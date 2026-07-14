@@ -1,0 +1,301 @@
+import { useState, useEffect } from "react";
+import {
+  Moon, Sun, Lock, Bell, LogOut, ChevronDown, Shield, MapPin, HelpCircle,
+  Smartphone, Globe, Eye, EyeOff, CheckCircle2, ChevronRight,
+} from "lucide-react";
+import { motion, AnimatePresence } from "motion/react";
+import { Link, useNavigate } from "react-router";
+import { useStudentAuth } from "../hooks/useStudentAuth";
+import { useTheme } from "../hooks/useTheme";
+import { StudentPageHeader } from "../components/ui/StudentPageHeader";
+import { PageTransition } from "../components/ui/PageTransition";
+import { cn } from "../lib/utils";
+
+type SettingsSection = "appearance" | "notifications" | "security" | "support";
+
+export function StudentSettingsPage() {
+  const studentAuth = useStudentAuth();
+  const navigate = useNavigate();
+  const { theme, toggleTheme } = useTheme();
+  const [activeSection, setActiveSection] = useState<SettingsSection>("appearance");
+
+  const [notifMap, setNotifMap] = useState(true);
+  const [notifReports, setNotifReports] = useState(true);
+  const [notifEvents, setNotifEvents] = useState(false);
+  const [changingPw, setChangingPw] = useState(false);
+  const [pwForm, setPwForm] = useState({ current: "", next: "", confirm: "" });
+  const [pwSaved, setPwSaved] = useState(false);
+
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: "instant" });
+  }, []);
+
+  const handleLogout = () => {
+    sessionStorage.removeItem("plv-student-auth");
+    navigate("/");
+  };
+
+  if (!studentAuth) {
+    navigate("/admin");
+    return null;
+  }
+
+  const handlePwSave = () => {
+    setPwSaved(true);
+    setTimeout(() => {
+      setChangingPw(false);
+      setPwSaved(false);
+      setPwForm({ current: "", next: "", confirm: "" });
+    }, 1800);
+  };
+
+  const SECTIONS: { key: SettingsSection; label: string; icon: React.ElementType }[] = [
+    { key: "appearance", label: "Appearance", icon: theme === "dark" ? Moon : Sun },
+    { key: "notifications", label: "Notifications", icon: Bell },
+    { key: "security", label: "Security", icon: Lock },
+    { key: "support", label: "Support", icon: HelpCircle },
+  ];
+
+  function Toggle({ on, onToggle }: { on: boolean; onToggle: () => void }) {
+    return (
+      <motion.button
+        onClick={onToggle}
+        aria-pressed={on}
+        className={cn(
+          "relative w-12 h-7 rounded-full transition-colors shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
+          on ? "bg-primary" : "bg-muted-foreground/25"
+        )}
+        whileTap={{ scale: 0.95 }}
+      >
+        <motion.span
+          className="absolute top-0.5 left-0.5 w-6 h-6 rounded-full bg-white shadow-sm"
+          animate={{ x: on ? 20 : 0 }}
+          transition={{ type: "spring", stiffness: 300, damping: 20 }}
+        />
+      </motion.button>
+    );
+  }
+
+  function SettingRow({ icon: Icon, label, desc, action }: {
+    icon: React.ElementType; label: string; desc?: string; action: React.ReactNode;
+  }) {
+    return (
+      <div className="flex items-center justify-between gap-4 px-5 py-4 border-b border-border last:border-0 hover:bg-muted/30 transition-colors">
+        <div className="flex items-center gap-3 min-w-0">
+          <Icon className="h-4 w-4 text-muted-foreground shrink-0" />
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-foreground">{label}</p>
+            {desc && <p className="text-xs text-muted-foreground mt-0.5 truncate">{desc}</p>}
+          </div>
+        </div>
+        <div className="shrink-0">{action}</div>
+      </div>
+    );
+  }
+
+  return (
+    <PageTransition>
+      <div className="min-h-screen">
+        <StudentPageHeader
+          backTo="/student"
+          title="Settings"
+          subtitle="Manage your account, preferences, and privacy"
+          icon={Shield}
+          iconBg="color-mix(in srgb, #8b5cf6 14%, transparent)"
+          iconColor="#7c3aed"
+        >
+          {/* Section tabs */}
+          <div className="flex gap-1 p-1 rounded-2xl bg-muted/60 border border-border">
+            {SECTIONS.map(({ key, label, icon: SecIcon }) => (
+              <button
+                key={key}
+                onClick={() => setActiveSection(key)}
+                className={cn(
+                  "flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex-1 justify-center",
+                  activeSection === key
+                    ? "bg-card text-primary shadow-sm border border-border"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                <SecIcon className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">{label}</span>
+              </button>
+            ))}
+          </div>
+        </StudentPageHeader>
+
+        <div className="max-w-2xl mx-auto px-5 py-6 space-y-6">
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={activeSection}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              transition={{ duration: 0.2 }}
+            >
+              {activeSection === "appearance" && (
+                <div>
+                  <p className="text-xs font-extrabold uppercase tracking-widest text-muted-foreground mb-3">Appearance</p>
+                  <div className="surface-card rounded-2xl overflow-hidden">
+                    <div className="px-5 py-4">
+                      <div className="flex items-center justify-between gap-4">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-muted border border-border">
+                            {theme === "dark"
+                              ? <Moon className="h-4 w-4 text-muted-foreground" />
+                              : <Sun className="h-4 w-4 text-muted-foreground" />}
+                          </div>
+                          <div>
+                            <p className="text-sm font-semibold text-foreground">
+                              {theme === "dark" ? "Dark Mode" : "Light Mode"}
+                            </p>
+                            <p className="text-xs text-muted-foreground">Switch appearance theme</p>
+                          </div>
+                        </div>
+                        <Toggle on={theme === "dark"} onToggle={toggleTheme} />
+                      </div>
+                    </div>
+                    <div className="px-5 py-3 border-t border-border bg-muted/30 flex items-center gap-3">
+                      <Globe className="h-4 w-4 text-muted-foreground shrink-0" />
+                      <span className="text-xs text-muted-foreground">System default follows your device settings</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {activeSection === "notifications" && (
+                <div>
+                  <p className="text-xs font-extrabold uppercase tracking-widest text-muted-foreground mb-3">Notifications</p>
+                  <div className="surface-card rounded-2xl overflow-hidden">
+                    <SettingRow icon={MapPin} label="Map updates" desc="When published maps are updated" action={<Toggle on={notifMap} onToggle={() => setNotifMap(v => !v)} />} />
+                    <SettingRow icon={Bell} label="Report status" desc="Updates when your reports change status" action={<Toggle on={notifReports} onToggle={() => setNotifReports(v => !v)} />} />
+                    <SettingRow icon={Smartphone} label="Campus events" desc="Alerts for event maps and activities" action={<Toggle on={notifEvents} onToggle={() => setNotifEvents(v => !v)} />} />
+                  </div>
+                </div>
+              )}
+
+              {activeSection === "security" && (
+                <div>
+                  <p className="text-xs font-extrabold uppercase tracking-widest text-muted-foreground mb-3">Security</p>
+                  <div className="surface-card rounded-2xl overflow-hidden">
+                    <button
+                      onClick={() => setChangingPw(v => !v)}
+                      className="w-full flex items-center gap-3 px-5 py-4 border-b border-border hover:bg-muted/60 transition-colors text-left"
+                    >
+                      <Lock className="h-4 w-4 text-muted-foreground shrink-0" />
+                      <span className="text-sm font-semibold text-foreground flex-1">Change Password</span>
+                      <motion.div
+                        animate={{ rotate: changingPw ? 180 : 0 }}
+                        transition={{ duration: 0.2 }}
+                      >
+                        <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                      </motion.div>
+                    </button>
+
+                    <AnimatePresence>
+                      {changingPw && (
+                        <motion.div
+                          initial={{ height: 0, opacity: 0 }}
+                          animate={{ height: "auto", opacity: 1 }}
+                          exit={{ height: 0, opacity: 0 }}
+                          transition={{ duration: 0.25 }}
+                          className="overflow-hidden"
+                        >
+                          <div className="px-5 py-4 border-b border-border space-y-3 bg-muted/40">
+                            {([
+                              { key: "current" as const, label: "Current Password", placeholder: "Enter current password", type: "password" },
+                              { key: "next" as const, label: "New Password", placeholder: "Min. 8 characters", type: "password" },
+                              { key: "confirm" as const, label: "Confirm New Password", placeholder: "Repeat new password", type: "password" },
+                            ]).map(f => (
+                              <div key={f.key}>
+                                <label className="block text-xs font-bold uppercase tracking-wide mb-1.5 text-foreground">{f.label}</label>
+                                <input
+                                  type={f.type}
+                                  value={pwForm[f.key]}
+                                  onChange={e => setPwForm(p => ({ ...p, [f.key]: e.target.value }))}
+                                  placeholder={f.placeholder}
+                                  className="w-full px-3 py-2.5 rounded-xl border border-border text-sm focus:outline-none focus:ring-2 focus:ring-primary/25 transition-all bg-input-background"
+                                />
+                              </div>
+                            ))}
+                            {pwSaved && (
+                              <motion.p
+                                initial={{ opacity: 0, y: -5 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                className="text-xs font-bold text-green-600 dark:text-green-400 flex items-center gap-1"
+                              >
+                                <CheckCircle2 className="h-3 w-3" /> Password updated successfully.
+                              </motion.p>
+                            )}
+                            <div className="flex gap-2 pt-1">
+                              <button onClick={() => { setChangingPw(false); setPwForm({ current: "", next: "", confirm: "" }); }}
+                                className="flex-1 h-10 rounded-xl border border-border text-xs font-bold hover:bg-muted transition-colors text-muted-foreground">
+                                Cancel
+                              </button>
+                              <button onClick={handlePwSave}
+                                disabled={!pwForm.current || !pwForm.next || pwForm.next !== pwForm.confirm}
+                                className="flex-1 h-10 rounded-xl text-xs font-bold transition-all disabled:opacity-40 bg-primary text-primary-foreground hover:brightness-110 active:scale-[0.98]">
+                                {pwSaved ? "Saved!" : "Update Password"}
+                              </button>
+                            </div>
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+
+                    <div className="px-5 py-4 grid sm:grid-cols-2 gap-4">
+                      {[
+                        { label: "Username", value: studentAuth.username },
+                        { label: "Role", value: studentAuth.role },
+                        { label: "School", value: "Pamantasan ng Lungsod ng Valenzuela" },
+                        { label: "Status", value: "Active" },
+                      ].map(f => (
+                        <div key={f.label}>
+                          <p className="text-[10px] font-extrabold uppercase tracking-widest text-muted-foreground mb-0.5">{f.label}</p>
+                          <p className="text-sm font-semibold text-foreground">{f.value}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {activeSection === "support" && (
+                <div>
+                  <p className="text-xs font-extrabold uppercase tracking-widest text-muted-foreground mb-3">Support</p>
+                  <div className="surface-card rounded-2xl overflow-hidden">
+                    <Link to="/help" className="flex items-center gap-3 px-5 py-4 border-b border-border hover:bg-muted/60 transition-colors group">
+                      <HelpCircle className="h-4 w-4 text-muted-foreground shrink-0" />
+                      <span className="text-sm font-semibold text-foreground flex-1">Help Center</span>
+                      <ChevronRight className="h-4 w-4 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
+                    </Link>
+                    <Link to="/map" className="flex items-center gap-3 px-5 py-4 hover:bg-muted/60 transition-colors group">
+                      <MapPin className="h-4 w-4 text-muted-foreground shrink-0" />
+                      <span className="text-sm font-semibold text-foreground flex-1">Open Campus Map</span>
+                      <ChevronRight className="h-4 w-4 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
+                    </Link>
+                  </div>
+                </div>
+              )}
+            </motion.div>
+          </AnimatePresence>
+
+          {/* Logout */}
+          <motion.button
+            onClick={handleLogout}
+            className="w-full flex items-center justify-center gap-2 h-12 rounded-2xl border transition-all hover:bg-destructive/8 text-destructive hover:border-destructive/30"
+            style={{ borderColor: "color-mix(in srgb, var(--destructive) 30%, transparent)" }}
+            whileTap={{ scale: 0.98 }}
+          >
+            <LogOut className="h-4 w-4" />
+            <span className="text-sm font-bold">Sign Out</span>
+          </motion.button>
+
+          <div className="h-4" />
+          {/* Safe area spacer for bottom nav */}
+          <div className="h-6 md:hidden" />
+        </div>
+      </div>
+    </PageTransition>
+  );
+}

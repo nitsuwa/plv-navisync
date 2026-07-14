@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=5, user-scalable=yes" />
+    <meta name="theme-color" content="#0e2a6e" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#0a0f1e" media="(prefers-color-scheme: dark)" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-touch-fullscreen" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="application-name" content="PLV NaviSync" />
+    <meta name="format-detection" content="telephone=no" />
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/icons/icon-192x192.png" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/icons/icon-48x48.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/icons/icon-48x48.png" />
+    <title>PLV NaviSync — Smart Campus Navigator</title>
+    <meta name="description" content="Interactive campus map and navigation for Pamantasan ng Lungsod ng Valenzuela. Find buildings, get directions, and explore the campus." />
+    <meta name="robots" content="index, follow" />
+    <!-- iOS splash screen detection -->
+    <script>
+      (function () {
+        var stored = localStorage.getItem("plv-theme");
+        var dark = stored === "dark" || (!stored && window.matchMedia("(prefers-color-scheme: dark)").matches);
+        if (dark) document.documentElement.classList.add("dark");
+        document.documentElement.style.background = dark ? "#070d1a" : "#eef2fa";
+        // Service worker registration for PWA
+        if ('serviceWorker' in navigator) {
+          window.addEventListener('load', function () {
+            navigator.serviceWorker.register('/sw.js').then(function () {}, function () {});
+          });
+        }
+      })();
+    </script>
+    <style>
+      html, body { height: 100%; margin: 0; }
+      html { background: #eef2fa; }
+      html.dark { background: #070d1a; }
+      #root { min-height: 100%; }
+      /* Prevent tap highlight on mobile */
+      * { -webkit-tap-highlight-color: transparent; }
+      /* Smooth iOS momentum scrolling */
+      body { 
+        -webkit-overflow-scrolling: touch; 
+        overscroll-behavior-y: contain;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

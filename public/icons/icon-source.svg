@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0e2a6e"/>
+      <stop offset="100%" stop-color="#071440"/>
+    </linearGradient>
+    <linearGradient id="pinGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#c8960c"/>
+      <stop offset="100%" stop-color="#e0a820"/>
+    </linearGradient>
+    <linearGradient id="glow" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="rgba(255,255,255,0.10)"/>
+      <stop offset="100%" stop-color="rgba(255,255,255,0)"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background rounded square (maskable safe zone) -->
+  <rect width="512" height="512" rx="100" fill="url(#bg)"/>
+
+  <!-- Subtle top glow -->
+  <rect width="512" height="256" rx="100" fill="url(#glow)"/>
+
+  <!-- Compass ring outer -->
+  <circle cx="256" cy="250" r="150" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="4"/>
+  <!-- Compass ring inner -->
+  <circle cx="256" cy="250" r="138" fill="none" stroke="rgba(255,255,255,0.12)" stroke-width="3"/>
+
+  <!-- Compass crosshair -->
+  <line x1="256" y1="100" x2="256" y2="400" stroke="rgba(255,255,255,0.05)" stroke-width="1"/>
+  <line x1="106" y1="250" x2="406" y2="250" stroke="rgba(255,255,255,0.05)" stroke-width="1"/>
+
+  <!-- N arrow (gold) -->
+  <polygon points="256,120 240,185 256,173 272,185" fill="url(#pinGrad)"/>
+  <!-- S arrow fade -->
+  <polygon points="256,380 240,315 256,327 272,315" fill="rgba(255,255,255,0.20)"/>
+
+  <!-- Map marker pin centered -->
+  <g transform="translate(256, 250)">
+    <ellipse cx="0" cy="40" rx="34" ry="10" fill="rgba(0,0,0,0.12)"/>
+    <path d="M0,-72 C-30,-72 -52,-48 -52,-22 C-52,12 -10,44 0,52 C10,44 52,12 52,-22 C52,-48 30,-72 0,-72Z" fill="url(#pinGrad)"/>
+    <!-- Highlight -->
+    <path d="M-14,-62 C-30,-60 -44,-42 -44,-22 C-44,-2 -20,20 -6,32 C-4,34 -2,34 0,34 C-2,30 -6,24 -10,16 C-24,0 -36,-14 -36,-24 C-36,-40 -26,-54 -14,-60Z" fill="rgba(255,255,255,0.18)"/>
+    <!-- Inner circle -->
+    <circle cx="0" cy="-24" r="20" fill="white"/>
+    <!-- "N" letter -->
+    <text x="0" y="-16" text-anchor="middle" font-family="Inter, 'Helvetica Neue', sans-serif" font-weight="800" font-size="28" fill="#0e2a6e">N</text>
+  </g>
+</svg>
