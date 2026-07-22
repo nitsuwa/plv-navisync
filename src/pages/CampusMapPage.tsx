@@ -1,11 +1,14 @@
 import { useState, useCallback, useMemo, useRef, useEffect } from "react";
+
 import {
   Search, Layers, ZoomIn, ZoomOut, LocateFixed, Building2, X,
   Accessibility, AlertTriangle, Navigation, Bookmark, Flag,
   Clock, ChevronRight, ChevronLeft, ChevronDown,
-  Share2, CalendarDays, MapPin, ArrowUpDown, Compass, Loader2,
+  Share2, CalendarDays, MapPin, ArrowUpDown, Compass,
+  Footprints, QrCode,
 } from "lucide-react";
 
+import { useDebounce } from "../hooks";
 import { MOCK_BUILDINGS as LEGACY_BUILDINGS } from "../data/mockData";
 import { FLOOR_PLANS as LEGACY_FLOOR_PLANS, type RoomType } from "../data/floorPlans";
 import type { Building } from "../types";
@@ -13,9 +16,11 @@ import { cn } from "../lib/utils";
 import { useStudentAuth } from "../hooks/useStudentAuth";
 import { useCampusData } from "../contexts/CampusDataContext";
 import { buildingPositionsFromCampus, floorPlansFromCampus, buildingsFromCampus } from "../lib/mapDataAdapter";
+import { findIndoorRoute, type IndoorRoute } from "../lib/indoorPathfinding";
+import { findBuildingPath } from "../lib/pathfinding";
 import {
-  BuildingPicker, ReportModal, EventPopup, SignInPrompt,
-  BuildingInfoPanel, MobileBuildingSheet, type PanelTab,
+  BuildingPicker, ReportModal, SignInPrompt,
+  BuildingInfoPanel, MobileBuildingSheet, QRPlaceholder,
 } from "../components/map";
 
 type MapMode  = "standard" | "accessible" | "emergency";
@@ -45,11 +50,7 @@ const STATUS: Record<string, "Open"|"Busy"|"Closed"> = {
 const STATUS_COLOR = { Open:"text-green-500", Busy:"text-amber-500", Closed:"text-red-500" };
 const STATUS_DOT   = { Open:"bg-green-500",   Busy:"bg-amber-500",   Closed:"bg-red-500"   };
 
-const EVENT_MARKERS = [
-  { id:"ev1", title:"STEM Fair 2025",  x:401, y:232, color:"#7c3aed", date:"Jan 15", venue:"Main Plaza", org:"COED Student Gov.",   desc:"Annual STEM exhibition featuring student projects across all programs." },
-  { id:"ev2", title:"Sports Day",      x:378, y:476, color:"#db2777", date:"Jan 18", venue:"Gymnasium",  org:"SSC Sports Committee", desc:"Inter-program sports competition open to all enrolled students." },
-  { id:"ev3", title:"Career Fair",     x:447, y:151, color:"#0891b2", date:"Jan 22", venue:"ADM Lobby",  org:"Placement Office",     desc:"Meet industry partners and explore internship and job opportunities." },
-];
+const EVENT_MARKERS: { id:string; title:string; x:number; y:number; color:string; date:string; venue:string; org:string; desc:string }[] = [];
 const POPULAR = [
   { label:"Registrar",        buildingId:"b2" },
   { label:"Cashier",          buildingId:"b2" },
@@ -99,17 +100,50 @@ export function CampusMapPage() {
   const studentAuth = useStudentAuth();
   const campusData = useCampusData();
 
+  const [selectedCampusId, setSelectedCampusId] = useState<string | null>(null);
+
+  const availableCampuses = useMemo(() => {
+    return [...campusData.campuses]
+      // Only show published, active (non-archived) campuses to students
+      .filter((campus) => campus.publishStatus !== "draft" && campus.status !== "archived")
+      .sort((a, b) => {
+        const aTime = a.publishedAt ? new Date(a.publishedAt).getTime() : 0;
+        const bTime = b.publishedAt ? new Date(b.publishedAt).getTime() : 0;
+        return bTime - aTime;
+      });
+  }, [campusData.campuses]);
+
+  const activeCampus = useMemo(() => {
+    if (!availableCampuses.length) return null;
+    if (selectedCampusId) {
+      const found = availableCampuses.find((campus) => campus.id === selectedCampusId);
+      if (found) return found;
+    }
+    return availableCampuses[0];
+  }, [availableCampuses, selectedCampusId]);
+
+  useEffect(() => {
+    if (!availableCampuses.length) {
+      setSelectedCampusId(null);
+      return;
+    }
+    if (!selectedCampusId || !availableCampuses.some((campus) => campus.id === selectedCampusId)) {
+      setSelectedCampusId(availableCampuses[0].id);
+      initialSelectionRef.current = true;
+    }
+  }, [availableCampuses, selectedCampusId]);
+
   // ── Use Map Builder data if available, fall back to legacy data ──
   const MOCK_BUILDINGS = useMemo(() => {
-    if (campusData.hasData && campusData.latestPublished) {
-      return buildingsFromCampus(campusData.latestPublished);
+    if (activeCampus) {
+      return buildingsFromCampus(activeCampus);
     }
     return LEGACY_BUILDINGS;
-  }, [campusData.hasData, campusData.latestPublished]);
+  }, [activeCampus]);
 
   const B_POS = useMemo<Record<string, {x:number;y:number;w:number;h:number;color:string}>>(() => {
-    if (campusData.hasData && campusData.latestPublished) {
-      return buildingPositionsFromCampus(campusData.latestPublished);
+    if (activeCampus) {
+      return buildingPositionsFromCampus(activeCampus);
     }
     return {
       b1: { x:155, y:130, w:125, h:80,  color:"#1e40af" },
@@ -119,19 +153,19 @@ export function CampusMapPage() {
       b5: { x:305, y:435, w:145, h:82,  color:"#2563eb" },
       b6: { x:605, y:415, w:112, h:72,  color:"#1d4ed8" },
     };
-  }, [campusData.hasData, campusData.latestPublished]);
+  }, [activeCampus]);
 
   const FLOOR_PLANS = useMemo(() => {
-    if (campusData.hasData && campusData.latestPublished) {
-      return floorPlansFromCampus(campusData.latestPublished);
+    if (activeCampus) {
+      return floorPlansFromCampus(activeCampus);
     }
     return LEGACY_FLOOR_PLANS;
-  }, [campusData.hasData, campusData.latestPublished]);
+  }, [activeCampus]);
 
   const BUILDING_FACILITIES: Record<string, string[]> = useMemo(() => {
-    if (campusData.hasData && campusData.latestPublished) {
+    if (activeCampus) {
       const result: Record<string, string[]> = {};
-      for (const b of campusData.latestPublished.buildings) {
+      for (const b of activeCampus.buildings) {
         result[b.id] = b.facilities || [];
       }
       return result;
@@ -144,12 +178,12 @@ export function CampusMapPage() {
       b5: ["Main Gymnasium", "Bleachers", "Locker Rooms", "Equipment Storage"],
       b6: ["Student Council Office", "Canteen", "Student Lounge", "Organization Rooms"],
     };
-  }, [campusData.hasData, campusData.latestPublished]);
+  }, [activeCampus]);
 
   const BUILDING_ACCESSIBILITY: Record<string, string[]> = useMemo(() => {
-    if (campusData.hasData && campusData.latestPublished) {
+    if (activeCampus) {
       const result: Record<string, string[]> = {};
-      for (const b of campusData.latestPublished.buildings) {
+      for (const b of activeCampus.buildings) {
         result[b.id] = b.accessibility || [];
       }
       return result;
@@ -162,11 +196,10 @@ export function CampusMapPage() {
       b5: ["Level Entry", "Accessible Seating", "Accessible Restroom"],
       b6: ["Ground Floor Access", "Wide Corridors"],
     };
-  }, [campusData.hasData, campusData.latestPublished]);
+  }, [activeCampus]);
 
   // Core map state
   const [selected,     setSelected]     = useState<Building|null>(null);
-  const [panelTab,     setPanelTab]     = useState<PanelTab>("overview");
   const [mapMode,      setMapMode]      = useState<MapMode>("standard");
   const [zoom,         setZoom]         = useState(1);
   const [displayZoom,  setDisplayZoom]  = useState(1);
@@ -184,9 +217,17 @@ export function CampusMapPage() {
     roomType: RoomType; upFloor: number|null; dnFloor: number|null; upLabel: string; dnLabel: string;
   }|null>(null);
   const [showCampusSelector, setShowCampusSelector] = useState(false);
+  const [campusTransitioning, setCampusTransitioning] = useState(false);
+  const transitioningRef = useRef<ReturnType<typeof setTimeout>>();
+  const initialSelectionRef = useRef(false);
+  const [indoorRoute, setIndoorRoute] = useState<IndoorRoute | null>(null);
+  const [activeRouteRoom, setActiveRouteRoom] = useState<string | null>(null);
+  const [showArrival, setShowArrival] = useState(false);
+  const [routeFading, setRouteFading] = useState(false);
 
   // Floating UI state
   const [search,         setSearch]         = useState("");
+  const debouncedSearch = useDebounce(search, 150);
   const [searchFocused,  setSearchFocused]  = useState(false);
   const [directionsMode, setDirectionsMode] = useState(false);
   const [fromBuilding,   setFromBuilding]   = useState<Building|null>(null);
@@ -197,7 +238,6 @@ export function CampusMapPage() {
 
   // Modals
   const [reportModal,   setReportModal]   = useState<Building|null>(null);
-  const [selectedEvent, setSelectedEvent] = useState<typeof EVENT_MARKERS[0]|null>(null);
   const [signInPrompt,  setSignInPrompt]  = useState<string|null>(null);
 
   // Refs
@@ -205,6 +245,10 @@ export function CampusMapPage() {
   const svgRef          = useRef<SVGSVGElement>(null);
   const dragRef         = useRef<{ sx:number; sy:number; lx:number; ly:number; px:number; py:number; moved:boolean; vx:number; vy:number; lastTime:number }|null>(null);
   const inertiaRef      = useRef<number>(0);
+  const panTargetRef    = useRef<Pt | null>(null);
+  const panAnimRef     = useRef<number>(0);
+  // ── Pinch-to-zoom ref ──
+  const pinchRef       = useRef<{ dist: number; initZoom: number } | null>(null);
   const getScale = useCallback(() => {
     const svg = svgRef.current;
     const vw = floorViewRef.current !== null ? FP_W : SVG_W;
@@ -212,6 +256,14 @@ export function CampusMapPage() {
   }, []);
   const floorViewRef    = useRef(floorView);
   useEffect(() => { floorViewRef.current = floorView; }, [floorView]);
+
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Simulate initial map load
+  useEffect(() => {
+    const timer = setTimeout(() => setIsLoading(false), 600);
+    return () => clearTimeout(timer);
+  }, []);
 
   // ── Computed floor plan values ─────────────────────────────────────────
   const isFloorMode       = floorView !== null;
@@ -239,18 +291,44 @@ export function CampusMapPage() {
     return () => cancelAnimationFrame(animFrameRef.current!);
   }, [zoom]);
 
+  // ── Smooth pan lerp ───────────────────────────────────────────────────
+  useEffect(() => {
+    const lerpPan = () => {
+      const target = panTargetRef.current;
+      if (!target) {
+        panAnimRef.current = requestAnimationFrame(lerpPan);
+        return;
+      }
+      setPan(prev => {
+        const dx = target.x - prev.x;
+        const dy = target.y - prev.y;
+        if (Math.abs(dx) < 0.3 && Math.abs(dy) < 0.3) {
+          panTargetRef.current = null; // arrived
+          return target;
+        }
+        panAnimRef.current = requestAnimationFrame(lerpPan);
+        return {
+          x: prev.x + dx * 0.1,
+          y: prev.y + dy * 0.1,
+        };
+      });
+    };
+    panAnimRef.current = requestAnimationFrame(lerpPan);
+    return () => cancelAnimationFrame(panAnimRef.current);
+  }, []);
+
   // ── Wheel zoom ─────────────────────────────────────────────────────────
   useEffect(() => {
     const el = mapContainerRef.current;
     if (!el) return;
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
-      const step = e.deltaMode === 1 ? e.deltaY * 0.05 : e.deltaY * 0.0012;
+      const step = e.deltaMode === 1 ? e.deltaY * 0.08 : e.deltaY * 0.003;
       setZoom(z => parseFloat(Math.max(0.35, Math.min(3.5, z - step)).toFixed(2)));
     };
     el.addEventListener("wheel", onWheel, { passive: false });
     return () => el.removeEventListener("wheel", onWheel);
-  }, []);
+  }, [isLoading]);
 
   // ── Keyboard shortcuts ─────────────────────────────────────────────────
   useEffect(() => {
@@ -265,10 +343,10 @@ export function CampusMapPage() {
         if (floorViewRef.current) { setFloorView(null); setZoom(1); setPan({x:0,y:0}); }
       }
       const PAN = 30;
-      if (e.key === "ArrowRight") setPan(p => ({...p, x:p.x-PAN}));
-      if (e.key === "ArrowLeft")  setPan(p => ({...p, x:p.x+PAN}));
-      if (e.key === "ArrowDown")  setPan(p => ({...p, y:p.y-PAN}));
-      if (e.key === "ArrowUp")    setPan(p => ({...p, y:p.y+PAN}));
+      if (e.key === "ArrowRight") { panTargetRef.current = null; setPan(p => ({...p, x:p.x-PAN})); }
+      if (e.key === "ArrowLeft")  { panTargetRef.current = null; setPan(p => ({...p, x:p.x+PAN})); }
+      if (e.key === "ArrowDown")  { panTargetRef.current = null; setPan(p => ({...p, y:p.y-PAN})); }
+      if (e.key === "ArrowUp")    { panTargetRef.current = null; setPan(p => ({...p, y:p.y+PAN})); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -311,6 +389,7 @@ export function CampusMapPage() {
   // ── Mouse drag-to-pan ────────────────────────────────────────────────
   const onMouseDown = useCallback((e: React.MouseEvent) => {
     if ((e.target as Element).closest("[data-no-drag]")) return;
+    panTargetRef.current = null;
     cancelAnimationFrame(inertiaRef.current);
     inertiaRef.current = 0;
     const x = e.clientX, y = e.clientY;
@@ -346,16 +425,37 @@ export function CampusMapPage() {
   // ── Touch drag-to-pan with inertia ───────────────────────────────────
   const onTouchStart = useCallback((e: React.TouchEvent) => {
     if ((e.target as Element).closest("[data-no-drag]")) return;
+    // Two fingers → pinch-to-zoom
+    if (e.touches.length === 2) {
+      e.preventDefault();
+      const t1 = e.touches[0], t2 = e.touches[1];
+      pinchRef.current = {
+        dist: Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY),
+        initZoom: zoom,
+      };
+      return;
+    }
     if (e.touches.length !== 1) return;
     // Prevent synthesized mouse events on touch devices
     e.preventDefault();
+    panTargetRef.current = null;
     cancelAnimationFrame(inertiaRef.current);
     inertiaRef.current = 0;
     const t = e.touches[0];
     dragRef.current = { sx: t.clientX, sy: t.clientY, lx: t.clientX, ly: t.clientY, px: pan.x, py: pan.y, moved: false, vx: 0, vy: 0, lastTime: performance.now() };
-  }, [pan]);
+  }, [pan, zoom]);
 
   const onTouchMove = useCallback((e: React.TouchEvent) => {
+    // Pinch-to-zoom: 2 fingers
+    if (e.touches.length === 2 && pinchRef.current) {
+      e.preventDefault();
+      const t1 = e.touches[0], t2 = e.touches[1];
+      const curDist = Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY);
+      const ratio = curDist / pinchRef.current.dist;
+      setZoom(z => parseFloat(Math.max(0.35, Math.min(3.5, pinchRef.current!.initZoom * ratio)).toFixed(2)));
+      return;
+    }
+    // Single-finger drag-to-pan
     if (e.touches.length !== 1) return;
     const drag = dragRef.current;
     if (!drag) return;
@@ -371,6 +471,7 @@ export function CampusMapPage() {
   }, [applyPanDelta, trackVelocity]);
 
   const onTouchEnd = useCallback(() => {
+    pinchRef.current = null;
     const drag = dragRef.current;
     dragRef.current = null;
     if (drag && drag.moved) {
@@ -414,14 +515,78 @@ export function CampusMapPage() {
   // ── Route ──────────────────────────────────────────────────────────────
   const route = useMemo(() => {
     if (!fromBuilding || !toBuilding) return null;
+
+    // Accessible mode: use graph-based pathfinding with accessibleOnly=true
+    if (mapMode === "accessible") {
+      const graphPath = findBuildingPath(fromBuilding.id, toBuilding.id, true);
+      if (graphPath && graphPath.waypoints.length >= 2) {
+        return {
+          points: graphPath.waypoints,
+          dist: graphPath.distanceM,
+          mins: graphPath.minutes,
+          steps: graphPath.steps,
+          isGraphBased: true,
+        };
+      }
+    }
+
+    // Standard/Emergency mode or fallback: use SVG-based route
     const fp = B_POS[fromBuilding.id], tp = B_POS[toBuilding.id];
     if (!fp || !tp) return null;
     const points = computeRoute(fp, tp);
-    return { points, dist: calcDist(points), mins: Math.max(1, Math.round(calcDist(points)/80)) };
-  }, [fromBuilding, toBuilding]);
+    return { points, dist: calcDist(points), mins: Math.max(1, Math.round(calcDist(points)/80)), steps: undefined, isGraphBased: false };
+  }, [fromBuilding, toBuilding, mapMode]);
+
+  // ── Route recalculation transition ─────────────────────────────────────
+  // Briefly fade out the old route when from/to building changes
+  const routeKey = `${fromBuilding?.id ?? ''}-${toBuilding?.id ?? ''}-${mapMode}`;
+  useEffect(() => {
+    if (fromBuilding && toBuilding && route) {
+      setRouteFading(true);
+      const timer = setTimeout(() => setRouteFading(false), 500);
+      return () => clearTimeout(timer);
+    }
+  }, [routeKey]);
+
+  // ── Zoom to route + arrival simulation ────────────────────────────────
+  useEffect(() => {
+    if (route) {
+      // Automatically zoom to show the full route
+      const xs = route.points.map(p => p.x);
+      const ys = route.points.map(p => p.y);
+      const minX = Math.min(...xs), maxX = Math.max(...xs);
+      const minY = Math.min(...ys), maxY = Math.max(...ys);
+      const routeW = maxX - minX, routeH = maxY - minY;
+      const fitZoom = Math.min(SVG_W / (routeW + 200), SVG_H / (routeH + 200), 2.0);
+      setZoom(parseFloat(Math.max(0.5, Math.min(fitZoom, 2.0)).toFixed(2)));
+      setPan({
+        x: SVG_CX - (minX + routeW / 2) * fitZoom,
+        y: SVG_CY - (minY + routeH / 2) * fitZoom,
+      });
+      
+      setShowArrival(false);
+    } else {
+      setShowArrival(false);
+    }
+  }, [route]);
+
+  // ── Pan to selected building on click (smooth animated lerp) ──────
+  useEffect(() => {
+    if (selected && !isFloorMode && !route) {
+      const pos = B_POS[selected.id];
+      if (pos) {
+        const cx = pos.x + pos.w / 2;
+        const cy = pos.y + pos.h / 2;
+        panTargetRef.current = {
+          x: SVG_CX - cx * zoom,
+          y: SVG_CY - cy * zoom,
+        };
+      }
+    }
+  }, [selected, B_POS, isFloorMode, route, zoom]);
 
   const selectBuilding = useCallback((b: Building|null) => {
-    setSelected(b); setPanelTab("overview");
+    setSelected(b);
     setSearchFocused(false); setSearch(""); setShowQR(false);
     if (b && !recentSearches.includes(b.name))
       setRecentSearches(prev => [b.name, ...prev].slice(0, 5));
@@ -429,46 +594,94 @@ export function CampusMapPage() {
 
   const startDirectionsTo = useCallback((b: Building) => {
     setToBuilding(b); setFromBuilding(null);
-    setDirectionsMode(true); setPanelTab("route");
+    setDirectionsMode(true);
   }, []);
 
   const toggleSave = (id: string) =>
     setSaved(p => { const s = new Set(p); s.has(id) ? s.delete(id) : s.add(id); return s; });
 
   // ── Search results (buildings on campus, rooms on floor plan) ──────────
-  const buildingResults = !isFloorMode && search
+  const buildingResults = !isFloorMode && debouncedSearch
     ? MOCK_BUILDINGS.filter(b =>
-        b.name.toLowerCase().includes(search.toLowerCase()) ||
-        b.code.toLowerCase().includes(search.toLowerCase()))
+        b.name.toLowerCase().includes(debouncedSearch.toLowerCase()) ||
+        b.code.toLowerCase().includes(debouncedSearch.toLowerCase()))
     : [];
-  const roomResults = isFloorMode && search
+  const roomResults = isFloorMode && debouncedSearch
     ? (currentFloor?.rooms ?? []).filter(r =>
-        r.name.toLowerCase().includes(search.toLowerCase()) ||
-        r.type.toLowerCase().includes(search.toLowerCase()))
+        r.name.toLowerCase().includes(debouncedSearch.toLowerCase()) ||
+        r.type.toLowerCase().includes(debouncedSearch.toLowerCase()))
     : [];
 
   const isDragging = dragRef.current?.moved ?? false;
-  const buildingFill = (id: string) =>
-    mapMode === "emergency" ? "#991b1b" : mapMode === "accessible" ? "#14532d" : B_POS[id]?.color ?? "#1e40af";
+const buildingFill = (id: string) =>
+  mapMode === "emergency" ? "#991b1b" : mapMode === "accessible" ? "#14532d" : B_POS[id]?.color ?? "var(--map-route)";
 
-  const [isLoading, setIsLoading] = useState(true);
-
-  // Simulate initial map load
+  // Campus switching transition — shows a loading overlay when switching between campuses
   useEffect(() => {
-    const timer = setTimeout(() => setIsLoading(false), 600);
-    return () => clearTimeout(timer);
+    // Skip on initial load (first auto-selection) to avoid double loading screens
+    if (!availableCampuses.length || isLoading || !initialSelectionRef.current) return;
+    setCampusTransitioning(true);
+    clearTimeout(transitioningRef.current);
+    transitioningRef.current = setTimeout(() => setCampusTransitioning(false), 450);
+    return () => clearTimeout(transitioningRef.current);
+  }, [selectedCampusId, isLoading]);
+
+  // ── Indoor route handler ────────────────────────────────────────────
+  const showIndoorRoute = useCallback((roomId: string) => {
+    if (!floorView) return;
+    const route = findIndoorRoute(floorView.building.id, floorView.floor, roomId);
+    if (route) {
+      setIndoorRoute(route);
+      setActiveRouteRoom(roomId);
+      setHighlightedRoom(roomId);
+    }
+  }, [floorView]);
+
+  const clearIndoorRoute = useCallback(() => {
+    setIndoorRoute(null);
+    setActiveRouteRoom(null);
+    setHighlightedRoom(null);
   }, []);
 
-  // ── Skeleton loading ──
+  // ── Map skeleton loading ──
   if (isLoading) {
-    return (
-      <div
-        className="flex items-center justify-center animate-fade-in"
-        style={{ height:"calc(100dvh - 56px)", background:"#f2efe9" }}
+    return (        <div
+          className="relative overflow-hidden"
+          style={{ height:"calc(100dvh - 56px)", background:"var(--map-bg)" }}
       >
-        <div className="flex flex-col items-center gap-4">
-          <Loader2 className="h-8 w-8 text-primary animate-spin" />
-          <p className="text-sm font-semibold text-muted-foreground">Loading campus map…</p>
+        {/* Map background skeleton with staggered pulse */}
+        <svg viewBox="0 0 900 680" className="absolute inset-0 w-full h-full" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
+          <defs>
+            <style>{`@keyframes skel-pulse { 0%,100% { opacity: 0.4; } 50% { opacity: 0.7; } }`}</style>
+          </defs>
+          <rect width={900} height={680} fill="var(--map-bg)"/>
+          {/* Road skeletons */}
+          <rect x={0} y={272} width={900} height={26} fill="var(--map-road)" opacity={0.3} rx={2}/>
+          <rect x={388} y={0} width={26} height={680} fill="var(--map-road)" opacity={0.3} rx={2}/>
+          {/* Building skeletons with staggered pulse */}
+          <rect x={155} y={130} width={125} height={80} rx={6} fill="var(--map-bg)" opacity={0.5} style={{ animation: "skel-pulse 1.8s ease-in-out infinite" }}/>
+          <rect x={395} y={115} width={105} height={72} rx={6} fill="var(--map-bg)" opacity={0.5} style={{ animation: "skel-pulse 1.8s ease-in-out infinite", animationDelay: "0.15s" }}/>
+          <rect x={545} y={295} width={115} height={78} rx={6} fill="var(--map-bg)" opacity={0.5} style={{ animation: "skel-pulse 2s ease-in-out infinite", animationDelay: "0.3s" }}/>
+          <rect x={165} y={305} width={105} height={62} rx={6} fill="var(--map-bg)" opacity={0.5} style={{ animation: "skel-pulse 1.8s ease-in-out infinite", animationDelay: "0.45s" }}/>
+          <rect x={305} y={435} width={145} height={82} rx={6} fill="var(--map-bg)" opacity={0.5} style={{ animation: "skel-pulse 1.5s ease-in-out infinite", animationDelay: "0.6s" }}/>
+          <rect x={605} y={415} width={112} height={72} rx={6} fill="var(--map-bg)" opacity={0.5} style={{ animation: "skel-pulse 1.8s ease-in-out infinite", animationDelay: "0.75s" }}/>
+
+        </svg>
+        {/* Loading label — branded card */}
+        <div className="absolute inset-0 flex items-center justify-center">
+          <div className="flex flex-col items-center gap-3 px-6 py-5 rounded-2xl bg-white/90 dark:bg-card/90 backdrop-blur-md shadow-lg border border-border/50 animate-scale-in" style={{ transformOrigin: "center" }}>
+            <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
+              <Compass className="h-5 w-5 text-primary" />
+            </div>
+            <div className="flex gap-1.5">
+              {[0,1,2].map(i => (
+                <div key={i} className="w-2 h-2 rounded-full bg-primary/60" style={{
+                  animation: `loading-bounce 0.8s ease-in-out ${i * 0.18}s infinite`
+                }}/>
+              ))}
+            </div>
+            <p className="text-xs font-semibold text-muted-foreground">Loading campus map</p>
+          </div>
         </div>
       </div>
     );
@@ -479,7 +692,7 @@ export function CampusMapPage() {
     <div
       ref={mapContainerRef}
       className="relative overflow-hidden animate-fade-in"
-      style={{ height:"calc(100dvh - 56px)", background: isFloorMode ? "#f0eff0" : "#f2efe9", cursor: isDragging ? "grabbing" : "grab", touchAction:"none" }}
+      style={{ height:"calc(100dvh - 56px)", background: isFloorMode ? "var(--map-floor-corridor)" : "var(--map-bg)", cursor: isDragging ? "grabbing" : "grab", touchAction:"none" }}
       onMouseDown={onMouseDown} onMouseMove={onMouseMove}
       onMouseUp={onMouseUp} onMouseLeave={onMouseUp}
       onTouchStart={onTouchStart} onTouchMove={onTouchMove}
@@ -497,13 +710,18 @@ export function CampusMapPage() {
         }}>
         <defs>
           <filter id="bldg-shadow" x="-10%" y="-10%" width="120%" height="120%">
-            <feDropShadow dx="2" dy="3" stdDeviation="3" floodColor="rgba(0,0,0,0.18)"/>
+            <feDropShadow dx="2" dy="3" stdDeviation="3" floodColor="rgba(0,0,0,0.25)"/>
           </filter>
-          <pattern id="grass" patternUnits="userSpaceOnUse" width="6" height="6">
-            <rect width="6" height="6" fill="#d4edda"/>
-            <circle cx="1.5" cy="1.5" r="0.8" fill="#c0e6c8" opacity="0.6"/>
-            <circle cx="4.5" cy="4.5" r="0.7" fill="#c0e6c8" opacity="0.5"/>
-          </pattern>
+          <filter id="route-glow" x="-20%" y="-20%" width="140%" height="140%">
+            <feGaussianBlur stdDeviation="4" result="blur"/>
+            <feFlood floodColor="var(--map-route)" floodOpacity="0.35" result="color"/>
+            <feComposite in="color" in2="blur" operator="in" result="glow"/>
+            <feMerge><feMergeNode in="glow"/><feMergeNode in="SourceGraphic"/></feMerge>
+          </filter>
+          <marker id="route-arrow" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--map-route)" fillOpacity="0.6"/>
+          </marker>
+
         </defs>
 
         <g transform={`translate(${tx},${ty}) scale(${displayZoom})`}>
@@ -514,27 +732,27 @@ export function CampusMapPage() {
             return (
               <>
                 {/* ── Architectural wall background ── */}
-                <rect width={FP_W} height={FP_H} fill="#b0ada8"/>
+                <rect width={FP_W} height={FP_H} fill="var(--map-floor-bg)"/>
                 {/* Grid for scale reference */}
-                {[...Array(22)].map((_,i) => <line key={`gv${i}`} x1={i*20} y1={0} x2={i*20} y2={FP_H} stroke="rgba(0,0,0,0.05)" strokeWidth={0.5}/>)}
-                {[...Array(15)].map((_,i) => <line key={`gh${i}`} x1={0} y1={i*20} x2={FP_W} y2={i*20} stroke="rgba(0,0,0,0.05)" strokeWidth={0.5}/>)}
+                {[...Array(22)].map((_,i) => <line key={`gv${i}`} x1={i*20} y1={0} x2={i*20} y2={FP_H} stroke="var(--map-boundary)" strokeWidth={0.5} opacity={0.15}/>)}
+                {[...Array(15)].map((_,i) => <line key={`gh${i}`} x1={0} y1={i*20} x2={FP_W} y2={i*20} stroke="var(--map-boundary)" strokeWidth={0.5} opacity={0.15}/>)}
                 {/* Outer building wall — thick */}
                 <rect x={8} y={8} width={FP_W-16} height={FP_H-16} rx={2}
-                  fill="#e0dcd6" stroke="#706d68" strokeWidth={5}/>
+                  fill="var(--map-floor-wall)" stroke="var(--map-floor-wall-stroke)" strokeWidth={5}/>
                 {/* Corridor floor */}
-                <rect x={13} y={13} width={FP_W-26} height={FP_H-26} fill="#cdc9c3"/>
+                <rect x={13} y={13} width={FP_W-26} height={FP_H-26} fill="var(--map-floor-corridor)"/>
                 {/* Mode tints */}
-                {mapMode === "emergency" && <rect x={8} y={8} width={FP_W-16} height={FP_H-16} fill="rgba(220,38,38,0.10)"/>}
-                {mapMode === "accessible" && <rect x={8} y={8} width={FP_W-16} height={FP_H-16} fill="rgba(22,163,74,0.08)"/>}
+                {mapMode === "emergency" && <rect x={8} y={8} width={FP_W-16} height={FP_H-16} fill="var(--map-route)" opacity={0.08}/>}
+                {mapMode === "accessible" && <rect x={8} y={8} width={FP_W-16} height={FP_H-16} fill="var(--map-route-start)" opacity={0.08}/>}
 
                 {/* ── Rooms ── */}
                 {(() => {
                   const hasUp = floorNums.some(n => n > (floorView?.floor ?? 1));
                   const hasDn = floorNums.some(n => n < (floorView?.floor ?? 1));
                   const archFills: Record<string,string> = {
-                    classroom:"#dfe8f5", office:"#e3ede6", lab:"#f2eed6",
-                    lobby:"#ece9e4", restroom:"#d8edf8", stairs:"#c2beba",
-                    storage:"#ece3f5", elevator:"#d4ecdc",
+                    classroom:"var(--map-room-classroom)", office:"var(--map-room-office)", lab:"var(--map-room-lab)",
+                    lobby:"var(--map-room-default)", restroom:"var(--map-room-restroom)", stairs:"var(--map-room-stairs)",
+                    storage:"var(--map-room-storage)", elevator:"var(--map-room-elevator)",
                   };
                   return currentFloor.rooms.map(room => {
                     const isNav  = room.type === "stairs" || room.type === "elevator";
@@ -544,12 +762,13 @@ export function CampusMapPage() {
                     const navColor = room.type === "elevator"
                       ? (hasUp && hasDn ? "#7c3aed" : hasUp ? "#16a34a" : "#f97316")
                       : (hasUp && hasDn ? "#2563eb" : hasUp ? "#2563eb" : "#f97316");
-                    const roomFill = isHigh ? "rgba(14,42,110,0.18)" :
-                      isHov && isNav ? navColor :
-                      isHov ? (archFills[room.type] ?? "#d0cdc8") :
+                    const roomFill = isHigh ? "var(--map-route)" :
+                      isHov && isNav ? "var(--map-route)" :
+                      isHov ? (archFills[room.type] ?? "var(--map-room-default)") :
                       (mapMode === "accessible" && (room.type === "elevator" || room.name.toLowerCase().includes("restroom")))
-                        ? "rgba(22,163,74,0.25)" :
-                      archFills[room.type] ?? "#dddad5";
+                        ? "var(--map-route-start)" :
+                      archFills[room.type] ?? "var(--map-room-default)";
+                    const roomFillOpacity = isHigh ? 0.15 : (mapMode === "accessible" && (room.type === "elevator" || room.name.toLowerCase().includes("restroom"))) ? 0.25 : 1;
 
                     return (
                       <g key={room.id} data-room
@@ -582,21 +801,22 @@ export function CampusMapPage() {
                         {/* Room slab */}
                         <rect x={room.x} y={room.y} width={room.w} height={room.h} rx={1}
                           fill={roomFill}
-                          stroke={isHigh ? "#0e2a6e" : isHov ? navColor : isNav ? navColor : "#8a8580"}
+                          fillOpacity={roomFillOpacity}
+                          stroke={isHigh ? "var(--map-route)" : isHov ? navColor : isNav ? navColor : "var(--map-floor-wall-stroke)"}
                           strokeWidth={isHigh || isHov ? 2.5 : isNav ? 1.5 : 1}/>
 
                         {/* Interior shadow edges (gives depth) */}
                         {!isNav && !isHigh && <>
-                          <line x1={room.x+1} y1={room.y+1} x2={room.x+room.w-1} y2={room.y+1} stroke="rgba(0,0,0,0.10)" strokeWidth={1.5}/>
-                          <line x1={room.x+1} y1={room.y+1} x2={room.x+1} y2={room.y+room.h-1} stroke="rgba(0,0,0,0.10)" strokeWidth={1.5}/>
-                          <line x1={room.x} y1={room.y+room.h} x2={room.x+room.w} y2={room.y+room.h} stroke="rgba(255,255,255,0.4)" strokeWidth={1}/>
-                          <line x1={room.x+room.w} y1={room.y} x2={room.x+room.w} y2={room.y+room.h} stroke="rgba(255,255,255,0.4)" strokeWidth={1}/>
+                          <line x1={room.x+1} y1={room.y+1} x2={room.x+room.w-1} y2={room.y+1} stroke="var(--map-room-text)" strokeWidth={1.5} opacity={0.08}/>
+                          <line x1={room.x+1} y1={room.y+1} x2={room.x+1} y2={room.y+room.h-1} stroke="var(--map-room-text)" strokeWidth={1.5} opacity={0.08}/>
+                          <line x1={room.x} y1={room.y+room.h} x2={room.x+room.w} y2={room.y+room.h} stroke="var(--map-room-text)" strokeWidth={1} opacity={0.06}/>
+                          <line x1={room.x+room.w} y1={room.y} x2={room.x+room.w} y2={room.y+room.h} stroke="var(--map-room-text)" strokeWidth={1} opacity={0.06}/>
                         </>}
 
                         {/* Room name */}
                         {room.w >= 44 && room.h >= 18 && !isNav && (
                           <text x={cx} y={cy+3} textAnchor="middle"
-                            fill={isHov ? "#1a1714" : "#3a3630"}
+                            fill={isHov ? "var(--map-route)" : "var(--map-room-text)"}
                             fontSize={room.w > 90 ? 8 : 6.5} fontWeight="600"
                             className="pointer-events-none select-none">
                             {room.name.length > 14 ? room.name.slice(0,13)+"…" : room.name}
@@ -626,7 +846,7 @@ export function CampusMapPage() {
                                 fill={isHov ? "white" : navColor} className="pointer-events-none select-none">↓</text>}
                               {/* Type label */}
                               {room.h >= 28 && <text x={cx} y={room.y+room.h-8} textAnchor="middle" fontSize={5.5} fontWeight="700"
-                                fill={isHov ? "white" : "#4a4642"} className="pointer-events-none select-none">
+                                fill={isHov ? "white" : "var(--map-room-text)"} className="pointer-events-none select-none">
                                 {room.type === "elevator" ? "ELEV" : "STAIR"}
                               </text>}
                             </>
@@ -643,12 +863,53 @@ export function CampusMapPage() {
                   });
                 })()}
 
+                {/* ── Indoor route path ── */}
+                {indoorRoute && indoorRoute.waypoints.length >= 2 && (
+                  <g>
+                    {/* Shadow path */}
+                    <polyline
+                      points={indoorRoute.waypoints.map(p => `${p.x},${p.y}`).join(" ")}
+                      fill="none" stroke="rgba(0,0,0,0.20)"
+                      strokeWidth={8} strokeLinecap="round" strokeLinejoin="round"
+                    />
+                    {/* Solid path */}
+                    <polyline
+                      points={indoorRoute.waypoints.map(p => `${p.x},${p.y}`).join(" ")}
+                      fill="none" stroke="var(--map-route)"
+                      strokeWidth={5} strokeLinecap="round" strokeLinejoin="round"
+                      strokeDasharray="1200" strokeDashoffset="1200"
+                      style={{ animation:"draw-route 1s cubic-bezier(0.4,0,0.2,1) forwards" }}
+                    />
+                    {/* Dashed marching ants overlay */}
+                    <polyline
+                      points={indoorRoute.waypoints.map(p => `${p.x},${p.y}`).join(" ")}
+                      fill="none" stroke="rgba(255,255,255,0.6)"
+                      strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round"
+                      strokeDasharray="6 10"
+                      style={{ animation:"draw-route 1s 0.3s ease forwards, dash-flow 1s 1.5s linear infinite" }}
+                    />
+                    {/* Start marker */}
+                    <circle cx={indoorRoute.waypoints[0].x} cy={indoorRoute.waypoints[0].y} r={6}
+                      fill="#16a34a" stroke="white" strokeWidth={2}
+                      style={{ animation:"scale-in 0.3s 0.5s ease both" }}/>
+                    {/* End marker (pulsing) */}
+                    <circle cx={indoorRoute.waypoints[indoorRoute.waypoints.length - 1].x}
+                      cy={indoorRoute.waypoints[indoorRoute.waypoints.length - 1].y}
+                      r={7} fill="var(--map-route)" stroke="white" strokeWidth={2.5}
+                      style={{ animation:"scale-in 0.3s 0.7s ease both" }}/>
+                    <circle cx={indoorRoute.waypoints[indoorRoute.waypoints.length - 1].x}
+                      cy={indoorRoute.waypoints[indoorRoute.waypoints.length - 1].y}
+                      r={12} fill="none" stroke="var(--map-route)" strokeWidth={2} opacity={0.4}
+                      style={{ animation:"pulse-ring 1.8s ease-in-out infinite" }}/>
+                  </g>
+                )}
+
                 {/* ── Compass rose ── */}
                 <g transform={`translate(${FP_W-22},20)`}>
-                  <circle r={12} fill="white" stroke="#8a8580" strokeWidth={1}/>
-                  <text textAnchor="middle" y={-2} fontSize={7} fontWeight="900" fill="#1e40af">N</text>
-                  <line y1={0} y2={-8} stroke="#1e40af" strokeWidth={2} strokeLinecap="round"/>
-                  <line y1={0} y2={7} stroke="#9ca3af" strokeWidth={1} strokeLinecap="round"/>
+                  <circle r={12} fill="var(--map-compass-bg)" stroke="var(--map-floor-wall-stroke)" strokeWidth={1}/>
+                  <text textAnchor="middle" y={-2} fontSize={7} fontWeight="900" fill="var(--map-compass-n)">N</text>
+                  <line y1={0} y2={-8} stroke="var(--map-compass-n)" strokeWidth={2} strokeLinecap="round"/>
+                  <line y1={0} y2={7} stroke="var(--map-compass-n)" strokeWidth={1} strokeLinecap="round" opacity={0.5}/>
                 </g>
                 {/* Floor watermark */}
                 <text x={FP_W/2} y={FP_H-5} textAnchor="middle" fontSize={7} fontWeight="600"
@@ -660,54 +921,30 @@ export function CampusMapPage() {
           })() : (
           /* ════════ CAMPUS MAP mode ════════ */
           <>
-            <rect data-bg="true" width={SVG_W} height={SVG_H} fill="#f2efe9"/>
-            <rect x={6} y={6} width={SVG_W-12} height={SVG_H-12} fill="none" stroke="#c8b89a" strokeWidth={3} rx={4} opacity={0.5} strokeDasharray="8 4"/>
-            {/* Green areas */}
-            <ellipse cx={401} cy={285} rx={55} ry={42} fill="url(#grass)" opacity={0.9}/>
-            <ellipse cx={188} cy={385} rx={82} ry={55} fill="url(#grass)" opacity={0.85}/>
-            <ellipse cx={590} cy={155} rx={58} ry={42} fill="url(#grass)" opacity={0.85}/>
-            <rect x={25} y={490} width={200} height={80} rx={8} fill="url(#grass)" opacity={0.8}/>
-            <rect x={35} y={500} width={180} height={60} rx={4} fill="none" stroke="#86c98a" strokeWidth={1.5} strokeDasharray="4 3"/>
-            <rect x={472} y={338} width={118} height={62} rx={6} fill="url(#grass)" opacity={0.85}/>
-            {[[175,380],[188,392],[202,380],[215,392],[580,148],[596,160],[612,148],[595,136],[395,258],[407,258],[419,258],[395,312],[407,312],[419,312],[40,510],[70,510],[100,510],[130,510],[160,510]].map(([cx,cy],i) => (
-              <g key={`t${i}`}>
-                <circle cx={cx} cy={cy} r={8} fill="#5a9e6a" opacity={0.55}/>
-                <circle cx={cx} cy={cy} r={5} fill="#4a8a58" opacity={0.7}/>
-                <circle cx={cx} cy={cy} r={2} fill="#3a7448" opacity={0.8}/>
-              </g>
-            ))}
-            {/* Roads */}
-            <rect x={0} y={272} width={SVG_W} height={26} fill="#e8e0d2"/>
-            <rect x={0} y={272} width={SVG_W} height={26} fill="none" stroke="#cec4b4" strokeWidth={1}/>
-            <line x1={0} y1={285} x2={SVG_W} y2={285} stroke="white" strokeWidth={1.5} strokeDasharray="18 10" opacity={0.7}/>
-            <text x={62} y={268} fontSize={8} fill="#8a7a6a" fontWeight="700" letterSpacing="0.05em" className="select-none">TONGCO STREET</text>
-            <rect x={388} y={0} width={26} height={SVG_H} fill="#e8e0d2"/>
-            <rect x={388} y={0} width={26} height={SVG_H} fill="none" stroke="#cec4b4" strokeWidth={1}/>
-            <line x1={401} y1={0} x2={401} y2={SVG_H} stroke="white" strokeWidth={1.5} strokeDasharray="18 10" opacity={0.7}/>
-            <text x={403} y={200} fontSize={8} fill="#8a7a6a" fontWeight="700" transform="rotate(90,403,200)" className="select-none">MAIN ROAD</text>
-            <rect x={104} y={0} width={15} height={SVG_H} fill="#ede8df" opacity={0.8}/>
-            <rect x={0} y={455} width={SVG_W} height={14} fill="#ede8df" opacity={0.8}/>
-            <path d="M 120 290 L 155 290 L 155 210" fill="none" stroke="#e0d8cc" strokeWidth={10} strokeLinecap="round"/>
-            <path d="M 414 290 L 540 290 L 540 373" fill="none" stroke="#e0d8cc" strokeWidth={10} strokeLinecap="round"/>
-            <path d="M 414 290 L 414 435 L 305 435" fill="none" stroke="#e0d8cc" strokeWidth={10} strokeLinecap="round"/>
-            <path d="M 414 435 L 605 435" fill="none" stroke="#e0d8cc" strokeWidth={10} strokeLinecap="round"/>
-            <path d="M 414 200 L 395 200 L 395 115" fill="none" stroke="#e0d8cc" strokeWidth={8} strokeLinecap="round"/>
-            {[272,277,282,287,292].map((y,i) => <rect key={i} x={395} y={y} width={16} height={3} fill="white" opacity={0.8}/>)}
-            {[388,393,398,403].map((x,i) => <rect key={i} x={x} y={276} width={3} height={14} fill="white" opacity={0.8}/>)}
-            {/* Parking */}
-            <rect x={240} y={460} width={70} height={36} rx={3} fill="#e4ddd2" stroke="#cec6b8" strokeWidth={1}/>
-            <text x={275} y={482} textAnchor="middle" fill="#8a7a6a" fontSize={7} fontWeight="700" className="select-none">PARKING</text>
-            {[252,264,276,288,300].map((x,i) => <line key={i} x1={x} y1={462} x2={x} y2={494} stroke="#cec6b8" strokeWidth={0.8}/>)}
-            <rect x={738} y={98} width={60} height={45} rx={3} fill="#e4ddd2" stroke="#cec6b8" strokeWidth={1}/>
-            <text x={768} y={124} textAnchor="middle" fill="#8a7a6a" fontSize={7} fontWeight="700" className="select-none">PARKING</text>
-            {[750,760,770,780,790].map((x,i) => <line key={i} x1={x} y1={100} x2={x} y2={141} stroke="#cec6b8" strokeWidth={0.8}/>)}
+            <rect data-bg="true" width={SVG_W} height={SVG_H} fill="var(--map-bg)"/>
+            <rect x={6} y={6} width={SVG_W-12} height={SVG_H-12} fill="none" stroke="var(--map-boundary)" strokeWidth={3} rx={4} opacity={0.5} strokeDasharray="8 4"/>
+
             {/* Accessible overlay */}
             {mapMode === "accessible" && <>
               <path d="M 119,289 L 155,289 L 155,170" fill="none" stroke="#16a34a" strokeWidth={7} opacity={0.5} strokeDasharray="12,6" strokeLinecap="round"/>
               <path d="M 414,289 L 540,289 L 540,373" fill="none" stroke="#16a34a" strokeWidth={7} opacity={0.5} strokeDasharray="12,6" strokeLinecap="round"/>
               <path d="M 414,289 L 414,435 L 305,435" fill="none" stroke="#16a34a" strokeWidth={7} opacity={0.5} strokeDasharray="12,6" strokeLinecap="round"/>
-              {([[155,290],[414,373],[414,435]] as [number,number][]).map(([cx,cy],i) => (
-                <g key={i}><circle cx={cx} cy={cy} r={10} fill="white" stroke="#16a34a" strokeWidth={2}/><text x={cx} y={cy+4} textAnchor="middle" fill="#16a34a" fontSize={11} fontWeight="900" className="select-none">♿</text></g>
+              {([[155,290,"#16a34a"],[414,373,"#16a34a"],[414,435,"#16a34a"]] as [number,number,string][]).map(([cx,cy,clr],i) => (
+                <g key={i}>
+                  <circle cx={cx} cy={cy} r={12} fill="white" stroke={clr} strokeWidth={2.5} style={{ animation:"scale-in 0.3s ease both" }}/>
+                  <text x={cx} y={cy+4} textAnchor="middle" fill={clr} fontSize={12} fontWeight="900" className="select-none">♿</text>
+                  <circle cx={cx} cy={cy} r={12} fill="none" stroke={clr} strokeWidth={2} opacity={0.3}>
+                    <animate attributeName="r" from="12" to="20" dur="1.5s" repeatCount="indefinite"/>
+                    <animate attributeName="opacity" from="0.3" to="0" dur="1.5s" repeatCount="indefinite"/>
+                  </circle>
+                </g>
+              ))}
+              {/* Building entrance accessibility markers */}
+              {([[155,170,"MAB - Ramp Access"],[395,115,"ADM - Elevator"],[540,295,"LRC - Ground"],[165,305,"ELB - Ramp"],[305,435,"GYM - Level"],[605,415,"SSC - Ground"]] as [number,number,string][]).map(([ex,ey,label],i) => (
+                <g key={`acc${i}`}>
+                  <rect x={ex-10} y={ey-10} width={20} height={10} rx={4} fill="#16a34a" fillOpacity={0.85} stroke="white" strokeWidth={1}/>
+                  <text x={ex} y={ey-3} textAnchor="middle" fill="white" fontSize={5.5} fontWeight="900" className="select-none pointer-events-none">{label}</text>
+                </g>
               ))}
             </>}
             {/* Emergency overlay */}
@@ -721,46 +958,82 @@ export function CampusMapPage() {
             {route && (() => {
               const pathStr = route.points.map(p => `${p.x},${p.y}`).join(" ");
               const color = mapMode === "accessible" ? "#16a34a" : mapMode === "emergency" ? "#dc2626" : "#1e40af";
+              const glowFilter = mapMode === "standard" ? "url(#route-glow)" : undefined;
               const pathId = "plv-route-path";
+              const midIdx = Math.floor(route.points.length / 2);
               return (
-                <g>
+                <g data-route-group className={`transition-opacity duration-300 ${routeFading ? 'opacity-0' : ''}`}>
                   <defs><path id={pathId} d={`M ${route.points.map(p => `${p.x} ${p.y}`).join(" L ")}`}/></defs>
-                  <polyline points={pathStr} fill="none" stroke="rgba(0,0,0,0.15)" strokeWidth={12} strokeLinecap="round" strokeLinejoin="round"/>
+                  {/* Outer shadow trail */}
+                  <polyline points={pathStr} fill="none" stroke="rgba(0,0,0,0.12)" strokeWidth={14} strokeLinecap="round" strokeLinejoin="round"/>
+                  {/* White backing */}
                   <polyline points={pathStr} fill="none" stroke="white" strokeWidth={9} strokeLinecap="round" strokeLinejoin="round"/>
-                  <polyline points={pathStr} fill="none" stroke={color} strokeWidth={6} strokeLinecap="round" strokeLinejoin="round"
+                  {/* Glow layer */}
+                  <polyline points={pathStr} fill="none" stroke={color} strokeWidth={8} strokeLinecap="round" strokeLinejoin="round" opacity={0.25}
+                    filter={glowFilter}
                     strokeDasharray="900" strokeDashoffset="900"
                     style={{ animation:"draw-route 1.4s cubic-bezier(0.4,0,0.2,1) forwards" }}/>
+                  {/* Main animated route line */}
+                  <polyline points={pathStr} fill="none" stroke={color} strokeWidth={5} strokeLinecap="round" strokeLinejoin="round"
+                    strokeDasharray="900" strokeDashoffset="900"
+                    style={{ animation:"draw-route 1.4s cubic-bezier(0.4,0,0.2,1) forwards" }}/>
+                  {/* Marching ants overlay */}
                   <polyline points={pathStr} fill="none" stroke="rgba(255,255,255,0.6)" strokeWidth={2}
                     strokeLinecap="round" strokeLinejoin="round" strokeDasharray="8 14"
                     style={{ animation:"draw-route 1.4s 0.4s ease forwards, dash-flow 1.2s 1.8s linear infinite" }}/>
-                  <circle r="8" fill={color} stroke="white" strokeWidth={2.5} style={{ filter:`drop-shadow(0 2px 8px ${color}aa)` }}>
-                    <animateMotion dur="5s" repeatCount="indefinite" rotate="auto"><mpath href={`#${pathId}`}/></animateMotion>
-                  </circle>
-                  <circle cx={route.points[0].x} cy={route.points[0].y} r={12} fill="#16a34a" stroke="white" strokeWidth={2.5}/>
-                  <text x={route.points[0].x} y={route.points[0].y+4} textAnchor="middle" fill="white" fontSize={9} fontWeight="900" className="select-none">A</text>
-                  <circle cx={route.points[route.points.length-1].x} cy={route.points[route.points.length-1].y} r={12} fill="#dc2626" stroke="white" strokeWidth={2.5}/>
-                  <text x={route.points[route.points.length-1].x} y={route.points[route.points.length-1].y+4} textAnchor="middle" fill="white" fontSize={9} fontWeight="900" className="select-none">B</text>
-                  <circle cx={route.points[route.points.length-1].x} cy={route.points[route.points.length-1].y} r={12} fill="none" stroke="#dc2626" strokeWidth={2} opacity="0.5">
-                    <animate attributeName="r" from="12" to="24" dur="1.8s" repeatCount="indefinite"/>
-                    <animate attributeName="opacity" from="0.5" to="0" dur="1.8s" repeatCount="indefinite"/>
-                  </circle>
+                  {/* Directional arrows along the route */}
+                  {route.points.length >= 2 && route.points.slice(0, -1).map((p, i) => {
+                    const next = route.points[i + 1];
+                    const mx = (p.x + next.x) / 2, my = (p.y + next.y) / 2;
+                    if (i % 2 !== 0) return null; // show on alternating segments
+                    return (
+                      <polygon key={i}
+                        points={`${mx-4},${my-6} ${mx+4},${my} ${mx-4},${my+6}`}
+                        fill={color} opacity={0.5}
+                        style={{ animation:`fade-in 1.4s ${0.6 + i*0.1}s ease both` }}/>
+                    );
+                  })}
+                  {/* Waypoint checkpoints at each junction */}
+                  {route.points.slice(1, -1).map((p, i) => (
+                    <g key={`wp${i}`}
+                      style={{ animation:`scale-in 0.3s ${0.8 + i*0.12}s ease both` }}>
+                      <circle cx={p.x} cy={p.y} r={5} fill="white" stroke={color} strokeWidth={2} opacity={0.85}/>
+                      <circle cx={p.x} cy={p.y} r={2} fill={color}/>
+                    </g>
+                  ))}
+                  {/* Start marker — green with flag */}
+                  <g style={{ animation:"scale-in 0.4s 0.3s ease both" }}>
+                    <circle cx={route.points[0].x} cy={route.points[0].y} r={14} fill="#16a34a" stroke="white" strokeWidth={3}
+                      style={{ filter:"drop-shadow(0 2px 6px rgba(22,163,74,0.4))" }}/>
+                    <circle cx={route.points[0].x} cy={route.points[0].y} r={10} fill="none" stroke="rgba(255,255,255,0.5)" strokeWidth={1.5}/>
+                    <text x={route.points[0].x} y={route.points[0].y+4} textAnchor="middle" fill="white" fontSize={11} fontWeight="900" className="select-none">A</text>
+                    {/* Pulse ring */}
+                    <circle cx={route.points[0].x} cy={route.points[0].y} r={14} fill="none" stroke="#16a34a" strokeWidth={2} opacity={0.4}>
+                      <animate attributeName="r" from="14" to="24" dur="2s" repeatCount="indefinite"/>
+                      <animate attributeName="opacity" from="0.4" to="0" dur="2s" repeatCount="indefinite"/>
+                    </circle>
+                  </g>
+                  {/* Destination marker — red pin with expanded pulse */}
+                  <g style={{ animation:"scale-in 0.4s 0.5s ease both" }}>
+                    <circle cx={route.points[route.points.length-1].x} cy={route.points[route.points.length-1].y} r={14} fill="#dc2626" stroke="white" strokeWidth={3}
+                      style={{ filter:"drop-shadow(0 2px 8px rgba(220,38,38,0.5))" }}/>
+                    <circle cx={route.points[route.points.length-1].x} cy={route.points[route.points.length-1].y} r={10} fill="none" stroke="rgba(255,255,255,0.5)" strokeWidth={1.5}/>
+                    <text x={route.points[route.points.length-1].x} y={route.points[route.points.length-1].y+4} textAnchor="middle" fill="white" fontSize={11} fontWeight="900" className="select-none">B</text>
+                    {/* Outer pulse ring */}
+                    <circle cx={route.points[route.points.length-1].x} cy={route.points[route.points.length-1].y} r={14} fill="none" stroke="#dc2626" strokeWidth={2.5} opacity={0.5}>
+                      <animate attributeName="r" from="14" to="32" dur="2.2s" repeatCount="indefinite"/>
+                      <animate attributeName="opacity" from="0.5" to="0" dur="2.2s" repeatCount="indefinite"/>
+                    </circle>
+                  </g>
                 </g>
               );
             })()}
-            {/* Gates */}
-            {[{x:100,y:272,w:22,lbl:"Main"},{x:672,y:272,w:22,lbl:"East"}].map((g,i) => (
-              <g key={i}>
-                <rect x={g.x} y={g.y} width={g.w} height={26} fill="#0e2a6e" rx={3}/>
-                <text x={g.x+g.w/2} y={g.y+10} textAnchor="middle" fill="white" fontSize={6} fontWeight="900" className="select-none">GATE</text>
-                <text x={g.x+g.w/2} y={g.y+18} textAnchor="middle" fill="#c8960c" fontSize={5} fontWeight="700" className="select-none">{g.lbl.toUpperCase()}</text>
-              </g>
-            ))}
-            {/* Buildings */}
+                        {/* Buildings */}
             {layers.buildings && MOCK_BUILDINGS.map(b => {
               const pos = B_POS[b.id]; if (!pos) return null;
               const isSel = selected?.id === b.id;
               const googleFill = mapMode === "standard"
-                ? (b.category === "sports" ? "#d4e8c2" : b.category === "library" || b.category === "facility" ? "#c8dff5" : "#d4c9b8")
+                ? (b.category === "sports" ? "var(--map-building-sports-fill)" : b.category === "library" || b.category === "facility" ? "var(--map-building-library-fill)" : "var(--map-building-default-fill)")
                 : buildingFill(b.id);
               return (
                 <g key={b.id} data-bldg style={{ cursor: isDragging ? "grabbing" : "pointer" }}
@@ -773,7 +1046,7 @@ export function CampusMapPage() {
                   {/* Building body */}
                   <rect x={pos.x} y={pos.y} width={pos.w} height={pos.h} rx={4}
                     fill={mapMode === "standard" ? googleFill : buildingFill(b.id)}
-                    stroke={isSel ? "#1e40af" : mapMode === "standard" ? "#b0a090" : "rgba(255,255,255,0.5)"}
+                    stroke={isSel ? "#1e40af" : mapMode === "standard" ? "var(--map-building-stroke)" : "rgba(255,255,255,0.5)"}
                     strokeWidth={isSel ? 2.5 : 1} opacity={isSel ? 1 : 0.94}/>
                   {/* Roof band */}
                   <rect x={pos.x} y={pos.y} width={pos.w} height={6} rx={4}
@@ -794,12 +1067,12 @@ export function CampusMapPage() {
                   )}
                   {/* Building code */}
                   <text x={pos.x+pos.w/2} y={pos.y+pos.h/2+3} textAnchor="middle"
-                    fill={mapMode === "standard" ? "#4a3c2c" : "white"}
+                    fill={mapMode === "standard" ? "var(--map-building-text)" : "white"}
                     fontSize={10} fontWeight="800" letterSpacing="-0.3"
                     className="pointer-events-none select-none">{b.code}</text>
                   {/* Building name label */}
                   {displayZoom > 0.7 && <text x={pos.x+pos.w/2} y={pos.y+pos.h+13}
-                    textAnchor="middle" fill={mapMode === "standard" ? "#3a3028" : "rgba(255,255,255,0.9)"}
+                    textAnchor="middle" fill={mapMode === "standard" ? "var(--map-building-name)" : "rgba(255,255,255,0.9)"}
                     fontSize={7} fontWeight="600"
                     style={{ textShadow: mapMode === "standard" ? "0 1px 3px rgba(255,255,255,0.95)" : "none" }}
                     className="pointer-events-none select-none">
@@ -811,23 +1084,8 @@ export function CampusMapPage() {
               );
             })}
             {/* Event markers — star pins */}
-            {EVENT_MARKERS.map(ev => (
-              <g key={ev.id} style={{ cursor:"pointer" }}
-                onClick={e => { e.stopPropagation(); if (!dragRef.current?.moved) setSelectedEvent(ev); }}>
-                {/* Pulse ring */}
-                <circle cx={ev.x} cy={ev.y-2} r={15} fill="none" stroke={ev.color} strokeWidth={1.5} opacity={0.4}>
-                  <animate attributeName="r" from="15" to="26" dur="2.2s" repeatCount="indefinite"/>
-                  <animate attributeName="opacity" from="0.4" to="0" dur="2.2s" repeatCount="indefinite"/>
-                </circle>
-                {/* Pin drop shadow */}
-                <ellipse cx={ev.x} cy={ev.y+14} rx={5} ry={2} fill="rgba(0,0,0,0.18)"/>
-                {/* Pin body (teardrop) */}
-                <path d={`M${ev.x},${ev.y+14} C${ev.x-7},${ev.y+5} ${ev.x-13},${ev.y-4} ${ev.x-13},${ev.y-10} A13,13 0 1,1 ${ev.x+13},${ev.y-10} C${ev.x+13},${ev.y-4} ${ev.x+7},${ev.y+5} ${ev.x},${ev.y+14}Z`}
-                  fill={ev.color} stroke="white" strokeWidth={2}/>
-                {/* Star icon inside pin */}
-                <text x={ev.x} y={ev.y-6} textAnchor="middle" fill="white" fontSize={11} fontWeight="900" className="select-none pointer-events-none">★</text>
-              </g>
-            ))}
+
+
             {/* Scale bar */}
             <g>
               <rect x={16} y={652} width={120} height={4} fill="none" stroke="#8a7a6a" strokeWidth={1}/>
@@ -872,7 +1130,7 @@ export function CampusMapPage() {
                 <span className="text-sm font-extrabold text-foreground" style={{ fontFamily:"var(--font-sans)" }}>Directions</span>
               </div>
               <button onClick={() => { setDirectionsMode(false); setFromBuilding(null); setToBuilding(null); }}
-                className="w-7 h-7 rounded-lg bg-muted flex items-center justify-center hover:bg-secondary transition-colors">
+                className="w-8 h-8 md:w-7 md:h-7 rounded-lg bg-muted flex items-center justify-center hover:bg-secondary active:scale-90 transition-all">
                 <X className="h-3.5 w-3.5 text-muted-foreground"/>
               </button>
             </div>
@@ -882,7 +1140,7 @@ export function CampusMapPage() {
                 buildings={MOCK_BUILDINGS}/>
               <div className="flex items-center justify-center">
                 <button onClick={() => { const tmp = fromBuilding; setFromBuilding(toBuilding); setToBuilding(tmp); }}
-                  className="w-7 h-7 rounded-full border border-border bg-card flex items-center justify-center hover:bg-muted transition-colors">
+                  className="w-8 h-8 md:w-7 md:h-7 rounded-full border border-border bg-card flex items-center justify-center hover:bg-muted active:scale-90 transition-all" aria-label="Swap start and destination">
                   <ArrowUpDown className="h-3 w-3 text-muted-foreground"/>
                 </button>
               </div>
@@ -895,8 +1153,24 @@ export function CampusMapPage() {
                     <span className="text-[10px] font-extrabold text-primary uppercase tracking-widest">Route Active</span>
                     <span className="w-2 h-2 rounded-full bg-accent animate-pulse"/>
                   </div>
-                  <p className="text-lg font-extrabold text-foreground">{route.dist} m</p>
-                  <p className="text-[10px] text-muted-foreground">{route.mins} min walking · Animated on map</p>
+                  <div className="flex items-end gap-3 mb-1">
+                    <p className="text-lg font-extrabold text-foreground">{route.dist} m</p>
+                    <p className="text-sm font-semibold text-muted-foreground pb-0.5">{route.mins} min</p>
+                  </div>
+                  {route.steps && route.steps.length > 0 && (
+                    <p className="text-[10px] text-muted-foreground mb-1.5">
+                      {route.steps.length} step{route.steps.length !== 1 ? "s" : ""} · Waypoints: {route.points.length}
+                    </p>
+                  )}
+                  <div className="mt-1 flex flex-wrap gap-1.5">
+                    <span className="flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-green-100 dark:bg-green-900/20 text-green-700 dark:text-green-400 border border-green-200 dark:border-green-800/30">
+                      <span className="w-1.5 h-1.5 rounded-full bg-green-500"/> {fromBuilding?.code ?? "Start"}
+                    </span>
+                    <ArrowUpDown className="h-3 w-3 text-muted-foreground"/>
+                    <span className="flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-red-100 dark:bg-red-900/20 text-destructive border border-red-200 dark:border-red-800/30">
+                      <span className="w-1.5 h-1.5 rounded-full bg-red-500"/> {toBuilding?.code ?? "?"}
+                    </span>
+                  </div>
                 </div>
               )}
             </div>
@@ -977,7 +1251,23 @@ export function CampusMapPage() {
                         <div className="w-8 h-8 rounded-xl bg-primary/10 flex items-center justify-center shrink-0"><Building2 className="h-4 w-4 text-primary"/></div>
                         <div><p className="text-sm font-bold text-foreground">{b.name}</p><p className="text-xs text-muted-foreground">{b.code} · {b.category}</p></div>
                       </button>
-                    )) : <p className="text-sm text-muted-foreground px-4 py-3">No results for "{search}"</p>}
+                    )) : (
+                      <div className="flex flex-col items-center py-6 px-4 text-center">
+                        <div className="w-10 h-10 rounded-xl bg-muted flex items-center justify-center mb-2.5">
+                          <Search className="h-5 w-5 text-muted-foreground/50" />
+                        </div>
+                        <p className="text-sm font-bold text-foreground mb-0.5">No results found</p>
+                        <p className="text-xs text-muted-foreground max-w-[200px]">
+                          We couldn&apos;t find anything matching &ldquo;{search}&rdquo;. Try a different name or code.
+                        </p>
+                        <button
+                          onClick={() => setSearch("")}
+                          className="mt-3 text-xs font-bold text-primary hover:underline"
+                        >
+                          Clear search
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
                 {/* Room search results (floor plan mode) */}
@@ -989,16 +1279,31 @@ export function CampusMapPage() {
                       </p>
                     )}
                     {search && roomResults.length > 0 ? roomResults.map(r => (
-                      <button key={r.id} onMouseDown={e => {
-                        e.preventDefault();
-                        setHighlightedRoom(r.id);
-                        setSearch("");
-                        setSearchFocused(false);
-                      }}
-                        className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-muted transition-colors text-left">
-                        <div className="w-7 h-7 rounded-lg bg-primary/10 flex items-center justify-center shrink-0 text-[10px] font-bold text-primary">{r.type === "stairs" ? "↕" : r.type === "elevator" ? "▲" : "⬜"}</div>
-                        <div><p className="text-sm font-bold text-foreground">{r.name}</p><p className="text-xs text-muted-foreground capitalize">{r.type}</p></div>
-                      </button>
+                      <div key={r.id} className="group flex items-center hover:bg-muted transition-colors">
+                        <button onMouseDown={e => {
+                          e.preventDefault();
+                          setHighlightedRoom(r.id);
+                          setSearch("");
+                          setSearchFocused(false);
+                        }}
+                          className="flex-1 flex items-center gap-3 px-4 py-2.5 text-left min-w-0">
+                          <div className="w-7 h-7 rounded-lg bg-primary/10 flex items-center justify-center shrink-0 text-[10px] font-bold text-primary">{r.type === "stairs" ? "↕" : r.type === "elevator" ? "▲" : "⬜"}</div>
+                          <div className="min-w-0"><p className="text-sm font-bold text-foreground truncate">{r.name}</p><p className="text-xs text-muted-foreground capitalize truncate">{r.type}</p></div>
+                        </button>
+                        {(r.type !== "stairs" && r.type !== "elevator") && (
+                          <button
+                            onMouseDown={e => {
+                              e.preventDefault();
+                              showIndoorRoute(r.id);
+                              setSearch("");
+                              setSearchFocused(false);
+                            }}
+                            className="mr-2 flex items-center gap-1 px-2 py-1.5 rounded-lg text-[10px] font-extrabold text-primary bg-primary/8 hover:bg-primary/15 transition-all opacity-0 group-hover:opacity-100 shrink-0 border border-primary/20"
+                            title="Show route">
+                            <Footprints className="h-3 w-3"/> Route
+                          </button>
+                        )}
+                      </div>
                     )) : search ? (
                       <p className="text-sm text-muted-foreground px-4 py-3">No rooms found for "{search}"</p>
                     ) : null}
@@ -1030,6 +1335,40 @@ export function CampusMapPage() {
         ))}
       </div>
 
+      {/* Accessibility / SOS Legend (visible only in special modes) */}
+      {mapMode !== "standard" && (
+        <div data-no-drag className="absolute top-14 left-1/2 -translate-x-1/2 z-20 animate-slide-up">
+          <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl border shadow-lg"
+            style={{
+              background: mapMode === "accessible" ? "rgba(22,163,74,0.12)" : "rgba(220,38,38,0.12)",
+              backdropFilter: "blur(12px)",
+              WebkitBackdropFilter: "blur(12px)",
+              borderColor: mapMode === "accessible" ? "rgba(22,163,74,0.25)" : "rgba(220,38,38,0.25)",
+            }}>
+            {mapMode === "accessible" ? (
+              <>
+                <span className="flex items-center gap-1 text-[10px] font-bold text-green-700 dark:text-green-400">
+                  <Accessibility className="h-3 w-3" /> Accessible Route
+                </span>
+                <span className="w-px h-3 bg-green-500/20"/>
+                <span className="flex items-center gap-1 text-[10px] font-semibold text-green-600/70 dark:text-green-500/70">■ Ramp</span>
+                <span className="text-[10px] font-semibold text-green-600/70 dark:text-green-500/70">■ Elevator</span>
+                <span className="text-[10px] font-semibold text-green-600/70 dark:text-green-500/70">— Wide Paths</span>
+              </>
+            ) : (
+              <>
+                <span className="flex items-center gap-1 text-[10px] font-bold text-red-600 dark:text-red-400">
+                  <AlertTriangle className="h-3 w-3"/> Emergency Mode
+                </span>
+                <span className="w-px h-3 bg-red-500/20"/>
+                <span className="text-[10px] font-semibold text-red-500/80">■ EXIT Points</span>
+                <span className="text-[10px] font-semibold text-red-500/80">■ Assembly Area</span>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* ══════════════ FLOOR SELECTOR (floor plan mode — always visible when in floor view) ══════════════ */}
       {isFloorMode && currentFloorData && (
         <div data-no-drag className="absolute right-14 top-1/2 -translate-y-1/2 z-20 flex flex-col gap-1 p-1.5 rounded-2xl border border-border/60 shadow-xl"
@@ -1056,17 +1395,21 @@ export function CampusMapPage() {
           <Layers className="h-4 w-4"/>
         </button>
         <button onClick={e => { e.stopPropagation(); setZoom(z => Math.min(3.5,+(z+0.4).toFixed(2))); }} title="Zoom in"
-          className="w-9 h-9 rounded-xl bg-card border border-border/60 shadow-md flex items-center justify-center text-muted-foreground hover:text-primary hover:border-primary/30 transition-all">
+          className="w-10 h-10 md:w-9 md:h-9 rounded-xl bg-card border border-border/60 shadow-md flex items-center justify-center text-muted-foreground hover:text-primary hover:border-primary/30 active:scale-95 transition-all" aria-label="Zoom in">
           <ZoomIn className="h-4 w-4"/>
         </button>
         <button onClick={e => { e.stopPropagation(); setZoom(z => Math.max(0.35,+(z-0.4).toFixed(2))); }} title="Zoom out"
-          className="w-9 h-9 rounded-xl bg-card border border-border/60 shadow-md flex items-center justify-center text-muted-foreground hover:text-primary hover:border-primary/30 transition-all">
+          className="w-10 h-10 md:w-9 md:h-9 rounded-xl bg-card border border-border/60 shadow-md flex items-center justify-center text-muted-foreground hover:text-primary hover:border-primary/30 active:scale-95 transition-all" aria-label="Zoom out">
           <ZoomOut className="h-4 w-4"/>
         </button>
         <button onClick={e => { e.stopPropagation(); setZoom(1); setPan({x:0,y:0}); }} title="Reset view"
-          className="w-9 h-9 rounded-xl bg-card border border-border/60 shadow-md flex items-center justify-center text-muted-foreground hover:text-primary hover:border-primary/30 transition-all">
+          className="w-10 h-10 md:w-9 md:h-9 rounded-xl bg-card border border-border/60 shadow-md flex items-center justify-center text-muted-foreground hover:text-primary hover:border-primary/30 active:scale-95 transition-all" aria-label="Reset view">
           <LocateFixed className="h-4 w-4"/>
         </button>
+        {/* Zoom level indicator */}
+        <div className="text-center text-[9px] font-semibold text-muted-foreground/60 select-none mt-0.5">
+          {Math.round(displayZoom * 100)}%
+        </div>
       </div>
 
       {/* Layers panel */}
@@ -1089,28 +1432,136 @@ export function CampusMapPage() {
       {route && (
         <div data-no-drag className="absolute bottom-5 left-3 z-20 hidden md:block animate-slide-up">
           <div className="rounded-2xl border border-border/60 shadow-xl overflow-hidden"
-            style={{ background:"var(--card)", backdropFilter:"blur(16px)", WebkitBackdropFilter:"blur(16px)", width:200 }}>
-            <div className="flex items-center gap-2 px-3 py-2 border-b border-border" style={{ background:"var(--primary)" }}>
+            style={{ background:"var(--card)", backdropFilter:"blur(16px)", WebkitBackdropFilter:"blur(16px)", width:230 }}>
+            {/* Header — destination name + live indicator */}
+            <div className="flex items-center gap-2 px-3 py-2" style={{ background: mapMode === "accessible" ? "#16a34a" : mapMode === "emergency" ? "#dc2626" : "var(--primary)" }}>
               <Navigation className="h-3.5 w-3.5 text-white shrink-0"/>
               <span className="text-[11px] font-extrabold text-white truncate flex-1">{toBuilding?.name}</span>
-              <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse shrink-0"/>
+              <span className="w-1.5 h-1.5 rounded-full bg-green-300 animate-pulse shrink-0"/>
             </div>
-            <div className="px-3 py-3 space-y-2">
-              <div className="flex gap-2">
-                <div className="flex-1 px-2 py-1.5 rounded-lg bg-muted text-center">
-                  <p className="text-[10px] text-muted-foreground">Distance</p>
-                  <p className="text-sm font-extrabold text-foreground">{route.dist} m</p>
-                </div>
-                <div className="flex-1 px-2 py-1.5 rounded-lg bg-muted text-center">
-                  <p className="text-[10px] text-muted-foreground">Time</p>
-                  <p className="text-sm font-extrabold text-foreground">{route.mins} min</p>
+            {/* Stats row: distance, time, mode */}
+            <div className="flex gap-2 px-3 pt-2.5 pb-2 border-b border-border">
+              <div className="flex-1 px-2 py-1.5 rounded-lg bg-primary/8 text-center">
+                <p className="text-[9px] text-muted-foreground font-semibold uppercase tracking-wider">Dist</p>
+                <p className="text-sm font-extrabold text-foreground">{route.dist} m</p>
+              </div>
+              <div className="flex-1 px-2 py-1.5 rounded-lg bg-primary/8 text-center">
+                <p className="text-[9px] text-muted-foreground font-semibold uppercase tracking-wider">Time</p>
+                <p className="text-sm font-extrabold text-foreground">{route.mins} min</p>
+              </div>
+              <div className="flex-1 px-2 py-1.5 rounded-lg bg-primary/8 text-center">
+                <p className="text-[9px] text-muted-foreground font-semibold uppercase tracking-wider">Via</p>
+                <p className="text-sm font-extrabold text-foreground">{mapMode === "accessible" ? <Accessibility className="h-4 w-4 inline-block align-middle" /> : mapMode === "emergency" ? "SOS" : "Walk"}</p>
+              </div>
+            </div>
+            {/* Step-by-step directions */}
+            <div className="px-3 pt-2 pb-1 max-h-28 overflow-y-auto scrollbar-show-on-hover">
+              <div className="relative pl-4 border-l-2 border-primary/30 space-y-1.5">
+                {(() => {
+                  const steps: string[] = route.steps ?? [
+                    fromBuilding ? `From ${fromBuilding.code}` : "Your location",
+                    `Walk ${route.dist}m toward ${toBuilding?.code ?? "destination"}`,
+                    `Arrive at ${toBuilding?.code ?? "destination"}`,
+                  ];
+                  return steps.map((step, i) => (
+                    <div key={i} className="relative flex items-start gap-2">
+                      <div className={cn(
+                        "absolute -left-[11px] w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0",
+                        i === 0 ? "bg-green-500 border-green-500" :
+                        i === steps.length - 1 ? "bg-destructive border-destructive" :
+                        "bg-card border-primary/50"
+                      )}/>
+                      <p className={cn("text-[10px] leading-snug pt-0.5 ml-1", i === steps.length - 1 ? "font-bold text-foreground" : "text-muted-foreground")}>{step}</p>
+                    </div>
+                  ));
+                })()}
+              </div>
+            </div>
+            {/* Actions */}
+            <div className="flex items-center gap-1.5 px-3 pb-2.5">
+              <button onClick={() => {
+                  setRouteFading(true);
+                  setTimeout(() => {
+                    setFromBuilding(null);
+                    setToBuilding(null);
+                    setDirectionsMode(false);
+                    setRouteFading(false);
+                  }, 300);
+                }}
+                className="flex-1 h-7 rounded-lg border border-destructive/30 text-destructive text-[10px] font-bold hover:bg-destructive/10 transition-colors">
+                End
+              </button>
+              <button onClick={() => { setZoom(1.5); }}
+                className="w-7 h-7 rounded-lg border border-border text-muted-foreground text-[10px] font-bold hover:bg-muted transition-colors" title="Zoom to route">
+                ▣
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ══════════════ DESKTOP BUILDING INFO PANEL ══════════════ */}
+      {selected && (
+        <BuildingInfoPanel
+          selected={selected}
+          onClose={() => selectBuilding(null)}
+          onDirections={startDirectionsTo}
+          onFloorPlan={(b) => openFloorPlan(b)}
+          isFloorMode={isFloorMode}
+          floorBuildingId={floorView?.building?.id}
+          saved={saved}
+          studentAuth={studentAuth}
+          onToggleSave={toggleSave}
+          onReport={setReportModal}
+          onSignInPrompt={setSignInPrompt}
+          showQR={showQR}
+          onToggleQR={() => setShowQR(v => !v)}
+          hasFloorPlans={Boolean(FLOOR_PLANS[selected.id])}
+          floorPlanCount={FLOOR_PLANS[selected.id]?.floors?.length ?? 0}
+          facilities={BUILDING_FACILITIES[selected.id] ?? []}
+          accessibility={BUILDING_ACCESSIBILITY[selected.id] ?? []}
+          route={route ? { dist: route.dist, mins: route.mins } : null}
+        />
+      )}
+
+      {/* ══════════════ ARRIVAL OVERLAY ══════════════ */}
+      {showArrival && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-background/60 backdrop-blur-sm animate-fade-in"
+          onClick={() => setShowArrival(false)}>
+          <div className="flex flex-col items-center gap-4 animate-slide-up" onClick={e => e.stopPropagation()}>
+            {/* Celebration ring */}
+            <div className="relative">
+              <div className="w-24 h-24 rounded-full bg-green-500/10 animate-scale-in flex items-center justify-center"
+                style={{ animation:"scale-in 0.5s cubic-bezier(0.16,1,0.3,1) both" }}>
+                <div className="w-20 h-20 rounded-full bg-green-500 flex items-center justify-center shadow-lg shadow-green-500/30">
+                  <svg viewBox="0 0 24 24" className="w-10 h-10 text-white" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="20 6 9 17 4 12"/>
+                  </svg>
                 </div>
               </div>
-              <p className="text-[10px] text-muted-foreground leading-snug" style={{ fontFamily:"var(--font-body)" }}>
-                Follow the animated route on the map.
-              </p>
-              <button onClick={() => { setFromBuilding(null); setToBuilding(null); setDirectionsMode(false); }}
-                className="w-full h-7 rounded-lg border border-destructive/30 text-destructive text-[10px] font-bold hover:bg-destructive/10 transition-colors">
+              {/* Decorative sparkles */}
+              <div className="absolute -top-2 -right-2 text-xl animate-scale-in" style={{ animationDelay: "0.3s" }}>✨</div>
+              <div className="absolute -bottom-1 -left-3 text-lg animate-scale-in" style={{ animationDelay: "0.5s" }}>🌟</div>
+            </div>
+            <div className="text-center">
+              <h3 className="text-xl font-extrabold text-foreground">You Have Arrived</h3>
+              <p className="text-sm text-muted-foreground mt-1">{toBuilding?.name ?? "Destination"}</p>
+              <div className="flex items-center justify-center gap-3 mt-2">
+                <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-green-100 dark:bg-green-900/20 text-green-700 dark:text-green-400">
+                  ✓ Arrived
+                </span>
+                <span className="text-[10px] text-muted-foreground">Route complete</span>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={() => { setShowArrival(false); }}
+                className="h-9 px-4 rounded-xl border border-border text-muted-foreground text-xs font-bold hover:bg-muted transition-colors">
+                Dismiss
+              </button>
+              <button
+                onClick={() => { setShowArrival(false); setFromBuilding(null); setToBuilding(null); setDirectionsMode(false); }}
+                className="h-9 px-5 rounded-xl bg-primary text-primary-foreground text-xs font-bold hover:bg-primary/90 transition-colors">
                 End Navigation
               </button>
             </div>
@@ -1118,204 +1569,79 @@ export function CampusMapPage() {
         </div>
       )}
 
-      {/* ══════════════ SMART INFO PANEL — 5 tabs, slides from right ══════════════ */}
-      <div data-no-drag className="absolute top-0 right-0 bottom-0 z-30 hidden md:flex flex-col border-l border-border bg-card shadow-2xl"
-        style={{
-          width: 280,
-          transform: selected ? "translateX(0)" : "translateX(100%)",
-          transition: "transform 0.3s cubic-bezier(0.16,1,0.3,1)",
-        }}>
-        {selected && (
-          <>
-            {/* Photo header */}
-            <div className="relative h-28 shrink-0 overflow-hidden bg-muted">
-              {selected.image_url && <img src={selected.image_url} alt={selected.name} className="w-full h-full object-cover"/>}
-              <div className="absolute inset-0 bg-gradient-to-t from-black/70 to-transparent"/>
-              <button onClick={() => selectBuilding(null)}
-                className="absolute top-2.5 right-2.5 w-7 h-7 rounded-full bg-black/40 text-white flex items-center justify-center hover:bg-black/60 transition-colors">
-                <X className="h-3.5 w-3.5"/>
-              </button>
-              <div className="absolute bottom-3 left-3 right-10">
-                <div className="flex items-center gap-1.5 mb-0.5">
-                  <span className="bg-primary/90 text-primary-foreground text-[10px] font-mono font-extrabold px-2 py-0.5 rounded">{selected.code}</span>
-                  <span className={cn("flex items-center gap-1 text-[10px] font-bold", STATUS_COLOR[STATUS[selected.id] ?? "Open"])}>
-                    <span className={cn("w-1.5 h-1.5 rounded-full", STATUS_DOT[STATUS[selected.id] ?? "Open"])}/>
-                    {STATUS[selected.id] ?? "Open"}
-                  </span>
-                </div>
-                <h2 className="text-white font-extrabold text-sm leading-tight" style={{ fontFamily:"var(--font-sans)" }}>{selected.name}</h2>
-              </div>
-            </div>
-
-            {/* 2×2 action buttons */}
-            <div className="grid grid-cols-2 gap-1.5 px-3 py-2.5 border-b border-border shrink-0">
-              <button onClick={() => startDirectionsTo(selected)}
-                className="flex items-center justify-center gap-1.5 py-2 rounded-xl bg-primary text-primary-foreground text-[10px] font-extrabold hover:bg-primary/90 transition-colors">
-                <Navigation className="h-3.5 w-3.5"/> Directions
-              </button>
-              <button onClick={() => { try { navigator.clipboard?.writeText(selected.name + " — PLV NaviSync"); } catch {} }}
-                className="flex items-center justify-center gap-1.5 py-2 rounded-xl bg-muted text-muted-foreground text-[10px] font-extrabold border border-border hover:bg-secondary transition-colors">
-                <Share2 className="h-3.5 w-3.5"/> Share
-              </button>
-              {studentAuth ? (
-                <button onClick={() => toggleSave(selected.id)}
-                  className={cn("flex items-center justify-center gap-1.5 py-2 rounded-xl text-[10px] font-extrabold border transition-colors",
-                    saved.has(selected.id) ? "bg-accent/15 text-accent border-accent/30" : "bg-muted text-muted-foreground border-border hover:bg-secondary")}>
-                  <Bookmark className={cn("h-3.5 w-3.5", saved.has(selected.id) && "fill-current")}/>
-                  {saved.has(selected.id) ? "Saved" : "Save"}
-                </button>
-              ) : (
-                <button onClick={() => setSignInPrompt("save locations")}
-                  className="flex items-center justify-center gap-1.5 py-2 rounded-xl bg-muted/60 text-muted-foreground/50 text-[10px] font-semibold border border-dashed border-border/60">
-                  <Bookmark className="h-3.5 w-3.5"/> Save
-                </button>
-              )}
-              {studentAuth ? (
-                <button onClick={() => setReportModal(selected)}
-                  className="flex items-center justify-center gap-1.5 py-2 rounded-xl bg-muted text-muted-foreground text-[10px] font-extrabold border border-border hover:bg-destructive/10 hover:text-destructive transition-colors">
-                  <Flag className="h-3.5 w-3.5"/> Report
-                </button>
-              ) : (
-                <button onClick={() => setSignInPrompt("report issues")}
-                  className="flex items-center justify-center gap-1.5 py-2 rounded-xl bg-muted/60 text-muted-foreground/50 text-[10px] font-semibold border border-dashed border-border/60">
-                  <Flag className="h-3.5 w-3.5"/> Report
-                </button>
-              )}
-            </div>
-
-            {/* 5-tab navigation */}
-            <div className="flex border-b border-border shrink-0 overflow-x-auto no-scrollbar">
-              {(["overview","departments","facilities","accessibility","route"] as PanelTab[]).map(t => (
-                <button key={t} onClick={() => setPanelTab(t)}
-                  className={cn("flex-1 py-2 text-[10px] font-extrabold whitespace-nowrap px-1 transition-all border-b-2 shrink-0",
-                    panelTab === t ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground")}>
-                  {t === "overview" ? "Overview" : t === "departments" ? "Depts" : t === "facilities" ? "Facilities" : t === "accessibility" ? "Access." : "Route"}
-                  {t === "route" && route && <span className="inline-block w-1.5 h-1.5 rounded-full bg-accent ml-1 align-middle animate-pulse"/>}
-                </button>
-              ))}
-            </div>
-
-            {/* Tab content */}
-            <div className="flex-1 overflow-hidden">
-              {panelTab === "overview" && (
-                <div className="h-full overflow-y-auto p-4 space-y-3 scrollbar-show-on-hover">
-                  <div className="inline-flex items-center px-2 py-0.5 rounded-full bg-primary/10 border border-primary/15">
-                    <span className="text-[10px] font-bold text-primary capitalize">{selected.category}</span>
-                  </div>
-                  {selected.operating_hours && (
-                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                      <Clock className="h-3.5 w-3.5 text-primary shrink-0"/> {selected.operating_hours}
-                    </div>
-                  )}
-                  <p className="text-xs text-muted-foreground leading-relaxed" style={{ fontFamily:"var(--font-body)" }}>{selected.description}</p>
-                  {/* Floor plan button (only if has floor plan and not already in floor view of this building) */}
-                  {FLOOR_PLANS[selected.id] && (!isFloorMode || floorView?.building.id !== selected.id) && (
-                    <button onClick={() => openFloorPlan(selected, 1)}
-                      className="w-full flex items-center justify-between px-3 py-2.5 rounded-xl border border-primary/25 bg-primary/5 hover:bg-primary/10 transition-colors group">
-                      <div className="flex items-center gap-2">
-                        <Layers className="h-4 w-4 text-primary shrink-0"/>
-                        <div className="text-left">
-                          <p className="text-xs font-extrabold text-primary">View Floor Plan</p>
-                          <p className="text-[10px] text-muted-foreground">{FLOOR_PLANS[selected.id].floors.length} floors</p>
-                        </div>
-                      </div>
-                      <ChevronRight className="h-4 w-4 text-primary group-hover:translate-x-0.5 transition-transform"/>
-                    </button>
-                  )}
-                  {isFloorMode && floorView?.building.id === selected.id && (
-                    <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-primary/8 border border-primary/20">
-                      <Layers className="h-3.5 w-3.5 text-primary shrink-0"/>
-                      <span className="text-xs font-semibold text-primary">Viewing floor plan — use the floor selector →</span>
-                    </div>
-                  )}
-                  {/* QR */}
-                  <div>
-                    <button onClick={() => setShowQR(v => !v)}
-                      className="flex items-center gap-2 text-[10px] font-extrabold text-muted-foreground uppercase tracking-widest hover:text-primary transition-colors w-full">
-                      <QrCode className="h-3.5 w-3.5"/> QR Code
-                      <ChevronRight className={cn("h-3.5 w-3.5 ml-auto transition-transform", showQR && "rotate-90")}/>
-                    </button>
-                    {showQR && (
-                      <div className="mt-3 flex flex-col items-center gap-2 p-4 rounded-xl bg-muted border border-border animate-scale-in">
-                        <div className="text-foreground"><QRPlaceholder/></div>
-                        <p className="text-[10px] text-muted-foreground text-center">Scan to view {selected.name} on mobile</p>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-              {panelTab === "departments" && (
-                <div className="h-full overflow-y-auto p-4 scrollbar-show-on-hover">
-                  {selected.departments?.length ? (
-                    <div className="space-y-0">
-                      <p className="text-[10px] font-extrabold text-muted-foreground uppercase tracking-widest mb-3">Departments</p>
-                      {selected.departments.map(d => (
-                        <div key={d} className="flex items-center gap-2 py-2 border-b border-border last:border-0 text-xs text-foreground">
-                          <Building2 className="h-3.5 w-3.5 text-primary shrink-0"/> {d}
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-sm text-muted-foreground text-center pt-8">No departments listed.</p>
-                  )}
-                </div>
-              )}
-              {panelTab === "facilities" && (
-                <div className="h-full overflow-y-auto p-4 scrollbar-show-on-hover">
-                  <p className="text-[10px] font-extrabold text-muted-foreground uppercase tracking-widest mb-3">Facilities</p>
-                  {BUILDING_FACILITIES[selected.id] ? (
-                    <div className="flex flex-wrap gap-1.5">
-                      {BUILDING_FACILITIES[selected.id].map(f => (
-                        <span key={f} className="text-[11px] font-semibold px-2.5 py-1 rounded-full bg-muted border border-border text-muted-foreground">{f}</span>
-                      ))}
-                    </div>
-                  ) : <p className="text-sm text-muted-foreground">No facilities data.</p>}
-                </div>
-              )}
-              {panelTab === "accessibility" && (
-                <div className="h-full overflow-y-auto p-4 scrollbar-show-on-hover">
-                  <p className="text-[10px] font-extrabold text-muted-foreground uppercase tracking-widest mb-3">Accessibility Features</p>
-                  {BUILDING_ACCESSIBILITY[selected.id] ? (
-                    <div className="space-y-2">
-                      {BUILDING_ACCESSIBILITY[selected.id].map(a => (
-                        <div key={a} className="flex items-center gap-2.5 px-3 py-2 rounded-xl bg-green-50 dark:bg-green-900/10 border border-green-200 dark:border-green-800/30 text-xs text-foreground">
-                          <span className="text-green-500 text-sm">♿</span> {a}
-                        </div>
-                      ))}
-                    </div>
-                  ) : <p className="text-sm text-muted-foreground">No accessibility data.</p>}
-                </div>
-              )}
-              {panelTab === "route" && (
-                <div className="h-full flex flex-col items-center justify-center gap-3 px-5 py-6 text-center">
-                  <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center">
-                    <Navigation className="h-6 w-6 text-primary"/>
-                  </div>
-                  <p className="text-sm font-bold text-foreground">Get Directions</p>
-                  <p className="text-xs text-muted-foreground leading-relaxed">Use the Directions panel to plan a route to or from this building.</p>
-                  <button onClick={() => startDirectionsTo(selected)}
-                    className="h-9 px-5 rounded-xl bg-primary text-primary-foreground text-xs font-bold hover:bg-primary/90 transition-colors flex items-center gap-2">
-                    <Navigation className="h-3.5 w-3.5"/> Directions to here
-                  </button>
-                </div>
-              )}
-            </div>
-          </>
-        )}
-      </div>
-
       {/* ══════════════ STAIR LOADING OVERLAY ══════════════ */}
       {stairLoading && (
         <div className="absolute inset-0 z-50 flex items-center justify-center bg-background/85 backdrop-blur-sm animate-fade-in">
-          <div className="flex flex-col items-center gap-3">
-            <div className="text-3xl animate-bounce">{stairLoading.dir === "up" ? "↑" : "↓"}</div>
-            <p className="text-sm font-extrabold text-foreground">{stairLoading.dir === "up" ? "Going up to" : "Going down to"}</p>
-            <p className="text-xs text-muted-foreground">{stairLoading.label}</p>
-            <div className="flex gap-1.5">
+          <div className="bg-card border border-border rounded-2xl shadow-2xl px-8 py-7 flex flex-col items-center gap-3 animate-scale-in"
+            style={{ transformOrigin: "center" }}>
+            {/* Direction indicator */}
+            <div className={cn(
+              "w-14 h-14 rounded-2xl flex items-center justify-center text-2xl font-bold shadow-lg",
+              stairLoading.dir === "up" ? "bg-blue-100 dark:bg-blue-900/30 text-blue-600" : "bg-orange-100 dark:bg-orange-900/30 text-orange-600"
+            )}>
+              {stairLoading.dir === "up" ? "↑" : "↓"}
+            </div>
+            <div className="text-center">
+              <p className="text-sm font-extrabold text-foreground">
+                {stairLoading.dir === "up" ? "Going up to" : "Going down to"}
+              </p>
+              <p className="text-xs text-muted-foreground mt-0.5">{stairLoading.label}</p>
+            </div>
+            <div className="flex gap-1.5 mt-1">
               {[0,1,2].map(i => (
-                <div key={i} className="w-1.5 h-1.5 rounded-full bg-primary"
-                  style={{ animation:`loading-bounce 1s ease-in-out ${i*0.2}s infinite` }}/>
+                <div key={i} className="w-2 h-2 rounded-full"
+                  style={{
+                    background: stairLoading.dir === "up" ? "var(--map-route)" : "#f97316",
+                    animation: `loading-bounce 1s ease-in-out ${i*0.2}s infinite`
+                  }}/>
               ))}
+            </div>
+            <p className="text-[10px] text-muted-foreground">Changing floor…</p>
+          </div>
+        </div>
+      )}
+
+      {/* ══════════════ INDOOR ROUTE DIRECTIONS PANEL ══════════════ */}
+      {indoorRoute && isFloorMode && !stairLoading && (
+        <div className="absolute top-16 left-1/2 -translate-x-1/2 z-20 animate-slide-up">
+          <div className="rounded-2xl border border-border/60 shadow-xl overflow-hidden"
+            style={{ background:"var(--card)", backdropFilter:"blur(16px)", WebkitBackdropFilter:"blur(16px)", width:280, maxWidth:"calc(100vw - 40px)" }}>
+            <div className="flex items-center gap-2 px-3 py-2" style={{ background:"linear-gradient(135deg, var(--primary), var(--map-route))" }}>
+              <Footprints className="h-3.5 w-3.5 text-white shrink-0"/>
+              <span className="text-[11px] font-extrabold text-white truncate flex-1">Route to {currentFloor?.rooms.find(r => r.id === activeRouteRoom)?.name ?? "room"}</span>
+              <span className="w-1.5 h-1.5 rounded-full bg-green-300 animate-pulse shrink-0"/>
+            </div>
+            <div className="flex gap-2 px-3 pt-2.5 pb-2 border-b border-border">
+              <div className="flex-1 px-2 py-1.5 rounded-lg bg-primary/8 text-center">
+                <p className="text-[9px] text-muted-foreground font-semibold uppercase tracking-wider">Distance</p>
+                <p className="text-sm font-extrabold text-foreground">{indoorRoute.distanceMeters} m</p>
+              </div>
+              <div className="flex-1 px-2 py-1.5 rounded-lg bg-primary/8 text-center">
+                <p className="text-[9px] text-muted-foreground font-semibold uppercase tracking-wider">Est. Time</p>
+                <p className="text-sm font-extrabold text-foreground">{indoorRoute.estimatedSeconds < 60 ? `${indoorRoute.estimatedSeconds}s` : `${Math.round(indoorRoute.estimatedSeconds / 60)} min`}</p>
+              </div>
+            </div>
+            <div className="px-3 py-2 max-h-36 overflow-y-auto scrollbar-show-on-hover">
+              <div className="relative pl-4 border-l-2 border-primary/30 space-y-2">
+                {indoorRoute.steps.map((step, i) => (
+                  <div key={i} className="relative flex items-start gap-2">
+                    <div className={cn(
+                      "absolute -left-[11px] w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0",
+                      i === 0 ? "bg-green-500 border-green-500" :
+                      i === indoorRoute.steps.length - 1 ? "bg-primary border-primary" :
+                      "bg-card border-primary/50"
+                    )}>
+                    </div>
+                    <p className="text-[10px] leading-snug pt-0.5 text-foreground ml-1" style={{ fontFamily:"var(--font-body)" }}>{step}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="px-3 pb-2.5">
+              <button onClick={clearIndoorRoute}
+                className="w-full h-7 rounded-lg border border-destructive/30 text-destructive text-[10px] font-bold hover:bg-destructive/10 transition-colors">
+                Clear Route
+              </button>
             </div>
           </div>
         </div>
@@ -1349,32 +1675,37 @@ export function CampusMapPage() {
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-border shadow-sm hover:shadow-md transition-all"
               style={{ background:"var(--card)", color:"var(--foreground)", fontSize:"11px", fontFamily:"var(--font-body)" }}>
               <MapPin className="h-3 w-3 shrink-0" style={{ color:"var(--primary)" }}/>
-              <span className="font-semibold">PLV Main Campus</span>
+              <span className="font-semibold">{activeCampus?.name ?? 'Select Campus'}</span>
               <ChevronDown className="h-3 w-3 shrink-0" style={{ color:"var(--muted-foreground)", transform: showCampusSelector ? "rotate(180deg)" : "none", transition:"transform 0.2s" }}/>
             </button>
-            {showCampusSelector && (
+            {showCampusSelector && availableCampuses.length > 0 && (
               <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 rounded-2xl border border-border shadow-2xl overflow-hidden animate-scale-in"
                 style={{ background:"var(--card)", width:220 }}>
                 <div className="px-4 py-2.5 border-b border-border">
                   <p className="text-[10px] font-extrabold uppercase tracking-widest" style={{ color:"var(--muted-foreground)", fontFamily:"var(--font-body)" }}>Select Campus</p>
                 </div>
-                {/* Active campus */}
-                <button className="w-full flex items-center gap-3 px-4 py-3 text-left border-l-2" style={{ borderColor:"var(--primary)", background:"color-mix(in srgb, var(--primary) 8%, transparent)" }}>
-                  <div className="w-2 h-2 rounded-full shrink-0" style={{ background:"var(--primary)" }}/>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs font-bold" style={{ color:"var(--primary)", fontFamily:"var(--font-sans)" }}>PLV Main Campus</p>
-                    <p className="text-[10px]" style={{ color:"var(--muted-foreground)", fontFamily:"var(--font-body)" }}>Tongco St., Valenzuela</p>
-                  </div>
-                  <span className="text-[10px] font-extrabold shrink-0" style={{ color:"var(--primary)" }}>Active</span>
-                </button>
-                {/* Future campus */}
-                <div className="flex items-center gap-3 px-4 py-3 opacity-45 cursor-not-allowed">
-                  <div className="w-2 h-2 rounded-full shrink-0" style={{ background:"var(--muted-foreground)" }}/>
-                  <div>
-                    <p className="text-xs font-bold" style={{ color:"var(--foreground)", fontFamily:"var(--font-sans)" }}>PLV North Campus</p>
-                    <p className="text-[10px]" style={{ color:"var(--muted-foreground)", fontFamily:"var(--font-body)" }}>Coming soon</p>
-                  </div>
-                </div>
+                {availableCampuses.map(campus => {
+                  const isActive = campus.id === activeCampus?.id;
+                  return (
+                    <button
+                      key={campus.id}
+                      onClick={() => { setSelectedCampusId(campus.id); setShowCampusSelector(false); }}
+                      className="w-full flex items-center gap-3 px-4 py-3 text-left transition-all hover:bg-muted/50"
+                      style={{
+                        borderLeft: isActive ? '2px solid var(--primary)' : '2px solid transparent',
+                        background: isActive ? 'color-mix(in srgb, var(--primary) 8%, transparent)' : 'transparent',
+                      }}>
+                      <div className="w-2 h-2 rounded-full shrink-0" style={{ background: isActive ? 'var(--primary)' : 'var(--muted-foreground)' }}/>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-bold" style={{ color: isActive ? 'var(--primary)' : 'var(--foreground)', fontFamily:"var(--font-sans)" }}>{campus.name}</p>
+                        {campus.code && <p className="text-[10px]" style={{ color:"var(--muted-foreground)", fontFamily:"var(--font-body)" }}>{campus.code}</p>}
+                      </div>
+                      {isActive && (
+                        <span className="text-[10px] font-extrabold shrink-0" style={{ color:"var(--primary)" }}>Active</span>
+                      )}
+                    </button>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -1429,65 +1760,20 @@ export function CampusMapPage() {
         </div>
       )}
 
-      {/* ══════════════ MOBILE: building bottom sheet ══════════════ */}
+      {/* ══════════════ MOBILE BUILDING SHEET ══════════════ */}
       {selected && !isFloorMode && (
-        <div data-no-drag
-          className="md:hidden fixed inset-x-0 z-40 bg-card/96 backdrop-blur-2xl rounded-t-3xl border-t border-border shadow-2xl animate-slide-up overflow-hidden flex flex-col"
-          style={{ bottom:"72px", maxHeight:"55vh" }}>
-          <div className="flex justify-center pt-3 shrink-0"><div className="w-10 h-1 rounded-full bg-muted-foreground/25"/></div>
-          <div className="flex items-start justify-between px-4 pt-2 pb-2 shrink-0">
-            <div>
-              <div className="flex items-center gap-1.5 mb-0.5">
-                <span className="bg-primary/90 text-primary-foreground text-[10px] font-mono font-extrabold px-1.5 py-0.5 rounded">{selected.code}</span>
-                <span className={cn("text-[10px] font-bold flex items-center gap-1", STATUS_COLOR[STATUS[selected.id] ?? "Open"])}>
-                  <span className={cn("w-1.5 h-1.5 rounded-full", STATUS_DOT[STATUS[selected.id] ?? "Open"])}/>
-                  {STATUS[selected.id] ?? "Open"}
-                </span>
-              </div>
-              <h3 className="font-extrabold text-foreground text-base leading-tight" style={{ fontFamily:"var(--font-sans)" }}>{selected.name}</h3>
-            </div>
-            <button onClick={() => selectBuilding(null)} className="w-8 h-8 rounded-full bg-muted flex items-center justify-center shrink-0 ml-2"><X className="h-4 w-4 text-muted-foreground"/></button>
-          </div>
-          <div className="grid grid-cols-4 gap-2 px-4 pb-3 border-b border-border shrink-0">
-            <button onClick={() => startDirectionsTo(selected)}
-              className="flex flex-col items-center gap-1.5 py-3 rounded-2xl bg-primary text-primary-foreground text-[10px] font-extrabold">
-              <Navigation className="h-4 w-4"/> Dir.
-            </button>
-            {FLOOR_PLANS[selected.id] && (
-              <button onClick={() => openFloorPlan(selected)}
-                className="flex flex-col items-center gap-1.5 py-3 rounded-2xl bg-muted text-muted-foreground text-[10px] font-extrabold border border-border">
-                <Layers className="h-4 w-4"/> Floors
-              </button>
-            )}
-            {studentAuth ? (
-              <button onClick={() => toggleSave(selected.id)}
-                className={cn("flex flex-col items-center gap-1.5 py-3 rounded-2xl text-[10px] font-extrabold border",
-                  saved.has(selected.id) ? "bg-accent/15 text-accent border-accent/30" : "bg-muted text-muted-foreground border-border")}>
-                <Bookmark className={cn("h-4 w-4", saved.has(selected.id) && "fill-current")}/>
-                {saved.has(selected.id) ? "Saved" : "Save"}
-              </button>
-            ) : (
-              <button onClick={() => setSignInPrompt("save locations")}
-                className="flex flex-col items-center gap-1.5 py-3 rounded-2xl bg-muted/60 text-muted-foreground/50 text-[10px] font-semibold border border-dashed border-border/60">
-                <Bookmark className="h-4 w-4"/> Save
-              </button>
-            )}
-            {studentAuth ? (
-              <button onClick={() => setReportModal(selected)}
-                className="flex flex-col items-center gap-1.5 py-3 rounded-2xl bg-muted text-muted-foreground text-[10px] font-extrabold border border-border">
-                <Flag className="h-4 w-4"/> Report
-              </button>
-            ) : (
-              <button onClick={() => setSignInPrompt("report issues")}
-                className="flex flex-col items-center gap-1.5 py-3 rounded-2xl bg-muted/60 text-muted-foreground/50 text-[10px] font-semibold border border-dashed border-border/60">
-                <Flag className="h-4 w-4"/> Report
-              </button>
-            )}
-          </div>
-          <div className="overflow-y-auto flex-1 p-4 scrollbar-show-on-hover">
-            <p className="text-sm text-muted-foreground leading-relaxed" style={{ fontFamily:"var(--font-body)" }}>{selected.description}</p>
-          </div>
-        </div>
+        <MobileBuildingSheet
+          selected={selected}
+          onClose={() => selectBuilding(null)}
+          onDirections={startDirectionsTo}
+          onFloorPlan={(b) => openFloorPlan(b)}
+          onSave={toggleSave}
+          onReport={setReportModal}
+          onSignInPrompt={setSignInPrompt}
+          saved={saved}
+          studentAuth={studentAuth}
+          hasFloorPlans={Boolean(FLOOR_PLANS[selected.id])}
+        />
       )}
 
       {/* ══════════════ STAIR UP/DOWN CHOICE ══════════════ */}
@@ -1547,12 +1833,29 @@ export function CampusMapPage() {
             </button>
           </div>
         </div>
-      )}
-
-      {/* ══════════════ MODALS ══════════════ */}
+      )}      {/* ══════════════ MODALS ══════════════ */}
       {reportModal   && <ReportModal building={reportModal} onClose={() => setReportModal(null)}/>}
-      {selectedEvent && <EventPopup event={selectedEvent} onClose={() => setSelectedEvent(null)} onNavigate={() => { const t = MOCK_BUILDINGS.find(b => b.id === "b5"); if (t) { selectBuilding(t); startDirectionsTo(t); } setSelectedEvent(null); }}/>}
       {signInPrompt  && <SignInPrompt message={signInPrompt} onClose={() => setSignInPrompt(null)}/>}
+
+      {/* Campus switching loading overlay */}
+      {campusTransitioning && (
+        <div className="absolute inset-0 z-30 flex items-center justify-center bg-background/60 backdrop-blur-sm" style={{ animation:"fadeIn 0.15s ease-out both" }}>
+          <div className="flex flex-col items-center gap-3 px-6 py-5 rounded-2xl bg-card/90 backdrop-blur-xl shadow-xl border border-border/50" style={{ animation:"scaleIn 0.25s cubic-bezier(0.16,1,0.3,1) both" }}>
+            <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
+              <svg className="animate-spin h-5 w-5 text-primary" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+              </svg>
+            </div>
+            <p className="text-sm font-bold text-foreground">Loading campus…</p>
+            <div className="flex gap-1">
+              {[0,1,2].map(i => (
+                <div key={i} className="w-1.5 h-1.5 rounded-full bg-primary/60" style={{ animation:`loading-bounce 0.8s ease-in-out ${i * 0.18}s infinite` }} />
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

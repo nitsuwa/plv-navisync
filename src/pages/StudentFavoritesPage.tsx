@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
-import { Building2, Navigation, X, MapPin, Search, Bookmark, Heart, ChevronRight, Trash2 } from "lucide-react";
+import { Building2, Navigation, MapPin, Search, Bookmark, Trash2, Sparkles } from "lucide-react";
+import { SearchBar } from "../components/ui/SearchBar";
 import { motion, AnimatePresence } from "motion/react";
 import { MOCK_BUILDINGS } from "../data/mockData";
 import { Link, useNavigate } from "react-router";
@@ -7,26 +8,72 @@ import { useStudentAuth } from "../hooks/useStudentAuth";
 import { StudentPageHeader } from "../components/ui/StudentPageHeader";
 import { PageTransition } from "../components/ui/PageTransition";
 import { EmptyState } from "../components/ui/EmptyState";
+import { SkeletonList } from "../components/ui/Skeleton";
+import { useScrollReveal } from "../hooks/useScrollReveal";
 import { cn } from "../lib/utils";
+
+// ═════════════════════════════════════════════════════════════════════════════
+// ── Scroll-reveal wrapper ───────────────────────────────────────────────────
+// ═════════════════════════════════════════════════════════════════════════════
+
+function Reveal({ children, className, delay = 0 }: {
+  children: React.ReactNode; className?: string; delay?: number;
+}) {
+  const { ref, visible } = useScrollReveal<HTMLDivElement>();
+  return (
+    <div ref={ref} className={className} style={{
+      opacity:    visible ? 1 : 0,
+      transform:  visible ? "translateY(0)" : "translateY(24px)",
+      transition: visible
+        ? `opacity 0.6s cubic-bezier(0.16,1,0.3,1) ${delay}ms, transform 0.6s cubic-bezier(0.16,1,0.3,1) ${delay}ms`
+        : "opacity 0.3s ease, transform 0.3s ease",
+    }}>
+      {children}
+    </div>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// ── Section label ───────────────────────────────────────────────────────────
+// ═════════════════════════════════════════════════════════════════════════════
+
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full border border-primary/20 bg-primary/5 text-primary text-[10px] font-extrabold uppercase tracking-widest mb-4">
+      <Sparkles className="h-3 w-3" />
+      {children}
+    </div>
+  );
+}
 
 const INITIAL_SAVED = ["b2", "b3", "b5"];
 
 export function StudentFavoritesPage() {
   const studentAuth = useStudentAuth();
   const navigate = useNavigate();
-
-  useEffect(() => {
-    window.scrollTo({ top: 0, behavior: "instant" });
-  }, []);
-
+  const [loading, setLoading] = useState(true);
   const [savedIds, setSavedIds] = useState<string[]>(INITIAL_SAVED);
   const [search, setSearch] = useState("");
   const [removingId, setRemovingId] = useState<string | null>(null);
+
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: "instant" });
+    const t = setTimeout(() => setLoading(false), 300);
+    return () => clearTimeout(t);
+  }, []);
 
   if (!studentAuth) {
     navigate("/admin");
     return null;
   }
+
+  if (loading) return (
+    <PageTransition>
+      <div className="max-w-2xl mx-auto px-5 py-6">
+        <SkeletonList count={4} />
+      </div>
+    </PageTransition>
+  );
 
   const savedBuildings = MOCK_BUILDINGS.filter(b => savedIds.includes(b.id));
   const filtered = search.trim()
@@ -56,24 +103,22 @@ export function StudentFavoritesPage() {
 
         <div className="max-w-2xl mx-auto px-5 py-6 space-y-4">
           {savedBuildings.length > 0 && (
-            <motion.div
-              initial={{ opacity: 0, y: -10 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="relative group"
-            >
-              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none transition-colors group-focus-within:text-primary" />
-              <input
-                value={search}
-                onChange={e => setSearch(e.target.value)}
-                placeholder="Search saved locations…"
-                className="w-full pl-10 pr-4 py-3 rounded-2xl border border-border text-sm focus:outline-none focus:ring-2 focus:ring-primary/25 transition-all bg-input-background"
-              />
-              {search && (
-                <button onClick={() => setSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
-                  <X className="h-4 w-4" />
-                </button>
-              )}
-            </motion.div>
+            <Reveal>
+              <div className="space-y-4">
+                {/* Section badge */}
+                <SectionLabel>Saved Places</SectionLabel>
+
+                <div className="max-w-sm">
+                  <SearchBar
+                    placeholder="Search saved locations…"
+                    value={search}
+                    onSearch={setSearch}
+                    onClear={() => setSearch("")}
+                    size="md"
+                  />
+                </div>
+              </div>
+            </Reveal>
           )}
 
           {filtered.length === 0 && savedBuildings.length === 0 ? (
@@ -92,67 +137,73 @@ export function StudentFavoritesPage() {
               }
             />
           ) : filtered.length === 0 ? (
-            <div className="text-center py-16 text-sm text-muted-foreground">
-              <p>No results for &ldquo;{search}&rdquo;</p>
-              <button onClick={() => setSearch("")} className="text-primary font-bold hover:underline mt-2">
-                Clear search
-              </button>
-            </div>
+            <Reveal>
+              <div className="flex flex-col items-center justify-center py-16 text-center">
+                <div className="w-14 h-14 rounded-2xl bg-muted flex items-center justify-center mb-4">
+                  <Search className="h-6 w-6 text-muted-foreground" />
+                </div>
+                <p className="text-sm font-bold text-foreground mb-1">No results for &ldquo;{search}&rdquo;</p>
+                <button onClick={() => setSearch("")} className="text-xs font-bold text-primary hover:underline mt-1">
+                  Clear search
+                </button>
+              </div>
+            </Reveal>
           ) : (
             <AnimatePresence>
               <div className="space-y-2.5">
-                {filtered.map(b => (
-                  <motion.div
-                    key={b.id}
-                    layout
-                    initial={{ opacity: 0, y: 16 }}
-                    animate={{
-                      opacity: removingId === b.id ? 0 : 1,
-                      y: removingId === b.id ? -10 : 0,
-                      scale: removingId === b.id ? 0.95 : 1,
-                    }}
-                    exit={{ opacity: 0, x: 100 }}
-                    transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
-                    className="surface-card surface-card-interactive flex items-center gap-4 px-4 py-4 rounded-2xl"
-                  >
-                    {b.image_url ? (
-                      <img src={b.image_url} alt="" className="w-14 h-14 rounded-xl object-cover shrink-0 ring-1 ring-border" />
-                    ) : (
-                      <div className="w-14 h-14 rounded-xl flex items-center justify-center shrink-0 bg-primary/10">
-                        <Building2 className="h-7 w-7 text-primary" />
-                      </div>
-                    )}
-
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-bold text-foreground truncate">{b.name}</p>
-                      <p className="text-xs text-muted-foreground mt-0.5 font-mono">{b.code}</p>
-                      {b.operating_hours && (
-                        <p className="text-[11px] text-muted-foreground mt-1">{b.operating_hours}</p>
+                {filtered.map((b, i) => (
+                  <Reveal key={b.id} delay={i * 30}>
+                    <motion.div
+                      layout
+                      initial={{ opacity: 0, y: 16 }}
+                      animate={{
+                        opacity: removingId === b.id ? 0 : 1,
+                        y: removingId === b.id ? -10 : 0,
+                        scale: removingId === b.id ? 0.95 : 1,
+                      }}
+                      exit={{ opacity: 0, x: 100 }}
+                      transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+                      className="group flex items-center gap-4 px-4 py-4 rounded-2xl border border-border/60 bg-card/50 hover:bg-card hover:border-primary/15 hover:shadow-sm transition-all duration-200"
+                    >
+                      {b.image_url ? (
+                        <img src={b.image_url} alt="" className="w-14 h-14 rounded-xl object-cover shrink-0 ring-1 ring-border" />
+                      ) : (
+                        <div className="w-14 h-14 rounded-xl flex items-center justify-center shrink-0 bg-primary/10 group-hover:scale-105 transition-transform">
+                          <Building2 className="h-7 w-7 text-primary" />
+                        </div>
                       )}
-                    </div>
 
-                    <div className="flex items-center gap-2 shrink-0">
-                      <Link
-                        to="/map"
-                        className="flex items-center gap-1.5 h-9 px-3.5 rounded-xl border border-border text-xs font-bold hover:bg-primary hover:text-primary-foreground hover:border-primary transition-all"
-                      >
-                        <Navigation className="h-3.5 w-3.5" />
-                        <span className="hidden sm:inline text-[10px]">Navigate</span>
-                      </Link>
-                      <button
-                        onClick={() => remove(b.id)}
-                        className="flex items-center justify-center h-9 w-9 rounded-xl border border-border text-muted-foreground hover:bg-destructive/10 hover:text-destructive hover:border-destructive/30 transition-all"
-                        title="Remove from favorites"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
-                  </motion.div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-bold text-foreground truncate">{b.name}</p>
+                        <p className="text-xs text-muted-foreground mt-0.5 font-mono">{b.code}</p>
+                        {b.operating_hours && (
+                          <p className="text-[11px] text-muted-foreground mt-1">{b.operating_hours}</p>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-2 shrink-0">
+                        <Link
+                          to="/map"
+                          className="flex items-center gap-1.5 h-9 px-3.5 rounded-xl border border-border text-xs font-bold hover:bg-primary hover:text-primary-foreground hover:border-primary transition-all"
+                        >
+                          <Navigation className="h-3.5 w-3.5" />
+                          <span className="hidden sm:inline text-[10px]">Navigate</span>
+                        </Link>
+                        <button
+                          onClick={() => remove(b.id)}
+                          className="flex items-center justify-center h-9 w-9 rounded-xl border border-border text-muted-foreground hover:bg-destructive/10 hover:text-destructive hover:border-destructive/30 transition-all"
+                          title="Remove from favorites"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    </motion.div>
+                  </Reveal>
                 ))}
 
                 <Link
                   to="/map"
-                  className="flex items-center justify-center gap-2 py-4 rounded-2xl border-2 border-dashed text-xs font-semibold transition-all hover:border-primary/30 hover:text-primary hover:bg-primary/5 text-muted-foreground mt-2"
+                  className="flex items-center justify-center gap-2 py-4 rounded-2xl border-2 border-dashed border-border text-xs font-semibold transition-all hover:border-primary/30 hover:text-primary hover:bg-primary/5 text-muted-foreground mt-2"
                 >
                   <MapPin className="h-3.5 w-3.5" />
                   Browse map to add more
@@ -161,7 +212,7 @@ export function StudentFavoritesPage() {
             </AnimatePresence>
           )}
         </div>
-        {/* Safe area spacer for bottom nav */}
+        {/* Safe area spacer */}
         <div className="h-6 md:hidden" />
       </div>
     </PageTransition>

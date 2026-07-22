@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import {
   Moon, Sun, Lock, Bell, LogOut, ChevronDown, Shield, MapPin, HelpCircle,
-  Smartphone, Globe, Eye, EyeOff, CheckCircle2, ChevronRight,
+  Smartphone, Globe, CheckCircle2, ChevronRight, Sparkles,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { Link, useNavigate } from "react-router";
@@ -9,7 +9,43 @@ import { useStudentAuth } from "../hooks/useStudentAuth";
 import { useTheme } from "../hooks/useTheme";
 import { StudentPageHeader } from "../components/ui/StudentPageHeader";
 import { PageTransition } from "../components/ui/PageTransition";
+import { Skeleton } from "../components/ui/Skeleton";
+import { useScrollReveal } from "../hooks/useScrollReveal";
 import { cn } from "../lib/utils";
+
+// ═════════════════════════════════════════════════════════════════════════════
+// ── Scroll-reveal wrapper ───────────────────────────────────────────────────
+// ═════════════════════════════════════════════════════════════════════════════
+
+function Reveal({ children, className, delay = 0 }: {
+  children: React.ReactNode; className?: string; delay?: number;
+}) {
+  const { ref, visible } = useScrollReveal<HTMLDivElement>();
+  return (
+    <div ref={ref} className={className} style={{
+      opacity:    visible ? 1 : 0,
+      transform:  visible ? "translateY(0)" : "translateY(24px)",
+      transition: visible
+        ? `opacity 0.6s cubic-bezier(0.16,1,0.3,1) ${delay}ms, transform 0.6s cubic-bezier(0.16,1,0.3,1) ${delay}ms`
+        : "opacity 0.3s ease, transform 0.3s ease",
+    }}>
+      {children}
+    </div>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// ── Section label ───────────────────────────────────────────────────────────
+// ═════════════════════════════════════════════════════════════════════════════
+
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full border border-primary/20 bg-primary/5 text-primary text-[10px] font-extrabold uppercase tracking-widest mb-4">
+      <Sparkles className="h-3 w-3" />
+      {children}
+    </div>
+  );
+}
 
 type SettingsSection = "appearance" | "notifications" | "security" | "support";
 
@@ -17,6 +53,7 @@ export function StudentSettingsPage() {
   const studentAuth = useStudentAuth();
   const navigate = useNavigate();
   const { theme, toggleTheme } = useTheme();
+  const [loading, setLoading] = useState(true);
   const [activeSection, setActiveSection] = useState<SettingsSection>("appearance");
 
   const [notifMap, setNotifMap] = useState(true);
@@ -28,6 +65,8 @@ export function StudentSettingsPage() {
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: "instant" });
+    const timer = setTimeout(() => setLoading(false), 500);
+    return () => clearTimeout(timer);
   }, []);
 
   const handleLogout = () => {
@@ -38,6 +77,32 @@ export function StudentSettingsPage() {
   if (!studentAuth) {
     navigate("/admin");
     return null;
+  }
+
+  // ── Loading skeleton (only after auth is confirmed) ──
+  if (loading) {
+    return (
+      <PageTransition>
+        <div className="min-h-screen">
+          <div className="max-w-2xl mx-auto px-5 py-6 space-y-6">
+            {/* Header skeleton */}
+            <div className="flex items-center gap-4 mb-6">
+              <Skeleton variant="avatar" className="h-12 w-12" />
+              <div className="space-y-2 flex-1">
+                <Skeleton className="h-6 w-32" />
+                <Skeleton className="h-4 w-56" />
+              </div>
+            </div>
+            {/* Tabs skeleton */}
+            <Skeleton className="h-12 w-full rounded-2xl" />
+            {/* Content cards */}
+            {Array.from({ length: 2 }).map((_, i) => (
+              <Skeleton key={i} className="h-48 w-full rounded-2xl" />
+            ))}
+          </div>
+        </div>
+      </PageTransition>
+    );
   }
 
   const handlePwSave = () => {
@@ -62,7 +127,7 @@ export function StudentSettingsPage() {
         onClick={onToggle}
         aria-pressed={on}
         className={cn(
-          "relative w-12 h-7 rounded-full transition-colors shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
+          "relative w-12 h-7 rounded-full transition-colors shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
           on ? "bg-primary" : "bg-muted-foreground/25"
         )}
         whileTap={{ scale: 0.95 }}
@@ -80,7 +145,7 @@ export function StudentSettingsPage() {
     icon: React.ElementType; label: string; desc?: string; action: React.ReactNode;
   }) {
     return (
-      <div className="flex items-center justify-between gap-4 px-5 py-4 border-b border-border last:border-0 hover:bg-muted/30 transition-colors">
+      <div className="flex items-center justify-between gap-4 px-5 py-4 border-b border-border/50 last:border-0 hover:bg-muted/20 transition-colors">
         <div className="flex items-center gap-3 min-w-0">
           <Icon className="h-4 w-4 text-muted-foreground shrink-0" />
           <div className="min-w-0">
@@ -105,7 +170,7 @@ export function StudentSettingsPage() {
           iconColor="#7c3aed"
         >
           {/* Section tabs */}
-          <div className="flex gap-1 p-1 rounded-2xl bg-muted/60 border border-border">
+          <div className="flex gap-1 p-1 rounded-2xl bg-muted/30 border border-border/60">
             {SECTIONS.map(({ key, label, icon: SecIcon }) => (
               <button
                 key={key}
@@ -113,7 +178,7 @@ export function StudentSettingsPage() {
                 className={cn(
                   "flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex-1 justify-center",
                   activeSection === key
-                    ? "bg-card text-primary shadow-sm border border-border"
+                    ? "bg-card text-primary shadow-sm border border-border/80"
                     : "text-muted-foreground hover:text-foreground"
                 )}
               >
@@ -134,165 +199,173 @@ export function StudentSettingsPage() {
               transition={{ duration: 0.2 }}
             >
               {activeSection === "appearance" && (
-                <div>
-                  <p className="text-xs font-extrabold uppercase tracking-widest text-muted-foreground mb-3">Appearance</p>
-                  <div className="surface-card rounded-2xl overflow-hidden">
-                    <div className="px-5 py-4">
-                      <div className="flex items-center justify-between gap-4">
-                        <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-muted border border-border">
-                            {theme === "dark"
-                              ? <Moon className="h-4 w-4 text-muted-foreground" />
-                              : <Sun className="h-4 w-4 text-muted-foreground" />}
+                <Reveal>
+                  <div>
+                    <SectionLabel>Appearance</SectionLabel>
+                    <div className="rounded-2xl border border-border/60 bg-card shadow-sm overflow-hidden">
+                      <div className="px-5 py-4">
+                        <div className="flex items-center justify-between gap-4">
+                          <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-muted border border-border/60">
+                              {theme === "dark"
+                                ? <Moon className="h-4 w-4 text-muted-foreground" />
+                                : <Sun className="h-4 w-4 text-muted-foreground" />}
+                            </div>
+                            <div>
+                              <p className="text-sm font-semibold text-foreground">
+                                {theme === "dark" ? "Dark Mode" : "Light Mode"}
+                              </p>
+                              <p className="text-xs text-muted-foreground">Switch appearance theme</p>
+                            </div>
                           </div>
-                          <div>
-                            <p className="text-sm font-semibold text-foreground">
-                              {theme === "dark" ? "Dark Mode" : "Light Mode"}
-                            </p>
-                            <p className="text-xs text-muted-foreground">Switch appearance theme</p>
-                          </div>
+                          <Toggle on={theme === "dark"} onToggle={toggleTheme} />
                         </div>
-                        <Toggle on={theme === "dark"} onToggle={toggleTheme} />
+                      </div>
+                      <div className="px-5 py-3 border-t border-border/50 bg-muted/20 flex items-center gap-3">
+                        <Globe className="h-4 w-4 text-muted-foreground shrink-0" />
+                        <span className="text-xs text-muted-foreground">System default follows your device settings</span>
                       </div>
                     </div>
-                    <div className="px-5 py-3 border-t border-border bg-muted/30 flex items-center gap-3">
-                      <Globe className="h-4 w-4 text-muted-foreground shrink-0" />
-                      <span className="text-xs text-muted-foreground">System default follows your device settings</span>
-                    </div>
                   </div>
-                </div>
+                </Reveal>
               )}
 
               {activeSection === "notifications" && (
-                <div>
-                  <p className="text-xs font-extrabold uppercase tracking-widest text-muted-foreground mb-3">Notifications</p>
-                  <div className="surface-card rounded-2xl overflow-hidden">
-                    <SettingRow icon={MapPin} label="Map updates" desc="When published maps are updated" action={<Toggle on={notifMap} onToggle={() => setNotifMap(v => !v)} />} />
-                    <SettingRow icon={Bell} label="Report status" desc="Updates when your reports change status" action={<Toggle on={notifReports} onToggle={() => setNotifReports(v => !v)} />} />
-                    <SettingRow icon={Smartphone} label="Campus events" desc="Alerts for event maps and activities" action={<Toggle on={notifEvents} onToggle={() => setNotifEvents(v => !v)} />} />
+                <Reveal>
+                  <div>
+                    <SectionLabel>Notifications</SectionLabel>
+                    <div className="rounded-2xl border border-border/60 bg-card shadow-sm overflow-hidden">
+                      <SettingRow icon={MapPin} label="Map updates" desc="When published maps are updated" action={<Toggle on={notifMap} onToggle={() => setNotifMap(v => !v)} />} />
+                      <SettingRow icon={Bell} label="Report status" desc="Updates when your reports change status" action={<Toggle on={notifReports} onToggle={() => setNotifReports(v => !v)} />} />
+                      <SettingRow icon={Smartphone} label="Campus events" desc="Alerts for event maps and activities" action={<Toggle on={notifEvents} onToggle={() => setNotifEvents(v => !v)} />} />
+                    </div>
                   </div>
-                </div>
+                </Reveal>
               )}
 
               {activeSection === "security" && (
-                <div>
-                  <p className="text-xs font-extrabold uppercase tracking-widest text-muted-foreground mb-3">Security</p>
-                  <div className="surface-card rounded-2xl overflow-hidden">
-                    <button
-                      onClick={() => setChangingPw(v => !v)}
-                      className="w-full flex items-center gap-3 px-5 py-4 border-b border-border hover:bg-muted/60 transition-colors text-left"
-                    >
-                      <Lock className="h-4 w-4 text-muted-foreground shrink-0" />
-                      <span className="text-sm font-semibold text-foreground flex-1">Change Password</span>
-                      <motion.div
-                        animate={{ rotate: changingPw ? 180 : 0 }}
-                        transition={{ duration: 0.2 }}
+                <Reveal>
+                  <div>
+                    <SectionLabel>Security</SectionLabel>
+                    <div className="rounded-2xl border border-border/60 bg-card shadow-sm overflow-hidden">
+                      <button
+                        onClick={() => setChangingPw(v => !v)}
+                        className="w-full flex items-center gap-3 px-5 py-4 border-b border-border/50 hover:bg-muted/20 transition-colors text-left"
                       >
-                        <ChevronDown className="h-4 w-4 text-muted-foreground" />
-                      </motion.div>
-                    </button>
-
-                    <AnimatePresence>
-                      {changingPw && (
+                        <Lock className="h-4 w-4 text-muted-foreground shrink-0" />
+                        <span className="text-sm font-semibold text-foreground flex-1">Change Password</span>
                         <motion.div
-                          initial={{ height: 0, opacity: 0 }}
-                          animate={{ height: "auto", opacity: 1 }}
-                          exit={{ height: 0, opacity: 0 }}
-                          transition={{ duration: 0.25 }}
-                          className="overflow-hidden"
+                          animate={{ rotate: changingPw ? 180 : 0 }}
+                          transition={{ duration: 0.2 }}
                         >
-                          <div className="px-5 py-4 border-b border-border space-y-3 bg-muted/40">
-                            {([
-                              { key: "current" as const, label: "Current Password", placeholder: "Enter current password", type: "password" },
-                              { key: "next" as const, label: "New Password", placeholder: "Min. 8 characters", type: "password" },
-                              { key: "confirm" as const, label: "Confirm New Password", placeholder: "Repeat new password", type: "password" },
-                            ]).map(f => (
-                              <div key={f.key}>
-                                <label className="block text-xs font-bold uppercase tracking-wide mb-1.5 text-foreground">{f.label}</label>
-                                <input
-                                  type={f.type}
-                                  value={pwForm[f.key]}
-                                  onChange={e => setPwForm(p => ({ ...p, [f.key]: e.target.value }))}
-                                  placeholder={f.placeholder}
-                                  className="w-full px-3 py-2.5 rounded-xl border border-border text-sm focus:outline-none focus:ring-2 focus:ring-primary/25 transition-all bg-input-background"
-                                />
-                              </div>
-                            ))}
-                            {pwSaved && (
-                              <motion.p
-                                initial={{ opacity: 0, y: -5 }}
-                                animate={{ opacity: 1, y: 0 }}
-                                className="text-xs font-bold text-green-600 dark:text-green-400 flex items-center gap-1"
-                              >
-                                <CheckCircle2 className="h-3 w-3" /> Password updated successfully.
-                              </motion.p>
-                            )}
-                            <div className="flex gap-2 pt-1">
-                              <button onClick={() => { setChangingPw(false); setPwForm({ current: "", next: "", confirm: "" }); }}
-                                className="flex-1 h-10 rounded-xl border border-border text-xs font-bold hover:bg-muted transition-colors text-muted-foreground">
-                                Cancel
-                              </button>
-                              <button onClick={handlePwSave}
-                                disabled={!pwForm.current || !pwForm.next || pwForm.next !== pwForm.confirm}
-                                className="flex-1 h-10 rounded-xl text-xs font-bold transition-all disabled:opacity-40 bg-primary text-primary-foreground hover:brightness-110 active:scale-[0.98]">
-                                {pwSaved ? "Saved!" : "Update Password"}
-                              </button>
-                            </div>
-                          </div>
+                          <ChevronDown className="h-4 w-4 text-muted-foreground" />
                         </motion.div>
-                      )}
-                    </AnimatePresence>
+                      </button>
 
-                    <div className="px-5 py-4 grid sm:grid-cols-2 gap-4">
-                      {[
-                        { label: "Username", value: studentAuth.username },
-                        { label: "Role", value: studentAuth.role },
-                        { label: "School", value: "Pamantasan ng Lungsod ng Valenzuela" },
-                        { label: "Status", value: "Active" },
-                      ].map(f => (
-                        <div key={f.label}>
-                          <p className="text-[10px] font-extrabold uppercase tracking-widest text-muted-foreground mb-0.5">{f.label}</p>
-                          <p className="text-sm font-semibold text-foreground">{f.value}</p>
-                        </div>
-                      ))}
+                      <AnimatePresence>
+                        {changingPw && (
+                          <motion.div
+                            initial={{ height: 0, opacity: 0 }}
+                            animate={{ height: "auto", opacity: 1 }}
+                            exit={{ height: 0, opacity: 0 }}
+                            transition={{ duration: 0.25 }}
+                            className="overflow-hidden"
+                          >
+                            <div className="px-5 py-4 border-b border-border/50 space-y-3 bg-muted/20">
+                              {([
+                                { key: "current" as const, label: "Current Password", placeholder: "Enter current password", type: "password" },
+                                { key: "next" as const, label: "New Password", placeholder: "Min. 8 characters", type: "password" },
+                                { key: "confirm" as const, label: "Confirm New Password", placeholder: "Repeat new password", type: "password" },
+                              ]).map(f => (
+                                <div key={f.key}>
+                                  <label className="block text-xs font-bold uppercase tracking-wide mb-1.5 text-foreground">{f.label}</label>
+                                  <input
+                                    type={f.type}
+                                    value={pwForm[f.key]}
+                                    onChange={e => setPwForm(p => ({ ...p, [f.key]: e.target.value }))}
+                                    placeholder={f.placeholder}
+                                    className="w-full px-3 py-2.5 rounded-xl border border-border/60 text-sm focus:outline-none focus:ring-2 focus:ring-primary/25 transition-all bg-input-background"
+                                  />
+                                </div>
+                              ))}
+                              {pwSaved && (
+                                <motion.p
+                                  initial={{ opacity: 0, y: -5 }}
+                                  animate={{ opacity: 1, y: 0 }}
+                                  className="text-xs font-bold text-green-600 dark:text-green-400 flex items-center gap-1"
+                                >
+                                  <CheckCircle2 className="h-3 w-3" /> Password updated successfully.
+                                </motion.p>
+                              )}
+                              <div className="flex gap-2 pt-1">
+                                <button onClick={() => { setChangingPw(false); setPwForm({ current: "", next: "", confirm: "" }); }}
+                                  className="flex-1 h-10 rounded-xl border border-border/60 text-xs font-bold hover:bg-muted/60 transition-colors text-muted-foreground">
+                                  Cancel
+                                </button>
+                                <button onClick={handlePwSave}
+                                  disabled={!pwForm.current || !pwForm.next || pwForm.next !== pwForm.confirm}
+                                  className="flex-1 h-10 rounded-xl text-xs font-bold transition-all disabled:opacity-40 bg-primary text-primary-foreground hover:brightness-110 active:scale-[0.97]">
+                                  {pwSaved ? "Saved!" : "Update Password"}
+                                </button>
+                              </div>
+                            </div>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+
+                      <div className="px-5 py-4 grid sm:grid-cols-2 gap-4">
+                        {[
+                          { label: "Username", value: studentAuth.username },
+                          { label: "Role", value: studentAuth.role },
+                          { label: "School", value: "Pamantasan ng Lungsod ng Valenzuela" },
+                          { label: "Status", value: "Active" },
+                        ].map(f => (
+                          <div key={f.label}>
+                            <p className="text-[10px] font-extrabold uppercase tracking-widest text-muted-foreground mb-0.5">{f.label}</p>
+                            <p className="text-sm font-semibold text-foreground">{f.value}</p>
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   </div>
-                </div>
+                </Reveal>
               )}
 
               {activeSection === "support" && (
-                <div>
-                  <p className="text-xs font-extrabold uppercase tracking-widest text-muted-foreground mb-3">Support</p>
-                  <div className="surface-card rounded-2xl overflow-hidden">
-                    <Link to="/help" className="flex items-center gap-3 px-5 py-4 border-b border-border hover:bg-muted/60 transition-colors group">
-                      <HelpCircle className="h-4 w-4 text-muted-foreground shrink-0" />
-                      <span className="text-sm font-semibold text-foreground flex-1">Help Center</span>
-                      <ChevronRight className="h-4 w-4 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
-                    </Link>
-                    <Link to="/map" className="flex items-center gap-3 px-5 py-4 hover:bg-muted/60 transition-colors group">
-                      <MapPin className="h-4 w-4 text-muted-foreground shrink-0" />
-                      <span className="text-sm font-semibold text-foreground flex-1">Open Campus Map</span>
-                      <ChevronRight className="h-4 w-4 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
-                    </Link>
+                <Reveal>
+                  <div>
+                    <SectionLabel>Support</SectionLabel>
+                    <div className="rounded-2xl border border-border/60 bg-card shadow-sm overflow-hidden">
+                      <Link to="/help" className="flex items-center gap-3 px-5 py-4 border-b border-border/50 hover:bg-muted/20 transition-colors group">
+                        <HelpCircle className="h-4 w-4 text-muted-foreground shrink-0" />
+                        <span className="text-sm font-semibold text-foreground flex-1">Help Center</span>
+                        <ChevronRight className="h-4 w-4 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
+                      </Link>
+                      <Link to="/map" className="flex items-center gap-3 px-5 py-4 hover:bg-muted/20 transition-colors group">
+                        <MapPin className="h-4 w-4 text-muted-foreground shrink-0" />
+                        <span className="text-sm font-semibold text-foreground flex-1">Open Campus Map</span>
+                        <ChevronRight className="h-4 w-4 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
+                      </Link>
+                    </div>
                   </div>
-                </div>
+                </Reveal>
               )}
             </motion.div>
           </AnimatePresence>
 
           {/* Logout */}
-          <motion.button
-            onClick={handleLogout}
-            className="w-full flex items-center justify-center gap-2 h-12 rounded-2xl border transition-all hover:bg-destructive/8 text-destructive hover:border-destructive/30"
-            style={{ borderColor: "color-mix(in srgb, var(--destructive) 30%, transparent)" }}
-            whileTap={{ scale: 0.98 }}
-          >
-            <LogOut className="h-4 w-4" />
-            <span className="text-sm font-bold">Sign Out</span>
-          </motion.button>
+          <Reveal>
+            <motion.button
+              onClick={handleLogout}
+              className="w-full flex items-center justify-center gap-2 h-12 rounded-2xl border border-destructive/30 transition-all hover:bg-destructive/8 text-destructive"
+              whileTap={{ scale: 0.98 }}
+            >
+              <LogOut className="h-4 w-4" />
+              <span className="text-sm font-bold">Sign Out</span>
+            </motion.button>
+          </Reveal>
 
           <div className="h-4" />
-          {/* Safe area spacer for bottom nav */}
           <div className="h-6 md:hidden" />
         </div>
       </div>

@@ -26,26 +26,27 @@ export function ReportModal({ building, onClose }: ReportModalProps) {
   if (submitted) {
     return (
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Report submitted"
         className="absolute inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm animate-fade-in"
         onClick={onClose}
       >
-        <div
-          className="bg-card border border-border rounded-3xl p-8 shadow-2xl max-w-sm w-full mx-4 text-center"
+        <div           className="bg-card border border-border rounded-2xl p-8 shadow-2xl max-w-sm w-full mx-4 text-center"
           onClick={(e) => e.stopPropagation()}
         >
           <div className="w-14 h-14 rounded-2xl bg-green-100 dark:bg-green-900/20 flex items-center justify-center mx-auto mb-4">
             <CheckCircle2 className="h-7 w-7 text-green-600 dark:text-green-400" />
           </div>
-          <h3 className="font-extrabold text-foreground text-lg mb-2" style={{ fontFamily: "var(--font-sans)" }}>
+          <h3 className="font-extrabold text-foreground text-lg mb-2">
             Report Submitted
           </h3>
           <p className="text-sm text-muted-foreground mb-1">Campus maintenance has been notified.</p>
           <p className="text-xs text-muted-foreground mb-6">
             Location: <span className="font-semibold text-foreground">{building.name}</span>
-          </p>
-          <button
+          </p>            <button
             onClick={onClose}
-            className="h-10 px-8 rounded-xl bg-primary text-primary-foreground text-sm font-bold hover:bg-primary/90 transition-colors"
+            className="h-10 px-8 rounded-xl bg-primary text-primary-foreground text-sm font-bold hover:bg-primary/90 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             Done
           </button>
@@ -56,11 +57,13 @@ export function ReportModal({ building, onClose }: ReportModalProps) {
 
   return (
     <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Report issue"
       className="absolute inset-0 z-50 flex items-end sm:items-center justify-center bg-background/70 backdrop-blur-sm animate-fade-in"
       onClick={onClose}
     >
-      <div
-        className="bg-card border border-border rounded-t-3xl sm:rounded-3xl shadow-2xl w-full sm:max-w-md mx-0 sm:mx-4 animate-slide-up"
+      <div         className="bg-card border border-border rounded-t-2xl sm:rounded-2xl shadow-2xl w-full sm:max-w-md mx-0 sm:mx-4 animate-slide-up"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-5 pt-5 pb-4 border-b border-border">
@@ -69,7 +72,7 @@ export function ReportModal({ building, onClose }: ReportModalProps) {
               <Flag className="h-4 w-4 text-destructive" />
             </div>
             <div>
-              <h3 className="font-extrabold text-foreground text-sm" style={{ fontFamily: "var(--font-sans)" }}>
+              <h3 className="font-extrabold text-foreground text-sm">
                 Report Issue
               </h3>
               <p className="text-[11px] text-muted-foreground">{building.name}</p>
@@ -77,7 +80,8 @@ export function ReportModal({ building, onClose }: ReportModalProps) {
           </div>
           <button
             onClick={onClose}
-            className="w-8 h-8 rounded-xl bg-muted flex items-center justify-center hover:bg-secondary transition-colors"
+            aria-label="Close report form"
+            className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-muted transition-colors text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             <X className="h-4 w-4 text-muted-foreground" />
           </button>
@@ -90,19 +94,21 @@ export function ReportModal({ building, onClose }: ReportModalProps) {
               Auto-set
             </span>
           </div>
-          <div>
+          <div role="radiogroup" aria-label="Issue type">
             <label className="block text-xs font-bold text-foreground uppercase tracking-wide mb-2">Issue Type *</label>
-            <div className="grid grid-cols-2 gap-1.5">
+            <div className="grid grid-cols-2 gap-1.5" role="radiogroup" aria-label="Issue type">
               {ISSUE_TYPES.map((t) => (
                 <button
                   key={t}
                   type="button"
+                  role="radio"
+                  aria-checked={issueType === t}
                   onClick={() => setIssueType(t)}
                   className={cn(
-                    "text-xs font-semibold py-2 px-2.5 rounded-xl border text-left transition-all",
+                    "text-xs font-semibold py-2.5 px-2.5 rounded-xl border text-left transition-all duration-150",
                     issueType === t
-                      ? "border-destructive bg-destructive/8 text-destructive"
-                      : "border-border text-muted-foreground hover:border-destructive/30",
+                      ? "border-destructive bg-destructive/8 text-destructive shadow-sm"
+                      : "border-border text-muted-foreground hover:border-destructive/30 hover:bg-destructive/5",
                   )}
                 >
                   {t}
@@ -111,22 +117,22 @@ export function ReportModal({ building, onClose }: ReportModalProps) {
             </div>
           </div>
           <div>
-            <label className="block text-xs font-bold text-foreground uppercase tracking-wide mb-1.5">
+            <label htmlFor="report-description" className="block text-xs font-bold text-foreground uppercase tracking-wide mb-1.5">
               Description
             </label>
             <textarea
+              id="report-description"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               rows={3}
               placeholder="Describe the issue in detail…"
-              className="w-full px-3 py-2.5 rounded-xl border border-border bg-input-background text-foreground placeholder:text-muted-foreground text-sm resize-none focus:outline-none focus:ring-2 focus:ring-primary/30"
-              style={{ fontFamily: "var(--font-body)" }}
+              className="w-full px-4 py-2.5 rounded-xl border border-border bg-input-background text-foreground placeholder:text-muted-foreground text-sm resize-y min-h-[44px] focus:outline-none focus:ring-2 focus:ring-primary/30 transition-all duration-200"
             />
           </div>
           <div className="flex gap-2 pt-1">
             <button
               type="button"
-              className="flex items-center gap-1.5 h-10 px-3 rounded-xl border border-border text-muted-foreground text-xs font-semibold hover:bg-muted transition-colors"
+              className="flex items-center gap-1.5 h-10 px-3 rounded-xl border border-border text-muted-foreground text-xs font-semibold hover:bg-muted hover:border-foreground/20 active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring transition-all duration-200"
             >
               <Camera className="h-3.5 w-3.5" /> Photo
             </button>

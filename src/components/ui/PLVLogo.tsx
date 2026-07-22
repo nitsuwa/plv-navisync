@@ -1,5 +1,5 @@
 import { ImageWithFallback } from "@/app/components/figma/ImageWithFallback";
-import plvLogo from "@/imports/image.png";
+import plvLogo from "@/assets/plv-logo.png";
 import { cn } from "../../lib/utils";
 
 interface PLVLogoProps {
@@ -25,7 +25,7 @@ export function PLVLogo({ size = 40, className }: PLVLogoProps) {
     >
       <ImageWithFallback
         src={plvLogo}
-        alt="PLV Official Seal — Pamantasan ng Lungsod ng Valenzuela"
+        alt="PLV Logo — Pamantasan ng Lungsod ng Valenzuela"
         style={{ width: imgSize, height: imgSize, objectFit: "contain" }}
         draggable={false}
       />

@@ -1,16 +1,18 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import {
-  Building2, SlidersHorizontal, ArrowUpDown, Search, X,
-  Map, Layers, Grid3X3, List,
+  Building2, SlidersHorizontal, ArrowUpDown,
+  Grid3X3, List,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { BuildingCard } from "../components/ui/BuildingCard";
 import { MOCK_BUILDINGS } from "../data/mockData";
 import { cn } from "../lib/utils";
-import { PageTransition, FadeIn } from "../components/ui/PageTransition";
+import { PageTransition } from "../components/ui/PageTransition";
 import { SkeletonCard } from "../components/ui/Skeleton";
 import { EmptyState } from "../components/ui/EmptyState";
 import { Reveal } from "../components/ui/Reveal";
+import { useDebounce } from "../hooks";
+import { SearchBar } from "../components/ui/SearchBar";
 import type { Building } from "../types";
 
 const CATEGORIES = [
@@ -39,6 +41,11 @@ export function BuildingsPage() {
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
   const [isLoading, setIsLoading] = useState(true);
 
+  // Debounce search for smoother filtering
+  const debouncedSearch = useDebounce(search, 150);
+
+  
+
   // Simulate initial load
   useEffect(() => {
     const timer = setTimeout(() => setIsLoading(false), 400);
@@ -48,7 +55,7 @@ export function BuildingsPage() {
   const filtered = MOCK_BUILDINGS
     .filter((b) => {
       const matchCat = category === "all" || b.category === category;
-      const q = search.toLowerCase().trim();
+      const q = debouncedSearch.toLowerCase().trim();
       const matchSearch =
         !q ||
         b.name.toLowerCase().includes(q) ||
@@ -90,26 +97,15 @@ export function BuildingsPage() {
         {/* ── Search & Filters ── */}
         <Reveal delay={80}>
           <div className="surface-card rounded-2xl p-5 mb-8 space-y-4">
-          {/* Search */}
-          <div className="relative group">
-            <label htmlFor="building-search" className="sr-only">Search buildings</label>
-            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground transition-colors group-focus-within:text-primary" />
-            <input
-              id="building-search"
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
+          <div className="max-w-md">
+            <SearchBar
               placeholder="Search by name, code, description, or category..."
-              className="w-full h-11 pl-10 pr-10 rounded-xl border border-border bg-input-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary text-sm transition-all"
+              value={search}
+              onSearch={setSearch}
+              onClear={() => setSearch("")}
+              showShortcutHint
+              size="md"
             />
-            {search && (
-              <button
-                onClick={() => setSearch("")}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            )}
           </div>
 
           {/* Category pills + Sort + View toggle */}

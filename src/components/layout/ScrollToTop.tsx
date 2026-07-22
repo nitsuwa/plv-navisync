@@ -9,12 +9,7 @@ export function ScrollToTop() {
   const { pathname } = useLocation();
 
   useEffect(() => {
-    // Use "instant" if supported, fall back to position 0
-    try {
-      window.scrollTo({ top: 0, left: 0, behavior: "instant" as ScrollBehavior });
-    } catch {
-      window.scrollTo(0, 0);
-    }
+    window.scrollTo({ top: 0, left: 0, behavior: "instant" });
   }, [pathname]);
 
   return null;

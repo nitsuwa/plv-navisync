@@ -1,7 +1,9 @@
 import { useState } from "react";
+import { motion, AnimatePresence } from "motion/react";
 import { Accessibility, CheckCircle2, XCircle, AlertCircle, X } from "lucide-react";
 import { MOCK_BUILDINGS } from "../data/mockData";
 import { cn } from "../lib/utils";
+import { SPRING, DURATION } from "../config/animation";
 
 // ── Data ──────────────────────────────────────────────────────────────────
 interface BuildingA11y {
@@ -42,8 +44,9 @@ const LEVEL_STYLE = {
 // ── Toggle switch ─────────────────────────────────────────────────────────
 function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) {
   return (
-    <button onClick={() => onChange(!on)} aria-pressed={on}
-      className={cn("relative w-10 h-6 rounded-full transition-colors shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50",
+    <button type="button" onClick={() => onChange(!on)} aria-pressed={on}
+      aria-label={on ? "Disable feature" : "Enable feature"}
+      className={cn("relative w-10 h-6 rounded-full transition-colors shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50",
         on ? "bg-green-500" : "bg-muted-foreground/25")}>
       <span className={cn("absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow-sm transition-transform",
         on ? "translate-x-4" : "translate-x-0")}/>
@@ -60,23 +63,27 @@ function EditModal({ data, buildingName, onSave, onClose }: {
   const set = (k: keyof BuildingA11y, v: any) => setForm(p => ({...p, [k]:v}));
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/70 backdrop-blur-sm animate-fade-in p-4"
-      onClick={onClose}>
-      <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-md animate-scale-in"
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/70 backdrop-blur-sm p-4"
+      onClick={onClose} role="dialog" aria-modal="true" aria-label="Edit accessibility">
+      <motion.div
+        initial={{ opacity: 0, scale: 0.92, y: 20 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        transition={{ type: "spring", duration: 0.4, bounce: 0.25 }}
+        className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-md"
         onClick={e => e.stopPropagation()}>
 
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-border">
           <div>
-            <h3 className="font-extrabold text-foreground text-sm" style={{ fontFamily:"var(--font-sans)" }}>
+            <h3 className="font-extrabold text-foreground text-sm">
               Edit Accessibility
             </h3>
-            <p className="text-[11px] text-muted-foreground mt-0.5" style={{ fontFamily:"var(--font-body)" }}>
+            <p className="text-[11px] text-muted-foreground mt-0.5">
               {buildingName}
             </p>
           </div>
-          <button onClick={onClose}
-            className="w-8 h-8 rounded-xl bg-muted flex items-center justify-center hover:bg-secondary transition-colors text-muted-foreground">
+          <button type="button" aria-label="Close modal" onClick={onClose}
+            className="w-8 h-8 rounded-xl bg-muted flex items-center justify-center hover:bg-secondary active:scale-90 transition-all text-muted-foreground">
             <X className="h-4 w-4"/>
           </button>
         </div>
@@ -86,7 +93,7 @@ function EditModal({ data, buildingName, onSave, onClose }: {
           {FEATURES.map(f => (
             <div key={f.key} className="flex items-center justify-between gap-4 py-2.5 px-4 rounded-xl border border-border bg-muted/30">
               <div>
-                <p className="text-sm font-bold text-foreground" style={{ fontFamily:"var(--font-sans)" }}>{f.label}</p>
+                <p className="text-sm font-bold text-foreground">{f.label}</p>
               </div>
               <Toggle on={form[f.key]} onChange={v => set(f.key, v)}/>
             </div>
@@ -103,7 +110,7 @@ function EditModal({ data, buildingName, onSave, onClose }: {
               onChange={e => set("notes", e.target.value)}
               rows={2}
               placeholder="Any known issues or special notes…"
-              className="w-full px-3 py-2.5 rounded-xl border border-border bg-input-background text-foreground text-sm resize-none focus:outline-none focus:ring-2 focus:ring-primary/30"
+              className="w-full px-4 py-2.5 rounded-xl border border-border bg-input-background text-foreground text-sm resize-y min-h-[44px] focus:outline-none focus:ring-2 focus:ring-primary/30 transition-all duration-200"
               style={{ fontFamily:"var(--font-body)", color:"var(--foreground)" }}/>
           </div>
         </div>
@@ -111,15 +118,15 @@ function EditModal({ data, buildingName, onSave, onClose }: {
         {/* Actions */}
         <div className="flex gap-2 px-6 pb-5">
           <button onClick={onClose}
-            className="flex-1 h-10 rounded-xl border border-border text-sm font-bold text-muted-foreground hover:bg-muted transition-colors">
+            className="flex-1 h-10 rounded-xl border border-border text-sm font-bold text-muted-foreground hover:bg-muted active:scale-[0.97] transition-all">
             Cancel
           </button>
           <button onClick={() => { onSave(form); onClose(); }}
-            className="flex-1 h-10 rounded-xl bg-primary text-primary-foreground text-sm font-extrabold hover:bg-primary/90 transition-colors">
+            className="flex-1 h-10 rounded-xl bg-primary text-primary-foreground text-sm font-extrabold hover:bg-primary/90 active:scale-[0.97] transition-all">
             Save
           </button>
         </div>
-      </div>
+      </motion.div>
     </div>
   );
 }
@@ -141,10 +148,10 @@ export function AdminAccessibilityPage() {
 
       {/* Header */}
       <div>
-        <h1 className="text-2xl font-extrabold text-foreground" style={{ fontFamily:"var(--font-sans)" }}>
+        <h1 className="text-2xl font-extrabold text-foreground">
           Accessibility
         </h1>
-        <p className="text-sm text-muted-foreground mt-0.5" style={{ fontFamily:"var(--font-body)" }}>
+        <p className="text-sm text-muted-foreground mt-0.5">
           Manage campus building accessibility features. This data powers Accessible Mode routing in the student app.
         </p>
       </div>
@@ -152,10 +159,10 @@ export function AdminAccessibilityPage() {
       {/* Summary bar */}
       <div className="bg-card rounded-2xl border border-border shadow-sm p-5">
         <div className="flex items-center justify-between mb-4">
-          <p className="text-sm font-bold text-foreground" style={{ fontFamily:"var(--font-sans)" }}>
+          <p className="text-sm font-bold text-foreground">
             Campus Compliance
           </p>
-          <p className="text-xs text-muted-foreground" style={{ fontFamily:"var(--font-body)" }}>
+          <p className="text-xs text-muted-foreground">
             {data.length} buildings total
           </p>
         </div>
@@ -174,7 +181,7 @@ export function AdminAccessibilityPage() {
             <div key={s.label} className="flex items-center gap-2">
               <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${s.color}`}/>
               <span className="text-xs font-bold text-foreground">{s.count}</span>
-              <span className="text-xs text-muted-foreground" style={{ fontFamily:"var(--font-body)" }}>{s.label}</span>
+              <span className="text-xs text-muted-foreground">{s.label}</span>
             </div>
           ))}
         </div>
@@ -196,7 +203,7 @@ export function AdminAccessibilityPage() {
               {/* Card header */}
               <div className="flex items-start justify-between px-4 pt-4 pb-3">
                 <div className="min-w-0 flex-1">
-                  <p className="font-extrabold text-foreground text-sm truncate" style={{ fontFamily:"var(--font-sans)" }}>
+                  <p className="font-extrabold text-foreground text-sm truncate">
                     {building.name}
                   </p>
                   <p className="text-[11px] text-muted-foreground font-mono mt-0.5">{building.code}</p>
@@ -212,7 +219,7 @@ export function AdminAccessibilityPage() {
                   <div className={cn("h-full rounded-full transition-all", style.bar)}
                     style={{ width:`${(s / FEATURES.length) * 100}%` }}/>
                 </div>
-                <p className="text-[10px] text-muted-foreground mt-1" style={{ fontFamily:"var(--font-body)" }}>
+                <p className="text-[10px] text-muted-foreground mt-1">
                   {s} of {FEATURES.length} features available
                 </p>
               </div>
@@ -236,7 +243,7 @@ export function AdminAccessibilityPage() {
               {/* Note */}
               {bldg.notes && (
                 <div className="px-4 pb-3">
-                  <p className="text-[10px] text-muted-foreground leading-relaxed line-clamp-2" style={{ fontFamily:"var(--font-body)" }}>
+                  <p className="text-[10px] text-muted-foreground leading-relaxed line-clamp-2">
                     {bldg.notes}
                   </p>
                 </div>
@@ -257,7 +264,7 @@ export function AdminAccessibilityPage() {
       {/* Legend */}
       <div className="flex items-start gap-3 px-4 py-3 rounded-xl border border-border bg-muted/30">
         <Accessibility className="h-4 w-4 text-primary shrink-0 mt-0.5"/>
-        <p className="text-xs text-muted-foreground leading-relaxed" style={{ fontFamily:"var(--font-body)" }}>
+        <p className="text-xs text-muted-foreground leading-relaxed">
           Features marked here automatically affect <strong className="text-foreground">Accessible Mode</strong> routing in the student map. Enable all features for a building to ensure wheelchair users receive reliable navigation to and through it.
         </p>
       </div>

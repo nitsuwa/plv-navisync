@@ -79,7 +79,7 @@ export function AdminFloorPlansPage() {
             <button key={b.id}
               onClick={() => { setSelected(b.id); setFloorNum(1); }}
               className={cn(
-                "flex items-start gap-3 p-4 rounded-2xl border text-left transition-all hover-lift",
+                "flex items-start gap-3 p-4 rounded-2xl border text-left transition-all hover-lift active:scale-[0.97]",
                 isSelected ? "border-primary/40 bg-primary/5 shadow-md" : "border-border bg-card shadow-sm hover:border-primary/20",
               )}>
               <div className="w-10 h-10 rounded-xl overflow-hidden bg-secondary shrink-0">
@@ -125,7 +125,7 @@ export function AdminFloorPlansPage() {
             <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar">
               {selectedData.floors.map(f => (
                 <button key={f.number} onClick={() => setFloorNum(f.number)}
-                  className={cn("shrink-0 h-8 px-3 rounded-xl text-xs font-extrabold transition-all",
+                  className={cn("shrink-0 h-8 px-3 rounded-xl text-xs font-extrabold transition-all active:scale-[0.97]",
                     floorNum === f.number ? "bg-primary text-primary-foreground shadow-sm" : "bg-muted text-muted-foreground hover:bg-secondary")}>
                   {f.label}
                 </button>

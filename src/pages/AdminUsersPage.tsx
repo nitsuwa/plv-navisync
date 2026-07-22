@@ -1,7 +1,11 @@
 import { useState, useEffect } from "react";
-import { Users, Plus, Search, Pencil, Trash2, X, Shield, Mail, Phone } from "lucide-react";
+import { motion } from "motion/react";
+import { Users, Plus, Search, Pencil, Trash2, X, Shield, Mail, Phone, UserPlus } from "lucide-react";
 import { Button } from "../components/ui/Button";
 import { Badge } from "../components/ui/Badge";
+import { FormField } from "../components/ui/FormField";
+import { EmptyState } from "../components/ui/EmptyState";
+import { SearchBar } from "../components/ui/SearchBar";
 import { cn } from "../lib/utils";
 import { TablePageSkeleton } from "../components/ui/PageSkeleton";
 import { useToast } from "../hooks/useToast";
@@ -63,6 +67,7 @@ export function AdminUsersPage() {
   const [form, setForm] = useState({
     name: "", email: "", role: "staff" as User["role"], department: "", status: "active" as User["status"],
   });
+  const [formErrors, setFormErrors] = useState<Record<string, string>>({});
 
   const filtered = users.filter((u) => {
     const matchRole = roleFilter === "all" || u.role === roleFilter;
@@ -76,17 +81,26 @@ export function AdminUsersPage() {
 
   const openAdd = () => {
     setForm({ name: "", email: "", role: "staff", department: "", status: "active" });
+    setFormErrors({});
     setEditTarget(null);
     setShowModal(true);
   };
 
   const openEdit = (u: User) => {
     setForm({ name: u.name, email: u.email, role: u.role, department: u.department, status: u.status });
+    setFormErrors({});
     setEditTarget(u);
     setShowModal(true);
   };
 
   const handleSave = () => {
+    const errors: Record<string, string> = {};
+    if (!form.name.trim()) errors.name = "Name is required";
+    if (!form.email.trim()) errors.email = "Email is required";
+    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) errors.email = "Invalid email format";
+    if (!form.department.trim()) errors.department = "Department is required";
+    if (Object.keys(errors).length > 0) { setFormErrors(errors); return; }
+    setFormErrors({});
     const initials = form.name.split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase();
     if (editTarget) {
       setUsers((prev) => prev.map((u) => u.id === editTarget.id ? { ...u, ...form, avatar_initials: initials } : u));
@@ -121,18 +135,28 @@ export function AdminUsersPage() {
           <p className="text-sm text-muted-foreground mt-0.5">{users.length} registered users · {stats.active} active</p>
         </div>
         <Button onClick={openAdd} variant="primary">
-          <Plus className="h-4 w-4" /> Add User
+          <Plus className="h-3.5 w-3.5" /> Add User
         </Button>
       </div>
 
       {/* Summary cards */}
-      <div className="grid grid-cols-3 gap-4">
+      <motion.div
+        initial="hidden"
+        animate="visible"
+        variants={{ visible: { transition: { staggerChildren: 0.06 } } }}
+        className="grid grid-cols-1 sm:grid-cols-3 gap-4"
+      >
         {[
           { label: "Total Users", value: stats.total, icon: Users, cx: "bg-primary/8 text-primary" },
           { label: "Active Users", value: stats.active, icon: Shield, cx: "bg-green-100 text-green-600 dark:bg-green-900/20 dark:text-green-400" },
           { label: "Administrators", value: stats.admins, icon: Shield, cx: "bg-accent/15 text-accent" },
-        ].map(({ label, value, icon: Icon, cx }) => (
-          <div key={label} className="bg-card rounded-2xl border border-border shadow-sm p-4">
+        ].map(({ label, value, icon: Icon, cx }, i) => (
+          <motion.div
+            key={label}
+            variants={{ hidden: { opacity: 0, y: 12 }, visible: { opacity: 1, y: 0 } }}
+            transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+            className="bg-card rounded-2xl border border-border shadow-sm p-4 hover:shadow-md hover:-translate-y-0.5 transition-all duration-200"
+          >
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-xs font-bold text-muted-foreground uppercase tracking-wide">{label}</p>
@@ -142,22 +166,27 @@ export function AdminUsersPage() {
                 <Icon className="h-5 w-5" />
               </div>
             </div>
-          </div>
+          </motion.div>
         ))}
-      </div>
+      </motion.div>
 
       {/* Filters */}
       <div className="flex flex-col sm:flex-row gap-3">
-        <div className="relative flex-1 max-w-sm">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <input type="text" placeholder="Search users..." value={search} onChange={(e) => setSearch(e.target.value)}
-            className="w-full h-10 pl-9 pr-4 rounded-xl border border-border bg-card text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary text-sm" />
+        <div className="flex-1 max-w-sm">
+          <SearchBar
+            placeholder="Search users..."
+            value={search}
+            onSearch={setSearch}
+            onClear={() => setSearch("")}
+            showShortcutHint
+            size="md"
+          />
         </div>
         <div className="flex gap-1.5">
           {["all", "admin", "faculty", "staff", "moderator"].map((r) => (
-            <button key={r} onClick={() => setRoleFilter(r)}
-              className={cn("px-3 py-1.5 rounded-xl text-xs font-bold transition-all capitalize",
-                roleFilter === r ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:bg-secondary")}>
+            <button key={r} type="button" onClick={() => setRoleFilter(r)}
+            className={cn("px-3 py-1.5 rounded-xl text-xs font-bold transition-all capitalize active:scale-[0.97]",
+              roleFilter === r ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:bg-secondary")}>
               {r === "all" ? "All Roles" : r}
             </button>
           ))}
@@ -165,7 +194,12 @@ export function AdminUsersPage() {
       </div>
 
       {/* Table */}
-      <div className="bg-card rounded-2xl border border-border shadow-sm overflow-hidden">
+      <motion.div
+        initial={{ opacity: 0, y: 16 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.15, duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+        className="bg-card rounded-2xl border border-border shadow-sm overflow-hidden hover:shadow-md transition-shadow"
+      >
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
@@ -202,6 +236,8 @@ export function AdminUsersPage() {
                     <td className="px-4 py-3.5 hidden lg:table-cell text-muted-foreground text-sm">{user.department}</td>
                     <td className="px-4 py-3.5 hidden lg:table-cell">
                       <button onClick={() => toggleStatus(user.id)}
+                        type="button"
+                        aria-pressed={user.status === "active"}
                         className={cn("px-2.5 py-1 rounded-full text-xs font-bold transition-colors",
                           user.status === "active"
                             ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 hover:bg-green-200"
@@ -212,10 +248,10 @@ export function AdminUsersPage() {
                     </td>
                     <td className="px-5 py-3.5">
                       <div className="flex items-center justify-end gap-1">
-                        <button onClick={() => openEdit(user)} className="w-8 h-8 rounded-lg flex items-center justify-center text-muted-foreground hover:bg-primary/10 hover:text-primary transition-colors">
+                        <button type="button" aria-label="Edit user" onClick={() => openEdit(user)} className="w-8 h-8 rounded-lg flex items-center justify-center text-muted-foreground hover:bg-primary/10 hover:text-primary active:scale-90 transition-all">
                           <Pencil className="h-3.5 w-3.5" />
                         </button>
-                        <button onClick={() => setDeleteId(user.id)} className="w-8 h-8 rounded-lg flex items-center justify-center text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors">
+                        <button type="button" aria-label="Delete user" onClick={() => setDeleteId(user.id)} className="w-8 h-8 rounded-lg flex items-center justify-center text-muted-foreground hover:bg-destructive/10 hover:text-destructive active:scale-90 transition-all">
                           <Trash2 className="h-3.5 w-3.5" />
                         </button>
                       </div>
@@ -227,40 +263,59 @@ export function AdminUsersPage() {
           </table>
         </div>
         {filtered.length === 0 && (
-          <div className="flex flex-col items-center py-12 text-center">
-            <Users className="h-8 w-8 text-muted-foreground mb-2" />
-            <p className="text-sm text-muted-foreground">No users match your search.</p>
-          </div>
+          <EmptyState
+            icon={search || roleFilter !== "all" ? Search : UserPlus}
+            title={search || roleFilter !== "all" ? "No matching users" : "No users yet"}
+            description={(search || roleFilter !== "all")
+              ? "We couldn't find any users matching your search or role filter. Try different terms or clear the filters to see all users."
+              : "Invite administrators, faculty, and staff to collaborate on managing the campus navigation system."
+            }
+            action={(search || roleFilter !== "all") ? (
+              <Button variant="outline" size="sm" onClick={() => { setSearch(""); setRoleFilter("all"); }}>
+                Clear Filters
+              </Button>
+            ) : (
+              <Button variant="primary" size="sm" onClick={openAdd}>
+                <Plus className="h-3.5 w-3.5" /> Add User
+              </Button>
+            )}
+          />
         )}
-      </div>
+      </motion.div>
 
       {/* Add/Edit Modal */}
       {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-          <div className="bg-card rounded-3xl border border-border shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto scrollbar-show-on-hover">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-border sticky top-0 bg-card rounded-t-3xl">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in" role="dialog" aria-modal="true" aria-label="Add or edit user">           <div className="bg-card rounded-2xl border border-border shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto animate-scale-in scrollbar-show-on-hover">
+             <div className="flex items-center justify-between px-6 py-4 border-b border-border sticky top-0 bg-card rounded-t-2xl">
               <h2 className="font-extrabold text-foreground">{editTarget ? "Edit User" : "Add User"}</h2>
-              <button onClick={() => setShowModal(false)} className="w-8 h-8 rounded-xl flex items-center justify-center text-muted-foreground hover:bg-muted">
+              <button type="button" aria-label="Close modal" onClick={() => setShowModal(false)} className="w-8 h-8 rounded-xl flex items-center justify-center text-muted-foreground hover:bg-muted">
                 <X className="h-4 w-4" />
               </button>
             </div>
             <div className="p-6 space-y-4">
-              {[
-                { label: "Full Name", key: "name", type: "text", placeholder: "e.g. Dr. Maria Santos" },
-                { label: "Email", key: "email", type: "email", placeholder: "user@plv.edu.ph" },
-                { label: "Department", key: "department", type: "text", placeholder: "e.g. College of Engineering" },
-              ].map(({ label, key, type, placeholder }) => (
-                <div key={key}>
-                  <label htmlFor={key} className="block text-xs font-bold text-foreground mb-1.5 uppercase tracking-wide">{label}</label>
-                  <input id={key} type={type} value={(form as any)[key]} onChange={(e) => setForm({ ...form, [key]: e.target.value })} placeholder={placeholder}
-                    className="w-full h-10 px-4 rounded-xl border border-border bg-input-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary text-sm" />
-                </div>
-              ))}
+              <FormField
+                label="Full Name" id="name" value={form.name}
+                onChange={(v) => { setForm(f => ({ ...f, name: v })); if (formErrors.name) setFormErrors(prev => { const n = {...prev}; delete n.name; return n; }); }}
+                error={formErrors.name} placeholder="e.g. Dr. Maria Santos" required
+                helper="First and last name"
+              />
+              <FormField
+                label="Email" id="email" value={form.email} type="email"
+                onChange={(v) => { setForm(f => ({ ...f, email: v })); if (formErrors.email) setFormErrors(prev => { const n = {...prev}; delete n.email; return n; }); }}
+                error={formErrors.email} placeholder="user@plv.edu.ph" required
+                helper="Must be a valid PLV email address"
+              />
+              <FormField
+                label="Department" id="department" value={form.department}
+                onChange={(v) => { setForm(f => ({ ...f, department: v })); if (formErrors.department) setFormErrors(prev => { const n = {...prev}; delete n.department; return n; }); }}
+                error={formErrors.department} placeholder="e.g. College of Engineering" required
+                helper="Department or office assigned to"
+              />
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label htmlFor="user-role" className="block text-xs font-bold text-foreground mb-1.5 uppercase tracking-wide">Role</label>
                   <select id="user-role" value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value as User["role"] })}
-                    className="w-full h-10 px-4 rounded-xl border border-border bg-input-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary text-sm">
+                    className="custom-select w-full h-10 px-4 rounded-xl border border-border bg-input-background text-foreground text-sm">
                     {["admin", "faculty", "staff", "moderator"].map((r) => (
                       <option key={r} value={r} className="capitalize">{r}</option>
                     ))}
@@ -269,7 +324,7 @@ export function AdminUsersPage() {
                 <div>
                   <label htmlFor="user-status" className="block text-xs font-bold text-foreground mb-1.5 uppercase tracking-wide">Status</label>
                   <select id="user-status" value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value as User["status"] })}
-                    className="w-full h-10 px-4 rounded-xl border border-border bg-input-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary text-sm">
+                    className="custom-select w-full h-10 px-4 rounded-xl border border-border bg-input-background text-foreground text-sm">
                     <option value="active">Active</option>
                     <option value="inactive">Inactive</option>
                   </select>
@@ -281,26 +336,26 @@ export function AdminUsersPage() {
               <Button variant="primary" onClick={handleSave} className="flex-1">
                 {editTarget ? "Save Changes" : "Add User"}
               </Button>
-            </div>
           </div>
         </div>
+      </div>
       )}
 
       {/* Delete confirm */}
       {deleteId && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-          <div className="bg-card rounded-2xl border border-border shadow-2xl w-full max-w-sm p-6 text-center">
-            <div className="w-12 h-12 rounded-2xl bg-destructive/10 flex items-center justify-center mx-auto mb-4">
-              <Trash2 className="h-6 w-6 text-destructive" />
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="Confirm delete user">
+          <div className="bg-card rounded-2xl border border-border shadow-2xl w-full max-w-sm p-6 text-center animate-scale-in">
+            <div className="w-14 h-14 rounded-2xl bg-destructive/10 flex items-center justify-center mx-auto mb-4">
+              <Trash2 className="h-7 w-7 text-destructive" />
             </div>
-            <h3 className="font-extrabold text-foreground mb-1">Remove User?</h3>
-            <p className="text-sm text-muted-foreground mb-5">This will permanently remove the user account.</p>
+            <h3 className="font-extrabold text-foreground mb-1">Delete User?</h3>
+            <p className="text-sm text-muted-foreground mb-5">This will permanently remove this user account and revoke all access.</p>
             <div className="flex gap-3">
               <Button variant="outline" onClick={() => setDeleteId(null)} className="flex-1">Cancel</Button>
-              <Button variant="danger" onClick={() => { const deleted = users.find(u => u.id === deleteId); setUsers((p) => p.filter((u) => u.id !== deleteId)); setDeleteId(null); if (deleted) toast.success("User removed", `${deleted.name} has been removed.`); }} className="flex-1">Remove</Button>
-            </div>
+              <Button variant="danger" onClick={() => { const deleted = users.find(u => u.id === deleteId); setUsers((p) => p.filter((u) => u.id !== deleteId)); setDeleteId(null); if (deleted) toast.success("User deleted", `${deleted.name}'s account has been removed.`); }} className="flex-1">Delete User</Button>
           </div>
         </div>
+      </div>
       )}
     </div>
   );

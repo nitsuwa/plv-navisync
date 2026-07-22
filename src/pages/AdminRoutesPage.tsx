@@ -1,10 +1,15 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
+import { motion } from "motion/react";
+import { ListCardSkeleton } from "../components/ui/PageSkeleton";
 import {
   Route, Plus, Pencil, Trash2, X, Navigation, Clock, Ruler,
   CheckCircle2, XCircle, Search, Filter, Eye,
 } from "lucide-react";
+import { useToast } from "../hooks/useToast";
 import { Button } from "../components/ui/Button";
 import { Badge } from "../components/ui/Badge";
+import { EmptyState } from "../components/ui/EmptyState";
+import { SearchBar } from "../components/ui/SearchBar";
 import { cn } from "../lib/utils";
 import {
   INITIAL_ROUTES, INITIAL_MARKERS, INITIAL_PATHS, INITIAL_BUILDINGS,
@@ -90,8 +95,19 @@ const ROUTE_TYPE_CONFIG = {
 
 // ── Main component ─────────────────────────────────────────────────────────────
 export function AdminRoutesPage() {
-  const [routes,    setRoutes]    = useState<MapRoute[]>(INITIAL_ROUTES);
+  const [routes,    setRoutes]    = useState<MapRoute[]>([]);
+  const [loading,   setLoading]   = useState(true);
   const [search,    setSearch]    = useState("");
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setRoutes(INITIAL_ROUTES);
+      setLoading(false);
+    }, 350);
+    return () => clearTimeout(timer);
+  }, []);
+
+  if (loading) return <ListCardSkeleton cards={4} />;
   const [typeFilter, setTypeFilter] = useState("all");
   const [showModal, setShowModal] = useState(false);
   const [editTarget, setEditTarget] = useState<MapRoute | null>(null);
@@ -106,6 +122,7 @@ export function AdminRoutesPage() {
     distance_m: 0, duration_min: 0,
     is_active: true,
   });
+  const toast = useToast();
 
   const filtered = routes.filter(r => {
     const matchType = typeFilter === "all" || r.type === typeFilter;
@@ -141,6 +158,7 @@ export function AdminRoutesPage() {
       setRoutes(prev => prev.map(r => r.id === editTarget.id
         ? { ...r, ...form } : r
       ));
+      toast.success("Route updated", `${form.name} has been updated.`);
     } else {
       // For a new route, derive waypoints from marker positions
       const fromM = INITIAL_MARKERS.find(m => m.id === form.from_marker_id);
@@ -154,6 +172,7 @@ export function AdminRoutesPage() {
         created_at: new Date().toISOString(),
       };
       setRoutes(prev => [...prev, nr]);
+      toast.success("Route added", `${form.name} has been added.`);
     }
     setShowModal(false);
   };
@@ -186,14 +205,24 @@ export function AdminRoutesPage() {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+      <motion.div
+        initial="hidden"
+        animate="visible"
+        variants={{ visible: { transition: { staggerChildren: 0.06 } } }}
+        className="grid grid-cols-2 sm:grid-cols-4 gap-4"
+      >
         {[
           { label: "Total Routes",     value: stats.total,      icon: Route,      cx: "bg-primary/10 text-primary" },
           { label: "Active",           value: stats.active,     icon: CheckCircle2, cx: "bg-green-100 text-green-600 dark:bg-green-900/20 dark:text-green-400" },
           { label: "Walking Routes",   value: stats.walking,    icon: Navigation, cx: "bg-primary/10 text-primary" },
           { label: "Accessible",       value: stats.accessible, icon: Navigation, cx: "bg-accent/15 text-accent" },
         ].map(({ label, value, icon: Icon, cx }) => (
-          <div key={label} className="bg-card rounded-2xl border border-border shadow-sm p-4 flex items-center justify-between">
+          <motion.div
+            key={label}
+            variants={{ hidden: { opacity: 0, y: 12 }, visible: { opacity: 1, y: 0 } }}
+            transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+            className="bg-card rounded-2xl border border-border shadow-sm p-4 flex items-center justify-between hover:shadow-md hover:-translate-y-0.5 transition-all duration-200"
+          >
             <div>
               <p className="text-xs font-bold text-muted-foreground uppercase tracking-wide">{label}</p>
               <p className="text-2xl font-extrabold text-foreground mt-1">{value}</p>
@@ -201,21 +230,26 @@ export function AdminRoutesPage() {
             <div className={cn("w-10 h-10 rounded-xl flex items-center justify-center shrink-0", cx)}>
               <Icon className="h-5 w-5" />
             </div>
-          </div>
+          </motion.div>
         ))}
-      </div>
+      </motion.div>
 
       {/* Filters */}
       <div className="flex flex-col sm:flex-row gap-3">
-        <div className="relative flex-1 max-w-sm">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <input type="text" placeholder="Search routes..." value={search} onChange={e => setSearch(e.target.value)}
-            className="w-full h-10 pl-9 pr-4 rounded-xl border border-border bg-card text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 text-sm" />
+        <div className="flex-1 max-w-sm">
+          <SearchBar
+            placeholder="Search routes..."
+            value={search}
+            onSearch={setSearch}
+            onClear={() => setSearch("")}
+            showShortcutHint
+            size="md"
+          />
         </div>
         <div className="flex gap-1.5">
           {["all", "walking", "accessible", "emergency"].map(t => (
-            <button key={t} onClick={() => setTypeFilter(t)}
-              className={cn("px-3 py-1.5 rounded-xl text-xs font-bold transition-all capitalize",
+            <button key={t} type="button" onClick={() => setTypeFilter(t)}
+              className={cn("px-3 py-1.5 rounded-xl text-xs font-bold transition-all capitalize active:scale-[0.97]",
                 typeFilter === t ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:bg-secondary")}>
               {t === "all" ? "All" : t}
             </button>
@@ -224,7 +258,12 @@ export function AdminRoutesPage() {
       </div>
 
       {/* Route grid */}
-      <div className="grid lg:grid-cols-2 gap-5">
+      <motion.div
+        initial="hidden"
+        animate="visible"
+        variants={{ visible: { transition: { staggerChildren: 0.05 } } }}
+        className="grid lg:grid-cols-2 gap-5"
+      >
         {filtered.map(route => {
           const cfg  = ROUTE_TYPE_CONFIG[route.type];
           const fromM = INITIAL_MARKERS.find(m => m.id === route.from_marker_id);
@@ -232,15 +271,19 @@ export function AdminRoutesPage() {
           const isPreviewing = previewId === route.id;
 
           return (
-            <div key={route.id}
-              className="bg-card rounded-2xl border border-border shadow-sm overflow-hidden hover:shadow-md transition-all">
+            <motion.div
+              key={route.id}
+              variants={{ hidden: { opacity: 0, y: 16 }, visible: { opacity: 1, y: 0 } }}
+              transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+              className="bg-card rounded-2xl border border-border shadow-sm overflow-hidden hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200"
+            >
               {/* Map preview */}
               <div className="relative h-36 bg-muted/30 overflow-hidden border-b border-border">
                 <MiniMapPreview route={route} />
                 <div className="absolute top-2 right-2 flex gap-1.5">
                   <button
                     onClick={() => toggleActive(route.id)}
-                    className={cn("text-xs font-bold px-2 py-1 rounded-lg transition-colors",
+                    className={cn("text-xs font-bold px-2 py-1 rounded-lg transition-all active:scale-[0.97]",
                       route.is_active
                         ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 hover:bg-green-200"
                         : "bg-muted text-muted-foreground hover:bg-secondary"
@@ -298,58 +341,78 @@ export function AdminRoutesPage() {
                 {/* Actions */}
                 <div className="flex gap-2 pt-2 border-t border-border">
                   <button onClick={() => openEdit(route)}
-                    className="flex-1 flex items-center justify-center gap-1.5 h-8 rounded-xl bg-muted text-foreground text-xs font-bold hover:bg-secondary transition-colors">
+                    className="flex-1 flex items-center justify-center gap-1.5 h-8 rounded-xl bg-muted text-foreground text-xs font-bold hover:bg-secondary active:scale-[0.97] transition-all">
                     <Pencil className="h-3.5 w-3.5" /> Edit
                   </button>
                   <button onClick={() => setDeleteId(route.id)}
-                    className="w-8 h-8 rounded-xl flex items-center justify-center text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors">
+                    className="w-8 h-8 rounded-xl flex items-center justify-center text-muted-foreground hover:bg-destructive/10 hover:text-destructive active:scale-90 transition-all">
                     <Trash2 className="h-3.5 w-3.5" />
                   </button>
                 </div>
               </div>
-            </div>
+            </motion.div>
           );
         })}
-      </div>
+      </motion.div>
 
       {filtered.length === 0 && (
-        <div className="flex flex-col items-center py-16 gap-3 text-center">
-          <div className="w-16 h-16 rounded-2xl bg-muted flex items-center justify-center">
-            <Route className="h-8 w-8 text-muted-foreground" />
-          </div>
-          <h3 className="font-extrabold text-foreground">No routes found</h3>
-          <p className="text-sm text-muted-foreground">Add a new route or adjust your filters.</p>
-        </div>
+        <EmptyState
+          icon={search || typeFilter !== "all" ? Search : Route}
+          title={search || typeFilter !== "all" ? "No matching routes" : "No routes yet"}
+          description={(search || typeFilter !== "all")
+            ? "No routes match your current filters. Try different search terms."
+            : "Create navigation routes between campus landmarks to help students navigate."
+          }
+          action={(search || typeFilter !== "all") ? (
+            <button
+              onClick={() => { setSearch(""); setTypeFilter("all"); }}
+              className="inline-flex items-center gap-2 h-10 px-5 rounded-xl border border-border text-sm font-bold text-foreground hover:bg-muted transition-all"
+            >
+              Clear Filters
+            </button>
+          ) : (
+            <Button variant="primary" size="sm" onClick={openAdd}>
+              <Plus className="h-3.5 w-3.5" /> Add Route
+            </Button>
+          )}
+        />
       )}
 
       {/* ── Add/Edit Modal */}
       {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-          <div className="bg-card rounded-3xl border border-border shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto animate-scale-in scrollbar-show-on-hover">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-border sticky top-0 bg-card rounded-t-3xl">
-              <h2 className="font-extrabold text-foreground">{editTarget ? "Edit Route" : "Add Route"}</h2>
-              <button onClick={() => setShowModal(false)} className="w-8 h-8 rounded-xl flex items-center justify-center text-muted-foreground hover:bg-muted">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in" role="dialog" aria-modal="true" aria-label="Route form">           <div className="bg-card rounded-2xl border border-border shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto animate-scale-in scrollbar-show-on-hover">
+             <div className="flex items-center justify-between px-6 py-4 border-b border-border sticky top-0 bg-card rounded-t-2xl z-10">
+              <h2 className="font-extrabold text-foreground text-sm">{editTarget ? "Edit Route" : "Add Route"}</h2>
+              <button type="button" aria-label="Close modal" onClick={() => setShowModal(false)} className="w-8 h-8 rounded-xl flex items-center justify-center text-muted-foreground hover:bg-muted">
                 <X className="h-4 w-4" />
               </button>
             </div>
             <div className="p-6 space-y-4">
               <div>
-                <label htmlFor="route-name" className="block text-xs font-bold text-foreground mb-1.5 uppercase tracking-wide">Route Name</label>
+                <label htmlFor="route-name" className="block text-xs font-bold text-foreground mb-1.5 uppercase tracking-wide">Route Name <span className="text-destructive">*</span></label>
                 <input id="route-name" type="text" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })}
                   placeholder="e.g. Main Gate to Library"
-                  className="w-full h-10 px-4 rounded-xl border border-border bg-input-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 text-sm" />
+                  className={"w-full h-10 px-4 rounded-xl border bg-input-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 text-sm " + (form.name.trim() ? "border-border" : "border-destructive/50")} />
+                <div className="flex items-center justify-between mt-1">
+                  <p className="text-[10px] text-muted-foreground">A clear, descriptive name for this navigation route</p>
+                  <span className="text-[10px] text-muted-foreground tabular-nums">{form.name.length}/{100}</span>
+                </div>
+                {!form.name.trim() && <p className="text-[10px] text-destructive mt-1 font-medium">Route name is required</p>}
               </div>
               <div>
-                <label htmlFor="route-description" className="block text-xs font-bold text-foreground mb-1.5 uppercase tracking-wide">Description (optional)</label>
+                <label htmlFor="route-description" className="block text-xs font-bold text-foreground mb-1.5 uppercase tracking-wide">Description</label>
                 <textarea id="route-description" value={form.description} onChange={e => setForm({ ...form, description: e.target.value })}
                   rows={2} placeholder="Describe this route..."
-                  className="w-full px-4 py-2.5 rounded-xl border border-border bg-input-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 text-sm resize-none" />
+                  className="w-full px-4 py-2.5 rounded-xl border border-border bg-input-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 text-sm resize-y min-h-[44px] transition-all duration-200" />
+                <div className="flex items-center justify-end mt-1">
+                  <span className="text-[10px] text-muted-foreground tabular-nums">{form.description.length}/{300}</span>
+                </div>
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label htmlFor="route-from" className="block text-xs font-bold text-foreground mb-1.5 uppercase tracking-wide">From</label>
                   <select id="route-from" value={form.from_marker_id} onChange={e => setForm({ ...form, from_marker_id: e.target.value })}
-                    className="w-full h-10 px-3 rounded-xl border border-border bg-input-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary/30">
+                    className="custom-select w-full h-10 px-4 rounded-xl border border-border bg-input-background text-foreground text-sm">
                     {INITIAL_MARKERS.map(m => (
                       <option key={m.id} value={m.id}>{m.name}</option>
                     ))}
@@ -358,7 +421,7 @@ export function AdminRoutesPage() {
                 <div>
                   <label htmlFor="route-to" className="block text-xs font-bold text-foreground mb-1.5 uppercase tracking-wide">To</label>
                   <select id="route-to" value={form.to_marker_id} onChange={e => setForm({ ...form, to_marker_id: e.target.value })}
-                    className="w-full h-10 px-3 rounded-xl border border-border bg-input-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary/30">
+                    className="custom-select w-full h-10 px-4 rounded-xl border border-border bg-input-background text-foreground text-sm">
                     {INITIAL_MARKERS.map(m => (
                       <option key={m.id} value={m.id}>{m.name}</option>
                     ))}
@@ -383,7 +446,7 @@ export function AdminRoutesPage() {
                   })}
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label htmlFor="route-distance" className="block text-xs font-bold text-foreground mb-1.5 uppercase tracking-wide">Distance (m)</label>
                   <input id="route-distance" type="number" min={0} value={form.distance_m}
@@ -422,16 +485,15 @@ export function AdminRoutesPage() {
 
       {/* ── Delete confirm */}
       {deleteId && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-          <div className="bg-card rounded-2xl border border-border shadow-2xl w-full max-w-sm p-6 text-center animate-scale-in">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="Confirm delete route">           <div className="bg-card rounded-2xl border border-border shadow-2xl w-full max-w-sm p-6 text-center animate-scale-in">
             <div className="w-14 h-14 rounded-2xl bg-destructive/10 flex items-center justify-center mx-auto mb-4">
               <Trash2 className="h-7 w-7 text-destructive" />
             </div>
             <h3 className="font-extrabold text-foreground mb-1">Delete Route?</h3>
-            <p className="text-sm text-muted-foreground mb-5">This navigation route will be permanently removed.</p>
+            <p className="text-sm text-muted-foreground mb-5">This navigation route will be permanently removed. All waypoints and directions will be lost. Consider deactivating it instead if it may be needed again.</p>
             <div className="flex gap-3">
               <Button variant="outline" onClick={() => setDeleteId(null)} className="flex-1">Cancel</Button>
-              <Button variant="danger" onClick={() => { setRoutes(p => p.filter(r => r.id !== deleteId)); setDeleteId(null); }} className="flex-1">Delete</Button>
+              <Button variant="danger" onClick={() => { const deleted = routes.find(r => r.id === deleteId); setRoutes(p => p.filter(r => r.id !== deleteId)); setDeleteId(null); if (deleted) toast.success("Route deleted", `${deleted.name} has been removed.`); }} className="flex-1">Delete Route</Button>
             </div>
           </div>
         </div>

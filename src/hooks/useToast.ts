@@ -1,6 +1,6 @@
 import { toast } from "sonner";
 
-type ToastVariant = "success" | "error" | "info" | "loading";
+type ToastVariant = "success" | "error" | "warning" | "info" | "loading";
 
 interface ToastOptions {
   description?: string;
@@ -30,6 +30,14 @@ export function useToast() {
         break;
       case "error":
         toast.error(message, {
+          description,
+          duration,
+          action: action ? { label: action.label, onClick: action.onClick } : undefined,
+          className: "font-semibold",
+        });
+        break;
+      case "warning":
+        toast.warning(message, {
           description,
           duration,
           action: action ? { label: action.label, onClick: action.onClick } : undefined,
@@ -76,6 +84,10 @@ export function useToast() {
       typeof options === "string"
         ? showToast(message, "info", { description: options })
         : showToast(message, "info", options as ToastOptions),
+    warning: (message: string, options?: ToastOptions | string) =>
+      typeof options === "string"
+        ? showToast(message, "warning", { description: options })
+        : showToast(message, "warning", options as ToastOptions),
     loading: (message: string, options?: ToastOptions | string) =>
       typeof options === "string"
         ? showToast(message, "loading", { description: options })

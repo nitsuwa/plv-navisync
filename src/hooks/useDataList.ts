@@ -32,6 +32,8 @@ interface UseDataListReturn<T> {
   setFilter: (f: Record<string, string> | undefined) => void;
   refresh: () => void;
   reload: () => void;
+  /** Re-run the current query (useful for retrying after an error) */
+  retry: () => void;
 }
 
 /**
@@ -63,6 +65,7 @@ export function useDataList<T>(options: UseDataListOptions<T>): UseDataListRetur
   const [filter, setFilterState] = useState<Record<string, string> | undefined>(undefined);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>();
   const [debouncedSearch, setDebouncedSearch] = useState("");
+  const mountedRef = useRef(true);
 
   // Debounce search
   const setSearch = useCallback((q: string) => {
@@ -90,19 +93,23 @@ export function useDataList<T>(options: UseDataListOptions<T>): UseDataListRetur
         search: debouncedSearch,
         filter,
       });
+      if (!mountedRef.current) return;
       setData(result.data);
       setTotal(result.total);
       setTotalPages(result.totalPages);
     } catch (err: unknown) {
+      if (!mountedRef.current) return;
       const message = err instanceof Error ? err.message : "Failed to fetch data";
       setError(message);
     } finally {
-      setLoading(false);
+      if (mountedRef.current) setLoading(false);
     }
   }, [fetcher, page, pageSize, debouncedSearch, filter]);
 
   useEffect(() => {
+    mountedRef.current = true;
     if (autoLoad) fetchData();
+    return () => { mountedRef.current = false; };
   }, [fetchData, autoLoad]);
 
   const refresh = useCallback(() => { fetchData(); }, [fetchData]);
@@ -117,5 +124,6 @@ export function useDataList<T>(options: UseDataListOptions<T>): UseDataListRetur
     search, page, pageSize, total, totalPages,
     setSearch, setPage, setPageSize, setFilter,
     refresh, reload,
+    retry: fetchData,
   };
 }

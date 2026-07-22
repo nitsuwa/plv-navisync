@@ -1,6 +1,7 @@
 import { MapPin, Clock, Phone, ChevronRight, Building2 } from "lucide-react";
 import { Link } from "react-router";
-import { useRef, useCallback, useEffect, useState } from "react";
+import { memo, useRef, useCallback, useEffect, useState } from "react";
+import { motion, useReducedMotion } from "motion/react";
 import type { Building } from "../../types";
 import { BuildingCategoryBadge } from "./Badge";
 import { cn } from "../../lib/utils";
@@ -10,8 +11,9 @@ interface BuildingCardProps {
   className?: string;
 }
 
-export function BuildingCard({ building, className }: BuildingCardProps) {
+const BuildingCardInner = memo(function BuildingCardInner({ building, className }: BuildingCardProps) {
   const innerRef = useRef<HTMLDivElement>(null);
+  const shouldReduce = useReducedMotion();
   const [reducedMotion, setReducedMotion] = useState(false);
 
   useEffect(() => {
@@ -42,6 +44,12 @@ export function BuildingCard({ building, className }: BuildingCardProps) {
   }, []);
 
   return (
+    <motion.div
+      initial={shouldReduce ? false : { opacity: 0, y: 20, scale: 0.97 }}
+      whileInView={shouldReduce ? undefined : { opacity: 1, y: 0, scale: 1 }}
+      viewport={{ once: true, margin: "-40px" }}
+      transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+    >
     <Link
       to={`/buildings/${building.id}`}
       onMouseMove={handleMouseMove}
@@ -50,7 +58,7 @@ export function BuildingCard({ building, className }: BuildingCardProps) {
     >
       <div
         ref={innerRef}
-        className="flex flex-col rounded-2xl border border-border bg-card shadow-sm overflow-hidden hover:shadow-xl"
+        className="flex flex-col rounded-2xl border border-border bg-card shadow-sm overflow-hidden hover:shadow-xl transition-shadow duration-200"
         style={{
           transform: "perspective(800px) rotateX(var(--tilt-y, 0deg)) rotateY(var(--tilt-x, 0deg))",
           transition: "transform 0.5s cubic-bezier(0.16,1,0.3,1), box-shadow 0.3s ease",
@@ -59,11 +67,23 @@ export function BuildingCard({ building, className }: BuildingCardProps) {
       {/* Image */}
       <div className="relative h-44 overflow-hidden bg-muted shrink-0">
         {building.image_url ? (
-          <img
-            src={building.image_url}
-            alt={building.name}
-            className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
-          />
+          <>
+            <img
+              src={building.image_url}
+              alt={building.name}
+              loading="lazy"
+              onError={(e) => {
+                const img = e.currentTarget;
+                img.style.display = 'none';
+                const fb = img.parentElement?.querySelector('.img-fallback');
+                if (fb) (fb as HTMLElement).style.display = 'flex';
+              }}
+              className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+            />
+            <div className="img-fallback absolute inset-0 items-center justify-center bg-gradient-to-br from-secondary to-muted" style={{ display: 'none' }}>
+              <Building2 className="h-12 w-12 text-muted-foreground/40" />
+            </div>
+          </>
         ) : (
           <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-secondary to-muted">
             <Building2 className="h-12 w-12 text-muted-foreground/40" />
@@ -76,7 +96,7 @@ export function BuildingCard({ building, className }: BuildingCardProps) {
         <div className="absolute top-3 left-3">
           <BuildingCategoryBadge category={building.category} />
         </div>
-        <div className="absolute top-3 right-3 bg-primary/90 backdrop-blur-sm text-primary-foreground text-xs font-mono font-bold px-2.5 py-1 rounded-lg shadow-sm">
+        <div className="absolute top-3 right-3 bg-primary/90 backdrop-blur-sm text-primary-foreground text-xs font-mono font-bold px-2.5 py-1 rounded-xl shadow-sm">
           {building.code}
         </div>
       </div>
@@ -115,8 +135,10 @@ export function BuildingCard({ building, className }: BuildingCardProps) {
             <ChevronRight className="h-3.5 w-3.5 text-primary group-hover:text-white transition-colors" />
           </div>
         </div>
-      </div>
-    </div>
+      </div>      </div>
     </Link>
+    </motion.div>
   );
-}
+});
+
+export { BuildingCardInner as BuildingCard };

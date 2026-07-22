@@ -36,16 +36,17 @@ export const STORAGE_KEYS = {
 
 // ── Route labels for the admin breadcrumb ─────────────────────────────────
 export const ROUTE_LABELS: Record<string, string> = {
-  "/admin/dashboard":     "Dashboard",
-  "/admin/buildings":     "Buildings",
-  "/admin/announcements": "Announcements",
-  "/admin/locations":     "Campus Assets",
-  "/admin/users":         "Users",
-  "/admin/settings":      "Settings",
-  "/admin/map-builder":   "Map Builder",
-  "/admin/floor-plans":   "Floor Plans",
-  "/admin/routes":        "Routes & Pathfinding",
-  "/admin/reports":       "Student Reports",
-  "/admin/accessibility": "Accessibility Management",
-  "/admin/events":        "Event Map Management",
+  "/admin-dashboard":                "Dashboard",
+  "/admin-dashboard/map-builder":    "Map Builder",
+  "/admin-dashboard/announcements":  "Announcements",
+  "/admin-dashboard/reports":        "Reports",
+  "/admin-dashboard/users":          "Users",
+  "/admin-dashboard/settings":       "Settings",
+  // Legacy pages still reachable by URL
+  "/admin-dashboard/buildings":      "Buildings",
+  "/admin-dashboard/floor-plans":    "Floor Plans",
+  "/admin-dashboard/routes":         "Routes",
+  "/admin-dashboard/locations":      "Campus Locations",
+  "/admin-dashboard/accessibility":  "Accessibility",
+  "/admin-dashboard/events":         "Event Maps",
 };

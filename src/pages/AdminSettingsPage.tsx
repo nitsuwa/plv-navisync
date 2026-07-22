@@ -123,7 +123,7 @@ export function AdminSettingsPage() {
         {TABS.map(({ id, label, icon: Icon }) => (
           <button key={id} onClick={() => setActiveTab(id)}
             className={cn(
-              "flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold transition-all whitespace-nowrap",
+              "flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold transition-all whitespace-nowrap active:scale-[0.97]",
               activeTab === id ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
             )}>
             <Icon className="h-3.5 w-3.5" /> {label}
@@ -140,26 +140,25 @@ export function AdminSettingsPage() {
               <div className="flex-1 space-y-3">
                 <div>
                   <label htmlFor="site-name" className="block text-xs font-bold text-foreground mb-1.5 uppercase tracking-wide">Site Name</label>
-                  <input id="site-name" type="text" value={siteName} onChange={(e) => setSiteName(e.target.value)}
-                    className="w-full h-10 px-4 rounded-xl border border-border bg-input-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary text-sm" />
+                  <input id="site-name" type="text" value={siteName} onChange={(e) => setSiteName(e.target.value)} placeholder="e.g. PLV NaviSync"
+                    className="w-full h-10 px-4 rounded-xl border border-border bg-input-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary text-sm" />
                 </div>
                 <div>
                   <label htmlFor="site-tagline" className="block text-xs font-bold text-foreground mb-1.5 uppercase tracking-wide">Tagline</label>
-                  <input id="site-tagline" type="text" value={siteTagline} onChange={(e) => setSiteTagline(e.target.value)}
-                    className="w-full h-10 px-4 rounded-xl border border-border bg-input-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary text-sm" />
+                  <input id="site-tagline" type="text" value={siteTagline} onChange={(e) => setSiteTagline(e.target.value)} placeholder="e.g. Smart Campus Navigator"
+                    className="w-full h-10 px-4 rounded-xl border border-border bg-input-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary text-sm" />
                 </div>
               </div>
             </div>
             <div className="space-y-3">
               <div>
                 <label htmlFor="contact-email" className="block text-xs font-bold text-foreground mb-1.5 uppercase tracking-wide">Contact Email</label>
-                <input id="contact-email" type="email" value={contactEmail} onChange={(e) => setContactEmail(e.target.value)}
-                  className="w-full h-10 px-4 rounded-xl border border-border bg-input-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary text-sm" />
+                <input id="contact-email" type="email" value={contactEmail} onChange={(e) => setContactEmail(e.target.value)} placeholder="navisync@plv.edu.ph"
+                  className="w-full h-10 px-4 rounded-xl border border-border bg-input-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary text-sm" />
               </div>
               <div>
-                <label htmlFor="campus-address" className="block text-xs font-bold text-foreground mb-1.5 uppercase tracking-wide">Campus Address</label>
-                <input id="campus-address" type="text" value={campusAddress} onChange={(e) => setCampusAddress(e.target.value)}
-                  className="w-full h-10 px-4 rounded-xl border border-border bg-input-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary text-sm" />
+                <label htmlFor="campus-address" className="block text-xs font-bold text-foreground mb-1.5 uppercase tracking-wide">Campus Address</label><input id="campus-address" type="text" value={campusAddress} onChange={(e) => setCampusAddress(e.target.value)} placeholder="Street, Building, Barangay"
+                    className="w-full h-10 px-4 rounded-xl border border-border bg-input-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary text-sm" />
               </div>
             </div>
           </SectionCard>
@@ -168,13 +167,13 @@ export function AdminSettingsPage() {
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label htmlFor="default-latitude" className="block text-xs font-bold text-foreground mb-1.5 uppercase tracking-wide">Default Latitude</label>
-                <input id="default-latitude" type="number" defaultValue="14.7116" step="0.0001"
-                  className="w-full h-10 px-4 rounded-xl border border-border bg-input-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 font-mono text-sm" />
+                <input id="default-latitude" type="number" defaultValue="14.7116" step="0.0001" placeholder="14.7116"
+                  className="w-full h-10 px-4 rounded-xl border border-border bg-input-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 font-mono text-sm" />
               </div>
               <div>
                 <label htmlFor="default-longitude" className="block text-xs font-bold text-foreground mb-1.5 uppercase tracking-wide">Default Longitude</label>
-                <input id="default-longitude" type="number" defaultValue="120.9660" step="0.0001"
-                  className="w-full h-10 px-4 rounded-xl border border-border bg-input-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 font-mono text-sm" />
+                <input id="default-longitude" type="number" defaultValue="120.9660" step="0.0001" placeholder="120.9660"
+                  className="w-full h-10 px-4 rounded-xl border border-border bg-input-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 font-mono text-sm" />
               </div>
             </div>
           </SectionCard>
@@ -217,7 +216,7 @@ export function AdminSettingsPage() {
             </SettingRow>
             <SettingRow label="Session Timeout" description="Auto-logout after inactivity (minutes)">
               <select id="security-timeout" value={security.sessionTimeout} onChange={(e) => setSecurity({ ...security, sessionTimeout: e.target.value })}
-                className="h-9 px-3 rounded-xl border border-border bg-input-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary/30">
+                className="h-9 px-3 rounded-xl border border-border bg-input-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 custom-select">
                 {["15", "30", "60", "120"].map((v) => (
                   <option key={v} value={v}>{v} min</option>
                 ))}
@@ -225,7 +224,7 @@ export function AdminSettingsPage() {
             </SettingRow>
             <SettingRow label="Max Login Attempts" description="Lock account after N failed attempts">
               <select id="security-attempts" value={security.loginAttempts} onChange={(e) => setSecurity({ ...security, loginAttempts: e.target.value })}
-                className="h-9 px-3 rounded-xl border border-border bg-input-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary/30">
+                className="h-9 px-3 rounded-xl border border-border bg-input-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 custom-select">
                 {["3", "5", "10"].map((v) => (
                   <option key={v} value={v}>{v} attempts</option>
                 ))}
@@ -252,7 +251,7 @@ export function AdminSettingsPage() {
         <SectionCard title="Display Preferences" description="Customize the look of PLV NaviSync.">
           <SettingRow label="Default Theme" description="Initial theme for new visitors">
             <select id="appearance-theme" value={appearance.defaultTheme} onChange={(e) => setAppearance({ ...appearance, defaultTheme: e.target.value })}
-              className="h-9 px-3 rounded-xl border border-border bg-input-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary/30">
+              className="h-9 px-3 rounded-xl border border-border bg-input-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 custom-select">
               <option value="light">Light</option>
               <option value="dark">Dark</option>
               <option value="system">System</option>

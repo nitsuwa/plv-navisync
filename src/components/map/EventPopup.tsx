@@ -1,4 +1,5 @@
 import { X, CalendarDays, MapPin, Navigation } from "lucide-react";
+import { motion } from "motion/react";
 
 interface EventData {
   id: string;
@@ -20,12 +21,23 @@ interface EventPopupProps {
 
 export function EventPopup({ event, onClose, onNavigate }: EventPopupProps) {
   return (
-    <div
-      className="absolute inset-0 z-50 flex items-end sm:items-center justify-center bg-background/60 backdrop-blur-sm animate-fade-in"
+    <motion.div
+      role="dialog"
+      aria-modal="true"
+      aria-label={event.title}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.2 }}
+      className="absolute inset-0 z-50 flex items-end sm:items-center justify-center bg-background/60 backdrop-blur-sm"
       onClick={onClose}
     >
-      <div
-        className="bg-card border border-border rounded-t-3xl sm:rounded-3xl shadow-2xl w-full sm:max-w-sm mx-0 sm:mx-4 p-5 animate-slide-up"
+      <motion.div
+        initial={{ opacity: 0, y: 20, scale: 0.95 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        exit={{ opacity: 0, y: 10, scale: 0.95 }}
+        transition={{ type: "spring", duration: 0.4, bounce: 0.25 }}
+        className="bg-card border border-border rounded-t-2xl sm:rounded-2xl shadow-2xl w-full sm:max-w-sm mx-0 sm:mx-4 p-5"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-start justify-between mb-3">
@@ -35,11 +47,11 @@ export function EventPopup({ event, onClose, onNavigate }: EventPopupProps) {
               Campus Event
             </span>
           </div>
-          <button onClick={onClose} className="w-7 h-7 rounded-xl bg-muted flex items-center justify-center">
+          <button onClick={onClose} aria-label="Close event popup" className="w-7 h-7 rounded-lg bg-muted flex items-center justify-center hover:bg-secondary active:scale-90 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
             <X className="h-3.5 w-3.5 text-muted-foreground" />
           </button>
         </div>
-        <h3 className="font-extrabold text-foreground text-base mb-2" style={{ fontFamily: "var(--font-sans)" }}>
+        <h3 className="font-extrabold text-foreground text-base mb-2">
           {event.title}
         </h3>
         <div className="flex items-center gap-4 mb-3">
@@ -56,11 +68,11 @@ export function EventPopup({ event, onClose, onNavigate }: EventPopupProps) {
         </p>
         <button
           onClick={onNavigate}
-          className="w-full h-10 rounded-xl bg-primary text-primary-foreground text-sm font-bold flex items-center justify-center gap-2 hover:bg-primary/90 transition-colors"
+          className="w-full h-10 rounded-xl bg-primary text-primary-foreground text-sm font-bold flex items-center justify-center gap-2 hover:bg-primary/90 active:scale-[0.98] transition-all"
         >
           <Navigation className="h-4 w-4" /> Navigate to {event.venue}
         </button>
-      </div>
-    </div>
+      </motion.div>
+    </motion.div>
   );
 }

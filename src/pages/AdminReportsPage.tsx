@@ -1,12 +1,16 @@
 import { useState, useEffect } from "react";
+import { motion, AnimatePresence } from "motion/react";
+import { SPRING, DURATION } from "../config/animation";
 import {
   Flag, MapPin, Clock, CheckCircle2, XCircle, AlertCircle,
   Search, Eye, ExternalLink, ChevronDown, Image, Filter,
 } from "lucide-react";
+import { SearchBar } from "../components/ui/SearchBar";
 import { cn } from "../lib/utils";
 import { Link } from "react-router";
 import { ReportsSkeleton } from "../components/ui/PageSkeleton";
 import { useToast } from "../hooks/useToast";
+import { EmptyState } from "../components/ui/EmptyState";
 
 // ── Mock report data ───────────────────────────────────────────────────────
 type ReportStatus = "pending" | "investigating" | "approved" | "rejected" | "resolved";
@@ -57,10 +61,15 @@ function ReportDetailModal({ report, onClose, onStatusChange }: {
   const [showStatusMenu, setShowStatusMenu] = useState(false);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/70 backdrop-blur-sm animate-fade-in p-4"
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/70 backdrop-blur-sm p-4"
       onClick={onClose}>
-      <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden animate-scale-in"
-        onClick={e => e.stopPropagation()}>
+      <motion.div
+        initial={{ opacity: 0, scale: 0.92, y: 20 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        transition={{ type: "spring", duration: 0.4, bounce: 0.25 }}
+        className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden"
+        onClick={e => e.stopPropagation()}
+      >
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-border">
           <div className="flex items-center gap-3">
@@ -68,14 +77,14 @@ function ReportDetailModal({ report, onClose, onStatusChange }: {
               <Flag className="h-4 w-4 text-destructive"/>
             </div>
             <div>
-              <h3 className="font-extrabold text-foreground text-sm" style={{ fontFamily:"var(--font-sans)" }}>
+              <h3 className="font-extrabold text-foreground text-sm">
                 {report.type}
               </h3>
               <p className="text-[11px] text-muted-foreground">Report #{report.id}</p>
             </div>
           </div>
           <button onClick={onClose}
-            className="w-8 h-8 rounded-xl bg-muted flex items-center justify-center hover:bg-secondary transition-colors text-muted-foreground">
+            className="w-8 h-8 rounded-xl bg-muted flex items-center justify-center hover:bg-secondary active:scale-90 transition-all text-muted-foreground">
             <XCircle className="h-4 w-4"/>
           </button>
         </div>
@@ -98,7 +107,7 @@ function ReportDetailModal({ report, onClose, onStatusChange }: {
           {/* Description */}
           <div>
             <p className="text-[10px] font-extrabold text-muted-foreground uppercase tracking-widest mb-2">Description</p>
-            <p className="text-sm text-foreground leading-relaxed" style={{ fontFamily:"var(--font-body)" }}>
+            <p className="text-sm text-foreground leading-relaxed">
               {report.description}
             </p>
           </div>
@@ -130,13 +139,13 @@ function ReportDetailModal({ report, onClose, onStatusChange }: {
             className="flex items-center gap-1.5 h-9 px-3 rounded-xl border border-border text-xs font-bold text-foreground hover:bg-muted transition-colors">
             <ExternalLink className="h-3.5 w-3.5"/> View on Map
           </Link>
-          <Link to="/admin/map-builder"
+          <Link to="/admin-dashboard/map-builder"
             className="flex items-center gap-1.5 h-9 px-3 rounded-xl border border-border text-xs font-bold text-foreground hover:bg-muted transition-colors">
             <MapPin className="h-3.5 w-3.5"/> Fix in Map Builder
           </Link>
           <div className="relative ml-auto">
             <button onClick={() => setShowStatusMenu(v => !v)}
-              className="flex items-center gap-1.5 h-9 px-4 rounded-xl bg-primary text-primary-foreground text-xs font-bold hover:bg-primary/90 transition-colors">
+              className="flex items-center gap-1.5 h-9 px-4 rounded-xl bg-primary text-primary-foreground text-xs font-bold hover:bg-primary/90 active:scale-[0.97] transition-all">
               Change Status <ChevronDown className="h-3 w-3"/>
             </button>
             {showStatusMenu && (
@@ -156,7 +165,7 @@ function ReportDetailModal({ report, onClose, onStatusChange }: {
             )}
           </div>
         </div>
-      </div>
+      </motion.div>
     </div>
   );
 }
@@ -218,10 +227,10 @@ export function AdminReportsPage() {
       {/* Header */}
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-extrabold text-foreground" style={{ fontFamily:"var(--font-sans)" }}>
+          <h1 className="text-2xl font-extrabold text-foreground">
             Student Reports
           </h1>
-          <p className="text-sm text-muted-foreground mt-0.5" style={{ fontFamily:"var(--font-body)" }}>
+          <p className="text-sm text-muted-foreground mt-0.5">
             Review and resolve campus issues reported by students. Reports help keep the navigation system accurate.
           </p>
         </div>
@@ -236,19 +245,29 @@ export function AdminReportsPage() {
       </div>
 
       {/* Summary cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <motion.div
+        initial="hidden"
+        animate="visible"
+        variants={{ visible: { transition: { staggerChildren: 0.06 } } }}
+        className="grid grid-cols-2 sm:grid-cols-4 gap-3"
+      >
         {[
           { label:"Total Reports",    value:counts.all,           color:"text-foreground",                          bg:"bg-muted/50"          },
           { label:"Pending Review",   value:counts.pending,       color:"text-amber-600 dark:text-amber-400",        bg:"bg-amber-50 dark:bg-amber-900/15" },
           { label:"Investigating",    value:counts.investigating,  color:"text-blue-600 dark:text-blue-400",          bg:"bg-blue-50 dark:bg-blue-900/15"   },
           { label:"Resolved",         value:counts.resolved,       color:"text-green-600 dark:text-green-400",        bg:"bg-green-50 dark:bg-green-900/15" },
         ].map(c => (
-          <div key={c.label} className={cn("rounded-2xl border border-border p-4", c.bg)}>
+          <motion.div
+            key={c.label}
+            variants={{ hidden: { opacity: 0, y: 12 }, visible: { opacity: 1, y: 0 } }}
+            transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+            className={cn("rounded-2xl border border-border p-4 hover:shadow-md hover:-translate-y-0.5 transition-all duration-200", c.bg)}
+          >
             <p className={cn("text-2xl font-extrabold", c.color)}>{c.value}</p>
-            <p className="text-xs text-muted-foreground mt-0.5" style={{ fontFamily:"var(--font-body)" }}>{c.label}</p>
-          </div>
+            <p className="text-xs text-muted-foreground mt-0.5">{c.label}</p>
+          </motion.div>
         ))}
-      </div>
+      </motion.div>
 
       {/* Filters */}
       <div className="bg-card rounded-2xl border border-border shadow-sm">
@@ -271,30 +290,51 @@ export function AdminReportsPage() {
           <div className="flex items-center gap-2 sm:ml-auto">
             {/* Type filter */}
             <select value={typeFilter} onChange={e => setTypeFilter(e.target.value)}
-              className="h-9 px-3 rounded-xl border border-border bg-input-background text-foreground text-xs focus:outline-none focus:ring-2 focus:ring-primary/30"
+              className="custom-select h-10 px-4 rounded-xl border border-border bg-input-background text-foreground text-sm"
               style={{ fontFamily:"var(--font-body)" }}>
               {ISSUE_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
             </select>
 
-            {/* Search */}
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none"/>
-              <input type="text" value={search} onChange={e => setSearch(e.target.value)}
+            <div className="w-48">
+              <SearchBar
                 placeholder="Search reports…"
-                className="h-9 pl-8 pr-3 rounded-xl border border-border bg-input-background text-foreground text-xs focus:outline-none focus:ring-2 focus:ring-primary/30 w-40"
-                style={{ fontFamily:"var(--font-body)" }}/>
+                value={search}
+                onSearch={setSearch}
+                onClear={() => setSearch("")}
+                size="md"
+              />
             </div>
           </div>
         </div>
 
         {/* Reports table */}
         {filtered.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-16 gap-3">
-            <Filter className="h-8 w-8 text-muted-foreground/30"/>
-            <p className="text-sm font-bold text-muted-foreground">No reports match your filters</p>
-          </div>
+          <EmptyState
+            icon={search || typeFilter !== "All Types" || statusFilter !== "all" ? Search : Flag}
+            title={search || typeFilter !== "All Types" || statusFilter !== "all"
+              ? "No matching reports"
+              : "No reports yet"
+            }
+            description={(search || typeFilter !== "All Types" || statusFilter !== "all")
+              ? "We couldn't find any reports matching your filters. Try different search terms or clear the filters to see all reports."
+              : "Student-submitted reports about campus issues, accessibility concerns, and navigation inaccuracies will appear here for review and resolution. Reports are submitted from the campus map and help center."
+            }
+            action={(search || typeFilter !== "All Types" || statusFilter !== "all") ? (
+              <button
+                onClick={() => { setSearch(""); setTypeFilter("All Types"); setStatusFilter("all"); }}
+                className="inline-flex items-center gap-2 h-10 px-5 rounded-xl border border-border text-sm font-bold text-foreground hover:bg-muted transition-all"
+              >
+                Clear Filters
+              </button>
+            ) : undefined}
+          />
         ) : (
-          <div className="divide-y divide-border">
+          <motion.div
+            initial="hidden"
+            animate="visible"
+            variants={{ visible: { transition: { staggerChildren: 0.04 } } }}
+            className="divide-y divide-border"
+          >
             {filtered.map(report => {
               const cfg = STATUS_CONFIG[report.status];
               const StatusIcon = cfg.icon;
@@ -319,7 +359,7 @@ export function AdminReportsPage() {
                       <MapPin className="h-3 w-3 text-primary shrink-0"/>
                       <span className="truncate">{report.building} · {report.locationDetail}</span>
                     </div>
-                    <p className="text-xs text-muted-foreground line-clamp-1" style={{ fontFamily:"var(--font-body)" }}>
+                    <p className="text-xs text-muted-foreground line-clamp-1">
                       {report.description}
                     </p>
                   </div>
@@ -339,7 +379,7 @@ export function AdminReportsPage() {
                 </div>
               );
             })}
-          </div>
+          </motion.div>
         )}
       </div>
 

@@ -1,7 +1,10 @@
-import { useState } from "react";
-import { Bell, AlertTriangle, Filter, Search } from "lucide-react";
+import { useState, useEffect } from "react";
+import { Bell, AlertTriangle, Filter, Search, Circle, Megaphone } from "lucide-react";
 import { AnnouncementCard } from "../components/ui/AnnouncementCard";
+import { SearchBar } from "../components/ui/SearchBar";
 import { MOCK_ANNOUNCEMENTS } from "../data/mockData";
+import { SkeletonList } from "../components/ui/Skeleton";
+import { EmptyState } from "../components/ui/EmptyState";
 import { cn } from "../lib/utils";
 
 const CATEGORIES = [
@@ -13,18 +16,33 @@ const CATEGORIES = [
   { value: "maintenance", label: "Maintenance" },
 ];
 
+const PRIORITY_COLORS: Record<string, string> = {
+  urgent: "text-red-500",
+  high: "text-yellow-500",
+  normal: "text-blue-500",
+  low: "text-slate-400",
+};
+
 const PRIORITIES = [
   { value: "all", label: "All Priorities" },
-  { value: "urgent", label: "🔴 Urgent" },
-  { value: "high", label: "🟡 High" },
-  { value: "normal", label: "🔵 Normal" },
-  { value: "low", label: "⚪ Low" },
+  { value: "urgent", label: "Urgent" },
+  { value: "high", label: "High" },
+  { value: "normal", label: "Normal" },
+  { value: "low", label: "Low" },
 ];
 
 export function AnnouncementsPage() {
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("all");
   const [priority, setPriority] = useState("all");
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const t = setTimeout(() => setLoading(false), 300);
+    return () => clearTimeout(t);
+  }, []);
+
+  if (loading) return <SkeletonList count={5} />;
 
   const urgent = MOCK_ANNOUNCEMENTS.filter((a) => a.priority === "urgent");
   const filtered = MOCK_ANNOUNCEMENTS.filter((a) => {
@@ -69,14 +87,14 @@ export function AnnouncementsPage() {
 
       {/* Filters */}
       <div className="bg-card rounded-2xl border border-border shadow-sm p-4 mb-6 space-y-3">
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
+        <div className="max-w-sm">
+          <SearchBar
             placeholder="Search announcements..."
-            className="w-full h-10 pl-9 pr-4 rounded-xl border border-border bg-input-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary text-sm transition-all"
+            value={search}
+            onSearch={setSearch}
+            onClear={() => setSearch("")}
+            showShortcutHint
+            size="md"
           />
         </div>
 
@@ -97,9 +115,10 @@ export function AnnouncementsPage() {
           {PRIORITIES.map(({ value, label }) => (
             <button key={value} onClick={() => setPriority(value)}
               className={cn(
-                "px-3 py-1.5 rounded-lg text-xs font-medium border transition-all",
-                priority === value ? "border-primary bg-primary/8 text-primary font-bold" : "border-border text-muted-foreground hover:border-primary/30"
+                "px-3 py-1.5 rounded-lg text-xs font-bold border transition-all flex items-center gap-1.5",
+                priority === value ? "border-primary bg-primary/8 text-primary" : "border-border text-muted-foreground hover:border-primary/30"
               )}>
+              {value !== "all" && <Circle className={cn("h-2.5 w-2.5 fill-current", PRIORITY_COLORS[value])} />}
               {label}
             </button>
           ))}
@@ -119,16 +138,22 @@ export function AnnouncementsPage() {
           ))}
         </div>
       ) : (
-        <div className="flex flex-col items-center justify-center py-16 gap-4 text-center">
-          <div className="w-16 h-16 rounded-2xl bg-muted flex items-center justify-center">
-            <Bell className="h-8 w-8 text-muted-foreground" />
-          </div>
-          <h3 className="font-bold text-foreground">No announcements found</h3>
-          <p className="text-sm text-muted-foreground">Try adjusting your search or filter.</p>
-          <button onClick={() => { setSearch(""); setCategory("all"); setPriority("all"); }} className="text-sm text-primary font-bold hover:underline">
-            Clear all filters
-          </button>
-        </div>
+        <EmptyState
+          icon={(search || category !== "all" || priority !== "all") ? Search : Megaphone}
+          title={(search || category !== "all" || priority !== "all") ? "No matching announcements" : "No announcements yet"}
+          description={(search || category !== "all" || priority !== "all")
+            ? "We couldn't find any announcements matching your search or filters. Try different keywords or adjust the filters above."
+            : "There are no announcements at the moment. Official notices, events, and updates from PLV will appear here when posted."
+          }
+          action={(search || category !== "all" || priority !== "all") ? (
+            <button
+              onClick={() => { setSearch(""); setCategory("all"); setPriority("all"); }}
+              className="inline-flex items-center gap-2 h-10 px-5 rounded-xl bg-primary text-primary-foreground text-sm font-bold hover:bg-primary/90 transition-all shadow-sm"
+            >
+              Clear all filters
+            </button>
+          ) : undefined}
+        />
       )}
     </div>
   );

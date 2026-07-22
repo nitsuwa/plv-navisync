@@ -28,6 +28,33 @@ export default defineConfig({
     alias: {
       // Alias @ to the src directory
       '@': path.resolve(__dirname, './src'),
+      react: path.resolve(__dirname, 'node_modules/react'),
+      'react-dom': path.resolve(__dirname, 'node_modules/react-dom'),
+    },
+    dedupe: ['react', 'react-dom'],
+  },
+  optimizeDeps: {
+    force: true,
+    include: ['react', 'react-dom', 'react-router'],
+  },
+
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          // Core framework — rarely changes, optimal caching
+          'vendor-react': ['react', 'react-dom'],
+          'vendor-router': ['react-router'],
+          // Animation library
+          'vendor-motion': ['motion'],
+          // UI icon library (large)
+          'vendor-icons': ['lucide-react'],
+          // Charting
+          'vendor-charts': ['recharts'],
+          // Date utilities
+          'vendor-dates': ['date-fns'],
+        },
+      },
     },
   },
 

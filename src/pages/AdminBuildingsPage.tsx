@@ -1,15 +1,16 @@
 import { useState } from "react";
-import { motion } from "motion/react";
-import {
-  Building2, Plus, Search, Pencil, Trash2, Eye, MapPin, Clock, Phone,
-  Layers, School, ExternalLink, Sparkles, Users, GraduationCap,
+import { motion } from "motion/react";import { Building2, Plus, Search, Pencil, Trash2, Eye, MapPin, Clock, Phone,
+  Layers, School, ExternalLink, Sparkles, Users, GraduationCap, X,
 } from "lucide-react";
 import { Link } from "react-router";
 import { cn } from "../lib/utils";
 import { Button } from "../components/ui/Button";
 import { BuildingCategoryBadge } from "../components/ui/Badge";
+import { SearchBar } from "../components/ui/SearchBar";
 import { StatCard } from "../components/ui/StatCard";
+import { EmptyState } from "../components/ui/EmptyState";
 import { TablePageSkeleton } from "../components/ui/PageSkeleton";
+import { FormField } from "../components/ui/FormField";
 import { useDataList, useCrudModal, useToast } from "../hooks";
 import { buildingService } from "../services";
 import { FLOOR_PLANS } from "../data/floorPlans";
@@ -67,8 +68,10 @@ export function AdminBuildingsPage() {
     pageSize: 50,
   });
 
+  
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [form, setForm] = useState(initialForm);
+  const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const modal = useCrudModal<Building>();
 
   // Page-level category filter; search is handled server-side by useDataList
@@ -95,6 +98,7 @@ export function AdminBuildingsPage() {
 
   const openAdd = () => {
     setForm(initialForm);
+    setFormErrors({});
     modal.openAdd();
   };
 
@@ -104,11 +108,16 @@ export function AdminBuildingsPage() {
       category: b.category, floor_count: b.floor_count,
       operating_hours: b.operating_hours ?? "", contact: b.contact ?? "",
     });
+    setFormErrors({});
     modal.openEdit(b);
   };
 
   const handleSave = async () => {
-    if (!form.name.trim() || !form.code.trim()) return;
+    const errors: Record<string, string> = {};
+    if (!form.name.trim()) errors.name = "Building name is required";
+    if (!form.code.trim()) errors.code = "Building code is required";
+    if (Object.keys(errors).length > 0) { setFormErrors(errors); return; }
+    setFormErrors({});
     if (modal.editTarget) {
       await buildingService.update(modal.editTarget.id, form);
       toast.success("Building updated", `${form.name} has been updated.`);
@@ -147,7 +156,7 @@ export function AdminBuildingsPage() {
           </p>
         </div>
         <Button onClick={openAdd} variant="primary">
-          <Plus className="h-4 w-4" /> Add Building
+          <Plus className="h-3.5 w-3.5" /> Add Building
         </Button>
       </motion.div>
 
@@ -196,14 +205,14 @@ export function AdminBuildingsPage() {
         transition={{ delay: 0.1, duration: 0.3 }}
         className="flex flex-col sm:flex-row gap-3 items-start sm:items-center"
       >
-        <div className="relative flex-1 max-w-sm w-full">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <input
-            type="text"
+        <div className="flex-1 max-w-sm w-full">
+          <SearchBar
             placeholder="Search buildings by name, code, or department..."
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-full h-10 pl-9 pr-4 rounded-xl border border-border bg-card text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 text-sm transition-shadow"
+            onSearch={setSearch}
+            onClear={() => setSearch("")}
+            showShortcutHint
+            size="md"
           />
         </div>
         <div className="flex gap-1.5 overflow-x-auto no-scrollbar w-full sm:w-auto">
@@ -218,6 +227,7 @@ export function AdminBuildingsPage() {
             return (
               <button
                 key={c.key}
+                type="button"
                 onClick={() => setCategoryFilter(c.key)}
                 className={cn(
                   "shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all",
@@ -238,20 +248,25 @@ export function AdminBuildingsPage() {
            BUILDING CARDS GRID
          ═══════════════════════════════════════════════════════════════ */}
       {enriched.length === 0 ? (
-        <motion.div
-          initial={{ opacity: 0, scale: 0.95 }}
-          animate={{ opacity: 1, scale: 1 }}
-          className="flex flex-col items-center py-16 gap-3 bg-card rounded-2xl border border-border shadow-sm"
-        >
-          <div className="w-16 h-16 rounded-2xl bg-muted flex items-center justify-center">
-            <Building2 className="h-8 w-8 text-muted-foreground" />
-          </div>
-          <p className="text-sm font-bold text-foreground">No buildings found</p>
-          <p className="text-xs text-muted-foreground">Try adjusting your search or filters.</p>
-          <Button variant="outline" onClick={() => { setSearch(""); setCategoryFilter("all"); }}>
-            Clear Filters
-          </Button>
-        </motion.div>
+        <EmptyState
+          icon={search || categoryFilter !== "all" ? Search : Building2}
+          title={search || categoryFilter !== "all" ? "No buildings found" : "No buildings yet"}
+          description={search || categoryFilter !== "all"
+            ? "No buildings match your search or category. Try a different keyword."
+            : "Add campus buildings with floor plans, departments, and operating hours."
+          }
+          action={
+            search || categoryFilter !== "all" ? (
+              <Button variant="outline" onClick={() => { setSearch(""); setCategoryFilter("all"); }}>
+                Clear Filters
+              </Button>
+            ) : (
+              <Button variant="primary" onClick={openAdd}>
+                <Plus className="h-3.5 w-3.5" /> Add Building
+              </Button>
+            )
+          }
+        />
       ) : (
         <motion.div
           initial="hidden"
@@ -410,16 +425,17 @@ export function AdminBuildingsPage() {
           animate={{ opacity: 1 }}
           className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
           onClick={modal.close}
+          role="dialog" aria-modal="true" aria-label={modal.editTarget ? "Edit building" : "Add building"}
         >
           <motion.div
             initial={{ opacity: 0, scale: 0.92, y: 20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             transition={{ type: "spring", duration: 0.4, bounce: 0.25 }}
-            className="bg-card rounded-3xl border border-border shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto scrollbar-show-on-hover"
+            className="bg-card rounded-2xl border border-border shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto scrollbar-show-on-hover"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Modal header */}
-            <div className="flex items-center justify-between px-6 py-4 border-b border-border sticky top-0 bg-card rounded-t-3xl z-10">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-border sticky top-0 bg-card rounded-t-2xl z-10">
               <div className="flex items-center gap-3">
                 <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
                   {modal.editTarget ? <Pencil className="h-4 w-4 text-primary" /> : <Plus className="h-4 w-4 text-primary" />}
@@ -428,39 +444,37 @@ export function AdminBuildingsPage() {
                   <h2 className="font-extrabold text-foreground text-sm">
                     {modal.editTarget ? "Edit Building" : "Add Building"}
                   </h2>
-                  <p className="text-[10px] text-muted-foreground">
-                    {modal.editTarget ? `Editing ${modal.editTarget.name}` : "Create a new campus building"}
-                  </p>
                 </div>
               </div>
-              <button onClick={modal.close} className="w-8 h-8 rounded-xl flex items-center justify-center text-muted-foreground hover:bg-muted transition-colors shrink-0">
-                <span className="text-lg leading-none">×</span>
+              <button type="button" aria-label="Close modal" onClick={modal.close} className="w-8 h-8 rounded-xl flex items-center justify-center text-muted-foreground hover:bg-muted transition-colors shrink-0">
+                <X className="h-4 w-4" />
               </button>
             </div>
 
             {/* Modal body */}
             <div className="p-6 space-y-4">
-              {[
-                { label: "Building Name", key: "name", placeholder: "e.g. Main Academic Building" },
-                { label: "Building Code", key: "code", placeholder: "e.g. MAB" },
-              ].map(({ label, key, placeholder }) => (
-                <div key={key}>
-                  <label htmlFor={`bldg-${key}`} className="block text-xs font-bold text-foreground mb-1.5 uppercase tracking-wide">{label}</label>
-                  <input id={`bldg-${key}`} type="text" value={(form as any)[key]} onChange={(e) => setForm({ ...form, [key]: e.target.value })} placeholder={placeholder}
-                    className="w-full h-10 px-4 rounded-xl border border-border bg-input-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary text-sm transition-shadow" />
-                </div>
-              ))}
-              <div>
-                <label htmlFor="bldg-description" className="block text-xs font-bold text-foreground mb-1.5 uppercase tracking-wide">Description</label>
-                <textarea id="bldg-description" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })}
-                  placeholder="Brief description..." rows={3}
-                  className="w-full px-4 py-2.5 rounded-xl border border-border bg-input-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary text-sm resize-none transition-shadow" />
-              </div>
+              <FormField
+                label="Building Name" id="bldg-name" value={form.name}
+                onChange={(v) => { setForm(f => ({ ...f, name: v })); if (formErrors.name) setFormErrors(prev => { const n = {...prev}; delete n.name; return n; }); }}
+                error={formErrors.name} placeholder="e.g. Main Academic Building"
+                helper="The official name of the building" required maxLength={100} showCharCount
+              />
+              <FormField
+                label="Building Code" id="bldg-code" value={form.code}
+                onChange={(v) => { setForm(f => ({ ...f, code: v })); if (formErrors.code) setFormErrors(prev => { const n = {...prev}; delete n.code; return n; }); }}
+                error={formErrors.code} placeholder="e.g. MAB"
+                helper="Short acronym, e.g. MAB, SSC, ADM" required maxLength={100} showCharCount mono
+              />
+              <FormField
+                label="Description" id="bldg-description" value={form.description}
+                onChange={(v) => setForm(f => ({ ...f, description: v }))}
+                placeholder="Brief description..." rows={3} maxLength={500} showCharCount
+              />
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label htmlFor="bldg-category" className="block text-xs font-bold text-foreground mb-1.5 uppercase tracking-wide">Category</label>
                   <select id="bldg-category" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value as Building["category"] })}
-                    className="w-full h-10 px-4 rounded-xl border border-border bg-input-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 text-sm transition-shadow">
+                    className="w-full h-10 px-4 rounded-xl border border-border bg-input-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/30 text-sm transition-all duration-200 custom-select">
                     {["academic", "admin", "facility", "sports", "dormitory"].map((c) => (
                       <option key={c} value={c} className="capitalize">{c}</option>
                     ))}
@@ -469,19 +483,19 @@ export function AdminBuildingsPage() {
                 <div>
                   <label htmlFor="bldg-floors" className="block text-xs font-bold text-foreground mb-1.5 uppercase tracking-wide">Floors</label>
                   <input id="bldg-floors" type="number" min={1} value={form.floor_count} onChange={(e) => setForm({ ...form, floor_count: parseInt(e.target.value) || 1 })}
-                    className="w-full h-10 px-4 rounded-xl border border-border bg-input-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 text-sm transition-shadow" />
+                    className="w-full h-10 px-4 rounded-xl border border-border bg-input-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/30 text-sm transition-all duration-200" />
                 </div>
               </div>
-              <div>
-                <label htmlFor="bldg-hours" className="block text-xs font-bold text-foreground mb-1.5 uppercase tracking-wide">Operating Hours</label>
-                <input id="bldg-hours" type="text" value={form.operating_hours} onChange={(e) => setForm({ ...form, operating_hours: e.target.value })} placeholder="Mon–Fri 7:00 AM – 8:00 PM"
-                  className="w-full h-10 px-4 rounded-xl border border-border bg-input-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary text-sm transition-shadow" />
-              </div>
-              <div>
-                <label htmlFor="bldg-contact" className="block text-xs font-bold text-foreground mb-1.5 uppercase tracking-wide">Contact</label>
-                <input id="bldg-contact" type="text" value={form.contact} onChange={(e) => setForm({ ...form, contact: e.target.value })} placeholder="(02) 8293-0000 loc. 101"
-                  className="w-full h-10 px-4 rounded-xl border border-border bg-input-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary text-sm transition-shadow" />
-              </div>
+              <FormField
+                label="Operating Hours" id="bldg-hours" value={form.operating_hours}
+                onChange={(v) => setForm(f => ({ ...f, operating_hours: v }))}
+                placeholder="Mon–Fri 7:00 AM – 8:00 PM" helper="e.g. Mon–Fri 7:00 AM – 8:00 PM"
+              />
+              <FormField
+                label="Contact" id="bldg-contact" value={form.contact}
+                onChange={(v) => setForm(f => ({ ...f, contact: v }))}
+                placeholder="(02) 8293-0000 loc. 101" type="tel"
+              />
             </div>
 
             {/* Modal footer */}
@@ -502,24 +516,24 @@ export function AdminBuildingsPage() {
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="Delete building"
         >
           <motion.div
             initial={{ opacity: 0, scale: 0.92, y: 20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             transition={{ type: "spring", duration: 0.35, bounce: 0.2 }}
-            className="bg-card rounded-3xl border border-border shadow-2xl w-full max-w-sm p-6 text-center"
+            className="bg-card rounded-2xl border border-border shadow-2xl w-full max-w-sm p-6 text-center"
           >
             <div className="w-14 h-14 rounded-2xl bg-destructive/10 flex items-center justify-center mx-auto mb-4">
               <Trash2 className="h-7 w-7 text-destructive" />
             </div>
             <h3 className="font-extrabold text-foreground mb-1">Delete Building?</h3>
             <p className="text-sm text-muted-foreground mb-5" style={{ fontFamily: "var(--font-body)" }}>
-              This action cannot be undone and will remove all associated data including floor plans and routes.
+              This will permanently remove the building and all associated floor plans and routes.
             </p>
             <div className="flex gap-3">
               <Button variant="outline" onClick={modal.cancelDelete} className="flex-1">Cancel</Button>
-              <Button variant="danger" onClick={() => modal.executeDelete(handleDelete)} className="flex-1">Delete</Button>
+              <Button variant="danger" onClick={() => modal.executeDelete(handleDelete)} className="flex-1">Delete Building</Button>
             </div>
           </motion.div>
         </motion.div>

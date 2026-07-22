@@ -1,15 +1,17 @@
 import { Link, useLocation } from "react-router";
-import { Home, Map, HelpCircle, User, Compass } from "lucide-react";
+import { Home, Map, HelpCircle, User, Compass, Building2 } from "lucide-react";
 import { motion } from "motion/react";
 import { cn } from "../../lib/utils";
-import { useStudentAuth } from "../../hooks/useStudentAuth";
+import { useStudentAuth } from "../../hooks/useStudentAuth";  const TABS = [
+    { to: "/", icon: Home, label: "Home" },
+    { to: "/map", icon: Compass, label: "Map" },
+    { to: "/buildings", icon: Building2, label: "Buildings" },
+    { to: "/help", icon: HelpCircle, label: "Help" },
+    { to: "/student", icon: User, label: "Profile", auth: true },
+  ];
 
-const TABS = [
-  { to: "/", icon: Home, label: "Home" },
-  { to: "/map", icon: Compass, label: "Map" },
-  { to: "/help", icon: HelpCircle, label: "Help" },
-  { to: "/student", icon: User, label: "Profile", auth: true },
-];
+  const landscapeClasses = "max-md:landscape:px-6 max-md:landscape:pb-1 max-md:landscape:gap-0";
+  const landscapeDock = "max-md:landscape:rounded-[20px] max-md:landscape:max-w-none max-md:landscape:mx-0 max-md:landscape:flex-row max-md:landscape:px-2 max-md:landscape:py-1";
 
 export function MobileBottomNav() {
   const { pathname } = useLocation();
@@ -26,12 +28,19 @@ export function MobileBottomNav() {
 
   return (
     <nav
-      className="md:hidden fixed bottom-0 left-0 right-0 z-50 pointer-events-none"
-      style={{ paddingBottom: "max(8px, env(safe-area-inset-bottom, 8px))" }}
+      className={cn(
+        "md:hidden fixed bottom-0 left-0 right-0 z-50 pointer-events-none",
+        "max-md:landscape:bottom-0"
+      )}
+      style={{ paddingBottom: "max(12px, env(safe-area-inset-bottom, 12px))" }}
       aria-label="Main navigation"
     >
-      <div className="px-3 pb-0.5 pointer-events-auto">
-        <div className="mobile-dock rounded-[24px] overflow-hidden max-w-sm mx-auto shadow-2xl">
+      <div className={cn("px-3 pb-0.5 pointer-events-auto", landscapeClasses)}>
+        <div className={cn(
+          "mobile-dock rounded-[24px] overflow-hidden shadow-2xl bg-card/95 backdrop-blur-xl border border-border/50",
+          "max-w-sm mx-auto",
+          landscapeDock
+        )}>
           <div className="flex items-stretch justify-around px-1 py-0.5 relative">
             {/* Active indicator — animated pill */}
             {activeIndex >= 0 && (
@@ -54,13 +63,13 @@ export function MobileBottomNav() {
                 <Link
                   key={to}
                   to={href}
+                  aria-current={active ? "page" : undefined}
                   className="flex-1 flex flex-col items-center justify-center gap-0 relative min-h-[56px] group"
                 >
                   <motion.div
                     whileTap={{ scale: 0.88 }}
                     transition={{ type: "spring", stiffness: 400, damping: 15 }}
-                    className={cn(
-                      "flex items-center justify-center rounded-2xl transition-all duration-200",
+                    className={cn(                          "flex items-center justify-center rounded-xl transition-all duration-200",
                       active
                         ? "w-[50px] h-9 bg-primary text-primary-foreground shadow-md shadow-primary/25"
                         : "w-10 h-9 text-muted-foreground"

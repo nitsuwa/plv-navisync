@@ -5,21 +5,23 @@ import { AdminSidebar } from "./AdminSidebar";
 import { ThemeToggle } from "../ui/ThemeToggle";
 import { useTheme } from "../../hooks/useTheme";
 import { cn } from "../../lib/utils";
-import { PanelLeftClose, PanelLeft, Bell, User, ChevronRight } from "lucide-react";
+import { PanelLeftClose, PanelLeft, Bell, User } from "lucide-react";
+import { motion } from "motion/react";
 
 const ROUTE_LABELS: Record<string, string> = {
-  "/admin/dashboard":    "Dashboard",
-  "/admin/buildings":    "Buildings",
-  "/admin/announcements":"Announcements",
-  "/admin/locations":    "Campus Assets",
-  "/admin/users":        "Users",
-  "/admin/settings":     "Settings",
-  "/admin/map-builder":  "Map Builder",
-  "/admin/floor-plans":  "Floor Plans",
-  "/admin/routes":       "Routes & Pathfinding",
-  "/admin/reports":      "Student Reports",
-  "/admin/accessibility":"Accessibility Management",
-  "/admin/events":       "Event Map Management",
+  "/admin-dashboard":                "Dashboard",
+  "/admin-dashboard/map-builder":    "Map Builder",
+  "/admin-dashboard/announcements":  "Announcements",
+  "/admin-dashboard/reports":        "Reports",
+  "/admin-dashboard/users":          "Users",
+  "/admin-dashboard/settings":       "Settings",
+  // Legacy pages still reachable by URL but not in sidebar
+  "/admin-dashboard/buildings":      "Buildings",
+  "/admin-dashboard/floor-plans":    "Floor Plans",
+  "/admin-dashboard/routes":         "Routes",
+  "/admin-dashboard/locations":      "Campus Locations",
+  "/admin-dashboard/accessibility":  "Accessibility",
+  "/admin-dashboard/events":         "Event Maps",
 };
 
 export function AdminLayout() {
@@ -49,16 +51,14 @@ export function AdminLayout() {
         <header className="h-16 border-b border-border bg-card flex items-center px-4 gap-3 shrink-0 shadow-sm">
           <button
             onClick={() => setCollapsed(!collapsed)}
-            className="inline-flex items-center justify-center w-9 h-9 rounded-lg border border-border text-muted-foreground hover:bg-muted transition-colors"
-            aria-label="Toggle sidebar"
+            className="inline-flex items-center justify-center w-9 h-9 rounded-xl border border-border text-muted-foreground hover:bg-muted active:scale-90 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
           >
             {collapsed ? <PanelLeft className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
           </button>
 
           {/* Breadcrumb */}
           <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
-            <span>Admin</span>
-            <ChevronRight className="h-3.5 w-3.5" />
             <span className="font-semibold text-foreground">{pageTitle}</span>
           </div>
 
@@ -67,13 +67,13 @@ export function AdminLayout() {
           <ThemeToggle theme={theme} onToggle={toggleTheme} />
 
           {/* Notification bell */}
-          <button className="relative inline-flex items-center justify-center w-9 h-9 rounded-lg border border-border text-muted-foreground hover:bg-muted transition-colors">
+          <button className="relative inline-flex items-center justify-center w-9 h-9 rounded-xl border border-border text-muted-foreground hover:bg-muted active:scale-90 transition-all" aria-label="Notifications">
             <Bell className="h-4 w-4" />
             <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-accent border border-card" />
           </button>
 
           {/* User */}
-          <div className="flex items-center gap-2.5 pl-2 border-l border-border">
+          <div className="flex items-center gap-2.5 pl-2 border-l border-border" role="status" aria-label="Current user">
             <div className="w-8 h-8 rounded-full bg-gradient-to-br from-primary to-primary/60 flex items-center justify-center shadow-sm">
               <User className="h-4 w-4 text-primary-foreground" />
             </div>
@@ -86,11 +86,19 @@ export function AdminLayout() {
 
         <main className={cn(
           "flex-1 min-h-0",           // min-h-0 allows flex child to shrink below content size
-          location.pathname === "/admin/map-builder"
+          location.pathname === "/admin-dashboard/map-builder"
             ? "overflow-hidden flex flex-col"   // map builder fills all remaining height, no padding
             : "overflow-y-auto p-5 lg:p-7"
         )}>
-          <Outlet />
+          <motion.div
+            key={location.pathname}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ duration: 0.1 }}
+            className="h-full flex flex-col"
+          >
+            <Outlet />
+          </motion.div>
         </main>
       </div>
     </div>

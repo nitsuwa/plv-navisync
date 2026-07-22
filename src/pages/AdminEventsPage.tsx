@@ -1,9 +1,14 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { motion, AnimatePresence } from "motion/react";
+import { SPRING, DURATION } from "../config/animation";
+import { EventCardSkeleton } from "../components/ui/PageSkeleton";
+import { useToast } from "../hooks/useToast";
 import {
   CalendarDays, MapPin, Plus, Edit2, Trash2, Eye, CheckCircle2,
-  Clock, XCircle, Star, AlertTriangle,
+  Clock, XCircle, Star, AlertTriangle, Search,
 } from "lucide-react";
 import { cn } from "../lib/utils";
+import { SearchBar } from "../components/ui/SearchBar";
 
 type EventStatus = "draft" | "scheduled" | "active" | "ended";
 
@@ -90,6 +95,8 @@ function EventModal({ event, onClose, onSave }: {
     status:"draft", markerCount:0, organizer:"", affectedAreas:[], tempFeatures:[],
   });
   const [featureInput, setFeatureInput] = useState("");
+  const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+  const toast = useToast();
 
   const update = (k: keyof CampusEvent, v: any) => setForm(p => ({...p, [k]:v}));
 
@@ -100,23 +107,35 @@ function EventModal({ event, onClose, onSave }: {
   };
 
   const handleSave = () => {
-    if (!form.title || !form.venue || !form.dateStart) return;
+    const errors: Record<string, string> = {};
+    if (!form.title?.trim()) errors.title = "Event title is required";
+    if (!form.venue?.trim()) errors.venue = "Venue is required";
+    if (!form.dateStart?.trim()) errors.dateStart = "Start date is required";
+    if (Object.keys(errors).length > 0) { setFormErrors(errors); return; }
+    setFormErrors({});
+    toast.success(isNew ? "Event map created" : "Event map updated", `"${form.title}" has been ${isNew ? "created" : "updated"}.`);
     onSave({
       id: event?.id ?? `ev${Date.now()}`,
       ...form as CampusEvent,
     });
   };
 
-  const inputCls = "w-full px-3 py-2.5 rounded-xl border border-border bg-input-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary/30";
+  const inputCls = "w-full h-10 px-4 rounded-xl border border-border bg-input-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary/30";
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/70 backdrop-blur-sm animate-fade-in p-4" onClick={onClose}>
-      <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden animate-scale-in max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/70 backdrop-blur-sm p-4" onClick={onClose}>
+      <motion.div
+        initial={{ opacity: 0, scale: 0.92, y: 20 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        transition={{ type: "spring", duration: 0.4, bounce: 0.25 }}
+        className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden max-h-[90vh] flex flex-col"
+        onClick={e => e.stopPropagation()}
+      >
         <div className="flex items-center justify-between px-6 py-4 border-b border-border shrink-0">
-          <h3 className="font-extrabold text-foreground text-sm" style={{ fontFamily:"var(--font-sans)" }}>
+          <h3 className="font-extrabold text-foreground text-sm">
             {isNew ? "Create Event Map" : "Edit Event Map"}
           </h3>
-          <button onClick={onClose} className="w-8 h-8 rounded-xl bg-muted flex items-center justify-center hover:bg-secondary transition-colors text-muted-foreground">
+          <button type="button" aria-label="Close modal" onClick={onClose} className="w-8 h-8 rounded-xl bg-muted flex items-center justify-center hover:bg-secondary active:scale-90 transition-all text-muted-foreground">
             <XCircle className="h-4 w-4"/>
           </button>
         </div>
@@ -125,35 +144,43 @@ function EventModal({ event, onClose, onSave }: {
           <div>
             <label htmlFor="event-title" className="block text-xs font-bold text-foreground uppercase tracking-wide mb-1.5">Event Title *</label>
             <input id="event-title" type="text" value={form.title ?? ""} onChange={e => update("title", e.target.value)}
-              placeholder="e.g. PLV Foundation Day 2025" className={inputCls} style={{ fontFamily:"var(--font-body)" }}/>
+              placeholder="e.g. PLV Foundation Day 2025" className={inputCls}/>
           </div>
           <div>
             <label htmlFor="event-description" className="block text-xs font-bold text-foreground uppercase tracking-wide mb-1.5">Description</label>
             <textarea id="event-description" value={form.description ?? ""} onChange={e => update("description", e.target.value)}
-              rows={2} placeholder="Brief event description…" className={cn(inputCls, "resize-none")} style={{ fontFamily:"var(--font-body)" }}/>
+              rows={2} placeholder="Brief event description…" className={cn(inputCls, "resize-y min-h-[44px] pt-2.5")}/>
+            <div className="flex items-center justify-end mt-1">
+              <span className="text-[10px] text-muted-foreground tabular-nums">{(form.description ?? "").length}/{500}</span>
+            </div>
           </div>
           <div className="grid sm:grid-cols-2 gap-4">
             <div>
-              <label htmlFor="event-venue" className="block text-xs font-bold text-foreground uppercase tracking-wide mb-1.5">Venue *</label>
-              <input id="event-venue" type="text" value={form.venue ?? ""} onChange={e => update("venue", e.target.value)}
-                placeholder="Campus-wide / GYM…" className={inputCls} style={{ fontFamily:"var(--font-body)" }}/>
+              <label htmlFor="event-venue" className="block text-xs font-bold text-foreground uppercase tracking-wide mb-1.5">Venue <span className="text-destructive">*</span></label>
+              <input id="event-venue" type="text" value={form.venue ?? ""} onChange={e => { update("venue", e.target.value); if (formErrors.venue) setFormErrors(prev => { const n = {...prev}; delete n.venue; return n; }); }}
+                placeholder="Campus-wide / GYM…" className={inputCls + (formErrors.venue ? " border-destructive focus:ring-destructive/30" : "")}/>
+              {formErrors.venue && <p className="text-[10px] text-destructive mt-1 font-medium">{formErrors.venue}</p>}
+              <p className="text-[10px] text-muted-foreground mt-1">Physical location of the event</p>
             </div>
             <div>
               <label htmlFor="event-organizer" className="block text-xs font-bold text-foreground uppercase tracking-wide mb-1.5">Organizer</label>
               <input id="event-organizer" type="text" value={form.organizer ?? ""} onChange={e => update("organizer", e.target.value)}
-                placeholder="Department / committee" className={inputCls} style={{ fontFamily:"var(--font-body)" }}/>
+                placeholder="Department / committee" className={inputCls}/>
+              <p className="text-[10px] text-muted-foreground mt-1">Department or organization in charge</p>
             </div>
           </div>
           <div className="grid sm:grid-cols-2 gap-4">
             <div>
-              <label htmlFor="event-start" className="block text-xs font-bold text-foreground uppercase tracking-wide mb-1.5">Start Date *</label>
+              <label htmlFor="event-start" className="block text-xs font-bold text-foreground uppercase tracking-wide mb-1.5">Start Date <span className="text-destructive">*</span></label>
               <input id="event-start" type="text" value={form.dateStart ?? ""} onChange={e => update("dateStart", e.target.value)}
-                placeholder="Jan 25, 2025" className={inputCls} style={{ fontFamily:"var(--font-body)" }}/>
+                placeholder="Jan 25, 2025" className={inputCls}/>
+              <p className="text-[10px] text-muted-foreground mt-1">When the event starts</p>
             </div>
             <div>
               <label htmlFor="event-end" className="block text-xs font-bold text-foreground uppercase tracking-wide mb-1.5">End Date</label>
               <input id="event-end" type="text" value={form.dateEnd ?? ""} onChange={e => update("dateEnd", e.target.value)}
-                placeholder="Jan 27, 2025" className={inputCls} style={{ fontFamily:"var(--font-body)" }}/>
+                placeholder="Jan 27, 2025" className={inputCls}/>
+              <p className="text-[10px] text-muted-foreground mt-1">Leave empty if single-day event</p>
             </div>
           </div>
           {/* Temporary features */}
@@ -163,10 +190,10 @@ function EventModal({ event, onClose, onSave }: {
               <span className="ml-1 text-muted-foreground font-normal normal-case tracking-normal">(markers on event map)</span>
             </label>
             <div className="flex gap-2 mb-2">
-              <input type="text" value={featureInput} onChange={e => setFeatureInput(e.target.value)}
+              <input id="event-feature-input" type="text" value={featureInput} onChange={e => setFeatureInput(e.target.value)}
                 onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addFeature(); }}}
-                placeholder="e.g. Food Booth, First Aid Station…" className={cn(inputCls, "flex-1")} style={{ fontFamily:"var(--font-body)" }}/>
-              <button onClick={addFeature} className="px-3 rounded-xl bg-primary text-primary-foreground text-xs font-bold hover:bg-primary/90 transition-colors shrink-0">Add</button>
+                placeholder="e.g. Food Booth, First Aid Station…" className={cn(inputCls, "flex-1")}/>
+              <button type="button" aria-label="Add feature" onClick={addFeature} className="px-3 rounded-xl bg-primary text-primary-foreground text-xs font-bold hover:bg-primary/90 active:scale-[0.97] transition-all shrink-0">Add</button>
             </div>
             <div className="flex flex-wrap gap-1.5">
               {(form.tempFeatures ?? []).map((f, i) => (
@@ -177,31 +204,47 @@ function EventModal({ event, onClose, onSave }: {
                 </span>
               ))}
               {(form.tempFeatures ?? []).length === 0 && (
-                <span className="text-xs text-muted-foreground" style={{ fontFamily:"var(--font-body)" }}>No features added yet</span>
+                <span className="text-xs text-muted-foreground">No features added yet</span>
               )}
             </div>
           </div>
         </div>
 
         <div className="flex gap-2 px-6 pb-5 pt-3 border-t border-border shrink-0">
-          <button onClick={onClose} className="flex-1 h-10 rounded-xl border border-border text-sm font-bold text-muted-foreground hover:bg-muted transition-colors">
+          <button onClick={onClose} className="flex-1 h-10 rounded-xl border border-border text-sm font-bold text-muted-foreground hover:bg-muted active:scale-[0.97] transition-all">
             Cancel
           </button>
           <button onClick={handleSave} disabled={!form.title || !form.venue}
-            className="flex-1 h-10 rounded-xl bg-primary text-primary-foreground text-sm font-extrabold hover:bg-primary/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+            className="flex-1 h-10 rounded-xl bg-primary text-primary-foreground text-sm font-extrabold hover:bg-primary/90 active:scale-[0.97] transition-all disabled:opacity-40 disabled:cursor-not-allowed">
             {isNew ? "Create Event Map" : "Save Changes"}
           </button>
+          {(!form.title || !form.venue) && (
+            <p className="text-[10px] text-destructive text-center mt-1">Fill in all required fields (*) to save</p>
+          )}
         </div>
-      </div>
+      </motion.div>
     </div>
   );
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
 export function AdminEventsPage() {
-  const [events, setEvents] = useState<CampusEvent[]>(MOCK_EVENTS);
+  const [events, setEvents] = useState<CampusEvent[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
   const [modal, setModal] = useState<CampusEvent|null|"new">(null);
   const [statusFilter, setStatusFilter] = useState<EventStatus|"all">("all");
+  const toast = useToast();
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setEvents(MOCK_EVENTS);
+      setLoading(false);
+    }, 350);
+    return () => clearTimeout(timer);
+  }, []);
+
+  if (loading) return <EventCardSkeleton cards={3} />;
 
   const handleSave = (e: CampusEvent) => {
     setEvents(prev => {
@@ -212,12 +255,24 @@ export function AdminEventsPage() {
     setModal(null);
   };
 
-  const handleDelete = (id: string) => setEvents(prev => prev.filter(e => e.id !== id));
+  const handleDelete = (id: string) => {
+    const deleted = events.find(e => e.id === id);
+    setEvents(prev => prev.filter(e => e.id !== id));
+    if (deleted) toast.success("Event deleted", `${deleted.title} has been removed.`);
+  };
 
   const handleActivate = (id: string) =>
     setEvents(prev => prev.map(e => e.id === id ? {...e, status:"active"} : e.status === "active" ? {...e, status:"ended"} : e));
 
-  const filtered = events.filter(e => statusFilter === "all" || e.status === statusFilter);
+  const filtered = events.filter(e => {
+    const matchStatus = statusFilter === "all" || e.status === statusFilter;
+    const q = search.toLowerCase();
+    const matchSearch = !q ||
+      e.title.toLowerCase().includes(q) ||
+      e.venue.toLowerCase().includes(q) ||
+      e.organizer.toLowerCase().includes(q);
+    return matchStatus && matchSearch;
+  });
 
   const tabs: { key: EventStatus|"all"; label: string }[] = [
     { key:"all", label:"All" },
@@ -232,16 +287,16 @@ export function AdminEventsPage() {
       {/* Header */}
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-extrabold text-foreground" style={{ fontFamily:"var(--font-sans)" }}>
+          <h1 className="text-2xl font-extrabold text-foreground">
             Event Map Management
           </h1>
-          <p className="text-sm text-muted-foreground mt-0.5" style={{ fontFamily:"var(--font-body)" }}>
+          <p className="text-sm text-muted-foreground mt-0.5">
             Create temporary event versions of the campus map with custom markers, restricted areas, and special venues. Active events automatically update the student map.
           </p>
         </div>
         <button onClick={() => setModal("new")}
-          className="flex items-center gap-2 h-10 px-4 rounded-xl bg-primary text-primary-foreground text-sm font-bold hover:bg-primary/90 transition-colors shrink-0 shadow-sm">
-          <Plus className="h-4 w-4"/> New Event Map
+          className="flex items-center gap-2 h-10 px-4 rounded-xl bg-primary text-primary-foreground text-sm font-bold hover:bg-primary/90 active:scale-[0.97] transition-all shrink-0 shadow-sm">
+          <Plus className="h-3.5 w-3.5" /> New Event Map
         </button>
       </div>
 
@@ -255,23 +310,34 @@ export function AdminEventsPage() {
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-sm font-bold text-green-700 dark:text-green-400">Event Map Active: {active.title}</p>
-              <p className="text-xs text-green-600/80 dark:text-green-400/60" style={{ fontFamily:"var(--font-body)" }}>
+              <p className="text-xs text-green-600/80 dark:text-green-400/60">
                 Students are currently seeing the event version of the campus map · {active.dateStart} – {active.dateEnd}
               </p>
             </div>
             <button onClick={() => setEvents(prev => prev.map(e => e.id === active.id ? {...e, status:"ended"} : e))}
-              className="shrink-0 text-xs font-bold text-green-700 dark:text-green-400 border border-green-300 dark:border-green-700/50 px-3 py-1.5 rounded-xl hover:bg-green-100 dark:hover:bg-green-900/30 transition-colors">
+              className="shrink-0 text-xs font-bold text-green-700 dark:text-green-400 border border-green-300 dark:border-green-700/50 px-3 py-1.5 rounded-xl hover:bg-green-100 dark:hover:bg-green-900/30 active:scale-[0.97] transition-all">
               Deactivate
             </button>
           </div>
         );
       })()}
 
-      {/* Filter tabs */}
-      <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
+      {/* Search + Filter tabs */}
+      <div className="flex flex-col sm:flex-row gap-3">
+        <div className="max-w-sm w-full">
+          <SearchBar
+            placeholder="Search events..."
+            value={search}
+            onSearch={setSearch}
+            onClear={() => setSearch("")}
+            showShortcutHint
+            size="md"
+          />
+        </div>
+        <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
         {tabs.map(t => (
-          <button key={t.key} onClick={() => setStatusFilter(t.key)}
-            className={cn("shrink-0 h-8 px-3 rounded-xl text-xs font-bold transition-all",
+          <button key={t.key} type="button" onClick={() => setStatusFilter(t.key)}
+            className={cn("shrink-0 h-8 px-3 rounded-xl text-xs font-bold transition-all active:scale-[0.97]",
               statusFilter === t.key ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted")}>
             {t.label}
             <span className={cn("ml-1.5 text-[10px] px-1.5 rounded-full",
@@ -280,6 +346,7 @@ export function AdminEventsPage() {
             </span>
           </button>
         ))}
+      </div>
       </div>
 
       {/* Event cards */}
@@ -298,15 +365,15 @@ export function AdminEventsPage() {
                 {/* Content */}
                 <div className="flex-1 min-w-0">
                   <div className="flex items-start justify-between gap-3 mb-1">
-                    <h3 className="font-extrabold text-foreground text-sm" style={{ fontFamily:"var(--font-sans)" }}>
+                    <h3 className="font-extrabold text-foreground text-sm">
                       {event.title}
                     </h3>
                     <div className={cn("flex items-center gap-1 px-2 py-0.5 rounded-full border text-[10px] font-bold shrink-0", cfg.bg, cfg.color)}>
-                      <StatusIcon className="h-2.5 w-2.5"/>
+                      <StatusIcon className="h-3 w-3" />
                       {cfg.label}
                     </div>
                   </div>
-                  <p className="text-xs text-muted-foreground mb-2 line-clamp-1" style={{ fontFamily:"var(--font-body)" }}>
+                  <p className="text-xs text-muted-foreground mb-2 line-clamp-1">
                     {event.description}
                   </p>
                   <div className="flex items-center gap-3 flex-wrap">
@@ -317,7 +384,7 @@ export function AdminEventsPage() {
                       <Clock className="h-3 w-3"/> {event.dateStart}{event.dateEnd !== event.dateStart ? ` – ${event.dateEnd}` : ""}
                     </span>
                     <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                      <Star className="h-3 w-3 text-accent"/> {event.markerCount} temp markers
+                      <Star className="h-3 w-3 text-accent" /> {event.markerCount} temp markers
                     </span>
                   </div>
                 </div>
@@ -337,22 +404,22 @@ export function AdminEventsPage() {
               {/* Actions */}
               <div className="flex items-center gap-2 px-5 py-3 border-t border-border bg-muted/20">
                 <button onClick={() => setModal(event)}
-                  className="flex items-center gap-1.5 h-8 px-3 rounded-xl border border-border text-xs font-bold text-foreground hover:bg-muted transition-colors">
-                  <Edit2 className="h-3 w-3"/> Edit
+                  className="flex items-center gap-1.5 h-8 px-3 rounded-xl border border-border text-xs font-bold text-foreground hover:bg-muted active:scale-[0.97] transition-all">
+                  <Edit2 className="h-3.5 w-3.5" /> Edit
                 </button>
 
                 {event.status === "draft" && (
                   <button
                     onClick={() => setEvents(prev => prev.map(e => e.id === event.id ? {...e, status:"scheduled"} : e))}
-                    className="flex items-center gap-1.5 h-8 px-3 rounded-xl border border-blue-300 dark:border-blue-700/50 text-xs font-bold text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors">
-                    <Eye className="h-3 w-3"/> Schedule
+                    className="flex items-center gap-1.5 h-8 px-3 rounded-xl border border-blue-300 dark:border-blue-700/50 text-xs font-bold text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 active:scale-[0.97] transition-all">
+                    <Eye className="h-3.5 w-3.5" /> Schedule
                   </button>
                 )}
 
                 {event.status === "scheduled" && (
                   <button onClick={() => handleActivate(event.id)}
-                    className="flex items-center gap-1.5 h-8 px-3 rounded-xl bg-green-500 text-white text-xs font-bold hover:bg-green-600 transition-colors">
-                    <CheckCircle2 className="h-3 w-3"/> Activate
+                    className="flex items-center gap-1.5 h-8 px-3 rounded-xl bg-green-500 text-white text-xs font-bold hover:bg-green-600 active:scale-[0.97] transition-all">
+                    <CheckCircle2 className="h-3.5 w-3.5" /> Activate
                   </button>
                 )}
 
@@ -366,8 +433,8 @@ export function AdminEventsPage() {
                 <div className="ml-auto flex items-center gap-2">
                   {event.status !== "active" && (
                     <button onClick={() => handleDelete(event.id)}
-                      className="flex items-center gap-1.5 h-8 px-3 rounded-xl border border-destructive/30 text-xs font-bold text-destructive hover:bg-destructive/10 transition-colors">
-                      <Trash2 className="h-3 w-3"/> Delete
+                      className="flex items-center gap-1.5 h-8 px-3 rounded-xl border border-destructive/30 text-xs font-bold text-destructive hover:bg-destructive/10 active:scale-[0.97] transition-all">
+                      <Trash2 className="h-3.5 w-3.5" /> Delete
                     </button>
                   )}
                 </div>
@@ -377,13 +444,22 @@ export function AdminEventsPage() {
         })}
 
         {filtered.length === 0 && (
-          <div className="bg-card rounded-2xl border border-border p-12 text-center">
-            <CalendarDays className="h-8 w-8 text-muted-foreground/30 mx-auto mb-3"/>
-            <p className="text-sm font-bold text-muted-foreground">No events in this category</p>
-            <button onClick={() => setModal("new")} className="mt-4 text-xs font-bold text-primary hover:underline">
-              Create your first event map →
-            </button>
-          </div>
+          <EmptyState
+            icon={search || statusFilter !== "all" ? Search : CalendarDays}
+            title={search ? "No matching events" : statusFilter !== "all" ? "No events in this category" : "No events yet"}
+            description={search
+              ? "No events match your search criteria. Try a different keyword."
+              : statusFilter !== "all"
+                ? "There are no event maps matching the current filter. Try a different status or create a new one."
+                : "Create temporary event versions of the campus map with custom markers, restricted areas, and special venues for upcoming campus events."
+            }
+            action={
+              <button onClick={() => setModal("new")}
+                className="inline-flex items-center gap-2 h-10 px-5 rounded-xl bg-primary text-primary-foreground text-sm font-bold hover:bg-primary/90 active:scale-[0.97] transition-all shadow-sm">
+                <Plus className="h-3.5 w-3.5" /> New Event Map
+              </button>
+            }
+          />
         )}
       </div>
 
@@ -392,7 +468,7 @@ export function AdminEventsPage() {
         <div className="flex items-start gap-3">
           <AlertTriangle className="h-5 w-5 text-amber-500 shrink-0 mt-0.5"/>
           <div>
-            <p className="text-sm font-bold text-foreground mb-1" style={{ fontFamily:"var(--font-sans)" }}>
+            <p className="text-sm font-bold text-foreground mb-1">
               How Event Maps Work
             </p>
             <p className="text-xs text-muted-foreground leading-relaxed" style={{ fontFamily:"var(--font-body)" }}>

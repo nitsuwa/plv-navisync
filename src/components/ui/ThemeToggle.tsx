@@ -1,5 +1,6 @@
 import { Sun, Moon } from "lucide-react";
 import { cn } from "../../lib/utils";
+import { motion, AnimatePresence } from "motion/react";
 
 interface ThemeToggleProps {
   theme: "light" | "dark";
@@ -8,19 +9,48 @@ interface ThemeToggleProps {
 }
 
 export function ThemeToggle({ theme, onToggle, className }: ThemeToggleProps) {
+  const isDark = theme === "dark";
+
   return (
-    <button
+    <motion.button
       onClick={onToggle}
-      aria-label={`Switch to ${theme === "light" ? "dark" : "light"} mode`}
+      whileTap={{ scale: 0.85 }}
+      aria-label={`Switch to ${isDark ? "light" : "dark"} mode`}
       className={cn(
-        "relative inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border",
+        "relative inline-flex h-9 w-9 items-center justify-center rounded-xl border border-border",
         "bg-card text-muted-foreground transition-all duration-200",
-        "hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        "hover:bg-secondary hover:text-foreground hover:shadow-sm hover:border-primary/20",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         className
       )}
     >
-      <Sun className={cn("h-4 w-4 transition-all duration-300", theme === "dark" ? "scale-0 opacity-0 absolute" : "scale-100 opacity-100")} />
-      <Moon className={cn("h-4 w-4 transition-all duration-300", theme === "light" ? "scale-0 opacity-0 absolute" : "scale-100 opacity-100")} />
-    </button>
+      <div className="relative flex items-center justify-center w-4 h-4">
+        <AnimatePresence initial={false}>
+          {isDark ? (
+            <motion.span
+              key="moon"
+              initial={{ scale: 0, rotate: -90, opacity: 0 }}
+              animate={{ scale: 1, rotate: 0, opacity: 1 }}
+              exit={{ scale: 0, rotate: 90, opacity: 0 }}
+              transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+              className="absolute"
+            >
+              <Moon className="h-4 w-4" />
+            </motion.span>
+          ) : (
+            <motion.span
+              key="sun"
+              initial={{ scale: 0, rotate: 90, opacity: 0 }}
+              animate={{ scale: 1, rotate: 0, opacity: 1 }}
+              exit={{ scale: 0, rotate: -90, opacity: 0 }}
+              transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+              className="absolute"
+            >
+              <Sun className="h-4 w-4" />
+            </motion.span>
+          )}
+        </AnimatePresence>
+      </div>
+    </motion.button>
   );
 }

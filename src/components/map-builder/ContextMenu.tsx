@@ -8,7 +8,7 @@ import { cn } from "../../lib/utils";
 interface ContextMenuProps {
   x: number;
   y: number;
-  type: "building" | "marker" | "path";
+  type: "building" | "marker" | "path" | "floor";
   onClose: () => void;
   onAction: (action: string) => void;
 }
@@ -45,6 +45,13 @@ export function ContextMenu({ x, y, type, onClose, onAction }: ContextMenuProps)
         { action: "divider" },
         { action: "delete", label: "Delete", icon: Trash2, danger: true },
       ]
+    : type === "floor"
+    ? [
+        { action: "rename", label: "Rename", icon: Pencil },
+        { action: "duplicate", label: "Duplicate", icon: Copy },
+        { action: "divider" },
+        { action: "delete", label: "Delete", icon: Trash2, danger: true },
+      ]
     : [
         { action: "rename", label: "Rename", icon: Pencil },
         { action: "delete", label: "Delete", icon: Trash2, danger: true },
@@ -59,6 +66,7 @@ export function ContextMenu({ x, y, type, onClose, onAction }: ContextMenuProps)
       ref={ref}
       className="fixed z-[100]"
       style={{ left: mx, top: my }}
+      onContextMenu={(e) => e.preventDefault()}
       initial={{ opacity: 0, scale: 0.92, y: -4 }}
       animate={{ opacity: 1, scale: 1, y: 0 }}
       exit={{ opacity: 0, scale: 0.92, y: -4 }}

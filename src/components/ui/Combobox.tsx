@@ -33,6 +33,7 @@ export function Combobox({
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const containerRef = useRef<HTMLDivElement>(null);
+  const listboxId = useRef(`combobox-listbox-${Math.random().toString(36).slice(2, 9)}`).current;
 
   const selected = options.find((o) => o.value === value);
 
@@ -71,9 +72,14 @@ export function Combobox({
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
+        role="combobox"
+        aria-expanded={open}
+        aria-haspopup="listbox"
+        aria-controls={open ? listboxId : undefined}
+        aria-label={selected ? `${placeholder} — ${selected.label} selected` : placeholder}
         className={cn(
-          "w-full flex items-center gap-2 h-9 px-3 rounded-xl border border-border bg-input-background text-foreground text-xs font-medium transition-all",
-          "hover:border-primary/30 focus:outline-none focus:ring-2 focus:ring-primary/20",
+          "w-full flex items-center gap-2 h-10 px-3 rounded-xl border border-border bg-input-background text-foreground text-xs font-medium transition-all duration-200",
+          "hover:border-primary/30 focus:outline-none focus:ring-2 focus:ring-primary/30",
           open && "border-primary/30 ring-2 ring-primary/20"
         )}
       >
@@ -97,6 +103,8 @@ export function Combobox({
 
       {open && (
         <div
+          id={listboxId}
+          role="listbox"
           className={cn(
             "absolute top-full mt-1 z-50 w-full min-w-[180px] rounded-xl border border-border bg-card shadow-xl overflow-hidden animate-scale-in",
             align === "end" && "right-0"
@@ -104,14 +112,14 @@ export function Combobox({
           style={{ transformOrigin: align === "end" ? "top right" : "top left" }}
         >
           {/* Search input */}
-          <div className="flex items-center gap-2 px-3 h-9 border-b border-border">
+          <div className="flex items-center gap-2 px-3 h-10 border-b border-border">
             <Search className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
             <input
               autoFocus
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder={searchPlaceholder}
-              className="flex-1 bg-transparent text-xs text-foreground placeholder:text-muted-foreground outline-none"
+              className="flex-1 bg-transparent text-xs text-foreground placeholder:text-muted-foreground outline-none focus:ring-0"
             />
           </div>
 
@@ -126,9 +134,11 @@ export function Combobox({
                   <button
                     key={opt.value}
                     type="button"
+                    role="option"
+                    aria-selected={isSelected}
                     onClick={() => handleSelect(opt)}
                     className={cn(
-                      "w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-left transition-colors",
+                      "w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-left transition-colors active:scale-[0.98]",
                       isSelected
                         ? "bg-primary/8 text-primary"
                         : "text-foreground hover:bg-muted"

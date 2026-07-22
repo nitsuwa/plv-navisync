@@ -5,3 +5,6 @@ export { useScrollReveal } from "./useScrollReveal";
 export { useUndoRedo } from "./useUndoRedo";
 export { useDataList } from "./useDataList";
 export { useCrudModal } from "./useCrudModal";
+export { useSearchKeyboard } from "./useSearchKeyboard";
+export { useDebounce, useDebouncedCallback } from "./useDebounce";
+export { useSearchHighlight, highlightSearch } from "./useSearchHighlight";

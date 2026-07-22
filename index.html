@@ -12,12 +12,16 @@
     <meta name="application-name" content="PLV NaviSync" />
     <meta name="format-detection" content="telephone=no" />
     <link rel="manifest" href="/manifest.json" />
-    <link rel="apple-touch-icon" sizes="180x180" href="/icons/icon-192x192.png" />
-    <link rel="icon" type="image/png" sizes="32x32" href="/icons/icon-48x48.png" />
-    <link rel="icon" type="image/png" sizes="16x16" href="/icons/icon-48x48.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/icon-16x16.png" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/icon-32x32.png" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/icon-192x192.png" />
+    <link rel="icon" type="image/png" sizes="512x512" href="/icon-512x512.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/icon-192x192.png" />
     <title>PLV NaviSync — Smart Campus Navigator</title>
     <meta name="description" content="Interactive campus map and navigation for Pamantasan ng Lungsod ng Valenzuela. Find buildings, get directions, and explore the campus." />
     <meta name="robots" content="index, follow" />
+    <!-- Apple splash screen meta -->
+    <meta name="apple-mobile-web-app-title" content="PLV NaviSync" />
     <!-- iOS splash screen detection -->
     <script>
       (function () {
@@ -25,10 +29,39 @@
         var dark = stored === "dark" || (!stored && window.matchMedia("(prefers-color-scheme: dark)").matches);
         if (dark) document.documentElement.classList.add("dark");
         document.documentElement.style.background = dark ? "#070d1a" : "#eef2fa";
-        // Service worker registration for PWA
+
+        // ── PWA Install Prompt (deferred—no UI shown) ───────────────
+        var deferredPrompt = null;
+        window.addEventListener('beforeinstallprompt', function (e) {
+          e.preventDefault();
+          deferredPrompt = e;
+          // Store the event so the React app can retrieve it later
+          window.__plvInstallPrompt = e;
+        });
+
+        window.addEventListener('appinstalled', function () {
+          window.__plvInstallPrompt = null;
+          deferredPrompt = null;
+        });
+
+        // ── Service Worker Registration ────────────────────────────
         if ('serviceWorker' in navigator) {
           window.addEventListener('load', function () {
-            navigator.serviceWorker.register('/sw.js').then(function () {}, function () {});
+            var swUrl = '/sw.js';
+            navigator.serviceWorker.register(swUrl).then(function (reg) {
+              // Listen for updates
+              reg.addEventListener('updatefound', function () {
+                var newWorker = reg.installing;
+                newWorker.addEventListener('statechange', function () {
+                  if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                    // New version available — dispatch a custom event the React app can listen to
+                    window.dispatchEvent(new CustomEvent('plv-sw-update', { detail: { registration: reg } }));
+                  }
+                });
+              });
+            }).catch(function () {
+              // SW registration failed silently — app continues to work without it
+            });
           });
         }
       })();

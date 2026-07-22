@@ -48,7 +48,10 @@ export interface SharedCampusData {
   buildings: SharedBuilding[];
   markers: SharedMarker[];
   paths: SharedPath[];
+  publishStatus?: "draft" | "published";
   publishedAt?: string;
+  /** @default "active" — archived campuses are hidden from students */
+  status?: "active" | "archived";
 }
 
 // ── Context ────────────────────────────────────────────────────────────────

@@ -1,0 +1,62 @@
+   {/* ══════════════ MOBILE: building bottom sheet ══════════════ */}
+      {selected && !isFloorMode && (
+        <div data-no-drag
+          className="md:hidden fixed inset-x-0 z-40 bg-card/96 backdrop-blur-2xl rounded-t-3xl border-t border-border shadow-2xl animate-slide-up overflow-hidden flex flex-col"
+          style={{ bottom:"72px", maxHeight:"55vh" }}>
+          <div className="flex justify-center pt-3 shrink-0"><div className="w-10 h-1 rounded-full bg-muted-foreground/25"/></div>
+          <div className="flex items-start justify-between px-4 pt-2 pb-2 shrink-0">
+            <div>
+              <div className="flex items-center gap-1.5 mb-0.5">
+                <span className="bg-primary/90 text-primary-foreground text-[10px] font-mono font-extrabold px-1.5 py-0.5 rounded">{selected.code}</span>
+                <span className={cn("text-[10px] font-bold flex items-center gap-1", STATUS_COLOR[STATUS[selected.id] ?? "Open"])}>
+                  <span className={cn("w-1.5 h-1.5 rounded-full", STATUS_DOT[STATUS[selected.id] ?? "Open"])}/>
+                  {STATUS[selected.id] ?? "Open"}
+                </span>
+              </div>
+              <h3 className="font-extrabold text-foreground text-base leading-tight" style={{ fontFamily:"var(--font-sans)" }}>{selected.name}</h3>
+            </div>
+            <button onClick={() => selectBuilding(null)} className="w-8 h-8 rounded-full bg-muted flex items-center justify-center shrink-0 ml-2"><X className="h-4 w-4 text-muted-foreground"/></button>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 px-4 pb-3 border-b border-border shrink-0">
+            <button onClick={() => startDirectionsTo(selected)}
+              className="flex flex-col items-center gap-1.5 py-3 rounded-2xl bg-primary text-primary-foreground text-[10px] font-extrabold">
+              <Navigation className="h-4 w-4"/> Dir.
+            </button>
+            {FLOOR_PLANS[selected.id] && (
+              <button onClick={() => openFloorPlan(selected)}
+                className="flex flex-col items-center gap-1.5 py-3 rounded-2xl bg-muted text-muted-foreground text-[10px] font-extrabold border border-border">
+                <Layers className="h-4 w-4"/> Floors
+              </button>
+            )}
+            {studentAuth ? (
+              <button onClick={() => toggleSave(selected.id)}
+                className={cn("flex flex-col items-center gap-1.5 py-3 rounded-2xl text-[10px] font-extrabold border",
+                  saved.has(selected.id) ? "bg-accent/15 text-accent border-accent/30" : "bg-muted text-muted-foreground border-border")}>
+                <Bookmark className={cn("h-4 w-4", saved.has(selected.id) && "fill-current")}/>
+                {saved.has(selected.id) ? "Saved" : "Save"}
+              </button>
+            ) : (
+              <button onClick={() => setSignInPrompt("save locations")}
+                className="flex flex-col items-center gap-1.5 py-3 rounded-2xl bg-muted/60 text-muted-foreground/50 text-[10px] font-semibold border border-dashed border-border/60">
+                <Bookmark className="h-4 w-4"/> Save
+              </button>
+            )}
+            {studentAuth ? (
+              <button onClick={() => setReportModal(selected)}
+                className="flex flex-col items-center gap-1.5 py-3 rounded-2xl bg-muted text-muted-foreground text-[10px] font-extrabold border border-border">
+                <Flag className="h-4 w-4"/> Report
+              </button>
+            ) : (
+              <button onClick={() => setSignInPrompt("report issues")}
+                className="flex flex-col items-center gap-1.5 py-3 rounded-2xl bg-muted/60 text-muted-foreground/50 text-[10px] font-semibold border border-dashed border-border/60">
+                <Flag className="h-4 w-4"/> Report
+              </button>
+            )}
+          </div>
+          <div className="overflow-y-auto flex-1 p-4 scrollbar-show-on-hover">
+            <p className="text-sm text-muted-foreground leading-relaxed" style={{ fontFamily:"var(--font-body)" }}>{selected.description}</p>
+          </div>
+        </div>
+      )}
+
+      {/* ══════════════ 

@@ -239,47 +239,55 @@ export function RegistrationPage() {
                   className="space-y-4"
                 >
                   <div>
-                    <label className="block text-xs font-bold text-foreground mb-1.5 uppercase tracking-widest">Full Name</label>
+                    <label htmlFor="reg-fullname" className="block text-xs font-bold text-foreground mb-1.5 uppercase tracking-widest">Full Name</label>
                     <div className="relative">
                       <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                      <input type="text" value={form.fullName} onChange={e => set("fullName", e.target.value)}
+                      <input id="reg-fullname" type="text" value={form.fullName} onChange={e => set("fullName", e.target.value)} autoComplete="name"
                         placeholder="e.g. Juan Dela Cruz"
-                        className="w-full h-11 pl-9 pr-4 rounded-xl border border-border bg-input-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary text-sm transition-all" />
+                        aria-invalid={!!errs.fullName}
+                        aria-describedby={errs.fullName ? "reg-fullname-error" : undefined}
+                        className={"w-full h-11 pl-9 pr-4 rounded-xl border bg-input-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 text-sm transition-all " + (errs.fullName ? "border-destructive focus:ring-destructive/30" : "border-border focus:ring-primary/30 focus:border-primary")} />
                     </div>
-                    {errs.fullName && <p className="text-xs text-destructive mt-1 flex items-center gap-1"><span className="w-1 h-1 rounded-full bg-destructive" />{errs.fullName}</p>}
+                    {errs.fullName && <p id="reg-fullname-error" role="alert" className="text-xs text-destructive mt-1 flex items-center gap-1"><span className="w-1 h-1 rounded-full bg-destructive" />{errs.fullName}</p>}
                   </div>
 
                   <div>
-                    <label className="block text-xs font-bold text-foreground mb-1.5 uppercase tracking-widest">PLV Email</label>
+                    <label htmlFor="reg-email" className="block text-xs font-bold text-foreground mb-1.5 uppercase tracking-widest">PLV Email</label>
                     <div className="relative">
                       <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                      <input type="email" value={form.email} onChange={e => set("email", e.target.value)}
+                      <input id="reg-email" type="email" value={form.email} onChange={e => set("email", e.target.value)} autoComplete="email"
                         placeholder="yourname@plv.edu.ph"
-                        className="w-full h-11 pl-9 pr-4 rounded-xl border border-border bg-input-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary text-sm transition-all" />
+                        aria-invalid={!!errs.email}
+                        aria-describedby={errs.email ? "reg-email-error" : undefined}
+                        className={"w-full h-11 pl-9 pr-4 rounded-xl border bg-input-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 text-sm transition-all " + (errs.email ? "border-destructive focus:ring-destructive/30" : "border-border focus:ring-primary/30 focus:border-primary")} />
                     </div>
-                    {errs.email && <p className="text-xs text-destructive mt-1 flex items-center gap-1"><span className="w-1 h-1 rounded-full bg-destructive" />{errs.email}</p>}
+                    {errs.email && <p id="reg-email-error" role="alert" className="text-xs text-destructive mt-1 flex items-center gap-1"><span className="w-1 h-1 rounded-full bg-destructive" />{errs.email}</p>}
                   </div>
 
                   <div>
-                    <label className="block text-xs font-bold text-foreground mb-1.5 uppercase tracking-widest">Student ID</label>
+                    <label htmlFor="reg-studentid" className="block text-xs font-bold text-foreground mb-1.5 uppercase tracking-widest">Student ID</label>
                     <div className="relative">
                       <IdCard className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                      <input type="text" value={form.studentId} onChange={e => set("studentId", e.target.value)}
+                      <input id="reg-studentid" type="text" value={form.studentId} onChange={e => set("studentId", e.target.value)} autoComplete="off"
                         placeholder="e.g. 2024-00001"
-                        className="w-full h-11 pl-9 pr-4 rounded-xl border border-border bg-input-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary text-sm transition-all font-mono" />
+                        aria-invalid={!!errs.studentId}
+                        aria-describedby={errs.studentId ? "reg-studentid-error" : undefined}
+                        className={"w-full h-11 pl-9 pr-4 rounded-xl border bg-input-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 text-sm font-mono transition-all " + (errs.studentId ? "border-destructive focus:ring-destructive/30" : "border-border focus:ring-primary/30 focus:border-primary")} />
                     </div>
-                    {errs.studentId && <p className="text-xs text-destructive mt-1 flex items-center gap-1"><span className="w-1 h-1 rounded-full bg-destructive" />{errs.studentId}</p>}
+                    {errs.studentId && <p id="reg-studentid-error" role="alert" className="text-xs text-destructive mt-1 flex items-center gap-1"><span className="w-1 h-1 rounded-full bg-destructive" />{errs.studentId}</p>}
                   </div>
 
                   <div>
-                    <label className="block text-xs font-bold text-foreground mb-1.5 uppercase tracking-widest">Username</label>
+                    <label htmlFor="reg-username" className="block text-xs font-bold text-foreground mb-1.5 uppercase tracking-widest">Username</label>
                     <div className="relative">
                       <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground text-sm font-mono">@</span>
-                      <input type="text" value={form.username} onChange={e => set("username", e.target.value)}
+                      <input id="reg-username" type="text" value={form.username} onChange={e => set("username", e.target.value)} autoComplete="username"
                         placeholder="yourhandle" minLength={4}
-                        className="w-full h-11 pl-8 pr-4 rounded-xl border border-border bg-input-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary text-sm transition-all font-mono" />
+                        aria-invalid={!!errs.username}
+                        aria-describedby={errs.username ? "reg-username-error" : undefined}
+                        className={"w-full h-11 pl-8 pr-4 rounded-xl border bg-input-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 text-sm font-mono transition-all " + (errs.username ? "border-destructive focus:ring-destructive/30" : "border-border focus:ring-primary/30 focus:border-primary")} />
                     </div>
-                    {errs.username && <p className="text-xs text-destructive mt-1 flex items-center gap-1"><span className="w-1 h-1 rounded-full bg-destructive" />{errs.username}</p>}
+                    {errs.username && <p id="reg-username-error" role="alert" className="text-xs text-destructive mt-1 flex items-center gap-1"><span className="w-1 h-1 rounded-full bg-destructive" />{errs.username}</p>}
                   </div>
 
                   <motion.button
@@ -323,33 +331,39 @@ export function RegistrationPage() {
                     </motion.div>
 
                     <div>
-                      <label className="block text-xs font-bold text-foreground mb-1.5 uppercase tracking-widest">Password</label>
+                      <label htmlFor="reg-password" className="block text-xs font-bold text-foreground mb-1.5 uppercase tracking-widest">Password</label>
                       <div className="relative">
                         <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                        <input type={showPw ? "text" : "password"} value={form.password} onChange={e => set("password", e.target.value)}
+                        <input id="reg-password" type={showPw ? "text" : "password"} value={form.password} onChange={e => set("password", e.target.value)} autoComplete="new-password"
                           placeholder="Min. 6 characters" minLength={6}
-                          className="w-full h-11 pl-9 pr-11 rounded-xl border border-border bg-input-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary text-sm transition-all" />
+                          aria-invalid={!!errs.password}
+                          aria-describedby={errs.password ? "reg-password-error" : undefined}
+                          className={"w-full h-11 pl-9 pr-11 rounded-xl border bg-input-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 text-sm transition-all " + (errs.password ? "border-destructive focus:ring-destructive/30" : "border-border focus:ring-primary/30 focus:border-primary")} />
                         <button type="button" onClick={() => setShowPw(!showPw)}
+                          aria-label={showPw ? "Hide password" : "Show password"}
                           className="absolute right-3.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
                           {showPw ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                         </button>
                       </div>
-                      {errs.password && <p className="text-xs text-destructive mt-1 flex items-center gap-1"><span className="w-1 h-1 rounded-full bg-destructive" />{errs.password}</p>}
+                      {errs.password && <p id="reg-password-error" role="alert" className="text-xs text-destructive mt-1 flex items-center gap-1"><span className="w-1 h-1 rounded-full bg-destructive" />{errs.password}</p>}
                     </div>
 
                     <div>
-                      <label className="block text-xs font-bold text-foreground mb-1.5 uppercase tracking-widest">Confirm Password</label>
+                      <label htmlFor="reg-confirm" className="block text-xs font-bold text-foreground mb-1.5 uppercase tracking-widest">Confirm Password</label>
                       <div className="relative">
                         <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                        <input type={showCfm ? "text" : "password"} value={form.confirm} onChange={e => set("confirm", e.target.value)}
+                        <input id="reg-confirm" type={showCfm ? "text" : "password"} value={form.confirm} onChange={e => set("confirm", e.target.value)} autoComplete="new-password"
                           placeholder="Repeat your password"
-                          className="w-full h-11 pl-9 pr-11 rounded-xl border border-border bg-input-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary text-sm transition-all" />
+                          aria-invalid={!!errs.confirm}
+                          aria-describedby={errs.confirm ? "reg-confirm-error" : undefined}
+                          className={"w-full h-11 pl-9 pr-11 rounded-xl border bg-input-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 text-sm transition-all " + (errs.confirm ? "border-destructive focus:ring-destructive/30" : "border-border focus:ring-primary/30 focus:border-primary")} />
                         <button type="button" onClick={() => setShowCfm(!showCfm)}
+                          aria-label={showCfm ? "Hide confirm password" : "Show confirm password"}
                           className="absolute right-3.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
                           {showCfm ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                         </button>
                       </div>
-                      {errs.confirm && <p className="text-xs text-destructive mt-1 flex items-center gap-1"><span className="w-1 h-1 rounded-full bg-destructive" />{errs.confirm}</p>}
+                      {errs.confirm && <p id="reg-confirm-error" role="alert" className="text-xs text-destructive mt-1 flex items-center gap-1"><span className="w-1 h-1 rounded-full bg-destructive" />{errs.confirm}</p>}
                     </div>
 
                     <p className="text-[11px] text-muted-foreground leading-relaxed flex items-start gap-1.5">

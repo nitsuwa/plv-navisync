@@ -25,10 +25,12 @@ export function validateSupabaseConfig(): boolean {
     requireEnv("VITE_SUPABASE_ANON_KEY");
     return true;
   } catch {
-    console.warn(
-      "[Supabase] VITE_SUPABASE_URL and/or VITE_SUPABASE_ANON_KEY not set.\n" +
-      "The app will run with local mock data. Set these env vars to connect to Supabase."
-    );
+    if (import.meta.env.DEV) {
+      console.warn(
+        "[Supabase] VITE_SUPABASE_URL and/or VITE_SUPABASE_ANON_KEY not set.\n" +
+        "The app will run with local mock data. Set these env vars to connect to Supabase."
+      );
+    }
     return false;
   }
 }

@@ -1,7 +1,7 @@
 import { Link, useLocation, useNavigate } from "react-router";
 import {
   Map, Home, HelpCircle, LogIn, LogOut, User, Bookmark, Flag, Settings,
-  ChevronDown, Menu, X,
+  ChevronDown,
 } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
@@ -23,7 +23,7 @@ export function Navbar() {
   const { theme, toggleTheme } = useTheme();
   const [scrollY, setScrollY] = useState(0);
   const [dropdownOpen, setDropdownOpen] = useState(false);
-  const [mobileOpen, setMobileOpen] = useState(false);
+
   const dropdownRef = useRef<HTMLDivElement>(null);
   const studentAuth = useStudentAuth();
 
@@ -54,7 +54,6 @@ export function Navbar() {
 
   useEffect(() => {
     setDropdownOpen(false);
-    setMobileOpen(false);
   }, [location.pathname]);
 
   const fillProgress = Math.min(scrollY / 80, 1);
@@ -67,19 +66,7 @@ export function Navbar() {
     ? studentAuth.username.slice(0, 2).toUpperCase()
     : "";
 
-  const mobileMenuVariants = {
-    closed: { opacity: 0, height: 0 },
-    open: { opacity: 1, height: "auto" },
-  };
 
-  const mobileItemVariants = {
-    closed: { opacity: 0, x: -12 },
-    open: (i: number) => ({
-      opacity: 1,
-      x: 0,
-      transition: { delay: 0.05 * i, type: "spring", stiffness: 300, damping: 25 },
-    }),
-  };
 
   return (
     <nav
@@ -125,6 +112,7 @@ export function Navbar() {
               const active = isActive(path);
               return (
                 <Link key={path} to={path}
+                  aria-current={active ? "page" : undefined}
                   className={cn(
                     "relative flex items-center gap-1.5 rounded-xl transition-colors duration-150 select-none",
                     "px-3.5 py-2 text-sm font-semibold",
@@ -159,6 +147,9 @@ export function Navbar() {
                 <motion.button
                   onClick={() => setDropdownOpen(v => !v)}
                   whileTap={{ scale: 0.93 }}
+                  aria-label={`${studentAuth.username} — user menu`}
+                  aria-expanded={dropdownOpen}
+                  aria-haspopup="true"
                   className={cn(
                     "flex items-center gap-2 h-9 pl-1 pr-2.5 rounded-xl transition-all duration-150",
                     showWhiteText
@@ -167,7 +158,8 @@ export function Navbar() {
                   )}
                   style={{ color: showWhiteText ? "rgba(255,255,255,0.9)" : "var(--foreground)" }}
                 >
-                  <div className="w-7 h-7 rounded-lg flex items-center justify-center text-[11px] font-extrabold text-primary-foreground shrink-0"
+                  <div              aria-hidden="true"
+              className="w-7 h-7 rounded-xl flex items-center justify-center text-[11px] font-extrabold text-primary-foreground shrink-0"
                     style={{ background: "var(--primary)" }}>
                     {initials}
                   </div>
@@ -218,7 +210,7 @@ export function Navbar() {
                           <Settings className="h-4 w-4 text-muted-foreground shrink-0" /> Settings
                         </Link>
                         <button onClick={handleStudentLogout}
-                          className="w-full flex items-center gap-3 px-4 py-2.5 text-sm font-semibold hover:bg-destructive/8 text-destructive transition-colors text-left">
+                          className="w-full flex items-center gap-3 px-4 py-2.5 text-sm font-semibold hover:bg-destructive/8 text-destructive transition-colors text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">
                           <LogOut className="h-4 w-4 shrink-0" /> Sign Out
                         </button>
                       </div>
@@ -228,7 +220,7 @@ export function Navbar() {
               </div>
             ) : (
               <Link to="/admin"
-                className="inline-flex items-center gap-1 h-8 px-3 sm:px-4 rounded-lg text-xs sm:text-sm font-bold transition-all duration-150 hover:brightness-110 active:scale-95"
+                className="inline-flex items-center gap-1 h-9 px-3 sm:px-4 rounded-xl text-xs sm:text-sm font-bold transition-all duration-200 hover:brightness-110 active:scale-95"
                 style={{
                   border: showWhiteText ? "1px solid rgba(255,255,255,0.45)" : "1px solid var(--primary)",
                   color: showWhiteText ? "rgba(255,255,255,0.9)" : "var(--primary)",
@@ -239,67 +231,12 @@ export function Navbar() {
               </Link>
             )}
 
-            {/* Mobile hamburger */}
-            <motion.button
-              onClick={() => setMobileOpen(v => !v)}
-              whileTap={{ scale: 0.88 }}
-              className="md:hidden w-10 h-10 rounded-xl flex items-center justify-center border border-border hover:bg-muted transition-colors active:bg-muted-foreground/10"
-              aria-label="Toggle navigation menu"
-            >
-              <AnimatePresence mode="wait">
-                {mobileOpen ? (
-                  <motion.div key="x" initial={{ rotate: -90, opacity: 0 }} animate={{ rotate: 0, opacity: 1 }} exit={{ rotate: 90, opacity: 0 }} transition={{ duration: 0.15 }}>
-                    <X className="h-4 w-4" />
-                  </motion.div>
-                ) : (
-                  <motion.div key="menu" initial={{ rotate: 90, opacity: 0 }} animate={{ rotate: 0, opacity: 1 }} exit={{ rotate: -90, opacity: 0 }} transition={{ duration: 0.15 }}>
-                    <Menu className="h-4 w-4" />
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </motion.button>
+
           </div>
         </div>
       </div>
 
-      {/* Mobile menu */}
-      <AnimatePresence>
-        {mobileOpen && (
-          <motion.div
-            variants={mobileMenuVariants}
-            initial="closed"
-            animate="open"
-            exit="closed"
-            transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
-            className="md:hidden overflow-hidden border-t border-border bg-card"
-          >
-            <div className="px-4 py-3 space-y-1">
-              {NAV_LINKS.map(({ label, path, icon: Icon }, i) => {
-                const active = isActive(path);
-                return (
-                  <motion.div
-                    key={path}
-                    custom={i}
-                    variants={mobileItemVariants}
-                    initial="closed"
-                    animate="open"
-                  >
-                    <Link to={path}
-                      className={cn(
-                        "flex items-center gap-3 px-3 py-3 rounded-xl text-sm font-semibold transition-colors active:scale-[0.98]",
-                        active ? "bg-primary/10 text-primary" : "text-foreground hover:bg-muted"
-                      )}
-                    >
-                      <Icon className="h-4 w-4" />
-                      {label}
-                    </Link>
-                  </motion.div>
-                );
-              })}
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+
     </nav>
   );
 }

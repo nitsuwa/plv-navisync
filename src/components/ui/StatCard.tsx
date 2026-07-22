@@ -1,4 +1,5 @@
 import { cn } from "../../lib/utils";
+import { memo } from "react";
 import type { LucideIcon } from "lucide-react";
 import { TrendingUp, TrendingDown } from "lucide-react";
 
@@ -45,7 +46,7 @@ const variantConfig = {
   },
 };
 
-export function StatCard({ title, value, subtitle, icon: Icon, trend, variant = "default", className }: StatCardProps) {
+const StatCard = memo(function StatCard({ title, value, subtitle, icon: Icon, trend, variant = "default", className }: StatCardProps) {
   const cfg = variantConfig[variant];
 
   return (
@@ -56,19 +57,19 @@ export function StatCard({ title, value, subtitle, icon: Icon, trend, variant = 
     )}>
       <div className="flex items-start justify-between gap-3">
         <div className="flex-1 min-w-0">
-          <p className={cn("text-xs font-bold uppercase tracking-widest mb-2", cfg.title)}>
+          <p className={cn("text-[11px] font-bold uppercase tracking-widest", cfg.title)}>
             {title}
           </p>
-          <p className={cn("text-3xl font-extrabold tracking-tight tabular-nums", cfg.value)}>
+          <p className={cn("text-2xl sm:text-3xl font-extrabold tracking-tight tabular-nums mt-1.5", cfg.value)}>
             {value}
           </p>
           {subtitle && (
-            <p className={cn("text-xs mt-1.5 font-medium", cfg.title)}>
+            <p className={cn("text-xs mt-1.5 leading-relaxed", cfg.title)}>
               {subtitle}
             </p>
           )}
           {trend && (
-            <div className="flex items-center gap-1 mt-2">
+            <div className="flex items-center gap-1.5 mt-2">
               {trend.value >= 0
                 ? <TrendingUp className="h-3.5 w-3.5 text-green-500" />
                 : <TrendingDown className="h-3.5 w-3.5 text-destructive" />
@@ -80,10 +81,12 @@ export function StatCard({ title, value, subtitle, icon: Icon, trend, variant = 
             </div>
           )}
         </div>
-        <div className={cn("shrink-0 w-12 h-12 rounded-2xl flex items-center justify-center shadow-sm", cfg.icon)}>
-          <Icon className="h-5 w-5" />
+        <div className={cn("shrink-0 w-10 h-10 sm:w-12 sm:h-12 rounded-xl sm:rounded-2xl flex items-center justify-center shadow-sm", cfg.icon)}>
+          <Icon className="h-4 w-4 sm:h-5 sm:w-5" />
         </div>
       </div>
     </div>
   );
-}
+});
+
+export { StatCard };

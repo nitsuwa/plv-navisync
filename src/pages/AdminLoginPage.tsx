@@ -1,7 +1,10 @@
 import { useState } from "react";
 import { useNavigate, Link } from "react-router";
-import { Eye, EyeOff, LogIn, Shield, ChevronDown, Check, GraduationCap, LayoutDashboard } from "lucide-react";
+import { motion } from "motion/react";
+import { Eye, EyeOff, LogIn, Shield, ChevronDown, Check, GraduationCap, LayoutDashboard, AlertCircle, X } from "lucide-react";
+import { cn } from "../lib/utils";
 import { Button } from "../components/ui/Button";
+import { useToast } from "../hooks/useToast";
 import { useTheme } from "../hooks/useTheme";
 import { ThemeToggle } from "../components/ui/ThemeToggle";
 import { PLVLogo } from "../components/ui/PLVLogo";
@@ -142,6 +145,7 @@ export function AdminLoginPage() {
   const [error, setError]      = useState("");
   const [demoOpen, setDemoOpen]    = useState(false);
   const [filledDemo, setFilledDemo] = useState<string | null>(null);
+  const toast = useToast();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -156,12 +160,14 @@ export function AdminLoginPage() {
     if (isAdmin) {
       sessionStorage.setItem("plv-admin-auth", "true");
       sessionStorage.removeItem("plv-student-auth");
-      navigate("/admin/dashboard");
+      toast.success("Welcome back", "Redirecting to admin dashboard...");
+      setTimeout(() => navigate("/admin-dashboard"), 400);
     } else if (isStudent || isFaculty) {
       // Students/faculty land on the public campus map, not the admin dashboard
       sessionStorage.setItem("plv-student-auth", JSON.stringify({ username, role: isStudent ? "student" : "faculty" }));
       sessionStorage.removeItem("plv-admin-auth");
-      navigate("/map");
+      toast.success("Signed in", `Welcome back, ${username}!`);
+      setTimeout(() => navigate("/map"), 400);
     } else {
       setError("Incorrect username or password.");
       setLoading(false);
@@ -196,7 +202,7 @@ export function AdminLoginPage() {
         <div className="relative z-10 flex items-center gap-3">
           <PLVLogo size={40}/>
           <div>
-            <p className="font-extrabold text-white text-base leading-none" style={{ fontFamily:"var(--font-sans)" }}>
+            <p className="font-extrabold text-white text-base leading-none">
               PLV NaviSync
             </p>
             <p className="text-white/50 text-xs font-semibold tracking-widest uppercase mt-0.5">
@@ -212,8 +218,7 @@ export function AdminLoginPage() {
 
         {/* Bottom tagline */}
         <div className="relative z-10">
-          <h2 className="text-3xl xl:text-4xl font-extrabold text-white leading-tight mb-2"
-            style={{ fontFamily: "var(--font-sans)" }}>
+          <h2 className="text-3xl xl:text-4xl font-extrabold text-white leading-tight mb-2">
             Navigate every corner<br/>of PLV campus.
           </h2>
           <p className="text-white/50 text-sm leading-relaxed max-w-xs">
@@ -225,22 +230,21 @@ export function AdminLoginPage() {
       {/* ══════════ RIGHT — login form ══════════ */}
       <div className="flex-1 lg:max-w-[460px] flex flex-col bg-background">
         {/* Top bar */}
-        <div className="flex items-center justify-between px-8 pt-6 pb-2">
-          <Link to="/" className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors">
-            <span>←</span> Back to site
+        <div className="flex items-center justify-between px-5 sm:px-8 pt-5 sm:pt-6 pb-2">
+          <Link to="/" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors">
+            <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+            Back
           </Link>
           <ThemeToggle theme={theme} onToggle={toggleTheme}/>
         </div>
 
-        {/* Extra px/py gives the right panel air — not too cramped, not too sparse */}
-        <div className="flex-1 flex items-center justify-center px-10 sm:px-14 py-10">
+        <div className="flex-1 flex items-center justify-center px-5 sm:px-10 py-8 sm:py-10">
           <div className="w-full max-w-[340px]">
 
             {/* PLV Logo — prominently at top */}
             <div className="flex flex-col items-center mb-9">
               <PLVLogo size={56} className="mb-3 shadow-md"/>
-              <h1 className="text-2xl font-extrabold text-foreground text-center"
-                style={{ fontFamily: "var(--font-sans)" }}>
+              <h1 className="text-2xl font-extrabold text-foreground text-center">
                 Welcome Back
               </h1>
               <p className="text-sm text-muted-foreground text-center mt-1">
@@ -267,8 +271,8 @@ export function AdminLoginPage() {
                 <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform duration-200 ${demoOpen?"rotate-180":""}`}/>
               </button>
 
-              <div className="overflow-hidden transition-all duration-300 ease-in-out"
-                style={{ maxHeight: demoOpen ? 160 : 0, opacity: demoOpen ? 1 : 0 }}>
+              <div className="transition-all duration-300 ease-in-out"
+                style={{ maxHeight: demoOpen ? 160 : 0, opacity: demoOpen ? 1 : 0, overflow: demoOpen ? 'visible' : 'hidden' }}>
                 <div className="mt-2 rounded-2xl border border-border bg-card shadow-lg overflow-hidden">
                   {DEMO_ACCOUNTS.map(acc => {
                     const Icon = acc.icon;
@@ -306,20 +310,24 @@ export function AdminLoginPage() {
                 <label htmlFor="login-username" className="block text-xs font-bold text-foreground mb-1.5 uppercase tracking-widest">
                   Username
                 </label>
-                <input id="login-username" type="text" value={form.username}
-                  onChange={e => { setForm({...form, username:e.target.value}); setFilledDemo(null); }}
+                <input id="login-username" type="text" value={form.username} autoComplete="username"
+                  onChange={e => { setForm({...form, username:e.target.value}); setFilledDemo(null); if (error) setError(""); }}
                   placeholder="Enter your username" required
-                  className="w-full h-11 px-4 rounded-xl border border-border bg-input-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-all text-sm"/>
+                  aria-invalid={!!error}
+                  aria-describedby={error ? "login-error" : undefined}
+                  className={cn("w-full h-11 px-4 rounded-xl border bg-input-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 transition-all text-sm", error ? "border-destructive focus:ring-destructive/30" : "border-border focus:ring-primary/30 focus:border-primary")}/>
               </div>
               <div>
                 <label htmlFor="login-password" className="block text-xs font-bold text-foreground mb-1.5 uppercase tracking-widest">
                   Password
                 </label>
                 <div className="relative">
-                  <input id="login-password" type={showPw?"text":"password"} value={form.password}
-                    onChange={e => { setForm({...form, password:e.target.value}); setFilledDemo(null); }}
-                    placeholder="Your password" required
-                    className="w-full h-11 px-4 pr-11 rounded-xl border border-border bg-input-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-all text-sm"/>
+                  <input id="login-password" type={showPw?"text":"password"} value={form.password} autoComplete="current-password"
+                    onChange={e => { setForm({...form, password:e.target.value}); setFilledDemo(null); if (error) setError(""); }}
+                    placeholder="Enter your password" required
+                    aria-invalid={!!error}
+                    aria-describedby={error ? "login-error" : undefined}
+                    className={cn("w-full h-11 px-4 pr-11 rounded-xl border bg-input-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 transition-all text-sm", error ? "border-destructive focus:ring-destructive/30" : "border-border focus:ring-primary/30 focus:border-primary")}/>
                   <button type="button" onClick={()=>setShowPw(!showPw)}
                     className="absolute right-3.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors">
                     {showPw?<EyeOff className="h-4 w-4"/>:<Eye className="h-4 w-4"/>}
@@ -328,10 +336,30 @@ export function AdminLoginPage() {
               </div>
 
               {error && (
-                <div className="flex items-start gap-2 p-3.5 rounded-xl bg-destructive/8 border border-destructive/20 text-destructive text-sm">
-                  <Shield className="h-4 w-4 shrink-0 mt-0.5"/>
-                  <span className="font-medium">{error}</span>
-                </div>
+                <motion.div
+                  initial={{ opacity: 0, y: -8, height: 0 }}
+                  animate={{ opacity: 1, y: 0, height: 'auto' }}
+                  transition={{ duration: 0.2 }}
+                  id="login-error"
+                  role="alert"
+                  className="flex items-start gap-2.5 p-3.5 rounded-xl bg-destructive/8 border border-destructive/20 text-destructive text-sm"
+                >
+                  <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+                  <div className="flex-1 min-w-0">
+                    <p className="font-semibold">{error}</p>
+                    <p className="text-xs text-destructive/80 mt-0.5">
+                      Demo credentials are: <span className="font-mono font-bold">admin</span> / <span className="font-mono font-bold">plv2025</span> or <span className="font-mono font-bold">student</span> / <span className="font-mono font-bold">plv2025</span>
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setError("")}
+                    aria-label="Dismiss error"
+                    className="shrink-0 w-5 h-5 rounded-full flex items-center justify-center text-destructive/60 hover:text-destructive hover:bg-destructive/10 transition-colors"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </motion.div>
               )}
 
               <Button type="submit" variant="primary" size="lg" isLoading={loading} className="w-full h-11">

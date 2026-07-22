@@ -37,13 +37,13 @@ export function AnnouncementCard({ announcement, className, compact = false }: A
 
   return (
     <div className={cn(
-      "rounded-2xl border border-border bg-card shadow-sm overflow-hidden border-l-4 transition-all duration-200 hover:shadow-md hover:-translate-y-0.5",
+      "rounded-2xl border border-border bg-card shadow-sm overflow-hidden border-l-4 transition-all duration-200 hover:shadow-md hover:-translate-y-0.5 group/card",
       accentColors[announcement.priority] ?? "border-l-border",
       className
     )}>
       <div className="p-4">
         <div className="flex items-start gap-3">
-          <div className={cn("shrink-0 flex items-center justify-center w-9 h-9 rounded-xl", iconBg[announcement.priority] ?? iconBg.normal)}>
+          <div className={cn("shrink-0 flex items-center justify-center w-9 h-9 rounded-xl transition-all duration-300 group-hover/card:scale-110 group-hover/card:rotate-3", iconBg[announcement.priority] ?? iconBg.normal)}>
             <Icon className="h-4 w-4" />
           </div>
 

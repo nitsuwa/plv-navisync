@@ -3,12 +3,14 @@ import { useState, useEffect } from "react";
 import {
   ArrowLeft, MapPin, Clock, Phone, Building2, Navigation, Layers, Users,
   ChevronRight, Bookmark, Share2, Flag, Info, CheckCircle2, Map,
+  Accessibility,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { MOCK_BUILDINGS } from "../data/mockData";
 import { BuildingCategoryBadge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
 import { BuildingCard } from "../components/ui/BuildingCard";
+import { EmptyState } from "../components/ui/EmptyState";
 import { PageTransition } from "../components/ui/PageTransition";
 import { Skeleton } from "../components/ui/Skeleton";
 import { cn } from "../lib/utils";
@@ -22,6 +24,25 @@ const TABS: { key: Tab; label: string; icon: React.ElementType }[] = [
   { key: "facilities", label: "Facilities", icon: Layers },
   { key: "accessibility", label: "Accessibility", icon: Map },
 ];
+
+// Building-specific data maps (consistent with CampusMapPage)
+const BUILDING_FACILITIES: Record<string, string[]> = {
+  b1: ["Lecture Rooms", "Computer Labs", "Faculty Offices", "Study Rooms"],
+  b2: ["Admin Offices", "Registrar", "Cashier", "Conference Rooms", "VP Office"],
+  b3: ["Main Library", "Reading Rooms", "Computer Access", "Study Booths", "Media Section"],
+  b4: ["Engineering Labs", "Workshops", "Drawing Rooms", "Project Rooms"],
+  b5: ["Main Gymnasium", "Bleachers", "Locker Rooms", "Equipment Storage"],
+  b6: ["Student Council Office", "Canteen", "Student Lounge", "Organization Rooms"],
+};
+
+const BUILDING_ACCESSIBILITY: Record<string, string[]> = {
+  b1: ["Wheelchair Ramp (G/F)", "Accessible Restroom", "Wide Corridors"],
+  b2: ["Elevator (all floors)", "Wheelchair Ramp", "Accessible Parking", "Accessible Restroom"],
+  b3: ["Ground Floor Access", "Wide Doorways", "Accessible Restroom"],
+  b4: ["Ramp at Main Entrance", "Accessible Lab Benches"],
+  b5: ["Level Entry", "Accessible Seating", "Accessible Restroom"],
+  b6: ["Ground Floor Access", "Wide Corridors"],
+};
 
 export function BuildingDetailsPage() {
   const { id } = useParams<{ id: string }>();
@@ -44,20 +65,16 @@ export function BuildingDetailsPage() {
   if (!isLoading && !building) {
     return (
       <PageTransition>
-        <div className="min-h-[60vh] flex flex-col items-center justify-center gap-5 px-5 text-center">
-          <div className="w-20 h-20 rounded-3xl bg-muted flex items-center justify-center border border-border">
-            <Building2 className="h-10 w-10 text-muted-foreground/50" />
-          </div>
-          <div>
-            <h2 className="text-xl font-extrabold text-foreground mb-1">Building Not Found</h2>
-            <p className="text-muted-foreground text-sm max-w-xs">
-              The building you are looking for doesn't exist or may have been removed.
-            </p>
-          </div>
-          <Link to="/buildings">
-            <Button variant="primary">Back to Buildings</Button>
-          </Link>
-        </div>
+        <EmptyState
+          icon={Building2}
+          title="Building Not Found"
+          description="The building you are looking for doesn't exist or may have been removed from the campus directory."
+          action={
+            <Link to="/buildings">
+              <Button variant="primary">Back to Buildings</Button>
+            </Link>
+          }
+        />
       </PageTransition>
     );
   }
@@ -268,7 +285,7 @@ export function BuildingDetailsPage() {
                       <Layers className="h-4 w-4 text-primary" /> Facilities
                     </h2>
                     <div className="flex flex-wrap gap-2">
-                      {["Lecture Rooms", "Computer Labs", "Faculty Offices", "Study Rooms", "Conference Rooms"].map((f) => (
+                      {(BUILDING_FACILITIES[building!.id] ?? ["General Facilities", "Study Areas"]).map((f) => (
                         <span
                           key={f}
                           className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full bg-muted border border-border text-muted-foreground hover:border-primary/20 hover:text-foreground transition-colors"
@@ -287,12 +304,12 @@ export function BuildingDetailsPage() {
                       <Map className="h-4 w-4 text-primary" /> Accessibility Features
                     </h2>
                     <div className="space-y-2">
-                      {["Wheelchair Ramp", "Elevator Access", "Accessible Restroom", "Wide Corridors"].map((a) => (
+                      {(BUILDING_ACCESSIBILITY[building!.id] ?? ["Standard Access"]).map((a) => (
                         <div
                           key={a}
                           className="flex items-center gap-2.5 px-3.5 py-3 rounded-xl bg-green-50/60 dark:bg-green-900/10 border border-green-200/60 dark:border-green-800/20 text-sm text-foreground"
                         >
-                          <span className="text-green-500 text-base">♿</span>
+                          <Accessibility className="h-4 w-4 text-green-500 shrink-0" />
                           {a}
                         </div>
                       ))}
