@@ -2,205 +2,206 @@
 
 # Team Development Rules
 
-**Version:** 1.0
-**Status:** Frozen Team Workflow
-**Purpose:** Prevent merge conflicts, duplicated work, AI drift, and accidental breaking changes while three developers work in parallel.
+**Version:** 2.0
+**Status:** Official Team Workflow
+**Purpose:** Keep `main` stable, prevent duplicate AI work, and allow Austin to continue the critical path while teammates contribute safely.
 
-This document applies to all developers and all AI-assisted coding sessions.
-
----
-
-# 1. Core Team Rule
-
-No developer commits directly to `main`.
-
-Every change must be completed in a feature branch, reviewed, tested, and merged through a Pull Request.
-
-The `main` branch should always remain buildable.
+These rules apply to every developer and every AI-assisted coding session.
 
 ---
 
-# 2. Branch Strategy
+# 1. Team Structure
 
-Use these long-running module branches:
+## Lead Developer and Integrator — Austin
 
-```text
-feature/auth-admin-backend
-feature/map-navigation
-feature/operations-content
-```
+Austin is the main developer and integration owner.
 
-## Developer 1
+Responsibilities:
 
-Branch:
+- Choose the next critical-path task.
+- Assign or approve tasks before work begins.
+- Own shared architecture, Supabase, migrations, generated database types, authentication, and publishing contracts.
+- Work on any important available feature when it is not actively claimed by another developer.
+- Review Pull Requests and decide merge order.
+- Take over tasks that are returned, abandoned, or blocking the project.
+- Keep `main` buildable.
 
-```text
-feature/auth-admin-backend
-```
+This role does not limit Austin to backend work. Austin may implement admin, student, Map Builder, navigation, or operational features according to project priority.
 
-Owns:
+## Contributing Developers
 
-- Supabase setup
-- Authentication
-- Profiles
-- Users
-- Settings
-- Shared services
-- Generated database types
-- Storage infrastructure
-- Backend error handling
-- Auth-related contexts and guards
+Developers 2 and 3 receive one small, clearly bounded task at a time.
 
-## Developer 2
+They do not permanently own the entire admin side, student side, or Map Builder. Ownership applies only to the task currently assigned to them.
 
-Branch:
+Contributor tasks should be:
 
-```text
-feature/map-navigation
-```
-
-Owns:
-
-- Campus map
-- Campus Map Builder
-- Buildings
-- Floors
-- Map elements
-- Navigation graph
-- Pathfinding
-- Accessibility routing
-- Emergency routing
-- Validation and publishing UI
-
-## Developer 3
-
-Branch:
-
-```text
-feature/operations-content
-```
-
-Owns:
-
-- Dashboard
-- Reports
-- Events
-- Announcements
-- Student report pages
-- Favorites
-- Operational statistics
-- Activity presentation
+- Independently testable.
+- Small enough for one Pull Request.
+- Limited to clearly listed files.
+- Unrelated to files another developer is actively editing.
+- Free from new migrations unless Austin explicitly assigns the database change.
 
 ---
 
-# 3. Optional Task Branches
+# 2. Core Branch Rule
 
-For risky or larger work, create a short-lived branch from the developer's main feature branch.
+No developer commits or pushes feature work directly to `main`.
+
+Every task uses a new short-lived branch created from the latest `main`.
 
 Examples:
 
 ```text
-feature/auth-admin-backend/supabase-auth
-feature/map-navigation/publish-workflow
-feature/operations-content/report-history
+feature/generate-database-types
+feature/password-reset
+feature/campus-crud
+feature/report-submission
+fix/student-profile-loading
+docs/update-roadmap
+```
+Do not use permanent developer branches such as:
+
+```text
+feature/developer-1
+feature/map-navigation
+feature/operations-content
 ```
 
-Merge the task branch back into the developer's feature branch first.
-
-Do not create dozens of unnecessary branches for tiny edits.
+One branch must contain one coherent task only.
 
 ---
 
-# 4. Daily Start Workflow
+# 3. Task Board and Claiming
 
-Before starting work:
+Maintain a small task board in the group chat, GitHub Issues, or project board.
+
+```text
+AVAILABLE
+- Unclaimed tasks
+
+CLAIMED
+- Task — Developer — Branch — Target date
+
+FOR REVIEW
+- Task — Pull Request link
+
+DONE
+- Merged tasks
+```
+
+Rules:
+
+1. A task must be listed or approved before work starts.
+2. The developer claims it and posts the branch name.
+3. Only one developer may claim a task.
+4. No one may edit files owned by another active task without coordination.
+5. If no meaningful progress is made by the agreed time, the task may be returned to `AVAILABLE`.
+6. Austin may take over a returned or blocking task.
+7. Starting a Freebuff session does not count as progress unless the produced changes are reviewed.
+
+---
+
+# 4. Starting a Task
+
+Before beginning:
 
 ```bash
 git checkout main
 git pull origin main
+git checkout -b <branch-name>
 ```
 
-Then update the assigned branch:
+Then:
 
-```bash
-git checkout feature/<assigned-branch>
-git merge main
-```
+1. Read the project documents.
+2. Inspect the exact files related to the task.
+3. Confirm the allowed files and acceptance criteria.
+4. Run the current build before making large changes when practical.
+5. Tell the team before touching a shared-core file.
 
-Resolve conflicts before beginning new work.
-
-After merging `main`, run:
-
-```bash
-pnpm install
-pnpm build
-```
-
-Run relevant tests when available.
-
-Do not continue if the branch does not build.
+Do not begin from an old branch.
 
 ---
 
-# 5. Folder Ownership
+# 5. Work Areas
 
-## Developer 1 ownership
+These areas guide task assignment but are not permanent ownership boundaries.
 
-Primary ownership:
+## Lead and shared foundation
+
+Normally coordinated by Austin:
 
 ```text
 src/lib/supabase.ts
 src/services/
-src/pages/AdminLoginPage.tsx
-src/pages/RegistrationPage.tsx
-src/pages/AdminUsersPage.tsx
-src/pages/AdminSettingsPage.tsx
-src/pages/StudentProfilePage.tsx
-src/pages/StudentSettingsPage.tsx
+src/hooks/useAdminAuth.ts
+src/hooks/useStudentAuth.ts
+src/app/routes.tsx
+src/contexts/
+src/types/
 supabase/
+package.json
+pnpm-lock.yaml
 ```
 
-Auth-related files under `src/contexts/` and `src/hooks/` also belong to Developer 1.
+Typical tasks:
 
-## Developer 2 ownership
+- Supabase and RLS
+- Authentication and authorization
+- Database migrations and generated types
+- Shared service contracts
+- Campus publishing and public-data contracts
+- Cross-module integration
 
-Primary ownership:
+## Map and authoring contributions
+
+Typical isolated contributor tasks:
 
 ```text
-src/components/map/
 src/components/map-builder/
+src/components/map/
 src/pages/AdminMapBuilderPage.tsx
 src/pages/CampusMapPage.tsx
-src/pages/BuildingsPage.tsx
-src/pages/BuildingDetailsPage.tsx
 src/lib/pathfinding.ts
 src/lib/indoorPathfinding.ts
 src/lib/combinedPathfinding.ts
-src/lib/mapDataAdapter.ts
-src/lib/campusHelpers.ts
 ```
 
-## Developer 3 ownership
+Examples:
 
-Primary ownership:
+- One editor interaction
+- One validation rule
+- One responsive UI fix
+- One pathfinding regression with tests
+
+## Operations and student contributions
+
+Typical isolated contributor tasks:
 
 ```text
 src/pages/AdminDashboardPage.tsx
 src/pages/AdminReportsPage.tsx
 src/pages/AdminEventsPage.tsx
 src/pages/AdminAnnouncementsPage.tsx
-src/pages/AnnouncementsPage.tsx
 src/pages/StudentReportsPage.tsx
 src/pages/StudentFavoritesPage.tsx
 src/components/map/EventPopup.tsx
 src/components/map/ReportModal.tsx
 ```
 
+Examples:
+
+- One loading/empty/error-state improvement
+- One form validation task
+- One isolated page connection after its service contract is merged
+- One responsive or accessibility fix
+
 ---
 
-# 6. Shared Files Requiring Coordination
+# 6. Shared-Core Files
 
-The following are shared-core files:
+These require coordination:
 
 ```text
 src/app/App.tsx
@@ -221,369 +222,216 @@ vite.config.ts
 supabase/migrations/
 ```
 
-Before modifying a shared file:
+Before changing one:
 
 1. Inform the team.
-2. Explain the reason.
+2. Explain why it is required.
 3. Assign one developer.
 4. Make the smallest safe change.
-5. Merge early.
-6. Tell everyone to update their branches.
+5. Merge it early.
+6. Tell active developers to update from `main`.
 
-Never let two Freebuff sessions edit the same shared file at the same time.
-
----
-
-# 7. Files That Must Not Be Modified Casually
-
-Do not rename, move, or replace these without a dedicated reviewed task:
-
-```text
-src/app/routes.tsx
-src/app/App.tsx
-src/components/map-builder/
-src/lib/pathfinding.ts
-src/lib/indoorPathfinding.ts
-src/lib/combinedPathfinding.ts
-src/contexts/CampusDataContext.tsx
-src/styles/theme.css
-src/config/animation.ts
-supabase/migrations/
-```
-
-Do not:
-
-- Replace React Router
-- Convert the project to Next.js
-- Replace the custom SVG map
-- Replace the active Map Builder
-- Add a second state-management framework
-- Add a second Supabase client
-- Introduce a new UI kit for one screen
-- Rebuild existing working modules without approval
+Never let separate Freebuff sessions edit the same shared file concurrently.
 
 ---
 
-# 8. AI Coding Rules for Team Members
+# 7. Database Change Rules
 
-Before prompting Freebuff or Codex:
+Austin coordinates all migration numbers and schema changes.
 
-1. Identify the exact module.
-2. Identify the exact files allowed to change.
-3. Reference the relevant documents.
-4. Request one small deliverable.
-5. Explicitly forbid unrelated changes.
+Every database change requires:
 
-Good prompt structure:
-
-```text
-Read:
-- docs/00_PROJECT_CONTEXT.md
-- docs/01_SYSTEM_FEATURES.md
-- docs/02_SYSTEM_ARCHITECTURE.md
-- docs/03_DATABASE_SUPABASE.md
-- docs/04_TEAM_RULES.md
-
-You are working only on [MODULE].
-
-Allowed files:
-- [exact files/folders]
-
-Task:
-[one specific implementation task]
-
-Do not:
-- modify unrelated files
-- rename folders
-- restructure the project
-- replace existing working components
-- create duplicate services or types
-- use mock data unless the task explicitly requires a temporary fixture
-
-Before finishing:
-- run the build
-- report modified files
-- report unresolved issues
-```
-
-Bad prompts:
-
-```text
-Improve the whole app.
-Fix everything.
-Make the dashboard better.
-Connect Supabase everywhere.
-Refactor the project.
-```
-
----
-
-# 9. One Task at a Time
-
-Each AI session should implement one coherent task.
-
-Examples:
-
-Good:
-
-- Connect login to Supabase Auth
-- Wire Admin Reports to `reportService`
-- Add the missing announcements routes
-- Persist map drafts
-- Replace public building mock data with service data
-
-Bad:
-
-- Implement auth, map publishing, reports, events, and redesign the dashboard in one prompt
-
-Smaller tasks are easier to review, revert, test, and merge.
-
----
-
-# 10. Commit Rules
-
-Commit frequently after a complete small change.
-
-Use Conventional Commit style.
-
-Examples:
-
-```text
-feat(auth): connect login to Supabase
-feat(map): persist campus draft versions
-feat(reports): add report image upload
-fix(routes): register announcement pages
-fix(nav): handle disconnected graph safely
-refactor(services): remove duplicate Supabase client
-test(auth): cover student route protection
-docs(team): update shared file ownership
-```
-
-Avoid:
-
-```text
-updates
-changes
-fixed stuff
-final
-working
-everything
-```
-
-A commit should contain one logical change.
-
----
-
-# 11. Pull Request Rules
-
-Every Pull Request must include:
-
-## Summary
-
-What was changed?
-
-## Scope
-
-Which module and files were changed?
-
-## Testing
-
-What commands and manual checks were completed?
-
-## Database impact
-
-Were migrations, policies, or generated types changed?
-
-## Screenshots or notes
-
-Add screenshots when possible. If screenshots cannot be provided, describe the visible behavior tested.
-
-## Risks
-
-What could break?
-
-## Follow-up
-
-What remains incomplete?
-
----
-
-# 12. Pull Request Checklist
-
-Before opening a Pull Request:
-
-- [ ] The branch includes the latest `main`.
-- [ ] The task matches `01_SYSTEM_FEATURES.md`.
-- [ ] Architecture rules were followed.
-- [ ] No unrelated files were modified.
-- [ ] No new duplicate component or service was created.
-- [ ] No production page relies on new mock data.
-- [ ] Loading, empty, error, and success states were handled.
-- [ ] Responsive behavior was checked.
-- [ ] Authentication and permissions were checked where relevant.
-- [ ] `pnpm build` succeeds.
-- [ ] Relevant tests pass.
-- [ ] Database migrations were reviewed.
-- [ ] Secrets were not committed.
-- [ ] The modified-file list was reviewed.
-
----
-
-# 13. Review Rules
-
-At least one teammate reviews each Pull Request.
-
-The reviewer checks:
-
-- Functional correctness
-- Scope compliance
-- Architecture compliance
-- Unintended changes
-- Duplicate logic
-- Security and RLS implications
-- Mobile and desktop behavior
-- Error handling
-- Test evidence
-
-The reviewer should not approve merely because the code builds.
-
----
-
-# 14. Merge Rules
-
-Prefer squash merging for small feature Pull Requests.
-
-Do not merge when:
-
-- Build fails
-- Required tests fail
-- Shared-file conflict is unresolved
-- Migration is unreviewed
-- AI changed unrelated files
-- Feature is only visually present but non-functional
-- Mock data is presented as completed backend integration
-- RLS has not been considered for a new table or write operation
-
-After merge:
-
-```bash
-git checkout main
-git pull origin main
-```
-
-Every developer then merges the updated `main` into their feature branch.
-
----
-
-# 15. Conflict Prevention
-
-To reduce conflicts:
-
-- Do not work on the same page simultaneously.
-- Do not auto-format the entire repository.
-- Do not reorder imports across unrelated files.
-- Do not rename shared components during feature work.
-- Do not modify lockfiles unless dependencies changed.
-- Do not edit the same migration simultaneously.
-- Merge shared infrastructure before dependent features.
-- Communicate route and type changes immediately.
-
-When a conflict occurs, the developers who own the affected modules resolve it together.
-
-Do not ask AI to blindly resolve complex merge conflicts.
-
----
-
-# 16. Database Change Rules
-
-All database changes require:
-
-1. Update `03_DATABASE_SUPABASE.md` when the design changes.
-2. Add a new numbered migration.
-3. Review foreign keys, indexes, and RLS.
-4. Apply to the development project.
-5. Generate updated TypeScript database types.
+1. Confirm the design in `03_DATABASE_SUPABASE.md`.
+2. Create a new numbered migration; never edit an applied shared migration.
+3. Review constraints, indexes, triggers, and RLS.
+4. Apply it to the development Supabase project.
+5. Regenerate TypeScript database types.
 6. Update services.
-7. Test guest, student, and admin access.
+7. Test guest, student, and admin permissions.
 8. Commit the migration and generated types together.
 
 Never:
 
-- Edit an already shared/applied migration
-- Use the service-role key in frontend code
-- Disable RLS to make a feature work
-- Make undocumented manual production table changes
-- Let multiple developers create conflicting migrations with the same number
-
-Developer 1 coordinates migration numbering.
+- Put the service-role key in frontend code.
+- Disable RLS to make a feature work.
+- Make undocumented production changes.
+- Allow two developers to create competing migrations.
 
 ---
 
-# 17. Mock Data Migration Rules
+# 8. AI-Assisted Coding Rules
 
-Do not remove all mock data at once.
+Each Freebuff or Codex session must receive:
 
-For each module:
+- One exact task.
+- The task branch name.
+- Allowed files or folders.
+- Acceptance criteria.
+- Explicit forbidden changes.
+- Required tests.
 
-1. Connect the service to Supabase.
-2. Verify reads.
-3. Verify writes.
-4. Verify RLS.
-5. Update the page.
-6. Test loading, empty, error, and populated states.
-7. Remove that module's production mock dependency.
-8. Keep separate test fixtures when needed.
+Good tasks:
 
-A module is not complete if it silently falls back to mock data in production.
+- Generate typed Supabase definitions from the applied schema.
+- Add the password-reset request flow.
+- Connect one report page to an already-approved report service.
+- Fix one Map Builder selection regression.
+
+Bad tasks:
+
+- Improve the whole app.
+- Connect everything to Supabase.
+- Finish all remaining features.
+- Redesign the admin and student sides.
+
+After AI work, the developer must inspect `git diff` and must not blindly accept the report.
 
 ---
 
-# 18. Definition of Done for a Team Task
+# 9. Finishing a Task
+
+Before committing:
+
+```bash
+pnpm build
+git status --short
+git diff --check
+```
+
+Run relevant tests when available.
+
+Then commit using a clear conventional message, for example:
+
+```text
+feat(auth): add password reset flow
+feat(campus): persist campus drafts
+fix(map): handle disconnected navigation graph
+docs(team): adopt task branch workflow
+```
+
+Push only the task branch:
+
+```bash
+git push -u origin <branch-name>
+```
+
+Open a Pull Request into `main`.
+
+---
+
+# 10. Pull Request Requirements
+
+Every Pull Request must state:
+
+## Summary
+
+What changed?
+
+## Scope
+
+Which module and files changed?
+
+## Testing
+
+Which commands and manual checks were completed?
+
+## Database impact
+
+Were migrations, policies, storage, or generated types changed?
+
+## Risks and remaining work
+
+What could break or remains unverified?
+
+Add screenshots for visible changes when practical.
+
+---
+
+# 11. Review and Merge Rules
+
+At least one teammate reviews the Pull Request. Austin performs the final integration review or approves a delegated reviewer.
+
+Do not merge when:
+
+- The build fails.
+- Relevant tests fail.
+- The branch contains unrelated changes.
+- A shared-file conflict is unresolved.
+- A migration or RLS policy is unreviewed.
+- A UI is present but its required behavior does not work.
+- New mock data is presented as completed backend integration.
+- Secrets or private environment files are staged.
+
+Prefer squash merge for one-task Pull Requests.
+
+Merge one Pull Request at a time. After each merge, verify `main` before merging the next one.
+
+---
+
+# 12. Updating After a Merge
+
+Before starting the next task:
+
+```bash
+git checkout main
+git pull origin main
+git checkout -b <new-task-branch>
+```
+
+For an active branch that must continue, update it carefully from `main` and resolve conflicts before adding more work.
+
+Delete completed branches after merge when no longer needed.
+
+---
+
+# 13. Conflict Prevention
+
+- Do not work on the same page simultaneously.
+- Do not auto-format the whole repository.
+- Do not reorder imports in unrelated files.
+- Do not rename shared components during feature work.
+- Do not modify a lockfile unless dependencies changed.
+- Do not edit the same migration simultaneously.
+- Merge shared contracts before dependent features.
+- Communicate route, schema, and shared-type changes immediately.
+- Do not ask AI to blindly resolve a complex merge conflict.
+
+---
+
+# 14. Definition of Done
 
 A task is complete only when:
 
-- The requested behavior works.
-- It persists when persistence is required.
-- It uses the correct service.
-- Permissions are enforced.
-- Input is validated.
-- Errors are handled.
-- Loading and empty states exist.
+- The assigned behavior works.
+- Required persistence works.
+- Correct services and permissions are used.
+- Input and errors are handled.
+- Loading and empty states exist when relevant.
 - Existing behavior remains intact.
-- Desktop and mobile are checked.
-- Build succeeds.
-- Relevant tests pass.
-- The code is reviewed and merged.
+- Desktop and mobile are checked when relevant.
+- The build succeeds.
+- Relevant tests pass or missing tests are disclosed.
+- The changes are reviewed and merged.
 
-A UI-only placeholder is not a completed feature.
+A visual placeholder is not a completed feature.
 
 ---
 
-# 19. Emergency Revert Rule
+# 15. Emergency Revert Rule
 
-If a merged change breaks `main`:
+If a merge breaks `main`:
 
 1. Stop new merges.
 2. Identify the breaking Pull Request.
-3. Revert the merge if a fast safe fix is not obvious.
-4. Restore a green build.
-5. Fix the issue in a separate branch.
-6. Re-review before merging.
-
-Do not stack more changes on a broken `main`.
+3. Revert it when a fast safe fix is not certain.
+4. Restore a passing build.
+5. Fix the issue in a new task branch.
+6. Review again before merging.
 
 ---
 
-# 20. Team Working Agreement
+# 16. Short Team Agreement
 
-The team agrees to:
-
-- Communicate before shared changes.
-- Respect module ownership.
-- Ask for review when uncertain.
-- Prefer small reversible changes.
-- Never hide AI-generated changes from teammates.
-- Test claims before marking features complete.
-- Preserve working functionality.
-- Keep `main` stable.
-- Follow the frozen project documents.
+```text
+Bawal mag-code o mag-push directly sa main. Bawat task may bagong branch mula sa latest main, at isang specific task lang bawat branch. Mag-claim muna bago mag-start. Sabihin agad kung shared file, route, type, service, o migration ang babaguhin. Pag tapos, inspect diff, run build/tests, push branch, at gumawa ng Pull Request. Si Austin ang lead/integrator at final merge coordinator, pero puwede siyang gumawa ng kahit anong priority feature. Ang assignments ng ibang developers ay maliit at isolated para hindi sila maging blocker.
+```
