@@ -590,10 +590,10 @@
 | Router | `createBrowserRouter` in `src/app/routes.tsx` — 25 registered routes; `AdminAnnouncementsPage` and `AnnouncementsPage` are **not** registered (broken) |
 | State | One global context (`CampusDataContext`, localStorage key `plv-campuses`); all other state is local `useState` |
 | Persistence | Supabase Auth persists administrator and student sessions. `localStorage` still stores `plv-campuses`, `plv-theme`, `plv-tutorial-done`, `plv-search-hint-dismissed`, and Help Center guest chats. Campus and most feature data are not yet server-authoritative. |
-| Data layer | The single browser client in `src/lib/supabase.ts` is active for authentication and profile lookup. Most feature services and pages still use mock, page-local, or localStorage data. |
+| Data layer | The generated `Database` contract types the single browser client in `src/lib/supabase.ts`, which is active for authentication and profile lookup. Most feature services and pages still use mock, page-local, or localStorage data. |
 | Service consumers | Only `AdminBuildingsPage` imports the services layer; every other page uses page-local mock arrays |
-| Database | Reviewed migration at `supabase/migrations/001_create_plv_navisync_schema.sql`; legacy migration archived. Auth/profile behavior is exercised at runtime, while most feature tables remain unconnected. |
+| Database | The reviewed `001` schema is preserved unchanged; an assertion-only live-baseline marker and a separate A1 security/Storage corrective migration are tracked after it. Core guest/student/admin RLS and Storage behavior is exercised against the live project, while most feature tables remain unconnected to the UI. |
 | PWA | `public/manifest.json` + `public/sw.js` service worker; no offline map-data caching |
-| Type safety | No `tsconfig.json` present — `vite build` is the only compile check |
-| Tests | 2 test files: `WeeklyChart.test.tsx`, `campusHelpers.test.ts` (Vitest); no `test` script in `package.json` |
+| Type safety | Live database types are generated at `src/types/database.generated.ts` and applied to the browser client. No `tsconfig.json` is present, so `vite build` remains the only project compile check. |
+| Tests | 2 Vitest files plus `scripts/verify-a1-supabase.mjs` for live guest/student/admin RLS and Storage fixtures and `supabase/tests/a1_catalog_assertions.sql` for catalog invariants; no `test` script in `package.json` |
 | Dead code | `map-builder-v2/` (6 files), 43-file unused shadcn kit under `src/app/components/ui/` (only `sonner` + `utils` consumed), `WeeklyChart` (unused), `QRPlaceholder` (placeholder-only) |

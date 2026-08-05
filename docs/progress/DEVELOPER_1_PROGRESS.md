@@ -6,11 +6,11 @@ Status values: `READY`, `ACTIVE`, `BLOCKED`, `FOR REVIEW`, `DONE`.
 
 ## Package checklist
 
-- [ ] **A1 — Database types, Storage, and RLS baseline**
-  - Status: `READY`
+- [x] **A1 — Database types, Storage, and RLS baseline**
+  - Status: `FOR REVIEW`
   - Branch: `feature/database-types-and-storage`
   - Depends on: None
-  - Test result: Pending
+  - Test result: PASS — Vite build, 45 Vitest tests, live guest/student/admin RLS and Storage matrix, catalog assertions, and advisor review
   - Pull Request: Pending
 - [ ] **A2 — Student account lifecycle**
   - Status: `BLOCKED`
@@ -63,8 +63,8 @@ Status values: `READY`, `ACTIVE`, `BLOCKED`, `FOR REVIEW`, `DONE`.
 
 ## Current handoff note
 
-- Active package: None
+- Active package: A1 — Database types, Storage, and RLS baseline (`FOR REVIEW`)
 - Last completed package: None
-- Known blocker: None
-- Important changed files: None
-- Next recommended action: Start A1.
+- Known blocker: None; leaked-password protection remains a documented Supabase Auth dashboard recommendation before production release.
+- Important changed files: `src/types/database.generated.ts`, `src/lib/supabase.ts`, `supabase/migrations/20260805160720_baseline_existing_schema.sql`, `supabase/migrations/20260805161108_harden_storage_rls_and_function_grants.sql`, `scripts/verify-a1-supabase.mjs`, `supabase/tests/a1_catalog_assertions.sql`
+- Next recommended action: Review the A1 commit and open its Pull Request; keep A2 blocked until A1 is merged.
