@@ -2,7 +2,7 @@
 
 # System Architecture
 
-**Version:** 2.1
+**Version:** 2.2
 **Status:** Frozen Technical Architecture
 **Purpose:** Implementation guide for the development team, Freebuff, and Codex.
 
@@ -372,11 +372,13 @@ Never place frontend code here.
 
 # 6. Core Module Boundaries and Task Ownership
 
-The architecture remains split into three responsibility areas, but branches and ownership are task-based rather than permanent.
+The architecture is split into three approximately balanced responsibility areas. Each developer has a complete workstream and an ordered queue of feature packages, while branches and ownership remain task-based and transferable.
 
-Austin is the lead developer and integrator. He coordinates shared contracts, Supabase, migrations, generated database types, publishing, and merge order. He may implement work in any module according to the critical path.
+Developer 1 is the primary owner of Area A, Developer 2 of Area B, and Developer 3 of Area C. No developer is described as the main developer. All three are responsible for completing, testing, documenting, and submitting their assigned packages for peer review.
 
-Developers 2 and 3 receive small, independent assignments. A developer owns only the files listed for the active task, not an entire module forever.
+Developer 1 normally coordinates shared backend contracts, migration numbering, generated database types, and dependency-aware merge sequencing because Area A defines contracts consumed by Areas B and C. This is a coordination responsibility, not authority over the other developers or permanent ownership of the whole project.
+
+Any developer may implement or continue work in another area when the current owner is unavailable, provided the handoff rules in `04_TEAM_RULES.md` are followed and only one active implementation exists.
 
 Every task uses a new short-lived branch from the latest `main`, such as:
 
@@ -389,7 +391,9 @@ fix/map-selection
 
 ## Area A — Identity, Administration, and Backend Foundation
 
-Normally coordinated by Austin because changes here affect other modules.
+**Primary developer:** Developer 1
+
+Developer 1 normally coordinates the shared contracts in this area because changes here affect the editor and public-facing modules.
 
 Responsibilities:
 

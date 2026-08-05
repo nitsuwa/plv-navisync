@@ -445,7 +445,7 @@ This table supports the existing Map Builder data shape while normalized tables 
 **Constraints**
 
 - Unique `(building_id, floor_number)`
-- Floor plan upload is recommended, not required when the floor is drawn entirely in the editor.
+- A publishable floor requires a floor-plan background under the frozen feature specification. The editor may still allow an incomplete draft floor before validation.
 
 ---
 
