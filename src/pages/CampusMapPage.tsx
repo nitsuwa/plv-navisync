@@ -16,7 +16,7 @@ import { cn } from "../lib/utils";
 import { useStudentAuth } from "../hooks/useStudentAuth";
 import { useCampusData } from "../contexts/CampusDataContext";
 import { buildingPositionsFromCampus, floorPlansFromCampus, buildingsFromCampus } from "../lib/mapDataAdapter";
-import { findIndoorRoute, type IndoorRoute } from "../lib/indoorPathfinding";
+import { findIndoorRoute, findIndoorRouteForFloor, type IndoorRoute } from "../lib/indoorPathfinding";
 import { findBuildingPath } from "../lib/pathfinding";
 import {
   BuildingPicker, ReportModal, SignInPrompt,
@@ -629,13 +629,27 @@ const buildingFill = (id: string) =>
   // ── Indoor route handler ────────────────────────────────────────────
   const showIndoorRoute = useCallback((roomId: string) => {
     if (!floorView) return;
-    const route = findIndoorRoute(floorView.building.id, floorView.floor, roomId);
+
+    // When campus data is available, use data-aware indoor routing so that
+    // rooms created in the Map Builder become real pathfinding destinations.
+    // In accessible mode, avoid stairs and prefer elevator routes.
+    const accessibleOnly = mapMode === "accessible";
+    const route = activeCampus
+      ? findIndoorRouteForFloor(
+          floorView.building.id,
+          floorView.floor,
+          roomId,
+          currentFloor?.rooms ?? [],
+          accessibleOnly
+        )
+      : findIndoorRoute(floorView.building.id, floorView.floor, roomId);
+
     if (route) {
       setIndoorRoute(route);
       setActiveRouteRoom(roomId);
       setHighlightedRoom(roomId);
     }
-  }, [floorView]);
+  }, [floorView, activeCampus, currentFloor]);
 
   const clearIndoorRoute = useCallback(() => {
     setIndoorRoute(null);

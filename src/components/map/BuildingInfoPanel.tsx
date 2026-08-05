@@ -7,6 +7,7 @@ import type { Building } from "../../types";
 import { cn } from "../../lib/utils";
 import { QRPlaceholder } from "./QRPlaceholder";
 import { useToast } from "../../hooks/useToast";
+import type { StudentAuthState } from "../../hooks/useStudentAuth";
 
 // ── Re-export shared types/constants ────────────────────────────────────────
 export type PanelTab = "overview" | "departments" | "facilities" | "accessibility" | "route";
@@ -25,7 +26,7 @@ interface BuildingInfoPanelProps {
   isFloorMode: boolean;
   floorBuildingId?: string;
   saved: Set<string>;
-  studentAuth: { username: string; role: "student" | "faculty" } | null;
+  studentAuth: StudentAuthState;
   onToggleSave: (id: string) => void;
   onReport: (b: Building) => void;
   onSignInPrompt: (msg: string) => void;
@@ -107,7 +108,7 @@ export function BuildingInfoPanel({
         >
           <Share2 className="h-3.5 w-3.5" /> Share
         </button>
-        {studentAuth ? (
+        {studentAuth.isStudent ? (
           <button
             onClick={() => onToggleSave(selected.id)}
             aria-label={saved.has(selected.id) ? `Remove ${selected.name} from saved` : `Save ${selected.name}`}
@@ -129,7 +130,7 @@ export function BuildingInfoPanel({
             <Bookmark className="h-3.5 w-3.5" /> Save
           </button>
         )}
-        {studentAuth ? (
+        {studentAuth.isStudent ? (
           <button
             onClick={() => onReport(selected)}
             className="flex items-center justify-center gap-1 h-8 px-3 rounded-xl bg-muted text-muted-foreground text-[10px] font-extrabold border border-border hover:bg-destructive/10 hover:text-destructive active:scale-[0.97] transition-all flex-1"

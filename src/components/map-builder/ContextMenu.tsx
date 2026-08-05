@@ -8,7 +8,7 @@ import { cn } from "../../lib/utils";
 interface ContextMenuProps {
   x: number;
   y: number;
-  type: "building" | "marker" | "path" | "floor";
+  type: "building" | "marker" | "path" | "floor" | "wall";
   onClose: () => void;
   onAction: (action: string) => void;
 }
@@ -50,6 +50,10 @@ export function ContextMenu({ x, y, type, onClose, onAction }: ContextMenuProps)
         { action: "rename", label: "Rename", icon: Pencil },
         { action: "duplicate", label: "Duplicate", icon: Copy },
         { action: "divider" },
+        { action: "delete", label: "Delete", icon: Trash2, danger: true },
+      ]
+    : type === "wall"
+    ? [
         { action: "delete", label: "Delete", icon: Trash2, danger: true },
       ]
     : [

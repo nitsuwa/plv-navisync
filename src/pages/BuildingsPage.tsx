@@ -6,6 +6,8 @@ import {
 import { motion, AnimatePresence } from "motion/react";
 import { BuildingCard } from "../components/ui/BuildingCard";
 import { MOCK_BUILDINGS } from "../data/mockData";
+import { useCampusData } from "../contexts/CampusDataContext";
+import { buildingsFromCampus } from "../lib/mapDataAdapter";
 import { cn } from "../lib/utils";
 import { PageTransition } from "../components/ui/PageTransition";
 import { SkeletonCard } from "../components/ui/Skeleton";
@@ -40,11 +42,21 @@ export function BuildingsPage() {
   const [sortBy, setSortBy] = useState<SortKey>("name");
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
   const [isLoading, setIsLoading] = useState(true);
+  const campusData = useCampusData();
+
+  // Derive buildings from published campus data, fall back to hardcoded data
+  const buildings: Building[] = useMemo(() => {
+    const activeCampus = campusData.campuses.find(
+      (c) => c.publishStatus !== "draft" && c.status !== "archived"
+    );
+    if (activeCampus) {
+      return buildingsFromCampus(activeCampus) as Building[];
+    }
+    return MOCK_BUILDINGS;
+  }, [campusData.campuses]);
 
   // Debounce search for smoother filtering
   const debouncedSearch = useDebounce(search, 150);
-
-  
 
   // Simulate initial load
   useEffect(() => {
@@ -52,7 +64,7 @@ export function BuildingsPage() {
     return () => clearTimeout(timer);
   }, []);
 
-  const filtered = MOCK_BUILDINGS
+  const filtered = buildings
     .filter((b) => {
       const matchCat = category === "all" || b.category === category;
       const q = debouncedSearch.toLowerCase().trim();
@@ -88,7 +100,7 @@ export function BuildingsPage() {
             <div>
               <h1 className="text-3xl font-extrabold text-foreground tracking-tight">Buildings Directory</h1>
               <p className="text-muted-foreground text-sm mt-0.5">
-                Browse all {MOCK_BUILDINGS.length} buildings, facilities, and services on PLV campus.
+                Browse all {buildings.length} buildings, facilities, and services on PLV campus.
               </p>
             </div>
           </div>

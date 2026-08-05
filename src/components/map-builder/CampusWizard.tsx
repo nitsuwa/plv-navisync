@@ -1,11 +1,19 @@
-import { useState, useRef, useCallback, useEffect, useId, type ChangeEvent } from "react";
+import { useState, useRef, useCallback, useEffect, useId, lazy, Suspense, type ChangeEvent } from "react";
 import { createPortal } from "react-dom";
 import { X, MapPin, Eye, EyeOff, CheckCircle2, ChevronRight, ChevronLeft, Palette, Image, Building2, Shield, Pencil, Loader2, AlertCircle, TriangleAlert, ChevronDown, Save, AlertTriangle } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { genId, THEME_COLORS } from "./constants";
 import { MapPicker } from "../ui/MapPicker";
-import { ColorPicker } from "../ui/ColorPicker";
 import { PLVLogo } from "../ui/PLVLogo";
+
+const ColorPickerImpl = lazy(() => import("../ui/ColorPicker"));
+function ColorPicker(props: { value: string; onChange: (c: string) => void }) {
+  return (
+    <Suspense fallback={<div className="h-10 rounded-xl border border-border bg-muted/30 animate-pulse" />}>
+      <ColorPickerImpl {...props} />
+    </Suspense>
+  );
+}
 import type { Campus } from "./types";
 
 // ── Tooltip that renders via portal to escape overflow / transform containers ──

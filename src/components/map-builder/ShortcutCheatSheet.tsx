@@ -47,7 +47,7 @@ const GROUPS: ShortcutGroup[] = [
     label: "Navigation",
     icon: ArrowUp,
     shortcuts: [
-      { keys: "Scroll", desc: "Zoom in / out" },
+      { keys: "Ctrl + Scroll", desc: "Zoom in / out" },
       { keys: "0", desc: "Reset view" },
       { keys: "Arrows", desc: "Nudge selected item 1px" },
       { keys: "Shift + Arrows", desc: "Nudge selected item 10px" },

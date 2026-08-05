@@ -1,12 +1,27 @@
-import { useRef, useCallback, useEffect, useState } from "react";
-import {
-  ZoomIn, ZoomOut, Maximize2, RotateCcw, Grid3X3,
-} from "lucide-react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { cn } from "../../lib/utils";
+import { CheckCircle2, XCircle } from "lucide-react";
 import { MARKER_STYLES } from "../../data/mapData";
 import type { LayerToolDescriptor } from "./constants";
-import type { Campus, CampusBuilding, CampusMarker, SimpleTool, EditorLayer, CampusSelection, RubberBand } from "./types";
+import type { Campus, CampusBuilding, CampusMarker, SimpleTool, EditorLayer, CampusSelection, RubberBand, CampusDecorAsset } from "./types";
+import { DECOR_ASSET_MAP, BUILDING_TYPE_MAP, genId, getRotatedAABB } from "./constants";
+
+// ── Rotation-aware resize cursor helpers (shared by buildings and decor assets) ──
+function angleToCursor(deg: number): string {
+  const a = ((deg % 360) + 360) % 360;
+  if (a < 22.5 || a >= 337.5) return "ew-resize";
+  if (a < 67.5) return "nwse-resize";
+  if (a < 112.5) return "ns-resize";
+  if (a < 157.5) return "nesw-resize";
+  if (a < 202.5) return "ew-resize";
+  if (a < 247.5) return "nwse-resize";
+  if (a < 292.5) return "ns-resize";
+  return "nesw-resize";
+}
+const CORNER_ANGLES: Record<string, number> = { ne: -45, se: 45, sw: 135, nw: 225 };
+const EDGE_ANGLES: Record<string, number> = { n: 270, s: 90, e: 0, w: 180 };
+const getCornerCursor = (corner: string, rot: number) => angleToCursor((CORNER_ANGLES[corner] ?? 45) + rot);
+const getEdgeCursor = (edge: string, rot: number) => angleToCursor((EDGE_ANGLES[edge] ?? 0) + rot);
 
 interface CanvasProps {
   campus: Campus;
@@ -32,17 +47,138 @@ interface CanvasProps {
   onCanvasMove: (e: React.MouseEvent<SVGSVGElement>) => void;
   onCanvasUp: (e: React.MouseEvent<SVGSVGElement>) => void;
   onCanvasDblClick: (e: React.MouseEvent<SVGSVGElement>) => void;
-  onItemDown: (e: React.MouseEvent, type: "building" | "marker", id: string, ox: number, oy: number) => void;
+  onItemDown: (e: React.MouseEvent, type: "building" | "marker" | "decorAsset", id: string, ox: number, oy: number) => void;
   onItemContextMenu?: (e: React.MouseEvent, type: "building" | "marker" | "path", id: string) => void;
   onResizeStart?: (e: React.MouseEvent, b: CampusBuilding, corner: string) => void;
+  onRotateStart?: (e: React.MouseEvent, b: CampusBuilding) => void;
   onBuildingDoubleClick?: (id: string) => void;
   onPathClick: (id: string) => void;
   onSelect: (sel: CampusSelection | null) => void;
-  onResetView: () => void;
-  onZoomIn: () => void;
-  onZoomOut: () => void;
-  onSetTool: (t: SimpleTool) => void;
-  onToggleSnap: () => void;
+  onResetView?: () => void;
+  onZoomIn?: () => void;
+  onZoomOut?: () => void;
+  onSetTool?: (t: SimpleTool) => void;
+  onToggleSnap?: () => void;
+  onWheel?: (e: React.WheelEvent<HTMLDivElement>) => void;
+  snapGrid?: boolean;
+  /** Called when an asset is dropped from the palette onto the canvas */
+  onDropAsset?: (asset: CampusDecorAsset) => void;
+  /** Called when a building type is dropped from the palette */
+  onDropBuilding?: (type: string, x: number, y: number) => void;
+  /** Canvas width/height for coordinate conversion */
+  canvasW?: number;
+  canvasH?: number;
+  /** ID of the building currently being rotated (handle hidden during rotation, like Canva) */
+  rotatingId?: string | null;
+  /** Current rotation angle while actively rotating (for floating degree indicator) */
+  rotatingAngle?: number;
+  /** ID of the building currently being resized (shows dimension indicator) */
+  resizingId?: string | null;
+  /** ID of the decor asset currently being rotated (handle hidden during rotation) */
+  decorRotatingId?: string | null;
+  /** ID of the decor asset currently being resized (shows scale indicator) */
+  decorResizingId?: string | null;
+  /** Called when the decor asset rotation handle is grabbed */
+  onDecorRotateStart?: (e: React.MouseEvent, da: CampusDecorAsset) => void;
+  /** Called when a decor asset resize corner/edge is grabbed */
+  onDecorResizeStart?: (e: React.MouseEvent, da: CampusDecorAsset, corner: string) => void;
+  /** Route to highlight from the test-navigation panel (waypoints + color) */
+  highlightedRoute?: { waypoints: { x: number; y: number }[]; color: string } | null;
+  /** ID of a just-completed path to play the draw-in animation on */
+  animatingPathId?: string | null;
+}
+
+// ── Drag-over indicator component — shows a real SVG preview of the dragged asset at the cursor ──
+function DragOverlay({
+  x, y, valid, label,
+  type, assetType,
+}: {
+  x: number; y: number; valid: boolean; label: string;
+  type: "decorAsset" | "buildingType";
+  assetType?: string;
+}) {
+  const decor = type === "decorAsset" && assetType ? DECOR_ASSET_MAP[assetType] : null;
+  const building = type === "buildingType" && assetType ? BUILDING_TYPE_MAP[assetType] : null;
+
+  const previewSize = 56;
+  const borderColor = valid ? "rgba(34,197,94,0.7)" : "rgba(239,68,68,0.7)";
+  const bgColor = valid ? "rgba(34,197,94,0.08)" : "rgba(239,68,68,0.08)";
+
+  return (
+    <>
+      {/* Real SVG preview floating at cursor */}
+      <div
+        className="absolute z-20 pointer-events-none flex items-center justify-center"
+        style={{
+          left: x,
+          top: y,
+          transform: "translate(-50%, -50%)",
+          width: previewSize,
+          height: previewSize,
+        }}
+      >
+        {/* Outer glow ring */}
+        <div
+          className="absolute inset-0 rounded-full transition-colors"
+          style={{
+            border: `2px solid ${borderColor}`,
+            background: bgColor,
+            boxShadow: valid
+              ? `0 0 20px rgba(34,197,94,0.2)`
+              : `0 0 20px rgba(239,68,68,0.2)`,
+            transform: "scale(1.4)",
+          }}
+        />
+        {/* Inner preview shape */}
+        <div className="relative flex items-center justify-center" style={{ width: 32, height: 32 }}>
+          {decor && (
+            <svg width={32} height={32} viewBox="0 0 40 40" className="drop-shadow-md">
+              <path
+                d={decor.svgPath}
+                fill={decor.color}
+                opacity={0.9}
+                transform={`translate(8, 6)`}
+              />
+            </svg>
+          )}
+          {building && (
+            <svg width={32} height={32} viewBox="0 0 40 40" className="drop-shadow-md">
+              <rect x={4} y={8} width={32} height={28} rx={4} fill={building.color} opacity={0.9} />
+              <rect x={8} y={4} width={24} height={6} rx={2} fill={building.color} opacity={0.7} />
+              <text x={20} y={28} textAnchor="middle" fill="white" fontSize={7} fontWeight="900">
+                {building.label.slice(0, 2).toUpperCase()}
+              </text>
+            </svg>
+          )}
+          {!decor && !building && (
+            <div className="w-7 h-7 rounded-lg border-2 border-dashed" style={{ borderColor }} />
+          )}
+        </div>
+      </div>
+
+      {/* Compact label pill floating near the preview */}
+      <div
+        className="absolute z-20 pointer-events-none"
+        style={{ left: x + 32, top: y - 16 }}
+      >
+        <div
+          className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold shadow-lg border transition-colors ${
+            valid
+              ? "bg-green-50/90 border-green-300 text-green-700 dark:bg-green-900/40 dark:border-green-600 dark:text-green-300"
+              : "bg-red-50/90 border-red-300 text-red-700 dark:bg-red-900/40 dark:border-red-600 dark:text-red-300"
+          }`}
+          style={{ backdropFilter: "blur(8px)" }}
+        >
+          {valid ? (
+            <CheckCircle2 className="h-2.5 w-2.5 shrink-0" />
+          ) : (
+            <XCircle className="h-2.5 w-2.5 shrink-0" />
+          )}
+          <span className="truncate max-w-[100px]">{valid ? `Place ${label}` : "Can't place here"}</span>
+        </div>
+      </div>
+    </>
+  );
 }
 
 export function Canvas({
@@ -52,19 +188,205 @@ export function Canvas({
   onCanvasDown, onCanvasMove, onCanvasUp, onCanvasDblClick,
   onItemDown, onItemContextMenu, onResizeStart, onBuildingDoubleClick, onPathClick, onSelect,
   onResetView, onZoomIn, onZoomOut, onSetTool, onToggleSnap,
-  invalidBuildings = new Set(),
+  onWheel, invalidBuildings = new Set(),
+  onDropAsset, onDropBuilding,
+  onRotateStart, canvasW, canvasH,
+  rotatingId, rotatingAngle,
+  resizingId, highlightedRoute, animatingPathId,
+  decorRotatingId, decorResizingId, onDecorRotateStart, onDecorResizeStart,
 }: CanvasProps) {
   const buildings = campus.buildings;
   const markers = campus.markers;
   const paths = campus.paths;
+  const decorAssets = campus.decorAssets ?? [];
   const hint = activeTools.find((t) => t.id === tool)?.hint ?? "";
-  // ── Fixed-position tooltip state (avoids palette overflow clipping) ──
-  const [tooltipState, setTooltipState] = useState<{ x: number; y: number; label: string; key: string } | null>(null);
+
+  // ── Drag-and-drop state ──
+  const [dragOver, setDragOver] = useState<{
+    x: number; y: number;
+    canvasX: number; canvasY: number;
+    valid: boolean; label: string;
+    type: "decorAsset" | "buildingType";
+    assetType?: string;
+  } | null>(null);
+  const dragCounterRef = useRef(0);
+  const dragLabelRef = useRef("Item");
+  const dragTypeRef = useRef<"decorAsset" | "buildingType">("decorAsset");
+  // Use refs to avoid stale closures in drag handlers
+  const buildingsRef = useRef(buildings);
+  buildingsRef.current = buildings;
+
+  const handleDragOver = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+
+    const container = containerRef.current;
+    if (!container) return;
+    const rect = container.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+
+    // Convert screen coords to canvas coords
+    const svg = svgRef.current;
+    if (!svg) return;
+    const svgRect = svg.getBoundingClientRect();
+    const cw = campus.canvasW || 900;
+    const ch = campus.canvasH || 680;
+    const scaleX = cw / svgRect.width;
+    const scaleY = ch / svgRect.height;
+    const canvasX = Math.round((e.clientX - svgRect.left) * scaleX);
+    const canvasY = Math.round((e.clientY - svgRect.top) * scaleY);
+
+    // Check if position is valid (inside canvas bounds, not overlapping)
+    const inBounds = canvasX >= 0 && canvasY >= 0 && canvasX <= cw && canvasY <= ch;
+
+    // Check overlap against existing buildings (rotated-AABB collision) — using ref to avoid stale closure
+    let overlapsBuilding = false;
+    const dropW = 24;
+    const dropH = 24;
+    const dropBox = { x: canvasX, y: canvasY, w: dropW, h: dropH };
+    for (const b of buildingsRef.current) {
+      const ba = getRotatedAABB(b.x, b.y, b.width, b.height, b.rotation ?? 0);
+      if (
+        dropBox.x < ba.x + ba.width &&
+        dropBox.x + dropBox.w > ba.x &&
+        dropBox.y < ba.y + ba.height &&
+        dropBox.y + dropBox.h > ba.y
+      ) {
+        overlapsBuilding = true;
+        break;
+      }
+    }
+
+    setDragOver({
+      x, y,
+      canvasX, canvasY,
+      valid: inBounds && !overlapsBuilding,
+      label: dragLabelRef.current,
+      type: dragTypeRef.current,
+    });
+  }, [campus.canvasW, campus.canvasH, svgRef, containerRef]);
+
+  const handleDragEnter = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    dragCounterRef.current += 1;
+
+    const container = containerRef.current;
+    if (!container) return;
+    const rect = container.getBoundingClientRect();
+    const cx = e.clientX - rect.left;
+    const cy = e.clientY - rect.top;
+
+    try {
+      const raw = e.dataTransfer.getData("text/plain");
+      const data = JSON.parse(raw);
+      if (data.type === "decorAsset") {
+        const label = DECOR_ASSET_MAP[data.assetType]?.label || data.assetType;
+        dragLabelRef.current = label;
+        dragTypeRef.current = "decorAsset";
+        setDragOver({
+          x: cx, y: cy,
+          canvasX: 0, canvasY: 0,
+          valid: true,
+          label,
+          type: "decorAsset",
+          assetType: data.assetType,
+        });
+      } else if (data.type === "buildingType") {
+        const label = data.label || "Building";
+        dragLabelRef.current = label;
+        dragTypeRef.current = "buildingType";
+        setDragOver({
+          x: cx, y: cy,
+          canvasX: 0, canvasY: 0,
+          valid: true,
+          label,
+          type: "buildingType",
+          assetType: data.assetType,
+        });
+      }
+    } catch {
+      // Not our data format — ignore
+    }
+  }, [containerRef]);
+
+  const handleDragLeave = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    dragCounterRef.current -= 1;
+    if (dragCounterRef.current <= 0) {
+      dragCounterRef.current = 0;
+      setDragOver(null);
+    }
+  }, []);
+
+  const handleDrop = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setDragOver(null);
+    dragCounterRef.current = 0;
+
+    // Convert screen coords to canvas coords
+    const svg = svgRef.current;
+    if (!svg) return;
+    const rect = svg.getBoundingClientRect();
+    const cw = campus.canvasW || 900;
+    const ch = campus.canvasH || 680;
+    const scaleX = cw / rect.width;
+    const scaleY = ch / rect.height;
+    const canvasX = Math.round((e.clientX - rect.left) * scaleX);
+    const canvasY = Math.round((e.clientY - rect.top) * scaleY);
+
+    // Clamp to canvas bounds
+    const clampedX = Math.max(0, Math.min(cw, canvasX));
+    const clampedY = Math.max(0, Math.min(ch, canvasY));
+
+    try {
+      const raw = e.dataTransfer.getData("text/plain");
+      const data = JSON.parse(raw);
+
+      if (data.type === "decorAsset" && onDropAsset) {
+        const asset: CampusDecorAsset = {
+          id: genId("dec"),
+          type: data.assetType,
+          x: clampedX,
+          y: clampedY,
+          rotation: 0,
+          scale: 1,
+        };
+        onDropAsset(asset);
+      } else if (data.type === "buildingType" && onDropBuilding) {
+        onDropBuilding(data.assetType || data.label, clampedX, clampedY);
+      }
+    } catch {
+      // Ignore invalid data
+    }
+  }, [campus.canvasW, campus.canvasH, svgRef, onDropAsset, onDropBuilding]);
+
+  // Cleanup drag counter on unmount
+  useEffect(() => {
+    return () => { dragCounterRef.current = 0; };
+  }, []);
 
   return (
-    <div ref={containerRef} className="flex-1 overflow-hidden relative" style={{
-      background: "#e8eaf0",
-    }}>
+    <div
+      ref={containerRef}
+      className="flex-1 overflow-hidden relative"
+      style={{ background: "#e8eaf0" }}
+      onWheel={onWheel}
+      onDragOver={handleDragOver}
+      onDragEnter={handleDragEnter}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
+      {/* Drag-over indicator — shows a real SVG preview of the dragged asset */}
+      {dragOver && (
+        <DragOverlay
+          x={dragOver.x}
+          y={dragOver.y}
+          valid={dragOver.valid}
+          label={dragOver.label}
+          type={dragOver.type}
+          assetType={dragOver.assetType}
+        />
+      )}
 
       {/* Dot grid pattern overlay — uses campus gridSize */}
       <div className="absolute inset-0 z-0 pointer-events-none" style={{
@@ -88,13 +410,45 @@ export function Canvas({
           <pattern id="dotPattern" width={campus.gridSize ?? 20} height={campus.gridSize ?? 20} patternUnits="userSpaceOnUse">
             <circle cx={(campus.gridSize ?? 20) / 2} cy={(campus.gridSize ?? 20) / 2} r={1} fill="rgba(14,42,110,0.08)" />
           </pattern>
+          <filter id="dropShadow" x="-20%" y="-20%" width="140%" height="140%">
+            <feDropShadow dx={0} dy={1} stdDeviation={2} floodColor="rgba(0,0,0,0.3)" />
+          </filter>
         </defs>
         <g transform={`translate(${pan.x},${pan.y}) scale(${zoom})`}>
           {/* Canvas background with subtle grid */}
           <rect data-bg="true" width={campus.canvasW} height={campus.canvasH} fill={(campus as unknown as { canvasColor?: string }).canvasColor ?? "#f5f3ef"} />
           <rect data-bg="true" width={campus.canvasW} height={campus.canvasH} fill="url(#dotPattern)" opacity={0.3} />
 
-          {/* Major grid lines — every 4× the grid size */}
+          {/* Empty state — shown when no buildings exist on campus layer */}
+          {layer === "campus" && buildings.length === 0 && (
+            <g opacity={0.6}>
+              <text x={campus.canvasW / 2} y={campus.canvasH / 2 - 30} textAnchor="middle" fontSize={16} fontWeight="800" fill="var(--primary)" className="pointer-events-none select-none">Start Building Your Campus</text>
+              <text x={campus.canvasW / 2} y={campus.canvasH / 2 - 10} textAnchor="middle" fontSize={10} fill="#6b7280" className="pointer-events-none select-none">Select a building type from the left panel, then click here to place it.</text>
+              <text x={campus.canvasW / 2} y={campus.canvasH / 2 + 6} textAnchor="middle" fontSize={9} fill="#9ca3af" className="pointer-events-none select-none">Or use the Building tool (B) + drag to draw a custom footprint.</text>
+              {/* Visual guide — 3 steps */}
+              <g transform={`translate(${campus.canvasW / 2 - 120}, ${campus.canvasH / 2 + 24})`}>
+                {["1. Place Building", "2. Add Floors", "3. Design Rooms"].map((label, i) => (
+                  <g key={i} transform={`translate(${i * 90}, 0)`}>
+                    <rect x={0} y={0} width={80} height={22} rx={6} fill="var(--primary)" fillOpacity={0.08} stroke="var(--primary)" strokeWidth={1} strokeOpacity={0.2} />
+                    <text x={40} y={14} textAnchor="middle" fontSize={8} fontWeight="700" fill="var(--primary)" className="pointer-events-none select-none">{label}</text>
+                    {i < 2 && <text x={85} y={14} textAnchor="middle" fontSize={10} fill="#9ca3af" className="pointer-events-none select-none">→</text>}
+                  </g>
+                ))}
+              </g>
+              <text x={campus.canvasW / 2} y={campus.canvasH / 2 + 62} textAnchor="middle" fontSize={8} fill="#d1d5db" className="pointer-events-none select-none">Double-click a floor in the hierarchy panel to open its floor plan editor</text>
+            </g>
+          )}
+
+          {/* All SVG content (unchanged from original) */}
+          {/* Navigation empty state */}
+          {layer === "navigation" && (campus.navNodes ?? []).length === 0 && (
+            <g opacity={0.55}>
+              <text x={campus.canvasW / 2} y={campus.canvasH / 2 - 20} textAnchor="middle" fontSize={14} fontWeight="800" fill="#16a34a" className="pointer-events-none select-none">Build the Walking Network</text>
+              <text x={campus.canvasW / 2} y={campus.canvasH / 2 + 2} textAnchor="middle" fontSize={10} fill="#6b7280" className="pointer-events-none select-none">Select Add Waypoint, click to place dots, then use Connect to link them.</text>
+            </g>
+          )}
+
+          {/* Major grid lines */}
           <g opacity={0.12}>
             {Array.from({ length: Math.ceil(campus.canvasW / ((campus.gridSize ?? 20) * 4)) }, (_, i) => (
               <line key={`v${i}`} x1={i * (campus.gridSize ?? 20) * 4} y1={0} x2={i * (campus.gridSize ?? 20) * 4} y2={campus.canvasH} stroke="rgba(14,42,110,0.2)" strokeWidth={0.5} />
@@ -150,36 +504,71 @@ export function Canvas({
                 style={{ cursor: tool === "erase" ? "not-allowed" : "pointer" }}
               >
                 {isSel && <polyline points={pts} fill="none" stroke="var(--accent)" strokeWidth={p.width + 6} strokeLinecap="round" strokeLinejoin="round" opacity={0.35} />}
-                <polyline points={pts} fill="none" stroke={p.color} strokeWidth={p.width} strokeLinecap="round" strokeLinejoin="round" opacity={0.75} />
+                {p.id === animatingPathId ? (
+                  /* Draw-in animation for a just-completed path */
+                  <motion.polyline
+                    points={pts}
+                    fill="none"
+                    stroke={p.color}
+                    strokeWidth={p.width}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    initial={{ pathLength: 0, opacity: 1 }}
+                    animate={{ pathLength: 1, opacity: 0.75 }}
+                    transition={{ duration: 0.7, ease: [0.16, 1, 0.3, 1] }}
+                  />
+                ) : (
+                  <polyline points={pts} fill="none" stroke={p.color} strokeWidth={p.width} strokeLinecap="round" strokeLinejoin="round" opacity={0.75} />
+                )}
               </g>
             );
           })}
 
-          {/* Alignment guides — enhanced with glow and labels */}
+          {/* Test-navigation highlighted route */}
+          {highlightedRoute && highlightedRoute.waypoints.length > 0 && (
+            <g pointerEvents="none">
+              {/* Soft glow underlay */}
+              <polyline
+                points={highlightedRoute.waypoints.map((w) => `${w.x},${w.y}`).join(" ")}
+                fill="none"
+                stroke={highlightedRoute.color}
+                strokeWidth={8}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                opacity={0.25}
+              />
+              {/* Animated dashed main line */}
+              <polyline
+                points={highlightedRoute.waypoints.map((w) => `${w.x},${w.y}`).join(" ")}
+                fill="none"
+                stroke={highlightedRoute.color}
+                strokeWidth={3}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeDasharray="10 6"
+                opacity={0.95}
+              />
+              {/* Start + end markers */}
+              <circle cx={highlightedRoute.waypoints[0].x} cy={highlightedRoute.waypoints[0].y} r={6} fill={highlightedRoute.color} stroke="white" strokeWidth={2} />
+              <circle cx={highlightedRoute.waypoints[highlightedRoute.waypoints.length - 1].x} cy={highlightedRoute.waypoints[highlightedRoute.waypoints.length - 1].y} r={6} fill={highlightedRoute.color} stroke="white" strokeWidth={2} />
+            </g>
+          )}
+
+          {/* Alignment guides */}
           {guides && guides.map((g, i) => (
             <g key={`g${i}`}>
-              {/* Glow behind guide */}
               {g.type === "v" ? (
-                <line x1={g.pos} y1={0} x2={g.pos} y2={campus.canvasH}
-                  stroke="var(--accent)" strokeWidth={8} opacity={0.15} />
+                <line x1={g.pos} y1={0} x2={g.pos} y2={campus.canvasH} stroke="var(--accent)" strokeWidth={8} opacity={0.15} />
               ) : (
-                <line x1={0} y1={g.pos} x2={campus.canvasW} y2={g.pos}
-                  stroke="var(--accent)" strokeWidth={8} opacity={0.15} />
+                <line x1={0} y1={g.pos} x2={campus.canvasW} y2={g.pos} stroke="var(--accent)" strokeWidth={8} opacity={0.15} />
               )}
-              {/* Solid guide line */}
               {g.type === "v" ? (
-                <line x1={g.pos} y1={0} x2={g.pos} y2={campus.canvasH}
-                  stroke="var(--accent)" strokeWidth={2} strokeDasharray="5 3" opacity={0.9} />
+                <line x1={g.pos} y1={0} x2={g.pos} y2={campus.canvasH} stroke="var(--accent)" strokeWidth={2} strokeDasharray="5 3" opacity={0.9} />
               ) : (
-                <line x1={0} y1={g.pos} x2={campus.canvasW} y2={g.pos}
-                  stroke="var(--accent)" strokeWidth={2} strokeDasharray="5 3" opacity={0.9} />
+                <line x1={0} y1={g.pos} x2={campus.canvasW} y2={g.pos} stroke="var(--accent)" strokeWidth={2} strokeDasharray="5 3" opacity={0.9} />
               )}
-              {/* Guide label */}
-              <rect x={g.type === "v" ? g.pos - 16 : campus.canvasW - 36} y={g.type === "v" ? 6 : g.pos - 7} width={32} height={14} rx={3}
-                fill="var(--accent)" fillOpacity={0.85} />
-              <text x={g.type === "v" ? g.pos : campus.canvasW - 20} y={g.type === "v" ? 15 : g.pos + 4}
-                textAnchor="middle" fill="white" fontSize={8} fontWeight="800"
-                className="pointer-events-none select-none">{g.pos}</text>
+              <rect x={g.type === "v" ? g.pos - 16 : campus.canvasW - 36} y={g.type === "v" ? 6 : g.pos - 7} width={32} height={14} rx={3} fill="var(--accent)" fillOpacity={0.85} />
+              <text x={g.type === "v" ? g.pos : campus.canvasW - 20} y={g.type === "v" ? 15 : g.pos + 4} textAnchor="middle" fill="white" fontSize={8} fontWeight="800" className="pointer-events-none select-none">{g.pos}</text>
             </g>
           ))}
 
@@ -190,14 +579,7 @@ export function Canvas({
             const rw = Math.abs(rubberBand.cx - rubberBand.sx);
             const rh = Math.abs(rubberBand.cy - rubberBand.sy);
             return (
-              <rect
-                x={rx} y={ry} width={rw} height={rh}
-                fill="rgba(14,42,110,0.06)"
-                stroke="var(--primary)"
-                strokeWidth={1.5}
-                strokeDasharray="6 4"
-                rx={2}
-              />
+              <rect x={rx} y={ry} width={rw} height={rh} fill="rgba(14,42,110,0.06)" stroke="var(--primary)" strokeWidth={1.5} strokeDasharray="6 4" rx={2} />
             );
           })()}
 
@@ -209,14 +591,8 @@ export function Canvas({
             const rh = Math.abs(buildingDrag.cy - buildingDrag.sy);
             return (
               <g>
-                <rect x={rx} y={ry} width={rw} height={rh} rx={6}
-                  fill="var(--primary)" fillOpacity={0.12}
-                  stroke="var(--primary)" strokeWidth={2} strokeDasharray="8 4" />
-                <text x={rx + rw / 2} y={ry + rh / 2 + 3} textAnchor="middle"
-                  fill="var(--primary)" fontSize={10} fontWeight="700"
-                  className="pointer-events-none select-none">
-                  {rw}×{rh}
-                </text>
+                <rect x={rx} y={ry} width={rw} height={rh} rx={6} fill="var(--primary)" fillOpacity={0.12} stroke="var(--primary)" strokeWidth={2} strokeDasharray="8 4" />
+                <text x={rx + rw / 2} y={ry + rh / 2 + 3} textAnchor="middle" fill="var(--primary)" fontSize={10} fontWeight="700" className="pointer-events-none select-none">{rw}×{rh}</text>
               </g>
             );
           })()}
@@ -248,164 +624,246 @@ export function Canvas({
             const isVisible = b.visible ?? true;
             const isLocked = b.locked ?? false;
             const opacity = b.opacity ?? 1;
+
             if (!isVisible && !isSel) return null;
             return (
               <g key={b.id} onMouseDown={(e) => { if (isLocked) return; onItemDown(e, "building", b.id, b.x, b.y); }} onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); if (isLocked) return; onItemContextMenu?.(e, "building", b.id); }} onDoubleClick={(e) => { if (isLocked) return; e.stopPropagation(); onBuildingDoubleClick?.(b.id); }} style={{ cursor: isLocked ? "default" : tool === "select" ? "move" : cursor, opacity }}>
-                {/* Multi-selection highlight */}
-                {isMultiSel && !isSel && (
-                  <rect
-                    x={b.x - 4} y={b.y - 4}
-                    width={b.width + 8} height={b.height + 8}
-                    rx={8} fill="none"
-                    stroke="var(--primary)" strokeWidth={1.5}
-                    strokeDasharray="4 3" opacity={0.6}
-                  />
-                )}                    {/* Single selection — enhanced with glow and corner indicators */}
-                    {isSel && (
-                      <>
-                        {/* Outer glow ring */}
-                        <rect x={b.x - 8} y={b.y - 8} width={b.width + 16} height={b.height + 16} rx={12} fill="none" stroke="var(--accent)" strokeWidth={5} opacity={0.15} />
-                        <rect x={b.x - 6} y={b.y - 6} width={b.width + 12} height={b.height + 12} rx={10} fill="none" stroke="var(--accent)" strokeWidth={2.5} opacity={0.8} />
-                        {/* Corner resize handles — larger invisible hit zones + visible indicators */}
-                        {["nw", "ne", "sw", "se"].map((corner) => {
-                          const hs = 10;
-                          const hx = corner.includes("e") ? b.x + b.width - hs / 2 : b.x - hs / 2;
-                          const hy = corner.includes("s") ? b.y + b.height - hs / 2 : b.y - hs / 2;
-                          return (
-                            <>
-                              {/* Large invisible hit zone (20px) */}
-                              <rect
-                                key={`${corner}-hit`}
-                                x={hx - 5} y={hy - 5} width={hs + 10} height={hs + 10}
-                                fill="transparent" stroke="none"
-                                style={{ cursor: corner.includes("n") && corner.includes("w") ? "nwse-resize" : corner.includes("n") ? "nesw-resize" : corner.includes("w") ? "nesw-resize" : "nwse-resize" }}
-                                onMouseDown={(e) => { e.stopPropagation(); onResizeStart?.(e, b, corner); }}
-                              />
-                              {/* Visible handle */}
-                              <rect key={corner} x={hx} y={hy} width={hs} height={hs} rx={2}
-                                fill="white" stroke="var(--accent)" strokeWidth={2}
-                                style={{ pointerEvents: "none", cursor: "nwse-resize" }} />
-                            </>
-                          );
-                        })}
-                        {/* Edge resize handles — much larger invisible hit targets */}
-                        {["n", "s", "e", "w"].map((corner) => {
-                          const HIT_EDGE = 16; // invisible hit zone extending outward from edge
-                          const HIT_INNER = 8;  // invisible cursor zone extending inward from edge
-                          const edgeW = corner === "n" || corner === "s" ? b.width : HIT_EDGE;
-                          const edgeH = corner === "e" || corner === "w" ? b.height : HIT_EDGE;
-                          const edgeX = corner === "e" ? b.x + b.width - HIT_EDGE / 2 : corner === "w" ? b.x - HIT_EDGE / 2 : b.x;
-                          const edgeY = corner === "s" ? b.y + b.height - HIT_EDGE / 2 : corner === "n" ? b.y - HIT_EDGE / 2 : b.y;
-                          return (
-                            <rect key={corner} x={edgeX} y={edgeY} width={edgeW} height={edgeH}
-                              fill="transparent" stroke="none"
-                              style={{ cursor: corner === "n" || corner === "s" ? "ns-resize" : "ew-resize" }}
-                              onMouseDown={(e) => { e.stopPropagation(); onResizeStart?.(e, b, corner); }} />
-                          );
-                        })}
-                        {/* Inward cursor zones — show resize cursor when hovering just inside the building */}
-                        {["n", "s", "e", "w"].map((corner) => {
-                          const INSET = 6;
-                          const innerW = corner === "n" || corner === "s" ? b.width : INSET;
-                          const innerH = corner === "e" || corner === "w" ? b.height : INSET;
-                          const innerX = corner === "n" || corner === "s" ? b.x : (corner === "e" ? b.x + b.width - INSET : b.x);
-                          const innerY = corner === "e" || corner === "w" ? b.y : (corner === "s" ? b.y + b.height - INSET : b.y);
-                          return (
-                            <rect key={`i-${corner}`} x={innerX} y={innerY} width={innerW} height={innerH}
-                              fill="transparent" stroke="none"
-                              style={{ cursor: corner === "n" || corner === "s" ? "ns-resize" : "ew-resize" }}
-                              onMouseDown={(e) => { e.stopPropagation(); onResizeStart?.(e, b, corner); }} />
-                          );
-                        })}
-                        {/* Rotation indicator */}
-                    {rot !== 0 && (
-                      <g>
-                        <circle cx={cx} cy={b.y - 12} r={4} fill="var(--accent)" stroke="white" strokeWidth={1.5} />
-                        <line x1={cx} y1={b.y - 8} x2={cx} y2={b.y - 2} stroke="var(--accent)" strokeWidth={1.5} />
-                      </g>
-                    )}
-                  </>
-                )}
-                {/* Overlap warning — red glowing outline */}
-                {isOverlapping && (
-                  <>
-                    <rect x={b.x - 4} y={b.y - 4} width={b.width + 8} height={b.height + 8}
-                      rx={10} fill="none" stroke="#dc2626" strokeWidth={2.5}
-                      strokeDasharray="6 4" opacity={0.9} />
-                    <rect x={b.x - 6} y={b.y - 6} width={b.width + 12} height={b.height + 12}
-                      rx={12} fill="none" stroke="#dc2626" strokeWidth={1}
-                      strokeDasharray="4 4" opacity={0.4} />
-                  </>
-                )}
-                {/* Shadow */}
-                <rect x={b.x + 3} y={b.y + 4} width={b.width} height={b.height} rx={8} fill="rgba(0,0,0,0.12)" />
-                {/* Building body with rotation */}
+                {/* ── Rotated group: shadow, outline, handles, overlap borders, and body all rotate together ── */}
                 <g transform={rot !== 0 ? `rotate(${rot}, ${cx}, ${cy})` : ''}>
+                  {/* Shadow (rotated with building so it follows the visual) */}
+                  <rect x={b.x + 3} y={b.y + 4} width={b.width} height={b.height} rx={8} fill="rgba(0,0,0,0.12)" />
+                  {/* Multi-selection highlight */}
+                  {isMultiSel && !isSel && (
+                    <rect x={b.x - 4} y={b.y - 4} width={b.width + 8} height={b.height + 8} rx={8} fill="none" stroke="var(--primary)" strokeWidth={1.5} strokeDasharray="4 3" opacity={0.6} />
+                  )}
+                  {/* Overlap warning border (rotated with building so it matches the actual visual) */}
+                  {isOverlapping && (
+                    <>
+                      <rect x={b.x - 4} y={b.y - 4} width={b.width + 8} height={b.height + 8} rx={10} fill="none" stroke="#dc2626" strokeWidth={2.5} strokeDasharray="6 4" opacity={0.9} />
+                      <rect x={b.x - 6} y={b.y - 6} width={b.width + 12} height={b.height + 12} rx={12} fill="none" stroke="#dc2626" strokeWidth={1} strokeDasharray="4 4" opacity={0.4} />
+                    </>
+                  )}
+                  {/* Building body */}
                   <rect x={b.x} y={b.y} width={b.width} height={b.height} rx={8} fill={b.color} stroke={isSel ? "var(--accent)" : "rgba(255,255,255,0.5)"} strokeWidth={isSel ? 2.5 : 1.5} opacity={0.92} />
                   <rect x={b.x} y={b.y} width={b.width} height={7} rx={8} fill="rgba(0,0,0,0.12)" />
-                  <text x={cx - b.x + b.x} y={b.y + b.height / 2 - 3} textAnchor="middle" fill="white" fontSize={11} fontWeight="800" className="pointer-events-none select-none">{b.code}</text>
-                  {b.floors.length > 0 && <text x={cx - b.x + b.x} y={b.y + b.height / 2 + 10} textAnchor="middle" fill="rgba(255,255,255,0.7)" fontSize={7} className="pointer-events-none select-none">{b.floors.length}F</text>}
-                  {/* Lock indicator for locked buildings */}
+                  <text x={cx} y={b.y + b.height / 2 - 8} textAnchor="middle" fill="white" fontSize={11} fontWeight="800" className="pointer-events-none select-none">{b.code}</text>
+                  {b.floors.length > 0 && <text x={cx} y={b.y + b.height / 2 + 4} textAnchor="middle" fill="rgba(255,255,255,0.7)" fontSize={7} className="pointer-events-none select-none">{b.floors.length}F</text>}
                   {isLocked && (
                     <g>
                       <rect x={b.x + b.width - 16} y={b.y + 4} width={12} height={10} rx={2} fill="rgba(255,255,255,0.85)" />
                       <text x={b.x + b.width - 10} y={b.y + 12} textAnchor="middle" fill="#92400e" fontSize={8} fontWeight="900" className="pointer-events-none select-none">🔒</text>
                     </g>
                   )}
-                  {/* Overlap warning badge */}
                   {isOverlapping && (
                     <g>
-                      <rect x={b.x + b.width - 18} y={b.y - 14} width={32} height={16} rx={4}
-                        fill="#dc2626" opacity={0.9} />
-                      <text x={b.x + b.width - 2} y={b.y - 3} textAnchor="middle"
-                        fill="white" fontSize={7} fontWeight="900"
-                        className="pointer-events-none select-none">
-                        OVERLAP
-                      </text>
+                      <rect x={b.x + b.width - 18} y={b.y - 14} width={32} height={16} rx={4} fill="#dc2626" opacity={0.9} />
+                      <text x={b.x + b.width - 2} y={b.y - 3} textAnchor="middle" fill="white" fontSize={7} fontWeight="900" className="pointer-events-none select-none">OVERLAP</text>
                     </g>
                   )}
-                  {/* Validation error highlight — red pulsing outline & badge */}
                   {isInvalid && !isOverlapping && (
                     <>
-                      {/* Red pulsing glow outline */}
-                      <rect
-                        x={b.x - 5} y={b.y - 5}
-                        width={b.width + 10} height={b.height + 10}
-                        rx={10} fill="none"
-                        stroke="#dc2626" strokeWidth={2.5}
-                        strokeDasharray="8 4" opacity={0.85}
-                        className="animate-validation-pulse"
-                      />
-                      <rect
-                        x={b.x - 7} y={b.y - 7}
-                        width={b.width + 14} height={b.height + 14}
-                        rx={12} fill="none"
-                        stroke="#dc2626" strokeWidth={1}
-                        strokeDasharray="4 6" opacity={0.35}
-                      />
-                      {/* ⚠ badge */}
+                      <rect x={b.x - 5} y={b.y - 5} width={b.width + 10} height={b.height + 10} rx={10} fill="none" stroke="#dc2626" strokeWidth={2.5} strokeDasharray="8 4" opacity={0.85} className="animate-validation-pulse" />
+                      <rect x={b.x - 7} y={b.y - 7} width={b.width + 14} height={b.height + 14} rx={12} fill="none" stroke="#dc2626" strokeWidth={1} strokeDasharray="4 6" opacity={0.35} />
                       <g>
-                        <rect
-                          x={b.x + b.width - 16} y={b.y - 14}
-                          width={30} height={16} rx={4}
-                          fill="#dc2626" opacity={0.9}
-                        />
-                        <text
-                          x={b.x + b.width - 1} y={b.y - 3}
-                          textAnchor="middle" fill="white"
-                          fontSize={8} fontWeight="900"
-                          className="pointer-events-none select-none"
-                        >
-                          ⚠
-                        </text>
+                        <rect x={b.x + b.width - 16} y={b.y - 14} width={30} height={16} rx={4} fill="#dc2626" opacity={0.9} />
+                        <text x={b.x + b.width - 1} y={b.y - 3} textAnchor="middle" fill="white" fontSize={8} fontWeight="900" className="pointer-events-none select-none">⚠</text>
                       </g>
                     </>
                   )}
+                  {/* Single selection outlines + resize handles — rendered ABOVE the body so the rotation-aware resize cursors are visible on hover (rotated with building) */}
+                  {isSel && (
+                    <>
+                      <rect x={b.x - 8} y={b.y - 8} width={b.width + 16} height={b.height + 16} rx={12} fill="none" stroke="var(--accent)" strokeWidth={5} opacity={0.15} />
+                      <rect x={b.x - 6} y={b.y - 6} width={b.width + 12} height={b.height + 12} rx={10} fill="none" stroke="var(--accent)" strokeWidth={2.5} opacity={0.8} />
+                      {(() => {
+                        return ["nw", "ne", "sw", "se"].map((corner) => {
+                          const hs = 14;
+                          const hx = corner.includes("e") ? b.x + b.width - hs / 2 : b.x - hs / 2;
+                          const hy = corner.includes("s") ? b.y + b.height - hs / 2 : b.y - hs / 2;
+                          const cornerCursor = getCornerCursor(corner, rot);
+                          return (
+                            <g key={corner}>
+                              <rect x={hx - 5} y={hy - 5} width={hs + 10} height={hs + 10} fill="transparent" stroke="none" style={{ cursor: cornerCursor }} onMouseDown={(e) => { e.stopPropagation(); onResizeStart?.(e, b, corner); }} />
+                              <rect x={hx} y={hy} width={hs} height={hs} rx={2} fill="white" stroke="var(--accent)" strokeWidth={2} style={{ pointerEvents: "none", cursor: cornerCursor }} />
+                            </g>
+                          );
+                        });
+                      })()}
+                      {["n", "s", "e", "w"].map((corner) => {
+                        const HIT_EDGE = 24;
+                        const edgeW = corner === "n" || corner === "s" ? b.width : HIT_EDGE;
+                        const edgeH = corner === "e" || corner === "w" ? b.height : HIT_EDGE;
+                        const edgeX = corner === "e" ? b.x + b.width - HIT_EDGE / 2 : corner === "w" ? b.x - HIT_EDGE / 2 : b.x;
+                        const edgeY = corner === "s" ? b.y + b.height - HIT_EDGE / 2 : corner === "n" ? b.y - HIT_EDGE / 2 : b.y;
+                        return <rect key={corner} x={edgeX} y={edgeY} width={edgeW} height={edgeH} fill="transparent" stroke="none" style={{ cursor: getEdgeCursor(corner, rot) }} onMouseDown={(e) => { e.stopPropagation(); onResizeStart?.(e, b, corner); }} />;
+                      })}
+                      {["n", "s", "e", "w"].map((corner) => {
+                        const INSET = 10;
+                        const innerW = corner === "n" || corner === "s" ? b.width : INSET;
+                        const innerH = corner === "e" || corner === "w" ? b.height : INSET;
+                        const innerX = corner === "n" || corner === "s" ? b.x : (corner === "e" ? b.x + b.width - INSET : b.x);
+                        const innerY = corner === "e" || corner === "w" ? b.y : (corner === "s" ? b.y + b.height - INSET : b.y);
+                        return <rect key={`i-${corner}`} x={innerX} y={innerY} width={innerW} height={innerH} fill="transparent" stroke="none" style={{ cursor: getEdgeCursor(corner, rot) }} onMouseDown={(e) => { e.stopPropagation(); onResizeStart?.(e, b, corner); }} />;
+                      })}
+                    </>
+                  )}
+                  {/* Rotation handle — INSIDE rotation group so it rotates with building */}
+                  {isSel && !isLocked && rotatingId !== b.id && (
+                    <g>
+                      <line x1={cx} y1={b.y} x2={cx} y2={b.y - 32} stroke="var(--accent)" strokeWidth={1.5} strokeDasharray="3 2" opacity={0.5} />
+                      <circle cx={cx} cy={b.y - 32} r={6} fill="var(--accent)" stroke="white" strokeWidth={2}
+                        style={{ cursor: "grab" }}
+                        onMouseDown={(e) => { e.stopPropagation(); onRotateStart?.(e, b); }}
+                      />
+                      <path d={`M${cx - 2.5} ${b.y - 34} Q${cx} ${b.y - 37} ${cx + 2.5} ${b.y - 34}`}
+                        fill="none" stroke="white" strokeWidth={1.5} strokeLinecap="round" />
+                    </g>
+                  )}
                 </g>
-                {zoom > 0.7 && b.name !== "New Building" && (
-                  <text x={cx} y={b.y + b.height + 14} textAnchor="middle" fill="rgba(0,0,0,0.6)" fontSize={8} fontWeight="600" stroke="rgba(240,238,234,0.9)" strokeWidth={3} paintOrder="stroke" className="pointer-events-none select-none">
-                    {b.name.length > 20 ? b.name.slice(0, 18) + "…" : b.name}
-                  </text>
+                {/* Building name — OUTSIDE rotation group so text stays horizontal & readable */}
+                {zoom > 0.7 && b.name !== "New Building" && (() => {
+                  const rotAABB = getRotatedAABB(b.x, b.y, b.width, b.height, rot);
+                  const rotCx = rotAABB.x + rotAABB.width / 2;
+                  const rotCy = rotAABB.y + rotAABB.height / 2;
+                  return (
+                    <text x={rotCx} y={rotCy + 16} textAnchor="middle" fill="rgba(255,255,255,0.75)" fontSize={6} fontWeight="600" className="pointer-events-none select-none" stroke="rgba(0,0,0,0.2)" strokeWidth={2} paintOrder="stroke">
+                      {b.name.length > 16 ? b.name.slice(0, 14) + "…" : b.name}
+                    </text>
+                  );
+                })()}
+                {/* ══ Degree indicators — OUTSIDE rotation group so text stays axis-aligned & readable ══ */}
+                {/* Static degree badge (non-rotating) */}
+                {isSel && !isLocked && rotatingId !== b.id && rot !== 0 && (() => {
+                  const rotAABB = getRotatedAABB(b.x, b.y, b.width, b.height, rot);
+                  const visCx = rotAABB.x + rotAABB.width / 2;
+                  const visTop = rotAABB.y;
+                  return (
+                    <g className="pointer-events-none select-none">
+                      <rect x={visCx - 16} y={visTop - 14} width={32} height={14} rx={3} fill="var(--accent)" opacity={0.9} />
+                      <text x={visCx} y={visTop - 4} textAnchor="middle" fill="white" fontSize={8} fontWeight="800">{rot}°</text>
+                    </g>
+                  );
+                })()}
+                {/* Floating degree indicator during active rotation (axis-aligned, readable) */}
+                {isSel && !isLocked && rotatingId === b.id && (() => {
+                  const rotAABB = getRotatedAABB(b.x, b.y, b.width, b.height, rot);
+                  const visCx = rotAABB.x + rotAABB.width / 2;
+                  const visTop = rotAABB.y;
+                  return (
+                    <g className="pointer-events-none select-none">
+                      <line x1={visCx} y1={visTop} x2={visCx} y2={visTop - 24} stroke="var(--accent)" strokeWidth={1.5} strokeDasharray="4 3" opacity={0.6} />
+                      <rect x={visCx - 22} y={visTop - 40} width={44} height={18} rx={5} fill="var(--accent)" opacity={0.95} filter="url(#dropShadow)" />
+                      <text x={visCx} y={visTop - 27} textAnchor="middle" fill="white" fontSize={10} fontWeight="900">{rotatingAngle ?? rot}°</text>
+                    </g>
+                  );
+                })()}
+                {/* ══ Dimension indicator during resize (axis-aligned, readable) ══ */}
+                {resizingId === b.id && (() => {
+                  const rotAABB = getRotatedAABB(b.x, b.y, b.width, b.height, rot);
+                  const visBot = rotAABB.y + rotAABB.height;
+                  const visCx = rotAABB.x + rotAABB.width / 2;
+                  return (
+                    <g className="pointer-events-none select-none">
+                      <rect x={visCx - 32} y={visBot + 6} width={64} height={18} rx={5} fill="var(--accent)" opacity={0.95} filter="url(#dropShadow)" />
+                      <text x={visCx} y={visBot + 18} textAnchor="middle" fill="white" fontSize={9} fontWeight="900">{b.width}×{b.height}</text>
+                    </g>
+                  );
+                })()}
+              </g>
+            );
+          })}
+
+          {/* Decorative assets */}
+          {decorAssets.map((da) => {
+            const template = DECOR_ASSET_MAP[da.type];
+            if (!template) return null;
+            const s = (da.scale ?? 1) * 3;
+            const rot = da.rotation ?? 0;
+            const isVisible = da.visible ?? true;
+            const isSel = selected?.type === "decorAsset" && selected.id === da.id;
+            if (!isVisible && !isSel) return null;
+
+            // World-space half extents (asset center is at da.x, da.y)
+            const hw = (template.defaultWidth / 2) * s;
+            const hh = (template.defaultHeight / 2) * s;
+            const rotRad = (rot * Math.PI) / 180;
+            const cosR = Math.cos(rotRad);
+            const sinR = Math.sin(rotRad);
+            // Rotate a local offset (lx, ly) about the asset center → world coords
+            const cornerPos = (lx: number, ly: number) => ({
+              x: da.x + lx * cosR - ly * sinR,
+              y: da.y + lx * sinR + ly * cosR,
+            });
+            // Axis-aligned AABB of the rotated asset (for axis-aligned badges)
+            const aabb = getRotatedAABB(da.x - hw, da.y - hh, hw * 2, hh * 2, rot);
+            const visCx = aabb.x + aabb.width / 2;
+            const rotHandlePos = cornerPos(0, -(hh + 30));
+
+            return (
+              <g key={da.id}
+                opacity={isSel ? 1 : 0.9}
+                style={{ cursor: tool === "select" ? "move" : "default" }}
+                onMouseDown={(e) => { if (tool === "select") onItemDown(e, "decorAsset", da.id, da.x, da.y); }}
+              >
+                {/* Body — transform group (rotates & scales with the asset) */}
+                <g transform={`translate(${da.x},${da.y}) rotate(${rot}) scale(${s})`}>
+                  {isSel && (
+                    <circle cx={0} cy={0} r={template.defaultWidth * 0.8} fill="none" stroke="var(--accent)" strokeWidth={2} strokeDasharray="4 3" opacity={0.8} />
+                  )}
+                  <path d={template.svgPath} fill={template.color} transform={`translate(-${template.defaultWidth / 2},-${template.defaultHeight / 2})`} />
+                </g>
+
+                {/* Selection handles — world space, rotation-aware cursors (not scaled with asset).
+                    Only shown in select tool so an erase/other tool can click the asset directly. */}
+                {isSel && tool === "select" && (
+                  <>
+                    {/* Rotation handle — sits above the rotated asset */}
+                    {decorRotatingId !== da.id && (
+                      <g>
+                        <line x1={da.x} y1={da.y} x2={rotHandlePos.x} y2={rotHandlePos.y} stroke="var(--accent)" strokeWidth={1.5} strokeDasharray="3 2" opacity={0.5} />
+                        <circle cx={rotHandlePos.x} cy={rotHandlePos.y} r={6} fill="var(--accent)" stroke="white" strokeWidth={2}
+                          style={{ cursor: "grab" }}
+                          onMouseDown={(e) => { e.stopPropagation(); onDecorRotateStart?.(e, da); }}
+                        />
+                        <path d={`M${rotHandlePos.x - 2.5} ${rotHandlePos.y - 2} Q${rotHandlePos.x} ${rotHandlePos.y - 5} ${rotHandlePos.x + 2.5} ${rotHandlePos.y - 2}`}
+                          fill="none" stroke="white" strokeWidth={1.5} strokeLinecap="round" />
+                      </g>
+                    )}
+                    {/* Corner resize handles — rotate with the asset via rotation-aware cursors */}
+                    {["nw", "ne", "sw", "se"].map((corner) => {
+                      const lx = corner.includes("e") ? hw : -hw;
+                      const ly = corner.includes("s") ? hh : -hh;
+                      const p = cornerPos(lx, ly);
+                      const cornerCursor = getCornerCursor(corner, rot);
+                      return (
+                        <g key={corner}>
+                          <rect x={p.x - 12} y={p.y - 12} width={24} height={24} fill="transparent" stroke="none" style={{ cursor: cornerCursor }} onMouseDown={(e) => { e.stopPropagation(); onDecorResizeStart?.(e, da, corner); }} />
+                          <rect x={p.x - 7} y={p.y - 7} width={14} height={14} rx={2} fill="white" stroke="var(--accent)" strokeWidth={2} style={{ pointerEvents: "none", cursor: cornerCursor }} />
+                        </g>
+                      );
+                    })}
+                    {/* Static degree badge (axis-aligned, readable) */}
+                    {rot !== 0 && decorRotatingId !== da.id && (
+                      <g className="pointer-events-none select-none">
+                        <rect x={visCx - 16} y={aabb.y - 14} width={32} height={14} rx={3} fill="var(--accent)" opacity={0.9} />
+                        <text x={visCx} y={aabb.y - 4} textAnchor="middle" fill="white" fontSize={8} fontWeight="800">{rot}°</text>
+                      </g>
+                    )}
+                    {/* Floating degree indicator during active rotation */}
+                    {decorRotatingId === da.id && (
+                      <g className="pointer-events-none select-none">
+                        <rect x={visCx - 22} y={aabb.y - 40} width={44} height={18} rx={5} fill="var(--accent)" opacity={0.95} filter="url(#dropShadow)" />
+                        <text x={visCx} y={aabb.y - 27} textAnchor="middle" fill="white" fontSize={10} fontWeight="900">{rotatingAngle ?? rot}°</text>
+                      </g>
+                    )}
+                    {/* Scale indicator during resize */}
+                    {decorResizingId === da.id && (
+                      <g className="pointer-events-none select-none">
+                        <rect x={visCx - 26} y={aabb.y + aabb.height + 6} width={52} height={18} rx={5} fill="var(--accent)" opacity={0.95} filter="url(#dropShadow)" />
+                        <text x={visCx} y={aabb.y + aabb.height + 18} textAnchor="middle" fill="white" fontSize={9} fontWeight="900">{Math.round((da.scale ?? 1) * 10) / 10}×</text>
+                      </g>
+                    )}
+                  </>
                 )}
               </g>
             );
@@ -430,125 +888,6 @@ export function Canvas({
           })}
         </g>
       </svg>
-
-      {/* Tool palette — vertical sidebar on the left */}
-      <motion.div
-        initial={{ opacity: 0, x: -20, scale: 0.95 }}
-        animate={{ opacity: 1, x: 0, scale: 1 }}
-        transition={{ type: "spring", stiffness: 300, damping: 25, delay: 0.15 }}
-        className="absolute left-3 top-1/2 -translate-y-1/2 z-20 flex flex-col gap-1 p-1.5 rounded-2xl border border-border shadow-lg max-h-[calc(100%-80px)] overflow-y-auto"
-        style={{ background: "var(--card)" }}
-        onMouseLeave={() => setTooltipState(null)}
-      >
-        {activeTools.map((t, i) => (
-          <motion.div key={t.id} className="relative group">
-            {i === activeTools.length - 1 && t.id === "erase" && <div className="my-0.5 border-t border-border" />}
-            <motion.button
-              whileHover={{ scale: 1.04 }}
-              whileTap={{ scale: 0.95 }}
-              onClick={() => { onSetTool(t.id as SimpleTool); }}
-              onMouseEnter={(e) => {
-                const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                setTooltipState({ x: rect.right + 10, y: rect.top + rect.height / 2, label: t.label, key: t.key });
-              }}
-              onMouseLeave={() => setTooltipState(null)}
-              data-tutorial={t.id === "building" ? "building-tool" : undefined}
-              className={cn(
-                "w-10 h-10 rounded-xl flex items-center justify-center transition-all",
-                tool === t.id && t.id === "erase"
-                  ? "bg-destructive text-destructive-foreground shadow-md"
-                  : tool === t.id
-                    ? "bg-primary text-primary-foreground shadow-md"
-                    : t.id === "erase"
-                      ? "text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                      : "text-muted-foreground hover:bg-muted hover:text-foreground"
-              )}
-            >
-              <t.icon className="h-4 w-4" />
-            </motion.button>
-          </motion.div>
-        ))}
-        <div className="my-0.5 border-t border-border" />
-        <div className="relative group">
-          <motion.button
-            whileHover={{ scale: 1.04 }}
-            whileTap={{ scale: 0.95 }}
-            onClick={onResetView}
-            onMouseEnter={(e) => {
-              const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-              setTooltipState({ x: rect.right + 10, y: rect.top + rect.height / 2, label: "Reset View", key: "0" });
-            }}
-            onMouseLeave={() => setTooltipState(null)}
-            className="w-10 h-10 rounded-xl flex items-center justify-center text-muted-foreground hover:bg-muted hover:text-foreground transition-all"
-          >
-            <RotateCcw className="h-4 w-4" />
-          </motion.button>
-        </div>
-        <div className="my-0.5 border-t border-border" />
-        <div className="relative group">
-          <motion.button
-            whileHover={{ scale: 1.04 }}
-            whileTap={{ scale: 0.95 }}
-            onClick={onToggleSnap}
-            onMouseEnter={(e) => {
-              const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-              setTooltipState({ x: rect.right + 10, y: rect.top + rect.height / 2, label: `Snap${snapGrid ? '' : ' (OFF)'}`, key: "Ctrl+G" });
-            }}
-            onMouseLeave={() => setTooltipState(null)}
-            data-tutorial="snap-tool"
-            className={cn(
-              "w-10 h-10 rounded-xl flex items-center justify-center transition-all",
-              snapGrid ? "bg-primary/15 text-primary" : "text-muted-foreground hover:bg-muted hover:text-foreground"
-            )}
-          >
-            <Grid3X3 className="h-4 w-4" />
-          </motion.button>
-        </div>
-      </motion.div>
-
-      {/* Fixed-position instant tooltip — rendered outside palette to avoid overflow clipping */}
-      {tooltipState && (
-        <div
-          className="fixed z-50 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg whitespace-nowrap border shadow-lg pointer-events-none"
-          style={{
-            left: tooltipState.x,
-            top: tooltipState.y,
-            transform: "translateY(-50%)",
-            background: "var(--popover)",
-            borderColor: "var(--border)",
-            color: "var(--popover-foreground)",
-          }}
-        >
-          <span className="text-[11px] font-bold">{tooltipState.label}</span>
-          <span
-            className="text-[9px] font-mono font-semibold px-1.5 py-0.5 rounded"
-            style={{ background: "color-mix(in srgb, var(--muted) 50%, transparent)", color: "var(--muted-foreground)" }}
-          >
-            {tooltipState.key}
-          </span>
-        </div>
-      )}
-
-      {/* Zoom controls with spring entrance */}
-      <motion.div
-        initial={{ opacity: 0, y: 16 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ type: "spring", stiffness: 300, damping: 25, delay: 0.25 }}
-        className="absolute bottom-10 right-3 z-20 flex items-center gap-1 p-1 rounded-xl border border-border shadow-md"
-        style={{ background: "var(--card)" }}
-      >
-        <motion.button whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.95 }} onClick={onZoomOut} className="w-8 h-8 rounded-lg flex items-center justify-center text-muted-foreground hover:bg-muted hover:text-foreground transition-all">
-          <ZoomOut className="h-4 w-4" />
-        </motion.button>
-        <span className="w-12 text-center text-xs font-mono font-bold text-foreground">{Math.round(zoom * 100)}%</span>
-        <motion.button whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.95 }} onClick={onZoomIn} className="w-8 h-8 rounded-lg flex items-center justify-center text-muted-foreground hover:bg-muted hover:text-foreground transition-all">
-          <ZoomIn className="h-4 w-4" />
-        </motion.button>
-        <div className="w-px h-5 mx-0.5" style={{ background: "var(--border)" }} />
-        <motion.button whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.95 }} onClick={onResetView} className="w-8 h-8 rounded-lg flex items-center justify-center text-muted-foreground hover:bg-muted hover:text-foreground transition-all">
-          <Maximize2 className="h-4 w-4" />
-        </motion.button>
-      </motion.div>
 
       {/* Layer overlay animation */}
       <AnimatePresence>

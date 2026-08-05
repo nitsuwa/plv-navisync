@@ -1,7 +1,9 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Building2, Layers, ChevronRight, CheckCircle2 } from "lucide-react";
 import { FLOOR_PLANS, ROOM_COLORS, type RoomType } from "../data/floorPlans";
 import { MOCK_BUILDINGS } from "../data/mockData";
+import { useCampusData } from "../contexts/CampusDataContext";
+import { buildingsFromCampus } from "../lib/mapDataAdapter";
 import { cn } from "../lib/utils";
 
 function FloorPlanPreview({ buildingId, floorNum }: { buildingId: string; floorNum: number }) {
@@ -56,9 +58,21 @@ function FloorPlanPreview({ buildingId, floorNum }: { buildingId: string; floorN
 export function AdminFloorPlansPage() {
   const [selected, setSelected]     = useState<string | null>(null);
   const [floorNum, setFloorNum]      = useState(1);
+  const campusData = useCampusData();
+
+  // Derive buildings from published campus data, fall back to hardcoded data
+  const buildingsList = useMemo(() => {
+    const activeCampus = campusData.campuses.find(
+      (c) => c.publishStatus !== "draft" && c.status !== "archived"
+    );
+    if (activeCampus) {
+      return buildingsFromCampus(activeCampus) as typeof MOCK_BUILDINGS;
+    }
+    return MOCK_BUILDINGS;
+  }, [campusData.campuses]);
 
   const selectedData = selected ? FLOOR_PLANS[selected] : null;
-  const building     = selected ? MOCK_BUILDINGS.find(b => b.id === selected) : null;
+  const building     = selected ? buildingsList.find(b => b.id === selected) : null;
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -72,7 +86,7 @@ export function AdminFloorPlansPage() {
 
       {/* Building grid */}
       <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        {MOCK_BUILDINGS.map(b => {
+        {buildingsList.map(b => {
           const hasPlan = !!FLOOR_PLANS[b.id];
           const isSelected = selected === b.id;
           return (

@@ -11,7 +11,7 @@ export { PropertiesPanel } from "./PropertiesPanel";
 export { Canvas } from "./Canvas";
 export { ContextMenu } from "./ContextMenu";
 export { PublishDialog } from "./PublishDialog";
-export { EditorPublishDialog } from "./EditorPublishDialog";
+export { PrePublishDialog } from "./PrePublishDialog";
 export { EditorBackDialog } from "./EditorBackDialog";
 export { CreateCampusGuide } from "./CreateCampusGuide";
 export { ShortcutCheatSheet } from "./ShortcutCheatSheet";

@@ -50,8 +50,8 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
 type SettingsSection = "appearance" | "notifications" | "security" | "support";
 
 export function StudentSettingsPage() {
-  const studentAuth = useStudentAuth();
   const navigate = useNavigate();
+  const { loading: authLoading, isStudent, username, role, signOut } = useStudentAuth();
   const { theme, toggleTheme } = useTheme();
   const [loading, setLoading] = useState(true);
   const [activeSection, setActiveSection] = useState<SettingsSection>("appearance");
@@ -69,18 +69,14 @@ export function StudentSettingsPage() {
     return () => clearTimeout(timer);
   }, []);
 
-  const handleLogout = () => {
-    sessionStorage.removeItem("plv-student-auth");
+  const handleLogout = async () => {
+    await signOut();
     navigate("/");
   };
 
-  if (!studentAuth) {
-    navigate("/admin");
-    return null;
-  }
-
-  // ── Loading skeleton (only after auth is confirmed) ──
-  if (loading) {
+  // Wait for the Supabase session/profile check before deciding. Reuse the
+  // branded skeleton so there is no blank flash while the session resolves.
+  if (authLoading || loading) {
     return (
       <PageTransition>
         <div className="min-h-screen">
@@ -103,6 +99,12 @@ export function StudentSettingsPage() {
         </div>
       </PageTransition>
     );
+  }
+
+  // Only active student profiles may use the student settings.
+  if (!isStudent) {
+    navigate("/admin");
+    return null;
   }
 
   const handlePwSave = () => {
@@ -315,8 +317,8 @@ export function StudentSettingsPage() {
 
                       <div className="px-5 py-4 grid sm:grid-cols-2 gap-4">
                         {[
-                          { label: "Username", value: studentAuth.username },
-                          { label: "Role", value: studentAuth.role },
+                          { label: "Username", value: username },
+                          { label: "Role", value: role },
                           { label: "School", value: "Pamantasan ng Lungsod ng Valenzuela" },
                           { label: "Status", value: "Active" },
                         ].map(f => (

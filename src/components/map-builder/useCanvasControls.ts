@@ -259,27 +259,65 @@ export function useCanvasControls(canvasW: number, canvasH: number) {
     [startPan]
   );
 
-  // ── Scroll-wheel zoom (Ctrl+wheel, zoom toward cursor) ──────────────────
+  // ── Window-level capture listeners to block browser defaults ──
+  // Chrome (v73+) treats wheel event listeners as passive by default,
+  // which silently ignores preventDefault() in React synthetic handlers.
+  // We use a capture-phase window listener with { passive: false } so
+  // preventDefault() actually works AND we intercept the event before it
+  // reaches any React handlers. The containerRef is checked at event time,
+  // not at setup time, so this works even if the ref isn't populated yet.
   useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-
-    const handler = (e: WheelEvent) => {
+    // Block Ctrl+Scroll / Cmd+Scroll from zooming the browser page
+    const wheelHandler = (e: WheelEvent) => {
       if (!e.ctrlKey && !e.metaKey) return;
-      e.preventDefault();
-
-      const delta = e.deltaMode === 1 ? e.deltaY * SCROLL_LINE_SENSITIVITY : e.deltaY * WHEEL_SENSITIVITY;
-      const currentZ = targetZoom.current;
-      const newZoom = clamp(currentZ - delta, ZOOM_MIN, ZOOM_MAX);
-
-      // If at limit, stop
-      if (newZoom === currentZ) return;
-
-      smoothZoomTo(newZoom, e.clientX, e.clientY, WHEEL_ZOOM_DURATION_MS);
+      // Only prevent if the event is inside the canvas container
+      if (containerRef.current?.contains(e.target as Node)) {
+        e.preventDefault();
+      }
+    };
+    // Block middle-click auto-scroll (the 4-direction arrow cursor)
+    const mouseDownHandler = (e: MouseEvent) => {
+      if (e.button === 1 && containerRef.current?.contains(e.target as Node)) {
+        e.preventDefault();
+      }
     };
 
-    el.addEventListener("wheel", handler, { passive: false });
-    return () => el.removeEventListener("wheel", handler);
+    // Capture phase + passive: false ensures preventDefault works
+    window.addEventListener("wheel", wheelHandler, { passive: false, capture: true });
+    window.addEventListener("mousedown", mouseDownHandler, { capture: true });
+    return () => {
+      window.removeEventListener("wheel", wheelHandler, { capture: true });
+      window.removeEventListener("mousedown", mouseDownHandler, { capture: true });
+    };
+  }, []);
+
+
+
+  // ── Scroll-wheel zoom + trackpad pinch-to-zoom ──
+  const handleWheel = useCallback((e: React.WheelEvent<HTMLDivElement>) => {
+    if (!e.ctrlKey && !e.metaKey) return;
+
+    // Note: e.preventDefault() is already handled by the native listener above,
+    // but we keep it here too as a fallback for older browsers.
+    e.preventDefault();
+
+    const absDelta = Math.abs(e.deltaY);
+    // Trackpad pinch gestures fire with very small deltas (±1-10px)
+    // while mouse wheel + Ctrl fires large deltas (±100-300px)
+    const sensitivity = (e.deltaMode === 1 || absDelta < 20)
+      ? SCROLL_LINE_SENSITIVITY  // 0.05 — for trackpad pinch / line-based scroll
+      : WHEEL_SENSITIVITY;       // 0.001 — for mouse wheel
+
+    const delta = e.deltaY * sensitivity;
+    const currentZ = targetZoom.current;
+    const newZoom = clamp(currentZ - delta, ZOOM_MIN, ZOOM_MAX);
+
+    if (newZoom === currentZ) return;
+
+    // Update zoom display immediately while canvas animates smoothly
+    setZoom(newZoom);
+
+    smoothZoomTo(newZoom, e.clientX, e.clientY, WHEEL_ZOOM_DURATION_MS);
   }, [smoothZoomTo]);
 
   // ── Zoom in/out buttons ─────────────────────────────────────────────────
@@ -292,6 +330,7 @@ export function useCanvasControls(canvasW: number, canvasH: number) {
 
     targetZoom.current = newZoom;
     targetPan.current = { x: newPanX, y: newPanY };
+    setZoom(newZoom);
     startAnimation();
   }, [canvasW, canvasH, startAnimation]);
 
@@ -303,6 +342,7 @@ export function useCanvasControls(canvasW: number, canvasH: number) {
 
     targetZoom.current = newZoom;
     targetPan.current = { x: newPanX, y: newPanY };
+    setZoom(newZoom);
     startAnimation();
   }, [canvasW, canvasH, startAnimation]);
 
@@ -374,5 +414,6 @@ export function useCanvasControls(canvasW: number, canvasH: number) {
     handleMiddleMouseDown,
     /** Zoom in at a specific screen point (for double-click) */
     zoomInAtPoint,
+    handleWheel,
   };
 }

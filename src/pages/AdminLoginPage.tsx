@@ -1,8 +1,10 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate, Link } from "react-router";
-import { motion } from "motion/react";
-import { Eye, EyeOff, LogIn, Shield, ChevronDown, Check, GraduationCap, LayoutDashboard, AlertCircle, X } from "lucide-react";
+import { motion, AnimatePresence, useReducedMotion } from "motion/react";
+import { Eye, EyeOff, LogIn, AlertCircle, X, ChevronDown, Sparkles, ShieldCheck, GraduationCap } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { cn } from "../lib/utils";
+import { supabase, isConnected } from "../lib/supabase";
 import { Button } from "../components/ui/Button";
 import { useToast } from "../hooks/useToast";
 import { useTheme } from "../hooks/useTheme";
@@ -10,25 +12,81 @@ import { ThemeToggle } from "../components/ui/ThemeToggle";
 import { PLVLogo } from "../components/ui/PLVLogo";
 import { StarField, LavaLampBackground } from "../components/ui/HeroBackground";
 
-// ── Demo accounts — Admin + Student only ─────────────────────────────────────
-const DEMO_ACCOUNTS = [
-  {
-    label:    "Admin Account",
-    subtitle: "Full dashboard & map management",
-    username: "admin",
-    password: "plv2025",
-    icon:     LayoutDashboard,
-    accent:   "#0e2a6e",
-  },
-  {
-    label:    "Student Account",
-    subtitle: "Campus map & navigation access",
-    username: "student",
-    password: "plv2025",
-    icon:     GraduationCap,
-    accent:   "#c8960c",
-  },
-];
+/**
+ * Map raw Supabase auth errors to concise, user-friendly messages.
+ * Never surfaces raw server details or demo credentials.
+ */
+function friendlyAuthError(rawMessage?: string): string {
+  const msg = (rawMessage ?? "").toLowerCase();
+  if (msg.includes("invalid login credentials") || msg.includes("invalid email") || msg.includes("invalid credentials")) {
+    return "Invalid email or password.";
+  }
+  if (msg.includes("email not confirmed")) {
+    return "Please confirm your email address before signing in.";
+  }
+  if (msg.includes("user not found")) {
+    return "No account found with this email address.";
+  }
+  if (msg.includes("too many requests") || msg.includes("rate limit")) {
+    return "Too many attempts. Please wait a moment and try again.";
+  }
+  if (msg.includes("network") || msg.includes("fetch") || msg.includes("offline")) {
+    return "Unable to reach the sign-in service. Check your connection and try again.";
+  }
+  return "Unable to sign in. Please check your email and password.";
+}
+
+// ── Demo account dropdown configuration ──────────────────────────────────────
+// The dropdown is purely a form-filling convenience for demonstrations. It
+// NEVER signs in automatically and NEVER bypasses Supabase: the user must still
+// press Sign In, and authentication always goes through
+// supabase.auth.signInWithPassword() plus the existing profile/role/route
+// checks. It is shown only when demonstration mode is explicitly enabled via
+// Vite variables AND the corresponding demo credentials are configured.
+// Requirement: the dropdown must appear only when VITE_ENABLE_DEMO_LOGIN is
+// exactly "true" (trimmed, case-sensitive).
+const DEMO_LOGIN_ENABLED =
+  (import.meta.env.VITE_ENABLE_DEMO_LOGIN ?? "").trim() === "true";
+const DEMO_ADMIN_EMAIL = (import.meta.env.VITE_DEMO_ADMIN_EMAIL ?? "").trim();
+const DEMO_ADMIN_PASSWORD = import.meta.env.VITE_DEMO_ADMIN_PASSWORD ?? "";
+const DEMO_STUDENT_EMAIL = (import.meta.env.VITE_DEMO_STUDENT_EMAIL ?? "").trim();
+const DEMO_STUDENT_PASSWORD = import.meta.env.VITE_DEMO_STUDENT_PASSWORD ?? "";
+
+interface DemoAccountOption {
+  id: string;
+  label: string;
+  description: string;
+  /** lucide icon used for the option badge */
+  icon: LucideIcon;
+  email: string;
+  password: string;
+}
+
+// Add new demonstration accounts here — the dropdown renders them
+// automatically, so the UI needs no redesign later. Each option is only
+// included when its own credentials are configured (admin and student are
+// independent of each other; both still require demo mode enabled).
+const DEMO_ACCOUNTS: DemoAccountOption[] = [];
+if (DEMO_LOGIN_ENABLED && DEMO_ADMIN_EMAIL && DEMO_ADMIN_PASSWORD) {
+  DEMO_ACCOUNTS.push({
+    id: "demo-admin",
+    label: "Demo Administrator",
+    description: "Opens the administration portal",
+    icon: ShieldCheck,
+    email: DEMO_ADMIN_EMAIL,
+    password: DEMO_ADMIN_PASSWORD,
+  });
+}
+if (DEMO_LOGIN_ENABLED && DEMO_STUDENT_EMAIL && DEMO_STUDENT_PASSWORD) {
+  DEMO_ACCOUNTS.push({
+    id: "demo-student",
+    label: "Demo Student",
+    description: "Opens the student experience",
+    icon: GraduationCap,
+    email: DEMO_STUDENT_EMAIL,
+    password: DEMO_STUDENT_PASSWORD,
+  });
+}
 
 // ── Campus building illustration for the left panel ───────────────────────────
 function CampusIllustration() {
@@ -139,46 +197,111 @@ function CampusIllustration() {
 export function AdminLoginPage() {
   const navigate = useNavigate();
   const { theme, toggleTheme } = useTheme();
-  const [form, setForm]        = useState({ username: "", password: "" });
+  const [form, setForm]        = useState({ email: "", password: "" });
   const [showPw, setShowPw]    = useState(false);
   const [loading, setLoading]  = useState(false);
   const [error, setError]      = useState("");
-  const [demoOpen, setDemoOpen]    = useState(false);
-  const [filledDemo, setFilledDemo] = useState<string | null>(null);
+  const [demoOpen, setDemoOpen] = useState(false);
+  const [selectedDemoId, setSelectedDemoId] = useState<string | null>(null);
+  const demoRef = useRef<HTMLDivElement>(null);
+  const shouldReduceMotion = useReducedMotion();
   const toast = useToast();
+
+  // Close the demo dropdown on outside click or Escape.
+  useEffect(() => {
+    if (!demoOpen) return;
+    const onPointerDown = (e: PointerEvent) => {
+      if (demoRef.current && !demoRef.current.contains(e.target as Node)) {
+        setDemoOpen(false);
+      }
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setDemoOpen(false);
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [demoOpen]);
+
+  // Selecting a demo account ONLY autofills the form fields and clears any
+  // stale error. It never signs the user in — Sign In still runs through
+  // supabase.auth.signInWithPassword() with the normal checks.
+  const applyDemoAccount = (account: DemoAccountOption) => {
+    setForm({ email: account.email, password: account.password });
+    setSelectedDemoId(account.id);
+    setError("");
+    setDemoOpen(false);
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (loading) return;
     setError("");
     setLoading(true);
-    await new Promise(r => setTimeout(r, 700));
-    const { username, password } = form;
-    const isAdmin   = username === "admin"   && password === "plv2025";
-    const isStudent = username === "student" && password === "plv2025";
-    const isFaculty = username === "faculty" && password === "plv2025";
 
-    if (isAdmin) {
-      sessionStorage.setItem("plv-admin-auth", "true");
-      sessionStorage.removeItem("plv-student-auth");
-      toast.success("Welcome back", "Redirecting to admin dashboard...");
-      setTimeout(() => navigate("/admin-dashboard"), 400);
-    } else if (isStudent || isFaculty) {
-      // Students/faculty land on the public campus map, not the admin dashboard
-      sessionStorage.setItem("plv-student-auth", JSON.stringify({ username, role: isStudent ? "student" : "faculty" }));
-      sessionStorage.removeItem("plv-admin-auth");
-      toast.success("Signed in", `Welcome back, ${username}!`);
-      setTimeout(() => navigate("/map"), 400);
-    } else {
-      setError("Incorrect username or password.");
+    if (!isConnected || !supabase) {
+      setError("Authentication is not configured. Please set up Supabase credentials and restart the app.");
+      setLoading(false);
+      return;
+    }
+
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: form.email.trim(),
+        password: form.password,
+      });
+      if (error || !data.user) {
+        setError(friendlyAuthError(error?.message ?? ""));
+        setLoading(false);
+        return;
+      }
+
+      // Retrieve the authenticated user's matching profile row.
+      const { data: profile, error: profileError } = await supabase
+        .from("profiles")
+        .select("*")
+        .eq("id", data.user.id)
+        .maybeSingle();
+
+      if (profileError || !profile) {
+        await supabase.auth.signOut();
+        setError("Your account is not fully set up. Please contact the administrator.");
+        setLoading(false);
+        return;
+      }
+
+      if (!profile.is_active) {
+        await supabase.auth.signOut();
+        setError("This account is inactive. Please contact the administrator.");
+        setLoading(false);
+        return;
+      }
+
+      if (profile.role === "admin") {
+        toast.success("Welcome back", "Redirecting to admin dashboard...");
+        navigate("/admin-dashboard", { replace: true });
+        return;
+      }
+
+      // Students land on the student campus map experience. Any other role
+      // (there are only student/admin in the schema) is rejected safely.
+      if (profile.role === "student") {
+        toast.success("Signed in", "Welcome to the student experience!");
+        navigate("/map", { replace: true });
+        return;
+      }
+
+      // Unknown role — never grant access, end the session safely.
+      await supabase.auth.signOut();
+      setError("This account type cannot sign in here. Please contact the administrator.");
+      setLoading(false);
+    } catch {
+      setError("Unable to sign in right now. Please try again.");
       setLoading(false);
     }
-  };
-
-  const pickDemo = (acc: typeof DEMO_ACCOUNTS[0]) => {
-    setForm({ username: acc.username, password: acc.password });
-    setFilledDemo(acc.username);
-    setDemoOpen(false);
-    setError("");
   };
 
   return (
@@ -252,67 +375,94 @@ export function AdminLoginPage() {
               </p>
             </div>
 
-            {/* Demo accounts accordion */}
-            <div className="mb-6">
-              <button
-                type="button"
-                onClick={() => setDemoOpen(v => !v)}
-                className="w-full flex items-center justify-between px-4 h-11 rounded-xl border border-border bg-muted/40 hover:bg-muted transition-all text-sm font-semibold text-foreground"
-              >
-                <span className="flex items-center gap-2">
-                  {filledDemo ? (
-                    <><Check className="h-4 w-4 text-green-500"/>
-                      <span className="text-green-600 dark:text-green-400 font-bold">
-                        {DEMO_ACCOUNTS.find(a=>a.username===filledDemo)?.label}
-                      </span>
-                    </>
-                  ) : "Use a Demo Account"}
-                </span>
-                <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform duration-200 ${demoOpen?"rotate-180":""}`}/>
-              </button>
-
-              <div className="transition-all duration-300 ease-in-out"
-                style={{ maxHeight: demoOpen ? 160 : 0, opacity: demoOpen ? 1 : 0, overflow: demoOpen ? 'visible' : 'hidden' }}>
-                <div className="mt-2 rounded-2xl border border-border bg-card shadow-lg overflow-hidden">
-                  {DEMO_ACCOUNTS.map(acc => {
-                    const Icon = acc.icon;
-                    return (
-                      <button key={acc.username} type="button" onClick={() => pickDemo(acc)}
-                        className="w-full flex items-center gap-3 px-4 py-3 hover:bg-muted transition-colors text-left border-b border-border last:border-0">
-                        <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
-                          style={{ background: acc.accent }}>
-                          <Icon className="h-4 w-4 text-white"/>
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-bold text-foreground leading-none">{acc.label}</p>
-                          <p className="text-[11px] text-muted-foreground mt-0.5">{acc.subtitle}</p>
-                        </div>
-                        <span className="text-[10px] font-mono bg-muted px-1.5 py-0.5 rounded text-muted-foreground shrink-0">
-                          {acc.username}
-                        </span>
-                      </button>
-                    );
-                  })}
+            {/* ── Demo account dropdown (only when demo mode is enabled) ── */}
+            {DEMO_ACCOUNTS.length > 0 && (
+              <div ref={demoRef} className="mb-6">
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-widest">
+                    Select a demonstration account
+                  </span>
+                  <span className="flex-1 h-px bg-border"/>
                 </div>
-              </div>
-            </div>
 
-            {/* Divider */}
-            <div className="flex items-center gap-3 mb-6">
-              <div className="flex-1 h-px bg-border"/>
-              <span className="text-xs text-muted-foreground font-medium">or enter manually</span>
-              <div className="flex-1 h-px bg-border"/>
-            </div>
+                <button
+                  type="button"
+                  onClick={() => setDemoOpen(o => !o)}
+                  aria-haspopup="menu"
+                  aria-expanded={demoOpen}
+                  aria-controls="demo-account-menu"
+                  className="w-full h-11 px-4 rounded-xl border border-dashed border-border bg-input-background text-foreground hover:border-primary/40 hover:bg-muted/50 transition-all flex items-center gap-2.5 text-sm font-medium"
+                >
+                  <Sparkles className="h-4 w-4 shrink-0 text-primary"/>
+                  <span className="flex-1 text-left truncate">
+                    {selectedDemoId
+                      ? `${DEMO_ACCOUNTS.find(a => a.id === selectedDemoId)?.label ?? "Demo account"} filled — press Sign In`
+                      : "Choose an account to fill the form"}
+                  </span>
+                  <motion.span
+                    animate={{ rotate: demoOpen ? 180 : 0 }}
+                    transition={{ duration: 0.25, ease: "easeOut" }}
+                    className="inline-flex shrink-0"
+                  >
+                    <ChevronDown className="h-4 w-4 text-muted-foreground"/>
+                  </motion.span>
+                </button>
+
+                <AnimatePresence initial={false}>
+                  {demoOpen && (
+                    <motion.div
+                      id="demo-account-menu"
+                      role="menu"
+                      aria-label="Demonstration accounts"
+                      initial={shouldReduceMotion ? false : { height: 0, opacity: 0, y: -8, scale: 0.98 }}
+                      animate={shouldReduceMotion ? { height: "auto", opacity: 1 } : { height: "auto", opacity: 1, y: 0, scale: 1 }}
+                      exit={shouldReduceMotion ? { opacity: 0 } : { height: 0, opacity: 0, y: -6, scale: 0.98 }}
+                      transition={{ duration: 0.24, ease: [0.16, 1, 0.3, 1] }}
+                      style={{ overflow: "hidden", transformOrigin: "top" }}
+                      className="mt-2 rounded-xl border border-border bg-popover text-popover-foreground shadow-lg shadow-black/5"
+                    >
+                      {DEMO_ACCOUNTS.map(account => (
+                        <button
+                          key={account.id}
+                          type="button"
+                          role="menuitemradio"
+                          aria-checked={selectedDemoId === account.id}
+                          onClick={() => applyDemoAccount(account)}
+                          className="w-full flex items-start gap-3 px-4 py-3.5 text-left hover:bg-muted/70 transition-colors group first:rounded-t-xl last:rounded-b-xl"
+                        >
+                          <span className="mt-0.5 h-8 w-8 shrink-0 rounded-lg bg-primary/10 text-primary flex items-center justify-center">
+                            <account.icon className="h-4 w-4"/>
+                          </span>
+                          <span className="min-w-0">
+                            <span className="block text-sm font-bold text-foreground group-hover:text-primary transition-colors">
+                              {account.label}
+                            </span>
+                            <span className="block text-xs text-muted-foreground mt-0.5 leading-relaxed">
+                              {account.description}
+                            </span>
+                          </span>
+                        </button>
+                      ))}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
+                <p className="text-[11px] text-muted-foreground mt-2 leading-relaxed">
+                  Selecting an account only fills the login form — you still press{" "}
+                  <span className="font-semibold text-foreground/80">Sign In</span> to authenticate with Supabase.
+                </p>
+              </div>
+            )}
 
             {/* Form */}
             <form onSubmit={handleSubmit} className="space-y-5">
               <div>
-                <label htmlFor="login-username" className="block text-xs font-bold text-foreground mb-1.5 uppercase tracking-widest">
-                  Username
+                <label htmlFor="login-email" className="block text-xs font-bold text-foreground mb-1.5 uppercase tracking-widest">
+                  Email
                 </label>
-                <input id="login-username" type="text" value={form.username} autoComplete="username"
-                  onChange={e => { setForm({...form, username:e.target.value}); setFilledDemo(null); if (error) setError(""); }}
-                  placeholder="Enter your username" required
+                <input id="login-email" type="email" value={form.email} autoComplete="email"
+                  onChange={e => { setForm({...form, email:e.target.value}); if (error) setError(""); }}
+                  placeholder="Enter your email" required
                   aria-invalid={!!error}
                   aria-describedby={error ? "login-error" : undefined}
                   className={cn("w-full h-11 px-4 rounded-xl border bg-input-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 transition-all text-sm", error ? "border-destructive focus:ring-destructive/30" : "border-border focus:ring-primary/30 focus:border-primary")}/>
@@ -323,7 +473,7 @@ export function AdminLoginPage() {
                 </label>
                 <div className="relative">
                   <input id="login-password" type={showPw?"text":"password"} value={form.password} autoComplete="current-password"
-                    onChange={e => { setForm({...form, password:e.target.value}); setFilledDemo(null); if (error) setError(""); }}
+                    onChange={e => { setForm({...form, password:e.target.value}); if (error) setError(""); }}
                     placeholder="Enter your password" required
                     aria-invalid={!!error}
                     aria-describedby={error ? "login-error" : undefined}
@@ -347,9 +497,6 @@ export function AdminLoginPage() {
                   <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
                   <div className="flex-1 min-w-0">
                     <p className="font-semibold">{error}</p>
-                    <p className="text-xs text-destructive/80 mt-0.5">
-                      Demo credentials are: <span className="font-mono font-bold">admin</span> / <span className="font-mono font-bold">plv2025</span> or <span className="font-mono font-bold">student</span> / <span className="font-mono font-bold">plv2025</span>
-                    </p>
                   </div>
                   <button
                     type="button"
@@ -374,9 +521,6 @@ export function AdminLoginPage() {
                 <Link to="/register" className="text-primary font-bold hover:underline">
                   Create Student Account
                 </Link>
-              </p>
-              <p className="text-[11px] text-muted-foreground/50">
-                Demo credentials are for presentation purposes only.
               </p>
             </div>
           </div>

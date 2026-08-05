@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "build": "vite build",
-    "dev": "vite"
+    "dev": "vite",
+    "demo:accounts": "node scripts/provision-demo-accounts.mjs"
   },
   "dependencies": {
     "@emotion/react": "11.14.0",

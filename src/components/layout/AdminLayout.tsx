@@ -4,9 +4,22 @@ import { NavigationProgress } from "../ui/NavigationProgress";
 import { AdminSidebar } from "./AdminSidebar";
 import { ThemeToggle } from "../ui/ThemeToggle";
 import { useTheme } from "../../hooks/useTheme";
+import { useAdminAuth } from "../../hooks/useAdminAuth";
 import { cn } from "../../lib/utils";
 import { PanelLeftClose, PanelLeft, Bell, User } from "lucide-react";
 import { motion } from "motion/react";
+
+/** Branded full-screen loader shown while the session/profile is checked. */
+function AuthGateLoader() {
+  return (
+    <div className="min-h-screen flex flex-col items-center justify-center gap-4 bg-background">
+      <div className="w-11 h-11 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center">
+        <div className="w-5 h-5 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+      </div>
+      <p className="text-xs font-semibold text-muted-foreground">Checking your session…</p>
+    </div>
+  );
+}
 
 const ROUTE_LABELS: Record<string, string> = {
   "/admin-dashboard":                "Dashboard",
@@ -27,17 +40,19 @@ const ROUTE_LABELS: Record<string, string> = {
 export function AdminLayout() {
   const { theme, toggleTheme } = useTheme();
   const [collapsed, setCollapsed] = useState(false);
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
+  const { loading, isAdmin, profile } = useAdminAuth();
 
   useEffect(() => {
-    const auth = sessionStorage.getItem("plv-admin-auth");
-    if (!auth) navigate("/admin");
-    else setIsAuthenticated(true);
-  }, [navigate]);
+    if (loading) return;
+    // Unauthenticated users AND non-admin accounts are sent to the login page.
+    if (!isAdmin) navigate("/admin", { replace: true });
+  }, [loading, isAdmin, navigate]);
 
-  if (!isAuthenticated) return null;
+  // Show a loader while the session/profile is being checked, and keep showing
+  // it for the brief moment after the redirect above is triggered.
+  if (loading || !isAdmin) return <AuthGateLoader />;
 
   const pageTitle = ROUTE_LABELS[location.pathname] ?? "Admin";
 
@@ -78,8 +93,12 @@ export function AdminLayout() {
               <User className="h-4 w-4 text-primary-foreground" />
             </div>
             <div className="hidden sm:block">
-              <p className="text-xs font-bold text-foreground leading-none">Administrator</p>
-              <p className="text-[10px] text-muted-foreground">PLV NaviSync</p>
+              <p className="text-xs font-bold text-foreground leading-none">
+                {profile
+                  ? [profile.first_name, profile.last_name].filter(Boolean).join(" ") || profile.email
+                  : "Administrator"}
+              </p>
+              <p className="text-[10px] text-muted-foreground">Administrator · PLV NaviSync</p>
             </div>
           </div>
         </header>

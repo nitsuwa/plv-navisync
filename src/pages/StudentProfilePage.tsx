@@ -61,11 +61,11 @@ const RECENT_ACTIVITY = [
 // ═════════════════════════════════════════════════════════════════════════════
 
 export function StudentProfilePage() {
-  const studentAuth = useStudentAuth();
   const navigate = useNavigate();
+  const { loading: authLoading, isStudent, profile, username, role, signOut } = useStudentAuth();
   const [loading, setLoading] = useState(true);
 
-  const [displayName, setDisplayName] = useState(studentAuth?.username ?? "");
+  const [displayName, setDisplayName] = useState(username || "");
   const [editingName, setEditingName] = useState(false);
   const [nameInput, setNameInput] = useState(displayName);
   const nameInputRef = useRef<HTMLInputElement>(null);
@@ -75,17 +75,36 @@ export function StudentProfilePage() {
     return () => clearTimeout(timer);
   }, []);
 
+  // Once the real profile loads, use its display name as the default.
+  useEffect(() => {
+    if (username) setDisplayName(username);
+  }, [username]);
+
   useEffect(() => {
     if (editingName && nameInputRef.current) nameInputRef.current.focus();
   }, [editingName]);
 
-  const handleLogout = () => {
-    sessionStorage.removeItem("plv-student-auth");
+  const handleLogout = async () => {
+    await signOut();
     navigate("/");
   };
 
+  // ── Loading state while the Supabase session/profile resolves ──
+  if (authLoading) {
+    return (
+      <PageTransition>
+        <div className="min-h-screen flex items-center justify-center">
+          <div className="flex items-center gap-3 text-sm text-muted-foreground">
+            <span className="w-5 h-5 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+            Checking your session…
+          </div>
+        </div>
+      </PageTransition>
+    );
+  }
+
   // ── Unauthenticated state ──
-  if (!studentAuth) {
+  if (!isStudent) {
     return (
       <PageTransition>
         <div className="min-h-[70vh] flex flex-col items-center justify-center gap-6 px-5 text-center" role="main" aria-label="Sign in required">
@@ -110,21 +129,7 @@ export function StudentProfilePage() {
             >
               Sign In
             </Link>
-            <button
-              onClick={() => {
-                sessionStorage.setItem("plv-student-auth", JSON.stringify({ username: "student", role: "student" }));
-                navigate(0);
-              }}
-              className="inline-flex items-center justify-center gap-2 h-11 px-6 rounded-xl text-sm font-bold border border-primary/30 text-primary hover:bg-primary/5 active:scale-[0.97] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              aria-label="Quick sign in with demo account"
-            >
-              <GraduationCap className="h-4 w-4" />
-              Quick Sign In (Demo)
-            </button>
           </div>
-          <p className="text-[11px] text-muted-foreground/60 mt-2">
-            Demo account: username <code className="text-[10px] font-mono bg-muted px-1 py-0.5 rounded">student</code> · password <code className="text-[10px] font-mono bg-muted px-1 py-0.5 rounded">plv2025</code>
-          </p>
         </div>
       </PageTransition>
     );
@@ -298,12 +303,12 @@ export function StudentProfilePage() {
                 <div className="flex flex-wrap items-center gap-2.5 justify-center sm:justify-start">
                   <span className="text-sm text-muted-foreground flex items-center gap-1.5">
                     <Mail className="h-3.5 w-3.5 shrink-0" />
-                    {studentAuth.username.toLowerCase()}@plv.edu.ph
+                    {profile?.email ?? `${username.toLowerCase()}@plv.edu.ph`}
                   </span>
                   <span className="hidden sm:inline text-muted-foreground/30">·</span>
                   <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-primary/10 text-primary border border-primary/20">
                     <GraduationCap className="h-3 w-3" />
-                    <span className="capitalize">{studentAuth.role}</span>
+                    <span className="capitalize">{role}</span>
                   </span>
                   <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-bold bg-green-500/10 text-green-600 dark:text-green-400 border border-green-500/20" aria-label="Currently logged in">
                     <span className="w-1.5 h-1.5 rounded-full bg-green-500" />

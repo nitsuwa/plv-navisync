@@ -112,7 +112,7 @@ const MY_REPORTS: Report[] = [
 ];
 
 export function StudentReportsPage() {
-  const studentAuth = useStudentAuth();
+  const { loading: authLoading, isStudent } = useStudentAuth();
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<FilterStatus>("all");
@@ -124,13 +124,9 @@ export function StudentReportsPage() {
     return () => clearTimeout(timer);
   }, []);
 
-  if (!studentAuth) {
-    navigate("/admin");
-    return null;
-  }
-
-  // ── Loading skeleton ──
-  if (loading) {
+  // Wait for the Supabase session/profile check before deciding. Reuse the
+  // branded skeleton so there is no blank flash while the session resolves.
+  if (authLoading || loading) {
     return (
       <PageTransition>
         <div className="min-h-screen">
@@ -173,6 +169,12 @@ export function StudentReportsPage() {
         </div>
       </PageTransition>
     );
+  }
+
+  // Only active student profiles may use the student reports.
+  if (!isStudent) {
+    navigate("/admin");
+    return null;
   }
 
   const filtered = MY_REPORTS.filter(r => {

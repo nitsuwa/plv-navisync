@@ -1,9 +1,11 @@
-import { Link, useLocation } from "react-router";
+import { Link, useLocation, useNavigate } from "react-router";
 import {
   LayoutDashboard, LogOut, Settings, Map, Flag, Users,
 } from "lucide-react";
+import { useState } from "react";
 import { cn } from "../../lib/utils";
 import { PLVLogo } from "../ui/PLVLogo";
+import { supabase } from "../../lib/supabase";
 import { motion, useReducedMotion } from "motion/react";
 import { sidebarSpring } from "../../config/animation";
 
@@ -59,10 +61,22 @@ function NavItem({ label, path, icon: Icon, active, collapsed, badge }: {
 
 export function AdminSidebar({ collapsed = false }: AdminSidebarProps) {
   const location = useLocation();
+  const navigate = useNavigate();
   const shouldReduce = useReducedMotion();
+  const [signingOut, setSigningOut] = useState(false);
 
   const isActive = (path: string) => {
     return location.pathname === path;
+  };
+
+  const handleSignOut = async () => {
+    if (signingOut) return;
+    setSigningOut(true);
+    try {
+      await supabase?.auth.signOut();
+    } finally {
+      navigate("/admin", { replace: true });
+    }
   };
 
   return (
@@ -100,19 +114,20 @@ export function AdminSidebar({ collapsed = false }: AdminSidebarProps) {
         ))}
       </nav>
 
-      {/* Exit */}
+      {/* Sign out */}
       <div className="px-2.5 pb-5 border-t border-sidebar-border pt-3">
-        <Link
-          to="/"
-          title={collapsed ? "Exit Admin" : undefined}
+        <button
+          onClick={handleSignOut}
+          disabled={signingOut}
+          title={collapsed ? "Sign Out" : undefined}
           className={cn(
-            "flex items-center rounded-xl text-sm font-medium text-sidebar-foreground/40",
-            "hover:text-white hover:bg-destructive/25 transition-all duration-150 active:scale-[0.97]",
+            "flex w-full items-center rounded-xl text-sm font-medium text-sidebar-foreground/40",
+            "hover:text-white hover:bg-destructive/25 transition-all duration-150 active:scale-[0.97] disabled:opacity-50",
             collapsed ? "justify-center w-10 h-10 mx-auto" : "gap-2.5 px-3 py-2.5"
           )}>
           <LogOut className={cn("shrink-0", collapsed ? "h-5 w-5" : "h-4 w-4")}/>
-          {!collapsed && <span style={{ fontFamily: "var(--font-body)" }}>Exit Admin</span>}
-        </Link>
+          {!collapsed && <span style={{ fontFamily: "var(--font-body)" }}>Sign Out</span>}
+        </button>
       </div>
     </motion.aside>
   );

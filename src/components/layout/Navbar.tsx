@@ -25,10 +25,10 @@ export function Navbar() {
   const [dropdownOpen, setDropdownOpen] = useState(false);
 
   const dropdownRef = useRef<HTMLDivElement>(null);
-  const studentAuth = useStudentAuth();
+  const { loading: authLoading, isStudent, username, role, signOut } = useStudentAuth();
 
-  const handleStudentLogout = () => {
-    sessionStorage.removeItem("plv-student-auth");
+  const handleStudentLogout = async () => {
+    await signOut();
     setDropdownOpen(false);
     navigate("/");
   };
@@ -62,9 +62,7 @@ export function Navbar() {
   const isActive = (path: string) =>
     path === "/" ? location.pathname === "/" : location.pathname.startsWith(path);
 
-  const initials = studentAuth
-    ? studentAuth.username.slice(0, 2).toUpperCase()
-    : "";
+  const initials = isStudent ? username.slice(0, 2).toUpperCase() : "";
 
 
 
@@ -141,13 +139,17 @@ export function Navbar() {
           <div className="flex items-center gap-1.5 shrink-0">
             <ThemeToggle theme={theme} onToggle={toggleTheme} />
 
-            {studentAuth ? (
+            {authLoading ? (
+              /* Session still resolving — placeholder sized like the controls it
+                 replaces so there is no layout shift on resolve */
+              <div className="w-[86px] sm:w-[96px] h-9 rounded-xl border border-border bg-muted/40 animate-pulse" aria-hidden="true" />
+            ) : isStudent ? (
               /* Student avatar dropdown */
               <div className="relative" ref={dropdownRef}>
                 <motion.button
                   onClick={() => setDropdownOpen(v => !v)}
                   whileTap={{ scale: 0.93 }}
-                  aria-label={`${studentAuth.username} — user menu`}
+                  aria-label={`${username} — user menu`}
                   aria-expanded={dropdownOpen}
                   aria-haspopup="true"
                   className={cn(
@@ -163,7 +165,7 @@ export function Navbar() {
                     style={{ background: "var(--primary)" }}>
                     {initials}
                   </div>
-                  <span className="hidden sm:block text-xs font-bold capitalize">{studentAuth.username}</span>
+                  <span className="hidden sm:block text-xs font-bold capitalize">{username}</span>
                   <motion.div
                     animate={{ rotate: dropdownOpen ? 180 : 0 }}
                     transition={{ duration: 0.2 }}
@@ -188,8 +190,8 @@ export function Navbar() {
                             {initials}
                           </div>
                           <div className="min-w-0">
-                            <p className="text-sm font-extrabold text-foreground truncate">{studentAuth.username}</p>
-                            <p className="text-[11px] text-muted-foreground capitalize">{studentAuth.role}</p>
+                            <p className="text-sm font-extrabold text-foreground truncate">{username}</p>
+                            <p className="text-[11px] text-muted-foreground capitalize">{role}</p>
                           </div>
                         </div>
                       </div>

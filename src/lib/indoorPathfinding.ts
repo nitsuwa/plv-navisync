@@ -40,17 +40,29 @@ interface CorridorEdge {
   dist: number;
 }
 
-// ── Auto-generate corridor graph for a given floor ─────────────────────────
-function buildFloorGraph(
-  buildingId: string,
-  floorNumber: number
-): { nodes: CorridorNode[]; edges: CorridorEdge[]; roomNodeMap: Map<string, string>; stairNodes: string[] } | null {
-  const plan = FLOOR_PLANS[buildingId];
-  if (!plan) return null;
-  const floor = plan.floors.find(f => f.number === floorNumber);
-  if (!floor) return null;
+/** Minimal room shape accepted by the graph builder */
+export interface RoomLike {
+  id: string; name: string;
+  x: number; y: number; w: number; h: number;
+  type: string;
+  /** Whether this room is wheelchair-accessible (used in accessible-only routing) */
+  accessibility?: boolean;
+}
 
-  const rooms = floor.rooms;
+// ── Build floor navigation graph from room data ───────────────────────────
+/**
+ * Build a corridor graph from an array of room-like objects.
+ * Rooms with type "stairs", "elevator", or "lobby" become "stair/service"
+ * nodes that connect to the corridor; every other room gets a "door" node.
+ *
+ * @param accessibleOnly If true, only elevator and lobby nodes are treated as
+ *   viable entry/exit points (stairs are excluded). Rooms without an explicit
+ *   `accessibility: true` flag are skipped.
+ */
+export function buildFloorGraphFromRooms(
+  rooms: RoomLike[],
+  accessibleOnly = false
+): { nodes: CorridorNode[]; edges: CorridorEdge[]; roomNodeMap: Map<string, string>; stairNodes: string[] } | null {
   if (rooms.length === 0) return null;
 
   // 1. Sort rooms by their vertical center to detect rows
@@ -83,7 +95,7 @@ function buildFloorGraph(
   const minX = Math.min(...allX) - 10;
   const maxX = Math.max(...allRight) + 10;
 
-  // Place corridor spine nodes every 10 SVG units
+  // Place corridor spine nodes every 15 SVG units
   const spacing = 15;
   const steps_count = Math.ceil((maxX - minX) / spacing) + 1;
   for (let i = 0; i < steps_count; i++) {
@@ -95,11 +107,16 @@ function buildFloorGraph(
     }
   }
 
-  // 5. For service rooms (stairs/elevator), connect to nearest corridor node
-  for (const sr of serviceRooms) {
+  // 5. For service rooms (stairs/elevator/lobby), connect to nearest corridor node
+  const validServiceRooms = accessibleOnly
+    ? serviceRooms.filter(sr => sr.type === "elevator" || sr.type === "lobby")
+    : serviceRooms;
+
+  for (const sr of validServiceRooms) {
+    const cx = sr.x + sr.w / 2;
+    const cy = sr.y + sr.h / 2;
+
     if (sr.type === "stairs" || sr.type === "elevator") {
-      const cx = sr.x + sr.w / 2;
-      const cy = sr.y + sr.h / 2;
       const nodeId = `service_${sr.id}`;
       nodes.push({ id: nodeId, x: cx, y: cy });
       stairNodes.push(nodeId);
@@ -120,12 +137,11 @@ function buildFloorGraph(
         edges.push({ from: nodeId, to: `cor_${bestIdx}`, dist: bestDist });
       }
     }
-    // Lobby: connect to corridor and also use as entrance
+
     if (sr.type === "lobby") {
-      const cx = sr.x + sr.w / 2;
       const nodeId = `entrance_${sr.id}`;
-      nodes.push({ id: nodeId, x: cx, y: sr.y + sr.h }); // bottom of lobby
-      stairNodes.push(nodeId); // treat lobby as an entry point
+      nodes.push({ id: nodeId, x: cx, y: sr.y + sr.h });
+      stairNodes.push(nodeId);
 
       let bestDist = Infinity;
       let bestIdx = -1;
@@ -145,24 +161,31 @@ function buildFloorGraph(
   }
 
   // 6. For each room, create a "door" node on the side facing the corridor
+  //    In accessible-only mode, skip rooms not marked as accessible
+  //    If a room has an explicit navConnection, use that as the door position.
   for (const room of rooms) {
     if (room.type === "stairs" || room.type === "elevator" || room.type === "lobby") continue;
-
+    // In accessible-only mode, only include rooms that have accessibility: true
+    if (accessibleOnly && room.accessibility !== true) continue;
     const doorNodeId = `door_${room.id}`;
-    const roomCx = room.x + room.w / 2;
     let doorX: number;
     let doorY: number;
 
-    // Determine which side faces the corridor
-    const roomCy = room.y + room.h / 2;
-    if (roomCy < effectiveCY) {
-      // Room is in top row → door faces down (bottom edge)
-      doorX = roomCx;
-      doorY = room.y + room.h;
+    if (room.navConnection) {
+      // Use the explicit navigation connection point set in the Floor Editor
+      doorX = room.navConnection.x;
+      doorY = room.navConnection.y;
     } else {
-      // Room is in bottom row → door faces up (top edge)
-      doorX = roomCx;
-      doorY = room.y;
+      // Auto-detect which side faces the corridor
+      const roomCx = room.x + room.w / 2;
+      const roomCy = room.y + room.h / 2;
+      if (roomCy < effectiveCY) {
+        doorX = roomCx;
+        doorY = room.y + room.h;
+      } else {
+        doorX = roomCx;
+        doorY = room.y;
+      }
     }
 
     nodes.push({ id: doorNodeId, x: doorX, y: doorY });
@@ -187,6 +210,18 @@ function buildFloorGraph(
   }
 
   return { nodes, edges, roomNodeMap, stairNodes };
+}
+
+// ── Auto-generate corridor graph for a given floor (legacy, hardcoded data) ─
+function buildFloorGraph(
+  buildingId: string,
+  floorNumber: number
+): { nodes: CorridorNode[]; edges: CorridorEdge[]; roomNodeMap: Map<string, string>; stairNodes: string[] } | null {
+  const plan = FLOOR_PLANS[buildingId];
+  if (!plan) return null;
+  const floor = plan.floors.find(f => f.number === floorNumber);
+  if (!floor) return null;
+  return buildFloorGraphFromRooms(floor.rooms);
 }
 
 // ── A* pathfinding on the floor graph ─────────────────────────────────────
@@ -413,4 +448,225 @@ function buildIndoorSteps(
   }
 
   return steps;
+}
+
+/**
+ * Same as `findIndoorRoute` but accepts room data directly instead
+ * of reading from the hardcoded FLOOR_PLANS constant.
+ *
+ * Use this when routing inside a floor of a published campus that
+ * was built with the Map Builder.
+ *
+ * @param accessibleOnly If true, only uses elevator/lobby nodes as entry
+ *   points (avoids stairs) and only navigates to accessible rooms.
+ */
+export function findIndoorRouteForFloor(
+  buildingId: string,
+  floorNumber: number,
+  targetRoomId: string,
+  rooms: RoomLike[],
+  accessibleOnly = false
+): IndoorRoute | null {
+  const graph = buildFloorGraphFromRooms(rooms, accessibleOnly);
+  if (!graph) return null;
+
+  const doorNode = graph.roomNodeMap.get(targetRoomId);
+  if (!doorNode || graph.stairNodes.length === 0) return null;
+
+  const targetNode = graph.nodes.find(n => n.id === doorNode);
+  if (!targetNode) return null;
+
+  let bestRoute: { pathIds: string[]; totalDist: number; entryNodeId: string } | null = null;
+
+  for (const entryNodeId of graph.stairNodes) {
+    const result = aStarFloor(entryNodeId, doorNode, graph.nodes, graph.edges);
+    if (result) {
+      if (!bestRoute || result.totalDist < bestRoute.totalDist) {
+        bestRoute = { ...result, entryNodeId };
+      }
+    }
+  }
+
+  if (!bestRoute) return null;
+
+  const nodeMap = new Map<string, CorridorNode>();
+  for (const n of graph.nodes) nodeMap.set(n.id, n);
+
+  const waypoints: IndoorWaypoint[] = [];
+  for (const id of bestRoute.pathIds) {
+    const nd = nodeMap.get(id);
+    if (nd) {
+      waypoints.push({ x: nd.x, y: nd.y });
+    }
+  }
+
+  const steps = buildIndoorSteps(bestRoute.pathIds, nodeMap, graph, targetRoomId, rooms);
+
+  const distanceMeters = parseFloat((bestRoute.totalDist * SVG_TO_METERS).toFixed(1));
+  const estimatedSeconds = Math.round(distanceMeters / 1.2);
+
+  return { waypoints, steps, distanceMeters, estimatedSeconds };
+}
+
+// ── Multi-floor indoor route segment ───────────────────────────────────────
+
+export interface MultiFloorSegment {
+  /** Human-readable label for this segment */
+  label: string;
+  /** SVG waypoints for this segment */
+  waypoints: IndoorWaypoint[];
+  /** Distance in meters */
+  distanceM: number;
+  /** Estimated time in seconds */
+  seconds: number;
+  /** Step-by-step directions for this segment */
+  steps: string[];
+  /** The floor number this segment is on (null = vertical transit) */
+  floorNumber: number | null;
+}
+
+export interface MultiFloorRoute {
+  /** All segments that make up the multi-floor route */
+  segments: MultiFloorSegment[];
+  /** Total distance in meters */
+  totalDistanceM: number;
+  /** Total estimated time in seconds */
+  totalSeconds: number;
+  /** All steps flattened */
+  allSteps: string[];
+}
+
+/**
+ * Find a route to a room that may span multiple floors.
+ *
+ * For same-floor routing this delegates to `findIndoorRouteForFloor`.
+ * For cross-floor routing it creates: exit-source-floor → vertical-transit
+ * → enter-target-floor segments.
+ *
+ * @param buildingId   building identifier
+ * @param targetFloor  target floor number
+ * @param targetRoomId room to navigate to
+ * @param fromFloor    starting floor number (defaults to 1 / ground)
+ * @param floorData    map of floor-number → rooms for *all* floors
+ * @param accessibleOnly If true, uses elevators instead of stairs and
+ *   only navigates to accessible rooms.
+ */
+export function findMultiFloorIndoorRoute(
+  buildingId: string,
+  targetFloor: number,
+  targetRoomId: string,
+  fromFloor: number,
+  floorData: Record<number, RoomLike[]>,
+  accessibleOnly = false
+): MultiFloorRoute | null {
+  const segments: MultiFloorSegment[] = [];
+
+  // Same floor — simple case
+  if (fromFloor === targetFloor) {
+    const route = findIndoorRouteForFloor(buildingId, targetFloor, targetRoomId, floorData[targetFloor] ?? [], accessibleOnly);
+    if (!route) return null;
+    segments.push({
+      label: `Navigate to room on ${describeFloor(targetFloor)}`,
+      waypoints: route.waypoints,
+      distanceM: route.distanceMeters,
+      seconds: route.estimatedSeconds,
+      steps: route.steps,
+      floorNumber: targetFloor,
+    });
+    return {
+      segments,
+      totalDistanceM: route.distanceMeters,
+      totalSeconds: route.estimatedSeconds,
+      allSteps: route.steps,
+    };
+  }
+
+  // Different floors — need stairs/elevator transit
+  const fromRooms = floorData[fromFloor];
+  const toRooms = floorData[targetFloor];
+  if (!fromRooms || !toRooms) return null;
+
+  // 1. Route from target room → nearest stair/elevator on target floor
+  const toGraph = buildFloorGraphFromRooms(toRooms, accessibleOnly);
+  if (!toGraph || toGraph.stairNodes.length === 0) return null;
+
+  const toDoorNode = toGraph.roomNodeMap.get(targetRoomId);
+  if (!toDoorNode) return null;
+
+  // Find the best stair for the target room
+  let bestStair: { pathIds: string[]; totalDist: number; entryNodeId: string } | null = null;
+  for (const entryNodeId of toGraph.stairNodes) {
+    const result = aStarFloor(entryNodeId, toDoorNode, toGraph.nodes, toGraph.edges);
+    if (result) {
+      if (!bestStair || result.totalDist < bestStair.totalDist) {
+        bestStair = { ...result, entryNodeId };
+      }
+    }
+  }
+  if (!bestStair) return null;
+
+  // Build the entry segment (stairs → target room on target floor)
+  const toNodeMap = new Map<string, CorridorNode>();
+  for (const n of toGraph.nodes) toNodeMap.set(n.id, n);
+
+  const entryWaypoints: IndoorWaypoint[] = [];
+  for (const id of bestStair.pathIds) {
+    const nd = toNodeMap.get(id);
+    if (nd) entryWaypoints.push({ x: nd.x, y: nd.y });
+  }
+  const entrySteps = buildIndoorSteps(bestStair.pathIds, toNodeMap, toGraph, targetRoomId, toRooms);
+
+  segments.push({
+    label: `Navigate on ${describeFloor(targetFloor)}`,
+    waypoints: entryWaypoints,
+    distanceM: parseFloat((bestStair.totalDist * SVG_TO_METERS).toFixed(1)),
+    seconds: Math.round(bestStair.totalDist * SVG_TO_METERS / 1.2),
+    steps: entrySteps,
+    floorNumber: targetFloor,
+  });
+
+  // 2. Vertical transit segment
+  const floorDiff = Math.abs(targetFloor - fromFloor);
+  const direction = targetFloor > fromFloor ? "up" : "down";
+  const hasElevator = toRooms.some(r => r.type === "elevator");
+  // In accessible-only mode, force elevator transit (stairs are excluded)
+  const transitType = accessibleOnly
+    ? (hasElevator ? "elevator" : "stairs — no elevator available")
+    : hasElevator ? "elevator" : "stairs";
+  const transitLabel = accessibleOnly
+    ? `Take elevator ${direction} from ${describeFloor(fromFloor)} to ${describeFloor(targetFloor)}`
+    : `Take ${transitType} ${direction} from ${describeFloor(fromFloor)} to ${describeFloor(targetFloor)}`;
+
+  segments.unshift({
+    label: transitLabel,
+    waypoints: [],
+    distanceM: 0,
+    seconds: hasElevator ? floorDiff * 8 : floorDiff * 15,
+    steps: [transitLabel],
+    floorNumber: null,
+  });
+
+  // 3. Exit segment (source floor: room → stairs) - simplified
+  //    We'll just include the transit step from the entrance side
+  segments.unshift({
+    label: `Exit from entrance on ${describeFloor(fromFloor)}`,
+    waypoints: [],
+    distanceM: 0,
+    seconds: 15,
+    steps: [`Enter ${buildingId} on ${describeFloor(fromFloor)}`],
+    floorNumber: fromFloor,
+  });
+
+  const totalDistanceM = segments.reduce((s, seg) => s + seg.distanceM, 0);
+  const totalSeconds = segments.reduce((s, seg) => s + seg.seconds, 0);
+  const allSteps = segments.flatMap(seg => seg.steps);
+
+  return { segments, totalDistanceM, totalSeconds, allSteps };
+}
+
+function describeFloor(floorNumber: number): string {
+  if (floorNumber === 1) return "Ground Floor";
+  if (floorNumber === 2) return "2nd Floor";
+  if (floorNumber === 3) return "3rd Floor";
+  return `${floorNumber}th Floor`;
 }

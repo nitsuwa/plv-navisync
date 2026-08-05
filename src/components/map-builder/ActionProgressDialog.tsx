@@ -2,12 +2,12 @@ import { useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import {
   Save, Globe, CheckCircle2, AlertTriangle, X, RotateCcw,
-  Upload, RefreshCw, Copy, FileDown, Loader2, EyeOff,
+  Upload, RefreshCw, Copy, FileDown, Loader2, EyeOff, Archive,
 } from "lucide-react";
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
-export type ActionType = "saving" | "publishing" | "unpublishing" | "updating" | "auto-saving" | "restoring" | "duplicating" | "exporting";
+export type ActionType = "saving" | "publishing" | "unpublishing" | "updating" | "auto-saving" | "restoring" | "duplicating" | "exporting" | "archiving";
 
 export type ActionState = "loading" | "success" | "error";
 
@@ -173,6 +173,23 @@ const ACTION_CONFIGS: Record<ActionType, ActionConfig> = {
       "Updating student map view...",
       "Clearing navigation caches...",
       "Finalizing takedown...",
+      "Almost done...",
+    ],
+  },
+  archiving: {
+    icon: Archive,
+    title: "Archiving Campus",
+    loadingMessage: "Your campus is being moved to the archive. Buildings, floor plans, and settings will be preserved.",
+    successTitle: "Campus Archived",
+    successMessage: "Your campus has been archived and hidden from students. You can restore it at any time.",
+    errorTitle: "Archiving Failed",
+    errorMessage: "The campus could not be archived. Please try again.",
+    statusMessages: [
+      "Preparing campus for archive...",
+      "Removing from student view...",
+      "Preserving building data...",
+      "Archiving floor plans...",
+      "Finalizing archive...",
       "Almost done...",
     ],
   },

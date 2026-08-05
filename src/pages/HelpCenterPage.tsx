@@ -278,7 +278,8 @@ function AIChatSection({ studentAuth }: { studentAuth: ReturnType<typeof useStud
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, typing]);
 
-  const isLimited = !studentAuth && guestUsed >= GUEST_LIMIT;
+  // Don't count a signed-in student as a guest while the session resolves.
+  const isLimited = !studentAuth.isStudent && !studentAuth.loading && guestUsed >= GUEST_LIMIT;
 
   const sendMessage = (text: string) => {
     if (!text.trim() || typing || isLimited) return;
@@ -286,7 +287,7 @@ function AIChatSection({ studentAuth }: { studentAuth: ReturnType<typeof useStud
     setInput("");
     setMessages(m => [...m, { role: "user", text: userMsg, time: new Date() }]);
     setTyping(true);
-    if (!studentAuth) { incrementGuestCount(); setGuestUsed(getGuestCount()); }
+    if (!studentAuth.isStudent && !studentAuth.loading) { incrementGuestCount(); setGuestUsed(getGuestCount()); }
     setTimeout(() => {
       setTyping(false);
       setMessages(m => [...m, { role: "ai", text: getAIResponse(userMsg), time: new Date() }]);
@@ -330,7 +331,7 @@ function AIChatSection({ studentAuth }: { studentAuth: ReturnType<typeof useStud
           <div className="min-w-0">
             <p className="text-sm font-extrabold text-foreground">PLV Campus Assistant</p>
             <p className="text-[11px] text-muted-foreground">
-              {studentAuth
+              {studentAuth.isStudent
                 ? `Unlimited access · ${studentAuth.role}`
                 : `${GUEST_LIMIT - guestUsed} of ${GUEST_LIMIT} questions remaining today`}
             </p>
@@ -1229,7 +1230,7 @@ export function HelpCenterPage() {
               <h2 className="text-2xl font-extrabold text-foreground mb-2">Campus Assistant</h2>
               <p className="text-sm text-muted-foreground max-w-lg mx-auto">
                 Ask anything about campus navigation, buildings, offices, and facilities.
-                {!studentAuth && (
+                {!studentAuth.isStudent && (
                   <span className="block mt-1">
                     Guests get {GUEST_LIMIT} free questions per day.{' '}
                     <a href="/admin" className="font-bold text-primary hover:underline">Log in for unlimited access.</a>

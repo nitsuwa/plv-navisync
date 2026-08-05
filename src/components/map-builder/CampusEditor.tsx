@@ -2,10 +2,10 @@ import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import {
   ArrowLeft, Globe, Map, CheckCircle2, Undo2, Redo2, X,
-  HelpCircle, AlignLeft, AlignCenter, AlignRight, AlignStartVertical, AlignEndVertical,
+  AlignLeft, AlignCenter, AlignRight, AlignStartVertical, AlignEndVertical,
   AlignVerticalJustifyCenter, Grid3X3, Magnet, ZoomIn, ZoomOut, Maximize2, Settings2,
   MousePointer2, Square, MapPin, GitBranch, Trash2, Hand, Keyboard, AlertTriangle,
-  Loader2,
+  Loader2, HelpCircle, ChevronLeft, Navigation,
 } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { useCanvasControls, isSpacePressed } from "./useCanvasControls";
@@ -21,12 +21,18 @@ import { ValidationErrorsDialog } from "./ValidationErrorsDialog";
 import type { ValidationIssue } from "./ValidationErrorsDialog";
 import { ContextMenu } from "./ContextMenu";
 import { MapBuilderTutorial, hasSeenTutorial } from "./MapBuilderTutorial";
-import { EditorPublishDialog } from "./EditorPublishDialog";
+import { PrePublishDialog } from "./PrePublishDialog";
+import { TestNavigationPanel } from "./TestNavigationPanel";
+import { ShortcutCheatSheet } from "./ShortcutCheatSheet";
 import { EditorBackDialog } from "./EditorBackDialog";
+import { IssuesPopover } from "./IssuesPopover";
 import type {
   Campus, CampusBuilding, CampusMarker, CampusSelection,
   SimpleTool, EditorLayer, RubberBand, CampusRoute, CampusPath,
+  CampusDecorAsset, BuildingTypeDescriptor,
 } from "./types";
+import { BUILDING_TYPE_MAP, DECOR_ASSET_MAP, getRotatedAABB } from "./constants";
+import { ToolbarTooltip } from "./ToolbarTooltip";
 
 // ── Per-layer marker configuration ──
 const LAYER_MARKER_CONFIG: Record<string, { name: string; type: string; color: string }> = {
@@ -45,6 +51,9 @@ const LAYER_PATH_CONFIG: Record<string, { type: string; color: string; width: nu
   emergency: { type: "emergency", color: "#dc2626", width: 3 },
   events: { type: "event-path", color: "#d97706", width: 3 },
 };
+
+/** Normalize an angle in degrees to [0, 360) — never -360/360/720 */
+const normalizeDeg = (deg: number) => ((deg % 360) + 360) % 360;
 
 interface CampusEditorProps {
   campus: Campus;
@@ -93,6 +102,8 @@ export function CampusEditor({ campus, onBack, onUpdate, onPublish, onOpenFloor,
   const [edgeSnap, setEdgeSnap] = useState(true);
   // ── Drag-to-create building ──
   const [buildingDrag, setBuildingDrag] = useState<{ sx: number; sy: number; cx: number; cy: number } | null>(null);
+  // ── Building type placement mode ──
+  const [selectedBuildingType, setSelectedBuildingType] = useState<BuildingTypeDescriptor | null>(null);
   // ── Route state ──
   const [selRouteId, setSelRouteId] = useState<string | null>(null);
   // ── Multi-selection ──
@@ -109,7 +120,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onPublish, onOpenFloor,
   // ── Context menu ──
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; type: "building" | "marker" | "path"; id: string } | null>(null);
   // ── Erase/delete confirmation ──
-  const [deleteConfirm, setDeleteConfirm] = useState<{ type: "building" | "marker" | "path"; id: string; name: string } | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<{ type: "building" | "marker" | "path" | "decorAsset"; id: string; name: string } | null>(null);
   // ── Batch delete confirmation ──
   const [batchDeleteConfirm, setBatchDeleteConfirm] = useState<{ buildingIds: string[]; markerIds: string[] } | null>(null);
   // ── Validation dialog ──
@@ -125,9 +136,34 @@ export function CampusEditor({ campus, onBack, onUpdate, onPublish, onOpenFloor,
     id: string; corner: string; sx: number; sy: number;
     ox: number; oy: number; ow: number; oh: number;
   } | null>(null);
-  // ── Clear guides when switching tools or layers ──
+  // ── Rotation state ──
+  // Stores the previous mouse angle + accumulated rotation so spinning across the
+  // ±180° atan2 wrap boundary stays smooth (never jumps to ±360° stored values).
+  const rotating = useRef<{ id: string; cx: number; cy: number; prevAngle: number; rotation: number } | null>(null);
+  const [rotatingId, setRotatingId] = useState<string | null>(null);
+  const [rotatingAngle, setRotatingAngle] = useState(0);
+  // ── Decor asset rotation state ──
+  const decorRotating = useRef<{ id: string; cx: number; cy: number; prevAngle: number; rotation: number } | null>(null);
+  const [decorRotatingId, setDecorRotatingId] = useState<string | null>(null);
+  // ── Decor asset resize state (uniform scale via corners, rotation-aware) ──
+  const decorResizing = useRef<{ id: string; corner: string; sx: number; sy: number; scale: number; hw: number; hh: number; rot: number } | null>(null);
+  const [decorResizingId, setDecorResizingId] = useState<string | null>(null);
+  // ── Hierarchy panel toggle ──
+  const [hierarchyOpen, setHierarchyOpen] = useState(true);
+  // ── Test navigation panel (Navigation layer) ──
+  const [testNavOpen, setTestNavOpen] = useState(false);
+  // ── Route highlighted by the test-navigation panel (drawn on the canvas) ──
+  const [highlightedRoute, setHighlightedRoute] = useState<{ waypoints: { x: number; y: number }[]; color: string } | null>(null);
+  // ── Keyboard shortcut cheat sheet ──
+  const [showCheatSheet, setShowCheatSheet] = useState(false);
+  // ── Path draw-in animation: id of the just-completed path ──
+  const [animatingPathId, setAnimatingPathId] = useState<string | null>(null);
+  // ── Arrow-key nudge batching (groups rapid nudges into one undo step) ──
+  const lastNudgeRef = useRef(0);
+  // ── Clear guides + test-route highlight when switching tools or layers ──
   useEffect(() => {
     setGuides([]);
+    setHighlightedRoute(null);
   }, [tool, layer]);
 
   // ── Hierarchy selection also clears multi-selection for sync ──
@@ -183,7 +219,9 @@ export function CampusEditor({ campus, onBack, onUpdate, onPublish, onOpenFloor,
           });
         }
       }
-      if (b.x < 0 || b.y < 0 || b.x + b.width > campus.canvasW || b.y + b.height > campus.canvasH) {
+      // Use rotated AABB for boundary check so it matches what the user sees
+      const bAABB = getRotatedAABB(b.x, b.y, b.width, b.height, b.rotation ?? 0);
+      if (bAABB.x < 0 || bAABB.y < 0 || bAABB.x + bAABB.width > campus.canvasW || bAABB.y + bAABB.height > campus.canvasH) {
         const key = `${b.id}-boundary`;
         if (!seenIds.has(key)) {
           seenIds.add(key);
@@ -267,13 +305,10 @@ export function CampusEditor({ campus, onBack, onUpdate, onPublish, onOpenFloor,
     return () => window.removeEventListener("beforeunload", handler);
   }, [isDirty]);
 
-  const { zoom, pan, panning, svgRef, containerRef, getPoint, startPan, movePan, endPan, resetView, zoomIn, zoomOut, zoomToBuilding, handleMiddleMouseDown } =
+  const { zoom, pan, panning, svgRef, containerRef, getPoint, startPan, movePan, endPan, resetView, zoomIn, zoomOut, zoomToBuilding, handleMiddleMouseDown, handleWheel } =
     useCanvasControls(campus.canvasW, campus.canvasH);
 
   const SNAP_DIST = 12;
-  // How strongly the building is pulled toward snap targets (0=none, 1=instant)
-  // A value around 0.3-0.4 gives a smooth magnetic feel
-  const SNAP_LERP = 0.35;
   const snap = useCallback((v: number) => (snapGrid ? Math.round(v / 20) * 20 : Math.round(v)), [snapGrid]);
 
   /** Edge-snap a building position to nearby buildings */
@@ -298,7 +333,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onPublish, onOpenFloor,
     },
     [edgeSnap]
   );
-  const dragging = useRef<{ type: "building" | "marker"; id: string; sx: number; sy: number; ox: number; oy: number } | null>(null);
+  const dragging = useRef<{ type: "building" | "marker" | "decorAsset"; id: string; sx: number; sy: number; ox: number; oy: number } | null>(null);
 
   const buildings = campus.buildings;
   const markers = campus.markers;
@@ -309,21 +344,21 @@ export function CampusEditor({ campus, onBack, onUpdate, onPublish, onOpenFloor,
   const updMarkers = (m: CampusMarker[]) => upd({ markers: m });
   const updPaths = (p: typeof paths) => upd({ paths: p });
 
-  // ── Overlap detection ───────────────────────────────────────────────────────
+  // ── Overlap detection (handles rotated buildings via rotated AABB) ──────────
   const computeOverlaps = useCallback((bldgs: CampusBuilding[]): Set<string> => {
     const overlapping = new Set<string>();
     for (let i = 0; i < bldgs.length; i++) {
       for (let j = i + 1; j < bldgs.length; j++) {
-        const a = bldgs[i];
-        const b = bldgs[j];
+        const a = getRotatedAABB(bldgs[i].x, bldgs[i].y, bldgs[i].width, bldgs[i].height, bldgs[i].rotation ?? 0);
+        const b = getRotatedAABB(bldgs[j].x, bldgs[j].y, bldgs[j].width, bldgs[j].height, bldgs[j].rotation ?? 0);
         if (
           a.x < b.x + b.width &&
           a.x + a.width > b.x &&
           a.y < b.y + b.height &&
           a.y + a.height > b.y
         ) {
-          overlapping.add(a.id);
-          overlapping.add(b.id);
+          overlapping.add(bldgs[i].id);
+          overlapping.add(bldgs[j].id);
         }
       }
     }
@@ -386,6 +421,36 @@ export function CampusEditor({ campus, onBack, onUpdate, onPublish, onOpenFloor,
       };
       updMarkers([...markers, nm]); setSelected({ type: "marker", id: nm.id }); setTool("select");
     } else if (tool === "building") {
+      // If a building type is selected from the palette, place it directly
+      if (selectedBuildingType) {
+        const nb: CampusBuilding = {
+          id: genId("bld"),
+          name: selectedBuildingType.label,
+          code: selectedBuildingType.label.slice(0, 3).toUpperCase(),
+          category: selectedBuildingType.category,
+          description: selectedBuildingType.description,
+          x: Math.round(Math.max(0, Math.min(campus.canvasW - selectedBuildingType.defaultWidth, clampedPt.x - selectedBuildingType.defaultWidth / 2))),
+          y: Math.round(Math.max(0, Math.min(campus.canvasH - selectedBuildingType.defaultHeight, clampedPt.y - selectedBuildingType.defaultHeight / 2))),
+          width: selectedBuildingType.defaultWidth,
+          height: selectedBuildingType.defaultHeight,
+          color: selectedBuildingType.color,
+          expanded: false,
+          floors: [{ id: genId("fl"), number: 1, label: "Ground Floor", rooms: [], paths: [] }],
+        };
+        updBuildings([...buildings, nb]);
+        setSelected({ type: "building", id: nb.id });
+        setSelectedBuildingType(null);
+        setTool("select");
+        const newOverlaps = computeOverlaps([...buildings, nb]);
+        if (newOverlaps.has(nb.id)) {
+          setShake((n) => n + 1);
+          toast.warning("Building overlaps another", "Adjust the position to avoid overlapping.");
+        } else {
+          toast.success("Building placed", `${nb.name} — edit properties in the right panel.`);
+        }
+        return;
+      }
+      // Otherwise, drag-to-create mode
       setBuildingDrag({ sx: clampedPt.x, sy: clampedPt.y, cx: clampedPt.x, cy: clampedPt.y });
     } else if (tool === "path") {
       setDP((p) => [...p, { x: Math.round(pt.x), y: Math.round(pt.y) }]);
@@ -416,23 +481,31 @@ export function CampusEditor({ campus, onBack, onUpdate, onPublish, onOpenFloor,
     movePan(e);
     const drag = dragging.current;
     if (!drag) return;
+    if (drag.type === "decorAsset") {
+      const updatedAssets = decorAssets.map((da) =>
+        da.id === drag.id
+          ? { ...da, x: Math.round(drag.ox + (pt.x - drag.sx)), y: Math.round(drag.oy + (pt.y - drag.sy)) }
+          : da
+      );
+      beginGestureHistory();
+      onUpdate({ ...campus, decorAssets: updatedAssets });
+      return;
+    }
     if (drag.type === "building") {
       const b = buildings.find((b) => b.id === drag.id)!;
-      // Calculate raw cursor position and snap target
+      // Direct 1:1 tracking: the building follows the cursor with the grab
+      // offset preserved, snapping instantly to grid/edges (no easing lag,
+      // so the grabbed point stays put under the cursor).
       const rawX = drag.ox + (pt.x - drag.sx);
       const rawY = drag.oy + (pt.y - drag.sy);
       const targetX = snap(rawX);
       const targetY = snap(rawY);
       const targetB = edgeSnapBuilding({ ...b, x: targetX, y: targetY }, buildings);
-      // Only lerp when snap pulls > 1px (ignores float-to-int rounding)
-      // When snap is off, building follows cursor instantly with no lag
-      const isSnapped = Math.abs(targetB.x - rawX) > 1 || Math.abs(targetB.y - rawY) > 1;
-      const lerpedB = {
-        ...b,
-        x: isSnapped ? b.x + (targetB.x - b.x) * SNAP_LERP : targetB.x,
-        y: isSnapped ? b.y + (targetB.y - b.y) * SNAP_LERP : targetB.y,
-      };
-      updBuildings(buildings.map((bld) => (bld.id === drag.id ? lerpedB : bld)));
+      beginGestureHistory();
+      onUpdate({
+        ...campus,
+        buildings: buildings.map((bld) => (bld.id === drag.id ? { ...bld, x: targetB.x, y: targetB.y } : bld)),
+      });
       // Alignment guides
       const guidesList: { type: "h" | "v"; pos: number }[] = [];
       for (const o of buildings) {
@@ -449,38 +522,207 @@ export function CampusEditor({ campus, onBack, onUpdate, onPublish, onOpenFloor,
       const overlaps = computeOverlaps(movedBldgs);
       setOverlappingBuildings(overlaps);
       setGuides(guidesList);
-    } else
-      updMarkers(markers.map((m) => (m.id === drag.id ? { ...m, x: snap(drag.ox + (pt.x - drag.sx)), y: snap(drag.oy + (pt.y - drag.sy)) } : m)));
+    } else {
+      beginGestureHistory();
+      onUpdate({
+        ...campus,
+        markers: markers.map((m) => (m.id === drag.id ? { ...m, x: snap(drag.ox + (pt.x - drag.sx)), y: snap(drag.oy + (pt.y - drag.sy)) } : m)),
+      });
+    }
   };
 
   const handleResizeStart = (e: React.MouseEvent, b: CampusBuilding, corner: string) => {
     e.stopPropagation();
-    setResizing({ id: b.id, corner, sx: e.clientX, sy: e.clientY, ox: b.x, oy: b.y, ow: b.width, oh: b.height });
+    const pt = getPoint(e, campus.canvasW, campus.canvasH);
+    gestureHistoryPushed.current = false;
+    setResizing({ id: b.id, corner, sx: pt.x, sy: pt.y, ox: b.x, oy: b.y, ow: b.width, oh: b.height });
   };
 
+  // ── Rotation handler ──
+  const handleRotateStart = useCallback((e: React.MouseEvent, b: CampusBuilding) => {
+    e.stopPropagation();
+    const pt = getPoint(e, campus.canvasW, campus.canvasH);
+    const cx = b.x + b.width / 2;
+    const cy = b.y + b.height / 2;
+    // Track the previous mouse angle + normalized accumulated rotation so that
+    // spinning across the ±180° atan2 wrap stays smooth (no ±360° jumps).
+    const startAngle = Math.atan2(pt.y - cy, pt.x - cx) * (180 / Math.PI);
+    const startRot = normalizeDeg(b.rotation ?? 0);
+    gestureHistoryPushed.current = false;
+    rotating.current = { id: b.id, cx, cy, prevAngle: startAngle, rotation: startRot };
+    setRotatingId(b.id);
+    setRotatingAngle(startRot);
+  }, [getPoint, campus.canvasW, campus.canvasH]);
+
+  // ── Decor asset rotation handler ──
+  const handleDecorRotateStart = useCallback((e: React.MouseEvent, da: CampusDecorAsset) => {
+    e.stopPropagation();
+    const pt = getPoint(e, campus.canvasW, campus.canvasH);
+    const startAngle = Math.atan2(pt.y - da.y, pt.x - da.x) * (180 / Math.PI);
+    const startRot = normalizeDeg(da.rotation ?? 0);
+    gestureHistoryPushed.current = false;
+    decorRotating.current = { id: da.id, cx: da.x, cy: da.y, prevAngle: startAngle, rotation: startRot };
+    setDecorRotatingId(da.id);
+    setRotatingAngle(startRot);
+  }, [getPoint, campus.canvasW, campus.canvasH]);
+
+  // ── Decor asset resize handler (uniform scale via corners, rotation-aware) ──
+  const handleDecorResizeStart = useCallback((e: React.MouseEvent, da: CampusDecorAsset, corner: string) => {
+    e.stopPropagation();
+    const template = DECOR_ASSET_MAP[da.type];
+    if (!template) return;
+    const pt = getPoint(e, campus.canvasW, campus.canvasH);
+    const s = (da.scale ?? 1) * 3;
+    gestureHistoryPushed.current = false;
+    decorResizing.current = {
+      id: da.id, corner,
+      sx: pt.x, sy: pt.y,
+      scale: da.scale ?? 1,
+      hw: (template.defaultWidth / 2) * s,
+      hh: (template.defaultHeight / 2) * s,
+      rot: da.rotation ?? 0,
+    };
+    setDecorResizingId(da.id);
+  }, [getPoint, campus.canvasW, campus.canvasH]);
+
   const handleSvgMoveResize = (e: React.MouseEvent) => {
+    // ── Handle active decor rotation first ──
+    if (decorRotating.current) {
+      const pt = getPoint(e, campus.canvasW, campus.canvasH);
+      const { id, cx, cy, prevAngle, rotation } = decorRotating.current;
+      const currentAngle = Math.atan2(pt.y - cy, pt.x - cx) * (180 / Math.PI);
+      // Shortest-path delta across the ±180° atan2 wrap boundary
+      let delta = currentAngle - prevAngle;
+      if (delta > 180) delta -= 360;
+      else if (delta < -180) delta += 360;
+      // Accumulate, keep in [0, 360) so it never stores -360°/720°, snap to 5°
+      const accumulated = normalizeDeg(rotation + delta);
+      const snapped = normalizeDeg(Math.round(accumulated / 5) * 5);
+      decorRotating.current = { ...decorRotating.current, prevAngle: currentAngle, rotation: accumulated };
+      const da = decorAssets.find((d) => d.id === id);
+      if (da) {
+        beginGestureHistory();
+        onUpdate({ ...campus, decorAssets: decorAssets.map((d) => (d.id === id ? { ...d, rotation: snapped } : d)) });
+        setRotatingAngle(snapped);
+      }
+      return;
+    }
+    // ── Handle active decor resize (uniform scale, rotation-aware R(-θ)) ──
+    if (decorResizing.current) {
+      const pt = getPoint(e, campus.canvasW, campus.canvasH);
+      const rs = decorResizing.current;
+      const ddx = pt.x - rs.sx;
+      const ddy = pt.y - rs.sy;
+      const rotRad = (rs.rot * Math.PI) / 180;
+      const cosR = Math.cos(rotRad);
+      const sinR = Math.sin(rotRad);
+      // Rotate the world delta into the asset's LOCAL frame (R(-θ)) so the
+      // grabbed corner follows the cursor along the asset's actual (rotated) axes
+      const localDx = ddx * cosR + ddy * sinR;
+      const localDy = -ddx * sinR + ddy * cosR;
+      // Uniform scale factor along the dragged corner's axes (anchored at center)
+      let fx = 1, fy = 1;
+      if (rs.corner.includes("e")) fx = rs.hw > 0 ? (rs.hw + localDx) / rs.hw : 1;
+      if (rs.corner.includes("w")) fx = rs.hw > 0 ? (rs.hw - localDx) / rs.hw : 1;
+      if (rs.corner.includes("s")) fy = rs.hh > 0 ? (rs.hh + localDy) / rs.hh : 1;
+      if (rs.corner.includes("n")) fy = rs.hh > 0 ? (rs.hh - localDy) / rs.hh : 1;
+      const factor = Math.max(fx, fy, 0.05);
+      const newScale = Math.max(0.1, Math.min(12, rs.scale * factor));
+      beginGestureHistory();
+      onUpdate({ ...campus, decorAssets: decorAssets.map((d) => (d.id === rs.id ? { ...d, scale: newScale } : d)) });
+      return;
+    }
+    // Handle active rotation first
+    if (rotating.current) {
+      const pt = getPoint(e, campus.canvasW, campus.canvasH);
+      const { id, cx, cy, prevAngle, rotation } = rotating.current;
+      const currentAngle = Math.atan2(pt.y - cy, pt.x - cx) * (180 / Math.PI);
+      // Shortest-path delta across the ±180° atan2 wrap boundary
+      let delta = currentAngle - prevAngle;
+      if (delta > 180) delta -= 360;
+      else if (delta < -180) delta += 360;
+      // Accumulate, keep in [0, 360) so it never stores -360°/720°, snap to 5°
+      const accumulated = normalizeDeg(rotation + delta);
+      const snapped = normalizeDeg(Math.round(accumulated / 5) * 5);
+      rotating.current = { ...rotating.current, prevAngle: currentAngle, rotation: accumulated };
+      const b = buildings.find(bld => bld.id === id);
+      if (b) {
+        beginGestureHistory();
+        onUpdate({ ...campus, buildings: buildings.map(bld => bld.id === id ? { ...bld, rotation: snapped } : bld) });
+        setRotatingAngle(snapped);
+      }
+      return;
+    }
     if (!resizing) { handleSvgMove(e); return; }
-    const dx = e.clientX - resizing.sx;
-    const dy = e.clientY - resizing.sy;
-    const svg = svgRef.current;
-    if (!svg) return;
-    const rect = svg.getBoundingClientRect();
-    const scale = (campus.canvasW / rect.width) / zoom;
-    const ddx = snap(dx * scale), ddy = snap(dy * scale);
-    updBuildings(
-      buildings.map((b) => {
+    const pt = getPoint(e, campus.canvasW, campus.canvasH);
+    const ddx = pt.x - resizing.sx;
+    const ddy = pt.y - resizing.sy;
+    beginGestureHistory();
+    onUpdate({
+      ...campus,
+      buildings: buildings.map((b) => {
         if (b.id !== resizing.id) return b;
-        let nx = resizing.ox, ny = resizing.oy, nw = resizing.ow, nh = resizing.oh;
-        if (resizing.corner.includes("e")) nw = Math.max(40, resizing.ow + ddx);
-        if (resizing.corner.includes("w")) { nx = resizing.ox + ddx; nw = Math.max(40, resizing.ow - ddx); }
-        if (resizing.corner.includes("s")) nh = Math.max(30, resizing.oh + ddy);
-        if (resizing.corner.includes("n")) { ny = resizing.oy + ddy; nh = Math.max(30, resizing.oh - ddy); }
-        return { ...b, x: nx, y: ny, width: nw, height: nh };
+        const rotVal = b.rotation ?? 0;
+        const rotRad = (rotVal * Math.PI) / 180;
+        const cosR = Math.cos(rotRad);
+        const sinR = Math.sin(rotRad);
+        // Rotate the world-space mouse delta into the building's LOCAL frame (R(-θ)),
+        // so the grabbed corner follows the cursor along the building's actual
+        // (rotated) axes — not its 0° orientation.
+        const localDx = ddx * cosR + ddy * sinR;
+        const localDy = -ddx * sinR + ddy * cosR;
+        const sDx = snap(localDx);
+        const sDy = snap(localDy);
+        // Apply the local deltas to width/height (e/w → width, s/n → height)
+        let nw = resizing.ow, nh = resizing.oh;
+        if (resizing.corner.includes("e")) nw = resizing.ow + sDx;
+        if (resizing.corner.includes("w")) nw = resizing.ow - sDx;
+        if (resizing.corner.includes("s")) nh = resizing.oh + sDy;
+        if (resizing.corner.includes("n")) nh = resizing.oh - sDy;
+        nw = Math.max(40, nw);
+        nh = Math.max(30, nh);
+        const dW = nw - resizing.ow;
+        const dH = nh - resizing.oh;
+        // Keep the edge/corner OPPOSITE the dragged handle visually fixed:
+        // fx/fy point from the center toward the fixed corner in LOCAL space.
+        const fx = resizing.corner.includes("w") ? 1 : resizing.corner.includes("e") ? -1 : 0;
+        const fy = resizing.corner.includes("n") ? 1 : resizing.corner.includes("s") ? -1 : 0;
+        // The fixed local corner shifts as w/h change, so the center must move by
+        // R(θ)·(F_old − F_new) to keep that corner stationary on screen.
+        const dcx = -fx * (dW / 2) * cosR + fy * (dH / 2) * sinR;
+        const dcy = -fx * (dW / 2) * sinR - fy * (dH / 2) * cosR;
+        // Rebuild top-left from the compensated center
+        const nx = resizing.ox + resizing.ow / 2 + dcx - nw / 2;
+        const ny = resizing.oy + resizing.oh / 2 + dcy - nh / 2;
+        return { ...b, x: Math.round(nx), y: Math.round(ny), width: nw, height: nh };
       })
-    );
+    });
   };
 
   const handleSvgUpResize = () => {
+    // Finalize decor rotation
+    if (decorRotating.current) {
+      gestureHistoryPushed.current = false;
+      decorRotating.current = null;
+      setDecorRotatingId(null);
+      setRotatingAngle(0);
+      return;
+    }
+    // Finalize decor resize
+    if (decorResizing.current) {
+      gestureHistoryPushed.current = false;
+      decorResizing.current = null;
+      setDecorResizingId(null);
+      return;
+    }
+    // Finalize rotation
+    if (rotating.current) {
+      gestureHistoryPushed.current = false;
+      rotating.current = null;
+      setRotatingId(null);
+      setRotatingAngle(0);
+      return;
+    }
     endPan();
     dragging.current = null;
     if (resizing) setResizing(null);
@@ -549,13 +791,19 @@ export function CampusEditor({ campus, onBack, onUpdate, onPublish, onOpenFloor,
 
     // ── Always clear alignment guides on mouse release ──
     setGuides([]);
+    gestureHistoryPushed.current = false;
   };
-  const handleSvgUp = () => { endPan(); dragging.current = null; setGuides([]); };
+  const handleSvgUp = () => { endPan(); dragging.current = null; setGuides([]); gestureHistoryPushed.current = false; };
   const handleDblClick = () => {
     if (tool === "path" && drawingPath.length >= 2) {
       const cfg = LAYER_PATH_CONFIG[layer] ?? LAYER_PATH_CONFIG.campus;
-      updPaths([...paths, { id: genId("p"), points: drawingPath, type: cfg.type, color: cfg.color, width: cfg.width }]);
+      const newPath = { id: genId("p"), points: drawingPath, type: cfg.type, color: cfg.color, width: cfg.width };
+      updPaths([...paths, newPath]);
       setDP([]); setTool("select");
+      // Play the draw-in animation for the just-completed path
+      setAnimatingPathId(newPath.id);
+      setTimeout(() => setAnimatingPathId((cur) => (cur === newPath.id ? null : cur)), 900);
+      toast.success("Path created", `${drawingPath.length} waypoint${drawingPath.length !== 1 ? "s" : ""} connected.`);
     }
   };
 
@@ -567,7 +815,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onPublish, onOpenFloor,
     setRenameValue(b.name);
   }, [buildings]);
 
-  const onItemDown = (e: React.MouseEvent, type: "building" | "marker", id: string, ox: number, oy: number) => {
+  const onItemDown = (e: React.MouseEvent, type: "building" | "marker" | "decorAsset", id: string, ox: number, oy: number) => {
     e.stopPropagation();
     // Spacebar held: pan instead of interacting with items
     if (isSpacePressed()) {
@@ -575,6 +823,14 @@ export function CampusEditor({ campus, onBack, onUpdate, onPublish, onOpenFloor,
       return;
     }
     if (tool === "erase") {
+      if (type === "decorAsset") {
+        const da = decorAssets.find((d) => d.id === id);
+        if (da) {
+          const template = DECOR_ASSET_MAP[da.type];
+          setDeleteConfirm({ type: "decorAsset", id, name: template?.label ?? da.type });
+        }
+        return;
+      }
       const item = type === "building" ? buildings.find((b) => b.id === id) : markers.find((m) => m.id === id);
       if (item) {
         setDeleteConfirm({
@@ -609,6 +865,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onPublish, onOpenFloor,
     setSelected({ type, id });
     setGuides([]);
     const pt = getPoint(e, campus.canvasW, campus.canvasH);
+    gestureHistoryPushed.current = false;
     dragging.current = { type, id, sx: pt.x, sy: pt.y, ox, oy };
   };
 
@@ -720,6 +977,17 @@ export function CampusEditor({ campus, onBack, onUpdate, onPublish, onOpenFloor,
     historyRef.current = { snapshots: pruned, idx: pruned.length - 1 };
   }, [campus]);
 
+  // ── Gesture history: push exactly ONE undo snapshot per drag/resize/rotate gesture ──
+  // (Previously every mousemove pushed a full structuredClone of the campus, which
+  // added input latency and filled undo history with per-frame garbage states.)
+  const gestureHistoryPushed = useRef(false);
+  const beginGestureHistory = useCallback(() => {
+    if (!gestureHistoryPushed.current) {
+      gestureHistoryPushed.current = true;
+      pushHistory();
+    }
+  }, [pushHistory]);
+
   const undoEdit = useCallback(() => {
     const h = historyRef.current;
     if (h.idx <= 0) { toast.info("Nothing to undo", "No more actions in history."); return; }
@@ -736,11 +1004,52 @@ export function CampusEditor({ campus, onBack, onUpdate, onPublish, onOpenFloor,
     onUpdate(h.snapshots[newIdx]);
   }, [onUpdate, toast]);
 
+  // ── Undo/redo availability (for disabled buttons + tooltips) ──
+  const undoSteps = historyRef.current.idx;
+  const redoSteps = historyRef.current.snapshots.length - 1 - historyRef.current.idx;
+  const canUndo = undoSteps > 0;
+  const canRedo = redoSteps > 0;
+
+  // ── Save draft: shared by the toolbar button, Ctrl+S, and the retry screen ──
+  const runSave = useCallback(() => {
+    // Match the toolbar button's disabled semantics: nothing to save / already saving
+    if (isProcessing || !isDirty) {
+      toast.success("Already saved", "All changes are up to date.");
+      return;
+    }
+    const errors = validateCampus();
+    if (errors.length > 0) {
+      setShake((n) => n + 1);
+      setSaveBtnError(true);
+      setTimeout(() => setSaveBtnError(false), 600);
+      setValidationErrors(errors);
+      setValidationDialogOpen(true);
+      return;
+    }
+    setIsProcessing(true);
+    setSaveScreen({ open: true, state: "saving" });
+    setTimeout(() => {
+      try {
+        const now = new Date().toISOString().slice(0, 10);
+        const saved = {
+          ...campus,
+          updatedAt: now,
+        };
+        onUpdate(saved);
+        savedSnapshotRef.current = JSON.stringify(saved);
+        setSaveScreen({ open: true, state: "success" });
+      } catch {
+        setSaveScreen({ open: true, state: "error" });
+      }
+      setIsProcessing(false);
+    }, 1500);
+  }, [campus, validateCampus, onUpdate, isDirty, isProcessing, toast]);
+
   // ── Keyboard shortcuts (disabled during tutorial) ──
   useEffect(() => {
     const k = (e: KeyboardEvent) => {
       if (showTutorial) return;
-      if (document.activeElement?.tagName === "INPUT" || document.activeElement?.tagName === "TEXTAREA") return;
+      if (document.activeElement?.tagName === "INPUT" || document.activeElement?.tagName === "TEXTAREA" || document.activeElement?.tagName === "SELECT") return;
       if ((e.ctrlKey || e.metaKey) && e.key === "z" && !e.shiftKey) { e.preventDefault(); undoEdit(); return; }
       if ((e.ctrlKey || e.metaKey) && (e.key === "y" || (e.key === "z" && e.shiftKey))) { e.preventDefault(); redoEdit(); return; }
       // Batch delete multi-selected items — show confirmation dialog
@@ -759,6 +1068,11 @@ export function CampusEditor({ campus, onBack, onUpdate, onPublish, onOpenFloor,
           pushHistory();
         } else if (selected.type === "marker") { updMarkers(markers.filter((m) => m.id !== selected.id)); pushHistory(); }
         else if (selected.type === "path") { updPaths(paths.filter((p) => p.id !== selected.id)); pushHistory(); }
+        else if (selected.type === "decorAsset") {
+          const da = decorAssets.find((d) => d.id === selected.id);
+          const template = da ? DECOR_ASSET_MAP[da.type] : undefined;
+          setDeleteConfirm({ type: "decorAsset", id: selected.id, name: template?.label ?? da?.type ?? "Asset" });
+        }
         setSelected(null);
       }
       // Ctrl+A: select all buildings
@@ -766,6 +1080,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onPublish, onOpenFloor,
         e.preventDefault();
         setMultiSelected(buildings.map((b) => b.id));
         if (buildings.length > 1) setShowAlignTools(true);
+        return; // Don't fall through to the single-letter "a" → building tool
       }
       if (e.key === "Escape") {
         setDP([]);
@@ -774,26 +1089,72 @@ export function CampusEditor({ campus, onBack, onUpdate, onPublish, onOpenFloor,
         setMultiSelected([]);
         setShowAlignTools(false);
         setGuides([]);
+        setSelectedBuildingType(null);
       }
-      if (e.key === "v" || e.key === "V") setTool("select");
-      if (e.code === "Space") {
-        e.preventDefault();
-        // Hold-to-pan: save previous tool, activate pan temporarily
-        if (tool !== "pan") {
-          prevToolRef.current = tool;
-          setTool("pan");
+      // Single-letter tool shortcuts must NOT fire while Ctrl/Cmd is held
+      if (!e.ctrlKey && !e.metaKey) {
+        if (e.key === "v" || e.key === "V") setTool("select");
+        if (e.code === "Space") {
+          e.preventDefault();
+          // Hold-to-pan: save previous tool, activate pan temporarily
+          if (tool !== "pan") {
+            prevToolRef.current = tool;
+            setTool("pan");
+          }
+        }
+        if (e.key === "m" || e.key === "M") setTool("marker");
+        if (e.key === "b" || e.key === "B") setTool("building");
+        if (e.key === "p" || e.key === "P") setTool("path");
+        if (e.key === "e" || e.key === "E") setTool("erase");
+        if (e.key === "r" || e.key === "R") setTool("room");
+        if (e.key === "l" || e.key === "L") setTool("room");
+        if (e.key === "x" || e.key === "X") setTool("erase");
+        if (e.key === "a" || e.key === "A") setTool("building");
+        if (e.key === "0") resetView();
+        // Layer switching: 1=Campus, 2=Navigation, 3=Accessibility, 4=Emergency, 5=Events
+        if (e.key >= "1" && e.key <= "5") {
+          const layerByKey: Record<string, EditorLayer> = {
+            "1": "campus", "2": "navigation", "3": "accessibility", "4": "emergency", "5": "events",
+          };
+          setLayer(layerByKey[e.key]);
+          setTool("select");
+          setSelected(null);
+          setMultiSelected([]);
+          setShowAlignTools(false);
+          setGuides([]);
+        }
+        // ? — keyboard shortcut cheat sheet
+        if (e.key === "?") {
+          e.preventDefault();
+          setShowCheatSheet(true);
+        }
+        // Arrow keys: nudge the selected item (1px, Shift=10px)
+        if (selected && (selected.type === "building" || selected.type === "marker")) {
+          const step = e.shiftKey ? 10 : 1;
+          let dx = 0, dy = 0;
+          if (e.key === "ArrowLeft") dx = -step;
+          else if (e.key === "ArrowRight") dx = step;
+          else if (e.key === "ArrowUp") dy = -step;
+          else if (e.key === "ArrowDown") dy = step;
+          if (dx || dy) {
+            e.preventDefault();
+            // Batch rapid nudges into a single undo step
+            const now = Date.now();
+            const isNewBurst = now - lastNudgeRef.current > 500;
+            lastNudgeRef.current = now;
+            if (selected.type === "building") {
+              const b = buildings.find((x) => x.id === selected.id);
+              if (b?.locked) return;
+              if (isNewBurst) pushHistory();
+              onUpdate({ ...campus, buildings: buildings.map((x) => x.id === selected.id ? { ...x, x: x.x + dx, y: x.y + dy } : x) });
+            } else {
+              if (isNewBurst) pushHistory();
+              onUpdate({ ...campus, markers: markers.map((m) => m.id === selected.id ? { ...m, x: m.x + dx, y: m.y + dy } : m) });
+            }
+          }
         }
       }
-      if (e.key === "m" || e.key === "M") setTool("marker");
-      if (e.key === "b" || e.key === "B") setTool("building");
-      if (e.key === "p" || e.key === "P") setTool("path");
-      if (e.key === "e" || e.key === "E") setTool("erase");
-      if (e.key === "r" || e.key === "R") setTool("room");
-      if (e.key === "l" || e.key === "L") setTool("room");
-      if (e.key === "x" || e.key === "X") setTool("erase");
-      if (e.key === "a" || e.key === "A") setTool("building");
-      if (e.key === "0") resetView();
-      if ((e.ctrlKey || e.metaKey) && e.key === "s") { e.preventDefault(); toast.success("Changes saved"); }
+      if ((e.ctrlKey || e.metaKey) && e.key === "s") { e.preventDefault(); runSave(); }
       if ((e.ctrlKey || e.metaKey) && e.key === "g") { e.preventDefault(); setSnapGrid((v) => !v); }
       // Ctrl+D: duplicate selected building
       if ((e.ctrlKey || e.metaKey) && e.key === "d" && selected?.type === "building") {
@@ -815,7 +1176,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onPublish, onOpenFloor,
     };
     window.addEventListener("keydown", k);
     return () => window.removeEventListener("keydown", k);
-  }, [selected, tool, buildings, markers, paths, undoEdit, redoEdit, showTutorial]);
+  }, [selected, tool, buildings, markers, paths, undoEdit, redoEdit, showTutorial, runSave, pushHistory, campus, onUpdate]);
 
   // ── Space keyup: restore previous tool when space is released (hold-to-pan) ──
   useEffect(() => {
@@ -843,21 +1204,31 @@ export function CampusEditor({ campus, onBack, onUpdate, onPublish, onOpenFloor,
     setSelRouteId(null);
   };
 
+  // ── Decorative asset handlers ──
+  const decorAssets = campus.decorAssets ?? [];
+  const handlePlaceDecorAsset = useCallback((asset: CampusDecorAsset) => {
+    pushHistory();
+    onUpdate({ ...campus, decorAssets: [...decorAssets, asset] });
+    toast.success("Asset placed", `Drag to reposition on the canvas.`);
+  }, [campus, decorAssets, pushHistory, onUpdate, toast]);
+
   // If we have multi-selected items, clear single selection for property panel
   const effectiveSelected = multiSelected.length > 0 ? null : selected;
   const selBldg = effectiveSelected?.type === "building" ? buildings.find((b) => b.id === effectiveSelected.id) : undefined;
   const selMkr = effectiveSelected?.type === "marker" ? markers.find((m) => m.id === effectiveSelected.id) : undefined;
-  const cursor = isSpacePressed()
-    ? panning.current ? "grabbing" : "grab"
-    : tool === "erase"
-      ? "not-allowed"
-      : tool === "pan"
-        ? "grab"
-        : panning.current
-          ? "grabbing"
-          : tool === "path" || tool === "building" || tool === "marker" || tool === "room"
-            ? "crosshair"
-            : "default";
+  const cursor = rotatingId || decorRotatingId
+    ? "grabbing"
+    : isSpacePressed()
+      ? panning.current ? "grabbing" : "grab"
+      : tool === "erase"
+        ? "not-allowed"
+        : tool === "pan"
+          ? "grab"
+          : panning.current
+            ? "grabbing"
+            : tool === "path" || tool === "building" || tool === "marker" || tool === "room"
+              ? "crosshair"
+              : "default";
 
   const activeLayer = LAYERS.find((l) => l.id === layer)!;
   const activeTools = LAYER_TOOLS[layer] ?? LAYER_TOOLS.campus;
@@ -872,6 +1243,18 @@ export function CampusEditor({ campus, onBack, onUpdate, onPublish, onOpenFloor,
     { id: "erase",    icon: Trash2,        label: "Erase",    shortcut: "E" },
   ];
 
+  // ── Validation issues for the bottom issues popover ──
+  const validationIssues = useMemo(() => {
+    const errs = validateCampus();
+    // Add severity to each issue
+    return errs.map(e => ({
+      ...e,
+      severity: (e.type === "overlap" || e.type === "boundary" || e.type === "missing_campus_name" ? "error" :
+                 e.type === "missing_name" || e.type === "missing_code" || e.type === "no_floors" ? "warning" :
+                 "info") as "error" | "warning" | "info",
+    }));
+  }, [validateCampus]);
+
   return (
     <div className="flex flex-col w-full flex-1" style={{ minHeight: 0 }}>
       <div
@@ -880,238 +1263,226 @@ export function CampusEditor({ campus, onBack, onUpdate, onPublish, onOpenFloor,
         style={{ minHeight: 0 }}
       >
       {/* ═══════════════════════════════════════════════════════════════════
-          TOP BAR: Compact Figma-style header
+          TOP BAR: Clean centered tool palette
           ═══════════════════════════════════════════════════════════════════ */}
       <div className="shrink-0 bg-card border-b border-border" style={campus.themeColor ? { borderBottomColor: campus.themeColor, borderBottomWidth: '2px' } : undefined}>
-        {/* Row 1: Main toolbar */}
-        <div className="flex items-center h-10 px-3 gap-1.5">
-          {/* Back + campus name */}
-          <button onClick={handleBack}
-            className="flex items-center gap-1 h-7 px-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-all text-[11px] font-semibold shrink-0 group"
-            title="Back to campus list"
-          >
-            <ArrowLeft className="h-3.5 w-3.5 group-hover:-translate-x-0.5 transition-transform" />
-            <span className="hidden sm:inline">Campuses</span>
-          </button>
-          <div className="w-px h-5 bg-border mx-1" />
-          <span className="text-sm font-extrabold text-foreground truncate max-w-[160px] flex items-center gap-1.5" style={{ fontFamily: "var(--font-sans)" }}>
-            {campus.themeColor && (
-              <span className="w-4 h-4 rounded shrink-0 inline-block" style={{ backgroundColor: campus.themeColor }} />
-            )}
-            {campus.name}
-          </span>
-          <span className={cn("text-[9px] font-bold px-1.5 py-0.5 rounded-md border shrink-0 flex items-center gap-1",
-            campus.publishStatus === "published"
-              ? isDirty
-                ? "bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800/30 text-amber-700 dark:text-amber-400"
-                : "bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800/30 text-green-700 dark:text-green-400"
-              : campus.publishedAt
-                ? "bg-muted border-border text-muted-foreground"
-                : "bg-slate-50 dark:bg-slate-800/20 border-slate-200 dark:border-slate-700/30 text-slate-500 dark:text-slate-400"
-          )}>
-            <span className={cn("w-1.5 h-1.5 rounded-full shrink-0",
+        {/* Row 1: Clean toolbar — balanced left/right with perfectly centered tools */}
+        <div className="flex items-center h-10 px-2 gap-0.5">
+          {/* ── Left section (flex-1 to balance right section) ── */}
+          <div className="flex-1 flex items-center gap-0.5 min-w-0">
+            <button onClick={handleBack}
+              className="flex items-center justify-center h-7 w-7 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-all shrink-0 group"
+              title="Back to campus list"
+            >
+              <ArrowLeft className="h-3.5 w-3.5 group-hover:-translate-x-0.5 transition-transform" />
+            </button>
+            <span className="text-sm font-extrabold text-foreground truncate max-w-[100px] flex items-center gap-1" style={{ fontFamily: "var(--font-sans)" }}>
+              {campus.themeColor && (
+                <span className="w-3 h-3 rounded shrink-0 inline-block" style={{ backgroundColor: campus.themeColor }} />
+              )}
+              {campus.name}
+            </span>
+            <span className={cn("text-[8px] font-bold px-1 py-0.5 rounded-md border shrink-0 hidden sm:flex items-center gap-1",
               campus.publishStatus === "published"
-                ? isDirty ? "bg-amber-500" : "bg-green-500"
-                : campus.publishedAt ? "bg-muted-foreground" : "bg-slate-400"
-            )} />
-            {campus.publishStatus === "published"
-              ? isDirty ? "Unpublished Changes" : "Published"
-              : campus.publishedAt
-                ? "Draft"
-                : "Never Published"}
-          </span>
+                ? isDirty
+                  ? "bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800/30 text-amber-700 dark:text-amber-400"
+                  : "bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800/30 text-green-700 dark:text-green-400"
+                : campus.publishedAt
+                  ? "bg-muted border-border text-muted-foreground"
+                  : "bg-slate-50 dark:bg-slate-800/20 border-slate-200 dark:border-slate-700/30 text-slate-500 dark:text-slate-400"
+            )}>
+              <span className={cn("w-1 h-1 rounded-full shrink-0",
+                campus.publishStatus === "published"
+                  ? isDirty ? "bg-amber-500" : "bg-green-500"
+                  : campus.publishedAt ? "bg-muted-foreground" : "bg-slate-400"
+              )} />
+              {campus.publishStatus === "published"
+                ? isDirty ? "Changes" : "Live"
+                : campus.publishedAt ? "Draft" : "New"}
+            </span>
 
-          {/* Drawing path indicator */}
-          {drawingPath.length > 0 && (
-            <div className="flex items-center gap-1.5 px-2 h-6 rounded-md border text-[10px] font-semibold ml-1 shrink-0"
-              style={{ background: "color-mix(in srgb,var(--accent) 10%,transparent)", borderColor: "color-mix(in srgb,var(--accent) 30%,transparent)", color: "var(--accent)" }}>
-              {drawingPath.length} pts
-              <button onClick={() => setDP([])} className="hover:opacity-70"><X className="h-2.5 w-2.5" /></button>
-            </div>
-          )}
-
-          <div className="flex-1" />
-
-          {/* Undo / Redo */}
-          <div className="flex items-center gap-0.5">
-            <button onClick={undoEdit}
-              className="flex items-center justify-center h-7 w-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
-              title="Undo (Ctrl+Z)">
-              <Undo2 className="h-3.5 w-3.5" />
-            </button>
-            <button onClick={redoEdit}
-              className="flex items-center justify-center h-7 w-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
-              title="Redo (Ctrl+Shift+Z)">
-              <Redo2 className="h-3.5 w-3.5" />
-            </button>
+            {/* Drawing path indicator */}
+            {drawingPath.length > 0 && (
+              <div className="flex items-center gap-1 px-1.5 h-5 rounded-md border text-[9px] font-semibold shrink-0"
+                style={{ background: "color-mix(in srgb,var(--accent) 10%,transparent)", borderColor: "color-mix(in srgb,var(--accent) 30%,transparent)", color: "var(--accent)" }}>
+                {drawingPath.length} pts
+                <button onClick={() => setDP([])} className="hover:opacity-70"><X className="h-2 w-2" /></button>
+              </div>
+            )}
           </div>
 
-          <div className="w-px h-5 bg-border mx-1" />
+          {/* ── Center: Tool palette (main tools, highlighted, perfectly centered) ── */}
+          <div className="flex items-center justify-center">
+            <div className="flex items-center gap-0.5 px-2 py-0.5 rounded-lg" style={{ background: "color-mix(in srgb, var(--muted) 30%, transparent)" }}>
+              {toolConfig.map((t) => (
+                <ToolbarTooltip key={t.id} tool={t.id} isActive={tool === t.id}>
+                  <button
+                    onClick={() => setTool(t.id)}
+                    className={cn(
+                      "flex items-center justify-center h-8 w-8 rounded-md transition-all",
+                      tool === t.id
+                        ? t.id === "erase"
+                          ? "bg-destructive text-destructive-foreground shadow-sm scale-105"
+                          : "bg-primary text-primary-foreground shadow-sm scale-105"
+                        : t.id === "erase"
+                          ? "text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                          : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                    )}
+                    data-tutorial={t.id === "building" ? "building-tool" : undefined}
+                  >
+                    <t.icon className="h-4 w-4" />
+                  </button>
+                </ToolbarTooltip>
+              ))}
+            </div>
+          </div>
 
-          {/* Grid snap toggle */}
-          <button
-            onClick={() => setSnapGrid(v => !v)}
-            className={cn(
-              "flex items-center justify-center h-7 w-7 rounded-md transition-all",
-              snapGrid ? "text-primary bg-primary/10" : "text-muted-foreground hover:text-foreground hover:bg-muted"
+          {/* ── Right section (flex-1 to balance left, with secondary controls) ── */}
+          <div className="flex-1 flex items-center justify-end gap-0.5 min-w-0">
+            {/* Undo / Redo — disabled at history bounds with step-count tooltips */}
+            <div className="flex items-center gap-0.5">
+              <button onClick={undoEdit}
+                disabled={!canUndo}
+                className={cn(
+                  "flex items-center justify-center h-7 w-7 rounded-md transition-all",
+                  canUndo ? "text-muted-foreground hover:text-foreground hover:bg-muted" : "text-muted-foreground/30 cursor-not-allowed"
+                )}
+                title={canUndo ? `Undo (Ctrl+Z) — ${undoSteps} step${undoSteps !== 1 ? "s" : ""} available` : "Nothing to undo"}>
+                <Undo2 className="h-3.5 w-3.5" />
+              </button>
+              <button onClick={redoEdit}
+                disabled={!canRedo}
+                className={cn(
+                  "flex items-center justify-center h-7 w-7 rounded-md transition-all",
+                  canRedo ? "text-muted-foreground hover:text-foreground hover:bg-muted" : "text-muted-foreground/30 cursor-not-allowed"
+                )}
+                title={canRedo ? `Redo (Ctrl+Shift+Z) — ${redoSteps} step${redoSteps !== 1 ? "s" : ""} available` : "Nothing to redo"}>
+                <Redo2 className="h-3.5 w-3.5" />
+              </button>
+            </div>
+
+            {/* Snap & zoom controls */}
+            <div className="hidden md:flex items-center gap-0.5">
+              <div className="w-px h-4 bg-border mx-0.5" />
+              <button
+                onClick={() => setSnapGrid(v => !v)}
+                className={cn(
+                  "flex items-center justify-center h-7 w-7 rounded-md transition-all",
+                  snapGrid ? "text-primary bg-primary/10" : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                )}
+                title={`Grid snap ${snapGrid ? 'ON' : 'OFF'} (Ctrl+G)`}
+              >
+                <Grid3X3 className="h-3.5 w-3.5" />
+              </button>
+              <button
+                onClick={() => setEdgeSnap(v => !v)}
+                className={cn(
+                  "flex items-center justify-center h-7 w-7 rounded-md transition-all",
+                  edgeSnap ? "text-primary bg-primary/10" : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                )}
+                title={`Edge snap ${edgeSnap ? 'ON' : 'OFF'}`}
+              >
+                <Magnet className="h-3.5 w-3.5" />
+              </button>
+              <div className="w-px h-4 bg-border mx-0.5" />
+              <button onClick={zoomIn}
+                className="flex items-center justify-center h-7 w-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
+                title="Zoom in">
+                <ZoomIn className="h-3.5 w-3.5" />
+              </button>
+              <span className="text-[9px] font-mono text-muted-foreground/50 w-8 text-center tabular-nums">{Math.round(zoom * 100)}%</span>
+              <button onClick={zoomOut}
+                className="flex items-center justify-center h-7 w-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
+                title="Zoom out">
+                <ZoomOut className="h-3.5 w-3.5" />
+              </button>
+              <button onClick={resetView}
+                className="flex items-center justify-center h-7 w-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
+                title="Reset view (0)">
+                <Maximize2 className="h-3 w-3" />
+              </button>
+            </div>
+
+            {onOpenCanvasSettings && (
+              <button
+                onClick={onOpenCanvasSettings}
+                className="hidden md:flex items-center justify-center h-7 w-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
+                title="Canvas Settings"
+              >
+                <Settings2 className="h-3.5 w-3.5" />
+              </button>
             )}
-            title={`Grid snap ${snapGrid ? 'ON' : 'OFF'} (Ctrl+G)`}
-          >
-            <Grid3X3 className="h-3.5 w-3.5" />
-          </button>
-
-          {/* Edge snap toggle */}
-          <button
-            onClick={() => setEdgeSnap(v => !v)}
-            className={cn(
-              "flex items-center justify-center h-7 w-7 rounded-md transition-all",
-              edgeSnap ? "text-primary bg-primary/10" : "text-muted-foreground hover:text-foreground hover:bg-muted"
-            )}
-            title={`Edge snap ${edgeSnap ? 'ON' : 'OFF'}`}
-          >
-            <Magnet className="h-3.5 w-3.5" />
-          </button>
-
-          {/* View controls */}
-          <div className="w-px h-5 bg-border mx-1" />
-          <button onClick={zoomIn}
-            className="flex items-center justify-center h-7 w-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
-            title="Zoom in">
-            <ZoomIn className="h-3.5 w-3.5" />
-          </button>
-          <button onClick={resetView}
-            className="flex items-center justify-center h-7 w-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
-            title="Reset view (0)">
-            <Maximize2 className="h-3 w-3" />
-          </button>
-          <button onClick={zoomOut}
-            className="flex items-center justify-center h-7 w-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
-            title="Zoom out">
-            <ZoomOut className="h-3.5 w-3.5" />
-          </button>
-          <span className="text-[10px] font-mono text-muted-foreground/50 w-10 text-center tabular-nums">{Math.round(zoom * 100)}%</span>
-
-          <div className="flex-1" />
-
-          {/* Right actions */}
-          {onOpenCanvasSettings && (
             <button
-              onClick={onOpenCanvasSettings}
-              className="flex items-center justify-center h-7 w-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
-              title="Canvas Settings — adjust dimensions, grid, units, and appearance"
+              onClick={() => setShowTutorial(true)}
+              className="hidden md:flex items-center justify-center h-7 w-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
+              title="Show tutorial"
             >
-              <Settings2 className="h-3.5 w-3.5" />
+              <Keyboard className="h-3.5 w-3.5" />
             </button>
-          )}
-          <button
-            onClick={() => setShowTutorial(true)}
-            className="flex items-center justify-center h-7 w-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
-            title="Show tutorial"
-          >
-            <Keyboard className="h-3.5 w-3.5" />
-          </button>
 
-          <button
-            onClick={() => {
-              const errors = validateCampus();
-              if (errors.length > 0) {
-                setShake((n) => n + 1);
-                setSaveBtnError(true);
-                setTimeout(() => setSaveBtnError(false), 600);
-                setValidationErrors(errors);
-                setValidationDialogOpen(true);
-                return;
-              }
-              setIsProcessing(true);
-              setSaveScreen({ open: true, state: "saving" });
-              setTimeout(() => {
-                try {
-                  const now = new Date().toISOString().slice(0, 10);
-                  // When saving a published campus that has changes,
-                  // keep publishStatus as "published" but don't update publishedAt
-                  // so we know there are draft changes waiting for publish
-                  const saved = {
-                    ...campus,
-                    updatedAt: now,
-                    // If campus was published, keep it published (admin saves draft changes)
-                    // The draft changes won't go live until Publish is clicked
-                  };
-                  onUpdate(saved);
-                  savedSnapshotRef.current = JSON.stringify(saved);
-                  setSaveScreen({ open: true, state: "success" });
-                } catch {
-                  setSaveScreen({ open: true, state: "error" });
+            <div className="flex items-center gap-1 ml-0.5">
+              <button
+                onClick={runSave}
+                disabled={saving || isProcessing || !isDirty}
+                className={cn(
+                  "flex items-center gap-1 h-7 px-2 rounded-md border text-[9px] font-bold transition-all disabled:opacity-50 disabled:cursor-not-allowed",
+                  saveBtnError ? "border-destructive text-destructive bg-destructive/10" : isDirty ? "border-primary text-primary bg-primary/10" : "border-border text-foreground hover:bg-muted"
+                )}
+              >
+                {saving ? (
+                  <><Loader2 className="w-3 h-3 animate-spin" /> Saving</>
+                ) : (
+                  <><Map className="h-3 w-3" /> {isDirty ? "Save" : "Saved"}</>
+                )}
+              </button>
+
+              <button
+                onClick={() => {
+                  if (isProcessing) return;
+                  const errors = validateCampus();
+                  if (errors.length > 0) {
+                    setShake((n) => n + 1);
+                    setSaveBtnError(true);
+                    setTimeout(() => setSaveBtnError(false), 600);
+                    setValidationErrors(errors);
+                    setValidationDialogOpen(true);
+                    return;
+                  }
+                  setShowPublishConfirm(true);
+                }}
+                disabled={
+                  isProcessing || isDirty ||
+                  (!isDirty && campus.publishStatus === "published" && !hasDraftChanges && campus.updatedAt === campus.publishedAt) ||
+                  (!isDirty && campus.publishStatus === "draft" && !campus.publishedAt)
                 }
-                setIsProcessing(false);
-              }, 1500);
-            }}
-            disabled={saving || isProcessing || !isDirty}
-            className={cn(
-              "flex items-center gap-1 h-7 px-2.5 rounded-md border text-[10px] font-bold transition-all disabled:opacity-50 disabled:cursor-not-allowed",
-              saveBtnError ? "border-destructive text-destructive bg-destructive/10" : isDirty ? "border-primary text-primary bg-primary/10" : "border-border text-foreground hover:bg-muted"
-            )}
-          >
-            {saving ? (
-              <><Loader2 className="w-3 h-3 animate-spin" /> Saving Draft</>
-            ) : (
-              <><Map className="h-3 w-3" /> {isDirty ? "Save Draft" : "Saved"}</>
-            )}
-          </button>
-
-          {/* Publish button — follows CMS workflow:
-            * Draft (never published): disabled until saved, enabled after save
-            * Published (no changes): disabled
-            * Published (unsaved): disabled (must save first)
-            * Published (saved draft waiting): enabled
-          */}
-          <button
-            onClick={() => {
-              if (isProcessing) return;
-              const errors = validateCampus();
-              if (errors.length > 0) {
-                setShake((n) => n + 1);
-                setSaveBtnError(true);
-                setTimeout(() => setSaveBtnError(false), 600);
-                setValidationErrors(errors);
-                setValidationDialogOpen(true);
-                return;
-              }
-              setShowPublishConfirm(true);
-            }}
-            disabled={
-              isProcessing ||
-              isDirty ||
-              // Published with no pending draft changes: disabled (nothing new to publish)
-              (!isDirty && campus.publishStatus === "published" && !hasDraftChanges && campus.updatedAt === campus.publishedAt) ||
-              // Draft that has never been saved: disabled
-              (!isDirty && campus.publishStatus === "draft" && !campus.publishedAt)
-            }
-            title={
-              isDirty
-                ? "Save your draft first before publishing"
-                : campus.publishStatus === "published" && !hasDraftChanges && campus.updatedAt === campus.publishedAt
-                  ? "Already published — make changes and save to enable publishing"
-                  : campus.publishStatus === "draft" && !campus.publishedAt
-                    ? "Save as draft first, then publish"
-                    : "Publish the current draft to make it live"
-            }
-            className={cn(
-              "flex items-center gap-1 h-7 px-2.5 rounded-md text-[10px] font-extrabold transition-all shadow-sm",
-              isProcessing
-                ? "bg-primary/70 text-primary-foreground/70 cursor-not-allowed"
-                : isDirty
-                  ? "bg-muted text-muted-foreground cursor-not-allowed"
-                  : !isDirty && campus.publishStatus === "published" && !hasDraftChanges && campus.updatedAt === campus.publishedAt
-                    ? "bg-muted text-muted-foreground cursor-not-allowed"
-                    : "bg-primary text-primary-foreground hover:bg-primary/90"
-            )}
-          >
-            {isProcessing ? (
-              <><Loader2 className="w-3 h-3 animate-spin" /> Publishing</>
-            ) : (
-              <><Globe className="h-3 w-3" /> Publish</>
-            )}
-          </button>
+                title={
+                  isDirty
+                    ? "Save your draft first before publishing"
+                    : campus.publishStatus === "published" && !hasDraftChanges && campus.updatedAt === campus.publishedAt
+                      ? "Already published — make changes and save to enable publishing"
+                      : campus.publishStatus === "draft" && !campus.publishedAt
+                        ? "Save as draft first, then publish"
+                        : "Publish the current draft to make it live"
+                }
+                className={cn(
+                  "flex items-center gap-1 h-7 px-2 rounded-md text-[9px] font-extrabold transition-all shadow-sm",
+                  isProcessing
+                    ? "bg-primary/70 text-primary-foreground/70 cursor-not-allowed"
+                    : isDirty
+                      ? "bg-muted text-muted-foreground cursor-not-allowed"
+                      : !isDirty && campus.publishStatus === "published" && !hasDraftChanges && campus.updatedAt === campus.publishedAt
+                        ? "bg-muted text-muted-foreground cursor-not-allowed"
+                        : "bg-primary text-primary-foreground hover:bg-primary/90"
+                )}
+              >
+                {isProcessing ? (
+                  <><Loader2 className="w-3 h-3 animate-spin" /> Publishing</>
+                ) : (
+                  <><Globe className="h-3 w-3" /> Publish</>
+                )}
+              </button>
+            </div>
+          </div>
         </div>
 
         {/* ── Layer bar (Row 2) — animated with smooth transitions ── */}
@@ -1199,20 +1570,49 @@ export function CampusEditor({ campus, onBack, onUpdate, onPublish, onOpenFloor,
           transition={{ duration: 0.12, ease: [0.16, 1, 0.3, 1] }}
           className="flex flex-1 overflow-hidden min-h-0 relative"
         >
-        {/* ── Left: Hierarchy Panel ── */}
-        <HierarchyPanel
-          campus={campus}
-          selected={selected}
-          onSelect={handleHierarchySelect}
-          onOpenFloor={onOpenFloor}
-          onAddBuilding={onAddBuilding}
-          onUpdateBuilding={onUpdateBuilding}
-          onUpdate={(c) => { pushHistory(); onUpdate({ ...campus, ...c }); }}
-          pushHistory={pushHistory}
-          toast={toast}
-        />
+        {/* ── Left: Hierarchy Panel (collapsible) ── */}
+        <div className="flex items-stretch">
+          <div
+            className="transition-all duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] overflow-hidden shrink-0"
+            style={{
+              width: hierarchyOpen ? 224 : 0,
+              opacity: hierarchyOpen ? 1 : 0,
+            }}
+          >
+            <div className="w-56 h-full">
+              <HierarchyPanel
+                campus={campus}
+                selected={selected}
+                onSelect={handleHierarchySelect}
+                onOpenFloor={onOpenFloor}
+                onAddBuilding={onAddBuilding}
+                onUpdateBuilding={onUpdateBuilding}
+                onUpdate={(c) => { pushHistory(); onUpdate({ ...campus, ...c }); }}
+                pushHistory={pushHistory}
+                toast={toast}
+                onSelectBuildingType={(type) => {
+                  setSelectedBuildingType(type);
+                  setTool("building");
+                  toast.info(`Selected: ${type.label}`, "Click the canvas to place.");
+                }}
+                activeBuildingType={selectedBuildingType?.id}
+                onPlaceDecorAsset={handlePlaceDecorAsset}
+                decorAssetCount={(campus.decorAssets ?? []).length}
+              />
+            </div>
+          </div>
+          {/* Toggle button — thin vertical strip on the canvas edge */}
+          <button
+            onClick={() => setHierarchyOpen((v) => !v)}
+            className="flex items-center justify-center w-5 h-10 my-auto rounded-r-md border border-l-0 border-border bg-card text-muted-foreground hover:text-foreground hover:bg-muted transition-all z-20 shrink-0"
+            title={hierarchyOpen ? "Collapse panel" : "Show panel"}
+          >
+            <ChevronLeft className={cn("h-3.5 w-3.5 transition-transform duration-300", hierarchyOpen ? "" : "rotate-180")} />
+          </button>
+        </div>
 
         {/* ── SVG Canvas ── */}
+        <div className="flex-1 relative flex min-w-0">
         <Canvas
           campus={campus}
           tool={tool}
@@ -1234,21 +1634,85 @@ export function CampusEditor({ campus, onBack, onUpdate, onPublish, onOpenFloor,
           overlappingBuildings={overlappingBuildings}
           invalidBuildings={invalidBuildings}
           onCanvasDown={handleSvgDown}
+          rotatingId={rotatingId}
+          rotatingAngle={rotatingAngle}
+          resizingId={resizing?.id ?? null}
           onCanvasMove={handleSvgMoveResize}
           onCanvasUp={handleSvgUpResize}
           onCanvasDblClick={handleDblClick}
           onItemDown={onItemDown}
           onItemContextMenu={handleContextMenu}
           onResizeStart={handleResizeStart}
+          onRotateStart={handleRotateStart}
+          onDecorRotateStart={handleDecorRotateStart}
+          onDecorResizeStart={handleDecorResizeStart}
+          decorRotatingId={decorRotatingId}
+          decorResizingId={decorResizingId}
           onBuildingDoubleClick={handleBuildingDoubleClick}
           onPathClick={onPathClick}
           onSelect={setSelected}
           onResetView={resetView}
+          onDropAsset={(asset) => {
+            pushHistory();
+            onUpdate({ ...campus, decorAssets: [...decorAssets, asset] });
+            toast.success("Asset placed", `${DECOR_ASSET_MAP[asset.type]?.label || asset.type} dropped on canvas.`);
+          }}
+          onDropBuilding={(type, x, y) => {
+            const bldgType = BUILDING_TYPE_MAP[type];
+            if (!bldgType) return;
+            const nb: CampusBuilding = {
+              id: genId("bld"),
+              name: bldgType.label,
+              code: bldgType.label.slice(0, 3).toUpperCase(),
+              category: bldgType.category,
+              description: bldgType.description,
+              x: Math.round(Math.max(0, Math.min(campus.canvasW - bldgType.defaultWidth, x - bldgType.defaultWidth / 2))),
+              y: Math.round(Math.max(0, Math.min(campus.canvasH - bldgType.defaultHeight, y - bldgType.defaultHeight / 2))),
+              width: bldgType.defaultWidth,
+              height: bldgType.defaultHeight,
+              color: bldgType.color,
+              expanded: false,
+              floors: [{ id: genId("fl"), number: 1, label: "Ground Floor", rooms: [], paths: [] }],
+            };
+            pushHistory();
+            updBuildings([...buildings, nb]);
+            setSelected({ type: "building", id: nb.id });
+            toast.success("Building placed", `${bldgType.label} dropped on canvas.`);
+          }}
+          canvasW={campus.canvasW}
+          canvasH={campus.canvasH}
           onZoomIn={zoomIn}
           onZoomOut={zoomOut}
           onSetTool={setTool}
           onToggleSnap={() => setSnapGrid((v) => !v)}
+          onWheel={handleWheel}
+          highlightedRoute={highlightedRoute}
+          animatingPathId={animatingPathId}
         />
+
+        {/* ── Test Navigation panel (Navigation layer) — slides up over the canvas only ── */}
+        <AnimatePresence>
+          {layer === "navigation" && testNavOpen && (
+            <motion.div
+              initial={{ opacity: 0, y: 40 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 40 }}
+              transition={{ type: "spring", stiffness: 350, damping: 32 }}
+              className="absolute bottom-0 left-0 right-0 z-40 max-h-[45%] overflow-y-auto scrollbar-show-on-hover"
+              style={{ background: "var(--card)", boxShadow: "0 -8px 30px rgba(0,0,0,0.12)" }}
+            >
+              <TestNavigationPanel
+                campus={campus}
+                onHighlightRoute={(route) => setHighlightedRoute(route)}
+                onFocusNode={(nodeId) => {
+                  const n = (campus.navNodes ?? []).find((x) => x.id === nodeId);
+                  if (n) zoomToBuilding(n.x - 30, n.y - 30, 60, 60);
+                }}
+              />
+            </motion.div>
+          )}
+        </AnimatePresence>
+        </div>
 
         {/* ── Alignment toolbar (multi-select) ── */}
         <AnimatePresence>
@@ -1331,9 +1795,55 @@ export function CampusEditor({ campus, onBack, onUpdate, onPublish, onOpenFloor,
           selBldg={selBldg}
           selMkr={selMkr}
           selRoute={selRoute}
+          allBuildings={buildings}
+          allNavNodes={campus.navNodes ?? []}
+          allNavEdges={campus.navEdges ?? []}
+          selNavNode={selected?.type === 'navNode' ? (campus.navNodes ?? []).find(n => n.id === selected.id) : undefined}
+          selNavEdge={selected?.type === 'navEdge' ? (campus.navEdges ?? []).find(e => e.id === selected.id) : undefined}
+          selEventOverlay={selected?.type === 'event' ? (campus.eventOverlays ?? []).find(ev => ev.id === selected.id) : undefined}
+          multiSelected={multiSelected}
+          multiSelectedBuildings={buildings.filter(b => multiSelected.includes(b.id))}
+          onBatchUpdateBuildings={(ids, changes) => {
+            pushHistory();
+            updBuildings(buildings.map(b => ids.includes(b.id) ? { ...b, ...changes } : b));
+          }}
+          onBatchDeleteBuildings={(ids) => {
+            pushHistory();
+            updBuildings(buildings.filter(b => !ids.includes(b.id)));
+            setMultiSelected([]);
+            setSelected(null);
+          }}
+          onClearMultiSelect={() => { setMultiSelected([]); setShowAlignTools(false); }}
           onUpdateBuilding={onUpdateBuilding}
           onUpdateMarker={onUpdateMarker}
           onUpdateRoute={onUpdateRoute}
+          onUpdateNavNode={(id, changes) => {
+            pushHistory();
+            onUpdate({ ...campus, navNodes: (campus.navNodes ?? []).map(n => n.id === id ? { ...n, ...changes } : n) });
+          }}
+          onDeleteNavNode={(id) => {
+            pushHistory();
+            onUpdate({ ...campus, navNodes: (campus.navNodes ?? []).filter(n => n.id !== id) });
+            setSelected(null);
+          }}
+          onUpdateNavEdge={(id, changes) => {
+            pushHistory();
+            onUpdate({ ...campus, navEdges: (campus.navEdges ?? []).map(e => e.id === id ? { ...e, ...changes } : e) });
+          }}
+          onDeleteNavEdge={(id) => {
+            pushHistory();
+            onUpdate({ ...campus, navEdges: (campus.navEdges ?? []).filter(e => e.id !== id) });
+            setSelected(null);
+          }}
+          onUpdateEventOverlay={(id, changes) => {
+            pushHistory();
+            onUpdate({ ...campus, eventOverlays: (campus.eventOverlays ?? []).map(ev => ev.id === id ? { ...ev, ...changes } : ev) });
+          }}
+          onDeleteEventOverlay={(id) => {
+            pushHistory();
+            onUpdate({ ...campus, eventOverlays: (campus.eventOverlays ?? []).filter(ev => ev.id !== id) });
+            setSelected(null);
+          }}
           onDeleteBuilding={onDeleteBuilding}
           onDeleteMarker={onDeleteMarker}
           onDeleteRoute={onDeleteRoute}
@@ -1342,15 +1852,23 @@ export function CampusEditor({ campus, onBack, onUpdate, onPublish, onOpenFloor,
       </motion.div>
       </AnimatePresence>
 
-      {/* ── Publish confirmation dialog ── */}
-      <EditorPublishDialog
+      {/* ── Publish confirmation dialog — grouped validation with real issue data ── */}
+      <PrePublishDialog
         open={showPublishConfirm}
+        campus={campus}
+        errors={validationIssues}
         onClose={() => setShowPublishConfirm(false)}
         onPublish={() => {
           setShowPublishConfirm(false);
           setIsProcessing(true);
           onPublish(campus);
         }}
+        onReviewIssue={(issue) => {
+          // Close the publish gate so the user can fix the issue on the canvas
+          setShowPublishConfirm(false);
+          handleReviewIssues(issue);
+        }}
+        isPublishing={isProcessing}
       />
 
       {/* ── Unsaved changes back dialog ── */}
@@ -1369,6 +1887,13 @@ export function CampusEditor({ campus, onBack, onUpdate, onPublish, onOpenFloor,
         }}
         onBack={() => {
           setShowBackConfirm(false);
+          // Discard unsaved changes: restore the last saved snapshot
+          if (isDirty) {
+            try {
+              const saved = JSON.parse(savedSnapshotRef.current) as Campus;
+              onUpdate(saved);
+            } catch {}
+          }
           onBack();
         }}
       />
@@ -1378,6 +1903,12 @@ export function CampusEditor({ campus, onBack, onUpdate, onPublish, onOpenFloor,
         open={showTutorial}
         onClose={() => setShowTutorial(false)}
         onSetTool={setTool}
+      />
+
+      {/* Keyboard shortcut cheat sheet (?) */}
+      <ShortcutCheatSheet
+        open={showCheatSheet}
+        onClose={() => setShowCheatSheet(false)}
       />
 
       {/* Batch delete confirmation dialog */}
@@ -1473,7 +2004,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onPublish, onOpenFloor,
                   style={{ background: "color-mix(in srgb, var(--destructive) 12%, transparent)" }}>
                   <Trash2 className="h-6 w-6" style={{ color: "var(--destructive)" }} />
                 </div>
-                <h3 className="text-base font-extrabold text-foreground">Delete {deleteConfirm.type === "path" ? "Path" : deleteConfirm.type === "marker" ? "Marker" : "Building"}?</h3>
+                <h3 className="text-base font-extrabold text-foreground">Delete {deleteConfirm.type === "path" ? "Path" : deleteConfirm.type === "marker" ? "Marker" : deleteConfirm.type === "decorAsset" ? "Asset" : "Building"}?</h3>
                 <p className="text-xs text-muted-foreground mt-1.5 leading-relaxed max-w-[260px]">
                   {deleteConfirm.type === "building"
                     ? `Are you sure you want to delete "${deleteConfirm.name}"? This will also remove all its floors and rooms. This action cannot be undone.`
@@ -1497,6 +2028,8 @@ export function CampusEditor({ campus, onBack, onUpdate, onPublish, onOpenFloor,
                       updBuildings(buildings.filter((b) => b.id !== deleteConfirm.id));
                     } else if (deleteConfirm.type === "marker") {
                       updMarkers(markers.filter((m) => m.id !== deleteConfirm.id));
+                    } else if (deleteConfirm.type === "decorAsset") {
+                      onUpdate({ ...campus, decorAssets: decorAssets.filter((da) => da.id !== deleteConfirm.id) });
                     } else {
                       updPaths(paths.filter((p) => p.id !== deleteConfirm.id));
                     }
@@ -1633,25 +2166,25 @@ export function CampusEditor({ campus, onBack, onUpdate, onPublish, onOpenFloor,
           {toolConfig.find(t => t.id === tool)?.label ?? tool}
         </span>
 
-        <div className="w-px h-3 bg-border" />
-
         {/* Layer indicator */}
         <div className="flex items-center gap-1" style={{ color: activeLayer.color }}>
           <div className="w-2 h-2 rounded-full" style={{ background: activeLayer.color }} />
           <span className="text-[9px] font-semibold">{activeLayer.label}</span>
         </div>
 
-        {/* Real-time error count */}
-        {errorCount > 0 && (
-          <>
-            <div className="w-px h-3 bg-border" />
-            <div className="flex items-center gap-1 px-1.5 py-0.5 rounded-sm" style={{ background: "color-mix(in srgb, var(--destructive) 10%, transparent)" }}>
-              <AlertTriangle className="h-2.5 w-2.5 shrink-0" style={{ color: "var(--destructive)" }} />
-              <span className="text-[9px] font-extrabold" style={{ color: "var(--destructive)" }}>
-                {errorCount}
-              </span>
-            </div>
-          </>
+        {/* Real-time error count — IssuesPopover with hover */}
+        {errorCount > 0 ? (
+          <IssuesPopover
+            issues={validationIssues}
+            onIssueClick={(issue) => {
+              handleReviewIssues(issue);
+            }}
+          />
+        ) : (
+          <div className="flex items-center gap-1 px-1.5 py-0.5 rounded-sm" style={{ background: "color-mix(in srgb, #22c55e 8%, transparent)" }}>
+            <CheckCircle2 className="h-2.5 w-2.5 shrink-0" style={{ color: "#22c55e" }} />
+            <span className="text-[9px] font-extrabold" style={{ color: "#22c55e" }}>OK</span>
+          </div>
         )}
 
         <div className="flex-1" />
@@ -1668,34 +2201,40 @@ export function CampusEditor({ campus, onBack, onUpdate, onPublish, onOpenFloor,
 
         <div className="w-px h-3 bg-border" />
 
+        {/* Test Navigation toggle (Navigation layer) */}
+        {layer === "navigation" && (
+          <button
+            onClick={() => setTestNavOpen((v) => !v)}
+            className={cn(
+              "flex items-center gap-1 transition-colors",
+              testNavOpen ? "text-blue-500" : "text-muted-foreground/40 hover:text-muted-foreground"
+            )}
+            title="Test navigation routes on this campus"
+          >
+            <Navigation className="h-2.5 w-2.5" />
+            <span className="text-[9px] hidden sm:inline">Test Nav</span>
+          </button>
+        )}
+
         {/* Help */}
         <button
-          onClick={() => setShowTutorial(true)}
+          onClick={() => setShowCheatSheet(true)}
           className="flex items-center gap-1 text-muted-foreground/40 hover:text-muted-foreground transition-colors"
-          title="Keyboard shortcuts"
+          title="Keyboard shortcuts (?)"
         >
           <Keyboard className="h-2.5 w-2.5" />
           <span className="text-[9px] hidden sm:inline">Shortcuts</span>
         </button>
       </div>
 
-      {/* Save screen overlay */}
+      {/* Save screen overlay — retry reuses the shared save flow */}
       <SaveScreen
         open={saveScreen.open}
         state={saveScreen.state}
         campusName={campus.name}
         onClose={() => setSaveScreen({ open: false, state: "saving" })}
-        onRetry={() => {
-          setSaveScreen({ open: true, state: "saving" });
-          setTimeout(() => {
-            try {
-              onUpdate({ ...campus, updatedAt: new Date().toISOString().slice(0, 10) });
-              setSaveScreen({ open: true, state: "success" });
-            } catch {
-              setSaveScreen({ open: true, state: "error" });
-            }
-          }, 1500);
-        }}        />
+        onRetry={runSave}
+      />
 
       {/* ── Validation Errors Dialog ── */}
       <ValidationErrorsDialog

@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from "motion/react";
 import {
   ArrowLeft, ChevronRight, CheckCircle2, Save, X, ZoomIn, ZoomOut, Undo2, Redo2,
   Grid3X3, Layers, Paintbrush, Sofa, SeparatorHorizontal, MoveVertical,
-  DoorOpen, Binary, Text, Ruler, PanelRightClose,
+  DoorOpen, Binary, Text, Ruler, PanelRightClose, Navigation,
 } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { useCanvasControls, isSpacePressed } from "./useCanvasControls";
@@ -13,11 +13,12 @@ import {
   FURNITURE_CATEGORIES, WALL_COLORS, genId,
 } from "./constants";
 import { FloorPropertiesPanel } from "./FloorPropertiesPanel";
+import { ContextMenu } from "./ContextMenu";
 import { useToast } from "../../hooks/useToast";
 import type {
   Campus, FloorPlan, FloorRoom, FloorPath,
   FloorWall, FloorDoor, FloorWindow, FloorFurniture,
-  FloorStairs, FloorElevatorItem, FloorLabel,
+  FloorStairs, FloorRamp, FloorElevatorItem, FloorLabel,
   FloorSelection, SimpleTool, FloorEditorMode,
   RoomResizeState, FloorUndoEntry,
 } from "./types";
@@ -76,6 +77,10 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
   const [wallSnap, setWallSnap] = useState(true);
   // ── Drawing state ──
   const [wallStart, setWallStart] = useState<{ x: number; y: number } | null>(null);
+  // ── Context menu ──
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; type: "wall"; id: string } | null>(null);
+  // ── Wall endpoint dragging ──
+  const wallEndpointDrag = useRef<{ wallId: string; endpoint: "x1" | "x2"; origin: FloorWall } | null>(null);
   const [wallPreview, setWallPreview] = useState<{ x: number; y: number } | null>(null);
   const [roomDrag, setRoomDrag] = useState<{ sx: number; sy: number; cx: number; cy: number } | null>(null);
   const [drawingPath, setDP] = useState<{ x: number; y: number }[]>([]);
@@ -91,14 +96,6 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
 
   const toast = useToast();
 
-  // ── Canvas controls ──
-  const { zoom, pan, panning, svgRef, containerRef, getPoint, startPan, movePan, endPan, resetView, zoomIn, zoomOut } =
-    useCanvasControls(FP_W, FP_H);
-
-  // ── Data refs for drag operations ──
-  const dragging = useRef<{ type: string; ids: string[]; origins: any[]; sx: number; sy: number } | null>(null);
-  const resizing = useRef<RoomResizeState | null>(null);
-
   // ── Floor data ──
   const rooms = floor.rooms;
   const fpaths = floor.paths;
@@ -107,8 +104,17 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
   const windows = floor.windows ?? [];
   const furniture = floor.furniture ?? [];
   const stairs = floor.stairs ?? [];
+  const ramps = floor.ramps ?? [];
   const elevators = floor.elevators ?? [];
   const labels = floor.labels ?? [];
+
+  // ── Canvas controls ──
+  const { zoom, pan, panning, svgRef, containerRef, getPoint, startPan, movePan, endPan, resetView, zoomIn, zoomOut } =
+    useCanvasControls(FP_W, FP_H);
+
+  // ── Data refs for drag operations ──
+  const dragging = useRef<{ type: string; ids: string[]; origins: any[]; sx: number; sy: number } | null>(null);
+  const resizing = useRef<RoomResizeState | null>(null);
 
   // ── History ──
   const { pushHistory, undo, redo, resetHistory } = useFloorHistory(rooms, fpaths);
@@ -134,6 +140,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
                         windows: updates.windows ?? f.windows ?? [],
                         furniture: updates.furniture ?? f.furniture ?? [],
                         stairs: updates.stairs ?? f.stairs ?? [],
+                        ramps: updates.ramps ?? f.ramps ?? [],
                         elevators: updates.elevators ?? f.elevators ?? [],
                         labels: updates.labels ?? f.labels ?? [],
                       }
@@ -149,17 +156,54 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
 
   const updFloor = useCallback(
     (newRooms: FloorRoom[], newPaths: FloorPath[], newWalls?: FloorWall[], newDoors?: FloorDoor[], newWindows?: FloorWindow[],
-     newFurniture?: FloorFurniture[], newStairs?: FloorStairs[], newElevators?: FloorElevatorItem[], newLabels?: FloorLabel[]) => {
+     newFurniture?: FloorFurniture[], newStairs?: FloorStairs[], newElevators?: FloorElevatorItem[], newLabels?: FloorLabel[], newRamps?: FloorRamp[]) => {
       buildFloorUpdates({
         rooms: newRooms, paths: newPaths,
         walls: newWalls ?? walls, doors: newDoors ?? doors,
         windows: newWindows ?? windows, furniture: newFurniture ?? furniture,
-        stairs: newStairs ?? stairs, elevators: newElevators ?? elevators,
-        labels: newLabels ?? labels,
+        stairs: newStairs ?? stairs,        elevators: newElevators ?? elevators, labels: newLabels ?? labels,
+        ramps: newRamps ?? ramps,
       });
     },
     [buildFloorUpdates, walls, doors, windows, furniture, stairs, elevators, labels]
   );
+
+  // ── Toggle navigation connection for a room ──
+  const onToggleNavConnection = useCallback((room: FloorRoom) => {
+    if (room.navConnection) {
+      // Disconnect — remove the nav connection
+      pushHistory(rooms, fpaths);
+      const { navConnection: _, ...rest } = room;
+      updFloor(
+        rooms.map((r) => r.id === room.id ? rest : r),
+        fpaths
+      );
+      toast.info("Navigation disconnected", `${room.name} is no longer a navigation destination.`);
+    } else {
+      // Connect — auto-detect door position
+      pushHistory(rooms, fpaths);
+      const cx = FP_W / 2;
+      const cy = FP_H / 2;
+      const edges = [
+        { x: room.x + room.w / 2, y: room.y },             // top
+        { x: room.x + room.w / 2, y: room.y + room.h },    // bottom
+        { x: room.x,              y: room.y + room.h / 2 }, // left
+        { x: room.x + room.w,     y: room.y + room.h / 2 }, // right
+      ];
+      let bestDist = Infinity;
+      let best = edges[0];
+      for (const pt of edges) {
+        const d = Math.sqrt((pt.x - cx) ** 2 + (pt.y - cy) ** 2);
+        if (d < bestDist) { bestDist = d; best = pt; }
+      }
+      const connected: FloorRoom = { ...room, navConnection: { x: Math.round(best.x), y: Math.round(best.y) } };
+      updFloor(
+        rooms.map((r) => r.id === room.id ? connected : r),
+        fpaths
+      );
+      toast.success("Connected to Navigation", `${room.name} is now a reachable destination.`);
+    }
+  }, [rooms, fpaths, updFloor, pushHistory, toast]);
 
   // ── Save ──
   const handleSave = () => {
@@ -238,7 +282,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
       return;
     }
 
-    if (tool === "stairs") {
+    if (tool === "stairs" || tool === "ramp") {
       setRoomDrag({ sx: clamped.x, sy: clamped.y, cx: clamped.x, cy: clamped.y });
       return;
     }
@@ -308,6 +352,37 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
       return;
     }
 
+    // Wall endpoint drag
+    if (wallEndpointDrag.current) {
+      const ep = wallEndpointDrag.current;
+      const s = (v: number) => snapOn ? snapToGrid(v, 5) : Math.round(v);
+      let newX = s(pt.x);
+      let newY = s(pt.y);
+      // 45° angle snap (same as wall drawing) — pivot around the FIXED endpoint
+      if (!e.shiftKey) {
+        const fixedX = ep.endpoint === "x1" ? ep.origin.x2 : ep.origin.x1;
+        const fixedY = ep.endpoint === "x1" ? ep.origin.y2 : ep.origin.y1;
+        const dx = newX - fixedX;
+        const dy = newY - fixedY;
+        const angle = Math.atan2(dy, dx) * (180 / Math.PI);
+        const snappedAngle = snapAngleDeg(angle, WALL_SNAP_ANGLE);
+        const len = Math.sqrt(dx * dx + dy * dy);
+        newX = fixedX + Math.cos(snappedAngle * (Math.PI / 180)) * len;
+        newY = fixedY + Math.sin(snappedAngle * (Math.PI / 180)) * len;
+      }
+      const clampedX = clamp(Math.round(newX), 0, FP_W);
+      const clampedY = clamp(Math.round(newY), 0, FP_H);
+      // Update the wall endpoint in real time
+      updFloor(rooms, fpaths,
+        walls.map((w) => {
+          if (w.id !== ep.wallId) return w;
+          if (ep.endpoint === "x1") return { ...w, x1: clampedX, y1: clampedY };
+          return { ...w, x2: clampedX, y2: clampedY };
+        })
+      );
+      return;
+    }
+
     // Room/stairs/elevator drag preview
     if (roomDrag && (tool === "room" || tool === "stairs" || tool === "elevator")) {
       const s = (v: number) => snapOn ? snapToGrid(v, 10) : Math.round(v);
@@ -344,6 +419,10 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
 
   const handleSvgUp = () => {
     endPan();
+    if (wallEndpointDrag.current) {
+      pushHistory(rooms, fpaths);
+      wallEndpointDrag.current = null;
+    }
     dragging.current = null;
     if (resizing.current) { resizing.current = null; return; }
 
@@ -358,6 +437,8 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
         id: genId("rm"), name: "Room",
         type: "classroom", x: Math.round(rx), y: Math.round(ry),
         w: Math.round(rw), h: Math.round(rh),
+        floorId,
+        buildingId,
       };
       updFloor([...rooms, newRoom], fpaths);
       setSelected({ type: "room", id: newRoom.id });
@@ -373,13 +454,39 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
       const ry = Math.min(roomDrag.sy, roomDrag.cy);
       const rw = Math.max(Math.abs(roomDrag.cx - roomDrag.sx), 16);
       const rh = Math.max(Math.abs(roomDrag.cy - roomDrag.sy), 12);
+      // Auto-generate a sharedId so this stair can be linked across floors
+      const stairSharedId = `shared_stair_${buildingId}_${(        stairs.filter(s => s.label === 'Stairs').length + 1)}`;
       const newStairs: FloorStairs = {
         id: genId("st"), x: Math.round(rx), y: Math.round(ry),
         width: Math.round(rw), height: Math.round(rh),
         direction: "both", label: "Stairs",
+        sharedId: stairSharedId,
       };
       updFloor(rooms, fpaths, walls, doors, windows, furniture, [...stairs, newStairs]);
       setSelected({ type: "stairs", id: newStairs.id });
+      setTool("select");
+      setRoomDrag(null);
+      return;
+    }
+
+    if (roomDrag && tool === "ramp") {
+      pushHistory(rooms, fpaths);
+      const rx = Math.min(roomDrag.sx, roomDrag.cx);
+      const ry = Math.min(roomDrag.sy, roomDrag.cy);
+      const rw = Math.max(Math.abs(roomDrag.cx - roomDrag.sx), 16);
+      const rh = Math.max(Math.abs(roomDrag.cy - roomDrag.sy), 12);
+      const rampSharedId = `shared_ramp_${buildingId}_${(ramps.filter(r => r.label === 'Ramp').length + 1)}`;
+      const newRamp: FloorRamp = {
+        id: genId("rmp"), x: Math.round(rx), y: Math.round(ry),
+        width: Math.round(rw), height: Math.round(rh),
+        label: "Ramp", direction: "both",
+        sharedId: rampSharedId,
+        handrails: true,
+        slope: "gentle",
+        accessible: true,
+      };
+      updFloor(rooms, fpaths, walls, doors, windows, furniture, stairs, elevators, labels, [...ramps, newRamp]);
+      setSelected({ type: "ramp", id: newRamp.id });
       setTool("select");
       setRoomDrag(null);
       return;
@@ -391,10 +498,14 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
       const ry = Math.min(roomDrag.sy, roomDrag.cy);
       const rw = Math.max(Math.abs(roomDrag.cx - roomDrag.sx), 14);
       const rh = Math.max(Math.abs(roomDrag.cy - roomDrag.sy), 14);
+      // Auto-generate a sharedId so this elevator can be linked across floors
+      const elevatorSharedId = `shared_el_${buildingId}_${(elevators.filter(e => e.label === 'Elevator').length + 1)}`;
       const newElevator: FloorElevatorItem = {
         id: genId("ev"), x: Math.round(rx), y: Math.round(ry),
         width: Math.round(rw), height: Math.round(rh),
         doorWidth: 6, label: "Elevator",
+        sharedId: elevatorSharedId,
+        accessible: true, // Elevators are always accessible
       };
       updFloor(rooms, fpaths, walls, doors, windows, furniture, stairs, [...elevators, newElevator]);
       setSelected({ type: "elevator", id: newElevator.id });
@@ -429,6 +540,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
       else if (type === "furniture") updFloor(rooms, fpaths, walls, doors, windows, furniture.filter((f: FloorFurniture) => f.id !== id));
       else if (type === "stairs") updFloor(rooms, fpaths, walls, doors, windows, furniture, stairs.filter((s: FloorStairs) => s.id !== id));
       else if (type === "elevator") updFloor(rooms, fpaths, walls, doors, windows, furniture, stairs, elevators.filter((e: FloorElevatorItem) => e.id !== id));
+      else if (type === "ramp") updFloor(rooms, fpaths, walls, doors, windows, furniture, stairs, ramps.filter((r: FloorRamp) => r.id !== id));
       else if (type === "label") updFloor(rooms, fpaths, walls, doors, windows, furniture, stairs, elevators, labels.filter((l: FloorLabel) => l.id !== id));
       setSelected(null);
       return;
@@ -463,6 +575,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
         else if (type === "furniture") updFloor(rooms, fpaths, walls, doors, windows, furniture.filter((f) => f.id !== id));
         else if (type === "stairs") updFloor(rooms, fpaths, walls, doors, windows, furniture, stairs.filter((s) => s.id !== id));
         else if (type === "elevator") updFloor(rooms, fpaths, walls, doors, windows, furniture, stairs, elevators.filter((e) => e.id !== id));
+        else if (type === "ramp") updFloor(rooms, fpaths, walls, doors, windows, furniture, stairs, ramps.filter((r) => r.id !== id));
         else if (type === "label") updFloor(rooms, fpaths, walls, doors, windows, furniture, stairs, elevators, labels.filter((l) => l.id !== id));
         setSelected(null);
         return;
@@ -493,7 +606,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
     : tool === "erase" ? "not-allowed"
     : tool === "pan" ? "grab"
     : panning.current ? "grabbing"
-    : (tool === "wall" || tool === "room" || tool === "path" || tool === "door" || tool === "window" || tool === "stairs" || tool === "elevator" || tool === "furniture" || tool === "text")
+    : (tool === "wall" || tool === "room" || tool === "path" || tool === "door" || tool === "window" || tool === "stairs" || tool === "ramp" || tool === "elevator" || tool === "furniture" || tool === "text")
       ? "crosshair"
       : "default";
 
@@ -508,16 +621,32 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
     : selected.type === "window" ? windows.find((w) => w.id === selected.id)
     : selected.type === "furniture" ? furniture.find((f) => f.id === selected.id)
     : selected.type === "stairs" ? stairs.find((s) => s.id === selected.id)
+    : selected.type === "ramp" ? ramps.find((r) => r.id === selected.id)
     : selected.type === "elevator" ? elevators.find((e) => e.id === selected.id)
     : selected.type === "label" ? labels.find((l) => l.id === selected.id)
     : undefined
   ) : undefined;
 
   const allItemsCount = rooms.length + walls.length + doors.length + windows.length +
-    furniture.length + stairs.length + elevators.length + labels.length + fpaths.length;
+    furniture.length + stairs.length + ramps.length + elevators.length + labels.length + fpaths.length;
 
   // ── Empty state check ──
   const isEmpty = allItemsCount === 0;
+
+  // ── Context menu action handler ──
+  const handleFloorContextAction = useCallback((action: string) => {
+    if (!contextMenu) return;
+    const { type, id } = contextMenu;
+    if (type === "wall") {
+      if (action === "delete") {
+        pushHistory(rooms, fpaths);
+        updFloor(rooms, fpaths, walls.filter((w) => w.id !== id));
+        setSelected(null);
+        toast.info("Wall deleted", "The wall has been removed.");
+      }
+    }
+    setContextMenu(null);
+  }, [contextMenu, rooms, fpaths, walls, updFloor, pushHistory, toast, setSelected]);
 
   return (
     <div className="flex flex-col w-full flex-1" style={{ minHeight: 0 }}>
@@ -701,6 +830,12 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
                   <MoveVertical className="h-4 w-4 text-muted-foreground" />
                   <span className="text-xs font-medium text-foreground">Stairs</span>
                 </button>
+                <button onClick={() => setTool("ramp")}
+                  className={cn("w-full flex items-center gap-2.5 pl-3 pr-2 py-1.5 transition-colors text-left",
+                    tool === "ramp" ? "bg-primary/8 border-l-2 border-primary" : "hover:bg-muted/50 border-l-2 border-transparent")}>
+                  <Navigation className="h-4 w-4 text-emerald-500" />
+                  <span className="text-xs font-medium text-foreground">Ramp</span>
+                </button>
                 <button onClick={() => setTool("elevator")}
                   className={cn("w-full flex items-center gap-2.5 pl-3 pr-2 py-1.5 transition-colors text-left",
                     tool === "elevator" ? "bg-primary/8 border-l-2 border-primary" : "hover:bg-muted/50 border-l-2 border-transparent")}>
@@ -783,7 +918,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
             onMouseUp={handleSvgUp}
             onMouseLeave={handleSvgUp}
             onDoubleClick={handleDblClick}
-            onContextMenu={(e) => e.preventDefault()}
+            onContextMenu={(e) => { e.preventDefault(); if (contextMenu) setContextMenu(null); }}
           >
             <g transform={`translate(${pan.x},${pan.y}) scale(${zoom})`}>
               {/* Background */}
@@ -803,7 +938,12 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
               {walls.map((wall) => {
                 const isSel = selected?.type === "wall" && selected.id === wall.id;
                 return (
-                  <g key={wall.id} onMouseDown={(e) => onItemDown(e, "wall", wall.id, wall)}
+                  <g key={wall.id}
+                    onMouseDown={(e) => onItemDown(e, "wall", wall.id, wall)}
+                    onContextMenu={(e) => {
+                      e.preventDefault(); e.stopPropagation();
+                      setContextMenu({ x: e.clientX, y: e.clientY, type: "wall", id: wall.id });
+                    }}
                     style={{ cursor: tool === "select" ? "pointer" : cursor }}>
                     {/* Selection glow */}
                     {isSel && (
@@ -818,8 +958,24 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
                     {/* Selection handles */}
                     {isSel && (
                       <>
-                        <circle cx={wall.x1} cy={wall.y1} r={5} fill="white" stroke="var(--accent)" strokeWidth={2} />
-                        <circle cx={wall.x2} cy={wall.y2} r={5} fill="white" stroke="var(--accent)" strokeWidth={2} />
+                        {/* Endpoint 1 — draggable */}
+                        <circle cx={wall.x1} cy={wall.y1} r={6} fill="white" stroke="var(--accent)" strokeWidth={2}
+                          style={{ cursor: tool === "select" ? "move" : cursor }}
+                          onMouseDown={(e) => {
+                            e.stopPropagation();
+                            if (tool !== "select") return;
+                            pushHistory(rooms, fpaths);
+                            wallEndpointDrag.current = { wallId: wall.id, endpoint: "x1", origin: { ...wall } };
+                          }} />
+                        {/* Endpoint 2 — draggable */}
+                        <circle cx={wall.x2} cy={wall.y2} r={6} fill="white" stroke="var(--accent)" strokeWidth={2}
+                          style={{ cursor: tool === "select" ? "move" : cursor }}
+                          onMouseDown={(e) => {
+                            e.stopPropagation();
+                            if (tool !== "select") return;
+                            pushHistory(rooms, fpaths);
+                            wallEndpointDrag.current = { wallId: wall.id, endpoint: "x2", origin: { ...wall } };
+                          }} />
                         {/* Length label */}
                         <text x={(wall.x1 + wall.x2) / 2} y={(wall.y1 + wall.y2) / 2 - 10}
                           textAnchor="middle" fill="#706d68" fontSize={6} fontWeight="600"
@@ -831,6 +987,22 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
                   </g>
                 );
               })}
+
+              {/* ═══ WALL ENDPOINT DRAG PREVIEW ═══ */}
+              {(() => {
+                const ep = wallEndpointDrag.current;
+                if (!ep) return null;
+                const wall = walls.find(w => w.id === ep.wallId);
+                if (!wall) return null;
+                return (
+                  <circle
+                    cx={wall[ep.endpoint === "x1" ? "x1" : "x2"]}
+                    cy={wall[ep.endpoint === "x1" ? "y1" : "y2"]}
+                    r={8} fill="var(--accent)" opacity={0.4}
+                    className="pointer-events-none"
+                  />
+                );
+              })()}
 
               {/* ═══ DOORS ═══ */}
               {doors.map((door) => {
@@ -948,6 +1120,40 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
                 );
               })}
 
+              {/* ═══ RAMPS ═══ */}
+              {ramps.map((rp) => {
+                const isSel = selected?.type === "ramp" && selected.id === rp.id;
+                return (
+                  <g key={rp.id} onMouseDown={(e) => onItemDown(e, "ramp", rp.id, { ...rp, x: rp.x, y: rp.y })}
+                    style={{ cursor: tool === "select" ? "move" : cursor }}>
+                    <rect x={rp.x} y={rp.y} width={rp.width} height={rp.height} rx={1}
+                      fill={isSel ? "rgba(5,150,105,0.25)" : "#ecfdf5"}
+                      stroke={isSel ? "var(--accent)" : "#6ee7b7"} strokeWidth={isSel ? 2 : 1} />
+                    {/* Ramp slope lines */}
+                    <line x1={rp.x + 3} y1={rp.y + rp.height - 3} x2={rp.x + rp.width - 3} y2={rp.y + 3}
+                      stroke={isSel ? "var(--accent)" : "#34d399"} strokeWidth={1.5} opacity={0.7} />
+                    <line x1={rp.x + 3} y1={rp.y + rp.height - 6} x2={rp.x + rp.width - 3} y2={rp.y + 6}
+                      stroke={isSel ? "var(--accent)" : "#34d399"} strokeWidth={1} opacity={0.4} />
+                    {/* Handrail indicators */}
+                    {rp.handrails && (
+                      <>
+                        <line x1={rp.x + 2} y1={rp.y + 2} x2={rp.x + rp.width - 2} y2={rp.y + 2}
+                          stroke="#059669" strokeWidth={1} opacity={0.5} />
+                        <line x1={rp.x + 2} y1={rp.y + rp.height - 2} x2={rp.x + rp.width - 2} y2={rp.y + rp.height - 2}
+                          stroke="#059669" strokeWidth={1} opacity={0.5} />
+                      </>
+                    )}
+                    {rp.width >= 20 && (
+                      <text x={rp.x + rp.width / 2} y={rp.y + rp.height / 2 + 2}
+                        textAnchor="middle" fill="#065f46" fontSize={6} fontWeight="700"
+                        className="pointer-events-none select-none">
+                        ♿
+                      </text>
+                    )}
+                  </g>
+                );
+              })}
+
               {/* ═══ STAIRS ═══ */}
               {stairs.map((st) => {
                 const isSel = selected?.type === "stairs" && selected.id === st.id;
@@ -1021,6 +1227,31 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
                         {lb.text}
                       </text>
                     </g>
+                  </g>
+                );
+              })}
+
+              {/* ═══ NAVIGATION CONNECTIONS ═══ */}
+              {rooms.filter(r => r.navConnection).map((room) => {
+                const nc = room.navConnection!;
+                const cx = FP_W / 2;
+                const cy = FP_H / 2;
+                return (
+                  <g key={`nav-${room.id}`} className="pointer-events-none">
+                    {/* Dashed line from nav node toward floor center (representing corridor connection) */}
+                    <line x1={nc.x} y1={nc.y} x2={cx} y2={cy}
+                      stroke="#16a34a" strokeWidth={1.5} strokeDasharray="4 3" opacity={0.4} />
+                    {/* Glow ring */}
+                    <circle cx={nc.x} cy={nc.y} r={9}
+                      fill="none" stroke="#16a34a" strokeWidth={3} opacity={0.25} />
+                    {/* Solid node */}
+                    <circle cx={nc.x} cy={nc.y} r={5}
+                      fill="#16a34a" stroke="white" strokeWidth={2} />
+                    {/* Direction indicator — small arrow pointing outward from room toward corridor */}
+                    <text x={nc.x} y={nc.y + 1.5} textAnchor="middle" fill="white"
+                      fontSize={6} fontWeight="900" className="select-none">
+                      {(nc.x < room.x + room.w / 2) ? "◀" : (nc.x > room.x + room.w / 2) ? "▶" : (nc.y < room.y + room.h / 2) ? "▲" : "▼"}
+                    </text>
                   </g>
                 );
               })}
@@ -1158,6 +1389,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
             windows={windows}
             furniture={furniture}
             stairs={stairs}
+            ramps={ramps}
             elevators={elevators}
             labels={labels}
             onUpdateRoom={(id, ch) => { pushHistory(rooms, fpaths); updFloor(rooms.map((r) => r.id === id ? { ...r, ...ch } : r), fpaths); }}
@@ -1166,8 +1398,10 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
             onUpdateWindow={(id, ch) => { pushHistory(rooms, fpaths); updFloor(rooms, fpaths, walls, doors, windows.map((w) => w.id === id ? { ...w, ...ch } : w)); }}
             onUpdateFurniture={(id, ch) => { pushHistory(rooms, fpaths); updFloor(rooms, fpaths, walls, doors, windows, furniture.map((f) => f.id === id ? { ...f, ...ch } : f)); }}
             onUpdateStairs={(id, ch) => { pushHistory(rooms, fpaths); updFloor(rooms, fpaths, walls, doors, windows, furniture, stairs.map((s) => s.id === id ? { ...s, ...ch } : s)); }}
+            onUpdateRamp={(id, ch) => { pushHistory(rooms, fpaths); updFloor(rooms, fpaths, walls, doors, windows, furniture, stairs, elevators, labels, ramps.map((r) => r.id === id ? { ...r, ...ch } : r)); }}
             onUpdateElevator={(id, ch) => { pushHistory(rooms, fpaths); updFloor(rooms, fpaths, walls, doors, windows, furniture, stairs, elevators.map((e) => e.id === id ? { ...e, ...ch } : e)); }}
             onUpdateLabel={(id, ch) => { pushHistory(rooms, fpaths); updFloor(rooms, fpaths, walls, doors, windows, furniture, stairs, elevators, labels.map((l) => l.id === id ? { ...l, ...ch } : l)); }}
+            onToggleNavConnection={onToggleNavConnection}
             onDeleteSelected={() => {
               if (!selected) return;
               pushHistory(rooms, fpaths);
@@ -1185,6 +1419,19 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
             onClose={() => setShowProperties(false)}
           />
         )}
+
+        {/* ── CONTEXT MENU ── */}
+        <AnimatePresence>
+          {contextMenu && (
+            <ContextMenu
+              x={contextMenu.x}
+              y={contextMenu.y}
+              type={contextMenu.type}
+              onClose={() => setContextMenu(null)}
+              onAction={handleFloorContextAction}
+            />
+          )}
+        </AnimatePresence>
       </div>
     </div>
   );

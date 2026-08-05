@@ -2,6 +2,7 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { toast } from "sonner";
 import { useCampusData } from "../contexts/CampusDataContext";
+import { buildSharedCampus, createCampusClone, resolvePublishTarget, sanitizeCampus } from "../lib/campusHelpers";
 import {
   CampusHome,
   CampusWizard,
@@ -24,17 +25,14 @@ const slideVariants = {
   enter: (direction: number) => ({
     x: direction > 0 ? "30%" : "-30%",
     opacity: 0,
-    scale: 0.98,
   }),
   center: {
     x: "0%",
     opacity: 1,
-    scale: 1,
   },
   exit: (direction: number) => ({
     x: direction > 0 ? "-30%" : "30%",
     opacity: 0,
-    scale: 0.98,
   }),
 };
 
@@ -54,7 +52,9 @@ function loadCampuses(): Campus[] {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw) as Campus[];
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      // Normalize legacy shapes (old versions may lack floors/markers/paths
+      // and the status flags) so the page never crashes on stale data.
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed.map(sanitizeCampus);
     }
   } catch {
     if (import.meta.env.DEV) {
@@ -111,38 +111,21 @@ export function AdminMapBuilderPage() {
   const duplicateCampus = useCallback((id: string) => {
     const source = campuses.find((c) => c.id === id);
     if (!source) return;
-    const now = new Date().toISOString().slice(0, 10);
-    const clone: Campus = {
-      ...structuredClone(source),
-      id: genId("campus"),
-      name: `${source.name} (Copy)`,
-      code: source.code ? `${source.code}-CP` : "",
-      publishStatus: "draft",
-      visibleToStudents: false,
-      createdAt: now,
-      updatedAt: now,
-      publishedAt: undefined,
-      buildings: source.buildings.map((b) => ({
-        ...structuredClone(b),
-        id: genId("bld"),
-        floors: b.floors.map((f) => ({
-          ...structuredClone(f),
-          id: genId("fl"),
-          rooms: f.rooms.map((r) => ({ ...structuredClone(r), id: genId("rm") })),
-          paths: f.paths.map((p) => ({ ...structuredClone(p), id: genId("fp") })),
-        })),
-      })),
-      markers: source.markers.map((m) => ({ ...structuredClone(m), id: genId("mk") })),
-      paths: source.paths.map((p) => ({ ...structuredClone(p), id: genId("pt") })),
-    };
+    const clone = createCampusClone(
+      source,
+      new Set(campuses.map((c) => c.name)),
+      new Set(campuses.map((c) => c.code).filter(Boolean)),
+      genId
+    );
     setCampuses((p) => [...p, clone]);
-    const src = campuses.find(c => c.id === id);
-    toast.success("Campus Duplicated", src ? `"${src.name}" has been copied.` : undefined);
+    toast.success("Campus Duplicated", `"${source.name}" has been copied as "${clone.name}".`);
   }, [campuses]);
 
-  const togglePublish = useCallback((id: string) => {
+  const togglePublish = useCallback((id: string, force?: "publish" | "unpublish") => {
     const campus = campuses.find((c) => c.id === id);
     const wasPublished = campus?.publishStatus === "published";
+    // Direction-aware: force lets retry/confirm re-run the exact same action instead of toggling
+    const targetPublished = resolvePublishTarget(wasPublished, force);
     const now = new Date().toISOString().slice(0, 10);
 
     setCampuses((p) =>
@@ -151,47 +134,40 @@ export function AdminMapBuilderPage() {
           ? c
           : {
               ...c,
-              publishStatus: wasPublished ? "draft" as const : "published" as const,
+              publishStatus: targetPublished ? "published" as const : "draft" as const,
+              visibleToStudents: targetPublished,
               updatedAt: now,
-              publishedAt: wasPublished ? undefined : now,
+              publishedAt: targetPublished ? (c.publishedAt ?? now) : undefined,
             }
       )
     );
 
-    if (!wasPublished && campus) {
+    if (targetPublished && campus) {
       // Publish to shared context so students can see it
-      ctxPublish({
-        id: campus.id,
-        name: campus.name,
-        code: campus.code,
-        canvasW: campus.canvasW,
-        canvasH: campus.canvasH,
-        buildings: campus.buildings.map((b) => ({
-          id: b.id, name: b.name, code: b.code,
-          category: b.category, description: b.description,
-          x: b.x, y: b.y, width: b.width, height: b.height,
-          color: b.color, floors: b.floors,
-        })),
-        markers: campus.markers,
-        paths: campus.paths,
-        publishedAt: now,
-      });
+      ctxPublish(buildSharedCampus(campus, now));
       toast.success("Campus Published", `"${campus.name}" is now visible to students.`);
-    } else if (wasPublished) {
+    } else if (!targetPublished) {
       // Unpublish — remove from shared context so students can no longer see it
       ctxRemove(id);
-      toast.success("Campus Unpublished", `"${campus?.name}" has been taken down.`);
+      toast.success("Campus Unpublished", campus ? `"${campus.name}" has been taken down.` : "The campus has been taken down.");
     }
   }, [campuses, ctxPublish, ctxRemove]);
 
   const archiveCampus = useCallback((id: string) => {
     const campus = campuses.find((c) => c.id === id);
     setCampuses((p) =>
-      p.map((c) => (c.id === id ? { ...c, status: "archived" as const } : c))
+      p.map((c) => (c.id === id ? { ...c, status: "archived" as const, visibleToStudents: false } : c))
     );
     // Remove from shared context so students can no longer see it
     ctxRemove(id);
-    toast.success("Campus Archived", campus ? `"${campus.name}" moved to archive and hidden from students.` : undefined);
+    if (campus) {
+      toast.success(
+        "Campus Archived",
+        campus.publishStatus === "published"
+          ? `"${campus.name}" is now hidden from students. It stays in the archive until you restore it.`
+          : `"${campus.name}" moved to the archive. Restore it anytime to edit or publish.`
+      );
+    }
   }, [campuses, ctxRemove]);
 
   const restoreCampus = useCallback((id: string) => {
@@ -200,23 +176,8 @@ export function AdminMapBuilderPage() {
       p.map((c) => (c.id === id ? { ...c, status: "active" as const } : c))
     );
     // If the campus was published before archiving, re-publish to shared context
-    if (campus?.publishStatus === "published" && campus) {
-      ctxPublish({
-        id: campus.id,
-        name: campus.name,
-        code: campus.code,
-        canvasW: campus.canvasW,
-        canvasH: campus.canvasH,
-        buildings: campus.buildings.map((b) => ({
-          id: b.id, name: b.name, code: b.code,
-          category: b.category, description: b.description,
-          x: b.x, y: b.y, width: b.width, height: b.height,
-          color: b.color, floors: b.floors,
-        })),
-        markers: campus.markers,
-        paths: campus.paths,
-        publishedAt: campus.publishedAt ?? new Date().toISOString(),
-      });
+    if (campus?.publishStatus === "published") {
+      ctxPublish(buildSharedCampus(campus, campus.publishedAt ?? new Date().toISOString()));
     }
     toast.success("Campus Restored", campus ? `"${campus.name}" is active and ${campus.publishStatus === "published" ? "visible to students again." : "available for editing."}` : undefined);
   }, [campuses, ctxPublish]);
@@ -228,24 +189,10 @@ export function AdminMapBuilderPage() {
     setView({
       type: "wizard",
       step: 1,
-      draft: {
-        id: campus.id, // Include id to signal edit mode
-        name: campus.name,
-        code: campus.code,
-        description: campus.description,
-        address: campus.address,
-        city: campus.city,
-        province: campus.province,
-        postalCode: campus.postalCode,
-        coordinates: campus.coordinates,
-        thumbnail: campus.thumbnail,
-        logo: campus.logo,
-        themeColor: campus.themeColor,
-        publishStatus: campus.publishStatus,
-        visibleToStudents: campus.visibleToStudents,
-        features: campus.features,
-        settings: campus.settings,
-      },
+      // Pass the whole campus as the draft so the wizard's save preserves
+      // everything (buildings, markers, paths, canvas size, features,
+      // settings, nav/decor data) instead of resetting them to defaults.
+      draft: campus,
     });
   }, [campuses]);
 
@@ -259,28 +206,14 @@ export function AdminMapBuilderPage() {
           ? {
               ...updated,
               publishStatus: "published" as const,
+              visibleToStudents: true,
               publishedAt: now,
               updatedAt: now,
             }
           : c
       )
     );
-    ctxPublish({
-      id: updated.id,
-      name: updated.name,
-      code: updated.code,
-      canvasW: updated.canvasW,
-      canvasH: updated.canvasH,
-      buildings: updated.buildings.map((b) => ({
-        id: b.id, name: b.name, code: b.code,
-        category: b.category, description: b.description,
-        x: b.x, y: b.y, width: b.width, height: b.height,
-        color: b.color, floors: b.floors,
-      })),
-      markers: updated.markers,
-      paths: updated.paths,
-      publishedAt: now,
-    });
+    ctxPublish(buildSharedCampus({ ...updated, publishStatus: "published", publishedAt: now }, now));
     toast.success("Campus Map Published", `"${updated.name}" is now available to students.`);
   }, [ctxPublish]);
 
@@ -341,34 +274,54 @@ export function AdminMapBuilderPage() {
   }, []);
 
   const finishWizard = useCallback((campus: Campus, existingId?: string) => {
+    const now = new Date().toISOString().slice(0, 10);
     if (existingId) {
       // Edit mode — preserve existing buildings, markers, paths while updating metadata
-      setCampuses((p) => p.map((c) =>
-        c.id === existingId
-          ? {
-              ...c,
-              ...campus,
-              id: existingId,
-              buildings: c.buildings,
-              markers: c.markers,
-              paths: c.paths,
-              routes: c.routes,
-              accessibilityFeatures: c.accessibilityFeatures,
-              eventOverlays: c.eventOverlays,
-              canvasW: c.canvasW,
-              canvasH: c.canvasH,
-            }
-          : c
-      ));
+      const existing = campuses.find((c) => c.id === existingId);
+      if (!existing) { goHome(); return; }
+      const wasPublished = existing.publishStatus === "published";
+      const nextPublished = campus.publishStatus === "published";
+      const merged: Campus = {
+        ...existing,
+        ...campus,
+        id: existingId,
+        buildings: existing.buildings,
+        markers: existing.markers,
+        paths: existing.paths,
+        routes: existing.routes,
+        accessibilityFeatures: existing.accessibilityFeatures,
+        eventOverlays: existing.eventOverlays,
+        canvasW: existing.canvasW,
+        canvasH: existing.canvasH,
+        updatedAt: now,
+        publishedAt: nextPublished ? (existing.publishedAt ?? now) : undefined,
+        visibleToStudents: campus.visibleToStudents,
+      };
+      setCampuses((p) => p.map((c) => (c.id === existingId ? merged : c)));
+      // Keep the shared student-facing copy in sync with the wizard's publish status,
+      // so toggling visibility from the wizard actually takes effect.
+      if (nextPublished) {
+        ctxPublish(buildSharedCampus(merged, merged.publishedAt));
+      } else if (wasPublished) {
+        ctxRemove(existingId);
+      }
       toast.success("Campus Details Updated", campus.name ? `"${campus.name}" has been updated.` : undefined);
       goHome();
     } else {
       // Create mode — add new campus and show success screen
-      setCampuses((p) => [...p, campus]);
+      const fresh: Campus = {
+        ...campus,
+        updatedAt: now,
+        publishedAt: campus.publishStatus === "published" ? now : undefined,
+      };
+      setCampuses((p) => [...p, fresh]);
+      if (campus.publishStatus === "published") {
+        ctxPublish(buildSharedCampus(fresh, now));
+      }
       toast.success("Campus Created", `"${campus.name}" is ready for editing.`);
       goToSuccess(campus.id);
     }
-  }, [goHome, goToSuccess]);
+  }, [campuses, ctxPublish, ctxRemove, goHome, goToSuccess]);
 
   // ── View key for AnimatePresence ──────────────────────────────────────────
 

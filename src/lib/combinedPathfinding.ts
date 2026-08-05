@@ -12,7 +12,7 @@
  */
 
 import { findBuildingPath } from "./pathfinding";
-import { findIndoorRoute } from "./indoorPathfinding";
+import { findIndoorRoute, findIndoorRouteForFloor, findMultiFloorIndoorRoute } from "./indoorPathfinding";
 import { FLOOR_PLANS, type Room } from "../data/floorPlans";
 import { MOCK_BUILDINGS } from "../data/mockData";
 import type { IndoorRoute } from "./indoorPathfinding";
@@ -459,6 +459,181 @@ export function findCompleteRoute(
   }
 
   return null;
+}
+
+// ── Multi-floor combined routing for a published campus ───────────────
+
+/**
+ * Find a complete route from a start location to a destination room
+ * working entirely from published campus data (no hardcoded FLOOR_PLANS).
+ *
+ * Handles same-floor, same-building-multi-floor, and cross-building routes.
+ */
+export function findCompleteRouteInCampus(
+  campus: {
+    buildings: {
+      id: string; name: string; code: string;
+      floors?: { number: number; label: string; rooms: { id: string; name: string; x: number; y: number; w: number; h: number; type: string; accessibility?: boolean }[] }[];
+    }[];
+  },
+  target: { buildingId: string; floorNumber: number; roomId: string } | null,
+  start?: { buildingId?: string; floorNumber?: number } | null,
+  accessibleOnly = false
+): { segments: RouteSegment[]; totalDistanceM: number; totalMinutes: number; allSteps: string[] } | null {
+  if (!target) return null;
+
+  const segments: RouteSegment[] = [];
+
+  const targetBuilding = campus.buildings.find(b => b.id === target.buildingId);
+  if (!targetBuilding) return null;
+
+  const fromBuilding = start?.buildingId
+    ? campus.buildings.find(b => b.id === start.buildingId)
+    : null;
+
+  // Same building routing (may involve multiple floors)
+  if (fromBuilding && fromBuilding.id === target.buildingId) {
+    const fromFloor = start?.floorNumber ?? 1;
+    if (fromFloor === target.floorNumber) {
+      // Same floor — use indoor route directly
+      const floorData = targetBuilding.floors?.find(f => f.number === target.floorNumber);
+      if (!floorData) return null;
+
+      const indoorRoute = findIndoorRouteForFloor(
+        target.buildingId, target.floorNumber, target.roomId, floorData.rooms as any, accessibleOnly
+      );
+      if (!indoorRoute) return null;
+
+      segments.push({
+        label: `Navigate to room on ${targetBuilding.name}`,
+        waypoints: indoorRoute.waypoints,
+        distanceM: indoorRoute.distanceMeters,
+        seconds: indoorRoute.estimatedSeconds,
+        steps: indoorRoute.steps,
+        buildingId: target.buildingId,
+        floorNumber: target.floorNumber,
+        isIndoor: true,
+      });
+    } else {
+      // Different floors in same building — multi-floor indoor
+      const floorDataMap: Record<number, { id: string; name: string; x: number; y: number; w: number; h: number; type: string }[]> = {};
+      for (const f of targetBuilding.floors ?? []) {
+        floorDataMap[f.number] = f.rooms as any;
+      }
+
+      const multiRoute = findMultiFloorIndoorRoute(
+        target.buildingId,
+        target.floorNumber,
+        target.roomId,
+        fromFloor,
+        floorDataMap,
+        accessibleOnly
+      );
+
+      if (!multiRoute) return null;
+
+      for (const seg of multiRoute.segments) {
+        segments.push({
+          label: seg.label,
+          waypoints: seg.waypoints,
+          distanceM: seg.distanceM,
+          seconds: seg.seconds,
+          steps: seg.steps,
+          buildingId: seg.floorNumber !== null ? target.buildingId : null,
+          floorNumber: seg.floorNumber,
+          isIndoor: true,
+        });
+      }
+    }
+  } else {
+    // Different buildings or just navigating to a room
+    const floorTargetData = targetBuilding.floors?.find(f => f.number === target.floorNumber);
+    if (!floorTargetData) return null;
+
+    const indoorRoute = findIndoorRouteForFloor(
+      target.buildingId, target.floorNumber, target.roomId, floorTargetData.rooms as any, accessibleOnly
+    );
+
+    if (indoorRoute) {
+      let entrySteps: string[] = [];
+      if (fromBuilding && fromBuilding.id !== target.buildingId) {
+        entrySteps.push(`Walk from ${fromBuilding.name} to ${targetBuilding.name}`);
+      }
+      entrySteps.push(`Enter ${targetBuilding.name}`);
+      if (target.floorNumber > 1) {
+        entrySteps.push(`Take stairs/elevator to ${describeFloorLabel(target.floorNumber)}`);
+      }
+
+      segments.push({
+        label: `Navigate to room in ${targetBuilding.name}`,
+        waypoints: indoorRoute.waypoints,
+        distanceM: indoorRoute.distanceMeters,
+        seconds: indoorRoute.estimatedSeconds,
+        steps: [...entrySteps, ...indoorRoute.steps],
+        buildingId: target.buildingId,
+        floorNumber: target.floorNumber,
+        isIndoor: true,
+      });
+    }
+
+    if (!segments.length) return null;
+  }
+
+  const totalDistanceM = Math.round(segments.reduce((s, seg) => s + seg.distanceM, 0));
+  const totalSeconds = segments.reduce((s, seg) => s + seg.seconds, 0);
+  const allSteps = segments.flatMap(seg => seg.steps);
+
+  return {
+    segments,
+    totalDistanceM,
+    totalMinutes: Math.max(1, Math.round(totalSeconds / 60)),
+    allSteps,
+  };
+}
+
+function describeFloorLabel(floorNumber: number): string {
+  if (floorNumber === 1) return "Ground Floor";
+  if (floorNumber === 2) return "2nd Floor";
+  if (floorNumber === 3) return "3rd Floor";
+  return `${floorNumber}th Floor`;
+}
+
+/**
+ * Search rooms inside a published campus's buildings and floors.
+ * Returns rooms whose name, type, or parent building name matches the query.
+ */
+export function searchDestinationsInCampus(
+  campus: { buildings: { id: string; name: string; code: string; floors?: { number: number; label: string; rooms: { id: string; name: string; type: string }[] }[] }[] },
+  query: string
+): { rooms: RoomDest[] } {
+  if (!query.trim()) return { rooms: [] };
+  const q = query.toLowerCase();
+  const rooms: RoomDest[] = [];
+
+  for (const building of campus.buildings) {
+    for (const floor of building.floors || []) {
+      for (const room of floor.rooms || []) {
+        const nameMatch = room.name.toLowerCase().includes(q);
+        const typeMatch = room.type?.toLowerCase().includes(q) ?? false;
+        const buildingMatch = building.name?.toLowerCase().includes(q) ?? false;
+        const codeMatch = building.code?.toLowerCase().includes(q) ?? false;
+
+        if (nameMatch || typeMatch || buildingMatch || codeMatch) {
+          rooms.push({
+            type: "room",
+            buildingId: building.id,
+            floorNumber: floor.number,
+            roomId: room.id,
+            roomName: room.name,
+            buildingLabel: building.name,
+            buildingCode: building.code,
+          });
+        }
+      }
+    }
+  }
+
+  return { rooms };
 }
 
 // ── Search helper ──────────────────────────────────────────────────────────

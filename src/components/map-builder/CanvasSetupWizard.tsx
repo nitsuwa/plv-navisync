@@ -1,14 +1,23 @@
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef, useEffect, lazy, Suspense } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import {
-  X, Ruler, Grid3X3, Palette, ZoomIn, CheckCircle2,
-  ArrowRight, ArrowLeft, Maximize2, Magnet, Sparkles,
+  X, Ruler, Palette, ZoomIn, CheckCircle2,
+  ArrowRight, ArrowLeft, Maximize2, Sparkles,
   AlertTriangle,
 } from "lucide-react";
 import { cn } from "../../lib/utils";
-import { CANVAS_SIZES, CANVAS_SIZE_RECOMMENDED, GRID_PRESETS } from "./constants";
+import { CANVAS_SIZES, CANVAS_SIZE_RECOMMENDED } from "./constants";
 import { PLVLogo } from "../ui/PLVLogo";
-import type { Campus, MeasurementUnit } from "./types";
+import type { Campus } from "./types";
+
+const ColorPickerImpl = lazy(() => import("../ui/ColorPicker"));
+function ColorPicker(props: { value: string; onChange: (c: string) => void }) {
+  return (
+    <Suspense fallback={<div className="h-10 rounded-xl border border-border bg-muted/30 animate-pulse" />}>
+      <ColorPickerImpl {...props} />
+    </Suspense>
+  );
+}
 
 // ── Props ──────────────────────────────────────────────────────────────────
 
@@ -21,33 +30,13 @@ interface CanvasSetupWizardProps {
 
 // ── Step definitions ───────────────────────────────────────────────────────
 
-type SetupStep = "size" | "grid" | "appearance" | "review";
+type SetupStep = "size" | "appearance" | "review";
 
 const STEP_INFO: { step: SetupStep; label: string; icon: React.ElementType }[] = [
   { step: "size",       label: "Size",     icon: Maximize2 },
-  { step: "grid",       label: "Grid",     icon: Grid3X3 },
   { step: "appearance", label: "Look",     icon: Palette },
   { step: "review",     label: "Review",   icon: CheckCircle2 },
 ];
-
-// ── Unit helpers ───────────────────────────────────────────────────────────
-
-function unitSuffix(unit: MeasurementUnit): string {
-  if (unit === "meters") return "m";
-  if (unit === "feet") return "ft";
-  return "px";
-}
-
-function gridLabel(size: number, unit: MeasurementUnit): string {
-  if (unit === "pixels") return `${size} px`;
-  if (unit === "meters") {
-    const m = size / 40; // 40px = 1m approx
-    return m >= 1 ? `${m} m` : `${(m * 100).toFixed(0)} cm`;
-  }
-  // feet: 1m ≈ 3.281ft
-  const ft = (size / 40) * 3.281;
-  return ft >= 1 ? `${ft.toFixed(1)} ft` : `${(ft * 12).toFixed(0)} in`;
-}
 
 // ── Loading overlay ────────────────────────────────────────────────────────
 
@@ -195,11 +184,6 @@ export function CanvasSetupWizard({ open, campus, onComplete, onClose }: CanvasS
   const customW = customWStr.trim() !== "" && !isNaN(parsedW) ? parsedW : 900;
   const customH = customHStr.trim() !== "" && !isNaN(parsedH) ? parsedH : 680;
 
-  // ── Grid & Units state ──
-  const [gridSize, setGridSize] = useState(20);
-  const [snapToGrid, setSnapToGrid] = useState(true);
-  const [measurementUnit, setMeasurementUnit] = useState<MeasurementUnit>("pixels");
-
   // ── Appearance state ──
   const [canvasColor, setCanvasColor] = useState("#f5f3ef");
   const [defaultZoom, setDefaultZoom] = useState(1);
@@ -248,16 +232,12 @@ export function CanvasSetupWizard({ open, campus, onComplete, onClose }: CanvasS
           canvasW: dims.w,
           canvasH: dims.h,
           canvasConfigured: true,
-          gridSize,
-          snapToGrid,
-          measurementUnit,
           canvasColor: canvasColor || undefined,
           defaultZoom,
         });
         setShowSuccess(false);
       }, 1500);
-    }, 1200);
-  }, [dims, gridSize, snapToGrid, measurementUnit, canvasColor, defaultZoom, onComplete]);
+    }, 1200);    }, [dims, canvasColor, defaultZoom, onComplete]);
 
   const totalSteps = STEP_INFO.length;
   const currentIdx = STEP_INFO.findIndex((s) => s.step === step);
@@ -501,7 +481,7 @@ export function CanvasSetupWizard({ open, campus, onComplete, onClose }: CanvasS
                         animate={{ opacity: 1, height: "auto" }}
                         className="grid grid-cols-2 gap-2.5 overflow-hidden"
                       >                            <div>
-                          <label className="block text-[9px] font-bold uppercase tracking-wider mb-1 text-muted-foreground">Width ({unitSuffix(measurementUnit)})</label>
+                          <label className="block text-[9px] font-bold uppercase tracking-wider mb-1 text-muted-foreground">Width (px)</label>
                           <input
                             type="text" inputMode="numeric" pattern="[0-9]*"
                             value={customWStr}
@@ -519,7 +499,7 @@ export function CanvasSetupWizard({ open, campus, onComplete, onClose }: CanvasS
                           />
                         </div>
                         <div>
-                          <label className="block text-[9px] font-bold uppercase tracking-wider mb-1 text-muted-foreground">Height ({unitSuffix(measurementUnit)})</label>
+                          <label className="block text-[9px] font-bold uppercase tracking-wider mb-1 text-muted-foreground">Height (px)</label>
                           <input
                             type="text" inputMode="numeric" pattern="[0-9]*"
                             value={customHStr}
@@ -553,7 +533,7 @@ export function CanvasSetupWizard({ open, campus, onComplete, onClose }: CanvasS
                     <div className="rounded-xl border border-border bg-muted/15 p-3">
                       <div className="flex items-center justify-between mb-1.5">
                         <p className="text-[8px] font-extrabold uppercase tracking-widest text-muted-foreground/50">Preview</p>
-                        <p className="text-[9px] font-mono text-muted-foreground/60">{dims.w} × {dims.h} {unitSuffix(measurementUnit)}</p>
+                        <p className="text-[9px] font-mono text-muted-foreground/60">{dims.w} × {dims.h} px</p>
                       </div>
                       <div
                         className="rounded-lg mx-auto flex items-center justify-center overflow-hidden border border-border/40 transition-all duration-300"
@@ -569,114 +549,6 @@ export function CanvasSetupWizard({ open, campus, onComplete, onClose }: CanvasS
                   </>
                 )}
 
-                {/* ══════ Step: Grid & Units ══════ */}
-                {step === "grid" && (
-                  <>
-                    <div className="flex items-start gap-2.5 p-3 rounded-xl bg-muted/40 border border-border">
-                      <Grid3X3 className="h-4 w-4 text-primary shrink-0 mt-0.5" />
-                      <p className="text-[11px] text-muted-foreground leading-relaxed">
-                        Set grid spacing and measurement units — helps align buildings and paths precisely on the canvas.
-                      </p>
-                    </div>
-
-                    <div>
-                      <label className="block text-[10px] font-bold uppercase tracking-wider mb-1.5 text-foreground/70">Grid Size</label>
-                      <div className="grid grid-cols-4 gap-1.5">
-                        {GRID_PRESETS.map((gp) => (
-                          <button
-                            key={gp.size}
-                            type="button"
-                            onClick={() => { setGridSize(gp.size); markChanged(); }}
-                            className={cn(
-                              "flex flex-col items-center gap-1 p-2 rounded-xl font-bold transition-all border",
-                              gridSize === gp.size
-                                ? "bg-primary text-primary-foreground border-primary shadow-sm"
-                                : "bg-input-background text-muted-foreground border-border hover:border-primary/20 hover:text-foreground"
-                            )}
-                          >
-                            {/* Mini grid preview SVG */}
-                            <div className="w-8 h-8 flex items-center justify-center">
-                            <svg width="32" height="32" viewBox="0 0 32 32">
-                              {(() => {
-                                const spacing = gp.size <= 10 ? 4 : gp.size <= 20 ? 6 : gp.size <= 40 ? 10 : 16;
-                                const offsetX = (32 - Math.floor(32 / spacing) * spacing) / 2 + spacing / 2;
-                                const offsetY = (32 - Math.floor(32 / spacing) * spacing) / 2 + spacing / 2;
-                                const dots: React.ReactNode[] = [];
-                                for (let x = offsetX; x < 32; x += spacing) {
-                                  for (let y = offsetY; y < 32; y += spacing) {
-                                    dots.push(
-                                      <circle
-                                        key={`${x}-${y}`}
-                                        cx={x}
-                                        cy={y}
-                                        r={gp.size <= 10 ? 0.8 : gp.size <= 20 ? 1 : gp.size <= 40 ? 1.2 : 1.4}
-                                        fill="currentColor"
-                                        opacity={gridSize === gp.size ? 0.9 : 0.4}
-                                      />
-                                    );
-                                  }
-                                }
-                                return dots;
-                              })()}
-                            </svg>
-                            </div>
-                            <span className="text-[10px] leading-tight">{gp.label}</span>
-                            <span className="text-[8px] opacity-70 leading-tight">{gridLabel(gp.size, measurementUnit)}</span>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    <div className="flex items-center justify-between p-3 rounded-xl border border-border bg-muted/15">
-                      <div className="flex items-center gap-2.5">
-                        <Magnet className="h-3.5 w-3.5 text-muted-foreground" />
-                        <div>
-                          <p className="text-xs font-bold text-foreground">Snap to Grid</p>
-                          <p className="text-[9px] text-muted-foreground/60">
-                            {snapToGrid ? "Objects automatically align to the nearest grid intersection" : "Objects can move freely"}
-                          </p>
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => { setSnapToGrid((v) => !v); markChanged(); }}
-                        className={cn(
-                          "relative w-9 h-[17px] rounded-full transition-colors shrink-0",
-                          snapToGrid ? "bg-primary" : "bg-muted-foreground/25"
-                        )}
-                      >
-                        <motion.div
-                          animate={{ x: snapToGrid ? 19 : 2 }}
-                          transition={{ type: "spring", stiffness: 500, damping: 30 }}
-                          className="absolute top-[2px] w-[13px] h-[13px] rounded-full bg-white shadow-sm"
-                        />
-                      </button>
-                    </div>
-
-                    <div>
-                      <label className="block text-[10px] font-bold uppercase tracking-wider mb-1.5 text-foreground/70">Measurement Units</label>
-                      <div className="flex gap-1.5">
-                        {(["pixels", "meters", "feet"] as MeasurementUnit[]).map((unit) => (
-                          <button
-                            key={unit}
-                            type="button"
-                            onClick={() => { setMeasurementUnit(unit); markChanged(); }}
-                            className={cn(
-                              "flex-1 h-8 rounded-lg font-bold text-[11px] transition-all border capitalize",
-                              measurementUnit === unit
-                                ? "bg-primary text-primary-foreground border-primary shadow-sm"
-                                : "bg-input-background text-muted-foreground border-border hover:border-primary/20 hover:text-foreground"
-                            )}
-                          >
-                            {unit}
-                          </button>
-                        ))}
-                      </div>
-                      <p className="text-[9px] text-muted-foreground/50 mt-1">How distances display in the editor. Grid labels update automatically.</p>
-                    </div>
-                  </>
-                )}
-
                 {/* ══════ Step: Appearance ══════ */}
                 {step === "appearance" && (
                   <>
@@ -687,55 +559,10 @@ export function CanvasSetupWizard({ open, campus, onComplete, onClose }: CanvasS
                       </p>
                     </div>
 
-                    {/* Canvas background color */}
+                    {/* Canvas background color - using same ColorPicker as CampusWizard */}
                     <div>
                       <label className="block text-[10px] font-bold uppercase tracking-wider mb-2 text-foreground/70">Canvas Background Color</label>
-                      <div className="flex flex-wrap gap-2">
-                        {[
-                          { color: "#f5f3ef", label: "Warm White" },
-                          { color: "#ffffff", label: "White" },
-                          { color: "#f0f4f8", label: "Cool Gray" },
-                          { color: "#e8f5e9", label: "Light Green" },
-                          { color: "#e3f2fd", label: "Light Blue" },
-                          { color: "#fff8e1", label: "Cream" },
-                          { color: "#fce4ec", label: "Light Pink" },
-                          { color: "#f3e5f5", label: "Light Purple" },
-                        ].map((c) => (
-                          <button
-                            key={c.color}
-                            type="button"
-                            onClick={() => { setCanvasColor(c.color); markChanged(); }}
-                            className={cn(
-                              "flex flex-col items-center gap-1 p-2 rounded-xl border-2 transition-all",
-                              canvasColor === c.color
-                                ? "border-primary shadow-sm ring-1 ring-primary/20"
-                                : "border-border hover:border-primary/20"
-                            )}
-                          >
-                            <div
-                              className="w-8 h-8 rounded-lg border border-black/10"
-                              style={{ backgroundColor: c.color }}
-                            />
-                            <span className="text-[8px] font-bold text-muted-foreground">{c.label}</span>
-                          </button>
-                        ))}
-                      </div>
-                      {/* Custom color input */}
-                      <div className="flex items-center gap-2 mt-3">
-                        <input
-                          type="color"
-                          value={canvasColor}
-                          onChange={(e) => { setCanvasColor(e.target.value); markChanged(); }}
-                          className="w-8 h-8 rounded-lg cursor-pointer border border-border p-0.5"
-                        />
-                        <input
-                          type="text"
-                          value={canvasColor}
-                          onChange={(e) => { if (/^#[0-9a-f]{0,6}$/i.test(e.target.value)) setCanvasColor(e.target.value); markChanged(); }}
-                          placeholder="#f5f3ef"
-                          className="flex-1 h-8 px-3 rounded-lg border border-border bg-input-background text-foreground text-xs font-mono focus:outline-none focus:ring-2 focus:ring-primary/30 transition-shadow"
-                        />
-                      </div>
+                      <ColorPicker value={canvasColor} onChange={(c) => { setCanvasColor(c); markChanged(); }} />
                     </div>
 
                     {/* Default Zoom */}
@@ -779,9 +606,7 @@ export function CanvasSetupWizard({ open, campus, onComplete, onClose }: CanvasS
                     {/* Summary cards */}
                     <div className="space-y-2">
                       {[
-                        { icon: Ruler, label: "Canvas Size", value: `${dims.w} × ${dims.h} ${unitSuffix(measurementUnit)}`, editStep: "size" as SetupStep },
-                        { icon: Grid3X3, label: "Grid", value: `${gridLabel(gridSize, measurementUnit)} · ${snapToGrid ? "Snap ON" : "Snap OFF"}`, editStep: "grid" as SetupStep },
-                        { icon: Ruler, label: "Measurement Unit", value: measurementUnit, editStep: "grid" as SetupStep },
+                        { icon: Ruler, label: "Canvas Size", value: `${dims.w} × ${dims.h} px`, editStep: "size" as SetupStep },
                         { icon: ZoomIn, label: "Default Zoom", value: `${Math.round(defaultZoom * 100)}%`, editStep: "appearance" as SetupStep },
                         { icon: Palette as React.ElementType, label: "Background Color", value: canvasColor, editStep: "appearance" as SetupStep },
                       ].map(({ icon: Icon, label, value, editStep }, i) => (

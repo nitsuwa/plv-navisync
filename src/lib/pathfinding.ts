@@ -297,3 +297,215 @@ export function calculateTransition(
 }
 
 export { NODES, EDGES, BUILDING_ENTRANCE_MAP };
+
+// ── Navigation graph route finder (for map-builder nav graph) ────────────────
+
+/**
+ * Find the shortest path on a custom NavigationNode/NavigationEdge graph
+ * (the map-builder's nav graph) using A*.
+ *
+ * @param navNodes - array of NavigationNode objects (must have id, x, y)
+ * @param navEdges - array of NavigationEdge objects (must have startNodeId, endNodeId, distance, bidirectional)
+ * @param fromNodeId - starting node id
+ * @param toNodeId - target node id
+ * @param accessibleOnly - if true, only traverse accessible edges
+ * @returns GraphPath or null if no path exists
+ */
+/**
+ * Build virtual floor-transition edges from stair/elevator sharedIds.
+ * Creates virtual edges between nav nodes on different floors that share
+ * the same transitionSharedId, enabling multi-floor pathfinding.
+ */
+export function buildTransitionEdges(
+  navNodes: { id: string; x: number; y: number; name?: string; transitionSharedId?: string; floorId?: string }[],
+  navEdges: { startNodeId: string; endNodeId: string; distance: number; bidirectional: boolean; accessible: boolean }[],
+): { startNodeId: string; endNodeId: string; distance: number; bidirectional: boolean; accessible: boolean }[] {
+  const extraEdges: { startNodeId: string; endNodeId: string; distance: number; bidirectional: boolean; accessible: boolean }[] = [];
+
+  // Group nav nodes by transitionSharedId
+  const groups = new Map<string, typeof navNodes>();
+  for (const node of navNodes) {
+    if (!node.transitionSharedId) continue;
+    if (!groups.has(node.transitionSharedId)) groups.set(node.transitionSharedId, []);
+    groups.get(node.transitionSharedId)!.push(node);
+  }
+
+  // For each shared transition, create virtual edges between all pairs on different floors
+  for (const [sharedId, nodes] of groups.entries()) {
+    if (nodes.length < 2) continue;
+
+    // Determine type from IDs — elevator or stairs
+    const isElevator = sharedId.includes("el_");
+    const virtualDist = 5; // Short virtual distance for floor transitions
+
+    for (let i = 0; i < nodes.length; i++) {
+      for (let j = i + 1; j < nodes.length; j++) {
+        const a = nodes[i];
+        const b = nodes[j];
+        // Only create edge if they're on different floors
+        if (a.floorId === b.floorId) continue;
+
+        const edge = {
+          startNodeId: a.id,
+          endNodeId: b.id,
+          distance: virtualDist,
+          bidirectional: true,
+          accessible: isElevator, // Elevator transitions are always accessible
+        };
+        extraEdges.push(edge);
+      }
+    }
+  }
+
+  return extraEdges;
+}
+
+export function findNavigationRoute(
+  navNodes: { id: string; x: number; y: number; name?: string; transitionSharedId?: string; floorId?: string }[],
+  navEdges: { startNodeId: string; endNodeId: string; distance: number; bidirectional: boolean; accessible: boolean; emergencySafe?: boolean }[],
+  fromNodeId: string,
+  toNodeId: string,
+  accessibleOnly = false,
+  emergencySafeOnly = false
+): GraphPath | null {
+  if (!fromNodeId || !toNodeId) return null;
+  if (fromNodeId === toNodeId) {
+    const node = navNodes.find(n => n.id === fromNodeId);
+    if (!node) return null;
+    return {
+      nodeIds: [fromNodeId],
+      distanceM: 0,
+      minutes: 0,
+      waypoints: [{ x: node.x, y: node.y }],
+      steps: [`Already at ${node.name || "destination"}.`],
+    };
+  }
+
+  // Build adjacency list (include emergencySafe for emergency routing)
+  const adj = new Map<string, { nodeId: string; dist: number; accessible: boolean; emergencySafe: boolean }[]>();
+  for (const edge of navEdges) {
+    if (!adj.has(edge.startNodeId)) adj.set(edge.startNodeId, []);
+    if (!adj.has(edge.endNodeId)) adj.set(edge.endNodeId, []);
+    const safe = edge.emergencySafe !== false; // default to safe if not set
+    adj.get(edge.startNodeId)!.push({ nodeId: edge.endNodeId, dist: edge.distance, accessible: edge.accessible, emergencySafe: safe });
+    if (edge.bidirectional) {
+      adj.get(edge.endNodeId)!.push({ nodeId: edge.startNodeId, dist: edge.distance, accessible: edge.accessible, emergencySafe: safe });
+    }
+  }
+
+  // Add virtual floor-transition edges from shared stair/elevator IDs
+  const transitionEdges = buildTransitionEdges(navNodes, navEdges);
+  for (const edge of transitionEdges) {
+    if (!adj.has(edge.startNodeId)) adj.set(edge.startNodeId, []);
+    if (!adj.has(edge.endNodeId)) adj.set(edge.endNodeId, []);
+    const safe = edge.emergencySafe !== false;
+    adj.get(edge.startNodeId)!.push({ nodeId: edge.endNodeId, dist: edge.distance, accessible: edge.accessible, emergencySafe: safe });
+    if (edge.bidirectional) {
+      adj.get(edge.endNodeId)!.push({ nodeId: edge.startNodeId, dist: edge.distance, accessible: edge.accessible, emergencySafe: safe });
+    }
+  }
+
+  // Node position map for heuristic
+  const nodeMap = new Map<string, { x: number; y: number; name?: string }>();
+  for (const n of navNodes) nodeMap.set(n.id, n);
+
+  const h = (a: string, b: string): number => {
+    const na = nodeMap.get(a);
+    const nb = nodeMap.get(b);
+    if (!na || !nb) return 0;
+    return Math.hypot(na.x - nb.x, na.y - nb.y);
+  };
+
+  interface NavAStarNode {
+    id: string;
+    g: number;
+    f: number;
+    parent: string | null;
+    edgeDist: number;
+  }
+
+  const open = new Map<string, NavAStarNode>();
+  const closed = new Set<string>();
+
+  // Persistent parent map — survives nodes being moved from open → closed
+  const parentMap = new Map<string, string | null>();
+
+  open.set(fromNodeId, { id: fromNodeId, g: 0, f: h(fromNodeId, toNodeId), parent: null, edgeDist: 0 });
+  parentMap.set(fromNodeId, null);
+
+  while (open.size > 0) {
+    let current: NavAStarNode | null = null;
+    for (const node of open.values()) {
+      if (!current || node.f < current.f) current = node;
+    }
+    if (!current) break;
+
+    if (current.id === toNodeId) {
+      // Reconstruct path using the persistent parentMap
+      const pathIds: string[] = [];
+      let nodeId: string | null = current.id;
+      while (nodeId !== null) {
+        pathIds.unshift(nodeId);
+        nodeId = parentMap.get(nodeId) ?? null;
+      }
+
+      const waypoints = pathIds.map(id => {
+        const n = nodeMap.get(id);
+        return n ? { x: n.x, y: n.y } : { x: 0, y: 0 };
+      });
+
+      // Calculate distance from edges between consecutive path nodes
+      let totalUnits = 0;
+      const steps: string[] = [];
+      for (let i = 0; i < pathIds.length - 1; i++) {
+        const from = pathIds[i];
+        const to = pathIds[i + 1];
+        const edge = navEdges.find(
+          e => (e.startNodeId === from && e.endNodeId === to) ||
+               (e.bidirectional && e.startNodeId === to && e.endNodeId === from)
+        );
+        if (edge) {
+          totalUnits += edge.distance;
+          const fromLabel = nodeMap.get(from)?.name || from;
+          const toLabel = nodeMap.get(to)?.name || to;
+          const distM = Math.round(edge.distance * M_PER_UNIT);
+          if (i === 0) {
+            steps.push(`Start from ${fromLabel}`);
+          }
+          steps.push(`Walk ${Math.max(1, distM)}m to ${toLabel}`);
+        }
+      }
+
+      const distanceM = Math.round(totalUnits * M_PER_UNIT);
+      const minutes = Math.max(1, Math.round(distanceM / 80));
+
+      return { nodeIds: pathIds, distanceM, minutes, waypoints, steps };
+    }
+
+    open.delete(current.id);
+    closed.add(current.id);
+
+    const neighbors = adj.get(current.id) ?? [];
+    for (const { nodeId: neighborId, dist, accessible, emergencySafe } of neighbors) {
+      if (closed.has(neighborId)) continue;
+      if (accessibleOnly && !accessible) continue;
+      if (emergencySafeOnly && !emergencySafe) continue;
+
+      const tentG = current.g + dist;
+      const existing = open.get(neighborId);
+
+      if (!existing || tentG < existing.g) {
+        parentMap.set(neighborId, current.id);
+        open.set(neighborId, {
+          id: neighborId,
+          g: tentG,
+          f: tentG + h(neighborId, toNodeId),
+          parent: current.id,
+          edgeDist: dist,
+        });
+      }
+    }
+  }
+
+  return null; // No path
+}

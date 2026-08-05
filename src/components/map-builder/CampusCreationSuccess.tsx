@@ -18,26 +18,29 @@ export function CampusCreationSuccess({
 }: CampusCreationSuccessProps) {
   return (
     <div className="flex-1 overflow-y-auto scrollbar-show-on-hover scroll-smooth p-6 lg:p-8 flex items-center justify-center">
+      {/* Single container entrance — fewer motion.divs = smoother mount */}
       <motion.div
-        initial={{ opacity: 0, scale: 0.95, y: 20 }}
-        animate={{ opacity: 1, scale: 1, y: 0 }}
-        transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
+        initial={{ opacity: 0, y: 24 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
         className="max-w-lg w-full text-center"
+        style={{ willChange: "transform, opacity" }}
       >
-        {/* Success checkmark */}
+        {/* Success checkmark — simplified to ease-out (no physics spring) */}
         <motion.div
           initial={{ scale: 0 }}
           animate={{ scale: 1 }}
-          transition={{ delay: 0.2, type: "spring", stiffness: 200, damping: 15 }}
+          transition={{ delay: 0.15, duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
           className="w-20 h-20 rounded-full bg-green-50 dark:bg-green-900/20 flex items-center justify-center mx-auto mb-6 ring-1 ring-green-200 dark:ring-green-700/30"
+          style={{ willChange: "transform" }}
         >
           <CheckCircle2 className="h-10 w-10 text-green-500" />
         </motion.div>
 
         <motion.h1
-          initial={{ opacity: 0, y: 10 }}
+          initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.3, duration: 0.4 }}
+          transition={{ delay: 0.25, duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
           className="text-2xl font-extrabold text-foreground mb-2"
           style={{ fontFamily: "var(--font-sans)" }}
         >
@@ -45,9 +48,9 @@ export function CampusCreationSuccess({
         </motion.h1>
 
         <motion.p
-          initial={{ opacity: 0, y: 10 }}
+          initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.4, duration: 0.4 }}
+          transition={{ delay: 0.32, duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
           className="text-muted-foreground mb-1 text-sm"
           style={{ fontFamily: "var(--font-body)" }}
         >
@@ -60,9 +63,9 @@ export function CampusCreationSuccess({
         </motion.p>
 
         <motion.p
-          initial={{ opacity: 0, y: 10 }}
+          initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.45, duration: 0.4 }}
+          transition={{ delay: 0.38, duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
           className="text-xs text-muted-foreground mb-8"
           style={{ fontFamily: "var(--font-body)" }}
         >
@@ -71,10 +74,11 @@ export function CampusCreationSuccess({
 
         {/* Action cards */}
         <motion.div
-          initial={{ opacity: 0, y: 20 }}
+          initial={{ opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.5, duration: 0.4 }}
+          transition={{ delay: 0.42, duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
           className="grid sm:grid-cols-3 gap-3 mb-6"
+          style={{ willChange: "transform, opacity" }}
         >
           <button
             onClick={onOpenMapBuilder}
@@ -119,7 +123,7 @@ export function CampusCreationSuccess({
         <motion.p
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          transition={{ delay: 0.7, duration: 0.4 }}
+          transition={{ delay: 0.55, duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
           className="text-[10px] text-muted-foreground/50"
         >
           You can access this campus anytime from the campus management page.

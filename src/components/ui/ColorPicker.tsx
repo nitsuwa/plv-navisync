@@ -510,3 +510,5 @@ export function ColorPicker({ value, onChange }: ColorPickerProps) {
     </div>
   );
 }
+
+export default ColorPicker;

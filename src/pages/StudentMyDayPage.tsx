@@ -7,6 +7,8 @@ import {
 } from "lucide-react";
 import { motion } from "motion/react";
 import { MOCK_BUILDINGS } from "../data/mockData";
+import { useCampusData } from "../contexts/CampusDataContext";
+import { buildingsFromCampus } from "../lib/mapDataAdapter";
 import {
   MOCK_SCHEDULE, getTodayClasses, getNextClass,
   timeToMinutes, getTransitionStatus,
@@ -35,8 +37,20 @@ function Reveal({ children, delay = 0, className }: {
 // ════════════════════════════════════════════════════════════════════════════
 export function StudentMyDayPage() {
   const navigate = useNavigate();
-  const studentAuth = useStudentAuth();
+  const { username } = useStudentAuth();
   const [loading, setLoading] = useState(true);
+
+  // Derive buildings from published campus data, fall back to hardcoded data
+  const campusData = useCampusData();
+  const buildings = useMemo(() => {
+    const activeCampus = campusData.campuses.find(
+      (c) => c.publishStatus !== "draft" && c.status !== "archived"
+    );
+    if (activeCampus) {
+      return buildingsFromCampus(activeCampus) as typeof MOCK_BUILDINGS;
+    }
+    return MOCK_BUILDINGS;
+  }, [campusData.campuses]);
 
   useEffect(() => {
     const timer = setTimeout(() => setLoading(false), 500);
@@ -79,7 +93,7 @@ export function StudentMyDayPage() {
 
   // ── Navigate to campus map with directions to a class ──
   const navigateToClass = (cls: ScheduledClass) => {
-    const building = MOCK_BUILDINGS.find(b => b.id === cls.buildingId);
+    const building = buildings.find(b => b.id === cls.buildingId);
     if (building) {
       navigate(`/map?dest=${building.id}&floor=${cls.floor}&room=${encodeURIComponent(cls.roomName)}`);
     }
@@ -87,10 +101,10 @@ export function StudentMyDayPage() {
 
   // ── Get building name helper ──
   const getBuildingName = (id: string): string => {
-    return MOCK_BUILDINGS.find(b => b.id === id)?.name ?? id;
+    return buildings.find(b => b.id === id)?.name ?? id;
   };
   const getBuildingCode = (id: string): string => {
-    return MOCK_BUILDINGS.find(b => b.id === id)?.code ?? id;
+    return buildings.find(b => b.id === id)?.code ?? id;
   };
 
   // ── Time of day greeting ──
@@ -159,7 +173,7 @@ export function StudentMyDayPage() {
             </div>
 
             <h1 className="text-2xl sm:text-3xl font-extrabold text-foreground mt-1" style={{ fontFamily: "var(--font-sans)" }}>
-              {greeting}, {studentAuth?.username ?? "Student"}
+              {greeting}, {username || "Student"}
             </h1>
 
             <p className="text-sm text-muted-foreground mt-1 flex items-center gap-2">

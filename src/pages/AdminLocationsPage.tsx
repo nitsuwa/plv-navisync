@@ -1,9 +1,11 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { ListCardSkeleton } from "../components/ui/PageSkeleton";
 import { MapPin, Plus, Search, Pencil, Trash2, X, Flag, Navigation } from "lucide-react";
 import { useToast } from "../hooks/useToast";
 import { MOCK_LOCATIONS } from "../data/mockData";
+import { useCampusData } from "../contexts/CampusDataContext";
+import { locationsFromCampus } from "../lib/mapDataAdapter";
 import type { CampusLocation } from "../types";
 import { Button } from "../components/ui/Button";
 import { Badge } from "../components/ui/Badge";
@@ -25,9 +27,31 @@ const typeColors: Record<string, string> = {
   clinic: "danger",
 };
 
+/** True if a location's id starts with the campus- prefix */
+function isCampusDerived(id: string) {
+  return id.startsWith("campus-");
+}
+
 export function AdminLocationsPage() {
   const [locations, setLocations] = useState<CampusLocation[]>([]);
   const [loading, setLoading] = useState(true);
+  const campusData = useCampusData();
+
+  // Derive locations from the first published campus
+  const campusLocations: CampusLocation[] = useMemo(() => {
+    const activeCampus = campusData.campuses.find(
+      (c) => c.publishStatus !== "draft" && c.status !== "archived"
+    );
+    if (!activeCampus) return [];
+    return locationsFromCampus(activeCampus);
+  }, [campusData.campuses]);
+
+  // Merge: manual locations first, then campus-derived (deduplicated by id)
+  const allLocations = useMemo(() => {
+    const campusIds = new Set(campusLocations.map((l) => l.id));
+    const manual = locations.filter((l) => !campusIds.has(l.id));
+    return [...manual, ...campusLocations];
+  }, [locations, campusLocations]);
   const [search, setSearch] = useState("");
 
   const [showModal, setShowModal] = useState(false);
@@ -51,7 +75,7 @@ export function AdminLocationsPage() {
 
   if (loading) return <ListCardSkeleton cards={6} />;
 
-  const filtered = locations.filter((l) =>
+  const filtered = allLocations.filter((l) =>
     l.name.toLowerCase().includes(search.toLowerCase()) ||
     l.type.toLowerCase().includes(search.toLowerCase())
   );
@@ -108,7 +132,7 @@ export function AdminLocationsPage() {
       >
         <div>
           <h1 className="text-2xl font-extrabold text-foreground">Manage Locations</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">{locations.length} mapped locations on campus</p>
+          <p className="text-sm text-muted-foreground mt-0.5">{allLocations.length} mapped locations on campus</p>
         </div>
         <Button onClick={openAdd} variant="primary">
           <Plus className="h-3.5 w-3.5" /> Add Location
@@ -158,16 +182,29 @@ export function AdminLocationsPage() {
                       : loc.name
                     }
                   </p>
-                  <Badge variant={(typeColors[loc.type] as string) ?? "default"} className="mt-0.5 capitalize">{loc.type}</Badge>
+                  <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                    <Badge variant={(typeColors[loc.type] as string) ?? "default"} className="capitalize">{loc.type}</Badge>
+                    {isCampusDerived(loc.id) && (
+                      <Badge variant="default" className="text-[9px] px-1 py-0.5 opacity-60">auto</Badge>
+                    )}
+                  </div>
                 </div>
               </div>
               <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                <button type="button" aria-label="Edit location" onClick={() => openEdit(loc)} className="w-7 h-7 rounded-lg flex items-center justify-center text-muted-foreground hover:bg-primary/10 hover:text-primary transition-colors">
-                  <Pencil className="h-3.5 w-3.5" />
-                </button>
-                <button type="button" aria-label="Delete location" onClick={() => setDeleteId(loc.id)} className="w-7 h-7 rounded-lg flex items-center justify-center text-muted-foreground hover:bg-destructive/10 hover:text-destructive active:scale-90 transition-all">
-                  <Trash2 className="h-3.5 w-3.5" />
-                </button>
+                {isCampusDerived(loc.id) ? (
+                  <span className="w-7 h-7 rounded-lg flex items-center justify-center text-muted-foreground/40 cursor-default" title="Auto-generated from Map Builder">
+                    <Pencil className="h-3.5 w-3.5" />
+                  </span>
+                ) : (
+                  <button type="button" aria-label="Edit location" onClick={() => openEdit(loc)} className="w-7 h-7 rounded-lg flex items-center justify-center text-muted-foreground hover:bg-primary/10 hover:text-primary transition-colors">
+                    <Pencil className="h-3.5 w-3.5" />
+                  </button>
+                )}
+                {!isCampusDerived(loc.id) && (
+                  <button type="button" aria-label="Delete location" onClick={() => setDeleteId(loc.id)} className="w-7 h-7 rounded-lg flex items-center justify-center text-muted-foreground hover:bg-destructive/10 hover:text-destructive active:scale-90 transition-all">
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                )}
               </div>
             </div>
             {loc.description && (

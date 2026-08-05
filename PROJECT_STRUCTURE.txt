@@ -1,0 +1,368 @@
+PLV NaviSync - project structure (tree /F style)
+Generated from project root. Excluded: node_modules, .git
+
+|-- dist
+|   |-- assets
+|   |   |-- AdminAccessibilityPage-DzJ7XyZS.js
+|   |   |-- AdminBuildingsPage-BXommVLK.js
+|   |   |-- AdminDashboardPage-CMbpSaY2.js
+|   |   |-- AdminEventsPage-SF6U3x8A.js
+|   |   |-- AdminFloorPlansPage-CkbxJAmc.js
+|   |   |-- AdminLocationsPage-bBmwiXJ1.js
+|   |   |-- AdminLoginPage-DuymbKbA.js
+|   |   |-- AdminMapBuilderPage-CT_bXMFu.js
+|   |   |-- AdminReportsPage-DkDuBi3L.js
+|   |   |-- AdminRoutesPage-_WHtOmvE.js
+|   |   |-- AdminSettingsPage-C92XsDj4.js
+|   |   |-- AdminUsersPage-1lnaG3ib.js
+|   |   |-- Badge-BEE9xIzQ.js
+|   |   |-- BuildingDetailsPage-B3oj5LKG.js
+|   |   |-- BuildingsPage-B2oeSKbc.js
+|   |   |-- Button-BuISckKp.js
+|   |   |-- CampusMapPage-ClQTJlw0.js
+|   |   |-- CanvasSettingsModal-B3VdTCYJ.js
+|   |   |-- ColorPicker-ScQvSPYl.js
+|   |   |-- EmptyState-Ds8x41Ib.js
+|   |   |-- FormField-CHgdhFYu.js
+|   |   |-- HelpCenterPage-CdBBIsLz.js
+|   |   |-- HeroBackground-DX6SlCdF.js
+|   |   |-- LandingPage-BK5sRGwc.js
+|   |   |-- PageSkeleton-ChZiAM5h.js
+|   |   |-- PageTransition-CkYiIsNP.js
+|   |   |-- RegistrationPage-Bfcjk8kg.js
+|   |   |-- Reveal-C8SSSbmC.js
+|   |   |-- SearchBar-BWgle1xG.js
+|   |   |-- Skeleton-IXpas50Q.js
+|   |   |-- StatCard-B-2weRjb.js
+|   |   |-- StudentFavoritesPage-ODbcFdHS.js
+|   |   |-- StudentMyDayPage-CtT5y3d6.js
+|   |   |-- StudentPageHeader-BDBYsMra.js
+|   |   |-- StudentProfilePage-CI-g3rpi.js
+|   |   |-- StudentReportsPage-J37YwmPU.js
+|   |   |-- StudentSettingsPage-Cs5ACvhI.js
+|   |   |-- floorPlans-DTFWVrUS.js
+|   |   |-- index-DKsltwo2.js
+|   |   |-- index-ggE-FFiR.css
+|   |   |-- mapData-CuYdzAVl.js
+|   |   |-- mapDataAdapter-BTRkulFR.js
+|   |   |-- mockData-CJBXK3uS.js
+|   |   |-- pathfinding-BxmG5eIN.js
+|   |   |-- plv-logo-DVAF-ypv.png
+|   |   |-- use-spring-BqWpqGbn.js
+|   |   |-- use-transform-C-3lITMw.js
+|   |   |-- useDebounce-B8OmRgzS.js
+|   |   |-- useScrollReveal-B9ZUjqVT.js
+|   |   |-- useSearchHighlight-DKqBHqSy.js
+|   |   |-- useToast-BkVqnVq_.js
+|   |   |-- vendor-charts-DcgSrn3D.js
+|   |   |-- vendor-dates-sbWH3_uq.js
+|   |   |-- vendor-icons--XrHMvb1.js
+|   |   |-- vendor-motion-5IL5vaJJ.js
+|   |   |-- vendor-react-BCVajpiJ.js
+|   |   \-- vendor-router-DOJ3FUlc.js
+|   |-- icon-16x16.png
+|   |-- icon-192x192.png
+|   |-- icon-32x32.png
+|   |-- icon-48x48.png
+|   |-- icon-512x512.png
+|   |-- index.html
+|   |-- manifest.json
+|   \-- sw.js
+|-- docs
+|   |-- old mds
+|   |   |-- FEATURE_INVENTORY.md
+|   |   |-- SYSTEM_DESCRIPTIVE_SPEC.md
+|   |   |-- SYSTEM_SUMMARY.md
+|   |   |-- TEST_QUESTIONNAIRE_FEATURE_BASED.md
+|   |   |-- TEST_QUESTIONNAIRE_ISO_25010.md
+|   |   |-- map-builder-implementation-plan.md
+|   |   \-- map-builder-redesign-spec.md
+|   |-- 00_PROJECT_CONTEXT.md
+|   |-- 01_SYSTEM_FEATURES.md
+|   |-- 02_SYSTEM_ARCHITECTURE.md
+|   |-- 03_DATABASE_SUPABASE.md
+|   |-- 04_TEAM_RULES.md
+|   |-- 05_FREEBUFF_RULES.md
+|   \-- 06_IMPLEMENTATION_ORDER.md
+|-- guidelines
+|   \-- Guidelines.md
+|-- public
+|   |-- icon-16x16.png
+|   |-- icon-192x192.png
+|   |-- icon-32x32.png
+|   |-- icon-48x48.png
+|   |-- icon-512x512.png
+|   |-- manifest.json
+|   \-- sw.js
+|-- src
+|   |-- app
+|   |   |-- components
+|   |   |   |-- figma
+|   |   |   |   \-- ImageWithFallback.tsx
+|   |   |   \-- ui
+|   |   |       |-- accordion.tsx
+|   |   |       |-- alert-dialog.tsx
+|   |   |       |-- alert.tsx
+|   |   |       |-- aspect-ratio.tsx
+|   |   |       |-- avatar.tsx
+|   |   |       |-- badge.tsx
+|   |   |       |-- breadcrumb.tsx
+|   |   |       |-- button.tsx
+|   |   |       |-- calendar.tsx
+|   |   |       |-- card.tsx
+|   |   |       |-- carousel.tsx
+|   |   |       |-- chart.tsx
+|   |   |       |-- checkbox.tsx
+|   |   |       |-- collapsible.tsx
+|   |   |       |-- command.tsx
+|   |   |       |-- context-menu.tsx
+|   |   |       |-- dialog.tsx
+|   |   |       |-- drawer.tsx
+|   |   |       |-- dropdown-menu.tsx
+|   |   |       |-- form.tsx
+|   |   |       |-- hover-card.tsx
+|   |   |       |-- input-otp.tsx
+|   |   |       |-- input.tsx
+|   |   |       |-- label.tsx
+|   |   |       |-- menubar.tsx
+|   |   |       |-- navigation-menu.tsx
+|   |   |       |-- pagination.tsx
+|   |   |       |-- popover.tsx
+|   |   |       |-- progress.tsx
+|   |   |       |-- radio-group.tsx
+|   |   |       |-- resizable.tsx
+|   |   |       |-- scroll-area.tsx
+|   |   |       |-- select.tsx
+|   |   |       |-- separator.tsx
+|   |   |       |-- sheet.tsx
+|   |   |       |-- sidebar.tsx
+|   |   |       |-- skeleton.tsx
+|   |   |       |-- slider.tsx
+|   |   |       |-- sonner.tsx
+|   |   |       |-- switch.tsx
+|   |   |       |-- table.tsx
+|   |   |       |-- tabs.tsx
+|   |   |       |-- textarea.tsx
+|   |   |       |-- toggle-group.tsx
+|   |   |       |-- toggle.tsx
+|   |   |       |-- tooltip.tsx
+|   |   |       |-- use-mobile.ts
+|   |   |       \-- utils.ts
+|   |   |-- App.tsx
+|   |   \-- routes.tsx
+|   |-- assets
+|   |   \-- plv-logo.png
+|   |-- components
+|   |   |-- layout
+|   |   |   |-- AdminLayout.tsx
+|   |   |   |-- AdminSidebar.tsx
+|   |   |   |-- Footer.tsx
+|   |   |   |-- MobileBottomNav.tsx
+|   |   |   |-- Navbar.tsx
+|   |   |   |-- PublicLayout.tsx
+|   |   |   \-- ScrollToTop.tsx
+|   |   |-- map
+|   |   |   |-- BuildingInfoPanel.tsx
+|   |   |   |-- BuildingPicker.tsx
+|   |   |   |-- EventPopup.tsx
+|   |   |   |-- MobileBuildingSheet.tsx
+|   |   |   |-- QRPlaceholder.tsx
+|   |   |   |-- ReportModal.tsx
+|   |   |   |-- SignInPrompt.tsx
+|   |   |   \-- index.ts
+|   |   |-- map-builder
+|   |   |   |-- ActionProgressDialog.tsx
+|   |   |   |-- BuildingWizardModal.tsx
+|   |   |   |-- CampusCreationSuccess.tsx
+|   |   |   |-- CampusEditor.tsx
+|   |   |   |-- CampusHome.tsx
+|   |   |   |-- CampusWizard.tsx
+|   |   |   |-- Canvas.tsx
+|   |   |   |-- CanvasSettingsModal.tsx
+|   |   |   |-- CanvasSetupWizard.tsx
+|   |   |   |-- ContextMenu.tsx
+|   |   |   |-- CreateCampusGuide.tsx
+|   |   |   |-- EditorBackDialog.tsx
+|   |   |   |-- FloorEditor.tsx
+|   |   |   |-- FloorPropertiesPanel.tsx
+|   |   |   |-- FloorWizardModal.tsx
+|   |   |   |-- HierarchyPanel.tsx
+|   |   |   |-- IssuesPopover.tsx
+|   |   |   |-- MapBuilderTutorial.tsx
+|   |   |   |-- PrePublishDialog.tsx
+|   |   |   |-- PropertiesPanel.tsx
+|   |   |   |-- PublishDialog.tsx
+|   |   |   |-- PublishScreen.tsx
+|   |   |   |-- RoutesPanel.tsx
+|   |   |   |-- SaveScreen.tsx
+|   |   |   |-- ShortcutCheatSheet.tsx
+|   |   |   |-- TestNavigationPanel.tsx
+|   |   |   |-- ToolbarTooltip.tsx
+|   |   |   |-- ValidationErrorsDialog.tsx
+|   |   |   |-- constants.ts
+|   |   |   |-- index.ts
+|   |   |   |-- types.ts
+|   |   |   |-- useCanvasControls.ts
+|   |   |   \-- useFloorHistory.ts
+|   |   |-- map-builder-v2
+|   |   |   |-- BuildingsTab.tsx
+|   |   |   |-- FloorPlansTab.tsx
+|   |   |   |-- LayersTab.tsx
+|   |   |   |-- MapBuilderWorkspace.tsx
+|   |   |   |-- PreviewTab.tsx
+|   |   |   |-- RoutesTab.tsx
+|   |   |   \-- index.ts
+|   |   |-- ui
+|   |   |   |-- __tests__
+|   |   |   |   \-- WeeklyChart.test.tsx
+|   |   |   |-- AnnouncementCard.tsx
+|   |   |   |-- Badge.tsx
+|   |   |   |-- BuildingCard.tsx
+|   |   |   |-- Button.tsx
+|   |   |   |-- ColorPicker.tsx
+|   |   |   |-- Combobox.tsx
+|   |   |   |-- ConfirmDialog.tsx
+|   |   |   |-- EmptyState.tsx
+|   |   |   |-- ErrorBoundary.tsx
+|   |   |   |-- FormField.tsx
+|   |   |   |-- HeroBackground.tsx
+|   |   |   |-- MapPicker.tsx
+|   |   |   |-- NavigationProgress.tsx
+|   |   |   |-- PLVLogo.tsx
+|   |   |   |-- PageSkeleton.tsx
+|   |   |   |-- PageTransition.tsx
+|   |   |   |-- Reveal.tsx
+|   |   |   |-- SearchBar.tsx
+|   |   |   |-- Skeleton.tsx
+|   |   |   |-- StatCard.tsx
+|   |   |   |-- StudentPageHeader.tsx
+|   |   |   |-- ThemeToggle.tsx
+|   |   |   |-- Tooltip.tsx
+|   |   |   |-- TypeToConfirmDialog.tsx
+|   |   |   \-- WeeklyChart.tsx
+|   |   \-- LoadingScreen.tsx
+|   |-- config
+|   |   |-- animation.ts
+|   |   |-- constants.ts
+|   |   \-- env.ts
+|   |-- contexts
+|   |   \-- CampusDataContext.tsx
+|   |-- data
+|   |   |-- floorPlans.ts
+|   |   |-- mapData.ts
+|   |   |-- mockData.ts
+|   |   \-- mockSchedule.ts
+|   |-- hooks
+|   |   |-- index.ts
+|   |   |-- useCrudModal.ts
+|   |   |-- useDataList.ts
+|   |   |-- useDebounce.ts
+|   |   |-- useScrollReveal.ts
+|   |   |-- useSearchHighlight.ts
+|   |   |-- useSearchKeyboard.ts
+|   |   |-- useStudentAuth.ts
+|   |   |-- useTheme.ts
+|   |   |-- useToast.ts
+|   |   \-- useUndoRedo.ts
+|   |-- lib
+|   |   |-- __tests__
+|   |   |   \-- campusHelpers.test.ts
+|   |   |-- campusHelpers.ts
+|   |   |-- combinedPathfinding.ts
+|   |   |-- indoorPathfinding.ts
+|   |   |-- mapDataAdapter.ts
+|   |   |-- pathfinding.ts
+|   |   |-- supabase.ts
+|   |   \-- utils.ts
+|   |-- pages
+|   |   |-- AdminAccessibilityPage.tsx
+|   |   |-- AdminAnnouncementsPage.tsx
+|   |   |-- AdminBuildingsPage.tsx
+|   |   |-- AdminDashboardPage.tsx
+|   |   |-- AdminEventsPage.tsx
+|   |   |-- AdminFloorPlansPage.tsx
+|   |   |-- AdminLocationsPage.tsx
+|   |   |-- AdminLoginPage.tsx
+|   |   |-- AdminMapBuilderPage.tsx
+|   |   |-- AdminReportsPage.tsx
+|   |   |-- AdminRoutesPage.tsx
+|   |   |-- AdminSettingsPage.tsx
+|   |   |-- AdminUsersPage.tsx
+|   |   |-- AnnouncementsPage.tsx
+|   |   |-- BuildingDetailsPage.tsx
+|   |   |-- BuildingsPage.tsx
+|   |   |-- CampusMapPage.tsx
+|   |   |-- HelpCenterPage.tsx
+|   |   |-- LandingPage.tsx
+|   |   |-- RegistrationPage.tsx
+|   |   |-- StudentFavoritesPage.tsx
+|   |   |-- StudentMyDayPage.tsx
+|   |   |-- StudentProfilePage.tsx
+|   |   |-- StudentReportsPage.tsx
+|   |   \-- StudentSettingsPage.tsx
+|   |-- services
+|   |   |-- announcementService.ts
+|   |   |-- buildingService.ts
+|   |   |-- campusService.ts
+|   |   |-- crud.ts
+|   |   |-- database.ts
+|   |   |-- eventService.ts
+|   |   |-- index.ts
+|   |   |-- locationService.ts
+|   |   |-- reportService.ts
+|   |   |-- routeService.ts
+|   |   |-- settingsService.ts
+|   |   |-- supabase.ts
+|   |   |-- types.ts
+|   |   \-- userService.ts
+|   |-- styles
+|   |   |-- fonts.css
+|   |   |-- globals.css
+|   |   |-- index.css
+|   |   |-- tailwind.css
+|   |   \-- theme.css
+|   |-- types
+|   |   |-- index.ts
+|   |   \-- map.ts
+|   |-- main.tsx
+|   \-- test-setup.ts
+|-- supabase
+|   \-- migrations
+|       \-- 001_initial_schema.sql
+|-- %TEMP%vite-log.txt
+|-- .env.example
+|-- .gitignore
+|-- ATTRIBUTIONS.md
+|-- CURRENT_IMPLEMENTATION.md
+|-- PROJECT_STRUCTURE.txt
+|-- README.md
+|-- audit-lucide-imports.mjs
+|-- audit-simple.mjs
+|-- default_shadcn_theme.css
+|-- enhance_nav_v2.py
+|-- enhance_navigation.py
+|-- fix_accessibile_routes.py
+|-- fix_all_critical.py
+|-- fix_final_issues.py
+|-- fix_form_ids.py
+|-- fix_form_ids2.py
+|-- fix_nav_final.py
+|-- fix_nav_issues.py
+|-- fix_qr_import.py
+|-- fix_remaining_nav.py
+|-- fix_route_type.py
+|-- fix_svg_props.py
+|-- icon-source.png
+|-- index.html
+|-- inline_panel.txt
+|-- mobile_sheet.txt
+|-- package-lock.json
+|-- package.json
+|-- plv-logo.png
+|-- pnpm-lock.yaml
+|-- pnpm-workspace.yaml
+|-- postcss.config.mjs
+|-- revert_button_fix.py
+|-- tab_block.txt
+|-- tab_section.txt
+\-- vite.config.ts

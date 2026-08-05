@@ -8,9 +8,21 @@ export interface SharedFloorRoom {
   description?: string; accessibility?: boolean;
 }
 
+export interface SharedFloorItem {
+  id: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  label?: string;
+  floors?: number[];
+}
+
 export interface SharedFloorPlan {
   id: string; number: number; label: string;
   rooms: SharedFloorRoom[];
+  elevators?: SharedFloorItem[];
+  stairs?: SharedFloorItem[];
 }
 
 export interface SharedBuilding {

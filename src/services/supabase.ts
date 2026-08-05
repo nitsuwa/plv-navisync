@@ -1,33 +1,36 @@
 /**
- * Supabase client factory.
+ * Supabase configuration validation.
  *
- * TO CONNECT:
- * 1. Install the package: pnpm add @supabase/supabase-js
- * 2. Set these env vars in your .env file:
- *    VITE_SUPABASE_URL=https://your-project.supabase.co
- *    VITE_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
- * 3. Uncomment the createClient line below.
- * 4. Replace the export with the live client.
+ * The live browser client lives in src/lib/supabase.ts and reads:
+ *   VITE_SUPABASE_URL
+ *   VITE_SUPABASE_PUBLISHABLE_KEY
+ * from .env.local (see .env.example). This module validates the presence of
+ * those variables so other services can decide between Supabase and mock data.
  */
 
 import { requireEnv } from "../config/env";
 
 export const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
+export const supabasePublishableKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined;
+// Backwards-compatible fallback for setups still using the older variable name.
 export const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
+export const supabaseKey = supabasePublishableKey ?? supabaseAnonKey;
 
 /**
- * Validates that required Supabase env vars exist.
- * Returns true if both env vars are present, false otherwise.
+ * Validates that the required Supabase env vars exist.
+ * Returns true if the URL and a key are present, false otherwise.
  */
 export function validateSupabaseConfig(): boolean {
   try {
     requireEnv("VITE_SUPABASE_URL");
-    requireEnv("VITE_SUPABASE_ANON_KEY");
+    if (!supabasePublishableKey && !supabaseAnonKey) {
+      throw new Error("Missing VITE_SUPABASE_PUBLISHABLE_KEY");
+    }
     return true;
   } catch {
     if (import.meta.env.DEV) {
       console.warn(
-        "[Supabase] VITE_SUPABASE_URL and/or VITE_SUPABASE_ANON_KEY not set.\n" +
+        "[Supabase] VITE_SUPABASE_URL and/or VITE_SUPABASE_PUBLISHABLE_KEY not set.\n" +
         "The app will run with local mock data. Set these env vars to connect to Supabase."
       );
     }
@@ -37,16 +40,3 @@ export function validateSupabaseConfig(): boolean {
 
 /** True when Supabase env vars are configured and the client will connect */
 export const isSupabaseConnected = validateSupabaseConfig();
-
-// ── Uncomment after installing @supabase/supabase-js ─────────────────────
-// import { createClient } from "@supabase/supabase-js";
-//
-// export const supabase = createClient(
-//   requireEnv("VITE_SUPABASE_URL"),
-//   requireEnv("VITE_SUPABASE_ANON_KEY")
-// );
-//
-// ── Helper: typed Supabase client for auto-completion ────────────────────
-// import type { SupabaseClient } from "@supabase/supabase-js";
-// import type { Database } from "./database.gen"; // generated via supabase gen types
-// export type TypedSupabaseClient = SupabaseClient<Database>;

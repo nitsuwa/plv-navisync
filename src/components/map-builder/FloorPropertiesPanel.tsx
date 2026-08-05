@@ -1,12 +1,21 @@
-import { useState, useEffect } from "react";
-import { X, Info, Palette, Settings2, AlertTriangle } from "lucide-react";
+import { useState, useEffect, lazy, Suspense } from "react";
+import { X, Info, Palette, Settings2, AlertTriangle, Navigation, Unlink } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { ROOM_TYPES, ROOM_MAP, WALL_THICKNESSES } from "./constants";
 import type {
   FloorRoom, FloorWall, FloorDoor, FloorWindow,
-  FloorFurniture, FloorStairs, FloorElevatorItem,
+  FloorFurniture, FloorStairs, FloorRamp, FloorElevatorItem,
   FloorLabel, FloorSelection, FloorEditorMode,
 } from "./types";
+
+const ColorPickerImpl = lazy(() => import("../ui/ColorPicker"));
+function ColorPicker(props: { value: string; onChange: (c: string) => void }) {
+  return (
+    <Suspense fallback={<div className="h-10 rounded-xl border border-border bg-muted/30 animate-pulse" />}>
+      <ColorPickerImpl {...props} />
+    </Suspense>
+  );
+}
 
 type TabId = "basic" | "style" | "advanced";
 
@@ -19,6 +28,7 @@ interface FloorPropertiesPanelProps {
   windows: FloorWindow[];
   furniture: FloorFurniture[];
   stairs: FloorStairs[];
+  ramps: FloorRamp[];
   elevators: FloorElevatorItem[];
   labels: FloorLabel[];
   onUpdateRoom: (id: string, changes: Partial<FloorRoom>) => void;
@@ -27,8 +37,10 @@ interface FloorPropertiesPanelProps {
   onUpdateWindow: (id: string, changes: Partial<FloorWindow>) => void;
   onUpdateFurniture: (id: string, changes: Partial<FloorFurniture>) => void;
   onUpdateStairs: (id: string, changes: Partial<FloorStairs>) => void;
+  onUpdateRamp: (id: string, changes: Partial<FloorRamp>) => void;
   onUpdateElevator: (id: string, changes: Partial<FloorElevatorItem>) => void;
   onUpdateLabel: (id: string, changes: Partial<FloorLabel>) => void;
+  onToggleNavConnection: (room: FloorRoom) => void;
   onDeleteSelected: () => void;
   onClose: () => void;
 }
@@ -47,9 +59,10 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 export function FloorPropertiesPanel({
   selected, mode,
-  rooms, walls, doors, windows, furniture, stairs, elevators, labels,
+  rooms, walls, doors, windows, furniture, stairs, ramps, elevators, labels,
   onUpdateRoom, onUpdateWall, onUpdateDoor, onUpdateWindow,
-  onUpdateFurniture, onUpdateStairs, onUpdateElevator, onUpdateLabel,
+  onUpdateFurniture,  onUpdateStairs, onUpdateRamp, onUpdateElevator, onUpdateLabel,
+  onToggleNavConnection,
   onDeleteSelected, onClose,
 }: FloorPropertiesPanelProps) {
   const [tab, setTab] = useState<TabId>("basic");
@@ -65,13 +78,14 @@ export function FloorPropertiesPanel({
   const selWindow = selected.type === "window" ? windows.find((w) => w.id === selected.id) : undefined;
   const selFurniture = selected.type === "furniture" ? furniture.find((f) => f.id === selected.id) : undefined;
   const selStairs = selected.type === "stairs" ? stairs.find((s) => s.id === selected.id) : undefined;
+  const selRamp = selected.type === "ramp" ? ramps.find((r) => r.id === selected.id) : undefined;
   const selElevator = selected.type === "elevator" ? elevators.find((e) => e.id === selected.id) : undefined;
   const selLabel = selected.type === "label" ? labels.find((l) => l.id === selected.id) : undefined;
 
-  const selItem = selRoom || selWall || selDoor || selWindow || selFurniture || selStairs || selElevator || selLabel;
+  const selItem = selRoom || selWall || selDoor || selWindow || selFurniture || selStairs || selRamp || selElevator || selLabel;
 
   const contentType = selRoom ? "Room" : selWall ? "Wall" : selDoor ? "Door" : selWindow ? "Window"
-    : selFurniture ? "Furniture" : selStairs ? "Stairs" : selElevator ? "Elevator" : selLabel ? "Label" : "Item";
+    : selFurniture ? "Furniture" : selStairs ? "Stairs" : selRamp ? "Ramp" : selElevator ? "Elevator" : selLabel ? "Label" : "Item";
 
   // Shared field renderer for position & size
   const PositionFields = ({ x, y, onChange }: { x: number; y: number; onChange: (k: string, v: number) => void }) => (
@@ -172,6 +186,31 @@ export function FloorPropertiesPanel({
               <>
                 <PositionFields x={selRoom.x} y={selRoom.y} onChange={(k, v) => onUpdateRoom(selRoom.id, { [k]: v })} />
                 <SizeFields w={selRoom.w} h={selRoom.h} />
+
+                {/* ── Navigation Connection ── */}
+                <div className="pt-3 border-t border-border space-y-2">
+                  <span className={labelCls}>Navigation</span>
+                  {selRoom.navConnection ? (
+                    <>
+                      <div className="flex items-center gap-2 px-3 py-2 rounded-xl border border-emerald-200 dark:border-emerald-800/40 bg-emerald-50/50 dark:bg-emerald-900/10">
+                        <Navigation className="h-4 w-4 text-emerald-600 shrink-0" />
+                        <span className="text-[10px] font-medium text-emerald-700 dark:text-emerald-400">
+                          Connected at ({selRoom.navConnection.x}, {selRoom.navConnection.y})
+                        </span>
+                      </div>
+                      <button onClick={() => onToggleNavConnection(selRoom)}
+                        className="w-full h-9 rounded-xl border border-destructive/30 text-xs font-bold text-destructive hover:bg-destructive/10 transition-colors flex items-center justify-center gap-1.5">
+                        <Unlink className="h-3 w-3" /> Disconnect
+                      </button>
+                    </>
+                  ) : (
+                    <button onClick={() => onToggleNavConnection(selRoom)}
+                      className="w-full h-9 rounded-xl border border-emerald-300 dark:border-emerald-700/40 text-xs font-bold text-emerald-700 dark:text-emerald-400 bg-emerald-50/50 dark:bg-emerald-900/10 hover:bg-emerald-100 dark:hover:bg-emerald-900/30 transition-all flex items-center justify-center gap-1.5">
+                      <Navigation className="h-3 w-3" /> Connect to Navigation
+                    </button>
+                  )}
+                </div>
+
                 <div className="pt-3 border-t border-border">
                   <button onClick={onDeleteSelected}
                     className="w-full h-9 rounded-xl border border-destructive/30 text-xs font-bold text-destructive hover:bg-destructive/10 transition-colors">
@@ -209,12 +248,9 @@ export function FloorPropertiesPanel({
               </>
             )}
             {tab === "style" && (
-              <>
-                <Field label="Color">
-                  <input type="color" value={selWall.color} onChange={(e) => onUpdateWall(selWall.id, { color: e.target.value })}
-                    className="w-full h-9 rounded-xl border border-border cursor-pointer" />
-                </Field>
-              </>
+              <Field label="Color">
+                <ColorPicker value={selWall.color} onChange={(c) => onUpdateWall(selWall.id, { color: c })} />
+              </Field>
             )}
             {tab === "advanced" && (
               <>
@@ -265,8 +301,7 @@ export function FloorPropertiesPanel({
             )}
             {tab === "style" && (
               <Field label="Color">
-                <input type="color" value={selDoor.color} onChange={(e) => onUpdateDoor(selDoor.id, { color: e.target.value })}
-                  className="w-full h-9 rounded-xl border border-border cursor-pointer" />
+                <ColorPicker value={selDoor.color} onChange={(c) => onUpdateDoor(selDoor.id, { color: c })} />
               </Field>
             )}
             {tab === "advanced" && (
@@ -294,8 +329,7 @@ export function FloorPropertiesPanel({
             )}
             {tab === "style" && (
               <Field label="Color">
-                <input type="color" value={selWindow.color} onChange={(e) => onUpdateWindow(selWindow.id, { color: e.target.value })}
-                  className="w-full h-9 rounded-xl border border-border cursor-pointer" />
+                <ColorPicker value={selWindow.color} onChange={(c) => onUpdateWindow(selWindow.id, { color: c })} />
               </Field>
             )}
             {tab === "advanced" && (
@@ -331,8 +365,7 @@ export function FloorPropertiesPanel({
             {tab === "style" && (
               <>
                 <Field label="Color">
-                  <input type="color" value={selFurniture.color} onChange={(e) => onUpdateFurniture(selFurniture.id, { color: e.target.value })}
-                    className="w-full h-9 rounded-xl border border-border cursor-pointer" />
+                  <ColorPicker value={selFurniture.color} onChange={(c) => onUpdateFurniture(selFurniture.id, { color: c })} />
                 </Field>
                 <Field label="Rotation">
                   <div className="flex items-center gap-2">
@@ -376,6 +409,16 @@ export function FloorPropertiesPanel({
                     <option value="both">Both</option>
                   </select>
                 </Field>
+                {/* ── Shared ID (for linking the same stairwell across floors) ── */}
+                <Field label="Shared ID">
+                  <input value={selStairs.sharedId ?? ""} onChange={(e) => onUpdateStairs(selStairs.id, { sharedId: e.target.value || undefined })}
+                    className={inputCls} placeholder="e.g. shared_stair_mab_1" />
+                </Field>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" checked={!!selStairs.accessible} onChange={(e) => onUpdateStairs(selStairs.id, { accessible: e.target.checked })}
+                    className="rounded border-border accent-primary h-4 w-4" />
+                  <span className="text-[11px] font-medium text-foreground">Wheelchair accessible</span>
+                </label>
               </>
             )}
             {tab === "advanced" && (
@@ -386,6 +429,58 @@ export function FloorPropertiesPanel({
                   <button onClick={onDeleteSelected}
                     className="w-full h-9 rounded-xl border border-destructive/30 text-xs font-bold text-destructive hover:bg-destructive/10 transition-colors">
                     Delete Stairs
+                  </button>
+                </div>
+              </>
+            )}
+          </>
+        )}
+
+        {/* ═══ RAMP ═══ */}
+        {selRamp && (
+          <>
+            {tab === "basic" && (
+              <>
+                <Field label="Label">
+                  <input value={selRamp.label} onChange={(e) => onUpdateRamp(selRamp.id, { label: e.target.value })}
+                    className={inputCls} placeholder="e.g. Wheelchair Ramp" />
+                </Field>
+                <Field label="Direction">
+                  <select value={selRamp.direction ?? "both"} onChange={(e) => onUpdateRamp(selRamp.id, { direction: e.target.value as any })}
+                    className="w-full h-9 px-3 rounded-xl border border-border bg-input-background text-foreground text-xs focus:outline-none focus:ring-2 focus:ring-primary/30">
+                    <option value="up">Up</option>
+                    <option value="down">Down</option>
+                    <option value="both">Both</option>
+                  </select>
+                </Field>
+                <Field label="Slope">
+                  <select value={selRamp.slope ?? "gentle"} onChange={(e) => onUpdateRamp(selRamp.id, { slope: e.target.value as any })}
+                    className="w-full h-9 px-3 rounded-xl border border-border bg-input-background text-foreground text-xs focus:outline-none focus:ring-2 focus:ring-primary/30">
+                    <option value="gentle">Gentle</option>
+                    <option value="medium">Medium</option>
+                    <option value="steep">Steep</option>
+                  </select>
+                </Field>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" checked={!!selRamp.handrails} onChange={(e) => onUpdateRamp(selRamp.id, { handrails: e.target.checked })}
+                    className="rounded border-border accent-primary h-4 w-4" />
+                  <span className="text-[11px] font-medium text-foreground">Handrails</span>
+                </label>
+                {/* ── Shared ID (for linking the same ramp across floors) ── */}
+                <Field label="Shared ID">
+                  <input value={selRamp.sharedId ?? ""} onChange={(e) => onUpdateRamp(selRamp.id, { sharedId: e.target.value || undefined })}
+                    className={inputCls} placeholder="e.g. shared_ramp_mab_1" />
+                </Field>
+              </>
+            )}
+            {tab === "advanced" && (
+              <>
+                <PositionFields x={selRamp.x} y={selRamp.y} onChange={(k, v) => onUpdateRamp(selRamp.id, { [k]: v })} />
+                <SizeFields w={selRamp.width} h={selRamp.height} />
+                <div className="pt-3 border-t border-border">
+                  <button onClick={onDeleteSelected}
+                    className="w-full h-9 rounded-xl border border-destructive/30 text-xs font-bold text-destructive hover:bg-destructive/10 transition-colors">
+                    Delete Ramp
                   </button>
                 </div>
               </>
@@ -405,6 +500,27 @@ export function FloorPropertiesPanel({
                 <Field label="Door Width">
                   <input type="number" min={4} max={12} value={selElevator.doorWidth} onChange={(e) => onUpdateElevator(selElevator.id, { doorWidth: parseInt(e.target.value) || 6 })}
                     className={inputCls} />
+                </Field>
+                {/* ── Shared ID (for linking the same elevator across floors) ── */}
+                <Field label="Shared ID">
+                  <input value={selElevator.sharedId ?? ""} onChange={(e) => onUpdateElevator(selElevator.id, { sharedId: e.target.value || undefined })}
+                    className={inputCls} placeholder="e.g. shared_el_mab_1" />
+                </Field>
+                {/* ── Connected floors display ── */}
+                <Field label="Connected Floors">
+                  <div className="px-3 py-2 rounded-xl border border-border bg-muted/20 text-xs text-muted-foreground min-h-[2rem]">
+                    {selElevator.floors && selElevator.floors.length > 0 ? (
+                      <div className="flex flex-wrap gap-1">
+                        {selElevator.floors.map((f) => (
+                          <span key={f} className="inline-flex items-center px-2 py-0.5 rounded-md bg-purple-100 dark:bg-purple-900/20 text-purple-700 dark:text-purple-400 text-[9px] font-bold">
+                            {f === 1 ? "Ground" : `Floor ${f}`}
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <span className="text-muted-foreground/60 italic">All floors (default)</span>
+                    )}
+                  </div>
                 </Field>
               </>
             )}
@@ -435,8 +551,7 @@ export function FloorPropertiesPanel({
             {tab === "style" && (
               <>
                 <Field label="Color">
-                  <input type="color" value={selLabel.color} onChange={(e) => onUpdateLabel(selLabel.id, { color: e.target.value })}
-                    className="w-full h-9 rounded-xl border border-border cursor-pointer" />
+                  <ColorPicker value={selLabel.color} onChange={(c) => onUpdateLabel(selLabel.id, { color: c })} />
                 </Field>
                 <Field label="Font Size">
                   <div className="flex items-center gap-2">

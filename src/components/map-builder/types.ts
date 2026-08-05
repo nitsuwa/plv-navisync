@@ -5,7 +5,7 @@ export type CampusStatus = "active" | "hidden" | "archived";
 export type PublishStatus = "draft" | "published";
 
 /** Tools available on the campus canvas */
-export type SimpleTool = "select" | "marker" | "building" | "path" | "erase" | "room" | "pan" | "wall" | "door" | "window" | "stairs" | "elevator" | "furniture" | "text" | "measure";
+export type SimpleTool = "select" | "marker" | "building" | "path" | "erase" | "room" | "pan" | "wall" | "door" | "window" | "stairs" | "elevator" | "ramp" | "furniture" | "text" | "measure";
 
 /** Layer modes for the editor */
 export type EditorLayer = "campus" | "navigation" | "accessibility" | "emergency" | "events";
@@ -49,6 +49,8 @@ export interface FloorDoor {
   color: string;
   locked?: boolean;
   label?: string;
+  /** Whether this door is designated as an emergency exit */
+  isEmergencyExit?: boolean;
 }
 
 // ── Indoor Window ───────────────────────────────────────────────────────────
@@ -89,6 +91,31 @@ export interface FloorStairs {
   direction: StairDirection;
   label: string;
   floors?: number[];
+  /** Shared ID linking the same physical stairwell across multiple floors */
+  sharedId?: string;
+  /** Whether this staircase is wheelchair-accessible */
+  accessible?: boolean;
+}
+
+// ── Indoor Ramp (free placement) ───────────────────────────────────────────
+
+export interface FloorRamp {
+  id: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  label: string;
+  /** Ramp direction: which floor it connects from/to */
+  direction?: "up" | "down" | "both";
+  /** Shared ID linking the same ramp across floors */
+  sharedId?: string;
+  /** Whether this ramp has handrails */
+  handrails?: boolean;
+  /** Slope steepness */
+  slope?: "gentle" | "medium" | "steep";
+  /** Ramps are always wheelchair-accessible */
+  accessible?: boolean;
 }
 
 // ── Indoor Elevator (free placement) ────────────────────────────────────────
@@ -102,6 +129,10 @@ export interface FloorElevatorItem {
   doorWidth: number;
   label: string;
   floors?: number[];
+  /** Shared ID linking the same physical elevator across multiple floors */
+  sharedId?: string;
+  /** Whether this elevator is wheelchair-accessible (always true for elevators) */
+  accessible?: boolean;
 }
 
 // ── Indoor Label / Text ─────────────────────────────────────────────────────
@@ -131,14 +162,28 @@ export interface FloorRoom {
   h: number;
   description?: string;
   accessibility?: boolean;
+  /** Parent floor ID this room belongs to */
+  floorId: string;
+  /** Parent building ID this room belongs to */
+  buildingId: string;
   /** For stairs: which direction this staircase travels from this floor */
   stairDirection?: StairDirection;
   /** For elevators: explicit list of floor numbers this elevator stops at (empty = all floors) */
   elevatorFloors?: number[];
+  /** Navigation connection point — the door position where pathfinding enters this room.
+   * Auto-detected from the room edge closest to floor center. */
+  navConnection?: { x: number; y: number };
+  /** Campus navigation node ID — links this room to the campus-level navigation graph.
+   * Set when the admin assigns a nav access point to this room. */
+  accessNodeId?: string;
+  /** How this room is accessed from the navigation graph */
+  accessType?: "door" | "access_point";
 }
 
 export interface FloorPlan {
   id: string;
+  /** Parent building ID */
+  buildingId: string;
   number: number;
   label: string;
   rooms: FloorRoom[];
@@ -148,6 +193,7 @@ export interface FloorPlan {
   windows: FloorWindow[];
   furniture: FloorFurniture[];
   stairs: FloorStairs[];
+  ramps: FloorRamp[];
   elevators: FloorElevatorItem[];
   labels: FloorLabel[];
 }
@@ -185,6 +231,17 @@ export interface CampusBuilding {
   locked?: boolean;
   /** Which editor layer the building belongs to */
   layer?: string;
+  /** Entrance point on the campus map (canvas coordinates) */
+  entrance?: { x: number; y: number; label?: string };
+  /** Navigation node ID for the building entrance — links building to the campus nav graph */
+  entranceNodeId?: string;
+  /** Basic accessibility summary */
+  accessibility?: {
+    wheelchairAccessible: boolean;
+    hasElevator: boolean;
+    hasRamp: boolean;
+    accessibleEntrance: boolean;
+  };
 }
 
 export interface RoomResizeState {
@@ -206,6 +263,7 @@ export interface FloorUndoEntry {
   windows: FloorWindow[];
   furniture: FloorFurniture[];
   stairs: FloorStairs[];
+  ramps: FloorRamp[];
   elevators: FloorElevatorItem[];
   labels: FloorLabel[];
 }
@@ -224,6 +282,47 @@ export interface CampusMarker {
 export interface CampusPath {
   id: string;
   points: { x: number; y: number }[];
+  type: string;
+  color: string;
+  width: number;
+}
+
+// ── Navigation Node (Waypoint) ──────────────────────────────────────────────
+
+export type NavigationNodeType = "outdoor" | "entrance" | "hallway" | "room_access" | "stair" | "elevator" | "transition";
+
+export interface NavigationNode {
+  id: string;
+  name: string;
+  type: NavigationNodeType;
+  x: number;
+  y: number;
+  /** Campus ID this node belongs to */
+  campusId?: string;
+  /** Building ID if this node is associated with a building */
+  buildingId?: string;
+  /** Floor ID if this node is inside a specific floor */
+  floorId?: string;
+  /** Shared stair/elevator transition ID — links nav nodes across floors for the same physical stair/elevator */
+  transitionSharedId?: string;
+  accessible: boolean;
+  color: string;
+}
+
+export interface NavigationEdge {
+  id: string;
+  startNodeId: string;
+  endNodeId: string;
+  /** Auto-calculated distance in canvas units (converted to meters in student view) */
+  distance: number;
+  bidirectional: boolean;
+  accessible: boolean;
+  /** Reason this edge is not accessible (only relevant when accessible=false) */
+  inaccessibleReason?: "stairs" | "narrow_path" | "restricted_access" | "uneven_surface" | "other";
+  /** Whether this edge is safe to use during an emergency (defaults to true) */
+  emergencySafe?: boolean;
+  /** Reason this edge is unsafe during an emergency */
+  emergencyReason?: "hazard" | "blocked" | "restricted" | "construction" | "other";
   type: string;
   color: string;
   width: number;
@@ -256,7 +355,33 @@ export interface AccessibilityFeature {
   notes?: string;
 }
 
+// ── Assembly Point ─────────────────────────────────────────────────────────
+
+export interface AssemblyPoint {
+  id: string;
+  name: string;
+  x: number;
+  y: number;
+  /** Campus ID this assembly point belongs to */
+  campusId?: string;
+  /** Optional navigation node ID — links assembly point to the campus nav graph */
+  navNodeId?: string;
+  /** Capacity estimate */
+  capacity?: number;
+  /** Whether this assembly point is accessible */
+  accessible?: boolean;
+}
+
 // ── Event Overlay ───────────────────────────────────────────────────────────
+
+export interface EventLocationRef {
+  type: "building" | "room";
+  buildingId: string;
+  floorId?: string;
+  roomId?: string;
+  /** Human-readable label like "Engineering Building — Floor 2 — Room 204" */
+  label: string;
+}
 
 export interface CampusEventOverlay {
   id: string;
@@ -266,6 +391,8 @@ export interface CampusEventOverlay {
   dateEnd: string;
   organizer: string;
   markers: { x: number; y: number; color: string; label: string }[];
+  /** Reference to an existing campus location (room or building) */
+  locationRef?: EventLocationRef;
   restrictedAreas: { points: { x: number; y: number }[] }[];
   isActive: boolean;
 }
@@ -321,9 +448,16 @@ export interface Campus {
   buildings: CampusBuilding[];
   markers: CampusMarker[];
   paths: CampusPath[];
+  /** Navigation graph nodes (waypoints) */
+  navNodes?: NavigationNode[];
+  /** Navigation graph edges (connections between nodes) */
+  navEdges?: NavigationEdge[];
   routes?: CampusRoute[];
   accessibilityFeatures?: AccessibilityFeature[];
+  assemblyPoints?: AssemblyPoint[];
   eventOverlays?: CampusEventOverlay[];
+  /** Decorative outdoor assets (visual only — trees, benches, signs, etc.) */
+  decorAssets?: CampusDecorAsset[];
   createdAt: string;
   updatedAt: string;
   publishedAt?: string;
@@ -365,7 +499,11 @@ export type CampusSelection =
   | { type: "building"; id: string }
   | { type: "marker"; id: string }
   | { type: "path"; id: string }
-  | { type: "route"; id: string };
+  | { type: "route"; id: string }
+  | { type: "navNode"; id: string }
+  | { type: "decorAsset"; id: string }
+  | { type: "navEdge"; id: string }
+  | { type: "eventOverlay"; id: string };
 
 export type FloorSelection =
   | { type: "room"; id: string }
@@ -376,6 +514,7 @@ export type FloorSelection =
   | { type: "furniture"; id: string }
   | { type: "stairs"; id: string }
   | { type: "elevator"; id: string }
+  | { type: "ramp"; id: string }
   | { type: "label"; id: string };
 
 // ── Building wizard omit type ───────────────────────────────────────────────
@@ -427,3 +566,41 @@ export interface CanvasSizeOption {
 export type MapType = "campus-overview" | "building" | "floor-plan" | "outdoor-area" | "parking" | "other";
 
 export type MeasurementUnit = "pixels" | "meters" | "feet";
+
+// ── Decorative Asset (outdoor campus visual-only objects) ─────────────────
+
+export type DecorAssetType =
+  | "tree" | "tree-large" | "palm"
+  | "bench" | "bench-long"
+  | "plant" | "bush" | "flower"
+  | "sign" | "flag"
+  | "trash-bin" | "recycle-bin"
+  | "lamp-post" | "bollard"
+  | "bike-rack" | "fountain"
+  | "picnic-table" | "gazebo";
+
+export interface CampusDecorAsset {
+  id: string;
+  type: DecorAssetType;
+  x: number;
+  y: number;
+  rotation?: number;
+  scale?: number;
+  /** Whether this asset is visible on the canvas */
+  visible?: boolean;
+}
+
+// ── Building Type Descriptor (palette presets) ─────────────────────────────
+
+export interface BuildingTypeDescriptor {
+  id: string;
+  label: string;
+  category: string;
+  color: string;
+  icon: string;
+  /** Default width when placed on canvas */
+  defaultWidth: number;
+  /** Default height when placed on canvas */
+  defaultHeight: number;
+  description: string;
+}

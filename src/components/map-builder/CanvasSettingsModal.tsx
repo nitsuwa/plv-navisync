@@ -1,14 +1,22 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useMemo, lazy, Suspense } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import {
-  X, Ruler, Grid3X3, Palette, ZoomIn, CheckCircle2, Save,
-  AlertTriangle, Maximize2, Magnet, RotateCcw, Loader2,
+  X, Ruler, Palette, ZoomIn, CheckCircle2, Save,
+  AlertTriangle, Maximize2, RotateCcw,
 } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { CANVAS_SIZES } from "./constants";
 import { PLVLogo } from "../ui/PLVLogo";
-import { ColorPicker } from "../ui/ColorPicker";
-import type { Campus, CanvasSizeOption, MeasurementUnit } from "./types";
+import type { Campus } from "./types";
+
+const ColorPickerImpl = lazy(() => import("../ui/ColorPicker"));
+function ColorPicker(props: { value: string; onChange: (c: string) => void }) {
+  return (
+    <Suspense fallback={<div className="h-10 rounded-xl border border-border bg-muted/30 animate-pulse" />}>
+      <ColorPickerImpl {...props} />
+    </Suspense>
+  );
+}
 
 // ── Props ──────────────────────────────────────────────────────────────────
 
@@ -17,6 +25,28 @@ interface CanvasSettingsModalProps {
   campus: Campus;
   onSave: (updates: Partial<Campus>) => void;
   onClose: () => void;
+}
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+
+function gcd(a: number, b: number): number {
+  return b === 0 ? a : gcd(b, a % b);
+}
+
+function aspectRatioLabel(w: number, h: number): string {
+  if (w <= 0 || h <= 0) return "";
+  const g = gcd(w, h);
+  const aw = w / g;
+  const ah = h / g;
+  // Clamp to reasonable ratios for display
+  if (aw > 50 || ah > 50) return `${Math.round(w / h * 10) / 10}:1`;
+  return `${aw}:${ah}`;
+}
+
+function orientationLabel(w: number, h: number): string {
+  if (w > h) return "Landscape";
+  if (h > w) return "Portrait";
+  return "Square";
 }
 
 // ── Resize impact analysis ─────────────────────────────────────────────────
@@ -60,14 +90,24 @@ function analyzeResizeImpact(campus: Campus, newW: number, newH: number): Resize
   };
 }
 
+// ── Dimension presets ──────────────────────────────────────────────────────
+
+const DIMENSION_PRESETS = [
+  { id: "small", label: "Small", w: 600, h: 480, icon: "▭" as const },
+  { id: "medium", label: "Medium", w: 900, h: 680, icon: "▬" as const },
+  { id: "large", label: "Large", w: 1200, h: 900, icon: "▮" as const },
+  { id: "hd", label: "Wide", w: 1400, h: 800, icon: "▬" as const },
+  { id: "square", label: "Square", w: 800, h: 800, icon: "◻" as const },
+];
+
 // ── Saving overlay (loading screen) ──────────────────────────────────────────
 
 function SavingOverlay({ campusName }: { campusName: string }) {
   const [phase, setPhase] = useState(0);
   const steps = [
     "Validating settings…",
-    "Applying grid changes…",
-    "Updating canvas…",
+    "Applying canvas changes…",
+    "Updating editor…",
     "Finalizing…",
     "Ready!",
   ];
@@ -124,10 +164,8 @@ export function CanvasSettingsModal({ open, campus, onSave, onClose }: CanvasSet
   const [canvasW, setCanvasW] = useState(campus.canvasW);
   const [canvasH, setCanvasH] = useState(campus.canvasH);
 
-  // ── Grid & Units ──
-  const [gridSize, setGridSize] = useState(campus.gridSize ?? 20);
-  const [snapToGrid, setSnapToGrid] = useState(campus.snapToGrid ?? true);
-  const [measurementUnit, setMeasurementUnit] = useState<MeasurementUnit>(campus.measurementUnit ?? "pixels");
+  // ── Validation ──
+  const [validationError, setValidationError] = useState<string | null>(null);
 
   // ── Appearance ──
   const [canvasColor, setCanvasColor] = useState((campus as unknown as { canvasColor?: string }).canvasColor ?? "#f5f3ef");
@@ -145,13 +183,18 @@ export function CanvasSettingsModal({ open, campus, onSave, onClose }: CanvasSet
 
   const markChanged = () => setHasChanges(true);
 
-  // Reset local state when campus changes
+  // ── Validate dimensions ──
+  const validateDimensions = useCallback((w: number, h: number): string | null => {
+    if (w < 100 || h < 100) return "Dimensions must be at least 100px";
+    if (w > 5000 || h > 5000) return "Dimensions cannot exceed 5000px";
+    if (w * h > 25_000_000) return "Total area exceeds 25 million px². Consider smaller dimensions.";
+    return null;
+  }, []);
+
+  // Reset local state when campus opens
   useEffect(() => {
     setCanvasW(campus.canvasW);
     setCanvasH(campus.canvasH);
-    setGridSize(campus.gridSize ?? 20);
-    setSnapToGrid(campus.snapToGrid ?? true);
-    setMeasurementUnit(campus.measurementUnit ?? "pixels");
     setCanvasColor((campus as unknown as { canvasColor?: string }).canvasColor ?? "#f5f3ef");
     setDefaultZoom(campus.defaultZoom ?? 1);
     setShowResizeConfirm(false);
@@ -160,7 +203,12 @@ export function CanvasSettingsModal({ open, campus, onSave, onClose }: CanvasSet
     setShowSaveConfirm(false);
     setShowSaving(false);
     setShowUnsaved(false);
+    setValidationError(null);
   }, [campus, open]);
+
+  // ── Memoized derived values ──
+  const aspectRatio = useMemo(() => aspectRatioLabel(canvasW, canvasH), [canvasW, canvasH]);
+  const orientation = useMemo(() => orientationLabel(canvasW, canvasH), [canvasW, canvasH]);
 
   const hasObjects = campus.buildings.length > 0 || campus.markers.length > 0 || campus.paths.length > 0;
   const dimensionsChanged = canvasW !== campus.canvasW || canvasH !== campus.canvasH;
@@ -168,14 +216,19 @@ export function CanvasSettingsModal({ open, campus, onSave, onClose }: CanvasSet
   const willClip = impact.buildingsOutside > 0 || impact.markersOutside > 0;
 
   const buildUpdates = useCallback((): Partial<Campus> => ({
-    canvasW: Math.max(200, Math.min(5000, canvasW)),
-    canvasH: Math.max(200, Math.min(5000, canvasH)),
-    gridSize,
-    snapToGrid,
-    measurementUnit,
+    canvasW: Math.max(100, Math.min(5000, canvasW)),
+    canvasH: Math.max(100, Math.min(5000, canvasH)),
     canvasColor: canvasColor || undefined,
     defaultZoom,
-  }), [canvasW, canvasH, gridSize, snapToGrid, measurementUnit, canvasColor, defaultZoom]);
+  }), [canvasW, canvasH, canvasColor, defaultZoom]);
+
+  // ── Apply preset ──
+  const applyPreset = useCallback((w: number, h: number) => {
+    setCanvasW(w);
+    setCanvasH(h);
+    setValidationError(validateDimensions(w, h));
+    markChanged();
+  }, [validateDimensions]);
 
   // ── Close with unsaved-changes guard ──
   const handleClose = useCallback(() => {
@@ -187,6 +240,12 @@ export function CanvasSettingsModal({ open, campus, onSave, onClose }: CanvasSet
   }, [hasChanges, onClose]);
 
   const handleSave = useCallback(() => {
+    const err = validateDimensions(canvasW, canvasH);
+    if (err) {
+      setValidationError(err);
+      return;
+    }
+
     const updates = buildUpdates();
 
     // If resizing and there are objects that might be affected, show confirmation
@@ -198,13 +257,12 @@ export function CanvasSettingsModal({ open, campus, onSave, onClose }: CanvasSet
 
     // Show save confirmation
     setShowSaveConfirm(true);
-  }, [buildUpdates, dimensionsChanged, hasObjects, willClip]);
+  }, [buildUpdates, dimensionsChanged, hasObjects, willClip, canvasW, canvasH, validateDimensions]);
 
   const handleConfirmSave = useCallback(() => {
     setShowSaveConfirm(false);
     setShowSaving(true);
     const updates = buildUpdates();
-    // Show loading for ~1.5s to let changes reflect, then save & close
     setTimeout(() => {
       onSave({ ...updates, canvasConfigured: true });
       setShowSaving(false);
@@ -230,11 +288,7 @@ export function CanvasSettingsModal({ open, campus, onSave, onClose }: CanvasSet
   if (!open) return null;
 
   const hasChangesSummary = [
-    canvasW !== campus.canvasW ? "Canvas size" : null,
-    canvasH !== campus.canvasH ? "Canvas size" : null,
-    gridSize !== (campus.gridSize ?? 20) ? "Grid size" : null,
-    snapToGrid !== (campus.snapToGrid ?? true) ? "Snap setting" : null,
-    measurementUnit !== (campus.measurementUnit ?? "pixels") ? "Measurement unit" : null,
+    canvasW !== campus.canvasW || canvasH !== campus.canvasH ? "Canvas dimensions" : null,
     canvasColor !== ((campus as unknown as { canvasColor?: string }).canvasColor ?? "#f5f3ef") ? "Canvas color" : null,
     defaultZoom !== (campus.defaultZoom ?? 1) ? "Default zoom" : null,
   ].filter(Boolean);
@@ -280,33 +334,161 @@ export function CanvasSettingsModal({ open, campus, onSave, onClose }: CanvasSet
                 <Maximize2 className="h-4 w-4 text-muted-foreground" />
                 <span className="text-xs font-extrabold text-foreground uppercase tracking-wide">Canvas Dimensions</span>
               </div>
+
+              {/* Preset size buttons */}
+              <div className="grid grid-cols-5 gap-1.5 mb-4">
+                {DIMENSION_PRESETS.map((preset) => {
+                  const isActive = canvasW === preset.w && canvasH === preset.h;
+                  return (
+                    <button
+                      key={preset.id}
+                      type="button"
+                      onClick={() => applyPreset(preset.w, preset.h)}
+                      className={cn(
+                        "flex flex-col items-center gap-0.5 py-2 px-1 rounded-xl text-[10px] font-bold transition-all border",
+                        isActive
+                          ? "bg-primary text-primary-foreground border-primary shadow-sm"
+                          : "bg-input-background text-muted-foreground border-border hover:border-primary/30 hover:text-foreground"
+                      )}
+                    >
+                      <span className="text-sm leading-none">{preset.icon}</span>
+                      <span>{preset.label}</span>
+                      <span className="text-[8px] font-mono opacity-70">{preset.w}×{preset.h}</span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Width & Height inputs */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-[10px] font-bold uppercase tracking-wide mb-1.5 text-muted-foreground">Width (px)</label>
                   <input
                     type="number"
-                    min={200}
+                    min={100}
                     max={5000}
                     value={canvasW}
-                    onChange={(e) => { const v = parseInt(e.target.value); if (!isNaN(v) && v > 0) setCanvasW(v); else if (e.target.value === "") setCanvasW(0); markChanged(); }}
-                    className="w-full h-10 px-3.5 rounded-xl border border-border bg-input-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition-shadow"
+                    onChange={(e) => {
+                      const v = parseInt(e.target.value);
+                      if (!isNaN(v) && v > 0) {
+                        setCanvasW(v);
+                        setValidationError(validateDimensions(v, canvasH));
+                      } else if (e.target.value === "") {
+                        setCanvasW(0);
+                        setValidationError(null);
+                      }
+                      markChanged();
+                    }}
+                    className={cn(
+                      "w-full h-10 px-3.5 rounded-xl border bg-input-background text-foreground text-sm focus:outline-none focus:ring-2 transition-shadow",
+                      validationError ? "border-destructive focus:ring-destructive/30" : "border-border focus:ring-primary/30"
+                    )}
                   />
                 </div>
                 <div>
                   <label className="block text-[10px] font-bold uppercase tracking-wide mb-1.5 text-muted-foreground">Height (px)</label>
                   <input
                     type="number"
-                    min={200}
+                    min={100}
                     max={5000}
                     value={canvasH}
-                    onChange={(e) => { const v = parseInt(e.target.value); if (!isNaN(v) && v > 0) setCanvasH(v); else if (e.target.value === "") setCanvasH(0); markChanged(); }}
-                    className="w-full h-10 px-3.5 rounded-xl border border-border bg-input-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition-shadow"
+                    onChange={(e) => {
+                      const v = parseInt(e.target.value);
+                      if (!isNaN(v) && v > 0) {
+                        setCanvasH(v);
+                        setValidationError(validateDimensions(canvasW, v));
+                      } else if (e.target.value === "") {
+                        setCanvasH(0);
+                        setValidationError(null);
+                      }
+                      markChanged();
+                    }}
+                    className={cn(
+                      "w-full h-10 px-3.5 rounded-xl border bg-input-background text-foreground text-sm focus:outline-none focus:ring-2 transition-shadow",
+                      validationError ? "border-destructive focus:ring-destructive/30" : "border-border focus:ring-primary/30"
+                    )}
                   />
                 </div>
               </div>
 
+              {/* Validation error */}
+              {validationError && (
+                <motion.div
+                  initial={{ opacity: 0, y: -4 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="mt-2 flex items-center gap-1.5 text-[10px] font-bold text-destructive"
+                >
+                  <AlertTriangle className="h-3 w-3 shrink-0" />
+                  {validationError}
+                </motion.div>
+              )}
+
+              {/* Aspect ratio & orientation badge */}
+              {canvasW > 0 && canvasH > 0 && !validationError && (
+                <div className="mt-3 flex items-center gap-2">
+                  <div className={cn(
+                    "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold border",
+                    orientation === "Landscape"
+                      ? "bg-blue-50/50 dark:bg-blue-900/10 border-blue-200 dark:border-blue-800/30 text-blue-700 dark:text-blue-300"
+                      : orientation === "Portrait"
+                        ? "bg-purple-50/50 dark:bg-purple-900/10 border-purple-200 dark:border-purple-800/30 text-purple-700 dark:text-purple-300"
+                        : "bg-green-50/50 dark:bg-green-900/10 border-green-200 dark:border-green-800/30 text-green-700 dark:text-green-300"
+                  )}>
+                    <span>{orientation}</span>
+                  </div>
+                  <span className="text-[10px] font-mono text-muted-foreground/60">
+                    {canvasW} × {canvasH} px
+                  </span>
+                  <span className="text-[10px] font-mono text-muted-foreground/40">
+                    ({aspectRatio})
+                  </span>
+                  {/* Megapixel badge */}
+                  <span className="text-[9px] font-mono text-muted-foreground/30 ml-auto">
+                    {(canvasW * canvasH / 1_000_000).toFixed(1)} MP
+                  </span>
+                </div>
+              )}
+
+              {/* Visual aspect-ratio preview */}
+              {canvasW > 0 && canvasH > 0 && !validationError && (
+                <div className="mt-3 rounded-xl border border-border bg-muted/15 p-3">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="text-[8px] font-extrabold uppercase tracking-widest text-muted-foreground/50">Preview</span>
+                    <span className="text-[8px] font-mono text-muted-foreground/30">{orientation} · {aspectRatio}</span>
+                  </div>
+                  <div
+                    className="rounded-lg mx-auto border border-border/40 overflow-hidden transition-all duration-300 relative"
+                    style={{
+                      width: "100%", maxWidth: 240,
+                      aspectRatio: `${canvasW} / ${canvasH}`,
+                      background: canvasColor || "#f5f3ef",
+                    }}
+                  >
+                    {/* Checkerboard pattern for light backgrounds */}
+                    <div
+                      className="absolute inset-0 opacity-[0.04]"
+                      style={{
+                        backgroundImage: "repeating-conic-gradient(#000 0% 25%, transparent 0% 50%)",
+                        backgroundSize: "8px 8px",
+                      }}
+                    />
+                    {/* Dimension label */}
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <span className="text-[10px] font-mono font-bold text-foreground/20 select-none">
+                        {canvasW} × {canvasH}
+                      </span>
+                    </div>
+                    {/* Aspect ratio diagonal guide lines */}
+                    <svg className="absolute inset-0 w-full h-full pointer-events-none" viewBox={`0 0 ${canvasW} ${canvasH}`} preserveAspectRatio="none">
+                      <line x1={0} y1={0} x2={canvasW} y2={canvasH} stroke="currentColor" strokeWidth={1} opacity={0.06} />
+                      <line x1={canvasW} y1={0} x2={0} y2={canvasH} stroke="currentColor" strokeWidth={1} opacity={0.06} />
+                    </svg>
+                  </div>
+                </div>
+              )}
+
               {/* Resize impact warning */}
-              {dimensionsChanged && hasObjects && (
+              {dimensionsChanged && hasObjects && !validationError && (
                 <div className={cn(
                   "mt-3 flex items-start gap-2.5 p-3 rounded-xl border text-xs leading-relaxed",
                   willClip
@@ -347,84 +529,6 @@ export function CanvasSettingsModal({ open, campus, onSave, onClose }: CanvasSet
 
             <div className="h-px bg-border" />
 
-            {/* ── Grid & Units section ── */}
-            <div>
-              <div className="flex items-center gap-2 mb-3">
-                <Grid3X3 className="h-4 w-4 text-muted-foreground" />
-                <span className="text-xs font-extrabold text-foreground uppercase tracking-wide">Grid & Units</span>
-              </div>
-
-              {/* Grid size */}
-              <div className="mb-4">
-                <label className="block text-[10px] font-bold uppercase tracking-wide mb-2 text-muted-foreground">Grid Size</label>
-                <div className="flex items-center gap-2">
-                  {[10, 20, 40, 80].map((size) => (
-                    <button
-                      key={size}
-                      type="button"
-                      onClick={() => { setGridSize(size); markChanged(); }}
-                      className={cn(
-                        "flex-1 h-10 rounded-xl font-bold text-xs transition-all border",
-                        gridSize === size
-                          ? "bg-primary text-primary-foreground border-primary shadow-sm"
-                          : "bg-input-background text-muted-foreground border-border hover:border-primary/30 hover:text-foreground"
-                      )}
-                    >
-                      {size}px
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Snap to grid */}
-              <div className="flex items-center justify-between p-3.5 rounded-xl border border-border bg-muted/20 mb-4">
-                <div className="flex items-center gap-2.5">
-                  <Magnet className="h-4 w-4 text-muted-foreground" />
-                  <div>
-                    <p className="text-xs font-bold text-foreground">Snap to Grid</p>
-                    <p className="text-[10px] text-muted-foreground">Elements snap to grid intersections</p>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => { setSnapToGrid((v) => !v); markChanged(); }}
-                  className={cn(
-                    "relative w-10 h-5 rounded-full transition-colors",
-                    snapToGrid ? "bg-primary" : "bg-muted-foreground/30"
-                  )}
-                >
-                  <div className={cn(
-                    "absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform",
-                    snapToGrid ? "translate-x-5" : "translate-x-0.5"
-                  )} />
-                </button>
-              </div>
-
-              {/* Measurement units */}
-              <div>
-                <label className="block text-[10px] font-bold uppercase tracking-wide mb-2 text-muted-foreground">Measurement Units</label>
-                <div className="flex items-center gap-2">
-                  {(["pixels", "meters", "feet"] as MeasurementUnit[]).map((unit) => (
-                    <button
-                      key={unit}
-                      type="button"
-                      onClick={() => { setMeasurementUnit(unit); markChanged(); }}
-                      className={cn(
-                        "flex-1 h-10 rounded-xl font-bold text-xs transition-all border capitalize",
-                        measurementUnit === unit
-                          ? "bg-primary text-primary-foreground border-primary shadow-sm"
-                          : "bg-input-background text-muted-foreground border-border hover:border-primary/30 hover:text-foreground"
-                      )}
-                    >
-                      {unit}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            <div className="h-px bg-border" />
-
             {/* ── Appearance section ── */}
             <div>
               <div className="flex items-center gap-2 mb-3">
@@ -432,7 +536,7 @@ export function CanvasSettingsModal({ open, campus, onSave, onClose }: CanvasSet
                 <span className="text-xs font-extrabold text-foreground uppercase tracking-wide">Canvas Background</span>
               </div>
 
-              {/* Canvas background color — using the same ColorPicker from CampusWizard */}
+              {/* Canvas background color */}
               <div className="mb-4">
                 <label className="block text-[10px] font-bold uppercase tracking-wide mb-2 text-muted-foreground">Background Color</label>
                 <ColorPicker
@@ -472,15 +576,12 @@ export function CanvasSettingsModal({ open, campus, onSave, onClose }: CanvasSet
           <div className="flex items-center justify-between px-6 py-4 border-t border-border shrink-0 bg-muted/20">
             <button
               onClick={() => {
-                // Reset to original values
                 setCanvasW(campus.canvasW);
                 setCanvasH(campus.canvasH);
-                setGridSize(campus.gridSize ?? 20);
-                setSnapToGrid(campus.snapToGrid ?? true);
-                setMeasurementUnit(campus.measurementUnit ?? "pixels");
                 setCanvasColor((campus as unknown as { canvasColor?: string }).canvasColor ?? "#f5f3ef");
                 setDefaultZoom(campus.defaultZoom ?? 1);
                 setHasChanges(false);
+                setValidationError(null);
               }}
               className="flex items-center gap-1.5 h-10 px-4 rounded-xl border border-border text-xs font-bold text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
             >

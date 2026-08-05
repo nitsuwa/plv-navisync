@@ -15,7 +15,7 @@ import { useStudentAuth } from "../../hooks/useStudentAuth";  const TABS = [
 
 export function MobileBottomNav() {
   const { pathname } = useLocation();
-  const studentAuth = useStudentAuth();
+  const { loading: authLoading, isStudent } = useStudentAuth();
 
   const isActive = (to: string) =>
     to === "/"
@@ -57,7 +57,7 @@ export function MobileBottomNav() {
 
             {TABS.map(({ to, icon: Icon, label, auth }) => {
               const active = isActive(to);
-              const href = auth && !studentAuth ? "/admin" : to;
+              const href = auth && !isStudent && !authLoading ? "/admin" : to;
 
               return (
                 <Link

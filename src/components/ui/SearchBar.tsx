@@ -5,6 +5,8 @@ import { useSearchKeyboard } from "../../hooks/useSearchKeyboard";
 
 interface SearchBarProps {
   placeholder?: string;
+  /** Accessible label for the input (defaults to "Search") */
+  label?: string;
   onSearch?: (query: string) => void;
   onClear?: () => void;
   className?: string;
@@ -18,6 +20,7 @@ interface SearchBarProps {
 
 export function SearchBar({
   placeholder = "Search...",
+  label = "Search",
   onSearch,
   onClear,
   className,
@@ -69,7 +72,7 @@ export function SearchBar({
         onChange={(e) => onSearch?.(e.target.value)}
         placeholder={placeholder}
         disabled={disabled}
-        aria-label="Search"
+        aria-label={label}
         className={cn(
           "w-full rounded-xl border border-border bg-input-background text-foreground placeholder:text-muted-foreground",
           "transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary",

@@ -1,8 +1,10 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Building2, Navigation, MapPin, Search, Bookmark, Trash2, Sparkles } from "lucide-react";
 import { SearchBar } from "../components/ui/SearchBar";
 import { motion, AnimatePresence } from "motion/react";
 import { MOCK_BUILDINGS } from "../data/mockData";
+import { useCampusData } from "../contexts/CampusDataContext";
+import { buildingsFromCampus } from "../lib/mapDataAdapter";
 import { Link, useNavigate } from "react-router";
 import { useStudentAuth } from "../hooks/useStudentAuth";
 import { StudentPageHeader } from "../components/ui/StudentPageHeader";
@@ -11,6 +13,7 @@ import { EmptyState } from "../components/ui/EmptyState";
 import { SkeletonList } from "../components/ui/Skeleton";
 import { useScrollReveal } from "../hooks/useScrollReveal";
 import { cn } from "../lib/utils";
+import type { Building } from "../types";
 
 // ═════════════════════════════════════════════════════════════════════════════
 // ── Scroll-reveal wrapper ───────────────────────────────────────────────────
@@ -49,12 +52,24 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
 const INITIAL_SAVED = ["b2", "b3", "b5"];
 
 export function StudentFavoritesPage() {
-  const studentAuth = useStudentAuth();
+  const { loading: authLoading, isStudent } = useStudentAuth();
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [savedIds, setSavedIds] = useState<string[]>(INITIAL_SAVED);
   const [search, setSearch] = useState("");
   const [removingId, setRemovingId] = useState<string | null>(null);
+  const campusData = useCampusData();
+
+  // Derive buildings from published campus data, fall back to hardcoded data
+  const buildings: Building[] = useMemo(() => {
+    const activeCampus = campusData.campuses.find(
+      (c) => c.publishStatus !== "draft" && c.status !== "archived"
+    );
+    if (activeCampus) {
+      return buildingsFromCampus(activeCampus) as Building[];
+    }
+    return MOCK_BUILDINGS;
+  }, [campusData.campuses]);
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: "instant" });
@@ -62,12 +77,9 @@ export function StudentFavoritesPage() {
     return () => clearTimeout(t);
   }, []);
 
-  if (!studentAuth) {
-    navigate("/admin");
-    return null;
-  }
-
-  if (loading) return (
+  // Wait for the Supabase session/profile check before deciding. Reuse the
+  // branded skeleton so there is no blank flash while the session resolves.
+  if (authLoading || loading) return (
     <PageTransition>
       <div className="max-w-2xl mx-auto px-5 py-6">
         <SkeletonList count={4} />
@@ -75,7 +87,12 @@ export function StudentFavoritesPage() {
     </PageTransition>
   );
 
-  const savedBuildings = MOCK_BUILDINGS.filter(b => savedIds.includes(b.id));
+  if (!isStudent) {
+    navigate("/admin");
+    return null;
+  }
+
+  const savedBuildings = buildings.filter(b => savedIds.includes(b.id));
   const filtered = search.trim()
     ? savedBuildings.filter(b =>
         b.name.toLowerCase().includes(search.toLowerCase()) ||

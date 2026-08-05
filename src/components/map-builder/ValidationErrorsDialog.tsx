@@ -14,6 +14,8 @@ import { cn } from "../../lib/utils";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
+export type ValidationSeverity = "error" | "warning" | "info";
+
 export interface ValidationIssue {
   /** Machine-readable type for grouping */
   type:
@@ -22,11 +24,59 @@ export interface ValidationIssue {
     | "missing_code"
     | "boundary"
     | "no_floors"
-    | "overlap";
+    | "overlap"
+    | "empty_floor"
+    | "no_buildings"
+    | "no_stairs_elevator"
+    | "room_no_nav_connection"
+    | "nav_disconnected"
+    | "no_elevator_accessible"
+    | "no_accessible_rooms"
+    | "no_routes"
+    | "duplicate_code"
+    | "canvas_not_configured"
+    | "room_out_of_bounds"
+    | "missing_room_name"
+    | "building_entrance_disconnected"
+    | "room_no_nav_access"
+    | "nav_dest_invalid_entity"
+    | "unreachable_room"
+    | "room_no_type"
+    // ── Phase 1: Hierarchy integrity checks ──
+    | "floor_no_building"
+    | "room_no_floor"
+    | "duplicate_id"
+    | "invalid_reference"
+    // ── Phase 2: Navigation graph checks ──
+    | "isolated_node"
+    | "nav_edge_orphan"
+    | "nav_duplicate_id"
+    | "zero_length_edge"
+    // ── Phase 4: Multi-floor transition checks ──
+    | "elevator_incomplete"
+    | "stair_incomplete"
+    | "no_floor_transition"
+    | "stair_disconnected_nav"
+    | "elevator_disconnected_nav"
+    // ── Phase 6: Emergency checks ──
+    | "emergency_exit_no_nav"
+    | "assembly_point_unreachable"
+    | "room_no_evacuation_route"
+    | "emergency_route_blocked"
+    // ── Phase 7: Event checks ──
+    | "event_no_location"
+    | "event_location_deleted"
+    | "event_location_unreachable";
+  /** Severity level */
+  severity: ValidationSeverity;
   /** Human-readable message explaining how to fix */
   message: string;
   /** Building ID (if the issue is building-specific) */
   buildingId?: string;
+  /** Floor ID (if the issue is floor-specific) */
+  floorId?: string;
+  /** Room ID (if the issue is room-specific) */
+  roomId?: string;
 }
 
 interface ValidationCategory {
@@ -41,7 +91,7 @@ interface ValidationCategory {
 const CATEGORIES: Record<string, ValidationCategory> = {
   boundary: {
     id: "boundary",
-    label: "Boundary Issues",
+    label: "Boundary & Layout",
     icon: Ruler,
     color: "#dc2626",
     bgClass: "bg-red-50 dark:bg-red-900/10",
@@ -63,6 +113,30 @@ const CATEGORIES: Record<string, ValidationCategory> = {
     bgClass: "bg-red-50 dark:bg-red-900/10",
     borderClass: "border-red-200 dark:border-red-800/30",
   },
+  navigation: {
+    id: "navigation",
+    label: "Navigation",
+    icon: MapPin,
+    color: "#16a34a",
+    bgClass: "bg-green-50 dark:bg-green-900/10",
+    borderClass: "border-green-200 dark:border-green-800/30",
+  },
+  accessibility: {
+    id: "accessibility",
+    label: "Accessibility",
+    icon: Building2,
+    color: "#2563eb",
+    bgClass: "bg-blue-50 dark:bg-blue-900/10",
+    borderClass: "border-blue-200 dark:border-blue-800/30",
+  },
+  rooms: {
+    id: "rooms",
+    label: "Rooms & Spaces",
+    icon: Layers,
+    color: "#7c3aed",
+    bgClass: "bg-purple-50 dark:bg-purple-900/10",
+    borderClass: "border-purple-200 dark:border-purple-800/30",
+  },
 };
 
 /** Map issue type → category id */
@@ -73,6 +147,41 @@ const ISSUE_CATEGORY: Record<string, string> = {
   boundary: "boundary",
   no_floors: "missing",
   overlap: "overlap",
+  empty_floor: "missing",
+  no_buildings: "missing",
+  no_stairs_elevator: "navigation",
+  room_no_nav_connection: "navigation",
+  nav_disconnected: "navigation",
+  no_elevator_accessible: "accessibility",
+  no_accessible_rooms: "accessibility",
+  no_routes: "navigation",
+  duplicate_code: "missing",
+  canvas_not_configured: "missing",
+  room_out_of_bounds: "rooms",
+  missing_room_name: "rooms",
+  room_no_type: "rooms",
+  // ── Phase 1: Hierarchy integrity ──
+  floor_no_building: "missing",
+  room_no_floor: "missing",
+  duplicate_id: "missing",
+  invalid_reference: "missing",
+  // ── Phase 2: Navigation graph ──
+  isolated_node: "navigation",
+  nav_edge_orphan: "navigation",
+  nav_duplicate_id: "missing",
+  zero_length_edge: "navigation",
+  elevator_incomplete: "navigation",
+  stair_incomplete: "navigation",
+  no_floor_transition: "navigation",
+  stair_disconnected_nav: "navigation",
+  elevator_disconnected_nav: "navigation",
+  emergency_exit_no_nav: "boundary",
+  assembly_point_unreachable: "boundary",
+  room_no_evacuation_route: "navigation",
+  emergency_route_blocked: "boundary",
+  event_no_location: "missing",
+  event_location_deleted: "missing",
+  event_location_unreachable: "navigation",
 };
 
 /** Per-issue icon */
@@ -83,6 +192,41 @@ const ISSUE_ICONS: Record<string, React.ElementType> = {
   boundary: Ruler,
   no_floors: Layers,
   overlap: Layers,
+  empty_floor: Layers,
+  no_buildings: Building2,
+  no_stairs_elevator: MapPin,
+  room_no_nav_connection: MapPin,
+  nav_disconnected: MapPin,
+  no_elevator_accessible: Building2,
+  no_accessible_rooms: Building2,
+  no_routes: MapPin,
+  duplicate_code: AlertTriangle,
+  canvas_not_configured: Ruler,
+  room_out_of_bounds: Ruler,
+  missing_room_name: AlertTriangle,
+  room_no_type: AlertTriangle,
+  // ── Phase 1: Hierarchy integrity ──
+  floor_no_building: Layers,
+  room_no_floor: Layers,
+  duplicate_id: AlertTriangle,
+  invalid_reference: AlertTriangle,
+  // ── Phase 2: Navigation graph ──
+  isolated_node: MapPin,
+  nav_edge_orphan: MapPin,
+  nav_duplicate_id: AlertTriangle,
+  zero_length_edge: Ruler,
+  elevator_incomplete: MapPin,
+  stair_incomplete: MapPin,
+  no_floor_transition: MapPin,
+  stair_disconnected_nav: MapPin,
+  elevator_disconnected_nav: MapPin,
+  emergency_exit_no_nav: AlertTriangle,
+  assembly_point_unreachable: MapPin,
+  room_no_evacuation_route: AlertTriangle,
+  emergency_route_blocked: AlertTriangle,
+  event_no_location: AlertTriangle,
+  event_location_deleted: AlertTriangle,
+  event_location_unreachable: MapPin,
 };
 
 function getIssueIcon(type: string): React.ElementType {

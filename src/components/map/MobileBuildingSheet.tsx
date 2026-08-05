@@ -3,6 +3,7 @@ import { X, Navigation, Bookmark, Layers, Flag } from "lucide-react";
 import { motion, useMotionValue, useTransform, animate, useDragControls } from "motion/react";
 import type { Building } from "../../types";
 import { cn } from "../../lib/utils";
+import type { StudentAuthState } from "../../hooks/useStudentAuth";
 
 interface MobileBuildingSheetProps {
   selected: Building;
@@ -13,7 +14,7 @@ interface MobileBuildingSheetProps {
   onReport: (b: Building) => void;
   onSignInPrompt: (msg: string) => void;
   saved: Set<string>;
-  studentAuth: { username: string; role: "student" | "faculty" } | null;
+  studentAuth: StudentAuthState;
   hasFloorPlans: boolean;
 }
 
@@ -130,7 +131,7 @@ export function MobileBuildingSheet({
             </button>
           )}
 
-          {studentAuth ? (
+          {studentAuth.isStudent ? (
             <button
               onClick={() => onSave(selected.id)}
               className={cn(
@@ -153,7 +154,7 @@ export function MobileBuildingSheet({
             </button>
           )}
 
-          {studentAuth ? (
+          {studentAuth.isStudent ? (
             <button
               onClick={() => onReport(selected)}
               className="flex items-center gap-1.5 h-9 px-4 rounded-full bg-muted text-muted-foreground text-xs font-bold border border-border hover:bg-destructive/10 hover:text-destructive active:scale-95 transition-all shrink-0"

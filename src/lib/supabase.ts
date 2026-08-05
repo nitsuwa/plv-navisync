@@ -1,8 +1,9 @@
 /**
- * Supabase client for PLV NaviSync.
+ * Supabase browser client for PLV NaviSync.
  *
- * ✅ Now ready to connect! Just set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY
- *    in your .env file and restart the dev server.
+ * Reads VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY from the Vite
+ * environment (see .env.example). The publishable (anon) key is safe to ship
+ * to the browser — the service-role key must NEVER be used on the client.
  *
  * If env vars are not set, the app gracefully falls back to mock data.
  */
@@ -11,16 +12,22 @@ import { createClient } from "@supabase/supabase-js";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
+const supabasePublishableKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined;
+// Backwards-compatible fallback for setups still using the older variable name.
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
+const supabaseKey = supabasePublishableKey ?? supabaseAnonKey;
+
+const PLACEHOLDER_URL = "https://your-project-id.supabase.co";
 
 let supabaseClient: SupabaseClient | null = null;
 let isConnected = false;
 
-if (supabaseUrl && supabaseAnonKey && supabaseUrl !== "https://your-project-id.supabase.co") {
-  supabaseClient = createClient(supabaseUrl, supabaseAnonKey, {
+if (supabaseUrl && supabaseKey && supabaseUrl !== PLACEHOLDER_URL) {
+  supabaseClient = createClient(supabaseUrl, supabaseKey, {
     auth: {
       persistSession: true,
       autoRefreshToken: true,
+      detectSessionInUrl: true,
     },
   });
   isConnected = true;
@@ -30,7 +37,7 @@ if (supabaseUrl && supabaseAnonKey && supabaseUrl !== "https://your-project-id.s
 } else {
   if (import.meta.env.DEV) {
     console.warn(
-      "[Supabase] VITE_SUPABASE_URL and/or VITE_SUPABASE_ANON_KEY not configured.\n" +
+      "[Supabase] VITE_SUPABASE_URL and/or VITE_SUPABASE_PUBLISHABLE_KEY not configured.\n" +
       "The app will run with local mock data.\n" +
       "To connect, create a .env file based on .env.example."
     );
@@ -39,7 +46,23 @@ if (supabaseUrl && supabaseAnonKey && supabaseUrl !== "https://your-project-id.s
 
 export { supabaseClient as supabase, isConnected };
 export const supabaseUrl_ = supabaseUrl;
-export const supabaseAnonKey_ = supabaseAnonKey;
+export const supabaseKey_ = supabaseKey;
+
+/** Public `profiles` row shape used by the authentication flows. */
+export interface Profile {
+  id: string;
+  role: "student" | "admin";
+  first_name?: string | null;
+  last_name?: string | null;
+  email: string;
+  student_number?: string | null;
+  department?: string | null;
+  avatar_path?: string | null;
+  is_active: boolean;
+  last_login_at?: string | null;
+  created_at: string;
+  updated_at: string;
+}
 
 /**
  * Get the Supabase client. Throws if not connected.
@@ -48,7 +71,7 @@ export const supabaseAnonKey_ = supabaseAnonKey;
 export function getSupabase(): SupabaseClient {
   if (!supabaseClient) {
     throw new Error(
-      "Supabase is not connected. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in your .env file."
+      "Supabase is not connected. Set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY in your .env file."
     );
   }
   return supabaseClient;
