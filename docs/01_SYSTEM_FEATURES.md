@@ -51,10 +51,10 @@ Critical
 ## Operational Modules (Required)
 
 ### Module 5
-Campus Directory
+Campus Events and Announcements
 
 Purpose:
-Provides navigation-related information for mapped locations.
+Displays campus events, announcements, and temporary campus changes on the map.
 
 Priority:
 High
@@ -62,10 +62,10 @@ High
 ---
 
 ### Module 6
-Events and Announcements
+Campus Issue Reporting
 
 Purpose:
-Displays campus events and temporary campus changes on the map.
+Allows authenticated students to report mapped campus issues and administrators to manage them.
 
 Priority:
 High
@@ -73,10 +73,10 @@ High
 ---
 
 ### Module 7
-Campus Issue Reporting
+Admin Dashboard and Analytics
 
 Purpose:
-Allows users to report navigation-related campus issues.
+Provides administrators with operational summaries, recent activity, and system health information.
 
 Priority:
 High
@@ -84,10 +84,10 @@ High
 ---
 
 ### Module 8
-Dashboard and Analytics
+Map Validation and Publishing
 
 Purpose:
-Provides administrators with an overview of campus operations and system activity.
+Validates campus data, protects drafts, and publishes safe map versions.
 
 Priority:
 High
@@ -95,10 +95,10 @@ High
 ---
 
 ### Module 9
-Map Validation and Publishing
+System Configuration and Settings
 
 Purpose:
-Ensures campus data is valid before publication.
+Provides approved campus branding, account, application, and export settings.
 
 Priority:
 High
