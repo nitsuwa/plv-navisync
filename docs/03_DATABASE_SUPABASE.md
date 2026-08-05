@@ -2,7 +2,7 @@
 
 # Database & Supabase Architecture
 
-**Version:** 2.0
+**Version:** 2.1
 **Status:** Frozen Backend Specification
 **Primary source of truth:** This document defines the intended backend design.
 **Generated SQL source of truth after implementation:** Once approved, the SQL migrations generated from this document become the executable database source of truth. If SQL and this document conflict, stop implementation and update both through a reviewed migration.
@@ -37,7 +37,7 @@ Do not create or modify tables, policies, storage buckets, or backend contracts 
 
 ## 2.1 Design source of truth
 
-Before Supabase is created, this document is the authoritative backend design.
+This document is the authoritative backend design. The Supabase project has been created and connected, so implemented behavior must also remain consistent with the applied migrations.
 
 ## 2.2 Executable source of truth
 
@@ -51,7 +51,7 @@ are the executable schema history.
 
 The database must never be changed manually in production without a migration.
 
-## 2.3 Existing migration
+## 2.3 Migration baseline
 
 The previous unchecked file:
 
@@ -59,17 +59,19 @@ The previous unchecked file:
 supabase/migrations/001_initial_schema.sql
 ```
 
-must not be run.
-
-Move it to:
+must not be run. It has been moved to:
 
 ```text
 supabase/archive/001_initial_schema_legacy.sql
 ```
 
-or rename it clearly as legacy.
+The reviewed initial migration is:
 
-A new reviewed initial migration will be generated from this specification.
+```text
+supabase/migrations/001_create_plv_navisync_schema.sql
+```
+
+Future schema changes must use new numbered migrations. Do not edit the applied shared baseline migration.
 
 ## 2.4 No schema drift
 
@@ -80,6 +82,25 @@ Whenever the backend changes:
 3. Update generated TypeScript database types.
 4. Update affected services.
 5. Add or update tests.
+
+## 2.5 Verified backend checkpoint — August 5, 2026
+
+Verified:
+
+- Supabase project and frontend environment connection are configured.
+- Real administrator and student accounts authenticate through Supabase Auth.
+- `profiles` records support `admin` and `student` roles and active-account checks.
+- Session restoration, logout, and role-based route protection work.
+- Demo Administrator and Demo Student accounts were provisioned through a server-side local script.
+- `.env.local` and `.env.demo.local` are ignored by Git.
+
+Still requiring verification or implementation:
+
+- Generated TypeScript database types.
+- All Storage buckets and their policies.
+- Full RLS testing across the table inventory.
+- Real registration, email verification, and password reset.
+- Persistent CRUD and service integration for feature modules.
 
 ---
 
@@ -1218,11 +1239,26 @@ VITE_SUPABASE_URL=
 VITE_SUPABASE_PUBLISHABLE_KEY=
 ```
 
+Optional local demonstration variables:
+
+```env
+VITE_ENABLE_DEMO_LOGIN=false
+VITE_DEMO_ADMIN_EMAIL=
+VITE_DEMO_ADMIN_PASSWORD=
+VITE_DEMO_STUDENT_EMAIL=
+VITE_DEMO_STUDENT_PASSWORD=
+```
+
+Local provisioning variables belong only in `.env.demo.local` and may include the service-role key for the approved Node provisioning script. They must never be imported by browser code or committed.
+
 Rules:
 
 - Only the anonymous public key belongs in the frontend.
 - Never expose the service-role key.
 - Commit `.env.example`, not `.env`.
+- Commit `.env.demo.example`, never `.env.demo.local`.
+- Vite-prefixed demo credentials are visible to the built browser application. Use only disposable demonstration accounts, keep demo mode disabled in production, and never use an owner administrator's credentials.
+- The demo selector may autofill fields but must never bypass normal Supabase authentication or sign in automatically.
 - Validate variables at startup.
 - Production and development Supabase projects should be separate when feasible.
 

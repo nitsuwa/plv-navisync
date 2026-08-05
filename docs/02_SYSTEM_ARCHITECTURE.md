@@ -2,7 +2,7 @@
 
 # System Architecture
 
-**Version:** 2.0
+**Version:** 2.1
 **Status:** Frozen Technical Architecture
 **Purpose:** Implementation guide for the development team, Freebuff, and Codex.
 
@@ -63,6 +63,21 @@ The architecture must:
 ---
 
 # 3. High-Level Runtime Architecture
+
+## Verified implementation checkpoint — August 5, 2026
+
+The following foundation is already implemented and manually verified:
+
+- The application connects to Supabase through the single browser client.
+- Administrator and student login use `supabase.auth.signInWithPassword()`.
+- Sessions restore after refresh.
+- Logout calls Supabase sign-out.
+- Profiles enforce `admin` and `student` roles plus active-account checks.
+- Admin and student route protection works without redirect loops.
+- Public guest routes remain accessible.
+- Demo Administrator and Demo Student options only autofill the login form; normal Supabase authentication is still required.
+
+The next foundation work is to generate schema-derived TypeScript types, verify Storage buckets and policies, and complete the remaining account lifecycle.
 
 ```text
 React Pages and Components
@@ -355,14 +370,26 @@ Never place frontend code here.
 
 ---
 
-# 6. Core Module Boundaries
+# 6. Core Module Boundaries and Task Ownership
 
-The system is split into three implementation ownership areas.
+The architecture remains split into three responsibility areas, but branches and ownership are task-based rather than permanent.
 
-## Module A — Identity, Administration, and Backend Foundation
+Austin is the lead developer and integrator. He coordinates shared contracts, Supabase, migrations, generated database types, publishing, and merge order. He may implement work in any module according to the critical path.
 
-**Primary owner:** Developer 1
-**Branch:** `feature/auth-admin-backend`
+Developers 2 and 3 receive small, independent assignments. A developer owns only the files listed for the active task, not an entire module forever.
+
+Every task uses a new short-lived branch from the latest `main`, such as:
+
+```text
+feature/generate-database-types
+feature/campus-crud
+feature/report-submission
+fix/map-selection
+```
+
+## Area A — Identity, Administration, and Backend Foundation
+
+Normally coordinated by Austin because changes here affect other modules.
 
 Responsibilities:
 
@@ -374,7 +401,7 @@ Responsibilities:
 - Shared services and generated database types
 - Storage infrastructure
 - Backend error contracts
-- Admin shell when required
+- Cross-module integration
 
 Primary files and folders:
 
@@ -382,6 +409,8 @@ Primary files and folders:
 src/lib/supabase.ts
 src/services/
 src/contexts/ authentication-related files
+src/hooks/useAdminAuth.ts
+src/hooks/useStudentAuth.ts
 src/pages/AdminLoginPage.tsx
 src/pages/RegistrationPage.tsx
 src/pages/AdminUsersPage.tsx
@@ -391,12 +420,7 @@ src/pages/StudentSettingsPage.tsx
 supabase/
 ```
 
-Developer 1 does not redesign the Map Builder or public navigation.
-
-## Module B — Map Builder, Campus Structure, and Navigation
-
-**Primary owner:** Developer 2
-**Branch:** `feature/map-navigation`
+## Area B — Map Builder, Campus Structure, and Navigation
 
 Responsibilities:
 
@@ -427,12 +451,9 @@ src/lib/mapDataAdapter.ts
 src/lib/campusHelpers.ts
 ```
 
-Developer 2 consumes services defined with Developer 1 and does not make independent schema changes.
+Contributors may receive isolated tasks in this area. They must consume approved service and schema contracts and may not create independent database changes.
 
-## Module C — Operations and Public Content
-
-**Primary owner:** Developer 3
-**Branch:** `feature/operations-content`
+## Area C — Operations and Public Content
 
 Responsibilities:
 
@@ -460,7 +481,7 @@ src/components/map/EventPopup.tsx
 src/components/map/ReportModal.tsx
 ```
 
-Developer 3 uses shared services and does not query Supabase directly from pages.
+Contributors may receive isolated tasks after the required service contract is merged. Pages must not query Supabase directly.
 
 ---
 

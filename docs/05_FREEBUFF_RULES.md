@@ -2,7 +2,7 @@
 
 # Freebuff and AI Coding Rules
 
-**Version:** 1.0
+**Version:** 1.1
 **Status:** Frozen AI Development Rules
 **Purpose:** Control how Freebuff, Codex, and other AI coding assistants work inside PLV NaviSync.
 
@@ -121,7 +121,7 @@ At the beginning of a session, the AI must:
 
 1. Read the required documentation.
 2. Inspect the exact files related to the task.
-3. Identify the module owner.
+3. Identify the active task owner and short-lived branch.
 4. Identify shared files that may be affected.
 5. State the intended files to modify.
 6. Preserve existing architecture.
@@ -537,6 +537,16 @@ RLS is the true authorization layer.
 
 Public registration must never create an administrator.
 
+Verified authentication checkpoint as of August 5, 2026:
+
+- Real Supabase administrator and student login work.
+- Sessions restore after refresh.
+- Logout and role-based route protection work.
+- Guest access remains available.
+- Demo Administrator and Demo Student only autofill the normal login form.
+
+Do not replace or reimplement these verified flows unless the assigned task specifically requires a correction.
+
 ---
 
 # 20. Error Handling Rules
@@ -753,11 +763,11 @@ Read the PLV NaviSync docs first.
 Assigned module:
 [MODULE NAME]
 
-Developer owner:
-[DEVELOPER NUMBER]
+Task owner:
+[DEVELOPER NAME OR NUMBER]
 
 Git branch:
-[BRANCH NAME]
+[SHORT-LIVED TASK BRANCH CREATED FROM LATEST MAIN]
 
 Allowed files:
 - [FILE OR FOLDER]
@@ -794,7 +804,7 @@ Before finishing:
 The AI must stop and explain before proceeding when:
 
 - The request conflicts with the frozen feature scope.
-- The request requires changing another developer's files.
+- The request conflicts with files owned by another active task.
 - A migration conflicts with the database blueprint.
 - A secret or service-role key would be exposed.
 - The requested code would disable RLS.

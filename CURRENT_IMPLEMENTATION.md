@@ -2,6 +2,7 @@
 
 > **PLV NaviSync — Implementation Inventory**
 > Frozen scope baseline: a factual listing of what currently exists in the codebase.
+> Authentication checkpoint updated: August 5, 2026.
 > This document does NOT recommend improvements. It only records implemented / partially implemented functionality as found in the source.
 >
 > **Status legend used below:**
@@ -16,35 +17,50 @@
 
 ## 1. Authentication
 
-**Status:** Partial / Mock Data — login works against hardcoded credentials; no real authentication backend.
+**Status:** Core authentication complete / account lifecycle partial — real Supabase administrator and student authentication is implemented and manually verified.
 
 **Current Screens:**
-- `/admin` — `AdminLoginPage` (unified admin + student + faculty sign-in)
-- `/register` — `RegistrationPage` (2-step student sign-up wizard)
+- `/admin` — `AdminLoginPage` for administrator and student sign-in.
+- `/register` — `RegistrationPage`; its real Supabase completion must still be verified before it is marked complete.
 
-**Current Components:**
-- `AdminLoginPage.tsx` — split-panel layout (campus illustration left, form right), demo-account accordion, show/hide password, loading spinner on submit, inline error banner (`role="alert"`)
-- `RegistrationPage.tsx` — 2-step form (details → password), per-field validation, animated step transitions, success screen
-- `useStudentAuth` hook — reads `sessionStorage["plv-student-auth"]` → `{ username, role: "student" | "faculty" } | null`
-- `AdminLayout` guard — reads `sessionStorage["plv-admin-auth"]`; redirects to `/admin` when absent
-- `PLVLogo`, `ThemeToggle`, `HeroBackground` (`StarField`, `LavaLampBackground`), `Button`
+**Current Components and hooks:**
+- `AdminLoginPage.tsx` — calls `supabase.auth.signInWithPassword()`, loads the associated profile, checks `is_active`, redirects administrators to `/admin-dashboard`, redirects students to `/map`, and signs out unknown or invalid roles.
+- Demonstration-account dropdown — appears only when demo mode and the relevant Vite variables are configured; Demo Administrator and Demo Student only fill the existing fields and never sign in automatically.
+- `useAdminAuth.ts` — restores the Supabase session and administrator profile for protected administration routes.
+- `useStudentAuth.ts` — uses `getSession()` and `onAuthStateChange`, loads the `profiles` row, and exposes profile, loading, student state, and Supabase sign-out behavior.
+- `AdminLayout.tsx` — protects administration routes using the real administrator session/profile.
+- Student pages and shared navigation — wait for authentication loading, protect student-only pages, show the real profile, and use Supabase sign-out.
 
-**Current Services:** None. There is no auth service; login is inline in `AdminLoginPage`.
+**Current Database Usage:**
+- Supabase Auth validates email/password credentials.
+- `public.profiles` supplies the application role and active state.
+- Verified roles are `admin` and `student`.
 
-**Current Database Usage:** None at runtime. `users` table exists in the migration but is never queried for login.
+**Verified behavior:**
+- Administrator login succeeds and redirects correctly.
+- Student login succeeds and redirects to `/map`.
+- Both sessions persist after refresh.
+- Students cannot access protected administrator routes.
+- Logout ends the Supabase session and remains signed out after refresh.
+- Public guest pages remain accessible.
+- Legacy student `sessionStorage` authentication is no longer used.
 
-**Current Problems:**
-- Credentials hardcoded: `admin/plv2025`, `student/plv2025`, `faculty/plv2025`
-- Session is `sessionStorage` only — lost on tab close; no expiry, refresh, or token
-- `faculty` is accepted in the login check but has no demo-account UI entry
-- Registration performs a simulated 1200 ms delay then shows success — **no account is created anywhere** (no service call, no storage write)
-- Guard is client-side only; any route is reachable by writing `sessionStorage`
+**Security notes:**
+- `.env.local` and `.env.demo.local` are ignored by Git.
+- Demo accounts are disposable accounts provisioned through the approved local script.
+- The service-role key is used only by the local provisioning process and never by React browser code.
+- Vite demo credentials are browser-visible by design and must remain disabled in production.
 
-**Missing Functionality:** Real credential validation, password hashing, account persistence, session expiry, role-based API enforcement, email verification, password reset.
+**Remaining functionality:**
+- Verify or complete real student registration.
+- Email verification and resend flow.
+- Forgot-password and reset-password flow.
+- Persistent administrator user-management operations through approved protected backend mechanisms.
+- Broader RLS verification beyond the manually tested authentication paths.
 
-**Files involved:** `src/pages/AdminLoginPage.tsx`, `src/pages/RegistrationPage.tsx`, `src/hooks/useStudentAuth.ts`, `src/components/layout/AdminLayout.tsx`, `src/components/ui/HeroBackground.tsx`, `src/components/ui/ThemeToggle.tsx`, `src/components/ui/PLVLogo.tsx`
+**Files involved:** `src/pages/AdminLoginPage.tsx`, `src/pages/RegistrationPage.tsx`, `src/hooks/useAdminAuth.ts`, `src/hooks/useStudentAuth.ts`, `src/components/layout/AdminLayout.tsx`, `src/components/layout/Navbar.tsx`, `src/components/layout/MobileBottomNav.tsx`, protected student pages, `src/lib/supabase.ts`
 
-**Dependencies:** `react-router`, `motion/react`, `lucide-react`, `useToast`, `useTheme`, `lib/utils.ts`
+**Dependencies:** Supabase Auth, `public.profiles`, React Router, Motion, `useToast`, `useTheme`
 
 ---
 
@@ -573,10 +589,10 @@
 |---|---|
 | Router | `createBrowserRouter` in `src/app/routes.tsx` — 25 registered routes; `AdminAnnouncementsPage` and `AnnouncementsPage` are **not** registered (broken) |
 | State | One global context (`CampusDataContext`, localStorage key `plv-campuses`); all other state is local `useState` |
-| Persistence | `localStorage`: `plv-campuses`, `plv-theme`, `plv-tutorial-done`, `plv-search-hint-dismissed`, Help Center guest chats. `sessionStorage`: `plv-admin-auth`, `plv-student-auth` |
-| Data layer | `services/database.ts` unified mock store (`Map`) + Supabase swap when `VITE_SUPABASE_URL`/`VITE_SUPABASE_ANON_KEY` are set; Supabase client is dormant by default |
+| Persistence | Supabase Auth persists administrator and student sessions. `localStorage` still stores `plv-campuses`, `plv-theme`, `plv-tutorial-done`, `plv-search-hint-dismissed`, and Help Center guest chats. Campus and most feature data are not yet server-authoritative. |
+| Data layer | The single browser client in `src/lib/supabase.ts` is active for authentication and profile lookup. Most feature services and pages still use mock, page-local, or localStorage data. |
 | Service consumers | Only `AdminBuildingsPage` imports the services layer; every other page uses page-local mock arrays |
-| Database | 12-table migration (`001_initial_schema.sql`) with RLS + triggers; not exercised at runtime |
+| Database | Reviewed migration at `supabase/migrations/001_create_plv_navisync_schema.sql`; legacy migration archived. Auth/profile behavior is exercised at runtime, while most feature tables remain unconnected. |
 | PWA | `public/manifest.json` + `public/sw.js` service worker; no offline map-data caching |
 | Type safety | No `tsconfig.json` present — `vite build` is the only compile check |
 | Tests | 2 test files: `WeeklyChart.test.tsx`, `campusHelpers.test.ts` (Vitest); no `test` script in `package.json` |

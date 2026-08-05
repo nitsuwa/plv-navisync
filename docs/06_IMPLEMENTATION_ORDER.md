@@ -1,611 +1,410 @@
 # PLV NaviSync
 
 # Master Implementation Order
-Version: 1.0
-Status: Official Development Roadmap
+
+**Version:** 2.0
+**Status:** Official Development Roadmap
+**Checkpoint date:** August 5, 2026
 
 ---
 
-# Purpose
+# 1. Purpose
 
-This document defines the ONLY implementation order for PLV NaviSync.
+This document defines the implementation sequence and current completion state of PLV NaviSync.
 
-All developers and AI coding assistants (Freebuff, Codex, ChatGPT, etc.) MUST follow this order.
+Developers and AI assistants must follow prerequisites, but independent tasks may run in parallel when they do not touch the same files, schema contracts, or unfinished dependencies.
 
-Do not skip phases.
+The roadmap exists to:
 
-Do not implement future phases before completing prerequisite phases.
-
-This roadmap exists to:
-
-- prevent AI drift
-- prevent duplicate implementations
-- reduce merge conflicts
-- keep the system stable
-- ensure every feature is demonstrable
-- ensure ISO 25010 compliance
+- Keep Austin moving on the critical path.
+- Give contributors small non-blocking tasks.
+- Prevent duplicate implementations and merge conflicts.
+- Replace mock/local data gradually and safely.
+- Keep every checkpoint buildable and demonstrable.
 
 ---
 
-# Project Status
+# 2. Status Legend
 
-Current State
+- `DONE` — implemented and manually verified.
+- `PARTIAL` — important behavior works, but listed gaps remain.
+- `NEXT` — next critical-path task.
+- `READY` — prerequisites are complete and the task may be assigned.
+- `BLOCKED` — prerequisite is incomplete.
+- `LATER` — valid scope, intentionally scheduled later.
+- `VERIFY` — implementation may exist but needs evidence before being marked done.
 
-✅ UI mostly exists
-
-✅ Pages already exist
-
-✅ Routing exists
-
-✅ Map Builder UI exists
-
-✅ Pathfinding engine exists
-
-✅ Components exist
-
-✅ Documentation finalized
+Do not mark work `DONE` based only on an AI report. Require build output and appropriate manual or automated checks.
 
 ---
 
-Needs Implementation
+# 3. Verified Project Checkpoint
 
-- Supabase backend
-- Authentication
-- Database integration
-- Real CRUD
-- Remove production mock data
-- Dashboard analytics
-- Events backend
-- Reports backend
-- Publishing workflow
-- Validation workflow
-- Testing
+The following are complete and verified:
 
----
+- Project documentation baseline exists.
+- Supabase project and frontend environment connection are configured.
+- The reviewed initial migration exists at `supabase/migrations/001_create_plv_navisync_schema.sql`.
+- The unchecked legacy migration is archived.
+- Real Supabase administrator login works.
+- Real Supabase student login works.
+- Administrator and student sessions survive refresh.
+- Logout ends the Supabase session.
+- Role-based admin and student route protection works.
+- Public guest access remains available.
+- Demo Administrator and Demo Student accounts were provisioned.
+- The demo-account selector only autofills credentials and still uses normal Supabase authentication.
+- `.env.local` and `.env.demo.local` are ignored by Git.
+- Production build passes.
+- Baseline commit `5a3a4e5` was pushed to `origin/main`.
 
-# Development Rules
+The following are not yet confirmed complete:
 
-Every task must follow this workflow.
-
-1. Read all project documentation.
-
-2. Implement ONE task only.
-
-3. Run build.
-
-4. Test.
-
-5. Commit.
-
-6. Merge.
-
-7. Continue.
-
-Never implement multiple unrelated tasks in one AI session.
+- Generated TypeScript database types.
+- All required Supabase Storage buckets and policies.
+- Full RLS verification for every table and role.
+- Real registration, email verification, and password-reset flows.
+- Admin user-management CRUD through Supabase Auth/profile services.
+- Persistent campus, building, floor, room, and navigation CRUD.
+- Live map publishing and public consumption from Supabase.
+- Backend-connected reports, events, announcements, settings, and dashboard.
+- Complete automated test coverage.
 
 ---
 
-# Milestone 1
+# 4. Execution Rules
 
-Backend Foundation Complete
-
-Expected Result
-
-- Authentication works
-- Supabase connected
-- Database operational
-- Profiles created
-- RLS configured
-
----
-
-# Milestone 2
-
-Campus Data Complete
-
-Expected Result
-
-- Campus CRUD
-- Building CRUD
-- Floor CRUD
-- Directory CRUD
-
-All persistent.
+1. Work from the latest `main`.
+2. Use one short-lived task branch per task.
+3. Implement one coherent task per Freebuff session and Pull Request.
+4. Do not let two developers edit the same files concurrently.
+5. Austin coordinates shared files, migrations, types, services, and merge order.
+6. A contributor may work in parallel only when the task is independent.
+7. Run `pnpm build` before marking a task complete.
+8. Run relevant tests and manual checks.
+9. Merge one Pull Request at a time and recheck `main`.
+10. Update this roadmap only after work is verified and merged.
 
 ---
 
-# Milestone 3
+# 5. Current Critical Path
 
-Map Builder Complete
+```text
+Database types
+→ Storage and RLS verification
+→ Remaining account lifecycle
+→ Campus structure persistence
+→ Map Builder draft/save/publish
+→ Public map consumes published data
+→ Operations modules
+→ System testing and release
+```
 
-Expected Result
-
-Administrator can completely build a campus without editing code.
-
----
-
-# Milestone 4
-
-Navigation Complete
-
-Expected Result
-
-Students can search and navigate anywhere.
-
-Accessibility routing works.
-
-Emergency routing works.
+Contributor work may run beside the critical path only when it does not depend on unfinished contracts.
 
 ---
 
-# Milestone 5
+# PHASE 0 — FOUNDATION VERIFICATION
 
-Operations Complete
+**Status:** `PARTIAL`
 
-Expected Result
+## 0.1 Documentation baseline
 
-Reports
+**Status:** `DONE`
 
-Events
+The core project documents exist and define scope, architecture, database design, team workflow, AI rules, and implementation order.
 
-Announcements
+## 0.2 Supabase project and environment
 
-Dashboard
+**Status:** `DONE`
 
-fully operational.
+The application connects to the configured Supabase project using frontend-safe variables.
 
----
+## 0.3 Initial migration and profiles
 
-# Milestone 6
+**Status:** `DONE`
 
-Release Candidate
+The reviewed migration and profile-based `admin` / `student` roles support the verified authentication flow.
 
-Expected Result
+## 0.4 Generate database types
 
-System ready for ISO evaluation.
+**Status:** `NEXT`
 
-System ready for Expert Testing.
+Deliverables:
 
-System ready for User Acceptance Testing.
+- Generate TypeScript types from the applied Supabase development schema.
+- Store them in the architecture-approved generated types file.
+- Wire the single browser Supabase client to the generated `Database` type.
+- Remove or reconcile handwritten database types only where safe.
+- Do not change the schema in this task.
 
-System ready for Capstone Defense.
+Definition of Done:
 
----
+- Generated types match the applied schema.
+- The Supabase client is typed.
+- `pnpm build` passes.
+- Modified files and any type mismatches are reported.
 
-# PHASE 0
+## 0.5 Verify Storage buckets and policies
 
-PROJECT STABILIZATION
+**Status:** `READY` after Task 0.4, unless completed evidence is provided.
 
-Status
+Verify the required buckets from `03_DATABASE_SUPABASE.md` and test allowed/denied access for guest, student, and administrator roles. Create a migration or documented setup only for missing approved objects.
 
-READY
+## 0.6 Backend smoke and RLS matrix
 
-Tasks
+**Status:** `READY` after Tasks 0.4 and 0.5.
 
-## Task 0.1
+Test the implemented schema against the RLS matrix. Record which reads and writes succeed or fail for guest, student, and administrator sessions.
 
-Verify documentation
+## Phase 0 checkpoint
 
-Done
-
----
-
-## Task 0.2
-
-Create Supabase project
-
-Done
-
----
-
-## Task 0.3
-
-Configure environment variables
-
-Pending
-
-Definition of Done
-
-Project connects to Supabase.
+Phase 0 is complete when generated types, storage, and the core RLS matrix are verified and `main` builds.
 
 ---
 
-## Task 0.4
+# PHASE 1 — AUTHENTICATION AND ACCOUNT LIFECYCLE
 
-Generate database types
+**Status:** `PARTIAL`
 
-Pending
+## 1.1 Core authentication
 
-Definition of Done
+**Status:** `DONE`
 
-database.types.ts generated.
+Includes:
 
----
+- Admin login.
+- Student login.
+- Session restoration.
+- Logout.
+- Active-profile and role validation.
+- Admin-route protection.
+- Student-page protection.
+- Guest access preservation.
+- Demo-account provisioning and selector.
 
-## Task 0.5
+## 1.2 Student registration
 
-Configure storage buckets
+**Status:** `READY` after Phase 0.
 
-Pending
+Replace any simulated registration with real Supabase sign-up and profile creation. Public registration must never create an administrator.
 
-Definition of Done
+## 1.3 Email verification
 
-Buckets exist.
+**Status:** `READY` with Task 1.2.
 
----
+Implement the configured verification flow, pending-verification UI, safe redirects, and resend behavior.
 
-## Task 0.6
+## 1.4 Forgot and reset password
 
-Verify project builds
+**Status:** `READY` after Phase 0.
 
-Definition of Done
+Implement request, callback, new-password, expired-link, and success states.
 
-pnpm build succeeds.
+## 1.5 Administrator user management
 
----
+**Status:** `READY` after Tasks 1.2–1.4 and service-contract review.
 
-Merge Checkpoint
+Connect user listing, activation/deactivation, and permitted profile management. Privileged Supabase Auth administration must use a protected server-side mechanism, never the browser service-role key.
 
-Phase 0 complete.
+## Phase 1 checkpoint
 
----
-
-# PHASE 1
-
-AUTHENTICATION
-
-Status
-
-READY
-
-Tasks
-
-1. Connect Supabase Auth
-
-2. Registration
-
-3. Login
-
-4. Logout
-
-5. Session persistence
-
-6. Route guards
-
-7. Role permissions
-
-8. Profile creation
-
-9. Forgot password
-
-10. Email verification
-
-Definition of Done
-
-Authentication fully functional.
-
-Mock authentication removed.
+Authentication and account lifecycle are complete when registration, verification, reset, sessions, roles, active-state enforcement, and administrator management are persistent and tested.
 
 ---
 
-Merge Checkpoint
+# PHASE 2 — CAMPUS STRUCTURE PERSISTENCE
 
-Authentication complete.
+**Status:** `BLOCKED` by Phase 0; design work may be prepared without merging production mock replacement.
 
----
+Implement in this order:
 
-# PHASE 2
+1. Campus service and campus CRUD.
+2. Campus version/draft contract.
+3. Building CRUD.
+4. Floor CRUD.
+5. Room and map-element CRUD.
+6. Navigation node and edge persistence.
+7. Directory queries over published campus data.
+8. Loading, empty, error, conflict, and success states.
+9. Remove production mock dependencies only from migrated flows.
 
-DATABASE
+Definition of Done:
 
-Status
-
-READY
-
-Tasks
-
-1. Campuses CRUD
-
-2. Buildings CRUD
-
-3. Floors CRUD
-
-4. Rooms CRUD
-
-5. Campus Directory CRUD
-
-6. Connect Services
-
-7. Replace mock data
-
-Definition of Done
-
-Everything persists.
+- Data survives refresh and a new browser session.
+- Services, not pages, own Supabase queries.
+- Guest, student, and administrator permissions match RLS.
+- Public reads never expose drafts.
+- The build and relevant tests pass.
 
 ---
 
-Merge Checkpoint
+# PHASE 3 — MAP BUILDER PERSISTENCE AND PUBLISHING
 
-Campus structure complete.
+**Status:** `BLOCKED` by the required Phase 2 contracts.
 
----
+The editor UI already contains substantial authoring behavior. Do not rebuild it.
 
-# PHASE 3
+Implement and verify:
 
-MAP BUILDER
+1. Load a campus draft from Supabase.
+2. Save drafts without making them public.
+3. Handle unsaved changes and save conflicts.
+4. Persist campus settings, buildings, floors, elements, nodes, and edges.
+5. Run complete validation.
+6. Show readable issues and focus affected objects.
+7. Publish through the approved version workflow.
+8. Keep the last valid published version available.
+9. Verify undo/redo, layers, properties, canvas settings, and route editing after integration.
 
-Status
+Definition of Done:
 
-READY
-
-Tasks
-
-1. Draft Saving
-
-2. Draft Loading
-
-3. Validation
-
-4. Publish
-
-5. Versioning
-
-6. Undo
-
-7. Redo
-
-8. Layer Management
-
-9. Properties
-
-10. Canvas Settings
-
-11. Route Editing
-
-12. Accessibility Route Editing
-
-13. Emergency Route Editing
-
-Definition of Done
-
-Entire campus editable.
+- An administrator can create, edit, close, reopen, validate, and publish a campus without editing code.
+- Drafts are private.
+- Public users see only the published version.
+- Publishing is transactional or safely recoverable.
 
 ---
 
-Merge Checkpoint
+# PHASE 4 — PUBLIC MAP AND NAVIGATION INTEGRATION
 
-Map Builder complete.
+**Status:** `BLOCKED` by Phase 3 publishing.
 
----
+Implement and verify:
 
-# PHASE 4
+1. Public map loads the active published campus version.
+2. Unified search covers buildings, rooms, facilities, and mapped destinations.
+3. Building and location details use published data.
+4. Outdoor and indoor pathfinding use authored graph data.
+5. Floor transitions work.
+6. Accessibility filtering works.
+7. Emergency-safe routing works.
+8. Distance, estimated walking time, and step instructions are correct.
+9. Disconnected graphs fail safely.
+10. Recent destinations and favorites are connected only after core navigation is stable.
 
-PUBLIC NAVIGATION
+Definition of Done:
 
-Status
-
-READY
-
-Tasks
-
-1. Smart Search
-
-2. Building Directory
-
-3. Building Pages
-
-4. Navigation
-
-5. Accessibility Routing
-
-6. Emergency Routing
-
-7. Route Instructions
-
-8. Estimated Distance
-
-9. Estimated Walking Time
-
-10. Recent Searches
-
-11. Favorites
-
-Definition of Done
-
-Students can navigate campus.
+- Guests and students can search and navigate through published campus data.
+- Hardcoded legacy graph assumptions are no longer authoritative.
 
 ---
 
-Merge Checkpoint
+# PHASE 5 — OPERATIONS
 
-Navigation complete.
+**Status:** `BLOCKED` for backend integration; isolated UI/accessibility fixes may be assigned earlier.
 
----
+Implement one module at a time:
 
-# PHASE 5
+1. Reports and report history.
+2. Report-image storage.
+3. Events and map locations.
+4. Announcements and map locations.
+5. Favorites.
+6. System settings.
+7. Activity logs.
+8. Dashboard queries and statistics.
 
-OPERATIONS
-
-Status
-
-READY
-
-Tasks
-
-1. Dashboard
-
-2. Reports
-
-3. Report Images
-
-4. Report Status
-
-5. Events
-
-6. Event Locations
-
-7. Announcements
-
-8. Statistics
-
-9. Activity Logs
-
-Definition of Done
-
-Operational modules complete.
+Each module must complete reads, writes, permissions, loading, empty, error, and populated states before its production mock data is removed.
 
 ---
 
-Merge Checkpoint
+# PHASE 6 — SYSTEM POLISH
 
-Operations complete.
+**Status:** `LATER`; small regression fixes may happen earlier.
 
----
+- Responsive behavior.
+- Mobile map usability.
+- Loading, empty, error, and success states.
+- Keyboard support and focus management.
+- Reduced-motion behavior.
+- Light and dark modes.
+- Performance and bundle review.
+- PWA installation and offline behavior.
+- Removal of verified dead code through dedicated tasks.
 
-# PHASE 6
-
-SYSTEM POLISH
-
-Status
-
-READY
-
-Tasks
-
-1. Loading Screens
-
-2. Empty States
-
-3. Error States
-
-4. Success Messages
-
-5. Animations
-
-6. Mobile Polish
-
-7. Accessibility
-
-8. Performance
-
-9. Responsive Improvements
-
-10. Keyboard Support
-
-Definition of Done
-
-Application feels production ready.
+Do not use this phase as permission for a broad redesign.
 
 ---
 
-Merge Checkpoint
+# PHASE 7 — TESTING AND EVALUATION
 
-UI complete.
+**Status:** `LATER`; tests should also be added during each earlier feature.
 
----
-
-# PHASE 7
-
-TESTING
-
-Status
-
-READY
-
-Tasks
-
-1. Unit Testing
-
-2. Integration Testing
-
-3. Playwright Testing
-
-4. Feature Testing
-
-5. ISO 25010 Evaluation
-
-6. Expert Testing
-
-7. User Acceptance Testing
-
-8. Bug Fixes
-
-Definition of Done
-
-All major bugs fixed.
+- Unit tests for pathfinding, validation, mapping, and service logic.
+- Integration tests for Supabase services and RLS-sensitive workflows.
+- Playwright end-to-end tests for critical user journeys.
+- Feature-based testing.
+- ISO/IEC 25010 evaluation.
+- Expert testing.
+- User Acceptance Testing.
+- Regression fixes.
 
 ---
 
-Merge Checkpoint
+# PHASE 8 — RELEASE CANDIDATE
 
-Testing complete.
+**Status:** `LATER`
 
----
-
-# PHASE 8
-
-RELEASE
-
-Status
-
-READY
-
-Tasks
-
-1. Documentation
-
-2. Demo Data
-
-3. Final Database Backup
-
-4. Final Testing
-
-5. Performance Check
-
-6. Security Review
-
-7. Presentation Preparation
-
-Definition of Done
-
-Capstone ready.
-
-ISO ready.
-
-Release Candidate complete.
+- Final documentation.
+- Safe demonstration data.
+- Final database backup.
+- Security review.
+- Performance review.
+- Production environment verification.
+- Presentation and capstone-defense preparation.
 
 ---
 
-# AI TASK EXECUTION RULE
+# 6. Safe Parallel Work
 
-Every future AI coding session shall begin with:
+Austin works on the `NEXT` critical-path task.
 
-Read:
+At the same time, contributors may receive tasks such as:
 
+- A self-contained accessibility or responsive fix on a page Austin is not editing.
+- A unit test for an existing pure pathfinding or validation function.
+- An isolated form-validation improvement that does not change services or schema.
+- Documentation or manual test-case preparation.
+
+Contributors must not independently:
+
+- Change migrations or RLS.
+- Change shared service contracts.
+- Modify the same page or shared file as an active critical-path task.
+- Connect a page to a service whose contract is not yet merged.
+- Remove mock data before the real persistent flow is verified.
+
+---
+
+# 7. Next Task Rule
+
+The next default development task is Task 0.4: generate and integrate Supabase database types.
+
+Do not start it until the documentation update is committed and pushed. After that checkpoint, create a new branch from the latest `main` and give Freebuff one focused prompt for Task 0.4.
+
+---
+
+# 8. AI Task Execution Rule
+
+Every coding session must read:
+
+```text
 docs/00_PROJECT_CONTEXT.md
-
 docs/01_SYSTEM_FEATURES.md
-
 docs/02_SYSTEM_ARCHITECTURE.md
-
 docs/03_DATABASE_SUPABASE.md
-
 docs/04_TEAM_RULES.md
-
 docs/05_FREEBUFF_RULES.md
-
 docs/06_IMPLEMENTATION_ORDER.md
+```
 
-Then implement ONLY the next unfinished task.
+Then it must:
 
-Do not skip phases.
-
-Do not redesign architecture.
-
-Do not modify unrelated files.
-
-Stop immediately after completing the assigned task.
-
----
-
-END OF DOCUMENT
+1. Confirm the assigned task and branch.
+2. Inspect only relevant code.
+3. State expected files before editing.
+4. Implement only the assigned task.
+5. Run the build and relevant tests.
+6. Report changed files, database impact, checks, and unresolved risks.
+7. Stop after the task report.
