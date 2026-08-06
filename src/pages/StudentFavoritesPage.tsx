@@ -1,10 +1,7 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect } from "react";
 import { Building2, Navigation, MapPin, Search, Bookmark, Trash2, Sparkles } from "lucide-react";
 import { SearchBar } from "../components/ui/SearchBar";
 import { motion, AnimatePresence } from "motion/react";
-import { MOCK_BUILDINGS } from "../data/mockData";
-import { useCampusData } from "../contexts/CampusDataContext";
-import { buildingsFromCampus } from "../lib/mapDataAdapter";
 import { Link, useNavigate } from "react-router";
 import { useStudentAuth } from "../hooks/useStudentAuth";
 import { StudentPageHeader } from "../components/ui/StudentPageHeader";
@@ -12,7 +9,7 @@ import { PageTransition } from "../components/ui/PageTransition";
 import { EmptyState } from "../components/ui/EmptyState";
 import { SkeletonList } from "../components/ui/Skeleton";
 import { useScrollReveal } from "../hooks/useScrollReveal";
-import { cn } from "../lib/utils";
+import { useToast } from "../hooks/useToast";
 import type { Building } from "../types";
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -93,12 +90,16 @@ export function StudentFavoritesPage() {
       )
     : savedBuildings;
 
+  const { showToast } = useToast();
+
   const remove = async (id: string) => {
+    const building = savedBuildings.find((b) => b.id === id);
     setRemovingId(id);
     await studentAccountService.toggleSaveBuilding(id);
     setTimeout(() => {
       setSavedBuildings((prev) => prev.filter((x) => x.id !== id));
       setRemovingId(null);
+      showToast(`${building?.name || "Location"} removed from favorites`, "success");
     }, 300);
   };
 

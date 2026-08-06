@@ -264,6 +264,8 @@ export function CampusMapPage() {
         if (b) {
           setSelected(b);
           initialSelectionRef.current = true;
+          // Clean the URL to prevent stale query params on subsequent navigations
+          window.history.replaceState({}, "", window.location.pathname);
         }
       }
     }

@@ -42,7 +42,7 @@ export function ReportModal({ building, onClose }: ReportModalProps) {
       await reportService.submitReport({
         buildingId: building.id,
         buildingName: building.name,
-        category: issueType.toLowerCase().includes("hazard") ? "hazard" : issueType.toLowerCase().includes("property") || issueType.toLowerCase().includes("light") ? "maintenance" : "maintenance",
+        category: issueType.toLowerCase().includes("hazard") || issueType.toLowerCase().includes("safety") ? "hazard" : issueType.toLowerCase().includes("blocked") ? "accessibility" : "maintenance",
         title: `${issueType} at ${building.name}`,
         description: description || `${issueType} reported at ${building.name}.`,
         imageFile,

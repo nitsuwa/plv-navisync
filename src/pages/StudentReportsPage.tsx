@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import {
   Flag, MapPin, Clock, CheckCircle2, AlertCircle, X, ChevronRight,
-  Search, Filter, MessageCircle, Sparkles, Plus,
+  Search, Filter, MessageCircle, Sparkles, Plus, RefreshCw,
 } from "lucide-react";
 import { SearchBar } from "../components/ui/SearchBar";
 import { motion, AnimatePresence } from "motion/react";
@@ -87,6 +87,13 @@ export function StudentReportsPage() {
     };
   }, []);
 
+  const refreshReports = useCallback(async () => {
+    setLoading(true);
+    const res = await reportService.getStudentReports();
+    setReports(res);
+    setLoading(false);
+  }, []);
+
   // Wait for the Supabase session/profile check before deciding. Reuse the
   // branded skeleton so there is no blank flash while the session resolves.
   if (authLoading || loading) {
@@ -163,13 +170,23 @@ export function StudentReportsPage() {
           iconBg="color-mix(in srgb, #f59e0b 14%, transparent)"
           iconColor="#d97706"
           action={
-            <Link
-              to="/map"
-              className="flex items-center gap-1.5 h-9 px-4 rounded-xl text-xs font-bold bg-primary text-primary-foreground shadow-sm shadow-primary/20 shrink-0 hover:brightness-110 transition-all"
-            >
-              <Plus className="h-3.5 w-3.5" />
-              New Report
-            </Link>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={refreshReports}
+                disabled={loading}
+                className="flex items-center gap-1.5 h-9 w-9 rounded-xl text-xs font-bold border border-border bg-card text-muted-foreground shrink-0 hover:bg-accent hover:text-foreground transition-all justify-center disabled:opacity-50"
+                aria-label="Refresh reports"
+              >
+                <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
+              </button>
+              <Link
+                to="/map"
+                className="flex items-center gap-1.5 h-9 px-4 rounded-xl text-xs font-bold bg-primary text-primary-foreground shadow-sm shadow-primary/20 shrink-0 hover:brightness-110 transition-all"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                New Report
+              </Link>
+            </div>
           }
         />
 

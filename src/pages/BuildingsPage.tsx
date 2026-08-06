@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useMemo } from "react";
 import {
   Building2, SlidersHorizontal, ArrowUpDown,
   Grid3X3, List, X,
@@ -56,12 +56,6 @@ export function BuildingsPage() {
 
   // Debounce search for smoother filtering
   const debouncedSearch = useDebounce(search, 150);
-
-  // Simulate initial load
-  useEffect(() => {
-    const timer = setTimeout(() => setIsLoading(false), 400);
-    return () => clearTimeout(timer);
-  }, []);
 
   const filtered = buildings
     .filter((b) => {

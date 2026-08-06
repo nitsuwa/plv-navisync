@@ -1334,47 +1334,10 @@ function HeroSection() {
   );
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-// ── ANNOUNCEMENTS PREVIEW PLACEHOLDER (Package C1 Deliverable) ───────────────
-// ═════════════════════════════════════════════════════════════════════════════
-
-// TODO C6: Replace placeholder announcements with real announcementService query
-const DEMO_ANNOUNCEMENTS = [
-  {
-    id: "ann-1",
-    category: "Maintenance",
-    title: "ADM Building Elevator Scheduled Maintenance",
-    date: "Aug 8, 2026",
-    location: "ADM Building (b2)",
-    priority: "High",
-    summary: "Elevator 2 in the ADM building will undergo routine safety inspection from 9:00 AM to 12:00 PM. Please use accessible stairways or Elevator 1.",
-    color: "border-amber-500/30 text-amber-500 bg-amber-500/10",
-  },
-  {
-    id: "ann-2",
-    category: "Campus Event",
-    title: "PLV Annual Tech & Innovation Fair 2026",
-    date: "Aug 12, 2026",
-    location: "PLV Gymnasium (b5)",
-    priority: "Normal",
-    summary: "Join us for student project exhibits, tech talks, and interactive demonstrations at the PLV Gym. Open to all students and faculty.",
-    color: "border-blue-500/30 text-blue-500 bg-blue-500/10",
-  },
-  {
-    id: "ann-3",
-    category: "Academic Notice",
-    title: "Midterm Examination Room Assignments Posted",
-    date: "Aug 15, 2026",
-    location: "Academic Buildings A & B",
-    priority: "Normal",
-    summary: "Midterm exam venues and seat arrangements are now available on campus bulletin boards and via the Smart Search directory.",
-    color: "border-emerald-500/30 text-emerald-500 bg-emerald-500/10",
-  },
-];
-
 function AnnouncementPreview() {
   const [announcements, setAnnouncements] = useState<CampusAnnouncement[]>([]);
   const [events, setEvents] = useState<CampusEvent[]>([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let mounted = true;
@@ -1385,6 +1348,7 @@ function AnnouncementPreview() {
       if (mounted) {
         setAnnouncements(ancData);
         setEvents(evtData);
+        setLoading(false);
       }
     });
     return () => {
