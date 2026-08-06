@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { campusService } from "../services/campusService";
+import { SEED_CAMPUSES } from "../components/map-builder/constants";
 import type { Campus } from "../components/map-builder/types";
 
 const SESSION_CACHE_KEY = "plv_published_campuses_cache_v1";
@@ -47,9 +48,19 @@ export function usePublishedCampus(): UsePublishedCampusResult {
       const allCampuses = await campusService.list();
       
       // Filter for published, non-archived campuses only
-      const published = allCampuses.filter(
+      let published = allCampuses.filter(
         (c) => c.publishStatus === "published" || c.visibleToStudents === true
       );
+
+      // Fallback: If database has no published campuses yet (fresh seed state),
+      // use SEED_CAMPUSES so the public map displays the default published PLV campus.
+      if (published.length === 0 && SEED_CAMPUSES.length > 0) {
+        published = SEED_CAMPUSES.map((c) => ({
+          ...c,
+          publishStatus: "published" as const,
+          visibleToStudents: true,
+        }));
+      }
 
       setCampuses(published);
       setIsCached(false);
@@ -63,14 +74,22 @@ export function usePublishedCampus(): UsePublishedCampusResult {
         }
       }
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Failed to load published campus map.";
-      setError(msg);
-
-      // Try fallback to sessionStorage cached campuses
+      // Fallback: Try sessionStorage cache first, then SEED_CAMPUSES
       const cached = getCachedCampuses();
       if (cached.length > 0) {
         setCampuses(cached);
         setIsCached(true);
+      } else if (SEED_CAMPUSES.length > 0) {
+        const defaultSeeds = SEED_CAMPUSES.map((c) => ({
+          ...c,
+          publishStatus: "published" as const,
+          visibleToStudents: true,
+        }));
+        setCampuses(defaultSeeds);
+        setIsCached(true);
+      } else {
+        const msg = err instanceof Error ? err.message : "Failed to load published campus map.";
+        setError(msg);
       }
     } finally {
       setLoading(false);
