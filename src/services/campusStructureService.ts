@@ -100,7 +100,7 @@ export function serializeCampusStructure(campus: Campus): CampusStructurePayload
   const buildings: JsonObject[] = [];
   const floors: JsonObject[] = [];
   const map_elements: JsonObject[] = [];
-  campus.buildings.forEach((building, buildingOrder) => {
+  (campus.buildings ?? []).forEach((building, buildingOrder) => {
     const { floors: buildingFloors, ...buildingUi } = building;
     buildings.push({
       id: building.id, name: building.name, code: building.code, description: building.description,
@@ -110,8 +110,11 @@ export function serializeCampusStructure(campus: Campus): CampusStructurePayload
       is_accessible: Boolean(building.accessibility?.wheelchairAccessible),
       metadata: { ...jsonUi(buildingUi), display_order: buildingOrder },
     });
-    buildingFloors.forEach((floor, floorOrder) => {
-      const { rooms, paths, walls, doors, windows, furniture, stairs, ramps, elevators, labels, ...floorUi } = floor;
+    (buildingFloors ?? []).forEach((floor, floorOrder) => {
+      const {
+        rooms = [], paths = [], walls = [], doors = [], windows = [], furniture = [],
+        stairs = [], ramps = [], elevators = [], labels = [], ...floorUi
+      } = floor;
       floors.push({ id: floor.id, building_id: building.id, name: floor.label, floor_number: floor.number,
         display_order: floorOrder, canvas_width: campus.canvasW, canvas_height: campus.canvasH,
         map_scale_m_per_unit: 1, is_visible: true, metadata: jsonUi(floorUi) });
@@ -127,8 +130,8 @@ export function serializeCampusStructure(campus: Campus): CampusStructurePayload
       labels.forEach((v) => map_elements.push(element("label", campus.id, v as unknown as Record<string, unknown>, building.id, floor.id)));
     });
   });
-  campus.markers.forEach((v) => map_elements.push(element("marker", campus.id, v as unknown as Record<string, unknown>)));
-  campus.paths.forEach((v) => map_elements.push(element("campus_path", campus.id, v as unknown as Record<string, unknown>)));
+  (campus.markers ?? []).forEach((v) => map_elements.push(element("marker", campus.id, v as unknown as Record<string, unknown>)));
+  (campus.paths ?? []).forEach((v) => map_elements.push(element("campus_path", campus.id, v as unknown as Record<string, unknown>)));
   (campus.routes ?? []).forEach((v) => map_elements.push(element("route", campus.id, v as unknown as Record<string, unknown>)));
   (campus.accessibilityFeatures ?? []).forEach((v) => map_elements.push(element("accessibility_feature", campus.id, v as unknown as Record<string, unknown>, v.buildingId)));
   (campus.assemblyPoints ?? []).forEach((v) => map_elements.push(element("assembly_point", campus.id, v as unknown as Record<string, unknown>)));

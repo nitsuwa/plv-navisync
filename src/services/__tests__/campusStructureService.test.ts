@@ -42,6 +42,21 @@ describe("campus structure mapping", () => {
     expect(payload.map_elements[0]).toMatchObject({ element_type: "classroom", floor_id: ids.floor, is_accessible: true });
   });
 
+  it("serializes a newly added building whose empty floor collections are not initialized yet", () => {
+    const wizardCampus = {
+      ...campus,
+      buildings: [{
+        ...campus.buildings[0],
+        floors: [{
+          id: ids.floor, number: 1, label: "Ground Floor", rooms: [], paths: [],
+        }],
+      }],
+    } as Campus;
+    expect(() => serializeCampusStructure(wizardCampus)).not.toThrow();
+    const payload = serializeCampusStructure(wizardCampus);
+    expect(payload).toMatchObject({ buildings: [{ id: ids.building }], floors: [{ id: ids.floor }], map_elements: [] });
+  });
+
   it("round-trips editor identity, coordinates, accessibility and floor links", () => {
     const payload = serializeCampusStructure(campus);
     const hydrated = hydrateCampusStructure(campus, {
