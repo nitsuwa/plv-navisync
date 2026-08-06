@@ -13,7 +13,7 @@ import { PageTransition } from "../components/ui/PageTransition";
 import { SkeletonCard } from "../components/ui/Skeleton";
 import { EmptyState } from "../components/ui/EmptyState";
 import { Reveal } from "../components/ui/Reveal";
-import { useDebounce } from "../hooks";
+import { useDebounce, usePublishedCampus } from "../hooks";
 import { SearchBar } from "../components/ui/SearchBar";
 import type { Building } from "../types";
 
@@ -41,19 +41,18 @@ export function BuildingsPage() {
   const [category, setCategory] = useState("all");
   const [sortBy, setSortBy] = useState<SortKey>("name");
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
-  const [isLoading, setIsLoading] = useState(true);
-  const campusData = useCampusData();
+
+  const { activeCampus, loading: isCampusLoading } = usePublishedCampus();
 
   // Derive buildings from published campus data, fall back to hardcoded data
   const buildings: Building[] = useMemo(() => {
-    const activeCampus = campusData.campuses.find(
-      (c) => c.publishStatus !== "draft" && c.status !== "archived"
-    );
     if (activeCampus) {
       return buildingsFromCampus(activeCampus) as Building[];
     }
     return MOCK_BUILDINGS;
-  }, [campusData.campuses]);
+  }, [activeCampus]);
+
+  const isLoading = isCampusLoading;
 
   // Debounce search for smoother filtering
   const debouncedSearch = useDebounce(search, 150);

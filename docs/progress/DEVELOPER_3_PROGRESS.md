@@ -19,10 +19,10 @@ Status values: `READY`, `ACTIVE`, `BLOCKED`, `FOR REVIEW`, `DONE`.
   - Test result: `npm run build` PASSED (2507 modules built in 20.98s). Created `usePublishedCampus` hook with loading, empty, error, and cached fallback states in `CampusMapPage.tsx`.
   - Pull Request: Pending
 - [ ] **C3 — Unified search, directory, and location details**
-  - Status: `BLOCKED`
+  - Status: `FOR REVIEW`
   - Branch: `feature/map-search-and-details`
   - Depends on: C2 and A5 directory services
-  - Test result: Pending
+  - Test result: `npm run build` PASSED (2508 modules built in 16.79s). Created `useCampusSearch` hook and connected unified location search & category filters across buildings, rooms, offices, labs, and facilities.
   - Pull Request: Pending
 - [ ] **C4 — Student route planning and navigation presentation**
   - Status: `BLOCKED`
@@ -69,8 +69,8 @@ Status values: `READY`, `ACTIVE`, `BLOCKED`, `FOR REVIEW`, `DONE`.
 
 ## Current handoff note
 
-- Active package: C2 (FOR REVIEW)
-- Last completed package: C2 — Published campus map loading and map states
-- Known blocker: None for C2. C3 requires A5 directory services.
-- Important changed files: `src/hooks/usePublishedCampus.ts`, `src/hooks/index.ts`, `src/pages/CampusMapPage.tsx`, `docs/progress/DEVELOPER_3_PROGRESS.md`
-- Next recommended action: Await PR review/merge of C2 into `main`, then proceed to C3 once A5 directory services are ready.
+- Active package: C3 (FOR REVIEW)
+- Last completed package: C3 — Unified search, directory, and location details
+- Known blocker: None for C3. C4 requires Gate G3 from Developer 2.
+- Important changed files: `src/hooks/useCampusSearch.ts`, `src/hooks/index.ts`, `src/pages/CampusMapPage.tsx`, `src/pages/BuildingsPage.tsx`, `docs/progress/DEVELOPER_3_PROGRESS.md`
+- Next recommended action: Await PR review/merge of C3 into `main`, then proceed to C4 once Gate G3 is ready.

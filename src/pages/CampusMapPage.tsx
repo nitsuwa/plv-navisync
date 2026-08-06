@@ -8,7 +8,7 @@ import {
   Footprints, QrCode, Loader2, RefreshCw, AlertCircle,
 } from "lucide-react";
 
-import { useDebounce, usePublishedCampus } from "../hooks";
+import { useDebounce, usePublishedCampus, useCampusSearch, type SearchResult } from "../hooks";
 import { MOCK_BUILDINGS as LEGACY_BUILDINGS } from "../data/mockData";
 import { FLOOR_PLANS as LEGACY_FLOOR_PLANS, type RoomType } from "../data/floorPlans";
 import type { Building } from "../types";
@@ -215,6 +215,29 @@ export function CampusMapPage() {
   const [recentSearches, setRecentSearches] = useState<string[]>([]);
   const [showQR,         setShowQR]         = useState(false);
 
+  // Unified Search Engine Hook for C3
+  const campusSearch = useCampusSearch(activeCampus);
+
+  const handleSelectSearchResult = useCallback((item: SearchResult) => {
+    if (item.kind === "building" || !item.buildingId) {
+      const b = MOCK_BUILDINGS.find((building) => building.id === item.buildingId || building.name.toLowerCase() === item.name.toLowerCase());
+      if (b) selectBuilding(b);
+    } else {
+      const b = MOCK_BUILDINGS.find((building) => building.id === item.buildingId);
+      if (b) {
+        setSelectedBuilding(b);
+        if (item.floorNumber !== undefined) {
+          setFloorView(item.floorNumber);
+        } else {
+          setFloorView(1);
+        }
+        setHighlightedRoom(item.id);
+      }
+    }
+    setSearch(item.name);
+    setSearchFocused(false);
+  }, [MOCK_BUILDINGS, selectBuilding]);
+
   // Modals
   const [reportModal,   setReportModal]   = useState<Building|null>(null);
   const [signInPrompt,  setSignInPrompt]  = useState<string|null>(null);
@@ -243,6 +266,11 @@ export function CampusMapPage() {
     const timer = setTimeout(() => setIsLoading(false), 600);
     return () => clearTimeout(timer);
   }, []);
+
+  // Sync search input with campusSearch query
+  useEffect(() => {
+    campusSearch.setQuery(search);
+  }, [search, campusSearch]);
 
   // ── Computed floor plan values ─────────────────────────────────────────
   const isFloorMode       = floorView !== null;
@@ -1307,71 +1335,58 @@ const buildingFill = (id: string) =>
                     </div>
                   </div>
                 )}
-                {/* Building search results */}
-                {!isFloorMode && search && (
-                  <div className="max-h-48 overflow-y-auto">
-                    {buildingResults.length > 0 ? buildingResults.map(b => (
-                      <button key={b.id} onMouseDown={e => { e.preventDefault(); selectBuilding(b); }}
-                        className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-muted transition-colors text-left">
-                        <div className="w-8 h-8 rounded-xl bg-primary/10 flex items-center justify-center shrink-0"><Building2 className="h-4 w-4 text-primary"/></div>
-                        <div><p className="text-sm font-bold text-foreground">{b.name}</p><p className="text-xs text-muted-foreground">{b.code} · {b.category}</p></div>
-                      </button>
-                    )) : (
+                {/* Unified Search Results (C3) */}
+                {search && (
+                  <div className="max-h-60 overflow-y-auto divide-y divide-border/40">
+                    {campusSearch.results.length > 0 ? (
+                      campusSearch.results.map((item) => (
+                        <button
+                          key={item.id}
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            handleSelectSearchResult(item);
+                          }}
+                          className="w-full flex items-center justify-between px-4 py-2.5 hover:bg-muted/80 transition-colors text-left group"
+                        >
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div className="w-8 h-8 rounded-xl bg-primary/10 flex items-center justify-center shrink-0 text-primary">
+                              {item.kind === "building" ? (
+                                <Building2 className="h-4 w-4" />
+                              ) : (
+                                <MapPin className="h-4 w-4" />
+                              )}
+                            </div>
+                            <div className="min-w-0">
+                              <p className="text-sm font-bold text-foreground truncate">{item.name}</p>
+                              <p className="text-xs text-muted-foreground truncate">
+                                {item.buildingName ? `${item.buildingName} ${item.floorLabel ? `· ${item.floorLabel}` : ""}` : item.code || item.category || "Building"}
+                              </p>
+                            </div>
+                          </div>
+                          {item.accessible && (
+                            <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-md bg-green-500/10 text-green-500 shrink-0">
+                              Accessible
+                            </span>
+                          )}
+                        </button>
+                      ))
+                    ) : (
                       <div className="flex flex-col items-center py-6 px-4 text-center">
                         <div className="w-10 h-10 rounded-xl bg-muted flex items-center justify-center mb-2.5">
                           <Search className="h-5 w-5 text-muted-foreground/50" />
                         </div>
                         <p className="text-sm font-bold text-foreground mb-0.5">No results found</p>
                         <p className="text-xs text-muted-foreground max-w-[200px]">
-                          We couldn&apos;t find anything matching &ldquo;{search}&rdquo;. Try a different name or code.
+                          We couldn&apos;t find anything matching &ldquo;{search}&rdquo;. Try a different building or room name.
                         </p>
                         <button
                           onClick={() => setSearch("")}
-                          className="mt-3 text-xs font-bold text-primary hover:underline"
+                          className="mt-3 text-xs font-bold text-primary hover:underline cursor-pointer"
                         >
                           Clear search
                         </button>
                       </div>
                     )}
-                  </div>
-                )}
-                {/* Room search results (floor plan mode) */}
-                {isFloorMode && (
-                  <div className="max-h-48 overflow-y-auto">
-                    {!search && (
-                      <p className="text-xs text-muted-foreground px-4 py-3">
-                        Search rooms, offices, labs, restrooms, stairs…
-                      </p>
-                    )}
-                    {search && roomResults.length > 0 ? roomResults.map(r => (
-                      <div key={r.id} className="group flex items-center hover:bg-muted transition-colors">
-                        <button onMouseDown={e => {
-                          e.preventDefault();
-                          setHighlightedRoom(r.id);
-                          setSearch("");
-                          setSearchFocused(false);
-                        }}
-                          className="flex-1 flex items-center gap-3 px-4 py-2.5 text-left min-w-0">
-                          <div className="w-7 h-7 rounded-lg bg-primary/10 flex items-center justify-center shrink-0 text-[10px] font-bold text-primary">{r.type === "stairs" ? "↕" : r.type === "elevator" ? "▲" : "⬜"}</div>
-                          <div className="min-w-0"><p className="text-sm font-bold text-foreground truncate">{r.name}</p><p className="text-xs text-muted-foreground capitalize truncate">{r.type}</p></div>
-                        </button>
-                        {(r.type !== "stairs" && r.type !== "elevator") && (
-                          <button
-                            onMouseDown={e => {
-                              e.preventDefault();
-                              showIndoorRoute(r.id);
-                              setSearch("");
-                              setSearchFocused(false);
-                            }}
-                            className="mr-2 flex items-center gap-1 px-2 py-1.5 rounded-lg text-[10px] font-extrabold text-primary bg-primary/8 hover:bg-primary/15 transition-all opacity-0 group-hover:opacity-100 shrink-0 border border-primary/20"
-                            title="Show route">
-                            <Footprints className="h-3 w-3"/> Route
-                          </button>
-                        )}
-                      </div>
-                    )) : search ? (
-                      <p className="text-sm text-muted-foreground px-4 py-3">No rooms found for "{search}"</p>
-                    ) : null}
                   </div>
                 )}
               </div>
