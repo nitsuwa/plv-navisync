@@ -31,10 +31,10 @@ Status values: `READY`, `ACTIVE`, `BLOCKED`, `FOR REVIEW`, `DONE`.
   - Test result: Pending
   - Pull Request: Pending
 - [ ] **C5 — Reports and report history**
-  - Status: `ACTIVE`
+  - Status: `FOR REVIEW`
   - Branch: `feature/reports-workflow`
   - Depends on: Gate G4 and C2
-  - Test result: In Progress
+  - Test result: `npm run build` PASSED (2508 modules built in 17.73s). Created `reportService.ts`, connected `ReportModal.tsx` for photo issue submissions, and built live student report history on `/student/reports`.
   - Pull Request: Pending
 - [ ] **C6 — Events and announcements**
   - Status: `BLOCKED`
