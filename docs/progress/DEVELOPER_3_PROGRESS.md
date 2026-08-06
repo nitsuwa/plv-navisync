@@ -31,10 +31,10 @@ Status values: `READY`, `ACTIVE`, `BLOCKED`, `FOR REVIEW`, `DONE`.
   - Test result: Pending
   - Pull Request: Pending
 - [ ] **C5 — Reports and report history**
-  - Status: `BLOCKED`
+  - Status: `ACTIVE`
   - Branch: `feature/reports-workflow`
   - Depends on: Gate G4 and C2
-  - Test result: Pending
+  - Test result: In Progress
   - Pull Request: Pending
 - [ ] **C6 — Events and announcements**
   - Status: `BLOCKED`

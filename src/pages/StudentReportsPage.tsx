@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import {
   Flag, MapPin, Clock, CheckCircle2, AlertCircle, X, ChevronRight,
-  Search, Filter, MessageCircle, Sparkles,
+  Search, Filter, MessageCircle, Sparkles, Plus,
 } from "lucide-react";
 import { SearchBar } from "../components/ui/SearchBar";
 import { motion, AnimatePresence } from "motion/react";
@@ -13,6 +13,7 @@ import { EmptyState } from "../components/ui/EmptyState";
 import { Skeleton } from "../components/ui/Skeleton";
 import { useScrollReveal } from "../hooks/useScrollReveal";
 import { cn } from "../lib/utils";
+import { reportService, type IssueReport } from "../services/reportService";
 
 // ═════════════════════════════════════════════════════════════════════════════
 // ── Scroll-reveal wrapper ───────────────────────────────────────────────────
@@ -48,68 +49,21 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
   );
 }
 
-type ReportStatus = "pending" | "investigating" | "resolved" | "rejected";
+type ReportStatus = "pending" | "investigating" | "under_review" | "resolved" | "rejected" | "dismissed";
 type FilterStatus = "all" | ReportStatus;
 
-interface Report {
-  id: string;
-  type: string;
-  building: string;
-  location: string;
-  description: string;
-  date: string;
-  status: ReportStatus;
-  updates?: { date: string; text: string }[];
-}
-
-const REPORT_STATUS: Record<ReportStatus, {
+const REPORT_STATUS: Record<string, {
   label: string; color: string; bg: string; icon: typeof Flag; step: number;
 }> = {
   pending:       { label: "Pending",       color: "text-amber-600 dark:text-amber-400",  bg: "bg-amber-50/80 dark:bg-amber-900/20 border-amber-200/60 dark:border-amber-800/30",  icon: Clock,        step: 1 },
   investigating: { label: "Under Review",  color: "text-blue-600 dark:text-blue-400",    bg: "bg-blue-50/80 dark:bg-blue-900/20 border-blue-200/60 dark:border-blue-800/30",      icon: AlertCircle,  step: 2 },
+  under_review:  { label: "Under Review",  color: "text-blue-600 dark:text-blue-400",    bg: "bg-blue-50/80 dark:bg-blue-900/20 border-blue-200/60 dark:border-blue-800/30",      icon: AlertCircle,  step: 2 },
   resolved:      { label: "Resolved",      color: "text-green-600 dark:text-green-400",  bg: "bg-green-50/80 dark:bg-green-900/20 border-green-200/60 dark:border-green-800/30",  icon: CheckCircle2, step: 3 },
-  rejected:      { label: "Rejected",      color: "text-destructive",                    bg: "bg-destructive/5 border-destructive/20",                                       icon: X,            step: 3 },
+  rejected:      { label: "Dismissed",     color: "text-destructive",                    bg: "bg-destructive/5 border-destructive/20",                                       icon: X,            step: 3 },
+  dismissed:     { label: "Dismissed",     color: "text-destructive",                    bg: "bg-destructive/5 border-destructive/20",                                       icon: X,            step: 3 },
 };
 
 const STEPS = ["Submitted", "Under Review", "Resolved"];
-
-const MY_REPORTS: Report[] = [
-  {
-    id: "rpt1",
-    type: "Broken Elevator",
-    building: "ADM Building",
-    location: "Ground Floor, near main lobby",
-    description: "The elevator near the main lobby has been out of service since Monday. There is no signage directing students to the alternate entrance.",
-    date: "January 15, 2025",
-    status: "investigating",
-    updates: [
-      { date: "Jan 16", text: "Maintenance team has been notified and is assessing the issue." },
-      { date: "Jan 14", text: "Report submitted and logged in the system." },
-    ],
-  },
-  {
-    id: "rpt2",
-    type: "Blocked Walkway",
-    building: "Near Library",
-    location: "North pathway between LRC and MAB",
-    description: "Construction materials are blocking the main pathway between the library and the main academic building.",
-    date: "January 10, 2025",
-    status: "resolved",
-    updates: [
-      { date: "Jan 12", text: "Construction materials have been cleared. Pathway is now accessible." },
-      { date: "Jan 11", text: "Campus maintenance notified of the obstruction." },
-    ],
-  },
-  {
-    id: "rpt3",
-    type: "Facility Problem",
-    building: "SSC Building",
-    location: "SSC Main Hall",
-    description: "Ceiling fan in the main hall has been making loud grinding noises and wobbles visibly.",
-    date: "January 5, 2025",
-    status: "pending",
-  },
-];
 
 export function StudentReportsPage() {
   const { loading: authLoading, isStudent } = useStudentAuth();
@@ -177,13 +131,15 @@ export function StudentReportsPage() {
     return null;
   }
 
-  const filtered = MY_REPORTS.filter(r => {
+  const filtered = reports.filter((r) => {
     const matchFilter = filter === "all" || r.status === filter;
     const q = search.toLowerCase().trim();
-    const matchSearch = !q ||
-      r.type.toLowerCase().includes(q) ||
-      r.building.toLowerCase().includes(q) ||
-      r.location.toLowerCase().includes(q);
+    const matchSearch =
+      !q ||
+      r.title.toLowerCase().includes(q) ||
+      (r.buildingName && r.buildingName.toLowerCase().includes(q)) ||
+      r.category.toLowerCase().includes(q) ||
+      r.description.toLowerCase().includes(q);
     return matchFilter && matchSearch;
   });
 
@@ -193,16 +149,16 @@ export function StudentReportsPage() {
         <StudentPageHeader
           backTo="/student"
           title="My Reports"
-          subtitle={`${MY_REPORTS.length} submitted ${MY_REPORTS.length === 1 ? "report" : "reports"}`}
+          subtitle={`${reports.length} submitted ${reports.length === 1 ? "report" : "reports"}`}
           icon={Flag}
           iconBg="color-mix(in srgb, #f59e0b 14%, transparent)"
           iconColor="#d97706"
           action={
             <Link
-              to="/help"
+              to="/map"
               className="flex items-center gap-1.5 h-9 px-4 rounded-xl text-xs font-bold bg-primary text-primary-foreground shadow-sm shadow-primary/20 shrink-0 hover:brightness-110 transition-all"
             >
-              <Flag className="h-3.5 w-3.5" />
+              <Plus className="h-3.5 w-3.5" />
               New Report
             </Link>
           }
@@ -210,14 +166,14 @@ export function StudentReportsPage() {
 
         <div className="max-w-2xl mx-auto px-5 py-6 space-y-4">
           {/* Search + Filter */}
-          {MY_REPORTS.length > 0 && (
+          {reports.length > 0 && (
             <Reveal>
               <div className="space-y-3">
                 <SectionLabel>Submitted Reports</SectionLabel>
 
                 <div className="max-w-sm">
                   <SearchBar
-                    placeholder="Search reports by type, building, or location..."
+                    placeholder="Search reports by title, building, or issue type..."
                     value={search}
                     onSearch={setSearch}
                     onClear={() => setSearch("")}
@@ -227,12 +183,12 @@ export function StudentReportsPage() {
 
                 <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar">
                   <Filter className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                  {(["all", "pending", "investigating", "resolved", "rejected"] as FilterStatus[]).map(s => (
+                  {(["all", "pending", "under_review", "resolved", "dismissed"] as FilterStatus[]).map((s) => (
                     <button
                       key={s}
                       onClick={() => setFilter(s)}
                       className={cn(
-                        "shrink-0 px-3 py-1.5 rounded-xl text-xs font-bold transition-all",
+                        "shrink-0 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer",
                         filter === s
                           ? "bg-primary text-primary-foreground shadow-sm"
                           : "bg-muted/60 text-muted-foreground hover:bg-muted-foreground/10"
@@ -246,17 +202,17 @@ export function StudentReportsPage() {
             </Reveal>
           )}
 
-          {filtered.length === 0 && MY_REPORTS.length === 0 ? (
+          {filtered.length === 0 && reports.length === 0 ? (
             <EmptyState
               icon={Flag}
-              title="No reports yet"
-              description="Report campus issues from the map or Help Center to get started."
+              title="No reports submitted yet"
+              description="You can report campus issues, broken facilities, or hazards directly from the campus map."
               action={
                 <Link
-                  to="/help"
+                  to="/map"
                   className="inline-flex items-center gap-2 h-11 px-6 rounded-xl text-sm font-bold bg-primary text-primary-foreground shadow-lg shadow-primary/20 hover:brightness-110 active:scale-[0.97] transition-all"
                 >
-                  Go to Help Center
+                  Go to Campus Map
                 </Link>
               }
             />
@@ -267,7 +223,7 @@ export function StudentReportsPage() {
                   <Search className="h-6 w-6 text-muted-foreground" />
                 </div>
                 <p className="text-sm font-bold text-foreground mb-1">No reports match your filters</p>
-                <button onClick={() => { setFilter("all"); setSearch(""); }} className="text-xs font-bold text-primary hover:underline mt-1">
+                <button onClick={() => { setFilter("all"); setSearch(""); }} className="text-xs font-bold text-primary hover:underline mt-1 cursor-pointer">
                   Clear all filters
                 </button>
               </div>
@@ -276,8 +232,13 @@ export function StudentReportsPage() {
             <AnimatePresence>
               <div className="space-y-4">
                 {filtered.map((r, i) => {
-                  const st = REPORT_STATUS[r.status];
+                  const st = REPORT_STATUS[r.status] || REPORT_STATUS.pending;
                   const StatusIcon = st.icon;
+                  const dateStr = new Date(r.createdAt).toLocaleDateString("en-US", {
+                    month: "short",
+                    day: "numeric",
+                    year: "numeric",
+                  });
 
                   return (
                     <Reveal key={r.id} delay={i * 40}>
@@ -294,7 +255,7 @@ export function StudentReportsPage() {
                             </div>
                             <div className="flex-1 min-w-0">
                               <div className="flex items-start justify-between gap-2">
-                                <p className="text-sm font-extrabold text-foreground">{r.type}</p>
+                                <p className="text-sm font-extrabold text-foreground">{r.title}</p>
                                 <span className={cn("flex items-center gap-1 text-[10px] font-bold px-2.5 py-1 rounded-full border shrink-0 whitespace-nowrap", st.bg, st.color)}>
                                   <StatusIcon className="h-2.5 w-2.5" />
                                   {st.label}
@@ -302,9 +263,9 @@ export function StudentReportsPage() {
                               </div>
                               <div className="flex items-center gap-1.5 mt-1 text-xs text-muted-foreground">
                                 <MapPin className="h-3 w-3 text-primary shrink-0" />
-                                {r.building} &middot; {r.location}
+                                {r.buildingName || "Campus Location"} {r.floorLabel ? `· ${r.floorLabel}` : ""}
                               </div>
-                              <p className="text-[10px] text-muted-foreground mt-0.5">{r.date}</p>
+                              <p className="text-[10px] text-muted-foreground mt-0.5">{dateStr}</p>
                             </div>
                           </div>
                         </div>
@@ -312,6 +273,11 @@ export function StudentReportsPage() {
                         {/* Description */}
                         <div className="px-5 py-3 border-b border-border/50 bg-muted/20">
                           <p className="text-xs text-muted-foreground leading-relaxed">{r.description}</p>
+                          {r.imageUrl && (
+                            <div className="mt-2.5 overflow-hidden rounded-xl border border-border max-w-xs">
+                              <img src={r.imageUrl} alt="Attached photo" className="w-full h-32 object-cover" />
+                            </div>
+                          )}
                         </div>
 
                         {/* Updates timeline */}
