@@ -90,7 +90,7 @@ export function StudentFavoritesPage() {
       )
     : savedBuildings;
 
-  const { showToast } = useToast();
+  const toast = useToast();
 
   const remove = async (id: string) => {
     const building = savedBuildings.find((b) => b.id === id);
@@ -99,7 +99,7 @@ export function StudentFavoritesPage() {
     setTimeout(() => {
       setSavedBuildings((prev) => prev.filter((x) => x.id !== id));
       setRemovingId(null);
-      showToast(`${building?.name || "Location"} removed from favorites`, "success");
+      toast.success(`${building?.name || "Location"} removed from favorites`);
     }, 300);
   };
 

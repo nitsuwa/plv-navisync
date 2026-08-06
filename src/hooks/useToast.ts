@@ -72,6 +72,7 @@ export function useToast() {
 
   return {
     toast: showToast,
+    showToast,
     success: (message: string, options?: ToastOptions | string) =>
       typeof options === "string"
         ? showToast(message, "success", { description: options })

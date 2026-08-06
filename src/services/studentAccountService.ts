@@ -1,4 +1,3 @@
-import { getSupabase } from "../lib/supabase";
 import type { Building } from "../types";
 import { MOCK_BUILDINGS } from "../data/mockData";
 
@@ -15,39 +14,13 @@ export interface RecentDestination {
 
 // Get student's bookmarked buildings
 export async function getSavedBuildings(): Promise<Building[]> {
-  const supabase = getSupabase();
-  const { data: userData } = await supabase.auth.getUser();
-  const userId = userData?.user?.id;
-
-  let savedIds: string[] = getLocalSavedBuildingIds();
-
-  if (userId) {
-    try {
-      const { data, error } = await supabase
-        .from("student_bookmarks")
-        .select("building_id")
-        .eq("user_id", userId);
-
-      if (!error && data) {
-        const dbIds = data.map((b) => b.building_id).filter(Boolean) as string[];
-        savedIds = Array.from(new Set([...savedIds, ...dbIds]));
-      }
-    } catch (err) {
-      console.warn("Using local saved places fallback:", err);
-    }
-  }
-
-  // Map IDs to Building objects
+  const savedIds: string[] = getLocalSavedBuildingIds();
   const savedBuildings = MOCK_BUILDINGS.filter((b) => savedIds.includes(b.id));
   return savedBuildings;
 }
 
 // Toggle bookmark for a building
 export async function toggleSaveBuilding(buildingId: string): Promise<boolean> {
-  const supabase = getSupabase();
-  const { data: userData } = await supabase.auth.getUser();
-  const userId = userData?.user?.id;
-
   const currentIds = getLocalSavedBuildingIds();
   const exists = currentIds.includes(buildingId);
   let updatedIds: string[];
@@ -59,19 +32,10 @@ export async function toggleSaveBuilding(buildingId: string): Promise<boolean> {
   }
 
   // Save to local storage
-  localStorage.setItem(SAVED_BUILDINGS_KEY, JSON.stringify(updatedIds));
-
-  // Sync to Supabase if logged in
-  if (userId) {
-    try {
-      if (exists) {
-        await supabase.from("student_bookmarks").delete().eq("user_id", userId).eq("building_id", buildingId);
-      } else {
-        await supabase.from("student_bookmarks").insert({ user_id: userId, building_id: buildingId });
-      }
-    } catch (err) {
-      console.warn("Supabase bookmark sync fallback:", err);
-    }
+  try {
+    localStorage.setItem(SAVED_BUILDINGS_KEY, JSON.stringify(updatedIds));
+  } catch {
+    // Ignore storage write errors
   }
 
   return !exists;
