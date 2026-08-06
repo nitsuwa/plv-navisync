@@ -17,7 +17,7 @@
 
 ## 1. Authentication
 
-**Status:** Core authentication and the A2 student account lifecycle are implemented. Live Auth/session behavior is verified; final mailbox-link delivery remains a deployment-configuration review check.
+**Status:** Core authentication, the A2 student account lifecycle, and A3 administrator account enforcement are implemented. Live Auth/session behavior and the developer mailbox-link walkthrough are verified; production redirect/SMTP settings remain deployment checks.
 
 **Current Screens:**
 - `/admin` — `AdminLoginPage` for administrator and student sign-in.
@@ -32,7 +32,7 @@
 - `studentAccount.ts` — validates registration data and owns typed signup, resend, reset-request, password-update, and active-student profile checks.
 - `AuthLifecyclePages.tsx` — owns verification and password-recovery route states while retaining the Supabase session after successful confirmation/reset.
 - Demonstration-account dropdown — appears only when demo mode and the relevant Vite variables are configured; Demo Administrator and Demo Student only fill the existing fields and never sign in automatically.
-- `useAdminAuth.ts` — restores the Supabase session and administrator profile for protected administration routes.
+- `useAdminAuth.ts` — validates the Auth user, restores the administrator profile, and rechecks role/active state every 15 seconds and whenever the window/tab becomes active.
 - `useStudentAuth.ts` — uses `getSession()` and `onAuthStateChange`, loads the `profiles` row, and exposes profile, loading, student state, and Supabase sign-out behavior.
 - `AdminLayout.tsx` — protects administration routes using the real administrator session/profile.
 - Student pages and shared navigation — wait for authentication loading, protect student-only pages, show the real profile, and use Supabase sign-out.
@@ -63,7 +63,6 @@
 **Remaining functionality:**
 - Configure every deployed origin in Supabase Auth Redirect URLs and click through one real verification and recovery email per target environment.
 - Configure production SMTP before onboarding real students; the hosted default provider has recipient restrictions.
-- Persistent administrator user-management operations through approved protected backend mechanisms.
 - Broader cross-feature RLS verification after later packages connect their tables.
 
 **Files involved:** `src/pages/AdminLoginPage.tsx`, `src/pages/RegistrationPage.tsx`, `src/pages/AuthLifecyclePages.tsx`, `src/lib/studentAccount.ts`, `src/hooks/useAdminAuth.ts`, `src/hooks/useStudentAuth.ts`, `src/components/layout/AdminLayout.tsx`, protected student pages, `src/lib/supabase.ts`
@@ -74,30 +73,30 @@
 
 ## 2. User Management
 
-**Status:** Partial / Mock Data — complete admin CRUD UI over a page-local mock user array.
+**Status:** Complete for A3 — typed live profile listing/filtering, invitations, approved profile/role changes, activation/deactivation, session enforcement, and privileged-action auditing.
 
 **Current Screens:**
-- `/admin-dashboard/users` — `AdminUsersPage` (list, search, add/edit modal, delete, role/status badges)
+- `/admin-dashboard/users` — `AdminUsersPage` (live list/search/filter, invite/edit modal, role/status badges, activation/deactivation)
 
 **Current Components:**
-- `AdminUsersPage.tsx` — `MOCK_USERS` array (6 users) loaded on mount via `useEffect`, paginated table, search bar, category badges, CRUD modal with form validation
-- `Button`, `Badge`, `FormField`, `EmptyState`, `SearchBar`, `TablePageSkeleton`, custom modal
+- `AdminUsersPage.tsx` — consumes the typed service, limits roles to the schema-approved `student`/`admin` values, disables self role/status controls, and presents validated invitation/profile forms.
+- `useAdminAuth.ts` — promptly removes protected-page access after another administrator changes the current account's role or active state.
+- `Button`, `FormField`, `EmptyState`, `SearchBar`, `TablePageSkeleton`, custom modal
 
-**Current Services:** `userService` (in `src/services/userService.ts`) exists, seeded with 6 users via `seedMockData("users", …)`. **Not connected** — the page uses its own `MOCK_USERS`, not the service.
+**Current Services:** `adminUserService.ts` owns typed `profiles` queries, the audited `admin_update_profile` RPC, and invocation of the protected `admin-users` Edge Function. The legacy mock `userService.ts` remains unused by this page.
 
-**Current Database Usage:** `users` table defined in migration (`supabase/migrations/001_initial_schema.sql`) with `role`/`status`/`department`/`last_login`. Not queried at runtime.
+**Current Database Usage:** `public.profiles` is queried under RLS. Migration `20260806094510_secure_admin_user_management.sql` adds the authenticated-only, active-admin-validated profile mutation and append-only `activity_logs` entries. The `admin-users` Edge Function owns service-role-only Auth invitations and independently verifies the caller's JWT and active admin profile.
 
-**Current Problems:**
-- Page-local mock array duplicates `userService` seed data (drift risk)
-- No persistence — edits are lost on reload
-- No image/avatar upload, no user detail page
-- Roles are restricted to a fixed dropdown (`admin/faculty/staff/moderator`)
+**Current Constraints:**
+- Auth email changes are intentionally excluded until a separate verified-email workflow is approved.
+- Account deletion is intentionally replaced by reversible deactivation.
+- Invitation delivery depends on configured Supabase SMTP and redirect settings.
 
-**Missing Functionality:** Wiring to `userService`/Supabase, real CRUD persistence, role permissions model, audit trail, bulk actions.
+**Missing Functionality:** Bulk actions and a dedicated user-detail history screen are outside A3.
 
-**Files involved:** `src/pages/AdminUsersPage.tsx`, `src/services/userService.ts`, `src/services/types.ts` (`DbUser`), `src/data/mockData.ts`
+**Files involved:** `src/pages/AdminUsersPage.tsx`, `src/services/adminUserService.ts`, `src/hooks/useAdminAuth.ts`, `src/types/database.generated.ts`, `supabase/functions/admin-users/index.ts`, `supabase/migrations/20260806094510_secure_admin_user_management.sql`
 
-**Dependencies:** `useDataList`-style list state (page-local), `useToast`, `Button`/`Badge`/`FormField`/`EmptyState`/`SearchBar`/`TablePageSkeleton`
+**Dependencies:** Supabase Auth, Edge Functions, `public.profiles`, `public.activity_logs`, `useToast`, `Button`/`FormField`/`EmptyState`/`SearchBar`/`TablePageSkeleton`
 
 ---
 

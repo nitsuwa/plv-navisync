@@ -1349,6 +1349,37 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      admin_update_profile: {
+        Args: {
+          p_department: string
+          p_first_name: string
+          p_is_active: boolean
+          p_last_name: string
+          p_role: string
+          p_student_number: string
+          p_target_id: string
+        }
+        Returns: {
+          avatar_path: string | null
+          created_at: string
+          department: string | null
+          email: string
+          first_name: string
+          id: string
+          is_active: boolean
+          last_login_at: string | null
+          last_name: string
+          role: string
+          student_number: string | null
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "profiles"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       campus_is_published: { Args: { p_campus_id: string }; Returns: boolean }
       is_admin: { Args: never; Returns: boolean }
       is_published_floor_plan: { Args: { p_path: string }; Returns: boolean }

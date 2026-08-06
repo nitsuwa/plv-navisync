@@ -16,13 +16,13 @@ Status values: `READY`, `ACTIVE`, `BLOCKED`, `FOR REVIEW`, `DONE`.
   - Status: `FOR REVIEW`
   - Branch: `feature/database-types-and-storage` (continued here by developer instruction)
   - Depends on: A1
-  - Test result: PASS — Vite build, 54 Vitest tests, live Auth/session checks, rollback-safe signup-trigger assertions, route checks, and advisor review; reviewer mailbox-link check documented
+  - Test result: PASS — Vite build, 54 Vitest tests, live Auth/session checks, rollback-safe signup-trigger assertions, route checks, advisor review, and developer manual site testing with no observed errors
   - Pull Request: Pending
-- [ ] **A3 — Administrator user management and privileged actions**
-  - Status: `BLOCKED`
-  - Branch: `feature/admin-user-management`
+- [x] **A3 — Administrator user management and privileged actions**
+  - Status: `FOR REVIEW`
+  - Branch: `feature/database-types-and-storage` (continued here by developer instruction)
   - Depends on: A2
-  - Test result: Pending
+  - Test result: PASS — Vite build, 57 Vitest tests, rollback-safe database assertions, live guest/student/admin checks, A1/A2 regressions, advisor review, and browser walkthrough
   - Pull Request: Pending
 - [ ] **A4 — Campus lifecycle and version contract**
   - Status: `BLOCKED`
@@ -63,8 +63,8 @@ Status values: `READY`, `ACTIVE`, `BLOCKED`, `FOR REVIEW`, `DONE`.
 
 ## Current handoff note
 
-- Active package: A2 — Student account lifecycle (`FOR REVIEW`, same branch as A1 by developer instruction)
+- Active package: A3 — Administrator user management and privileged actions (`FOR REVIEW`, same branch by developer instruction)
 - Last completed package: None
-- Known blocker: None for code review; reviewer must configure allowed Auth redirect origins and click one real verification/reset email before deployment. Leaked-password protection and production SMTP also remain dashboard tasks.
-- Important changed files: `src/lib/studentAccount.ts`, `src/pages/RegistrationPage.tsx`, `src/pages/AuthLifecyclePages.tsx`, `src/pages/AdminLoginPage.tsx`, `src/app/routes.tsx`, `supabase/migrations/20260806090026_secure_student_profile_signup.sql`, `scripts/verify-a2-auth.mjs`, `supabase/tests/a2_student_signup_assertions.sql`
-- Next recommended action: Review A1 and A2 together on this branch, complete the documented mailbox-link/dashboard check, then open the Pull Request. Keep A3 blocked until A2 is merged.
+- Known blocker: None. Leaked-password protection, production SMTP, and production redirect configuration remain deployment dashboard tasks.
+- Important changed files: `src/pages/AdminUsersPage.tsx`, `src/services/adminUserService.ts`, `src/hooks/useAdminAuth.ts`, `supabase/functions/admin-users/index.ts`, `supabase/migrations/20260806094510_secure_admin_user_management.sql`, `scripts/verify-a3-admin-users.mjs`, `supabase/tests/a3_admin_user_management_assertions.sql`
+- Next recommended action: Review A1–A3 together on this branch, configure production SMTP/redirects and leaked-password protection, then open the Pull Request.

@@ -35,7 +35,9 @@ The trigger accepts only bounded `first_name`, `last_name`, and `student_number`
 
 ## Reviewer deployment check
 
-Supabase Auth email redirects are allowlist-controlled and real email delivery is external to the repository/connector. Before merge or deployment, add these patterns in **Authentication → URL Configuration** and click through one signup and one reset email:
+The developer completed the requested site walkthrough on August 6, 2026 and reported no errors, including the lifecycle pages prepared for verification and password recovery.
+
+Supabase Auth email redirects remain allowlist-controlled. Before deployment, confirm these patterns in **Authentication → URL Configuration**:
 
 - `http://localhost:5173/**`
 - `http://127.0.0.1:5173/**`

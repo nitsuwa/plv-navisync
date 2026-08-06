@@ -41,11 +41,23 @@ export function useAdminAuth(): AdminAuthState {
       setLoading(false);
     };
 
-    // Restore any persisted session (page refresh / returning visitor).
-    supabase.auth.getSession().then(({ data }) => {
+    const revalidate = async () => {
+      if (!supabase) return;
+      const { data, error } = await supabase.auth.getUser();
       if (!mounted) return;
-      if (data.session) {
-        void loadProfile(data.session.user.id);
+      if (error || !data.user) {
+        setProfile(null);
+        setLoading(false);
+        return;
+      }
+      await loadProfile(data.user.id);
+    };
+
+    // Restore and validate the current identity against the Auth server.
+    supabase.auth.getUser().then(({ data, error }) => {
+      if (!mounted) return;
+      if (!error && data.user) {
+        void loadProfile(data.user.id);
       } else {
         setProfile(null);
         setLoading(false);
@@ -63,8 +75,22 @@ export function useAdminAuth(): AdminAuthState {
       }
     });
 
+    // Profile authorization is database state, not JWT state. Recheck it while
+    // the portal is open and immediately when the tab/window becomes active so
+    // another administrator's deactivation takes effect in the current session.
+    const interval = window.setInterval(() => void revalidate(), 15_000);
+    const handleFocus = () => void revalidate();
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") void revalidate();
+    };
+    window.addEventListener("focus", handleFocus);
+    document.addEventListener("visibilitychange", handleVisibility);
+
     return () => {
       mounted = false;
+      window.clearInterval(interval);
+      window.removeEventListener("focus", handleFocus);
+      document.removeEventListener("visibilitychange", handleVisibility);
       listener.subscription.unsubscribe();
     };
   }, []);
