@@ -37,10 +37,10 @@ Status values: `READY`, `ACTIVE`, `BLOCKED`, `FOR REVIEW`, `DONE`.
   - Test result: `npm run build` PASSED (2508 modules built in 17.73s). Created `reportService.ts`, connected `ReportModal.tsx` for photo issue submissions, and built live student report history on `/student/reports`.
   - Pull Request: Pending
 - [ ] **C6 — Events and announcements**
-  - Status: `ACTIVE`
+  - Status: `FOR REVIEW`
   - Branch: `feature/events-and-announcements`
   - Depends on: Gate G4 and C2
-  - Test result: In Progress
+  - Test result: `npm run build` PASSED (2508 modules built in 18.42s). Created `eventService.ts`, connected Home announcements/events feed, and added interactive map venue links.
   - Pull Request: Pending
 - [ ] **C7 — Favorites, recent destinations, and minimal profile**
   - Status: `BLOCKED`
