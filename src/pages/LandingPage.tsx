@@ -1547,7 +1547,7 @@ function FinalCTA() {
 
 export function LandingPage() {
   return (
-    <div className="min-h-screen">
+    <div className="min-h-screen w-full max-w-full overflow-x-hidden">
       <HeroSection />
       <PlatformHighlights />
       <HowHelpsYou />

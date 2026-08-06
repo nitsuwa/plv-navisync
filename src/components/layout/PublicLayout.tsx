@@ -16,7 +16,7 @@ export function PublicLayout() {
   const showBottomNav = true;
 
   return (
-    <div className={cn("min-h-screen flex flex-col", !isMapPage && "app-page-bg")}>
+    <div className={cn("min-h-screen flex flex-col w-full max-w-full overflow-x-hidden", !isMapPage && "app-page-bg")}>
       {/* Skip-to-content link for keyboard and screen reader users */}
       <a
         href="#main-content"
@@ -47,8 +47,8 @@ export function PublicLayout() {
       <main
         id="main-content"
         className={cn(
-          "relative z-[1] flex-1",
-          isMapPage && "overflow-hidden flex flex-col",
+          "relative z-[1] flex-1 w-full max-w-full",
+          isMapPage ? "overflow-hidden flex flex-col" : "overflow-x-hidden",
           showBottomNav && !isMapPage && "pb-[calc(88px+env(safe-area-inset-bottom,0px))] md:pb-0"
         )}
       >
