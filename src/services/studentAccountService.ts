@@ -15,20 +15,56 @@ export interface RecentDestination {
 // Get student's bookmarked buildings
 export async function getSavedBuildings(): Promise<Building[]> {
   const savedIds: string[] = getLocalSavedBuildingIds();
-  const savedBuildings = MOCK_BUILDINGS.filter((b) => savedIds.includes(b.id));
+  if (savedIds.length === 0) return [];
+
+  // Filter MOCK_BUILDINGS matching by id, code, or lowercased id/code
+  const savedBuildings = MOCK_BUILDINGS.filter((b) =>
+    savedIds.some(
+      (id) =>
+        id === b.id ||
+        id.toLowerCase() === b.code.toLowerCase() ||
+        id.toLowerCase() === b.id.toLowerCase() ||
+        b.name.toLowerCase().includes(id.toLowerCase())
+    )
+  );
   return savedBuildings;
 }
 
 // Toggle bookmark for a building
 export async function toggleSaveBuilding(buildingId: string): Promise<boolean> {
   const currentIds = getLocalSavedBuildingIds();
-  const exists = currentIds.includes(buildingId);
-  let updatedIds: string[];
+  
+  // Find building in MOCK_BUILDINGS to resolve its standard ID and Code
+  const targetBuilding = MOCK_BUILDINGS.find(
+    (b) =>
+      b.id === buildingId ||
+      b.code.toLowerCase() === buildingId.toLowerCase() ||
+      b.id.toLowerCase() === buildingId.toLowerCase()
+  );
 
+  const standardId = targetBuilding?.id || buildingId;
+  const standardCode = targetBuilding?.code;
+
+  const exists = currentIds.some(
+    (id) =>
+      id === standardId ||
+      id === buildingId ||
+      (standardCode && id.toLowerCase() === standardCode.toLowerCase())
+  );
+
+  let updatedIds: string[];
   if (exists) {
-    updatedIds = currentIds.filter((id) => id !== buildingId);
+    updatedIds = currentIds.filter(
+      (id) =>
+        id !== standardId &&
+        id !== buildingId &&
+        (standardCode ? id.toLowerCase() !== standardCode.toLowerCase() : true)
+    );
   } else {
-    updatedIds = [buildingId, ...currentIds];
+    updatedIds = [standardId, ...currentIds.filter((id) => id !== standardId)];
+    if (standardCode && !updatedIds.includes(standardCode)) {
+      updatedIds.push(standardCode);
+    }
   }
 
   // Save to local storage

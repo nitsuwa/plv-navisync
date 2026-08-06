@@ -108,21 +108,24 @@ export function BuildingInfoPanel({
         >
           <Share2 className="h-3 w-3 shrink-0" /> Share
         </button>
-        {studentAuth.isStudent ? (
-          <button
-            onClick={() => onToggleSave(selected.id)}
-            aria-label={saved.has(selected.id) ? `Remove ${selected.name} from saved` : `Save ${selected.name}`}
-            className={cn(
-              "flex items-center justify-center gap-0.5 h-8 px-1 rounded-xl text-[10px] font-extrabold border active:scale-[0.97] transition-all",
-              saved.has(selected.id)
-                ? "bg-accent/15 text-accent border-accent/30"
-                : "bg-muted text-muted-foreground border-border hover:bg-secondary",
-            )}
-          >
-            <Bookmark className={cn("h-3 w-3 shrink-0", saved.has(selected.id) && "fill-current")} />
-            {saved.has(selected.id) ? "Saved" : "Save"}
-          </button>
-        ) : (
+        {studentAuth.isStudent ? (() => {
+          const isSaved = saved.has(selected.id) || (Boolean(selected.code) && (saved.has(selected.code) || saved.has(selected.code.toLowerCase())));
+          return (
+            <button
+              onClick={() => onToggleSave(selected.id)}
+              aria-label={isSaved ? `Remove ${selected.name} from saved` : `Save ${selected.name}`}
+              className={cn(
+                "flex items-center justify-center gap-0.5 h-8 px-1 rounded-xl text-[10px] font-extrabold border active:scale-[0.97] transition-all",
+                isSaved
+                  ? "bg-accent/15 text-accent border-accent/30"
+                  : "bg-muted text-muted-foreground border-border hover:bg-secondary",
+              )}
+            >
+              <Bookmark className={cn("h-3 w-3 shrink-0", isSaved && "fill-current")} />
+              {isSaved ? "Saved" : "Save"}
+            </button>
+          );
+        })() : (
           <button
             onClick={() => onSignInPrompt("save locations")}
             className="flex items-center justify-center gap-0.5 h-8 px-1 rounded-xl bg-muted/60 text-muted-foreground/50 text-[10px] font-semibold border border-dashed border-border/60"

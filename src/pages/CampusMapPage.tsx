@@ -191,7 +191,15 @@ export function CampusMapPage() {
   // Load initial bookmarked buildings from studentAccountService
   useEffect(() => {
     studentAccountService.getSavedBuildings().then((buildings) => {
-      setSaved(new Set(buildings.map((b) => b.id)));
+      const idSet = new Set<string>();
+      buildings.forEach((b) => {
+        idSet.add(b.id);
+        if (b.code) {
+          idSet.add(b.code);
+          idSet.add(b.code.toLowerCase());
+        }
+      });
+      setSaved(idSet);
     });
   }, []);
 
@@ -633,12 +641,17 @@ export function CampusMapPage() {
   }, []);
 
   const toggleSave = useCallback(async (id: string) => {
-    setSaved((p) => {
-      const s = new Set(p);
-      s.has(id) ? s.delete(id) : s.add(id);
-      return s;
-    });
     await studentAccountService.toggleSaveBuilding(id);
+    const updated = await studentAccountService.getSavedBuildings();
+    const idSet = new Set<string>();
+    updated.forEach((b) => {
+      idSet.add(b.id);
+      if (b.code) {
+        idSet.add(b.code);
+        idSet.add(b.code.toLowerCase());
+      }
+    });
+    setSaved(idSet);
   }, []);
 
   // ── Search results (buildings on campus, rooms on floor plan) ──────────

@@ -131,20 +131,23 @@ export function MobileBuildingSheet({
             </button>
           )}
 
-          {studentAuth.isStudent ? (
-            <button
-              onClick={() => onSave(selected.id)}
-              className={cn(
-                "flex items-center gap-1.5 h-9 px-4 rounded-full text-xs font-bold border active:scale-95 transition-all shrink-0",
-                saved.has(selected.id)
-                  ? "bg-accent/15 text-accent border-accent/30"
-                  : "bg-muted text-muted-foreground border-border hover:bg-secondary"
-              )}
-            >
-              <Bookmark className={cn("h-3.5 w-3.5", saved.has(selected.id) && "fill-current")} />
-              {saved.has(selected.id) ? "Saved" : "Save"}
-            </button>
-          ) : (
+          {studentAuth.isStudent ? (() => {
+            const isSaved = saved.has(selected.id) || (Boolean(selected.code) && (saved.has(selected.code) || saved.has(selected.code.toLowerCase())));
+            return (
+              <button
+                onClick={() => onSave(selected.id)}
+                className={cn(
+                  "flex items-center gap-1.5 h-9 px-4 rounded-full text-xs font-bold border active:scale-95 transition-all shrink-0",
+                  isSaved
+                    ? "bg-accent/15 text-accent border-accent/30"
+                    : "bg-muted text-muted-foreground border-border hover:bg-secondary"
+                )}
+              >
+                <Bookmark className={cn("h-3.5 w-3.5", isSaved && "fill-current")} />
+                {isSaved ? "Saved" : "Save"}
+              </button>
+            );
+          })() : (
             <button
               onClick={() => onSignInPrompt("save locations")}
               className="flex items-center gap-1.5 h-9 px-4 rounded-full bg-muted/60 text-muted-foreground/50 text-xs font-semibold border border-dashed border-border/60 shrink-0"
