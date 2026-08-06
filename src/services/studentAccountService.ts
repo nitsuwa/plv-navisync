@@ -33,41 +33,15 @@ export async function getSavedBuildings(): Promise<Building[]> {
 // Toggle bookmark for a building
 export async function toggleSaveBuilding(buildingId: string): Promise<boolean> {
   const currentIds = getLocalSavedBuildingIds();
-  
-  // Find building in MOCK_BUILDINGS to resolve its standard ID and Code
-  const targetBuilding = MOCK_BUILDINGS.find(
-    (b) =>
-      b.id === buildingId ||
-      b.code.toLowerCase() === buildingId.toLowerCase() ||
-      b.id.toLowerCase() === buildingId.toLowerCase()
-  );
-
-  const standardId = targetBuilding?.id || buildingId;
-  const standardCode = targetBuilding?.code;
-
-  const exists = currentIds.some(
-    (id) =>
-      id === standardId ||
-      id === buildingId ||
-      (standardCode && id.toLowerCase() === standardCode.toLowerCase())
-  );
-
+  const exists = currentIds.includes(buildingId);
   let updatedIds: string[];
+
   if (exists) {
-    updatedIds = currentIds.filter(
-      (id) =>
-        id !== standardId &&
-        id !== buildingId &&
-        (standardCode ? id.toLowerCase() !== standardCode.toLowerCase() : true)
-    );
+    updatedIds = currentIds.filter((id) => id !== buildingId);
   } else {
-    updatedIds = [standardId, ...currentIds.filter((id) => id !== standardId)];
-    if (standardCode && !updatedIds.includes(standardCode)) {
-      updatedIds.push(standardCode);
-    }
+    updatedIds = [buildingId, ...currentIds.filter((id) => id !== buildingId)];
   }
 
-  // Save to local storage
   try {
     localStorage.setItem(SAVED_BUILDINGS_KEY, JSON.stringify(updatedIds));
   } catch {

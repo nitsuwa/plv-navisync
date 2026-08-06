@@ -640,19 +640,38 @@ export function CampusMapPage() {
     setDirectionsMode(true);
   }, []);
 
-  const toggleSave = useCallback(async (id: string) => {
-    await studentAccountService.toggleSaveBuilding(id);
-    const updated = await studentAccountService.getSavedBuildings();
-    const idSet = new Set<string>();
-    updated.forEach((b) => {
-      idSet.add(b.id);
-      if (b.code) {
-        idSet.add(b.code);
-        idSet.add(b.code.toLowerCase());
+  const toggleSave = useCallback((id: string) => {
+    const b = selected?.id === id ? selected : MOCK_BUILDINGS.find((item) => item.id === id || item.code.toLowerCase() === id.toLowerCase());
+    const targetCode = b?.code;
+
+    setSaved((prev) => {
+      const next = new Set(prev);
+      const isSaved = next.has(id) || (targetCode ? next.has(targetCode) || next.has(targetCode.toLowerCase()) : false);
+
+      if (isSaved) {
+        next.delete(id);
+        if (targetCode) {
+          next.delete(targetCode);
+          next.delete(targetCode.toLowerCase());
+        }
+        studentAccountService.toggleSaveBuilding(id);
+        if (targetCode && targetCode !== id) {
+          studentAccountService.toggleSaveBuilding(targetCode);
+        }
+      } else {
+        next.add(id);
+        if (targetCode) {
+          next.add(targetCode);
+          next.add(targetCode.toLowerCase());
+        }
+        studentAccountService.toggleSaveBuilding(id);
+        if (targetCode && targetCode !== id) {
+          studentAccountService.toggleSaveBuilding(targetCode);
+        }
       }
+      return next;
     });
-    setSaved(idSet);
-  }, []);
+  }, [selected]);
 
   // ── Search results (buildings on campus, rooms on floor plan) ──────────
   const buildingResults = !isFloorMode && debouncedSearch
