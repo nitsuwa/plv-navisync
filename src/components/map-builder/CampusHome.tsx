@@ -75,7 +75,7 @@ export interface CampusHomeProps {
   campuses: Campus[];
   onOpen: (id: string) => void;
   onCreate: () => void;
-  onDelete: (id: string) => void;
+  onDelete?: (id: string) => void;
   onDuplicate?: (id: string) => void;
   onTogglePublish?: (id: string, force?: "publish" | "unpublish") => void;
   onArchive?: (id: string) => void;
@@ -211,7 +211,7 @@ function QuickActions({
   onTogglePublish?: (id: string, force?: "publish" | "unpublish") => void;
   onArchive?: (id: string) => void;
   onEditDetails?: (id: string) => void;
-  onDeleteRequest: (id: string) => void;
+  onDeleteRequest?: (id: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [dropdownPos, setDropdownPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
@@ -381,8 +381,10 @@ function QuickActions({
         setArchiveConfirm({ id: campus.id, name: campus.name, wasPublished: campus.publishStatus === "published" });
       },
     }] : []),
-    { type: "separator" as const },
-    { icon: Trash2, label: "Delete", danger: true, action: () => { setOpen(false); onDeleteRequest(campus.id); } },
+    ...(onDeleteRequest ? [
+      { type: "separator" as const },
+      { icon: Trash2, label: "Delete", danger: true, action: () => { setOpen(false); onDeleteRequest(campus.id); } },
+    ] : []),
   ];
 
   const progressActionType = actionProgress?.action ?? "publishing";
@@ -624,7 +626,7 @@ export function CampusHome({
   return (
     <div className="flex-1 overflow-y-auto scrollbar-show-on-hover scroll-smooth p-6 lg:p-8">
       {/* Type-to-confirm delete dialog for X button */}
-      {deleteConfirm && (
+      {deleteConfirm && onDelete && (
         <TypeToConfirmDialog
           open={!!deleteConfirm}
           title="Delete Campus"
@@ -879,12 +881,12 @@ export function CampusHome({
                         onTogglePublish={onTogglePublish}
                         onArchive={onArchive}
                         onEditDetails={onEditDetails}
-                        onDeleteRequest={(id) => {
+                        onDeleteRequest={onDelete ? (id) => {
                           const target = campuses.find((x) => x.id === id);
                           if (target) setDeleteConfirm({ id, name: target.name });
-                        }}
+                        } : undefined}
                       />
-                      <button
+                      {onDelete && <button
                         onClick={(e) => {
                           e.stopPropagation();
                           setDeleteConfirm({ id: campus.id, name: campus.name });
@@ -893,7 +895,7 @@ export function CampusHome({
                         title="Delete campus"
                       >
                         <X className="h-3.5 w-3.5" />
-                      </button>
+                      </button>}
                     </div>
 
                     {/* Campus code badge at bottom */}
@@ -978,7 +980,7 @@ export function CampusHome({
                       </div>
 
                       {/* Open button */}
-                      <button
+                      {onDelete && <button
                         onClick={() => onOpen(campus.id)}
                         className={cn(
                           "w-full mt-3 h-9 rounded-xl text-xs font-extrabold transition-all flex items-center justify-center gap-1.5",
@@ -1005,7 +1007,7 @@ export function CampusHome({
                       >
                         <ExternalLink className="h-3.5 w-3.5" />
                         Open Editor
-                      </button>
+                      </button>}
                     </div>
                   </div>
                 </motion.div>
@@ -1054,13 +1056,13 @@ export function CampusHome({
                       >
                         Restore
                       </button>
-                      <button
+                      {onDelete && <button
                         onClick={() => setDeleteConfirm({ id: campus.id, name: campus.name })}
                         className="text-xs font-bold text-destructive/70 hover:text-destructive hover:underline shrink-0"
                         title="Permanently delete this archived campus"
                       >
                         Delete
-                      </button>
+                      </button>}
                     </div>
                   </div>
                 ))}

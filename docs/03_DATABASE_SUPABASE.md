@@ -95,7 +95,7 @@ Verified:
 - `.env.local` and `.env.demo.local` are ignored by Git.
 - The existing live schema is recorded in migration history by the assertion-only `20260805160720_baseline_existing_schema.sql` marker without replaying the applied `001` schema.
 - Live database types are generated at `src/types/database.generated.ts`, and the single browser client is typed with `Database`.
-- All five Storage buckets enforce the documented MIME allowlist and file-size limits.
+- All six Storage buckets enforce the documented MIME allowlist and file-size limits.
 - Function execution grants are restricted to reviewed roles; intentionally public RLS helpers are documented in the corrective migration.
 - Repeatable guest, student, and administrator RLS and Storage checks pass with controlled, self-cleaning fixtures.
 - Student registration now calls Supabase Auth with validated name, email, password, and student-number metadata; the trigger preserves only reviewed profile fields and always hardcodes the `student` role.
@@ -104,7 +104,7 @@ Verified:
 
 Still requiring verification or implementation:
 
-- Persistent CRUD and service integration for feature modules.
+- Persistent CRUD and service integration for feature modules beyond the A4 campus lifecycle.
 - Full cross-system RLS verification after the remaining feature packages are connected.
 - Supabase Auth leaked-password protection must be enabled in the project dashboard before production release.
 - Each local/preview/production origin must be added to Supabase Auth Redirect URLs, and production SMTP must be configured before real student onboarding.
@@ -335,12 +335,17 @@ All time values are stored in UTC and formatted to Asia/Manila in the frontend.
 | `code` | TEXT | Yes | Unique |
 | `description` | TEXT | No | |
 | `address` | TEXT | No | |
+| `city` | TEXT | No | |
+| `province` | TEXT | No | |
+| `postal_code` | TEXT | No | |
 | `latitude` | DOUBLE PRECISION | No | General campus coordinate only |
 | `longitude` | DOUBLE PRECISION | No | |
 | `logo_path` | TEXT | No | |
 | `overview_image_path` | TEXT | No | |
+| `theme_color` | TEXT | Yes | Six-digit hex color |
 | `canvas_width` | INTEGER | Yes | Positive |
 | `canvas_height` | INTEGER | Yes | Positive |
+| `canvas_configured` | BOOLEAN | Yes | Persists completion even when default dimensions are retained |
 | `map_scale_m_per_unit` | NUMERIC | Yes | Used for route distance and ETA |
 | `is_default` | BOOLEAN | Yes | Default `false` |
 | `status` | TEXT | Yes | `draft`, `published`, `archived` |
@@ -356,6 +361,8 @@ All time values are stored in UTC and formatted to Asia/Manila in the frontend.
 - `status IN ('draft', 'published', 'archived')`
 - At most one active campus may be `is_default = true`.
 - Public users only read published, non-archived campuses.
+- New campuses always begin as private drafts; restoring an archive also returns it to a private draft.
+- `draft` plus a non-null published-version pointer is presented as `unpublished` by the application contract.
 
 ---
 
@@ -996,6 +1003,15 @@ Use database search indexes only when actual query patterns require them. Avoid 
 - Allowed: JPG, PNG, WEBP
 - Maximum: 5 MB
 - Administrator write access
+
+## `campus-images`
+
+- Private bucket
+- Allowed: JPG, PNG, WEBP
+- Maximum: 5 MB
+- Administrator write access
+- Guests and students may read only an object referenced by a published, non-archived campus
+- Administrators use short-lived signed URLs to preview draft assets
 
 ## `floor-plans`
 

@@ -60,6 +60,7 @@ interface CampusEditorProps {
   onBack: () => void;
   onUpdate: (c: Campus) => void;
   onPublish: (c: Campus) => void;
+  publishingEnabled?: boolean;
   onOpenFloor: (buildingId: string, floorId: string) => void;
   onAddBuilding: () => void;
   onOpenCanvasSettings?: () => void;
@@ -67,7 +68,7 @@ interface CampusEditorProps {
   lastSavedAt?: string;
 }
 
-export function CampusEditor({ campus, onBack, onUpdate, onPublish, onOpenFloor, onAddBuilding, onOpenCanvasSettings }: CampusEditorProps) {
+export function CampusEditor({ campus, onBack, onUpdate, onPublish, publishingEnabled = true, onOpenFloor, onAddBuilding, onOpenCanvasSettings }: CampusEditorProps) {
   const [tool, setTool] = useState<SimpleTool>("select");
   const [selected, setSelected] = useState<CampusSelection | null>(null);
   const [drawingPath, setDP] = useState<{ x: number; y: number }[]>([]);
@@ -1451,12 +1452,14 @@ export function CampusEditor({ campus, onBack, onUpdate, onPublish, onOpenFloor,
                   setShowPublishConfirm(true);
                 }}
                 disabled={
-                  isProcessing || isDirty ||
+                  !publishingEnabled || isProcessing || isDirty ||
                   (!isDirty && campus.publishStatus === "published" && !hasDraftChanges && campus.updatedAt === campus.publishedAt) ||
                   (!isDirty && campus.publishStatus === "draft" && !campus.publishedAt)
                 }
                 title={
-                  isDirty
+                  !publishingEnabled
+                    ? "Publishing becomes available in A6"
+                    : isDirty
                     ? "Save your draft first before publishing"
                     : campus.publishStatus === "published" && !hasDraftChanges && campus.updatedAt === campus.publishedAt
                       ? "Already published — make changes and save to enable publishing"
@@ -1466,7 +1469,9 @@ export function CampusEditor({ campus, onBack, onUpdate, onPublish, onOpenFloor,
                 }
                 className={cn(
                   "flex items-center gap-1 h-7 px-2 rounded-md text-[9px] font-extrabold transition-all shadow-sm",
-                  isProcessing
+                  !publishingEnabled
+                    ? "bg-muted text-muted-foreground cursor-not-allowed"
+                    : isProcessing
                     ? "bg-primary/70 text-primary-foreground/70 cursor-not-allowed"
                     : isDirty
                       ? "bg-muted text-muted-foreground cursor-not-allowed"

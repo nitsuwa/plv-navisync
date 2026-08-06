@@ -359,8 +359,10 @@ export type Database = {
         Row: {
           address: string | null
           archived_at: string | null
+          canvas_configured: boolean
           canvas_height: number
           canvas_width: number
+          city: string | null
           code: string
           created_at: string
           created_by: string | null
@@ -374,15 +376,20 @@ export type Database = {
           map_scale_m_per_unit: number
           name: string
           overview_image_path: string | null
+          postal_code: string | null
+          province: string | null
           status: string
+          theme_color: string
           updated_at: string
           updated_by: string | null
         }
         Insert: {
           address?: string | null
           archived_at?: string | null
+          canvas_configured?: boolean
           canvas_height?: number
           canvas_width?: number
+          city?: string | null
           code: string
           created_at?: string
           created_by?: string | null
@@ -396,15 +403,20 @@ export type Database = {
           map_scale_m_per_unit?: number
           name: string
           overview_image_path?: string | null
+          postal_code?: string | null
+          province?: string | null
           status?: string
+          theme_color?: string
           updated_at?: string
           updated_by?: string | null
         }
         Update: {
           address?: string | null
           archived_at?: string | null
+          canvas_configured?: boolean
           canvas_height?: number
           canvas_width?: number
+          city?: string | null
           code?: string
           created_at?: string
           created_by?: string | null
@@ -418,7 +430,10 @@ export type Database = {
           map_scale_m_per_unit?: number
           name?: string
           overview_image_path?: string | null
+          postal_code?: string | null
+          province?: string | null
           status?: string
+          theme_color?: string
           updated_at?: string
           updated_by?: string | null
         }

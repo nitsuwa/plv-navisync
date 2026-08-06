@@ -5,9 +5,9 @@
  *   node scripts/verify-a1-supabase.mjs
  *
  * The script reads .env.local, authenticates with the disposable demo admin
- * and student accounts, creates uniquely named fixtures, verifies the core
- * guest/student/admin RLS and Storage matrix, and removes every fixture in a
- * finally block. It never uses a service-role key.
+ * and student accounts, creates controlled fixtures, verifies the core
+ * guest/student/admin RLS and Storage matrix, removes transient fixtures, and
+ * archives its reusable published campus. It never uses a service-role key.
  */
 
 import { randomUUID } from "node:crypto";
@@ -158,21 +158,70 @@ try {
     "student role escalation"
   );
 
-  publishedCampus = expectOk(
+  expectDenied(
     await admin
       .from("campuses")
       .insert({
-        name: `A1 Published Fixture ${suffix}`,
-        code: `A1PUB${suffix}`,
+        name: `A1 Forbidden Published Fixture ${suffix}`,
+        code: `A1BAD${suffix}`,
         status: "published",
         created_by: adminId,
         updated_by: adminId,
-      })
-      .select()
-      .single(),
-    "admin published-campus fixture creation"
+      }),
+    "direct published-campus creation"
   );
-  created.campusIds.push(publishedCampus.id);
+
+  const existingVerificationCampus = expectOk(
+    await admin.from("campuses").select("*").eq("code", "A1VERIFY").maybeSingle(),
+    "controlled verification-campus lookup"
+  );
+  publishedCampus = existingVerificationCampus ?? expectOk(
+    await admin.from("campuses").insert({
+      name: "A1 Verification Fixture",
+      code: "A1VERIFY",
+      status: "draft",
+      created_by: adminId,
+      updated_by: adminId,
+    }).select().single(),
+    "admin publishable draft-campus fixture creation"
+  );
+  if (publishedCampus.status === "archived") {
+    publishedCampus = expectOk(
+      await admin.from("campuses").update({ status: "draft", archived_at: null }).eq("id", publishedCampus.id).select().single(),
+      "controlled verification-campus restore"
+    );
+  }
+
+  const existingVersions = expectOk(
+    await admin.from("campus_versions").select("version_number").eq("campus_id", publishedCampus.id).order("version_number", { ascending: false }).limit(1),
+    "verification-campus version lookup"
+  );
+
+  const publishVersion = expectOk(
+    await admin.from("campus_versions").insert({
+      campus_id: publishedCampus.id,
+      version_number: (existingVersions[0]?.version_number ?? 0) + 1,
+      state: "draft",
+      snapshot: { campus: { id: publishedCampus.id, name: publishedCampus.name } },
+      created_by: adminId,
+    }).select().single(),
+    "admin draft-version fixture creation"
+  );
+  const validationRun = expectOk(
+    await admin.from("validation_runs").insert({
+      campus_id: publishedCampus.id,
+      campus_version_id: publishVersion.id,
+      run_by: adminId,
+      status: "passed",
+      score: 100,
+      passed_count: 1,
+    }).select().single(),
+    "admin passing validation fixture creation"
+  );
+  expectOk(
+    await admin.rpc("publish_campus_version", { p_version_id: publishVersion.id }),
+    "atomic campus-version publication"
+  );
 
   const draftCampus = expectOk(
     await admin
@@ -429,6 +478,10 @@ try {
   if (created.buildingIds.length) {
     const result = await admin.from("buildings").delete().in("id", created.buildingIds);
     if (result.error) console.error(`CLEANUP buildings: ${result.error.message}`);
+  }
+  if (publishedCampus?.id) {
+    const result = await admin.from("campuses").update({ status: "archived", archived_at: new Date().toISOString(), is_default: false }).eq("id", publishedCampus.id);
+    if (result.error) console.error(`CLEANUP verification campus archive: ${result.error.message}`);
   }
   if (created.campusIds.length) {
     const result = await admin.from("campuses").delete().in("id", created.campusIds);

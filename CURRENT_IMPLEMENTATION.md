@@ -284,10 +284,10 @@
 
 ## 9. Map Builder
 
-**Status:** Complete (UI/authoring) / Mock Data (localStorage persistence) — the largest and most feature-complete module; a Canva/Figma-style campus editor.
+**Status:** Partial live integration — A4 campus metadata, lifecycle, images, and canvas dimensions persist in Supabase; A5/A6 still own structure saving and publishing.
 
 **Current Screens (view machine in `AdminMapBuilderPage`):**
-- `/admin-dashboard/map-builder` — `CampusHome` (campus cards grid, search, duplicate/archive/delete, "Quick Start" tutorial, empty state)
+- `/admin-dashboard/map-builder` — `CampusHome` (campus cards grid, search, duplicate/archive/restore, "Quick Start" tutorial, empty state)
 - `CampusEditor` (per-campus) — the main editor
 - `FloorEditor` (per building/floor)
 - `CampusWizard` (create campus), `CampusCreationSuccess`
@@ -303,18 +303,18 @@
 - **Onboarding:** `MapBuilderTutorial.tsx` (persisted via `localStorage` key), `CreateCampusGuide.tsx`, `IssuesPopover.tsx`, `ToolbarTooltip.tsx`
 - **Barrel:** `index.ts` exports `SEED_CAMPUSES`, `LAYER_TOOLS`, components, and types
 
-**Current Services:** `campusService` (seeded with `SEED_CAMPUSES`, `Not Connected` — the page does not call it). Persistence is direct `localStorage` in `AdminMapBuilderPage` (key `plv-campuses`) plus `CampusDataContext` (key `plv-campuses`).
+**Current Services:** `campusService` owns typed campus create/read/update/archive/restore, version reads, active-campus selection, optimistic conflicts, and private campus-image uploads. `AdminMapBuilderPage` consumes this service and contains no raw Supabase query.
 
-**Current Database Usage:** None at runtime. `campuses` table exists in the migration; the migration `001_initial_schema.sql` has no campus-building/floor JSON columns matching the authoring model.
+**Current Database Usage:** `public.campuses`, `public.campus_versions`, and private `campus-images` Storage are live under RLS. Campus structure tables are not connected to the editor until A5.
 
 **Current Problems:**
-- Persistence is localStorage-only; no server sync
+- Building/floor/map-element authoring remains in-memory until A5 adds persistent structure services.
 - Second, dead Map Builder implementation exists: `src/components/map-builder-v2/` (`MapBuilderWorkspace`, `BuildingsTab`, `FloorPlansTab`, `LayersTab`, `PreviewTab`, `RoutesTab`) — unused
-- `campusService` imports `SEED_CAMPUSES` from the map-builder barrel (upward dependency from services → components)
+- Publishing controls are intentionally disabled until A6 owns validation and atomic version publication.
 - Publish copies campus JSON into `CampusDataContext`; the public map consumes it via `mapDataAdapter` (fragile contract)
 - Desktop-tuned; mobile support partial (editor has limited responsive fallback)
 
-**Missing Functionality:** Server persistence, versioning/diffing, image upload for floor plans, template library, multi-user editing, live publish.
+**Missing Functionality:** Structure persistence, draft snapshot saving/diffing, image upload for floor plans, template library, multi-user editing, and live publish.
 
 **Files involved:** `src/pages/AdminMapBuilderPage.tsx`, `src/components/map-builder/*` (37 files), `src/components/map-builder-v2/*` (dead), `src/contexts/CampusDataContext.tsx`, `src/services/campusService.ts`, `src/lib/campusHelpers.ts`
 
