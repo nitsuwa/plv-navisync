@@ -68,14 +68,23 @@ const STEPS = ["Submitted", "Under Review", "Resolved"];
 export function StudentReportsPage() {
   const { loading: authLoading, isStudent } = useStudentAuth();
   const navigate = useNavigate();
+  const [reports, setReports] = useState<IssueReport[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<FilterStatus>("all");
   const [search, setSearch] = useState("");
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: "instant" });
-    const timer = setTimeout(() => setLoading(false), 500);
-    return () => clearTimeout(timer);
+    let mounted = true;
+    reportService.getStudentReports().then((res) => {
+      if (mounted) {
+        setReports(res);
+        setLoading(false);
+      }
+    });
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   // Wait for the Supabase session/profile check before deciding. Reuse the
