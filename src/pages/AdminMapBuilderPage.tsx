@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from "motion/react";
 import { toast } from "sonner";
 import { createCampusClone } from "../lib/campusHelpers";
 import { campusService, CampusConflictError, type CampusCreateInput, type CampusUpdateInput } from "../services/campusService";
+import { campusStructureService } from "../services/campusStructureService";
 import {
   CampusHome,
   CampusWizard,
@@ -148,16 +149,29 @@ export function AdminMapBuilderPage() {
     setView({ type: "home" });
   }, []);
 
-  const goToCampus = useCallback((campusId: string) => {
+  const goToCampus = useCallback(async (campusId: string) => {
     const campus = campuses.find((c) => c.id === campusId);
     directionRef.current = 1;
     // If the campus has no canvas configured yet, redirect to canvas setup
     if (campus && !campus.canvasConfigured) {
       setView({ type: "create-map", campusId });
     } else {
+      try {
+        const hydrated = await campusStructureService.load(campus!);
+        updateCampus(hydrated);
+      } catch (error) {
+        toast.error("Could not load map", (error as Error).message);
+        return;
+      }
       setView({ type: "campus", campusId });
     }
-  }, [campuses]);
+  }, [campuses, updateCampus]);
+
+  const saveCampusStructure = useCallback(async (campus: Campus) => {
+    const saved = await campusStructureService.save(campus);
+    updateCampus(saved);
+    return saved;
+  }, [updateCampus]);
 
   const goToCampusFromFloor = useCallback((campusId: string) => {
     directionRef.current = -1;
@@ -310,6 +324,7 @@ export function AdminMapBuilderPage() {
                   campus={activeCampus}
                   onBack={goHome}
                   onUpdate={updateCampus}
+                  onSave={saveCampusStructure}
                   onPublish={() => toast.info("Publishing is implemented in A6.")}
                   publishingEnabled={false}
                   onOpenFloor={handleOpenFloor}
@@ -349,6 +364,7 @@ export function AdminMapBuilderPage() {
                 onBack={() => goToCampusFromFloor(activeCampus.id)}
                 onSwitchFloor={(fId) => setView({ ...view, floorId: fId })}
                 onUpdate={updateCampus}
+                onSave={saveCampusStructure}
               />
             )}
 

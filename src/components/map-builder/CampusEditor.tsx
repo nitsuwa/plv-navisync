@@ -59,6 +59,7 @@ interface CampusEditorProps {
   campus: Campus;
   onBack: () => void;
   onUpdate: (c: Campus) => void;
+  onSave?: (c: Campus) => Promise<Campus>;
   onPublish: (c: Campus) => void;
   publishingEnabled?: boolean;
   onOpenFloor: (buildingId: string, floorId: string) => void;
@@ -68,7 +69,7 @@ interface CampusEditorProps {
   lastSavedAt?: string;
 }
 
-export function CampusEditor({ campus, onBack, onUpdate, onPublish, publishingEnabled = true, onOpenFloor, onAddBuilding, onOpenCanvasSettings }: CampusEditorProps) {
+export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publishingEnabled = true, onOpenFloor, onAddBuilding, onOpenCanvasSettings }: CampusEditorProps) {
   const [tool, setTool] = useState<SimpleTool>("select");
   const [selected, setSelected] = useState<CampusSelection | null>(null);
   const [drawingPath, setDP] = useState<{ x: number; y: number }[]>([]);
@@ -1012,7 +1013,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onPublish, publishingEn
   const canRedo = redoSteps > 0;
 
   // ── Save draft: shared by the toolbar button, Ctrl+S, and the retry screen ──
-  const runSave = useCallback(() => {
+  const runSave = useCallback(async () => {
     // Match the toolbar button's disabled semantics: nothing to save / already saving
     if (isProcessing || !isDirty) {
       toast.success("Already saved", "All changes are up to date.");
@@ -1029,22 +1030,18 @@ export function CampusEditor({ campus, onBack, onUpdate, onPublish, publishingEn
     }
     setIsProcessing(true);
     setSaveScreen({ open: true, state: "saving" });
-    setTimeout(() => {
-      try {
-        const now = new Date().toISOString().slice(0, 10);
-        const saved = {
-          ...campus,
-          updatedAt: now,
-        };
+    try {
+        const candidate = { ...campus, updatedAt: new Date().toISOString() };
+        const saved = onSave ? await onSave(candidate) : candidate;
         onUpdate(saved);
         savedSnapshotRef.current = JSON.stringify(saved);
         setSaveScreen({ open: true, state: "success" });
-      } catch {
+      } catch (error) {
         setSaveScreen({ open: true, state: "error" });
+        toast.error("Could not save map", error instanceof Error ? error.message : "The database rejected the save.");
       }
       setIsProcessing(false);
-    }, 1500);
-  }, [campus, validateCampus, onUpdate, isDirty, isProcessing, toast]);
+  }, [campus, validateCampus, onUpdate, onSave, isDirty, isProcessing, toast]);
 
   // ── Keyboard shortcuts (disabled during tutorial) ──
   useEffect(() => {

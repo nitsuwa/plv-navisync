@@ -980,7 +980,7 @@ export function CampusHome({
                       </div>
 
                       {/* Open button */}
-                      {onDelete && <button
+                      <button
                         onClick={() => onOpen(campus.id)}
                         className={cn(
                           "w-full mt-3 h-9 rounded-xl text-xs font-extrabold transition-all flex items-center justify-center gap-1.5",
@@ -1007,7 +1007,7 @@ export function CampusHome({
                       >
                         <ExternalLink className="h-3.5 w-3.5" />
                         Open Editor
-                      </button>}
+                      </button>
                     </div>
                   </div>
                 </motion.div>

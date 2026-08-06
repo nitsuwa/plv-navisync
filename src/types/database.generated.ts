@@ -210,6 +210,7 @@ export type Database = {
           is_accessible: boolean
           is_searchable: boolean
           is_visible: boolean
+          metadata: Json
           name: string
           operating_hours: string | null
           rotation: number
@@ -234,6 +235,7 @@ export type Database = {
           is_accessible?: boolean
           is_searchable?: boolean
           is_visible?: boolean
+          metadata?: Json
           name: string
           operating_hours?: string | null
           rotation?: number
@@ -258,6 +260,7 @@ export type Database = {
           is_accessible?: boolean
           is_searchable?: boolean
           is_visible?: boolean
+          metadata?: Json
           name?: string
           operating_hours?: string | null
           rotation?: number
@@ -647,6 +650,7 @@ export type Database = {
           id: string
           is_visible: boolean
           map_scale_m_per_unit: number | null
+          metadata: Json
           name: string
           updated_at: string
         }
@@ -662,6 +666,7 @@ export type Database = {
           id?: string
           is_visible?: boolean
           map_scale_m_per_unit?: number | null
+          metadata?: Json
           name: string
           updated_at?: string
         }
@@ -677,6 +682,7 @@ export type Database = {
           id?: string
           is_visible?: boolean
           map_scale_m_per_unit?: number | null
+          metadata?: Json
           name?: string
           updated_at?: string
         }
@@ -1401,6 +1407,10 @@ export type Database = {
       publish_campus_version: {
         Args: { p_version_id: string }
         Returns: string
+      }
+      save_campus_structure: {
+        Args: { p_campus_id: string; p_payload: Json }
+        Returns: Json
       }
     }
     Enums: {

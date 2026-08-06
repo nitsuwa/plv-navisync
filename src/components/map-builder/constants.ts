@@ -14,7 +14,10 @@ import { INITIAL_MARKERS, INITIAL_PATHS, MARKER_STYLES } from "../../data/mapDat
 // ── ID generator ────────────────────────────────────────────────────────────
 
 export function genId(p = "x") {
-  return `${p}_${Date.now().toString(36)}`;
+  // Database authoring entities use UUID primary keys. The prefix remains in
+  // the signature for backwards-compatible call sites and human intent only.
+  void p;
+  return crypto.randomUUID();
 }
 
 // ── Canvas size options ─────────────────────────────────────────────────────

@@ -30,11 +30,11 @@ Status values: `READY`, `ACTIVE`, `BLOCKED`, `FOR REVIEW`, `DONE`.
   - Depends on: A1
   - Test result: PASS — Vite build, 60 Vitest tests, rollback-safe guest/student/admin lifecycle and Storage assertions, live A1/A2/A3 regressions, generated-type review, and security/performance advisor review
   - Pull Request: Pending
-- [ ] **A5 — Campus structure, directory, and graph services**
-  - Status: `BLOCKED`
-  - Branch: `feature/campus-structure-services`
+- [x] **A5 — Campus structure, directory, and graph services**
+  - Status: `FOR REVIEW`
+  - Branch: `feature/database-types-and-storage` (continued here by developer instruction)
   - Depends on: A4
-  - Test result: Pending
+  - Test result: PASS — Vite build, 63 Vitest tests, live atomic structure/RLS/cross-campus/recoverability checks, A1 Storage/RLS regression, generated-type review, advisors, and browser smoke test
   - Pull Request: Pending
 - [ ] **A6 — Draft save, validation handoff, and publish orchestration**
   - Status: `BLOCKED`
@@ -63,8 +63,8 @@ Status values: `READY`, `ACTIVE`, `BLOCKED`, `FOR REVIEW`, `DONE`.
 
 ## Current handoff note
 
-- Active package: A4 — Campus lifecycle and version contract (`FOR REVIEW`, same branch by developer instruction)
+- Active package: A5 — Campus structure, directory, and graph services (`FOR REVIEW`, same branch by developer instruction)
 - Last completed package: None
 - Known blocker: None. Leaked-password protection, production SMTP, and production redirect configuration remain deployment dashboard tasks.
-- Important changed files: `src/pages/AdminMapBuilderPage.tsx`, `src/services/campusService.ts`, `src/types/database.generated.ts`, `supabase/migrations/20260806101639_establish_campus_lifecycle_contract.sql`, `supabase/migrations/20260806102931_restore_admin_campus_delete_privilege.sql`, `supabase/tests/a4_campus_lifecycle_assertions.sql`
-- Next recommended action: Complete the A4 manual site checklist, then review A1–A4 together on this branch before starting A5.
+- Important changed files: `src/services/campusStructureService.ts`, `src/pages/AdminMapBuilderPage.tsx`, `src/components/map-builder/CampusEditor.tsx`, `src/components/map-builder/FloorEditor.tsx`, `src/types/database.generated.ts`, `supabase/migrations/20260806113935_establish_campus_structure_contract.sql`, `scripts/verify-a5-campus-structure.mjs`
+- Next recommended action: Complete the A5 manual site checklist, then obtain A5 and B5 contract review before beginning A6 publish orchestration.

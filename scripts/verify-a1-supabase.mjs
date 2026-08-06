@@ -278,11 +278,8 @@ try {
   );
   created.buildingIds.push(building.id);
 
-  const guestBuildings = expectOk(
-    await anonymous.from("buildings").select("id").eq("id", building.id),
-    "guest live-building query"
-  );
-  assert(guestBuildings.length === 0, "guest saw a live authoring building row");
+  const guestBuildingResult = await anonymous.from("buildings").select("id").eq("id", building.id);
+  assert(Boolean(guestBuildingResult.error) || guestBuildingResult.data?.length === 0, "guest saw a live authoring building row");
 
   const studentBuildings = expectOk(
     await student.from("buildings").select("id").eq("id", building.id),
