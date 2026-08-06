@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import {
   Building2, SlidersHorizontal, ArrowUpDown,
-  Grid3X3, List,
+  Grid3X3, List, X,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { BuildingCard } from "../components/ui/BuildingCard";
