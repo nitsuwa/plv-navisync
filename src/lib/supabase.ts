@@ -10,6 +10,7 @@
 
 import { createClient } from "@supabase/supabase-js";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import type { Database, Tables } from "../types/database.generated";
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
 const supabasePublishableKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined;
@@ -19,11 +20,11 @@ const supabaseKey = supabasePublishableKey ?? supabaseAnonKey;
 
 const PLACEHOLDER_URL = "https://your-project-id.supabase.co";
 
-let supabaseClient: SupabaseClient | null = null;
+let supabaseClient: SupabaseClient<Database> | null = null;
 let isConnected = false;
 
 if (supabaseUrl && supabaseKey && supabaseUrl !== PLACEHOLDER_URL) {
-  supabaseClient = createClient(supabaseUrl, supabaseKey, {
+  supabaseClient = createClient<Database>(supabaseUrl, supabaseKey, {
     auth: {
       persistSession: true,
       autoRefreshToken: true,
@@ -48,27 +49,14 @@ export { supabaseClient as supabase, isConnected };
 export const supabaseUrl_ = supabaseUrl;
 export const supabaseKey_ = supabaseKey;
 
-/** Public `profiles` row shape used by the authentication flows. */
-export interface Profile {
-  id: string;
-  role: "student" | "admin";
-  first_name?: string | null;
-  last_name?: string | null;
-  email: string;
-  student_number?: string | null;
-  department?: string | null;
-  avatar_path?: string | null;
-  is_active: boolean;
-  last_login_at?: string | null;
-  created_at: string;
-  updated_at: string;
-}
+/** Generated `profiles` row shape used by the authentication flows. */
+export type Profile = Tables<"profiles">;
 
 /**
  * Get the Supabase client. Throws if not connected.
  * Use this when you want a guaranteed client (e.g., after user login).
  */
-export function getSupabase(): SupabaseClient {
+export function getSupabase(): SupabaseClient<Database> {
   if (!supabaseClient) {
     throw new Error(
       "Supabase is not connected. Set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY in your .env file."

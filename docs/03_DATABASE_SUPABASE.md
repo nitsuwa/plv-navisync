@@ -83,7 +83,7 @@ Whenever the backend changes:
 4. Update affected services.
 5. Add or update tests.
 
-## 2.5 Verified backend checkpoint — August 5, 2026
+## 2.5 Verified backend checkpoint — August 6, 2026
 
 Verified:
 
@@ -93,14 +93,21 @@ Verified:
 - Session restoration, logout, and role-based route protection work.
 - Demo Administrator and Demo Student accounts were provisioned through a server-side local script.
 - `.env.local` and `.env.demo.local` are ignored by Git.
+- The existing live schema is recorded in migration history by the assertion-only `20260805160720_baseline_existing_schema.sql` marker without replaying the applied `001` schema.
+- Live database types are generated at `src/types/database.generated.ts`, and the single browser client is typed with `Database`.
+- All six Storage buckets enforce the documented MIME allowlist and file-size limits.
+- Function execution grants are restricted to reviewed roles; intentionally public RLS helpers are documented in the corrective migration.
+- Repeatable guest, student, and administrator RLS and Storage checks pass with controlled, self-cleaning fixtures.
+- Student registration now calls Supabase Auth with validated name, email, password, and student-number metadata; the trigger preserves only reviewed profile fields and always hardcodes the `student` role.
+- Email-verification pending/resend/callback states and forgot/reset-password states are implemented at dedicated routes.
+- The hosted project has public email signup enabled, email confirmation required, and the email provider enabled.
 
 Still requiring verification or implementation:
 
-- Generated TypeScript database types.
-- All Storage buckets and their policies.
-- Full RLS testing across the table inventory.
-- Real registration, email verification, and password reset.
-- Persistent CRUD and service integration for feature modules.
+- Persistent CRUD and service integration for feature modules beyond the A4 campus lifecycle.
+- Full cross-system RLS verification after the remaining feature packages are connected.
+- Supabase Auth leaked-password protection must be enabled in the project dashboard before production release.
+- Each local/preview/production origin must be added to Supabase Auth Redirect URLs, and production SMTP must be configured before real student onboarding.
 
 ---
 
@@ -328,12 +335,17 @@ All time values are stored in UTC and formatted to Asia/Manila in the frontend.
 | `code` | TEXT | Yes | Unique |
 | `description` | TEXT | No | |
 | `address` | TEXT | No | |
+| `city` | TEXT | No | |
+| `province` | TEXT | No | |
+| `postal_code` | TEXT | No | |
 | `latitude` | DOUBLE PRECISION | No | General campus coordinate only |
 | `longitude` | DOUBLE PRECISION | No | |
 | `logo_path` | TEXT | No | |
 | `overview_image_path` | TEXT | No | |
+| `theme_color` | TEXT | Yes | Six-digit hex color |
 | `canvas_width` | INTEGER | Yes | Positive |
 | `canvas_height` | INTEGER | Yes | Positive |
+| `canvas_configured` | BOOLEAN | Yes | Persists completion even when default dimensions are retained |
 | `map_scale_m_per_unit` | NUMERIC | Yes | Used for route distance and ETA |
 | `is_default` | BOOLEAN | Yes | Default `false` |
 | `status` | TEXT | Yes | `draft`, `published`, `archived` |
@@ -349,6 +361,8 @@ All time values are stored in UTC and formatted to Asia/Manila in the frontend.
 - `status IN ('draft', 'published', 'archived')`
 - At most one active campus may be `is_default = true`.
 - Public users only read published, non-archived campuses.
+- New campuses always begin as private drafts; restoring an archive also returns it to a private draft.
+- `draft` plus a non-null published-version pointer is presented as `unpublished` by the application contract.
 
 ---
 
@@ -990,6 +1004,15 @@ Use database search indexes only when actual query patterns require them. Avoid 
 - Maximum: 5 MB
 - Administrator write access
 
+## `campus-images`
+
+- Private bucket
+- Allowed: JPG, PNG, WEBP
+- Maximum: 5 MB
+- Administrator write access
+- Guests and students may read only an object referenced by a published, non-archived campus
+- Administrators use short-lived signed URLs to preview draft assets
+
 ## `floor-plans`
 
 - Private administrator-write bucket
@@ -1043,6 +1066,8 @@ public.is_admin()
 
 implemented as a `SECURITY DEFINER` function with a fixed `search_path`.
 
+Function execution is deny-by-default for application trigger and integrity functions. `is_admin()` is callable only by `authenticated` and `service_role`; `publish_campus_version(uuid)` is an authenticated RPC with its own active-administrator check. `campus_is_published(uuid)` and `is_published_floor_plan(text)` are intentionally callable by `anon` and `authenticated` because public RLS and Storage policies require them. These grants and their rationale are recorded as database comments in the A1 corrective migration.
+
 Public visibility conditions are applied inside the select policies: published events and event locations additionally require the campus to be published and not archived (`campus_is_published(campus_id)`); published announcements and announcement locations additionally require the campus to be published, `archived_at is null`, and the active time window (`starts_at` is null or `starts_at <= now()`, and `expires_at` is null or `expires_at >= now()`). Upcoming and finished published events remain readable and are filtered by the frontend.
 
 **Single source of truth for map content:** The live authoring tables (`buildings`, `floors`, `map_elements`, `navigation_nodes`, `navigation_edges`) are **administrator-only**. Guests and students never read them directly; they receive published map content exclusively from the latest published `campus_versions.snapshot` (`campus_versions_select_public`). This guarantees unfinished administrator edits can never be exposed before publication. Public campus metadata (`campuses` rows with `status = 'published'`) and published events/announcements remain directly readable.
@@ -1064,6 +1089,18 @@ Do not repeat complex profile subqueries in every policy if a reviewed helper fu
 5. Student signs in after verification.
 
 Public registration must never create an administrator.
+
+The A2 client sends only `first_name`, `last_name`, and `student_number` as signup metadata. The `handle_new_user()` trigger validates those fields, copies the Auth email directly from `auth.users`, hardcodes `role = 'student'` and `is_active = true`, and ignores any authorization metadata supplied by the caller.
+
+## Email verification and password recovery
+
+- Signup confirmation redirects to `/auth/callback?flow=signup`.
+- The pending screen at `/auth/verify` can resend a signup confirmation without exposing privileged operations.
+- Password-reset requests redirect to `/auth/reset-password?flow=recovery`.
+- The reset page requires a recovery link and valid Supabase session before calling `updateUser()`.
+- Successful confirmation/reset retains the valid student session, then active-profile and role checks run before student navigation.
+- Expired, invalid, missing-profile, inactive-profile, loading, and success states are explicit.
+- Redirect URLs must include local development origins and every deployed preview/production origin in the Supabase Auth dashboard.
 
 ## Administrator creation
 
@@ -1280,6 +1317,8 @@ supabase/migrations/001_create_plv_navisync_schema.sql
 7. Commit the migration and generated types together.
 8. Use additional numbered migrations for later changes.
 9. Never edit a migration that has already been applied to a shared or production database.
+
+For the existing shared development project, `001_create_plv_navisync_schema.sql` predates migration-history tracking and must not be replayed. The assertion-only `20260805160720_baseline_existing_schema.sql` migration verifies the expected live tables and buckets, establishes the live schema as the tracked baseline, and contains no schema creation or destructive statements. All corrections follow it as new migrations.
 
 ---
 

@@ -3,13 +3,20 @@ import { Link, useNavigate } from "react-router";
 import { motion, AnimatePresence } from "motion/react";
 import {
   Eye, EyeOff, ArrowLeft, CheckCircle2, User, Mail, IdCard, Lock,
-  GraduationCap, ChevronRight, Sparkles, Shield,
+  GraduationCap, ChevronRight, Sparkles, Shield, AlertCircle,
 } from "lucide-react";
 import { Button } from "../components/ui/Button";
 import { useTheme } from "../hooks/useTheme";
 import { ThemeToggle } from "../components/ui/ThemeToggle";
 import { PLVLogo } from "../components/ui/PLVLogo";
 import { StarField, LavaLampBackground } from "../components/ui/HeroBackground";
+import { isConnected, supabase } from "../lib/supabase";
+import {
+  friendlyAccountError,
+  MIN_ACCOUNT_PASSWORD_LENGTH,
+  registerStudent,
+  validateStudentRegistration,
+} from "../lib/studentAccount";
 
 // ── Left panel step progress ──
 function StepProgress({ step }: { step: 1 | 2 }) {
@@ -51,8 +58,8 @@ export function RegistrationPage() {
   const navigate = useNavigate();
   const { theme, toggleTheme } = useTheme();
   const [step, setStep] = useState<1 | 2>(1);
-  const [success, setSuccess] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [submitError, setSubmitError] = useState("");
   const [showPw, setShowPw] = useState(false);
   const [showCfm, setShowCfm] = useState(false);
   const [errs, setErrs] = useState<Record<string, string>>({});
@@ -61,7 +68,6 @@ export function RegistrationPage() {
     fullName: "",
     email: "",
     studentId: "",
-    username: "",
     password: "",
     confirm: "",
   });
@@ -69,22 +75,39 @@ export function RegistrationPage() {
   const set = (k: keyof typeof form, v: string) => {
     setForm(p => ({ ...p, [k]: v }));
     setErrs(p => ({ ...p, [k]: "" }));
+    setSubmitError("");
   };
 
   const validateStep1 = () => {
     const e: Record<string, string> = {};
-    if (!form.fullName.trim()) e.fullName = "Full name is required.";
-    if (!form.email.includes("@")) e.email = "Enter a valid email address.";
-    if (!form.studentId.trim()) e.studentId = "Student ID is required.";
-    if (form.username.length < 4) e.username = "Username must be at least 4 characters.";
+    const validation = validateStudentRegistration({
+      fullName: form.fullName,
+      email: form.email,
+      studentNumber: form.studentId,
+      password: "12345678",
+      confirmPassword: "12345678",
+    });
+    if (validation.fullName) e.fullName = validation.fullName;
+    if (validation.email) e.email = validation.email;
+    if (validation.studentNumber) e.studentId = validation.studentNumber;
     setErrs(e);
     return !Object.keys(e).length;
   };
 
   const validateStep2 = () => {
     const e: Record<string, string> = {};
-    if (form.password.length < 6) e.password = "Password must be at least 6 characters.";
-    if (form.password !== form.confirm) e.confirm = "Passwords do not match.";
+    const validation = validateStudentRegistration({
+      fullName: form.fullName,
+      email: form.email,
+      studentNumber: form.studentId,
+      password: form.password,
+      confirmPassword: form.confirm,
+    });
+    if (validation.fullName) e.fullName = validation.fullName;
+    if (validation.email) e.email = validation.email;
+    if (validation.studentNumber) e.studentId = validation.studentNumber;
+    if (validation.password) e.password = validation.password;
+    if (validation.confirmPassword) e.confirm = validation.confirmPassword;
     setErrs(e);
     return !Object.keys(e).length;
   };
@@ -94,58 +117,35 @@ export function RegistrationPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!validateStep2()) return;
+    if (!isConnected || !supabase) {
+      setSubmitError("Registration is not configured. Add the Supabase environment values and restart the app.");
+      return;
+    }
     setLoading(true);
-    await new Promise(r => setTimeout(r, 1200));
-    setLoading(false);
-    setSuccess(true);
+    setSubmitError("");
+    try {
+      const { data, error } = await registerStudent({
+        fullName: form.fullName,
+        email: form.email,
+        studentNumber: form.studentId,
+        password: form.password,
+        confirmPassword: form.confirm,
+      }, supabase);
+      if (error) {
+        setSubmitError(friendlyAccountError(error.message));
+        return;
+      }
+      if (data.session) {
+        navigate("/auth/callback?flow=signup", { replace: true });
+      } else {
+        navigate("/auth/verify", { replace: true, state: { email: form.email.trim().toLowerCase() } });
+      }
+    } catch (error) {
+      setSubmitError(friendlyAccountError(error instanceof Error ? error.message : ""));
+    } finally {
+      setLoading(false);
+    }
   };
-
-  // ── Success ──
-  if (success) {
-    return (
-      <div className="min-h-screen bg-background flex items-center justify-center px-6">
-        <motion.div
-          initial={{ opacity: 0, scale: 0.95 }}
-          animate={{ opacity: 1, scale: 1 }}
-          transition={{ duration: 0.5 }}
-          className="max-w-sm w-full text-center"
-        >
-          <motion.div
-            initial={{ scale: 0 }}
-            animate={{ scale: 1 }}
-            transition={{ type: "spring", stiffness: 200, damping: 15, delay: 0.1 }}
-            className="w-20 h-20 rounded-3xl bg-green-100 dark:bg-green-900/20 flex items-center justify-center mx-auto mb-6 shadow-md"
-          >
-            <CheckCircle2 className="h-10 w-10 text-green-600 dark:text-green-400" />
-          </motion.div>
-          <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.25 }}
-          >
-            <PLVLogo size={48} className="mx-auto mb-4" />
-            <h1 className="text-2xl font-extrabold text-foreground mb-2">Account Created!</h1>
-            <p className="text-muted-foreground text-sm leading-relaxed mb-8">
-              Welcome to PLV NaviSync, <span className="font-bold text-foreground">{form.fullName}</span>!
-              Your student account is ready. Sign in to start navigating campus.
-            </p>
-          </motion.div>
-          <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.35 }}
-          >
-            <Button variant="primary" size="lg" className="w-full" onClick={() => navigate("/admin")}>
-              Go to Sign In
-            </Button>
-            <p className="text-xs text-muted-foreground mt-4">
-              Note: Full access may require admin approval.
-            </p>
-          </motion.div>
-        </motion.div>
-      </div>
-    );
-  }
 
   return (
     <div className="min-h-screen flex">
@@ -277,19 +277,6 @@ export function RegistrationPage() {
                     {errs.studentId && <p id="reg-studentid-error" role="alert" className="text-xs text-destructive mt-1 flex items-center gap-1"><span className="w-1 h-1 rounded-full bg-destructive" />{errs.studentId}</p>}
                   </div>
 
-                  <div>
-                    <label htmlFor="reg-username" className="block text-xs font-bold text-foreground mb-1.5 uppercase tracking-widest">Username</label>
-                    <div className="relative">
-                      <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground text-sm font-mono">@</span>
-                      <input id="reg-username" type="text" value={form.username} onChange={e => set("username", e.target.value)} autoComplete="username"
-                        placeholder="yourhandle" minLength={4}
-                        aria-invalid={!!errs.username}
-                        aria-describedby={errs.username ? "reg-username-error" : undefined}
-                        className={"w-full h-11 pl-8 pr-4 rounded-xl border bg-input-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 text-sm font-mono transition-all " + (errs.username ? "border-destructive focus:ring-destructive/30" : "border-border focus:ring-primary/30 focus:border-primary")} />
-                    </div>
-                    {errs.username && <p id="reg-username-error" role="alert" className="text-xs text-destructive mt-1 flex items-center gap-1"><span className="w-1 h-1 rounded-full bg-destructive" />{errs.username}</p>}
-                  </div>
-
                   <motion.button
                     type="button"
                     onClick={handleNext}
@@ -324,7 +311,7 @@ export function RegistrationPage() {
                         <p className="text-sm font-bold text-foreground truncate flex items-center gap-1.5">
                           <Sparkles className="h-3 w-3 text-accent" /> {form.fullName}
                         </p>
-                        <p className="text-xs text-muted-foreground">@{form.username} · {form.studentId}</p>
+                        <p className="text-xs text-muted-foreground">{form.email} · {form.studentId}</p>
                       </div>
                       <button type="button" onClick={() => setStep(1)}
                         className="text-xs text-primary hover:underline font-semibold shrink-0">Edit</button>
@@ -335,7 +322,7 @@ export function RegistrationPage() {
                       <div className="relative">
                         <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                         <input id="reg-password" type={showPw ? "text" : "password"} value={form.password} onChange={e => set("password", e.target.value)} autoComplete="new-password"
-                          placeholder="Min. 6 characters" minLength={6}
+                          placeholder={`Min. ${MIN_ACCOUNT_PASSWORD_LENGTH} characters`} minLength={MIN_ACCOUNT_PASSWORD_LENGTH}
                           aria-invalid={!!errs.password}
                           aria-describedby={errs.password ? "reg-password-error" : undefined}
                           className={"w-full h-11 pl-9 pr-11 rounded-xl border bg-input-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 text-sm transition-all " + (errs.password ? "border-destructive focus:ring-destructive/30" : "border-border focus:ring-primary/30 focus:border-primary")} />
@@ -370,6 +357,13 @@ export function RegistrationPage() {
                       <Shield className="h-3 w-3 text-primary shrink-0 mt-0.5" />
                       By registering, you agree to PLV NaviSync's terms of use and privacy policy.
                     </p>
+
+                    {submitError && (
+                      <div role="alert" className="flex items-start gap-2 rounded-xl border border-destructive/20 bg-destructive/8 p-3 text-sm text-destructive">
+                        <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                        <span>{submitError}</span>
+                      </div>
+                    )}
 
                     <div className="flex gap-3">
                       <button type="button" onClick={() => setStep(1)}

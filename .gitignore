@@ -7,6 +7,9 @@ dist/
 .vscode/
 *.log
 
+# Supabase CLI local state
+supabase/.temp/
+
 # Windows reserved device names (avoid accidental creation in bash/Git Bash)
 nul
 NUL

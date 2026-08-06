@@ -2,7 +2,7 @@
 
 > **PLV NaviSync — Implementation Inventory**
 > Frozen scope baseline: a factual listing of what currently exists in the codebase.
-> Authentication checkpoint updated: August 5, 2026.
+> Authentication checkpoint updated: August 6, 2026.
 > This document does NOT recommend improvements. It only records implemented / partially implemented functionality as found in the source.
 >
 > **Status legend used below:**
@@ -17,16 +17,22 @@
 
 ## 1. Authentication
 
-**Status:** Core authentication complete / account lifecycle partial — real Supabase administrator and student authentication is implemented and manually verified.
+**Status:** Core authentication, the A2 student account lifecycle, and A3 administrator account enforcement are implemented. Live Auth/session behavior and the developer mailbox-link walkthrough are verified; production redirect/SMTP settings remain deployment checks.
 
 **Current Screens:**
 - `/admin` — `AdminLoginPage` for administrator and student sign-in.
-- `/register` — `RegistrationPage`; its real Supabase completion must still be verified before it is marked complete.
+- `/register` — `RegistrationPage`; creates a real student Auth account with validated profile metadata.
+- `/auth/verify` — verification-pending and resend state.
+- `/auth/callback` — email-verification callback with checking, success, expired, invalid, and blocked-profile states.
+- `/auth/forgot-password` — enumeration-safe reset request.
+- `/auth/reset-password` — recovery callback, new-password, expired/invalid-link, and success states.
 
 **Current Components and hooks:**
 - `AdminLoginPage.tsx` — calls `supabase.auth.signInWithPassword()`, loads the associated profile, checks `is_active`, redirects administrators to `/admin-dashboard`, redirects students to `/map`, and signs out unknown or invalid roles.
+- `studentAccount.ts` — validates registration data and owns typed signup, resend, reset-request, password-update, and active-student profile checks.
+- `AuthLifecyclePages.tsx` — owns verification and password-recovery route states while retaining the Supabase session after successful confirmation/reset.
 - Demonstration-account dropdown — appears only when demo mode and the relevant Vite variables are configured; Demo Administrator and Demo Student only fill the existing fields and never sign in automatically.
-- `useAdminAuth.ts` — restores the Supabase session and administrator profile for protected administration routes.
+- `useAdminAuth.ts` — validates the Auth user, restores the administrator profile, and rechecks role/active state every 15 seconds and whenever the window/tab becomes active.
 - `useStudentAuth.ts` — uses `getSession()` and `onAuthStateChange`, loads the `profiles` row, and exposes profile, loading, student state, and Supabase sign-out behavior.
 - `AdminLayout.tsx` — protects administration routes using the real administrator session/profile.
 - Student pages and shared navigation — wait for authentication loading, protect student-only pages, show the real profile, and use Supabase sign-out.
@@ -44,6 +50,9 @@
 - Logout ends the Supabase session and remains signed out after refresh.
 - Public guest pages remain accessible.
 - Legacy student `sessionStorage` authentication is no longer used.
+- Hosted email signup is enabled and requires confirmation.
+- The signup trigger ignores attempted role/active-state metadata and always creates an active `student` profile.
+- Student sessions refresh and remain valid; password changes without a session are rejected.
 
 **Security notes:**
 - `.env.local` and `.env.demo.local` are ignored by Git.
@@ -52,13 +61,11 @@
 - Vite demo credentials are browser-visible by design and must remain disabled in production.
 
 **Remaining functionality:**
-- Verify or complete real student registration.
-- Email verification and resend flow.
-- Forgot-password and reset-password flow.
-- Persistent administrator user-management operations through approved protected backend mechanisms.
-- Broader RLS verification beyond the manually tested authentication paths.
+- Configure every deployed origin in Supabase Auth Redirect URLs and click through one real verification and recovery email per target environment.
+- Configure production SMTP before onboarding real students; the hosted default provider has recipient restrictions.
+- Broader cross-feature RLS verification after later packages connect their tables.
 
-**Files involved:** `src/pages/AdminLoginPage.tsx`, `src/pages/RegistrationPage.tsx`, `src/hooks/useAdminAuth.ts`, `src/hooks/useStudentAuth.ts`, `src/components/layout/AdminLayout.tsx`, `src/components/layout/Navbar.tsx`, `src/components/layout/MobileBottomNav.tsx`, protected student pages, `src/lib/supabase.ts`
+**Files involved:** `src/pages/AdminLoginPage.tsx`, `src/pages/RegistrationPage.tsx`, `src/pages/AuthLifecyclePages.tsx`, `src/lib/studentAccount.ts`, `src/hooks/useAdminAuth.ts`, `src/hooks/useStudentAuth.ts`, `src/components/layout/AdminLayout.tsx`, protected student pages, `src/lib/supabase.ts`
 
 **Dependencies:** Supabase Auth, `public.profiles`, React Router, Motion, `useToast`, `useTheme`
 
@@ -66,30 +73,30 @@
 
 ## 2. User Management
 
-**Status:** Partial / Mock Data — complete admin CRUD UI over a page-local mock user array.
+**Status:** Complete for A3 — typed live profile listing/filtering, invitations, approved profile/role changes, activation/deactivation, session enforcement, and privileged-action auditing.
 
 **Current Screens:**
-- `/admin-dashboard/users` — `AdminUsersPage` (list, search, add/edit modal, delete, role/status badges)
+- `/admin-dashboard/users` — `AdminUsersPage` (live list/search/filter, invite/edit modal, role/status badges, activation/deactivation)
 
 **Current Components:**
-- `AdminUsersPage.tsx` — `MOCK_USERS` array (6 users) loaded on mount via `useEffect`, paginated table, search bar, category badges, CRUD modal with form validation
-- `Button`, `Badge`, `FormField`, `EmptyState`, `SearchBar`, `TablePageSkeleton`, custom modal
+- `AdminUsersPage.tsx` — consumes the typed service, limits roles to the schema-approved `student`/`admin` values, disables self role/status controls, and presents validated invitation/profile forms.
+- `useAdminAuth.ts` — promptly removes protected-page access after another administrator changes the current account's role or active state.
+- `Button`, `FormField`, `EmptyState`, `SearchBar`, `TablePageSkeleton`, custom modal
 
-**Current Services:** `userService` (in `src/services/userService.ts`) exists, seeded with 6 users via `seedMockData("users", …)`. **Not connected** — the page uses its own `MOCK_USERS`, not the service.
+**Current Services:** `adminUserService.ts` owns typed `profiles` queries, the audited `admin_update_profile` RPC, and invocation of the protected `admin-users` Edge Function. The legacy mock `userService.ts` remains unused by this page.
 
-**Current Database Usage:** `users` table defined in migration (`supabase/migrations/001_initial_schema.sql`) with `role`/`status`/`department`/`last_login`. Not queried at runtime.
+**Current Database Usage:** `public.profiles` is queried under RLS. Migration `20260806094510_secure_admin_user_management.sql` adds the authenticated-only, active-admin-validated profile mutation and append-only `activity_logs` entries. The `admin-users` Edge Function owns service-role-only Auth invitations and independently verifies the caller's JWT and active admin profile.
 
-**Current Problems:**
-- Page-local mock array duplicates `userService` seed data (drift risk)
-- No persistence — edits are lost on reload
-- No image/avatar upload, no user detail page
-- Roles are restricted to a fixed dropdown (`admin/faculty/staff/moderator`)
+**Current Constraints:**
+- Auth email changes are intentionally excluded until a separate verified-email workflow is approved.
+- Account deletion is intentionally replaced by reversible deactivation.
+- Invitation delivery depends on configured Supabase SMTP and redirect settings.
 
-**Missing Functionality:** Wiring to `userService`/Supabase, real CRUD persistence, role permissions model, audit trail, bulk actions.
+**Missing Functionality:** Bulk actions and a dedicated user-detail history screen are outside A3.
 
-**Files involved:** `src/pages/AdminUsersPage.tsx`, `src/services/userService.ts`, `src/services/types.ts` (`DbUser`), `src/data/mockData.ts`
+**Files involved:** `src/pages/AdminUsersPage.tsx`, `src/services/adminUserService.ts`, `src/hooks/useAdminAuth.ts`, `src/types/database.generated.ts`, `supabase/functions/admin-users/index.ts`, `supabase/migrations/20260806094510_secure_admin_user_management.sql`
 
-**Dependencies:** `useDataList`-style list state (page-local), `useToast`, `Button`/`Badge`/`FormField`/`EmptyState`/`SearchBar`/`TablePageSkeleton`
+**Dependencies:** Supabase Auth, Edge Functions, `public.profiles`, `public.activity_logs`, `useToast`, `Button`/`FormField`/`EmptyState`/`SearchBar`/`TablePageSkeleton`
 
 ---
 
@@ -277,10 +284,10 @@
 
 ## 9. Map Builder
 
-**Status:** Complete (UI/authoring) / Mock Data (localStorage persistence) — the largest and most feature-complete module; a Canva/Figma-style campus editor.
+**Status:** Partial live integration — A4 campus metadata, lifecycle, images, and canvas dimensions persist in Supabase; A5/A6 still own structure saving and publishing.
 
 **Current Screens (view machine in `AdminMapBuilderPage`):**
-- `/admin-dashboard/map-builder` — `CampusHome` (campus cards grid, search, duplicate/archive/delete, "Quick Start" tutorial, empty state)
+- `/admin-dashboard/map-builder` — `CampusHome` (campus cards grid, search, duplicate/archive/restore, "Quick Start" tutorial, empty state)
 - `CampusEditor` (per-campus) — the main editor
 - `FloorEditor` (per building/floor)
 - `CampusWizard` (create campus), `CampusCreationSuccess`
@@ -296,18 +303,18 @@
 - **Onboarding:** `MapBuilderTutorial.tsx` (persisted via `localStorage` key), `CreateCampusGuide.tsx`, `IssuesPopover.tsx`, `ToolbarTooltip.tsx`
 - **Barrel:** `index.ts` exports `SEED_CAMPUSES`, `LAYER_TOOLS`, components, and types
 
-**Current Services:** `campusService` (seeded with `SEED_CAMPUSES`, `Not Connected` — the page does not call it). Persistence is direct `localStorage` in `AdminMapBuilderPage` (key `plv-campuses`) plus `CampusDataContext` (key `plv-campuses`).
+**Current Services:** `campusService` owns typed campus create/read/update/archive/restore, version reads, active-campus selection, optimistic conflicts, and private campus-image uploads. `AdminMapBuilderPage` consumes this service and contains no raw Supabase query.
 
-**Current Database Usage:** None at runtime. `campuses` table exists in the migration; the migration `001_initial_schema.sql` has no campus-building/floor JSON columns matching the authoring model.
+**Current Database Usage:** `public.campuses`, `public.campus_versions`, and private `campus-images` Storage are live under RLS. Campus structure tables are not connected to the editor until A5.
 
 **Current Problems:**
-- Persistence is localStorage-only; no server sync
+- Building/floor/map-element authoring remains in-memory until A5 adds persistent structure services.
 - Second, dead Map Builder implementation exists: `src/components/map-builder-v2/` (`MapBuilderWorkspace`, `BuildingsTab`, `FloorPlansTab`, `LayersTab`, `PreviewTab`, `RoutesTab`) — unused
-- `campusService` imports `SEED_CAMPUSES` from the map-builder barrel (upward dependency from services → components)
+- Publishing controls are intentionally disabled until A6 owns validation and atomic version publication.
 - Publish copies campus JSON into `CampusDataContext`; the public map consumes it via `mapDataAdapter` (fragile contract)
 - Desktop-tuned; mobile support partial (editor has limited responsive fallback)
 
-**Missing Functionality:** Server persistence, versioning/diffing, image upload for floor plans, template library, multi-user editing, live publish.
+**Missing Functionality:** Structure persistence, draft snapshot saving/diffing, image upload for floor plans, template library, multi-user editing, and live publish.
 
 **Files involved:** `src/pages/AdminMapBuilderPage.tsx`, `src/components/map-builder/*` (37 files), `src/components/map-builder-v2/*` (dead), `src/contexts/CampusDataContext.tsx`, `src/services/campusService.ts`, `src/lib/campusHelpers.ts`
 
@@ -587,13 +594,13 @@
 
 | Area | Fact |
 |---|---|
-| Router | `createBrowserRouter` in `src/app/routes.tsx` — 25 registered routes; `AdminAnnouncementsPage` and `AnnouncementsPage` are **not** registered (broken) |
+| Router | `createBrowserRouter` in `src/app/routes.tsx` — 29 registered routes, including the A2 verification/recovery routes; `AdminAnnouncementsPage` and `AnnouncementsPage` are **not** registered (broken) |
 | State | One global context (`CampusDataContext`, localStorage key `plv-campuses`); all other state is local `useState` |
 | Persistence | Supabase Auth persists administrator and student sessions. `localStorage` still stores `plv-campuses`, `plv-theme`, `plv-tutorial-done`, `plv-search-hint-dismissed`, and Help Center guest chats. Campus and most feature data are not yet server-authoritative. |
-| Data layer | The single browser client in `src/lib/supabase.ts` is active for authentication and profile lookup. Most feature services and pages still use mock, page-local, or localStorage data. |
+| Data layer | The generated `Database` contract types the single browser client in `src/lib/supabase.ts`, which is active for authentication and profile lookup. Most feature services and pages still use mock, page-local, or localStorage data. |
 | Service consumers | Only `AdminBuildingsPage` imports the services layer; every other page uses page-local mock arrays |
-| Database | Reviewed migration at `supabase/migrations/001_create_plv_navisync_schema.sql`; legacy migration archived. Auth/profile behavior is exercised at runtime, while most feature tables remain unconnected. |
+| Database | The reviewed `001` schema is preserved unchanged; the live-baseline marker, A1 security/Storage correction, and A2 safe student-profile signup trigger are tracked as later migrations. Core guest/student/admin RLS, Storage, and student signup-trigger behavior are exercised against the live project. |
 | PWA | `public/manifest.json` + `public/sw.js` service worker; no offline map-data caching |
-| Type safety | No `tsconfig.json` present — `vite build` is the only compile check |
-| Tests | 2 test files: `WeeklyChart.test.tsx`, `campusHelpers.test.ts` (Vitest); no `test` script in `package.json` |
+| Type safety | Live database types are generated at `src/types/database.generated.ts` and applied to the browser client. No `tsconfig.json` is present, so `vite build` remains the only project compile check. |
+| Tests | 4 Vitest files (54 tests), live A1/A2 verification scripts, and rollback-safe A1/A2 SQL assertions. `package.json` exposes `verify:a1` and `verify:a2`; no general `test` script is defined. |
 | Dead code | `map-builder-v2/` (6 files), 43-file unused shadcn kit under `src/app/components/ui/` (only `sonner` + `utils` consumed), `WeeklyChart` (unused), `QRPlaceholder` (placeholder-only) |

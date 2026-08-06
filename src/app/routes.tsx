@@ -28,6 +28,10 @@ const StudentFavoritesPage = lazy(() => import("../pages/StudentFavoritesPage").
 const StudentReportsPage   = lazy(() => import("../pages/StudentReportsPage").then(m => ({ default: m.StudentReportsPage })));
 const StudentSettingsPage  = lazy(() => import("../pages/StudentSettingsPage").then(m => ({ default: m.StudentSettingsPage })));
 const StudentMyDayPage     = lazy(() => import("../pages/StudentMyDayPage").then(m => ({ default: m.StudentMyDayPage })));
+const VerificationPendingPage = lazy(() => import("../pages/AuthLifecyclePages").then(m => ({ default: m.VerificationPendingPage })));
+const AuthCallbackPage     = lazy(() => import("../pages/AuthLifecyclePages").then(m => ({ default: m.AuthCallbackPage })));
+const ForgotPasswordPage   = lazy(() => import("../pages/AuthLifecyclePages").then(m => ({ default: m.ForgotPasswordPage })));
+const ResetPasswordPage    = lazy(() => import("../pages/AuthLifecyclePages").then(m => ({ default: m.ResetPasswordPage })));
 
 // ── Suspense fallback — branded shimmer skeleton ─────────────────────────
 function PageLoading() {
@@ -145,6 +149,10 @@ export const router = createBrowserRouter([
   // ── Auth pages (standalone)
   { path: "/admin", element: <SuspensePage><AdminLoginPage /></SuspensePage> },
   { path: "/register", element: <SuspensePage><RegistrationPage /></SuspensePage> },
+  { path: "/auth/verify", element: <SuspensePage><VerificationPendingPage /></SuspensePage> },
+  { path: "/auth/callback", element: <SuspensePage><AuthCallbackPage /></SuspensePage> },
+  { path: "/auth/forgot-password", element: <SuspensePage><ForgotPasswordPage /></SuspensePage> },
+  { path: "/auth/reset-password", element: <SuspensePage><ResetPasswordPage /></SuspensePage> },
 
   // ── Admin portal (protected by AdminLayout's auth check)
   {

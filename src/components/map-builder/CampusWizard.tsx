@@ -239,6 +239,7 @@ interface CampusWizardProps {
   onFinish: (campus: Campus) => void;
   onClose: () => void;
   onJumpToStep?: (step: 1 | 2 | 3 | 4) => void;
+  publishingEnabled?: boolean;
 }
 
 // ── Saving overlay (mimics LoadingScreen style) ──────────────────────────────
@@ -332,7 +333,7 @@ function SaveConfirmDialog({ open, campusName, onConfirm, onCancel }: {
   );
 }
 
-export function CampusWizard({ draft, step, onNext, onBack, onFinish, onClose, onJumpToStep }: CampusWizardProps) {
+export function CampusWizard({ draft, step, onNext, onBack, onFinish, onClose, onJumpToStep, publishingEnabled = true }: CampusWizardProps) {
   const uid = useId();
 
   // ── Step 1: Identity ──────────────────────────────────────────────────────
@@ -942,7 +943,7 @@ export function CampusWizard({ draft, step, onNext, onBack, onFinish, onClose, o
                 <input
                   ref={thumbInputRef}
                   type="file"
-                  accept="image/*"
+                  accept="image/jpeg,image/png,image/webp"
                   onChange={(e) => handleFileChange(e, setThumbnail)}
                   className="hidden"
                 />
@@ -992,7 +993,7 @@ export function CampusWizard({ draft, step, onNext, onBack, onFinish, onClose, o
                 <input
                   ref={logoInputRef}
                   type="file"
-                  accept="image/*"
+                  accept="image/jpeg,image/png,image/webp"
                   onChange={(e) => handleFileChange(e, setLogo)}
                   className="hidden"
                 />
@@ -1028,7 +1029,7 @@ export function CampusWizard({ draft, step, onNext, onBack, onFinish, onClose, o
                       <div className="flex-1 min-w-0">
                         <p className="text-xs font-bold text-foreground">Upload campus logo</p>
                         <p className="text-[10px] text-muted-foreground leading-tight" style={{ fontFamily: "var(--font-body)" }}>
-                          PNG or SVG · Square aspect ratio recommended
+                          PNG, JPG, or WEBP · Square aspect ratio recommended
                         </p>
                       </div>
                     </>
@@ -1198,9 +1199,11 @@ export function CampusWizard({ draft, step, onNext, onBack, onFinish, onClose, o
                       </button>
                       <button
                         type="button"
+                        disabled={!publishingEnabled}
                         onClick={() => { setPublishStatus("published"); setVisibleToStudents(true); }}
                         className={cn(
                           "flex items-center gap-2 px-3 py-2.5 rounded-xl border text-left transition-all text-sm",
+                          !publishingEnabled && "opacity-50 cursor-not-allowed",
                           publishStatus === "published"
                             ? "border-green-400 bg-green-50 dark:bg-green-900/15 ring-1 ring-green-400/30"
                             : "border-border hover:border-green-400/30"
@@ -1209,7 +1212,7 @@ export function CampusWizard({ draft, step, onNext, onBack, onFinish, onClose, o
                         <Eye className={cn("h-4 w-4", publishStatus === "published" ? "text-green-600" : "text-muted-foreground")} />
                         <div>
                           <p className={cn("text-xs font-extrabold", publishStatus === "published" ? "text-green-700 dark:text-green-400" : "text-foreground")}>Published</p>
-                          <p className="text-[9px] text-muted-foreground leading-tight">Visible to students</p>
+                          <p className="text-[9px] text-muted-foreground leading-tight">Available in A6</p>
                         </div>
                       </button>
                     </div>

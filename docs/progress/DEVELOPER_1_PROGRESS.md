@@ -6,35 +6,35 @@ Status values: `READY`, `ACTIVE`, `BLOCKED`, `FOR REVIEW`, `DONE`.
 
 ## Package checklist
 
-- [ ] **A1 — Database types, Storage, and RLS baseline**
-  - Status: `READY`
+- [x] **A1 — Database types, Storage, and RLS baseline**
+  - Status: `FOR REVIEW`
   - Branch: `feature/database-types-and-storage`
   - Depends on: None
-  - Test result: Pending
+  - Test result: PASS — Vite build, 45 Vitest tests, live guest/student/admin RLS and Storage matrix, catalog assertions, and advisor review
   - Pull Request: Pending
-- [ ] **A2 — Student account lifecycle**
-  - Status: `BLOCKED`
-  - Branch: `feature/student-account-lifecycle`
+- [x] **A2 — Student account lifecycle**
+  - Status: `FOR REVIEW`
+  - Branch: `feature/database-types-and-storage` (continued here by developer instruction)
   - Depends on: A1
-  - Test result: Pending
+  - Test result: PASS — Vite build, 54 Vitest tests, live Auth/session checks, rollback-safe signup-trigger assertions, route checks, advisor review, and developer manual site testing with no observed errors
   - Pull Request: Pending
-- [ ] **A3 — Administrator user management and privileged actions**
-  - Status: `BLOCKED`
-  - Branch: `feature/admin-user-management`
+- [x] **A3 — Administrator user management and privileged actions**
+  - Status: `FOR REVIEW`
+  - Branch: `feature/database-types-and-storage` (continued here by developer instruction)
   - Depends on: A2
-  - Test result: Pending
+  - Test result: PASS — Vite build, 57 Vitest tests, rollback-safe database assertions, live guest/student/admin checks, A1/A2 regressions, advisor review, and browser walkthrough
   - Pull Request: Pending
-- [ ] **A4 — Campus lifecycle and version contract**
-  - Status: `BLOCKED`
-  - Branch: `feature/campus-lifecycle`
+- [x] **A4 — Campus lifecycle and version contract**
+  - Status: `FOR REVIEW`
+  - Branch: `feature/database-types-and-storage` (continued here by developer instruction)
   - Depends on: A1
-  - Test result: Pending
+  - Test result: PASS — Vite build, 60 Vitest tests, rollback-safe guest/student/admin lifecycle and Storage assertions, live A1/A2/A3 regressions, generated-type review, and security/performance advisor review
   - Pull Request: Pending
-- [ ] **A5 — Campus structure, directory, and graph services**
-  - Status: `BLOCKED`
-  - Branch: `feature/campus-structure-services`
+- [x] **A5 — Campus structure, directory, and graph services**
+  - Status: `FOR REVIEW`
+  - Branch: `feature/database-types-and-storage` (continued here by developer instruction)
   - Depends on: A4
-  - Test result: Pending
+  - Test result: PASS — Vite build, 63 Vitest tests, live atomic structure/RLS/cross-campus/recoverability checks, A1 Storage/RLS regression, generated-type review, advisors, and browser smoke test
   - Pull Request: Pending
 - [ ] **A6 — Draft save, validation handoff, and publish orchestration**
   - Status: `BLOCKED`
@@ -63,8 +63,8 @@ Status values: `READY`, `ACTIVE`, `BLOCKED`, `FOR REVIEW`, `DONE`.
 
 ## Current handoff note
 
-- Active package: None
+- Active package: A5 — Campus structure, directory, and graph services (`FOR REVIEW`, same branch by developer instruction)
 - Last completed package: None
-- Known blocker: None
-- Important changed files: None
-- Next recommended action: Start A1.
+- Known blocker: None. Leaked-password protection, production SMTP, and production redirect configuration remain deployment dashboard tasks.
+- Important changed files: `src/services/campusStructureService.ts`, `src/pages/AdminMapBuilderPage.tsx`, `src/components/map-builder/CampusEditor.tsx`, `src/components/map-builder/FloorEditor.tsx`, `src/types/database.generated.ts`, `supabase/migrations/20260806113935_establish_campus_structure_contract.sql`, `scripts/verify-a5-campus-structure.mjs`
+- Next recommended action: Complete the A5 manual site checklist, then obtain A5 and B5 contract review before beginning A6 publish orchestration.

@@ -60,11 +60,12 @@ interface FloorEditorProps {
   onBack: () => void;
   onSwitchFloor: (floorId: string) => void;
   onUpdate: (c: Campus) => void;
+  onSave?: (c: Campus) => Promise<Campus>;
 }
 
 // ── Component ───────────────────────────────────────────────────────────────
 
-export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor, onUpdate }: FloorEditorProps) {
+export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor, onUpdate, onSave }: FloorEditorProps) {
   const building = campus.buildings.find((b) => b.id === buildingId)!;
   const floor = building?.floors.find((f) => f.id === floorId)!;
 
@@ -123,7 +124,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
 
   const buildFloorUpdates = useCallback(
     (updates: Partial<FloorPlan>) => {
-      onUpdate({
+      const updatedCampus = {
         ...campus,
         buildings: campus.buildings.map((b) =>
           b.id === buildingId
@@ -149,7 +150,9 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
               }
             : b
         ),
-      });
+      };
+      onUpdate(updatedCampus);
+      return updatedCampus;
     },
     [campus, buildingId, floorId, onUpdate]
   );
@@ -206,15 +209,20 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
   }, [rooms, fpaths, updFloor, pushHistory, toast]);
 
   // ── Save ──
-  const handleSave = () => {
+  const handleSave = async () => {
     setSaving(true);
-    setTimeout(() => {
-      buildFloorUpdates({});
+    try {
+      const candidate = buildFloorUpdates({});
+      const savedCampus = onSave ? await onSave(candidate) : candidate;
+      onUpdate(savedCampus);
       setSaving(false);
       setSaved(true);
       toast.success("Floor saved", `${floor.label} changes saved successfully.`);
       setTimeout(() => setSaved(false), 2000);
-    }, 400);
+    } catch (error) {
+      setSaving(false);
+      toast.error("Could not save floor", error instanceof Error ? error.message : "The database rejected the save.");
+    }
   };
 
   // ── SVG Mouse handlers ──

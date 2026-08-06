@@ -462,6 +462,12 @@ export interface Campus {
   updatedAt: string;
   publishedAt?: string;
   createdBy?: string;
+  /** Database metadata used for optimistic concurrency and private asset previews. */
+  databaseUpdatedAt?: string;
+  logoPath?: string;
+  overviewImagePath?: string;
+  isDefault?: boolean;
+  lifecycleStatus?: "draft" | "published" | "unpublished" | "archived";
 }
 
 // ── Keep CampusSettings for backward compatibility with editor ──────────────

@@ -1,8 +1,9 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { toast } from "sonner";
-import { useCampusData } from "../contexts/CampusDataContext";
-import { buildSharedCampus, createCampusClone, resolvePublishTarget, sanitizeCampus } from "../lib/campusHelpers";
+import { createCampusClone } from "../lib/campusHelpers";
+import { campusService, CampusConflictError, type CampusCreateInput, type CampusUpdateInput } from "../services/campusService";
+import { campusStructureService } from "../services/campusStructureService";
 import {
   CampusHome,
   CampusWizard,
@@ -10,12 +11,9 @@ import {
   CampusEditor,
   FloorEditor,
   BuildingWizardModal,
-  PublishDialog,
-  PublishScreen,
   CanvasSetupWizard,
   CanvasSettingsModal,
   genId,
-  SEED_CAMPUSES,
   BUILDING_COLORS,
 } from "../components/map-builder";
 import type { Campus, View, BuildingWizardData } from "../components/map-builder/types";
@@ -42,52 +40,40 @@ const slideTransition = {
 };
 
 // ── localStorage persistence key ────────────────────────────────────────────
-const STORAGE_KEY = "plv-admin-campuses";
+function campusInput(campus: Campus): CampusCreateInput {
+  return {
+    name: campus.name, code: campus.code, description: campus.description || null,
+    address: campus.address || null, city: campus.city || null,
+    province: campus.province || null, postal_code: campus.postalCode || null,
+    latitude: campus.coordinates?.lat ?? null, longitude: campus.coordinates?.lng ?? null,
+    logo_path: campus.logoPath ?? null, overview_image_path: campus.overviewImagePath ?? null,
+    theme_color: campus.themeColor ?? "#1e3a5f", canvas_width: campus.canvasW || 1200,
+    canvas_height: campus.canvasH || 800, canvas_configured: campus.canvasConfigured ?? false, map_scale_m_per_unit: 1,
+    is_default: campus.isDefault ?? false,
+  };
+}
 
-/**
- * Load campuses from localStorage, falling back to seed data.
- */
-function loadCampuses(): Campus[] {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw) as Campus[];
-      // Normalize legacy shapes (old versions may lack floors/markers/paths
-      // and the status flags) so the page never crashes on stale data.
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed.map(sanitizeCampus);
-    }
-  } catch {
-    if (import.meta.env.DEV) {
-      console.warn("[AdminMapBuilder] Failed to load campuses from localStorage — using seed data");
-    }
-  }
-  return SEED_CAMPUSES;
+async function dataUrlToBlob(value?: string): Promise<Blob | null> {
+  if (!value?.startsWith("data:")) return null;
+  return (await fetch(value)).blob();
 }
 
 /**
  * AdminMapBuilderPage — orchestrates all campus management views
  */
 export function AdminMapBuilderPage() {
-  const [campuses, setCampuses] = useState<Campus[]>(loadCampuses);
+  const [campuses, setCampuses] = useState<Campus[]>([]);
   const [view, setView] = useState<View>({ type: "home" });
   const [showBuildingWizard, setShowBuildingWizard] = useState(false);
-  const [showPublishDialog, setShowPublishDialog] = useState(false);
-  const [publishScreen, setPublishScreen] = useState<{ open: boolean; state: "publishing" | "success" | "error" }>({ open: false, state: "publishing" });
-  // ── Processing guard — prevents duplicate publish clicks ──
-  const [isPublishing, setIsPublishing] = useState(false);
   const directionRef = useRef(1);
-  const { publishCampus: ctxPublish, removeCampus: ctxRemove } = useCampusData();
 
-  // ── Persist campuses to localStorage on every change ────────────────────
   useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(campuses));
-    } catch {
-      if (import.meta.env.DEV) {
-        console.warn("[AdminMapBuilder] Failed to persist campuses to localStorage");
-      }
-    }
-  }, [campuses]);
+    let active = true;
+    campusService.list().then((rows) => { if (active) setCampuses(rows); }).catch((error: Error) => {
+      toast.error("Could not load campuses", error.message);
+    });
+    return () => { active = false; };
+  }, []);
 
   const activeCampus =
     view.type === "campus" || view.type === "floor"
@@ -100,15 +86,7 @@ export function AdminMapBuilderPage() {
     setCampuses((p) => p.map((c) => (c.id === updated.id ? updated : c))),
   []);
 
-  const deleteCampus = useCallback((id: string) => {
-    setCampuses((p) => p.filter((c) => c.id !== id));
-    // Also remove from shared context if it was published
-    ctxRemove(id);
-    const deleted = campuses.find(c => c.id === id);
-    toast.success("Campus Deleted", deleted ? `"${deleted.name}" has been removed.` : undefined);
-  }, [ctxRemove]);
-
-  const duplicateCampus = useCallback((id: string) => {
+  const duplicateCampus = useCallback(async (id: string) => {
     const source = campuses.find((c) => c.id === id);
     if (!source) return;
     const clone = createCampusClone(
@@ -117,70 +95,32 @@ export function AdminMapBuilderPage() {
       new Set(campuses.map((c) => c.code).filter(Boolean)),
       genId
     );
-    setCampuses((p) => [...p, clone]);
-    toast.success("Campus Duplicated", `"${source.name}" has been copied as "${clone.name}".`);
+    try {
+      const created = await campusService.create({ ...campusInput(clone), logo_path: null, overview_image_path: null, is_default: false });
+      setCampuses((p) => [...p, created]);
+      toast.success("Campus Duplicated", `"${source.name}" has been copied as "${created.name}".`);
+    } catch (error) { toast.error("Could not duplicate campus", (error as Error).message); }
   }, [campuses]);
 
-  const togglePublish = useCallback((id: string, force?: "publish" | "unpublish") => {
+  const archiveCampus = useCallback(async (id: string) => {
     const campus = campuses.find((c) => c.id === id);
-    const wasPublished = campus?.publishStatus === "published";
-    // Direction-aware: force lets retry/confirm re-run the exact same action instead of toggling
-    const targetPublished = resolvePublishTarget(wasPublished, force);
-    const now = new Date().toISOString().slice(0, 10);
+    if (!campus?.databaseUpdatedAt) return;
+    try {
+      const updated = await campusService.archive(id, campus.databaseUpdatedAt);
+      updateCampus(updated);
+      toast.success("Campus Archived", `"${campus.name}" is private until restored.`);
+    } catch (error) { toast.error("Could not archive campus", (error as Error).message); }
+  }, [campuses, updateCampus]);
 
-    setCampuses((p) =>
-      p.map((c) =>
-        c.id !== id
-          ? c
-          : {
-              ...c,
-              publishStatus: targetPublished ? "published" as const : "draft" as const,
-              visibleToStudents: targetPublished,
-              updatedAt: now,
-              publishedAt: targetPublished ? (c.publishedAt ?? now) : undefined,
-            }
-      )
-    );
-
-    if (targetPublished && campus) {
-      // Publish to shared context so students can see it
-      ctxPublish(buildSharedCampus(campus, now));
-      toast.success("Campus Published", `"${campus.name}" is now visible to students.`);
-    } else if (!targetPublished) {
-      // Unpublish — remove from shared context so students can no longer see it
-      ctxRemove(id);
-      toast.success("Campus Unpublished", campus ? `"${campus.name}" has been taken down.` : "The campus has been taken down.");
-    }
-  }, [campuses, ctxPublish, ctxRemove]);
-
-  const archiveCampus = useCallback((id: string) => {
+  const restoreCampus = useCallback(async (id: string) => {
     const campus = campuses.find((c) => c.id === id);
-    setCampuses((p) =>
-      p.map((c) => (c.id === id ? { ...c, status: "archived" as const, visibleToStudents: false } : c))
-    );
-    // Remove from shared context so students can no longer see it
-    ctxRemove(id);
-    if (campus) {
-      toast.success(
-        "Campus Archived",
-        campus.publishStatus === "published"
-          ? `"${campus.name}" is now hidden from students. It stays in the archive until you restore it.`
-          : `"${campus.name}" moved to the archive. Restore it anytime to edit or publish.`
-      );
-    }
-  }, [campuses, ctxRemove]);
-
-  const restoreCampus = useCallback((id: string) => {
-    const campus = campuses.find((c) => c.id === id);
-    setCampuses((p) =>
-      p.map((c) => (c.id === id ? { ...c, status: "active" as const } : c))
-    );
-    // If the campus was published before archiving, re-publish to shared context
-    if (campus?.publishStatus === "published") {
-      ctxPublish(buildSharedCampus(campus, campus.publishedAt ?? new Date().toISOString()));
-    }
-    toast.success("Campus Restored", campus ? `"${campus.name}" is active and ${campus.publishStatus === "published" ? "visible to students again." : "available for editing."}` : undefined);
-  }, [campuses, ctxPublish]);
+    if (!campus?.databaseUpdatedAt) return;
+    try {
+      const updated = await campusService.restore(id, campus.databaseUpdatedAt);
+      updateCampus(updated);
+      toast.success("Campus Restored", `"${campus.name}" was restored as a private draft.`);
+    } catch (error) { toast.error("Could not restore campus", (error as Error).message); }
+  }, [campuses, updateCampus]);
 
   const editDetails = useCallback((id: string) => {
     const campus = campuses.find((c) => c.id === id);
@@ -198,25 +138,6 @@ export function AdminMapBuilderPage() {
 
   // ── Navigation ────────────────────────────────────────────────────────────
 
-  const publishCampus = useCallback((updated: Campus) => {
-    const now = new Date().toISOString().slice(0, 10);
-    setCampuses((p) =>
-      p.map((c) =>
-        c.id === updated.id
-          ? {
-              ...updated,
-              publishStatus: "published" as const,
-              visibleToStudents: true,
-              publishedAt: now,
-              updatedAt: now,
-            }
-          : c
-      )
-    );
-    ctxPublish(buildSharedCampus({ ...updated, publishStatus: "published", publishedAt: now }, now));
-    toast.success("Campus Map Published", `"${updated.name}" is now available to students.`);
-  }, [ctxPublish]);
-
   const handleOpenFloor = useCallback((buildingId: string, floorId: string) => {
     if (!activeCampus) return;
     directionRef.current = 1;
@@ -228,16 +149,29 @@ export function AdminMapBuilderPage() {
     setView({ type: "home" });
   }, []);
 
-  const goToCampus = useCallback((campusId: string) => {
+  const goToCampus = useCallback(async (campusId: string) => {
     const campus = campuses.find((c) => c.id === campusId);
     directionRef.current = 1;
     // If the campus has no canvas configured yet, redirect to canvas setup
     if (campus && !campus.canvasConfigured) {
       setView({ type: "create-map", campusId });
     } else {
+      try {
+        const hydrated = await campusStructureService.load(campus!);
+        updateCampus(hydrated);
+      } catch (error) {
+        toast.error("Could not load map", (error as Error).message);
+        return;
+      }
       setView({ type: "campus", campusId });
     }
-  }, [campuses]);
+  }, [campuses, updateCampus]);
+
+  const saveCampusStructure = useCallback(async (campus: Campus) => {
+    const saved = await campusStructureService.save(campus);
+    updateCampus(saved);
+    return saved;
+  }, [updateCampus]);
 
   const goToCampusFromFloor = useCallback((campusId: string) => {
     directionRef.current = -1;
@@ -273,55 +207,46 @@ export function AdminMapBuilderPage() {
     setView({ type: "success", campusId });
   }, []);
 
-  const finishWizard = useCallback((campus: Campus, existingId?: string) => {
-    const now = new Date().toISOString().slice(0, 10);
-    if (existingId) {
-      // Edit mode — preserve existing buildings, markers, paths while updating metadata
-      const existing = campuses.find((c) => c.id === existingId);
-      if (!existing) { goHome(); return; }
-      const wasPublished = existing.publishStatus === "published";
-      const nextPublished = campus.publishStatus === "published";
-      const merged: Campus = {
-        ...existing,
-        ...campus,
-        id: existingId,
-        buildings: existing.buildings,
-        markers: existing.markers,
-        paths: existing.paths,
-        routes: existing.routes,
-        accessibilityFeatures: existing.accessibilityFeatures,
-        eventOverlays: existing.eventOverlays,
-        canvasW: existing.canvasW,
-        canvasH: existing.canvasH,
-        updatedAt: now,
-        publishedAt: nextPublished ? (existing.publishedAt ?? now) : undefined,
-        visibleToStudents: campus.visibleToStudents,
-      };
-      setCampuses((p) => p.map((c) => (c.id === existingId ? merged : c)));
-      // Keep the shared student-facing copy in sync with the wizard's publish status,
-      // so toggling visibility from the wizard actually takes effect.
-      if (nextPublished) {
-        ctxPublish(buildSharedCampus(merged, merged.publishedAt));
-      } else if (wasPublished) {
-        ctxRemove(existingId);
+  const finishWizard = useCallback(async (campus: Campus, existingId?: string) => {
+    try {
+      const requestedLogo = await dataUrlToBlob(campus.logo);
+      const requestedOverview = await dataUrlToBlob(campus.thumbnail);
+      if (requestedLogo) campusService.validateImage(requestedLogo);
+      if (requestedOverview) campusService.validateImage(requestedOverview);
+
+      if (existingId) {
+        const existing = campuses.find((item) => item.id === existingId);
+        if (!existing?.databaseUpdatedAt) throw new Error("Refresh before editing this campus.");
+        const input = campusInput({ ...existing, ...campus }) as CampusUpdateInput;
+        let updated = await campusService.update(existingId, input, existing.databaseUpdatedAt);
+        if (requestedLogo || requestedOverview) {
+          const [logoPath, overviewPath] = await Promise.all([
+            requestedLogo ? campusService.uploadImage(existingId, "logo", requestedLogo) : Promise.resolve(updated.logoPath),
+            requestedOverview ? campusService.uploadImage(existingId, "overview", requestedOverview) : Promise.resolve(updated.overviewImagePath),
+          ]);
+          updated = await campusService.update(existingId, { logo_path: logoPath ?? null, overview_image_path: overviewPath ?? null }, updated.databaseUpdatedAt!);
+        }
+        updateCampus(updated);
+        toast.success("Campus Details Updated", `"${updated.name}" has been saved.`);
+        goHome();
+        return;
       }
-      toast.success("Campus Details Updated", campus.name ? `"${campus.name}" has been updated.` : undefined);
-      goHome();
-    } else {
-      // Create mode — add new campus and show success screen
-      const fresh: Campus = {
-        ...campus,
-        updatedAt: now,
-        publishedAt: campus.publishStatus === "published" ? now : undefined,
-      };
-      setCampuses((p) => [...p, fresh]);
-      if (campus.publishStatus === "published") {
-        ctxPublish(buildSharedCampus(fresh, now));
+
+      let created = await campusService.create({ ...campusInput(campus), logo_path: null, overview_image_path: null });
+      if (requestedLogo || requestedOverview) {
+        const [logoPath, overviewPath] = await Promise.all([
+          requestedLogo ? campusService.uploadImage(created.id, "logo", requestedLogo) : Promise.resolve(undefined),
+          requestedOverview ? campusService.uploadImage(created.id, "overview", requestedOverview) : Promise.resolve(undefined),
+        ]);
+        created = await campusService.update(created.id, { logo_path: logoPath ?? null, overview_image_path: overviewPath ?? null }, created.databaseUpdatedAt!);
       }
-      toast.success("Campus Created", `"${campus.name}" is ready for editing.`);
-      goToSuccess(campus.id);
+      setCampuses((items) => [...items, created]);
+      toast.success("Campus Created", `"${created.name}" was saved as a private draft.`);
+      goToSuccess(created.id);
+    } catch (error) {
+      toast.error(error instanceof CampusConflictError ? "Campus changed elsewhere" : "Could not save campus", (error as Error).message);
     }
-  }, [campuses, ctxPublish, ctxRemove, goHome, goToSuccess]);
+  }, [campuses, goHome, goToSuccess, updateCampus]);
 
   // ── View key for AnimatePresence ──────────────────────────────────────────
 
@@ -341,18 +266,27 @@ export function AdminMapBuilderPage() {
       ? campuses.find((c) => c.id === view.campusId) ?? null
       : null;
 
-  const handleCanvasSetupComplete = useCallback((updates: Partial<Campus>) => {
+  const handleCanvasSetupComplete = useCallback(async (updates: Partial<Campus>) => {
     if (!canvasSetupCampus) return;
-    const updated: Campus = { ...canvasSetupCampus, ...updates, canvasConfigured: true };
-    updateCampus(updated);
-    setView({ type: "campus", campusId: canvasSetupCampus.id });
+    try {
+      const updated = await campusService.update(canvasSetupCampus.id, {
+        canvas_width: updates.canvasW, canvas_height: updates.canvasH, canvas_configured: true,
+      }, canvasSetupCampus.databaseUpdatedAt!);
+      updateCampus({ ...updated, canvasConfigured: true });
+      setView({ type: "campus", campusId: canvasSetupCampus.id });
+    } catch (error) { toast.error("Could not save canvas", (error as Error).message); }
   }, [canvasSetupCampus, updateCampus]);
 
   const [showCanvasSettings, setShowCanvasSettings] = useState(false);
 
-  const handleCanvasSettingsSave = useCallback((updates: Partial<Campus>) => {
+  const handleCanvasSettingsSave = useCallback(async (updates: Partial<Campus>) => {
     if (!activeCampus) return;
-    updateCampus({ ...activeCampus, ...updates, canvasConfigured: true });
+    try {
+      const updated = await campusService.update(activeCampus.id, {
+        canvas_width: updates.canvasW, canvas_height: updates.canvasH, canvas_configured: true,
+      }, activeCampus.databaseUpdatedAt!);
+      updateCampus({ ...updated, canvasConfigured: true });
+    } catch (error) { toast.error("Could not update canvas", (error as Error).message); }
   }, [activeCampus, updateCampus]);
 
   return (
@@ -376,9 +310,7 @@ export function AdminMapBuilderPage() {
                 campuses={campuses}
                 onOpen={goToCampus}
                 onCreate={() => setView({ type: "wizard", step: 1, draft: {} })}
-                onDelete={deleteCampus}
                 onDuplicate={duplicateCampus}
-                onTogglePublish={togglePublish}
                 onArchive={archiveCampus}
                 onRestore={restoreCampus}
                 onEditDetails={editDetails}
@@ -392,7 +324,9 @@ export function AdminMapBuilderPage() {
                   campus={activeCampus}
                   onBack={goHome}
                   onUpdate={updateCampus}
-                  onPublish={() => setShowPublishDialog(true)}
+                  onSave={saveCampusStructure}
+                  onPublish={() => toast.info("Publishing is implemented in A6.")}
+                  publishingEnabled={false}
                   onOpenFloor={handleOpenFloor}
                   onAddBuilding={() => setShowBuildingWizard(true)}
                   onOpenCanvasSettings={() => setShowCanvasSettings(true)}
@@ -418,32 +352,6 @@ export function AdminMapBuilderPage() {
                     }}
                   />
                 )}
-                {showPublishDialog && activeCampus && (
-                  <PublishDialog
-                    campus={activeCampus}
-                    onClose={() => setShowPublishDialog(false)}
-                    onPublish={() => {
-                      if (isPublishing) return;
-                      setIsPublishing(true);
-                      setShowPublishDialog(false);
-                      // Directly show publish progress screen
-                      setPublishScreen({ open: true, state: "publishing" });
-                      // Cache the campus to publish so closure is stable
-                      const campusToPublish = activeCampus;
-                      // Use setTimeout for predictable timing
-                      setTimeout(() => {
-                        try {
-                          publishCampus(campusToPublish);
-                          setPublishScreen({ open: true, state: "success" });
-                        } catch (err) {
-                          console.error("[Publish] Failed:", err);
-                          setPublishScreen({ open: true, state: "error" });
-                        }
-                        setIsPublishing(false);
-                      }, 600);
-                    }}
-                  />
-                )}
               </>
             )}
 
@@ -456,6 +364,7 @@ export function AdminMapBuilderPage() {
                 onBack={() => goToCampusFromFloor(activeCampus.id)}
                 onSwitchFloor={(fId) => setView({ ...view, floorId: fId })}
                 onUpdate={updateCampus}
+                onSave={saveCampusStructure}
               />
             )}
 
@@ -488,31 +397,9 @@ export function AdminMapBuilderPage() {
           onFinish={(campus) => finishWizard(campus, view.draft.id)}
           onClose={goHome}
           onJumpToStep={jumpToStep}
+          publishingEnabled={false}
         />
       )}
-
-      {/* Publish screen overlay */}
-      <PublishScreen
-        open={publishScreen.open}
-        state={publishScreen.state}
-        campusName={activeCampus?.name}
-        onClose={() => setPublishScreen({ open: false, state: "publishing" })}
-        onRetry={() => {
-          setPublishScreen({ open: true, state: "publishing" });
-          setTimeout(() => {
-            try {
-              if (activeCampus) {
-                publishCampus(activeCampus);
-                setPublishScreen({ open: true, state: "success" });
-              } else {
-                setPublishScreen({ open: true, state: "error" });
-              }
-            } catch {
-              setPublishScreen({ open: true, state: "error" });
-            }
-          }, 2000);
-        }}
-      />
 
       {/* ── Canvas Setup Wizard — shown for new campuses with no canvas configured ── */}
       {canvasSetupCampus && (

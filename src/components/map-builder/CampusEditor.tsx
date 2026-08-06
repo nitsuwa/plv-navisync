@@ -59,7 +59,9 @@ interface CampusEditorProps {
   campus: Campus;
   onBack: () => void;
   onUpdate: (c: Campus) => void;
+  onSave?: (c: Campus) => Promise<Campus>;
   onPublish: (c: Campus) => void;
+  publishingEnabled?: boolean;
   onOpenFloor: (buildingId: string, floorId: string) => void;
   onAddBuilding: () => void;
   onOpenCanvasSettings?: () => void;
@@ -67,7 +69,7 @@ interface CampusEditorProps {
   lastSavedAt?: string;
 }
 
-export function CampusEditor({ campus, onBack, onUpdate, onPublish, onOpenFloor, onAddBuilding, onOpenCanvasSettings }: CampusEditorProps) {
+export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publishingEnabled = true, onOpenFloor, onAddBuilding, onOpenCanvasSettings }: CampusEditorProps) {
   const [tool, setTool] = useState<SimpleTool>("select");
   const [selected, setSelected] = useState<CampusSelection | null>(null);
   const [drawingPath, setDP] = useState<{ x: number; y: number }[]>([]);
@@ -1011,7 +1013,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onPublish, onOpenFloor,
   const canRedo = redoSteps > 0;
 
   // ── Save draft: shared by the toolbar button, Ctrl+S, and the retry screen ──
-  const runSave = useCallback(() => {
+  const runSave = useCallback(async () => {
     // Match the toolbar button's disabled semantics: nothing to save / already saving
     if (isProcessing || !isDirty) {
       toast.success("Already saved", "All changes are up to date.");
@@ -1028,22 +1030,18 @@ export function CampusEditor({ campus, onBack, onUpdate, onPublish, onOpenFloor,
     }
     setIsProcessing(true);
     setSaveScreen({ open: true, state: "saving" });
-    setTimeout(() => {
-      try {
-        const now = new Date().toISOString().slice(0, 10);
-        const saved = {
-          ...campus,
-          updatedAt: now,
-        };
+    try {
+        const candidate = { ...campus, updatedAt: new Date().toISOString() };
+        const saved = onSave ? await onSave(candidate) : candidate;
         onUpdate(saved);
         savedSnapshotRef.current = JSON.stringify(saved);
         setSaveScreen({ open: true, state: "success" });
-      } catch {
+      } catch (error) {
         setSaveScreen({ open: true, state: "error" });
+        toast.error("Could not save map", error instanceof Error ? error.message : "The database rejected the save.");
       }
       setIsProcessing(false);
-    }, 1500);
-  }, [campus, validateCampus, onUpdate, isDirty, isProcessing, toast]);
+  }, [campus, validateCampus, onUpdate, onSave, isDirty, isProcessing, toast]);
 
   // ── Keyboard shortcuts (disabled during tutorial) ──
   useEffect(() => {
@@ -1451,12 +1449,14 @@ export function CampusEditor({ campus, onBack, onUpdate, onPublish, onOpenFloor,
                   setShowPublishConfirm(true);
                 }}
                 disabled={
-                  isProcessing || isDirty ||
+                  !publishingEnabled || isProcessing || isDirty ||
                   (!isDirty && campus.publishStatus === "published" && !hasDraftChanges && campus.updatedAt === campus.publishedAt) ||
                   (!isDirty && campus.publishStatus === "draft" && !campus.publishedAt)
                 }
                 title={
-                  isDirty
+                  !publishingEnabled
+                    ? "Publishing becomes available in A6"
+                    : isDirty
                     ? "Save your draft first before publishing"
                     : campus.publishStatus === "published" && !hasDraftChanges && campus.updatedAt === campus.publishedAt
                       ? "Already published — make changes and save to enable publishing"
@@ -1466,7 +1466,9 @@ export function CampusEditor({ campus, onBack, onUpdate, onPublish, onOpenFloor,
                 }
                 className={cn(
                   "flex items-center gap-1 h-7 px-2 rounded-md text-[9px] font-extrabold transition-all shadow-sm",
-                  isProcessing
+                  !publishingEnabled
+                    ? "bg-muted text-muted-foreground cursor-not-allowed"
+                    : isProcessing
                     ? "bg-primary/70 text-primary-foreground/70 cursor-not-allowed"
                     : isDirty
                       ? "bg-muted text-muted-foreground cursor-not-allowed"
