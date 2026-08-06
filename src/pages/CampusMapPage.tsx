@@ -218,26 +218,6 @@ export function CampusMapPage() {
   // Unified Search Engine Hook for C3
   const campusSearch = useCampusSearch(activeCampus);
 
-  const handleSelectSearchResult = useCallback((item: SearchResult) => {
-    if (item.kind === "building" || !item.buildingId) {
-      const b = MOCK_BUILDINGS.find((building) => building.id === item.buildingId || building.name.toLowerCase() === item.name.toLowerCase());
-      if (b) selectBuilding(b);
-    } else {
-      const b = MOCK_BUILDINGS.find((building) => building.id === item.buildingId);
-      if (b) {
-        setSelectedBuilding(b);
-        if (item.floorNumber !== undefined) {
-          setFloorView(item.floorNumber);
-        } else {
-          setFloorView(1);
-        }
-        setHighlightedRoom(item.id);
-      }
-    }
-    setSearch(item.name);
-    setSearchFocused(false);
-  }, [MOCK_BUILDINGS, selectBuilding]);
-
   // Modals
   const [reportModal,   setReportModal]   = useState<Building|null>(null);
   const [signInPrompt,  setSignInPrompt]  = useState<string|null>(null);
@@ -598,6 +578,26 @@ export function CampusMapPage() {
     if (b && !recentSearches.includes(b.name))
       setRecentSearches(prev => [b.name, ...prev].slice(0, 5));
   }, [recentSearches]);
+
+  const handleSelectSearchResult = useCallback((item: SearchResult) => {
+    if (item.kind === "building" || !item.buildingId) {
+      const b = MOCK_BUILDINGS.find((building) => building.id === item.buildingId || building.name.toLowerCase() === item.name.toLowerCase());
+      if (b) selectBuilding(b);
+    } else {
+      const b = MOCK_BUILDINGS.find((building) => building.id === item.buildingId);
+      if (b) {
+        setSelectedBuilding(b);
+        if (item.floorNumber !== undefined) {
+          setFloorView({ building: b, floor: item.floorNumber });
+        } else {
+          setFloorView({ building: b, floor: 1 });
+        }
+        setHighlightedRoom(item.id);
+      }
+    }
+    setSearch(item.name);
+    setSearchFocused(false);
+  }, [MOCK_BUILDINGS, selectBuilding]);
 
   const startDirectionsTo = useCallback((b: Building) => {
     setToBuilding(b); setFromBuilding(null);
