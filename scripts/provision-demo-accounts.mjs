@@ -115,7 +115,7 @@ async function findUserByEmail(admin, email) {
   }
 }
 
-async function ensureAuthUser(admin, email, password, displayName) {
+async function ensureAuthUser(admin, email, password, displayName, studentNumber) {
   const existing = await findUserByEmail(admin, email);
   if (existing) {
     // Existing user: refresh password (deterministic demo login) and make sure
@@ -138,6 +138,7 @@ async function ensureAuthUser(admin, email, password, displayName) {
     user_metadata: {
       first_name: displayName.first,
       last_name: displayName.last,
+      student_number: studentNumber,
       source: "demo-provisioning",
     },
   });
@@ -262,7 +263,8 @@ async function main() {
     admin,
     env.DEMO_STUDENT_EMAIL,
     env.DEMO_STUDENT_PASSWORD,
-    { first: "Demo", last: "Student" }
+    { first: "Demo", last: "Student" },
+    "DEMO-STUDENT"
   );
   await ensureProfileExists(admin, studentUser.id, env.DEMO_STUDENT_EMAIL, "student");
 
@@ -272,7 +274,8 @@ async function main() {
     admin,
     env.DEMO_ADMIN_EMAIL,
     env.DEMO_ADMIN_PASSWORD,
-    { first: "Demo", last: "Administrator" }
+    { first: "Demo", last: "Administrator" },
+    "DEMO-ADMIN"
   );
   await ensureProfileExists(admin, adminUser.id, env.DEMO_ADMIN_EMAIL, "student");
 

@@ -98,13 +98,16 @@ Verified:
 - All five Storage buckets enforce the documented MIME allowlist and file-size limits.
 - Function execution grants are restricted to reviewed roles; intentionally public RLS helpers are documented in the corrective migration.
 - Repeatable guest, student, and administrator RLS and Storage checks pass with controlled, self-cleaning fixtures.
+- Student registration now calls Supabase Auth with validated name, email, password, and student-number metadata; the trigger preserves only reviewed profile fields and always hardcodes the `student` role.
+- Email-verification pending/resend/callback states and forgot/reset-password states are implemented at dedicated routes.
+- The hosted project has public email signup enabled, email confirmation required, and the email provider enabled.
 
 Still requiring verification or implementation:
 
-- Real registration, email verification, and password reset.
 - Persistent CRUD and service integration for feature modules.
 - Full cross-system RLS verification after the remaining feature packages are connected.
 - Supabase Auth leaked-password protection must be enabled in the project dashboard before production release.
+- Each local/preview/production origin must be added to Supabase Auth Redirect URLs, and production SMTP must be configured before real student onboarding.
 
 ---
 
@@ -1070,6 +1073,18 @@ Do not repeat complex profile subqueries in every policy if a reviewed helper fu
 5. Student signs in after verification.
 
 Public registration must never create an administrator.
+
+The A2 client sends only `first_name`, `last_name`, and `student_number` as signup metadata. The `handle_new_user()` trigger validates those fields, copies the Auth email directly from `auth.users`, hardcodes `role = 'student'` and `is_active = true`, and ignores any authorization metadata supplied by the caller.
+
+## Email verification and password recovery
+
+- Signup confirmation redirects to `/auth/callback?flow=signup`.
+- The pending screen at `/auth/verify` can resend a signup confirmation without exposing privileged operations.
+- Password-reset requests redirect to `/auth/reset-password?flow=recovery`.
+- The reset page requires a recovery link and valid Supabase session before calling `updateUser()`.
+- Successful confirmation/reset retains the valid student session, then active-profile and role checks run before student navigation.
+- Expired, invalid, missing-profile, inactive-profile, loading, and success states are explicit.
+- Redirect URLs must include local development origins and every deployed preview/production origin in the Supabase Auth dashboard.
 
 ## Administrator creation
 

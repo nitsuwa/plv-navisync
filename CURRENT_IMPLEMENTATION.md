@@ -2,7 +2,7 @@
 
 > **PLV NaviSync — Implementation Inventory**
 > Frozen scope baseline: a factual listing of what currently exists in the codebase.
-> Authentication checkpoint updated: August 5, 2026.
+> Authentication checkpoint updated: August 6, 2026.
 > This document does NOT recommend improvements. It only records implemented / partially implemented functionality as found in the source.
 >
 > **Status legend used below:**
@@ -17,14 +17,20 @@
 
 ## 1. Authentication
 
-**Status:** Core authentication complete / account lifecycle partial — real Supabase administrator and student authentication is implemented and manually verified.
+**Status:** Core authentication and the A2 student account lifecycle are implemented. Live Auth/session behavior is verified; final mailbox-link delivery remains a deployment-configuration review check.
 
 **Current Screens:**
 - `/admin` — `AdminLoginPage` for administrator and student sign-in.
-- `/register` — `RegistrationPage`; its real Supabase completion must still be verified before it is marked complete.
+- `/register` — `RegistrationPage`; creates a real student Auth account with validated profile metadata.
+- `/auth/verify` — verification-pending and resend state.
+- `/auth/callback` — email-verification callback with checking, success, expired, invalid, and blocked-profile states.
+- `/auth/forgot-password` — enumeration-safe reset request.
+- `/auth/reset-password` — recovery callback, new-password, expired/invalid-link, and success states.
 
 **Current Components and hooks:**
 - `AdminLoginPage.tsx` — calls `supabase.auth.signInWithPassword()`, loads the associated profile, checks `is_active`, redirects administrators to `/admin-dashboard`, redirects students to `/map`, and signs out unknown or invalid roles.
+- `studentAccount.ts` — validates registration data and owns typed signup, resend, reset-request, password-update, and active-student profile checks.
+- `AuthLifecyclePages.tsx` — owns verification and password-recovery route states while retaining the Supabase session after successful confirmation/reset.
 - Demonstration-account dropdown — appears only when demo mode and the relevant Vite variables are configured; Demo Administrator and Demo Student only fill the existing fields and never sign in automatically.
 - `useAdminAuth.ts` — restores the Supabase session and administrator profile for protected administration routes.
 - `useStudentAuth.ts` — uses `getSession()` and `onAuthStateChange`, loads the `profiles` row, and exposes profile, loading, student state, and Supabase sign-out behavior.
@@ -44,6 +50,9 @@
 - Logout ends the Supabase session and remains signed out after refresh.
 - Public guest pages remain accessible.
 - Legacy student `sessionStorage` authentication is no longer used.
+- Hosted email signup is enabled and requires confirmation.
+- The signup trigger ignores attempted role/active-state metadata and always creates an active `student` profile.
+- Student sessions refresh and remain valid; password changes without a session are rejected.
 
 **Security notes:**
 - `.env.local` and `.env.demo.local` are ignored by Git.
@@ -52,13 +61,12 @@
 - Vite demo credentials are browser-visible by design and must remain disabled in production.
 
 **Remaining functionality:**
-- Verify or complete real student registration.
-- Email verification and resend flow.
-- Forgot-password and reset-password flow.
+- Configure every deployed origin in Supabase Auth Redirect URLs and click through one real verification and recovery email per target environment.
+- Configure production SMTP before onboarding real students; the hosted default provider has recipient restrictions.
 - Persistent administrator user-management operations through approved protected backend mechanisms.
-- Broader RLS verification beyond the manually tested authentication paths.
+- Broader cross-feature RLS verification after later packages connect their tables.
 
-**Files involved:** `src/pages/AdminLoginPage.tsx`, `src/pages/RegistrationPage.tsx`, `src/hooks/useAdminAuth.ts`, `src/hooks/useStudentAuth.ts`, `src/components/layout/AdminLayout.tsx`, `src/components/layout/Navbar.tsx`, `src/components/layout/MobileBottomNav.tsx`, protected student pages, `src/lib/supabase.ts`
+**Files involved:** `src/pages/AdminLoginPage.tsx`, `src/pages/RegistrationPage.tsx`, `src/pages/AuthLifecyclePages.tsx`, `src/lib/studentAccount.ts`, `src/hooks/useAdminAuth.ts`, `src/hooks/useStudentAuth.ts`, `src/components/layout/AdminLayout.tsx`, protected student pages, `src/lib/supabase.ts`
 
 **Dependencies:** Supabase Auth, `public.profiles`, React Router, Motion, `useToast`, `useTheme`
 
@@ -587,13 +595,13 @@
 
 | Area | Fact |
 |---|---|
-| Router | `createBrowserRouter` in `src/app/routes.tsx` — 25 registered routes; `AdminAnnouncementsPage` and `AnnouncementsPage` are **not** registered (broken) |
+| Router | `createBrowserRouter` in `src/app/routes.tsx` — 29 registered routes, including the A2 verification/recovery routes; `AdminAnnouncementsPage` and `AnnouncementsPage` are **not** registered (broken) |
 | State | One global context (`CampusDataContext`, localStorage key `plv-campuses`); all other state is local `useState` |
 | Persistence | Supabase Auth persists administrator and student sessions. `localStorage` still stores `plv-campuses`, `plv-theme`, `plv-tutorial-done`, `plv-search-hint-dismissed`, and Help Center guest chats. Campus and most feature data are not yet server-authoritative. |
 | Data layer | The generated `Database` contract types the single browser client in `src/lib/supabase.ts`, which is active for authentication and profile lookup. Most feature services and pages still use mock, page-local, or localStorage data. |
 | Service consumers | Only `AdminBuildingsPage` imports the services layer; every other page uses page-local mock arrays |
-| Database | The reviewed `001` schema is preserved unchanged; an assertion-only live-baseline marker and a separate A1 security/Storage corrective migration are tracked after it. Core guest/student/admin RLS and Storage behavior is exercised against the live project, while most feature tables remain unconnected to the UI. |
+| Database | The reviewed `001` schema is preserved unchanged; the live-baseline marker, A1 security/Storage correction, and A2 safe student-profile signup trigger are tracked as later migrations. Core guest/student/admin RLS, Storage, and student signup-trigger behavior are exercised against the live project. |
 | PWA | `public/manifest.json` + `public/sw.js` service worker; no offline map-data caching |
 | Type safety | Live database types are generated at `src/types/database.generated.ts` and applied to the browser client. No `tsconfig.json` is present, so `vite build` remains the only project compile check. |
-| Tests | 2 Vitest files plus `scripts/verify-a1-supabase.mjs` for live guest/student/admin RLS and Storage fixtures and `supabase/tests/a1_catalog_assertions.sql` for catalog invariants; no `test` script in `package.json` |
+| Tests | 4 Vitest files (54 tests), live A1/A2 verification scripts, and rollback-safe A1/A2 SQL assertions. `package.json` exposes `verify:a1` and `verify:a2`; no general `test` script is defined. |
 | Dead code | `map-builder-v2/` (6 files), 43-file unused shadcn kit under `src/app/components/ui/` (only `sonner` + `utils` consumed), `WeeklyChart` (unused), `QRPlaceholder` (placeholder-only) |

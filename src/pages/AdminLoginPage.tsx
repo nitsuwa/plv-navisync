@@ -514,6 +514,12 @@ export function AdminLoginPage() {
               </Button>
             </form>
 
+            <div className="mt-4 text-center">
+              <Link to="/auth/forgot-password" className="text-sm font-bold text-primary hover:underline">
+                Forgot your password?
+              </Link>
+            </div>
+
             {/* Footer links */}
             <div className="mt-8 text-center space-y-2">
               <p className="text-sm text-muted-foreground">

@@ -12,11 +12,11 @@ Status values: `READY`, `ACTIVE`, `BLOCKED`, `FOR REVIEW`, `DONE`.
   - Depends on: None
   - Test result: PASS — Vite build, 45 Vitest tests, live guest/student/admin RLS and Storage matrix, catalog assertions, and advisor review
   - Pull Request: Pending
-- [ ] **A2 — Student account lifecycle**
-  - Status: `BLOCKED`
-  - Branch: `feature/student-account-lifecycle`
+- [x] **A2 — Student account lifecycle**
+  - Status: `FOR REVIEW`
+  - Branch: `feature/database-types-and-storage` (continued here by developer instruction)
   - Depends on: A1
-  - Test result: Pending
+  - Test result: PASS — Vite build, 54 Vitest tests, live Auth/session checks, rollback-safe signup-trigger assertions, route checks, and advisor review; reviewer mailbox-link check documented
   - Pull Request: Pending
 - [ ] **A3 — Administrator user management and privileged actions**
   - Status: `BLOCKED`
@@ -63,8 +63,8 @@ Status values: `READY`, `ACTIVE`, `BLOCKED`, `FOR REVIEW`, `DONE`.
 
 ## Current handoff note
 
-- Active package: A1 — Database types, Storage, and RLS baseline (`FOR REVIEW`)
+- Active package: A2 — Student account lifecycle (`FOR REVIEW`, same branch as A1 by developer instruction)
 - Last completed package: None
-- Known blocker: None; leaked-password protection remains a documented Supabase Auth dashboard recommendation before production release.
-- Important changed files: `src/types/database.generated.ts`, `src/lib/supabase.ts`, `supabase/migrations/20260805160720_baseline_existing_schema.sql`, `supabase/migrations/20260805161108_harden_storage_rls_and_function_grants.sql`, `scripts/verify-a1-supabase.mjs`, `supabase/tests/a1_catalog_assertions.sql`
-- Next recommended action: Review the A1 commit and open its Pull Request; keep A2 blocked until A1 is merged.
+- Known blocker: None for code review; reviewer must configure allowed Auth redirect origins and click one real verification/reset email before deployment. Leaked-password protection and production SMTP also remain dashboard tasks.
+- Important changed files: `src/lib/studentAccount.ts`, `src/pages/RegistrationPage.tsx`, `src/pages/AuthLifecyclePages.tsx`, `src/pages/AdminLoginPage.tsx`, `src/app/routes.tsx`, `supabase/migrations/20260806090026_secure_student_profile_signup.sql`, `scripts/verify-a2-auth.mjs`, `supabase/tests/a2_student_signup_assertions.sql`
+- Next recommended action: Review A1 and A2 together on this branch, complete the documented mailbox-link/dashboard check, then open the Pull Request. Keep A3 blocked until A2 is merged.
