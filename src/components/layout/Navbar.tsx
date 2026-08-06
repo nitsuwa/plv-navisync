@@ -1,7 +1,7 @@
 import { Link, useLocation, useNavigate } from "react-router";
 import {
   Map, Home, HelpCircle, LogIn, LogOut, User, Bookmark, Flag, Settings,
-  ChevronDown,
+  ChevronDown, Building2,
 } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
@@ -14,6 +14,7 @@ import { cn } from "../../lib/utils";
 const NAV_LINKS = [
   { label: "Home", path: "/", icon: Home },
   { label: "Map", path: "/map", icon: Map },
+  { label: "Directory", path: "/buildings", icon: Building2 },
   { label: "Help Center", path: "/help", icon: HelpCircle },
 ];
 
