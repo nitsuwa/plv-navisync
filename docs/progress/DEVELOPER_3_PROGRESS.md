@@ -7,10 +7,10 @@ Status values: `READY`, `ACTIVE`, `BLOCKED`, `FOR REVIEW`, `DONE`.
 ## Package checklist
 
 - [ ] **C1 — Public/student shell, Home, and Help Center completion**
-  - Status: `READY`
+  - Status: `FOR REVIEW`
   - Branch: `feature/public-shell-and-help`
   - Depends on: None
-  - Test result: Pending
+  - Test result: `npm run build` PASSED (2502 modules built in 17.27s). Verified Home presentation, announcement preview, Help Center FAQ, and contact form layout.
   - Pull Request: Pending
 - [ ] **C2 — Published campus map loading and map states**
   - Status: `BLOCKED`
@@ -69,8 +69,8 @@ Status values: `READY`, `ACTIVE`, `BLOCKED`, `FOR REVIEW`, `DONE`.
 
 ## Current handoff note
 
-- Active package: None
-- Last completed package: None
-- Known blocker: None
-- Important changed files: None
-- Next recommended action: Start C1.
+- Active package: C1 (FOR REVIEW)
+- Last completed package: C1 — Public/student shell, Home, and Help Center completion
+- Known blocker: None for C1. C2 is BLOCKED until Gate G1 and A6 are merged.
+- Important changed files: `src/pages/LandingPage.tsx`, `docs/progress/DEVELOPER_3_PROGRESS.md`
+- Next recommended action: Await PR review/merge of C1 into `main`, then start C2 once Gate G1 & A6 are completed.

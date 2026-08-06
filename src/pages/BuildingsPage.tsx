@@ -121,8 +121,8 @@ export function BuildingsPage() {
           </div>
 
           {/* Category pills + Sort + View toggle */}
-          <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center">
-            <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar flex-1 pb-0.5">
+          <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center w-full min-w-0">
+            <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar flex-1 w-full min-w-0 max-w-full pb-0.5">
               <SlidersHorizontal className="h-3.5 w-3.5 text-muted-foreground shrink-0 mr-0.5" />
               {CATEGORIES.map(({ value, label, icon: CatIcon }) => (
                 <button
