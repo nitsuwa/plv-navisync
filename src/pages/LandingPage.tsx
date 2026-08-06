@@ -4,7 +4,7 @@ import {
   Star, Flag, CheckCircle2, ArrowRight,
   Compass, Crosshair, MapPin, Hexagon, MousePointer2,
   Navigation, Eye, Smartphone, Wifi, Shield,
-  Sparkles, Layers, Bookmark, Clock, Route, Zap, Wrench,
+  Sparkles, Layers, Bookmark, Clock, Route, Zap, Wrench, Megaphone, Bell, Calendar, Tag,
 } from "lucide-react";
 import { useRef, useState, useEffect } from "react";
 import { motion, useScroll, useTransform, useSpring } from "motion/react";
@@ -1334,6 +1334,121 @@ function HeroSection() {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
+// ── ANNOUNCEMENTS PREVIEW PLACEHOLDER (Package C1 Deliverable) ───────────────
+// ═════════════════════════════════════════════════════════════════════════════
+
+// TODO C6: Replace placeholder announcements with real announcementService query
+const DEMO_ANNOUNCEMENTS = [
+  {
+    id: "ann-1",
+    category: "Maintenance",
+    title: "ADM Building Elevator Scheduled Maintenance",
+    date: "Aug 8, 2026",
+    location: "ADM Building (b2)",
+    priority: "High",
+    summary: "Elevator 2 in the ADM building will undergo routine safety inspection from 9:00 AM to 12:00 PM. Please use accessible stairways or Elevator 1.",
+    color: "border-amber-500/30 text-amber-500 bg-amber-500/10",
+  },
+  {
+    id: "ann-2",
+    category: "Campus Event",
+    title: "PLV Annual Tech & Innovation Fair 2026",
+    date: "Aug 12, 2026",
+    location: "PLV Gymnasium (b5)",
+    priority: "Normal",
+    summary: "Join us for student project exhibits, tech talks, and interactive demonstrations at the PLV Gym. Open to all students and faculty.",
+    color: "border-blue-500/30 text-blue-500 bg-blue-500/10",
+  },
+  {
+    id: "ann-3",
+    category: "Academic Notice",
+    title: "Midterm Examination Room Assignments Posted",
+    date: "Aug 15, 2026",
+    location: "Academic Buildings A & B",
+    priority: "Normal",
+    summary: "Midterm exam venues and seat arrangements are now available on campus bulletin boards and via the Smart Search directory.",
+    color: "border-emerald-500/30 text-emerald-500 bg-emerald-500/10",
+  },
+];
+
+function AnnouncementPreview() {
+  return (
+    <section className="py-20 bg-card/60 relative border-t border-border/50">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6">
+        <Reveal className="text-center max-w-2xl mx-auto mb-14">
+          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full border border-primary/20 bg-primary/5 text-primary text-[10px] font-extrabold uppercase tracking-widest mb-4">
+            <Megaphone className="h-3.5 w-3.5" />
+            Campus Updates
+          </div>
+          <h2 className="text-2xl sm:text-4xl font-extrabold text-foreground tracking-tight mb-3">
+            Latest Announcements & Advisories
+          </h2>
+          <p className="text-muted-foreground text-sm leading-relaxed">
+            Stay updated with facility notices, event schedules, and navigation advisories across PLV.
+          </p>
+        </Reveal>
+
+        <div className="grid md:grid-cols-3 gap-6 mb-10">
+          {DEMO_ANNOUNCEMENTS.map((item, i) => (
+            <Reveal key={item.id} delay={i * 80}>
+              <motion.div
+                whileHover={{ y: -4 }}
+                transition={{ type: "spring", stiffness: 300, damping: 20 }}
+                className="group relative rounded-2xl border border-border/80 bg-card p-6 shadow-sm hover:shadow-md hover:border-primary/20 transition-all duration-200 flex flex-col h-full"
+              >
+                <div className="flex items-center justify-between gap-2 mb-4">
+                  <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold border ${item.color}`}>
+                    <Tag className="h-3 w-3" />
+                    {item.category}
+                  </span>
+                  <div className="flex items-center gap-1 text-[11px] text-muted-foreground font-medium">
+                    <Calendar className="h-3 w-3" />
+                    {item.date}
+                  </div>
+                </div>
+
+                <h3 className="text-base font-extrabold text-foreground mb-2 group-hover:text-primary transition-colors leading-snug">
+                  {item.title}
+                </h3>
+
+                <p className="text-xs text-muted-foreground leading-relaxed mb-4 flex-1">
+                  {item.summary}
+                </p>
+
+                <div className="pt-3 border-t border-border/50 flex items-center justify-between text-xs text-muted-foreground">
+                  <span className="inline-flex items-center gap-1 font-semibold text-foreground/80 truncate">
+                    <MapPin className="h-3.5 w-3.5 text-primary shrink-0" />
+                    {item.location}
+                  </span>
+                  <Link
+                    to="/map"
+                    className="inline-flex items-center gap-1 text-primary font-extrabold text-xs hover:underline shrink-0 ml-2"
+                  >
+                    View Map
+                    <ArrowRight className="h-3 w-3" />
+                  </Link>
+                </div>
+              </motion.div>
+            </Reveal>
+          ))}
+        </div>
+
+        <div className="text-center">
+          <Link
+            to="/help"
+            className="inline-flex items-center gap-2 px-6 py-3 rounded-xl border border-border bg-card hover:bg-muted font-bold text-xs text-foreground transition-all duration-200 shadow-sm"
+          >
+            <Bell className="h-4 w-4 text-primary" />
+            View All Advisories & Help
+            <ArrowRight className="h-3.5 w-3.5" />
+          </Link>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
 // ── FINAL CTA (enhanced) ────────────────────────────────────────────────────
 // ═════════════════════════════════════════════════════════════════════════════
 
@@ -1440,6 +1555,7 @@ export function LandingPage() {
       <ProductShowcase />
       <WhyNaviSync />
       <DayWithNaviSync />
+      <AnnouncementPreview />
       <FinalCTA />
     </div>
   );
