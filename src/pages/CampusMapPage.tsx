@@ -586,7 +586,7 @@ export function CampusMapPage() {
     } else {
       const b = MOCK_BUILDINGS.find((building) => building.id === item.buildingId);
       if (b) {
-        setSelectedBuilding(b);
+        selectBuilding(b);
         if (item.floorNumber !== undefined) {
           setFloorView({ building: b, floor: item.floorNumber });
         } else {
