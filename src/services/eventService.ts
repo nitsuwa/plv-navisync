@@ -1,13 +1,162 @@
-import { createCrudService, seedMockData } from "./crud";
-import type { DbCampusEvent } from "./types";
+import { getSupabase } from "../lib/supabase";
+import type { Tables } from "../types/database.generated";
 
-const mockEvents: DbCampusEvent[] = [
-  { id: "ev1", campus_id: "campus_plv", title: "PLV Foundation Day 2025", description: "Annual foundation day celebration with performances, exhibits, and booths across the campus.", venue: "Campus-wide", date_start: "Jan 25, 2025", date_end: "Jan 27, 2025", status: "scheduled", marker_count: 12, organizer: "PLV Office of Student Affairs", affected_areas: ["Main Plaza", "MAB Grounds", "GYM Area"], temp_features: ["Stage", "Food Booths (×8)", "Registration Tent", "First Aid Station", "Temporary Restrooms"], created_at: "2025-01-05", updated_at: "2025-01-15" },
-  { id: "ev2", campus_id: "campus_plv", title: "STEM Fair 2025", description: "Annual science and technology exhibition where students showcase research projects.", venue: "Main Academic Building", date_start: "Feb 12, 2025", date_end: "Feb 14, 2025", status: "draft", marker_count: 6, organizer: "College of Engineering", affected_areas: ["MAB Ground Floor", "Main Plaza"], temp_features: ["Exhibit Booths (×20)", "Demo Area", "Judges Station"], created_at: "2025-01-10", updated_at: "2025-01-10" },
-  { id: "ev3", campus_id: "campus_plv", title: "Career Fair 2024", description: "Connects students with industry partners for internship and employment opportunities.", venue: "ADM Building Lobby", date_start: "Nov 20, 2024", date_end: "Nov 21, 2024", status: "ended", marker_count: 8, organizer: "Placement Office", affected_areas: ["ADM Building", "Main Entrance"], temp_features: ["Company Booths (×15)", "Interview Rooms", "CV Submission Booth"], created_at: "2024-11-01", updated_at: "2024-11-22" },
-  { id: "ev4", campus_id: "campus_plv", title: "Sports Day 2025", description: "Inter-program sports competition open to all enrolled students.", venue: "Gymnasium & Sports Field", date_start: "Mar 5, 2025", date_end: "Mar 5, 2025", status: "draft", marker_count: 5, organizer: "SSC Sports Committee", affected_areas: ["Gymnasium", "South Sports Field"], temp_features: ["Bleacher Expansion", "First Aid Tent", "Scoreboard", "Refreshment Area"], created_at: "2025-01-12", updated_at: "2025-01-12" },
+export type AnnouncementRow = Tables<"announcements">;
+export type EventRow = Tables<"events">;
+
+export interface CampusAnnouncement {
+  id: string;
+  title: string;
+  content: string;
+  category: "general" | "academic" | "urgent" | "event" | string;
+  priority: "low" | "medium" | "high" | "urgent" | string;
+  status: "published" | "draft" | "archived" | string;
+  startsAt?: string | null;
+  expiresAt?: string | null;
+  createdAt: string;
+}
+
+export interface CampusEvent {
+  id: string;
+  title: string;
+  description: string;
+  category: "Academic" | "Sports" | "Cultural" | "Administrative" | "Student Affairs" | string;
+  organizer: string;
+  buildingId?: string | null;
+  buildingName?: string;
+  locationLabel?: string;
+  coverImage?: string | null;
+  startsAt: string;
+  endsAt: string;
+  status: "published" | "upcoming" | "ongoing" | "completed" | string;
+}
+
+const MOCK_ANNOUNCEMENTS: CampusAnnouncement[] = [
+  {
+    id: "anc-1",
+    title: "Second Semester Registration & Enrolment Guidelines",
+    content: "Official enrolment schedule for AY 2025-2026. Please check your student portal for priority appointment dates.",
+    category: "academic",
+    priority: "high",
+    status: "published",
+    createdAt: new Date().toISOString(),
+  },
+  {
+    id: "anc-2",
+    title: "Main Academic Building Elevator Maintenance",
+    content: "Elevator B in the MAB will undergo scheduled servicing on Friday. Please use stairs or Elevator A.",
+    category: "urgent",
+    priority: "medium",
+    status: "published",
+    createdAt: new Date(Date.now() - 86400000).toISOString(),
+  },
 ];
 
-seedMockData("campus_events", mockEvents);
+const MOCK_EVENTS: CampusEvent[] = [
+  {
+    id: "evt-1",
+    title: "PLV Annual Tech & Innovation Summit 2025",
+    description: "Join fellow students, industry leaders, and faculty for keynotes on AI, software development, and campus tech solutions.",
+    category: "Academic",
+    organizer: "College of Information Technology & Engineering",
+    buildingId: "b3",
+    buildingName: "Library & Learning Resource Center",
+    locationLabel: "LRC 3rd Floor Audio-Visual Room",
+    coverImage: "https://images.unsplash.com/photo-1540575467063-178a50c2df87?w=800&auto=format&fit=crop&q=80",
+    startsAt: new Date(Date.now() + 86400000 * 2).toISOString(),
+    endsAt: new Date(Date.now() + 86400000 * 2 + 14400000).toISOString(),
+    status: "published",
+  },
+  {
+    id: "evt-2",
+    title: "Inter-College Basketball Championship Finals",
+    description: "Cheer for your college team at the PLV Gymnasium! Gates open 30 minutes before tip-off.",
+    category: "Sports",
+    organizer: "PLV Athletics & Sports Development",
+    buildingId: "b5",
+    buildingName: "Gymnasium",
+    locationLabel: "Main Arena",
+    coverImage: "https://images.unsplash.com/photo-1546519638-68e109498ffc?w=800&auto=format&fit=crop&q=80",
+    startsAt: new Date(Date.now() + 86400000 * 4).toISOString(),
+    endsAt: new Date(Date.now() + 86400000 * 4 + 10800000).toISOString(),
+    status: "published",
+  },
+  {
+    id: "evt-3",
+    title: "PLV Cultural Arts & Music Festival",
+    description: "A celebration of student talent featuring dance performances, live acoustic sets, and art exhibits.",
+    category: "Cultural",
+    organizer: "Student Center & Arts Club",
+    buildingId: "b6",
+    buildingName: "Student Services Center",
+    locationLabel: "SSC Open Grounds",
+    coverImage: "https://images.unsplash.com/photo-1492684223066-81342ee5ff30?w=800&auto=format&fit=crop&q=80",
+    startsAt: new Date(Date.now() + 86400000 * 7).toISOString(),
+    endsAt: new Date(Date.now() + 86400000 * 7 + 21600000).toISOString(),
+    status: "published",
+  },
+];
 
-export const eventService = createCrudService<DbCampusEvent>("campus_events");
+export async function getPublishedAnnouncements(): Promise<CampusAnnouncement[]> {
+  const supabase = getSupabase();
+  try {
+    const { data, error } = await supabase
+      .from("announcements")
+      .select("*")
+      .eq("status", "published")
+      .order("created_at", { ascending: false });
+
+    if (!error && data && data.length > 0) {
+      return data.map((row) => ({
+        id: row.id,
+        title: row.title,
+        content: row.content,
+        category: row.category,
+        priority: row.priority,
+        status: row.status,
+        startsAt: row.starts_at,
+        expiresAt: row.expires_at,
+        createdAt: row.created_at,
+      }));
+    }
+  } catch (err) {
+    console.warn("Using mock announcements fallback:", err);
+  }
+  return MOCK_ANNOUNCEMENTS;
+}
+
+export async function getUpcomingEvents(): Promise<CampusEvent[]> {
+  const supabase = getSupabase();
+  try {
+    const { data, error } = await supabase
+      .from("events")
+      .select("*")
+      .eq("status", "published")
+      .order("starts_at", { ascending: true });
+
+    if (!error && data && data.length > 0) {
+      return data.map((row) => ({
+        id: row.id,
+        title: row.title,
+        description: row.description || "",
+        category: row.category,
+        organizer: row.organizer || "PLV Campus",
+        buildingId: "b1",
+        buildingName: "Main Academic Building",
+        locationLabel: "Campus Venue",
+        coverImage: row.cover_image_path || null,
+        startsAt: row.starts_at,
+        endsAt: row.ends_at,
+        status: row.status,
+      }));
+    }
+  } catch (err) {
+    console.warn("Using mock events fallback:", err);
+  }
+  return MOCK_EVENTS;
+}
+
+export const eventService = {
+  getPublishedAnnouncements,
+  getUpcomingEvents,
+};

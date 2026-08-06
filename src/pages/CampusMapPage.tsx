@@ -252,6 +252,23 @@ export function CampusMapPage() {
     campusSearch.setQuery(search);
   }, [search, campusSearch]);
 
+  // Auto-select building from URL query parameters (e.g. /map?buildingId=b3)
+  useEffect(() => {
+    if (!initialSelectionRef.current && MOCK_BUILDINGS.length > 0) {
+      const params = new URLSearchParams(window.location.search);
+      const targetId = params.get("buildingId") || params.get("select");
+      if (targetId) {
+        const b = MOCK_BUILDINGS.find(
+          (building) => building.id === targetId || building.code.toLowerCase() === targetId.toLowerCase()
+        );
+        if (b) {
+          setSelected(b);
+          initialSelectionRef.current = true;
+        }
+      }
+    }
+  }, [MOCK_BUILDINGS]);
+
   // ── Computed floor plan values ─────────────────────────────────────────
   const isFloorMode       = floorView !== null;
   const currentFloorData  = floorView ? FLOOR_PLANS[floorView.building.id] : null;

@@ -11,6 +11,7 @@ import { motion, useScroll, useTransform, useSpring } from "motion/react";
 import { PLVLogo } from "../components/ui/PLVLogo";
 import { LavaLampBackground } from "../components/ui/HeroBackground";
 import { useScrollReveal } from "../hooks/useScrollReveal";
+import { eventService, type CampusAnnouncement, type CampusEvent } from "../services/eventService";
 
 // ═════════════════════════════════════════════════════════════════════════════
 // ── Floating decorative shapes (Hero) ────────────────────────────────────────
@@ -1372,56 +1373,107 @@ const DEMO_ANNOUNCEMENTS = [
 ];
 
 function AnnouncementPreview() {
+  const [announcements, setAnnouncements] = useState<CampusAnnouncement[]>([]);
+  const [events, setEvents] = useState<CampusEvent[]>([]);
+
+  useEffect(() => {
+    let mounted = true;
+    Promise.all([
+      eventService.getPublishedAnnouncements(),
+      eventService.getUpcomingEvents(),
+    ]).then(([ancData, evtData]) => {
+      if (mounted) {
+        setAnnouncements(ancData);
+        setEvents(evtData);
+      }
+    });
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
   return (
     <section className="py-20 bg-card/60 relative border-t border-border/50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6">
         <Reveal className="text-center max-w-2xl mx-auto mb-14">
           <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full border border-primary/20 bg-primary/5 text-primary text-[10px] font-extrabold uppercase tracking-widest mb-4">
             <Megaphone className="h-3.5 w-3.5" />
-            Campus Updates
+            Campus Updates & Events
           </div>
           <h2 className="text-2xl sm:text-4xl font-extrabold text-foreground tracking-tight mb-3">
-            Latest Announcements & Advisories
+            Latest Announcements & Campus Events
           </h2>
           <p className="text-muted-foreground text-sm leading-relaxed">
             Stay updated with facility notices, event schedules, and navigation advisories across PLV.
           </p>
         </Reveal>
 
+        {/* Live Announcements Row */}
+        {announcements.length > 0 && (
+          <div className="mb-10 space-y-3">
+            {announcements.slice(0, 2).map((anc) => (
+              <div
+                key={anc.id}
+                className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 p-4 rounded-2xl border border-primary/20 bg-primary/5 backdrop-blur-sm"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center shrink-0 text-primary">
+                    <Bell className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-extrabold text-foreground">{anc.title}</h4>
+                    <p className="text-xs text-muted-foreground">{anc.content}</p>
+                  </div>
+                </div>
+                <span className="text-[10px] font-extrabold uppercase tracking-wider px-2.5 py-1 rounded-full bg-primary/15 text-primary shrink-0">
+                  {anc.category}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Upcoming Events Grid */}
         <div className="grid md:grid-cols-3 gap-6 mb-10">
-          {DEMO_ANNOUNCEMENTS.map((item, i) => (
-            <Reveal key={item.id} delay={i * 80}>
+          {events.map((evt, i) => (
+            <Reveal key={evt.id} delay={i * 80}>
               <motion.div
                 whileHover={{ y: -4 }}
                 transition={{ type: "spring", stiffness: 300, damping: 20 }}
-                className="group relative rounded-2xl border border-border/80 bg-card p-6 shadow-sm hover:shadow-md hover:border-primary/20 transition-all duration-200 flex flex-col h-full"
+                className="group relative rounded-2xl border border-border/80 bg-card p-6 shadow-sm hover:shadow-md hover:border-primary/20 transition-all duration-200 flex flex-col h-full overflow-hidden"
               >
-                <div className="flex items-center justify-between gap-2 mb-4">
-                  <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold border ${item.color}`}>
+                {evt.coverImage && (
+                  <div className="h-32 -mx-6 -mt-6 mb-4 overflow-hidden bg-muted relative">
+                    <img src={evt.coverImage} alt={evt.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
+                    <div className="absolute inset-0 bg-gradient-to-t from-card via-transparent to-transparent" />
+                  </div>
+                )}
+                <div className="flex items-center justify-between gap-2 mb-3">
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold border border-primary/20 text-primary bg-primary/10">
                     <Tag className="h-3 w-3" />
-                    {item.category}
+                    {evt.category}
                   </span>
                   <div className="flex items-center gap-1 text-[11px] text-muted-foreground font-medium">
                     <Calendar className="h-3 w-3" />
-                    {item.date}
+                    {new Date(evt.startsAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
                   </div>
                 </div>
 
                 <h3 className="text-base font-extrabold text-foreground mb-2 group-hover:text-primary transition-colors leading-snug">
-                  {item.title}
+                  {evt.title}
                 </h3>
 
                 <p className="text-xs text-muted-foreground leading-relaxed mb-4 flex-1">
-                  {item.summary}
+                  {evt.description}
                 </p>
 
                 <div className="pt-3 border-t border-border/50 flex items-center justify-between text-xs text-muted-foreground">
-                  <span className="inline-flex items-center gap-1 font-semibold text-foreground/80 truncate">
+                  <span className="inline-flex items-center gap-1 font-semibold text-foreground/80 truncate max-w-[170px]">
                     <MapPin className="h-3.5 w-3.5 text-primary shrink-0" />
-                    {item.location}
+                    {evt.locationLabel || evt.buildingName}
                   </span>
                   <Link
-                    to="/map"
+                    to={`/map?buildingId=${evt.buildingId || "b1"}`}
                     className="inline-flex items-center gap-1 text-primary font-extrabold text-xs hover:underline shrink-0 ml-2"
                   >
                     View Map
