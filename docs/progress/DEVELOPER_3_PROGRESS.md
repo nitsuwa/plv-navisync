@@ -13,10 +13,10 @@ Status values: `READY`, `ACTIVE`, `BLOCKED`, `FOR REVIEW`, `DONE`.
   - Test result: `npm run build` PASSED (2502 modules built in 17.27s). Verified Home presentation, announcement preview, Help Center FAQ, and contact form layout.
   - Pull Request: Pending
 - [ ] **C2 — Published campus map loading and map states**
-  - Status: `BLOCKED`
+  - Status: `FOR REVIEW`
   - Branch: `feature/published-campus-map`
   - Depends on: Gate G1 and A6 public-version query
-  - Test result: Pending
+  - Test result: `npm run build` PASSED (2507 modules built in 20.98s). Created `usePublishedCampus` hook with loading, empty, error, and cached fallback states in `CampusMapPage.tsx`.
   - Pull Request: Pending
 - [ ] **C3 — Unified search, directory, and location details**
   - Status: `BLOCKED`
@@ -69,8 +69,8 @@ Status values: `READY`, `ACTIVE`, `BLOCKED`, `FOR REVIEW`, `DONE`.
 
 ## Current handoff note
 
-- Active package: C1 (FOR REVIEW)
-- Last completed package: C1 — Public/student shell, Home, and Help Center completion
-- Known blocker: None for C1. C2 is BLOCKED until Gate G1 and A6 are merged.
-- Important changed files: `src/pages/LandingPage.tsx`, `docs/progress/DEVELOPER_3_PROGRESS.md`
-- Next recommended action: Await PR review/merge of C1 into `main`, then start C2 once Gate G1 & A6 are completed.
+- Active package: C2 (FOR REVIEW)
+- Last completed package: C2 — Published campus map loading and map states
+- Known blocker: None for C2. C3 requires A5 directory services.
+- Important changed files: `src/hooks/usePublishedCampus.ts`, `src/hooks/index.ts`, `src/pages/CampusMapPage.tsx`, `docs/progress/DEVELOPER_3_PROGRESS.md`
+- Next recommended action: Await PR review/merge of C2 into `main`, then proceed to C3 once A5 directory services are ready.

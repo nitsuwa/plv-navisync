@@ -5,10 +5,10 @@ import {
   Accessibility, AlertTriangle, Navigation, Bookmark, Flag,
   Clock, ChevronRight, ChevronLeft, ChevronDown,
   Share2, CalendarDays, MapPin, ArrowUpDown, Compass,
-  Footprints, QrCode,
+  Footprints, QrCode, Loader2, RefreshCw, AlertCircle,
 } from "lucide-react";
 
-import { useDebounce } from "../hooks";
+import { useDebounce, usePublishedCampus } from "../hooks";
 import { MOCK_BUILDINGS as LEGACY_BUILDINGS } from "../data/mockData";
 import { FLOOR_PLANS as LEGACY_FLOOR_PLANS, type RoomType } from "../data/floorPlans";
 import type { Building } from "../types";
@@ -98,40 +98,19 @@ function calcDist(pts: Pt[]): number {
 // ═════════════════════════════════════════════════════════════════════════════
 export function CampusMapPage() {
   const studentAuth = useStudentAuth();
-  const campusData = useCampusData();
+  const publishedCampusState = usePublishedCampus();
 
-  const [selectedCampusId, setSelectedCampusId] = useState<string | null>(null);
-
-  const availableCampuses = useMemo(() => {
-    return [...campusData.campuses]
-      // Only show published, active (non-archived) campuses to students
-      .filter((campus) => campus.publishStatus !== "draft" && campus.status !== "archived")
-      .sort((a, b) => {
-        const aTime = a.publishedAt ? new Date(a.publishedAt).getTime() : 0;
-        const bTime = b.publishedAt ? new Date(b.publishedAt).getTime() : 0;
-        return bTime - aTime;
-      });
-  }, [campusData.campuses]);
-
-  const activeCampus = useMemo(() => {
-    if (!availableCampuses.length) return null;
-    if (selectedCampusId) {
-      const found = availableCampuses.find((campus) => campus.id === selectedCampusId);
-      if (found) return found;
-    }
-    return availableCampuses[0];
-  }, [availableCampuses, selectedCampusId]);
-
-  useEffect(() => {
-    if (!availableCampuses.length) {
-      setSelectedCampusId(null);
-      return;
-    }
-    if (!selectedCampusId || !availableCampuses.some((campus) => campus.id === selectedCampusId)) {
-      setSelectedCampusId(availableCampuses[0].id);
-      initialSelectionRef.current = true;
-    }
-  }, [availableCampuses, selectedCampusId]);
+  const {
+    campuses: availableCampuses,
+    activeCampus,
+    selectedCampusId,
+    setSelectedCampusId,
+    loading: isCampusLoading,
+    error: campusError,
+    isEmpty: isCampusEmpty,
+    isCached: isCampusCached,
+    refetch: refetchCampus,
+  } = publishedCampusState;
 
   // ── Use Map Builder data if available, fall back to legacy data ──
   const MOCK_BUILDINGS = useMemo(() => {
@@ -701,6 +680,67 @@ const buildingFill = (id: string) =>
     );
   }
 
+  // ── Data States: Loading, Empty, Error ─────────────────────────────────
+  if (isCampusLoading && !activeCampus) {
+    return (
+      <div className="relative flex flex-col items-center justify-center w-full" style={{ height: "calc(100dvh - 56px)", background: "var(--map-bg)" }}>
+        <div className="flex flex-col items-center gap-3.5 p-8 rounded-3xl bg-card/90 border border-border/80 shadow-2xl backdrop-blur-md text-center max-w-xs">
+          <Loader2 className="h-9 w-9 text-primary animate-spin" />
+          <div>
+            <p className="text-base font-extrabold text-foreground mb-1">Loading Campus Map</p>
+            <p className="text-xs text-muted-foreground">Fetching published campus from Supabase...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (isCampusEmpty && !activeCampus) {
+    return (
+      <div className="relative flex flex-col items-center justify-center w-full p-6" style={{ height: "calc(100dvh - 56px)", background: "var(--map-bg)" }}>
+        <div className="flex flex-col items-center text-center max-w-sm p-8 rounded-3xl bg-card border border-border shadow-xl">
+          <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center mb-4 text-primary">
+            <Building2 className="h-8 w-8" />
+          </div>
+          <h3 className="text-lg font-extrabold text-foreground mb-2">No Published Campus Map</h3>
+          <p className="text-xs text-muted-foreground mb-6 leading-relaxed">
+            The administrator has not published a campus map version yet. Please check back later.
+          </p>
+          <button
+            onClick={() => refetchCampus()}
+            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-primary text-primary-foreground text-xs font-bold hover:brightness-110 transition-all shadow-md cursor-pointer"
+          >
+            <RefreshCw className="h-3.5 w-3.5" />
+            Check Again
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (campusError && !activeCampus) {
+    return (
+      <div className="relative flex flex-col items-center justify-center w-full p-6" style={{ height: "calc(100dvh - 56px)", background: "var(--map-bg)" }}>
+        <div className="flex flex-col items-center text-center max-w-sm p-8 rounded-3xl bg-card border border-destructive/20 shadow-xl">
+          <div className="w-16 h-16 rounded-2xl bg-destructive/10 flex items-center justify-center mb-4 text-destructive">
+            <AlertCircle className="h-8 w-8" />
+          </div>
+          <h3 className="text-lg font-extrabold text-foreground mb-2">Unable to Load Campus Map</h3>
+          <p className="text-xs text-muted-foreground mb-6 leading-relaxed">
+            {campusError}
+          </p>
+          <button
+            onClick={() => refetchCampus()}
+            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-primary text-primary-foreground text-xs font-bold hover:brightness-110 transition-all shadow-md cursor-pointer"
+          >
+            <RefreshCw className="h-3.5 w-3.5" />
+            Retry Connection
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   // ── Render ─────────────────────────────────────────────────────────────
   return (
     <div
@@ -711,6 +751,17 @@ const buildingFill = (id: string) =>
       onMouseUp={onMouseUp} onMouseLeave={onMouseUp}
       onTouchStart={onTouchStart} onTouchMove={onTouchMove}
       onTouchEnd={onTouchEnd}>
+
+      {/* Cached Offline Banner */}
+      {isCampusCached && (
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-40 flex items-center gap-2 px-4 py-2 rounded-xl bg-amber-500/90 text-white text-xs font-bold shadow-xl backdrop-blur-md border border-amber-400/30">
+          <AlertTriangle className="h-4 w-4 shrink-0" />
+          <span>Viewing cached campus map (offline mode).</span>
+          <button onClick={() => refetchCampus()} className="underline ml-2 hover:opacity-80">
+            Refresh
+          </button>
+        </div>
+      )}
 
       {/* ══════════════════════════ MAP SVG ══════════════════════════ */}
       <svg ref={svgRef}

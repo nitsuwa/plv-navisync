@@ -4,7 +4,7 @@ import { motion, AnimatePresence, useScroll, useTransform, useSpring } from "mot
 import {
   Send, ChevronDown, CheckCircle2, Bot, User, Sparkles, HelpCircle, Mail, Phone, MapPin, Clock, ArrowRight,
   Search, Building2, GraduationCap, CreditCard, BookOpen, HeartHandshake, Stethoscope, Shield, Monitor,
-  Map, Navigation, ChevronRight, Plus, X, MessageCircle, Loader2, Upload, ExternalLink,
+  Map, Navigation, ChevronRight, Plus, X, MessageCircle, Loader2, Upload, ExternalLink, AlertCircle,
 } from "lucide-react";
 import { LavaLampBackground } from "../components/ui/HeroBackground";
 import { useScrollReveal } from "../hooks/useScrollReveal";
@@ -544,9 +544,9 @@ const CATEGORIES = [
 
 const INPUT_BASE = "peer w-full px-4 pt-5 pb-1.5 rounded-xl border bg-input-background text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/25 focus:border-primary/30 transition-all duration-200";
 
-function FloatingInput({ id, label, value, onChange, placeholder, type = "text", required = false }: {
+function FloatingInput({ id, label, value, onChange, placeholder, type = "text", required = false, error }: {
   id: string; label: string; value: string; onChange: (v: string) => void;
-  placeholder: string; type?: string; required?: boolean;
+  placeholder: string; type?: string; required?: boolean; error?: string;
 }) {
   const [focused, setFocused] = useState(false);
 
@@ -561,19 +561,32 @@ function FloatingInput({ id, label, value, onChange, placeholder, type = "text",
         onBlur={() => setFocused(false)}
         placeholder={placeholder}
         required={required}
-        className={cn(INPUT_BASE, focused ? "border-primary/40" : "border-border")}
+        className={cn(
+          INPUT_BASE,
+          error
+            ? "border-destructive/60 focus:border-destructive focus:ring-destructive/20 text-foreground"
+            : focused
+              ? "border-primary/40"
+              : "border-border"
+        )}
         aria-required={required}
+        aria-invalid={Boolean(error)}
       />
       <label
         htmlFor={id}
         className={cn(
           "absolute left-4 top-1.5 text-[10px] font-bold uppercase tracking-wide transition-all duration-200 pointer-events-none select-none",
-          "text-muted-foreground",
-          focused && "text-primary",
+          error ? "text-destructive" : focused ? "text-primary" : "text-muted-foreground",
         )}
       >
         {label} {required && <span className="text-destructive">*</span>}
       </label>
+      {error && (
+        <p className="text-[11px] text-destructive font-semibold mt-1 px-1 flex items-center gap-1.5">
+          <AlertCircle className="h-3 w-3 shrink-0 text-destructive" />
+          {error}
+        </p>
+      )}
     </div>
   );
 }
@@ -721,6 +734,9 @@ function InquiryForm() {
 
   const update = (k: keyof typeof form, v: string) => setForm(p => ({ ...p, [k]: v }));
   const validEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email);
+  const emailError = form.email.length > 0 && !validEmail
+    ? "Please enter a valid email address (e.g. name@gmail.com or name@plv.edu.ph)"
+    : undefined;
   const canSubmit = form.name.trim() && form.email.trim() && validEmail && form.category && form.subject.trim() && form.message.trim();
 
   const handleSubmit = () => {
@@ -779,7 +795,7 @@ function InquiryForm() {
         {/* Name + Email grid */}
         <div className="grid sm:grid-cols-2 gap-4">
           <FloatingInput id="inq-name" label="Full Name" value={form.name} onChange={v => update("name", v)} placeholder="Juan dela Cruz" required />
-          <FloatingInput id="inq-email" label="Email" value={form.email} onChange={v => update("email", v)} placeholder="juan@plv.edu.ph" type="email" required />
+          <FloatingInput id="inq-email" label="Email" value={form.email} onChange={v => update("email", v)} placeholder="juan@plv.edu.ph" type="email" required error={emailError} />
         </div>
 
         {/* Category */}

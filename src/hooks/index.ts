@@ -8,3 +8,5 @@ export { useCrudModal } from "./useCrudModal";
 export { useSearchKeyboard } from "./useSearchKeyboard";
 export { useDebounce, useDebouncedCallback } from "./useDebounce";
 export { useSearchHighlight, highlightSearch } from "./useSearchHighlight";
+export { usePublishedCampus } from "./usePublishedCampus";
+
