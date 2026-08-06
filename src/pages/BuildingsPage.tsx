@@ -65,7 +65,14 @@ export function BuildingsPage() {
 
   const filtered = buildings
     .filter((b) => {
-      const matchCat = category === "all" || b.category === category;
+      const bCat = b.category.toLowerCase();
+      const matchCat =
+        category === "all" ||
+        (category === "admin"
+          ? bCat.startsWith("admin")
+          : category === "facility"
+          ? bCat.startsWith("facil") || bCat.includes("service")
+          : bCat === category.toLowerCase());
       const q = debouncedSearch.toLowerCase().trim();
       const matchSearch =
         !q ||
