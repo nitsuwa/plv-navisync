@@ -9,20 +9,20 @@ Status values: `READY`, `ACTIVE`, `BLOCKED`, `FOR REVIEW`, `DONE`.
 - [ ] **C1 — Public/student shell, Home, and Help Center completion**
   - Status: `FOR REVIEW`
   - Branch: `feature/public-shell-and-help`
-  - Depends on: None
-  - Test result: `npm run build` PASSED (2502 modules built in 17.27s). Verified Home presentation, announcement preview, Help Center FAQ, and contact form layout.
+  - Verification Evidence: [DEVELOPER_3_C1_VERIFICATION.md](file:///c:/Users/Rj/Documents/GitHub/plv-navisync/docs/progress/DEVELOPER_3_C1_VERIFICATION.md)
+  - Test result: `npm run build` PASSED. Verified Home presentation, announcement preview, Help Center FAQ, and contact form layout.
   - Pull Request: Pending
 - [ ] **C2 — Published campus map loading and map states**
   - Status: `FOR REVIEW`
   - Branch: `feature/published-campus-map`
-  - Depends on: Gate G1 and A6 public-version query
-  - Test result: `npm run build` PASSED (2507 modules built in 20.98s). Created `usePublishedCampus` hook with loading, empty, error, and cached fallback states in `CampusMapPage.tsx`.
+  - Verification Evidence: [DEVELOPER_3_C2_VERIFICATION.md](file:///c:/Users/Rj/Documents/GitHub/plv-navisync/docs/progress/DEVELOPER_3_C2_VERIFICATION.md)
+  - Test result: `npm run build` PASSED. Created `usePublishedCampus` hook with loading, empty, error, and cached fallback states in `CampusMapPage.tsx`.
   - Pull Request: Pending
 - [ ] **C3 — Unified search, directory, and location details**
   - Status: `FOR REVIEW`
   - Branch: `feature/map-search-and-details`
-  - Depends on: C2 and A5 directory services
-  - Test result: `npm run build` PASSED (2508 modules built in 16.79s). Created `useCampusSearch` hook and connected unified location search & category filters across buildings, rooms, offices, labs, and facilities.
+  - Verification Evidence: [DEVELOPER_3_C3_VERIFICATION.md](file:///c:/Users/Rj/Documents/GitHub/plv-navisync/docs/progress/DEVELOPER_3_C3_VERIFICATION.md)
+  - Test result: `npm run build` PASSED. Created `useCampusSearch` hook and connected unified location search & category filters across buildings, rooms, offices, labs, and facilities.
   - Pull Request: Pending
 - [ ] **C4 — Student route planning and navigation presentation**
   - Status: `BLOCKED`
@@ -33,20 +33,20 @@ Status values: `READY`, `ACTIVE`, `BLOCKED`, `FOR REVIEW`, `DONE`.
 - [ ] **C5 — Reports and report history**
   - Status: `FOR REVIEW`
   - Branch: `feature/reports-workflow`
-  - Depends on: Gate G4 and C2
-  - Test result: `npm run build` PASSED (2508 modules built in 17.73s). Created `reportService.ts`, connected `ReportModal.tsx` for photo issue submissions, and built live student report history on `/student/reports`.
+  - Verification Evidence: [DEVELOPER_3_C5_VERIFICATION.md](file:///c:/Users/Rj/Documents/GitHub/plv-navisync/docs/progress/DEVELOPER_3_C5_VERIFICATION.md)
+  - Test result: `npm run build` PASSED. Created `reportService.ts`, connected `ReportModal.tsx` for photo issue submissions, and built live student report history on `/student/reports`.
   - Pull Request: Pending
 - [ ] **C6 — Events and announcements**
   - Status: `FOR REVIEW`
   - Branch: `feature/events-and-announcements`
-  - Depends on: Gate G4 and C2
-  - Test result: `npm run build` PASSED (2508 modules built in 18.42s). Created `eventService.ts`, connected Home announcements/events feed, and added interactive map venue links.
+  - Verification Evidence: [DEVELOPER_3_C6_VERIFICATION.md](file:///c:/Users/Rj/Documents/GitHub/plv-navisync/docs/progress/DEVELOPER_3_C6_VERIFICATION.md)
+  - Test result: `npm run build` PASSED. Created `eventService.ts`, connected Home announcements/events feed, and added interactive map venue links.
   - Pull Request: Pending
 - [ ] **C7 — Favorites, recent destinations, and minimal profile**
   - Status: `FOR REVIEW`
   - Branch: `feature/student-favorites-profile`
-  - Depends on: Gate G4 and C2
-  - Test result: `npm run build` PASSED (2509 modules built in 30.46s). Created `studentAccountService.ts`, connected `/student/favorites` for saved places, and updated `/student/profile` live stats.
+  - Verification Evidence: [DEVELOPER_3_C7_VERIFICATION.md](file:///c:/Users/Rj/Documents/GitHub/plv-navisync/docs/progress/DEVELOPER_3_C7_VERIFICATION.md)
+  - Test result: `npm run build` PASSED. Created `studentAccountService.ts`, connected `/student/favorites` for saved places, and updated `/student/profile` live stats.
   - Pull Request: Pending
 - [ ] **C8 — Admin operations pages, settings, logs, and dashboard**
   - Status: `BLOCKED`
