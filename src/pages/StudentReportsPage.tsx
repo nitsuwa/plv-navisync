@@ -70,6 +70,7 @@ export function StudentReportsPage() {
   const navigate = useNavigate();
   const [reports, setReports] = useState<IssueReport[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [filter, setFilter] = useState<FilterStatus>("all");
   const [search, setSearch] = useState("");
 
@@ -88,10 +89,12 @@ export function StudentReportsPage() {
   }, []);
 
   const refreshReports = useCallback(async () => {
-    setLoading(true);
+    setIsRefreshing(true);
     const res = await reportService.getStudentReports();
     setReports(res);
-    setLoading(false);
+    setTimeout(() => {
+      setIsRefreshing(false);
+    }, 600);
   }, []);
 
   // Wait for the Supabase session/profile check before deciding. Reuse the
@@ -172,12 +175,13 @@ export function StudentReportsPage() {
           action={
             <div className="flex items-center gap-2">
               <button
+                type="button"
                 onClick={refreshReports}
-                disabled={loading}
+                disabled={isRefreshing}
                 className="flex items-center gap-1.5 h-9 w-9 rounded-xl text-xs font-bold border border-border bg-card text-muted-foreground shrink-0 hover:bg-accent hover:text-foreground transition-all justify-center disabled:opacity-50"
                 aria-label="Refresh reports"
               >
-                <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
+                <RefreshCw className={`h-3.5 w-3.5 ${isRefreshing ? "animate-spin text-primary" : ""}`} />
               </button>
               <Link
                 to="/map"
