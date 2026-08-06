@@ -49,36 +49,30 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
   );
 }
 
-const INITIAL_SAVED = ["b2", "b3", "b5"];
+import { studentAccountService } from "../services/studentAccountService";
 
 export function StudentFavoritesPage() {
   const { loading: authLoading, isStudent } = useStudentAuth();
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
-  const [savedIds, setSavedIds] = useState<string[]>(INITIAL_SAVED);
+  const [savedBuildings, setSavedBuildings] = useState<Building[]>([]);
   const [search, setSearch] = useState("");
   const [removingId, setRemovingId] = useState<string | null>(null);
-  const campusData = useCampusData();
-
-  // Derive buildings from published campus data, fall back to hardcoded data
-  const buildings: Building[] = useMemo(() => {
-    const activeCampus = campusData.campuses.find(
-      (c) => c.publishStatus !== "draft" && c.status !== "archived"
-    );
-    if (activeCampus) {
-      return buildingsFromCampus(activeCampus) as Building[];
-    }
-    return MOCK_BUILDINGS;
-  }, [campusData.campuses]);
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: "instant" });
-    const t = setTimeout(() => setLoading(false), 300);
-    return () => clearTimeout(t);
+    let mounted = true;
+    studentAccountService.getSavedBuildings().then((res) => {
+      if (mounted) {
+        setSavedBuildings(res);
+        setLoading(false);
+      }
+    });
+    return () => {
+      mounted = false;
+    };
   }, []);
 
-  // Wait for the Supabase session/profile check before deciding. Reuse the
-  // branded skeleton so there is no blank flash while the session resolves.
   if (authLoading || loading) return (
     <PageTransition>
       <div className="max-w-2xl mx-auto px-5 py-6">
@@ -92,18 +86,18 @@ export function StudentFavoritesPage() {
     return null;
   }
 
-  const savedBuildings = buildings.filter(b => savedIds.includes(b.id));
   const filtered = search.trim()
-    ? savedBuildings.filter(b =>
+    ? savedBuildings.filter((b) =>
         b.name.toLowerCase().includes(search.toLowerCase()) ||
         b.code.toLowerCase().includes(search.toLowerCase())
       )
     : savedBuildings;
 
-  const remove = (id: string) => {
+  const remove = async (id: string) => {
     setRemovingId(id);
+    await studentAccountService.toggleSaveBuilding(id);
     setTimeout(() => {
-      setSavedIds(prev => prev.filter(x => x !== id));
+      setSavedBuildings((prev) => prev.filter((x) => x.id !== id));
       setRemovingId(null);
     }, 300);
   };
@@ -200,7 +194,7 @@ export function StudentFavoritesPage() {
 
                       <div className="flex items-center gap-2 shrink-0">
                         <Link
-                          to="/map"
+                          to={`/map?buildingId=${b.id}`}
                           className="flex items-center gap-1.5 h-9 px-3.5 rounded-xl border border-border text-xs font-bold hover:bg-primary hover:text-primary-foreground hover:border-primary transition-all"
                         >
                           <Navigation className="h-3.5 w-3.5" />

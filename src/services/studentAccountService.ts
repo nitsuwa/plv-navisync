@@ -1,0 +1,129 @@
+import { getSupabase } from "../lib/supabase";
+import type { Building } from "../types";
+import { MOCK_BUILDINGS } from "../data/mockData";
+
+const SAVED_BUILDINGS_KEY = "plv_student_saved_buildings_v1";
+const RECENT_DESTINATIONS_KEY = "plv_student_recent_destinations_v1";
+
+export interface RecentDestination {
+  id: string;
+  name: string;
+  code?: string;
+  buildingId?: string;
+  timestamp: string;
+}
+
+// Get student's bookmarked buildings
+export async function getSavedBuildings(): Promise<Building[]> {
+  const supabase = getSupabase();
+  const { data: userData } = await supabase.auth.getUser();
+  const userId = userData?.user?.id;
+
+  let savedIds: string[] = getLocalSavedBuildingIds();
+
+  if (userId) {
+    try {
+      const { data, error } = await supabase
+        .from("student_bookmarks")
+        .select("building_id")
+        .eq("user_id", userId);
+
+      if (!error && data) {
+        const dbIds = data.map((b) => b.building_id).filter(Boolean) as string[];
+        savedIds = Array.from(new Set([...savedIds, ...dbIds]));
+      }
+    } catch (err) {
+      console.warn("Using local saved places fallback:", err);
+    }
+  }
+
+  // Map IDs to Building objects
+  const savedBuildings = MOCK_BUILDINGS.filter((b) => savedIds.includes(b.id));
+  return savedBuildings;
+}
+
+// Toggle bookmark for a building
+export async function toggleSaveBuilding(buildingId: string): Promise<boolean> {
+  const supabase = getSupabase();
+  const { data: userData } = await supabase.auth.getUser();
+  const userId = userData?.user?.id;
+
+  const currentIds = getLocalSavedBuildingIds();
+  const exists = currentIds.includes(buildingId);
+  let updatedIds: string[];
+
+  if (exists) {
+    updatedIds = currentIds.filter((id) => id !== buildingId);
+  } else {
+    updatedIds = [buildingId, ...currentIds];
+  }
+
+  // Save to local storage
+  localStorage.setItem(SAVED_BUILDINGS_KEY, JSON.stringify(updatedIds));
+
+  // Sync to Supabase if logged in
+  if (userId) {
+    try {
+      if (exists) {
+        await supabase.from("student_bookmarks").delete().eq("user_id", userId).eq("building_id", buildingId);
+      } else {
+        await supabase.from("student_bookmarks").insert({ user_id: userId, building_id: buildingId });
+      }
+    } catch (err) {
+      console.warn("Supabase bookmark sync fallback:", err);
+    }
+  }
+
+  return !exists;
+}
+
+// Get recent map search destinations
+export function getRecentDestinations(): RecentDestination[] {
+  try {
+    const raw = localStorage.getItem(RECENT_DESTINATIONS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch {
+    // Ignore parse errors
+  }
+  return [];
+}
+
+// Add to recent map search destinations
+export function addRecentDestination(item: { id: string; name: string; code?: string; buildingId?: string }): void {
+  try {
+    const existing = getRecentDestinations();
+    const newItem: RecentDestination = {
+      ...item,
+      timestamp: new Date().toISOString(),
+    };
+    const updated = [newItem, ...existing.filter((d) => d.id !== item.id)].slice(0, 10);
+    localStorage.setItem(RECENT_DESTINATIONS_KEY, JSON.stringify(updated));
+  } catch {
+    // Ignore storage errors
+  }
+}
+
+// Helpers
+function getLocalSavedBuildingIds(): string[] {
+  try {
+    const raw = localStorage.getItem(SAVED_BUILDINGS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch {
+    // Ignore parse errors
+  }
+  // Default demo saved buildings if empty
+  return ["b1", "b3"];
+}
+
+export const studentAccountService = {
+  getSavedBuildings,
+  toggleSaveBuilding,
+  getRecentDestinations,
+  addRecentDestination,
+};

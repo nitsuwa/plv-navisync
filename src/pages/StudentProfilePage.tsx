@@ -60,6 +60,9 @@ const RECENT_ACTIVITY = [
 // ── MAIN COMPONENT ──────────────────────────────────────────────────────────
 // ═════════════════════════════════════════════════════════════════════════════
 
+import { studentAccountService } from "../services/studentAccountService";
+import { reportService } from "../services/reportService";
+
 export function StudentProfilePage() {
   const navigate = useNavigate();
   const { loading: authLoading, isStudent, profile, username, role, signOut } = useStudentAuth();
@@ -69,10 +72,24 @@ export function StudentProfilePage() {
   const [editingName, setEditingName] = useState(false);
   const [nameInput, setNameInput] = useState(displayName);
   const nameInputRef = useRef<HTMLInputElement>(null);
+  const [savedCount, setSavedCount] = useState(0);
+  const [reportsCount, setReportsCount] = useState(0);
 
   useEffect(() => {
-    const timer = setTimeout(() => setLoading(false), 500);
-    return () => clearTimeout(timer);
+    let mounted = true;
+    Promise.all([
+      studentAccountService.getSavedBuildings(),
+      reportService.getStudentReports(),
+    ]).then(([saved, rpts]) => {
+      if (mounted) {
+        setSavedCount(saved.length);
+        setReportsCount(rpts.length);
+        setLoading(false);
+      }
+    });
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   // Once the real profile loads, use its display name as the default.
@@ -212,8 +229,8 @@ export function StudentProfilePage() {
   ];
 
   const STATS = [
-    { label: "Saved", value: "3", icon: Bookmark, color: "text-primary" },
-    { label: "Reports", value: "3", icon: Flag, color: "text-amber-500" },
+    { label: "Saved", value: String(savedCount), icon: Bookmark, color: "text-primary" },
+    { label: "Reports", value: String(reportsCount), icon: Flag, color: "text-amber-500" },
     { label: "Routes", value: "12", icon: Navigation, color: "text-green-500" },
     { label: "Status", value: "Active", icon: Shield, color: "text-emerald-500" },
   ];

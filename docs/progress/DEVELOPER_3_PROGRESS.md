@@ -43,10 +43,10 @@ Status values: `READY`, `ACTIVE`, `BLOCKED`, `FOR REVIEW`, `DONE`.
   - Test result: `npm run build` PASSED (2508 modules built in 18.42s). Created `eventService.ts`, connected Home announcements/events feed, and added interactive map venue links.
   - Pull Request: Pending
 - [ ] **C7 — Favorites, recent destinations, and minimal profile**
-  - Status: `BLOCKED`
-  - Branch: `feature/student-saved-places`
-  - Depends on: C3, C4, and Gate G4
-  - Test result: Pending
+  - Status: `ACTIVE`
+  - Branch: `feature/student-favorites-profile`
+  - Depends on: Gate G4 and C2
+  - Test result: In Progress
   - Pull Request: Pending
 - [ ] **C8 — Admin operations pages, settings, logs, and dashboard**
   - Status: `BLOCKED`
