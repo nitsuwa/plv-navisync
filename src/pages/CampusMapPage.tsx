@@ -22,6 +22,7 @@ import {
   BuildingPicker, ReportModal, SignInPrompt,
   BuildingInfoPanel, MobileBuildingSheet, QRPlaceholder,
 } from "../components/map";
+import { studentAccountService } from "../services/studentAccountService";
 
 type MapMode  = "standard" | "accessible" | "emergency";
 
@@ -187,6 +188,13 @@ export function CampusMapPage() {
   const [layers,       setLayers]       = useState({ buildings:true, accessibility:false, emergency:false });
   const animFrameRef   = useRef<number>();
 
+  // Load initial bookmarked buildings from studentAccountService
+  useEffect(() => {
+    studentAccountService.getSavedBuildings().then((buildings) => {
+      setSaved(new Set(buildings.map((b) => b.id)));
+    });
+  }, []);
+
   // Floor plan state (replaces buildingView — floor plans now render in the main SVG)
   const [floorView,       setFloorView]       = useState<{ building: Building; floor: number }|null>(null);
   const [hoveredRoom,     setHoveredRoom]     = useState<string|null>(null);
@@ -285,42 +293,42 @@ export function CampusMapPage() {
 
   // ── Smooth zoom lerp ───────────────────────────────────────────────────
   useEffect(() => {
+    let animId: number;
     const lerp = () => {
-      setDisplayZoom(cur => {
+      setDisplayZoom((cur) => {
         const diff = zoom - cur;
         if (Math.abs(diff) < 0.001) return zoom;
-        animFrameRef.current = requestAnimationFrame(lerp);
         return cur + diff * 0.12;
       });
+      animId = requestAnimationFrame(lerp);
     };
-    animFrameRef.current = requestAnimationFrame(lerp);
-    return () => cancelAnimationFrame(animFrameRef.current!);
+    animId = requestAnimationFrame(lerp);
+    return () => cancelAnimationFrame(animId);
   }, [zoom]);
 
   // ── Smooth pan lerp ───────────────────────────────────────────────────
   useEffect(() => {
+    let animId: number;
     const lerpPan = () => {
       const target = panTargetRef.current;
-      if (!target) {
-        panAnimRef.current = requestAnimationFrame(lerpPan);
-        return;
+      if (target) {
+        setPan((prev) => {
+          const dx = target.x - prev.x;
+          const dy = target.y - prev.y;
+          if (Math.abs(dx) < 0.3 && Math.abs(dy) < 0.3) {
+            panTargetRef.current = null;
+            return target;
+          }
+          return {
+            x: prev.x + dx * 0.1,
+            y: prev.y + dy * 0.1,
+          };
+        });
       }
-      setPan(prev => {
-        const dx = target.x - prev.x;
-        const dy = target.y - prev.y;
-        if (Math.abs(dx) < 0.3 && Math.abs(dy) < 0.3) {
-          panTargetRef.current = null; // arrived
-          return target;
-        }
-        panAnimRef.current = requestAnimationFrame(lerpPan);
-        return {
-          x: prev.x + dx * 0.1,
-          y: prev.y + dy * 0.1,
-        };
-      });
+      animId = requestAnimationFrame(lerpPan);
     };
-    panAnimRef.current = requestAnimationFrame(lerpPan);
-    return () => cancelAnimationFrame(panAnimRef.current);
+    animId = requestAnimationFrame(lerpPan);
+    return () => cancelAnimationFrame(animId);
   }, []);
 
   // ── Wheel zoom ─────────────────────────────────────────────────────────
@@ -624,8 +632,14 @@ export function CampusMapPage() {
     setDirectionsMode(true);
   }, []);
 
-  const toggleSave = (id: string) =>
-    setSaved(p => { const s = new Set(p); s.has(id) ? s.delete(id) : s.add(id); return s; });
+  const toggleSave = useCallback(async (id: string) => {
+    setSaved((p) => {
+      const s = new Set(p);
+      s.has(id) ? s.delete(id) : s.add(id);
+      return s;
+    });
+    await studentAccountService.toggleSaveBuilding(id);
+  }, []);
 
   // ── Search results (buildings on campus, rooms on floor plan) ──────────
   const buildingResults = !isFloorMode && debouncedSearch
