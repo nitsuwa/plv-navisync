@@ -564,8 +564,9 @@ export function CampusMapPage() {
       if (pos) {
         const cx = pos.x + pos.w / 2;
         const cy = pos.y + pos.h / 2;
+        const sidePanelOffset = typeof window !== "undefined" && window.innerWidth >= 768 ? -80 : 0;
         panTargetRef.current = {
-          x: SVG_CX - cx * zoom,
+          x: SVG_CX - cx * zoom + sidePanelOffset,
           y: SVG_CY - cy * zoom,
         };
       }
@@ -1737,7 +1738,7 @@ const buildingFill = (id: string) =>
       )}
 
       {/* ══════════════ CAMPUS SELECTOR / MAP LABEL ══════════════ */}
-      <div data-no-drag className="absolute bottom-[76px] md:bottom-3 left-1/2 -translate-x-1/2 z-20">
+      <div data-no-drag className="absolute bottom-[76px] md:bottom-6 left-1/2 -translate-x-1/2 z-20">
         {isFloorMode ? (
           /* Floor plan: breadcrumb label */
           <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-border shadow-sm"

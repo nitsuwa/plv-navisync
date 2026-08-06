@@ -87,13 +87,13 @@ export function BuildingInfoPanel({
         </div>
       </div>
 
-      {/* Action buttons — horizontal row */}
-      <div className="flex gap-1.5 px-3 py-2.5 border-b border-border shrink-0">
+      {/* Action buttons — compact grid for 280px panel */}
+      <div className="grid grid-cols-4 gap-1 px-2 py-2.5 border-b border-border shrink-0">
         <button
           onClick={() => onDirections(selected)}
-          className="flex items-center justify-center gap-1 h-8 px-3 rounded-xl bg-primary text-primary-foreground text-[10px] font-extrabold hover:bg-primary/90 active:scale-[0.97] transition-all flex-1"
+          className="flex items-center justify-center gap-0.5 h-8 px-1 rounded-xl bg-primary text-primary-foreground text-[10px] font-extrabold hover:bg-primary/90 active:scale-[0.97] transition-all"
         >
-          <Navigation className="h-3.5 w-3.5" /> Directions
+          <Navigation className="h-3 w-3 shrink-0" /> Directions
         </button>
         <button
           onClick={async () => {
@@ -104,45 +104,45 @@ export function BuildingInfoPanel({
               toast.error("Could not copy", "Clipboard access denied.");
             }
           }}
-          className="flex items-center justify-center gap-1 h-8 px-3 rounded-xl bg-muted text-muted-foreground text-[10px] font-extrabold border border-border hover:bg-secondary active:scale-[0.97] transition-all flex-1"
+          className="flex items-center justify-center gap-0.5 h-8 px-1 rounded-xl bg-muted text-muted-foreground text-[10px] font-extrabold border border-border hover:bg-secondary active:scale-[0.97] transition-all"
         >
-          <Share2 className="h-3.5 w-3.5" /> Share
+          <Share2 className="h-3 w-3 shrink-0" /> Share
         </button>
         {studentAuth.isStudent ? (
           <button
             onClick={() => onToggleSave(selected.id)}
             aria-label={saved.has(selected.id) ? `Remove ${selected.name} from saved` : `Save ${selected.name}`}
             className={cn(
-              "flex items-center justify-center gap-1 h-8 px-3 rounded-xl text-[10px] font-extrabold border active:scale-[0.97] transition-all flex-1",
+              "flex items-center justify-center gap-0.5 h-8 px-1 rounded-xl text-[10px] font-extrabold border active:scale-[0.97] transition-all",
               saved.has(selected.id)
                 ? "bg-accent/15 text-accent border-accent/30"
                 : "bg-muted text-muted-foreground border-border hover:bg-secondary",
             )}
           >
-            <Bookmark className={cn("h-3.5 w-3.5", saved.has(selected.id) && "fill-current")} />
+            <Bookmark className={cn("h-3 w-3 shrink-0", saved.has(selected.id) && "fill-current")} />
             {saved.has(selected.id) ? "Saved" : "Save"}
           </button>
         ) : (
           <button
             onClick={() => onSignInPrompt("save locations")}
-            className="flex items-center justify-center gap-1 h-8 px-3 rounded-xl bg-muted/60 text-muted-foreground/50 text-[10px] font-semibold border border-dashed border-border/60 flex-1"
+            className="flex items-center justify-center gap-0.5 h-8 px-1 rounded-xl bg-muted/60 text-muted-foreground/50 text-[10px] font-semibold border border-dashed border-border/60"
           >
-            <Bookmark className="h-3.5 w-3.5" /> Save
+            <Bookmark className="h-3 w-3 shrink-0" /> Save
           </button>
         )}
         {studentAuth.isStudent ? (
           <button
             onClick={() => onReport(selected)}
-            className="flex items-center justify-center gap-1 h-8 px-3 rounded-xl bg-muted text-muted-foreground text-[10px] font-extrabold border border-border hover:bg-destructive/10 hover:text-destructive active:scale-[0.97] transition-all flex-1"
+            className="flex items-center justify-center gap-0.5 h-8 px-1 rounded-xl bg-muted text-muted-foreground text-[10px] font-extrabold border border-border hover:bg-destructive/10 hover:text-destructive active:scale-[0.97] transition-all"
           >
-            <Flag className="h-3.5 w-3.5" /> Report
+            <Flag className="h-3 w-3 shrink-0" /> Report
           </button>
         ) : (
           <button
             onClick={() => onSignInPrompt("report issues")}
-            className="flex items-center justify-center gap-1 h-8 px-3 rounded-xl bg-muted/60 text-muted-foreground/50 text-[10px] font-semibold border border-dashed border-border/60 flex-1"
+            className="flex items-center justify-center gap-0.5 h-8 px-1 rounded-xl bg-muted/60 text-muted-foreground/50 text-[10px] font-semibold border border-dashed border-border/60"
           >
-            <Flag className="h-3.5 w-3.5" /> Report
+            <Flag className="h-3 w-3 shrink-0" /> Report
           </button>
         )}
       </div>
