@@ -1,5 +1,6 @@
 import { LogIn, X } from "lucide-react";
 import { Link } from "react-router";
+import { createPortal } from "react-dom";
 
 interface SignInPromptProps {
   message: string;
@@ -7,12 +8,14 @@ interface SignInPromptProps {
 }
 
 export function SignInPrompt({ message, onClose }: SignInPromptProps) {
-  return (
+  // Portaled to body so this overlay clears PublicLayout's z-[1] stacking context
+  // and stays above the z-50 mobile bottom navigation.
+  return createPortal(
     <div
       role="dialog"
       aria-modal="true"
       aria-label="Sign in required"
-      className="absolute inset-0 z-50 flex items-center justify-center bg-background/70 backdrop-blur-sm animate-fade-in"
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-background/70 backdrop-blur-sm animate-fade-in"
       onClick={onClose}
     >
       <div
@@ -50,6 +53,7 @@ export function SignInPrompt({ message, onClose }: SignInPromptProps) {
           </Link>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

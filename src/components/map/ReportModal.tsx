@@ -1,4 +1,5 @@
 import { useState, useRef } from "react";
+import { createPortal } from "react-dom";
 import { CheckCircle2, Flag, X, MapPin, Camera, Loader2 } from "lucide-react";
 import type { Building } from "../../types";
 import { cn } from "../../lib/utils";
@@ -58,12 +59,15 @@ export function ReportModal({ building, onClose }: ReportModalProps) {
   };
 
   if (submitted) {
-    return (
+    // Portaled to body: PublicLayout's <main> uses z-[1] (stacking context), which
+    // traps plain `absolute z-50` overlays BELOW the z-50 MobileBottomNav and clips
+    // them via overflow-hidden. fixed + z-[60] at body level fixes both.
+    return createPortal(
       <div
         role="dialog"
         aria-modal="true"
         aria-label="Report submitted"
-        className="absolute inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm animate-fade-in"
+        className="fixed inset-0 z-[60] flex items-center justify-center bg-background/80 backdrop-blur-sm animate-fade-in"
         onClick={onClose}
       >
         <div
@@ -87,16 +91,19 @@ export function ReportModal({ building, onClose }: ReportModalProps) {
             Done
           </button>
         </div>
-      </div>
+      </div>,
+      document.body
     );
   }
 
-  return (
+  // Portaled to body (see note above) so the bottom-sheet actions stay above the
+  // mobile bottom navigation on the map page.
+  return createPortal(
     <div
       role="dialog"
       aria-modal="true"
       aria-label="Report issue"
-      className="absolute inset-0 z-50 flex items-end sm:items-center justify-center bg-background/70 backdrop-blur-sm animate-fade-in"
+      className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-background/70 backdrop-blur-sm animate-fade-in"
       onClick={onClose}
     >
       <div
@@ -204,6 +211,7 @@ export function ReportModal({ building, onClose }: ReportModalProps) {
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

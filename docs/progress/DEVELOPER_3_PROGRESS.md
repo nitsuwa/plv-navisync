@@ -25,10 +25,12 @@ Status values: `READY`, `ACTIVE`, `BLOCKED`, `FOR REVIEW`, `DONE`.
   - Test result: `npm run build` PASSED. Created `useCampusSearch` hook and connected unified location search & category filters across buildings, rooms, offices, labs, and facilities.
   - Pull Request: Merged (#1)
 - [ ] **C4 — Student route planning and navigation presentation**
-  - Status: `BLOCKED`
-  - Branch: `feature/student-navigation`
-  - Depends on: Gate G3
-  - Test result: Pending
+  - Status: `ACTIVE` (**Phase 1 ✅ implemented** on `feature/developer-3-c8-c4-c9-c10`; **Phase 2 still `BLOCKED` on Gate G3** — published navigation graph from Dev 2 B8)
+  - Branch: `feature/developer-3-c8-c4-c9-c10`
+  - Depends on: Gate G3 (Phase 2 only; Phase 1 builds on existing engines)
+  - Verification Evidence: [DEVELOPER_3_C4_VERIFICATION.md](file:///c:/Users/Rj/Documents/GitHub/plv-navisync/docs/progress/DEVELOPER_3_C4_VERIFICATION.md)
+  - Test result: `pnpm build` PASSED; **103/103 Vitest tests PASS** (14 new: routePlanner)
+  - C4 Phase 1 scope: `src/lib/routePlanner.ts` (typed wrapper — real graph distance/ETA in ALL modes, structured turn-by-turn, floor transitions, SVG fallback); new map components `RoutePlannerDialog` / `RouteStepsPanel` / `RouteMapOverlay` / `RouteErrorState`; `CampusMapPage.tsx` rewired (recent destination capture, mobile bottom-sheet steps); **fixed pre-existing A* reconstruction bug in `pathfinding.ts`** (`findPath` used `open.get(parentId)` which broke after nodes moved to closed — now uses persistent `parentMap`/`edgeMap`, same pattern as `findNavigationRoute`)
   - Pull Request: Pending
 - [x] **C5 — Reports and report history**
   - Status: `DONE`
@@ -49,10 +51,13 @@ Status values: `READY`, `ACTIVE`, `BLOCKED`, `FOR REVIEW`, `DONE`.
   - Test result: `npm run build` PASSED. Created `studentAccountService.ts`, connected `/student/favorites` for saved places, and updated `/student/profile` live stats.
   - Pull Request: Merged (#1)
 - [ ] **C8 — Admin operations pages, settings, logs, and dashboard**
-  - Status: `BLOCKED`
-  - Branch: `feature/admin-operations-dashboard`
-  - Depends on: A3, A6, A7, C5, and C6
-  - Test result: Pending
+  - Status: `ACTIVE` (C8-A ✅ + C8-B ✅ implemented on `feature/developer-3-c8-c4-c9-c10`; **C8-C still `BLOCKED` on Dev 1 A6/A7** — publish controls, branding, remaining states)
+  - Branch: `feature/developer-3-c8-c4-c9-c10`
+  - Depends on: A3, A6, A7, C5, and C6 (only C8-C depends on A6/A7 now)
+  - Verification Evidence: [DEVELOPER_3_C8_VERIFICATION.md](file:///c:/Users/Rj/Documents/GitHub/plv-navisync/docs/progress/DEVELOPER_3_C8_VERIFICATION.md)
+  - Test result: `pnpm build` PASSED; **103/103 Vitest tests PASS** (C8-B +11: dashboardService, settingsService, exporters; C4 Phase 1 +14: routePlanner)
+  - C8-A scope: admin Reports/Events/Announcements pages wired to real services + activity-log audit trail + sidebar entries
+  - C8-B scope: dashboard rewired to live `dashboardService` counts (no hardcoded numbers); settings persisted via `system_settings` upsert (fake SMTP/2FA tabs removed); new `/admin-dashboard/activity-logs` page; CSV/JSON exports on reports page
   - Pull Request: Pending
 - [ ] **C9 — Responsive, accessibility, theme, and visual consistency**
   - Status: `BLOCKED`
@@ -69,8 +74,8 @@ Status values: `READY`, `ACTIVE`, `BLOCKED`, `FOR REVIEW`, `DONE`.
 
 ## Current handoff note
 
-- Active package: C3 (FOR REVIEW)
-- Last completed package: C3 — Unified search, directory, and location details
-- Known blocker: None for C3. C4 requires Gate G3 from Developer 2.
-- Important changed files: `src/hooks/useCampusSearch.ts`, `src/hooks/index.ts`, `src/pages/CampusMapPage.tsx`, `src/pages/BuildingsPage.tsx`, `docs/progress/DEVELOPER_3_PROGRESS.md`
-- Next recommended action: Await PR review/merge of C3 into `main`, then proceed to C4 once Gate G3 is ready.
+- Active package: **C4 Phase 1** (✅ implemented on `feature/developer-3-c8-c4-c9-c10`; C8-C 🔒 still blocked on Dev 1 A6/A7)
+- Last completed package: C4 Phase 1 — Student Route Planning & Navigation (route planner, turn-by-turn UI, mobile steps sheet, pathfinding bug fix)
+- Known blocker: C8-C (publish controls, branding) requires Dev 1 A6/A7. C4 Phase 2 requires Gate G3 (Dev 2).
+- Important changed files (C4 Phase 1): `src/lib/routePlanner.ts` + `src/lib/__tests__/routePlanner.test.ts` (new), `src/components/map/RoutePlannerDialog.tsx` / `RouteStepsPanel.tsx` / `RouteMapOverlay.tsx` / `RouteErrorState.tsx` (new), `src/pages/CampusMapPage.tsx` (rewire), `src/components/map/index.ts` (exports), `src/lib/pathfinding.ts` (A* reconstruction fix)
+- Next recommended action: C4 Phase 2 after Gate G3 (published navigation graph), or C9 responsive/a11y pass, or C8-C once Dev 1 A6/A7 land.

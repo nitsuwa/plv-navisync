@@ -1,7 +1,11 @@
 import { getSupabase } from "../lib/supabase";
 import type { Tables, TablesInsert } from "../types/database.generated";
+import { logActivity, listActivityLogs, type ActivityLogRow } from "./activityLogService";
 
 export type ReportRow = Tables<"reports">;
+
+/** Report lifecycle statuses used by the admin workflow. */
+export type ReportStatus = "pending" | "under_review" | "in_progress" | "resolved" | "rejected";
 
 export interface IssueReport {
   id: string;
@@ -15,8 +19,10 @@ export interface IssueReport {
   priority: "low" | "medium" | "high" | "urgent" | string;
   title: string;
   description: string;
-  status: "pending" | "under_review" | "resolved" | "dismissed" | string;
+  status: ReportStatus | (string & {});
   imageUrl?: string | null;
+  internalNotes?: string | null;
+  resolutionNotes?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -49,6 +55,8 @@ export function toIssueReport(row: ReportRow): IssueReport {
     title: row.title,
     description: row.description,
     status: row.status,
+    internalNotes: row.internal_notes,
+    resolutionNotes: row.resolution_notes,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -176,6 +184,100 @@ export async function getStudentReports(): Promise<IssueReport[]> {
   return combined;
 }
 
+// ── Admin workflow ─────────────────────────────────────────────────────────
+
+export interface ReportFilters {
+  status?: ReportStatus | "all";
+  category?: string;
+  search?: string;
+}
+
+/** Count reports still awaiting review (used for the admin sidebar badge). */
+export async function countPendingReports(): Promise<number> {
+  const supabase = getSupabase();
+  const { count, error } = await supabase
+    .from("reports")
+    .select("id", { count: "exact", head: true })
+    .eq("status", "pending");
+  if (error) throw error;
+  return count ?? 0;
+}
+
+/** List every report for the admin review queue, newest first. */
+export async function listAllReports(filters: ReportFilters = {}): Promise<IssueReport[]> {
+  const supabase = getSupabase();
+  let query = supabase.from("reports").select("*").order("created_at", { ascending: false });
+
+  if (filters.status && filters.status !== "all") query = query.eq("status", filters.status);
+  if (filters.category && filters.category !== "all") query = query.eq("category", filters.category);
+
+  const { data, error } = await query;
+  if (error) throw error;
+
+  let reports = (data ?? []).map(toIssueReport);
+  const q = filters.search?.trim().toLocaleLowerCase();
+  if (q) {
+    reports = reports.filter((r) =>
+      [r.title, r.buildingName, r.category, r.description].filter(Boolean).join(" ").toLocaleLowerCase().includes(q)
+    );
+  }
+  return reports;
+}
+
+/** Advance a report through the admin workflow and append an audit entry. */
+export async function updateReportStatus(
+  id: string,
+  status: ReportStatus,
+  resolutionNotes?: string
+): Promise<void> {
+  const supabase = getSupabase();
+  const updates: TablesInsert<"reports"> = {
+    status,
+    updated_at: new Date().toISOString(),
+  };
+  if (status === "resolved") updates.resolved_at = new Date().toISOString();
+  if (resolutionNotes !== undefined) updates.resolution_notes = resolutionNotes || null;
+
+  const { error } = await supabase.from("reports").update(updates).eq("id", id);
+  if (error) throw error;
+
+  await logActivity({
+    action: `report.${status}`,
+    entityType: "report",
+    entityId: id,
+    metadata: resolutionNotes ? { resolutionNotes } : null,
+  });
+}
+
+/** Save private admin notes on a report. */
+export async function updateReportInternalNotes(id: string, notes: string): Promise<void> {
+  const supabase = getSupabase();
+  const { error } = await supabase
+    .from("reports")
+    .update({ internal_notes: notes || null, updated_at: new Date().toISOString() })
+    .eq("id", id);
+  if (error) throw error;
+
+  await logActivity({ action: "report.notes", entityType: "report", entityId: id });
+}
+
+/** Soft-delete a report by archiving it; the workflow status is left untouched. */
+export async function archiveReport(id: string): Promise<void> {
+  const supabase = getSupabase();
+  const { error } = await supabase
+    .from("reports")
+    .update({ archived_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+    .eq("id", id);
+  if (error) throw error;
+
+  await logActivity({ action: "report.archive", entityType: "report", entityId: id });
+}
+
+/** Full audit history for one report. */
+export async function getReportHistory(id: string): Promise<ActivityLogRow[]> {
+  return listActivityLogs({ entityType: "report", entityId: id });
+}
+
 // Local Storage Cache Helpers
 function getLocalCachedReports(): IssueReport[] {
   try {
@@ -204,4 +306,10 @@ export const reportService = {
   submitReport,
   getStudentReports,
   uploadReportImage,
+  countPendingReports,
+  listAllReports,
+  updateReportStatus,
+  updateReportInternalNotes,
+  archiveReport,
+  getReportHistory,
 };

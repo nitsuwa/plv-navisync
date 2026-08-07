@@ -1,20 +1,11 @@
 import { getSupabase } from "../lib/supabase";
-import type { Tables } from "../types/database.generated";
+import { resolveActiveCampusId } from "./campusService";
+import type { Tables, TablesInsert } from "../types/database.generated";
+import { logActivity } from "./activityLogService";
+import { getPublishedAnnouncements } from "./announcementService";
 
-export type AnnouncementRow = Tables<"announcements">;
 export type EventRow = Tables<"events">;
-
-export interface CampusAnnouncement {
-  id: string;
-  title: string;
-  content: string;
-  category: "general" | "academic" | "urgent" | "event" | string;
-  priority: "low" | "medium" | "high" | "urgent" | string;
-  status: "published" | "draft" | "archived" | string;
-  startsAt?: string | null;
-  expiresAt?: string | null;
-  createdAt: string;
-}
+export type EventLocationRow = Tables<"event_locations">;
 
 export interface CampusEvent {
   id: string;
@@ -30,27 +21,6 @@ export interface CampusEvent {
   endsAt: string;
   status: "published" | "upcoming" | "ongoing" | "completed" | string;
 }
-
-const MOCK_ANNOUNCEMENTS: CampusAnnouncement[] = [
-  {
-    id: "anc-1",
-    title: "Second Semester Registration & Enrolment Guidelines",
-    content: "Official enrolment schedule for AY 2025-2026. Please check your student portal for priority appointment dates.",
-    category: "academic",
-    priority: "high",
-    status: "published",
-    createdAt: new Date().toISOString(),
-  },
-  {
-    id: "anc-2",
-    title: "Main Academic Building Elevator Maintenance",
-    content: "Elevator B in the MAB will undergo scheduled servicing on Friday. Please use stairs or Elevator A.",
-    category: "urgent",
-    priority: "medium",
-    status: "published",
-    createdAt: new Date(Date.now() - 86400000).toISOString(),
-  },
-];
 
 const MOCK_EVENTS: CampusEvent[] = [
   {
@@ -97,34 +67,6 @@ const MOCK_EVENTS: CampusEvent[] = [
   },
 ];
 
-export async function getPublishedAnnouncements(): Promise<CampusAnnouncement[]> {
-  const supabase = getSupabase();
-  try {
-    const { data, error } = await supabase
-      .from("announcements")
-      .select("*")
-      .eq("status", "published")
-      .order("created_at", { ascending: false });
-
-    if (!error && data && data.length > 0) {
-      return data.map((row) => ({
-        id: row.id,
-        title: row.title,
-        content: row.content,
-        category: row.category,
-        priority: row.priority,
-        status: row.status,
-        startsAt: row.starts_at,
-        expiresAt: row.expires_at,
-        createdAt: row.created_at,
-      }));
-    }
-  } catch (err) {
-    console.warn("Using mock announcements fallback:", err);
-  }
-  return MOCK_ANNOUNCEMENTS;
-}
-
 export async function getUpcomingEvents(): Promise<CampusEvent[]> {
   const supabase = getSupabase();
   try {
@@ -132,9 +74,21 @@ export async function getUpcomingEvents(): Promise<CampusEvent[]> {
       .from("events")
       .select("*")
       .eq("status", "published")
+      .gte("ends_at", new Date().toISOString())
       .order("starts_at", { ascending: true });
 
     if (!error && data && data.length > 0) {
+      // Attach venue labels from event_locations in one follow-up query.
+      let locationMap: Record<string, string> = {};
+      const ids = data.map((row) => row.id);
+      const { data: locations } = await supabase
+        .from("event_locations")
+        .select("event_id, label")
+        .in("event_id", ids);
+      (locations ?? []).forEach((loc) => {
+        if (!locationMap[loc.event_id]) locationMap[loc.event_id] = loc.label;
+      });
+
       return data.map((row) => ({
         id: row.id,
         title: row.title,
@@ -143,7 +97,7 @@ export async function getUpcomingEvents(): Promise<CampusEvent[]> {
         organizer: row.organizer || "PLV Campus",
         buildingId: null,
         buildingName: undefined,
-        locationLabel: "Campus Venue",
+        locationLabel: locationMap[row.id] ?? "Campus Venue",
         coverImage: row.cover_image_path || null,
         startsAt: row.starts_at,
         endsAt: row.ends_at,
@@ -156,7 +110,169 @@ export async function getUpcomingEvents(): Promise<CampusEvent[]> {
   return MOCK_EVENTS;
 }
 
+// ── Admin event management ────────────────────────────────────────────────
+
+export type ManagedEventStatus = "draft" | "published" | "archived";
+
+export interface ManagedEvent {
+  id: string;
+  title: string;
+  description: string;
+  category: string;
+  organizer: string;
+  venue: string;
+  startsAt: string;
+  endsAt: string;
+  status: ManagedEventStatus;
+  coverImagePath: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface EventInput {
+  title: string;
+  description?: string;
+  category: string;
+  organizer?: string;
+  venue?: string;
+  startsAt: string;
+  endsAt: string;
+  status: ManagedEventStatus;
+}
+
+export interface EventFilters {
+  status?: ManagedEventStatus | "all";
+  search?: string;
+}
+
+function toManagedEvent(row: EventRow, venues: string[]): ManagedEvent {
+  return {
+    id: row.id,
+    title: row.title,
+    description: row.description || "",
+    category: row.category,
+    organizer: row.organizer || "PLV Campus",
+    venue: venues[0] || "Campus Venue",
+    startsAt: row.starts_at,
+    endsAt: row.ends_at,
+    status: (row.status as ManagedEventStatus) || "draft",
+    coverImagePath: row.cover_image_path,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+/** List all events (including drafts and archived) for the admin queue. */
+export async function listEvents(filters: EventFilters = {}): Promise<ManagedEvent[]> {
+  const supabase = getSupabase();
+  let query = supabase.from("events").select("*").order("starts_at", { ascending: false });
+  if (filters.status && filters.status !== "all") query = query.eq("status", filters.status);
+
+  const { data, error } = await query;
+  if (error) throw error;
+
+  let events = data ?? [];
+  if (events.length > 0) {
+    const ids = events.map((row) => row.id);
+    const { data: locations } = await supabase
+      .from("event_locations")
+      .select("event_id, label")
+      .in("event_id", ids);
+    const venueMap: Record<string, string[]> = {};
+    (locations ?? []).forEach((loc) => {
+      (venueMap[loc.event_id] ??= []).push(loc.label);
+    });
+    events = events.map((row) => toManagedEvent(row, venueMap[row.id] ?? []));
+  }
+
+  const q = filters.search?.trim().toLocaleLowerCase();
+  if (q) {
+    events = events.filter((e) =>
+      [e.title, e.description, e.venue, e.organizer, e.category].join(" ").toLocaleLowerCase().includes(q)
+    );
+  }
+  return events;
+}
+
+/** Create an event and its primary venue label. */
+export async function createEvent(input: EventInput): Promise<ManagedEvent> {
+  const supabase = getSupabase();
+  const { data: userData } = await supabase.auth.getUser();
+  const userId = userData?.user?.id;
+  if (!userId) throw new Error("You must be signed in to create an event.");
+
+  const campusId = await resolveActiveCampusId();
+  if (!campusId) throw new Error("No active campus found. Create a campus before adding events.");
+
+  const row: TablesInsert<"events"> = {
+    campus_id: campusId,
+    title: input.title,
+    description: input.description ?? null,
+    category: input.category,
+    organizer: input.organizer ?? null,
+    starts_at: input.startsAt,
+    ends_at: input.endsAt,
+    status: input.status,
+    created_by: userId,
+  };
+
+  const { data, error } = await supabase.from("events").insert(row).select("*").single();
+  if (error) throw error;
+
+  const venue = input.venue?.trim();
+  if (venue) {
+    await supabase.from("event_locations").insert({ event_id: data.id, label: venue });
+  }
+
+  await logActivity({ action: "event.create", entityType: "event", entityId: data.id, metadata: { title: input.title } });
+  return toManagedEvent(data, venue ? [venue] : []);
+}
+
+/** Update an event and its primary venue label. */
+export async function updateEvent(id: string, input: Partial<EventInput>): Promise<void> {
+  const supabase = getSupabase();
+  const changes: TablesInsert<"events"> = { updated_at: new Date().toISOString() };
+  if (input.title !== undefined) changes.title = input.title;
+  if (input.description !== undefined) changes.description = input.description || null;
+  if (input.category !== undefined) changes.category = input.category;
+  if (input.organizer !== undefined) changes.organizer = input.organizer || null;
+  if (input.startsAt !== undefined) changes.starts_at = input.startsAt;
+  if (input.endsAt !== undefined) changes.ends_at = input.endsAt;
+  if (input.status !== undefined) changes.status = input.status;
+
+  const { error } = await supabase.from("events").update(changes).eq("id", id);
+  if (error) throw error;
+
+  if (input.venue !== undefined) {
+    const venue = input.venue.trim();
+    const { data: locations } = await supabase.from("event_locations").select("id").eq("event_id", id).limit(1);
+    if (locations && locations.length > 0) {
+      await supabase.from("event_locations").update({ label: venue || "Campus Venue" }).eq("id", locations[0].id);
+    } else if (venue) {
+      await supabase.from("event_locations").insert({ event_id: id, label: venue });
+    }
+  }
+
+  await logActivity({ action: "event.update", entityType: "event", entityId: id });
+}
+
+/** Archive an event (safe delete that preserves history). */
+export async function archiveEvent(id: string): Promise<void> {
+  const supabase = getSupabase();
+  const { error } = await supabase
+    .from("events")
+    .update({ status: "archived", archived_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+    .eq("id", id);
+  if (error) throw error;
+
+  await logActivity({ action: "event.archive", entityType: "event", entityId: id });
+}
+
 export const eventService = {
   getPublishedAnnouncements,
   getUpcomingEvents,
+  listEvents,
+  createEvent,
+  updateEvent,
+  archiveEvent,
 };

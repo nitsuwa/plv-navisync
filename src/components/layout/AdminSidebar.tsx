@@ -1,23 +1,28 @@
 import { Link, useLocation, useNavigate } from "react-router";
 import {
-  LayoutDashboard, LogOut, Settings, Map, Flag, Users,
+  LayoutDashboard, LogOut, Settings, Map, Flag, Users, Megaphone, CalendarDays, History,
 } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { cn } from "../../lib/utils";
+import { reportService } from "../../services/reportService";
 import { PLVLogo } from "../ui/PLVLogo";
 import { supabase } from "../../lib/supabase";
 import { motion, useReducedMotion } from "motion/react";
 import { sidebarSpring } from "../../config/animation";
 
 // Core admin navigation — focused on essential workflows.
-// Buildings, Floor Plans, Routes, Locations, Events, and Accessibility
-// are all managed inside the Map Builder workspace via its layer system.
+// Buildings, Floor Plans, Routes, Locations, and Accessibility are managed
+// inside the Map Builder workspace via its layer system; operational pages
+// (Reports, Announcements, Events) are standalone routes.
 const NAV_ITEMS = [
-  { label: "Dashboard",     path: "/admin-dashboard",   icon: LayoutDashboard },
+  { label: "Dashboard",     path: "/admin-dashboard",            icon: LayoutDashboard },
   { label: "Map Builder",   path: "/admin-dashboard/map-builder", icon: Map              },
-  { label: "Reports",       path: "/admin-dashboard/reports",       icon: Flag, badge: 2   },
-  { label: "Users",         path: "/admin-dashboard/users",         icon: Users            },
-  { label: "Settings",      path: "/admin-dashboard/settings",      icon: Settings         },
+  { label: "Reports",       path: "/admin-dashboard/reports",     icon: Flag             },
+  { label: "Announcements", path: "/admin-dashboard/announcements", icon: Megaphone     },
+  { label: "Events",        path: "/admin-dashboard/events",      icon: CalendarDays    },
+  { label: "Users",         path: "/admin-dashboard/users",       icon: Users           },
+  { label: "Activity Logs", path: "/admin-dashboard/activity-logs", icon: History       },
+  { label: "Settings",      path: "/admin-dashboard/settings",    icon: Settings        },
 ];
 
 interface AdminSidebarProps { collapsed?: boolean; }
@@ -64,6 +69,23 @@ export function AdminSidebar({ collapsed = false }: AdminSidebarProps) {
   const navigate = useNavigate();
   const shouldReduce = useReducedMotion();
   const [signingOut, setSigningOut] = useState(false);
+  const [pendingReports, setPendingReports] = useState(0);
+
+  // Real pending-report count for the Reports badge (0 = no badge shown).
+  useEffect(() => {
+    let cancelled = false;
+    reportService
+      .countPendingReports()
+      .then((count) => { if (!cancelled) setPendingReports(count); })
+      .catch(() => { if (!cancelled) setPendingReports(0); });
+    return () => { cancelled = true; };
+  }, []);
+
+  const navItems = NAV_ITEMS.map((item) =>
+    item.label === "Reports" && pendingReports > 0
+      ? { ...item, badge: pendingReports }
+      : item
+  );
 
   const isActive = (path: string) => {
     return location.pathname === path;
@@ -109,7 +131,7 @@ export function AdminSidebar({ collapsed = false }: AdminSidebarProps) {
 
       {/* Nav */}
       <nav className="flex-1 px-2.5 py-4 flex flex-col gap-0.5 overflow-y-auto scrollbar-show-on-hover">
-        {NAV_ITEMS.map(item => (
+        {navItems.map(item => (
           <NavItem key={item.path} {...item} active={isActive(item.path)} collapsed={collapsed}/>
         ))}
       </nav>
