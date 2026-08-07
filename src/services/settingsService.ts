@@ -1,5 +1,4 @@
 import { getSupabase } from "../lib/supabase";
-import { logActivity } from "./activityLogService";
 
 /**
  * Typed settings service over the `system_settings` table (global rows,
@@ -27,15 +26,6 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   landing_page: "/",
   default_theme: "dark",
 };
-
-async function currentUserId(): Promise<string | null> {
-  try {
-    const { data } = await getSupabase().auth.getUser();
-    return data?.user?.id ?? null;
-  } catch {
-    return null;
-  }
-}
 
 /** All global settings for the admin (DB values win over defaults). */
 export async function getSettings(): Promise<Record<string, unknown>> {
@@ -74,41 +64,14 @@ export async function getPublicSettings(): Promise<Record<string, unknown>> {
 /** Insert-or-update each entry and append one audit entry for the batch. */
 export async function upsertSettings(entries: SettingsEntry[]): Promise<void> {
   const supabase = getSupabase();
-  const userId = await currentUserId();
-  const now = new Date().toISOString();
-
-  for (const entry of entries) {
-    const { data: existing } = await supabase
-      .from("system_settings")
-      .select("id")
-      .eq("key", entry.key)
-      .is("campus_id", null)
-      .maybeSingle();
-
-    const payload = {
+  const { error } = await supabase.rpc("upsert_system_settings", {
+    p_entries: entries.map((entry) => ({
       key: entry.key,
-      value: entry.value as never,
+      value: entry.value,
       is_public: entry.isPublic ?? false,
-      updated_by: userId,
-      updated_at: now,
-    };
-
-    if (existing?.id) {
-      const { error } = await supabase.from("system_settings").update(payload).eq("id", existing.id);
-      if (error) throw error;
-    } else {
-      const { error } = await supabase
-        .from("system_settings")
-        .insert({ ...payload, campus_id: null });
-      if (error) throw error;
-    }
-  }
-
-  await logActivity({
-    action: "settings.update",
-    entityType: "settings",
-    metadata: { keys: entries.map((e) => e.key) },
+    })),
   });
+  if (error) throw error;
 }
 
 export const settingsService = {

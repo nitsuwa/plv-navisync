@@ -28,73 +28,23 @@ describe("settings service (system_settings persistence)", () => {
     expect(settings.contact_email).toBe(DEFAULT_SETTINGS.contact_email);
   });
 
-  it("creates new rows for missing keys and writes an audit entry", async () => {
-    const maybeSingle = vi.fn().mockResolvedValue({ data: null, error: null });
-    const update = vi.fn().mockResolvedValue({ error: null });
-    const insert = vi.fn().mockResolvedValue({ error: null });
-    const insertLog = vi.fn().mockResolvedValue({ error: null });
-    const auth = { getUser: vi.fn().mockResolvedValue({ data: { user: { id: "admin-1" } } }) };
-
-    const from = vi.fn((table: string) => {
-      if (table === "system_settings") {
-        return {
-          select: vi.fn(() => ({
-            eq: vi.fn(() => ({ is: vi.fn(() => ({ maybeSingle })) })),
-          })),
-          update,
-          insert,
-        };
-      }
-      return { insert: insertLog };
-    });
-
-    vi.mocked(getSupabase).mockReturnValue({ from, auth } as never);
+  it("saves a settings batch through the atomic audited RPC", async () => {
+    const rpc = vi.fn().mockResolvedValue({ data: 1, error: null });
+    vi.mocked(getSupabase).mockReturnValue({ rpc } as never);
 
     await upsertSettings([{ key: "site_name", value: "PLV NaviSync 2", isPublic: true }]);
 
-    expect(insert).toHaveBeenCalledWith(
-      expect.objectContaining({
-        key: "site_name",
-        value: "PLV NaviSync 2",
-        campus_id: null,
-        is_public: true,
-        updated_by: "admin-1",
-      })
-    );
-    expect(update).not.toHaveBeenCalled();
-    expect(insertLog).toHaveBeenCalledWith(
-      expect.objectContaining({ action: "settings.update", entity_type: "settings" })
-    );
+    expect(rpc).toHaveBeenCalledWith("upsert_system_settings", { p_entries: [
+      { key: "site_name", value: "PLV NaviSync 2", is_public: true },
+    ] });
   });
 
-  it("updates an existing row instead of inserting a duplicate", async () => {
-    const maybeSingle = vi.fn().mockResolvedValue({ data: { id: "s1" }, error: null });
-    // update() is chained with .eq(id) in the service, so it must return a thenable query.
-    const updateEq = vi.fn().mockResolvedValue({ error: null });
-    const update = vi.fn(() => ({ eq: updateEq }));
-    const insert = vi.fn().mockResolvedValue({ error: null });
-    const insertLog = vi.fn().mockResolvedValue({ error: null });
-    const auth = { getUser: vi.fn().mockResolvedValue({ data: { user: { id: "admin-1" } } }) };
+  it("surfaces an RPC error without partial client-side writes", async () => {
+    const rpc = vi.fn().mockResolvedValue({ data: null, error: { message: "administrator access required" } });
+    vi.mocked(getSupabase).mockReturnValue({ rpc } as never);
 
-    const from = vi.fn((table: string) => {
-      if (table === "system_settings") {
-        return {
-          select: vi.fn(() => ({
-            eq: vi.fn(() => ({ is: vi.fn(() => ({ maybeSingle })) })),
-          })),
-          update,
-          insert,
-        };
-      }
-      return { insert: insertLog };
-    });
+    await expect(upsertSettings([{ key: "default_zoom", value: "17" }])).rejects.toMatchObject({ message: "administrator access required" });
 
-    vi.mocked(getSupabase).mockReturnValue({ from, auth } as never);
-
-    await upsertSettings([{ key: "default_zoom", value: "17" }]);
-
-    expect(update).toHaveBeenCalledWith(expect.objectContaining({ key: "default_zoom", value: "17" }));
-    expect(updateEq).toHaveBeenCalledWith("id", "s1");
-    expect(insert).not.toHaveBeenCalled();
+    expect(rpc).toHaveBeenCalledOnce();
   });
 });

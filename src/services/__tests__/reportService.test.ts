@@ -52,27 +52,14 @@ describe("report service (admin workflow)", () => {
     expect(query.eq).toHaveBeenCalledWith("category", "maintenance");
   });
 
-  it("resolves a report with notes and writes an audit entry", async () => {
-    const eq = vi.fn().mockResolvedValue({ error: null });
-    const update = vi.fn(() => ({ eq }));
-    const insert = vi.fn().mockResolvedValue({ error: null });
-    const auth = { getUser: vi.fn().mockResolvedValue({ data: { user: { id: "admin-1" } } }) };
-    const from = vi.fn((table: string) => {
-      if (table === "activity_logs") return { insert };
-      return { update };
-    });
-
-    vi.mocked(getSupabase).mockReturnValue({ from, auth } as never);
+  it("resolves a report atomically through the audited workflow RPC", async () => {
+    const rpc = vi.fn().mockResolvedValue({ error: null });
+    vi.mocked(getSupabase).mockReturnValue({ rpc } as never);
 
     await updateReportStatus("r1", "resolved", "Fixed the hallway light.");
 
-    expect(update).toHaveBeenCalledWith(
-      expect.objectContaining({ status: "resolved", resolution_notes: "Fixed the hallway light." })
-    );
-    expect(update.mock.calls[0][0]).toHaveProperty("resolved_at");
-    expect(eq).toHaveBeenCalledWith("id", "r1");
-    expect(insert).toHaveBeenCalledWith(
-      expect.objectContaining({ action: "report.resolved", entity_id: "r1" })
-    );
+    expect(rpc).toHaveBeenCalledWith("update_report_workflow", {
+      p_report_id: "r1", p_status: "resolved", p_resolution_notes: "Fixed the hallway light.", p_internal_notes: null,
+    });
   });
 });

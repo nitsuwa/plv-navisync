@@ -1,6 +1,6 @@
 import { getSupabase } from "../lib/supabase";
 import type { Tables, TablesInsert } from "../types/database.generated";
-import { logActivity, listActivityLogs, type ActivityLogRow } from "./activityLogService";
+import { logActivity, type ActivityLogRow } from "./activityLogService";
 
 export type ReportRow = Tables<"reports">;
 
@@ -63,39 +63,37 @@ export function toIssueReport(row: ReportRow): IssueReport {
 }
 
 // Upload photo to Supabase storage bucket `report-images`
-export async function uploadReportImage(file: Blob): Promise<string | null> {
-  try {
-    const supabase = getSupabase();
-    const ext = file.type === "image/jpeg" ? "jpg" : file.type.split("/")[1] || "png";
-    const path = `reports/${crypto.randomUUID()}.${ext}`;
+export async function uploadReportImage(reportId: string, file: Blob): Promise<string> {
+  const allowed = new Map([["image/jpeg", "jpg"], ["image/png", "png"], ["image/webp", "webp"]]);
+  const ext = allowed.get(file.type);
+  if (!ext) throw new Error("Report photos must be JPEG, PNG, or WebP.");
+  if (file.size > 8 * 1024 * 1024) throw new Error("Report photos must be 8 MB or smaller.");
+  const supabase = getSupabase();
+  const { data: auth } = await supabase.auth.getUser();
+  if (!auth.user) throw new Error("You must be signed in to upload a report photo.");
+  const path = `${reportId}/${crypto.randomUUID()}.${ext}`;
+  const uploaded = await supabase.storage.from("report-images").upload(path, file, { contentType: file.type, upsert: false });
+  if (uploaded.error) throw uploaded.error;
+  const linked = await supabase.from("report_images").insert({ report_id: reportId, storage_path: path, uploaded_by: auth.user.id });
+  if (linked.error) { await supabase.storage.from("report-images").remove([path]); throw linked.error; }
+  const signed = await supabase.storage.from("report-images").createSignedUrl(path, 3600);
+  if (signed.error) throw signed.error;
+  return signed.data.signedUrl;
+}
 
-    const { error } = await supabase.storage
-      .from("report-images")
-      .upload(path, file, { contentType: file.type, upsert: false });
-
-    if (error) {
-      console.warn("Storage upload warning, using local data URL fallback:", error.message);
-      return null;
-    }
-
-    const { data: publicUrlData } = supabase.storage.from("report-images").getPublicUrl(path);
-    return publicUrlData.publicUrl;
-  } catch (err) {
-    console.warn("Failed uploading report image to storage:", err);
-    return null;
-  }
+function databaseReportCategory(value: string): ReportRow["category"] {
+  const mapped: Record<string, ReportRow["category"]> = {
+    accessibility: "accessibility_concern", maintenance: "damaged_facility", map_error: "navigation_error", hazard: "safety_concern",
+  };
+  return mapped[value] ?? (value as ReportRow["category"]);
 }
 
 // Submit a new issue report
 export async function submitReport(input: CreateReportInput): Promise<IssueReport> {
   const supabase = getSupabase();
   const { data: userData } = await supabase.auth.getUser();
-  const userId = userData?.user?.id || "guest-student-id";
-
-  let imageUrl: string | null = null;
-  if (input.imageFile) {
-    imageUrl = await uploadReportImage(input.imageFile);
-  }
+  const userId = userData?.user?.id;
+  if (!userId) throw new Error("You must be signed in to submit a report.");
 
   const newReport: IssueReport = {
     id: crypto.randomUUID(),
@@ -105,45 +103,37 @@ export async function submitReport(input: CreateReportInput): Promise<IssueRepor
     floorId: input.floorId || null,
     floorLabel: input.floorLabel,
     reporterId: userId,
-    category: input.category || "maintenance",
-    priority: input.priority || "medium",
+    category: databaseReportCategory(input.category || "maintenance"),
+    priority: "normal",
     title: input.title,
     description: input.description,
     status: "pending",
-    imageUrl,
+    imageUrl: null,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
 
-  // Try inserting into Supabase reports table
-  try {
-    const insertPayload: TablesInsert<"reports"> = {
+  const insertPayload: TablesInsert<"reports"> = {
       id: newReport.id,
       campus_id: newReport.campusId,
       building_id: newReport.buildingId,
       floor_id: newReport.floorId,
-      reporter_id: userId !== "guest-student-id" ? userId : "00000000-0000-0000-0000-000000000000",
+      reporter_id: userId,
       category: newReport.category,
       priority: newReport.priority,
       title: newReport.title,
       description: newReport.description,
       status: "pending",
-    };
+  };
 
-    const { data, error } = await supabase.from("reports").insert(insertPayload).select("*").single();
+  const { data, error } = await supabase.from("reports").insert(insertPayload).select("*").single();
+  if (error) throw error;
 
-    if (!error && data) {
-      const reportFromDb = toIssueReport(data);
-      saveToLocalCache({ ...reportFromDb, buildingName: input.buildingName, floorLabel: input.floorLabel, imageUrl });
-      return { ...reportFromDb, buildingName: input.buildingName, floorLabel: input.floorLabel, imageUrl };
-    }
-  } catch (err) {
-    console.warn("Supabase report insert fallback:", err);
-  }
-
-  // Save to local storage for offline / demo mode
-  saveToLocalCache(newReport);
-  return newReport;
+  const reportFromDb = toIssueReport(data);
+  const imageUrl = input.imageFile ? await uploadReportImage(data.id, input.imageFile) : null;
+  const result = { ...reportFromDb, buildingName: input.buildingName, floorLabel: input.floorLabel, imageUrl };
+  saveToLocalCache(result);
+  return result;
 }
 
 // Get submitted report history for student
@@ -231,22 +221,10 @@ export async function updateReportStatus(
   resolutionNotes?: string
 ): Promise<void> {
   const supabase = getSupabase();
-  const updates: TablesInsert<"reports"> = {
-    status,
-    updated_at: new Date().toISOString(),
-  };
-  if (status === "resolved") updates.resolved_at = new Date().toISOString();
-  if (resolutionNotes !== undefined) updates.resolution_notes = resolutionNotes || null;
-
-  const { error } = await supabase.from("reports").update(updates).eq("id", id);
-  if (error) throw error;
-
-  await logActivity({
-    action: `report.${status}`,
-    entityType: "report",
-    entityId: id,
-    metadata: resolutionNotes ? { resolutionNotes } : null,
+  const { error } = await supabase.rpc("update_report_workflow", {
+    p_report_id: id, p_status: status, p_resolution_notes: resolutionNotes ?? null, p_internal_notes: null,
   });
+  if (error) throw error;
 }
 
 /** Save private admin notes on a report. */
@@ -275,7 +253,11 @@ export async function archiveReport(id: string): Promise<void> {
 
 /** Full audit history for one report. */
 export async function getReportHistory(id: string): Promise<ActivityLogRow[]> {
-  return listActivityLogs({ entityType: "report", entityId: id });
+  const { data, error } = await getSupabase().from("report_history").select("*").eq("report_id", id).order("created_at", { ascending: false });
+  if (error) throw error;
+  return (data ?? []).map((row) => ({ id: row.id, actor_id: row.performed_by, campus_id: null,
+    action: `report.${row.new_status ?? row.action}`, entity_type: "report", entity_id: row.report_id,
+    metadata: { old_status: row.old_status, new_status: row.new_status, note: row.note }, created_at: row.created_at })) as ActivityLogRow[];
 }
 
 // Local Storage Cache Helpers

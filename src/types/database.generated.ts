@@ -515,6 +515,66 @@ export type Database = {
           },
         ]
       }
+      event_stalls: {
+        Row: {
+          created_at: string
+          description: string | null
+          event_id: string
+          event_location_id: string | null
+          height: number
+          id: string
+          metadata: Json
+          name: string
+          updated_at: string
+          width: number
+          x: number
+          y: number
+        }
+        Insert: {
+          created_at?: string
+          description?: string | null
+          event_id: string
+          event_location_id?: string | null
+          height?: number
+          id?: string
+          metadata?: Json
+          name: string
+          updated_at?: string
+          width?: number
+          x: number
+          y: number
+        }
+        Update: {
+          created_at?: string
+          description?: string | null
+          event_id?: string
+          event_location_id?: string | null
+          height?: number
+          id?: string
+          metadata?: Json
+          name?: string
+          updated_at?: string
+          width?: number
+          x?: number
+          y?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "event_stalls_event_id_fkey"
+            columns: ["event_id"]
+            isOneToOne: false
+            referencedRelation: "events"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "event_stalls_event_location_id_fkey"
+            columns: ["event_location_id"]
+            isOneToOne: false
+            referencedRelation: "event_locations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       events: {
         Row: {
           archived_at: string | null
@@ -1019,6 +1079,74 @@ export type Database = {
         }
         Relationships: []
       }
+      recent_destinations: {
+        Row: {
+          building_id: string | null
+          campus_id: string
+          code: string | null
+          created_at: string
+          id: string
+          last_visited_at: string
+          map_element_id: string | null
+          name: string
+          user_id: string
+          visit_count: number
+        }
+        Insert: {
+          building_id?: string | null
+          campus_id: string
+          code?: string | null
+          created_at?: string
+          id?: string
+          last_visited_at?: string
+          map_element_id?: string | null
+          name: string
+          user_id: string
+          visit_count?: number
+        }
+        Update: {
+          building_id?: string | null
+          campus_id?: string
+          code?: string | null
+          created_at?: string
+          id?: string
+          last_visited_at?: string
+          map_element_id?: string | null
+          name?: string
+          user_id?: string
+          visit_count?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "recent_destinations_building_id_fkey"
+            columns: ["building_id"]
+            isOneToOne: false
+            referencedRelation: "buildings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "recent_destinations_campus_id_fkey"
+            columns: ["campus_id"]
+            isOneToOne: false
+            referencedRelation: "campuses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "recent_destinations_map_element_id_fkey"
+            columns: ["map_element_id"]
+            isOneToOne: false
+            referencedRelation: "map_elements"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "recent_destinations_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       report_history: {
         Row: {
           action: string
@@ -1412,6 +1540,41 @@ export type Database = {
         Args: { p_campus_id: string; p_payload: Json }
         Returns: Json
       }
+      update_report_workflow: {
+        Args: {
+          p_internal_notes?: string
+          p_report_id: string
+          p_resolution_notes?: string
+          p_status: string
+        }
+        Returns: {
+          archived_at: string | null
+          assigned_admin_id: string | null
+          building_id: string | null
+          campus_id: string
+          category: string
+          created_at: string
+          description: string
+          floor_id: string | null
+          id: string
+          internal_notes: string | null
+          map_element_id: string | null
+          priority: string
+          reporter_id: string
+          resolution_notes: string | null
+          resolved_at: string | null
+          status: string
+          title: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "reports"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      upsert_system_settings: { Args: { p_entries: Json }; Returns: number }
     }
     Enums: {
       [_ in never]: never

@@ -42,11 +42,11 @@ Status values: `READY`, `ACTIVE`, `BLOCKED`, `FOR REVIEW`, `DONE`.
   - Depends on: A5 and B5 contract review
   - Test result: Pending
   - Pull Request: Pending
-- [ ] **A7 — Operations service contracts**
-  - Status: `BLOCKED`
-  - Branch: `feature/operations-services`
+- [x] **A7 — Operations service contracts**
+  - Status: `FOR REVIEW`
+  - Branch: `A6-A9` (continued here by developer instruction; A6 skipped)
   - Depends on: A1 and A5
-  - Test result: Pending
+  - Test result: PASS — Vite build, 210 Vitest tests, live guest/student/admin operations RLS and private Storage matrix, migration-history reconciliation, generated types, and security/performance advisor review
   - Pull Request: Pending
 - [ ] **A8 — Cross-system security and integration verification**
   - Status: `BLOCKED`
@@ -63,8 +63,8 @@ Status values: `READY`, `ACTIVE`, `BLOCKED`, `FOR REVIEW`, `DONE`.
 
 ## Current handoff note
 
-- Active package: A5 — Campus structure, directory, and graph services (`FOR REVIEW`, same branch by developer instruction)
+- Active package: A7 — Operations service contracts (`FOR REVIEW`, same `A6-A9` branch by developer instruction)
 - Last completed package: None
-- Known blocker: None. Leaked-password protection, production SMTP, and production redirect configuration remain deployment dashboard tasks.
-- Important changed files: `src/services/campusStructureService.ts`, `src/pages/AdminMapBuilderPage.tsx`, `src/components/map-builder/CampusEditor.tsx`, `src/components/map-builder/FloorEditor.tsx`, `src/types/database.generated.ts`, `supabase/migrations/20260806113935_establish_campus_structure_contract.sql`, `scripts/verify-a5-campus-structure.mjs`
-- Next recommended action: Complete the A5 manual site checklist, then obtain A5 and B5 contract review before beginning A6 publish orchestration.
+- Known blocker: A6 remains blocked on the B5 contract review and was intentionally skipped. Leaked-password protection, production SMTP, and production redirect configuration remain deployment dashboard tasks.
+- Important changed files: `supabase/migrations/20260807074958_establish_operations_service_contracts.sql`, `src/types/database.generated.ts`, operations services under `src/services`, `scripts/verify-a7-operations.mjs`, `docs/progress/DEVELOPER_1_A7_VERIFICATION.md`
+- Next recommended action: Complete the A7 manual site checklist and obtain review; resume A6 only after the B5 contract is approved.

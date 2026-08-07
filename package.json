@@ -11,7 +11,8 @@
     "verify:a1": "node scripts/verify-a1-supabase.mjs",
     "verify:a2": "node scripts/verify-a2-auth.mjs",
     "verify:a3": "node scripts/verify-a3-admin-users.mjs",
-    "verify:a5": "node scripts/verify-a5-campus-structure.mjs"
+    "verify:a5": "node scripts/verify-a5-campus-structure.mjs",
+    "verify:a7": "node scripts/verify-a7-operations.mjs"
   },
   "dependencies": {
     "@emotion/react": "11.14.0",

@@ -4,6 +4,8 @@ import type { Tables, TablesInsert } from "../types/database.generated";
 import { logActivity } from "./activityLogService";
 
 export type AnnouncementRow = Tables<"announcements">;
+export type AnnouncementLocationRow = Tables<"announcement_locations">;
+export type AnnouncementLocationInput = Omit<TablesInsert<"announcement_locations">, "announcement_id">;
 
 export type AnnouncementCategory = "general" | "academic" | "event" | "emergency" | "maintenance";
 export type AnnouncementPriority = "low" | "normal" | "high" | "urgent";
@@ -230,6 +232,24 @@ export async function archiveAnnouncement(id: string): Promise<void> {
   await logActivity({ action: "announcement.archive", entityType: "announcement", entityId: id });
 }
 
+/** Read mapped notices and temporary closures; visibility and expiry are enforced by RLS. */
+export async function listAnnouncementLocations(announcementId: string): Promise<AnnouncementLocationRow[]> {
+  const { data, error } = await getSupabase().from("announcement_locations").select("*").eq("announcement_id", announcementId).order("created_at");
+  if (error) throw error;
+  return data ?? [];
+}
+
+/** Replace mapped locations, including controlled navigation-edge closures, for an announcement. */
+export async function replaceAnnouncementLocations(announcementId: string, locations: AnnouncementLocationInput[]): Promise<AnnouncementLocationRow[]> {
+  const supabase = getSupabase();
+  const removed = await supabase.from("announcement_locations").delete().eq("announcement_id", announcementId);
+  if (removed.error) throw removed.error;
+  if (locations.length === 0) return [];
+  const { data, error } = await supabase.from("announcement_locations").insert(locations.map((location) => ({ ...location, announcement_id: announcementId }))).select("*");
+  if (error) throw error;
+  return data ?? [];
+}
+
 export const announcementService = {
   getPublishedAnnouncements,
   listAnnouncements,
@@ -237,4 +257,6 @@ export const announcementService = {
   updateAnnouncement,
   publishAnnouncement,
   archiveAnnouncement,
+  listAnnouncementLocations,
+  replaceAnnouncementLocations,
 };

@@ -6,6 +6,8 @@ import { getPublishedAnnouncements } from "./announcementService";
 
 export type EventRow = Tables<"events">;
 export type EventLocationRow = Tables<"event_locations">;
+export type EventStallRow = Tables<"event_stalls">;
+export type EventStallInput = Pick<TablesInsert<"event_stalls">, "name" | "description" | "x" | "y" | "width" | "height" | "metadata" | "event_location_id">;
 
 export interface CampusEvent {
   id: string;
@@ -268,6 +270,24 @@ export async function archiveEvent(id: string): Promise<void> {
   await logActivity({ action: "event.archive", entityType: "event", entityId: id });
 }
 
+/** Public/admin stall reader; RLS hides stalls for drafts and expired events from guests/students. */
+export async function listEventStalls(eventId: string): Promise<EventStallRow[]> {
+  const { data, error } = await getSupabase().from("event_stalls").select("*").eq("event_id", eventId).order("created_at");
+  if (error) throw error;
+  return data ?? [];
+}
+
+/** Replace an event's stall layout as one service-level operation. */
+export async function replaceEventStalls(eventId: string, stalls: EventStallInput[]): Promise<EventStallRow[]> {
+  const supabase = getSupabase();
+  const removed = await supabase.from("event_stalls").delete().eq("event_id", eventId);
+  if (removed.error) throw removed.error;
+  if (stalls.length === 0) return [];
+  const { data, error } = await supabase.from("event_stalls").insert(stalls.map((stall) => ({ ...stall, event_id: eventId }))).select("*");
+  if (error) throw error;
+  return data ?? [];
+}
+
 export const eventService = {
   getPublishedAnnouncements,
   getUpcomingEvents,
@@ -275,4 +295,6 @@ export const eventService = {
   createEvent,
   updateEvent,
   archiveEvent,
+  listEventStalls,
+  replaceEventStalls,
 };
