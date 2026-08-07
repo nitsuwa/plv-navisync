@@ -5,6 +5,7 @@ import { MARKER_STYLES } from "../../data/mapData";
 import type { LayerToolDescriptor } from "./constants";
 import type { Campus, CampusBuilding, CampusMarker, SimpleTool, EditorLayer, CampusSelection, RubberBand, CampusDecorAsset } from "./types";
 import { DECOR_ASSET_MAP, BUILDING_TYPE_MAP, genId, getRotatedAABB } from "./constants";
+import { computeBuildingPlacement, shouldDrawNavConnector } from "../../lib/editorPlacement";
 
 // ── Rotation-aware resize cursor helpers (shared by buildings and decor assets) ──
 function angleToCursor(deg: number): string {
@@ -46,6 +47,8 @@ interface CanvasProps {
   onCanvasDown: (e: React.MouseEvent<SVGSVGElement>) => void;
   onCanvasMove: (e: React.MouseEvent<SVGSVGElement>) => void;
   onCanvasUp: (e: React.MouseEvent<SVGSVGElement>) => void;
+  /** Fired when the cursor leaves the canvas (defaults to onCanvasUp for backward compatibility) */
+  onCanvasLeave?: (e: React.MouseEvent<SVGSVGElement>) => void;
   onCanvasDblClick: (e: React.MouseEvent<SVGSVGElement>) => void;
   onItemDown: (e: React.MouseEvent, type: "building" | "marker" | "decorAsset", id: string, ox: number, oy: number) => void;
   onItemContextMenu?: (e: React.MouseEvent, type: "building" | "marker" | "path", id: string) => void;
@@ -185,7 +188,7 @@ export function Canvas({
   campus, tool, layer, selected, multiSelected, rubberBand, activeTools, drawingPath, snapGrid,
   zoom, pan, svgRef, containerRef, cursor,
   buildingDrag, guides, cursorPos, overlappingBuildings,
-  onCanvasDown, onCanvasMove, onCanvasUp, onCanvasDblClick,
+  onCanvasDown, onCanvasMove, onCanvasUp, onCanvasLeave, onCanvasDblClick,
   onItemDown, onItemContextMenu, onResizeStart, onBuildingDoubleClick, onPathClick, onSelect,
   onResetView, onZoomIn, onZoomOut, onSetTool, onToggleSnap,
   onWheel, invalidBuildings = new Set(),
@@ -402,7 +405,7 @@ export function Canvas({
         onMouseDown={onCanvasDown}
         onMouseMove={onCanvasMove}
         onMouseUp={onCanvasUp}
-        onMouseLeave={onCanvasUp}
+        onMouseLeave={onCanvasLeave ?? onCanvasUp}
         onDoubleClick={onCanvasDblClick}
         onContextMenu={(e) => e.preventDefault()}
       >
@@ -461,8 +464,12 @@ export function Canvas({
           </g>
 
           {/* Layer-specific indicators */}
+          {/* Navigation: green dashed connector from a building's entrance to the
+              walking network — drawn ONLY for buildings that actually have a nav
+              node attached (the user created navigation data). A bare building
+              must never silently render path-looking decoration. */}
           {layer === "navigation" &&
-            buildings.map((b) => (
+            buildings.filter((b) => shouldDrawNavConnector(b.id, campus.navNodes ?? [], b.entranceNodeId)).map((b) => (
               <g key={`nav-${b.id}`} opacity={0.65}>
                 <line x1={b.x + b.width / 2} y1={b.y + b.height} x2={b.x + b.width / 2} y2={campus.canvasH * 0.9} stroke="#16a34a" strokeWidth={3} strokeDasharray="8 4" strokeLinecap="round" />
                 <circle cx={b.x + b.width / 2} cy={b.y + b.height + 6} r={5} fill="#16a34a" />
@@ -583,16 +590,18 @@ export function Canvas({
             );
           })()}
 
-          {/* Building drag preview */}
+          {/* Building drag preview — uses the SAME geometry function as the
+              finalize step, so the preview and the created building always match
+              exactly (position, size, minimums, canvas clamping). */}
           {buildingDrag && (() => {
-            const rx = Math.min(buildingDrag.sx, buildingDrag.cx);
-            const ry = Math.min(buildingDrag.sy, buildingDrag.cy);
-            const rw = Math.abs(buildingDrag.cx - buildingDrag.sx);
-            const rh = Math.abs(buildingDrag.cy - buildingDrag.sy);
+            const r = computeBuildingPlacement(
+              buildingDrag.sx, buildingDrag.sy, buildingDrag.cx, buildingDrag.cy,
+              campus.canvasW, campus.canvasH
+            );
             return (
               <g>
-                <rect x={rx} y={ry} width={rw} height={rh} rx={6} fill="var(--primary)" fillOpacity={0.12} stroke="var(--primary)" strokeWidth={2} strokeDasharray="8 4" />
-                <text x={rx + rw / 2} y={ry + rh / 2 + 3} textAnchor="middle" fill="var(--primary)" fontSize={10} fontWeight="700" className="pointer-events-none select-none">{rw}×{rh}</text>
+                <rect x={r.x} y={r.y} width={r.width} height={r.height} rx={6} fill="var(--primary)" fillOpacity={0.12} stroke="var(--primary)" strokeWidth={2} strokeDasharray="8 4" />
+                <text x={r.x + r.width / 2} y={r.y + r.height / 2 + 3} textAnchor="middle" fill="var(--primary)" fontSize={10} fontWeight="700" className="pointer-events-none select-none">{r.width}×{r.height}</text>
               </g>
             );
           })()}

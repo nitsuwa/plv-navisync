@@ -6,6 +6,7 @@
   "scripts": {
     "build": "vite build",
     "dev": "vite",
+    "test": "vitest run",
     "demo:accounts": "node scripts/provision-demo-accounts.mjs",
     "verify:a1": "node scripts/verify-a1-supabase.mjs",
     "verify:a2": "node scripts/verify-a2-auth.mjs",

@@ -31,8 +31,10 @@ import type {
   SimpleTool, EditorLayer, RubberBand, CampusRoute, CampusPath,
   CampusDecorAsset, BuildingTypeDescriptor,
 } from "./types";
-import { BUILDING_TYPE_MAP, DECOR_ASSET_MAP, getRotatedAABB } from "./constants";
+import { BUILDING_TYPE_MAP, DECOR_ASSET_MAP } from "./constants";
 import { ToolbarTooltip } from "./ToolbarTooltip";
+import { validateCampusData, computeBuildingOverlaps } from "../../lib/campusValidation";
+import { computeBuildingPlacement, resetTransientToolState } from "../../lib/editorPlacement";
 
 // ── Per-layer marker configuration ──
 const LAYER_MARKER_CONFIG: Record<string, { name: string; type: string; color: string }> = {
@@ -189,79 +191,12 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     }
   }, [shake]);
 
-  // ── Pure validation — no side effects ──
+  // ── Pure validation — no side effects (logic lives in src/lib/campusValidation.ts) ──
   const validateCampus = useCallback((): ValidationIssue[] => {
-    const errors: ValidationIssue[] = [];
-    const seenIds = new Set<string>();
-
-    if (!campus.name || campus.name.trim() === "") {
-      errors.push({ type: "missing_campus_name", message: "Please enter a name for the campus." });
-    }
-    const bldgs = campus.buildings;
-    for (const b of bldgs) {
-      if (!b.name || b.name === "New Building") {
-        const key = `${b.id}-missing_name`;
-        if (!seenIds.has(key)) {
-          seenIds.add(key);
-          errors.push({
-            type: "missing_name",
-            message: `Please enter a name for Building "${b.code}".`,
-            buildingId: b.id,
-          });
-        }
-      }
-      if (!b.code || b.code === "NEW") {
-        const key = `${b.id}-missing_code`;
-        if (!seenIds.has(key)) {
-          seenIds.add(key);
-          errors.push({
-            type: "missing_code",
-            message: `Please assign a building code to "${b.name}".`,
-            buildingId: b.id,
-          });
-        }
-      }
-      // Use rotated AABB for boundary check so it matches what the user sees
-      const bAABB = getRotatedAABB(b.x, b.y, b.width, b.height, b.rotation ?? 0);
-      if (bAABB.x < 0 || bAABB.y < 0 || bAABB.x + bAABB.width > campus.canvasW || bAABB.y + bAABB.height > campus.canvasH) {
-        const key = `${b.id}-boundary`;
-        if (!seenIds.has(key)) {
-          seenIds.add(key);
-          errors.push({
-            type: "boundary",
-            message: `The building "${b.code}" extends beyond the campus boundary. Move or resize it so it fits within the map.`,
-            buildingId: b.id,
-          });
-        }
-      }
-      if (b.floors.length === 0) {
-        const key = `${b.id}-no_floors`;
-        if (!seenIds.has(key)) {
-          seenIds.add(key);
-          errors.push({
-            type: "no_floors",
-            message: `Please add at least one floor to Building "${b.code}".`,
-            buildingId: b.id,
-          });
-        }
-      }
-    }
-    if (overlappingBuildings.size > 0) {
-      for (const id of overlappingBuildings) {
-        const b = bldgs.find((x) => x.id === id);
-        if (!b) continue;
-        const key = `${id}-overlap`;
-        if (!seenIds.has(key)) {
-          seenIds.add(key);
-          errors.push({
-            type: "overlap",
-            message: `Building "${b.code}" overlaps with another building. Adjust its position to resolve the overlap.`,
-            buildingId: id,
-          });
-        }
-      }
-    }
-    return errors;
+    // Narrow deps mirror the original inline implementation: the checks only
+    // read name/buildings/canvasW/canvasH, so the memo must not re-create on
+    // unrelated campus mutations (markers, paths, navNodes, …).
+    return validateCampusData(campus, overlappingBuildings);
   }, [campus.name, campus.buildings, campus.canvasW, campus.canvasH, overlappingBuildings]);
 
   // ── Real-time validation error count ──
@@ -348,23 +283,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
 
   // ── Overlap detection (handles rotated buildings via rotated AABB) ──────────
   const computeOverlaps = useCallback((bldgs: CampusBuilding[]): Set<string> => {
-    const overlapping = new Set<string>();
-    for (let i = 0; i < bldgs.length; i++) {
-      for (let j = i + 1; j < bldgs.length; j++) {
-        const a = getRotatedAABB(bldgs[i].x, bldgs[i].y, bldgs[i].width, bldgs[i].height, bldgs[i].rotation ?? 0);
-        const b = getRotatedAABB(bldgs[j].x, bldgs[j].y, bldgs[j].width, bldgs[j].height, bldgs[j].rotation ?? 0);
-        if (
-          a.x < b.x + b.width &&
-          a.x + a.width > b.x &&
-          a.y < b.y + b.height &&
-          a.y + a.height > b.y
-        ) {
-          overlapping.add(bldgs[i].id);
-          overlapping.add(bldgs[j].id);
-        }
-      }
-    }
-    return overlapping;
+    return computeBuildingOverlaps(bldgs);
   }, []);
 
   // Recompute overlaps whenever buildings change
@@ -762,15 +681,15 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
 
     if (resizing) { setResizing(null); return; }      // Finalize building drag-to-create
     if (buildingDrag) {
-      const rx = Math.min(buildingDrag.sx, buildingDrag.cx);
-      const ry = Math.min(buildingDrag.sy, buildingDrag.cy);
-      const rw = Math.max(Math.abs(buildingDrag.cx - buildingDrag.sx), 40);
-      const rh = Math.max(Math.abs(buildingDrag.cy - buildingDrag.sy), 30);
+      // Shared geometry with the canvas preview (computeBuildingPlacement), so
+      // the final building is always exactly where/whatever the preview showed.
+      const rect = computeBuildingPlacement(
+        buildingDrag.sx, buildingDrag.sy, buildingDrag.cx, buildingDrag.cy,
+        campus.canvasW, campus.canvasH
+      );
       const nb: CampusBuilding = {
         id: genId("bld"), name: "New Building", code: "NEW", category: "Academic", description: "",
-        x: Math.round(Math.max(0, Math.min(campus.canvasW - rw, rx))),
-        y: Math.round(Math.max(0, Math.min(campus.canvasH - rh, ry))),
-        width: Math.round(rw), height: Math.round(rh),
+        x: rect.x, y: rect.y, width: rect.width, height: rect.height,
         color: BUILDING_COLORS[Math.floor(Math.random() * BUILDING_COLORS.length)],
         expanded: false,
         floors: [{ id: genId("fl"), number: 1, label: "Ground Floor", rooms: [], paths: [] }],
@@ -796,6 +715,54 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     gestureHistoryPushed.current = false;
   };
   const handleSvgUp = () => { endPan(); dragging.current = null; setGuides([]); gestureHistoryPushed.current = false; };
+
+  // ── Mouse leaves the canvas mid-gesture: CANCEL placement/drawing instead of
+  // finalizing it. (onMouseLeave previously ran the same handler as mouseup, so
+  // a drag that exited the canvas — e.g. toward the top-left — could commit a
+  // building at an unintended spot without the user ever releasing the button.) ──
+  const handleSvgLeave = () => {
+    endPan();
+    dragging.current = null;
+    if (resizing) setResizing(null);
+    if (rotating.current) { rotating.current = null; setRotatingId(null); setRotatingAngle(0); }
+    if (decorRotating.current) { decorRotating.current = null; setDecorRotatingId(null); setRotatingAngle(0); }
+    if (decorResizing.current) { decorResizing.current = null; setDecorResizingId(null); }
+    setBuildingDrag(null);
+    setRubberBand(null);
+    setGuides([]);
+    gestureHistoryPushed.current = false;
+  };
+
+  // ── Tool switching — clears stale drawing/preview state so switching tools
+  // never leaves an unfinished path preview, building drag, or rubber band ──
+  const switchTool = useCallback((t: SimpleTool) => {
+    const reset = resetTransientToolState();
+    setTool(t);
+    setDP(reset.drawingPath);
+    setBuildingDrag(reset.buildingDrag);
+    setRubberBand(reset.rubberBand);
+    setGuides(reset.guides);
+    if (t !== "building") setSelectedBuildingType(null);
+  }, []);
+
+  // ── Layer switching — clears ALL transient tool state and returns to the
+  // select tool so an incompatible active tool can never leak between
+  // Campus / Navigation / Accessibility / Emergency / Events ──
+  const switchLayer = useCallback((next: EditorLayer) => {
+    const reset = resetTransientToolState();
+    setLayer(next);
+    setTool("select");
+    setSelected(null);
+    setMultiSelected([]);
+    setShowAlignTools(false);
+    setDP(reset.drawingPath);
+    setBuildingDrag(reset.buildingDrag);
+    setRubberBand(reset.rubberBand);
+    setGuides(reset.guides);
+    setSelectedBuildingType(reset.selectedBuildingType);
+    setHighlightedRoute(null);
+  }, []);
+
   const handleDblClick = () => {
     if (tool === "path" && drawingPath.length >= 2) {
       const cfg = LAYER_PATH_CONFIG[layer] ?? LAYER_PATH_CONFIG.campus;
@@ -1082,16 +1049,18 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
       }
       if (e.key === "Escape") {
         setDP([]);
-        if (tool === "path") setTool("select");
+        if (tool === "path") switchTool("select");
         setSelected(null);
         setMultiSelected([]);
         setShowAlignTools(false);
         setGuides([]);
         setSelectedBuildingType(null);
+        setBuildingDrag(null);
+        setRubberBand(null);
       }
       // Single-letter tool shortcuts must NOT fire while Ctrl/Cmd is held
       if (!e.ctrlKey && !e.metaKey) {
-        if (e.key === "v" || e.key === "V") setTool("select");
+        if (e.key === "v" || e.key === "V") switchTool("select");
         if (e.code === "Space") {
           e.preventDefault();
           // Hold-to-pan: save previous tool, activate pan temporarily
@@ -1100,26 +1069,21 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
             setTool("pan");
           }
         }
-        if (e.key === "m" || e.key === "M") setTool("marker");
-        if (e.key === "b" || e.key === "B") setTool("building");
-        if (e.key === "p" || e.key === "P") setTool("path");
-        if (e.key === "e" || e.key === "E") setTool("erase");
-        if (e.key === "r" || e.key === "R") setTool("room");
-        if (e.key === "l" || e.key === "L") setTool("room");
-        if (e.key === "x" || e.key === "X") setTool("erase");
-        if (e.key === "a" || e.key === "A") setTool("building");
+        if (e.key === "m" || e.key === "M") switchTool("marker");
+        if (e.key === "b" || e.key === "B") switchTool("building");
+        if (e.key === "p" || e.key === "P") switchTool("path");
+        if (e.key === "e" || e.key === "E") switchTool("erase");
+        if (e.key === "r" || e.key === "R") switchTool("room");
+        if (e.key === "l" || e.key === "L") switchTool("room");
+        if (e.key === "x" || e.key === "X") switchTool("erase");
+        if (e.key === "a" || e.key === "A") switchTool("building");
         if (e.key === "0") resetView();
         // Layer switching: 1=Campus, 2=Navigation, 3=Accessibility, 4=Emergency, 5=Events
         if (e.key >= "1" && e.key <= "5") {
           const layerByKey: Record<string, EditorLayer> = {
             "1": "campus", "2": "navigation", "3": "accessibility", "4": "emergency", "5": "events",
           };
-          setLayer(layerByKey[e.key]);
-          setTool("select");
-          setSelected(null);
-          setMultiSelected([]);
-          setShowAlignTools(false);
-          setGuides([]);
+          switchLayer(layerByKey[e.key]);
         }
         // ? — keyboard shortcut cheat sheet
         if (e.key === "?") {
@@ -1174,7 +1138,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     };
     window.addEventListener("keydown", k);
     return () => window.removeEventListener("keydown", k);
-  }, [selected, tool, buildings, markers, paths, undoEdit, redoEdit, showTutorial, runSave, pushHistory, campus, onUpdate]);
+  }, [selected, tool, buildings, markers, paths, undoEdit, redoEdit, showTutorial, runSave, pushHistory, campus, onUpdate, switchTool, switchLayer]);
 
   // ── Space keyup: restore previous tool when space is released (hold-to-pan) ──
   useEffect(() => {
@@ -1315,7 +1279,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
               {toolConfig.map((t) => (
                 <ToolbarTooltip key={t.id} tool={t.id} isActive={tool === t.id}>
                   <button
-                    onClick={() => setTool(t.id)}
+                    onClick={() => switchTool(t.id)}
                     className={cn(
                       "flex items-center justify-center h-8 w-8 rounded-md transition-all",
                       tool === t.id
@@ -1496,7 +1460,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
               <motion.button
                 key={l.id}
                 layout
-                onClick={() => setLayer(l.id)}
+                onClick={() => switchLayer(l.id)}
                 className={cn(
                   "relative flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[10px] font-bold shrink-0 whitespace-nowrap",
                   !isActive && "text-muted-foreground hover:text-foreground hover:bg-muted/60"
@@ -1641,6 +1605,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
           resizingId={resizing?.id ?? null}
           onCanvasMove={handleSvgMoveResize}
           onCanvasUp={handleSvgUpResize}
+          onCanvasLeave={handleSvgLeave}
           onCanvasDblClick={handleDblClick}
           onItemDown={onItemDown}
           onItemContextMenu={handleContextMenu}
