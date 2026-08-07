@@ -113,6 +113,49 @@ export function selectActiveCampus(campuses: Campus[], preferredId?: string): Ca
     ?? null;
 }
 
+/**
+ * Resolve the id of the campus that new operational records (events,
+ * announcements, reports) should attach to.
+ *
+ * Order of preference:
+ *  1. The designated default campus (is_default = true) — the designed path.
+ *  2. The non-archived campus with the most real content (building count),
+ *     used while no default has been flagged yet (e.g. draft campuses).
+ *  3. The earliest-created non-archived campus as a final fallback.
+ *
+ * Returns null only when no usable campus exists at all.
+ */
+export async function resolveActiveCampusId(): Promise<string | null> {
+  const supabase = getSupabase();
+
+  // 1) Prefer the designated default campus.
+  const { data: def } = await supabase
+    .from("campuses")
+    .select("id")
+    .eq("is_default", true)
+    .is("archived_at", null)
+    .maybeSingle();
+  if (def?.id) return def.id;
+
+  // 2/3) Fall back to a non-archived campus, preferring the one with the most
+  // real content (buildings) and tie-breaking on earliest creation. PostgREST
+  // embedded aggregate `buildings(count)` returns [{ count }] per row.
+  const { data: candidates } = await supabase
+    .from("campuses")
+    .select("id, buildings(count)")
+    .is("archived_at", null)
+    .order("created_at", { ascending: true });
+
+  const rows = (candidates ?? []) as unknown as {
+    id: string;
+    buildings?: { count: number }[];
+  }[];
+  const picked = rows
+    .slice()
+    .sort((a, b) => (b.buildings?.[0]?.count ?? 0) - (a.buildings?.[0]?.count ?? 0))[0];
+  return picked?.id ?? null;
+}
+
 export async function getCampusById(id: string): Promise<Campus | null> {
   const { data, error } = await getSupabase().from("campuses").select("*").eq("id", id).maybeSingle();
   assertOk(error);

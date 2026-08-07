@@ -10,6 +10,7 @@ const CampusMapPage        = lazy(() => import("../pages/CampusMapPage").then(m 
 const BuildingsPage        = lazy(() => import("../pages/BuildingsPage").then(m => ({ default: m.BuildingsPage })));
 const BuildingDetailsPage  = lazy(() => import("../pages/BuildingDetailsPage").then(m => ({ default: m.BuildingDetailsPage })));
 const HelpCenterPage       = lazy(() => import("../pages/HelpCenterPage").then(m => ({ default: m.HelpCenterPage })));
+const AnnouncementsPage    = lazy(() => import("../pages/AnnouncementsPage").then(m => ({ default: m.AnnouncementsPage })));
 const AdminLoginPage       = lazy(() => import("../pages/AdminLoginPage").then(m => ({ default: m.AdminLoginPage })));
 const AdminDashboardPage   = lazy(() => import("../pages/AdminDashboardPage").then(m => ({ default: m.AdminDashboardPage })));
 const AdminBuildingsPage   = lazy(() => import("../pages/AdminBuildingsPage").then(m => ({ default: m.AdminBuildingsPage })));
@@ -23,6 +24,8 @@ const AdminRoutesPage      = lazy(() => import("../pages/AdminRoutesPage").then(
 const AdminReportsPage     = lazy(() => import("../pages/AdminReportsPage").then(m => ({ default: m.AdminReportsPage })));
 const AdminAccessibilityPage = lazy(() => import("../pages/AdminAccessibilityPage").then(m => ({ default: m.AdminAccessibilityPage })));
 const AdminEventsPage      = lazy(() => import("../pages/AdminEventsPage").then(m => ({ default: m.AdminEventsPage })));
+const AdminAnnouncementsPage = lazy(() => import("../pages/AdminAnnouncementsPage").then(m => ({ default: m.AdminAnnouncementsPage })));
+const AdminActivityLogsPage = lazy(() => import("../pages/AdminActivityLogsPage").then(m => ({ default: m.AdminActivityLogsPage })));
 const StudentProfilePage   = lazy(() => import("../pages/StudentProfilePage").then(m => ({ default: m.StudentProfilePage })));
 const StudentFavoritesPage = lazy(() => import("../pages/StudentFavoritesPage").then(m => ({ default: m.StudentFavoritesPage })));
 const StudentReportsPage   = lazy(() => import("../pages/StudentReportsPage").then(m => ({ default: m.StudentReportsPage })));
@@ -134,6 +137,7 @@ export const router = createBrowserRouter([
       { path: "buildings", element: <SuspensePage><BuildingsPage /></SuspensePage> },
       { path: "buildings/:id", element: <SuspensePage><BuildingDetailsPage /></SuspensePage> },
       { path: "help", element: <SuspensePage><HelpCenterPage /></SuspensePage> },
+      { path: "announcements", element: <SuspensePage><AnnouncementsPage /></SuspensePage> },
 
       // Student portal
       { path: "my-day", element: <SuspensePage><StudentMyDayPage /></SuspensePage> },
@@ -170,6 +174,8 @@ export const router = createBrowserRouter([
       { path: "reports", element: <SuspensePage><AdminReportsPage /></SuspensePage> },
       { path: "accessibility", element: <SuspensePage><AdminAccessibilityPage /></SuspensePage> },
       { path: "events", element: <SuspensePage><AdminEventsPage /></SuspensePage> },
+      { path: "announcements", element: <SuspensePage><AdminAnnouncementsPage /></SuspensePage> },
+      { path: "activity-logs", element: <SuspensePage><AdminActivityLogsPage /></SuspensePage> },
     ],
   },
 ]);

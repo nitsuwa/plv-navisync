@@ -1,5 +1,6 @@
 import { X, CalendarDays, MapPin, Navigation } from "lucide-react";
 import { motion } from "motion/react";
+import { createPortal } from "react-dom";
 
 interface EventData {
   id: string;
@@ -20,7 +21,9 @@ interface EventPopupProps {
 }
 
 export function EventPopup({ event, onClose, onNavigate }: EventPopupProps) {
-  return (
+  // Portaled to body so this overlay clears PublicLayout's z-[1] stacking context
+  // and stays above the z-50 mobile bottom navigation.
+  return createPortal(
     <motion.div
       role="dialog"
       aria-modal="true"
@@ -29,7 +32,7 @@ export function EventPopup({ event, onClose, onNavigate }: EventPopupProps) {
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       transition={{ duration: 0.2 }}
-      className="absolute inset-0 z-50 flex items-end sm:items-center justify-center bg-background/60 backdrop-blur-sm"
+      className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-background/60 backdrop-blur-sm"
       onClick={onClose}
     >
       <motion.div
@@ -73,6 +76,7 @@ export function EventPopup({ event, onClose, onNavigate }: EventPopupProps) {
           <Navigation className="h-4 w-4" /> Navigate to {event.venue}
         </button>
       </motion.div>
-    </motion.div>
+    </motion.div>,
+    document.body
   );
 }

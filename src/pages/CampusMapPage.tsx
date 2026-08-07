@@ -4,7 +4,7 @@ import {
   Search, Layers, ZoomIn, ZoomOut, LocateFixed, Building2, X,
   Accessibility, AlertTriangle, Navigation, Bookmark, Flag,
   Clock, ChevronRight, ChevronLeft, ChevronDown,
-  Share2, CalendarDays, MapPin, ArrowUpDown, Compass,
+  Share2, CalendarDays, MapPin, Compass,
   Footprints, QrCode, Loader2, RefreshCw, AlertCircle,
 } from "lucide-react";
 
@@ -17,9 +17,10 @@ import { useStudentAuth } from "../hooks/useStudentAuth";
 import { useCampusData } from "../contexts/CampusDataContext";
 import { buildingPositionsFromCampus, floorPlansFromCampus, buildingsFromCampus } from "../lib/mapDataAdapter";
 import { findIndoorRoute, findIndoorRouteForFloor, type IndoorRoute } from "../lib/indoorPathfinding";
-import { findBuildingPath } from "../lib/pathfinding";
+import { planBuildingRoute, type PlannedRoute } from "../lib/routePlanner";
 import {
-  BuildingPicker, ReportModal, SignInPrompt,
+  RoutePlannerDialog, RouteStepsPanel, RouteMapOverlay,
+  ReportModal, SignInPrompt,
   BuildingInfoPanel, MobileBuildingSheet, QRPlaceholder,
 } from "../components/map";
 import { studentAccountService } from "../services/studentAccountService";
@@ -27,8 +28,6 @@ import { studentAccountService } from "../services/studentAccountService";
 type MapMode  = "standard" | "accessible" | "emergency";
 
 // ── Map constants ──────────────────────────────────────────────────────────
-const MAIN_H = 289;
-const MAIN_V = 401;
 const SVG_W  = 900;
 const SVG_H  = 680;
 const SVG_CX = SVG_W / 2;
@@ -76,25 +75,6 @@ const BUILDING_ACCESSIBILITY: Record<string, string[]> = {
   b5: ["Level Entry", "Accessible Seating", "Accessible Restroom"],
   b6: ["Ground Floor Access", "Wide Corridors"],
 };
-
-function computeRoute(from: typeof B_POS[string], to: typeof B_POS[string]): Pt[] {
-  const fCx = from.x + from.w/2, fCy = from.y + from.h/2;
-  const tCx = to.x   + to.w/2,   tCy = to.y   + to.h/2;
-  const pts: Pt[] = [{ x:fCx, y:fCy }];
-  if ((fCx < MAIN_V) === (tCx < MAIN_V) && (fCy < MAIN_H) === (tCy < MAIN_H)) {
-    pts.push({ x:fCx, y:MAIN_H }, { x:tCx, y:MAIN_H });
-  } else {
-    pts.push({ x:fCx, y:MAIN_H }, { x:MAIN_V, y:MAIN_H }, { x:tCx, y:MAIN_H });
-  }
-  pts.push({ x:tCx, y:tCy });
-  return pts;
-}
-function calcDist(pts: Pt[]): number {
-  let d = 0;
-  for (let i = 1; i < pts.length; i++)
-    d += Math.hypot(pts[i].x - pts[i-1].x, pts[i].y - pts[i-1].y);
-  return Math.round(d * 0.45);
-}
 
 // ═════════════════════════════════════════════════════════════════════════════
 export function CampusMapPage() {
@@ -535,29 +515,18 @@ export function CampusMapPage() {
   }, []);
 
   // ── Route ──────────────────────────────────────────────────────────────
-  const route = useMemo(() => {
+  const route = useMemo<PlannedRoute | null>(() => {
     if (!fromBuilding || !toBuilding) return null;
 
-    // Accessible mode: use graph-based pathfinding with accessibleOnly=true
-    if (mapMode === "accessible") {
-      const graphPath = findBuildingPath(fromBuilding.id, toBuilding.id, true);
-      if (graphPath && graphPath.waypoints.length >= 2) {
-        return {
-          points: graphPath.waypoints,
-          dist: graphPath.distanceM,
-          mins: graphPath.minutes,
-          steps: graphPath.steps,
-          isGraphBased: true,
-        };
-      }
-    }
-
-    // Standard/Emergency mode or fallback: use SVG-based route
-    const fp = B_POS[fromBuilding.id], tp = B_POS[toBuilding.id];
-    if (!fp || !tp) return null;
-    const points = computeRoute(fp, tp);
-    return { points, dist: calcDist(points), mins: Math.max(1, Math.round(calcDist(points)/80)), steps: undefined, isGraphBased: false };
-  }, [fromBuilding, toBuilding, mapMode]);
+    // Use the route planner: real graph stats in ALL modes, with an SVG
+    // estimate fallback when the buildings are not on the walkway graph.
+    return planBuildingRoute(
+      { id: fromBuilding.id, code: fromBuilding.code, name: fromBuilding.name },
+      { id: toBuilding.id, code: toBuilding.code, name: toBuilding.name },
+      mapMode,
+      B_POS
+    );
+  }, [fromBuilding, toBuilding, mapMode, B_POS]);
 
   // ── Route recalculation transition ─────────────────────────────────────
   // Briefly fade out the old route when from/to building changes
@@ -639,6 +608,20 @@ export function CampusMapPage() {
     setToBuilding(b); setFromBuilding(null);
     setDirectionsMode(true);
   }, []);
+
+  // ── Save recent destination once a route is successfully computed ──
+  const lastSavedDestRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (route && toBuilding && lastSavedDestRef.current !== toBuilding.id) {
+      lastSavedDestRef.current = toBuilding.id;
+      studentAccountService.addRecentDestination({
+        id: toBuilding.id,
+        name: toBuilding.name,
+        code: toBuilding.code,
+      });
+    }
+    if (!toBuilding) lastSavedDestRef.current = null;
+  }, [route, toBuilding]);
 
   const toggleSave = useCallback((id: string) => {
     const b = selected?.id === id ? selected : MOCK_BUILDINGS.find((item) => item.id === id || item.code.toLowerCase() === id.toLowerCase());
@@ -1114,79 +1097,9 @@ const buildingFill = (id: string) =>
               ))}
             </>}
             {/* Route */}
-            {route && (() => {
-              const pathStr = route.points.map(p => `${p.x},${p.y}`).join(" ");
-              const color = mapMode === "accessible" ? "#16a34a" : mapMode === "emergency" ? "#dc2626" : "#1e40af";
-              const glowFilter = mapMode === "standard" ? "url(#route-glow)" : undefined;
-              const pathId = "plv-route-path";
-              const midIdx = Math.floor(route.points.length / 2);
-              return (
-                <g data-route-group className={`transition-opacity duration-300 ${routeFading ? 'opacity-0' : ''}`}>
-                  <defs><path id={pathId} d={`M ${route.points.map(p => `${p.x} ${p.y}`).join(" L ")}`}/></defs>
-                  {/* Outer shadow trail */}
-                  <polyline points={pathStr} fill="none" stroke="rgba(0,0,0,0.12)" strokeWidth={14} strokeLinecap="round" strokeLinejoin="round"/>
-                  {/* White backing */}
-                  <polyline points={pathStr} fill="none" stroke="white" strokeWidth={9} strokeLinecap="round" strokeLinejoin="round"/>
-                  {/* Glow layer */}
-                  <polyline points={pathStr} fill="none" stroke={color} strokeWidth={8} strokeLinecap="round" strokeLinejoin="round" opacity={0.25}
-                    filter={glowFilter}
-                    strokeDasharray="900" strokeDashoffset="900"
-                    style={{ animation:"draw-route 1.4s cubic-bezier(0.4,0,0.2,1) forwards" }}/>
-                  {/* Main animated route line */}
-                  <polyline points={pathStr} fill="none" stroke={color} strokeWidth={5} strokeLinecap="round" strokeLinejoin="round"
-                    strokeDasharray="900" strokeDashoffset="900"
-                    style={{ animation:"draw-route 1.4s cubic-bezier(0.4,0,0.2,1) forwards" }}/>
-                  {/* Marching ants overlay */}
-                  <polyline points={pathStr} fill="none" stroke="rgba(255,255,255,0.6)" strokeWidth={2}
-                    strokeLinecap="round" strokeLinejoin="round" strokeDasharray="8 14"
-                    style={{ animation:"draw-route 1.4s 0.4s ease forwards, dash-flow 1.2s 1.8s linear infinite" }}/>
-                  {/* Directional arrows along the route */}
-                  {route.points.length >= 2 && route.points.slice(0, -1).map((p, i) => {
-                    const next = route.points[i + 1];
-                    const mx = (p.x + next.x) / 2, my = (p.y + next.y) / 2;
-                    if (i % 2 !== 0) return null; // show on alternating segments
-                    return (
-                      <polygon key={i}
-                        points={`${mx-4},${my-6} ${mx+4},${my} ${mx-4},${my+6}`}
-                        fill={color} opacity={0.5}
-                        style={{ animation:`fade-in 1.4s ${0.6 + i*0.1}s ease both` }}/>
-                    );
-                  })}
-                  {/* Waypoint checkpoints at each junction */}
-                  {route.points.slice(1, -1).map((p, i) => (
-                    <g key={`wp${i}`}
-                      style={{ animation:`scale-in 0.3s ${0.8 + i*0.12}s ease both` }}>
-                      <circle cx={p.x} cy={p.y} r={5} fill="white" stroke={color} strokeWidth={2} opacity={0.85}/>
-                      <circle cx={p.x} cy={p.y} r={2} fill={color}/>
-                    </g>
-                  ))}
-                  {/* Start marker — green with flag */}
-                  <g style={{ animation:"scale-in 0.4s 0.3s ease both" }}>
-                    <circle cx={route.points[0].x} cy={route.points[0].y} r={14} fill="#16a34a" stroke="white" strokeWidth={3}
-                      style={{ filter:"drop-shadow(0 2px 6px rgba(22,163,74,0.4))" }}/>
-                    <circle cx={route.points[0].x} cy={route.points[0].y} r={10} fill="none" stroke="rgba(255,255,255,0.5)" strokeWidth={1.5}/>
-                    <text x={route.points[0].x} y={route.points[0].y+4} textAnchor="middle" fill="white" fontSize={11} fontWeight="900" className="select-none">A</text>
-                    {/* Pulse ring */}
-                    <circle cx={route.points[0].x} cy={route.points[0].y} r={14} fill="none" stroke="#16a34a" strokeWidth={2} opacity={0.4}>
-                      <animate attributeName="r" from="14" to="24" dur="2s" repeatCount="indefinite"/>
-                      <animate attributeName="opacity" from="0.4" to="0" dur="2s" repeatCount="indefinite"/>
-                    </circle>
-                  </g>
-                  {/* Destination marker — red pin with expanded pulse */}
-                  <g style={{ animation:"scale-in 0.4s 0.5s ease both" }}>
-                    <circle cx={route.points[route.points.length-1].x} cy={route.points[route.points.length-1].y} r={14} fill="#dc2626" stroke="white" strokeWidth={3}
-                      style={{ filter:"drop-shadow(0 2px 8px rgba(220,38,38,0.5))" }}/>
-                    <circle cx={route.points[route.points.length-1].x} cy={route.points[route.points.length-1].y} r={10} fill="none" stroke="rgba(255,255,255,0.5)" strokeWidth={1.5}/>
-                    <text x={route.points[route.points.length-1].x} y={route.points[route.points.length-1].y+4} textAnchor="middle" fill="white" fontSize={11} fontWeight="900" className="select-none">B</text>
-                    {/* Outer pulse ring */}
-                    <circle cx={route.points[route.points.length-1].x} cy={route.points[route.points.length-1].y} r={14} fill="none" stroke="#dc2626" strokeWidth={2.5} opacity={0.5}>
-                      <animate attributeName="r" from="14" to="32" dur="2.2s" repeatCount="indefinite"/>
-                      <animate attributeName="opacity" from="0.5" to="0" dur="2.2s" repeatCount="indefinite"/>
-                    </circle>
-                  </g>
-                </g>
-              );
-            })()}
+            {route && (
+              <RouteMapOverlay points={route.points} mode={mapMode} fading={routeFading} />
+            )}
                         {/* Buildings */}
             {layers.buildings && MOCK_BUILDINGS.map(b => {
               const pos = B_POS[b.id]; if (!pos) return null;
@@ -1280,60 +1193,19 @@ const buildingFill = (id: string) =>
         )}
 
         {directionsMode ? (
-          /* ── Directions panel ── */
-          <div className="rounded-2xl border border-border shadow-xl overflow-visible"
-            style={{ background:"var(--card)", color:"var(--foreground)" }}>
-            <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-              <div className="flex items-center gap-2">
-                <Navigation className="h-4 w-4 text-primary"/>
-                <span className="text-sm font-extrabold text-foreground" style={{ fontFamily:"var(--font-sans)" }}>Directions</span>
-              </div>
-              <button onClick={() => { setDirectionsMode(false); setFromBuilding(null); setToBuilding(null); }}
-                className="w-8 h-8 md:w-7 md:h-7 rounded-lg bg-muted flex items-center justify-center hover:bg-secondary active:scale-90 transition-all">
-                <X className="h-3.5 w-3.5 text-muted-foreground"/>
-              </button>
-            </div>
-            <div className="p-3 space-y-2">
-              <BuildingPicker badge="A" badgeColor="#16a34a" value={fromBuilding}
-                onSelect={setFromBuilding} onClear={() => setFromBuilding(null)} placeholder="Starting point…"
-                buildings={MOCK_BUILDINGS}/>
-              <div className="flex items-center justify-center">
-                <button onClick={() => { const tmp = fromBuilding; setFromBuilding(toBuilding); setToBuilding(tmp); }}
-                  className="w-8 h-8 md:w-7 md:h-7 rounded-full border border-border bg-card flex items-center justify-center hover:bg-muted active:scale-90 transition-all" aria-label="Swap start and destination">
-                  <ArrowUpDown className="h-3 w-3 text-muted-foreground"/>
-                </button>
-              </div>
-              <BuildingPicker badge="B" badgeColor="#dc2626" value={toBuilding}
-                onSelect={setToBuilding} onClear={() => setToBuilding(null)} placeholder="Destination…"
-                buildings={MOCK_BUILDINGS}/>
-              {route && (
-                <div className="mt-1 p-3 rounded-xl bg-primary/8 border border-primary/20">
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-[10px] font-extrabold text-primary uppercase tracking-widest">Route Active</span>
-                    <span className="w-2 h-2 rounded-full bg-accent animate-pulse"/>
-                  </div>
-                  <div className="flex items-end gap-3 mb-1">
-                    <p className="text-lg font-extrabold text-foreground">{route.dist} m</p>
-                    <p className="text-sm font-semibold text-muted-foreground pb-0.5">{route.mins} min</p>
-                  </div>
-                  {route.steps && route.steps.length > 0 && (
-                    <p className="text-[10px] text-muted-foreground mb-1.5">
-                      {route.steps.length} step{route.steps.length !== 1 ? "s" : ""} · Waypoints: {route.points.length}
-                    </p>
-                  )}
-                  <div className="mt-1 flex flex-wrap gap-1.5">
-                    <span className="flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-green-100 dark:bg-green-900/20 text-green-700 dark:text-green-400 border border-green-200 dark:border-green-800/30">
-                      <span className="w-1.5 h-1.5 rounded-full bg-green-500"/> {fromBuilding?.code ?? "Start"}
-                    </span>
-                    <ArrowUpDown className="h-3 w-3 text-muted-foreground"/>
-                    <span className="flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-red-100 dark:bg-red-900/20 text-destructive border border-red-200 dark:border-red-800/30">
-                      <span className="w-1.5 h-1.5 rounded-full bg-red-500"/> {toBuilding?.code ?? "?"}
-                    </span>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
+          <RoutePlannerDialog
+            from={fromBuilding}
+            to={toBuilding}
+            onFromChange={setFromBuilding}
+            onToChange={setToBuilding}
+            buildings={MOCK_BUILDINGS}
+            mode={mapMode}
+            onModeChange={setMapMode}
+            route={route}
+            onClose={() => { setDirectionsMode(false); setFromBuilding(null); setToBuilding(null); }}
+            onClear={() => { setFromBuilding(null); setToBuilding(null); }}
+            onFindRoute={() => { if (fromBuilding && toBuilding) setDirectionsMode(false); }}
+          />
         ) : (
           /* ── Search bar ── */
           <>
@@ -1574,58 +1446,17 @@ const buildingFill = (id: string) =>
         </div>
       )}
 
-      {/* ══════════════ COMPACT NAVIGATION CARD (only when route active) ══════════════ */}
+      {/* ══════════════ NAVIGATION PANEL (only when route active) ══════════════ */}
       {route && (
-        <div data-no-drag className="absolute bottom-5 left-3 z-20 hidden md:block animate-slide-up">
-          <div className="rounded-2xl border border-border/60 shadow-xl overflow-hidden"
-            style={{ background:"var(--card)", backdropFilter:"blur(16px)", WebkitBackdropFilter:"blur(16px)", width:230 }}>
-            {/* Header — destination name + live indicator */}
-            <div className="flex items-center gap-2 px-3 py-2" style={{ background: mapMode === "accessible" ? "#16a34a" : mapMode === "emergency" ? "#dc2626" : "var(--primary)" }}>
-              <Navigation className="h-3.5 w-3.5 text-white shrink-0"/>
-              <span className="text-[11px] font-extrabold text-white truncate flex-1">{toBuilding?.name}</span>
-              <span className="w-1.5 h-1.5 rounded-full bg-green-300 animate-pulse shrink-0"/>
-            </div>
-            {/* Stats row: distance, time, mode */}
-            <div className="flex gap-2 px-3 pt-2.5 pb-2 border-b border-border">
-              <div className="flex-1 px-2 py-1.5 rounded-lg bg-primary/8 text-center">
-                <p className="text-[9px] text-muted-foreground font-semibold uppercase tracking-wider">Dist</p>
-                <p className="text-sm font-extrabold text-foreground">{route.dist} m</p>
-              </div>
-              <div className="flex-1 px-2 py-1.5 rounded-lg bg-primary/8 text-center">
-                <p className="text-[9px] text-muted-foreground font-semibold uppercase tracking-wider">Time</p>
-                <p className="text-sm font-extrabold text-foreground">{route.mins} min</p>
-              </div>
-              <div className="flex-1 px-2 py-1.5 rounded-lg bg-primary/8 text-center">
-                <p className="text-[9px] text-muted-foreground font-semibold uppercase tracking-wider">Via</p>
-                <p className="text-sm font-extrabold text-foreground">{mapMode === "accessible" ? <Accessibility className="h-4 w-4 inline-block align-middle" /> : mapMode === "emergency" ? "SOS" : "Walk"}</p>
-              </div>
-            </div>
-            {/* Step-by-step directions */}
-            <div className="px-3 pt-2 pb-1 max-h-28 overflow-y-auto scrollbar-show-on-hover">
-              <div className="relative pl-4 border-l-2 border-primary/30 space-y-1.5">
-                {(() => {
-                  const steps: string[] = route.steps ?? [
-                    fromBuilding ? `From ${fromBuilding.code}` : "Your location",
-                    `Walk ${route.dist}m toward ${toBuilding?.code ?? "destination"}`,
-                    `Arrive at ${toBuilding?.code ?? "destination"}`,
-                  ];
-                  return steps.map((step, i) => (
-                    <div key={i} className="relative flex items-start gap-2">
-                      <div className={cn(
-                        "absolute -left-[11px] w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0",
-                        i === 0 ? "bg-green-500 border-green-500" :
-                        i === steps.length - 1 ? "bg-destructive border-destructive" :
-                        "bg-card border-primary/50"
-                      )}/>
-                      <p className={cn("text-[10px] leading-snug pt-0.5 ml-1", i === steps.length - 1 ? "font-bold text-foreground" : "text-muted-foreground")}>{step}</p>
-                    </div>
-                  ));
-                })()}
-              </div>
-            </div>
-            {/* Actions */}
-            <div className="flex items-center gap-1.5 px-3 pb-2.5">
-              <button onClick={() => {
+        <>
+          {/* Desktop: compact card, bottom-left */}
+          <div data-no-drag className="absolute bottom-5 left-3 z-20 hidden md:block animate-slide-up">
+            <div style={{ width: 230 }}>
+              <RouteStepsPanel
+                route={route}
+                mode={mapMode}
+                toName={toBuilding?.name ?? "Destination"}
+                onEnd={() => {
                   setRouteFading(true);
                   setTimeout(() => {
                     setFromBuilding(null);
@@ -1634,16 +1465,29 @@ const buildingFill = (id: string) =>
                     setRouteFading(false);
                   }, 300);
                 }}
-                className="flex-1 h-7 rounded-lg border border-destructive/30 text-destructive text-[10px] font-bold hover:bg-destructive/10 transition-colors">
-                End
-              </button>
-              <button onClick={() => { setZoom(1.5); }}
-                className="w-7 h-7 rounded-lg border border-border text-muted-foreground text-[10px] font-bold hover:bg-muted transition-colors" title="Zoom to route">
-                ▣
-              </button>
+                onZoom={() => setZoom(1.5)}
+              />
             </div>
           </div>
-        </div>
+          {/* Mobile: bottom sheet with steps (above the app's bottom nav) */}
+          <div data-no-drag className="absolute inset-x-0 bottom-[84px] z-30 md:hidden animate-slide-up px-3">
+            <RouteStepsPanel
+              route={route}
+              mode={mapMode}
+              toName={toBuilding?.name ?? "Destination"}
+              onEnd={() => {
+                setRouteFading(true);
+                setTimeout(() => {
+                  setFromBuilding(null);
+                  setToBuilding(null);
+                  setDirectionsMode(false);
+                  setRouteFading(false);
+                }, 300);
+              }}
+              onZoom={() => setZoom(1.5)}
+            />
+          </div>
+        </>
       )}
 
       {/* ══════════════ DESKTOP BUILDING INFO PANEL ══════════════ */}

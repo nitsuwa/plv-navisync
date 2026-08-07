@@ -1,141 +1,155 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { motion } from "motion/react";
 import {
   Building2, Bell, AlertTriangle, Clock, ArrowRight,
-  Flag, Layers, Route, Users, CheckCircle2,
+  Flag, Layers, Route, Users, CheckCircle2, CalendarDays, History,
 } from "lucide-react";
 import { EmptyState } from "../components/ui/EmptyState";
 import { StatCard } from "../components/ui/StatCard";
-import { MOCK_BUILDINGS } from "../data/mockData";
-import { FLOOR_PLANS } from "../data/floorPlans";
 import { Link } from "react-router";
 import { DashboardSkeleton } from "../components/ui/PageSkeleton";
 import { cn } from "../lib/utils";
+import {
+  dashboardService,
+  type DashboardStats,
+  type RecentActivityItem,
+} from "../services/dashboardService";
+import { reportService } from "../services/reportService";
+import { campusService } from "../services/campusService";
+import { readableActionLabel, timeAgoLabel } from "../services/activityLogService";
 
-// ── Derived statistics ────────────────────────────────────────────────────
+// ── Quick actions (all links valid) ───────────────────────────────────────
 
-const totalFloors = Object.values(FLOOR_PLANS).reduce((s, fp) => s + fp.floors.length, 0);
-const totalRooms = Object.values(FLOOR_PLANS).reduce(
-  (s, fp) => s + fp.floors.reduce((sf, f) => sf + f.rooms.length, 0), 0
-);
+interface QuickAction { label: string; to: string; icon: React.ElementType; desc: string; color: string; }
 
-const KEY_METRICS = [
-  {
-    title: "Buildings Mapped",
-    value: MOCK_BUILDINGS.length,
-    subtitle: `${Object.keys(FLOOR_PLANS).length} with floor plans`,
-    icon: Building2,
-    variant: "primary" as const,
-    trend: { value: 0, label: "unchanged" },
-  },
-  {
-    title: "Total Rooms",
-    value: totalRooms,
-    subtitle: `Across ${totalFloors} floors`,
-    icon: Layers,
-    variant: "success" as const,
-    trend: { value: 12, label: "new this month" },
-  },
-  {
-    title: "Active Routes",
-    value: 12,
-    subtitle: "4 wheelchair-accessible",
-    icon: Route,
-    variant: "accent" as const,
-    trend: { value: 8, label: "new routes" },
-  },
-  {
-    title: "Pending Reports",
-    value: 2,
-    subtitle: "Requiring attention",
-    icon: Flag,
-    variant: "warning" as const,
-    trend: { value: 5, label: "improvement" },
-  },
-];
-
-// ── Pending items ─────────────────────────────────────────────────────────
-
-const PENDING_ITEMS = [
-  {
-    label: "Broken Elevator",
-    detail: "ADM Building, 2nd Floor",
-    time: "2 days ago",
-    priority: "high" as const,
-    link: "/admin-dashboard/reports",
-  },
-  {
-    label: "Blocked Walkway",
-    detail: "Near Library entrance",
-    time: "3 days ago",
-    priority: "medium" as const,
-    link: "/admin-dashboard/reports",
-  },
-];
-
-// ── Recent activity ────────────────────────────────────────────────────────
-
-const ACTIVITY = [
-  { action: "Floor plan updated",  detail: "MAB — 3rd Floor rooms added",            time: "1h ago", type: "floor" as const },
-  { action: "Route modified",      detail: "Main Gate → Library — accessible path",  time: "3h ago", type: "route" as const },
-  { action: "Building updated",    detail: "ELB — contact info and hours updated",    time: "5h ago", type: "building" as const },
-];
-
-const activityIcon = {
-  floor: Layers, route: Route, building: Building2,
-};
-const activityColor = {
-  floor:    "bg-blue-100 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400",
-  route:    "bg-green-100 text-green-600 dark:bg-green-900/20 dark:text-green-400",
-  building: "bg-primary/10 text-primary",
-};
-
-// ── Quick actions ─────────────────────────────────────────────────────────
-
-const QUICK_ACTIONS = [
-  { label: "Open Map Builder", to: "/admin-dashboard/map-builder", icon: Building2, desc: "Edit campus map", color: "bg-primary" },
-  { label: "Review Reports",   to: "/admin-dashboard/reports",      icon: Flag,       desc: "2 pending",       color: "bg-amber-500" },
-  { label: "Post Announcement",to: "/admin-dashboard/announcements",icon: Bell,       desc: "Notify students", color: "bg-violet-500" },
-  { label: "Manage Users",     to: "/admin-dashboard/users",        icon: Users,      desc: "6 accounts",      color: "bg-emerald-500" },
-];
-
-// ═════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════
 
 export function AdminDashboardPage() {
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [activity, setActivity] = useState<RecentActivityItem[]>([]);
+  const [pendingReports, setPendingReports] = useState<{ title: string; detail: string; time: string; priority: "high" | "medium" }[]>([]);
+  const [publishInfo, setPublishInfo] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      const [s, a, reports, campuses] = await Promise.all([
+        dashboardService.getDashboardStats(),
+        dashboardService.getRecentActivity(6).catch(() => []),
+        reportService.listAllReports({ status: "pending" }).catch(() => []),
+        campusService.list().catch(() => []),
+      ]);
+      setStats(s);
+      setActivity(a);
+      setPendingReports(
+        reports.slice(0, 4).map((r) => ({
+          title: r.title,
+          detail: r.buildingName ?? r.category ?? "Campus location",
+          time: timeAgoLabel(r.createdAt),
+          priority: r.priority === "urgent" || r.priority === "high" ? "high" : "medium",
+        }))
+      );
+      // Editor Campus objects expose lifecycleState/publishStatus — check the lifecycle field.
+      const published = campuses.find((c) => c.lifecycleStatus === "published");
+      setPublishInfo(
+        published
+          ? `Published: ${published.name}${published.updatedAt ? ` · ${published.updatedAt}` : ""}`
+          : "No published campus yet"
+      );
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not load dashboard data.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    const timer = setTimeout(() => setLoading(false), 400);
-    return () => clearTimeout(timer);
-  }, []);
+    load();
+  }, [load]);
 
   if (loading) return <DashboardSkeleton />;
 
+  if (error) {
+    return (
+      <div className="space-y-6 animate-fade-in">
+        <h1 className="text-2xl font-extrabold text-foreground">Dashboard</h1>
+        <EmptyState
+          icon={AlertTriangle}
+          title="Could not load dashboard"
+          description={error}
+          action={
+            <button onClick={load} className="inline-flex items-center gap-2 h-10 px-5 rounded-xl bg-primary text-primary-foreground text-sm font-bold hover:bg-primary/90 transition-all">
+              Try Again
+            </button>
+          }
+        />
+      </div>
+    );
+  }
+
+  const s = stats ?? {
+    buildings: 0, rooms: 0, activeEdges: 0, accessibleEdges: 0,
+    pendingReports: 0, publishedEvents: 0, activeStudents: 0, weeklyActivity: [],
+  };
+
+  // Note: these are live head counts, not trends — no fabricated deltas.
+  const KEY_METRICS = [
+    {
+      title: "Buildings Mapped",
+      value: s.buildings,
+      subtitle: "in the active campus",
+      icon: Building2,
+      variant: "primary" as const,
+    },
+    {
+      title: "Total Rooms",
+      value: s.rooms,
+      subtitle: "rooms & offices",
+      icon: Layers,
+      variant: "success" as const,
+    },
+    {
+      title: "Active Routes",
+      value: s.activeEdges,
+      subtitle: `${s.accessibleEdges} wheelchair-accessible`,
+      icon: Route,
+      variant: "accent" as const,
+    },
+    {
+      title: "Pending Reports",
+      value: s.pendingReports,
+      subtitle: "requiring attention",
+      icon: Flag,
+      variant: "warning" as const,
+    },
+  ];
+
+  const maxWeekly = Math.max(1, ...s.weeklyActivity.map((d) => d.count));
+  const QUICK_ACTIONS: QuickAction[] = [
+    { label: "Open Map Builder", to: "/admin-dashboard/map-builder", icon: Building2, desc: "Edit campus map", color: "bg-primary" },
+    { label: "Review Reports", to: "/admin-dashboard/reports", icon: Flag, desc: `${s.pendingReports} pending`, color: "bg-amber-500" },
+    { label: "Post Announcement", to: "/admin-dashboard/announcements", icon: Bell, desc: "Notify students", color: "bg-violet-500" },
+    { label: "Manage Users", to: "/admin-dashboard/users", icon: Users, desc: `${s.activeStudents} students`, color: "bg-emerald-500" },
+  ];
+
   return (
     <div className="space-y-4 lg:space-y-3 animate-fade-in">
-      {/* ═══════════════════════════════════════════════════════════════
-           HEADER — title with lightweight status
-         ═══════════════════════════════════════════════════════════════ */}
+      {/* HEADER */}
       <motion.div
         initial={{ opacity: 0, y: -8 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
         className="flex items-center justify-between gap-4"
       >
-        <div className="flex items-center gap-3">
-          <h1 className="text-xl lg:text-2xl font-extrabold text-foreground">
-            Dashboard
-          </h1>
-          <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground/60 font-medium">
-            <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
-            All systems OK
-          </span>
+        <div>
+          <h1 className="text-xl lg:text-2xl font-extrabold text-foreground">Dashboard</h1>
+          <p className="text-xs text-muted-foreground mt-0.5">{publishInfo ?? "Live data"}</p>
         </div>
       </motion.div>
 
-      {/* ═══════════════════════════════════════════════════════════════
-           KEY METRICS — 4 essential numbers
-         ═══════════════════════════════════════════════════════════════ */}
+      {/* KEY METRICS */}
       <motion.div
         initial="hidden"
         animate="visible"
@@ -145,10 +159,7 @@ export function AdminDashboardPage() {
         {KEY_METRICS.map((m) => (
           <motion.div
             key={m.title}
-            variants={{
-              hidden: { opacity: 0, y: 16 },
-              visible: { opacity: 1, y: 0 },
-            }}
+            variants={{ hidden: { opacity: 0, y: 16 }, visible: { opacity: 1, y: 0 } }}
           >
             <StatCard
               title={m.title}
@@ -163,54 +174,45 @@ export function AdminDashboardPage() {
         ))}
       </motion.div>
 
-      {/* ═══════════════════════════════════════════════════════════════
-           BOTTOM ROW — 3 columns: Priority Items, Activity, Quick Actions
-         ═══════════════════════════════════════════════════════════════ */}
+      {/* BOTTOM ROW */}
       <motion.div
         initial="hidden"
         animate="visible"
         variants={{ visible: { transition: { staggerChildren: 0.08 } } }}
         className="grid md:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4"
       >
-
-        {/* ── Priority Items ── */}
+        {/* Priority items — real pending reports */}
         <motion.div
-          variants={{
-            hidden: { opacity: 0, y: 16 },
-            visible: { opacity: 1, y: 0 },
-          }}
+          variants={{ hidden: { opacity: 0, y: 16 }, visible: { opacity: 1, y: 0 } }}
           className="bg-card rounded-2xl border border-border shadow-sm overflow-hidden flex flex-col"
         >
           <div className="flex items-center justify-between px-5 py-3 border-b border-border">
             <div className="flex items-center gap-2.5">
-              <h2 className="font-bold text-foreground text-sm">
-                Priority Items
-              </h2>
+              <h2 className="font-bold text-foreground text-sm">Priority Items</h2>
               <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400">
-                {PENDING_ITEMS.length}
+                {pendingReports.length}
               </span>
             </div>
-            <Link to="/admin-dashboard/reports" className="text-[11px] font-bold text-primary hover:underline">
-              View all
-            </Link>
+            <Link to="/admin-dashboard/reports" className="text-[11px] font-bold text-primary hover:underline">View all</Link>
           </div>
           <div className="flex-1 divide-y divide-border">
-            {PENDING_ITEMS.length > 0 ? (
-              PENDING_ITEMS.map((item, i) => (
+            {pendingReports.length > 0 ? (
+              pendingReports.map((item, i) => (
                 <Link
                   key={i}
-                  to={item.link}
+                  to="/admin-dashboard/reports"
                   className="flex items-center gap-3 px-4 py-3 hover:bg-muted/40 active:scale-[0.97] transition-all group"
                 >
                   <div className={cn(
                     "w-8 h-8 rounded-xl flex items-center justify-center shrink-0",
-                    item.priority === "high" ? "bg-red-100 dark:bg-red-900/20 text-red-600 dark:text-red-400" :
-                    "bg-amber-100 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400"
+                    item.priority === "high"
+                      ? "bg-red-100 dark:bg-red-900/20 text-red-600 dark:text-red-400"
+                      : "bg-amber-100 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400"
                   )}>
                     <AlertTriangle className="h-4 w-4" />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-bold text-foreground group-hover:text-primary transition-colors">{item.label}</p>
+                    <p className="text-sm font-bold text-foreground group-hover:text-primary transition-colors line-clamp-1">{item.title}</p>
                     <p className="text-xs text-muted-foreground mt-0.5">{item.detail} · {item.time}</p>
                   </div>
                   <ArrowRight className="h-4 w-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
@@ -220,68 +222,58 @@ export function AdminDashboardPage() {
               <EmptyState
                 icon={CheckCircle2}
                 title="No pending items"
-                description="All campus reports have been addressed. No issues requiring attention."
+                description="All campus reports have been addressed."
                 compact
               />
             )}
           </div>
         </motion.div>
 
-        {/* ── Recent Activity ── */}
+        {/* Recent activity — real activity_logs */}
         <motion.div
-          variants={{
-            hidden: { opacity: 0, y: 16 },
-            visible: { opacity: 1, y: 0 },
-          }}
+          variants={{ hidden: { opacity: 0, y: 16 }, visible: { opacity: 1, y: 0 } }}
           className="bg-card rounded-2xl border border-border shadow-sm overflow-hidden flex flex-col"
         >
           <div className="px-5 py-3 border-b border-border flex items-center gap-2">
-            <h2 className="font-bold text-foreground text-sm flex-1">
-              Recent Activity
-            </h2>
+            <h2 className="font-bold text-foreground text-sm flex-1">Recent Activity</h2>
+            <Link to="/admin-dashboard/activity-logs" className="flex items-center gap-1 text-[11px] font-bold text-primary hover:underline">
+              <History className="h-3 w-3" /> View all
+            </Link>
           </div>
           <div className="flex-1 divide-y divide-border">
-            {ACTIVITY.length > 0 ? (
-              ACTIVITY.map((item, i) => {
-                const Icon = activityIcon[item.type];
-                return (
-                  <div key={i} className="flex items-center gap-3 px-4 py-3">
-                    <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${activityColor[item.type]}`}>
-                      <Icon className="h-3.5 w-3.5" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs font-bold text-foreground">{item.action}</p>
-                      <p className="text-[10px] text-muted-foreground truncate mt-0.5">
-                        {item.detail}
-                      </p>
-                    </div>
-                    <span className="text-[10px] text-muted-foreground font-mono shrink-0">{item.time}</span>
+            {activity.length > 0 ? (
+              activity.map((item) => (
+                <div key={item.id} className="flex items-center gap-3 px-4 py-3">
+                  <div className="w-7 h-7 rounded-lg bg-primary/10 text-primary flex items-center justify-center shrink-0">
+                    <Clock className="h-3.5 w-3.5" />
                   </div>
-                );
-              })
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-bold text-foreground">{readableActionLabel(item.action)}</p>
+                    <p className="text-[10px] text-muted-foreground truncate mt-0.5">
+                      {item.actorName ?? "System"} · {item.entityType ?? "system"}
+                    </p>
+                  </div>
+                  <span className="text-[10px] text-muted-foreground font-mono shrink-0">{timeAgoLabel(item.createdAt)}</span>
+                </div>
+              ))
             ) : (
               <EmptyState
                 icon={Clock}
                 title="No recent activity"
-                description="Campus map changes and system events will appear here."
+                description="Admin actions and system events will appear here."
                 compact
               />
             )}
           </div>
         </motion.div>
 
-        {/* ── Quick Actions ── */}
+        {/* Quick actions */}
         <motion.div
-          variants={{
-            hidden: { opacity: 0, y: 16 },
-            visible: { opacity: 1, y: 0 },
-          }}
+          variants={{ hidden: { opacity: 0, y: 16 }, visible: { opacity: 1, y: 0 } }}
           className="bg-card rounded-2xl border border-border shadow-sm overflow-hidden"
         >
           <div className="px-5 py-3 border-b border-border flex items-center gap-2">
-            <h2 className="font-bold text-foreground text-sm">
-              Quick Actions
-            </h2>
+            <h2 className="font-bold text-foreground text-sm">Quick Actions</h2>
           </div>
           <div className="p-4 grid grid-cols-2 gap-2.5">
             {QUICK_ACTIONS.map((a) => {
@@ -303,13 +295,34 @@ export function AdminDashboardPage() {
               );
             })}
           </div>
+
+          {/* Weekly activity (last 7 days, real) */}
+          <div className="px-5 pt-1 pb-5 border-t border-border">
+            <div className="flex items-center gap-1.5 mb-2.5">
+              <CalendarDays className="h-3.5 w-3.5 text-muted-foreground" />
+              <p className="text-[10px] font-extrabold uppercase tracking-widest text-muted-foreground">
+                Activity · last 7 days
+              </p>
+            </div>
+            <div className="flex items-end gap-1.5 h-16">
+              {s.weeklyActivity.map((d) => (
+                <div key={d.day} className="flex-1 flex flex-col items-center gap-1">
+                  <div className="w-full flex-1 flex items-end">
+                    <div
+                      className="w-full rounded-t-md bg-primary/70 hover:bg-primary transition-colors"
+                      style={{ height: `${Math.max(8, (d.count / maxWeekly) * 100)}%`, minHeight: d.count > 0 ? 6 : 3, opacity: d.count > 0 ? 1 : 0.25 }}
+                      title={`${d.day}: ${d.count} events`}
+                    />
+                  </div>
+                  <span className="text-[8px] text-muted-foreground font-mono">
+                    {new Date(d.day + "T00:00:00").toLocaleDateString(undefined, { weekday: "narrow" })}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
         </motion.div>
       </motion.div>
-
-      {/* Version info — minimal */}
-      <div className="text-[10px] text-muted-foreground text-right">
-        v2.1.0 · Last published: Jan 15, 2025
-      </div>
     </div>
   );
 }

@@ -4,6 +4,7 @@ export { validateSupabaseConfig, supabaseUrl, supabaseAnonKey, isSupabaseConnect
 export type * from "./types";
 
 // ── Entity services ───────────────────────────────────────────────────────
+export { activityLogService } from "./activityLogService";
 export { buildingService } from "./buildingService";
 export { userService } from "./userService";
 export { announcementService } from "./announcementService";
@@ -13,3 +14,4 @@ export { routeService } from "./routeService";
 export { eventService } from "./eventService";
 export { settingsService } from "./settingsService";
 export { campusService } from "./campusService";
+export { dashboardService, type DashboardStats, type WeeklyActivityPoint } from "./dashboardService";
