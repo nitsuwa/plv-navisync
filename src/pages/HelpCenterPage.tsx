@@ -818,9 +818,13 @@ function InquiryForm() {
             {fileError}
           </div>
         )}
-        <button
-          type="button"
+        <div
+          role="button"
+          tabIndex={0}
           onClick={() => fileInputRef.current?.click()}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") fileInputRef.current?.click();
+          }}
           className="w-full flex items-center gap-3 px-4 py-3 rounded-xl border border-dashed border-border bg-input-background/50 hover:bg-input-background hover:border-primary/30 transition-all duration-200 cursor-pointer group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/25 focus-visible:border-primary/30 text-left"
           aria-label="Attach a file"
         >
@@ -860,7 +864,7 @@ function InquiryForm() {
               }
             }}
           />
-        </button>
+        </div>
 
         {/* Response time estimate */}
         <div className="flex items-center gap-2 px-3.5 py-2.5 rounded-xl bg-primary/5 border border-primary/10">

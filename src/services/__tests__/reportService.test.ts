@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getSupabase } from "../../lib/supabase";
-import { listAllReports, toIssueReport, updateReportStatus } from "../reportService";
+import { listAllReports, resolveReportTarget, toIssueReport, updateReportStatus } from "../reportService";
 
 vi.mock("../../lib/supabase", () => ({ getSupabase: vi.fn() }));
 
@@ -60,6 +60,32 @@ describe("report service (admin workflow)", () => {
 
     expect(rpc).toHaveBeenCalledWith("update_report_workflow", {
       p_report_id: "r1", p_status: "resolved", p_resolution_notes: "Fixed the hallway light.", p_internal_notes: null,
+    });
+  });
+
+  it("rejects mock map identifiers when no campus has been published", async () => {
+    const query: Record<string, unknown> = {};
+    query.eq = vi.fn(() => query);
+    query.is = vi.fn(() => query);
+    query.order = vi.fn(() => query);
+    query.limit = vi.fn(() => query);
+    query.maybeSingle = vi.fn().mockResolvedValue({ data: null, error: null });
+    vi.mocked(getSupabase).mockReturnValue({ from: vi.fn(() => ({ select: vi.fn(() => query) })) } as never);
+
+    await expect(resolveReportTarget({ buildingId: "b1" })).rejects.toThrow("No campus is published yet");
+  });
+
+  it("uses the real campus relationship for a published database building", async () => {
+    const query: Record<string, unknown> = {};
+    query.eq = vi.fn(() => query);
+    query.is = vi.fn(() => query);
+    query.maybeSingle = vi.fn().mockResolvedValue({
+      data: { id: "11111111-1111-4111-8111-111111111111", campus_id: "22222222-2222-4222-8222-222222222222" }, error: null,
+    });
+    vi.mocked(getSupabase).mockReturnValue({ from: vi.fn(() => ({ select: vi.fn(() => query) })) } as never);
+
+    await expect(resolveReportTarget({ buildingId: "11111111-1111-4111-8111-111111111111" })).resolves.toEqual({
+      campusId: "22222222-2222-4222-8222-222222222222", buildingId: "11111111-1111-4111-8111-111111111111", floorId: null,
     });
   });
 });

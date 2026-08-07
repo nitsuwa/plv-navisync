@@ -41,6 +41,7 @@ export interface CreateReportInput {
 }
 
 const LOCAL_STORAGE_REPORTS_KEY = "plv_student_submitted_reports_v1";
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 // Helper to convert database row to domain IssueReport
 export function toIssueReport(row: ReportRow): IssueReport {
@@ -88,19 +89,43 @@ function databaseReportCategory(value: string): ReportRow["category"] {
   return mapped[value] ?? (value as ReportRow["category"]);
 }
 
+/** Resolve browser/mock map identifiers to a real published database target. */
+export async function resolveReportTarget(input: Pick<CreateReportInput, "campusId" | "buildingId" | "floorId">): Promise<{
+  campusId: string; buildingId: string | null; floorId: string | null;
+}> {
+  const supabase = getSupabase();
+  if (input.buildingId && UUID.test(input.buildingId)) {
+    const { data, error } = await supabase.from("buildings").select("id,campus_id").eq("id", input.buildingId).is("archived_at", null).maybeSingle();
+    if (error) throw error;
+    if (data) return {
+      campusId: data.campus_id,
+      buildingId: data.id,
+      floorId: input.floorId && UUID.test(input.floorId) ? input.floorId : null,
+    };
+  }
+
+  let query = supabase.from("campuses").select("id").eq("status", "published").is("archived_at", null);
+  if (input.campusId && UUID.test(input.campusId)) query = query.eq("id", input.campusId);
+  const { data, error } = await query.order("is_default", { ascending: false }).limit(1).maybeSingle();
+  if (error) throw error;
+  if (!data) throw new Error("No campus is published yet. Ask an administrator to publish the campus map before submitting reports.");
+  return { campusId: data.id, buildingId: null, floorId: null };
+}
+
 // Submit a new issue report
 export async function submitReport(input: CreateReportInput): Promise<IssueReport> {
   const supabase = getSupabase();
   const { data: userData } = await supabase.auth.getUser();
   const userId = userData?.user?.id;
   if (!userId) throw new Error("You must be signed in to submit a report.");
+  const target = await resolveReportTarget(input);
 
   const newReport: IssueReport = {
     id: crypto.randomUUID(),
-    campusId: input.campusId || "plv-main-campus",
-    buildingId: input.buildingId || null,
+    campusId: target.campusId,
+    buildingId: target.buildingId,
     buildingName: input.buildingName,
-    floorId: input.floorId || null,
+    floorId: target.floorId,
     floorLabel: input.floorLabel,
     reporterId: userId,
     category: databaseReportCategory(input.category || "maintenance"),

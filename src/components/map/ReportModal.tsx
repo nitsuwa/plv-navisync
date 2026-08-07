@@ -51,8 +51,11 @@ export function ReportModal({ building, onClose }: ReportModalProps) {
 
       setSubmitted(true);
       showToast("Report submitted successfully!", "success");
-    } catch {
-      showToast("Failed to submit report. Please try again.", "error");
+    } catch (error) {
+      showToast("Unable to submit report", "error", {
+        description: error instanceof Error ? error.message : "Please try again.",
+        duration: 7000,
+      });
     } finally {
       setIsSubmitting(false);
     }
