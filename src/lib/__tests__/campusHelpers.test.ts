@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { Campus } from "../../components/map-builder/types";
-import { buildSharedCampus, campusMatchesQuery, campusStatusOf, createCampusClone, resolvePublishTarget } from "../campusHelpers";
+import { buildSharedCampus, campusMatchesQuery, campusStatusOf, createCampusClone, resolvePublishTarget, sanitizeCampus } from "../campusHelpers";
 
 // ── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -369,5 +369,94 @@ describe("createCampusClone", () => {
     const snapshot = JSON.stringify(src);
     createCampusClone(src, new Set(), new Set(), seqGen());
     expect(JSON.stringify(src)).toBe(snapshot);
+  });
+});
+
+// ── sanitizeCampus ──────────────────────────────────────────────────────────
+
+describe("sanitizeCampus", () => {
+  it("applies safe defaults to a legacy campus missing new fields", () => {
+    const legacy = {
+      id: "legacy-1",
+      name: "Old Campus",
+      code: "OLD",
+      description: "",
+      address: "",
+      city: "",
+      province: "",
+      postalCode: "",
+      status: undefined,
+      publishStatus: undefined,
+      visibleToStudents: undefined,
+      features: undefined,
+      canvasW: undefined,
+      canvasH: undefined,
+      settings: undefined,
+      createdAt: "2025-01-01",
+      updatedAt: "2025-01-01",
+      buildings: undefined,
+      markers: undefined,
+      paths: undefined,
+      routes: undefined,
+      accessibilityFeatures: undefined,
+      assemblyPoints: undefined,
+      eventOverlays: undefined,
+      decorAssets: undefined,
+      navNodes: undefined,
+      navEdges: undefined,
+    } as unknown as Campus;
+
+    const safe = sanitizeCampus(legacy);
+    expect(safe.status).toBe("active");
+    expect(safe.publishStatus).toBe("draft");
+    expect(safe.visibleToStudents).toBe(false);
+    expect(safe.canvasW).toBe(900);
+    expect(safe.canvasH).toBe(680);
+    expect(safe.features).toEqual({
+      indoorNavigation: false,
+      accessibilityNavigation: false,
+      emergencyRoutes: false,
+      issueReporting: false,
+    });
+    expect(safe.settings).toEqual({ accessibility: false, emergency: false, eventLayer: false, gps: false });
+    expect(safe.buildings).toEqual([]);
+    expect(safe.markers).toEqual([]);
+    expect(safe.paths).toEqual([]);
+    expect(safe.routes).toEqual([]);
+    expect(safe.navNodes).toEqual([]);
+    expect(safe.navEdges).toEqual([]);
+    expect(safe.accessibilityFeatures).toEqual([]);
+    expect(safe.assemblyPoints).toEqual([]);
+    expect(safe.eventOverlays).toEqual([]);
+    expect(safe.decorAssets).toEqual([]);
+  });
+
+  it("normalizes buildings with missing floors and floors with missing rooms/paths", () => {
+    const legacy = {
+      ...makeSourceCampus(),
+      buildings: [
+        { id: "b1", name: "B", code: "B1", category: "academic", description: "", x: 0, y: 0, width: 10, height: 10, color: "#fff", floors: undefined },
+        {
+          id: "b2", name: "C", code: "C1", category: "academic", description: "", x: 0, y: 0, width: 10, height: 10, color: "#fff",
+          floors: [{ id: "f1", buildingId: "b2", number: 1, label: "Ground", rooms: undefined, paths: undefined }],
+        },
+      ],
+    } as unknown as Campus;
+
+    const safe = sanitizeCampus(legacy);
+    expect(safe.buildings[0].floors).toEqual([]);
+    expect(safe.buildings[1].floors[0].rooms).toEqual([]);
+    expect(safe.buildings[1].floors[0].paths).toEqual([]);
+  });
+
+  it("preserves provided values and existing collections", () => {
+    const src = makeSourceCampus();
+    const safe = sanitizeCampus(src);
+    expect(safe.name).toBe("PLV Main Campus");
+    expect(safe.canvasW).toBe(900);
+    expect(safe.buildings).toHaveLength(1);
+    expect(safe.navNodes).toHaveLength(4);
+    expect(safe.navEdges).toHaveLength(1);
+    expect(safe.markers).toHaveLength(1);
   });
 });

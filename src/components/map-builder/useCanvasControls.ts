@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from "react";
+import { screenToWorld } from "../lib/editorPlacement";
 
 // ── Animation constants ─────────────────────────────────────────────────────
 const ZOOM_MIN = 0.25;
@@ -122,17 +123,14 @@ export function useCanvasControls(canvasW: number, canvasH: number) {
   }, []);
 
   // ── Convert screen coords to canvas coords ──────────────────────────────
+  // Delegates to the pure screenToWorld helper (src/lib/editorPlacement.ts),
+  // which is unit-tested, so the tested math is the math used in production.
   const getPoint = useCallback(
     (e: React.MouseEvent | MouseEvent, cw: number, ch: number): { x: number; y: number } => {
       const svg = svgRef.current;
       if (!svg) return { x: 0, y: 0 };
       const rect = svg.getBoundingClientRect();
-      const z = currentZoom.current;
-      const p = currentPan.current;
-      return {
-        x: (((e.clientX - rect.left) / rect.width) * cw - p.x) / z,
-        y: (((e.clientY - rect.top) / rect.height) * ch - p.y) / z,
-      };
+      return screenToWorld(e.clientX, e.clientY, rect, cw, ch, currentPan.current, currentZoom.current);
     },
     []
   );

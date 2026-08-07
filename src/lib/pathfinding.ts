@@ -133,8 +133,14 @@ export function findPath(fromNodeId: string, toNodeId: string, accessibleOnly = 
   const open = new Map<string, AStarNode>();
   const closed = new Set<string>();
 
+  // Persistent parent map — survives nodes being moved from open → closed.
+  // (Without this, reconstructing the path via the open set truncates the
+  // route once any ancestor has been closed, returning a single-node path.)
+  const parentMap = new Map<string, { parent: string | null; edge: GraphEdge | null }>();
+
   const start: AStarNode = { id: fromNodeId, g: 0, f: heuristic(fromNodeId, toNodeId), parent: null, edge: null };
   open.set(fromNodeId, start);
+  parentMap.set(fromNodeId, { parent: null, edge: null });
 
   while (open.size > 0) {
     // Find node with lowest f
@@ -145,15 +151,15 @@ export function findPath(fromNodeId: string, toNodeId: string, accessibleOnly = 
     if (!current) break;
 
     if (current.id === toNodeId) {
-      // Reconstruct path
+      // Reconstruct path using the persistent parent map
       const nodeIds: string[] = [];
       const edges: GraphEdge[] = [];
-      let c: AStarNode | null = current;
-      while (c) {
-        nodeIds.unshift(c.id);
-        if (c.edge) edges.unshift(c.edge);
-        const parentId = c.parent;
-        c = parentId ? open.get(parentId) ?? null : null;
+      let cId: string | null = current.id;
+      while (cId !== null) {
+        nodeIds.unshift(cId);
+        const entry = parentMap.get(cId);
+        if (entry?.edge) edges.unshift(entry.edge);
+        cId = entry?.parent ?? null;
       }
 
       const totalUnits = edges.reduce((sum, e) => sum + e.distance, 0);
@@ -186,6 +192,7 @@ export function findPath(fromNodeId: string, toNodeId: string, accessibleOnly = 
       const existing = open.get(neighborId);
 
       if (!existing || tentG < existing.g) {
+        parentMap.set(neighborId, { parent: current.id, edge });
         open.set(neighborId, {
           id: neighborId,
           g: tentG,

@@ -2,7 +2,7 @@ import { getSupabase } from "../lib/supabase";
 import type { Database, Json, Tables, TablesInsert, TablesUpdate } from "../types/database.generated";
 import type {
   AccessibilityFeature, AssemblyPoint, Campus, CampusBuilding, CampusDecorAsset,
-  CampusMarker, CampusPath, CampusRoute, FloorPlan, NavigationEdge, NavigationNode,
+  CampusMarker, CampusPath, CampusRoute, FloorPlan, FloorWall, NavigationEdge, NavigationNode,
 } from "../components/map-builder/types";
 
 export type BuildingRow = Tables<"buildings">;
@@ -65,12 +65,32 @@ function normalizedEdgeType(value: string): string {
   return new Set(["walkway", "hallway", "stairs", "elevator", "ramp", "door", "crossing", "transition"]).has(value) ? value : "walkway";
 }
 
+/** Coerce a numeric field to a finite number, throwing a descriptive, developer-facing
+ * error that names the element type + id when the data is genuinely corrupt. The DB
+ * contract requires map_elements.x/y and rotation to be NOT NULL, so we must never
+ * emit NaN (which JSON.stringify turns into null) for those columns. */
+function finiteNumber(value: unknown, kind: string, id: unknown, label: string): number {
+  if (value === undefined || value === null) return 0;
+  const n = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(n)) {
+    throw new Error(`map_elements (${kind} "${String(id)}"): invalid ${label} value ${String(value)}. Fix or delete this element in the Floor Editor.`);
+  }
+  return n;
+}
+
 function element(kind: StructureKind, campusId: string, value: Record<string, unknown>, buildingId?: string, floorId?: string): JsonObject {
   const points = "points" in value ? value.points as Json : undefined;
   const width = Number("w" in value ? value.w : value.width);
   const height = Number("h" in value ? value.h : value.height);
   const name = String(value.name ?? value.label ?? value.text ?? kind.replaceAll("_", " "));
   const roomType = kind === "room" ? normalizedElementType(String(value.type ?? "room")) : undefined;
+  // Walls are endpoint-based (x1/y1/x2/y2). Their canonical anchor location is
+  // the START point; the full segment geometry is retained in metadata.ui and
+  // geometry.points. This avoids emitting null/NaN for the NOT NULL x/y columns.
+  const anchorX = kind === "wall" ? value.x1 : value.x;
+  const anchorY = kind === "wall" ? value.y1 : value.y;
+  const rawRotation = value.rotation;
+  const rotationValue = finiteNumber(rawRotation, kind, value.id, "rotation");
   const typeMap: Partial<Record<StructureKind, string>> = {
     marker: "landmark", route: "custom", campus_path: "custom", accessibility_feature: "custom",
     assembly_point: "assembly_area", decor: "custom", floor_path: "hallway", wall: "wall",
@@ -82,10 +102,11 @@ function element(kind: StructureKind, campusId: string, value: Record<string, un
     element_type: roomType ?? typeMap[kind] ?? "custom", name,
     code: kind === "room" ? String(value.name ?? "") : undefined,
     description: typeof value.description === "string" ? value.description : undefined,
-    search_keywords: [name.toLowerCase()], x: Number(value.x ?? 0), y: Number(value.y ?? 0),
+    search_keywords: [name.toLowerCase()],
+    x: finiteNumber(anchorX, kind, value.id, "x"), y: finiteNumber(anchorY, kind, value.id, "y"),
     width: Number.isFinite(width) && width > 0 ? width : undefined,
     height: Number.isFinite(height) && height > 0 ? height : undefined,
-    rotation: ((Number(value.rotation ?? 0) % 360) + 360) % 360, z_index: 0,
+    rotation: ((rotationValue % 360) + 360) % 360, z_index: 0,
     geometry: points ? { points } : undefined,
     style: { color: typeof value.color === "string" ? value.color : undefined, width: typeof value.width === "number" ? value.width : undefined },
     metadata: { kind, ui: value as Json },
@@ -104,8 +125,11 @@ export function serializeCampusStructure(campus: Campus): CampusStructurePayload
     const { floors: buildingFloors, ...buildingUi } = building;
     buildings.push({
       id: building.id, name: building.name, code: building.code, description: building.description,
-      category: normalizedBuildingCategory(building.category), x: building.x, y: building.y,
-      width: building.width, height: building.height, rotation: ((building.rotation ?? 0) % 360 + 360) % 360,
+      category: normalizedBuildingCategory(building.category),
+      x: finiteNumber(building.x, "building", building.id, "x"),
+      y: finiteNumber(building.y, "building", building.id, "y"),
+      width: building.width, height: building.height,
+      rotation: ((finiteNumber(building.rotation, "building", building.id, "rotation") % 360) + 360) % 360,
       is_searchable: true, is_visible: building.visible !== false,
       is_accessible: Boolean(building.accessibility?.wheelchairAccessible),
       metadata: { ...jsonUi(buildingUi), display_order: buildingOrder },
@@ -140,8 +164,10 @@ export function serializeCampusStructure(campus: Campus): CampusStructurePayload
     buildings, floors, map_elements,
     navigation_nodes: (campus.navNodes ?? []).map((node) => ({
       id: node.id, building_id: node.buildingId, floor_id: node.floorId, node_type: normalizedNodeType(node.type),
-      name: node.name, x: node.x, y: node.y, is_accessible: node.accessible,
-      is_emergency_safe: true, is_active: true, metadata: jsonUi(node),
+      name: node.name,
+      x: finiteNumber(node.x, "navigation_node", node.id, "x"),
+      y: finiteNumber(node.y, "navigation_node", node.id, "y"),
+      is_accessible: node.accessible, is_emergency_safe: true, is_active: true, metadata: jsonUi(node),
     })),
     navigation_edges: (campus.navEdges ?? []).map((edge) => ({
       id: edge.id, from_node_id: edge.startNodeId, to_node_id: edge.endNodeId,
@@ -159,9 +185,18 @@ export function hydrateCampusStructure(campus: Campus, rows: CampusStructureRows
   [...rows.floors].sort((a, b) => a.display_order - b.display_order || a.floor_number - b.floor_number).forEach((row) => {
     const values = floorElements.get(row.id) ?? [];
     const byKind = <T>(kind: StructureKind) => values.filter((item) => uiFrom<{ kind?: string }>(item.metadata)?.kind === kind || (item.metadata as JsonObject | null)?.kind === kind).map((item) => uiFrom<T>(item.metadata)).filter((v): v is T => Boolean(v));
+    // Legacy normalization: walls are endpoint-based (x1/y1/x2/y2). Older editor
+    // builds could leave stray non-finite x/y fields on wall objects (a broken
+    // drag wrote NaN there). Strip those so they never render or re-serialize.
+    const walls = byKind<Record<string, unknown>>("wall").map((w) => {
+      const cleaned = { ...w };
+      if (!Number.isFinite(cleaned.x as number)) delete cleaned.x;
+      if (!Number.isFinite(cleaned.y as number)) delete cleaned.y;
+      return cleaned as FloorWall;
+    });
     const base = uiFrom<Partial<FloorPlan>>(row.metadata) ?? {};
     const floor: FloorPlan = { ...base, id: row.id, buildingId: row.building_id, number: row.floor_number, label: row.name,
-      rooms: byKind("room"), paths: byKind("floor_path"), walls: byKind("wall"), doors: byKind("door"),
+      rooms: byKind("room"), paths: byKind("floor_path"), walls, doors: byKind("door"),
       windows: byKind("window"), furniture: byKind("furniture"), stairs: byKind("stairs"), ramps: byKind("ramp"),
       elevators: byKind("elevator"), labels: byKind("label") } as FloorPlan;
     floorsByBuilding.set(row.building_id, [...(floorsByBuilding.get(row.building_id) ?? []), floor]);

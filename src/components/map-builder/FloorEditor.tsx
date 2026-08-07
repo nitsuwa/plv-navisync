@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from "motion/react";
 import {
   ArrowLeft, ChevronRight, CheckCircle2, Save, X, ZoomIn, ZoomOut, Undo2, Redo2,
   Grid3X3, Layers, Paintbrush, Sofa, SeparatorHorizontal, MoveVertical,
-  DoorOpen, Binary, Text, Ruler, PanelRightClose, Navigation,
+  DoorOpen, Binary, Text, Ruler, PanelRightClose, Navigation, LandPlot,
 } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { useCanvasControls, isSpacePressed } from "./useCanvasControls";
@@ -116,11 +116,19 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
   // ── Data refs for drag operations ──
   const dragging = useRef<{ type: string; ids: string[]; origins: any[]; sx: number; sy: number } | null>(null);
   const resizing = useRef<RoomResizeState | null>(null);
+  // ── Gesture history: during a drag we suppress per-frame history pushes and
+  //    commit exactly ONE undo entry (the POST-gesture state) on pointer release,
+  //    so undo restores the pre-gesture state and redo re-applies the gesture. ──
+  const suppressHistoryRef = useRef(false);
+  const gestureMoved = useRef(false);
 
-  // ── History ──
-  const { pushHistory, undo, redo, resetHistory } = useFloorHistory(rooms, fpaths);
+  // ── History (full floor state so undo/redo restores every element type) ──
+  const floorSnapshot = (): FloorUndoEntry => ({
+    rooms, paths: fpaths, walls, doors, windows, furniture, stairs, ramps, elevators, labels,
+  });
+  const { pushHistory, undo, redo, resetHistory, canUndo, canRedo } = useFloorHistory(floorSnapshot());
 
-  useEffect(() => { resetHistory(rooms, fpaths); }, [floorId]);
+  useEffect(() => { resetHistory(floorSnapshot()); }, [floorId]);
 
   const buildFloorUpdates = useCallback(
     (updates: Partial<FloorPlan>) => {
@@ -160,22 +168,36 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
   const updFloor = useCallback(
     (newRooms: FloorRoom[], newPaths: FloorPath[], newWalls?: FloorWall[], newDoors?: FloorDoor[], newWindows?: FloorWindow[],
      newFurniture?: FloorFurniture[], newStairs?: FloorStairs[], newElevators?: FloorElevatorItem[], newLabels?: FloorLabel[], newRamps?: FloorRamp[]) => {
-      buildFloorUpdates({
+      const next: FloorUndoEntry = {
         rooms: newRooms, paths: newPaths,
         walls: newWalls ?? walls, doors: newDoors ?? doors,
         windows: newWindows ?? windows, furniture: newFurniture ?? furniture,
-        stairs: newStairs ?? stairs,        elevators: newElevators ?? elevators, labels: newLabels ?? labels,
+        stairs: newStairs ?? stairs, elevators: newElevators ?? elevators, labels: newLabels ?? labels,
         ramps: newRamps ?? ramps,
-      });
+      };
+      // Record the POST-change state as the new history tip (unless we are in the
+      // middle of a drag gesture — that commit happens once on pointer release).
+      if (!suppressHistoryRef.current) pushHistory(next);
+      buildFloorUpdates(next);
     },
-    [buildFloorUpdates, walls, doors, windows, furniture, stairs, elevators, labels]
+    [buildFloorUpdates, walls, doors, windows, furniture, stairs, elevators, labels, pushHistory]
   );
+
+  // Apply a history entry to the floor (shared by toolbar buttons + shortcuts).
+  // History pushes are suppressed while applying so undo/redo never record
+  // themselves as a new edit.
+  const applyEntry = useCallback((entry: FloorUndoEntry | null) => {
+    if (!entry) return;
+    suppressHistoryRef.current = true;
+    updFloor(entry.rooms, entry.paths, entry.walls, entry.doors, entry.windows,
+      entry.furniture, entry.stairs, entry.elevators, entry.labels, entry.ramps);
+    suppressHistoryRef.current = false;
+  }, [updFloor]);
 
   // ── Toggle navigation connection for a room ──
   const onToggleNavConnection = useCallback((room: FloorRoom) => {
     if (room.navConnection) {
       // Disconnect — remove the nav connection
-      pushHistory(rooms, fpaths);
       const { navConnection: _, ...rest } = room;
       updFloor(
         rooms.map((r) => r.id === room.id ? rest : r),
@@ -184,7 +206,6 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
       toast.info("Navigation disconnected", `${room.name} is no longer a navigation destination.`);
     } else {
       // Connect — auto-detect door position
-      pushHistory(rooms, fpaths);
       const cx = FP_W / 2;
       const cy = FP_H / 2;
       const edges = [
@@ -230,7 +251,11 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
   const handleSvgDown = (e: React.MouseEvent<SVGSVGElement>) => {
     if (isSpacePressed()) { e.preventDefault(); startPan(e); return; }
     const target = e.target as SVGElement;
-    const isBg = target === svgRef.current || target.dataset.bg === "true";
+    // "Empty canvas" = the svg itself or anything inside the decorative
+    // background group (outer rect, grid lines, floor-area rects). Item <g>s are
+    // siblings of that group, so object clicks never match and never deselect.
+    const isBg = target === svgRef.current || target.dataset.bg === "true"
+      || target.closest?.('[data-bg="true"]') != null;
 
     if (tool === "pan") { if (isBg) startPan(e); return; }
     if (tool === "select" || tool === "erase") {
@@ -248,7 +273,6 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
         setWallStart(clamped);
       } else {
         // Complete the wall
-        pushHistory(rooms, fpaths);
         const endPt = wallPreview ?? clamped;
         const newWall: FloorWall = {
           id: genId("wl"),
@@ -273,7 +297,6 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
         id: genId("dr"), x: clamped.x, y: clamped.y,
         width: 8, direction: "left", color: "#d97706",
       };
-      pushHistory(rooms, fpaths);
       updFloor(rooms, fpaths, walls, [...doors, newDoor]);
       setSelected({ type: "door", id: newDoor.id });
       return;
@@ -284,7 +307,6 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
         id: genId("wn"), x: clamped.x, y: clamped.y,
         width: 12, height: 4, color: "#7dd3fc",
       };
-      pushHistory(rooms, fpaths);
       updFloor(rooms, fpaths, walls, doors, [...windows, newWindow]);
       setSelected({ type: "window", id: newWindow.id });
       return;
@@ -313,7 +335,6 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
         rotation: 0,
         color: furnitureTemplate.color,
       };
-      pushHistory(rooms, fpaths);
       updFloor(rooms, fpaths, walls, doors, windows, [...furniture, newItem]);
       setSelected({ type: "furniture", id: newItem.id });
       setTool("select");
@@ -325,7 +346,6 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
         id: genId("lb"), x: clamped.x, y: clamped.y,
         text: "Label", fontSize: 12, color: "#374151", rotation: 0,
       };
-      pushHistory(rooms, fpaths);
       updFloor(rooms, fpaths, walls, doors, windows, furniture, stairs, elevators, [...labels, newLabel]);
       setSelected({ type: "label", id: newLabel.id });
       setTool("select");
@@ -380,6 +400,8 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
       }
       const clampedX = clamp(Math.round(newX), 0, FP_W);
       const clampedY = clamp(Math.round(newY), 0, FP_H);
+      const originPt = ep.endpoint === "x1" ? { x: ep.origin.x1, y: ep.origin.y1 } : { x: ep.origin.x2, y: ep.origin.y2 };
+      if (originPt.x !== clampedX || originPt.y !== clampedY) gestureMoved.current = true;
       // Update the wall endpoint in real time
       updFloor(rooms, fpaths,
         walls.map((w) => {
@@ -403,7 +425,15 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
     const drag = dragging.current;
     const dx = Math.round(pt.x - drag.sx);
     const dy = Math.round(pt.y - drag.sy);
-    const moved = drag.origins.map((orig: any) => ({ ...orig, x: orig.x + dx, y: orig.y + dy }));
+    // Walls are endpoint-based (x1/y1/x2/y2) — never write NaN x/y onto them.
+    // The generic { x, y } translate polluted wall objects with NaN coordinates,
+    // which later serialized as JSON null and broke the map_elements NOT NULL x.
+    const moved = drag.origins.map((orig: any) =>
+      drag.type === "wall"
+        ? { ...orig, x1: orig.x1 + dx, y1: orig.y1 + dy, x2: orig.x2 + dx, y2: orig.y2 + dy }
+        : { ...orig, x: orig.x + dx, y: orig.y + dy }
+    );
+    if (dx !== 0 || dy !== 0) gestureMoved.current = true;
     // Apply to rooms
     if (drag.type === "room") {
       updFloor(
@@ -427,16 +457,20 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
 
   const handleSvgUp = () => {
     endPan();
-    if (wallEndpointDrag.current) {
-      pushHistory(rooms, fpaths);
-      wallEndpointDrag.current = null;
+    // Commit exactly ONE history entry per completed gesture: the POST-gesture
+    // state (per-frame pushes were suppressed during the drag). Undo therefore
+    // restores the pre-gesture snapshot and redo re-applies the gesture.
+    if (gestureMoved.current) {
+      pushHistory(floorSnapshot()); /* post-gesture commit */
     }
+    suppressHistoryRef.current = false;
+    gestureMoved.current = false;
+    wallEndpointDrag.current = null;
     dragging.current = null;
     if (resizing.current) { resizing.current = null; return; }
 
     // Finalize room/stairs/elevator creation
     if (roomDrag && tool === "room") {
-      pushHistory(rooms, fpaths);
       const rx = Math.min(roomDrag.sx, roomDrag.cx);
       const ry = Math.min(roomDrag.sy, roomDrag.cy);
       const rw = Math.max(Math.abs(roomDrag.cx - roomDrag.sx), 20);
@@ -457,7 +491,6 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
     }
 
     if (roomDrag && tool === "stairs") {
-      pushHistory(rooms, fpaths);
       const rx = Math.min(roomDrag.sx, roomDrag.cx);
       const ry = Math.min(roomDrag.sy, roomDrag.cy);
       const rw = Math.max(Math.abs(roomDrag.cx - roomDrag.sx), 16);
@@ -478,7 +511,6 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
     }
 
     if (roomDrag && tool === "ramp") {
-      pushHistory(rooms, fpaths);
       const rx = Math.min(roomDrag.sx, roomDrag.cx);
       const ry = Math.min(roomDrag.sy, roomDrag.cy);
       const rw = Math.max(Math.abs(roomDrag.cx - roomDrag.sx), 16);
@@ -501,7 +533,6 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
     }
 
     if (roomDrag && tool === "elevator") {
-      pushHistory(rooms, fpaths);
       const rx = Math.min(roomDrag.sx, roomDrag.cx);
       const ry = Math.min(roomDrag.sy, roomDrag.cy);
       const rw = Math.max(Math.abs(roomDrag.cx - roomDrag.sx), 14);
@@ -527,7 +558,6 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
 
   const handleDblClick = () => {
     if (drawingPath.length >= 2) {
-      pushHistory(rooms, fpaths);
       updFloor(rooms, [...fpaths, { id: genId("fp"), points: drawingPath, type: "footpath", color: "#94a3b8", width: 3 }]);
       setDP([]);
       setTool("select");
@@ -540,7 +570,6 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
     e.stopPropagation();
     if (isSpacePressed()) { startPan(e); return; }
     if (tool === "erase") {
-      pushHistory(rooms, fpaths);
       if (type === "room") updFloor(rooms.filter((r: FloorRoom) => r.id !== id), fpaths);
       else if (type === "wall") updFloor(rooms, fpaths, walls.filter((w: FloorWall) => w.id !== id));
       else if (type === "door") updFloor(rooms, fpaths, walls, doors.filter((d: FloorDoor) => d.id !== id));
@@ -557,6 +586,10 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
     const sel: FloorSelection = { type: type as any, id };
     setSelected(sel);
     const pt = getPoint(e, FP_W, FP_H);
+    // Suppress per-frame history pushes during the drag; ONE post-gesture entry
+    // is committed on pointer release (handleSvgUp).
+    suppressHistoryRef.current = true;
+    gestureMoved.current = false;
     dragging.current = { type, ids: [id], origins: [{ ...item }], sx: pt.x, sy: pt.y };
   };
 
@@ -570,11 +603,10 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
   useEffect(() => {
     const k = (e: KeyboardEvent) => {
       if (document.activeElement?.tagName === "INPUT" || document.activeElement?.tagName === "TEXTAREA") return;
-      if ((e.ctrlKey || e.metaKey) && e.key === "z" && !e.shiftKey) { e.preventDefault(); const entry = undo(); if (entry) { updFloor(entry.rooms, entry.paths, entry.walls ?? walls, entry.doors ?? doors, entry.windows ?? windows, entry.furniture ?? furniture, entry.stairs ?? stairs, entry.elevators ?? elevators, entry.labels ?? labels); } return; }
-      if ((e.ctrlKey || e.metaKey) && (e.key === "y" || (e.key === "z" && e.shiftKey))) { e.preventDefault(); const entry = redo(); if (entry) { updFloor(entry.rooms, entry.paths, entry.walls ?? walls, entry.doors ?? doors, entry.windows ?? windows, entry.furniture ?? furniture, entry.stairs ?? stairs, entry.elevators ?? elevators, entry.labels ?? labels); } return; }
+      if ((e.ctrlKey || e.metaKey) && e.key === "z" && !e.shiftKey) { e.preventDefault(); applyEntry(undo()); return; }
+      if ((e.ctrlKey || e.metaKey) && (e.key === "y" || (e.key === "z" && e.shiftKey))) { e.preventDefault(); applyEntry(redo()); return; }
       if ((e.key === "Delete" || e.key === "Backspace") && selected) {
         e.preventDefault();
-        pushHistory(rooms, fpaths);
         const { type, id } = selected;
         if (type === "room") updFloor(rooms.filter((r) => r.id !== id), fpaths);
         else if (type === "wall") updFloor(rooms, fpaths, walls.filter((w) => w.id !== id));
@@ -588,7 +620,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
         setSelected(null);
         return;
       }
-      if (e.key === "Escape") { setWallStart(null); setWallPreview(null); setDP([]); setSelected(null); if (tool === "path") setTool("select"); }
+      if (e.key === "Escape") { setWallStart(null); setWallPreview(null); setDP([]); setSelected(null); suppressHistoryRef.current = false; gestureMoved.current = false; dragging.current = null; if (tool === "path") setTool("select"); }
       if (e.key === "v" || e.key === "V") setTool("select");
       if (e.key === "w" || e.key === "W") setTool("wall");
       if (e.key === "r" || e.key === "R") setTool("room");
@@ -606,7 +638,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
     };
     window.addEventListener("keydown", k);
     return () => window.removeEventListener("keydown", k);
-  }, [selected, tool, rooms, fpaths, walls, doors, windows, furniture, stairs, elevators, labels, undo, redo]);
+  }, [selected, tool, rooms, fpaths, walls, doors, windows, furniture, stairs, elevators, labels, undo, redo, applyEntry, pushHistory]);
 
   // ── Cursor ──
   const cursor = isSpacePressed()
@@ -647,7 +679,6 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
     const { type, id } = contextMenu;
     if (type === "wall") {
       if (action === "delete") {
-        pushHistory(rooms, fpaths);
         updFloor(rooms, fpaths, walls.filter((w) => w.id !== id));
         setSelected(null);
         toast.info("Wall deleted", "The wall has been removed.");
@@ -738,12 +769,16 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
           <div className="w-px h-5 bg-border mx-0.5" />
 
           {/* Undo/Redo */}
-          <button onClick={() => { const entry = undo(); if (entry) updFloor(entry.rooms, entry.paths, entry.walls ?? walls, entry.doors ?? doors, entry.windows ?? windows, entry.furniture ?? furniture, entry.stairs ?? stairs, entry.elevators ?? elevators, entry.labels ?? labels); }}
-            className="flex items-center justify-center h-7 w-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-all" title="Undo (Ctrl+Z)">
+          <button onClick={() => applyEntry(undo())} disabled={!canUndo}
+            className={cn("flex items-center justify-center h-7 w-7 rounded-md transition-all",
+              canUndo ? "text-muted-foreground hover:text-foreground hover:bg-muted" : "text-muted-foreground/40 cursor-not-allowed")}
+            title="Undo (Ctrl+Z)">
             <Undo2 className="h-3.5 w-3.5" />
           </button>
-          <button onClick={() => { const entry = redo(); if (entry) updFloor(entry.rooms, entry.paths, entry.walls ?? walls, entry.doors ?? doors, entry.windows ?? windows, entry.furniture ?? furniture, entry.stairs ?? stairs, entry.elevators ?? elevators, entry.labels ?? labels); }}
-            className="flex items-center justify-center h-7 w-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-all" title="Redo (Ctrl+Y)">
+          <button onClick={() => applyEntry(redo())} disabled={!canRedo}
+            className={cn("flex items-center justify-center h-7 w-7 rounded-md transition-all",
+              canRedo ? "text-muted-foreground hover:text-foreground hover:bg-muted" : "text-muted-foreground/40 cursor-not-allowed")}
+            title="Redo (Ctrl+Y)">
             <Redo2 className="h-3.5 w-3.5" />
           </button>
 
@@ -929,18 +964,23 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
             onContextMenu={(e) => { e.preventDefault(); if (contextMenu) setContextMenu(null); }}
           >
             <g transform={`translate(${pan.x},${pan.y}) scale(${zoom})`}>
-              {/* Background */}
-              <rect data-bg="true" width={FP_W} height={FP_H} fill="#b0ada8" />
-              {/* Grid lines */}
-              {Array.from({ length: Math.ceil(FP_W / 20) }, (_, i) => (
-                <line key={`gv${i}`} x1={i * 20} y1={0} x2={i * 20} y2={FP_H} stroke="rgba(0,0,0,0.04)" strokeWidth={0.5} />
-              ))}
-              {Array.from({ length: Math.ceil(FP_H / 20) }, (_, i) => (
-                <line key={`gh${i}`} x1={0} y1={i * 20} x2={FP_W} y2={i * 20} stroke="rgba(0,0,0,0.04)" strokeWidth={0.5} />
-              ))}
-              {/* Floor area */}
-              <rect x={8} y={8} width={FP_W - 16} height={FP_H - 16} rx={2} fill="#e0dcd6" stroke="#706d68" strokeWidth={5} />
-              <rect x={13} y={13} width={FP_W - 26} height={FP_H - 26} fill="#cdc9c3" />
+              {/* Decorative background layer: the outer rect, grid lines and
+                  floor-area rects are all inside a single data-bg group so a click
+                  on ANY empty canvas space (not just the outer margin) clears the
+                  current selection. Item <g>s are siblings of this group. */}
+              <g data-bg="true">
+                <rect width={FP_W} height={FP_H} fill="#b0ada8" />
+                {/* Grid lines */}
+                {Array.from({ length: Math.ceil(FP_W / 20) }, (_, i) => (
+                  <line key={`gv${i}`} x1={i * 20} y1={0} x2={i * 20} y2={FP_H} stroke="rgba(0,0,0,0.04)" strokeWidth={0.5} />
+                ))}
+                {Array.from({ length: Math.ceil(FP_H / 20) }, (_, i) => (
+                  <line key={`gh${i}`} x1={0} y1={i * 20} x2={FP_W} y2={i * 20} stroke="rgba(0,0,0,0.04)" strokeWidth={0.5} />
+                ))}
+                {/* Floor area */}
+                <rect x={8} y={8} width={FP_W - 16} height={FP_H - 16} rx={2} fill="#e0dcd6" stroke="#706d68" strokeWidth={5} />
+                <rect x={13} y={13} width={FP_W - 26} height={FP_H - 26} fill="#cdc9c3" />
+              </g>
 
               {/* ═══ WALLS ═══ */}
               {walls.map((wall) => {
@@ -955,7 +995,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
                     style={{ cursor: tool === "select" ? "pointer" : cursor }}>
                     {/* Selection glow */}
                     {isSel && (
-                      <line x1={wall.x1} y1={wall.y1} x2={wall.x2} y2={wall.y2}
+                      <line data-testid="selection-glow" x1={wall.x1} y1={wall.y1} x2={wall.x2} y2={wall.y2}
                         stroke="var(--accent)" strokeWidth={wall.thickness + 6} opacity={0.3}
                         strokeLinecap="round" />
                     )}
@@ -967,21 +1007,23 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
                     {isSel && (
                       <>
                         {/* Endpoint 1 — draggable */}
-                        <circle cx={wall.x1} cy={wall.y1} r={6} fill="white" stroke="var(--accent)" strokeWidth={2}
+                        <circle data-testid="wall-endpoint-handle" cx={wall.x1} cy={wall.y1} r={6} fill="white" stroke="var(--accent)" strokeWidth={2}
                           style={{ cursor: tool === "select" ? "move" : cursor }}
                           onMouseDown={(e) => {
                             e.stopPropagation();
                             if (tool !== "select") return;
-                            pushHistory(rooms, fpaths);
+                            suppressHistoryRef.current = true;
+                            gestureMoved.current = false;
                             wallEndpointDrag.current = { wallId: wall.id, endpoint: "x1", origin: { ...wall } };
                           }} />
                         {/* Endpoint 2 — draggable */}
-                        <circle cx={wall.x2} cy={wall.y2} r={6} fill="white" stroke="var(--accent)" strokeWidth={2}
+                        <circle data-testid="wall-endpoint-handle" cx={wall.x2} cy={wall.y2} r={6} fill="white" stroke="var(--accent)" strokeWidth={2}
                           style={{ cursor: tool === "select" ? "move" : cursor }}
                           onMouseDown={(e) => {
                             e.stopPropagation();
                             if (tool !== "select") return;
-                            pushHistory(rooms, fpaths);
+                            suppressHistoryRef.current = true;
+                            gestureMoved.current = false;
                             wallEndpointDrag.current = { wallId: wall.id, endpoint: "x2", origin: { ...wall } };
                           }} />
                         {/* Length label */}
@@ -1210,7 +1252,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
                 const pts = p.points.map((pt) => `${pt.x},${pt.y}`).join(" ");
                 const isSel = selected?.type === "path" && selected.id === p.id;
                 return (
-                  <g key={p.id} onClick={(e) => { e.stopPropagation(); if (tool === "erase") { pushHistory(rooms, fpaths); updFloor(rooms, fpaths.filter((x) => x.id !== p.id)); } else setSelected({ type: "path", id: p.id }); }}
+                  <g key={p.id} onClick={(e) => { e.stopPropagation(); if (tool === "erase") { updFloor(rooms, fpaths.filter((x) => x.id !== p.id)); } else setSelected({ type: "path", id: p.id }); }}
                     style={{ cursor: tool === "erase" ? "not-allowed" : "pointer" }}>
                     {isSel && <polyline points={pts} fill="none" stroke="var(--accent)" strokeWidth={p.width + 4} strokeLinecap="round" opacity={0.4} />}
                     <polyline points={pts} fill="none" stroke={p.color} strokeWidth={p.width} strokeLinecap="round" opacity={0.8} />
@@ -1400,19 +1442,18 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
             ramps={ramps}
             elevators={elevators}
             labels={labels}
-            onUpdateRoom={(id, ch) => { pushHistory(rooms, fpaths); updFloor(rooms.map((r) => r.id === id ? { ...r, ...ch } : r), fpaths); }}
-            onUpdateWall={(id, ch) => { pushHistory(rooms, fpaths); updFloor(rooms, fpaths, walls.map((w) => w.id === id ? { ...w, ...ch } : w)); }}
-            onUpdateDoor={(id, ch) => { pushHistory(rooms, fpaths); updFloor(rooms, fpaths, walls, doors.map((d) => d.id === id ? { ...d, ...ch } : d)); }}
-            onUpdateWindow={(id, ch) => { pushHistory(rooms, fpaths); updFloor(rooms, fpaths, walls, doors, windows.map((w) => w.id === id ? { ...w, ...ch } : w)); }}
-            onUpdateFurniture={(id, ch) => { pushHistory(rooms, fpaths); updFloor(rooms, fpaths, walls, doors, windows, furniture.map((f) => f.id === id ? { ...f, ...ch } : f)); }}
-            onUpdateStairs={(id, ch) => { pushHistory(rooms, fpaths); updFloor(rooms, fpaths, walls, doors, windows, furniture, stairs.map((s) => s.id === id ? { ...s, ...ch } : s)); }}
-            onUpdateRamp={(id, ch) => { pushHistory(rooms, fpaths); updFloor(rooms, fpaths, walls, doors, windows, furniture, stairs, elevators, labels, ramps.map((r) => r.id === id ? { ...r, ...ch } : r)); }}
-            onUpdateElevator={(id, ch) => { pushHistory(rooms, fpaths); updFloor(rooms, fpaths, walls, doors, windows, furniture, stairs, elevators.map((e) => e.id === id ? { ...e, ...ch } : e)); }}
-            onUpdateLabel={(id, ch) => { pushHistory(rooms, fpaths); updFloor(rooms, fpaths, walls, doors, windows, furniture, stairs, elevators, labels.map((l) => l.id === id ? { ...l, ...ch } : l)); }}
+            onUpdateRoom={(id, ch) => { updFloor(rooms.map((r) => r.id === id ? { ...r, ...ch } : r), fpaths); }}
+            onUpdateWall={(id, ch) => { updFloor(rooms, fpaths, walls.map((w) => w.id === id ? { ...w, ...ch } : w)); }}
+            onUpdateDoor={(id, ch) => { updFloor(rooms, fpaths, walls, doors.map((d) => d.id === id ? { ...d, ...ch } : d)); }}
+            onUpdateWindow={(id, ch) => { updFloor(rooms, fpaths, walls, doors, windows.map((w) => w.id === id ? { ...w, ...ch } : w)); }}
+            onUpdateFurniture={(id, ch) => { updFloor(rooms, fpaths, walls, doors, windows, furniture.map((f) => f.id === id ? { ...f, ...ch } : f)); }}
+            onUpdateStairs={(id, ch) => { updFloor(rooms, fpaths, walls, doors, windows, furniture, stairs.map((s) => s.id === id ? { ...s, ...ch } : s)); }}
+            onUpdateRamp={(id, ch) => { updFloor(rooms, fpaths, walls, doors, windows, furniture, stairs, elevators, labels, ramps.map((r) => r.id === id ? { ...r, ...ch } : r)); }}
+            onUpdateElevator={(id, ch) => { updFloor(rooms, fpaths, walls, doors, windows, furniture, stairs, elevators.map((e) => e.id === id ? { ...e, ...ch } : e)); }}
+            onUpdateLabel={(id, ch) => { updFloor(rooms, fpaths, walls, doors, windows, furniture, stairs, elevators, labels.map((l) => l.id === id ? { ...l, ...ch } : l)); }}
             onToggleNavConnection={onToggleNavConnection}
             onDeleteSelected={() => {
               if (!selected) return;
-              pushHistory(rooms, fpaths);
               const { type, id } = selected;
               if (type === "room") updFloor(rooms.filter((r) => r.id !== id), fpaths);
               else if (type === "wall") updFloor(rooms, fpaths, walls.filter((w) => w.id !== id));
