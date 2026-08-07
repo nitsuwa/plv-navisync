@@ -3,7 +3,8 @@ import { motion, AnimatePresence } from "motion/react";
 import {
   ArrowLeft, Globe, Map, CheckCircle2, Undo2, Redo2, X,
   AlignLeft, AlignCenter, AlignRight, AlignStartVertical, AlignEndVertical,
-  AlignVerticalJustifyCenter, Grid3X3, Magnet, ZoomIn, ZoomOut, Maximize2, Settings2,
+  AlignVerticalJustifyCenter, AlignHorizontalDistributeCenter, AlignVerticalDistributeCenter,
+  Grid3X3, Magnet, ZoomIn, ZoomOut, Maximize2, Settings2,
   MousePointer2, Square, MapPin, GitBranch, Trash2, Hand, Keyboard, AlertTriangle,
   Loader2, HelpCircle, ChevronLeft, Navigation,
 } from "lucide-react";
@@ -14,13 +15,12 @@ import { HierarchyPanel } from "./HierarchyPanel";
 import { PropertiesPanel } from "./PropertiesPanel";
 import { RoutesPanel } from "./RoutesPanel";
 import { SaveScreen } from "./SaveScreen";
-import { LAYERS, BUILDING_COLORS, LAYER_TOOLS, PATH_COLORS } from "./constants";
+import { LAYERS, BUILDING_COLORS } from "./constants";
 import { genId } from "./constants";
 import { useToast } from "../../hooks/useToast";
 import { ValidationErrorsDialog } from "./ValidationErrorsDialog";
 import type { ValidationIssue } from "./ValidationErrorsDialog";
 import { ContextMenu } from "./ContextMenu";
-import { MapBuilderTutorial, hasSeenTutorial } from "./MapBuilderTutorial";
 import { PrePublishDialog } from "./PrePublishDialog";
 import { TestNavigationPanel } from "./TestNavigationPanel";
 import { ShortcutCheatSheet } from "./ShortcutCheatSheet";
@@ -35,6 +35,14 @@ import { BUILDING_TYPE_MAP, DECOR_ASSET_MAP } from "./constants";
 import { ToolbarTooltip } from "./ToolbarTooltip";
 import { validateCampusData, computeBuildingOverlaps } from "../../lib/campusValidation";
 import { computeBuildingPlacement, resetTransientToolState } from "../../lib/editorPlacement";
+import { computeGroupTranslation, groupBBoxAfterTranslation, computeGroupAlignmentGuides } from "../../lib/campusGroupMove";
+import type { GroupMoveMember } from "../../lib/campusGroupMove";
+import { reorderOutdoorStack } from "../../lib/campusStack";
+import type { LayerOrderAction } from "../../lib/campusLayerOrder";
+import { duplicateDecorAsset } from "../../lib/decorAsset";
+import { decorRenderScale, decorWorldSize } from "../../lib/decorVisual";
+import { outdoorSelectionIdsInRect, selectionRectFromPoints } from "../../lib/campusSelection";
+import { arrangeSelectedOutdoorObjects, selectedOutdoorCount, type OutdoorArrangementAction } from "../../lib/campusArrangement";
 
 // ── Per-layer marker configuration ──
 const LAYER_MARKER_CONFIG: Record<string, { name: string; type: string; color: string }> = {
@@ -122,11 +130,11 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
   const [renameDialog, setRenameDialog] = useState<{ id: string; name: string } | null>(null);
   const [renameValue, setRenameValue] = useState("");
   // ── Context menu ──
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; type: "building" | "marker" | "path"; id: string } | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; type: "building" | "marker" | "path" | "decorAsset"; id: string } | null>(null);
   // ── Erase/delete confirmation ──
   const [deleteConfirm, setDeleteConfirm] = useState<{ type: "building" | "marker" | "path" | "decorAsset"; id: string; name: string } | null>(null);
   // ── Batch delete confirmation ──
-  const [batchDeleteConfirm, setBatchDeleteConfirm] = useState<{ buildingIds: string[]; markerIds: string[] } | null>(null);
+  const [batchDeleteConfirm, setBatchDeleteConfirm] = useState<{ buildingIds: string[]; markerIds: string[]; decorAssetIds: string[] } | null>(null);
   // ── Validation dialog ──
   const [validationDialogOpen, setValidationDialogOpen] = useState(false);
   const [validationErrors, setValidationErrors] = useState<ValidationIssue[]>([]);
@@ -160,6 +168,14 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
   const [highlightedRoute, setHighlightedRoute] = useState<{ waypoints: { x: number; y: number }[]; color: string } | null>(null);
   // ── Keyboard shortcut cheat sheet ──
   const [showCheatSheet, setShowCheatSheet] = useState(false);
+
+  // ── Normalized canvas dimensions ──
+  // The DB contract guarantees canvas_width/height > 0, but a freshly-created
+  // in-memory campus (e.g. right after the canvas setup wizard) can transiently
+  // carry 0/undefined. Every geometry path below reads these safe values so
+  // placement can never silently collapse toward the top-left corner (0,0).
+  const cw = campus.canvasW > 0 ? campus.canvasW : 900;
+  const ch = campus.canvasH > 0 ? campus.canvasH : 680;
   // ── Path draw-in animation: id of the just-completed path ──
   const [animatingPathId, setAnimatingPathId] = useState<string | null>(null);
   // ── Arrow-key nudge batching (groups rapid nudges into one undo step) ──
@@ -212,8 +228,6 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     setInvalidBuildings(invalidIds);
   }, [validateCampus]);
 
-  // ── Tutorial ──
-  const [showTutorial, setShowTutorial] = useState(!hasSeenTutorial());
   const toast = useToast();
 
   // ── Handle back navigation with unsaved/pending changes check ──
@@ -243,7 +257,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
   }, [isDirty]);
 
   const { zoom, pan, panning, svgRef, containerRef, getPoint, startPan, movePan, endPan, resetView, zoomIn, zoomOut, zoomToBuilding, handleMiddleMouseDown, handleWheel } =
-    useCanvasControls(campus.canvasW, campus.canvasH);
+    useCanvasControls(cw, ch);
 
   const SNAP_DIST = 12;
   const snap = useCallback((v: number) => (snapGrid ? Math.round(v / 20) * 20 : Math.round(v)), [snapGrid]);
@@ -271,10 +285,12 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     [edgeSnap]
   );
   const dragging = useRef<{ type: "building" | "marker" | "decorAsset"; id: string; sx: number; sy: number; ox: number; oy: number } | null>(null);
+  const dragGroupStartRef = useRef<GroupMoveMember[] | null>(null);
 
   const buildings = campus.buildings;
   const markers = campus.markers;
   const paths = campus.paths;
+  const decorAssets = campus.decorAssets ?? [];
 
   const upd = (c: Partial<Campus>) => { pushHistory(); onUpdate({ ...campus, ...c }); };
   const updBuildings = (b: CampusBuilding[]) => upd({ buildings: b });
@@ -290,6 +306,39 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
   useEffect(() => {
     setOverlappingBuildings(computeOverlaps(buildings));
   }, [buildings, computeOverlaps]);
+
+  // ── Build the rigid group-drag member list ──
+  // When the grabbed object is part of the current multi-selection, the whole
+  // selection of buildings + decorative assets moves as one unit. Locked
+  // buildings are excluded; markers/paths/nav items are never part of the group.
+  const buildDragGroup = (drag: { type: string; id: string }, sel: string[]): GroupMoveMember[] | null => {
+    if (!sel.includes(drag.id)) return null;
+    const members: GroupMoveMember[] = [];
+    for (const b of buildings) {
+      if (b.locked) continue;
+      if (sel.includes(b.id)) members.push({ kind: "building", id: b.id, x: b.x, y: b.y, width: b.width, height: b.height });
+    }
+    for (const da of decorAssets) {
+      if (!sel.includes(da.id)) continue;
+      const t = DECOR_ASSET_MAP[da.type];
+      if (!t) continue;
+      const size = decorWorldSize(t, da.scale);
+      members.push({ kind: "decorAsset", id: da.id, x: da.x, y: da.y, width: size.width, height: size.height });
+    }
+    return members.length >= 2 ? members : null;
+  };
+
+  const selectionForId = useCallback((id: string): CampusSelection | null => {
+    if (buildings.some((b) => b.id === id)) return { type: "building", id };
+    if (markers.some((m) => m.id === id)) return { type: "marker", id };
+    if (decorAssets.some((da) => da.id === id)) return { type: "decorAsset", id };
+    return null;
+  }, [buildings, markers, decorAssets]);
+
+  const selectedOutdoorObjectCount = useMemo(
+    () => selectedOutdoorCount(buildings, decorAssets, multiSelected, DECOR_ASSET_MAP),
+    [buildings, decorAssets, multiSelected]
+  );
 
   // ── SVG event handlers ──
   const handleSvgDown = (e: React.MouseEvent<SVGSVGElement>) => {
@@ -319,17 +368,17 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     }
 
     if (tool === "select") {
-      const pt = getPoint(e, campus.canvasW, campus.canvasH);
+      const pt = getPoint(e, cw, ch);
       setRubberBand({ sx: pt.x, sy: pt.y, cx: pt.x, cy: pt.y });
       if (!e.shiftKey) { setMultiSelected([]); setSelected(null); setGuides([]); }
       return;
     }
     if (tool === "erase") { startPan(e); setSelected(null); return; }
 
-    const pt = getPoint(e, campus.canvasW, campus.canvasH);
+    const pt = getPoint(e, cw, ch);
     const clampedPt = {
-      x: Math.max(0, Math.min(campus.canvasW, Math.round(pt.x))),
-      y: Math.max(0, Math.min(campus.canvasH, Math.round(pt.y))),
+      x: Math.max(0, Math.min(cw, Math.round(pt.x))),
+      y: Math.max(0, Math.min(ch, Math.round(pt.y))),
     };
     if (tool === "marker" || tool === "room") {
       const cfg = LAYER_MARKER_CONFIG[layer] ?? LAYER_MARKER_CONFIG.campus;
@@ -350,8 +399,8 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
           code: selectedBuildingType.label.slice(0, 3).toUpperCase(),
           category: selectedBuildingType.category,
           description: selectedBuildingType.description,
-          x: Math.round(Math.max(0, Math.min(campus.canvasW - selectedBuildingType.defaultWidth, clampedPt.x - selectedBuildingType.defaultWidth / 2))),
-          y: Math.round(Math.max(0, Math.min(campus.canvasH - selectedBuildingType.defaultHeight, clampedPt.y - selectedBuildingType.defaultHeight / 2))),
+          x: Math.round(Math.max(0, Math.min(cw - selectedBuildingType.defaultWidth, clampedPt.x - selectedBuildingType.defaultWidth / 2))),
+          y: Math.round(Math.max(0, Math.min(ch - selectedBuildingType.defaultHeight, clampedPt.y - selectedBuildingType.defaultHeight / 2))),
           width: selectedBuildingType.defaultWidth,
           height: selectedBuildingType.defaultHeight,
           color: selectedBuildingType.color,
@@ -384,7 +433,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
       return;
     }
 
-    const pt = getPoint(e, campus.canvasW, campus.canvasH);
+    const pt = getPoint(e, cw, ch);
     setCursorPos({ x: Math.round(pt.x), y: Math.round(pt.y) });
 
     // Building drag-to-create preview
@@ -402,13 +451,55 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     movePan(e);
     const drag = dragging.current;
     if (!drag) return;
+
+    // ── Group drag: the whole selected group of buildings + decorative assets
+    // moves rigidly as one unit (grid-snapped on the anchor, edge-snapped on the
+    // group bbox, clamped to the canvas). Internal spacing is never distorted. ──
+    const group = dragGroupStartRef.current;
+    if (group) {
+      const groupIds = new Set(group.map((m) => m.id));
+      const otherBuildings = buildings
+        .filter((b) => !groupIds.has(b.id))
+        .map((b) => ({ x: b.x, y: b.y, width: b.width, height: b.height }));
+      const { dx, dy } = computeGroupTranslation({
+        members: group,
+        draggedId: drag.id,
+        rawDx: pt.x - drag.sx,
+        rawDy: pt.y - drag.sy,
+        canvasW: cw,
+        canvasH: ch,
+        snapGrid,
+        otherBuildings,
+        edgeSnap,
+      });
+      if (dx === 0 && dy === 0) return;
+      gestureChangedRef.current = true;
+      const startById = new globalThis.Map(group.map((m) => [m.id, m]));
+      const nextBuildings = buildings.map((b) => {
+        const start = startById.get(b.id);
+        return start?.kind === "building" ? { ...b, x: start.x + dx, y: start.y + dy } : b;
+      });
+      onUpdate({
+        ...campus,
+        buildings: nextBuildings,
+        decorAssets: decorAssets.map((da) => {
+          const start = startById.get(da.id);
+          return start?.kind === "decorAsset" ? { ...da, x: start.x + dx, y: start.y + dy } : da;
+        }),
+      });
+      const bbox = groupBBoxAfterTranslation(group, dx, dy);
+      setOverlappingBuildings(computeOverlaps(nextBuildings));
+      setGuides(computeGroupAlignmentGuides(bbox.x, bbox.y, bbox.width, bbox.height, otherBuildings));
+      return;
+    }
+
     if (drag.type === "decorAsset") {
       const updatedAssets = decorAssets.map((da) =>
         da.id === drag.id
-          ? { ...da, x: Math.round(drag.ox + (pt.x - drag.sx)), y: Math.round(drag.oy + (pt.y - drag.sy)) }
+          ? { ...da, x: snap(drag.ox + (pt.x - drag.sx)), y: snap(drag.oy + (pt.y - drag.sy)) }
           : da
       );
-      beginGestureHistory();
+      gestureChangedRef.current = true;
       onUpdate({ ...campus, decorAssets: updatedAssets });
       return;
     }
@@ -422,7 +513,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
       const targetX = snap(rawX);
       const targetY = snap(rawY);
       const targetB = edgeSnapBuilding({ ...b, x: targetX, y: targetY }, buildings);
-      beginGestureHistory();
+      gestureChangedRef.current = true;
       onUpdate({
         ...campus,
         buildings: buildings.map((bld) => (bld.id === drag.id ? { ...bld, x: targetB.x, y: targetB.y } : bld)),
@@ -444,7 +535,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
       setOverlappingBuildings(overlaps);
       setGuides(guidesList);
     } else {
-      beginGestureHistory();
+      gestureChangedRef.current = true;
       onUpdate({
         ...campus,
         markers: markers.map((m) => (m.id === drag.id ? { ...m, x: snap(drag.ox + (pt.x - drag.sx)), y: snap(drag.oy + (pt.y - drag.sy)) } : m)),
@@ -454,7 +545,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
 
   const handleResizeStart = (e: React.MouseEvent, b: CampusBuilding, corner: string) => {
     e.stopPropagation();
-    const pt = getPoint(e, campus.canvasW, campus.canvasH);
+    const pt = getPoint(e, cw, ch);
     gestureHistoryPushed.current = false;
     setResizing({ id: b.id, corner, sx: pt.x, sy: pt.y, ox: b.x, oy: b.y, ow: b.width, oh: b.height });
   };
@@ -462,7 +553,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
   // ── Rotation handler ──
   const handleRotateStart = useCallback((e: React.MouseEvent, b: CampusBuilding) => {
     e.stopPropagation();
-    const pt = getPoint(e, campus.canvasW, campus.canvasH);
+    const pt = getPoint(e, cw, ch);
     const cx = b.x + b.width / 2;
     const cy = b.y + b.height / 2;
     // Track the previous mouse angle + normalized accumulated rotation so that
@@ -473,27 +564,27 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     rotating.current = { id: b.id, cx, cy, prevAngle: startAngle, rotation: startRot };
     setRotatingId(b.id);
     setRotatingAngle(startRot);
-  }, [getPoint, campus.canvasW, campus.canvasH]);
+  }, [getPoint, cw, ch]);
 
   // ── Decor asset rotation handler ──
   const handleDecorRotateStart = useCallback((e: React.MouseEvent, da: CampusDecorAsset) => {
     e.stopPropagation();
-    const pt = getPoint(e, campus.canvasW, campus.canvasH);
+    const pt = getPoint(e, cw, ch);
     const startAngle = Math.atan2(pt.y - da.y, pt.x - da.x) * (180 / Math.PI);
     const startRot = normalizeDeg(da.rotation ?? 0);
     gestureHistoryPushed.current = false;
     decorRotating.current = { id: da.id, cx: da.x, cy: da.y, prevAngle: startAngle, rotation: startRot };
     setDecorRotatingId(da.id);
     setRotatingAngle(startRot);
-  }, [getPoint, campus.canvasW, campus.canvasH]);
+  }, [getPoint, cw, ch]);
 
   // ── Decor asset resize handler (uniform scale via corners, rotation-aware) ──
   const handleDecorResizeStart = useCallback((e: React.MouseEvent, da: CampusDecorAsset, corner: string) => {
     e.stopPropagation();
     const template = DECOR_ASSET_MAP[da.type];
     if (!template) return;
-    const pt = getPoint(e, campus.canvasW, campus.canvasH);
-    const s = (da.scale ?? 1) * 3;
+    const pt = getPoint(e, cw, ch);
+    const s = decorRenderScale(da.scale);
     gestureHistoryPushed.current = false;
     decorResizing.current = {
       id: da.id, corner,
@@ -504,12 +595,12 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
       rot: da.rotation ?? 0,
     };
     setDecorResizingId(da.id);
-  }, [getPoint, campus.canvasW, campus.canvasH]);
+  }, [getPoint, cw, ch]);
 
   const handleSvgMoveResize = (e: React.MouseEvent) => {
     // ── Handle active decor rotation first ──
     if (decorRotating.current) {
-      const pt = getPoint(e, campus.canvasW, campus.canvasH);
+      const pt = getPoint(e, cw, ch);
       const { id, cx, cy, prevAngle, rotation } = decorRotating.current;
       const currentAngle = Math.atan2(pt.y - cy, pt.x - cx) * (180 / Math.PI);
       // Shortest-path delta across the ±180° atan2 wrap boundary
@@ -530,7 +621,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     }
     // ── Handle active decor resize (uniform scale, rotation-aware R(-θ)) ──
     if (decorResizing.current) {
-      const pt = getPoint(e, campus.canvasW, campus.canvasH);
+      const pt = getPoint(e, cw, ch);
       const rs = decorResizing.current;
       const ddx = pt.x - rs.sx;
       const ddy = pt.y - rs.sy;
@@ -555,7 +646,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     }
     // Handle active rotation first
     if (rotating.current) {
-      const pt = getPoint(e, campus.canvasW, campus.canvasH);
+      const pt = getPoint(e, cw, ch);
       const { id, cx, cy, prevAngle, rotation } = rotating.current;
       const currentAngle = Math.atan2(pt.y - cy, pt.x - cx) * (180 / Math.PI);
       // Shortest-path delta across the ±180° atan2 wrap boundary
@@ -575,7 +666,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
       return;
     }
     if (!resizing) { handleSvgMove(e); return; }
-    const pt = getPoint(e, campus.canvasW, campus.canvasH);
+    const pt = getPoint(e, cw, ch);
     const ddx = pt.x - resizing.sx;
     const ddy = pt.y - resizing.sy;
     beginGestureHistory();
@@ -644,36 +735,41 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
       setRotatingAngle(0);
       return;
     }
+    // Commit exactly ONE post-gesture undo snapshot for item drags (single or
+    // group) so undo restores the pre-gesture state and redo re-applies the
+    // complete gesture. The pre-gesture state is still the previous history
+    // tip, so a drag adds exactly one new entry — never one per object/move.
+    const dragCommitted = gestureChangedRef.current;
     endPan();
     dragging.current = null;
+    dragGroupStartRef.current = null;
     if (resizing) setResizing(null);
 
     // Finalize rubber-band selection
     if (rubberBand) {
-      const rx = Math.min(rubberBand.sx, rubberBand.cx);
-      const ry = Math.min(rubberBand.sy, rubberBand.cy);
-      const rw = Math.abs(rubberBand.cx - rubberBand.sx);
-      const rh = Math.abs(rubberBand.cy - rubberBand.sy);
+      const rect = selectionRectFromPoints(rubberBand.sx, rubberBand.sy, rubberBand.cx, rubberBand.cy);
+      const rw = rect.width;
+      const rh = rect.height;
       if (rw > 5 || rh > 5) {
-        // Only capture if dragged more than 5px (avoid accidental clicks)
-        const captured: string[] = [];
-        for (const b of buildings) {
-          if (
-            b.x >= rx && b.y >= ry &&
-            b.x + b.width <= rx + rw &&
-            b.y + b.height <= ry + rh
-          ) {
-            captured.push(b.id);
-          }
+        // Only capture if dragged more than 5px (avoid accidental clicks).
+        // Buildings and decorative assets share one selectable-bounds helper:
+        // rotated building AABB, decor rendered size/rotation, and hidden
+        // objects excluded. Intersections make selection forgiving when the
+        // band crosses the visible object.
+        const captured = outdoorSelectionIdsInRect(rect, buildings, decorAssets, DECOR_ASSET_MAP, { includeHidden: true });
+        if (captured.length > 1) {
+          setMultiSelected(captured);
+          setSelected(null);
+          setShowAlignTools(true);
+        } else if (captured.length === 1) {
+          setMultiSelected([]);
+          setSelected(selectionForId(captured[0]));
+          setShowAlignTools(false);
+        } else {
+          setMultiSelected([]);
+          setSelected(null);
+          setShowAlignTools(false);
         }
-        for (const m of markers) {
-          if (m.x >= rx && m.y >= ry && m.x <= rx + rw && m.y <= ry + rh) {
-            captured.push(m.id);
-          }
-        }
-        setMultiSelected(captured);
-        if (captured.length > 1) setShowAlignTools(true);
-        if (captured.length === 0) setSelected(null);
       }
       setRubberBand(null);
       return;
@@ -685,7 +781,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
       // the final building is always exactly where/whatever the preview showed.
       const rect = computeBuildingPlacement(
         buildingDrag.sx, buildingDrag.sy, buildingDrag.cx, buildingDrag.cy,
-        campus.canvasW, campus.canvasH
+        cw, ch
       );
       const nb: CampusBuilding = {
         id: genId("bld"), name: "New Building", code: "NEW", category: "Academic", description: "",
@@ -712,17 +808,24 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
 
     // ── Always clear alignment guides on mouse release ──
     setGuides([]);
+    if (dragCommitted) pushHistory();
+    gestureChangedRef.current = false;
     gestureHistoryPushed.current = false;
   };
-  const handleSvgUp = () => { endPan(); dragging.current = null; setGuides([]); gestureHistoryPushed.current = false; };
+  const handleSvgUp = () => { endPan(); dragging.current = null; dragGroupStartRef.current = null; setGuides([]); gestureHistoryPushed.current = false; };
 
   // ── Mouse leaves the canvas mid-gesture: CANCEL placement/drawing instead of
   // finalizing it. (onMouseLeave previously ran the same handler as mouseup, so
   // a drag that exited the canvas — e.g. toward the top-left — could commit a
   // building at an unintended spot without the user ever releasing the button.) ──
   const handleSvgLeave = () => {
+    // If an item drag was in progress when the pointer left the canvas, the
+    // movement was already applied — record it so undo can restore it.
+    if (gestureChangedRef.current) pushHistory();
+    gestureChangedRef.current = false;
     endPan();
     dragging.current = null;
+    dragGroupStartRef.current = null;
     if (resizing) setResizing(null);
     if (rotating.current) { rotating.current = null; setRotatingId(null); setRotatingAngle(0); }
     if (decorRotating.current) { decorRotating.current = null; setDecorRotatingId(null); setRotatingAngle(0); }
@@ -820,22 +923,51 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     }
     if (tool !== "select") return;
     if (e.shiftKey) {
-      // Shift+click: toggle in multi-selection
-      setMultiSelected((prev) => {
-        const already = prev.includes(id);
-        const next = already ? prev.filter((x) => x !== id) : [...prev, id];
-        setShowAlignTools(next.length > 1);
-        return next;
-      });
+      // Shift+click toggles membership against the currently visible
+      // selection. If one object was selected normally, include it before
+      // adding the shifted object so the visual state and drag group agree.
+      const base = multiSelected.length > 0
+        ? multiSelected
+        : selected
+          ? [selected.id]
+          : [];
+      const next = base.includes(id) ? base.filter((x) => x !== id) : [...base, id];
+      setShowAlignTools(next.length > 1);
+      if (next.length > 1) {
+        setMultiSelected(next);
+        setSelected({ type, id });
+      } else if (next.length === 1) {
+        setMultiSelected([]);
+        setSelected(selectionForId(next[0]));
+      } else {
+        setMultiSelected([]);
+        setSelected(null);
+      }
+      setGuides([]);
+      return;
+    }
+    // Clicking an object that is already part of the current multi-selection
+    // keeps the group: dragging it moves the entire selection (Figma-style).
+    // Clicking an unselected object collapses to single-object editing.
+    if (multiSelected.includes(id)) {
+      setSelected({ type, id });
+      setGuides([]);
+      const pt = getPoint(e, cw, ch);
+      gestureHistoryPushed.current = false;
+      gestureChangedRef.current = false;
+      dragging.current = { type, id, sx: pt.x, sy: pt.y, ox, oy };
+      dragGroupStartRef.current = buildDragGroup({ type, id }, multiSelected);
       return;
     }
     setMultiSelected([]);
     setShowAlignTools(false);
     setSelected({ type, id });
     setGuides([]);
-    const pt = getPoint(e, campus.canvasW, campus.canvasH);
+    const pt = getPoint(e, cw, ch);
     gestureHistoryPushed.current = false;
+    gestureChangedRef.current = false;
     dragging.current = { type, id, sx: pt.x, sy: pt.y, ox, oy };
+    dragGroupStartRef.current = null;
   };
 
 
@@ -863,12 +995,113 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
   };
 
   // ── Context menu ──
-  const handleContextMenu = useCallback((e: React.MouseEvent, type: "building" | "marker" | "path", id: string) => {
+  const handleContextMenu = useCallback((e: React.MouseEvent, type: "building" | "marker" | "path" | "decorAsset", id: string) => {
     e.preventDefault();
     e.stopPropagation();
     setContextMenu({ x: e.clientX, y: e.clientY, type, id });
     setSelected({ type, id });
   }, []);
+
+  // ── Undo/Redo history (declared before layer ordering + context actions) ──
+  const historyRef = useRef<{ snapshots: Campus[]; idx: number }>({
+    snapshots: [structuredClone(campus)],
+    idx: 0,
+  });
+
+  const pushHistory = useCallback((state?: Campus) => {
+    const h = historyRef.current;
+    const pruned = h.snapshots.slice(0, h.idx + 1);
+    // Snapshot the CURRENT state by default. Discrete actions may pass the
+    // POST-change state explicitly so the invariant snapshots[idx] === current
+    // holds and undo/redo always land on real states (never a duplicate).
+    pruned.push(structuredClone(state ?? campus));
+    if (pruned.length > 30) pruned.shift();
+    historyRef.current = { snapshots: pruned, idx: pruned.length - 1 };
+  }, [campus]);
+
+  // ── Decor asset property edits (B2 Phase 3) ──
+  // Every committed change is exactly ONE undoable state via the corrected
+  // post-state history pattern (onUpdate(next) + pushHistory(next)).
+  const onUpdateDecorAsset = useCallback((id: string, changes: Partial<CampusDecorAsset>) => {
+    const next = { ...campus, decorAssets: (campus.decorAssets ?? []).map((d) => (d.id === id ? { ...d, ...changes } : d)) };
+    onUpdate(next);
+    pushHistory(next);
+  }, [campus, onUpdate, pushHistory]);
+
+  const onDeleteDecorAsset = useCallback((id: string) => {
+    const next = { ...campus, decorAssets: (campus.decorAssets ?? []).filter((d) => d.id !== id) };
+    onUpdate(next);
+    pushHistory(next);
+    setSelected(null);
+  }, [campus, onUpdate, pushHistory]);
+
+  const handleArrangeSelection = useCallback((action: OutdoorArrangementAction) => {
+    const result = arrangeSelectedOutdoorObjects(buildings, decorAssets, multiSelected, action, DECOR_ASSET_MAP);
+    if (!result.changed) {
+      toast.info("Nothing to arrange", "The selected objects are already in that position.");
+      return;
+    }
+    const next: Campus = {
+      ...campus,
+      buildings: result.buildings,
+      ...(campus.decorAssets !== undefined ? { decorAssets: result.decorAssets } : {}),
+    };
+    onUpdate(next);
+    pushHistory(next);
+    toast.success(
+      action.startsWith("distribute") ? "Objects distributed" : "Objects aligned",
+      `${selectedOutdoorObjectCount} selected item${selectedOutdoorObjectCount === 1 ? "" : "s"} updated.`
+    );
+  }, [buildings, decorAssets, multiSelected, campus, onUpdate, pushHistory, selectedOutdoorObjectCount, toast]);
+
+  const onDuplicateDecorAsset = useCallback((id: string) => {
+    const cur = campus.decorAssets ?? [];
+    const src = cur.find((d) => d.id === id);
+    if (!src) return;
+    const copy = duplicateDecorAsset(src, genId("dec"));
+    const next = { ...campus, decorAssets: [...cur, copy] };
+    onUpdate(next);
+    pushHistory(next);
+    setMultiSelected([]);
+    setShowAlignTools(false);
+    setSelected({ type: "decorAsset", id: copy.id });
+    toast.success("Asset Duplicated", "A copy has been placed nearby.");
+  }, [campus, onUpdate, pushHistory, toast]);
+
+  // ── Layer ordering (B2): bring forward / send backward / bring to front / send to back ──
+  // Cross-type: buildings and decorative assets share ONE visual stack (a
+  // lightweight optional `zOrder` field on each object — no migration; legacy
+  // campuses default to buildings-below-decor exactly as before). The whole
+  // action is ONE undo snapshot; no-op calls create no history entry.
+  // `ids` is optional: when provided (context menu), only those ids reorder;
+  // otherwise the current selection (multi-selection > single) is used.
+  const handleLayerOrder = useCallback((action: LayerOrderAction, ids?: Set<string>) => {
+    const sel = ids ?? new Set<string>(
+      multiSelected.length > 0
+        ? multiSelected
+        : selected?.type === "building" || selected?.type === "decorAsset"
+          ? [selected.id]
+          : []
+    );
+    if (sel.size === 0) return;
+    const res = reorderOutdoorStack(buildings, campus.decorAssets ?? [], sel, action);
+    if (!res.changed) {
+      toast.info("Nothing to reorder", "The selection is already at that position.");
+      return;
+    }
+    // ONE history entry per successful action: the post-change state is pushed
+    // explicitly so undo restores the previous ordering and redo re-applies it
+    // (the same pattern the gesture path uses, avoiding duplicate snapshots).
+    const next: Campus = {
+      ...campus,
+      buildings: res.buildings,
+      // Only touch decorAssets when the campus already had them — never
+      // introduce an empty array on campuses without decorative assets.
+      ...(campus.decorAssets !== undefined ? { decorAssets: res.decorAssets } : {}),
+    };
+    onUpdate(next);
+    pushHistory(next);
+  }, [campus, buildings, multiSelected, selected, pushHistory, onUpdate, toast]);
 
   const handleContextAction = useCallback((action: string) => {
     if (!contextMenu) return;
@@ -905,7 +1138,16 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
           break;
         case "bring-forward":
         case "send-backward":
-          toast.info(`${action} not available in this version`, "This feature will be added in a future update.");
+        case "bring-to-front":
+        case "send-to-back":
+          // Context-menu ordering acts on the right-clicked building only.
+          handleLayerOrder(
+            action === "bring-to-front" ? "front"
+              : action === "send-to-back" ? "back"
+                : action === "bring-forward" ? "forward"
+                  : "backward",
+            new Set([id])
+          );
           break;
       }
     } else if (type === "marker") {
@@ -917,8 +1159,26 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
       if (action === "delete") {
         setDeleteConfirm({ type: "path", id, name: "Path" });
       }
+    } else if (type === "decorAsset") {
+      if (action === "duplicate") {
+        onDuplicateDecorAsset(id);
+      } else if (action === "delete") {
+        const da = (campus.decorAssets ?? []).find((x) => x.id === id);
+        const template = da ? DECOR_ASSET_MAP[da.type] : undefined;
+        setDeleteConfirm({ type: "decorAsset", id, name: da?.name || template?.label || "Asset" });
+      } else if (action === "bring-forward" || action === "send-backward" || action === "bring-to-front" || action === "send-to-back") {
+        // Right-click ordering invokes the SAME implementation as the
+        // PropertiesPanel controls — never a separate code path.
+        handleLayerOrder(
+          action === "bring-to-front" ? "front"
+            : action === "send-to-back" ? "back"
+              : action === "bring-forward" ? "forward"
+                : "backward",
+          new Set([id])
+        );
+      }
     }
-  }, [contextMenu, buildings, markers, onUpdateBuilding]);
+  }, [contextMenu, buildings, markers, onUpdateBuilding, handleLayerOrder, campus, onDuplicateDecorAsset]);
 
   // ── Review Issues: select first invalid building and zoom to it ──
   const handleReviewIssues = useCallback((firstIssue: ValidationIssue) => {
@@ -932,24 +1192,15 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     }
   }, [buildings, zoomToBuilding]);
 
-  // ── Undo/Redo history ──
-  const historyRef = useRef<{ snapshots: Campus[]; idx: number }>({
-    snapshots: [structuredClone(campus)],
-    idx: 0,
-  });
-
-  const pushHistory = useCallback(() => {
-    const h = historyRef.current;
-    const pruned = h.snapshots.slice(0, h.idx + 1);
-    pruned.push(structuredClone(campus));
-    if (pruned.length > 30) pruned.shift();
-    historyRef.current = { snapshots: pruned, idx: pruned.length - 1 };
-  }, [campus]);
-
   // ── Gesture history: push exactly ONE undo snapshot per drag/resize/rotate gesture ──
   // (Previously every mousemove pushed a full structuredClone of the campus, which
   // added input latency and filled undo history with per-frame garbage states.)
   const gestureHistoryPushed = useRef(false);
+  // True while an item-drag gesture (single or group) has actually applied a
+  // movement. Used to commit exactly ONE post-gesture undo snapshot on pointer
+  // release (or leave), so undo restores the pre-gesture state and redo
+  // re-applies the complete gesture.
+  const gestureChangedRef = useRef(false);
   const beginGestureHistory = useCallback(() => {
     if (!gestureHistoryPushed.current) {
       gestureHistoryPushed.current = true;
@@ -1010,10 +1261,9 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
       setIsProcessing(false);
   }, [campus, validateCampus, onUpdate, onSave, isDirty, isProcessing, toast]);
 
-  // ── Keyboard shortcuts (disabled during tutorial) ──
+  // ── Keyboard shortcuts ──
   useEffect(() => {
     const k = (e: KeyboardEvent) => {
-      if (showTutorial) return;
       if (document.activeElement?.tagName === "INPUT" || document.activeElement?.tagName === "TEXTAREA" || document.activeElement?.tagName === "SELECT") return;
       if ((e.ctrlKey || e.metaKey) && e.key === "z" && !e.shiftKey) { e.preventDefault(); undoEdit(); return; }
       if ((e.ctrlKey || e.metaKey) && (e.key === "y" || (e.key === "z" && e.shiftKey))) { e.preventDefault(); redoEdit(); return; }
@@ -1022,7 +1272,8 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
         e.preventDefault();
         const bIds = buildings.filter((b) => multiSelected.includes(b.id)).map((b) => b.id);
         const mIds = markers.filter((m) => multiSelected.includes(m.id)).map((m) => m.id);
-        setBatchDeleteConfirm({ buildingIds: bIds, markerIds: mIds });
+        const daIds = decorAssets.filter((d) => multiSelected.includes(d.id)).map((d) => d.id);
+        setBatchDeleteConfirm({ buildingIds: bIds, markerIds: mIds, decorAssetIds: daIds });
         return;
       }
       if ((e.key === "Delete" || e.key === "Backspace") && selected) {
@@ -1138,7 +1389,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     };
     window.addEventListener("keydown", k);
     return () => window.removeEventListener("keydown", k);
-  }, [selected, tool, buildings, markers, paths, undoEdit, redoEdit, showTutorial, runSave, pushHistory, campus, onUpdate, switchTool, switchLayer]);
+  }, [selected, tool, buildings, markers, paths, undoEdit, redoEdit, runSave, pushHistory, campus, onUpdate, switchTool, switchLayer]);
 
   // ── Space keyup: restore previous tool when space is released (hold-to-pan) ──
   useEffect(() => {
@@ -1167,7 +1418,6 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
   };
 
   // ── Decorative asset handlers ──
-  const decorAssets = campus.decorAssets ?? [];
   const handlePlaceDecorAsset = useCallback((asset: CampusDecorAsset) => {
     pushHistory();
     onUpdate({ ...campus, decorAssets: [...decorAssets, asset] });
@@ -1178,6 +1428,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
   const effectiveSelected = multiSelected.length > 0 ? null : selected;
   const selBldg = effectiveSelected?.type === "building" ? buildings.find((b) => b.id === effectiveSelected.id) : undefined;
   const selMkr = effectiveSelected?.type === "marker" ? markers.find((m) => m.id === effectiveSelected.id) : undefined;
+  const selDecorAsset = effectiveSelected?.type === "decorAsset" ? (campus.decorAssets ?? []).find((d) => d.id === effectiveSelected.id) : undefined;
   const cursor = rotatingId || decorRotatingId
     ? "grabbing"
     : isSpacePressed()
@@ -1193,7 +1444,6 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
               : "default";
 
   const activeLayer = LAYERS.find((l) => l.id === layer)!;
-  const activeTools = LAYER_TOOLS[layer] ?? LAYER_TOOLS.campus;
 
   // ── Tool config for compact palette ──
   const toolConfig: { id: SimpleTool; icon: React.ElementType; label: string; shortcut: string }[] = [
@@ -1290,7 +1540,6 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
                           ? "text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
                           : "text-muted-foreground hover:bg-muted hover:text-foreground"
                     )}
-                    data-tutorial={t.id === "building" ? "building-tool" : undefined}
                   >
                     <t.icon className="h-4 w-4" />
                   </button>
@@ -1375,9 +1624,10 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
               </button>
             )}
             <button
-              onClick={() => setShowTutorial(true)}
-              className="hidden md:flex items-center justify-center h-7 w-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
-              title="Show tutorial"
+              onClick={() => setShowCheatSheet(true)}
+              className="flex items-center justify-center h-7 w-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
+              title="Keyboard shortcuts (?)"
+              aria-label="Keyboard shortcuts"
             >
               <Keyboard className="h-3.5 w-3.5" />
             </button>
@@ -1498,17 +1748,6 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
               </motion.button>
             );
           })}
-          {layer !== "campus" && (
-            <motion.span
-              initial={{ opacity: 0, x: -8 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.3, ease: "easeOut" }}
-              className="text-[9px] text-muted-foreground/40 ml-auto italic"
-            >
-              Click objects on the canvas to edit
-            </motion.span>
-          )}
         </motion.div>
       </div>
 
@@ -1586,7 +1825,6 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
           selected={selected}
           multiSelected={multiSelected}
           rubberBand={rubberBand}
-          activeTools={activeTools}
           drawingPath={drawingPath}
           snapGrid={snapGrid}
           zoom={zoom}
@@ -1633,8 +1871,8 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
               code: bldgType.label.slice(0, 3).toUpperCase(),
               category: bldgType.category,
               description: bldgType.description,
-              x: Math.round(Math.max(0, Math.min(campus.canvasW - bldgType.defaultWidth, x - bldgType.defaultWidth / 2))),
-              y: Math.round(Math.max(0, Math.min(campus.canvasH - bldgType.defaultHeight, y - bldgType.defaultHeight / 2))),
+              x: Math.round(Math.max(0, Math.min(cw - bldgType.defaultWidth, x - bldgType.defaultWidth / 2))),
+              y: Math.round(Math.max(0, Math.min(ch - bldgType.defaultHeight, y - bldgType.defaultHeight / 2))),
               width: bldgType.defaultWidth,
               height: bldgType.defaultHeight,
               color: bldgType.color,
@@ -1646,8 +1884,8 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
             setSelected({ type: "building", id: nb.id });
             toast.success("Building placed", `${bldgType.label} dropped on canvas.`);
           }}
-          canvasW={campus.canvasW}
-          canvasH={campus.canvasH}
+          canvasW={cw}
+          canvasH={ch}
           onZoomIn={zoomIn}
           onZoomOut={zoomOut}
           onSetTool={setTool}
@@ -1683,7 +1921,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
 
         {/* ── Alignment toolbar (multi-select) ── */}
         <AnimatePresence>
-          {showAlignTools && multiSelected.length > 1 && (
+          {showAlignTools && selectedOutdoorObjectCount > 1 && (
             <motion.div
               initial={{ opacity: 0, y: -8, scale: 0.95 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -1693,50 +1931,55 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
               style={{ background: "var(--card)" }}
             >
               {[
-                { icon: AlignLeft, label: "Align Left", action: "left" },
-                { icon: AlignCenter, label: "Align Center", action: "center-h" },
-                { icon: AlignRight, label: "Align Right", action: "right" },
-                { icon: AlignStartVertical, label: "Align Top", action: "top" },
-                { icon: AlignVerticalJustifyCenter, label: "Align Middle", action: "center-v" },
-                { icon: AlignEndVertical, label: "Align Bottom", action: "bottom" },
+                { icon: AlignLeft, label: "Align Left", action: "align-left" },
+                { icon: AlignCenter, label: "Align Horizontal Center", action: "align-center-h" },
+                { icon: AlignRight, label: "Align Right", action: "align-right" },
+                { icon: AlignStartVertical, label: "Align Top", action: "align-top" },
+                { icon: AlignVerticalJustifyCenter, label: "Align Vertical Center", action: "align-center-v" },
+                { icon: AlignEndVertical, label: "Align Bottom", action: "align-bottom" },
               ].map(({ icon: Icon, label, action }) => (
                 <motion.button
                   key={action}
                   whileHover={{ scale: 1.04 }}
                   whileTap={{ scale: 0.95 }}
-                  onClick={() => {
-                    pushHistory();
-                    const selBuildings = buildings.filter((b) => multiSelected.includes(b.id));
-                    if (selBuildings.length < 2) return;
-                    const ref = selBuildings[0];
-                    const updated = buildings.map((b) => {
-                      if (!multiSelected.includes(b.id)) return b;
-                      let nx = b.x, ny = b.y;
-                      switch (action) {
-                        case "left": nx = ref.x; break;
-                        case "center-h": nx = ref.x + ref.width / 2 - b.width / 2; break;
-                        case "right": nx = ref.x + ref.width - b.width; break;
-                        case "top": ny = ref.y; break;
-                        case "center-v": ny = ref.y + ref.height / 2 - b.height / 2; break;
-                        case "bottom": ny = ref.y + ref.height - b.height; break;
-                      }
-                      return { ...b, x: snap(nx), y: snap(ny) };
-                    });
-                    updBuildings(updated);
-                    toast.success(`Aligned ${multiSelected.length} items`);
-                  }}
+                  onClick={() => handleArrangeSelection(action as OutdoorArrangementAction)}
                   className="w-7 h-7 rounded-lg flex items-center justify-center text-muted-foreground hover:bg-muted hover:text-foreground transition-all"
                   title={label}
+                  aria-label={label}
                 >
                   <Icon className="h-3.5 w-3.5" />
                 </motion.button>
               ))}
+              {selectedOutdoorObjectCount >= 3 && (
+                <>
+                  <div className="w-px h-5 bg-border" />
+                  {[
+                    { icon: AlignHorizontalDistributeCenter, label: "Distribute Horizontally", action: "distribute-h" },
+                    { icon: AlignVerticalDistributeCenter, label: "Distribute Vertically", action: "distribute-v" },
+                  ].map(({ icon: Icon, label, action }) => (
+                    <motion.button
+                      key={action}
+                      whileHover={{ scale: 1.04 }}
+                      whileTap={{ scale: 0.95 }}
+                      onClick={() => handleArrangeSelection(action as OutdoorArrangementAction)}
+                      className="w-7 h-7 rounded-lg flex items-center justify-center text-muted-foreground hover:bg-muted hover:text-foreground transition-all"
+                      title={label}
+                      aria-label={label}
+                    >
+                      <Icon className="h-3.5 w-3.5" />
+                    </motion.button>
+                  ))}
+                </>
+              )}
               <div className="w-px h-5 bg-border" />
-              <span className="text-[10px] font-mono text-muted-foreground px-1">{multiSelected.length}</span>
+              <span className="text-[10px] font-mono text-muted-foreground px-1" aria-label={`${selectedOutdoorObjectCount} selected outdoor objects`}>
+                {selectedOutdoorObjectCount}
+              </span>
               <button
-                onClick={() => { setMultiSelected([]); setShowAlignTools(false); }}
+                onClick={() => { setMultiSelected([]); setSelected(null); setShowAlignTools(false); }}
                 className="w-7 h-7 rounded-lg flex items-center justify-center text-muted-foreground hover:bg-muted hover:text-foreground transition-all"
                 title="Clear selection"
+                aria-label="Clear selection"
               >
                 <X className="h-3 w-3" />
               </button>
@@ -1768,19 +2011,33 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
           selNavNode={selected?.type === 'navNode' ? (campus.navNodes ?? []).find(n => n.id === selected.id) : undefined}
           selNavEdge={selected?.type === 'navEdge' ? (campus.navEdges ?? []).find(e => e.id === selected.id) : undefined}
           selEventOverlay={selected?.type === 'event' ? (campus.eventOverlays ?? []).find(ev => ev.id === selected.id) : undefined}
+          selDecorAsset={selDecorAsset}
+          allDecorAssets={campus.decorAssets ?? []}
+          onUpdateDecorAsset={onUpdateDecorAsset}
+          onDeleteDecorAsset={onDeleteDecorAsset}
+          onDuplicateDecorAsset={onDuplicateDecorAsset}
           multiSelected={multiSelected}
           multiSelectedBuildings={buildings.filter(b => multiSelected.includes(b.id))}
+          selectedOutdoorCount={selectedOutdoorObjectCount}
           onBatchUpdateBuildings={(ids, changes) => {
             pushHistory();
             updBuildings(buildings.map(b => ids.includes(b.id) ? { ...b, ...changes } : b));
           }}
           onBatchDeleteBuildings={(ids) => {
             pushHistory();
-            updBuildings(buildings.filter(b => !ids.includes(b.id)));
+            const next: Campus = {
+              ...campus,
+              buildings: buildings.filter(b => !ids.includes(b.id)),
+              ...(campus.decorAssets !== undefined
+                ? { decorAssets: (campus.decorAssets ?? []).filter((d) => !ids.includes(d.id)) }
+                : {}),
+            };
+            onUpdate(next);
             setMultiSelected([]);
             setSelected(null);
           }}
           onClearMultiSelect={() => { setMultiSelected([]); setShowAlignTools(false); }}
+          onLayerOrder={handleLayerOrder}
           onUpdateBuilding={onUpdateBuilding}
           onUpdateMarker={onUpdateMarker}
           onUpdateRoute={onUpdateRoute}
@@ -1865,14 +2122,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
         }}
       />
 
-      {/* Tutorial overlay */}
-      <MapBuilderTutorial
-        open={showTutorial}
-        onClose={() => setShowTutorial(false)}
-        onSetTool={setTool}
-      />
-
-      {/* Keyboard shortcut cheat sheet (?) */}
+      {/* Keyboard shortcut cheat sheet (? / toolbar help button) */}
       <ShortcutCheatSheet
         open={showCheatSheet}
         onClose={() => setShowCheatSheet(false)}
@@ -1903,13 +2153,16 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
                   style={{ background: "color-mix(in srgb, var(--destructive) 12%, transparent)" }}>
                   <Trash2 className="h-6 w-6" style={{ color: "var(--destructive)" }} />
                 </div>
-                <h3 className="text-base font-extrabold text-foreground">Delete {batchDeleteConfirm.buildingIds.length + batchDeleteConfirm.markerIds.length} Items?</h3>
+                <h3 className="text-base font-extrabold text-foreground">Delete {batchDeleteConfirm.buildingIds.length + batchDeleteConfirm.markerIds.length + batchDeleteConfirm.decorAssetIds.length} Items?</h3>
                 <p className="text-xs text-muted-foreground mt-1.5 leading-relaxed max-w-[260px]">
                   {batchDeleteConfirm.buildingIds.length > 0 && (
-                    <>{batchDeleteConfirm.buildingIds.length} building{batchDeleteConfirm.buildingIds.length > 1 ? "s" : ""}{batchDeleteConfirm.markerIds.length > 0 ? " and " : ""}</>
+                    <>{batchDeleteConfirm.buildingIds.length} building{batchDeleteConfirm.buildingIds.length > 1 ? "s" : ""}{batchDeleteConfirm.markerIds.length + batchDeleteConfirm.decorAssetIds.length > 0 ? ", " : ""}</>
                   )}
                   {batchDeleteConfirm.markerIds.length > 0 && (
-                    <>{batchDeleteConfirm.markerIds.length} marker{batchDeleteConfirm.markerIds.length > 1 ? "s" : ""}</>
+                    <>{batchDeleteConfirm.markerIds.length} marker{batchDeleteConfirm.markerIds.length > 1 ? "s" : ""}{batchDeleteConfirm.decorAssetIds.length > 0 ? ", " : ""}</>
+                  )}
+                  {batchDeleteConfirm.decorAssetIds.length > 0 && (
+                    <>{batchDeleteConfirm.decorAssetIds.length} decor asset{batchDeleteConfirm.decorAssetIds.length > 1 ? "s" : ""}</>
                   )}
                    will be permanently deleted. This action cannot be undone.
                 </p>
@@ -1926,10 +2179,11 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
                   onClick={() => {
                     if (!batchDeleteConfirm) return;
                     pushHistory();
-                    const { buildingIds, markerIds } = batchDeleteConfirm;
+                    const { buildingIds, markerIds, decorAssetIds } = batchDeleteConfirm;
                     upd({
                       buildings: buildings.filter((b) => !buildingIds.includes(b.id)),
                       markers: markers.filter((m) => !markerIds.includes(m.id)),
+                      decorAssets: decorAssets.filter((d) => !decorAssetIds.includes(d.id)),
                     });
                     setMultiSelected([]);
                     setShowAlignTools(false);
@@ -1990,15 +2244,20 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
                 <button
                   onClick={() => {
                     if (!deleteConfirm) return;
-                    pushHistory();
-                    if (deleteConfirm.type === "building") {
-                      updBuildings(buildings.filter((b) => b.id !== deleteConfirm.id));
-                    } else if (deleteConfirm.type === "marker") {
-                      updMarkers(markers.filter((m) => m.id !== deleteConfirm.id));
-                    } else if (deleteConfirm.type === "decorAsset") {
-                      onUpdate({ ...campus, decorAssets: decorAssets.filter((da) => da.id !== deleteConfirm.id) });
+                    if (deleteConfirm.type === "decorAsset") {
+                      // Post-state history: exactly one correct undo/redo entry.
+                      const next = { ...campus, decorAssets: decorAssets.filter((da) => da.id !== deleteConfirm.id) };
+                      onUpdate(next);
+                      pushHistory(next);
                     } else {
-                      updPaths(paths.filter((p) => p.id !== deleteConfirm.id));
+                      pushHistory();
+                      if (deleteConfirm.type === "building") {
+                        updBuildings(buildings.filter((b) => b.id !== deleteConfirm.id));
+                      } else if (deleteConfirm.type === "marker") {
+                        updMarkers(markers.filter((m) => m.id !== deleteConfirm.id));
+                      } else {
+                        updPaths(paths.filter((p) => p.id !== deleteConfirm.id));
+                      }
                     }
                     setSelected(null);
                     setDeleteConfirm(null);
@@ -2098,7 +2357,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
         <div className="w-px h-3 bg-border" />
 
         {/* Canvas dimensions */}
-        <span className="text-[10px] font-mono text-muted-foreground/50 tabular-nums">{campus.canvasW} × {campus.canvasH}</span>
+        <span className="text-[10px] font-mono text-muted-foreground/50 tabular-nums">{cw} × {ch}</span>
 
         <div className="w-px h-3 bg-border" />
 

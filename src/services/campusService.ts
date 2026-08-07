@@ -28,14 +28,115 @@ export class CampusConflictError extends Error {
   }
 }
 
+/**
+ * A campus operation failed. Carries the structured PostgREST/Supabase error
+ * details (code, details, hint) so development logging and tests can reason
+ * about the real failure instead of a generic message.
+ */
+export class CampusServiceError extends Error {
+  /** PostgREST/Supabase error code, e.g. "23514" (check violation). */
+  readonly dbCode?: string;
+  /** PostgREST `details` (constraint/row details) when available. */
+  readonly dbDetails?: string;
+  /** PostgREST `hint` when available. */
+  readonly dbHint?: string;
+  /** The operation that failed, e.g. "create campus". */
+  readonly operation: string;
+
+  constructor(opts: { operation: string; message: string; code?: string; details?: string; hint?: string }) {
+    super(opts.message);
+    this.name = "CampusServiceError";
+    this.operation = opts.operation;
+    this.dbCode = opts.code;
+    this.dbDetails = opts.details;
+    this.dbHint = opts.hint;
+  }
+}
+
+/**
+ * Normalize + validate a campus code against the DB contract
+ * (`^[A-Z0-9][A-Z0-9_-]{0,29}$` — required, 1-30 chars, no spaces).
+ *
+ * The INSERT would otherwise be rejected by `campuses_code_format_check` with
+ * a cryptic PostgREST error ("Could not save campus"). Failing fast here gives
+ * the wizard/UI a clear, user-facing message.
+ */
+export function normalizeCampusCode(raw: string): string {
+  const code = raw.trim().toUpperCase();
+  if (!code) {
+    throw new CampusServiceError({ operation: "create campus", message: "Campus code is required." });
+  }
+  if (!/^[A-Z0-9][A-Z0-9_-]{0,29}$/.test(code)) {
+    throw new CampusServiceError({
+      operation: "create campus",
+      message: "Campus code must be 1–30 letters, numbers, hyphens, or underscores (no spaces).",
+    });
+  }
+  return code;
+}
+
 export function deriveCampusLifecycleStatus(row: CampusRow): CampusLifecycleStatus {
   if (row.status === "archived") return "archived";
   if (row.status === "published") return "published";
   return row.latest_published_version_id ? "unpublished" : "draft";
 }
 
-function assertOk(error: { message: string } | null): void {
-  if (error) throw new Error(error.message);
+/**
+ * Map a campus-operation failure to a concise, user-safe message.
+ *
+ * Known PostgREST/Supabase codes become friendly one-liners; the full
+ * structured detail (code/message/details/hint) stays in the dev console log
+ * from `assertOk`. Errors without a recognized DB code keep their own message
+ * (e.g. client-side validation or the duplicate-code pre-check).
+ */
+export function userFacingCampusMessage(error: unknown): string {
+  if (error instanceof CampusServiceError && error.dbCode) {
+    switch (error.dbCode) {
+      case "23505": // unique_violation
+        return "A campus with this code already exists. Choose a different code.";
+      case "23514": // check_violation
+        return "Some campus details don't meet the required format. Check the code, name, and coordinates.";
+      case "23502": // not_null_violation
+        return "Some required campus details are missing.";
+      case "23503": // foreign_key_violation
+        return "This campus references data that no longer exists. Refresh and try again.";
+      case "42501": // insufficient_privilege
+        return "Your account is not allowed to save campuses.";
+      default:
+        return "The campus could not be saved. Try again or refresh the page.";
+    }
+  }
+  return error instanceof Error ? error.message : "Something went wrong.";
+}
+
+interface SupabaseErrorLike {
+  message: string;
+  code?: string | null;
+  details?: string | null;
+  hint?: string | null;
+}
+
+function assertOk(error: SupabaseErrorLike | null, operation = "campus operation"): void {
+  if (!error) return;
+  const wrapped = new CampusServiceError({
+    operation,
+    message: error.message,
+    code: error.code ?? undefined,
+    details: error.details ?? undefined,
+    hint: error.hint ?? undefined,
+  });
+  if (import.meta.env.DEV) {
+    // Development-only structured diagnostics: code/message/details/hint keep
+    // the real Supabase failure visible (e.g. a 23514 check violation naming
+    // campuses_code_format_check). Never exposed to normal users.
+    console.error(`[campusService] ${operation} failed`, {
+      code: wrapped.dbCode,
+      message: wrapped.message,
+      details: wrapped.dbDetails,
+      hint: wrapped.dbHint,
+    });
+  }
+  throw wrapped;
 }
 
 async function requireCurrentUserId(): Promise<string> {
@@ -164,10 +265,11 @@ export async function getCampusById(id: string): Promise<Campus | null> {
 
 export async function createCampus(input: CampusCreateInput): Promise<Campus> {
   const userId = await requireCurrentUserId();
+  const code = normalizeCampusCode(input.code);
   const { data, error } = await getSupabase().from("campuses").insert({
-    ...input, code: input.code.trim().toUpperCase(), status: "draft", created_by: userId, updated_by: userId,
+    ...input, code, status: "draft", created_by: userId, updated_by: userId,
   }).select("*").single();
-  assertOk(error);
+  assertOk(error, "create campus");
   return toEditorCampus(data!);
 }
 
@@ -175,7 +277,7 @@ async function updateWithVersion(id: string, expectedUpdatedAt: string, changes:
   const userId = await requireCurrentUserId();
   const { data, error } = await getSupabase().from("campuses").update({ ...changes, updated_by: userId })
     .eq("id", id).eq("updated_at", expectedUpdatedAt).select("*").maybeSingle();
-  assertOk(error);
+  assertOk(error, "update campus");
   if (!data) throw new CampusConflictError();
   return toEditorCampus(data);
 }

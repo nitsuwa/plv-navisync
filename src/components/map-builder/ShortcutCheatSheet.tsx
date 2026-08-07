@@ -28,8 +28,7 @@ const GROUPS: ShortcutGroup[] = [
       { keys: "M", desc: "Marker tool (Campus layer)" },
       { keys: "P", desc: "Path / Route tool" },
       { keys: "E", desc: "Erase tool" },
-      { keys: "R", desc: "Room tool (Floor Editor)" },
-      { keys: "W", desc: "Waypoint tool (Navigation layer)" },
+      { keys: "R", desc: "Room / elevator marker tool" },
     ],
   },
   {
@@ -47,10 +46,10 @@ const GROUPS: ShortcutGroup[] = [
     label: "Navigation",
     icon: ArrowUp,
     shortcuts: [
-      { keys: "Ctrl + Scroll", desc: "Zoom in / out" },
+      { keys: "Ctrl + Scroll", desc: "Zoom in / out (toward cursor)" },
       { keys: "0", desc: "Reset view" },
-      { keys: "Arrows", desc: "Nudge selected item 1px" },
-      { keys: "Shift + Arrows", desc: "Nudge selected item 10px" },
+      { keys: "Arrows", desc: "Nudge selected building / marker 1px" },
+      { keys: "Shift + Arrows", desc: "Nudge selected building / marker 10px" },
     ],
   },
   {
@@ -73,7 +72,7 @@ const GROUPS: ShortcutGroup[] = [
       { keys: "Ctrl + Y", desc: "Redo" },
       { keys: "Ctrl + S", desc: "Save draft" },
       { keys: "Ctrl + G", desc: "Toggle snap to grid" },
-      { keys: "Ctrl + D", desc: "Duplicate selected (future)" },
+      { keys: "Ctrl + D", desc: "Duplicate selected building" },
     ],
   },
 ];

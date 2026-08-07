@@ -7,6 +7,10 @@
 
 import type { SharedCampusData, SharedBuilding } from "../contexts/CampusDataContext";
 
+function visibleBuildings(campus: SharedCampusData): SharedBuilding[] {
+  return campus.buildings.filter((building) => (building as SharedBuilding & { visible?: boolean }).visible !== false);
+}
+
 // ── Building position map (legacy B_POS format) ────────────────────────────
 export interface BuildingPosition {
   x: number; y: number; w: number; h: number; color: string;
@@ -14,7 +18,7 @@ export interface BuildingPosition {
 
 export function buildingPositionsFromCampus(campus: SharedCampusData): Record<string, BuildingPosition> {
   const result: Record<string, BuildingPosition> = {};
-  for (const b of campus.buildings) {
+  for (const b of visibleBuildings(campus)) {
     result[b.id] = { x: b.x, y: b.y, w: b.width, h: b.height, color: b.color };
   }
   return result;
@@ -34,7 +38,7 @@ interface LegacyFloorPlan {
 
 export function floorPlansFromCampus(campus: SharedCampusData): Record<string, LegacyFloorPlan> {
   const result: Record<string, LegacyFloorPlan> = {};
-  for (const b of campus.buildings) {
+  for (const b of visibleBuildings(campus)) {
     if (!b.floors || b.floors.length === 0) continue;
     result[b.id] = {
       buildingId: b.id,
@@ -69,7 +73,7 @@ interface LegacyBuilding {
 }
 
 export function buildingsFromCampus(campus: SharedCampusData): LegacyBuilding[] {
-  return campus.buildings.map(b => ({
+  return visibleBuildings(campus).map(b => ({
     id: b.id,
     name: b.name,
     code: b.code,
@@ -92,7 +96,7 @@ export const STATUS_DOT = { Open: "bg-green-500", Busy: "bg-amber-500", Closed: 
 // ── Facilities & accessibility (helpers from building data) ────────────────
 export function facilitiesFromCampus(campus: SharedCampusData): Record<string, string[]> {
   const result: Record<string, string[]> = {};
-  for (const b of campus.buildings) {
+  for (const b of visibleBuildings(campus)) {
     result[b.id] = b.facilities || [];
   }
   return result;
@@ -100,7 +104,7 @@ export function facilitiesFromCampus(campus: SharedCampusData): Record<string, s
 
 export function accessibilityFromCampus(campus: SharedCampusData): Record<string, string[]> {
   const result: Record<string, string[]> = {};
-  for (const b of campus.buildings) {
+  for (const b of visibleBuildings(campus)) {
     result[b.id] = b.accessibility || [];
   }
   return result;
@@ -153,7 +157,7 @@ export function locationsFromCampus(campus: SharedCampusData): CampusLocation[] 
   }
 
   // 2. Rooms inside each building/floor
-  for (const b of campus.buildings) {
+  for (const b of visibleBuildings(campus)) {
     // Add building itself as a landmark location
     locations.push({
       id: `campus-${b.id}`,

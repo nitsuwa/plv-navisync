@@ -2,7 +2,7 @@
 
 **Package:** B1 — Map Builder baseline audit and regression protection
 **Branch:** `test/map-builder-baseline`
-**Status:** FOR REVIEW — automated checks pass (17 files / 171 tests, clean build, clean diff); all manual retest checklist items (§9, §10.6, §11.5) confirmed by the reviewer on August 7, 2026 (§12). B1 becomes officially DONE only after its PR is merged.
+**Status:** DONE — merged through Pull Request #5 (`test/map-builder-baseline` → `main`, merge commit `b19d974`). FOR REVIEW was granted August 7, 2026 after all automated checks (17 files / 171 tests, clean build, clean diff) and every manual retest checklist item (§9, §10.6, §11.5) were confirmed; the merged PR marked it officially DONE.
 **Date:** August 7, 2026
 
 This document records the truthful baseline of the existing Map Builder,
@@ -318,7 +318,7 @@ The reviewer confirmed the following manual checks passed on `test/map-builder-b
 - Unrequested navigation connector lines no longer appear.
 - No new red browser-console errors were observed.
 
-**Result:** All §9, §10.6 and §11.5 checklist items are confirmed. B1 status is set to **FOR REVIEW**; it becomes `DONE` only after its Pull Request is merged.
+**Result:** All §9, §10.6 and §11.5 checklist items are confirmed. B1 status was set to **FOR REVIEW**; it became **DONE** when Pull Request #5 was merged into `main` (merge commit `b19d974`).
 
 ### 12.1 Deferred requirements by package (assignments kept)
 

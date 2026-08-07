@@ -27,11 +27,57 @@ export interface ScreenRect {
   height: number;
 }
 
+export interface SvgContentBox {
+  /** Horizontal offset (px) of the viewBox content inside the SVG element. */
+  offsetX: number;
+  /** Vertical offset (px) of the viewBox content inside the SVG element. */
+  offsetY: number;
+  /** Scale factor from viewBox units to screen px. */
+  scale: number;
+}
+
+/**
+ * Compute where the viewBox content actually sits inside the SVG element.
+ *
+ * The editor canvas is an <svg viewBox="0 0 W H"> stretched to fill its
+ * container (w-full h-full) with the default preserveAspectRatio="xMidYMid
+ * meet". When the container's aspect ratio differs from the canvas, the
+ * content is LETTERBOXED (scaled to fit and centered), leaving empty margins
+ * on two sides. Pointer conversion MUST subtract those margins and divide by
+ * the real content scale — a naive `(clientX - rect.left) / rect.width * W`
+ * stretches the whole element box and places objects offset from the cursor
+ * (the rubber-band box visibly shifted to the right).
+ *
+ * Returns a sane fallback (offset 0, element-box scale) for degenerate rects
+ * so a freshly-created campus whose SVG has not laid out yet can never push
+ * placements toward the top-left corner.
+ */
+export function getSvgContentBox(
+  rect: ScreenRect,
+  canvasW: number,
+  canvasH: number
+): SvgContentBox {
+  if (rect.width <= 0 || rect.height <= 0 || canvasW <= 0 || canvasH <= 0) {
+    const scale = rect.width > 0 && canvasW > 0 ? rect.width / canvasW : 1;
+    return { offsetX: 0, offsetY: 0, scale };
+  }
+  const scale = Math.min(rect.width / canvasW, rect.height / canvasH);
+  return {
+    offsetX: (rect.width - canvasW * scale) / 2,
+    offsetY: (rect.height - canvasH * scale) / 2,
+    scale,
+  };
+}
+
 /**
  * Convert a client (screen) point into canvas/world coordinates.
- * Mirrors the SVG math in useCanvasControls: the world point W maps to the
- * SVG viewBox coordinate V = W·zoom + pan, and the viewBox spans the element
- * (fraction · canvasW). This is the inverse of that mapping.
+ *
+ * This is the SINGLE pointer→world conversion path for the whole editor:
+ * screen/client coordinates → content-box (letterbox-aware) → undo pan → undo
+ * zoom → world/campus coordinates. Placement, rubber-band selection, item
+ * drags, resize/rotate handles, drag-and-drop and zoom-to-cursor all call it
+ * (directly or via useCanvasControls.getPoint) so the visible cursor and the
+ * interaction location always match, at any zoom, after any pan.
  */
 export function screenToWorld(
   clientX: number,
@@ -42,9 +88,35 @@ export function screenToWorld(
   pan: { x: number; y: number },
   zoom: number
 ): { x: number; y: number } {
+  const box = getSvgContentBox(rect, canvasW, canvasH);
+  const z = zoom > 0 ? zoom : 1;
   return {
-    x: (((clientX - rect.left) / rect.width) * canvasW - pan.x) / zoom,
-    y: (((clientY - rect.top) / rect.height) * canvasH - pan.y) / zoom,
+    x: ((clientX - rect.left - box.offsetX) / box.scale - pan.x) / z,
+    y: ((clientY - rect.top - box.offsetY) / box.scale - pan.y) / z,
+  };
+}
+
+/**
+ * Inverse helper for zoom-to-cursor: compute the pan that keeps the world
+ * point (worldX, worldY) exactly under the client point (clientX, clientY)
+ * at the given zoom, respecting the letterbox content box. Returns the
+ * resulting pan.
+ */
+export function panToKeepWorldPoint(
+  clientX: number,
+  clientY: number,
+  rect: ScreenRect,
+  canvasW: number,
+  canvasH: number,
+  worldX: number,
+  worldY: number,
+  zoom: number
+): { x: number; y: number } {
+  const box = getSvgContentBox(rect, canvasW, canvasH);
+  const z = zoom > 0 ? zoom : 1;
+  return {
+    x: (clientX - rect.left - box.offsetX) / box.scale - worldX * z,
+    y: (clientY - rect.top - box.offsetY) / box.scale - worldY * z,
   };
 }
 
