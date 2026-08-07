@@ -3,25 +3,22 @@ import {
   X, Eye, EyeOff, Lock, Unlock, Info, Palette, Settings2,
   Route, Accessibility, Star, CheckCircle2, AlertTriangle,
   PaintBucket, Trash2, MapPin, Calendar, Plus, Minus, GripVertical,
-  BookOpen, FlaskConical, Library, Dumbbell, Home, Building2,
-  UtensilsCrossed, HeartPulse, Shield, Box, Layers,
+  Layers, Copy,
+  ChevronUp, ChevronDown, ChevronsUp, ChevronsDown,
 } from "lucide-react";
+import type { LayerOrderAction } from "../../lib/campusLayerOrder";
+import { normalizeRotation, clampDecorScale, DECOR_SCALE_MIN, DECOR_SCALE_MAX } from "../../lib/decorAsset";
+import { DecorAssetVisual } from "./DecorAssetVisual";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
 import { cn } from "../../lib/utils";
 import { MARKER_STYLES } from "../../data/mapData";
-import { LAYERS, LAYER_TOOLS, BUILDING_TYPES, genId } from "./constants";
+import { LAYERS, LAYER_TOOLS, DECOR_ASSET_MAP, DECOR_ASSET_TYPES, genId } from "./constants";
 import { Combobox } from "../ui/Combobox";
 import type {
   CampusBuilding, CampusMarker, CampusSelection, EditorLayer,
   CampusRoute, NavigationNode, NavigationEdge, CampusEventOverlay,
-  EventLocationRef, FloorPlan,
+  EventLocationRef, FloorPlan, CampusDecorAsset, DecorAssetType,
 } from "./types";
-
-// ── Building type icon map ──
-const BUILDING_TYPE_ICONS: Record<string, React.ElementType> = {
-  BookOpen, FlaskConical, Library, Dumbbell, Home, Building2,
-  UtensilsCrossed, HeartPulse, Shield, Box,
-};
 
 const ColorPickerImpl = lazy(() => import("../ui/ColorPicker"));
 function ColorPicker(props: { value: string; onChange: (c: string) => void }) {
@@ -50,6 +47,9 @@ interface PropertiesPanelProps {
   selected: CampusSelection | null;
   selBldg: CampusBuilding | undefined;
   selMkr: CampusMarker | undefined;
+  selDecorAsset?: CampusDecorAsset | undefined;
+  /** All decorative assets — used to detect reorderable multi-selections. */
+  allDecorAssets: CampusDecorAsset[];
   selRoute: CampusRoute | undefined;
   selNavNode?: NavigationNode | undefined;
   selNavEdge?: NavigationEdge | undefined;
@@ -61,9 +61,12 @@ interface PropertiesPanelProps {
   // Multi-select props
   multiSelected: string[];
   multiSelectedBuildings: CampusBuilding[];
+  selectedOutdoorCount: number;
   onBatchUpdateBuildings: (ids: string[], changes: Partial<CampusBuilding>) => void;
   onBatchDeleteBuildings: (ids: string[]) => void;
   onClearMultiSelect: () => void;
+  /** Layer-ordering action (B2): bring forward/backward, bring to front/back. */
+  onLayerOrder?: (action: LayerOrderAction) => void;
   // Individual item callbacks
   onUpdateBuilding: (id: string, changes: Partial<CampusBuilding>) => void;
   onUpdateMarker: (id: string, changes: Partial<CampusMarker>) => void;
@@ -71,6 +74,9 @@ interface PropertiesPanelProps {
   onUpdateEventOverlay?: (id: string, changes: Partial<CampusEventOverlay>) => void;
   onDeleteBuilding: (id: string) => void;
   onDeleteMarker: (id: string) => void;
+  onUpdateDecorAsset: (id: string, changes: Partial<CampusDecorAsset>) => void;
+  onDeleteDecorAsset: (id: string) => void;
+  onDuplicateDecorAsset: (id: string) => void;
   onDeleteRoute?: (id: string) => void;
   onDeleteEventOverlay?: (id: string) => void;
   // Navigation node/edge callbacks
@@ -115,35 +121,39 @@ function TabBar({ active, onChange }: { active: TabId; onChange: (t: TabId) => v
 
 export function PropertiesPanel({
   selected, selBldg, selMkr, selRoute,
+  selDecorAsset, allDecorAssets,
   selNavNode, selNavEdge, selEventOverlay, allNavNodes, allNavEdges,
   allBuildings,
   layer,
-  multiSelected, multiSelectedBuildings,
-  onBatchUpdateBuildings, onBatchDeleteBuildings, onClearMultiSelect,
+  multiSelected, multiSelectedBuildings, selectedOutdoorCount,
+  onBatchUpdateBuildings, onBatchDeleteBuildings, onClearMultiSelect, onLayerOrder,
   onUpdateBuilding, onUpdateMarker, onUpdateRoute,
   onUpdateEventOverlay,
   onDeleteBuilding, onDeleteMarker, onDeleteRoute,
   onDeleteEventOverlay,
+  onUpdateDecorAsset, onDeleteDecorAsset, onDuplicateDecorAsset,
   onUpdateNavNode, onDeleteNavNode, onUpdateNavEdge, onDeleteNavEdge,
   onClose,
 }: PropertiesPanelProps) {
   const [tab, setTab] = useState<TabId>("basic");
-  const [deleteConfirm, setDeleteConfirm] = useState<{ type: "building" | "marker" | "route" | "batch"; id: string; label: string } | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<{ type: "building" | "marker" | "route" | "batch" | "decorAsset"; id: string; label: string } | null>(null);
   const visible = !!selected || multiSelected.length > 0;
 
   // Reset to basic tab when selection changes
   useEffect(() => { setTab("basic"); }, [selected]);
 
   // ── Multi-select mode ──
-  const isMultiMode = multiSelected.length > 0 && multiSelectedBuildings.length > 0;
+  const multiSelectedDecorAssets = allDecorAssets.filter((d) => multiSelected.includes(d.id));
+  const isMultiMode = selectedOutdoorCount > 0;
+  const isBuildingOnlyMultiMode = isMultiMode && selectedOutdoorCount === multiSelectedBuildings.length;
 
   const handleBatchColor = useCallback((color: string) => {
     onBatchUpdateBuildings(multiSelected, { color });
   }, [multiSelected, onBatchUpdateBuildings]);
 
   // Check if all selected are visible / locked for batch toggle clarity
-  const allVisible = multiSelectedBuildings.every((b) => b.visible !== false);
-  const allLocked = multiSelectedBuildings.every((b) => b.locked === true);
+  const allVisible = multiSelectedBuildings.length > 0 && multiSelectedBuildings.every((b) => b.visible !== false);
+  const allLocked = multiSelectedBuildings.length > 0 && multiSelectedBuildings.every((b) => b.locked === true);
 
   return (
     <div
@@ -159,8 +169,8 @@ export function PropertiesPanel({
       <div className="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
         <span className="text-xs font-extrabold uppercase tracking-wide text-foreground" style={{ fontFamily: "var(--font-sans)" }}>
           {isMultiMode
-            ? `Multi-Select (${multiSelectedBuildings.length})`
-            : selBldg ? "Building" : selMkr ? "Marker" : selRoute ? "Route" : selected?.type === "navNode" ? "Waypoint" : selected?.type === "navEdge" ? "Navigation Edge" : "Properties"}
+            ? `Multi-Select (${selectedOutdoorCount})`
+            : selBldg ? "Building" : selMkr ? "Marker" : selDecorAsset ? "Decorative Asset" : selRoute ? "Route" : selected?.type === "navNode" ? "Waypoint" : selected?.type === "navEdge" ? "Navigation Edge" : "Properties"}
         </span>
         <button
           onClick={() => { onClearMultiSelect(); onClose(); }}
@@ -175,6 +185,40 @@ export function PropertiesPanel({
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto scrollbar-show-on-hover scroll-smooth p-4 space-y-4">
+        {/* ── LAYER ORDER (B2): bring forward/backward, bring to front/back ── */}
+        {/* Only show for selections that actually contain reorderable objects
+            (buildings or decor assets) — a marker-only multi-selection must
+            not expose controls that can only no-op. */}
+        {(selBldg || selected?.type === "decorAsset" || multiSelected.some((id) => allBuildings.some((b) => b.id === id) || allDecorAssets.some((d) => d.id === id))) && (
+          <div>
+            <div className="flex items-center gap-1.5 mb-2">
+              <Layers className="h-3 w-3 text-primary" />
+              <span className="text-[9px] font-extrabold uppercase tracking-widest text-muted-foreground">Layer Order</span>
+            </div>
+            <div className="grid grid-cols-4 gap-1.5">
+              {[
+                { action: "front" as const, label: "Bring to Front", icon: ChevronsUp },
+                { action: "forward" as const, label: "Bring Forward", icon: ChevronUp },
+                { action: "backward" as const, label: "Send Backward", icon: ChevronDown },
+                { action: "back" as const, label: "Send to Back", icon: ChevronsDown },
+              ].map(({ action, label, icon: Icon }) => (
+                <button
+                  key={action}
+                  title={label}
+                  aria-label={label}
+                  onClick={() => onLayerOrder?.(action)}
+                  className="flex items-center justify-center h-9 rounded-xl border border-border text-muted-foreground hover:border-muted-foreground/30 hover:bg-muted/30 hover:text-foreground transition-all"
+                >
+                  <Icon className="h-3.5 w-3.5" />
+                </button>
+              ))}
+            </div>
+            <p className="text-[8px] text-muted-foreground mt-1.5 italic">
+              Reorders buildings and outdoor assets in one shared stack without moving them. One undo step per action.
+            </p>
+          </div>
+        )}
+
         {/* ════════════════════════════════════ */}
         {/* ── MULTI-SELECT BATCH OPERATIONS ── */}
         {/* ════════════════════════════════════ */}
@@ -183,7 +227,7 @@ export function PropertiesPanel({
             {/* Selected items quick list */}
             <div className="flex items-center gap-1.5 mb-1">
               <Info className="h-3 w-3 text-primary" />
-              <span className="text-[9px] font-extrabold uppercase tracking-widest text-muted-foreground">Selected Buildings</span>
+              <span className="text-[9px] font-extrabold uppercase tracking-widest text-muted-foreground">Selected Objects</span>
             </div>
             <div className="space-y-1 max-h-[120px] overflow-y-auto scrollbar-show-on-hover">
               {multiSelectedBuildings.map((b) => (
@@ -192,12 +236,22 @@ export function PropertiesPanel({
                   <span className="text-[10px] font-semibold truncate text-foreground">{b.code} — {b.name}</span>
                 </div>
               ))}
+              {multiSelectedDecorAssets.map((asset) => {
+              const template = DECOR_ASSET_MAP[asset.type];
+              return (
+                <div key={asset.id} className="flex items-center gap-2 px-2 py-1 rounded-lg border border-border/50 bg-muted/20">
+                  <div className="w-2.5 h-2.5 rounded-full shrink-0 bg-emerald-500" />
+                  <span className="text-[10px] font-semibold truncate text-foreground">{asset.name || template.label}</span>
+                </div>
+              );
+            })}
             </div>
 
+            {isBuildingOnlyMultiMode && (
             <div className="border-t border-border pt-3">
               <div className="flex items-center gap-1.5 mb-2">
                 <PaintBucket className="h-3 w-3 text-primary" />
-                <span className="text-[9px] font-extrabold uppercase tracking-widest text-muted-foreground">Batch Actions</span>
+                <span className="text-[9px] font-extrabold uppercase tracking-widest text-muted-foreground">Building Batch Actions</span>
               </div>
 
               {/* Batch Color */}
@@ -242,19 +296,21 @@ export function PropertiesPanel({
                 </div>
               </div>
 
-              {/* Batch Delete */}
-              <div className="pt-3 border-t border-border">
-                <button
-                  onClick={() => setDeleteConfirm({
-                    type: "batch",
-                    id: "batch",
-                    label: `${multiSelectedBuildings.length} buildings`,
-                  })}
-                  className="w-full h-10 rounded-xl border border-destructive/30 text-xs font-bold text-destructive hover:bg-destructive/10 hover:border-destructive/50 transition-colors duration-200"
-                >
-                  <span className="flex items-center justify-center gap-1.5"><Trash2 className="h-3 w-3" /> Delete All ({multiSelectedBuildings.length})</span>
-                </button>
-              </div>
+            </div>
+            )}
+
+            {/* Batch Delete */}
+            <div className="pt-3 border-t border-border">
+              <button
+                onClick={() => setDeleteConfirm({
+                  type: "batch",
+                  id: "batch",
+                  label: `${selectedOutdoorCount} objects`,
+                })}
+                className="w-full h-10 rounded-xl border border-destructive/30 text-xs font-bold text-destructive hover:bg-destructive/10 hover:border-destructive/50 transition-colors duration-200"
+              >
+                <span className="flex items-center justify-center gap-1.5"><Trash2 className="h-3 w-3" /> Delete All ({selectedOutdoorCount})</span>
+              </button>
             </div>
           </>
         )}
@@ -277,45 +333,10 @@ export function PropertiesPanel({
                   <label htmlFor="bldg-code" className={labelCls}>Code</label>
                   <input id="bldg-code" value={selBldg.code} onChange={(e) => onUpdateBuilding(selBldg.id, { code: e.target.value.toUpperCase().slice(0, 5) })} className={inputCls} placeholder="e.g. MAB" />
                 </div>
-                {/* ── Building Type Selector ── */}
-                <div>
-                  <label className={labelCls}>Building Type</label>
-                  <div className="grid grid-cols-2 gap-1.5">
-                    {BUILDING_TYPES.map((bt) => {
-                      const Icon = BUILDING_TYPE_ICONS[bt.icon] || Box;
-                      const isSelected = selBldg.category === bt.category;
-                      return (
-                        <button
-                          key={bt.id}
-                          onClick={() => onUpdateBuilding(selBldg.id, { category: bt.category, color: bt.color })}
-                          className={cn(
-                            "flex flex-col items-center gap-1 rounded-xl border p-2 transition-all text-center",
-                            isSelected
-                              ? "border-primary/50 bg-primary/8 ring-1 ring-primary/20"
-                              : "border-border hover:border-muted-foreground/30 hover:bg-muted/30"
-                          )}
-                        >
-                          <div
-                            className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0"
-                            style={{ background: isSelected ? bt.color + "22" : "var(--muted)" }}
-                          >
-                            <Icon
-                              className="h-3.5 w-3.5"
-                              style={{ color: isSelected ? bt.color : "var(--muted-foreground)" }}
-                            />
-                          </div>
-                          <span className={cn(
-                            "text-[8px] font-bold leading-tight",
-                            isSelected ? "text-foreground" : "text-muted-foreground"
-                          )}>
-                            {bt.label}
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                  <p className="text-[8px] text-muted-foreground mt-1.5 italic">Selecting a type sets both the category and a suggested color. You can still customize the color in the Style tab.</p>
-                </div>
+                {/* Building Type is intentionally NOT editable in the sidebar:
+                    an outdoor building object is simply a Building here. The
+                    legacy `category` field is preserved in the data model for
+                    backward compatibility but provides no editor functionality. */}
                 <div>
                   <label htmlFor="bldg-description" className={labelCls}>Description</label>
                   <textarea id="bldg-description" value={selBldg.description ?? ""} rows={2} onChange={(e) => onUpdateBuilding(selBldg.id, { description: e.target.value })} placeholder="Optional description..." className="w-full px-3 py-2 rounded-xl border border-border bg-input-background text-foreground text-xs resize-none focus:outline-none focus:ring-2 focus:ring-primary/30 transition-all duration-200" />
@@ -682,6 +703,144 @@ export function PropertiesPanel({
               </button>
             </div>
           </>
+        )}
+
+        {/* ── DECORATIVE ASSET PROPERTIES (B2 Phase 3) ── */}
+        {selDecorAsset && !isMultiMode && (
+          (() => {
+            const template = DECOR_ASSET_MAP[selDecorAsset.type];
+            const rot = normalizeRotation(selDecorAsset.rotation ?? 0);
+            const scale = clampDecorScale(selDecorAsset.scale ?? 1);
+            return (
+              <>
+                {/* Asset summary */}
+                <div className="flex items-center gap-1.5 mb-2">
+                  <Info className="h-3 w-3 text-primary" />
+                  <span className="text-[9px] font-extrabold uppercase tracking-widest text-muted-foreground">Asset Info</span>
+                </div>
+                <div className="flex items-center gap-2.5 px-2.5 py-2 rounded-xl border border-border bg-muted/20">
+                  <DecorAssetVisual type={selDecorAsset.type} className="w-7 h-8 shrink-0" />
+                  <div className="min-w-0">
+                    <p className="text-[11px] font-bold text-foreground truncate">{template?.label ?? selDecorAsset.type}</p>
+                    <p className="text-[9px] text-muted-foreground capitalize">{template?.category ?? "Asset"}</p>
+                  </div>
+                </div>
+                <div>
+                  <label htmlFor="decor-name" className={labelCls}>Name (optional)</label>
+                  <CommittedTextInput
+                    id="decor-name"
+                    value={selDecorAsset.name ?? ""}
+                    onCommit={(v) => onUpdateDecorAsset(selDecorAsset.id, { name: v.trim() ? v.trim() : undefined })}
+                    className={inputCls}
+                    placeholder="e.g. Old Oak Tree"
+                  />
+                </div>
+                <div>
+                  <label className={labelCls}>Type</label>
+                  <Combobox
+                    value={selDecorAsset.type}
+                    onChange={(v) => onUpdateDecorAsset(selDecorAsset.id, { type: v as DecorAssetType })}
+                    options={DECOR_ASSET_TYPES.map((t) => ({ value: t.type, label: t.label, color: t.color }))}
+                    placeholder="Select asset type"
+                    searchPlaceholder="Search asset types..."
+                  />
+                </div>
+
+                {/* Transform */}
+                <div className="pt-2 border-t border-border">
+                  <div className="flex items-center gap-1.5 mb-2">
+                    <Settings2 className="h-3 w-3 text-primary" />
+                    <span className="text-[9px] font-extrabold uppercase tracking-widest text-muted-foreground">Transform</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    {[["x", "X"], ["y", "Y"]].map(([k, l]) => (
+                      <div key={k}>
+                        <label htmlFor={`decor-${k}`} className={labelCls}>{l}</label>
+                        <CommittedNumberInput
+                          id={`decor-${k}`}
+                          value={selDecorAsset[k as "x" | "y"]}
+                          onCommit={(v) => onUpdateDecorAsset(selDecorAsset.id, { [k]: v })}
+                          className={`${inputCls} font-mono`}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                  <div className="mt-2">
+                    <label htmlFor="decor-rotation" className={labelCls}>Rotation</label>
+                    <div className="flex items-center gap-2">
+                      <CommittedSlider
+                        id="decor-rotation"
+                        value={rot}
+                        min={0}
+                        max={360}
+                        step={5}
+                        onCommit={(v) => onUpdateDecorAsset(selDecorAsset.id, { rotation: normalizeRotation(v) })}
+                        format={(v) => `${Math.round(v)}°`}
+                        className="flex-1"
+                      />
+                      <CommittedNumberInput
+                        id="decor-rotation-input"
+                        value={rot}
+                        onCommit={(v) => onUpdateDecorAsset(selDecorAsset.id, { rotation: normalizeRotation(v) })}
+                        className="w-16 shrink-0 font-mono"
+                      />
+                    </div>
+                  </div>
+                  <div className="mt-2">
+                    <label htmlFor="decor-scale" className={labelCls}>Scale</label>
+                    <CommittedSlider
+                      id="decor-scale"
+                      value={scale}
+                      min={DECOR_SCALE_MIN}
+                      max={DECOR_SCALE_MAX}
+                      step={0.1}
+                      onCommit={(v) => onUpdateDecorAsset(selDecorAsset.id, { scale: clampDecorScale(v) })}
+                      format={(v) => `${Math.round(v * 10) / 10}×`}
+                    />
+                  </div>
+                </div>
+
+                {/* Appearance */}
+                <div className="pt-2 border-t border-border">
+                  <div className="flex items-center gap-1.5 mb-2">
+                    <Palette className="h-3 w-3 text-primary" />
+                    <span className="text-[9px] font-extrabold uppercase tracking-widest text-muted-foreground">Appearance</span>
+                  </div>
+                  <label className={labelCls}>Visibility</label>
+                  <button
+                    onClick={() => onUpdateDecorAsset(selDecorAsset.id, { visible: !(selDecorAsset.visible ?? true) })}
+                    className={cn(
+                      "w-full flex items-center justify-center gap-1.5 h-8 rounded-xl border text-[10px] font-bold transition-all",
+                      (selDecorAsset.visible ?? true)
+                        ? "border-primary/30 bg-primary/8 text-primary"
+                        : "border-border text-muted-foreground"
+                    )}
+                  >
+                    {selDecorAsset.visible ?? true ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
+                    {selDecorAsset.visible ?? true ? "Visible" : "Hidden"}
+                  </button>
+                </div>
+
+                {/* Actions */}
+                <div className="pt-3 border-t border-border space-y-2">
+                  <button
+                    title="Duplicate Asset"
+                    onClick={() => onDuplicateDecorAsset(selDecorAsset.id)}
+                    className="w-full h-10 rounded-xl border border-primary/30 text-xs font-bold text-primary hover:bg-primary/8 hover:border-primary/50 transition-colors duration-200"
+                  >
+                    <span className="flex items-center justify-center gap-1.5"><Copy className="h-3 w-3" /> Duplicate Asset</span>
+                  </button>
+                  <button
+                    title="Delete Asset"
+                    onClick={() => setDeleteConfirm({ type: "decorAsset", id: selDecorAsset.id, label: selDecorAsset.name || template?.label || "this asset" })}
+                    className="w-full h-10 rounded-xl border border-destructive/30 text-xs font-bold text-destructive hover:bg-destructive/10 hover:border-destructive/50 transition-colors duration-200"
+                  >
+                    <span className="flex items-center justify-center gap-1.5"><AlertTriangle className="h-3 w-3" /> Delete Asset</span>
+                  </button>
+                </div>
+              </>
+            );
+          })()
         )}
 
         {/* ── NAV NODE PROPERTIES (Navigation layer) ── */}
@@ -1156,11 +1315,11 @@ export function PropertiesPanel({
       {/* Delete confirmation (single or batch) */}
       <ConfirmDialog
         open={deleteConfirm !== null}
-        title={deleteConfirm?.type === "batch" ? "Delete Multiple Buildings?" : `Delete ${deleteConfirm?.type === "building" ? "Building" : deleteConfirm?.type === "marker" ? "Marker" : "Route"}?`}
+        title={deleteConfirm?.type === "batch" ? "Delete Selected Objects?" : `Delete ${deleteConfirm?.type === "building" ? "Building" : deleteConfirm?.type === "marker" ? "Marker" : deleteConfirm?.type === "decorAsset" ? "Asset" : "Route"}?`}
         message={deleteConfirm?.type === "batch"
           ? `This action cannot be undone. "${deleteConfirm?.label}" will be permanently removed from the map.`
           : `This action cannot be undone. "${deleteConfirm?.label ?? "this item"}" will be permanently removed from the map.`}
-        confirmLabel={deleteConfirm?.type === "batch" ? "Delete All" : `Delete ${deleteConfirm?.type === "building" ? "Building" : deleteConfirm?.type === "marker" ? "Marker" : "Route"}`}
+        confirmLabel={deleteConfirm?.type === "batch" ? "Delete All" : `Delete ${deleteConfirm?.type === "building" ? "Building" : deleteConfirm?.type === "marker" ? "Marker" : deleteConfirm?.type === "decorAsset" ? "Asset" : "Route"}`}
         variant="danger"
         onConfirm={() => {
           if (!deleteConfirm) return;
@@ -1169,12 +1328,119 @@ export function PropertiesPanel({
             onClearMultiSelect();
           } else if (deleteConfirm.type === "building") onDeleteBuilding(deleteConfirm.id);
           else if (deleteConfirm.type === "marker") onDeleteMarker(deleteConfirm.id);
+          else if (deleteConfirm.type === "decorAsset") onDeleteDecorAsset(deleteConfirm.id);
           else onDeleteRoute?.(deleteConfirm.id);
           setDeleteConfirm(null);
           if (deleteConfirm.type !== "batch") onClose();
         }}
         onCancel={() => setDeleteConfirm(null)}
       />
+    </div>
+  );
+}
+
+// ── Committed controls (B2 Phase 3) ──
+// Local draft + commit on blur/Enter/pointer-release, so each meaningful change
+// produces exactly ONE undoable history state instead of one per keystroke/tick.
+
+function CommittedNumberInput({ id, value, min, max, step, onCommit, className, placeholder }: {
+  id: string;
+  value: number;
+  min?: number;
+  max?: number;
+  step?: number;
+  onCommit: (v: number) => void;
+  className?: string;
+  placeholder?: string;
+}) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const commit = () => {
+    const raw = draft;
+    setDraft(null);
+    if (raw === null) return;
+    const num = parseFloat(raw);
+    if (Number.isNaN(num)) return;
+    let v = num;
+    if (min !== undefined) v = Math.max(min, v);
+    if (max !== undefined) v = Math.min(max, v);
+    if (v !== value) onCommit(v);
+  };
+  return (
+    <input
+      id={id}
+      type="number"
+      min={min}
+      max={max}
+      step={step}
+      value={draft ?? String(value)}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+      className={className}
+      placeholder={placeholder}
+    />
+  );
+}
+
+function CommittedTextInput({ id, value, onCommit, className, placeholder }: {
+  id: string;
+  value: string;
+  onCommit: (v: string) => void;
+  className?: string;
+  placeholder?: string;
+}) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const commit = () => {
+    const raw = draft;
+    setDraft(null);
+    if (raw !== null && raw !== value) onCommit(raw);
+  };
+  return (
+    <input
+      id={id}
+      type="text"
+      value={draft ?? value}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+      className={className}
+      placeholder={placeholder}
+    />
+  );
+}
+
+function CommittedSlider({ id, value, min, max, step, onCommit, format, className }: {
+  id: string;
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  onCommit: (v: number) => void;
+  format: (v: number) => string;
+  className?: string;
+}) {
+  const [draft, setDraft] = useState<number | null>(null);
+  const display = draft ?? value;
+  const commit = () => {
+    const d = draft;
+    setDraft(null);
+    if (d !== null && d !== value) onCommit(d);
+  };
+  return (
+    <div className="flex items-center gap-2">
+      <input
+        id={id}
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={display}
+        onChange={(e) => setDraft(parseFloat(e.target.value))}
+        onBlur={commit}
+        onPointerUp={commit}
+        className={cn("h-1.5 accent-primary", className)}
+      />
+      <span className="text-xs font-mono text-muted-foreground w-12 text-right shrink-0">{format(display)}</span>
     </div>
   );
 }

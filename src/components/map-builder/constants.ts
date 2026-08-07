@@ -10,6 +10,7 @@ import type {
   Campus, CampusBuilding, FloorPlan, FurnitureCategory,
 } from "./types";
 import { INITIAL_MARKERS, INITIAL_PATHS, MARKER_STYLES } from "../../data/mapData";
+import { shade } from "../../lib/color";
 
 // ── ID generator ────────────────────────────────────────────────────────────
 
@@ -102,7 +103,7 @@ export interface LayerToolDescriptor {
 
 export const LAYER_TOOLS: Record<string, LayerToolDescriptor[]> = {
   campus: [
-    { id: "select",   icon: MousePointer2, label: "Select",   hint: "Click a building to edit its name, floors, and properties in the right panel. Drag to move. Shift+click to select multiple.", key: "V" },
+    { id: "select",   icon: MousePointer2, label: "Select",   hint: "Select and move objects on the canvas.", key: "V" },
     { id: "pan",      icon: Hand,          label: "Pan",      hint: "Hold Space + drag, or middle-click + drag, to move around the canvas freely", key: "Space" },
     { id: "marker",   icon: MapPin,        label: "Marker",   hint: "Click to place a point of interest (cafeteria, entrance, info booth) on the campus map", key: "M" },
     { id: "building", icon: Square,        label: "Add Building", hint: "Click & drag on the canvas to draw a building footprint. Give it a name and floors in the Properties panel on the right.", key: "B" },
@@ -322,13 +323,31 @@ export const BUILDING_TYPE_MAP = Object.fromEntries(BUILDING_TYPES.map((t) => [t
 
 // ── Decorative asset palette (visual-only outdoor objects) ─────────────────
 
+/**
+ * A single SVG sub-shape of a decorative asset. Coordinates live in the
+ * asset's local 0..defaultWidth × 0..defaultHeight space; the renderer
+ * centers that box on the asset position.
+ */
+export interface DecorPart {
+  /** SVG path data in local asset space. */
+  d: string;
+  fill?: string;
+  stroke?: string;
+  strokeWidth?: number;
+  fillOpacity?: number;
+  strokeLinecap?: "butt" | "round" | "square";
+  strokeLinejoin?: "miter" | "round" | "bevel";
+}
+
 export interface DecorAssetDescriptor {
   type: DecorAssetType;
   label: string;
   category: string;
   color: string;
-  /** SVG path data for rendering on canvas */
+  /** SVG path data for rendering on canvas (primary body, kept for legacy/fallback rendering) */
   svgPath: string;
+  /** Multi-part artwork — used by the shared visual renderer when present. */
+  parts?: DecorPart[];
   /** Default width in canvas units */
   defaultWidth: number;
   /** Default height in canvas units */
@@ -337,31 +356,223 @@ export interface DecorAssetDescriptor {
 
 export const DECOR_ASSET_TYPES: DecorAssetDescriptor[] = [
   // Greenery
-  { type: "tree",          label: "Tree",           category: "Greenery",    color: "#22c55e", svgPath: "M16 4 Q20 0 24 4 Q28 8 24 14 L20 20 L16 14 Q12 8 16 4Z", defaultWidth: 24, defaultHeight: 28 },
-  { type: "tree-large",    label: "Large Tree",     category: "Greenery",    color: "#16a34a", svgPath: "M12 4 Q18 -2 24 4 Q30 10 24 20 L20 30 L16 20 Q10 10 12 4Z", defaultWidth: 32, defaultHeight: 36 },
-  { type: "palm",          label: "Palm Tree",      category: "Greenery",    color: "#15803d", svgPath: "M16 6 Q12 0 8 4 M16 6 Q20 0 24 4 M14 8 L16 30 L18 8", defaultWidth: 28, defaultHeight: 34 },
-  { type: "bush",          label: "Bush",           category: "Greenery",    color: "#4ade80", svgPath: "M4 16 Q4 8 12 8 Q20 8 20 16 Q20 20 12 20 Q4 20 4 16Z", defaultWidth: 24, defaultHeight: 20 },
-  { type: "plant",         label: "Plant Pot",      category: "Greenery",    color: "#22c55e", svgPath: "M10 8 L8 18 L20 18 L18 8Z M12 4 Q16 2 16 8 L12 8Z", defaultWidth: 18, defaultHeight: 22 },
-  { type: "flower",        label: "Flower Bed",     category: "Greenery",    color: "#f472b6", svgPath: "M8 16 Q4 12 8 8 Q12 4 16 8 Q20 12 16 16 Q12 20 8 16Z", defaultWidth: 20, defaultHeight: 20 },
+  {
+    type: "tree", label: "Tree", category: "Greenery", color: "#22c55e",
+    svgPath: "M12 1 C7 1 3 5 3 10 C3 16 8 19 12 19 C16 19 21 16 21 10 C21 5 17 1 12 1 Z",
+    parts: [
+      { d: "M10 14 L11 27 L13 27 L14 14 Z", fill: "#8a6a3f" },
+      { d: "M12 1 C7 1 3 5 3 10 C3 16 8 19 12 19 C16 19 21 16 21 10 C21 5 17 1 12 1 Z", fill: shade("#22c55e", -10) },
+      { d: "M8 5 C6 7 6 11 8 13 C10 15 13 14 14 11 C15 8 12 4 8 5 Z", fill: shade("#22c55e", 25) },
+    ],
+    defaultWidth: 24, defaultHeight: 28,
+  },
+  {
+    type: "tree-large", label: "Large Tree", category: "Greenery", color: "#16a34a",
+    svgPath: "M16 2 C9 2 4 7 4 13 C4 20 10 24 16 24 C22 24 28 20 28 13 C28 7 23 2 16 2 Z",
+    parts: [
+      { d: "M14 18 L15 34 L17 34 L18 18 Z", fill: "#8a6a3f" },
+      { d: "M16 2 C9 2 4 7 4 13 C4 20 10 24 16 24 C22 24 28 20 28 13 C28 7 23 2 16 2 Z", fill: shade("#16a34a", -12) },
+      { d: "M10 7 C7 9 6 14 9 17 C12 20 17 19 19 15 C21 11 16 5 10 7 Z", fill: shade("#16a34a", 22) },
+    ],
+    defaultWidth: 32, defaultHeight: 36,
+  },
+  {
+    type: "palm", label: "Palm Tree", category: "Greenery", color: "#15803d",
+    svgPath: "M13 32 Q12 22 13 9 L15 9 Q14 22 15 32 Z",
+    parts: [
+      { d: "M14 9 Q4 4 2 12 M14 9 Q24 2 26 10 M14 9 Q5 10 3 17 M14 9 Q23 12 25 18", fill: "none", stroke: "#15803d", strokeWidth: 2.2, strokeLinecap: "round" },
+      { d: "M13 32 Q12 22 13 9 L15 9 Q14 22 15 32 Z", fill: "#a16207" },
+      { d: "M11.4 10.6 m-1.7,0 a1.7,1.7 0 1 1 3.4,0 a1.7,1.7 0 1 1 -3.4,0 Z M16 12.8 m-1.4,0 a1.4,1.4 0 1 1 2.8,0 a1.4,1.4 0 1 1 -2.8,0 Z", fill: "#b45309" },
+    ],
+    defaultWidth: 28, defaultHeight: 34,
+  },
+  {
+    type: "bush", label: "Bush", category: "Greenery", color: "#4ade80",
+    svgPath: "M12 3 C7 3 3 7 3 12 C3 17 7 19 12 19 C17 19 21 17 21 12 C21 7 17 3 12 3 Z",
+    parts: [
+      { d: "M12 3 C7 3 3 7 3 12 C3 17 7 19 12 19 C17 19 21 17 21 12 C21 7 17 3 12 3 Z", fill: shade("#4ade80", -8) },
+      { d: "M7 6 C5 8 5 11 7 13 C9 15 13 15 14 12 C15 9 12 4 7 6 Z", fill: shade("#4ade80", 20) },
+    ],
+    defaultWidth: 24, defaultHeight: 20,
+  },
+  {
+    type: "plant", label: "Plant Pot", category: "Greenery", color: "#22c55e",
+    svgPath: "M5.5 14 L7 21 L11 21 L12.5 14 Z",
+    parts: [
+      { d: "M5.5 14 L7 21 L11 21 L12.5 14 Z", fill: "#c2620a" },
+      { d: "M4.5 12.5 L13.5 12.5 L13 15 L5 15 Z", fill: "#b45309" },
+      { d: "M8.5 12.5 Q5 8 6.5 3 Q9.5 5.5 8.5 12.5 Z", fill: shade("#22c55e", 18) },
+      { d: "M9.5 12.5 Q12.5 7.5 15.5 6 Q13.5 10 9.5 12.5 Z", fill: "#22c55e" },
+      { d: "M9.3 12.5 Q8.5 7 10.5 3.5 Q12 7 9.3 12.5 Z", fill: shade("#22c55e", -8) },
+    ],
+    defaultWidth: 18, defaultHeight: 22,
+  },
+  {
+    type: "flower", label: "Flower Bed", category: "Greenery", color: "#f472b6",
+    svgPath: "M14.2 10.5 m-2.3,0 a2.3,2.3 0 1 1 4.6,0 a2.3,2.3 0 1 1 -4.6,0 Z M11.3 14.5 m-2.3,0 a2.3,2.3 0 1 1 4.6,0 a2.3,2.3 0 1 1 -4.6,0 Z M6.6 12.9 m-2.3,0 a2.3,2.3 0 1 1 4.6,0 a2.3,2.3 0 1 1 -4.6,0 Z M6.6 8.1 m-2.3,0 a2.3,2.3 0 1 1 4.6,0 a2.3,2.3 0 1 1 -4.6,0 Z M11.3 6.5 m-2.3,0 a2.3,2.3 0 1 1 4.6,0 a2.3,2.3 0 1 1 -4.6,0 Z",
+    parts: [
+      { d: "M14.2 10.5 m-2.3,0 a2.3,2.3 0 1 1 4.6,0 a2.3,2.3 0 1 1 -4.6,0 Z M11.3 14.5 m-2.3,0 a2.3,2.3 0 1 1 4.6,0 a2.3,2.3 0 1 1 -4.6,0 Z M6.6 12.9 m-2.3,0 a2.3,2.3 0 1 1 4.6,0 a2.3,2.3 0 1 1 -4.6,0 Z M6.6 8.1 m-2.3,0 a2.3,2.3 0 1 1 4.6,0 a2.3,2.3 0 1 1 -4.6,0 Z M11.3 6.5 m-2.3,0 a2.3,2.3 0 1 1 4.6,0 a2.3,2.3 0 1 1 -4.6,0 Z", fill: "#f472b6", fillOpacity: 0.95 },
+      { d: "M10 10.5 m-2.1,0 a2.1,2.1 0 1 1 4.2,0 a2.1,2.1 0 1 1 -4.2,0 Z", fill: "#fbbf24" },
+      { d: "M8 17.5 L12 17.5 L11 20 L9 20 Z", fill: "#16a34a" },
+    ],
+    defaultWidth: 20, defaultHeight: 20,
+  },
   // Seating
-  { type: "bench",         label: "Bench",          category: "Seating",     color: "#a16207", svgPath: "M2 10 L22 10 L22 14 L2 14Z M4 14 L4 18 M18 14 L18 18", defaultWidth: 24, defaultHeight: 18 },
-  { type: "bench-long",    label: "Long Bench",     category: "Seating",     color: "#92400e", svgPath: "M2 10 L34 10 L34 14 L2 14Z M4 14 L4 18 M30 14 L30 18", defaultWidth: 36, defaultHeight: 18 },
-  { type: "picnic-table",  label: "Picnic Table",   category: "Seating",     color: "#78350f", svgPath: "M4 6 L28 6 L28 10 L4 10Z M6 10 L6 18 M26 10 L26 18 M4 18 L28 18", defaultWidth: 32, defaultHeight: 22 },
+  {
+    type: "bench", label: "Bench", category: "Seating", color: "#a16207",
+    svgPath: "M3 9 L21 9 L21 12 L3 12 Z",
+    parts: [
+      { d: "M4 5 L8 5 L8 9 L4 9 Z M10 5 L14 5 L14 9 L10 9 Z M16 5 L20 5 L20 9 L16 9 Z", fill: shade("#a16207", -5) },
+      { d: "M3 9 L21 9 L21 12 L3 12 Z", fill: shade("#a16207", 10) },
+      { d: "M3 12 L21 12 L21 13.5 L3 13.5 Z", fill: shade("#a16207", -15) },
+      { d: "M5 13.5 L5 17 L6.5 17 L6.5 13.5 Z M18.5 13.5 L18.5 17 L20 17 L20 13.5 Z", fill: shade("#a16207", -25) },
+    ],
+    defaultWidth: 24, defaultHeight: 18,
+  },
+  {
+    type: "bench-long", label: "Long Bench", category: "Seating", color: "#92400e",
+    svgPath: "M4 9 L32 9 L32 12 L4 12 Z",
+    parts: [
+      { d: "M5 5 L9 5 L9 9 L5 9 Z M12 5 L16 5 L16 9 L12 9 Z M19 5 L23 5 L23 9 L19 9 Z M26 5 L30 5 L30 9 L26 9 Z", fill: shade("#92400e", -5) },
+      { d: "M4 9 L32 9 L32 12 L4 12 Z", fill: shade("#92400e", 10) },
+      { d: "M4 12 L32 12 L32 13.5 L4 13.5 Z", fill: shade("#92400e", -15) },
+      { d: "M6 13.5 L6 17 L7.5 17 L7.5 13.5 Z M30.5 13.5 L30.5 17 L32 17 L32 13.5 Z", fill: shade("#92400e", -25) },
+    ],
+    defaultWidth: 36, defaultHeight: 18,
+  },
+  {
+    type: "picnic-table", label: "Picnic Table", category: "Seating", color: "#78350f",
+    svgPath: "M4 8 L28 8 L28 11 L4 11 Z",
+    parts: [
+      { d: "M4 8 L28 8 L28 11 L4 11 Z", fill: shade("#78350f", 12) },
+      { d: "M4 11 L28 11 L28 12.5 L4 12.5 Z", fill: shade("#78350f", -12) },
+      { d: "M3 15 L9 15 L9 17.5 L3 17.5 Z", fill: shade("#78350f", 8) },
+      { d: "M23 15 L29 15 L29 17.5 L23 17.5 Z", fill: shade("#78350f", 8) },
+      { d: "M7 12.5 L5.5 20 L7.5 20 L9 12.5 Z M23 12.5 L24.5 20 L26.5 20 L25 12.5 Z M14.5 12.5 L15 20 L17 20 L17.5 12.5 Z", fill: shade("#78350f", -25) },
+    ],
+    defaultWidth: 32, defaultHeight: 22,
+  },
   // Wayfinding
-  { type: "sign",          label: "Sign Post",      category: "Wayfinding",  color: "#2563eb", svgPath: "M14 4 L14 28 M6 4 L22 4 L22 12 L6 12Z", defaultWidth: 24, defaultHeight: 30 },
-  { type: "flag",          label: "Flag",           category: "Wayfinding",  color: "#dc2626", svgPath: "M8 4 L8 28 M8 4 L24 8 L8 12", defaultWidth: 26, defaultHeight: 30 },
+  {
+    type: "sign", label: "Sign Post", category: "Wayfinding", color: "#2563eb",
+    svgPath: "M4 4 L20 4 L20 14 L4 14 Z",
+    parts: [
+      { d: "M11 11 L11 28 L13 28 L13 11 Z", fill: "#64748b" },
+      { d: "M4 4 L20 4 L20 14 L4 14 Z", fill: "#2563eb" },
+      { d: "M6 6 L18 6 L18 12 L6 12 Z", fill: "#ffffff", fillOpacity: 0.9 },
+      { d: "M7.5 8.2 L16.5 8.2 M7.5 10 L13.5 10", fill: "none", stroke: "#334155", strokeWidth: 1.2, strokeLinecap: "round" },
+    ],
+    defaultWidth: 24, defaultHeight: 30,
+  },
+  {
+    type: "flag", label: "Flag", category: "Wayfinding", color: "#dc2626",
+    svgPath: "M13 4 L23 4 L21 7 L23 10 L13 10 Z",
+    parts: [
+      { d: "M11 3 L13 3 L13 27 L11 27 Z", fill: "#94a3b8" },
+      { d: "M13 4 L23 4 L21 7 L23 10 L13 10 Z", fill: "#dc2626" },
+      { d: "M9 27 L15 27 L14 29.5 L10 29.5 Z", fill: "#64748b" },
+    ],
+    defaultWidth: 26, defaultHeight: 30,
+  },
   // Utilities
-  { type: "trash-bin",     label: "Trash Bin",      category: "Utilities",   color: "#78716c", svgPath: "M6 8 L6 22 L22 22 L22 8 M4 8 L24 8 M10 4 L18 4 L18 8 L10 8Z", defaultWidth: 24, defaultHeight: 26 },
-  { type: "recycle-bin",   label: "Recycle Bin",    category: "Utilities",   color: "#16a34a", svgPath: "M6 8 L6 22 L22 22 L22 8 M4 8 L24 8 M12 12 L16 18 M16 12 L12 18", defaultWidth: 24, defaultHeight: 26 },
-  { type: "lamp-post",     label: "Lamp Post",      category: "Utilities",   color: "#eab308", svgPath: "M14 4 L14 28 M10 4 Q14 0 18 4 M12 8 L16 8", defaultWidth: 20, defaultHeight: 30 },
-  { type: "bollard",       label: "Bollard",        category: "Utilities",   color: "#94a3b8", svgPath: "M10 12 L10 24 L18 24 L18 12 Q14 8 10 12Z", defaultWidth: 16, defaultHeight: 26 },
+  {
+    type: "trash-bin", label: "Trash Bin", category: "Utilities", color: "#78716c",
+    svgPath: "M5.5 9 L7 23 L17 23 L18.5 9 Z",
+    parts: [
+      { d: "M6 5 L18 5 L17 8 L7 8 Z", fill: shade("#78716c", -10) },
+      { d: "M5 8 L19 8 L18.5 10 L5.5 10 Z", fill: shade("#78716c", -20) },
+      { d: "M5.5 9 L7 23 L17 23 L18.5 9 Z", fill: "#78716c" },
+      { d: "M9 10.5 L9.5 21.5 M12 10.5 L12 21.5 M15 10.5 L15 21.5", fill: "none", stroke: "rgba(255,255,255,0.4)", strokeWidth: 1, strokeLinecap: "round" },
+    ],
+    defaultWidth: 24, defaultHeight: 26,
+  },
+  {
+    type: "recycle-bin", label: "Recycle Bin", category: "Utilities", color: "#16a34a",
+    svgPath: "M5.5 9 L7 23 L17 23 L18.5 9 Z",
+    parts: [
+      { d: "M6 5 L18 5 L17 8 L7 8 Z", fill: shade("#16a34a", -10) },
+      { d: "M5 8 L19 8 L18.5 10 L5.5 10 Z", fill: shade("#16a34a", -20) },
+      { d: "M5.5 9 L7 23 L17 23 L18.5 9 Z", fill: "#16a34a" },
+      { d: "M12 12 L15.5 17.5 L8.5 17.5 Z M12 12 L12 13.8 M12 12 L14.4 14.2", fill: "none", stroke: "#ffffff", strokeWidth: 1.4, strokeLinecap: "round", strokeLinejoin: "round" },
+    ],
+    defaultWidth: 24, defaultHeight: 26,
+  },
+  {
+    type: "lamp-post", label: "Lamp Post", category: "Utilities", color: "#eab308",
+    svgPath: "M10 4.4 m-2.2,0 a2.2,2.2 0 1 1 4.4,0 a2.2,2.2 0 1 1 -4.4,0 Z",
+    parts: [
+      { d: "M9 6 L9 28 L11 28 L11 6 Z", fill: "#64748b" },
+      { d: "M7.5 27 L12.5 27 L12 29.5 L8 29.5 Z", fill: "#475569" },
+      { d: "M6.5 6 Q10 2.5 13.5 6", fill: "none", stroke: "#64748b", strokeWidth: 1.6, strokeLinecap: "round" },
+      { d: "M10 3.8 m-3.1,0 a3.1,3.1 0 1 1 6.2,0 a3.1,3.1 0 1 1 -6.2,0 Z", fill: "#fde047", fillOpacity: 0.35 },
+      { d: "M10 4.4 m-2.2,0 a2.2,2.2 0 1 1 4.4,0 a2.2,2.2 0 1 1 -4.4,0 Z", fill: "#fef08a" },
+    ],
+    defaultWidth: 20, defaultHeight: 30,
+  },
+  {
+    type: "bollard", label: "Bollard", category: "Utilities", color: "#94a3b8",
+    svgPath: "M5 10 C5 6 11 6 11 10 L11 24 L5 24 Z",
+    parts: [
+      { d: "M5 10 C5 6 11 6 11 10 L11 12 L5 12 Z", fill: shade("#94a3b8", 18) },
+      { d: "M5.5 12 L10.5 12 L10.5 24 L5.5 24 Z", fill: "#94a3b8" },
+      { d: "M5.5 15 L10.5 15 L10.5 17.5 L5.5 17.5 Z", fill: "#e2e8f0", fillOpacity: 0.9 },
+    ],
+    defaultWidth: 16, defaultHeight: 26,
+  },
   // Facilities
-  { type: "bike-rack",     label: "Bike Rack",      category: "Facilities",  color: "#64748b", svgPath: "M4 10 L4 22 M10 10 L10 22 M16 10 L16 22 M22 10 L22 22 M4 10 L22 10", defaultWidth: 26, defaultHeight: 24 },
-  { type: "fountain",      label: "Fountain",       category: "Facilities",  color: "#38bdf8", svgPath: "M4 20 L24 20 L24 26 L4 26Z M10 20 L10 12 M18 20 L18 12 M14 8 Q14 4 14 8", defaultWidth: 28, defaultHeight: 28 },
-  { type: "gazebo",        label: "Gazebo",         category: "Facilities",  color: "#92400e", svgPath: "M4 14 L24 14 L24 24 L4 24Z M6 14 L6 24 M22 14 L22 24 M4 14 L14 4 L24 14", defaultWidth: 30, defaultHeight: 28 },
+  {
+    type: "bike-rack", label: "Bike Rack", category: "Facilities", color: "#64748b",
+    svgPath: "M3.5 13 L3.5 6.5 Q3.5 3.5 6.5 3.5 L7 3.5 Q10 3.5 10 6.5 L10 13",
+    parts: [
+      { d: "M3 13 L23 13 L23 14.5 L3 14.5 Z", fill: shade("#64748b", 10) },
+      { d: "M3.5 13 L3.5 6.5 Q3.5 3.5 6.5 3.5 L7 3.5 Q10 3.5 10 6.5 L10 13 M11.5 13 L11.5 6.5 Q11.5 3.5 14.5 3.5 L15 3.5 Q18 3.5 18 6.5 L18 13 M19.5 13 L19.5 6.5 Q19.5 3.5 22.5 3.5 L23 3.5 Q26 3.5 26 6.5 L26 13", fill: "none", stroke: "#64748b", strokeWidth: 2, strokeLinecap: "round" },
+      { d: "M4 13 L3 21 L5 21 L6 13 Z M20 13 L21 21 L23 21 L22 13 Z", fill: shade("#64748b", -20) },
+    ],
+    defaultWidth: 26, defaultHeight: 24,
+  },
+  {
+    type: "fountain", label: "Fountain", category: "Facilities", color: "#38bdf8",
+    svgPath: "M2 20 a12 5 0 1 0 24 0 a12 5 0 1 0 -24 0 Z",
+    parts: [
+      { d: "M2 20 a12 5 0 1 0 24 0 a12 5 0 1 0 -24 0 Z", fill: "#7dd3fc" },
+      { d: "M6.5 19 a7.5 3 0 1 0 15 0 a7.5 3 0 1 0 -15 0 Z", fill: "#38bdf8" },
+      { d: "M12 19 L16 19 L15.5 21.5 L12.5 21.5 Z", fill: "#93c5fd" },
+      { d: "M14 19 C12.5 14 12.5 10 14 7 C15.5 10 15.5 14 14 19 Z", fill: "#bae6fd" },
+    ],
+    defaultWidth: 28, defaultHeight: 28,
+  },
+  {
+    type: "gazebo", label: "Gazebo", category: "Facilities", color: "#92400e",
+    svgPath: "M5 12 L25 12 L15 2 Z",
+    parts: [
+      { d: "M5 12 L25 12 L15 2 Z", fill: shade("#92400e", -10) },
+      { d: "M8 10.5 L22 10.5 L15 4.5 Z", fill: shade("#92400e", 12) },
+      { d: "M7 12 L7 24 L8.5 24 L8.5 12 Z M21.5 12 L21.5 24 L23 24 L23 12 Z", fill: shade("#92400e", -15) },
+      { d: "M5 24 L25 24 L24.5 26 L5.5 26 Z", fill: shade("#92400e", -25) },
+    ],
+    defaultWidth: 30, defaultHeight: 28,
+  },
 ];
 
 export const DECOR_ASSET_MAP = Object.fromEntries(DECOR_ASSET_TYPES.map((a) => [a.type, a]));
+
+// ── Curated placement palette for outdoor decor ───────────────────────────
+// A focused public-campus-map set (clean top-down map symbols). Types that are
+// NOT listed here are still fully renderable and editable when loaded from
+// existing saved campuses (backward compatible) — they are simply not offered
+// in the placement palette because they read as clip-art at campus scale.
+export const DECOR_PALETTE_TYPES: string[] = [
+  // Greenery
+  "tree", "tree-large", "palm", "bush", "plant",
+  // Seating
+  "bench", "bench-long",
+  // Wayfinding
+  "sign",
+  // Utilities
+  "trash-bin", "recycle-bin", "lamp-post",
+  // Facilities
+  "bike-rack", "gazebo",
+];
 
 // ── Decor categories for the panel ────────────────────────────────────────
 

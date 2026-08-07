@@ -229,6 +229,9 @@ export interface CampusBuilding {
   opacity?: number;
   /** Whether the building is locked (prevents drag/resize/delete) */
   locked?: boolean;
+  /** Visual stacking order shared with decorative assets (cross-type layer ordering).
+   *  Optional — legacy data defaults to array order (buildings below decor). */
+  zOrder?: number;
   /** Which editor layer the building belongs to */
   layer?: string;
   /** Entrance point on the campus map (canvas coordinates) */
@@ -594,6 +597,11 @@ export interface CampusDecorAsset {
   scale?: number;
   /** Whether this asset is visible on the canvas */
   visible?: boolean;
+  /** Optional custom display name (separate from the asset type label) */
+  name?: string;
+  /** Visual stacking order shared with buildings (cross-type layer ordering).
+   *  Optional — legacy data defaults to array order (decor above buildings). */
+  zOrder?: number;
 }
 
 // ── Building Type Descriptor (palette presets) ─────────────────────────────

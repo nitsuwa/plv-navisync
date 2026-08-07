@@ -2,7 +2,7 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { toast } from "sonner";
 import { createCampusClone } from "../lib/campusHelpers";
-import { campusService, CampusConflictError, type CampusCreateInput, type CampusUpdateInput } from "../services/campusService";
+import { campusService, CampusConflictError, userFacingCampusMessage, type CampusCreateInput, type CampusUpdateInput } from "../services/campusService";
 import { campusStructureService } from "../services/campusStructureService";
 import {
   CampusHome,
@@ -17,6 +17,8 @@ import {
   BUILDING_COLORS,
 } from "../components/map-builder";
 import type { Campus, View, BuildingWizardData } from "../components/map-builder/types";
+
+const shouldLogCampusDiagnostics = import.meta.env.DEV && import.meta.env.MODE !== "test";
 
 // ── Directional slide variants ──────────────────────────────────────────────
 const slideVariants = {
@@ -70,7 +72,7 @@ export function AdminMapBuilderPage() {
   useEffect(() => {
     let active = true;
     campusService.list().then((rows) => { if (active) setCampuses(rows); }).catch((error: Error) => {
-      toast.error("Could not load campuses", error.message);
+      toast.error("Could not load campuses", { description: error.message });
     });
     return () => { active = false; };
   }, []);
@@ -98,8 +100,8 @@ export function AdminMapBuilderPage() {
     try {
       const created = await campusService.create({ ...campusInput(clone), logo_path: null, overview_image_path: null, is_default: false });
       setCampuses((p) => [...p, created]);
-      toast.success("Campus Duplicated", `"${source.name}" has been copied as "${created.name}".`);
-    } catch (error) { toast.error("Could not duplicate campus", (error as Error).message); }
+      toast.success("Campus Duplicated", { description: `"${source.name}" has been copied as "${created.name}".` });
+    } catch (error) { toast.error("Could not duplicate campus", { description: userFacingCampusMessage(error) }); }
   }, [campuses]);
 
   const archiveCampus = useCallback(async (id: string) => {
@@ -108,8 +110,8 @@ export function AdminMapBuilderPage() {
     try {
       const updated = await campusService.archive(id, campus.databaseUpdatedAt);
       updateCampus(updated);
-      toast.success("Campus Archived", `"${campus.name}" is private until restored.`);
-    } catch (error) { toast.error("Could not archive campus", (error as Error).message); }
+      toast.success("Campus Archived", { description: `"${campus.name}" is private until restored.` });
+    } catch (error) { toast.error("Could not archive campus", { description: userFacingCampusMessage(error) }); }
   }, [campuses, updateCampus]);
 
   const restoreCampus = useCallback(async (id: string) => {
@@ -118,8 +120,8 @@ export function AdminMapBuilderPage() {
     try {
       const updated = await campusService.restore(id, campus.databaseUpdatedAt);
       updateCampus(updated);
-      toast.success("Campus Restored", `"${campus.name}" was restored as a private draft.`);
-    } catch (error) { toast.error("Could not restore campus", (error as Error).message); }
+      toast.success("Campus Restored", { description: `"${campus.name}" was restored as a private draft.` });
+    } catch (error) { toast.error("Could not restore campus", { description: userFacingCampusMessage(error) }); }
   }, [campuses, updateCampus]);
 
   const editDetails = useCallback((id: string) => {
@@ -160,7 +162,7 @@ export function AdminMapBuilderPage() {
         const hydrated = await campusStructureService.load(campus!);
         updateCampus(hydrated);
       } catch (error) {
-        toast.error("Could not load map", (error as Error).message);
+        toast.error("Could not load map", { description: (error as Error).message });
         return;
       }
       setView({ type: "campus", campusId });
@@ -209,6 +211,13 @@ export function AdminMapBuilderPage() {
 
   const finishWizard = useCallback(async (campus: Campus, existingId?: string) => {
     try {
+      if (shouldLogCampusDiagnostics) {
+        console.debug("[AdminMapBuilderPage] finishWizard start", {
+          mode: existingId ? "edit" : "create",
+          id: existingId ?? campus.id,
+          code: campus.code,
+        });
+      }
       const requestedLogo = await dataUrlToBlob(campus.logo);
       const requestedOverview = await dataUrlToBlob(campus.thumbnail);
       if (requestedLogo) campusService.validateImage(requestedLogo);
@@ -218,6 +227,7 @@ export function AdminMapBuilderPage() {
         const existing = campuses.find((item) => item.id === existingId);
         if (!existing?.databaseUpdatedAt) throw new Error("Refresh before editing this campus.");
         const input = campusInput({ ...existing, ...campus }) as CampusUpdateInput;
+        if (shouldLogCampusDiagnostics) console.debug("[AdminMapBuilderPage] campusService.update start", { id: existingId });
         let updated = await campusService.update(existingId, input, existing.databaseUpdatedAt);
         if (requestedLogo || requestedOverview) {
           const [logoPath, overviewPath] = await Promise.all([
@@ -227,11 +237,19 @@ export function AdminMapBuilderPage() {
           updated = await campusService.update(existingId, { logo_path: logoPath ?? null, overview_image_path: overviewPath ?? null }, updated.databaseUpdatedAt!);
         }
         updateCampus(updated);
-        toast.success("Campus Details Updated", `"${updated.name}" has been saved.`);
+        toast.success("Campus Details Updated", { description: `"${updated.name}" has been saved.` });
         goHome();
-        return;
+        return true;
       }
 
+      // Fail fast on a duplicate campus code instead of surfacing a cryptic
+      // PostgREST unique-violation toast. The DB `code` column is unique, so
+      // the server remains the backstop; this just gives a clear message first.
+      const normalizedCode = campus.code.trim().toUpperCase();
+      if (campuses.some((c) => c.code?.toUpperCase() === normalizedCode)) {
+        throw new Error(`A campus with code "${normalizedCode}" already exists. Choose a different code.`);
+      }
+      if (shouldLogCampusDiagnostics) console.debug("[AdminMapBuilderPage] campusService.create start", { code: normalizedCode });
       let created = await campusService.create({ ...campusInput(campus), logo_path: null, overview_image_path: null });
       if (requestedLogo || requestedOverview) {
         const [logoPath, overviewPath] = await Promise.all([
@@ -241,10 +259,15 @@ export function AdminMapBuilderPage() {
         created = await campusService.update(created.id, { logo_path: logoPath ?? null, overview_image_path: overviewPath ?? null }, created.databaseUpdatedAt!);
       }
       setCampuses((items) => [...items, created]);
-      toast.success("Campus Created", `"${created.name}" was saved as a private draft.`);
+      toast.success("Campus Created", { description: `"${created.name}" was saved as a private draft.` });
       goToSuccess(created.id);
+      return true;
     } catch (error) {
-      toast.error(error instanceof CampusConflictError ? "Campus changed elsewhere" : "Could not save campus", (error as Error).message);
+      toast.error(error instanceof CampusConflictError ? "Campus changed elsewhere" : "Could not save campus", { description: userFacingCampusMessage(error) });
+      if (shouldLogCampusDiagnostics) {
+        console.error("[AdminMapBuilderPage] finishWizard failed", error);
+      }
+      return false;
     }
   }, [campuses, goHome, goToSuccess, updateCampus]);
 
@@ -274,7 +297,7 @@ export function AdminMapBuilderPage() {
       }, canvasSetupCampus.databaseUpdatedAt!);
       updateCampus({ ...updated, canvasConfigured: true });
       setView({ type: "campus", campusId: canvasSetupCampus.id });
-    } catch (error) { toast.error("Could not save canvas", (error as Error).message); }
+    } catch (error) { toast.error("Could not save canvas", { description: (error as Error).message }); }
   }, [canvasSetupCampus, updateCampus]);
 
   const [showCanvasSettings, setShowCanvasSettings] = useState(false);
@@ -286,7 +309,7 @@ export function AdminMapBuilderPage() {
         canvas_width: updates.canvasW, canvas_height: updates.canvasH, canvas_configured: true,
       }, activeCampus.databaseUpdatedAt!);
       updateCampus({ ...updated, canvasConfigured: true });
-    } catch (error) { toast.error("Could not update canvas", (error as Error).message); }
+    } catch (error) { toast.error("Could not update canvas", { description: (error as Error).message }); }
   }, [activeCampus, updateCampus]);
 
   return (

@@ -5,7 +5,8 @@ import {
   ChevronRight, ChevronDown, FolderOpen, Search, Eye, EyeOff, Lock, TreePine, Sparkles,
 } from "lucide-react";
 import { cn } from "../../lib/utils";
-import { genId, BUILDING_TYPES, DECOR_ASSET_TYPES, DECOR_ASSET_MAP } from "./constants";
+import { genId, BUILDING_TYPES, DECOR_PALETTE_TYPES, DECOR_ASSET_MAP } from "./constants";
+import { DecorAssetVisual } from "./DecorAssetVisual";
 import { ContextMenu } from "./ContextMenu";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
 import type { Campus, CampusBuilding, CampusSelection, FloorPlan, BuildingTypeDescriptor, CampusDecorAsset, DecorAssetType } from "./types";
@@ -409,9 +410,12 @@ export function HierarchyPanel({
               {decorAssetCount > 0 && <span className="text-[8px] font-mono opacity-60">({decorAssetCount})</span>}
             </span>
             <div className="mt-1.5 grid grid-cols-3 gap-1">
+              {/* Curated placement palette — a focused public-campus-map set.
+                  Unlisted legacy types still render on the canvas if a saved
+                  campus contains them (backward compatible). */}
               {(assetSearch
-                ? DECOR_ASSET_TYPES.filter(a => a.label.toLowerCase().includes(assetSearch.toLowerCase()))
-                : DECOR_ASSET_TYPES
+                ? DECOR_PALETTE_TYPES.map((t) => DECOR_ASSET_MAP[t]).filter(Boolean).filter(a => a.label.toLowerCase().includes(assetSearch.toLowerCase()))
+                : DECOR_PALETTE_TYPES.map((t) => DECOR_ASSET_MAP[t]).filter(Boolean)
               ).map((asset) => (
                 <button
                   key={asset.type}
@@ -427,7 +431,7 @@ export function HierarchyPanel({
                   }}
                 >
                   <div className="w-9 h-9 rounded-lg flex items-center justify-center group-hover:scale-110 transition-transform" style={{ backgroundColor: `${asset.color}12`, border: `1px solid ${asset.color}25` }}>
-                    <svg viewBox="0 0 28 32" className="w-5 h-6"><path d={asset.svgPath} fill={asset.color} opacity={0.85} /></svg>
+                    <DecorAssetVisual type={asset.type} className="w-5 h-6" style={{ opacity: 0.85 }} />
                   </div>
                   <span className="text-[7px] font-semibold text-foreground/60 group-hover:text-foreground text-center leading-tight">{asset.label}</span>
                 </button>

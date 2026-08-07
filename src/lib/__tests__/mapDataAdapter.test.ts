@@ -82,6 +82,20 @@ describe("buildingPositionsFromCampus", () => {
     expect(pos["b1"]).toEqual({ x: 10, y: 20, w: 100, h: 80, color: "#123456" });
     expect(Object.keys(pos)).toContain("b2");
   });
+
+  it("excludes hidden buildings from public/student map adapters", () => {
+    const campus = makeCampus();
+    campus.buildings = [
+      campus.buildings[0],
+      { ...campus.buildings[1], visible: false } as typeof campus.buildings[number] & { visible: false },
+    ];
+
+    expect(buildingPositionsFromCampus(campus)["b2"]).toBeUndefined();
+    expect(buildingsFromCampus(campus).some((building) => building.id === "b2")).toBe(false);
+    expect(facilitiesFromCampus(campus)["b2"]).toBeUndefined();
+    expect(accessibilityFromCampus(campus)["b2"]).toBeUndefined();
+    expect(locationsFromCampus(campus).some((location) => location.building_id === "b2")).toBe(false);
+  });
 });
 
 // ── floorPlansFromCampus ────────────────────────────────────────────────────

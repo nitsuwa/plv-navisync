@@ -2,10 +2,12 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { CheckCircle2, XCircle } from "lucide-react";
 import { MARKER_STYLES } from "../../data/mapData";
-import type { LayerToolDescriptor } from "./constants";
 import type { Campus, CampusBuilding, CampusMarker, SimpleTool, EditorLayer, CampusSelection, RubberBand, CampusDecorAsset } from "./types";
 import { DECOR_ASSET_MAP, BUILDING_TYPE_MAP, genId, getRotatedAABB } from "./constants";
-import { computeBuildingPlacement, shouldDrawNavConnector } from "../../lib/editorPlacement";
+import { computeBuildingPlacement, screenToWorld, shouldDrawNavConnector } from "../../lib/editorPlacement";
+import { decorRenderScale, decorSelectionOutlineBox, decorWorldSize } from "../../lib/decorVisual";
+import { mergeOutdoorStack } from "../../lib/campusStack";
+import { DecorAssetArt, DecorAssetVisual } from "./DecorAssetVisual";
 
 // ── Rotation-aware resize cursor helpers (shared by buildings and decor assets) ──
 function angleToCursor(deg: number): string {
@@ -31,7 +33,6 @@ interface CanvasProps {
   selected: CampusSelection | null;
   multiSelected: string[];
   rubberBand: RubberBand | null;
-  activeTools: LayerToolDescriptor[];
   drawingPath: { x: number; y: number }[];
   snapGrid: boolean;
   zoom: number;
@@ -51,7 +52,7 @@ interface CanvasProps {
   onCanvasLeave?: (e: React.MouseEvent<SVGSVGElement>) => void;
   onCanvasDblClick: (e: React.MouseEvent<SVGSVGElement>) => void;
   onItemDown: (e: React.MouseEvent, type: "building" | "marker" | "decorAsset", id: string, ox: number, oy: number) => void;
-  onItemContextMenu?: (e: React.MouseEvent, type: "building" | "marker" | "path", id: string) => void;
+  onItemContextMenu?: (e: React.MouseEvent, type: "building" | "marker" | "path" | "decorAsset", id: string) => void;
   onResizeStart?: (e: React.MouseEvent, b: CampusBuilding, corner: string) => void;
   onRotateStart?: (e: React.MouseEvent, b: CampusBuilding) => void;
   onBuildingDoubleClick?: (id: string) => void;
@@ -135,14 +136,7 @@ function DragOverlay({
         {/* Inner preview shape */}
         <div className="relative flex items-center justify-center" style={{ width: 32, height: 32 }}>
           {decor && (
-            <svg width={32} height={32} viewBox="0 0 40 40" className="drop-shadow-md">
-              <path
-                d={decor.svgPath}
-                fill={decor.color}
-                opacity={0.9}
-                transform={`translate(8, 6)`}
-              />
-            </svg>
+            <DecorAssetVisual type={assetType ?? ""} className="w-8 h-8 drop-shadow-md" />
           )}
           {building && (
             <svg width={32} height={32} viewBox="0 0 40 40" className="drop-shadow-md">
@@ -185,7 +179,7 @@ function DragOverlay({
 }
 
 export function Canvas({
-  campus, tool, layer, selected, multiSelected, rubberBand, activeTools, drawingPath, snapGrid,
+  campus, tool, layer, selected, multiSelected, rubberBand, drawingPath, snapGrid,
   zoom, pan, svgRef, containerRef, cursor,
   buildingDrag, guides, cursorPos, overlappingBuildings,
   onCanvasDown, onCanvasMove, onCanvasUp, onCanvasLeave, onCanvasDblClick,
@@ -202,7 +196,18 @@ export function Canvas({
   const markers = campus.markers;
   const paths = campus.paths;
   const decorAssets = campus.decorAssets ?? [];
-  const hint = activeTools.find((t) => t.id === tool)?.hint ?? "";
+
+  // Normalized canvas dimensions: prefer the explicit props (CampusEditor
+  // passes its safe/normalized dims) so a transiently-unset campus can never
+  // render a degenerate viewBox or collapse pointer conversion toward (0,0).
+  const cw = (canvasW ?? campus.canvasW) || 900;
+  const ch = (canvasH ?? campus.canvasH) || 680;
+
+  // ── ONE cross-type visual stack for buildings + decorative assets ──
+  // Document order == stacking order, so a bench can sit in front of part of a
+  // building and a tree behind it (B2 cross-type layer ordering). Markers,
+  // paths, nav/event objects stay in their own fixed layers.
+  const stackedOutdoor = mergeOutdoorStack(buildings, decorAssets);
 
   // ── Drag-and-drop state ──
   const [dragOver, setDragOver] = useState<{
@@ -229,16 +234,14 @@ export function Canvas({
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
 
-    // Convert screen coords to canvas coords
+    // Convert screen coords to canvas coords — the SAME shared, letterbox-aware
+    // path every other editor interaction uses (no independent formula here).
     const svg = svgRef.current;
     if (!svg) return;
     const svgRect = svg.getBoundingClientRect();
-    const cw = campus.canvasW || 900;
-    const ch = campus.canvasH || 680;
-    const scaleX = cw / svgRect.width;
-    const scaleY = ch / svgRect.height;
-    const canvasX = Math.round((e.clientX - svgRect.left) * scaleX);
-    const canvasY = Math.round((e.clientY - svgRect.top) * scaleY);
+    const pt = screenToWorld(e.clientX, e.clientY, svgRect, cw, ch, pan, zoom);
+    const canvasX = Math.round(pt.x);
+    const canvasY = Math.round(pt.y);
 
     // Check if position is valid (inside canvas bounds, not overlapping)
     const inBounds = canvasX >= 0 && canvasY >= 0 && canvasX <= cw && canvasY <= ch;
@@ -268,7 +271,7 @@ export function Canvas({
       label: dragLabelRef.current,
       type: dragTypeRef.current,
     });
-  }, [campus.canvasW, campus.canvasH, svgRef, containerRef]);
+  }, [cw, ch, pan, zoom, svgRef, containerRef]);
 
   const handleDragEnter = useCallback((e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
@@ -326,16 +329,14 @@ export function Canvas({
     setDragOver(null);
     dragCounterRef.current = 0;
 
-    // Convert screen coords to canvas coords
+    // Convert screen coords to canvas coords — same shared conversion as all
+    // other tools (letterbox-aware, zoom/pan-aware).
     const svg = svgRef.current;
     if (!svg) return;
     const rect = svg.getBoundingClientRect();
-    const cw = campus.canvasW || 900;
-    const ch = campus.canvasH || 680;
-    const scaleX = cw / rect.width;
-    const scaleY = ch / rect.height;
-    const canvasX = Math.round((e.clientX - rect.left) * scaleX);
-    const canvasY = Math.round((e.clientY - rect.top) * scaleY);
+    const pt = screenToWorld(e.clientX, e.clientY, rect, cw, ch, pan, zoom);
+    const canvasX = Math.round(pt.x);
+    const canvasY = Math.round(pt.y);
 
     // Clamp to canvas bounds
     const clampedX = Math.max(0, Math.min(cw, canvasX));
@@ -361,7 +362,7 @@ export function Canvas({
     } catch {
       // Ignore invalid data
     }
-  }, [campus.canvasW, campus.canvasH, svgRef, onDropAsset, onDropBuilding]);
+  }, [cw, ch, pan, zoom, svgRef, onDropAsset, onDropBuilding]);
 
   // Cleanup drag counter on unmount
   useEffect(() => {
@@ -399,7 +400,7 @@ export function Canvas({
       {/* SVG Canvas */}
       <svg
         ref={svgRef}
-        viewBox={`0 0 ${campus.canvasW} ${campus.canvasH}`}
+        viewBox={`0 0 ${cw} ${ch}`}
         className="w-full h-full"
         style={{ cursor, userSelect: "none" }}
         onMouseDown={onCanvasDown}
@@ -419,47 +420,35 @@ export function Canvas({
         </defs>
         <g transform={`translate(${pan.x},${pan.y}) scale(${zoom})`}>
           {/* Canvas background with subtle grid */}
-          <rect data-bg="true" width={campus.canvasW} height={campus.canvasH} fill={(campus as unknown as { canvasColor?: string }).canvasColor ?? "#f5f3ef"} />
-          <rect data-bg="true" width={campus.canvasW} height={campus.canvasH} fill="url(#dotPattern)" opacity={0.3} />
+          <rect data-bg="true" width={cw} height={ch} fill={(campus as unknown as { canvasColor?: string }).canvasColor ?? "#f5f3ef"} />
+          <rect data-bg="true" width={cw} height={ch} fill="url(#dotPattern)" opacity={0.3} />
 
-          {/* Empty state — shown when no buildings exist on campus layer */}
+          {/* Empty state — compact contextual prompt, not a tutorial */}
           {layer === "campus" && buildings.length === 0 && (
-            <g opacity={0.6}>
-              <text x={campus.canvasW / 2} y={campus.canvasH / 2 - 30} textAnchor="middle" fontSize={16} fontWeight="800" fill="var(--primary)" className="pointer-events-none select-none">Start Building Your Campus</text>
-              <text x={campus.canvasW / 2} y={campus.canvasH / 2 - 10} textAnchor="middle" fontSize={10} fill="#6b7280" className="pointer-events-none select-none">Select a building type from the left panel, then click here to place it.</text>
-              <text x={campus.canvasW / 2} y={campus.canvasH / 2 + 6} textAnchor="middle" fontSize={9} fill="#9ca3af" className="pointer-events-none select-none">Or use the Building tool (B) + drag to draw a custom footprint.</text>
-              {/* Visual guide — 3 steps */}
-              <g transform={`translate(${campus.canvasW / 2 - 120}, ${campus.canvasH / 2 + 24})`}>
-                {["1. Place Building", "2. Add Floors", "3. Design Rooms"].map((label, i) => (
-                  <g key={i} transform={`translate(${i * 90}, 0)`}>
-                    <rect x={0} y={0} width={80} height={22} rx={6} fill="var(--primary)" fillOpacity={0.08} stroke="var(--primary)" strokeWidth={1} strokeOpacity={0.2} />
-                    <text x={40} y={14} textAnchor="middle" fontSize={8} fontWeight="700" fill="var(--primary)" className="pointer-events-none select-none">{label}</text>
-                    {i < 2 && <text x={85} y={14} textAnchor="middle" fontSize={10} fill="#9ca3af" className="pointer-events-none select-none">→</text>}
-                  </g>
-                ))}
-              </g>
-              <text x={campus.canvasW / 2} y={campus.canvasH / 2 + 62} textAnchor="middle" fontSize={8} fill="#d1d5db" className="pointer-events-none select-none">Double-click a floor in the hierarchy panel to open its floor plan editor</text>
+            <g opacity={0.5}>
+              <text x={cw / 2} y={ch / 2 - 20} textAnchor="middle" fontSize={15} fontWeight="800" fill="var(--primary)" className="pointer-events-none select-none">Start Building Your Campus</text>
+              <text x={cw / 2} y={ch / 2} textAnchor="middle" fontSize={10} fill="#6b7280" className="pointer-events-none select-none">Select a building type or asset from the left panel and place it here.</text>
             </g>
           )}
 
           {/* All SVG content (unchanged from original) */}
           {/* Navigation empty state */}
           {layer === "navigation" && (campus.navNodes ?? []).length === 0 && (
-            <g opacity={0.55}>
-              <text x={campus.canvasW / 2} y={campus.canvasH / 2 - 20} textAnchor="middle" fontSize={14} fontWeight="800" fill="#16a34a" className="pointer-events-none select-none">Build the Walking Network</text>
-              <text x={campus.canvasW / 2} y={campus.canvasH / 2 + 2} textAnchor="middle" fontSize={10} fill="#6b7280" className="pointer-events-none select-none">Select Add Waypoint, click to place dots, then use Connect to link them.</text>
+            <g opacity={0.5}>
+              <text x={cw / 2} y={ch / 2 - 20} textAnchor="middle" fontSize={14} fontWeight="800" fill="#16a34a" className="pointer-events-none select-none">Build the Walking Network</text>
+              <text x={cw / 2} y={ch / 2} textAnchor="middle" fontSize={10} fill="#6b7280" className="pointer-events-none select-none">Select Add Waypoint, click to place dots, then use Connect to link them.</text>
             </g>
           )}
 
           {/* Major grid lines */}
           <g opacity={0.12}>
-            {Array.from({ length: Math.ceil(campus.canvasW / ((campus.gridSize ?? 20) * 4)) }, (_, i) => (
-              <line key={`v${i}`} x1={i * (campus.gridSize ?? 20) * 4} y1={0} x2={i * (campus.gridSize ?? 20) * 4} y2={campus.canvasH} stroke="rgba(14,42,110,0.2)" strokeWidth={0.5} />
+            {Array.from({ length: Math.ceil(cw / ((campus.gridSize ?? 20) * 4)) }, (_, i) => (
+              <line key={`v${i}`} x1={i * (campus.gridSize ?? 20) * 4} y1={0} x2={i * (campus.gridSize ?? 20) * 4} y2={ch} stroke="rgba(14,42,110,0.2)" strokeWidth={0.5} />
             ))}
           </g>
           <g opacity={0.12}>
-            {Array.from({ length: Math.ceil(campus.canvasH / ((campus.gridSize ?? 20) * 4)) }, (_, i) => (
-              <line key={`h${i}`} x1={0} y1={i * (campus.gridSize ?? 20) * 4} x2={campus.canvasW} y2={i * (campus.gridSize ?? 20) * 4} stroke="rgba(14,42,110,0.2)" strokeWidth={0.5} />
+            {Array.from({ length: Math.ceil(ch / ((campus.gridSize ?? 20) * 4)) }, (_, i) => (
+              <line key={`h${i}`} x1={0} y1={i * (campus.gridSize ?? 20) * 4} x2={cw} y2={i * (campus.gridSize ?? 20) * 4} stroke="rgba(14,42,110,0.2)" strokeWidth={0.5} />
             ))}
           </g>
 
@@ -471,7 +460,7 @@ export function Canvas({
           {layer === "navigation" &&
             buildings.filter((b) => shouldDrawNavConnector(b.id, campus.navNodes ?? [], b.entranceNodeId)).map((b) => (
               <g key={`nav-${b.id}`} opacity={0.65}>
-                <line x1={b.x + b.width / 2} y1={b.y + b.height} x2={b.x + b.width / 2} y2={campus.canvasH * 0.9} stroke="#16a34a" strokeWidth={3} strokeDasharray="8 4" strokeLinecap="round" />
+                <line x1={b.x + b.width / 2} y1={b.y + b.height} x2={b.x + b.width / 2} y2={ch * 0.9} stroke="#16a34a" strokeWidth={3} strokeDasharray="8 4" strokeLinecap="round" />
                 <circle cx={b.x + b.width / 2} cy={b.y + b.height + 6} r={5} fill="#16a34a" />
               </g>
             ))}
@@ -565,17 +554,17 @@ export function Canvas({
           {guides && guides.map((g, i) => (
             <g key={`g${i}`}>
               {g.type === "v" ? (
-                <line x1={g.pos} y1={0} x2={g.pos} y2={campus.canvasH} stroke="var(--accent)" strokeWidth={8} opacity={0.15} />
+                <line x1={g.pos} y1={0} x2={g.pos} y2={ch} stroke="var(--accent)" strokeWidth={8} opacity={0.15} />
               ) : (
-                <line x1={0} y1={g.pos} x2={campus.canvasW} y2={g.pos} stroke="var(--accent)" strokeWidth={8} opacity={0.15} />
+                <line x1={0} y1={g.pos} x2={cw} y2={g.pos} stroke="var(--accent)" strokeWidth={8} opacity={0.15} />
               )}
               {g.type === "v" ? (
-                <line x1={g.pos} y1={0} x2={g.pos} y2={campus.canvasH} stroke="var(--accent)" strokeWidth={2} strokeDasharray="5 3" opacity={0.9} />
+                <line x1={g.pos} y1={0} x2={g.pos} y2={ch} stroke="var(--accent)" strokeWidth={2} strokeDasharray="5 3" opacity={0.9} />
               ) : (
-                <line x1={0} y1={g.pos} x2={campus.canvasW} y2={g.pos} stroke="var(--accent)" strokeWidth={2} strokeDasharray="5 3" opacity={0.9} />
+                <line x1={0} y1={g.pos} x2={cw} y2={g.pos} stroke="var(--accent)" strokeWidth={2} strokeDasharray="5 3" opacity={0.9} />
               )}
-              <rect x={g.type === "v" ? g.pos - 16 : campus.canvasW - 36} y={g.type === "v" ? 6 : g.pos - 7} width={32} height={14} rx={3} fill="var(--accent)" fillOpacity={0.85} />
-              <text x={g.type === "v" ? g.pos : campus.canvasW - 20} y={g.type === "v" ? 15 : g.pos + 4} textAnchor="middle" fill="white" fontSize={8} fontWeight="800" className="pointer-events-none select-none">{g.pos}</text>
+              <rect x={g.type === "v" ? g.pos - 16 : cw - 36} y={g.type === "v" ? 6 : g.pos - 7} width={32} height={14} rx={3} fill="var(--accent)" fillOpacity={0.85} />
+              <text x={g.type === "v" ? g.pos : cw - 20} y={g.type === "v" ? 15 : g.pos + 4} textAnchor="middle" fill="white" fontSize={8} fontWeight="800" className="pointer-events-none select-none">{g.pos}</text>
             </g>
           ))}
 
@@ -596,7 +585,7 @@ export function Canvas({
           {buildingDrag && (() => {
             const r = computeBuildingPlacement(
               buildingDrag.sx, buildingDrag.sy, buildingDrag.cx, buildingDrag.cy,
-              campus.canvasW, campus.canvasH
+              cw, ch
             );
             return (
               <g>
@@ -621,9 +610,11 @@ export function Canvas({
             </g>
           )}
 
-          {/* Buildings */}
-          {buildings.map((b) => {
-            const isSel = selected?.type === "building" && selected.id === b.id;
+          {/* Buildings + decorative assets — ONE cross-type visual stack */}
+          {stackedOutdoor.map((entry) => {
+            if (entry.kind === "building") {
+              const b = entry.item as CampusBuilding;
+              const isSel = selected?.type === "building" && selected.id === b.id;
             const isMultiSel = multiSelected.includes(b.id);
             const isInvalid = invalidBuildings?.has(b.id) ?? false;
             const isOverlapping = overlappingBuildings?.has(b.id) ?? false;
@@ -633,10 +624,9 @@ export function Canvas({
             const isVisible = b.visible ?? true;
             const isLocked = b.locked ?? false;
             const opacity = b.opacity ?? 1;
-
-            if (!isVisible && !isSel) return null;
+            const editorOpacity = isVisible ? opacity : Math.min(opacity, isSel || isMultiSel ? 0.35 : 0.28);
             return (
-              <g key={b.id} onMouseDown={(e) => { if (isLocked) return; onItemDown(e, "building", b.id, b.x, b.y); }} onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); if (isLocked) return; onItemContextMenu?.(e, "building", b.id); }} onDoubleClick={(e) => { if (isLocked) return; e.stopPropagation(); onBuildingDoubleClick?.(b.id); }} style={{ cursor: isLocked ? "default" : tool === "select" ? "move" : cursor, opacity }}>
+              <g key={b.id} data-hidden={isVisible ? undefined : "true"} onMouseDown={(e) => { if (isLocked) return; onItemDown(e, "building", b.id, b.x, b.y); }} onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); if (isLocked) return; onItemContextMenu?.(e, "building", b.id); }} onDoubleClick={(e) => { if (isLocked) return; e.stopPropagation(); onBuildingDoubleClick?.(b.id); }} style={{ cursor: isLocked ? "default" : tool === "select" ? "move" : cursor, opacity: editorOpacity }}>
                 {/* ── Rotated group: shadow, outline, handles, overlap borders, and body all rotate together ── */}
                 <g transform={rot !== 0 ? `rotate(${rot}, ${cx}, ${cy})` : ''}>
                   {/* Shadow (rotated with building so it follows the visual) */}
@@ -655,6 +645,14 @@ export function Canvas({
                   {/* Building body */}
                   <rect x={b.x} y={b.y} width={b.width} height={b.height} rx={8} fill={b.color} stroke={isSel ? "var(--accent)" : "rgba(255,255,255,0.5)"} strokeWidth={isSel ? 2.5 : 1.5} opacity={0.92} />
                   <rect x={b.x} y={b.y} width={b.width} height={7} rx={8} fill="rgba(0,0,0,0.12)" />
+                  {!isVisible && (
+                    <g className="pointer-events-none select-none" opacity={0.95}>
+                      <rect x={b.x + 5} y={b.y + 5} width={18} height={14} rx={4} fill="var(--card)" stroke="var(--border)" strokeWidth={1} />
+                      <path d={`M${b.x + 8} ${b.y + 12} Q${b.x + 14} ${b.y + 7} ${b.x + 20} ${b.y + 12} Q${b.x + 14} ${b.y + 17} ${b.x + 8} ${b.y + 12}Z`} fill="none" stroke="var(--muted-foreground)" strokeWidth={1.2} />
+                      <circle cx={b.x + 14} cy={b.y + 12} r={2} fill="var(--muted-foreground)" />
+                      <line x1={b.x + 8} y1={b.y + 17} x2={b.x + 21} y2={b.y + 6} stroke="var(--muted-foreground)" strokeWidth={1.5} strokeLinecap="round" />
+                    </g>
+                  )}
                   <text x={cx} y={b.y + b.height / 2 - 8} textAnchor="middle" fill="white" fontSize={11} fontWeight="800" className="pointer-events-none select-none">{b.code}</text>
                   {b.floors.length > 0 && <text x={cx} y={b.y + b.height / 2 + 4} textAnchor="middle" fill="rgba(255,255,255,0.7)" fontSize={7} className="pointer-events-none select-none">{b.floors.length}F</text>}
                   {isLocked && (
@@ -663,20 +661,10 @@ export function Canvas({
                       <text x={b.x + b.width - 10} y={b.y + 12} textAnchor="middle" fill="#92400e" fontSize={8} fontWeight="900" className="pointer-events-none select-none">🔒</text>
                     </g>
                   )}
-                  {isOverlapping && (
-                    <g>
-                      <rect x={b.x + b.width - 18} y={b.y - 14} width={32} height={16} rx={4} fill="#dc2626" opacity={0.9} />
-                      <text x={b.x + b.width - 2} y={b.y - 3} textAnchor="middle" fill="white" fontSize={7} fontWeight="900" className="pointer-events-none select-none">OVERLAP</text>
-                    </g>
-                  )}
                   {isInvalid && !isOverlapping && (
                     <>
                       <rect x={b.x - 5} y={b.y - 5} width={b.width + 10} height={b.height + 10} rx={10} fill="none" stroke="#dc2626" strokeWidth={2.5} strokeDasharray="8 4" opacity={0.85} className="animate-validation-pulse" />
                       <rect x={b.x - 7} y={b.y - 7} width={b.width + 14} height={b.height + 14} rx={12} fill="none" stroke="#dc2626" strokeWidth={1} strokeDasharray="4 6" opacity={0.35} />
-                      <g>
-                        <rect x={b.x + b.width - 16} y={b.y - 14} width={30} height={16} rx={4} fill="#dc2626" opacity={0.9} />
-                        <text x={b.x + b.width - 1} y={b.y - 3} textAnchor="middle" fill="white" fontSize={8} fontWeight="900" className="pointer-events-none select-none">⚠</text>
-                      </g>
                     </>
                   )}
                   {/* Single selection outlines + resize handles — rendered ABOVE the body so the rotation-aware resize cursors are visible on hover (rotated with building) */}
@@ -726,6 +714,23 @@ export function Canvas({
                       />
                       <path d={`M${cx - 2.5} ${b.y - 34} Q${cx} ${b.y - 37} ${cx + 2.5} ${b.y - 34}`}
                         fill="none" stroke="white" strokeWidth={1.5} strokeLinecap="round" />
+                    </g>
+                  )}
+                  {/* Issue/warning badges — rendered AFTER the selection outline and
+                      resize/rotation handles so the selection overlay never covers
+                      them. This is an editor-overlay z-layer: it is NOT affected by
+                      Bring Forward / Send Backward (which only stack buildings and
+                      decor assets). */}
+                  {isOverlapping && (
+                    <g className="pointer-events-none select-none">
+                      <rect x={b.x + b.width - 18} y={b.y - 14} width={32} height={16} rx={4} fill="#dc2626" opacity={0.95} />
+                      <text x={b.x + b.width - 2} y={b.y - 3} textAnchor="middle" fill="white" fontSize={7} fontWeight="900">OVERLAP</text>
+                    </g>
+                  )}
+                  {isInvalid && !isOverlapping && (
+                    <g className="pointer-events-none select-none">
+                      <rect x={b.x + b.width - 16} y={b.y - 14} width={30} height={16} rx={4} fill="#dc2626" opacity={0.95} />
+                      <text x={b.x + b.width - 1} y={b.y - 3} textAnchor="middle" fill="white" fontSize={8} fontWeight="900">⚠</text>
                     </g>
                   )}
                 </g>
@@ -780,21 +785,22 @@ export function Canvas({
                 })()}
               </g>
             );
-          })}
-
-          {/* Decorative assets */}
-          {decorAssets.map((da) => {
+            }
+            const da = entry.item as CampusDecorAsset;
             const template = DECOR_ASSET_MAP[da.type];
             if (!template) return null;
-            const s = (da.scale ?? 1) * 3;
+            const s = decorRenderScale(da.scale);
             const rot = da.rotation ?? 0;
             const isVisible = da.visible ?? true;
             const isSel = selected?.type === "decorAsset" && selected.id === da.id;
-            if (!isVisible && !isSel) return null;
+            const isMultiSel = multiSelected.includes(da.id);
+            const editorOpacity = isVisible ? (isSel ? 1 : 0.9) : (isSel || isMultiSel ? 0.35 : 0.28);
 
             // World-space half extents (asset center is at da.x, da.y)
-            const hw = (template.defaultWidth / 2) * s;
-            const hh = (template.defaultHeight / 2) * s;
+            const { width: worldW, height: worldH } = decorWorldSize(template, da.scale);
+            const outline = decorSelectionOutlineBox(template, da.scale);
+            const hw = worldW / 2;
+            const hh = worldH / 2;
             const rotRad = (rot * Math.PI) / 180;
             const cosR = Math.cos(rotRad);
             const sinR = Math.sin(rotRad);
@@ -810,20 +816,57 @@ export function Canvas({
 
             return (
               <g key={da.id}
-                opacity={isSel ? 1 : 0.9}
+                data-decor-type={da.type}
+                data-hidden={isVisible ? undefined : "true"}
+                opacity={editorOpacity}
                 style={{ cursor: tool === "select" ? "move" : "default" }}
                 onMouseDown={(e) => { if (tool === "select") onItemDown(e, "decorAsset", da.id, da.x, da.y); }}
+                onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onItemContextMenu?.(e, "decorAsset", da.id); }}
               >
                 {/* Body — transform group (rotates & scales with the asset) */}
+                <rect
+                  data-testid="decor-hitbox"
+                  x={da.x - outline.width / 2}
+                  y={da.y - outline.height / 2}
+                  width={outline.width}
+                  height={outline.height}
+                  rx={outline.rx}
+                  fill="transparent"
+                  stroke="none"
+                  transform={`rotate(${rot}, ${da.x}, ${da.y})`}
+                />
+                {(isMultiSel || isSel) && (
+                  <rect
+                    data-testid="decor-selection-outline"
+                    x={da.x - outline.width / 2}
+                    y={da.y - outline.height / 2}
+                    width={outline.width}
+                    height={outline.height}
+                    rx={outline.rx}
+                    fill="none"
+                    stroke={isSel ? "var(--accent)" : "var(--primary)"}
+                    strokeWidth={isSel ? 2 : 1.5}
+                    strokeDasharray="4 3"
+                    opacity={isSel ? 0.8 : 0.65}
+                    transform={`rotate(${rot}, ${da.x}, ${da.y})`}
+                  />
+                )}
                 <g transform={`translate(${da.x},${da.y}) rotate(${rot}) scale(${s})`}>
-                  {isSel && (
-                    <circle cx={0} cy={0} r={template.defaultWidth * 0.8} fill="none" stroke="var(--accent)" strokeWidth={2} strokeDasharray="4 3" opacity={0.8} />
-                  )}
-                  <path d={template.svgPath} fill={template.color} transform={`translate(-${template.defaultWidth / 2},-${template.defaultHeight / 2})`} />
+                  <g transform={`translate(-${template.defaultWidth / 2},-${template.defaultHeight / 2})`}>
+                    <DecorAssetArt descriptor={template} />
+                  </g>
                 </g>
 
                 {/* Selection handles — world space, rotation-aware cursors (not scaled with asset).
                     Only shown in select tool so an erase/other tool can click the asset directly. */}
+                {!isVisible && (
+                  <g className="pointer-events-none select-none" opacity={0.95}>
+                    <rect x={aabb.x + 4} y={aabb.y + 4} width={18} height={14} rx={4} fill="var(--card)" stroke="var(--border)" strokeWidth={1} />
+                    <path d={`M${aabb.x + 7} ${aabb.y + 11} Q${aabb.x + 13} ${aabb.y + 6} ${aabb.x + 19} ${aabb.y + 11} Q${aabb.x + 13} ${aabb.y + 16} ${aabb.x + 7} ${aabb.y + 11}Z`} fill="none" stroke="var(--muted-foreground)" strokeWidth={1.2} />
+                    <circle cx={aabb.x + 13} cy={aabb.y + 11} r={2} fill="var(--muted-foreground)" />
+                    <line x1={aabb.x + 7} y1={aabb.y + 16} x2={aabb.x + 20} y2={aabb.y + 5} stroke="var(--muted-foreground)" strokeWidth={1.5} strokeLinecap="round" />
+                  </g>
+                )}
                 {isSel && tool === "select" && (
                   <>
                     {/* Rotation handle — sits above the rotated asset */}
@@ -873,6 +916,13 @@ export function Canvas({
                       </g>
                     )}
                   </>
+                )}
+
+                {/* Custom name label (B2 Phase 3) — shown under the asset when named.
+                    During an active resize the scale badge occupies +6..+24 below the
+                    asset, so the label drops lower to avoid overlapping it. */}
+                {da.name && (
+                  <text x={visCx} y={aabb.y + aabb.height + (decorResizingId === da.id ? 34 : 14)} textAnchor="middle" fontSize={9} fontWeight={600} fill="var(--muted-foreground)" className="pointer-events-none select-none">{da.name}</text>
                 )}
               </g>
             );
@@ -935,11 +985,6 @@ export function Canvas({
               X:{cursorPos.x} Y:{cursorPos.y}
             </div>
           )}
-        </div>
-        <div className="flex-1 text-center px-4">
-          <span className="text-[11px] px-3 py-1 rounded-full border border-border/60 font-medium" style={{ background: "color-mix(in srgb,var(--card) 85%,transparent)", backdropFilter: "blur(8px)", color: "var(--muted-foreground)", fontFamily: "var(--font-body)" }}>
-            {drawingPath.length > 0 ? `${drawingPath.length} points - double-click to finish` : hint}
-          </span>
         </div>
       </motion.div>
     </div>
