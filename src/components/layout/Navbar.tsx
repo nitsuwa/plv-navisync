@@ -98,7 +98,7 @@ export function Navbar() {
               >
                 PLV <span style={{ color: showWhiteText ? "rgba(255,255,255,0.7)" : undefined }}>NaviSync</span>
               </span>
-              <span className="text-[8px] font-bold text-accent tracking-widest uppercase leading-none mt-0.5 block hidden sm:block"
+              <span className="text-[9px] font-bold text-accent tracking-widest uppercase leading-none mt-0.5 block hidden sm:block"
                 style={{ color: showWhiteText ? "rgba(200,152,12,0.9)" : undefined, transition: "color 200ms ease" }}>
                 Smart Campus Navigator
               </span>

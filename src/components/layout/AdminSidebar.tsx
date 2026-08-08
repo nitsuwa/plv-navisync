@@ -122,7 +122,7 @@ export function AdminSidebar({ collapsed = false }: AdminSidebarProps) {
               style={{ fontFamily: "var(--font-sans)" }}>
               PLV NaviSync
             </span>
-            <span className="text-[9px] font-bold text-sidebar-primary tracking-widest uppercase whitespace-nowrap">
+            <span className="text-[10px] font-bold text-sidebar-primary tracking-widest uppercase whitespace-nowrap">
               Admin Portal
             </span>
           </div>
