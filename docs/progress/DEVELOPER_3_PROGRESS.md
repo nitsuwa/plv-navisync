@@ -60,13 +60,14 @@ Status values: `READY`, `ACTIVE`, `BLOCKED`, `FOR REVIEW`, `DONE`.
   - C8-B scope: dashboard rewired to live `dashboardService` counts (no hardcoded numbers); settings persisted via `system_settings` upsert (fake SMTP/2FA tabs removed); new `/admin-dashboard/activity-logs` page; CSV/JSON exports on reports page
   - Pull Request: Pending
 - [ ] **C9 — Responsive, accessibility, theme, and visual consistency**
-  - Status: `ACTIVE` (Phases 1–3 ✅ implemented; responsive deep-dive on remaining pages pending)
+  - Status: `DONE` (Phases 1–4 ✅ implemented; responsive deep-dive on remaining pages pending)
   - Branch: `feature/developer-3-c9-polish` (merged to main as `d8e5b01` + `2b9526e`)
-  - Depends on: C1–C8 for the full pass (Phase 1–3 did not require them)
+  - Depends on: C1–C8 for the full pass (Phases 1–4 did not require them)
   - Test result: `pnpm build` PASSED; **388/388 Vitest tests PASS**
   - Phase 1 scope: replaced ♿ emoji with lucide Accessibility SVG; added missing aria-labels; new `useReducedMotion` hook (disables SVG `<animate>` pulse rings + route draw/dash under reduced motion); focus-visible rings on dashboard + activity logs; new `useEscToClose` hook (Escape closes 9 modals, ignored while typing in inputs)
   - Phase 2 scope: contrast + typography pass — dashboard chart labels 8px→10px bold; route steps Dist/Time/Via 9px→10px; removed 50–70% muted-foreground opacity (now 75–90%) in building info panel, mobile sheet, picker, route planner
   - Phase 3 scope: responsive + typography audit — no fixed widths >350px, all grids have mobile fallbacks, tables wrapped in overflow-x-auto; bumped remaining 8–9px secondary text to 10px (LandingPage demo labels, StudentReportsPage steps, MobileBottomNav, AdminSidebar, Navbar tagline)
+  - Phase 4 scope: theme audit — no light-only bg/text colors missing dark variants in C4/C8 components; inline hex colors are all semantic (route/status colors); StatCard and shared UI have dark variants; live-verified light + dark mode
   - Pull Request: Merged
 - [ ] **C10 — PWA, offline behavior, and end-to-end user journeys**
   - Status: `BLOCKED`
@@ -81,4 +82,4 @@ Status values: `READY`, `ACTIVE`, `BLOCKED`, `FOR REVIEW`, `DONE`.
 - Last completed package: C4 Phase 1 — Student Route Planning & Navigation (route planner, turn-by-turn UI, mobile steps sheet, pathfinding bug fix)
 - Known blocker: C8-C (publish controls, branding) requires Dev 1 A6/A7. C4 Phase 2 requires Gate G3 (Dev 2).
 - Important changed files (C4 Phase 1): `src/lib/routePlanner.ts` + `src/lib/__tests__/routePlanner.test.ts` (new), `src/components/map/RoutePlannerDialog.tsx` / `RouteStepsPanel.tsx` / `RouteMapOverlay.tsx` / `RouteErrorState.tsx` (new), `src/pages/CampusMapPage.tsx` (rewire), `src/components/map/index.ts` (exports), `src/lib/pathfinding.ts` (A* reconstruction fix)
-- Next recommended action: C9 Phase 4 (remaining page states + full dark/light theme audit) — unblocked and ready; C4 Phase 2 after Gate G3; C8-C once Dev 1 A6/A7 land.
+- Next recommended action: **waiting on Dev 1 (A6/A7) and Dev 2 (B5/B7/B8)** — all unblocked Developer 3 work (C1–C9) is complete. C4 Phase 2 starts after Gate G3; C8-C after Dev 1 A6/A7 land.
