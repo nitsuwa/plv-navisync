@@ -320,17 +320,56 @@ Table reads (typed):
 
 ## 7. PACKAGE 4 — C8-C: Publish Controls, Branding, Remaining States (POST A6/A7)
 
-**Goal:** Campus publish/unpublish/archive controls on admin pages using the approved service; campus branding (logo/favicon/colors) persistence; last remaining C8 states.
+**Goal:** Campus publish/unpublish/archive controls on admin pages using the approved A6 service; campus branding (logo/favicon/colors) persistence; last remaining C8 states. **Integration-only** — we call the A6/A7 service methods, never raw queries.
 
 **Prerequisite:** Dev 1 A6 (publish orchestration) + A7 (ops contracts) merged. **Do not start before.** Until then, C8 is functionally complete for demo purposes using C8-A + C8-B.
 
-**Steps (post-gate, integration-only):**
-1. Campus publish/unpublish/archive controls on `AdminDashboardPage`/Map Builder entry: call the approved A6 service methods (`publish`, `unpublish`, `archive`) — no raw queries.
-2. Publish metadata in dashboard footer: version number, publisher, timestamp from the A6 version contract.
-3. Campus contact/branding (logo, favicon, approved colors): persist via A7/campus contract fields; consume in `Navbar`/`Footer`/`index.html` favicon where feasible.
-4. Report-image private access: verify `report-images` bucket policies (Dev 1 A1 storage) and load student photos in AdminReportsPage via signed URLs.
+### 7a. Current state (Aug 2026) — what C8-B already gives us
+- `AdminDashboardPage` shows `publishInfo` from `campusService.listCampuses()` ("Published: <name> · <updatedAt>" or "No published campus yet") — **display only, no action buttons**.
+- `AdminSettingsPage` has General (site name + map config) + Appearance (theme) persisted via `settingsService` over `system_settings`; **no logo/brand-color fields yet**.
+- `index.html` uses static favicons (`/icon-16x16.png` … `/icon-512x512.png`); `Navbar`/`Footer` use hardcoded PLV branding + `site_name` from `getPublicSettings`.
+- `campusService` already exposes `listCampuses`, `toEditorCampus` (lifecycle/publish status), `resolveActiveCampusId`. A6 will add the actual `publish`/`unpublish`/`archive` orchestration + version contract.
 
-**Definition of Done:** Admin actions reflect backend results truthfully; published campus state drives public map loading (C2/`usePublishedCampus`); dashboard shows real publish metadata.
+### 7b. Step 1 — Verify A6/A7 contract signatures (read-only, no code)
+1. After Dev 1 merges A6/A7, read the new service exports (e.g. `campusPublishService` or methods on `campusService`) and the `campus_versions` contract fields (version number, publisher, published_at).
+2. Confirm the exact method names (`publish(campusId)`, `unpublish(campusId)`, `archive(campusId)` or similar) and return shapes before writing any UI code.
+3. Note any new DB columns/bucket policies in `types/database.generated.ts` that C8-C consumes.
+
+### 7c. Step 2 — Publish/unpublish/archive controls (UI)
+**Files:** `src/pages/AdminDashboardPage.tsx` (publish card) + optional Map Builder entry (`AdminMapBuilderPage` — **Dev 2 owns it; ask before editing; if denied, keep controls on the dashboard only**).
+- Add a **Publish Status card** on the dashboard: current state (Draft / Published / Unpublished / Archived), the active campus name, and version metadata when published.
+- Buttons per state (calling the A6 methods + `logActivity`):
+  - Draft → **Publish** (primary)
+  - Published → **Unpublish** (with confirm dialog)
+  - Unpublished → **Publish** or **Archive**
+  - Archived → read-only badge (no resurrect button unless A6 supports it)
+- Loading states per action; toast on success/failure; refresh `publishInfo` + dashboard stats after each action.
+- Every action writes an `activity_logs` entry (entity type `campus_versions` / `campus`).
+
+### 7d. Step 3 — Real publish metadata in dashboard footer
+- Replace the static footer ("v2.1.0 · Last published") with the **A6 version contract**: version number, publisher name (from `profiles`), and `published_at` — only when a published version exists; otherwise show "—" (no fake dates).
+- If A6 exposes a "publish now" flow with validation handoff, surface any validation errors from the handoff (draft must pass validation before publish).
+
+### 7e. Step 4 — Branding persistence (logo, favicon, colors)
+**Files:** `src/pages/AdminSettingsPage.tsx` (form), `src/services/settingsService.ts` (keys), `src/components/layout/Navbar.tsx` + `Footer.tsx` (consume), `index.html` (favicon — static swap only if feasible).
+- Add to the General tab: **logo upload** (Storage bucket — confirm bucket name with Dev 1; fall back to keeping existing logo on failure), **brand color** (reuse existing `ColorPicker`), **favicon upload** (optional; static favicon swap documented in verification doc if too invasive).
+- Persist as `system_settings` keys (`logo_url`, `primary_color`, `favicon_url`) via `upsertSettings` — reuse the C8-B pattern.
+- Consume in `Navbar`/`Footer`: use `logo_url` when set (fallback to current logo), apply `primary_color` via CSS variable override when set.
+- Keep hardcoded PLV defaults as fallback when DB is empty (per team rule: no fake integration).
+
+### 7f. Step 5 — Report-image private access (signed URLs)
+- Verify `report-images` bucket RLS/policies (Dev 1 A1 storage).
+- In `AdminReportsPage` detail modal, load the student photo via **signed URL** from `reportService` (add a `getReportImageUrl(path)` helper that calls the storage signed-URL API) instead of the public URL — only when A7 contract confirms private access.
+- Graceful fallback: if signed URL fails, show a placeholder with a note (never broken image icon in a misleading way).
+
+### 7g. Step 6 — Tests + verification
+- Unit: `campusPublish`-adapter tests (if the service is ours — otherwise mock it), `settingsService` branding-key upsert tests, `reportService` signed-URL builder tests.
+- Manual (as Demo Administrator): publish → public `/map` now loads the published campus (C2/`usePublishedCampus`); unpublish → map shows fallback/empty state; archive → campus disappears from lists; branding changes appear in Navbar/Footer after refresh; report photos load via signed URLs.
+- Update `DEVELOPER_3_C8_VERIFICATION.md` + `DEVELOPER_3_PROGRESS.md` (C8 → DONE).
+
+**Out of scope (NOT ours):** `AdminUsersPage` (Dev 1 A3), Map Builder internals (Dev 2 B-series), DB migrations/RLS, `campus_versions` table schema (Dev 1 A6).
+
+**Definition of Done:** Admin actions reflect backend results truthfully; published campus state drives public map loading (C2/`usePublishedCampus`); dashboard shows real publish metadata; branding persisted via `system_settings`; report photos load via signed URLs; build + tests pass.
 
 ---
 
