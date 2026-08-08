@@ -8,7 +8,7 @@ import {
   Footprints, QrCode, Loader2, RefreshCw, AlertCircle,
 } from "lucide-react";
 
-import { useDebounce, usePublishedCampus, useCampusSearch, type SearchResult } from "../hooks";
+import { useDebounce, usePublishedCampus, useCampusSearch, useReducedMotion, type SearchResult } from "../hooks";
 import { MOCK_BUILDINGS as LEGACY_BUILDINGS } from "../data/mockData";
 import { FLOOR_PLANS as LEGACY_FLOOR_PLANS, type RoomType } from "../data/floorPlans";
 import type { Building } from "../types";
@@ -236,6 +236,7 @@ export function CampusMapPage() {
   useEffect(() => { floorViewRef.current = floorView; }, [floorView]);
 
   const [isLoading, setIsLoading] = useState(true);
+  const reducedMotion = useReducedMotion();
 
   // Simulate initial map load
   useEffect(() => {
@@ -1074,11 +1075,19 @@ const buildingFill = (id: string) =>
               {([[155,290,"#16a34a"],[414,373,"#16a34a"],[414,435,"#16a34a"]] as [number,number,string][]).map(([cx,cy,clr],i) => (
                 <g key={i}>
                   <circle cx={cx} cy={cy} r={12} fill="white" stroke={clr} strokeWidth={2.5} style={{ animation:"scale-in 0.3s ease both" }}/>
-                  <text x={cx} y={cy+4} textAnchor="middle" fill={clr} fontSize={12} fontWeight="900" className="select-none">♿</text>
-                  <circle cx={cx} cy={cy} r={12} fill="none" stroke={clr} strokeWidth={2} opacity={0.3}>
-                    <animate attributeName="r" from="12" to="20" dur="1.5s" repeatCount="indefinite"/>
-                    <animate attributeName="opacity" from="0.3" to="0" dur="1.5s" repeatCount="indefinite"/>
-                  </circle>
+                  <svg x={cx-8} y={cy-8} width={16} height={16} viewBox="0 0 24 24" fill="none" stroke={clr} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="select-none">
+                    <circle cx="16" cy="4" r="1"/>
+                    <path d="m18 19 1-7-6 1"/>
+                    <path d="m5 8 3-3 5.5 3-2.36 3.5"/>
+                    <path d="M4.24 14.5a5 5 0 0 0 6.88 6"/>
+                    <path d="M13.76 17.5a5 5 0 0 0-6.88-6"/>
+                  </svg>
+                  {!reducedMotion && (
+                    <circle cx={cx} cy={cy} r={12} fill="none" stroke={clr} strokeWidth={2} opacity={0.3}>
+                      <animate attributeName="r" from="12" to="20" dur="1.5s" repeatCount="indefinite"/>
+                      <animate attributeName="opacity" from="0.3" to="0" dur="1.5s" repeatCount="indefinite"/>
+                    </circle>
+                  )}
                 </g>
               ))}
               {/* Building entrance accessibility markers */}

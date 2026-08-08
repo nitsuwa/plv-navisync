@@ -5,6 +5,7 @@ import type { Building } from "../../types";
 import { cn } from "../../lib/utils";
 import { reportService } from "../../services/reportService";
 import { useToast } from "../../hooks/useToast";
+import { useEscToClose } from "../../hooks/useEscToClose";
 
 const ISSUE_TYPES = [
   "Broken Light",
@@ -22,6 +23,7 @@ interface ReportModalProps {
 }
 
 export function ReportModal({ building, onClose }: ReportModalProps) {
+  useEscToClose(onClose);
   const [issueType, setIssueType] = useState("");
   const [description, setDescription] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);

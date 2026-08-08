@@ -9,6 +9,7 @@ import { RouteErrorState } from "./RouteErrorState";
 import { cn } from "../../lib/utils";
 import type { PlannedRoute, RouteMode } from "../../lib/routePlanner";
 import { formatDistance, formatMinutes } from "../../lib/routePlanner";
+import { useEscToClose } from "../../hooks/useEscToClose";
 
 interface RoutePlannerDialogProps {
   from: Building | null;
@@ -39,6 +40,7 @@ export function RoutePlannerDialog({
   from, to, onFromChange, onToChange, buildings, mode, onModeChange,
   route, onClose, onClear, onFindRoute,
 }: RoutePlannerDialogProps) {
+  useEscToClose(onClose);
   const bothSet = Boolean(from && to);
   const canPlan = bothSet;
 

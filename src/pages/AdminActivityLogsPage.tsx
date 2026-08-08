@@ -101,7 +101,7 @@ export function AdminActivityLogsPage() {
           icon={History}
           title="Could not load activity logs"
           description={error}
-          action={<button onClick={refresh} className="inline-flex items-center gap-2 h-10 px-5 rounded-xl bg-primary text-primary-foreground text-sm font-bold hover:bg-primary/90 transition-all">Try Again</button>}
+          action={<button onClick={refresh} className="inline-flex items-center gap-2 h-10 px-5 rounded-xl bg-primary text-primary-foreground text-sm font-bold hover:bg-primary/90 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background">Try Again</button>}
         />
       </div>
     );
@@ -117,7 +117,7 @@ export function AdminActivityLogsPage() {
           </p>
         </div>
         <button onClick={refresh} disabled={isRefreshing}
-          className="flex items-center gap-1.5 h-9 w-9 rounded-xl text-xs font-bold border border-border bg-card text-muted-foreground hover:bg-accent hover:text-foreground transition-all justify-center disabled:opacity-50"
+          className="flex items-center gap-1.5 h-9 w-9 rounded-xl text-xs font-bold border border-border bg-card text-muted-foreground hover:bg-accent hover:text-foreground transition-all justify-center disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           aria-label="Refresh activity logs">
           <RefreshCw className={`h-3.5 w-3.5 ${isRefreshing ? "animate-spin text-primary" : ""}`} />
         </button>
@@ -129,7 +129,7 @@ export function AdminActivityLogsPage() {
         {ENTITY_TYPES.map((t) => (
           <button key={t.key || "all"} onClick={() => setFilter(t.key)}
             className={cn(
-              "shrink-0 px-3 py-1.5 rounded-xl text-xs font-bold transition-all active:scale-[0.97]",
+              "shrink-0 px-3 py-1.5 rounded-xl text-xs font-bold transition-all active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
               filter === t.key
                 ? "bg-primary text-primary-foreground shadow-sm"
                 : "bg-muted/60 text-muted-foreground hover:bg-muted-foreground/10"

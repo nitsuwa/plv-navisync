@@ -9,6 +9,7 @@ import { cn } from "../lib/utils";
 import { Link } from "react-router";
 import { ReportsSkeleton } from "../components/ui/PageSkeleton";
 import { useToast } from "../hooks/useToast";
+import { useEscToClose } from "../hooks/useEscToClose";
 import { EmptyState } from "../components/ui/EmptyState";
 import { Button } from "../components/ui/Button";
 import {
@@ -69,6 +70,7 @@ function ReportDetailModal({ report, onClose, onChanged }: {
   onClose: () => void;
   onChanged: () => void;
 }) {
+  useEscToClose(onClose);
   const cfg = STATUS_CONFIG[report.status as ReportStatus] ?? STATUS_CONFIG.pending;
   const Icon = cfg.icon;
   const toast = useToast();

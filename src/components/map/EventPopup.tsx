@@ -1,6 +1,7 @@
 import { X, CalendarDays, MapPin, Navigation } from "lucide-react";
 import { motion } from "motion/react";
 import { createPortal } from "react-dom";
+import { useEscToClose } from "../../hooks/useEscToClose";
 
 interface EventData {
   id: string;
@@ -21,6 +22,7 @@ interface EventPopupProps {
 }
 
 export function EventPopup({ event, onClose, onNavigate }: EventPopupProps) {
+  useEscToClose(onClose);
   // Portaled to body so this overlay clears PublicLayout's z-[1] stacking context
   // and stays above the z-50 mobile bottom navigation.
   return createPortal(

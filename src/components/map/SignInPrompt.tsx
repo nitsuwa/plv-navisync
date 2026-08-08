@@ -1,6 +1,7 @@
 import { LogIn, X } from "lucide-react";
 import { Link } from "react-router";
 import { createPortal } from "react-dom";
+import { useEscToClose } from "../../hooks/useEscToClose";
 
 interface SignInPromptProps {
   message: string;
@@ -8,6 +9,7 @@ interface SignInPromptProps {
 }
 
 export function SignInPrompt({ message, onClose }: SignInPromptProps) {
+  useEscToClose(onClose);
   // Portaled to body so this overlay clears PublicLayout's z-[1] stacking context
   // and stays above the z-50 mobile bottom navigation.
   return createPortal(

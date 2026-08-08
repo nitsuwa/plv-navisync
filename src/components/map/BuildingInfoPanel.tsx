@@ -7,6 +7,7 @@ import type { Building } from "../../types";
 import { cn } from "../../lib/utils";
 import { QRPlaceholder } from "./QRPlaceholder";
 import { useToast } from "../../hooks/useToast";
+import { useEscToClose } from "../../hooks/useEscToClose";
 import type { StudentAuthState } from "../../hooks/useStudentAuth";
 
 // ── Re-export shared types/constants ────────────────────────────────────────
@@ -46,6 +47,7 @@ export function BuildingInfoPanel({
   facilities, accessibility, route,
 }: BuildingInfoPanelProps) {
   const toast = useToast();
+  useEscToClose(onClose);
   const status = STATUS[selected.id] ?? "Open";
 
   return (

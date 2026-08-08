@@ -80,7 +80,7 @@ export function AdminDashboardPage() {
           title="Could not load dashboard"
           description={error}
           action={
-            <button onClick={load} className="inline-flex items-center gap-2 h-10 px-5 rounded-xl bg-primary text-primary-foreground text-sm font-bold hover:bg-primary/90 transition-all">
+            <button onClick={load} className="inline-flex items-center gap-2 h-10 px-5 rounded-xl bg-primary text-primary-foreground text-sm font-bold hover:bg-primary/90 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background">
               Try Again
             </button>
           }
@@ -193,7 +193,7 @@ export function AdminDashboardPage() {
                 {pendingReports.length}
               </span>
             </div>
-            <Link to="/admin-dashboard/reports" className="text-[11px] font-bold text-primary hover:underline">View all</Link>
+            <Link to="/admin-dashboard/reports" className="text-[11px] font-bold text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-sm">View all</Link>
           </div>
           <div className="flex-1 divide-y divide-border">
             {pendingReports.length > 0 ? (
@@ -201,7 +201,7 @@ export function AdminDashboardPage() {
                 <Link
                   key={i}
                   to="/admin-dashboard/reports"
-                  className="flex items-center gap-3 px-4 py-3 hover:bg-muted/40 active:scale-[0.97] transition-all group"
+                  className="flex items-center gap-3 px-4 py-3 hover:bg-muted/40 active:scale-[0.97] transition-all group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
                 >
                   <div className={cn(
                     "w-8 h-8 rounded-xl flex items-center justify-center shrink-0",
@@ -236,7 +236,7 @@ export function AdminDashboardPage() {
         >
           <div className="px-5 py-3 border-b border-border flex items-center gap-2">
             <h2 className="font-bold text-foreground text-sm flex-1">Recent Activity</h2>
-            <Link to="/admin-dashboard/activity-logs" className="flex items-center gap-1 text-[11px] font-bold text-primary hover:underline">
+            <Link to="/admin-dashboard/activity-logs" className="flex items-center gap-1 text-[11px] font-bold text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-sm">
               <History className="h-3 w-3" /> View all
             </Link>
           </div>
@@ -282,7 +282,7 @@ export function AdminDashboardPage() {
                 <Link
                   key={a.to}
                   to={a.to}
-                  className="group flex items-center gap-2.5 px-3 py-2.5 rounded-xl border border-border bg-muted/30 hover:bg-muted/60 hover:border-primary/20 active:scale-[0.97] transition-all duration-200"
+                  className="group flex items-center gap-2.5 px-3 py-2.5 rounded-xl border border-border bg-muted/30 hover:bg-muted/60 hover:border-primary/20 active:scale-[0.97] transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
                   <div className={`w-8 h-8 rounded-xl ${a.color} flex items-center justify-center shadow-sm shrink-0`}>
                     <Icon className="h-4 w-4 text-white" />

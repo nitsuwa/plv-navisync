@@ -1,5 +1,6 @@
 import type { Pt, RouteMode } from "../../lib/routePlanner";
 import { cn } from "../../lib/utils";
+import { useReducedMotion } from "../../hooks";
 
 interface RouteMapOverlayProps {
   points: Pt[];
@@ -13,6 +14,7 @@ interface RouteMapOverlayProps {
  * <svg> (the parent applies the viewBox transform).
  */
 export function RouteMapOverlay({ points, mode, fading = false }: RouteMapOverlayProps) {
+  const reducedMotion = useReducedMotion();
   if (points.length < 2) return null;
 
   const pathStr = points.map((p) => `${p.x},${p.y}`).join(" ");
@@ -20,6 +22,10 @@ export function RouteMapOverlay({ points, mode, fading = false }: RouteMapOverla
   const color = mode === "accessible" ? "#16a34a" : mode === "emergency" ? "#dc2626" : "#1e40af";
   const glowFilter = mode === "standard" ? "url(#route-glow)" : undefined;
   const pathId = "plv-route-path";
+  // When the user prefers reduced motion: skip the draw/dash/scale animations
+  // and the SVG <animate> pulse rings (CSS alone cannot stop <animate>).
+  const drawAnim = reducedMotion ? undefined : { animation: "draw-route 1.4s cubic-bezier(0.4,0,0.2,1) forwards" };
+  const antsAnim = reducedMotion ? undefined : { animation: "draw-route 1.4s 0.4s ease forwards, dash-flow 1.2s 1.8s linear infinite" };
 
   return (
     <g data-route-group className={cn("transition-opacity duration-300", fading && "opacity-0")}>
@@ -34,21 +40,23 @@ export function RouteMapOverlay({ points, mode, fading = false }: RouteMapOverla
       <polyline
         points={pathStr} fill="none" stroke={color} strokeWidth={8} strokeLinecap="round" strokeLinejoin="round"
         opacity={0.25} filter={glowFilter}
-        strokeDasharray="900" strokeDashoffset="900"
-        style={{ animation: "draw-route 1.4s cubic-bezier(0.4,0,0.2,1) forwards" }}
+        strokeDasharray="900" strokeDashoffset={reducedMotion ? 0 : 900}
+        style={drawAnim}
       />
       {/* Main animated route line */}
       <polyline
         points={pathStr} fill="none" stroke={color} strokeWidth={5} strokeLinecap="round" strokeLinejoin="round"
-        strokeDasharray="900" strokeDashoffset="900"
-        style={{ animation: "draw-route 1.4s cubic-bezier(0.4,0,0.2,1) forwards" }}
+        strokeDasharray="900" strokeDashoffset={reducedMotion ? 0 : 900}
+        style={drawAnim}
       />
       {/* Marching ants overlay */}
-      <polyline
-        points={pathStr} fill="none" stroke="rgba(255,255,255,0.6)" strokeWidth={2}
-        strokeLinecap="round" strokeLinejoin="round" strokeDasharray="8 14"
-        style={{ animation: "draw-route 1.4s 0.4s ease forwards, dash-flow 1.2s 1.8s linear infinite" }}
-      />
+      {!reducedMotion && (
+        <polyline
+          points={pathStr} fill="none" stroke="rgba(255,255,255,0.6)" strokeWidth={2}
+          strokeLinecap="round" strokeLinejoin="round" strokeDasharray="8 14"
+          style={antsAnim}
+        />
+      )}
 
       {/* Directional arrows along the route */}
       {points.slice(0, -1).map((p, i) => {
@@ -75,29 +83,33 @@ export function RouteMapOverlay({ points, mode, fading = false }: RouteMapOverla
       ))}
 
       {/* Start marker — green with flag */}
-      <g style={{ animation: "scale-in 0.4s 0.3s ease both" }}>
+      <g style={reducedMotion ? undefined : { animation: "scale-in 0.4s 0.3s ease both" }}>
         <circle cx={points[0].x} cy={points[0].y} r={14} fill="#16a34a" stroke="white" strokeWidth={3}
           style={{ filter: "drop-shadow(0 2px 6px rgba(22,163,74,0.4))" }} />
         <circle cx={points[0].x} cy={points[0].y} r={10} fill="none" stroke="rgba(255,255,255,0.5)" strokeWidth={1.5} />
         <text x={points[0].x} y={points[0].y + 4} textAnchor="middle" fill="white" fontSize={11} fontWeight="900" className="select-none">A</text>
-        {/* Pulse ring */}
-        <circle cx={points[0].x} cy={points[0].y} r={14} fill="none" stroke="#16a34a" strokeWidth={2} opacity={0.4}>
-          <animate attributeName="r" from="14" to="24" dur="2s" repeatCount="indefinite" />
-          <animate attributeName="opacity" from="0.4" to="0" dur="2s" repeatCount="indefinite" />
-        </circle>
+        {/* Pulse ring — disabled when reduced motion */}
+        {!reducedMotion && (
+          <circle cx={points[0].x} cy={points[0].y} r={14} fill="none" stroke="#16a34a" strokeWidth={2} opacity={0.4}>
+            <animate attributeName="r" from="14" to="24" dur="2s" repeatCount="indefinite" />
+            <animate attributeName="opacity" from="0.4" to="0" dur="2s" repeatCount="indefinite" />
+          </circle>
+        )}
       </g>
 
       {/* Destination marker — red pin with expanded pulse */}
-      <g style={{ animation: "scale-in 0.4s 0.5s ease both" }}>
+      <g style={reducedMotion ? undefined : { animation: "scale-in 0.4s 0.5s ease both" }}>
         <circle cx={points[points.length - 1].x} cy={points[points.length - 1].y} r={14} fill="#dc2626" stroke="white" strokeWidth={3}
           style={{ filter: "drop-shadow(0 2px 8px rgba(220,38,38,0.5))" }} />
         <circle cx={points[points.length - 1].x} cy={points[points.length - 1].y} r={10} fill="none" stroke="rgba(255,255,255,0.5)" strokeWidth={1.5} />
         <text x={points[points.length - 1].x} y={points[points.length - 1].y + 4} textAnchor="middle" fill="white" fontSize={11} fontWeight="900" className="select-none">B</text>
-        {/* Outer pulse ring */}
-        <circle cx={points[points.length - 1].x} cy={points[points.length - 1].y} r={14} fill="none" stroke="#dc2626" strokeWidth={2.5} opacity={0.5}>
-          <animate attributeName="r" from="14" to="32" dur="2.2s" repeatCount="indefinite" />
-          <animate attributeName="opacity" from="0.5" to="0" dur="2.2s" repeatCount="indefinite" />
-        </circle>
+        {/* Outer pulse ring — disabled when reduced motion */}
+        {!reducedMotion && (
+          <circle cx={points[points.length - 1].x} cy={points[points.length - 1].y} r={14} fill="none" stroke="#dc2626" strokeWidth={2.5} opacity={0.5}>
+            <animate attributeName="r" from="14" to="32" dur="2.2s" repeatCount="indefinite" />
+            <animate attributeName="opacity" from="0.5" to="0" dur="2.2s" repeatCount="indefinite" />
+          </circle>
+        )}
       </g>
     </g>
   );

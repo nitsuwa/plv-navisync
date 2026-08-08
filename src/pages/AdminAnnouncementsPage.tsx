@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from "motion/react";
 import { TablePageSkeleton } from "../components/ui/PageSkeleton";
 import { Plus, Search, Pencil, Trash2, X, Megaphone, Send, Archive, AlertCircle } from "lucide-react";
 import { useToast } from "../hooks/useToast";
+import { useEscToClose } from "../hooks/useEscToClose";
 import {
   announcementService,
   type ManagedAnnouncement,
@@ -57,8 +58,10 @@ export function AdminAnnouncementsPage() {
   const [search, setSearch] = useState("");
 
   const [showModal, setShowModal] = useState(false);
+  useEscToClose(() => setShowModal(false), showModal);
   const [editTarget, setEditTarget] = useState<ManagedAnnouncement | null>(null);
   const [archiveTarget, setArchiveTarget] = useState<ManagedAnnouncement | null>(null);
+  useEscToClose(() => setArchiveTarget(null), Boolean(archiveTarget));
 
   const [form, setForm] = useState<AnnouncementForm>(EMPTY_FORM);
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
