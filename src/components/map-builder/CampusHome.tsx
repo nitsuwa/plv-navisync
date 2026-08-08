@@ -131,6 +131,7 @@ function CampusMiniMap({ campus, className }: { campus: Campus; className?: stri
 
   return (
     <svg
+      data-testid="campus-mini-map"
       viewBox={`0 0 ${svgW} ${svgH}`}
       className={cn("w-full h-full", className)}
       preserveAspectRatio="xMidYMid meet"
@@ -813,6 +814,10 @@ export function CampusHome({
                 {activeVisible.map((campus, index) => {
               const rooms = totalRooms(campus);
               const floors = totalFloors(campus);
+              const hydratedBuildingCount = (campus.buildings ?? []).length;
+              const previewBuildingCount = campus.previewBuildingCount ?? hydratedBuildingCount;
+              const hasHydratedPreview = hydratedBuildingCount > 0;
+              const markerCount = campus.markers.length;
               return (
                 <motion.div
                   key={campus.id}
@@ -832,8 +837,15 @@ export function CampusHome({
                       />
                     ) : (
                       <div className="absolute inset-0 flex items-center justify-center p-3">
-                        {(campus.buildings ?? []).length > 0 ? (
+                        {hasHydratedPreview ? (
                           <CampusMiniMap campus={campus} className="max-h-full max-w-full" />
+                        ) : previewBuildingCount > 0 ? (
+                          <div className="flex flex-col items-center gap-1 text-muted-foreground/60">
+                            <Map className="h-8 w-8" />
+                            <span className="text-[9px] font-medium">
+                              {previewBuildingCount} building{previewBuildingCount !== 1 ? "s" : ""} mapped
+                            </span>
+                          </div>
                         ) : (
                           <div className="flex flex-col items-center gap-1 text-muted-foreground/40">
                             <Map className="h-8 w-8" />
@@ -941,28 +953,28 @@ export function CampusHome({
                     <div className="mt-auto">
                       {/* Stats bar */}
                       <div className="flex items-center gap-3 mt-3 pt-3 border-t border-border">
-                        <Tooltip content="Buildings">
-                          <span className="flex items-center gap-1 text-[10px] text-muted-foreground cursor-help">
+                        <Tooltip content={`Buildings: ${previewBuildingCount}`}>
+                          <span className="flex items-center gap-1 text-[10px] text-muted-foreground cursor-help" title={`Buildings: ${previewBuildingCount}`}>
                             <Building2 className="h-3 w-3 shrink-0" />
-                            <span className="font-semibold tabular-nums">{(campus.buildings ?? []).length}</span>
+                            <span className="font-semibold tabular-nums">{previewBuildingCount}</span>
                           </span>
                         </Tooltip>
-                        <Tooltip content="Floors">
-                          <span className="flex items-center gap-1 text-[10px] text-muted-foreground cursor-help">
+                        <Tooltip content={`Floors: ${floors}`}>
+                          <span className="flex items-center gap-1 text-[10px] text-muted-foreground cursor-help" title={`Floors: ${floors}`}>
                             <Layers className="h-3 w-3 shrink-0" />
                             <span className="font-semibold tabular-nums">{floors}</span>
                           </span>
                         </Tooltip>
-                        <Tooltip content="Rooms">
-                          <span className="flex items-center gap-1 text-[10px] text-muted-foreground cursor-help">
+                        <Tooltip content={`Rooms: ${rooms}`}>
+                          <span className="flex items-center gap-1 text-[10px] text-muted-foreground cursor-help" title={`Rooms: ${rooms}`}>
                             <DoorOpen className="h-3 w-3 shrink-0" />
                             <span className="font-semibold tabular-nums">{rooms}</span>
                           </span>
                         </Tooltip>
-                        <Tooltip content="Markers">
-                          <span className="flex items-center gap-1 text-[10px] text-muted-foreground cursor-help">
+                        <Tooltip content={`Markers: ${markerCount}`}>
+                          <span className="flex items-center gap-1 text-[10px] text-muted-foreground cursor-help" title={`Markers: ${markerCount}`}>
                             <MapPin className="h-3 w-3 shrink-0" />
-                            <span className="font-semibold tabular-nums">{campus.markers.length}</span>
+                            <span className="font-semibold tabular-nums">{markerCount}</span>
                           </span>
                         </Tooltip>
                         <div className="flex-1" />

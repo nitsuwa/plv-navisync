@@ -6,6 +6,7 @@
  */
 
 import type { SharedCampusData, SharedBuilding } from "../contexts/CampusDataContext";
+import { entranceDescription, entranceDisplayName } from "./buildingEntrances";
 
 function visibleBuildings(campus: SharedCampusData): SharedBuilding[] {
   return campus.buildings.filter((building) => (building as SharedBuilding & { visible?: boolean }).visible !== false);
@@ -167,14 +168,15 @@ export function locationsFromCampus(campus: SharedCampusData): CampusLocation[] 
       building_id: b.id,
     });
 
-    // Add entrance from building position
-    locations.push({
-      id: `campus-${b.id}-entrance`,
-      name: `${b.name} Entrance`,
-      type: "entrance",
-      description: `Main entrance of ${b.name}`,
-      building_id: b.id,
-    });
+    for (const [idx, entrance] of (b.entrances ?? []).entries()) {
+      locations.push({
+        id: `campus-${entrance.id}`,
+        name: entranceDisplayName(entrance, idx),
+        type: "entrance",
+        description: entranceDescription(entrance, b.name),
+        building_id: b.id,
+      });
+    }
 
     for (const f of b.floors || []) {
       for (const r of f.rooms || []) {

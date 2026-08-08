@@ -1,10 +1,11 @@
-import { useState, useEffect, useCallback, lazy, Suspense } from "react";
+import { useState, useEffect, useCallback, useRef, lazy, Suspense } from "react";
 import {
   X, Eye, EyeOff, Lock, Unlock, Info, Palette, Settings2,
   Route, Accessibility, Star, CheckCircle2, AlertTriangle,
   PaintBucket, Trash2, MapPin, Calendar, Plus, Minus, GripVertical,
   Layers, Copy,
   ChevronUp, ChevronDown, ChevronsUp, ChevronsDown,
+  DoorOpen,
 } from "lucide-react";
 import type { LayerOrderAction } from "../../lib/campusLayerOrder";
 import { normalizeRotation, clampDecorScale, DECOR_SCALE_MIN, DECOR_SCALE_MAX } from "../../lib/decorAsset";
@@ -14,10 +15,20 @@ import { cn } from "../../lib/utils";
 import { MARKER_STYLES } from "../../data/mapData";
 import { LAYERS, LAYER_TOOLS, DECOR_ASSET_MAP, DECOR_ASSET_TYPES, genId } from "./constants";
 import { Combobox } from "../ui/Combobox";
+import {
+  BUILDING_ENTRANCE_EDGE_LABELS,
+  BUILDING_ENTRANCE_TYPES,
+  entranceDisplayName,
+  entrancePurposeMeta,
+  entranceTypeLabel,
+  normalizeEntranceType,
+} from "../../lib/buildingEntrances";
 import type {
   CampusBuilding, CampusMarker, CampusSelection, EditorLayer,
   CampusRoute, NavigationNode, NavigationEdge, CampusEventOverlay,
   EventLocationRef, FloorPlan, CampusDecorAsset, DecorAssetType,
+  BuildingEntranceEdge, BuildingEntranceType,
+  CampusEntrance,
 } from "./types";
 
 const ColorPickerImpl = lazy(() => import("../ui/ColorPicker"));
@@ -46,6 +57,8 @@ const TABS: TabDef[] = [
 interface PropertiesPanelProps {
   selected: CampusSelection | null;
   selBldg: CampusBuilding | undefined;
+  selEntrance?: CampusEntrance | undefined;
+  selEntranceParent?: CampusBuilding | undefined;
   selMkr: CampusMarker | undefined;
   selDecorAsset?: CampusDecorAsset | undefined;
   /** All decorative assets — used to detect reorderable multi-selections. */
@@ -69,6 +82,10 @@ interface PropertiesPanelProps {
   onLayerOrder?: (action: LayerOrderAction) => void;
   // Individual item callbacks
   onUpdateBuilding: (id: string, changes: Partial<CampusBuilding>) => void;
+  onAddEntrance: (buildingId: string) => void;
+  onSelectEntrance: (buildingId: string, entranceId: string) => void;
+  onUpdateEntrance: (buildingId: string, entranceId: string, changes: Partial<CampusEntrance>) => void;
+  onDeleteEntrance: (buildingId: string, entranceId: string) => void;
   onUpdateMarker: (id: string, changes: Partial<CampusMarker>) => void;
   onUpdateRoute?: (id: string, changes: Partial<CampusRoute>) => void;
   onUpdateEventOverlay?: (id: string, changes: Partial<CampusEventOverlay>) => void;
@@ -120,14 +137,14 @@ function TabBar({ active, onChange }: { active: TabId; onChange: (t: TabId) => v
 }
 
 export function PropertiesPanel({
-  selected, selBldg, selMkr, selRoute,
+  selected, selBldg, selEntrance, selEntranceParent, selMkr, selRoute,
   selDecorAsset, allDecorAssets,
   selNavNode, selNavEdge, selEventOverlay, allNavNodes, allNavEdges,
   allBuildings,
   layer,
   multiSelected, multiSelectedBuildings, selectedOutdoorCount,
   onBatchUpdateBuildings, onBatchDeleteBuildings, onClearMultiSelect, onLayerOrder,
-  onUpdateBuilding, onUpdateMarker, onUpdateRoute,
+  onUpdateBuilding, onAddEntrance, onSelectEntrance, onUpdateEntrance, onDeleteEntrance, onUpdateMarker, onUpdateRoute,
   onUpdateEventOverlay,
   onDeleteBuilding, onDeleteMarker, onDeleteRoute,
   onDeleteEventOverlay,
@@ -170,7 +187,7 @@ export function PropertiesPanel({
         <span className="text-xs font-extrabold uppercase tracking-wide text-foreground" style={{ fontFamily: "var(--font-sans)" }}>
           {isMultiMode
             ? `Multi-Select (${selectedOutdoorCount})`
-            : selBldg ? "Building" : selMkr ? "Marker" : selDecorAsset ? "Decorative Asset" : selRoute ? "Route" : selected?.type === "navNode" ? "Waypoint" : selected?.type === "navEdge" ? "Navigation Edge" : "Properties"}
+            : selBldg ? "Building" : selEntrance ? "Entrance" : selMkr ? "Marker" : selDecorAsset ? "Decorative Asset" : selRoute ? "Route" : selected?.type === "navNode" ? "Waypoint" : selected?.type === "navEdge" ? "Navigation Edge" : "Properties"}
         </span>
         <button
           onClick={() => { onClearMultiSelect(); onClose(); }}
@@ -340,6 +357,48 @@ export function PropertiesPanel({
                 <div>
                   <label htmlFor="bldg-description" className={labelCls}>Description</label>
                   <textarea id="bldg-description" value={selBldg.description ?? ""} rows={2} onChange={(e) => onUpdateBuilding(selBldg.id, { description: e.target.value })} placeholder="Optional description..." className="w-full px-3 py-2 rounded-xl border border-border bg-input-background text-foreground text-xs resize-none focus:outline-none focus:ring-2 focus:ring-primary/30 transition-all duration-200" />
+                </div>
+                <div className="pt-1">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-1.5">
+                      <DoorOpen className="h-3 w-3 text-primary" />
+                      <span className="text-[9px] font-extrabold uppercase tracking-widest text-muted-foreground">Entrances ({selBldg.entrances?.length ?? 0})</span>
+                    </div>
+                    <button
+                      onClick={() => onAddEntrance(selBldg.id)}
+                      disabled={selBldg.locked}
+                      className="flex items-center gap-1 h-6 px-2 rounded-lg border border-primary/30 text-[9px] font-bold text-primary hover:bg-primary/8 transition-all disabled:opacity-40"
+                    >
+                      <Plus className="h-3 w-3" />
+                      Add
+                    </button>
+                  </div>
+                  {(selBldg.entrances?.length ?? 0) > 0 ? (
+                    <div className="space-y-1 max-h-[132px] overflow-y-auto scrollbar-show-on-hover">
+                      {(selBldg.entrances ?? []).map((entrance, idx) => {
+                        const meta = entrancePurposeMeta(entrance);
+                        const entranceType = normalizeEntranceType(entrance.type);
+                        return (
+                          <button
+                            key={entrance.id}
+                            type="button"
+                            onClick={() => onSelectEntrance(selBldg.id, entrance.id)}
+                            className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg border border-border/60 bg-muted/10 hover:bg-muted/30 text-left transition-colors"
+                          >
+                            <DoorOpen className="h-3.5 w-3.5 text-primary shrink-0" />
+                            <span className="min-w-0 flex-1">
+                              <span className="block text-[10px] font-bold text-foreground truncate">{entranceDisplayName(entrance, idx)}</span>
+                              <span className="block text-[8px] text-muted-foreground truncate">{meta}</span>
+                            </span>
+                            {entrance.isPrimary && entranceType === "general" && <Star className="h-3 w-3 text-amber-500 fill-amber-500 shrink-0" />}
+                            {entrance.accessible && <Accessibility className="h-3 w-3 text-blue-500 shrink-0" />}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <p className="text-[9px] text-muted-foreground italic">No entrances yet.</p>
+                  )}
                 </div>
                 {/* ── Floor Management ── */}
                 <div className="pt-1">
@@ -596,28 +655,6 @@ export function PropertiesPanel({
                     </div>
                   )}
                 </div>
-                {/* Entrance section */}
-                <div className="pt-3 border-t border-border">
-                  <div className="flex items-center gap-1.5 mb-2">
-                    <MapPin className="h-3 w-3 text-green-500" />
-                    <span className="text-[9px] font-extrabold uppercase tracking-widest text-muted-foreground">Entrance</span>
-                  </div>
-                  <p className="text-[9px] text-muted-foreground mb-2">Set the main entrance location on the campus map.</p>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label htmlFor="bldg-ent-x" className={labelCls}>X</label>
-                      <input id="bldg-ent-x" type="number" value={selBldg.entrance?.x ?? Math.round(selBldg.x + selBldg.width / 2)} onChange={(e) => onUpdateBuilding(selBldg.id, { entrance: { ...(selBldg.entrance || { label: undefined }), x: parseInt(e.target.value) || 0, y: selBldg.entrance?.y ?? Math.round(selBldg.y + selBldg.height), label: selBldg.entrance?.label }})} className={`${inputCls} font-mono`} />
-                    </div>
-                    <div>
-                      <label htmlFor="bldg-ent-y" className={labelCls}>Y</label>
-                      <input id="bldg-ent-y" type="number" value={selBldg.entrance?.y ?? Math.round(selBldg.y + selBldg.height)} onChange={(e) => onUpdateBuilding(selBldg.id, { entrance: { ...(selBldg.entrance || { label: undefined }), x: selBldg.entrance?.x ?? Math.round(selBldg.x + selBldg.width / 2), y: parseInt(e.target.value) || 0, label: selBldg.entrance?.label }})} className={`${inputCls} font-mono`} />
-                    </div>
-                  </div>
-                  <div className="mt-2">
-                    <label htmlFor="bldg-ent-label" className={labelCls}>Label</label>
-                    <input id="bldg-ent-label" value={selBldg.entrance?.label ?? ""} onChange={(e) => onUpdateBuilding(selBldg.id, { entrance: { x: selBldg.entrance?.x ?? Math.round(selBldg.x + selBldg.width / 2), y: selBldg.entrance?.y ?? Math.round(selBldg.y + selBldg.height), label: e.target.value || undefined }})} className={inputCls} placeholder="e.g. Main Gate" />
-                  </div>
-                </div>
                 {/* Accessibility section */}
                 <div className="pt-3 border-t border-border">
                   <div className="flex items-center gap-1.5 mb-2">
@@ -658,6 +695,136 @@ export function PropertiesPanel({
         )}
 
         {/* ── MARKER PROPERTIES ── */}
+        {selEntrance && selEntranceParent && !isMultiMode && (
+          <>
+            {(() => {
+              const entranceLocked = selEntranceParent.locked === true;
+              const entranceType = normalizeEntranceType(selEntrance.type);
+              const canBePrimary = entranceType === "general";
+              return (
+          <>
+            <div className="flex items-center gap-1.5 mb-2">
+              <DoorOpen className="h-3 w-3 text-primary" />
+              <span className="text-[9px] font-extrabold uppercase tracking-widest text-muted-foreground">Entrance</span>
+            </div>
+            <div className="px-2.5 py-2 rounded-xl border border-border bg-muted/20">
+              <span className="block text-xs font-extrabold text-foreground truncate">{entranceDisplayName(selEntrance, selEntranceParent.entrances?.findIndex((e) => e.id === selEntrance.id) ?? 0)}</span>
+              <span className="block text-[9px] text-muted-foreground truncate">{selEntranceParent.code} - {selEntranceParent.name}</span>
+            </div>
+            <div>
+              <label htmlFor="entrance-name" className={labelCls}>Name</label>
+              <CommittedTextInput
+                id="entrance-name"
+                value={selEntrance.name ?? ""}
+                onCommit={(name) => onUpdateEntrance(selEntranceParent.id, selEntrance.id, { name: name || undefined })}
+                className={inputCls}
+                placeholder="Main Entrance"
+                disabled={entranceLocked}
+              />
+            </div>
+            <div>
+              <label id="entrance-purpose-label" className={labelCls}>Purpose</label>
+              <div
+                data-testid="entrance-purpose-control"
+                aria-labelledby="entrance-purpose-label"
+                role="group"
+                className="grid grid-cols-1 gap-1.5"
+              >
+                {BUILDING_ENTRANCE_TYPES.map((type) => (
+                  <button
+                    key={type}
+                    type="button"
+                    disabled={entranceLocked}
+                    onClick={() => onUpdateEntrance(selEntranceParent.id, selEntrance.id, { type })}
+                    className={cn(
+                      "flex items-center justify-between gap-2 min-h-8 px-2.5 py-1.5 rounded-lg border text-left text-[10px] font-bold transition-colors disabled:opacity-50",
+                      entranceType === type
+                        ? "border-primary/40 bg-primary/8 text-primary"
+                        : "border-border/70 bg-muted/10 text-muted-foreground hover:bg-muted/30 hover:text-foreground"
+                    )}
+                  >
+                    <span>{entranceTypeLabel(type)}</span>
+                    {entranceType === type && <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="px-2.5 py-2 rounded-xl border border-border text-[10px] bg-muted/30 text-muted-foreground space-y-1">
+              <div className="flex justify-between gap-2">
+                <span>Parent</span>
+                <span className="font-bold text-foreground truncate">{selEntranceParent.code} - {selEntranceParent.name}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Edge</span>
+                <span className="font-bold">{BUILDING_ENTRANCE_EDGE_LABELS[selEntrance.edge]}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Offset</span>
+                <span className="font-mono">{Math.round(selEntrance.offset * 100)}%</span>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 gap-2">
+              <div>
+                <label id="entrance-edge-label" className={labelCls}>Side</label>
+                <div role="group" aria-labelledby="entrance-edge-label" className="grid grid-cols-4 gap-1">
+                  {Object.entries(BUILDING_ENTRANCE_EDGE_LABELS).map(([edge, label]) => (
+                    <button
+                      key={edge}
+                      type="button"
+                      disabled={entranceLocked}
+                      onClick={() => onUpdateEntrance(selEntranceParent.id, selEntrance.id, { edge: edge as BuildingEntranceEdge })}
+                      className={cn(
+                        "h-8 rounded-lg border text-[9px] font-bold transition-colors disabled:opacity-50",
+                        selEntrance.edge === edge
+                          ? "border-primary/40 bg-primary/8 text-primary"
+                          : "border-border/70 bg-muted/10 text-muted-foreground hover:bg-muted/30 hover:text-foreground"
+                      )}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <label htmlFor="entrance-offset" className={labelCls}>Position Along Side</label>
+                <CommittedSlider
+                  id="entrance-offset"
+                  value={selEntrance.offset}
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  disabled={entranceLocked}
+                  onCommit={(offset) => onUpdateEntrance(selEntranceParent.id, selEntrance.id, { offset })}
+                  format={(v) => `${Math.round(v * 100)}%`}
+                  className="flex-1"
+                />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <label className={cn("flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-muted/30 transition-colors cursor-pointer", entranceLocked && "cursor-not-allowed opacity-60")}>
+                <input type="checkbox" checked={canBePrimary && (selEntrance.isPrimary ?? false)} disabled={entranceLocked || !canBePrimary} onChange={(e) => onUpdateEntrance(selEntranceParent.id, selEntrance.id, { isPrimary: e.target.checked })} className="accent-primary h-3.5 w-3.5 rounded" />
+                <span className="text-[10px] text-foreground font-medium">Primary Entrance</span>
+              </label>
+              <label className={cn("flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-muted/30 transition-colors cursor-pointer", entranceLocked && "cursor-not-allowed opacity-60")}>
+                <input type="checkbox" checked={selEntrance.accessible ?? false} disabled={entranceLocked} onChange={(e) => onUpdateEntrance(selEntranceParent.id, selEntrance.id, { accessible: e.target.checked })} className="accent-primary h-3.5 w-3.5 rounded" />
+                <span className="text-[10px] text-foreground font-medium">Accessible</span>
+              </label>
+            </div>
+            <div className="pt-3 border-t border-border">
+              <button
+                onClick={() => onDeleteEntrance(selEntranceParent.id, selEntrance.id)}
+                disabled={entranceLocked}
+                className="w-full h-10 rounded-xl border border-destructive/30 text-xs font-bold text-destructive hover:bg-destructive/10 hover:border-destructive/50 transition-colors duration-200 disabled:opacity-40 disabled:hover:bg-transparent"
+              >
+                <span className="flex items-center justify-center gap-1.5"><Trash2 className="h-3 w-3" /> Delete Entrance</span>
+              </button>
+            </div>
+          </>
+              );
+            })()}
+          </>
+        )}
+
         {selMkr && !isMultiMode && (
           <>
             {/* Basic */}
@@ -1382,34 +1549,44 @@ function CommittedNumberInput({ id, value, min, max, step, onCommit, className, 
   );
 }
 
-function CommittedTextInput({ id, value, onCommit, className, placeholder }: {
+function CommittedTextInput({ id, value, onCommit, className, placeholder, disabled }: {
   id: string;
   value: string;
   onCommit: (v: string) => void;
   className?: string;
   placeholder?: string;
+  disabled?: boolean;
 }) {
-  const [draft, setDraft] = useState<string | null>(null);
-  const commit = () => {
-    const raw = draft;
-    setDraft(null);
-    if (raw !== null && raw !== value) onCommit(raw);
+  const [draft, setDraft] = useState(value);
+  const draftRef = useRef(value);
+  useEffect(() => { setDraft(value); draftRef.current = value; }, [value]);
+  const commit = (currentValue?: string) => {
+    const raw = currentValue ?? draftRef.current;
+    setDraft(raw);
+    draftRef.current = raw;
+    if (raw !== value) onCommit(raw);
+  };
+  const updateDraft = (next: string) => {
+    draftRef.current = next;
+    setDraft(next);
   };
   return (
     <input
       id={id}
       type="text"
-      value={draft ?? value}
-      onChange={(e) => setDraft(e.target.value)}
-      onBlur={commit}
+      value={draft}
+      onChange={(e) => updateDraft(e.target.value)}
+      onInput={(e) => updateDraft((e.target as HTMLInputElement).value)}
+      onBlur={(e) => commit(e.currentTarget.value || draftRef.current)}
       onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
       className={className}
       placeholder={placeholder}
+      disabled={disabled}
     />
   );
 }
 
-function CommittedSlider({ id, value, min, max, step, onCommit, format, className }: {
+function CommittedSlider({ id, value, min, max, step, onCommit, format, className, disabled }: {
   id: string;
   value: number;
   min: number;
@@ -1418,6 +1595,7 @@ function CommittedSlider({ id, value, min, max, step, onCommit, format, classNam
   onCommit: (v: number) => void;
   format: (v: number) => string;
   className?: string;
+  disabled?: boolean;
 }) {
   const [draft, setDraft] = useState<number | null>(null);
   const display = draft ?? value;
@@ -1439,6 +1617,7 @@ function CommittedSlider({ id, value, min, max, step, onCommit, format, classNam
         onBlur={commit}
         onPointerUp={commit}
         className={cn("h-1.5 accent-primary", className)}
+        disabled={disabled}
       />
       <span className="text-xs font-mono text-muted-foreground w-12 text-right shrink-0">{format(display)}</span>
     </div>

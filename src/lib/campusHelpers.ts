@@ -1,5 +1,6 @@
 import type { Campus } from "../components/map-builder/types";
 import type { SharedCampusData } from "../contexts/CampusDataContext";
+import { normalizeBuildingEntrances } from "./buildingEntrances";
 
 /**
  * Build the shared, student-facing snapshot of a campus used by all publish
@@ -22,7 +23,7 @@ export function buildSharedCampus(campus: Campus, publishedAt?: string): SharedC
       id: b.id, name: b.name, code: b.code,
       category: b.category, description: b.description,
       x: b.x, y: b.y, width: b.width, height: b.height,
-      color: b.color, floors: b.floors,
+      color: b.color, floors: b.floors, entrances: normalizeBuildingEntrances(b),
     })),
     markers: campus.markers,
     paths: campus.paths,
@@ -83,6 +84,7 @@ export function sanitizeCampus(c: Campus): Campus {
     settings: c.settings ?? { accessibility: false, emergency: false, eventLayer: false, gps: false },
     buildings: (Array.isArray(c.buildings) ? c.buildings : []).map((b) => ({
       ...b,
+      entrances: Array.isArray(b?.entrances) ? normalizeBuildingEntrances(b) : [],
       floors: (Array.isArray(b?.floors) ? b.floors : []).map((f) => ({
         ...f,
         rooms: Array.isArray(f?.rooms) ? f.rooms : [],
@@ -202,6 +204,7 @@ export function createCampusClone(
       return {
         ...structuredClone(b),
         id: nbId,
+        entrances: (b.entrances ?? []).map((entrance) => ({ ...structuredClone(entrance), id: gen("ent"), buildingId: nbId })),
         entranceNodeId: b.entranceNodeId ? nodeMap.get(b.entranceNodeId) ?? b.entranceNodeId : undefined,
         floors: b.floors.map((f) => {
           const nfId = floorMap.get(f.id)!;

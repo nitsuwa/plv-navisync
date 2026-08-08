@@ -25,6 +25,9 @@ export interface ValidationIssue {
     | "boundary"
     | "no_floors"
     | "overlap"
+    | "no_building_entrance"
+    | "no_primary_entrance"
+    | "multiple_primary_entrances"
     | "empty_floor"
     | "no_buildings"
     | "no_stairs_elevator"
@@ -146,6 +149,9 @@ const ISSUE_CATEGORY: Record<string, string> = {
   missing_code: "missing",
   boundary: "boundary",
   no_floors: "missing",
+  no_building_entrance: "navigation",
+  no_primary_entrance: "navigation",
+  multiple_primary_entrances: "navigation",
   overlap: "overlap",
   empty_floor: "missing",
   no_buildings: "missing",
@@ -191,6 +197,9 @@ const ISSUE_ICONS: Record<string, React.ElementType> = {
   missing_code: Building2,
   boundary: Ruler,
   no_floors: Layers,
+  no_building_entrance: MapPin,
+  no_primary_entrance: MapPin,
+  multiple_primary_entrances: AlertTriangle,
   overlap: Layers,
   empty_floor: Layers,
   no_buildings: Building2,

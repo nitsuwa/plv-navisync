@@ -1,11 +1,16 @@
 import { getSupabase } from "../lib/supabase";
 import { DEFAULT_FEATURES } from "../components/map-builder/constants";
-import type { Campus } from "../components/map-builder/types";
-import type { Tables, TablesInsert, TablesUpdate } from "../types/database.generated";
+import type { Campus, CampusBuilding } from "../components/map-builder/types";
+import type { Json, Tables, TablesInsert, TablesUpdate } from "../types/database.generated";
 
 export type CampusRow = Tables<"campuses">;
 export type CampusVersionRow = Tables<"campus_versions">;
 export type CampusLifecycleStatus = "draft" | "published" | "unpublished" | "archived";
+type CampusPreviewBuildingRow = Pick<
+  Tables<"buildings">,
+  "id" | "name" | "code" | "category" | "description" | "x" | "y" | "width" | "height" | "rotation" | "is_visible" | "metadata" | "archived_at"
+>;
+type CampusListRow = CampusRow & { preview_buildings?: CampusPreviewBuildingRow[] | null };
 
 export type CampusCreateInput = Pick<
   TablesInsert<"campuses">,
@@ -153,13 +158,45 @@ async function signedImageUrl(path: string | null): Promise<string | undefined> 
   return data.signedUrl;
 }
 
-export async function toEditorCampus(row: CampusRow): Promise<Campus> {
+function metadataUi(metadata: Json): Partial<CampusBuilding> {
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return {};
+  const ui = (metadata as { ui?: unknown }).ui;
+  return ui && typeof ui === "object" && !Array.isArray(ui) ? ui as Partial<CampusBuilding> : {};
+}
+
+function previewBuildings(row: CampusListRow, fallbackColor: string): CampusBuilding[] {
+  return (row.preview_buildings ?? [])
+    .filter((building) => !building.archived_at)
+    .map((building) => {
+      const ui = metadataUi(building.metadata);
+      return {
+        ...ui,
+        id: building.id,
+        name: building.name,
+        code: building.code,
+        category: building.category,
+        description: building.description ?? "",
+        x: building.x,
+        y: building.y,
+        width: building.width,
+        height: building.height,
+        rotation: building.rotation,
+        visible: building.is_visible,
+        color: ui.color ?? fallbackColor,
+        floors: [],
+      };
+    });
+}
+
+export async function toEditorCampus(row: CampusListRow): Promise<Campus> {
   const [logo, thumbnail] = await Promise.all([
     signedImageUrl(row.logo_path),
     signedImageUrl(row.overview_image_path),
   ]);
   const lifecycleStatus = deriveCampusLifecycleStatus(row);
   const day = row.updated_at.slice(0, 10);
+  const hasPreviewBuildings = row.preview_buildings !== undefined;
+  const buildings = hasPreviewBuildings ? previewBuildings(row, row.theme_color) : [];
   return {
     id: row.id,
     name: row.name,
@@ -181,7 +218,9 @@ export async function toEditorCampus(row: CampusRow): Promise<Campus> {
     canvasH: row.canvas_height,
     canvasConfigured: row.canvas_configured,
     settings: { accessibility: true, emergency: true, eventLayer: true, gps: true },
-    buildings: [], markers: [], paths: [], navNodes: [], navEdges: [], routes: [],
+    buildings, markers: [], paths: [], navNodes: [], navEdges: [], routes: [],
+    previewBuildingCount: hasPreviewBuildings ? buildings.length : undefined,
+    previewBuildingsLoaded: hasPreviewBuildings,
     accessibilityFeatures: [], assemblyPoints: [], eventOverlays: [], decorAssets: [],
     createdAt: row.created_at.slice(0, 10),
     updatedAt: day,
@@ -195,14 +234,18 @@ export async function toEditorCampus(row: CampusRow): Promise<Campus> {
   };
 }
 
-async function mapRows(rows: CampusRow[]): Promise<Campus[]> {
+async function mapRows(rows: CampusListRow[]): Promise<Campus[]> {
   return Promise.all(rows.map(toEditorCampus));
 }
 
 export async function listCampuses(): Promise<Campus[]> {
-  const { data, error } = await getSupabase().from("campuses").select("*").order("is_default", { ascending: false }).order("name");
+  const { data, error } = await getSupabase()
+    .from("campuses")
+    .select("*, preview_buildings:buildings(id,name,code,category,description,x,y,width,height,rotation,is_visible,metadata,archived_at)")
+    .order("is_default", { ascending: false })
+    .order("name");
   assertOk(error);
-  return mapRows(data ?? []);
+  return mapRows((data ?? []) as CampusListRow[]);
 }
 
 /** Choose a usable campus without assuming the database contains one. */

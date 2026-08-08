@@ -8,6 +8,7 @@ import { computeBuildingPlacement, screenToWorld, shouldDrawNavConnector } from 
 import { decorRenderScale, decorSelectionOutlineBox, decorWorldSize } from "../../lib/decorVisual";
 import { mergeOutdoorStack } from "../../lib/campusStack";
 import { DecorAssetArt, DecorAssetVisual } from "./DecorAssetVisual";
+import { BUILDING_ENTRANCE_TYPE_COLORS, entranceDisplayName, entranceWorldPosition, normalizeEntranceType } from "../../lib/buildingEntrances";
 
 // ── Rotation-aware resize cursor helpers (shared by buildings and decor assets) ──
 function angleToCursor(deg: number): string {
@@ -52,6 +53,7 @@ interface CanvasProps {
   onCanvasLeave?: (e: React.MouseEvent<SVGSVGElement>) => void;
   onCanvasDblClick: (e: React.MouseEvent<SVGSVGElement>) => void;
   onItemDown: (e: React.MouseEvent, type: "building" | "marker" | "decorAsset", id: string, ox: number, oy: number) => void;
+  onEntranceDown?: (e: React.MouseEvent, buildingId: string, entranceId: string, ox: number, oy: number) => void;
   onItemContextMenu?: (e: React.MouseEvent, type: "building" | "marker" | "path" | "decorAsset", id: string) => void;
   onResizeStart?: (e: React.MouseEvent, b: CampusBuilding, corner: string) => void;
   onRotateStart?: (e: React.MouseEvent, b: CampusBuilding) => void;
@@ -183,7 +185,7 @@ export function Canvas({
   zoom, pan, svgRef, containerRef, cursor,
   buildingDrag, guides, cursorPos, overlappingBuildings,
   onCanvasDown, onCanvasMove, onCanvasUp, onCanvasLeave, onCanvasDblClick,
-  onItemDown, onItemContextMenu, onResizeStart, onBuildingDoubleClick, onPathClick, onSelect,
+  onItemDown, onEntranceDown, onItemContextMenu, onResizeStart, onBuildingDoubleClick, onPathClick, onSelect,
   onResetView, onZoomIn, onZoomOut, onSetTool, onToggleSnap,
   onWheel, invalidBuildings = new Set(),
   onDropAsset, onDropBuilding,
@@ -926,6 +928,40 @@ export function Canvas({
                 )}
               </g>
             );
+          })}
+
+          {/* Building entrances: functional editor overlay, not part of z-order. */}
+          {buildings.flatMap((b) => {
+            const entrances = b.entrances ?? [];
+            const isParentVisible = b.visible ?? true;
+            const isParentLocked = b.locked ?? false;
+            return entrances.map((entrance) => {
+              const pos = entranceWorldPosition(b, entrance);
+              const isSel = selected?.type === "entrance" && selected.id === entrance.id;
+              const stroke = BUILDING_ENTRANCE_TYPE_COLORS[normalizeEntranceType(entrance.type)];
+              const opacity = isParentVisible ? 1 : isSel ? 0.45 : 0.3;
+              return (
+                <g
+                  key={entrance.id}
+                  data-entrance-id={entrance.id}
+                  data-building-id={b.id}
+                  data-hidden={isParentVisible ? undefined : "true"}
+                  transform={`translate(${pos.x},${pos.y}) rotate(${pos.angle})`}
+                  opacity={opacity}
+                  style={{ cursor: isParentLocked ? "default" : tool === "select" ? "grab" : cursor }}
+                  onMouseDown={(e) => onEntranceDown?.(e, b.id, entrance.id, pos.x, pos.y)}
+                >
+                  <title>{entranceDisplayName(entrance, entrances.findIndex((e) => e.id === entrance.id))}</title>
+                  <circle cx={0} cy={0} r={12} fill="transparent" />
+                  <path d="M-10,-7 L10,-7 L10,7 L-10,7 Z" fill="var(--card)" stroke={isSel ? "var(--accent)" : stroke} strokeWidth={isSel ? 2.5 : 1.8} />
+                  <path d="M-4,7 L-4,-3 L4,-3 L4,7" fill={stroke} opacity={0.92} />
+                  <path d="M0,13 L-5,6 H5 Z" fill={isSel ? "var(--accent)" : stroke} />
+                  {entrance.isPrimary && <circle cx={8} cy={-8} r={3} fill="#f59e0b" stroke="white" strokeWidth={1} />}
+                  {entrance.accessible && <circle cx={-8} cy={-8} r={3} fill="#2563eb" stroke="white" strokeWidth={1} />}
+                  {isSel && <circle cx={0} cy={0} r={15} fill="none" stroke="var(--accent)" strokeWidth={1.5} strokeDasharray="4 3" />}
+                </g>
+              );
+            });
           })}
 
           {/* Markers */}

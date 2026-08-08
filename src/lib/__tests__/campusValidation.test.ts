@@ -17,6 +17,7 @@ function building(overrides: Partial<CampusBuilding> = {}): CampusBuilding {
     width: 100,
     height: 80,
     color: "#123456",
+    entrances: [{ id: "ent1", buildingId: "b1", edge: "bottom", offset: 0.5, type: "general", isPrimary: true, accessible: false }],
     floors: [{ id: "f1", number: 1, label: "Ground Floor", rooms: [], paths: [], walls: [], doors: [], windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [] }],
     ...overrides,
   };
@@ -71,6 +72,45 @@ describe("validateCampusData", () => {
   it("flags buildings without floors", () => {
     const errs = validateCampusData(campus({ buildings: [building({ floors: [] })] }));
     expect(issueTypes(errs)).toContain("no_floors");
+  });
+
+  it("flags buildings without entrances", () => {
+    const errs = validateCampusData(campus({ buildings: [building({ entrances: [] })] }));
+    expect(issueTypes(errs)).toContain("no_building_entrance");
+  });
+
+  it("flags buildings with entrances but no primary entrance", () => {
+    const errs = validateCampusData(campus({
+      buildings: [building({
+        entrances: [{ id: "ent1", buildingId: "b1", edge: "bottom", offset: 0.5, type: "general", accessible: false }],
+      })],
+    }));
+    expect(issueTypes(errs)).toContain("no_primary_entrance");
+  });
+
+  it("does not treat Service or Emergency Exit as a primary entrance", () => {
+    const errs = validateCampusData(campus({
+      buildings: [building({
+        entrances: [
+          { id: "ent1", buildingId: "b1", edge: "bottom", offset: 0.5, type: "service", isPrimary: true },
+          { id: "ent2", buildingId: "b1", edge: "top", offset: 0.5, type: "emergency_exit", isPrimary: true },
+        ],
+      })],
+    }));
+    expect(issueTypes(errs)).toContain("no_primary_entrance");
+    expect(errs.find((e) => e.type === "no_primary_entrance")?.message).toContain("has no primary entrance");
+  });
+
+  it("flags corrupted buildings with multiple primary entrances", () => {
+    const errs = validateCampusData(campus({
+      buildings: [building({
+        entrances: [
+          { id: "ent1", buildingId: "b1", edge: "bottom", offset: 0.5, type: "general", isPrimary: true },
+          { id: "ent2", buildingId: "b1", edge: "top", offset: 0.5, type: "general", isPrimary: true },
+        ],
+      })],
+    }));
+    expect(issueTypes(errs)).toContain("multiple_primary_entrances");
   });
 
   it("reports an issue per building and never duplicates an issue type per building", () => {
