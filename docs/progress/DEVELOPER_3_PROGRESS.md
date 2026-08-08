@@ -60,10 +60,12 @@ Status values: `READY`, `ACTIVE`, `BLOCKED`, `FOR REVIEW`, `DONE`.
   - C8-B scope: dashboard rewired to live `dashboardService` counts (no hardcoded numbers); settings persisted via `system_settings` upsert (fake SMTP/2FA tabs removed); new `/admin-dashboard/activity-logs` page; CSV/JSON exports on reports page
   - Pull Request: Pending
 - [ ] **C9 — Responsive, accessibility, theme, and visual consistency**
-  - Status: `BLOCKED`
-  - Branch: `fix/public-operations-polish`
-  - Depends on: C1–C8 for the final pass
-  - Test result: Pending
+  - Status: `ACTIVE` (Phases 1–2 ✅ implemented on `feature/developer-3-c9-polish`; responsive deep-dive + remaining pages pending)
+  - Branch: `feature/developer-3-c9-polish`
+  - Depends on: C1–C8 for the full pass (Phase 1–2 did not require them)
+  - Test result: `pnpm build` PASSED; **388/388 Vitest tests PASS**
+  - Phase 1 scope: replaced ♿ emoji with lucide Accessibility SVG; added missing aria-labels; new `useReducedMotion` hook (disables SVG `<animate>` pulse rings + route draw/dash under reduced motion); focus-visible rings on dashboard + activity logs; new `useEscToClose` hook (Escape closes 9 modals, ignored while typing in inputs)
+  - Phase 2 scope: contrast + typography pass — dashboard chart labels 8px→10px bold; route steps Dist/Time/Via 9px→10px; removed 50–70% muted-foreground opacity (now 75–90%) in building info panel, mobile sheet, picker, route planner
   - Pull Request: Pending
 - [ ] **C10 — PWA, offline behavior, and end-to-end user journeys**
   - Status: `BLOCKED`
@@ -78,4 +80,4 @@ Status values: `READY`, `ACTIVE`, `BLOCKED`, `FOR REVIEW`, `DONE`.
 - Last completed package: C4 Phase 1 — Student Route Planning & Navigation (route planner, turn-by-turn UI, mobile steps sheet, pathfinding bug fix)
 - Known blocker: C8-C (publish controls, branding) requires Dev 1 A6/A7. C4 Phase 2 requires Gate G3 (Dev 2).
 - Important changed files (C4 Phase 1): `src/lib/routePlanner.ts` + `src/lib/__tests__/routePlanner.test.ts` (new), `src/components/map/RoutePlannerDialog.tsx` / `RouteStepsPanel.tsx` / `RouteMapOverlay.tsx` / `RouteErrorState.tsx` (new), `src/pages/CampusMapPage.tsx` (rewire), `src/components/map/index.ts` (exports), `src/lib/pathfinding.ts` (A* reconstruction fix)
-- Next recommended action: C4 Phase 2 after Gate G3 (published navigation graph), or C9 responsive/a11y pass, or C8-C once Dev 1 A6/A7 land.
+- Next recommended action: C9 Phase 3 (responsive deep-dive + remaining page states) — unblocked and ready; C4 Phase 2 after Gate G3; C8-C once Dev 1 A6/A7 land.
