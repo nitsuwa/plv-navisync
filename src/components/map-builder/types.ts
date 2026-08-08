@@ -236,6 +236,7 @@ export interface CampusBuilding {
   layer?: string;
   /** Entrance point on the campus map (canvas coordinates) */
   entrance?: { x: number; y: number; label?: string };
+  entrances?: CampusEntrance[];
   /** Navigation node ID for the building entrance — links building to the campus nav graph */
   entranceNodeId?: string;
   /** Basic accessibility summary */
@@ -245,6 +246,21 @@ export interface CampusBuilding {
     hasRamp: boolean;
     accessibleEntrance: boolean;
   };
+}
+
+export type BuildingEntranceEdge = "top" | "right" | "bottom" | "left";
+export type BuildingEntranceType = "general" | "service" | "emergency_exit";
+export type LegacyBuildingEntranceType = "main" | "secondary" | "emergency";
+
+export interface CampusEntrance {
+  id: string;
+  buildingId: string;
+  edge: BuildingEntranceEdge;
+  offset: number;
+  type?: BuildingEntranceType | LegacyBuildingEntranceType;
+  name?: string;
+  isPrimary?: boolean;
+  accessible?: boolean;
 }
 
 export interface RoomResizeState {
@@ -449,6 +465,10 @@ export interface Campus {
   defaultZoom?: number;
   settings: CampusSettings;
   buildings: CampusBuilding[];
+  /** Persisted structure summary used by campus-list previews before full editor hydration. */
+  previewBuildingCount?: number;
+  /** Lightweight persisted outdoor footprint rows for campus-list thumbnails. */
+  previewBuildingsLoaded?: boolean;
   markers: CampusMarker[];
   paths: CampusPath[];
   /** Navigation graph nodes (waypoints) */
@@ -506,6 +526,7 @@ export type View =
 
 export type CampusSelection =
   | { type: "building"; id: string }
+  | { type: "entrance"; id: string; buildingId: string }
   | { type: "marker"; id: string }
   | { type: "path"; id: string }
   | { type: "route"; id: string }

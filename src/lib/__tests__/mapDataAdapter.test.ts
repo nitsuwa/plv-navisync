@@ -32,6 +32,7 @@ function makeCampus(): SharedCampusData {
         color: "#123456",
         facilities: ["Library"],
         accessibility: ["ramp"],
+        entrances: [{ id: "ent1", buildingId: "b1", edge: "bottom", offset: 0.5, name: "South Door", type: "general", isPrimary: true }],
         floors: [
           {
             id: "f1",
@@ -154,10 +155,11 @@ describe("locationsFromCampus", () => {
     expect(byId.get("campus-m4")).toMatchObject({ type: "landmark" });
   });
 
-  it("adds a landmark + entrance location per building", () => {
+  it("adds a landmark plus attached entrance locations", () => {
     const locations = locationsFromCampus(makeCampus());
     expect(locations.some((l) => l.id === "campus-b1" && l.type === "landmark")).toBe(true);
-    expect(locations.some((l) => l.id === "campus-b1-entrance" && l.type === "entrance")).toBe(true);
+    expect(locations.some((l) => l.id === "campus-ent1" && l.name === "South Door" && l.type === "entrance")).toBe(true);
+    expect(locations.find((l) => l.id === "campus-ent1")?.description).toBe("Primary General Entrance of Main Academic Building");
   });
 
   it("skips structural rooms (hallway, stairs, elevator) but keeps destinations", () => {

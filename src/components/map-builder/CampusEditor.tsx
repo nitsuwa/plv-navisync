@@ -29,7 +29,7 @@ import { IssuesPopover } from "./IssuesPopover";
 import type {
   Campus, CampusBuilding, CampusMarker, CampusSelection,
   SimpleTool, EditorLayer, RubberBand, CampusRoute, CampusPath,
-  CampusDecorAsset, BuildingTypeDescriptor,
+  CampusDecorAsset, BuildingTypeDescriptor, CampusEntrance,
 } from "./types";
 import { BUILDING_TYPE_MAP, DECOR_ASSET_MAP } from "./constants";
 import { ToolbarTooltip } from "./ToolbarTooltip";
@@ -43,6 +43,7 @@ import { duplicateDecorAsset } from "../../lib/decorAsset";
 import { decorRenderScale, decorWorldSize } from "../../lib/decorVisual";
 import { outdoorSelectionIdsInRect, selectionRectFromPoints } from "../../lib/campusSelection";
 import { arrangeSelectedOutdoorObjects, selectedOutdoorCount, type OutdoorArrangementAction } from "../../lib/campusArrangement";
+import { defaultEntrance, normalizeBuildingEntrances, promotePrimaryEntrance, pointerToEntranceAttachment, updateBuildingEntrance } from "../../lib/buildingEntrances";
 
 // ── Per-layer marker configuration ──
 const LAYER_MARKER_CONFIG: Record<string, { name: string; type: string; color: string }> = {
@@ -80,6 +81,8 @@ interface CampusEditorProps {
 }
 
 export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publishingEnabled = true, onOpenFloor, onAddBuilding, onOpenCanvasSettings }: CampusEditorProps) {
+  const campusRef = useRef(campus);
+  useEffect(() => { campusRef.current = campus; }, [campus]);
   const [tool, setTool] = useState<SimpleTool>("select");
   const [selected, setSelected] = useState<CampusSelection | null>(null);
   const [drawingPath, setDP] = useState<{ x: number; y: number }[]>([]);
@@ -284,7 +287,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     },
     [edgeSnap]
   );
-  const dragging = useRef<{ type: "building" | "marker" | "decorAsset"; id: string; sx: number; sy: number; ox: number; oy: number } | null>(null);
+  const dragging = useRef<{ type: "building" | "marker" | "decorAsset" | "entrance"; id: string; buildingId?: string; sx: number; sy: number; ox: number; oy: number } | null>(null);
   const dragGroupStartRef = useRef<GroupMoveMember[] | null>(null);
 
   const buildings = campus.buildings;
@@ -330,6 +333,9 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
 
   const selectionForId = useCallback((id: string): CampusSelection | null => {
     if (buildings.some((b) => b.id === id)) return { type: "building", id };
+    for (const b of buildings) {
+      if ((b.entrances ?? []).some((entrance) => entrance.id === id)) return { type: "entrance", id, buildingId: b.id };
+    }
     if (markers.some((m) => m.id === id)) return { type: "marker", id };
     if (decorAssets.some((da) => da.id === id)) return { type: "decorAsset", id };
     return null;
@@ -451,6 +457,22 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     movePan(e);
     const drag = dragging.current;
     if (!drag) return;
+
+    if (drag.type === "entrance" && drag.buildingId) {
+      const parent = buildings.find((b) => b.id === drag.buildingId);
+      if (!parent || parent.locked) return;
+      const attachment = pointerToEntranceAttachment(parent, pt);
+      gestureChangedRef.current = true;
+      onUpdate({
+        ...campus,
+        buildings: buildings.map((b) =>
+          b.id === parent.id
+            ? { ...b, entrances: (b.entrances ?? []).map((entrance) => entrance.id === drag.id ? { ...entrance, ...attachment } : entrance) }
+            : b
+        ),
+      });
+      return;
+    }
 
     // ── Group drag: the whole selected group of buildings + decorative assets
     // moves rigidly as one unit (grid-snapped on the anchor, edge-snapped on the
@@ -970,10 +992,97 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     dragGroupStartRef.current = null;
   };
 
+  const onEntranceDown = (e: React.MouseEvent, buildingId: string, entranceId: string, ox: number, oy: number) => {
+    e.stopPropagation();
+    const parent = buildings.find((b) => b.id === buildingId);
+    if (!parent) return;
+    setMultiSelected([]);
+    setShowAlignTools(false);
+    setSelected({ type: "entrance", id: entranceId, buildingId });
+    setGuides([]);
+    if (parent.locked) {
+      return;
+    }
+    if (tool === "erase") {
+      onDeleteEntrance(buildingId, entranceId);
+      return;
+    }
+    if (tool !== "select") return;
+    const pt = getPoint(e, cw, ch);
+    gestureHistoryPushed.current = false;
+    gestureChangedRef.current = false;
+    dragging.current = { type: "entrance", id: entranceId, buildingId, sx: pt.x, sy: pt.y, ox, oy };
+    dragGroupStartRef.current = null;
+  };
+
 
 
   const onUpdateBuilding = (id: string, changes: Partial<CampusBuilding>) => {
     updBuildings(buildings.map((b) => (b.id === id ? { ...b, ...changes } : b)));
+  };
+
+  const onAddEntrance = (buildingId: string) => {
+    const currentCampus = campusRef.current;
+    const currentBuildings = currentCampus.buildings;
+    const parent = currentBuildings.find((b) => b.id === buildingId);
+    if (!parent || parent.locked) return;
+    const entrance = defaultEntrance(parent, genId("ent"));
+    const next: Campus = {
+      ...currentCampus,
+      buildings: currentBuildings.map((b) => b.id === buildingId ? { ...b, entrances: [...(b.entrances ?? []), entrance] } : b),
+    };
+    campusRef.current = next;
+    onUpdate(next);
+    pushHistory(next);
+    setSelected({ type: "entrance", id: entrance.id, buildingId });
+    toast.success("Entrance added", "Drag it along the building perimeter to reposition it.");
+  };
+
+  const onSelectEntrance = (buildingId: string, entranceId: string) => {
+    setMultiSelected([]);
+    setShowAlignTools(false);
+    setSelected({ type: "entrance", id: entranceId, buildingId });
+    setGuides([]);
+  };
+
+  const onUpdateEntrance = (buildingId: string, entranceId: string, changes: Partial<CampusEntrance>) => {
+    const currentCampus = campusRef.current;
+    const currentBuildings = currentCampus.buildings;
+    const parent = currentBuildings.find((b) => b.id === buildingId);
+    if (!parent || parent.locked) return;
+    let changed = false;
+    const next: Campus = {
+      ...currentCampus,
+      buildings: currentBuildings.map((b) => {
+        if (b.id !== buildingId) return b;
+        const result = updateBuildingEntrance(b, entranceId, changes);
+        changed = result.changed;
+        return result.building;
+      }),
+    };
+    if (!changed) return;
+    campusRef.current = next;
+    onUpdate(next);
+    pushHistory(next);
+  };
+
+  const onDeleteEntrance = (buildingId: string, entranceId: string) => {
+    const currentCampus = campusRef.current;
+    const currentBuildings = currentCampus.buildings;
+    const parent = currentBuildings.find((b) => b.id === buildingId);
+    if (!parent || parent.locked) return;
+    const next: Campus = {
+      ...currentCampus,
+      buildings: currentBuildings.map((b) => {
+        if (b.id !== buildingId) return b;
+        const remaining = normalizeBuildingEntrances(b).filter((entrance) => entrance.id !== entranceId);
+        return { ...b, entrances: promotePrimaryEntrance(remaining) };
+      }),
+    };
+    campusRef.current = next;
+    onUpdate(next);
+    pushHistory(next);
+    setSelected({ type: "building", id: buildingId });
   };
 
   const onUpdateMarker = (id: string, changes: Partial<CampusMarker>) => {
@@ -1117,7 +1226,15 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
         }
         case "duplicate": {
           pushHistory();
-          const nb: CampusBuilding = { ...b, id: genId("bld"), name: `${b.name} (copy)`, x: b.x + 20, y: b.y + 20 };
+          const nbId = genId("bld");
+          const nb: CampusBuilding = {
+            ...b,
+            id: nbId,
+            name: `${b.name} (copy)`,
+            x: b.x + 20,
+            y: b.y + 20,
+            entrances: normalizeBuildingEntrances(b).map((entrance) => ({ ...entrance, id: genId("ent"), buildingId: nbId })),
+          };
           updBuildings([...buildings, nb]);
           setSelected({ type: "building", id: nb.id });
           toast.success("Building Duplicated", `${b.code} has been copied.`);
@@ -1284,6 +1401,11 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
           pushHistory();
         } else if (selected.type === "marker") { updMarkers(markers.filter((m) => m.id !== selected.id)); pushHistory(); }
         else if (selected.type === "path") { updPaths(paths.filter((p) => p.id !== selected.id)); pushHistory(); }
+        else if (selected.type === "entrance") {
+          const parent = buildings.find((b) => b.id === selected.buildingId);
+          if (parent?.locked) return;
+          onDeleteEntrance(selected.buildingId, selected.id);
+        }
         else if (selected.type === "decorAsset") {
           const da = decorAssets.find((d) => d.id === selected.id);
           const template = da ? DECOR_ASSET_MAP[da.type] : undefined;
@@ -1375,12 +1497,14 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
         const b = buildings.find((x) => x.id === selected.id);
         if (!b) return;
         pushHistory();
+        const nbId = genId("bld");
         const nb: CampusBuilding = {
           ...b,
-          id: genId("bld"),
+          id: nbId,
           name: `${b.name} (copy)`,
           x: b.x + 25,
           y: b.y + 25,
+          entrances: normalizeBuildingEntrances(b).map((entrance) => ({ ...entrance, id: genId("ent"), buildingId: nbId })),
         };
         updBuildings([...buildings, nb]);
         setSelected({ type: "building", id: nb.id });
@@ -1427,6 +1551,8 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
   // If we have multi-selected items, clear single selection for property panel
   const effectiveSelected = multiSelected.length > 0 ? null : selected;
   const selBldg = effectiveSelected?.type === "building" ? buildings.find((b) => b.id === effectiveSelected.id) : undefined;
+  const selEntranceParent = effectiveSelected?.type === "entrance" ? buildings.find((b) => b.id === effectiveSelected.buildingId) : undefined;
+  const selEntrance = effectiveSelected?.type === "entrance" ? selEntranceParent?.entrances?.find((entrance) => entrance.id === effectiveSelected.id) : undefined;
   const selMkr = effectiveSelected?.type === "marker" ? markers.find((m) => m.id === effectiveSelected.id) : undefined;
   const selDecorAsset = effectiveSelected?.type === "decorAsset" ? (campus.decorAssets ?? []).find((d) => d.id === effectiveSelected.id) : undefined;
   const cursor = rotatingId || decorRotatingId
@@ -1462,7 +1588,9 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     return errs.map(e => ({
       ...e,
       severity: (e.type === "overlap" || e.type === "boundary" || e.type === "missing_campus_name" ? "error" :
+                 e.type === "multiple_primary_entrances" ? "error" :
                  e.type === "missing_name" || e.type === "missing_code" || e.type === "no_floors" ? "warning" :
+                 e.type === "no_building_entrance" || e.type === "no_primary_entrance" ? "warning" :
                  "info") as "error" | "warning" | "info",
     }));
   }, [validateCampus]);
@@ -1846,6 +1974,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
           onCanvasLeave={handleSvgLeave}
           onCanvasDblClick={handleDblClick}
           onItemDown={onItemDown}
+          onEntranceDown={onEntranceDown}
           onItemContextMenu={handleContextMenu}
           onResizeStart={handleResizeStart}
           onRotateStart={handleRotateStart}
@@ -2003,6 +2132,8 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
           layer={layer}
           selected={selected}
           selBldg={selBldg}
+          selEntrance={selEntrance}
+          selEntranceParent={selEntranceParent}
           selMkr={selMkr}
           selRoute={selRoute}
           allBuildings={buildings}
@@ -2039,6 +2170,10 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
           onClearMultiSelect={() => { setMultiSelected([]); setShowAlignTools(false); }}
           onLayerOrder={handleLayerOrder}
           onUpdateBuilding={onUpdateBuilding}
+          onAddEntrance={onAddEntrance}
+          onSelectEntrance={onSelectEntrance}
+          onUpdateEntrance={onUpdateEntrance}
+          onDeleteEntrance={onDeleteEntrance}
           onUpdateMarker={onUpdateMarker}
           onUpdateRoute={onUpdateRoute}
           onUpdateNavNode={(id, changes) => {

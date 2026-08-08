@@ -55,6 +55,27 @@ function campusInput(campus: Campus): CampusCreateInput {
   };
 }
 
+function preserveStructureIfMissing(next: Campus, previous?: Campus): Campus {
+  if (!previous || (next.buildings?.length ?? 0) > 0 || next.previewBuildingCount !== undefined) return next;
+  const hasPreviousPreview = previous.previewBuildingCount !== undefined || (previous.buildings?.length ?? 0) > 0;
+  if (!hasPreviousPreview) return next;
+  return {
+    ...next,
+    buildings: previous.buildings,
+    previewBuildingCount: previous.previewBuildingCount,
+    previewBuildingsLoaded: previous.previewBuildingsLoaded,
+    markers: previous.markers,
+    paths: previous.paths,
+    routes: previous.routes,
+    accessibilityFeatures: previous.accessibilityFeatures,
+    assemblyPoints: previous.assemblyPoints,
+    eventOverlays: previous.eventOverlays,
+    decorAssets: previous.decorAssets,
+    navNodes: previous.navNodes,
+    navEdges: previous.navEdges,
+  };
+}
+
 async function dataUrlToBlob(value?: string): Promise<Blob | null> {
   if (!value?.startsWith("data:")) return null;
   return (await fetch(value)).blob();
@@ -88,6 +109,10 @@ export function AdminMapBuilderPage() {
     setCampuses((p) => p.map((c) => (c.id === updated.id ? updated : c))),
   []);
 
+  const updateCampusMetadata = useCallback((updated: Campus) =>
+    setCampuses((p) => p.map((c) => (c.id === updated.id ? preserveStructureIfMissing(updated, c) : c))),
+  []);
+
   const duplicateCampus = useCallback(async (id: string) => {
     const source = campuses.find((c) => c.id === id);
     if (!source) return;
@@ -109,20 +134,20 @@ export function AdminMapBuilderPage() {
     if (!campus?.databaseUpdatedAt) return;
     try {
       const updated = await campusService.archive(id, campus.databaseUpdatedAt);
-      updateCampus(updated);
+      updateCampusMetadata(updated);
       toast.success("Campus Archived", { description: `"${campus.name}" is private until restored.` });
     } catch (error) { toast.error("Could not archive campus", { description: userFacingCampusMessage(error) }); }
-  }, [campuses, updateCampus]);
+  }, [campuses, updateCampusMetadata]);
 
   const restoreCampus = useCallback(async (id: string) => {
     const campus = campuses.find((c) => c.id === id);
     if (!campus?.databaseUpdatedAt) return;
     try {
       const updated = await campusService.restore(id, campus.databaseUpdatedAt);
-      updateCampus(updated);
+      updateCampusMetadata(updated);
       toast.success("Campus Restored", { description: `"${campus.name}" was restored as a private draft.` });
     } catch (error) { toast.error("Could not restore campus", { description: userFacingCampusMessage(error) }); }
-  }, [campuses, updateCampus]);
+  }, [campuses, updateCampusMetadata]);
 
   const editDetails = useCallback((id: string) => {
     const campus = campuses.find((c) => c.id === id);
@@ -160,7 +185,10 @@ export function AdminMapBuilderPage() {
     } else {
       try {
         const hydrated = await campusStructureService.load(campus!);
-        updateCampus(hydrated);
+        updateCampus({
+          ...hydrated,
+          previewBuildingCount: campus?.previewBuildingCount ?? hydrated.previewBuildingCount ?? hydrated.buildings.length,
+        });
       } catch (error) {
         toast.error("Could not load map", { description: (error as Error).message });
         return;
@@ -171,8 +199,9 @@ export function AdminMapBuilderPage() {
 
   const saveCampusStructure = useCallback(async (campus: Campus) => {
     const saved = await campusStructureService.save(campus);
-    updateCampus(saved);
-    return saved;
+    const savedWithPreviewCount = { ...saved, previewBuildingCount: saved.buildings.length, previewBuildingsLoaded: true };
+    updateCampus(savedWithPreviewCount);
+    return savedWithPreviewCount;
   }, [updateCampus]);
 
   const goToCampusFromFloor = useCallback((campusId: string) => {
@@ -236,7 +265,7 @@ export function AdminMapBuilderPage() {
           ]);
           updated = await campusService.update(existingId, { logo_path: logoPath ?? null, overview_image_path: overviewPath ?? null }, updated.databaseUpdatedAt!);
         }
-        updateCampus(updated);
+        updateCampusMetadata(updated);
         toast.success("Campus Details Updated", { description: `"${updated.name}" has been saved.` });
         goHome();
         return true;
@@ -269,7 +298,7 @@ export function AdminMapBuilderPage() {
       }
       return false;
     }
-  }, [campuses, goHome, goToSuccess, updateCampus]);
+  }, [campuses, goHome, goToSuccess, updateCampusMetadata]);
 
   // ── View key for AnimatePresence ──────────────────────────────────────────
 
@@ -295,10 +324,10 @@ export function AdminMapBuilderPage() {
       const updated = await campusService.update(canvasSetupCampus.id, {
         canvas_width: updates.canvasW, canvas_height: updates.canvasH, canvas_configured: true,
       }, canvasSetupCampus.databaseUpdatedAt!);
-      updateCampus({ ...updated, canvasConfigured: true });
+      updateCampusMetadata({ ...updated, canvasConfigured: true });
       setView({ type: "campus", campusId: canvasSetupCampus.id });
     } catch (error) { toast.error("Could not save canvas", { description: (error as Error).message }); }
-  }, [canvasSetupCampus, updateCampus]);
+  }, [canvasSetupCampus, updateCampusMetadata]);
 
   const [showCanvasSettings, setShowCanvasSettings] = useState(false);
 
@@ -308,9 +337,9 @@ export function AdminMapBuilderPage() {
       const updated = await campusService.update(activeCampus.id, {
         canvas_width: updates.canvasW, canvas_height: updates.canvasH, canvas_configured: true,
       }, activeCampus.databaseUpdatedAt!);
-      updateCampus({ ...updated, canvasConfigured: true });
+      updateCampusMetadata({ ...updated, canvasConfigured: true });
     } catch (error) { toast.error("Could not update canvas", { description: (error as Error).message }); }
-  }, [activeCampus, updateCampus]);
+  }, [activeCampus, updateCampusMetadata]);
 
   return (
     <div className="flex flex-col w-full flex-1" style={{ minHeight: 0 }}>

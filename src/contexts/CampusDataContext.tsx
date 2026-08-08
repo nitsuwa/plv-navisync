@@ -37,6 +37,16 @@ export interface SharedBuilding {
   operating_hours?: string;
   contact?: string;
   image_url?: string;
+  entrances?: {
+    id: string;
+    buildingId: string;
+    edge: "top" | "right" | "bottom" | "left";
+    offset: number;
+    type?: "general" | "service" | "emergency_exit" | "main" | "secondary" | "emergency";
+    name?: string;
+    isPrimary?: boolean;
+    accessible?: boolean;
+  }[];
 }
 
 export interface SharedMarker {

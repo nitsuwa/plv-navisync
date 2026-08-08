@@ -8,16 +8,21 @@ interface TooltipProps {
 export function Tooltip({ content, children }: TooltipProps) {
   const [show, setShow] = useState(false);
   const [pos, setPos] = useState({ x: 0, y: 0 });
+  const showAt = (target: HTMLElement) => {
+    const rect = target.getBoundingClientRect();
+    setPos({ x: rect.left + rect.width / 2, y: rect.top });
+    setShow(true);
+  };
 
   return (
     <>
       <span
         className="inline-flex"
-        onMouseEnter={(e) => {
-          const rect = e.currentTarget.getBoundingClientRect();
-          setPos({ x: rect.left + rect.width / 2, y: rect.top });
-          setShow(true);
-        }}
+        tabIndex={0}
+        aria-label={content}
+        onFocus={(e) => showAt(e.currentTarget)}
+        onBlur={() => setShow(false)}
+        onMouseEnter={(e) => showAt(e.currentTarget)}
         onMouseLeave={() => setShow(false)}
       >
         {children}

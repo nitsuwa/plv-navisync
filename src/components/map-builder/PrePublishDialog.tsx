@@ -28,7 +28,7 @@ const CHECK_GROUPS: CheckGroup[] = [
   {
     id: "buildings", label: "Buildings & Floors", icon: Building2,
     color: "#1e40af",
-    checks: ["missing_name", "missing_code", "boundary", "overlap", "no_floors", "empty_floor"],
+    checks: ["missing_name", "missing_code", "boundary", "overlap", "no_floors", "empty_floor", "no_building_entrance", "no_primary_entrance", "multiple_primary_entrances"],
   },
   {
     id: "rooms", label: "Rooms & Spaces", icon: Layers,

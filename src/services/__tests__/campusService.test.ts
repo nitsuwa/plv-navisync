@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getSupabase } from "../../lib/supabase";
-import { CampusServiceError, createCampus, normalizeCampusCode, userFacingCampusMessage } from "../campusService";
+import { CampusServiceError, createCampus, listCampuses, normalizeCampusCode, userFacingCampusMessage } from "../campusService";
 
 vi.mock("../../lib/supabase", () => ({ getSupabase: vi.fn() }));
 
@@ -186,5 +186,61 @@ describe("createCampus (create/INSERT boundary)", () => {
       expect.objectContaining({ code: "23514", details: expect.stringContaining("Failing row") })
     );
     consoleError.mockRestore();
+  });
+});
+
+describe("listCampuses (campus preview summary boundary)", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("queries persisted lightweight building footprints and maps them without full structure hydration", async () => {
+    const orderByName = vi.fn().mockResolvedValue({
+      data: [
+        { ...campusRow, id: "c1", name: "Empty Campus", preview_buildings: [] },
+        {
+          ...campusRow,
+          id: "c2",
+          name: "Mapped Campus",
+          preview_buildings: [
+            {
+              id: "b1",
+              name: "Building One",
+              code: "B1",
+              category: "academic",
+              description: "Saved building",
+              x: 10,
+              y: 20,
+              width: 100,
+              height: 80,
+              rotation: 15,
+              is_visible: true,
+              metadata: { ui: { color: "#123456", zOrder: 7 } },
+              archived_at: null,
+            },
+          ],
+        },
+      ],
+      error: null,
+    });
+    const orderByDefault = vi.fn(() => ({ order: orderByName }));
+    const select = vi.fn(() => ({ order: orderByDefault }));
+    const from = vi.fn((table: string) => {
+      if (table !== "campuses") throw new Error(`unexpected table ${table}`);
+      return { select };
+    });
+    vi.mocked(getSupabase).mockReturnValue({ from } as never);
+
+    const campuses = await listCampuses();
+
+    expect(select).toHaveBeenCalledWith("*, preview_buildings:buildings(id,name,code,category,description,x,y,width,height,rotation,is_visible,metadata,archived_at)");
+    expect(campuses.map((campus) => ({ id: campus.id, count: campus.previewBuildingCount, previewLoaded: campus.previewBuildingsLoaded, buildings: campus.buildings.length }))).toEqual([
+      { id: "c1", count: 0, previewLoaded: true, buildings: 0 },
+      { id: "c2", count: 1, previewLoaded: true, buildings: 1 },
+    ]);
+    expect(campuses[1].buildings[0]).toMatchObject({
+      id: "b1",
+      color: "#123456",
+      rotation: 15,
+      floors: [],
+    });
   });
 });

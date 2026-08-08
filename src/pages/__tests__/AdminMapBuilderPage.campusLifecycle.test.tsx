@@ -39,6 +39,7 @@ vi.mock("../../components/ui/ColorPicker", () => ({
 }));
 
 import { campusService } from "../../services/campusService";
+import { campusStructureService } from "../../services/campusStructureService";
 import { AdminMapBuilderPage } from "../AdminMapBuilderPage";
 
 function makeCampus(over: Partial<Campus> = {}): Campus {
@@ -77,6 +78,22 @@ function makeCampus(over: Partial<Campus> = {}): Campus {
     isDefault: false,
     lifecycleStatus: "draft",
     ...over,
+  };
+}
+
+function makePreviewBuilding(id = "b1") {
+  return {
+    id,
+    name: `Building ${id}`,
+    code: id.toUpperCase(),
+    category: "Academic",
+    description: "",
+    x: id === "b1" ? 100 : 260,
+    y: id === "b1" ? 100 : 180,
+    width: 120,
+    height: 80,
+    color: "#1e40af",
+    floors: [],
   };
 }
 
@@ -145,6 +162,172 @@ async function completeSave() {
 }
 
 describe("AdminMapBuilderPage — campus lifecycle", () => {
+  it("PREVIEW: initial campus list shows persisted building count and visual thumbnail without opening the campus", async () => {
+    (campusService.list as ReturnType<typeof vi.fn>).mockResolvedValue([
+      makeCampus({ id: "campus-empty", name: "Empty Campus", code: "EMPTY", canvasConfigured: true, buildings: [], previewBuildingCount: 0 }),
+      makeCampus({
+        id: "campus-mapped",
+        name: "Mapped Campus",
+        code: "MAP",
+        canvasConfigured: true,
+        buildings: [makePreviewBuilding("b1"), makePreviewBuilding("b2")],
+        previewBuildingCount: 2,
+        previewBuildingsLoaded: true,
+      }),
+    ]);
+
+    renderPage();
+    expect(screen.queryByText("No buildings yet")).not.toBeInTheDocument();
+    await flush();
+
+    expect(screen.getByText("Mapped Campus")).toBeInTheDocument();
+    expect(await screen.findByTestId("campus-mini-map")).toBeInTheDocument();
+    expect(screen.getByLabelText("Buildings: 2")).toBeInTheDocument();
+    expect(screen.getAllByLabelText("Floors: 0").length).toBeGreaterThan(0);
+    expect(screen.getAllByLabelText("Rooms: 0").length).toBeGreaterThan(0);
+    expect(screen.getAllByLabelText("Markers: 0").length).toBeGreaterThan(0);
+    fireEvent.mouseEnter(screen.getByLabelText("Buildings: 2"));
+    expect(screen.getAllByText("Buildings: 2").length).toBeGreaterThan(0);
+    expect(campusStructureService.load).not.toHaveBeenCalled();
+    expect(screen.getByText("No buildings yet")).toBeInTheDocument();
+  });
+
+  it("PREVIEW: positive building count never renders the false empty state while geometry is unavailable", async () => {
+    (campusService.list as ReturnType<typeof vi.fn>).mockResolvedValue([
+      makeCampus({ id: "campus-mapped", name: "Mapped Campus", code: "MAP", canvasConfigured: true, buildings: [], previewBuildingCount: 5 }),
+    ]);
+
+    renderPage();
+    await flush();
+
+    expect(screen.getByText("5 buildings mapped")).toBeInTheDocument();
+    expect(screen.queryByText("No buildings yet")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("campus-mini-map")).not.toBeInTheDocument();
+  });
+
+  it("PREVIEW: opening and returning from a campus does not change the list count merely because hydration happened", async () => {
+    const lightweightCampus = makeCampus({
+      canvasConfigured: true,
+      buildings: [makePreviewBuilding("b1"), makePreviewBuilding("b2")],
+      previewBuildingCount: 2,
+      previewBuildingsLoaded: true,
+    });
+    const hydratedCampus = makeCampus({
+      ...lightweightCampus,
+      previewBuildingCount: undefined,
+      buildings: [{
+        id: "b1",
+        name: "Only Hydrated Building",
+        code: "B1",
+        category: "Academic",
+        description: "",
+        x: 100,
+        y: 100,
+        width: 120,
+        height: 80,
+        color: "#1e40af",
+        floors: [],
+      }],
+    });
+    (campusService.list as ReturnType<typeof vi.fn>).mockResolvedValue([lightweightCampus]);
+    (campusStructureService.load as ReturnType<typeof vi.fn>).mockResolvedValue(hydratedCampus);
+
+    renderPage();
+    await flush();
+    expect(await screen.findByTestId("campus-mini-map")).toBeInTheDocument();
+    expect(screen.getByLabelText("Buildings: 2")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /open editor/i }));
+    fireEvent.click(await screen.findByTitle("Back to campus list"));
+
+    expect(await screen.findByRole("heading", { name: "Campus Management" })).toBeInTheDocument();
+    expect(await screen.findByTestId("campus-mini-map")).toBeInTheDocument();
+    expect(screen.getByLabelText("Buildings: 2")).toBeInTheDocument();
+    expect(screen.queryByText("No buildings yet")).not.toBeInTheDocument();
+  });
+
+  it("PREVIEW: metadata-only updates preserve hydrated buildings so the campus card does not show No buildings yet", async () => {
+    const buildingCampus = makeCampus({
+      canvasConfigured: true,
+      buildings: [{
+        id: "b1",
+        name: "Building One",
+        code: "B1",
+        category: "Academic",
+        description: "",
+        x: 100,
+        y: 100,
+        width: 120,
+        height: 80,
+        color: "#1e40af",
+        floors: [],
+      }],
+    });
+    (campusService.list as ReturnType<typeof vi.fn>).mockResolvedValue([buildingCampus]);
+    (campusService.update as ReturnType<typeof vi.fn>).mockResolvedValue(makeCampus({
+      id: buildingCampus.id,
+      name: "Main Campus Renamed",
+      code: buildingCampus.code,
+      canvasConfigured: true,
+      buildings: [],
+    }));
+    (campusStructureService.load as ReturnType<typeof vi.fn>).mockResolvedValue(buildingCampus);
+
+    renderPage();
+    await flush();
+    expect(screen.queryByText("No buildings yet")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /actions for main campus/i }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /edit details/i }));
+    fireEvent.change(screen.getByLabelText(/campus name/i), { target: { value: "Main Campus Renamed" } });
+    await clickContinueAndExpect("Campus Location");
+    await clickContinueAndExpect("Campus Appearance");
+    await clickContinueAndExpect("Review & Save");
+    fireEvent.click(screen.getByRole("button", { name: /^save changes$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /yes, save changes/i }));
+    await completeSave();
+
+    expect(screen.getByRole("heading", { name: "Campus Management" })).toBeInTheDocument();
+    expect(screen.getAllByText("Main Campus Renamed").length).toBeGreaterThan(0);
+    expect(screen.queryByText("No buildings yet")).not.toBeInTheDocument();
+  }, 10_000);
+
+  it("PREVIEW: metadata-only updates preserve the persisted count before editor hydration", async () => {
+    const lightweightCampus = makeCampus({
+      canvasConfigured: true,
+      buildings: [makePreviewBuilding("b1"), makePreviewBuilding("b2")],
+      previewBuildingCount: 2,
+      previewBuildingsLoaded: true,
+    });
+    (campusService.list as ReturnType<typeof vi.fn>).mockResolvedValue([lightweightCampus]);
+    (campusService.update as ReturnType<typeof vi.fn>).mockResolvedValue(makeCampus({
+      id: lightweightCampus.id,
+      name: "Main Campus Renamed",
+      code: lightweightCampus.code,
+      canvasConfigured: true,
+      buildings: [],
+    }));
+
+    renderPage();
+    await flush();
+    expect(await screen.findByTestId("campus-mini-map")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /actions for main campus/i }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /edit details/i }));
+    fireEvent.change(screen.getByLabelText(/campus name/i), { target: { value: "Main Campus Renamed" } });
+    await clickContinueAndExpect("Campus Location");
+    await clickContinueAndExpect("Campus Appearance");
+    await clickContinueAndExpect("Review & Save");
+    fireEvent.click(screen.getByRole("button", { name: /^save changes$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /yes, save changes/i }));
+    await completeSave();
+
+    expect(screen.getByRole("heading", { name: "Campus Management" })).toBeInTheDocument();
+    expect(await screen.findByTestId("campus-mini-map")).toBeInTheDocument();
+    expect(screen.getByLabelText("Buildings: 2")).toBeInTheDocument();
+    expect(screen.queryByText("No buildings yet")).not.toBeInTheDocument();
+  }, 10_000);
+
   it("CREATE: New Campus opens the wizard; completing it calls campusService.create exactly once with valid non-zero canvas dims and lands on success", async () => {
     (campusService.list as ReturnType<typeof vi.fn>).mockResolvedValue([]);
     const created = makeCampus({ id: "campus-new", name: "Test Campus", code: "TST" });

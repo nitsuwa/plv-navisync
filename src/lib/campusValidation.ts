@@ -11,6 +11,7 @@
 
 import type { CampusBuilding } from "../components/map-builder/types";
 import { getRotatedAABB } from "../components/map-builder/constants";
+import { normalizeBuildingEntrances, primaryEligibleEntrances } from "./buildingEntrances";
 import type { ValidationIssue } from "../components/map-builder/ValidationErrorsDialog";
 
 /** The subset of Campus that the baseline validation reads. */
@@ -115,6 +116,39 @@ export function validateCampusData(
         errors.push({
           type: "no_floors",
           message: `Please add at least one floor to Building "${b.code}".`,
+          buildingId: b.id,
+        });
+      }
+    }
+    const entrances = normalizeBuildingEntrances(b);
+    const primaryEntrances = primaryEligibleEntrances(entrances);
+    if (entrances.length === 0) {
+      const key = `${b.id}-no_building_entrance`;
+      if (!seenIds.has(key)) {
+        seenIds.add(key);
+        errors.push({
+          type: "no_building_entrance",
+          message: `Building "${b.code}" has no entrance. Add a General entrance before navigation setup.`,
+          buildingId: b.id,
+        });
+      }
+    } else if (primaryEntrances.length === 0) {
+      const key = `${b.id}-no_primary_entrance`;
+      if (!seenIds.has(key)) {
+        seenIds.add(key);
+        errors.push({
+          type: "no_primary_entrance",
+          message: `Building "${b.code}" has no primary entrance. Mark one General entrance as Primary.`,
+          buildingId: b.id,
+        });
+      }
+    } else if (primaryEntrances.length > 1) {
+      const key = `${b.id}-multiple_primary_entrances`;
+      if (!seenIds.has(key)) {
+        seenIds.add(key);
+        errors.push({
+          type: "multiple_primary_entrances",
+          message: `Building "${b.code}" has more than one primary entrance. Keep only one Primary entrance.`,
           buildingId: b.id,
         });
       }
