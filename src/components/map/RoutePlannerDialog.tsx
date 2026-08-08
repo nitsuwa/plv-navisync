@@ -178,7 +178,7 @@ export function RoutePlannerDialog({
               "flex-1 h-9 rounded-xl text-[11px] font-bold transition-all",
               canPlan
                 ? "bg-primary text-primary-foreground hover:brightness-110 shadow-md active:scale-[0.98]"
-                : "bg-muted text-muted-foreground/60 cursor-not-allowed"
+                : "bg-muted text-muted-foreground/75 cursor-not-allowed"
             )}
           >
             {route ? "Navigate" : "Find Route"}

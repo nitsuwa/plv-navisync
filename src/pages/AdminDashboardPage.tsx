@@ -314,7 +314,7 @@ export function AdminDashboardPage() {
                       title={`${d.day}: ${d.count} events`}
                     />
                   </div>
-                  <span className="text-[8px] text-muted-foreground font-mono">
+                  <span className="text-[10px] font-bold text-muted-foreground font-mono">
                     {new Date(d.day + "T00:00:00").toLocaleDateString(undefined, { weekday: "narrow" })}
                   </span>
                 </div>

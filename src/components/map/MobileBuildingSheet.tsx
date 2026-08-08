@@ -152,7 +152,7 @@ export function MobileBuildingSheet({
           })() : (
             <button
               onClick={() => onSignInPrompt("save locations")}
-              className="flex items-center gap-1.5 h-9 px-4 rounded-full bg-muted/60 text-muted-foreground/50 text-xs font-semibold border border-dashed border-border/60 shrink-0"
+              className="flex items-center gap-1.5 h-9 px-4 rounded-full bg-muted/60 text-muted-foreground/80 text-xs font-semibold border border-dashed border-border/60 shrink-0"
             >
               <Bookmark className="h-3.5 w-3.5" />
               Save
@@ -170,7 +170,7 @@ export function MobileBuildingSheet({
           ) : (
             <button
               onClick={() => onSignInPrompt("report issues")}
-              className="flex items-center gap-1.5 h-9 px-4 rounded-full bg-muted/60 text-muted-foreground/50 text-xs font-semibold border border-dashed border-border/60 shrink-0"
+              className="flex items-center gap-1.5 h-9 px-4 rounded-full bg-muted/60 text-muted-foreground/80 text-xs font-semibold border border-dashed border-border/60 shrink-0"
             >
               <Flag className="h-3.5 w-3.5" />
               Report

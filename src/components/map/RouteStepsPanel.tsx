@@ -60,15 +60,15 @@ export function RouteStepsPanel({
       {/* Stats row: distance, time, mode */}
       <div className="flex gap-2 px-3 pt-2.5 pb-2 border-b border-border">
         <div className="flex-1 px-2 py-1.5 rounded-lg bg-primary/8 text-center">
-          <p className="text-[9px] text-muted-foreground font-semibold uppercase tracking-wider">Dist</p>
+          <p className="text-[10px] text-muted-foreground font-bold uppercase tracking-wider">Dist</p>
           <p className="text-sm font-extrabold text-foreground">{formatDistance(route.dist)}</p>
         </div>
         <div className="flex-1 px-2 py-1.5 rounded-lg bg-primary/8 text-center">
-          <p className="text-[9px] text-muted-foreground font-semibold uppercase tracking-wider">Time</p>
+          <p className="text-[10px] text-muted-foreground font-bold uppercase tracking-wider">Time</p>
           <p className="text-sm font-extrabold text-foreground">{formatMinutes(route.mins)}</p>
         </div>
         <div className="flex-1 px-2 py-1.5 rounded-lg bg-primary/8 text-center">
-          <p className="text-[9px] text-muted-foreground font-semibold uppercase tracking-wider">Via</p>
+          <p className="text-[10px] text-muted-foreground font-bold uppercase tracking-wider">Via</p>
           <p className="text-sm font-extrabold text-foreground">
             {mode === "accessible" ? <Accessibility className="h-4 w-4 inline-block align-middle" /> :
              mode === "emergency" ? "SOS" : "Walk"}
@@ -111,7 +111,7 @@ export function RouteStepsPanel({
                     {step.instruction}
                   </p>
                   {step.distanceM !== undefined && (
-                    <span className="text-[9px] text-muted-foreground/70 font-semibold">
+                    <span className="text-[10px] text-muted-foreground font-semibold">
                       {formatDistance(step.distanceM)}
                     </span>
                   )}

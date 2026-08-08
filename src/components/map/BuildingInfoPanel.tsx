@@ -130,7 +130,7 @@ export function BuildingInfoPanel({
         })() : (
           <button
             onClick={() => onSignInPrompt("save locations")}
-            className="flex items-center justify-center gap-0.5 h-8 px-1 rounded-xl bg-muted/60 text-muted-foreground/50 text-[10px] font-semibold border border-dashed border-border/60"
+            className="flex items-center justify-center gap-0.5 h-8 px-1 rounded-xl bg-muted/60 text-muted-foreground/80 text-[10px] font-semibold border border-dashed border-border/60"
           >
             <Bookmark className="h-3 w-3 shrink-0" /> Save
           </button>
@@ -145,7 +145,7 @@ export function BuildingInfoPanel({
         ) : (
           <button
             onClick={() => onSignInPrompt("report issues")}
-            className="flex items-center justify-center gap-0.5 h-8 px-1 rounded-xl bg-muted/60 text-muted-foreground/50 text-[10px] font-semibold border border-dashed border-border/60"
+            className="flex items-center justify-center gap-0.5 h-8 px-1 rounded-xl bg-muted/60 text-muted-foreground/80 text-[10px] font-semibold border border-dashed border-border/60"
           >
             <Flag className="h-3 w-3 shrink-0" /> Report
           </button>
@@ -203,7 +203,7 @@ export function BuildingInfoPanel({
               ))}
             </div>
           ) : (
-            <p className="text-xs text-muted-foreground/60">No facilities data yet.</p>
+            <p className="text-xs text-muted-foreground/90">No facilities data yet.</p>
           )}
         </div>
 
@@ -222,7 +222,7 @@ export function BuildingInfoPanel({
               ))}
             </div>
           ) : (
-            <p className="text-xs text-muted-foreground/60">No accessibility data yet.</p>
+            <p className="text-xs text-muted-foreground/90">No accessibility data yet.</p>
           )}
         </div>
 

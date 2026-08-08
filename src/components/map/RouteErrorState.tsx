@@ -42,7 +42,7 @@ export function RouteErrorState({ fromCode, toCode, mode, onSwitchMode }: RouteE
             <Compass className="h-3 w-3" /> Try Standard mode
           </button>
         )}
-        <span className="text-[9px] text-muted-foreground/70 self-center ml-auto">
+        <span className="text-[10px] text-muted-foreground self-center ml-auto">
           Try a different destination
         </span>
       </div>
