@@ -11,6 +11,7 @@ const ids = {
   nodeB: "10000000-0000-4000-8000-000000000006",
   edge: "10000000-0000-4000-8000-000000000007",
 };
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const campus = {
   id: ids.campus, name: "A5 Campus", code: "A5", description: "", address: "", city: "", province: "", postalCode: "",
@@ -100,6 +101,38 @@ describe("campus structure mapping", () => {
     // Endpoint geometry survives in metadata.ui for round-tripping
     const ui = (wallRow.metadata as { ui: { x1: number; y1: number; x2: number; y2: number } }).ui;
     expect(ui).toMatchObject({ x1: 10, y1: 20, x2: 110, y2: 20 });
+  });
+
+  it("normalizes legacy synthetic managed perimeter wall ids before building the save payload", () => {
+    const syntheticId = `managed-perimeter-${ids.floor}-top`;
+    const withLegacyPerimeter = {
+      ...campus,
+      buildings: [{
+        ...campus.buildings[0],
+        floors: [{
+          ...campus.buildings[0].floors[0],
+          rooms: [],
+          walls: [{ id: syntheticId, x1: 0, y1: 0, x2: 220, y2: 0, thickness: 6, color: "#334155", locked: true, managedKind: "perimeter", perimeterSide: "top" }],
+          doors: [{ id: "10000000-0000-4000-8000-000000000021", x: 110, y: 0, width: 24, direction: "left", color: "#b45309", wallId: syntheticId, offset: 0.5 }],
+          windows: [{ id: "10000000-0000-4000-8000-000000000022", x: 120, y: 0, width: 32, height: 6, color: "#0284c7", wallId: syntheticId, offset: 0.55 }],
+        }],
+      }],
+    } as Campus;
+
+    const payload = serializeCampusStructure(withLegacyPerimeter);
+    const wallRow = payload.map_elements.find((row) => row.element_type === "wall")!;
+    const doorRow = payload.map_elements.find((row) => row.element_type === "door")!;
+    const windowRow = payload.map_elements.find((row) => row.element_type === "window")!;
+    const wallUi = (wallRow.metadata as { ui: { id: string; managedKind: string; perimeterSide: string } }).ui;
+    const doorUi = (doorRow.metadata as { ui: { wallId: string } }).ui;
+    const windowUi = (windowRow.metadata as { ui: { wallId: string } }).ui;
+
+    expect(wallRow.id).toMatch(UUID_RE);
+    expect(wallRow.id).not.toContain("managed-perimeter");
+    expect(wallUi).toMatchObject({ id: wallRow.id, managedKind: "perimeter", perimeterSide: "top" });
+    expect(doorUi.wallId).toBe(wallRow.id);
+    expect(windowUi.wallId).toBe(wallRow.id);
+    expect(JSON.stringify(payload)).not.toContain("managed-perimeter");
   });
 
   it("sanitizes stray NaN x/y on legacy walls instead of serializing null (regression: broken drag)", () => {

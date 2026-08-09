@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from "motion/react";
 import { X } from "lucide-react";
 import { genId } from "./constants";
 import { SPRING, DURATION } from "../../config/animation";
+import { createDefaultFloor } from "../../lib/floorPlanNormalization";
 import type { FloorPlan } from "./types";
 
 interface FloorWizardModalProps {
@@ -74,13 +75,11 @@ export function FloorWizardModal({ nextNumber, onClose, onSave }: FloorWizardMod
             </button>
             <button
               onClick={() =>
-                onSave({
+                onSave(createDefaultFloor({
                   id: genId("floor"),
                   number,
                   label: label || `Floor ${number}`,
-                  rooms: [],
-                  paths: [],
-                })
+                }))
               }
               disabled={!label.trim()}
               className="flex-1 h-10 rounded-xl bg-primary text-primary-foreground text-sm font-extrabold hover:bg-primary/90 transition-colors disabled:opacity-40"

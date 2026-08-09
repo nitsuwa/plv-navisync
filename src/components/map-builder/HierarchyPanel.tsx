@@ -9,6 +9,7 @@ import { genId, BUILDING_TYPES, DECOR_PALETTE_TYPES, DECOR_ASSET_MAP } from "./c
 import { DecorAssetVisual } from "./DecorAssetVisual";
 import { ContextMenu } from "./ContextMenu";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
+import { createDefaultFloor, duplicateFloorForBuilding, normalizeFloor } from "../../lib/floorPlanNormalization";
 import type { Campus, CampusBuilding, CampusSelection, FloorPlan, BuildingTypeDescriptor, CampusDecorAsset, DecorAssetType } from "./types";
 
 interface HierarchyPanelProps {
@@ -109,17 +110,13 @@ export function HierarchyPanel({
     const floor = b.floors.find((f) => f.id === floorId);
     if (!floor) return;
     pushHistory();
-    const newFloor: FloorPlan = {
-      ...structuredClone(floor),
+    const nextNumber = Math.max(...b.floors.map((f) => f.number), 0) + 1;
+    const newFloor: FloorPlan = duplicateFloorForBuilding(floor, {
       id: genId("fl"),
       buildingId,
-      number: Math.max(...b.floors.map((f) => f.number), 0) + 1,
+      number: nextNumber,
       label: `${floor.label} (copy)`,
-      rooms: floor.rooms.map((r) => ({ ...r, floorId: genId("fl") /* will fix below */, buildingId })),
-    };
-    // Fix the temp floorId references
-    const finalFloorId = newFloor.id;
-    newFloor.rooms = newFloor.rooms.map((r) => ({ ...r, floorId: finalFloorId }));
+    });
     updBuildings(
       buildings.map((x) => (x.id === buildingId ? { ...x, floors: [...x.floors, newFloor] } : x))
     );
@@ -157,21 +154,7 @@ export function HierarchyPanel({
     const b = buildings.find((x) => x.id === buildingId);
     if (!b) return;
     const nextNum = Math.max(...b.floors.map((f) => f.number), 0) + 1;
-    const newFloor: FloorPlan = {
-      id: genId("fl"),
-      buildingId,
-      number: nextNum,
-      label: nextNum === 1 ? "Ground Floor" : `Floor ${nextNum}`,
-      rooms: [],
-      paths: [],
-      walls: [],
-      doors: [],
-      windows: [],
-      furniture: [],
-      stairs: [],
-      elevators: [],
-      labels: [],
-    };
+    const newFloor: FloorPlan = createDefaultFloor({ id: genId("fl"), buildingId, number: nextNum });
     pushHistory();
     updBuildings(
       buildings.map((x) => (x.id === buildingId ? { ...x, floors: [...x.floors, newFloor] } : x))
@@ -192,20 +175,23 @@ export function HierarchyPanel({
     const b = buildings.find((x) => x.id === id);
     if (!b) return;
     pushHistory();
+    const nbId = genId("bld");
     const nb: CampusBuilding = {
       ...structuredClone(b),
-      id: genId("bld"),
+      id: nbId,
       name: `${b.name} (copy)`,
       x: b.x + 25,
       y: b.y + 25,
-      floors: b.floors.map((f) => ({
-        ...f,
-        buildingId: genId("bld"), // temp — fixed below
-        rooms: f.rooms.map((r) => ({ ...r, floorId: f.id, buildingId: genId("bld") })),
+      floors: b.floors.map((f) => duplicateFloorForBuilding(f, {
+        id: genId("fl"),
+        buildingId: nbId,
+        number: f.number,
+        label: f.label,
       })),
     };
-    // Fix temp buildingId references to actual new building ID
-    nb.floors = nb.floors.map((f) => ({ ...f, buildingId: nb.id, rooms: f.rooms.map((r) => ({ ...r, buildingId: nb.id, floorId: f.id })) }));
+    // Keep a final normalization pass for older building data that predates
+    // complete floor collections.
+    nb.floors = nb.floors.map((f) => normalizeFloor(f, { buildingId: nb.id }));
     updBuildings([...buildings, nb]);
     onSelect({ type: "building", id: nb.id });
     toast.success("Building Duplicated", `${b.code} has been copied.`);

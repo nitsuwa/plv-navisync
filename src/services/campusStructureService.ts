@@ -1,4 +1,5 @@
 import { getSupabase } from "../lib/supabase";
+import { normalizeFloor } from "../lib/floorPlanNormalization";
 import type { Database, Json, Tables, TablesInsert, TablesUpdate } from "../types/database.generated";
 import type {
   AccessibilityFeature, AssemblyPoint, Campus, CampusBuilding, CampusDecorAsset,
@@ -106,7 +107,7 @@ function element(kind: StructureKind, campusId: string, value: Record<string, un
     x: finiteNumber(anchorX, kind, value.id, "x"), y: finiteNumber(anchorY, kind, value.id, "y"),
     width: Number.isFinite(width) && width > 0 ? width : undefined,
     height: Number.isFinite(height) && height > 0 ? height : undefined,
-    rotation: ((rotationValue % 360) + 360) % 360, z_index: 0,
+    rotation: ((rotationValue % 360) + 360) % 360, z_index: Number.isFinite(Number(value.zOrder)) ? Number(value.zOrder) : 0,
     geometry: points ? { points } : undefined,
     style: { color: typeof value.color === "string" ? value.color : undefined, width: typeof value.width === "number" ? value.width : undefined },
     metadata: { kind, ui: value as Json },
@@ -134,7 +135,8 @@ export function serializeCampusStructure(campus: Campus): CampusStructurePayload
       is_accessible: Boolean(building.accessibility?.wheelchairAccessible),
       metadata: { ...jsonUi(buildingUi), display_order: buildingOrder },
     });
-    (buildingFloors ?? []).forEach((floor, floorOrder) => {
+    (buildingFloors ?? []).forEach((rawFloor, floorOrder) => {
+      const floor = normalizeFloor(rawFloor, { buildingId: building.id, number: floorOrder + 1 });
       const {
         rooms = [], paths = [], walls = [], doors = [], windows = [], furniture = [],
         stairs = [], ramps = [], elevators = [], labels = [], ...floorUi
@@ -195,10 +197,10 @@ export function hydrateCampusStructure(campus: Campus, rows: CampusStructureRows
       return cleaned as FloorWall;
     });
     const base = uiFrom<Partial<FloorPlan>>(row.metadata) ?? {};
-    const floor: FloorPlan = { ...base, id: row.id, buildingId: row.building_id, number: row.floor_number, label: row.name,
+    const floor = normalizeFloor({ ...base, id: row.id, buildingId: row.building_id, number: row.floor_number, label: row.name,
       rooms: byKind("room"), paths: byKind("floor_path"), walls, doors: byKind("door"),
       windows: byKind("window"), furniture: byKind("furniture"), stairs: byKind("stairs"), ramps: byKind("ramp"),
-      elevators: byKind("elevator"), labels: byKind("label") } as FloorPlan;
+      elevators: byKind("elevator"), labels: byKind("label") } as Partial<FloorPlan>, { buildingId: row.building_id });
     floorsByBuilding.set(row.building_id, [...(floorsByBuilding.get(row.building_id) ?? []), floor]);
   });
   const buildings = [...rows.buildings].sort((a, b) => Number((a.metadata as JsonObject)?.display_order ?? 0) - Number((b.metadata as JsonObject)?.display_order ?? 0)).map((row) => ({

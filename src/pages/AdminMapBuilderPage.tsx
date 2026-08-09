@@ -417,6 +417,8 @@ export function AdminMapBuilderPage() {
                 onSwitchFloor={(fId) => setView({ ...view, floorId: fId })}
                 onUpdate={updateCampus}
                 onSave={saveCampusStructure}
+                onPublish={() => toast.info("Publishing is implemented in A6.")}
+                publishingEnabled={false}
               />
             )}
 

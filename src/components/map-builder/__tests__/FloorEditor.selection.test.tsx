@@ -113,7 +113,7 @@ function findWallGByX1(container: HTMLElement, x1: number): SVGGElement {
 
 /** The visible "empty floor" area — the interior decoration rect inside the data-bg group. */
 function floorAreaRect(container: HTMLElement): SVGRectElement {
-  const rect = container.querySelector('rect[fill="#cdc9c3"]');
+  const rect = container.querySelector('[data-testid="floor-canvas-boundary"]');
   expect(rect).toBeTruthy();
   return rect as SVGRectElement;
 }
