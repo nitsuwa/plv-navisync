@@ -91,8 +91,8 @@ function getLocalSavedBuildingIds(): string[] {
   } catch {
     // Ignore parse errors
   }
-  // Default demo saved buildings if empty
-  return ["b1", "b3"];
+  // Default demo saved buildings if empty (real PLV campus ids)
+  return ["b_scb", "b_caba"];
 }
 
 export const studentAccountService = {

@@ -7,7 +7,7 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { MOCK_BUILDINGS } from "../data/mockData";
-import { useCampusData } from "../contexts/CampusDataContext";
+import { usePublishedCampus } from "../hooks";
 import { buildingsFromCampus, facilitiesFromCampus, accessibilityFromCampus } from "../lib/mapDataAdapter";
 import { BuildingCategoryBadge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
@@ -17,6 +17,7 @@ import { PageTransition } from "../components/ui/PageTransition";
 import { Skeleton } from "../components/ui/Skeleton";
 import { cn } from "../lib/utils";
 import { Reveal } from "../components/ui/Reveal";
+import { getOpenStatus } from "../lib/buildingHours";
 import type { Building } from "../types";
 
 type Tab = "about" | "departments" | "facilities" | "accessibility";
@@ -33,11 +34,9 @@ export function BuildingDetailsPage() {
   const [activeTab, setActiveTab] = useState<Tab>("about");
   const [isLoading, setIsLoading] = useState(true);
   const [isSaved, setIsSaved] = useState(false);
-  const campusData = useCampusData();
-
-  const activeCampus = campusData.campuses.find(
-    (c) => c.publishStatus !== "draft" && c.status !== "archived"
-  );
+  // Use the published campus (same source as the map + directory) so the
+  // detail page resolves seeded building ids like b_scb consistently.
+  const { activeCampus } = usePublishedCampus();
 
   // Derive buildings from published campus data, fall back to hardcoded data
   const buildings: Building[] = useMemo(() => {
@@ -86,6 +85,7 @@ export function BuildingDetailsPage() {
   const related = buildings.filter(
     (b) => b.id !== id && b.category === building?.category
   ).slice(0, 3);
+  const bHours = building ? getOpenStatus(building) : null;
 
 
   if (!isLoading && !building) {
@@ -186,11 +186,35 @@ export function BuildingDetailsPage() {
               </span>
               <span className="w-1 h-1 rounded-full bg-white/40" />
               <span>{building!.floor_count} floor{building!.floor_count !== 1 ? "s" : ""}</span>
-              {building!.operating_hours && (
+              {bHours?.status && (
+                <>
+                  <span className="w-1 h-1 rounded-full bg-white/40" />
+                  <span
+                    className={cn(
+                      "flex items-center gap-1.5 font-bold",
+                      bHours.status === "Open" && "text-green-300",
+                      bHours.status === "Busy" && "text-amber-300",
+                      bHours.status === "Closed" && "text-red-300"
+                    )}
+                    title={bHours.label}
+                  >
+                    <span
+                      className={cn(
+                        "w-1.5 h-1.5 rounded-full",
+                        bHours.status === "Open" && "bg-green-400",
+                        bHours.status === "Busy" && "bg-amber-400",
+                        bHours.status === "Closed" && "bg-red-400"
+                      )}
+                    />
+                    {bHours.status}
+                  </span>
+                </>
+              )}
+              {bHours?.hoursLabel && (
                 <>
                   <span className="w-1 h-1 rounded-full bg-white/40" />
                   <span className="flex items-center gap-1.5">
-                    <Clock className="h-3.5 w-3.5" /> {building!.operating_hours}
+                    <Clock className="h-3.5 w-3.5" /> {bHours.hoursLabel}
                   </span>
                 </>
               )}
@@ -354,7 +378,7 @@ export function BuildingDetailsPage() {
                 {[
                   { icon: MapPin, label: "Location", value: "PLV Campus, Tongco St., Valenzuela City" },
                   { icon: Layers, label: "Floors", value: `${building!.floor_count} ${building!.floor_count === 1 ? "floor" : "floors"}` },
-                  ...(building!.operating_hours ? [{ icon: Clock, label: "Hours", value: building!.operating_hours }] : []),
+                  ...((bHours?.hoursLabel || building!.operating_hours) ? [{ icon: Clock, label: "Hours", value: bHours?.hoursLabel ?? building!.operating_hours! }] : []),
                   ...(building!.contact ? [{ icon: Phone, label: "Contact", value: building!.contact }] : []),
                 ].map(({ icon: InfoIcon, label, value }) => (
                   <div key={label} className="flex items-start gap-3 py-2.5 border-b border-border last:border-0">

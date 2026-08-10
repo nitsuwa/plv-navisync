@@ -6,8 +6,14 @@ import { ThemeToggle } from "../ui/ThemeToggle";
 import { useTheme } from "../../hooks/useTheme";
 import { useAdminAuth } from "../../hooks/useAdminAuth";
 import { cn } from "../../lib/utils";
-import { PanelLeftClose, PanelLeft, Bell, User } from "lucide-react";
-import { motion } from "motion/react";
+import { PanelLeftClose, PanelLeft, Bell, User, History, CheckCheck } from "lucide-react";
+import { motion, AnimatePresence } from "motion/react";
+import {
+  activityLogService,
+  type ActivityLogRow,
+} from "../../services/activityLogService";
+import { notificationService } from "../../lib/notificationService";
+import { Link } from "react-router";
 
 /** Branded full-screen loader shown while the session/profile is checked. */
 function AuthGateLoader() {
@@ -40,9 +46,40 @@ const ROUTE_LABELS: Record<string, string> = {
 export function AdminLayout() {
   const { theme, toggleTheme } = useTheme();
   const [collapsed, setCollapsed] = useState(false);
+  const [bellOpen, setBellOpen] = useState(false);
+  const [logs, setLogs] = useState<ActivityLogRow[]>([]);
+  const [unread, setUnread] = useState(0);
   const navigate = useNavigate();
   const location = useLocation();
   const { loading, isAdmin, profile } = useAdminAuth();
+
+  // Load the latest activity logs once the session is confirmed and refresh
+  // whenever the bell is reopened.
+  useEffect(() => {
+    if (loading || !isAdmin) return;
+    let mounted = true;
+    const loadLogs = async () => {
+      try {
+        const rows = await activityLogService.listActivityLogs({ limit: 6 });
+        if (!mounted) return;
+        setLogs(rows);
+        setUnread(notificationService.countUnseenLogs(rows));
+      } catch {
+        // Bell stays empty when logs are unavailable.
+      }
+    };
+    loadLogs();
+    return () => {
+      mounted = false;
+    };
+  }, [loading, isAdmin]);
+
+  useEffect(() => {
+    if (bellOpen) {
+      notificationService.markLogsSeen();
+      setUnread(0);
+    }
+  }, [bellOpen]);
 
   useEffect(() => {
     if (loading) return;
@@ -81,11 +118,69 @@ export function AdminLayout() {
 
           <ThemeToggle theme={theme} onToggle={toggleTheme} />
 
-          {/* Notification bell */}
-          <button className="relative inline-flex items-center justify-center w-9 h-9 rounded-xl border border-border text-muted-foreground hover:bg-muted active:scale-90 transition-all" aria-label="Notifications">
-            <Bell className="h-4 w-4" />
-            <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-accent border border-card" />
-          </button>
+          {/* Notification bell — real activity-log feed */}
+          <div className="relative">
+            <button
+              onClick={() => setBellOpen((v) => !v)}
+              aria-expanded={bellOpen}
+              aria-haspopup="true"
+              aria-label="Notifications"
+              className="relative inline-flex items-center justify-center w-9 h-9 rounded-xl border border-border text-muted-foreground hover:bg-muted active:scale-90 transition-all"
+            >
+              <Bell className="h-4 w-4" />
+              {unread > 0 && (
+                <span className="absolute -top-1 -right-1 min-w-4 h-4 px-1 rounded-full bg-accent text-accent-foreground text-[9px] font-extrabold flex items-center justify-center border border-card">
+                  {unread > 9 ? "9+" : unread}
+                </span>
+              )}
+            </button>
+
+            <AnimatePresence>
+              {bellOpen && (
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.95, y: -5 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.95, y: -5 }}
+                  transition={{ duration: 0.15, ease: [0.16, 1, 0.3, 1] }}
+                  className="absolute right-0 top-full mt-2 w-72 rounded-2xl border border-border bg-card shadow-xl overflow-hidden"
+                  style={{ zIndex: 60, transformOrigin: "top right" }}
+                >
+                  <div className="px-4 py-3 border-b border-border flex items-center gap-2">
+                    <Bell className="h-3.5 w-3.5 text-primary" />
+                    <p className="text-xs font-extrabold text-foreground flex-1">Activity</p>
+                    {unread > 0 && (
+                      <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-accent text-accent-foreground">{unread} new</span>
+                    )}
+                  </div>
+                  <div className="max-h-72 overflow-y-auto divide-y divide-border">
+                    {logs.length > 0 ? (
+                      logs.map((l) => (
+                        <div key={l.id} className="flex items-center gap-2.5 px-4 py-2.5">
+                          <div className="w-6 h-6 rounded-lg bg-primary/10 text-primary flex items-center justify-center shrink-0">
+                            <History className="h-3 w-3" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-[11px] font-bold text-foreground truncate">{activityLogService.readableActionLabel(l.action)}</p>
+                            <p className="text-[10px] text-muted-foreground truncate">{l.entity_type ?? "system"}</p>
+                          </div>
+                          <span className="text-[9px] text-muted-foreground font-mono shrink-0">{activityLogService.timeAgoLabel(l.created_at)}</span>
+                        </div>
+                      ))
+                    ) : (
+                      <p className="px-4 py-6 text-center text-xs text-muted-foreground">No activity yet.</p>
+                    )}
+                  </div>
+                  <Link
+                    to="/admin-dashboard/activity-logs"
+                    onClick={() => setBellOpen(false)}
+                    className="flex items-center justify-center gap-1.5 px-4 py-2.5 border-t border-border text-[11px] font-bold text-primary hover:bg-muted transition-colors"
+                  >
+                    <CheckCheck className="h-3 w-3" /> View all activity logs
+                  </Link>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
 
           {/* User */}
           <div className="flex items-center gap-2.5 pl-2 border-l border-border" role="status" aria-label="Current user">

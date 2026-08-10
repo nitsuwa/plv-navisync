@@ -1,19 +1,22 @@
 import type { Pt, RouteMode } from "../../lib/routePlanner";
 import { cn } from "../../lib/utils";
 import { useReducedMotion } from "../../hooks";
+import { pointAlongPolyline } from "../../lib/geo";
 
 interface RouteMapOverlayProps {
   points: Pt[];
   mode: RouteMode;
   fading?: boolean;
+  /** 0..1 walk progress — when provided, renders the moving "you" avatar */
+  walkProgress?: number;
 }
 
 /**
  * SVG route overlay — the animated route line, direction arrows, junction
- * waypoints and start/destination markers. Rendered inside the campus map
- * <svg> (the parent applies the viewBox transform).
+ * waypoints, start/destination markers and the moving walk avatar. Rendered
+ * inside the campus map <svg> (the parent applies the viewBox transform).
  */
-export function RouteMapOverlay({ points, mode, fading = false }: RouteMapOverlayProps) {
+export function RouteMapOverlay({ points, mode, fading = false, walkProgress }: RouteMapOverlayProps) {
   const reducedMotion = useReducedMotion();
   if (points.length < 2) return null;
 
@@ -81,6 +84,23 @@ export function RouteMapOverlay({ points, mode, fading = false }: RouteMapOverla
           <circle cx={p.x} cy={p.y} r={2} fill={color} />
         </g>
       ))}
+
+      {/* Walk avatar — the moving "you" dot (kiosk-style) */}
+      {typeof walkProgress === "number" && walkProgress >= 0 && !reducedMotion && (() => {
+        const pos = pointAlongPolyline(points, Math.min(1, Math.max(0, walkProgress)));
+        return (
+          <g key="walk-avatar" style={{ pointerEvents: "none" }}>
+            <circle cx={pos.x} cy={pos.y} r={13} fill="rgba(37,99,235,0.18)" />
+            <circle cx={pos.x} cy={pos.y} r={8.5} fill="#2563eb" stroke="white" strokeWidth={2.5}
+              style={{ filter: "drop-shadow(0 1px 5px rgba(37,99,235,0.55))" }} />
+            {/* Little walking person glyph */}
+            <g transform={`translate(${pos.x},${pos.y}) scale(0.55)`}>
+              <circle cy={-4.5} r={3.4} fill="white" />
+              <path d="M -3.4 7 L 0 0 L 3.4 7 M 0 0 L 0 -4.5" fill="none" stroke="white" strokeWidth={2.4} strokeLinecap="round" />
+            </g>
+          </g>
+        );
+      })()}
 
       {/* Start marker — green with flag */}
       <g style={reducedMotion ? undefined : { animation: "scale-in 0.4s 0.3s ease both" }}>
