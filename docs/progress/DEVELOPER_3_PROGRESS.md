@@ -79,7 +79,19 @@ Status values: `READY`, `ACTIVE`, `BLOCKED`, `FOR REVIEW`, `DONE`.
 
 ## Current handoff note
 
-- Active package: **Out-of-scope enhancements (August 10)** — 6 frozen-spec/adjacent features implemented on `main` (QR sharing, remember-last-viewed, usage analytics, notifications, building hours, emergency broadcast) + 1 bug fix (BuildingDetailsPage resolves seeded ids). C4 Phase 1 kiosk round-2 is still uncommitted on `main`.
+- Active package: **UI/UX Audit fixes (August 11)** — 4 issues from the full UI/UX audit fixed (P1–P4). Also includes the earlier Route-Planner-vs-Steps-Panel overlap fix (auto-close planner on route-ready + `!directionsMode` guard on both steps panels).
+- UI/UX audit result: `docs/08_SYSTEM_AUDIT_AND_SUGGESTIONS.md` Part 4 — lahat ng pages rated; mobile overlap checked; P1–P4 fixed.
+- Step-by-step testing: **`docs/progress/DEVELOPER_3_UIUX_FIXES_VERIFICATION.md`** (NEW) — P2/P4/P3/P1 + overlap fix na may testing steps; `ADDED_FEATURES.md` §6b updated (428→639 tests).
+- P1 — **Admin sidebar mobile drawer**: `AdminLayout` + `AdminSidebar` — sidebar `hidden md:block` sa desktop; sa mobile may hamburger (`Menu`) + overlay + slide-in drawer na may `onNavigate` (nagsasara pag pumili ng nav item); desktop collapse toggle preserved (224→64px).
+- P2 — **Mode pills vs search bar 24px overlap** (768–950px): desktop search container naging `hidden md:block` (tinanggal ang duplicate search bar sa mobile) at width `min(300px, calc(50vw - 160px))` → 0px overlap verified.
+- P3 — **Announcements Archived tab**: `AdminAnnouncementsPage` — status filter tabs All/Published/Draft/Archived na may counts (katulad ng Events); Archive button nakatago sa archived rows. Verified: "All(2) Published(2) Draft(0) Archived(0)".
+- P4 — **Mobile steps sheet overlaps**: itinago ang campus selector (`hidden md:block`) at zoom controls (`hidden md:flex`) sa mobile kapag may active route; desktop visible pa rin.
+- Bonus — **Route Planner vs Steps Panel overlap fix** (nauna): auto-close ang planner pag handa na ang route (null→route transition, may `prevRouteRef`) + parehong desktop/mobile steps panel guarded ng `!directionsMode` → hindi na pwedeng mag-overlap.
+- Important changed files: `src/pages/CampusMapPage.tsx`, `src/pages/AdminAnnouncementsPage.tsx`, `src/components/layout/AdminLayout.tsx`, `src/components/layout/AdminSidebar.tsx`.
+- Verified: `pnpm build` PASS; live DOM checks (P2 0px overlap, P3 tabs + filter, P1 desktop collapse); mobile logic verified via code + `hidden md:*` classes.
+- Last completed package: C4 Phase 1 — Student Route Planning & Navigation (route planner, turn-by-turn UI, mobile steps sheet, pathfinding bug fix)
+- Known blocker: C8-C (publish controls, branding) requires Dev 1 A6/A7. C4 Phase 2 requires Gate G3 (Dev 2).
+- Next recommended action: **waiting on Dev 1 (A6/A7) and Dev 2 (B5/B7/B8)** — all unblocked Developer 3 work (C1–C9) is complete. C4 Phase 2 starts after Gate G3; C8-C after Dev 1 A6/A7 land. Optionally commit the uncommitted C4 round-2 kiosk work + enhancements + these UI/UX fixes.
 - Last completed package: C4 Phase 1 — Student Route Planning & Navigation (route planner, turn-by-turn UI, mobile steps sheet, pathfinding bug fix)
 - Known blocker: C8-C (publish controls, branding) requires Dev 1 A6/A7. C4 Phase 2 requires Gate G3 (Dev 2).
 - Important changed files (C4 Phase 1): `src/lib/routePlanner.ts` + `src/lib/__tests__/routePlanner.test.ts` (new), `src/components/map/RoutePlannerDialog.tsx` / `RouteStepsPanel.tsx` / `RouteMapOverlay.tsx` / `RouteErrorState.tsx` (new), `src/pages/CampusMapPage.tsx` (rewire), `src/components/map/index.ts` (exports), `src/lib/pathfinding.ts` (A* reconstruction fix)

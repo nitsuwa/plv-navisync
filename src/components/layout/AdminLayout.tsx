@@ -6,7 +6,7 @@ import { ThemeToggle } from "../ui/ThemeToggle";
 import { useTheme } from "../../hooks/useTheme";
 import { useAdminAuth } from "../../hooks/useAdminAuth";
 import { cn } from "../../lib/utils";
-import { PanelLeftClose, PanelLeft, Bell, User, History, CheckCheck } from "lucide-react";
+import { PanelLeftClose, PanelLeft, Menu, Bell, User, History, CheckCheck } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import {
   activityLogService,
@@ -46,6 +46,10 @@ const ROUTE_LABELS: Record<string, string> = {
 export function AdminLayout() {
   const { theme, toggleTheme } = useTheme();
   const [collapsed, setCollapsed] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [isMobile, setIsMobile] = useState(
+    () => typeof window !== "undefined" && window.matchMedia("(max-width: 767.98px)").matches
+  );
   const [bellOpen, setBellOpen] = useState(false);
   const [logs, setLogs] = useState<ActivityLogRow[]>([]);
   const [unread, setUnread] = useState(0);
@@ -81,6 +85,19 @@ export function AdminLayout() {
     }
   }, [bellOpen]);
 
+  // Keep the mobile drawer closed when navigating between pages.
+  useEffect(() => {
+    setMobileNavOpen(false);
+  }, [location.pathname]);
+
+  // Track viewport changes so the hamburger opens a drawer on mobile.
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 767.98px)");
+    const handle = (e: MediaQueryListEvent) => setIsMobile(e.matches);
+    mq.addEventListener("change", handle);
+    return () => mq.removeEventListener("change", handle);
+  }, []);
+
   useEffect(() => {
     if (loading) return;
     // Unauthenticated users AND non-admin accounts are sent to the login page.
@@ -96,17 +113,47 @@ export function AdminLayout() {
   return (
     <div className="flex h-screen overflow-hidden bg-background">
       <NavigationProgress />
-      <AdminSidebar collapsed={collapsed} />
+
+      {/* Desktop: inline collapsible sidebar */}
+      <div className="hidden md:block h-full">
+        <AdminSidebar collapsed={collapsed} />
+      </div>
+
+      {/* Mobile: overlay drawer */}
+      <AnimatePresence>
+        {mobileNavOpen && (
+          <>
+            <motion.div
+              key="mobile-nav-overlay"
+              className="fixed inset-0 z-40 bg-black/50 md:hidden"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setMobileNavOpen(false)}
+            />
+            <motion.div
+              key="mobile-nav-drawer"
+              className="fixed inset-y-0 left-0 z-50 md:hidden"
+              initial={{ x: -260 }}
+              animate={{ x: 0 }}
+              exit={{ x: -260 }}
+              transition={{ type: "spring", stiffness: 350, damping: 32 }}
+            >
+              <AdminSidebar collapsed={false} onNavigate={() => setMobileNavOpen(false)} />
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
 
       <div className="flex-1 flex flex-col overflow-hidden min-w-0">
         {/* Top bar */}
         <header className="h-16 border-b border-border bg-card flex items-center px-4 gap-3 shrink-0 shadow-sm">
           <button
-            onClick={() => setCollapsed(!collapsed)}
+            onClick={() => (isMobile ? setMobileNavOpen(true) : setCollapsed(!collapsed))}
             className="inline-flex items-center justify-center w-9 h-9 rounded-xl border border-border text-muted-foreground hover:bg-muted active:scale-90 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            aria-label={isMobile ? "Open navigation menu" : collapsed ? "Expand sidebar" : "Collapse sidebar"}
           >
-            {collapsed ? <PanelLeft className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
+            {isMobile ? <Menu className="h-4 w-4" /> : collapsed ? <PanelLeft className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
           </button>
 
           {/* Breadcrumb */}

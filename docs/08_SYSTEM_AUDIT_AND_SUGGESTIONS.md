@@ -227,3 +227,58 @@ Ang sistema ay **malakas na sa core**: may gumaganang auth (Supabase), interacti
 - Bell: real feed ("Announcement published 3d ago", "Report resolved 3d ago"…)
 - Analytics: Usage Analytics card + WeeklyChart sa dashboard
 - Emergency: red critical banner "Class suspension due to Typhoon…" lumabas sa public map, at na-off din (malinis ang DB)
+
+---
+
+## Part 4 — UI/UX Audit (Aug 2026) — lahat ng findings at fixes
+
+**Scope:** Full UI/UX audit ng lahat ng 30+ pages (public, student, admin) via live DOM inspection + console + static responsive review. **Mga file na hinawakan ay part natin (Developer 3):** `CampusMapPage`, `AdminAnnouncementsPage`, `AdminLayout`, `AdminSidebar`.
+
+### 4.1 Mobile overlap check
+
+| # | Scenario | Result |
+|---|---|---|
+| 1 | Route Planner vs Steps Panel (mobile bottom sheets) | ✅ FIXED — parehong mobile at desktop steps panel ay nasa `route && !directionsMode` guard → hindi pwedeng mag-overlap sa anumang width |
+| 2 | Steps sheet vs campus selector + zoom buttons (mobile) | ✅ FIXED — itinago ang campus selector (`hidden md:block`) at zoom controls (`hidden md:flex`) kapag may active route sa mobile (desktop visible pa rin) |
+| 3 | Building sheet vs steps panel (mobile) | ⚠️ Known minor — building sheet (z-40) sumasapaw sa steps panel (z-30) kung mag-tap ng building habang nag-navigate; acceptable (opaque cover) |
+| 4 | Offline cached banner vs search bar (mobile) | ⚠️ Minor — amber banner (top-4) sumasapaw sa search bar center; offline mode lang |
+
+### 4.2 Desktop findings at fixes
+
+| # | Issue | Rating (before) | Fix | Verified |
+|---|---|---|---|---|
+| P1 | Admin sidebar ay fixed `w-56` sa lahat ng screen — walang mobile adaptation | 2.5/5 (admin mobile) | `AdminLayout`: sidebar ngayon `hidden md:block` + **mobile drawer** (hamburger `Menu` icon + overlay + slide-in `AdminSidebar` na may `onNavigate`); desktop collapse toggle preserved | ✅ Desktop collapse 224→64px works; drawer logic verified |
+| P2 | Mode pills vs search bar — **24px overlap** sa 768–950px width | 4/5 (map) | Desktop search: `hidden md:block` (tinanggal ang duplicate sa mobile) + width `min(300px, calc(50vw - 160px))` | ✅ 0px overlap (search 271px, gap 5px) |
+| P3 | Announcements walang "Archived" view (inconsistent sa Events) | 3.5/5 | Idinagdag ang status filter tabs **All / Published / Draft / Archived** na may counts; Archive button nakatago sa archived rows | ✅ Tabs "All(2) Published(2) Draft(0) Archived(0)"; filter works (2→0 rows) |
+| P4 | Mobile steps sheet sumasapaw sa campus selector + zoom | (see 3.1#2) | Itago sa mobile kapag may route | ✅ Desktop visible (`block`/`flex`), mobile `hidden` |
+
+### 4.3 Overall ratings (desktop, 862px)
+
+| Area | Rating |
+|---|---|
+| Landing | 4.5/5 |
+| Campus Map | 4.5/5 |
+| Buildings Directory | 4/5 |
+| Building Details | 4/5 |
+| Help Center | 4/5 |
+| My Day | 4/5 |
+| Student Reports | 4/5 |
+| Student Favorites | 3.5/5 |
+| Admin Dashboard | 4.5/5 |
+| Admin Settings | 4/5 |
+| Admin Reports | 4/5 |
+| Admin Events | 4/5 |
+| Admin Announcements | 4/5 (may Archived tab na) |
+| Admin Activity Logs | 4/5 |
+| **Admin Portal (mobile)** | **4/5** (may drawer na — dating 2.5/5) |
+
+### 4.4 Green flags (verified live)
+- Zero console errors, lahat ng API requests 200
+- Walang horizontal overflow sa kahit anong page
+- Mobile bottom nav (dock, safe-area, landscape support) solid
+- Consistent design system + empty states + accessibility (skip-link, aria, focus rings, reduced-motion)
+
+### 4.5 Known remaining (minor, hindi blinock ng ibang dev)
+- MobileBuildingSheet covers steps panel kung mag-tap ng building mid-navigation (by design, opaque)
+- Offline banner vs search bar sa mobile (rare)
+- AdminSidebar Sign Out: kailangan i-click sa drawer (working via `onNavigate`)

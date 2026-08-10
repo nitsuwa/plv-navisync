@@ -1,9 +1,9 @@
 # PLV NaviSync — ADDED FEATURES
 
 **Developer 3 (Workstream C — Student Experience & Operations)**
-**Last updated:** August 10, 2026
+**Last updated:** August 11, 2026
 
-This document lists every feature **added, rewired, or fixed** by Developer 3. It covers the C-series packages (C1–C9), the kiosk-style navigation round, and the out-of-scope enhancements implemented on `main`.
+This document lists every feature **added, rewired, or fixed** by Developer 3. It covers the C-series packages (C1–C9), the kiosk-style navigation round, the out-of-scope enhancements implemented on `main`, and the UI/UX audit fixes (P1–P4).
 
 ---
 
@@ -68,9 +68,24 @@ These came from a full system audit — frozen-spec gaps and adjacent improvemen
 ## 5. Quality & Testing
 
 - **`pnpm build`** — PASSES (only the pre-existing >500 kB Map Builder chunk warning remains).
-- **`pnpm test`** — **428/428 tests pass** across 46 files.
-  - 20 new tests: `buildingHours` (10), `notificationService` (8), `usageAnalyticsService` (6).
+- **`pnpm test`** — **639/639 tests pass** across 57 files (includes Dev 2's floor-editor tests after merge).
+  - 20 new tests from the enhancements: `buildingHours` (10), `notificationService` (8), `usageAnalyticsService` (6).
 - All enhancements live-verified in the running app (QR, last-viewed restore, hours status, bell feed, analytics chart, emergency banner).
+- UI/UX audit fixes (P1–P4) verified: 0px pills/search overlap, announcement filter tabs, admin drawer + desktop collapse, mobile steps-sheet cleanup.
+
+## 6b. UI/UX Audit Fixes (August 11, 2026)
+
+From the full UI/UX audit (`docs/08_SYSTEM_AUDIT_AND_SUGGESTIONS.md` → Part 4). Lahat ng files ay Developer 3 scope. Full testing steps: `docs/progress/DEVELOPER_3_UIUX_FIXES_VERIFICATION.md`.
+
+| # | Fix | What it does |
+|---|---|---|
+| P1 | **Admin sidebar mobile drawer** | Admin sidebar ngayon `hidden md:block` sa desktop; sa mobile may hamburger (☰) + dimmed overlay + slide-in drawer na nagsasara pag pumili ng nav item o nag-tap sa labas. Desktop collapse toggle (224→64px) preserved. |
+| P2 | **Mode pills vs search bar overlap** | Dating 24px overlap sa 768–950px width. Desktop search naging `hidden md:block` (tinanggal din ang duplicate search bar sa mobile) + width `min(300px, calc(50vw - 160px))` → 0px overlap. |
+| P3 | **Announcements Archived tab** | Status filter tabs **All / Published / Draft / Archived** na may counts (consistent sa Events page); Archive button nakatago sa archived rows. |
+| P4 | **Mobile steps-sheet overlaps** | Itinago ang campus selector + zoom controls sa mobile kapag may active route para hindi sila sumilip sa ilalim ng steps sheet; desktop visible pa rin. |
+| Bonus | **Route Planner vs Steps Panel overlap** | Auto-close ang Route Planner pag handa na ang route (null→route transition) at parehong desktop/mobile steps panel ay guarded ng `!directionsMode` → hindi na pwedeng mag-overlap. |
+
+**Files changed (P1–P4):** `src/pages/CampusMapPage.tsx`, `src/pages/AdminAnnouncementsPage.tsx`, `src/components/layout/AdminLayout.tsx`, `src/components/layout/AdminSidebar.tsx`.
 
 ## 6. Team-Safety Notes
 

@@ -25,15 +25,16 @@ const NAV_ITEMS = [
   { label: "Settings",      path: "/admin-dashboard/settings",    icon: Settings        },
 ];
 
-interface AdminSidebarProps { collapsed?: boolean; }
+interface AdminSidebarProps { collapsed?: boolean; onNavigate?: () => void; }
 
-function NavItem({ label, path, icon: Icon, active, collapsed, badge }: {
+function NavItem({ label, path, icon: Icon, active, collapsed, badge, onClick }: {
   label: string; path: string; icon: React.ElementType;
-  active: boolean; collapsed: boolean; badge?: number;
+  active: boolean; collapsed: boolean; badge?: number; onClick?: () => void;
 }) {
   return (
     <Link
       to={path}
+      onClick={onClick}
       title={collapsed ? label : undefined}
       aria-current={active ? "page" : undefined}
       className={cn(
@@ -64,7 +65,7 @@ function NavItem({ label, path, icon: Icon, active, collapsed, badge }: {
   );
 }
 
-export function AdminSidebar({ collapsed = false }: AdminSidebarProps) {
+export function AdminSidebar({ collapsed = false, onNavigate }: AdminSidebarProps) {
   const location = useLocation();
   const navigate = useNavigate();
   const shouldReduce = useReducedMotion();
@@ -132,14 +133,14 @@ export function AdminSidebar({ collapsed = false }: AdminSidebarProps) {
       {/* Nav */}
       <nav className="flex-1 px-2.5 py-4 flex flex-col gap-0.5 overflow-y-auto scrollbar-show-on-hover">
         {navItems.map(item => (
-          <NavItem key={item.path} {...item} active={isActive(item.path)} collapsed={collapsed}/>
+          <NavItem key={item.path} {...item} active={isActive(item.path)} collapsed={collapsed} onClick={onNavigate}/>
         ))}
       </nav>
 
       {/* Sign out */}
       <div className="px-2.5 pb-5 border-t border-sidebar-border pt-3">
         <button
-          onClick={handleSignOut}
+          onClick={() => { handleSignOut(); onNavigate?.(); }}
           disabled={signingOut}
           title={collapsed ? "Sign Out" : undefined}
           className={cn(

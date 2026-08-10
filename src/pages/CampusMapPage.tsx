@@ -713,6 +713,18 @@ export function CampusMapPage() {
     );
   }, [fromBuilding, toBuilding, useMyLocation, youAreHere, mapMode, B_POS, activeCampus]);
 
+  // ── Auto-close planner when the route becomes ready ────────────────────
+  // The compact RouteStepsPanel (bottom-left) takes over, so the full
+  // planner never renders on top of it. Only fires on the null → route
+  // transition, so re-opening the planner to edit keeps it open.
+  const prevRouteRef = useRef<PlannedRoute | null>(null);
+  useEffect(() => {
+    if (route && !prevRouteRef.current) {
+      setDirectionsMode(false);
+    }
+    prevRouteRef.current = route;
+  }, [route]);
+
   // ── Route recalculation transition ─────────────────────────────────────
   // Briefly fade out the old route when from/to building changes
   const routeKey = `${useMyLocation ? "here" : fromBuilding?.id ?? ""}-${toBuilding?.id ?? ""}-${mapMode}`;
@@ -813,6 +825,7 @@ export function CampusMapPage() {
 
   const startDirectionsTo = useCallback((b: Building) => {
     setToBuilding(b); setFromBuilding(null);
+    setSelected(null); // Close building info panel to avoid overlap with route planner
     setDirectionsMode(true);
   }, []);
 
@@ -1475,9 +1488,9 @@ const buildingFill = (id: string) =>
           directionsMode
             ? // Mobile: full-width bottom sheet above the app's bottom nav; desktop: floating panel
               "inset-x-3 bottom-[74px] md:inset-x-auto md:bottom-auto md:top-3 md:left-3 md:w-[350px]"
-            : "top-3 left-3"
+            : "top-3 left-3 hidden md:block"
         )}
-        style={directionsMode ? undefined : { width: 300, maxWidth: "calc(100vw - 100px)" }}
+        style={directionsMode ? undefined : { width: 300, maxWidth: "min(300px, calc(50vw - 160px))" }}
       >
 
         {/* Breadcrumb strip (floor plan mode only) */}
@@ -1713,7 +1726,7 @@ const buildingFill = (id: string) =>
       )}
 
       {/* ══════════════ ZOOM CONTROLS — always visible ══════════════ */}
-      <div data-no-drag className="absolute bottom-20 md:bottom-5 right-3 z-20 flex flex-col gap-1">
+      <div data-no-drag className={cn("absolute bottom-20 md:bottom-5 right-3 z-20 flex flex-col gap-1", route && "hidden md:flex")}>
         <button onClick={e => { e.stopPropagation(); setShowLayers(v => !v); }} title="Layers"
           className={cn("w-9 h-9 rounded-xl border shadow-md flex items-center justify-center transition-all",
             showLayers ? "bg-primary border-primary text-primary-foreground" : "bg-card border-border/60 text-muted-foreground hover:border-primary/30")}>
@@ -1763,8 +1776,8 @@ const buildingFill = (id: string) =>
         </div>
       )}
 
-      {/* ══════════════ NAVIGATION PANEL (only when route active) ══════════════ */}
-      {route && (
+      {/* ══════════════ NAVIGATION PANEL (only when route active & planner closed) ══════════════ */}
+      {route && !directionsMode && (
         <>
           {/* Desktop: compact card, bottom-left */}
           <div data-no-drag className="absolute bottom-5 left-3 z-20 hidden md:block animate-slide-up">
@@ -1968,7 +1981,7 @@ const buildingFill = (id: string) =>
       )}
 
       {/* ══════════════ CAMPUS SELECTOR / MAP LABEL ══════════════ */}
-      <div data-no-drag className="absolute bottom-[76px] md:bottom-6 left-1/2 -translate-x-1/2 z-20">
+      <div data-no-drag className={cn("absolute bottom-[76px] md:bottom-6 left-1/2 -translate-x-1/2 z-20", route && "hidden md:block")}>
         {isFloorMode ? (
           /* Floor plan: breadcrumb label */
           <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-border shadow-sm"
@@ -2028,7 +2041,12 @@ const buildingFill = (id: string) =>
         <div className="flex items-center gap-2 h-10 px-3.5 rounded-2xl border border-border/60 shadow-lg"
           style={{ background:"var(--card)", backdropFilter:"blur(16px)", WebkitBackdropFilter:"blur(16px)" }}>
           {isFloorMode && (
-            <button onClick={closeFloorPlan} className="text-primary shrink-0"><ChevronLeft className="h-4 w-4"/></button>
+            <button onClick={closeFloorPlan} className="text-primary shrink-0 flex items-center gap-1" aria-label="Back to campus map">
+              <ChevronLeft className="h-4 w-4"/>
+              <span className="text-[10px] font-bold text-foreground truncate max-w-[110px]">
+                {floorView?.building.code} · {currentFloor?.label ?? `Floor ${floorView?.floor}`}
+              </span>
+            </button>
           )}
           <Search className="h-4 w-4 text-muted-foreground shrink-0"/>
           <input type="text" value={search}

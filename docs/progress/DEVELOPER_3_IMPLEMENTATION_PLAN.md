@@ -35,10 +35,14 @@ Status verified against `main` (commit `54aba46`), the verification docs, and li
 | 1 | C8-A — Admin Reports / Events / Announcements wiring | ✅ DONE | `feature/developer-3-c8-c4-c9-c10` | 3 pages wired to real services; 11 new tests; **78/78 tests + build pass** |
 | 2 | C4 Phase 1 — Navigation UI/UX | ✅ DONE | `feature/developer-3-c8-c4-c9-c10` | see Package 2 notes below |
 | 3 | C8-B — Dashboard, Activity Logs, Settings, Exports | ✅ DONE | same branch | 3 new services/lib + 3 pages rewired + activity-logs page + exports; 11 new tests; **89/89 tests + build pass** |
-| 4 | C4 Phase 2 — Published-graph integration | 🔒 blocked on Gate G3 | — | — |
-| 5 | C8-C — Publish controls, branding | 🔒 blocked on A6/A7 | — | — |
-| 6 | C9 — Responsive / a11y / theme final pass | ⬜ pending (after C4 + C8) | — | — |
-| 7 | C10 — PWA, offline, e2e | 🔒 blocked on Gate G5 | — | — |
+| 4 | C4 kiosk round-2 — seed campus, walking dot, you-are-here, pin UX | ✅ DONE | `main` | `DEVELOPER_3_C4_VERIFICATION.md` kiosk section; real PLV seed (SCB/Canteen/CABA/COED/CEIT/Guard) + walkway graph; geo.ts; 11+7 new tests; live walking-dot verified |
+| 5 | 6 out-of-scope enhancements (QR, last-viewed, analytics, notifications, hours, emergency) | ✅ DONE | `main` | `ADDED_FEATURES.md` §3 + `08_SYSTEM_AUDIT_AND_SUGGESTIONS.md` Part 1–2; 20 new tests; live-verified |
+| 6 | BuildingDetailsPage bug fix (seeded ids 404) | ✅ DONE | `main` | `ADDED_FEATURES.md` §4; `/buildings/b_scb` resolves |
+| 7 | UI/UX audit fixes P1–P4 + planner/steps overlap fix | ✅ DONE | `main` (uncommitted) | `DEVELOPER_3_UIUX_FIXES_VERIFICATION.md` (new) + `08_SYSTEM_AUDIT_AND_SUGGESTIONS.md` Part 4; `pnpm build` PASS + 639/639 tests |
+| 8 | C4 Phase 2 — Published-graph integration | 🔒 blocked on Gate G3 | — | — |
+| 9 | C8-C — Publish controls, branding | 🔒 blocked on A6/A7 | — | — |
+| 10 | C9 — Responsive / a11y / theme final pass | ✅ DONE | `main` | contrast/typography audit (10px min secondary text, semantic colors, focus rings, reduced motion) + UI/UX fixes P1–P4 (mobile admin drawer, pills overlap, steps-sheet cleanup) |
+| 11 | C10 — PWA, offline, e2e | 🔒 blocked on Gate G5 | — | — |
 
 > **Working branch:** all Developer 3 changes accumulate on `feature/developer-3-c8-c4-c9-c10`; ONE commit + push at the end of all packages (per developer instruction). `pnpm-lock.yaml` must be restored before that commit (pnpm rewrites it locally due to a pnpm-version/override mismatch — see §11).
 
