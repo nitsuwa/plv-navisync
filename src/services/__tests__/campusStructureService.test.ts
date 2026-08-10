@@ -11,6 +11,7 @@ const ids = {
   nodeB: "10000000-0000-4000-8000-000000000006",
   edge: "10000000-0000-4000-8000-000000000007",
 };
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const campus = {
   id: ids.campus, name: "A5 Campus", code: "A5", description: "", address: "", city: "", province: "", postalCode: "",
@@ -69,6 +70,64 @@ describe("campus structure mapping", () => {
     expect(hydrated.navEdges?.[0]).toMatchObject({ id: ids.edge, emergencySafe: true });
   });
 
+  it("serializes and hydrates floor-plan background metadata and calibrated scale", () => {
+    const withBackground = {
+      ...campus,
+      buildings: [{
+        ...campus.buildings[0],
+        floors: [{
+          ...campus.buildings[0].floors[0],
+          canvasW: 220,
+          canvasH: 160,
+          backgroundImage: {
+            storagePath: "campus/building/floor/plan.png",
+            fileName: "plan.png",
+            mimeType: "image/png",
+            size: 2048,
+            visible: true,
+            opacity: 0.4,
+            locked: true,
+            x: 12,
+            y: 8,
+            width: 180,
+            height: 120,
+            rotation: 3,
+          },
+          calibration: {
+            metersPerUnit: 0.05,
+            editorDistance: 200,
+            realDistanceM: 10,
+            points: [{ x: 0, y: 0 }, { x: 200, y: 0 }],
+          },
+        }],
+      }],
+    } as Campus;
+
+    const payload = serializeCampusStructure(withBackground);
+    expect(payload.floors[0]).toMatchObject({
+      floor_plan_path: "campus/building/floor/plan.png",
+      canvas_width: 220,
+      canvas_height: 160,
+      map_scale_m_per_unit: 0.05,
+    });
+
+    const hydrated = hydrateCampusStructure(withBackground, {
+      buildings: payload.buildings.map((v) => ({ ...v, campus_id: ids.campus }) as never),
+      floors: payload.floors.map((v) => v as never),
+      mapElements: payload.map_elements.map((v) => v as never),
+      navigationNodes: payload.navigation_nodes.map((v) => v as never),
+      navigationEdges: payload.navigation_edges.map((v) => v as never),
+    });
+
+    expect(hydrated.buildings[0].floors[0].backgroundImage).toMatchObject({
+      storagePath: "campus/building/floor/plan.png",
+      opacity: 0.4,
+      x: 12,
+      width: 180,
+    });
+    expect(hydrated.buildings[0].floors[0].calibration?.metersPerUnit).toBe(0.05);
+  });
+
   it("builds directory results from published snapshots only", () => {
     const payload = serializeCampusStructure(campus);
     expect(directoryFromSnapshot(ids.campus, { structure: payload } as never)).toEqual(expect.arrayContaining([
@@ -100,6 +159,38 @@ describe("campus structure mapping", () => {
     // Endpoint geometry survives in metadata.ui for round-tripping
     const ui = (wallRow.metadata as { ui: { x1: number; y1: number; x2: number; y2: number } }).ui;
     expect(ui).toMatchObject({ x1: 10, y1: 20, x2: 110, y2: 20 });
+  });
+
+  it("normalizes legacy synthetic managed perimeter wall ids before building the save payload", () => {
+    const syntheticId = `managed-perimeter-${ids.floor}-top`;
+    const withLegacyPerimeter = {
+      ...campus,
+      buildings: [{
+        ...campus.buildings[0],
+        floors: [{
+          ...campus.buildings[0].floors[0],
+          rooms: [],
+          walls: [{ id: syntheticId, x1: 0, y1: 0, x2: 220, y2: 0, thickness: 6, color: "#334155", locked: true, managedKind: "perimeter", perimeterSide: "top" }],
+          doors: [{ id: "10000000-0000-4000-8000-000000000021", x: 110, y: 0, width: 24, direction: "left", color: "#b45309", wallId: syntheticId, offset: 0.5 }],
+          windows: [{ id: "10000000-0000-4000-8000-000000000022", x: 120, y: 0, width: 32, height: 6, color: "#0284c7", wallId: syntheticId, offset: 0.55 }],
+        }],
+      }],
+    } as Campus;
+
+    const payload = serializeCampusStructure(withLegacyPerimeter);
+    const wallRow = payload.map_elements.find((row) => row.element_type === "wall")!;
+    const doorRow = payload.map_elements.find((row) => row.element_type === "door")!;
+    const windowRow = payload.map_elements.find((row) => row.element_type === "window")!;
+    const wallUi = (wallRow.metadata as { ui: { id: string; managedKind: string; perimeterSide: string } }).ui;
+    const doorUi = (doorRow.metadata as { ui: { wallId: string } }).ui;
+    const windowUi = (windowRow.metadata as { ui: { wallId: string } }).ui;
+
+    expect(wallRow.id).toMatch(UUID_RE);
+    expect(wallRow.id).not.toContain("managed-perimeter");
+    expect(wallUi).toMatchObject({ id: wallRow.id, managedKind: "perimeter", perimeterSide: "top" });
+    expect(doorUi.wallId).toBe(wallRow.id);
+    expect(windowUi.wallId).toBe(wallRow.id);
+    expect(JSON.stringify(payload)).not.toContain("managed-perimeter");
   });
 
   it("sanitizes stray NaN x/y on legacy walls instead of serializing null (regression: broken drag)", () => {

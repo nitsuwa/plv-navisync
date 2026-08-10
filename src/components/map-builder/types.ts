@@ -36,6 +36,22 @@ export interface FloorWall {
   material?: string;
   color: string;
   layer?: string;
+  startAnchor?: FloorWallEndpointAnchor;
+  endAnchor?: FloorWallEndpointAnchor;
+  managedKind?: "perimeter";
+  perimeterSide?: "top" | "right" | "bottom" | "left";
+  zOrder?: number;
+  visible?: boolean;
+  locked?: boolean;
+}
+
+export type FloorRoomAnchorEdge = "top" | "right" | "bottom" | "left";
+
+export interface FloorWallEndpointAnchor {
+  targetType: "room";
+  roomId: string;
+  edge: FloorRoomAnchorEdge;
+  offset: number;
 }
 
 // ── Indoor Door ─────────────────────────────────────────────────────────────
@@ -45,9 +61,16 @@ export interface FloorDoor {
   x: number;
   y: number;
   width: number;
+  wallId?: string;
+  offset?: number;
+  doorType?: "single" | "double";
+  hinge?: "left" | "right";
+  swingSide?: "a" | "b";
   direction: "left" | "right" | "double" | "sliding";
   color: string;
   locked?: boolean;
+  visible?: boolean;
+  zOrder?: number;
   label?: string;
   /** Whether this door is designated as an emergency exit */
   isEmergencyExit?: boolean;
@@ -61,7 +84,12 @@ export interface FloorWindow {
   y: number;
   width: number;
   height: number;
+  wallId?: string;
+  offset?: number;
   color: string;
+  zOrder?: number;
+  visible?: boolean;
+  locked?: boolean;
 }
 
 // ── Indoor Furniture ────────────────────────────────────────────────────────
@@ -78,6 +106,9 @@ export interface FloorFurniture {
   rotation: number;
   color: string;
   layer?: string;
+  zOrder?: number;
+  visible?: boolean;
+  locked?: boolean;
 }
 
 // ── Indoor Stairs (free placement) ──────────────────────────────────────────
@@ -88,6 +119,8 @@ export interface FloorStairs {
   y: number;
   width: number;
   height: number;
+  /** Rotation in degrees. Optional for legacy saved stair objects. */
+  rotation?: number;
   direction: StairDirection;
   label: string;
   floors?: number[];
@@ -95,6 +128,9 @@ export interface FloorStairs {
   sharedId?: string;
   /** Whether this staircase is wheelchair-accessible */
   accessible?: boolean;
+  zOrder?: number;
+  visible?: boolean;
+  locked?: boolean;
 }
 
 // ── Indoor Ramp (free placement) ───────────────────────────────────────────
@@ -105,6 +141,8 @@ export interface FloorRamp {
   y: number;
   width: number;
   height: number;
+  /** Rotation in degrees. Optional for legacy saved ramp objects. */
+  rotation?: number;
   label: string;
   /** Ramp direction: which floor it connects from/to */
   direction?: "up" | "down" | "both";
@@ -116,6 +154,9 @@ export interface FloorRamp {
   slope?: "gentle" | "medium" | "steep";
   /** Ramps are always wheelchair-accessible */
   accessible?: boolean;
+  zOrder?: number;
+  visible?: boolean;
+  locked?: boolean;
 }
 
 // ── Indoor Elevator (free placement) ────────────────────────────────────────
@@ -126,6 +167,8 @@ export interface FloorElevatorItem {
   y: number;
   width: number;
   height: number;
+  /** Rotation in degrees. Optional for legacy saved elevator objects. */
+  rotation?: number;
   doorWidth: number;
   label: string;
   floors?: number[];
@@ -133,6 +176,9 @@ export interface FloorElevatorItem {
   sharedId?: string;
   /** Whether this elevator is wheelchair-accessible (always true for elevators) */
   accessible?: boolean;
+  zOrder?: number;
+  visible?: boolean;
+  locked?: boolean;
 }
 
 // ── Indoor Label / Text ─────────────────────────────────────────────────────
@@ -145,12 +191,43 @@ export interface FloorLabel {
   fontSize: number;
   color: string;
   rotation: number;
+  /** Horizontal anchor of the label relative to (x, y). Defaults to left. */
+  align?: "left" | "center" | "right";
+  zOrder?: number;
+  visible?: boolean;
+  locked?: boolean;
 }
 
 // ── Room types ──────────────────────────────────────────────────────────────
 
 /** Direction a staircase travels */
 export type StairDirection = "up" | "down" | "both";
+
+export interface FloorPlanBackground {
+  storagePath: string;
+  fileName: string;
+  mimeType: string;
+  size: number;
+  visible: boolean;
+  opacity: number;
+  locked: boolean;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  rotation: number;
+  naturalWidth?: number;
+  naturalHeight?: number;
+  uploadedAt?: string;
+}
+
+export interface FloorScaleCalibration {
+  metersPerUnit: number;
+  points: [{ x: number; y: number }, { x: number; y: number }];
+  editorDistance: number;
+  realDistanceM: number;
+  calibratedAt?: string;
+}
 
 export interface FloorRoom {
   id: string;
@@ -160,6 +237,10 @@ export interface FloorRoom {
   y: number;
   w: number;
   h: number;
+  rotation?: number;
+  zOrder?: number;
+  visible?: boolean;
+  locked?: boolean;
   description?: string;
   accessibility?: boolean;
   /** Parent floor ID this room belongs to */
@@ -186,6 +267,17 @@ export interface FloorPlan {
   buildingId: string;
   number: number;
   label: string;
+  /** Editable floor-canvas dimensions in authoring units. */
+  canvasW?: number;
+  canvasH?: number;
+  /** Floor surface background color (appearance). Defaults to the warm canvas tone. */
+  backgroundColor?: string;
+  /** Whether the canvas grid lines are visible (persistent appearance preference). */
+  showGrid?: boolean;
+  /** Visual and snap grid spacing in floor authoring units. */
+  gridSize?: 10 | 20 | 40;
+  backgroundImage?: FloorPlanBackground;
+  calibration?: FloorScaleCalibration;
   rooms: FloorRoom[];
   paths: FloorPath[];
   walls: FloorWall[];
@@ -272,9 +364,18 @@ export interface RoomResizeState {
   oy: number;
   ow: number;
   oh: number;
+  rotation?: number;
 }
 
 export interface FloorUndoEntry {
+  canvasW?: number;
+  canvasH?: number;
+  backgroundColor?: string;
+  showGrid?: boolean;
+  gridSize?: 10 | 20 | 40;
+  backgroundImage?: FloorPlanBackground;
+  calibration?: FloorScaleCalibration;
+  label?: string;
   rooms: FloorRoom[];
   paths: FloorPath[];
   walls: FloorWall[];
