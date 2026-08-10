@@ -78,9 +78,16 @@ interface CampusEditorProps {
   onOpenCanvasSettings?: () => void;
   /** Timestamp of the last save (used to sync savedSnapshotRef with external saves) */
   lastSavedAt?: string;
+  /**
+   * JSON snapshot of the last-saved campus (page-level baseline). The editor
+   * unmounts while the Floor Editor is open, so on remount it must compare
+   * against the last PERSISTED campus — not the current one — or Floor Editor
+   * changes would never enable the outer Save button.
+   */
+  savedSnapshot?: string;
 }
 
-export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publishingEnabled = true, onOpenFloor, onAddBuilding, onOpenCanvasSettings }: CampusEditorProps) {
+export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publishingEnabled = true, onOpenFloor, onAddBuilding, onOpenCanvasSettings, savedSnapshot }: CampusEditorProps) {
   const campusRef = useRef(campus);
   useEffect(() => { campusRef.current = campus; }, [campus]);
   const [tool, setTool] = useState<SimpleTool>("select");
@@ -89,7 +96,16 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
   const [saveScreen, setSaveScreen] = useState<{ open: boolean; state: "saving" | "success" | "error" }>({ open: false, state: "saving" });
   const [layer, setLayer] = useState<EditorLayer>("campus");
   // ── Dirty state: snapshot of last-saved campus ──
-  const savedSnapshotRef = useRef<string>(JSON.stringify(campus));
+  // The page supplies the persisted baseline so a remount after editing floors
+  // (when this editor is unmounted) still detects the Floor Editor changes.
+  // Without the prop we fall back to the current campus (legacy behavior), which
+  // silently masks pre-existing floor edits — warn in dev so a forgotten entry
+  // point surfaces instead of hiding itself.
+  if (!savedSnapshot && import.meta.env.DEV && import.meta.env.MODE !== "test") {
+    // eslint-disable-next-line no-console
+    console.warn("[CampusEditor] savedSnapshot prop missing — dirty baseline defaults to the current campus.");
+  }
+  const savedSnapshotRef = useRef<string>(savedSnapshot ?? JSON.stringify(campus));
   const prevLastSavedAt = useRef<string | undefined>(campus.updatedAt);
 
   // Sync saved snapshot when lastSavedAt changes (indicating an external save)

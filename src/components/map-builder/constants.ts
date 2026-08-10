@@ -1,7 +1,7 @@
 import {
   MousePointer2, MapPin, Square, GitBranch, Trash2, Map,
   Navigation, Accessibility, Flame, Star, Hand, DoorOpen,
-  MoveVertical, SeparatorHorizontal, Binary, Text, Ruler, Sofa,
+  MoveVertical, SeparatorHorizontal, Binary, Text, Sofa,
   Container, Table, Monitor, Lamp, BookOpen,
   PanelRightOpen,
 } from "lucide-react";
@@ -152,7 +152,6 @@ export const FLOOR_STRUCTURE_TOOLS: { id: SimpleTool; icon: React.ElementType; l
   { id: "stairs",   icon: MoveVertical,           label: "Stairs",   key: "S" },
   { id: "elevator", icon: Binary,               label: "Elevator", key: "L" },
   { id: "text",     icon: Text,                 label: "Label",    key: "T" },
-  { id: "measure",  icon: Ruler,                label: "Measure",  key: "M" },
   { id: "path",     icon: GitBranch,            label: "Path",     key: "P" },
   { id: "erase",    icon: Trash2,               label: "Erase",    key: "E" },
 ];
@@ -165,7 +164,6 @@ export const FLOOR_INTERIOR_TOOLS: { id: SimpleTool; icon: React.ElementType; la
   { id: "furniture", icon: Sofa,          label: "Furniture", key: "F" },
   { id: "room",      icon: Square,        label: "Room",      key: "R" },
   { id: "text",      icon: Text,          label: "Label",     key: "T" },
-  { id: "measure",   icon: Ruler,         label: "Measure",   key: "M" },
   { id: "erase",     icon: Trash2,        label: "Erase",     key: "E" },
 ];
 
@@ -189,24 +187,18 @@ export const FURNITURE_CATEGORIES: FurnitureCategory[] = [
     label: "Seating",
     icon: "Armchair",
     items: [
-      { type: "student-chair",   name: "Student Chair",    width: 12, height: 12, color: "#2563eb" },
-      { type: "armchair",        name: "Armchair",         width: 18, height: 16, color: "#7c3aed" },
-      { type: "sofa",            name: "Sofa",             width: 30, height: 14, color: "#db2777" },
-      { type: "bench",           name: "Bench",            width: 28, height: 10, color: "#ca8a04" },
-      { type: "stool",           name: "Stool",            width: 8,  height: 8,  color: "#d97706" },
+      { type: "chair",           name: "Chair",            width: 12, height: 12, color: "#4b5563" },
+      { type: "bench",           name: "Bench",            width: 30, height: 10, color: "#6b5b45" },
+      { type: "sofa",            name: "Sofa",             width: 34, height: 16, color: "#3f3f46" },
     ],
   },
   {
     id: "tables",
-    label: "Tables",
+    label: "Tables / Work",
     icon: "Table",
     items: [
-      { type: "desk",             name: "Desk",              width: 24, height: 14, color: "#1e40af" },
-      { type: "student-desk",     name: "Student Desk",      width: 18, height: 12, color: "#3b82f6" },
-      { type: "conference-table", name: "Conference Table",  width: 40, height: 20, color: "#6366f1" },
-      { type: "lab-table",        name: "Lab Table",         width: 26, height: 16, color: "#a855f7" },
-      { type: "round-table",      name: "Round Table",       width: 20, height: 20, color: "#eab308" },
-      { type: "reception-desk",   name: "Reception Desk",    width: 22, height: 14, color: "#f97316" },
+      { type: "desk",             name: "Desk",              width: 26, height: 16, color: "#7a5c3a" },
+      { type: "table",            name: "Table",             width: 28, height: 18, color: "#8b6f4e" },
     ],
   },
   {
@@ -214,10 +206,8 @@ export const FURNITURE_CATEGORIES: FurnitureCategory[] = [
     label: "Storage",
     icon: "Container",
     items: [
-      { type: "bookshelf",       name: "Bookshelf",       width: 14, height: 8,  color: "#92400e" },
-      { type: "cabinet",         name: "Cabinet",         width: 16, height: 10, color: "#78716c" },
-      { type: "filing-cabinet",  name: "Filing Cabinet",  width: 10, height: 14, color: "#a8a29e" },
-      { type: "locker",          name: "Locker",          width: 6,  height: 10, color: "#64748b" },
+      { type: "cabinet",         name: "Cabinet",         width: 18, height: 12, color: "#71717a" },
+      { type: "bookshelf",       name: "Shelf",           width: 18, height: 10, color: "#6b5b45" },
     ],
   },
   {
@@ -225,34 +215,15 @@ export const FURNITURE_CATEGORIES: FurnitureCategory[] = [
     label: "Electronics",
     icon: "Monitor",
     items: [
-      { type: "computer",         name: "Computer",        width: 8,  height: 6,  color: "#475569" },
-      { type: "monitor",          name: "Monitor",         width: 10, height: 6,  color: "#334155" },
-      { type: "printer",          name: "Printer",         width: 10, height: 8,  color: "#64748b" },
-      { type: "projector",        name: "Projector",       width: 14, height: 8,  color: "#94a3b8" },
-      { type: "tv-screen",        name: "TV/Screen",       width: 20, height: 4,  color: "#0f172a" },
-    ],
-  },
-  {
-    id: "lab",
-    label: "Lab Equipment",
-    icon: "Flask",
-    items: [
-      { type: "microscope",       name: "Microscope",      width: 6,  height: 6,  color: "#a855f7" },
-      { type: "sink",             name: "Sink",            width: 12, height: 8,  color: "#94a3b8" },
-      { type: "fume-hood",        name: "Fume Hood",       width: 20, height: 10, color: "#d4d4d8" },
-      { type: "centrifuge",       name: "Centrifuge",      width: 10, height: 8,  color: "#e4e4e7" },
+      { type: "computer-workstation", name: "Computer Workstation", width: 28, height: 16, color: "#475569" },
     ],
   },
   {
     id: "decor",
-    label: "Decor & Plants",
+    label: "Decor",
     icon: "Lamp",
     items: [
-      { type: "plant",            name: "Plant Pot",       width: 8,  height: 8,  color: "#22c55e" },
-      { type: "trash-bin",        name: "Trash Bin",       width: 6,  height: 6,  color: "#78716c" },
-      { type: "water-cooler",     name: "Water Cooler",    width: 8,  height: 8,  color: "#3b82f6" },
-      { type: "whiteboard",       name: "Whiteboard",      width: 24, height: 4,  color: "#f8fafc" },
-      { type: "bulletin-board",   name: "Bulletin Board",  width: 20, height: 6,  color: "#fef08a" },
+      { type: "plant",            name: "Plant",           width: 10, height: 10, color: "#3f7d4a" },
     ],
   },
 ];

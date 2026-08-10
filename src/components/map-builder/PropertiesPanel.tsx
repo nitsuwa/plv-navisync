@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import type { LayerOrderAction } from "../../lib/campusLayerOrder";
 import { normalizeRotation, clampDecorScale, DECOR_SCALE_MIN, DECOR_SCALE_MAX } from "../../lib/decorAsset";
+import { createDefaultFloor } from "../../lib/floorPlanNormalization";
 import { DecorAssetVisual } from "./DecorAssetVisual";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
 import { cn } from "../../lib/utils";
@@ -410,21 +411,7 @@ export function PropertiesPanel({
                     <button
                       onClick={() => {
                         const nextNum = selBldg.floors.length + 1;
-                        const newFloor: FloorPlan = {
-                          id: genId("fl"),
-                          buildingId: selBldg.id,
-                          number: nextNum,
-                          label: nextNum === 1 ? "Ground Floor" : `Floor ${nextNum}`,
-                          rooms: [],
-                          paths: [],
-                          walls: [],
-                          doors: [],
-                          windows: [],
-                          furniture: [],
-                          stairs: [],
-                          elevators: [],
-                          labels: [],
-                        };
+                        const newFloor: FloorPlan = createDefaultFloor({ id: genId("fl"), buildingId: selBldg.id, number: nextNum });
                         onUpdateBuilding(selBldg.id, { floors: [...selBldg.floors, newFloor] });
                       }}
                       className="flex items-center gap-1 h-6 px-2 rounded-lg border border-primary/30 text-[9px] font-bold text-primary hover:bg-primary/8 transition-all"

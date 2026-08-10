@@ -78,7 +78,7 @@ describe("FloorEditor render (regression: LandPlot runtime crash)", () => {
     ).not.toThrow();
   });
 
-  it("shows the structure sidebar tools including the Window (LandPlot) button", () => {
+  it("shows the unified floor object library including the Window (LandPlot) button", () => {
     render(
       <FloorEditor
         campus={makeCampus()}
@@ -89,17 +89,36 @@ describe("FloorEditor render (regression: LandPlot runtime crash)", () => {
         onUpdate={() => {}}
       />
     );
-    // Structure-mode sidebar buttons (rendered from the same JSX that used
+    // Object-library sidebar buttons (rendered from the same JSX that used
     // the previously-unimported LandPlot icon)
-    expect(screen.getByText("Draw Wall")).toBeInTheDocument();
+    expect(screen.getByText("Wall")).toBeInTheDocument();
     expect(screen.getByText("Window")).toBeInTheDocument();
     expect(screen.getByText("Door")).toBeInTheDocument();
     expect(screen.getByText("Stairs")).toBeInTheDocument();
     // "Elevator" appears in multiple places (sidebar + tool labels)
     expect(screen.getAllByText("Elevator").length).toBeGreaterThan(0);
-    // Floor breadcrumb + mode toggle render (labels appear in multiple places)
+    // Floor breadcrumb + unified library render.
     expect(screen.getAllByText("Ground Floor").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Structure").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Interior").length).toBeGreaterThan(0);
+    expect(screen.getByText("Object Library")).toBeInTheDocument();
+    expect(screen.queryByText("Structure")).toBeNull();
+    expect(screen.queryByText("Interior")).toBeNull();
+  });
+
+  it("shows a recoverable message instead of creating fake data when the floor is missing", () => {
+    render(
+      <FloorEditor
+        campus={makeCampus()}
+        buildingId="b1"
+        floorId="missing-floor"
+        onBack={() => {}}
+        onSwitchFloor={() => {}}
+        onUpdate={() => {
+          throw new Error("missing floor must not save fake data");
+        }}
+      />
+    );
+
+    expect(screen.getByText("Floor unavailable")).toBeInTheDocument();
+    expect(screen.getByText("The selected floor could not be loaded. No floor data was changed.")).toBeInTheDocument();
   });
 });

@@ -370,6 +370,14 @@ export function useCanvasControls(canvasW: number, canvasH: number) {
       if (!svg || !container) return;
 
       const containerRect = container.getBoundingClientRect();
+      if (
+        containerRect.width <= padding * 2 ||
+        containerRect.height <= padding * 2 ||
+        svg.viewBox.baseVal.width <= 0 ||
+        svg.viewBox.baseVal.height <= 0 ||
+        w <= 0 ||
+        h <= 0
+      ) return;
       const pxPerUnit = containerRect.width / svg.viewBox.baseVal.width;
       const fitZoomX = ((containerRect.width - padding * 2) / w) / pxPerUnit;
       const fitZoomY = ((containerRect.height - padding * 2) / h) / pxPerUnit;
