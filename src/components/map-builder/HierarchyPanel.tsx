@@ -1,16 +1,25 @@
 import { useState, useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import {
-  Building2, Layers, Plus, Pencil, Trash2, Copy, GripVertical,
+  Building2, Layers, Plus, Pencil, Trash2, Copy, GripVertical, MoreHorizontal,
   ChevronRight, ChevronDown, FolderOpen, Search, Eye, EyeOff, Lock, TreePine, Sparkles,
 } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { genId, BUILDING_TYPES, DECOR_PALETTE_TYPES, DECOR_ASSET_MAP } from "./constants";
 import { DecorAssetVisual } from "./DecorAssetVisual";
 import { ContextMenu } from "./ContextMenu";
+import { FloorActionsMenu } from "./FloorActionsMenu";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
-import { createDefaultFloor, duplicateFloorForBuilding, normalizeFloor } from "../../lib/floorPlanNormalization";
-import type { Campus, CampusBuilding, CampusSelection, FloorPlan, BuildingTypeDescriptor, CampusDecorAsset, DecorAssetType } from "./types";
+import { duplicateFloorForBuilding, normalizeFloor } from "../../lib/floorPlanNormalization";
+import {
+  addFloorToBuilding,
+  countFloorAuthoredItems,
+  deleteFloorFromBuilding,
+  duplicateFloorInBuilding,
+  moveFloorInBuilding,
+  renameFloorInBuilding,
+} from "../../lib/floorManagement";
+import type { Campus, CampusBuilding, CampusSelection, BuildingTypeDescriptor, CampusDecorAsset, DecorAssetType } from "./types";
 
 interface HierarchyPanelProps {
   campus: Campus;
@@ -50,6 +59,12 @@ export function HierarchyPanel({
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const dragItemRef = useRef<number | null>(null);
+  // ── Floor row `...` menu ──
+  const [floorMenu, setFloorMenu] = useState<{ buildingId: string; floorId: string; x: number; y: number } | null>(null);
+  // ── Floor drag-and-drop reorder (mirrors the building-row DnD pattern) ──
+  const floorDragRef = useRef<{ buildingId: string; index: number } | null>(null);
+  const [floorDragOver, setFloorDragOver] = useState<{ buildingId: string; index: number } | null>(null);
+  const suppressFloorOpenRef = useRef(false);
 
   const buildings = campus.buildings;
   const filteredBuildings = searchQuery
@@ -75,7 +90,7 @@ export function HierarchyPanel({
   const applyRename = () => {
     if (!renameDialog || !renameValue.trim()) return;
     const { buildingId, floorId } = renameDialog;
-    // Floor rename
+    // Floor rename (same shared helper the Floor Editor uses)
     if (floorId) {
       const b = buildings.find((x) => x.id === buildingId);
       const floor = b?.floors.find((f) => f.id === floorId);
@@ -85,9 +100,7 @@ export function HierarchyPanel({
       updBuildings(
         buildings.map((x) =>
           x.id === buildingId
-            ? { ...x, floors: x.floors.map((f) =>
-                f.id === floorId ? { ...f, label: renameValue.trim() } : f
-              )}
+            ? { ...x, floors: renameFloorInBuilding(x.floors, floorId, renameValue.trim()) }
             : x
         )
       );
@@ -107,21 +120,27 @@ export function HierarchyPanel({
   const duplicateFloor = (buildingId: string, floorId: string) => {
     const b = buildings.find((x) => x.id === buildingId);
     if (!b) return;
-    const floor = b.floors.find((f) => f.id === floorId);
-    if (!floor) return;
     pushHistory();
-    const nextNumber = Math.max(...b.floors.map((f) => f.number), 0) + 1;
-    const newFloor: FloorPlan = duplicateFloorForBuilding(floor, {
-      id: genId("fl"),
-      buildingId,
-      number: nextNumber,
-      label: `${floor.label} (copy)`,
-    });
+    const { floors, copy } = duplicateFloorInBuilding(b.floors, buildingId, floorId);
+    if (!copy) return;
     updBuildings(
-      buildings.map((x) => (x.id === buildingId ? { ...x, floors: [...x.floors, newFloor] } : x))
+      buildings.map((x) => (x.id === buildingId ? { ...x, floors } : x))
     );
-    const duplicatedFloor = buildings.find(x => x.id === buildingId)?.floors.find(f => f.id === floorId);
-    toast.success("Floor Duplicated", duplicatedFloor ? `"${duplicatedFloor.label}" has been copied.` : undefined);
+    toast.success("Floor Duplicated", `"${copy.label}" has been copied.`);
+  };
+
+  /** Move Up / Move Down — same ordering primitive the Floor Editor tabs use. */
+  const moveFloor = (buildingId: string, floorId: string, direction: -1 | 1) => {
+    const b = buildings.find((x) => x.id === buildingId);
+    if (!b) return;
+    const { floors, moved } = moveFloorInBuilding(b.floors, floorId, direction);
+    if (!moved) return;
+    pushHistory();
+    updBuildings(
+      buildings.map((x) => (x.id === buildingId ? { ...x, floors } : x))
+    );
+    const floor = b.floors.find((f) => f.id === floorId);
+    toast.success("Floor Reordered", `"${floor?.label ?? "Floor"}" moved ${direction < 0 ? "up" : "down"}.`);
   };
 
   const confirmDeleteFloor = (buildingId: string, floorId: string) => {
@@ -132,35 +151,42 @@ export function HierarchyPanel({
       return;
     }
     const floor = b.floors.find((f) => f.id === floorId);
-    setDeleteConfirm({ type: "floor", id: floorId, name: floor?.label ?? "this floor", buildingId });
+    setDeleteConfirm({
+      type: "floor",
+      id: floorId,
+      name: floor?.label ?? "this floor",
+      buildingId,
+      itemCount: floor ? countFloorAuthoredItems(floor) : 0,
+    });
   };
 
   const executeDeleteFloor = (buildingId: string, floorId: string) => {
     const b = buildings.find((x) => x.id === buildingId);
     if (!b) return;
+    const { floors, deleted } = deleteFloorFromBuilding(b.floors, floorId);
     pushHistory();
     updBuildings(
-      buildings.map((x) =>
-        x.id === buildingId
-          ? { ...x, floors: x.floors.filter((f) => f.id !== floorId) }
-          : x
-      )
+      buildings.map((x) => (x.id === buildingId ? { ...x, floors } : x))
     );
-    const deletedFloor = buildings.find(x => x.id === buildingId)?.floors.find(f => f.id === floorId);
-    toast.success("Floor Deleted", deletedFloor ? `"${deletedFloor.label}" has been removed.` : undefined);
+    toast.success("Floor Deleted", deleted ? `"${deleted.label}" has been removed.` : undefined);
   };
 
   const addFloor = (buildingId: string) => {
     const b = buildings.find((x) => x.id === buildingId);
     if (!b) return;
-    const nextNum = Math.max(...b.floors.map((f) => f.number), 0) + 1;
-    const newFloor: FloorPlan = createDefaultFloor({ id: genId("fl"), buildingId, number: nextNum });
+    const { floors, floor } = addFloorToBuilding(b.floors, buildingId);
     pushHistory();
     updBuildings(
-      buildings.map((x) => (x.id === buildingId ? { ...x, floors: [...x.floors, newFloor] } : x))
+      buildings.map((x) => (x.id === buildingId ? { ...x, floors } : x))
     );
     const buildingForAdd = buildings.find(x => x.id === buildingId);
     toast.success("Floor Added", buildingForAdd ? `New floor added to ${buildingForAdd.code}.` : undefined);
+  };
+
+  const openFloorMenu = (e: React.MouseEvent, buildingId: string, floorId: string) => {
+    e.stopPropagation();
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    setFloorMenu({ buildingId, floorId, x: rect.left, y: (rect.bottom ?? 8) + 4 });
   };
 
   // ── Building manager helpers ──
@@ -244,6 +270,7 @@ export function HierarchyPanel({
     id: string;
     name: string;
     buildingId?: string;
+    itemCount?: number;
   } | null>(null);
 
   // ── Context menu ──
@@ -564,45 +591,93 @@ export function HierarchyPanel({
               </button>
             </div>
 
-            {/* Expanded floors */}
+            {/* Expanded floors — draggable rows reorder directly; the `...` button
+                opens the same shared floor actions menu used by the Floor Editor. */}
             {b.expanded && (
-              <div className="pl-10">
-                {b.floors.map((f) => (
+              <div className="pl-8">
+                {b.floors.map((f, floorIndex) => (
                   <div key={f.id}>
-                    <div className="group flex items-center" onContextMenu={(e) => handleFloorContextMenu(e, b.id, f.id)}>
+                    {/* Floor drop indicator */}
+                    {floorDragOver?.buildingId === b.id && floorDragOver.index === floorIndex && (
+                      <div className="h-0.5 bg-primary mx-5 rounded-full my-0.5" />
+                    )}
+                    <div
+                      className="group flex items-center"
+                      draggable
+                      onDragStart={(e) => {
+                        floorDragRef.current = { buildingId: b.id, index: floorIndex };
+                        e.dataTransfer.effectAllowed = "move";
+                        e.dataTransfer.setData("text/plain", f.id);
+                      }}
+                      onDragOver={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        e.dataTransfer.dropEffect = "move";
+                        setFloorDragOver({ buildingId: b.id, index: floorIndex });
+                      }}
+                      onDragLeave={() => setFloorDragOver(null)}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        const from = floorDragRef.current;
+                        if (from && from.buildingId === b.id && from.index !== floorIndex) {
+                          // Same ordering primitive as moveFloorInBuilding, but
+                          // dragged to an arbitrary destination index.
+                          const reordered = [...b.floors];
+                          const [moved] = reordered.splice(from.index, 1);
+                          reordered.splice(floorIndex, 0, moved);
+                          pushHistory();
+                          updBuildings(
+                            buildings.map((x) => (x.id === b.id ? { ...x, floors: reordered } : x))
+                          );
+                          toast.success("Floor Reordered", "Floor order updated.");
+                        }
+                        floorDragRef.current = null;
+                        setFloorDragOver(null);
+                      }}
+                      onDragEnd={() => {
+                        floorDragRef.current = null;
+                        setFloorDragOver(null);
+                        // A drag end can still be followed by a click in some
+                        // browsers — never let a reorder gesture open the floor.
+                        // Consume the flag on the next row click; also clear it
+                        // after a tick so a drag that ends elsewhere never
+                        // swallows a later legitimate row click.
+                        suppressFloorOpenRef.current = true;
+                        window.setTimeout(() => { suppressFloorOpenRef.current = false; }, 0);
+                      }}
+                      onContextMenu={(e) => handleFloorContextMenu(e, b.id, f.id)}
+                    >
+                      {/* Grip handle */}
+                      <span
+                        className="opacity-0 group-hover:opacity-40 cursor-grab active:cursor-grabbing text-muted-foreground shrink-0"
+                        title="Drag to reorder"
+                      >
+                        <GripVertical className="h-3 w-3" />
+                      </span>
                       <button
-                        onClick={() => onOpenFloor(b.id, f.id)}
-                        className="flex-1 flex items-center gap-2 px-2 py-1 hover:bg-muted/50 transition-colors text-left min-w-0"
+                        onClick={() => {
+                          if (suppressFloorOpenRef.current) { suppressFloorOpenRef.current = false; return; }
+                          onOpenFloor(b.id, f.id);
+                        }}
+                        className="flex-1 flex items-center gap-2 px-1 py-1 hover:bg-muted/50 transition-colors text-left min-w-0"
                       >
                         <Layers className="h-3 w-3 text-muted-foreground shrink-0" />
-                        <span className="text-xs text-muted-foreground group-hover:text-foreground transition-colors truncate flex-1">
+                        <span className="text-xs text-muted-foreground group-hover:text-foreground transition-colors truncate flex-1" title={f.label}>
                           {f.label}
                         </span>
                         <span className="text-[9px] text-muted-foreground">
                           {f.rooms.length}R
                         </span>
                       </button>
-                      {/* Floor manager actions */}
+                      {/* Floor actions `...` — operates on THIS floor row */}
                       <button
-                        onClick={(e) => { e.stopPropagation(); renameFloor(b.id, f.id); }}
-                        className="opacity-0 group-hover:opacity-100 w-5 h-5 rounded flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted transition-all shrink-0"
-                        title="Rename"
+                        onClick={(e) => openFloorMenu(e, b.id, f.id)}
+                        aria-label={`Floor actions: ${f.label}`}
+                        title="Floor actions"
+                        className="opacity-0 group-hover:opacity-100 w-6 h-6 rounded-md flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted transition-all shrink-0"
                       >
-                        <Pencil className="h-2.5 w-2.5" />
-                      </button>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); duplicateFloor(b.id, f.id); }}
-                        className="opacity-0 group-hover:opacity-100 w-5 h-5 rounded flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted transition-all shrink-0"
-                        title="Duplicate"
-                      >
-                        <Copy className="h-2.5 w-2.5" />
-                      </button>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); confirmDeleteFloor(b.id, f.id); }}
-                        className="opacity-0 group-hover:opacity-100 w-5 h-5 rounded flex items-center justify-center text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-all shrink-0"
-                        title="Delete"
-                      >
-                        <Trash2 className="h-2.5 w-2.5" />
+                        <MoreHorizontal className="h-3.5 w-3.5" />
                       </button>
                     </div>
                     {/* Rooms under this floor */}
@@ -676,6 +751,31 @@ export function HierarchyPanel({
         )}
       </AnimatePresence>
 
+      {/* Floor actions `...` menu — shared component + shared handlers */}
+      {floorMenu && (() => {
+        const targetBuilding = buildings.find((x) => x.id === floorMenu.buildingId);
+        const target = targetBuilding?.floors.find((f) => f.id === floorMenu.floorId);
+        if (!targetBuilding || !target) return null;
+        const index = targetBuilding.floors.findIndex((f) => f.id === target.id);
+        return (
+          <FloorActionsMenu
+            x={floorMenu.x}
+            y={floorMenu.y}
+            floor={target}
+            isFirst={index <= 0}
+            isLast={index >= targetBuilding.floors.length - 1}
+            isOnly={targetBuilding.floors.length <= 1}
+            testId="hierarchy-floor-actions-menu"
+            onClose={() => setFloorMenu(null)}
+            onRename={() => { setFloorMenu(null); renameFloor(floorMenu.buildingId, target.id); }}
+            onDuplicate={() => { setFloorMenu(null); duplicateFloor(floorMenu.buildingId, target.id); }}
+            onMoveUp={() => { setFloorMenu(null); moveFloor(floorMenu.buildingId, target.id, -1); }}
+            onMoveDown={() => { setFloorMenu(null); moveFloor(floorMenu.buildingId, target.id, 1); }}
+            onDelete={() => { setFloorMenu(null); confirmDeleteFloor(floorMenu.buildingId, target.id); }}
+          />
+        );
+      })()}
+
       {/* Rename dialog */}
       <AnimatePresence>
         {renameDialog && (
@@ -745,10 +845,10 @@ export function HierarchyPanel({
         title={deleteConfirm?.type === "floor" ? "Delete Floor" : "Delete Building"}
         message={
           deleteConfirm?.type === "floor"
-            ? `Are you sure you want to delete "${deleteConfirm?.name}"? This action cannot be undone.`
+            ? `Delete "${deleteConfirm?.name}" and its ${deleteConfirm?.itemCount ?? 0} authored ${(deleteConfirm?.itemCount ?? 0) === 1 ? "item" : "items"}? This action cannot be undone.`
             : `Are you sure you want to delete "${deleteConfirm?.name}"? This will also remove all its floors and rooms. This action cannot be undone.`
         }
-        confirmLabel="Delete"
+        confirmLabel={deleteConfirm?.type === "floor" ? "Delete Floor" : "Delete"}
         cancelLabel="Cancel"
         variant="danger"
         onConfirm={() => {

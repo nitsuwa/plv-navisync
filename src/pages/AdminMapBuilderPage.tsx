@@ -90,6 +90,15 @@ export function AdminMapBuilderPage() {
   const [showBuildingWizard, setShowBuildingWizard] = useState(false);
   const directionRef = useRef(1);
 
+  // ── Single dirty-state source of truth ──
+  // JSON snapshot of the last PERSISTED campus per campus id. The outdoor
+  // CampusEditor derives `isDirty` by comparing its current campus against this
+  // baseline (via the `savedSnapshot` prop). Because the CampusEditor unmounts
+  // while the Floor Editor is open, the baseline must live here at the page
+  // level so Floor Editor mutations (which update the same campus draft through
+  // onUpdate) still enable the outer Save when the user returns.
+  const savedSnapshotsRef = useRef<Record<string, string>>({});
+
   useEffect(() => {
     let active = true;
     campusService.list().then((rows) => { if (active) setCampuses(rows); }).catch((error: Error) => {
@@ -109,9 +118,18 @@ export function AdminMapBuilderPage() {
     setCampuses((p) => p.map((c) => (c.id === updated.id ? updated : c))),
   []);
 
-  const updateCampusMetadata = useCallback((updated: Campus) =>
-    setCampuses((p) => p.map((c) => (c.id === updated.id ? preserveStructureIfMissing(updated, c) : c))),
-  []);
+  const updateCampusMetadata = useCallback((updated: Campus) => {
+    setCampuses((p) => p.map((c) => (c.id === updated.id ? preserveStructureIfMissing(updated, c) : c)));
+    // Metadata persistence (details, canvas settings, archive/restore) is a
+    // completed write — the stored campus becomes the new dirty baseline.
+    // Compute from the closure (not inside the state updater) so the updater
+    // stays pure; all callers pass a campus already present in `campuses`.
+    const previous = campuses.find((c) => c.id === updated.id);
+    if (previous) {
+      const stored = preserveStructureIfMissing(updated, previous);
+      savedSnapshotsRef.current = { ...savedSnapshotsRef.current, [stored.id]: JSON.stringify(stored) };
+    }
+  }, [campuses]);
 
   const duplicateCampus = useCallback(async (id: string) => {
     const source = campuses.find((c) => c.id === id);
@@ -185,10 +203,13 @@ export function AdminMapBuilderPage() {
     } else {
       try {
         const hydrated = await campusStructureService.load(campus!);
-        updateCampus({
+        const hydratedWithPreview = {
           ...hydrated,
           previewBuildingCount: campus?.previewBuildingCount ?? hydrated.previewBuildingCount ?? hydrated.buildings.length,
-        });
+        };
+        updateCampus(hydratedWithPreview);
+        // Hydration is a read of the persisted state — it becomes the baseline.
+        savedSnapshotsRef.current = { ...savedSnapshotsRef.current, [campusId]: JSON.stringify(hydratedWithPreview) };
       } catch (error) {
         toast.error("Could not load map", { description: (error as Error).message });
         return;
@@ -201,6 +222,8 @@ export function AdminMapBuilderPage() {
     const saved = await campusStructureService.save(campus);
     const savedWithPreviewCount = { ...saved, previewBuildingCount: saved.buildings.length, previewBuildingsLoaded: true };
     updateCampus(savedWithPreviewCount);
+    // A successful save is the canonical baseline for the outer dirty check.
+    savedSnapshotsRef.current = { ...savedSnapshotsRef.current, [saved.id]: JSON.stringify(savedWithPreviewCount) };
     return savedWithPreviewCount;
   }, [updateCampus]);
 
@@ -383,6 +406,7 @@ export function AdminMapBuilderPage() {
                   onAddBuilding={() => setShowBuildingWizard(true)}
                   onOpenCanvasSettings={() => setShowCanvasSettings(true)}
                   lastSavedAt={activeCampus.updatedAt}
+                  savedSnapshot={savedSnapshotsRef.current[activeCampus.id]}
                 />
                 {showBuildingWizard && (
                   <BuildingWizardModal

@@ -13,7 +13,7 @@ import type {
   FloorWallEndpointAnchor,
 } from "../components/map-builder/types";
 
-export const DEFAULT_FLOOR_CANVAS = { w: 580, h: 380 };
+export const DEFAULT_FLOOR_CANVAS = { w: 600, h: 450 };
 export const MIN_FLOOR_CANVAS = { w: 120, h: 100 };
 
 export interface Rect {

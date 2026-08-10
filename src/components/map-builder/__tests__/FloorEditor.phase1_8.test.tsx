@@ -71,6 +71,8 @@ function makeSnapCampus(): Campus {
   const floor = campus.buildings[0].floors[0];
   floor.canvasW = 580;
   floor.canvasH = 380;
+  // These legacy snap regressions assert the historical 10-unit grid behavior.
+  floor.gridSize = 10;
   floor.rooms = [];
   floor.walls = [
     { id: "w1", x1: 53, y1: 57, x2: 153, y2: 57, thickness: 4, color: "#64748b", material: "concrete" },
@@ -196,6 +198,57 @@ function Harness({
   );
 }
 
+function makeFloorManagementCampus(): Campus {
+  const campus = makeRichCampus();
+  const floor = campus.buildings[0].floors[0];
+  floor.canvasW = 600;
+  floor.canvasH = 450;
+  floor.rooms = [{ id: "r1", name: "Room", type: "classroom", x: 50, y: 50, w: 120, h: 90, floorId: "f1", buildingId: "b1" }];
+  floor.walls = [{
+    id: "w1",
+    x1: 50,
+    y1: 50,
+    x2: 170,
+    y2: 50,
+    thickness: 6,
+    color: "#64748b",
+    material: "concrete",
+    startAnchor: { targetType: "room", roomId: "r1", edge: "top", offset: 0 },
+    endAnchor: { targetType: "room", roomId: "r1", edge: "top", offset: 1 },
+  }];
+  floor.doors = [{ id: "d1", x: 110, y: 50, width: 28, direction: "left", color: "#b45309", wallId: "w1", offset: 0.5 }];
+  floor.windows = [{ id: "win1", x: 140, y: 50, width: 32, height: 6, color: "#0284c7", wallId: "w1", offset: 0.75 }];
+  floor.furniture = [];
+  floor.stairs = [];
+  floor.ramps = [];
+  floor.elevators = [];
+  floor.labels = [{ id: "lb1", x: 90, y: 130, text: "GF", fontSize: 12, color: "#374151", rotation: 0 }];
+  floor.paths = [];
+  return campus;
+}
+
+function FloorWorkflowHarness({
+  onCampusChange,
+  initialCampus = makeFloorManagementCampus(),
+}: {
+  onCampusChange?: (c: Campus) => void;
+  initialCampus?: Campus;
+}) {
+  const [campus, setCampus] = useState<Campus>(initialCampus);
+  const [activeFloorId, setActiveFloorId] = useState("f1");
+  return (
+    <FloorEditor
+      campus={campus}
+      buildingId="b1"
+      floorId={activeFloorId}
+      onBack={() => {}}
+      onSwitchFloor={setActiveFloorId}
+      onUpdate={(c) => { onCampusChange?.(c); setCampus(c); }}
+      onSave={(c) => Promise.resolve(c)}
+    />
+  );
+}
+
 function canvasSvg(container: HTMLElement, w = 220, h = 160): SVGSVGElement {
   const svg = Array.from(container.querySelectorAll("svg")).find((s) => s.getAttribute("viewBox") === `0 0 ${w} ${h}`);
   expect(svg).toBeTruthy();
@@ -268,6 +321,316 @@ beforeEach(() => {
   latestCampus = null;
   vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => window.setTimeout(() => cb(performance.now()), 0));
   vi.stubGlobal("cancelAnimationFrame", (id: number) => window.clearTimeout(id));
+});
+
+describe("B4 floor workflow completion", () => {
+  it("adds a new default floor and switches into a clean editor state", () => {
+    let latestCampus: Campus | null = null;
+    render(<FloorWorkflowHarness onCampusChange={(c) => { latestCampus = c; }} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Add Floor" }));
+
+    const floors = latestCampus!.buildings[0].floors;
+    expect(floors).toHaveLength(2);
+    expect(floors[1]).toMatchObject({ buildingId: "b1", number: 2, label: "Floor 2", canvasW: 600, canvasH: 450, gridSize: 20 });
+    expect(floors[1].rooms).toEqual([]);
+    expect(screen.queryByTestId("floor-properties-panel")).toBeNull();
+    // The new floor becomes the active tab; the breadcrumb also renders the same
+    // label, so scope to the tab button role rather than a bare text query.
+    expect(screen.getByRole("button", { name: "Floor 2" })).toBeInTheDocument();
+  });
+
+  it("duplicates a populated floor with independent IDs and remapped room-wall-opening relationships", () => {
+    let latestCampus: Campus | null = null;
+    render(<FloorWorkflowHarness onCampusChange={(c) => { latestCampus = c; }} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Floor actions" }));
+    fireEvent.click(screen.getByRole("button", { name: "Duplicate Floor" }));
+
+    const [source, copy] = latestCampus!.buildings[0].floors;
+    expect(copy.label).toBe("Ground Floor Copy");
+    expect(copy.rooms[0].id).not.toBe(source.rooms[0].id);
+    expect(copy.walls[0].id).not.toBe(source.walls[0].id);
+    expect(copy.walls[0].startAnchor?.roomId).toBe(copy.rooms[0].id);
+    expect(copy.walls[0].endAnchor?.roomId).toBe(copy.rooms[0].id);
+    expect(copy.doors[0].id).not.toBe(source.doors[0].id);
+    expect(copy.doors[0].wallId).toBe(copy.walls[0].id);
+    expect(copy.windows[0].id).not.toBe(source.windows[0].id);
+    expect(copy.windows[0].wallId).toBe(copy.walls[0].id);
+  });
+
+  it("reorders floors and deletes only after confirmation", async () => {
+    let latestCampus: Campus | null = null;
+    render(<FloorWorkflowHarness onCampusChange={(c) => { latestCampus = c; }} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Floor actions" }));
+    fireEvent.click(screen.getByRole("button", { name: "Duplicate Floor" }));
+    fireEvent.click(screen.getByRole("button", { name: "Floor actions" }));
+    fireEvent.click(screen.getByRole("button", { name: "Move Left" }));
+    expect(latestCampus!.buildings[0].floors.map((floor) => floor.label)).toEqual(["Ground Floor Copy", "Ground Floor"]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Floor actions" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete Floor" }));
+    expect(screen.getByTestId("delete-floor-confirm-dialog")).toHaveTextContent("Ground Floor Copy");
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    // The dialog is wrapped in AnimatePresence, so it stays mounted through the
+    // exit animation after Cancel. Wait for it to fully unmount before reopening
+    // the floor actions menu, otherwise the ghost confirm button duplicates the
+    // menu item's accessible name.
+    await waitFor(() => expect(screen.queryByTestId("delete-floor-confirm-dialog")).toBeNull());
+    expect(latestCampus!.buildings[0].floors).toHaveLength(2);
+
+    fireEvent.click(screen.getByRole("button", { name: "Floor actions" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete Floor" }));
+    fireEvent.click(within(screen.getByTestId("delete-floor-confirm-dialog")).getByRole("button", { name: "Delete Floor" }));
+    expect(latestCampus!.buildings[0].floors.map((floor) => floor.label)).toEqual(["Ground Floor"]);
+    // The surviving floor becomes the active tab after deletion.
+    expect(screen.getByRole("button", { name: "Ground Floor" }).className).toContain("bg-primary");
+  });
+
+  it("persists grid presets from normal Floor Settings without exposing deferred tools", () => {
+    let latestCampus: Campus | null = null;
+    render(<FloorWorkflowHarness onCampusChange={(c) => { latestCampus = c; }} />);
+
+    // The Floor Settings dialog is opened from the toolbar button whose
+    // accessible name is exactly "Floor Settings".
+    fireEvent.click(screen.getByRole("button", { name: /^Floor Settings$/i }));
+    expect(screen.queryByText(/Import Floor Plan/i)).toBeNull();
+    expect(screen.queryByText(/Calibrate Scale/i)).toBeNull();
+    expect(screen.queryByRole("button", { name: /Measure/i })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Grid size 10" }));
+    fireEvent.click(screen.getByRole("button", { name: "Grid size 40" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save Changes" }));
+
+    expect(latestCampus!.buildings[0].floors[0].gridSize).toBe(40);
+  });
+
+  it("commits one completed inline text edit as exactly one history action", () => {
+    const campus = makeRichCampus();
+    campus.buildings[0].floors[0].labels = [
+      { id: "lbx", x: 40, y: 80, text: "Hi", fontSize: 12, color: "#374151", rotation: 0, align: "left" },
+    ];
+    const { container } = render(<Harness initialCampus={campus} onCampusChange={(c) => { latestCampus = c; }} />);
+    stubSvgRect(container);
+
+    fireEvent.dblClick(screen.getByTestId("floor-label-hit-area"), { clientX: 42, clientY: 80, bubbles: true });
+    const inline = screen.getByLabelText("Inline label text");
+    // Multiple keystrokes while editing must only ever record ONE history entry.
+    fireEvent.change(inline, { target: { value: "M" } });
+    fireEvent.change(inline, { target: { value: "Ma" } });
+    fireEvent.change(inline, { target: { value: "Main Lobby" } });
+    fireEvent.blur(inline);
+
+    const label = latestCampus!.buildings[0].floors[0].labels[0];
+    expect(label.text).toBe("Main Lobby");
+    const undoBtn = screen.getByTitle("Undo (Ctrl+Z)") as HTMLButtonElement;
+    expect(undoBtn.disabled).toBe(false);
+    fireEvent.click(undoBtn);
+    expect(latestCampus!.buildings[0].floors[0].labels[0].text).toBe("Hi");
+    expect((screen.getByTitle("Undo (Ctrl+Z)") as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("protects the last remaining floor from deletion", () => {
+    let latestCampus: Campus | null = null;
+    render(<FloorWorkflowHarness onCampusChange={(c) => { latestCampus = c; }} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Floor actions" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete Floor" }));
+
+    expect(screen.queryByTestId("delete-floor-confirm-dialog")).toBeNull();
+    expect(latestCampus).toBeNull();
+    expect(screen.getByRole("button", { name: "Ground Floor" })).toBeInTheDocument();
+  });
+
+  it("changes grid presets without moving existing objects", () => {
+    let latestCampus: Campus | null = null;
+    render(<FloorWorkflowHarness onCampusChange={(c) => { latestCampus = c; }} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /^Floor Settings$/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Grid size 40" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save Changes" }));
+
+    const floor = latestCampus!.buildings[0].floors[0];
+    expect(floor.gridSize).toBe(40);
+    expect(floor.walls[0]).toMatchObject({ x1: 50, y1: 50, x2: 170, y2: 50 });
+    expect(floor.rooms[0]).toMatchObject({ x: 50, y: 50, w: 120, h: 90 });
+    expect(floor.doors[0]).toMatchObject({ x: 110, y: 50, wallId: "w1" });
+  });
+});
+
+describe("B4 floor management UX consistency", () => {
+  function floorActionsMenu(): HTMLElement {
+    return screen.getByTestId("floor-actions-menu");
+  }
+
+  it("labels the floor actions button and shows the shared menu with edge disable states", () => {
+    render(<FloorWorkflowHarness />);
+
+    const actionsButton = screen.getByRole("button", { name: "Floor actions" });
+    expect(actionsButton).toHaveAttribute("title", "Floor actions");
+    fireEvent.click(actionsButton);
+
+    const menu = floorActionsMenu();
+    expect(within(menu).getByRole("button", { name: "Rename Floor" })).toBeInTheDocument();
+    expect(within(menu).getByRole("button", { name: "Duplicate Floor" })).toBeInTheDocument();
+    expect(within(menu).getByRole("button", { name: "Floor Settings" })).toBeInTheDocument();
+    // Single floor: reordering and deleting are blocked from the menu too.
+    expect((within(menu).getByRole("button", { name: "Move Left" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((within(menu).getByRole("button", { name: "Move Right" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((within(menu).getByRole("button", { name: "Delete Floor" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("renames the active floor from the menu and rejects an empty name", () => {
+    let latestCampus: Campus | null = null;
+    render(<FloorWorkflowHarness onCampusChange={(c) => { latestCampus = c; }} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Floor actions" }));
+    fireEvent.click(within(floorActionsMenu()).getByRole("button", { name: "Rename Floor" }));
+    fireEvent.change(screen.getByLabelText("Rename floor input"), { target: { value: "Lobby 1" } });
+    fireEvent.click(screen.getByRole("button", { name: "Rename Floor" }));
+
+    expect(latestCampus!.buildings[0].floors[0].label).toBe("Lobby 1");
+    expect(screen.getByRole("button", { name: "Lobby 1" })).toBeInTheDocument();
+
+    // Empty/whitespace names keep the dialog open with a disabled save.
+    fireEvent.click(screen.getByRole("button", { name: "Floor actions" }));
+    fireEvent.click(within(floorActionsMenu()).getByRole("button", { name: "Rename Floor" }));
+    fireEvent.change(screen.getByLabelText("Rename floor input"), { target: { value: "   " } });
+    expect(screen.getByText("Floor name cannot be empty.")).toBeInTheDocument();
+    expect((screen.getByRole("button", { name: "Rename Floor" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByLabelText("Rename floor input")).toBeInTheDocument();
+  });
+
+  it("moves the active floor left/right with edge disable states while keeping the active floor by ID", () => {
+    let latestCampus: Campus | null = null;
+    render(<FloorWorkflowHarness onCampusChange={(c) => { latestCampus = c; }} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Add Floor" })); // active = Floor 2 (last)
+    fireEvent.click(screen.getByRole("button", { name: "Floor actions" }));
+    const menu = floorActionsMenu();
+    expect((within(menu).getByRole("button", { name: "Move Right" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(within(menu).getByRole("button", { name: "Move Left" }));
+
+    expect(latestCampus!.buildings[0].floors.map((floor) => floor.label)).toEqual(["Floor 2", "Ground Floor"]);
+    // Active floor is tracked by ID, not array index — Floor 2 stays active after reorder.
+    expect(screen.getByRole("button", { name: "Floor 2" }).className).toContain("bg-primary");
+  });
+
+  it("opens the shared menu from a tab right-click and acts on that floor", () => {
+    let latestCampus: Campus | null = null;
+    render(<FloorWorkflowHarness onCampusChange={(c) => { latestCampus = c; }} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Add Floor" })); // active = Floor 2
+    fireEvent.contextMenu(screen.getByRole("button", { name: "Ground Floor" }), { clientX: 120, clientY: 40 });
+
+    const menu = floorActionsMenu();
+    fireEvent.click(within(menu).getByRole("button", { name: "Duplicate Floor" }));
+
+    expect(latestCampus!.buildings[0].floors.map((floor) => floor.label)).toEqual(["Ground Floor", "Floor 2", "Ground Floor Copy"]);
+    expect(screen.getByRole("button", { name: "Ground Floor Copy" }).className).toContain("bg-primary");
+  });
+
+  it("exposes the compact floor section in the properties sidebar when nothing is selected", () => {
+    render(<FloorWorkflowHarness />);
+
+    fireEvent.click(screen.getByTitle("Toggle Properties Panel"));
+    const panel = screen.getByTestId("floor-properties-panel");
+    expect(within(panel).getByText("Floor Overview")).toBeInTheDocument();
+    expect(within(panel).getByLabelText("Name")).toHaveValue("Ground Floor");
+    expect(within(panel).getByLabelText("Width")).toHaveValue(600);
+    expect(within(panel).getByLabelText("Height")).toHaveValue(450);
+    expect(within(panel).getByRole("button", { name: "Show Grid" })).toHaveAttribute("aria-pressed", "true");
+    expect(within(panel).getByRole("button", { name: "Floor grid 40" })).toBeInTheDocument();
+    expect(within(panel).getByRole("button", { name: "Open Floor Settings" })).toBeInTheDocument();
+    // Single-floor building: reorder and delete stay disabled in the sidebar too.
+    expect((within(panel).getByRole("button", { name: "Move Up" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((within(panel).getByRole("button", { name: "Move Down" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((within(panel).getByRole("button", { name: "Delete Floor" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("quick-edits name, canvas size, grid size, and grid visibility from the sidebar", () => {
+    let latestCampus: Campus | null = null;
+    render(<FloorWorkflowHarness onCampusChange={(c) => { latestCampus = c; }} />);
+
+    fireEvent.click(screen.getByTitle("Toggle Properties Panel"));
+    const panel = screen.getByTestId("floor-properties-panel");
+
+    fireEvent.change(within(panel).getByLabelText("Name"), { target: { value: "Atrium" } });
+    fireEvent.blur(within(panel).getByLabelText("Name"));
+    expect(latestCampus!.buildings[0].floors[0].label).toBe("Atrium");
+
+    fireEvent.change(within(panel).getByLabelText("Width"), { target: { value: "300" } });
+    fireEvent.blur(within(panel).getByLabelText("Width"));
+    expect(latestCampus!.buildings[0].floors[0].canvasW).toBe(300);
+
+    fireEvent.click(within(panel).getByRole("button", { name: "Floor grid 40" }));
+    expect(latestCampus!.buildings[0].floors[0].gridSize).toBe(40);
+
+    fireEvent.click(within(panel).getByRole("button", { name: "Show Grid" }));
+    expect(latestCampus!.buildings[0].floors[0].showGrid).toBe(false);
+  });
+
+  it("duplicates, moves, and deletes the active floor from the sidebar actions", () => {
+    let latestCampus: Campus | null = null;
+    render(<FloorWorkflowHarness onCampusChange={(c) => { latestCampus = c; }} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Add Floor" })); // active = Floor 2
+    fireEvent.click(screen.getByTitle("Toggle Properties Panel"));
+    const panel = screen.getByTestId("floor-properties-panel");
+
+    fireEvent.click(within(panel).getByRole("button", { name: "Duplicate Floor" }));
+    expect(latestCampus!.buildings[0].floors.map((floor) => floor.label)).toEqual(["Ground Floor", "Floor 2", "Floor 2 Copy"]);
+    expect(screen.getByRole("button", { name: "Floor 2 Copy" }).className).toContain("bg-primary");
+
+    // Duplicating switches to the copy and clears transient state (the sidebar
+    // closes, like a floor switch) — reopen it for the next action.
+    fireEvent.click(screen.getByTitle("Toggle Properties Panel"));
+    const panel2 = screen.getByTestId("floor-properties-panel");
+    expect((within(panel2).getByRole("button", { name: "Move Down" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(within(panel2).getByRole("button", { name: "Move Up" }));
+    expect(latestCampus!.buildings[0].floors.map((floor) => floor.label)).toEqual(["Ground Floor", "Floor 2 Copy", "Floor 2"]);
+    expect(screen.getByRole("button", { name: "Floor 2 Copy" }).className).toContain("bg-primary");
+
+    fireEvent.click(within(panel2).getByRole("button", { name: "Delete Floor" }));
+    fireEvent.click(within(screen.getByTestId("delete-floor-confirm-dialog")).getByRole("button", { name: "Delete Floor" }));
+    expect(latestCampus!.buildings[0].floors.map((floor) => floor.label)).toEqual(["Ground Floor", "Floor 2"]);
+    expect(screen.getByRole("button", { name: "Floor 2" }).className).toContain("bg-primary");
+  });
+
+  it("deleting an inactive floor leaves the active floor untouched", () => {
+    let latestCampus: Campus | null = null;
+    render(<FloorWorkflowHarness onCampusChange={(c) => { latestCampus = c; }} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Add Floor" })); // active = Floor 2, Ground is inactive
+    fireEvent.contextMenu(screen.getByRole("button", { name: "Ground Floor" }), { clientX: 120, clientY: 40 });
+    fireEvent.click(within(floorActionsMenu()).getByRole("button", { name: "Delete Floor" }));
+    expect(screen.getByTestId("delete-floor-confirm-dialog")).toHaveTextContent("Delete Ground Floor and its");
+    fireEvent.click(within(screen.getByTestId("delete-floor-confirm-dialog")).getByRole("button", { name: "Delete Floor" }));
+
+    expect(latestCampus!.buildings[0].floors.map((floor) => floor.label)).toEqual(["Floor 2"]);
+    expect(screen.getByRole("button", { name: "Floor 2" }).className).toContain("bg-primary");
+  });
+
+  it("persists renamed floors and reordered arrays through save/reopen", () => {
+    render(<FloorWorkflowHarness onCampusChange={(c) => { latestCampus = c; }} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Floor actions" }));
+    fireEvent.click(within(floorActionsMenu()).getByRole("button", { name: "Rename Floor" }));
+    fireEvent.change(screen.getByLabelText("Rename floor input"), { target: { value: "Mezzanine" } });
+    fireEvent.click(screen.getByRole("button", { name: "Rename Floor" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Add Floor" }));
+    fireEvent.click(screen.getByRole("button", { name: "Floor actions" }));
+    fireEvent.click(within(floorActionsMenu()).getByRole("button", { name: "Move Left" }));
+    expect(latestCampus!.buildings[0].floors.map((floor) => floor.label)).toEqual(["Floor 2", "Mezzanine"]);
+
+    // "Reopen": mount a fresh editor with the saved campus — names and order survive.
+    cleanup();
+    render(<FloorWorkflowHarness initialCampus={latestCampus!} />);
+    expect(screen.getByRole("button", { name: "Floor 2" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Mezzanine" })).toBeInTheDocument();
+  });
 });
 
 describe("Phase 2.1 - room layering, state, and structural snapping", () => {
@@ -1599,7 +1962,7 @@ describe("Phase 1.8 — text annotation is a real editable object", () => {
     // Font size
     fireEvent.change(screen.getByLabelText("Label font size"), { target: { value: "16" } });
     // Alignment
-    fireEvent.change(screen.getByLabelText("Label alignment"), { target: { value: "center" } });
+    fireEvent.click(screen.getByRole("button", { name: "Center" }));
     // Color is wired through the functional ColorPicker in the panel
     const colorLabel = screen.getByText("Text Color");
     expect(colorLabel).toBeInTheDocument();
@@ -1620,14 +1983,41 @@ describe("Phase 1.8 — text annotation is a real editable object", () => {
       { id: "lbx", x: 40, y: 80, text: "Lobby", fontSize: 12, color: "#374151", rotation: 0, align: "left" },
     ];
     const { container } = render(<Harness initialCampus={campus} />);
-    stubSvgRect(container);
+    const svg = stubSvgRect(container);
 
-    const labelGroup = Array.from(container.querySelectorAll("g")).find(
-      (el) => !el.hasAttribute("transform") && el.querySelector("text")?.textContent === "Lobby"
-    ) as SVGGElement;
-    fireEvent.doubleClick(labelGroup, { clientX: 60, clientY: 80, bubbles: true });
+    fireEvent.dblClick(screen.getByTestId("floor-label-hit-area"), { clientX: 60, clientY: 80, bubbles: true });
 
     expect(screen.getByLabelText("Label text")).toBeInTheDocument();
+    expect(screen.getByLabelText("Inline label text")).toBeInTheDocument();
+  });
+
+  it("commits inline text edits from the canvas and preserves normal label persistence fields", () => {
+    const campus = makeRichCampus();
+    campus.buildings[0].floors[0].labels = [
+      { id: "lbx", x: 40, y: 80, text: "Lobby", fontSize: 12, color: "#374151", rotation: 0, align: "left" },
+    ];
+    const { container } = render(<Harness initialCampus={campus} onCampusChange={(c) => { latestCampus = c; }} />);
+    const svg = stubSvgRect(container);
+
+    fireEvent.mouseDown(screen.getByTestId("floor-label-object"), { clientX: 60, clientY: 80, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    fireEvent.mouseDown(screen.getByTestId("floor-label-object"), { clientX: 60, clientY: 80, detail: 2, bubbles: true });
+
+    const inline = screen.getByLabelText("Inline label text");
+    fireEvent.change(inline, { target: { value: "Main Lobby" } });
+    fireEvent.blur(inline);
+
+    const label = latestCampus!.buildings[0].floors[0].labels[0];
+    expect(label).toMatchObject({
+      text: "Main Lobby",
+      x: 40,
+      y: 80,
+      fontSize: 12,
+      color: "#374151",
+      rotation: 0,
+      align: "left",
+    });
+    expect(screen.queryByLabelText("Inline label text")).toBeNull();
   });
 
   it("keeps text inside the floor when it grows near an edge", () => {
@@ -1647,6 +2037,172 @@ describe("Phase 1.8 — text annotation is a real editable object", () => {
     fireEvent.change(screen.getByLabelText("Label text"), { target: { value: "WWWWW" } });
     const label = latestCampus!.buildings[0].floors[0].labels[0];
     expect(label.x + label.text.length * label.fontSize * 0.6).toBeLessThanOrEqual(220);
+  });
+
+  it("cancels inline edits with Escape without changing text", () => {
+    const campus = makeRichCampus();
+    campus.buildings[0].floors[0].labels = [
+      { id: "lbx", x: 40, y: 80, text: "Lobby", fontSize: 12, color: "#374151", rotation: 0, align: "left" },
+    ];
+    const { container } = render(<Harness initialCampus={campus} onCampusChange={(c) => { latestCampus = c; }} />);
+    const svg = stubSvgRect(container);
+
+    fireEvent.mouseDown(screen.getByTestId("floor-label-hit-area"), { clientX: 60, clientY: 80, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    fireEvent.dblClick(screen.getByTestId("floor-label-hit-area"), { clientX: 60, clientY: 80, bubbles: true });
+    const inline = screen.getByLabelText("Inline label text");
+    fireEvent.change(inline, { target: { value: "Draft Name" } });
+    fireEvent.keyDown(inline, { key: "Escape", bubbles: true });
+
+    expect(latestCampus).toBeNull();
+    expect(campus.buildings[0].floors[0].labels[0].text).toBe("Lobby");
+    expect(screen.queryByLabelText("Inline label text")).toBeNull();
+  });
+
+  it("click selects, drag moves, and A-/A+ adjust selected text size", () => {
+    const campus = makeRichCampus();
+    campus.buildings[0].floors[0].labels = [
+      { id: "lbx", x: 40, y: 80, text: "Lobby", fontSize: 12, color: "#374151", rotation: 0, align: "left" },
+    ];
+    const { container } = render(<Harness initialCampus={campus} onCampusChange={(c) => { latestCampus = c; }} />);
+    const svg = stubSvgRect(container);
+
+    const labelGroup = screen.getByTestId("floor-label-object");
+    fireEvent.mouseDown(labelGroup, { clientX: 40, clientY: 80, bubbles: true });
+    expect(screen.getByTestId("floor-properties-panel")).toHaveTextContent("Label");
+    expect(screen.getByTestId("selected-label-font-controls")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Increase selected text size" }));
+    expect(latestCampus!.buildings[0].floors[0].labels[0].fontSize).toBe(13);
+
+    fireEvent.click(screen.getByRole("button", { name: "Decrease selected text size" }));
+    expect(latestCampus!.buildings[0].floors[0].labels[0].fontSize).toBe(12);
+
+    fireEvent.mouseMove(svg, { clientX: 60, clientY: 95, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    expect(latestCampus!.buildings[0].floors[0].labels[0]).toMatchObject({ x: 60, y: 95 });
+  });
+
+  it("selects and drags from the text body hit area, not only the outline", () => {
+    const campus = makeRichCampus();
+    campus.buildings[0].floors[0].labels = [
+      { id: "lbx", x: 40, y: 80, text: "Lobby", fontSize: 12, color: "#374151", rotation: 0, align: "left" },
+    ];
+    const { container } = render(<Harness initialCampus={campus} onCampusChange={(c) => { latestCampus = c; }} />);
+    const svg = stubSvgRect(container);
+
+    const hitArea = screen.getByTestId("floor-label-hit-area");
+    fireEvent.mouseDown(hitArea, { clientX: 42, clientY: 76, bubbles: true });
+    expect(screen.getByTestId("floor-label-selection-outline")).toBeInTheDocument();
+
+    fireEvent.mouseMove(svg, { clientX: 70, clientY: 100, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+
+    expect(latestCampus!.buildings[0].floors[0].labels[0]).toMatchObject({ x: 68, y: 104 });
+  });
+
+  it("shows text transform handles and scales text by changing font size", () => {
+    const campus = makeRichCampus();
+    campus.buildings[0].floors[0].labels = [
+      { id: "lbx", x: 40, y: 80, text: "Lobby", fontSize: 12, color: "#374151", rotation: 0, align: "left" },
+    ];
+    const { container } = render(<Harness initialCampus={campus} onCampusChange={(c) => { latestCampus = c; }} />);
+    const svg = stubSvgRect(container);
+
+    fireEvent.mouseDown(screen.getByTestId("floor-label-hit-area"), { clientX: 42, clientY: 76, bubbles: true });
+    expect(screen.getAllByTestId("floor-label-resize-handle")).toHaveLength(4);
+    expect(screen.getByTestId("floor-label-rotate-handle")).toBeInTheDocument();
+
+    const resizeHandle = screen.getAllByTestId("floor-label-resize-handle").find((el) => el.getAttribute("data-corner") === "se")!;
+    fireEvent.mouseDown(resizeHandle, { clientX: 84, clientY: 90, bubbles: true });
+    fireEvent.mouseMove(svg, { clientX: 122, clientY: 122, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+
+    expect(latestCampus!.buildings[0].floors[0].labels[0].fontSize).toBeGreaterThan(12);
+  });
+
+  it("keeps multi-selected text out of edit mode until double-click isolates it", () => {
+    const campus = makeRichCampus();
+    campus.buildings[0].floors[0].rooms = [];
+    campus.buildings[0].floors[0].walls = [];
+    campus.buildings[0].floors[0].doors = [];
+    campus.buildings[0].floors[0].windows = [];
+    campus.buildings[0].floors[0].stairs = [];
+    campus.buildings[0].floors[0].ramps = [];
+    campus.buildings[0].floors[0].elevators = [];
+    campus.buildings[0].floors[0].paths = [];
+    campus.buildings[0].floors[0].furniture = [
+      { id: "furx", type: "chair", name: "Chair", category: "seating", x: 80, y: 80, width: 16, height: 16, rotation: 0, color: "#64748b" },
+    ];
+    campus.buildings[0].floors[0].labels = [
+      { id: "lbx", x: 40, y: 80, text: "Lobby", fontSize: 12, color: "#374151", rotation: 0, align: "left" },
+    ];
+    const { container } = render(<Harness initialCampus={campus} />);
+    const svg = stubSvgRect(container);
+
+    fireEvent.mouseDown(svg, { clientX: 20, clientY: 55, bubbles: true });
+    fireEvent.mouseMove(svg, { clientX: 115, clientY: 110, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    expect(screen.getByTestId("floor-multi-properties-panel")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Inline label text")).toBeNull();
+
+    fireEvent.keyDown(window, { key: "x", bubbles: true });
+    expect(screen.queryByLabelText("Inline label text")).toBeNull();
+
+    fireEvent.mouseDown(screen.getByTestId("floor-label-hit-area"), { clientX: 60, clientY: 80, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    fireEvent.dblClick(screen.getByTestId("floor-label-hit-area"), { clientX: 60, clientY: 80, bubbles: true });
+
+    expect(screen.queryByTestId("floor-multi-properties-panel")).toBeNull();
+    expect(screen.getByLabelText("Inline label text")).toBeInTheDocument();
+  });
+
+  it("keeps floor shortcuts inactive while inline text is being edited", () => {
+    const campus = makeRichCampus();
+    campus.buildings[0].floors[0].labels = [
+      { id: "lbx", x: 40, y: 80, text: "Lobby", fontSize: 12, color: "#374151", rotation: 0, align: "left" },
+    ];
+    const { container } = render(<Harness initialCampus={campus} onCampusChange={(c) => { latestCampus = c; }} />);
+    const svg = stubSvgRect(container);
+
+    const labelGroup = screen.getByTestId("floor-label-object");
+    fireEvent.mouseDown(labelGroup, { clientX: 60, clientY: 80, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    fireEvent.mouseDown(labelGroup, { clientX: 60, clientY: 80, bubbles: true });
+    const inline = screen.getByLabelText("Inline label text");
+
+    fireEvent.keyDown(inline, { key: "a", ctrlKey: true, bubbles: true });
+    fireEvent.keyDown(inline, { key: "d", ctrlKey: true, bubbles: true });
+    fireEvent.keyDown(inline, { key: "Backspace", bubbles: true });
+    fireEvent.keyDown(inline, { key: "Delete", bubbles: true });
+
+    expect(campus.buildings[0].floors[0].labels).toHaveLength(1);
+    expect(screen.queryByTestId("floor-multi-properties-panel")).toBeNull();
+    expect(screen.getByLabelText("Inline label text")).toBeInTheDocument();
+    expect(latestCampus).toBeNull();
+  });
+
+  it("auto-sizes inline editing live and hides the committed text underneath", () => {
+    const campus = makeRichCampus();
+    campus.buildings[0].floors[0].labels = [
+      { id: "lbx", x: 40, y: 80, text: "Hi", fontSize: 12, color: "#374151", rotation: 0, align: "left" },
+    ];
+    const { container } = render(<Harness initialCampus={campus} />);
+    stubSvgRect(container);
+
+    fireEvent.dblClick(screen.getByTestId("floor-label-hit-area"), { clientX: 42, clientY: 80, bubbles: true });
+    const inline = screen.getByLabelText("Inline label text") as HTMLTextAreaElement;
+    // Query the editor by its stable data-testid instead of the SVG element name,
+    // which JSDOM's closest() does not always match case-sensitively.
+    const editor = () => inline.closest('[data-testid="inline-label-editor"]') as SVGForeignObjectElement;
+    const initialWidth = Number(editor().getAttribute("width"));
+
+    expect(Array.from(container.querySelectorAll("text")).filter((node) => node.textContent === "Hi")).toHaveLength(0);
+    fireEvent.change(inline, { target: { value: "A much longer wayfinding note" } });
+    expect(Number(editor().getAttribute("width"))).toBeGreaterThan(initialWidth);
+
+    fireEvent.change(inline, { target: { value: "Ok" } });
+    expect(Number(editor().getAttribute("width"))).toBe(initialWidth);
   });
 });
 
@@ -1675,10 +2231,11 @@ describe("Phase 1.8 — Floor Settings dialog", () => {
     fireEvent.change(screen.getByLabelText("Floor canvas height"), { target: { value: "220" } });
     fireEvent.click(screen.getByRole("button", { name: /Background Warm White/i }));
     fireEvent.click(screen.getByRole("button", { name: /Show canvas grid/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Grid size 40" }));
     fireEvent.click(screen.getByRole("button", { name: "Save Changes" }));
 
     const floor = latestCampus!.buildings[0].floors[0];
-    expect(floor).toMatchObject({ canvasW: 300, canvasH: 220, backgroundColor: "#faf7f0", showGrid: false });
+    expect(floor).toMatchObject({ canvasW: 300, canvasH: 220, backgroundColor: "#faf7f0", showGrid: false, gridSize: 40 });
 
     // The floor surface visually uses the applied background; grid lines hide
     const boundary = screen.getByTestId("floor-canvas-boundary");
@@ -1749,6 +2306,37 @@ describe("Phase 1.8 — Floor Settings dialog", () => {
     fireEvent.change(nameInput, { target: { value: "Renamed Floor" } });
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(latestCampus).toBeNull();
+  });
+
+  it("does not close when input selection or backdrop mouse release lands outside the dialog", () => {
+    render(<Harness onCampusChange={(c) => { latestCampus = c; }} />);
+    openSettings();
+
+    const dialog = screen.getByTestId("floor-settings-dialog");
+    const widthInput = screen.getByLabelText("Floor canvas width");
+    fireEvent.mouseDown(widthInput, { clientX: 20, clientY: 20, bubbles: true });
+    fireEvent.mouseMove(dialog, { clientX: 1, clientY: 1, bubbles: true });
+    fireEvent.mouseUp(dialog, { clientX: 1, clientY: 1, bubbles: true });
+    fireEvent.click(dialog);
+
+    expect(screen.getByTestId("floor-settings-dialog")).toBeInTheDocument();
+    expect(screen.getByLabelText("Floor canvas width")).toBeInTheDocument();
+    expect(latestCampus).toBeNull();
+  });
+
+  it("closes only through explicit close controls while keeping a bounded scroll body and footer", async () => {
+    render(<Harness />);
+    openSettings();
+
+    expect(screen.getByTestId("floor-settings-scroll-body").className).toContain("overflow-y-auto");
+    expect(screen.getByTestId("floor-settings-footer").className).toContain("shrink-0");
+
+    fireEvent.click(screen.getByLabelText("Close floor settings"));
+    await waitFor(() => expect(screen.queryByTestId("floor-settings-dialog")).toBeNull());
+
+    openSettings();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByTestId("floor-settings-dialog")).toBeNull());
   });
 
   it("does not leak Floor Settings controls into multi-selection or single-object properties", () => {

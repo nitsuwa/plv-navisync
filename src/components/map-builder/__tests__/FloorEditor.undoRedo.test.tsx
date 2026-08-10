@@ -43,6 +43,8 @@ function makeCampus(): Campus {
             buildingId: "b1",
             number: 1,
             label: "Ground Floor",
+            canvasW: 580,
+            canvasH: 380,
             rooms: [],
             paths: [],
             walls: [{ id: "w1", x1: 50, y1: 50, x2: 150, y2: 50, thickness: 4, color: "#64748b", material: "concrete" }],

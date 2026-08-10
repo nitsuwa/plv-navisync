@@ -1,4 +1,5 @@
 import type { FloorPlan, FloorUndoEntry, FloorWall, FloorWallEndpointAnchor } from "../components/map-builder/types";
+import { normalizeFloorPlanBackground } from "./floorPlanBackground";
 import { DEFAULT_FLOOR_CANVAS, normalizeFloorCanvasSize } from "./floorGeometry";
 
 const FLOOR_COLLECTION_KEYS = [
@@ -90,12 +91,36 @@ function normalizeWallAttachment(item: { wallId?: unknown; offset?: unknown }) {
   };
 }
 
+function normalizeCalibration(value: unknown): FloorPlan["calibration"] {
+  const item = value as FloorPlan["calibration"] | null | undefined;
+  if (!item || !Array.isArray(item.points) || item.points.length !== 2) return undefined;
+  const metersPerUnit = normalizedNumber(item.metersPerUnit, 0);
+  const editorDistance = normalizedNumber(item.editorDistance, 0);
+  const realDistanceM = normalizedNumber(item.realDistanceM, 0);
+  if (metersPerUnit <= 0 || editorDistance <= 0 || realDistanceM <= 0) return undefined;
+  return {
+    metersPerUnit,
+    editorDistance,
+    realDistanceM,
+    points: [
+      { x: normalizedNumber(item.points[0]?.x, 0), y: normalizedNumber(item.points[0]?.y, 0) },
+      { x: normalizedNumber(item.points[1]?.x, 0), y: normalizedNumber(item.points[1]?.y, 0) },
+    ],
+    calibratedAt: typeof item.calibratedAt === "string" ? item.calibratedAt : undefined,
+  };
+}
+
 export function defaultFloorLabel(number: number) {
   return number === 1 ? "Ground Floor" : `Floor ${number}`;
 }
 
 /** Canonical floor surface tone used when a floor record has no background color. */
 export const DEFAULT_FLOOR_BACKGROUND = "#e8e1d7";
+export const DEFAULT_FLOOR_GRID_SIZE = 20;
+
+function normalizeGridSize(value: unknown): FloorPlan["gridSize"] {
+  return value === 10 || value === 20 || value === 40 ? value : DEFAULT_FLOOR_GRID_SIZE;
+}
 
 export function normalizeFloor(input: Partial<FloorPlan> | null | undefined, defaults: FloorDefaults = {}): FloorPlan {
   const source = input ?? {};
@@ -129,6 +154,9 @@ export function normalizeFloor(input: Partial<FloorPlan> | null | undefined, def
     canvasH: canvas.h,
     backgroundColor: typeof source.backgroundColor === "string" && source.backgroundColor ? source.backgroundColor : DEFAULT_FLOOR_BACKGROUND,
     showGrid: source.showGrid !== false,
+    gridSize: normalizeGridSize(source.gridSize),
+    backgroundImage: normalizeFloorPlanBackground(source.backgroundImage, canvas.w, canvas.h),
+    calibration: normalizeCalibration(source.calibration),
     rooms: arrayCopy<FloorPlan["rooms"][number]>(source.rooms).map((room, index) => ({
       ...room,
       buildingId: room.buildingId ?? buildingId,
@@ -239,6 +267,9 @@ export function floorUndoEntryFromFloor(floor: Partial<FloorPlan>): FloorUndoEnt
       ["canvasH", normalized.canvasH],
       ["backgroundColor", normalized.backgroundColor],
       ["showGrid", normalized.showGrid],
+      ["gridSize", normalized.gridSize],
+      ["backgroundImage", normalized.backgroundImage],
+      ["calibration", normalized.calibration],
       ["label", normalized.label],
       ...FLOOR_COLLECTION_KEYS.map((key: FloorCollectionKey) => [key, normalized[key]]),
     ]

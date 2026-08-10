@@ -227,6 +227,7 @@ const ColorPickerPanel = memo(function ColorPickerPanel({
   return (
     <div
       ref={panelRef}
+      data-testid="color-picker-panel"
       className={cn(
         "w-[420px] p-4 rounded-2xl border border-border bg-card shadow-2xl shadow-black/10 dark:shadow-black/30 animate-scale-in"
       )}
@@ -341,24 +342,28 @@ export function ColorPicker({ value, onChange }: ColorPickerProps) {
     const rect = triggerRef.current.getBoundingClientRect();
     const panelWidth = 420; // w-[420px]
     const panelHeight = 300; // approximate max height (landscape layout)
-    const gap = 8; // mt-2 = 0.5rem = 8px
+    const gap = 10;
+    const margin = 24;
     const viewW = window.innerWidth;
     const viewH = window.innerHeight;
 
-    // Prefer below, flip above if not enough room
-    const spaceBelow = viewH - (rect.bottom + gap);
-    const spaceAbove = rect.top - gap;
+    // Prefer below, but flip above early enough to avoid hugging the viewport
+    // bottom when the trigger sits low in a modal scroll body.
+    const spaceBelow = viewH - margin - (rect.bottom + gap);
+    const spaceAbove = rect.top - margin - gap;
     const above = spaceBelow < panelHeight && spaceAbove > spaceBelow;
 
-    // Horizontal: align left edge by default, flip to right edge if overflowing
-    let left: number | undefined = rect.left;
+    const rawTop = above ? rect.top - gap - panelHeight : rect.bottom + gap;
+    const top = Math.max(margin, Math.min(rawTop, viewH - margin - panelHeight));
+
+    let left = Math.max(margin, Math.min(rect.left, viewW - margin - panelWidth));
     let right: number | undefined;
-    if (rect.left + panelWidth > viewW - 16) {
+    if (left + panelWidth > viewW - margin) {
       left = undefined;
-      right = viewW - rect.right;
+      right = margin;
     }
 
-    setPopoverPos({ top: above ? rect.top - gap : rect.bottom + gap, left, right, above });
+    setPopoverPos({ top, left, right, above });
   }, [open]);
 
   // Re-position on open and on scroll/resize while open
@@ -452,7 +457,7 @@ export function ColorPicker({ value, onChange }: ColorPickerProps) {
         top: popoverPos.top,
         left: popoverPos.left ?? 'auto',
         right: popoverPos.right ?? 'auto',
-        transform: popoverPos.above ? 'translateY(-8px)' : 'translateY(8px)',
+        transform: 'none',
         transformOrigin: popoverPos.above ? 'bottom left' : 'top left',
       } satisfies React.CSSProperties)
     : undefined;

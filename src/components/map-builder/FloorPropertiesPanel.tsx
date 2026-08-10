@@ -66,7 +66,10 @@ function SegmentControl<T extends string>({ value, options, onChange }: {
   onChange: (value: T) => void;
 }) {
   return (
-    <div className="grid grid-cols-2 gap-1 rounded-xl border border-border bg-muted/20 p-1">
+    <div
+      className="grid gap-1 rounded-xl border border-border bg-muted/20 p-1"
+      style={{ gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` }}
+    >
       {options.map((option) => (
         <button
           key={option.value}
@@ -835,23 +838,50 @@ export function FloorPropertiesPanel({
                 className="w-full px-3 py-2 rounded-xl border border-border bg-input-background text-foreground text-xs resize-none focus:outline-none focus:ring-2 focus:ring-primary/30" />
             </Field>
             <Field label="Font Size">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  aria-label="Decrease label font size"
+                  onClick={() => onUpdateLabel(selLabel.id, { fontSize: Math.max(6, selLabel.fontSize - 1) })}
+                  className="h-8 w-8 rounded-lg border border-border text-[11px] font-extrabold text-foreground hover:bg-muted transition-colors"
+                >
+                  A-
+                </button>
                 <input aria-label="Label font size" type="range" min={6} max={24} step={1} value={selLabel.fontSize}
                   onChange={(e) => onUpdateLabel(selLabel.id, { fontSize: parseInt(e.target.value) })}
                   className="flex-1 h-1.5 accent-primary" />
-                <span className="text-xs font-mono text-muted-foreground w-6 text-right">{selLabel.fontSize}px</span>
+                <input
+                  aria-label="Exact label font size"
+                  type="number"
+                  min={6}
+                  max={24}
+                  value={selLabel.fontSize}
+                  onChange={(e) => onUpdateLabel(selLabel.id, { fontSize: Math.max(6, Math.min(24, parseInt(e.target.value) || 12)) })}
+                  className="h-8 w-12 rounded-lg border border-border bg-input-background px-1.5 text-center text-xs font-mono text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
+                />
+                <button
+                  type="button"
+                  aria-label="Increase label font size"
+                  onClick={() => onUpdateLabel(selLabel.id, { fontSize: Math.min(24, selLabel.fontSize + 1) })}
+                  className="h-8 w-8 rounded-lg border border-border text-[11px] font-extrabold text-foreground hover:bg-muted transition-colors"
+                >
+                  A+
+                </button>
               </div>
             </Field>
             <Field label="Text Color">
               <ColorPicker value={selLabel.color} onChange={(c) => onUpdateLabel(selLabel.id, { color: c })} />
             </Field>
             <Field label="Alignment">
-              <select aria-label="Label alignment" value={selLabel.align ?? "left"} onChange={(e) => onUpdateLabel(selLabel.id, { align: e.target.value as any })}
-                className="w-full h-9 px-3 rounded-xl border border-border bg-input-background text-foreground text-xs focus:outline-none focus:ring-2 focus:ring-primary/30">
-                <option value="left">Left</option>
-                <option value="center">Center</option>
-                <option value="right">Right</option>
-              </select>
+              <SegmentControl
+                value={selLabel.align ?? "left"}
+                options={[
+                  { value: "left", label: "Left" },
+                  { value: "center", label: "Center" },
+                  { value: "right", label: "Right" },
+                ]}
+                onChange={(align) => onUpdateLabel(selLabel.id, { align })}
+              />
             </Field>
             <Field label="Rotation">
               <div className="flex items-center gap-2">

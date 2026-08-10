@@ -26,8 +26,8 @@ describe("floorPlanNormalization", () => {
     expect(floor.buildingId).toBe("b1");
     expect(floor.number).toBe(2);
     expect(floor.label).toBe("Floor 2");
-    expect(floor.canvasW).toBe(580);
-    expect(floor.canvasH).toBe(380);
+    expect(floor.canvasW).toBe(600);
+    expect(floor.canvasH).toBe(450);
     expect(floor.rooms[0].buildingId).toBe("b1");
     expect(floor.rooms[0].floorId).toBe("f-old");
     expect(floor.paths).toEqual([]);
@@ -38,6 +38,9 @@ describe("floorPlanNormalization", () => {
     expect(floor.ramps).toEqual([]);
     expect(floor.elevators).toEqual([]);
     expect(floor.labels).toEqual([]);
+    expect(floor.backgroundImage).toBeUndefined();
+    expect(floor.calibration).toBeUndefined();
+    expect(floor.gridSize).toBe(20);
   });
 
   it("creates default floors with stable labels and initialized collections", () => {
@@ -47,10 +50,17 @@ describe("floorPlanNormalization", () => {
     expect(defaultFloorLabel(1)).toBe("Ground Floor");
     expect(first.label).toBe("Ground Floor");
     expect(third.label).toBe("Floor 3");
-    expect(first.canvasW).toBe(580);
-    expect(first.canvasH).toBe(380);
+    expect(first.canvasW).toBe(600);
+    expect(first.canvasH).toBe(450);
+    expect(first.gridSize).toBe(20);
     expect(first.rooms).toEqual([]);
     expect(third.walls).toEqual([]);
+  });
+
+  it("normalizes floor grid presets to the supported 10/20/40 values", () => {
+    expect(normalizeFloor({ id: "f1", buildingId: "b1", number: 1, gridSize: 10 }).gridSize).toBe(10);
+    expect(normalizeFloor({ id: "f1", buildingId: "b1", number: 1, gridSize: 40 }).gridSize).toBe(40);
+    expect(normalizeFloor({ id: "f1", buildingId: "b1", number: 1, gridSize: 25 as 20 }).gridSize).toBe(20);
   });
 
   it("normalizes floor lists with per-building room ownership defaults", () => {
@@ -109,10 +119,13 @@ describe("floorPlanNormalization", () => {
 
     expect(entry).toEqual({
       rooms: [],
-      canvasW: 580,
-      canvasH: 380,
+      canvasW: 600,
+      canvasH: 450,
       backgroundColor: "#e8e1d7",
       showGrid: true,
+      gridSize: 20,
+      backgroundImage: undefined,
+      calibration: undefined,
       label: "Ground Floor",
       paths: [],
       walls: [],
@@ -143,5 +156,42 @@ describe("floorPlanNormalization", () => {
     expect(floor.walls[0].id).not.toContain("managed-perimeter");
     expect(floor.doors[0].wallId).toBe(floor.walls[0].id);
     expect(floor.windows[0].wallId).toBe(floor.walls[0].id);
+  });
+
+  it("preserves explicitly persisted custom floor dimensions", () => {
+    const floor = normalizeFloor({ id: "f1", buildingId: "b1", number: 1, canvasW: 1200, canvasH: 800 });
+    expect(floor.canvasW).toBe(1200);
+    expect(floor.canvasH).toBe(800);
+  });
+
+  it("normalizes dormant background/calibration metadata safely", () => {
+    const floor = normalizeFloor({
+      id: "f1",
+      buildingId: "b1",
+      number: 1,
+      backgroundImage: {
+        storagePath: "campus/building/floor/plan.png",
+        fileName: "plan.png",
+        mimeType: "image/png",
+        size: 100,
+        visible: true,
+        opacity: 0.5,
+        locked: true,
+        x: 1,
+        y: 2,
+        width: 300,
+        height: 200,
+        rotation: 0,
+      },
+      calibration: {
+        metersPerUnit: 0.05,
+        editorDistance: 200,
+        realDistanceM: 10,
+        points: [{ x: 0, y: 0 }, { x: 200, y: 0 }],
+      },
+    });
+
+    expect(floor.backgroundImage).toMatchObject({ storagePath: "campus/building/floor/plan.png", opacity: 0.5 });
+    expect(floor.calibration?.metersPerUnit).toBe(0.05);
   });
 });

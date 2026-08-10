@@ -203,6 +203,32 @@ export interface FloorLabel {
 /** Direction a staircase travels */
 export type StairDirection = "up" | "down" | "both";
 
+export interface FloorPlanBackground {
+  storagePath: string;
+  fileName: string;
+  mimeType: string;
+  size: number;
+  visible: boolean;
+  opacity: number;
+  locked: boolean;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  rotation: number;
+  naturalWidth?: number;
+  naturalHeight?: number;
+  uploadedAt?: string;
+}
+
+export interface FloorScaleCalibration {
+  metersPerUnit: number;
+  points: [{ x: number; y: number }, { x: number; y: number }];
+  editorDistance: number;
+  realDistanceM: number;
+  calibratedAt?: string;
+}
+
 export interface FloorRoom {
   id: string;
   name: string;
@@ -248,6 +274,10 @@ export interface FloorPlan {
   backgroundColor?: string;
   /** Whether the canvas grid lines are visible (persistent appearance preference). */
   showGrid?: boolean;
+  /** Visual and snap grid spacing in floor authoring units. */
+  gridSize?: 10 | 20 | 40;
+  backgroundImage?: FloorPlanBackground;
+  calibration?: FloorScaleCalibration;
   rooms: FloorRoom[];
   paths: FloorPath[];
   walls: FloorWall[];
@@ -342,6 +372,9 @@ export interface FloorUndoEntry {
   canvasH?: number;
   backgroundColor?: string;
   showGrid?: boolean;
+  gridSize?: 10 | 20 | 40;
+  backgroundImage?: FloorPlanBackground;
+  calibration?: FloorScaleCalibration;
   label?: string;
   rooms: FloorRoom[];
   paths: FloorPath[];

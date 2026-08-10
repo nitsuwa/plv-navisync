@@ -77,6 +77,8 @@ function makeSnapCampus(): Campus {
   const floor = campus.buildings[0].floors[0];
   floor.canvasW = 580;
   floor.canvasH = 380;
+  // These legacy snap regressions assert the historical 10-unit grid behavior.
+  floor.gridSize = 10;
   floor.rooms = [];
   floor.walls = [
     { id: "w1", x1: 53, y1: 57, x2: 153, y2: 57, thickness: 4, color: "#64748b", material: "concrete" },
@@ -399,6 +401,193 @@ describe("Phase 1.7 — wall connection snapping", () => {
 
     const walls = latestCampus!.buildings[0].floors[0].walls;
     expect(walls.find((w) => w.id === "w2")).toMatchObject({ x1: 253, y1: 57, x2: 580, y2: 57 });
+  });
+
+  it("previews the structural snap for the start point BEFORE the first click", () => {
+    const { container } = render(<Harness initialCampus={makeSnapCampus()} />);
+    const svg = stubSvgRect(container, 580, 380);
+
+    fireEvent.keyDown(window, { key: "w" }); // wall tool
+    // No click yet — hovering near the w1 endpoint (53,57) shows the exact
+    // coordinate the first click will commit.
+    fireEvent.mouseMove(svg, { clientX: 55, clientY: 59, bubbles: true });
+    const indicator = screen.getByTestId("wall-snap-indicator");
+    expect(Number(indicator.querySelectorAll("circle")[0].getAttribute("cx"))).toBe(53);
+    expect(Number(indicator.querySelectorAll("circle")[0].getAttribute("cy"))).toBe(57);
+
+    // Moving away from any structural target clears the hover indicator.
+    fireEvent.mouseMove(svg, { clientX: 200, clientY: 200, bubbles: true });
+    expect(screen.queryByTestId("wall-snap-indicator")).toBeNull();
+  });
+
+  it("snaps creation start and end to a DIAGONAL existing wall", () => {
+    const campus = makeSnapCampus();
+    campus.buildings[0].floors[0].walls.push(
+      { id: "w3", x1: 50, y1: 50, x2: 100, y2: 100, thickness: 4, color: "#64748b", material: "concrete" }
+    );
+    const { container } = render(<Harness initialCampus={campus} onCampusChange={(c) => { latestCampus = c; }} />);
+    const svg = stubSvgRect(container, 580, 380);
+
+    fireEvent.keyDown(window, { key: "w" });
+    // Start (45,45): 7.07 from the diagonal endpoint (50,50) → endpoint wins
+    // over the 10-grid (40,40).
+    fireEvent.mouseDown(svg, { clientX: 45, clientY: 45, bubbles: true });
+    // End (75,73): projects onto the diagonal segment at (74,74) → T-junction.
+    fireEvent.mouseMove(svg, { clientX: 75, clientY: 73, bubbles: true });
+    fireEvent.mouseDown(svg, { clientX: 75, clientY: 73, bubbles: true });
+
+    const walls = latestCampus!.buildings[0].floors[0].walls;
+    expect(walls).toHaveLength(4); // w1 + w2 + diagonal w3 + new wall
+    expect(walls[3]).toMatchObject({ x1: 50, y1: 50, x2: 74, y2: 74 });
+  });
+
+  it("live preview line matches the exact snapped geometry that gets committed", () => {
+    const campus = makeSnapCampus();
+    campus.buildings[0].floors[0].walls.push(
+      { id: "w3", x1: 50, y1: 50, x2: 100, y2: 100, thickness: 4, color: "#64748b", material: "concrete" }
+    );
+    const { container } = render(<Harness initialCampus={campus} onCampusChange={(c) => { latestCampus = c; }} />);
+    const svg = stubSvgRect(container, 580, 380);
+
+    fireEvent.keyDown(window, { key: "w" });
+    fireEvent.mouseDown(svg, { clientX: 45, clientY: 45, bubbles: true }); // start → (50,50)
+    fireEvent.mouseMove(svg, { clientX: 75, clientY: 73, bubbles: true }); // preview → (74,74)
+
+    const previewLine = Array.from(container.querySelectorAll("line"))
+      .find((l) => l.getAttribute("stroke-dasharray") === "6 3");
+    expect(previewLine).toBeTruthy();
+    expect(Number(previewLine!.getAttribute("x1"))).toBe(50);
+    expect(Number(previewLine!.getAttribute("y1"))).toBe(50);
+    expect(Number(previewLine!.getAttribute("x2"))).toBe(74);
+    expect(Number(previewLine!.getAttribute("y2"))).toBe(74);
+
+    fireEvent.mouseDown(svg, { clientX: 75, clientY: 73, bubbles: true });
+    const walls = latestCampus!.buildings[0].floors[0].walls;
+    expect(walls[3]).toMatchObject({ x1: 50, y1: 50, x2: 74, y2: 74 });
+  });
+
+  it("snaps to a room-attached wall's world geometry without adding a room anchor", () => {
+    const campus = makeSnapCampus();
+    const floor = campus.buildings[0].floors[0];
+    floor.rooms = [{ id: "r9", name: "Lobby", type: "classroom", x: 100, y: 100, w: 50, h: 40, floorId: "f1", buildingId: "b1" }];
+    floor.walls.push({
+      id: "w3", x1: 100, y1: 100, x2: 150, y2: 100, thickness: 4, color: "#64748b", material: "concrete",
+      startAnchor: { roomId: "r9", edge: "top", offset: 0 },
+    });
+    const { container } = render(<Harness initialCampus={campus} onCampusChange={(c) => { latestCampus = c; }} />);
+    const svg = stubSvgRect(container, 580, 380);
+
+    fireEvent.keyDown(window, { key: "w" });
+    // Start (103,103): 4.24 from w3's room-anchored endpoint (100,100) — the
+    // WALL endpoint (not the room corner) wins the snap.
+    fireEvent.mouseDown(svg, { clientX: 103, clientY: 103, bubbles: true });
+    // End (120,104): projects onto the w3 segment at (120,100) → T-junction.
+    fireEvent.mouseMove(svg, { clientX: 120, clientY: 104, bubbles: true });
+    fireEvent.mouseDown(svg, { clientX: 120, clientY: 104, bubbles: true });
+
+    const walls = latestCampus!.buildings[0].floors[0].walls;
+    const created = walls[3];
+    expect(created).toMatchObject({ x1: 100, y1: 100, x2: 120, y2: 100 });
+    // Wall-to-wall snap must NOT create a room anchor on the new wall.
+    expect(created.startAnchor).toBeUndefined();
+    expect(created.endAnchor).toBeUndefined();
+  });
+
+  it("structural wall snap beats the 20-unit grid", () => {
+    const campus = makeSnapCampus();
+    const floor = campus.buildings[0].floors[0];
+    floor.gridSize = 20;
+    floor.walls = [
+      { id: "w1", x1: 53, y1: 57, x2: 153, y2: 57, thickness: 4, color: "#64748b", material: "concrete" },
+    ];
+    const { container } = render(<Harness initialCampus={campus} onCampusChange={(c) => { latestCampus = c; }} />);
+    const svg = stubSvgRect(container, 580, 380);
+
+    fireEvent.keyDown(window, { key: "w" });
+    // Start (45,45) is 14.4 from (53,57) → no structural target → 20-grid (40,40).
+    fireEvent.mouseDown(svg, { clientX: 45, clientY: 45, bubbles: true });
+    // End (55,59) is 2.8 from the endpoint → (53,57) beats the 20-grid (60,60).
+    fireEvent.mouseMove(svg, { clientX: 55, clientY: 59, bubbles: true });
+    fireEvent.mouseDown(svg, { clientX: 55, clientY: 59, bubbles: true });
+
+    const walls = latestCampus!.buildings[0].floors[0].walls;
+    expect(walls[1]).toMatchObject({ x1: 40, y1: 40, x2: 53, y2: 57 });
+  });
+
+  it("structural wall snap beats 45° angle assistance", () => {
+    const { container } = render(<Harness initialCampus={makeSnapCampus()} onCampusChange={(c) => { latestCampus = c; }} />);
+    const svg = stubSvgRect(container, 580, 380);
+
+    fireEvent.keyDown(window, { key: "w" });
+    // Start (30,30): far from every wall → plain grid point.
+    fireEvent.mouseDown(svg, { clientX: 30, clientY: 30, bubbles: true });
+    // End (55,57): near the w1 endpoint (53,57). Angle rounding would yield
+    // (56,56) from (30,30), but the structural endpoint wins.
+    fireEvent.mouseMove(svg, { clientX: 55, clientY: 57, bubbles: true });
+    fireEvent.mouseDown(svg, { clientX: 55, clientY: 57, bubbles: true });
+
+    const walls = latestCampus!.buildings[0].floors[0].walls;
+    expect(walls[2]).toMatchObject({ x1: 30, y1: 30, x2: 53, y2: 57 });
+  });
+
+  it("snaps wall creation to a managed perimeter wall without making it selectable", () => {
+    const campus = makeSnapCampus();
+    campus.buildings[0].floors[0].walls = [
+      { id: "perim-top", x1: 0, y1: 0, x2: 580, y2: 0, thickness: 6, color: "#334155", material: "concrete", managedKind: "perimeter", perimeterSide: "top" },
+    ];
+    const { container } = render(<Harness initialCampus={campus} onCampusChange={(c) => { latestCampus = c; }} />);
+    const svg = stubSvgRect(container, 580, 380);
+
+    fireEvent.keyDown(window, { key: "w" });
+    // Start (5,5): 7.07 from the perimeter endpoint (0,0) → endpoint snap.
+    fireEvent.mouseDown(svg, { clientX: 5, clientY: 5, bubbles: true });
+    // End (60,5): 5 from the perimeter segment (y=0) → on-segment snap.
+    fireEvent.mouseMove(svg, { clientX: 60, clientY: 5, bubbles: true });
+    fireEvent.mouseDown(svg, { clientX: 60, clientY: 5, bubbles: true });
+
+    const walls = latestCampus!.buildings[0].floors[0].walls;
+    expect(walls).toHaveLength(2);
+    expect(walls[1]).toMatchObject({ x1: 0, y1: 0, x2: 60, y2: 0 });
+    // The perimeter wall itself remains untouched and unselected.
+    expect(walls[0]).toMatchObject({ managedKind: "perimeter", perimeterSide: "top" });
+  });
+
+  it("returns to the Select tool with the new wall selected after finishing", () => {
+    const { container } = render(<Harness initialCampus={makeSnapCampus()} onCampusChange={(c) => { latestCampus = c; }} />);
+    const svg = stubSvgRect(container, 580, 380);
+
+    fireEvent.keyDown(window, { key: "w" });
+    fireEvent.mouseDown(svg, { clientX: 55, clientY: 59, bubbles: true }); // → (53,57)
+    fireEvent.mouseMove(svg, { clientX: 255, clientY: 59, bubbles: true }); // → (253,57)
+    fireEvent.mouseDown(svg, { clientX: 255, clientY: 59, bubbles: true });
+
+    // Select tool is active again (toolbar Select button shows active styling).
+    expect(screen.getByTitle("Select (V)").className).toContain("bg-primary");
+    // The new wall is selected, so the wall properties panel shows its length.
+    const walls = latestCampus!.buildings[0].floors[0].walls;
+    expect(walls).toHaveLength(3);
+    expect(screen.getAllByText("200").length).toBeGreaterThan(0);
+  });
+
+  it("creates one history entry per wall and restores exact snapped geometry on redo", () => {
+    const { container } = render(<Harness initialCampus={makeSnapCampus()} onCampusChange={(c) => { latestCampus = c; }} />);
+    const svg = stubSvgRect(container, 580, 380);
+
+    fireEvent.keyDown(window, { key: "w" });
+    fireEvent.mouseDown(svg, { clientX: 55, clientY: 59, bubbles: true }); // → (53,57)
+    fireEvent.mouseMove(svg, { clientX: 255, clientY: 59, bubbles: true }); // → (253,57)
+    fireEvent.mouseDown(svg, { clientX: 255, clientY: 59, bubbles: true });
+    expect(latestCampus!.buildings[0].floors[0].walls).toHaveLength(3);
+
+    // ONE undo removes the whole wall (single history action).
+    fireEvent.click(screen.getByTitle("Undo (Ctrl+Z)"));
+    expect(latestCampus!.buildings[0].floors[0].walls).toHaveLength(2);
+
+    // Redo restores the exact snapped geometry.
+    fireEvent.click(screen.getByTitle("Redo (Ctrl+Y)"));
+    const walls = latestCampus!.buildings[0].floors[0].walls;
+    expect(walls).toHaveLength(3);
+    expect(walls[2]).toMatchObject({ x1: 53, y1: 57, x2: 253, y2: 57 });
   });
 });
 

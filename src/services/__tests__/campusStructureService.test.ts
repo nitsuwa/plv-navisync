@@ -70,6 +70,64 @@ describe("campus structure mapping", () => {
     expect(hydrated.navEdges?.[0]).toMatchObject({ id: ids.edge, emergencySafe: true });
   });
 
+  it("serializes and hydrates floor-plan background metadata and calibrated scale", () => {
+    const withBackground = {
+      ...campus,
+      buildings: [{
+        ...campus.buildings[0],
+        floors: [{
+          ...campus.buildings[0].floors[0],
+          canvasW: 220,
+          canvasH: 160,
+          backgroundImage: {
+            storagePath: "campus/building/floor/plan.png",
+            fileName: "plan.png",
+            mimeType: "image/png",
+            size: 2048,
+            visible: true,
+            opacity: 0.4,
+            locked: true,
+            x: 12,
+            y: 8,
+            width: 180,
+            height: 120,
+            rotation: 3,
+          },
+          calibration: {
+            metersPerUnit: 0.05,
+            editorDistance: 200,
+            realDistanceM: 10,
+            points: [{ x: 0, y: 0 }, { x: 200, y: 0 }],
+          },
+        }],
+      }],
+    } as Campus;
+
+    const payload = serializeCampusStructure(withBackground);
+    expect(payload.floors[0]).toMatchObject({
+      floor_plan_path: "campus/building/floor/plan.png",
+      canvas_width: 220,
+      canvas_height: 160,
+      map_scale_m_per_unit: 0.05,
+    });
+
+    const hydrated = hydrateCampusStructure(withBackground, {
+      buildings: payload.buildings.map((v) => ({ ...v, campus_id: ids.campus }) as never),
+      floors: payload.floors.map((v) => v as never),
+      mapElements: payload.map_elements.map((v) => v as never),
+      navigationNodes: payload.navigation_nodes.map((v) => v as never),
+      navigationEdges: payload.navigation_edges.map((v) => v as never),
+    });
+
+    expect(hydrated.buildings[0].floors[0].backgroundImage).toMatchObject({
+      storagePath: "campus/building/floor/plan.png",
+      opacity: 0.4,
+      x: 12,
+      width: 180,
+    });
+    expect(hydrated.buildings[0].floors[0].calibration?.metersPerUnit).toBe(0.05);
+  });
+
   it("builds directory results from published snapshots only", () => {
     const payload = serializeCampusStructure(campus);
     expect(directoryFromSnapshot(ids.campus, { structure: payload } as never)).toEqual(expect.arrayContaining([

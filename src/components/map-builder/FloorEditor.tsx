@@ -6,7 +6,7 @@ import {
   DoorOpen, Binary, Text, PanelRightClose, Navigation, LandPlot,
   MousePointer2, Hand, HelpCircle, AlertTriangle, Maximize2, MoreHorizontal,
   Square as SquareIcon, GitBranch as GitBranchIcon, Trash2 as TrashIcon, Copy, Settings2,
-  Loader2, Globe2, Eye, EyeOff, Lock, Unlock,
+  Loader2, Globe2, Eye, EyeOff, Lock, Unlock, Plus, Pencil,
 } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { useCanvasControls, isSpacePressed } from "./useCanvasControls";
@@ -16,10 +16,28 @@ import {
   FURNITURE_CATEGORIES, genId,
 } from "./constants";
 import { FloorPropertiesPanel } from "./FloorPropertiesPanel";
+import { FloorOverviewSidebar } from "./FloorOverviewSidebar";
+import { FloorActionsMenu } from "./FloorActionsMenu";
 import { FloorSettingsDialog, type FloorSettingsDraft } from "./FloorSettingsDialog";
 import { ShortcutCheatSheet } from "./ShortcutCheatSheet";
 import { useToast } from "../../hooks/useToast";
 import { floorUndoEntryFromFloor, normalizeFloor } from "../../lib/floorPlanNormalization";
+import {
+  addFloorToBuilding,
+  countFloorAuthoredItems,
+  deleteFloorFromBuilding,
+  duplicateFloorInBuilding,
+  moveFloorInBuilding,
+  renameFloorInBuilding,
+} from "../../lib/floorManagement";
+import {
+  createFittedFloorPlanBackground,
+  createFloorScaleCalibration,
+  fitFloorPlanBackgroundToFloor,
+  measureDistanceMeters,
+  resetFloorPlanBackgroundPosition,
+} from "../../lib/floorPlanBackground";
+import { floorPlanStorageService } from "../../services/floorPlanStorageService";
 import {
   clamp as clampFloorValue,
   constrainDeltaForBounds,
@@ -59,7 +77,7 @@ import type {
   Campus, FloorPlan, FloorRoom, FloorPath,
   FloorWall, FloorDoor, FloorWindow, FloorFurniture,
   FloorStairs, FloorRamp, FloorElevatorItem, FloorLabel,
-  FloorSelection, SimpleTool, FloorEditorMode,
+  FloorSelection, SimpleTool, FloorEditorMode, FloorPlanBackground,
   RoomResizeState, FloorUndoEntry, FloorWallEndpointAnchor,
 } from "./types";
 
@@ -75,6 +93,7 @@ const DOUBLE_DOOR_MIN_WIDTH = 28;
 const DOUBLE_DOOR_MAX_WIDTH = 72;
 const WINDOW_MAX_WIDTH = 72;
 const OPENING_HIT_TOLERANCE = 22;
+const ADVANCED_FLOOR_REFERENCE_ENABLED = false;
 const PERIMETER_SIDES = ["top", "right", "bottom", "left"] as const;
 type PerimeterSide = typeof PERIMETER_SIDES[number];
 const WALL_SNAP_ANGLE = 45; // degrees — snap to 45° angles when drawing walls
@@ -98,6 +117,61 @@ function snapAngleDeg(deg: number, increment: number = 15): number {
 /** Distance between two points */
 function dist(x1: number, y1: number, x2: number, y2: number): number {
   return Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2);
+}
+
+function textMetrics(value: string, fontSize: number) {
+  const text = value.length > 0 ? value : " ";
+  // Real canvas measurement is used when a 2D context is available (production
+  // browsers). JSDOM/test environments return null (or can throw), so we fall
+  // back to a deterministic per-character estimate — no canvas dependency is
+  // added just for tests.
+  try {
+    const canvas = typeof document !== "undefined" ? document.createElement("canvas") : null;
+    const context = canvas?.getContext("2d");
+    if (context && typeof context.measureText === "function") {
+      context.font = `600 ${fontSize}px Inter, system-ui, sans-serif`;
+      return { width: Math.ceil(context.measureText(text).width), height: Math.ceil(fontSize * 1.35) };
+    }
+  } catch {
+    // Fall through to the deterministic estimate below.
+  }
+  return { width: Math.ceil(text.length * fontSize * 0.62), height: Math.ceil(fontSize * 1.35) };
+}
+
+function inlineLabelEditorBounds(label: FloorLabel, value: string, canvasW: number, canvasH: number) {
+  const fontSize = Math.max(11, label.fontSize);
+  const metrics = textMetrics(value, fontSize);
+  const width = Math.max(72, metrics.width + 20);
+  const height = Math.max(32, metrics.height + 14);
+  let x = label.x - 6;
+  if (label.align === "center") x = label.x - width / 2;
+  if (label.align === "right") x = label.x - width + 6;
+  if (width <= canvasW) x = Math.max(0, Math.min(x, canvasW - width));
+  else x = 0;
+  let y = label.y - height + fontSize * 0.65;
+  if (height <= canvasH) y = Math.max(0, Math.min(y, canvasH - height));
+  else y = 0;
+  return { x, y, width, height };
+}
+
+function readImageSize(file: File): Promise<{ width?: number; height?: number }> {
+  return new Promise((resolve) => {
+    if (typeof URL === "undefined" || typeof Image === "undefined") {
+      resolve({});
+      return;
+    }
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      resolve({ width: img.naturalWidth, height: img.naturalHeight });
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      resolve({});
+    };
+    img.src = url;
+  });
 }
 function wallMaterialStyle(material?: string) {
   if (material === "glass") return { coreOpacity: 0.62, casingOpacity: 0.72, dash: "6 3", casing: "#60a5fa" };
@@ -739,6 +813,27 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
   const [showIssues, setShowIssues] = useState(false);
   const [showMoreTools, setShowMoreTools] = useState(false);
   const [showFloorSettings, setShowFloorSettings] = useState(false);
+  const [floorMenu, setFloorMenu] = useState<{ floorId: string; x: number; y: number } | null>(null);
+  const floorActionsButtonRef = useRef<HTMLButtonElement | null>(null);
+  const [floorRename, setFloorRename] = useState<{ floorId: string; currentLabel: string } | null>(null);
+  const [floorRenameValue, setFloorRenameValue] = useState("");
+  const [floorDeleteConfirm, setFloorDeleteConfirm] = useState<{ id: string; label: string } | null>(null);
+  const [backgroundPreviewUrl, setBackgroundPreviewUrl] = useState<string | null>(null);
+  const [backgroundUploading, setBackgroundUploading] = useState(false);
+  const [calibrationDraft, setCalibrationDraft] = useState<{
+    active: boolean;
+    p1?: { x: number; y: number };
+    p2?: { x: number; y: number };
+    distanceInput: string;
+  }>({ active: false, distanceInput: "" });
+  const [measureDraft, setMeasureDraft] = useState<{
+    start?: { x: number; y: number };
+    end?: { x: number; y: number };
+  }>({});
+  const [inlineLabelEdit, setInlineLabelEdit] = useState<{ id: string; value: string; original: string } | null>(null);
+  const skipNextInlineCommitRef = useRef(false);
+  const inlineLabelBlurReadyRef = useRef(true);
+  const lastLabelClickRef = useRef<{ id: string; at: number } | null>(null);
 
   const toast = useToast();
   const floorClipId = useMemo(() => `floor-clip-${floor.id.replace(/[^A-Za-z0-9_-]/g, "-")}`, [floor.id]);
@@ -757,6 +852,9 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
   const floorCanvas = normalizeFloorCanvasSize(floor.canvasW, floor.canvasH);
   const FP_W = floorCanvas.w;
   const FP_H = floorCanvas.h;
+  const floorGridSize = floor.gridSize ?? 20;
+  const floorBackground = floor.backgroundImage;
+  const calibratedMetersPerUnit = floor.calibration?.metersPerUnit;
   const orderedRooms = useMemo(() => sortByZ(rooms), [rooms]);
   const orderedWalls = useMemo(() => sortByZ(walls), [walls]);
   const orderedDoors = useMemo(() => sortByZ(doors), [doors]);
@@ -803,12 +901,38 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
     Math.round((((Math.atan2(pt.y - cy, pt.x - cx) * 180) / Math.PI + 90 + 360) % 360) / 5) * 5
   ), []);
 
+  useEffect(() => {
+    let cancelled = false;
+    const path = floorBackground?.storagePath;
+    if (!path) {
+      setBackgroundPreviewUrl(null);
+      return;
+    }
+    if (/^(blob:|data:|https?:\/\/)/.test(path)) {
+      setBackgroundPreviewUrl(path);
+      return;
+    }
+    floorPlanStorageService.signedUrl(path)
+      .then((url) => { if (!cancelled) setBackgroundPreviewUrl(url); })
+      .catch(() => { if (!cancelled) setBackgroundPreviewUrl(null); });
+    return () => { cancelled = true; };
+  }, [floorBackground?.storagePath]);
+
   // ── Data refs for drag operations ──
   const dragging = useRef<{ entries: { type: FloorSelection["type"]; id: string; origin: any }[]; sx: number; sy: number; fromBackground?: boolean } | null>(null);
   const resizing = useRef<RoomResizeState | null>(null);
   const furnitureResizing = useRef<{ id: string; corner: string; sx: number; sy: number; origin: FloorFurniture } | null>(null);
   const circulationResizing = useRef<{ type: "stairs" | "ramp" | "elevator"; id: string; corner: string; sx: number; sy: number; origin: FloorStairs | FloorRamp | FloorElevatorItem } | null>(null);
   const rotating = useRef<{ type: "room" | "furniture" | "stairs" | "ramp" | "elevator"; id: string; cx: number; cy: number; originRotation: number; startAngle: number } | null>(null);
+  const labelTransforming = useRef<{
+    kind: "resize" | "rotate";
+    id: string;
+    origin: FloorLabel;
+    center: { x: number; y: number };
+    startDistance?: number;
+    originRotation?: number;
+    startAngle?: number;
+  } | null>(null);
   const groupTransforming = useRef<{
     kind: "resize" | "rotate";
     handle?: string;
@@ -845,12 +969,15 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
     setDP([]);
     setContextMenu(null);
     setShowProperties(false);
+    setInlineLabelEdit(null);
+    setFloorMenu(null);
     wallEndpointDrag.current = null;
     dragging.current = null;
     resizing.current = null;
     furnitureResizing.current = null;
     circulationResizing.current = null;
     rotating.current = null;
+    labelTransforming.current = null;
     groupTransforming.current = null;
     suppressHistoryRef.current = false;
     gestureMoved.current = false;
@@ -898,6 +1025,9 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
         canvasH: floor.canvasH,
         backgroundColor: floor.backgroundColor,
         showGrid: floor.showGrid,
+        gridSize: floor.gridSize,
+        backgroundImage: floor.backgroundImage,
+        calibration: floor.calibration,
         label: floor.label,
         rooms: newRooms, paths: newPaths,
         walls: nextWalls, doors: syncedOpenings.doors,
@@ -910,7 +1040,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
       if (!suppressHistoryRef.current) pushHistory(next);
       buildFloorUpdates(next);
     },
-    [buildFloorUpdates, floor.canvasW, floor.canvasH, floor.backgroundColor, floor.showGrid, floor.label, walls, doors, windows, furniture, stairs, ramps, elevators, labels, pushHistory]
+    [buildFloorUpdates, floor.canvasW, floor.canvasH, floor.backgroundColor, floor.showGrid, floor.gridSize, floor.backgroundImage, floor.calibration, floor.label, walls, doors, windows, furniture, stairs, ramps, elevators, labels, pushHistory]
   );
 
   // Apply a history entry to the floor (shared by toolbar buttons + shortcuts).
@@ -1017,6 +1147,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
 
   const requestFloorSwitch = useCallback((targetFloorId: string) => {
     if (targetFloorId === floorId) return;
+    setFloorMenu(null);
     clearTransientEditorState();
     if (isFloorDirty) {
       setPendingFloorSwitch(targetFloorId);
@@ -1024,6 +1155,118 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
     }
     switchToFloor(targetFloorId);
   }, [clearTransientEditorState, floorId, isFloorDirty, switchToFloor]);
+
+  const updateBuildingFloors = useCallback((nextFloors: FloorPlan[]) => {
+    const updatedCampus: Campus = {
+      ...campus,
+      buildings: campus.buildings.map((b) =>
+        b.id === buildingId
+          ? { ...b, floors: nextFloors.map((nextFloor) => normalizeFloor(nextFloor, { buildingId: b.id })) }
+          : b
+      ),
+    };
+    onUpdate(updatedCampus);
+    return updatedCampus;
+  }, [buildingId, campus, onUpdate]);
+
+  // ── Floor management — ALL surfaces (the `...` button, tab right-clicks,
+  //    the rename/delete dialogs, and the Floor Overview sidebar) route through
+  //    these handlers and the shared floorManagement helpers, so no surface can
+  //    drift into a separate duplicate/delete/reorder implementation. ──
+
+  const addFloorFromEditor = useCallback(() => {
+    const { floors, floor: newFloor } = addFloorToBuilding(building.floors, buildingId);
+    updateBuildingFloors(floors);
+    clearTransientEditorState();
+    setFloorMenu(null);
+    onSwitchFloor(newFloor.id);
+    toast.success("Floor added", `${newFloor.label} is ready to edit.`);
+  }, [building.floors, buildingId, clearTransientEditorState, onSwitchFloor, toast, updateBuildingFloors]);
+
+  const requestDuplicateFloor = useCallback((targetId: string) => {
+    const { floors, copy } = duplicateFloorInBuilding(building.floors, buildingId, targetId);
+    if (!copy) {
+      setFloorMenu(null);
+      return;
+    }
+    updateBuildingFloors(floors);
+    clearTransientEditorState();
+    setFloorMenu(null);
+    onSwitchFloor(copy.id);
+    toast.success("Floor duplicated", `${copy.label} was copied with new object IDs.`);
+  }, [building.floors, buildingId, clearTransientEditorState, onSwitchFloor, toast, updateBuildingFloors]);
+
+  const requestMoveFloor = useCallback((targetId: string, direction: -1 | 1) => {
+    const { floors, moved } = moveFloorInBuilding(building.floors, targetId, direction);
+    if (!moved) return;
+    updateBuildingFloors(floors);
+    setFloorMenu(null);
+    const label = building.floors.find((f) => f.id === targetId)?.label ?? "Floor";
+    toast.success("Floor order updated", `${label} moved ${direction < 0 ? "left" : "right"}.`);
+  }, [building.floors, toast, updateBuildingFloors]);
+
+  const requestDeleteFloor = useCallback((targetId: string) => {
+    if (building.floors.length <= 1) {
+      toast.error("Cannot delete floor", "A building must keep at least one floor.");
+      setFloorMenu(null);
+      return;
+    }
+    const target = building.floors.find((f) => f.id === targetId);
+    setFloorDeleteConfirm({ id: targetId, label: target?.label ?? "this floor" });
+    setFloorMenu(null);
+  }, [building.floors, toast]);
+
+  const confirmDeleteFloorById = useCallback((targetId: string) => {
+    const { floors, deleted, nextActiveId } = deleteFloorFromBuilding(building.floors, targetId);
+    if (!deleted) {
+      setFloorDeleteConfirm(null);
+      return;
+    }
+    if (floors.length === 0) {
+      toast.error("Cannot delete floor", "A building must keep at least one floor.");
+      setFloorDeleteConfirm(null);
+      return;
+    }
+    updateBuildingFloors(floors);
+    clearTransientEditorState();
+    setFloorDeleteConfirm(null);
+    // Track the active floor by ID: deleting the active floor activates the
+    // nearest remaining floor (next at the same index, else previous); deleting
+    // an inactive floor leaves the current active floor untouched.
+    if (targetId === floorId && nextActiveId) onSwitchFloor(nextActiveId);
+    toast.success("Floor deleted", `${deleted.label} has been removed.`);
+  }, [building.floors, clearTransientEditorState, floorId, onSwitchFloor, toast, updateBuildingFloors]);
+
+  const beginRenameFloor = useCallback((target: FloorPlan) => {
+    setFloorRename({ floorId: target.id, currentLabel: target.label });
+    setFloorRenameValue(target.label);
+    setFloorMenu(null);
+  }, []);
+
+  const applyFloorRename = useCallback(() => {
+    if (!floorRename) return;
+    const value = floorRenameValue.trim();
+    if (!value) {
+      toast.error("Name required", "Floor name cannot be empty.");
+      return;
+    }
+    if (value === floorRename.currentLabel) {
+      setFloorRename(null);
+      return;
+    }
+    updateBuildingFloors(renameFloorInBuilding(building.floors, floorRename.floorId, value));
+    setFloorRename(null);
+    toast.success("Floor renamed", `Renamed to "${value}".`);
+  }, [building.floors, floorRename, floorRenameValue, toast, updateBuildingFloors]);
+
+  const openFloorActionsAtButton = useCallback(() => {
+    if (floorMenu) {
+      setFloorMenu(null);
+      return;
+    }
+    const rect = floorActionsButtonRef.current?.getBoundingClientRect();
+    setFloorMenu({ floorId, x: rect?.left ?? 8, y: (rect?.bottom ?? 8) + 4 });
+  }, [floorId, floorMenu]);
 
   const saveAndSwitchFloor = useCallback(async () => {
     if (!pendingFloorSwitch) return;
@@ -1083,17 +1326,58 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
     setShowProperties(true);
   }, []);
 
+  const updateLabel = useCallback((id: string, changes: Partial<FloorLabel>) => {
+    const current = labels.find((label) => label.id === id);
+    if (!current) return;
+    const next = constrainLabelToFloor({ ...current, ...changes }, FP_W, FP_H);
+    updFloor(rooms, fpaths, walls, doors, windows, furniture, stairs, elevators, labels.map((label) => label.id === id ? next : label));
+  }, [FP_W, FP_H, rooms, fpaths, walls, doors, windows, furniture, stairs, elevators, labels, updFloor]);
+
+  const beginInlineLabelEdit = useCallback((label: FloorLabel, options?: { isolate?: boolean }) => {
+    if (label.locked) return;
+    if (multiSelected.length > 1 && !options?.isolate) return;
+    skipNextInlineCommitRef.current = false;
+    inlineLabelBlurReadyRef.current = false;
+    window.setTimeout(() => { inlineLabelBlurReadyRef.current = true; }, 0);
+    setMultiSelected([]);
+    selectFloorItem({ type: "label", id: label.id });
+    setInlineLabelEdit({ id: label.id, value: label.text, original: label.text });
+  }, [multiSelected.length, selectFloorItem]);
+
+  const commitInlineLabelEdit = useCallback(() => {
+    if (!inlineLabelEdit) return;
+    if (skipNextInlineCommitRef.current) {
+      skipNextInlineCommitRef.current = false;
+      return;
+    }
+    const nextValue = inlineLabelEdit.value.trim().length > 0 ? inlineLabelEdit.value : "Label";
+    if (nextValue !== inlineLabelEdit.original) {
+      updateLabel(inlineLabelEdit.id, { text: nextValue });
+    }
+    setInlineLabelEdit(null);
+  }, [inlineLabelEdit, updateLabel]);
+
+  const cancelInlineLabelEdit = useCallback(() => {
+    skipNextInlineCommitRef.current = true;
+    setInlineLabelEdit(null);
+  }, []);
+
   // Switching tools abandons any in-progress wall draw / snap feedback so the
   // transient snap indicator never stays behind as stale decoration.
   const switchTool = useCallback((next: SimpleTool) => {
+    if (next === "measure" && (!ADVANCED_FLOOR_REFERENCE_ENABLED || !calibratedMetersPerUnit)) {
+      toast.info("Calibrate floor scale first", "Measure uses the calibrated floor scale and will not fake meters.");
+      return;
+    }
     setTool(next);
     setWallStart(null);
     setWallPreview(null);
     setWallSnapIndicator(null);
     setOpeningPreview(null);
     setDP([]);
+    if (next !== "measure") setMeasureDraft({});
     setShowMoreTools(false);
-  }, []);
+  }, [calibratedMetersPerUnit, toast]);
 
   const selectionsFromIds = useCallback((ids: string[]) =>
     ids.map((id) => selectionForId(id)).filter((value): value is FloorSelection => !!value),
@@ -1471,7 +1755,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
   const wallDrawCursor = useCallback((raw: { x: number; y: number }, shiftHeld: boolean) => {
     const structural = findWallSnapTarget(raw);
     if (structural) return { point: structural, indicator: { x: structural.x, y: structural.y } };
-    const s = (v: number) => (snapOn ? snapToGrid(v, 5) : Math.round(v));
+    const s = (v: number) => (snapOn ? snapToGrid(v, floorGridSize) : Math.round(v));
     let ex = s(raw.x);
     let ey = s(raw.y);
     // 45° angle assistance while drawing (Shift held = free drawing)
@@ -1486,16 +1770,16 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
     }
     const bounded = { x: clamp(ex, 0, FP_W), y: clamp(ey, 0, FP_H) };
     return { point: snapPointToFloorBounds(bounded, FP_W, FP_H, SNAP_THRESHOLD), indicator: findSnapIndicator(bounded) };
-  }, [FP_W, FP_H, findWallSnapTarget, findSnapIndicator, snapOn, wallStart]);
+  }, [FP_W, FP_H, findWallSnapTarget, findSnapIndicator, snapOn, floorGridSize, wallStart]);
 
   // Wall-start placement: structural → grid (coarse) → boundary. No angle pivot yet.
   const wallStartCursor = useCallback((raw: { x: number; y: number }) => {
     const structural = findWallSnapTarget(raw);
     if (structural) return { point: structural, indicator: { x: structural.x, y: structural.y } };
-    const s = (v: number) => (snapOn ? snapToGrid(v, 10) : Math.round(v));
+    const s = (v: number) => (snapOn ? snapToGrid(v, floorGridSize) : Math.round(v));
     const bounded = { x: clamp(s(raw.x), 0, FP_W), y: clamp(s(raw.y), 0, FP_H) };
     return { point: snapPointToFloorBounds(bounded, FP_W, FP_H, SNAP_THRESHOLD), indicator: findSnapIndicator(bounded) };
-  }, [FP_W, FP_H, findWallSnapTarget, findSnapIndicator, snapOn]);
+  }, [FP_W, FP_H, findWallSnapTarget, findSnapIndicator, snapOn, floorGridSize]);
 
   // Endpoint editing: free movement by default (walls never feel stuck to an
   // orientation — drag away to detach and re-angle); Shift holds 15° angle
@@ -1503,7 +1787,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
   const wallEndpointCursor = useCallback((raw: { x: number; y: number }, shiftHeld: boolean, ep: NonNullable<typeof wallEndpointDrag.current>) => {
     const structural = findWallSnapTarget(raw, ep.wallId);
     if (structural) return { point: structural, indicator: { x: structural.x, y: structural.y } };
-    const s = (v: number) => (snapOn ? snapToGrid(v, 5) : Math.round(v));
+    const s = (v: number) => (snapOn ? snapToGrid(v, floorGridSize) : Math.round(v));
     let nx = s(raw.x);
     let ny = s(raw.y);
     if (shiftHeld) {
@@ -1519,7 +1803,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
     }
     const bounded = { x: clamp(nx, 0, FP_W), y: clamp(ny, 0, FP_H) };
     return { point: snapPointToFloorBounds(bounded, FP_W, FP_H, SNAP_THRESHOLD), indicator: findSnapIndicator(bounded) };
-  }, [FP_W, FP_H, findWallSnapTarget, findSnapIndicator, snapOn]);
+  }, [FP_W, FP_H, findWallSnapTarget, findSnapIndicator, snapOn, floorGridSize]);
 
   const openingWallTarget = useCallback((point: { x: number; y: number }, type: "door" | "window") => {
     const width = type === "door" ? DOOR_DEFAULT_WIDTH : WINDOW_DEFAULT_WIDTH;
@@ -1553,6 +1837,82 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
     setShowIssues(false);
   }, []);
 
+  const updateFloorMetadata = useCallback((updates: Partial<FloorPlan>, message?: string) => {
+    const candidate = normalizeFloor({ ...floor, ...updates }, { buildingId });
+    pushHistory(floorUndoEntryFromFloor(candidate));
+    buildFloorUpdates(updates);
+    if (message) toast.success(message);
+  }, [buildFloorUpdates, buildingId, floor, pushHistory, toast]);
+
+  const handleImportBackground = useCallback(async (file: File) => {
+    setBackgroundUploading(true);
+    try {
+      floorPlanStorageService.validate(file);
+      const [storagePath, imageSize] = await Promise.all([
+        floorPlanStorageService.upload({ campusId: campus.id, buildingId, floorId, file }),
+        readImageSize(file),
+      ]);
+      const background = createFittedFloorPlanBackground({
+        storagePath,
+        fileName: file.name,
+        mimeType: file.type,
+        size: file.size,
+        canvasW: FP_W,
+        canvasH: FP_H,
+        naturalWidth: imageSize.width,
+        naturalHeight: imageSize.height,
+      });
+      updateFloorMetadata({ backgroundImage: background }, "Floor plan imported");
+      setShowFloorSettings(true);
+    } catch (error) {
+      toast.error("Could not import floor plan", error instanceof Error ? error.message : "Upload failed.");
+    } finally {
+      setBackgroundUploading(false);
+    }
+  }, [FP_H, FP_W, buildingId, campus.id, floorId, toast, updateFloorMetadata]);
+
+  const handleUpdateBackground = useCallback((background: FloorPlanBackground | undefined) => {
+    updateFloorMetadata({ backgroundImage: background, calibration: background ? floor.calibration : undefined }, background ? "Floor plan background updated" : "Floor plan background removed");
+  }, [floor.calibration, updateFloorMetadata]);
+
+  const handleFitBackground = useCallback(() => {
+    const background = fitFloorPlanBackgroundToFloor(floor.backgroundImage, FP_W, FP_H);
+    if (background) updateFloorMetadata({ backgroundImage: background }, "Floor plan fit to floor");
+  }, [FP_H, FP_W, floor.backgroundImage, updateFloorMetadata]);
+
+  const handleResetBackground = useCallback(() => {
+    const background = resetFloorPlanBackgroundPosition(floor.backgroundImage);
+    if (background) updateFloorMetadata({ backgroundImage: background }, "Floor plan position reset");
+  }, [floor.backgroundImage, updateFloorMetadata]);
+
+  const startCalibration = useCallback(() => {
+    if (!floor.backgroundImage) {
+      toast.info("Import a floor plan first", "Scale calibration needs a reference image.");
+      return;
+    }
+    setShowFloorSettings(false);
+    setTool("select");
+    setCalibrationDraft({ active: true, distanceInput: "" });
+  }, [floor.backgroundImage, toast]);
+
+  const removeCalibration = useCallback(() => {
+    updateFloorMetadata({ calibration: undefined }, "Floor scale calibration removed");
+    if (tool === "measure") setTool("select");
+    setMeasureDraft({});
+  }, [tool, updateFloorMetadata]);
+
+  const confirmCalibration = useCallback(() => {
+    if (!calibrationDraft.p1 || !calibrationDraft.p2) return;
+    const distanceM = Number(calibrationDraft.distanceInput);
+    try {
+      const calibration = createFloorScaleCalibration(calibrationDraft.p1, calibrationDraft.p2, distanceM);
+      updateFloorMetadata({ calibration }, "Floor scale calibrated");
+      setCalibrationDraft({ active: false, distanceInput: "" });
+    } catch (error) {
+      toast.error("Calibration blocked", error instanceof Error ? error.message : "Enter a valid distance.");
+    }
+  }, [calibrationDraft.distanceInput, calibrationDraft.p1, calibrationDraft.p2, toast, updateFloorMetadata]);
+
   // Floor Settings applies draft General/Canvas/Appearance values as ONE edit:
   // validates shrink against authored geometry, pushes one history entry, marks
   // the floor dirty, and returns whether the change was accepted.
@@ -1571,6 +1931,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
       && draft.label === floor.label
       && draft.backgroundColor === (floor.backgroundColor ?? "#e8e1d7")
       && draft.showGrid === (floor.showGrid !== false)
+      && draft.gridSize === (floor.gridSize ?? 20)
       && !perimeterChanged;
     if (unchanged) { setShowFloorSettings(false); return true; }
 
@@ -1618,6 +1979,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
       label: draft.label,
       backgroundColor: draft.backgroundColor,
       showGrid: draft.showGrid,
+      gridSize: draft.gridSize,
       walls: nextWalls,
       doors: nextDoors,
       windows: nextWindows,
@@ -1630,9 +1992,41 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
     return true;
   }, [buildFloorUpdates, doors, floor, pushHistory, toast, walls, windows, FP_W, FP_H]);
 
+  // Floor Overview sidebar quick-edits reuse Floor Settings' single-edit apply
+  // path so width/height changes get the same shrink validation + history.
+  const applySidebarFloorSettings = useCallback((partial: Partial<FloorSettingsDraft>) => {
+    const perimeterWalls = walls.filter(isManagedPerimeterWall);
+    const firstPerimeter = perimeterWalls[0];
+    const draft: FloorSettingsDraft = {
+      label: floor.label,
+      canvasW: FP_W,
+      canvasH: FP_H,
+      backgroundColor: floor.backgroundColor ?? "#e8e1d7",
+      showGrid: floor.showGrid !== false,
+      gridSize: floor.gridSize ?? 20,
+      perimeterEnabled: perimeterWalls.length > 0,
+      perimeterThickness: firstPerimeter?.thickness ?? 6,
+      perimeterMaterial: firstPerimeter?.material ?? "concrete",
+      perimeterColor: firstPerimeter?.color ?? "#334155",
+      ...partial,
+    };
+    applyFloorSettings(draft);
+  }, [FP_H, FP_W, applyFloorSettings, floor, walls]);
+
+  const renameActiveFloorFromSidebar = useCallback((label: string) => {
+    updateBuildingFloors(renameFloorInBuilding(building.floors, floorId, label));
+  }, [building.floors, floorId, updateBuildingFloors]);
+
   const fitFloor = useCallback(() => {
     zoomToFit(0, 0, FP_W, FP_H, 48);
   }, [FP_W, FP_H, zoomToFit]);
+
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => {
+      zoomToFit(0, 0, FP_W, FP_H, 56);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [floorId, FP_W, FP_H, zoomToFit]);
 
   // ── SVG Mouse handlers ──
 
@@ -1648,6 +2042,27 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
 
     const pt = getPoint(e, FP_W, FP_H);
     const boundedPt = { x: clamp(Math.round(pt.x), 0, FP_W), y: clamp(Math.round(pt.y), 0, FP_H) };
+
+    if (calibrationDraft.active) {
+      e.preventDefault();
+      if (!calibrationDraft.p1) {
+        setCalibrationDraft((draft) => ({ ...draft, p1: boundedPt }));
+      } else if (!calibrationDraft.p2) {
+        setCalibrationDraft((draft) => ({ ...draft, p2: boundedPt }));
+      }
+      return;
+    }
+
+    if (tool === "measure") {
+      e.preventDefault();
+      if (!floor.calibration) {
+        toast.info("Calibrate floor scale first", "Measure uses the calibrated floor scale and will not fake meters.");
+        setTool("select");
+        return;
+      }
+      setMeasureDraft((draft) => !draft.start || draft.end ? { start: boundedPt } : { ...draft, end: boundedPt });
+      return;
+    }
 
     if (tool === "pan") { if (isBg) startPan(e); return; }
     if (tool === "select" || tool === "erase") {
@@ -1690,7 +2105,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
       return;
     }
 
-    const s = (v: number) => snapOn ? snapToGrid(v, 10) : Math.round(v);
+    const s = (v: number) => snapOn ? snapToGrid(v, floorGridSize) : Math.round(v);
     const clamped = snapFloorPoint({ x: clamp(s(pt.x), 0, FP_W), y: clamp(s(pt.y), 0, FP_H) });
 
     if (tool === "wall") {
@@ -1815,6 +2230,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
       };
       updFloor(rooms, fpaths, walls, doors, windows, furniture, stairs, elevators, [...labels, newLabel]);
       selectFloorItem({ type: "label", id: newLabel.id });
+      setInlineLabelEdit({ id: newLabel.id, value: newLabel.text, original: newLabel.text });
       setTool("select");
       return;
     }
@@ -1829,6 +2245,8 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
     const pt = getPoint(e, FP_W, FP_H);
     setCursorPos({ x: Math.round(pt.x), y: Math.round(pt.y) });
     const boundedPt = { x: clamp(Math.round(pt.x), 0, FP_W), y: clamp(Math.round(pt.y), 0, FP_H) };
+
+    if (calibrationDraft.active || tool === "measure") return;
 
     if (tool === "door" || tool === "window") {
       const target = openingWallTarget(pt, tool);
@@ -1910,6 +2328,16 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
       return;
     }
 
+    // Start-point hover feedback: while the Wall tool is armed but no start
+    // point is placed yet, preview the EXACT structural snap the first click
+    // will commit (same wallStartCursor resolution), so the connection target
+    // is visible before clicking — wall creation feels as reliable as endpoint
+    // editing. Falls through: nothing else is active before the first click.
+    if (tool === "wall" && !wallStart) {
+      const resolved = wallStartCursor({ x: pt.x, y: pt.y });
+      setWallSnapIndicator(resolved.indicator);
+    }
+
     // Wall endpoint editing: free movement by default (drag an endpoint away to
     // detach and re-angle a wall — it is never permanently locked to a snapped
     // orientation). Structural snaps resolve first from the raw pointer; Shift
@@ -1937,7 +2365,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
 
     // Room/stairs/elevator drag preview
     if (roomDrag && (tool === "room" || tool === "stairs" || tool === "ramp" || tool === "elevator")) {
-      const s = (v: number) => snapOn ? snapToGrid(v, 10) : Math.round(v);
+      const s = (v: number) => snapOn ? snapToGrid(v, floorGridSize) : Math.round(v);
       setRoomDrag({ ...roomDrag, cx: clamp(s(pt.x), 0, FP_W), cy: clamp(s(pt.y), 0, FP_H) });
       return;
     }
@@ -2019,6 +2447,24 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
       } else {
         if (rotation !== state.originRotation) gestureMoved.current = true;
         updFloor(rooms, fpaths, walls, doors, windows, furniture, stairs, elevators.map((el) => el.id === state.id ? { ...el, rotation } : el));
+      }
+      return;
+    }
+
+    if (labelTransforming.current) {
+      const state = labelTransforming.current;
+      if (state.kind === "resize") {
+        const currentDistance = Math.max(1, dist(pt.x, pt.y, state.center.x, state.center.y));
+        const scale = clamp(currentDistance / Math.max(1, state.startDistance ?? currentDistance), 0.45, 3);
+        const nextFontSize = clamp(Math.round(state.origin.fontSize * scale), 6, 48);
+        if (nextFontSize !== state.origin.fontSize) gestureMoved.current = true;
+        updateLabel(state.id, { fontSize: nextFontSize });
+      } else {
+        const currentAngle = rotationFromPoint(pt, state.center.x, state.center.y);
+        const rawDelta = currentAngle - (state.startAngle ?? currentAngle);
+        const rotation = normalizeRotation((state.originRotation ?? 0) + (e.shiftKey ? Math.round(rawDelta / 15) * 15 : rawDelta));
+        if (rotation !== (state.originRotation ?? 0)) gestureMoved.current = true;
+        updateLabel(state.id, { rotation });
       }
       return;
     }
@@ -2148,6 +2594,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
     // state (per-frame pushes were suppressed during the drag). Undo therefore
     // restores the pre-gesture snapshot and redo re-applies the gesture.
     if (gestureMoved.current) {
+      lastLabelClickRef.current = null;
       pushHistory(floorSnapshot()); /* post-gesture commit */
     }
     suppressHistoryRef.current = false;
@@ -2161,6 +2608,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
     if (!(tool === "wall" && wallStart)) setWallSnapIndicator(null);
     dragging.current = null;
     if (groupTransforming.current) { groupTransforming.current = null; return; }
+    if (labelTransforming.current) { labelTransforming.current = null; return; }
     if (rotating.current) { rotating.current = null; return; }
     if (circulationResizing.current) { circulationResizing.current = null; return; }
     if (furnitureResizing.current) { furnitureResizing.current = null; return; }
@@ -2282,6 +2730,17 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
       return;
     }
     if (tool !== "select") return;
+    if (type === "label") {
+      const now = Date.now();
+      const lastLabelClick = lastLabelClickRef.current;
+      const isDoubleClick =
+        e.detail >= 2 || (!!lastLabelClick && lastLabelClick.id === id && now - lastLabelClick.at <= 450);
+      lastLabelClickRef.current = isDoubleClick ? null : { id, at: now };
+      if (isDoubleClick) {
+        beginInlineLabelEdit(item as FloorLabel, { isolate: true });
+        return;
+      }
+    }
     const sel: FloorSelection = { type: type as any, id };
     if (e.shiftKey || e.ctrlKey || e.metaKey) {
       const base = multiSelected.length > 0 ? multiSelected : selected ? [selected.id] : [];
@@ -2463,8 +2922,9 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
       if (e.key === "Escape") {
         setWallStart(null); setWallPreview(null); setWallSnapIndicator(null); setDP([]);
         setSelected(null); setMultiSelected([]); setRubberBand(null); setContextMenu(null);
+        setCalibrationDraft({ active: false, distanceInput: "" }); setMeasureDraft({});
         suppressHistoryRef.current = false; gestureMoved.current = false; dragging.current = null;
-        if (tool === "path") setTool("select");
+        if (tool === "path" || tool === "measure") setTool("select");
       }
       if (e.key === "v" || e.key === "V") switchTool("select");
       if (e.key === "w" || e.key === "W") switchTool("wall");
@@ -2491,7 +2951,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
     : tool === "erase" ? "not-allowed"
     : tool === "pan" ? "grab"
     : panning.current ? "grabbing"
-    : (tool === "wall" || tool === "room" || tool === "path" || tool === "door" || tool === "window" || tool === "stairs" || tool === "ramp" || tool === "elevator" || tool === "furniture" || tool === "text")
+    : calibrationDraft.active || tool === "measure" || (tool === "wall" || tool === "room" || tool === "path" || tool === "door" || tool === "window" || tool === "stairs" || tool === "ramp" || tool === "elevator" || tool === "furniture" || tool === "text")
       ? "crosshair"
       : "default";
 
@@ -2529,6 +2989,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
 
   const allItemsCount = rooms.length + walls.length + doors.length + windows.length +
     furniture.length + stairs.length + ramps.length + elevators.length + labels.length + fpaths.length;
+  const selectedLabel = selected?.type === "label" ? labels.find((label) => label.id === selected.id) : undefined;
 
   // Group bounding rectangle — the subtle outline that visually distinguishes a
   // multi-selection (like Canva / the Outdoor Map Builder) and updates live
@@ -2583,6 +3044,28 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
   }, [FP_W, FP_H, getPoint, getSelectionItem, multiBounds, multiSelected, selectionForId, tool, toast]);
 
   // ── Empty state check ──
+  const startLabelTransform = useCallback((e: React.MouseEvent, label: FloorLabel, kind: "resize" | "rotate") => {
+    e.stopPropagation();
+    if (tool !== "select" || label.locked || inlineLabelEdit?.id === label.id) return;
+    const bounds = labelBounds(label);
+    const center = { x: bounds.x + bounds.w / 2, y: bounds.y + bounds.h / 2 };
+    const pt = getPoint(e as any, FP_W, FP_H);
+    labelTransforming.current = {
+      kind,
+      id: label.id,
+      origin: structuredClone(label),
+      originBounds: bounds,
+      center,
+      startDistance: kind === "resize" ? dist(pt.x, pt.y, center.x, center.y) : undefined,
+      originRotation: label.rotation ?? 0,
+      startAngle: kind === "rotate" ? rotationFromPoint(pt, center.x, center.y) : undefined,
+    };
+    suppressHistoryRef.current = true;
+    gestureMoved.current = false;
+    setMultiSelected([]);
+    selectFloorItem({ type: "label", id: label.id });
+  }, [FP_W, FP_H, getPoint, inlineLabelEdit?.id, rotationFromPoint, selectFloorItem, tool]);
+
   const isEmpty = allItemsCount === 0;
 
   // ── Context menu action handler ──
@@ -2668,16 +3151,44 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
             ({allItemsCount} item{allItemsCount !== 1 ? "s" : ""})
           </span>
 
-          {/* Floor tabs */}
+          {/* Floor tabs — right-clicking a tab opens the shared floor actions menu for THAT floor */}
           <div className="flex items-center gap-0.5 ml-2 overflow-x-auto no-scrollbar">
             {building.floors.map((f) => (
               <button key={f.id}
                 className={cn("shrink-0 h-6 px-2 rounded-md text-[10px] font-extrabold transition-all",
                   f.id === floorId ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:bg-muted hover:text-foreground")}
-                onClick={() => requestFloorSwitch(f.id)}>
+                onClick={() => requestFloorSwitch(f.id)}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  setFloorMenu({ floorId: f.id, x: e.clientX, y: e.clientY });
+                }}>
                 {f.label}
               </button>
             ))}
+            <button
+              type="button"
+              onClick={addFloorFromEditor}
+              title="Add Floor"
+              aria-label="Add Floor"
+              className="shrink-0 h-6 w-6 rounded-md border border-border text-muted-foreground hover:text-primary hover:border-primary/40 hover:bg-primary/5 flex items-center justify-center transition-all"
+            >
+              <Plus className="h-3.5 w-3.5" />
+            </button>
+            <div className="relative shrink-0">
+              <button
+                type="button"
+                ref={floorActionsButtonRef}
+                onClick={openFloorActionsAtButton}
+                title="Floor actions"
+                aria-label="Floor actions"
+                className={cn(
+                  "h-6 w-6 rounded-md border border-border flex items-center justify-center transition-all",
+                  floorMenu ? "bg-primary/10 text-primary border-primary/30" : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                )}
+              >
+                <MoreHorizontal className="h-3.5 w-3.5" />
+              </button>
+            </div>
           </div>
 
           <div className="flex-1" />
@@ -2732,6 +3243,42 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
               )}
             </div>
           </div>
+
+          {selectedLabel && multiSelected.length <= 1 && !inlineLabelEdit && (
+            <>
+              <div className="w-px h-5 bg-border mx-0.5" />
+              <div
+                className="flex items-center gap-1 rounded-lg border border-border bg-muted/30 p-0.5"
+                data-testid="selected-label-font-controls"
+              >
+                <button
+                  type="button"
+                  aria-label="Decrease selected text size"
+                  onClick={() => updateLabel(selectedLabel.id, { fontSize: Math.max(6, selectedLabel.fontSize - 1) })}
+                  className="h-6 px-2 rounded-md text-[10px] font-extrabold text-muted-foreground hover:bg-muted hover:text-foreground transition-all"
+                >
+                  A-
+                </button>
+                <input
+                  aria-label="Selected text font size"
+                  type="number"
+                  min={6}
+                  max={24}
+                  value={selectedLabel.fontSize}
+                  onChange={(event) => updateLabel(selectedLabel.id, { fontSize: Math.max(6, Math.min(24, parseInt(event.target.value) || 12)) })}
+                  className="h-6 w-11 rounded-md border border-border bg-input-background px-1 text-center text-[10px] font-mono font-bold text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
+                />
+                <button
+                  type="button"
+                  aria-label="Increase selected text size"
+                  onClick={() => updateLabel(selectedLabel.id, { fontSize: Math.min(24, selectedLabel.fontSize + 1) })}
+                  className="h-6 px-2 rounded-md text-[10px] font-extrabold text-muted-foreground hover:bg-muted hover:text-foreground transition-all"
+                >
+                  A+
+                </button>
+              </div>
+            </>
+          )}
 
           <div className="w-px h-5 bg-border mx-0.5" />
 
@@ -2934,13 +3481,17 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
               <div className="grid grid-cols-2 gap-1 mt-1">
                 {[
                   { id: "text" as SimpleTool, label: "Text", icon: Text },
+                  ...(ADVANCED_FLOOR_REFERENCE_ENABLED ? [{ id: "measure" as SimpleTool, label: "Measure", icon: Text }] : []),
                 ].map((item) => {
                   const Icon = item.icon;
+                  const disabled = item.id === "measure" && !floor.calibration;
                   return (
                     <button key={item.id} onClick={() => { switchTool(item.id); setFurnitureTemplate(null); }}
+                      disabled={disabled}
                       className={cn("h-12 rounded-lg border px-2 py-1.5 transition-all text-left",
-                        tool === item.id ? "border-primary bg-primary/8 text-primary" : "border-border hover:bg-muted/60 text-foreground")}
-                      title={item.label}>
+                        tool === item.id ? "border-primary bg-primary/8 text-primary" : "border-border hover:bg-muted/60 text-foreground",
+                        disabled && "opacity-50 cursor-not-allowed hover:bg-transparent")}
+                      title={disabled ? "Calibrate floor scale first." : item.label}>
                       <Icon className="h-4 w-4 mb-0.5" />
                       <span className="text-[10px] font-bold block truncate">{item.label}</span>
                     </button>
@@ -2996,14 +3547,47 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
                   current selection. Item <g>s are siblings of this group. */}
               <g data-bg="true">
                 <rect data-testid="floor-canvas-boundary" data-bg="true" x={0} y={0} width={FP_W} height={FP_H} rx={2} fill={floor.backgroundColor ?? "#e8e1d7"} stroke="#5f5a52" strokeWidth={2} vectorEffect="non-scaling-stroke" />
+                {ADVANCED_FLOOR_REFERENCE_ENABLED && floorBackground && floorBackground.visible !== false && (
+                  <g
+                    data-testid="floor-plan-background-layer"
+                    data-bg="true"
+                    clipPath={`url(#${floorClipId})`}
+                    className="pointer-events-none"
+                    opacity={floorBackground.opacity}
+                    transform={`translate(${floorBackground.x}, ${floorBackground.y}) rotate(${floorBackground.rotation}, ${floorBackground.width / 2}, ${floorBackground.height / 2})`}
+                  >
+                    {backgroundPreviewUrl ? (
+                      <image
+                        data-testid="floor-plan-background-image"
+                        href={backgroundPreviewUrl}
+                        x={0}
+                        y={0}
+                        width={floorBackground.width}
+                        height={floorBackground.height}
+                        preserveAspectRatio="none"
+                      />
+                    ) : (
+                      <rect
+                        data-testid="floor-plan-background-placeholder"
+                        x={0}
+                        y={0}
+                        width={floorBackground.width}
+                        height={floorBackground.height}
+                        fill="rgba(14,42,110,0.08)"
+                        stroke="rgba(14,42,110,0.22)"
+                        strokeDasharray="6 4"
+                      />
+                    )}
+                  </g>
+                )}
                 {/* Grid lines — visibility follows the persisted floor appearance preference */}
                 {floor.showGrid !== false && (
                   <>
-                    {Array.from({ length: Math.ceil(FP_W / 20) }, (_, i) => (
-                      <line key={`gv${i}`} x1={i * 20} y1={0} x2={i * 20} y2={FP_H} stroke="rgba(55,48,40,0.08)" strokeWidth={0.5} />
+                    {Array.from({ length: Math.ceil(FP_W / floorGridSize) + 1 }, (_, i) => (
+                      <line key={`gv${i}`} x1={i * floorGridSize} y1={0} x2={i * floorGridSize} y2={FP_H} stroke="rgba(55,48,40,0.08)" strokeWidth={0.5} />
                     ))}
-                    {Array.from({ length: Math.ceil(FP_H / 20) }, (_, i) => (
-                      <line key={`gh${i}`} x1={0} y1={i * 20} x2={FP_W} y2={i * 20} stroke="rgba(55,48,40,0.08)" strokeWidth={0.5} />
+                    {Array.from({ length: Math.ceil(FP_H / floorGridSize) + 1 }, (_, i) => (
+                      <line key={`gh${i}`} x1={0} y1={i * floorGridSize} x2={FP_W} y2={i * floorGridSize} stroke="rgba(55,48,40,0.08)" strokeWidth={0.5} />
                     ))}
                   </>
                 )}
@@ -3689,28 +4273,182 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
 
               {orderedLabels.map((lb) => {
                 const isSel = (selected?.type === "label" && selected.id === lb.id) || multiSelected.includes(lb.id);
+                const isSingleLabelSelection = selected?.type === "label" && selected.id === lb.id && multiSelected.length === 0;
+                const isEditingLabel = inlineLabelEdit?.id === lb.id;
                 const bounds = labelBounds(lb);
+                const editorValue = isEditingLabel ? inlineLabelEdit.value : lb.text;
+                const editorBounds = inlineLabelEditorBounds(lb, editorValue, FP_W, FP_H);
                 const anchor = lb.align === "center" ? "middle" : lb.align === "right" ? "end" : "start";
+                const hitPad = Math.max(4, Math.min(8, 7 / zoom));
+                const handleSize = Math.max(4, Math.min(7, 6 / zoom));
+                const rotateOffset = Math.max(14, Math.min(24, (bounds.h + 18) / zoom));
+                const handleBounds = {
+                  x: bounds.x - hitPad,
+                  y: bounds.y - hitPad,
+                  w: bounds.w + hitPad * 2,
+                  h: bounds.h + hitPad * 2,
+                };
+                const cornerHandles = [
+                  { id: "nw", x: handleBounds.x - handleSize / 2, y: handleBounds.y - handleSize / 2, cursor: "nwse-resize" },
+                  { id: "ne", x: handleBounds.x + handleBounds.w - handleSize / 2, y: handleBounds.y - handleSize / 2, cursor: "nesw-resize" },
+                  { id: "sw", x: handleBounds.x - handleSize / 2, y: handleBounds.y + handleBounds.h - handleSize / 2, cursor: "nesw-resize" },
+                  { id: "se", x: handleBounds.x + handleBounds.w - handleSize / 2, y: handleBounds.y + handleBounds.h - handleSize / 2, cursor: "nwse-resize" },
+                ];
                 return (
-                  <g key={lb.id} onMouseDown={(e) => onItemDown(e, "label", lb.id, lb)}
+                  <g key={lb.id} data-testid="floor-label-object"
+                    onMouseDownCapture={(e) => {
+                      if (e.detail >= 2) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        beginInlineLabelEdit(lb, { isolate: true });
+                      }
+                    }}
+                    onMouseDown={(e) => onItemDown(e, "label", lb.id, lb)}
+                    onClick={(e) => {
+                      if (e.detail >= 2) {
+                        e.stopPropagation();
+                        beginInlineLabelEdit(lb, { isolate: true });
+                      }
+                    }}
                     onContextMenu={(e) => onItemContextMenu(e, "label", lb.id)}
                     opacity={visibleOpacity(lb)}
                     onDoubleClick={(e) => {
                       e.stopPropagation();
-                      // Double-click a text annotation to jump straight into editing it.
-                      if (tool === "select") { setMultiSelected([]); selectFloorItem({ type: "label", id: lb.id }); }
+                      beginInlineLabelEdit(lb, { isolate: true });
                     }}
                     style={{ cursor: tool === "select" ? "move" : cursor }}>
-                    {isSel && (
-                      <rect x={bounds.x - 4} y={bounds.y - 3} width={bounds.w + 8} height={bounds.h + 6} rx={2}
-                        fill="none" stroke="var(--accent)" strokeWidth={1} strokeDasharray="3 2" />
-                    )}
                     <g transform={`rotate(${lb.rotation}, ${lb.x}, ${lb.y})`}>
-                      <text x={lb.x} y={lb.y} textAnchor={anchor} fill={lb.color} fontSize={lb.fontSize} fontWeight="600"
-                        className="pointer-events-none select-none">
-                        {lb.text}
-                      </text>
+                      <rect
+                        data-testid="floor-label-hit-area"
+                        x={handleBounds.x}
+                        y={handleBounds.y}
+                        width={handleBounds.w}
+                        height={handleBounds.h}
+                        rx={2}
+                        fill="transparent"
+                        style={{ pointerEvents: "all", cursor: tool === "select" ? "move" : cursor }}
+                        onMouseDown={(e) => {
+                          if (e.detail >= 2) {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            beginInlineLabelEdit(lb, { isolate: true });
+                          }
+                        }}
+                        onDoubleClick={(e) => {
+                          e.stopPropagation();
+                          beginInlineLabelEdit(lb, { isolate: true });
+                        }}
+                      />
+                      {isSel && !isEditingLabel && (
+                        <rect
+                          data-testid="floor-label-selection-outline"
+                          x={handleBounds.x}
+                          y={handleBounds.y}
+                          width={handleBounds.w}
+                          height={handleBounds.h}
+                          rx={2}
+                          fill="none"
+                          stroke="var(--accent)"
+                          strokeWidth={1.1}
+                          strokeDasharray="3 2"
+                          className="pointer-events-none"
+                        />
+                      )}
+                      {!isEditingLabel && (
+                        <text x={lb.x} y={lb.y} textAnchor={anchor} fill={lb.color} fontSize={lb.fontSize} fontWeight="600"
+                          className="pointer-events-none select-none">
+                          {lb.text}
+                        </text>
+                      )}
+                      {isSingleLabelSelection && !isEditingLabel && (
+                        <>
+                          <line
+                            x1={handleBounds.x + handleBounds.w / 2}
+                            y1={handleBounds.y}
+                            x2={handleBounds.x + handleBounds.w / 2}
+                            y2={handleBounds.y - rotateOffset}
+                            stroke="var(--accent)"
+                            strokeWidth={1}
+                            strokeDasharray="2 2"
+                            className="pointer-events-none"
+                          />
+                          <circle
+                            data-testid="floor-label-rotate-handle"
+                            cx={handleBounds.x + handleBounds.w / 2}
+                            cy={handleBounds.y - rotateOffset}
+                            r={Math.max(3.5, handleSize * 0.75)}
+                            fill="white"
+                            stroke="var(--accent)"
+                            strokeWidth={1.4}
+                            style={{ cursor: "grab" }}
+                            onMouseDown={(e) => startLabelTransform(e, lb, "rotate")}
+                          />
+                          {cornerHandles.map((handle) => (
+                            <rect
+                              key={handle.id}
+                              data-testid="floor-label-resize-handle"
+                              data-corner={handle.id}
+                              x={handle.x}
+                              y={handle.y}
+                              width={handleSize}
+                              height={handleSize}
+                              rx={Math.max(1, handleSize * 0.25)}
+                              fill="white"
+                              stroke="var(--accent)"
+                              strokeWidth={1.2}
+                              style={{ cursor: handle.cursor }}
+                              onMouseDown={(e) => startLabelTransform(e, lb, "resize")}
+                            />
+                          ))}
+                        </>
+                      )}
                     </g>
+                    {isEditingLabel && (
+                      <foreignObject
+                        x={editorBounds.x}
+                        y={editorBounds.y}
+                        width={Math.min(editorBounds.width, Math.max(FP_W, 72))}
+                        height={editorBounds.height}
+                        data-testid="inline-label-editor"
+                      >
+                        <textarea
+                          autoFocus
+                          aria-label="Inline label text"
+                          value={inlineLabelEdit.value}
+                          onChange={(event) => {
+                            inlineLabelBlurReadyRef.current = true;
+                            const nextValue = event.target.value.replace(/[\r\n]+/g, " ");
+                            setInlineLabelEdit((current) => current?.id === lb.id ? { ...current, value: nextValue } : current);
+                          }}
+                          onBlur={() => {
+                            if (!inlineLabelBlurReadyRef.current) return;
+                            commitInlineLabelEdit();
+                          }}
+                          onMouseDown={(event) => event.stopPropagation()}
+                          onDoubleClick={(event) => event.stopPropagation()}
+                          onKeyDown={(event) => {
+                            event.stopPropagation();
+                            if (event.key === "Enter") {
+                              event.preventDefault();
+                              commitInlineLabelEdit();
+                            } else if (event.key === "Escape") {
+                              event.preventDefault();
+                              cancelInlineLabelEdit();
+                              event.currentTarget.blur();
+                            }
+                          }}
+                          className="h-full w-full resize-none rounded-md border border-primary/60 bg-card/95 px-2 py-1 text-[11px] font-semibold text-foreground shadow-lg outline-none ring-2 ring-primary/25 caret-primary"
+                          style={{
+                            fontSize: `${Math.max(11, lb.fontSize)}px`,
+                            color: lb.color,
+                            whiteSpace: "pre",
+                            overflowX: "auto",
+                            overflowY: "hidden",
+                            textAlign: lb.align ?? "left",
+                          }}
+                        />
+                      </foreignObject>
+                    )}
                   </g>
                 );
               })}
@@ -3764,6 +4502,69 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
               })()}
 
               {/* ═══ NAVIGATION CONNECTIONS ═══ */}
+              {ADVANCED_FLOOR_REFERENCE_ENABLED && floor.calibration && (
+                <g data-testid="floor-calibration-line" className="pointer-events-none">
+                  <line
+                    x1={floor.calibration.points[0].x}
+                    y1={floor.calibration.points[0].y}
+                    x2={floor.calibration.points[1].x}
+                    y2={floor.calibration.points[1].y}
+                    stroke="#2563eb"
+                    strokeWidth={2}
+                    strokeDasharray="5 3"
+                  />
+                  <circle cx={floor.calibration.points[0].x} cy={floor.calibration.points[0].y} r={4} fill="#2563eb" stroke="white" strokeWidth={1.5} />
+                  <circle cx={floor.calibration.points[1].x} cy={floor.calibration.points[1].y} r={4} fill="#2563eb" stroke="white" strokeWidth={1.5} />
+                </g>
+              )}
+
+              {ADVANCED_FLOOR_REFERENCE_ENABLED && calibrationDraft.active && calibrationDraft.p1 && (
+                <g data-testid="floor-calibration-draft-line" className="pointer-events-none">
+                  <line
+                    x1={calibrationDraft.p1.x}
+                    y1={calibrationDraft.p1.y}
+                    x2={(calibrationDraft.p2 ?? cursorPos ?? calibrationDraft.p1).x}
+                    y2={(calibrationDraft.p2 ?? cursorPos ?? calibrationDraft.p1).y}
+                    stroke="var(--primary)"
+                    strokeWidth={2}
+                    strokeDasharray="4 3"
+                  />
+                  <circle cx={calibrationDraft.p1.x} cy={calibrationDraft.p1.y} r={5} fill="var(--primary)" stroke="white" strokeWidth={1.5} />
+                  {calibrationDraft.p2 && <circle cx={calibrationDraft.p2.x} cy={calibrationDraft.p2.y} r={5} fill="var(--primary)" stroke="white" strokeWidth={1.5} />}
+                </g>
+              )}
+
+              {ADVANCED_FLOOR_REFERENCE_ENABLED && measureDraft.start && (
+                <g data-testid="floor-measure-line" className="pointer-events-none">
+                  <line
+                    x1={measureDraft.start.x}
+                    y1={measureDraft.start.y}
+                    x2={(measureDraft.end ?? cursorPos ?? measureDraft.start).x}
+                    y2={(measureDraft.end ?? cursorPos ?? measureDraft.start).y}
+                    stroke="#16a34a"
+                    strokeWidth={2}
+                    strokeDasharray="5 3"
+                  />
+                  <circle cx={measureDraft.start.x} cy={measureDraft.start.y} r={4} fill="#16a34a" stroke="white" strokeWidth={1.5} />
+                  {measureDraft.end && <circle cx={measureDraft.end.x} cy={measureDraft.end.y} r={4} fill="#16a34a" stroke="white" strokeWidth={1.5} />}
+                  {measureDraft.end && floor.calibration && (
+                    <text
+                      x={(measureDraft.start.x + measureDraft.end.x) / 2}
+                      y={(measureDraft.start.y + measureDraft.end.y) / 2 - 8}
+                      textAnchor="middle"
+                      fill="#166534"
+                      fontSize={8}
+                      fontWeight={800}
+                      stroke="white"
+                      strokeWidth={2}
+                      paintOrder="stroke fill"
+                    >
+                      {measureDistanceMeters(measureDraft.start, measureDraft.end, floor.calibration)?.toFixed(2)} m
+                    </text>
+                  )}
+                </g>
+              )}
+
               {rooms.filter(r => r.navConnection).map((room) => {
                 const nc = room.navConnection!;
                 const cx = FP_W / 2;
@@ -3897,6 +4698,72 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
           )}
 
           {/* Save status overlay — polished real-async feedback, not only a toast */}
+          {ADVANCED_FLOOR_REFERENCE_ENABLED && backgroundUploading && (
+            <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20">
+              <div className="px-3 py-1.5 rounded-lg border shadow-sm bg-card text-[11px] font-semibold text-foreground flex items-center gap-2">
+                <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+                Importing floor plan...
+              </div>
+            </div>
+          )}
+
+          {ADVANCED_FLOOR_REFERENCE_ENABLED && calibrationDraft.active && (
+            <div data-testid="floor-calibration-panel" className="absolute top-4 left-4 z-30 w-72 rounded-xl border border-border bg-card shadow-xl p-3">
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <p className="text-xs font-extrabold text-foreground">Calibrate Scale</p>
+                  <p className="text-[10px] text-muted-foreground mt-0.5">
+                    {!calibrationDraft.p1 ? "Step 1 - Pick first point"
+                      : !calibrationDraft.p2 ? "Step 2 - Pick second point"
+                      : "Step 3 - Enter real distance"}
+                  </p>
+                </div>
+                <button
+                  onClick={() => setCalibrationDraft({ active: false, distanceInput: "" })}
+                  className="w-7 h-7 rounded-lg hover:bg-muted flex items-center justify-center text-muted-foreground"
+                  aria-label="Cancel calibration"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+              <div className="mt-3 space-y-2 text-[10px]">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Editor distance</span>
+                  <span className="font-mono font-bold">{calibrationDraft.p1 && calibrationDraft.p2 ? dist(calibrationDraft.p1.x, calibrationDraft.p1.y, calibrationDraft.p2.x, calibrationDraft.p2.y).toFixed(2) : "-"}</span>
+                </div>
+                <label className="block">
+                  <span className="block text-[9px] font-bold uppercase tracking-wider mb-1 text-muted-foreground">Real distance (meters)</span>
+                  <input
+                    aria-label="Calibration real distance"
+                    type="number"
+                    min={0.01}
+                    step={0.01}
+                    value={calibrationDraft.distanceInput}
+                    disabled={!calibrationDraft.p2}
+                    onChange={(e) => setCalibrationDraft((draft) => ({ ...draft, distanceInput: e.target.value }))}
+                    className="w-full h-9 px-3 rounded-xl border border-border bg-input-background text-xs font-mono disabled:opacity-50"
+                  />
+                </label>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Resulting scale</span>
+                  <span className="font-mono font-bold">{calibrationDraft.p1 && calibrationDraft.p2 && Number(calibrationDraft.distanceInput) > 0 ? (Number(calibrationDraft.distanceInput) / dist(calibrationDraft.p1.x, calibrationDraft.p1.y, calibrationDraft.p2.x, calibrationDraft.p2.y)).toFixed(4) : "-"} m/u</span>
+                </div>
+              </div>
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                <button onClick={() => setCalibrationDraft({ active: true, distanceInput: "" })} className="h-9 rounded-xl border border-border text-xs font-bold hover:bg-muted">
+                  Restart
+                </button>
+                <button
+                  onClick={confirmCalibration}
+                  disabled={!calibrationDraft.p1 || !calibrationDraft.p2 || !(Number(calibrationDraft.distanceInput) > 0)}
+                  className="h-9 rounded-xl bg-primary text-primary-foreground text-xs font-extrabold disabled:opacity-50"
+                >
+                  Confirm
+                </button>
+              </div>
+            </div>
+          )}
+
           <AnimatePresence>
             {(saving || saved) && (
               <motion.div
@@ -4040,37 +4907,25 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
           </div>
         )}
         {showProperties && multiSelected.length <= 1 && !selected && (
-          <div
-            data-testid="floor-properties-panel"
-            className="w-64 shrink-0 flex flex-col border-l border-border overflow-hidden bg-card"
-          >
-            <div className="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
-              <div>
-                <span className="text-xs font-extrabold uppercase tracking-wide text-foreground">Floor Overview</span>
-                <p className="text-[10px] text-muted-foreground mt-0.5">{floor.label}</p>
-              </div>
-              <button onClick={() => setShowProperties(false)} className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-muted transition-colors text-muted-foreground">
-                <X className="h-3.5 w-3.5" />
-              </button>
-            </div>
-            <div className="flex-1 overflow-y-auto p-4 space-y-3">
-              <div className="rounded-xl border border-border bg-muted/25 p-3 space-y-1">
-                <div className="flex justify-between text-[10px]"><span className="text-muted-foreground">Canvas</span><span className="font-mono font-bold">{FP_W} × {FP_H}</span></div>
-                <div className="flex justify-between text-[10px]"><span className="text-muted-foreground">Items</span><span className="font-mono font-bold">{allItemsCount}</span></div>
-                <div className="flex justify-between text-[10px]"><span className="text-muted-foreground">Issues</span>
-                  <span className={cn("font-bold", blockingIssues.length > 0 ? "text-destructive" : "text-emerald-600")}>{blockingIssues.length > 0 ? `${floorIssues.length} blocking` : "None"}</span>
-                </div>
-              </div>
-              <button
-                onClick={() => setShowFloorSettings(true)}
-                className="w-full h-9 rounded-xl bg-primary text-primary-foreground text-xs font-extrabold hover:bg-primary/90 shadow-sm transition-all flex items-center justify-center gap-1.5"
-              >
-                <Settings2 className="h-3.5 w-3.5" /> Open Floor Settings
-              </button>
-              <p className="text-[10px] text-muted-foreground leading-relaxed">
-                Select an object on the canvas to edit its properties. Floor canvas size and appearance live in Floor Settings.
-              </p>
-            </div>
+          <div data-testid="floor-properties-panel" className="shrink-0 flex">
+            <FloorOverviewSidebar
+              floor={floor}
+              canvasW={FP_W}
+              canvasH={FP_H}
+              isFirst={building.floors.findIndex((f) => f.id === floorId) <= 0}
+              isLast={building.floors.findIndex((f) => f.id === floorId) >= building.floors.length - 1}
+              isOnly={building.floors.length <= 1}
+              onClose={() => setShowProperties(false)}
+              onRename={renameActiveFloorFromSidebar}
+              onCanvasSize={(w, h) => applySidebarFloorSettings({ canvasW: w, canvasH: h })}
+              onShowGrid={(v) => applySidebarFloorSettings({ showGrid: v })}
+              onGridSize={(size) => applySidebarFloorSettings({ gridSize: size })}
+              onOpenSettings={() => setShowFloorSettings(true)}
+              onDuplicate={() => requestDuplicateFloor(floorId)}
+              onMoveUp={() => requestMoveFloor(floorId, -1)}
+              onMoveDown={() => requestMoveFloor(floorId, 1)}
+              onDelete={() => requestDeleteFloor(floorId)}
+            />
           </div>
         )}
         {showProperties && multiSelected.length <= 1 && selected && (
@@ -4164,15 +5019,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
             onUpdateStairs={(id, ch) => { updFloor(rooms, fpaths, walls, doors, windows, furniture, stairs.map((s) => s.id === id ? { ...s, ...ch } : s)); }}
             onUpdateRamp={(id, ch) => { updFloor(rooms, fpaths, walls, doors, windows, furniture, stairs, elevators, labels, ramps.map((r) => r.id === id ? { ...r, ...ch } : r)); }}
             onUpdateElevator={(id, ch) => { updFloor(rooms, fpaths, walls, doors, windows, furniture, stairs, elevators.map((e) => e.id === id ? { ...e, ...ch } : e)); }}
-            onUpdateLabel={(id, ch) => {
-              const current = labels.find((l) => l.id === id);
-              if (!current) return;
-              // Text edits stay inside the floor: font-size/text changes are
-              // constrained by the label's rendered bounds so the annotation
-              // never disappears outside the plan.
-              const next = constrainLabelToFloor({ ...current, ...ch }, FP_W, FP_H);
-              updFloor(rooms, fpaths, walls, doors, windows, furniture, stairs, elevators, labels.map((l) => l.id === id ? next : l));
-            }}
+            onUpdateLabel={updateLabel}
             onToggleNavConnection={onToggleNavConnection}
             onDeleteSelected={() => {
               deleteSelection(selected);
@@ -4248,6 +5095,143 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
           )}
         </AnimatePresence>
 
+        {/* Shared floor actions menu — opened from the `...` button or a tab right-click */}
+        {floorMenu && (() => {
+          const target = building.floors.find((f) => f.id === floorMenu.floorId);
+          if (!target) return null;
+          const index = building.floors.findIndex((f) => f.id === target.id);
+          return (
+            <FloorActionsMenu
+              x={floorMenu.x}
+              y={floorMenu.y}
+              floor={target}
+              isFirst={index <= 0}
+              isLast={index >= building.floors.length - 1}
+              isOnly={building.floors.length <= 1}
+              moveUpLabel="Move Left"
+              moveDownLabel="Move Right"
+              showSettings
+              testId="floor-actions-menu"
+              onClose={() => setFloorMenu(null)}
+              onRename={() => beginRenameFloor(target)}
+              onDuplicate={() => requestDuplicateFloor(target.id)}
+              onMoveUp={() => requestMoveFloor(target.id, -1)}
+              onMoveDown={() => requestMoveFloor(target.id, 1)}
+              onDelete={() => requestDeleteFloor(target.id)}
+              onSettings={() => {
+                setFloorMenu(null);
+                if (target.id !== floorId) requestFloorSwitch(target.id);
+                setShowFloorSettings(true);
+              }}
+            />
+          );
+        })()}
+
+        {/* Rename Floor dialog — the same compact flow is used by the Hierarchy panel */}
+        <AnimatePresence>
+          {floorRename && (
+            <motion.div
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              transition={{ duration: 0.15 }}
+              className="fixed inset-0 z-[150] flex items-center justify-center bg-background/70 backdrop-blur-sm p-4"
+              onClick={() => setFloorRename(null)}
+            >
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95, y: 8 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 8 }}
+                transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+                className="w-full max-w-sm bg-card border border-border rounded-2xl shadow-2xl overflow-hidden"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="px-5 py-4 border-b border-border">
+                  <h3 className="text-sm font-extrabold text-foreground">Rename Floor</h3>
+                  <p className="text-xs text-muted-foreground mt-0.5">Enter a new label for "{floorRename.currentLabel}".</p>
+                </div>
+                <div className="px-5 py-4">
+                  <input
+                    autoFocus
+                    aria-label="Rename floor input"
+                    value={floorRenameValue}
+                    onChange={(e) => setFloorRenameValue(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") applyFloorRename();
+                      if (e.key === "Escape") setFloorRename(null);
+                    }}
+                    placeholder="Floor label"
+                    className="w-full h-10 px-3 rounded-xl border border-border bg-input-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+                  />
+                  {!floorRenameValue.trim() && (
+                    <p className="text-[10px] text-destructive mt-1.5">Floor name cannot be empty.</p>
+                  )}
+                </div>
+                <div className="flex gap-2 px-5 pb-5">
+                  <button
+                    onClick={() => setFloorRename(null)}
+                    className="flex-1 h-9 rounded-xl border border-border text-xs font-bold text-muted-foreground hover:bg-muted transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={applyFloorRename}
+                    disabled={!floorRenameValue.trim() || floorRenameValue.trim() === floorRename.currentLabel}
+                    className="flex-1 h-9 rounded-xl bg-primary text-primary-foreground text-xs font-extrabold hover:bg-primary/90 transition-colors disabled:opacity-40 shadow-sm"
+                  >
+                    <Pencil className="h-3 w-3 mr-1.5 inline-block align-[-2px]" />
+                    Rename Floor
+                  </button>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        <AnimatePresence>
+          {floorDeleteConfirm && (() => {
+            const targetFloor = building.floors.find((f) => f.id === floorDeleteConfirm.id);
+            const itemCount = targetFloor ? countFloorAuthoredItems(targetFloor) : 0;
+            return (
+              <motion.div
+                initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                className="fixed inset-0 z-[150] flex items-center justify-center bg-background/70 backdrop-blur-sm p-4"
+                onClick={() => setFloorDeleteConfirm(null)}
+              >
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.95, y: 8 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 8 }}
+                  className="w-full max-w-sm bg-card border border-border rounded-2xl shadow-2xl overflow-hidden"
+                  onClick={(e) => e.stopPropagation()}
+                  data-testid="delete-floor-confirm-dialog"
+                >
+                  <div className="flex items-start gap-4 p-5">
+                    <div className="w-10 h-10 rounded-xl bg-destructive/10 text-destructive flex items-center justify-center shrink-0">
+                      <TrashIcon className="h-5 w-5" />
+                    </div>
+                    <div className="flex-1 min-w-0 pt-0.5">
+                      <h3 className="text-sm font-extrabold text-foreground">Delete Floor</h3>
+                      <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
+                        Delete {floorDeleteConfirm.label} and its {itemCount} authored {itemCount === 1 ? "item" : "items"}?
+                        This removes its rooms, walls, openings, furniture, circulation objects, labels, and settings from the draft.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex gap-2 px-5 pb-5">
+                    <button
+                      onClick={() => setFloorDeleteConfirm(null)}
+                      className="flex-1 h-10 rounded-xl border border-border text-xs font-bold text-muted-foreground hover:bg-muted transition-colors"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={() => confirmDeleteFloorById(floorDeleteConfirm.id)}
+                      className="flex-1 h-10 rounded-xl bg-destructive text-destructive-foreground text-xs font-extrabold hover:bg-destructive/90 shadow-sm transition-all"
+                    >
+                      Delete Floor
+                    </button>
+                  </div>
+                </motion.div>
+              </motion.div>
+            );
+          })()}
+        </AnimatePresence>
+
         <AnimatePresence>
           {showIssues && (
             <motion.div
@@ -4313,6 +5297,12 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
           floor={floor}
           onApply={applyFloorSettings}
           onClose={() => setShowFloorSettings(false)}
+          onImportBackground={handleImportBackground}
+          onUpdateBackground={handleUpdateBackground}
+          onFitBackground={handleFitBackground}
+          onResetBackground={handleResetBackground}
+          onStartCalibration={startCalibration}
+          onRemoveCalibration={removeCalibration}
         />
       </div>
     </div>
