@@ -1,5 +1,7 @@
 import { getSupabase } from "../lib/supabase";
 import { normalizeFloor } from "../lib/floorPlanNormalization";
+import { syncEntranceNodePositions } from "../lib/navigationGraph";
+import { syncIndoorLinkedNodePositions } from "../lib/indoorNavigationGraph";
 import type { Database, Json, Tables, TablesInsert, TablesUpdate } from "../types/database.generated";
 import type {
   AccessibilityFeature, AssemblyPoint, Campus, CampusBuilding, CampusDecorAsset,
@@ -60,7 +62,16 @@ function normalizedElementType(value: string): string {
   return ROOM_TYPES.has(type) ? type : "room";
 }
 function normalizedNodeType(value: NavigationNode["type"]): string {
-  return ({ outdoor: "waypoint", hallway: "waypoint", room_access: "destination", stair: "stairs", transition: "floor_transition" } as Record<string, string>)[value] ?? value;
+  // navigation_nodes.node_type has a DB CHECK constraint allowing only
+  // waypoint/entrance/destination/stairs/elevator/ramp/exit/assembly_area/
+  // floor_transition. Map every UI type onto a DB-safe value; the full UI type
+  // round-trips through metadata JSON, so no information is lost on save.
+  return ({
+    outdoor: "waypoint", hallway: "waypoint", room_access: "destination",
+    stair: "stairs", elevator: "elevator", ramp: "ramp", transition: "floor_transition",
+    emergency_exit: "exit", assembly: "assembly_area", safe_area: "assembly_area",
+    entrance: "entrance",
+  } as Record<string, string>)[value] ?? "waypoint";
 }
 function normalizedEdgeType(value: string): string {
   return new Set(["walkway", "hallway", "stairs", "elevator", "ramp", "door", "crossing", "transition"]).has(value) ? value : "walkway";
@@ -218,11 +229,38 @@ export function hydrateCampusStructure(campus: Campus, rows: CampusStructureRows
     height: row.height, rotation: row.rotation, visible: row.is_visible, floors: floorsByBuilding.get(row.id) ?? [],
   })) as CampusBuilding[];
   const top = <T>(kind: StructureKind) => rows.mapElements.filter((item) => !item.floor_id && (item.metadata as JsonObject | null)?.kind === kind).map((item) => uiFrom<T>(item.metadata)).filter((v): v is T => Boolean(v));
+  const hydratedNavNodes = rows.navigationNodes.map((row) => uiFrom<NavigationNode>(row.metadata)).filter((v): v is NavigationNode => Boolean(v));
+  const hydratedNavEdges = rows.navigationEdges.map((row) => uiFrom<NavigationEdge>(row.metadata)).filter((v): v is NavigationEdge => Boolean(v));
+  // B5 Phase 1.8: entrance-linked nav nodes are DERIVED geometry — a stale
+  // persisted x/y (older save, hand-edited metadata) is re-synced against the
+  // linked building entrance on load. IDs + graph relationships are preserved.
+  const navNodes = syncEntranceNodePositions(buildings, hydratedNavNodes);
+  // B5 Phase 2: indoor linked nodes (room/door/stair/elevator/ramp) are DERIVED
+  // geometry too — re-sync their x/y against the hydrated floor objects so a
+  // stale persisted position never drifts from its physical owner on load.
+  const indoorNodes = navNodes.filter((n) => !!n.floorId);
+  const indoorLinkedIds = new Set(indoorNodes.filter((n) => !!n.roomId || !!n.doorId || !!n.stairId || !!n.elevatorId || !!n.rampId).map((n) => n.id));
+  const syncedIndoorNodes = buildings.flatMap((b) =>
+    syncIndoorLinkedNodePositions(
+      indoorNodes.filter((n) => n.buildingId === b.id),
+      { rooms: (b.floors ?? []).flatMap((f) => f.rooms ?? []), doors: (b.floors ?? []).flatMap((f) => f.doors ?? []),
+        stairs: (b.floors ?? []).flatMap((f) => f.stairs ?? []), ramps: (b.floors ?? []).flatMap((f) => f.ramps ?? []),
+        elevators: (b.floors ?? []).flatMap((f) => f.elevators ?? []) }
+    )
+  );
+  const byId = new Map(syncedIndoorNodes.map((n) => [n.id, n]));
+  const finalNodes = navNodes.map((n) => (indoorLinkedIds.has(n.id) ? byId.get(n.id) ?? n : n));
+  // Only drop dangling edges (missing endpoints); cross-side indoor↔outdoor
+  // links (entrance → room access) are a legitimate future graph pattern.
+  const finalEdges = hydratedNavEdges.filter((e) => {
+    const a = finalNodes.find((n) => n.id === e.startNodeId);
+    const b = finalNodes.find((n) => n.id === e.endNodeId);
+    return Boolean(a && b);
+  });
   return { ...campus, buildings, markers: top<CampusMarker>("marker"), paths: top<CampusPath>("campus_path"),
     routes: top<CampusRoute>("route"), accessibilityFeatures: top<AccessibilityFeature>("accessibility_feature"),
     assemblyPoints: top<AssemblyPoint>("assembly_point"), decorAssets: top<CampusDecorAsset>("decor"),
-    navNodes: rows.navigationNodes.map((row) => uiFrom<NavigationNode>(row.metadata)).filter((v): v is NavigationNode => Boolean(v)),
-    navEdges: rows.navigationEdges.map((row) => uiFrom<NavigationEdge>(row.metadata)).filter((v): v is NavigationEdge => Boolean(v)) };
+    navNodes: finalNodes, navEdges: finalEdges };
 }
 
 async function selectStructure(campusId: string): Promise<CampusStructureRows> {

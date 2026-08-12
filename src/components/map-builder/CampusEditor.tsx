@@ -15,7 +15,7 @@ import { HierarchyPanel } from "./HierarchyPanel";
 import { PropertiesPanel } from "./PropertiesPanel";
 import { RoutesPanel } from "./RoutesPanel";
 import { SaveScreen } from "./SaveScreen";
-import { LAYERS, BUILDING_COLORS } from "./constants";
+import { LAYERS, LAYER_TOOLS, BUILDING_COLORS } from "./constants";
 import { genId } from "./constants";
 import { useToast } from "../../hooks/useToast";
 import { ValidationErrorsDialog } from "./ValidationErrorsDialog";
@@ -29,13 +29,18 @@ import { IssuesPopover } from "./IssuesPopover";
 import type {
   Campus, CampusBuilding, CampusMarker, CampusSelection,
   SimpleTool, EditorLayer, RubberBand, CampusRoute, CampusPath,
-  CampusDecorAsset, BuildingTypeDescriptor, CampusEntrance,
+  CampusDecorAsset, BuildingTypeDescriptor, CampusEntrance, NavigationNode, NavigationEdge,
 } from "./types";
 import { BUILDING_TYPE_MAP, DECOR_ASSET_MAP } from "./constants";
 import { ToolbarTooltip } from "./ToolbarTooltip";
 import { validateCampusData, computeBuildingOverlaps } from "../../lib/campusValidation";
-import { computeBuildingPlacement, resetTransientToolState } from "../../lib/editorPlacement";
+import { computeBuildingPlacement, resetTransientToolState, pointInBuilding } from "../../lib/editorPlacement";
 import { computeGroupTranslation, groupBBoxAfterTranslation, computeGroupAlignmentGuides } from "../../lib/campusGroupMove";
+import {
+  createNavNode, createNavEdge, findDuplicateNavEdge, isSelfEdge, removeNavNode, findNavNodeAtPoint,
+  findEntranceNavNode, navGraphSelectionIdsInRect, syncEntranceNodePositions, pruneOrphanedEntranceNodes,
+  outdoorNavNodes, outdoorNavEdges,
+} from "../../lib/navigationGraph";
 import type { GroupMoveMember } from "../../lib/campusGroupMove";
 import { reorderOutdoorStack } from "../../lib/campusStack";
 import type { LayerOrderAction } from "../../lib/campusLayerOrder";
@@ -43,7 +48,7 @@ import { duplicateDecorAsset } from "../../lib/decorAsset";
 import { decorRenderScale, decorWorldSize } from "../../lib/decorVisual";
 import { outdoorSelectionIdsInRect, selectionRectFromPoints } from "../../lib/campusSelection";
 import { arrangeSelectedOutdoorObjects, selectedOutdoorCount, type OutdoorArrangementAction } from "../../lib/campusArrangement";
-import { defaultEntrance, normalizeBuildingEntrances, promotePrimaryEntrance, pointerToEntranceAttachment, updateBuildingEntrance } from "../../lib/buildingEntrances";
+import { defaultEntrance, normalizeBuildingEntrances, promotePrimaryEntrance, pointerToEntranceAttachment, updateBuildingEntrance, entranceWorldPosition, findEntranceAtPoint, entranceDisplayName } from "../../lib/buildingEntrances";
 
 // ── Per-layer marker configuration ──
 const LAYER_MARKER_CONFIG: Record<string, { name: string; type: string; color: string }> = {
@@ -93,6 +98,14 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
   const [tool, setTool] = useState<SimpleTool>("select");
   const [selected, setSelected] = useState<CampusSelection | null>(null);
   const [drawingPath, setDP] = useState<{ x: number; y: number }[]>([]);
+  // ── B5 Phase 1: navigation-layer Path tool = edge authoring. navConnectStart
+  // is the node the admin is connecting FROM; navPreview is the live pointer
+  // position (or hovered node) shown as a dashed preview before the edge commits.
+  const [navConnectStart, setNavConnectStart] = useState<string | null>(null);
+  const [navPreview, setNavPreview] = useState<{ x: number; y: number } | null>(null);
+  // ── B5 Phase 1.6: entrance target the Add Waypoint / Connect Path tools are
+  // currently hovering (highlighted as a special routing target).
+  const [navEntranceHover, setNavEntranceHover] = useState<{ buildingId: string; entranceId: string; x: number; y: number } | null>(null);
   const [saveScreen, setSaveScreen] = useState<{ open: boolean; state: "saving" | "success" | "error" }>({ open: false, state: "saving" });
   const [layer, setLayer] = useState<EditorLayer>("campus");
   // ── Dirty state: snapshot of last-saved campus ──
@@ -303,16 +316,33 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     },
     [edgeSnap]
   );
-  const dragging = useRef<{ type: "building" | "marker" | "decorAsset" | "entrance"; id: string; buildingId?: string; sx: number; sy: number; ox: number; oy: number } | null>(null);
+  const dragging = useRef<{ type: "building" | "marker" | "decorAsset" | "entrance" | "navNode"; id: string; buildingId?: string; sx: number; sy: number; ox: number; oy: number } | null>(null);
   const dragGroupStartRef = useRef<GroupMoveMember[] | null>(null);
+  // ── B5 Phase 1.6: rigid nav-node group drag — snapshots the original
+  // positions of every multi-selected waypoint at gesture start so dragging
+  // one moves the whole selection without distorting internal spacing.
+  const navGroupOriginRef = useRef<Map<string, { x: number; y: number }> | null>(null);
 
   const buildings = campus.buildings;
   const markers = campus.markers;
   const paths = campus.paths;
   const decorAssets = campus.decorAssets ?? [];
+  const navNodes = campus.navNodes ?? [];
+  const navEdges = campus.navEdges ?? [];
+  // B5 Phase 2.9 — navigation scope isolation. Indoor floor navigation shares
+  // the campus nav arrays (scoped by buildingId+floorId) but belongs ONLY to
+  // its floor's editor. The outdoor canvas derives a render/read-only outdoor
+  // subset here, so indoor floor nodes/edges NEVER enter the outdoor editor.
+  // State mutations (appends/removals/sync) keep using the FULL arrays so the
+  // indoor graph is never dropped or rewritten by outdoor edits.
+  const outdoorNodes = useMemo(() => outdoorNavNodes(navNodes), [navNodes]);
+  const outdoorEdges = useMemo(() => outdoorNavEdges(navEdges, outdoorNodes), [navEdges, outdoorNodes]);
 
   const upd = (c: Partial<Campus>) => { pushHistory(); onUpdate({ ...campus, ...c }); };
-  const updBuildings = (b: CampusBuilding[]) => upd({ buildings: b });
+  // B5 Phase 1.8: any building mutation re-syncs entrance-linked nav nodes so
+  // they always match the resolved world position of their linked B3 entrance
+  // (no manual navigation repair after a building move/resize/rotate).
+  const updBuildings = (b: CampusBuilding[]) => upd({ buildings: b, navNodes: syncEntranceNodePositions(b, navNodes) });
   const updMarkers = (m: CampusMarker[]) => upd({ markers: m });
   const updPaths = (p: typeof paths) => upd({ paths: p });
 
@@ -354,8 +384,10 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     }
     if (markers.some((m) => m.id === id)) return { type: "marker", id };
     if (decorAssets.some((da) => da.id === id)) return { type: "decorAsset", id };
+    if (outdoorNodes.some((n) => n.id === id)) return { type: "navNode", id };
+    if (outdoorEdges.some((e) => e.id === id)) return { type: "navEdge", id };
     return null;
-  }, [buildings, markers, decorAssets]);
+  }, [buildings, markers, decorAssets, outdoorNodes, outdoorEdges]);
 
   const selectedOutdoorObjectCount = useMemo(
     () => selectedOutdoorCount(buildings, decorAssets, multiSelected, DECOR_ASSET_MAP),
@@ -390,6 +422,8 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     }
 
     if (tool === "select") {
+      // In Navigation mode Select touches only graph elements, but empty-space
+      // drags still start a marquee that captures waypoints + connections.
       const pt = getPoint(e, cw, ch);
       setRubberBand({ sx: pt.x, sy: pt.y, cx: pt.x, cy: pt.y });
       if (!e.shiftKey) { setMultiSelected([]); setSelected(null); setGuides([]); }
@@ -403,6 +437,48 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
       y: Math.max(0, Math.min(ch, Math.round(pt.y))),
     };
     if (tool === "marker" || tool === "room") {
+      // B5 Phase 1: in the Navigation layer the Marker tool becomes the
+      // Waypoint tool — it creates a real NavigationNode (selectable, movable,
+      // deletable, undoable) instead of a decorative CampusMarker.
+      if (layer === "navigation") {
+        // B5 Phase 1.6: clicking a building entrance creates/reuses an
+        // entrance-linked waypoint instead of a generic point underneath it.
+        const entranceHit = findEntranceAtPoint(buildings, clampedPt);
+        if (entranceHit) {
+          const existing = findEntranceNavNode(outdoorNodes, entranceHit.buildingId, entranceHit.entranceId);
+          if (existing) {
+            // B5 Phase 1.8: no duplicate node, no mutation — select the
+            // existing entrance-linked waypoint + give clear feedback.
+            setSelected({ type: "navNode", id: existing.id });
+            setTool("select");
+            toast.info("Entrance already connected to the navigation network", "The existing entrance waypoint is selected.");
+            return;
+          }
+          const ee = buildEntranceNode(entranceHit.buildingId, entranceHit.entranceId, entranceHit.x, entranceHit.y);
+          if (ee) {
+            const next = { ...campus, navNodes: [...navNodes, ee] };
+            onUpdate(next); pushHistory(next);
+            setSelected({ type: "navNode", id: ee.id });
+            setTool("select");
+            return;
+          }
+        }
+        // B5 Phase 1.6: outdoor waypoints belong to outdoor navigable space —
+        // arbitrary points inside a building footprint are rejected with clear
+        // feedback instead of silently creating a node under the roof.
+        if (buildings.some((b) => pointInBuilding(b, clampedPt))) {
+          toast.warning("Connect through a building entrance", "Outdoor waypoints belong outside buildings — click the building's entrance instead.");
+          return;
+        }
+        const cfg = LAYER_MARKER_CONFIG.navigation;
+        const nn = createNavNode({ id: genId("nn"), x: clampedPt.x, y: clampedPt.y, campusId: campus.id, name: "Waypoint", type: "outdoor", color: cfg.color });
+        const next = { ...campus, navNodes: [...navNodes, nn] };
+        onUpdate(next);
+        pushHistory(next);
+        setSelected({ type: "navNode", id: nn.id });
+        setTool("select");
+        return;
+      }
       const cfg = LAYER_MARKER_CONFIG[layer] ?? LAYER_MARKER_CONFIG.campus;
       const nm: CampusMarker = {
         id: genId("mk"),
@@ -445,9 +521,203 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
       // Otherwise, drag-to-create mode
       setBuildingDrag({ sx: clampedPt.x, sy: clampedPt.y, cx: clampedPt.x, cy: clampedPt.y });
     } else if (tool === "path") {
+      // B5 Phase 1: in the Navigation layer the Path tool authors edges between
+      // waypoints. Clicks on existing waypoints are routed through onItemDown
+      // (nodes stop propagation), so THIS branch only receives empty-canvas
+      // clicks: first click creates the start waypoint, second click creates a
+      // destination waypoint and connects them in ONE history action.
+      if (layer === "navigation") {
+        // B5 Phase 1.7 ordering fix: entrance targets are checked BEFORE the
+        // building-body rejection. Entrances sit exactly on the building edge
+        // and pointInBuilding uses inclusive bounds, so a wrong order would
+        // reject every entrance click with "Connect through a building
+        // entrance". Entrance first, building-body rejection second — the same
+        // order the Add Waypoint branch already uses.
+        const entranceHit = findEntranceAtPoint(buildings, clampedPt);
+        if (!entranceHit && buildings.some((b) => pointInBuilding(b, clampedPt))) {
+          toast.warning("Connect through a building entrance", "Outdoor paths run outside buildings — connect to the building's entrance instead.");
+          return;
+        }
+        if (!navConnectStart) {
+          if (entranceHit) {
+            const startId = ensureEntranceNavNode(entranceHit.buildingId, entranceHit.entranceId, entranceHit.x, entranceHit.y);
+            if (!startId) return;
+            const start = outdoorNodes.find((n) => n.id === startId);
+            setNavConnectStart(startId);
+            setNavPreview(start ? { x: start.x, y: start.y } : { x: entranceHit.x, y: entranceHit.y });
+            setSelected({ type: "navNode", id: startId });
+            return;
+          }
+          const nn = createNavNode({ id: genId("nn"), x: clampedPt.x, y: clampedPt.y, campusId: campus.id, name: "Waypoint", type: "outdoor" });
+          const next = { ...campus, navNodes: [...navNodes, nn] };
+          onUpdate(next);
+          pushHistory(next);
+          setNavConnectStart(nn.id);
+          setNavPreview({ x: clampedPt.x, y: clampedPt.y });
+          setSelected({ type: "navNode", id: nn.id });
+        } else {
+          if (entranceHit) {
+            // B5 Phase 1.7: route through the canonical entrance-edge helper —
+            // it creates/reuses ONE entrance-linked node and commits node+edge
+            // in a single history action with correct distance. The previous
+            // ensureEntranceNavNode + commitNavEdge sequence read a stale
+            // navNodes closure and could commit an edge to a node that was not
+            // in the same state snapshot (dangling reference / distance 0).
+            commitNavEdgeWithEntrance(navConnectStart, entranceHit.buildingId, entranceHit.entranceId, entranceHit.x, entranceHit.y);
+            return;
+          }
+          commitNavEdgeWithNewNode(navConnectStart, { x: clampedPt.x, y: clampedPt.y });
+        }
+        return;
+      }
       setDP((p) => [...p, { x: Math.round(pt.x), y: Math.round(pt.y) }]);
     }
   };
+
+  // ── B5 Phase 1: shared navigation-edge authoring helpers ───────────────────
+  // One gesture = ONE history action: node+edge pairs commit together through a
+  // single upd call, and every surface (node click, empty-canvas click) routes
+  // through these so the rules can never diverge.
+  const commitNavEdge = useCallback((startId: string, endId: string) => {
+    if (isSelfEdge(startId, endId)) {
+      toast.warning("Cannot connect a waypoint to itself", "Pick a different destination waypoint.");
+      return;
+    }
+    const dup = findDuplicateNavEdge(outdoorEdges, startId, endId);
+    if (dup) {
+      toast.warning("Those points are already connected", "Select the existing connection to edit it.");
+      setNavConnectStart(null);
+      setNavPreview(null);
+      setNavEntranceHover(null);
+      return;
+    }
+    const edge = createNavEdge({ id: genId("ne"), startNodeId: startId, endNodeId: endId, nodes: outdoorNodes });
+    const next = { ...campus, navEdges: [...navEdges, edge] };
+    onUpdate(next);
+    pushHistory(next);
+    setSelected({ type: "navEdge", id: edge.id });
+    setNavConnectStart(null);
+    setNavPreview(null);
+    setNavEntranceHover(null);
+    toast.success("Connection created", `Waypoints connected (${edge.distance} units).`);
+    // pushHistory is intentionally omitted from deps: it accepts an explicit
+    // post-change state and only touches the stable historyRef, so the first-render
+    // closure stays correct (and referencing it here would hit the TDZ since it
+    // is declared later in the component body).
+  }, [campus, navEdges, navNodes, outdoorEdges, outdoorNodes, onUpdate, toast]);
+
+  const commitNavEdgeWithNewNode = useCallback((startId: string, point: { x: number; y: number }) => {
+    const nn = createNavNode({ id: genId("nn"), x: point.x, y: point.y, campusId: campus.id, name: "Waypoint", type: "outdoor" });
+    const edge = createNavEdge({ id: genId("ne"), startNodeId: startId, endNodeId: nn.id, nodes: [...navNodes, nn] });
+    // Node + edge commit as ONE history action so undo restores both.
+    const next = { ...campus, navNodes: [...navNodes, nn], navEdges: [...navEdges, edge] };
+    onUpdate(next);
+    pushHistory(next);
+    setSelected({ type: "navEdge", id: edge.id });
+    setNavConnectStart(null);
+    setNavPreview(null);
+    setNavEntranceHover(null);
+    toast.success("Connection created", `Waypoint added and connected (${edge.distance} units).`);
+    // pushHistory intentionally omitted from deps — see commitNavEdge note.
+  }, [campus, navEdges, navNodes, onUpdate, toast]);
+
+  // ── B5 Phase 1.6: entrance-linked waypoint helpers ────────────────────────
+  // Outdoor navigation enters buildings through entrances. Clicking an
+  // entrance (Add Waypoint or Connect Path) creates/reuses ONE canonical node
+  // of type "entrance" linked to that entrance (buildingId + entranceId) at
+  // its resolved world position — never a generic point underneath, never a
+  // duplicate per click.
+  const buildEntranceNode = useCallback((buildingId: string, entranceId: string, x: number, y: number): NavigationNode | null => {
+    const parent = buildings.find((b) => b.id === buildingId);
+    const entrance = parent?.entrances?.find((en) => en.id === entranceId);
+    if (!parent || !entrance) return null;
+    return createNavNode({
+      id: genId("nn"), x, y, campusId: campus.id,
+      buildingId: parent.id, entranceId: entrance.id,
+      name: entranceDisplayName(entrance, (parent.entrances ?? []).findIndex((en) => en.id === entrance.id)),
+      type: "entrance", accessible: entrance.accessible !== false,
+      color: LAYER_MARKER_CONFIG.navigation.color,
+    });
+  }, [buildings, campus.id]);
+
+  /** Reuse an existing entrance node or create one (node creation = one history action). */
+  const ensureEntranceNavNode = useCallback((buildingId: string, entranceId: string, x: number, y: number): string | null => {
+    const existing = findEntranceNavNode(outdoorNodes, buildingId, entranceId);
+    if (existing) return existing.id;
+    const nn = buildEntranceNode(buildingId, entranceId, x, y);
+    if (!nn) return null;
+    const next = { ...campus, navNodes: [...navNodes, nn] };
+    onUpdate(next);
+    pushHistory(next);
+    return nn.id;
+  }, [buildEntranceNode, campus, navNodes, outdoorNodes, onUpdate]);
+
+  /** Edge commit where the destination may be a (possibly new) entrance node — ONE history action for node+edge. */
+  const commitNavEdgeWithEntrance = useCallback((startId: string, buildingId: string, entranceId: string, x: number, y: number) => {
+    const existing = findEntranceNavNode(outdoorNodes, buildingId, entranceId);
+    if (existing) {
+      commitNavEdge(startId, existing.id);
+      return;
+    }
+    const nn = buildEntranceNode(buildingId, entranceId, x, y);
+    if (!nn) return;
+    if (isSelfEdge(startId, nn.id)) return;
+    const dup = findDuplicateNavEdge(outdoorEdges, startId, nn.id);
+    if (dup) {
+      toast.warning("Those points are already connected", "Select the existing connection to edit it.");
+      setNavConnectStart(null);
+      setNavPreview(null);
+      setNavEntranceHover(null);
+      return;
+    }
+    const edge = createNavEdge({ id: genId("ne"), startNodeId: startId, endNodeId: nn.id, nodes: [...navNodes, nn] });
+    const next = { ...campus, navNodes: [...navNodes, nn], navEdges: [...navEdges, edge] };
+    onUpdate(next);
+    pushHistory(next);
+    setSelected({ type: "navEdge", id: edge.id });
+    setNavConnectStart(null);
+    setNavPreview(null);
+    setNavEntranceHover(null);
+    toast.success("Connection created", `Connected to ${nn.name} (${edge.distance} units).`);
+  }, [buildEntranceNode, campus, commitNavEdge, findDuplicateNavEdge, isSelfEdge, navEdges, navNodes, outdoorEdges, outdoorNodes, onUpdate, toast]);
+
+  // ── B5 Phase 1.7: shared navigation multi-delete ──
+  // ONE history action: remove the selected nodes (with every edge touching
+  // them, so no dangling references) plus any selected edges that survive the
+  // node cleanup. Used by the keyboard Delete shortcut AND the panel's
+  // "Delete Selected" so the behavior can never diverge.
+  const deleteNavSelection = useCallback((nodeIds: string[], edgeIds: string[]) => {
+    const nodeSet = new Set(nodeIds);
+    const edgeSet = new Set(edgeIds);
+    const nextNodes = (campus.navNodes ?? []).filter((n) => !nodeSet.has(n.id));
+    const nextEdges = (campus.navEdges ?? []).filter(
+      (e) => !edgeSet.has(e.id) && !nodeSet.has(e.startNodeId) && !nodeSet.has(e.endNodeId)
+    );
+    const next: Campus = { ...campus, navNodes: nextNodes, navEdges: nextEdges };
+    pushHistory();
+    onUpdate(next);
+    setMultiSelected([]);
+    setSelected(null);
+    setShowAlignTools(false);
+    const removed = nodeIds.length + edgeIds.length;
+    toast.success("Deleted", `Removed ${removed} graph element${removed !== 1 ? "s" : ""}.`);
+    // pushHistory intentionally omitted from deps — see commitNavEdge note:
+    // it is declared later in the body (TDZ) and only touches the stable
+    // historyRef, so the first-render closure stays correct.
+  }, [campus, onUpdate, toast]);
+
+  // Path tool clicked an EXISTING waypoint (node clicks stop propagation, so
+  // this is the only path into edge authoring from a node).
+  const onNavNodeClick = useCallback((nodeId: string) => {
+    if (!navConnectStart) {
+      const n = outdoorNodes.find((x) => x.id === nodeId);
+      setNavConnectStart(nodeId);
+      setNavPreview(n ? { x: n.x, y: n.y } : null);
+      setSelected({ type: "navNode", id: nodeId });
+      return;
+    }
+    commitNavEdge(navConnectStart, nodeId);
+  }, [commitNavEdge, navConnectStart, outdoorNodes]);
 
   const handleSvgMove = (e: React.MouseEvent<SVGSVGElement>) => {
     if (tool === "pan") {
@@ -470,6 +740,30 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
       return;
     }
 
+    // B5 Phase 1.6: entrance hover target — Add Waypoint and Connect Path both
+    // recognize building entrances as special routing targets. Hovering one
+    // highlights it and (for Connect Path) snaps the live preview to the
+    // entrance's resolved world position so the click commits an exact point.
+    if (layer === "navigation" && (tool === "path" || tool === "marker")) {
+      const entranceHit = findEntranceAtPoint(buildings, pt);
+      setNavEntranceHover(entranceHit
+        ? { buildingId: entranceHit.buildingId, entranceId: entranceHit.entranceId, x: entranceHit.x, y: entranceHit.y }
+        : null);
+      // Navigation edge-authoring live preview (Path tool, navigation layer).
+      // Always follows the pointer — even before the first click — so an
+      // empty-space hover shows the would-be waypoint node. Snaps to a hovered
+      // waypoint or entrance so the committed coordinate is exact, never an
+      // unsnapped pointer coordinate.
+      if (tool === "path") {
+        const hit = findNavNodeAtPoint(outdoorNodes, pt);
+        setNavPreview(hit
+          ? { x: hit.x, y: hit.y }
+          : entranceHit
+            ? { x: entranceHit.x, y: entranceHit.y }
+            : { x: Math.max(0, Math.min(cw, Math.round(pt.x))), y: Math.max(0, Math.min(ch, Math.round(pt.y))) });
+      }
+    }
+
     movePan(e);
     const drag = dragging.current;
     if (!drag) return;
@@ -478,14 +772,18 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
       const parent = buildings.find((b) => b.id === drag.buildingId);
       if (!parent || parent.locked) return;
       const attachment = pointerToEntranceAttachment(parent, pt);
+      const nextBuildings = buildings.map((b) =>
+        b.id === parent.id
+          ? { ...b, entrances: (b.entrances ?? []).map((entrance) => entrance.id === drag.id ? { ...entrance, ...attachment } : entrance) }
+          : b
+      );
       gestureChangedRef.current = true;
       onUpdate({
         ...campus,
-        buildings: buildings.map((b) =>
-          b.id === parent.id
-            ? { ...b, entrances: (b.entrances ?? []).map((entrance) => entrance.id === drag.id ? { ...entrance, ...attachment } : entrance) }
-            : b
-        ),
+        buildings: nextBuildings,
+        // B5 Phase 1.8: repositioning an entrance moves its linked nav node
+        // in the SAME gesture — the node follows the resolved entrance position.
+        navNodes: syncEntranceNodePositions(nextBuildings, navNodes),
       });
       return;
     }
@@ -520,6 +818,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
       onUpdate({
         ...campus,
         buildings: nextBuildings,
+        navNodes: syncEntranceNodePositions(nextBuildings, navNodes),
         decorAssets: decorAssets.map((da) => {
           const start = startById.get(da.id);
           return start?.kind === "decorAsset" ? { ...da, x: start.x + dx, y: start.y + dy } : da;
@@ -541,6 +840,45 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
       onUpdate({ ...campus, decorAssets: updatedAssets });
       return;
     }
+    // B5 Phase 1: waypoint drag — same one-gesture/one-history pattern as
+    // markers, clamped to the canvas and grid-snapped.
+    if (drag.type === "navNode") {
+      const node = outdoorNodes.find((n) => n.id === drag.id);
+      if (!node) return;
+      // B5 Phase 1.8: entrance-linked nodes are derived geometry — never moved
+      // independently (onItemDown already blocks the drag start; this guard
+      // also protects stale drags).
+      if (node.entranceId) return;
+      // B5 Phase 1.6: dragging a waypoint that is part of a multi-selection
+      // moves the whole selected node group rigidly (connected edges follow
+      // automatically because edge geometry is derived from node positions).
+      const navGroup = navGroupOriginRef.current;
+      if (navGroup && navGroup.has(drag.id)) {
+        const dx = pt.x - drag.sx;
+        const dy = pt.y - drag.sy;
+        gestureChangedRef.current = true;
+        onUpdate({
+          ...campus,
+          navNodes: navNodes.map((n) => {
+            const origin = navGroup.get(n.id);
+            return origin
+              ? { ...n, x: Math.max(0, Math.min(cw, snap(origin.x + dx))), y: Math.max(0, Math.min(ch, snap(origin.y + dy))) }
+              : n;
+          }),
+        });
+        return;
+      }
+      gestureChangedRef.current = true;
+      onUpdate({
+        ...campus,
+        navNodes: navNodes.map((n) =>
+          n.id === drag.id
+            ? { ...n, x: Math.max(0, Math.min(cw, snap(drag.ox + (pt.x - drag.sx)))), y: Math.max(0, Math.min(ch, snap(drag.oy + (pt.y - drag.sy)))) }
+            : n
+        ),
+      });
+      return;
+    }
     if (drag.type === "building") {
       const b = buildings.find((b) => b.id === drag.id)!;
       // Direct 1:1 tracking: the building follows the cursor with the grab
@@ -552,9 +890,11 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
       const targetY = snap(rawY);
       const targetB = edgeSnapBuilding({ ...b, x: targetX, y: targetY }, buildings);
       gestureChangedRef.current = true;
+      const nextBuildings = buildings.map((bld) => (bld.id === drag.id ? { ...bld, x: targetB.x, y: targetB.y } : bld));
       onUpdate({
         ...campus,
-        buildings: buildings.map((bld) => (bld.id === drag.id ? { ...bld, x: targetB.x, y: targetB.y } : bld)),
+        buildings: nextBuildings,
+        navNodes: syncEntranceNodePositions(nextBuildings, navNodes),
       });
       // Alignment guides
       const guidesList: { type: "h" | "v"; pos: number }[] = [];
@@ -583,6 +923,9 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
 
   const handleResizeStart = (e: React.MouseEvent, b: CampusBuilding, corner: string) => {
     e.stopPropagation();
+    // B5 Phase 1.7: campus geometry is context-only in Navigation mode — resize
+    // handles are never interactive while authoring the route graph.
+    if (layer === "navigation") return;
     const pt = getPoint(e, cw, ch);
     gestureHistoryPushed.current = false;
     setResizing({ id: b.id, corner, sx: pt.x, sy: pt.y, ox: b.x, oy: b.y, ow: b.width, oh: b.height });
@@ -591,6 +934,8 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
   // ── Rotation handler ──
   const handleRotateStart = useCallback((e: React.MouseEvent, b: CampusBuilding) => {
     e.stopPropagation();
+    // B5 Phase 1.7: campus geometry is context-only in Navigation mode.
+    if (layer === "navigation") return;
     const pt = getPoint(e, cw, ch);
     const cx = b.x + b.width / 2;
     const cy = b.y + b.height / 2;
@@ -602,7 +947,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     rotating.current = { id: b.id, cx, cy, prevAngle: startAngle, rotation: startRot };
     setRotatingId(b.id);
     setRotatingAngle(startRot);
-  }, [getPoint, cw, ch]);
+  }, [getPoint, cw, ch, layer]);
 
   // ── Decor asset rotation handler ──
   const handleDecorRotateStart = useCallback((e: React.MouseEvent, da: CampusDecorAsset) => {
@@ -697,8 +1042,15 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
       rotating.current = { ...rotating.current, prevAngle: currentAngle, rotation: accumulated };
       const b = buildings.find(bld => bld.id === id);
       if (b) {
+        const nextBuildings = buildings.map(bld => bld.id === id ? { ...bld, rotation: snapped } : bld);
         beginGestureHistory();
-        onUpdate({ ...campus, buildings: buildings.map(bld => bld.id === id ? { ...bld, rotation: snapped } : bld) });
+        onUpdate({
+          ...campus,
+          buildings: nextBuildings,
+          // B5 Phase 1.8: rotating a building moves its entrances → the linked
+          // nav nodes follow in the same gesture.
+          navNodes: syncEntranceNodePositions(nextBuildings, navNodes),
+        });
         setRotatingAngle(snapped);
       }
       return;
@@ -707,45 +1059,49 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     const pt = getPoint(e, cw, ch);
     const ddx = pt.x - resizing.sx;
     const ddy = pt.y - resizing.sy;
+    const nextBuildings = buildings.map((b) => {
+      if (b.id !== resizing.id) return b;
+      const rotVal = b.rotation ?? 0;
+      const rotRad = (rotVal * Math.PI) / 180;
+      const cosR = Math.cos(rotRad);
+      const sinR = Math.sin(rotRad);
+      // Rotate the world-space mouse delta into the building's LOCAL frame (R(-θ)),
+      // so the grabbed corner follows the cursor along the building's actual
+      // (rotated) axes — not its 0° orientation.
+      const localDx = ddx * cosR + ddy * sinR;
+      const localDy = -ddx * sinR + ddy * cosR;
+      const sDx = snap(localDx);
+      const sDy = snap(localDy);
+      // Apply the local deltas to width/height (e/w → width, s/n → height)
+      let nw = resizing.ow, nh = resizing.oh;
+      if (resizing.corner.includes("e")) nw = resizing.ow + sDx;
+      if (resizing.corner.includes("w")) nw = resizing.ow - sDx;
+      if (resizing.corner.includes("s")) nh = resizing.oh + sDy;
+      if (resizing.corner.includes("n")) nh = resizing.oh - sDy;
+      nw = Math.max(40, nw);
+      nh = Math.max(30, nh);
+      const dW = nw - resizing.ow;
+      const dH = nh - resizing.oh;
+      // Keep the edge/corner OPPOSITE the dragged handle visually fixed:
+      // fx/fy point from the center toward the fixed corner in LOCAL space.
+      const fx = resizing.corner.includes("w") ? 1 : resizing.corner.includes("e") ? -1 : 0;
+      const fy = resizing.corner.includes("n") ? 1 : resizing.corner.includes("s") ? -1 : 0;
+      // The fixed local corner shifts as w/h change, so the center must move by
+      // R(θ)·(F_old − F_new) to keep that corner stationary on screen.
+      const dcx = -fx * (dW / 2) * cosR + fy * (dH / 2) * sinR;
+      const dcy = -fx * (dW / 2) * sinR - fy * (dH / 2) * cosR;
+      // Rebuild top-left from the compensated center
+      const nx = resizing.ox + resizing.ow / 2 + dcx - nw / 2;
+      const ny = resizing.oy + resizing.oh / 2 + dcy - nh / 2;
+      return { ...b, x: Math.round(nx), y: Math.round(ny), width: nw, height: nh };
+    });
     beginGestureHistory();
     onUpdate({
       ...campus,
-      buildings: buildings.map((b) => {
-        if (b.id !== resizing.id) return b;
-        const rotVal = b.rotation ?? 0;
-        const rotRad = (rotVal * Math.PI) / 180;
-        const cosR = Math.cos(rotRad);
-        const sinR = Math.sin(rotRad);
-        // Rotate the world-space mouse delta into the building's LOCAL frame (R(-θ)),
-        // so the grabbed corner follows the cursor along the building's actual
-        // (rotated) axes — not its 0° orientation.
-        const localDx = ddx * cosR + ddy * sinR;
-        const localDy = -ddx * sinR + ddy * cosR;
-        const sDx = snap(localDx);
-        const sDy = snap(localDy);
-        // Apply the local deltas to width/height (e/w → width, s/n → height)
-        let nw = resizing.ow, nh = resizing.oh;
-        if (resizing.corner.includes("e")) nw = resizing.ow + sDx;
-        if (resizing.corner.includes("w")) nw = resizing.ow - sDx;
-        if (resizing.corner.includes("s")) nh = resizing.oh + sDy;
-        if (resizing.corner.includes("n")) nh = resizing.oh - sDy;
-        nw = Math.max(40, nw);
-        nh = Math.max(30, nh);
-        const dW = nw - resizing.ow;
-        const dH = nh - resizing.oh;
-        // Keep the edge/corner OPPOSITE the dragged handle visually fixed:
-        // fx/fy point from the center toward the fixed corner in LOCAL space.
-        const fx = resizing.corner.includes("w") ? 1 : resizing.corner.includes("e") ? -1 : 0;
-        const fy = resizing.corner.includes("n") ? 1 : resizing.corner.includes("s") ? -1 : 0;
-        // The fixed local corner shifts as w/h change, so the center must move by
-        // R(θ)·(F_old − F_new) to keep that corner stationary on screen.
-        const dcx = -fx * (dW / 2) * cosR + fy * (dH / 2) * sinR;
-        const dcy = -fx * (dW / 2) * sinR - fy * (dH / 2) * cosR;
-        // Rebuild top-left from the compensated center
-        const nx = resizing.ox + resizing.ow / 2 + dcx - nw / 2;
-        const ny = resizing.oy + resizing.oh / 2 + dcy - nh / 2;
-        return { ...b, x: Math.round(nx), y: Math.round(ny), width: nw, height: nh };
-      })
+      buildings: nextBuildings,
+      // B5 Phase 1.8: resizing a building moves its entrances → the linked nav
+      // nodes follow in the same gesture.
+      navNodes: syncEntranceNodePositions(nextBuildings, navNodes),
     });
   };
 
@@ -781,6 +1137,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     endPan();
     dragging.current = null;
     dragGroupStartRef.current = null;
+    navGroupOriginRef.current = null;
     if (resizing) setResizing(null);
 
     // Finalize rubber-band selection
@@ -790,11 +1147,19 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
       const rh = rect.height;
       if (rw > 5 || rh > 5) {
         // Only capture if dragged more than 5px (avoid accidental clicks).
-        // Buildings and decorative assets share one selectable-bounds helper:
-        // rotated building AABB, decor rendered size/rotation, and hidden
-        // objects excluded. Intersections make selection forgiving when the
-        // band crosses the visible object.
-        const captured = outdoorSelectionIdsInRect(rect, buildings, decorAssets, DECOR_ASSET_MAP, { includeHidden: true });
+        // In Navigation mode the marquee selects graph elements (nodes whose
+        // center falls in the band + edges whose segment crosses it); campus
+        // geometry is never captured. Elsewhere buildings + decorative assets
+        // share one selectable-bounds helper (rotated AABB, rendered size).
+        const captured = layer === "navigation"
+          ? (() => {
+              // B5 Phase 2.9: the marquee captures ONLY outdoor-scope graph
+              // elements — indoor floor nodes/edges can never be rubber-band
+              // selected from the outdoor editor.
+              const { nodeIds, edgeIds } = navGraphSelectionIdsInRect(rect, outdoorNodes, outdoorEdges);
+              return [...nodeIds, ...edgeIds];
+            })()
+          : outdoorSelectionIdsInRect(rect, buildings, decorAssets, DECOR_ASSET_MAP, { includeHidden: true });
         if (captured.length > 1) {
           setMultiSelected(captured);
           setSelected(null);
@@ -850,7 +1215,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     gestureChangedRef.current = false;
     gestureHistoryPushed.current = false;
   };
-  const handleSvgUp = () => { endPan(); dragging.current = null; dragGroupStartRef.current = null; setGuides([]); gestureHistoryPushed.current = false; };
+  const handleSvgUp = () => { endPan(); dragging.current = null; dragGroupStartRef.current = null; navGroupOriginRef.current = null; setGuides([]); gestureHistoryPushed.current = false; };
 
   // ── Mouse leaves the canvas mid-gesture: CANCEL placement/drawing instead of
   // finalizing it. (onMouseLeave previously ran the same handler as mouseup, so
@@ -864,6 +1229,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     endPan();
     dragging.current = null;
     dragGroupStartRef.current = null;
+    navGroupOriginRef.current = null;
     if (resizing) setResizing(null);
     if (rotating.current) { rotating.current = null; setRotatingId(null); setRotatingAngle(0); }
     if (decorRotating.current) { decorRotating.current = null; setDecorRotatingId(null); setRotatingAngle(0); }
@@ -871,6 +1237,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     setBuildingDrag(null);
     setRubberBand(null);
     setGuides([]);
+    setNavEntranceHover(null);
     gestureHistoryPushed.current = false;
   };
 
@@ -880,6 +1247,10 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     const reset = resetTransientToolState();
     setTool(t);
     setDP(reset.drawingPath);
+    setNavConnectStart(null);
+    setNavPreview(null);
+    setNavEntranceHover(null);
+    navGroupOriginRef.current = null;
     setBuildingDrag(reset.buildingDrag);
     setRubberBand(reset.rubberBand);
     setGuides(reset.guides);
@@ -897,6 +1268,10 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     setMultiSelected([]);
     setShowAlignTools(false);
     setDP(reset.drawingPath);
+    setNavConnectStart(null);
+    setNavPreview(null);
+    setNavEntranceHover(null);
+    navGroupOriginRef.current = null;
     setBuildingDrag(reset.buildingDrag);
     setRubberBand(reset.rubberBand);
     setGuides(reset.guides);
@@ -918,21 +1293,54 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
   };
 
   const handleBuildingDoubleClick = useCallback((id: string) => {
+    // Navigation mode treats campus geometry as context only — double-click
+    // rename stays on the Campus layer.
+    if (layer === "navigation") return;
     const b = buildings.find((x) => x.id === id);
     if (!b) return;
     setSelected({ type: "building", id });
     setRenameDialog({ id, name: b.name });
     setRenameValue(b.name);
-  }, [buildings]);
+  }, [buildings, layer]);
 
-  const onItemDown = (e: React.MouseEvent, type: "building" | "marker" | "decorAsset", id: string, ox: number, oy: number) => {
+  const onItemDown = (e: React.MouseEvent, type: "building" | "marker" | "decorAsset" | "navNode", id: string, ox: number, oy: number) => {
     e.stopPropagation();
     // Spacebar held: pan instead of interacting with items
     if (isSpacePressed()) {
       startPan(e);
       return;
     }
+    // B5 Phase 1: navigation-layer Path tool connects waypoints by clicking
+    // them — node clicks never reach handleSvgDown (they stop propagation).
+    if (tool === "path" && layer === "navigation" && type === "navNode") {
+      onNavNodeClick(id);
+      return;
+    }
+    // B5 Phase 1.6: in the Navigation layer, clicking a building BODY with the
+    // Waypoint or Connect Path tools is rejected with clear feedback — outdoor
+    // waypoints belong outside buildings; routes enter through entrances.
+    if (layer === "navigation" && (tool === "marker" || tool === "path") && type === "building") {
+      toast.warning("Connect through a building entrance", "Outdoor waypoints belong outside buildings — click the building's entrance instead.");
+      return;
+    }
     if (tool === "erase") {
+      // In Navigation mode the Remove tool only touches graph elements — campus
+      // geometry is protected from accidental deletion while authoring routes.
+      if (layer === "navigation" && type !== "navNode") return;
+      if (type === "navNode") {
+        // Waypoint erase: deterministic connected-edge cleanup + clear feedback
+        // (never leaves dangling edge references).
+        const node = navNodes.find((n) => n.id === id);
+        if (!node) return;
+        const connected = navEdges.filter((e) => e.startNodeId === id || e.endNodeId === id).length;
+        const next = removeNavNode(navNodes, navEdges, id);
+        const nextCampus = { ...campus, navNodes: next.nodes, navEdges: next.edges };
+        onUpdate(nextCampus);
+        pushHistory(nextCampus);
+        setSelected(null);
+        toast.success("Waypoint deleted", connected > 0 ? `Removed ${connected} connected connection${connected !== 1 ? "s" : ""}.` : undefined);
+        return;
+      }
       if (type === "decorAsset") {
         const da = decorAssets.find((d) => d.id === id);
         if (da) {
@@ -959,6 +1367,10 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
       setGuides([]);
       return;
     }
+    // In the Navigation layer, Select interacts ONLY with graph elements —
+    // campus geometry stays visible as context but is never selected or
+    // dragged while the admin is building routes.
+    if (tool === "select" && layer === "navigation" && type !== "navNode") return;
     if (tool !== "select") return;
     if (e.shiftKey) {
       // Shift+click toggles membership against the currently visible
@@ -990,17 +1402,40 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     if (multiSelected.includes(id)) {
       setSelected({ type, id });
       setGuides([]);
+      // B5 Phase 1.8: an entrance-linked node can never be the drag anchor —
+      // selection is kept but the gesture is not armed (no mutation/history).
+      if (type === "navNode" && navNodes.find((n) => n.id === id)?.entranceId) {
+        toast.info("Entrance waypoints follow their building entrance", "Move the building or its entrance to reposition it.");
+        return;
+      }
       const pt = getPoint(e, cw, ch);
       gestureHistoryPushed.current = false;
       gestureChangedRef.current = false;
       dragging.current = { type, id, sx: pt.x, sy: pt.y, ox, oy };
       dragGroupStartRef.current = buildDragGroup({ type, id }, multiSelected);
+      // B5 Phase 1.6: waypoint multi-selection drags as one rigid group. Edges
+      // follow their nodes automatically (derived geometry) — only nodes move.
+      if (type === "navNode") {
+        // B5 Phase 1.8: entrance-linked nodes never join a rigid group move —
+        // they stay fixed to their building entrance while the other selected
+        // waypoints translate (edges follow automatically from node positions).
+        const selectedNodes = navNodes.filter((n) => multiSelected.includes(n.id) && !n.entranceId);
+        navGroupOriginRef.current = selectedNodes.length >= 2
+          ? new globalThis.Map(selectedNodes.map((n) => [n.id, { x: n.x, y: n.y }]))
+          : null;
+      }
       return;
     }
     setMultiSelected([]);
     setShowAlignTools(false);
     setSelected({ type, id });
     setGuides([]);
+    // B5 Phase 1.8: an entrance-linked node is selectable/inspectable/connectable
+    // but never independently draggable — it follows its building entrance.
+    if (type === "navNode" && navNodes.find((n) => n.id === id)?.entranceId) {
+      toast.info("Entrance waypoints follow their building entrance", "Move the building or its entrance to reposition it.");
+      return;
+    }
     const pt = getPoint(e, cw, ch);
     gestureHistoryPushed.current = false;
     gestureChangedRef.current = false;
@@ -1012,6 +1447,51 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     e.stopPropagation();
     const parent = buildings.find((b) => b.id === buildingId);
     if (!parent) return;
+    // B5 Phase 1.6: in the Navigation layer an entrance is a routing TARGET —
+    // Add Waypoint and Connect Path both create/reuse the entrance-linked node
+    // instead of selecting/dragging the entrance geometry.
+    if (layer === "navigation" && (tool === "marker" || tool === "path")) {
+      const pos = entranceWorldPosition(parent, parent.entrances?.find((en) => en.id === entranceId) ?? { edge: "bottom", offset: 0.5 });
+      if (tool === "marker") {
+        const existing = findEntranceNavNode(navNodes, buildingId, entranceId);
+        if (existing) {
+          // B5 Phase 1.8: no duplicate node, no mutation — select the existing
+          // entrance-linked waypoint + give clear feedback.
+          setSelected({ type: "navNode", id: existing.id });
+          setTool("select");
+          toast.info("Entrance already connected to the navigation network", "The existing entrance waypoint is selected.");
+          return;
+        }
+        const ee = buildEntranceNode(buildingId, entranceId, pos.x, pos.y);
+        if (ee) {
+          const next = { ...campus, navNodes: [...navNodes, ee] };
+          onUpdate(next); pushHistory(next);
+          setSelected({ type: "navNode", id: ee.id });
+          setTool("select");
+        }
+        return;
+      }
+      // Connect Path tool on an entrance.
+      const entranceNodeId = findEntranceNavNode(navNodes, buildingId, entranceId)?.id;
+      if (!navConnectStart) {
+        const startId = entranceNodeId ?? ensureEntranceNavNode(buildingId, entranceId, pos.x, pos.y);
+        if (!startId) return;
+        const start = navNodes.find((n) => n.id === startId);
+        setNavConnectStart(startId);
+        setNavPreview(start ? { x: start.x, y: start.y } : { x: pos.x, y: pos.y });
+        setSelected({ type: "navNode", id: startId });
+      } else if (entranceNodeId) {
+        commitNavEdge(navConnectStart, entranceNodeId);
+      } else {
+        commitNavEdgeWithEntrance(navConnectStart, buildingId, entranceId, pos.x, pos.y);
+      }
+      return;
+    }
+    // B5 Phase 1.7: in Navigation mode an entrance is CONTEXT-ONLY unless the
+    // admin is explicitly targeting it with Add Waypoint / Connect Path (handled
+    // above). It must never fall through to normal B3 entrance editing,
+    // dragging, or deletion while authoring the route graph.
+    if (layer === "navigation") return;
     setMultiSelected([]);
     setShowAlignTools(false);
     setSelected({ type: "entrance", id: entranceId, buildingId });
@@ -1067,16 +1547,20 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     const parent = currentBuildings.find((b) => b.id === buildingId);
     if (!parent || parent.locked) return;
     let changed = false;
+    const nextBuildings = currentBuildings.map((b) => {
+      if (b.id !== buildingId) return b;
+      const result = updateBuildingEntrance(b, entranceId, changes);
+      changed = result.changed;
+      return result.building;
+    });
+    if (!changed) return;
+    // B5 Phase 1.8: an entrance reposition/update moves its linked nav node in
+    // the SAME mutation — the node follows the resolved entrance position.
     const next: Campus = {
       ...currentCampus,
-      buildings: currentBuildings.map((b) => {
-        if (b.id !== buildingId) return b;
-        const result = updateBuildingEntrance(b, entranceId, changes);
-        changed = result.changed;
-        return result.building;
-      }),
+      buildings: nextBuildings,
+      navNodes: syncEntranceNodePositions(nextBuildings, currentCampus.navNodes ?? []),
     };
-    if (!changed) return;
     campusRef.current = next;
     onUpdate(next);
     pushHistory(next);
@@ -1087,13 +1571,21 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     const currentBuildings = currentCampus.buildings;
     const parent = currentBuildings.find((b) => b.id === buildingId);
     if (!parent || parent.locked) return;
+    const nextBuildings = currentBuildings.map((b) => {
+      if (b.id !== buildingId) return b;
+      const remaining = normalizeBuildingEntrances(b).filter((entrance) => entrance.id !== entranceId);
+      return { ...b, entrances: promotePrimaryEntrance(remaining) };
+    });
+    // B5 Phase 1.8: deleting an entrance also removes its linked nav node +
+    // connected edges in the SAME mutation — no stale entranceId references.
+    const { nodes, edges } = pruneOrphanedEntranceNodes(
+      nextBuildings, currentCampus.navNodes ?? [], currentCampus.navEdges ?? []
+    );
     const next: Campus = {
       ...currentCampus,
-      buildings: currentBuildings.map((b) => {
-        if (b.id !== buildingId) return b;
-        const remaining = normalizeBuildingEntrances(b).filter((entrance) => entrance.id !== entranceId);
-        return { ...b, entrances: promotePrimaryEntrance(remaining) };
-      }),
+      buildings: nextBuildings,
+      navNodes: nodes,
+      navEdges: edges,
     };
     campusRef.current = next;
     onUpdate(next);
@@ -1105,12 +1597,23 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     updMarkers(markers.map((m) => (m.id === id ? { ...m, ...changes } : m)));
   };
 
-  const onDeleteBuilding = (id: string) => { updBuildings(buildings.filter((b) => b.id !== id)); setSelected(null); };
+  const onDeleteBuilding = (id: string) => {
+    // B5 Phase 1.8: deleting a building also removes its entrance-linked nav
+    // nodes + connected edges in the SAME mutation (no stale references).
+    const nextBuildings = buildings.filter((b) => b.id !== id);
+    const { nodes, edges } = pruneOrphanedEntranceNodes(nextBuildings, navNodes, navEdges);
+    pushHistory();
+    onUpdate({ ...campus, buildings: nextBuildings, navNodes: nodes, navEdges: edges });
+    setSelected(null);
+  };
   const onDeleteMarker = (id: string) => { updMarkers(markers.filter((m) => m.id !== id)); setSelected(null); };
 
   // ── Floor manager helpers (delegated to HierarchyPanel) ──
 
   const onPathClick = (id: string) => {
+    // Campus walkways are context-only in Navigation mode — never selected or
+    // removed while authoring the graph.
+    if (layer === "navigation") return;
     if (tool === "erase") {
       const p = paths.find((x) => x.id === id);
       if (p) setDeleteConfirm({ type: "path", id, name: "Path" });
@@ -1120,12 +1623,20 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
   };
 
   // ── Context menu ──
-  const handleContextMenu = useCallback((e: React.MouseEvent, type: "building" | "marker" | "path" | "decorAsset", id: string) => {
+  const handleContextMenu = useCallback((e: React.MouseEvent, type: "building" | "marker" | "path" | "decorAsset" | "navNode", id: string) => {
     e.preventDefault();
     e.stopPropagation();
+    // B5 Phase 1: right-click cancels an in-progress navigation edge so a
+    // dangling connect state can never survive a context action (same rule as
+    // Escape / tool switch — never leaves an orphan edge).
+    if (tool === "path" && layer === "navigation") {
+      setNavConnectStart(null);
+      setNavPreview(null);
+    }
     setContextMenu({ x: e.clientX, y: e.clientY, type, id });
     setSelected({ type, id });
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tool, layer]);
 
   // ── Undo/Redo history (declared before layer ordering + context actions) ──
   const historyRef = useRef<{ snapshots: Campus[]; idx: number }>({
@@ -1394,15 +1905,227 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
       setIsProcessing(false);
   }, [campus, validateCampus, onUpdate, onSave, isDirty, isProcessing, toast]);
 
+  // ── B5 Phase 2.1: copy / paste / duplicate (editor-local clipboards) ───────
+  const outdoorClipboardRef = useRef<{ type: string; id: string }[] | null>(null);
+  const outdoorNavClipboardRef = useRef<{ nodes: NavigationNode[]; edges: NavigationEdge[] } | null>(null);
+  const pasteOffsetRef = useRef(25);
+
+  const copyOutdoorSelection = useCallback(() => {
+    const ids: { type: string; id: string }[] = [];
+    if (multiSelected.length > 0) {
+      for (const id of multiSelected) {
+        if (buildings.some((b) => b.id === id)) ids.push({ type: "building", id });
+        else if (markers.some((m) => m.id === id)) ids.push({ type: "marker", id });
+        else if (decorAssets.some((d) => d.id === id)) ids.push({ type: "decorAsset", id });
+        else if (paths.some((p) => p.id === id)) ids.push({ type: "path", id });
+      }
+    } else if (selected) {
+      if (["building", "marker", "decorAsset", "path"].includes(selected.type)) {
+        ids.push({ type: selected.type, id: selected.id });
+      }
+    }
+    if (ids.length === 0) {
+      toast.info("Nothing to copy", "Select a building, point of interest, or decorative asset first (Ctrl+C).");
+      return;
+    }
+    outdoorClipboardRef.current = ids;
+    pasteOffsetRef.current = 25;
+    toast.success("Copied", `${ids.length} object${ids.length !== 1 ? "s" : ""} copied (Ctrl+V to paste).`);
+  }, [buildings, markers, decorAssets, paths, multiSelected, selected, toast]);
+
+  const pasteOutdoorSelection = useCallback(() => {
+    if (!outdoorClipboardRef.current || outdoorClipboardRef.current.length === 0) {
+      toast.info("Nothing to paste", "Copy an object first (Ctrl+C).");
+      return;
+    }
+    const offset = pasteOffsetRef.current;
+    pasteOffsetRef.current += 25;
+    const nextBuildings = [...buildings];
+    const nextMarkers = [...markers];
+    const nextPaths = [...paths];
+    const nextDecor = [...decorAssets];
+    const newIds: string[] = [];
+    for (const sel of outdoorClipboardRef.current) {
+      if (sel.type === "building") {
+        const b = buildings.find((x) => x.id === sel.id);
+        if (!b) continue;
+        const nbId = genId("bld");
+        const nb: CampusBuilding = {
+          ...b,
+          id: nbId,
+          name: `${b.name} (copy)`,
+          x: Math.round(Math.max(0, Math.min(cw - b.width, b.x + offset))),
+          y: Math.round(Math.max(0, Math.min(ch - b.height, b.y + offset))),
+          entrances: normalizeBuildingEntrances(b).map((entrance) => ({ ...entrance, id: genId("ent"), buildingId: nbId })),
+        };
+        nextBuildings.push(nb);
+        newIds.push(nbId);
+      } else if (sel.type === "marker") {
+        const m = markers.find((x) => x.id === sel.id);
+        if (!m) continue;
+        const nm = { ...m, id: genId("mk"), x: Math.round(m.x + offset), y: Math.round(m.y + offset) };
+        nextMarkers.push(nm);
+        newIds.push(nm.id);
+      } else if (sel.type === "decorAsset") {
+        const d = decorAssets.find((x) => x.id === sel.id);
+        if (!d) continue;
+        const copy = duplicateDecorAsset(d, genId("dec"), offset, offset);
+        nextDecor.push(copy);
+        newIds.push(copy.id);
+      } else if (sel.type === "path") {
+        const p = paths.find((x) => x.id === sel.id);
+        if (!p) continue;
+        const np = { ...p, id: genId("pth"), points: (p.points ?? []).map((pt) => ({ x: Math.round(pt.x + offset), y: Math.round(pt.y + offset) })) };
+        nextPaths.push(np);
+        newIds.push(np.id);
+      }
+    }
+    if (newIds.length === 0) {
+      toast.info("Nothing to paste", "The copied object no longer exists on this campus.");
+      return;
+    }
+    pushHistory();
+    onUpdate({ ...campus, buildings: nextBuildings, markers: nextMarkers, paths: nextPaths, decorAssets: nextDecor });
+    setSelected(null);
+    setMultiSelected(newIds);
+    toast.success("Pasted", `${newIds.length} object${newIds.length !== 1 ? "s" : ""} pasted with fresh IDs.`);
+  }, [buildings, markers, paths, decorAssets, campus, cw, ch, onUpdate, pushHistory, toast]);
+
+  const duplicateOutdoorSelection = useCallback(() => {
+    if (selected?.type === "building") {
+      const b = buildings.find((x) => x.id === selected.id);
+      if (!b) return;
+      pushHistory();
+      const nbId = genId("bld");
+      const nb: CampusBuilding = {
+        ...b,
+        id: nbId,
+        name: `${b.name} (copy)`,
+        x: b.x + 25,
+        y: b.y + 25,
+        entrances: normalizeBuildingEntrances(b).map((entrance) => ({ ...entrance, id: genId("ent"), buildingId: nbId })),
+      };
+      updBuildings([...buildings, nb]);
+      setSelected({ type: "building", id: nb.id });
+      toast.success("Building Duplicated", `${b.code} has been copied.`);
+      return;
+    }
+    const ids: { type: string; id: string }[] = [];
+    if (multiSelected.length > 0) {
+      for (const id of multiSelected) {
+        if (buildings.some((x) => x.id === id)) ids.push({ type: "building", id });
+        else if (markers.some((x) => x.id === id)) ids.push({ type: "marker", id });
+        else if (decorAssets.some((x) => x.id === id)) ids.push({ type: "decorAsset", id });
+        else if (paths.some((x) => x.id === id)) ids.push({ type: "path", id });
+      }
+    } else if (selected && ["marker", "decorAsset", "path"].includes(selected.type)) {
+      ids.push({ type: selected.type, id: selected.id });
+    }
+    if (ids.length === 0) {
+      toast.info("Nothing to duplicate", "Select an object to duplicate (Ctrl+D).");
+      return;
+    }
+    outdoorClipboardRef.current = ids;
+    pasteOutdoorSelection();
+  }, [selected, multiSelected, buildings, markers, decorAssets, paths, cw, ch, navNodes, updBuildings, campus, onUpdate, pushHistory, toast, pasteOutdoorSelection]);
+
+  // Outdoor Navigation (layer) copy/paste — free nodes + edges between them;
+  // entrance-linked nodes are DERIVED geometry and are never duplicated.
+  const navOutdoorSelectionGraph = useCallback(() => {
+    const selNode = selected?.type === "navNode" ? selected.id : null;
+    let nodeIds: string[] = [];
+    if (selNode) nodeIds = multiSelected.length > 0 ? [...new Set([...multiSelected, selNode])] : [selNode];
+    else nodeIds = multiSelected.filter((id) => navNodes.some((n) => n.id === id));
+    const selectedNodes = navNodes.filter((n) => nodeIds.includes(n.id));
+    const freeNodes = selectedNodes.filter((n) => !n.entranceId);
+    const linkedCount = selectedNodes.length - freeNodes.length;
+    const freeIds = new Set(freeNodes.map((n) => n.id));
+    const edges = navEdges.filter((e) => freeIds.has(e.startNodeId) && freeIds.has(e.endNodeId));
+    return { nodes: freeNodes, edges, linkedCount };
+  }, [multiSelected, navEdges, navNodes, selected]);
+
+  const copyOutdoorNavSelection = useCallback(() => {
+    const { nodes, edges, linkedCount } = navOutdoorSelectionGraph();
+    if (nodes.length === 0) {
+      toast.info("Nothing to copy", "Select free waypoints first (Ctrl+C).");
+      return;
+    }
+    outdoorNavClipboardRef.current = { nodes: structuredClone(nodes), edges: structuredClone(edges) };
+    pasteOffsetRef.current = 25;
+    if (linkedCount > 0) {
+      toast.info("Entrance waypoints not copied", `${linkedCount} entrance waypoint${linkedCount !== 1 ? "s" : ""} follow their building entrance and cannot be copied.`);
+    } else {
+      toast.success("Copied", `${nodes.length} waypoint${nodes.length !== 1 ? "s" : ""} copied (Ctrl+V to paste).`);
+    }
+  }, [navOutdoorSelectionGraph, toast]);
+
+  const pasteOutdoorNavSelection = useCallback(() => {
+    if (!outdoorNavClipboardRef.current || outdoorNavClipboardRef.current.nodes.length === 0) {
+      toast.info("Nothing to paste", "Copy waypoints first (Ctrl+C).");
+      return;
+    }
+    const { nodes, edges } = outdoorNavClipboardRef.current;
+    const offset = pasteOffsetRef.current;
+    pasteOffsetRef.current += 25;
+    const idMap = new globalThis.Map<string, string>();
+    const nextNodes: NavigationNode[] = nodes.map((n) => {
+      const newId = genId("nn");
+      idMap.set(n.id, newId);
+      return { ...n, id: newId, x: Math.round(n.x + offset), y: Math.round(n.y + offset) };
+    });
+    const nodeById = new globalThis.Map(nextNodes.map((n) => [n.id, n]));
+    const nextEdges: NavigationEdge[] = edges
+      .filter((e) => idMap.has(e.startNodeId) && idMap.has(e.endNodeId))
+      .map((e) => {
+        const a = nodeById.get(idMap.get(e.startNodeId)!);
+        const b = nodeById.get(idMap.get(e.endNodeId)!);
+        return { ...e, id: genId("ne"), startNodeId: a!.id, endNodeId: b!.id, distance: Math.round(Math.hypot(b!.x - a!.x, b!.y - a!.y)) };
+      });
+    const nextCampus = { ...campus, navNodes: [...navNodes, ...nextNodes], navEdges: [...navEdges, ...nextEdges] };
+    onUpdate(nextCampus);
+    pushHistory(nextCampus);
+    setSelected({ type: "navNode", id: nextNodes[nextNodes.length - 1].id });
+    setMultiSelected(nextNodes.map((n) => n.id));
+    toast.success("Waypoints pasted", `${nextNodes.length} waypoint${nextNodes.length !== 1 ? "s" : ""} pasted with fresh connections.`);
+  }, [campus, navNodes, navEdges, onUpdate, pushHistory, toast]);
+
+  const duplicateOutdoorNavSelection = useCallback(() => {
+    const { nodes, edges, linkedCount } = navOutdoorSelectionGraph();
+    if (nodes.length === 0) {
+      toast.info("Nothing to duplicate", "Select free waypoints first (Ctrl+D).");
+      return;
+    }
+    if (linkedCount > 0) {
+      toast.info("Entrance waypoints excluded", `${linkedCount} entrance waypoint${linkedCount !== 1 ? "s" : ""} follow their building entrance and cannot be duplicated.`);
+    }
+    outdoorNavClipboardRef.current = { nodes: structuredClone(nodes), edges: structuredClone(edges) };
+    pasteOffsetRef.current = 25;
+    pasteOutdoorNavSelection();
+  }, [navOutdoorSelectionGraph, pasteOutdoorNavSelection, toast]);
+
   // ── Keyboard shortcuts ──
   useEffect(() => {
     const k = (e: KeyboardEvent) => {
-      if (document.activeElement?.tagName === "INPUT" || document.activeElement?.tagName === "TEXTAREA" || document.activeElement?.tagName === "SELECT") return;
+      // B5 Phase 1.7: Delete/Backspace must never fire graph deletion while the
+      // user is typing in an input, textarea, native select, or contenteditable
+      // (inline editors).
+      const el = document.activeElement as HTMLElement | null;
+      if (el?.tagName === "INPUT" || el?.tagName === "TEXTAREA" || el?.tagName === "SELECT" || el?.isContentEditable) return;
       if ((e.ctrlKey || e.metaKey) && e.key === "z" && !e.shiftKey) { e.preventDefault(); undoEdit(); return; }
       if ((e.ctrlKey || e.metaKey) && (e.key === "y" || (e.key === "z" && e.shiftKey))) { e.preventDefault(); redoEdit(); return; }
       // Batch delete multi-selected items — show confirmation dialog
       if ((e.key === "Delete" || e.key === "Backspace") && multiSelected.length > 0) {
         e.preventDefault();
+        // B5 Phase 1.7: navigation multi-selection deletes nodes/edges in ONE
+        // history action (connected edges of deleted nodes are removed — never
+        // a dangling reference). Graph deletion is deliberate, so it proceeds
+        // directly like the panel's Delete Selected.
+        const navNodeIds = navNodes.filter((n) => multiSelected.includes(n.id)).map((n) => n.id);
+        const navEdgeIds = navEdges.filter((e2) => multiSelected.includes(e2.id)).map((e2) => e2.id);
+        if (navNodeIds.length > 0 || navEdgeIds.length > 0) {
+          deleteNavSelection(navNodeIds, navEdgeIds);
+          return;
+        }
         const bIds = buildings.filter((b) => multiSelected.includes(b.id)).map((b) => b.id);
         const mIds = markers.filter((m) => multiSelected.includes(m.id)).map((m) => m.id);
         const daIds = decorAssets.filter((d) => multiSelected.includes(d.id)).map((d) => d.id);
@@ -1413,8 +2136,9 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
         if (selected.type === "building") {
           const b = buildings.find((x) => x.id === selected.id);
           if (b?.locked) return;
-          updBuildings(buildings.filter((x) => x.id !== selected.id));
-          pushHistory();
+          // B5 Phase 1.8: building delete also prunes its entrance-linked nav
+          // nodes + edges in the same single history action.
+          onDeleteBuilding(selected.id);
         } else if (selected.type === "marker") { updMarkers(markers.filter((m) => m.id !== selected.id)); pushHistory(); }
         else if (selected.type === "path") { updPaths(paths.filter((p) => p.id !== selected.id)); pushHistory(); }
         else if (selected.type === "entrance") {
@@ -1427,6 +2151,19 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
           const template = da ? DECOR_ASSET_MAP[da.type] : undefined;
           setDeleteConfirm({ type: "decorAsset", id: selected.id, name: template?.label ?? da?.type ?? "Asset" });
         }
+        else if (selected.type === "navNode") {
+          // Single waypoint delete: deterministic connected-edge cleanup.
+          const next = removeNavNode(navNodes, navEdges, selected.id);
+          const nextCampus = { ...campus, navNodes: next.nodes, navEdges: next.edges };
+          onUpdate(nextCampus);
+          pushHistory(nextCampus);
+        }
+        else if (selected.type === "navEdge") {
+          // Single edge delete — never leaves a dangling reference.
+          const nextCampus = { ...campus, navEdges: navEdges.filter((e2) => e2.id !== selected.id) };
+          onUpdate(nextCampus);
+          pushHistory(nextCampus);
+        }
         setSelected(null);
       }
       // Ctrl+A: select all buildings
@@ -1438,6 +2175,9 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
       }
       if (e.key === "Escape") {
         setDP([]);
+        // Cancel an in-progress navigation edge (never leaves an orphan edge).
+        setNavConnectStart(null);
+        setNavPreview(null);
         if (tool === "path") switchTool("select");
         setSelected(null);
         setMultiSelected([]);
@@ -1449,6 +2189,10 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
       }
       // Single-letter tool shortcuts must NOT fire while Ctrl/Cmd is held
       if (!e.ctrlKey && !e.metaKey) {
+        // Tool shortcuts are LAYER-AWARE: a shortcut only activates a tool the
+        // active layer actually exposes (e.g. B does nothing in Navigation mode,
+        // and the removed accessibility-layer R/L elevator tool is now inert).
+        const canUseTool = (id: SimpleTool) => (LAYER_TOOLS[layer] ?? LAYER_TOOLS.campus).some((t) => t.id === id);
         if (e.key === "v" || e.key === "V") switchTool("select");
         if (e.code === "Space") {
           e.preventDefault();
@@ -1458,19 +2202,19 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
             setTool("pan");
           }
         }
-        if (e.key === "m" || e.key === "M") switchTool("marker");
-        if (e.key === "b" || e.key === "B") switchTool("building");
-        if (e.key === "p" || e.key === "P") switchTool("path");
-        if (e.key === "e" || e.key === "E") switchTool("erase");
-        if (e.key === "r" || e.key === "R") switchTool("room");
-        if (e.key === "l" || e.key === "L") switchTool("room");
-        if (e.key === "x" || e.key === "X") switchTool("erase");
-        if (e.key === "a" || e.key === "A") switchTool("building");
+        if (e.key === "m" || e.key === "M") { if (canUseTool("marker")) switchTool("marker"); }
+        if (e.key === "b" || e.key === "B") { if (canUseTool("building")) switchTool("building"); }
+        if (e.key === "p" || e.key === "P") { if (canUseTool("path")) switchTool("path"); }
+        if (e.key === "e" || e.key === "E") { if (canUseTool("erase")) switchTool("erase"); }
+        if (e.key === "x" || e.key === "X") { if (canUseTool("erase")) switchTool("erase"); }
+        if (e.key === "a" || e.key === "A") { if (canUseTool("building")) switchTool("building"); }
         if (e.key === "0") resetView();
-        // Layer switching: 1=Campus, 2=Navigation, 3=Accessibility, 4=Emergency, 5=Events
-        if (e.key >= "1" && e.key <= "5") {
+        // Layer switching: 1=Campus, 2=Navigation, 3=Events
+        // (Accessibility and Emergency are routing properties of the
+        // Navigation layer, not separate editing modes.)
+        if (e.key >= "1" && e.key <= "3") {
           const layerByKey: Record<string, EditorLayer> = {
-            "1": "campus", "2": "navigation", "3": "accessibility", "4": "emergency", "5": "events",
+            "1": "campus", "2": "navigation", "3": "events",
           };
           switchLayer(layerByKey[e.key]);
         }
@@ -1507,29 +2251,28 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
       }
       if ((e.ctrlKey || e.metaKey) && e.key === "s") { e.preventDefault(); runSave(); }
       if ((e.ctrlKey || e.metaKey) && e.key === "g") { e.preventDefault(); setSnapGrid((v) => !v); }
-      // Ctrl+D: duplicate selected building
-      if ((e.ctrlKey || e.metaKey) && e.key === "d" && selected?.type === "building") {
+      // B5 Phase 2.1: copy / paste / duplicate — fresh IDs + relationship remaps,
+      // native text behavior preserved by the editable-target guard at the top.
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "c") {
         e.preventDefault();
-        const b = buildings.find((x) => x.id === selected.id);
-        if (!b) return;
-        pushHistory();
-        const nbId = genId("bld");
-        const nb: CampusBuilding = {
-          ...b,
-          id: nbId,
-          name: `${b.name} (copy)`,
-          x: b.x + 25,
-          y: b.y + 25,
-          entrances: normalizeBuildingEntrances(b).map((entrance) => ({ ...entrance, id: genId("ent"), buildingId: nbId })),
-        };
-        updBuildings([...buildings, nb]);
-        setSelected({ type: "building", id: nb.id });
-        toast.success("Building Duplicated", `${b.code} has been copied.`);
+        if (layer === "navigation") copyOutdoorNavSelection(); else copyOutdoorSelection();
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "v") {
+        e.preventDefault();
+        if (layer === "navigation") pasteOutdoorNavSelection(); else pasteOutdoorSelection();
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "d") {
+        e.preventDefault();
+        if (layer === "navigation") { duplicateOutdoorNavSelection(); return; }
+        duplicateOutdoorSelection();
+        return;
       }
     };
     window.addEventListener("keydown", k);
     return () => window.removeEventListener("keydown", k);
-  }, [selected, tool, buildings, markers, paths, undoEdit, redoEdit, runSave, pushHistory, campus, onUpdate, switchTool, switchLayer]);
+  }, [selected, tool, layer, buildings, markers, paths, multiSelected, navNodes, navEdges, deleteNavSelection, removeNavNode, onDeleteBuilding, undoEdit, redoEdit, runSave, pushHistory, campus, onUpdate, switchTool, switchLayer, copyOutdoorSelection, pasteOutdoorSelection, duplicateOutdoorSelection, copyOutdoorNavSelection, pasteOutdoorNavSelection, duplicateOutdoorNavSelection]);
 
   // ── Space keyup: restore previous tool when space is released (hold-to-pan) ──
   useEffect(() => {
@@ -1587,15 +2330,13 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
 
   const activeLayer = LAYERS.find((l) => l.id === layer)!;
 
-  // ── Tool config for compact palette ──
-  const toolConfig: { id: SimpleTool; icon: React.ElementType; label: string; shortcut: string }[] = [
-    { id: "select",   icon: MousePointer2, label: "Select",   shortcut: "V" },
-    { id: "pan",      icon: Hand,          label: "Pan",      shortcut: "Space" },
-    { id: "marker",   icon: MapPin,        label: "Marker",   shortcut: "M" },
-    { id: "building", icon: Square,        label: "Build",    shortcut: "B" },
-    { id: "path",     icon: GitBranch,     label: "Path",     shortcut: "P" },
-    { id: "erase",    icon: Trash2,        label: "Erase",    shortcut: "E" },
-  ];
+  // ── Tool config for compact palette — contextual per active layer ──
+  // Each layer exposes only the tools that genuinely apply to it (e.g.
+  // Navigation = Select/Pan/Add Waypoint/Connect Path/Remove; no campus
+  // building or Marker tools, and no navigation tools on the Campus layer).
+  const layerTools = LAYER_TOOLS[layer] ?? LAYER_TOOLS.campus;
+  const toolConfig: { id: SimpleTool; icon: React.ElementType; label: string; shortcut: string; hint: string }[] =
+    layerTools.map((t) => ({ id: t.id as SimpleTool, icon: t.icon, label: t.label, shortcut: t.key, hint: t.hint }));
 
   // ── Validation issues for the bottom issues popover ──
   const validationIssues = useMemo(() => {
@@ -1665,14 +2406,30 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
                 <button onClick={() => setDP([])} className="hover:opacity-70"><X className="h-2 w-2" /></button>
               </div>
             )}
+
+            {/* Navigation edge-authoring status (B5 Phase 1) */}
+            {layer === "navigation" && tool === "path" && (
+              <div data-testid="nav-path-status"
+                className="flex items-center gap-1 px-2 h-5 rounded-md border text-[9px] font-semibold shrink-0"
+                style={{ background: "color-mix(in srgb,#16a34a 10%,transparent)", borderColor: "color-mix(in srgb,#16a34a 30%,transparent)", color: "#16a34a" }}>
+                {navConnectStart ? "Select or place destination" : "Select or place start point"}
+                {navConnectStart && (
+                  <button onClick={() => { setNavConnectStart(null); setNavPreview(null); }} className="hover:opacity-70" aria-label="Cancel connection">
+                    <X className="h-2 w-2" />
+                  </button>
+                )}
+              </div>
+            )}
           </div>
 
           {/* ── Center: Tool palette (main tools, highlighted, perfectly centered) ── */}
           <div className="flex items-center justify-center">
-            <div className="flex items-center gap-0.5 px-2 py-0.5 rounded-lg" style={{ background: "color-mix(in srgb, var(--muted) 30%, transparent)" }}>
+            <div data-testid="editor-toolbar" className="flex items-center gap-0.5 px-2 py-0.5 rounded-lg" style={{ background: "color-mix(in srgb, var(--muted) 30%, transparent)" }}>
               {toolConfig.map((t) => (
-                <ToolbarTooltip key={t.id} tool={t.id} isActive={tool === t.id}>
+                <ToolbarTooltip key={t.id} tool={t.id} label={t.label} shortcut={t.shortcut} hint={t.hint} isActive={tool === t.id}>
                   <button
+                    aria-label={t.label}
+                    title={t.label}
                     onClick={() => switchTool(t.id)}
                     className={cn(
                       "flex items-center justify-center h-8 w-8 rounded-md transition-all",
@@ -1908,17 +2665,14 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
         )}
       </AnimatePresence>
 
-      {/* ── Main editor area — animated on layer change, preserves camera & selection ── */}
-      <AnimatePresence mode="popLayout">
-        <motion.div
-          key={`editor-${layer}`}
-          layout
-          initial={{ opacity: 0, x: layer === "campus" ? -6 : 6 }}
-          animate={{ opacity: 1, x: 0 }}
-          exit={{ opacity: 0, x: layer === "campus" ? 6 : -6 }}
-          transition={{ duration: 0.12, ease: [0.16, 1, 0.3, 1] }}
-          className="flex flex-1 overflow-hidden min-h-0 relative"
-        >
+      {/* ── Main editor area — stays mounted across layer switches ──
+          IMPORTANT: this subtree must NOT be remounted on layer change. A
+          per-layer key + AnimatePresence used to remount it, and when the
+          exiting layer's editor unmounted its <svg ref={svgRef}> cleanup set
+          the shared svgRef to null — silently breaking every subsequent
+          pointer→world conversion (waypoints placed at x=0,y=0 in the real
+          browser). switchLayer already resets all transient tool state. */}
+        <div className="flex flex-1 overflow-hidden min-h-0 relative">
         {/* ── Left: Hierarchy Panel (collapsible) ── */}
         <div className="flex items-stretch">
           <div
@@ -1970,6 +2724,36 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
           multiSelected={multiSelected}
           rubberBand={rubberBand}
           drawingPath={drawingPath}
+          navNodes={outdoorNodes}
+          navEdges={outdoorEdges}
+          navConnectStartId={navConnectStart}
+          navPreview={navPreview}
+          navEntranceHover={navEntranceHover}
+          onNavEdgeSelect={(e, id) => {
+            e.stopPropagation();
+            if (tool !== "select") return;
+            // B5 Phase 1.6: Shift-click toggles an edge's membership in the
+            // multi-selection (same semantics as waypoint shift-click).
+            if (e.shiftKey) {
+              const base = multiSelected.length > 0 ? multiSelected : selected ? [selected.id] : [];
+              const next = base.includes(id) ? base.filter((x) => x !== id) : [...base, id];
+              setShowAlignTools(next.length > 1);
+              if (next.length > 1) {
+                setMultiSelected(next);
+                setSelected({ type: "navEdge", id });
+              } else if (next.length === 1) {
+                setMultiSelected([]);
+                setSelected(selectionForId(next[0]));
+              } else {
+                setMultiSelected([]);
+                setSelected(null);
+              }
+              setGuides([]);
+              return;
+            }
+            setSelected({ type: "navEdge", id });
+            setMultiSelected([]);
+          }}
           snapGrid={snapGrid}
           zoom={zoom}
           pan={pan}
@@ -2172,9 +2956,13 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
           }}
           onBatchDeleteBuildings={(ids) => {
             pushHistory();
+            const nextBuildings = buildings.filter(b => !ids.includes(b.id));
+            const { nodes, edges } = pruneOrphanedEntranceNodes(nextBuildings, navNodes, navEdges);
             const next: Campus = {
               ...campus,
-              buildings: buildings.filter(b => !ids.includes(b.id)),
+              buildings: nextBuildings,
+              navNodes: nodes,
+              navEdges: edges,
               ...(campus.decorAssets !== undefined
                 ? { decorAssets: (campus.decorAssets ?? []).filter((d) => !ids.includes(d.id)) }
                 : {}),
@@ -2197,14 +2985,25 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
             onUpdate({ ...campus, navNodes: (campus.navNodes ?? []).map(n => n.id === id ? { ...n, ...changes } : n) });
           }}
           onDeleteNavNode={(id) => {
+            // Deterministic connected-edge cleanup — never leave dangling edges.
+            const connected = navEdges.filter((e) => e.startNodeId === id || e.endNodeId === id).length;
+            const next = removeNavNode(navNodes, navEdges, id);
             pushHistory();
-            onUpdate({ ...campus, navNodes: (campus.navNodes ?? []).filter(n => n.id !== id) });
+            onUpdate({ ...campus, navNodes: next.nodes, navEdges: next.edges });
             setSelected(null);
+            if (connected > 0) {
+              toast.success("Waypoint deleted", `Removed ${connected} connected connection${connected !== 1 ? "s" : ""}.`);
+            }
           }}
           onUpdateNavEdge={(id, changes) => {
             pushHistory();
             onUpdate({ ...campus, navEdges: (campus.navEdges ?? []).map(e => e.id === id ? { ...e, ...changes } : e) });
           }}
+          onBatchUpdateNavEdges={(ids, changes) => {
+            pushHistory();
+            onUpdate({ ...campus, navEdges: (campus.navEdges ?? []).map(e => ids.includes(e.id) ? { ...e, ...changes } : e) });
+          }}
+          onDeleteNavSelection={(nodeIds, edgeIds) => deleteNavSelection(nodeIds, edgeIds)}
           onDeleteNavEdge={(id) => {
             pushHistory();
             onUpdate({ ...campus, navEdges: (campus.navEdges ?? []).filter(e => e.id !== id) });
@@ -2224,8 +3023,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
           onDeleteRoute={onDeleteRoute}
           onClose={() => { setSelected(null); setSelRouteId(null); }}
         />
-      </motion.div>
-      </AnimatePresence>
+        </div>
 
       {/* ── Publish confirmation dialog — grouped validation with real issue data ── */}
       <PrePublishDialog

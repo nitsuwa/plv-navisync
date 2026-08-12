@@ -224,12 +224,45 @@ export function createDefaultFloor(defaults: FloorDefaults = {}): FloorPlan {
   return normalizeFloor({}, { canvasW: DEFAULT_FLOOR_CANVAS.w, canvasH: DEFAULT_FLOOR_CANVAS.h, ...defaults });
 }
 
-export function duplicateFloorForBuilding(source: Partial<FloorPlan>, defaults: FloorDefaults & { buildingId: string }): FloorPlan {
+export interface FloorDuplicateIdMaps {
+  rooms: Map<string, string>;
+  walls: Map<string, string>;
+  doors: Map<string, string>;
+  windows: Map<string, string>;
+  stairs: Map<string, string>;
+  ramps: Map<string, string>;
+  elevators: Map<string, string>;
+}
+
+/**
+ * Deep-duplicate a floor. When `outIdMaps` is supplied it is filled with the
+ * old→new element id maps so callers (e.g. B5 Phase 2 floor-nav duplication)
+ * can remap linked references that live OUTSIDE the FloorPlan object.
+ */
+export function duplicateFloorForBuilding(
+  source: Partial<FloorPlan>,
+  defaults: FloorDefaults & { buildingId: string },
+  outIdMaps?: FloorDuplicateIdMaps
+): FloorPlan {
   const floor = normalizeFloor(source, defaults);
   const id = defaults.id ?? generateFloorId();
   const buildingId = defaults.buildingId;
   const roomIdMap = new Map(floor.rooms.map((room) => [room.id, generateFloorId()]));
   const wallIdMap = new Map(floor.walls.map((wall) => [wall.id, generateFloorId()]));
+  const doorIdMap = new Map(floor.doors.map((door) => [door.id, generateFloorId()]));
+  const windowIdMap = new Map(floor.windows.map((win) => [win.id, generateFloorId()]));
+  const stairIdMap = new Map(floor.stairs.map((s) => [s.id, generateFloorId()]));
+  const rampIdMap = new Map(floor.ramps.map((r) => [r.id, generateFloorId()]));
+  const elevatorIdMap = new Map(floor.elevators.map((e) => [e.id, generateFloorId()]));
+  if (outIdMaps) {
+    outIdMaps.rooms = roomIdMap;
+    outIdMaps.walls = wallIdMap;
+    outIdMaps.doors = doorIdMap;
+    outIdMaps.windows = windowIdMap;
+    outIdMaps.stairs = stairIdMap;
+    outIdMaps.ramps = rampIdMap;
+    outIdMaps.elevators = elevatorIdMap;
+  }
   const remapAnchor = (anchor: FloorWallEndpointAnchor | undefined) => {
     const nextRoomId = anchor ? roomIdMap.get(anchor.roomId) : undefined;
     return anchor && nextRoomId ? { ...anchor, roomId: nextRoomId } : undefined;
@@ -243,12 +276,12 @@ export function duplicateFloorForBuilding(source: Partial<FloorPlan>, defaults: 
     rooms: floor.rooms.map((room) => ({ ...room, id: roomIdMap.get(room.id) ?? generateFloorId(), buildingId, floorId: id })),
     paths: floor.paths.map((item) => ({ ...item, id: generateFloorId() })),
     walls: floor.walls.map((item) => ({ ...item, id: wallIdMap.get(item.id) ?? generateFloorId(), startAnchor: remapAnchor(item.startAnchor), endAnchor: remapAnchor(item.endAnchor) })),
-    doors: floor.doors.map((item) => ({ ...item, id: generateFloorId(), wallId: item.wallId ? wallIdMap.get(item.wallId) : undefined })),
-    windows: floor.windows.map((item) => ({ ...item, id: generateFloorId(), wallId: item.wallId ? wallIdMap.get(item.wallId) : undefined })),
+    doors: floor.doors.map((item) => ({ ...item, id: doorIdMap.get(item.id) ?? generateFloorId(), wallId: item.wallId ? wallIdMap.get(item.wallId) : undefined })),
+    windows: floor.windows.map((item) => ({ ...item, id: windowIdMap.get(item.id) ?? generateFloorId(), wallId: item.wallId ? wallIdMap.get(item.wallId) : undefined })),
     furniture: floor.furniture.map((item) => ({ ...item, id: generateFloorId() })),
-    stairs: floor.stairs.map((item) => ({ ...item, id: generateFloorId() })),
-    ramps: floor.ramps.map((item) => ({ ...item, id: generateFloorId() })),
-    elevators: floor.elevators.map((item) => ({ ...item, id: generateFloorId() })),
+    stairs: floor.stairs.map((item) => ({ ...item, id: stairIdMap.get(item.id) ?? generateFloorId() })),
+    ramps: floor.ramps.map((item) => ({ ...item, id: rampIdMap.get(item.id) ?? generateFloorId() })),
+    elevators: floor.elevators.map((item) => ({ ...item, id: elevatorIdMap.get(item.id) ?? generateFloorId() })),
     labels: floor.labels.map((item) => ({ ...item, id: generateFloorId() })),
   }, { ...defaults, id, buildingId });
 }

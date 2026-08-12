@@ -1130,8 +1130,10 @@ describe("Phase 1.9 - visual and interaction polish", () => {
 
     expect(stairsSymbol.querySelectorAll("line").length).toBeGreaterThanOrEqual(4);
     expect(stairsSymbol.querySelector("path")).toBeTruthy();
-    expect(rampSymbol.querySelectorAll("path").length).toBeGreaterThanOrEqual(1);
-    expect(rampSymbol.querySelector("circle")).toBeTruthy();
+    // B5 Phase 2.5: the simplified ramp is a functional blue footprint with a
+    // centered accessibility icon (lucide) + a small direction cue.
+    expect(rampSymbol.querySelector('[data-testid="ramp-blue-base"]')).toBeTruthy();
+    expect(rampSymbol.querySelector('[data-testid="ramp-accessibility-icon"]')).toBeTruthy();
     expect(elevatorSymbol.querySelectorAll("rect").length).toBeGreaterThanOrEqual(3);
     expect(elevatorSymbol.querySelector("path")).toBeTruthy();
   });

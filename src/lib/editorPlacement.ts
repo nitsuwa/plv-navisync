@@ -150,21 +150,37 @@ export function computeBuildingPlacement(
 }
 
 /**
- * Whether the Navigation layer should draw the "building → walking network"
- * connector indicator for a building.
- *
- * The indicator is a green dashed line from the building's entrance down to
- * the network. It is only truthful when the building actually has navigation
- * data: either a nav node that references the building, or an entranceNodeId
- * linking the building to a nav node (set from the Properties panel). A bare
- * building with neither must never silently produce path-looking decoration.
+ * True when a world-space point falls inside a building's footprint,
+ * including its rotation (the point is inverse-rotated around the building
+ * center before the axis-aligned check). Used by the Navigation layer to
+ * reject outdoor waypoints placed on arbitrary building bodies — outdoor
+ * graph nodes belong to outdoor navigable space, so a click inside a
+ * building should prompt "connect through a building entrance" instead of
+ * silently creating a waypoint.
  */
-export function shouldDrawNavConnector(
-  buildingId: string,
-  navNodes: { buildingId?: string }[],
-  entranceNodeId?: string
+export function pointInBuilding(
+  building: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    rotation?: number;
+  },
+  point: { x: number; y: number }
 ): boolean {
-  return navNodes.some((n) => n.buildingId === buildingId) || !!entranceNodeId;
+  const rotation = building.rotation ?? 0;
+  const cx = building.x + building.width / 2;
+  const cy = building.y + building.height / 2;
+  const radians = (-rotation * Math.PI) / 180;
+  const cos = Math.cos(radians);
+  const sin = Math.sin(radians);
+  const dx = point.x - cx;
+  const dy = point.y - cy;
+  const unrotatedX = dx * cos - dy * sin;
+  const unrotatedY = dx * sin + dy * cos;
+  const halfW = building.width / 2;
+  const halfH = building.height / 2;
+  return unrotatedX >= -halfW && unrotatedX <= halfW && unrotatedY >= -halfH && unrotatedY <= halfH;
 }
 
 /**

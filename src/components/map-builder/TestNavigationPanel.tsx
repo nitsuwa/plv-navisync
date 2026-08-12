@@ -2,6 +2,7 @@ import { useState, useCallback, useMemo } from "react";
 import { Route, MapPin, Navigation, ArrowRight, AlertTriangle, CheckCircle2, Loader2 } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { findNavigationRoute } from "../../lib/pathfinding";
+import { outdoorNavNodes, outdoorNavEdges } from "../../lib/navigationGraph";
 import type { GraphPath } from "../../lib/pathfinding";
 import type { Campus, NavigationNode, CampusBuilding, CampusEventOverlay } from "./types";
 import { genId } from "./constants";
@@ -33,8 +34,10 @@ export function TestNavigationPanel({
   const [loading, setLoading] = useState(false);
 
   const buildings = campus.buildings;
-  const navNodes = campus.navNodes ?? [];
-  const navEdges = campus.navEdges ?? [];
+  // B5 Phase 2.9: outdoor-scope graph only — indoor floor nodes/edges never
+  // enter the outdoor route-testing panel.
+  const navNodes = outdoorNavNodes(campus.navNodes);
+  const navEdges = outdoorNavEdges(campus.navEdges, navNodes);
   const assemblyPoints = campus.assemblyPoints ?? [];
 
   // Resolve assembly point and event overlay

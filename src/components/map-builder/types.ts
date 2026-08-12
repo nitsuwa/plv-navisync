@@ -21,7 +21,7 @@ export type FeatureStatus = "present" | "missing" | "under_maintenance";
 
 // ── Floor Editor Mode ──────────────────────────────────────────────────────
 
-export type FloorEditorMode = "structure" | "interior";
+export type FloorEditorMode = "structure" | "interior" | "navigation";
 
 // ── Indoor Wall ─────────────────────────────────────────────────────────────
 
@@ -386,6 +386,15 @@ export interface FloorUndoEntry {
   ramps: FloorRamp[];
   elevators: FloorElevatorItem[];
   labels: FloorLabel[];
+  /** B5 Phase 2: floor-scoped nav graph snapshot for undo/redo integration. */
+  navNodes?: NavigationNode[];
+  navEdges?: NavigationEdge[];
+}
+
+/** B5 Phase 2: floor-scoped indoor nav graph state (reused by undo entries). */
+export interface FloorNavGraphState {
+  navNodes: NavigationNode[];
+  navEdges: NavigationEdge[];
 }
 
 // ── Marker & Path ───────────────────────────────────────────────────────────
@@ -409,7 +418,7 @@ export interface CampusPath {
 
 // ── Navigation Node (Waypoint) ──────────────────────────────────────────────
 
-export type NavigationNodeType = "outdoor" | "entrance" | "hallway" | "room_access" | "stair" | "elevator" | "transition";
+export type NavigationNodeType = "outdoor" | "entrance" | "hallway" | "room_access" | "stair" | "elevator" | "ramp" | "transition" | "emergency_exit" | "assembly" | "safe_area";
 
 export interface NavigationNode {
   id: string;
@@ -423,9 +432,19 @@ export interface NavigationNode {
   buildingId?: string;
   /** Floor ID if this node is inside a specific floor */
   floorId?: string;
+  /** Building-entrance ID when this node represents a building entrance target */
+  entranceId?: string;
   /** Shared stair/elevator transition ID — links nav nodes across floors for the same physical stair/elevator */
   transitionSharedId?: string;
+  /** Indoor linked physical objects (B5 Phase 2) — exactly one is set for a linked node. */
+  roomId?: string;
+  doorId?: string;
+  stairId?: string;
+  elevatorId?: string;
+  rampId?: string;
   accessible: boolean;
+  /** Reason this node is not accessible (only relevant when accessible=false) */
+  inaccessibleReason?: "stairs" | "narrow_path" | "restricted_access" | "uneven_surface" | "other";
   color: string;
 }
 
@@ -443,6 +462,16 @@ export interface NavigationEdge {
   emergencySafe?: boolean;
   /** Reason this edge is unsafe during an emergency */
   emergencyReason?: "hazard" | "blocked" | "restricted" | "construction" | "other";
+  /** Whether this connection is temporarily closed/disabled in route planning */
+  closed?: boolean;
+  /**
+   * B5 Phase 2.5: optional intermediate bend/control points (polyline geometry).
+   * Indoor paths use orthogonal bends so routes follow hallways instead of a
+   * diagonal A→B cut. GEOMETRY ONLY — the routing endpoints stay
+   * startNodeId/endNodeId; bends are never independent nodes. Persisted via the
+   * edge's metadata JSON (no DB migration).
+   */
+  bendPoints?: { x: number; y: number }[];
   type: string;
   color: string;
   width: number;

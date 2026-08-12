@@ -1,6 +1,6 @@
 import {
   MousePointer2, MapPin, Square, GitBranch, Trash2, Map,
-  Navigation, Accessibility, Flame, Star, Hand, DoorOpen,
+  Navigation, Star, Hand, DoorOpen,
   MoveVertical, SeparatorHorizontal, Binary, Text, Sofa,
   Container, Table, Monitor, Lamp, BookOpen,
   PanelRightOpen,
@@ -102,40 +102,31 @@ export interface LayerToolDescriptor {
 }
 
 export const LAYER_TOOLS: Record<string, LayerToolDescriptor[]> = {
+  // B5 Phase 1.7: Campus mode is focused on PHYSICAL campus authoring. The
+  // generic Add POI and Draw Walkway tools are hidden from the toolbar (their
+  // data model + persistence stay intact for legacy content and future mapped
+  // destinations / a proper Pathway authoring feature). Campus exposes only
+  // tools that genuinely work end-to-end today.
   campus: [
     { id: "select",   icon: MousePointer2, label: "Select",   hint: "Select and move objects on the canvas.", key: "V" },
     { id: "pan",      icon: Hand,          label: "Pan",      hint: "Hold Space + drag, or middle-click + drag, to move around the canvas freely", key: "Space" },
-    { id: "marker",   icon: MapPin,        label: "Marker",   hint: "Click to place a point of interest (cafeteria, entrance, info booth) on the campus map", key: "M" },
     { id: "building", icon: Square,        label: "Add Building", hint: "Click & drag on the canvas to draw a building footprint. Give it a name and floors in the Properties panel on the right.", key: "B" },
-    { id: "path",     icon: GitBranch,     label: "Walkway",  hint: "Click points to draw outdoor walkways between buildings. Double-click to finish, Esc to cancel.", key: "P" },
-    { id: "erase",    icon: Trash2,        label: "Erase",    hint: "Click any building, marker, or path to remove it from the campus", key: "E" },
+    { id: "erase",    icon: Trash2,        label: "Erase",    hint: "Click any building, marker, path, or asset to remove it from the campus", key: "E" },
   ],
   navigation: [
-    { id: "select",   icon: MousePointer2, label: "Select",   hint: "Click a navigation waypoint (green dot) or connection line to edit its properties", key: "V" },
+    { id: "select",   icon: MousePointer2, label: "Select",   hint: "Select waypoints and connections to edit routing properties. Campus objects stay visible as context.", key: "V" },
     { id: "pan",      icon: Hand,          label: "Pan",      hint: "Hold Space + drag to pan around the canvas", key: "Space" },
-    { id: "marker",   icon: MapPin,        label: "Add Waypoint", hint: "Click to place a navigation waypoint (a point in the walking network). Add several, then connect them with the Connect tool.", key: "W" },
-    { id: "path",     icon: GitBranch,     label: "Connect",  hint: "Click one waypoint, then click a second waypoint to create a walkable connection between them. Repeat to build the walking network.", key: "P" },
+    { id: "marker",   icon: MapPin,        label: "Add Waypoint", hint: "Place a routing point. Click a valid empty location — inside buildings use entrances instead.", key: "M" },
+    { id: "path",     icon: GitBranch,     label: "Connect Path", hint: "Connect waypoints to build the walking network. Click a waypoint or empty space to start, then the destination.", key: "P" },
     { id: "erase",    icon: Trash2,        label: "Remove",   hint: "Click a waypoint or connection to remove it from the navigation network. Deleting a waypoint removes all its connections.", key: "E" },
   ],
-  accessibility: [
-    { id: "select",   icon: MousePointer2, label: "Select",   hint: "Click a path, entrance, or elevator to mark it as accessible or inaccessible", key: "V" },
-    { id: "pan",      icon: Hand,          label: "Pan",      hint: "Hold Space + drag to pan around the canvas", key: "Space" },
-    { id: "marker",   icon: MapPin,        label: "Add Ramp", hint: "Click to place a wheelchair ramp marker. Students using accessible routing will prefer paths near ramps.", key: "R" },
-    { id: "room",     icon: Square,        label: "Add Elevator", hint: "Click to place an elevator marker. Elevators are accessible by default and connect upper floors.", key: "L" },
-    { id: "erase",    icon: Trash2,        label: "Remove",   hint: "Click a marker or accessibility feature to remove it", key: "X" },
-  ],
-  emergency: [
-    { id: "select",   icon: MousePointer2, label: "Select",   hint: "Click an exit, path, or assembly point to edit its emergency properties", key: "V" },
-    { id: "pan",      icon: Hand,          label: "Pan",      hint: "Hold Space + drag to pan around the canvas", key: "Space" },
-    { id: "marker",   icon: MapPin,        label: "Add Exit", hint: "Click to mark an emergency exit location. Students will be routed toward exits during evacuations.", key: "X" },
-    { id: "building", icon: Square,        label: "Assembly Area", hint: "Click & drag to draw an outdoor assembly/evacuation gathering point on the map", key: "A" },
-    { id: "erase",    icon: Trash2,        label: "Remove",   hint: "Click an emergency item to remove it", key: "E" },
-  ],
+  // Accessibility and Emergency are ROUTING PROPERTIES of the navigation graph
+  // (edge/node accessible + emergency-safe flags), not separate drawing modes.
   events: [
     { id: "select",   icon: MousePointer2, label: "Select",    hint: "Click an event marker to edit its name, date, and location", key: "V" },
     { id: "pan",      icon: Hand,          label: "Pan",       hint: "Hold Space + drag to pan around the canvas", key: "Space" },
-    { id: "marker",   icon: MapPin,        label: "Add Event", hint: "Click to place an event pin on the map, then assign it to a building or room in the Properties panel", key: "P" },
-    { id: "building", icon: Square,        label: "Restrict Area", hint: "Click & drag to draw an area that should be restricted during the event", key: "R" },
+    { id: "marker",   icon: MapPin,        label: "Add Event", hint: "Click to place an event pin on the map, then assign it to a building or room in the Properties panel", key: "M" },
+    { id: "building", icon: Square,        label: "Restrict Area", hint: "Click & drag to draw an area that should be restricted during the event", key: "B" },
     { id: "erase",    icon: Trash2,        label: "Remove",    hint: "Click an event marker or restricted area to remove it", key: "E" },
   ],
 };
@@ -261,10 +252,8 @@ export interface LayerDescriptor {
 
 export const LAYERS: LayerDescriptor[] = [
   { id: "campus",        icon: Map,          label: "1. Campus",       color: "var(--primary)",     accent: "color-mix(in srgb,var(--primary) 12%,transparent)",      hint: "Start here: add buildings, give them floors, and draw outdoor walkways" },
-  { id: "navigation",    icon: Navigation,   label: "2. Navigation",   color: "#16a34a",             accent: "color-mix(in srgb,#16a34a 12%,transparent)",              hint: "Add waypoints (nav nodes) and connect them into a walking network" },
-  { id: "accessibility", icon: Accessibility,label: "3. Accessibility",color: "#2563eb",             accent: "color-mix(in srgb,#2563eb 12%,transparent)",              hint: "Mark which paths, entrances, and elevators are wheelchair-accessible" },
-  { id: "emergency",     icon: Flame,        label: "4. Emergency",    color: "#dc2626",             accent: "color-mix(in srgb,#dc2626 12%,transparent)",              hint: "Place emergency exits and outdoor assembly points for evacuations" },
-  { id: "events",        icon: Star,         label: "5. Events",       color: "#d97706",             accent: "color-mix(in srgb,#d97706 12%,transparent)",              hint: "Add event pins and link them to existing campus locations" },
+  { id: "navigation",    icon: Navigation,   label: "2. Navigation",   color: "#16a34a",             accent: "color-mix(in srgb,#16a34a 12%,transparent)",              hint: "Add waypoints and connect them into a walking network. Accessibility and emergency flags are properties of each waypoint/connection." },
+  { id: "events",        icon: Star,         label: "3. Events",       color: "#d97706",             accent: "color-mix(in srgb,#d97706 12%,transparent)",              hint: "Add event pins and link them to existing campus locations" },
 ];
 
 // ── Building color palette ──────────────────────────────────────────────────

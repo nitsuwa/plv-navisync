@@ -610,13 +610,18 @@ export function FloorPropertiesPanel({
                   <input value={selStairs.label} onChange={(e) => onUpdateStairs(selStairs.id, { label: e.target.value })}
                     className={inputCls} placeholder="e.g. Staircase A" />
                 </Field>
+                {/* B5 Phase 2.3: compact custom Direction control (Up / Down /
+                    Both) — no native select, matches NaviSync control language. */}
                 <Field label="Direction">
-                  <select value={selStairs.direction} onChange={(e) => onUpdateStairs(selStairs.id, { direction: e.target.value as any })}
-                    className="w-full h-9 px-3 rounded-xl border border-border bg-input-background text-foreground text-xs focus:outline-none focus:ring-2 focus:ring-primary/30">
-                    <option value="up">Up</option>
-                    <option value="down">Down</option>
-                    <option value="both">Both</option>
-                  </select>
+                  <SegmentControl
+                    value={selStairs.direction}
+                    options={[
+                      { value: "up" as const, label: "Up" },
+                      { value: "down" as const, label: "Down" },
+                      { value: "both" as const, label: "Both" },
+                    ]}
+                    onChange={(direction) => onUpdateStairs(selStairs.id, { direction })}
+                  />
                 </Field>
                 {/* ── Shared ID (for linking the same stairwell across floors) ── */}
                 <Field label="Shared ID">
@@ -681,13 +686,17 @@ export function FloorPropertiesPanel({
                   <input value={selRamp.label} onChange={(e) => onUpdateRamp(selRamp.id, { label: e.target.value })}
                     className={inputCls} placeholder="e.g. Wheelchair Ramp" />
                 </Field>
+                {/* B5 Phase 2.3: compact custom Direction control for the ramp. */}
                 <Field label="Direction">
-                  <select value={selRamp.direction ?? "both"} onChange={(e) => onUpdateRamp(selRamp.id, { direction: e.target.value as any })}
-                    className="w-full h-9 px-3 rounded-xl border border-border bg-input-background text-foreground text-xs focus:outline-none focus:ring-2 focus:ring-primary/30">
-                    <option value="up">Up</option>
-                    <option value="down">Down</option>
-                    <option value="both">Both</option>
-                  </select>
+                  <SegmentControl
+                    value={selRamp.direction ?? "both"}
+                    options={[
+                      { value: "up" as const, label: "Up" },
+                      { value: "down" as const, label: "Down" },
+                      { value: "both" as const, label: "Both" },
+                    ]}
+                    onChange={(direction) => onUpdateRamp(selRamp.id, { direction })}
+                  />
                 </Field>
                 <Field label="Slope">
                   <select value={selRamp.slope ?? "gentle"} onChange={(e) => onUpdateRamp(selRamp.id, { slope: e.target.value as any })}

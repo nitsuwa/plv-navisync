@@ -1,6 +1,7 @@
 import { genId } from "../components/map-builder/constants";
-import { createDefaultFloor, duplicateFloorForBuilding } from "./floorPlanNormalization";
-import type { FloorPlan } from "../components/map-builder/types";
+import { createDefaultFloor, duplicateFloorForBuilding, type FloorDuplicateIdMaps } from "./floorPlanNormalization";
+import { remapIndoorNavForFloorCopy } from "./indoorNavigationGraph";
+import type { FloorPlan, NavigationEdge, NavigationNode } from "../components/map-builder/types";
 
 /**
  * Shared, pure floor-management helpers used by BOTH the Floor Editor and the
@@ -44,21 +45,49 @@ export function renameFloorInBuilding(floors: FloorPlan[], floorId: string, labe
   return changed ? next : floors;
 }
 
+export interface DuplicateFloorResult {
+  floors: FloorPlan[];
+  copy: FloorPlan | null;
+  /** Remapped campus-level indoor nav graph for the copied floor (B5 Phase 2). */
+  navNodes?: NavigationNode[];
+  navEdges?: NavigationEdge[];
+}
+
 /**
  * Deep-duplicate a floor with brand-new IDs for every element, remapping
  * room→wall anchors, door/window wallId references, and perimeter identity.
+ * When `navNodes`/`navEdges` (campus-level) are provided, the source floor's
+ * indoor nav graph is cloned with new node/edge IDs, floorId pointing at the
+ * copy, and linked room/door/stair/elevator/ramp refs remapped to the copy's
+ * objects — the duplicate graph is fully independent of the original.
  */
-export function duplicateFloorInBuilding(floors: FloorPlan[], buildingId: string, floorId: string): { floors: FloorPlan[]; copy: FloorPlan | null } {
+export function duplicateFloorInBuilding(
+  floors: FloorPlan[],
+  buildingId: string,
+  floorId: string,
+  navNodes?: NavigationNode[],
+  navEdges?: NavigationEdge[]
+): DuplicateFloorResult {
   const source = floors.find((f) => f.id === floorId);
   if (!source) return { floors: [...floors], copy: null };
   const nextNumber = Math.max(0, ...floors.map((f) => f.number ?? 0)) + 1;
+  const idMaps: FloorDuplicateIdMaps = {
+    rooms: new Map(), walls: new Map(), doors: new Map(), windows: new Map(),
+    stairs: new Map(), ramps: new Map(), elevators: new Map(),
+  };
   const copy = duplicateFloorForBuilding(source, {
     id: genId("fl"),
     buildingId,
     number: nextNumber,
     label: `${source.label} Copy`,
-  });
-  return { floors: [...floors, copy], copy };
+  }, idMaps);
+  const result: DuplicateFloorResult = { floors: [...floors, copy], copy };
+  if (navNodes && navEdges) {
+    const remapped = remapIndoorNavForFloorCopy(navNodes, navEdges, source.id, copy.id, idMaps);
+    result.navNodes = remapped.navNodes;
+    result.navEdges = remapped.navEdges;
+  }
+  return result;
 }
 
 /**

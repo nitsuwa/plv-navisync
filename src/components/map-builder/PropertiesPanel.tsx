@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef, lazy, Suspense } from "react";
 import {
   X, Eye, EyeOff, Lock, Unlock, Info, Palette, Settings2,
-  Route, Accessibility, Star, CheckCircle2, AlertTriangle,
+  Route, Accessibility, Star, CheckCircle2, XCircle, AlertTriangle,
   PaintBucket, Trash2, MapPin, Calendar, Plus, Minus, GripVertical,
   Layers, Copy,
   ChevronUp, ChevronDown, ChevronsUp, ChevronsDown,
@@ -102,11 +102,195 @@ interface PropertiesPanelProps {
   onDeleteNavNode?: (id: string) => void;
   onUpdateNavEdge?: (id: string, changes: Partial<NavigationEdge>) => void;
   onDeleteNavEdge?: (id: string) => void;
+  /** B5 Phase 1.6: bulk edge routing-flag update for graph multi-selection. */
+  onBatchUpdateNavEdges?: (ids: string[], changes: Partial<NavigationEdge>) => void;
+  /** B5 Phase 1.6: delete a set of nodes+edges as one history action. */
+  onDeleteNavSelection?: (nodeIds: string[], edgeIds: string[]) => void;
   onClose: () => void;
 }
 
 const inputCls = "w-full h-10 px-3 rounded-xl border border-border bg-input-background text-foreground text-xs focus:outline-none focus:ring-2 focus:ring-primary/30 transition-all duration-200";
 const labelCls = "block text-[10px] font-bold uppercase tracking-wide mb-1 text-muted-foreground";
+
+// ── B5 Phase 1.6: human-readable waypoint types (custom selector options) ──
+const WAYPOINT_TYPE_LABELS: Record<string, string> = {
+  outdoor: "Outdoor Waypoint",
+  entrance: "Building Entrance",
+  hallway: "Hallway",
+  room_access: "Destination",
+  stair: "Staircase",
+  elevator: "Elevator",
+  transition: "Floor Transition",
+  emergency_exit: "Emergency Exit",
+  assembly: "Assembly Area",
+  safe_area: "Safe Area",
+};
+// B5 Phase 1.7: the OUTDOOR authoring menu only exposes types that are
+// meaningful for outdoor route planning. Indoor-only enum members (hallway /
+// stair / elevator / transition) belong to the future Floor Editor graph and
+// are not shown here — a type is never exposed just because the enum has it.
+const WAYPOINT_TYPE_ORDER = [
+  "outdoor", "entrance", "room_access", "emergency_exit", "assembly", "safe_area",
+];
+
+/** Compact custom dropdown used for the Waypoint Type selector (no native select). */
+function WaypointTypeMenu({ value, onChange }: { value: string; onChange: (t: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDocDown = (ev: MouseEvent) => {
+      if (ref.current && !ref.current.contains(ev.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDocDown);
+    return () => document.removeEventListener("mousedown", onDocDown);
+  }, [open]);
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        className="w-full h-10 px-3 rounded-xl border border-border bg-input-background text-foreground text-xs font-semibold flex items-center justify-between gap-2 hover:border-primary/40 transition-colors"
+      >
+        <span className="truncate">{WAYPOINT_TYPE_LABELS[value] ?? value}</span>
+        <ChevronDown className={`h-3.5 w-3.5 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+      {open && (
+        <div className="absolute right-0 left-0 z-50 mt-1 rounded-xl border border-border bg-card shadow-xl overflow-hidden" role="listbox">
+          {WAYPOINT_TYPE_ORDER.map((t) => (
+            <button
+              key={t}
+              type="button"
+              role="option"
+              aria-selected={value === t}
+              onClick={() => { onChange(t); setOpen(false); }}
+              className={cn(
+                "w-full flex items-center justify-between px-3 py-2 text-[11px] font-medium text-left hover:bg-muted transition-colors",
+                value === t ? "text-primary bg-primary/5" : "text-foreground"
+              )}
+            >
+              {WAYPOINT_TYPE_LABELS[t] ?? t}
+              {value === t && <CheckCircle2 className="h-3 w-3 text-primary" />}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * B5 Phase 1.8: comfortable custom Yes/No (or Open/Closed) segmented control
+ * for navigation Boolean properties — larger hit targets, readable labels,
+ * balanced width, consistent height with other NaviSync controls, and
+ * keyboard/focus accessible (radiogroup + aria-pressed). Never a native select.
+ */
+function BoolSegmented({ value, onYes, onNo, label, yesLabel = "Yes", noLabel = "No" }: {
+  value: boolean;
+  onYes: () => void;
+  onNo: () => void;
+  label: string;
+  yesLabel?: string;
+  noLabel?: string;
+}) {
+  return (
+    <div role="radiogroup" aria-label={label} className="grid grid-cols-2 gap-1.5 p-1.5 rounded-xl border border-border bg-muted/30 w-[128px] shrink-0">
+      <button
+        type="button"
+        onClick={onYes}
+        aria-pressed={value}
+        className={cn(
+          "h-9 rounded-lg text-[11px] font-bold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
+          value ? "bg-card text-primary shadow-sm border border-primary/25" : "text-muted-foreground hover:text-foreground hover:bg-muted/40"
+        )}
+      >{yesLabel}</button>
+      <button
+        type="button"
+        onClick={onNo}
+        aria-pressed={!value}
+        className={cn(
+          "h-9 rounded-lg text-[11px] font-bold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
+          !value ? "bg-card text-primary shadow-sm border border-primary/25" : "text-muted-foreground hover:text-foreground hover:bg-muted/40"
+        )}
+      >{noLabel}</button>
+    </div>
+  );
+}
+
+/** B5 Phase 1.7: shared reason options for Accessible = No (explanatory
+ * metadata, not a separate routing graph). */
+const INACCESSIBLE_REASONS: { value: string; label: string }[] = [
+  { value: "stairs", label: "Stairs" },
+  { value: "narrow_path", label: "Narrow Path" },
+  { value: "restricted_access", label: "Restricted Access" },
+  { value: "uneven_surface", label: "Uneven Surface" },
+  { value: "other", label: "Other" },
+];
+
+/** B5 Phase 1.7: shared reason options for Emergency Safe = No. */
+const EMERGENCY_REASONS: { value: string; label: string }[] = [
+  { value: "hazard", label: "Hazard Area" },
+  { value: "blocked", label: "Restricted During Emergency" },
+  { value: "construction", label: "Not an Evacuation Route" },
+  { value: "other", label: "Other" },
+];
+
+/** Compact custom dropdown for reason selectors (no native select). */
+function ReasonMenu({ value, options, onChange, placeholder }: {
+  value: string;
+  options: { value: string; label: string }[];
+  onChange: (v: string) => void;
+  placeholder?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDocDown = (ev: MouseEvent) => {
+      if (ref.current && !ref.current.contains(ev.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDocDown);
+    return () => document.removeEventListener("mousedown", onDocDown);
+  }, [open]);
+  const current = options.find((o) => o.value === value);
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        className="w-full h-8 px-3 rounded-lg border border-border bg-input-background text-foreground text-[11px] font-semibold flex items-center justify-between gap-2 hover:border-primary/40 transition-colors"
+      >
+        <span className="truncate text-muted-foreground">{placeholder}</span>
+        <span className="truncate">{current?.label ?? "Other"}</span>
+        <ChevronDown className={`h-3 w-3 text-muted-foreground shrink-0 transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+      {open && (
+        <div className="absolute right-0 left-0 z-50 mt-1 rounded-xl border border-border bg-card shadow-xl overflow-hidden" role="listbox">
+          {options.map((o) => (
+            <button
+              key={o.value}
+              type="button"
+              role="option"
+              aria-selected={value === o.value}
+              onClick={() => { onChange(o.value); setOpen(false); }}
+              className={cn(
+                "w-full flex items-center justify-between px-3 py-2 text-[11px] font-medium text-left hover:bg-muted transition-colors",
+                value === o.value ? "text-primary bg-primary/5" : "text-foreground"
+              )}
+            >
+              {o.label}
+              {value === o.value && <CheckCircle2 className="h-3 w-3 text-primary" />}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function TabBar({ active, onChange }: { active: TabId; onChange: (t: TabId) => void }) {
   return (
@@ -151,6 +335,7 @@ export function PropertiesPanel({
   onDeleteEventOverlay,
   onUpdateDecorAsset, onDeleteDecorAsset, onDuplicateDecorAsset,
   onUpdateNavNode, onDeleteNavNode, onUpdateNavEdge, onDeleteNavEdge,
+  onBatchUpdateNavEdges, onDeleteNavSelection,
   onClose,
 }: PropertiesPanelProps) {
   const [tab, setTab] = useState<TabId>("basic");
@@ -173,6 +358,16 @@ export function PropertiesPanel({
   const allVisible = multiSelectedBuildings.length > 0 && multiSelectedBuildings.every((b) => b.visible !== false);
   const allLocked = multiSelectedBuildings.length > 0 && multiSelectedBuildings.every((b) => b.locked === true);
 
+  // ── B5 Phase 1.6: navigation multi-selection ──
+  // A marquee/shift-selection over graph elements selects nav nodes + edges.
+  // This is distinct from outdoor multi-mode (buildings/decor): show a compact
+  // graph summary + routing bulk flags + delete instead of layer/align tools.
+  const multiNavNodeIds = multiSelected.filter((id) => allNavNodes?.some((n) => n.id === id) ?? false);
+  const multiNavEdgeIds = multiSelected.filter((id) => allNavEdges?.some((e) => e.id === id) ?? false);
+  const isNavMultiMode = layer === "navigation" && multiSelected.length > 0 && selectedOutdoorCount === 0
+    && (multiNavNodeIds.length > 0 || multiNavEdgeIds.length > 0)
+    && multiNavNodeIds.length + multiNavEdgeIds.length === multiSelected.length;
+
   return (
     <div
       className="absolute top-0 right-0 bottom-0 z-30 flex flex-col border-l border-border shadow-2xl overflow-hidden"
@@ -186,9 +381,11 @@ export function PropertiesPanel({
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
         <span className="text-xs font-extrabold uppercase tracking-wide text-foreground" style={{ fontFamily: "var(--font-sans)" }}>
-          {isMultiMode
-            ? `Multi-Select (${selectedOutdoorCount})`
-            : selBldg ? "Building" : selEntrance ? "Entrance" : selMkr ? "Marker" : selDecorAsset ? "Decorative Asset" : selRoute ? "Route" : selected?.type === "navNode" ? "Waypoint" : selected?.type === "navEdge" ? "Navigation Edge" : "Properties"}
+          {isNavMultiMode
+            ? `Graph Multi-Select (${multiNavNodeIds.length + multiNavEdgeIds.length})`
+            : isMultiMode
+              ? `Multi-Select (${selectedOutdoorCount})`
+              : selBldg ? "Building" : selEntrance ? "Entrance" : selMkr ? "Marker" : selDecorAsset ? "Decorative Asset" : selRoute ? "Route" : selected?.type === "navNode" ? "Waypoint" : selected?.type === "navEdge" ? "Navigation Edge" : "Properties"}
         </span>
         <button
           onClick={() => { onClearMultiSelect(); onClose(); }}
@@ -203,6 +400,67 @@ export function PropertiesPanel({
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto scrollbar-show-on-hover scroll-smooth p-4 space-y-4">
+        {/* ── NAVIGATION MULTI-SELECT (B5 Phase 1.6) ── */}
+        {isNavMultiMode && (
+          <div data-testid="nav-multi-props">
+            <div className="flex items-center gap-1.5 mb-2">
+              <Route className="h-3 w-3 text-green-500" />
+              <span className="text-[9px] font-extrabold uppercase tracking-widest text-muted-foreground">Graph Selection</span>
+            </div>
+            <div className="px-2.5 py-2 rounded-xl border border-border text-[10px] bg-muted/30 text-muted-foreground space-y-1">
+              <div className="flex justify-between">
+                <span>Waypoints</span>
+                <span className="font-bold">{multiNavNodeIds.length}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Connections</span>
+                <span className="font-bold">{multiNavEdgeIds.length}</span>
+              </div>
+              <p className="text-[9px] pt-1 border-t border-border">Drag a waypoint to move the selected nodes together. Connections follow their waypoints.</p>
+            </div>
+            {multiNavEdgeIds.length > 0 && (
+              <div className="pt-3 mt-3 border-t border-border space-y-2">
+                <div className="flex items-center gap-1.5">
+                  <Accessibility className="h-3 w-3 text-muted-foreground" />
+                  <span className="text-[9px] font-extrabold uppercase tracking-widest text-muted-foreground">Bulk Routing</span>
+                </div>
+                <button
+                  onClick={() => onBatchUpdateNavEdges?.(multiNavEdgeIds, { accessible: true })}
+                  className="w-full h-8 rounded-xl border border-green-200 dark:border-green-700/30 bg-green-50 dark:bg-green-900/10 text-[10px] font-bold text-green-600 hover:bg-green-100 dark:hover:bg-green-900/20 transition-colors"
+                >
+                  Mark accessible
+                </button>
+                <button
+                  onClick={() => onBatchUpdateNavEdges?.(multiNavEdgeIds, { emergencySafe: true })}
+                  className="w-full h-8 rounded-xl border border-green-200 dark:border-green-700/30 bg-green-50 dark:bg-green-900/10 text-[10px] font-bold text-green-600 hover:bg-green-100 dark:hover:bg-green-900/20 transition-colors"
+                >
+                  Mark emergency safe
+                </button>
+                <button
+                  onClick={() => onBatchUpdateNavEdges?.(multiNavEdgeIds, { accessible: false, inaccessibleReason: "other" })}
+                  className="w-full h-8 rounded-xl border border-amber-200 dark:border-amber-700/30 bg-amber-50 dark:bg-amber-900/10 text-[10px] font-bold text-amber-600 hover:bg-amber-100 dark:hover:bg-amber-900/20 transition-colors"
+                >
+                  Mark not accessible
+                </button>
+                <button
+                  onClick={() => onBatchUpdateNavEdges?.(multiNavEdgeIds, { closed: true })}
+                  className="w-full h-8 rounded-xl border border-red-200 dark:border-red-700/30 bg-red-50 dark:bg-red-900/10 text-[10px] font-bold text-red-600 hover:bg-red-100 dark:hover:bg-red-900/20 transition-colors"
+                >
+                  Mark closed
+                </button>
+              </div>
+            )}
+            <div className="pt-3 mt-3 border-t border-border">
+              <button
+                onClick={() => onDeleteNavSelection?.(multiNavNodeIds, multiNavEdgeIds)}
+                className="w-full h-10 rounded-xl border border-destructive/30 text-xs font-bold text-destructive hover:bg-destructive/10 transition-colors"
+              >
+                <span className="flex items-center justify-center gap-1.5"><AlertTriangle className="h-3 w-3" /> Delete Selected</span>
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* ── LAYER ORDER (B2): bring forward/backward, bring to front/back ── */}
         {/* Only show for selections that actually contain reorderable objects
             (buildings or decor assets) — a marker-only multi-selection must
@@ -999,237 +1257,281 @@ export function PropertiesPanel({
 
         {/* ── NAV NODE PROPERTIES (Navigation layer) ── */}
         {selNavNode && !isMultiMode && (
-          <>
-            <div className="flex items-center gap-1.5 mb-2">
+          <div data-testid="nav-node-props">
+            <div className="flex items-center gap-1.5 mb-3">
               <Route className="h-3 w-3 text-green-500" />
               <span className="text-[9px] font-extrabold uppercase tracking-widest text-muted-foreground">Waypoint</span>
             </div>
-            <div>
-              <label htmlFor="nav-name" className={labelCls}>Name</label>
-              <input id="nav-name" value={selNavNode.name} onChange={(e) => onUpdateNavNode?.(selNavNode.id, { name: e.target.value })}
-                className={inputCls} placeholder="Waypoint name" />
+
+            {/* GENERAL */}
+            <div className="space-y-3">
+              <div className="flex items-center gap-1.5">
+                <Info className="h-3 w-3 text-muted-foreground" />
+                <span className="text-[9px] font-extrabold uppercase tracking-widest text-muted-foreground">General</span>
+              </div>
+              <div>
+                <label htmlFor="nav-name" className={labelCls}>Name</label>
+                <input id="nav-name" value={selNavNode.name} onChange={(e) => onUpdateNavNode?.(selNavNode.id, { name: e.target.value })}
+                  className={inputCls} placeholder="Waypoint name" />
+              </div>
+              <div>
+                <label className={labelCls}>Type</label>
+                {/* B5 Phase 1.7: an entrance-linked waypoint is permanently a
+                    Building Entrance — the type is locked so a generic Type
+                    change can never silently break the B3 entrance relationship. */}
+                {selNavNode.entranceId ? (
+                  <div className="w-full h-10 px-3 rounded-xl border border-border bg-muted/40 text-foreground text-xs font-semibold flex items-center gap-2">
+                    <DoorOpen className="h-3.5 w-3.5 text-blue-500" />
+                    <span className="truncate">Building Entrance</span>
+                    <span className="ml-auto text-[9px] text-muted-foreground font-medium">Linked</span>
+                  </div>
+                ) : (
+                  <WaypointTypeMenu value={selNavNode.type} onChange={(t) => onUpdateNavNode?.(selNavNode.id, { type: t as NavigationNode["type"] })} />
+                )}
+              </div>
             </div>
-            <div>
-              <label className={labelCls}>Type</label>
-              <select value={selNavNode.type} onChange={(e) => onUpdateNavNode?.(selNavNode.id, { type: e.target.value as any })}
-                className="w-full h-8 px-2 rounded-lg border border-border bg-input-background text-foreground text-xs focus:outline-none focus:ring-2 focus:ring-primary/20 custom-select">
-                <option value="outdoor">Outdoor Path</option>
-                <option value="entrance">Building Entrance</option>
-                <option value="hallway">Hallway</option>
-                <option value="room_access">Room Access</option>
-                <option value="stair">Staircase</option>
-                <option value="elevator">Elevator</option>
-                <option value="transition">Floor Transition</option>
-              </select>
+
+            {/* ROUTING */}
+            <div className="pt-3 mt-3 border-t border-border space-y-3">
+              <div className="flex items-center gap-1.5">
+                <Accessibility className="h-3 w-3 text-muted-foreground" />
+                <span className="text-[9px] font-extrabold uppercase tracking-widest text-muted-foreground">Routing</span>
+              </div>
+              {/* B5 Phase 1.8: comfortable custom Yes/No segmented control + custom
+                  reason selector. Accessible = may be used for an Accessible route. */}
+              <div>
+                <div className="flex items-center justify-between gap-2 mb-1.5">
+                  <span className="text-[10px] font-semibold text-foreground flex items-center gap-1.5"><CheckCircle2 className="h-3.5 w-3.5 text-green-600 shrink-0" /> Accessible</span>
+                  <BoolSegmented
+                    value={selNavNode.accessible}
+                    onYes={() => onUpdateNavNode?.(selNavNode.id, { accessible: true, inaccessibleReason: undefined })}
+                    onNo={() => onUpdateNavNode?.(selNavNode.id, { accessible: false, inaccessibleReason: selNavNode.inaccessibleReason ?? "other" })}
+                    label="Accessible"
+                  />
+                </div>
+                {selNavNode.accessible === false && (
+                  <ReasonMenu
+                    value={selNavNode.inaccessibleReason ?? "other"}
+                    options={INACCESSIBLE_REASONS}
+                    onChange={(r) => onUpdateNavNode?.(selNavNode.id, { inaccessibleReason: r as NavigationNode["inaccessibleReason"] })}
+                    placeholder="Why is this not accessible?"
+                  />
+                )}
+              </div>
+              {selNavNode.type === "entrance" && selNavNode.buildingId && (
+                <div className="px-2.5 py-2 rounded-xl border border-border text-[10px] bg-muted/30 text-muted-foreground">
+                  Linked to building entrance — outdoor routes enter the building through here.
+                </div>
+              )}
             </div>
-            <div>
-              <label className={labelCls}>Position</label>
+
+            {/* CONNECTIONS */}
+            <div className="pt-3 mt-3 border-t border-border">
+              <div className="flex items-center gap-1.5 mb-2">
+                <Route className="h-3 w-3 text-muted-foreground" />
+                <span className="text-[9px] font-extrabold uppercase tracking-widest text-muted-foreground">Connections</span>
+              </div>
+              <div className="px-2.5 py-2 rounded-xl border border-border text-[10px] bg-muted/30 text-muted-foreground">
+                <div className="flex justify-between">
+                  <span>Connected paths</span>
+                  <span className="font-bold">
+                    {allNavEdges?.filter(e => e.startNodeId === selNavNode.id || e.endNodeId === selNavNode.id).length ?? 0}
+                  </span>
+                </div>
+                {selNavNode.buildingId && (
+                  <div className="flex justify-between mt-1">
+                    <span>Building</span>
+                    <span className="font-bold text-[9px]">{allBuildings.find((b) => b.id === selNavNode.buildingId)?.name ?? selNavNode.buildingId}</span>
+                  </div>
+                )}
+                {selNavNode.floorId && (
+                  <div className="flex justify-between mt-1">
+                    <span>Floor</span>
+                    <span className="font-bold text-[9px]">{selNavNode.floorId}</span>
+                  </div>
+                )}
+              </div>
+              {/* Isolated warning — only when genuinely isolated */}
+              {allNavEdges && allNavEdges.filter(e => e.startNodeId === selNavNode.id || e.endNodeId === selNavNode.id).length === 0 && (
+                <div className="mt-2 px-2.5 py-2 rounded-xl border border-amber-200 dark:border-amber-700/30 bg-amber-50 dark:bg-amber-900/10 text-[10px]">
+                  <div className="flex items-center gap-1.5 mb-1">
+                    <AlertTriangle className="h-3 w-3 text-amber-500" />
+                    <span className="font-bold text-amber-600 dark:text-amber-400">Isolated</span>
+                  </div>
+                  <p className="text-muted-foreground">This waypoint has no connections. Use Connect Path to link it into the walking network.</p>
+                </div>
+              )}
+            </div>
+
+            {/* POSITION — compact secondary fields, never the focus. Entrance-
+                linked nodes are derived geometry: position is read-only because
+                it always follows the linked building entrance. */}
+            <div className="pt-3 mt-3 border-t border-border">
+              <div className="flex items-center gap-1.5 mb-2">
+                <Settings2 className="h-3 w-3 text-muted-foreground" />
+                <span className="text-[9px] font-extrabold uppercase tracking-widest text-muted-foreground">Position</span>
+              </div>
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <label className={labelCls}>X</label>
-                  <input type="number" value={selNavNode.x} onChange={(e) => onUpdateNavNode?.(selNavNode.id, { x: parseInt(e.target.value) || 0 })}
-                    className={`${inputCls} font-mono`} />
+                  <input type="number" value={selNavNode.x} disabled={!!selNavNode.entranceId}
+                    onChange={(e) => onUpdateNavNode?.(selNavNode.id, { x: parseInt(e.target.value) || 0 })}
+                    className={`${inputCls} font-mono ${selNavNode.entranceId ? "opacity-60 cursor-not-allowed" : ""}`} />
                 </div>
                 <div>
                   <label className={labelCls}>Y</label>
-                  <input type="number" value={selNavNode.y} onChange={(e) => onUpdateNavNode?.(selNavNode.id, { y: parseInt(e.target.value) || 0 })}
-                    className={`${inputCls} font-mono`} />
+                  <input type="number" value={selNavNode.y} disabled={!!selNavNode.entranceId}
+                    onChange={(e) => onUpdateNavNode?.(selNavNode.id, { y: parseInt(e.target.value) || 0 })}
+                    className={`${inputCls} font-mono ${selNavNode.entranceId ? "opacity-60 cursor-not-allowed" : ""}`} />
                 </div>
               </div>
-            </div>
-            <div className="px-2.5 py-2 rounded-xl border border-border text-[10px] bg-muted/30 text-muted-foreground space-y-1">
-              <div className="flex justify-between">
-                <span>Connections</span>
-                <span className="font-bold">
-                  {allNavEdges?.filter(e => e.startNodeId === selNavNode.id || e.endNodeId === selNavNode.id).length ?? 0}
-                </span>
-              </div>
-              {selNavNode.buildingId && (
-                <div className="flex justify-between">
-                  <span>Building</span>
-                  <span className="font-bold text-[9px]">{selNavNode.buildingId}</span>
-                </div>
-              )}
-              {selNavNode.floorId && (
-                <div className="flex justify-between">
-                  <span>Floor</span>
-                  <span className="font-bold text-[9px]">{selNavNode.floorId}</span>
-                </div>
+              {selNavNode.entranceId && (
+                <p className="px-1 pt-1.5 text-[9px] text-muted-foreground">Derived from the linked building entrance — move the building or entrance instead.</p>
               )}
             </div>
-            <div>
-              <label className={labelCls}>Accessible</label>
-              <button
-                onClick={() => onUpdateNavNode?.(selNavNode.id, { accessible: !selNavNode.accessible })}
-                className={cn(
-                  "w-full flex items-center justify-center gap-1.5 h-8 rounded-xl border text-[10px] font-bold transition-all",
-                  selNavNode.accessible
-                    ? "border-green-200 dark:border-green-700/30 bg-green-50 dark:bg-green-900/10 text-green-600"
-                    : "border-border text-muted-foreground"
-                )}
-              >
-                <CheckCircle2 className="h-3.5 w-3.5" />
-                {selNavNode.accessible ? "Accessible" : "Not Accessible"}
-              </button>
-            </div>
-            {/* Isolated warning */}
-            {allNavEdges && allNavEdges.filter(e => e.startNodeId === selNavNode.id || e.endNodeId === selNavNode.id).length === 0 && (
-              <div className="px-2.5 py-2 rounded-xl border border-amber-200 dark:border-amber-700/30 bg-amber-50 dark:bg-amber-900/10 text-[10px]">
-                <div className="flex items-center gap-1.5 mb-1">
-                  <AlertTriangle className="h-3 w-3 text-amber-500" />
-                  <span className="font-bold text-amber-600 dark:text-amber-400">Isolated Node</span>
-                </div>
-                <p className="text-muted-foreground">This waypoint has no connections. Use the Path tool to connect it to other waypoints.</p>
-              </div>
-            )}
-            <div className="pt-3 border-t border-border">
+
+            {/* ACTIONS */}
+            <div className="pt-3 mt-3 border-t border-border">
               <button onClick={() => onDeleteNavNode?.(selNavNode.id)}
                 className="w-full h-10 rounded-xl border border-destructive/30 text-xs font-bold text-destructive hover:bg-destructive/10 transition-colors">
                 <span className="flex items-center justify-center gap-1.5"><AlertTriangle className="h-3 w-3" /> Delete Waypoint</span>
               </button>
             </div>
-          </>
+          </div>
         )}
 
         {/* ── NAV EDGE PROPERTIES (Navigation layer) ── */}
         {selNavEdge && !isMultiMode && (
           <>
-            <div className="flex items-center gap-1.5 mb-2">
+            <div className="flex items-center gap-1.5 mb-3">
               <Route className="h-3 w-3 text-green-500" />
-              <span className="text-[9px] font-extrabold uppercase tracking-widest text-muted-foreground">Navigation Edge</span>
+              <span className="text-[9px] font-extrabold uppercase tracking-widest text-muted-foreground">Navigation Path</span>
             </div>
-            <div className="px-2.5 py-2 rounded-xl border border-border text-[10px] bg-muted/30 text-muted-foreground space-y-1">
-              <div className="flex justify-between">
-                <span>From</span>
-                <span className="font-bold text-[9px]">{allNavNodes?.find(n => n.id === selNavEdge.startNodeId)?.name ?? selNavEdge.startNodeId}</span>
-              </div>
-              <div className="flex justify-between">
-                <span>To</span>
-                <span className="font-bold text-[9px]">{allNavNodes?.find(n => n.id === selNavEdge.endNodeId)?.name ?? selNavEdge.endNodeId}</span>
-              </div>
-              <div className="flex justify-between border-t border-border pt-1 mt-1">
-                <span>Distance (auto)</span>
-                <span className="font-bold">{selNavEdge.distance}m</span>
-              </div>
-            </div>
+
+            {/* CONNECTION */}
             <div>
-              <label className={labelCls}>Direction</label>
-              <button
-                onClick={() => onUpdateNavEdge?.(selNavEdge.id, { bidirectional: !selNavEdge.bidirectional })}
-                className={cn(
-                  "w-full flex items-center justify-center gap-1.5 h-8 rounded-xl border text-[10px] font-bold transition-all",
-                  selNavEdge.bidirectional
-                    ? "border-primary/30 bg-primary/8 text-primary"
-                    : "border-border text-muted-foreground"
-                )}
-              >
-                {selNavEdge.bidirectional ? "⇄ Bidirectional" : "→ One Way"}
-              </button>
-            </div>
-            <div>
-              <label className={labelCls}>Accessible</label>
-              <button
-                onClick={() => onUpdateNavEdge?.(selNavEdge.id, { accessible: !selNavEdge.accessible, inaccessibleReason: selNavEdge.accessible ? undefined : selNavEdge.inaccessibleReason })}
-                className={cn(
-                  "w-full flex items-center justify-center gap-1.5 h-8 rounded-xl border text-[10px] font-bold transition-all",
-                  selNavEdge.accessible
-                    ? "border-green-200 dark:border-green-700/30 bg-green-50 dark:bg-green-900/10 text-green-600"
-                    : "border-border text-muted-foreground"
-                )}
-              >
-                <CheckCircle2 className="h-3.5 w-3.5" />
-                {selNavEdge.accessible ? "Accessible ✓" : "Not Accessible"}
-              </button>
-            </div>
-            {/* ── Inaccessible reason (only shown when accessible=false) ── */}
-            {!selNavEdge.accessible && (
-              <div>
-                <label className={labelCls}>Reason</label>
-                <select
-                  value={selNavEdge.inaccessibleReason ?? "other"}
-                  onChange={(e) => onUpdateNavEdge?.(selNavEdge.id, { inaccessibleReason: e.target.value as any })}
-                  className="w-full h-8 px-2 rounded-lg border border-border bg-input-background text-foreground text-xs focus:outline-none focus:ring-2 focus:ring-primary/20 custom-select"
-                >
-                  <option value="stairs">Stairs</option>
-                  <option value="narrow_path">Narrow Path</option>
-                  <option value="restricted_access">Restricted Access</option>
-                  <option value="uneven_surface">Uneven Surface</option>
-                  <option value="other">Other</option>
-                </select>
-                {selNavEdge.inaccessibleReason && (
-                  <div className="mt-1 px-2.5 py-1.5 rounded-lg bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-700/30">
-                    <div className="flex items-center gap-1.5">
-                      <AlertTriangle className="h-3 w-3 text-amber-500 shrink-0" />
-                      <span className="text-[9px] text-amber-600 dark:text-amber-400 font-medium">
-                        {selNavEdge.inaccessibleReason === 'stairs' ? 'Contains stairs — not wheelchair accessible' :
-                         selNavEdge.inaccessibleReason === 'narrow_path' ? 'Path is too narrow for wheelchairs' :
-                         selNavEdge.inaccessibleReason === 'restricted_access' ? 'Restricted access area' :
-                         selNavEdge.inaccessibleReason === 'uneven_surface' ? 'Uneven surface — difficult for wheelchairs' :
-                         'Marked as inaccessible'}
-                      </span>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-            {/* ── Emergency Safety ── */}
-            <div className="pt-2 border-t border-border">
               <div className="flex items-center gap-1.5 mb-2">
-                <AlertTriangle className="h-3 w-3 text-red-500" />
-                <span className="text-[9px] font-extrabold uppercase tracking-widest text-muted-foreground">Emergency</span>
+                <Info className="h-3 w-3 text-muted-foreground" />
+                <span className="text-[9px] font-extrabold uppercase tracking-widest text-muted-foreground">Connection</span>
               </div>
-              <div>
-                <label className={labelCls}>Safe During Emergency</label>
+              <div className="px-2.5 py-2 rounded-xl border border-border text-[10px] bg-muted/30 text-muted-foreground space-y-1">
+                <div className="flex justify-between">
+                  <span>From</span>
+                  <span className="font-bold text-[9px]">{allNavNodes?.find(n => n.id === selNavEdge.startNodeId)?.name ?? "Waypoint"}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>To</span>
+                  <span className="font-bold text-[9px]">{allNavNodes?.find(n => n.id === selNavEdge.endNodeId)?.name ?? "Waypoint"}</span>
+                </div>
+                <div className="flex justify-between border-t border-border pt-1 mt-1">
+                  <span>Distance</span>
+                  <span className="font-bold">{selNavEdge.distance} units</span>
+                </div>
+              </div>
+            </div>
+
+            {/* DIRECTION — compact segmented control */}
+            <div className="pt-3 mt-3 border-t border-border">
+              <div className="flex items-center gap-1.5 mb-2">
+                <Route className="h-3 w-3 text-muted-foreground" />
+                <span className="text-[9px] font-extrabold uppercase tracking-widest text-muted-foreground">Direction</span>
+              </div>
+              <div className="grid grid-cols-2 gap-1 p-1 rounded-xl border border-border bg-muted/30">
                 <button
-                  onClick={() => onUpdateNavEdge?.(selNavEdge.id, {
-                    emergencySafe: selNavEdge.emergencySafe === false ? true : false,
-                    emergencyReason: selNavEdge.emergencySafe === false ? undefined : (selNavEdge.emergencyReason || "hazard")
-                  })}
+                  onClick={() => onUpdateNavEdge?.(selNavEdge.id, { bidirectional: true })}
+                  aria-pressed={selNavEdge.bidirectional !== false}
                   className={cn(
-                    "w-full flex items-center justify-center gap-1.5 h-8 rounded-xl border text-[10px] font-bold transition-all",
-                    selNavEdge.emergencySafe !== false
-                      ? "border-green-200 dark:border-green-700/30 bg-green-50 dark:bg-green-900/10 text-green-600"
-                      : "border-red-200 dark:border-red-700/30 bg-red-50 dark:bg-red-900/10 text-red-600"
+                    "h-7 rounded-lg text-[10px] font-bold transition-all",
+                    selNavEdge.bidirectional !== false
+                      ? "bg-card text-primary shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
                   )}
                 >
-                  <CheckCircle2 className="h-3.5 w-3.5" />
-                  {selNavEdge.emergencySafe !== false ? "Safe ✓" : "Unsafe"}
+                  ⇄ Bidirectional
+                </button>
+                <button
+                  onClick={() => onUpdateNavEdge?.(selNavEdge.id, { bidirectional: false })}
+                  aria-pressed={selNavEdge.bidirectional === false}
+                  className={cn(
+                    "h-7 rounded-lg text-[10px] font-bold transition-all",
+                    selNavEdge.bidirectional === false
+                      ? "bg-card text-primary shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  → One Way
                 </button>
               </div>
-              {/* ── Emergency unsafe reason (only shown when unsafe) ── */}
-              {selNavEdge.emergencySafe === false && (
-                <div className="mt-2">
-                  <label className={labelCls}>Reason</label>
-                  <select
-                    value={selNavEdge.emergencyReason ?? "hazard"}
-                    onChange={(e) => onUpdateNavEdge?.(selNavEdge.id, { emergencyReason: e.target.value as any })}
-                    className="w-full h-8 px-2 rounded-lg border border-border bg-input-background text-foreground text-xs focus:outline-none focus:ring-2 focus:ring-primary/20 custom-select"
-                  >
-                    <option value="hazard">Hazard</option>
-                    <option value="blocked">Blocked</option>
-                    <option value="restricted">Restricted Access</option>
-                    <option value="construction">Under Construction</option>
-                    <option value="other">Other</option>
-                  </select>
-                  <div className="mt-1 px-2.5 py-1.5 rounded-lg bg-red-50 dark:bg-red-900/10 border border-red-200 dark:border-red-700/30">
-                    <div className="flex items-center gap-1.5">
-                      <AlertTriangle className="h-3 w-3 text-red-500 shrink-0" />
-                      <span className="text-[9px] text-red-600 dark:text-red-400 font-medium">
-                        {selNavEdge.emergencyReason === 'hazard' ? 'Hazard area — avoid during evacuation' :
-                         selNavEdge.emergencyReason === 'blocked' ? 'Blocked path — not usable during emergency' :
-                         selNavEdge.emergencyReason === 'restricted' ? 'Restricted access area' :
-                         selNavEdge.emergencyReason === 'construction' ? 'Under construction — unsafe during emergency' :
-                         'Marked as unsafe for emergency'}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              )}
             </div>
-            <div className="pt-3 border-t border-border">
+
+            {/* ROUTE AVAILABILITY — one shared graph, routing flags per edge */}
+            <div className="pt-3 mt-3 border-t border-border space-y-3">
+              <div className="flex items-center gap-1.5 mb-1">
+                <Accessibility className="h-3 w-3 text-muted-foreground" />
+                <span className="text-[9px] font-extrabold uppercase tracking-widest text-muted-foreground">Route Availability</span>
+              </div>
+              {/* Accessible — segmented Yes/No + custom reason (no native select) */}
+              <div>
+                <div className="flex items-center justify-between gap-2 mb-1.5">
+                  <span className="text-[10px] font-semibold text-foreground flex items-center gap-1.5"><CheckCircle2 className="h-3.5 w-3.5 text-green-600 shrink-0" /> Accessible</span>
+                  <BoolSegmented
+                    value={selNavEdge.accessible}
+                    onYes={() => onUpdateNavEdge?.(selNavEdge.id, { accessible: true, inaccessibleReason: undefined })}
+                    onNo={() => onUpdateNavEdge?.(selNavEdge.id, { accessible: false, inaccessibleReason: selNavEdge.inaccessibleReason ?? "other" })}
+                    label="Accessible"
+                  />
+                </div>
+                {selNavEdge.accessible === false && (
+                  <ReasonMenu
+                    value={selNavEdge.inaccessibleReason ?? "other"}
+                    options={INACCESSIBLE_REASONS}
+                    onChange={(r) => onUpdateNavEdge?.(selNavEdge.id, { inaccessibleReason: r as NavigationEdge["inaccessibleReason"] })}
+                    placeholder="Why is this not accessible?"
+                  />
+                )}
+              </div>
+              {/* Emergency Safe — segmented Yes/No + custom reason */}
+              <div>
+                <div className="flex items-center justify-between gap-2 mb-1.5">
+                  <span className="text-[10px] font-semibold text-foreground flex items-center gap-1.5"><AlertTriangle className="h-3.5 w-3.5 text-amber-600 shrink-0" /> Emergency Safe</span>
+                  <BoolSegmented
+                    value={selNavEdge.emergencySafe !== false}
+                    onYes={() => onUpdateNavEdge?.(selNavEdge.id, { emergencySafe: true, emergencyReason: undefined })}
+                    onNo={() => onUpdateNavEdge?.(selNavEdge.id, { emergencySafe: false, emergencyReason: selNavEdge.emergencyReason ?? "hazard" })}
+                    label="Emergency Safe"
+                  />
+                </div>
+                {selNavEdge.emergencySafe === false && (
+                  <ReasonMenu
+                    value={selNavEdge.emergencyReason ?? "hazard"}
+                    options={EMERGENCY_REASONS}
+                    onChange={(r) => onUpdateNavEdge?.(selNavEdge.id, { emergencyReason: r as NavigationEdge["emergencyReason"] })}
+                    placeholder="Why not emergency-safe?"
+                  />
+                )}
+              </div>
+              {/* Closed — Open / Closed segmented */}
+              <div>
+                <div className="flex items-center justify-between gap-2 mb-1.5">
+                  <span className="text-[10px] font-semibold text-foreground flex items-center gap-1.5"><XCircle className="h-3.5 w-3.5 text-amber-600 shrink-0" /> Closed</span>
+                  <BoolSegmented
+                    value={selNavEdge.closed === true}
+                    onYes={() => onUpdateNavEdge?.(selNavEdge.id, { closed: false })}
+                    onNo={() => onUpdateNavEdge?.(selNavEdge.id, { closed: true })}
+                    label="Closed"
+                    yesLabel="Open"
+                    noLabel="Closed"
+                  />
+                </div>
+                <p className="px-1 text-[9px] text-muted-foreground">Closed paths are excluded from routing (temporarily unavailable for all route modes).</p>
+              </div>
+            </div>
+
+            {/* ACTIONS */}
+            <div className="pt-3 mt-3 border-t border-border">
               <button onClick={() => onDeleteNavEdge?.(selNavEdge.id)}
                 className="w-full h-10 rounded-xl border border-destructive/30 text-xs font-bold text-destructive hover:bg-destructive/10 transition-colors">
-                <span className="flex items-center justify-center gap-1.5"><AlertTriangle className="h-3 w-3" /> Delete Edge</span>
+                <span className="flex items-center justify-center gap-1.5"><AlertTriangle className="h-3 w-3" /> Delete Path</span>
               </button>
             </div>
           </>

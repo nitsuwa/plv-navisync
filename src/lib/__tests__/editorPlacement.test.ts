@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { screenToWorld, panToKeepWorldPoint, getSvgContentBox, computeBuildingPlacement } from "../editorPlacement";
+import { screenToWorld, panToKeepWorldPoint, getSvgContentBox, computeBuildingPlacement, pointInBuilding } from "../editorPlacement";
 
 const CANVAS = { canvasW: 900, canvasH: 680 };
 
@@ -132,5 +132,29 @@ describe("computeBuildingPlacement — click never lands at (0,0) unless clicked
     const r = computeBuildingPlacement(900, 680, 900, 680, 900, 680);
     expect(r.x + r.width).toBeLessThanOrEqual(900);
     expect(r.y + r.height).toBeLessThanOrEqual(680);
+  });
+});
+
+describe("pointInBuilding — outdoor waypoints must not be placed under building roofs", () => {
+  const building = { x: 100, y: 100, width: 120, height: 80, rotation: 0 };
+
+  it("true for a point inside the footprint", () => {
+    expect(pointInBuilding(building, { x: 150, y: 140 })).toBe(true);
+    expect(pointInBuilding(building, { x: 100, y: 100 })).toBe(true);
+  });
+
+  it("false for a point outside the footprint", () => {
+    expect(pointInBuilding(building, { x: 50, y: 50 })).toBe(false);
+    expect(pointInBuilding(building, { x: 260, y: 140 })).toBe(false);
+    expect(pointInBuilding(building, { x: 150, y: 240 })).toBe(false);
+  });
+
+  it("respects rotation (un-rotates the point before the axis-aligned check)", () => {
+    // A 90°-rotated 120x80 building: the footprint's long axis now runs
+    // vertically, so (150,140) — near the original center — stays inside,
+    // while a point 100 units to the right of center moves out of the AABB.
+    const rotated = { ...building, rotation: 90 };
+    expect(pointInBuilding(rotated, { x: 150, y: 140 })).toBe(true);
+    expect(pointInBuilding(rotated, { x: 300, y: 140 })).toBe(false);
   });
 });
