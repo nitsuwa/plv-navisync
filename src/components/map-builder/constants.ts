@@ -87,7 +87,7 @@ export const TOOLS: ToolDescriptor[] = [
   { id: "pan",      icon: Hand,          label: "Pan",      hint: "Hold Space + drag to pan the canvas freely",                                               key: "Space" },
   { id: "marker",   icon: MapPin,        label: "Marker",   hint: "Click to place a location marker",                              key: "M" },
   { id: "building", icon: Square,        label: "Building", hint: "Click & drag on the canvas to draw a building",                 key: "B" },
-  { id: "path",     icon: GitBranch,     label: "Path",     hint: "Click waypoints · Double-click to finish · Esc to cancel",      key: "P" },
+  { id: "path",     icon: GitBranch,     label: "Path",     hint: "Drag one clean pathway or road segment",      key: "P" },
   { id: "erase",    icon: Trash2,        label: "Erase",    hint: "Click any item to remove it",                                   key: "E" },
 ];
 
@@ -102,22 +102,18 @@ export interface LayerToolDescriptor {
 }
 
 export const LAYER_TOOLS: Record<string, LayerToolDescriptor[]> = {
-  // B5 Phase 1.7: Campus mode is focused on PHYSICAL campus authoring. The
-  // generic Add POI and Draw Walkway tools are hidden from the toolbar (their
-  // data model + persistence stay intact for legacy content and future mapped
-  // destinations / a proper Pathway authoring feature). Campus exposes only
-  // tools that genuinely work end-to-end today.
   campus: [
     { id: "select",   icon: MousePointer2, label: "Select",   hint: "Select and move objects on the canvas.", key: "V" },
     { id: "pan",      icon: Hand,          label: "Pan",      hint: "Hold Space + drag, or middle-click + drag, to move around the canvas freely", key: "Space" },
     { id: "building", icon: Square,        label: "Add Building", hint: "Click & drag on the canvas to draw a building footprint. Give it a name and floors in the Properties panel on the right.", key: "B" },
+    { id: "path",     icon: GitBranch,     label: "Pathway", hint: "Drag one clean walkway, road, or accessible path segment. End near another path to create a junction.", key: "P" },
     { id: "erase",    icon: Trash2,        label: "Erase",    hint: "Click any building, marker, path, or asset to remove it from the campus", key: "E" },
   ],
   navigation: [
     { id: "select",   icon: MousePointer2, label: "Select",   hint: "Select waypoints and connections to edit routing properties. Campus objects stay visible as context.", key: "V" },
     { id: "pan",      icon: Hand,          label: "Pan",      hint: "Hold Space + drag to pan around the canvas", key: "Space" },
     { id: "marker",   icon: MapPin,        label: "Add Waypoint", hint: "Place a routing point. Click a valid empty location — inside buildings use entrances instead.", key: "M" },
-    { id: "path",     icon: GitBranch,     label: "Connect Path", hint: "Connect waypoints to build the walking network. Click a waypoint or empty space to start, then the destination.", key: "P" },
+    { id: "path",     icon: GitBranch,     label: "Connect", hint: "Connect waypoints and entrances. Click a start point, optional bend points, then a destination point.", key: "P" },
     { id: "erase",    icon: Trash2,        label: "Remove",   hint: "Click a waypoint or connection to remove it from the navigation network. Deleting a waypoint removes all its connections.", key: "E" },
   ],
   // Accessibility and Emergency are ROUTING PROPERTIES of the navigation graph
@@ -271,11 +267,7 @@ export const BUILDING_TYPES: BuildingTypeDescriptor[] = [
   { id: "laboratory",    label: "Laboratory",     category: "Laboratory",    color: "#7c3aed", icon: "Flask",       defaultWidth: 120, defaultHeight: 80,  description: "Science labs, research facilities, and workshops" },
   { id: "library",       label: "Library",        category: "Library",       color: "#0891b2", icon: "Library",     defaultWidth: 130, defaultHeight: 85,  description: "Reading rooms, media sections, and study areas" },
   { id: "gym",           label: "Gymnasium",      category: "Sports",        color: "#059669", icon: "Dumbbell",    defaultWidth: 160, defaultHeight: 100, description: "Sports complex, gym, and athletic facilities" },
-  { id: "dormitory",     label: "Dormitory",      category: "Dormitory",     color: "#d97706", icon: "Home",        defaultWidth: 110, defaultHeight: 80,  description: "Student housing and residential buildings" },
   { id: "admin",         label: "Administration",  category: "Administrative",color: "#1e3a8a", icon: "Building2",   defaultWidth: 110, defaultHeight: 75,  description: "Admin offices, registrar, and services" },
-  { id: "canteen",       label: "Canteen",        category: "Canteen",       color: "#ea580c", icon: "UtensilsCrossed", defaultWidth: 100, defaultHeight: 70,  description: "Cafeteria, food court, and dining areas" },
-  { id: "medical",       label: "Medical",        category: "Medical",       color: "#dc2626", icon: "HeartPulse",  defaultWidth: 90,  defaultHeight: 70,  description: "Clinic, infirmary, and health services" },
-  { id: "security",      label: "Security",       category: "Security",      color: "#475569", icon: "Shield",      defaultWidth: 70,  defaultHeight: 55,  description: "Guard house, security office, and checkpoint" },
   { id: "other",         label: "Other",          category: "Other",         color: "#64748b", icon: "Box",         defaultWidth: 100, defaultHeight: 70,  description: "Miscellaneous buildings and structures" },
 ];
 
@@ -315,6 +307,16 @@ export interface DecorAssetDescriptor {
 }
 
 export const DECOR_ASSET_TYPES: DecorAssetDescriptor[] = [
+  // Outdoor areas
+  {
+    type: "ground-area", label: "Ground Area", category: "Outdoor Areas", color: "#86b879",
+    svgPath: "M2 2 L38 2 L38 26 L2 26 Z",
+    parts: [
+      { d: "M2 2 L38 2 L38 26 L2 26 Z", fill: "#d8ead0" },
+      { d: "M6 7 L34 7 M6 14 L34 14 M6 21 L34 21", fill: "none", stroke: "#86b879", strokeWidth: 0.8, strokeLinecap: "round", strokeLinejoin: "round" },
+    ],
+    defaultWidth: 40, defaultHeight: 28,
+  },
   // Greenery
   {
     type: "tree", label: "Tree", category: "Greenery", color: "#22c55e",
@@ -1059,4 +1061,3 @@ export const SEED_CAMPUSES: Campus[] = [
     ],
   },
 ];
-

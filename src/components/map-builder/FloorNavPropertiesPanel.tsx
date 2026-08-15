@@ -133,12 +133,18 @@ interface FloorNavPropertiesPanelProps {
   straightenBlocked: boolean;
   /** B5 Phase 2.11: the edge currently crosses/overlaps a wall (presentation only). */
   edgeBlocked: boolean;
+  /** B5 Phase 3: floors this node's cross-floor transitions connect to. */
+  transitionFloors: Array<{ id: string; label: string }>;
+  /** B5 Phase 3: sharedId match state for this linked circulation node. */
+  transitionState: "linked" | "no-shared-id" | "no-match";
+  elevatorServedFloors?: Array<{ id: string; label: string; linked: boolean; isLocal: boolean }>;
 }
 
 export function FloorNavPropertiesPanel({
   selected, nodes, edges,
   onUpdateNode, onUpdateEdge, onDelete, onClose,
   onAddBend, onRemoveBend, onStraighten, straightenBlocked, edgeBlocked,
+  transitionFloors, transitionState, elevatorServedFloors = [],
 }: FloorNavPropertiesPanelProps) {
   if (selected.type === "node") {
     const node = nodes.find((n) => n.id === selected.id);
@@ -219,6 +225,70 @@ export function FloorNavPropertiesPanel({
               {connections.length} path{connections.length !== 1 ? "s" : ""}
             </div>
           </Section>
+          {/* B5 Phase 3: cross-floor transition status for linked Stair / Elevator
+              / Ramp nodes — concise authoring feedback only (never a routing UI). */}
+          {ref?.kind === "elevator" && (
+            <Section title="Served Floors">
+              {elevatorServedFloors.length > 0 ? (
+                <>
+                  <div className="text-[11px] font-bold text-foreground" data-testid="nav-elevator-served-status">
+                    {elevatorServedFloors.filter((f) => f.linked).length} of {elevatorServedFloors.length} served floors added to navigation
+                  </div>
+                  <div className="flex flex-wrap gap-1 mt-1">
+                    {elevatorServedFloors.map((floor) => (
+                      <span key={floor.id} data-testid="nav-elevator-served-floor-chip"
+                        className={cn(
+                          "px-1.5 py-0.5 rounded border text-[9px] font-bold",
+                          floor.linked
+                            ? "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800/40 dark:bg-emerald-900/10 dark:text-emerald-400"
+                            : "border-border bg-muted/40 text-muted-foreground"
+                        )}>
+                        {floor.linked ? "✓ " : "○ "}{floor.label}{floor.isLocal ? " — Current" : ""}{!floor.linked ? " — Not added to navigation" : ""}
+                      </span>
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <span className="text-[10px] text-muted-foreground">No served floors configured.</span>
+              )}
+            </Section>
+          )}
+          {ref?.kind === "stair" && (
+            <Section title="Floor Transitions">
+              {transitionState === "linked" ? (
+                <>
+                  <div className="text-[11px] font-bold text-foreground" data-testid="nav-transition-status-linked">
+                    Connected floors{transitionFloors.length > 0 ? ` (${transitionFloors.length})` : ""}
+                  </div>
+                  <div className="flex flex-wrap gap-1 mt-1">
+                    {transitionFloors.length > 0 ? transitionFloors.map((floor) => (
+                      <span key={floor.id} data-testid="nav-transition-floor-chip"
+                        className="px-1.5 py-0.5 rounded border border-border bg-muted/50 text-[9px] font-bold text-foreground">
+                        {floor.label}
+                      </span>
+                    )) : (
+                      <span className="text-[10px] text-muted-foreground">No transition edges yet.</span>
+                    )}
+                  </div>
+                </>
+              ) : transitionState === "no-shared-id" ? (
+                <p data-testid="nav-transition-no-shared" className="text-[9px] text-amber-600 font-semibold leading-relaxed">
+                  Not linked to another floor. Assign the same {LINKED_LABEL[ref.kind].toLowerCase()} connection across floors to enable floor-to-floor navigation.
+                </p>
+              ) : (
+                <p data-testid="nav-transition-no-match" className="text-[9px] text-muted-foreground leading-relaxed">
+                  No matching {LINKED_LABEL[ref.kind].toLowerCase()} on another floor yet — link the same connection there to connect floors.
+                </p>
+              )}
+            </Section>
+          )}
+          {ref?.kind === "ramp" && (
+            <Section title="Accessibility">
+              <p data-testid="nav-ramp-accessibility-status" className="text-[9px] text-muted-foreground leading-relaxed">
+                Accessible path anchor for local walking routes.
+              </p>
+            </Section>
+          )}
           <Section title="Position">
             <div className="grid grid-cols-2 gap-1.5">
               <div className="h-8 rounded-lg border border-border bg-muted/40 px-2 flex items-center text-[10px] font-semibold text-muted-foreground">
@@ -289,20 +359,21 @@ export function FloorNavPropertiesPanel({
                 <div className="text-[11px] font-bold text-foreground">
                   {bends.length === 0 ? "Straight path" : `Segmented · ${bends.length} bend${bends.length !== 1 ? "s" : ""}`}
                 </div>
-                <div className="grid grid-cols-3 gap-1">
+                {/* B5 Phase 6.10: responsive layout — Add/Remove on row 1, Straighten on row 2 */}
+                <div className="grid grid-cols-2 gap-1">
                   <button onClick={() => onAddBend(edge.id)} data-testid="nav-path-add-bend"
-                    className="h-7 rounded-md text-[10px] font-bold border border-border text-foreground hover:bg-muted transition-colors">
+                    className="h-7 rounded-md text-[10px] font-bold border border-border text-foreground hover:bg-muted transition-colors min-w-0">
                     Add Bend
                   </button>
                   <button onClick={() => onRemoveBend(edge.id)} disabled={bends.length === 0} data-testid="nav-path-remove-bend"
-                    className="h-7 rounded-md text-[10px] font-bold border border-border text-foreground hover:bg-muted transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+                    className="h-7 rounded-md text-[10px] font-bold border border-border text-foreground hover:bg-muted transition-colors disabled:opacity-40 disabled:cursor-not-allowed min-w-0">
                     Remove Bend
                   </button>
-                  <button onClick={() => onStraighten(edge.id)} disabled={bends.length === 0 || straightenBlocked} data-testid="nav-path-straighten"
-                    className="h-7 rounded-md text-[10px] font-bold border border-border text-foreground hover:bg-muted transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
-                    Straighten
-                  </button>
                 </div>
+                <button onClick={() => onStraighten(edge.id)} disabled={bends.length === 0 || straightenBlocked} data-testid="nav-path-straighten"
+                  className="w-full h-7 rounded-md text-[10px] font-bold border border-border text-foreground hover:bg-muted transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+                  Straighten
+                </button>
                 <p className="text-[9px] text-muted-foreground leading-relaxed">
                   {straightenBlocked
                     ? "The direct line crosses a wall — keep a bend or add a door opening."

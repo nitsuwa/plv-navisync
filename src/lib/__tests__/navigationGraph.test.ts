@@ -15,6 +15,9 @@ import {
   findEntranceNavNode,
   syncEntranceNodePositions,
   pruneOrphanedEntranceNodes,
+  translateSelectedNavGraph,
+  navGroupSelectionBounds,
+  applyBulkRoutingAction,
 } from "../navigationGraph";
 import type { CampusBuilding } from "../../components/map-builder/types";
 
@@ -303,5 +306,211 @@ describe("B5 Phase 1.8 — entrance-linked node synchronization", () => {
     const pruned = pruneOrphanedEntranceNodes([b], nodes, edges);
     expect(pruned.nodes).toEqual(nodes);
     expect(pruned.edges).toEqual(edges);
+  });
+});
+
+describe("B5 Final correction — shared nav graph group translation", () => {
+  function edge(id: string, a: string, b: string, bends?: { x: number; y: number }[]): NavigationEdge {
+    return { id, startNodeId: a, endNodeId: b, distance: 10, bidirectional: true, accessible: true, type: "walkway", color: "#16a34a", width: 4, bendPoints: bends };
+  }
+
+  describe("translateSelectedNavGraph", () => {
+    it("moves every selected node AND the bends of edges whose both endpoints move", () => {
+      const nodes = [node("A", 0, 0), node("B", 100, 0), node("C", 200, 0)];
+      const edges = [edge("e1", "A", "B", [{ x: 50, y: -40 }]), edge("e2", "B", "C", [{ x: 150, y: -40 }])];
+      const moving = new Set(["A", "B"]);
+      const { nodes: nn, edges: ne } = translateSelectedNavGraph(nodes, edges, moving, 20, 30);
+
+      // A and B move; C stays.
+      expect(nn.find((n) => n.id === "A")).toMatchObject({ x: 20, y: 30 });
+      expect(nn.find((n) => n.id === "B")).toMatchObject({ x: 120, y: 30 });
+      expect(nn.find((n) => n.id === "C")).toMatchObject({ x: 200, y: 0 });
+      // e1 (both endpoints moving) carries its bend; e2 (only B moving) keeps it.
+      expect(ne.find((e) => e.id === "e1")?.bendPoints).toEqual([{ x: 70, y: -10 }]);
+      expect(ne.find((e) => e.id === "e2")?.bendPoints).toEqual([{ x: 150, y: -40 }]);
+    });
+
+    it("keeps relative geometry identical across the whole selected substructure", () => {
+      const nodes = [node("A", 0, 0), node("B", 100, 0), node("C", 100, 100)];
+      const edges = [
+        edge("e1", "A", "B", [{ x: 50, y: 0 }]),
+        edge("e2", "B", "C", [{ x: 100, y: 50 }]),
+      ];
+      const moving = new Set(["A", "B", "C"]);
+      const { nodes: nn, edges: ne } = translateSelectedNavGraph(nodes, edges, moving, 7, -3);
+      expect(nn.map((n) => [n.x, n.y])).toEqual([[7, -3], [107, -3], [107, 97]]);
+      expect(ne.find((e) => e.id === "e1")?.bendPoints).toEqual([{ x: 57, y: -3 }]);
+      expect(ne.find((e) => e.id === "e2")?.bendPoints).toEqual([{ x: 107, y: 47 }]);
+    });
+
+    it("leaves edges with NO moving endpoint untouched (bends stay put)", () => {
+      const nodes = [node("A", 0, 0), node("B", 100, 0), node("C", 200, 0)];
+      const edges = [edge("e1", "A", "B", [{ x: 50, y: 0 }]), edge("e2", "C", "A", [{ x: 100, y: -10 }])];
+      const moving = new Set(["B"]);
+      const { nodes: nn, edges: ne } = translateSelectedNavGraph(nodes, edges, moving, 5, 5);
+      expect(nn.find((n) => n.id === "B")).toMatchObject({ x: 105, y: 5 });
+      // e2 does not touch B at all → identical edge object.
+      expect(ne.find((e) => e.id === "e2")).toBe(edges[1]);
+    });
+
+    it("is a no-op for zero delta or an empty moving set (identity preserved)", () => {
+      const nodes = [node("A", 0, 0)];
+      const edges = [edge("e1", "A", "A", [{ x: 1, y: 2 }])];
+      const out = translateSelectedNavGraph(nodes, edges, new Set(["A"]), 0, 0);
+      expect(out.nodes).toBe(nodes);
+      expect(out.edges).toBe(edges);
+      const out2 = translateSelectedNavGraph(nodes, edges, new Set(), 5, 5);
+      expect(out2.nodes).toBe(nodes);
+    });
+
+    it("translates multi-bend edges fully (every bend rides with the group)", () => {
+      const nodes = [node("A", 0, 0), node("B", 100, 0)];
+      const edges = [edge("e1", "A", "B", [{ x: 30, y: -20 }, { x: 70, y: -20 }, { x: 70, y: 20 }])];
+      const { edges: ne } = translateSelectedNavGraph(nodes, edges, new Set(["A", "B"]), 10, 10);
+      expect(ne[0].bendPoints).toEqual([{ x: 40, y: -10 }, { x: 80, y: -10 }, { x: 80, y: 30 }]);
+    });
+  });
+
+  describe("navGroupSelectionBounds", () => {
+    it("bounds selected nodes + bends of edges with both endpoints selected, with padding", () => {
+      const nodes = [node("A", 0, 0), node("B", 100, 0)];
+      const edges = [edge("e1", "A", "B", [{ x: 50, y: -40 }])];
+      const bounds = navGroupSelectionBounds(nodes, edges, new Set(["A", "B"]), new Set(), 10);
+      expect(bounds).toEqual({ x: -10, y: -50, width: 120, height: 60 });
+    });
+
+    it("includes bends of explicitly-selected edges even without both endpoints", () => {
+      const nodes = [node("A", 0, 0), node("B", 100, 0)];
+      const edges = [edge("e1", "A", "B", [{ x: 50, y: -40 }])];
+      const bounds = navGroupSelectionBounds(nodes, edges, new Set(["A"]), new Set(["e1"]), 10);
+      // Only A is a selected NODE, but the explicit edge selection brings its
+      // bend into the bounds: A(0,0) + bend(50,-40) → width 70, height 60.
+      expect(bounds).toEqual({ x: -10, y: -50, width: 70, height: 60 });
+    });
+
+    it("returns null when nothing is selected", () => {
+      expect(navGroupSelectionBounds([node("A", 0, 0)], [], new Set(), new Set())).toBeNull();
+    });
+  });
+});
+
+describe("B5 Final bulk-routing state semantics — applyBulkRoutingAction", () => {
+  function edge(
+    overrides: Partial<NavigationEdge> & { id: string; startNodeId: string; endNodeId: string }
+  ): NavigationEdge {
+    return {
+      id: overrides.id,
+      startNodeId: overrides.startNodeId,
+      endNodeId: overrides.endNodeId,
+      distance: 10,
+      bidirectional: true,
+      accessible: true,
+      emergencySafe: true,
+      closed: false,
+      type: "walkway",
+      color: "#16a34a",
+      width: 4,
+      bendPoints: [{ x: 50, y: 0 }],
+      ...overrides,
+    };
+  }
+
+  it("mark_closed sets closed=true and preserves every unrelated field", () => {
+    const edges = [edge({
+      id: "e1", startNodeId: "A", endNodeId: "B",
+      accessible: false, inaccessibleReason: "stairs",
+      emergencySafe: false, emergencyReason: "hazard",
+      bendPoints: [{ x: 30, y: 40 }],
+    })];
+    const out = applyBulkRoutingAction(edges, ["e1"], "mark_closed");
+    const e = out[0];
+    expect(e.closed).toBe(true);
+    expect(e.accessible).toBe(false);
+    expect(e.inaccessibleReason).toBe("stairs");
+    expect(e.emergencySafe).toBe(false);
+    expect(e.emergencyReason).toBe("hazard");
+    expect(e.bidirectional).toBe(true);
+    expect(e.bendPoints).toEqual([{ x: 30, y: 40 }]);
+    expect(e.startNodeId).toBe("A");
+    expect(e.endNodeId).toBe("B");
+    expect(e.distance).toBe(10);
+  });
+
+  it("mark_closed then mark_accessible reopens: accessible=true, closed=false, reason cleared", () => {
+    let edges = [edge({ id: "e1", startNodeId: "A", endNodeId: "B", closed: true })];
+    edges = applyBulkRoutingAction(edges, ["e1"], "mark_accessible");
+    expect(edges[0]).toMatchObject({ accessible: true, closed: false });
+    expect(edges[0].inaccessibleReason).toBeUndefined();
+    // unrelated metadata preserved
+    expect(edges[0].bidirectional).toBe(true);
+    expect(edges[0].emergencySafe).toBe(true);
+    expect(edges[0].bendPoints).toEqual([{ x: 50, y: 0 }]);
+  });
+
+  it("mark_closed then mark_not_accessible: accessible=false, closed=false, reason preserved or defaulted", () => {
+    // Existing per-edge reason is preserved
+    let edges = [edge({ id: "e1", startNodeId: "A", endNodeId: "B", closed: true, inaccessibleReason: "uneven_surface" })];
+    edges = applyBulkRoutingAction(edges, ["e1"], "mark_not_accessible");
+    expect(edges[0]).toMatchObject({ accessible: false, closed: false, inaccessibleReason: "uneven_surface" });
+    // No existing reason → defaults to "other" like the single-edge inspector
+    let edges2 = [edge({ id: "e2", startNodeId: "B", endNodeId: "C", closed: true })];
+    edges2 = applyBulkRoutingAction(edges2, ["e2"], "mark_not_accessible");
+    expect(edges2[0]).toMatchObject({ accessible: false, closed: false, inaccessibleReason: "other" });
+  });
+
+  it("mark_closed then mark_emergency_safe: emergencySafe=true, closed=false, reason cleared", () => {
+    let edges = [edge({ id: "e1", startNodeId: "A", endNodeId: "B", closed: true, emergencySafe: false, emergencyReason: "hazard" })];
+    edges = applyBulkRoutingAction(edges, ["e1"], "mark_emergency_safe");
+    expect(edges[0]).toMatchObject({ emergencySafe: true, closed: false });
+    expect(edges[0].emergencyReason).toBeUndefined();
+    expect(edges[0].accessible).toBe(true);
+  });
+
+  it("mark_open sets closed=false and preserves accessible/emergency/direction/reasons", () => {
+    const edges = [edge({
+      id: "e1", startNodeId: "A", endNodeId: "B", closed: true,
+      accessible: false, inaccessibleReason: "narrow_path",
+      emergencySafe: false, emergencyReason: "construction",
+    })];
+    const out = applyBulkRoutingAction(edges, ["e1"], "mark_open");
+    expect(out[0].closed).toBe(false);
+    expect(out[0].accessible).toBe(false);
+    expect(out[0].inaccessibleReason).toBe("narrow_path");
+    expect(out[0].emergencySafe).toBe(false);
+    expect(out[0].emergencyReason).toBe("construction");
+  });
+
+  it("updates ALL selected edges but leaves unselected edges untouched", () => {
+    const edges = [
+      edge({ id: "e1", startNodeId: "A", endNodeId: "B" }),
+      edge({ id: "e2", startNodeId: "B", endNodeId: "C" }),
+      edge({ id: "e3", startNodeId: "C", endNodeId: "D" }),
+    ];
+    const out = applyBulkRoutingAction(edges, ["e1", "e3"], "mark_closed");
+    expect(out[0].closed).toBe(true);
+    expect(out[2].closed).toBe(true);
+    expect(out[1]).toBe(edges[1]); // unselected edge identical by reference
+    expect(out[1].closed).toBe(false);
+  });
+
+  it("never touches geometry, direction, or endpoints for ANY action", () => {
+    const bends = [{ x: 11, y: 22 }, { x: 33, y: 44 }];
+    const edges = [edge({ id: "e1", startNodeId: "A", endNodeId: "B", bidirectional: false, bendPoints: bends })];
+    const actions = ["mark_accessible", "mark_not_accessible", "mark_emergency_safe", "mark_open", "mark_closed"] as const;
+    for (const action of actions) {
+      const out = applyBulkRoutingAction(edges, ["e1"], action);
+      expect(out[0].bidirectional).toBe(false);
+      expect(out[0].bendPoints).toEqual(bends);
+      expect(out[0].startNodeId).toBe("A");
+      expect(out[0].endNodeId).toBe("B");
+      expect(out[0].distance).toBe(10);
+    }
+  });
+
+  it("is a no-op for an empty id list (edges returned by identity)", () => {
+    const edges = [edge({ id: "e1", startNodeId: "A", endNodeId: "B" })];
+    const out = applyBulkRoutingAction(edges, [], "mark_closed");
+    expect(out[0]).toBe(edges[0]);
+    expect(out).toEqual(edges);
   });
 });

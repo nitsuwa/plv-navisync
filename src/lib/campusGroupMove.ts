@@ -18,11 +18,11 @@
  * centered on (x, y).
  */
 export interface GroupMoveMember {
-  kind: "building" | "decorAsset";
+  kind: "building" | "decorAsset" | "path";
   id: string;
-  /** Building: top-left x. Decor asset: center x. */
+  /** Building/path bounds: top-left x. Decor asset: center x. */
   x: number;
-  /** Building: top-left y. Decor asset: center y. */
+  /** Building/path bounds: top-left y. Decor asset: center y. */
   y: number;
   /** Full world-space width (decor uses the shared rendered decorWorldSize). */
   width: number;
@@ -97,8 +97,8 @@ export function computeGroupTranslation(p: ComputeGroupTranslationParams): Group
   let maxX = -Infinity;
   let maxY = -Infinity;
   for (const m of p.members) {
-    const left = m.kind === "building" ? m.x : m.x - m.width / 2;
-    const top = m.kind === "building" ? m.y : m.y - m.height / 2;
+    const left = m.kind === "decorAsset" ? m.x - m.width / 2 : m.x;
+    const top = m.kind === "decorAsset" ? m.y - m.height / 2 : m.y;
     minX = Math.min(minX, left);
     minY = Math.min(minY, top);
     maxX = Math.max(maxX, left + m.width);
@@ -154,8 +154,8 @@ export function groupBBoxAfterTranslation(
   let maxX = -Infinity;
   let maxY = -Infinity;
   for (const m of members) {
-    const left = (m.kind === "building" ? m.x : m.x - m.width / 2) + dx;
-    const top = (m.kind === "building" ? m.y : m.y - m.height / 2) + dy;
+    const left = (m.kind === "decorAsset" ? m.x - m.width / 2 : m.x) + dx;
+    const top = (m.kind === "decorAsset" ? m.y - m.height / 2 : m.y) + dy;
     minX = Math.min(minX, left);
     minY = Math.min(minY, top);
     maxX = Math.max(maxX, left + m.width);

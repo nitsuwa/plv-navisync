@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect, lazy, Suspense } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import {
   X, Ruler, Palette, ZoomIn, CheckCircle2,
@@ -8,16 +8,8 @@ import {
 import { cn } from "../../lib/utils";
 import { CANVAS_SIZES, CANVAS_SIZE_RECOMMENDED } from "./constants";
 import { PLVLogo } from "../ui/PLVLogo";
+import { ColorPicker } from "../ui/ColorPicker";
 import type { Campus } from "./types";
-
-const ColorPickerImpl = lazy(() => import("../ui/ColorPicker"));
-function ColorPicker(props: { value: string; onChange: (c: string) => void }) {
-  return (
-    <Suspense fallback={<div className="h-10 rounded-xl border border-border bg-muted/30 animate-pulse" />}>
-      <ColorPickerImpl {...props} />
-    </Suspense>
-  );
-}
 
 // ── Props ──────────────────────────────────────────────────────────────────
 

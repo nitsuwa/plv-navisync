@@ -387,3 +387,204 @@ export function validateNavGraphBasics(
   }
   return { selfEdges, duplicateEdges, danglingEdges, invalidCoords };
 }
+
+// ── B5 Phase 6.1 — Edge snap detection for waypoint insertion ───────────
+
+/** Find the nearest point on a polyline segment. Returns { point, t } where t ∈ [0,1]. */
+function nearestPointOnSegment(
+  px: number, py: number,
+  ax: number, ay: number,
+  bx: number, by: number,
+): { x: number; y: number; t: number; dist: number } {
+  const dx = bx - ax;
+  const dy = by - ay;
+  const lenSq = dx * dx + dy * dy;
+  if (lenSq === 0) return { x: ax, y: ay, t: 0, dist: Math.hypot(px - ax, py - ay) };
+  let t = ((px - ax) * dx + (py - ay) * dy) / lenSq;
+  t = Math.max(0, Math.min(1, t));
+  const cx = ax + t * dx;
+  const cy = ay + t * dy;
+  return { x: cx, y: cy, t, dist: Math.hypot(px - cx, py - cy) };
+}
+
+/** Find the nearest point on an edge's polyline from a world point. */
+export function nearestPointOnEdgePolyline(
+  edge: NavigationEdge,
+  nodeMap: Record<string, { x: number; y: number }>,
+  point: { x: number; y: number },
+): { x: number; y: number; dist: number; segIndex: number; t: number } | null {
+  const startNode = nodeMap[edge.startNodeId];
+  const endNode = nodeMap[edge.endNodeId];
+  if (!startNode || !endNode) return null;
+  const points = [
+    { x: startNode.x, y: startNode.y },
+    ...(edge.bendPoints ?? []),
+    { x: endNode.x, y: endNode.y },
+  ];
+  let best: { x: number; y: number; dist: number; segIndex: number; t: number } | null = null;
+  for (let i = 0; i < points.length - 1; i++) {
+    const result = nearestPointOnSegment(point.x, point.y, points[i].x, points[i].y, points[i + 1].x, points[i + 1].y);
+    if (!best || result.dist < best.dist) {
+      best = { x: result.x, y: result.y, dist: result.dist, segIndex: i, t: result.t };
+    }
+  }
+  return best;
+}
+
+/** Snap threshold for waypoint-on-edge detection (canvas units). */
+export const NAV_EDGE_SNAP_THRESHOLD = 20;
+
+/** Find the nearest eligible navigation edge to a point. */
+export function findNavEdgeAtPoint(
+  edges: NavigationEdge[],
+  nodeMap: Record<string, { x: number; y: number }>,
+  point: { x: number; y: number },
+  threshold = NAV_EDGE_SNAP_THRESHOLD,
+): { edge: NavigationEdge; nearest: { x: number; y: number; dist: number; segIndex: number; t: number } } | null {
+  let best: { edge: NavigationEdge; nearest: { x: number; y: number; dist: number; segIndex: number; t: number } } | null = null;
+  for (const edge of edges) {
+    // Self-edges and edges with no nodes are ineligible
+    if (edge.startNodeId === edge.endNodeId) continue;
+    const nearest = nearestPointOnEdgePolyline(edge, nodeMap, point);
+    if (!nearest) continue;
+    if (nearest.dist <= threshold && (!best || nearest.dist < best.nearest.dist)) {
+      best = { edge, nearest };
+    }
+  }
+  return best;
+}
+
+// ── B5 Final correction — shared nav graph GROUP translation ──────────────
+//
+// Both editors (outdoor CampusEditor + Floor Editor) must move a multi-selected
+// nav graph RIGIDLY: every selected free node translates by (dx,dy), and every
+// edge whose BOTH endpoints are in the moving set carries its bendPoints along
+// by the same delta. An edge with only ONE endpoint moving keeps its bends (the
+// fixed endpoint stays anchored and the polyline stretches) — never detaches.
+// Mouse group drags and arrow-key nudges share this ONE pure implementation so
+// the two input paths can never disagree.
+
+/**
+ * Translate the selected part of a nav graph by (dx,dy).
+ *
+ * - Nodes listed in `movingNodeIds` move by exactly (dx,dy). Nodes NOT listed
+ *   (and therefore unselected / linked-to-physical-owner nodes that the caller
+ *   deliberately excluded) stay put.
+ * - Edges with BOTH endpoints inside `movingNodeIds` translate their
+ *   bendPoints by the same (dx,dy) — the whole edge rides rigidly with the
+ *   group. Edges with only one moving endpoint are left untouched: the moving
+ *   node translates, the fixed node stays, and the polyline remains attached
+ *   to both (partial-move semantics, matching single-node drags).
+ * - Coordinates are translated exactly (no rounding/clamping here — callers
+ *   round/clamp node positions against their own canvas bounds).
+ */
+export function translateSelectedNavGraph(
+  nodes: NavigationNode[],
+  edges: NavigationEdge[],
+  movingNodeIds: ReadonlySet<string>,
+  dx: number,
+  dy: number,
+): { nodes: NavigationNode[]; edges: NavigationEdge[] } {
+  if ((dx === 0 && dy === 0) || movingNodeIds.size === 0) {
+    return { nodes, edges };
+  }
+  const nextNodes = nodes.map((n) =>
+    movingNodeIds.has(n.id) ? { ...n, x: n.x + dx, y: n.y + dy } : n
+  );
+  const nextEdges = edges.map((e) => {
+    if (!movingNodeIds.has(e.startNodeId) || !movingNodeIds.has(e.endNodeId)) return e;
+    const bends = e.bendPoints;
+    if (!bends || bends.length === 0) return e;
+    return {
+      ...e,
+      bendPoints: bends.map((b) => ({ ...b, x: b.x + dx, y: b.y + dy })),
+    };
+  });
+  return { nodes: nextNodes, edges: nextEdges };
+}
+
+/**
+ * Axis-aligned bounds of a selected nav graph group, used for the group
+ * selection outline. Includes every selected node's coordinates AND the
+ * bendPoints of every edge whose both endpoints are selected (the geometry
+ * that actually rides with the group). Returns null when there is nothing to
+ * bound. `padding` is added on every side (defaults to 18).
+ */
+export function navGroupSelectionBounds(
+  nodes: NavigationNode[],
+  edges: NavigationEdge[],
+  selectedNodeIds: ReadonlySet<string>,
+  selectedEdgeIds: ReadonlySet<string> = new Set(),
+  padding = 18,
+): { x: number; y: number; width: number; height: number } | null {
+  const points: { x: number; y: number }[] = [];
+  for (const n of nodes) {
+    if (selectedNodeIds.has(n.id)) points.push({ x: n.x, y: n.y });
+  }
+  for (const e of edges) {
+    const bothEndpoints = selectedNodeIds.has(e.startNodeId) && selectedNodeIds.has(e.endNodeId);
+    if (!bothEndpoints && !selectedEdgeIds.has(e.id)) continue;
+    for (const b of e.bendPoints ?? []) points.push({ x: b.x, y: b.y });
+  }
+  if (points.length === 0) return null;
+  const xs = points.map((p) => p.x);
+  const ys = points.map((p) => p.y);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+  return {
+    x: minX - padding,
+    y: minY - padding,
+    width: maxX - minX + padding * 2,
+    height: maxY - minY + padding * 2,
+  };
+}
+
+// ── B5 final bulk-routing state fix ────────────────────────────────────────
+// The bulk-routing buttons operate on a graph multi-selection. Each action is
+// a SEMANTIC classification, not a raw field merge: a positive/negative
+// routing classification ALWAYS reopens the connection (closed=false), so the
+// closed flag can never stay invisibly stuck after the admin changes the
+// routing state. Only Mark closed (and the explicit Mark open) control the
+// closed flag directly.
+
+/** Semantic bulk-routing actions available from the graph multi-select panel. */
+export type BulkRoutingAction =
+  | "mark_accessible"
+  | "mark_not_accessible"
+  | "mark_emergency_safe"
+  | "mark_open"
+  | "mark_closed";
+
+/**
+ * Apply ONE semantic bulk-routing action to the given nav edges (only the
+ * edges whose ids are listed are touched). Returns a NEW edges array; edges
+ * outside the selection are returned by identity. Only routing metadata is
+ * mutated — geometry (bendPoints/endpoints/distance), direction
+ * (bidirectional) and color/width are never altered.
+ */
+export function applyBulkRoutingAction(
+  edges: NavigationEdge[],
+  ids: string[],
+  action: BulkRoutingAction,
+): NavigationEdge[] {
+  const target = new Set(ids);
+  return edges.map((e) => {
+    if (!target.has(e.id)) return e;
+    switch (action) {
+      case "mark_accessible":
+        return { ...e, accessible: true, inaccessibleReason: undefined, closed: false };
+      case "mark_not_accessible":
+        // Preserve each edge's existing reason, defaulting like the single-edge
+        // inspector ("other") — matches existing UI behavior.
+        return { ...e, accessible: false, inaccessibleReason: e.inaccessibleReason ?? "other", closed: false };
+      case "mark_emergency_safe":
+        return { ...e, emergencySafe: true, emergencyReason: undefined, closed: false };
+      case "mark_open":
+        return { ...e, closed: false };
+      case "mark_closed":
+        return { ...e, closed: true };
+    }
+  });
+}

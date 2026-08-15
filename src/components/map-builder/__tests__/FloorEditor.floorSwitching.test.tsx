@@ -141,7 +141,10 @@ function floorOne(campus: Campus) {
 }
 
 function floorTwoButton() {
-  return screen.getByRole("button", { name: /Floor 2/i });
+  // Selector-first floor UI: the floor tabs live behind the "Select floor"
+  // dropdown (replaced the always-visible tab buttons).
+  fireEvent.click(screen.getByRole("button", { name: /Select floor/i }));
+  return screen.getByRole("option", { name: /Floor 2/i });
 }
 
 let latestCampus: Campus | null = null;
@@ -278,7 +281,9 @@ describe("FloorEditor floor switching", () => {
     expect(activeFloorId).toBe("f2");
     expect(screen.queryByText("Unsaved Floor Changes")).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: /Ground Floor/i }));
+    // Back to Ground Floor through the same selector dropdown.
+    fireEvent.click(screen.getByRole("button", { name: /Select floor/i }));
+    fireEvent.click(screen.getByRole("option", { name: /Ground Floor/i }));
     fireEvent.mouseDown(svg, { clientX: 140, clientY: 60, bubbles: true });
     fireEvent.mouseUp(svg, { bubbles: true });
 

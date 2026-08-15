@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { X, AlertTriangle, CheckCircle2, MapPin } from "lucide-react";
 import { cn } from "../../lib/utils";
+import { resolveIssueTarget } from "../../lib/issueLocate";
 import type { ValidationIssue, ValidationSeverity } from "./ValidationErrorsDialog";
 
 // ── Issues popover: anchored near the button, shows on hover + click, navigates to issue ──
@@ -117,6 +118,8 @@ export function IssuesPopover({ issues, onIssueClick }: { issues: ValidationIssu
       onMouseLeave={handleMouseLeave}
     >
       <button
+        data-testid="issues-popover"
+        data-count={errorCount}
         onMouseDown={(e) => {
           e.stopPropagation();
           if (!open && issues.length > 0) recalcPos();
@@ -178,35 +181,43 @@ export function IssuesPopover({ issues, onIssueClick }: { issues: ValidationIssu
                       {group.label} ({group.items.length})
                     </span>
                   </div>
-                  {group.items.map((issue, idx) => (
-                    <button
-                      key={`${issue.type}-${issue.buildingId ?? idx}`}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onIssueClick(issue);
-                        setOpen(false);
-                      }}
-                      className="w-full flex items-start gap-2 px-2.5 py-2 rounded-lg text-left transition-all hover:bg-muted/60 active:scale-[0.98]"
-                    >
-                      <div
-                        className="w-4 h-4 rounded-full shrink-0 mt-0.5 flex items-center justify-center"
-                        style={{ background: severityColors[issue.severity].bg }}
-                      >
-                        <AlertTriangle className="h-2.5 w-2.5" style={{ color: severityColors[issue.severity].icon }} />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <span className="text-[11px] font-medium leading-snug block" style={{ color: "var(--foreground)" }}>
-                          {issue.message}
-                        </span>
-                        {issue.buildingId && (
-                          <span className="text-[8px] font-mono mt-0.5 flex items-center gap-1" style={{ color: "var(--muted-foreground)" }}>
-                            <MapPin className="h-2.5 w-2.5" />
-                            Click to locate on map
-                          </span>
+                  {group.items.map((issue, idx) => {
+                    // B5 Final: every locatable issue shows the locate hint —
+                    // the dispatcher derives the target from structured metadata.
+                    const locatable = resolveIssueTarget(issue) != null;
+                    return (
+                      <button
+                        key={`${issue.type}-${issue.buildingId ?? idx}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onIssueClick(issue);
+                          setOpen(false);
+                        }}
+                        className={cn(
+                          "w-full flex items-start gap-2 px-2.5 py-2 rounded-lg text-left transition-all",
+                          locatable ? "hover:bg-muted/60 active:scale-[0.98] cursor-pointer" : "cursor-default"
                         )}
-                      </div>
-                    </button>
-                  ))}
+                      >
+                        <div
+                          className="w-4 h-4 rounded-full shrink-0 mt-0.5 flex items-center justify-center"
+                          style={{ background: severityColors[issue.severity].bg }}
+                        >
+                          <AlertTriangle className="h-2.5 w-2.5" style={{ color: severityColors[issue.severity].icon }} />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <span className="text-[11px] font-medium leading-snug block" style={{ color: "var(--foreground)" }}>
+                            {issue.message}
+                          </span>
+                          {locatable && (
+                            <span className="text-[8px] font-mono mt-0.5 flex items-center gap-1" style={{ color: "var(--muted-foreground)" }}>
+                              <MapPin className="h-2.5 w-2.5" />
+                              Click to locate on map
+                            </span>
+                          )}
+                        </div>
+                      </button>
+                    );
+                  })}
                 </div>
               ))}
             </div>

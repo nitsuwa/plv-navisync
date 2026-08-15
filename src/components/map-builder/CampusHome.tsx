@@ -812,10 +812,12 @@ export function CampusHome({
               {/* Campus cards grid */}
               <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
                 {activeVisible.map((campus, index) => {
-              const rooms = totalRooms(campus);
-              const floors = totalFloors(campus);
               const hydratedBuildingCount = (campus.buildings ?? []).length;
+              const hydratedFloors = totalFloors(campus);
+              const hydratedRooms = totalRooms(campus);
               const previewBuildingCount = campus.previewBuildingCount ?? hydratedBuildingCount;
+              const floors = hydratedFloors > 0 ? hydratedFloors : campus.previewFloorCount ?? 0;
+              const rooms = hydratedRooms > 0 ? hydratedRooms : campus.previewRoomCount ?? 0;
               const hasHydratedPreview = hydratedBuildingCount > 0;
               const markerCount = campus.markers.length;
               return (

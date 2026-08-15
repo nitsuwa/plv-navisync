@@ -553,7 +553,9 @@ describe("B5 Phase 2.2 — Indoor Navigation UX Simplification + Interaction Fix
     expect(svg.style.cursor).toBe("crosshair");
     fireEvent.click(screen.getByRole("button", { name: /Remove/ }));
     expect(svg.style.cursor).toBe("not-allowed");
-    fireEvent.click(screen.getByRole("button", { name: /Select/ }));
+    // Use the nav tool's exact aria-label — /Select/ alone also matches the
+    // floor-selector button ("Select floor") introduced by the selector redesign.
+    fireEvent.click(screen.getByRole("button", { name: "Select waypoints and paths" }));
     expect(svg.style.cursor).toBe("default");
   });
 

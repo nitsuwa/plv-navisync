@@ -305,7 +305,8 @@ describe("B5 Phase 2.1 — Floor Editor Navigation UX / shortcuts / tooling", ()
     fireEvent.keyDown(input, { key: "v", ctrlKey: true });
     fireEvent.keyDown(input, { key: "d", ctrlKey: true });
     // No canvas mutation from shortcuts while typing in the name field.
-    expect(container.querySelectorAll('rect[width="50"][height="40"]')).toHaveLength(1);
+    // (Only the visible room rect — the label layer's transparent hit rect is excluded.)
+    expect(container.querySelectorAll('rect[width="50"][height="40"]:not([fill="transparent"])')).toHaveLength(1);
     expect(onCampusChange.mock.calls.length).toBe(0);
   });
 
@@ -578,7 +579,8 @@ describe("B5 Phase 2.1 — Floor Editor Navigation UX / shortcuts / tooling", ()
     expect(onCampusChange.mock.calls.length).toBe(callsBefore);
     expect(navNodes(container)).toHaveLength(0);
     expect(navLinkedNodes(container)).toHaveLength(0);
-    expect(container.querySelectorAll('rect[width="50"][height="40"]')).toHaveLength(1);
+    // The room stays untouched (only the visible rect — not the transparent label hit rect).
+    expect(container.querySelectorAll('rect[width="50"][height="40"]:not([fill="transparent"])')).toHaveLength(1);
   });
 
   // ── SELECT ──

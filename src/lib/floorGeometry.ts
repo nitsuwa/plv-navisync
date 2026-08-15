@@ -649,8 +649,8 @@ export function resizeCirculationWithinFloor<T extends ResizableCirculationItem>
 ): T {
   const minWidth = "doorWidth" in item ? 14 : 16;
   const minHeight = "doorWidth" in item ? 14 : 12;
-  const maxWidth = "doorWidth" in item ? 58 : 96;
-  const maxHeight = "doorWidth" in item ? 58 : 64;
+  const maxWidth = canvasW;
+  const maxHeight = canvasH;
   const resized = resizeRectLocal(item, corner, dx, dy, canvasW, canvasH, minWidth, minHeight, maxWidth, maxHeight, preserveAspect);
   return { ...resized, width: Math.round(resized.width), height: Math.round(resized.height) } as T;
   let x = item.x;

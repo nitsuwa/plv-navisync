@@ -312,6 +312,7 @@ export interface CampusBuilding {
   height: number;
   color: string;
   floors: FloorPlan[];
+  circulationGroups?: CirculationGroup[];
   expanded?: boolean;
   /** Rotation in degrees (0-360), default 0 */
   rotation?: number;
@@ -338,6 +339,13 @@ export interface CampusBuilding {
     hasRamp: boolean;
     accessibleEntrance: boolean;
   };
+}
+
+export interface CirculationGroup {
+  id: string;
+  buildingId: string;
+  kind: "stair" | "elevator";
+  name: string;
 }
 
 export type BuildingEntranceEdge = "top" | "right" | "bottom" | "left";
@@ -411,9 +419,16 @@ export interface CampusMarker {
 export interface CampusPath {
   id: string;
   points: { x: number; y: number }[];
-  type: string;
+  type: "walkway" | "road" | "accessible" | string;
   color: string;
   width: number;
+  /** Optional editor grouping identity for joined physical Pathway networks. */
+  pathNetworkId?: string;
+  /** Shared-coordinate junction keys intentionally disconnected for this path. */
+  disconnectedJunctionKeys?: string[];
+  name?: string;
+  visible?: boolean;
+  locked?: boolean;
 }
 
 // ── Navigation Node (Waypoint) ──────────────────────────────────────────────
@@ -597,6 +612,10 @@ export interface Campus {
   buildings: CampusBuilding[];
   /** Persisted structure summary used by campus-list previews before full editor hydration. */
   previewBuildingCount?: number;
+  /** Persisted floor summary used by campus-list previews before full editor hydration. */
+  previewFloorCount?: number;
+  /** Persisted room summary used by campus-list previews before full editor hydration. */
+  previewRoomCount?: number;
   /** Lightweight persisted outdoor footprint rows for campus-list thumbnails. */
   previewBuildingsLoaded?: boolean;
   markers: CampusMarker[];
@@ -647,7 +666,7 @@ export type View =
   | { type: "home" }
   | { type: "wizard"; step: 1 | 2 | 3 | 4 | 5; draft: Partial<Campus> }
   | { type: "campus"; campusId: string }
-  | { type: "floor"; campusId: string; buildingId: string; floorId: string }
+  | { type: "floor"; campusId: string; buildingId: string; floorId: string; initialSelection?: FloorSelection }
   | { type: "success"; campusId: string }
   | { type: "create-map"; campusId: string }
   | { type: "map-settings"; campusId: string };
@@ -675,7 +694,12 @@ export type FloorSelection =
   | { type: "stairs"; id: string }
   | { type: "elevator"; id: string }
   | { type: "ramp"; id: string }
-  | { type: "label"; id: string };
+  | { type: "label"; id: string }
+  // B5 Final: issue-locate selections for indoor navigation targets. When the
+  // Floor Editor receives one of these via onOpenFloor's initialSelection it
+  // switches to Navigation mode and selects the node/edge directly.
+  | { type: "navNode"; id: string }
+  | { type: "navEdge"; id: string };
 
 // ── Building wizard omit type ───────────────────────────────────────────────
 
@@ -730,6 +754,7 @@ export type MeasurementUnit = "pixels" | "meters" | "feet";
 // ── Decorative Asset (outdoor campus visual-only objects) ─────────────────
 
 export type DecorAssetType =
+  | "ground-area"
   | "tree" | "tree-large" | "palm"
   | "bench" | "bench-long"
   | "plant" | "bush" | "flower"
@@ -744,10 +769,17 @@ export interface CampusDecorAsset {
   type: DecorAssetType;
   x: number;
   y: number;
+  /** Optional explicit size for non-uniform outdoor areas such as Ground Area. */
+  width?: number;
+  height?: number;
+  /** Appearance variant for the flexible Ground Area asset. */
+  groundType?: "grass" | "planted" | "plaza" | "field";
   rotation?: number;
   scale?: number;
   /** Whether this asset is visible on the canvas */
   visible?: boolean;
+  /** Whether this asset is locked against canvas movement/resizing */
+  locked?: boolean;
   /** Optional custom display name (separate from the asset type label) */
   name?: string;
   /** Visual stacking order shared with buildings (cross-type layer ordering).

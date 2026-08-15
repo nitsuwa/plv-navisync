@@ -1,5 +1,5 @@
 import type {
-  NavigationNode, NavigationEdge, FloorPlan, FloorRoom, FloorDoor,
+  Campus, NavigationNode, NavigationEdge, FloorPlan, FloorRoom, FloorDoor,
   FloorStairs, FloorRamp, FloorElevatorItem, FloorWall, NavigationNodeType,
 } from "../components/map-builder/types";
 import { createNavNode, createNavEdge, findNavNodeAtPoint } from "./navigationGraph";
@@ -621,6 +621,67 @@ export function navEdgeIsBlocked(
   return edgePolylineCrossesWallWithoutDoor(pts, walls, doors) !== null;
 }
 
+// ── B5 Phase 6.10 + placement-reality fix — Indoor blocking furniture ───────
+// EVERY placed furniture object physically occupies floor space, so ANY
+// visible furniture piece (chair, bench, sofa, desk, table, cabinet,
+// bookshelf, workstation, plant…) blocks navigation routing. This is what
+// turns an edge red the moment you place a furniture item on top of it in the
+// Floor Editor Navigation tab — and clears the moment it moves away.
+
+/** B5 Phase 6.10: true when an edge's polyline intersects a furniture object's
+ *  footprint. Checks every segment of the polyline against the rotated
+ *  footprint of each visible furniture piece. Door-linked nodes that sit on a
+ *  wall boundary are exempt (the existing wall-crossing model handles that). */
+export function edgeCrossesBlockingFurniture(
+  points: NavPoint[],
+  furniture: Array<{ x: number; y: number; width: number; height: number; type: string; rotation?: number; visible?: boolean }> | undefined
+): boolean {
+  const blockers = (furniture ?? []).filter((f) => f.visible !== false);
+  if (blockers.length === 0) return false;
+  for (let i = 0; i < points.length - 1; i++) {
+    const a = points[i];
+    const b = points[i + 1];
+    // Sample interior points along the segment (skip endpoints — a linked
+    // node may legitimately sit inside a room that contains furniture).
+    for (let t = 0.1; t <= 0.9; t += 0.2) {
+      const px = a.x + (b.x - a.x) * t;
+      const py = a.y + (b.y - a.y) * t;
+      for (const fb of blockers) {
+        const rad = (-(fb.rotation ?? 0) * Math.PI) / 180;
+        const cx = fb.x + fb.width / 2;
+        const cy = fb.y + fb.height / 2;
+        const cos = Math.cos(rad);
+        const sin = Math.sin(rad);
+        const dx = px - cx;
+        const dy = py - cy;
+        const ux = dx * cos - dy * sin;
+        const uy = dx * sin + dy * cos;
+        const halfW = fb.width / 2;
+        const halfH = fb.height / 2;
+        if (ux >= -halfW && ux <= halfW && uy >= -halfH && uy <= halfH) {
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
+/** B5 Phase 6.10: extended edge-blocked check — wall crossing OR blocking
+ *  furniture intersection. */
+export function navEdgeIsBlockedExtended(
+  edge: Pick<NavigationEdge, "startNodeId" | "endNodeId" | "bendPoints">,
+  nodes: Pick<NavigationNode, "id" | "x" | "y">[],
+  walls: FloorWall[] | undefined,
+  doors: FloorDoor[] | undefined,
+  furniture: Array<{ x: number; y: number; width: number; height: number; type: string; rotation?: number; visible?: boolean }> | undefined
+): boolean {
+  const pts = edgePolylinePoints(edge, nodes);
+  if (!pts || pts.length < 2) return false;
+  if (edgePolylineCrossesWallWithoutDoor(pts, walls, doors) !== null) return true;
+  return edgeCrossesBlockingFurniture(pts, furniture);
+}
+
 /**
  * B5 Phase 2.9: when the START anchor lies on/near wall geometry, report which
  * candidate's FIRST segment leaves the wall PERPENDICULARLY into open floor —
@@ -718,13 +779,18 @@ export function orthogonalBendsFor(
  * committed edit — remove duplicate consecutive points, zero-length segments,
  * and three consecutive collinear points (A─B─C on the same axis drops B).
  * Intentional corners are never removed.
+ *
+ * B5 Phase 6.8: also drops NEAR-duplicate consecutive points (within `eps`
+ * world units) so Connect can never leave two almost-overlapping bend handles
+ * around one corner (e.g. a manually pinned corner plus a regenerated auto-L
+ * corner). The collinear pass stays exact so a legitimate turn is never lost.
  */
-export function normalizeBendPoints(bends: NavPoint[]): NavPoint[] {
+export function normalizeBendPoints(bends: NavPoint[], eps = 2): NavPoint[] {
   if (bends.length < 2) return bends;
   const out: NavPoint[] = [];
   for (const p of bends) {
     const last = out.length > 0 ? out[out.length - 1] : null;
-    if (last && p.x === last.x && p.y === last.y) continue; // duplicate / zero-length
+    if (last && Math.abs(p.x - last.x) <= eps && Math.abs(p.y - last.y) <= eps) continue; // duplicate / near-duplicate / zero-length
     // Drop a collinear middle point while the last two + p share an axis.
     while (out.length >= 2) {
       const a = out[out.length - 2];
@@ -780,6 +846,25 @@ export function translateOrthogonalSegment(
   return origBends.map((bp, i) => (i === bi0 || i === bi1) ? perp(bp) : bp);
 }
 
+/**
+ * B5 Phase 6.8: drag geometry for a STRAIGHT (bend-less) edge segment. The
+ * perpendicular offset produces a clean orthogonal U-dog-leg built from the
+ * FIXED endpoints (A/B never move), matching Floor Editor's straight-segment
+ * drag: A → (A.x, A.y+delta) → (B.x, B.y+delta) → B for a horizontal segment.
+ * `isHorizontal` describes the ORIGINAL segment (a horizontal segment is
+ * dragged vertically). The caller clamps/normalizes the result.
+ */
+export function translateStraightSegment(
+  a: NavPoint,
+  b: NavPoint,
+  delta: number,
+  isHorizontal: boolean
+): NavPoint[] {
+  const perp = (pt: NavPoint): NavPoint =>
+    isHorizontal ? { x: pt.x, y: pt.y + delta } : { x: pt.x + delta, y: pt.y };
+  return [perp(a), perp(b)];
+}
+
 /** Alignment-guide line rendered while snapping a node/bend drag. */
 export interface NavAlignGuide {
   type: "h" | "v";
@@ -787,19 +872,35 @@ export interface NavAlignGuide {
 }
 
 /**
- * B5 Phase 2.8: always-on alignment assistance (replaces the Phase 2.7 Shift
- * snap). When a dragged free waypoint/destination (or bend) target comes within
- * `threshold` of another routing node's X or Y, snap to it and report the guide
- * line(s) to draw. Returns the corrected target + guides (empty when far away).
+ * B5 Phase 2.8 / 6.10: always-on alignment assistance (replaces the Phase 2.7
+ * Shift snap). When a dragged free waypoint/destination (or bend) target comes
+ * within `threshold` of another routing node's X or Y, snap to it and report
+ * the guide line(s) to draw. Returns the corrected target + guides (empty when
+ * far away).
+ *
+ * B5 Phase 6.10: connected-node priority — nodes whose IDs appear in
+ * `connectedIds` are checked FIRST so they win over a closer-but-unconnected
+ * node at the same axis within threshold. This makes it easy to straighten an
+ * edge by dragging one endpoint near the other's axis.
  */
 export function navAlignSnap(
   target: NavPoint,
-  others: { x: number; y: number }[],
-  threshold = 8
+  others: { x: number; y: number; id?: string }[],
+  threshold = 8,
+  connectedIds?: Set<string>
 ): { x: number; y: number; guides: NavAlignGuide[] } {
+  // B5 Phase 6.10: sort so connected nodes come first — they win when
+  // two candidates are within threshold on the same axis.
+  const sorted = connectedIds && connectedIds.size > 0
+    ? [...others].sort((a, b) => {
+        const aConn = a.id && connectedIds.has(a.id) ? 0 : 1;
+        const bConn = b.id && connectedIds.has(b.id) ? 0 : 1;
+        return aConn - bConn;
+      })
+    : others;
   let bestX: { d: number; pos: number } | null = null;
   let bestY: { d: number; pos: number } | null = null;
-  for (const o of others) {
+  for (const o of sorted) {
     const dx = Math.abs(o.x - target.x);
     if (dx <= threshold && (!bestX || dx < bestX.d)) bestX = { d: dx, pos: o.x };
     const dy = Math.abs(o.y - target.y);
@@ -837,27 +938,31 @@ export function navGroupAlignSnap(
   const minY = bbox.minY + dy;
   const maxY = bbox.minY + bbox.height + dy;
   const centerY = (minY + maxY) / 2;
-  let bestX: { d: number; pos: number } | null = null;
-  let bestY: { d: number; pos: number } | null = null;
+  // `ref` records WHICH candidate edge matched (min/max/center), so the
+  // adjustment moves the group so that edge lands on the other node — never
+  // minX/minY blindly (B5 correction: snapping maxX/centerX previously added
+  // (bestX.pos - minX), teleporting the whole group).
+  let bestX: { d: number; pos: number; ref: number } | null = null;
+  let bestY: { d: number; pos: number; ref: number } | null = null;
   for (const o of others) {
     for (const pos of [minX, maxX, centerX]) {
       const d = Math.abs(o.x - pos);
-      if (d <= threshold && (!bestX || d < bestX.d)) bestX = { d, pos: o.x };
+      if (d <= threshold && (!bestX || d < bestX.d)) bestX = { d, pos: o.x, ref: pos };
     }
     for (const pos of [minY, maxY, centerY]) {
       const d = Math.abs(o.y - pos);
-      if (d <= threshold && (!bestY || d < bestY.d)) bestY = { d, pos: o.y };
+      if (d <= threshold && (!bestY || d < bestY.d)) bestY = { d, pos: o.y, ref: pos };
     }
   }
   const guides: NavAlignGuide[] = [];
   let ndx = dx;
   let ndy = dy;
   if (bestX) {
-    ndx += bestX.pos - minX;
+    ndx += bestX.pos - bestX.ref;
     guides.push({ type: "v", pos: bestX.pos });
   }
   if (bestY) {
-    ndy += bestY.pos - minY;
+    ndy += bestY.pos - bestY.ref;
     guides.push({ type: "h", pos: bestY.pos });
   }
   return { dx: ndx, dy: ndy, guides };
@@ -922,4 +1027,196 @@ export function remapIndoorNavForFloorCopy(
       endNodeId: idMap.get(e.endNodeId)!,
     }));
   return { navNodes: remappedNodes, navEdges: remappedEdges };
+}
+
+// ── B5 Phase 3 — Cross-floor navigation transitions ────────────────────────
+// Stairs and Elevators share a physical identity across floors via the
+// circulation object's `sharedId`. Each floor keeps its OWN local NavigationNode
+// (the routing anchor at the local physical object); cross-floor travel is
+// represented by dedicated transition NavigationEdges between the floor-specific
+// nodes of the SAME (kind, sharedId) chain. Transitions are fully DERIVED and
+// idempotent — every campus write reconciles them, so there is never a separate
+// in-memory-only transition system and never a duplicate edge.
+
+/** The NavigationEdge.type used to mark a cross-floor transition edge. */
+export const CROSS_FLOOR_EDGE_TYPE = "floor_transition";
+
+export type CrossFloorKind = "stair" | "elevator";
+
+/**
+ * Accessibility default for a cross-floor transition: stairs are NOT accessible
+ * (a stairwell cannot be used by wheelchairs), elevators ARE.
+ */
+export function crossFloorTransitionAccessible(kind: CrossFloorKind): boolean {
+  return kind !== "stair";
+}
+
+/** Physical-circulation metadata needed to reconcile one node's transitions. */
+export interface CrossFloorOwnerInfo {
+  kind: CrossFloorKind;
+  ownerId: string;
+  sharedId: string;
+  floorId: string;
+  floorOrder: number;
+  floorNumber: number;
+  floorLabel: string;
+  /** Elevator served floors (floor NUMBERS) — undefined when unspecified. */
+  servedFloors?: number[];
+}
+
+/**
+ * Resolve the cross-floor identity of a linked circulation node: its physical
+ * owner, the owner's `sharedId`, and the floor it sits on. Returns null for
+ * free nodes, non-transition circulation links, objects WITHOUT a sharedId, and
+ * nodes of a different building. Ramps are local accessible path anchors, not
+ * floor-to-floor transition devices. A physical object that was never linked
+ * has no node, so it can never create a transition (the admin's Link Location
+ * workflow is preserved — §10).
+ */
+export function findCrossFloorOwnerInfo(
+  node: NavigationNode,
+  floors: Pick<FloorPlan, "id" | "number" | "label" | "stairs" | "ramps" | "elevators">[] | undefined,
+  buildingId: string
+): CrossFloorOwnerInfo | null {
+  if (node.buildingId !== buildingId) return null;
+  const floorOrder = (floors ?? []).findIndex((f) => f.id === node.floorId);
+  const floor = floorOrder >= 0 ? (floors ?? [])[floorOrder] : undefined;
+  if (!floor) return null;
+  if (node.stairId) {
+    const owner = (floor.stairs ?? []).find((s) => s.id === node.stairId);
+    if (!owner?.sharedId) return null;
+    return { kind: "stair", ownerId: node.stairId, sharedId: owner.sharedId, floorId: floor.id, floorOrder, floorNumber: floor.number ?? 0, floorLabel: floor.label };
+  }
+  if (node.elevatorId) {
+    const owner = (floor.elevators ?? []).find((e) => e.id === node.elevatorId);
+    if (!owner?.sharedId) return null;
+    return {
+      kind: "elevator", ownerId: node.elevatorId, sharedId: owner.sharedId,
+      floorId: floor.id, floorOrder,
+      floorNumber: floor.number ?? 0, floorLabel: floor.label,
+      servedFloors: owner.floors && owner.floors.length > 0 ? owner.floors : undefined,
+    };
+  }
+  return null;
+}
+
+/**
+ * Reconcile the building's cross-floor transition edges against the CURRENT
+ * linked circulation nodes (pure + idempotent — safe to run on every campus
+ * write):
+ *  - nodes sharing the same (kind, sharedId) form one chain;
+ *  - Stairs link ADJACENT canonical floors only (1↔2, 2↔3 — never 1↔3);
+ *  - Elevators additionally respect the physical served `floors` list — nodes
+ *    on floors the shaft does not serve never participate, and adjacent served
+ *    stops are connected in current canonical building-floor order;
+ *  - at most ONE edge per node pair: an existing transition edge for the exact
+ *    pair is REUSED (same id), otherwise one is created;
+ *  - stale transition edges (pair no longer valid, kind mismatch, sharedId
+ *    changed, or one endpoint deleted) are removed;
+ *  - non-transition edges pass through untouched.
+ * Transition edges carry `type: CROSS_FLOOR_EDGE_TYPE` so the semantic intent
+ * is explicit (never inferred from endpoint floorIds) and so the Floor Editor
+ * can exclude them from walkable-floor editing (bend handles, wall checks).
+ */
+export function reconcileCrossFloorTransitions(
+  nodes: NavigationNode[] | undefined,
+  edges: NavigationEdge[] | undefined,
+  floors: Pick<FloorPlan, "id" | "number" | "label" | "stairs" | "ramps" | "elevators">[] | undefined,
+  buildingId: string
+): NavigationEdge[] {
+  const safeNodes = nodes ?? [];
+  const safeEdges = edges ?? [];
+  // 1) Group linked circulation nodes by (kind, sharedId).
+  const groups = new Map<string, { node: NavigationNode; info: CrossFloorOwnerInfo }[]>();
+  for (const node of safeNodes) {
+    const info = findCrossFloorOwnerInfo(node, floors, buildingId);
+    if (!info) continue;
+    const key = `${info.kind}:${info.sharedId}`;
+    const list = groups.get(key) ?? [];
+    list.push({ node, info });
+    groups.set(key, list);
+  }
+  // 2) Desired pairs: adjacent canonical floors/stops only; elevators filtered
+  // to served floors.
+  const desired = new Map<string, { a: string; b: string; accessible: boolean }>();
+  for (const group of groups.values()) {
+    if (group.length < 2) continue;
+    const kind = group[0].info.kind;
+    // Elevator served floors: as soon as ANY member of the chain declares a
+    // served-floor list, the list set is authoritative — a node whose floor is
+    // in NO member's served list never participates (no invented stops), while
+    // partial/inconsistent authoring (one owner lists, another doesn't) still
+    // links the floors that ARE served by at least one member.
+    const servedLists = kind === "elevator"
+      ? group.map((p) => p.info.servedFloors).filter((l): l is number[] => !!l && l.length > 0)
+      : [];
+    const participants = servedLists.length > 0
+      ? group.filter((p) => servedLists.some((l) => l.includes(p.info.floorNumber)))
+      : group;
+    const sorted = [...participants].sort((a, b) => a.info.floorOrder - b.info.floorOrder);
+    for (let i = 0; i < sorted.length - 1; i++) {
+      const a = sorted[i];
+      const b = sorted[i + 1];
+      if (a.info.floorId === b.info.floorId) continue; // same floor — not a transition
+      if (kind === "stair" && Math.abs(a.info.floorOrder - b.info.floorOrder) !== 1) continue;
+      const pairKey = [a.node.id, b.node.id].sort().join("|");
+      desired.set(pairKey, { a: a.node.id, b: b.node.id, accessible: crossFloorTransitionAccessible(kind) });
+    }
+  }
+  // 3) Reuse existing transition edges for identical pairs (idempotent ids).
+  const existingByPair = new Map<string, NavigationEdge>();
+  for (const e of safeEdges) {
+    if (e.type !== CROSS_FLOOR_EDGE_TYPE) continue;
+    existingByPair.set([e.startNodeId, e.endNodeId].sort().join("|"), e);
+  }
+  const transitionEdges: NavigationEdge[] = [];
+  for (const entry of desired.values()) {
+    const pairKey = [entry.a, entry.b].sort().join("|");
+    const existing = existingByPair.get(pairKey);
+    transitionEdges.push(existing
+      ? { ...existing, accessible: entry.accessible }
+      : {
+          id: genId("ne"),
+          startNodeId: entry.a,
+          endNodeId: entry.b,
+          distance: 1,
+          bidirectional: true,
+          accessible: entry.accessible,
+          emergencySafe: true,
+          type: CROSS_FLOOR_EDGE_TYPE,
+          color: "#475569",
+          width: 1,
+        });
+  }
+  // 4) Non-transition edges pass through; stale transitions are dropped.
+  return [...safeEdges.filter((e) => e.type !== CROSS_FLOOR_EDGE_TYPE), ...transitionEdges];
+}
+
+/**
+ * Canonical floor-order mutation used by both the outer Campus hierarchy and
+ * the Floor Editor. Replacing the floors array changes the building's canonical
+ * order, then immediately reconciles derived cross-floor transition edges
+ * against that same order. Stair direction validity/defaults are derived in UI
+ * from this array, so callers must route floor reorder/add/delete/rename
+ * through here rather than splicing a separate local path.
+ */
+export function replaceBuildingFloorsAndReconcileTransitions(
+  campus: Campus,
+  buildingId: string,
+  floors: FloorPlan[]
+): Campus {
+  const next: Campus = {
+    ...campus,
+    buildings: campus.buildings.map((building) =>
+      building.id === buildingId ? { ...building, floors } : building
+    ),
+  };
+  return {
+    ...next,
+    navEdges: reconcileCrossFloorTransitions(
+      next.navNodes, next.navEdges,
+      next.buildings.find((building) => building.id === buildingId)?.floors,
+      buildingId
+    ),
+  };
 }

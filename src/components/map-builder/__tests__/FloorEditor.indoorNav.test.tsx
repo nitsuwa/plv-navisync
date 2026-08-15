@@ -330,7 +330,7 @@ describe("B5 Phase 2 — Floor Editor indoor Navigation mode", () => {
     fireEvent.mouseDown(navNodes(container)[0], { clientX: 40, clientY: 40, bubbles: true });
     fireEvent.mouseUp(svg, { bubbles: true });
     // B5 Phase 2.7: the connect hint now advertises empty-space bend pinning.
-    expect(screen.getByText(/click empty space to pin a bend/)).toBeTruthy();
+    expect(screen.getByText(/Shift for H\/V/)).toBeTruthy();
     fireEvent.keyDown(window, { key: "Escape" });
     expect(navEdges(container)).toHaveLength(0);
     expect(screen.queryByTestId("floor-nav-connect-preview")).toBeNull();

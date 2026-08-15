@@ -22,7 +22,12 @@ import {
   navGroupAlignSnap,
   remapIndoorNavForFloorCopy,
   navEdgeIsBlocked,
+  CROSS_FLOOR_EDGE_TYPE,
+  crossFloorTransitionAccessible,
+  findCrossFloorOwnerInfo,
+  reconcileCrossFloorTransitions,
 } from "../indoorNavigationGraph";
+import { createNavEdge, normalizeNavGraph } from "../navigationGraph";
 import type {
   FloorPlan, FloorWall, FloorDoor, NavigationNode, NavigationEdge,
 } from "../../components/map-builder/types";
@@ -531,5 +536,477 @@ describe("B5 Phase 2.11 — live validity of EXISTING authored edges (navEdgeIsB
 
   it("an edge wholly clear of walls is valid", () => {
     expect(navEdgeIsBlocked({ startNodeId: "n1", endNodeId: "n2", bendPoints: [{ x: 20, y: 100 }] }, nodes, [wall], [])).toBe(false);
+  });
+});
+
+describe("B5 Phase 3 — cross-floor navigation transitions", () => {
+  const stair = (id: string, sharedId: string) => ({
+    id, x: 40, y: 40, width: 20, height: 16, direction: "both" as const, label: "Stairs", sharedId,
+  });
+  const elevator = (id: string, sharedId: string, floors?: number[]) => ({
+    id, x: 40, y: 40, width: 14, height: 14, doorWidth: 6, label: "Elevator", sharedId,
+    ...(floors ? { floors } : {}),
+  });
+  const ramp = (id: string, sharedId: string) => ({
+    id, x: 40, y: 40, width: 20, height: 12, label: "Ramp", direction: "both" as const, sharedId,
+  });
+  const floors: Pick<FloorPlan, "id" | "number" | "label" | "stairs" | "ramps" | "elevators">[] = [
+    { id: "f1", number: 1, label: "Ground Floor", stairs: [stair("s1", "stair-core-a")], ramps: [], elevators: [] },
+    { id: "f2", number: 2, label: "Floor 2", stairs: [stair("s2", "stair-core-a")], ramps: [], elevators: [] },
+    { id: "f3", number: 3, label: "Floor 3", stairs: [stair("s3", "stair-core-a")], ramps: [], elevators: [] },
+  ];
+  const linked = (id: string, floorId: string, refs: Partial<NavigationNode>): NavigationNode => ({
+    id, name: "Stairs", type: "stair", x: 50, y: 48, buildingId: "b1", floorId, accessible: false, color: "#16a34a", ...refs,
+  });
+
+  it("matching Stair sharedId on adjacent floors produces ONE transition edge (stair = not accessible)", () => {
+    const nodes = [
+      linked("n1", "f1", { stairId: "s1" }),
+      linked("n2", "f2", { stairId: "s2" }),
+    ];
+    const edges = reconcileCrossFloorTransitions(nodes, [], floors, "b1");
+    expect(edges).toHaveLength(1);
+    const t = edges[0];
+    expect(t.type).toBe(CROSS_FLOOR_EDGE_TYPE);
+    expect(t.accessible).toBe(false);
+    expect(crossFloorTransitionAccessible("stair")).toBe(false);
+    expect([t.startNodeId, t.endNodeId].sort()).toEqual(["n1", "n2"]);
+  });
+
+  it("unrelated sharedIds do not connect", () => {
+    const otherFloors = [
+      { id: "f1", number: 1, label: "Ground Floor", stairs: [stair("s1", "stair-core-a")], ramps: [], elevators: [] },
+      { id: "f2", number: 2, label: "Floor 2", stairs: [stair("s2", "stair-core-b")], ramps: [], elevators: [] },
+    ];
+    const nodes = [
+      linked("n1", "f1", { stairId: "s1" }),
+      linked("n2", "f2", { stairId: "s2" }),
+    ];
+    expect(reconcileCrossFloorTransitions(nodes, [], otherFloors, "b1")).toHaveLength(0);
+  });
+
+  it("a Stair and an Elevator sharing a sharedId do NOT connect (kind isolation)", () => {
+    const mixedFloors = [
+      { id: "f1", number: 1, label: "Ground Floor", stairs: [stair("s1", "core-a")], ramps: [], elevators: [] },
+      { id: "f2", number: 2, label: "Floor 2", stairs: [], ramps: [], elevators: [elevator("e2", "core-a")] },
+    ];
+    const nodes = [
+      linked("n1", "f1", { stairId: "s1" }),
+      linked("n2", "f2", { elevatorId: "e2", type: "elevator" }),
+    ];
+    expect(reconcileCrossFloorTransitions(nodes, [], mixedFloors, "b1")).toHaveLength(0);
+  });
+
+  it("a three-floor Stair chain creates ADJACENT transitions only (never 1→3)", () => {
+    const nodes = [
+      linked("n1", "f1", { stairId: "s1" }),
+      linked("n2", "f2", { stairId: "s2" }),
+      linked("n3", "f3", { stairId: "s3" }),
+    ];
+    const edges = reconcileCrossFloorTransitions(nodes, [], floors, "b1");
+    expect(edges).toHaveLength(2);
+    const pairs = edges.map((e) => [e.startNodeId, e.endNodeId].sort().join("|")).sort();
+    expect(pairs).toEqual(["n1|n2", "n2|n3"]);
+  });
+
+  it("a four-floor Stair chain creates exactly N-1 adjacent canonical transitions", () => {
+    const fourFloors: Pick<FloorPlan, "id" | "number" | "label" | "stairs" | "ramps" | "elevators">[] = [
+      { id: "fa", number: 1, label: "Ground Floor", stairs: [stair("sa", "stair-s")], ramps: [], elevators: [] },
+      { id: "fb", number: 2, label: "Floor 2", stairs: [stair("sb", "stair-s")], ramps: [], elevators: [] },
+      { id: "fc", number: 3, label: "Floor 3", stairs: [stair("sc", "stair-s")], ramps: [], elevators: [] },
+      { id: "fd", number: 4, label: "Floor 4", stairs: [stair("sd", "stair-s")], ramps: [], elevators: [] },
+    ];
+    const nodes = [
+      linked("na", "fa", { stairId: "sa" }),
+      linked("nb", "fb", { stairId: "sb" }),
+      linked("nc", "fc", { stairId: "sc" }),
+      linked("nd", "fd", { stairId: "sd" }),
+    ];
+    const edges = reconcileCrossFloorTransitions(nodes, [], fourFloors, "b1");
+    const pairs = edges.map((e) => [e.startNodeId, e.endNodeId].sort().join("|")).sort();
+    expect(pairs).toEqual(["na|nb", "nb|nc", "nc|nd"]);
+    expect(pairs).not.toContain("na|nc");
+    expect(pairs).not.toContain("na|nd");
+    expect(pairs).not.toContain("nb|nd");
+
+    const reordered = [fourFloors[3], fourFloors[0], fourFloors[1], fourFloors[2]];
+    const afterReorder = reconcileCrossFloorTransitions(nodes, edges, reordered, "b1");
+    const reorderedPairs = afterReorder.map((e) => [e.startNodeId, e.endNodeId].sort().join("|")).sort();
+    expect(reorderedPairs).toEqual(["na|nb", "na|nd", "nb|nc"]);
+    expect(reorderedPairs).not.toContain("nc|nd");
+    expect(new Set(afterReorder.map((e) => e.id)).size).toBe(afterReorder.length);
+  });
+
+  it("Stairs do not skip a missing linked intermediate floor", () => {
+    const fourFloors: Pick<FloorPlan, "id" | "number" | "label" | "stairs" | "ramps" | "elevators">[] = [
+      { id: "fa", number: 1, label: "Ground Floor", stairs: [stair("sa", "stair-s")], ramps: [], elevators: [] },
+      { id: "fb", number: 2, label: "Floor 2", stairs: [stair("sb", "stair-s")], ramps: [], elevators: [] },
+      { id: "fc", number: 3, label: "Floor 3", stairs: [stair("sc", "stair-s")], ramps: [], elevators: [] },
+      { id: "fd", number: 4, label: "Floor 4", stairs: [stair("sd", "stair-s")], ramps: [], elevators: [] },
+    ];
+    const nodes = [
+      linked("na", "fa", { stairId: "sa" }),
+      linked("nb", "fb", { stairId: "sb" }),
+      linked("nd", "fd", { stairId: "sd" }),
+    ];
+    const edges = reconcileCrossFloorTransitions(nodes, [], fourFloors, "b1");
+    expect(edges.map((e) => [e.startNodeId, e.endNodeId].sort().join("|"))).toEqual(["na|nb"]);
+  });
+
+  it("Stair reconciliation cleans existing stale skip edges after canonical reorder", () => {
+    const reordered: Pick<FloorPlan, "id" | "number" | "label" | "stairs" | "ramps" | "elevators">[] = [
+      { id: "fg", number: 1, label: "Ground Floor", stairs: [stair("sg", "stair-s")], ramps: [], elevators: [] },
+      { id: "f3", number: 3, label: "Floor 3", stairs: [stair("s3", "stair-s")], ramps: [], elevators: [] },
+      { id: "f2", number: 2, label: "Floor 2", stairs: [stair("s2", "stair-s")], ramps: [], elevators: [] },
+      { id: "f4", number: 4, label: "Floor 4", stairs: [stair("s4", "stair-s")], ramps: [], elevators: [] },
+    ];
+    const nodes = [
+      linked("ng", "fg", { stairId: "sg" }),
+      linked("n3", "f3", { stairId: "s3" }),
+      linked("n2", "f2", { stairId: "s2" }),
+      linked("n4", "f4", { stairId: "s4" }),
+    ];
+    const staleEdges: NavigationEdge[] = [
+      { id: "bad-ground-floor2", startNodeId: "ng", endNodeId: "n2", distance: 1, bidirectional: true, accessible: false, emergencySafe: true, type: CROSS_FLOOR_EDGE_TYPE, color: "#475569", width: 1 },
+      { id: "bad-ground-floor4", startNodeId: "ng", endNodeId: "n4", distance: 1, bidirectional: true, accessible: false, emergencySafe: true, type: CROSS_FLOOR_EDGE_TYPE, color: "#475569", width: 1 },
+      { id: "normal-walkway", startNodeId: "n2", endNodeId: "n4", distance: 20, bidirectional: true, accessible: true, emergencySafe: true, type: "walkway", color: "#16a34a", width: 4 },
+    ];
+    const edges = reconcileCrossFloorTransitions(nodes, staleEdges, reordered, "b1");
+    const transitions = edges.filter((e) => e.type === CROSS_FLOOR_EDGE_TYPE);
+    const pairs = transitions.map((e) => [e.startNodeId, e.endNodeId].sort().join("|")).sort();
+    expect(pairs).toEqual(["n2|n3", "n2|n4", "n3|ng"]);
+    expect(pairs).not.toContain("n2|ng");
+    expect(pairs).not.toContain("n4|ng");
+    expect(edges.some((e) => e.id === "normal-walkway")).toBe(true);
+  });
+
+  it("Stair adjacency follows canonical floor array order, not floor numbers", () => {
+    const reordered = [floors[2], floors[0], floors[1]]; // Floor 3, Ground Floor, Floor 2
+    const nodes = [
+      linked("n1", "f1", { stairId: "s1" }),
+      linked("n2", "f2", { stairId: "s2" }),
+      linked("n3", "f3", { stairId: "s3" }),
+    ];
+    const edges = reconcileCrossFloorTransitions(nodes, [], reordered, "b1");
+    const pairs = edges.map((e) => [e.startNodeId, e.endNodeId].sort().join("|")).sort();
+    expect(pairs).toEqual(["n1|n2", "n1|n3"]);
+  });
+
+  it("an Elevator links only its SERVED floors (nodes on unserved floors never participate)", () => {
+    const elevatorFloors: Pick<FloorPlan, "id" | "number" | "label" | "stairs" | "ramps" | "elevators">[] = [
+      { id: "f1", number: 1, label: "Ground Floor", stairs: [], ramps: [], elevators: [elevator("e1", "el-a", [1, 3])] },
+      { id: "f2", number: 2, label: "Floor 2", stairs: [], ramps: [], elevators: [elevator("e2", "el-a", [1, 3])] },
+      { id: "f3", number: 3, label: "Floor 3", stairs: [], ramps: [], elevators: [elevator("e3", "el-a", [1, 3])] },
+    ];
+    const nodes = [
+      linked("n1", "f1", { elevatorId: "e1", type: "elevator" }),
+      linked("n2", "f2", { elevatorId: "e2", type: "elevator" }),
+      linked("n3", "f3", { elevatorId: "e3", type: "elevator" }),
+    ];
+    const edges = reconcileCrossFloorTransitions(nodes, [], elevatorFloors, "b1");
+    expect(edges).toHaveLength(1);
+    expect(edges[0].accessible).toBe(true); // elevator transition = accessible
+    expect([edges[0].startNodeId, edges[0].endNodeId].sort()).toEqual(["n1", "n3"]);
+  });
+
+  it("Elevator served floors remain respected while served participants use canonical order", () => {
+    const elevatorFloors: Pick<FloorPlan, "id" | "number" | "label" | "stairs" | "ramps" | "elevators">[] = [
+      { id: "f3", number: 3, label: "Floor 3", stairs: [], ramps: [], elevators: [elevator("e3", "el-a", [1, 3])] },
+      { id: "f1", number: 1, label: "Ground Floor", stairs: [], ramps: [], elevators: [elevator("e1", "el-a", [1, 3])] },
+      { id: "f2", number: 2, label: "Floor 2", stairs: [], ramps: [], elevators: [elevator("e2", "el-a", [1, 3])] },
+    ];
+    const nodes = [
+      linked("n1", "f1", { elevatorId: "e1", type: "elevator" }),
+      linked("n2", "f2", { elevatorId: "e2", type: "elevator" }),
+      linked("n3", "f3", { elevatorId: "e3", type: "elevator" }),
+    ];
+    const edges = reconcileCrossFloorTransitions(nodes, [], elevatorFloors, "b1");
+    expect(edges).toHaveLength(1);
+    expect([edges[0].startNodeId, edges[0].endNodeId].sort()).toEqual(["n1", "n3"]);
+  });
+
+  it("an Elevator chain connects adjacent served stops only, never skipping through", () => {
+    const elevatorFloors: Pick<FloorPlan, "id" | "number" | "label" | "stairs" | "ramps" | "elevators">[] = [
+      { id: "f1", number: 1, label: "Ground Floor", stairs: [], ramps: [], elevators: [elevator("e1", "el-a", [1, 2, 4])] },
+      { id: "f2", number: 2, label: "Floor 2", stairs: [], ramps: [], elevators: [elevator("e2", "el-a", [1, 2, 4])] },
+      { id: "f3", number: 3, label: "Floor 3", stairs: [], ramps: [], elevators: [elevator("e3", "el-a", [1, 2, 4])] },
+      { id: "f4", number: 4, label: "Floor 4", stairs: [], ramps: [], elevators: [elevator("e4", "el-a", [1, 2, 4])] },
+    ];
+    const nodes = [
+      linked("n1", "f1", { elevatorId: "e1", type: "elevator" }),
+      linked("n2", "f2", { elevatorId: "e2", type: "elevator" }),
+      linked("n3", "f3", { elevatorId: "e3", type: "elevator" }),
+      linked("n4", "f4", { elevatorId: "e4", type: "elevator" }),
+    ];
+    const edges = reconcileCrossFloorTransitions(nodes, [], elevatorFloors, "b1");
+    const pairs = edges.map((e) => [e.startNodeId, e.endNodeId].sort().join("|")).sort();
+    expect(pairs).toEqual(["n1|n2", "n2|n4"]);
+    expect(pairs).not.toContain("n1|n4");
+    expect(edges.every((e) => e.accessible)).toBe(true);
+  });
+
+  it("removing an Elevator served floor removes stale transition edges and preserves idempotency", () => {
+    const elevatorFloors: Pick<FloorPlan, "id" | "number" | "label" | "stairs" | "ramps" | "elevators">[] = [
+      { id: "f1", number: 1, label: "Ground Floor", stairs: [], ramps: [], elevators: [elevator("e1", "el-a", [1, 2, 4])] },
+      { id: "f2", number: 2, label: "Floor 2", stairs: [], ramps: [], elevators: [elevator("e2", "el-a", [1, 2, 4])] },
+      { id: "f4", number: 4, label: "Floor 4", stairs: [], ramps: [], elevators: [elevator("e4", "el-a", [1, 2, 4])] },
+    ];
+    const nodes = [
+      linked("n1", "f1", { elevatorId: "e1", type: "elevator" }),
+      linked("n2", "f2", { elevatorId: "e2", type: "elevator" }),
+      linked("n4", "f4", { elevatorId: "e4", type: "elevator" }),
+    ];
+    const first = reconcileCrossFloorTransitions(nodes, [], elevatorFloors, "b1");
+    expect(first.map((e) => [e.startNodeId, e.endNodeId].sort().join("|")).sort()).toEqual(["n1|n2", "n2|n4"]);
+
+    const removedStop = elevatorFloors.map((f) => ({
+      ...f,
+      elevators: (f.elevators ?? []).map((e) => ({ ...e, floors: [1, 4] })),
+    }));
+    const afterRemoval = reconcileCrossFloorTransitions(nodes, first, removedStop, "b1");
+    expect(afterRemoval).toHaveLength(1);
+    expect([afterRemoval[0].startNodeId, afterRemoval[0].endNodeId].sort()).toEqual(["n1", "n4"]);
+
+    const again = reconcileCrossFloorTransitions(nodes, afterRemoval, removedStop, "b1");
+    expect(again).toEqual(afterRemoval);
+  });
+
+  it("Ramp nodes stay local accessible anchors and do NOT create floor transitions", () => {
+    const rampFloors: Pick<FloorPlan, "id" | "number" | "label" | "stairs" | "ramps" | "elevators">[] = [
+      { id: "f1", number: 1, label: "Ground Floor", stairs: [], ramps: [ramp("r1", "ramp-a")], elevators: [] },
+      { id: "f2", number: 2, label: "Floor 2", stairs: [], ramps: [ramp("r2", "ramp-a")], elevators: [] },
+    ];
+    const nodes = [
+      linked("n1", "f1", { rampId: "r1", type: "ramp", x: 50, y: 46 }), // centered anchors
+      linked("n2", "f2", { rampId: "r2", type: "ramp", x: 50, y: 46 }),
+    ];
+    const edges = reconcileCrossFloorTransitions(nodes, [], rampFloors, "b1");
+    expect(edges).toHaveLength(0);
+    expect(findCrossFloorOwnerInfo(nodes[0], rampFloors, "b1")).toBeNull();
+    expect(createIndoorNavNode("ramp", "Ramp", { x: 50, y: 46 }, { buildingId: "b1", floorId: "f1", rampId: "r1" }).accessible).toBe(true);
+    expect(createNavEdge("n1", "n2", 12).accessible).toBe(true);
+  });
+
+  it("stale automatic Ramp transition edges are removed deterministically", () => {
+    const rampFloors: Pick<FloorPlan, "id" | "number" | "label" | "stairs" | "ramps" | "elevators">[] = [
+      { id: "f3", number: 3, label: "Floor 3", stairs: [], ramps: [ramp("r3", "ramp-a")], elevators: [] },
+      { id: "f1", number: 1, label: "Ground Floor", stairs: [], ramps: [ramp("r1", "ramp-a")], elevators: [] },
+      { id: "f2", number: 2, label: "Floor 2", stairs: [], ramps: [ramp("r2", "ramp-a")], elevators: [] },
+    ];
+    const nodes = [
+      linked("n1", "f1", { rampId: "r1", type: "ramp" }),
+      linked("n2", "f2", { rampId: "r2", type: "ramp" }),
+      linked("n3", "f3", { rampId: "r3", type: "ramp" }),
+    ];
+    const stale: NavigationEdge = {
+      id: "stale-ramp-transition",
+      startNodeId: "n1",
+      endNodeId: "n2",
+      distance: 1,
+      bidirectional: true,
+      accessible: true,
+      emergencySafe: true,
+      type: CROSS_FLOOR_EDGE_TYPE,
+      color: "#475569",
+      width: 1,
+    };
+    const localWalkway: NavigationEdge = {
+      id: "local-ramp-walkway",
+      startNodeId: "n1",
+      endNodeId: "n2",
+      distance: 12,
+      bidirectional: true,
+      accessible: true,
+      emergencySafe: true,
+      type: "walkway",
+      color: "#16a34a",
+      width: 4,
+    };
+    const edges = reconcileCrossFloorTransitions(nodes, [stale, localWalkway], rampFloors, "b1");
+    expect(edges).toEqual([localWalkway]);
+  });
+
+  it("an UNLINKED physical circulation object creates no transition (Link Location stays intentional)", () => {
+    // Only floor 1 has a linked node — floor 2's matching stair exists but was
+    // never linked into navigation.
+    const nodes = [linked("n1", "f1", { stairId: "s1" })];
+    expect(reconcileCrossFloorTransitions(nodes, [], floors, "b1")).toHaveLength(0);
+  });
+
+  it("creating the matching second-floor node reconciles the transition", () => {
+    const oneNode = [linked("n1", "f1", { stairId: "s1" })];
+    const without = reconcileCrossFloorTransitions(oneNode, [], floors, "b1");
+    expect(without).toHaveLength(0);
+    // The second floor's node is linked → the transition appears automatically.
+    const both = [linked("n1", "f1", { stairId: "s1" }), linked("n2", "f2", { stairId: "s2" })];
+    expect(reconcileCrossFloorTransitions(both, without, floors, "b1")).toHaveLength(1);
+  });
+
+  it("repeated reconciliation is idempotent — no duplicate edges, same edge id", () => {
+    const nodes = [
+      linked("n1", "f1", { stairId: "s1" }),
+      linked("n2", "f2", { stairId: "s2" }),
+    ];
+    const first = reconcileCrossFloorTransitions(nodes, [], floors, "b1");
+    const second = reconcileCrossFloorTransitions(nodes, first, floors, "b1");
+    expect(second).toHaveLength(1);
+    expect(second[0].id).toBe(first[0].id);
+  });
+
+  it("deleting one transition node removes/reconciles its transition edge", () => {
+    const nodes = [
+      linked("n1", "f1", { stairId: "s1" }),
+      linked("n2", "f2", { stairId: "s2" }),
+    ];
+    const withEdge = reconcileCrossFloorTransitions(nodes, [], floors, "b1");
+    expect(withEdge).toHaveLength(1);
+    const afterDelete = reconcileCrossFloorTransitions([nodes[0]], withEdge, floors, "b1");
+    expect(afterDelete).toHaveLength(0);
+  });
+
+  it("a sharedId change removes the stale transition", () => {
+    const nodes = [
+      linked("n1", "f1", { stairId: "s1" }),
+      linked("n2", "f2", { stairId: "s2" }),
+    ];
+    const withEdge = reconcileCrossFloorTransitions(nodes, [], floors, "b1");
+    expect(withEdge).toHaveLength(1);
+    // Floor 2's stair now belongs to a different stairwell.
+    const changedFloors = floors.map((f) => f.id === "f2" ? { ...f, stairs: [stair("s2", "stair-core-b")] } : f);
+    const afterChange = reconcileCrossFloorTransitions(nodes, withEdge, changedFloors, "b1");
+    expect(afterChange).toHaveLength(0);
+  });
+
+  it("indoorNavEdges excludes cross-floor transition edges (walkable-floor isolation)", () => {
+    const nodes = [
+      linked("n1", "f1", { stairId: "s1" }),
+      linked("n2", "f2", { stairId: "s2" }),
+      { id: "w1", name: "Waypoint", type: "hallway" as const, x: 100, y: 100, buildingId: "b1", floorId: "f1", accessible: true, color: "#16a34a" },
+    ];
+    const edges = [
+      ...reconcileCrossFloorTransitions(nodes, [], floors, "b1"),
+      { id: "e1", startNodeId: "n1", endNodeId: "w1", distance: 50, bidirectional: true, accessible: true, emergencySafe: true, type: "walkway", color: "#16a34a", width: 4 },
+    ];
+    const indoor = indoorNavEdges(edges, indoorNavNodes(nodes, "b1", "f1"), "b1", "f1");
+    expect(indoor.map((e) => e.id)).toEqual(["e1"]);
+  });
+
+  it("normalization preserves the transition edge type (persistence-safe)", () => {
+    const nodes = [
+      linked("n1", "f1", { stairId: "s1" }),
+      linked("n2", "f2", { stairId: "s2" }),
+    ];
+    const edges = reconcileCrossFloorTransitions(nodes, [], floors, "b1");
+    const { edges: normalized } = normalizeNavGraph(nodes, edges);
+    expect(normalized).toHaveLength(1);
+    expect(normalized[0].type).toBe(CROSS_FLOOR_EDGE_TYPE);
+    expect(normalized[0].accessible).toBe(false);
+  });
+
+  it("elevator served floors are authoritative even when only ONE owner declares them", () => {
+    const mixedFloors: Pick<FloorPlan, "id" | "number" | "label" | "stairs" | "ramps" | "elevators">[] = [
+      { id: "f1", number: 1, label: "Ground Floor", stairs: [], ramps: [], elevators: [elevator("e1", "el-a")] }, // no served list
+      { id: "f2", number: 2, label: "Floor 2", stairs: [], ramps: [], elevators: [elevator("e2", "el-a", [1, 3])] }, // serves 1+3 only
+    ];
+    const nodes = [
+      linked("n1", "f1", { elevatorId: "e1", type: "elevator" }),
+      linked("n2", "f2", { elevatorId: "e2", type: "elevator" }),
+    ];
+    // Floor 2 is NOT served → no invented stop at floor 2.
+    expect(reconcileCrossFloorTransitions(nodes, [], mixedFloors, "b1")).toHaveLength(0);
+  });
+
+  it("a sharedId change also creates the NEW valid link where appropriate", () => {
+    const nodes = [
+      linked("n1", "f1", { stairId: "s1" }),
+      linked("n2", "f2", { stairId: "s2" }),
+      linked("n3", "f3", { stairId: "s3" }),
+    ];
+    const withEdge = reconcileCrossFloorTransitions(nodes, [], floors, "b1");
+    expect(withEdge).toHaveLength(2); // n1↔n2, n2↔n3
+    // Floor 2's stair joins floor 3's chain instead.
+    const rezoned = floors.map((f) =>
+      f.id === "f2" ? { ...f, stairs: [stair("s2", "stair-core-b")] } : f
+    );
+    const floors3B = rezoned.map((f) => f.id === "f3" ? { ...f, stairs: [stair("s3", "stair-core-b")] } : f);
+    const afterChange = reconcileCrossFloorTransitions(nodes, withEdge, floors3B, "b1");
+    // Stale n1↔n2 / n2↔n3 removed; new n2↔n3 created on the b-chain.
+    expect(afterChange).toHaveLength(1);
+    expect([afterChange[0].startNodeId, afterChange[0].endNodeId].sort()).toEqual(["n2", "n3"]);
+  });
+
+  it("findCrossFloorOwnerInfo reports kind/sharedId only for linked, sharedId-carrying nodes", () => {
+    const info = findCrossFloorOwnerInfo(linked("n1", "f1", { stairId: "s1" }), floors, "b1");
+    expect(info?.kind).toBe("stair");
+    expect(info?.sharedId).toBe("stair-core-a");
+    expect(info?.floorNumber).toBe(1);
+    // No sharedId on the physical object → null.
+    const bareFloors = [{ ...floors[0], stairs: [stair("s1", "")] }];
+    expect(findCrossFloorOwnerInfo(linked("n1", "f1", { stairId: "s1" }), bareFloors, "b1")).toBeNull();
+    // A free (unlinked) node → null.
+    const free = { id: "n9", name: "Waypoint", type: "hallway" as const, x: 10, y: 10, buildingId: "b1", floorId: "f1", accessible: true, color: "#16a34a" };
+    expect(findCrossFloorOwnerInfo(free, floors, "b1")).toBeNull();
+  });
+
+  // ── B5 Phase 3.2 — cross-floor adjacency follows CANONICAL floor order ─────
+  // The admin's Move Up/Down reorders the floors ARRAY. The same array order
+  // must drive transition adjacency — never floor.number/name (the admin may
+  // keep numbers untouched while reordering the hierarchy, so "Floor 3" can
+  // be the LOWEST floor visually).
+
+  it("cross-floor adjacency follows CANONICAL array order, not floor numbers", () => {
+    // Array order after reorder: [f3, f1, f2]. Array semantics make f3 lowest,
+    // f2 highest — so transitions are f3↔f1 and f1↔f2. Number order would have
+    // produced f1↔f2 and f2↔f3 (a different, wrong chain).
+    const reordered: Pick<FloorPlan, "id" | "number" | "label" | "stairs" | "ramps" | "elevators">[] = [
+      { id: "f3", number: 3, label: "Floor 3", stairs: [stair("s3", "stair-core-a")], ramps: [], elevators: [] },
+      { id: "f1", number: 1, label: "Ground Floor", stairs: [stair("s1", "stair-core-a")], ramps: [], elevators: [] },
+      { id: "f2", number: 2, label: "Floor 2", stairs: [stair("s2", "stair-core-a")], ramps: [], elevators: [] },
+    ];
+    const nodes = [
+      linked("n3", "f3", { stairId: "s3" }),
+      linked("n1", "f1", { stairId: "s1" }),
+      linked("n2", "f2", { stairId: "s2" }),
+    ];
+    const edges = reconcileCrossFloorTransitions(nodes, [], reordered, "b1");
+    expect(edges).toHaveLength(2);
+    const pairs = edges.map((e) => [e.startNodeId, e.endNodeId].sort().join("|")).sort();
+    expect(pairs).toEqual(["n1|n2", "n1|n3"]); // f3(0)↔f1(1), f1(1)↔f2(2) — never n2|n3
+  });
+
+  it("Ramp chains do not create floor transitions after reorder", () => {
+    // Array order: [f2, f1, f3] → f2(0)↔f1(1), f1(1)↔f3(2).
+    const reordered: Pick<FloorPlan, "id" | "number" | "label" | "stairs" | "ramps" | "elevators">[] = [
+      { id: "f2", number: 2, label: "Floor 2", stairs: [], ramps: [ramp("r2", "ramp-a")], elevators: [] },
+      { id: "f1", number: 1, label: "Ground Floor", stairs: [], ramps: [ramp("r1", "ramp-a")], elevators: [] },
+      { id: "f3", number: 3, label: "Floor 3", stairs: [], ramps: [ramp("r3", "ramp-a")], elevators: [] },
+    ];
+    const nodes = [
+      linked("n2", "f2", { rampId: "r2", type: "ramp" }),
+      linked("n1", "f1", { rampId: "r1", type: "ramp" }),
+      linked("n3", "f3", { rampId: "r3", type: "ramp" }),
+    ];
+    const edges = reconcileCrossFloorTransitions(nodes, [], reordered, "b1");
+    expect(edges).toHaveLength(0);
+  });
+
+  it("an Elevator's served floors stay authoritative after floors are reordered", () => {
+    // Elevator serves floors 1 and 3; the ARRAY order is [f3, f2, f1]. The
+    // served-floor list (numbers) filters stops, while the CANONICAL array
+    // order decides which adjacent served pair links: f3(0)↔f1(2) — one edge,
+    // and the unserved f2 never participates.
+    const reordered: Pick<FloorPlan, "id" | "number" | "label" | "stairs" | "ramps" | "elevators">[] = [
+      { id: "f3", number: 3, label: "Floor 3", stairs: [], ramps: [], elevators: [elevator("e3", "el-a", [1, 3])] },
+      { id: "f2", number: 2, label: "Floor 2", stairs: [], ramps: [], elevators: [elevator("e2", "el-a", [1, 3])] },
+      { id: "f1", number: 1, label: "Ground Floor", stairs: [], ramps: [], elevators: [elevator("e1", "el-a", [1, 3])] },
+    ];
+    const nodes = [
+      linked("n3", "f3", { elevatorId: "e3", type: "elevator" }),
+      linked("n2", "f2", { elevatorId: "e2", type: "elevator" }),
+      linked("n1", "f1", { elevatorId: "e1", type: "elevator" }),
+    ];
+    const edges = reconcileCrossFloorTransitions(nodes, [], reordered, "b1");
+    expect(edges).toHaveLength(1);
+    expect([edges[0].startNodeId, edges[0].endNodeId].sort()).toEqual(["n1", "n3"]);
   });
 });

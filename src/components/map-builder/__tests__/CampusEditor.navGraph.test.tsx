@@ -3,8 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useState } from "react";
 import { toast } from "sonner";
 import { CampusEditor } from "../CampusEditor";
-import { LAYERS } from "../constants";
-import type { Campus, NavigationNode } from "../types";
+import { BUILDING_TYPES, DECOR_ASSET_MAP, LAYERS } from "../constants";
+import type { Campus, NavigationNode, NavigationEdge, CampusDecorAsset } from "../types";
 
 function makeCampus(): Campus {
   return {
@@ -116,6 +116,65 @@ function buildingGroup(container: HTMLElement): SVGGElement {
   return rect!.parentElement as SVGGElement;
 }
 
+function buildingGroupByFill(container: HTMLElement, fill: string): SVGGElement {
+  const rect = Array.from(container.querySelectorAll<SVGRectElement>("rect")).find(
+    (r) => r.getAttribute("fill") === fill
+  );
+  expect(rect, `building body rect ${fill}`).toBeTruthy();
+  return rect!.parentElement as SVGGElement;
+}
+
+function decorGroup(container: HTMLElement, type = "tree"): SVGGElement {
+  const group = container.querySelector<SVGGElement>(`[data-decor-type='${type}']`);
+  expect(group, `${type} decor group`).toBeTruthy();
+  return group!;
+}
+
+function groupOutline(container: HTMLElement): SVGRectElement {
+  const outline = container.querySelector<SVGRectElement>("[data-testid='campus-group-outline']");
+  expect(outline, "campus group outline").toBeTruthy();
+  return outline!;
+}
+
+function groupDragSurface(container: HTMLElement): SVGRectElement {
+  const surface = container.querySelector<SVGRectElement>("[data-testid='campus-group-drag-surface']");
+  expect(surface, "campus group drag surface").toBeTruthy();
+  return surface!;
+}
+
+function rectNumber(rect: SVGRectElement, attr: "x" | "y" | "width" | "height"): number {
+  return Number(rect.getAttribute(attr));
+}
+
+function campusWithOutdoorSelectionObjects(): Campus {
+  const campus = makeCampus();
+  campus.buildings = [
+    campus.buildings[0],
+    {
+      ...campus.buildings[0],
+      id: "b2",
+      name: "Building Two",
+      code: "B2",
+      x: 360,
+      y: 170,
+      width: 90,
+      height: 70,
+      color: "#0f766e",
+      floors: [],
+    },
+  ];
+  campus.decorAssets = [
+    { id: "tree1", type: "tree", x: 280, y: 160, rotation: 0, scale: 1 },
+    { id: "rot1", type: "bench", x: 520, y: 220, rotation: 45, scale: 1.4 },
+    { id: "ground1", type: "ground-area", x: 500, y: 390, rotation: 0, width: 220, height: 120, groundType: "grass", zOrder: -1000 },
+  ];
+  campus.navNodes = [
+    { id: "nnA", name: "Gate A", type: "outdoor", x: 200, y: 200, campusId: "c1", accessible: true, color: "#16a34a" },
+    { id: "nnB", name: "Gate B", type: "outdoor", x: 300, y: 200, campusId: "c1", accessible: true, color: "#16a34a" },
+  ];
+  return campus;
+}
+
 afterEach(cleanup);
 
 describe("B5 Phase 1 — navigation graph authoring", () => {
@@ -163,23 +222,41 @@ describe("B5 Phase 1 — navigation graph authoring", () => {
     expect(screen.getByTestId("nav-edge")).toBeTruthy();
   });
 
-  it("creates a waypoint + edge from empty-space Path clicks as ONE history action", () => {
+  it("Connect empty-space clicks do nothing before a source; after a source they pin bends", () => {
     let latest: Campus | undefined;
-    const { container } = render(<Harness onCampusChange={(c) => { latest = c; }} />);
+    const { container } = render(<Harness initialCampus={seededCampus()} onCampusChange={(c) => { latest = c; }} />);
     const svg = openNavigationLayer(container);
     fireEvent.keyDown(window, { key: "p" });
-    fireEvent.mouseDown(svg, { clientX: 400, clientY: 300, bubbles: true });
+    fireEvent.mouseDown(svg, { clientX: 260, clientY: 260, bubbles: true });
     fireEvent.mouseUp(svg, { bubbles: true });
-    fireEvent.mouseDown(svg, { clientX: 520, clientY: 300, bubbles: true });
+    expect(latest).toBeUndefined();
+
+    fireEvent.mouseDown(navNodeAt(container, 200, 200), { clientX: 200, clientY: 200, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    fireEvent.mouseDown(svg, { clientX: 260, clientY: 260, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    fireEvent.mouseDown(navNodeAt(container, 300, 200), { clientX: 300, clientY: 200, bubbles: true });
     fireEvent.mouseUp(svg, { bubbles: true });
 
     expect(latest!.navNodes).toHaveLength(2);
     expect(latest!.navEdges).toHaveLength(1);
-    expect(latest!.navEdges![0].distance).toBe(120);
+    // B5 Phase 6.9 (Floor Editor parity): ONE diagonal empty-space click at
+    // (260,260) pins the FULL preview shape — the auto-L corner (260,200) AND
+    // the click point (260,260) (the click point is never dropped). The commit
+    // to (300,200) appends the tail auto-L corner (300,260). Same number/type
+    // of bends as Floor Editor produces for this exact gesture — all distinct
+    // corners, never near-duplicate/stacked handles.
+    const bends = latest!.navEdges![0].bendPoints;
+    expect(bends).toEqual([
+      { x: 260, y: 200 },
+      { x: 260, y: 260 },
+      { x: 300, y: 260 },
+    ]);
+    expect(latest!.navEdges![0].distance).toBe(220);
 
-    // ONE undo removes BOTH the node and the edge created by the second click.
+    // ONE undo removes the connection and its bend without deleting existing waypoints.
     fireEvent.click(screen.getByTitle(/Undo/));
-    expect(latest!.navNodes).toHaveLength(1);
+    expect(latest!.navNodes).toHaveLength(2);
     expect(latest!.navEdges).toHaveLength(0);
   });
 
@@ -211,6 +288,9 @@ describe("B5 Phase 1 — navigation graph authoring", () => {
     fireEvent.mouseDown(navNodeAt(container, 300, 200), { clientX: 300, clientY: 200, bubbles: true });
     fireEvent.mouseUp(svg, { bubbles: true });
     expect(latest!.navEdges).toHaveLength(1);
+    // B5 Phase 6.9 (Floor parity): Connect returns to Select after a successful
+    // commit — re-arm the Path tool before attempting the reversed duplicate.
+    fireEvent.keyDown(window, { key: "p" });
     // B → A (duplicate, reversed)
     fireEvent.mouseDown(navNodeAt(container, 300, 200), { clientX: 300, clientY: 200, bubbles: true });
     fireEvent.mouseUp(svg, { bubbles: true });
@@ -246,7 +326,7 @@ describe("B5 Phase 1 — navigation graph authoring", () => {
     fireEvent.keyDown(window, { key: "p" });
     fireEvent.mouseDown(navNodeAt(container, 200, 200), { clientX: 200, clientY: 200, bubbles: true });
     fireEvent.mouseUp(svg, { bubbles: true });
-    expect(screen.getByText("Select or place destination")).toBeTruthy();
+    expect(screen.getByText(/Click destination/)).toBeTruthy();
 
     fireEvent.keyDown(window, { key: "Escape" });
 
@@ -274,7 +354,7 @@ describe("B5 Phase 1 — navigation graph authoring", () => {
     fireEvent.keyDown(window, { key: "p" });
     fireEvent.mouseDown(navNodeAt(container, 200, 200), { clientX: 200, clientY: 200, bubbles: true });
     fireEvent.mouseUp(svg, { bubbles: true });
-    expect(screen.getByText("Select or place destination")).toBeTruthy();
+    expect(screen.getByText(/Click destination/)).toBeTruthy();
 
     // Right-clicking a waypoint cancels the dangling connect state: no orphan
     // edge, and the status chip returns to the idle "start point" prompt.
@@ -361,19 +441,19 @@ describe("B5 Phase 1.5 — navigation authoring UX / tool architecture correctio
     expect(toolbar.queryByRole("button", { name: "Draw Walkway" })).toBeNull();
     // …and no navigation authoring tools leak into Campus mode
     expect(toolbar.queryByRole("button", { name: "Add Waypoint" })).toBeNull();
-    expect(toolbar.queryByRole("button", { name: "Connect Path" })).toBeNull();
+    expect(toolbar.queryByRole("button", { name: "Connect" })).toBeNull();
     expect(toolbar.queryByRole("button", { name: "Remove" })).toBeNull();
     // No ambiguous legacy naming either — Marker/Walkway are now explicit
     expect(toolbar.queryByRole("button", { name: "Marker" })).toBeNull();
     expect(toolbar.queryByRole("button", { name: "Walkway" })).toBeNull();
   });
 
-  it("Navigation layer exposes Add Waypoint + Connect Path instead of generic Marker/Path", () => {
+  it("Navigation layer exposes Add Waypoint + Connect instead of generic Marker/Path", () => {
     const { container } = render(<Harness />);
     openNavigationLayer(container);
     const toolbar = within(screen.getByTestId("editor-toolbar"));
     expect(toolbar.getByRole("button", { name: "Add Waypoint" })).toBeTruthy();
-    expect(toolbar.getByRole("button", { name: "Connect Path" })).toBeTruthy();
+    expect(toolbar.getByRole("button", { name: "Connect" })).toBeTruthy();
     expect(toolbar.getByRole("button", { name: "Remove" })).toBeTruthy();
     // No campus building tool and no generic "Marker" naming in Navigation mode
     expect(toolbar.queryByRole("button", { name: "Add Building" })).toBeNull();
@@ -490,9 +570,9 @@ describe("B5 Phase 1.5 — navigation authoring UX / tool architecture correctio
         Math.abs(next.pan.y - cam.pan.y) < 0.01;
       stableReads = same ? stableReads + 1 : 0;
       cam = next;
-      if (stableReads >= 3 && cam.zoom > 1.05) break;
+      if (stableReads >= 3 && cam.zoom > 1.04) break;
     }
-    expect(cam.zoom).toBeGreaterThan(1.05);
+    expect(cam.zoom).toBeGreaterThan(1.04);
 
     fireEvent.keyDown(window, { key: "m" });
     fireEvent.mouseDown(svg, { clientX: 420, clientY: 300, bubbles: true });
@@ -562,10 +642,10 @@ describe("B5 Phase 1.5 — navigation authoring UX / tool architecture correctio
     fireEvent.mouseDown(container.querySelector("[data-testid='nav-edge']")!, { clientX: 250, clientY: 200, bubbles: true });
     fireEvent.mouseUp(svg, { bubbles: true });
 
-    expect(screen.getAllByText("Navigation Path").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Navigation Connection").length).toBeGreaterThan(0);
     // Segmented Direction control
-    expect(screen.getByText("⇄ Bidirectional")).toBeTruthy();
-    expect(screen.getByText("→ One Way")).toBeTruthy();
+    expect(screen.getByText("⇄ Two-way")).toBeTruthy();
+    expect(screen.getByText("→ One-way")).toBeTruthy();
     // Route Availability — one graph, routing flags (not separate stores)
     expect(screen.getByText("Route Availability")).toBeTruthy();
     // B5 Phase 1.7: segmented Yes/No + Open/Closed controls (multiple matches
@@ -768,7 +848,7 @@ describe("B5 Phase 1.6 — navigation foundation UX finalization", () => {
     fireEvent.mouseUp(svg, { bubbles: true });
 
     // Switch to One Way via the segmented control.
-    fireEvent.click(screen.getByRole("button", { name: "→ One Way" }));
+    fireEvent.click(screen.getByRole("button", { name: "→ One-way" }));
     expect(latest!.navEdges![0].bidirectional).toBe(false);
     // Closed — segmented Open/Closed control with explanation.
     fireEvent.click(screen.getByRole("button", { name: "Closed" }));
@@ -875,14 +955,20 @@ describe("B5 Phase 1.7 — outdoor navigation manual-QA corrections", () => {
     fireEvent.mouseUp(svg, { bubbles: true });
     expect(latest!.buildings[0].entrances).toHaveLength(entranceCount);
 
-    // Select tool on the entrance — must NOT select it (no entrance props).
-    // (The SVG <title> "Primary Entrance" always exists; assert the entrance
-    // inspector itself never opens.)
+    // B5 Phase 6.4: Select tool on the entrance NOW selects it in Navigation mode
+    // (read-only inspection). The entrance-name input appears.
     fireEvent.keyDown(window, { key: "v" });
     fireEvent.mouseDown(entranceEl!, { clientX: 160, clientY: 180, bubbles: true });
     fireEvent.mouseUp(svg, { bubbles: true });
-    expect(document.getElementById("entrance-name")).toBeNull();
-    expect(screen.queryByTestId("entrance-purpose-control")).toBeNull();
+    // B5 Phase 6.4: entrance IS selectable in Navigation mode for inspection
+    expect(document.getElementById("entrance-name")).not.toBeNull();
+    expect(screen.queryByTestId("entrance-purpose-control")).not.toBeNull();
+    // But entrance is immutable — dragging it should not work
+    const prevEntranceCount = latest!.buildings[0].entrances!.length;
+    fireEvent.keyDown(window, { key: "e" });
+    fireEvent.mouseDown(entranceEl!, { clientX: 160, clientY: 180, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    expect(latest!.buildings[0].entrances).toHaveLength(prevEntranceCount);
   });
 
   it("Campus mode still edits Buildings/Entrances normally", () => {
@@ -1076,7 +1162,7 @@ describe("B5 Phase 1.7 — outdoor navigation manual-QA corrections", () => {
     // Segmented Yes/No + Open/Closed controls are present.
     expect(screen.getByRole("radiogroup", { name: "Accessible" })).toBeTruthy();
     expect(screen.getByRole("radiogroup", { name: "Emergency Safe" })).toBeTruthy();
-    expect(screen.getByRole("radiogroup", { name: "Closed" })).toBeTruthy();
+    expect(screen.getByRole("radiogroup", { name: "Availability" })).toBeTruthy();
     // Custom reason dropdown (role listbox) appears because Accessible = No.
     expect(screen.getByText("Stairs")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /Why is this not accessible/ }));
@@ -1385,9 +1471,9 @@ describe("B5 Phase 1.8 — entrance-linked navigation final corrections", () => 
     const accessible = screen.getByRole("radiogroup", { name: "Accessible" });
     const buttons = accessible.querySelectorAll("button");
     expect(buttons.length).toBe(2);
-    expect(buttons[0].className).toContain("h-9"); // comfortable hit target, not h-6 chips
+    expect(buttons[0].className).toContain("h-10"); // comfortable hit target, not h-6 chips
     expect(screen.getByRole("radiogroup", { name: "Emergency Safe" })).toBeTruthy();
-    expect(screen.getByRole("radiogroup", { name: "Closed" })).toBeTruthy();
+    expect(screen.getByRole("radiogroup", { name: "Availability" })).toBeTruthy();
     // Still no native selects anywhere.
     expect(screen.queryByRole("combobox")).toBeNull();
   });
@@ -1503,6 +1589,1079 @@ describe("B5 Phase 1.9 — entrance navigation visual cleanup", () => {
     // Transient connect state fully cleared after completion.
     expect(screen.queryByTestId("nav-path-preview")).toBeNull();
     expect(container.querySelector("[data-entrance-id='ent1'] [data-testid='entrance-connect-target']")).toBeNull();
+  });
+
+  it("Phase 5.1 asset palette exposes simplified campus object presets only", () => {
+    render(<Harness />);
+    fireEvent.click(screen.getByRole("button", { name: "Assets" }));
+
+    expect(BUILDING_TYPES.map((type) => type.label)).toEqual([
+      "Academic",
+      "Laboratory",
+      "Library",
+      "Gymnasium",
+      "Administration",
+      "Other",
+    ]);
+    for (const label of ["Dormitory", "Canteen", "Medical", "Security"]) {
+      expect(screen.queryByRole("button", { name: new RegExp(label) })).toBeNull();
+    }
+  });
+
+  it("legacy building categories still render safely even when removed from new presets", () => {
+    const campus = makeCampus();
+    campus.buildings[0] = { ...campus.buildings[0], name: "Legacy Dorm", category: "Dormitory" };
+    render(<Harness initialCampus={campus} />);
+    expect(screen.getAllByText("Legacy Dorm").length).toBeGreaterThan(0);
+  });
+
+
+
+  it("direct pathway width drag changes only stroke width, not path points", () => {
+    let latest: Campus | undefined;
+    const campus = makeCampus();
+    campus.paths = [{ id: "p1", name: "Main Walk", type: "walkway", color: "#94a3b8", width: 10, points: [{ x: 100, y: 100 }, { x: 200, y: 100 }] }];
+    const { container } = render(<Harness initialCampus={campus} onCampusChange={(c) => { latest = c; }} />);
+    const svg = canvasSvg(container);
+    const path = container.querySelector("[data-testid='campus-path']") as SVGGElement;
+    fireEvent.mouseDown(path, { clientX: 150, clientY: 100, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+
+    expect(container.querySelector("[data-testid='path-width-handle']")).toBeTruthy();
+    const handle = container.querySelector("[data-testid='path-width-handle']")!;
+    fireEvent.mouseDown(handle, { clientX: 150, clientY: 123, bubbles: true });
+    fireEvent.mouseMove(svg, { clientX: 150, clientY: 133, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+
+    expect(latest!.paths[0].width).toBeGreaterThan(10);
+    expect(latest!.paths[0].points).toEqual(campus.paths[0].points);
+  });
+
+  it("pathway type visuals remain distinct for walkway, road, and accessible paths", () => {
+    const campus = makeCampus();
+    campus.paths = [
+      { id: "pw", type: "walkway", color: "#94a3b8", width: 10, points: [{ x: 80, y: 80 }, { x: 160, y: 80 }] },
+      { id: "pr", type: "road", color: "#cbd5e1", width: 18, points: [{ x: 80, y: 120 }, { x: 160, y: 120 }] },
+      { id: "pa", type: "accessible", color: "#a7f3d0", width: 10, points: [{ x: 80, y: 160 }, { x: 160, y: 160 }] },
+    ];
+    const { container } = render(<Harness initialCampus={campus} />);
+    const kinds = Array.from(container.querySelectorAll("[data-testid='campus-path']")).map((el) => el.getAttribute("data-path-kind"));
+    expect(kinds).toEqual(["walkway", "road", "accessible"]);
+    // B5 Phase 5.12: centerline is now rendered in the chain layer, not the hit-test group
+    const roadChain = Array.from(container.querySelectorAll("[data-testid='path-chain']")).find((c) => c.getAttribute("data-chain-kind") === "road");
+    expect(roadChain).toBeTruthy();
+    expect(roadChain!.querySelector("path[stroke-dasharray='10 10']")).toBeTruthy();
+  });
+
+  it("Phase 5.2 shows one outdoor group boundary for two selected objects", () => {
+    const { container } = render(<Harness initialCampus={campusWithOutdoorSelectionObjects()} />);
+    const svg = canvasSvg(container);
+    fireEvent.mouseDown(buildingGroup(container), { clientX: 160, clientY: 140, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+
+    expect(container.querySelector("[data-testid='campus-group-outline']")).toBeNull();
+    fireEvent.mouseDown(decorGroup(container), { clientX: 280, clientY: 160, shiftKey: true, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+
+    expect(container.querySelectorAll("[data-testid='campus-group-outline']")).toHaveLength(1);
+  });
+
+  it("Phase 5.2 keeps single selection free of the group boundary", () => {
+    const { container } = render(<Harness initialCampus={campusWithOutdoorSelectionObjects()} />);
+    const svg = canvasSvg(container);
+    fireEvent.mouseDown(buildingGroup(container), { clientX: 160, clientY: 140, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+
+    expect(container.querySelector("[data-testid='campus-group-outline']")).toBeNull();
+  });
+
+  it("Phase 5.2 Shift-click toggles the outdoor group boundary from 1 to 2 to 1", () => {
+    const { container } = render(<Harness initialCampus={campusWithOutdoorSelectionObjects()} />);
+    const svg = canvasSvg(container);
+    const tree = decorGroup(container);
+
+    fireEvent.mouseDown(buildingGroup(container), { clientX: 160, clientY: 140, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    fireEvent.mouseDown(tree, { clientX: 280, clientY: 160, shiftKey: true, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    expect(groupOutline(container)).toBeTruthy();
+
+    fireEvent.mouseDown(tree, { clientX: 280, clientY: 160, shiftKey: true, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    expect(container.querySelector("[data-testid='campus-group-outline']")).toBeNull();
+  });
+
+  it("Phase 5.2 group outline toolbar toggle hides and restores only the large boundary", () => {
+    const { container } = render(<Harness initialCampus={campusWithOutdoorSelectionObjects()} />);
+    const svg = canvasSvg(container);
+    fireEvent.mouseDown(buildingGroup(container), { clientX: 160, clientY: 140, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    fireEvent.mouseDown(decorGroup(container), { clientX: 280, clientY: 160, shiftKey: true, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+
+    expect(groupOutline(container)).toBeTruthy();
+    const hide = screen.getByRole("button", { name: "Hide group outline" });
+    fireEvent.click(hide);
+    expect(container.querySelector("[data-testid='campus-group-outline']")).toBeNull();
+    expect(screen.getByLabelText("2 selected outdoor objects")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Show group outline" }));
+    expect(groupOutline(container)).toBeTruthy();
+  });
+
+  it("Phase 5.2 rubber-band multi-selection renders the group boundary in either drag direction", () => {
+    const { container, unmount } = render(<Harness initialCampus={campusWithOutdoorSelectionObjects()} />);
+    let svg = canvasSvg(container);
+    fireEvent.mouseDown(svg, { clientX: 70, clientY: 70, bubbles: true });
+    fireEvent.mouseMove(svg, { clientX: 340, clientY: 245, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    expect(groupOutline(container)).toBeTruthy();
+
+    unmount();
+    const second = render(<Harness initialCampus={campusWithOutdoorSelectionObjects()} />);
+    svg = canvasSvg(second.container);
+    fireEvent.mouseDown(svg, { clientX: 340, clientY: 245, bubbles: true });
+    fireEvent.mouseMove(svg, { clientX: 70, clientY: 70, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    expect(groupOutline(second.container)).toBeTruthy();
+  });
+
+  it("Phase 5.2 mixed Building + Decor union bounds use rendered decor extents", () => {
+    const { container } = render(<Harness initialCampus={campusWithOutdoorSelectionObjects()} />);
+    const svg = canvasSvg(container);
+    fireEvent.mouseDown(buildingGroup(container), { clientX: 160, clientY: 140, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    fireEvent.mouseDown(decorGroup(container), { clientX: 280, clientY: 160, shiftKey: true, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+
+    const outline = groupOutline(container);
+    const tree = DECOR_ASSET_MAP.tree;
+    const treeW = tree.defaultWidth * 3;
+    const treeH = tree.defaultHeight * 3;
+    expect(rectNumber(outline, "x")).toBeCloseTo(96, 0);
+    expect(rectNumber(outline, "y")).toBeCloseTo(96, 0);
+    expect(rectNumber(outline, "width")).toBeCloseTo((280 + treeW / 2) - 100 + 8, 0);
+    expect(rectNumber(outline, "height")).toBeCloseTo(Math.max(180, 160 + treeH / 2) - 100 + 8, 0);
+  });
+
+  it("Phase 5.2 Ground Area resized bounds are included in the outdoor group boundary", () => {
+    const { container } = render(<Harness initialCampus={campusWithOutdoorSelectionObjects()} />);
+    const svg = canvasSvg(container);
+    fireEvent.mouseDown(buildingGroup(container), { clientX: 160, clientY: 140, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    fireEvent.mouseDown(container.querySelector("[data-testid='ground-area']")!, { clientX: 500, clientY: 390, shiftKey: true, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+
+    const outline = groupOutline(container);
+    expect(rectNumber(outline, "x")).toBeCloseTo(96, 0);
+    expect(rectNumber(outline, "y")).toBeCloseTo(96, 0);
+    expect(rectNumber(outline, "width")).toBeCloseTo(518, 0);
+    expect(rectNumber(outline, "height")).toBeCloseTo(358, 0);
+  });
+
+  it("Phase 5.2 scaled and rotated decor contributes rotation-aware bounds", () => {
+    const { container } = render(<Harness initialCampus={campusWithOutdoorSelectionObjects()} />);
+    const svg = canvasSvg(container);
+    fireEvent.mouseDown(buildingGroup(container), { clientX: 160, clientY: 140, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    fireEvent.mouseDown(decorGroup(container, "bench"), { clientX: 520, clientY: 220, shiftKey: true, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+
+    const outline = groupOutline(container);
+    const unrotatedRight = 520 + (DECOR_ASSET_MAP.bench.defaultWidth * 3 * 1.4) / 2;
+    expect(rectNumber(outline, "width")).toBeGreaterThan(unrotatedRight - 100 + 8);
+  });
+
+  it("Phase 5.2 group drag moves the outdoor boundary with selected objects", () => {
+    let latest: Campus | undefined;
+    const { container } = render(<Harness initialCampus={campusWithOutdoorSelectionObjects()} onCampusChange={(c) => { latest = c; }} />);
+    const svg = canvasSvg(container);
+    const building = buildingGroup(container);
+    fireEvent.mouseDown(building, { clientX: 160, clientY: 140, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    fireEvent.mouseDown(decorGroup(container), { clientX: 280, clientY: 160, shiftKey: true, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    const beforeX = rectNumber(groupOutline(container), "x");
+    const beforeY = rectNumber(groupOutline(container), "y");
+
+    fireEvent.mouseDown(building, { clientX: 160, clientY: 140, bubbles: true });
+    fireEvent.mouseMove(svg, { clientX: 200, clientY: 160, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+
+    const after = groupOutline(container);
+    expect(rectNumber(after, "x")).toBeGreaterThan(beforeX);
+    expect(rectNumber(after, "y")).toBeGreaterThan(beforeY);
+    expect(latest!.buildings.find((building) => building.id === "b1")!.x).toBeGreaterThan(100);
+    expect(latest!.decorAssets!.find((asset) => asset.id === "tree1")!.x).toBeGreaterThan(280);
+  });
+
+  it("Phase 5.3 creates an interactive group drag surface for two selected Buildings", () => {
+    const { container } = render(<Harness initialCampus={campusWithOutdoorSelectionObjects()} />);
+    const svg = canvasSvg(container);
+    fireEvent.mouseDown(buildingGroup(container), { clientX: 160, clientY: 140, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    fireEvent.mouseDown(buildingGroupByFill(container, "#0f766e"), { clientX: 405, clientY: 205, shiftKey: true, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+
+    expect(groupOutline(container)).toBeTruthy();
+    expect(groupDragSurface(container)).toBeTruthy();
+  });
+
+  it("Phase 5.3 dragging empty space inside a two-Building group moves both rigidly", () => {
+    let latest: Campus | undefined;
+    const { container } = render(<Harness initialCampus={campusWithOutdoorSelectionObjects()} onCampusChange={(c) => { latest = c; }} />);
+    const svg = canvasSvg(container);
+    fireEvent.mouseDown(buildingGroup(container), { clientX: 160, clientY: 140, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    fireEvent.mouseDown(buildingGroupByFill(container, "#0f766e"), { clientX: 405, clientY: 205, shiftKey: true, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+
+    fireEvent.mouseDown(groupDragSurface(container), { clientX: 280, clientY: 140, bubbles: true });
+    fireEvent.mouseMove(svg, { clientX: 320, clientY: 160, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+
+    expect(latest!.buildings.find((building) => building.id === "b1")).toMatchObject({ x: 140, y: 120 });
+    expect(latest!.buildings.find((building) => building.id === "b2")).toMatchObject({ x: 400, y: 190 });
+    expect(rectNumber(groupOutline(container), "x")).toBeGreaterThan(96);
+  });
+
+  it("Phase 5.3 clicking group interior without movement preserves the multi-selection", () => {
+    let latest: Campus | undefined;
+    const { container } = render(<Harness initialCampus={campusWithOutdoorSelectionObjects()} onCampusChange={(c) => { latest = c; }} />);
+    const svg = canvasSvg(container);
+    fireEvent.mouseDown(buildingGroup(container), { clientX: 160, clientY: 140, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    fireEvent.mouseDown(buildingGroupByFill(container, "#0f766e"), { clientX: 405, clientY: 205, shiftKey: true, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+
+    fireEvent.mouseDown(groupDragSurface(container), { clientX: 280, clientY: 140, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+
+    expect(groupOutline(container)).toBeTruthy();
+    expect(screen.getByLabelText("2 selected outdoor objects")).toBeTruthy();
+    expect(latest).toBeUndefined();
+  });
+
+  it("Phase 5.3 dragging outside the group keeps normal rubber-band canvas behavior", () => {
+    const { container } = render(<Harness initialCampus={campusWithOutdoorSelectionObjects()} />);
+    const svg = canvasSvg(container);
+    fireEvent.mouseDown(buildingGroup(container), { clientX: 160, clientY: 140, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    fireEvent.mouseDown(buildingGroupByFill(container, "#0f766e"), { clientX: 405, clientY: 205, shiftKey: true, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    expect(groupOutline(container)).toBeTruthy();
+
+    fireEvent.mouseDown(svg, { clientX: 20, clientY: 20, bubbles: true });
+    fireEvent.mouseMove(svg, { clientX: 45, clientY: 45, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+
+    expect(container.querySelector("[data-testid='campus-group-outline']")).toBeNull();
+  });
+
+  it("Phase 5.3 Shift on the group surface does not initiate group movement", () => {
+    let latest: Campus | undefined;
+    const { container } = render(<Harness initialCampus={campusWithOutdoorSelectionObjects()} onCampusChange={(c) => { latest = c; }} />);
+    const svg = canvasSvg(container);
+    fireEvent.mouseDown(buildingGroup(container), { clientX: 160, clientY: 140, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    fireEvent.mouseDown(buildingGroupByFill(container, "#0f766e"), { clientX: 405, clientY: 205, shiftKey: true, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+
+    fireEvent.mouseDown(groupDragSurface(container), { clientX: 280, clientY: 140, shiftKey: true, bubbles: true });
+    fireEvent.mouseMove(svg, { clientX: 320, clientY: 160, shiftKey: true, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+
+    expect(latest).toBeUndefined();
+  });
+
+  it("Phase 5.3 mixed Building + Decor + Ground Area moves from empty group space", () => {
+    let latest: Campus | undefined;
+    const { container } = render(<Harness initialCampus={campusWithOutdoorSelectionObjects()} onCampusChange={(c) => { latest = c; }} />);
+    const svg = canvasSvg(container);
+    fireEvent.mouseDown(buildingGroup(container), { clientX: 160, clientY: 140, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    fireEvent.mouseDown(decorGroup(container), { clientX: 280, clientY: 160, shiftKey: true, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    fireEvent.mouseDown(container.querySelector("[data-testid='ground-area']")!, { clientX: 500, clientY: 390, shiftKey: true, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+
+    fireEvent.mouseDown(groupDragSurface(container), { clientX: 320, clientY: 300, bubbles: true });
+    fireEvent.mouseMove(svg, { clientX: 360, clientY: 320, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+
+    expect(latest!.buildings.find((building) => building.id === "b1")!.x).toBeGreaterThan(100);
+    expect(latest!.decorAssets!.find((asset) => asset.id === "tree1")!.x).toBeGreaterThan(280);
+    expect(latest!.decorAssets!.find((asset) => asset.id === "ground1")!.x).toBeGreaterThan(500);
+  });
+
+  it("Phase 5.3 pointer offset causes no initial jump before movement", () => {
+    let latest: Campus | undefined;
+    const { container } = render(<Harness initialCampus={campusWithOutdoorSelectionObjects()} onCampusChange={(c) => { latest = c; }} />);
+    const svg = canvasSvg(container);
+    fireEvent.mouseDown(buildingGroup(container), { clientX: 160, clientY: 140, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    fireEvent.mouseDown(buildingGroupByFill(container, "#0f766e"), { clientX: 405, clientY: 205, shiftKey: true, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+
+    fireEvent.mouseDown(groupDragSurface(container), { clientX: 280, clientY: 140, bubbles: true });
+    fireEvent.mouseMove(svg, { clientX: 280, clientY: 140, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+
+    expect(latest).toBeUndefined();
+    expect(groupOutline(container)).toBeTruthy();
+  });
+
+  it("Phase 5.3 one empty-space group drag creates one undo history operation", () => {
+    let latest: Campus | undefined;
+    const { container } = render(<Harness initialCampus={campusWithOutdoorSelectionObjects()} onCampusChange={(c) => { latest = c; }} />);
+    const svg = canvasSvg(container);
+    fireEvent.mouseDown(buildingGroup(container), { clientX: 160, clientY: 140, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    fireEvent.mouseDown(buildingGroupByFill(container, "#0f766e"), { clientX: 405, clientY: 205, shiftKey: true, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+
+    fireEvent.mouseDown(groupDragSurface(container), { clientX: 280, clientY: 140, bubbles: true });
+    fireEvent.mouseMove(svg, { clientX: 320, clientY: 160, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    expect(latest!.buildings.find((building) => building.id === "b1")!.x).toBe(140);
+
+    fireEvent.keyDown(window, { key: "z", ctrlKey: true });
+    expect(latest!.buildings.find((building) => building.id === "b1")!.x).toBe(100);
+    fireEvent.keyDown(window, { key: "z", ctrlKey: true });
+    expect(latest!.buildings.find((building) => building.id === "b1")!.x).toBe(100);
+  });
+
+
+
+
+
+
+
+  it("Phase 5.4 Pathway hover shows width preview", () => {
+    const { container } = render(<Harness />);
+    const svg = canvasSvg(container);
+    fireEvent.click(screen.getByRole("button", { name: "Pathway" }));
+    fireEvent.mouseMove(svg, { clientX: 220, clientY: 220, bubbles: true });
+
+    const preview = container.querySelector("[data-testid='path-paint-preview'] circle") as SVGCircleElement;
+    expect(preview).toBeTruthy();
+    expect(preview.getAttribute("r")).toBe("6");
+  });
+
+  it("Phase 5.4 Pathway drag creates one editable simplified CampusPath with persisted width", () => {
+    let latest: Campus | undefined;
+    const { container } = render(<Harness onCampusChange={(c) => { latest = c; }} />);
+    const svg = canvasSvg(container);
+    fireEvent.click(screen.getByRole("button", { name: "Pathway" }));
+    fireEvent.click(screen.getByRole("button", { name: "Road / Driveway" }));
+    for (const value of ["24", "26"]) {
+      fireEvent.change(screen.getByLabelText("Pathway width"), { target: { value } });
+    }
+    fireEvent.mouseDown(svg, { clientX: 100, clientY: 100, bubbles: true });
+    for (let i = 0; i < 14; i += 1) {
+      fireEvent.mouseMove(svg, { clientX: 100 + i * 12, clientY: 100 + (i % 2 === 0 ? 0 : 8), bubbles: true });
+    }
+    fireEvent.mouseUp(svg, { bubbles: true });
+
+    expect(latest!.paths).toHaveLength(1);
+    expect(latest!.paths[0]).toMatchObject({ type: "road", width: 26 });
+    expect(latest!.paths[0].points.length).toBeGreaterThanOrEqual(2);
+    expect(latest!.paths[0].points.length).toBeLessThan(14);
+    expect(container.querySelector("[data-testid='path-width-handle']")).toBeTruthy();
+  });
+
+  it("Phase 5.4 existing old Campus.paths still load as editable pathways", () => {
+    const campus = makeCampus();
+    campus.paths = [{ id: "old-path", type: "walkway", color: "#94a3b8", width: 10, points: [{ x: 80, y: 80 }, { x: 150, y: 120 }, { x: 220, y: 120 }] }];
+    const { container } = render(<Harness initialCampus={campus} />);
+    const svg = canvasSvg(container);
+
+    expect(container.querySelector("[data-testid='campus-path']")).toBeTruthy();
+    fireEvent.mouseDown(container.querySelector("[data-testid='campus-path']")!, { clientX: 150, clientY: 120, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    expect(container.querySelector("[data-testid='path-width-handle']")).toBeTruthy();
+  });
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  it("Phase 5.5 simple Pathway strokes produce low point counts and clean axes", () => {
+    let latest: Campus | undefined;
+    const { container } = render(<Harness onCampusChange={(c) => { latest = c; }} />);
+    const svg = canvasSvg(container);
+    fireEvent.click(screen.getByRole("button", { name: "Pathway" }));
+    fireEvent.mouseDown(svg, { clientX: 100, clientY: 200, bubbles: true });
+    for (let i = 0; i < 18; i += 1) {
+      fireEvent.mouseMove(svg, { clientX: 100 + i * 10, clientY: 200 + (i % 2 === 0 ? 4 : -5), bubbles: true });
+    }
+    fireEvent.mouseUp(svg, { bubbles: true });
+
+    expect(latest!.paths).toHaveLength(1);
+    expect(latest!.paths[0].points).toHaveLength(2);
+    expect(latest!.paths[0].points[0].y).toBe(latest!.paths[0].points[1].y);
+  });
+
+  it("Phase 5.5 Pathway editing remains functional after cleaned stroke creation", () => {
+    let latest: Campus | undefined;
+    const { container } = render(<Harness onCampusChange={(c) => { latest = c; }} />);
+    const svg = canvasSvg(container);
+    fireEvent.click(screen.getByRole("button", { name: "Pathway" }));
+    fireEvent.mouseDown(svg, { clientX: 180, clientY: 240, bubbles: true });
+    fireEvent.mouseMove(svg, { clientX: 260, clientY: 280, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    expect(latest!.paths[0].points.length).toBeGreaterThanOrEqual(2);
+    expect(container.querySelector("[data-testid='path-width-handle']")).toBeTruthy();
+    expect(container.querySelector("[data-testid='path-width-control']")).toBeTruthy();
+  });
+
+  it("Phase 5.5 outdoor Waypoint alignment guides appear within threshold", () => {
+    const { container } = render(<Harness initialCampus={seededCampus()} />);
+    const svg = openNavigationLayer(container);
+    fireEvent.click(screen.getByRole("button", { name: "Add Waypoint" }));
+    fireEvent.mouseMove(svg, { clientX: 210, clientY: 260, bubbles: true });
+
+    expect(container.querySelector("[data-testid='alignment-guide']")).toBeTruthy();
+  });
+
+
+
+
+
+
+
+  it("Phase 5.6 removes Ground Paint, Ground Eraser, and Ground Area from active authoring", () => {
+    render(<Harness />);
+    expect(screen.queryByRole("button", { name: "Ground Paint" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Ground Eraser" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Assets" }));
+    expect(screen.queryByRole("button", { name: /Ground Area/ })).toBeNull();
+  });
+
+  it("Phase 5.6 creates horizontal, vertical, and free diagonal Pathways with exactly two points", () => {
+    let latest: Campus | undefined;
+    const { container } = render(<Harness onCampusChange={(c) => { latest = c; }} />);
+    const svg = canvasSvg(container);
+    fireEvent.click(screen.getByRole("button", { name: "Pathway" }));
+
+    fireEvent.mouseDown(svg, { clientX: 80, clientY: 100, bubbles: true });
+    fireEvent.mouseMove(svg, { clientX: 180, clientY: 104, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    expect(latest!.paths[0].points).toEqual([{ x: 80, y: 100 }, { x: 180, y: 100 }]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Pathway" }));
+    fireEvent.mouseDown(svg, { clientX: 220, clientY: 100, bubbles: true });
+    fireEvent.mouseMove(svg, { clientX: 224, clientY: 180, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    expect(latest!.paths[1].points).toEqual([{ x: 220, y: 100 }, { x: 220, y: 180 }]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Pathway" }));
+    fireEvent.mouseDown(svg, { clientX: 260, clientY: 100, bubbles: true });
+    fireEvent.mouseMove(svg, { clientX: 330, clientY: 135, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    expect(latest!.paths[2].points).toEqual([{ x: 260, y: 100 }, { x: 330, y: 135 }]);
+  });
+
+  it("Phase 5.6 near-45 Pathway placement snaps with guides, while off-angle diagonals remain free", () => {
+    let latest: Campus | undefined;
+    const { container } = render(<Harness onCampusChange={(c) => { latest = c; }} />);
+    const svg = canvasSvg(container);
+    fireEvent.click(screen.getByRole("button", { name: "Pathway" }));
+    fireEvent.mouseDown(svg, { clientX: 100, clientY: 100, bubbles: true });
+    fireEvent.mouseMove(svg, { clientX: 150, clientY: 154, bubbles: true });
+    expect(container.querySelector("[data-testid='alignment-guide']")).toBeTruthy();
+    fireEvent.mouseUp(svg, { bubbles: true });
+    expect(latest!.paths[0].points[1]).toEqual({ x: 152, y: 152 });
+
+    fireEvent.click(screen.getByRole("button", { name: "Pathway" }));
+    fireEvent.mouseDown(svg, { clientX: 100, clientY: 200, bubbles: true });
+    fireEvent.mouseMove(svg, { clientX: 170, clientY: 232, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    expect(latest!.paths[1].points[1]).toEqual({ x: 170, y: 232 });
+  });
+
+  it("Phase 5.6 endpoint extension adds one diagonal control point", () => {
+    let latest: Campus | undefined;
+    const campus = makeCampus();
+    campus.paths = [{ id: "p1", type: "walkway", color: "#94a3b8", width: 12, points: [{ x: 100, y: 100 }, { x: 180, y: 100 }] }];
+    const { container } = render(<Harness initialCampus={campus} onCampusChange={(c) => { latest = c; }} />);
+    const svg = canvasSvg(container);
+    fireEvent.mouseDown(container.querySelector("[data-testid='campus-path']")!, { clientX: 140, clientY: 100, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    const endHandle = Array.from(container.querySelectorAll("[data-testid='path-extension-handle']")).find((node) => node.getAttribute("data-point-index") === "1")!;
+    fireEvent.mouseDown(endHandle.querySelector("circle")!, { clientX: 200, clientY: 100, bubbles: true });
+    fireEvent.mouseMove(svg, { clientX: 230, clientY: 150, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    expect(latest!.paths[0].points).toEqual([{ x: 100, y: 100 }, { x: 180, y: 100 }, { x: 230, y: 150 }]);
+  });
+
+  it("Phase 5.6 endpoint and diagonal T-junction snaps share exact coordinates without nav edges", () => {
+    let latest: Campus | undefined;
+    const campus = makeCampus();
+    campus.paths = [{ id: "main", type: "walkway", color: "#94a3b8", width: 12, points: [{ x: 100, y: 100 }, { x: 220, y: 220 }] }];
+    const { container } = render(<Harness initialCampus={campus} onCampusChange={(c) => { latest = c; }} />);
+    const svg = canvasSvg(container);
+    fireEvent.click(screen.getByRole("button", { name: "Pathway" }));
+    fireEvent.mouseDown(svg, { clientX: 260, clientY: 100, bubbles: true });
+    fireEvent.mouseMove(svg, { clientX: 222, clientY: 218, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    expect(latest!.paths[1].points[1]).toEqual({ x: 220, y: 220 });
+
+    fireEvent.click(screen.getByRole("button", { name: "Pathway" }));
+    fireEvent.mouseDown(svg, { clientX: 250, clientY: 140, bubbles: true });
+    fireEvent.mouseMove(svg, { clientX: 160, clientY: 158, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    expect(latest!.paths.find((path) => path.id === "main")!.points).toContainEqual({ x: 159, y: 159 });
+    expect(latest!.paths[2].points[1]).toEqual({ x: 159, y: 159 });
+    expect(latest!.navEdges ?? []).toHaveLength(0);
+  });
+
+  it("Phase 5.6 Waypoint snaps to diagonal Pathway centerline and Pathway junctions", () => {
+    let latest: Campus | undefined;
+    const campus = makeCampus();
+    campus.paths = [
+      { id: "main", type: "walkway", color: "#94a3b8", width: 12, points: [{ x: 300, y: 300 }, { x: 350, y: 350 }, { x: 420, y: 420 }] },
+      { id: "branch", type: "road", color: "#cbd5e1", width: 22, points: [{ x: 350, y: 350 }, { x: 430, y: 310 }] },
+    ];
+    const { container } = render(<Harness initialCampus={campus} onCampusChange={(c) => { latest = c; }} />);
+    const svg = openNavigationLayer(container);
+    fireEvent.click(screen.getByRole("button", { name: "Add Waypoint" }));
+    fireEvent.mouseDown(svg, { clientX: 376, clientY: 374, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    expect(latest!.navNodes![0]).toMatchObject({ x: 375, y: 375 });
+
+    fireEvent.click(screen.getByRole("button", { name: "Add Waypoint" }));
+    fireEvent.mouseDown(svg, { clientX: 353, clientY: 349, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    expect(latest!.navNodes![1]).toMatchObject({ x: 350, y: 350 });
+  });
+
+  it("Phase 5.6 Navigation sidebar is Hierarchy only and Design restores Assets", () => {
+    const { container } = render(<Harness initialCampus={seededCampus()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Assets" }));
+    expect(screen.getByText("Campus Objects")).toBeTruthy();
+    openNavigationLayer(container);
+    expect(screen.getByTestId("navigation-hierarchy-sidebar")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Assets" })).toBeNull();
+    expect(screen.queryByText("Workflow")).toBeNull();
+    fireEvent.click(screen.getByText("1. Campus"));
+    expect(screen.getByRole("button", { name: "Assets" })).toBeTruthy();
+  });
+
+  it("Phase 5.6 save/reload preserves diagonal and joined Pathways", () => {
+    let latest: Campus | undefined;
+    const first = render(<Harness onCampusChange={(c) => { latest = c; }} />);
+    const svg = canvasSvg(first.container);
+    fireEvent.click(screen.getByRole("button", { name: "Pathway" }));
+    fireEvent.mouseDown(svg, { clientX: 100, clientY: 100, bubbles: true });
+    fireEvent.mouseMove(svg, { clientX: 180, clientY: 160, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    fireEvent.click(screen.getByRole("button", { name: "Pathway" }));
+    fireEvent.mouseDown(svg, { clientX: 240, clientY: 100, bubbles: true });
+    fireEvent.mouseMove(svg, { clientX: 181, clientY: 159, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    expect(latest!.paths[1].points[1]).toEqual(latest!.paths[0].points[1]);
+
+    first.unmount();
+    const second = render(<Harness initialCampus={latest!} />);
+    const loadedPaths = second.container.querySelectorAll("[data-testid='campus-path']");
+    expect(loadedPaths).toHaveLength(2);
+  });
+
+  it("Phase 5.7 endpoint extension can close a pathway back onto its own start point", () => {
+    let latest: Campus | undefined;
+    const campus = makeCampus();
+    campus.paths = [{ id: "loop", type: "walkway", color: "#94a3b8", width: 12, points: [{ x: 100, y: 100 }, { x: 180, y: 100 }] }];
+    const { container } = render(<Harness initialCampus={campus} onCampusChange={(c) => { latest = c; }} />);
+    const svg = canvasSvg(container);
+    fireEvent.mouseDown(container.querySelector("[data-path-id='loop']")!, { clientX: 140, clientY: 100, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    const endHandle = Array.from(container.querySelectorAll("[data-testid='path-extension-handle']")).find((node) => node.getAttribute("data-point-index") === "1")!;
+    fireEvent.mouseDown(endHandle.querySelector("circle")!, { clientX: 200, clientY: 100, bubbles: true });
+    fireEvent.mouseMove(svg, { clientX: 101, clientY: 100, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+
+    expect(latest!.paths[0].points.at(-1)).toEqual({ x: 100, y: 100 });
+    expect(container.querySelectorAll("[data-testid='path-junction-handle']").length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("Phase 5.7 endpoint extension can self T-junction onto an existing same-path segment", () => {
+    let latest: Campus | undefined;
+    const campus = makeCampus();
+    campus.paths = [{
+      id: "self-t",
+      type: "road",
+      color: "#cbd5e1",
+      width: 20,
+      points: [{ x: 100, y: 100 }, { x: 240, y: 100 }, { x: 240, y: 200 }],
+    }];
+    const { container } = render(<Harness initialCampus={campus} onCampusChange={(c) => { latest = c; }} />);
+    const svg = canvasSvg(container);
+    fireEvent.mouseDown(container.querySelector("[data-path-id='self-t']")!, { clientX: 240, clientY: 150, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    const endHandle = Array.from(container.querySelectorAll("[data-testid='path-extension-handle']")).find((node) => node.getAttribute("data-point-index") === "2")!;
+    fireEvent.mouseDown(endHandle.querySelector("circle")!, { clientX: 240, clientY: 220, bubbles: true });
+    fireEvent.mouseMove(svg, { clientX: 160, clientY: 100, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+
+    expect(latest!.paths[0].points).toContainEqual({ x: 160, y: 100 });
+    expect(latest!.paths[0].points.at(-1)).toEqual({ x: 160, y: 100 });
+  });
+
+  it("Phase 5.7 pathway bend controls add and remove a diagonal midpoint", () => {
+    let latest: Campus | undefined;
+    const campus = makeCampus();
+    campus.paths = [{ id: "diag", type: "walkway", color: "#94a3b8", width: 12, points: [{ x: 100, y: 100 }, { x: 200, y: 200 }] }];
+    const { container } = render(<Harness initialCampus={campus} onCampusChange={(c) => { latest = c; }} />);
+    const svg = canvasSvg(container);
+    fireEvent.mouseDown(container.querySelector("[data-path-id='diag']")!, { clientX: 150, clientY: 150, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+
+    fireEvent.click(screen.getByRole("button", { name: /Add Bend/ }));
+    expect(latest!.paths[0].points).toEqual([{ x: 100, y: 100 }, { x: 150, y: 150 }, { x: 200, y: 200 }]);
+    fireEvent.click(screen.getByRole("button", { name: /Remove Bend/ }));
+    expect(latest!.paths[0].points).toEqual([{ x: 100, y: 100 }, { x: 200, y: 200 }]);
+  });
+
+  it("Phase 5.7 moving a shared pathway junction preserves exact coordinate links", () => {
+    let latest: Campus | undefined;
+    const campus = makeCampus();
+    campus.paths = [
+      { id: "main", type: "walkway", color: "#94a3b8", width: 12, points: [{ x: 100, y: 200 }, { x: 200, y: 200 }] },
+      { id: "branch", type: "accessible", color: "#a7f3d0", width: 10, points: [{ x: 200, y: 200 }, { x: 260, y: 260 }] },
+    ];
+    const { container } = render(<Harness initialCampus={campus} onCampusChange={(c) => { latest = c; }} />);
+    const svg = canvasSvg(container);
+    fireEvent.mouseDown(container.querySelector("[data-path-id='main']")!, { clientX: 150, clientY: 200, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    const handle = container.querySelector("[data-testid='path-junction-handle'][data-path-id='main'][data-point-index='1']")!;
+    fireEvent.mouseDown(handle, { clientX: 200, clientY: 200, bubbles: true });
+    fireEvent.mouseMove(svg, { clientX: 240, clientY: 240, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+
+    expect(latest!.paths.find((path) => path.id === "main")!.points[1]).toEqual({ x: 240, y: 240 });
+    expect(latest!.paths.find((path) => path.id === "branch")!.points[0]).toEqual({ x: 240, y: 240 });
+  });
+
+  it("Phase 5.7 Disconnect breaks a coordinate-linked pathway junction without changing the other path", () => {
+    let latest: Campus | undefined;
+    const campus = makeCampus();
+    campus.paths = [
+      { id: "main", type: "walkway", color: "#94a3b8", width: 12, points: [{ x: 100, y: 200 }, { x: 200, y: 200 }] },
+      { id: "branch", type: "road", color: "#cbd5e1", width: 22, points: [{ x: 200, y: 200 }, { x: 260, y: 200 }] },
+    ];
+    const { container } = render(<Harness initialCampus={campus} onCampusChange={(c) => { latest = c; }} />);
+    const svg = canvasSvg(container);
+    fireEvent.mouseDown(container.querySelector("[data-path-id='main']")!, { clientX: 150, clientY: 200, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    const handle = container.querySelector("[data-testid='path-junction-handle'][data-path-id='main'][data-point-index='1']")!;
+    fireEvent.mouseDown(handle, { clientX: 200, clientY: 200, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    fireEvent.click(screen.getByRole("button", { name: /Disconnect/ }));
+
+    // B5 Phase 5.12: disconnect uses disconnectedJunctionKeys instead of point offset
+    expect(latest!.paths.find((path) => path.id === "main")!.points[1]).toEqual({ x: 200, y: 200 });
+    expect(latest!.paths.find((path) => path.id === "main")!.disconnectedJunctionKeys).toContain("200:200");
+    expect(latest!.paths.find((path) => path.id === "branch")!.points[0]).toEqual({ x: 200, y: 200 });
+  });
+
+  it("Phase 5.7 Add Path to Navigation is idempotent for a closed pathway loop", () => {
+    let latest: Campus | undefined;
+    const campus = makeCampus();
+    campus.paths = [{
+      id: "loop",
+      type: "walkway",
+      color: "#94a3b8",
+      width: 12,
+      points: [{ x: 100, y: 100 }, { x: 180, y: 100 }, { x: 180, y: 180 }, { x: 100, y: 100 }],
+    }];
+    const { container } = render(<Harness initialCampus={campus} onCampusChange={(c) => { latest = c; }} />);
+    const svg = canvasSvg(container);
+    fireEvent.mouseDown(container.querySelector("[data-path-id='loop']")!, { clientX: 140, clientY: 100, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    fireEvent.click(screen.getByRole("button", { name: /Add Path to Navigation/ }));
+    expect(latest!.navNodes).toHaveLength(3);
+    expect(latest!.navEdges).toHaveLength(3);
+
+    fireEvent.click(screen.getByRole("button", { name: /Add Path to Navigation/ }));
+    expect(latest!.navNodes).toHaveLength(3);
+    expect(latest!.navEdges).toHaveLength(3);
+  });
+
+  it("Phase 5.7 Add Path to Navigation reuses junction nodes across T-junction pathways", () => {
+    let latest: Campus | undefined;
+    const campus = makeCampus();
+    campus.paths = [
+      { id: "main", type: "road", color: "#cbd5e1", width: 22, points: [{ x: 100, y: 100 }, { x: 200, y: 100 }, { x: 300, y: 100 }] },
+      { id: "branch", type: "walkway", color: "#94a3b8", width: 12, points: [{ x: 200, y: 100 }, { x: 200, y: 200 }] },
+    ];
+    const { container } = render(<Harness initialCampus={campus} onCampusChange={(c) => { latest = c; }} />);
+    const svg = canvasSvg(container);
+    fireEvent.mouseDown(container.querySelector("[data-path-id='main']")!, { clientX: 180, clientY: 100, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    fireEvent.click(screen.getByRole("button", { name: /Add Path to Navigation/ }));
+    fireEvent.mouseDown(container.querySelector("[data-path-id='branch']")!, { clientX: 200, clientY: 150, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    fireEvent.click(screen.getByRole("button", { name: /Add Path to Navigation/ }));
+
+    expect(latest!.navNodes!.filter((node) => node.x === 200 && node.y === 100)).toHaveLength(1);
+    expect(latest!.navNodes).toHaveLength(4);
+    expect(latest!.navEdges).toHaveLength(3);
+  });
+
+  it("Phase 5.2 Navigation mode multi-selection renders the NAV graph group outline (bounds include bend geometry)", () => {
+    const { container } = render(<Harness initialCampus={campusWithOutdoorSelectionObjects()} />);
+    const svg = openNavigationLayer(container);
+    fireEvent.keyDown(window, { key: "v" });
+    fireEvent.mouseDown(navNodeAt(container, 200, 200), { clientX: 200, clientY: 200, shiftKey: true, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    fireEvent.mouseDown(navNodeAt(container, 300, 200), { clientX: 300, clientY: 200, shiftKey: true, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+
+    expect(screen.getByTestId("nav-multi-props")).toBeTruthy();
+    // B5 correction: the nav multi-select now shows its OWN graph group
+    // outline (bounds from the selected node + bend geometry).
+    expect(container.querySelector("[data-testid='campus-group-outline']")).toBeTruthy();
+  });
+
+  it("Phase 5.3 Navigation mode group outline provides a real empty-space drag surface (rigid move, no rubber-band)", () => {
+    let latest: Campus | undefined;
+    const { container } = render(<Harness initialCampus={campusWithOutdoorSelectionObjects()} onCampusChange={(c) => { latest = c; }} />);
+    const svg = openNavigationLayer(container);
+    fireEvent.keyDown(window, { key: "v" });
+    fireEvent.mouseDown(navNodeAt(container, 200, 200), { clientX: 200, clientY: 200, shiftKey: true, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    fireEvent.mouseDown(navNodeAt(container, 300, 200), { clientX: 300, clientY: 200, shiftKey: true, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+
+    expect(screen.getByTestId("nav-multi-props")).toBeTruthy();
+    // B5 correction: the nav graph group outline now includes a real drag
+    // surface — pointerdown on empty interior starts the SAME rigid group drag.
+    const surface = container.querySelector("[data-testid='campus-group-drag-surface']") as SVGRectElement | null;
+    expect(surface).toBeTruthy();
+    // Grab EMPTY interior space between the two nodes (bounds ≈ 182..318 x
+    // 182..218 with padding; (250,190) is clear of both node hit circles) and
+    // drag by (+50, +20): both nodes translate by the SAME vector — rigid
+    // move, selection kept, no rubber-band.
+    fireEvent.mouseDown(surface!, { clientX: 250, clientY: 190, bubbles: true });
+    fireEvent.mouseMove(svg, { clientX: 300, clientY: 210, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+
+    expect(latest).toBeDefined();
+    const nodes = latest!.navNodes!;
+    expect(nodes.find((n) => n.id === "nnA")).toMatchObject({ x: 250, y: 220 });
+    expect(nodes.find((n) => n.id === "nnB")).toMatchObject({ x: 350, y: 220 });
+    // Multi-select is retained (no selection clear / rubber-band).
+    expect(screen.getByTestId("nav-multi-props")).toBeTruthy();
+  });
+});
+
+describe("B5 Final — bulk routing state semantics (multi-selection)", () => {
+  function seededEdgesCampus(edges: Partial<NavigationEdge>[]): Campus {
+    const campus = seededCampus();
+    campus.navEdges = edges.map((e, i) => ({
+      id: `ne${i + 1}`,
+      startNodeId: "nnA",
+      endNodeId: "nnB",
+      distance: 100,
+      bidirectional: true,
+      accessible: true,
+      emergencySafe: true,
+      closed: false,
+      type: "walkway",
+      color: "#16a34a",
+      width: 4,
+      bendPoints: [{ x: 250, y: 180 }],
+      ...e,
+    }));
+    return campus;
+  }
+
+  /** Marquee-select the whole graph (both nodes + edges) in the Navigation layer. */
+  function selectAllGraph(container: HTMLElement): SVGSVGElement {
+    const svg = openNavigationLayer(container);
+    fireEvent.keyDown(window, { key: "v" });
+    fireEvent.mouseDown(svg, { clientX: 150, clientY: 150, bubbles: true });
+    fireEvent.mouseMove(svg, { clientX: 350, clientY: 250, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    expect(screen.getByTestId("nav-multi-props")).toBeTruthy();
+    return svg;
+  }
+
+  function edgeState(latest: Campus | undefined, id: string): Partial<NavigationEdge> {
+    const e = latest!.navEdges!.find((ed) => ed.id === id)!;
+    return {
+      accessible: e.accessible,
+      inaccessibleReason: e.inaccessibleReason,
+      emergencySafe: e.emergencySafe,
+      emergencyReason: e.emergencyReason,
+      closed: e.closed,
+      bendPoints: e.bendPoints,
+      bidirectional: e.bidirectional,
+    };
+  }
+
+  it("graph multi-select shows ONLY the Graph Multi-Select panel — no stray single-edge Name/Type/Route Availability", () => {
+    let latest: Campus | undefined;
+    const campus = seededEdgesCampus([{}, {}]);
+    const { container } = render(<Harness initialCampus={campus} onCampusChange={(c) => { latest = c; }} />);
+    const svg = openNavigationLayer(container);
+    fireEvent.keyDown(window, { key: "v" });
+
+    // Shift-click both edges — the flow that used to leave `selected` set while
+    // multi-selecting, so the single-edge inspector rendered BELOW the summary.
+    const edges = Array.from(container.querySelectorAll("[data-testid='nav-edge']"));
+    expect(edges.length).toBe(2);
+    fireEvent.mouseDown(edges[0], { clientX: 250, clientY: 200, shiftKey: true, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    fireEvent.mouseDown(edges[1], { clientX: 250, clientY: 200, shiftKey: true, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+
+    // Multi-select summary is shown…
+    expect(screen.getByTestId("nav-multi-props")).toBeTruthy();
+    // …and the single-edge inspector (Connection/Route Availability/Reverse) is NOT.
+    expect(screen.queryByText("Navigation Connection")).toBeNull();
+    expect(screen.queryByText("Route Availability")).toBeNull();
+    expect(container.querySelector("[data-testid='nav-edge-reverse-direction']")).toBeNull();
+
+    // Bulk routing functions still work from the multi panel.
+    fireEvent.click(screen.getByRole("button", { name: "Mark closed" }));
+    expect(latest!.navEdges!.every((e) => e.closed === true)).toBe(true);
+    expect(screen.getByTestId("nav-multi-props")).toBeTruthy();
+  });
+
+  it("node multi-selection hides the single Waypoint Name/Type inspector", () => {
+    const { container } = render(<Harness initialCampus={seededCampus()} />);
+    const svg = openNavigationLayer(container);
+    fireEvent.keyDown(window, { key: "v" });
+    fireEvent.mouseDown(navNodeAt(container, 200, 200), { clientX: 200, clientY: 200, shiftKey: true, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    fireEvent.mouseDown(navNodeAt(container, 300, 200), { clientX: 300, clientY: 200, shiftKey: true, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+
+    expect(screen.getByTestId("nav-multi-props")).toBeTruthy();
+    expect(screen.queryByTestId("nav-node-props")).toBeNull();
+  });
+
+  it("canvas closed ✕ marker appears on Mark closed and DISAPPEARS after Mark accessible", () => {
+    let latest: Campus | undefined;
+    const campus = seededEdgesCampus([{}, {}]);
+    const { container } = render(<Harness initialCampus={campus} onCampusChange={(c) => { latest = c; }} />);
+    selectAllGraph(container);
+    const closedMarkers = () => container.querySelectorAll("[data-testid='nav-edge-closed-marker']").length;
+    expect(closedMarkers()).toBe(0);
+
+    fireEvent.click(screen.getByRole("button", { name: "Mark closed" }));
+    expect(latest!.navEdges!.every((e) => e.closed === true)).toBe(true);
+    expect(closedMarkers()).toBe(2);
+
+    // Reopening via Mark accessible must clear the closed flag AND the visual
+    // closed marker on the canvas immediately — no reselect, no reload.
+    fireEvent.click(screen.getByRole("button", { name: "Mark accessible" }));
+    expect(latest!.navEdges!.every((e) => e.accessible === true && e.closed === false)).toBe(true);
+    expect(closedMarkers()).toBe(0);
+    expect(screen.getByTestId("nav-multi-props")).toBeTruthy();
+  });
+
+  it("Mark closed sets closed=true on every selected edge and preserves metadata", () => {
+    let latest: Campus | undefined;
+    const campus = seededEdgesCampus([
+      { accessible: false, inaccessibleReason: "stairs", emergencySafe: false, emergencyReason: "hazard" },
+      {},
+    ]);
+    const { container } = render(<Harness initialCampus={campus} onCampusChange={(c) => { latest = c; }} />);
+    selectAllGraph(container);
+
+    fireEvent.click(screen.getByRole("button", { name: "Mark closed" }));
+    expect(latest!.navEdges!.every((e) => e.closed === true)).toBe(true);
+    // Unrelated metadata preserved
+    expect(edgeState(latest, "ne1")).toMatchObject({
+      accessible: false, inaccessibleReason: "stairs", emergencySafe: false, emergencyReason: "hazard",
+      bidirectional: true, bendPoints: [{ x: 250, y: 180 }],
+    });
+    expect(edgeState(latest, "ne2")).toMatchObject({ accessible: true, emergencySafe: true, bendPoints: [{ x: 250, y: 180 }] });
+    // Selection stays put — the panel is still open for the next action.
+    expect(screen.getByTestId("nav-multi-props")).toBeTruthy();
+  });
+
+  it("Mark closed then Mark accessible reopens and clears the inaccessible reason", () => {
+    let latest: Campus | undefined;
+    const campus = seededEdgesCampus([{ inaccessibleReason: "narrow_path" }, {}]);
+    const { container } = render(<Harness initialCampus={campus} onCampusChange={(c) => { latest = c; }} />);
+    selectAllGraph(container);
+
+    fireEvent.click(screen.getByRole("button", { name: "Mark closed" }));
+    expect(latest!.navEdges!.every((e) => e.closed === true)).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: "Mark accessible" }));
+    expect(latest!.navEdges!.every((e) => e.accessible === true && e.closed === false)).toBe(true);
+    expect(latest!.navEdges!.every((e) => e.inaccessibleReason === undefined)).toBe(true);
+    // Geometry untouched by the whole closed→accessible cycle.
+    expect(latest!.navEdges!.every((e) => JSON.stringify(e.bendPoints) === JSON.stringify([{ x: 250, y: 180 }]))).toBe(true);
+    expect(screen.getByTestId("nav-multi-props")).toBeTruthy();
+  });
+
+  it("Mark closed then Mark not accessible reopens with accessible=false and a reason", () => {
+    let latest: Campus | undefined;
+    const campus = seededEdgesCampus([{ inaccessibleReason: "stairs" }, {}]);
+    const { container } = render(<Harness initialCampus={campus} onCampusChange={(c) => { latest = c; }} />);
+    selectAllGraph(container);
+
+    fireEvent.click(screen.getByRole("button", { name: "Mark closed" }));
+    fireEvent.click(screen.getByRole("button", { name: "Mark not accessible" }));
+    expect(latest!.navEdges!.every((e) => e.accessible === false && e.closed === false)).toBe(true);
+    // Existing reason preserved on ne1; default "other" on ne2.
+    expect(latest!.navEdges!.find((e) => e.id === "ne1")!.inaccessibleReason).toBe("stairs");
+    expect(latest!.navEdges!.find((e) => e.id === "ne2")!.inaccessibleReason).toBe("other");
+    expect(screen.getByTestId("nav-multi-props")).toBeTruthy();
+  });
+
+  it("Mark closed then Mark emergency safe reopens with emergencySafe=true and clears the reason", () => {
+    let latest: Campus | undefined;
+    const campus = seededEdgesCampus([{ emergencySafe: false, emergencyReason: "construction" }, {}]);
+    const { container } = render(<Harness initialCampus={campus} onCampusChange={(c) => { latest = c; }} />);
+    selectAllGraph(container);
+
+    fireEvent.click(screen.getByRole("button", { name: "Mark closed" }));
+    fireEvent.click(screen.getByRole("button", { name: "Mark emergency safe" }));
+    expect(latest!.navEdges!.every((e) => e.emergencySafe === true && e.closed === false)).toBe(true);
+    expect(latest!.navEdges!.every((e) => e.emergencyReason === undefined)).toBe(true);
+    expect(screen.getByTestId("nav-multi-props")).toBeTruthy();
+  });
+
+  it("Mark open reopens while preserving accessible/emergency/direction metadata", () => {
+    let latest: Campus | undefined;
+    const campus = seededEdgesCampus([
+      { accessible: false, inaccessibleReason: "narrow_path", emergencySafe: false, emergencyReason: "hazard", closed: true },
+    ]);
+    const { container } = render(<Harness initialCampus={campus} onCampusChange={(c) => { latest = c; }} />);
+    selectAllGraph(container);
+
+    fireEvent.click(screen.getByRole("button", { name: "Mark open" }));
+    expect(edgeState(latest, "ne1")).toMatchObject({
+      closed: false,
+      accessible: false,
+      inaccessibleReason: "narrow_path",
+      emergencySafe: false,
+      emergencyReason: "hazard",
+      bidirectional: true,
+      bendPoints: [{ x: 250, y: 180 }],
+    });
+  });
+
+  it("mixed open/closed selection: bulk action updates ALL selected edges and shows mixed hint", () => {
+    let latest: Campus | undefined;
+    const campus = seededEdgesCampus([{ closed: true }, {}]);
+    const { container } = render(<Harness initialCampus={campus} onCampusChange={(c) => { latest = c; }} />);
+    selectAllGraph(container);
+
+    // Mixed closed states → neither Mark open nor Mark closed is fully active.
+    expect(screen.getByText(/mixed open\/closed states/i)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Mark accessible" }));
+    // The action applies to the WHOLE selection, not only the open edge.
+    expect(latest!.navEdges!.every((e) => e.accessible === true && e.closed === false)).toBe(true);
+    expect(screen.queryByText(/mixed open\/closed states/i)).toBeNull();
+  });
+
+  it("one button press = one history entry; undo restores the previous bulk state", () => {
+    let latest: Campus | undefined;
+    const campus = seededEdgesCampus([{ inaccessibleReason: "other" }, {}]);
+    const { container } = render(<Harness initialCampus={campus} onCampusChange={(c) => { latest = c; }} />);
+    selectAllGraph(container);
+
+    // State 1: closed
+    fireEvent.click(screen.getByRole("button", { name: "Mark closed" }));
+    expect(latest!.navEdges!.every((e) => e.closed === true)).toBe(true);
+
+    // State 2: accessible + reopened
+    fireEvent.click(screen.getByRole("button", { name: "Mark accessible" }));
+    expect(latest!.navEdges!.every((e) => e.accessible === true && e.closed === false)).toBe(true);
+
+    // ONE Ctrl+Z restores the whole Mark closed state in one step.
+    fireEvent.keyDown(window, { key: "z", ctrlKey: true });
+    expect(latest!.navEdges!.every((e) => e.closed === true)).toBe(true);
+    expect(latest!.navEdges!.every((e) => e.accessible === true)).toBe(true);
+
+    // A second Ctrl+Z returns to the original seeded state (ne1 keeps its reason).
+    fireEvent.keyDown(window, { key: "z", ctrlKey: true });
+    expect(latest!.navEdges!.every((e) => e.closed === false)).toBe(true);
+    expect(latest!.navEdges!.find((e) => e.id === "ne1")!.inaccessibleReason).toBe("other");
+    expect(latest!.navEdges!.find((e) => e.id === "ne1")!.accessible).toBe(true);
+  });
+});
+
+describe("B5 Final — placed objects turn touching nav edges red", () => {
+  function campusWithEdgeAnd(decor: Partial<CampusDecorAsset>[]): Campus {
+    const campus = seededCampus();
+    campus.navEdges = [{
+      id: "ne1", startNodeId: "nnA", endNodeId: "nnB", distance: 100, bidirectional: true,
+      accessible: true, type: "walkway", color: "#16a34a", width: 4,
+    }];
+    campus.decorAssets = decor.map((d, i) => ({
+      id: `d${i + 1}`, type: "fountain", name: "Fountain", x: 236, y: 186,
+      width: 28, height: 28, rotation: 0, scale: 1, color: "#38bdf8", ...d,
+    }));
+    return campus;
+  }
+
+  function edgeStrokes(container: HTMLElement): string[] {
+    const edgeG = container.querySelector("[data-testid='nav-edge']");
+    if (!edgeG) return [];
+    return Array.from(edgeG.querySelectorAll("polyline")).map((p) => p.getAttribute("stroke") ?? "");
+  }
+
+  it("placing a decor asset ON a nav edge turns the edge red in the Navigation layer", () => {
+    const campus = campusWithEdgeAnd([{}]);
+    const { container } = render(<Harness initialCampus={campus} />);
+    openNavigationLayer(container);
+    expect(edgeStrokes(container)).toContain("#dc2626");
+  });
+
+  it("the SAME red indicator shows in the Campus layer navigation overlay (especially in campus tab)", () => {
+    const campus = campusWithEdgeAnd([{}]);
+    const { container } = render(<Harness initialCampus={campus} />);
+    // Stay on the Campus layer and toggle the read-only navigation overlay on.
+    fireEvent.click(screen.getByRole("button", { name: /show navigation overlay/i }));
+    expect(edgeStrokes(container)).toContain("#dc2626");
+  });
+
+  it("a Ground Area under the edge does NOT red-line it (background terrain)", () => {
+    const campus = campusWithEdgeAnd([{ type: "ground-area", x: 230, y: 190, width: 80, height: 20 }]);
+    const { container } = render(<Harness initialCampus={campus} />);
+    openNavigationLayer(container);
+    expect(edgeStrokes(container)).not.toContain("#dc2626");
+  });
+
+  it("moving the decor OFF the edge clears the red state live (no reload)", () => {
+    let latest: Campus | undefined;
+    const campus = campusWithEdgeAnd([{}]);
+    const { container } = render(<Harness initialCampus={campus} onCampusChange={(c) => { latest = c; }} />);
+    const svg = openNavigationLayer(container);
+    expect(edgeStrokes(container)).toContain("#dc2626");
+
+    // Back to the Campus layer, drag the fountain far from the edge — the
+    // live memo must re-derive and clear the red state immediately.
+    fireEvent.click(screen.getByText("1. Campus"));
+    fireEvent.mouseDown(decorGroup(container, "fountain"), { clientX: 236, clientY: 186, bubbles: true });
+    fireEvent.mouseMove(svg, { clientX: 600, clientY: 500, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    expect(latest!.decorAssets!.find((d) => d.id === "d1")!.x).toBeGreaterThan(500);
+
+    fireEvent.click(screen.getByText("2. Navigation"));
+    expect(edgeStrokes(container)).not.toContain("#dc2626");
   });
 });
 

@@ -1,4 +1,5 @@
 import { Link, useLocation, useNavigate } from "react-router";
+import { useUnsavedChangesContext } from "../map-builder/UnsavedChangesContext";
 import {
   LayoutDashboard, LogOut, Settings, Map, Flag, Users, Megaphone, CalendarDays, History,
 } from "lucide-react";
@@ -27,13 +28,21 @@ const NAV_ITEMS = [
 
 interface AdminSidebarProps { collapsed?: boolean; }
 
-function NavItem({ label, path, icon: Icon, active, collapsed, badge }: {
+function NavItem({ label, path, icon: Icon, active, collapsed, badge, onNavigate }: {
   label: string; path: string; icon: React.ElementType;
   active: boolean; collapsed: boolean; badge?: number;
+  onNavigate: () => void;
 }) {
   return (
     <Link
       to={path}
+      onClick={(e) => {
+        // Route every sidebar section change through the shared unsaved-changes
+        // guard so leaving the map builder with a dirty draft prompts first.
+        if (active) return; // already here — nothing to leave
+        e.preventDefault();
+        onNavigate();
+      }}
       title={collapsed ? label : undefined}
       aria-current={active ? "page" : undefined}
       className={cn(
@@ -67,6 +76,7 @@ function NavItem({ label, path, icon: Icon, active, collapsed, badge }: {
 export function AdminSidebar({ collapsed = false }: AdminSidebarProps) {
   const location = useLocation();
   const navigate = useNavigate();
+  const { requestGuarded } = useUnsavedChangesContext();
   const shouldReduce = useReducedMotion();
   const [signingOut, setSigningOut] = useState(false);
   const [pendingReports, setPendingReports] = useState(0);
@@ -93,11 +103,13 @@ export function AdminSidebar({ collapsed = false }: AdminSidebarProps) {
 
   const handleSignOut = async () => {
     if (signingOut) return;
+    // Signing out leaves the editor entirely — route through the shared guard
+    // so a dirty draft prompts before the page unmounts.
     setSigningOut(true);
     try {
       await supabase?.auth.signOut();
     } finally {
-      navigate("/admin", { replace: true });
+      requestGuarded(() => navigate("/admin", { replace: true }));
     }
   };
 
@@ -132,7 +144,13 @@ export function AdminSidebar({ collapsed = false }: AdminSidebarProps) {
       {/* Nav */}
       <nav className="flex-1 px-2.5 py-4 flex flex-col gap-0.5 overflow-y-auto scrollbar-show-on-hover">
         {navItems.map(item => (
-          <NavItem key={item.path} {...item} active={isActive(item.path)} collapsed={collapsed}/>
+          <NavItem
+            key={item.path}
+            {...item}
+            active={isActive(item.path)}
+            collapsed={collapsed}
+            onNavigate={() => requestGuarded(() => navigate(item.path))}
+          />
         ))}
       </nav>
 
