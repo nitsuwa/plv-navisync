@@ -1,5 +1,9 @@
 import { getSupabase } from "../lib/supabase";
 import { normalizeFloor } from "../lib/floorPlanNormalization";
+import { nextFloorNumberForBuilding } from "../lib/floorManagement";
+import { syncEntranceNodePositions } from "../lib/navigationGraph";
+import { syncIndoorLinkedNodePositions } from "../lib/indoorNavigationGraph";
+import { ENTRANCE_TRANSITION_EDGE_TYPE, reconcileEntranceTransitions } from "../lib/entranceTransitions";
 import type { Database, Json, Tables, TablesInsert, TablesUpdate } from "../types/database.generated";
 import type {
   AccessibilityFeature, AssemblyPoint, Campus, CampusBuilding, CampusDecorAsset,
@@ -60,10 +64,33 @@ function normalizedElementType(value: string): string {
   return ROOM_TYPES.has(type) ? type : "room";
 }
 function normalizedNodeType(value: NavigationNode["type"]): string {
-  return ({ outdoor: "waypoint", hallway: "waypoint", room_access: "destination", stair: "stairs", transition: "floor_transition" } as Record<string, string>)[value] ?? value;
+  // navigation_nodes.node_type has a DB CHECK constraint allowing only
+  // waypoint/entrance/destination/stairs/elevator/ramp/exit/assembly_area/
+  // floor_transition. Map every UI type onto a DB-safe value; the full UI type
+  // round-trips through metadata JSON, so no information is lost on save.
+  return ({
+    outdoor: "waypoint", hallway: "waypoint", room_access: "destination",
+    stair: "stairs", elevator: "elevator", ramp: "ramp", transition: "floor_transition",
+    emergency_exit: "exit", assembly: "assembly_area", safe_area: "assembly_area",
+    entrance: "entrance",
+  } as Record<string, string>)[value] ?? "waypoint";
 }
 function normalizedEdgeType(value: string): string {
+  // B5 Phase 3: the UI "floor_transition" edge type maps onto the DB's allowed
+  // "transition" value (the full UI type round-trips through metadata JSON).
+  if (value === "floor_transition") return "transition";
+  if (value === ENTRANCE_TRANSITION_EDGE_TYPE) return "transition";
   return new Set(["walkway", "hallway", "stairs", "elevator", "ramp", "door", "crossing", "transition"]).has(value) ? value : "walkway";
+}
+
+interface ExistingNavigationEdgePair {
+  id: string;
+  campus_id: string;
+  from_node_id: string;
+  to_node_id: string;
+  is_temporarily_closed?: boolean | null;
+  edge_type?: string | null;
+  metadata?: Json | null;
 }
 
 /** Coerce a numeric field to a finite number, throwing a descriptive, developer-facing
@@ -119,10 +146,11 @@ function element(kind: StructureKind, campusId: string, value: Record<string, un
 }
 
 export function serializeCampusStructure(campus: Campus): CampusStructurePayload {
+  const canonicalCampus = reconcileEntranceTransitions(campus);
   const buildings: JsonObject[] = [];
   const floors: JsonObject[] = [];
   const map_elements: JsonObject[] = [];
-  (campus.buildings ?? []).forEach((building, buildingOrder) => {
+  (canonicalCampus.buildings ?? []).forEach((building, buildingOrder) => {
     const { floors: buildingFloors, ...buildingUi } = building;
     buildings.push({
       id: building.id, name: building.name, code: building.code, description: building.description,
@@ -135,8 +163,29 @@ export function serializeCampusStructure(campus: Campus): CampusStructurePayload
       is_accessible: Boolean(building.accessibility?.wheelchairAccessible),
       metadata: { ...jsonUi(buildingUi), display_order: buildingOrder },
     });
+    // B5 Phase 3.1: defensive per-building unique renumbering. Local editor
+    // state could drift (e.g. a floor added with a stale next-number) — the DB
+    // `floors_building_number_uq (building_id, floor_number)` constraint must
+    // never reject a save because of it. Keep each floor's own number when it is
+    // still unused in this building; deterministically bump colliding ones to
+    // the next free number (max used + 1).
+    const usedFloorNumbers = new Set<number>();
+    const seenFloorIds = new Set<string>();
     (buildingFloors ?? []).forEach((rawFloor, floorOrder) => {
-      const floor = normalizeFloor(rawFloor, { buildingId: building.id, number: floorOrder + 1 });
+      const normalizedFloor = normalizeFloor(rawFloor, { buildingId: building.id, number: floorOrder + 1 });
+      // B5 Phase 3.1.2: a duplicated local floor object (same id appended
+      // twice) would be persisted as a duplicate row — fail early with a
+      // clear developer-facing error instead of sending invalid rows.
+      if (seenFloorIds.has(normalizedFloor.id)) {
+        throw new Error(`Building "${building.name}" contains a duplicate floor id "${normalizedFloor.id}" — remove the duplicated floor before saving.`);
+      }
+      seenFloorIds.add(normalizedFloor.id);
+      let floorNumber = normalizedFloor.number;
+      if (usedFloorNumbers.has(floorNumber)) {
+        floorNumber = nextFloorNumberForBuilding([...usedFloorNumbers].map((n) => ({ number: n })));
+      }
+      usedFloorNumbers.add(floorNumber);
+      const floor = { ...normalizedFloor, number: floorNumber };
       const {
         rooms = [], paths = [], walls = [], doors = [], windows = [], furniture = [],
         stairs = [], ramps = [], elevators = [], labels = [], ...floorUi
@@ -165,14 +214,14 @@ export function serializeCampusStructure(campus: Campus): CampusStructurePayload
   (campus.decorAssets ?? []).forEach((v) => map_elements.push(element("decor", campus.id, v as unknown as Record<string, unknown>)));
   return {
     buildings, floors, map_elements,
-    navigation_nodes: (campus.navNodes ?? []).map((node) => ({
+    navigation_nodes: (canonicalCampus.navNodes ?? []).map((node) => ({
       id: node.id, building_id: node.buildingId, floor_id: node.floorId, node_type: normalizedNodeType(node.type),
       name: node.name,
       x: finiteNumber(node.x, "navigation_node", node.id, "x"),
       y: finiteNumber(node.y, "navigation_node", node.id, "y"),
       is_accessible: node.accessible, is_emergency_safe: true, is_active: true, metadata: jsonUi(node),
     })),
-    navigation_edges: (campus.navEdges ?? []).map((edge) => ({
+    navigation_edges: (canonicalCampus.navEdges ?? []).map((edge) => ({
       id: edge.id, from_node_id: edge.startNodeId, to_node_id: edge.endNodeId,
       distance_m: Math.max(edge.distance, 0.001), weight: 1, edge_type: normalizedEdgeType(edge.type),
       is_bidirectional: edge.bidirectional, is_accessible: edge.accessible,
@@ -218,11 +267,45 @@ export function hydrateCampusStructure(campus: Campus, rows: CampusStructureRows
     height: row.height, rotation: row.rotation, visible: row.is_visible, floors: floorsByBuilding.get(row.id) ?? [],
   })) as CampusBuilding[];
   const top = <T>(kind: StructureKind) => rows.mapElements.filter((item) => !item.floor_id && (item.metadata as JsonObject | null)?.kind === kind).map((item) => uiFrom<T>(item.metadata)).filter((v): v is T => Boolean(v));
+  const hydratedNavNodes = rows.navigationNodes
+    .filter((row) => row.is_active !== false)
+    .map((row) => uiFrom<NavigationNode>(row.metadata))
+    .filter((v): v is NavigationNode => Boolean(v));
+  const hydratedNavEdges = rows.navigationEdges
+    .filter((row) => row.is_temporarily_closed !== true)
+    .map((row) => uiFrom<NavigationEdge>(row.metadata))
+    .filter((v): v is NavigationEdge => Boolean(v));
+  // B5 Phase 1.8: entrance-linked nav nodes are DERIVED geometry — a stale
+  // persisted x/y (older save, hand-edited metadata) is re-synced against the
+  // linked building entrance on load. IDs + graph relationships are preserved.
+  const navNodes = syncEntranceNodePositions(buildings, hydratedNavNodes);
+  // B5 Phase 2: indoor linked nodes (room/door/stair/elevator/ramp) are DERIVED
+  // geometry too — re-sync their x/y against the hydrated floor objects so a
+  // stale persisted position never drifts from its physical owner on load.
+  const indoorNodes = navNodes.filter((n) => !!n.floorId);
+  const indoorLinkedIds = new Set(indoorNodes.filter((n) => !!n.roomId || !!n.doorId || !!n.stairId || !!n.elevatorId || !!n.rampId).map((n) => n.id));
+  const syncedIndoorNodes = buildings.flatMap((b) =>
+    syncIndoorLinkedNodePositions(
+      indoorNodes.filter((n) => n.buildingId === b.id),
+      { rooms: (b.floors ?? []).flatMap((f) => f.rooms ?? []), doors: (b.floors ?? []).flatMap((f) => f.doors ?? []),
+        stairs: (b.floors ?? []).flatMap((f) => f.stairs ?? []), ramps: (b.floors ?? []).flatMap((f) => f.ramps ?? []),
+        elevators: (b.floors ?? []).flatMap((f) => f.elevators ?? []) }
+    )
+  );
+  const byId = new Map(syncedIndoorNodes.map((n) => [n.id, n]));
+  const finalNodes = navNodes.map((n) => (indoorLinkedIds.has(n.id) ? byId.get(n.id) ?? n : n));
+  // Only drop dangling edges (missing endpoints); cross-side indoor↔outdoor
+  // links (entrance → room access) are a legitimate future graph pattern.
+  const finalEdges = hydratedNavEdges.filter((e) => {
+    const a = finalNodes.find((n) => n.id === e.startNodeId);
+    const b = finalNodes.find((n) => n.id === e.endNodeId);
+    return Boolean(a && b);
+  });
+  const reconciledGraph = reconcileEntranceTransitions({ ...campus, buildings, navNodes: finalNodes, navEdges: finalEdges });
   return { ...campus, buildings, markers: top<CampusMarker>("marker"), paths: top<CampusPath>("campus_path"),
     routes: top<CampusRoute>("route"), accessibilityFeatures: top<AccessibilityFeature>("accessibility_feature"),
     assemblyPoints: top<AssemblyPoint>("assembly_point"), decorAssets: top<CampusDecorAsset>("decor"),
-    navNodes: rows.navigationNodes.map((row) => uiFrom<NavigationNode>(row.metadata)).filter((v): v is NavigationNode => Boolean(v)),
-    navEdges: rows.navigationEdges.map((row) => uiFrom<NavigationEdge>(row.metadata)).filter((v): v is NavigationEdge => Boolean(v)) };
+    navNodes: finalNodes, navEdges: reconciledGraph.navEdges ?? [] };
 }
 
 async function selectStructure(campusId: string): Promise<CampusStructureRows> {
@@ -231,8 +314,8 @@ async function selectStructure(campusId: string): Promise<CampusStructureRows> {
     db.from("buildings").select("*").eq("campus_id", campusId).is("archived_at", null),
     db.from("floors").select("*, buildings!inner(campus_id)").eq("buildings.campus_id", campusId).is("archived_at", null),
     db.from("map_elements").select("*").eq("campus_id", campusId).is("archived_at", null),
-    db.from("navigation_nodes").select("*").eq("campus_id", campusId),
-    db.from("navigation_edges").select("*").eq("campus_id", campusId),
+    db.from("navigation_nodes").select("*").eq("campus_id", campusId).eq("is_active", true),
+    db.from("navigation_edges").select("*").eq("campus_id", campusId).eq("is_temporarily_closed", false),
   ]);
   const failure = [buildings, floors, mapElements, navigationNodes, navigationEdges].find((result) => result.error)?.error;
   if (failure) throw failure;
@@ -259,8 +342,15 @@ export const entranceService = { ...mapElementService, list: async (campusId: st
 export const campusStructureService = {
   async load(campus: Campus): Promise<Campus> { return hydrateCampusStructure(campus, await selectStructure(campus.id)); },
   async save(campus: Campus): Promise<Campus> {
-    const { error } = await getSupabase().rpc("save_campus_structure", { p_campus_id: campus.id, p_payload: serializeCampusStructure(campus) as unknown as Json });
-    if (error) throw new Error(`Campus structure was not saved: ${error.message}`);
+    const payload = serializeCampusStructure(campus);
+    validateNavigationEdgePayload(payload);
+    const payloadWithStableEdgeRows = await reuseExistingNavigationEdgePairRows(campus.id, payload);
+    validateNavigationEdgePayload(payloadWithStableEdgeRows);
+    const { error } = await getSupabase().rpc("save_campus_structure", { p_campus_id: campus.id, p_payload: payloadWithStableEdgeRows as unknown as Json });
+    if (error) {
+      await logCampusStructureSaveDiagnostics(campus.id, payloadWithStableEdgeRows, error);
+      throw new Error(`Campus structure was not saved: ${error.message}`);
+    }
     return this.load(campus);
   },
   async publishedDirectory(campusId?: string): Promise<PublishedDirectoryEntry[]> {
@@ -270,6 +360,202 @@ export const campusStructureService = {
     return (data ?? []).flatMap((version) => directoryFromSnapshot(version.campus_id, version.snapshot));
   },
 };
+
+function navigationEdgeRowType(edge: JsonObject): string | undefined {
+  const metadata = edge.metadata;
+  const ui = metadata && typeof metadata === "object" && !Array.isArray(metadata) ? (metadata as JsonObject).ui : undefined;
+  return ui && typeof ui === "object" && !Array.isArray(ui) ? String((ui as JsonObject).type ?? "") || undefined : undefined;
+}
+
+export function validateNavigationEdgePayload(payload: CampusStructurePayload): void {
+  const nodeIds = new Set(payload.navigation_nodes.map((node) => String(node.id)));
+  const edgeIds = new Set<string>();
+  const pairIds = new Map<string, string>();
+  const entranceById = new Map<string, string>();
+  for (const edge of payload.navigation_edges) {
+    const id = String(edge.id ?? "");
+    const from = String(edge.from_node_id ?? "");
+    const to = String(edge.to_node_id ?? "");
+    if (!id) throw new Error("navigation edge payload contains an edge without an id.");
+    if (edgeIds.has(id)) throw new Error(`navigation edge payload contains duplicate edge id "${id}".`);
+    edgeIds.add(id);
+    if (!nodeIds.has(from) || !nodeIds.has(to)) {
+      throw new Error(`navigation edge "${id}" references missing endpoint node(s): ${from} -> ${to}.`);
+    }
+    const pairKey = `${from}|${to}`;
+    const existingPairId = pairIds.get(pairKey);
+    if (existingPairId) {
+      throw new Error(`navigation edge payload contains duplicate active pair ${from} -> ${to} (${existingPairId}, ${id}).`);
+    }
+    pairIds.set(pairKey, id);
+    if (navigationEdgeRowType(edge) === ENTRANCE_TRANSITION_EDGE_TYPE) {
+      const metadata = edge.metadata as JsonObject | undefined;
+      const ui = metadata?.ui as JsonObject | undefined;
+      const startId = String(ui?.startNodeId ?? from);
+      const endId = String(ui?.endNodeId ?? to);
+      const startNode = payload.navigation_nodes.find((node) => String(node.id) === startId);
+      const endNode = payload.navigation_nodes.find((node) => String(node.id) === endId);
+      const entranceNode = startNode && !startNode.floor_id ? startNode : endNode && !endNode.floor_id ? endNode : undefined;
+      const entranceId = entranceNode?.metadata && typeof entranceNode.metadata === "object" && !Array.isArray(entranceNode.metadata)
+        ? ((entranceNode.metadata as JsonObject).ui as JsonObject | undefined)?.entranceId
+        : undefined;
+      if (entranceId) {
+        const entranceKey = String(entranceId);
+        const existingEntranceEdge = entranceById.get(entranceKey);
+        if (existingEntranceEdge) {
+          throw new Error(`navigation edge payload contains multiple entrance transitions for entrance "${entranceKey}" (${existingEntranceEdge}, ${id}).`);
+        }
+        entranceById.set(entranceKey, id);
+      }
+    }
+  }
+}
+
+export function rekeyNavigationEdgePayloadPairs(payload: CampusStructurePayload, existingRows: NavigationEdgePairRow[], campusId: string): CampusStructurePayload {
+  const byPair = new Map(existingRows.filter((row) => row.campusId === campusId).map((row) => [`${row.fromNodeId}|${row.toNodeId}`, row.id]));
+  const navigation_edges = payload.navigation_edges.map((edge) => {
+    const pairOwnerId = byPair.get(`${String(edge.from_node_id)}|${String(edge.to_node_id)}`);
+    if (!pairOwnerId || pairOwnerId === edge.id) return edge;
+    const metadata = edge.metadata && typeof edge.metadata === "object" && !Array.isArray(edge.metadata)
+      ? { ...(edge.metadata as JsonObject) }
+      : edge.metadata;
+    if (metadata && typeof metadata === "object" && !Array.isArray(metadata)) {
+      const ui = (metadata as JsonObject).ui;
+      if (ui && typeof ui === "object" && !Array.isArray(ui)) {
+        (metadata as JsonObject).ui = { ...(ui as JsonObject), id: pairOwnerId } as Json;
+      }
+    }
+    return { ...edge, id: pairOwnerId, metadata };
+  });
+  return { ...payload, navigation_edges };
+}
+
+async function reuseExistingNavigationEdgePairRows(campusId: string, payload: CampusStructurePayload): Promise<CampusStructurePayload> {
+  if (payload.navigation_edges.length === 0) return payload;
+  const { data, error } = await getSupabase()
+    .from("navigation_edges")
+    .select("id,campus_id,from_node_id,to_node_id,is_temporarily_closed,edge_type,metadata")
+    .eq("campus_id", campusId);
+  if (error) throw new Error(`Could not inspect existing navigation edge pairs before save: ${error.message}`);
+  const existingRows: NavigationEdgePairRow[] = ((data ?? []) as ExistingNavigationEdgePair[]).map((row) => ({
+    id: row.id,
+    campusId: row.campus_id,
+    fromNodeId: row.from_node_id,
+    toNodeId: row.to_node_id,
+  }));
+  return rekeyNavigationEdgePayloadPairs(payload, existingRows, campusId);
+}
+
+async function logCampusStructureSaveDiagnostics(campusId: string, payload: CampusStructurePayload, error: unknown): Promise<void> {
+  const floors = payload.floors.map((f) => ({
+    id: String(f.id),
+    buildingId: String(f.building_id),
+    requestedNumber: Number(f.floor_number),
+    name: String(f.name ?? ""),
+  }));
+  const keyCounts = new Map<string, number>();
+  floors.forEach((f) => {
+    const key = `${f.buildingId}|${f.requestedNumber}`;
+    keyCounts.set(key, (keyCounts.get(key) ?? 0) + 1);
+  });
+  const duplicatePayloadKeys = [...keyCounts.entries()].filter(([, count]) => count > 1).map(([key]) => key);
+  let persistedConflicts: unknown[] = [];
+  try {
+    const buildingIds = [...new Set(floors.map((f) => f.buildingId))];
+    const requestedNumbers = [...new Set(floors.map((f) => f.requestedNumber))];
+    if (buildingIds.length > 0 && requestedNumbers.length > 0) {
+      const { data, error: conflictError } = await getSupabase()
+        .from("floors")
+        .select("id,building_id,name,floor_number,display_order,archived_at,updated_at")
+        .in("building_id", buildingIds)
+        .in("floor_number", requestedNumbers);
+      if (conflictError) throw conflictError;
+      const payloadIds = new Set(floors.map((f) => f.id));
+      persistedConflicts = (data ?? []).map((row) => ({
+        id: row.id,
+        buildingId: row.building_id,
+        name: row.name,
+        floorNumber: row.floor_number,
+        archivedAt: row.archived_at,
+        alsoInPayload: payloadIds.has(row.id),
+      }));
+    }
+  } catch (diagnosticError) {
+    persistedConflicts = [{ diagnosticQueryFailed: diagnosticError instanceof Error ? diagnosticError.message : String(diagnosticError) }];
+  }
+  console.error("[CampusStructure] save_campus_structure failed", {
+    rpc: "save_campus_structure",
+    args: ["p_campus_id", "p_payload"],
+    campusId,
+    error,
+    floors,
+    duplicatePayloadKeys,
+    persistedConflicts,
+  });
+}
+
+/**
+ * B5 Phase 3.1.2 — pure TS mirror of the two-phase floor-number resolution
+ * executed inside the `save_campus_structure` RPC (migration
+ * 20260812120000_two_phase_floor_number_save.sql) BEFORE its single-statement
+ * `INSERT ... ON CONFLICT (id) DO UPDATE`:
+ *
+ * 1. every existing row that will be rewritten in place (id + building match a
+ *    payload row) OR that currently holds a (building_id, floor_number) a
+ *    payload row claims (a stale live/archived blocker) is moved to a unique
+ *    temporary negative number;
+ * 2. the final payload numbers are then written with no intermediate
+ *    `floors_building_number_uq` collision — a swap (A:1→2 while B still holds
+ *    2, B→1) or a new floor taking a number held by an archived stale row can
+ *    no longer abort the save.
+ *
+ * Exported so the write-order contract is regression-testable without a live
+ * database; the SQL migration is the authoritative implementation.
+ */
+export interface FloorNumberRow { id: string; buildingId: string; number: number; }
+export interface FloorNumberWritePlan {
+  /** Existing rows to move to temporary numbers before the final write. */
+  moves: Array<{ id: string; tempNumber: number }>;
+  /** Final rows to upsert (the payload floors). */
+  finals: FloorNumberRow[];
+}
+export function planFloorNumberWrites(payload: FloorNumberRow[], existing: FloorNumberRow[]): FloorNumberWritePlan {
+  const claimed = new Map<string, string>(); // `${buildingId}|${number}` → payload id
+  for (const f of payload) claimed.set(`${f.buildingId}|${f.number}`, f.id);
+  const payloadIds = new Set(payload.map((f) => f.id));
+  const moves: Array<{ id: string; tempNumber: number }> = [];
+  const minByBuilding = new Map<string, number>();
+  for (const row of existing) {
+    minByBuilding.set(row.buildingId, Math.min(minByBuilding.get(row.buildingId) ?? 0, row.number));
+  }
+  const nextTempByBuilding = new Map<string, number>();
+  [...existing]
+    .sort((a, b) => a.id.localeCompare(b.id))
+    .forEach((row) => {
+      const rewrittenInPlace = payload.some((f) => f.id === row.id && f.buildingId === row.buildingId);
+      const claimedBy = claimed.get(`${row.buildingId}|${row.number}`);
+      const staleBlocker = claimedBy !== undefined && claimedBy !== row.id && !payloadIds.has(row.id);
+      if (rewrittenInPlace || staleBlocker) {
+        const tempNumber = (nextTempByBuilding.get(row.buildingId) ?? (minByBuilding.get(row.buildingId) ?? 0)) - 1;
+        nextTempByBuilding.set(row.buildingId, tempNumber);
+        moves.push({ id: row.id, tempNumber });
+      }
+    });
+  return { moves, finals: payload.map((f) => ({ ...f })) };
+}
+
+export interface NavigationEdgePairRow { id: string; campusId: string; fromNodeId: string; toNodeId: string; }
+export function navigationEdgePairConflictIds(payload: NavigationEdgePairRow[], existing: NavigationEdgePairRow[], campusId: string): string[] {
+  const payloadIds = new Set(payload.map((edge) => edge.id));
+  const payloadPairs = new Set(payload.filter((edge) => edge.campusId === campusId).map((edge) => `${edge.fromNodeId}|${edge.toNodeId}`));
+  return existing
+    .filter((edge) =>
+      edge.campusId === campusId &&
+      !payloadIds.has(edge.id) &&
+      payloadPairs.has(`${edge.fromNodeId}|${edge.toNodeId}`)
+    )
+    .map((edge) => edge.id);
+}
 
 export function directoryFromSnapshot(campusId: string, snapshot: Json): PublishedDirectoryEntry[] {
   if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) return [];

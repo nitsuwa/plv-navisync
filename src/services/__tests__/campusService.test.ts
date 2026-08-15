@@ -193,6 +193,16 @@ describe("listCampuses (campus preview summary boundary)", () => {
   beforeEach(() => vi.clearAllMocks());
 
   it("queries persisted lightweight building footprints and maps them without full structure hydration", async () => {
+    const floorRows = [
+      { id: "f1", archived_at: null, buildings: { campus_id: "c2" } },
+      { id: "f2", archived_at: null, buildings: { campus_id: "c2" } },
+      { id: "f3", archived_at: null, buildings: { campus_id: "c3" } },
+    ];
+    const roomRows = [
+      { id: "r1", campus_id: "c2", element_type: "room", archived_at: null },
+      { id: "r2", campus_id: "c2", element_type: "room", archived_at: null },
+      { id: "r3", campus_id: "c3", element_type: "room", archived_at: null },
+    ];
     const orderByName = vi.fn().mockResolvedValue({
       data: [
         { ...campusRow, id: "c1", name: "Empty Campus", preview_buildings: [] },
@@ -218,23 +228,51 @@ describe("listCampuses (campus preview summary boundary)", () => {
             },
           ],
         },
+        {
+          ...campusRow,
+          id: "c3",
+          name: "Second Campus",
+          preview_buildings: [],
+        },
       ],
       error: null,
     });
     const orderByDefault = vi.fn(() => ({ order: orderByName }));
     const select = vi.fn(() => ({ order: orderByDefault }));
+    const floorIs = vi.fn().mockResolvedValue({ data: floorRows, error: null });
+    const floorIn = vi.fn(() => ({ is: floorIs }));
+    const floorSelect = vi.fn(() => ({ in: floorIn }));
+    const roomIs = vi.fn().mockResolvedValue({ data: roomRows, error: null });
+    const roomEq = vi.fn(() => ({ is: roomIs }));
+    const roomIn = vi.fn(() => ({ eq: roomEq }));
+    const roomSelect = vi.fn(() => ({ in: roomIn }));
     const from = vi.fn((table: string) => {
-      if (table !== "campuses") throw new Error(`unexpected table ${table}`);
-      return { select };
+      if (table === "campuses") return { select };
+      if (table === "floors") return { select: floorSelect };
+      if (table === "map_elements") return { select: roomSelect };
+      throw new Error(`unexpected table ${table}`);
     });
     vi.mocked(getSupabase).mockReturnValue({ from } as never);
 
     const campuses = await listCampuses();
 
     expect(select).toHaveBeenCalledWith("*, preview_buildings:buildings(id,name,code,category,description,x,y,width,height,rotation,is_visible,metadata,archived_at)");
-    expect(campuses.map((campus) => ({ id: campus.id, count: campus.previewBuildingCount, previewLoaded: campus.previewBuildingsLoaded, buildings: campus.buildings.length }))).toEqual([
-      { id: "c1", count: 0, previewLoaded: true, buildings: 0 },
-      { id: "c2", count: 1, previewLoaded: true, buildings: 1 },
+    expect(floorSelect).toHaveBeenCalledWith("id,archived_at,buildings!inner(campus_id)");
+    expect(floorIn).toHaveBeenCalledWith("buildings.campus_id", ["c1", "c2", "c3"]);
+    expect(roomSelect).toHaveBeenCalledWith("id,campus_id,element_type,archived_at");
+    expect(roomIn).toHaveBeenCalledWith("campus_id", ["c1", "c2", "c3"]);
+    expect(roomEq).toHaveBeenCalledWith("element_type", "room");
+    expect(campuses.map((campus) => ({
+      id: campus.id,
+      count: campus.previewBuildingCount,
+      floors: campus.previewFloorCount,
+      rooms: campus.previewRoomCount,
+      previewLoaded: campus.previewBuildingsLoaded,
+      buildings: campus.buildings.length,
+    }))).toEqual([
+      { id: "c1", count: 0, floors: 0, rooms: 0, previewLoaded: true, buildings: 0 },
+      { id: "c2", count: 1, floors: 2, rooms: 2, previewLoaded: true, buildings: 1 },
+      { id: "c3", count: 0, floors: 1, rooms: 1, previewLoaded: true, buildings: 0 },
     ]);
     expect(campuses[1].buildings[0]).toMatchObject({
       id: "b1",

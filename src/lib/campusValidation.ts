@@ -74,6 +74,15 @@ export function validateCampusData(
   }
   const bldgs = campus.buildings;
   for (const b of bldgs) {
+    // Every building-scoped issue shares one locate target: select the
+    // building on the campus canvas in Design mode.
+    const buildingTarget = {
+      scope: "campus" as const,
+      mode: "design" as const,
+      buildingId: b.id,
+      selectionType: "building" as const,
+      id: b.id,
+    };
     if (!b.name || b.name === "New Building") {
       const key = `${b.id}-missing_name`;
       if (!seenIds.has(key)) {
@@ -82,6 +91,7 @@ export function validateCampusData(
           type: "missing_name",
           message: `Please enter a name for Building "${b.code}".`,
           buildingId: b.id,
+          target: buildingTarget,
         });
       }
     }
@@ -93,6 +103,7 @@ export function validateCampusData(
           type: "missing_code",
           message: `Please assign a building code to "${b.name}".`,
           buildingId: b.id,
+          target: buildingTarget,
         });
       }
     }
@@ -106,6 +117,7 @@ export function validateCampusData(
           type: "boundary",
           message: `The building "${b.code}" extends beyond the campus boundary. Move or resize it so it fits within the map.`,
           buildingId: b.id,
+          target: buildingTarget,
         });
       }
     }
@@ -117,6 +129,7 @@ export function validateCampusData(
           type: "no_floors",
           message: `Please add at least one floor to Building "${b.code}".`,
           buildingId: b.id,
+          target: buildingTarget,
         });
       }
     }
@@ -130,6 +143,7 @@ export function validateCampusData(
           type: "no_building_entrance",
           message: `Building "${b.code}" has no entrance. Add a General entrance before navigation setup.`,
           buildingId: b.id,
+          target: buildingTarget,
         });
       }
     } else if (primaryEntrances.length === 0) {
@@ -140,6 +154,7 @@ export function validateCampusData(
           type: "no_primary_entrance",
           message: `Building "${b.code}" has no primary entrance. Mark one General entrance as Primary.`,
           buildingId: b.id,
+          target: buildingTarget,
         });
       }
     } else if (primaryEntrances.length > 1) {
@@ -150,6 +165,7 @@ export function validateCampusData(
           type: "multiple_primary_entrances",
           message: `Building "${b.code}" has more than one primary entrance. Keep only one Primary entrance.`,
           buildingId: b.id,
+          target: buildingTarget,
         });
       }
     }
@@ -167,6 +183,13 @@ export function validateCampusData(
           type: "overlap",
           message: `Building "${b.code}" overlaps with another building. Adjust its position to resolve the overlap.`,
           buildingId: id,
+          target: {
+            scope: "campus",
+            mode: "design",
+            buildingId: id,
+            selectionType: "building",
+            id,
+          },
         });
       }
     }

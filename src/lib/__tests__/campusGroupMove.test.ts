@@ -15,6 +15,10 @@ function decor(id: string, x: number, y: number, width = 72, height = 84): Group
   return { kind: "decorAsset", id, x, y, width, height };
 }
 
+function pathMember(id: string, x: number, y: number, width = 160, height = 40): GroupMoveMember {
+  return { kind: "path", id, x, y, width, height };
+}
+
 const CANVAS = { canvasW: 900, canvasH: 680 };
 
 describe("computeGroupTranslation — rigid multi-object movement", () => {
@@ -57,6 +61,23 @@ describe("computeGroupTranslation — rigid multi-object movement", () => {
     expect(b1Center.x).toBe(170);
     expect(daCenter.x - b1Center.x).toBe(290); // same as 450 - 160
     expect(daCenter.y - b1Center.y).toBe(-20); // same as 120 - 140
+  });
+
+  it("moves multiple pathways by the same rigid delta using top-left path bounds", () => {
+    const members = [pathMember("p1", 100, 100), pathMember("p2", 300, 160)];
+    const { dx, dy } = computeGroupTranslation({
+      members,
+      draggedId: "p1",
+      rawDx: 23,
+      rawDy: 17,
+      ...CANVAS,
+      snapGrid: true,
+    });
+
+    expect(dx).toBe(20);
+    expect(dy).toBe(20);
+    expect(members[1].x + dx - (members[0].x + dx)).toBe(200);
+    expect(members[1].y + dy - (members[0].y + dy)).toBe(60);
   });
 
   it("preserves internal spacing regardless of how far the group is dragged", () => {

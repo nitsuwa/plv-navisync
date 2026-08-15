@@ -26,9 +26,9 @@ const GROUPS: ShortcutGroup[] = [
     shortcuts: [
       { keys: "V", desc: "Select tool" },
       { keys: "B", desc: "Building tool (Campus layer)" },
-      { keys: "M", desc: "Marker tool (Campus layer)" },
-      { keys: "P", desc: "Path / Route tool" },
-      { keys: "E", desc: "Erase tool" },
+      { keys: "M", desc: "Add Waypoint (Navigation) / Add Event (Events)" },
+      { keys: "P", desc: "Connect Path (Navigation)" },
+      { keys: "E", desc: "Erase / Remove tool" },
       { keys: "R", desc: "Room / elevator marker tool" },
     ],
   },
@@ -38,9 +38,8 @@ const GROUPS: ShortcutGroup[] = [
     shortcuts: [
       { keys: "1", desc: "Campus layer" },
       { keys: "2", desc: "Navigation layer" },
-      { keys: "3", desc: "Accessibility layer" },
-      { keys: "4", desc: "Emergency layer" },
-      { keys: "5", desc: "Events layer" },
+      { keys: "3", desc: "Events layer" },
+      { keys: "0", desc: "Reset view" },
     ],
   },
   {
@@ -69,6 +68,8 @@ const GROUPS: ShortcutGroup[] = [
     icon: Square,
     shortcuts: [
       { keys: "Delete / Bksp", desc: "Delete selected" },
+      { keys: "Ctrl + C", desc: "Copy selected" },
+      { keys: "Ctrl + V", desc: "Paste copied with new IDs" },
       { keys: "Ctrl + Z", desc: "Undo" },
       { keys: "Ctrl + Y", desc: "Redo" },
       { keys: "Ctrl + S", desc: "Save draft" },
@@ -118,6 +119,8 @@ const FLOOR_GROUPS: ShortcutGroup[] = [
     icon: Square,
     shortcuts: [
       { keys: "Delete / Bksp", desc: "Delete selected" },
+      { keys: "Ctrl + C", desc: "Copy selected floor object(s)" },
+      { keys: "Ctrl + V", desc: "Paste copied with new IDs" },
       { keys: "Ctrl + Z", desc: "Undo" },
       { keys: "Ctrl + Y", desc: "Redo" },
       { keys: "Ctrl + D", desc: "Duplicate selected floor object(s)" },

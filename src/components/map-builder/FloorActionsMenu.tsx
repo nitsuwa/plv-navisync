@@ -14,7 +14,7 @@ interface FloorActionsMenuProps {
   isLast: boolean;
   /** True when this is the only floor — disables Delete. */
   isOnly: boolean;
-  /** Directional wording — "Move Left / Move Right" on horizontal tabs, "Move Up / Move Down" in the hierarchy. */
+  /** Directional wording for the canonical vertical floor order. */
   moveUpLabel?: string;
   moveDownLabel?: string;
   /** Include "Floor Settings" (Floor Editor only). */

@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { useState } from "react";
 import { FloorEditor } from "../FloorEditor";
 import { FURNITURE_CATEGORIES } from "../constants";
-import { rotatedRectBounds } from "../../../lib/floorGeometry";
+import { resizeCirculationWithinFloor, rotatedRectBounds } from "../../../lib/floorGeometry";
 import type { Campus, FloorWall } from "../types";
 
 // ── Shared fixtures ─────────────────────────────────────────────────────────
@@ -296,6 +296,10 @@ function furnitureGroup(container: HTMLElement, title: string): SVGGElement {
   return g;
 }
 
+function layerKeys(container: HTMLElement) {
+  return Array.from(container.querySelectorAll("[data-layer-key]")).map((el) => el.getAttribute("data-layer-key"));
+}
+
 function titledGroup(container: HTMLElement, title: string): SVGGElement {
   const g = Array.from(container.querySelectorAll("g")).find(
     (el) => !el.hasAttribute("transform") && (el.querySelector("title")?.textContent === title || el.getAttribute("data-floor-title") === title)
@@ -323,6 +327,78 @@ beforeEach(() => {
   vi.stubGlobal("cancelAnimationFrame", (id: number) => window.clearTimeout(id));
 });
 
+describe("B5 final cleanup regressions", () => {
+  it("previous/next floor buttons follow canonical order and disable at boundaries", () => {
+    const campus = makeFloorManagementCampus();
+    const base = campus.buildings[0].floors[0];
+    campus.buildings[0].floors = [
+      base,
+      { ...structuredClone(base), id: "f2", number: 2, label: "Floor 2", rooms: [], walls: [], doors: [], windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [], paths: [] },
+      { ...structuredClone(base), id: "f3", number: 3, label: "Floor 3", rooms: [], walls: [], doors: [], windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [], paths: [] },
+    ];
+
+    render(<FloorWorkflowHarness initialCampus={campus} />);
+
+    const previous = screen.getByRole("button", { name: "Previous floor" }) as HTMLButtonElement;
+    const next = screen.getByRole("button", { name: "Next floor" }) as HTMLButtonElement;
+    expect(previous.disabled).toBe(true);
+    expect(next.disabled).toBe(false);
+
+    fireEvent.click(next);
+    expect(screen.getByRole("button", { name: "Select floor" })).toHaveTextContent("Floor 2");
+    expect((screen.getByRole("button", { name: "Previous floor" }) as HTMLButtonElement).disabled).toBe(false);
+
+    fireEvent.click(screen.getByRole("button", { name: "Next floor" }));
+    expect(screen.getByRole("button", { name: "Select floor" })).toHaveTextContent("Floor 3");
+    expect((screen.getByRole("button", { name: "Next floor" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("does not clamp authored circulation resize back to small defaults", () => {
+    const resized = resizeCirculationWithinFloor(
+      { id: "st-large", x: 40, y: 40, width: 120, height: 40, direction: "both", label: "Stairs", rotation: 0 },
+      "e",
+      80,
+      0,
+      300,
+      220,
+      false
+    );
+
+    expect(resized.width).toBe(200);
+    expect(resized.height).toBe(40);
+    expect(resized.x).toBe(40);
+  });
+
+  it("commits a wall endpoint to the exact room-boundary intersection target", () => {
+    const campus = makeRichCampus();
+    const floor = campus.buildings[0].floors[0];
+    floor.canvasW = 220;
+    floor.canvasH = 160;
+    floor.rooms = [{ id: "r-intersect", name: "Room", type: "classroom", x: 50, y: 50, w: 120, h: 90, floorId: "f1", buildingId: "b1" }];
+    floor.walls = [{ id: "existing-cross", x1: 110, y1: 20, x2: 110, y2: 100, thickness: 4, color: "#64748b", material: "concrete" }];
+    floor.doors = [];
+    floor.windows = [];
+    floor.furniture = [];
+    floor.stairs = [];
+    floor.ramps = [];
+    floor.elevators = [];
+    floor.labels = [];
+    floor.paths = [];
+
+    const { container } = render(<Harness initialCampus={campus} onCampusChange={(c) => { latestCampus = c; }} />);
+    const svg = stubSvgRect(container);
+
+    fireEvent.keyDown(window, { key: "w" });
+    fireEvent.mouseDown(svg, { clientX: 20, clientY: 50, bubbles: true });
+    fireEvent.mouseMove(svg, { clientX: 110, clientY: 50, bubbles: true });
+    fireEvent.mouseDown(svg, { clientX: 110, clientY: 50, bubbles: true });
+
+    const drawn = latestCampus!.buildings[0].floors[0].walls[1];
+    expect(drawn).toMatchObject({ x1: 20, y1: 60, x2: 110, y2: 50 });
+    expect(drawn.endAnchor).toMatchObject({ targetType: "room", roomId: "r-intersect", edge: "top" });
+  });
+});
+
 describe("B4 floor workflow completion", () => {
   it("adds a new default floor and switches into a clean editor state", () => {
     let latestCampus: Campus | null = null;
@@ -335,9 +411,8 @@ describe("B4 floor workflow completion", () => {
     expect(floors[1]).toMatchObject({ buildingId: "b1", number: 2, label: "Floor 2", canvasW: 600, canvasH: 450, gridSize: 20 });
     expect(floors[1].rooms).toEqual([]);
     expect(screen.queryByTestId("floor-properties-panel")).toBeNull();
-    // The new floor becomes the active tab; the breadcrumb also renders the same
-    // label, so scope to the tab button role rather than a bare text query.
-    expect(screen.getByRole("button", { name: "Floor 2" })).toBeInTheDocument();
+    // The new floor becomes the ACTIVE floor — shown in the floor selector button.
+    expect(screen.getByRole("button", { name: "Select floor" }).textContent).toContain("Floor 2");
   });
 
   it("duplicates a populated floor with independent IDs and remapped room-wall-opening relationships", () => {
@@ -366,7 +441,7 @@ describe("B4 floor workflow completion", () => {
     fireEvent.click(screen.getByRole("button", { name: "Floor actions" }));
     fireEvent.click(screen.getByRole("button", { name: "Duplicate Floor" }));
     fireEvent.click(screen.getByRole("button", { name: "Floor actions" }));
-    fireEvent.click(screen.getByRole("button", { name: "Move Left" }));
+    fireEvent.click(screen.getByRole("button", { name: "Move Up" }));
     expect(latestCampus!.buildings[0].floors.map((floor) => floor.label)).toEqual(["Ground Floor Copy", "Ground Floor"]);
 
     fireEvent.click(screen.getByRole("button", { name: "Floor actions" }));
@@ -384,8 +459,8 @@ describe("B4 floor workflow completion", () => {
     fireEvent.click(screen.getByRole("button", { name: "Delete Floor" }));
     fireEvent.click(within(screen.getByTestId("delete-floor-confirm-dialog")).getByRole("button", { name: "Delete Floor" }));
     expect(latestCampus!.buildings[0].floors.map((floor) => floor.label)).toEqual(["Ground Floor"]);
-    // The surviving floor becomes the active tab after deletion.
-    expect(screen.getByRole("button", { name: "Ground Floor" }).className).toContain("bg-primary");
+    // The surviving floor becomes the ACTIVE floor after deletion.
+    expect(screen.getByRole("button", { name: "Select floor" }).textContent).toContain("Ground Floor");
   });
 
   it("persists grid presets from normal Floor Settings without exposing deferred tools", () => {
@@ -440,7 +515,8 @@ describe("B4 floor workflow completion", () => {
 
     expect(screen.queryByTestId("delete-floor-confirm-dialog")).toBeNull();
     expect(latestCampus).toBeNull();
-    expect(screen.getByRole("button", { name: "Ground Floor" })).toBeInTheDocument();
+    // The only floor is still present and active in the selector button.
+    expect(screen.getByRole("button", { name: "Select floor" }).textContent).toContain("Ground Floor");
   });
 
   it("changes grid presets without moving existing objects", () => {
@@ -476,8 +552,8 @@ describe("B4 floor management UX consistency", () => {
     expect(within(menu).getByRole("button", { name: "Duplicate Floor" })).toBeInTheDocument();
     expect(within(menu).getByRole("button", { name: "Floor Settings" })).toBeInTheDocument();
     // Single floor: reordering and deleting are blocked from the menu too.
-    expect((within(menu).getByRole("button", { name: "Move Left" }) as HTMLButtonElement).disabled).toBe(true);
-    expect((within(menu).getByRole("button", { name: "Move Right" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((within(menu).getByRole("button", { name: "Move Up" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((within(menu).getByRole("button", { name: "Move Down" }) as HTMLButtonElement).disabled).toBe(true);
     expect((within(menu).getByRole("button", { name: "Delete Floor" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
@@ -491,7 +567,8 @@ describe("B4 floor management UX consistency", () => {
     fireEvent.click(screen.getByRole("button", { name: "Rename Floor" }));
 
     expect(latestCampus!.buildings[0].floors[0].label).toBe("Lobby 1");
-    expect(screen.getByRole("button", { name: "Lobby 1" })).toBeInTheDocument();
+    // The renamed ACTIVE floor is shown in the selector button.
+    expect(screen.getByRole("button", { name: "Select floor" }).textContent).toContain("Lobby 1");
 
     // Empty/whitespace names keep the dialog open with a disabled save.
     fireEvent.click(screen.getByRole("button", { name: "Floor actions" }));
@@ -502,33 +579,40 @@ describe("B4 floor management UX consistency", () => {
     expect(screen.getByLabelText("Rename floor input")).toBeInTheDocument();
   });
 
-  it("moves the active floor left/right with edge disable states while keeping the active floor by ID", () => {
+  it("moves the active floor up/down with edge disable states while keeping the active floor by ID", () => {
     let latestCampus: Campus | null = null;
     render(<FloorWorkflowHarness onCampusChange={(c) => { latestCampus = c; }} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Add Floor" })); // active = Floor 2 (last)
     fireEvent.click(screen.getByRole("button", { name: "Floor actions" }));
     const menu = floorActionsMenu();
-    expect((within(menu).getByRole("button", { name: "Move Right" }) as HTMLButtonElement).disabled).toBe(true);
-    fireEvent.click(within(menu).getByRole("button", { name: "Move Left" }));
+    expect((within(menu).getByRole("button", { name: "Move Down" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(within(menu).getByRole("button", { name: "Move Up" }));
 
     expect(latestCampus!.buildings[0].floors.map((floor) => floor.label)).toEqual(["Floor 2", "Ground Floor"]);
     // Active floor is tracked by ID, not array index — Floor 2 stays active after reorder.
-    expect(screen.getByRole("button", { name: "Floor 2" }).className).toContain("bg-primary");
+    expect(screen.getByRole("button", { name: "Select floor" }).textContent).toContain("Floor 2");
   });
 
-  it("opens the shared menu from a tab right-click and acts on that floor", () => {
+  it("opens the shared menu from a floor selector right-click and acts on that floor", () => {
     let latestCampus: Campus | null = null;
     render(<FloorWorkflowHarness onCampusChange={(c) => { latestCampus = c; }} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Add Floor" })); // active = Floor 2
-    fireEvent.contextMenu(screen.getByRole("button", { name: "Ground Floor" }), { clientX: 120, clientY: 40 });
+    // Right-click the INACTIVE Ground Floor inside the selector popover → the
+    // shared actions menu targets THAT floor (the old tab right-click flow).
+    fireEvent.click(screen.getByRole("button", { name: "Select floor" }));
+    fireEvent.contextMenu(
+      within(screen.getByTestId("floor-selector-popover")).getByRole("option", { name: /Ground Floor/ }),
+      { clientX: 120, clientY: 40 }
+    );
 
     const menu = floorActionsMenu();
     fireEvent.click(within(menu).getByRole("button", { name: "Duplicate Floor" }));
 
     expect(latestCampus!.buildings[0].floors.map((floor) => floor.label)).toEqual(["Ground Floor", "Floor 2", "Ground Floor Copy"]);
-    expect(screen.getByRole("button", { name: "Ground Floor Copy" }).className).toContain("bg-primary");
+    // Duplicating switches to the copy → it becomes the ACTIVE floor.
+    expect(screen.getByRole("button", { name: "Select floor" }).textContent).toContain("Ground Floor Copy");
   });
 
   it("exposes the compact floor section in the properties sidebar when nothing is selected", () => {
@@ -581,7 +665,7 @@ describe("B4 floor management UX consistency", () => {
 
     fireEvent.click(within(panel).getByRole("button", { name: "Duplicate Floor" }));
     expect(latestCampus!.buildings[0].floors.map((floor) => floor.label)).toEqual(["Ground Floor", "Floor 2", "Floor 2 Copy"]);
-    expect(screen.getByRole("button", { name: "Floor 2 Copy" }).className).toContain("bg-primary");
+    expect(screen.getByRole("button", { name: "Select floor" }).textContent).toContain("Floor 2 Copy");
 
     // Duplicating switches to the copy and clears transient state (the sidebar
     // closes, like a floor switch) — reopen it for the next action.
@@ -590,12 +674,12 @@ describe("B4 floor management UX consistency", () => {
     expect((within(panel2).getByRole("button", { name: "Move Down" }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(within(panel2).getByRole("button", { name: "Move Up" }));
     expect(latestCampus!.buildings[0].floors.map((floor) => floor.label)).toEqual(["Ground Floor", "Floor 2 Copy", "Floor 2"]);
-    expect(screen.getByRole("button", { name: "Floor 2 Copy" }).className).toContain("bg-primary");
+    expect(screen.getByRole("button", { name: "Select floor" }).textContent).toContain("Floor 2 Copy");
 
     fireEvent.click(within(panel2).getByRole("button", { name: "Delete Floor" }));
     fireEvent.click(within(screen.getByTestId("delete-floor-confirm-dialog")).getByRole("button", { name: "Delete Floor" }));
     expect(latestCampus!.buildings[0].floors.map((floor) => floor.label)).toEqual(["Ground Floor", "Floor 2"]);
-    expect(screen.getByRole("button", { name: "Floor 2" }).className).toContain("bg-primary");
+    expect(screen.getByRole("button", { name: "Select floor" }).textContent).toContain("Floor 2");
   });
 
   it("deleting an inactive floor leaves the active floor untouched", () => {
@@ -603,16 +687,22 @@ describe("B4 floor management UX consistency", () => {
     render(<FloorWorkflowHarness onCampusChange={(c) => { latestCampus = c; }} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Add Floor" })); // active = Floor 2, Ground is inactive
-    fireEvent.contextMenu(screen.getByRole("button", { name: "Ground Floor" }), { clientX: 120, clientY: 40 });
+    // Right-click the INACTIVE Ground Floor in the selector popover → delete it.
+    fireEvent.click(screen.getByRole("button", { name: "Select floor" }));
+    fireEvent.contextMenu(
+      within(screen.getByTestId("floor-selector-popover")).getByRole("option", { name: /Ground Floor/ }),
+      { clientX: 120, clientY: 40 }
+    );
     fireEvent.click(within(floorActionsMenu()).getByRole("button", { name: "Delete Floor" }));
     expect(screen.getByTestId("delete-floor-confirm-dialog")).toHaveTextContent("Delete Ground Floor and its");
     fireEvent.click(within(screen.getByTestId("delete-floor-confirm-dialog")).getByRole("button", { name: "Delete Floor" }));
 
     expect(latestCampus!.buildings[0].floors.map((floor) => floor.label)).toEqual(["Floor 2"]);
-    expect(screen.getByRole("button", { name: "Floor 2" }).className).toContain("bg-primary");
+    // The ACTIVE floor (Floor 2) was untouched by deleting the inactive one.
+    expect(screen.getByRole("button", { name: "Select floor" }).textContent).toContain("Floor 2");
   });
 
-  it("persists renamed floors and reordered arrays through save/reopen", () => {
+  it("persists renamed floors and reordered arrays through save/reopen", async () => {
     render(<FloorWorkflowHarness onCampusChange={(c) => { latestCampus = c; }} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Floor actions" }));
@@ -621,15 +711,24 @@ describe("B4 floor management UX consistency", () => {
     fireEvent.click(screen.getByRole("button", { name: "Rename Floor" }));
 
     fireEvent.click(screen.getByRole("button", { name: "Add Floor" }));
+    // B5 Phase 3.1: the renamed floor is dirty, so Add Floor first asks
+    // Save/Discard — Save persists the rename exactly once before the new floor
+    // is created (no duplicate floor record, no duplicate floor number). The
+    // save is async, so wait for the dialog to close before touching the tabs.
+    fireEvent.click(screen.getByRole("button", { name: "Save Changes" }));
+    await waitFor(() => expect(screen.queryByText("Unsaved Floor Changes")).toBeNull());
     fireEvent.click(screen.getByRole("button", { name: "Floor actions" }));
-    fireEvent.click(within(floorActionsMenu()).getByRole("button", { name: "Move Left" }));
+    fireEvent.click(within(floorActionsMenu()).getByRole("button", { name: "Move Up" }));
     expect(latestCampus!.buildings[0].floors.map((floor) => floor.label)).toEqual(["Floor 2", "Mezzanine"]);
 
     // "Reopen": mount a fresh editor with the saved campus — names and order survive.
     cleanup();
     render(<FloorWorkflowHarness initialCampus={latestCampus!} />);
-    expect(screen.getByRole("button", { name: "Floor 2" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Mezzanine" })).toBeInTheDocument();
+    // The selector popover lists every floor (the active one is shown in the button).
+    fireEvent.click(screen.getByRole("button", { name: "Select floor" }));
+    const popover = screen.getByTestId("floor-selector-popover");
+    expect(within(popover).getByRole("option", { name: /Floor 2/ })).toBeInTheDocument();
+    expect(within(popover).getByRole("option", { name: /Mezzanine/ })).toBeInTheDocument();
   });
 });
 
@@ -669,6 +768,71 @@ describe("Phase 2.1 - room layering, state, and structural snapping", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /^Front$/i }));
     expect(latestCampus!.buildings[0].floors[0].rooms[0].zOrder).toBeGreaterThanOrEqual(0);
+  });
+
+  it("orders floor layers from the properties panel across object types and supports undo/redo", async () => {
+    const campus = makeRichCampus();
+    const floor = campus.buildings[0].floors[0];
+    floor.furniture[0].x = 30;
+    floor.furniture[0].y = 30;
+    floor.stairs[0].x = 34;
+    floor.stairs[0].y = 34;
+    floor.rooms[0].zOrder = 0;
+    floor.furniture[0].zOrder = 1;
+    floor.stairs[0].zOrder = 2;
+    const { container } = render(<Harness initialCampus={campus} onCampusChange={(c) => { latestCampus = c; }} />);
+    const svg = stubSvgRect(container);
+
+    expect(layerKeys(container)).toEqual(expect.arrayContaining(["room:r1", "furniture:fur1", "stairs:st1"]));
+    expect(layerKeys(container).indexOf("room:r1")).toBeLessThan(layerKeys(container).indexOf("furniture:fur1"));
+    expect(layerKeys(container).indexOf("furniture:fur1")).toBeLessThan(layerKeys(container).indexOf("stairs:st1"));
+
+    fireEvent.mouseDown(roomGroup(container), { clientX: 45, clientY: 40, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    fireEvent.click(screen.getByRole("button", { name: /^Front$/i }));
+    let changed = latestCampus!.buildings[0].floors[0];
+    expect(changed.rooms[0].zOrder).toBeGreaterThan(changed.furniture[0].zOrder ?? -1);
+    expect(layerKeys(container).indexOf("room:r1")).toBeGreaterThan(layerKeys(container).indexOf("stairs:st1"));
+
+    await waitFor(() => expect(screen.getByTitle("Undo (Ctrl+Z)")).not.toBeDisabled());
+    fireEvent.click(screen.getByTitle("Undo (Ctrl+Z)"));
+    await waitFor(() => {
+      changed = latestCampus!.buildings[0].floors[0];
+      expect(changed.rooms[0].zOrder).toBeLessThan(changed.furniture[0].zOrder ?? 999);
+      expect(layerKeys(container).indexOf("room:r1")).toBeLessThan(layerKeys(container).indexOf("furniture:fur1"));
+    });
+
+    await waitFor(() => expect(screen.getByTitle("Redo (Ctrl+Y)")).not.toBeDisabled());
+    fireEvent.click(screen.getByTitle("Redo (Ctrl+Y)"));
+    await waitFor(() => {
+      changed = latestCampus!.buildings[0].floors[0];
+      expect(changed.rooms[0].zOrder).toBeGreaterThan(changed.furniture[0].zOrder ?? -1);
+      expect(layerKeys(container).indexOf("room:r1")).toBeGreaterThan(layerKeys(container).indexOf("stairs:st1"));
+    });
+  });
+
+  it("orders floor layers from the context menu using the same cross-type stack", () => {
+    const campus = makeRichCampus();
+    const floor = campus.buildings[0].floors[0];
+    floor.furniture[0].x = 30;
+    floor.furniture[0].y = 30;
+    floor.stairs[0].x = 34;
+    floor.stairs[0].y = 34;
+    floor.rooms[0].zOrder = 4;
+    floor.furniture[0].zOrder = 0;
+    floor.stairs[0].zOrder = 2;
+    const { container } = render(<Harness initialCampus={campus} onCampusChange={(c) => { latestCampus = c; }} />);
+    const svg = stubSvgRect(container);
+
+    expect(layerKeys(container).indexOf("room:r1")).toBeGreaterThan(layerKeys(container).indexOf("stairs:st1"));
+    fireEvent.contextMenu(roomGroup(container), { clientX: 45, clientY: 40, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    fireEvent.click(screen.getByRole("button", { name: /Send to Back/i }));
+
+    const changed = latestCampus!.buildings[0].floors[0];
+    expect(changed.rooms[0].zOrder).toBeLessThan(changed.furniture[0].zOrder ?? 999);
+    expect(changed.rooms[0].zOrder).toBeLessThan(changed.stairs[0].zOrder ?? 999);
+    expect(layerKeys(container).indexOf("room:r1")).toBeLessThan(layerKeys(container).indexOf("furniture:fur1"));
   });
 
   it("snaps wall drawing to visible room edges after wall endpoints and segments", () => {
@@ -1130,8 +1294,10 @@ describe("Phase 1.9 - visual and interaction polish", () => {
 
     expect(stairsSymbol.querySelectorAll("line").length).toBeGreaterThanOrEqual(4);
     expect(stairsSymbol.querySelector("path")).toBeTruthy();
-    expect(rampSymbol.querySelectorAll("path").length).toBeGreaterThanOrEqual(1);
-    expect(rampSymbol.querySelector("circle")).toBeTruthy();
+    // B5 Phase 2.5: the simplified ramp is a functional blue footprint with a
+    // centered accessibility icon (lucide) + a small direction cue.
+    expect(rampSymbol.querySelector('[data-testid="ramp-blue-base"]')).toBeTruthy();
+    expect(rampSymbol.querySelector('[data-testid="ramp-accessibility-icon"]')).toBeTruthy();
     expect(elevatorSymbol.querySelectorAll("rect").length).toBeGreaterThanOrEqual(3);
     expect(elevatorSymbol.querySelector("path")).toBeTruthy();
   });

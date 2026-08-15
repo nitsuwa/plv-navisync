@@ -32,11 +32,12 @@ vi.mock("../../components/ui/MapPicker", () => ({
   MapPicker: () => <div data-testid="map-picker-mock" />,
 }));
 
-vi.mock("../../components/ui/ColorPicker", () => ({
-  default: ({ value, onChange }: { value: string; onChange: (c: string) => void }) => (
+vi.mock("../../components/ui/ColorPicker", () => {
+  const MockColorPicker = ({ value, onChange }: { value: string; onChange: (c: string) => void }) => (
     <input aria-label="theme color" value={value} onChange={(e) => onChange(e.target.value)} />
-  ),
-}));
+  );
+  return { default: MockColorPicker, ColorPicker: MockColorPicker };
+});
 
 import { campusService } from "../../services/campusService";
 import { campusStructureService } from "../../services/campusStructureService";
@@ -172,6 +173,19 @@ describe("AdminMapBuilderPage — campus lifecycle", () => {
         canvasConfigured: true,
         buildings: [makePreviewBuilding("b1"), makePreviewBuilding("b2")],
         previewBuildingCount: 2,
+        previewFloorCount: 5,
+        previewRoomCount: 14,
+        previewBuildingsLoaded: true,
+      }),
+      makeCampus({
+        id: "campus-second",
+        name: "Second Campus",
+        code: "SEC",
+        canvasConfigured: true,
+        buildings: [makePreviewBuilding("b3")],
+        previewBuildingCount: 1,
+        previewFloorCount: 2,
+        previewRoomCount: 3,
         previewBuildingsLoaded: true,
       }),
     ]);
@@ -181,10 +195,13 @@ describe("AdminMapBuilderPage — campus lifecycle", () => {
     await flush();
 
     expect(screen.getByText("Mapped Campus")).toBeInTheDocument();
-    expect(await screen.findByTestId("campus-mini-map")).toBeInTheDocument();
+    expect((await screen.findAllByTestId("campus-mini-map")).length).toBeGreaterThanOrEqual(2);
     expect(screen.getByLabelText("Buildings: 2")).toBeInTheDocument();
-    expect(screen.getAllByLabelText("Floors: 0").length).toBeGreaterThan(0);
-    expect(screen.getAllByLabelText("Rooms: 0").length).toBeGreaterThan(0);
+    expect(screen.getByLabelText("Floors: 5")).toBeInTheDocument();
+    expect(screen.getByLabelText("Rooms: 14")).toBeInTheDocument();
+    expect(screen.getByLabelText("Buildings: 1")).toBeInTheDocument();
+    expect(screen.getByLabelText("Floors: 2")).toBeInTheDocument();
+    expect(screen.getByLabelText("Rooms: 3")).toBeInTheDocument();
     expect(screen.getAllByLabelText("Markers: 0").length).toBeGreaterThan(0);
     fireEvent.mouseEnter(screen.getByLabelText("Buildings: 2"));
     expect(screen.getAllByText("Buildings: 2").length).toBeGreaterThan(0);

@@ -3,11 +3,12 @@ import {
   buildingSelectionBounds,
   decorSelectionBounds,
   outdoorSelectionIdsInRect,
+  pathSelectionBounds,
   rectsIntersect,
   selectionRectFromPoints,
 } from "../campusSelection";
 import { DECOR_ASSET_MAP } from "../../components/map-builder/constants";
-import type { CampusBuilding, CampusDecorAsset } from "../../components/map-builder/types";
+import type { CampusBuilding, CampusDecorAsset, CampusPath } from "../../components/map-builder/types";
 
 function building(overrides: Partial<CampusBuilding> = {}): CampusBuilding {
   return {
@@ -35,6 +36,18 @@ function decor(overrides: Partial<CampusDecorAsset> = {}): CampusDecorAsset {
     y: 120,
     rotation: 0,
     scale: 1,
+    ...overrides,
+  };
+}
+
+function path(overrides: Partial<CampusPath> = {}): CampusPath {
+  return {
+    id: "p1",
+    name: "Walkway",
+    points: [{ x: 120, y: 120 }, { x: 260, y: 140 }],
+    type: "walkway",
+    color: "#94a3b8",
+    width: 12,
     ...overrides,
   };
 }
@@ -85,5 +98,25 @@ describe("campusSelection helpers", () => {
     );
 
     expect(ids).toEqual(["b1", "da1"]);
+  });
+
+  it("bounds pathways by their authored points plus stroke width", () => {
+    const bounds = pathSelectionBounds(path({ width: 20 }));
+
+    expect(bounds).toMatchObject({ id: "p1", kind: "path", x: 110, y: 110, width: 160, height: 40 });
+    expect(pathSelectionBounds(path({ visible: false }))).toBeNull();
+    expect(pathSelectionBounds(path({ visible: false }), { includeHidden: true })?.id).toBe("p1");
+  });
+
+  it("rubber-band selection captures pathways without breaking the legacy options signature", () => {
+    const ids = outdoorSelectionIdsInRect(
+      { x: 90, y: 90, width: 240, height: 80 },
+      [building()],
+      [decor({ x: 700 })],
+      DECOR_ASSET_MAP,
+      [path()]
+    );
+
+    expect(ids).toEqual(["b1", "p1"]);
   });
 });

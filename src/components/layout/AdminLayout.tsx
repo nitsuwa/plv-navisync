@@ -1,6 +1,7 @@
 import { Outlet, useNavigate, useLocation } from "react-router";
 import { useState, useEffect } from "react";
 import { NavigationProgress } from "../ui/NavigationProgress";
+import { UnsavedChangesProvider } from "../map-builder/UnsavedChangesContext";
 import { AdminSidebar } from "./AdminSidebar";
 import { ThemeToggle } from "../ui/ThemeToggle";
 import { useTheme } from "../../hooks/useTheme";
@@ -111,6 +112,7 @@ export function AdminLayout() {
   const pageTitle = ROUTE_LABELS[location.pathname] ?? "Admin";
 
   return (
+    <UnsavedChangesProvider>
     <div className="flex h-screen overflow-hidden bg-background">
       <NavigationProgress />
 
@@ -263,5 +265,6 @@ export function AdminLayout() {
         </main>
       </div>
     </div>
+    </UnsavedChangesProvider>
   );
 }

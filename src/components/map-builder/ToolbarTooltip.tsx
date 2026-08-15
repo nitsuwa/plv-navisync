@@ -21,14 +21,23 @@ export const TOOL_DEFINITIONS: Record<string, ToolDescriptor> = {
 };
 
 // ── Custom designed tooltip wrapper ──
+// The same tool id can mean different things per layer (e.g. "marker" is
+// "Add Waypoint" in the Navigation layer and "Marker" in the Campus layer),
+// so callers may override the label/shortcut/hint text shown in the tooltip.
 export function ToolbarTooltip({
   children,
   tool,
   isActive,
+  label,
+  shortcut,
+  hint,
 }: {
   children: React.ReactNode;
   tool: string;
   isActive?: boolean;
+  label?: string;
+  shortcut?: string;
+  hint?: string;
 }) {
   const [show, setShow] = useState(false);
   const [pos, setPos] = useState({ x: 0, y: 0, above: true });
@@ -36,6 +45,9 @@ export function ToolbarTooltip({
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const def = TOOL_DEFINITIONS[tool];
+  const title = label ?? def?.label ?? tool;
+  const shortcutText = shortcut ?? def?.shortcut ?? "";
+  const description = hint ?? def?.description ?? "";
 
   useEffect(() => {
     return () => {
@@ -102,7 +114,7 @@ export function ToolbarTooltip({
             }}
           >
             <div className="px-3 py-2 border-b border-border/40 flex items-center justify-between gap-3">
-              <span className="text-[11px] font-extrabold text-foreground">{def.label}</span>
+              <span className="text-[11px] font-extrabold text-foreground">{title}</span>
               <span
                 className="px-1.5 py-0.5 rounded text-[8px] font-bold uppercase tracking-wider"
                 style={{
@@ -110,11 +122,11 @@ export function ToolbarTooltip({
                   color: "var(--muted-foreground)",
                 }}
               >
-                {def.shortcut}
+                {shortcutText}
               </span>
             </div>
             <div className="px-3 py-1.5">
-              <p className="text-[10px] text-muted-foreground leading-relaxed">{def.description}</p>
+              <p className="text-[10px] text-muted-foreground leading-relaxed">{description}</p>
             </div>
             {/* Arrow: points down when above, up when below */}
             <div

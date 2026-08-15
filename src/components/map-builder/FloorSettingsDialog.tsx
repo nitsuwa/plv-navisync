@@ -1,19 +1,11 @@
-import { useEffect, useRef, useState, lazy, Suspense } from "react";
+import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { X, Ruler, Grid3X3, Check, Save, Image as ImageIcon, Upload, Eye, EyeOff, Lock, Unlock, Maximize2, RotateCcw, Trash2, RefreshCw } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { MIN_FLOOR_CANVAS, normalizeFloorCanvasSize } from "../../lib/floorGeometry";
 import { WALL_THICKNESSES } from "./constants";
+import { ColorPicker } from "../ui/ColorPicker";
 import type { FloorPlan, FloorPlanBackground } from "./types";
-
-const ColorPickerImpl = lazy(() => import("../ui/ColorPicker"));
-function ColorPicker(props: { value: string; onChange: (c: string) => void }) {
-  return (
-    <Suspense fallback={<div className="h-10 rounded-xl border border-border bg-muted/30 animate-pulse" />}>
-      <ColorPickerImpl {...props} />
-    </Suspense>
-  );
-}
 
 export interface FloorSettingsDraft {
   label: string;

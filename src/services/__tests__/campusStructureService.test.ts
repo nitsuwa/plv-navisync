@@ -43,6 +43,26 @@ describe("campus structure mapping", () => {
     expect(payload.map_elements[0]).toMatchObject({ element_type: "classroom", floor_id: ids.floor, is_accessible: true });
   });
 
+  it("B5 Phase 3.1: renumbers colliding per-building floor numbers before persisting", () => {
+    const dupCampus = {
+      ...campus,
+      buildings: [{
+        ...campus.buildings[0],
+        floors: [
+          { ...campus.buildings[0].floors[0], id: ids.floor, number: 1, label: "Ground Floor" },
+          { id: "dup-floor", buildingId: ids.building, number: 1, label: "Duplicate Number" },
+          { id: "third-floor", buildingId: ids.building, number: 3, label: "Floor 3" },
+        ],
+      }],
+    } as Campus;
+    const payload = serializeCampusStructure(dupCampus);
+    const numbers = payload.floors.map((f) => f.floor_number);
+    // The second floor (duplicate number 1) is deterministically bumped to the
+    // next free number (max used + 1 = 2); the third floor keeps its own 3.
+    expect(numbers).toEqual([1, 2, 3]);
+    expect(new Set(numbers).size).toBe(numbers.length);
+  });
+
   it("serializes a newly added building whose empty floor collections are not initialized yet", () => {
     const wizardCampus = {
       ...campus,

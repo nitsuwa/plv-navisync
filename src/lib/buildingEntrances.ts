@@ -184,6 +184,37 @@ export function pointerToEntranceAttachment(
   return { edge: "left", offset: clamp01((unrotated.y - building.y) / building.height) };
 }
 
+export interface EntranceHitResult extends EntranceWorldPosition {
+  buildingId: string;
+  entranceId: string;
+}
+
+/**
+ * Find the building entrance nearest to a world point within the threshold.
+ * Used by the Navigation layer so Add Waypoint / Connect Path can recognize
+ * entrances as special routing targets instead of dropping a generic point
+ * underneath them.
+ */
+export function findEntranceAtPoint(
+  buildings: Pick<CampusBuilding, "id" | "x" | "y" | "width" | "height" | "rotation" | "entrances">[],
+  point: Point,
+  threshold = 16
+): EntranceHitResult | undefined {
+  let best: EntranceHitResult | undefined;
+  let bestD = threshold;
+  for (const building of buildings) {
+    for (const entrance of building.entrances ?? []) {
+      const pos = entranceWorldPosition(building, entrance);
+      const d = Math.hypot(point.x - pos.x, point.y - pos.y);
+      if (d <= bestD) {
+        best = { ...pos, buildingId: building.id, entranceId: entrance.id };
+        bestD = d;
+      }
+    }
+  }
+  return best;
+}
+
 export function defaultEntrance(building: CampusBuilding, id: string): CampusEntrance {
   const isFirstEntrance = (building.entrances ?? []).length === 0;
   return {

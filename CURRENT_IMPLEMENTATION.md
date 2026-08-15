@@ -295,7 +295,7 @@
 
 **Current Components (37 files in `src/components/map-builder/`):**
 - **Editor core:** `CampusEditor.tsx` (~1,200 lines), `Canvas.tsx`, `useCanvasControls.ts`, `useFloorHistory.ts`, `HierarchyPanel.tsx`, `PropertiesPanel.tsx`, `ContextMenu.tsx`
-- **Layers:** 5 contextual layers — campus, navigation, accessibility, emergency, events (tool palette changes per layer)
+- **Layers:** 3 contextual layers — campus, navigation, events. Accessibility and emergency are routing properties of the navigation graph (edge/node `accessible` / `emergencySafe` / `closed` flags + `emergency_exit` / `assembly` waypoint types), not separate drawing modes (B5 Phase 1.5)
 - **Editing features:** multi-select + rubber-band, Ctrl+A select all, align/distribute, batch delete, drag-to-create buildings, path drawing, edge snapping, undo/redo (`useUndoRedo`), keyboard shortcuts, "?" cheat sheet (`ShortcutCheatSheet`)
 - **Navigation authoring:** `RoutesPanel.tsx` (route list + drawing), `TestNavigationPanel.tsx` (live route test), nav nodes/edges with `accessible` + `emergencySafe` flags and `inaccessibleReason`
 - **Floor authoring:** `FloorEditor.tsx`, `FloorPropertiesPanel.tsx`, `FloorWizardModal.tsx`, `BuildingWizardModal.tsx`
@@ -387,13 +387,13 @@
 
 **Current Screens:**
 - `/map` — **Accessible mode** (green mode chip): avoids stairs, highlights elevators/restrooms, prefers accessible edges
-- Map Builder Accessibility layer — place ramps, elevators, accessible entrances; per-building accessibility checklist in `PropertiesPanel`
+- Map Builder Navigation layer — accessibility is a routing property: waypoints/connections carry an `accessible` flag + `inaccessibleReason`; per-building accessibility checklist in `PropertiesPanel`
 - `/admin-dashboard/accessibility` — `AdminAccessibilityPage` (legacy per-building checklist CRUD with page-local mock)
 
 **Current Components:**
 - `PropertiesPanel.tsx` — building accessibility checklist (`wheelchairAccessible`, `hasElevator`, `hasRamp`, `accessibleEntrance`), nav-node accessible toggle, nav-edge accessible toggle + `inaccessibleReason` (stairs/narrow_path/restricted_access/uneven_surface)
 - `FloorPropertiesPanel.tsx` — wheelchair-accessible flags for stairs/elevators
-- `Canvas.tsx` — accessibility layer rendering; `CampusMapPage.tsx` — accessible-mode room highlighting
+- `Canvas.tsx` — nav-node/edge rendering with accessible-state dimming; `CampusMapPage.tsx` — accessible-mode room highlighting
 - `AdminAccessibilityPage.tsx` — 6-building mock checklist
 
 **Current Services:** None (no accessibility service).
@@ -419,7 +419,7 @@
 
 **Current Screens:**
 - `/map` — **SOS / Emergency mode** (red chip): highlights emergency exits, evacuation routes, assembly points, clinic; tints map red; filters routing
-- Map Builder Emergency layer — place exit markers, assembly areas; mark nav edges `emergencySafe` with `emergencyReason` (hazard/blocked)
+- Map Builder Navigation layer — emergency semantics are graph properties: `emergency_exit` / `assembly` waypoint types and nav-edge `emergencySafe` + `emergencyReason` (hazard/blocked)
 - `TestNavigationPanel` — emergency-mode route testing against safe edges
 - `HelpCenterPage` — emergency-mode FAQ answers in the AI knowledge base
 

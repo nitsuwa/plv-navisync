@@ -10,7 +10,12 @@ type CampusPreviewBuildingRow = Pick<
   Tables<"buildings">,
   "id" | "name" | "code" | "category" | "description" | "x" | "y" | "width" | "height" | "rotation" | "is_visible" | "metadata" | "archived_at"
 >;
-type CampusListRow = CampusRow & { preview_buildings?: CampusPreviewBuildingRow[] | null };
+type CampusListRow = CampusRow & {
+  preview_buildings?: CampusPreviewBuildingRow[] | null;
+};
+type CampusPreviewFloorRow = Pick<Tables<"floors">, "id" | "archived_at"> & { buildings?: { campus_id: string } | null };
+type CampusPreviewRoomRow = Pick<Tables<"map_elements">, "id" | "campus_id" | "element_type" | "archived_at">;
+type CampusPreviewSummary = { floors: number; rooms: number };
 
 export type CampusCreateInput = Pick<
   TablesInsert<"campuses">,
@@ -188,7 +193,7 @@ function previewBuildings(row: CampusListRow, fallbackColor: string): CampusBuil
     });
 }
 
-export async function toEditorCampus(row: CampusListRow): Promise<Campus> {
+export async function toEditorCampus(row: CampusListRow, previewSummary?: CampusPreviewSummary): Promise<Campus> {
   const [logo, thumbnail] = await Promise.all([
     signedImageUrl(row.logo_path),
     signedImageUrl(row.overview_image_path),
@@ -220,6 +225,8 @@ export async function toEditorCampus(row: CampusListRow): Promise<Campus> {
     settings: { accessibility: true, emergency: true, eventLayer: true, gps: true },
     buildings, markers: [], paths: [], navNodes: [], navEdges: [], routes: [],
     previewBuildingCount: hasPreviewBuildings ? buildings.length : undefined,
+    previewFloorCount: previewSummary?.floors,
+    previewRoomCount: previewSummary?.rooms,
     previewBuildingsLoaded: hasPreviewBuildings,
     accessibilityFeatures: [], assemblyPoints: [], eventOverlays: [], decorAssets: [],
     createdAt: row.created_at.slice(0, 10),
@@ -234,8 +241,42 @@ export async function toEditorCampus(row: CampusListRow): Promise<Campus> {
   };
 }
 
+async function previewStructureSummaries(campusIds: string[]): Promise<Map<string, CampusPreviewSummary>> {
+  const summaries = new Map(campusIds.map((id) => [id, { floors: 0, rooms: 0 }]));
+  if (campusIds.length === 0) return summaries;
+  const db = getSupabase();
+  const [floors, rooms] = await Promise.all([
+    db
+      .from("floors")
+      .select("id,archived_at,buildings!inner(campus_id)")
+      .in("buildings.campus_id", campusIds)
+      .is("archived_at", null),
+    db
+      .from("map_elements")
+      .select("id,campus_id,element_type,archived_at")
+      .in("campus_id", campusIds)
+      .eq("element_type", "room")
+      .is("archived_at", null),
+  ]);
+  assertOk(floors.error);
+  assertOk(rooms.error);
+  for (const floor of (floors.data ?? []) as CampusPreviewFloorRow[]) {
+    const campusId = floor.buildings?.campus_id;
+    if (!campusId || floor.archived_at) continue;
+    const summary = summaries.get(campusId);
+    if (summary) summary.floors += 1;
+  }
+  for (const room of (rooms.data ?? []) as CampusPreviewRoomRow[]) {
+    if (room.archived_at || room.element_type !== "room") continue;
+    const summary = summaries.get(room.campus_id);
+    if (summary) summary.rooms += 1;
+  }
+  return summaries;
+}
+
 async function mapRows(rows: CampusListRow[]): Promise<Campus[]> {
-  return Promise.all(rows.map(toEditorCampus));
+  const summaries = await previewStructureSummaries(rows.map((row) => row.id));
+  return Promise.all(rows.map((row) => toEditorCampus(row, summaries.get(row.id))));
 }
 
 export async function listCampuses(): Promise<Campus[]> {

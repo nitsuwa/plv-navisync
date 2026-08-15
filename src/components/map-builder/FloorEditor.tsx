@@ -1,12 +1,14 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import {
-  ArrowLeft, ChevronRight, CheckCircle2, Save, X, ZoomIn, ZoomOut, Undo2, Redo2,
+  ArrowLeft, ChevronRight, ChevronDown, CheckCircle2, Save, X, ZoomIn, ZoomOut, Undo2, Redo2,
+  ChevronLeft,
   Grid3X3, Layers, Paintbrush, Sofa, SeparatorHorizontal, MoveVertical,
   DoorOpen, Binary, Text, PanelRightClose, Navigation, LandPlot,
   MousePointer2, Hand, HelpCircle, AlertTriangle, Maximize2, MoreHorizontal,
   Square as SquareIcon, GitBranch as GitBranchIcon, Trash2 as TrashIcon, Copy, Settings2,
-  Loader2, Globe2, Eye, EyeOff, Lock, Unlock, Plus, Pencil,
+  Loader2, Globe2, Eye, EyeOff, Lock, Unlock, Plus, Pencil, Waypoints, Link2, MapPin,
+  Accessibility as AccessibilityIcon, Search,
 } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { useCanvasControls, isSpacePressed } from "./useCanvasControls";
@@ -16,12 +18,51 @@ import {
   FURNITURE_CATEGORIES, genId,
 } from "./constants";
 import { FloorPropertiesPanel } from "./FloorPropertiesPanel";
+import { FloorNavPropertiesPanel } from "./FloorNavPropertiesPanel";
+import { NavigationRelationshipCard } from "./NavigationRelationshipCard";
 import { FloorOverviewSidebar } from "./FloorOverviewSidebar";
 import { FloorActionsMenu } from "./FloorActionsMenu";
 import { FloorSettingsDialog, type FloorSettingsDraft } from "./FloorSettingsDialog";
 import { ShortcutCheatSheet } from "./ShortcutCheatSheet";
+import { UnsavedChangesDialog } from "./UnsavedChangesDialog";
+import { useUnsavedChangesGuard } from "./useUnsavedChangesGuard";
 import { useToast } from "../../hooks/useToast";
 import { floorUndoEntryFromFloor, normalizeFloor } from "../../lib/floorPlanNormalization";
+import {
+  createIndoorNavNode,
+  edgeCrossesWallWithoutDoor,
+  edgePolylineCrossesWallWithoutDoor,
+  edgePolylinePoints,
+  findCirculationAtPoint,
+  findDoorAtPoint,
+  findRoomAtPoint,
+  indoorNavEdges,
+  indoorNavNodes,
+  linkedPlacementBlockAt,
+  navAlignSnap,
+  navEdgeMidpoint,
+  navEdgePolylineDistance,
+  navGroupAlignSnap,
+  normalizeBendPoints,
+  orthogonalBendsFor,
+  pointInsideWallObstacle,
+  pruneOrphanedIndoorNodes,
+  translateOrthogonalSegment,
+  rampLinkedCuePosition,
+  remapIndoorNavForFloorCopy,
+  roomLinkedCuePosition,
+  syncIndoorLinkedNodePositions,
+  linkedObjectRef,
+  findNavNodeAtPoint,
+  createNavEdge,
+  navEdgeIsBlocked,
+  navEdgeIsBlockedExtended,
+  CROSS_FLOOR_EDGE_TYPE,
+  findCrossFloorOwnerInfo,
+  reconcileCrossFloorTransitions,
+  replaceBuildingFloorsAndReconcileTransitions,
+} from "../../lib/indoorNavigationGraph";
+import { findNavEdgeAtPoint, translateSelectedNavGraph, navGroupSelectionBounds } from "../../lib/navigationGraph";
 import {
   addFloorToBuilding,
   countFloorAuthoredItems,
@@ -29,7 +70,10 @@ import {
   duplicateFloorInBuilding,
   moveFloorInBuilding,
   renameFloorInBuilding,
+  stairDirectionsForFloorInOrder,
+  defaultStairDirectionForFloorInOrder,
 } from "../../lib/floorManagement";
+import { doorDisplayName, doorEntranceLinkStatus, reconcileEntranceTransitions } from "../../lib/entranceTransitions";
 import {
   createFittedFloorPlanBackground,
   createFloorScaleCalibration,
@@ -79,6 +123,7 @@ import type {
   FloorStairs, FloorRamp, FloorElevatorItem, FloorLabel,
   FloorSelection, SimpleTool, FloorEditorMode, FloorPlanBackground,
   RoomResizeState, FloorUndoEntry, FloorWallEndpointAnchor,
+  NavigationNode, NavigationEdge, FloorNavGraphState,
 } from "./types";
 
 // ── Constants ───────────────────────────────────────────────────────────────
@@ -117,6 +162,13 @@ function snapAngleDeg(deg: number, increment: number = 15): number {
 /** Distance between two points */
 function dist(x1: number, y1: number, x2: number, y2: number): number {
   return Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2);
+}
+
+function distToSegment(p: { x: number; y: number }, a: { x: number; y: number }, b: { x: number; y: number }): number {
+  const l2 = (b.x - a.x) ** 2 + (b.y - a.y) ** 2;
+  if (l2 === 0) return Math.hypot(p.x - a.x, p.y - a.y);
+  const t = Math.max(0, Math.min(1, ((p.x - a.x) * (b.x - a.x) + (p.y - a.y) * (b.y - a.y)) / l2));
+  return Math.hypot(p.x - (a.x + t * (b.x - a.x)), p.y - (a.y + t * (b.y - a.y)));
 }
 
 function textMetrics(value: string, fontSize: number) {
@@ -408,6 +460,24 @@ function snapPointOnSegment(point: { x: number; y: number }, segment: { x1: numb
   return nearestPointOnSegment(point, segment as FloorWall);
 }
 
+function segmentIntersectionPoint(
+  a: { x1: number; y1: number; x2: number; y2: number },
+  b: { x1: number; y1: number; x2: number; y2: number }
+) {
+  const rX = a.x2 - a.x1;
+  const rY = a.y2 - a.y1;
+  const sX = b.x2 - b.x1;
+  const sY = b.y2 - b.y1;
+  const denom = rX * sY - rY * sX;
+  if (Math.abs(denom) < 0.0001) return null;
+  const qpx = b.x1 - a.x1;
+  const qpy = b.y1 - a.y1;
+  const t = (qpx * sY - qpy * sX) / denom;
+  const u = (qpx * rY - qpy * rX) / denom;
+  if (t < -0.0001 || t > 1.0001 || u < -0.0001 || u > 1.0001) return null;
+  return { x: a.x1 + t * rX, y: a.y1 + t * rY };
+}
+
 type FloorContextMenuState =
   | { x: number; y: number; type: FloorSelection["type"]; id: string }
   | { x: number; y: number; type: "group"; id?: undefined }
@@ -609,41 +679,78 @@ function CirculationSelectionHandles({
 }
 
 function StairsSymbol({ item, selected }: { item: FloorStairs; selected: boolean }) {
-  const treadCount = Math.max(3, Math.min(8, Math.floor(item.width / 7)));
   const stroke = selected ? "var(--accent)" : "#6b7280";
-  const arrow = item.direction === "up" ? "M -4 3 L 0 -4 L 4 3" : item.direction === "down" ? "M -4 -3 L 0 4 L 4 -3" : "M -4 0 L 0 -5 L 4 0 M -4 0 L 0 5 L 4 0";
+  const cx = item.x + item.width / 2;
+  const cy = item.y + item.height / 2;
+  // B5 Phase 2.3: recognizable top-down straight stair — repeated tread lines
+  // across the run plus a centered directional arrow. Everything is in the
+  // object's local frame, so the parent rotate() keeps it aligned; the arrow
+  // clearly communicates ascent (up) / descent (down) / transition (both).
+  const treadCount = Math.max(3, Math.min(8, Math.floor(item.width / 7)));
+  const dir = item.direction === "up" ? "up" : item.direction === "down" ? "down" : "both";
   return (
     <>
       <rect x={item.x} y={item.y} width={item.width} height={item.height} rx={1.5}
         fill={selected ? "rgba(14,42,110,0.12)" : "#f8fafc"} stroke={stroke} strokeWidth={selected ? 1.8 : 1.1} />
+      {/* B5 Phase 2.4: subtle boundary guard rails inside the footprint edges —
+          they follow the run axis and rotate with the object (local frame). */}
+      <line data-testid="stairs-rail" x1={item.x + 1.5} y1={item.y + 2} x2={item.x + 1.5} y2={item.y + item.height - 2} stroke="#94a3b8" strokeWidth={0.7} opacity={0.55} />
+      <line data-testid="stairs-rail" x1={item.x + item.width - 1.5} y1={item.y + 2} x2={item.x + item.width - 1.5} y2={item.y + item.height - 2} stroke="#94a3b8" strokeWidth={0.7} opacity={0.55} />
       {Array.from({ length: treadCount }, (_, i) => {
         const tx = item.x + (item.width / (treadCount + 1)) * (i + 1);
-        return <line key={i} x1={tx} y1={item.y + 2} x2={tx} y2={item.y + item.height - 2} stroke="#64748b" strokeWidth={0.85} />;
+        return <line key={i} data-testid="stairs-tread" x1={tx} y1={item.y + 2} x2={tx} y2={item.y + item.height - 2} stroke="#64748b" strokeWidth={0.85} />;
       })}
-      <line x1={item.x + 3} y1={item.y + item.height / 2} x2={item.x + item.width - 3} y2={item.y + item.height / 2} stroke="#94a3b8" strokeWidth={0.8} strokeDasharray="2 2" />
-      <path d={arrow} transform={`translate(${item.x + item.width / 2} ${item.y + item.height / 2})`} fill="none" stroke="#334155" strokeWidth={1.2} strokeLinecap="round" strokeLinejoin="round" />
+      {/* Center dashed run line + directional arrow, both centered on the object. */}
+      <line data-testid="stairs-center-line" x1={cx} y1={item.y + 3} x2={cx} y2={item.y + item.height - 3} stroke="#94a3b8" strokeWidth={0.8} strokeDasharray="2 2" />
+      <g data-testid="stairs-arrow" transform={`translate(${cx} ${cy})`}>
+        {dir === "up" && (
+          <path d="M 0 6 L 0 -6 M 0 -6 L -3.2 -1.6 M 0 -6 L 3.2 -1.6" fill="none" stroke="#334155" strokeWidth={1.3} strokeLinecap="round" strokeLinejoin="round" />
+        )}
+        {dir === "down" && (
+          <path d="M 0 -6 L 0 6 M 0 6 L -3.2 1.6 M 0 6 L 3.2 1.6" fill="none" stroke="#334155" strokeWidth={1.3} strokeLinecap="round" strokeLinejoin="round" />
+        )}
+        {dir === "both" && (
+          <path d="M 0 6 L 0 -6 M 0 -6 L -3.2 -1.6 M 0 -6 L 3.2 -1.6 M 0 6 L -3.2 1.6 M 0 6 L 3.2 1.6" fill="none" stroke="#334155" strokeWidth={1.3} strokeLinecap="round" strokeLinejoin="round" />
+        )}
+      </g>
     </>
   );
 }
 
 function RampSymbol({ item, selected }: { item: FloorRamp; selected: boolean }) {
-  const slopeStroke = item.slope === "steep" ? 2 : item.slope === "medium" ? 1.6 : 1.2;
-  const stroke = selected ? "var(--accent)" : "#059669";
+  const cx = item.x + item.width / 2;
+  const cy = item.y + item.height / 2;
+  // B5 Phase 2.6: accessibility-sign style — a deep-blue footprint with a LARGE
+  // centered white wheelchair icon as the dominant visual, a clean border, and
+  // only a tiny secondary direction cue tucked into the corner. Everything is
+  // local-frame geometry, so rotation/resize keep the symbol centered.
+  const dir = item.direction === "down" ? "down" : item.direction === "up" ? "up" : "both";
+  const iconSize = Math.max(10, Math.min(item.width, item.height) * 0.68);
+  const showCue = item.height >= 12 && item.width >= 12;
   return (
     <>
-      <rect x={item.x} y={item.y} width={item.width} height={item.height} rx={1.5}
-        fill={selected ? "rgba(5,150,105,0.16)" : "#ecfdf5"} stroke={stroke} strokeWidth={selected ? 1.8 : 1.1} />
-      <path d={`M ${item.x + 3} ${item.y + item.height - 4} L ${item.x + item.width - 5} ${item.y + 4} l -4 0 m 4 0 l 0 4`}
-        fill="none" stroke="#047857" strokeWidth={slopeStroke} strokeLinecap="round" strokeLinejoin="round" />
-      <line x1={item.x + 4} y1={item.y + item.height - 8} x2={item.x + item.width - 7} y2={item.y + 7}
-        stroke="#34d399" strokeWidth={0.9} opacity={0.75} />
-      {item.handrails && (
-        <>
-          <line x1={item.x + 2} y1={item.y + 2} x2={item.x + item.width - 2} y2={item.y + 2} stroke="#10b981" strokeWidth={0.9} opacity={0.65} />
-          <line x1={item.x + 2} y1={item.y + item.height - 2} x2={item.x + item.width - 2} y2={item.y + item.height - 2} stroke="#10b981" strokeWidth={0.9} opacity={0.65} />
-        </>
+      <rect x={item.x} y={item.y} width={item.width} height={item.height} rx={2}
+        fill={selected ? "#1e40af" : "#2563eb"} stroke={selected ? "var(--accent)" : "#1e40af"}
+        strokeWidth={selected ? 1.8 : 1.2} data-testid="ramp-blue-base" />
+      {/* Large centered white accessibility icon — the ramp's primary visual. */}
+      <g data-testid="ramp-accessibility-icon" transform={`translate(${cx} ${cy})`} className="pointer-events-none">
+        <AccessibilityIcon size={iconSize} strokeWidth={1.6} color="#ffffff" x={-iconSize / 2} y={-iconSize / 2} />
+      </g>
+      {/* Tiny corner direction cue (up / down / both) — never competes with the
+          dominant accessibility symbol. */}
+      {showCue && (
+        <g data-testid="ramp-direction-cue" transform={`translate(${item.x + item.width - 4} ${item.y + item.height - 4})`} opacity={0.95} className="pointer-events-none">
+          {dir === "up" && (
+            <path d="M 0 2.5 L 0 -2.5 M 0 -2.5 L -1.6 0 M 0 -2.5 L 1.6 0" fill="none" stroke="#dbeafe" strokeWidth={1} strokeLinecap="round" strokeLinejoin="round" />
+          )}
+          {dir === "down" && (
+            <path d="M 0 -2.5 L 0 2.5 M 0 2.5 L -1.6 0 M 0 2.5 L 1.6 0" fill="none" stroke="#dbeafe" strokeWidth={1} strokeLinecap="round" strokeLinejoin="round" />
+          )}
+          {dir === "both" && (
+            <path d="M 0 2.5 L 0 -2.5 M 0 -2.5 L -1.6 0 M 0 -2.5 L 1.6 0 M 0 2.5 L -1.6 0 M 0 2.5 L 1.6 0" fill="none" stroke="#dbeafe" strokeWidth={1} strokeLinecap="round" strokeLinejoin="round" />
+          )}
+        </g>
       )}
-      <circle cx={item.x + item.width * 0.22} cy={item.y + item.height * 0.72} r={Math.max(1.5, Math.min(item.width, item.height) * 0.11)} fill="#047857" opacity={0.9} />
     </>
   );
 }
@@ -651,16 +758,30 @@ function RampSymbol({ item, selected }: { item: FloorRamp; selected: boolean }) 
 function ElevatorSymbol({ item, selected }: { item: FloorElevatorItem; selected: boolean }) {
   const stroke = selected ? "var(--accent)" : "#15803d";
   const cx = item.x + item.width / 2;
+  const cy = item.y + item.height / 2;
+  // B5 Phase 2.3: recognizable top-down elevator — outer shaft frame, inner cab
+  // rectangle, centered door opening, and SYMMETRIC up/down chevrons centered in
+  // the cab. Everything is local-frame (rotates/resizes with the object); the
+  // old chevron path was asymmetric and drifted off-center after resize.
+  const cabW = Math.max(4, item.width - 8);
+  const cabH = Math.max(4, item.height - 8);
+  const doorW = Math.min(Math.max(4, item.doorWidth), cabW - 2);
   return (
     <>
+      {/* Outer shaft / frame */}
       <rect x={item.x} y={item.y} width={item.width} height={item.height} rx={1.5}
-        fill={selected ? "rgba(22,163,74,0.14)" : "#f0fdf4"} stroke={stroke} strokeWidth={selected ? 1.8 : 1.1} />
-      <rect x={item.x + 3} y={item.y + 3} width={Math.max(2, item.width - 6)} height={Math.max(2, item.height - 6)} rx={1}
-        fill="none" stroke="#86efac" strokeWidth={0.9} />
-      <line x1={cx} y1={item.y + 4} x2={cx} y2={item.y + item.height - 4} stroke="#15803d" strokeWidth={0.9} opacity={0.75} />
-      <rect x={cx - item.doorWidth / 2} y={item.y + item.height - 3.5} width={item.doorWidth} height={2.5} rx={0.5} fill="#22c55e" />
-      <path d={`M ${cx - 4} ${item.y + item.height / 2 - 1} L ${cx - 1.5} ${item.y + item.height / 2 - 4} L ${cx + 1} ${item.y + item.height / 2 - 1} M ${cx - 4} ${item.y + item.height / 2 + 2} L ${cx - 1.5} ${item.y + item.height / 2 + 5} L ${cx + 1} ${item.y + item.height / 2 + 2}`}
-        fill="none" stroke="#14532d" strokeWidth={0.9} strokeLinecap="round" strokeLinejoin="round" />
+        fill={selected ? "rgba(22,163,74,0.14)" : "#f0fdf4"} stroke={stroke} strokeWidth={selected ? 1.8 : 1.1} data-testid="elevator-shaft" />
+      {/* Inner cab */}
+      <rect x={cx - cabW / 2} y={cy - cabH / 2} width={cabW} height={cabH} rx={1}
+        fill="none" stroke="#86efac" strokeWidth={0.9} data-testid="elevator-cab" />
+      {/* Centered door opening */}
+      <rect x={cx - doorW / 2} y={item.y + item.height - 3.2} width={doorW} height={2.4} rx={0.5} fill="#22c55e" data-testid="elevator-door" />
+      {/* B5 Phase 2.4: stacked vertical up/down chevrons (▲ over ▼) centered
+          symmetrically inside the cab — scaled to the cab and rotation-safe. */}
+      <g data-testid="elevator-chevrons" transform={`translate(${cx} ${cy})`}>
+        <path d={`M ${-cabW * 0.2} ${-cabH * 0.12} L 0 ${-cabH * 0.3} L ${cabW * 0.2} ${-cabH * 0.12} M ${-cabW * 0.2} ${cabH * 0.12} L 0 ${cabH * 0.3} L ${cabW * 0.2} ${cabH * 0.12}`}
+          fill="none" stroke="#14532d" strokeWidth={1} strokeLinecap="round" strokeLinejoin="round" />
+      </g>
     </>
   );
 }
@@ -750,11 +871,187 @@ interface FloorEditorProps {
   onSave?: (c: Campus) => Promise<Campus>;
   onPublish?: (c: Campus) => void;
   publishingEnabled?: boolean;
+  // B5 Phase 3.1.4: the page's persisted campus snapshot (same value the outer
+  // CampusEditor compares against). Deriving the STRUCTURE dirty from this
+  // prop — instead of component state alone — survives the page re-mounting
+  // FloorEditor when the floorId changes (Add Floor switches to the new tab).
+  savedSnapshot?: string;
+  initialSelection?: FloorSelection;
 }
 
 // ── Component ───────────────────────────────────────────────────────────────
 
-export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor, onUpdate, onSave, onPublish, publishingEnabled = false }: FloorEditorProps) {
+/** Distance from a point to a segment (B5 Phase 2.6 — segment hover for Add Bend). */
+function distanceToSegment(p: { x: number; y: number }, a: { x: number; y: number }, b: { x: number; y: number }): number {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const lenSq = dx * dx + dy * dy;
+  if (lenSq === 0) return Math.hypot(p.x - a.x, p.y - a.y);
+  let t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / lenSq;
+  t = Math.max(0, Math.min(1, t));
+  return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
+}
+
+/**
+ * B5 Phase 3.1.3: deterministic identity key for a building's floor STRUCTURE
+ * (floor ids, numbers, labels — order-sensitive). Add Floor / delete / reorder
+ * / rename all change this key, which is what enables the Save button even
+ * when the current floor's own content is untouched.
+ */
+function floorStructureKeyOf(floors: FloorPlan[] | undefined): string {
+  return JSON.stringify((floors ?? []).map((f) => [f.id, f.number, f.label]));
+}
+
+function floorDirtyKeyOf(floor: FloorPlan, nodes: NavigationNode[], edges: NavigationEdge[]): string {
+  return `${JSON.stringify(floor)}|${JSON.stringify([nodes, edges])}`;
+}
+
+/**
+ * B5 Phase 2.10: ONE proposed pin geometry for a raw empty-space click during
+ * an ACTIVE Connect — the SAME helper the live preview and the click handler
+ * both call, so the shown geometry and the pinned geometry can never diverge.
+ * Alignment-snapped (no-Shift, modest threshold) with guide feedback, but wall
+ * validity ALWAYS wins: when the snapped shape is wall-blocked the geometry
+ * falls back to the raw pointer. Every produced point is later point-validated
+ * against wall obstacles by the caller.
+ */
+function navPinGeometryFor(
+  rawPt: { x: number; y: number },
+  last: { x: number; y: number },
+  nodes: { x: number; y: number }[],
+  walls: FloorWall[] | undefined,
+  doors: FloorDoor[] | undefined,
+  bounds: { width: number; height: number }
+): { pins: { x: number; y: number }[]; snapped: boolean; guides: { type: "h" | "v"; pos: number }[] } {
+  const align = navAlignSnap(rawPt, nodes, 8);
+  const snapPt = { x: align.x, y: align.y };
+  const cornerSnap = orthogonalBendsFor(last, snapPt, walls, doors, bounds);
+  const pinsSnap = cornerSnap.length > 0 ? [...cornerSnap, snapPt] : [snapPt];
+  if (align.x === rawPt.x && align.y === rawPt.y) {
+    return { pins: pinsSnap, snapped: false, guides: [] };
+  }
+  if (!edgePolylineCrossesWallWithoutDoor([last, ...pinsSnap], walls, doors)) {
+    return { pins: pinsSnap, snapped: true, guides: align.guides };
+  }
+  const corner = orthogonalBendsFor(last, rawPt, walls, doors, bounds);
+  return {
+    pins: corner.length > 0 ? [...corner, rawPt] : [rawPt],
+    snapped: false,
+    guides: [],
+  };
+}
+
+// ── B5 Phase 6.2: Physical object navigation-only properties panel ──────
+function PhysicalNavPropertiesPanel({
+  physicalType, physicalId, rooms, doors, stairs, elevators, ramps, nodes, navEdges, onClose,
+  onAdd, onRemove, onView,
+}: {
+  physicalType: "room" | "door" | "stairs" | "elevator" | "ramp";
+  physicalId: string;
+  rooms: FloorRoom[];
+  doors: FloorDoor[];
+  stairs: FloorStairs[];
+  elevators: FloorElevatorItem[];
+  ramps: FloorRamp[];
+  nodes: NavigationNode[];
+  navEdges: NavigationEdge[];
+  onClose: () => void;
+  /** B5 Phase 6.8: canonical graph actions shared with Design mode. */
+  onAdd?: (type: "room" | "door" | "stairs" | "elevator" | "ramp", id: string) => void;
+  onRemove?: (type: "room" | "door" | "stairs" | "elevator" | "ramp", id: string) => void;
+  onView?: (type: "room" | "door" | "stairs" | "elevator" | "ramp", id: string) => void;
+}) {
+  const iconMap: Record<string, React.ElementType> = {
+    room: DoorOpen, door: DoorOpen, stairs: Waypoints, elevator: Waypoints, ramp: AccessibilityIcon,
+  };
+  const Icon = iconMap[physicalType] ?? DoorOpen;
+
+  // Find the physical object
+  const physical = physicalType === "room" ? rooms.find((r) => r.id === physicalId)
+    : physicalType === "door" ? doors.find((d) => d.id === physicalId)
+    : physicalType === "stairs" ? stairs.find((s) => s.id === physicalId)
+    : physicalType === "elevator" ? elevators.find((e) => e.id === physicalId)
+    : ramps.find((r) => r.id === physicalId);
+
+  // Find linked navigation node
+  const linkedNode = nodes.find((n) =>
+    physicalType === "room" ? n.roomId === physicalId
+    : physicalType === "door" ? n.doorId === physicalId
+    : physicalType === "stairs" ? n.stairId === physicalId
+    : physicalType === "elevator" ? n.elevatorId === physicalId
+    : n.rampId === physicalId
+  );
+
+  const name = physicalType === "room" ? (physical as FloorRoom)?.name
+    : physicalType === "door" ? (physical as FloorDoor)?.label ?? "Door"
+    : physicalType === "stairs" ? (physical as FloorStairs)?.name
+    : physicalType === "elevator" ? (physical as FloorElevatorItem)?.name
+    : (physical as FloorRamp)?.name ?? "Ramp";
+
+  // Count connections for the linked node
+  const connCount = linkedNode ? navEdges.filter((e) =>
+    e.startNodeId === linkedNode.id || e.endNodeId === linkedNode.id
+  ).length : 0;
+
+  return (
+    <div className="w-60 shrink-0 border-l border-border bg-card/80 backdrop-blur flex flex-col">
+      <div className="flex items-center justify-between px-3 h-9 border-b border-border">
+        <span className="text-xs font-extrabold uppercase tracking-wide text-foreground flex items-center gap-1.5">
+          <Icon className="h-3 w-3 text-blue-500" />
+          {physicalType === "stairs" ? "Stair" : physicalType === "elevator" ? "Elevator" : physicalType === "ramp" ? "Ramp" : physicalType === "door" ? "Door" : "Room"}
+        </span>
+        <button onClick={onClose} className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-muted text-muted-foreground">
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+      <div className="p-3 space-y-3 text-[10px]">
+        <div>
+          <span className="font-semibold text-foreground">{name || "Unnamed"}</span>
+          <span className="ml-1.5 text-muted-foreground">({physicalType})</span>
+        </div>
+        {/* B5 Phase 6.7/6.8: shared NavigationRelationshipCard — the SAME
+            component + the SAME canonical graph actions as Design mode (only
+            the View button label differs). */}
+        <NavigationRelationshipCard
+          linked={!!linkedNode}
+          detail={linkedNode ? `Connected to navigation node "${linkedNode.name}"` : `Add ${physicalType} to the navigation network.`}
+          mode="navigation"
+          connectionCount={connCount}
+          onView={() => {
+            if (onView) { onView(physicalType, physicalId); return; }
+            setNavPhysicalSelected(null);
+            setNavSelected({ type: "node", id: linkedNode!.id });
+          }}
+          onAdd={() => onAdd?.(physicalType, physicalId)}
+          onRemove={() => onRemove?.(physicalType, physicalId)}
+        />
+        {physicalType === "stairs" && (
+          <div className="pt-2 border-t border-border space-y-1.5">
+            <span className="font-extrabold uppercase tracking-widest text-muted-foreground text-[9px]">Properties</span>
+            <div className="flex items-center justify-between">
+              <span className="text-muted-foreground">Accessible</span>
+              <span className="font-semibold">No</span>
+            </div>
+          </div>
+        )}
+        {(physicalType === "elevator" || physicalType === "ramp") && (
+          <div className="pt-2 border-t border-border space-y-1.5">
+            <span className="font-extrabold uppercase tracking-widest text-muted-foreground text-[9px]">Properties</span>
+            <div className="flex items-center justify-between">
+              <span className="text-muted-foreground">Accessible</span>
+              <span className="font-semibold">Yes</span>
+            </div>
+          </div>
+        )}
+        <p className="text-[9px] text-muted-foreground pt-2 border-t border-border">
+          Physical editing is available in Design mode. This is Navigation mode — for routing relationships only.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor, onUpdate, onSave, onPublish, publishingEnabled = false, savedSnapshot, initialSelection }: FloorEditorProps) {
   const building = campus.buildings.find((b) => b.id === buildingId);
   const rawFloor = building?.floors.find((f) => f.id === floorId);
 
@@ -781,9 +1078,114 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
 
   // ── Core state ──
   const [mode, setMode] = useState<FloorEditorMode>("structure");
+  // B5 Phase 2: indoor Navigation authoring mode (Design vs Navigation).
+  const navMode = mode === "navigation";
+  const [navTool, setNavTool] = useState<"select" | "pan" | "waypoint" | "destination" | "connect" | "link" | "erase">("select");
+  // B5 Phase 2.2: destructive-hover target for the Remove tool (node or edge).
+  const [navEraseHover, setNavEraseHover] = useState<{ type: "node" | "edge"; id: string } | null>(null);
+  const [navSelected, setNavSelected] = useState<{ type: "node" | "edge"; id: string } | null>(null);
+  // B5 Phase 6.2: physical object selected in Navigation mode (read-only context)
+  const [navPhysicalSelected, setNavPhysicalSelected] = useState<{ type: "room" | "door" | "stairs" | "elevator" | "ramp"; id: string } | null>(null);
+  // B5 Phase 6.4: edge snap indicator for waypoint insertion in Floor Editor
+  const [floorEdgeSnap, setFloorEdgeSnap] = useState<{ edgeId: string; nearest: { x: number; y: number } } | null>(null);
+  const [navMultiSelected, setNavMultiSelected] = useState<string[]>([]);
+  const [navDuplicateNodeId, setNavDuplicateNodeId] = useState<string | null>(null);
+  const [navConnectStart, setNavConnectStart] = useState<string | null>(null);
+  const [navPreview, setNavPreview] = useState<{ x: number; y: number } | null>(null);
+  const [navTargetHover, setNavTargetHover] = useState<{
+    kind: "room" | "door" | "stairs" | "elevator" | "ramp";
+    id: string;
+    x: number;
+    y: number;
+  } | null>(null);
+  // B5 Phase 2.6: Connect-tool hover feedback — the node id under the pointer so
+  // a valid routing target shows ONE clean target ring (stronger once a start
+  // has been chosen). Cleared on leave/tool-switch/cancel.
+  const [navNodeHover, setNavNodeHover] = useState<string | null>(null);
+  // B5 Phase 2.6: bend editing — the specifically selected bend (Remove Bend /
+  // Delete removes THAT bend, not just the last one) and the hovered segment of
+  // the selected path (Add Bend splits the hovered segment, else the longest).
+  const [navSelectedBend, setNavSelectedBend] = useState<{ edgeId: string; index: number } | null>(null);
+  const [navSegmentHover, setNavSegmentHover] = useState<{ edgeId: string; index: number } | null>(null);
+  // B5 Phase 2.7: multi-bend Connect — empty-space clicks PIN geometry bends on
+  // ONE edge (never NavigationNodes) until a routing node finishes the edge.
+  const [navConnectBends, setNavConnectBends] = useState<{ x: number; y: number }[]>([]);
+  // B5 Phase 2.9: per-click pin counts — ONE empty-space click pins the FULL
+  // segment shape the preview showed (an L corner + the click point, or the
+  // click point alone on a straight continuation), and temporary Ctrl+Z must
+  // remove that whole last click in one step (never leave a stray corner).
+  const navConnectBendGroupsRef = useRef<number[]>([]);
+  const navGraphRef = useRef<{ nodes: NavigationNode[]; edges: NavigationEdge[] }>({ nodes: [], edges: [] });
+  const [, setNavGraphVersion] = useState(0); // bump-only: recompute nav-derived UI
+  // Free-waypoint group drag — linked nodes are excluded (derived geometry).
+  // B5 correction: `origins` + `edgeOrigins` form the IMMUTABLE drag-start
+  // snapshot (original node positions + original bendPoints of every INTERNAL
+  // edge). Every mousemove applies the TOTAL world delta to these originals —
+  // never to already-translated geometry — so the group tracks the cursor 1:1
+  // and its exact shape is preserved (no frame compounding, no reshaping).
+  const navDragRef = useRef<{
+    ids: string[];
+    origins: { id: string; x: number; y: number }[];
+    edgeOrigins: Map<string, { x: number; y: number }[]>;
+    sx: number;
+    sy: number;
+  } | null>(null);
+  // B5 Phase 2.5: bend-handle drag on a selected segmented path (one history
+  // action on release, same convention as node drags).
+  const navBendDragRef = useRef<{ edgeId: string; index: number; ox: number; oy: number } | null>(null);
+  // B5 Phase 2.7: orthogonal SEGMENT drag on a selected segmented path — dragging
+  // a horizontal/vertical segment translates it perpendicular, keeping the
+  // connector axis-aligned (one history action on release). B5 Phase 2.8: the
+  // drag stores the IMMUTABLE drag-start snapshot (origPts/origBends) so each
+  // pointermove computes geometry = snapshot + current delta — never compounding
+  // on already-modified bends, never appending bends every frame.
+  const navSegDragRef = useRef<{
+    edgeId: string;
+    segIndex: number;
+    ox: number;
+    oy: number;
+    origBends: { x: number; y: number }[];
+    origPts: { x: number; y: number }[];
+    isHorizontal: boolean;
+  } | null>(null);
+  // B5 Phase 2.8: always-on alignment guides (outdoor-editor philosophy, no
+  // Shift) — temporary h/v lines shown while a free node / bend drags near
+  // another routing node's X or Y center. Cleared on release/cancel/tool-switch.
+  const [navAlignGuides, setNavAlignGuides] = useState<{ type: "h" | "v"; pos: number }[]>([]);
+  // B5 Phase 2.8: one-time wall warning per drag gesture (avoid toast spam).
+  const navDragWallWarnedRef = useRef(false);
+  // B5 Phase 2.1: editor-local clipboards + Navigation Library drag state.
+  const [clipboard, setClipboard] = useState<{ type: FloorSelection["type"]; id: string }[] | null>(null);
+  const pasteOffsetRef = useRef(12);
+  const navClipboardRef = useRef<{ nodes: NavigationNode[]; edges: NavigationEdge[] } | null>(null);
+  const navPasteOffsetRef = useRef(12);
+  const navLibraryDragRef = useRef<string | null>(null);
+  const [navDragPreview, setNavDragPreview] = useState<{ x: number; y: number } | null>(null);
+  // B5 Phase 2.3: not-allowed preview when dragging a free Waypoint/Destination
+  // over a linked-location semantic target (Room center / Door / Stairs / …).
+  const [navDragBlocked, setNavDragBlocked] = useState<{ x: number; y: number } | null>(null);
   const [tool, setTool] = useState<SimpleTool>("select");
   const [selected, setSelected] = useState<FloorSelection | null>(null);
   const [multiSelected, setMultiSelected] = useState<string[]>([]);
+  useEffect(() => {
+    if (!initialSelection) return;
+    // B5 Final: issue-locate selections — nav targets land in Navigation mode
+    // (the node/edge is selected + its properties open); physical targets land
+    // in Design mode with the object selected.
+    if (initialSelection.type === "navNode" || initialSelection.type === "navEdge") {
+      setSelected(null);
+      setMultiSelected([]);
+      setNavTool("select");
+      setNavSelected({ type: initialSelection.type === "navNode" ? "node" : "edge", id: initialSelection.id });
+      setShowProperties(true);
+      setMode("navigation");
+    } else {
+      setSelected(initialSelection);
+      setMultiSelected([]);
+      setShowProperties(true);
+      setMode("structure");
+    }
+  }, [initialSelection]);
   const [rubberBand, setRubberBand] = useState<{ sx: number; sy: number; cx: number; cy: number } | null>(null);
   const [snapOn, setSnapOn] = useState(true);
   // ── Drawing state ──
@@ -808,12 +1210,31 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [cursorPos, setCursorPos] = useState<{ x: number; y: number } | null>(null);
-  const [pendingFloorSwitch, setPendingFloorSwitch] = useState<string | null>(null);
+  // B5 Phase 3.1: Add Floor / floor switching with unsaved changes first asks
+  // Save/Discard (SHARED unsaved-changes guard — see the useUnsavedChangesGuard
+  // hook below) so the CURRENT floor's changes are persisted exactly once
+  // BEFORE the new floor is created — a failed save never leaves a
+  // partially-added duplicate floor behind.
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [showIssues, setShowIssues] = useState(false);
+  // B5 Phase 2.5: Design-mode "Show Navigation" view preference — a READ-ONLY
+  // graph overlay for alignment/reference. Pure view state: no dirty, no history.
+  const [showNavOverlay, setShowNavOverlay] = useState(false);
   const [showMoreTools, setShowMoreTools] = useState(false);
+  // ── B5 Final: arrow-key nudge batching (groups rapid nudges into one undo step) ──
+  const lastNudgeRef = useRef(0);
   const [showFloorSettings, setShowFloorSettings] = useState(false);
   const [floorMenu, setFloorMenu] = useState<{ floorId: string; x: number; y: number } | null>(null);
+  const [floorSelectorOpen, setFloorSelectorOpen] = useState(false);
+  const [floorSelectorSearch, setFloorSelectorSearch] = useState("");
+  const floorSelectorButtonRef = useRef<HTMLButtonElement | null>(null);
+  const floorSelectorPopoverRef = useRef<HTMLDivElement | null>(null);
+  const [floorSelectorPosition, setFloorSelectorPosition] = useState<{
+    left: number;
+    top: number;
+    width: number;
+    maxHeight: number;
+  } | null>(null);
   const floorActionsButtonRef = useRef<HTMLButtonElement | null>(null);
   const [floorRename, setFloorRename] = useState<{ floorId: string; currentLabel: string } | null>(null);
   const [floorRenameValue, setFloorRenameValue] = useState("");
@@ -865,6 +1286,17 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
   const orderedRamps = useMemo(() => sortByZ(ramps), [ramps]);
   const orderedElevators = useMemo(() => sortByZ(elevators), [elevators]);
   const orderedLabels = useMemo(() => sortByZ(labels), [labels]);
+  const floorLayerStack = useMemo(() => [
+    ...rooms.map((item) => ({ type: "room" as const, item, id: item.id })),
+    ...walls.map((item) => ({ type: "wall" as const, item, id: item.id })),
+    ...doors.map((item) => ({ type: "door" as const, item, id: item.id })),
+    ...windows.map((item) => ({ type: "window" as const, item, id: item.id })),
+    ...furniture.map((item) => ({ type: "furniture" as const, item, id: item.id })),
+    ...stairs.map((item) => ({ type: "stairs" as const, item, id: item.id })),
+    ...ramps.map((item) => ({ type: "ramp" as const, item, id: item.id })),
+    ...elevators.map((item) => ({ type: "elevator" as const, item, id: item.id })),
+    ...labels.map((item) => ({ type: "label" as const, item, id: item.id })),
+  ].sort((a, b) => (a.item.zOrder ?? 0) - (b.item.zOrder ?? 0) || `${a.type}:${a.id}`.localeCompare(`${b.type}:${b.id}`)), [doors, elevators, furniture, labels, ramps, rooms, stairs, walls, windows]);
   const allSelectableIds = useMemo(
     () => selectionIdsInRect(floor, { x: 0, y: 0, w: FP_W, h: FP_H }),
     [floor, FP_W, FP_H]
@@ -900,6 +1332,17 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
   const rotationFromPoint = useCallback((pt: { x: number; y: number }, cx: number, cy: number) => (
     Math.round((((Math.atan2(pt.y - cy, pt.x - cx) * 180) / Math.PI + 90 + 360) % 360) / 5) * 5
   ), []);
+
+  // ── B5 Final: issue-locate focus flash state ──────────────────────────
+  // The camera-focus effect itself lives BELOW (after indoorNodes/indoorEdges
+  // and getSelectionItem are declared) to avoid TDZ on the dependency array.
+  const [locateFlash, setLocateFlash] = useState<{ world: { x: number; y: number } } | null>(null);
+  useEffect(() => {
+    if (!locateFlash) return;
+    const t = window.setTimeout(() => setLocateFlash(null), 2600);
+    return () => window.clearTimeout(t);
+  }, [locateFlash]);
+  const locateFocusedRef = useRef<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -949,14 +1392,217 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
   const suppressHistoryRef = useRef(false);
   const gestureMoved = useRef(false);
 
+  // ── B5 Phase 2: floor-scoped indoor nav graph (single source of truth is the
+  //    campus nav arrays, filtered to this building+floor). ──
+  const indoorNodes = useMemo(
+    () => indoorNavNodes(campus.navNodes, buildingId, floorId),
+    [campus.navNodes, buildingId, floorId]
+  );
+  const indoorEdges = useMemo(
+    () => indoorNavEdges(campus.navEdges, indoorNodes, buildingId, floorId),
+    [campus.navEdges, indoorNodes, buildingId, floorId]
+  );
+  // B5 Phase 2.6: straightening the selected segmented path is blocked (button
+  // disabled + guidance) when the direct A→B line would cross a wall without a
+  // door opening — never silently create an invalid wall-crossing route.
+  const straightenBlocked = (() => {
+    if (navSelected?.type !== "edge") return false;
+    const edge = indoorEdges.find((e) => e.id === navSelected.id);
+    if (!edge || !edge.bendPoints || edge.bendPoints.length === 0) return false;
+    const base = edgePolylinePoints(edge, indoorNodes);
+    if (!base || base.length < 2) return false;
+    return Boolean(edgePolylineCrossesWallWithoutDoor([base[0], base[base.length - 1]], walls, doors));
+  })();
+
+  // B5 Phase 2.8: does the hovered physical object already have its canonical
+  // linked routing node? While CONNECT is active the routing node itself is the
+  // target, so the yellow physical-object highlight must not compete with it.
+  const navTargetHasLinkedNode = (() => {
+    if (!navTargetHover) return false;
+    return indoorNodes.some((n) => {
+      if (navTargetHover.kind === "room" && n.roomId === navTargetHover.id) return true;
+      if (navTargetHover.kind === "door" && n.doorId === navTargetHover.id) return true;
+      if (navTargetHover.kind === "stairs" && n.stairId === navTargetHover.id) return true;
+      if (navTargetHover.kind === "elevator" && n.elevatorId === navTargetHover.id) return true;
+      if (navTargetHover.kind === "ramp" && n.rampId === navTargetHover.id) return true;
+      return false;
+    });
+  })();
+
   // ── History (full floor state so undo/redo restores every element type) ──
   const floorSnapshot = (): FloorUndoEntry => floorUndoEntryFromFloor(floor);
-  const floorStateKey = useMemo(() => JSON.stringify(floor), [floor]);
+  // Nav graph snapshot for history — same post-change convention as floorSnapshot.
+  const navSnapshot = (): FloorUndoEntry => ({
+    ...floorUndoEntryFromFloor(floor),
+    navNodes: navGraphRef.current.nodes,
+    navEdges: navGraphRef.current.edges,
+  });
+  // B5 Phase 2: the dirty key includes this floor's indoor nav graph so graph
+  // edits enable the floor Save button exactly like physical-object edits do.
+  const fullStateKey = floorDirtyKeyOf(floor, indoorNodes, indoorEdges);
   const baselineFloorRef = useRef<FloorPlan>(structuredClone(floor));
   const baselineEntryRef = useRef<FloorUndoEntry>(floorUndoEntryFromFloor(floor));
-  const [baselineKey, setBaselineKey] = useState(floorStateKey);
-  const isFloorDirty = floorStateKey !== baselineKey;
+  const [baselineKey, setBaselineKey] = useState(fullStateKey);
+  // B5 Phase 3.1.3: the building's floor STRUCTURE (floor list identity — ids,
+  // numbers, labels, order) is a SEPARATE dirty dimension. `fullStateKey` only
+  // covers the CURRENT floor's content, so Add Floor / Delete / reorder / rename
+  // (which mutate the floors ARRAY, never this floor) would leave the Save
+  // button disabled. The structure baseline is captured at mount and cleared
+  // ONLY by a successful save — floor switches must NOT reset it, otherwise
+  // switching onto the freshly-added floor would wipe the unsaved structure
+  // change.
+  const structureKey = useMemo(() => floorStructureKeyOf(building?.floors), [building?.floors]);
+  const [structureBaselineKey, setStructureBaselineKey] = useState(structureKey);
+  useEffect(() => {
+    navGraphRef.current = { nodes: indoorNodes, edges: indoorEdges };
+    setNavGraphVersion((v) => v + 1);
+  }, [indoorNodes, indoorEdges, structureKey]);
+  // B5 Phase 3.1.4: the page re-keys the floor view by floorId (viewKey =
+  // `floor-${campusId}-${floorId}`), so switching to a freshly added floor
+  // REMOUNTS FloorEditor and re-initializes the useState baseline above —
+  // wiping the unsaved structure change (inner Save disabled while the outer
+  // Save stayed enabled). When the page supplies its persisted snapshot
+  // (survives remounts because it is a prop), derive the structure dirty from
+  // it instead. Fall back to the state baseline when no snapshot is provided.
+  const savedCampusForDirty = useMemo(() => {
+    if (!savedSnapshot) return null;
+    try {
+      return JSON.parse(savedSnapshot) as Campus;
+    } catch {
+      return null;
+    }
+  }, [savedSnapshot, buildingId]);
+  const savedStructureKey = useMemo(() => (
+    savedCampusForDirty
+      ? floorStructureKeyOf(savedCampusForDirty.buildings?.find((b) => b.id === buildingId)?.floors)
+      : null
+  ), [savedCampusForDirty, buildingId]);
+  const savedFullStateKey = useMemo(() => {
+    if (!savedCampusForDirty) return null;
+    const savedFloor = savedCampusForDirty.buildings
+      ?.find((b) => b.id === buildingId)
+      ?.floors.find((f) => f.id === floorId);
+    if (!savedFloor) return null;
+    const normalizedSavedFloor = normalizeFloor(savedFloor, { buildingId });
+    const savedNodes = indoorNavNodes(savedCampusForDirty.navNodes, buildingId, floorId);
+    const savedEdges = indoorNavEdges(savedCampusForDirty.navEdges, savedNodes, buildingId, floorId);
+    return floorDirtyKeyOf(normalizedSavedFloor, savedNodes, savedEdges);
+  }, [savedCampusForDirty, buildingId, floorId]);
+  const structureDirty = savedStructureKey !== null
+    ? structureKey !== savedStructureKey
+    : structureKey !== structureBaselineKey;
+  const isFloorDirty = fullStateKey !== (savedFullStateKey ?? baselineKey) || structureDirty;
   const { pushHistory, undo, redo, resetHistory, canUndo, canRedo } = useFloorHistory(floorSnapshot());
+
+  /** Merge floor-scoped nav back into the campus arrays (replace this floor's slice). */
+  const mergeFloorNavIntoCampus = useCallback((nextNodes: NavigationNode[], nextEdges: NavigationEdge[]): Campus => {
+    // A floor owns its single-floor edges: any old edge whose BOTH endpoints are
+    // indoor nodes of THIS floor is replaced wholesale by nextEdges — so a
+    // deleted edge is truly removed from campus data (no stale/dangling refs).
+    // Edges with an outdoor endpoint (indoor↔outdoor entrance links) are NOT
+    // floor-owned and are preserved untouched.
+    const floorNodeIds = new Set(
+      (campus.navNodes ?? [])
+        .filter((n) => n.buildingId === buildingId && n.floorId === floorId)
+        .map((n) => n.id)
+    );
+    const ownedByFloor = (e: NavigationEdge) =>
+      floorNodeIds.has(e.startNodeId) && floorNodeIds.has(e.endNodeId);
+    return {
+      ...campus,
+      navNodes: [
+        ...(campus.navNodes ?? []).filter((n) => !(n.buildingId === buildingId && n.floorId === floorId)),
+        ...nextNodes,
+      ],
+      navEdges: [
+        ...(campus.navEdges ?? []).filter((e) => !ownedByFloor(e)),
+        ...nextEdges,
+      ],
+    };
+  }, [buildingId, campus, floorId]);
+
+  /**
+   * Commit a floor-scoped nav graph change: merge into campus, push ONE history
+   * entry (nav rides inside the floor undo entry so Ctrl+Z restores it), and
+   * rebuild the floor. Linked-node positions are re-synced against the CURRENT
+   * floor geometry on every commit.
+   */
+
+  // B5 Phase 6.3: split an indoor nav edge by inserting a waypoint
+  const splitIndoorNavEdge = useCallback((
+    edge: NavigationEdge,
+    waypoint: NavigationNode,
+    allNodes: NavigationNode[],
+  ): { newEdges: NavigationEdge[] } | null => {
+    const nodeMap: Record<string, { x: number; y: number }> = Object.fromEntries(allNodes.map((n) => [n.id, { x: n.x, y: n.y }]));
+    const startNode = nodeMap[edge.startNodeId];
+    const endNode = nodeMap[edge.endNodeId];
+    if (!startNode || !endNode) return null;
+    const allPoints = [
+      { x: startNode.x, y: startNode.y },
+      ...(edge.bendPoints ?? []),
+      { x: endNode.x, y: endNode.y },
+    ];
+    const nearest = findNavEdgeAtPoint([edge], nodeMap, { x: waypoint.x, y: waypoint.y });
+    if (!nearest) return null;
+    const splitIdx = nearest.nearest.segIndex;
+    const beforePoints = allPoints.slice(0, splitIdx + 1);
+    const afterPoints = [{ x: waypoint.x, y: waypoint.y }, ...allPoints.slice(splitIdx + 1)];
+    const edgeBendBefore = beforePoints.length > 2 ? beforePoints.slice(1, -1) : [];
+    const edgeBendAfter = afterPoints.length > 2 ? afterPoints.slice(1, -1) : [];
+    const distBefore = navEdgePolylineDistance(beforePoints);
+    const distAfter = navEdgePolylineDistance(afterPoints);
+    const edgeBefore: NavigationEdge = {
+      ...edge, id: genId("ne"), startNodeId: edge.startNodeId, endNodeId: waypoint.id,
+      bendPoints: edgeBendBefore, distance: distBefore,
+    };
+    const edgeAfter: NavigationEdge = {
+      ...edge, id: genId("ne"), startNodeId: waypoint.id, endNodeId: edge.endNodeId,
+      bendPoints: edgeBendAfter, distance: distAfter,
+    };
+    return { newEdges: [edgeBefore, edgeAfter] };
+  }, []);
+
+  const commitNavGraph = useCallback((nextNodes: NavigationNode[], nextEdges: NavigationEdge[]) => {
+    const syncedNodes = syncIndoorLinkedNodePositions(nextNodes, {
+      rooms, doors, stairs, ramps, elevators,
+    });
+    const pruned = pruneOrphanedIndoorNodes(syncedNodes, nextEdges, {
+      rooms, doors, stairs, ramps, elevators,
+    });
+    // B5 Phase 2.5: segmented edges report their CURRENT total polyline length
+    // (start → bends → end) so distance stays accurate after node/bend edits.
+    const finalEdges = pruned.edges.map((e) => {
+      if (!e.bendPoints || e.bendPoints.length === 0) return e;
+      const pts = edgePolylinePoints(e, pruned.nodes);
+      if (!pts) return e;
+      const dist = navEdgePolylineDistance(pts);
+      return dist === e.distance ? e : { ...e, distance: dist };
+    });
+    const merged = mergeFloorNavIntoCampus(pruned.nodes, finalEdges);
+    // B5 Phase 3: reconcile the building's cross-floor transition edges against
+    // the CURRENT linked circulation nodes — fully derived + idempotent, so a
+    // node created on another floor (or deleted here) automatically establishes
+    // / removes its transitions with NO manual cross-floor line drawing.
+    const reconciledEdges = reconcileCrossFloorTransitions(
+      merged.navNodes, merged.navEdges,
+      (merged.buildings ?? []).find((b) => b.id === buildingId)?.floors,
+      buildingId
+    );
+    const reconciled: Campus = reconcileEntranceTransitions({ ...merged, navEdges: reconciledEdges });
+    navGraphRef.current = { nodes: pruned.nodes, edges: finalEdges };
+    setNavGraphVersion((v) => v + 1);
+    // Per-frame drag updates are suppressed; the gesture commits ONE history
+    // entry on mouse-up (same convention as the architectural floor drag).
+    if (!suppressHistoryRef.current) {
+      pushHistory({
+        ...floorUndoEntryFromFloor(floor),
+        navNodes: pruned.nodes,
+        navEdges: finalEdges,
+      });
+    }
+    onUpdate(reconciled);
+  }, [buildingId, doors, elevators, floor, mergeFloorNavIntoCampus, onUpdate, pushHistory, ramps, rooms, stairs]);
 
   const clearTransientEditorState = useCallback(() => {
     setSelected(null);
@@ -985,34 +1631,78 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
 
   useEffect(() => {
     baselineFloorRef.current = structuredClone(floor);
-    const entry = floorUndoEntryFromFloor(floor);
+    const entry: FloorUndoEntry = {
+      ...floorUndoEntryFromFloor(floor),
+      navNodes: indoorNodes,
+      navEdges: indoorEdges,
+    };
     baselineEntryRef.current = structuredClone(entry);
-    setBaselineKey(JSON.stringify(floor));
+    setBaselineKey(fullStateKey);
     resetHistory(entry);
-    clearTransientEditorState();
+    // B5 Final: when arriving via an issue-locate initialSelection, preserve
+    // the selection/properties state set by the initialSelection effect
+    // instead of wiping it (the transient clear still runs for floor
+    // switches, where initialSelection is undefined).
+    if (!initialSelection) clearTransientEditorState();
   }, [floorId]);
 
   const buildFloorUpdates = useCallback(
-    (updates: Partial<FloorPlan>) => {
-      const updatedCampus = {
-        ...campus,
-        buildings: campus.buildings.map((b) =>
-          b.id === buildingId
-            ? {
-                ...b,
-                floors: b.floors.map((f) =>
-                  f.id === floorId
-                    ? normalizeFloor({ ...f, ...updates }, { buildingId: b.id })
-                    : normalizeFloor(f, { buildingId: b.id })
-                ),
-              }
-            : b
-        ),
-      };
+    (updates: Partial<FloorPlan> & FloorNavGraphState, buildingUpdates?: Partial<Campus["buildings"][number]>) => {
+      // B5 Phase 2: after a physical-object edit, re-sync + prune the indoor nav
+      // graph against the NEW floor geometry so linked nodes follow their owner
+      // (and orphans never linger) in the SAME campus update — no extra history.
+      const synced = syncIndoorLinkedNodePositions(updates.navNodes ?? indoorNodes, {
+        rooms: updates.rooms ?? rooms,
+        doors: updates.doors ?? doors,
+        stairs: updates.stairs ?? stairs,
+        ramps: updates.ramps ?? ramps,
+        elevators: updates.elevators ?? elevators,
+      });
+      const pruned = pruneOrphanedIndoorNodes(synced, updates.navEdges ?? indoorEdges, {
+        rooms: updates.rooms ?? rooms,
+        doors: updates.doors ?? doors,
+        stairs: updates.stairs ?? stairs,
+        ramps: updates.ramps ?? ramps,
+        elevators: updates.elevators ?? elevators,
+      });
+      const floorNav = { navNodes: pruned.nodes, navEdges: pruned.edges };
+      const mergedCampus = mergeFloorNavIntoCampus(floorNav.navNodes, floorNav.navEdges);
+      // B5 Phase 3: reconcile cross-floor transitions on EVERY campus write —
+      // physical-object edits (sharedId changes, deletion), Link Location node
+      // creation and undo/redo restore all flow through here.
+      const reconciledEdges = reconcileCrossFloorTransitions(
+        mergedCampus.navNodes, mergedCampus.navEdges,
+        (mergedCampus.buildings ?? []).find((b) => b.id === buildingId)?.floors,
+        buildingId
+      );
+      const updatedCampus: Campus = { ...mergedCampus, navEdges: reconciledEdges };
+      // The nav graph lives on the CAMPUS arrays, never inside the FloorPlan —
+      // strip those keys before merging into the floor object so normalizeFloor
+      // (which spreads its input) can't leak navNodes/navEdges into the floor
+      // and break the JSON dirty comparison against the saved baseline.
+      const { navNodes: _navNodes, navEdges: _navEdges, ...floorUpdates } = updates;
+      updatedCampus.buildings = updatedCampus.buildings.map((b) =>
+        b.id === buildingId
+          ? {
+              ...b,
+              ...buildingUpdates,
+              floors: b.floors.map((f) =>
+                f.id === floorId
+                  ? normalizeFloor({ ...f, ...floorUpdates }, { buildingId: b.id })
+                  : normalizeFloor(f, { buildingId: b.id })
+              ),
+            }
+          : b
+      );
+      updatedCampus.navEdges = reconcileCrossFloorTransitions(
+        updatedCampus.navNodes, updatedCampus.navEdges,
+        (updatedCampus.buildings ?? []).find((b) => b.id === buildingId)?.floors,
+        buildingId
+      );
       onUpdate(updatedCampus);
       return updatedCampus;
     },
-    [campus, buildingId, floorId, onUpdate]
+    [campus, buildingId, floorId, indoorEdges, indoorNodes, mergeFloorNavIntoCampus, onUpdate, rooms, doors, stairs, ramps, elevators]
   );
 
   const updFloor = useCallback(
@@ -1034,6 +1724,13 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
         windows: syncedOpenings.windows, furniture: newFurniture ?? furniture,
         stairs: newStairs ?? stairs, elevators: newElevators ?? elevators, labels: newLabels ?? labels,
         ramps: newRamps ?? ramps,
+        // B5 Phase 2: physical-object edits carry the re-synced nav snapshot so
+        // undo/redo restores linked-node positions together with their owners.
+        navNodes: syncIndoorLinkedNodePositions(indoorNodes, {
+          rooms: newRooms, doors: syncedOpenings.doors,
+          stairs: newStairs ?? stairs, ramps: newRamps ?? ramps, elevators: newElevators ?? elevators,
+        }),
+        navEdges: indoorEdges,
       };
       // Record the POST-change state as the new history tip (unless we are in the
       // middle of a drag gesture — that commit happens once on pointer release).
@@ -1042,6 +1739,61 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
     },
     [buildFloorUpdates, floor.canvasW, floor.canvasH, floor.backgroundColor, floor.showGrid, floor.gridSize, floor.backgroundImage, floor.calibration, floor.label, walls, doors, windows, furniture, stairs, ramps, elevators, labels, pushHistory]
   );
+
+  const updateCirculationGroupMetadata = useCallback((groups: NonNullable<Campus["buildings"][number]["circulationGroups"]>) => {
+    pushHistory(floorUndoEntryFromFloor(floor));
+    const floorsForBuilding = (campus.buildings ?? []).find((b) => b.id === buildingId)?.floors ?? [];
+    const nextCampus = replaceBuildingFloorsAndReconcileTransitions({
+      ...campus,
+      buildings: campus.buildings.map((b) => b.id === buildingId ? { ...b, circulationGroups: groups } : b),
+    }, buildingId, floorsForBuilding);
+    onUpdate(nextCampus);
+  }, [buildingId, campus, floor, onUpdate, pushHistory]);
+
+  const ensureCirculationGroupName = useCallback((type: "stairs" | "elevator", sharedId: string, fallbackName: string) => {
+    const kind = type === "stairs" ? "stair" : "elevator";
+    const groups = building?.circulationGroups ?? [];
+    if (groups.some((g) => g.id === sharedId && g.kind === kind)) return groups;
+    return [...groups, { id: sharedId, buildingId, kind, name: fallbackName }];
+  }, [building?.circulationGroups, buildingId]);
+
+  const assignCirculationGroup = useCallback((type: "stairs" | "elevator", objectId: string, sharedId: string | undefined) => {
+    if (sharedId) {
+      const duplicate = (building?.floors ?? []).some((f) => {
+        const items = type === "stairs" ? (f.stairs ?? []) : (f.elevators ?? []);
+        return items.some((item) => item.id !== objectId && item.sharedId === sharedId && f.id === floorId);
+      });
+      if (duplicate) {
+        toast.warning(
+          type === "stairs" ? "Stair Connection already used" : "Elevator Shaft already used",
+          `${type === "stairs" ? "This stair connection" : "This elevator shaft"} is already assigned to another ${type === "stairs" ? "stair" : "elevator"} on this floor.`
+        );
+        return;
+      }
+    }
+    if (type === "stairs") buildFloorUpdates({ stairs: stairs.map((s) => s.id === objectId ? { ...s, sharedId } : s) });
+    else buildFloorUpdates({ elevators: elevators.map((e) => e.id === objectId ? { ...e, sharedId } : e) });
+  }, [building?.floors, buildFloorUpdates, elevators, floorId, stairs, toast]);
+
+  const createCirculationGroup = useCallback((type: "stairs" | "elevator", objectId: string, name: string) => {
+    const prefix = type === "stairs" ? "stair" : "el";
+    const sharedId = `shared_${prefix}_${genId("cg")}`;
+    const groups = ensureCirculationGroupName(type, sharedId, name);
+    if (type === "stairs") {
+      buildFloorUpdates({ stairs: stairs.map((s) => s.id === objectId ? { ...s, sharedId } : s) }, { circulationGroups: groups });
+    } else {
+      buildFloorUpdates({ elevators: elevators.map((e) => e.id === objectId ? { ...e, sharedId } : e) }, { circulationGroups: groups });
+    }
+  }, [buildFloorUpdates, elevators, ensureCirculationGroupName, stairs]);
+
+  const renameCirculationGroup = useCallback((type: "stairs" | "elevator", sharedId: string, name: string) => {
+    const kind = type === "stairs" ? "stair" : "elevator";
+    const groups = building?.circulationGroups ?? [];
+    const nextGroups = groups.some((g) => g.id === sharedId && g.kind === kind)
+      ? groups.map((g) => g.id === sharedId && g.kind === kind ? { ...g, name } : g)
+      : [...groups, { id: sharedId, buildingId, kind, name }];
+    updateCirculationGroupMetadata(nextGroups);
+  }, [building?.circulationGroups, buildingId, updateCirculationGroupMetadata]);
 
   // Apply a history entry to the floor (shared by toolbar buttons + shortcuts).
   // History pushes are suppressed while applying so undo/redo never record
@@ -1107,10 +1859,27 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
         savedCampus.buildings.find((b) => b.id === buildingId)?.floors.find((f) => f.id === floorId) ?? floor,
         { buildingId }
       );
-      const entry = floorUndoEntryFromFloor(savedFloor);
+      const savedIndoorNodes = indoorNavNodes(savedCampus.navNodes, buildingId, floorId);
+      const savedIndoorEdges = indoorNavEdges(savedCampus.navEdges, savedIndoorNodes, buildingId, floorId);
+      const entry: FloorUndoEntry = {
+        ...floorUndoEntryFromFloor(savedFloor),
+        navNodes: savedIndoorNodes,
+        navEdges: savedIndoorEdges,
+      };
+      navGraphRef.current = { nodes: savedIndoorNodes, edges: savedIndoorEdges };
+      setNavGraphVersion((v) => v + 1);
       baselineFloorRef.current = structuredClone(savedFloor);
       baselineEntryRef.current = structuredClone(entry);
-      setBaselineKey(JSON.stringify(savedFloor));
+      // Baseline must match the composed dirty key (floor + indoor nav graph)
+      // derived from the confirmed saved campus, not from pre-save refs.
+      setBaselineKey(floorDirtyKeyOf(savedFloor, savedIndoorNodes, savedIndoorEdges));
+      // B5 Phase 3.1.3: a successful save also re-baselines the building floor
+      // structure (the new floor list is now persisted) so Save disables again.
+      // Fall back to the pre-save structure if the saved campus lacks the
+      // building (defensive — never mark a saved state dirty spuriously).
+      setStructureBaselineKey(floorStructureKeyOf(
+        savedCampus.buildings.find((b) => b.id === buildingId)?.floors ?? building.floors
+      ));
       resetHistory(entry);
       setSaving(false);
       setSaved(true);
@@ -1123,6 +1892,30 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
       return false;
     }
   }, [buildFloorUpdates, onSave, onUpdate, buildingId, floorId, floor, resetHistory, toast, isFloorDirty, saving]);
+
+  // ── Shared unsaved-changes guard: floor switch / add floor / back / exit.
+  // Runs the real save flow (handleSave) on Save Changes, restores the FULL
+  // saved baseline (floor + indoor nav graph) on Discard, and registers the
+  // native beforeunload protection while the floor is dirty.
+  const unsavedGuard = useUnsavedChangesGuard({
+    isDirty: isFloorDirty,
+    onSave: handleSave,
+    onDiscard: () => {
+      // Restore the FULL saved baseline — floor AND indoor nav graph — so a
+      // Discard never leaves unsaved nav edits behind.
+      const entry = baselineEntryRef.current ?? floorUndoEntryFromFloor(structuredClone(baselineFloorRef.current));
+      buildFloorUpdates(entry);
+      resetHistory(entry);
+      baselineEntryRef.current = structuredClone(entry);
+      setBaselineKey(JSON.stringify(baselineFloorRef.current) + "|" + JSON.stringify([entry.navNodes ?? [], entry.navEdges ?? []]));
+    },
+  });
+  const { guard: guardNavigation } = unsavedGuard;
+
+  // ── Back to the Campus editor — same guard path as every other exit ──
+  const handleBack = useCallback(() => {
+    guardNavigation(() => onBack());
+  }, [guardNavigation, onBack]);
 
   const handlePublish = useCallback(() => {
     const issues = validateFloorGeometry(floor);
@@ -1148,23 +1941,52 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
   const requestFloorSwitch = useCallback((targetFloorId: string) => {
     if (targetFloorId === floorId) return;
     setFloorMenu(null);
+    setFloorSelectorOpen(false);
     clearTransientEditorState();
-    if (isFloorDirty) {
-      setPendingFloorSwitch(targetFloorId);
-      return;
-    }
-    switchToFloor(targetFloorId);
-  }, [clearTransientEditorState, floorId, isFloorDirty, switchToFloor]);
+    // Dirty floor edits go through the shared unsaved-changes guard (same
+    // flow as Add Floor and back). The pending action resumes after
+    // Save Changes / Discard Changes or is cancelled by Keep Editing.
+    guardNavigation(() => switchToFloor(targetFloorId), {
+      description: `Save or discard changes to ${floor.label} before switching floors.`,
+    });
+  }, [clearTransientEditorState, floor, floorId, guardNavigation, switchToFloor]);
+
+  const updateFloorSelectorPosition = useCallback(() => {
+    const trigger = floorSelectorButtonRef.current;
+    if (!trigger) return;
+    const rect = trigger.getBoundingClientRect();
+    const gap = 6;
+    const margin = 12;
+    const width = Math.min(320, Math.max(180, window.innerWidth - margin * 2));
+    const left = clamp(rect.left, margin, Math.max(margin, window.innerWidth - width - margin));
+    const below = window.innerHeight - rect.bottom - gap - margin;
+    const above = rect.top - gap - margin;
+    const openAbove = below < 180 && above > below;
+    const maxHeight = Math.max(160, Math.min(288, openAbove ? above : below));
+    const top = openAbove
+      ? Math.max(margin, rect.top - gap - maxHeight)
+      : Math.min(rect.bottom + gap, window.innerHeight - margin - maxHeight);
+    setFloorSelectorPosition({ left, top, width, maxHeight });
+  }, []);
+
+  useEffect(() => {
+    if (!floorSelectorOpen) return;
+    updateFloorSelectorPosition();
+    const onReposition = () => updateFloorSelectorPosition();
+    window.addEventListener("resize", onReposition);
+    window.addEventListener("scroll", onReposition, true);
+    return () => {
+      window.removeEventListener("resize", onReposition);
+      window.removeEventListener("scroll", onReposition, true);
+    };
+  }, [floorSelectorOpen, updateFloorSelectorPosition]);
 
   const updateBuildingFloors = useCallback((nextFloors: FloorPlan[]) => {
-    const updatedCampus: Campus = {
-      ...campus,
-      buildings: campus.buildings.map((b) =>
-        b.id === buildingId
-          ? { ...b, floors: nextFloors.map((nextFloor) => normalizeFloor(nextFloor, { buildingId: b.id })) }
-          : b
-      ),
-    };
+    const updatedCampus = replaceBuildingFloorsAndReconcileTransitions(
+      campus,
+      buildingId,
+      nextFloors.map((nextFloor) => normalizeFloor(nextFloor, { buildingId }))
+    );
     onUpdate(updatedCampus);
     return updatedCampus;
   }, [buildingId, campus, onUpdate]);
@@ -1174,27 +1996,63 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
   //    these handlers and the shared floorManagement helpers, so no surface can
   //    drift into a separate duplicate/delete/reorder implementation. ──
 
-  const addFloorFromEditor = useCallback(() => {
+  // B5 Phase 3.1: the ACTUAL add-floor mutation, shared by the direct path
+  // (clean floor) and the Save/Discard dialog path (dirty floor).
+  const performAddFloor = useCallback(() => {
     const { floors, floor: newFloor } = addFloorToBuilding(building.floors, buildingId);
     updateBuildingFloors(floors);
     clearTransientEditorState();
     setFloorMenu(null);
+    setFloorSelectorOpen(false);
     onSwitchFloor(newFloor.id);
     toast.success("Floor added", `${newFloor.label} is ready to edit.`);
   }, [building.floors, buildingId, clearTransientEditorState, onSwitchFloor, toast, updateBuildingFloors]);
 
+  const addFloorFromEditor = useCallback(() => {
+    setFloorMenu(null);
+    setFloorSelectorOpen(false);
+    clearTransientEditorState();
+    // B5 Phase 3.1: never create a new floor on top of unsaved changes — the
+    // admin must first decide Save/Discard through the shared guard. This
+    // keeps the "Add Floor → Save" flow single-creation: the save happens
+    // once, the new floor opens once, and a failed save leaves the floor list
+    // untouched.
+    guardNavigation(performAddFloor, {
+      description: `Save or discard changes to ${floor.label} before adding a new floor.`,
+    });
+  }, [clearTransientEditorState, floor, guardNavigation, performAddFloor]);
+
   const requestDuplicateFloor = useCallback((targetId: string) => {
-    const { floors, copy } = duplicateFloorInBuilding(building.floors, buildingId, targetId);
+    // B5 Phase 2: pass the campus nav graph so the duplicate floor also clones
+    // its indoor nav graph (new IDs, remapped floorId + linked object refs).
+    const { floors, copy, navNodes, navEdges } = duplicateFloorInBuilding(building.floors, buildingId, targetId, campus.navNodes, campus.navEdges);
     if (!copy) {
       setFloorMenu(null);
       return;
     }
-    updateBuildingFloors(floors);
+    const baseCampus: Campus = {
+      ...campus,
+      navNodes: navNodes ?? campus.navNodes,
+      navEdges: navEdges ?? campus.navEdges,
+      buildings: campus.buildings.map((b) =>
+        b.id === buildingId ? { ...b, floors } : b
+      ),
+    };
+    // B5 Phase 3: reconcile transitions after the duplicated floor's circulation
+    // objects land (duplication preserves sharedId, so matching chains keep
+    // their intended cross-floor continuity without manual re-linking).
+    const reconciledEdges = reconcileCrossFloorTransitions(
+      baseCampus.navNodes, baseCampus.navEdges,
+      (baseCampus.buildings ?? []).find((b) => b.id === buildingId)?.floors,
+      buildingId
+    );
+    const updatedCampus: Campus = { ...baseCampus, navEdges: reconciledEdges };
+    onUpdate(updatedCampus);
     clearTransientEditorState();
     setFloorMenu(null);
     onSwitchFloor(copy.id);
     toast.success("Floor duplicated", `${copy.label} was copied with new object IDs.`);
-  }, [building.floors, buildingId, clearTransientEditorState, onSwitchFloor, toast, updateBuildingFloors]);
+  }, [building.floors, buildingId, campus, clearTransientEditorState, onSwitchFloor, toast, onUpdate]);
 
   const requestMoveFloor = useCallback((targetId: string, direction: -1 | 1) => {
     const { floors, moved } = moveFloorInBuilding(building.floors, targetId, direction);
@@ -1202,7 +2060,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
     updateBuildingFloors(floors);
     setFloorMenu(null);
     const label = building.floors.find((f) => f.id === targetId)?.label ?? "Floor";
-    toast.success("Floor order updated", `${label} moved ${direction < 0 ? "left" : "right"}.`);
+    toast.success("Floor order updated", `${label} moved ${direction < 0 ? "up" : "down"}.`);
   }, [building.floors, toast, updateBuildingFloors]);
 
   const requestDeleteFloor = useCallback((targetId: string) => {
@@ -1260,6 +2118,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
   }, [building.floors, floorRename, floorRenameValue, toast, updateBuildingFloors]);
 
   const openFloorActionsAtButton = useCallback(() => {
+    setFloorSelectorOpen(false);
     if (floorMenu) {
       setFloorMenu(null);
       return;
@@ -1267,28 +2126,6 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
     const rect = floorActionsButtonRef.current?.getBoundingClientRect();
     setFloorMenu({ floorId, x: rect?.left ?? 8, y: (rect?.bottom ?? 8) + 4 });
   }, [floorId, floorMenu]);
-
-  const saveAndSwitchFloor = useCallback(async () => {
-    if (!pendingFloorSwitch) return;
-    const target = pendingFloorSwitch;
-    const ok = await handleSave();
-    if (!ok) return;
-    setPendingFloorSwitch(null);
-    switchToFloor(target);
-  }, [handleSave, pendingFloorSwitch, switchToFloor]);
-
-  const discardAndSwitchFloor = useCallback(() => {
-    if (!pendingFloorSwitch) return;
-    const target = pendingFloorSwitch;
-    const baselineFloor = structuredClone(baselineFloorRef.current);
-    const entry = floorUndoEntryFromFloor(baselineFloor);
-    buildFloorUpdates(baselineFloor);
-    resetHistory(entry);
-    baselineEntryRef.current = structuredClone(entry);
-    setBaselineKey(JSON.stringify(baselineFloor));
-    setPendingFloorSwitch(null);
-    switchToFloor(target);
-  }, [buildFloorUpdates, pendingFloorSwitch, resetHistory, switchToFloor]);
 
   const getSelectionItem = useCallback((type: FloorSelection["type"], id: string) => {
     if (type === "room") return rooms.find((r) => r.id === id);
@@ -1325,6 +2162,47 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
     setSelected(selection);
     setShowProperties(true);
   }, []);
+
+  // ── B5 Final: issue-locate camera focus ───────────────────────────────
+  // After an initialSelection arrives (issue clicked on the campus editor),
+  // center the camera on the located object so the admin lands directly on
+  // the problem. The ref guard prevents re-zooming on unrelated re-renders.
+  useEffect(() => {
+    if (!initialSelection) return;
+    const focusKey = `${initialSelection.type}:${initialSelection.id}`;
+    if (locateFocusedRef.current === focusKey) return;
+    locateFocusedRef.current = focusKey;
+    if (initialSelection.type === "navNode") {
+      const n = indoorNodes.find((x) => x.id === initialSelection.id);
+      if (n) {
+        zoomToFit(Math.max(0, n.x - 60), Math.max(0, n.y - 60), 120, 120, 48);
+        setLocateFlash({ world: { x: n.x, y: n.y } });
+      }
+      return;
+    }
+    if (initialSelection.type === "navEdge") {
+      const e = indoorEdges.find((x) => x.id === initialSelection.id);
+      const a = e ? indoorNodes.find((n) => n.id === e.startNodeId) : undefined;
+      const b = e ? indoorNodes.find((n) => n.id === e.endNodeId) : undefined;
+      if (e && a && b) {
+        const pts = [{ x: a.x, y: a.y }, ...(e.bendPoints ?? []), { x: b.x, y: b.y }];
+        const xs = pts.map((p) => p.x);
+        const ys = pts.map((p) => p.y);
+        const minX = Math.min(...xs);
+        const maxX = Math.max(...xs);
+        const minY = Math.min(...ys);
+        const maxY = Math.max(...ys);
+        zoomToFit(Math.max(0, minX - 40), Math.max(0, minY - 40), maxX - minX + 80, maxY - minY + 80, 40);
+        setLocateFlash({ world: { x: (minX + maxX) / 2, y: (minY + maxY) / 2 } });
+      }
+      return;
+    }
+    const item = getSelectionItem(initialSelection.type, initialSelection.id) as { x?: number; y?: number } | undefined;
+    if (item && typeof item.x === "number" && typeof item.y === "number") {
+      zoomToFit(Math.max(0, item.x - 60), Math.max(0, item.y - 60), 120, 120, 48);
+      setLocateFlash({ world: { x: item.x, y: item.y } });
+    }
+  }, [initialSelection, indoorNodes, indoorEdges, getSelectionItem, zoomToFit, locateFocusedRef]);
 
   const updateLabel = useCallback((id: string, changes: Partial<FloorLabel>) => {
     const current = labels.find((label) => label.id === id);
@@ -1469,43 +2347,75 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
   const applyLayerAction = useCallback((selection: FloorSelection | null, action: LayerAction) => {
     const scope = selectionScope(selection).filter((item) => item.type !== "path");
     if (scope.length === 0) return;
-    const idsByType = new Map<FloorSelection["type"], Set<string>>();
-    scope.forEach((item) => idsByType.set(item.type, new Set([...(idsByType.get(item.type) ?? []), item.id])));
-    const layerList = <T extends { id: string; zOrder?: number }>(items: T[], type: FloorSelection["type"]) => {
-      const ids = idsByType.get(type);
-      if (!ids || ids.size === 0) return items;
-      const normalized = sortByZ(items).map((item, index) => ({ ...item, zOrder: index }));
-      if (action === "bring-front" || action === "send-back") {
-        const selectedItems = normalized.filter((item) => ids.has(item.id));
-        const rest = normalized.filter((item) => !ids.has(item.id));
-        const nextOrder = action === "bring-front" ? [...rest, ...selectedItems] : [...selectedItems, ...rest];
-        return nextOrder.map((item, index) => ({ ...item, zOrder: index }));
+    const selectedKeys = new Set(scope.map((item) => `${item.type}:${item.id}`));
+    const entries = [
+      ...rooms.map((item) => ({ type: "room" as const, item })),
+      ...walls.map((item) => ({ type: "wall" as const, item })),
+      ...doors.map((item) => ({ type: "door" as const, item })),
+      ...windows.map((item) => ({ type: "window" as const, item })),
+      ...furniture.map((item) => ({ type: "furniture" as const, item })),
+      ...stairs.map((item) => ({ type: "stairs" as const, item })),
+      ...elevators.map((item) => ({ type: "elevator" as const, item })),
+      ...labels.map((item) => ({ type: "label" as const, item })),
+      ...ramps.map((item) => ({ type: "ramp" as const, item })),
+    ].sort((a, b) => (a.item.zOrder ?? 0) - (b.item.zOrder ?? 0) || `${a.type}:${a.item.id}`.localeCompare(`${b.type}:${b.item.id}`));
+    const normalized = entries.map((entry, index) => ({ ...entry, item: { ...entry.item, zOrder: index } }));
+    const next = [...normalized];
+    if (action === "bring-front" || action === "send-back") {
+      const selectedEntries = normalized.filter((entry) => selectedKeys.has(`${entry.type}:${entry.item.id}`));
+      const rest = normalized.filter((entry) => !selectedKeys.has(`${entry.type}:${entry.item.id}`));
+      next.splice(0, next.length, ...(action === "bring-front" ? [...rest, ...selectedEntries] : [...selectedEntries, ...rest]));
+    } else if (action === "bring-forward") {
+      for (let i = next.length - 2; i >= 0; i -= 1) {
+        const key = `${next[i].type}:${next[i].item.id}`;
+        const nextKey = `${next[i + 1].type}:${next[i + 1].item.id}`;
+        if (selectedKeys.has(key) && !selectedKeys.has(nextKey)) [next[i], next[i + 1]] = [next[i + 1], next[i]];
       }
-      const next = [...normalized];
-      if (action === "bring-forward") {
-        for (let i = next.length - 2; i >= 0; i -= 1) {
-          if (ids.has(next[i].id) && !ids.has(next[i + 1].id)) [next[i], next[i + 1]] = [next[i + 1], next[i]];
-        }
-      } else {
-        for (let i = 1; i < next.length; i += 1) {
-          if (ids.has(next[i].id) && !ids.has(next[i - 1].id)) [next[i], next[i - 1]] = [next[i - 1], next[i]];
-        }
+    } else {
+      for (let i = 1; i < next.length; i += 1) {
+        const key = `${next[i].type}:${next[i].item.id}`;
+        const previousKey = `${next[i - 1].type}:${next[i - 1].item.id}`;
+        if (selectedKeys.has(key) && !selectedKeys.has(previousKey)) [next[i], next[i - 1]] = [next[i - 1], next[i]];
       }
-      return next.map((item, index) => ({ ...item, zOrder: index }));
-    };
+    }
+    const keyed = new Map(next.map((entry, index) => [`${entry.type}:${entry.item.id}`, { ...entry.item, zOrder: index }]));
+    const changed = normalized.some((entry) => {
+      const nextItem = keyed.get(`${entry.type}:${entry.item.id}`);
+      return nextItem && nextItem.zOrder !== entry.item.zOrder;
+    });
+    if (!changed) return;
+    const applyZ = <T extends { id: string; zOrder?: number }>(items: T[], type: FloorSelection["type"]) =>
+      items.map((item) => (keyed.get(`${type}:${item.id}`) as T | undefined) ?? item);
+    pushHistory({
+      ...floorUndoEntryFromFloor({
+        ...floor,
+        rooms,
+        paths: fpaths,
+        walls,
+        doors,
+        windows,
+        furniture,
+        stairs,
+        elevators,
+        labels,
+        ramps,
+      }),
+      navNodes: indoorNodes,
+      navEdges: indoorEdges,
+    });
     updFloor(
-      layerList(rooms, "room"),
+      applyZ(rooms, "room"),
       fpaths,
-      layerList(walls, "wall"),
-      layerList(doors, "door"),
-      layerList(windows, "window"),
-      layerList(furniture, "furniture"),
-      layerList(stairs, "stairs"),
-      layerList(elevators, "elevator"),
-      layerList(labels, "label"),
-      layerList(ramps, "ramp")
+      applyZ(walls, "wall"),
+      applyZ(doors, "door"),
+      applyZ(windows, "window"),
+      applyZ(furniture, "furniture"),
+      applyZ(stairs, "stairs"),
+      applyZ(elevators, "elevator"),
+      applyZ(labels, "label"),
+      applyZ(ramps, "ramp")
     );
-  }, [selectionScope, rooms, fpaths, walls, doors, windows, furniture, stairs, elevators, labels, ramps, updFloor]);
+  }, [selectionScope, rooms, fpaths, walls, doors, windows, furniture, stairs, elevators, labels, ramps, pushHistory, floor, indoorNodes, indoorEdges, updFloor]);
 
   const deleteSelections = useCallback((selections: FloorSelection[]) => {
     if (selections.length === 0) return;
@@ -1548,86 +2458,102 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
     if (selection) deleteSelections([selection]);
   }, [selected, multiSelected, selectionsFromIds, deleteSelections]);
 
+  /**
+   * B5 Phase 2.1: shared duplication core used by Ctrl+D and Ctrl+V paste.
+   * Copies the given entries with fresh IDs, relationship remapping (room→wall
+   * anchors, wall→attached doors/windows), a clamped offset, and ONE history
+   * action. Returns the copied object ids.
+   */
+  const duplicateEntrySet = useCallback((
+    entries: { type: FloorSelection["type"]; id: string; item: any }[],
+    offset: number
+  ): string[] => {
+    if (entries.length === 0) return [];
+    if (entries.some((entry) => isSelectionLocked({ type: entry.type, id: entry.id }))) {
+      toast.info("Locked selection", "Unlock locked floor objects before duplicating them.");
+      return [];
+    }
+    const valid = entries.filter((entry) => entry.item && entry.type !== "path");
+    const bounds = valid
+      .map((entry) => itemBounds(entry.type, entry.item))
+      .filter((value): value is NonNullable<typeof value> => !!value);
+    const delta = constrainDeltaForBounds(bounds, offset, offset, FP_W, FP_H);
+    const nextRooms = [...rooms];
+    const nextWalls = [...walls];
+    const nextDoors = [...doors];
+    const nextWindows = [...windows];
+    const nextFurniture = [...furniture];
+    const nextStairs = [...stairs];
+    const nextRamps = [...ramps];
+    const nextElevators = [...elevators];
+    const nextLabels = [...labels];
+    const nextIds: string[] = [];
+    const duplicatedRoomIds = new Map(valid.filter((entry) => entry.type === "room").map((entry) => [entry.id, genId("rm")]));
+    const duplicatedWallIds = new Map(valid.filter((entry) => entry.type === "wall").map((entry) => [entry.id, genId("wl")]));
+    const selectedWallIds = new Set(duplicatedWallIds.keys());
+    for (const entry of valid) {
+      if (entry.type === "room") {
+        const copy = translateFloorItem("room", { ...(entry.item as FloorRoom), id: duplicatedRoomIds.get(entry.id) ?? genId("rm"), name: `${(entry.item as FloorRoom).name} Copy` }, delta.dx, delta.dy, FP_W, FP_H) as FloorRoom;
+        nextRooms.push(copy); nextIds.push(copy.id);
+      } else if (entry.type === "wall") {
+        const source = entry.item as FloorWall;
+        const startAnchor = source.startAnchor && duplicatedRoomIds.has(source.startAnchor.roomId)
+          ? { ...source.startAnchor, roomId: duplicatedRoomIds.get(source.startAnchor.roomId)! }
+          : undefined;
+        const endAnchor = source.endAnchor && duplicatedRoomIds.has(source.endAnchor.roomId)
+          ? { ...source.endAnchor, roomId: duplicatedRoomIds.get(source.endAnchor.roomId)! }
+          : undefined;
+        const copy = translateFloorItem("wall", { ...source, id: duplicatedWallIds.get(entry.id) ?? genId("wl"), startAnchor, endAnchor }, delta.dx, delta.dy, FP_W, FP_H) as FloorWall;
+        nextWalls.push(copy); nextIds.push(copy.id);
+        doors.filter((door) => door.wallId === source.id).forEach((door) => {
+          const doorCopy = syncOpeningsToWalls([{ ...door, id: genId("dr"), wallId: copy.id }], [], [copy]).doors[0];
+          nextDoors.push(doorCopy);
+          nextIds.push(doorCopy.id);
+        });
+        windows.filter((win) => win.wallId === source.id).forEach((win) => {
+          const winCopy = syncOpeningsToWalls([], [{ ...win, id: genId("wn"), wallId: copy.id }], [copy]).windows[0];
+          nextWindows.push(winCopy);
+          nextIds.push(winCopy.id);
+        });
+      } else if (entry.type === "door") {
+        if ((entry.item as FloorDoor).wallId && selectedWallIds.has((entry.item as FloorDoor).wallId!)) continue;
+        const copy = translateFloorItem("door", { ...(entry.item as FloorDoor), id: genId("dr") }, delta.dx, delta.dy, FP_W, FP_H) as FloorDoor;
+        nextDoors.push(copy); nextIds.push(copy.id);
+      } else if (entry.type === "window") {
+        if ((entry.item as FloorWindow).wallId && selectedWallIds.has((entry.item as FloorWindow).wallId!)) continue;
+        const copy = translateFloorItem("window", { ...(entry.item as FloorWindow), id: genId("wn") }, delta.dx, delta.dy, FP_W, FP_H) as FloorWindow;
+        nextWindows.push(copy); nextIds.push(copy.id);
+      } else if (entry.type === "furniture") {
+        const copy = translateFloorItem("furniture", { ...(entry.item as FloorFurniture), id: genId("fn"), name: `${(entry.item as FloorFurniture).name} Copy` }, delta.dx, delta.dy, FP_W, FP_H) as FloorFurniture;
+        nextFurniture.push(copy); nextIds.push(copy.id);
+      } else if (entry.type === "stairs") {
+        const copy = translateFloorItem("stairs", { ...(entry.item as FloorStairs), id: genId("st") }, delta.dx, delta.dy, FP_W, FP_H) as FloorStairs;
+        nextStairs.push(copy); nextIds.push(copy.id);
+      } else if (entry.type === "ramp") {
+        const copy = translateFloorItem("ramp", { ...(entry.item as FloorRamp), id: genId("rmp") }, delta.dx, delta.dy, FP_W, FP_H) as FloorRamp;
+        nextRamps.push(copy); nextIds.push(copy.id);
+      } else if (entry.type === "elevator") {
+        const copy = translateFloorItem("elevator", { ...(entry.item as FloorElevatorItem), id: genId("ev") }, delta.dx, delta.dy, FP_W, FP_H) as FloorElevatorItem;
+        nextElevators.push(copy); nextIds.push(copy.id);
+      } else if (entry.type === "label") {
+        const copy = translateFloorItem("label", { ...(entry.item as FloorLabel), id: genId("lb"), text: `${(entry.item as FloorLabel).text} Copy` }, delta.dx, delta.dy, FP_W, FP_H) as FloorLabel;
+        nextLabels.push(copy); nextIds.push(copy.id);
+      }
+    }
+    updFloor(nextRooms, fpaths, nextWalls, nextDoors, nextWindows, nextFurniture, nextStairs, nextElevators, nextLabels, nextRamps);
+    setSelected(null);
+    setMultiSelected(nextIds);
+    setShowProperties(true);
+    return nextIds;
+  }, [rooms, fpaths, walls, doors, windows, furniture, stairs, ramps, elevators, labels, FP_W, FP_H, updFloor, isSelectionLocked, itemBounds, constrainDeltaForBounds, toast]);
+
   const duplicateSelection = useCallback((selection: FloorSelection | null = selected) => {
     const groupSelections = multiSelected.length > 1 ? selectionsFromIds(multiSelected) : [];
     if (groupSelections.length > 1 && (!selection || groupSelections.some((item) => item.id === selection.id))) {
-      if (groupSelections.some((item) => isSelectionLocked(item))) {
-        toast.info("Locked selection", "Unlock locked floor objects before duplicating them.");
-        return;
-      }
       const entries = groupSelections
         .map((value) => ({ ...value, item: structuredClone(getSelectionItem(value.type, value.id)) }))
-        .filter((entry) => entry.item && entry.type !== "path");
-      const bounds = entries
-        .map((entry) => itemBounds(entry.type, entry.item))
-        .filter((value): value is NonNullable<typeof value> => !!value);
-      const delta = constrainDeltaForBounds(bounds, 12, 12, FP_W, FP_H);
-      const nextRooms = [...rooms];
-      const nextWalls = [...walls];
-      const nextDoors = [...doors];
-      const nextWindows = [...windows];
-      const nextFurniture = [...furniture];
-      const nextStairs = [...stairs];
-      const nextRamps = [...ramps];
-      const nextElevators = [...elevators];
-      const nextLabels = [...labels];
-      const nextIds: string[] = [];
-      const duplicatedRoomIds = new Map(entries.filter((entry) => entry.type === "room").map((entry) => [entry.id, genId("rm")]));
-      const duplicatedWallIds = new Map(entries.filter((entry) => entry.type === "wall").map((entry) => [entry.id, genId("wl")]));
-      const selectedWallIds = new Set(duplicatedWallIds.keys());
-      for (const entry of entries) {
-        if (entry.type === "room") {
-          const copy = translateFloorItem("room", { ...(entry.item as FloorRoom), id: duplicatedRoomIds.get(entry.id) ?? genId("rm"), name: `${(entry.item as FloorRoom).name} Copy` }, delta.dx, delta.dy, FP_W, FP_H) as FloorRoom;
-          nextRooms.push(copy); nextIds.push(copy.id);
-        } else if (entry.type === "wall") {
-          const source = entry.item as FloorWall;
-          const startAnchor = source.startAnchor && duplicatedRoomIds.has(source.startAnchor.roomId)
-            ? { ...source.startAnchor, roomId: duplicatedRoomIds.get(source.startAnchor.roomId)! }
-            : undefined;
-          const endAnchor = source.endAnchor && duplicatedRoomIds.has(source.endAnchor.roomId)
-            ? { ...source.endAnchor, roomId: duplicatedRoomIds.get(source.endAnchor.roomId)! }
-            : undefined;
-          const copy = translateFloorItem("wall", { ...source, id: duplicatedWallIds.get(entry.id) ?? genId("wl"), startAnchor, endAnchor }, delta.dx, delta.dy, FP_W, FP_H) as FloorWall;
-          nextWalls.push(copy); nextIds.push(copy.id);
-          doors.filter((door) => door.wallId === source.id).forEach((door) => {
-            const doorCopy = syncOpeningsToWalls([{ ...door, id: genId("dr"), wallId: copy.id }], [], [copy]).doors[0];
-            nextDoors.push(doorCopy);
-            nextIds.push(doorCopy.id);
-          });
-          windows.filter((win) => win.wallId === source.id).forEach((win) => {
-            const winCopy = syncOpeningsToWalls([], [{ ...win, id: genId("wn"), wallId: copy.id }], [copy]).windows[0];
-            nextWindows.push(winCopy);
-            nextIds.push(winCopy.id);
-          });
-        } else if (entry.type === "door") {
-          if ((entry.item as FloorDoor).wallId && selectedWallIds.has((entry.item as FloorDoor).wallId!)) continue;
-          const copy = translateFloorItem("door", { ...(entry.item as FloorDoor), id: genId("dr") }, delta.dx, delta.dy, FP_W, FP_H) as FloorDoor;
-          nextDoors.push(copy); nextIds.push(copy.id);
-        } else if (entry.type === "window") {
-          if ((entry.item as FloorWindow).wallId && selectedWallIds.has((entry.item as FloorWindow).wallId!)) continue;
-          const copy = translateFloorItem("window", { ...(entry.item as FloorWindow), id: genId("wn") }, delta.dx, delta.dy, FP_W, FP_H) as FloorWindow;
-          nextWindows.push(copy); nextIds.push(copy.id);
-        } else if (entry.type === "furniture") {
-          const copy = translateFloorItem("furniture", { ...(entry.item as FloorFurniture), id: genId("fn"), name: `${(entry.item as FloorFurniture).name} Copy` }, delta.dx, delta.dy, FP_W, FP_H) as FloorFurniture;
-          nextFurniture.push(copy); nextIds.push(copy.id);
-        } else if (entry.type === "stairs") {
-          const copy = translateFloorItem("stairs", { ...(entry.item as FloorStairs), id: genId("st") }, delta.dx, delta.dy, FP_W, FP_H) as FloorStairs;
-          nextStairs.push(copy); nextIds.push(copy.id);
-        } else if (entry.type === "ramp") {
-          const copy = translateFloorItem("ramp", { ...(entry.item as FloorRamp), id: genId("rmp") }, delta.dx, delta.dy, FP_W, FP_H) as FloorRamp;
-          nextRamps.push(copy); nextIds.push(copy.id);
-        } else if (entry.type === "elevator") {
-          const copy = translateFloorItem("elevator", { ...(entry.item as FloorElevatorItem), id: genId("ev") }, delta.dx, delta.dy, FP_W, FP_H) as FloorElevatorItem;
-          nextElevators.push(copy); nextIds.push(copy.id);
-        } else if (entry.type === "label") {
-          const copy = translateFloorItem("label", { ...(entry.item as FloorLabel), id: genId("lb"), text: `${(entry.item as FloorLabel).text} Copy` }, delta.dx, delta.dy, FP_W, FP_H) as FloorLabel;
-          nextLabels.push(copy); nextIds.push(copy.id);
-        }
-      }
-      updFloor(nextRooms, fpaths, nextWalls, nextDoors, nextWindows, nextFurniture, nextStairs, nextElevators, nextLabels, nextRamps);
-      setSelected(null);
-      setMultiSelected(nextIds);
-      setShowProperties(true);
+        .filter((entry) => entry.item);
+      duplicateEntrySet(entries, 12);
       return;
     }
     if (!selection) return;
@@ -1691,6 +2617,52 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
     }
   }, [selected, multiSelected, selectionsFromIds, getSelectionItem, FP_W, FP_H, rooms, fpaths, walls, doors, windows, furniture, stairs, ramps, elevators, labels, updFloor, selectFloorItem, isSelectionLocked, toast]);
 
+  // ── B5 Phase 2.1: Design copy / paste (Ctrl+C / Ctrl+V) ────────────────────
+
+  const copySelection = useCallback(() => {
+    const ids: { type: FloorSelection["type"]; id: string }[] = [];
+    if (multiSelected.length > 1) {
+      for (const id of multiSelected) {
+        const sel = selectionForId(id);
+        if (sel) ids.push(sel);
+      }
+    } else if (selected) {
+      ids.push({ type: selected.type, id: selected.id });
+    }
+    if (ids.length === 0) {
+      toast.info("Nothing to copy", "Select a floor object first (Ctrl+C).");
+      return;
+    }
+    setClipboard(ids);
+    pasteOffsetRef.current = 12;
+    toast.success("Copied", `${ids.length} object${ids.length !== 1 ? "s" : ""} copied (Ctrl+V to paste).`);
+  }, [multiSelected, selected, selectionForId, toast]);
+
+  const pasteSelection = useCallback(() => {
+    if (!clipboard || clipboard.length === 0) {
+      toast.info("Nothing to paste", "Copy a floor object first (Ctrl+C).");
+      return;
+    }
+    const entries = clipboard
+      .map((sel) => {
+        const item = getSelectionItem(sel.type, sel.id);
+        return item ? { type: sel.type, id: sel.id, item: structuredClone(item) } : null;
+      })
+      .filter((entry): entry is NonNullable<typeof entry> => !!entry);
+    if (entries.length === 0) {
+      toast.info("Nothing to paste", "The copied object no longer exists on this floor.");
+      return;
+    }
+    const nextIds = duplicateEntrySet(entries, pasteOffsetRef.current);
+    pasteOffsetRef.current += 12;
+    if (nextIds.length === 1) {
+      // Single paste feels like the single-item duplicate: select the copy directly.
+      setMultiSelected([]);
+      setSelected({ type: entries[0].type, id: nextIds[0] });
+    }
+    toast.success("Pasted", `${nextIds.length} object${nextIds.length !== 1 ? "s" : ""} pasted with fresh IDs.`);
+  }, [clipboard, duplicateEntrySet, getSelectionItem, toast]);
+
   // Wall connection snapping priority (verified in Phase 1.7):
   //   1. existing wall endpoint   (exact coordinates)
   //   2. valid nearby wall segment (closest point on segment)
@@ -1702,6 +2674,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
   // snapping always beats boundary snapping instead of the two fighting.
   const findWallSnapTarget = useCallback((point: { x: number; y: number }, ignoreWallId?: string) => {
     let bestEndpoint: { x: number; y: number; d: number } | null = null;
+    let bestIntersection: { x: number; y: number; d: number; roomAnchor?: FloorWallEndpointAnchor } | null = null;
     let bestSegment: { x: number; y: number; d: number } | null = null;
     let bestRoomCorner: { x: number; y: number; d: number; roomAnchor: FloorWallEndpointAnchor } | null = null;
     let bestRoomEdge: { x: number; y: number; d: number; edge: { x1: number; y1: number; x2: number; y2: number }; roomAnchor: FloorWallEndpointAnchor } | null = null;
@@ -1722,6 +2695,19 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
     }
     for (const room of rooms) {
       if (room.visible === false) continue;
+      const roomSegments = roomGuideSegments(room);
+      for (const roomSegment of roomSegments) {
+        for (const wall of walls) {
+          if (wall.id === ignoreWallId) continue;
+          const intersection = segmentIntersectionPoint(wall, roomSegment);
+          if (!intersection) continue;
+          const d = dist(point.x, point.y, intersection.x, intersection.y);
+          if (d > SNAP_THRESHOLD || (bestIntersection && d >= bestIntersection.d)) continue;
+          const anchor = roomAnchorAtPoint(room, intersection, 0.75)?.anchor
+            ?? roomAnchorAtPoint(room, intersection, SNAP_THRESHOLD)?.anchor;
+          bestIntersection = { ...intersection, d, roomAnchor: anchor };
+        }
+      }
       const roomAnchor = roomAnchorAtPoint(room, point, SNAP_THRESHOLD);
       if (!roomAnchor) continue;
       if (roomAnchor.anchor.offset === 0 || roomAnchor.anchor.offset === 1) {
@@ -1731,7 +2717,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
         if (!bestRoomEdge || roomAnchor.d < bestRoomEdge.d) bestRoomEdge = { ...roomAnchor, edge, roomAnchor: roomAnchor.anchor };
       }
     }
-    return bestEndpoint ?? bestSegment ?? bestRoomCorner ?? bestRoomEdge ?? null;
+    return bestEndpoint ?? bestIntersection ?? bestSegment ?? bestRoomCorner ?? bestRoomEdge ?? null;
   }, [walls, rooms]);
 
   const snapFloorPoint = useCallback((point: { x: number; y: number }, ignoreWallId?: string) => {
@@ -1825,8 +2811,259 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
     return best;
   }, [walls, zoom]);
 
-  const floorIssues = useMemo<FloorIssue[]>(() => validateFloorGeometry(floor), [floor]);
+  const floorIssues = useMemo<FloorIssue[]>(() => {
+    const geometryIssues = validateFloorGeometry(floor);
+    // B5 Phase 3.1: an impossible stair direction (e.g. Down on the lowest
+    // floor with no floor below, or Up on the highest) counts as a local floor
+    // issue so the admin notices and corrects it. Single-floor buildings are
+    // exempt — direction has no cross-floor meaning there.
+    const orderedFloors = (campus.buildings ?? []).find((b) => b.id === buildingId)?.floors ?? [];
+    const allowed = stairDirectionsForFloorInOrder(floor.id, orderedFloors);
+    const stairIssues: FloorIssue[] = orderedFloors.length <= 1 ? [] : stairs
+      .filter((s) => !allowed.includes(s.direction))
+      .map((s) => ({
+        id: `stair-dir-${s.id}`,
+        severity: "warning" as const,
+        message: `Stair direction is invalid for this floor — no floor ${s.direction === "down" ? "below" : s.direction === "up" ? "above" : "connection"} available.`,
+        selection: { type: "stairs", id: s.id } as FloorSelection,
+      }));
+    const doorIssues: FloorIssue[] = doors.flatMap((door) => {
+      const status = doorEntranceLinkStatus(campus, buildingId, floorId, door.id);
+      if (status.state !== "linked" || !status.entranceName) return [];
+      const doorName = doorDisplayName(door, { doors });
+      const issues: FloorIssue[] = [];
+      if (status.entryFloor === false) {
+        issues.push({
+          id: `entrance-door-entry-floor-${door.id}`,
+          severity: "warning" as const,
+          message: `${doorName} is connected to ${status.entranceName} but is no longer on the building entry floor.`,
+          selection: { type: "door", id: door.id } as FloorSelection,
+        });
+      }
+      if (door.visible === false) {
+        issues.push({
+          id: `entrance-door-hidden-${door.id}`,
+          severity: "warning" as const,
+          message: `${doorName} is connected to ${status.entranceName} but is hidden.`,
+          selection: { type: "door", id: door.id } as FloorSelection,
+        });
+      }
+      return issues;
+    });
+    return [...geometryIssues, ...stairIssues, ...doorIssues];
+  }, [floor, stairs, doors, buildingId, floorId, campus]);
   const blockingIssues = floorIssues.filter((issue) => issue.severity === "error");
+
+  // B5 Phase 2.11: LIVE validity of every existing indoor edge — the same strict
+  // thick-wall model as Connect creation, recomputed against the CURRENT nodes
+  // and authored bends. An invalid edge renders RED and stays editable so the
+  // admin can repair it (Remove Bend may legitimately invalidate an edge). This
+  // derived set is the authoring invariant future routing/publish code can rely
+  // on — no persisted field, no migration.
+  const navBlockedEdgeIds = useMemo(() => {
+    const blocked = new Set<string>();
+    for (const e of indoorEdges) {
+      if (navEdgeIsBlockedExtended(e, indoorNodes, walls, doors, floor.furniture)) blocked.add(e.id);
+    }
+    return blocked;
+  }, [indoorEdges, indoorNodes, walls, doors, floor.furniture]);
+  const totalIssues = floorIssues.length + navBlockedEdgeIds.size;
+  const hasBlockingIssues = blockingIssues.length > 0 || navBlockedEdgeIds.size > 0;
+  const hasAnyIssues = totalIssues > 0;
+
+  // B5 Phase 3: cross-floor transition status for the CURRENT floor's nodes —
+  // connected floor labels (authoring feedback) + sharedId match state. Fully
+  // derived from the campus transition edges; nothing here is persisted twice.
+  const buildingFloors = useMemo(
+    () => (campus.buildings ?? []).find((b) => b.id === buildingId)?.floors ?? [],
+    [buildingId, campus.buildings]
+  );
+  const activeFloorIndex = buildingFloors.findIndex((f) => f.id === floorId);
+  const previousFloor = activeFloorIndex > 0 ? buildingFloors[activeFloorIndex - 1] : null;
+  const nextFloor = activeFloorIndex >= 0 && activeFloorIndex < buildingFloors.length - 1
+    ? buildingFloors[activeFloorIndex + 1]
+    : null;
+  const filteredFloorOptions = useMemo(() => {
+    const query = floorSelectorSearch.trim().toLowerCase();
+    if (!query) return buildingFloors;
+    return buildingFloors.filter((f) => `${f.label} ${f.number}`.toLowerCase().includes(query));
+  }, [buildingFloors, floorSelectorSearch]);
+
+  useEffect(() => {
+    if (!floorSelectorOpen) return;
+    const option = floorSelectorPopoverRef.current?.querySelector<HTMLElement>("[aria-selected='true']");
+    if (typeof option?.scrollIntoView === "function") option.scrollIntoView({ block: "nearest" });
+  }, [floorId, filteredFloorOptions, floorSelectorOpen]);
+
+  const circulationGroups = useMemo(() => {
+    const labels = new Map(buildingFloors.map((f) => [f.id, f.label]));
+    const stored = building?.circulationGroups ?? [];
+    const makeGroups = (kind: "stair" | "elevator") => {
+      const storedById = new Map(stored.filter((g) => g.kind === kind).map((g) => [g.id, g.name]));
+      const usage = new Map<string, { id: string; label: string; objectId: string; objectLabel: string }[]>();
+      for (const f of buildingFloors) {
+        const items = kind === "stair" ? (f.stairs ?? []) : (f.elevators ?? []);
+        for (const item of items) {
+          if (!item.sharedId) continue;
+          const list = usage.get(item.sharedId) ?? [];
+          list.push({ id: f.id, label: labels.get(f.id) ?? f.label, objectId: item.id, objectLabel: item.label });
+          usage.set(item.sharedId, list);
+        }
+      }
+      let fallbackIndex = 1;
+      return [...new Set([...storedById.keys(), ...usage.keys()])].map((id) => {
+        const usedFloors = usage.get(id) ?? [];
+        const objectLabel = usedFloors.find((u) => u.objectLabel && !/^stairs?$/i.test(u.objectLabel) && !/^elevator$/i.test(u.objectLabel))?.objectLabel;
+        return {
+          id,
+          name: storedById.get(id) ?? objectLabel ?? `${kind === "stair" ? "Stair Connection" : "Elevator Shaft"} ${fallbackIndex++}`,
+          usedFloors,
+        };
+      }).sort((a, b) => a.name.localeCompare(b.name));
+    };
+    return { stairs: makeGroups("stair"), elevators: makeGroups("elevator") };
+  }, [building?.circulationGroups, buildingFloors]);
+  const reconciledTransitionEdges = useMemo(() => reconcileCrossFloorTransitions(
+    campus.navNodes,
+    campus.navEdges,
+    buildingFloors,
+    buildingId
+  ), [buildingFloors, buildingId, campus.navEdges, campus.navNodes]);
+  const navNodeTransitionStatus = useMemo(() => {
+    const status = new Map<string, { floors: { id: string; label: string }[]; state: "linked" | "no-shared-id" | "no-match" }>();
+    const keyByNode = new Map<string, string>();
+    for (const node of campus.navNodes ?? []) {
+      const info = findCrossFloorOwnerInfo(node, buildingFloors, buildingId);
+      if (info) keyByNode.set(node.id, `${info.kind}:${info.sharedId}`);
+    }
+    const keyCounts = new Map<string, number>();
+    for (const key of keyByNode.values()) keyCounts.set(key, (keyCounts.get(key) ?? 0) + 1);
+    const labels = new Map(buildingFloors.map((f) => [f.id, f.label]));
+    for (const node of indoorNodes) {
+      const key = keyByNode.get(node.id);
+      if (!key) {
+        status.set(node.id, { floors: [], state: "no-shared-id" });
+        continue;
+      }
+      const floors: { id: string; label: string }[] = [];
+      for (const e of reconciledTransitionEdges) {
+        if (e.type !== CROSS_FLOOR_EDGE_TYPE) continue;
+        const otherId = e.startNodeId === node.id ? e.endNodeId : e.endNodeId === node.id ? e.startNodeId : null;
+        if (!otherId) continue;
+        const other = (campus.navNodes ?? []).find((n) => n.id === otherId);
+        if (!other) continue;
+        const otherFloorId = other.floorId ?? "";
+        const label = labels.get(otherFloorId) ?? "Other floor";
+        if (!floors.some((f) => f.id === otherFloorId)) floors.push({ id: otherFloorId, label });
+      }
+      status.set(node.id, { floors, state: (keyCounts.get(key) ?? 0) > 1 ? "linked" : "no-match" });
+    }
+    return status;
+  }, [buildingFloors, buildingId, campus.navNodes, indoorNodes, reconciledTransitionEdges]);
+
+  const navSelectedElevatorServedFloors = useMemo(() => {
+    if (navSelected?.type !== "node") return [];
+    const node = (campus.navNodes ?? []).find((n) => n.id === navSelected.id);
+    if (!node?.elevatorId) return [];
+    const currentFloor = buildingFloors.find((f) => f.id === node.floorId);
+    const owner = currentFloor?.elevators?.find((e) => e.id === node.elevatorId);
+    if (!owner?.sharedId) return [];
+    const servedSet = owner.floors?.length ? new Set(owner.floors) : null;
+    return buildingFloors
+      .filter((f) => !servedSet || servedSet.has(f.number))
+      .map((f) => {
+        const floorOwner = (f.elevators ?? []).find((e) => e.sharedId === owner.sharedId);
+        return {
+          id: f.id,
+          label: f.label,
+          linked: !!floorOwner && (campus.navNodes ?? []).some((n) => n.floorId === f.id && n.elevatorId === floorOwner.id),
+          isLocal: f.id === node.floorId,
+        };
+      });
+  }, [buildingFloors, campus.navNodes, navSelected]);
+
+  const circulationNavStatus = useMemo(() => {
+    if (!selected || (selected.type !== "stairs" && selected.type !== "elevator" && selected.type !== "ramp")) return undefined;
+    const kind = selected.type;
+    const localNode = indoorNodes.find((n) =>
+      kind === "stairs" ? n.stairId === selected.id
+      : kind === "elevator" ? n.elevatorId === selected.id
+      : n.rampId === selected.id
+    );
+    const localOwner = kind === "stairs" ? stairs.find((s) => s.id === selected.id)
+      : kind === "elevator" ? elevators.find((e) => e.id === selected.id)
+      : ramps.find((r) => r.id === selected.id);
+    const sharedId = localOwner?.sharedId;
+    const servedFloorSet = kind === "elevator" && localOwner && "floors" in localOwner && localOwner.floors?.length
+      ? new Set(localOwner.floors)
+      : null;
+    const localFloorOrder = buildingFloors.findIndex((f) => f.id === floorId);
+    const matching = sharedId && kind !== "ramp"
+      ? buildingFloors.flatMap((f) => {
+          if (f.id === floorId) return [];
+          if (kind === "stairs" && Math.abs(buildingFloors.findIndex((candidate) => candidate.id === f.id) - localFloorOrder) !== 1) return [];
+          if (servedFloorSet && !servedFloorSet.has(f.number)) return [];
+          const owner = kind === "stairs"
+            ? (f.stairs ?? []).find((s) => s.sharedId === sharedId)
+            : (f.elevators ?? []).find((e) => e.sharedId === sharedId);
+          return owner ? [{ floor: f, ownerId: owner.id }] : [];
+        })
+      : [];
+    const servedFloors = kind === "elevator"
+      ? buildingFloors
+          .filter((f) => !servedFloorSet || servedFloorSet.has(f.number))
+          .map((f) => {
+            const owner = sharedId ? (f.elevators ?? []).find((e) => e.sharedId === sharedId) : undefined;
+            return {
+              id: f.id,
+              label: f.label,
+              hasPhysical: !!owner,
+              linked: !!owner && (campus.navNodes ?? []).some((n) => n.floorId === f.id && n.elevatorId === owner.id),
+              isLocal: f.id === floorId,
+            };
+          })
+      : [];
+    const connectedFloors = localNode
+      ? (navNodeTransitionStatus.get(localNode.id)?.floors ?? [])
+      : [];
+    const connected = new Set(connectedFloors.map((f) => f.id));
+    const waitingFloors = matching
+      .filter(({ floor, ownerId }) => {
+        if (connected.has(floor.id)) return false;
+        return !(campus.navNodes ?? []).some((n) =>
+          n.floorId === floor.id && (
+            kind === "stairs" ? n.stairId === ownerId
+            : n.elevatorId === ownerId
+          )
+        );
+      })
+      .map(({ floor }) => ({ id: floor.id, label: floor.label }));
+    const owner = kind === "stairs" ? stairs.find((s) => s.id === selected.id)
+      : kind === "elevator" ? elevators.find((e) => e.id === selected.id)
+      : ramps.find((r) => r.id === selected.id);
+    const groupLabel = owner?.sharedId
+      ? (kind === "stairs" ? circulationGroups.stairs : circulationGroups.elevators).find((g) => g.id === owner.sharedId)?.name
+      : undefined;
+    const connectedLabel = connectedFloors.length > 0 ? `Connected to ${connectedFloors.map((f) => f.label).join(", ")}` : "Linked to the walking network";
+    return {
+      kind,
+      linked: !!localNode,
+      connectedFloors: kind === "ramp" ? [] : connectedFloors,
+      waitingFloors: kind === "ramp" ? [] : waitingFloors,
+      servedFloors,
+      // B5 Phase 6.8: shared-card content (Design + Navigation parity).
+      title: kind === "stairs" ? "Stair Connection" : kind === "elevator" ? "Elevator Shaft" : "Ramp",
+      detail: kind === "ramp"
+        ? (localNode ? "Accessible path anchor for local walking routes." : "Add this ramp as an accessible path anchor.")
+        : kind === "stairs"
+          ? (localNode ? connectedLabel : "Add this stair as a local stair navigation anchor.")
+          : (localNode ? "Linked to the walking network" : "Add this elevator as a local elevator navigation anchor."),
+      groupLabel: groupLabel ?? owner?.label,
+      connectionCount: localNode
+        ? indoorEdges.filter((e) => e.startNodeId === localNode.id || e.endNodeId === localNode.id).length
+        : undefined,
+    };
+  }, [buildingFloors, campus.navNodes, circulationGroups.elevators, circulationGroups.stairs, elevators, floorId, indoorEdges, indoorNodes, navNodeTransitionStatus, ramps, selected, stairs]);
 
   const selectIssue = useCallback((issue: FloorIssue) => {
     if (issue.selection) {
@@ -2030,7 +3267,1176 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
 
   // ── SVG Mouse handlers ──
 
+  // ── B5 Phase 2: indoor Navigation authoring ────────────────────────────────
+  // Graph-only pointer handling when the editor is in Navigation mode. Rooms,
+  // walls, doors, furniture and circulation stay visible as CONTEXT only — the
+  // nav branch below never mutates them.
+  const navPointFromEvent = (e: React.MouseEvent): { x: number; y: number } => {
+    const pt = getPoint(e as any, FP_W, FP_H);
+    return { x: Math.max(0, Math.min(FP_W, Math.round(pt.x))), y: Math.max(0, Math.min(FP_H, Math.round(pt.y))) };
+  };
+
+  // Authoring target under the pointer (rooms, doors, stairs/elevator/ramp) —
+  // the indoor equivalent of the outdoor building-entrance target affordance.
+  const resolveNavTargetAt = (pt: { x: number; y: number }): {
+    kind: "room" | "door" | "stairs" | "elevator" | "ramp"; id: string; x: number; y: number;
+  } | null => {
+    const door = findDoorAtPoint(doors, pt);
+    if (door) return { kind: "door", id: door.id, x: Math.round(door.x), y: Math.round(door.y) };
+    const circ = findCirculationAtPoint(stairs, elevators, ramps, pt);
+    if (circ) {
+      const owner = circ.kind === "stairs" ? stairs.find((s) => s.id === circ.id)
+        : circ.kind === "elevator" ? elevators.find((el) => el.id === circ.id)
+        : ramps.find((r) => r.id === circ.id);
+      if (owner) {
+        return { kind: circ.kind, id: circ.id, x: Math.round(owner.x + owner.width / 2), y: Math.round(owner.y + owner.height / 2) };
+      }
+    }
+    const room = findRoomAtPoint(rooms, pt);
+    if (room) return { kind: "room", id: room.id, x: Math.round(room.x + room.w / 2), y: Math.round(room.y + room.h / 2) };
+    return null;
+  };
+
+  const linkedNodeForPhysical = useCallback((
+    kind: "room" | "door" | "stairs" | "elevator" | "ramp",
+    id: string,
+    nodes: NavigationNode[] = indoorNodes
+  ) => nodes.find((node) =>
+    kind === "room" ? node.roomId === id
+    : kind === "door" ? node.doorId === id
+    : kind === "stairs" ? node.stairId === id
+    : kind === "elevator" ? node.elevatorId === id
+    : node.rampId === id
+  ), [indoorNodes]);
+
+  const linkedNodesForPhysical = useCallback((
+    kind: "room" | "door" | "stairs" | "elevator" | "ramp",
+    id: string,
+    nodes: NavigationNode[] = indoorNodes
+  ) => nodes.filter((node) =>
+    kind === "room" ? node.roomId === id
+    : kind === "door" ? node.doorId === id
+    : kind === "stairs" ? node.stairId === id
+    : kind === "elevator" ? node.elevatorId === id
+    : node.rampId === id
+  ), [indoorNodes]);
+
+  const physicalNavPoint = useCallback((kind: "room" | "door" | "stairs" | "elevator" | "ramp", id: string) => {
+    if (kind === "room") {
+      const room = rooms.find((r) => r.id === id);
+      if (!room) return null;
+      return { x: Math.round(room.x + room.w / 2), y: Math.round(room.y + room.h / 2) };
+    }
+    if (kind === "door") {
+      const door = doors.find((d) => d.id === id);
+      return door ? { x: Math.round(door.x), y: Math.round(door.y) } : null;
+    }
+    const owner = kind === "stairs" ? stairs.find((s) => s.id === id)
+      : kind === "elevator" ? elevators.find((el) => el.id === id)
+      : ramps.find((r) => r.id === id);
+    return owner ? { x: Math.round(owner.x + owner.width / 2), y: Math.round(owner.y + owner.height / 2) } : null;
+  }, [doors, elevators, ramps, rooms, stairs]);
+
+  const physicalNavLabel = useCallback((kind: "room" | "door" | "stairs" | "elevator" | "ramp", id: string) => {
+    if (kind === "room") return rooms.find((r) => r.id === id)?.name ?? "Room";
+    if (kind === "door") return doors.find((d) => d.id === id)?.label ?? "Door";
+    if (kind === "stairs") return stairs.find((s) => s.id === id)?.label ?? "Stairs";
+    if (kind === "elevator") return elevators.find((el) => el.id === id)?.label ?? "Elevator";
+    return ramps.find((r) => r.id === id)?.label ?? "Ramp";
+  }, [doors, elevators, ramps, rooms, stairs]);
+
+  const selectDuplicateNavNode = useCallback((node: NavigationNode) => {
+    setNavSelected({ type: "node", id: node.id });
+    setNavMultiSelected([]);
+    setShowProperties(true);
+    setNavDuplicateNodeId(node.id);
+    window.setTimeout(() => setNavDuplicateNodeId((current) => (current === node.id ? null : current)), 1200);
+    toast.info("Navigation point already exists here.", "Delete the existing point first to replace it.");
+  }, [toast]);
+
+  const deleteNavSelection = useCallback((target?: { type: "node" | "edge"; id: string }) => {
+    // B5 Phase 2.3: the Remove tool targets ONLY the clicked element (consistent
+    // with Floor Design erase) — a targeted remove must never silently delete the
+    // rest of the current multi-selection. The Delete key (no target) still
+    // removes the full multi-selection.
+    let nodeIds: string[] = [];
+    let edgeIds: string[] = [];
+    if (target) {
+      if (target.type === "node") nodeIds = [target.id];
+      else edgeIds = [target.id];
+    } else {
+      const selNode = navSelected?.type === "node" ? navSelected.id : null;
+      const selEdge = navSelected?.type === "edge" ? navSelected.id : null;
+      if (selEdge) edgeIds = [selEdge];
+      if (selNode) nodeIds = navMultiSelected.length > 0 ? [...new Set([...navMultiSelected, selNode])] : [selNode];
+      else if (navMultiSelected.length > 0) nodeIds = navMultiSelected;
+    }
+    if (nodeIds.length === 0 && edgeIds.length === 0) {
+      toast.info("Nothing selected", "Select a waypoint or path to remove it.");
+      return;
+    }
+    const nodeIdSet = new Set(nodeIds);
+    const removedEdges = indoorEdges.filter((edge) =>
+      nodeIdSet.has(edge.startNodeId) || nodeIdSet.has(edge.endNodeId) || edgeIds.includes(edge.id)
+    );
+    const nextNodes = indoorNodes.filter((n) => !nodeIdSet.has(n.id));
+    const nextEdges = indoorEdges.filter((edge) => !removedEdges.includes(edge));
+    commitNavGraph(nextNodes, nextEdges);
+    // B5 Phase 2.3: a targeted Remove (Remove tool on a group member) prunes only
+    // that element from the multi-selection — the remaining members stay selected
+    // so the group isn't unexpectedly destroyed. The Delete key (no target)
+    // clears the whole selection as before.
+    if (target?.type === "node") {
+      const remaining = navMultiSelected.filter((id) => id !== target.id);
+      if (remaining.length > 0) {
+        setNavMultiSelected(remaining);
+        setNavSelected({ type: "node", id: remaining[remaining.length - 1] });
+        setShowProperties(true);
+      } else {
+        setNavSelected(null);
+        setNavMultiSelected([]);
+      }
+    } else {
+      setNavSelected(null);
+      setNavMultiSelected([]);
+    }
+    toast.success(
+      nodeIds.length > 0 && removedEdges.length > 0 ? "Waypoints removed"
+      : nodeIds.length > 0 ? "Waypoint removed"
+      : "Path removed",
+      removedEdges.length > 0
+        ? `Removed ${nodeIds.length} waypoint${nodeIds.length !== 1 ? "s" : ""} and ${removedEdges.length} path${removedEdges.length !== 1 ? "s" : ""}.`
+        : "The selected waypoint was removed."
+    );
+  }, [commitNavGraph, indoorEdges, indoorNodes, navMultiSelected, navSelected, toast]);
+
+  const navEraseAt = (pt: { x: number; y: number }) => {
+    const hitNode = findNavNodeAtPoint(indoorNodes, pt);
+    if (hitNode) { deleteNavSelection({ type: "node", id: hitNode.id }); return; }
+    const hitEdge = indoorEdges.find((edge) => {
+      const a = indoorNodes.find((n) => n.id === edge.startNodeId);
+      const b = indoorNodes.find((n) => n.id === edge.endNodeId);
+      if (!a || !b) return false;
+      return distToSegment(pt, { x: a.x, y: a.y }, { x: b.x, y: b.y }) <= 10;
+    });
+    if (hitEdge) { deleteNavSelection({ type: "edge", id: hitEdge.id }); return; }
+    toast.info("Nothing to remove", "Click a waypoint or path to remove it.");
+  };
+
+  const handleNavNodeDown = (e: React.MouseEvent, node: NavigationNode) => {
+    e.stopPropagation();
+    if (isSpacePressed()) { startPan(e); return; }
+    const pt = navPointFromEvent(e);
+    if (navTool === "erase") { deleteNavSelection({ type: "node", id: node.id }); return; }
+    if (navTool === "waypoint" || navTool === "destination") {
+      selectDuplicateNavNode(node);
+      setNavTool("select");
+      return;
+      // Waypoint / Destination / Link Location on an existing node just selects
+      // it (no duplicate) — the canonical node is reused.
+    }
+    if (navTool === "link") {
+      setNavSelected({ type: "node", id: node.id });
+      setNavMultiSelected([]);
+      setShowProperties(true);
+      setNavTool("select");
+      toast.info("Already added to navigation", "This location already has a navigation point.");
+      return;
+    }
+    if (navTool === "connect") { navConnectAtPoint(pt); return; }
+    const multiBase = navMultiSelected.length > 0 ? navMultiSelected
+      : navSelected?.type === "node" ? [navSelected.id] : [];
+    if (e.shiftKey) {
+      const next = multiBase.includes(node.id) ? multiBase.filter((id) => id !== node.id) : [...multiBase, node.id];
+      setNavMultiSelected(next);
+      setNavSelected({ type: "node", id: node.id });
+      setShowProperties(true);
+      return;
+    }
+    // B5 Phase 2.3: clicking a member of the CURRENT multi-selection PRESERVES
+    // the whole group (Figma/outdoor-editor style) — dragging it moves the full
+    // set and the multi-selection Properties stay open. Only clicking an
+    // UNRELATED node collapses to single-object editing.
+    const isMultiMember = multiBase.length > 1 && multiBase.includes(node.id);
+    if (isMultiMember) {
+      setNavSelected({ type: "node", id: node.id });
+      setShowProperties(true);
+    } else {
+      setNavSelected({ type: "node", id: node.id });
+      setNavMultiSelected([]);
+      setShowProperties(true);
+    }
+    // Linked nodes are derived geometry — never draggable.
+    if (linkedObjectRef(node)) return;
+    // Free waypoints move as a rigid group (linked nodes excluded from the move).
+    const dragBase = isMultiMember ? multiBase : [node.id];
+    const hadLinkedInMulti = dragBase.some((id) => {
+      const n = indoorNodes.find((x) => x.id === id);
+      return !!n && !!linkedObjectRef(n);
+    });
+    const ids = [...new Set([...dragBase.filter((id) => {
+      const n = indoorNodes.find((x) => x.id === id);
+      return n && !linkedObjectRef(n);
+    }), node.id])];
+    const origins = indoorNodes.filter((n) => ids.includes(n.id)).map((n) => ({ id: n.id, x: n.x, y: n.y }));
+    if (origins.length === 0) return;
+    // B5 Phase 2.2: predictable mixed rule — free nodes move, linked locations
+    // stay attached to their floor objects (one concise toast).
+    if (hadLinkedInMulti) {
+      toast.info("Linked locations stay put", "Linked locations remain attached to their floor objects.");
+    }
+    suppressHistoryRef.current = true;
+    gestureMoved.current = false;
+    // B5 correction: snapshot the INTERNAL edge bends (both endpoints moving)
+    // alongside the node origins for one rigid group translation.
+    const movingIds = new Set(ids);
+    const edgeOrigins = new Map<string, { x: number; y: number }[]>();
+    for (const ed of indoorEdges) {
+      if (movingIds.has(ed.startNodeId) && movingIds.has(ed.endNodeId)) {
+        edgeOrigins.set(ed.id, (ed.bendPoints ?? []).map((b) => ({ x: b.x, y: b.y })));
+      }
+    }
+    navDragRef.current = { ids, origins, edgeOrigins, sx: pt.x, sy: pt.y };
+  };
+
+  // ── B5 correction: empty-space drag surface inside the nav group outline ──
+  // Pointerdown anywhere in the group bounds' EMPTY interior starts the SAME
+  // rigid group drag as grabbing a member waypoint (identical snapshot + 1:1
+  // translation pipeline — only the pointerdown origin differs). Priority:
+  // bend handle > node > edge > physical object > empty group interior.
+  const handleNavGroupSurfaceDown = (e: React.MouseEvent) => {
+    if (navTool !== "select") return;
+    const pt = navPointFromEvent(e);
+    // A physical object (room/door/stair/elevator/ramp) under the pointer keeps
+    // its Navigation-mode selection behavior — the surface must never swallow it.
+    const physical = resolveNavTargetAt(pt);
+    if (physical) {
+      e.stopPropagation();
+      setNavPhysicalSelected({ type: physical.kind, id: physical.id });
+      setNavSelected(null);
+      setNavMultiSelected([]);
+      setShowProperties(true);
+      return;
+    }
+    const freeIds = navMultiSelected.filter((id) => {
+      const n = indoorNodes.find((x) => x.id === id);
+      return Boolean(n && !linkedObjectRef(n));
+    });
+    if (freeIds.length < 2) return;
+    e.stopPropagation();
+    e.preventDefault();
+    setNavSelected({ type: "node", id: freeIds[0] });
+    setShowProperties(true);
+    suppressHistoryRef.current = true;
+    gestureMoved.current = false;
+    const origins = indoorNodes.filter((n) => freeIds.includes(n.id)).map((n) => ({ id: n.id, x: n.x, y: n.y }));
+    const movingIds = new Set(freeIds);
+    const edgeOrigins = new Map<string, { x: number; y: number }[]>();
+    for (const ed of indoorEdges) {
+      if (movingIds.has(ed.startNodeId) && movingIds.has(ed.endNodeId)) {
+        edgeOrigins.set(ed.id, (ed.bendPoints ?? []).map((b) => ({ x: b.x, y: b.y })));
+      }
+    }
+    navDragRef.current = { ids: freeIds, origins, edgeOrigins, sx: pt.x, sy: pt.y };
+  };
+
+  const handleNavEdgeDown = (e: React.MouseEvent, edge: NavigationEdge) => {
+    // B5 Phase 6.7: Add Waypoint tool should not be intercepted by edge selection
+    // — let the click fall through to handleNavSvgDown for edge insertion
+    if (navTool === "waypoint" || navTool === "destination") return;
+    e.stopPropagation();
+    if (isSpacePressed()) { startPan(e); return; }
+    if (navTool === "erase") { deleteNavSelection({ type: "edge", id: edge.id }); return; }
+    if (navTool === "connect") return;
+    // B5 Phase 2.7: dragging a SEGMENT of the already-selected segmented path
+    // translates it perpendicular (draw.io-style); a plain click still selects.
+    const isSel = navSelected?.type === "edge" && navSelected.id === edge.id;
+    if (navTool === "select" && isSel && edge.bendPoints && edge.bendPoints.length > 0) {
+      const pt = navPointFromEvent(e);
+      const segPts = edgePolylinePoints(edge, indoorNodes);
+      if (segPts && segPts.length >= 2) {
+        let best = 0;
+        let bestD = Infinity;
+        for (let i = 0; i < segPts.length - 1; i++) {
+          const d = distanceToSegment(pt, segPts[i], segPts[i + 1]);
+          if (d < bestD) { bestD = d; best = i; }
+        }
+        const p0 = segPts[best];
+        const p1 = segPts[best + 1];
+        // Only axis-aligned segments are draggable (Straighten diagonals are not).
+        if (p0.x === p1.x || p0.y === p1.y) {
+          suppressHistoryRef.current = true;
+          gestureMoved.current = false;
+          navDragWallWarnedRef.current = false;
+          // B5 Phase 2.8: store the IMMUTABLE drag-start snapshot — geometry is
+          // always computed from this + the current delta, never compounded on
+          // already-modified live bends (the exaggerated-movement bug) and never
+          // appending corner bends per pointermove (the too-many-bends bug).
+          navSegDragRef.current = {
+            edgeId: edge.id,
+            segIndex: best,
+            ox: pt.x,
+            oy: pt.y,
+            origBends: [...(edge.bendPoints ?? [])],
+            origPts: segPts,
+            isHorizontal: p0.y === p1.y,
+          };
+          return;
+        }
+      }
+    }
+    setNavSelected({ type: "edge", id: edge.id });
+    setNavMultiSelected([]);
+    setShowProperties(true);
+    setNavSelectedBend(null);
+  };
+
+  // B5 Phase 2.6: hovering the SELECTED path's hit line remembers which segment
+  // the pointer is nearest — Add Bend then splits that exact segment.
+  const handleNavEdgeMove = (e: React.MouseEvent, edge: NavigationEdge) => {
+    if (navTool !== "select" || !(navSelected?.type === "edge" && navSelected.id === edge.id)) return;
+    const pt = navPointFromEvent(e);
+    const pts = edgePolylinePoints(edge, indoorNodes);
+    if (!pts || pts.length < 2) return;
+    let best = 0;
+    let bestD = Infinity;
+    for (let i = 0; i < pts.length - 1; i++) {
+      const d = distanceToSegment(pt, pts[i], pts[i + 1]);
+      if (d < bestD) { bestD = d; best = i; }
+    }
+    setNavSegmentHover({ edgeId: edge.id, index: best });
+  };
+
+  // B5 Phase 2.5: grab a bend handle on a segmented path — the path reshapes
+  // live during drag and commits ONE history action on mouse-up. B5 Phase 2.6:
+  // grabbing a bend also SELECTS that specific bend (Remove Bend / Delete then
+  // target it precisely) and opens the edge inspector.
+  const handleNavBendDown = (e: React.MouseEvent, edge: NavigationEdge, index: number) => {
+    e.stopPropagation();
+    if (isSpacePressed()) { startPan(e); return; }
+    if (navTool !== "select") return;
+    const pt = navPointFromEvent(e);
+    const orig = edge.bendPoints?.[index] ?? { x: pt.x, y: pt.y };
+    suppressHistoryRef.current = true;
+    gestureMoved.current = false;
+    navBendDragRef.current = { edgeId: edge.id, index, ox: orig.x, oy: orig.y };
+    setNavSelected({ type: "edge", id: edge.id });
+    setNavSelectedBend({ edgeId: edge.id, index });
+    setShowProperties(true);
+  };
+
+  const switchFloorEditorMode = useCallback((nextMode: FloorEditorMode) => {
+    if (nextMode === mode) return;
+    setMode(nextMode);
+    setNavConnectStart(null);
+    setNavPreview(null);
+    setNavConnectBends([]);
+    navConnectBendGroupsRef.current = [];
+    setNavTargetHover(null);
+    setNavDragPreview(null);
+    setNavDragBlocked(null);
+    setNavEraseHover(null);
+    setNavNodeHover(null);
+    setNavSelectedBend(null);
+    setNavSegmentHover(null);
+    setNavAlignGuides([]);
+    navDragWallWarnedRef.current = false;
+    navLibraryDragRef.current = null;
+    navBendDragRef.current = null;
+    navSegDragRef.current = null;
+    setRubberBand(null);
+    if (nextMode === "navigation") {
+      setNavTool("select");
+      setSelected(null);
+      setMultiSelected([]);
+      // B5 Phase 2.1: the Properties sidebar represents the CURRENT SELECTION —
+      // entering Navigation must never auto-open it just to show tutorial text.
+      setShowProperties(false);
+    } else {
+      setNavSelected(null);
+      setNavMultiSelected([]);
+      setTool("select");
+    }
+  }, [mode]);
+
+  const selectNavTool = useCallback((id: "select" | "pan" | "waypoint" | "destination" | "connect" | "link" | "erase") => {
+    if (id !== "connect") { setNavConnectStart(null); setNavPreview(null); setNavConnectBends([]); navConnectBendGroupsRef.current = []; }
+    setNavTool(id);
+    setNavEraseHover(null);
+    setNavNodeHover(null);
+    setNavAlignGuides([]);
+    if (id !== "select") setNavSelectedBend(null);
+    setNavSegmentHover(null);
+  }, []);
+
+  const commitNavEdgeBetween = useCallback((
+    startId: string,
+    endId: string,
+    nodes: NavigationNode[] = indoorNodes,
+    edges: NavigationEdge[] = indoorEdges,
+    pinnedBends: { x: number; y: number }[] = []
+  ): boolean => {
+    const clearConnect = () => {
+      setNavConnectStart(null);
+      setNavPreview(null);
+      setNavConnectBends([]);
+      navConnectBendGroupsRef.current = [];
+    };
+    if (startId === endId) {
+      toast.info("Cannot connect a waypoint to itself", "Pick a different destination.");
+      clearConnect();
+      return false;
+    }
+    const dup = edges.find((e) =>
+      (e.startNodeId === startId && e.endNodeId === endId) ||
+      (e.bidirectional !== false && e.startNodeId === endId && e.endNodeId === startId)
+    );
+    if (dup) {
+      toast.info("Those points are already connected", "Select the existing path to edit it.");
+      clearConnect();
+      return false;
+    }
+    const a = nodes.find((n) => n.id === startId);
+    const b = nodes.find((n) => n.id === endId);
+    if (!a || !b) return false;
+    // B5 Phase 2.5/2.7: indoor connectors stay ORTHOGONAL by default. Every
+    // pinned bend (Phase 2.7 empty-space clicks) becomes part of THIS one edge,
+    // and the final segment from the last pinned point (or the start) to the
+    // destination gets the same wall-safe auto-L the preview promised — so the
+    // committed shape is always exactly what was previewed.
+    const last = pinnedBends.length > 0 ? pinnedBends[pinnedBends.length - 1] : { x: a.x, y: a.y };
+    const tail = orthogonalBendsFor(last, { x: b.x, y: b.y }, walls, doors, { width: FP_W, height: FP_H });
+    const bends = [...pinnedBends, ...tail];
+    const polyline = bends.length > 0 ? [{ x: a.x, y: a.y }, ...bends, { x: b.x, y: b.y }] : null;
+    // Every segment of the final path is wall-validated (no automatic routing).
+    const blocked = polyline
+      ? edgePolylineCrossesWallWithoutDoor(polyline, walls, doors)
+      : edgeCrossesWallWithoutDoor({ x: a.x, y: a.y }, { x: b.x, y: b.y }, walls, doors);
+    // B5 Phase 2.9A: clicking an INVALID preview must NOT create the edge or
+    // add history — and the connection stays ACTIVE so the admin can reposition
+    // or pin a different bend. The red invalid preview keeps showing while the
+    // pointer is still on the blocked target, so the rejection is self-evident.
+    if (blocked) {
+      toast.warning("Paths must pass through a door opening", `The path crosses a wall at (${blocked.x}, ${blocked.y}).`);
+      return false;
+    }
+    const edge = createNavEdge({ id: genId("ne"), startNodeId: startId, endNodeId: endId, nodes, type: "hallway" });
+    if (bends.length > 0 && polyline) {
+      // B5 Phase 2.8: normalize the committed polyline (drop duplicate /
+      // collinear bends) so authored geometry stays clean.
+      const normalized = normalizeBendPoints(bends.map((bp) => ({ x: Math.round(bp.x), y: Math.round(bp.y) })));
+      edge.bendPoints = normalized;
+      // Distance/weight = TOTAL polyline length (start → bends → end).
+      edge.distance = navEdgePolylineDistance([polyline[0], ...normalized, polyline[polyline.length - 1]]);
+    }
+    commitNavGraph(nodes, [...edges, edge]);
+    setNavSelected({ type: "edge", id: edge.id });
+    setNavMultiSelected([]);
+    setShowProperties(true);
+    clearConnect();
+    toast.success("Connection created", `Waypoints connected (${edge.distance} units).`);
+    return true;
+  }, [commitNavGraph, doors, indoorEdges, indoorNodes, toast, walls]);
+
+  // ── B5 Phase 2.6: bend editing actions — ONE history action each ───────────
+
+  /** Insert a bend at the midpoint of the hovered segment (else the LONGEST
+   *  segment) so Add Bend never stacks a new handle on top of an existing bend. */
+  const addBendToEdge = useCallback((edgeId: string) => {
+    const edge = indoorEdges.find((e) => e.id === edgeId);
+    if (!edge) return;
+    const base = edgePolylinePoints(edge, indoorNodes);
+    if (!base || base.length < 2) return;
+    // B5 Phase 2.11: intended segment — the hovered segment, else the segment
+    // that FOLLOWS the selected bend, else the longest segment. Add Bend must
+    // visibly alter the path without requiring an invisible hover state.
+    let segIndex = navSegmentHover?.edgeId === edgeId ? navSegmentHover.index : -1;
+    if (segIndex < 0 || segIndex >= base.length - 1) {
+      if (navSelectedBend?.edgeId === edgeId) {
+        segIndex = Math.min(navSelectedBend.index + 1, base.length - 2);
+      }
+    }
+    if (segIndex < 0 || segIndex >= base.length - 1) {
+      let best = 0;
+      let bestLen = -1;
+      for (let i = 0; i < base.length - 1; i++) {
+        const len = Math.hypot(base[i + 1].x - base[i].x, base[i + 1].y - base[i].y);
+        if (len > bestLen) { bestLen = len; best = i; }
+      }
+      segIndex = best;
+    }
+    const p = base[segIndex];
+    const q = base[segIndex + 1];
+    const segLen = Math.hypot(q.x - p.x, q.y - p.y);
+    if (segLen < 2) return; // degenerate — nothing useful to split
+    const mx = Math.round((p.x + q.x) / 2);
+    const my = Math.round((p.y + q.y) / 2);
+    // B5 Phase 2.11: a plain collinear midpoint is normalized away instantly —
+    // split with a USEFUL orthogonal dog-leg (U-shape corner pair) so the new
+    // geometry survives and the segment can actually be reshaped. Modest
+    // deterministic offset; legacy diagonal segments get a V midpoint instead.
+    const offset = Math.max(10, Math.min(24, Math.round(segLen / 4)));
+    const horizontal = p.y === q.y;
+    const vertical = p.x === q.x;
+    const candidates: NavPoint[][] = horizontal
+      ? [
+          [{ x: mx, y: my }, { x: mx, y: my + offset }, { x: q.x, y: my + offset }],
+          [{ x: mx, y: my }, { x: mx, y: my - offset }, { x: q.x, y: my - offset }],
+        ]
+      : vertical
+        ? [
+            [{ x: mx, y: my }, { x: mx + offset, y: my }, { x: mx + offset, y: q.y }],
+            [{ x: mx, y: my }, { x: mx - offset, y: my }, { x: mx - offset, y: q.y }],
+          ]
+        : (() => {
+            const perp = { x: -(q.y - p.y), y: q.x - p.x };
+            const plen = Math.hypot(perp.x, perp.y) || 1;
+            return [
+              [{ x: Math.round(mx + (perp.x / plen) * offset), y: Math.round(my + (perp.y / plen) * offset) }],
+              [{ x: Math.round(mx - (perp.x / plen) * offset), y: Math.round(my - (perp.y / plen) * offset) }],
+            ];
+          })();
+    // B5 Phase 2.10/2.11: pick the FIRST wall-clear side — the FULL proposed
+    // polyline runs through the strict wall check and every new bend is point-
+    // validated (and kept inside the floor canvas). Wall validity wins over
+    // alignment; when no side is clear the action is rejected with feedback.
+    let chosen: NavPoint[] | null = null;
+    for (const cand of candidates) {
+      const nextPts = [...base.slice(0, segIndex + 1), ...cand, ...base.slice(segIndex + 1)];
+      const blocked = edgePolylineCrossesWallWithoutDoor(nextPts, walls, doors) !== null
+        || cand.some((bp) => pointInsideWallObstacle(bp, walls, doors) !== null)
+        || cand.some((bp) => bp.x < 0 || bp.y < 0 || bp.x > FP_W || bp.y > FP_H);
+      if (!blocked) { chosen = cand; break; }
+    }
+    if (!chosen) {
+      toast.warning("Path blocked by wall", "No clear side is available for the new bend — move the geometry manually.");
+      return;
+    }
+    const newBends = normalizeBendPoints([...base.slice(1, segIndex + 1), ...chosen, ...base.slice(segIndex + 1, -1)]);
+    const nextPts = [base[0], ...newBends, base[base.length - 1]];
+    commitNavGraph(
+      indoorNodes,
+      indoorEdges.map((e) => e.id === edgeId
+        ? { ...e, bendPoints: newBends, distance: navEdgePolylineDistance(nextPts) }
+        : e)
+    );
+    // The bend set changed — a previously selected bend index may now point at
+    // a different bend, so clear the selection rather than stale-target it.
+    setNavSelectedBend((s) => (s?.edgeId === edgeId ? null : s));
+  }, [commitNavGraph, doors, indoorEdges, indoorNodes, navSegmentHover, navSelectedBend, toast, walls]);
+
+  /** Remove a specific bend (defaults to the selected one, else the last).
+   *  Neighboring segments reconnect and the distance recomputes. */
+  const removeBendFromEdge = useCallback((edgeId: string, forcedIndex?: number) => {
+    const edge = indoorEdges.find((e) => e.id === edgeId);
+    if (!edge || !edge.bendPoints || edge.bendPoints.length === 0) return;
+    const idx = forcedIndex ?? (navSelectedBend?.edgeId === edgeId ? navSelectedBend.index : edge.bendPoints.length - 1);
+    if (idx < 0 || idx >= edge.bendPoints.length) return;
+    const nextBends = edge.bendPoints.filter((_, i) => i !== idx);
+    const pts = edgePolylinePoints({ ...edge, bendPoints: nextBends.length > 0 ? nextBends : undefined }, indoorNodes);
+    commitNavGraph(
+      indoorNodes,
+      indoorEdges.map((e) => e.id === edgeId
+        ? { ...e, bendPoints: nextBends.length > 0 ? nextBends : undefined, distance: pts ? navEdgePolylineDistance(pts) : e.distance }
+        : e)
+    );
+    setNavSelectedBend((s) => (s?.edgeId === edgeId ? null : s));
+  }, [commitNavGraph, indoorEdges, indoorNodes, navSelectedBend]);
+
+  /** Straighten removes ALL intermediate bends — but never silently creates a
+   *  wall-crossing path: the direct A→B line is validated first. */
+  const straightenEdge = useCallback((edgeId: string) => {
+    const edge = indoorEdges.find((e) => e.id === edgeId);
+    if (!edge) return;
+    const base = edgePolylinePoints(edge, indoorNodes);
+    if (!base || base.length < 2) return;
+    const a = base[0];
+    const b = base[base.length - 1];
+    if (edgePolylineCrossesWallWithoutDoor([a, b], walls, doors)) {
+      toast.warning("Can't straighten", "The direct path crosses a wall without a door opening — keep a bend or add a door.");
+      return;
+    }
+    commitNavGraph(
+      indoorNodes,
+      indoorEdges.map((e) => e.id === edgeId
+        ? { ...e, bendPoints: undefined, distance: Math.round(Math.hypot(b.x - a.x, b.y - a.y)) }
+        : e)
+    );
+    setNavSelectedBend((s) => (s?.edgeId === edgeId ? null : s));
+  }, [commitNavGraph, doors, indoorEdges, indoorNodes, toast, walls]);
+
+  const navWaypointAt = useCallback((pt: { x: number; y: number }) => {
+    // 1. Existing node → select it (or use as connect target).
+    const hit = findNavNodeAtPoint(indoorNodes, pt);
+    if (hit) return { kind: "node" as const, node: hit };
+    // 2. Door target → create/reuse its canonical door node.
+    const door = findDoorAtPoint(doors, pt);
+    if (door) {
+      const existing = indoorNodes.find((n) => n.doorId === door.id);
+      if (existing) return { kind: "node" as const, node: existing };
+      const node = createIndoorNavNode({
+        id: genId("nn"), x: door.x, y: door.y, buildingId, floorId, campusId: campus.id,
+        name: door.label ?? "Door", type: "hallway", doorId: door.id,
+      });
+      commitNavGraph([...indoorNodes, node], indoorEdges);
+      setNavSelected({ type: "node", id: node.id });
+      setNavMultiSelected([]);
+      return { kind: "node" as const, node };
+    }
+    // 3. Room target → create/reuse its canonical room destination node.
+    const room = findRoomAtPoint(rooms, pt);
+    if (room) {
+      const hasDoor = doors.some((d) => {
+        const wall = walls.find((w) => w.id === d.wallId);
+        return !!wall && (wall.startAnchor?.roomId === room.id || wall.endAnchor?.roomId === room.id);
+      });
+      if (!hasDoor) {
+        toast.info("Add a door before connecting this room to the walking network", "Room destinations connect through their doorway.");
+      }
+      const existing = indoorNodes.find((n) => n.roomId === room.id);
+      if (existing) return { kind: "node" as const, node: existing };
+      // B5 Phase 2.4: the room-linked node's canonical position is the routing
+      // anchor (deterministic offset above the center) so the nav cue and edge
+      // endpoints never land on the room's centered name label.
+      const anchor = roomLinkedCuePosition(room);
+      const node = createIndoorNavNode({
+        id: genId("nn"), x: anchor.x, y: anchor.y, buildingId, floorId, campusId: campus.id,
+        name: room.name, type: "room_access", roomId: room.id,
+      });
+      commitNavGraph([...indoorNodes, node], indoorEdges);
+      setNavSelected({ type: "node", id: node.id });
+      setNavMultiSelected([]);
+      return { kind: "node" as const, node };
+    }
+    // 4. Stairs / elevator / ramp targets.
+    const circ = findCirculationAtPoint(stairs, elevators, ramps, pt);
+    if (circ) {
+      const existing = indoorNodes.find((n) =>
+        circ.kind === "stairs" ? n.stairId === circ.id
+        : circ.kind === "elevator" ? n.elevatorId === circ.id
+        : n.rampId === circ.id
+      );
+      if (existing) return { kind: "node" as const, node: existing };
+      const owner = circ.kind === "stairs" ? stairs.find((s) => s.id === circ.id)
+        : circ.kind === "elevator" ? elevators.find((el) => el.id === circ.id)
+        : ramps.find((r) => r.id === circ.id);
+      if (!owner) return { kind: "free" as const, x: pt.x, y: pt.y };
+      // B5 Phase 2.5: the ramp-linked node uses a deterministic interior anchor
+      // B5 Phase 2.6: every circulation LOGICAL anchor is the object center —
+      // route edges terminate there. The visual ramp badge may offset
+      // (rampLinkedCuePosition) so it never covers the centered accessibility
+      // icon, but the routing node coordinate stays the transformed center.
+      const cx = Math.round(owner.x + owner.width / 2);
+      const cy = Math.round(owner.y + owner.height / 2);
+      const type = circ.kind === "stairs" ? "stair" : circ.kind === "elevator" ? "elevator" : "ramp";
+      const node = createIndoorNavNode({
+        id: genId("nn"), x: cx, y: cy, buildingId, floorId, campusId: campus.id,
+        name: circ.kind === "stairs" ? (owner as FloorStairs).label ?? "Stairs" : circ.kind === "elevator" ? (owner as FloorElevatorItem).label ?? "Elevator" : (owner as FloorRamp).label ?? "Ramp",
+        type,
+        stairId: circ.kind === "stairs" ? circ.id : undefined,
+        elevatorId: circ.kind === "elevator" ? circ.id : undefined,
+        rampId: circ.kind === "ramp" ? circ.id : undefined,
+      });
+      commitNavGraph([...indoorNodes, node], indoorEdges);
+      setNavSelected({ type: "node", id: node.id });
+      setNavMultiSelected([]);
+      return { kind: "node" as const, node };
+    }
+    // 5. Free outdoor-style indoor waypoint.
+    return { kind: "free" as const, x: pt.x, y: pt.y };
+  }, [buildingId, campus.id, commitNavGraph, doors, elevators, floorId, indoorEdges, indoorNodes, ramps, rooms, stairs, toast, walls]);
+
+  const ensureLinkedNavigationNode = useCallback((kind: "room" | "door" | "stairs" | "elevator" | "ramp", id: string) => {
+    const existing = linkedNodeForPhysical(kind, id);
+    if (existing) return { node: existing, created: false };
+    const pt = physicalNavPoint(kind, id);
+    if (!pt) return null;
+    const result = navWaypointAt(pt);
+    if (result.kind !== "node") return null;
+    return { node: result.node, created: true };
+  }, [linkedNodeForPhysical, navWaypointAt, physicalNavPoint]);
+
+  const addPhysicalToNavigation = useCallback((type: "room" | "door" | "stairs" | "elevator" | "ramp", id: string) => {
+    const result = ensureLinkedNavigationNode(type, id);
+    if (!result) return;
+    // B5 Phase 6.10: when Add is invoked from the Navigation-mode physical-object
+    // panel, keep that panel open — the shared card flips to Linked in place.
+    // (navWaypointAt internally selects the freshly created node, so we must
+    // re-assert the physical selection here to stay on the physical panel.)
+    if (navMode && navPhysicalSelected) {
+      setNavSelected(null);
+      setNavMultiSelected([]);
+      setNavPhysicalSelected({ type, id });
+    } else {
+      setNavSelected({ type: "node", id: result.node.id });
+      setNavMultiSelected([]);
+    }
+    if (result.created) {
+      toast.success("Added to navigation", `${physicalNavLabel(type, id)} is now linked to the walking network.`);
+    } else {
+      toast.info("Already added to navigation", `${physicalNavLabel(type, id)} is already linked.`);
+    }
+  }, [ensureLinkedNavigationNode, navMode, navPhysicalSelected, physicalNavLabel, toast]);
+
+  const viewPhysicalInNavigation = useCallback((type: "room" | "door" | "stairs" | "elevator" | "ramp", id: string) => {
+    const node = linkedNodeForPhysical(type, id);
+    if (!node) return;
+    switchFloorEditorMode("navigation");
+    setNavTool("select");
+    setNavSelected({ type: "node", id: node.id });
+    setNavMultiSelected([]);
+    setShowProperties(true);
+    zoomToFit(Math.max(0, node.x - 40), Math.max(0, node.y - 40), 80, 80, 48);
+  }, [linkedNodeForPhysical, switchFloorEditorMode, zoomToFit]);
+
+  const removePhysicalFromNavigation = useCallback((type: "room" | "door" | "stairs" | "elevator" | "ramp", id: string) => {
+    const nodes = linkedNodesForPhysical(type, id);
+    if (nodes.length === 0) return;
+    const nodeIds = new Set(nodes.map((node) => node.id));
+    const nextNodes = indoorNodes.filter((n) => !nodeIds.has(n.id));
+    const nextEdges = indoorEdges.filter((edge) => !nodeIds.has(edge.startNodeId) && !nodeIds.has(edge.endNodeId));
+    commitNavGraph(nextNodes, nextEdges);
+    setNavSelected(null);
+    setNavMultiSelected([]);
+    toast.success("Removed from navigation", `${physicalNavLabel(type, id)} remains on the floor plan.`);
+  }, [commitNavGraph, indoorEdges, indoorNodes, linkedNodesForPhysical, physicalNavLabel, toast]);
+
+  const physicalNavStatus = useMemo(() => {
+    if (!selected) return undefined;
+    if (selected.type !== "room" && selected.type !== "door" && selected.type !== "stairs" && selected.type !== "elevator" && selected.type !== "ramp") {
+      return undefined;
+    }
+    const linkedNode = linkedNodeForPhysical(selected.type, selected.id);
+    const linked = !!linkedNode;
+    // B5 Phase 6.8: connection count feeds the shared NavigationRelationshipCard
+    // in BOTH modes so the card content is pixel-identical.
+    const connectionCount = linkedNode
+      ? indoorEdges.filter((e) => e.startNodeId === linkedNode.id || e.endNodeId === linkedNode.id).length
+      : undefined;
+    if (selected.type === "room") {
+      return {
+        kind: "room" as const,
+        linked,
+        title: "Room",
+        detail: linked ? "Destination linked" : "Create the destination anchor used by routing.",
+        connectionCount,
+      };
+    }
+    if (selected.type === "door") {
+      return {
+        kind: "door" as const,
+        linked,
+        title: "Door",
+        detail: linked ? "Navigation entry linked" : "Create a door navigation entry so paths can connect directly to this doorway.",
+        connectionCount,
+      };
+    }
+    if (selected.type === "ramp") {
+      return {
+        kind: "ramp" as const,
+        linked,
+        title: "Ramp",
+        detail: linked ? "Accessible path anchor" : "Add this ramp as an accessible path anchor.",
+        connectionCount,
+      };
+    }
+    if (selected.type === "stairs") {
+      const stair = stairs.find((s) => s.id === selected.id);
+      const groupLabel = stair?.sharedId ? circulationGroups.stairs.find((g) => g.id === stair.sharedId)?.name : undefined;
+      return {
+        kind: "stairs" as const,
+        linked,
+        title: "Stair Connection",
+        detail: linked ? "Linked" : "Add this stair as a local stair navigation anchor.",
+        groupLabel: groupLabel ?? stair?.label,
+        connectionCount,
+      };
+    }
+    const elevator = elevators.find((el) => el.id === selected.id);
+    const groupLabel = elevator?.sharedId ? circulationGroups.elevators.find((g) => g.id === elevator.sharedId)?.name : undefined;
+    return {
+      kind: "elevator" as const,
+      linked,
+      title: "Elevator Shaft",
+      detail: linked ? "Linked" : "Add this elevator as a local elevator navigation anchor.",
+      groupLabel: groupLabel ?? elevator?.label,
+      connectionCount,
+    };
+  }, [circulationGroups.elevators, circulationGroups.stairs, elevators, indoorEdges, linkedNodeForPhysical, selected, stairs]);
+
+  const selectedDoorEntranceStatus = useMemo(() => {
+    if (selected?.type !== "door") return undefined;
+    return doorEntranceLinkStatus(campus, buildingId, floorId, selected.id);
+  }, [buildingId, campus, floorId, selected]);
+
+  const handleNavSvgDown = (e: React.MouseEvent<SVGSVGElement>) => {
+    if (e.button === 1) { e.preventDefault(); startPan(e); return; }
+    if (isSpacePressed()) { e.preventDefault(); startPan(e); return; }
+    const target = e.target as SVGElement;
+    const isBg = target === svgRef.current || target.dataset.bg === "true" || target.closest?.('[data-bg="true"]') != null;
+    const pt = navPointFromEvent(e);
+
+    if (navTool === "pan") { if (isBg) startPan(e); return; }
+
+    if (navTool === "select") {
+      if (isBg) {
+        if (!e.shiftKey) { setNavSelected(null); setNavMultiSelected([]); }
+        setRubberBand({ sx: pt.x, sy: pt.y, cx: pt.x, cy: pt.y });
+      }
+      return;
+    }
+
+    if (navTool === "erase") {
+      if (isBg) { setNavSelected(null); setNavMultiSelected([]); return; }
+      navEraseAt(pt);
+      return;
+    }
+
+    if (navTool === "waypoint" || navTool === "destination") {
+      const isDest = navTool === "destination";
+      const existing = findNavNodeAtPoint(indoorNodes, pt);
+      if (existing) {
+        selectDuplicateNavNode(existing);
+        setNavTool("select");
+        return;
+      }
+      // B5 Phase 2.3: FREE Waypoint / Destination placement is for open walkable
+      // floor space. Landing directly on a semantic linked-location object (Room
+      // semantic target / Door / Stair / Elevator / Ramp) is rejected with
+      // guidance — those link through the Link Location workflow instead. The
+      // interior of a large room (away from its center label zone) stays allowed.
+      const blocked = linkedPlacementBlockAt(pt, rooms, doors, stairs, elevators, ramps);
+      if (blocked) {
+        toast.info("Use Link Location for this object", "Rooms, doors and circulation points link through Link Location.");
+        return;
+      }
+      // B5 Phase 6.3: check if click is near an existing nav edge for insertion
+      const edgeNodeMap = Object.fromEntries(indoorNodes.map((n) => [n.id, { x: n.x, y: n.y }]));
+      const edgeHit = findNavEdgeAtPoint(indoorEdges, edgeNodeMap, pt);
+      if (edgeHit) {
+        // Insert waypoint into existing edge — split it
+        const insertNode = createIndoorNavNode({
+          id: genId("nn"), x: edgeHit.nearest.x, y: edgeHit.nearest.y, buildingId, floorId, campusId: campus.id,
+          name: isDest ? "Destination" : "Waypoint",
+          type: isDest ? "room_access" : "hallway",
+        });
+        const splitResult = splitIndoorNavEdge(edgeHit.edge, insertNode, indoorNodes);
+        if (splitResult) {
+          const nextEdges = indoorEdges.filter((e) => e.id !== edgeHit.edge.id);
+          nextEdges.push(...splitResult.newEdges);
+          commitNavGraph([...indoorNodes, insertNode], nextEdges);
+          setNavSelected({ type: "node", id: insertNode.id });
+          setNavMultiSelected([]);
+          setShowProperties(true);
+          setNavTool("select");
+          toast.success("Waypoint inserted", "Edge split into two connections.");
+          return;
+        }
+      }
+      // Open floor (including large-room interiors away from the semantic
+      // target) → a canonical free node at the exact clicked coordinate.
+      const node = createIndoorNavNode({
+        id: genId("nn"), x: pt.x, y: pt.y, buildingId, floorId, campusId: campus.id,
+        name: isDest ? "Destination" : "Waypoint",
+        type: isDest ? "room_access" : "hallway",
+      });
+      commitNavGraph([...indoorNodes, node], indoorEdges);
+      setNavSelected({ type: "node", id: node.id });
+      setNavMultiSelected([]);
+      setShowProperties(true);
+      setNavTool("select");
+      return;
+    }
+
+    if (navTool === "link") {
+      // B5 Phase 2.2: Link Location infers the node type from the physical
+      // object under the pointer — Room / Door / Stairs / Elevator / Ramp.
+      const target = resolveNavTargetAt(pt);
+      if (!target) {
+        toast.info("Nothing to link", "Select an existing floor location to link.");
+        return;
+      }
+      const result = ensureLinkedNavigationNode(target.kind, target.id);
+      if (result) {
+        setNavSelected({ type: "node", id: result.node.id });
+        setNavMultiSelected([]);
+        setShowProperties(true);
+        setNavTool("select");
+        if (!result.created) toast.info("Already added to navigation", "This location already has a navigation point.");
+      }
+      return;
+    }
+
+    if (navTool === "connect") {
+      navConnectAtPoint(pt);
+      return;
+    }
+  };
+
+  // Shared Connect Path interaction — used by both the canvas background and
+  // existing-waypoint clicks so every surface behaves identically.
+  const navConnectAtPoint = (pt: { x: number; y: number }) => {
+    const result = navWaypointAt(pt);
+    if (!navConnectStart) {
+      // B5 Phase 2.8: a connection MUST begin by clicking an existing valid
+      // routing node (or a linked-location target that becomes one). Clicking
+      // EMPTY floor space before a start does NOTHING — no waypoint, no node,
+      // no mutation/history. Only after a start exists may empty clicks pin
+      // geometry bends.
+      if (result.kind !== "node") return;
+      const startId = result.node.id;
+      setNavConnectStart(startId);
+      const startNode = indoorNodes.find((n) => n.id === startId);
+      setNavPreview({ x: startNode?.x ?? result.node.x, y: startNode?.y ?? result.node.y });
+      setNavSelected({ type: "node", id: startId });
+      return;
+    }
+    const endId = result.kind === "node" ? result.node.id : null;
+    if (endId) {
+      // Finish: commit ONE edge carrying every pinned bend (one history action).
+      // B5 Phase 2.9A: a REJECTED commit (invalid wall-crossing geometry) keeps
+      // the Connect tool active — the tool only returns to Select on success.
+      const committed = commitNavEdgeBetween(navConnectStart, endId, indoorNodes, indoorEdges, navConnectBends);
+      if (committed) setNavTool("select");
+      return;
+    }
+    // B5 Phase 2.9: ONE empty-space click during an ACTIVE connection pins the
+    // FULL segment shape the preview shows — the orthogonal corner resolved from
+    // the current anchor/latest bend PLUS the click point itself (or just the
+    // click point on a straight continuation). The click point immediately
+    // becomes the new continuation anchor, so the NEXT preview starts from it:
+    // no confirmation click, no "selected but not yet pinned" state, and no
+    // NavigationNode is ever created from an empty Connect click.
+    const startNode = indoorNodes.find((n) => n.id === navConnectStart);
+    if (!startNode) return;
+    const last = navConnectBends.length > 0
+      ? navConnectBends[navConnectBends.length - 1]
+      : { x: startNode.x, y: startNode.y };
+    const rawPt = { x: Math.round(pt.x), y: Math.round(pt.y) };
+    // B5 Phase 2.10: ONE proposed pin geometry — the SAME helper the live
+    // preview uses, so the click pins EXACTLY what was shown (alignment-snapped,
+    // wall validity always winning over the snap, detours kept in floor bounds,
+    // and never creating a NavigationNode).
+    const geo = navPinGeometryFor(rawPt, last, indoorNodes, walls, doors, { width: FP_W, height: FP_H });
+    const pins = geo.pins;
+    // A bend may NEVER settle inside a wall's effective obstacle (thickness +
+    // clearance). The click point AND the auto-resolved corner are both
+    // point-validated — a segment that merely ENDS on a wall centerline can
+    // pass the segment check, but the bend itself is still inside the wall.
+    const badPin = pins.find((p) => pointInsideWallObstacle(p, walls, doors) !== null);
+    if (badPin) {
+      toast.warning("Path blocked by wall", "The bend would land inside a wall.");
+      return;
+    }
+    // Every pinned segment is wall-validated (clearance + crossings + doors).
+    if (edgePolylineCrossesWallWithoutDoor([last, ...pins], walls, doors)) {
+      toast.warning("Paths must pass through a door opening", "This segment crosses a wall without a door opening.");
+      return;
+    }
+    const lastPin = pins[pins.length - 1];
+    if (Math.hypot(lastPin.x - last.x, lastPin.y - last.y) < 2) return; // ignore micro-clicks
+    if (geo.snapped) setNavAlignGuides(geo.guides);
+    // Dedupe against the previous pin (a snapped corner can coincide with it),
+    // then record how many points THIS click actually appended so temporary
+    // Ctrl+Z removes the whole click in one step.
+    const out = [...navConnectBends];
+    let appended = 0;
+    for (const p of pins) {
+      const lp = out[out.length - 1];
+      if (lp && lp.x === p.x && lp.y === p.y) continue;
+      out.push(p);
+      appended++;
+    }
+    if (appended === 0) return;
+    navConnectBendGroupsRef.current.push(appended);
+    setNavConnectBends(out);
+  };
+
+  // ── B5 Phase 2.1: Navigation copy / paste / duplicate ──────────────────────
+
+  /** Current nav selection as a free-node graph fragment (linked nodes excluded). */
+  const navSelectionGraph = useCallback((): { nodes: NavigationNode[]; edges: NavigationEdge[]; linkedCount: number } => {
+    const selNode = navSelected?.type === "node" ? navSelected.id : null;
+    let nodeIds: string[] = [];
+    if (selNode) nodeIds = navMultiSelected.length > 0 ? [...new Set([...navMultiSelected, selNode])] : [selNode];
+    else nodeIds = navMultiSelected;
+    const selectedNodes = indoorNodes.filter((n) => nodeIds.includes(n.id));
+    const linkedCount = selectedNodes.filter((n) => linkedObjectRef(n)).length;
+    const freeNodes = selectedNodes.filter((n) => !linkedObjectRef(n));
+    const freeIds = new Set(freeNodes.map((n) => n.id));
+    const edges = indoorEdges.filter((e) => freeIds.has(e.startNodeId) && freeIds.has(e.endNodeId));
+    return { nodes: freeNodes, edges, linkedCount };
+  }, [indoorEdges, indoorNodes, navMultiSelected, navSelected]);
+
+  const copyNavSelection = useCallback(() => {
+    const { nodes, edges, linkedCount } = navSelectionGraph();
+    if (nodes.length === 0) {
+      toast.info("Nothing to copy", "Select free waypoints first (Ctrl+C).");
+      return;
+    }
+    navClipboardRef.current = { nodes: structuredClone(nodes), edges: structuredClone(edges) };
+    navPasteOffsetRef.current = 12;
+    if (linkedCount > 0) {
+      toast.info("Linked waypoints not copied", `${linkedCount} linked waypoint${linkedCount !== 1 ? "s" : ""} follow their physical object and cannot be copied.`);
+    } else {
+      toast.success("Copied", `${nodes.length} waypoint${nodes.length !== 1 ? "s" : ""} copied (Ctrl+V to paste).`);
+    }
+  }, [navSelectionGraph, toast]);
+
+  /**
+   * Paste a nav graph fragment with fresh IDs, remapped edge endpoints, and a
+   * small clamped offset — ONE history action via commitNavGraph.
+   */
+  const pasteNavGraph = useCallback((nodes: NavigationNode[], edges: NavigationEdge[], offset: number): number => {
+    if (nodes.length === 0) return 0;
+    const idMap = new Map<string, string>();
+    const nextNodes: NavigationNode[] = nodes.map((n) => {
+      const newId = genId("nn");
+      idMap.set(n.id, newId);
+      // Linked refs are never copied — strip defensively so no second canonical
+      // link to the same physical object can ever exist.
+      const free = { ...structuredClone(n), id: newId } as NavigationNode & Record<string, unknown>;
+      delete free.roomId; delete free.doorId; delete free.stairId;
+      delete free.elevatorId; delete free.rampId; delete free.entranceId;
+      return {
+        ...free,
+        x: clamp(Math.round(n.x + offset), 0, FP_W),
+        y: clamp(Math.round(n.y + offset), 0, FP_H),
+      };
+    });
+    const nodeById = new Map(nextNodes.map((n) => [n.id, n]));
+    const nextEdges: NavigationEdge[] = edges
+      .filter((e) => idMap.has(e.startNodeId) && idMap.has(e.endNodeId))
+      .map((e) => {
+        const a = nodeById.get(idMap.get(e.startNodeId)!);
+        const b = nodeById.get(idMap.get(e.endNodeId)!);
+        // B5 Phase 2.5: bendPoints travel with the edge and translate WITH the
+        // nodes (the copied L-shape stays attached to its pasted endpoints); the
+        // distance is the TOTAL polyline length, never the straight diagonal.
+        const bends = e.bendPoints?.map((p) => ({
+          x: clamp(Math.round(p.x + offset), 0, FP_W),
+          y: clamp(Math.round(p.y + offset), 0, FP_H),
+        }));
+        const pts = bends && bends.length > 0
+          ? [{ x: a!.x, y: a!.y }, ...bends, { x: b!.x, y: b!.y }]
+          : null;
+        return {
+          ...e,
+          id: genId("ne"),
+          startNodeId: a!.id,
+          endNodeId: b!.id,
+          ...(bends && bends.length > 0 ? { bendPoints: bends } : {}),
+          distance: pts ? navEdgePolylineDistance(pts) : Math.round(Math.hypot(b!.x - a!.x, b!.y - a!.y)),
+        };
+      });
+    commitNavGraph([...indoorNodes, ...nextNodes], [...indoorEdges, ...nextEdges]);
+    setNavSelected({ type: "node", id: nextNodes[nextNodes.length - 1].id });
+    setNavMultiSelected(nextNodes.map((n) => n.id));
+    setShowProperties(true);
+    return nextNodes.length;
+  }, [FP_W, FP_H, commitNavGraph, indoorEdges, indoorNodes]);
+
+  const pasteNavSelection = useCallback(() => {
+    if (!navClipboardRef.current || navClipboardRef.current.nodes.length === 0) {
+      toast.info("Nothing to paste", "Copy waypoints first (Ctrl+C).");
+      return;
+    }
+    const count = pasteNavGraph(navClipboardRef.current.nodes, navClipboardRef.current.edges, navPasteOffsetRef.current);
+    navPasteOffsetRef.current += 12;
+    toast.success("Waypoints pasted", `${count} waypoint${count !== 1 ? "s" : ""} pasted with fresh connections.`);
+  }, [pasteNavGraph, toast]);
+
+  const duplicateNavSelection = useCallback(() => {
+    const { nodes, edges, linkedCount } = navSelectionGraph();
+    if (nodes.length === 0) {
+      toast.info("Nothing to duplicate", "Select free waypoints first (Ctrl+D).");
+      return;
+    }
+    if (linkedCount > 0) {
+      toast.info("Linked waypoints excluded", `${linkedCount} linked waypoint${linkedCount !== 1 ? "s" : ""} follow their physical object and cannot be duplicated.`);
+    }
+    const count = pasteNavGraph(nodes, edges, 12);
+    toast.success("Waypoints duplicated", `${count} waypoint${count !== 1 ? "s" : ""} duplicated.`);
+  }, [navSelectionGraph, pasteNavGraph, toast]);
+
+  // ── B5 Phase 2.1: Navigation Library drag-and-drop ─────────────────────────
+
+  const navPointFromDrag = (e: React.DragEvent): { x: number; y: number } => {
+    const pt = getPoint(e as any, FP_W, FP_H);
+    return { x: Math.max(0, Math.min(FP_W, Math.round(pt.x))), y: Math.max(0, Math.min(FP_H, Math.round(pt.y))) };
+  };
+
+  const handleNavLibraryDragOver = useCallback((e: React.DragEvent) => {
+    const kind = navLibraryDragRef.current;
+    if (!kind) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+    const pt = navPointFromDrag(e);
+    if (kind === "waypoint" || kind === "destination") {
+      // B5 Phase 2.3: free placement is blocked on linked-location semantic
+      // targets — show a not-allowed preview instead of a green ghost.
+      const blocked = linkedPlacementBlockAt(pt, rooms, doors, stairs, elevators, ramps);
+      if (blocked) {
+        setNavDragPreview(null);
+        setNavDragBlocked(pt);
+      } else {
+        setNavDragPreview(pt);
+        setNavDragBlocked(null);
+      }
+      setNavTargetHover(null);
+      return;
+    }
+    // B5 Phase 2.2: linked kinds are not draggable — the unified Link Location
+    // tool (click-to-target) replaces the old per-kind drag items.
+    setNavDragPreview(null);
+    setNavDragBlocked(null);
+    setNavTargetHover(null);
+  }, [doors, elevators, ramps, rooms, stairs]);
+
+  const handleNavLibraryDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    const kind = navLibraryDragRef.current;
+    navLibraryDragRef.current = null;
+    setNavDragPreview(null);
+    setNavDragBlocked(null);
+    setNavTargetHover(null);
+    if (!kind) return;
+    const pt = navPointFromDrag(e);
+    if (kind === "waypoint" || kind === "destination") {
+      const existing = findNavNodeAtPoint(indoorNodes, pt);
+      if (existing) {
+        selectDuplicateNavNode(existing);
+        setNavTool("select");
+        return;
+      }
+      // B5 Phase 2.3: reject free drops on linked-location semantic targets
+      // (Room center zone / Door / Stair / Elevator / Ramp) — no orphan node.
+      const blocked = linkedPlacementBlockAt(pt, rooms, doors, stairs, elevators, ramps);
+      if (blocked) {
+        toast.info("Use Link Location for this object", "Rooms, doors and circulation points link through Link Location.");
+        return;
+      }
+      const node = createIndoorNavNode({
+        id: genId("nn"), x: pt.x, y: pt.y, buildingId, floorId, campusId: campus.id,
+        name: kind === "destination" ? "Destination" : "Waypoint",
+        type: kind === "destination" ? "room_access" : "hallway",
+      });
+      commitNavGraph([...indoorNodes, node], indoorEdges);
+      setNavSelected({ type: "node", id: node.id });
+      setNavMultiSelected([]);
+      setShowProperties(true);
+      setNavTool("select");
+      toast.success(kind === "destination" ? "Destination placed" : "Waypoint placed", "Added to the walking network.");
+      return;
+    }
+    // B5 Phase 2.2: linked kinds are NO LONGER draggable — the unified Link
+    // Location tool infers the type from the actual object under the pointer,
+    // so a wrong-type drop can never occur. Defensive reject for unknown kinds.
+    toast.info("Use Link Location", "Drag Waypoints and Destinations; link Rooms, Doors, Stairs, Elevators and Ramps with Link Location.");
+  }, [buildingId, campus.id, commitNavGraph, doors, elevators, floorId, indoorEdges, indoorNodes, ramps, rooms, selectDuplicateNavNode, stairs, toast]);
+
   const handleSvgDown = (e: React.MouseEvent<SVGSVGElement>) => {
+    if (navMode) { handleNavSvgDown(e); return; }
     if (e.button === 1) { e.preventDefault(); startPan(e); return; }
     if (isSpacePressed()) { e.preventDefault(); startPan(e); return; }
     const target = e.target as SVGElement;
@@ -2245,6 +4651,240 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
     const pt = getPoint(e, FP_W, FP_H);
     setCursorPos({ x: Math.round(pt.x), y: Math.round(pt.y) });
     const boundedPt = { x: clamp(Math.round(pt.x), 0, FP_W), y: clamp(Math.round(pt.y), 0, FP_H) };
+
+    if (navMode) {
+      // B5 Phase 2.1: Navigation Pan must behave identically to Design Pan —
+      // movePan only acts while a pan gesture (Pan tool / space / middle mouse)
+      // is active, so marquee + group drags are unaffected.
+      movePan(e);
+      // Connect preview follows the pointer; authoring targets highlight live.
+      if (navTool === "waypoint" || navTool === "destination" || navTool === "connect" || navTool === "link") {
+        setNavTargetHover(resolveNavTargetAt(pt));
+      } else {
+        setNavTargetHover(null);
+      }
+      // B5 Phase 6.4: detect edge snap for waypoint insertion in Floor Editor
+      if (navTool === "waypoint" || navTool === "destination") {
+        const edgeNodeMap = Object.fromEntries(indoorNodes.map((n) => [n.id, { x: n.x, y: n.y }]));
+        const edgeHit = findNavEdgeAtPoint(indoorEdges, edgeNodeMap, pt);
+        setFloorEdgeSnap(edgeHit ? { edgeId: edgeHit.edge.id, nearest: edgeHit.nearest } : null);
+      } else {
+        setFloorEdgeSnap(null);
+      }
+      if (navConnectStart) {
+        setNavPreview(pt);
+        // B5 Phase 2.9: the pin-snap guide feedback is transient — it appears
+        // right after an empty-click pin and clears once the pointer moves.
+        setNavAlignGuides([]);
+      }
+      // Nav marquee (rubber band over graph elements).
+      if (rubberBand) { setRubberBand({ ...rubberBand, cx: boundedPt.x, cy: boundedPt.y }); return; }
+      // B5 Phase 2.7/2.8: orthogonal SEGMENT drag — a horizontal segment moves
+      // vertically, a vertical segment moves horizontally; the connector stays
+      // axis-aligned (boundary segments get a corner bend, interior segments
+      // translate both bends). Geometry is ALWAYS derived from the immutable
+      // drag-start snapshot + the current pointer delta (never compounded on
+      // already-modified bends, never appending bends every frame), then
+      // normalized and wall-validated. One history action on release.
+      if (navSegDragRef.current) {
+        const segDrag = navSegDragRef.current;
+        const segEdge = indoorEdges.find((ed) => ed.id === segDrag.edgeId);
+        if (!segEdge || !segEdge.bendPoints || segEdge.bendPoints.length === 0) { navSegDragRef.current = null; return; }
+        const delta = segDrag.isHorizontal
+          ? Math.round(boundedPt.y) - segDrag.oy
+          : Math.round(boundedPt.x) - segDrag.ox;
+        if (delta !== 0) gestureMoved.current = true;
+        if (delta === 0) return;
+        // Clamp the translation delta so the segment tracks the cursor 1:1 and
+        // stays inside floor bounds (same intuitive rate as other draggables).
+        let nextBends = translateOrthogonalSegment(segDrag.origPts, segDrag.origBends, segDrag.segIndex, delta, segDrag.isHorizontal);
+        nextBends = normalizeBendPoints(nextBends.map((bp) => ({
+          x: clamp(Math.round(bp.x), 0, FP_W),
+          y: clamp(Math.round(bp.y), 0, FP_H),
+        })));
+        // Wall validation on the FINAL geometry — a segment drag that would push
+        // a path through a solid wall without a door opening is rejected.
+        // B5 Phase 2.11: an ALREADY-invalid edge stays freely draggable so the
+        // admin can repair it (drags may pass through blocked intermediate
+        // states; the live red state clears as soon as the geometry is valid).
+        const candidateEdge = { ...segEdge, bendPoints: nextBends };
+        const candPts = edgePolylinePoints(candidateEdge, indoorNodes);
+        if (candPts && !navBlockedEdgeIds.has(segDrag.edgeId) && edgePolylineCrossesWallWithoutDoor(candPts, walls, doors)) {
+          if (!navDragWallWarnedRef.current) {
+            navDragWallWarnedRef.current = true;
+            toast.warning("Paths must pass through a door opening", "This segment would cross a wall without a door opening.");
+          }
+          return;
+        }
+        commitNavGraph(
+          indoorNodes,
+          indoorEdges.map((ed) => (ed.id === segDrag.edgeId ? { ...ed, bendPoints: nextBends } : ed))
+        );
+        return;
+      }
+      // B5 Phase 2.5: bend-handle drag — reshape the selected segmented path
+      // live (history suppressed); mouse-up commits ONE undoable action.
+      // B5 Phase 2.6: Shift = strict orthogonal constraint; otherwise a small
+      // snap tolerance keeps near-axis segments exactly horizontal/vertical.
+      if (navBendDragRef.current) {
+        const drag = navBendDragRef.current;
+        const dragEdge = indoorEdges.find((ed) => ed.id === drag.edgeId);
+        const dragBends = dragEdge?.bendPoints;
+        let nx = clamp(Math.round(boundedPt.x), 0, FP_W);
+        let ny = clamp(Math.round(boundedPt.y), 0, FP_H);
+        if (e.shiftKey) {
+          // Strict axis constraint — keep the changed segment horizontal OR
+          // vertical using whichever axis best matches the pointer movement.
+          const dx = nx - drag.ox;
+          const dy = ny - drag.oy;
+          if (Math.abs(dx) >= Math.abs(dy)) ny = drag.oy;
+          else nx = drag.ox;
+        } else if (dragBends) {
+          // Near-axis snap — never leave visually crooked 2–5° segments.
+          const aNode = indoorNodes.find((n) => n.id === dragEdge?.startNodeId);
+          const bNode = indoorNodes.find((n) => n.id === dragEdge?.endNodeId);
+          const prev = drag.index > 0 && dragBends[drag.index - 1]
+            ? dragBends[drag.index - 1]
+            : aNode ? { x: aNode.x, y: aNode.y } : null;
+          const next = drag.index < dragBends.length - 1 && dragBends[drag.index + 1]
+            ? dragBends[drag.index + 1]
+            : bNode ? { x: bNode.x, y: bNode.y } : null;
+          const tol = 4;
+          if (prev) {
+            if (Math.abs(nx - prev.x) <= tol) nx = prev.x;
+            if (Math.abs(ny - prev.y) <= tol) ny = prev.y;
+          }
+          if (next) {
+            if (Math.abs(nx - next.x) <= tol) nx = next.x;
+            if (Math.abs(ny - next.y) <= tol) ny = next.y;
+          }
+        }
+        // B5 Phase 2.8: always-on alignment guides for bends — snap to a nearby
+        // bend or endpoint node's X/Y center within the threshold and show a
+        // subtle temporary guide (orthogonality preserved: only one axis snaps).
+        if (dragEdge && dragEdge.bendPoints) {
+          const aNode = indoorNodes.find((n) => n.id === dragEdge?.startNodeId);
+          const bNode = indoorNodes.find((n) => n.id === dragEdge?.endNodeId);
+          const others: { x: number; y: number }[] = [
+            ...(aNode ? [{ x: aNode.x, y: aNode.y }] : []),
+            ...(bNode ? [{ x: bNode.x, y: bNode.y }] : []),
+            ...dragEdge.bendPoints.filter((_, i) => i !== drag.index),
+          ];
+          const snap = navAlignSnap({ x: nx, y: ny }, others);
+          nx = snap.x;
+          ny = snap.y;
+          setNavAlignGuides(snap.guides);
+        }
+        // B5 Phase 2.10: a bend may not settle inside a wall's obstacle — the
+        // point check catches a bend dragged onto/into a wall that the segment
+        // check tolerates (a segment may legally END at a wall anchor).
+        if (pointInsideWallObstacle({ x: nx, y: ny }, walls, doors)) {
+          if (!navDragWallWarnedRef.current) {
+            navDragWallWarnedRef.current = true;
+            toast.warning("Path blocked by wall", "A bend cannot sit inside a wall.");
+          }
+          return;
+        }
+        if (nx !== drag.ox || ny !== drag.oy) gestureMoved.current = true;
+        const nextEdges = indoorEdges.map((ed) => {
+          if (ed.id !== drag.edgeId || !ed.bendPoints) return ed;
+          const bends = normalizeBendPoints(
+            ed.bendPoints.map((p, i) => (i === drag.index ? { x: nx, y: ny } : p))
+          );
+          return { ...ed, bendPoints: bends };
+        });
+        // B5 Phase 2.8: wall validation on the reshaped path — a bend drag that
+        // would cross a solid wall without a door opening is rejected.
+        // B5 Phase 2.11: except on an ALREADY-invalid edge, which stays freely
+        // editable so the admin can pull it clear of the wall (live red state).
+        const candEdge = nextEdges.find((ed) => ed.id === drag.edgeId);
+        const candPts = candEdge ? edgePolylinePoints(candEdge, indoorNodes) : null;
+        if (candPts && !navBlockedEdgeIds.has(drag.edgeId) && edgePolylineCrossesWallWithoutDoor(candPts, walls, doors)) {
+          if (!navDragWallWarnedRef.current) {
+            navDragWallWarnedRef.current = true;
+            toast.warning("Paths must pass through a door opening", "This bend would cross a wall without a door opening.");
+          }
+          return;
+        }
+        commitNavGraph(indoorNodes, nextEdges);
+        return;
+      }
+      // Free-waypoint group drag — edges follow derived node positions.
+      if (navDragRef.current) {
+        const drag = navDragRef.current;
+        let dx = boundedPt.x - drag.sx;
+        let dy = boundedPt.y - drag.sy;
+        if (dx !== 0 || dy !== 0) gestureMoved.current = true;
+        // B5 Phase 6.10: Shift constrains to dominant axis relative to drag
+        // start — cooperate with alignment guides rather than fight them.
+        if (e.shiftKey) {
+          if (Math.abs(dx) >= Math.abs(dy)) {
+            dy = 0;
+          } else {
+            dx = 0;
+          }
+        }
+        // B5 Phase 2.8/6.10: always-on ALIGNMENT GUIDES — snap the dragged
+        // group's bbox edges/center to another routing node's X or Y within a
+        // modest threshold. B5 Phase 6.10: connected-node priority for nodes
+        // directly connected to any node in the dragged group.
+        {
+          const connectedIds = new Set<string>();
+          for (const id of drag.ids) {
+            for (const e2 of indoorEdges) {
+              if (e2.type === "floor_transition") continue;
+              if (e2.startNodeId === id) connectedIds.add(e2.endNodeId);
+              if (e2.endNodeId === id) connectedIds.add(e2.startNodeId);
+            }
+          }
+          const xs = drag.origins.map((o) => o.x);
+          const ys = drag.origins.map((o) => o.y);
+          const others = indoorNodes
+            .filter((n) => !drag.ids.includes(n.id))
+            .map((n) => ({ x: n.x, y: n.y, id: n.id }));
+          const snap = navGroupAlignSnap(
+            {
+              minX: Math.min(...xs),
+              minY: Math.min(...ys),
+              width: Math.max(...xs) - Math.min(...xs),
+              height: Math.max(...ys) - Math.min(...ys),
+            },
+            dx,
+            dy,
+            others
+          );
+          dx = snap.dx;
+          dy = snap.dy;
+          setNavAlignGuides(snap.guides);
+        }
+        // B5 correction: TRUE 1:1 RIGID TRANSLATION. `dx/dy` are the TOTAL
+        // world delta from the drag-start pointer (already snapped/shifted as a
+        // single shared vector above). Every frame applies that SAME vector to
+        // the IMMUTABLE snapshot — node origins + internal edge bend origins —
+        // never to already-translated geometry, so nothing compounds, the group
+        // stays under the cursor under any zoom/pan, and the selected graph's
+        // shape is identical before/after (no re-orthogonalization).
+        const rdx = Math.round(dx);
+        const rdy = Math.round(dy);
+        const originById = new Map(drag.origins.map((o) => [o.id, o]));
+        const nextNodes = indoorNodes.map((n) => {
+          const origin = originById.get(n.id);
+          if (!origin) return n;
+          const x = clamp(Math.round(origin.x + rdx), 0, FP_W);
+          const y = clamp(Math.round(origin.y + rdy), 0, FP_H);
+          if (x === n.x && y === n.y) return n;
+          return { ...n, x, y };
+        });
+        const nextEdges = indoorEdges.map((e) => {
+          const originBends = drag.edgeOrigins.get(e.id);
+          if (!originBends || originBends.length === 0) return e;
+          return { ...e, bendPoints: originBends.map((b) => ({ x: b.x + rdx, y: b.y + rdy })) };
+        });
+        commitNavGraph(nextNodes, nextEdges);
+        return;
+      }
+      return;
+    }
 
     if (calibrationDraft.active || tool === "measure") return;
 
@@ -2559,6 +5199,59 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
 
   const handleSvgUp = () => {
     endPan();
+    if (navMode) {
+      setNavTargetHover(null);
+      setNavNodeHover(null);
+      // B5 Phase 2.8: alignment guides disappear after the drag.
+      setNavAlignGuides([]);
+      navDragWallWarnedRef.current = false;
+      if (rubberBand) {
+        const rect = {
+          x: Math.min(rubberBand.sx, rubberBand.cx),
+          y: Math.min(rubberBand.sy, rubberBand.cy),
+          w: Math.abs(rubberBand.cx - rubberBand.sx),
+          h: Math.abs(rubberBand.cy - rubberBand.sy),
+        };
+        const captured = rect.w >= 3 || rect.h >= 3
+          ? indoorNodes.filter((n) =>
+              n.x >= rect.x - 2 && n.x <= rect.x + rect.w + 2 &&
+              n.y >= rect.y - 2 && n.y <= rect.y + rect.h + 2
+            ).map((n) => n.id)
+          : [];
+        if (captured.length > 0) {
+          setNavSelected({ type: "node", id: captured[captured.length - 1] });
+          setNavMultiSelected(captured);
+          setShowProperties(true);
+        } else {
+          setNavSelected(null);
+          setNavMultiSelected([]);
+        }
+        setRubberBand(null);
+        return;
+      }
+      // Commit the nav drag as ONE history entry.
+      if (navDragRef.current) {
+        if (gestureMoved.current) pushHistory(navSnapshot());
+        suppressHistoryRef.current = false;
+        gestureMoved.current = false;
+        navDragRef.current = null;
+      }
+      // B5 Phase 2.5: bend drags commit the same way — ONE undoable gesture.
+      if (navBendDragRef.current) {
+        if (gestureMoved.current) pushHistory(navSnapshot());
+        suppressHistoryRef.current = false;
+        gestureMoved.current = false;
+        navBendDragRef.current = null;
+      }
+      // B5 Phase 2.7: segment drags commit the same way — ONE undoable gesture.
+      if (navSegDragRef.current) {
+        if (gestureMoved.current) pushHistory(navSnapshot());
+        suppressHistoryRef.current = false;
+        gestureMoved.current = false;
+        navSegDragRef.current = null;
+      }
+      return;
+    }
     if (rubberBand) {
       const rect = {
         x: Math.min(rubberBand.sx, rubberBand.cx),
@@ -2642,10 +5335,14 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
       const ry = clamp(Math.min(roomDrag.sy, roomDrag.cy), 0, FP_H - rh);
       // Auto-generate a sharedId so this stair can be linked across floors
       const stairSharedId = `shared_stair_${buildingId}_${(        stairs.filter(s => s.label === 'Stairs').length + 1)}`;
+      // B5 Phase 3.1: context-aware default direction — a stair on the lowest
+      // floor defaults to Up, highest to Down, middle floors to Both, so the
+      // authoring UI never silently creates an impossible cross-floor direction.
+      const stairDirection = defaultStairDirectionForFloorInOrder(floor.id, buildingFloors);
       const newStairs: FloorStairs = {
         id: genId("st"), x: Math.round(rx), y: Math.round(ry),
         width: Math.round(rw), height: Math.round(rh),
-        rotation: 0, direction: "both", label: "Stairs",
+        rotation: 0, direction: stairDirection, label: "Stairs",
         sharedId: stairSharedId,
       };
       updFloor(rooms, fpaths, walls, doors, windows, furniture, [...stairs, newStairs]);
@@ -2702,6 +5399,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
   };
 
   const handleDblClick = () => {
+    if (navMode) return;
     if (drawingPath.length >= 2) {
       const newPath = { id: genId("fp"), points: drawingPath, type: "footpath", color: "#94a3b8", width: 3 };
       updFloor(rooms, [...fpaths, newPath]);
@@ -2714,6 +5412,21 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
   // ── Item mouse handlers ──
 
   const onItemDown = (e: React.MouseEvent, type: string, id: string, item: any) => {
+    // B5 Phase 6.2: Navigation mode — select physical objects for navigation context
+    // but do NOT allow physical editing (drag/resize/rotate).
+    if (navMode) {
+      if (navTool !== "select") return;
+      // Only navigation-relevant physical objects are selectable
+      const navTypes = ["room", "door", "stairs", "elevator", "ramp"];
+      if (!navTypes.includes(type)) return;
+      e.stopPropagation();
+      // Set the physical object nav selection for nav-only properties
+      setNavPhysicalSelected({ type: type as any, id });
+      setNavSelected(null);
+      setNavMultiSelected([]);
+      setShowProperties(true);
+      return;
+    }
     if (isSpacePressed()) { e.stopPropagation(); startPan(e); return; }
     if (tool !== "select" && tool !== "erase") return;
     e.stopPropagation();
@@ -2866,6 +5579,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
   };
 
   const onItemContextMenu = (e: React.MouseEvent, type: FloorSelection["type"], id: string) => {
+    if (navMode) return; // Navigation mode: floor objects are context-only.
     e.preventDefault();
     e.stopPropagation();
     const item = getSelectionItem(type, id);
@@ -2895,10 +5609,38 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
   useEffect(() => {
     const k = (e: KeyboardEvent) => {
       if (isEditableShortcutTarget(e.target ?? document.activeElement)) return;
-      if ((e.ctrlKey || e.metaKey) && e.key === "z" && !e.shiftKey) { e.preventDefault(); applyEntry(undo()); return; }
+      if ((e.ctrlKey || e.metaKey) && e.key === "z" && !e.shiftKey) {
+        e.preventDefault();
+        // B5 Phase 2.8/2.9: during an UNFINISHED Connect, Ctrl+Z must NOT undo
+        // unrelated editor history — it removes the LAST temporary pinned CLICK
+        // (the full corner+click shape, never a stray half-bend), or cancels
+        // the whole unfinished connection when no bends exist yet. Neither
+        // creates a history entry. Committed edges undo normally.
+        if (navMode && navConnectStart) {
+          const group = navConnectBendGroupsRef.current.pop() ?? 0;
+          if (group > 0) {
+            setNavConnectBends((prev) => prev.slice(0, Math.max(0, prev.length - group)));
+          } else {
+            setNavConnectStart(null);
+            setNavPreview(null);
+            setNavConnectBends([]);
+            navConnectBendGroupsRef.current = [];
+          }
+          return;
+        }
+        applyEntry(undo());
+        return;
+      }
       if ((e.ctrlKey || e.metaKey) && (e.key === "y" || (e.key === "z" && e.shiftKey))) { e.preventDefault(); applyEntry(redo()); return; }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") {
         e.preventDefault();
+        if (navMode) {
+          if (indoorNodes.length === 0) return;
+          setNavMultiSelected(indoorNodes.map((n) => n.id));
+          setNavSelected({ type: "node", id: indoorNodes[indoorNodes.length - 1].id });
+          setShowProperties(true);
+          return;
+        }
         if (allSelectableIds.length === 1) {
           const only = selectionForId(allSelectableIds[0]);
           if (only) selectFloorItem(only);
@@ -2909,9 +5651,32 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
         }
         return;
       }
+      // B5 Phase 2.1: copy / paste / duplicate — one history action each, fresh
+      // IDs, and native text behavior is preserved by the editable-target guard.
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "c") {
+        e.preventDefault();
+        if (navMode) copyNavSelection(); else copySelection();
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "v") {
+        e.preventDefault();
+        if (navMode) pasteNavSelection(); else pasteSelection();
+        return;
+      }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "d") {
         e.preventDefault();
-        duplicateSelection();
+        if (navMode) duplicateNavSelection(); else duplicateSelection();
+        return;
+      }
+      if ((e.key === "Delete" || e.key === "Backspace") && navMode) {
+        e.preventDefault();
+        // B5 Phase 2.6: a specifically selected bend is removed on Delete —
+        // inner bends can be deleted in any order, not just reverse creation.
+        if (navSelectedBend) {
+          removeBendFromEdge(navSelectedBend.edgeId, navSelectedBend.index);
+          return;
+        }
+        deleteNavSelection();
         return;
       }
       if ((e.key === "Delete" || e.key === "Backspace") && (selected || multiSelected.length > 0)) {
@@ -2920,11 +5685,121 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
         return;
       }
       if (e.key === "Escape") {
+        if (navMode) {
+          setNavConnectStart(null);
+          setNavPreview(null);
+          setNavConnectBends([]);
+          navConnectBendGroupsRef.current = [];
+          setNavTargetHover(null);
+          setNavEraseHover(null);
+          setNavNodeHover(null);
+          setNavSelectedBend(null);
+          setNavSegmentHover(null);
+          setNavAlignGuides([]);
+          navDragWallWarnedRef.current = false;
+          setNavSelected(null);
+          setNavMultiSelected([]);
+          setRubberBand(null);
+          // Link Location / Destination return to Select on cancel.
+          if (navTool === "link" || navTool === "destination") setNavTool("select");
+          return;
+        }
         setWallStart(null); setWallPreview(null); setWallSnapIndicator(null); setDP([]);
         setSelected(null); setMultiSelected([]); setRubberBand(null); setContextMenu(null);
         setCalibrationDraft({ active: false, distanceInput: "" }); setMeasureDraft({});
         suppressHistoryRef.current = false; gestureMoved.current = false; dragging.current = null;
         if (tool === "path" || tool === "measure") setTool("select");
+      }
+      // ── Arrow keys: nudge the selected object(s) (1px, Shift=10px) ──
+      // B5 Final: works in both Design and Navigation modes; rapid nudges
+      // batch into ONE undo step (500 ms burst window). Linked navigation
+      // nodes are derived geometry and stay attached to their owners.
+      {
+        const step = e.shiftKey ? 10 : 1;
+        let dx = 0, dy = 0;
+        if (e.key === "ArrowLeft") dx = -step;
+        else if (e.key === "ArrowRight") dx = step;
+        else if (e.key === "ArrowUp") dy = -step;
+        else if (e.key === "ArrowDown") dy = step;
+        if (dx || dy) {
+          if (navMode) {
+            const targets = navMultiSelected.length > 0
+              ? navMultiSelected
+              : navSelected?.type === "node" ? [navSelected.id] : [];
+            const freeIds = targets.filter((id) => {
+              const n = indoorNodes.find((x) => x.id === id);
+              return Boolean(n && !linkedObjectRef(n));
+            });
+            if (freeIds.length === 0) return;
+            e.preventDefault();
+            const now = Date.now();
+            const isNewBurst = now - lastNudgeRef.current > 500;
+            lastNudgeRef.current = now;
+            if (isNewBurst) pushHistory({ ...floorUndoEntryFromFloor(floor), navNodes: indoorNodes, navEdges: indoorEdges });
+            suppressHistoryRef.current = true;
+            // B5 correction: nudge uses the SAME graph-group translation as the
+            // mouse drag — selected free waypoints AND the bends of edges whose
+            // both endpoints move translate together (no torn graph on nudges).
+            const movingIds = new Set(freeIds);
+            const { nodes: nudgedNodes, edges: nudgedEdges } = translateSelectedNavGraph(
+              indoorNodes,
+              indoorEdges,
+              movingIds,
+              dx,
+              dy,
+            );
+            commitNavGraph(
+              nudgedNodes.map((n) => movingIds.has(n.id)
+                ? { ...n, x: clamp(n.x, 0, FP_W), y: clamp(n.y, 0, FP_H) }
+                : n),
+              nudgedEdges,
+            );
+            suppressHistoryRef.current = false;
+            return;
+          }
+          const targets = multiSelected.length > 0 ? multiSelected : selected ? [selected.id] : [];
+          if (targets.length === 0) return;
+          const locked = targets.some((id) => {
+            const sel = selectionForId(id);
+            return sel ? isSelectionLocked(sel) : true;
+          });
+          if (locked) return;
+          e.preventDefault();
+          const now = Date.now();
+          const isNewBurst = now - lastNudgeRef.current > 500;
+          lastNudgeRef.current = now;
+          if (isNewBurst) pushHistory(floorUndoEntryFromFloor(floor));
+          suppressHistoryRef.current = true;
+          let nextRooms = rooms, nextPaths = fpaths, nextWalls = walls, nextDoors = doors, nextWindows = windows,
+              nextFurniture = furniture, nextStairs = stairs, nextElevators = elevators, nextLabels = labels, nextRamps = ramps;
+          for (const id of targets) {
+            const sel = selectionForId(id);
+            if (!sel) continue;
+            const move = <T extends { id: string; x: number; y: number }>(items: T[]) =>
+              items.map((it) => it.id === id ? { ...it, x: Math.round(it.x + dx), y: Math.round(it.y + dy) } : it);
+            if (sel.type === "room") nextRooms = move(nextRooms);
+            else if (sel.type === "door") nextDoors = move(nextDoors);
+            else if (sel.type === "window") nextWindows = move(nextWindows);
+            else if (sel.type === "furniture") nextFurniture = move(nextFurniture);
+            else if (sel.type === "stairs") nextStairs = move(nextStairs);
+            else if (sel.type === "ramp") nextRamps = move(nextRamps);
+            else if (sel.type === "elevator") nextElevators = move(nextElevators);
+            else if (sel.type === "label") nextLabels = move(nextLabels);
+            else if (sel.type === "wall") nextWalls = nextWalls.map((w) => w.id === id ? { ...w, x1: w.x1 + dx, y1: w.y1 + dy, x2: w.x2 + dx, y2: w.y2 + dy } : w);
+            else if (sel.type === "path") nextPaths = nextPaths.map((p) => p.id === id ? { ...p, points: p.points.map((pt) => ({ ...pt, x: pt.x + dx, y: pt.y + dy })) } : p);
+          }
+          updFloor(nextRooms, nextPaths, nextWalls, nextDoors, nextWindows, nextFurniture, nextStairs, nextElevators, nextLabels, nextRamps);
+          suppressHistoryRef.current = false;
+          return;
+        }
+      }
+      if (navMode) {
+        if (e.key === "v" || e.key === "V") selectNavTool("select");
+        if (e.key === "h" || e.key === "H") selectNavTool("pan");
+        if (e.key === "n" || e.key === "N") selectNavTool("waypoint");
+        if (e.key === "c" || e.key === "C") selectNavTool("connect");
+        if (e.key === "e" || e.key === "E") selectNavTool("erase");
+        return;
       }
       if (e.key === "v" || e.key === "V") switchTool("select");
       if (e.key === "w" || e.key === "W") switchTool("wall");
@@ -2943,10 +5818,16 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
     };
     window.addEventListener("keydown", k);
     return () => window.removeEventListener("keydown", k);
-  }, [allSelectableIds, selected, multiSelected, tool, undo, redo, applyEntry, handleSave, fitFloor, switchTool, deleteSelection, duplicateSelection, selectFloorItem, selectionForId]);
+  }, [allSelectableIds, selected, multiSelected, tool, navTool, undo, redo, applyEntry, handleSave, fitFloor, switchTool, deleteSelection, duplicateSelection, copySelection, pasteSelection, copyNavSelection, pasteNavSelection, duplicateNavSelection, selectFloorItem, selectionForId, navMode, indoorNodes, indoorEdges, deleteNavSelection, selectNavTool, navSelected, navMultiSelected, navSelectedBend, removeBendFromEdge, navConnectStart, navConnectBends, pushHistory, commitNavGraph, updFloor, isSelectionLocked, linkedObjectRef, floorUndoEntryFromFloor, floor, rooms, fpaths, walls, doors, windows, furniture, stairs, elevators, labels, ramps, FP_W, FP_H]);
 
   // ── Cursor ──
-  const cursor = isSpacePressed()
+  const cursor = navMode
+    ? (isSpacePressed() || navTool === "pan")
+      ? (panning.current ? "grabbing" : "grab")
+      : navTool === "erase" ? "not-allowed"
+      : navTool === "waypoint" || navTool === "destination" || navTool === "connect" || navTool === "link" ? "crosshair"
+      : "default"
+    : isSpacePressed()
     ? panning.current ? "grabbing" : "grab"
     : tool === "erase" ? "not-allowed"
     : tool === "pan" ? "grab"
@@ -2971,6 +5852,12 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
     { id: "text" as SimpleTool, icon: Text, label: "Text", key: "T" },
     { id: "path" as SimpleTool, icon: GitBranchIcon, label: "Path", key: "P" },
     { id: "erase" as SimpleTool, icon: TrashIcon, label: "Erase", key: "E" },
+  ];
+  const navTools = [
+    { id: "select" as const, icon: MousePointer2, label: "Select", hint: "Select waypoints and paths" },
+    { id: "pan" as const, icon: Hand, label: "Pan", hint: "Pan the floor canvas" },
+    { id: "connect" as const, icon: Link2, label: "Connect", hint: "Connect routing points and locations" },
+    { id: "erase" as const, icon: TrashIcon, label: "Remove", hint: "Remove — Delete the selected waypoint or path" },
   ];
 
   // ── Selected item for properties panel ──
@@ -3137,34 +6024,63 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
         transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
         className="shrink-0 bg-card border-b border-border"
       >
-        <div className="flex items-center h-10 px-2 gap-1">
+        {/* B5 Phase 6.9: de-cramped top toolbar — always wraps into tidy rows
+            (breadcrumb/floor selector/mode/tools on the first, utilities + Save
+            on the second) instead of forcing every control into one squeezed
+            line at xl widths; slightly taller hit area + breathing room. */}
+        <div className="flex flex-wrap items-center min-h-11 px-3 py-1.5 gap-x-3 gap-y-2">
           {/* Breadcrumb */}
-          <button onClick={onBack} className="flex items-center gap-1 h-7 px-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-all text-[11px] font-semibold shrink-0 group">
-            <ArrowLeft className="h-3.5 w-3.5 group-hover:-translate-x-0.5 transition-transform" />
-            <span className="hidden sm:inline">{campus.name}</span>
-          </button>
-          <ChevronRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />
-          <span className="text-[11px] text-muted-foreground font-semibold shrink-0">{building.code}</span>
-          <ChevronRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />
-          <span className="text-xs font-extrabold text-foreground truncate max-w-[120px]">{floor.label}</span>
-          <span className="text-[9px] text-muted-foreground/50 ml-1 font-medium shrink-0">
-            ({allItemsCount} item{allItemsCount !== 1 ? "s" : ""})
-          </span>
+          <div className="flex items-center gap-1 min-w-0 shrink-0">
+            <button onClick={handleBack} className="flex items-center gap-1 h-7 px-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-all text-[11px] font-semibold shrink-0 group">
+              <ArrowLeft className="h-3.5 w-3.5 group-hover:-translate-x-0.5 transition-transform" />
+              <span className="hidden sm:inline max-w-[120px] truncate">{campus.name}</span>
+            </button>
+            <ChevronRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />
+            <span className="text-[11px] text-muted-foreground font-semibold shrink-0">{building.code}</span>
+            <ChevronRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />
+            <span className="text-xs font-extrabold text-foreground truncate max-w-[120px]">{floor.label}</span>
+            <span className="text-[9px] text-muted-foreground/50 ml-1 font-medium shrink-0">
+              ({allItemsCount} item{allItemsCount !== 1 ? "s" : ""})
+            </span>
+          </div>
 
-          {/* Floor tabs — right-clicking a tab opens the shared floor actions menu for THAT floor */}
-          <div className="flex items-center gap-0.5 ml-2 overflow-x-auto no-scrollbar">
-            {building.floors.map((f) => (
-              <button key={f.id}
-                className={cn("shrink-0 h-6 px-2 rounded-md text-[10px] font-extrabold transition-all",
-                  f.id === floorId ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:bg-muted hover:text-foreground")}
-                onClick={() => requestFloorSwitch(f.id)}
-                onContextMenu={(e) => {
-                  e.preventDefault();
-                  setFloorMenu({ floorId: f.id, x: e.clientX, y: e.clientY });
-                }}>
-                {f.label}
-              </button>
-            ))}
+          {/* Floor tabs — right-clicking a tab opens the shared floor actions menu for THAT floor.
+              B5 Phase 3.1.4: the tab LIST lives in a BOUNDED flex-1 scroll region so many floors
+              never push the pinned Add Floor (+) / Floor actions (…) controls off-screen; the
+              active tab auto-scrolls into view on creation/switch. */}
+          <div className="relative flex items-center gap-1.5 min-w-[190px] flex-[1_1_240px] max-w-[320px] xl:flex-none xl:w-[300px]" data-testid="floor-tab-bar">
+            <button
+              type="button"
+              onClick={() => previousFloor && requestFloorSwitch(previousFloor.id)}
+              disabled={!previousFloor}
+              title={previousFloor ? `Previous floor: ${previousFloor.label}` : "No previous floor"}
+              aria-label="Previous floor"
+              className="shrink-0 h-6 w-6 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground flex items-center justify-center transition-all"
+            >
+              <ChevronLeft className="h-3.5 w-3.5" />
+            </button>
+            <button
+              type="button"
+              ref={floorSelectorButtonRef}
+              onClick={() => { setFloorSelectorOpen((v) => !v); setFloorMenu(null); }}
+              aria-expanded={floorSelectorOpen}
+              aria-label="Select floor"
+              title={floor.label}
+              className="min-w-0 flex-1 h-7 px-2.5 rounded-md border border-border bg-card text-[10px] font-extrabold text-foreground hover:bg-muted transition-all flex items-center justify-between gap-1.5"
+            >
+              <span className="truncate">{floor.label}</span>
+              <ChevronDown className={cn("h-3 w-3 shrink-0 text-muted-foreground transition-transform", floorSelectorOpen && "rotate-180")} />
+            </button>
+            <button
+              type="button"
+              onClick={() => nextFloor && requestFloorSwitch(nextFloor.id)}
+              disabled={!nextFloor}
+              title={nextFloor ? `Next floor: ${nextFloor.label}` : "No next floor"}
+              aria-label="Next floor"
+              className="shrink-0 h-6 w-6 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground flex items-center justify-center transition-all"
+            >
+              <ChevronRight className="h-3.5 w-3.5" />
+            </button>
             <button
               type="button"
               onClick={addFloorFromEditor}
@@ -3189,64 +6105,179 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
                 <MoreHorizontal className="h-3.5 w-3.5" />
               </button>
             </div>
-          </div>
-
-          <div className="flex-1" />
-
-          {/* Core tools */}
-          <div className="flex items-center gap-0.5 p-0.5 rounded-lg border border-border bg-muted/30">
-            {toolbarTools.map((t) => {
-              const Icon = t.icon;
-              const isActive = tool === t.id;
-              return (
-                <button key={t.id} onClick={() => switchTool(t.id)}
-                  title={`${t.label} (${t.key})`}
-                  className={cn("flex items-center justify-center h-6 w-6 rounded-md text-[10px] font-bold transition-all",
-                    isActive ? "bg-primary text-primary-foreground shadow-sm"
-                    : "text-muted-foreground hover:text-foreground hover:bg-muted")}>
-                  <Icon className="h-3 w-3" />
-                </button>
-              );
-            })}
-            <div className="relative">
-              <button
-                onClick={() => setShowMoreTools((v) => !v)}
-                title="More tools"
-                aria-label="More tools"
-                className={cn("flex items-center gap-1 h-6 px-2 rounded-md text-[10px] font-extrabold transition-all",
-                  showMoreTools ? "bg-primary/10 text-primary" : "text-muted-foreground hover:text-foreground hover:bg-muted")}
+            {floorSelectorOpen && (
+              <div
+                ref={floorSelectorPopoverRef}
+                data-testid="floor-selector-popover"
+                className="fixed z-50 rounded-lg border border-border bg-card shadow-xl overflow-hidden"
+                style={{
+                  left: floorSelectorPosition?.left ?? 12,
+                  top: floorSelectorPosition?.top ?? 48,
+                  width: floorSelectorPosition?.width ?? 280,
+                }}
               >
-                <MoreHorizontal className="h-3.5 w-3.5" />
-                <span className="hidden md:inline">More tools</span>
-              </button>
-              {showMoreTools && (
-                <div className="absolute right-0 top-8 z-50 w-56 rounded-xl border border-border bg-card shadow-2xl p-1.5 grid grid-cols-2 gap-1">
-                  {moreTools.map((t) => {
-                    const Icon = t.icon;
-                    const isActive = tool === t.id;
-                    return (
-                      <button
-                        key={t.id}
-                        onClick={() => switchTool(t.id)}
-                        className={cn("flex items-center gap-2 h-8 px-2 rounded-lg text-[11px] font-bold transition-all text-left",
-                          isActive && t.id === "erase" ? "bg-destructive text-destructive-foreground"
-                          : isActive ? "bg-primary text-primary-foreground"
-                          : "text-muted-foreground hover:bg-muted hover:text-foreground")}
-                      >
-                        <Icon className="h-3.5 w-3.5 shrink-0" />
-                        <span className="truncate">{t.label}</span>
-                        <span className="ml-auto text-[8px] opacity-70">{t.key}</span>
-                      </button>
-                    );
-                  })}
+                <div className="px-3 py-2 border-b border-border">
+                  <div className="text-[10px] font-extrabold uppercase tracking-wide text-muted-foreground">Floors</div>
                 </div>
-              )}
-            </div>
+                {buildingFloors.length > 15 && (
+                  <label className="flex items-center gap-2 h-9 px-2 border-b border-border">
+                    <Search className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                    <input
+                      value={floorSelectorSearch}
+                      onChange={(e) => setFloorSelectorSearch(e.target.value)}
+                      placeholder="Search floors"
+                      className="min-w-0 flex-1 bg-transparent outline-none text-[11px] font-semibold text-foreground placeholder:text-muted-foreground"
+                    />
+                  </label>
+                )}
+                <div
+                  className="overflow-y-auto py-1"
+                  style={{ maxHeight: floorSelectorPosition ? Math.max(96, floorSelectorPosition.maxHeight - (buildingFloors.length > 15 ? 78 : 37)) : 288 }}
+                  role="listbox"
+                  aria-label="Floors"
+                >
+                  {filteredFloorOptions.map((f) => (
+                    <button
+                      key={f.id}
+                      type="button"
+                      role="option"
+                      aria-selected={f.id === floorId}
+                      data-testid="floor-selector-option"
+                      onClick={() => requestFloorSwitch(f.id)}
+                      onContextMenu={(e) => {
+                        // B5 Phase 3.2: right-clicking a floor in the selector opens
+                        // the SHARED floor actions menu for THAT floor — preserving
+                        // the old tab right-click capability in the dropdown design
+                        // (the actions menu already targets floorMenu.floorId).
+                        e.preventDefault();
+                        setFloorSelectorOpen(false);
+                        setFloorMenu({ floorId: f.id, x: e.clientX, y: e.clientY });
+                      }}
+                      className={cn(
+                        "w-full h-8 px-3 text-left text-[11px] font-bold flex items-center justify-between gap-3 hover:bg-muted transition-colors",
+                        f.id === floorId ? "text-primary bg-primary/10" : "text-foreground"
+                      )}
+                      title={f.label}
+                    >
+                      <span className="flex items-center gap-2 min-w-0">
+                        <CheckCircle2 className={cn("h-3.5 w-3.5 shrink-0", f.id === floorId ? "opacity-100" : "opacity-0")} />
+                        <span className="truncate">{f.label}</span>
+                      </span>
+                      <span className="shrink-0 text-[9px] font-mono text-muted-foreground">#{f.number}</span>
+                    </button>
+                  ))}
+                  {filteredFloorOptions.length === 0 && (
+                    <div className="px-3 py-4 text-[11px] font-semibold text-muted-foreground">No floors found</div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
+
+          {/* Mode switch — Design architectural authoring vs Navigation graph authoring */}
+          <div className="flex items-center p-0.5 rounded-lg border border-border bg-muted/30 mx-0.5" role="tablist" aria-label="Floor editor mode">
+            {[
+              { id: "structure" as FloorEditorMode, label: "Design" },
+              { id: "navigation" as FloorEditorMode, label: "Navigation" },
+            ].map((m) => (
+              <button
+                key={m.id}
+                role="tab"
+                aria-selected={mode === m.id}
+                onClick={() => switchFloorEditorMode(m.id)}
+                className={cn("h-6 px-2.5 rounded-md text-[10px] font-extrabold transition-all",
+                  mode === m.id ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground hover:bg-muted")}
+                title={m.id === "structure" ? "Edit rooms, walls, doors and furniture" : "Author the indoor walking network"}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Contextual tools — Navigation toolbar replaces the design toolbar.
+              B5 Phase 2.2: a restrained keyed fade/slide (150–220ms) so the
+              switch feels intentional; the canvas itself never remounts. */}
+          <motion.div
+            key={navMode ? "nav-toolbar" : "design-toolbar"}
+            initial={{ opacity: 0, x: navMode ? 6 : -6 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+            className="flex items-center min-w-0"
+          >
+          {navMode ? (
+            <div className="flex items-center gap-0.5 p-0.5 rounded-lg border border-border bg-muted/30" data-testid="floor-nav-toolbar">
+              {navTools.map((t) => {
+                const Icon = t.icon;
+                const isActive = navTool === t.id;
+                return (
+                  <button key={t.id} onClick={() => selectNavTool(t.id)}
+                    title={t.hint}
+                    aria-label={t.hint}
+                    className={cn("flex items-center gap-1 h-6 px-2 rounded-md text-[10px] font-extrabold transition-all",
+                      isActive ? "bg-primary text-primary-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground hover:bg-muted")}>
+                    <Icon className="h-3 w-3" />
+                    <span className="hidden md:inline">{t.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="flex items-center gap-0.5 p-0.5 rounded-lg border border-border bg-muted/30">
+              {toolbarTools.map((t) => {
+                const Icon = t.icon;
+                const isActive = tool === t.id;
+                return (
+                  <button key={t.id} onClick={() => switchTool(t.id)}
+                    title={`${t.label} (${t.key})`}
+                    className={cn("flex items-center justify-center h-6 w-6 rounded-md text-[10px] font-bold transition-all",
+                      isActive ? "bg-primary text-primary-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground hover:bg-muted")}>
+                    <Icon className="h-3 w-3" />
+                  </button>
+                );
+              })}
+              <div className="relative">
+                <button
+                  onClick={() => setShowMoreTools((v) => !v)}
+                  title="More tools"
+                  aria-label="More tools"
+                  className={cn("flex items-center gap-1 h-6 px-2 rounded-md text-[10px] font-extrabold transition-all",
+                    showMoreTools ? "bg-primary/10 text-primary" : "text-muted-foreground hover:text-foreground hover:bg-muted")}
+                >
+                  <MoreHorizontal className="h-3.5 w-3.5" />
+                  <span className="hidden md:inline">More tools</span>
+                </button>
+                {showMoreTools && (
+                  <div className="absolute right-0 top-8 z-50 w-56 rounded-xl border border-border bg-card shadow-2xl p-1.5 grid grid-cols-2 gap-1">
+                    {moreTools.map((t) => {
+                      const Icon = t.icon;
+                      const isActive = tool === t.id;
+                      return (
+                        <button
+                          key={t.id}
+                          onClick={() => switchTool(t.id)}
+                          className={cn("flex items-center gap-2 h-8 px-2 rounded-lg text-[11px] font-bold transition-all text-left",
+                            isActive && t.id === "erase" ? "bg-destructive text-destructive-foreground"
+                            : isActive ? "bg-primary text-primary-foreground"
+                            : "text-muted-foreground hover:bg-muted hover:text-foreground")}
+                        >
+                          <Icon className="h-3.5 w-3.5 shrink-0" />
+                          <span className="truncate">{t.label}</span>
+                          <span className="ml-auto text-[8px] opacity-70">{t.key}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+          </motion.div>
 
           {selectedLabel && multiSelected.length <= 1 && !inlineLabelEdit && (
             <>
-              <div className="w-px h-5 bg-border mx-0.5" />
+              <div className="hidden sm:block w-px h-5 bg-border mx-1" />
               <div
                 className="flex items-center gap-1 rounded-lg border border-border bg-muted/30 p-0.5"
                 data-testid="selected-label-font-controls"
@@ -3280,7 +6311,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
             </>
           )}
 
-          <div className="w-px h-5 bg-border mx-0.5" />
+          <div className="hidden sm:block w-px h-5 bg-border mx-1" />
 
           {/* Undo/Redo */}
           <button onClick={() => applyEntry(undo())} disabled={!canUndo}
@@ -3296,7 +6327,8 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
             <Redo2 className="h-3.5 w-3.5" />
           </button>
 
-          <div className="w-px h-5 bg-border mx-0.5" />
+          <div className="hidden xl:block flex-1 min-w-8" />
+          <div className="hidden sm:block w-px h-5 bg-border mx-1" />
 
           {/* Snap toggle */}
           <button onClick={() => setSnapOn((v) => !v)}
@@ -3307,6 +6339,19 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
             Grid
           </button>
 
+          {/* B5 Phase 2.5: Design-mode READ-ONLY navigation overlay — a view
+              preference for alignment/reference (never marks the draft dirty). */}
+          {!navMode && (
+            <button onClick={() => setShowNavOverlay((v) => !v)}
+              title="Show the navigation graph as a read-only overlay while editing the floor"
+              aria-label="Show Navigation overlay"
+              className={cn("flex items-center justify-center h-7 px-2 rounded-md text-[10px] font-bold transition-all border",
+                showNavOverlay ? "bg-primary/10 border-primary/30 text-primary" : "border-border text-muted-foreground hover:text-foreground hover:bg-muted")}>
+              <Waypoints className="h-3 w-3 mr-1" />
+              Show Navigation
+            </button>
+          )}
+
           <button onClick={fitFloor}
             title="Fit Floor"
             aria-label="Fit Floor"
@@ -3314,13 +6359,21 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
             <Maximize2 className="h-3.5 w-3.5" />
           </button>
 
+          {/* B5 Phase 3.1: compact one-line Issues control — whitespace-nowrap
+              keeps icon + label + count chip on a single line at desktop widths
+              (the old "Issues 0" text could wrap vertically). */}
           <button onClick={() => setShowIssues(true)}
             title="Issues"
-            aria-label={`Issues: ${floorIssues.length}`}
-            className={cn("flex items-center gap-1 h-7 px-2 rounded-md text-[10px] font-extrabold transition-all border",
-              blockingIssues.length > 0 ? "border-destructive/30 bg-destructive/10 text-destructive" : "border-border text-emerald-600 hover:bg-muted")}>
-            {blockingIssues.length > 0 ? <AlertTriangle className="h-3 w-3" /> : <CheckCircle2 className="h-3 w-3" />}
-            Issues {floorIssues.length}
+            aria-label={`Issues: ${totalIssues}`}
+            data-testid="issues-toolbar"
+            className={cn("flex items-center gap-1.5 h-7 px-2.5 rounded-md text-[10px] font-extrabold whitespace-nowrap shrink-0 transition-all border",
+              hasAnyIssues ? "border-destructive/30 bg-destructive/10 text-destructive" : "border-border text-emerald-600 hover:bg-muted")}>
+            {hasAnyIssues ? <AlertTriangle className="h-3 w-3" /> : <CheckCircle2 className="h-3 w-3" />}
+            <span>Issues</span>
+            <span className={cn("min-w-[18px] h-4 px-1 rounded-full text-[9px] flex items-center justify-center",
+              hasAnyIssues ? "bg-destructive/15 text-destructive" : "bg-emerald-500/10 text-emerald-700")}>
+              {totalIssues}
+            </span>
           </button>
 
           <button onClick={() => setShowShortcuts(true)}
@@ -3383,11 +6436,81 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
           transition={{ duration: 0.3, delay: 0.08, ease: [0.16, 1, 0.3, 1] }}
           className="w-52 border-r border-border bg-card flex flex-col overflow-hidden shrink-0"
         >
-          <div className="px-3 py-2.5 border-b border-border">
-            <p className="text-[10px] font-extrabold uppercase tracking-widest text-muted-foreground">Object Library</p>
-            <p className="text-[10px] text-muted-foreground/70 mt-0.5">Build indoor floor content</p>
-          </div>
-          <div className="flex-1 overflow-y-auto scrollbar-show-on-hover scroll-smooth p-2 space-y-3">
+          {/* B5 Phase 2.2: subtle keyed transition for the sidebar content on
+              Design ↔ Navigation switch — never touches the canvas camera. */}
+          <motion.div
+            key={navMode ? "nav-library" : "object-library"}
+            initial={{ opacity: 0, x: -8 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+            className="flex flex-col flex-1 min-h-0 overflow-hidden"
+          >
+          {navMode ? (
+            <>
+              <div className="px-3 py-2.5 border-b border-border">
+                <p className="text-[10px] font-extrabold uppercase tracking-widest text-muted-foreground">Navigation Library</p>
+                <p className="text-[10px] text-muted-foreground/70 mt-0.5">Author the indoor walking network</p>
+              </div>
+              <div className="flex-1 overflow-y-auto scrollbar-show-on-hover scroll-smooth p-2 space-y-3">
+                <div>
+                  <span className="px-1 text-[9px] font-extrabold uppercase tracking-wider text-muted-foreground">Create</span>
+                  <div className="grid grid-cols-2 gap-1 mt-1">
+                    {[
+                      { kind: "waypoint", label: "Waypoint", icon: Waypoints, tool: "waypoint" as const, tip: "Drag onto the floor to place a routing point. Click to arm the Waypoint tool." },
+                      { kind: "destination", label: "Destination", icon: MapPin, tool: "destination" as const, tip: "Drag onto the floor to place a destination point. Click to arm the Destination tool." },
+                    ].map((item) => (
+                      <button
+                        key={item.kind}
+                        data-testid={`nav-library-${item.kind}`}
+                        draggable
+                        onDragStart={(e) => {
+                          e.dataTransfer.setData("text/plain", item.kind);
+                          e.dataTransfer.effectAllowed = "copy";
+                          navLibraryDragRef.current = item.kind;
+                        }}
+                        onDragEnd={() => { navLibraryDragRef.current = null; setNavDragPreview(null); setNavDragBlocked(null); setNavTargetHover(null); }}
+                        onClick={() => selectNavTool(item.tool)}
+                        className="h-14 rounded-lg border text-left px-2 py-1.5 transition-all hover:bg-muted/60 text-foreground"
+                        title={item.tip}
+                      >
+                        <item.icon className="h-4 w-4 mb-1" />
+                        <span className="text-[10px] font-bold block truncate">{item.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                  <p className="px-1 mt-1.5 text-[9px] leading-relaxed text-muted-foreground/70">Drag onto the floor to place, or click to arm the placement tool.</p>
+                </div>
+
+                {/* B5 Phase 2.2: ONE unified Link Location action — the type is
+                    inferred from the physical object you click (Room / Door /
+                    Stairs / Elevator / Ramp), so wrong-type links are impossible. */}
+                <div>
+                  <span className="px-1 text-[9px] font-extrabold uppercase tracking-wider text-muted-foreground">Link</span>
+                  <button
+                    data-testid="nav-library-link"
+                    onClick={() => selectNavTool("link")}
+                    className={cn("h-10 w-full rounded-lg border text-left px-2 py-1.5 transition-all",
+                      navTool === "link" ? "border-primary bg-primary/8 text-primary" : "border-border hover:bg-muted/60 text-foreground")}
+                    title="Link an existing Room, Door, Stair, Elevator or Ramp to the walking network"
+                  >
+                    <span className="flex items-center gap-2">
+                      <Link2 className="h-3.5 w-3.5 shrink-0" />
+                      <span className="text-[10px] font-bold block truncate">Link Location</span>
+                    </span>
+                  </button>
+                  <p className="px-1 mt-1.5 text-[9px] leading-relaxed text-muted-foreground/70">
+                    Link an existing Room, Door, Stair, Elevator or Ramp to the walking network.
+                  </p>
+                </div>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="px-3 py-2.5 border-b border-border">
+                <p className="text-[10px] font-extrabold uppercase tracking-widest text-muted-foreground">Object Library</p>
+                <p className="text-[10px] text-muted-foreground/70 mt-0.5">Build indoor floor content</p>
+              </div>
+              <div className="flex-1 overflow-y-auto scrollbar-show-on-hover scroll-smooth p-2 space-y-3">
             <div>
               <span className="px-1 text-[9px] font-extrabold uppercase tracking-wider text-muted-foreground">Build</span>
               <div className="grid grid-cols-2 gap-1 mt-1">
@@ -3499,7 +6622,10 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
                 })}
               </div>
             </div>
-          </div>
+              </div>
+            </>
+          )}
+          </motion.div>
         </motion.div>
 
         {/* ── CANVAS ── */}
@@ -3511,7 +6637,13 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
           className="flex-1 overflow-hidden relative"
           style={{ background: "#b0ada8" }}
           onWheel={handleWheel}
+          onDragOver={(e) => handleNavLibraryDragOver(e)}
+          onDrop={(e) => handleNavLibraryDrop(e)}
+          onDragLeave={(e) => {
+            if (e.target === e.currentTarget) { setNavDragPreview(null); setNavDragBlocked(null); setNavTargetHover(null); }
+          }}
           onMouseDown={(e) => {
+            if (navMode) return; // Navigation mode clears its own graph selection.
             if (e.target !== containerRef.current || tool !== "select" || e.shiftKey) return;
             setSelected(null);
             setMultiSelected([]);
@@ -3529,6 +6661,17 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
             onDoubleClick={handleDblClick}
             onContextMenu={(e) => {
               e.preventDefault();
+              if (navMode) {
+                // Navigation right-click cancels an incomplete connection
+                // (including any temporary pinned bends).
+                setNavConnectStart(null);
+                setNavPreview(null);
+                setNavConnectBends([]);
+                navConnectBendGroupsRef.current = [];
+                setNavTargetHover(null);
+                setContextMenu(null);
+                return;
+              }
               const target = e.target as SVGElement;
               const isBg = target === svgRef.current || target.dataset.bg === "true" || target.closest?.('[data-bg="true"]') != null;
               if (isBg) setContextMenu({ x: e.clientX, y: e.clientY, type: "canvas" });
@@ -3613,7 +6756,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
                 const cx = room.x + room.w / 2;
                 const cy = room.y + room.h / 2;
                 return (
-                  <g key={room.id} clipPath={`url(#${floorClipId})`} onMouseDown={(e) => onItemDown(e, "room", room.id, room)}
+                  <g key={room.id} clipPath={`url(#${floorClipId})`} data-floor-title={room.name} aria-label={room.name} onMouseDown={(e) => onItemDown(e, "room", room.id, room)}
                     onContextMenu={(e) => onItemContextMenu(e, "room", room.id)}
                     opacity={visibleOpacity(room)}
                     style={{ cursor: tool === "select" ? room.locked ? "default" : "move" : cursor }}>
@@ -3626,23 +6769,6 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
                       <line x1={room.x + 1} y1={room.y + 1} x2={room.x + room.w - 1} y2={room.y + 1}
                         stroke="rgba(0,0,0,0.06)" strokeWidth={1.5} />
                     </g>
-                    {isSel && (
-                      <CirculationSelectionHandles
-                        x={room.x} y={room.y} width={room.w} height={room.h}
-                        rotation={rotation}
-                        handleSize={handleSizeFor(room.w, room.h)}
-                        rotateOffset={rotateHandleOffsetFor(room.h)}
-                        testPrefix="room"
-                        onResize={(event, handle) => onResizeStart(event, room, handle)}
-                        onRotate={(event) => onRotateStart(event, "room", room.id, { x: room.x, y: room.y, width: room.w, height: room.h, rotation })}
-                      />
-                    )}
-                    {isSel && room.w > 60 && room.h > 24 && (
-                      <text x={cx} y={room.y + room.h + 12} textAnchor="middle"
-                        fill="#706d68" fontSize={6} fontWeight="500" className="pointer-events-none select-none">
-                        {room.w}x{room.h} | {Math.round(rotation)} deg
-                      </text>
-                    )}
                     {room.locked && (
                       <g transform={`translate(${room.x + room.w - 10}, ${room.y + 4}) rotate(${rotation}, 4, 4)`} className="pointer-events-none">
                         <rect x={0} y={0} width={8} height={8} rx={1.5} fill="rgba(15,23,42,0.78)" />
@@ -3793,6 +6919,8 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
                   return (
                     <g key={door.id} onMouseDown={(e) => onItemDown(e, "door", door.id, door)}
                       data-testid="attached-door-opening-symbol"
+                      data-floor-title={door.label ?? "Door"}
+                      aria-label={door.label ?? "Door"}
                       onContextMenu={(e) => onItemContextMenu(e, "door", door.id)}
                       opacity={visibleOpacity(door)}
                       transform={openingSymbolTransform(geom)}
@@ -3852,7 +6980,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
                   );
                 }
                 return (
-                  <g key={door.id} clipPath={`url(#${floorClipId})`} onMouseDown={(e) => onItemDown(e, "door", door.id, door)}
+                  <g key={door.id} clipPath={`url(#${floorClipId})`} data-floor-title={door.label ?? "Door"} aria-label={door.label ?? "Door"} onMouseDown={(e) => onItemDown(e, "door", door.id, door)}
                     onContextMenu={(e) => onItemContextMenu(e, "door", door.id)}
                     opacity={visibleOpacity(door)}
                     style={{ cursor: tool === "select" ? "pointer" : cursor }}>
@@ -3951,6 +7079,200 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
                 );
               })}
 
+              {floorLayerStack.map((entry) => {
+                if (entry.type === "room") {
+                  const room = entry.item;
+                  const rt = ROOM_MAP[room.type] ?? ROOM_MAP.classroom;
+                  const isSel = (selected?.type === "room" && selected.id === room.id) || multiSelected.includes(room.id);
+                  const rotation = room.rotation ?? 0;
+                  const cx = room.x + room.w / 2;
+                  const cy = room.y + room.h / 2;
+                  const roomName = room.name.length > 18 ? `${room.name.slice(0, 17)}...` : room.name;
+                  const fontSize = Math.min(room.w > 90 ? 8 : 7, 9);
+                  const labelW = Math.min(room.w - 6, Math.max(28, roomName.length * fontSize * 0.58 + 8));
+                  return (
+                    <g
+                      key={`${entry.type}-${entry.id}`}
+                      data-layer-key={`${entry.type}:${entry.id}`}
+                      clipPath={`url(#${floorClipId})`}
+                      data-floor-title={room.name}
+                      aria-label={room.name}
+                      onMouseDown={(e) => onItemDown(e, "room", room.id, room)}
+                      onContextMenu={(e) => onItemContextMenu(e, "room", room.id)}
+                      opacity={visibleOpacity(room)}
+                      style={{ cursor: tool === "select" ? room.locked ? "default" : "move" : cursor }}
+                    >
+                      <g transform={`rotate(${rotation}, ${cx}, ${cy})`}>
+                        <rect x={room.x} y={room.y} width={room.w} height={room.h} rx={1} fill="transparent" stroke="none" />
+                        {room.visible !== false && room.w >= 40 && room.h >= 18 && (
+                          <g data-testid="room-label-overlay" className="pointer-events-none select-none">
+                            <rect
+                              x={cx - labelW / 2}
+                              y={cy - fontSize / 2 - 4}
+                              width={labelW}
+                              height={fontSize + 8}
+                              rx={2}
+                              fill={floor.backgroundColor ?? "#ffffff"}
+                              fillOpacity={0.72}
+                              stroke="rgba(15,23,42,0.12)"
+                              strokeWidth={0.6}
+                            />
+                            <text
+                              x={cx}
+                              y={cy + fontSize * 0.34}
+                              textAnchor="middle"
+                              fill={rt.text}
+                              fontSize={fontSize}
+                              fontWeight="700"
+                              stroke={floor.backgroundColor ?? "#ffffff"}
+                              strokeWidth={1.8}
+                              paintOrder="stroke fill"
+                            >
+                              {roomName}
+                            </text>
+                          </g>
+                        )}
+                      </g>
+                      {isSel && (
+                        <CirculationSelectionHandles
+                          x={room.x} y={room.y} width={room.w} height={room.h}
+                          rotation={rotation}
+                          handleSize={handleSizeFor(room.w, room.h)}
+                          rotateOffset={rotateHandleOffsetFor(room.h)}
+                          testPrefix="room"
+                          onResize={(event, handle) => onResizeStart(event, room, handle)}
+                          onRotate={(event) => onRotateStart(event, "room", room.id, { x: room.x, y: room.y, width: room.w, height: room.h, rotation })}
+                        />
+                      )}
+                      {isSel && room.w > 60 && room.h > 24 && (
+                        <text x={cx} y={room.y + room.h + 12} textAnchor="middle"
+                          fill="#706d68" fontSize={6} fontWeight="500" className="pointer-events-none select-none">
+                          {room.w}x{room.h} | {Math.round(rotation)} deg
+                        </text>
+                      )}
+                    </g>
+                  );
+                }
+
+                if (entry.type === "furniture") {
+                  const fi = entry.item;
+                  const isSel = (selected?.type === "furniture" && selected.id === fi.id) || multiSelected.includes(fi.id);
+                  const cx = fi.x + fi.width / 2;
+                  const cy = fi.y + fi.height / 2;
+                  return (
+                    <g
+                      key={`${entry.type}-${entry.id}`}
+                      data-layer-key={`${entry.type}:${entry.id}`}
+                      onMouseDown={(e) => onItemDown(e, "furniture", fi.id, fi)}
+                      onContextMenu={(e) => onItemContextMenu(e, "furniture", fi.id)}
+                      opacity={visibleOpacity(fi)}
+                      style={{ cursor: tool === "select" ? "move" : cursor }}
+                    >
+                      {isSel && (
+                        <g transform={`rotate(${fi.rotation}, ${cx}, ${cy})`}>
+                          <rect data-testid="furniture-selection-outline" x={fi.x - 2} y={fi.y - 2} width={fi.width + 4} height={fi.height + 4} rx={1}
+                            fill="none" stroke="var(--accent)" strokeWidth={1.5} strokeDasharray="3 2" />
+                          <line x1={cx} y1={fi.y - 2} x2={cx} y2={fi.y - rotateHandleOffsetFor(fi.height) + 2}
+                            stroke="var(--accent)" strokeWidth={1} strokeDasharray="2 2" />
+                          <circle data-testid="furniture-rotate-handle" cx={cx} cy={fi.y - rotateHandleOffsetFor(fi.height)}
+                            r={Math.max(3, handleSizeFor(fi.width, fi.height) * 0.72)}
+                            fill="white" stroke="var(--accent)" strokeWidth={1.4}
+                            style={{ cursor: "grab" }}
+                            onMouseDown={(e) => onRotateStart(e, "furniture", fi.id, fi)} />
+                          {["n", "s", "e", "w"].map((side) => {
+                            const hs = handleSizeFor(fi.width, fi.height);
+                            const hx = side === "e" ? fi.x + fi.width - hs / 2 : side === "w" ? fi.x - hs / 2 : fi.x + fi.width / 2 - hs / 2;
+                            const hy = side === "s" ? fi.y + fi.height - hs / 2 : side === "n" ? fi.y - hs / 2 : fi.y + fi.height / 2 - hs / 2;
+                            return (
+                              <rect
+                                key={side}
+                                data-testid="furniture-resize-handle"
+                                data-corner={side}
+                                x={hx}
+                                y={hy}
+                                width={hs}
+                                height={hs}
+                                rx={1.5}
+                                fill="white"
+                                stroke="var(--accent)"
+                                strokeWidth={1.2}
+                                style={{ cursor: side === "n" || side === "s" ? "ns-resize" : "ew-resize" }}
+                                onMouseDown={(e) => onFurnitureResizeStart(e, fi, side)}
+                              />
+                            );
+                          })}
+                          {["nw", "ne", "sw", "se"].map((corner) => {
+                            const hs = handleSizeFor(fi.width, fi.height);
+                            const hx = corner.includes("e") ? fi.x + fi.width - hs / 2 : fi.x - hs / 2;
+                            const hy = corner.includes("s") ? fi.y + fi.height - hs / 2 : fi.y - hs / 2;
+                            return (
+                              <rect
+                                key={corner}
+                                data-testid="furniture-resize-handle"
+                                data-corner={corner}
+                                x={hx}
+                                y={hy}
+                                width={hs}
+                                height={hs}
+                                rx={1.5}
+                                fill="white"
+                                stroke="var(--accent)"
+                                strokeWidth={1.5}
+                                style={{ cursor: "nwse-resize" }}
+                                onMouseDown={(e) => onFurnitureResizeStart(e, fi, corner)}
+                              />
+                            );
+                          })}
+                        </g>
+                      )}
+                      <g transform={`rotate(${fi.rotation}, ${cx}, ${cy})`}>
+                        <FloorFurnitureSymbol type={fi.type} x={fi.x} y={fi.y} width={fi.width} height={fi.height} color={fi.color} selected={isSel} />
+                        <title>{fi.name}</title>
+                      </g>
+                    </g>
+                  );
+                }
+
+                if (entry.type === "ramp" || entry.type === "stairs" || entry.type === "elevator") {
+                  const item = entry.item;
+                  const isSel = (selected?.type === entry.type && selected.id === item.id) || multiSelected.includes(item.id);
+                  const cx = item.x + item.width / 2;
+                  const cy = item.y + item.height / 2;
+                  const rotation = item.rotation ?? 0;
+                  return (
+                    <g
+                      key={`${entry.type}-${entry.id}`}
+                      data-layer-key={`${entry.type}:${entry.id}`}
+                      data-floor-title={item.label}
+                      aria-label={item.label}
+                      onMouseDown={(e) => onItemDown(e, entry.type, item.id, item)}
+                      onContextMenu={(e) => onItemContextMenu(e, entry.type, item.id)}
+                      opacity={visibleOpacity(item)}
+                      style={{ cursor: tool === "select" ? "move" : cursor }}
+                    >
+                      {isSel && (
+                        <CirculationSelectionHandles
+                          x={item.x} y={item.y} width={item.width} height={item.height}
+                          rotation={rotation}
+                          handleSize={handleSizeFor(item.width, item.height)}
+                          rotateOffset={rotateHandleOffsetFor(item.height)}
+                          testPrefix={entry.type}
+                          onResize={(event, handle) => onCirculationResizeStart(event, entry.type, item, handle)}
+                          onRotate={(event) => onRotateStart(event, entry.type, item.id, item)}
+                        />
+                      )}
+                      <g data-testid={`${entry.type}-symbol`} transform={`rotate(${rotation}, ${cx}, ${cy})`}>
+                        {entry.type === "ramp" ? <RampSymbol item={item} selected={isSel} /> : null}
+                        {entry.type === "stairs" ? <StairsSymbol item={item} selected={isSel} /> : null}
+                        {entry.type === "elevator" ? <ElevatorSymbol item={item} selected={isSel} /> : null}
+                      </g>
+                    </g>
+                  );
+                }
+
+                return null;
+              })}
+
               {/* ═══ ROOMS ═══ */}
               {false && rooms.map((room) => {
                 const rt = ROOM_MAP[room.type] ?? ROOM_MAP.classroom;
@@ -4001,7 +7323,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
               })}
 
               {/* ═══ FURNITURE ═══ */}
-              {orderedFurniture.map((fi) => {
+              {false && orderedFurniture.map((fi) => {
                 const isSel = (selected?.type === "furniture" && selected.id === fi.id) || multiSelected.includes(fi.id);
                 const cx = fi.x + fi.width / 2;
                 const cy = fi.y + fi.height / 2;
@@ -4078,7 +7400,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
               })}
 
               {/* ═══ RAMPS ═══ */}
-              {orderedRamps.map((rp) => {
+              {false && orderedRamps.map((rp) => {
                 const isSel = (selected?.type === "ramp" && selected.id === rp.id) || multiSelected.includes(rp.id);
                 const cx = rp.x + rp.width / 2;
                 const cy = rp.y + rp.height / 2;
@@ -4102,36 +7424,12 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
                     <g data-testid="ramp-symbol" transform={`rotate(${rotation}, ${cx}, ${cy})`}>
                       <RampSymbol item={rp} selected={isSel} />
                     </g>
-                    <rect x={rp.x} y={rp.y} width={rp.width} height={rp.height} rx={1}
-                      fill={isSel ? "rgba(5,150,105,0.25)" : "#ecfdf5"}
-                      stroke={isSel ? "var(--accent)" : "#6ee7b7"} strokeWidth={isSel ? 2 : 1} opacity={0} />
-                    {/* Ramp slope lines */}
-                    <line x1={rp.x + 3} y1={rp.y + rp.height - 3} x2={rp.x + rp.width - 3} y2={rp.y + 3}
-                      stroke={isSel ? "var(--accent)" : "#34d399"} strokeWidth={1.5} opacity={0} />
-                    <line x1={rp.x + 3} y1={rp.y + rp.height - 6} x2={rp.x + rp.width - 3} y2={rp.y + 6}
-                      stroke={isSel ? "var(--accent)" : "#34d399"} strokeWidth={1} opacity={0} />
-                    {/* Handrail indicators */}
-                    {rp.handrails && (
-                      <>
-                        <line x1={rp.x + 2} y1={rp.y + 2} x2={rp.x + rp.width - 2} y2={rp.y + 2}
-                          stroke="#059669" strokeWidth={1} opacity={0} />
-                        <line x1={rp.x + 2} y1={rp.y + rp.height - 2} x2={rp.x + rp.width - 2} y2={rp.y + rp.height - 2}
-                          stroke="#059669" strokeWidth={1} opacity={0} />
-                      </>
-                    )}
-                    {rp.width >= 20 && (
-                      <text x={rp.x + rp.width / 2} y={rp.y + rp.height / 2 + 2}
-                        textAnchor="middle" fill="#065f46" fontSize={6} fontWeight="700"
-                        className="pointer-events-none select-none" opacity={0}>
-                        ♿
-                      </text>
-                    )}
                   </g>
                 );
               })}
 
               {/* ═══ STAIRS ═══ */}
-              {orderedStairs.map((st) => {
+              {false && orderedStairs.map((st) => {
                 const isSel = (selected?.type === "stairs" && selected.id === st.id) || multiSelected.includes(st.id);
                 const cx = st.x + st.width / 2;
                 const cy = st.y + st.height / 2;
@@ -4155,26 +7453,12 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
                     <g data-testid="stairs-symbol" transform={`rotate(${rotation}, ${cx}, ${cy})`}>
                       <StairsSymbol item={st} selected={isSel} />
                     </g>
-                    <rect x={st.x} y={st.y} width={st.width} height={st.height} rx={1}
-                      fill={isSel ? "rgba(14,42,110,0.2)" : "#f3f4f6"}
-                      stroke={isSel ? "var(--accent)" : "#9ca3af"} strokeWidth={isSel ? 2 : 1} opacity={0} />
-                    {/* Stair tread lines */}
-                    {Array.from({ length: Math.min(6, Math.floor(st.width / 10)) }, (_, i) => (
-                      <line key={i} x1={st.x + (st.width / (Math.min(6, Math.floor(st.width / 10)) + 1)) * (i + 1)}
-                        y1={st.y} x2={st.x + (st.width / (Math.min(6, Math.floor(st.width / 10)) + 1)) * (i + 1)}
-                        y2={st.y + st.height} stroke="#9ca3af" strokeWidth={0.5} opacity={0} />
-                    ))}
-                    <text x={st.x + st.width / 2} y={st.y + st.height / 2 + 2}
-                      textAnchor="middle" fill="#6b7280" fontSize={6} fontWeight="600"
-                      className="pointer-events-none select-none" opacity={0}>
-                      {st.direction === "up" ? "↑" : st.direction === "down" ? "↓" : "↕"}
-                    </text>
                   </g>
                 );
               })}
 
               {/* ═══ ELEVATORS ═══ */}
-              {orderedElevators.map((el) => {
+              {false && orderedElevators.map((el) => {
                 const isSel = (selected?.type === "elevator" && selected.id === el.id) || multiSelected.includes(el.id);
                 const cx = el.x + el.width / 2;
                 const cy = el.y + el.height / 2;
@@ -4198,15 +7482,6 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
                     <g data-testid="elevator-symbol" transform={`rotate(${rotation}, ${cx}, ${cy})`}>
                       <ElevatorSymbol item={el} selected={isSel} />
                     </g>
-                    <rect x={el.x} y={el.y} width={el.width} height={el.height} rx={1}
-                      fill={isSel ? "rgba(14,42,110,0.2)" : "#f0fdf4"}
-                      stroke={isSel ? "var(--accent)" : "#86efac"} strokeWidth={isSel ? 2 : 1} opacity={0} />
-                    {/* Elevator door */}
-                    <rect x={el.x + el.width / 2 - el.doorWidth / 2} y={el.y + el.height - 3}
-                      width={el.doorWidth} height={3} fill="#86efac" rx={0.5} opacity={0} />
-                    <text x={el.x + el.width / 2} y={el.y + el.height / 2 + 2}
-                      textAnchor="middle" fill="#14532d" fontSize={7} fontWeight="700"
-                      className="pointer-events-none select-none" opacity={0}>E</text>
                   </g>
                 );
               })}
@@ -4226,7 +7501,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
               })}
 
               {/* ═══ LABELS ═══ */}
-              {orderedRooms.map((room) => {
+              {false && orderedRooms.map((room) => {
                 if (room.visible === false || room.w < 40 || room.h < 18) return null;
                 const rt = ROOM_MAP[room.type] ?? ROOM_MAP.classroom;
                 const cx = room.x + room.w / 2;
@@ -4608,9 +7883,9 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
                   <circle cx={wallSnapIndicator.x} cy={wallSnapIndicator.y} r={2.5} fill="var(--primary)" opacity={0.9} />
                 </g>
               )}
-              {/* Wall drawing preview */}
+              {/* Wall drawing preview — pointer-events-none so the completion click always reaches the svg background (real-browser hit-testing) */}
               {wallStart && wallPreview && (
-                <g>
+                <g className="pointer-events-none" data-testid="wall-draw-preview">
                   <line x1={wallStart.x} y1={wallStart.y} x2={wallPreview.x} y2={wallPreview.y}
                     stroke="var(--primary)" strokeWidth={4} strokeLinecap="round"
                     strokeDasharray="6 3" opacity={0.7} />
@@ -4628,7 +7903,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
                   })()}
                 </g>
               )}
-              {/* Room/stairs/elevator drag preview */}
+              {/* Room/stairs/elevator drag preview — pointer-events-none so drawing clicks reach the svg background */}
               {roomDrag && (tool === "room" || tool === "stairs" || tool === "ramp" || tool === "elevator") && (() => {
                 const rx = Math.min(roomDrag.sx, roomDrag.cx);
                 const ry = Math.min(roomDrag.sy, roomDrag.cy);
@@ -4636,17 +7911,522 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
                 const rh = Math.abs(roomDrag.cy - roomDrag.sy);
                 const color = tool === "stairs" ? "#9ca3af" : tool === "ramp" ? "#34d399" : tool === "elevator" ? "#86efac" : "var(--primary)";
                 return (
-                  <rect x={rx} y={ry} width={rw} height={rh} rx={2}
+                  <rect className="pointer-events-none" x={rx} y={ry} width={rw} height={rh} rx={2}
                     fill={color} fillOpacity={0.1}
                     stroke={color} strokeWidth={2} strokeDasharray="6 3" />
                 );
               })()}
-              {/* Drawing path */}
+              {/* Drawing path — pointer-events-none so completion clicks reach the svg background */}
               {drawingPath.length > 0 && (
-                <g>
+                <g className="pointer-events-none">
                   {drawingPath.length > 1 && <polyline points={drawingPath.map((p) => `${p.x},${p.y}`).join(" ")}
                     fill="none" stroke="var(--primary)" strokeWidth={3} strokeLinecap="round" strokeDasharray="8 4" opacity={0.9} />}
                   {drawingPath.map((pt, i) => <circle key={i} cx={pt.x} cy={pt.y} r={4} fill="var(--primary)" opacity={0.9} />)}
+                </g>
+              )}
+
+              {/* ═══ INDOOR NAVIGATION LAYER (Navigation mode) ═══ */}
+              {navMode && (
+                <g data-testid="floor-nav-layer">
+                  {/* B5 correction: empty-space drag surface for the nav graph
+                      group. Rendered BEFORE edges/nodes so they stay on top
+                      (event priority: bend > node > edge > group interior).
+                      The handler re-checks physical objects under the pointer
+                      so rooms/doors/circulation keep their nav selection. */}
+                  {navTool === "select" && navMultiSelected.length > 1 && (() => {
+                    const nodeIds = new Set(navMultiSelected.filter((id) => indoorNodes.some((n) => n.id === id)));
+                    const edgeIds = new Set(navMultiSelected.filter((id) => indoorEdges.some((e) => e.id === id)));
+                    if (nodeIds.size === 0 && edgeIds.size === 0) return null;
+                    const bounds = navGroupSelectionBounds(indoorNodes, indoorEdges, nodeIds, edgeIds);
+                    if (!bounds) return null;
+                    return (
+                      <rect
+                        data-testid="floor-nav-group-drag-surface"
+                        x={bounds.x}
+                        y={bounds.y}
+                        width={bounds.width}
+                        height={bounds.height}
+                        rx={2}
+                        fill="transparent"
+                        stroke="none"
+                        style={{ cursor: "move", pointerEvents: "fill" }}
+                        onMouseDown={(e) => handleNavGroupSurfaceDown(e)}
+                      />
+                    );
+                  })()}
+                  {/* Edges — geometry derived from node positions, drawn under nodes */}
+                  {indoorEdges.map((edge) => {
+                    const a = indoorNodes.find((n) => n.id === edge.startNodeId);
+                    const b = indoorNodes.find((n) => n.id === edge.endNodeId);
+                    if (!a || !b) return null;
+                    // B5 Phase 2.5: optional authored bends turn the edge into a
+                    // polyline (orthogonal hallway routing). Endpoints always come
+                    // from the nodes; bends are absolute geometry-only points.
+                    const pts = edgePolylinePoints(edge, indoorNodes) ?? [];
+                    const poly = pts.length > 2;
+                    const pointsStr = pts.map((p) => `${p.x},${p.y}`).join(" ");
+                    const isSel = navSelected?.type === "edge" && navSelected.id === edge.id;
+                    const closed = edge.closed === true;
+                    // B5 Phase 2.11: an existing edge that currently crosses /
+                    // overlaps a wall (strict Phase 2.10 model) renders RED so an
+                    // invalid authoring state is never mistaken for a fine path.
+                    const invalid = navBlockedEdgeIds.has(edge.id);
+                    const mid = navEdgeMidpoint(pts.length > 1 ? pts : [{ x: a.x, y: a.y }, { x: b.x, y: b.y }]);
+                    const midX = mid.x;
+                    const midY = mid.y;
+                    const edgeStroke = closed ? "#b45309" : invalid ? "#dc2626" : isSel ? "var(--accent)" : "#3f6212";
+                    return (
+                      <g key={edge.id}>
+                        {poly ? (
+                          <polyline points={pointsStr} fill="none" stroke={edgeStroke}
+                            strokeWidth={isSel ? 2.4 : 1.6}
+                            strokeDasharray={closed ? "5 3" : undefined}
+                            strokeLinejoin="round" strokeLinecap="round"
+                            opacity={closed ? 0.75 : 0.9}
+                            data-invalid={invalid ? "true" : undefined}
+                            data-testid={isSel ? "nav-edge-selected" : "nav-edge"} />
+                        ) : (
+                          <line x1={a.x} y1={a.y} x2={b.x} y2={b.y}
+                            stroke={edgeStroke}
+                            strokeWidth={isSel ? 2.4 : 1.6}
+                            strokeDasharray={closed ? "5 3" : undefined}
+                            opacity={closed ? 0.75 : 0.9}
+                            data-invalid={invalid ? "true" : undefined}
+                            data-testid={isSel ? "nav-edge-selected" : "nav-edge"} />
+                        )}
+                        {edge.bidirectional === false && (() => {
+                          // Direction arrow anchored at the polyline midpoint and
+                          // oriented along the segment that contains it.
+                          let ang = Math.atan2(b.y - a.y, b.x - a.x);
+                          if (pts.length > 2) {
+                            let acc = 0;
+                            const total = navEdgePolylineDistance(pts);
+                            const target = total / 2;
+                            for (let i = 1; i < pts.length; i++) {
+                              const seg = Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y);
+                              if (target <= acc + seg || i === pts.length - 1) {
+                                ang = Math.atan2(pts[i].y - pts[i - 1].y, pts[i].x - pts[i - 1].x);
+                                break;
+                              }
+                              acc += seg;
+                            }
+                          }
+                          const size = 4;
+                          const back = { x: midX - Math.cos(ang) * size * 1.6, y: midY - Math.sin(ang) * size * 1.6 };
+                          const p1 = { x: back.x + Math.cos(ang + 2.6) * size, y: back.y + Math.sin(ang + 2.6) * size };
+                          const p2 = { x: back.x + Math.cos(ang - 2.6) * size, y: back.y + Math.sin(ang - 2.6) * size };
+                          return (
+                            <path d={`M ${midX} ${midY} L ${p1.x} ${p1.y} L ${p2.x} ${p2.y} Z`}
+                              fill={closed ? "#b45309" : invalid ? "#dc2626" : "#3f6212"} opacity={0.9} data-testid="nav-edge-direction" />
+                          );
+                        })()}
+                        {/* B5 Phase 2.11: selected INVALID edge — small warning
+                            marker near the path midpoint; the edge stays fully
+                            editable (bend/segment handles + drags remain live). */}
+                        {isSel && invalid && (
+                          <g transform={`translate(${midX + 10} ${midY - 10})`} data-testid="nav-edge-invalid-marker" className="pointer-events-none">
+                            <path d="M 0 -4.5 L 4 3.5 L -4 3.5 Z" fill="#dc2626" />
+                            <line x1={0} y1={-1.6} x2={0} y2={1.4} stroke="#fff" strokeWidth={1.1} />
+                            <circle cx={0} cy={2.8} r={0.7} fill="#fff" />
+                          </g>
+                        )}
+                        {/* B5 Phase 2.2: transparent hit line (the visible stroke is
+                            pointer-events-none) with an erase-aware cursor + destructive hover. */}
+                        {poly ? (
+                          <polyline points={pointsStr} fill="none" stroke="transparent" strokeWidth={14}
+                            onMouseDown={(e) => handleNavEdgeDown(e, edge)}
+                            onMouseMove={(e) => handleNavEdgeMove(e, edge)}
+                            onMouseEnter={() => { if (navTool === "erase") setNavEraseHover({ type: "edge", id: edge.id }); }}
+                            onMouseLeave={() => {
+                              setNavEraseHover((h) => h?.type === "edge" && h.id === edge.id ? null : h);
+                              setNavSegmentHover((h) => (h?.edgeId === edge.id ? null : h));
+                            }}
+                            style={{ cursor: navTool === "erase" ? "not-allowed" : "pointer" }} data-testid="nav-edge-hit" />
+                        ) : (
+                          <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="transparent" strokeWidth={14}
+                            onMouseDown={(e) => handleNavEdgeDown(e, edge)}
+                            onMouseMove={(e) => handleNavEdgeMove(e, edge)}
+                            onMouseEnter={() => { if (navTool === "erase") setNavEraseHover({ type: "edge", id: edge.id }); }}
+                            onMouseLeave={() => {
+                              setNavEraseHover((h) => h?.type === "edge" && h.id === edge.id ? null : h);
+                              setNavSegmentHover((h) => (h?.edgeId === edge.id ? null : h));
+                            }}
+                            style={{ cursor: navTool === "erase" ? "not-allowed" : "pointer" }} data-testid="nav-edge-hit" />
+                        )}
+                        {navEraseHover?.type === "edge" && navEraseHover.id === edge.id && (
+                          poly ? (
+                            <polyline points={pointsStr} fill="none" stroke="#dc2626" strokeWidth={3}
+                              strokeDasharray="4 3" opacity={0.9} className="pointer-events-none" data-testid="nav-edge-erase-hover" />
+                          ) : (
+                            <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#dc2626" strokeWidth={3}
+                              strokeDasharray="4 3" opacity={0.9} className="pointer-events-none" data-testid="nav-edge-erase-hover" />
+                          )
+                        )}
+                        {/* B5 Phase 2.5: bend handles on the SELECTED segmented path —
+                            drag a handle to reshape live (ONE history action on release).
+                            B5 Phase 2.6: each bend is INDEPENDENTLY selectable; the
+                            selected handle renders larger/highlighted so Remove Bend /
+                            Delete target exactly that bend. */}
+                        {isSel && navTool === "select" && edge.bendPoints && edge.bendPoints.length > 0 && edge.bendPoints.map((bp, i) => {
+                          const bendSel = navSelectedBend?.edgeId === edge.id && navSelectedBend.index === i;
+                          return (
+                            <g key={i}
+                              onMouseDown={(e) => handleNavBendDown(e, edge, i)}
+                              className="cursor-grab"
+                              data-testid="nav-bend-handle"
+                            >
+                              <circle cx={bp.x} cy={bp.y} r={7} fill="transparent" />
+                              <circle cx={bp.x} cy={bp.y} r={bendSel ? 4.2 : 3.2}
+                                fill="var(--accent)"
+                                stroke="#f8fafc" strokeWidth={bendSel ? 1.6 : 1}
+                                data-testid={bendSel ? "nav-bend-selected" : undefined}
+                                className="pointer-events-none" />
+                            </g>
+                          );
+                        })}
+                      </g>
+                    );
+                  })}
+
+                  {/* Nodes — free waypoints get the graph-node visual; linked nodes
+                      (room/door/stair/elevator/ramp) stay as a small cue over the
+                      physical object, mirroring the outdoor entrance philosophy. */}
+                  {indoorNodes.map((node) => {
+                    const ref = linkedObjectRef(node);
+                    const isLinked = !!ref;
+                    const isSel = navSelected?.type === "node" && navSelected.id === node.id;
+                    const isMulti = navMultiSelected.includes(node.id);
+                    const isConnectStart = navConnectStart === node.id;
+                    const isDest = !isLinked && node.type === "room_access";
+                    const isEraseHover = navEraseHover?.type === "node" && navEraseHover.id === node.id;
+                    const isDuplicateWarn = navDuplicateNodeId === node.id;
+                    const label = (node.name || "Waypoint").trim();
+                    const showLabel = !isLinked && label && label !== "Waypoint";
+                    // B5 Phase 2.7: the linked routing cue ALWAYS renders at the
+                    // node's LOGICAL anchor (node.x/node.y — synced to the owner:
+                    // room anchor, door position, circulation center). For ramps
+                    // the anchor is the exact center; only a tiny presentation-only
+                    // corner badge marks "linked" (never a routing location).
+                    const rampOwner = node.rampId ? ramps.find((r) => r.id === node.rampId) : null;
+                    const cue = { x: node.x, y: node.y };
+                    return (
+                      <g key={node.id}
+                        data-testid={isLinked ? "nav-linked-node" : "nav-node"}
+                        onMouseDown={(e) => handleNavNodeDown(e, node)}
+                        onMouseEnter={() => {
+                          if (navTool === "erase") setNavEraseHover({ type: "node", id: node.id });
+                          if (navTool === "connect") setNavNodeHover(node.id);
+                        }}
+                        onMouseLeave={() => {
+                          setNavEraseHover((h) => h?.type === "node" && h.id === node.id ? null : h);
+                          setNavNodeHover((h) => (h === node.id ? null : h));
+                        }}
+                        style={{ cursor: navTool === "erase" ? "not-allowed" : navTool === "connect" ? "pointer" : isLinked ? "pointer" : isDest ? "move" : "grab" }}
+                      >
+                        {/* B5 Phase 2.2: invisible hit target — the visible node art is
+                            pointer-events-none (it must not capture hover/click on the
+                            physical object underneath), so a transparent circle is the
+                            actual click/drag surface. This is the click-selection fix. */}
+                        <circle cx={cue.x} cy={cue.y} r={11} fill="transparent"
+                          data-testid="nav-node-hit" />
+                        {isLinked ? (
+                          // B5 Phase 2.7: the actual routing node stays VISIBLE even
+                          // while the violet Connect ring surrounds it — the ring is
+                          // feedback around the node, never a replacement for it.
+                          <g className="pointer-events-none">
+                            <circle cx={cue.x} cy={cue.y} r={4} fill="rgba(21,128,61,0.85)" data-testid="nav-linked-cue" />
+                            <circle cx={cue.x} cy={cue.y} r={6.5} fill="none"
+                              stroke={isSel || isMulti ? "var(--accent)" : "rgba(21,128,61,0.45)"}
+                              strokeWidth={isSel || isMulti ? 1.8 : 1} />
+                          </g>
+                        ) : isDest ? (
+                          /* B5 Phase 2.2: Destination — a compact target/pin so it is
+                             genuinely distinct from a technical routing Waypoint. */
+                          <g className="pointer-events-none">
+                            <circle cx={node.x} cy={node.y} r={5}
+                              fill={isSel || isMulti ? "var(--accent)" : "#7c3aed"}
+                              stroke="#f8fafc" strokeWidth={1.2} />
+                            <circle cx={node.x} cy={node.y} r={1.8} fill="#f8fafc" />
+                            {(isSel || isMulti) && (
+                              <circle cx={node.x} cy={node.y} r={8} fill="none"
+                                stroke="var(--accent)" strokeWidth={1.6} data-testid="nav-node-selected" />
+                            )}
+                            {isConnectStart && (
+                              <circle cx={node.x} cy={node.y} r={10.5} fill="none"
+                                stroke="var(--accent)" strokeWidth={1.4} strokeDasharray="3 2" data-testid="nav-connect-start" />
+                            )}
+                          </g>
+                        ) : (
+                          <g className="pointer-events-none">
+                            <circle cx={node.x} cy={node.y} r={4.5}
+                              fill={isSel || isMulti ? "var(--accent)" : "#16a34a"}
+                              stroke="#f8fafc" strokeWidth={1} />
+                            {(isSel || isMulti) && (
+                              <circle cx={node.x} cy={node.y} r={7.5} fill="none"
+                                stroke="var(--accent)" strokeWidth={1.6} data-testid="nav-node-selected" />
+                            )}
+                            {isConnectStart && (
+                              <circle cx={node.x} cy={node.y} r={10} fill="none"
+                                stroke="var(--accent)" strokeWidth={1.4} strokeDasharray="3 2" data-testid="nav-connect-start" />
+                            )}
+                            {showLabel && (
+                              <text x={node.x} y={node.y + 13} textAnchor="middle" fontSize={5.5}
+                                fill="#334155" fontWeight={600} className="pointer-events-none select-none">
+                                {label.length > 14 ? `${label.slice(0, 13)}…` : label}
+                              </text>
+                            )}
+                          </g>
+                        )}
+                        {/* B5 Phase 3: subtle cross-floor transition indicator for a
+                            linked circulation node with floor-to-floor links — a
+                            small neutral up/down chevron badge (never a waypoint,
+                            never a routing location; the node stays the anchor). */}
+                        {isLinked && (() => {
+                          const t = navNodeTransitionStatus.get(node.id);
+                          if (!t || t.state !== "linked" || t.floors.length === 0) return null;
+                          return (
+                            <g className="pointer-events-none" data-testid="nav-transition-badge">
+                              <rect x={cue.x - 5} y={cue.y - 14.5} width={10} height={8} rx={2} fill="#475569" opacity={0.92} />
+                              <path d={`M ${cue.x - 3} ${cue.y - 11.6} L ${cue.x} ${cue.y - 14.1} L ${cue.x + 3} ${cue.y - 11.6} Z`} fill="#f8fafc" />
+                              <path d={`M ${cue.x - 3} ${cue.y - 9.2} L ${cue.x} ${cue.y - 6.7} L ${cue.x + 3} ${cue.y - 9.2} Z`} fill="#f8fafc" />
+                            </g>
+                          );
+                        })()}
+                        {/* B5 Phase 2.7: tiny presentation-only "linked" badge for
+                            ramps (top-right corner) — NEVER a routing location; the
+                            actual node/cue sits at the ramp center. */}
+                        {rampOwner && (
+                          <circle cx={rampLinkedCuePosition(rampOwner).x} cy={rampLinkedCuePosition(rampOwner).y}
+                            r={1.6} fill="rgba(21,128,61,0.9)" className="pointer-events-none" data-testid="nav-linked-badge" />
+                        )}
+                        {/* B5 Phase 2.2: Remove tool destructive hover — one red ring. */}
+                        {isEraseHover && (
+                          <circle cx={cue.x} cy={cue.y} r={12} fill="none"
+                            stroke="#dc2626" strokeWidth={2} strokeDasharray="4 3"
+                            className="pointer-events-none" data-testid="nav-erase-hover" />
+                        )}
+                        {isDuplicateWarn && (
+                          <circle cx={cue.x} cy={cue.y} r={14} fill="none"
+                            stroke="#f59e0b" strokeWidth={2.2} strokeDasharray="3 2"
+                            className="pointer-events-none animate-pulse" data-testid="nav-duplicate-node-warning" />
+                        )}
+                        {/* B5 Phase 2.6: Connect tool target feedback — one clean
+                            ring on the hovered candidate; stronger once a start has
+                            been chosen. Never stacked with the start/selected rings. */}
+                        {navTool === "connect" && navNodeHover === node.id && !isConnectStart && !isSel && !isMulti && (
+                          <circle cx={cue.x} cy={cue.y} r={navConnectStart ? 12 : 9} fill="none"
+                            stroke={navConnectStart ? "var(--accent)" : "#7c3aed"}
+                            strokeWidth={navConnectStart ? 2 : 1.4}
+                            strokeDasharray={navConnectStart ? undefined : "3 2"}
+                            className="pointer-events-none" data-testid="nav-connect-target" />
+                        )}
+                      </g>
+                    );
+                  })}
+
+                  {/* Authoring target highlight (rooms / doors / circulation) —
+                      while CONNECT is active the routing NODE is the target (violet
+                      ring on the semantic node/cue), so the yellow physical-object
+                      highlight is suppressed to avoid yellow/violet competition. */}
+                  {navTargetHover && (navTool === "waypoint" || navTool === "destination" || navTool === "connect" || navTool === "link" || navLibraryDragRef.current != null) && !navNodeHover && !(navTool === "connect" && navTargetHasLinkedNode) && (
+                    <g className="pointer-events-none" data-testid="floor-nav-target">
+                      <circle cx={navTargetHover.x} cy={navTargetHover.y} r={12} fill="none"
+                        stroke="var(--accent)" strokeWidth={1.6} strokeDasharray="4 3" />
+                      <circle cx={navTargetHover.x} cy={navTargetHover.y} r={2.5} fill="var(--accent)" />
+                    </g>
+                  )}
+
+                  {/* B5 Phase 2.8: always-on alignment guides while a free node /
+                      bend drags near another routing node's X or Y center. */}
+                  {navAlignGuides.map((guide, i) => (
+                    <line key={i} data-testid="nav-align-guide"
+                      x1={guide.type === "v" ? guide.pos : 0} y1={guide.type === "v" ? 0 : guide.pos}
+                      x2={guide.type === "v" ? guide.pos : FP_W} y2={guide.type === "v" ? FP_H : guide.pos}
+                      stroke="var(--accent)" strokeWidth={1} strokeDasharray="4 3"
+                      opacity={0.7} className="pointer-events-none" />
+                  ))}
+
+                  {/* Connect preview — dashed line + ghost node showing the FINAL
+                      shape (pinned bends + the auto-orthogonal tail to the pointer
+                      or hovered node — same resolved geometry as the commit). Each
+                      pinned bend renders a small square marker. pointer-events-none.
+
+                      B5 Phase 2.9A: the SAME wall validation the commit uses runs
+                      here, so a preview that cannot be committed (wall crossing /
+                      wall-hug / clearance violation) is shown in RED BEFORE the
+                      click — the already-pinned geometry keeps its normal styling
+                      and only the invalid proposed tail portion turns red, with a
+                      small "Path blocked by wall" label near the target. */}
+                  {navConnectStart && navPreview && (() => {
+                    const start = indoorNodes.find((n) => n.id === navConnectStart);
+                    if (!start) return null;
+                    const hoveredNode = navNodeHover ? indoorNodes.find((n) => n.id === navNodeHover) : null;
+                    const dest = hoveredNode
+                      ? { x: hoveredNode.x, y: hoveredNode.y }
+                      : navTargetHover ? { x: navTargetHover.x, y: navTargetHover.y } : navPreview;
+                    const last = navConnectBends.length > 0
+                      ? navConnectBends[navConnectBends.length - 1]
+                      : { x: start.x, y: start.y };
+                    // B5 Phase 2.10: the preview must show EXACTLY what a click
+                    // would pin/commit. For the RAW-pointer target the SAME
+                    // pin-geometry helper the click uses resolves the shape
+                    // (alignment-snapped, wall validity winning, detours kept in
+                    // floor bounds) — geometry AND validity can never diverge.
+                    // Nodes / linked targets resolve the plain auto-L (a linked
+                    // anchor legitimately sits on a wall, so no point check).
+                    let proposed: { x: number; y: number }[];
+                    if (!hoveredNode && !navTargetHover) {
+                      const geo = navPinGeometryFor(
+                        { x: dest.x, y: dest.y }, last, indoorNodes, walls, doors,
+                        { width: FP_W, height: FP_H }
+                      );
+                      proposed = geo.pins;
+                    } else {
+                      const tail = orthogonalBendsFor(last, { x: dest.x, y: dest.y }, walls, doors, { width: FP_W, height: FP_H });
+                      proposed = [...tail, { x: dest.x, y: dest.y }];
+                    }
+                    const ringPos = proposed[proposed.length - 1];
+                    const pts = [{ x: start.x, y: start.y }, ...navConnectBends, ...proposed];
+                    // Exact same validation as the pin-click / commit — preview
+                    // can only look committable when it actually is committable:
+                    // segment wall-validity PLUS every proposed point itself (a
+                    // pointer resting on a wall — or an auto-L corner inside one
+                    // — must preview RED; the click will be rejected). Nodes /
+                    // linked targets are exempt — a linked anchor legitimately
+                    // sits on a wall/doorway.
+                    const invalid = edgePolylineCrossesWallWithoutDoor([last, ...proposed], walls, doors) !== null
+                      || (!hoveredNode && !navTargetHover && proposed.some((p) => pointInsideWallObstacle(p, walls, doors) !== null));
+                    const tailPts = invalid
+                      ? [{ x: last.x, y: last.y }, ...proposed]
+                      : null;
+                    return (
+                      <g className="pointer-events-none" data-testid="floor-nav-connect-preview">
+                        {/* FULL preview — single source of truth for the shape. */}
+                        <polyline points={pts.map((p) => `${p.x},${p.y}`).join(" ")} fill="none"
+                          stroke={invalid ? "#dc2626" : "var(--accent)"} strokeWidth={1.6}
+                          strokeDasharray="5 4" opacity={0.85}
+                          data-testid={invalid ? "floor-nav-preview-invalid-line" : undefined} />
+                        {navConnectBends.map((bp, i) => (
+                          /* B5 Phase 2.9: a subtle neutral geometry-edit marker —
+                             never confusable with a green Waypoint, violet
+                             Destination, linked-location cue, or the violet
+                             connect-target ring. */
+                          <rect key={i} x={bp.x - 1.75} y={bp.y - 1.75} width={3.5} height={3.5} rx={0.75}
+                            fill="none" stroke="var(--muted-foreground)" strokeWidth={1.1} opacity={0.85}
+                            data-testid="nav-connect-pin" />
+                        ))}
+                        <circle cx={ringPos.x} cy={ringPos.y} r={invalid ? 5.5 : 5} fill="none"
+                          stroke={invalid ? "#dc2626" : "var(--accent)"}
+                          strokeWidth={invalid ? 1.6 : 1.4} strokeDasharray="2 2"
+                          data-testid={invalid ? "floor-nav-preview-invalid-ring" : undefined} />
+                        {/* B5 Phase 2.9A: invalid proposed portion — red overdraw on
+                            the tail only, plus a concise label near the target.
+                            Already-valid pinned geometry keeps its normal look. */}
+                        {tailPts && (
+                          <g data-testid="floor-nav-preview-invalid">
+                            <polyline points={tailPts.map((p) => `${p.x},${p.y}`).join(" ")} fill="none"
+                              stroke="#dc2626" strokeWidth={1.8} strokeDasharray="5 4" opacity={0.95} />
+                            <text x={ringPos.x + 8} y={ringPos.y - 10} fontSize={9} fontWeight={700} fill="#dc2626"
+                              stroke="rgba(255,255,255,0.9)" strokeWidth={3} paintOrder="stroke"
+                              className="select-none">Path blocked by wall</text>
+                          </g>
+                        )}
+                      </g>
+                    );
+                  })()}
+
+                  {/* B5 Phase 2.1: Navigation Library drag ghost preview (free items) */}
+                  {navDragPreview && (
+                    <g className="pointer-events-none" data-testid="floor-nav-drag-preview">
+                      <circle cx={navDragPreview.x} cy={navDragPreview.y} r={6} fill="rgba(22,163,74,0.3)" stroke="#16a34a" strokeWidth={1.4} strokeDasharray="3 2" />
+                    </g>
+                  )}
+                  {/* B5 Phase 2.3: not-allowed drag feedback over linked-location
+                      semantic targets — no green ghost, a red ✕ instead. */}
+                  {navDragBlocked && (
+                    <g className="pointer-events-none" data-testid="floor-nav-drag-blocked">
+                      <circle cx={navDragBlocked.x} cy={navDragBlocked.y} r={7} fill="none" stroke="#dc2626" strokeWidth={1.6} strokeDasharray="3 2" />
+                      <line x1={navDragBlocked.x - 3.5} y1={navDragBlocked.y - 3.5} x2={navDragBlocked.x + 3.5} y2={navDragBlocked.y + 3.5} stroke="#dc2626" strokeWidth={1.6} />
+                      <line x1={navDragBlocked.x - 3.5} y1={navDragBlocked.y + 3.5} x2={navDragBlocked.x + 3.5} y2={navDragBlocked.y - 3.5} stroke="#dc2626" strokeWidth={1.6} />
+                    </g>
+                  )}
+                  {/* B5 correction: nav graph multi-select group outline — bounds
+                      from the actual selected graph geometry (node coords + bends
+                      of edges whose both endpoints are selected), so the frame
+                      communicates the whole substructure moves together. */}
+                  {navMultiSelected.length > 1 && (() => {
+                    const nodeIds = new Set(navMultiSelected.filter((id) => indoorNodes.some((n) => n.id === id)));
+                    const edgeIds = new Set(navMultiSelected.filter((id) => indoorEdges.some((e) => e.id === id)));
+                    if (nodeIds.size === 0 && edgeIds.size === 0) return null;
+                    const bounds = navGroupSelectionBounds(indoorNodes, indoorEdges, nodeIds, edgeIds);
+                    if (!bounds) return null;
+                    return (
+                      <g className="pointer-events-none" data-testid="floor-nav-group-outline">
+                        <rect
+                          x={bounds.x}
+                          y={bounds.y}
+                          width={bounds.width}
+                          height={bounds.height}
+                          rx={2}
+                          fill="var(--accent)"
+                          fillOpacity={0.04}
+                          stroke="var(--accent)"
+                          strokeWidth={1.2}
+                          strokeDasharray="4 3"
+                        />
+                      </g>
+                    );
+                  })()}
+                </g>
+              )}
+
+              {/* B5 Phase 2.5: Design-mode READ-ONLY navigation overlay — shown
+                  only while "Show Navigation" is on. Reduced opacity, thinner
+                  lines, smaller nodes; pointer-events-none so Design Select keeps
+                  editing ONLY floor objects (graph is not selectable/movable). */}
+              {!navMode && showNavOverlay && (indoorNodes.length > 0 || indoorEdges.length > 0) && (
+                <g data-testid="floor-nav-overlay" className="pointer-events-none">
+                  {indoorEdges.map((edge) => {
+                    const pts = edgePolylinePoints(edge, indoorNodes);
+                    if (!pts || pts.length < 2) return null;
+                    // B5 Phase 2.11: the read-only overlay also flags an invalid
+                    // (wall-blocked) edge — subdued red — so the problem is not
+                    // hidden outside Navigation mode (reuses the live memo).
+                    const invalid = navBlockedEdgeIds.has(edge.id);
+                    const pointsStr = pts.map((p) => `${p.x},${p.y}`).join(" ");
+                    return pts.length > 2
+                      ? <polyline key={edge.id} points={pointsStr} fill="none" stroke={invalid ? "#dc2626" : "#3f6212"} strokeWidth={1} opacity={invalid ? 0.55 : 0.4} data-invalid={invalid ? "true" : undefined} />
+                      : <line key={edge.id} x1={pts[0].x} y1={pts[0].y} x2={pts[1].x} y2={pts[1].y} stroke={invalid ? "#dc2626" : "#3f6212"} strokeWidth={1} opacity={invalid ? 0.55 : 0.4} data-invalid={invalid ? "true" : undefined} />;
+                  })}
+                  {indoorNodes.map((node) => {
+                    // B5 Phase 2.6: the read-only overlay keeps SEMANTIC colors
+                    // (Waypoint green, Destination violet, linked-location cues)
+                    // — just subdued, so the graph still communicates what each
+                    // element is while staying a reference-only view.
+                    const isLinked = !!linkedObjectRef(node);
+                    const isDest = !isLinked && node.type === "room_access";
+                    return (
+                      <circle key={node.id} cx={node.x} cy={node.y} r={isDest ? 2.6 : 2.2}
+                        fill={isLinked ? "rgba(21,128,61,0.7)" : isDest ? "rgba(124,58,237,0.65)" : "rgba(22,163,74,0.55)"} />
+                    );
+                  })}
+                </g>
+              )}
+
+              {/* B5 Phase 6.5: floor waypoint-on-edge insertion indicator */}
+              {floorEdgeSnap && (
+                <g className="pointer-events-none" data-testid="floor-edge-snap-indicator">
+                  <circle cx={floorEdgeSnap.nearest.x} cy={floorEdgeSnap.nearest.y} r={5}
+                    fill="none" stroke="var(--accent)" strokeWidth={1.6}
+                    strokeDasharray="3 2" opacity={0.9} />
+                  <line
+                    x1={floorEdgeSnap.nearest.x - 4} y1={floorEdgeSnap.nearest.y}
+                    x2={floorEdgeSnap.nearest.x + 4} y2={floorEdgeSnap.nearest.y}
+                    stroke="var(--accent)" strokeWidth={1.2} opacity={0.7} />
+                  <line
+                    x1={floorEdgeSnap.nearest.x} y1={floorEdgeSnap.nearest.y - 4}
+                    x2={floorEdgeSnap.nearest.x} y2={floorEdgeSnap.nearest.y + 4}
+                    stroke="var(--accent)" strokeWidth={1.2} opacity={0.7} />
                 </g>
               )}
 
@@ -4693,6 +8473,22 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
             <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20">
               <div className="px-3 py-1.5 rounded-lg border shadow-sm bg-card text-[11px] font-semibold text-foreground">
                 Click again to finish wall · Shift-click to continue · Esc to cancel
+              </div>
+            </div>
+          )}
+
+          {/* Navigation authoring status hint */}
+          {navMode && (navTool === "connect" || navTool === "waypoint" || navTool === "destination" || navTool === "link") && (
+            <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 pointer-events-none">
+              <div className="px-3 py-1.5 rounded-lg border shadow-sm bg-card text-[11px] font-semibold text-foreground">
+                {navTool === "connect"
+                  ? (navConnectStart ? "Click destination · Shift for H/V · Esc to cancel" : "Select a start point")
+                  : navTool === "link"
+                    ? "Select a Room, Door, Stair, Elevator or Ramp."
+                    : navTool === "destination"
+                      ? "Click to place a destination point"
+                      : "Click to place a routing point"}
+                {(navTool === "connect" || navTool === "link") && " · Esc to cancel"}
               </div>
             </div>
           )}
@@ -4819,6 +8615,63 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
             </div>
           </div>
 
+          {/* B5 Phase 3.2: NON-BLOCKING nav empty-state — a compact banner pinned
+              near the top of the canvas, shown ONLY while the editor is idle
+              (Select tool, nothing linked, no Connect in progress, no library
+              drag). It never covers the physical objects the admin needs for
+              Link Location: arming any authoring tool (Link Location / Waypoint
+              / Connect) or starting a library drag hides it immediately, and
+              the whole banner is pointer-events-none so it can never intercept
+              a canvas click. */}
+          {navMode && indoorNodes.length === 0 && indoorEdges.length === 0 && navTool === "select" && !navConnectStart && navLibraryDragRef.current == null && (
+            <div data-testid="floor-nav-canvas-empty-state" className="absolute top-3 left-1/2 -translate-x-1/2 z-10 pointer-events-none">
+              <div className="flex items-center gap-2 rounded-lg border border-border bg-card/90 backdrop-blur px-3 py-1.5 shadow-md max-w-[min(620px,calc(100%-24px))]">
+                <Waypoints className="h-3.5 w-3.5 text-primary shrink-0" />
+                <span className="text-[10px] font-extrabold text-foreground whitespace-nowrap">Build the Walking Network</span>
+                <span className="hidden md:inline text-[10px] text-muted-foreground truncate">
+                  Link a Room, Door, Stair, Elevator or Ramp — or drop a Waypoint.
+                </span>
+                <button
+                  onClick={() => selectNavTool("waypoint")}
+                  aria-label="Start building the walking network"
+                  className="pointer-events-auto shrink-0 ml-1 h-6 px-2.5 rounded-md bg-primary text-primary-foreground text-[10px] font-extrabold hover:opacity-90 transition-opacity"
+                >
+                  Add Waypoint
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* B5 Final: locate flash overlay — pulses the located object, then fades */}
+          {locateFlash && (
+            <svg
+              viewBox={`0 0 ${FP_W} ${FP_H}`}
+              className="absolute inset-0 z-20 pointer-events-none"
+              data-testid="locate-flash"
+              aria-hidden="true"
+            >
+              <g transform={`translate(${pan.x},${pan.y}) scale(${zoom})`}>
+                <circle
+                  cx={locateFlash.world.x}
+                  cy={locateFlash.world.y}
+                  r={34}
+                  fill="none"
+                  stroke="#f59e0b"
+                  strokeWidth={2.5}
+                  className="animate-locate-ping"
+                />
+                <circle
+                  cx={locateFlash.world.x}
+                  cy={locateFlash.world.y}
+                  r={14}
+                  fill="rgba(245,158,11,0.18)"
+                  stroke="#f59e0b"
+                  strokeWidth={2}
+                />
+              </g>
+            </svg>
+          )}
+
           {/* Zoom controls */}
           <div className="absolute bottom-10 right-3 z-20 flex items-center gap-1 p-1 rounded-xl border border-border shadow-md bg-card">
             <button onClick={zoomOut} title="Zoom Out" aria-label="Zoom Out" className="w-7 h-7 rounded-lg flex items-center justify-center text-muted-foreground hover:bg-muted hover:text-foreground transition-all">
@@ -4906,7 +8759,146 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
             </div>
           </div>
         )}
-        {showProperties && multiSelected.length <= 1 && !selected && (
+        {/* B5 Phase 2.2: nav properties fade in per selection state (single /
+            multi / none) — a restrained 180ms, never re-mounting the canvas. */}
+        {navMode && showProperties && navMultiSelected.length > 1 && (
+          <motion.div
+            key="nav-multi-props"
+            initial={{ opacity: 0, x: 8 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+            className="shrink-0 flex"
+          >
+          <div data-testid="floor-nav-multi-props" className="w-60 shrink-0 flex flex-col border-l border-border overflow-hidden bg-card">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
+              <div>
+                <span className="text-xs font-extrabold uppercase tracking-wide text-foreground">Selected Navigation Objects</span>
+                <p className="text-[10px] text-muted-foreground mt-0.5">{navMultiSelected.length} waypoint{navMultiSelected.length !== 1 ? "s" : ""} selected</p>
+              </div>
+              <button onClick={() => setShowProperties(false)} className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-muted transition-colors text-muted-foreground">
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-4 space-y-3">
+              {(() => {
+                const selSet = new Set(navMultiSelected);
+                const selNodes = indoorNodes.filter((n) => selSet.has(n.id));
+                const freeNodes = selNodes.filter((n) => !linkedObjectRef(n));
+                const waypointCount = freeNodes.filter((n) => n.type !== "room_access").length;
+                const destCount = freeNodes.filter((n) => n.type === "room_access").length;
+                const linkedCount = selNodes.length - freeNodes.length;
+                // Paths touching ANY selected node — matches exactly what the
+                // Delete Selected action removes (deleteNavSelection removes
+                // every edge connected to a selected node).
+                const pathCount = indoorEdges.filter((e) => selSet.has(e.startNodeId) || selSet.has(e.endNodeId)).length;
+                return (
+                  <div className="rounded-xl border border-border bg-muted/25 p-3 space-y-2">
+                    {[
+                      { label: "Waypoints", value: waypointCount },
+                      { label: "Destinations", value: destCount },
+                      { label: "Linked Locations", value: linkedCount },
+                      { label: "Paths", value: pathCount },
+                    ].map((row) => (
+                      <div key={row.label} className="flex items-center justify-between">
+                        <span className="text-[10px] font-semibold text-muted-foreground">{row.label}</span>
+                        <span className="text-[11px] font-extrabold text-foreground">{row.value}</span>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
+              <p className="text-[10px] text-muted-foreground leading-relaxed">
+                Drag a free waypoint to move the group. Linked locations stay attached to their floor objects.
+              </p>
+              <button
+                onClick={() => deleteNavSelection()}
+                className="w-full h-9 rounded-xl border border-destructive/30 text-xs font-bold text-destructive hover:bg-destructive/10 transition-colors flex items-center justify-center gap-1.5"
+              >
+                <TrashIcon className="h-3.5 w-3.5" /> Delete Selected
+              </button>
+              <button
+                onClick={() => { setNavMultiSelected([]); setNavSelected(null); }}
+                className="w-full h-9 rounded-xl border border-border text-xs font-bold text-muted-foreground hover:bg-muted transition-colors"
+              >
+                Clear Selection
+              </button>
+            </div>
+          </div>
+          </motion.div>
+        )}
+        {navMode && showProperties && navMultiSelected.length <= 1 && navSelected && (
+          <motion.div
+            key="nav-single-props"
+            initial={{ opacity: 0, x: 8 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+            className="shrink-0 flex"
+          >
+          <FloorNavPropertiesPanel
+            selected={navSelected}
+            nodes={indoorNodes}
+            edges={indoorEdges}
+            onUpdateNode={(id, ch) => commitNavGraph(indoorNodes.map((n) => n.id === id ? { ...n, ...ch } : n), indoorEdges)}
+            onUpdateEdge={(id, ch) => commitNavGraph(indoorNodes, indoorEdges.map((e) => e.id === id ? { ...e, ...ch } : e))}
+            onDelete={() => deleteNavSelection()}
+            onClose={() => { setNavSelected(null); setNavMultiSelected([]); }}
+            onAddBend={addBendToEdge}
+            onRemoveBend={removeBendFromEdge}
+            onStraighten={straightenEdge}
+            straightenBlocked={straightenBlocked}
+            edgeBlocked={navSelected?.type === "edge" ? navBlockedEdgeIds.has(navSelected.id) : false}
+            transitionFloors={navSelected?.type === "node" ? (navNodeTransitionStatus.get(navSelected.id)?.floors ?? []) : []}
+            transitionState={navSelected?.type === "node" ? (navNodeTransitionStatus.get(navSelected.id)?.state ?? "no-shared-id") : "no-shared-id"}
+            elevatorServedFloors={navSelectedElevatorServedFloors}
+          />
+          </motion.div>
+        )}
+        {/* B5 Phase 6.2: physical object selected in Navigation mode — navigation-only info */}
+        {navMode && showProperties && navPhysicalSelected && !navSelected && (
+          <motion.div
+            key="nav-physical-props"
+            initial={{ opacity: 0, x: 8 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+            className="shrink-0 flex"
+          >
+            <PhysicalNavPropertiesPanel
+              physicalType={navPhysicalSelected.type}
+              physicalId={navPhysicalSelected.id}
+              rooms={rooms}
+              doors={doors}
+              stairs={stairs}
+              elevators={elevators}
+              ramps={ramps}
+              nodes={indoorNodes}
+              navEdges={indoorEdges}
+              onClose={() => { setNavPhysicalSelected(null); setShowProperties(false); }}
+              onAdd={addPhysicalToNavigation}
+              onRemove={removePhysicalFromNavigation}
+              onView={viewPhysicalInNavigation}
+            />
+          </motion.div>
+        )}
+        {navMode && showProperties && !navSelected && !navPhysicalSelected && (
+          <div data-testid="floor-nav-empty-state" className="shrink-0 flex">
+            <div className="w-60 border-l border-border bg-card/80 backdrop-blur flex flex-col">
+              <div className="flex items-center justify-between px-3 h-9 border-b border-border">
+                <span className="text-[10px] font-extrabold uppercase tracking-wider text-muted-foreground">Navigation</span>
+                <button onClick={() => setShowProperties(false)} aria-label="Close properties" className="text-muted-foreground hover:text-foreground">
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+              <div className="p-3 space-y-3">
+                {/* B5 Phase 2.1: minimal neutral state — instructions live on the canvas empty state. */}
+                <div className="text-xs font-bold text-foreground">Nothing selected</div>
+                <p className="text-[11px] leading-relaxed text-muted-foreground">
+                  Select a waypoint or path to edit its properties, or use the Navigation Library to add one.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+        {!navMode && showProperties && multiSelected.length <= 1 && !selected && (
           <div data-testid="floor-properties-panel" className="shrink-0 flex">
             <FloorOverviewSidebar
               floor={floor}
@@ -4941,6 +8933,19 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
             ramps={ramps}
             elevators={elevators}
             labels={labels}
+            floorId={floor.id}
+            buildingFloors={buildingFloors.map((f) => ({ id: f.id, label: f.label, number: f.number }))}
+            circulationGroups={circulationGroups}
+            circulationNavStatus={circulationNavStatus}
+            physicalNavStatus={physicalNavStatus}
+            entranceConnectionStatus={selectedDoorEntranceStatus}
+            onAddPhysicalToNavigation={addPhysicalToNavigation}
+            onViewPhysicalInNavigation={viewPhysicalInNavigation}
+            onRemovePhysicalFromNavigation={removePhysicalFromNavigation}
+            onCirculationGroupChange={assignCirculationGroup}
+            onCreateCirculationGroup={createCirculationGroup}
+            onRenameCirculationGroup={renameCirculationGroup}
+            onGoToFloor={(targetFloorId) => requestFloorSwitch(targetFloorId)}
             onUpdateRoom={(id, ch) => { updFloor(rooms.map((r) => r.id === id ? { ...r, ...ch } : r), fpaths); }}
             onUpdateWall={(id, ch) => { updFloor(rooms, fpaths, walls.map((w) => w.id === id ? { ...w, ...ch } : w)); }}
             onUpdateDoor={(id, ch) => {
@@ -5045,55 +9050,20 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
           )}
         </AnimatePresence>
 
-        <AnimatePresence>
-          {pendingFloorSwitch && (
-            <motion.div
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              className="fixed inset-0 z-[150] flex items-center justify-center bg-background/70 backdrop-blur-sm p-4"
-              onClick={() => setPendingFloorSwitch(null)}
-            >
-              <motion.div
-                initial={{ opacity: 0, scale: 0.95, y: 8 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 8 }}
-                className="w-full max-w-sm bg-card border border-border rounded-2xl shadow-2xl overflow-hidden"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <div className="flex items-start gap-4 p-5">
-                  <div className="w-10 h-10 rounded-xl bg-amber-100 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0">
-                    <Layers className="h-5 w-5" />
-                  </div>
-                  <div className="flex-1 min-w-0 pt-0.5">
-                    <h3 className="text-sm font-extrabold text-foreground">Unsaved Floor Changes</h3>
-                    <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
-                      Save or discard changes to {floor.label} before switching floors.
-                    </p>
-                  </div>
-                </div>
-                <div className="flex gap-2 px-5 pb-5">
-                  <button
-                    onClick={() => setPendingFloorSwitch(null)}
-                    className="flex-1 h-10 rounded-xl border border-border text-xs font-bold text-muted-foreground hover:bg-muted transition-colors"
-                  >
-                    Keep Editing
-                  </button>
-                  <button
-                    onClick={saveAndSwitchFloor}
-                    disabled={saving}
-                    className="flex-1 h-10 rounded-xl bg-primary text-primary-foreground text-xs font-extrabold hover:bg-primary/90 shadow-sm transition-all disabled:opacity-50 flex items-center justify-center gap-1.5"
-                  >
-                    <Save className="h-3.5 w-3.5" /> Save Changes
-                  </button>
-                  <button
-                    onClick={discardAndSwitchFloor}
-                    disabled={saving}
-                    className="flex-1 h-10 rounded-xl bg-destructive text-destructive-foreground text-xs font-extrabold hover:bg-destructive/90 shadow-sm transition-all disabled:opacity-50"
-                  >
-                    Discard Changes
-                  </button>
-                </div>
-              </motion.div>
-            </motion.div>
-          )}
-        </AnimatePresence>
+        {/* ── Shared unsaved-changes dialog (portal: covers the FULL viewport) ── */}
+        <UnsavedChangesDialog
+          open={unsavedGuard.open}
+          isDirty
+          saving={unsavedGuard.saving}
+          error={unsavedGuard.error}
+          title="Unsaved Floor Changes"
+          continueLabel="Keep Editing"
+          saveLabel="Save Changes"
+          description={unsavedGuard.pendingDescription ?? `Save or discard changes to ${floor.label} before switching floors.`}
+          onCancel={unsavedGuard.cancel}
+          onSave={unsavedGuard.saveAndContinue}
+          onDiscard={unsavedGuard.discard}
+        />
 
         {/* Shared floor actions menu — opened from the `...` button or a tab right-click */}
         {floorMenu && (() => {
@@ -5108,8 +9078,6 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
               isFirst={index <= 0}
               isLast={index >= building.floors.length - 1}
               isOnly={building.floors.length <= 1}
-              moveUpLabel="Move Left"
-              moveDownLabel="Move Right"
               showSettings
               testId="floor-actions-menu"
               onClose={() => setFloorMenu(null)}
@@ -5246,12 +9214,12 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
               >
                 <div className="flex items-center justify-between px-5 py-4 border-b border-border">
                   <div className="flex items-center gap-3">
-                    <div className={cn("w-9 h-9 rounded-xl flex items-center justify-center", blockingIssues.length > 0 ? "bg-destructive/10 text-destructive" : "bg-emerald-500/10 text-emerald-600")}>
-                      {blockingIssues.length > 0 ? <AlertTriangle className="h-5 w-5" /> : <CheckCircle2 className="h-5 w-5" />}
+                    <div className={cn("w-9 h-9 rounded-xl flex items-center justify-center", hasAnyIssues ? "bg-destructive/10 text-destructive" : "bg-emerald-500/10 text-emerald-600")}>
+                      {hasAnyIssues ? <AlertTriangle className="h-5 w-5" /> : <CheckCircle2 className="h-5 w-5" />}
                     </div>
                     <div>
                       <h3 className="text-sm font-extrabold text-foreground">Floor Issues</h3>
-                      <p className="text-xs text-muted-foreground">{floorIssues.length} issue{floorIssues.length !== 1 ? "s" : ""} on {floor.label}</p>
+                      <p className="text-xs text-muted-foreground">{totalIssues} issue{totalIssues !== 1 ? "s" : ""} on {floor.label}</p>
                     </div>
                   </div>
                   <button onClick={() => setShowIssues(false)} className="w-8 h-8 rounded-xl hover:bg-muted flex items-center justify-center text-muted-foreground">
@@ -5259,7 +9227,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
                   </button>
                 </div>
                 <div className="max-h-[360px] overflow-y-auto p-3">
-                  {floorIssues.length === 0 ? (
+                  {totalIssues === 0 ? (
                     <div className="p-5 text-center">
                       <CheckCircle2 className="h-8 w-8 mx-auto text-emerald-600 mb-2" />
                       <p className="text-sm font-bold text-foreground">No floor issues found</p>
@@ -5271,12 +9239,34 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
                         <button
                           key={issue.id}
                           onClick={() => selectIssue(issue)}
-                          className="w-full flex items-start gap-3 rounded-xl px-3 py-2.5 text-left hover:bg-muted/70 transition-colors"
+                          className="w-full flex items-start gap-3 rounded-xl border border-destructive/20 bg-destructive/5 px-3 py-2.5 text-left hover:bg-destructive/10 transition-colors"
                         >
                           <AlertTriangle className="h-4 w-4 text-destructive shrink-0 mt-0.5" />
                           <div className="min-w-0">
                             <p className="text-xs font-bold text-foreground">{issue.message}</p>
                             <p className="text-[10px] text-muted-foreground mt-0.5">Click to select the affected object.</p>
+                          </div>
+                        </button>
+                      ))}
+                      {/* B5 Phase 2.11: wall-blocked navigation paths count as local
+                          issues; clicking one jumps to Navigation mode with the
+                          invalid edge selected so it can be repaired. */}
+                      {Array.from(navBlockedEdgeIds).map((edgeId) => (
+                        <button
+                          key={`nav-${edgeId}`}
+                          onClick={() => {
+                            setShowIssues(false);
+                            switchFloorEditorMode("navigation");
+                            setNavSelected({ type: "edge", id: edgeId });
+                            setShowProperties(true);
+                          }}
+                          data-testid={`nav-edge-issue-${edgeId}`}
+                          className="w-full flex items-start gap-3 rounded-xl px-3 py-2.5 text-left hover:bg-muted/70 transition-colors"
+                        >
+                          <AlertTriangle className="h-4 w-4 text-destructive shrink-0 mt-0.5" />
+                          <div className="min-w-0">
+                            <p className="text-xs font-bold text-foreground">Navigation path crosses or overlaps a wall.</p>
+                            <p className="text-[10px] text-muted-foreground mt-0.5">Click to select the affected edge.</p>
                           </div>
                         </button>
                       ))}

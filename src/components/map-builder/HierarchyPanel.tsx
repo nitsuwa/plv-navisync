@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useEffect, useState, useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import {
   Building2, Layers, Plus, Pencil, Trash2, Copy, GripVertical, MoreHorizontal,
@@ -11,6 +11,7 @@ import { ContextMenu } from "./ContextMenu";
 import { FloorActionsMenu } from "./FloorActionsMenu";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
 import { duplicateFloorForBuilding, normalizeFloor } from "../../lib/floorPlanNormalization";
+import { replaceBuildingFloorsAndReconcileTransitions } from "../../lib/indoorNavigationGraph";
 import {
   addFloorToBuilding,
   countFloorAuthoredItems,
@@ -43,12 +44,15 @@ interface HierarchyPanelProps {
   onPlaceDecorAsset?: (asset: CampusDecorAsset) => void;
   /** Number of decorative assets placed */
   decorAssetCount?: number;
+  /** Whether the authoring asset palette is available in this mode */
+  assetsEnabled?: boolean;
 }
 
 export function HierarchyPanel({
   campus, selected, onSelect, onOpenFloor, onAddBuilding,
   onUpdateBuilding, onUpdate, pushHistory, toast,
   onSelectBuildingType, activeBuildingType, onPlaceDecorAsset, decorAssetCount = 0,
+  assetsEnabled = true,
 }: HierarchyPanelProps) {
   // ── Panel tab: "hierarchy" | "assets" ──
   const [panelTab, setPanelTab] = useState<"hierarchy" | "assets">("hierarchy");
@@ -65,8 +69,22 @@ export function HierarchyPanel({
   const floorDragRef = useRef<{ buildingId: string; index: number } | null>(null);
   const [floorDragOver, setFloorDragOver] = useState<{ buildingId: string; index: number } | null>(null);
   const suppressFloorOpenRef = useRef(false);
+  useEffect(() => {
+    if (!assetsEnabled && panelTab !== "hierarchy") setPanelTab("hierarchy");
+  }, [assetsEnabled, panelTab]);
 
   const buildings = campus.buildings;
+  const activeDecorPalette = DECOR_PALETTE_TYPES.filter((type) => type !== "ground-area");
+  const createDecorAsset = (asset: { type: DecorAssetType; defaultWidth: number; defaultHeight: number }): CampusDecorAsset => ({
+    id: genId("dec"),
+    type: asset.type,
+    x: Math.round(campus.canvasW / 2 + (Math.random() - 0.5) * 100),
+    y: Math.round(campus.canvasH / 2 + (Math.random() - 0.5) * 100),
+    rotation: 0,
+    ...(asset.type === "ground-area"
+      ? { width: 150, height: 95, groundType: "grass" as const, zOrder: -1000 }
+      : { scale: 1 }),
+  });
   const filteredBuildings = searchQuery
     ? buildings.filter(
         (b) =>
@@ -76,6 +94,10 @@ export function HierarchyPanel({
     : buildings;
 
   const updBuildings = (b: CampusBuilding[]) => onUpdate({ buildings: b });
+  const replaceBuildingFloors = (buildingId: string, floors: CampusBuilding["floors"]) => {
+    const next = replaceBuildingFloorsAndReconcileTransitions(campus, buildingId, floors);
+    onUpdate({ buildings: next.buildings, navEdges: next.navEdges });
+  };
 
   // ── Floor manager helpers ──
   const renameFloor = (buildingId: string, floorId: string) => {
@@ -97,13 +119,7 @@ export function HierarchyPanel({
       if (!b || !floor) return;
       if (renameValue.trim() === floor.label) { setRenameDialog(null); return; }
       pushHistory();
-      updBuildings(
-        buildings.map((x) =>
-          x.id === buildingId
-            ? { ...x, floors: renameFloorInBuilding(x.floors, floorId, renameValue.trim()) }
-            : x
-        )
-      );
+      replaceBuildingFloors(buildingId, renameFloorInBuilding(b.floors, floorId, renameValue.trim()));
       toast.success("Floor Renamed", `Renamed to "${renameValue.trim()}".`);
     } else {
       // Building rename
@@ -123,9 +139,7 @@ export function HierarchyPanel({
     pushHistory();
     const { floors, copy } = duplicateFloorInBuilding(b.floors, buildingId, floorId);
     if (!copy) return;
-    updBuildings(
-      buildings.map((x) => (x.id === buildingId ? { ...x, floors } : x))
-    );
+    replaceBuildingFloors(buildingId, floors);
     toast.success("Floor Duplicated", `"${copy.label}" has been copied.`);
   };
 
@@ -136,9 +150,7 @@ export function HierarchyPanel({
     const { floors, moved } = moveFloorInBuilding(b.floors, floorId, direction);
     if (!moved) return;
     pushHistory();
-    updBuildings(
-      buildings.map((x) => (x.id === buildingId ? { ...x, floors } : x))
-    );
+    replaceBuildingFloors(buildingId, floors);
     const floor = b.floors.find((f) => f.id === floorId);
     toast.success("Floor Reordered", `"${floor?.label ?? "Floor"}" moved ${direction < 0 ? "up" : "down"}.`);
   };
@@ -165,9 +177,7 @@ export function HierarchyPanel({
     if (!b) return;
     const { floors, deleted } = deleteFloorFromBuilding(b.floors, floorId);
     pushHistory();
-    updBuildings(
-      buildings.map((x) => (x.id === buildingId ? { ...x, floors } : x))
-    );
+    replaceBuildingFloors(buildingId, floors);
     toast.success("Floor Deleted", deleted ? `"${deleted.label}" has been removed.` : undefined);
   };
 
@@ -176,9 +186,7 @@ export function HierarchyPanel({
     if (!b) return;
     const { floors, floor } = addFloorToBuilding(b.floors, buildingId);
     pushHistory();
-    updBuildings(
-      buildings.map((x) => (x.id === buildingId ? { ...x, floors } : x))
-    );
+    replaceBuildingFloors(buildingId, floors);
     const buildingForAdd = buildings.find(x => x.id === buildingId);
     toast.success("Floor Added", buildingForAdd ? `New floor added to ${buildingForAdd.code}.` : undefined);
   };
@@ -323,54 +331,61 @@ export function HierarchyPanel({
     >
       {/* Header with tab switcher */}
       <div className="px-2 pt-2 pb-0 border-b border-border">
-        <div className="flex gap-0.5 p-0.5 rounded-lg bg-muted/50">
-          <button
-            onClick={() => setPanelTab("hierarchy")}
-            className={cn(
-              "flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-md text-[10px] font-bold transition-all",
-              panelTab === "hierarchy" ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
-            )}
-          >
+        {assetsEnabled ? (
+          <div className="flex gap-0.5 p-0.5 rounded-lg bg-muted/50">
+            <button
+              onClick={() => setPanelTab("hierarchy")}
+              className={cn(
+                "flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-md text-[10px] font-bold transition-all",
+                panelTab === "hierarchy" ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              <Building2 className="h-3 w-3" />
+              Hierarchy
+            </button>
+            <button
+              onClick={() => setPanelTab("assets")}
+              className={cn(
+                "flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-md text-[10px] font-bold transition-all",
+                panelTab === "assets" ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              <Sparkles className="h-3 w-3" />
+              Assets
+            </button>
+          </div>
+        ) : (
+          <div className="flex items-center justify-center gap-1.5 py-1.5 text-[10px] font-bold text-foreground">
             <Building2 className="h-3 w-3" />
             Hierarchy
-          </button>
-          <button
-            onClick={() => setPanelTab("assets")}
-            className={cn(
-              "flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-md text-[10px] font-bold transition-all",
-              panelTab === "assets" ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
-            )}
-          >
-            <Sparkles className="h-3 w-3" />
-            Assets
-          </button>
-        </div>
+          </div>
+        )}
         {panelTab === "hierarchy" && (
-          <div className="relative py-2">
-            <Search className="absolute left-2 top-1/2 translate-y-[-25%] h-3 w-3 text-muted-foreground" />
+          <div className="relative min-w-0 shrink-0 py-2">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 z-10 h-3 w-3 -translate-y-1/2 text-muted-foreground" />
             <input
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search buildings..."
-              className="w-full h-7 pl-6 pr-2 rounded-lg bg-muted/50 text-xs text-foreground placeholder:text-muted-foreground/60 border border-transparent focus:outline-none focus:border-primary/30 focus:bg-muted transition-all"
+              className="block h-7 w-full min-w-0 rounded-lg border border-transparent bg-muted/50 pl-8 pr-2 text-xs leading-7 text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:border-primary/40 focus:ring-1 focus:ring-primary/20 focus:bg-muted transition-all"
             />
           </div>
         )}
-        {panelTab === "assets" && (
-          <div className="relative py-2">
-            <Search className="absolute left-2 top-1/2 translate-y-[-25%] h-3 w-3 text-muted-foreground" />
+        {assetsEnabled && panelTab === "assets" && (
+          <div className="relative min-w-0 shrink-0 py-2">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 z-10 h-3 w-3 -translate-y-1/2 text-muted-foreground" />
             <input
               value={assetSearch}
               onChange={(e) => setAssetSearch(e.target.value)}
               placeholder="Search assets..."
-              className="w-full h-7 pl-6 pr-2 rounded-lg bg-muted/50 text-xs text-foreground placeholder:text-muted-foreground/60 border border-transparent focus:outline-none focus:border-primary/30 focus:bg-muted transition-all"
+              className="block h-7 w-full min-w-0 rounded-lg border border-transparent bg-muted/50 pl-8 pr-2 text-xs leading-7 text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:border-primary/40 focus:ring-1 focus:ring-primary/20 focus:bg-muted transition-all"
             />
           </div>
         )}
       </div>
 
       {/* ═══ ASSETS TAB ═══ */}
-      {panelTab === "assets" && (
+      {assetsEnabled && panelTab === "assets" && (
         <div className="flex-1 overflow-y-auto scrollbar-show-on-hover scroll-smooth py-2 px-2 space-y-3">
           {/* Combined Assets Grid — buildings + outdoor assets */}
           <div>
@@ -379,7 +394,7 @@ export function HierarchyPanel({
               Campus Objects
               {decorAssetCount > 0 && <span className="text-[8px] font-mono opacity-60">({decorAssetCount})</span>}
             </span>
-            <div className="mt-1.5 grid grid-cols-3 gap-1">
+            <div className="mt-1.5 grid grid-cols-2 gap-2">
               {(assetSearch
                 ? BUILDING_TYPES.filter(t => t.label.toLowerCase().includes(assetSearch.toLowerCase()) || t.category.toLowerCase().includes(assetSearch.toLowerCase()))
                 : BUILDING_TYPES
@@ -396,18 +411,20 @@ export function HierarchyPanel({
                     e.dataTransfer.effectAllowed = "copy";
                   }}
                   className={cn(
-                    "flex flex-col items-center gap-1 w-full px-1.5 py-2 rounded-lg border transition-all text-left group",
+                    "flex min-h-[74px] min-w-0 flex-col items-center justify-start gap-1 w-full px-1.5 py-1.5 rounded-lg border transition-all text-left group",
                     activeBuildingType === type.id
                       ? "border-primary/40 bg-primary/8 ring-1 ring-primary/20"
                       : "border-transparent hover:border-border hover:bg-muted/40"
                   )}
                 >
                   {/* Visual preview — SVG icon */}
-                  <div className="w-10 h-8 rounded flex items-center justify-center shrink-0" style={{ backgroundColor: `${type.color}12`, border: `1px solid ${type.color}25` }}>
+                  <div className="w-10 h-8 rounded-md flex items-center justify-center shrink-0" style={{ backgroundColor: `${type.color}12`, border: `1px solid ${type.color}25` }}>
                     <Building2 className="h-4 w-4" style={{ color: type.color }} />
                   </div>
-                  <div className="flex-1 min-w-0 text-center">
-                    <span className="text-[9px] font-bold text-foreground block truncate group-hover:text-primary transition-colors">{type.label}</span>
+                  <div className="min-w-0 max-w-full text-center flex items-start justify-center h-7">
+                    <span className="block max-w-full text-[8.5px] font-bold text-foreground leading-tight group-hover:text-primary transition-colors line-clamp-2 break-words [overflow-wrap:anywhere]">
+                      {type.label}
+                    </span>
                   </div>
                   {activeBuildingType === type.id && <div className="w-1 h-1 rounded-full bg-primary shrink-0" />}
                 </button>
@@ -422,31 +439,32 @@ export function HierarchyPanel({
               Outdoor Decor
               {decorAssetCount > 0 && <span className="text-[8px] font-mono opacity-60">({decorAssetCount})</span>}
             </span>
-            <div className="mt-1.5 grid grid-cols-3 gap-1">
+            <div className="mt-1.5 grid grid-cols-3 gap-1.5">
               {/* Curated placement palette — a focused public-campus-map set.
                   Unlisted legacy types still render on the canvas if a saved
                   campus contains them (backward compatible). */}
               {(assetSearch
-                ? DECOR_PALETTE_TYPES.map((t) => DECOR_ASSET_MAP[t]).filter(Boolean).filter(a => a.label.toLowerCase().includes(assetSearch.toLowerCase()))
-                : DECOR_PALETTE_TYPES.map((t) => DECOR_ASSET_MAP[t]).filter(Boolean)
+                ? activeDecorPalette.map((t) => DECOR_ASSET_MAP[t]).filter(Boolean).filter(a => a.label.toLowerCase().includes(assetSearch.toLowerCase()))
+                : activeDecorPalette.map((t) => DECOR_ASSET_MAP[t]).filter(Boolean)
               ).map((asset) => (
                 <button
                   key={asset.type}
                   onClick={() => {
-                    const a: CampusDecorAsset = { id: genId("dec"), type: asset.type, x: Math.round(campus.canvasW / 2 + (Math.random() - 0.5) * 100), y: Math.round(campus.canvasH / 2 + (Math.random() - 0.5) * 100), rotation: 0, scale: 1 };
-                    onPlaceDecorAsset?.(a);
+                    onPlaceDecorAsset?.(createDecorAsset(asset));
                   }}
-                  className="flex flex-col items-center gap-0.5 p-1.5 rounded-md hover:bg-muted/50 transition-all group active:scale-95"
+                  className="flex min-h-[70px] min-w-0 flex-col items-center justify-start gap-1 p-1.5 rounded-md hover:bg-muted/50 transition-all group active:scale-95"
                   draggable
                   onDragStart={(e) => {
-                    e.dataTransfer.setData("text/plain", JSON.stringify({ type: "decorAsset", assetType: asset.type, w: asset.defaultWidth, h: asset.defaultHeight }));
+                    e.dataTransfer.setData("text/plain", JSON.stringify({ type: "decorAsset", assetType: asset.type, w: asset.defaultWidth, h: asset.defaultHeight, groundArea: asset.type === "ground-area" }));
                     e.dataTransfer.effectAllowed = "copy";
                   }}
                 >
                   <div className="w-9 h-9 rounded-lg flex items-center justify-center group-hover:scale-110 transition-transform" style={{ backgroundColor: `${asset.color}12`, border: `1px solid ${asset.color}25` }}>
                     <DecorAssetVisual type={asset.type} className="w-5 h-6" style={{ opacity: 0.85 }} />
                   </div>
-                  <span className="text-[7px] font-semibold text-foreground/60 group-hover:text-foreground text-center leading-tight">{asset.label}</span>
+                  <span className="block max-w-full text-[7.5px] font-semibold text-foreground/65 group-hover:text-foreground text-center leading-tight line-clamp-2 break-words [overflow-wrap:anywhere]">
+                    {asset.label}
+                  </span>
                 </button>
               ))}
             </div>
@@ -621,15 +639,14 @@ export function HierarchyPanel({
                         e.stopPropagation();
                         const from = floorDragRef.current;
                         if (from && from.buildingId === b.id && from.index !== floorIndex) {
-                          // Same ordering primitive as moveFloorInBuilding, but
-                          // dragged to an arbitrary destination index.
+                          // Same canonical floor-order update path as the
+                          // Move Up/Down actions, just with an arbitrary drop
+                          // index.
                           const reordered = [...b.floors];
                           const [moved] = reordered.splice(from.index, 1);
                           reordered.splice(floorIndex, 0, moved);
                           pushHistory();
-                          updBuildings(
-                            buildings.map((x) => (x.id === b.id ? { ...x, floors: reordered } : x))
-                          );
+                          replaceBuildingFloors(b.id, reordered);
                           toast.success("Floor Reordered", "Floor order updated.");
                         }
                         floorDragRef.current = null;

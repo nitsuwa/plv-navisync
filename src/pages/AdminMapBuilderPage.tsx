@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { toast } from "sonner";
+import { useUnsavedChangesContext } from "../components/map-builder/UnsavedChangesContext";
 import { createCampusClone } from "../lib/campusHelpers";
 import { campusService, CampusConflictError, userFacingCampusMessage, type CampusCreateInput, type CampusUpdateInput } from "../services/campusService";
 import { campusStructureService } from "../services/campusStructureService";
@@ -16,7 +17,7 @@ import {
   genId,
   BUILDING_COLORS,
 } from "../components/map-builder";
-import type { Campus, View, BuildingWizardData } from "../components/map-builder/types";
+import type { Campus, View, BuildingWizardData, FloorSelection } from "../components/map-builder/types";
 
 const shouldLogCampusDiagnostics = import.meta.env.DEV && import.meta.env.MODE !== "test";
 
@@ -55,6 +56,17 @@ function campusInput(campus: Campus): CampusCreateInput {
   };
 }
 
+function campusFloorCount(campus: Campus): number {
+  return (campus.buildings ?? []).reduce((sum, building) => sum + (building.floors?.length ?? 0), 0);
+}
+
+function campusRoomCount(campus: Campus): number {
+  return (campus.buildings ?? []).reduce(
+    (sum, building) => sum + (building.floors ?? []).reduce((floorSum, floor) => floorSum + (floor.rooms?.length ?? 0), 0),
+    0
+  );
+}
+
 function preserveStructureIfMissing(next: Campus, previous?: Campus): Campus {
   if (!previous || (next.buildings?.length ?? 0) > 0 || next.previewBuildingCount !== undefined) return next;
   const hasPreviousPreview = previous.previewBuildingCount !== undefined || (previous.buildings?.length ?? 0) > 0;
@@ -63,6 +75,8 @@ function preserveStructureIfMissing(next: Campus, previous?: Campus): Campus {
     ...next,
     buildings: previous.buildings,
     previewBuildingCount: previous.previewBuildingCount,
+    previewFloorCount: previous.previewFloorCount,
+    previewRoomCount: previous.previewRoomCount,
     previewBuildingsLoaded: previous.previewBuildingsLoaded,
     markers: previous.markers,
     paths: previous.paths,
@@ -183,10 +197,10 @@ export function AdminMapBuilderPage() {
 
   // ── Navigation ────────────────────────────────────────────────────────────
 
-  const handleOpenFloor = useCallback((buildingId: string, floorId: string) => {
+  const handleOpenFloor = useCallback((buildingId: string, floorId: string, initialSelection?: FloorSelection) => {
     if (!activeCampus) return;
     directionRef.current = 1;
-    setView({ type: "floor", campusId: activeCampus.id, buildingId, floorId });
+    setView({ type: "floor", campusId: activeCampus.id, buildingId, floorId, initialSelection });
   }, [activeCampus]);
 
   const goHome = useCallback(() => {
@@ -206,6 +220,8 @@ export function AdminMapBuilderPage() {
         const hydratedWithPreview = {
           ...hydrated,
           previewBuildingCount: campus?.previewBuildingCount ?? hydrated.previewBuildingCount ?? hydrated.buildings.length,
+          previewFloorCount: campusFloorCount(hydrated),
+          previewRoomCount: campusRoomCount(hydrated),
         };
         updateCampus(hydratedWithPreview);
         // Hydration is a read of the persisted state — it becomes the baseline.
@@ -220,12 +236,61 @@ export function AdminMapBuilderPage() {
 
   const saveCampusStructure = useCallback(async (campus: Campus) => {
     const saved = await campusStructureService.save(campus);
-    const savedWithPreviewCount = { ...saved, previewBuildingCount: saved.buildings.length, previewBuildingsLoaded: true };
+    const savedWithPreviewCount = {
+      ...saved,
+      previewBuildingCount: saved.buildings.length,
+      previewFloorCount: campusFloorCount(saved),
+      previewRoomCount: campusRoomCount(saved),
+      previewBuildingsLoaded: true,
+    };
     updateCampus(savedWithPreviewCount);
     // A successful save is the canonical baseline for the outer dirty check.
     savedSnapshotsRef.current = { ...savedSnapshotsRef.current, [saved.id]: JSON.stringify(savedWithPreviewCount) };
     return savedWithPreviewCount;
   }, [updateCampus]);
+
+  // ── Page-level unsaved-changes handler for the shared guard ──────────────
+  // The editors guard their OWN internal exits (back, floor switch, add floor);
+  // this registration arms the SAME shared modal for anything that would
+  // UNMOUNT the page and discard the draft: sidebar sections, sign out, and
+  // browser back. Dirty = the active campus draft differs from its persisted
+  // snapshot (the same baseline the editors receive via `savedSnapshot`).
+  const { registerHandler } = useUnsavedChangesContext();
+  const activeCampusRef = useRef(activeCampus);
+  activeCampusRef.current = activeCampus;
+  const activeCampusIsDirty =
+    activeCampus !== null && JSON.stringify(activeCampus) !== savedSnapshotsRef.current[activeCampus.id];
+  useEffect(() => {
+    if (!activeCampus || !activeCampusIsDirty) {
+      registerHandler(null);
+      return () => registerHandler(null);
+    }
+    const campusId = activeCampus.id;
+    registerHandler({
+      isDirty: () => true,
+      onSave: async () => {
+        const current = activeCampusRef.current;
+        if (!current) return true;
+        try {
+          await saveCampusStructure(current);
+          return true;
+        } catch {
+          return false;
+        }
+      },
+      onDiscard: () => {
+        const snapshot = savedSnapshotsRef.current[campusId];
+        if (snapshot) {
+          try {
+            updateCampus(JSON.parse(snapshot) as Campus);
+          } catch {
+            // Baseline unavailable — keep the current draft untouched.
+          }
+        }
+      },
+    });
+    return () => registerHandler(null);
+  }, [activeCampus, activeCampusIsDirty, registerHandler, saveCampusStructure, updateCampus]);
 
   const goToCampusFromFloor = useCallback((campusId: string) => {
     directionRef.current = -1;
@@ -438,11 +503,13 @@ export function AdminMapBuilderPage() {
                 buildingId={view.buildingId}
                 floorId={view.floorId}
                 onBack={() => goToCampusFromFloor(activeCampus.id)}
-                onSwitchFloor={(fId) => setView({ ...view, floorId: fId })}
+                onSwitchFloor={(fId) => setView({ ...view, floorId: fId, initialSelection: undefined })}
                 onUpdate={updateCampus}
                 onSave={saveCampusStructure}
                 onPublish={() => toast.info("Publishing is implemented in A6.")}
                 publishingEnabled={false}
+                savedSnapshot={savedSnapshotsRef.current[activeCampus.id]}
+                initialSelection={view.initialSelection}
               />
             )}
 
