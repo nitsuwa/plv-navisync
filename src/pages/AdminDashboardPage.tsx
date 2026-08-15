@@ -3,7 +3,10 @@ import { motion } from "motion/react";
 import {
   Building2, Bell, AlertTriangle, Clock, ArrowRight,
   Flag, Layers, Route, Users, CheckCircle2, CalendarDays, History,
+  BarChart3, Search as SearchIcon, MapPin, Flag as FlagIcon,
 } from "lucide-react";
+import { WeeklyChart } from "../components/ui/WeeklyChart";
+import { usageAnalyticsService, type AnalyticsSummary } from "../services/usageAnalyticsService";
 import { EmptyState } from "../components/ui/EmptyState";
 import { StatCard } from "../components/ui/StatCard";
 import { Link } from "react-router";
@@ -31,6 +34,7 @@ export function AdminDashboardPage() {
   const [activity, setActivity] = useState<RecentActivityItem[]>([]);
   const [pendingReports, setPendingReports] = useState<{ title: string; detail: string; time: string; priority: "high" | "medium" }[]>([]);
   const [publishInfo, setPublishInfo] = useState<string | null>(null);
+  const [analytics, setAnalytics] = useState<AnalyticsSummary | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -51,6 +55,8 @@ export function AdminDashboardPage() {
         }))
       );
       // Editor Campus objects expose lifecycleState/publishStatus — check the lifecycle field.
+      // Real tracked usage (page views, routes, searches) from this browser.
+      setAnalytics(usageAnalyticsService.getAnalytics(7));
       const published = campuses.find((c) => c.lifecycleStatus === "published");
       setPublishInfo(
         published
@@ -127,6 +133,15 @@ export function AdminDashboardPage() {
   ];
 
   const maxWeekly = Math.max(1, ...s.weeklyActivity.map((d) => d.count));
+
+  // Analytics chart data — WeeklyChart expects day labels + two series.
+  const analyticsChart = analytics
+    ? analytics.byDay.map((d) => ({
+        day: new Date(d.day + "T00:00:00").toLocaleDateString(undefined, { weekday: "short" }),
+        updates: d.updates,
+        reports: d.reports,
+      }))
+    : [];
   const QUICK_ACTIONS: QuickAction[] = [
     { label: "Open Map Builder", to: "/admin-dashboard/map-builder", icon: Building2, desc: "Edit campus map", color: "bg-primary" },
     { label: "Review Reports", to: "/admin-dashboard/reports", icon: Flag, desc: `${s.pendingReports} pending`, color: "bg-amber-500" },
@@ -265,6 +280,77 @@ export function AdminDashboardPage() {
               />
             )}
           </div>
+        </motion.div>
+
+        {/* Usage analytics — real tracked events */}
+        <motion.div
+          variants={{ hidden: { opacity: 0, y: 16 }, visible: { opacity: 1, y: 0 } }}
+          className="bg-card rounded-2xl border border-border shadow-sm overflow-hidden flex flex-col"
+        >
+          <div className="px-5 py-3 border-b border-border flex items-center gap-2">
+            <BarChart3 className="h-3.5 w-3.5 text-primary" />
+            <h2 className="font-bold text-foreground text-sm flex-1">Usage Analytics</h2>
+            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-primary/10 text-primary uppercase tracking-wider">
+              last 7 days
+            </span>
+          </div>
+          <div className="p-4 pb-2">
+            {analytics && analytics.totalViews + analytics.totalRoutes > 0 ? (
+              <WeeklyChart data={analyticsChart} />
+            ) : (
+              <p className="text-xs text-muted-foreground py-6 text-center">
+                No tracked activity yet. Browse the map, search, and plan a route to see charts here.
+              </p>
+            )}
+          </div>
+          <div className="px-5 pb-4 grid grid-cols-4 gap-2">
+            {[
+              { icon: MapPin, label: "Map views", value: analytics?.totalViews ?? 0 },
+              { icon: Route, label: "Routes", value: analytics?.totalRoutes ?? 0 },
+              { icon: SearchIcon, label: "Searches", value: analytics?.totalSearches ?? 0 },
+              { icon: FlagIcon, label: "Reports", value: analytics?.totalReports ?? 0 },
+            ].map(({ icon: MiniIcon, label, value }) => (
+              <div key={label} className="rounded-xl border border-border bg-muted/30 p-2 text-center">
+                <MiniIcon className="h-3.5 w-3.5 text-primary mx-auto mb-1" />
+                <p className="text-base font-extrabold text-foreground leading-none">{value}</p>
+                <p className="text-[9px] text-muted-foreground mt-1 font-semibold">{label}</p>
+              </div>
+            ))}
+          </div>
+          {(analytics?.topSearches.length || analytics?.topRoutes.length) ? (
+            <div className="px-5 pb-4 pt-1 border-t border-border grid sm:grid-cols-2 gap-3">
+              <div>
+                <p className="text-[9px] font-extrabold uppercase tracking-widest text-muted-foreground mb-1.5">Top searches</p>
+                {analytics!.topSearches.length > 0 ? (
+                  <div className="space-y-1">
+                    {analytics!.topSearches.map((s) => (
+                      <div key={s.term} className="flex items-center justify-between text-[11px]">
+                        <span className="text-foreground font-semibold truncate">{s.term}</span>
+                        <span className="text-muted-foreground font-mono">{s.count}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-[11px] text-muted-foreground">No searches yet.</p>
+                )}
+              </div>
+              <div>
+                <p className="text-[9px] font-extrabold uppercase tracking-widest text-muted-foreground mb-1.5">Top routes</p>
+                {analytics!.topRoutes.length > 0 ? (
+                  <div className="space-y-1">
+                    {analytics!.topRoutes.map((r) => (
+                      <div key={r.route} className="flex items-center justify-between text-[11px]">
+                        <span className="text-foreground font-semibold truncate">{r.route}</span>
+                        <span className="text-muted-foreground font-mono">{r.count}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-[11px] text-muted-foreground">No routes planned yet.</p>
+                )}
+              </div>
+            </div>
+          ) : null}
         </motion.div>
 
         {/* Quick actions */}

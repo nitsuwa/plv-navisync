@@ -621,8 +621,8 @@ export const SEED_CAMPUSES: Campus[] = [
     id: "campus_plv",
     name: "PLV Main Campus",
     code: "PLV-MAIN",
-    description: "Main campus of Pamantasan ng Lungsod ng Valenzuela, featuring academic buildings, library, gymnasium, and student services.",
-    address: "Tongco Street, Karuhatan",
+    description: "Main campus of Pamantasan ng Lungsod ng Valenzuela — Student Center, Canteen, CABA, COED, CEIT buildings around the central Quadrangle.",
+    address: "Tongco Street, Brgy. Maysan",
     city: "Valenzuela",
     province: "Metro Manila",
     postalCode: "1442",
@@ -641,373 +641,276 @@ export const SEED_CAMPUSES: Campus[] = [
     canvasConfigured: true,
     settings: { accessibility: true, emergency: true, eventLayer: true, gps: true },
     createdAt: "2024-12-01",
-    updatedAt: "2025-01-15",
+    updatedAt: "2026-08-10",
     publishedAt: "2024-12-15",
     createdBy: "Admin",
-    markers: INITIAL_MARKERS.map((m) => ({
-      id: m.id, name: m.name, type: m.type, x: m.x, y: m.y, color: m.color || "#0e2a6e",
-    })),
-    paths: INITIAL_PATHS.map((p) => ({
-      id: p.id, points: p.points, type: p.type, color: p.color, width: p.width,
-    })),
+    // ── Markers (red dots = entrances, per the real campus map) ─────────────
+    markers: [
+      { id: "mm_gate", name: "Main Gate", type: "entrance", x: 110, y: 300, color: "#dc2626" },
+      { id: "mm_quad", name: "Quadrangle", type: "landmark", x: 440, y: 355, color: "#16a34a" },
+    ],
+    // ── Visual paths: closed paths render as filled areas (Tongco St + Quadrangle),
+    //    open polylines render as the red brick walkways. ───────────────────
+    paths: [
+      { id: "p_tongco", name: "Tongco Street", type: "road", points: [{ x: 0, y: 0 }, { x: 60, y: 0 }, { x: 60, y: 680 }, { x: 0, y: 680 }, { x: 0, y: 0 }], color: "#475569", width: 24 },
+      { id: "p_quad", name: "Quadrangle", type: "green", points: [{ x: 310, y: 250 }, { x: 570, y: 250 }, { x: 570, y: 460 }, { x: 310, y: 460 }, { x: 310, y: 250 }], color: "#166534", width: 16 },
+      // Red brick walkways
+      { id: "p_gate", name: "Main Gate Walkway", type: "walkway", points: [{ x: 110, y: 300 }, { x: 310, y: 300 }], color: "#c2410c", width: 6 },
+      { id: "p_perim", name: "Quadrangle Perimeter", type: "walkway", points: [{ x: 310, y: 250 }, { x: 570, y: 250 }, { x: 570, y: 460 }, { x: 310, y: 460 }], color: "#c2410c", width: 5 },
+      { id: "p_scb", name: "SCB Walkway", type: "walkway", points: [{ x: 310, y: 250 }, { x: 280, y: 180 }], color: "#c2410c", width: 4 },
+      { id: "p_canteen", name: "Canteen Walkway", type: "walkway", points: [{ x: 570, y: 250 }, { x: 520, y: 150 }], color: "#c2410c", width: 4 },
+      { id: "p_coed", name: "COED Walkway", type: "walkway", points: [{ x: 570, y: 250 }, { x: 650, y: 125 }], color: "#c2410c", width: 4 },
+      { id: "p_caba", name: "CABA Walkway", type: "walkway", points: [{ x: 310, y: 460 }, { x: 230, y: 495 }], color: "#c2410c", width: 4 },
+      { id: "p_ceit", name: "CEIT Walkway", type: "walkway", points: [{ x: 570, y: 460 }, { x: 660, y: 445 }], color: "#c2410c", width: 4 },
+      { id: "p_guard", name: "Guard House Walkway", type: "walkway", points: [{ x: 110, y: 300 }, { x: 130, y: 360 }], color: "#c2410c", width: 4 },
+    ],
     buildings: [
       {
-        id: "b_mab", name: "Main Academic Building", code: "MAB", category: "Academic",
-        description: "Primary academic building housing major college departments.",
-        x: 155, y: 130, width: 125, height: 80, color: "#1e40af", expanded: false,
+        id: "b_scb", name: "Student Center Building", code: "SCB", category: "Administrative",
+        description: "Home of student services, organizations, and the Office of Student Affairs.",
+        x: 170, y: 70, width: 240, height: 110, color: "#7c3aed", expanded: false,
         floors: [
           {
-            id: "f_mab_1", number: 1, label: "Ground Floor", paths: [],
+            id: "f_scb_1", number: 1, label: "Ground Floor", paths: [],
             rooms: [
-              { id: "r1", name: "Lobby",     type: "lobby",     x: 20,  y: 60,  w: 80,  h: 50 },
-              { id: "r2", name: "Room 101",  type: "classroom", x: 120, y: 60,  w: 70,  h: 45 },
-              { id: "r3", name: "Room 102",  type: "classroom", x: 200, y: 60,  w: 70,  h: 45 },
-              { id: "r4", name: "Stairs A",  type: "stairs",    x: 300, y: 60,  w: 30,  h: 30 },
-              { id: "r5", name: "Restroom",  type: "restroom",  x: 350, y: 60,  w: 40,  h: 30 },
+              { id: "scb_r1", name: "Lobby", type: "lobby", x: 20, y: 60, w: 80, h: 50 },
+              { id: "scb_r2", name: "Registration", type: "office", x: 120, y: 60, w: 70, h: 45 },
+              { id: "scb_r3", name: "Student Lounge", type: "lounge", x: 200, y: 60, w: 90, h: 50 },
+              { id: "scb_r4", name: "Stairs A", type: "stairs", x: 310, y: 60, w: 30, h: 30 },
+              { id: "scb_r5", name: "Restroom", type: "restroom", x: 350, y: 60, w: 40, h: 30 },
             ],
           },
           {
-            id: "f_mab_2", number: 2, label: "Floor 2", paths: [],
+            id: "f_scb_2", number: 2, label: "Floor 2", paths: [],
             rooms: [
-              { id: "r6",  name: "Room 201", type: "classroom", x: 20,  y: 60, w: 80,  h: 50 },
-              { id: "r7",  name: "Room 202", type: "classroom", x: 120, y: 60, w: 70,  h: 45 },
-              { id: "r8",  name: "Lab 201",  type: "lab",       x: 200, y: 60, w: 90,  h: 55 },
-              { id: "r9",  name: "Stairs A", type: "stairs",    x: 300, y: 60, w: 30,  h: 30 },
+              { id: "scb_r6", name: "Org Room 201", type: "office", x: 20, y: 60, w: 80, h: 50 },
+              { id: "scb_r7", name: "Org Room 202", type: "office", x: 120, y: 60, w: 80, h: 50 },
+              { id: "scb_r8", name: "Stairs A", type: "stairs", x: 310, y: 60, w: 30, h: 30 },
             ],
           },
-          { id: "f_mab_3", number: 3, label: "Floor 3", paths: [], rooms: [] },
+          { id: "f_scb_3", number: 3, label: "Floor 3", paths: [], rooms: [] },
         ],
       },
       {
-        id: "b_adm", name: "Administration Building", code: "ADM", category: "Administrative",
-        description: "Houses administrative offices, registrar, and cashier.",
-        x: 395, y: 115, width: 105, height: 72, color: "#1e3a8a", expanded: false,
+        id: "b_canteen", name: "University Canteen", code: "CANTEEN", category: "Facility",
+        description: "Main dining area with food stalls and seating for students.",
+        x: 480, y: 85, width: 110, height: 70, color: "#d97706", expanded: false,
         floors: [
           {
-            id: "f_adm_1", number: 1, label: "Ground Floor", paths: [],
+            id: "f_can_1", number: 1, label: "Ground Floor", paths: [],
             rooms: [
-              { id: "ra1", name: "Registrar", type: "office", x: 20,  y: 60,  w: 100, h: 60 },
-              { id: "ra2", name: "Cashier",   type: "office", x: 140, y: 60,  w: 80,  h: 60 },
-              { id: "ra3", name: "Lobby",     type: "lobby",  x: 240, y: 60,  w: 60,  h: 60 },
-            ],
-          },
-          { id: "f_adm_2", number: 2, label: "Floor 2", paths: [], rooms: [] },
-        ],
-      },
-      {
-        id: "b_lrc", name: "Library & Learning Resource", code: "LRC", category: "Library",
-        description: "Main library with reading rooms, computer access, and media section.",
-        x: 545, y: 295, width: 115, height: 78, color: "#1d4ed8", expanded: false,
-        floors: [
-          {
-            id: "f_lrc_1", number: 1, label: "Ground Floor", paths: [],
-            rooms: [
-              { id: "rl1", name: "Main Library", type: "office", x: 20,  y: 50,  w: 150, h: 80 },
-              { id: "rl2", name: "Reading Room", type: "lobby",  x: 180, y: 50,  w: 80,  h: 80 },
+              { id: "can_r1", name: "Dining Area", type: "canteen", x: 20, y: 40, w: 180, h: 90 },
+              { id: "can_r2", name: "Kitchen", type: "kitchen", x: 220, y: 40, w: 100, h: 70 },
+              { id: "can_r3", name: "Stairs", type: "stairs", x: 340, y: 40, w: 30, h: 30 },
+              { id: "can_r4", name: "Restroom", type: "restroom", x: 380, y: 40, w: 40, h: 30 },
             ],
           },
         ],
       },
       {
-        id: "b_elb", name: "Engineering Laboratory Bldg", code: "ELB", category: "Laboratory",
-        description: "Engineering labs and workshop areas.",
-        x: 165, y: 305, width: 105, height: 62, color: "#1e40af", expanded: false,
-        floors: [{ id: "f_elb_1", number: 1, label: "Ground Floor", paths: [], rooms: [] }],
+        id: "b_caba", name: "CABA Building", code: "CABA", category: "Academic",
+        description: "College of Accountancy and Business Administration.",
+        x: 130, y: 400, width: 100, height: 190, color: "#1e40af", expanded: false,
+        floors: [
+          {
+            id: "f_caba_1", number: 1, label: "Ground Floor", paths: [],
+            rooms: [
+              { id: "caba_r1", name: "Lobby", type: "lobby", x: 20, y: 60, w: 80, h: 50 },
+              { id: "caba_r2", name: "Room 101", type: "classroom", x: 120, y: 60, w: 70, h: 45 },
+              { id: "caba_r3", name: "Room 102", type: "classroom", x: 200, y: 60, w: 70, h: 45 },
+              { id: "caba_r4", name: "Room 103", type: "classroom", x: 280, y: 60, w: 70, h: 45 },
+              { id: "caba_r5", name: "Stairs A", type: "stairs", x: 360, y: 60, w: 30, h: 30 },
+            ],
+          },
+          {
+            id: "f_caba_2", number: 2, label: "Floor 2", paths: [],
+            rooms: [
+              { id: "caba_r6", name: "Room 201", type: "classroom", x: 20, y: 60, w: 80, h: 50 },
+              { id: "caba_r7", name: "Room 202", type: "classroom", x: 120, y: 60, w: 70, h: 45 },
+              { id: "caba_r8", name: "Room 203", type: "classroom", x: 200, y: 60, w: 70, h: 45 },
+              { id: "caba_r9", name: "Stairs A", type: "stairs", x: 360, y: 60, w: 30, h: 30 },
+            ],
+          },
+        ],
       },
       {
-        id: "b_gym", name: "Gymnasium & Sports Complex", code: "GYM", category: "Sports",
-        description: "Main gymnasium and sports facilities.",
-        x: 305, y: 435, width: 145, height: 82, color: "#2563eb", expanded: false,
-        floors: [{ id: "f_gym_1", number: 1, label: "Main Floor", paths: [], rooms: [] }],
+        id: "b_coed", name: "COED Building", code: "COED", category: "Academic",
+        description: "College of Education — teacher education programs.",
+        x: 620, y: 60, width: 230, height: 130, color: "#0d9488", expanded: false,
+        floors: [
+          {
+            id: "f_coed_1", number: 1, label: "Ground Floor", paths: [],
+            rooms: [
+              { id: "coed_r1", name: "Lobby", type: "lobby", x: 20, y: 60, w: 80, h: 50 },
+              { id: "coed_r2", name: "Room 301", type: "classroom", x: 120, y: 60, w: 70, h: 45 },
+              { id: "coed_r3", name: "Room 302", type: "classroom", x: 200, y: 60, w: 70, h: 45 },
+              { id: "coed_r4", name: "Room 303", type: "classroom", x: 280, y: 60, w: 70, h: 45 },
+              { id: "coed_r5", name: "Stairs A", type: "stairs", x: 360, y: 60, w: 30, h: 30 },
+            ],
+          },
+          {
+            id: "f_coed_2", number: 2, label: "Floor 2", paths: [],
+            rooms: [
+              { id: "coed_r6", name: "Room 401", type: "classroom", x: 20, y: 60, w: 80, h: 50 },
+              { id: "coed_r7", name: "Room 402", type: "classroom", x: 120, y: 60, w: 70, h: 45 },
+              { id: "coed_r8", name: "Room 403", type: "classroom", x: 200, y: 60, w: 70, h: 45 },
+              { id: "coed_r9", name: "Stairs A", type: "stairs", x: 360, y: 60, w: 30, h: 30 },
+            ],
+          },
+        ],
       },
       {
-        id: "b_ssc", name: "Student Services Center", code: "SSC", category: "Administrative",
-        description: "Student services and canteen area.",
-        x: 605, y: 415, width: 112, height: 72, color: "#1d4ed8", expanded: false,
-        floors: [{ id: "f_ssc_1", number: 1, label: "Ground Floor", paths: [], rooms: [] }],
+        id: "b_ceit", name: "CEIT Building", code: "CEIT", category: "Academic",
+        description: "College of Engineering and Information Technology.",
+        x: 660, y: 330, width: 100, height: 230, color: "#059669", expanded: false,
+        floors: [
+          {
+            id: "f_ceit_1", number: 1, label: "Ground Floor", paths: [],
+            rooms: [
+              { id: "ceit_r1", name: "Lobby", type: "lobby", x: 20, y: 60, w: 80, h: 50 },
+              { id: "ceit_r2", name: "Lab 501", type: "lab", x: 120, y: 60, w: 90, h: 55 },
+              { id: "ceit_r3", name: "Lab 502", type: "lab", x: 230, y: 60, w: 90, h: 55 },
+              { id: "ceit_r4", name: "Stairs A", type: "stairs", x: 340, y: 60, w: 30, h: 30 },
+            ],
+          },
+          {
+            id: "f_ceit_2", number: 2, label: "Floor 2", paths: [],
+            rooms: [
+              { id: "ceit_r5", name: "Lab 601", type: "lab", x: 20, y: 60, w: 90, h: 55 },
+              { id: "ceit_r6", name: "Lab 602", type: "lab", x: 130, y: 60, w: 90, h: 55 },
+              { id: "ceit_r7", name: "Stairs A", type: "stairs", x: 340, y: 60, w: 30, h: 30 },
+            ],
+          },
+        ],
+      },
+      {
+        id: "b_guard", name: "Guard House", code: "GUARD", category: "Facility",
+        description: "Security guard house at the main gate entrance.",
+        x: 110, y: 300, width: 80, height: 55, color: "#64748b", expanded: false,
+        floors: [
+          {
+            id: "f_guard_1", number: 1, label: "Ground Floor", paths: [],
+            rooms: [
+              { id: "guard_r1", name: "Guard Post", type: "office", x: 20, y: 60, w: 120, h: 70 },
+            ],
+          },
+        ],
       },
     ],
-
-    // ── Navigation Graph ──────────────────────────────────────────────────────
+    // ── Navigation graph — edges follow ONLY the red brick walkways ─────────
     navNodes: [
-      // Gates
-      { id: "nn_gate", name: "Main Gate", type: "entrance", x: 108, y: 285, accessible: true, color: "#16a34a" },
-      { id: "nn_eastgate", name: "East Gate", type: "entrance", x: 680, y: 285, accessible: true, color: "#16a34a" },
-      // Central plaza
-      { id: "nn_plaza", name: "Flagpole Plaza", type: "outdoor", x: 404, y: 285, accessible: true, color: "#16a34a" },
-      // Building entrances
-      { id: "nn_mab", name: "MAB Entrance", type: "entrance", x: 280, y: 170, buildingId: "b_mab", accessible: true, color: "#16a34a" },
-      { id: "nn_adm", name: "Admin Entrance", type: "entrance", x: 450, y: 195, buildingId: "b_adm", accessible: true, color: "#16a34a" },
-      { id: "nn_elb", name: "ELB Entrance", type: "entrance", x: 270, y: 336, buildingId: "b_elb", accessible: true, color: "#16a34a" },
-      { id: "nn_lrc", name: "Library Entrance", type: "entrance", x: 545, y: 295, buildingId: "b_lrc", accessible: true, color: "#16a34a" },
-      { id: "nn_gym", name: "Gym Entrance", type: "entrance", x: 375, y: 476, buildingId: "b_gym", accessible: true, color: "#16a34a" },
-      { id: "nn_ssc", name: "SSC Entrance", type: "entrance", x: 605, y: 415, buildingId: "b_ssc", accessible: true, color: "#16a34a" },
-      // Junctions
-      { id: "nn_south", name: "South Junction", type: "outdoor", x: 404, y: 462, accessible: true, color: "#16a34a" },
-      { id: "nn_parking", name: "Student Parking", type: "outdoor", x: 250, y: 490, accessible: true, color: "#16a34a" },
+      { id: "nn_gate", name: "Main Gate", type: "entrance", x: 110, y: 300, accessible: true, color: "#dc2626" },
+      { id: "nn_guard", name: "Guard House Entrance", type: "entrance", x: 130, y: 360, buildingId: "b_guard", accessible: true, color: "#16a34a" },
+      { id: "nn_scb", name: "SCB Entrance", type: "entrance", x: 280, y: 180, buildingId: "b_scb", accessible: true, color: "#16a34a" },
+      { id: "nn_canteen", name: "Canteen Entrance", type: "entrance", x: 520, y: 150, buildingId: "b_canteen", accessible: true, color: "#16a34a" },
+      { id: "nn_coed", name: "COED Entrance", type: "entrance", x: 650, y: 125, buildingId: "b_coed", accessible: true, color: "#16a34a" },
+      { id: "nn_caba", name: "CABA Entrance", type: "entrance", x: 230, y: 495, buildingId: "b_caba", accessible: true, color: "#16a34a" },
+      { id: "nn_ceit", name: "CEIT Entrance", type: "entrance", x: 660, y: 445, buildingId: "b_ceit", accessible: true, color: "#16a34a" },
+      { id: "nn_jct_w", name: "West Junction", type: "outdoor", x: 310, y: 300, accessible: true, color: "#16a34a" },
+      { id: "nn_qnw", name: "Quadrangle NW", type: "outdoor", x: 310, y: 250, accessible: true, color: "#16a34a" },
+      { id: "nn_qne", name: "Quadrangle NE", type: "outdoor", x: 570, y: 250, accessible: true, color: "#16a34a" },
+      { id: "nn_qse", name: "Quadrangle SE", type: "outdoor", x: 570, y: 460, accessible: true, color: "#16a34a" },
+      { id: "nn_qsw", name: "Quadrangle SW", type: "outdoor", x: 310, y: 460, accessible: true, color: "#16a34a" },
     ],
     navEdges: [
-      // Main gate to central plaza (horizontal spine)
-      { id: "ne_gate_plaza", startNodeId: "nn_gate", endNodeId: "nn_plaza", distance: 296, bidirectional: true, accessible: true, emergencySafe: true, type: "walkway", color: "#16a34a", width: 4 },
-      // East gate to central plaza (horizontal spine)
-      { id: "ne_east_plaza", startNodeId: "nn_eastgate", endNodeId: "nn_plaza", distance: 276, bidirectional: true, accessible: true, emergencySafe: true, type: "walkway", color: "#16a34a", width: 4 },
-      // Plaza to MAB (north-west)
-      { id: "ne_plaza_mab", startNodeId: "nn_plaza", endNodeId: "nn_mab", distance: 169, bidirectional: true, accessible: true, emergencySafe: true, type: "walkway", color: "#16a34a", width: 3 },
-      // Plaza to Admin (north-east)
-      { id: "ne_plaza_adm", startNodeId: "nn_plaza", endNodeId: "nn_adm", distance: 101, bidirectional: true, accessible: true, emergencySafe: true, type: "walkway", color: "#16a34a", width: 3 },
-      // Plaza to ELB (south-west)
-      { id: "ne_plaza_elb", startNodeId: "nn_plaza", endNodeId: "nn_elb", distance: 143, bidirectional: true, accessible: true, emergencySafe: false, type: "walkway", color: "#16a34a", width: 3 },
-      // Plaza to Library (east)
-      { id: "ne_plaza_lrc", startNodeId: "nn_plaza", endNodeId: "nn_lrc", distance: 141, bidirectional: true, accessible: true, emergencySafe: true, type: "walkway", color: "#16a34a", width: 3 },
-      // Plaza to south junction (vertical spine)
-      { id: "ne_plaza_south", startNodeId: "nn_plaza", endNodeId: "nn_south", distance: 177, bidirectional: true, accessible: true, emergencySafe: true, type: "walkway", color: "#16a34a", width: 4 },
-      // South junction to Gym
-      { id: "ne_south_gym", startNodeId: "nn_south", endNodeId: "nn_gym", distance: 32, bidirectional: true, accessible: true, emergencySafe: true, type: "walkway", color: "#16a34a", width: 3 },
-      // South junction to SSC
-      { id: "ne_south_ssc", startNodeId: "nn_south", endNodeId: "nn_ssc", distance: 206, bidirectional: true, accessible: true, emergencySafe: false, type: "walkway", color: "#16a34a", width: 3 },
-      // SSC to Library (cross-connection)
-      { id: "ne_ssc_lrc", startNodeId: "nn_ssc", endNodeId: "nn_lrc", distance: 134, bidirectional: true, accessible: true, emergencySafe: false, type: "walkway", color: "#16a34a", width: 2 },
-      // MAB to ELB (direct diagonal)
-      { id: "ne_mab_elb", startNodeId: "nn_mab", endNodeId: "nn_elb", distance: 166, bidirectional: true, accessible: true, emergencySafe: false, type: "walkway", color: "#16a34a", width: 2 },
-      // South junction to student parking
-      { id: "ne_south_parking", startNodeId: "nn_south", endNodeId: "nn_parking", distance: 157, bidirectional: true, accessible: true, emergencySafe: false, type: "walkway", color: "#16a34a", width: 2 },
-      // Gym to parking (direct)
-      { id: "ne_gym_parking", startNodeId: "nn_gym", endNodeId: "nn_parking", distance: 126, bidirectional: true, accessible: true, emergencySafe: false, type: "walkway", color: "#16a34a", width: 2 },
-      // Main gate to ELB (shortcut via west path)
-      { id: "ne_gate_elb", startNodeId: "nn_gate", endNodeId: "nn_elb", distance: 170, bidirectional: true, accessible: false, inaccessibleReason: "uneven_surface", emergencySafe: false, type: "walkway", color: "#16a34a", width: 2 },
+      { id: "ne_gate_w", startNodeId: "nn_gate", endNodeId: "nn_jct_w", distance: 200, bidirectional: true, accessible: true, emergencySafe: true, type: "walkway", color: "#c2410c", width: 6 },
+      { id: "ne_w_qnw", startNodeId: "nn_jct_w", endNodeId: "nn_qnw", distance: 50, bidirectional: true, accessible: true, emergencySafe: true, type: "walkway", color: "#c2410c", width: 5 },
+      { id: "ne_w_qsw", startNodeId: "nn_jct_w", endNodeId: "nn_qsw", distance: 160, bidirectional: true, accessible: true, emergencySafe: true, type: "walkway", color: "#c2410c", width: 5 },
+      { id: "ne_perim_n", startNodeId: "nn_qnw", endNodeId: "nn_qne", distance: 260, bidirectional: true, accessible: true, emergencySafe: true, type: "walkway", color: "#c2410c", width: 5 },
+      { id: "ne_perim_e", startNodeId: "nn_qne", endNodeId: "nn_qse", distance: 210, bidirectional: true, accessible: true, emergencySafe: true, type: "walkway", color: "#c2410c", width: 5 },
+      { id: "ne_perim_s", startNodeId: "nn_qse", endNodeId: "nn_qsw", distance: 260, bidirectional: true, accessible: true, emergencySafe: true, type: "walkway", color: "#c2410c", width: 5 },
+      { id: "ne_perim_w", startNodeId: "nn_qsw", endNodeId: "nn_qnw", distance: 210, bidirectional: true, accessible: true, emergencySafe: true, type: "walkway", color: "#c2410c", width: 5 },
+      { id: "ne_scb", startNodeId: "nn_qnw", endNodeId: "nn_scb", distance: 67, bidirectional: true, accessible: true, emergencySafe: true, type: "walkway", color: "#c2410c", width: 4 },
+      { id: "ne_canteen", startNodeId: "nn_qne", endNodeId: "nn_canteen", distance: 103, bidirectional: true, accessible: true, emergencySafe: true, type: "walkway", color: "#c2410c", width: 4 },
+      { id: "ne_coed", startNodeId: "nn_qne", endNodeId: "nn_coed", distance: 136, bidirectional: true, accessible: true, emergencySafe: true, type: "walkway", color: "#c2410c", width: 4 },
+      { id: "ne_caba", startNodeId: "nn_qsw", endNodeId: "nn_caba", distance: 97, bidirectional: true, accessible: true, emergencySafe: true, type: "walkway", color: "#c2410c", width: 4 },
+      { id: "ne_ceit", startNodeId: "nn_qse", endNodeId: "nn_ceit", distance: 84, bidirectional: true, accessible: true, emergencySafe: true, type: "walkway", color: "#c2410c", width: 4 },
+      { id: "ne_gate_guard", startNodeId: "nn_gate", endNodeId: "nn_guard", distance: 60, bidirectional: true, accessible: true, emergencySafe: true, type: "walkway", color: "#c2410c", width: 4 },
     ],
-
-    // ── Decorative Assets (visual-only outdoor objects) ────────────────────────
+    // ── Decorative assets (visual only) ─────────────────────────────────────
     decorAssets: [
-      // ══ Perimeter Trees (large) ══
-      { id: "da_tl_01", type: "tree-large", x: 30, y: 30 },
-      { id: "da_tl_02", type: "tree-large", x: 90, y: 40 },
-      { id: "da_tl_03", type: "tree-large", x: 350, y: 35 },
-      { id: "da_tl_04", type: "tree-large", x: 480, y: 30 },
-      { id: "da_tl_05", type: "tree-large", x: 650, y: 40 },
-      { id: "da_tl_06", type: "tree-large", x: 820, y: 55 },
-      { id: "da_tl_07", type: "tree-large", x: 30, y: 200 },
-      { id: "da_tl_08", type: "tree-large", x: 30, y: 420 },
-      { id: "da_tl_09", type: "tree-large", x: 50, y: 580 },
-      { id: "da_tl_10", type: "tree-large", x: 200, y: 600 },
-      { id: "da_tl_11", type: "tree-large", x: 400, y: 610 },
-      { id: "da_tl_12", type: "tree-large", x: 600, y: 600 },
-      { id: "da_tl_13", type: "tree-large", x: 790, y: 590 },
-      { id: "da_tl_14", type: "tree-large", x: 850, y: 170 },
-      { id: "da_tl_15", type: "tree-large", x: 850, y: 400 },
-
-      // ══ Interior Trees (between buildings) ══
-      { id: "da_tr_01", type: "tree", x: 320, y: 200 },
-      { id: "da_tr_02", type: "tree", x: 360, y: 160 },
-      { id: "da_tr_03", type: "tree", x: 500, y: 180 },
-      { id: "da_tr_04", type: "tree", x: 200, y: 270 },
-      { id: "da_tr_05", type: "tree", x: 220, y: 380 },
-      { id: "da_tr_06", type: "tree", x: 480, y: 350 },
-      { id: "da_tr_07", type: "tree", x: 510, y: 380 },
-      { id: "da_tr_08", type: "tree", x: 460, y: 500 },
-      { id: "da_tr_09", type: "tree", x: 530, y: 490 },
-      { id: "da_tr_10", type: "tree", x: 350, y: 550 },
-      { id: "da_tr_11", type: "tree", x: 700, y: 380 },
-      { id: "da_tr_12", type: "tree", x: 720, y: 480 },
-
-      // ══ Palm Trees (for tropical vibe) ══
-      { id: "da_pm_01", type: "palm", x: 310, y: 270 },
-      { id: "da_pm_02", type: "palm", x: 500, y: 270 },
-      { id: "da_pm_03", type: "palm", x: 380, y: 440 },
-      { id: "da_pm_04", type: "palm", x: 590, y: 440 },
-
-      // ══ Bushes (near buildings and walkways) ══
-      { id: "da_bu_01", type: "bush", x: 270, y: 125 },
-      { id: "da_bu_02", type: "bush", x: 290, y: 125 },
-      { id: "da_bu_03", type: "bush", x: 380, y: 105 },
-      { id: "da_bu_04", type: "bush", x: 480, y: 105 },
-      { id: "da_bu_05", type: "bush", x: 530, y: 280 },
-      { id: "da_bu_06", type: "bush", x: 560, y: 280 },
-      { id: "da_bu_07", type: "bush", x: 155, y: 350 },
-      { id: "da_bu_08", type: "bush", x: 155, y: 370 },
-      { id: "da_bu_09", type: "bush", x: 290, y: 420 },
-      { id: "da_bu_10", type: "bush", x: 320, y: 420 },
-      { id: "da_bu_11", type: "bush", x: 600, y: 400 },
-      { id: "da_bu_12", type: "bush", x: 620, y: 400 },
-
-      // ══ Flower Beds (decorative color) ══
-      { id: "da_fl_01", type: "flower", x: 385, y: 265 },
-      { id: "da_fl_02", type: "flower", x: 425, y: 265 },
-      { id: "da_fl_03", type: "flower", x: 220, y: 145 },
-      { id: "da_fl_04", type: "flower", x: 460, y: 160 },
-
-      // ══ Plant Pots (entrance decorations) ══
-      { id: "da_pt_01", type: "plant", x: 260, y: 160 },
-      { id: "da_pt_02", type: "plant", x: 300, y: 160 },
-      { id: "da_pt_03", type: "plant", x: 430, y: 185 },
-      { id: "da_pt_04", type: "plant", x: 470, y: 185 },
-      { id: "da_pt_05", type: "plant", x: 525, y: 295 },
-      { id: "da_pt_06", type: "plant", x: 565, y: 295 },
-      { id: "da_pt_07", type: "plant", x: 360, y: 466 },
-      { id: "da_pt_08", type: "plant", x: 390, y: 466 },
-      { id: "da_pt_09", type: "plant", x: 585, y: 425 },
-      { id: "da_pt_10", type: "plant", x: 625, y: 425 },
-
-      // ══ Benches (rest areas near buildings) ══
-      { id: "da_be_01", type: "bench", x: 250, y: 155 },
-      { id: "da_be_02", type: "bench", x: 475, y: 210 },
-      { id: "da_be_03", type: "bench", x: 530, y: 310 },
-      { id: "da_be_04", type: "bench", x: 585, y: 430 },
-      { id: "da_be_05", type: "bench", x: 360, y: 490 },
-      { id: "da_be_06", type: "bench", x: 390, y: 300 },
-      // Long benches
-      { id: "da_bl_01", type: "bench-long", x: 340, y: 270 },
-      { id: "da_bl_02", type: "bench-long", x: 600, y: 370 },
-
-      // ══ Lamp Posts (along main paths) ══
-      { id: "da_lp_01", type: "lamp-post", x: 150, y: 275 },
-      { id: "da_lp_02", type: "lamp-post", x: 250, y: 275 },
-      { id: "da_lp_03", type: "lamp-post", x: 350, y: 275 },
-      { id: "da_lp_04", type: "lamp-post", x: 460, y: 275 },
-      { id: "da_lp_05", type: "lamp-post", x: 560, y: 275 },
-      { id: "da_lp_06", type: "lamp-post", x: 650, y: 275 },
-      { id: "da_lp_07", type: "lamp-post", x: 394, y: 210 },
-      { id: "da_lp_08", type: "lamp-post", x: 394, y: 340 },
-      { id: "da_lp_09", type: "lamp-post", x: 394, y: 420 },
-      { id: "da_lp_10", type: "lamp-post", x: 394, y: 520 },
-
-      // ══ Trash & Recycle Bins ══
-      { id: "da_tb_01", type: "trash-bin", x: 395, y: 275 },
-      { id: "da_tb_02", type: "trash-bin", x: 280, y: 165 },
-      { id: "da_tb_03", type: "trash-bin", x: 450, y: 185 },
-      { id: "da_tb_04", type: "trash-bin", x: 540, y: 305 },
-      { id: "da_tb_05", type: "trash-bin", x: 375, y: 465 },
-      { id: "da_tb_06", type: "trash-bin", x: 610, y: 410 },
-      { id: "da_rb_01", type: "recycle-bin", x: 414, y: 275 },
-
-      // ══ Wayfinding Signs ══
-      { id: "da_sg_01", type: "sign", x: 100, y: 275 },
-      { id: "da_sg_02", type: "sign", x: 690, y: 275 },
-      { id: "da_sg_03", type: "sign", x: 395, y: 310 },
-
-      // ══ Flags ══
-      { id: "da_fg_01", type: "flag", x: 390, y: 255 },
-
-      // ══ Facilities ══
-      { id: "da_fn_01", type: "fountain", x: 395, y: 285 },
-      { id: "da_br_01", type: "bike-rack", x: 285, y: 140 },
-      { id: "da_br_02", type: "bike-rack", x: 465, y: 150 },
-      { id: "da_pt_11", type: "picnic-table", x: 340, y: 550 },
-      { id: "da_pt_12", type: "picnic-table", x: 660, y: 350 },
-      { id: "da_gz_01", type: "gazebo", x: 170, y: 250 },
+      { id: "da_tl_01", type: "tree-large", x: 90, y: 60 },
+      { id: "da_tl_02", type: "tree-large", x: 460, y: 60 },
+      { id: "da_tl_03", type: "tree-large", x: 620, y: 250 },
+      { id: "da_tl_04", type: "tree-large", x: 800, y: 320 },
+      { id: "da_tl_05", type: "tree-large", x: 260, y: 620 },
+      { id: "da_tr_01", type: "tree", x: 300, y: 330 },
+      { id: "da_tr_02", type: "tree", x: 400, y: 300 },
+      { id: "da_tr_03", type: "tree", x: 500, y: 400 },
+      { id: "da_be_01", type: "bench", x: 340, y: 275 },
+      { id: "da_be_02", type: "bench", x: 540, y: 275 },
+      { id: "da_lp_01", type: "lamp-post", x: 200, y: 300 },
+      { id: "da_lp_02", type: "lamp-post", x: 420, y: 300 },
+      { id: "da_fn_01", type: "fountain", x: 440, y: 355 },
     ],
-
-    // ── Assembly Points (emergency gathering areas) ───────────────────────────
+    // ── Assembly points (emergency gathering areas) ─────────────────────────
     assemblyPoints: [
-      { id: "ap_plaza", name: "Flagpole Plaza", x: 404, y: 285, capacity: 500, accessible: true },
-      { id: "ap_field", name: "Open Field (Gym Area)", x: 375, y: 540, capacity: 300, accessible: true },
-      { id: "ap_gate", name: "Main Gate Area", x: 108, y: 300, capacity: 200, accessible: true },
-      { id: "ap_parking", name: "Student Parking Lot", x: 250, y: 510, capacity: 150, accessible: true },
+      { id: "ap_quad", name: "Quadrangle", x: 440, y: 355, capacity: 800, accessible: true },
+      { id: "ap_gate", name: "Main Gate Area", x: 110, y: 320, capacity: 200, accessible: true },
+      { id: "ap_guard", name: "Guard House Area", x: 130, y: 380, capacity: 100, accessible: true },
     ],
-
-    // ── Accessibility Features ────────────────────────────────────────────────
+    // ── Accessibility features ──────────────────────────────────────────────
     accessibilityFeatures: [
-      { id: "af_mab_ramp", buildingId: "b_mab", type: "ramp", label: "MAB Entrance Ramp", status: "present", notes: "Wheelchair ramp at main entrance" },
-      { id: "af_adm_ramp", buildingId: "b_adm", type: "ramp", label: "Admin Entrance Ramp", status: "present", notes: "Ramp at north entrance" },
-      { id: "af_lrc_elv", buildingId: "b_lrc", type: "elevator", label: "Library Elevator", status: "present", notes: "Public elevator to all floors" },
-      { id: "af_ssc_entr", buildingId: "b_ssc", type: "accessible_entrance", label: "SSC Accessible Entrance", status: "present" },
-      { id: "af_elb_ramp", buildingId: "b_elb", type: "ramp", label: "ELB Side Ramp", status: "present" },
-      { id: "af_mab_rstr", buildingId: "b_mab", type: "accessible_restroom", label: "MAB Accessible Restroom", status: "present" },
-      { id: "af_lrc_rstr", buildingId: "b_lrc", type: "accessible_restroom", label: "Library Accessible Restroom", status: "present" },
-      { id: "af_gym_ramp", buildingId: "b_gym", type: "ramp", label: "Gym Entrance Ramp", status: "under_maintenance", notes: "Scheduled for repair next month" },
-      { id: "af_adm_corr", buildingId: "b_adm", type: "wide_corridor", label: "Admin Wide Corridor", status: "present" },
+      { id: "af_scb_ramp", buildingId: "b_scb", type: "ramp", label: "SCB Entrance Ramp", status: "present", notes: "Wheelchair ramp at the main entrance" },
+      { id: "af_caba_ramp", buildingId: "b_caba", type: "ramp", label: "CABA Entrance Ramp", status: "present" },
+      { id: "af_ceit_elv", buildingId: "b_ceit", type: "elevator", label: "CEIT Elevator", status: "present", notes: "Elevator to all floors" },
+      { id: "af_coed_ramp", buildingId: "b_coed", type: "ramp", label: "COED Side Ramp", status: "present" },
+      { id: "af_scb_rstr", buildingId: "b_scb", type: "accessible_restroom", label: "SCB Accessible Restroom", status: "present" },
     ],
-
-    // ── Predefined Routes ─────────────────────────────────────────────────────
+    // ── Predefined routes (all follow the brick walkways) ───────────────────
     routes: [
       {
-        id: "rt_gate_mab", name: "Main Gate → MAB",
-        description: "Standard walking route from the main entrance to the Main Academic Building",
-        fromBuildingId: "b_mab", toBuildingId: "",
-        waypoints: [{ x: 108, y: 285 }, { x: 404, y: 285 }, { x: 280, y: 170 }],
-        type: "walking", distanceM: 120, durationMin: 2, color: "#0e2a6e", isActive: true,
+        id: "rt_gate_scb", name: "Main Gate → Student Center",
+        description: "From the main gate to the Student Center via the quadrangle walkway",
+        fromBuildingId: "b_scb", toBuildingId: "",
+        waypoints: [{ x: 110, y: 300 }, { x: 310, y: 300 }, { x: 310, y: 250 }, { x: 280, y: 180 }],
+        type: "walking", distanceM: 140, durationMin: 2, color: "#c2410c", isActive: true,
       },
       {
-        id: "rt_gate_lrc", name: "Main Gate → Library",
-        description: "Route from main gate to the Library & Learning Resource Center",
-        fromBuildingId: "b_lrc", toBuildingId: "",
-        waypoints: [{ x: 108, y: 285 }, { x: 404, y: 285 }, { x: 545, y: 295 }],
-        type: "walking", distanceM: 150, durationMin: 3, color: "#0e2a6e", isActive: true,
+        id: "rt_caba_coed", name: "CABA → COED",
+        description: "Across the quadrangle diagonal to the College of Education",
+        fromBuildingId: "b_caba", toBuildingId: "b_coed",
+        waypoints: [{ x: 230, y: 495 }, { x: 310, y: 460 }, { x: 570, y: 250 }, { x: 650, y: 125 }],
+        type: "walking", distanceM: 210, durationMin: 3, color: "#c2410c", isActive: true,
       },
       {
-        id: "rt_east_gym", name: "East Gate → Gymnasium",
-        description: "From the east campus entrance to the sports complex",
-        fromBuildingId: "b_gym", toBuildingId: "",
-        waypoints: [{ x: 680, y: 285 }, { x: 404, y: 285 }, { x: 404, y: 462 }, { x: 375, y: 476 }],
-        type: "walking", distanceM: 200, durationMin: 4, color: "#0e2a6e", isActive: true,
+        id: "rt_scb_ceit", name: "Student Center → CEIT",
+        description: "From the Student Center to the College of Engineering & IT",
+        fromBuildingId: "b_scb", toBuildingId: "b_ceit",
+        waypoints: [{ x: 280, y: 180 }, { x: 310, y: 250 }, { x: 570, y: 460 }, { x: 660, y: 445 }],
+        type: "walking", distanceM: 180, durationMin: 3, color: "#c2410c", isActive: true,
       },
       {
-        id: "rt_adm_ssc", name: "Admin → SSC (Accessible)",
-        description: "Wheelchair-accessible route from Administration to Student Services",
-        fromBuildingId: "b_adm", toBuildingId: "b_ssc",
-        waypoints: [{ x: 450, y: 195 }, { x: 404, y: 285 }, { x: 404, y: 462 }, { x: 605, y: 415 }],
-        type: "accessible", distanceM: 220, durationMin: 5, color: "#2563eb", isActive: true,
-      },
-      {
-        id: "rt_mab_lrc", name: "MAB → Library",
-        description: "Quick route between academic buildings",
-        fromBuildingId: "b_mab", toBuildingId: "b_lrc",
-        waypoints: [{ x: 280, y: 170 }, { x: 404, y: 285 }, { x: 545, y: 295 }],
-        type: "walking", distanceM: 180, durationMin: 3, color: "#0e2a6e", isActive: true,
-      },
-      {
-        id: "rt_gym_parking", name: "Gymnasium → Student Parking",
-        description: "Route from the sports complex to the student parking area",
-        fromBuildingId: "b_gym", toBuildingId: "",
-        waypoints: [{ x: 375, y: 476 }, { x: 250, y: 490 }],
-        type: "walking", distanceM: 80, durationMin: 1, color: "#0e2a6e", isActive: true,
+        id: "rt_canteen_ceit", name: "Canteen → CEIT",
+        description: "From the canteen to CEIT along the east walkway",
+        fromBuildingId: "b_canteen", toBuildingId: "b_ceit",
+        waypoints: [{ x: 520, y: 150 }, { x: 570, y: 250 }, { x: 570, y: 460 }, { x: 660, y: 445 }],
+        type: "walking", distanceM: 130, durationMin: 2, color: "#c2410c", isActive: true,
       },
     ],
-
-    // ── Event Overlays ────────────────────────────────────────────────────────
+    // ── Event overlays ──────────────────────────────────────────────────────
     eventOverlays: [
       {
         id: "ev_foundation",
         title: "PLV Foundation Week",
-        description: "Annual foundation celebration with booth activities along the main walkway",
+        description: "Booth activities along the quadrangle walkway",
         dateStart: "2026-02-15",
         dateEnd: "2026-02-21",
         organizer: "Office of Student Affairs",
         markers: [
-          { x: 320, y: 280, color: "#d97706", label: "Booth 1 — Student Council" },
-          { x: 350, y: 280, color: "#d97706", label: "Booth 2 — Org Fair" },
-          { x: 380, y: 280, color: "#d97706", label: "Booth 3 — Food Stalls" },
-          { x: 410, y: 280, color: "#d97706", label: "Booth 4 — Games" },
-          { x: 440, y: 280, color: "#d97706", label: "Booth 5 — Merch Booth" },
-          { x: 470, y: 280, color: "#d97706", label: "Booth 6 — Info Desk" },
-        ],
-        restrictedAreas: [
-          {
-            points: [
-              { x: 300, y: 270 }, { x: 500, y: 270 },
-              { x: 500, y: 300 }, { x: 300, y: 300 },
-            ],
-          },
-        ],
-        isActive: true,
-      },
-      {
-        id: "ev_enrollment",
-        title: "Enrollment Period",
-        description: "Enrollment assistance tent near the Administration Building",
-        dateStart: "2026-05-20",
-        dateEnd: "2026-06-10",
-        organizer: "Registrar's Office",
-        markers: [
-          { x: 420, y: 150, color: "#2563eb", label: "Enrollment Tent" },
-          { x: 440, y: 150, color: "#2563eb", label: "Help Desk" },
-          { x: 460, y: 150, color: "#2563eb", label: "Payment Counter" },
+          { x: 330, y: 265, color: "#d97706", label: "Booth 1 — Student Council" },
+          { x: 370, y: 265, color: "#d97706", label: "Booth 2 — Org Fair" },
+          { x: 410, y: 265, color: "#d97706", label: "Booth 3 — Food Stalls" },
+          { x: 450, y: 265, color: "#d97706", label: "Booth 4 — Games" },
+          { x: 490, y: 265, color: "#d97706", label: "Booth 5 — Merch" },
+          { x: 530, y: 265, color: "#d97706", label: "Booth 6 — Info Desk" },
         ],
         restrictedAreas: [],
         isActive: true,
       },
     ],
   },
+
   // ── Additional seed campus: North Campus ──────────────────────────────────
   {
     id: "campus_north",

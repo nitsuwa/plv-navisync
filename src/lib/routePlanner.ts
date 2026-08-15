@@ -15,7 +15,14 @@
  * any DB layer.
  */
 
-import { findBuildingPath, type GraphPath } from "./pathfinding";
+import {
+  findBuildingPath,
+  findNavigationRoute,
+  NODES as STATIC_NODES,
+  EDGES as STATIC_EDGES,
+  BUILDING_ENTRANCE_MAP,
+  type GraphPath,
+} from "./pathfinding";
 import {
   findCompleteRoute,
   type Destination,
@@ -44,6 +51,33 @@ export interface RoutePosition {
   y: number;
   w: number;
   h: number;
+}
+
+/**
+ * Published-campus navigation graph (map-builder `navNodes` / `navEdges`),
+ * consumed structurally so this module stays decoupled from Developer 2's
+ * map-builder types.
+ */
+export interface CampusNavNode {
+  id: string;
+  x: number;
+  y: number;
+  name?: string;
+  buildingId?: string;
+}
+
+export interface CampusNavEdge {
+  startNodeId: string;
+  endNodeId: string;
+  distance: number;
+  bidirectional: boolean;
+  accessible: boolean;
+  emergencySafe?: boolean;
+}
+
+export interface CampusNavGraph {
+  navNodes?: CampusNavNode[] | null;
+  navEdges?: CampusNavEdge[] | null;
 }
 
 export type RouteStepIcon =
@@ -219,38 +253,90 @@ function fallbackSteps(from: BuildingLike, to: BuildingLike, dist: number): Rout
 
 // ── Public API ─────────────────────────────────────────────────────────────
 
+function toPlannedRoute(
+  path: GraphPath,
+  mode: RouteMode,
+  fromCode: string,
+  toCode: string,
+  fromPt?: Pt
+): PlannedRoute | null {
+  if (!path || path.waypoints.length < 2) return null;
+  const steps = stepsFromGraphPath(path, fromCode, toCode);
+  if (fromPt && steps.length > 0) {
+    // The first step of a point-start route always reads "You are here".
+    steps[0] = { id: "start", icon: "start", instruction: "You are here" };
+  }
+  return {
+    points: path.waypoints,
+    dist: path.distanceM,
+    mins: path.minutes,
+    steps,
+    isGraphBased: true,
+    mode,
+    fromCode,
+    toCode,
+    transitions: [],
+  };
+}
+
+/**
+ * Resolve the campus-published nav graph (navNodes/navEdges) into the generic
+ * shape expected by `findNavigationRoute`, or `null` when the campus has none.
+ */
+function resolveCampusGraph(graph?: CampusNavGraph | null): {
+  nodes: CampusNavNode[];
+  edges: CampusNavEdge[];
+} | null {
+  const nodes = graph?.navNodes;
+  const edges = graph?.navEdges;
+  if (!nodes || !edges || nodes.length === 0 || edges.length === 0) return null;
+  return { nodes, edges };
+}
+
 /**
  * Plan a building → building route on the campus map.
  *
- * Prefers the real walkway graph (accurate distance + ETA + turn-by-turn)
- * for every mode. When the buildings are not on the graph (e.g. a published
- * campus whose nav graph is still pending), falls back to an SVG orthogonal
- * estimate so the UI never breaks.
+ * Prefers the published campus navigation graph (navNodes/navEdges — real
+ * distances + ETA + turn-by-turn), then the built-in walkway graph, then an
+ * SVG orthogonal estimate so the UI never breaks.
  *
  * @param positions optional building rectangles — required for the fallback
+ * @param graph optional published-campus nav graph (C4 Phase 2 bridge)
  */
 export function planBuildingRoute(
   from: BuildingLike,
   to: BuildingLike,
   mode: RouteMode,
-  positions?: Record<string, RoutePosition>
+  positions?: Record<string, RoutePosition>,
+  graph?: CampusNavGraph | null
 ): PlannedRoute | null {
   if (!from?.id || !to?.id || from.id === to.id) return null;
 
-  // 1. Real graph path in ALL modes (accessible mode filters non-accessible edges)
+  // 0. Published-campus nav graph (real routes for any campus with one)
+  const campusGraph = resolveCampusGraph(graph);
+  if (campusGraph) {
+    const fromNode = campusGraph.nodes.find((n) => n.buildingId === from.id);
+    const toNode = campusGraph.nodes.find((n) => n.buildingId === to.id);
+    if (fromNode && toNode) {
+      const p = findNavigationRoute(
+        campusGraph.nodes,
+        campusGraph.edges,
+        fromNode.id,
+        toNode.id,
+        mode === "accessible",
+        mode === "emergency"
+      );
+      if (p) {
+        const planned = toPlannedRoute(p, mode, from.code, to.code);
+        if (planned) return planned;
+      }
+    }
+  }
+
+  // 1. Built-in walkway graph (legacy b1-b6 ids)
   const graphPath = findBuildingPath(from.id, to.id, mode === "accessible");
   if (graphPath && graphPath.waypoints.length >= 2) {
-    return {
-      points: graphPath.waypoints,
-      dist: graphPath.distanceM,
-      mins: graphPath.minutes,
-      steps: stepsFromGraphPath(graphPath, from.code, to.code),
-      isGraphBased: true,
-      mode,
-      fromCode: from.code,
-      toCode: to.code,
-      transitions: [],
-    };
+    return toPlannedRoute(graphPath, mode, from.code, to.code) ?? null;
   }
 
   // 2. SVG estimate fallback when the graph has no entries for these buildings
@@ -268,6 +354,111 @@ export function planBuildingRoute(
     isGraphBased: false,
     mode,
     fromCode: from.code,
+    toCode: to.code,
+    transitions: [],
+  };
+}
+
+/**
+ * Plan a route starting from a free-form SVG point (the "You are here"
+ * marker — GPS fix or tap-on-map) to a destination building.
+ *
+ * The start point is snapped to the nearest walkway node, so the route
+ * always begins on the path network. When no graph node can be reached,
+ * falls back to a straight-line SVG estimate from the point to the
+ * destination so the demo never breaks.
+ */
+export function planRouteFromPoint(
+  fromPt: Pt,
+  to: BuildingLike,
+  mode: RouteMode,
+  graph?: CampusNavGraph | null,
+  positions?: Record<string, RoutePosition>
+): PlannedRoute | null {
+  if (!fromPt || !to?.id) return null;
+
+  const campusGraph = resolveCampusGraph(graph);
+  const nodes: CampusNavNode[] = campusGraph ? campusGraph.nodes : STATIC_NODES;
+  const edges: CampusNavEdge[] = campusGraph
+    ? campusGraph.edges
+    : STATIC_EDGES.map((e) => ({
+        startNodeId: e.from,
+        endNodeId: e.to,
+        distance: e.distance,
+        bidirectional: true,
+        accessible: e.accessible,
+      }));
+
+  // Destination node: campus graph building node, or static entrance map.
+  let toNodeId: string | undefined;
+  if (campusGraph) {
+    toNodeId = campusGraph.nodes.find((n) => n.buildingId === to.id)?.id;
+  } else {
+    toNodeId = BUILDING_ENTRANCE_MAP[to.id];
+  }
+  if (!toNodeId || nodes.length === 0) {
+    return svgFallbackFromPoint(fromPt, to, mode, positions);
+  }
+
+  // Snap the start point to the nearest node.
+  let fromNodeId: string | null = null;
+  let bestD = Infinity;
+  for (const n of nodes) {
+    const d = Math.hypot(n.x - fromPt.x, n.y - fromPt.y);
+    if (d < bestD) {
+      bestD = d;
+      fromNodeId = n.id;
+    }
+  }
+  if (!fromNodeId) {
+    return svgFallbackFromPoint(fromPt, to, mode, positions);
+  }
+
+  const path = findNavigationRoute(
+    nodes,
+    edges,
+    fromNodeId,
+    toNodeId,
+    mode === "accessible",
+    mode === "emergency"
+  );
+  if (!path || path.waypoints.length < 2) {
+    return svgFallbackFromPoint(fromPt, to, mode, positions);
+  }
+
+  return toPlannedRoute(path, mode, "You are here", to.code, fromPt);
+}
+
+/** Straight-line SVG estimate from a free point to a building center. */
+function svgFallbackFromPoint(
+  fromPt: Pt,
+  to: BuildingLike,
+  mode: RouteMode,
+  positions?: Record<string, RoutePosition>
+): PlannedRoute | null {
+  const tp = positions?.[to.id];
+  if (!tp) return null;
+  const tCx = tp.x + tp.w / 2;
+  const tCy = tp.y + tp.h / 2;
+  const points: Pt[] = [
+    { x: fromPt.x, y: fromPt.y },
+    { x: fromPt.x, y: 289 },
+    { x: tCx, y: 289 },
+    { x: tCx, y: tCy },
+  ];
+  const dist = estimateDistance(points);
+  return {
+    points,
+    dist,
+    mins: Math.max(1, Math.round(dist / 80)),
+    steps: [
+      { id: "start", icon: "start", instruction: "You are here" },
+      { id: "walk", icon: "walk", instruction: `Walk ${dist} m toward ${to.code}`, distanceM: dist },
+      { id: "arrive", icon: "arrive", instruction: `Arrive at ${to.code}` },
+    ],
+    isGraphBased: false,
+    mode,
+    fromCode: "You are here",
     toCode: to.code,
     transitions: [],
   };

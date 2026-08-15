@@ -1,14 +1,34 @@
 import { describe, expect, it } from "vitest";
 import {
   planBuildingRoute,
+  planRouteFromPoint,
   planDestinationRoute,
   stepsFromGraphPath,
   detectFloorTransitions,
   formatDistance,
   formatMinutes,
+  type CampusNavGraph,
   type RouteSegment,
 } from "../routePlanner";
 import { findBuildingPath, type GraphPath } from "../pathfinding";
+
+// Small published-campus nav graph shaped like the seed (b_mab / b_gym ids).
+const CAMPUS_GRAPH: CampusNavGraph = {
+  navNodes: [
+    { id: "nn_gate", name: "Main Gate", type: "entrance", x: 108, y: 285, accessible: true, color: "#16a34a" },
+    { id: "nn_mab", name: "MAB Entrance", type: "entrance", x: 280, y: 170, buildingId: "b_mab", accessible: true, color: "#16a34a" },
+    { id: "nn_gym", name: "Gym Entrance", type: "entrance", x: 375, y: 476, buildingId: "b_gym", accessible: true, color: "#16a34a" },
+  ],
+  navEdges: [
+    { id: "ne_gate_mab", startNodeId: "nn_gate", endNodeId: "nn_mab", distance: 169, bidirectional: true, accessible: true, emergencySafe: true, type: "walkway", color: "#16a34a", width: 3 },
+    { id: "ne_gate_gym", startNodeId: "nn_gate", endNodeId: "nn_gym", distance: 200, bidirectional: true, accessible: true, emergencySafe: true, type: "walkway", color: "#16a34a", width: 3 },
+  ],
+};
+
+const CAMPUS_POSITIONS = {
+  b_mab: { x: 155, y: 130, w: 125, h: 80 },
+  b_gym: { x: 305, y: 435, w: 145, h: 82 },
+};
 
 const MAB = { id: "b1", code: "MAB", name: "Main Academic Building" };
 const GYM = { id: "b5", code: "GYM", name: "Gymnasium & Sports Complex" };
@@ -69,6 +89,107 @@ describe("planBuildingRoute (building → building)", () => {
       "standard"
     );
     expect(route).toBeNull();
+  });
+});
+
+describe("planBuildingRoute (published-campus nav graph — C4 Phase 2 bridge)", () => {
+  it("uses the campus nav graph for seed-style building ids (b_mab → b_gym)", () => {
+    const route = planBuildingRoute(
+      { id: "b_mab", code: "MAB", name: "Main Academic Building" },
+      { id: "b_gym", code: "GYM", name: "Gymnasium" },
+      "standard",
+      CAMPUS_POSITIONS,
+      CAMPUS_GRAPH
+    );
+    expect(route).not.toBeNull();
+    expect(route!.isGraphBased).toBe(true);
+    expect(route!.dist).toBeGreaterThan(0);
+    // First node is the MAB entrance, last is the gym entrance.
+    expect(route!.points[0]).toEqual({ x: 280, y: 170 });
+    expect(route!.points[route!.points.length - 1]).toEqual({ x: 375, y: 476 });
+  });
+
+  it("honors accessible mode by filtering non-accessible edges", () => {
+    const graph: CampusNavGraph = {
+      navNodes: CAMPUS_GRAPH.navNodes,
+      navEdges: [
+        { ...CAMPUS_GRAPH.navEdges[0], accessible: false },
+        { ...CAMPUS_GRAPH.navEdges[1], accessible: true },
+      ],
+    };
+    const route = planBuildingRoute(
+      { id: "b_mab", code: "MAB", name: "MAB" },
+      { id: "b_gym", code: "GYM", name: "GYM" },
+      "accessible",
+      CAMPUS_POSITIONS,
+      graph
+    );
+    // MAB → Gate edge is inaccessible, so the only path is via the gate.
+    expect(route).not.toBeNull();
+    expect(route!.isGraphBased).toBe(true);
+  });
+});
+
+describe("planBuildingRoute (seed ids on the static graph)", () => {
+  it("routes b_mab → b_gym via the extended static entrance map (no campus graph passed)", () => {
+    const route = planBuildingRoute(
+      { id: "b_mab", code: "MAB", name: "Main Academic Building" },
+      { id: "b_gym", code: "GYM", name: "Gymnasium" },
+      "standard",
+      CAMPUS_POSITIONS
+    );
+    expect(route).not.toBeNull();
+    expect(route!.isGraphBased).toBe(true);
+    expect(route!.dist).toBeGreaterThan(0);
+  });
+});
+
+describe("planRouteFromPoint (kiosk-style 'You are here' start)", () => {
+  it("snaps a point to the nearest node and routes to the destination building", () => {
+    const route = planRouteFromPoint(
+      { x: 100, y: 280 }, // just outside the Main Gate
+      { id: "b_gym", code: "GYM", name: "Gymnasium" },
+      "standard",
+      CAMPUS_GRAPH,
+      CAMPUS_POSITIONS
+    );
+    expect(route).not.toBeNull();
+    expect(route!.isGraphBased).toBe(true);
+    expect(route!.fromCode).toBe("You are here");
+    // The walk starts at the snapped gate node.
+    expect(route!.points[0]).toEqual({ x: 108, y: 285 });
+    expect(route!.steps[0].instruction).toBe("You are here");
+    expect(route!.steps[route!.steps.length - 1].icon).toBe("arrive");
+  });
+
+  it("works on the static graph when no campus graph is provided", () => {
+    const route = planRouteFromPoint(
+      { x: 155, y: 285 }, // near MAB junction
+      { id: "b5", code: "GYM", name: "Gymnasium" },
+      "standard",
+      null,
+      POSITIONS
+    );
+    expect(route).not.toBeNull();
+    expect(route!.isGraphBased).toBe(true);
+    expect(route!.steps[0].instruction).toBe("You are here");
+  });
+
+  it("falls back to a straight-line estimate when the destination has no node", () => {
+    const route = planRouteFromPoint(
+      { x: 100, y: 100 },
+      { id: "unknown", code: "XX", name: "Unknown" },
+      "standard",
+      null,
+      { unknown: { x: 500, y: 400, w: 60, h: 40 } }
+    );
+    expect(route).not.toBeNull();
+    expect(route!.isGraphBased).toBe(false);
+    expect(route!.steps[0].instruction).toBe("You are here");
+  });
+
+  it("returns null without a destination", () => {
+    expect(planRouteFromPoint({ x: 0, y: 0 }, null as never, "standard", CAMPUS_GRAPH, CAMPUS_POSITIONS)).toBeNull();
   });
 });
 

@@ -5,7 +5,8 @@ import {
 import { AnimatePresence, motion } from "motion/react";
 import type { Building } from "../../types";
 import { cn } from "../../lib/utils";
-import { QRPlaceholder } from "./QRPlaceholder";
+import { LocationQR } from "./LocationQR";
+import { getOpenStatus } from "../../lib/buildingHours";
 import { useToast } from "../../hooks/useToast";
 import { useEscToClose } from "../../hooks/useEscToClose";
 import type { StudentAuthState } from "../../hooks/useStudentAuth";
@@ -13,9 +14,6 @@ import type { StudentAuthState } from "../../hooks/useStudentAuth";
 // ── Re-export shared types/constants ────────────────────────────────────────
 export type PanelTab = "overview" | "departments" | "facilities" | "accessibility" | "route";
 
-const STATUS: Record<string, "Open" | "Busy" | "Closed"> = {
-  b1: "Open", b2: "Open", b3: "Open", b4: "Open", b5: "Busy", b6: "Open",
-};
 const STATUS_COLOR = { Open: "text-green-500", Busy: "text-amber-500", Closed: "text-red-500" as const };
 const STATUS_DOT = { Open: "bg-green-500", Busy: "bg-amber-500", Closed: "bg-red-500" as const };
 
@@ -48,7 +46,10 @@ export function BuildingInfoPanel({
 }: BuildingInfoPanelProps) {
   const toast = useToast();
   useEscToClose(onClose);
-  const status = STATUS[selected.id] ?? "Open";
+  // Live open/closed status from operating hours (seeded campus + legacy).
+  const hours = getOpenStatus(selected);
+  const status: "Open" | "Busy" | "Closed" = hours.status ?? "Open";
+  const statusKnown = hours.status !== null;
 
   return (
     <div
@@ -78,10 +79,20 @@ export function BuildingInfoPanel({
             <span className="bg-primary/90 text-primary-foreground text-[10px] font-mono font-extrabold px-2 py-0.5 rounded">
               {selected.code}
             </span>
-            <span className={cn("flex items-center gap-1 text-[10px] font-bold", STATUS_COLOR[status])}>
-              <span className={cn("w-1.5 h-1.5 rounded-full", STATUS_DOT[status])} />
-              {status}
-            </span>
+            {statusKnown ? (
+              <span
+                className={cn("flex items-center gap-1 text-[10px] font-bold", STATUS_COLOR[status])}
+                title={hours.label}
+              >
+                <span className={cn("w-1.5 h-1.5 rounded-full", STATUS_DOT[status])} />
+                {status}
+              </span>
+            ) : (
+              <span className="flex items-center gap-1 text-[10px] font-bold text-muted-foreground">
+                <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/40" />
+                {hours.label}
+              </span>
+            )}
           </div>
           <h2 className="text-white font-extrabold text-sm leading-tight">
             {selected.name}
@@ -160,9 +171,9 @@ export function BuildingInfoPanel({
         </div>
 
         {/* Operating hours */}
-        {selected.operating_hours && (
+        {hours.hoursLabel && (
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <Clock className="h-3.5 w-3.5 text-primary shrink-0" /> {selected.operating_hours}
+            <Clock className="h-3.5 w-3.5 text-primary shrink-0" /> {hours.hoursLabel}
           </div>
         )}
 
@@ -238,11 +249,8 @@ export function BuildingInfoPanel({
           {showQR && (
             <div className="mt-3 flex flex-col items-center gap-2 p-4 rounded-xl bg-muted border border-border animate-scale-in">
               <div className="text-foreground">
-                <QRPlaceholder />
+                <LocationQR buildingId={selected.id} buildingName={selected.name} />
               </div>
-              <p className="text-[10px] text-muted-foreground text-center">
-                Scan to view {selected.name} on mobile
-              </p>
             </div>
           )}
         </div>
