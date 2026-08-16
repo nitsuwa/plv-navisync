@@ -42,15 +42,15 @@ function friendlyAuthError(rawMessage?: string): string {
 // press Sign In, and authentication always goes through
 // supabase.auth.signInWithPassword() plus the existing profile/role/route
 // checks. It is shown only when demonstration mode is explicitly enabled via
-// Vite variables AND the corresponding demo credentials are configured.
+// Vite variables AND the corresponding demo email is configured. Passwords
+// are deliberately never accepted through VITE_* variables because those
+// values are public in the built browser application.
 // Requirement: the dropdown must appear only when VITE_ENABLE_DEMO_LOGIN is
 // exactly "true" (trimmed, case-sensitive).
 const DEMO_LOGIN_ENABLED =
   (import.meta.env.VITE_ENABLE_DEMO_LOGIN ?? "").trim() === "true";
 const DEMO_ADMIN_EMAIL = (import.meta.env.VITE_DEMO_ADMIN_EMAIL ?? "").trim();
-const DEMO_ADMIN_PASSWORD = import.meta.env.VITE_DEMO_ADMIN_PASSWORD ?? "";
 const DEMO_STUDENT_EMAIL = (import.meta.env.VITE_DEMO_STUDENT_EMAIL ?? "").trim();
-const DEMO_STUDENT_PASSWORD = import.meta.env.VITE_DEMO_STUDENT_PASSWORD ?? "";
 
 interface DemoAccountOption {
   id: string;
@@ -59,32 +59,29 @@ interface DemoAccountOption {
   /** lucide icon used for the option badge */
   icon: LucideIcon;
   email: string;
-  password: string;
 }
 
 // Add new demonstration accounts here — the dropdown renders them
 // automatically, so the UI needs no redesign later. Each option is only
-// included when its own credentials are configured (admin and student are
+// included when its own public email label is configured (admin and student are
 // independent of each other; both still require demo mode enabled).
 const DEMO_ACCOUNTS: DemoAccountOption[] = [];
-if (DEMO_LOGIN_ENABLED && DEMO_ADMIN_EMAIL && DEMO_ADMIN_PASSWORD) {
+if (DEMO_LOGIN_ENABLED && DEMO_ADMIN_EMAIL) {
   DEMO_ACCOUNTS.push({
     id: "demo-admin",
     label: "Demo Administrator",
     description: "Opens the administration portal",
     icon: ShieldCheck,
     email: DEMO_ADMIN_EMAIL,
-    password: DEMO_ADMIN_PASSWORD,
   });
 }
-if (DEMO_LOGIN_ENABLED && DEMO_STUDENT_EMAIL && DEMO_STUDENT_PASSWORD) {
+if (DEMO_LOGIN_ENABLED && DEMO_STUDENT_EMAIL) {
   DEMO_ACCOUNTS.push({
     id: "demo-student",
     label: "Demo Student",
     description: "Opens the student experience",
     icon: GraduationCap,
     email: DEMO_STUDENT_EMAIL,
-    password: DEMO_STUDENT_PASSWORD,
   });
 }
 
@@ -226,11 +223,11 @@ export function AdminLoginPage() {
     };
   }, [demoOpen]);
 
-  // Selecting a demo account ONLY autofills the form fields and clears any
+  // Selecting a demo account ONLY fills its non-secret email and clears any
   // stale error. It never signs the user in — Sign In still runs through
   // supabase.auth.signInWithPassword() with the normal checks.
   const applyDemoAccount = (account: DemoAccountOption) => {
-    setForm({ email: account.email, password: account.password });
+    setForm({ email: account.email, password: "" });
     setSelectedDemoId(account.id);
     setError("");
     setDemoOpen(false);
@@ -396,7 +393,7 @@ export function AdminLoginPage() {
                   <Sparkles className="h-4 w-4 shrink-0 text-primary"/>
                   <span className="flex-1 text-left truncate">
                     {selectedDemoId
-                      ? `${DEMO_ACCOUNTS.find(a => a.id === selectedDemoId)?.label ?? "Demo account"} filled — press Sign In`
+                      ? `${DEMO_ACCOUNTS.find(a => a.id === selectedDemoId)?.label ?? "Demo account"} selected — enter its password`
                       : "Choose an account to fill the form"}
                   </span>
                   <motion.span
@@ -448,8 +445,9 @@ export function AdminLoginPage() {
                 </AnimatePresence>
 
                 <p className="text-[11px] text-muted-foreground mt-2 leading-relaxed">
-                  Selecting an account only fills the login form — you still press{" "}
-                  <span className="font-semibold text-foreground/80">Sign In</span> to authenticate with Supabase.
+                  Selecting an account fills only its email. Enter the password
+                  from the private demo handoff, then press{" "}
+                  <span className="font-semibold text-foreground/80">Sign In</span>.
                 </p>
               </div>
             )}

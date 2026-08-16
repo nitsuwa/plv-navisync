@@ -1281,9 +1281,7 @@ Optional local demonstration variables:
 ```env
 VITE_ENABLE_DEMO_LOGIN=false
 VITE_DEMO_ADMIN_EMAIL=
-VITE_DEMO_ADMIN_PASSWORD=
 VITE_DEMO_STUDENT_EMAIL=
-VITE_DEMO_STUDENT_PASSWORD=
 ```
 
 Local provisioning variables belong only in `.env.demo.local` and may include the service-role key for the approved Node provisioning script. They must never be imported by browser code or committed.
@@ -1294,8 +1292,8 @@ Rules:
 - Never expose the service-role key.
 - Commit `.env.example`, not `.env`.
 - Commit `.env.demo.example`, never `.env.demo.local`.
-- Vite-prefixed demo credentials are visible to the built browser application. Use only disposable demonstration accounts, keep demo mode disabled in production, and never use an owner administrator's credentials.
-- The demo selector may autofill fields but must never bypass normal Supabase authentication or sign in automatically.
+- Vite-prefixed values are visible to the built browser application. Demo passwords must stay in `.env.demo.local` or an approved private handoff and must never use a `VITE_*` name.
+- The demo selector may fill a non-secret email label but must never fill a password, bypass normal Supabase authentication, or sign in automatically.
 - Validate variables at startup.
 - Production and development Supabase projects should be separate when feasible.
 

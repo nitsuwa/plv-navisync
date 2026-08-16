@@ -14,7 +14,8 @@
     "verify:a5": "node scripts/verify-a5-campus-structure.mjs",
     "verify:a6": "node scripts/verify-a6-publishing.mjs",
     "verify:a7": "node scripts/verify-a7-operations.mjs",
-    "verify:a8": "node scripts/verify-a8-security-matrix.mjs"
+    "verify:a8": "node scripts/verify-a8-security-matrix.mjs",
+    "verify:a9": "node scripts/verify-a9-release-readiness.mjs"
   },
   "dependencies": {
     "@emotion/react": "11.14.0",

@@ -55,16 +55,16 @@ Status values: `READY`, `ACTIVE`, `BLOCKED`, `FOR REVIEW`, `DONE`.
   - Test result: PASS for available scope — 105 Vitest files/1,417 tests, Vite build, live A1–A8 verification chain, inactive-session RLS/Storage enforcement, cross-campus/cross-user isolation, draft/public isolation, schema lint, advisors, and browser protected-route checks
   - Pull Request: Pending
 - [ ] **A9 — Release data, backup, and deployment readiness**
-  - Status: `BLOCKED`
-  - Branch: `chore/release-data-and-backup`
+  - Status: `ACTIVE` — readiness tooling and runbook implemented; final release-data/restore/deployment evidence remains gated
+  - Branch: `A6-A9` (continued here by developer instruction)
   - Depends on: Gate G5
-  - Test result: Pending
+  - Test result: PARTIAL PASS — build, 105 files/1,417 tests, schema lint, live types/migrations, demo roles, report CSV/JSON, env/secret/bundle checks, and advisors pass available scope; no approved guest-published campus, no physical backup/PITR, Docker logical dump/restore drill, production redirects/SMTP/security/hosting, and Gate G5 remain pending
   - Pull Request: Pending
 
 ## Current handoff note
 
-- Active package: A8 — Cross-system security and integration verification (`ACTIVE`, same `A6-A9` branch by developer instruction)
+- Active packages: A8 final dependent UI verification and A9 release-readiness final gate (`ACTIVE`, same `A6-A9` branch by developer instruction)
 - Last completed package: None
-- Known blocker: A8 final UI integration matrix waits for Developer 2 B6–B9 and Developer 3 C4 Phase 2/C8-C to merge. Leaked-password protection, production SMTP, and production redirect configuration remain deployment dashboard tasks.
-- Important changed files: `supabase/migrations/20260816094353_enforce_active_account_and_public_image_isolation.sql`, `scripts/verify-a8-security-matrix.mjs`, `src/hooks/useStudentAuth.ts`, student protected pages, and `docs/progress/DEVELOPER_1_A8_VERIFICATION.md`
-- Next recommended action: Submit the A8 backend/security checkpoint for review, then rerun the documented UI matrix after the dependency-gated packages merge.
+- Known blocker: Gate G5 is not met; no approved guest-published campus exists; physical backup/PITR is unavailable; Docker logical dump/restore verification and production dashboard/hosting checks remain pending.
+- Important changed files: `vite.config.ts`, `src/pages/AdminLoginPage.tsx`, `scripts/provision-demo-accounts.mjs`, `scripts/verify-a9-release-readiness.mjs`, `docs/09_RELEASE_AND_RECOVERY.md`, and `docs/progress/DEVELOPER_1_A9_VERIFICATION.md`.
+- Next recommended action: Merge and verify Gate G5 dependencies, approve/publish the release campus, then complete the encrypted logical-backup restore drill and production smoke matrix before marking A9 `FOR REVIEW`.

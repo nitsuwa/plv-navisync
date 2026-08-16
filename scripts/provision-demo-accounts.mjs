@@ -58,7 +58,10 @@ const REQUIRED_VARS = [
   "DEMO_ADMIN_PASSWORD",
   "DEMO_STUDENT_EMAIL",
   "DEMO_STUDENT_PASSWORD",
+  "DEMO_ACCOUNT_PROVISIONING_CONFIRM",
 ];
+
+const REQUIRED_CONFIRMATION = "I_UNDERSTAND_THIS_RESETS_DEMO_PASSWORDS";
 
 // ---------------------------------------------------------------------------
 // Minimal .env loader (dependency-free). `#` starts a comment, surrounding
@@ -236,6 +239,13 @@ async function main() {
     process.exit(1);
   }
 
+  if (env.DEMO_ACCOUNT_PROVISIONING_CONFIRM !== REQUIRED_CONFIRMATION) {
+    console.error(
+      "[demo:accounts] Refusing to run without the exact deliberate-action confirmation from .env.demo.example."
+    );
+    process.exit(1);
+  }
+
   // Guard: a demo email must never point at the existing administrator. The
   // script would otherwise reset that administrator's password.
   const demoEmails = [env.DEMO_ADMIN_EMAIL, env.DEMO_STUDENT_EMAIL];
@@ -308,23 +318,21 @@ async function main() {
     // Local cleanup only; nothing depends on it.
   }
 
-  // 4) Print ONLY the final demonstration login information. The service-role
-  //    key and the existing administrator's password are never printed.
+  // 4) Print only non-secret handoff metadata. Passwords remain in the private
+  //    local file and are never copied into terminal output or browser config.
   console.log("");
   console.log("Demo accounts provisioned successfully.");
-  console.log("The passwords below come from .env.demo.local — store them in a private handoff document, never in the app or in chat.");
+  console.log("Passwords remain in .env.demo.local. Transfer them only through the approved private handoff channel.");
   console.log("--------------------------------------------------------------------------------");
   console.log("Portal   : Admin Portal (protected administrator routes)");
   console.log("Route    : /admin");
   console.log("Role     : admin");
   console.log(`Email    : ${env.DEMO_ADMIN_EMAIL}`);
-  console.log(`Password : ${env.DEMO_ADMIN_PASSWORD}`);
   console.log("");
   console.log("Portal   : Student portal");
   console.log("Route    : /map (usable once student authentication is connected)");
   console.log("Role     : student");
   console.log(`Email    : ${env.DEMO_STUDENT_EMAIL}`);
-  console.log(`Password : ${env.DEMO_STUDENT_PASSWORD}`);
   console.log("");
   console.log("Guest    : no account required — public pages and the published campus map remain accessible.");
   console.log("--------------------------------------------------------------------------------");

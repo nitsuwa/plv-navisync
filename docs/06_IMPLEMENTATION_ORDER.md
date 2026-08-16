@@ -399,8 +399,8 @@ Definition of Done:
 
 ## A9 — Release data, backup, and deployment readiness
 
-**Status:** `BLOCKED` by Gate G5
-**Branch:** `chore/release-data-and-backup`
+**Status:** `ACTIVE` readiness checkpoint; final review remains blocked by Gate G5
+**Branch:** `A6-A9` (continued here by developer instruction)
 
 Deliverables:
 
