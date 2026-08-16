@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { campusService } from "../services/campusService";
+import { campusPublishingService } from "../services/campusPublishingService";
 import { SEED_CAMPUSES } from "../components/map-builder/constants";
 import type { Campus } from "../components/map-builder/types";
 
@@ -44,13 +44,8 @@ export function usePublishedCampus(): UsePublishedCampusResult {
     setLoading(true);
     setError(null);
     try {
-      // Fetch all campuses from Supabase via campusService
-      const allCampuses = await campusService.list();
-      
-      // Filter for published, non-archived campuses only
-      let published = allCampuses.filter(
-        (c) => c.publishStatus === "published" || c.visibleToStudents === true
-      );
+      // RLS exposes only each campus's active immutable published snapshot.
+      let published = await campusPublishingService.listPublished();
 
       // Fallback: If database has no published campuses yet (fresh seed state),
       // use SEED_CAMPUSES so the public map displays the default published PLV campus.

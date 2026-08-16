@@ -28,6 +28,10 @@ vi.mock("../../services/campusStructureService", () => ({
   campusStructureService: { save: vi.fn(), load: vi.fn() },
 }));
 
+vi.mock("../../services/campusPublishingService", () => ({
+  campusPublishingService: { saveDraft: vi.fn(), publish: vi.fn(), archive: vi.fn() },
+}));
+
 // Leaflet map wrapper and lazy color picker are pure UI — keep jsdom hermetic.
 vi.mock("../../components/ui/MapPicker", () => ({
   MapPicker: () => <div data-testid="map-picker-mock" />,
@@ -42,6 +46,7 @@ vi.mock("../../components/ui/ColorPicker", () => {
 
 import { campusService } from "../../services/campusService";
 import { campusStructureService } from "../../services/campusStructureService";
+import { campusPublishingService } from "../../services/campusPublishingService";
 import { AdminMapBuilderPage } from "../AdminMapBuilderPage";
 
 // ── Fixtures — floors are built through normalizeFloor so they are canonical ──
@@ -122,6 +127,9 @@ const labelFloor = makeFloor("f1", "Ground Floor", 1, {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  (campusPublishingService.saveDraft as ReturnType<typeof vi.fn>).mockImplementation(async (c: Campus) => ({
+    campus: c, versionId: "draft-version", versionNumber: 1, versionUpdatedAt: c.databaseUpdatedAt,
+  }));
   toast.dismiss();
   vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => window.setTimeout(() => cb(performance.now()), 0));
   vi.stubGlobal("cancelAnimationFrame", (id: number) => window.clearTimeout(id));
@@ -266,9 +274,9 @@ describe("AdminMapBuilderPage — B4 floor dirty-state integration", () => {
     let persisted: Campus | null = null;
     (campusService.list as ReturnType<typeof vi.fn>).mockResolvedValue([original]);
     (campusStructureService.load as ReturnType<typeof vi.fn>).mockImplementation(async (c: Campus) => c);
-    (campusStructureService.save as ReturnType<typeof vi.fn>).mockImplementation(async (c: Campus) => {
+    (campusPublishingService.saveDraft as ReturnType<typeof vi.fn>).mockImplementation(async (c: Campus) => {
       persisted = { ...c, updatedAt: "2026-01-02T00:00:00.000Z" };
-      return persisted;
+      return { campus: persisted, versionId: "draft-version", versionNumber: 1, versionUpdatedAt: persisted.databaseUpdatedAt };
     });
 
     renderPage();

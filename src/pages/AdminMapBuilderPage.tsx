@@ -5,6 +5,7 @@ import { useUnsavedChangesContext } from "../components/map-builder/UnsavedChang
 import { createCampusClone } from "../lib/campusHelpers";
 import { campusService, CampusConflictError, userFacingCampusMessage, type CampusCreateInput, type CampusUpdateInput } from "../services/campusService";
 import { campusStructureService } from "../services/campusStructureService";
+import { campusPublishingService } from "../services/campusPublishingService";
 import {
   CampusHome,
   CampusWizard,
@@ -165,7 +166,7 @@ export function AdminMapBuilderPage() {
     const campus = campuses.find((c) => c.id === id);
     if (!campus?.databaseUpdatedAt) return;
     try {
-      const updated = await campusService.archive(id, campus.databaseUpdatedAt);
+      const updated = await campusPublishingService.archive(campus);
       updateCampusMetadata(updated);
       toast.success("Campus Archived", { description: `"${campus.name}" is private until restored.` });
     } catch (error) { toast.error("Could not archive campus", { description: userFacingCampusMessage(error) }); }
@@ -235,7 +236,7 @@ export function AdminMapBuilderPage() {
   }, [campuses, updateCampus]);
 
   const saveCampusStructure = useCallback(async (campus: Campus) => {
-    const saved = await campusStructureService.save(campus);
+    const { campus: saved } = await campusPublishingService.saveDraft(campus);
     const savedWithPreviewCount = {
       ...saved,
       previewBuildingCount: saved.buildings.length,
@@ -247,6 +248,27 @@ export function AdminMapBuilderPage() {
     // A successful save is the canonical baseline for the outer dirty check.
     savedSnapshotsRef.current = { ...savedSnapshotsRef.current, [saved.id]: JSON.stringify(savedWithPreviewCount) };
     return savedWithPreviewCount;
+  }, [updateCampus]);
+
+  const publishCampus = useCallback(async (campus: Campus) => {
+    try {
+      const result = await campusPublishingService.publish(campus);
+      const published = {
+        ...result.campus,
+        previewBuildingCount: result.campus.buildings.length,
+        previewFloorCount: campusFloorCount(result.campus),
+        previewRoomCount: campusRoomCount(result.campus),
+        previewBuildingsLoaded: true,
+      };
+      updateCampus(published);
+      savedSnapshotsRef.current = { ...savedSnapshotsRef.current, [published.id]: JSON.stringify(published) };
+      toast.success("Campus Published", {
+        description: `Version ${result.versionNumber} is now live with validation score ${result.validation.score}.`,
+      });
+    } catch (error) {
+      toast.error("Could not publish campus", { description: userFacingCampusMessage(error) });
+      throw error;
+    }
   }, [updateCampus]);
 
   // ── Page-level unsaved-changes handler for the shared guard ──────────────
@@ -465,8 +487,8 @@ export function AdminMapBuilderPage() {
                   onBack={goHome}
                   onUpdate={updateCampus}
                   onSave={saveCampusStructure}
-                  onPublish={() => toast.info("Publishing is implemented in A6.")}
-                  publishingEnabled={false}
+                  onPublish={publishCampus}
+                  publishingEnabled
                   onOpenFloor={handleOpenFloor}
                   onAddBuilding={() => setShowBuildingWizard(true)}
                   onOpenCanvasSettings={() => setShowCanvasSettings(true)}
@@ -506,8 +528,8 @@ export function AdminMapBuilderPage() {
                 onSwitchFloor={(fId) => setView({ ...view, floorId: fId, initialSelection: undefined })}
                 onUpdate={updateCampus}
                 onSave={saveCampusStructure}
-                onPublish={() => toast.info("Publishing is implemented in A6.")}
-                publishingEnabled={false}
+                onPublish={publishCampus}
+                publishingEnabled
                 savedSnapshot={savedSnapshotsRef.current[activeCampus.id]}
                 initialSelection={view.initialSelection}
               />

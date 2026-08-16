@@ -36,11 +36,11 @@ Status values: `READY`, `ACTIVE`, `BLOCKED`, `FOR REVIEW`, `DONE`.
   - Depends on: A4
   - Test result: PASS — Vite build, 63 Vitest tests, live atomic structure/RLS/cross-campus/recoverability checks, A1 Storage/RLS regression, generated-type review, advisors, and browser smoke test
   - Pull Request: Pending
-- [ ] **A6 — Draft save, validation handoff, and publish orchestration**
-  - Status: `BLOCKED`
-  - Branch: `feature/campus-publishing-workflow`
+- [x] **A6 — Draft save, validation handoff, and publish orchestration**
+  - Status: `FOR REVIEW`
+  - Branch: `A6-A9` (continued here by developer instruction after merging B5 from `main`)
   - Depends on: A5 and B5 contract review
-  - Test result: Pending
+  - Test result: PASS — live migration reconciliation, generated Database types, 104 Vitest files/1,415 tests, Vite build, live guest/student/admin draft/publish/RLS/concurrency/recovery assertions, A1/A5/A7 regressions, schema lint, advisors, and unauthenticated browser smoke test
   - Pull Request: Pending
 - [x] **A7 — Operations service contracts**
   - Status: `FOR REVIEW`
@@ -63,8 +63,8 @@ Status values: `READY`, `ACTIVE`, `BLOCKED`, `FOR REVIEW`, `DONE`.
 
 ## Current handoff note
 
-- Active package: A7 — Operations service contracts (`FOR REVIEW`, same `A6-A9` branch by developer instruction)
+- Active package: A6 — Draft save, validation handoff, and publish orchestration (`FOR REVIEW`, same `A6-A9` branch by developer instruction)
 - Last completed package: None
-- Known blocker: A6 remains blocked on the B5 contract review and was intentionally skipped. Leaked-password protection, production SMTP, and production redirect configuration remain deployment dashboard tasks.
-- Important changed files: `supabase/migrations/20260807074958_establish_operations_service_contracts.sql`, `src/types/database.generated.ts`, operations services under `src/services`, `scripts/verify-a7-operations.mjs`, `docs/progress/DEVELOPER_1_A7_VERIFICATION.md`
-- Next recommended action: Complete the A7 manual site checklist and obtain review; resume A6 only after the B5 contract is approved.
+- Known blocker: None for A6. Leaked-password protection, production SMTP, and production redirect configuration remain deployment dashboard tasks.
+- Important changed files: A6 migrations beginning `20260816083208`, `src/services/campusPublishingService.ts`, `src/types/database.generated.ts`, map-builder publishing integration, `scripts/verify-a6-publishing.mjs`, and `docs/progress/DEVELOPER_1_A6_VERIFICATION.md`
+- Next recommended action: Complete the A6 manual site checklist and submit A6/A7 for review before starting the next dependency-gated package.

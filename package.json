@@ -12,6 +12,7 @@
     "verify:a2": "node scripts/verify-a2-auth.mjs",
     "verify:a3": "node scripts/verify-a3-admin-users.mjs",
     "verify:a5": "node scripts/verify-a5-campus-structure.mjs",
+    "verify:a6": "node scripts/verify-a6-publishing.mjs",
     "verify:a7": "node scripts/verify-a7-operations.mjs"
   },
   "dependencies": {
@@ -96,11 +97,6 @@
     },
     "react-dom": {
       "optional": true
-    }
-  },
-  "pnpm": {
-    "overrides": {
-      "vite": "6.3.5"
     }
   }
 }

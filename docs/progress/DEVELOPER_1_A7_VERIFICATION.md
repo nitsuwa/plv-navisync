@@ -1,6 +1,6 @@
 # A7 — Operations Service Contracts Verification
 
-Status: `FOR REVIEW` on the existing `A6-A9` branch. A6 remains skipped and `BLOCKED`.
+Status: `FOR REVIEW` on the existing `A6-A9` branch. A6 has since been completed on the same branch and is also `FOR REVIEW`.
 
 ## Delivered
 

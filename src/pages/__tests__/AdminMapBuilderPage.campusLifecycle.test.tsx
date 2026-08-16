@@ -27,6 +27,10 @@ vi.mock("../../services/campusStructureService", () => ({
   campusStructureService: { save: vi.fn(), load: vi.fn() },
 }));
 
+vi.mock("../../services/campusPublishingService", () => ({
+  campusPublishingService: { saveDraft: vi.fn(), publish: vi.fn(), archive: vi.fn() },
+}));
+
 // Leaflet map wrapper and lazy color picker are pure UI — keep jsdom hermetic.
 vi.mock("../../components/ui/MapPicker", () => ({
   MapPicker: () => <div data-testid="map-picker-mock" />,
@@ -41,6 +45,7 @@ vi.mock("../../components/ui/ColorPicker", () => {
 
 import { campusService } from "../../services/campusService";
 import { campusStructureService } from "../../services/campusStructureService";
+import { campusPublishingService } from "../../services/campusPublishingService";
 import { AdminMapBuilderPage } from "../AdminMapBuilderPage";
 
 function makeCampus(over: Partial<Campus> = {}): Campus {
@@ -100,6 +105,9 @@ function makePreviewBuilding(id = "b1") {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  (campusPublishingService.saveDraft as ReturnType<typeof vi.fn>).mockImplementation(async (c: Campus) => ({
+    campus: c, versionId: "draft-version", versionNumber: 1, versionUpdatedAt: c.databaseUpdatedAt,
+  }));
   // sonner's toast store is module-global — clear it so a toast from a previous
   // test can never leak into this test's DOM assertions.
   toast.dismiss();

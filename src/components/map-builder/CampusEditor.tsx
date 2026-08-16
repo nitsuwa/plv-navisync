@@ -355,7 +355,7 @@ interface CampusEditorProps {
   onBack: () => void;
   onUpdate: (c: Campus) => void;
   onSave?: (c: Campus) => Promise<Campus>;
-  onPublish: (c: Campus) => void;
+  onPublish: (c: Campus) => void | Promise<void>;
   publishingEnabled?: boolean;
   onOpenFloor: (buildingId: string, floorId: string, initialSelection?: FloorSelection) => void;
   onAddBuilding: () => void;
@@ -5062,8 +5062,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
                 }}
                 disabled={
                   !publishingEnabled || isProcessing || isDirty ||
-                  (!isDirty && campus.publishStatus === "published" && !hasDraftChanges && campus.updatedAt === campus.publishedAt) ||
-                  (!isDirty && campus.publishStatus === "draft" && !campus.publishedAt)
+                  (!isDirty && campus.publishStatus === "published" && !hasDraftChanges && campus.updatedAt === campus.publishedAt)
                 }
                 title={
                   !publishingEnabled
@@ -5072,9 +5071,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
                     ? "Save your draft first before publishing"
                     : campus.publishStatus === "published" && !hasDraftChanges && campus.updatedAt === campus.publishedAt
                       ? "Already published — make changes and save to enable publishing"
-                      : campus.publishStatus === "draft" && !campus.publishedAt
-                        ? "Save as draft first, then publish"
-                        : "Publish the current draft to make it live"
+                      : "Publish the current draft to make it live"
                 }
                 className={cn(
                   "flex items-center gap-1 h-7 px-2 rounded-md text-[9px] font-extrabold transition-all shadow-sm",
@@ -5757,10 +5754,16 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
         campus={campus}
         errors={validationIssues}
         onClose={() => setShowPublishConfirm(false)}
-        onPublish={() => {
+        onPublish={async () => {
           setShowPublishConfirm(false);
           setIsProcessing(true);
-          onPublish(campus);
+          try {
+            await onPublish(campus);
+          } catch {
+            // The page-level A6 handler already presents the database error.
+          } finally {
+            setIsProcessing(false);
+          }
         }}
         onReviewIssue={(issue) => {
           // Close the publish gate so the user can fix the issue on the canvas

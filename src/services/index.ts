@@ -14,4 +14,5 @@ export { routeService } from "./routeService";
 export { eventService } from "./eventService";
 export { settingsService } from "./settingsService";
 export { campusService } from "./campusService";
+export { campusPublishingService } from "./campusPublishingService";
 export { dashboardService, type DashboardStats, type WeeklyActivityPoint } from "./dashboardService";

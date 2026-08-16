@@ -329,8 +329,8 @@ Unlocks Gate G1.
 
 ## A6 — Draft save, validation handoff, and publish orchestration
 
-**Status:** `BLOCKED` by A5 and B5 contract review
-**Branch:** `feature/campus-publishing-workflow`
+**Status:** `FOR REVIEW`
+**Branch:** `A6-A9` (continued here by developer instruction)
 
 Deliverables:
 

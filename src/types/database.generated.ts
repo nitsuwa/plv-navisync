@@ -12,6 +12,31 @@ export type Database = {
   __InternalSupabase: {
     PostgrestVersion: "14.15"
   }
+  graphql_public: {
+    Tables: {
+      [_ in never]: never
+    }
+    Views: {
+      [_ in never]: never
+    }
+    Functions: {
+      graphql: {
+        Args: {
+          extensions?: Json
+          operationName?: string
+          query?: string
+          variables?: Json
+        }
+        Returns: Json
+      }
+    }
+    Enums: {
+      [_ in never]: never
+    }
+    CompositeTypes: {
+      [_ in never]: never
+    }
+  }
   public: {
     Tables: {
       activity_logs: {
@@ -305,6 +330,7 @@ export type Database = {
           published_by: string | null
           snapshot: Json
           state: string
+          updated_at: string
           validation_score: number | null
           version_number: number
         }
@@ -318,6 +344,7 @@ export type Database = {
           published_by?: string | null
           snapshot: Json
           state: string
+          updated_at?: string
           validation_score?: number | null
           version_number: number
         }
@@ -331,6 +358,7 @@ export type Database = {
           published_by?: string | null
           snapshot?: Json
           state?: string
+          updated_at?: string
           validation_score?: number | null
           version_number?: number
         }
@@ -1529,16 +1557,51 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      archive_campus_map: {
+        Args: { p_campus_id: string; p_expected_updated_at: string }
+        Returns: string
+      }
       campus_is_published: { Args: { p_campus_id: string }; Returns: boolean }
+      discard_campus_draft: {
+        Args: { p_expected_updated_at: string; p_version_id: string }
+        Returns: string
+      }
       is_admin: { Args: never; Returns: boolean }
       is_published_floor_plan: { Args: { p_path: string }; Returns: boolean }
       publish_campus_version: {
         Args: { p_version_id: string }
         Returns: string
       }
+      publish_validated_campus_draft: {
+        Args: { p_expected_updated_at: string; p_version_id: string }
+        Returns: Json
+      }
+      record_campus_validation: {
+        Args: {
+          p_issues: Json
+          p_score: number
+          p_status: string
+          p_version_id: string
+        }
+        Returns: string
+      }
+      save_campus_draft: {
+        Args: {
+          p_campus_id: string
+          p_change_summary: string
+          p_expected_updated_at: string
+          p_snapshot: Json
+          p_structure: Json
+        }
+        Returns: Json
+      }
       save_campus_structure: {
         Args: { p_campus_id: string; p_payload: Json }
         Returns: Json
+      }
+      unpublish_campus_map: {
+        Args: { p_campus_id: string; p_expected_updated_at: string }
+        Returns: string
       }
       update_report_workflow: {
         Args: {
@@ -1703,6 +1766,9 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
+  graphql_public: {
+    Enums: {},
+  },
   public: {
     Enums: {},
   },

@@ -869,7 +869,7 @@ interface FloorEditorProps {
   onSwitchFloor: (floorId: string) => void;
   onUpdate: (c: Campus) => void;
   onSave?: (c: Campus) => Promise<Campus>;
-  onPublish?: (c: Campus) => void;
+  onPublish?: (c: Campus) => void | Promise<void>;
   publishingEnabled?: boolean;
   // B5 Phase 3.1.4: the page's persisted campus snapshot (same value the outer
   // CampusEditor compares against). Deriving the STRUCTURE dirty from this
@@ -1917,7 +1917,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
     guardNavigation(() => onBack());
   }, [guardNavigation, onBack]);
 
-  const handlePublish = useCallback(() => {
+  const handlePublish = useCallback(async () => {
     const issues = validateFloorGeometry(floor);
     const errors = issues.filter((issue) => issue.severity === "error");
     if (errors.length > 0) {
@@ -1929,7 +1929,11 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
       toast.info("Publishing is implemented in A6.", "Save this floor draft now; campus-level publishing will use the existing Map Builder publish workflow.");
       return;
     }
-    onPublish(campus);
+    try {
+      await onPublish(campus);
+    } catch {
+      // The page-level A6 handler already presents the database error.
+    }
   }, [campus, floor, onPublish, publishingEnabled, toast]);
 
   const switchToFloor = useCallback((targetFloorId: string) => {
