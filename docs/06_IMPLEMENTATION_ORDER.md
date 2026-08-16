@@ -379,8 +379,8 @@ Unlocks Gate G4.
 
 ## A8 — Cross-system security and integration verification
 
-**Status:** `BLOCKED` by A2–A7 and dependent merged UI packages
-**Branch:** `test/security-and-integration-matrix`
+**Status:** `ACTIVE` — backend/security matrix complete; final dependent UI-package verification remains
+**Branch:** `A6-A9` (continued here by developer instruction)
 
 Deliverables:
 

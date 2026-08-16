@@ -53,11 +53,25 @@ export function useStudentAuth(): StudentAuthState {
       setLoading(false);
     };
 
-    // Restore any persisted session (page refresh / returning visitor).
-    supabase.auth.getSession().then(({ data }) => {
+    const revalidate = async () => {
+      if (!supabase) return;
+      const { data, error } = await supabase.auth.getUser();
       if (!mounted) return;
-      if (data.session) {
-        void loadProfile(data.session.user.id);
+      if (error || !data.user) {
+        setProfile(null);
+        setLoading(false);
+        return;
+      }
+      await loadProfile(data.user.id);
+    };
+
+    // Restore and validate the persisted identity against the Auth server.
+    // getSession() alone trusts local storage and can temporarily preserve an
+    // expired identity until the next refresh attempt.
+    supabase.auth.getUser().then(({ data, error }) => {
+      if (!mounted) return;
+      if (!error && data.user) {
+        void loadProfile(data.user.id);
       } else {
         setProfile(null);
         setLoading(false);
@@ -75,8 +89,22 @@ export function useStudentAuth(): StudentAuthState {
       }
     });
 
+    // Profile activation is live database authorization state, not a JWT
+    // claim. Recheck it while the portal is open and when the tab regains
+    // focus so an administrator's deactivation takes effect without logout.
+    const interval = window.setInterval(() => void revalidate(), 15_000);
+    const handleFocus = () => void revalidate();
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") void revalidate();
+    };
+    window.addEventListener("focus", handleFocus);
+    document.addEventListener("visibilitychange", handleVisibility);
+
     return () => {
       mounted = false;
+      window.clearInterval(interval);
+      window.removeEventListener("focus", handleFocus);
+      document.removeEventListener("visibilitychange", handleVisibility);
       listener.subscription.unsubscribe();
     };
   }, []);

@@ -64,6 +64,10 @@ export function StudentSettingsPage() {
   const [pwSaved, setPwSaved] = useState(false);
 
   useEffect(() => {
+    if (!authLoading && !isStudent) navigate("/admin", { replace: true });
+  }, [authLoading, isStudent, navigate]);
+
+  useEffect(() => {
     window.scrollTo({ top: 0, behavior: "instant" });
     const timer = setTimeout(() => setLoading(false), 500);
     return () => clearTimeout(timer);
@@ -103,7 +107,6 @@ export function StudentSettingsPage() {
 
   // Only active student profiles may use the student settings.
   if (!isStudent) {
-    navigate("/admin");
     return null;
   }
 

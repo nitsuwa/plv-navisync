@@ -55,9 +55,15 @@ export function StudentFavoritesPage() {
   const [savedBuildings, setSavedBuildings] = useState<Building[]>([]);
   const [search, setSearch] = useState("");
   const [removingId, setRemovingId] = useState<string | null>(null);
+  const toast = useToast();
+
+  useEffect(() => {
+    if (!authLoading && !isStudent) navigate("/admin", { replace: true });
+  }, [authLoading, isStudent, navigate]);
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: "instant" });
+    if (authLoading || !isStudent) return;
     let mounted = true;
     studentAccountService.getSavedBuildings().then((res) => {
       if (mounted) {
@@ -68,7 +74,7 @@ export function StudentFavoritesPage() {
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [authLoading, isStudent]);
 
   if (authLoading || loading) return (
     <PageTransition>
@@ -79,7 +85,6 @@ export function StudentFavoritesPage() {
   );
 
   if (!isStudent) {
-    navigate("/admin");
     return null;
   }
 
@@ -89,8 +94,6 @@ export function StudentFavoritesPage() {
         b.code.toLowerCase().includes(search.toLowerCase())
       )
     : savedBuildings;
-
-  const toast = useToast();
 
   const remove = async (id: string) => {
     const building = savedBuildings.find((b) => b.id === id);

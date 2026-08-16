@@ -75,7 +75,12 @@ export function StudentReportsPage() {
   const [search, setSearch] = useState("");
 
   useEffect(() => {
+    if (!authLoading && !isStudent) navigate("/admin", { replace: true });
+  }, [authLoading, isStudent, navigate]);
+
+  useEffect(() => {
     window.scrollTo({ top: 0, behavior: "instant" });
+    if (authLoading || !isStudent) return;
     let mounted = true;
     reportService.getStudentReports().then((res) => {
       if (mounted) {
@@ -86,7 +91,7 @@ export function StudentReportsPage() {
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [authLoading, isStudent]);
 
   const refreshReports = useCallback(async () => {
     setIsRefreshing(true);
@@ -146,7 +151,6 @@ export function StudentReportsPage() {
 
   // Only active student profiles may use the student reports.
   if (!isStudent) {
-    navigate("/admin");
     return null;
   }
 
