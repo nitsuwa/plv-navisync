@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import {
   Navigation, X, ArrowUpDown, Compass, Accessibility, AlertTriangle,
-  MapPin, Route as RouteIcon,
+  MapPin, Route as RouteIcon, Crosshair,
 } from "lucide-react";
 import type { Building } from "../../types";
 import { BuildingPicker } from "./BuildingPicker";
@@ -9,6 +9,7 @@ import { RouteErrorState } from "./RouteErrorState";
 import { cn } from "../../lib/utils";
 import type { PlannedRoute, RouteMode } from "../../lib/routePlanner";
 import { formatDistance, formatMinutes } from "../../lib/routePlanner";
+import { useEscToClose } from "../../hooks/useEscToClose";
 
 interface RoutePlannerDialogProps {
   from: Building | null;
@@ -22,6 +23,11 @@ interface RoutePlannerDialogProps {
   onClose: () => void;
   onClear: () => void;
   onFindRoute: () => void;
+  /** "You are here" marker — when set, the user can start from it */
+  youAreHere?: { x: number; y: number } | null;
+  /** Route starts from the "You are here" marker instead of a building */
+  useMyLocation: boolean;
+  onUseMyLocationChange: (v: boolean) => void;
 }
 
 const MODES: { key: RouteMode; label: string; icon: ReactNode }[] = [
@@ -37,14 +43,15 @@ const MODES: { key: RouteMode; label: string; icon: ReactNode }[] = [
  */
 export function RoutePlannerDialog({
   from, to, onFromChange, onToChange, buildings, mode, onModeChange,
-  route, onClose, onClear, onFindRoute,
+  route, onClose, onClear, onFindRoute, youAreHere, useMyLocation, onUseMyLocationChange,
 }: RoutePlannerDialogProps) {
-  const bothSet = Boolean(from && to);
+  useEscToClose(onClose);
+  const bothSet = useMyLocation ? Boolean(to) : Boolean(from && to);
   const canPlan = bothSet;
 
   return (
     <div
-      className="rounded-2xl border border-border shadow-xl overflow-visible animate-scale-in"
+      className="rounded-2xl border border-border shadow-xl overflow-y-auto max-h-[72dvh] md:max-h-[85dvh] animate-scale-in"
       style={{ background: "var(--card)", color: "var(--foreground)" }}
     >
       {/* Header */}
@@ -94,24 +101,66 @@ export function RoutePlannerDialog({
         </div>
 
         {/* Pickers */}
-        <BuildingPicker
-          badge="A"
-          badgeColor="#16a34a"
-          value={from}
-          onSelect={onFromChange}
-          onClear={() => onFromChange(null)}
-          placeholder="Starting point…"
-          buildings={buildings}
-        />
-        <div className="flex items-center justify-center">
-          <button
-            onClick={() => { const tmp = from; onFromChange(to); onToChange(tmp); }}
-            className="w-8 h-8 rounded-full border border-border bg-card flex items-center justify-center hover:bg-muted active:scale-90 transition-all"
-            aria-label="Swap start and destination"
+        {youAreHere && (
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={() => onUseMyLocationChange(!useMyLocation)}
+              className={cn(
+                "flex flex-1 items-center gap-1.5 px-2.5 py-2 rounded-xl text-[11px] font-bold transition-all",
+                useMyLocation
+                  ? "bg-blue-500/15 text-blue-700 dark:text-blue-400 border border-blue-500/30 shadow-sm"
+                  : "border border-border text-muted-foreground hover:bg-muted"
+              )}
+              aria-pressed={useMyLocation}
+              title="Start from the 'You are here' marker"
+            >
+              <Crosshair className={cn("h-3.5 w-3.5", useMyLocation ? "animate-pulse" : "")} />
+              <span>You are here</span>
+              {useMyLocation && <span className="w-1.5 h-1.5 rounded-full bg-blue-500 ml-auto" />}
+            </button>
+          </div>
+        )}
+        {useMyLocation && youAreHere ? (
+          /* From = "You are here" (no building picker) */
+          <div
+            className="flex items-center gap-2 px-3 py-2.5 rounded-xl border border-blue-500/30 bg-blue-500/8"
+            data-testid="from-you-are-here"
           >
-            <ArrowUpDown className="h-3 w-3 text-muted-foreground" />
-          </button>
-        </div>
+            <span className="w-5 h-5 rounded-full bg-blue-500 text-white flex items-center justify-center text-[10px] font-black">A</span>
+            <div className="min-w-0 flex-1">
+              <p className="text-[11px] font-extrabold text-foreground leading-tight">You are here</p>
+              <p className="text-[9px] text-muted-foreground">Using your current location</p>
+            </div>
+            <button
+              onClick={() => onUseMyLocationChange(false)}
+              className="text-[9px] font-bold text-primary hover:underline"
+              aria-label="Choose a building as starting point instead"
+            >
+              Change
+            </button>
+          </div>
+        ) : (
+          <BuildingPicker
+            badge="A"
+            badgeColor="#16a34a"
+            value={from}
+            onSelect={onFromChange}
+            onClear={() => onFromChange(null)}
+            placeholder="Starting point…"
+            buildings={buildings}
+          />
+        )}
+        {!useMyLocation && (
+          <div className="flex items-center justify-center">
+            <button
+              onClick={() => { const tmp = from; onFromChange(to); onToChange(tmp); }}
+              className="w-8 h-8 rounded-full border border-border bg-card flex items-center justify-center hover:bg-muted active:scale-90 transition-all"
+              aria-label="Swap start and destination"
+            >
+              <ArrowUpDown className="h-3 w-3 text-muted-foreground" />
+            </button>
+          </div>
+        )}
         <BuildingPicker
           badge="B"
           badgeColor="#dc2626"
@@ -139,7 +188,7 @@ export function RoutePlannerDialog({
             </div>
             <div className="mt-2 flex items-center gap-1 text-[10px] font-semibold">
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-green-100 dark:bg-green-900/20 text-green-700 dark:text-green-400 border border-green-200 dark:border-green-800/30">
-                <span className="w-1.5 h-1.5 rounded-full bg-green-500" /> {from?.code ?? "Start"}
+                <span className="w-1.5 h-1.5 rounded-full bg-green-500" /> {useMyLocation ? "You are here" : (from?.code ?? "Start")}
               </span>
               <ArrowUpDown className="h-3 w-3 text-muted-foreground" />
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-100 dark:bg-red-900/20 text-destructive border border-red-200 dark:border-red-800/30">
@@ -176,7 +225,7 @@ export function RoutePlannerDialog({
               "flex-1 h-9 rounded-xl text-[11px] font-bold transition-all",
               canPlan
                 ? "bg-primary text-primary-foreground hover:brightness-110 shadow-md active:scale-[0.98]"
-                : "bg-muted text-muted-foreground/60 cursor-not-allowed"
+                : "bg-muted text-muted-foreground/75 cursor-not-allowed"
             )}
           >
             {route ? "Navigate" : "Find Route"}

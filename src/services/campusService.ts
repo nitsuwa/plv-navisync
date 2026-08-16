@@ -1,11 +1,21 @@
 import { getSupabase } from "../lib/supabase";
 import { DEFAULT_FEATURES } from "../components/map-builder/constants";
-import type { Campus } from "../components/map-builder/types";
-import type { Tables, TablesInsert, TablesUpdate } from "../types/database.generated";
+import type { Campus, CampusBuilding } from "../components/map-builder/types";
+import type { Json, Tables, TablesInsert, TablesUpdate } from "../types/database.generated";
 
 export type CampusRow = Tables<"campuses">;
 export type CampusVersionRow = Tables<"campus_versions">;
 export type CampusLifecycleStatus = "draft" | "published" | "unpublished" | "archived";
+type CampusPreviewBuildingRow = Pick<
+  Tables<"buildings">,
+  "id" | "name" | "code" | "category" | "description" | "x" | "y" | "width" | "height" | "rotation" | "is_visible" | "metadata" | "archived_at"
+>;
+type CampusListRow = CampusRow & {
+  preview_buildings?: CampusPreviewBuildingRow[] | null;
+};
+type CampusPreviewFloorRow = Pick<Tables<"floors">, "id" | "archived_at"> & { buildings?: { campus_id: string } | null };
+type CampusPreviewRoomRow = Pick<Tables<"map_elements">, "id" | "campus_id" | "element_type" | "archived_at">;
+type CampusPreviewSummary = { floors: number; rooms: number };
 
 export type CampusCreateInput = Pick<
   TablesInsert<"campuses">,
@@ -28,14 +38,115 @@ export class CampusConflictError extends Error {
   }
 }
 
+/**
+ * A campus operation failed. Carries the structured PostgREST/Supabase error
+ * details (code, details, hint) so development logging and tests can reason
+ * about the real failure instead of a generic message.
+ */
+export class CampusServiceError extends Error {
+  /** PostgREST/Supabase error code, e.g. "23514" (check violation). */
+  readonly dbCode?: string;
+  /** PostgREST `details` (constraint/row details) when available. */
+  readonly dbDetails?: string;
+  /** PostgREST `hint` when available. */
+  readonly dbHint?: string;
+  /** The operation that failed, e.g. "create campus". */
+  readonly operation: string;
+
+  constructor(opts: { operation: string; message: string; code?: string; details?: string; hint?: string }) {
+    super(opts.message);
+    this.name = "CampusServiceError";
+    this.operation = opts.operation;
+    this.dbCode = opts.code;
+    this.dbDetails = opts.details;
+    this.dbHint = opts.hint;
+  }
+}
+
+/**
+ * Normalize + validate a campus code against the DB contract
+ * (`^[A-Z0-9][A-Z0-9_-]{0,29}$` — required, 1-30 chars, no spaces).
+ *
+ * The INSERT would otherwise be rejected by `campuses_code_format_check` with
+ * a cryptic PostgREST error ("Could not save campus"). Failing fast here gives
+ * the wizard/UI a clear, user-facing message.
+ */
+export function normalizeCampusCode(raw: string): string {
+  const code = raw.trim().toUpperCase();
+  if (!code) {
+    throw new CampusServiceError({ operation: "create campus", message: "Campus code is required." });
+  }
+  if (!/^[A-Z0-9][A-Z0-9_-]{0,29}$/.test(code)) {
+    throw new CampusServiceError({
+      operation: "create campus",
+      message: "Campus code must be 1–30 letters, numbers, hyphens, or underscores (no spaces).",
+    });
+  }
+  return code;
+}
+
 export function deriveCampusLifecycleStatus(row: CampusRow): CampusLifecycleStatus {
   if (row.status === "archived") return "archived";
   if (row.status === "published") return "published";
   return row.latest_published_version_id ? "unpublished" : "draft";
 }
 
-function assertOk(error: { message: string } | null): void {
-  if (error) throw new Error(error.message);
+/**
+ * Map a campus-operation failure to a concise, user-safe message.
+ *
+ * Known PostgREST/Supabase codes become friendly one-liners; the full
+ * structured detail (code/message/details/hint) stays in the dev console log
+ * from `assertOk`. Errors without a recognized DB code keep their own message
+ * (e.g. client-side validation or the duplicate-code pre-check).
+ */
+export function userFacingCampusMessage(error: unknown): string {
+  if (error instanceof CampusServiceError && error.dbCode) {
+    switch (error.dbCode) {
+      case "23505": // unique_violation
+        return "A campus with this code already exists. Choose a different code.";
+      case "23514": // check_violation
+        return "Some campus details don't meet the required format. Check the code, name, and coordinates.";
+      case "23502": // not_null_violation
+        return "Some required campus details are missing.";
+      case "23503": // foreign_key_violation
+        return "This campus references data that no longer exists. Refresh and try again.";
+      case "42501": // insufficient_privilege
+        return "Your account is not allowed to save campuses.";
+      default:
+        return "The campus could not be saved. Try again or refresh the page.";
+    }
+  }
+  return error instanceof Error ? error.message : "Something went wrong.";
+}
+
+interface SupabaseErrorLike {
+  message: string;
+  code?: string | null;
+  details?: string | null;
+  hint?: string | null;
+}
+
+function assertOk(error: SupabaseErrorLike | null, operation = "campus operation"): void {
+  if (!error) return;
+  const wrapped = new CampusServiceError({
+    operation,
+    message: error.message,
+    code: error.code ?? undefined,
+    details: error.details ?? undefined,
+    hint: error.hint ?? undefined,
+  });
+  if (import.meta.env.DEV) {
+    // Development-only structured diagnostics: code/message/details/hint keep
+    // the real Supabase failure visible (e.g. a 23514 check violation naming
+    // campuses_code_format_check). Never exposed to normal users.
+    console.error(`[campusService] ${operation} failed`, {
+      code: wrapped.dbCode,
+      message: wrapped.message,
+      details: wrapped.dbDetails,
+      hint: wrapped.dbHint,
+    });
+  }
+  throw wrapped;
 }
 
 async function requireCurrentUserId(): Promise<string> {
@@ -52,13 +163,45 @@ async function signedImageUrl(path: string | null): Promise<string | undefined> 
   return data.signedUrl;
 }
 
-export async function toEditorCampus(row: CampusRow): Promise<Campus> {
+function metadataUi(metadata: Json): Partial<CampusBuilding> {
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return {};
+  const ui = (metadata as { ui?: unknown }).ui;
+  return ui && typeof ui === "object" && !Array.isArray(ui) ? ui as Partial<CampusBuilding> : {};
+}
+
+function previewBuildings(row: CampusListRow, fallbackColor: string): CampusBuilding[] {
+  return (row.preview_buildings ?? [])
+    .filter((building) => !building.archived_at)
+    .map((building) => {
+      const ui = metadataUi(building.metadata);
+      return {
+        ...ui,
+        id: building.id,
+        name: building.name,
+        code: building.code,
+        category: building.category,
+        description: building.description ?? "",
+        x: building.x,
+        y: building.y,
+        width: building.width,
+        height: building.height,
+        rotation: building.rotation,
+        visible: building.is_visible,
+        color: ui.color ?? fallbackColor,
+        floors: [],
+      };
+    });
+}
+
+export async function toEditorCampus(row: CampusListRow, previewSummary?: CampusPreviewSummary): Promise<Campus> {
   const [logo, thumbnail] = await Promise.all([
     signedImageUrl(row.logo_path),
     signedImageUrl(row.overview_image_path),
   ]);
   const lifecycleStatus = deriveCampusLifecycleStatus(row);
   const day = row.updated_at.slice(0, 10);
+  const hasPreviewBuildings = row.preview_buildings !== undefined;
+  const buildings = hasPreviewBuildings ? previewBuildings(row, row.theme_color) : [];
   return {
     id: row.id,
     name: row.name,
@@ -80,7 +223,11 @@ export async function toEditorCampus(row: CampusRow): Promise<Campus> {
     canvasH: row.canvas_height,
     canvasConfigured: row.canvas_configured,
     settings: { accessibility: true, emergency: true, eventLayer: true, gps: true },
-    buildings: [], markers: [], paths: [], navNodes: [], navEdges: [], routes: [],
+    buildings, markers: [], paths: [], navNodes: [], navEdges: [], routes: [],
+    previewBuildingCount: hasPreviewBuildings ? buildings.length : undefined,
+    previewFloorCount: previewSummary?.floors,
+    previewRoomCount: previewSummary?.rooms,
+    previewBuildingsLoaded: hasPreviewBuildings,
     accessibilityFeatures: [], assemblyPoints: [], eventOverlays: [], decorAssets: [],
     createdAt: row.created_at.slice(0, 10),
     updatedAt: day,
@@ -94,14 +241,52 @@ export async function toEditorCampus(row: CampusRow): Promise<Campus> {
   };
 }
 
-async function mapRows(rows: CampusRow[]): Promise<Campus[]> {
-  return Promise.all(rows.map(toEditorCampus));
+async function previewStructureSummaries(campusIds: string[]): Promise<Map<string, CampusPreviewSummary>> {
+  const summaries = new Map(campusIds.map((id) => [id, { floors: 0, rooms: 0 }]));
+  if (campusIds.length === 0) return summaries;
+  const db = getSupabase();
+  const [floors, rooms] = await Promise.all([
+    db
+      .from("floors")
+      .select("id,archived_at,buildings!inner(campus_id)")
+      .in("buildings.campus_id", campusIds)
+      .is("archived_at", null),
+    db
+      .from("map_elements")
+      .select("id,campus_id,element_type,archived_at")
+      .in("campus_id", campusIds)
+      .eq("element_type", "room")
+      .is("archived_at", null),
+  ]);
+  assertOk(floors.error);
+  assertOk(rooms.error);
+  for (const floor of (floors.data ?? []) as CampusPreviewFloorRow[]) {
+    const campusId = floor.buildings?.campus_id;
+    if (!campusId || floor.archived_at) continue;
+    const summary = summaries.get(campusId);
+    if (summary) summary.floors += 1;
+  }
+  for (const room of (rooms.data ?? []) as CampusPreviewRoomRow[]) {
+    if (room.archived_at || room.element_type !== "room") continue;
+    const summary = summaries.get(room.campus_id);
+    if (summary) summary.rooms += 1;
+  }
+  return summaries;
+}
+
+async function mapRows(rows: CampusListRow[]): Promise<Campus[]> {
+  const summaries = await previewStructureSummaries(rows.map((row) => row.id));
+  return Promise.all(rows.map((row) => toEditorCampus(row, summaries.get(row.id))));
 }
 
 export async function listCampuses(): Promise<Campus[]> {
-  const { data, error } = await getSupabase().from("campuses").select("*").order("is_default", { ascending: false }).order("name");
+  const { data, error } = await getSupabase()
+    .from("campuses")
+    .select("*, preview_buildings:buildings(id,name,code,category,description,x,y,width,height,rotation,is_visible,metadata,archived_at)")
+    .order("is_default", { ascending: false })
+    .order("name");
   assertOk(error);
-  return mapRows(data ?? []);
+  return mapRows((data ?? []) as CampusListRow[]);
 }
 
 /** Choose a usable campus without assuming the database contains one. */
@@ -164,10 +349,11 @@ export async function getCampusById(id: string): Promise<Campus | null> {
 
 export async function createCampus(input: CampusCreateInput): Promise<Campus> {
   const userId = await requireCurrentUserId();
+  const code = normalizeCampusCode(input.code);
   const { data, error } = await getSupabase().from("campuses").insert({
-    ...input, code: input.code.trim().toUpperCase(), status: "draft", created_by: userId, updated_by: userId,
+    ...input, code, status: "draft", created_by: userId, updated_by: userId,
   }).select("*").single();
-  assertOk(error);
+  assertOk(error, "create campus");
   return toEditorCampus(data!);
 }
 
@@ -175,7 +361,7 @@ async function updateWithVersion(id: string, expectedUpdatedAt: string, changes:
   const userId = await requireCurrentUserId();
   const { data, error } = await getSupabase().from("campuses").update({ ...changes, updated_by: userId })
     .eq("id", id).eq("updated_at", expectedUpdatedAt).select("*").maybeSingle();
-  assertOk(error);
+  assertOk(error, "update campus");
   if (!data) throw new CampusConflictError();
   return toEditorCampus(data);
 }

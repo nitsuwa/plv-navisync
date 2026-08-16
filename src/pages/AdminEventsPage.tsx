@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { EventCardSkeleton } from "../components/ui/PageSkeleton";
 import { useToast } from "../hooks/useToast";
+import { useEscToClose } from "../hooks/useEscToClose";
 import {
   CalendarDays, MapPin, Plus, Edit2, Trash2, CheckCircle2,
   Clock, XCircle, Search, Archive, AlertCircle,
@@ -48,6 +49,7 @@ function EventModal({ event, onClose, onSave }: {
   onClose: () => void;
   onSave: (input: EventInput) => Promise<void>;
 }) {
+  useEscToClose(onClose);
   const isNew = event === null;
   const toast = useToast();
   const [saving, setSaving] = useState(false);

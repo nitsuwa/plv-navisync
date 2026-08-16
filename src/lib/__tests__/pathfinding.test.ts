@@ -59,7 +59,13 @@ describe("findBuildingPath / calculateTransition (legacy)", () => {
   it("maps known buildings to their entrance nodes", () => {
     expect(BUILDING_ENTRANCE_MAP["b1"]).toBe("ent_mab");
     expect(BUILDING_ENTRANCE_MAP["b6"]).toBe("ent_ssc");
-    expect(Object.keys(BUILDING_ENTRANCE_MAP).length).toBe(6);
+    // C4 Phase 2 bridge: published-campus seed ids map to the same nodes.
+    expect(BUILDING_ENTRANCE_MAP["b_mab"]).toBe("ent_mab");
+    expect(BUILDING_ENTRANCE_MAP["b_ssc"]).toBe("ent_ssc");
+    // Real PLV campus seed ids (SCB / Canteen / CABA / COED / CEIT / Guard)
+    expect(BUILDING_ENTRANCE_MAP["b_scb"]).toBe("ent_scb");
+    expect(BUILDING_ENTRANCE_MAP["b_ceit"]).toBe("ent_ceit");
+    expect(Object.keys(BUILDING_ENTRANCE_MAP).length).toBe(18);
   });
 
   it("finds a building-to-building route", () => {
@@ -67,6 +73,24 @@ describe("findBuildingPath / calculateTransition (legacy)", () => {
     expect(path).not.toBeNull();
     expect(path!.nodeIds[0]).toBe("ent_mab");
     expect(path!.nodeIds[path!.nodeIds.length - 1]).toBe("ent_lrc");
+  });
+
+  it("routes the real PLV campus along brick walkways (SCB → CEIT)", () => {
+    const path = findBuildingPath("b_scb", "b_ceit");
+    expect(path).not.toBeNull();
+    expect(path!.nodeIds[0]).toBe("ent_scb");
+    expect(path!.nodeIds[path!.nodeIds.length - 1]).toBe("ent_ceit");
+    // Every hop stays on a quadrangle walkway node (no straight-line shortcut).
+    const allowed = new Set(["ent_scb", "q_nw", "q_ne", "q_se", "q_sw", "jct_plv_w", "ent_ceit"]);
+    for (const id of path!.nodeIds) expect(allowed.has(id)).toBe(true);
+    expect(path!.distanceM).toBeGreaterThan(0);
+  });
+
+  it("routes from the main gate to the guard house", () => {
+    const path = findBuildingPath("b_guard", "b_caba");
+    expect(path).not.toBeNull();
+    expect(path!.nodeIds[0]).toBe("ent_guard");
+    expect(path!.nodeIds[path!.nodeIds.length - 1]).toBe("ent_caba");
   });
 
   it("returns null when a building has no entrance node", () => {

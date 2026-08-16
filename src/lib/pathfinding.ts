@@ -67,6 +67,20 @@ const NODES: GraphNode[] = [
   { id: "ent_elb",    x: 165, y: 305, label: "ELB Entrance" },
   { id: "ent_gym",    x: 305, y: 435, label: "GYM Entrance" },
   { id: "ent_ssc",    x: 605, y: 415, label: "SSC Entrance" },
+
+  // ── Real PLV campus layout (matches the seeded published campus) ────────
+  { id: "gate_plv",  x: 110, y: 300, label: "Main Gate" },
+  { id: "jct_plv_w", x: 310, y: 300, label: "West Junction" },
+  { id: "q_nw",      x: 310, y: 250, label: "Quadrangle NW" },
+  { id: "q_ne",      x: 570, y: 250, label: "Quadrangle NE" },
+  { id: "q_se",      x: 570, y: 460, label: "Quadrangle SE" },
+  { id: "q_sw",      x: 310, y: 460, label: "Quadrangle SW" },
+  { id: "ent_scb",    x: 280, y: 180, label: "SCB Entrance" },
+  { id: "ent_canteen", x: 520, y: 150, label: "Canteen Entrance" },
+  { id: "ent_coed",   x: 650, y: 125, label: "COED Entrance" },
+  { id: "ent_caba",   x: 230, y: 495, label: "CABA Entrance" },
+  { id: "ent_ceit",   x: 660, y: 445, label: "CEIT Entrance" },
+  { id: "ent_guard",  x: 130, y: 360, label: "Guard House Entrance" },
 ];
 
 const EDGES: GraphEdge[] = [
@@ -94,6 +108,21 @@ const EDGES: GraphEdge[] = [
 
   // East-west connectors (rear)
   { from: "ent_elb",    to: "jct_south",  distance: 130, accessible: true },
+
+  // ── Real PLV campus walkways (red brick paths only) ─────────────────────
+  { from: "gate_plv",   to: "jct_plv_w", distance: 200, accessible: true },
+  { from: "jct_plv_w",  to: "q_nw",     distance: 50,  accessible: true },
+  { from: "jct_plv_w",  to: "q_sw",     distance: 160, accessible: true },
+  { from: "q_nw",       to: "q_ne",     distance: 260, accessible: true },
+  { from: "q_ne",       to: "q_se",     distance: 210, accessible: true },
+  { from: "q_se",       to: "q_sw",     distance: 260, accessible: true },
+  { from: "q_sw",       to: "q_nw",     distance: 210, accessible: true },
+  { from: "q_nw",       to: "ent_scb",  distance: 67,  accessible: true },
+  { from: "q_ne",       to: "ent_canteen", distance: 103, accessible: true },
+  { from: "q_ne",       to: "ent_coed", distance: 136, accessible: true },
+  { from: "q_sw",       to: "ent_caba", distance: 97,  accessible: true },
+  { from: "q_se",       to: "ent_ceit", distance: 84,  accessible: true },
+  { from: "gate_plv",   to: "ent_guard", distance: 60,  accessible: true },
 ];
 
 // ── Adjacency list ─────────────────────────────────────────────────────────
@@ -245,14 +274,32 @@ function buildSteps(nodeIds: string[], edges: GraphEdge[]): string[] {
 }
 
 // ── Building entrance map ──────────────────────────────────────────────────
-// Maps building IDs to nearest graph node IDs
+// Maps building IDs to nearest graph node IDs.
+// Includes BOTH the legacy mock ids (b1-b6) and the published-campus seed
+// ids (b_mab, …) so routes work whether the student map is fed by the
+// legacy fallback or the seeded PLV campus (Developer 3 / C4 scope).
 const BUILDING_ENTRANCE_MAP: Record<string, string> = {
+  // Legacy mock ids
   b1: "ent_mab",
   b2: "ent_adm",
   b3: "ent_lrc",
   b4: "ent_elb",
   b5: "ent_gym",
   b6: "ent_ssc",
+  // Published-campus seed ids
+  b_mab: "ent_mab",
+  b_adm: "ent_adm",
+  b_lrc: "ent_lrc",
+  b_elb: "ent_elb",
+  b_gym: "ent_gym",
+  b_ssc: "ent_ssc",
+  // Real PLV campus seed ids (SCB / Canteen / CABA / COED / CEIT / Guard)
+  b_scb: "ent_scb",
+  b_canteen: "ent_canteen",
+  b_caba: "ent_caba",
+  b_coed: "ent_coed",
+  b_ceit: "ent_ceit",
+  b_guard: "ent_guard",
 };
 
 /**

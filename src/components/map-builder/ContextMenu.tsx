@@ -1,14 +1,14 @@
 import { useEffect, useRef } from "react";
 import { motion } from "motion/react";
 import {
-  Pencil, Copy, Lock, EyeOff, Trash2, ChevronUp, ChevronDown,
+  Pencil, Copy, Lock, EyeOff, Trash2, ChevronUp, ChevronDown, ChevronsUp, ChevronsDown,
 } from "lucide-react";
 import { cn } from "../../lib/utils";
 
 interface ContextMenuProps {
   x: number;
   y: number;
-  type: "building" | "marker" | "path" | "floor" | "wall";
+  type: "building" | "marker" | "path" | "floor" | "wall" | "decorAsset";
   onClose: () => void;
   onAction: (action: string) => void;
 }
@@ -40,8 +40,21 @@ export function ContextMenu({ x, y, type, onClose, onAction }: ContextMenuProps)
         { action: "lock", label: "Lock", icon: Lock },
         { action: "hide", label: "Hide", icon: EyeOff },
         { action: "divider" },
+        { action: "bring-to-front", label: "Bring to Front", icon: ChevronsUp },
         { action: "bring-forward", label: "Bring Forward", icon: ChevronUp },
         { action: "send-backward", label: "Send Backward", icon: ChevronDown },
+        { action: "send-to-back", label: "Send to Back", icon: ChevronsDown },
+        { action: "divider" },
+        { action: "delete", label: "Delete", icon: Trash2, danger: true },
+      ]
+    : type === "decorAsset"
+    ? [
+        { action: "duplicate", label: "Duplicate", icon: Copy },
+        { action: "divider" },
+        { action: "bring-to-front", label: "Bring to Front", icon: ChevronsUp },
+        { action: "bring-forward", label: "Bring Forward", icon: ChevronUp },
+        { action: "send-backward", label: "Send Backward", icon: ChevronDown },
+        { action: "send-to-back", label: "Send to Back", icon: ChevronsDown },
         { action: "divider" },
         { action: "delete", label: "Delete", icon: Trash2, danger: true },
       ]

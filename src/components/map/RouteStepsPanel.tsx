@@ -1,6 +1,6 @@
 import {
   Navigation, Flag, Footprints, ArrowUp, MoveVertical, DoorOpen,
-  CircleCheck, Info, Maximize2, Accessibility,
+  CircleCheck, Info, Maximize2, Accessibility, RotateCcw,
 } from "lucide-react";
 import type { PlannedRoute, RouteMode, RouteStepIcon } from "../../lib/routePlanner";
 import { formatDistance, formatMinutes } from "../../lib/routePlanner";
@@ -14,6 +14,28 @@ interface RouteStepsPanelProps {
   onEnd: () => void;
   /** Called to zoom the map to fit the route */
   onZoom: () => void;
+  /** 0..1 walk progress — when provided, the active step is highlighted */
+  walkProgress?: number;
+  /** Replays the walk animation */
+  onReplay?: () => void;
+}
+
+/** Index of the step currently being walked, based on cumulative distance. */
+function activeStepIndex(
+  steps: PlannedRoute["steps"],
+  progress: number,
+  totalDist: number
+): number {
+  if (steps.length === 0) return 0;
+  if (progress <= 0) return 0;
+  if (progress >= 1) return steps.length - 1;
+  const traveled = progress * totalDist;
+  let acc = 0;
+  for (let i = 0; i < steps.length; i++) {
+    acc += steps[i].distanceM ?? 0;
+    if (acc >= traveled) return i;
+  }
+  return steps.length - 1;
 }
 
 function StepIcon({ icon }: { icon: RouteStepIcon }) {
@@ -41,11 +63,15 @@ function stepDot(isFirst: boolean, isLast: boolean) {
  * (desktop bottom-left card, mobile sheet).
  */
 export function RouteStepsPanel({
-  route, mode, toName, onEnd, onZoom,
+  route, mode, toName, onEnd, onZoom, walkProgress, onReplay,
 }: RouteStepsPanelProps) {
   const steps = route.steps;
   const modeColor =
     mode === "accessible" ? "#16a34a" : mode === "emergency" ? "#dc2626" : "var(--primary)";
+  const activeIndex =
+    typeof walkProgress === "number"
+      ? activeStepIndex(steps, walkProgress, route.dist)
+      : null;
 
   return (
     <div className="rounded-2xl border border-border/60 shadow-xl overflow-hidden animate-slide-up"
@@ -60,15 +86,15 @@ export function RouteStepsPanel({
       {/* Stats row: distance, time, mode */}
       <div className="flex gap-2 px-3 pt-2.5 pb-2 border-b border-border">
         <div className="flex-1 px-2 py-1.5 rounded-lg bg-primary/8 text-center">
-          <p className="text-[9px] text-muted-foreground font-semibold uppercase tracking-wider">Dist</p>
+          <p className="text-[10px] text-muted-foreground font-bold uppercase tracking-wider">Dist</p>
           <p className="text-sm font-extrabold text-foreground">{formatDistance(route.dist)}</p>
         </div>
         <div className="flex-1 px-2 py-1.5 rounded-lg bg-primary/8 text-center">
-          <p className="text-[9px] text-muted-foreground font-semibold uppercase tracking-wider">Time</p>
+          <p className="text-[10px] text-muted-foreground font-bold uppercase tracking-wider">Time</p>
           <p className="text-sm font-extrabold text-foreground">{formatMinutes(route.mins)}</p>
         </div>
         <div className="flex-1 px-2 py-1.5 rounded-lg bg-primary/8 text-center">
-          <p className="text-[9px] text-muted-foreground font-semibold uppercase tracking-wider">Via</p>
+          <p className="text-[10px] text-muted-foreground font-bold uppercase tracking-wider">Via</p>
           <p className="text-sm font-extrabold text-foreground">
             {mode === "accessible" ? <Accessibility className="h-4 w-4 inline-block align-middle" /> :
              mode === "emergency" ? "SOS" : "Walk"}
@@ -94,8 +120,15 @@ export function RouteStepsPanel({
           {steps.map((step, i) => {
             const isFirst = i === 0;
             const isLast = i === steps.length - 1;
+            const isActive = activeIndex === i;
             return (
-              <div key={step.id} className="relative flex items-start gap-2">
+              <div
+                key={step.id}
+                className={cn(
+                  "relative flex items-start gap-2 rounded-lg transition-all",
+                  isActive && "bg-primary/10 ring-1 ring-primary/30 px-1.5 -mx-1.5 py-1"
+                )}
+              >
                 <span className={cn(
                   "absolute -left-[11px] w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0",
                   stepDot(isFirst, isLast)
@@ -111,7 +144,7 @@ export function RouteStepsPanel({
                     {step.instruction}
                   </p>
                   {step.distanceM !== undefined && (
-                    <span className="text-[9px] text-muted-foreground/70 font-semibold">
+                    <span className="text-[10px] text-muted-foreground font-semibold">
                       {formatDistance(step.distanceM)}
                     </span>
                   )}
@@ -130,6 +163,17 @@ export function RouteStepsPanel({
         >
           End
         </button>
+        {onReplay && (
+          <button
+            onClick={onReplay}
+            className="h-7 px-2 rounded-lg border border-border text-muted-foreground flex items-center gap-1 hover:bg-muted transition-colors"
+            title="Replay walk animation"
+            aria-label="Replay walk animation"
+          >
+            <RotateCcw className="h-3 w-3" />
+            <span className="text-[10px] font-bold hidden sm:inline">Replay</span>
+          </button>
+        )}
         <button
           onClick={onZoom}
           className="w-7 h-7 rounded-lg border border-border text-muted-foreground flex items-center justify-center hover:bg-muted transition-colors"

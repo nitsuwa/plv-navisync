@@ -1,6 +1,7 @@
 import { Outlet, useLocation } from "react-router";
 import { Toaster } from "../../app/components/ui/sonner";
 import { Navbar } from "./Navbar";
+import { EmergencyBanner } from "./EmergencyBanner";
 import { Footer } from "./Footer";
 import { ScrollToTop } from "./ScrollToTop";
 import { MobileBottomNav } from "./MobileBottomNav";
@@ -43,6 +44,7 @@ export function PublicLayout() {
       <NavigationProgress />
       <ScrollToTop />
       <Navbar />
+      <EmergencyBanner />
 
       <main
         id="main-content"

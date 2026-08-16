@@ -5,6 +5,7 @@ import { BUILDING_CATEGORIES } from "./constants";
 import { genId } from "./constants";
 import { Combobox } from "../ui/Combobox";
 import { SPRING, DURATION } from "../../config/animation";
+import { createDefaultFloor } from "../../lib/floorPlanNormalization";
 import type { BuildingWizardData, FloorPlan } from "./types";
 
 interface BuildingWizardModalProps {
@@ -134,13 +135,9 @@ export function BuildingWizardModal({ onClose, onSave }: BuildingWizardModalProp
             <button
               onClick={() => {
                 if (!name.trim() || !code.trim()) return;
-                const floorArr: FloorPlan[] = Array.from({ length: floors }, (_, i) => ({
-                  id: genId("floor"),
-                  number: i + 1,
-                  label: i === 0 ? "Ground Floor" : `Floor ${i + 1}`,
-                  rooms: [],
-                  paths: [],
-                }));
+                const floorArr: FloorPlan[] = Array.from({ length: floors }, (_, i) =>
+                  createDefaultFloor({ id: genId("floor"), number: i + 1 })
+                );
                 onSave({ name: name.trim(), code: code.trim(), category, description: desc, floors: floorArr });
               }}
               disabled={!name.trim() || !code.trim()}

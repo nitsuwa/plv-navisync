@@ -203,6 +203,7 @@ export function StudentFavoritesPage() {
                         </Link>
                         <button
                           onClick={() => remove(b.id)}
+                          aria-label={`Remove ${b.name} from favorites`}
                           className="flex items-center justify-center h-9 w-9 rounded-xl border border-border text-muted-foreground hover:bg-destructive/10 hover:text-destructive hover:border-destructive/30 transition-all"
                           title="Remove from favorites"
                         >

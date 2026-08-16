@@ -1,5 +1,7 @@
 import type { Campus } from "../components/map-builder/types";
 import type { SharedCampusData } from "../contexts/CampusDataContext";
+import { normalizeBuildingEntrances } from "./buildingEntrances";
+import { normalizeFloor } from "./floorPlanNormalization";
 
 /**
  * Build the shared, student-facing snapshot of a campus used by all publish
@@ -22,7 +24,7 @@ export function buildSharedCampus(campus: Campus, publishedAt?: string): SharedC
       id: b.id, name: b.name, code: b.code,
       category: b.category, description: b.description,
       x: b.x, y: b.y, width: b.width, height: b.height,
-      color: b.color, floors: b.floors,
+      color: b.color, floors: b.floors, entrances: normalizeBuildingEntrances(b),
     })),
     markers: campus.markers,
     paths: campus.paths,
@@ -83,11 +85,8 @@ export function sanitizeCampus(c: Campus): Campus {
     settings: c.settings ?? { accessibility: false, emergency: false, eventLayer: false, gps: false },
     buildings: (Array.isArray(c.buildings) ? c.buildings : []).map((b) => ({
       ...b,
-      floors: (Array.isArray(b?.floors) ? b.floors : []).map((f) => ({
-        ...f,
-        rooms: Array.isArray(f?.rooms) ? f.rooms : [],
-        paths: Array.isArray(f?.paths) ? f.paths : [],
-      })),
+      entrances: Array.isArray(b?.entrances) ? normalizeBuildingEntrances(b) : [],
+      floors: (Array.isArray(b?.floors) ? b.floors : []).map((f) => normalizeFloor(f, { buildingId: b.id })),
     })),
     markers: Array.isArray(c.markers) ? c.markers : [],
     paths: Array.isArray(c.paths) ? c.paths : [],
@@ -174,7 +173,8 @@ export function createCampusClone(
   };
 
   source.buildings.forEach((b) => bldMap.set(b.id, gen("bld")));
-  source.buildings.forEach((b) => b.floors.forEach((f) => {
+  source.buildings.forEach((b) => (Array.isArray(b.floors) ? b.floors : []).forEach((rawFloor) => {
+    const f = normalizeFloor(rawFloor, { buildingId: b.id });
     floorMap.set(f.id, gen("fl"));
     f.rooms.forEach((r) => roomMap.set(r.id, gen("rm")));
     f.paths.forEach((p) => fpMap.set(p.id, gen("fp")));
@@ -202,11 +202,13 @@ export function createCampusClone(
       return {
         ...structuredClone(b),
         id: nbId,
+        entrances: (b.entrances ?? []).map((entrance) => ({ ...structuredClone(entrance), id: gen("ent"), buildingId: nbId })),
         entranceNodeId: b.entranceNodeId ? nodeMap.get(b.entranceNodeId) ?? b.entranceNodeId : undefined,
-        floors: b.floors.map((f) => {
+        floors: (Array.isArray(b.floors) ? b.floors : []).map((rawFloor) => {
+          const f = normalizeFloor(rawFloor, { buildingId: b.id });
           const nfId = floorMap.get(f.id)!;
           return {
-            ...structuredClone(f),
+            ...normalizeFloor(structuredClone(f), { buildingId: nbId }),
             id: nfId,
             buildingId: nbId,
             rooms: f.rooms.map((r) => ({

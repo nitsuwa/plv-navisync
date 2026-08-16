@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from "react";
-import { screenToWorld } from "../lib/editorPlacement";
+import { screenToWorld, panToKeepWorldPoint } from "../../lib/editorPlacement";
 
 // ── Animation constants ─────────────────────────────────────────────────────
 const ZOOM_MIN = 0.25;
@@ -125,6 +125,10 @@ export function useCanvasControls(canvasW: number, canvasH: number) {
   // ── Convert screen coords to canvas coords ──────────────────────────────
   // Delegates to the pure screenToWorld helper (src/lib/editorPlacement.ts),
   // which is unit-tested, so the tested math is the math used in production.
+  // The helper is letterbox-aware (preserveAspectRatio="xMidYMid meet") and
+  // guards against degenerate rects, so the visible cursor and the world
+  // point always agree regardless of container aspect, zoom, pan, or a
+  // freshly-created canvas that has not laid out yet.
   const getPoint = useCallback(
     (e: React.MouseEvent | MouseEvent, cw: number, ch: number): { x: number; y: number } => {
       const svg = svgRef.current;
@@ -136,17 +140,14 @@ export function useCanvasControls(canvasW: number, canvasH: number) {
   );
 
   // ── Convert screen coords to SVG world coords (helper for zoom-to-cursor) ─
-  const screenToWorld = useCallback(
+  // Same shared, letterbox-aware conversion as getPoint — never a second,
+  // independent formula that could drift from pointer coordinates.
+  const screenToWorldPt = useCallback(
     (clientX: number, clientY: number): { x: number; y: number } | null => {
       const svg = svgRef.current;
       if (!svg) return null;
       const rect = svg.getBoundingClientRect();
-      const z = currentZoom.current;
-      const p = currentPan.current;
-      return {
-        x: (((clientX - rect.left) / rect.width) * canvasW - p.x) / z,
-        y: (((clientY - rect.top) / rect.height) * canvasH - p.y) / z,
-      };
+      return screenToWorld(clientX, clientY, rect, canvasW, canvasH, currentPan.current, currentZoom.current);
     },
     [canvasW, canvasH]
   );
@@ -171,13 +172,14 @@ export function useCanvasControls(canvasW: number, canvasH: number) {
 
       if (clientX !== undefined && clientY !== undefined) {
         // Zoom toward cursor: keep the world point under the cursor fixed
-        const world = screenToWorld(clientX, clientY);
+        const world = screenToWorldPt(clientX, clientY);
         if (world) {
           const svg = svgRef.current;
           if (svg) {
             const rect = svg.getBoundingClientRect();
-            newPanX = ((clientX - rect.left) / rect.width) * canvasW - world.x * clampedZoom;
-            newPanY = ((clientY - rect.top) / rect.height) * canvasH - world.y * clampedZoom;
+            const p = panToKeepWorldPoint(clientX, clientY, rect, canvasW, canvasH, world.x, world.y, clampedZoom);
+            newPanX = p.x;
+            newPanY = p.y;
           } else {
             newPanX = canvasW / 2 - world.x * clampedZoom;
             newPanY = canvasH / 2 - world.y * clampedZoom;
@@ -195,7 +197,7 @@ export function useCanvasControls(canvasW: number, canvasH: number) {
 
       startAnimation(duration);
     },
-    [canvasW, canvasH, screenToWorld, startAnimation]
+    [canvasW, canvasH, screenToWorldPt, startAnimation]
   );
 
   // ── Global keyboard listener for spacebar pan ──────────────────────────
@@ -368,6 +370,14 @@ export function useCanvasControls(canvasW: number, canvasH: number) {
       if (!svg || !container) return;
 
       const containerRect = container.getBoundingClientRect();
+      if (
+        containerRect.width <= padding * 2 ||
+        containerRect.height <= padding * 2 ||
+        svg.viewBox.baseVal.width <= 0 ||
+        svg.viewBox.baseVal.height <= 0 ||
+        w <= 0 ||
+        h <= 0
+      ) return;
       const pxPerUnit = containerRect.width / svg.viewBox.baseVal.width;
       const fitZoomX = ((containerRect.width - padding * 2) / w) / pxPerUnit;
       const fitZoomY = ((containerRect.height - padding * 2) / h) / pxPerUnit;

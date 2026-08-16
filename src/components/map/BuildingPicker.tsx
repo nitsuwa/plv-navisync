@@ -173,7 +173,7 @@ export function BuildingPicker({
             <div className="flex flex-col items-center py-6 px-4 text-center">
               <Building2 className="h-6 w-6 text-muted-foreground/30 mb-1.5" />
               <p className="text-xs font-semibold text-muted-foreground">No buildings found</p>
-              <p className="text-[10px] text-muted-foreground/60 mt-0.5">
+              <p className="text-[10px] text-muted-foreground/85 mt-0.5">
                 Try a different search term.
               </p>
             </div>

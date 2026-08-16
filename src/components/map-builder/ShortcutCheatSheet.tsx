@@ -10,6 +10,7 @@ import { cn } from "../../lib/utils";
 interface ShortcutCheatSheetProps {
   open: boolean;
   onClose: () => void;
+  variant?: "campus" | "floor";
 }
 
 interface ShortcutGroup {
@@ -25,11 +26,10 @@ const GROUPS: ShortcutGroup[] = [
     shortcuts: [
       { keys: "V", desc: "Select tool" },
       { keys: "B", desc: "Building tool (Campus layer)" },
-      { keys: "M", desc: "Marker tool (Campus layer)" },
-      { keys: "P", desc: "Path / Route tool" },
-      { keys: "E", desc: "Erase tool" },
-      { keys: "R", desc: "Room tool (Floor Editor)" },
-      { keys: "W", desc: "Waypoint tool (Navigation layer)" },
+      { keys: "M", desc: "Add Waypoint (Navigation) / Add Event (Events)" },
+      { keys: "P", desc: "Connect Path (Navigation)" },
+      { keys: "E", desc: "Erase / Remove tool" },
+      { keys: "R", desc: "Room / elevator marker tool" },
     ],
   },
   {
@@ -38,19 +38,18 @@ const GROUPS: ShortcutGroup[] = [
     shortcuts: [
       { keys: "1", desc: "Campus layer" },
       { keys: "2", desc: "Navigation layer" },
-      { keys: "3", desc: "Accessibility layer" },
-      { keys: "4", desc: "Emergency layer" },
-      { keys: "5", desc: "Events layer" },
+      { keys: "3", desc: "Events layer" },
+      { keys: "0", desc: "Reset view" },
     ],
   },
   {
     label: "Navigation",
     icon: ArrowUp,
     shortcuts: [
-      { keys: "Ctrl + Scroll", desc: "Zoom in / out" },
+      { keys: "Ctrl + Scroll", desc: "Zoom in / out (toward cursor)" },
       { keys: "0", desc: "Reset view" },
-      { keys: "Arrows", desc: "Nudge selected item 1px" },
-      { keys: "Shift + Arrows", desc: "Nudge selected item 10px" },
+      { keys: "Arrows", desc: "Nudge selected building / marker 1px" },
+      { keys: "Shift + Arrows", desc: "Nudge selected building / marker 10px" },
     ],
   },
   {
@@ -69,16 +68,70 @@ const GROUPS: ShortcutGroup[] = [
     icon: Square,
     shortcuts: [
       { keys: "Delete / Bksp", desc: "Delete selected" },
+      { keys: "Ctrl + C", desc: "Copy selected" },
+      { keys: "Ctrl + V", desc: "Paste copied with new IDs" },
       { keys: "Ctrl + Z", desc: "Undo" },
       { keys: "Ctrl + Y", desc: "Redo" },
       { keys: "Ctrl + S", desc: "Save draft" },
       { keys: "Ctrl + G", desc: "Toggle snap to grid" },
-      { keys: "Ctrl + D", desc: "Duplicate selected (future)" },
+      { keys: "Ctrl + D", desc: "Duplicate selected building" },
     ],
   },
 ];
 
-export function ShortcutCheatSheet({ open, onClose }: ShortcutCheatSheetProps) {
+const FLOOR_GROUPS: ShortcutGroup[] = [
+  {
+    label: "Tools",
+    icon: MousePointer2,
+    shortcuts: [
+      { keys: "V", desc: "Select tool" },
+      { keys: "Space", desc: "Hold for pan" },
+      { keys: "W", desc: "Wall tool" },
+      { keys: "Shift + Click", desc: "Finish wall and keep drawing" },
+      { keys: "R", desc: "Room tool" },
+      { keys: "D", desc: "Door tool" },
+      { keys: "I", desc: "Window tool" },
+      { keys: "F", desc: "Furniture tool" },
+    ],
+  },
+  {
+    label: "Navigation",
+    icon: ArrowUp,
+    shortcuts: [
+      { keys: "Ctrl + Scroll", desc: "Zoom in / out toward cursor" },
+      { keys: "0", desc: "Fit floor / reset view" },
+      { keys: "Middle Drag", desc: "Pan canvas" },
+    ],
+  },
+  {
+    label: "Selection",
+    icon: Pointer,
+    shortcuts: [
+      { keys: "Click", desc: "Select single item" },
+      { keys: "Shift + Click", desc: "Add / remove from selection" },
+      { keys: "Ctrl + A", desc: "Select all floor objects" },
+      { keys: "Drag", desc: "Marquee select on empty floor" },
+      { keys: "Escape", desc: "Deselect / cancel drawing" },
+    ],
+  },
+  {
+    label: "Editing",
+    icon: Square,
+    shortcuts: [
+      { keys: "Delete / Bksp", desc: "Delete selected" },
+      { keys: "Ctrl + C", desc: "Copy selected floor object(s)" },
+      { keys: "Ctrl + V", desc: "Paste copied with new IDs" },
+      { keys: "Ctrl + Z", desc: "Undo" },
+      { keys: "Ctrl + Y", desc: "Redo" },
+      { keys: "Ctrl + D", desc: "Duplicate selected floor object(s)" },
+      { keys: "Ctrl + S", desc: "Save floor" },
+    ],
+  },
+];
+
+export function ShortcutCheatSheet({ open, onClose, variant = "campus" }: ShortcutCheatSheetProps) {
+  const groups = variant === "floor" ? FLOOR_GROUPS : GROUPS;
+  const title = variant === "floor" ? "Floor Editor Shortcuts" : "Keyboard Shortcuts";
   // Close on Escape
   useEffect(() => {
     if (!open) return;
@@ -117,7 +170,7 @@ export function ShortcutCheatSheet({ open, onClose }: ShortcutCheatSheetProps) {
                 </div>
                 <div>
                   <h2 className="font-extrabold text-foreground text-base" style={{ fontFamily: "var(--font-sans)" }}>
-                    Keyboard Shortcuts
+                    {title}
                   </h2>
                   <p className="text-xs text-muted-foreground" style={{ fontFamily: "var(--font-body)" }}>
                     Press the key or combination shown
@@ -131,7 +184,7 @@ export function ShortcutCheatSheet({ open, onClose }: ShortcutCheatSheetProps) {
 
             {/* Content */}
             <div className="flex-1 overflow-y-auto scrollbar-show-on-hover p-6 space-y-5">
-              {GROUPS.map((group) => (
+              {groups.map((group) => (
                 <div key={group.label}>
                   <div className="flex items-center gap-2 mb-2">
                     <group.icon className="h-3.5 w-3.5 text-muted-foreground" />

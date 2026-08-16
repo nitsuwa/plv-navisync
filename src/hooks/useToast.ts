@@ -44,6 +44,14 @@ export function useToast() {
           className: "font-semibold",
         });
         break;
+      case "info":
+        toast.info(message, {
+          description,
+          duration,
+          action: action ? { label: action.label, onClick: action.onClick } : undefined,
+          className: "font-semibold",
+        });
+        break;
       case "loading":
         toast.loading(message, {
           description,

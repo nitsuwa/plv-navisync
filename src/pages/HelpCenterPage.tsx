@@ -929,6 +929,7 @@ function FaqSearch({ value, onChange }: { value: string; onChange: (v: string) =
       {value && (
         <button
           onClick={() => onChange("")}
+          aria-label="Clear search"
           className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 rounded-full bg-muted-foreground/20 flex items-center justify-center hover:bg-muted-foreground/30 transition-colors"
         >
           <X className="h-3 w-3 text-muted-foreground" />

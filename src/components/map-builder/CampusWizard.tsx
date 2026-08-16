@@ -1,20 +1,14 @@
-import { useState, useRef, useCallback, useEffect, useId, lazy, Suspense, type ChangeEvent } from "react";
+import { useState, useRef, useCallback, useEffect, useId, type ChangeEvent } from "react";
 import { createPortal } from "react-dom";
 import { X, MapPin, Eye, EyeOff, CheckCircle2, ChevronRight, ChevronLeft, Palette, Image, Building2, Shield, Pencil, Loader2, AlertCircle, TriangleAlert, ChevronDown, Save, AlertTriangle } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { genId, THEME_COLORS } from "./constants";
 import { MapPicker } from "../ui/MapPicker";
 import { PLVLogo } from "../ui/PLVLogo";
-
-const ColorPickerImpl = lazy(() => import("../ui/ColorPicker"));
-function ColorPicker(props: { value: string; onChange: (c: string) => void }) {
-  return (
-    <Suspense fallback={<div className="h-10 rounded-xl border border-border bg-muted/30 animate-pulse" />}>
-      <ColorPickerImpl {...props} />
-    </Suspense>
-  );
-}
+import { ColorPicker } from "../ui/ColorPicker";
 import type { Campus } from "./types";
+
+const shouldLogWizardDiagnostics = import.meta.env.DEV && import.meta.env.MODE !== "test";
 
 // ── Tooltip that renders via portal to escape overflow / transform containers ──
 
@@ -206,8 +200,15 @@ const VALIDATIONS: Record<number, (values: Record<string, string>) => FieldError
   1: (v) => {
     const errs: FieldError[] = [];
     if (!v.name?.trim()) errs.push({ field: "name", message: "Campus name is required" });
-    if (v.code?.trim() && !/^[A-Z0-9 _-]+$/.test(v.code.trim())) {
-      errs.push({ field: "code", message: "Only letters, numbers, spaces, hyphens, and underscores allowed" });
+    // Mirror the campuses.code DB contract (`^[A-Z0-9][A-Z0-9_-]{0,29}$`):
+    // required, 1-30 chars, no spaces. The old regex allowed spaces and
+    // treated code as optional, which let invalid codes reach the INSERT and
+    // fail `campuses_code_format_check` ("Could not save campus").
+    const code = v.code?.trim().toUpperCase() ?? "";
+    if (!code) {
+      errs.push({ field: "code", message: "Campus code is required" });
+    } else if (!/^[A-Z0-9][A-Z0-9_-]{0,29}$/.test(code)) {
+      errs.push({ field: "code", message: "Use 1–30 letters, numbers, hyphens, or underscores (no spaces)" });
     }
     return errs;
   },
@@ -236,7 +237,7 @@ interface CampusWizardProps {
   step: 1 | 2 | 3 | 4;
   onNext: (data: Partial<Campus>) => void;
   onBack: () => void;
-  onFinish: (campus: Campus) => void;
+  onFinish: (campus: Campus) => boolean | Promise<boolean>;
   onClose: () => void;
   onJumpToStep?: (step: 1 | 2 | 3 | 4) => void;
   publishingEnabled?: boolean;
@@ -320,10 +321,28 @@ function SaveConfirmDialog({ open, campusName, onConfirm, onCancel }: {
           </div>
         </div>
         <div className="flex gap-2 px-5 pb-5">
-          <button onClick={onCancel} className="flex-1 h-10 rounded-xl border border-border text-xs font-bold text-muted-foreground hover:bg-muted transition-colors">
+          <button
+            type="button"
+            onPointerDown={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onCancel();
+            }}
+            onClick={onCancel}
+            className="flex-1 h-10 rounded-xl border border-border text-xs font-bold text-muted-foreground hover:bg-muted transition-colors"
+          >
             Cancel
           </button>
-          <button onClick={onConfirm} className="flex-1 h-10 rounded-xl bg-primary text-primary-foreground text-xs font-extrabold hover:bg-primary/90 shadow-sm transition-all">
+          <button
+            type="button"
+            onPointerDown={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onConfirm();
+            }}
+            onClick={onConfirm}
+            className="flex-1 h-10 rounded-xl bg-primary text-primary-foreground text-xs font-extrabold hover:bg-primary/90 shadow-sm transition-all"
+          >
             Yes, Save Changes
           </button>
         </div>
@@ -366,28 +385,37 @@ export function CampusWizard({ draft, step, onNext, onBack, onFinish, onClose, o
   // ── Edit mode detection ────────────────────────────────────────────────────
   const isEditing = !!draft.id;
 
+  // The wizard draft is MERGED with step values on every navigation step
+  // (nextWizardStep spreads the previous draft), so comparing against the live
+  // `draft` prop would erase dirty state the moment the user advances a step.
+  // Capture the original baseline once so `hasChanges` (and the Save enabled
+  // state / unsaved-changes dialog) stay truthful for the whole session.
+  const initialDraftRef = useRef(draft);
+
   // ── Confirmation & saving state ────────────────────────────────────────────
   const [showConfirm, setShowConfirm] = useState(false);
   const [showSaving, setShowSaving] = useState(false);
   const [showUnsaved, setShowUnsaved] = useState(false);
+  const saveInFlightRef = useRef(false);
 
-  // ── Track if user has made any changes from the initial draft ────────────
-  const draftLat = draft.coordinates?.lat?.toString() ?? "";
-  const draftLng = draft.coordinates?.lng?.toString() ?? "";
-  const hasChanges = name !== (draft.name ?? "") || code !== (draft.code ?? "") || desc !== (draft.description ?? "") ||
-    address !== (draft.address ?? "") || city !== (draft.city ?? "") || province !== (draft.province ?? "") ||
-    postalCode !== (draft.postalCode ?? "") || latStr !== draftLat || lngStr !== draftLng ||
-    thumbnail !== (draft.thumbnail ?? null) || logo !== (draft.logo ?? null) ||
-    themeColor !== (draft.themeColor ?? "#1e3a5f") ||
-    publishStatus !== (draft.publishStatus ?? "draft") || visibleToStudents !== (draft.visibleToStudents ?? false);
+  // ── Track if user has made any changes from the original draft ───────────
+  const base = initialDraftRef.current;
+  const draftLat = base.coordinates?.lat?.toString() ?? "";
+  const draftLng = base.coordinates?.lng?.toString() ?? "";
+  const hasChanges = name !== (base.name ?? "") || code !== (base.code ?? "") || desc !== (base.description ?? "") ||
+    address !== (base.address ?? "") || city !== (base.city ?? "") || province !== (base.province ?? "") ||
+    postalCode !== (base.postalCode ?? "") || latStr !== draftLat || lngStr !== draftLng ||
+    thumbnail !== (base.thumbnail ?? null) || logo !== (base.logo ?? null) ||
+    themeColor !== (base.themeColor ?? "#1e3a5f") ||
+    publishStatus !== (base.publishStatus ?? "draft") || visibleToStudents !== (base.visibleToStudents ?? false);
 
   const handleClose = useCallback(() => {
-    if (isEditing && hasChanges) {
+    if (hasChanges) {
       setShowUnsaved(true);
     } else {
       onClose();
     }
-  }, [isEditing, hasChanges, onClose]);
+  }, [hasChanges, onClose]);
 
   // ── Validation state ──────────────────────────────────────────────────────
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -536,6 +564,7 @@ export function CampusWizard({ draft, step, onNext, onBack, onFinish, onClose, o
   };
 
   const handleFinish = () => {
+    if (showSaving || saveInFlightRef.current) return;
     setShowConfirm(true);
   };
 
@@ -544,7 +573,9 @@ export function CampusWizard({ draft, step, onNext, onBack, onFinish, onClose, o
     onClose();
   };
 
-  const handleConfirmSave = () => {
+  const handleConfirmSave = async () => {
+    if (saveInFlightRef.current) return;
+    saveInFlightRef.current = true;
     setShowConfirm(false);
     setShowSaving(true);
     const now = new Date().toISOString().slice(0, 10);
@@ -575,15 +606,27 @@ export function CampusWizard({ draft, step, onNext, onBack, onFinish, onClose, o
       updatedAt: now,
       createdBy: draft.createdBy ?? "Admin",
     };
-    // Show loading overlay for a short duration, then finish
-    setTimeout(() => {
-      onFinish(newCampus);
+
+    const mode = isEditing ? "edit" : "create";
+    if (shouldLogWizardDiagnostics) {
+      console.debug("[CampusWizard] confirmed save", { mode, id: newCampus.id, code: newCampus.code });
+    }
+
+    try {
+      const saved = await onFinish(newCampus);
+      if (shouldLogWizardDiagnostics) {
+        console.debug("[CampusWizard] save finished", { mode, saved });
+      }
+    } finally {
+      // On success the parent changes view and unmounts the wizard. On failure it
+      // returns false and leaves the wizard open with field values intact.
+      saveInFlightRef.current = false;
       setShowSaving(false);
-    }, 1800);
+    }
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm p-4">
+    <div className="fixed inset-0 z-[120] flex items-center justify-center bg-background/80 backdrop-blur-sm p-4">
       <div
         className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden animate-scale-in flex flex-col"
         style={{ maxHeight: "92vh" }}
@@ -604,7 +647,14 @@ export function CampusWizard({ draft, step, onNext, onBack, onFinish, onClose, o
             </div>
           </div>
           <button
+            type="button"
+            onPointerDown={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              handleClose();
+            }}
             onClick={handleClose}
+            aria-label="Close"
             className="w-8 h-8 rounded-xl bg-muted flex items-center justify-center hover:bg-secondary transition-colors text-muted-foreground"
           >
             <X className="h-4 w-4" />
@@ -692,6 +742,7 @@ export function CampusWizard({ draft, step, onNext, onBack, onFinish, onClose, o
                     <input
                       id={`${uid}-name`}
                       value={name}
+                      maxLength={120}
                       onChange={(e) => { setName(e.target.value); markEdited("name"); }}
                       onBlur={() => handleBlur("name")}
                       placeholder="e.g. PLV Main Campus"
@@ -712,11 +763,12 @@ export function CampusWizard({ draft, step, onNext, onBack, onFinish, onClose, o
                   )}
                 </div>
                 <div>
-                  <FieldLabel label="Campus Code" htmlFor={`${uid}-code`} tooltip="A short identifier shown on building labels. Example: MAIN, ANNEX, ENG." />
+                  <FieldLabel label="Campus Code" required htmlFor={`${uid}-code`} tooltip="A short identifier shown on building labels. Example: MAIN, ANNEX, ENG. Use 1–30 letters, numbers, hyphens, or underscores (no spaces)." />
                   <div className="relative">
                     <input
                       id={`${uid}-code`}
                       value={code}
+                      maxLength={30}
                       onChange={(e) => { setCode(e.target.value.toUpperCase()); markEdited("code"); }}
                       onBlur={() => handleBlur("code")}
                       placeholder="e.g. MAIN"
@@ -740,6 +792,7 @@ export function CampusWizard({ draft, step, onNext, onBack, onFinish, onClose, o
                 <FieldLabel label="Description" htmlFor={`${uid}-desc`} tooltip="Describe the campus — its location, facilities, and what makes it unique." />
                 <textarea id={`${uid}-desc`}
                   value={desc}
+                  maxLength={2000}
                   onChange={(e) => setDesc(e.target.value)}
                   rows={3}
                   placeholder="Describe the campus, its history, and notable features... (optional)"
@@ -828,6 +881,7 @@ export function CampusWizard({ draft, step, onNext, onBack, onFinish, onClose, o
                             <input
                               id={`${uid}-address`}
                               value={address}
+                              maxLength={300}
                               onChange={(e) => { setAddress(e.target.value); markEdited("address"); }}
                               onBlur={() => handleBlur("address")}
                               placeholder="Street, Building, Barangay"
@@ -852,6 +906,7 @@ export function CampusWizard({ draft, step, onNext, onBack, onFinish, onClose, o
                             <input
                               id={`${uid}-city`}
                               value={city}
+                              maxLength={120}
                               onChange={(e) => { setCity(e.target.value); markEdited("city"); }}
                               onBlur={() => handleBlur("city")}
                               placeholder="e.g. Valenzuela"
@@ -876,6 +931,7 @@ export function CampusWizard({ draft, step, onNext, onBack, onFinish, onClose, o
                             <input
                               id={`${uid}-province`}
                               value={province}
+                              maxLength={120}
                               onChange={(e) => { setProvince(e.target.value); markEdited("province"); }}
                               onBlur={() => handleBlur("province")}
                               placeholder="e.g. Metro Manila"
@@ -1232,7 +1288,14 @@ export function CampusWizard({ draft, step, onNext, onBack, onFinish, onClose, o
         <div className="flex items-center gap-3 px-6 pb-5 pt-4 border-t border-border shrink-0">
           <button
             type="button"
-            onClick={onBack}
+            onPointerDown={(e) => {
+              if (step !== 1) return;
+              e.preventDefault();
+              e.stopPropagation();
+              handleClose();
+            }}
+            onClick={step === 1 ? handleClose : onBack}
+            disabled={showSaving}
             className="flex items-center gap-1.5 h-11 px-5 rounded-xl border border-border text-sm font-bold text-muted-foreground hover:bg-muted transition-colors"
           >
             {step > 1 && <ChevronLeft className="h-4 w-4" />}
@@ -1243,6 +1306,7 @@ export function CampusWizard({ draft, step, onNext, onBack, onFinish, onClose, o
             <button
               type="button"
               onClick={() => {
+                if (showSaving) return;
                 if (!attemptProceed(step)) return;
                 // Mark this step as completed so checkmark shows
                 setCompletedSteps(prev => new Set(prev).add(step));
@@ -1260,8 +1324,14 @@ export function CampusWizard({ draft, step, onNext, onBack, onFinish, onClose, o
           ) : (
             <button
               type="button"
+              onPointerDown={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                handleFinish();
+              }}
               onClick={handleFinish}
-              disabled={showSaving}
+              disabled={showSaving || (isEditing && !hasChanges)}
+              title={isEditing && !hasChanges ? "No changes to save" : undefined}
               className="flex-1 h-11 rounded-xl bg-primary text-primary-foreground text-sm font-extrabold hover:bg-primary/90 transition-colors disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2"
             >
               {showSaving ? (
@@ -1302,10 +1372,28 @@ export function CampusWizard({ draft, step, onNext, onBack, onFinish, onClose, o
                   </div>
                 </div>
                 <div className="flex gap-2 px-5 pb-5">
-                  <button onClick={() => setShowUnsaved(false)} className="flex-1 h-10 rounded-xl border border-border text-xs font-bold text-muted-foreground hover:bg-muted transition-colors">
+                  <button
+                    type="button"
+                    onPointerDown={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setShowUnsaved(false);
+                    }}
+                    onClick={() => setShowUnsaved(false)}
+                    className="flex-1 h-10 rounded-xl border border-border text-xs font-bold text-muted-foreground hover:bg-muted transition-colors"
+                  >
                     Keep Editing
                   </button>
-                  <button onClick={handleDiscardClose} className="flex-1 h-10 rounded-xl bg-destructive text-destructive-foreground text-xs font-extrabold hover:bg-destructive/90 shadow-sm transition-all">
+                  <button
+                    type="button"
+                    onPointerDown={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      handleDiscardClose();
+                    }}
+                    onClick={handleDiscardClose}
+                    className="flex-1 h-10 rounded-xl bg-destructive text-destructive-foreground text-xs font-extrabold hover:bg-destructive/90 shadow-sm transition-all"
+                  >
                     Discard
                   </button>
                 </div>

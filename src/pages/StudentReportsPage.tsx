@@ -364,7 +364,7 @@ export function StudentReportsPage() {
                                       }
                                     </div>
                                     <span
-                                      className="text-[9px] font-bold mt-1.5 text-center whitespace-nowrap"
+                                      className="text-[10px] font-bold mt-1.5 text-center whitespace-nowrap"
                                       style={{ color: current ? "var(--primary)" : active ? "var(--foreground)" : "var(--muted-foreground)" }}
                                     >
                                       {s}

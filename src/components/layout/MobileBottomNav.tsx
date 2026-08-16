@@ -83,7 +83,7 @@ export function MobileBottomNav() {
                   </motion.div>
                   <motion.span
                     className={cn(
-                      "text-[9px] font-bold leading-none tracking-tight",
+                      "text-[10px] font-bold leading-none tracking-tight",
                       active ? "text-primary" : "text-muted-foreground/70"
                     )}
                     animate={{

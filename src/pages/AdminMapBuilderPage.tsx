@@ -1,8 +1,9 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { toast } from "sonner";
+import { useUnsavedChangesContext } from "../components/map-builder/UnsavedChangesContext";
 import { createCampusClone } from "../lib/campusHelpers";
-import { campusService, CampusConflictError, type CampusCreateInput, type CampusUpdateInput } from "../services/campusService";
+import { campusService, CampusConflictError, userFacingCampusMessage, type CampusCreateInput, type CampusUpdateInput } from "../services/campusService";
 import { campusStructureService } from "../services/campusStructureService";
 import {
   CampusHome,
@@ -16,7 +17,9 @@ import {
   genId,
   BUILDING_COLORS,
 } from "../components/map-builder";
-import type { Campus, View, BuildingWizardData } from "../components/map-builder/types";
+import type { Campus, View, BuildingWizardData, FloorSelection } from "../components/map-builder/types";
+
+const shouldLogCampusDiagnostics = import.meta.env.DEV && import.meta.env.MODE !== "test";
 
 // ── Directional slide variants ──────────────────────────────────────────────
 const slideVariants = {
@@ -53,6 +56,40 @@ function campusInput(campus: Campus): CampusCreateInput {
   };
 }
 
+function campusFloorCount(campus: Campus): number {
+  return (campus.buildings ?? []).reduce((sum, building) => sum + (building.floors?.length ?? 0), 0);
+}
+
+function campusRoomCount(campus: Campus): number {
+  return (campus.buildings ?? []).reduce(
+    (sum, building) => sum + (building.floors ?? []).reduce((floorSum, floor) => floorSum + (floor.rooms?.length ?? 0), 0),
+    0
+  );
+}
+
+function preserveStructureIfMissing(next: Campus, previous?: Campus): Campus {
+  if (!previous || (next.buildings?.length ?? 0) > 0 || next.previewBuildingCount !== undefined) return next;
+  const hasPreviousPreview = previous.previewBuildingCount !== undefined || (previous.buildings?.length ?? 0) > 0;
+  if (!hasPreviousPreview) return next;
+  return {
+    ...next,
+    buildings: previous.buildings,
+    previewBuildingCount: previous.previewBuildingCount,
+    previewFloorCount: previous.previewFloorCount,
+    previewRoomCount: previous.previewRoomCount,
+    previewBuildingsLoaded: previous.previewBuildingsLoaded,
+    markers: previous.markers,
+    paths: previous.paths,
+    routes: previous.routes,
+    accessibilityFeatures: previous.accessibilityFeatures,
+    assemblyPoints: previous.assemblyPoints,
+    eventOverlays: previous.eventOverlays,
+    decorAssets: previous.decorAssets,
+    navNodes: previous.navNodes,
+    navEdges: previous.navEdges,
+  };
+}
+
 async function dataUrlToBlob(value?: string): Promise<Blob | null> {
   if (!value?.startsWith("data:")) return null;
   return (await fetch(value)).blob();
@@ -67,10 +104,19 @@ export function AdminMapBuilderPage() {
   const [showBuildingWizard, setShowBuildingWizard] = useState(false);
   const directionRef = useRef(1);
 
+  // ── Single dirty-state source of truth ──
+  // JSON snapshot of the last PERSISTED campus per campus id. The outdoor
+  // CampusEditor derives `isDirty` by comparing its current campus against this
+  // baseline (via the `savedSnapshot` prop). Because the CampusEditor unmounts
+  // while the Floor Editor is open, the baseline must live here at the page
+  // level so Floor Editor mutations (which update the same campus draft through
+  // onUpdate) still enable the outer Save when the user returns.
+  const savedSnapshotsRef = useRef<Record<string, string>>({});
+
   useEffect(() => {
     let active = true;
     campusService.list().then((rows) => { if (active) setCampuses(rows); }).catch((error: Error) => {
-      toast.error("Could not load campuses", error.message);
+      toast.error("Could not load campuses", { description: error.message });
     });
     return () => { active = false; };
   }, []);
@@ -86,6 +132,19 @@ export function AdminMapBuilderPage() {
     setCampuses((p) => p.map((c) => (c.id === updated.id ? updated : c))),
   []);
 
+  const updateCampusMetadata = useCallback((updated: Campus) => {
+    setCampuses((p) => p.map((c) => (c.id === updated.id ? preserveStructureIfMissing(updated, c) : c)));
+    // Metadata persistence (details, canvas settings, archive/restore) is a
+    // completed write — the stored campus becomes the new dirty baseline.
+    // Compute from the closure (not inside the state updater) so the updater
+    // stays pure; all callers pass a campus already present in `campuses`.
+    const previous = campuses.find((c) => c.id === updated.id);
+    if (previous) {
+      const stored = preserveStructureIfMissing(updated, previous);
+      savedSnapshotsRef.current = { ...savedSnapshotsRef.current, [stored.id]: JSON.stringify(stored) };
+    }
+  }, [campuses]);
+
   const duplicateCampus = useCallback(async (id: string) => {
     const source = campuses.find((c) => c.id === id);
     if (!source) return;
@@ -98,8 +157,8 @@ export function AdminMapBuilderPage() {
     try {
       const created = await campusService.create({ ...campusInput(clone), logo_path: null, overview_image_path: null, is_default: false });
       setCampuses((p) => [...p, created]);
-      toast.success("Campus Duplicated", `"${source.name}" has been copied as "${created.name}".`);
-    } catch (error) { toast.error("Could not duplicate campus", (error as Error).message); }
+      toast.success("Campus Duplicated", { description: `"${source.name}" has been copied as "${created.name}".` });
+    } catch (error) { toast.error("Could not duplicate campus", { description: userFacingCampusMessage(error) }); }
   }, [campuses]);
 
   const archiveCampus = useCallback(async (id: string) => {
@@ -107,20 +166,20 @@ export function AdminMapBuilderPage() {
     if (!campus?.databaseUpdatedAt) return;
     try {
       const updated = await campusService.archive(id, campus.databaseUpdatedAt);
-      updateCampus(updated);
-      toast.success("Campus Archived", `"${campus.name}" is private until restored.`);
-    } catch (error) { toast.error("Could not archive campus", (error as Error).message); }
-  }, [campuses, updateCampus]);
+      updateCampusMetadata(updated);
+      toast.success("Campus Archived", { description: `"${campus.name}" is private until restored.` });
+    } catch (error) { toast.error("Could not archive campus", { description: userFacingCampusMessage(error) }); }
+  }, [campuses, updateCampusMetadata]);
 
   const restoreCampus = useCallback(async (id: string) => {
     const campus = campuses.find((c) => c.id === id);
     if (!campus?.databaseUpdatedAt) return;
     try {
       const updated = await campusService.restore(id, campus.databaseUpdatedAt);
-      updateCampus(updated);
-      toast.success("Campus Restored", `"${campus.name}" was restored as a private draft.`);
-    } catch (error) { toast.error("Could not restore campus", (error as Error).message); }
-  }, [campuses, updateCampus]);
+      updateCampusMetadata(updated);
+      toast.success("Campus Restored", { description: `"${campus.name}" was restored as a private draft.` });
+    } catch (error) { toast.error("Could not restore campus", { description: userFacingCampusMessage(error) }); }
+  }, [campuses, updateCampusMetadata]);
 
   const editDetails = useCallback((id: string) => {
     const campus = campuses.find((c) => c.id === id);
@@ -138,10 +197,10 @@ export function AdminMapBuilderPage() {
 
   // ── Navigation ────────────────────────────────────────────────────────────
 
-  const handleOpenFloor = useCallback((buildingId: string, floorId: string) => {
+  const handleOpenFloor = useCallback((buildingId: string, floorId: string, initialSelection?: FloorSelection) => {
     if (!activeCampus) return;
     directionRef.current = 1;
-    setView({ type: "floor", campusId: activeCampus.id, buildingId, floorId });
+    setView({ type: "floor", campusId: activeCampus.id, buildingId, floorId, initialSelection });
   }, [activeCampus]);
 
   const goHome = useCallback(() => {
@@ -158,9 +217,17 @@ export function AdminMapBuilderPage() {
     } else {
       try {
         const hydrated = await campusStructureService.load(campus!);
-        updateCampus(hydrated);
+        const hydratedWithPreview = {
+          ...hydrated,
+          previewBuildingCount: campus?.previewBuildingCount ?? hydrated.previewBuildingCount ?? hydrated.buildings.length,
+          previewFloorCount: campusFloorCount(hydrated),
+          previewRoomCount: campusRoomCount(hydrated),
+        };
+        updateCampus(hydratedWithPreview);
+        // Hydration is a read of the persisted state — it becomes the baseline.
+        savedSnapshotsRef.current = { ...savedSnapshotsRef.current, [campusId]: JSON.stringify(hydratedWithPreview) };
       } catch (error) {
-        toast.error("Could not load map", (error as Error).message);
+        toast.error("Could not load map", { description: (error as Error).message });
         return;
       }
       setView({ type: "campus", campusId });
@@ -169,9 +236,61 @@ export function AdminMapBuilderPage() {
 
   const saveCampusStructure = useCallback(async (campus: Campus) => {
     const saved = await campusStructureService.save(campus);
-    updateCampus(saved);
-    return saved;
+    const savedWithPreviewCount = {
+      ...saved,
+      previewBuildingCount: saved.buildings.length,
+      previewFloorCount: campusFloorCount(saved),
+      previewRoomCount: campusRoomCount(saved),
+      previewBuildingsLoaded: true,
+    };
+    updateCampus(savedWithPreviewCount);
+    // A successful save is the canonical baseline for the outer dirty check.
+    savedSnapshotsRef.current = { ...savedSnapshotsRef.current, [saved.id]: JSON.stringify(savedWithPreviewCount) };
+    return savedWithPreviewCount;
   }, [updateCampus]);
+
+  // ── Page-level unsaved-changes handler for the shared guard ──────────────
+  // The editors guard their OWN internal exits (back, floor switch, add floor);
+  // this registration arms the SAME shared modal for anything that would
+  // UNMOUNT the page and discard the draft: sidebar sections, sign out, and
+  // browser back. Dirty = the active campus draft differs from its persisted
+  // snapshot (the same baseline the editors receive via `savedSnapshot`).
+  const { registerHandler } = useUnsavedChangesContext();
+  const activeCampusRef = useRef(activeCampus);
+  activeCampusRef.current = activeCampus;
+  const activeCampusIsDirty =
+    activeCampus !== null && JSON.stringify(activeCampus) !== savedSnapshotsRef.current[activeCampus.id];
+  useEffect(() => {
+    if (!activeCampus || !activeCampusIsDirty) {
+      registerHandler(null);
+      return () => registerHandler(null);
+    }
+    const campusId = activeCampus.id;
+    registerHandler({
+      isDirty: () => true,
+      onSave: async () => {
+        const current = activeCampusRef.current;
+        if (!current) return true;
+        try {
+          await saveCampusStructure(current);
+          return true;
+        } catch {
+          return false;
+        }
+      },
+      onDiscard: () => {
+        const snapshot = savedSnapshotsRef.current[campusId];
+        if (snapshot) {
+          try {
+            updateCampus(JSON.parse(snapshot) as Campus);
+          } catch {
+            // Baseline unavailable — keep the current draft untouched.
+          }
+        }
+      },
+    });
+    return () => registerHandler(null);
+  }, [activeCampus, activeCampusIsDirty, registerHandler, saveCampusStructure, updateCampus]);
 
   const goToCampusFromFloor = useCallback((campusId: string) => {
     directionRef.current = -1;
@@ -209,6 +328,13 @@ export function AdminMapBuilderPage() {
 
   const finishWizard = useCallback(async (campus: Campus, existingId?: string) => {
     try {
+      if (shouldLogCampusDiagnostics) {
+        console.debug("[AdminMapBuilderPage] finishWizard start", {
+          mode: existingId ? "edit" : "create",
+          id: existingId ?? campus.id,
+          code: campus.code,
+        });
+      }
       const requestedLogo = await dataUrlToBlob(campus.logo);
       const requestedOverview = await dataUrlToBlob(campus.thumbnail);
       if (requestedLogo) campusService.validateImage(requestedLogo);
@@ -218,6 +344,7 @@ export function AdminMapBuilderPage() {
         const existing = campuses.find((item) => item.id === existingId);
         if (!existing?.databaseUpdatedAt) throw new Error("Refresh before editing this campus.");
         const input = campusInput({ ...existing, ...campus }) as CampusUpdateInput;
+        if (shouldLogCampusDiagnostics) console.debug("[AdminMapBuilderPage] campusService.update start", { id: existingId });
         let updated = await campusService.update(existingId, input, existing.databaseUpdatedAt);
         if (requestedLogo || requestedOverview) {
           const [logoPath, overviewPath] = await Promise.all([
@@ -226,12 +353,20 @@ export function AdminMapBuilderPage() {
           ]);
           updated = await campusService.update(existingId, { logo_path: logoPath ?? null, overview_image_path: overviewPath ?? null }, updated.databaseUpdatedAt!);
         }
-        updateCampus(updated);
-        toast.success("Campus Details Updated", `"${updated.name}" has been saved.`);
+        updateCampusMetadata(updated);
+        toast.success("Campus Details Updated", { description: `"${updated.name}" has been saved.` });
         goHome();
-        return;
+        return true;
       }
 
+      // Fail fast on a duplicate campus code instead of surfacing a cryptic
+      // PostgREST unique-violation toast. The DB `code` column is unique, so
+      // the server remains the backstop; this just gives a clear message first.
+      const normalizedCode = campus.code.trim().toUpperCase();
+      if (campuses.some((c) => c.code?.toUpperCase() === normalizedCode)) {
+        throw new Error(`A campus with code "${normalizedCode}" already exists. Choose a different code.`);
+      }
+      if (shouldLogCampusDiagnostics) console.debug("[AdminMapBuilderPage] campusService.create start", { code: normalizedCode });
       let created = await campusService.create({ ...campusInput(campus), logo_path: null, overview_image_path: null });
       if (requestedLogo || requestedOverview) {
         const [logoPath, overviewPath] = await Promise.all([
@@ -241,12 +376,17 @@ export function AdminMapBuilderPage() {
         created = await campusService.update(created.id, { logo_path: logoPath ?? null, overview_image_path: overviewPath ?? null }, created.databaseUpdatedAt!);
       }
       setCampuses((items) => [...items, created]);
-      toast.success("Campus Created", `"${created.name}" was saved as a private draft.`);
+      toast.success("Campus Created", { description: `"${created.name}" was saved as a private draft.` });
       goToSuccess(created.id);
+      return true;
     } catch (error) {
-      toast.error(error instanceof CampusConflictError ? "Campus changed elsewhere" : "Could not save campus", (error as Error).message);
+      toast.error(error instanceof CampusConflictError ? "Campus changed elsewhere" : "Could not save campus", { description: userFacingCampusMessage(error) });
+      if (shouldLogCampusDiagnostics) {
+        console.error("[AdminMapBuilderPage] finishWizard failed", error);
+      }
+      return false;
     }
-  }, [campuses, goHome, goToSuccess, updateCampus]);
+  }, [campuses, goHome, goToSuccess, updateCampusMetadata]);
 
   // ── View key for AnimatePresence ──────────────────────────────────────────
 
@@ -272,10 +412,10 @@ export function AdminMapBuilderPage() {
       const updated = await campusService.update(canvasSetupCampus.id, {
         canvas_width: updates.canvasW, canvas_height: updates.canvasH, canvas_configured: true,
       }, canvasSetupCampus.databaseUpdatedAt!);
-      updateCampus({ ...updated, canvasConfigured: true });
+      updateCampusMetadata({ ...updated, canvasConfigured: true });
       setView({ type: "campus", campusId: canvasSetupCampus.id });
-    } catch (error) { toast.error("Could not save canvas", (error as Error).message); }
-  }, [canvasSetupCampus, updateCampus]);
+    } catch (error) { toast.error("Could not save canvas", { description: (error as Error).message }); }
+  }, [canvasSetupCampus, updateCampusMetadata]);
 
   const [showCanvasSettings, setShowCanvasSettings] = useState(false);
 
@@ -285,9 +425,9 @@ export function AdminMapBuilderPage() {
       const updated = await campusService.update(activeCampus.id, {
         canvas_width: updates.canvasW, canvas_height: updates.canvasH, canvas_configured: true,
       }, activeCampus.databaseUpdatedAt!);
-      updateCampus({ ...updated, canvasConfigured: true });
-    } catch (error) { toast.error("Could not update canvas", (error as Error).message); }
-  }, [activeCampus, updateCampus]);
+      updateCampusMetadata({ ...updated, canvasConfigured: true });
+    } catch (error) { toast.error("Could not update canvas", { description: (error as Error).message }); }
+  }, [activeCampus, updateCampusMetadata]);
 
   return (
     <div className="flex flex-col w-full flex-1" style={{ minHeight: 0 }}>
@@ -331,6 +471,7 @@ export function AdminMapBuilderPage() {
                   onAddBuilding={() => setShowBuildingWizard(true)}
                   onOpenCanvasSettings={() => setShowCanvasSettings(true)}
                   lastSavedAt={activeCampus.updatedAt}
+                  savedSnapshot={savedSnapshotsRef.current[activeCampus.id]}
                 />
                 {showBuildingWizard && (
                   <BuildingWizardModal
@@ -362,9 +503,13 @@ export function AdminMapBuilderPage() {
                 buildingId={view.buildingId}
                 floorId={view.floorId}
                 onBack={() => goToCampusFromFloor(activeCampus.id)}
-                onSwitchFloor={(fId) => setView({ ...view, floorId: fId })}
+                onSwitchFloor={(fId) => setView({ ...view, floorId: fId, initialSelection: undefined })}
                 onUpdate={updateCampus}
                 onSave={saveCampusStructure}
+                onPublish={() => toast.info("Publishing is implemented in A6.")}
+                publishingEnabled={false}
+                savedSnapshot={savedSnapshotsRef.current[activeCampus.id]}
+                initialSelection={view.initialSelection}
               />
             )}
 

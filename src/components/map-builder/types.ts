@@ -21,7 +21,7 @@ export type FeatureStatus = "present" | "missing" | "under_maintenance";
 
 // ── Floor Editor Mode ──────────────────────────────────────────────────────
 
-export type FloorEditorMode = "structure" | "interior";
+export type FloorEditorMode = "structure" | "interior" | "navigation";
 
 // ── Indoor Wall ─────────────────────────────────────────────────────────────
 
@@ -36,6 +36,22 @@ export interface FloorWall {
   material?: string;
   color: string;
   layer?: string;
+  startAnchor?: FloorWallEndpointAnchor;
+  endAnchor?: FloorWallEndpointAnchor;
+  managedKind?: "perimeter";
+  perimeterSide?: "top" | "right" | "bottom" | "left";
+  zOrder?: number;
+  visible?: boolean;
+  locked?: boolean;
+}
+
+export type FloorRoomAnchorEdge = "top" | "right" | "bottom" | "left";
+
+export interface FloorWallEndpointAnchor {
+  targetType: "room";
+  roomId: string;
+  edge: FloorRoomAnchorEdge;
+  offset: number;
 }
 
 // ── Indoor Door ─────────────────────────────────────────────────────────────
@@ -45,9 +61,16 @@ export interface FloorDoor {
   x: number;
   y: number;
   width: number;
+  wallId?: string;
+  offset?: number;
+  doorType?: "single" | "double";
+  hinge?: "left" | "right";
+  swingSide?: "a" | "b";
   direction: "left" | "right" | "double" | "sliding";
   color: string;
   locked?: boolean;
+  visible?: boolean;
+  zOrder?: number;
   label?: string;
   /** Whether this door is designated as an emergency exit */
   isEmergencyExit?: boolean;
@@ -61,7 +84,12 @@ export interface FloorWindow {
   y: number;
   width: number;
   height: number;
+  wallId?: string;
+  offset?: number;
   color: string;
+  zOrder?: number;
+  visible?: boolean;
+  locked?: boolean;
 }
 
 // ── Indoor Furniture ────────────────────────────────────────────────────────
@@ -78,6 +106,9 @@ export interface FloorFurniture {
   rotation: number;
   color: string;
   layer?: string;
+  zOrder?: number;
+  visible?: boolean;
+  locked?: boolean;
 }
 
 // ── Indoor Stairs (free placement) ──────────────────────────────────────────
@@ -88,6 +119,8 @@ export interface FloorStairs {
   y: number;
   width: number;
   height: number;
+  /** Rotation in degrees. Optional for legacy saved stair objects. */
+  rotation?: number;
   direction: StairDirection;
   label: string;
   floors?: number[];
@@ -95,6 +128,9 @@ export interface FloorStairs {
   sharedId?: string;
   /** Whether this staircase is wheelchair-accessible */
   accessible?: boolean;
+  zOrder?: number;
+  visible?: boolean;
+  locked?: boolean;
 }
 
 // ── Indoor Ramp (free placement) ───────────────────────────────────────────
@@ -105,6 +141,8 @@ export interface FloorRamp {
   y: number;
   width: number;
   height: number;
+  /** Rotation in degrees. Optional for legacy saved ramp objects. */
+  rotation?: number;
   label: string;
   /** Ramp direction: which floor it connects from/to */
   direction?: "up" | "down" | "both";
@@ -116,6 +154,9 @@ export interface FloorRamp {
   slope?: "gentle" | "medium" | "steep";
   /** Ramps are always wheelchair-accessible */
   accessible?: boolean;
+  zOrder?: number;
+  visible?: boolean;
+  locked?: boolean;
 }
 
 // ── Indoor Elevator (free placement) ────────────────────────────────────────
@@ -126,6 +167,8 @@ export interface FloorElevatorItem {
   y: number;
   width: number;
   height: number;
+  /** Rotation in degrees. Optional for legacy saved elevator objects. */
+  rotation?: number;
   doorWidth: number;
   label: string;
   floors?: number[];
@@ -133,6 +176,9 @@ export interface FloorElevatorItem {
   sharedId?: string;
   /** Whether this elevator is wheelchair-accessible (always true for elevators) */
   accessible?: boolean;
+  zOrder?: number;
+  visible?: boolean;
+  locked?: boolean;
 }
 
 // ── Indoor Label / Text ─────────────────────────────────────────────────────
@@ -145,12 +191,43 @@ export interface FloorLabel {
   fontSize: number;
   color: string;
   rotation: number;
+  /** Horizontal anchor of the label relative to (x, y). Defaults to left. */
+  align?: "left" | "center" | "right";
+  zOrder?: number;
+  visible?: boolean;
+  locked?: boolean;
 }
 
 // ── Room types ──────────────────────────────────────────────────────────────
 
 /** Direction a staircase travels */
 export type StairDirection = "up" | "down" | "both";
+
+export interface FloorPlanBackground {
+  storagePath: string;
+  fileName: string;
+  mimeType: string;
+  size: number;
+  visible: boolean;
+  opacity: number;
+  locked: boolean;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  rotation: number;
+  naturalWidth?: number;
+  naturalHeight?: number;
+  uploadedAt?: string;
+}
+
+export interface FloorScaleCalibration {
+  metersPerUnit: number;
+  points: [{ x: number; y: number }, { x: number; y: number }];
+  editorDistance: number;
+  realDistanceM: number;
+  calibratedAt?: string;
+}
 
 export interface FloorRoom {
   id: string;
@@ -160,6 +237,10 @@ export interface FloorRoom {
   y: number;
   w: number;
   h: number;
+  rotation?: number;
+  zOrder?: number;
+  visible?: boolean;
+  locked?: boolean;
   description?: string;
   accessibility?: boolean;
   /** Parent floor ID this room belongs to */
@@ -186,6 +267,17 @@ export interface FloorPlan {
   buildingId: string;
   number: number;
   label: string;
+  /** Editable floor-canvas dimensions in authoring units. */
+  canvasW?: number;
+  canvasH?: number;
+  /** Floor surface background color (appearance). Defaults to the warm canvas tone. */
+  backgroundColor?: string;
+  /** Whether the canvas grid lines are visible (persistent appearance preference). */
+  showGrid?: boolean;
+  /** Visual and snap grid spacing in floor authoring units. */
+  gridSize?: 10 | 20 | 40;
+  backgroundImage?: FloorPlanBackground;
+  calibration?: FloorScaleCalibration;
   rooms: FloorRoom[];
   paths: FloorPath[];
   walls: FloorWall[];
@@ -220,6 +312,7 @@ export interface CampusBuilding {
   height: number;
   color: string;
   floors: FloorPlan[];
+  circulationGroups?: CirculationGroup[];
   expanded?: boolean;
   /** Rotation in degrees (0-360), default 0 */
   rotation?: number;
@@ -229,10 +322,14 @@ export interface CampusBuilding {
   opacity?: number;
   /** Whether the building is locked (prevents drag/resize/delete) */
   locked?: boolean;
+  /** Visual stacking order shared with decorative assets (cross-type layer ordering).
+   *  Optional — legacy data defaults to array order (buildings below decor). */
+  zOrder?: number;
   /** Which editor layer the building belongs to */
   layer?: string;
   /** Entrance point on the campus map (canvas coordinates) */
   entrance?: { x: number; y: number; label?: string };
+  entrances?: CampusEntrance[];
   /** Navigation node ID for the building entrance — links building to the campus nav graph */
   entranceNodeId?: string;
   /** Basic accessibility summary */
@@ -244,6 +341,28 @@ export interface CampusBuilding {
   };
 }
 
+export interface CirculationGroup {
+  id: string;
+  buildingId: string;
+  kind: "stair" | "elevator";
+  name: string;
+}
+
+export type BuildingEntranceEdge = "top" | "right" | "bottom" | "left";
+export type BuildingEntranceType = "general" | "service" | "emergency_exit";
+export type LegacyBuildingEntranceType = "main" | "secondary" | "emergency";
+
+export interface CampusEntrance {
+  id: string;
+  buildingId: string;
+  edge: BuildingEntranceEdge;
+  offset: number;
+  type?: BuildingEntranceType | LegacyBuildingEntranceType;
+  name?: string;
+  isPrimary?: boolean;
+  accessible?: boolean;
+}
+
 export interface RoomResizeState {
   id: string;
   corner: string;
@@ -253,9 +372,18 @@ export interface RoomResizeState {
   oy: number;
   ow: number;
   oh: number;
+  rotation?: number;
 }
 
 export interface FloorUndoEntry {
+  canvasW?: number;
+  canvasH?: number;
+  backgroundColor?: string;
+  showGrid?: boolean;
+  gridSize?: 10 | 20 | 40;
+  backgroundImage?: FloorPlanBackground;
+  calibration?: FloorScaleCalibration;
+  label?: string;
   rooms: FloorRoom[];
   paths: FloorPath[];
   walls: FloorWall[];
@@ -266,6 +394,15 @@ export interface FloorUndoEntry {
   ramps: FloorRamp[];
   elevators: FloorElevatorItem[];
   labels: FloorLabel[];
+  /** B5 Phase 2: floor-scoped nav graph snapshot for undo/redo integration. */
+  navNodes?: NavigationNode[];
+  navEdges?: NavigationEdge[];
+}
+
+/** B5 Phase 2: floor-scoped indoor nav graph state (reused by undo entries). */
+export interface FloorNavGraphState {
+  navNodes: NavigationNode[];
+  navEdges: NavigationEdge[];
 }
 
 // ── Marker & Path ───────────────────────────────────────────────────────────
@@ -282,14 +419,21 @@ export interface CampusMarker {
 export interface CampusPath {
   id: string;
   points: { x: number; y: number }[];
-  type: string;
+  type: "walkway" | "road" | "accessible" | string;
   color: string;
   width: number;
+  /** Optional editor grouping identity for joined physical Pathway networks. */
+  pathNetworkId?: string;
+  /** Shared-coordinate junction keys intentionally disconnected for this path. */
+  disconnectedJunctionKeys?: string[];
+  name?: string;
+  visible?: boolean;
+  locked?: boolean;
 }
 
 // ── Navigation Node (Waypoint) ──────────────────────────────────────────────
 
-export type NavigationNodeType = "outdoor" | "entrance" | "hallway" | "room_access" | "stair" | "elevator" | "transition";
+export type NavigationNodeType = "outdoor" | "entrance" | "hallway" | "room_access" | "stair" | "elevator" | "ramp" | "transition" | "emergency_exit" | "assembly" | "safe_area";
 
 export interface NavigationNode {
   id: string;
@@ -303,9 +447,19 @@ export interface NavigationNode {
   buildingId?: string;
   /** Floor ID if this node is inside a specific floor */
   floorId?: string;
+  /** Building-entrance ID when this node represents a building entrance target */
+  entranceId?: string;
   /** Shared stair/elevator transition ID — links nav nodes across floors for the same physical stair/elevator */
   transitionSharedId?: string;
+  /** Indoor linked physical objects (B5 Phase 2) — exactly one is set for a linked node. */
+  roomId?: string;
+  doorId?: string;
+  stairId?: string;
+  elevatorId?: string;
+  rampId?: string;
   accessible: boolean;
+  /** Reason this node is not accessible (only relevant when accessible=false) */
+  inaccessibleReason?: "stairs" | "narrow_path" | "restricted_access" | "uneven_surface" | "other";
   color: string;
 }
 
@@ -323,6 +477,16 @@ export interface NavigationEdge {
   emergencySafe?: boolean;
   /** Reason this edge is unsafe during an emergency */
   emergencyReason?: "hazard" | "blocked" | "restricted" | "construction" | "other";
+  /** Whether this connection is temporarily closed/disabled in route planning */
+  closed?: boolean;
+  /**
+   * B5 Phase 2.5: optional intermediate bend/control points (polyline geometry).
+   * Indoor paths use orthogonal bends so routes follow hallways instead of a
+   * diagonal A→B cut. GEOMETRY ONLY — the routing endpoints stay
+   * startNodeId/endNodeId; bends are never independent nodes. Persisted via the
+   * edge's metadata JSON (no DB migration).
+   */
+  bendPoints?: { x: number; y: number }[];
   type: string;
   color: string;
   width: number;
@@ -446,6 +610,14 @@ export interface Campus {
   defaultZoom?: number;
   settings: CampusSettings;
   buildings: CampusBuilding[];
+  /** Persisted structure summary used by campus-list previews before full editor hydration. */
+  previewBuildingCount?: number;
+  /** Persisted floor summary used by campus-list previews before full editor hydration. */
+  previewFloorCount?: number;
+  /** Persisted room summary used by campus-list previews before full editor hydration. */
+  previewRoomCount?: number;
+  /** Lightweight persisted outdoor footprint rows for campus-list thumbnails. */
+  previewBuildingsLoaded?: boolean;
   markers: CampusMarker[];
   paths: CampusPath[];
   /** Navigation graph nodes (waypoints) */
@@ -494,7 +666,7 @@ export type View =
   | { type: "home" }
   | { type: "wizard"; step: 1 | 2 | 3 | 4 | 5; draft: Partial<Campus> }
   | { type: "campus"; campusId: string }
-  | { type: "floor"; campusId: string; buildingId: string; floorId: string }
+  | { type: "floor"; campusId: string; buildingId: string; floorId: string; initialSelection?: FloorSelection }
   | { type: "success"; campusId: string }
   | { type: "create-map"; campusId: string }
   | { type: "map-settings"; campusId: string };
@@ -503,6 +675,7 @@ export type View =
 
 export type CampusSelection =
   | { type: "building"; id: string }
+  | { type: "entrance"; id: string; buildingId: string }
   | { type: "marker"; id: string }
   | { type: "path"; id: string }
   | { type: "route"; id: string }
@@ -521,7 +694,12 @@ export type FloorSelection =
   | { type: "stairs"; id: string }
   | { type: "elevator"; id: string }
   | { type: "ramp"; id: string }
-  | { type: "label"; id: string };
+  | { type: "label"; id: string }
+  // B5 Final: issue-locate selections for indoor navigation targets. When the
+  // Floor Editor receives one of these via onOpenFloor's initialSelection it
+  // switches to Navigation mode and selects the node/edge directly.
+  | { type: "navNode"; id: string }
+  | { type: "navEdge"; id: string };
 
 // ── Building wizard omit type ───────────────────────────────────────────────
 
@@ -576,6 +754,7 @@ export type MeasurementUnit = "pixels" | "meters" | "feet";
 // ── Decorative Asset (outdoor campus visual-only objects) ─────────────────
 
 export type DecorAssetType =
+  | "ground-area"
   | "tree" | "tree-large" | "palm"
   | "bench" | "bench-long"
   | "plant" | "bush" | "flower"
@@ -590,10 +769,22 @@ export interface CampusDecorAsset {
   type: DecorAssetType;
   x: number;
   y: number;
+  /** Optional explicit size for non-uniform outdoor areas such as Ground Area. */
+  width?: number;
+  height?: number;
+  /** Appearance variant for the flexible Ground Area asset. */
+  groundType?: "grass" | "planted" | "plaza" | "field";
   rotation?: number;
   scale?: number;
   /** Whether this asset is visible on the canvas */
   visible?: boolean;
+  /** Whether this asset is locked against canvas movement/resizing */
+  locked?: boolean;
+  /** Optional custom display name (separate from the asset type label) */
+  name?: string;
+  /** Visual stacking order shared with buildings (cross-type layer ordering).
+   *  Optional — legacy data defaults to array order (decor above buildings). */
+  zOrder?: number;
 }
 
 // ── Building Type Descriptor (palette presets) ─────────────────────────────

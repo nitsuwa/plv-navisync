@@ -391,10 +391,10 @@ function RouteDemo() {
         )}
       </svg>
       {/* Labels */}
-      <div className="absolute bottom-2 left-2 text-[9px] text-white/50 font-mono flex items-center gap-1">
+      <div className="absolute bottom-2 left-2 text-[10px] text-white/50 font-mono flex items-center gap-1">
         <MapPin className="h-2.5 w-2.5" /> Start
       </div>
-      <div className="absolute bottom-2 right-2 text-[9px] text-white/50 font-mono flex items-center gap-1">
+      <div className="absolute bottom-2 right-2 text-[10px] text-white/50 font-mono flex items-center gap-1">
         <Flag className="h-2.5 w-2.5" /> CCS Lab 2
       </div>
     </div>
@@ -468,12 +468,12 @@ function A11yDemo() {
           )}
         </svg>
         {enabled && (
-          <div className="absolute bottom-1.5 right-2 flex items-center gap-1.5 text-[9px] text-green-600 dark:text-green-400 font-medium animate-fade-in-up">
+          <div className="absolute bottom-1.5 right-2 flex items-center gap-1.5 text-[10px] text-green-600 dark:text-green-400 font-medium animate-fade-in-up">
             <CheckCircle2 className="h-2.5 w-2.5" />
             Avoiding stairs — using ramps & elevators
           </div>
         )}
-        <div className="absolute bottom-1.5 left-2 text-[9px] text-muted-foreground font-mono flex items-center gap-1">
+        <div className="absolute bottom-1.5 left-2 text-[10px] text-muted-foreground font-mono flex items-center gap-1">
           {enabled ? <><Accessibility className="h-2.5 w-2.5" /> Accessible route active</> : "Click toggle to see accessible route"}
         </div>
       </div>
@@ -525,7 +525,7 @@ function ReportDemo() {
               <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${phase === "reporting" ? "bg-orange-500/15" : "bg-muted-foreground/10"}`}>
                 <MapPin className="h-4 w-4" />
               </div>
-              <span className="text-[9px] font-medium">Pin Issue</span>
+              <span className="text-[10px] font-medium">Pin Issue</span>
             </div>
             <ArrowRight className="h-3 w-3 text-muted-foreground/30" />
             {/* Step 2: Admin */}
@@ -533,7 +533,7 @@ function ReportDemo() {
               <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${phase === "submitted" ? "bg-blue-500/15" : "bg-muted-foreground/10"}`}>
                 <Eye className="h-4 w-4" />
               </div>
-              <span className="text-[9px] font-medium">Admin</span>
+              <span className="text-[10px] font-medium">Admin</span>
             </div>
             <ArrowRight className="h-3 w-3 text-muted-foreground/30" />
             {/* Step 3: Resolved */}
@@ -541,16 +541,16 @@ function ReportDemo() {
               <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${phase === "resolved" ? "bg-green-500/15" : "bg-muted-foreground/10"}`}>
                 <CheckCircle2 className="h-4 w-4" />
               </div>
-              <span className="text-[9px] font-medium">Resolved</span>
+              <span className="text-[10px] font-medium">Resolved</span>
             </div>
           </div>
           {phase === "submitted" && (
-            <div className="mt-2 text-[9px] text-blue-600 dark:text-blue-400 text-center font-medium animate-fade-in-up">
+            <div className="mt-2 text-[10px] text-blue-600 dark:text-blue-400 text-center font-medium animate-fade-in-up">
               Admin has received your report
             </div>
           )}
           {phase === "resolved" && (
-            <div className="mt-2 text-[9px] text-green-600 dark:text-green-400 text-center font-medium animate-fade-in-up">
+            <div className="mt-2 text-[10px] text-green-600 dark:text-green-400 text-center font-medium animate-fade-in-up">
               Issue has been resolved. Thank you!
             </div>
           )}
@@ -801,13 +801,13 @@ function ShowcaseDemo({ type }: { type: "search" | "route" | "a11y" | "report" }
             <Search className="h-3.5 w-3.5 text-muted-foreground" />
             <span className="text-xs text-muted-foreground">Search buildings, rooms &hellip;</span>
             <div className="ml-auto flex gap-1">
-              <kbd className="px-1.5 py-0.5 rounded text-[9px] bg-background text-muted-foreground border border-border">⌘K</kbd>
+              <kbd className="px-1.5 py-0.5 rounded text-[10px] bg-background text-muted-foreground border border-border">⌘K</kbd>
             </div>
           </div>
           <div className="space-y-1">
             {["Registrar Office", "CCS Laboratory 2", "Library"].map((item, i) => (
               <div key={i} className="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-muted/50 transition-colors cursor-pointer">
-                <div className="w-5 h-5 rounded bg-primary/10 flex items-center justify-center text-[9px] text-primary font-bold shrink-0">
+                <div className="w-5 h-5 rounded bg-primary/10 flex items-center justify-center text-[10px] text-primary font-bold shrink-0">
                   <MapPin className="h-2.5 w-2.5" />
                 </div>
                 <span className="text-xs font-medium text-foreground">{item}</span>
@@ -864,26 +864,26 @@ function ShowcaseDemo({ type }: { type: "search" | "route" | "a11y" | "report" }
           <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-muted border border-border">
             <Flag className="h-3.5 w-3.5 text-orange-500" />
             <span className="text-xs font-bold text-foreground flex-1">Report an Issue</span>
-            <span className="text-[9px] px-2 py-0.5 rounded-full bg-orange-100 dark:bg-orange-900/30 text-orange-600 dark:text-orange-400 font-bold">NEW</span>
+            <span className="text-[10px] px-2 py-0.5 rounded-full bg-orange-100 dark:bg-orange-900/30 text-orange-600 dark:text-orange-400 font-bold">NEW</span>
           </div>
           <div className="grid grid-cols-3 gap-2">
             <div className="flex flex-col items-center gap-1.5 p-2 rounded-lg bg-card border border-border">
               <div className="w-6 h-6 rounded-md bg-orange-100 dark:bg-orange-900/30 flex items-center justify-center">
                 <MapPin className="h-3 w-3 text-orange-500" />
               </div>
-              <span className="text-[9px] font-medium text-muted-foreground">Pin</span>
+              <span className="text-[10px] font-medium text-muted-foreground">Pin</span>
             </div>
             <div className="flex flex-col items-center gap-1.5 p-2 rounded-lg bg-card border border-border">
               <div className="w-6 h-6 rounded-md bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center">
                 <Eye className="h-3 w-3 text-blue-500" />
               </div>
-              <span className="text-[9px] font-medium text-muted-foreground">Admin</span>
+              <span className="text-[10px] font-medium text-muted-foreground">Admin</span>
             </div>
             <div className="flex flex-col items-center gap-1.5 p-2 rounded-lg bg-card border border-green-200 dark:border-green-800">
               <div className="w-6 h-6 rounded-md bg-green-100 dark:bg-green-900/30 flex items-center justify-center">
                 <CheckCircle2 className="h-3 w-3 text-green-500" />
               </div>
-              <span className="text-[9px] font-medium text-green-600 dark:text-green-400">Resolved</span>
+              <span className="text-[10px] font-medium text-green-600 dark:text-green-400">Resolved</span>
             </div>
           </div>
         </div>

@@ -16,6 +16,48 @@ import { cn } from "../../lib/utils";
 
 export type ValidationSeverity = "error" | "warning" | "info";
 
+/**
+ * Structured target used by the "Click to locate on map" workflow.
+ *
+ * The validator attaches this to every locatable issue so the editor can jump
+ * straight to the object — no fragile message-text parsing. `scope` decides
+ * whether the target lives on the campus canvas ("campus") or inside a
+ * building floor ("floor"); `mode` decides which editor mode (Design vs
+ * Navigation) should be active when the target is revealed.
+ */
+export interface IssueTarget {
+  /** Where the target object lives. */
+  scope: "campus" | "floor";
+  /** Which editor mode should be active when the target is revealed. */
+  mode: "design" | "navigation";
+  /** Building ID when the target is inside a building (floor scope). */
+  buildingId?: string;
+  /** Floor ID when the target lives on a specific floor. */
+  floorId?: string;
+  /** What kind of object to select. */
+  selectionType:
+    | "navNode"
+    | "navEdge"
+    | "room"
+    | "door"
+    | "stairs"
+    | "elevator"
+    | "ramp"
+    | "entrance"
+    | "building"
+    | "path"
+    | "decorAsset"
+    | "marker"
+    | "wall"
+    | "window"
+    | "furniture"
+    | "label"
+    | "groundArea"
+    | "campus";
+  /** The object's id. For entrance issues this is the entrance id (buildingId carries the building). */
+  id: string;
+}
+
 export interface ValidationIssue {
   /** Machine-readable type for grouping */
   type:
@@ -25,6 +67,9 @@ export interface ValidationIssue {
     | "boundary"
     | "no_floors"
     | "overlap"
+    | "no_building_entrance"
+    | "no_primary_entrance"
+    | "multiple_primary_entrances"
     | "empty_floor"
     | "no_buildings"
     | "no_stairs_elevator"
@@ -66,7 +111,18 @@ export interface ValidationIssue {
     // ── Phase 7: Event checks ──
     | "event_no_location"
     | "event_location_deleted"
-    | "event_location_unreachable";
+    | "event_location_unreachable"
+    // ── B5 Phase 6: Navigation graph readiness ──
+    | "nav_orphan_node"
+    | "nav_broken_edge"
+    | "nav_duplicate_edge"
+    | "nav_entrance_bridge_missing"
+    | "nav_entrance_door_missing"
+    | "nav_floor_transition_invalid"
+    | "nav_accessibility_contradiction"
+    | "nav_disconnected_component"
+    // ── B5 Phase 6.10: obstacle-blocked edges ──
+    | "nav_edge_blocked_by_obstacle";
   /** Severity level */
   severity: ValidationSeverity;
   /** Human-readable message explaining how to fix */
@@ -77,6 +133,16 @@ export interface ValidationIssue {
   floorId?: string;
   /** Room ID (if the issue is room-specific) */
   roomId?: string;
+  /** Navigation node ID (if the issue is node-specific) */
+  nodeId?: string;
+  /** Navigation edge ID (if the issue is edge-specific) */
+  edgeId?: string;
+  /**
+   * B5 Final: structured locate metadata. When present, "Click to locate on
+   * map" uses this exclusively (no message parsing). When absent, the editor
+   * falls back to deriving a target from the flat fields above.
+   */
+  target?: IssueTarget;
 }
 
 interface ValidationCategory {
@@ -146,6 +212,9 @@ const ISSUE_CATEGORY: Record<string, string> = {
   missing_code: "missing",
   boundary: "boundary",
   no_floors: "missing",
+  no_building_entrance: "navigation",
+  no_primary_entrance: "navigation",
+  multiple_primary_entrances: "navigation",
   overlap: "overlap",
   empty_floor: "missing",
   no_buildings: "missing",
@@ -191,6 +260,9 @@ const ISSUE_ICONS: Record<string, React.ElementType> = {
   missing_code: Building2,
   boundary: Ruler,
   no_floors: Layers,
+  no_building_entrance: MapPin,
+  no_primary_entrance: MapPin,
+  multiple_primary_entrances: AlertTriangle,
   overlap: Layers,
   empty_floor: Layers,
   no_buildings: Building2,

@@ -1,14 +1,26 @@
-import { useState, useRef } from "react";
+import { useEffect, useState, useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import {
-  Building2, Layers, Plus, Pencil, Trash2, Copy, GripVertical,
+  Building2, Layers, Plus, Pencil, Trash2, Copy, GripVertical, MoreHorizontal,
   ChevronRight, ChevronDown, FolderOpen, Search, Eye, EyeOff, Lock, TreePine, Sparkles,
 } from "lucide-react";
 import { cn } from "../../lib/utils";
-import { genId, BUILDING_TYPES, DECOR_ASSET_TYPES, DECOR_ASSET_MAP } from "./constants";
+import { genId, BUILDING_TYPES, DECOR_PALETTE_TYPES, DECOR_ASSET_MAP } from "./constants";
+import { DecorAssetVisual } from "./DecorAssetVisual";
 import { ContextMenu } from "./ContextMenu";
+import { FloorActionsMenu } from "./FloorActionsMenu";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
-import type { Campus, CampusBuilding, CampusSelection, FloorPlan, BuildingTypeDescriptor, CampusDecorAsset, DecorAssetType } from "./types";
+import { duplicateFloorForBuilding, normalizeFloor } from "../../lib/floorPlanNormalization";
+import { replaceBuildingFloorsAndReconcileTransitions } from "../../lib/indoorNavigationGraph";
+import {
+  addFloorToBuilding,
+  countFloorAuthoredItems,
+  deleteFloorFromBuilding,
+  duplicateFloorInBuilding,
+  moveFloorInBuilding,
+  renameFloorInBuilding,
+} from "../../lib/floorManagement";
+import type { Campus, CampusBuilding, CampusSelection, BuildingTypeDescriptor, CampusDecorAsset, DecorAssetType } from "./types";
 
 interface HierarchyPanelProps {
   campus: Campus;
@@ -32,12 +44,15 @@ interface HierarchyPanelProps {
   onPlaceDecorAsset?: (asset: CampusDecorAsset) => void;
   /** Number of decorative assets placed */
   decorAssetCount?: number;
+  /** Whether the authoring asset palette is available in this mode */
+  assetsEnabled?: boolean;
 }
 
 export function HierarchyPanel({
   campus, selected, onSelect, onOpenFloor, onAddBuilding,
   onUpdateBuilding, onUpdate, pushHistory, toast,
   onSelectBuildingType, activeBuildingType, onPlaceDecorAsset, decorAssetCount = 0,
+  assetsEnabled = true,
 }: HierarchyPanelProps) {
   // ── Panel tab: "hierarchy" | "assets" ──
   const [panelTab, setPanelTab] = useState<"hierarchy" | "assets">("hierarchy");
@@ -48,8 +63,28 @@ export function HierarchyPanel({
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const dragItemRef = useRef<number | null>(null);
+  // ── Floor row `...` menu ──
+  const [floorMenu, setFloorMenu] = useState<{ buildingId: string; floorId: string; x: number; y: number } | null>(null);
+  // ── Floor drag-and-drop reorder (mirrors the building-row DnD pattern) ──
+  const floorDragRef = useRef<{ buildingId: string; index: number } | null>(null);
+  const [floorDragOver, setFloorDragOver] = useState<{ buildingId: string; index: number } | null>(null);
+  const suppressFloorOpenRef = useRef(false);
+  useEffect(() => {
+    if (!assetsEnabled && panelTab !== "hierarchy") setPanelTab("hierarchy");
+  }, [assetsEnabled, panelTab]);
 
   const buildings = campus.buildings;
+  const activeDecorPalette = DECOR_PALETTE_TYPES.filter((type) => type !== "ground-area");
+  const createDecorAsset = (asset: { type: DecorAssetType; defaultWidth: number; defaultHeight: number }): CampusDecorAsset => ({
+    id: genId("dec"),
+    type: asset.type,
+    x: Math.round(campus.canvasW / 2 + (Math.random() - 0.5) * 100),
+    y: Math.round(campus.canvasH / 2 + (Math.random() - 0.5) * 100),
+    rotation: 0,
+    ...(asset.type === "ground-area"
+      ? { width: 150, height: 95, groundType: "grass" as const, zOrder: -1000 }
+      : { scale: 1 }),
+  });
   const filteredBuildings = searchQuery
     ? buildings.filter(
         (b) =>
@@ -59,6 +94,10 @@ export function HierarchyPanel({
     : buildings;
 
   const updBuildings = (b: CampusBuilding[]) => onUpdate({ buildings: b });
+  const replaceBuildingFloors = (buildingId: string, floors: CampusBuilding["floors"]) => {
+    const next = replaceBuildingFloorsAndReconcileTransitions(campus, buildingId, floors);
+    onUpdate({ buildings: next.buildings, navEdges: next.navEdges });
+  };
 
   // ── Floor manager helpers ──
   const renameFloor = (buildingId: string, floorId: string) => {
@@ -73,22 +112,14 @@ export function HierarchyPanel({
   const applyRename = () => {
     if (!renameDialog || !renameValue.trim()) return;
     const { buildingId, floorId } = renameDialog;
-    // Floor rename
+    // Floor rename (same shared helper the Floor Editor uses)
     if (floorId) {
       const b = buildings.find((x) => x.id === buildingId);
       const floor = b?.floors.find((f) => f.id === floorId);
       if (!b || !floor) return;
       if (renameValue.trim() === floor.label) { setRenameDialog(null); return; }
       pushHistory();
-      updBuildings(
-        buildings.map((x) =>
-          x.id === buildingId
-            ? { ...x, floors: x.floors.map((f) =>
-                f.id === floorId ? { ...f, label: renameValue.trim() } : f
-              )}
-            : x
-        )
-      );
+      replaceBuildingFloors(buildingId, renameFloorInBuilding(b.floors, floorId, renameValue.trim()));
       toast.success("Floor Renamed", `Renamed to "${renameValue.trim()}".`);
     } else {
       // Building rename
@@ -105,25 +136,23 @@ export function HierarchyPanel({
   const duplicateFloor = (buildingId: string, floorId: string) => {
     const b = buildings.find((x) => x.id === buildingId);
     if (!b) return;
-    const floor = b.floors.find((f) => f.id === floorId);
-    if (!floor) return;
     pushHistory();
-    const newFloor: FloorPlan = {
-      ...structuredClone(floor),
-      id: genId("fl"),
-      buildingId,
-      number: Math.max(...b.floors.map((f) => f.number), 0) + 1,
-      label: `${floor.label} (copy)`,
-      rooms: floor.rooms.map((r) => ({ ...r, floorId: genId("fl") /* will fix below */, buildingId })),
-    };
-    // Fix the temp floorId references
-    const finalFloorId = newFloor.id;
-    newFloor.rooms = newFloor.rooms.map((r) => ({ ...r, floorId: finalFloorId }));
-    updBuildings(
-      buildings.map((x) => (x.id === buildingId ? { ...x, floors: [...x.floors, newFloor] } : x))
-    );
-    const duplicatedFloor = buildings.find(x => x.id === buildingId)?.floors.find(f => f.id === floorId);
-    toast.success("Floor Duplicated", duplicatedFloor ? `"${duplicatedFloor.label}" has been copied.` : undefined);
+    const { floors, copy } = duplicateFloorInBuilding(b.floors, buildingId, floorId);
+    if (!copy) return;
+    replaceBuildingFloors(buildingId, floors);
+    toast.success("Floor Duplicated", `"${copy.label}" has been copied.`);
+  };
+
+  /** Move Up / Move Down — same ordering primitive the Floor Editor tabs use. */
+  const moveFloor = (buildingId: string, floorId: string, direction: -1 | 1) => {
+    const b = buildings.find((x) => x.id === buildingId);
+    if (!b) return;
+    const { floors, moved } = moveFloorInBuilding(b.floors, floorId, direction);
+    if (!moved) return;
+    pushHistory();
+    replaceBuildingFloors(buildingId, floors);
+    const floor = b.floors.find((f) => f.id === floorId);
+    toast.success("Floor Reordered", `"${floor?.label ?? "Floor"}" moved ${direction < 0 ? "up" : "down"}.`);
   };
 
   const confirmDeleteFloor = (buildingId: string, floorId: string) => {
@@ -134,49 +163,38 @@ export function HierarchyPanel({
       return;
     }
     const floor = b.floors.find((f) => f.id === floorId);
-    setDeleteConfirm({ type: "floor", id: floorId, name: floor?.label ?? "this floor", buildingId });
+    setDeleteConfirm({
+      type: "floor",
+      id: floorId,
+      name: floor?.label ?? "this floor",
+      buildingId,
+      itemCount: floor ? countFloorAuthoredItems(floor) : 0,
+    });
   };
 
   const executeDeleteFloor = (buildingId: string, floorId: string) => {
     const b = buildings.find((x) => x.id === buildingId);
     if (!b) return;
+    const { floors, deleted } = deleteFloorFromBuilding(b.floors, floorId);
     pushHistory();
-    updBuildings(
-      buildings.map((x) =>
-        x.id === buildingId
-          ? { ...x, floors: x.floors.filter((f) => f.id !== floorId) }
-          : x
-      )
-    );
-    const deletedFloor = buildings.find(x => x.id === buildingId)?.floors.find(f => f.id === floorId);
-    toast.success("Floor Deleted", deletedFloor ? `"${deletedFloor.label}" has been removed.` : undefined);
+    replaceBuildingFloors(buildingId, floors);
+    toast.success("Floor Deleted", deleted ? `"${deleted.label}" has been removed.` : undefined);
   };
 
   const addFloor = (buildingId: string) => {
     const b = buildings.find((x) => x.id === buildingId);
     if (!b) return;
-    const nextNum = Math.max(...b.floors.map((f) => f.number), 0) + 1;
-    const newFloor: FloorPlan = {
-      id: genId("fl"),
-      buildingId,
-      number: nextNum,
-      label: nextNum === 1 ? "Ground Floor" : `Floor ${nextNum}`,
-      rooms: [],
-      paths: [],
-      walls: [],
-      doors: [],
-      windows: [],
-      furniture: [],
-      stairs: [],
-      elevators: [],
-      labels: [],
-    };
+    const { floors, floor } = addFloorToBuilding(b.floors, buildingId);
     pushHistory();
-    updBuildings(
-      buildings.map((x) => (x.id === buildingId ? { ...x, floors: [...x.floors, newFloor] } : x))
-    );
+    replaceBuildingFloors(buildingId, floors);
     const buildingForAdd = buildings.find(x => x.id === buildingId);
     toast.success("Floor Added", buildingForAdd ? `New floor added to ${buildingForAdd.code}.` : undefined);
+  };
+
+  const openFloorMenu = (e: React.MouseEvent, buildingId: string, floorId: string) => {
+    e.stopPropagation();
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    setFloorMenu({ buildingId, floorId, x: rect.left, y: (rect.bottom ?? 8) + 4 });
   };
 
   // ── Building manager helpers ──
@@ -191,20 +209,23 @@ export function HierarchyPanel({
     const b = buildings.find((x) => x.id === id);
     if (!b) return;
     pushHistory();
+    const nbId = genId("bld");
     const nb: CampusBuilding = {
       ...structuredClone(b),
-      id: genId("bld"),
+      id: nbId,
       name: `${b.name} (copy)`,
       x: b.x + 25,
       y: b.y + 25,
-      floors: b.floors.map((f) => ({
-        ...f,
-        buildingId: genId("bld"), // temp — fixed below
-        rooms: f.rooms.map((r) => ({ ...r, floorId: f.id, buildingId: genId("bld") })),
+      floors: b.floors.map((f) => duplicateFloorForBuilding(f, {
+        id: genId("fl"),
+        buildingId: nbId,
+        number: f.number,
+        label: f.label,
       })),
     };
-    // Fix temp buildingId references to actual new building ID
-    nb.floors = nb.floors.map((f) => ({ ...f, buildingId: nb.id, rooms: f.rooms.map((r) => ({ ...r, buildingId: nb.id, floorId: f.id })) }));
+    // Keep a final normalization pass for older building data that predates
+    // complete floor collections.
+    nb.floors = nb.floors.map((f) => normalizeFloor(f, { buildingId: nb.id }));
     updBuildings([...buildings, nb]);
     onSelect({ type: "building", id: nb.id });
     toast.success("Building Duplicated", `${b.code} has been copied.`);
@@ -257,6 +278,7 @@ export function HierarchyPanel({
     id: string;
     name: string;
     buildingId?: string;
+    itemCount?: number;
   } | null>(null);
 
   // ── Context menu ──
@@ -309,54 +331,61 @@ export function HierarchyPanel({
     >
       {/* Header with tab switcher */}
       <div className="px-2 pt-2 pb-0 border-b border-border">
-        <div className="flex gap-0.5 p-0.5 rounded-lg bg-muted/50">
-          <button
-            onClick={() => setPanelTab("hierarchy")}
-            className={cn(
-              "flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-md text-[10px] font-bold transition-all",
-              panelTab === "hierarchy" ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
-            )}
-          >
+        {assetsEnabled ? (
+          <div className="flex gap-0.5 p-0.5 rounded-lg bg-muted/50">
+            <button
+              onClick={() => setPanelTab("hierarchy")}
+              className={cn(
+                "flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-md text-[10px] font-bold transition-all",
+                panelTab === "hierarchy" ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              <Building2 className="h-3 w-3" />
+              Hierarchy
+            </button>
+            <button
+              onClick={() => setPanelTab("assets")}
+              className={cn(
+                "flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-md text-[10px] font-bold transition-all",
+                panelTab === "assets" ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              <Sparkles className="h-3 w-3" />
+              Assets
+            </button>
+          </div>
+        ) : (
+          <div className="flex items-center justify-center gap-1.5 py-1.5 text-[10px] font-bold text-foreground">
             <Building2 className="h-3 w-3" />
             Hierarchy
-          </button>
-          <button
-            onClick={() => setPanelTab("assets")}
-            className={cn(
-              "flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-md text-[10px] font-bold transition-all",
-              panelTab === "assets" ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
-            )}
-          >
-            <Sparkles className="h-3 w-3" />
-            Assets
-          </button>
-        </div>
+          </div>
+        )}
         {panelTab === "hierarchy" && (
-          <div className="relative py-2">
-            <Search className="absolute left-2 top-1/2 translate-y-[-25%] h-3 w-3 text-muted-foreground" />
+          <div className="relative min-w-0 shrink-0 py-2">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 z-10 h-3 w-3 -translate-y-1/2 text-muted-foreground" />
             <input
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search buildings..."
-              className="w-full h-7 pl-6 pr-2 rounded-lg bg-muted/50 text-xs text-foreground placeholder:text-muted-foreground/60 border border-transparent focus:outline-none focus:border-primary/30 focus:bg-muted transition-all"
+              className="block h-7 w-full min-w-0 rounded-lg border border-transparent bg-muted/50 pl-8 pr-2 text-xs leading-7 text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:border-primary/40 focus:ring-1 focus:ring-primary/20 focus:bg-muted transition-all"
             />
           </div>
         )}
-        {panelTab === "assets" && (
-          <div className="relative py-2">
-            <Search className="absolute left-2 top-1/2 translate-y-[-25%] h-3 w-3 text-muted-foreground" />
+        {assetsEnabled && panelTab === "assets" && (
+          <div className="relative min-w-0 shrink-0 py-2">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 z-10 h-3 w-3 -translate-y-1/2 text-muted-foreground" />
             <input
               value={assetSearch}
               onChange={(e) => setAssetSearch(e.target.value)}
               placeholder="Search assets..."
-              className="w-full h-7 pl-6 pr-2 rounded-lg bg-muted/50 text-xs text-foreground placeholder:text-muted-foreground/60 border border-transparent focus:outline-none focus:border-primary/30 focus:bg-muted transition-all"
+              className="block h-7 w-full min-w-0 rounded-lg border border-transparent bg-muted/50 pl-8 pr-2 text-xs leading-7 text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:border-primary/40 focus:ring-1 focus:ring-primary/20 focus:bg-muted transition-all"
             />
           </div>
         )}
       </div>
 
       {/* ═══ ASSETS TAB ═══ */}
-      {panelTab === "assets" && (
+      {assetsEnabled && panelTab === "assets" && (
         <div className="flex-1 overflow-y-auto scrollbar-show-on-hover scroll-smooth py-2 px-2 space-y-3">
           {/* Combined Assets Grid — buildings + outdoor assets */}
           <div>
@@ -365,7 +394,7 @@ export function HierarchyPanel({
               Campus Objects
               {decorAssetCount > 0 && <span className="text-[8px] font-mono opacity-60">({decorAssetCount})</span>}
             </span>
-            <div className="mt-1.5 grid grid-cols-3 gap-1">
+            <div className="mt-1.5 grid grid-cols-2 gap-2">
               {(assetSearch
                 ? BUILDING_TYPES.filter(t => t.label.toLowerCase().includes(assetSearch.toLowerCase()) || t.category.toLowerCase().includes(assetSearch.toLowerCase()))
                 : BUILDING_TYPES
@@ -382,18 +411,20 @@ export function HierarchyPanel({
                     e.dataTransfer.effectAllowed = "copy";
                   }}
                   className={cn(
-                    "flex flex-col items-center gap-1 w-full px-1.5 py-2 rounded-lg border transition-all text-left group",
+                    "flex min-h-[74px] min-w-0 flex-col items-center justify-start gap-1 w-full px-1.5 py-1.5 rounded-lg border transition-all text-left group",
                     activeBuildingType === type.id
                       ? "border-primary/40 bg-primary/8 ring-1 ring-primary/20"
                       : "border-transparent hover:border-border hover:bg-muted/40"
                   )}
                 >
                   {/* Visual preview — SVG icon */}
-                  <div className="w-10 h-8 rounded flex items-center justify-center shrink-0" style={{ backgroundColor: `${type.color}12`, border: `1px solid ${type.color}25` }}>
+                  <div className="w-10 h-8 rounded-md flex items-center justify-center shrink-0" style={{ backgroundColor: `${type.color}12`, border: `1px solid ${type.color}25` }}>
                     <Building2 className="h-4 w-4" style={{ color: type.color }} />
                   </div>
-                  <div className="flex-1 min-w-0 text-center">
-                    <span className="text-[9px] font-bold text-foreground block truncate group-hover:text-primary transition-colors">{type.label}</span>
+                  <div className="min-w-0 max-w-full text-center flex items-start justify-center h-7">
+                    <span className="block max-w-full text-[8.5px] font-bold text-foreground leading-tight group-hover:text-primary transition-colors line-clamp-2 break-words [overflow-wrap:anywhere]">
+                      {type.label}
+                    </span>
                   </div>
                   {activeBuildingType === type.id && <div className="w-1 h-1 rounded-full bg-primary shrink-0" />}
                 </button>
@@ -408,28 +439,32 @@ export function HierarchyPanel({
               Outdoor Decor
               {decorAssetCount > 0 && <span className="text-[8px] font-mono opacity-60">({decorAssetCount})</span>}
             </span>
-            <div className="mt-1.5 grid grid-cols-3 gap-1">
+            <div className="mt-1.5 grid grid-cols-3 gap-1.5">
+              {/* Curated placement palette — a focused public-campus-map set.
+                  Unlisted legacy types still render on the canvas if a saved
+                  campus contains them (backward compatible). */}
               {(assetSearch
-                ? DECOR_ASSET_TYPES.filter(a => a.label.toLowerCase().includes(assetSearch.toLowerCase()))
-                : DECOR_ASSET_TYPES
+                ? activeDecorPalette.map((t) => DECOR_ASSET_MAP[t]).filter(Boolean).filter(a => a.label.toLowerCase().includes(assetSearch.toLowerCase()))
+                : activeDecorPalette.map((t) => DECOR_ASSET_MAP[t]).filter(Boolean)
               ).map((asset) => (
                 <button
                   key={asset.type}
                   onClick={() => {
-                    const a: CampusDecorAsset = { id: genId("dec"), type: asset.type, x: Math.round(campus.canvasW / 2 + (Math.random() - 0.5) * 100), y: Math.round(campus.canvasH / 2 + (Math.random() - 0.5) * 100), rotation: 0, scale: 1 };
-                    onPlaceDecorAsset?.(a);
+                    onPlaceDecorAsset?.(createDecorAsset(asset));
                   }}
-                  className="flex flex-col items-center gap-0.5 p-1.5 rounded-md hover:bg-muted/50 transition-all group active:scale-95"
+                  className="flex min-h-[70px] min-w-0 flex-col items-center justify-start gap-1 p-1.5 rounded-md hover:bg-muted/50 transition-all group active:scale-95"
                   draggable
                   onDragStart={(e) => {
-                    e.dataTransfer.setData("text/plain", JSON.stringify({ type: "decorAsset", assetType: asset.type, w: asset.defaultWidth, h: asset.defaultHeight }));
+                    e.dataTransfer.setData("text/plain", JSON.stringify({ type: "decorAsset", assetType: asset.type, w: asset.defaultWidth, h: asset.defaultHeight, groundArea: asset.type === "ground-area" }));
                     e.dataTransfer.effectAllowed = "copy";
                   }}
                 >
                   <div className="w-9 h-9 rounded-lg flex items-center justify-center group-hover:scale-110 transition-transform" style={{ backgroundColor: `${asset.color}12`, border: `1px solid ${asset.color}25` }}>
-                    <svg viewBox="0 0 28 32" className="w-5 h-6"><path d={asset.svgPath} fill={asset.color} opacity={0.85} /></svg>
+                    <DecorAssetVisual type={asset.type} className="w-5 h-6" style={{ opacity: 0.85 }} />
                   </div>
-                  <span className="text-[7px] font-semibold text-foreground/60 group-hover:text-foreground text-center leading-tight">{asset.label}</span>
+                  <span className="block max-w-full text-[7.5px] font-semibold text-foreground/65 group-hover:text-foreground text-center leading-tight line-clamp-2 break-words [overflow-wrap:anywhere]">
+                    {asset.label}
+                  </span>
                 </button>
               ))}
             </div>
@@ -574,45 +609,92 @@ export function HierarchyPanel({
               </button>
             </div>
 
-            {/* Expanded floors */}
+            {/* Expanded floors — draggable rows reorder directly; the `...` button
+                opens the same shared floor actions menu used by the Floor Editor. */}
             {b.expanded && (
-              <div className="pl-10">
-                {b.floors.map((f) => (
+              <div className="pl-8">
+                {b.floors.map((f, floorIndex) => (
                   <div key={f.id}>
-                    <div className="group flex items-center" onContextMenu={(e) => handleFloorContextMenu(e, b.id, f.id)}>
+                    {/* Floor drop indicator */}
+                    {floorDragOver?.buildingId === b.id && floorDragOver.index === floorIndex && (
+                      <div className="h-0.5 bg-primary mx-5 rounded-full my-0.5" />
+                    )}
+                    <div
+                      className="group flex items-center"
+                      draggable
+                      onDragStart={(e) => {
+                        floorDragRef.current = { buildingId: b.id, index: floorIndex };
+                        e.dataTransfer.effectAllowed = "move";
+                        e.dataTransfer.setData("text/plain", f.id);
+                      }}
+                      onDragOver={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        e.dataTransfer.dropEffect = "move";
+                        setFloorDragOver({ buildingId: b.id, index: floorIndex });
+                      }}
+                      onDragLeave={() => setFloorDragOver(null)}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        const from = floorDragRef.current;
+                        if (from && from.buildingId === b.id && from.index !== floorIndex) {
+                          // Same canonical floor-order update path as the
+                          // Move Up/Down actions, just with an arbitrary drop
+                          // index.
+                          const reordered = [...b.floors];
+                          const [moved] = reordered.splice(from.index, 1);
+                          reordered.splice(floorIndex, 0, moved);
+                          pushHistory();
+                          replaceBuildingFloors(b.id, reordered);
+                          toast.success("Floor Reordered", "Floor order updated.");
+                        }
+                        floorDragRef.current = null;
+                        setFloorDragOver(null);
+                      }}
+                      onDragEnd={() => {
+                        floorDragRef.current = null;
+                        setFloorDragOver(null);
+                        // A drag end can still be followed by a click in some
+                        // browsers — never let a reorder gesture open the floor.
+                        // Consume the flag on the next row click; also clear it
+                        // after a tick so a drag that ends elsewhere never
+                        // swallows a later legitimate row click.
+                        suppressFloorOpenRef.current = true;
+                        window.setTimeout(() => { suppressFloorOpenRef.current = false; }, 0);
+                      }}
+                      onContextMenu={(e) => handleFloorContextMenu(e, b.id, f.id)}
+                    >
+                      {/* Grip handle */}
+                      <span
+                        className="opacity-0 group-hover:opacity-40 cursor-grab active:cursor-grabbing text-muted-foreground shrink-0"
+                        title="Drag to reorder"
+                      >
+                        <GripVertical className="h-3 w-3" />
+                      </span>
                       <button
-                        onClick={() => onOpenFloor(b.id, f.id)}
-                        className="flex-1 flex items-center gap-2 px-2 py-1 hover:bg-muted/50 transition-colors text-left min-w-0"
+                        onClick={() => {
+                          if (suppressFloorOpenRef.current) { suppressFloorOpenRef.current = false; return; }
+                          onOpenFloor(b.id, f.id);
+                        }}
+                        className="flex-1 flex items-center gap-2 px-1 py-1 hover:bg-muted/50 transition-colors text-left min-w-0"
                       >
                         <Layers className="h-3 w-3 text-muted-foreground shrink-0" />
-                        <span className="text-xs text-muted-foreground group-hover:text-foreground transition-colors truncate flex-1">
+                        <span className="text-xs text-muted-foreground group-hover:text-foreground transition-colors truncate flex-1" title={f.label}>
                           {f.label}
                         </span>
                         <span className="text-[9px] text-muted-foreground">
                           {f.rooms.length}R
                         </span>
                       </button>
-                      {/* Floor manager actions */}
+                      {/* Floor actions `...` — operates on THIS floor row */}
                       <button
-                        onClick={(e) => { e.stopPropagation(); renameFloor(b.id, f.id); }}
-                        className="opacity-0 group-hover:opacity-100 w-5 h-5 rounded flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted transition-all shrink-0"
-                        title="Rename"
+                        onClick={(e) => openFloorMenu(e, b.id, f.id)}
+                        aria-label={`Floor actions: ${f.label}`}
+                        title="Floor actions"
+                        className="opacity-0 group-hover:opacity-100 w-6 h-6 rounded-md flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted transition-all shrink-0"
                       >
-                        <Pencil className="h-2.5 w-2.5" />
-                      </button>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); duplicateFloor(b.id, f.id); }}
-                        className="opacity-0 group-hover:opacity-100 w-5 h-5 rounded flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted transition-all shrink-0"
-                        title="Duplicate"
-                      >
-                        <Copy className="h-2.5 w-2.5" />
-                      </button>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); confirmDeleteFloor(b.id, f.id); }}
-                        className="opacity-0 group-hover:opacity-100 w-5 h-5 rounded flex items-center justify-center text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-all shrink-0"
-                        title="Delete"
-                      >
-                        <Trash2 className="h-2.5 w-2.5" />
+                        <MoreHorizontal className="h-3.5 w-3.5" />
                       </button>
                     </div>
                     {/* Rooms under this floor */}
@@ -686,6 +768,31 @@ export function HierarchyPanel({
         )}
       </AnimatePresence>
 
+      {/* Floor actions `...` menu — shared component + shared handlers */}
+      {floorMenu && (() => {
+        const targetBuilding = buildings.find((x) => x.id === floorMenu.buildingId);
+        const target = targetBuilding?.floors.find((f) => f.id === floorMenu.floorId);
+        if (!targetBuilding || !target) return null;
+        const index = targetBuilding.floors.findIndex((f) => f.id === target.id);
+        return (
+          <FloorActionsMenu
+            x={floorMenu.x}
+            y={floorMenu.y}
+            floor={target}
+            isFirst={index <= 0}
+            isLast={index >= targetBuilding.floors.length - 1}
+            isOnly={targetBuilding.floors.length <= 1}
+            testId="hierarchy-floor-actions-menu"
+            onClose={() => setFloorMenu(null)}
+            onRename={() => { setFloorMenu(null); renameFloor(floorMenu.buildingId, target.id); }}
+            onDuplicate={() => { setFloorMenu(null); duplicateFloor(floorMenu.buildingId, target.id); }}
+            onMoveUp={() => { setFloorMenu(null); moveFloor(floorMenu.buildingId, target.id, -1); }}
+            onMoveDown={() => { setFloorMenu(null); moveFloor(floorMenu.buildingId, target.id, 1); }}
+            onDelete={() => { setFloorMenu(null); confirmDeleteFloor(floorMenu.buildingId, target.id); }}
+          />
+        );
+      })()}
+
       {/* Rename dialog */}
       <AnimatePresence>
         {renameDialog && (
@@ -755,10 +862,10 @@ export function HierarchyPanel({
         title={deleteConfirm?.type === "floor" ? "Delete Floor" : "Delete Building"}
         message={
           deleteConfirm?.type === "floor"
-            ? `Are you sure you want to delete "${deleteConfirm?.name}"? This action cannot be undone.`
+            ? `Delete "${deleteConfirm?.name}" and its ${deleteConfirm?.itemCount ?? 0} authored ${(deleteConfirm?.itemCount ?? 0) === 1 ? "item" : "items"}? This action cannot be undone.`
             : `Are you sure you want to delete "${deleteConfirm?.name}"? This will also remove all its floors and rooms. This action cannot be undone.`
         }
-        confirmLabel="Delete"
+        confirmLabel={deleteConfirm?.type === "floor" ? "Delete Floor" : "Delete"}
         cancelLabel="Cancel"
         variant="danger"
         onConfirm={() => {

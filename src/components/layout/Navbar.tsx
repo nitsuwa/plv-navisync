@@ -9,6 +9,9 @@ import { ThemeToggle } from "../ui/ThemeToggle";
 import { useTheme } from "../../hooks/useTheme";
 import { PLVLogo } from "../ui/PLVLogo";
 import { useStudentAuth } from "../../hooks/useStudentAuth";
+import { useToast } from "../../hooks/useToast";
+import { reportService } from "../../services/reportService";
+import { notificationService } from "../../lib/notificationService";
 import { cn } from "../../lib/utils";
 
 const NAV_LINKS = [
@@ -27,6 +30,36 @@ export function Navbar() {
 
   const dropdownRef = useRef<HTMLDivElement>(null);
   const { loading: authLoading, isStudent, username, role, signOut } = useStudentAuth();
+  const toast = useToast();
+  const [reportNotifCount, setReportNotifCount] = useState(0);
+  const notifiedRef = useRef(false);
+
+  // Detect admin-side report status changes and surface them as a badge + toast.
+  useEffect(() => {
+    if (authLoading || !isStudent || notifiedRef.current) return;
+    let mounted = true;
+    (async () => {
+      try {
+        const reports = await reportService.getStudentReports();
+        if (!mounted || reports.length === 0) return;
+        const changes = notificationService.detectReportStatusChanges(reports);
+        if (changes.length > 0) {
+          const first = changes[0];
+          setReportNotifCount(changes.length);
+          notifiedRef.current = true;
+          toast.info(
+            "Report updated",
+            `"${first.title}" is now ${first.to.toLowerCase()}.`
+          );
+        }
+      } catch {
+        // Notifications are best-effort; never block the navbar.
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, [authLoading, isStudent, toast]);
 
   const handleStudentLogout = async () => {
     await signOut();
@@ -98,7 +131,7 @@ export function Navbar() {
               >
                 PLV <span style={{ color: showWhiteText ? "rgba(255,255,255,0.7)" : undefined }}>NaviSync</span>
               </span>
-              <span className="text-[8px] font-bold text-accent tracking-widest uppercase leading-none mt-0.5 block hidden sm:block"
+              <span className="text-[9px] font-bold text-accent tracking-widest uppercase leading-none mt-0.5 block hidden sm:block"
                 style={{ color: showWhiteText ? "rgba(200,152,12,0.9)" : undefined, transition: "color 200ms ease" }}>
                 Smart Campus Navigator
               </span>
@@ -205,6 +238,11 @@ export function Navbar() {
                         </Link>
                         <Link to="/student/reports" className="flex items-center gap-3 px-4 py-2.5 text-sm font-semibold text-foreground hover:bg-muted transition-colors">
                           <Flag className="h-4 w-4 text-muted-foreground shrink-0" /> My Reports
+                          {reportNotifCount > 0 && (
+                            <span className="ml-auto min-w-4 h-4 px-1 rounded-full bg-accent text-accent-foreground text-[9px] font-extrabold flex items-center justify-center">
+                              {reportNotifCount > 9 ? "9+" : reportNotifCount}
+                            </span>
+                          )}
                         </Link>
                       </div>
                       <div className="h-px mx-3 bg-border" />

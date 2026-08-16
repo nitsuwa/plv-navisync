@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from "motion/react";
 import { TablePageSkeleton } from "../components/ui/PageSkeleton";
 import { Plus, Search, Pencil, Trash2, X, Megaphone, Send, Archive, AlertCircle } from "lucide-react";
 import { useToast } from "../hooks/useToast";
+import { useEscToClose } from "../hooks/useEscToClose";
 import {
   announcementService,
   type ManagedAnnouncement,
@@ -15,7 +16,7 @@ import { Button } from "../components/ui/Button";
 import { FormField } from "../components/ui/FormField";
 import { EmptyState } from "../components/ui/EmptyState";
 import { SearchBar } from "../components/ui/SearchBar";
-import { formatDate } from "../lib/utils";
+import { cn, formatDate } from "../lib/utils";
 
 const CATEGORIES: AnnouncementCategory[] = ["general", "academic", "event", "emergency", "maintenance"];
 const PRIORITIES: AnnouncementPriority[] = ["low", "normal", "high", "urgent"];
@@ -55,10 +56,13 @@ export function AdminAnnouncementsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<AnnouncementStatus | "all">("all");
 
   const [showModal, setShowModal] = useState(false);
+  useEscToClose(() => setShowModal(false), showModal);
   const [editTarget, setEditTarget] = useState<ManagedAnnouncement | null>(null);
   const [archiveTarget, setArchiveTarget] = useState<ManagedAnnouncement | null>(null);
+  useEscToClose(() => setArchiveTarget(null), Boolean(archiveTarget));
 
   const [form, setForm] = useState<AnnouncementForm>(EMPTY_FORM);
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
@@ -91,9 +95,24 @@ export function AdminAnnouncementsPage() {
 
   if (loading) return <TablePageSkeleton rows={6} />;
 
+  const tabs: { key: AnnouncementStatus | "all"; label: string }[] = [
+    { key: "all", label: "All" },
+    { key: "published", label: "Published" },
+    { key: "draft", label: "Draft" },
+    { key: "archived", label: "Archived" },
+  ];
+
+  const counts: Record<string, number> = {
+    all: announcements.length,
+    published: announcements.filter((a) => a.status === "published").length,
+    draft: announcements.filter((a) => a.status === "draft").length,
+    archived: announcements.filter((a) => a.status === "archived").length,
+  };
+
   const filtered = announcements.filter((a) =>
-    a.title.toLowerCase().includes(search.toLowerCase()) ||
-    a.content.toLowerCase().includes(search.toLowerCase())
+    (statusFilter === "all" || a.status === statusFilter) &&
+    (a.title.toLowerCase().includes(search.toLowerCase()) ||
+     a.content.toLowerCase().includes(search.toLowerCase()))
   );
 
   const openAdd = () => {
@@ -213,16 +232,31 @@ export function AdminAnnouncementsPage() {
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.05, duration: 0.3 }}
-        className="max-w-sm"
+        className="flex flex-col sm:flex-row gap-3"
       >
-        <SearchBar
-          placeholder="Search announcements..."
-          value={search}
-          onSearch={setSearch}
-          onClear={() => setSearch("")}
-          showShortcutHint
-          size="md"
-        />
+        <div className="max-w-sm w-full">
+          <SearchBar
+            placeholder="Search announcements..."
+            value={search}
+            onSearch={setSearch}
+            onClear={() => setSearch("")}
+            showShortcutHint
+            size="md"
+          />
+        </div>
+        <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
+          {tabs.map((t) => (
+            <button key={t.key} type="button" onClick={() => setStatusFilter(t.key)}
+              className={cn("shrink-0 h-8 px-3 rounded-xl text-xs font-bold transition-all active:scale-[0.97]",
+                statusFilter === t.key ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted")}>
+              {t.label}
+              <span className={cn("ml-1.5 text-[10px] px-1.5 rounded-full",
+                statusFilter === t.key ? "bg-white/20" : "bg-muted text-foreground")}>
+                {counts[t.key]}
+              </span>
+            </button>
+          ))}
+        </div>
       </motion.div>
 
       <motion.div
@@ -278,10 +312,12 @@ export function AdminAnnouncementsPage() {
                           className="flex items-center gap-1.5 h-8 px-3 rounded-xl border border-border text-xs font-bold text-foreground hover:bg-muted active:scale-[0.97] transition-all">
                           <Pencil className="h-3.5 w-3.5" /> Edit
                         </button>
-                        <button type="button" onClick={() => setArchiveTarget(a)} disabled={busy}
-                          className="flex items-center gap-1.5 h-8 px-3 rounded-xl border border-destructive/30 text-xs font-bold text-destructive hover:bg-destructive/10 active:scale-[0.97] transition-all">
-                          <Archive className="h-3.5 w-3.5" /> Archive
-                        </button>
+                        {a.status !== "archived" && (
+                          <button type="button" onClick={() => setArchiveTarget(a)} disabled={busy}
+                            className="flex items-center gap-1.5 h-8 px-3 rounded-xl border border-destructive/30 text-xs font-bold text-destructive hover:bg-destructive/10 active:scale-[0.97] transition-all">
+                            <Archive className="h-3.5 w-3.5" /> Archive
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
