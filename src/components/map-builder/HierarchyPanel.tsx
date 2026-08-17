@@ -422,7 +422,7 @@ export function HierarchyPanel({
                     <Building2 className="h-4 w-4" style={{ color: type.color }} />
                   </div>
                   <div className="min-w-0 max-w-full text-center flex items-start justify-center h-7">
-                    <span className="block max-w-full text-[8.5px] font-bold text-foreground leading-tight group-hover:text-primary transition-colors line-clamp-2 break-words [overflow-wrap:anywhere]">
+                    <span className="block max-w-full text-[8px] font-bold text-foreground leading-tight group-hover:text-primary transition-colors line-clamp-2 break-words">
                       {type.label}
                     </span>
                   </div>
@@ -462,7 +462,7 @@ export function HierarchyPanel({
                   <div className="w-9 h-9 rounded-lg flex items-center justify-center group-hover:scale-110 transition-transform" style={{ backgroundColor: `${asset.color}12`, border: `1px solid ${asset.color}25` }}>
                     <DecorAssetVisual type={asset.type} className="w-5 h-6" style={{ opacity: 0.85 }} />
                   </div>
-                  <span className="block max-w-full text-[7.5px] font-semibold text-foreground/65 group-hover:text-foreground text-center leading-tight line-clamp-2 break-words [overflow-wrap:anywhere]">
+                  <span className="block max-w-full text-[8px] font-semibold text-foreground/65 group-hover:text-foreground text-center leading-tight line-clamp-2 break-words">
                     {asset.label}
                   </span>
                 </button>

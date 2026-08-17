@@ -2665,6 +2665,41 @@ describe("B5 Final — placed objects turn touching nav edges red", () => {
   });
 });
 
+describe("B6 manual-QA: compact asset labels", () => {
+  it("long labels use the compact line-clamped styling without character-level breaking", () => {
+    render(<Harness />);
+    fireEvent.click(screen.getByRole("button", { name: "Assets" }));
+
+    // Campus Objects label — the longest preset ("Administration") must keep the
+    // compact 2-line-clamped styling and NOT use [overflow-wrap:anywhere], which
+    // allowed ugly character-level mid-word breaks ("Administra / tion").
+    const adminButton = screen.getByRole("button", { name: /Administration/i });
+    const adminLabel = within(adminButton).getByText("Administration");
+    expect(adminLabel.className).toContain("line-clamp-2");
+    expect(adminLabel.className).toContain("break-words");
+    expect(adminLabel.className).not.toContain("overflow-wrap");
+
+    // Outdoor Decor labels share the same compact size ("Recycle Bin" wraps at
+    // the space, never mid-word).
+    const recycleButton = screen.getByRole("button", { name: /Recycle Bin/i });
+    const recycleLabel = within(recycleButton).getByText("Recycle Bin");
+    expect(recycleLabel.className).toContain("line-clamp-2");
+    expect(recycleLabel.className).toContain("break-words");
+    expect(recycleLabel.className).not.toContain("overflow-wrap");
+    expect(recycleLabel.className).toContain("text-[8px]");
+  });
+
+  it("asset controls remain usable (labels still render as draggable buttons)", () => {
+    render(<Harness />);
+    fireEvent.click(screen.getByRole("button", { name: "Assets" }));
+
+    for (const label of ["Academic", "Laboratory", "Library", "Gymnasium", "Administration", "Other"]) {
+      expect(screen.getByRole("button", { name: new RegExp(label) })).toBeTruthy();
+    }
+    expect(screen.getByRole("button", { name: /Large Tree/i })).toBeTruthy();
+  });
+});
+
 /** Read the camera (pan/zoom) from the svg content-group transform. */
 function cameraOf(container: HTMLElement): { pan: { x: number; y: number }; zoom: number } {
   const g = container.querySelector("svg > g[transform]");
