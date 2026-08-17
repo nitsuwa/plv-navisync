@@ -24,7 +24,9 @@ export default defineConfig(({ mode }) => {
     'VITE_SUPABASE_ANON_KEY',
     'VITE_ENABLE_DEMO_LOGIN',
     'VITE_DEMO_ADMIN_EMAIL',
+    'VITE_DEMO_ADMIN_PASSWORD',
     'VITE_DEMO_STUDENT_EMAIL',
+    'VITE_DEMO_STUDENT_PASSWORD',
   ] as const
 
   return {

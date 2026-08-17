@@ -5,6 +5,7 @@ import { cn } from "../lib/utils";
 import { SettingsSkeleton } from "../components/ui/PageSkeleton";
 import { useToast } from "../hooks/useToast";
 import { settingsService, DEFAULT_SETTINGS } from "../services/settingsService";
+import { useSupabaseRealtimeRefresh } from "../hooks/useSupabaseRealtimeData";
 
 const TABS = [
   { id: "general", label: "General", icon: Settings },
@@ -86,6 +87,8 @@ export function AdminSettingsPage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useSupabaseRealtimeRefresh({ channel: "settings", tables: ["system_settings"], onChange: load });
 
   useEffect(() => {
     load();

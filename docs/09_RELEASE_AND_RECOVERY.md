@@ -128,10 +128,13 @@ VITE_SUPABASE_PUBLISHABLE_KEY=<PUBLISHABLE_KEY>
 VITE_ENABLE_DEMO_LOGIN=false
 ```
 
-If reviewers need the non-secret selector, enable it and add only
-`VITE_DEMO_ADMIN_EMAIL` and `VITE_DEMO_STUDENT_EMAIL`. The Vite configuration
-uses an exact allowlist. Never add service-role keys, Supabase access tokens,
-database passwords, owner credentials, or demo passwords to a `VITE_*` value.
+If reviewers need the demo selector, enable it and configure the matching
+`VITE_DEMO_ADMIN_EMAIL`, `VITE_DEMO_ADMIN_PASSWORD`,
+`VITE_DEMO_STUDENT_EMAIL`, and `VITE_DEMO_STUDENT_PASSWORD` values. The Vite
+configuration uses an exact allowlist, and every `VITE_*` value is public in
+the browser bundle. These passwords must belong only to disposable demo users.
+Never add service-role keys, Supabase access tokens, database passwords, owner
+credentials, or any real user password to a `VITE_*` value.
 
 Before deploying:
 

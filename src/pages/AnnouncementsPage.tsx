@@ -1,11 +1,12 @@
-import { useState, useEffect } from "react";
+import { useMemo, useState } from "react";
 import { Bell, AlertTriangle, Filter, Search, Circle, Megaphone } from "lucide-react";
 import { AnnouncementCard } from "../components/ui/AnnouncementCard";
 import { SearchBar } from "../components/ui/SearchBar";
-import { MOCK_ANNOUNCEMENTS } from "../data/mockData";
 import { SkeletonList } from "../components/ui/Skeleton";
 import { EmptyState } from "../components/ui/EmptyState";
 import { cn } from "../lib/utils";
+import { usePublishedAnnouncements } from "../hooks/usePublishedAnnouncements";
+import type { Announcement } from "../types";
 
 const CATEGORIES = [
   { value: "all", label: "All" },
@@ -35,17 +36,26 @@ export function AnnouncementsPage() {
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("all");
   const [priority, setPriority] = useState("all");
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    const t = setTimeout(() => setLoading(false), 300);
-    return () => clearTimeout(t);
-  }, []);
+  const { announcements: rows, loading } = usePublishedAnnouncements();
+  const announcements = useMemo<Announcement[]>(
+    () => rows.map((row) => ({
+      id: row.id,
+      title: row.title,
+      content: row.content,
+      category: row.category as Announcement["category"],
+      priority: row.priority as Announcement["priority"],
+      published_at: row.createdAt,
+      expires_at: row.expiresAt ?? undefined,
+      author: "PLV Administration",
+      is_active: true,
+    })),
+    [rows],
+  );
 
   if (loading) return <SkeletonList count={5} />;
 
-  const urgent = MOCK_ANNOUNCEMENTS.filter((a) => a.priority === "urgent");
-  const filtered = MOCK_ANNOUNCEMENTS.filter((a) => {
+  const urgent = announcements.filter((a) => a.priority === "urgent");
+  const filtered = announcements.filter((a) => {
     const matchCat = category === "all" || a.category === category;
     const matchPri = priority === "all" || a.priority === priority;
     const matchSearch =

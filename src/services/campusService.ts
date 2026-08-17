@@ -341,6 +341,32 @@ export async function resolveActiveCampusId(): Promise<string | null> {
   return picked?.id ?? null;
 }
 
+/** Resolve the published campus that may own publicly visible operations. */
+export async function resolvePublishedCampusId(): Promise<string | null> {
+  const supabase = getSupabase();
+
+  const { data: preferred, error: preferredError } = await supabase
+    .from("campuses")
+    .select("id")
+    .eq("status", "published")
+    .eq("is_default", true)
+    .is("archived_at", null)
+    .maybeSingle();
+  assertOk(preferredError, "resolve published campus");
+  if (preferred?.id) return preferred.id;
+
+  const { data, error } = await supabase
+    .from("campuses")
+    .select("id")
+    .eq("status", "published")
+    .is("archived_at", null)
+    .order("created_at", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  assertOk(error, "resolve published campus");
+  return data?.id ?? null;
+}
+
 export async function getCampusById(id: string): Promise<Campus | null> {
   const { data, error } = await getSupabase().from("campuses").select("*").eq("id", id).maybeSingle();
   assertOk(error);

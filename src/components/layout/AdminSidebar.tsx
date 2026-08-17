@@ -11,13 +11,14 @@ import {
   CalendarDays,
   History,
 } from "lucide-react";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { cn } from "../../lib/utils";
 import { reportService } from "../../services/reportService";
 import { PLVLogo } from "../ui/PLVLogo";
 import { supabase } from "../../lib/supabase";
 import { motion, useReducedMotion } from "motion/react";
 import { sidebarSpring } from "../../config/animation";
+import { useSupabaseRealtimeRefresh } from "../../hooks/useSupabaseRealtimeData";
 
 // Core admin navigation — focused on essential workflows.
 // Buildings, Floor Plans, Routes, Locations, and Accessibility are managed
@@ -135,23 +136,19 @@ export function AdminSidebar({
   const [signingOut, setSigningOut] = useState(false);
   const [pendingReports, setPendingReports] = useState(0);
 
+  const loadPendingReports = useCallback(async () => {
+    try {
+      setPendingReports(await reportService.countPendingReports());
+    } catch {
+      setPendingReports(0);
+    }
+  }, []);
+
   // Real pending-report count for the Reports badge (0 = no badge shown).
   useEffect(() => {
-    let cancelled = false;
-
-    reportService
-      .countPendingReports()
-      .then((count) => {
-        if (!cancelled) setPendingReports(count);
-      })
-      .catch(() => {
-        if (!cancelled) setPendingReports(0);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    void loadPendingReports();
+  }, [loadPendingReports]);
+  useSupabaseRealtimeRefresh({ channel: "pending-report-badge", tables: ["reports"], onChange: loadPendingReports });
 
   const navItems = NAV_ITEMS.map((item) =>
     item.label === "Reports" && pendingReports > 0

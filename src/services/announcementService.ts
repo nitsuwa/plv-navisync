@@ -1,5 +1,5 @@
 import { getSupabase } from "../lib/supabase";
-import { resolveActiveCampusId } from "./campusService";
+import { resolveActiveCampusId, resolvePublishedCampusId } from "./campusService";
 import type { Tables, TablesInsert } from "../types/database.generated";
 import { logActivity } from "./activityLogService";
 
@@ -10,6 +10,7 @@ export type AnnouncementLocationInput = Omit<TablesInsert<"announcement_location
 export type AnnouncementCategory = "general" | "academic" | "event" | "emergency" | "maintenance";
 export type AnnouncementPriority = "low" | "normal" | "high" | "urgent";
 export type AnnouncementStatus = "draft" | "published" | "archived";
+export type AnnouncementScope = "global" | "campus";
 
 /** Public-facing announcement shape (consumed by the landing page). */
 export interface CampusAnnouncement {
@@ -19,6 +20,7 @@ export interface CampusAnnouncement {
   category: AnnouncementCategory | (string & {});
   priority: AnnouncementPriority | (string & {});
   status: AnnouncementStatus | (string & {});
+  scope: AnnouncementScope;
   startsAt?: string | null;
   expiresAt?: string | null;
   createdAt: string;
@@ -32,6 +34,7 @@ export interface ManagedAnnouncement {
   category: AnnouncementCategory;
   priority: AnnouncementPriority;
   status: AnnouncementStatus;
+  scope: AnnouncementScope;
   startsAt: string | null;
   expiresAt: string | null;
   createdBy: string | null;
@@ -46,6 +49,7 @@ export interface AnnouncementInput {
   category: AnnouncementCategory;
   priority: AnnouncementPriority;
   status: AnnouncementStatus;
+  scope?: AnnouncementScope;
   startsAt?: string | null;
   expiresAt?: string | null;
 }
@@ -56,27 +60,6 @@ export interface AnnouncementFilters {
   search?: string;
 }
 
-const MOCK_ANNOUNCEMENTS: CampusAnnouncement[] = [
-  {
-    id: "anc-1",
-    title: "Second Semester Registration & Enrolment Guidelines",
-    content: "Official enrolment schedule for AY 2025-2026. Please check your student portal for priority appointment dates.",
-    category: "academic",
-    priority: "high",
-    status: "published",
-    createdAt: new Date().toISOString(),
-  },
-  {
-    id: "anc-2",
-    title: "Main Academic Building Elevator Maintenance",
-    content: "Elevator B in the MAB will undergo scheduled servicing on Friday. Please use stairs or Elevator A.",
-    category: "maintenance",
-    priority: "normal",
-    status: "published",
-    createdAt: new Date(Date.now() - 86400000).toISOString(),
-  },
-];
-
 function toCampusAnnouncement(row: AnnouncementRow): CampusAnnouncement {
   return {
     id: row.id,
@@ -85,6 +68,7 @@ function toCampusAnnouncement(row: AnnouncementRow): CampusAnnouncement {
     category: row.category,
     priority: row.priority,
     status: row.status,
+    scope: row.audience_scope as AnnouncementScope,
     startsAt: row.starts_at,
     expiresAt: row.expires_at,
     createdAt: row.created_at,
@@ -99,6 +83,7 @@ function toManagedAnnouncement(row: AnnouncementRow): ManagedAnnouncement {
     category: row.category as AnnouncementCategory,
     priority: row.priority as AnnouncementPriority,
     status: (row.status as AnnouncementStatus) || "draft",
+    scope: (row.audience_scope as AnnouncementScope) || "global",
     startsAt: row.starts_at,
     expiresAt: row.expires_at,
     createdBy: row.created_by,
@@ -111,26 +96,63 @@ function toManagedAnnouncement(row: AnnouncementRow): ManagedAnnouncement {
 /** Public reader: only published, non-expired announcements, newest first. */
 export async function getPublishedAnnouncements(): Promise<CampusAnnouncement[]> {
   const supabase = getSupabase();
-  try {
-    const { data, error } = await supabase
-      .from("announcements")
-      .select("*")
-      .eq("status", "published")
-      .is("archived_at", null)
-      .order("created_at", { ascending: false });
+  const { data, error } = await supabase
+    .from("announcements")
+    .select("*")
+    .eq("status", "published")
+    .is("archived_at", null)
+    .order("created_at", { ascending: false });
 
-    if (!error && data && data.length > 0) {
-      // Filter expiry client-side to avoid brittle PostgREST `or()` filters.
-      const now = Date.now();
-      const visible = data.filter(
-        (row) => !row.expires_at || new Date(row.expires_at).getTime() >= now
-      );
-      if (visible.length > 0) return visible.map(toCampusAnnouncement);
-    }
-  } catch (err) {
-    console.warn("Using mock announcements fallback:", err);
+  if (error) throw error;
+
+  // RLS enforces the same publication window. This local check also removes
+  // announcements that expire while a public page remains open.
+  const now = Date.now();
+  return (data ?? [])
+    .filter((row) => {
+      const hasStarted = !row.starts_at || new Date(row.starts_at).getTime() <= now;
+      const hasNotExpired = !row.expires_at || new Date(row.expires_at).getTime() >= now;
+      return hasStarted && hasNotExpired;
+    })
+    .map(toCampusAnnouncement);
+}
+
+const NO_PUBLISHED_CAMPUS_MESSAGE =
+  "Campus-scoped announcements require a published campus. Choose System-wide or publish the campus first.";
+
+async function requirePublishedCampus(campusId: string | null): Promise<void> {
+  if (!campusId) throw new Error(NO_PUBLISHED_CAMPUS_MESSAGE);
+  const { data: campus, error: campusError } = await getSupabase()
+    .from("campuses")
+    .select("id")
+    .eq("id", campusId)
+    .eq("status", "published")
+    .is("archived_at", null)
+    .maybeSingle();
+  if (campusError) throw campusError;
+  if (!campus) throw new Error(NO_PUBLISHED_CAMPUS_MESSAGE);
+}
+
+async function requireAnnouncementPublicationAllowed(
+  announcementId: string,
+  changes: Pick<Partial<AnnouncementInput>, "scope" | "status"> = {},
+): Promise<void> {
+  const { data, error } = await getSupabase()
+    .from("announcements")
+    .select("campus_id, audience_scope, status")
+    .eq("id", announcementId)
+    .single();
+  if (error) throw error;
+
+  const nextScope = changes.scope ?? (data.audience_scope as AnnouncementScope);
+  const nextStatus = changes.status ?? (data.status as AnnouncementStatus);
+  if (nextScope === "campus" && nextStatus === "published") {
+    await requirePublishedCampus(data.campus_id);
   }
-  return MOCK_ANNOUNCEMENTS;
+}
+
+export async function canPublishAnnouncements(): Promise<boolean> {
+  return Boolean(await resolvePublishedCampusId());
 }
 
 // ── Admin announcement management ─────────────────────────────────────────
@@ -163,11 +185,22 @@ export async function createAnnouncement(input: AnnouncementInput): Promise<Mana
   const userId = userData?.user?.id;
   if (!userId) throw new Error("You must be signed in to post an announcement.");
 
-  const campusId = await resolveActiveCampusId();
-  if (!campusId) throw new Error("No active campus found. Create a campus before posting announcements.");
+  const scope = input.scope ?? "global";
+  const campusId = scope === "campus"
+    ? input.status === "published"
+      ? await resolvePublishedCampusId()
+      : await resolveActiveCampusId()
+    : null;
+  if (scope === "campus" && input.status === "published" && !campusId) {
+    throw new Error(NO_PUBLISHED_CAMPUS_MESSAGE);
+  }
+  if (scope === "campus" && !campusId) {
+    throw new Error("No active campus found. Create a campus or choose a system-wide announcement.");
+  }
 
   const row: TablesInsert<"announcements"> = {
     campus_id: campusId,
+    audience_scope: scope,
     title: input.title,
     content: input.content,
     category: input.category,
@@ -192,6 +225,9 @@ export async function createAnnouncement(input: AnnouncementInput): Promise<Mana
 
 /** Update an announcement's fields. */
 export async function updateAnnouncement(id: string, changes: Partial<AnnouncementInput>): Promise<void> {
+  if (changes.status === "published" || changes.scope !== undefined) {
+    await requireAnnouncementPublicationAllowed(id, changes);
+  }
   const supabase = getSupabase();
   const row: TablesInsert<"announcements"> = { updated_at: new Date().toISOString() };
   if (changes.title !== undefined) row.title = changes.title;
@@ -199,6 +235,7 @@ export async function updateAnnouncement(id: string, changes: Partial<Announceme
   if (changes.category !== undefined) row.category = changes.category;
   if (changes.priority !== undefined) row.priority = changes.priority;
   if (changes.status !== undefined) row.status = changes.status;
+  if (changes.scope !== undefined) row.audience_scope = changes.scope;
   if (changes.startsAt !== undefined) row.starts_at = changes.startsAt ?? null;
   if (changes.expiresAt !== undefined) row.expires_at = changes.expiresAt ?? null;
 
@@ -210,6 +247,7 @@ export async function updateAnnouncement(id: string, changes: Partial<Announceme
 
 /** Publish a draft announcement so it appears on the public feed. */
 export async function publishAnnouncement(id: string): Promise<void> {
+  await requireAnnouncementPublicationAllowed(id, { status: "published" });
   const supabase = getSupabase();
   const { error } = await supabase
     .from("announcements")
@@ -259,4 +297,5 @@ export const announcementService = {
   archiveAnnouncement,
   listAnnouncementLocations,
   replaceAnnouncementLocations,
+  canPublishAnnouncements,
 };

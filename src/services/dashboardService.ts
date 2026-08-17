@@ -20,6 +20,15 @@ export interface DashboardStats {
   weeklyActivity: { day: string; count: number }[];
 }
 
+export interface DatabaseActivityAnalytics {
+  byDay: { day: string; updates: number; reports: number }[];
+  adminEvents: number;
+  routeVisits: number;
+  reportsCreated: number;
+  favoritesSaved: number;
+  topDestinations: { name: string; count: number }[];
+}
+
 export interface RecentActivityItem {
   id: string;
   action: string;
@@ -124,7 +133,58 @@ export async function getRecentActivity(limit = 6): Promise<RecentActivityItem[]
   }));
 }
 
+/** Seven-day analytics sourced only from persisted database records. */
+export async function getDatabaseActivity(days = 7): Promise<DatabaseActivityAnalytics> {
+  const client = getSupabase();
+  const cutoff = new Date(Date.now() - (days - 1) * 86400000);
+  cutoff.setHours(0, 0, 0, 0);
+  const cutoffIso = cutoff.toISOString();
+
+  const [logs, reportsResult, destinationsResult, favoritesResult] = await Promise.all([
+    listActivityLogs({ from: cutoffIso, limit: 1000 }),
+    client.from("reports").select("created_at").gte("created_at", cutoffIso).is("archived_at", null),
+    client.from("recent_destinations").select("name, visit_count, last_visited_at").gte("last_visited_at", cutoffIso),
+    client.from("favorites").select("created_at").gte("created_at", cutoffIso),
+  ]);
+
+  const firstError = [reportsResult.error, destinationsResult.error, favoritesResult.error].find(Boolean);
+  if (firstError) throw firstError;
+
+  const reports = reportsResult.data ?? [];
+  const destinations = destinationsResult.data ?? [];
+  const favorites = favoritesResult.data ?? [];
+  const dayMap = new Map<string, { updates: number; reports: number }>();
+  for (let index = days - 1; index >= 0; index--) {
+    const day = new Date(Date.now() - index * 86400000).toISOString().slice(0, 10);
+    dayMap.set(day, { updates: 0, reports: 0 });
+  }
+  logs.forEach((row) => {
+    const item = dayMap.get(row.created_at.slice(0, 10));
+    if (item) item.updates += 1;
+  });
+  reports.forEach((row) => {
+    const item = dayMap.get(row.created_at.slice(0, 10));
+    if (item) item.reports += 1;
+  });
+
+  const destinationTotals = new Map<string, number>();
+  destinations.forEach((row) => destinationTotals.set(row.name, (destinationTotals.get(row.name) ?? 0) + row.visit_count));
+
+  return {
+    byDay: [...dayMap.entries()].map(([day, values]) => ({ day, ...values })),
+    adminEvents: logs.length,
+    routeVisits: destinations.reduce((sum, row) => sum + row.visit_count, 0),
+    reportsCreated: reports.length,
+    favoritesSaved: favorites.length,
+    topDestinations: [...destinationTotals.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 6)
+      .map(([name, count]) => ({ name, count })),
+  };
+}
+
 export const dashboardService = {
   getDashboardStats,
   getRecentActivity,
+  getDatabaseActivity,
 };

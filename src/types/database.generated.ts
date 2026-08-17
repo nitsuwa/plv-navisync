@@ -159,7 +159,8 @@ export type Database = {
       announcements: {
         Row: {
           archived_at: string | null
-          campus_id: string
+          audience_scope: string
+          campus_id: string | null
           category: string
           content: string
           created_at: string
@@ -174,7 +175,8 @@ export type Database = {
         }
         Insert: {
           archived_at?: string | null
-          campus_id: string
+          audience_scope?: string
+          campus_id?: string | null
           category: string
           content: string
           created_at?: string
@@ -189,7 +191,8 @@ export type Database = {
         }
         Update: {
           archived_at?: string | null
-          campus_id?: string
+          audience_scope?: string
+          campus_id?: string | null
           category?: string
           content?: string
           created_at?: string

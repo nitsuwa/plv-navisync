@@ -16,6 +16,7 @@ import {
   type ManagedEventStatus,
   type EventInput,
 } from "../services/eventService";
+import { useSupabaseRealtimeRefresh } from "../hooks/useSupabaseRealtimeData";
 
 const EVENT_CATEGORIES = ["Academic", "Sports", "Cultural", "Administrative", "Student Affairs"];
 
@@ -229,6 +230,8 @@ export function AdminEventsPage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [statusFilter, search]);
+
+  useSupabaseRealtimeRefresh({ channel: "events", tables: ["events", "event_locations", "event_stalls"], onChange: loadEvents });
 
   useEffect(() => {
     loadEvents();

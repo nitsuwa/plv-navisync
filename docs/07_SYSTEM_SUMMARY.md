@@ -114,7 +114,7 @@ Lahat ng services ay may **live Supabase + in-memory mock fallback** (kapag wala
 | `buildingService` | list (search/filter/paginate), create, update, delete | `buildings` |
 | `reportService` | `submitReport`, `getStudentReports`, `uploadReportImage`, `countPendingReports`, `listAllReports`, `updateReportStatus`, `updateReportInternalNotes`, `archiveReport`, `getReportHistory` | `reports` |
 | `eventService` | `getPublishedAnnouncements`, `getUpcomingEvents`, `listEvents`, `createEvent`, `updateEvent`, `archiveEvent` | `campus_events` |
-| `announcementService` | `getPublishedAnnouncements`, `listAnnouncements`, `createAnnouncement`, `updateAnnouncement`, `publishAnnouncement`, `archiveAnnouncement` | `announcements` |
+| `announcementService` | Realtime public feed plus system-wide/campus-scoped create, update, publish, and archive workflows | `announcements` |
 | `settingsService` | `getSettings`, `getPublicSettings`, `upsertSettings`, `DEFAULT_SETTINGS` | `settings` |
 | `activityLogService` | `logActivity`, `listActivityLogs`, `readableActionLabel`, `timeAgoLabel` | `activity_logs` |
 | `dashboardService` | `getDashboardStats`, `getRecentActivity` | aggregates |

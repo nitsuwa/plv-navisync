@@ -15,7 +15,8 @@
     "verify:a6": "node scripts/verify-a6-publishing.mjs",
     "verify:a7": "node scripts/verify-a7-operations.mjs",
     "verify:a8": "node scripts/verify-a8-security-matrix.mjs",
-    "verify:a9": "node scripts/verify-a9-release-readiness.mjs"
+    "verify:a9": "node scripts/verify-a9-release-readiness.mjs",
+    "verify:admin-realtime": "node scripts/verify-admin-realtime.mjs"
   },
   "dependencies": {
     "@emotion/react": "11.14.0",

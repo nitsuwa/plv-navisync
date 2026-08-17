@@ -1,565 +1,124 @@
-import { useState } from "react";
-import { motion } from "motion/react";import { Building2, Plus, Search, Pencil, Trash2, Eye, MapPin, Clock, Phone,
-  Layers, School, ExternalLink, Sparkles, Users, GraduationCap, X,
-} from "lucide-react";
+import { useMemo, useState } from "react";
 import { Link } from "react-router";
-import { cn } from "../lib/utils";
-import { Button } from "../components/ui/Button";
-import { BuildingCategoryBadge } from "../components/ui/Badge";
-import { SearchBar } from "../components/ui/SearchBar";
-import { StatCard } from "../components/ui/StatCard";
+import { Building2, Layers3, Map, Search, ShieldCheck } from "lucide-react";
 import { EmptyState } from "../components/ui/EmptyState";
 import { TablePageSkeleton } from "../components/ui/PageSkeleton";
-import { FormField } from "../components/ui/FormField";
-import { useDataList, useCrudModal, useToast } from "../hooks";
-import { buildingService } from "../services";
-import { FLOOR_PLANS } from "../data/floorPlans";
-import type { DbBuilding } from "../services/types";
-import type { Building } from "../types";
+import { LiveDataStatus } from "../components/admin/LiveDataStatus";
+import { cn } from "../lib/utils";
+import { useSupabaseRealtimeData } from "../hooks/useSupabaseRealtimeData";
+import {
+  ADMIN_MAP_REALTIME_TABLES,
+  loadAdminMapInventory,
+} from "../services/adminMapDataService";
 
-// ── Adapt DbBuilding → Building (UI type) ─────────────────────────────────
-function toUiBuilding(db: DbBuilding): Building {
-  return {
-    id: db.id,
-    name: db.name,
-    code: db.code,
-    description: db.description,
-    category: db.category,
-    floor_count: db.floor_count,
-    image_url: db.image_url,
-    latitude: db.latitude,
-    longitude: db.longitude,
-    departments: db.departments,
-    operating_hours: db.operating_hours,
-    contact: db.contact,
-    created_at: db.created_at,
-  };
-}
-
-const initialForm = {
-  name: "", code: "", description: "", category: "academic" as Building["category"],
-  floor_count: 1, operating_hours: "", contact: "",
-};
-
-// ── Derived category counts ────────────────────────────────────────────────
-interface CategoryCount {
-  key: string;
-  label: string;
-  icon: React.ElementType;
-  variant: "primary" | "accent" | "success" | "warning" | "secondary";
-}
-
-const CATEGORIES: CategoryCount[] = [
-  { key: "academic",  label: "Academic",  icon: GraduationCap, variant: "primary"  },
-  { key: "admin",     label: "Admin",     icon: School,        variant: "accent"   },
-  { key: "facility",  label: "Facility",  icon: Layers,        variant: "success"  },
-  { key: "sports",    label: "Sports",    icon: Users,         variant: "warning"  },
-];
+const ROOM_TYPES = new Set([
+  "room", "classroom", "laboratory", "office", "restroom", "clinic",
+  "library", "canteen", "information_desk", "storage", "custom",
+]);
 
 export function AdminBuildingsPage() {
-  const toast = useToast();
-  const {
-    data: buildings,
-    loading,
-    search,
-    setSearch,
-  } = useDataList({
-    fetcher: (params) => buildingService.list(params),
-    pageSize: 50,
+  const [search, setSearch] = useState("");
+  const [campusFilter, setCampusFilter] = useState("all");
+  const live = useSupabaseRealtimeData({
+    channel: "buildings-inventory",
+    tables: ADMIN_MAP_REALTIME_TABLES,
+    load: loadAdminMapInventory,
   });
 
-  
-  const [categoryFilter, setCategoryFilter] = useState("all");
-  const [form, setForm] = useState(initialForm);
-  const [formErrors, setFormErrors] = useState<Record<string, string>>({});
-  const modal = useCrudModal<Building>();
-
-  // Page-level category filter; search is handled server-side by useDataList
-  const filtered = buildings
-    .map(toUiBuilding)
-    .filter((b) => categoryFilter === "all" || b.category === categoryFilter);
-
-  // Enrich with floor plan data
-  const enriched = filtered.map((b) => {
-    const fp = FLOOR_PLANS[b.id];
-    return {
-      ...b,
-      hasFloorPlan: !!fp,
-      floorPlanFloors: fp?.floors.length ?? 0,
-      totalRooms: fp?.floors.reduce((s, f) => s + f.rooms.length, 0) ?? 0,
-    };
-  });
-
-  // Category counts
-  const catCounts = CATEGORIES.map((c) => ({
-    ...c,
-    count: buildings.map(toUiBuilding).filter((b) => b.category === c.key).length,
-  }));
-
-  const openAdd = () => {
-    setForm(initialForm);
-    setFormErrors({});
-    modal.openAdd();
-  };
-
-  const openEdit = (b: Building) => {
-    setForm({
-      name: b.name, code: b.code, description: b.description,
-      category: b.category, floor_count: b.floor_count,
-      operating_hours: b.operating_hours ?? "", contact: b.contact ?? "",
+  const rows = useMemo(() => {
+    if (!live.data) return [];
+    const campuses = new Map(live.data.campuses.map((campus) => [campus.id, campus]));
+    return live.data.buildings.map((building) => {
+      const floors = live.data!.floors.filter((floor) => floor.building_id === building.id);
+      const rooms = live.data!.elements.filter(
+        (element) => element.building_id === building.id && ROOM_TYPES.has(element.element_type),
+      );
+      return { building, campus: campuses.get(building.campus_id), floors: floors.length, rooms: rooms.length };
     });
-    setFormErrors({});
-    modal.openEdit(b);
-  };
+  }, [live.data]);
 
-  const handleSave = async () => {
-    const errors: Record<string, string> = {};
-    if (!form.name.trim()) errors.name = "Building name is required";
-    if (!form.code.trim()) errors.code = "Building code is required";
-    if (Object.keys(errors).length > 0) { setFormErrors(errors); return; }
-    setFormErrors({});
-    if (modal.editTarget) {
-      await buildingService.update(modal.editTarget.id, form);
-      toast.success("Building updated", `${form.name} has been updated.`);
-    } else {
-      await buildingService.create(form as unknown as Omit<DbBuilding, "id">);
-      toast.success("Building added", `${form.name} has been added.`);
-    }
-    modal.close();
-  };
+  const filtered = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    return rows.filter(({ building, campus }) => {
+      if (campusFilter !== "all" && building.campus_id !== campusFilter) return false;
+      if (!query) return true;
+      return [building.name, building.code, building.category, campus?.name]
+        .some((value) => value?.toLowerCase().includes(query));
+    });
+  }, [campusFilter, rows, search]);
 
-  const handleDelete = async (id: string) => {
-    const deleted = buildings.find((b) => b.id === id) as DbBuilding | undefined;
-    if (deleted) {
-      await buildingService.remove(id);
-      toast.success("Building deleted", `${deleted.name} has been removed.`);
-    }
-  };
+  if (live.loading && !live.data) return <TablePageSkeleton rows={6} />;
 
-  if (loading) return <TablePageSkeleton rows={6} />;
+  const accessible = rows.filter(({ building }) => building.is_accessible).length;
+  const visible = rows.filter(({ building }) => building.is_visible).length;
 
   return (
     <div className="space-y-6 animate-fade-in">
-      {/* ═══════════════════════════════════════════════════════════════
-           HEADER
-         ═══════════════════════════════════════════════════════════════ */}
-      <motion.div
-        initial={{ opacity: 0, y: -8 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
-        className="flex items-start justify-between gap-4"
-      >
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-extrabold text-foreground">Manage Buildings</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            {buildings.length} buildings in the directory · {Object.keys(FLOOR_PLANS).length} with floor plans
+          <h1 className="text-2xl font-extrabold text-foreground">Buildings</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Live building inventory from the administrator authoring database.
           </p>
         </div>
-        <Button onClick={openAdd} variant="primary">
-          <Plus className="h-3.5 w-3.5" /> Add Building
-        </Button>
-      </motion.div>
+        <div className="flex items-center gap-2">
+          <LiveDataStatus connected={live.realtimeConnected} refreshing={live.refreshing} lastUpdatedAt={live.lastUpdatedAt} onRefresh={() => void live.refresh()} />
+          <Link to="/admin-dashboard/map-builder" className="inline-flex h-9 items-center gap-2 rounded-xl bg-primary px-3 text-xs font-bold text-primary-foreground hover:bg-primary/90">
+            <Map className="h-3.5 w-3.5" /> Open Map Builder
+          </Link>
+        </div>
+      </div>
 
-      {/* ═══════════════════════════════════════════════════════════════
-           SUMMARY METRICS ROW
-         ═══════════════════════════════════════════════════════════════ */}
-      <motion.div
-        initial="hidden"
-        animate="visible"
-        variants={{ visible: { transition: { staggerChildren: 0.04 } } }}
-        className="grid grid-cols-2 sm:grid-cols-4 gap-3"
-      >
-        {/* Total */}
-        <motion.div
-          variants={{ hidden: { opacity: 0, y: 12 }, visible: { opacity: 1, y: 0 } }}
-        >
-          <StatCard
-            title="Total Buildings"
-            value={buildings.length}
-            subtitle={`${Object.keys(FLOOR_PLANS).length} with plans`}
-            icon={Building2}
-            variant="primary"
-          />
-        </motion.div>
-        {catCounts.map((c) => (
-          <motion.div
-            key={c.key}
-            variants={{ hidden: { opacity: 0, y: 12 }, visible: { opacity: 1, y: 0 } }}
-          >
-            <StatCard
-              title={c.label}
-              value={c.count}
-              icon={c.icon}
-              variant={c.variant}
-            />
-          </motion.div>
+      {live.error && <div className="rounded-xl border border-destructive/25 bg-destructive/10 px-4 py-3 text-sm text-destructive">{live.error}</div>}
+
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        {[
+          { label: "Buildings", value: rows.length, icon: Building2 },
+          { label: "Visible", value: visible, icon: ShieldCheck },
+          { label: "Accessible", value: accessible, icon: ShieldCheck },
+          { label: "Floors", value: live.data?.floors.length ?? 0, icon: Layers3 },
+        ].map(({ label, value, icon: Icon }) => (
+          <div key={label} className="rounded-2xl border border-border bg-card p-4 shadow-sm">
+            <div className="mb-2 flex items-center justify-between"><p className="text-xs font-bold text-muted-foreground">{label}</p><Icon className="h-4 w-4 text-primary" /></div>
+            <p className="text-2xl font-extrabold text-foreground">{value}</p>
+          </div>
         ))}
-      </motion.div>
+      </div>
 
-      {/* ═══════════════════════════════════════════════════════════════
-           SEARCH & FILTERS
-         ═══════════════════════════════════════════════════════════════ */}
-      <motion.div
-        initial={{ opacity: 0, y: 8 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.1, duration: 0.3 }}
-        className="flex flex-col sm:flex-row gap-3 items-start sm:items-center"
-      >
-        <div className="flex-1 max-w-sm w-full">
-          <SearchBar
-            placeholder="Search buildings by name, code, or department..."
-            value={search}
-            onSearch={setSearch}
-            onClear={() => setSearch("")}
-            showShortcutHint
-            size="md"
-          />
-        </div>
-        <div className="flex gap-1.5 overflow-x-auto no-scrollbar w-full sm:w-auto">
-          {[
-            { key: "all", label: "All", icon: Building2 },
-            { key: "academic", label: "Academic", icon: GraduationCap },
-            { key: "admin", label: "Admin", icon: School },
-            { key: "facility", label: "Facility", icon: Layers },
-            { key: "sports", label: "Sports", icon: Users },
-          ].map((c) => {
-            const Icon = c.icon;
-            return (
-              <button
-                key={c.key}
-                type="button"
-                onClick={() => setCategoryFilter(c.key)}
-                className={cn(
-                  "shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all",
-                  categoryFilter === c.key
-                    ? "bg-primary text-primary-foreground shadow-sm"
-                    : "bg-muted text-muted-foreground hover:bg-secondary"
-                )}
-              >
-                <Icon className="h-3.5 w-3.5" />
-                {c.label}
-              </button>
-            );
-          })}
-        </div>
-      </motion.div>
+      <div className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-4 sm:flex-row">
+        <label className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search building, code, category, or campus" className="h-10 w-full rounded-xl border border-border bg-input-background pl-9 pr-3 text-sm text-foreground outline-none focus:ring-2 focus:ring-primary/30" />
+        </label>
+        <select value={campusFilter} onChange={(event) => setCampusFilter(event.target.value)} className="h-10 rounded-xl border border-border bg-input-background px-3 text-sm text-foreground outline-none focus:ring-2 focus:ring-primary/30">
+          <option value="all">All campuses</option>
+          {live.data?.campuses.map((campus) => <option key={campus.id} value={campus.id}>{campus.name}</option>)}
+        </select>
+      </div>
 
-      {/* ═══════════════════════════════════════════════════════════════
-           BUILDING CARDS GRID
-         ═══════════════════════════════════════════════════════════════ */}
-      {enriched.length === 0 ? (
-        <EmptyState
-          icon={search || categoryFilter !== "all" ? Search : Building2}
-          title={search || categoryFilter !== "all" ? "No buildings found" : "No buildings yet"}
-          description={search || categoryFilter !== "all"
-            ? "No buildings match your search or category. Try a different keyword."
-            : "Add campus buildings with floor plans, departments, and operating hours."
-          }
-          action={
-            search || categoryFilter !== "all" ? (
-              <Button variant="outline" onClick={() => { setSearch(""); setCategoryFilter("all"); }}>
-                Clear Filters
-              </Button>
-            ) : (
-              <Button variant="primary" onClick={openAdd}>
-                <Plus className="h-3.5 w-3.5" /> Add Building
-              </Button>
-            )
-          }
-        />
+      {filtered.length === 0 ? (
+        <EmptyState icon={Building2} title="No buildings found" description="No live database rows match the current filters." />
       ) : (
-        <motion.div
-          initial="hidden"
-          animate="visible"
-          variants={{ visible: { transition: { staggerChildren: 0.03 } } }}
-          className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4"
-        >
-          {enriched.map((b, i) => (
-            <motion.div
-              key={b.id}
-              variants={{
-                hidden: { opacity: 0, y: 16 },
-                visible: { opacity: 1, y: 0 },
-              }}
-            >
-              <div
-                className="group relative flex flex-col bg-card rounded-2xl border border-border shadow-sm overflow-hidden
-                            hover:shadow-lg hover:-translate-y-1 hover:border-primary/20 transition-all duration-300"
-              >
-                {/* Image section */}
-                <div className="relative h-36 overflow-hidden bg-muted shrink-0">
-                  {b.image_url ? (
-                    <img
-                      src={b.image_url}
-                      alt={b.name}
-                      className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
-                    />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-secondary to-muted">
-                      <Building2 className="h-12 w-12 text-muted-foreground/30" />
-                    </div>
-                  )}
-                  {/* Gradient overlay */}
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-transparent" />
-
-                  {/* Category badge */}
-                  <div className="absolute top-3 left-3">
-                    <BuildingCategoryBadge category={b.category} />
-                  </div>
-
-                  {/* Code badge */}
-                  <div className="absolute top-3 right-3 bg-primary/90 backdrop-blur-sm text-primary-foreground text-xs font-mono font-bold px-2.5 py-1 rounded-lg shadow-sm">
-                    {b.code}
-                  </div>
-
-                  {/* Floor plan indicator */}
-                  {b.hasFloorPlan && (
-                    <div className="absolute bottom-3 left-3 flex items-center gap-1.5 bg-black/50 backdrop-blur-sm text-white/90 text-[10px] font-bold px-2 py-1 rounded-lg">
-                      <Layers className="h-3 w-3" />
-                      {b.floorPlanFloors} floors · {b.totalRooms} rooms
-                    </div>
-                  )}
-                </div>
-
-                {/* Content section */}
-                <div className="flex-1 flex flex-col p-4">
-                  {/* Name */}
-                  <h3 className="font-bold text-foreground text-sm leading-snug mb-1 group-hover:text-primary transition-colors line-clamp-1">
-                    {b.name}
-                  </h3>
-
-                  {/* Description */}
-                  <p className="text-xs text-muted-foreground leading-relaxed line-clamp-2 mb-3 flex-1" style={{ fontFamily: "var(--font-body)" }}>
-                    {b.description}
-                  </p>
-
-                  {/* Meta rows */}
-                  <div className="space-y-1.5 text-[11px] text-muted-foreground mb-3">
-                    {b.operating_hours && (
-                      <div className="flex items-center gap-1.5">
-                        <Clock className="h-3 w-3 shrink-0 text-primary/60" />
-                        <span className="truncate">{b.operating_hours}</span>
-                      </div>
-                    )}
-                    {b.contact && (
-                      <div className="flex items-center gap-1.5">
-                        <Phone className="h-3 w-3 shrink-0 text-primary/60" />
-                        <span>{b.contact}</span>
-                      </div>
-                    )}
-                    <div className="flex items-center gap-1.5">
-                      <MapPin className="h-3 w-3 shrink-0 text-primary/60" />
-                      <span>
-                        {b.floor_count} {b.floor_count === 1 ? "story" : "stories"}
-                        {b.departments && b.departments.length > 0 && ` · ${b.departments.length} dept${b.departments.length > 1 ? "s" : ""}`}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Departments */}
-                  {b.departments && b.departments.length > 0 && (
-                    <div className="flex flex-wrap gap-1 mb-3">
-                      {b.departments.slice(0, 3).map((d) => (
-                        <span
-                          key={d}
-                          className="text-[9px] font-semibold text-muted-foreground bg-muted px-1.5 py-0.5 rounded-md truncate max-w-[120px]"
-                        >
-                          {d}
-                        </span>
-                      ))}
-                      {b.departments.length > 3 && (
-                        <span className="text-[9px] text-muted-foreground font-bold">
-                          +{b.departments.length - 3}
-                        </span>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Actions footer */}
-                  <div className="pt-3 border-t border-border flex items-center justify-between">
-                    <div className="flex items-center gap-1">
-                      <Link to={`/buildings/${b.id}`} target="_blank">
-                        <button
-                          className="w-7 h-7 rounded-lg flex items-center justify-center text-muted-foreground hover:bg-muted hover:text-foreground transition-all"
-                          title="View public page"
-                        >
-                          <Eye className="h-3.5 w-3.5" />
-                        </button>
-                      </Link>
-                      <button
-                        onClick={() => openEdit(b)}
-                        className="w-7 h-7 rounded-lg flex items-center justify-center text-muted-foreground hover:bg-primary/10 hover:text-primary transition-all"
-                        title="Edit building"
-                      >
-                        <Pencil className="h-3.5 w-3.5" />
-                      </button>
-                      <button
-                        onClick={() => modal.confirmDelete(b.id)}
-                        className="w-7 h-7 rounded-lg flex items-center justify-center text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-all"
-                        title="Delete building"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
-                    <Link
-                      to={`/buildings/${b.id}`}
-                      target="_blank"
-                      className="flex items-center gap-1 text-[10px] font-bold text-primary opacity-0 group-hover:opacity-100 transition-opacity"
-                    >
-                      Details <ExternalLink className="h-3 w-3" />
-                    </Link>
-                  </div>
-                </div>
-              </div>
-            </motion.div>
-          ))}
-        </motion.div>
-      )}
-
-      {/* ═══════════════════════════════════════════════════════════════
-           ADD/EDIT MODAL
-         ═══════════════════════════════════════════════════════════════ */}
-      {modal.isOpen && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
-          onClick={modal.close}
-          role="dialog" aria-modal="true" aria-label={modal.editTarget ? "Edit building" : "Add building"}
-        >
-          <motion.div
-            initial={{ opacity: 0, scale: 0.92, y: 20 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            transition={{ type: "spring", duration: 0.4, bounce: 0.25 }}
-            className="bg-card rounded-2xl border border-border shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto scrollbar-show-on-hover"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Modal header */}
-            <div className="flex items-center justify-between px-6 py-4 border-b border-border sticky top-0 bg-card rounded-t-2xl z-10">
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
-                  {modal.editTarget ? <Pencil className="h-4 w-4 text-primary" /> : <Plus className="h-4 w-4 text-primary" />}
-                </div>
-                <div>
-                  <h2 className="font-extrabold text-foreground text-sm">
-                    {modal.editTarget ? "Edit Building" : "Add Building"}
-                  </h2>
-                </div>
-              </div>
-              <button type="button" aria-label="Close modal" onClick={modal.close} className="w-8 h-8 rounded-xl flex items-center justify-center text-muted-foreground hover:bg-muted transition-colors shrink-0">
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-
-            {/* Modal body */}
-            <div className="p-6 space-y-4">
-              <FormField
-                label="Building Name" id="bldg-name" value={form.name}
-                onChange={(v) => { setForm(f => ({ ...f, name: v })); if (formErrors.name) setFormErrors(prev => { const n = {...prev}; delete n.name; return n; }); }}
-                error={formErrors.name} placeholder="e.g. Main Academic Building"
-                helper="The official name of the building" required maxLength={100} showCharCount
-              />
-              <FormField
-                label="Building Code" id="bldg-code" value={form.code}
-                onChange={(v) => { setForm(f => ({ ...f, code: v })); if (formErrors.code) setFormErrors(prev => { const n = {...prev}; delete n.code; return n; }); }}
-                error={formErrors.code} placeholder="e.g. MAB"
-                helper="Short acronym, e.g. MAB, SSC, ADM" required maxLength={100} showCharCount mono
-              />
-              <FormField
-                label="Description" id="bldg-description" value={form.description}
-                onChange={(v) => setForm(f => ({ ...f, description: v }))}
-                placeholder="Brief description..." rows={3} maxLength={500} showCharCount
-              />
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label htmlFor="bldg-category" className="block text-xs font-bold text-foreground mb-1.5 uppercase tracking-wide">Category</label>
-                  <select id="bldg-category" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value as Building["category"] })}
-                    className="w-full h-10 px-4 rounded-xl border border-border bg-input-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/30 text-sm transition-all duration-200 custom-select">
-                    {["academic", "admin", "facility", "sports", "dormitory"].map((c) => (
-                      <option key={c} value={c} className="capitalize">{c}</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label htmlFor="bldg-floors" className="block text-xs font-bold text-foreground mb-1.5 uppercase tracking-wide">Floors</label>
-                  <input id="bldg-floors" type="number" min={1} value={form.floor_count} onChange={(e) => setForm({ ...form, floor_count: parseInt(e.target.value) || 1 })}
-                    className="w-full h-10 px-4 rounded-xl border border-border bg-input-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/30 text-sm transition-all duration-200" />
-                </div>
-              </div>
-              <FormField
-                label="Operating Hours" id="bldg-hours" value={form.operating_hours}
-                onChange={(v) => setForm(f => ({ ...f, operating_hours: v }))}
-                placeholder="Mon–Fri 7:00 AM – 8:00 PM" helper="e.g. Mon–Fri 7:00 AM – 8:00 PM"
-              />
-              <FormField
-                label="Contact" id="bldg-contact" value={form.contact}
-                onChange={(v) => setForm(f => ({ ...f, contact: v }))}
-                placeholder="(02) 8293-0000 loc. 101" type="tel"
-              />
-            </div>
-
-            {/* Modal footer */}
-            <div className="flex gap-3 px-6 pb-6">
-              <Button variant="outline" onClick={modal.close} className="flex-1">Cancel</Button>
-              <Button variant="primary" onClick={handleSave} className="flex-1" disabled={!form.name.trim()}>
-                {modal.editTarget ? "Save Changes" : "Add Building"}
-              </Button>
-            </div>
-          </motion.div>
-        </motion.div>
-      )}
-
-      {/* ═══════════════════════════════════════════════════════════════
-           DELETE CONFIRMATION
-         ═══════════════════════════════════════════════════════════════ */}
-      {modal.deleteId && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="Delete building"
-        >
-          <motion.div
-            initial={{ opacity: 0, scale: 0.92, y: 20 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            transition={{ type: "spring", duration: 0.35, bounce: 0.2 }}
-            className="bg-card rounded-2xl border border-border shadow-2xl w-full max-w-sm p-6 text-center"
-          >
-            <div className="w-14 h-14 rounded-2xl bg-destructive/10 flex items-center justify-center mx-auto mb-4">
-              <Trash2 className="h-7 w-7 text-destructive" />
-            </div>
-            <h3 className="font-extrabold text-foreground mb-1">Delete Building?</h3>
-            <p className="text-sm text-muted-foreground mb-5" style={{ fontFamily: "var(--font-body)" }}>
-              This will permanently remove the building and all associated floor plans and routes.
-            </p>
-            <div className="flex gap-3">
-              <Button variant="outline" onClick={modal.cancelDelete} className="flex-1">Cancel</Button>
-              <Button variant="danger" onClick={() => modal.executeDelete(handleDelete)} className="flex-1">Delete Building</Button>
-            </div>
-          </motion.div>
-        </motion.div>
-      )}
-
-      {/* ═══════════════════════════════════════════════════════════════
-           FOOTER
-         ═══════════════════════════════════════════════════════════════ */}
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ delay: 0.3 }}
-        className="flex items-center justify-between px-5 py-3 rounded-2xl border border-border bg-card/50"
-      >
-        <div className="flex items-center gap-4 text-[10px] text-muted-foreground">
-          <span>{buildings.length} buildings total</span>
-          <span className="w-1 h-1 rounded-full bg-muted-foreground/30" />
-          <span>{filtered.length} shown</span>
-          <span className="w-1 h-1 rounded-full bg-muted-foreground/30" />
-          <span>{Object.keys(FLOOR_PLANS).length} with floor plans</span>
+        <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[760px] text-left">
+              <thead className="border-b border-border bg-muted/40 text-[10px] font-extrabold uppercase tracking-wider text-muted-foreground"><tr><th className="px-4 py-3">Building</th><th className="px-4 py-3">Campus</th><th className="px-4 py-3">Category</th><th className="px-4 py-3 text-center">Floors</th><th className="px-4 py-3 text-center">Rooms</th><th className="px-4 py-3">Status</th></tr></thead>
+              <tbody className="divide-y divide-border">
+                {filtered.map(({ building, campus, floors, rooms }) => (
+                  <tr key={building.id} className="hover:bg-muted/25">
+                    <td className="px-4 py-3"><p className="text-sm font-bold text-foreground">{building.name}</p><p className="mt-0.5 text-[11px] font-mono text-muted-foreground">{building.code}</p></td>
+                    <td className="px-4 py-3 text-sm text-foreground">{campus?.name ?? "Unknown campus"}</td>
+                    <td className="px-4 py-3 text-sm capitalize text-foreground">{building.category}</td>
+                    <td className="px-4 py-3 text-center text-sm font-bold text-foreground">{floors}</td>
+                    <td className="px-4 py-3 text-center text-sm font-bold text-foreground">{rooms}</td>
+                    <td className="px-4 py-3"><span className={cn("rounded-full px-2 py-1 text-[10px] font-bold", building.is_visible ? "bg-emerald-500/10 text-emerald-600" : "bg-muted text-muted-foreground")}>{building.is_visible ? "Visible" : "Hidden"}</span></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
-        <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
-          <Sparkles className="h-3 w-3" />
-          <span>Updated just now</span>
-        </div>
-      </motion.div>
+      )}
     </div>
   );
 }

@@ -16,6 +16,7 @@ import {
   type ManagedProfile,
   type ManagedRole,
 } from "../services/adminUserService";
+import { useSupabaseRealtimeRefresh } from "../hooks/useSupabaseRealtimeData";
 
 type StatusFilter = "all" | "active" | "inactive";
 
@@ -76,6 +77,8 @@ export function AdminUsersPage() {
       setLoading(false);
     }
   }, [roleFilter, search, statusFilter]);
+
+  useSupabaseRealtimeRefresh({ channel: "users", tables: ["profiles"], onChange: loadUsers });
 
   useEffect(() => {
     const timer = window.setTimeout(() => void loadUsers(), search ? 250 : 0);

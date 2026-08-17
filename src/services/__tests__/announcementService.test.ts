@@ -6,7 +6,8 @@ vi.mock("../../lib/supabase", () => ({ getSupabase: vi.fn() }));
 
 const row = {
   id: "a1",
-  campus_id: "c1",
+  campus_id: null,
+  audience_scope: "global",
   title: "Enrollment Open",
   content: "Enrollment for the second semester is now open.",
   category: "academic",
@@ -43,14 +44,11 @@ describe("announcement service", () => {
     expect(items[0]).toMatchObject({ id: "a1", title: "Enrollment Open", category: "academic", status: "published" });
   });
 
-  it("falls back to curated mocks when the database returns an error", async () => {
+  it("surfaces database errors instead of showing local announcements", async () => {
     const query = chainedQuery(null, { message: "connection failed" });
     vi.mocked(getSupabase).mockReturnValue({ from: vi.fn(() => ({ select: vi.fn(() => query) })) } as never);
 
-    const items = await getPublishedAnnouncements();
-
-    expect(items.length).toBeGreaterThan(0);
-    expect(items[0].status).toBe("published");
+    await expect(getPublishedAnnouncements()).rejects.toMatchObject({ message: "connection failed" });
   });
 
   it("lists announcements for admin with case-insensitive search", async () => {
@@ -63,16 +61,21 @@ describe("announcement service", () => {
     expect(items[0]).toMatchObject({ id: "a1", status: "published", createdBy: "u1" });
   });
 
-  it("creates an announcement under the default campus with an audit entry", async () => {
+  it("creates a system-wide announcement without a campus dependency", async () => {
     const single = vi.fn().mockResolvedValue({ data: row, error: null });
     const insert = vi.fn(() => ({ select: vi.fn(() => ({ single })) }));
     const insertLog = vi.fn().mockResolvedValue({ error: null });
     const maybeSingle = vi.fn().mockResolvedValue({ data: { id: "c1" }, error: null });
+    const campusQuery: Record<string, unknown> = { maybeSingle };
+    campusQuery.eq = vi.fn(() => campusQuery);
+    campusQuery.is = vi.fn(() => campusQuery);
+    campusQuery.order = vi.fn(() => campusQuery);
+    campusQuery.limit = vi.fn(() => campusQuery);
     const auth = { getUser: vi.fn().mockResolvedValue({ data: { user: { id: "u1" } } }) };
 
     const from = vi.fn((table: string) => {
       if (table === "campuses")
-        return { select: vi.fn(() => ({ eq: vi.fn(() => ({ is: vi.fn(() => ({ maybeSingle })) })) })) };
+        return { select: vi.fn(() => campusQuery) };
       if (table === "activity_logs") return { insert: insertLog };
       return { insert };
     });
@@ -89,7 +92,13 @@ describe("announcement service", () => {
 
     expect(created).toMatchObject({ id: "a1" });
     expect(insert).toHaveBeenCalledWith(
-      expect.objectContaining({ title: "Enrollment Open", campus_id: "c1", created_by: "u1", status: "published" })
+      expect.objectContaining({
+        title: "Enrollment Open",
+        audience_scope: "global",
+        campus_id: null,
+        created_by: "u1",
+        status: "published",
+      })
     );
     expect(insertLog).toHaveBeenCalledWith(
       expect.objectContaining({ action: "announcement.publish", entity_id: "a1" })

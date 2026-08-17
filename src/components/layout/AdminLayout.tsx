@@ -1,5 +1,5 @@
 import { Outlet, useNavigate, useLocation } from "react-router";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { NavigationProgress } from "../ui/NavigationProgress";
 import { UnsavedChangesProvider } from "../map-builder/UnsavedChangesContext";
 import { AdminSidebar } from "./AdminSidebar";
@@ -15,6 +15,7 @@ import {
 } from "../../services/activityLogService";
 import { notificationService } from "../../lib/notificationService";
 import { Link } from "react-router";
+import { useSupabaseRealtimeRefresh } from "../../hooks/useSupabaseRealtimeData";
 
 /** Branded full-screen loader shown while the session/profile is checked. */
 function AuthGateLoader() {
@@ -58,26 +59,22 @@ export function AdminLayout() {
   const location = useLocation();
   const { loading, isAdmin, profile } = useAdminAuth();
 
-  // Load the latest activity logs once the session is confirmed and refresh
-  // whenever the bell is reopened.
-  useEffect(() => {
+  const loadLogs = useCallback(async () => {
     if (loading || !isAdmin) return;
-    let mounted = true;
-    const loadLogs = async () => {
-      try {
-        const rows = await activityLogService.listActivityLogs({ limit: 6 });
-        if (!mounted) return;
-        setLogs(rows);
-        setUnread(notificationService.countUnseenLogs(rows));
-      } catch {
-        // Bell stays empty when logs are unavailable.
-      }
-    };
-    loadLogs();
-    return () => {
-      mounted = false;
-    };
-  }, [loading, isAdmin]);
+    try {
+      const rows = await activityLogService.listActivityLogs({ limit: 6 });
+      setLogs(rows);
+      setUnread(notificationService.countUnseenLogs(rows));
+    } catch {
+      // Bell stays on its last valid snapshot when logs are unavailable.
+    }
+  }, [isAdmin, loading]);
+
+  // Load the latest activity logs once the session is confirmed.
+  useEffect(() => {
+    void loadLogs();
+  }, [loadLogs]);
+  useSupabaseRealtimeRefresh({ channel: "admin-notification-bell", tables: ["activity_logs"], onChange: loadLogs });
 
   useEffect(() => {
     if (bellOpen) {

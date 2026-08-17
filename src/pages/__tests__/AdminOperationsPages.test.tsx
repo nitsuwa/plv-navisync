@@ -90,6 +90,7 @@ vi.mock("../../services/announcementService", () => {
       updateAnnouncement: vi.fn().mockResolvedValue(undefined),
       publishAnnouncement: vi.fn().mockResolvedValue(undefined),
       archiveAnnouncement: vi.fn().mockResolvedValue(undefined),
+      canPublishAnnouncements: vi.fn().mockResolvedValue(true),
     },
   };
 });

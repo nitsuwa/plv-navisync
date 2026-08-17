@@ -11,7 +11,8 @@ import { motion, useScroll, useTransform, useSpring } from "motion/react";
 import { PLVLogo } from "../components/ui/PLVLogo";
 import { LavaLampBackground } from "../components/ui/HeroBackground";
 import { useScrollReveal } from "../hooks/useScrollReveal";
-import { eventService, type CampusAnnouncement, type CampusEvent } from "../services/eventService";
+import { eventService, type CampusEvent } from "../services/eventService";
+import { usePublishedAnnouncements } from "../hooks/usePublishedAnnouncements";
 
 // ═════════════════════════════════════════════════════════════════════════════
 // ── Floating decorative shapes (Hero) ────────────────────────────────────────
@@ -1335,20 +1336,14 @@ function HeroSection() {
 }
 
 function AnnouncementPreview() {
-  const [announcements, setAnnouncements] = useState<CampusAnnouncement[]>([]);
+  const { announcements } = usePublishedAnnouncements();
   const [events, setEvents] = useState<CampusEvent[]>([]);
-  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let mounted = true;
-    Promise.all([
-      eventService.getPublishedAnnouncements(),
-      eventService.getUpcomingEvents(),
-    ]).then(([ancData, evtData]) => {
+    eventService.getUpcomingEvents().then((evtData) => {
       if (mounted) {
-        setAnnouncements(ancData);
         setEvents(evtData);
-        setLoading(false);
       }
     });
     return () => {

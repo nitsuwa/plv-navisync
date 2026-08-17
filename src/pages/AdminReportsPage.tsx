@@ -19,6 +19,7 @@ import {
 } from "../services/reportService";
 import type { ActivityLogRow } from "../services/activityLogService";
 import { downloadCsv, downloadJson } from "../lib/exporters";
+import { useSupabaseRealtimeRefresh } from "../hooks/useSupabaseRealtimeData";
 
 // ── Report workflow ────────────────────────────────────────────────────────
 const STATUS_ORDER: ReportStatus[] = ["pending", "under_review", "in_progress", "resolved", "rejected"];
@@ -325,6 +326,8 @@ export function AdminReportsPage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [statusFilter, categoryFilter, search]);
+
+  useSupabaseRealtimeRefresh({ channel: "reports", tables: ["reports", "report_history", "report_images"], onChange: () => loadReports(false) });
 
   useEffect(() => {
     loadReports();

@@ -1,92 +1,86 @@
-import { useState, useEffect, useCallback } from "react";
 import { motion } from "motion/react";
 import {
   Building2, Bell, AlertTriangle, Clock, ArrowRight,
   Flag, Layers, Route, Users, CheckCircle2, CalendarDays, History,
-  BarChart3, Search as SearchIcon, MapPin, Flag as FlagIcon,
+  BarChart3, Heart, MapPin, Flag as FlagIcon,
 } from "lucide-react";
 import { WeeklyChart } from "../components/ui/WeeklyChart";
-import { usageAnalyticsService, type AnalyticsSummary } from "../services/usageAnalyticsService";
 import { EmptyState } from "../components/ui/EmptyState";
 import { StatCard } from "../components/ui/StatCard";
+import { LiveDataStatus } from "../components/admin/LiveDataStatus";
 import { Link } from "react-router";
 import { DashboardSkeleton } from "../components/ui/PageSkeleton";
 import { cn } from "../lib/utils";
 import {
   dashboardService,
+  type DatabaseActivityAnalytics,
   type DashboardStats,
   type RecentActivityItem,
 } from "../services/dashboardService";
 import { reportService } from "../services/reportService";
 import { campusService } from "../services/campusService";
 import { readableActionLabel, timeAgoLabel } from "../services/activityLogService";
+import { useSupabaseRealtimeData } from "../hooks/useSupabaseRealtimeData";
 
 // ── Quick actions (all links valid) ───────────────────────────────────────
 
 interface QuickAction { label: string; to: string; icon: React.ElementType; desc: string; color: string; }
 
+interface DashboardLiveData {
+  stats: DashboardStats;
+  activity: RecentActivityItem[];
+  pendingReports: { title: string; detail: string; time: string; priority: "high" | "medium" }[];
+  publishInfo: string;
+  analytics: DatabaseActivityAnalytics;
+}
+
+const DASHBOARD_REALTIME_TABLES = [
+  "buildings", "map_elements", "navigation_edges", "reports", "events",
+  "profiles", "activity_logs", "campuses", "recent_destinations", "favorites",
+] as const;
+
+async function loadDashboardData(): Promise<DashboardLiveData> {
+  const [stats, activity, reports, campuses, analytics] = await Promise.all([
+    dashboardService.getDashboardStats(),
+    dashboardService.getRecentActivity(6).catch(() => []),
+    reportService.listAllReports({ status: "pending" }).catch(() => []),
+    campusService.list().catch(() => []),
+    dashboardService.getDatabaseActivity(7),
+  ]);
+  const published = campuses.find((campus) => campus.lifecycleStatus === "published");
+  return {
+    stats,
+    activity,
+    analytics,
+    pendingReports: reports.slice(0, 4).map((report) => ({
+      title: report.title,
+      detail: report.buildingName ?? report.category ?? "Campus location",
+      time: timeAgoLabel(report.createdAt),
+      priority: report.priority === "urgent" || report.priority === "high" ? "high" : "medium",
+    })),
+    publishInfo: published
+      ? `Published: ${published.name}${published.updatedAt ? ` · ${published.updatedAt}` : ""}`
+      : "No published campus yet",
+  };
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 
 export function AdminDashboardPage() {
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [stats, setStats] = useState<DashboardStats | null>(null);
-  const [activity, setActivity] = useState<RecentActivityItem[]>([]);
-  const [pendingReports, setPendingReports] = useState<{ title: string; detail: string; time: string; priority: "high" | "medium" }[]>([]);
-  const [publishInfo, setPublishInfo] = useState<string | null>(null);
-  const [analytics, setAnalytics] = useState<AnalyticsSummary | null>(null);
+  const live = useSupabaseRealtimeData({ channel: "dashboard", tables: DASHBOARD_REALTIME_TABLES, load: loadDashboardData });
 
-  const load = useCallback(async () => {
-    try {
-      const [s, a, reports, campuses] = await Promise.all([
-        dashboardService.getDashboardStats(),
-        dashboardService.getRecentActivity(6).catch(() => []),
-        reportService.listAllReports({ status: "pending" }).catch(() => []),
-        campusService.list().catch(() => []),
-      ]);
-      setStats(s);
-      setActivity(a);
-      setPendingReports(
-        reports.slice(0, 4).map((r) => ({
-          title: r.title,
-          detail: r.buildingName ?? r.category ?? "Campus location",
-          time: timeAgoLabel(r.createdAt),
-          priority: r.priority === "urgent" || r.priority === "high" ? "high" : "medium",
-        }))
-      );
-      // Editor Campus objects expose lifecycleState/publishStatus — check the lifecycle field.
-      // Real tracked usage (page views, routes, searches) from this browser.
-      setAnalytics(usageAnalyticsService.getAnalytics(7));
-      const published = campuses.find((c) => c.lifecycleStatus === "published");
-      setPublishInfo(
-        published
-          ? `Published: ${published.name}${published.updatedAt ? ` · ${published.updatedAt}` : ""}`
-          : "No published campus yet"
-      );
-      setError(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not load dashboard data.");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  if (live.loading && !live.data) return <DashboardSkeleton />;
 
-  useEffect(() => {
-    load();
-  }, [load]);
-
-  if (loading) return <DashboardSkeleton />;
-
-  if (error) {
+  if (live.error && !live.data) {
     return (
       <div className="space-y-6 animate-fade-in">
         <h1 className="text-2xl font-extrabold text-foreground">Dashboard</h1>
         <EmptyState
           icon={AlertTriangle}
           title="Could not load dashboard"
-          description={error}
+          description={live.error}
           action={
-            <button onClick={load} className="inline-flex items-center gap-2 h-10 px-5 rounded-xl bg-primary text-primary-foreground text-sm font-bold hover:bg-primary/90 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background">
+            <button onClick={() => void live.refresh()} className="inline-flex items-center gap-2 h-10 px-5 rounded-xl bg-primary text-primary-foreground text-sm font-bold hover:bg-primary/90 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background">
               Try Again
             </button>
           }
@@ -95,9 +89,15 @@ export function AdminDashboardPage() {
     );
   }
 
-  const s = stats ?? {
+  const s = live.data?.stats ?? {
     buildings: 0, rooms: 0, activeEdges: 0, accessibleEdges: 0,
     pendingReports: 0, publishedEvents: 0, activeStudents: 0, weeklyActivity: [],
+  };
+  const activity = live.data?.activity ?? [];
+  const pendingReports = live.data?.pendingReports ?? [];
+  const publishInfo = live.data?.publishInfo ?? "Live database data";
+  const analytics = live.data?.analytics ?? {
+    byDay: [], adminEvents: 0, routeVisits: 0, reportsCreated: 0, favoritesSaved: 0, topDestinations: [],
   };
 
   // Note: these are live head counts, not trends — no fabricated deltas.
@@ -135,13 +135,11 @@ export function AdminDashboardPage() {
   const maxWeekly = Math.max(1, ...s.weeklyActivity.map((d) => d.count));
 
   // Analytics chart data — WeeklyChart expects day labels + two series.
-  const analyticsChart = analytics
-    ? analytics.byDay.map((d) => ({
+  const analyticsChart = analytics.byDay.map((d) => ({
         day: new Date(d.day + "T00:00:00").toLocaleDateString(undefined, { weekday: "short" }),
         updates: d.updates,
         reports: d.reports,
-      }))
-    : [];
+      }));
   const QUICK_ACTIONS: QuickAction[] = [
     { label: "Open Map Builder", to: "/admin-dashboard/map-builder", icon: Building2, desc: "Edit campus map", color: "bg-primary" },
     { label: "Review Reports", to: "/admin-dashboard/reports", icon: Flag, desc: `${s.pendingReports} pending`, color: "bg-amber-500" },
@@ -160,8 +158,9 @@ export function AdminDashboardPage() {
       >
         <div>
           <h1 className="text-xl lg:text-2xl font-extrabold text-foreground">Dashboard</h1>
-          <p className="text-xs text-muted-foreground mt-0.5">{publishInfo ?? "Live data"}</p>
+          <p className="text-xs text-muted-foreground mt-0.5">{publishInfo}</p>
         </div>
+        <LiveDataStatus connected={live.realtimeConnected} refreshing={live.refreshing} lastUpdatedAt={live.lastUpdatedAt} onRefresh={() => void live.refresh()} />
       </motion.div>
 
       {/* KEY METRICS */}
@@ -282,33 +281,33 @@ export function AdminDashboardPage() {
           </div>
         </motion.div>
 
-        {/* Usage analytics — real tracked events */}
+        {/* Database analytics — persisted records only */}
         <motion.div
           variants={{ hidden: { opacity: 0, y: 16 }, visible: { opacity: 1, y: 0 } }}
           className="bg-card rounded-2xl border border-border shadow-sm overflow-hidden flex flex-col"
         >
           <div className="px-5 py-3 border-b border-border flex items-center gap-2">
             <BarChart3 className="h-3.5 w-3.5 text-primary" />
-            <h2 className="font-bold text-foreground text-sm flex-1">Usage Analytics</h2>
+            <h2 className="font-bold text-foreground text-sm flex-1">Database Activity</h2>
             <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-primary/10 text-primary uppercase tracking-wider">
               last 7 days
             </span>
           </div>
           <div className="p-4 pb-2">
-            {analytics && analytics.totalViews + analytics.totalRoutes > 0 ? (
+            {analytics.adminEvents + analytics.routeVisits + analytics.reportsCreated > 0 ? (
               <WeeklyChart data={analyticsChart} />
             ) : (
               <p className="text-xs text-muted-foreground py-6 text-center">
-                No tracked activity yet. Browse the map, search, and plan a route to see charts here.
+                No persisted activity has been recorded during the last seven days.
               </p>
             )}
           </div>
           <div className="px-5 pb-4 grid grid-cols-4 gap-2">
             {[
-              { icon: MapPin, label: "Map views", value: analytics?.totalViews ?? 0 },
-              { icon: Route, label: "Routes", value: analytics?.totalRoutes ?? 0 },
-              { icon: SearchIcon, label: "Searches", value: analytics?.totalSearches ?? 0 },
-              { icon: FlagIcon, label: "Reports", value: analytics?.totalReports ?? 0 },
+              { icon: History, label: "Admin events", value: analytics.adminEvents },
+              { icon: MapPin, label: "Route visits", value: analytics.routeVisits },
+              { icon: FlagIcon, label: "Reports", value: analytics.reportsCreated },
+              { icon: Heart, label: "Favorites", value: analytics.favoritesSaved },
             ].map(({ icon: MiniIcon, label, value }) => (
               <div key={label} className="rounded-xl border border-border bg-muted/30 p-2 text-center">
                 <MiniIcon className="h-3.5 w-3.5 text-primary mx-auto mb-1" />
@@ -317,37 +316,16 @@ export function AdminDashboardPage() {
               </div>
             ))}
           </div>
-          {(analytics?.topSearches.length || analytics?.topRoutes.length) ? (
-            <div className="px-5 pb-4 pt-1 border-t border-border grid sm:grid-cols-2 gap-3">
-              <div>
-                <p className="text-[9px] font-extrabold uppercase tracking-widest text-muted-foreground mb-1.5">Top searches</p>
-                {analytics!.topSearches.length > 0 ? (
-                  <div className="space-y-1">
-                    {analytics!.topSearches.map((s) => (
-                      <div key={s.term} className="flex items-center justify-between text-[11px]">
-                        <span className="text-foreground font-semibold truncate">{s.term}</span>
-                        <span className="text-muted-foreground font-mono">{s.count}</span>
-                      </div>
-                    ))}
+          {analytics.topDestinations.length > 0 ? (
+            <div className="px-5 pb-4 pt-3 border-t border-border">
+              <p className="text-[9px] font-extrabold uppercase tracking-widest text-muted-foreground mb-1.5">Top recent destinations</p>
+              <div className="grid gap-1 sm:grid-cols-2">
+                {analytics.topDestinations.map((destination) => (
+                  <div key={destination.name} className="flex items-center justify-between text-[11px] rounded-lg bg-muted/30 px-2.5 py-1.5">
+                    <span className="text-foreground font-semibold truncate">{destination.name}</span>
+                    <span className="text-muted-foreground font-mono">{destination.count}</span>
                   </div>
-                ) : (
-                  <p className="text-[11px] text-muted-foreground">No searches yet.</p>
-                )}
-              </div>
-              <div>
-                <p className="text-[9px] font-extrabold uppercase tracking-widest text-muted-foreground mb-1.5">Top routes</p>
-                {analytics!.topRoutes.length > 0 ? (
-                  <div className="space-y-1">
-                    {analytics!.topRoutes.map((r) => (
-                      <div key={r.route} className="flex items-center justify-between text-[11px]">
-                        <span className="text-foreground font-semibold truncate">{r.route}</span>
-                        <span className="text-muted-foreground font-mono">{r.count}</span>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-[11px] text-muted-foreground">No routes planned yet.</p>
-                )}
+                ))}
               </div>
             </div>
           ) : null}

@@ -6,6 +6,7 @@ import { cn } from "../lib/utils";
 import { listActivityLogs, readableActionLabel, timeAgoLabel } from "../services/activityLogService";
 import { getSupabase } from "../lib/supabase";
 import type { Tables } from "../types/database.generated";
+import { useSupabaseRealtimeRefresh } from "../hooks/useSupabaseRealtimeData";
 
 type LogRow = Tables<"activity_logs">;
 
@@ -57,6 +58,8 @@ export function AdminActivityLogsPage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useSupabaseRealtimeRefresh({ channel: "activity-logs", tables: ["activity_logs", "profiles"], onChange: () => load(filter) });
 
   // Resolve actor display names for the current page.
   const resolveActors = useCallback(async (rows: LogRow[]) => {

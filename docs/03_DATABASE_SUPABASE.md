@@ -699,7 +699,8 @@ A public event location is readable by guests and students only when its parent 
 | Column | Type | Required | Notes |
 |---|---|---:|---|
 | `id` | UUID | Yes | PK |
-| `campus_id` | UUID | Yes | |
+| `campus_id` | UUID | No | Required when `audience_scope = 'campus'`; omitted for system-wide announcements |
+| `audience_scope` | TEXT | Yes | `global` or `campus`; defaults to `global` |
 | `title` | TEXT | Yes | |
 | `content` | TEXT | Yes | |
 | `category` | TEXT | Yes | One of: `general`, `event`, `emergency`, `maintenance`, `closure`, `relocation` |
@@ -716,6 +717,7 @@ A public event location is readable by guests and students only when its parent 
 
 - `category` is one of: `general`, `event`, `emergency`, `maintenance`, `closure`, `relocation`
 - `priority` is one of: `low`, `normal`, `high`, `urgent` (default `normal`)
+- `audience_scope` is `global` for system-wide notices or `campus` for campus-bound notices
 
 **Public visibility**
 
@@ -723,9 +725,11 @@ A public announcement is readable by guests and students only when all of these 
 
 - `status = 'published'`
 - `archived_at is null`
-- The campus is published and not archived (`campus_is_published(campus_id)`)
+- `audience_scope = 'global'`, or the campus is published and not archived for a campus-scoped notice
 - `starts_at` is null or `starts_at <= now()`
 - `expires_at` is null or `expires_at >= now()`
+
+Global announcement text is intentionally independent of the campus/map publication lifecycle. Location mappings remain protected by the published-campus requirement so draft building, floor, element, and route data cannot leak.
 
 ---
 
@@ -1292,8 +1296,8 @@ Rules:
 - Never expose the service-role key.
 - Commit `.env.example`, not `.env`.
 - Commit `.env.demo.example`, never `.env.demo.local`.
-- Vite-prefixed values are visible to the built browser application. Demo passwords must stay in `.env.demo.local` or an approved private handoff and must never use a `VITE_*` name.
-- The demo selector may fill a non-secret email label but must never fill a password, bypass normal Supabase authentication, or sign in automatically.
+- Vite-prefixed values are visible to the built browser application. `VITE_DEMO_*_PASSWORD` may contain only disposable demonstration credentials when demo login is explicitly enabled; never use a real administrator or student password.
+- The demo selector may fill the configured disposable email and password, but must never bypass normal Supabase authentication or sign in automatically.
 - Validate variables at startup.
 - Production and development Supabase projects should be separate when feasible.
 

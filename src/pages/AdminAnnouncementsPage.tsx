@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { TablePageSkeleton } from "../components/ui/PageSkeleton";
-import { Plus, Search, Pencil, Trash2, X, Megaphone, Send, Archive, AlertCircle } from "lucide-react";
+import { Plus, Search, Pencil, Trash2, X, Megaphone, Send, Archive, AlertCircle, AlertTriangle } from "lucide-react";
 import { useToast } from "../hooks/useToast";
 import { useEscToClose } from "../hooks/useEscToClose";
 import {
@@ -10,6 +10,7 @@ import {
   type AnnouncementCategory,
   type AnnouncementPriority,
   type AnnouncementStatus,
+  type AnnouncementScope,
 } from "../services/announcementService";
 import { CategoryBadge, PriorityBadge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
@@ -17,6 +18,7 @@ import { FormField } from "../components/ui/FormField";
 import { EmptyState } from "../components/ui/EmptyState";
 import { SearchBar } from "../components/ui/SearchBar";
 import { cn, formatDate } from "../lib/utils";
+import { useSupabaseRealtimeRefresh } from "../hooks/useSupabaseRealtimeData";
 
 const CATEGORIES: AnnouncementCategory[] = ["general", "academic", "event", "emergency", "maintenance"];
 const PRIORITIES: AnnouncementPriority[] = ["low", "normal", "high", "urgent"];
@@ -44,11 +46,12 @@ interface AnnouncementForm {
   category: AnnouncementCategory;
   priority: AnnouncementPriority;
   status: AnnouncementStatus;
+  scope: AnnouncementScope;
   expires_at: string;
 }
 
 const EMPTY_FORM: AnnouncementForm = {
-  title: "", content: "", category: "general", priority: "normal", status: "draft", expires_at: "",
+  title: "", content: "", category: "general", priority: "normal", status: "draft", scope: "global", expires_at: "",
 };
 
 export function AdminAnnouncementsPage() {
@@ -68,6 +71,7 @@ export function AdminAnnouncementsPage() {
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [canPublish, setCanPublish] = useState(false);
   const requestRef = useRef(0);
   const toast = useToast();
 
@@ -75,9 +79,13 @@ export function AdminAnnouncementsPage() {
     const requestId = ++requestRef.current;
     setLoading(true);
     try {
-      const data = await announcementService.listAnnouncements({ search });
+      const [data, publishingAvailable] = await Promise.all([
+        announcementService.listAnnouncements({ search }),
+        announcementService.canPublishAnnouncements(),
+      ]);
       if (requestId !== requestRef.current) return;
       setAnnouncements(data);
+      setCanPublish(publishingAvailable);
       setError(null);
     } catch (err) {
       if (requestId !== requestRef.current) return;
@@ -88,6 +96,12 @@ export function AdminAnnouncementsPage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search]);
+
+  useSupabaseRealtimeRefresh({
+    channel: "announcements",
+    tables: ["announcements", "announcement_locations", "campuses"],
+    onChange: loadAnnouncements,
+  });
 
   useEffect(() => {
     loadAnnouncements();
@@ -125,7 +139,7 @@ export function AdminAnnouncementsPage() {
   const openEdit = (a: ManagedAnnouncement) => {
     setForm({
       title: a.title, content: a.content, category: a.category, priority: a.priority,
-      status: a.status, expires_at: toLocalInput(a.expiresAt),
+      status: a.status, scope: a.scope, expires_at: toLocalInput(a.expiresAt),
     });
     setFormErrors({});
     setEditTarget(a);
@@ -146,6 +160,7 @@ export function AdminAnnouncementsPage() {
         category: form.category,
         priority: form.priority,
         status: form.status,
+        scope: form.scope,
         expiresAt: form.expires_at ? new Date(form.expires_at).toISOString() : null,
       };
       if (editTarget) {
@@ -303,7 +318,8 @@ export function AdminAnnouncementsPage() {
                     <td className="px-5 py-3.5">
                       <div className="flex items-center justify-end gap-2">
                         {a.status === "draft" && (
-                          <button type="button" onClick={() => handlePublish(a)} disabled={busy}
+                          <button type="button" onClick={() => handlePublish(a)} disabled={busy || (a.scope === "campus" && !canPublish)}
+                            title={a.scope === "campus" && !canPublish ? "Publish a campus before publishing this campus notice" : undefined}
                             className="flex items-center gap-1.5 h-8 px-3 rounded-xl bg-green-500 text-white text-xs font-bold hover:bg-green-600 active:scale-[0.97] transition-all disabled:opacity-50">
                             <Send className="h-3.5 w-3.5" /> Publish
                           </button>
@@ -390,7 +406,15 @@ export function AdminAnnouncementsPage() {
                   error={formErrors.content} placeholder="Full announcement content..." required rows={4}
                   helper="Provide full details about this announcement" maxLength={1000} showCharCount
                 />
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div>
+                    <label htmlFor="announcement-scope" className="block text-xs font-bold text-foreground mb-1.5 uppercase tracking-wide">Audience</label>
+                    <select id="announcement-scope" value={form.scope} onChange={(e) => setForm({ ...form, scope: e.target.value as AnnouncementScope })}
+                      className="custom-select w-full h-10 px-4 rounded-xl border border-border bg-input-background text-foreground text-sm">
+                      <option value="global">System-wide</option>
+                      <option value="campus">Campus-specific</option>
+                    </select>
+                  </div>
                   <div>
                     <label htmlFor="announcement-category" className="block text-xs font-bold text-foreground mb-1.5 uppercase tracking-wide">Category</label>
                     <select id="announcement-category" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value as AnnouncementCategory })}
@@ -416,7 +440,7 @@ export function AdminAnnouncementsPage() {
                     <select id="announcement-status" value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value as AnnouncementStatus })}
                       className="custom-select w-full h-10 px-4 rounded-xl border border-border bg-input-background text-foreground text-sm">
                       <option value="draft">Draft</option>
-                      <option value="published">Published</option>
+                      <option value="published" disabled={form.scope === "campus" && !canPublish}>Published</option>
                     </select>
                   </div>
                   <div>
@@ -425,7 +449,13 @@ export function AdminAnnouncementsPage() {
                       className="w-full h-10 px-4 rounded-xl border border-border bg-input-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary text-sm transition-all" />
                   </div>
                 </div>
-                <p className="text-[10px] text-muted-foreground">Published announcements appear on the student feed until they expire or are archived.</p>
+                {form.scope === "campus" && !canPublish ? (
+                  <p className="flex items-center gap-1.5 text-[10px] font-semibold text-amber-600 dark:text-amber-400">
+                    <AlertTriangle className="h-3 w-3" /> Publish a campus before making this campus-specific notice public.
+                  </p>
+                ) : (
+                  <p className="text-[10px] text-muted-foreground">System-wide announcements appear publicly without requiring a published campus.</p>
+                )}
               </div>
               <div className="flex gap-3 px-6 pb-6">
                 <Button variant="outline" onClick={() => setShowModal(false)} className="flex-1">Cancel</Button>
