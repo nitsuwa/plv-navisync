@@ -6175,7 +6175,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
           </div>
 
           {/* Mode switch — Design architectural authoring vs Navigation graph authoring */}
-          <div className="flex items-center p-0.5 rounded-lg border border-border bg-muted/30 mx-0.5" role="tablist" aria-label="Floor editor mode">
+          <div className="flex items-center p-0.5 rounded-lg border border-border bg-muted/30 mx-0.5 shrink-0" role="tablist" aria-label="Floor editor mode">
             {[
               { id: "structure" as FloorEditorMode, label: "Design" },
               { id: "navigation" as FloorEditorMode, label: "Navigation" },
@@ -6202,7 +6202,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
             initial={{ opacity: 0, x: navMode ? 6 : -6 }}
             animate={{ opacity: 1, x: 0 }}
             transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
-            className="flex items-center min-w-0"
+            className="flex items-center shrink-0"
           >
           {navMode ? (
             <div className="flex items-center gap-0.5 p-0.5 rounded-lg border border-border bg-muted/30" data-testid="floor-nav-toolbar">
@@ -6279,7 +6279,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
             <>
               <div className="hidden sm:block w-px h-5 bg-border mx-1" />
               <div
-                className="flex items-center gap-1 rounded-lg border border-border bg-muted/30 p-0.5"
+                className="flex items-center gap-1 rounded-lg border border-border bg-muted/30 p-0.5 shrink-0"
                 data-testid="selected-label-font-controls"
               >
                 <button
@@ -6313,19 +6313,21 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
 
           <div className="hidden sm:block w-px h-5 bg-border mx-1" />
 
-          {/* Undo/Redo */}
-          <button onClick={() => applyEntry(undo())} disabled={!canUndo}
-            className={cn("flex items-center justify-center h-7 w-7 rounded-md transition-all",
-              canUndo ? "text-muted-foreground hover:text-foreground hover:bg-muted" : "text-muted-foreground/40 cursor-not-allowed")}
-            title="Undo (Ctrl+Z)">
-            <Undo2 className="h-3.5 w-3.5" />
-          </button>
-          <button onClick={() => applyEntry(redo())} disabled={!canRedo}
-            className={cn("flex items-center justify-center h-7 w-7 rounded-md transition-all",
-              canRedo ? "text-muted-foreground hover:text-foreground hover:bg-muted" : "text-muted-foreground/40 cursor-not-allowed")}
-            title="Redo (Ctrl+Y)">
-            <Redo2 className="h-3.5 w-3.5" />
-          </button>
+          {/* Undo/Redo — grouped so the pair never splits across wrapped rows */}
+          <div className="flex items-center gap-0.5 shrink-0">
+            <button onClick={() => applyEntry(undo())} disabled={!canUndo}
+              className={cn("flex items-center justify-center h-7 w-7 rounded-md transition-all",
+                canUndo ? "text-muted-foreground hover:text-foreground hover:bg-muted" : "text-muted-foreground/40 cursor-not-allowed")}
+              title="Undo (Ctrl+Z)">
+              <Undo2 className="h-3.5 w-3.5" />
+            </button>
+            <button onClick={() => applyEntry(redo())} disabled={!canRedo}
+              className={cn("flex items-center justify-center h-7 w-7 rounded-md transition-all",
+                canRedo ? "text-muted-foreground hover:text-foreground hover:bg-muted" : "text-muted-foreground/40 cursor-not-allowed")}
+              title="Redo (Ctrl+Y)">
+              <Redo2 className="h-3.5 w-3.5" />
+            </button>
+          </div>
 
           <div className="hidden xl:block flex-1 min-w-8" />
           <div className="hidden sm:block w-px h-5 bg-border mx-1" />
@@ -6333,7 +6335,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
           {/* Snap toggle */}
           <button onClick={() => setSnapOn((v) => !v)}
             title="Toggle grid snap"
-            className={cn("flex items-center justify-center h-7 px-2 rounded-md text-[10px] font-bold transition-all border",
+            className={cn("flex items-center justify-center h-7 px-2 rounded-md text-[10px] font-bold transition-all border shrink-0",
               snapOn ? "bg-primary/10 border-primary/30 text-primary" : "border-border text-muted-foreground hover:text-foreground hover:bg-muted")}>
             <Grid3X3 className="h-3 w-3 mr-1" />
             Grid
@@ -6345,7 +6347,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
             <button onClick={() => setShowNavOverlay((v) => !v)}
               title="Show the navigation graph as a read-only overlay while editing the floor"
               aria-label="Show Navigation overlay"
-              className={cn("flex items-center justify-center h-7 px-2 rounded-md text-[10px] font-bold transition-all border",
+              className={cn("flex items-center justify-center h-7 px-2 rounded-md text-[10px] font-bold transition-all border shrink-0",
                 showNavOverlay ? "bg-primary/10 border-primary/30 text-primary" : "border-border text-muted-foreground hover:text-foreground hover:bg-muted")}>
               <Waypoints className="h-3 w-3 mr-1" />
               Show Navigation
@@ -6355,7 +6357,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
           <button onClick={fitFloor}
             title="Fit Floor"
             aria-label="Fit Floor"
-            className="flex items-center justify-center h-7 w-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-all">
+            className="flex items-center justify-center h-7 w-7 shrink-0 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-all">
             <Maximize2 className="h-3.5 w-3.5" />
           </button>
 
@@ -6379,13 +6381,13 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
           <button onClick={() => setShowShortcuts(true)}
             title="Keyboard shortcuts"
             aria-label="Keyboard shortcuts"
-            className="flex items-center justify-center h-7 w-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-all">
+            className="flex items-center justify-center h-7 w-7 shrink-0 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-all">
             <HelpCircle className="h-3.5 w-3.5" />
           </button>
 
           {/* Properties toggle */}
           <button onClick={() => setShowProperties((v) => !v)}
-            className={cn("flex items-center justify-center h-7 w-7 rounded-md transition-all",
+            className={cn("flex items-center justify-center h-7 w-7 shrink-0 rounded-md transition-all",
               showProperties ? "bg-primary/10 text-primary" : "text-muted-foreground hover:text-foreground hover:bg-muted")}
             title="Toggle Properties Panel">
             <PanelRightClose className="h-3.5 w-3.5" />
@@ -6395,33 +6397,35 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
           <button onClick={() => setShowFloorSettings(true)}
             title="Floor Settings"
             aria-label="Floor Settings"
-            className="flex items-center justify-center h-7 w-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-all">
+            className="flex items-center justify-center h-7 w-7 shrink-0 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-all">
             <Settings2 className="h-3.5 w-3.5" />
           </button>
 
-          {/* Save / Publish */}
-          <button onClick={handleSave} disabled={saving || !isFloorDirty}
-            title={isFloorDirty ? "Save floor draft changes" : "No floor changes to save"}
-            className={cn("flex items-center gap-1 h-7 px-2.5 rounded-md text-[10px] font-extrabold transition-all border shadow-sm",
-              isFloorDirty ? "bg-primary text-primary-foreground border-primary hover:bg-primary/90" : "bg-muted/40 text-muted-foreground border-border cursor-not-allowed")}>
-            {saving ? <Loader2 className="h-3 w-3 animate-spin" /> :
-              saved ? <CheckCircle2 className="h-3 w-3" /> : <Save className="h-3 w-3" />}
-            {saving ? "Saving..." : saved ? "Saved" : "Save"}
-          </button>
-          <button
-            onClick={handlePublish}
-            disabled={!publishingEnabled || saving || isFloorDirty}
-            title={
-              !publishingEnabled ? "Publishing becomes available in A6"
-              : isFloorDirty ? "Save your draft first before publishing"
-              : "Publish the current campus draft"
-            }
-            className={cn("flex items-center gap-1 h-7 px-2.5 rounded-md text-[10px] font-extrabold transition-all border",
-              !publishingEnabled || isFloorDirty || saving ? "border-border text-muted-foreground/60 cursor-not-allowed" : "border-emerald-500/30 text-emerald-700 bg-emerald-500/10 hover:bg-emerald-500/15")}
-          >
-            <Globe2 className="h-3 w-3" />
-            Publish
-          </button>
+          {/* Save / Publish — grouped so the pair never splits across wrapped rows */}
+          <div className="flex items-center gap-2 shrink-0">
+            <button onClick={handleSave} disabled={saving || !isFloorDirty}
+              title={isFloorDirty ? "Save floor draft changes" : "No floor changes to save"}
+              className={cn("flex items-center gap-1 h-7 px-2.5 rounded-md text-[10px] font-extrabold transition-all border shadow-sm",
+                isFloorDirty ? "bg-primary text-primary-foreground border-primary hover:bg-primary/90" : "bg-muted/40 text-muted-foreground border-border cursor-not-allowed")}>
+              {saving ? <Loader2 className="h-3 w-3 animate-spin" /> :
+                saved ? <CheckCircle2 className="h-3 w-3" /> : <Save className="h-3 w-3" />}
+              {saving ? "Saving..." : saved ? "Saved" : "Save"}
+            </button>
+            <button
+              onClick={handlePublish}
+              disabled={!publishingEnabled || saving || isFloorDirty}
+              title={
+                !publishingEnabled ? "Publishing becomes available in A6"
+                : isFloorDirty ? "Save your draft first before publishing"
+                : "Publish the current campus draft"
+              }
+              className={cn("flex items-center gap-1 h-7 px-2.5 rounded-md text-[10px] font-extrabold transition-all border",
+                !publishingEnabled || isFloorDirty || saving ? "border-border text-muted-foreground/60 cursor-not-allowed" : "border-emerald-500/30 text-emerald-700 bg-emerald-500/10 hover:bg-emerald-500/15")}
+            >
+              <Globe2 className="h-3 w-3" />
+              Publish
+            </button>
+          </div>
         </div>
       </motion.div>
 

@@ -7,7 +7,7 @@ import { ENTRANCE_TRANSITION_EDGE_TYPE, reconcileEntranceTransitions } from "../
 import type { Database, Json, Tables, TablesInsert, TablesUpdate } from "../types/database.generated";
 import type {
   AccessibilityFeature, AssemblyPoint, Campus, CampusBuilding, CampusDecorAsset,
-  CampusMarker, CampusPath, CampusRoute, FloorPlan, FloorWall, NavigationEdge, NavigationNode,
+  CampusEventOverlay, CampusMarker, CampusPath, CampusRoute, FloorPlan, FloorWall, NavigationEdge, NavigationNode,
 } from "../components/map-builder/types";
 
 export type BuildingRow = Tables<"buildings">;
@@ -18,7 +18,7 @@ export type NavigationEdgeRow = Tables<"navigation_edges">;
 
 type JsonObject = Record<string, Json | undefined>;
 type StructureKind =
-  | "marker" | "campus_path" | "route" | "accessibility_feature" | "assembly_point" | "decor"
+  | "marker" | "campus_path" | "route" | "accessibility_feature" | "assembly_point" | "decor" | "event_overlay"
   | "room" | "floor_path" | "wall" | "door" | "window" | "furniture" | "stairs" | "ramp" | "elevator" | "label";
 
 export interface CampusStructurePayload {
@@ -110,7 +110,7 @@ function element(kind: StructureKind, campusId: string, value: Record<string, un
   const points = "points" in value ? value.points as Json : undefined;
   const width = Number("w" in value ? value.w : value.width);
   const height = Number("h" in value ? value.h : value.height);
-  const name = String(value.name ?? value.label ?? value.text ?? kind.replaceAll("_", " "));
+  const name = String(value.name ?? value.title ?? value.label ?? value.text ?? kind.replaceAll("_", " "));
   const roomType = kind === "room" ? normalizedElementType(String(value.type ?? "room")) : undefined;
   // Walls are endpoint-based (x1/y1/x2/y2). Their canonical anchor location is
   // the START point; the full segment geometry is retained in metadata.ui and
@@ -121,7 +121,7 @@ function element(kind: StructureKind, campusId: string, value: Record<string, un
   const rotationValue = finiteNumber(rawRotation, kind, value.id, "rotation");
   const typeMap: Partial<Record<StructureKind, string>> = {
     marker: "landmark", route: "custom", campus_path: "custom", accessibility_feature: "custom",
-    assembly_point: "assembly_area", decor: "custom", floor_path: "hallway", wall: "wall",
+    assembly_point: "assembly_area", decor: "custom", event_overlay: "custom", floor_path: "hallway", wall: "wall",
     door: value.isEmergencyExit ? "emergency_exit" : "door", window: "window", furniture: "furniture",
     stairs: "stairs", ramp: "ramp", elevator: "elevator", label: "custom",
   };
@@ -212,6 +212,7 @@ export function serializeCampusStructure(campus: Campus): CampusStructurePayload
   (campus.accessibilityFeatures ?? []).forEach((v) => map_elements.push(element("accessibility_feature", campus.id, v as unknown as Record<string, unknown>, v.buildingId)));
   (campus.assemblyPoints ?? []).forEach((v) => map_elements.push(element("assembly_point", campus.id, v as unknown as Record<string, unknown>)));
   (campus.decorAssets ?? []).forEach((v) => map_elements.push(element("decor", campus.id, v as unknown as Record<string, unknown>)));
+  (campus.eventOverlays ?? []).forEach((v) => map_elements.push(element("event_overlay", campus.id, v as unknown as Record<string, unknown>, v.locationRef?.buildingId)));
   return {
     buildings, floors, map_elements,
     navigation_nodes: (canonicalCampus.navNodes ?? []).map((node) => ({
@@ -305,17 +306,34 @@ export function hydrateCampusStructure(campus: Campus, rows: CampusStructureRows
   return { ...campus, buildings, markers: top<CampusMarker>("marker"), paths: top<CampusPath>("campus_path"),
     routes: top<CampusRoute>("route"), accessibilityFeatures: top<AccessibilityFeature>("accessibility_feature"),
     assemblyPoints: top<AssemblyPoint>("assembly_point"), decorAssets: top<CampusDecorAsset>("decor"),
+    eventOverlays: top<CampusEventOverlay>("event_overlay"),
     navNodes: finalNodes, navEdges: reconciledGraph.navEdges ?? [] };
 }
 
 async function selectStructure(campusId: string): Promise<CampusStructureRows> {
   const db = getSupabase();
+  // B6 Phase 2: deterministic load order. Postgres returns rows in arbitrary
+  // order without ORDER BY, which made repeated loads of identical persisted
+  // data produce different collection orders and therefore false dirty-state
+  // differences after Save → reload. Semantic editor order is preserved where a
+  // column exists (floors.display_order/floor_number; buildings carry their
+  // explicit order in metadata.display_order and the hydrator re-sorts by it),
+  // and every collection gets a stable created_at → id tie-break so two loads
+  // of the same rows always hydrate to the same JSON.
   const [buildings, floors, mapElements, navigationNodes, navigationEdges] = await Promise.all([
-    db.from("buildings").select("*").eq("campus_id", campusId).is("archived_at", null),
-    db.from("floors").select("*, buildings!inner(campus_id)").eq("buildings.campus_id", campusId).is("archived_at", null),
-    db.from("map_elements").select("*").eq("campus_id", campusId).is("archived_at", null),
-    db.from("navigation_nodes").select("*").eq("campus_id", campusId).eq("is_active", true),
-    db.from("navigation_edges").select("*").eq("campus_id", campusId).eq("is_temporarily_closed", false),
+    db.from("buildings").select("*").eq("campus_id", campusId)
+      .order("created_at", { ascending: true }).order("id", { ascending: true })
+      .is("archived_at", null),
+    db.from("floors").select("*, buildings!inner(campus_id)").eq("buildings.campus_id", campusId)
+      .order("display_order", { ascending: true }).order("floor_number", { ascending: true }).order("id", { ascending: true })
+      .is("archived_at", null),
+    db.from("map_elements").select("*").eq("campus_id", campusId)
+      .order("created_at", { ascending: true }).order("id", { ascending: true })
+      .is("archived_at", null),
+    db.from("navigation_nodes").select("*").eq("campus_id", campusId).eq("is_active", true)
+      .order("created_at", { ascending: true }).order("id", { ascending: true }),
+    db.from("navigation_edges").select("*").eq("campus_id", campusId).eq("is_temporarily_closed", false)
+      .order("created_at", { ascending: true }).order("id", { ascending: true }),
   ]);
   const failure = [buildings, floors, mapElements, navigationNodes, navigationEdges].find((result) => result.error)?.error;
   if (failure) throw failure;

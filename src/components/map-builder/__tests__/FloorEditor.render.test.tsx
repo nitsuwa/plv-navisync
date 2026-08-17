@@ -122,3 +122,47 @@ describe("FloorEditor render (regression: LandPlot runtime crash)", () => {
     expect(screen.getByText("The selected floor could not be loaded. No floor data was changed.")).toBeInTheDocument();
   });
 });
+
+describe("FloorEditor top toolbar (B6 manual-QA: deterministic responsive grouping)", () => {
+  function renderEditor() {
+    return render(
+      <FloorEditor
+        campus={makeCampus()}
+        buildingId="b1"
+        floorId="f1"
+        onBack={() => {}}
+        onSwitchFloor={() => {}}
+        onUpdate={() => {}}
+      />
+    );
+  }
+
+  it("keeps Save and Publish in the same shrink-0 group so a wrapped row never splits them", () => {
+    renderEditor();
+    const save = screen.getByRole("button", { name: /^Save$/i });
+    const publish = screen.getByRole("button", { name: /^Publish$/i });
+    expect(save.parentElement).toBe(publish.parentElement);
+    expect(save.parentElement?.className).toContain("shrink-0");
+    // Both sit inside the deterministic flex-wrap toolbar row.
+    const wrap = save.closest(".flex-wrap");
+    expect(wrap).toBeTruthy();
+    expect(wrap?.className).toContain("min-h-11");
+  });
+
+  it("keeps Undo and Redo in the same group", () => {
+    renderEditor();
+    const undo = screen.getByRole("button", { name: /^Undo/i });
+    const redo = screen.getByRole("button", { name: /^Redo/i });
+    expect(undo.parentElement).toBe(redo.parentElement);
+  });
+
+  it("still renders the major control groups (mode switch, floor tabs, issues, save/publish)", () => {
+    renderEditor();
+    expect(screen.getByTestId("floor-tab-bar")).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "Design" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "Navigation" })).toBeTruthy();
+    expect(screen.getByTestId("issues-toolbar")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^Save$/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^Publish$/i })).toBeTruthy();
+  });
+});
