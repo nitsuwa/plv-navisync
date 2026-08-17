@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import {
-  X, Settings2, Copy, ChevronUp, ChevronDown, Trash2, Grid3X3, Eye, EyeOff,
+  X, Settings2, Copy, ChevronUp, ChevronDown, Trash2, Grid3X3, Eye, EyeOff, Square,
 } from "lucide-react";
 import { cn } from "../../lib/utils";
 import type { FloorPlan } from "./types";
@@ -24,6 +24,8 @@ interface FloorOverviewSidebarProps {
   onMoveUp: () => void;
   onMoveDown: () => void;
   onDelete: () => void;
+  /** Whether the perimeter wall is currently enabled for this floor. */
+  perimeterEnabled?: boolean;
 }
 
 const labelCls = "block text-[9px] font-bold uppercase tracking-wider mb-1 text-muted-foreground";
@@ -78,6 +80,7 @@ export function FloorOverviewSidebar({
   floor, canvasW, canvasH, isFirst, isLast, isOnly,
   onClose, onRename, onCanvasSize, onShowGrid, onGridSize,
   onOpenSettings, onDuplicate, onMoveUp, onMoveDown, onDelete,
+  perimeterEnabled = false,
 }: FloorOverviewSidebarProps) {
   const showGrid = floor.showGrid !== false;
   const gridSize = floor.gridSize ?? 20;
@@ -166,6 +169,30 @@ export function FloorOverviewSidebar({
                 </button>
               ))}
             </div>
+          </div>
+        </section>
+
+        {/* ── PERIMETER WALL ── */}
+        <section>
+          <SectionLabel>Perimeter Wall</SectionLabel>
+          <div className="px-3 py-2.5 rounded-xl border border-border bg-muted/20 space-y-1.5">
+            <div className="flex items-center gap-2">
+              <Square className="h-3.5 w-3.5 text-primary shrink-0" />
+              <span className="text-[11px] font-bold text-foreground">Outer Boundary</span>
+              <span className={cn(
+                "ml-auto text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded-md",
+                perimeterEnabled
+                  ? "bg-primary/15 text-primary"
+                  : "bg-muted text-muted-foreground"
+              )}>
+                {perimeterEnabled ? "On" : "Off"}
+              </span>
+            </div>
+            <p className="text-[9px] leading-relaxed text-muted-foreground">
+              {perimeterEnabled
+                ? "The outer boundary wall is enabled and follows the floor canvas size."
+                : "No outer boundary wall. Enable in Floor Settings."}
+            </p>
           </div>
         </section>
 

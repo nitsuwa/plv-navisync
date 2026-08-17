@@ -3,49 +3,108 @@ import { motion, AnimatePresence } from "motion/react";
 import {
   AlertTriangle, CheckCircle2, X, Globe, Building2, MapPin,
   Layers, Ruler, FileText, Navigation, Accessibility, ArrowRight,
-  ChevronDown, ChevronRight, Loader2,
+  ChevronDown, ChevronRight, Loader2, Info,
 } from "lucide-react";
 import { cn } from "../../lib/utils";
 import type { Campus, CampusBuilding } from "./types";
 import type { ValidationIssue, ValidationSeverity } from "./ValidationErrorsDialog";
+import { resolveIssueTarget } from "../../lib/issueLocate";
 
-// ── Check definitions ──────────────────────────────────────────────────────
+// ── Check definitions (B7 Phase 3: mapped to ACTUAL current validators) ────
 
 interface CheckGroup {
   id: string;
   label: string;
   icon: React.ElementType;
   color: string;
-  checks: string[]; // issue type prefixes that belong to this group
+  /** Issue types that belong to this group. A type matches if it starts with
+   *  any of these prefixes (for nav_* types) or equals exactly. */
+  types: string[];
 }
 
 const CHECK_GROUPS: CheckGroup[] = [
   {
-    id: "structure", label: "Campus Structure", icon: MapPin,
+    id: "campus_buildings", label: "Campus & Buildings", icon: Building2,
     color: "var(--primary)",
-    checks: ["missing_campus_name", "no_buildings", "canvas_not_configured", "duplicate_code"],
+    types: [
+      "missing_campus_name", "no_buildings", "canvas_not_configured", "duplicate_code",
+      "missing_name", "missing_code", "boundary", "overlap", "no_floors",
+      "empty_floor", "no_building_entrance", "no_primary_entrance", "multiple_primary_entrances",
+    ],
   },
   {
-    id: "buildings", label: "Buildings & Floors", icon: Building2,
-    color: "#1e40af",
-    checks: ["missing_name", "missing_code", "boundary", "overlap", "no_floors", "empty_floor", "no_building_entrance", "no_primary_entrance", "multiple_primary_entrances"],
-  },
-  {
-    id: "rooms", label: "Rooms & Spaces", icon: Layers,
+    id: "rooms_content", label: "Rooms & Floor Content", icon: Layers,
     color: "#7c3aed",
-    checks: ["room_out_of_bounds", "missing_room_name", "room_no_type"],
+    types: [
+      "duplicate_room_name", "room_out_of_bounds", "missing_room_name", "room_no_type",
+    ],
   },
   {
     id: "navigation", label: "Navigation", icon: Navigation,
     color: "#16a34a",
-    checks: ["no_stairs_elevator", "room_no_nav_connection", "nav_disconnected", "no_routes"],
+    types: [
+      "nav_broken_edge", "nav_duplicate_edge", "nav_orphan_node",
+      "nav_disconnected_component", "nav_entrance_bridge_missing",
+      "nav_entrance_door_missing", "nav_floor_transition_invalid",
+      "nav_edge_blocked_by_obstacle", "emergency_exit_no_nav",
+    ],
   },
   {
     id: "accessibility", label: "Accessibility", icon: Accessibility,
     color: "#2563eb",
-    checks: ["no_elevator_accessible", "no_accessible_rooms"],
+    types: [
+      "nav_accessibility_contradiction",
+    ],
   },
 ];
+
+/** Match an issue type to a group. Nav types use prefix matching. */
+function issueTypeMatchesGroup(type: string, group: CheckGroup): boolean {
+  return group.types.some((t) => type === t || (t.endsWith("_") && type.startsWith(t)));
+}
+
+/** Readable location derived from the issue target + campus data. */
+function issueLocation(issue: ValidationIssue, campus: Campus): string | null {
+  const target = resolveIssueTarget(issue);
+  if (!target) return null;
+  const parts: string[] = [];
+  if (target.buildingId) {
+    const b = campus.buildings.find((x) => x.id === target.buildingId);
+    if (b) parts.push(b.name || b.code);
+  }
+  if (target.floorId && target.buildingId) {
+    const b = campus.buildings.find((x) => x.id === target.buildingId);
+    const f = b?.floors.find((fl) => fl.id === target.floorId);
+    if (f) parts.push(f.label);
+  }
+  if (parts.length === 0) return null;
+  return parts.join(" \u00B7 ");
+}
+
+/** Concise suggested resolution for common issue types. */
+function suggestedResolution(type: string): string | null {
+  const resolutions: Record<string, string> = {
+    duplicate_room_name: "Rename one of the rooms so names are unique on this floor.",
+    emergency_exit_no_nav: "Add this door to the navigation network.",
+    nav_disconnected_component: "Connect this navigation section to the main network.",
+    no_building_entrance: "Add at least one usable building entrance.",
+    no_primary_entrance: "Mark one entrance as Primary.",
+    missing_campus_name: "Enter a name for the campus.",
+    missing_name: "Enter a name for this building.",
+    missing_code: "Enter a short code for this building.",
+    no_floors: "Add at least one floor to this building.",
+    boundary: "Ensure the building fits within the campus canvas.",
+    overlap: "Move or resize buildings so they do not overlap.",
+    nav_broken_edge: "Fix or remove the broken navigation connection.",
+    nav_orphan_node: "Connect this waypoint to the navigation network.",
+    nav_duplicate_edge: "Remove the duplicate navigation connection.",
+    nav_edge_blocked_by_obstacle: "Adjust the path to avoid the obstacle.",
+    nav_entrance_bridge_missing: "Link this entrance to its indoor navigation node.",
+    nav_floor_transition_invalid: "Fix the stair or elevator floor-transition edge.",
+    nav_accessibility_contradiction: "Review accessibility flags on this navigation element.",
+  };
+  return resolutions[type] ?? null;
+}
 
 // ── Props ──────────────────────────────────────────────────────────────────
 
@@ -73,28 +132,30 @@ export function PrePublishDialog({
   const [expandedGroup, setExpandedGroup] = useState<string | null>("structure");
   const [confirmPublish, setConfirmPublish] = useState(false);
 
-  // ── Group errors by check group ──
+  // ── Group errors by check group (B7 Phase 3: uses ACTUAL current types) ──
   const groupedIssues = useMemo(() => {
-    const result = new Map<string, { errors: ValidationIssue[]; warnings: ValidationIssue[] }>();
+    const result = new Map<string, { errors: ValidationIssue[]; warnings: ValidationIssue[]; info: ValidationIssue[] }>();
     for (const group of CHECK_GROUPS) {
-      result.set(group.id, { errors: [], warnings: [] });
+      result.set(group.id, { errors: [], warnings: [], info: [] });
     }
-    // Uncategorized -> structure
-    const def = result.get("structure")!;
+    // Uncategorized goes to campus_buildings as fallback
+    const fallback = result.get("campus_buildings")!;
     for (const err of errors) {
       let placed = false;
       for (const group of CHECK_GROUPS) {
-        if (group.checks.includes(err.type)) {
+        if (issueTypeMatchesGroup(err.type, group)) {
           const entry = result.get(group.id)!;
           if (err.severity === "error") entry.errors.push(err);
-          else entry.warnings.push(err);
+          else if (err.severity === "warning") entry.warnings.push(err);
+          else entry.info.push(err);
           placed = true;
           break;
         }
       }
       if (!placed) {
-        if (err.severity === "error") def.errors.push(err);
-        else def.warnings.push(err);
+        if (err.severity === "error") fallback.errors.push(err);
+        else if (err.severity === "warning") fallback.warnings.push(err);
+        else fallback.info.push(err);
       }
     }
     return result;
@@ -111,12 +172,27 @@ export function PrePublishDialog({
     return { totalErrors, totalWarnings, totalInfo, total: errors.length };
   }, [errors]);
 
-  // ── Compute readiness ──
+  // ── Compute readiness (B7 Phase 3: user-friendly wording) ──
   const readiness = useMemo(() => {
-    if (stats.totalErrors === 0 && stats.totalWarnings === 0) return "ready";
-    if (stats.totalErrors === 0) return "warning";
-    return "blocked";
+    if (stats.totalErrors === 0 && stats.totalWarnings === 0) return "ready" as const;
+    if (stats.totalErrors === 0) return "warning" as const;
+    return "blocked" as const;
   }, [stats]);
+
+  // ── Validation summary: passed checks count ──
+  const summary = useMemo(() => {
+    const totalChecks = CHECK_GROUPS.length;
+    const groupsWithIssues = new Set<string>();
+    for (const [id, data] of groupedIssues) {
+      if (data.errors.length + data.warnings.length > 0) groupsWithIssues.add(id);
+    }
+    return {
+      passed: totalChecks - groupsWithIssues.size,
+      total: totalChecks,
+      errors: stats.totalErrors,
+      warnings: stats.totalWarnings,
+    };
+  }, [groupedIssues, stats]);
 
   // ── Building count ──
   const bldgs = campus.buildings;
@@ -176,8 +252,8 @@ export function PrePublishDialog({
               <div className="min-w-0 flex-1">
                 <h2 className="text-lg font-extrabold text-foreground" style={{ fontFamily: "var(--font-sans)" }}>
                   {readiness === "ready" ? "Ready to Publish" :
-                   readiness === "warning" ? "Publish with Warnings" :
-                   "Validation Issues Found"}
+                   readiness === "warning" ? "Needs Attention" :
+                   "Not Ready to Publish"}
                 </h2>
                 <p className="mt-0.5 text-sm text-muted-foreground leading-relaxed" style={{ fontFamily: "var(--font-body)" }}>
                   {readiness === "ready"
@@ -216,23 +292,30 @@ export function PrePublishDialog({
               </div>
             </div>
 
-            {/* ═══ ERROR/WARNING SUMMARY BADGE ═══ */}
-            {stats.total > 0 && (
-              <div className="px-6 py-1 shrink-0">
+            {/* ═══ VALIDATION SUMMARY (B7 Phase 3) ═══ */}
+            <div className="px-6 py-1.5 shrink-0">
+              <div className="flex flex-wrap items-center gap-2">
                 <div className={cn(
-                  "inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold",
+                  "inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold",
                   stats.totalErrors > 0
                     ? "bg-red-50 dark:bg-red-900/15 text-red-700 dark:text-red-400"
-                    : "bg-amber-50 dark:bg-amber-900/15 text-amber-700 dark:text-amber-400"
+                    : stats.totalWarnings > 0
+                      ? "bg-amber-50 dark:bg-amber-900/15 text-amber-700 dark:text-amber-400"
+                      : "bg-green-50 dark:bg-green-900/15 text-green-700 dark:text-green-400"
                 )}>
                   {stats.totalErrors > 0 ? (
-                    <><AlertTriangle className="h-3.5 w-3.5" /> {stats.totalErrors} error{stats.totalErrors !== 1 ? "s" : ""}{stats.totalWarnings > 0 ? `, ${stats.totalWarnings} warning${stats.totalWarnings !== 1 ? "s" : ""}` : ""}</>
+                    <><AlertTriangle className="h-3 w-3" /> {stats.totalErrors} error{stats.totalErrors !== 1 ? "s" : ""}</>
+                  ) : stats.totalWarnings > 0 ? (
+                    <><AlertTriangle className="h-3 w-3" /> {stats.totalWarnings} warning{stats.totalWarnings !== 1 ? "s" : ""}</>
                   ) : (
-                    <><AlertTriangle className="h-3.5 w-3.5" /> {stats.totalWarnings} warning{stats.totalWarnings !== 1 ? "s" : ""}</>
+                    <><CheckCircle2 className="h-3 w-3" /> All checks passed</>
                   )}
                 </div>
+                <span className="text-[10px] text-muted-foreground">
+                  {summary.passed} of {summary.total} checks passed
+                </span>
               </div>
-            )}
+            </div>
 
             {/* Scrollable check groups */}
             <div className="flex-1 overflow-y-auto px-6 pb-2 min-h-0 scrollbar-show-on-hover space-y-1.5">
@@ -241,7 +324,8 @@ export function PrePublishDialog({
                 if (!data) return null;
                 const groupErrors = data.errors.length;
                 const groupWarnings = data.warnings.length;
-                const totalGroup = groupErrors + groupWarnings;
+                const groupInfo = data.info.length;
+                const totalGroup = groupErrors + groupWarnings + groupInfo;
                 const Icon = group.icon;
                 const isExpanded = expandedGroup === group.id;
                 const hasContent = totalGroup > 0;
@@ -260,12 +344,14 @@ export function PrePublishDialog({
                           "text-[10px] font-bold px-1.5 py-0.5 rounded-full",
                           groupErrors > 0
                             ? "bg-red-100 dark:bg-red-900/20 text-red-700 dark:text-red-400"
-                            : "bg-amber-100 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400"
+                            : groupWarnings > 0
+                              ? "bg-amber-100 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400"
+                              : "bg-blue-100 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400"
                         )}>
-                          {groupErrors > 0 ? `${groupErrors} err` : `${groupWarnings} warn`}
+                          {groupErrors > 0 ? `${groupErrors} err` : groupWarnings > 0 ? `${groupWarnings} warn` : `${groupInfo} info`}
                         </span>
                       ) : (
-                        <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />
+                        <span className="text-[10px] text-green-600 dark:text-green-400 font-bold">Passed</span>
                       )}
                       {isExpanded ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />}
                     </button>
@@ -281,29 +367,50 @@ export function PrePublishDialog({
                           className="overflow-hidden"
                         >
                           <div className="px-3.5 pb-2.5 space-y-1">
-                            {[...data.errors, ...data.warnings].map((issue, idx) => (
-                              <div
-                                key={`${issue.type}-${issue.buildingId ?? issue.roomId ?? idx}`}
-                                className={cn(
-                                  "flex items-start gap-2 px-3 py-2 rounded-lg border",
-                                  issue.severity === "error"
-                                    ? "bg-red-50/60 dark:bg-red-900/8 border-red-200 dark:border-red-800/20"
-                                    : "bg-amber-50/60 dark:bg-amber-900/8 border-amber-200 dark:border-amber-800/20"
-                                )}
-                              >
-                                <AlertTriangle className={cn(
-                                  "h-3.5 w-3.5 shrink-0 mt-0.5",
-                                  issue.severity === "error" ? "text-red-500" : "text-amber-500"
-                                )} />
-                                <span className="text-xs leading-relaxed text-foreground flex-1">{issue.message}</span>
-                                <button
-                                  onClick={() => onReviewIssue(issue)}
-                                  className="shrink-0 h-6 px-2 rounded-lg border border-border text-[9px] font-bold text-muted-foreground hover:text-foreground hover:bg-muted transition-colors flex items-center gap-1"
+                            {[...data.errors, ...data.warnings, ...data.info].map((issue, idx) => {
+                              const location = issueLocation(issue, campus);
+                              const resolution = suggestedResolution(issue.type);
+                              return (
+                                <div
+                                  key={`${issue.type}-${issue.buildingId ?? issue.roomId ?? idx}`}
+                                  className={cn(
+                                    "px-3 py-2 rounded-lg border",
+                                    issue.severity === "error"
+                                      ? "bg-red-50/60 dark:bg-red-900/8 border-red-200 dark:border-red-800/20"
+                                      : issue.severity === "warning"
+                                        ? "bg-amber-50/60 dark:bg-amber-900/8 border-amber-200 dark:border-amber-800/20"
+                                        : "bg-blue-50/60 dark:bg-blue-900/8 border-blue-200 dark:border-blue-800/20"
+                                  )}
                                 >
-                                  Fix <ArrowRight className="h-2.5 w-2.5" />
-                                </button>
-                              </div>
-                            ))}
+                                  <div className="flex items-start gap-2">
+                                    {issue.severity === "error" ? (
+                                      <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5 text-red-500" />
+                                    ) : issue.severity === "warning" ? (
+                                      <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5 text-amber-500" />
+                                    ) : (
+                                      <Info className="h-3.5 w-3.5 shrink-0 mt-0.5 text-blue-500" />
+                                    )}
+                                    <div className="flex-1 min-w-0">
+                                      <span className="text-xs leading-relaxed text-foreground block">{issue.message}</span>
+                                      {location && (
+                                        <span className="text-[9px] text-muted-foreground mt-0.5 flex items-center gap-1">
+                                          <MapPin className="h-2 w-2 shrink-0" />{location}
+                                        </span>
+                                      )}
+                                      {resolution && (
+                                        <span className="text-[9px] text-muted-foreground mt-0.5 block italic">{resolution}</span>
+                                      )}
+                                    </div>
+                                    <button
+                                      onClick={() => onReviewIssue(issue)}
+                                      className="shrink-0 h-6 px-2 rounded-lg border border-border text-[9px] font-bold text-muted-foreground hover:text-foreground hover:bg-muted transition-colors flex items-center gap-1"
+                                    >
+                                      Fix <ArrowRight className="h-2.5 w-2.5" />
+                                    </button>
+                                  </div>
+                                </div>
+                              );
+                            })}
                           </div>
                         </motion.div>
                       )}
@@ -329,7 +436,7 @@ export function PrePublishDialog({
                 Cancel
               </button>
               <div className="flex-1" />
-              {readiness === "ready" || readiness === "warning" ? (
+              {readiness === "ready" ? (
                 confirmPublish ? (
                   <div className="flex items-center gap-2">
                     <button onClick={() => setConfirmPublish(false)}
@@ -352,6 +459,31 @@ export function PrePublishDialog({
                     className="h-10 px-5 rounded-xl bg-primary text-primary-foreground text-xs font-extrabold hover:bg-primary/90 transition-all shadow-sm flex items-center gap-1.5"
                   >
                     <Globe className="h-3.5 w-3.5" /> Publish Now
+                  </button>
+                )
+              ) : readiness === "warning" ? (
+                confirmPublish ? (
+                  <div className="flex items-center gap-2">
+                    <button onClick={() => setConfirmPublish(false)}
+                      className="h-10 px-3 rounded-xl border border-border text-[10px] font-bold text-muted-foreground hover:bg-muted transition-colors"
+                    >
+                      Back
+                    </button>
+                    <button onClick={onPublish} disabled={isPublishing}
+                      className="h-10 px-5 rounded-xl bg-primary text-primary-foreground text-xs font-extrabold hover:bg-primary/90 transition-all shadow-sm flex items-center gap-1.5 disabled:opacity-50"
+                    >
+                      {isPublishing ? (
+                        <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Publishing...</>
+                      ) : (
+                        <><Globe className="h-3.5 w-3.5" /> Publish with Warnings</>
+                      )}
+                    </button>
+                  </div>
+                ) : (
+                  <button onClick={() => setConfirmPublish(true)}
+                    className="h-10 px-5 rounded-xl bg-primary text-primary-foreground text-xs font-extrabold hover:bg-primary/90 transition-all shadow-sm flex items-center gap-1.5"
+                  >
+                    <AlertTriangle className="h-3.5 w-3.5" /> Review Warnings & Publish
                   </button>
                 )
               ) : (

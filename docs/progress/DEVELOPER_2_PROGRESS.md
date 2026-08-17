@@ -169,11 +169,32 @@ Status values: `READY`, `ACTIVE`, `BLOCKED`, `FOR REVIEW`, `DONE`.
   - Test result: Phase 1 — 40 persistence tests green (`campusStructurePersistence.test.ts`) plus clone-compatibility suite green; Phase 2 — 34 persistence tests green (deterministic order, maximal round-trip, idempotency, path-vs-nav separation, navigation-metadata preservation); final UI pass — 144 focused tests green (`FloorEditor.render`, `CampusEditor.navGraph`, `FloorEditor.uxParity`) including new asset-label and toolbar-grouping regressions; `pnpm build` passed (existing non-blocking >500 kB chunk warning only); `git diff --check` clean.
   - Database impact: none — no migration, no schema change, no RLS change, and no dependency change were required; persistence uses the existing A5 `save_campus_structure` atomic RPC contract.
   - Pull Request: Pending
-- [ ] **B7 — Complete validation and issues workflow**
-  - Status: `BLOCKED`
+- [x] **B7 — Complete validation and issues workflow**
+  - Status: `FOR REVIEW`
   - Branch: `feature/map-builder-validation`
   - Depends on: B5 and B6
-  - Test result: Pending
+  - Scope delivered:
+    - Canonical live validation architecture (`liveValidation.ts`) deriving campus/building, duplicate-room, navigation-graph, accessibility, and floor-geometry issues from one merged source
+    - Global Issues popover with severity-colored badge, readiness label (Ready / Needs Attention / Not Ready), and real group-level validation summary ("N of 4 checks passed")
+    - PrePublishDialog with active issue grouping (Campus & Buildings / Rooms & Floor Content / Navigation / Accessibility), readable affected locations, suggested resolutions, and severity-based publish gating
+    - Floor Editor issue consistency — local floor issues merged with canonical campus/nav issues without duplication
+    - Object issue markers on canvas (one restrained badge per affected campus/floor object)
+    - Marker visibility respects active editor mode/layer (nav markers hidden in Design, shown in Navigation)
+    - Contextual "Needs attention" section in Properties sidebar for selected objects with issues
+    - Issue locate with structured `IssueTarget`, stale-target safety, correct campus/floor/mode switching
+    - Locate flash ping removed (oversized misaligned circle replaced by selection + zoom + Properties)
+    - Save Draft allowed with warnings/errors (validation issues remain visible after save)
+    - Publish semantics preserved: errors block, warnings require explicit confirmation, info non-blocking, A6 gate intentionally NOT bypassed
+    - Dead ValidationErrorsDialog wiring removed from CampusEditor
+    - Floor delete confirmation parity (PropertiesPanel floor Management now uses ConfirmDialog)
+    - Fake floor drag handles removed from both HierarchyPanel and PropertiesPanel
+    - Room overlap detection and rejection during authoring (accepted correction pass)
+    - Wall endpoint snap and drawing preview non-interactive fix (accepted correction pass)
+    - Perimeter Wall discoverable in FloorOverviewSidebar
+  - Test result: 98 focused tests across 9 B7 test files pass (`b7FinalCorrection` 18, `b7MarkerLayerVisibility` 8, `b7PrePublishPhase3` 10, `CampusEditor.b7Markers` 6, `CampusEditor.publishGate` 4, `CampusEditor.issueLocate` 17, `CampusEditor.b7Corrections` 16, `CampusEditor.objectIssues` 6, `FloorEditor.b7Issues` 13); `pnpm build` passed (existing non-blocking >500 kB chunk warning only); `git diff --check` clean.
+  - Manual QA: all B7 manual QA corrections completed — locate ping removed, floor drag handles removed from both render paths, floor delete confirmation parity added, A6 publish gate preserved, marker layer visibility fixed.
+  - Database impact: none — no migration, no schema change, no RLS change, and no dependency change were required.
+  - Deferred (next authoring correction before/around B8): adjacent-room / separating-wall workflow, wall endpoint snapping reliability, room/wall authoring usability.
   - Pull Request: Pending
 - [ ] **B8 — Route testing and pathfinding verification**
   - Status: `BLOCKED`

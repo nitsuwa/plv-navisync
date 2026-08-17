@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { X, Trash2, Link2, Waypoints, MapPin, AlertTriangle } from "lucide-react";
 import { cn } from "../../lib/utils";
+import { ObjectIssueSection, type ObjectIssueItem } from "./ObjectIssueSection";
 import type { NavigationNode, NavigationEdge, NavigationNodeType } from "./types";
 import { linkedObjectRef } from "../../lib/indoorNavigationGraph";
 
@@ -119,6 +120,8 @@ function PopSelect({ value, options, onChange, disabled }: {
 
 interface FloorNavPropertiesPanelProps {
   selected: { type: "node" | "edge"; id: string };
+  /** B7 Phase 2: live validation issues for the currently selected nav object. */
+  issueItems?: ObjectIssueItem[];
   nodes: NavigationNode[];
   edges: NavigationEdge[];
   onUpdateNode: (id: string, changes: Partial<NavigationNode>) => void;
@@ -145,6 +148,7 @@ export function FloorNavPropertiesPanel({
   onUpdateNode, onUpdateEdge, onDelete, onClose,
   onAddBend, onRemoveBend, onStraighten, straightenBlocked, edgeBlocked,
   transitionFloors, transitionState, elevatorServedFloors = [],
+  issueItems = [],
 }: FloorNavPropertiesPanelProps) {
   if (selected.type === "node") {
     const node = nodes.find((n) => n.id === selected.id);
@@ -169,6 +173,8 @@ export function FloorNavPropertiesPanel({
           </button>
         </div>
         <div className="flex-1 overflow-y-auto p-3 space-y-3.5">
+          {/* B7 Phase 2: contextual issue guidance for the selected waypoint */}
+          <ObjectIssueSection items={issueItems} />
           <Section title="General">
             <FieldLabel>{isDest ? "Name (required)" : "Name"}</FieldLabel>
             <input
@@ -328,6 +334,8 @@ export function FloorNavPropertiesPanel({
         </button>
       </div>
       <div className="flex-1 overflow-y-auto p-3 space-y-3.5">
+        {/* B7 Phase 2: contextual issue guidance for the selected nav edge */}
+        <ObjectIssueSection items={issueItems} />
         <Section title="Connection">
           <div className="text-[11px] font-bold text-foreground">
             {from?.name || "Waypoint"} <span className="text-muted-foreground font-semibold">→</span> {to?.name || "Waypoint"}

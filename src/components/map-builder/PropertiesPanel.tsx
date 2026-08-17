@@ -13,8 +13,9 @@ import { polylineCrossesObstacle } from "../../lib/editorPlacement";
 import type { BulkRoutingAction } from "../../lib/navigationGraph";
 import { normalizeRotation, clampDecorScale, DECOR_SCALE_MIN, DECOR_SCALE_MAX } from "../../lib/decorAsset";
 import { createDefaultFloor } from "../../lib/floorPlanNormalization";
-import { nextFloorNumberForBuilding } from "../../lib/floorManagement";
+import { nextFloorNumberForBuilding, countFloorAuthoredItems, deleteFloorFromBuilding } from "../../lib/floorManagement";
 import { DecorAssetVisual } from "./DecorAssetVisual";
+import { ObjectIssueSection, type ObjectIssueItem } from "./ObjectIssueSection";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
 import { cn } from "../../lib/utils";
 import { MARKER_STYLES } from "../../data/mapData";
@@ -54,6 +55,8 @@ const TABS: TabDef[] = [
 
 interface PropertiesPanelProps {
   selected: CampusSelection | null;
+  /** B7 Phase 2: live validation issues for the currently selected object. */
+  issueItems?: ObjectIssueItem[];
   selBldg: CampusBuilding | undefined;
   selEntrance?: CampusEntrance | undefined;
   selEntranceParent?: CampusBuilding | undefined;
@@ -361,6 +364,7 @@ function TabBar({ active, onChange }: { active: TabId; onChange: (t: TabId) => v
 
 export function PropertiesPanel({
   selected, selBldg, selEntrance, selEntranceParent, selMkr, selPath, selRoute, allPaths = [],
+  issueItems = [],
   selectedPathPoint, selectedPathPointIsJunction, selectedPathPointCanBeRemoved,
   selDecorAsset, allDecorAssets,
   selNavNode, selNavEdge, navEdgeBlocked, selEventOverlay, allNavNodes, allNavEdges, entranceLinkStatus, entranceDoorOptions,
@@ -383,7 +387,7 @@ export function PropertiesPanel({
   onClose,
 }: PropertiesPanelProps) {
   const [tab, setTab] = useState<TabId>("basic");
-  const [deleteConfirm, setDeleteConfirm] = useState<{ type: "building" | "marker" | "path" | "route" | "batch" | "decorAsset"; id: string; label: string } | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<{ type: "building" | "marker" | "path" | "route" | "batch" | "decorAsset" | "floor"; id: string; label: string; buildingId?: string; itemCount?: number } | null>(null);
   const [entranceDoorPickerOpen, setEntranceDoorPickerOpen] = useState(false);
   const [entranceDoorSearch, setEntranceDoorSearch] = useState("");
   const visible = !!selected || multiSelected.length > 0;
@@ -533,6 +537,9 @@ export function PropertiesPanel({
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto overflow-x-hidden scrollbar-show-on-hover scroll-smooth p-4 space-y-4 min-w-0">
+        {/* ── B7 Phase 2: contextual issue guidance for the selected object ── */}
+        <ObjectIssueSection items={issueItems} />
+
         {/* ── NAVIGATION MULTI-SELECT (B5 Phase 1.6) ── */}
         {isNavMultiMode && (
           <div data-testid="nav-multi-props">
@@ -981,7 +988,7 @@ export function PropertiesPanel({
                         key={floor.id}
                         className="flex items-center gap-2 px-2 py-1.5 rounded-lg border border-border/60 bg-muted/10 group hover:bg-muted/20 transition-colors"
                       >
-                        <GripVertical className="h-3 w-3 text-muted-foreground/40 shrink-0 cursor-grab" />
+
                         <div
                           className="w-4 h-4 rounded flex items-center justify-center text-[8px] font-extrabold text-white shrink-0"
                           style={{ background: selBldg.color }}
@@ -995,14 +1002,12 @@ export function PropertiesPanel({
                         <button
                           onClick={() => {
                             if (selBldg.floors.length <= 1) return;
-                            const newFloors = selBldg.floors.filter((f) => f.id !== floor.id);
-                            // Re-number
-                            onUpdateBuilding(selBldg.id, {
-                              floors: newFloors.map((f, i) => ({
-                                ...f,
-                                number: i + 1,
-                                label: i === 0 ? "Ground Floor" : `Floor ${i + 1}`,
-                              })),
+                            setDeleteConfirm({
+                              type: "floor",
+                              id: floor.id,
+                              label: floor.label,
+                              buildingId: selBldg.id,
+                              itemCount: countFloorAuthoredItems(floor),
                             });
                           }}
                           disabled={selBldg.floors.length <= 1}
@@ -2429,24 +2434,40 @@ export function PropertiesPanel({
       {/* Delete confirmation (single or batch) */}
       <ConfirmDialog
         open={deleteConfirm !== null}
-        title={deleteConfirm?.type === "batch" ? "Delete Selected Objects?" : `Delete ${deleteConfirm?.type === "building" ? "Building" : deleteConfirm?.type === "marker" ? "Marker" : deleteConfirm?.type === "path" ? "Pathway" : deleteConfirm?.type === "decorAsset" ? "Asset" : "Route"}?`}
+        title={deleteConfirm?.type === "batch" ? "Delete Selected Objects?"
+          : deleteConfirm?.type === "floor" ? "Delete Floor"
+          : `Delete ${deleteConfirm?.type === "building" ? "Building" : deleteConfirm?.type === "marker" ? "Marker" : deleteConfirm?.type === "path" ? "Pathway" : deleteConfirm?.type === "decorAsset" ? "Asset" : "Route"}?`}
         message={deleteConfirm?.type === "batch"
           ? `This action cannot be undone. "${deleteConfirm?.label}" will be permanently removed from the map.`
+          : deleteConfirm?.type === "floor"
+          ? `Delete "${deleteConfirm?.label}" and its ${deleteConfirm?.itemCount ?? 0} authored ${(deleteConfirm?.itemCount ?? 0) === 1 ? "item" : "items"}? This action cannot be undone.`
           : `This action cannot be undone. "${deleteConfirm?.label ?? "this item"}" will be permanently removed from the map.`}
-        confirmLabel={deleteConfirm?.type === "batch" ? "Delete All" : `Delete ${deleteConfirm?.type === "building" ? "Building" : deleteConfirm?.type === "marker" ? "Marker" : deleteConfirm?.type === "path" ? "Pathway" : deleteConfirm?.type === "decorAsset" ? "Asset" : "Route"}`}
+        confirmLabel={deleteConfirm?.type === "batch" ? "Delete All"
+          : deleteConfirm?.type === "floor" ? "Delete Floor"
+          : `Delete ${deleteConfirm?.type === "building" ? "Building" : deleteConfirm?.type === "marker" ? "Marker" : deleteConfirm?.type === "path" ? "Pathway" : deleteConfirm?.type === "decorAsset" ? "Asset" : "Route"}`}
         variant="danger"
         onConfirm={() => {
           if (!deleteConfirm) return;
           if (deleteConfirm.type === "batch") {
             onBatchDeleteBuildings(multiSelected);
             onClearMultiSelect();
+          } else if (deleteConfirm.type === "floor") {
+            // Delete floor + re-number remaining floors
+            const floors = (selBldg?.floors ?? []).filter((f) => f.id !== deleteConfirm.id);
+            onUpdateBuilding(deleteConfirm.buildingId!, {
+              floors: floors.map((f, i) => ({
+                ...f,
+                number: i + 1,
+                label: i === 0 ? "Ground Floor" : `Floor ${i + 1}`,
+              })),
+            });
           } else if (deleteConfirm.type === "building") onDeleteBuilding(deleteConfirm.id);
           else if (deleteConfirm.type === "marker") onDeleteMarker(deleteConfirm.id);
           else if (deleteConfirm.type === "path") onDeletePath?.(deleteConfirm.id);
           else if (deleteConfirm.type === "decorAsset") onDeleteDecorAsset(deleteConfirm.id);
           else onDeleteRoute?.(deleteConfirm.id);
           setDeleteConfirm(null);
-          if (deleteConfirm.type !== "batch") onClose();
+          if (deleteConfirm.type !== "batch" && deleteConfirm.type !== "floor") onClose();
         }}
         onCancel={() => setDeleteConfirm(null)}
       />

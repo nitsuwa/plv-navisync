@@ -169,6 +169,40 @@ export function validateCampusData(
         });
       }
     }
+    // B7 Phase 1: duplicate room names WITHIN the same floor. Comparison is
+    // case-insensitive and whitespace-normalized; matching names on different
+    // floors are NOT duplicates. Each affected room after the first canonical
+    // occurrence gets its own locatable warning so every duplicate can be
+    // fixed individually. Empty/whitespace-only names are ignored.
+    for (const floor of b.floors ?? []) {
+      const seenNames = new Set<string>();
+      for (const room of floor.rooms ?? []) {
+        const raw = room.name?.trim();
+        if (!raw) continue;
+        const normalized = raw.replace(/\s+/g, " ");
+        const key = normalized.toLowerCase();
+        if (seenNames.has(key)) {
+          errors.push({
+            type: "duplicate_room_name",
+            severity: "warning",
+            message: `Room name "${normalized}" is duplicated on floor "${floor.label || `Floor ${floor.number}`}". Rename one of the rooms.`,
+            buildingId: b.id,
+            floorId: floor.id,
+            roomId: room.id,
+            target: {
+              scope: "floor",
+              mode: "design",
+              buildingId: b.id,
+              floorId: floor.id,
+              selectionType: "room",
+              id: room.id,
+            },
+          });
+        } else {
+          seenNames.add(key);
+        }
+      }
+    }
   }
 
   const overlapIds = overlaps ?? computeBuildingOverlaps(bldgs);

@@ -673,7 +673,10 @@ describe("B5 Phase 3.2 — non-blocking nav empty-state + circulation quick-link
 
     const issuesButton = screen.getByTestId("issues-toolbar");
     expect(issuesButton).toHaveTextContent("Issues");
-    expect(issuesButton).toHaveTextContent("1");
+    // B7 Phase 1: the Floor panel now also surfaces the canonical floor-scoped
+    // issues — here the orphaned elevator nav node on floor fa (1 local stair
+    // direction warning + 1 canonical orphan warning = 2).
+    expect(issuesButton).toHaveTextContent("2");
     expect(issuesButton.className).toContain("text-destructive");
 
     selectElevator(container);
@@ -691,6 +694,8 @@ describe("B5 Phase 3.2 — non-blocking nav empty-state + circulation quick-link
 
     fireEvent.click(issuesButton);
     expect(screen.getByText(/Stair direction is invalid/)).toBeTruthy();
+    // Canonical floor issue is now visible in the Floor Editor panel too.
+    expect(screen.getByText(/has no navigation connections/)).toBeTruthy();
     expect(screen.queryByText("No floor issues found")).toBeNull();
     expect(screen.getByText("Floor Issues").closest(".bg-card")?.querySelector(".text-emerald-600")).toBeNull();
   });

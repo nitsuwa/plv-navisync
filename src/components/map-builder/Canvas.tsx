@@ -464,6 +464,9 @@ interface CanvasProps {
   connectBlocked?: boolean;
   /** B5 Phase 6.10: set of edge IDs currently blocked by obstacles (rendered red). */
   navBlockedEdgeIds?: Set<string>;
+  /** B7 Phase 1: restrained validation issue markers (world-space anchors). One
+   *  small badge per affected campus object, pointer-events-none, drawn on top. */
+  issueMarkers?: { key: string; x: number; y: number; severity: "error" | "warning" }[];
   /** Click an edge (select mode selects it; path mode is ignored). */
   onNavEdgeSelect?: (e: React.MouseEvent, id: string) => void;
   onNavEdgeBendDown?: (e: React.MouseEvent, id: string, bendIndex: number) => void;
@@ -603,6 +606,7 @@ export function Canvas({
   resizingId, highlightedRoute, animatingPathId,
   decorRotatingId, decorResizingId, onDecorRotateStart, onDecorResizeStart,
   navNodes, navEdges, showNavigationOverlay = false, navConnectStartId, navPreview, navConnectBends = [], navPreviewPins = [], navEntranceHover, edgeSnapPreview, connectBlocked, navBlockedEdgeIds, onNavEdgeSelect, onNavEdgeBendDown, onNavEdgeAddBend,
+  issueMarkers = [],
 }: CanvasProps) {
   const buildings = campus.buildings;
   const markers = campus.markers;
@@ -2278,6 +2282,24 @@ export function Canvas({
                 style={{ fontFamily: "var(--font-sans)" }}>
                 Insert waypoint into connection
               </text>
+            </g>
+          )}
+
+          {/* ── B7 Phase 1: validation issue markers — one small badge per
+              affected campus object, drawn in the SAME world→SVG transform as
+              the objects. Warnings stay amber, errors stay red; the layer is
+              pointer-events-none so it never intercepts canvas interactions. ── */}
+          {issueMarkers.length > 0 && (
+            <g className="pointer-events-none" data-testid="campus-issue-marker-layer">
+              {issueMarkers.map((m) => {
+                const color = m.severity === "error" ? "#dc2626" : "#d97706";
+                return (
+                  <g key={m.key} data-testid="campus-issue-marker" data-issue-object={m.key} data-issue-severity={m.severity}>
+                    <circle cx={m.x} cy={m.y - 13} r={7} fill="none" stroke={color} strokeWidth={0.8} opacity={0.45} />
+                    <circle cx={m.x} cy={m.y - 13} r={4.5} fill={color} stroke="white" strokeWidth={1.4} />
+                  </g>
+                );
+              })}
             </g>
           )}
         </g>

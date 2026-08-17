@@ -87,6 +87,8 @@ export interface ValidationIssue {
     | "nav_dest_invalid_entity"
     | "unreachable_room"
     | "room_no_type"
+    // ── B7 Phase 1: structural completeness ──
+    | "duplicate_room_name"
     // ── Phase 1: Hierarchy integrity checks ──
     | "floor_no_building"
     | "room_no_floor"
@@ -229,6 +231,7 @@ const ISSUE_CATEGORY: Record<string, string> = {
   room_out_of_bounds: "rooms",
   missing_room_name: "rooms",
   room_no_type: "rooms",
+  duplicate_room_name: "rooms",
   // ── Phase 1: Hierarchy integrity ──
   floor_no_building: "missing",
   room_no_floor: "missing",
@@ -244,7 +247,7 @@ const ISSUE_CATEGORY: Record<string, string> = {
   no_floor_transition: "navigation",
   stair_disconnected_nav: "navigation",
   elevator_disconnected_nav: "navigation",
-  emergency_exit_no_nav: "boundary",
+  emergency_exit_no_nav: "navigation",
   assembly_point_unreachable: "boundary",
   room_no_evacuation_route: "navigation",
   emergency_route_blocked: "boundary",
@@ -277,6 +280,7 @@ const ISSUE_ICONS: Record<string, React.ElementType> = {
   room_out_of_bounds: Ruler,
   missing_room_name: AlertTriangle,
   room_no_type: AlertTriangle,
+  duplicate_room_name: Layers,
   // ── Phase 1: Hierarchy integrity ──
   floor_no_building: Layers,
   room_no_floor: Layers,

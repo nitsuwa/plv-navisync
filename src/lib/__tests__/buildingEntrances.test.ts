@@ -166,4 +166,59 @@ describe("building entrance geometry", () => {
     ]);
     expect(noGeneral.some((e) => e.isPrimary)).toBe(false);
   });
+
+  it("first entrance keeps the default bottom-center position (B7 Phase 1)", () => {
+    const b = building();
+    const first = defaultEntrance(b, "ent1");
+    expect(first).toMatchObject({ edge: "bottom", offset: 0.5 });
+  });
+
+  it("second entrance gets a non-overlapping default position (B7 Phase 1)", () => {
+    const b = building({ entrances: [defaultEntrance(building(), "ent1")] });
+    const second = defaultEntrance(b, "ent2");
+    // Must differ from the first entrance's world position.
+    const p1 = entranceWorldPosition(b, b.entrances![0]);
+    const p2 = entranceWorldPosition(b, second);
+    expect(Math.hypot(p2.x - p1.x, p2.y - p1.y)).toBeGreaterThan(16);
+    // Still plain edge + offset geometry (drag/rotation-safe attachment).
+    expect(second).toMatchObject({ edge: expect.stringMatching(/^(top|right|bottom|left)$/), offset: expect.any(Number) });
+  });
+
+  it("third and additional entrances keep choosing valid free positions (B7 Phase 1)", () => {
+    let b = building();
+    b = { ...b, entrances: [] };
+    const placements: { x: number; y: number }[] = [];
+    for (let i = 0; i < 6; i++) {
+      const entrance = defaultEntrance(b, `ent${i + 1}`);
+      b = { ...b, entrances: [...(b.entrances ?? []), entrance] };
+      const pos = entranceWorldPosition(b, entrance);
+      // Every new entrance must be separated from ALL previous ones.
+      for (const prev of placements) {
+        expect(Math.hypot(pos.x - prev.x, pos.y - prev.y)).toBeGreaterThan(12);
+      }
+      placements.push(pos);
+    }
+    expect(placements).toHaveLength(6);
+  });
+
+  it("entrance attachment stays valid after building rotation (B7 Phase 1)", () => {
+    const b = building({ rotation: 90 });
+    const e1 = defaultEntrance(b, "ent1");
+    const b2 = { ...b, entrances: [e1] };
+    const e2 = defaultEntrance(b2, "ent2");
+    const p1 = entranceWorldPosition(b2, e1);
+    const p2 = entranceWorldPosition(b2, e2);
+    // Rotated building: the two entrances must still be distinct world points.
+    expect(Math.hypot(p2.x - p1.x, p2.y - p1.y)).toBeGreaterThan(16);
+  });
+
+  it("never moves existing entrances (B7 Phase 1)", () => {
+    const existing = [
+      { id: "ent1", buildingId: "b1", edge: "bottom", offset: 0.5, type: "general" as const, isPrimary: true },
+      { id: "ent2", buildingId: "b1", edge: "top", offset: 0.25, type: "service" as const, isPrimary: false },
+    ];
+    const b = building({ entrances: existing });
+    defaultEntrance(b, "ent3");
+    expect(b.entrances).toEqual(existing);
+  });
 });

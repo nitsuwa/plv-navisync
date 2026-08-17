@@ -135,3 +135,79 @@ describe("B5 Phase 4.5 - Save Draft persistence flow", () => {
     expect(screen.getByText("Unsaved Changes")).toBeInTheDocument();
   });
 });
+
+describe("B7 Phase 2 — Save Draft is never blocked by validation", () => {
+  it("saves a draft that has validation WARNINGS", async () => {
+    // Orphan nav node → nav_orphan_node warning. Saving must NOT be blocked.
+    const current = makeCampus();
+    current.navNodes!.push({ id: "orphan", campusId: "c1", name: "Orphan", type: "outdoor", x: 500, y: 500, accessible: true } as Campus["navNodes"][number]);
+    const saved = { ...current, navEdges: [] };
+    const onSave = vi.fn(async (c: Campus) => c);
+    const onBack = vi.fn();
+
+    render(<Harness initialCampus={current} savedSnapshot={JSON.stringify(saved)} onSave={onSave} onBack={onBack} />);
+    // The warning is live in the global Issues control BEFORE saving.
+    expect(screen.getByTestId("issues-popover").getAttribute("data-count")).toBe("1");
+
+    clickBack();
+    fireEvent.click(screen.getByRole("button", { name: /Save Draft/i }));
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(onBack).toHaveBeenCalledTimes(1));
+  });
+
+  it("saves a draft that has validation ERRORS", async () => {
+    // Building pushed beyond the canvas → boundary error. Saving must NOT be blocked.
+    const current = makeCampus();
+    current.buildings[0] = { ...current.buildings[0], x: 850 };
+    const saved = { ...current, navEdges: [] };
+    const onSave = vi.fn(async (c: Campus) => c);
+    const onBack = vi.fn();
+
+    render(<Harness initialCampus={current} savedSnapshot={JSON.stringify(saved)} onSave={onSave} onBack={onBack} />);
+    expect(screen.getByTestId("issues-popover").getAttribute("data-count")).toBe("1");
+
+    clickBack();
+    fireEvent.click(screen.getByRole("button", { name: /Save Draft/i }));
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(onBack).toHaveBeenCalledTimes(1));
+  });
+
+  it("successful save does NOT remove validation issues and clears dirty state", async () => {
+    const current = makeCampus();
+    current.navNodes!.push({ id: "orphan", campusId: "c1", name: "Orphan", type: "outdoor", x: 500, y: 500, accessible: true } as Campus["navNodes"][number]);
+    const saved = { ...current, navEdges: [] };
+    const onSave = vi.fn(async (c: Campus) => c);
+    const onBack = vi.fn();
+
+    render(<Harness initialCampus={current} savedSnapshot={JSON.stringify(saved)} onSave={onSave} onBack={onBack} />);
+    // Save via the toolbar button directly (no back-guard needed).
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+    // Validation issues legitimately remain after the save.
+    expect(screen.getByTestId("issues-popover").getAttribute("data-count")).toBe("1");
+    // Dirty state is cleared normally → the toolbar button flips to Saved.
+    const saveBtn = screen.getByRole("button", { name: "Saved" }) as HTMLButtonElement;
+    expect(saveBtn.disabled).toBe(true);
+  });
+
+  it("a real save failure preserves dirty edits and reports the failure", async () => {
+    const current = makeCampus();
+    const saved = { ...current, navEdges: [] };
+    const onSave = vi.fn(async () => {
+      throw new Error("database offline");
+    });
+    const onBack = vi.fn();
+
+    render(<Harness initialCampus={current} savedSnapshot={JSON.stringify(saved)} onSave={onSave} onBack={onBack} />);
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    // Failure surfaces inside the save screen with a retry — dirty state stays.
+    expect(await screen.findByText("Unable to Save Campus Map")).toBeInTheDocument();
+    // The toolbar Save button is still enabled (draft still dirty).
+    expect((screen.getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(false);
+    expect(onBack).not.toHaveBeenCalled();
+  });
+});

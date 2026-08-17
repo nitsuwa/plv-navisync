@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import {
-  ArrowLeft, Globe, Map, CheckCircle2, Undo2, Redo2, X,
+  ArrowLeft, Globe, Map as MapIcon, CheckCircle2, Undo2, Redo2, X,
   AlignLeft, AlignCenter, AlignRight, AlignStartVertical, AlignEndVertical,
   AlignVerticalJustifyCenter, AlignHorizontalDistributeCenter, AlignVerticalDistributeCenter,
   Grid3X3, Magnet, ZoomIn, ZoomOut, Maximize2, Settings2,
@@ -18,7 +18,6 @@ import { SaveScreen } from "./SaveScreen";
 import { LAYERS, LAYER_TOOLS, BUILDING_COLORS } from "./constants";
 import { genId } from "./constants";
 import { useToast } from "../../hooks/useToast";
-import { ValidationErrorsDialog } from "./ValidationErrorsDialog";
 import type { ValidationIssue } from "./ValidationErrorsDialog";
 import { ContextMenu } from "./ContextMenu";
 import { PrePublishDialog } from "./PrePublishDialog";
@@ -35,8 +34,9 @@ import type {
 import { BUILDING_TYPE_MAP, DECOR_ASSET_MAP } from "./constants";
 import { ToolbarTooltip } from "./ToolbarTooltip";
 import { validateCampusData, computeBuildingOverlaps } from "../../lib/campusValidation";
-import { validateNavigationGraph } from "../../lib/validateNavigationGraph";
-import { dedupeValidationIssues, resolveIssueTarget, floorSelectionForTarget, resolveIssueLocateTarget } from "../../lib/issueLocate";
+import { computeLiveValidationIssues, validationIssuesForCampusSelection } from "../../lib/liveValidation";
+import { validationIssuesToItems } from "./ObjectIssueSection";
+import { resolveIssueTarget, floorSelectionForTarget, resolveIssueLocateTarget, polylineMidpoint } from "../../lib/issueLocate";
 import type { IssueTarget } from "./ValidationErrorsDialog";
 import { computeBuildingPlacement, resetTransientToolState, pointInBuilding, polylineCrossesObstacle, polylineCrossesPlacedObject } from "../../lib/editorPlacement";
 import { computeGroupTranslation, groupBBoxAfterTranslation, computeGroupAlignmentGuides } from "../../lib/campusGroupMove";
@@ -462,8 +462,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
   // ── Batch delete confirmation ──
   const [batchDeleteConfirm, setBatchDeleteConfirm] = useState<{ buildingIds: string[]; markerIds: string[]; decorAssetIds: string[] } | null>(null);
   // ── Validation dialog ──
-  const [validationDialogOpen, setValidationDialogOpen] = useState(false);
-  const [validationErrors, setValidationErrors] = useState<ValidationIssue[]>([]);
+
   // ── B5 Final: temporary "locate on map" focus flash — pulses the target
   // object after an issue is clicked, then fades automatically. ──
   const [locateFlash, setLocateFlash] = useState<{ selectionType: string; id: string; world: { x: number; y: number } } | null>(null);
@@ -475,7 +474,6 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
   // ── Track invalid building IDs for canvas highlighting ──
   const [invalidBuildings, setInvalidBuildings] = useState<Set<string>>(new Set());
   // ── Save button error highlight ──
-  const [saveBtnError, setSaveBtnError] = useState(false);
   // ── Cursor coords for status bar ──
   const [cursorPos, setCursorPos] = useState<{ x: number; y: number } | null>(null);
   const [resizing, setResizing] = useState<{
@@ -581,23 +579,14 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
 
   // ── Live validation issues for the toolbar popover + dialogs ──
   // Derived from the CURRENT campus on every render-relevant change (B5 Final:
-  // never an accumulated/stale list). Deduplicated so repeated validation runs
-  // cannot show the same logical issue twice.
-  const validationIssues = useMemo(() => {
-    const errs = validateCampus();
-    // Add severity to each issue
-    const campusIssues = errs.map(e => ({
-      ...e,
-      severity: (e.type === "overlap" || e.type === "boundary" || e.type === "missing_campus_name" ? "error" :
-                 e.type === "multiple_primary_entrances" ? "error" :
-                 e.type === "missing_name" || e.type === "missing_code" || e.type === "no_floors" ? "warning" :
-                 e.type === "no_building_entrance" || e.type === "no_primary_entrance" ? "warning" :
-                 "info") as "error" | "warning" | "info",
-    }));
-    // B5 Phase 6: add navigation graph readiness issues
-    const navResult = validateNavigationGraph(campus);
-    return dedupeValidationIssues([...campusIssues, ...navResult.issues]);
-  }, [validateCampus, campus]);
+  // never an accumulated/stale list). This is the SAME canonical derivation the
+  // Floor Editor consumes (src/lib/liveValidation.ts), so the global Issues
+  // control and each Floor Editor's Issues panel always agree. Deduplicated so
+  // repeated validation runs cannot show the same logical issue twice.
+  const validationIssues = useMemo(
+    () => computeLiveValidationIssues(campus, overlappingBuildings),
+    [campus, overlappingBuildings]
+  );
 
   // ── Real-time validation error count (derived from the live issue list) ──
   const errorCount = validationIssues.length;
@@ -693,6 +682,77 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
   const decorAssets = campus.decorAssets ?? [];
   const navNodes = campus.navNodes ?? [];
   const navEdges = campus.navEdges ?? [];
+
+  // ── B7 Phase 1: restrained on-canvas issue markers ──
+  // ONE small badge per affected CAMPUS object (building, entrance, nav node,
+  // nav edge) derived from the SAME canonical issue list as the global Issues
+  // control. The worst severity per object wins; warnings stay amber, errors
+  // stay red; the badge is pointer-events-none (never intercepts canvas
+  // interactions) and disappears immediately when the issue is fixed.
+  const campusIssueMarkers = useMemo(() => {
+    const markers = new Map<string, { severity: "error" | "warning"; selectionType: string; id: string }>();
+    for (const issue of validationIssues) {
+      const target = resolveIssueTarget(issue);
+      if (!target || target.scope !== "campus") continue;
+      if (target.selectionType !== "building" && target.selectionType !== "entrance" && target.selectionType !== "navNode" && target.selectionType !== "navEdge") continue;
+      if (issue.severity === "info") continue;
+      const key = `${target.selectionType}:${target.id}`;
+      const existing = markers.get(key);
+      if (!existing || (issue.severity === "error" && existing.severity !== "error")) {
+        markers.set(key, { severity: issue.severity, selectionType: target.selectionType, id: target.id });
+      }
+    }
+    return markers;
+  }, [validationIssues]);
+
+  // World-space anchor of a campus issue marker (rendered object center).
+  const campusMarkerAnchor = useCallback((selectionType: string, id: string): { x: number; y: number } | null => {
+    switch (selectionType) {
+      case "building": {
+        const b = buildings.find((x) => x.id === id);
+        return b ? { x: b.x + b.width / 2, y: b.y + b.height / 2 } : null;
+      }
+      case "entrance": {
+        const parent = buildings.find((bldg) => (bldg.entrances ?? []).some((en) => en.id === id));
+        const entrance = parent?.entrances?.find((en) => en.id === id);
+        if (!parent || !entrance) return null;
+        const pos = entranceWorldPosition(parent, entrance);
+        return { x: pos.x, y: pos.y };
+      }
+      case "navNode": {
+        const n = navNodes.find((x) => x.id === id);
+        return n ? { x: n.x, y: n.y } : null;
+      }
+      case "navEdge": {
+        const e = navEdges.find((x) => x.id === id);
+        const a = e ? navNodes.find((n) => n.id === e.startNodeId) : undefined;
+        const b = e ? navNodes.find((n) => n.id === e.endNodeId) : undefined;
+        if (!e || !a || !b) return null;
+        return polylineMidpoint([{ x: a.x, y: a.y }, ...(e.bendPoints ?? []), { x: b.x, y: b.y }]);
+      }
+      default:
+        return null;
+    }
+  }, [buildings, navNodes, navEdges]);
+
+  // Resolved marker layer (world-space anchors) handed to the Canvas so it
+  // renders the badges inside its own SVG/transform — never a second overlay
+  // SVG that could drift or be picked up as "the canvas".
+  // B7 correction: navNode/navEdge markers are hidden when the editor is in
+  // campus/design mode (the nav layer is not visible then). The issue itself
+  // remains in the global Issues list — only the on-canvas marker is gated.
+  const campusMarkerLayer = useMemo(() => {
+    const resolved: { key: string; x: number; y: number; severity: "error" | "warning" }[] = [];
+    const navVisible = layer === "navigation";
+    for (const { severity, selectionType, id } of campusIssueMarkers.values()) {
+      // Hide nav-only markers when the Navigation layer is not active
+      if (!navVisible && (selectionType === "navNode" || selectionType === "navEdge")) continue;
+      const anchor = campusMarkerAnchor(selectionType, id);
+      if (!anchor) continue;
+      resolved.push({ key: `${selectionType}:${id}`, x: anchor.x, y: anchor.y, severity });
+    }
+    return resolved;
+  }, [campusIssueMarkers, campusMarkerAnchor, layer]);
   // B5 Phase 2.9 — navigation scope isolation. Indoor floor navigation shares
   // the campus nav arrays (scoped by buildingId+floorId) but belongs ONLY to
   // its floor's editor. The outdoor canvas derives a render/read-only outdoor
@@ -3991,8 +4051,6 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
       toast.info("This issue refers to an object or floor that no longer exists", "The editor was not changed. Repair or remove the leftover reference.");
       return;
     }
-    setValidationDialogOpen(false);
-
     // ── Floor scope → open the Floor Editor at the right building/floor ──
     // resolveIssueLocateTarget already verified both exist in this campus.
     if (resolution.kind === "floor") {
@@ -4047,7 +4105,11 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
         const a = navNodes.find((x) => x.id === e.startNodeId);
         const b = navNodes.find((x) => x.id === e.endNodeId);
         if (a && b) {
+          // B7 Phase 1: flash the midpoint measured ALONG the rendered
+          // polyline (polylineMidpoint), not the bounding-box center which
+          // can sit off a bent edge.
           const pts = [{ x: a.x, y: a.y }, ...(e.bendPoints ?? []), { x: b.x, y: b.y }];
+          const mid = polylineMidpoint(pts);
           const xs = pts.map((p) => p.x);
           const ys = pts.map((p) => p.y);
           const minX = Math.min(...xs);
@@ -4055,7 +4117,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
           const minY = Math.min(...ys);
           const maxY = Math.max(...ys);
           zoomToFit(minX - 40, minY - 40, maxX - minX + 80, maxY - minY + 80, 40);
-          setLocateFlash({ selectionType: target.selectionType, id: e.id, world: { x: (minX + maxX) / 2, y: (minY + maxY) / 2 } });
+          setLocateFlash({ selectionType: target.selectionType, id: e.id, world: { x: mid.x, y: mid.y } });
         }
         return;
       }
@@ -4138,16 +4200,10 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
       toast.success("Already saved", "All changes are up to date.");
       return true;
     }
-    const errors = validateCampus();
-    if (errors.length > 0) {
-      setShake((n) => n + 1);
-      setSaveBtnError(true);
-      setTimeout(() => setSaveBtnError(false), 600);
-      setValidationErrors(errors);
-      setValidationDialogOpen(true);
-      saveErrorRef.current = "Resolve validation issues before saving this draft.";
-      return false;
-    }
+    // B7 Phase 2: SAVE DRAFT must never be blocked by map validation. A draft
+    // is allowed to be incomplete — validation issues stay visible but never
+    // stop the administrator from preserving unfinished work. Only genuine
+    // persistence failures (below) can prevent a save.
     setIsProcessing(true);
     saveErrorRef.current = null;
     setSaveScreen({ open: true, state: "saving" });
@@ -4167,7 +4223,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
       setIsProcessing(false);
       return false;
     }
-  }, [campus, validateCampus, onUpdate, onSave, isDirty, isProcessing, toast]);
+  }, [campus, onUpdate, onSave, isDirty, isProcessing, toast]);
 
   // ── Shared unsaved-changes guard (back/exit prompts + native beforeunload) ──
   // The guard's onSave needs to surface runSave's failure message inside the
@@ -4786,6 +4842,17 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     : [];
   const selMkr = effectiveSelected?.type === "marker" ? markers.find((m) => m.id === effectiveSelected.id) : undefined;
   const selDecorAsset = effectiveSelected?.type === "decorAsset" ? (campus.decorAssets ?? []).find((d) => d.id === effectiveSelected.id) : undefined;
+
+  // ── B7 Phase 2: contextual issue guidance for the SELECTED object ──
+  // Same canonical live list as the global Issues control + on-canvas markers:
+  // selecting an object that has a marker explains exactly what is wrong.
+  const selectedIssueItems = useMemo(() => {
+    if (!effectiveSelected) return [];
+    const type = effectiveSelected.type;
+    if (type !== "building" && type !== "entrance" && type !== "navNode" && type !== "navEdge") return [];
+    const issues = validationIssuesForCampusSelection(validationIssues, type, effectiveSelected.id);
+    return validationIssuesToItems(issues);
+  }, [effectiveSelected, validationIssues]);
   const connectEntranceToIndoorDoor = useCallback((buildingId: string, entranceId: string, doorNodeId: string) => {
     const existing = findEntranceTransitionForDoor(campus.navNodes ?? [], campus.navEdges ?? [], doorNodeId);
     const existingDoor = existing ? doorNodeForEdge(existing, campus.navNodes ?? []) : undefined;
@@ -5036,34 +5103,28 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
                 disabled={saving || isProcessing || !isDirty}
                 className={cn(
                   "flex items-center gap-1 h-7 px-2 rounded-md border text-[9px] font-bold transition-all disabled:opacity-50 disabled:cursor-not-allowed",
-                  saveBtnError ? "border-destructive text-destructive bg-destructive/10" : isDirty ? "border-primary text-primary bg-primary/10" : "border-border text-foreground hover:bg-muted"
+                  isDirty ? "border-primary text-primary bg-primary/10" : "border-border text-foreground hover:bg-muted"
                 )}
               >
                 {saving ? (
                   <><Loader2 className="w-3 h-3 animate-spin" /> Saving</>
                 ) : (
-                  <><Map className="h-3 w-3" /> {isDirty ? "Save" : "Saved"}</>
+                  <><MapIcon className="h-3 w-3" /> {isDirty ? "Save" : "Saved"}</>
                 )}
               </button>
 
               <button
                 onClick={() => {
                   if (isProcessing) return;
-                  const errors = validateCampus();
-                  if (errors.length > 0) {
-                    setShake((n) => n + 1);
-                    setSaveBtnError(true);
-                    setTimeout(() => setSaveBtnError(false), 600);
-                    setValidationErrors(errors);
-                    setValidationDialogOpen(true);
-                    return;
-                  }
+                  // B7 Phase 2: PUBLISH gating lives in PrePublishDialog, which
+                  // consumes the canonical live validation list and blocks on
+                  // errors / requires explicit warning confirmation there —
+                  // severity is the source of truth, never a type hard-code.
                   setShowPublishConfirm(true);
                 }}
                 disabled={
                   !publishingEnabled || isProcessing || isDirty ||
-                  (!isDirty && campus.publishStatus === "published" && !hasDraftChanges && campus.updatedAt === campus.publishedAt) ||
-                  (!isDirty && campus.publishStatus === "draft" && !campus.publishedAt)
+                  (!isDirty && campus.publishStatus === "published" && !hasDraftChanges && campus.updatedAt === campus.publishedAt)
                 }
                 title={
                   !publishingEnabled
@@ -5072,9 +5133,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
                     ? "Save your draft first before publishing"
                     : campus.publishStatus === "published" && !hasDraftChanges && campus.updatedAt === campus.publishedAt
                       ? "Already published — make changes and save to enable publishing"
-                      : campus.publishStatus === "draft" && !campus.publishedAt
-                        ? "Save as draft first, then publish"
-                        : "Publish the current draft to make it live"
+                      : "Publish the current draft to make it live"
                 }
                 className={cn(
                   "flex items-center gap-1 h-7 px-2 rounded-md text-[9px] font-extrabold transition-all shadow-sm",
@@ -5449,37 +5508,13 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
           onWheel={handleWheel}
           highlightedRoute={highlightedRoute}
           animatingPathId={animatingPathId}
+          issueMarkers={campusMarkerLayer}
         />
 
-        {/* ── B5 Final: locate flash overlay — pulses the located object, then fades ── */}
-        {locateFlash && (
-          <svg
-            viewBox={`0 0 ${cw} ${ch}`}
-            className="absolute inset-0 z-20 pointer-events-none"
-            data-testid="locate-flash"
-            aria-hidden="true"
-          >
-            <g transform={`translate(${pan.x},${pan.y}) scale(${zoom})`}>
-              <circle
-                cx={locateFlash.world.x}
-                cy={locateFlash.world.y}
-                r={34}
-                fill="none"
-                stroke="#f59e0b"
-                strokeWidth={2.5}
-                className="animate-locate-ping"
-              />
-              <circle
-                cx={locateFlash.world.x}
-                cy={locateFlash.world.y}
-                r={14}
-                fill="rgba(245,158,11,0.18)"
-                stroke="#f59e0b"
-                strokeWidth={2}
-              />
-            </g>
-          </svg>
-        )}
+        {/* B7 Correction: locate flash overlay removed — locate behavior now
+            relies on object selection, Properties sidebar, and contextual
+            "Needs attention" section for a precise, non-misaligned result. */}
+        {null}
 
         {/* ── Test Navigation panel (Navigation layer) — slides up over the canvas only ── */}
         <AnimatePresence>
@@ -5603,6 +5638,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
         <PropertiesPanel
           layer={layer}
           selected={selected}
+          issueItems={selectedIssueItems}
           selBldg={selBldg}
           selEntrance={selEntrance}
           selEntranceParent={selEntranceParent}
@@ -6125,13 +6161,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
         onRetry={runSave}
       />
 
-      {/* ── Validation Errors Dialog ── */}
-      <ValidationErrorsDialog
-        open={validationDialogOpen}
-        errors={validationErrors}
-        onClose={() => setValidationDialogOpen(false)}
-        onReviewIssues={handleReviewIssues}
-      />
+
     </div>
     </div>
   );
