@@ -54,6 +54,59 @@ export function dedupeValidationIssues(issues: ValidationIssue[]): ValidationIss
   return out;
 }
 
+// ── Locate geometry helpers (B7 Phase 1) ──────────────────────────────────
+// The locate flash must center EXACTLY on the rendered object. Point objects
+// (nav nodes, doors, labels) use their coordinates directly; rectangular
+// objects use their bounds center; edges use the midpoint measured ALONG the
+// polyline (the bounding-box midpoint can sit off a bent edge).
+
+/**
+ * Midpoint measured along a polyline (by path length, not bounding box). For a
+ * straight edge this equals the segment midpoint; for a bent edge it is a
+ * point ON the actual rendered polyline.
+ */
+export function polylineMidpoint(pts: { x: number; y: number }[]): { x: number; y: number } {
+  if (pts.length === 0) return { x: 0, y: 0 };
+  const segLens: number[] = [];
+  let total = 0;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const len = Math.hypot(pts[i + 1].x - pts[i].x, pts[i + 1].y - pts[i].y);
+    segLens.push(len);
+    total += len;
+  }
+  if (total === 0) return { x: pts[0].x, y: pts[0].y };
+  let target = total / 2;
+  for (let i = 0; i < segLens.length; i++) {
+    if (target <= segLens[i] || i === segLens.length - 1) {
+      const t = segLens[i] === 0 ? 0 : target / segLens[i];
+      return {
+        x: pts[i].x + (pts[i + 1].x - pts[i].x) * t,
+        y: pts[i].y + (pts[i + 1].y - pts[i].y) * t,
+      };
+    }
+    target -= segLens[i];
+  }
+  return { x: pts[pts.length - 1].x, y: pts[pts.length - 1].y };
+}
+
+/**
+ * The world-space anchor for a floor object: the actual rendered center.
+ * Rectangular objects (rooms, stairs, elevators, ramps, furniture, windows)
+ * anchor at their bounds center; point objects (doors, labels) at their
+ * coordinate. `item` carries the same shape the renderers use.
+ */
+export function floorObjectCenter(
+  type: "room" | "door" | "stairs" | "elevator" | "ramp" | "furniture" | "window" | "label" | "wall",
+  item: { x: number; y: number; w?: number; h?: number; width?: number; height?: number },
+): { x: number; y: number } {
+  if (type === "room") {
+    return { x: item.x + (item.w ?? 0) / 2, y: item.y + (item.h ?? 0) / 2 };
+  }
+  const w = item.width ?? 0;
+  const h = item.height ?? 0;
+  return { x: item.x + w / 2, y: item.y + h / 2 };
+}
+
 // ── Locate target resolution ───────────────────────────────────────────────
 
 /** The campus-level selection type for an IssueTarget.selectionType. */

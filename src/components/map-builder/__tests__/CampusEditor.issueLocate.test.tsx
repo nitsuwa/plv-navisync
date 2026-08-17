@@ -425,9 +425,10 @@ describe("indoor locate", () => {
     expect(screen.getByTestId("nav-node-props")).toBeTruthy();
   });
 
-  it("an issue with no locatable target stays stable (toast, no navigation)", () => {
-    // nav_disconnected_component carries no node/edge/building target — the
-    // dispatcher must not navigate anywhere.
+  it("a disconnected-component issue locates a representative waypoint (no floor hop)", () => {
+    // B7 Phase 1 (G1): nav_disconnected_component issues now carry a
+    // representative nav-node target — clicking one switches to Navigation and
+    // selects the node instead of being unlocatable.
     const campus = makeCampus({
       navNodes: [
         node({ id: "n1", type: "outdoor", x: 0, y: 0 }),
@@ -442,12 +443,14 @@ describe("indoor locate", () => {
     });
     render(<Harness initialCampus={campus} />);
     openIssuesPopover();
-    // The row exists; clicking it must NOT hop floors or switch selection.
+    // The row exists and is locatable: no floor hop, and the representative
+    // waypoint's properties open in Navigation mode.
     const rows = screen.queryAllByText(/disconnected components/);
     expect(rows.length).toBeGreaterThan(0);
     fireEvent.click(rows[0]);
     expect(openFloorCalls).toHaveLength(0);
-    expect(infoSpy).toHaveBeenCalledWith("This issue refers to an object or floor that no longer exists", expect.objectContaining({ description: expect.any(String) }));
+    expect(screen.getByTestId("nav-node-props")).toBeTruthy();
+    expect(infoSpy).not.toHaveBeenCalled();
   });
 
   it("locating a missing shared transition ID opens Design mode targeting the physical stair", () => {
@@ -484,5 +487,134 @@ describe("indoor locate", () => {
     expect(openFloorCalls[0].floorId).toBe("f1");
     // Physical stair in Design mode so the shared ID can be fixed.
     expect(openFloorCalls[0].selection).toEqual({ type: "stairs", id: "phys-stair-1" });
+  });
+});
+
+// ── B7 Phase 1 — new structural rules are live + locatable ────────────────
+
+describe("B7 Phase 1 structural rules (live)", () => {
+  function validBuilding(floors: any[]): Campus["buildings"] {
+    return [{
+      id: "b1",
+      name: "Building One",
+      code: "B1",
+      category: "Academic",
+      description: "",
+      x: 100,
+      y: 100,
+      width: 120,
+      height: 80,
+      color: "#1e40af",
+      expanded: false,
+      floors,
+      entrances: [{ id: "e1", buildingId: "b1", edge: "bottom", offset: 0.5, type: "general", isPrimary: true }],
+    }];
+  }
+
+  it("duplicate room name appears live and disappears when the room is renamed", () => {
+    // A complete entrance bridge (entrance node + entrance_transition) keeps
+    // the fixture free of unrelated entrance warnings so the ONLY issue is the
+    // duplicate room name.
+    const campus = makeCampus({
+      buildings: validBuilding([{
+        id: "f1", buildingId: "b1", number: 1, label: "Ground Floor",
+        rooms: [
+          { id: "r1", name: "Room 201", type: "classroom", x: 0, y: 0, w: 10, h: 10, floorId: "f1", buildingId: "b1" },
+          { id: "r2", name: "room 201", type: "classroom", x: 20, y: 0, w: 10, h: 10, floorId: "f1", buildingId: "b1" },
+        ],
+        paths: [], walls: [],
+        doors: [{ id: "d1", x: 10, y: 10, width: 8, direction: "left", color: "#000" }],
+        windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [],
+      }]),
+      navNodes: [
+        node({ id: "ent-node", type: "entrance", buildingId: "b1", entranceId: "e1" }),
+        node({ id: "door-node", type: "room_access", buildingId: "b1", floorId: "f1", doorId: "d1" }),
+        node({ id: "hall-node", type: "hallway", buildingId: "b1", floorId: "f1" }),
+      ],
+      navEdges: [
+        edge({ id: "bridge", startNodeId: "ent-node", endNodeId: "door-node", type: "entrance_transition" }),
+        edge({ id: "walk", startNodeId: "door-node", endNodeId: "hall-node" }),
+      ],
+    });
+    render(<Harness initialCampus={campus} />);
+    expect(screen.getByTestId("issues-popover").getAttribute("data-count")).toBe("1");
+
+    // Fix: rename the duplicate.
+    const fixed: Campus = {
+      ...campus,
+      buildings: validBuilding([{
+        id: "f1", buildingId: "b1", number: 1, label: "Ground Floor",
+        rooms: [
+          { id: "r1", name: "Room 201", type: "classroom", x: 0, y: 0, w: 10, h: 10, floorId: "f1", buildingId: "b1" },
+          { id: "r2", name: "Room 202", type: "classroom", x: 20, y: 0, w: 10, h: 10, floorId: "f1", buildingId: "b1" },
+        ],
+        paths: [], walls: [],
+        doors: [{ id: "d1", x: 10, y: 10, width: 8, direction: "left", color: "#000" }],
+        windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [],
+      }]),
+    };
+    act(() => { applyFixRef!(fixed); });
+    expect(screen.queryByTestId("issues-popover")).toBeNull();
+    expect(screen.getByText("OK")).toBeTruthy();
+  });
+
+  it("emergency exit without a nav node appears live and disappears when linked", () => {
+    const campus = makeCampus({
+      buildings: validBuilding([{
+        id: "f1", buildingId: "b1", number: 1, label: "Ground Floor",
+        rooms: [], paths: [], walls: [],
+        doors: [{ id: "d1", x: 10, y: 10, width: 8, direction: "left", color: "#000", isEmergencyExit: true }],
+        windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [],
+      }]),
+      navNodes: [
+        node({ id: "ent-node", type: "entrance", buildingId: "b1", entranceId: "e1" }),
+        node({ id: "hall-node", type: "hallway", buildingId: "b1", floorId: "f1" }),
+      ],
+      navEdges: [edge({ id: "bridge", startNodeId: "ent-node", endNodeId: "hall-node", type: "entrance_transition" })],
+    });
+    render(<Harness initialCampus={campus} />);
+    expect(screen.getByTestId("issues-popover").getAttribute("data-count")).toBe("1");
+
+    // Fix: add a canonical node linked to the door (plus an edge so the new
+    // node is not an orphan).
+    const fixed: Campus = {
+      ...campus,
+      navNodes: [
+        node({ id: "ent-node", type: "entrance", buildingId: "b1", entranceId: "e1" }),
+        node({ id: "hall-node", type: "hallway", buildingId: "b1", floorId: "f1" }),
+        node({ id: "door-node", type: "room_access", buildingId: "b1", floorId: "f1", doorId: "d1" }),
+      ],
+      navEdges: [
+        edge({ id: "bridge", startNodeId: "ent-node", endNodeId: "hall-node", type: "entrance_transition" }),
+        edge({ id: "walk", startNodeId: "door-node", endNodeId: "hall-node" }),
+      ],
+    };
+    act(() => { applyFixRef!(fixed); });
+    expect(screen.queryByTestId("issues-popover")).toBeNull();
+    expect(screen.getByText("OK")).toBeTruthy();
+  });
+
+  it("locating a disconnected-component issue selects a representative waypoint in Navigation mode", () => {
+    const campus = makeCampus({
+      navNodes: [
+        node({ id: "outdoor-1", type: "outdoor" }),
+        node({ id: "outdoor-2", type: "outdoor" }),
+        node({ id: "indoor-1", type: "hallway", buildingId: "b1", floorId: "f1" }),
+        node({ id: "indoor-2", type: "hallway", buildingId: "b1", floorId: "f1" }),
+      ],
+      navEdges: [
+        edge({ id: "e1", startNodeId: "outdoor-1", endNodeId: "outdoor-2" }),
+        edge({ id: "e2", startNodeId: "indoor-1", endNodeId: "indoor-2" }),
+      ],
+    });
+    render(<Harness initialCampus={campus} />);
+    openIssuesPopover();
+    fireEvent.click(screen.getByText(/has no connection to any indoor floor/));
+
+    // No floor hop — the representative is an outdoor node on the campus canvas.
+    expect(openFloorCalls).toHaveLength(0);
+    // Navigation layer + the representative waypoint's properties open.
+    expect(screen.getByTestId("nav-node-props")).toBeTruthy();
+    expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("outdoor-1");
   });
 });

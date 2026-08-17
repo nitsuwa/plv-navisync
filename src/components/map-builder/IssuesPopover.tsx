@@ -88,6 +88,11 @@ export function IssuesPopover({ issues, onIssueClick }: { issues: ValidationIssu
 
   const errorCount = issues.length;
 
+  // B7 Phase 3: compute readiness for the badge
+  const hasErrors = issues.some((i) => i.severity === "error");
+  const hasWarnings = issues.some((i) => i.severity === "warning");
+  const readiness = errorCount === 0 ? "ready" : hasErrors ? "not_ready" : "needs_attention";
+
   // Group issues by severity
   const grouped = useMemo(() => {
     const groups: { label: string; severity: ValidationSeverity; items: ValidationIssue[] }[] = [
@@ -146,6 +151,10 @@ export function IssuesPopover({ issues, onIssueClick }: { issues: ValidationIssu
             <span className="text-[9px] font-extrabold" style={{ color: "#22c55e" }}>OK</span>
           </>
         )}
+        {/* B7 Phase 3: restrained readiness label inside the popover trigger */}
+        <span className="text-[8px] font-bold text-muted-foreground hidden sm:inline">
+          {readiness === "ready" ? "Ready" : readiness === "needs_attention" ? "Needs Attention" : "Not Ready"}
+        </span>
       </button>
       {showPopover && createPortal(
         <div

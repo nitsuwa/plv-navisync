@@ -5,6 +5,8 @@ import {
   resolveIssueTarget,
   resolveIssueLocateTarget,
   floorSelectionForTarget,
+  polylineMidpoint,
+  floorObjectCenter,
 } from "../issueLocate";
 import type { ValidationIssue } from "../../components/map-builder/ValidationErrorsDialog";
 import type { Campus, NavigationNode } from "../../components/map-builder/types";
@@ -251,5 +253,93 @@ describe("floorSelectionForTarget", () => {
 
   it("returns null for campus-scope targets", () => {
     expect(floorSelectionForTarget({ scope: "campus", mode: "navigation", selectionType: "navNode", id: "n1" })).toBeNull();
+  });
+});
+
+describe("B7 Phase 1 — dedup stability for new issue types", () => {
+  const duplicateRoomIssue = {
+    type: "duplicate_room_name" as const,
+    severity: "warning" as const,
+    message: "Room name \"Room 201\" is duplicated on floor \"Ground Floor\".",
+    buildingId: "b1",
+    floorId: "f1",
+    roomId: "r2",
+    target: { scope: "floor" as const, mode: "design" as const, buildingId: "b1", floorId: "f1", selectionType: "room" as const, id: "r2" },
+  };
+  const emergencyExitIssue = {
+    type: "emergency_exit_no_nav" as const,
+    severity: "warning" as const,
+    message: "Emergency exit door \"d1\" has no navigation waypoint.",
+    buildingId: "b1",
+    floorId: "f1",
+    target: { scope: "floor" as const, mode: "design" as const, buildingId: "b1", floorId: "f1", selectionType: "door" as const, id: "d1" },
+  };
+
+  it("collapses repeated duplicate_room_name issues with identical targets", () => {
+    const out = dedupeValidationIssues([duplicateRoomIssue, duplicateRoomIssue, duplicateRoomIssue]);
+    expect(out).toHaveLength(1);
+  });
+
+  it("keeps duplicate_room_name issues for different rooms", () => {
+    const other = { ...duplicateRoomIssue, roomId: "r3", target: { ...duplicateRoomIssue.target, id: "r3" } };
+    const out = dedupeValidationIssues([duplicateRoomIssue, other]);
+    expect(out).toHaveLength(2);
+  });
+
+  it("collapses repeated emergency_exit_no_nav issues for the same door", () => {
+    const out = dedupeValidationIssues([emergencyExitIssue, emergencyExitIssue]);
+    expect(out).toHaveLength(1);
+  });
+});
+
+// ── Locate geometry (B7 Phase 1) ───────────────────────────────────────────
+
+describe("polylineMidpoint", () => {
+  it("returns the segment midpoint for a straight edge", () => {
+    const mid = polylineMidpoint([{ x: 0, y: 0 }, { x: 100, y: 0 }]);
+    expect(mid).toEqual({ x: 50, y: 0 });
+  });
+
+  it("returns a point ON the polyline for a bent L-shaped edge (not the bbox center)", () => {
+    // L-shape: (0,0) → (0,200) → (100,200). BBox center is (50,100) which is
+    // NOT on the polyline; the path-length midpoint (total 300, half 150)
+    // lands on the first segment at (0,150).
+    const mid = polylineMidpoint([{ x: 0, y: 0 }, { x: 0, y: 200 }, { x: 100, y: 200 }]);
+    expect(mid).toEqual({ x: 0, y: 150 });
+    // The point must lie on one of the polyline segments.
+    const onSeg1 = mid.x === 0 && mid.y >= 0 && mid.y <= 200;
+    const onSeg2 = mid.y === 200 && mid.x >= 0 && mid.x <= 100;
+    expect(onSeg1 || onSeg2).toBe(true);
+  });
+
+  it("handles unequal segment lengths", () => {
+    // (0,0) → (0,100) → (100,100): total length 200, midpoint at length 100 → (0,100).
+    const mid = polylineMidpoint([{ x: 0, y: 0 }, { x: 0, y: 100 }, { x: 100, y: 100 }]);
+    expect(mid).toEqual({ x: 0, y: 100 });
+  });
+
+  it("returns the node position for degenerate/empty input", () => {
+    expect(polylineMidpoint([{ x: 5, y: 5 }])).toEqual({ x: 5, y: 5 });
+    expect(polylineMidpoint([{ x: 1, y: 1 }, { x: 1, y: 1 }])).toEqual({ x: 1, y: 1 });
+    expect(polylineMidpoint([])).toEqual({ x: 0, y: 0 });
+  });
+});
+
+describe("floorObjectCenter", () => {
+  it("centers a room on its bounds center", () => {
+    expect(floorObjectCenter("room", { x: 10, y: 20, w: 40, h: 30 })).toEqual({ x: 30, y: 35 });
+  });
+
+  it("centers stairs/elevator/ramp/furniture/window on their bounds center", () => {
+    expect(floorObjectCenter("stairs", { x: 10, y: 20, width: 40, height: 30 })).toEqual({ x: 30, y: 35 });
+    expect(floorObjectCenter("elevator", { x: 10, y: 20, width: 40, height: 30 })).toEqual({ x: 30, y: 35 });
+    expect(floorObjectCenter("ramp", { x: 10, y: 20, width: 40, height: 30 })).toEqual({ x: 30, y: 35 });
+    expect(floorObjectCenter("furniture", { x: 10, y: 20, width: 40, height: 30 })).toEqual({ x: 30, y: 35 });
+    expect(floorObjectCenter("window", { x: 10, y: 20, width: 40, height: 30 })).toEqual({ x: 30, y: 35 });
+  });
+
+  it("treats doors and labels as point objects", () => {
+    expect(floorObjectCenter("door", { x: 10, y: 20 })).toEqual({ x: 10, y: 20 });
+    expect(floorObjectCenter("label", { x: 10, y: 20 })).toEqual({ x: 10, y: 20 });
   });
 });

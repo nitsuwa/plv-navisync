@@ -215,9 +215,24 @@ export function findEntranceAtPoint(
   return best;
 }
 
+/**
+ * Deterministic default placement for a NEW building entrance (B7 Phase 1).
+ *
+ * The first entrance keeps the historical default (bottom-center). Additional
+ * entrances pick the next sensible FREE perimeter position so a second
+ * entrance never spawns exactly on top of an existing one: spaced offsets on
+ * the same side first, then the other sides, choosing the first candidate
+ * whose world-space distance to EVERY existing entrance clears a separation
+ * threshold (rotation-aware, so it stays valid after building rotation). When
+ * no candidate clears the threshold (tiny buildings), the most-separated
+ * candidate wins. Existing entrances are never moved, and the result is still
+ * plain `edge + offset` geometry, so resize/rotation-safe attachment and
+ * manual repositioning are unchanged.
+ */
 export function defaultEntrance(building: CampusBuilding, id: string): CampusEntrance {
-  const isFirstEntrance = (building.entrances ?? []).length === 0;
-  return {
+  const existing = building.entrances ?? [];
+  const isFirstEntrance = existing.length === 0;
+  const base: CampusEntrance = {
     id,
     buildingId: building.id,
     edge: "bottom",
@@ -226,6 +241,26 @@ export function defaultEntrance(building: CampusBuilding, id: string): CampusEnt
     isPrimary: isFirstEntrance,
     accessible: false,
   };
+  if (isFirstEntrance) return base;
+
+  const existingPositions = existing.map((en) => entranceWorldPosition(building, en));
+  const separation = Math.max(16, Math.min(building.width, building.height) * 0.25);
+  // Same side (bottom — the default) first with evenly spaced offsets, then
+  // the other sides. Deterministic, never random.
+  const edgeOrder: BuildingEntranceEdge[] = ["bottom", "top", "right", "left"];
+  const spread = Array.from({ length: 7 }, (_, i) => (2 * i + 1) / 14);
+  let best: { edge: BuildingEntranceEdge; offset: number; minD: number } | null = null;
+  for (const edge of edgeOrder) {
+    for (const offset of spread) {
+      const pos = entranceWorldPosition(building, { edge, offset });
+      const minD = Math.min(...existingPositions.map((p) => Math.hypot(p.x - pos.x, p.y - pos.y)));
+      if (minD >= separation) {
+        return { ...base, edge, offset };
+      }
+      if (!best || minD > best.minD) best = { edge, offset, minD };
+    }
+  }
+  return { ...base, edge: best!.edge, offset: best!.offset };
 }
 
 export function updateBuildingEntrance(

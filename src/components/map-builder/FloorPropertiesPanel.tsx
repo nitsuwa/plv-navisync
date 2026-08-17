@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { X, Info, Palette, Settings2, AlertTriangle, Navigation, Copy, Eye, EyeOff, Lock, Unlock, Layers } from "lucide-react";
 import { NavigationRelationshipCard } from "./NavigationRelationshipCard";
+import { ObjectIssueSection, type ObjectIssueItem } from "./ObjectIssueSection";
 import { cn } from "../../lib/utils";
 import { ColorPicker } from "../ui/ColorPicker";
 import { ROOM_TYPES, ROOM_MAP, WALL_THICKNESSES } from "./constants";
@@ -17,6 +18,8 @@ type TabId = "basic" | "style" | "advanced";
 interface FloorPropertiesPanelProps {
   selected: FloorSelection | null;
   mode: FloorEditorMode;
+  /** B7 Phase 2: live validation issues for the currently selected object. */
+  issueItems?: ObjectIssueItem[];
   rooms: FloorRoom[];
   walls: FloorWall[];
   doors: FloorDoor[];
@@ -129,10 +132,10 @@ function SegmentControl<T extends string>({ value, options, onChange }: {
 
 function effectiveDoorType(door: FloorDoor): "single" | "double" {
   return door.doorType ?? (door.direction === "double" ? "double" : "single");
-}
-
-export function FloorPropertiesPanel({
-  selected, mode,
+}export function FloorPropertiesPanel({
+  selected,
+  mode,
+  issueItems = [],
   rooms, walls, doors, windows, furniture, stairs, ramps, elevators, labels,
   onUpdateRoom, onUpdateWall, onUpdateDoor, onUpdateWindow,
   onUpdateFurniture,  onUpdateStairs, onUpdateRamp, onUpdateElevator, onUpdateLabel,
@@ -524,6 +527,9 @@ export function FloorPropertiesPanel({
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto scrollbar-show-on-hover scroll-smooth p-4 space-y-4">
+        {/* B7 Phase 2: contextual issue guidance for the selected object */}
+        <ObjectIssueSection items={issueItems} />
+
         {StateLayerControls}
 
         {/* ═══ ROOM ═══ */}

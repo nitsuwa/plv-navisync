@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { validateCampusData, computeBuildingOverlaps, type CampusValidationInput } from "../campusValidation";
 import { getRotatedAABB } from "../../components/map-builder/constants";
-import type { CampusBuilding } from "../../components/map-builder/types";
+import type { CampusBuilding, FloorRoom } from "../../components/map-builder/types";
 
 // ── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -33,6 +33,32 @@ function campus(overrides: Partial<CampusValidationInput> = {}): CampusValidatio
   };
 }
 
+function room(overrides: Partial<FloorRoom> & { id: string; name: string }): FloorRoom {
+  return {
+    type: "classroom",
+    x: 0,
+    y: 0,
+    w: 10,
+    h: 10,
+    floorId: "f1",
+    buildingId: "b1",
+    ...overrides,
+  };
+}
+
+/** Building with one floor containing the given rooms. */
+function buildingWithRooms(rooms: FloorRoom[], floorId = "f1"): CampusBuilding {
+  return building({
+    floors: [{
+      id: floorId,
+      number: 1,
+      label: "Ground Floor",
+      rooms,
+      paths: [], walls: [], doors: [], windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [],
+    }],
+  });
+}
+
 function issueTypes(errors: { type: string }[]): string[] {
   return errors.map((e) => e.type);
 }
@@ -42,6 +68,84 @@ function issueTypes(errors: { type: string }[]): string[] {
 describe("validateCampusData", () => {
   it("returns no issues for a valid campus", () => {
     expect(validateCampusData(campus())).toEqual([]);
+  });
+
+  it("flags duplicate room names within the same floor as warnings", () => {
+    const errs = validateCampusData(campus({ buildings: [buildingWithRooms([
+      room({ id: "r1", name: "Room 201" }),
+      room({ id: "r2", name: "room 201" }),
+    ])] }));
+    const duplicates = errs.filter((e) => e.type === "duplicate_room_name");
+    expect(duplicates).toHaveLength(1);
+    expect(duplicates[0].severity).toBe("warning");
+  });
+
+  it("duplicate-name comparison is case-insensitive", () => {
+    const errs = validateCampusData(campus({ buildings: [buildingWithRooms([
+      room({ id: "r1", name: "Lecture Hall" }),
+      room({ id: "r2", name: "LECTURE HALL" }),
+    ])] }));
+    expect(errs.some((e) => e.type === "duplicate_room_name")).toBe(true);
+  });
+
+  it("normalizes surrounding whitespace before comparing", () => {
+    const errs = validateCampusData(campus({ buildings: [buildingWithRooms([
+      room({ id: "r1", name: "  Room   201  " }),
+      room({ id: "r2", name: "room 201" }),
+    ])] }));
+    expect(errs.some((e) => e.type === "duplicate_room_name")).toBe(true);
+  });
+
+  it("allows the same room name on different floors", () => {
+    const errs = validateCampusData(campus({ buildings: [building({
+      floors: [
+        { id: "f1", number: 1, label: "Floor 1", rooms: [room({ id: "r1", name: "Room 201" })], paths: [], walls: [], doors: [], windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [] },
+        { id: "f2", number: 2, label: "Floor 2", rooms: [room({ id: "r2", name: "Room 201", floorId: "f2" })], paths: [], walls: [], doors: [], windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [] },
+      ],
+    })] }));
+    expect(errs.some((e) => e.type === "duplicate_room_name")).toBe(false);
+  });
+
+  it("emits one locatable issue per affected duplicate room with the correct target", () => {
+    const errs = validateCampusData(campus({ buildings: [buildingWithRooms([
+      room({ id: "r1", name: "Lobby" }),
+      room({ id: "r2", name: "lobby" }),
+      room({ id: "r3", name: "LOBBY" }),
+    ])] }));
+    const duplicates = errs.filter((e) => e.type === "duplicate_room_name");
+    expect(duplicates.map((e) => e.roomId).sort()).toEqual(["r2", "r3"]);
+    for (const issue of duplicates) {
+      expect(issue.target).toEqual({
+        scope: "floor",
+        mode: "design",
+        buildingId: "b1",
+        floorId: "f1",
+        selectionType: "room",
+        id: issue.roomId,
+      });
+    }
+  });
+
+  it("renaming the duplicate removes the issue", () => {
+    const withDuplicate = campus({ buildings: [buildingWithRooms([
+      room({ id: "r1", name: "Room 201" }),
+      room({ id: "r2", name: "Room 201" }),
+    ])] });
+    expect(validateCampusData(withDuplicate).some((e) => e.type === "duplicate_room_name")).toBe(true);
+
+    const renamed = campus({ buildings: [buildingWithRooms([
+      room({ id: "r1", name: "Room 201" }),
+      room({ id: "r2", name: "Room 202" }),
+    ])] });
+    expect(validateCampusData(renamed).some((e) => e.type === "duplicate_room_name")).toBe(false);
+  });
+
+  it("ignores empty and whitespace-only room names", () => {
+    const errs = validateCampusData(campus({ buildings: [buildingWithRooms([
+      room({ id: "r1", name: "" }),
+      room({ id: "r2", name: "   " }),
+    ])] }));
+    expect(errs.some((e) => e.type === "duplicate_room_name")).toBe(false);
   });
 
   it("flags a missing campus name", () => {

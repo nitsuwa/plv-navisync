@@ -146,6 +146,22 @@ function transitionTarget(node: NavigationNode | undefined, fallbackId: string):
   return navNodeTarget(node, fallbackId);
 }
 
+/**
+ * Pick a meaningful representative node for a connected component so a
+ * disconnected-graph issue can be located. Prefers an outdoor/entrance node
+ * (visible on the campus canvas) and falls back to any surviving node of the
+ * component — never invents nodes or IDs.
+ */
+function representativeNodeForComponent(
+  component: Set<string>,
+  nodeMap: Map<string, NavigationNode>,
+): NavigationNode | undefined {
+  const nodes = [...component]
+    .map((id) => nodeMap.get(id))
+    .filter((n): n is NavigationNode => !!n);
+  return nodes.find((n) => n.type === "outdoor" || n.type === "entrance") ?? nodes[0];
+}
+
 // ── Main validation ────────────────────────────────────────────────────────
 
 export function validateNavigationGraph(campus: Campus): NavGraphReadinessResult {
@@ -337,6 +353,35 @@ export function validateNavigationGraph(campus: Campus): NavGraphReadinessResult
     }
   }
 
+  // ── E.5 Emergency exits must be present in the navigation graph (B7 P1) ─
+  // Structural only: a door marked isEmergencyExit must have a canonical
+  // NavigationNode linked through node.doorId. This does NOT prove an
+  // evacuation route exists — route verification is B8.
+  for (const building of buildings) {
+    for (const floor of building.floors ?? []) {
+      for (const door of floor.doors ?? []) {
+        if (door.isEmergencyExit !== true) continue;
+        const linked = nodes.some((n) => n.doorId === door.id);
+        if (linked) continue;
+        issues.push({
+          type: "emergency_exit_no_nav",
+          severity: "warning",
+          message: `Emergency exit door "${door.label || door.id}" has no navigation waypoint. Add one linked to this door so the exit participates in the navigation graph.`,
+          buildingId: building.id,
+          floorId: floor.id,
+          target: {
+            scope: "floor",
+            mode: "design",
+            buildingId: building.id,
+            floorId: floor.id,
+            selectionType: "door",
+            id: door.id,
+          },
+        });
+      }
+    }
+  }
+
   // ── F. Floor transition validation ─────────────────────────────────────
   const transitionEdges = activeEdges.filter((e) => e.type === "floor_transition");
   for (const edge of transitionEdges) {
@@ -469,10 +514,17 @@ export function validateNavigationGraph(campus: Campus): NavGraphReadinessResult
       if (hasEntrance && hasIndoor) {
         // This component bridges outdoor and indoor — good
       } else if (hasEntrance && !hasIndoor) {
+        // Target a representative outdoor/entrance node of THIS component so
+        // the admin can locate the stranded outdoor network and rejoin it.
+        const rep = representativeNodeForComponent(comp, nodeMap);
         issues.push({
           type: "nav_disconnected_component",
           severity: "warning",
           message: `Outdoor navigation network has no connection to any indoor floor.`,
+          nodeId: rep?.id,
+          buildingId: rep?.buildingId,
+          floorId: rep?.floorId,
+          target: rep ? navNodeTarget(rep, rep.id) : undefined,
         });
       }
     }
@@ -480,10 +532,27 @@ export function validateNavigationGraph(campus: Campus): NavGraphReadinessResult
     if (significantComponents.length >= 2) {
       const totalNodes = significantComponents.reduce((sum, c) => sum + c.size, 0);
       if (totalNodes >= 3) {
+        // Target a representative node of the LARGEST component — the natural
+        // anchor the admin should rejoin the other components to.
+        let rep: NavigationNode | undefined;
+        let repSize = 0;
+        for (const comp of significantComponents) {
+          if (comp.size > repSize) {
+            const candidate = representativeNodeForComponent(comp, nodeMap);
+            if (candidate) {
+              rep = candidate;
+              repSize = comp.size;
+            }
+          }
+        }
         issues.push({
           type: "nav_disconnected_component",
           severity: "info",
           message: `Navigation graph has ${significantComponents.length} disconnected components. Consider connecting them for end-to-end routing.`,
+          nodeId: rep?.id,
+          buildingId: rep?.buildingId,
+          floorId: rep?.floorId,
+          target: rep ? navNodeTarget(rep, rep.id) : undefined,
         });
       }
     }

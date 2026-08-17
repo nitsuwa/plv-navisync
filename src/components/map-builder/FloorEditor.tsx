@@ -74,6 +74,10 @@ import {
   defaultStairDirectionForFloorInOrder,
 } from "../../lib/floorManagement";
 import { doorDisplayName, doorEntranceLinkStatus, reconcileEntranceTransitions } from "../../lib/entranceTransitions";
+import { validationIssuesForFloor, mergeFloorIssueLists, floorIssuesForSelection } from "../../lib/liveValidation";
+import { floorIssuesToItems } from "./ObjectIssueSection";
+import { floorObjectCenter, polylineMidpoint } from "../../lib/issueLocate";
+import { findOverlappingRoom } from "../../lib/roomOverlap";
 import {
   createFittedFloorPlanBackground,
   createFloorScaleCalibration,
@@ -1277,6 +1281,19 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
   const floorBackground = floor.backgroundImage;
   const calibratedMetersPerUnit = floor.calibration?.metersPerUnit;
   const orderedRooms = useMemo(() => sortByZ(rooms), [rooms]);
+  // B7 Part F: compute set of room IDs that overlap another room (for visual feedback).
+  const overlappingRoomIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (let i = 0; i < rooms.length; i++) {
+      for (let j = i + 1; j < rooms.length; j++) {
+        const a = rooms[i]; const b = rooms[j];
+        const ox = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x);
+        const oy = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y);
+        if (ox > 2 && oy > 2) { ids.add(a.id); ids.add(b.id); }
+      }
+    }
+    return ids;
+  }, [rooms]);
   const orderedWalls = useMemo(() => sortByZ(walls), [walls]);
   const orderedDoors = useMemo(() => sortByZ(doors), [doors]);
   const orderedWindows = useMemo(() => sortByZ(windows), [windows]);
@@ -1843,13 +1860,10 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
   // ── Save ──
   const handleSave = useCallback(async (): Promise<boolean> => {
     if (!isFloorDirty || saving) return true;
-    const issues = validateFloorGeometry(floor);
-    const errors = issues.filter((issue) => issue.severity === "error");
-    if (errors.length > 0) {
-      setShowIssues(true);
-      toast.error("Resolve floor issues before saving", `${errors.length} blocking issue${errors.length !== 1 ? "s" : ""} found on this floor.`);
-      return false;
-    }
+    // B7 Phase 2: SAVE DRAFT must never be blocked by map validation. A draft
+    // is allowed to be incomplete — issues stay visible (Issues panel, markers)
+    // but never stop the administrator from preserving unfinished work. Only
+    // genuine persistence failures (below) can prevent a save.
     setSaving(true);
     try {
       const candidate = buildFloorUpdates({});
@@ -1918,8 +1932,21 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
   }, [guardNavigation, onBack]);
 
   const handlePublish = useCallback(() => {
-    const issues = validateFloorGeometry(floor);
-    const errors = issues.filter((issue) => issue.severity === "error");
+    // B7 Phase 2: PUBLISH uses the SAME canonical live issue list as the Issues
+    // panel — the floor-local geometry checks merged with the canonical
+    // campus/navigation issues that target this floor. Errors block publishing;
+    // warnings/info may proceed (severity is the source of truth).
+    const localGeometryErrors = validateFloorGeometry(floor).filter((issue) => issue.severity === "error");
+    const canonicalFloorErrors = validationIssuesForFloor(campus, floorId).filter((issue) => issue.severity === "error");
+    const seen = new Set<string>();
+    const errors: FloorIssue[] = [];
+    for (const issue of [...localGeometryErrors, ...canonicalFloorErrors]) {
+      const selection = issue.selection ? `${issue.selection.type}|${issue.selection.id}` : "";
+      const key = `${issue.id ?? ""}|${selection}|${issue.message}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      errors.push(issue);
+    }
     if (errors.length > 0) {
       setShowIssues(true);
       toast.error("Resolve floor issues before publishing", `${errors.length} blocking issue${errors.length !== 1 ? "s" : ""} found on this floor.`);
@@ -1930,7 +1957,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
       return;
     }
     onPublish(campus);
-  }, [campus, floor, onPublish, publishingEnabled, toast]);
+  }, [campus, floor, floorId, onPublish, publishingEnabled, toast]);
 
   const switchToFloor = useCallback((targetFloorId: string) => {
     if (targetFloorId === floorId) return;
@@ -2175,6 +2202,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
     if (initialSelection.type === "navNode") {
       const n = indoorNodes.find((x) => x.id === initialSelection.id);
       if (n) {
+        // Point object — the rendered node center IS its coordinates.
         zoomToFit(Math.max(0, n.x - 60), Math.max(0, n.y - 60), 120, 120, 48);
         setLocateFlash({ world: { x: n.x, y: n.y } });
       }
@@ -2185,7 +2213,10 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
       const a = e ? indoorNodes.find((n) => n.id === e.startNodeId) : undefined;
       const b = e ? indoorNodes.find((n) => n.id === e.endNodeId) : undefined;
       if (e && a && b) {
+        // B7 Phase 1: flash the midpoint measured ALONG the rendered polyline,
+        // never the bounding-box center (which can sit off a bent edge).
         const pts = [{ x: a.x, y: a.y }, ...(e.bendPoints ?? []), { x: b.x, y: b.y }];
+        const mid = polylineMidpoint(pts);
         const xs = pts.map((p) => p.x);
         const ys = pts.map((p) => p.y);
         const minX = Math.min(...xs);
@@ -2193,14 +2224,18 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
         const minY = Math.min(...ys);
         const maxY = Math.max(...ys);
         zoomToFit(Math.max(0, minX - 40), Math.max(0, minY - 40), maxX - minX + 80, maxY - minY + 80, 40);
-        setLocateFlash({ world: { x: (minX + maxX) / 2, y: (minY + maxY) / 2 } });
+        setLocateFlash({ world: { x: mid.x, y: mid.y } });
       }
       return;
     }
-    const item = getSelectionItem(initialSelection.type, initialSelection.id) as { x?: number; y?: number } | undefined;
+    const item = getSelectionItem(initialSelection.type, initialSelection.id) as { x?: number; y?: number; w?: number; h?: number; width?: number; height?: number } | undefined;
     if (item && typeof item.x === "number" && typeof item.y === "number") {
-      zoomToFit(Math.max(0, item.x - 60), Math.max(0, item.y - 60), 120, 120, 48);
-      setLocateFlash({ world: { x: item.x, y: item.y } });
+      // B7 Phase 1: rectangular objects flash at their rendered bounds CENTER
+      // (rooms, stairs, elevators, ramps, furniture, windows); point objects
+      // (doors, labels) at their coordinate. Never the top-left corner.
+      const anchor = floorObjectCenter(initialSelection.type as Parameters<typeof floorObjectCenter>[0], item);
+      zoomToFit(Math.max(0, anchor.x - 60), Math.max(0, anchor.y - 60), 120, 120, 48);
+      setLocateFlash({ world: { x: anchor.x, y: anchor.y } });
     }
   }, [initialSelection, indoorNodes, indoorEdges, getSelectionItem, zoomToFit, locateFocusedRef]);
 
@@ -2811,6 +2846,31 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
     return best;
   }, [walls, zoom]);
 
+  // B5 Phase 2.11: LIVE validity of every existing indoor edge — the same strict
+  // thick-wall model as Connect creation, recomputed against the CURRENT nodes
+  // and authored bends. An invalid edge renders RED and stays editable so the
+  // admin can repair it (Remove Bend may legitimately invalidate an edge). This
+  // derived set is the authoring invariant future routing/publish code can rely
+  // on — no persisted field, no migration.
+  const navBlockedEdgeIds = useMemo(() => {
+    const blocked = new Set<string>();
+    for (const e of indoorEdges) {
+      if (navEdgeIsBlockedExtended(e, indoorNodes, walls, doors, floor.furniture)) blocked.add(e.id);
+    }
+    return blocked;
+  }, [indoorEdges, indoorNodes, walls, doors, floor.furniture]);
+
+  // ── Floor Issues (B7 Phase 1) ──
+  // = FloorEditor-local live checks (floor geometry, stair direction, door/
+  // entrance relationship, blocked nav edges) + the CANONICAL campus/nav
+  // validation issues that target THIS floor (duplicate room names, emergency
+  // exits without a nav link, nav node/edge issues on this floor, …). The
+  // canonical list is the exact same derivation the Campus Editor's global
+  // Issues control shows (src/lib/liveValidation.ts) — filtered to the current
+  // floor and merged WITHOUT duplicating a logical issue that both sides
+  // produce (e.g. a wall-blocked nav edge). Renaming a room or linking an
+  // emergency exit disappears the row immediately because this memo re-runs on
+  // the live campus.
   const floorIssues = useMemo<FloorIssue[]>(() => {
     const geometryIssues = validateFloorGeometry(floor);
     // B5 Phase 3.1: an impossible stair direction (e.g. Down on the lowest
@@ -2850,26 +2910,101 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
       }
       return issues;
     });
-    return [...geometryIssues, ...stairIssues, ...doorIssues];
-  }, [floor, stairs, doors, buildingId, floorId, campus]);
+    const localIssues: FloorIssue[] = [...geometryIssues, ...stairIssues, ...doorIssues];
+    // Canonical campus/nav issues that target the CURRENT floor only. Blocked
+    // nav edges already tracked locally are excluded so the same warning never
+    // appears twice in one panel (the local blocked-edge rows render below).
+    const campusFloorIssues = validationIssuesForFloor(campus, floorId);
+    return mergeFloorIssueLists(localIssues, campusFloorIssues, navBlockedEdgeIds);
+  }, [floor, stairs, doors, buildingId, floorId, campus, navBlockedEdgeIds]);
   const blockingIssues = floorIssues.filter((issue) => issue.severity === "error");
-
-  // B5 Phase 2.11: LIVE validity of every existing indoor edge — the same strict
-  // thick-wall model as Connect creation, recomputed against the CURRENT nodes
-  // and authored bends. An invalid edge renders RED and stays editable so the
-  // admin can repair it (Remove Bend may legitimately invalidate an edge). This
-  // derived set is the authoring invariant future routing/publish code can rely
-  // on — no persisted field, no migration.
-  const navBlockedEdgeIds = useMemo(() => {
-    const blocked = new Set<string>();
-    for (const e of indoorEdges) {
-      if (navEdgeIsBlockedExtended(e, indoorNodes, walls, doors, floor.furniture)) blocked.add(e.id);
-    }
-    return blocked;
-  }, [indoorEdges, indoorNodes, walls, doors, floor.furniture]);
   const totalIssues = floorIssues.length + navBlockedEdgeIds.size;
   const hasBlockingIssues = blockingIssues.length > 0 || navBlockedEdgeIds.size > 0;
   const hasAnyIssues = totalIssues > 0;
+
+  // ── B7 Phase 1: restrained on-canvas issue markers ────────────────────────
+  // ONE small badge per affected object (rooms, doors, stairs, elevators,
+  // ramps, nav nodes/edges) derived from the SAME live issue list the Issues
+  // panel shows. The worst severity wins per object; warnings stay amber and
+  // errors stay red; the badge is pointer-events-none so it never intercepts
+  // canvas interactions, and it disappears the moment the issue is fixed
+  // because it re-derives on every issue-list change.
+  const floorIssueMarkers = useMemo(() => {
+    const markers = new Map<string, { severity: "error" | "warning"; selection: FloorSelection }>();
+    // B7 correction: nav-only markers (navNode, navEdge) are hidden when the
+    // Navigation layer is not active — the issue stays in the Issues list but
+    // no floating marker appears on an invisible object.
+    const navVisible = mode === "navigation";
+    const add = (selection: FloorSelection | undefined, severity: "error" | "warning" | "info") => {
+      if (!selection || severity === "info") return;
+      if (selection.type === "wall" || selection.type === "path" || selection.type === "window" || selection.type === "furniture" || selection.type === "label") return;
+      // Hide nav-only issue markers when the Navigation layer is not active
+      if (!navVisible && (selection.type === "navNode" || selection.type === "navEdge")) return;
+      const key = `${selection.type}:${selection.id}`;
+      const existing = markers.get(key);
+      if (!existing || (severity === "error" && existing.severity !== "error")) {
+        markers.set(key, { severity, selection });
+      }
+    };
+    for (const issue of floorIssues) add(issue.selection, issue.severity);
+    for (const edgeId of navBlockedEdgeIds) add({ type: "navEdge", id: edgeId }, "warning");
+    return markers;
+  }, [floorIssues, navBlockedEdgeIds, mode]);
+
+  // ── B7 Phase 2: contextual issue guidance for the SELECTED object ──
+  // Same floor issue list the Issues panel + markers use: selecting an object
+  // that has a marker explains exactly what is wrong (design + nav modes).
+  const selectedIssueItems = useMemo(() => {
+    if (!selected) return [];
+    return floorIssuesToItems(floorIssuesForSelection(floorIssues, selected));
+  }, [selected, floorIssues]);
+  const navSelectedIssueItems = useMemo(() => {
+    if (!navSelected) return [];
+    const selection: FloorSelection =
+      navSelected.type === "node" ? { type: "navNode", id: navSelected.id } : { type: "navEdge", id: navSelected.id };
+    return floorIssuesToItems(floorIssuesForSelection(floorIssues, selection));
+  }, [navSelected, floorIssues]);
+
+  // World-space anchor of an issue marker: the rendered object's center
+  // (nav nodes/edges use their graph geometry; physical objects use their
+  // bounds center). Shared with the locate-flash geometry helpers.
+  const floorMarkerAnchor = useCallback((selection: FloorSelection): { x: number; y: number } | null => {
+    switch (selection.type) {
+      case "room": {
+        const r = rooms.find((x) => x.id === selection.id);
+        return r ? floorObjectCenter("room", r) : null;
+      }
+      case "door": {
+        const d = doors.find((x) => x.id === selection.id);
+        return d ? { x: d.x, y: d.y } : null;
+      }
+      case "stairs": {
+        const s = stairs.find((x) => x.id === selection.id);
+        return s ? floorObjectCenter("stairs", s) : null;
+      }
+      case "elevator": {
+        const e = elevators.find((x) => x.id === selection.id);
+        return e ? floorObjectCenter("elevator", e) : null;
+      }
+      case "ramp": {
+        const r = ramps.find((x) => x.id === selection.id);
+        return r ? floorObjectCenter("ramp", r) : null;
+      }
+      case "navNode": {
+        const n = indoorNodes.find((x) => x.id === selection.id);
+        return n ? { x: n.x, y: n.y } : null;
+      }
+      case "navEdge": {
+        const e = indoorEdges.find((x) => x.id === selection.id);
+        const a = e ? indoorNodes.find((n) => n.id === e.startNodeId) : undefined;
+        const b = e ? indoorNodes.find((n) => n.id === e.endNodeId) : undefined;
+        if (!e || !a || !b) return null;
+        return polylineMidpoint([{ x: a.x, y: a.y }, ...(e.bendPoints ?? []), { x: b.x, y: b.y }]);
+      }
+      default:
+        return null;
+    }
+  }, [rooms, doors, stairs, elevators, ramps, indoorNodes, indoorEdges]);
 
   // B5 Phase 3: cross-floor transition status for the CURRENT floor's nodes —
   // connected floor labels (authoring feedback) + sharedId match state. Fully
@@ -5016,6 +5151,14 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
       const dx = Math.round(e.clientX - state.sx);
       const dy = Math.round(e.clientY - state.sy);
       const resized = resizeRoomWithinFloor(origin, state.corner, dx, dy, FP_W, FP_H);
+      // B7 Part F: prevent resize that would overlap another room.
+      const overlapDuringResize = findOverlappingRoom(resized, rooms);
+      if (overlapDuringResize && !gestureMoved.current) {
+        // First frame of overlap — revert to origin and notify.
+        resizing.current = null;
+        toast.warning("Room overlap", `Cannot resize here — would overlap "${overlapDuringResize.name}".`);
+        return;
+      }
       const nextRooms = rooms.map((r) => r.id === state.id ? resized : r);
       const anchored = anchoredRoomUpdate(nextRooms, walls, new Set([state.id]));
       if (anchored.blocked) return;
@@ -5182,6 +5325,18 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
     const anchored = anchoredRoomUpdate(nextRooms, nextWalls, movedRoomIds, movedWallIds);
     if (anchored.blocked) return;
     nextWalls = anchored.walls;
+    // B7 Part F: prevent room moves that would overlap another room.
+    if (movedRoomIds.size > 0) {
+      const stationaryRooms = nextRooms.filter((r) => !movedRoomIds.has(r.id));
+      for (const movedRoom of nextRooms.filter((r) => movedRoomIds.has(r.id))) {
+        const overlap = findOverlappingRoom(movedRoom, stationaryRooms);
+        if (overlap) {
+          // Revert to origin and cancel the move.
+          gestureMoved.current = false;
+          return;
+        }
+      }
+    }
     if (dx !== 0 || dy !== 0) gestureMoved.current = true;
     updFloor(
       nextRooms,
@@ -5313,10 +5468,19 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
       const rh = Math.max(Math.abs(roomDrag.cy - roomDrag.sy), 15);
       const rx = clamp(Math.min(roomDrag.sx, roomDrag.cx), 0, FP_W - rw);
       const ry = clamp(Math.min(roomDrag.sy, roomDrag.cy), 0, FP_H - rh);
+      // B7 Part F: reject room creation that would overlap an existing room.
+      const candidate = { x: Math.round(rx), y: Math.round(ry), w: Math.round(rw), h: Math.round(rh) };
+      const overlap = findOverlappingRoom(candidate, rooms);
+      if (overlap) {
+        toast.error("Room overlaps", `Cannot place here — overlaps "${overlap.name}". Move or resize to avoid overlap.`);
+        setRoomDrag(null);
+        setTool("select");
+        return;
+      }
       const newRoom: FloorRoom = {
         id: genId("rm"), name: "Room",
-        type: sidebarCategory && ROOM_MAP[sidebarCategory] ? sidebarCategory : "classroom", x: Math.round(rx), y: Math.round(ry),
-        w: Math.round(rw), h: Math.round(rh),
+        type: sidebarCategory && ROOM_MAP[sidebarCategory] ? sidebarCategory : "classroom", x: candidate.x, y: candidate.y,
+        w: candidate.w, h: candidate.h,
         floorId,
         buildingId,
       };
@@ -6756,6 +6920,8 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
               {orderedRooms.map((room) => {
                 const rt = ROOM_MAP[room.type] ?? ROOM_MAP.classroom;
                 const isSel = (selected?.type === "room" && selected.id === room.id) || multiSelected.includes(room.id);
+                // B7 Part F: visual overlap indicator
+                const isOverlap = overlappingRoomIds.has(room.id);
                 const rotation = room.rotation ?? 0;
                 const cx = room.x + room.w / 2;
                 const cy = room.y + room.h / 2;
@@ -6768,8 +6934,9 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
                       <rect x={room.x} y={room.y} width={room.w} height={room.h} rx={1}
                         fill={isSel ? "rgba(14,42,110,0.15)" : rt.fill}
                         fillOpacity={isSel ? 0.72 : 0.58}
-                        stroke={isSel ? "var(--accent)" : rt.stroke}
-                        strokeWidth={isSel ? 2 : 1} />
+                        stroke={isOverlap ? "#dc2626" : isSel ? "var(--accent)" : rt.stroke}
+                        strokeWidth={isOverlap ? 2.5 : isSel ? 2 : 1}
+                        strokeDasharray={isOverlap ? "4 2" : undefined} />
                       <line x1={room.x + 1} y1={room.y + 1} x2={room.x + room.w - 1} y2={room.y + 1}
                         stroke="rgba(0,0,0,0.06)" strokeWidth={1.5} />
                     </g>
@@ -6788,12 +6955,16 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
                 const isSel = selectableWall && ((selected?.type === "wall" && selected.id === wall.id) || multiSelected.includes(wall.id));
                 const materialStyle = wallMaterialStyle(wall.material);
                 const label = wallLengthLabelPosition(wall);
+                // B7 Part G: wall-drawing mode makes wall SVG groups non-interactive
+                // so the completion click always reaches the SVG background handler
+                // and the snap resolution picks the correct endpoint.
+                const wallDrawingMode = tool === "wall" || tool === "door" || tool === "window";
                 return (
                   <g key={wall.id} clipPath={`url(#${floorClipId})`}
-                    onMouseDown={(e) => onItemDown(e, "wall", wall.id, wall)}
-                    onContextMenu={(e) => onItemContextMenu(e, "wall", wall.id)}
+                    onMouseDown={wallDrawingMode ? undefined : (e) => onItemDown(e, "wall", wall.id, wall)}
+                    onContextMenu={wallDrawingMode ? undefined : (e) => onItemContextMenu(e, "wall", wall.id)}
                     opacity={visibleOpacity(wall)}
-                    style={{ cursor: tool === "select" && selectableWall ? "pointer" : cursor }}>
+                    style={{ cursor: tool === "select" && selectableWall ? "pointer" : cursor, pointerEvents: wallDrawingMode ? "none" : undefined }}>
                     {/* Selection glow */}
                     {isSel && (
                       <line data-testid="selection-glow" x1={wall.x1} y1={wall.y1} x2={wall.x2} y2={wall.y2}
@@ -8455,6 +8626,33 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
                 );
               })()}
 
+              {/* ── B7 Phase 1: validation issue markers — one small badge per
+                  affected object, derived live from the same issue list the
+                  Issues panel shows. Warnings stay amber, errors stay red; the
+                  layer is pointer-events-none and clipped to the floor so it
+                  never intercepts canvas interactions or spills outside. ── */}
+              {floorIssueMarkers.size > 0 && (
+                <g clipPath={`url(#${floorClipId})`} className="pointer-events-none" data-testid="issue-marker-layer">
+                  {Array.from(floorIssueMarkers.values()).map(({ severity, selection }) => {
+                    const anchor = floorMarkerAnchor(selection);
+                    if (!anchor) return null;
+                    const color = severity === "error" ? "#dc2626" : "#d97706";
+                    return (
+                      <g
+                        key={`${selection.type}:${selection.id}`}
+                        data-testid="issue-marker"
+                        data-issue-object={`${selection.type}:${selection.id}`}
+                        data-issue-severity={severity}
+                      >
+                        {/* Soft halo so the badge reads on any background */}
+                        <circle cx={anchor.x} cy={anchor.y - 13} r={7} fill="none" stroke={color} strokeWidth={0.8} opacity={0.45} />
+                        <circle cx={anchor.x} cy={anchor.y - 13} r={4.5} fill={color} stroke="white" strokeWidth={1.4} />
+                      </g>
+                    );
+                  })}
+                </g>
+              )}
+
             </g>
           </svg>
 
@@ -8646,35 +8844,9 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
             </div>
           )}
 
-          {/* B5 Final: locate flash overlay — pulses the located object, then fades */}
-          {locateFlash && (
-            <svg
-              viewBox={`0 0 ${FP_W} ${FP_H}`}
-              className="absolute inset-0 z-20 pointer-events-none"
-              data-testid="locate-flash"
-              aria-hidden="true"
-            >
-              <g transform={`translate(${pan.x},${pan.y}) scale(${zoom})`}>
-                <circle
-                  cx={locateFlash.world.x}
-                  cy={locateFlash.world.y}
-                  r={34}
-                  fill="none"
-                  stroke="#f59e0b"
-                  strokeWidth={2.5}
-                  className="animate-locate-ping"
-                />
-                <circle
-                  cx={locateFlash.world.x}
-                  cy={locateFlash.world.y}
-                  r={14}
-                  fill="rgba(245,158,11,0.18)"
-                  stroke="#f59e0b"
-                  strokeWidth={2}
-                />
-              </g>
-            </svg>
-          )}
+          {/* B7 Correction: locate flash overlay removed — locate behavior now
+              relies on object selection, Properties sidebar, and contextual
+              "Needs attention" section for a precise, non-misaligned result. */}
 
           {/* Zoom controls */}
           <div className="absolute bottom-10 right-3 z-20 flex items-center gap-1 p-1 rounded-xl border border-border shadow-md bg-card">
@@ -8840,6 +9012,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
           >
           <FloorNavPropertiesPanel
             selected={navSelected}
+            issueItems={navSelectedIssueItems}
             nodes={indoorNodes}
             edges={indoorEdges}
             onUpdateNode={(id, ch) => commitNavGraph(indoorNodes.map((n) => n.id === id ? { ...n, ...ch } : n), indoorEdges)}
@@ -8921,6 +9094,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
               onMoveUp={() => requestMoveFloor(floorId, -1)}
               onMoveDown={() => requestMoveFloor(floorId, 1)}
               onDelete={() => requestDeleteFloor(floorId)}
+              perimeterEnabled={walls.some(isManagedPerimeterWall)}
             />
           </div>
         )}
@@ -8928,6 +9102,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
           <FloorPropertiesPanel
             selected={selected}
             mode={mode}
+            issueItems={selectedIssueItems}
             rooms={rooms}
             walls={walls}
             doors={doors}
@@ -9239,19 +9414,29 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
                     </div>
                   ) : (
                     <div className="space-y-1">
-                      {floorIssues.map((issue) => (
-                        <button
-                          key={issue.id}
-                          onClick={() => selectIssue(issue)}
-                          className="w-full flex items-start gap-3 rounded-xl border border-destructive/20 bg-destructive/5 px-3 py-2.5 text-left hover:bg-destructive/10 transition-colors"
-                        >
-                          <AlertTriangle className="h-4 w-4 text-destructive shrink-0 mt-0.5" />
-                          <div className="min-w-0">
-                            <p className="text-xs font-bold text-foreground">{issue.message}</p>
-                            <p className="text-[10px] text-muted-foreground mt-0.5">Click to select the affected object.</p>
-                          </div>
-                        </button>
-                      ))}
+                      {floorIssues.map((issue) => {
+                        // Severity-aware row styling: errors stay destructive,
+                        // warnings stay amber, info stays blue (B7 Phase 1 —
+                        // warnings must remain warnings, never a giant red state).
+                        const severityStyle = issue.severity === "error"
+                          ? "border-destructive/20 bg-destructive/5 hover:bg-destructive/10 text-destructive"
+                          : issue.severity === "warning"
+                            ? "border-amber-500/25 bg-amber-500/5 hover:bg-amber-500/10 text-amber-600 dark:text-amber-400"
+                            : "border-sky-500/25 bg-sky-500/5 hover:bg-sky-500/10 text-sky-600 dark:text-sky-400";
+                        return (
+                          <button
+                            key={issue.id}
+                            onClick={() => selectIssue(issue)}
+                            className={`w-full flex items-start gap-3 rounded-xl border px-3 py-2.5 text-left transition-colors ${severityStyle}`}
+                          >
+                            <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+                            <div className="min-w-0">
+                              <p className="text-xs font-bold text-foreground">{issue.message}</p>
+                              <p className="text-[10px] text-muted-foreground mt-0.5">Click to select the affected object.</p>
+                            </div>
+                          </button>
+                        );
+                      })}
                       {/* B5 Phase 2.11: wall-blocked navigation paths count as local
                           issues; clicking one jumps to Navigation mode with the
                           invalid edge selected so it can be repaired. */}

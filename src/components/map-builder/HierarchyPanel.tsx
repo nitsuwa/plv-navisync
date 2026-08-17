@@ -65,10 +65,6 @@ export function HierarchyPanel({
   const dragItemRef = useRef<number | null>(null);
   // ── Floor row `...` menu ──
   const [floorMenu, setFloorMenu] = useState<{ buildingId: string; floorId: string; x: number; y: number } | null>(null);
-  // ── Floor drag-and-drop reorder (mirrors the building-row DnD pattern) ──
-  const floorDragRef = useRef<{ buildingId: string; index: number } | null>(null);
-  const [floorDragOver, setFloorDragOver] = useState<{ buildingId: string; index: number } | null>(null);
-  const suppressFloorOpenRef = useRef(false);
   useEffect(() => {
     if (!assetsEnabled && panelTab !== "hierarchy") setPanelTab("hierarchy");
   }, [assetsEnabled, panelTab]);
@@ -615,66 +611,14 @@ export function HierarchyPanel({
               <div className="pl-8">
                 {b.floors.map((f, floorIndex) => (
                   <div key={f.id}>
-                    {/* Floor drop indicator */}
-                    {floorDragOver?.buildingId === b.id && floorDragOver.index === floorIndex && (
-                      <div className="h-0.5 bg-primary mx-5 rounded-full my-0.5" />
-                    )}
+
                     <div
                       className="group flex items-center"
-                      draggable
-                      onDragStart={(e) => {
-                        floorDragRef.current = { buildingId: b.id, index: floorIndex };
-                        e.dataTransfer.effectAllowed = "move";
-                        e.dataTransfer.setData("text/plain", f.id);
-                      }}
-                      onDragOver={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        e.dataTransfer.dropEffect = "move";
-                        setFloorDragOver({ buildingId: b.id, index: floorIndex });
-                      }}
-                      onDragLeave={() => setFloorDragOver(null)}
-                      onDrop={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        const from = floorDragRef.current;
-                        if (from && from.buildingId === b.id && from.index !== floorIndex) {
-                          // Same canonical floor-order update path as the
-                          // Move Up/Down actions, just with an arbitrary drop
-                          // index.
-                          const reordered = [...b.floors];
-                          const [moved] = reordered.splice(from.index, 1);
-                          reordered.splice(floorIndex, 0, moved);
-                          pushHistory();
-                          replaceBuildingFloors(b.id, reordered);
-                          toast.success("Floor Reordered", "Floor order updated.");
-                        }
-                        floorDragRef.current = null;
-                        setFloorDragOver(null);
-                      }}
-                      onDragEnd={() => {
-                        floorDragRef.current = null;
-                        setFloorDragOver(null);
-                        // A drag end can still be followed by a click in some
-                        // browsers — never let a reorder gesture open the floor.
-                        // Consume the flag on the next row click; also clear it
-                        // after a tick so a drag that ends elsewhere never
-                        // swallows a later legitimate row click.
-                        suppressFloorOpenRef.current = true;
-                        window.setTimeout(() => { suppressFloorOpenRef.current = false; }, 0);
-                      }}
                       onContextMenu={(e) => handleFloorContextMenu(e, b.id, f.id)}
                     >
-                      {/* Grip handle */}
-                      <span
-                        className="opacity-0 group-hover:opacity-40 cursor-grab active:cursor-grabbing text-muted-foreground shrink-0"
-                        title="Drag to reorder"
-                      >
-                        <GripVertical className="h-3 w-3" />
-                      </span>
+                      {/* No drag handle — floor reordering uses Move Up/Down controls */}
                       <button
                         onClick={() => {
-                          if (suppressFloorOpenRef.current) { suppressFloorOpenRef.current = false; return; }
                           onOpenFloor(b.id, f.id);
                         }}
                         className="flex-1 flex items-center gap-2 px-1 py-1 hover:bg-muted/50 transition-colors text-left min-w-0"

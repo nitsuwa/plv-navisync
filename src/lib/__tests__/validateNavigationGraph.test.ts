@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { validateNavigationGraph } from "../validateNavigationGraph";
+import { resolveIssueTarget } from "../issueLocate";
 import type { Campus, NavigationNode, NavigationEdge, CampusBuilding } from "../../components/map-builder/types";
 
 // ── Helpers ──────────────────────────────────────────────────────────────
@@ -421,5 +422,116 @@ describe("validateNavigationGraph", () => {
       selectionType: "entrance",
       id: "e1",
     });
+  });
+});
+
+describe("B7 Phase 1 — locatable disconnected-component issues", () => {
+  // Two components: an outdoor pair and an indoor pair with no bridge.
+  function disconnectedCampus(): Campus {
+    return baseCampus({
+      navNodes: [
+        node({ id: "outdoor-1", type: "outdoor" }),
+        node({ id: "outdoor-2", type: "outdoor" }),
+        node({ id: "indoor-1", type: "hallway", buildingId: "b1", floorId: "f1" }),
+        node({ id: "indoor-2", type: "hallway", buildingId: "b1", floorId: "f1" }),
+      ],
+      navEdges: [
+        edge({ id: "e1", startNodeId: "outdoor-1", endNodeId: "outdoor-2" }),
+        edge({ id: "e2", startNodeId: "indoor-1", endNodeId: "indoor-2" }),
+      ],
+    });
+  }
+
+  it("outdoor-no-indoor-connection warning targets a representative outdoor node", () => {
+    const issue = validateNavigationGraph(disconnectedCampus()).issues.find(
+      (i) => i.type === "nav_disconnected_component" && i.severity === "warning",
+    )!;
+    expect(issue).toBeTruthy();
+    expect(issue.target).toMatchObject({
+      scope: "campus",
+      mode: "navigation",
+      selectionType: "navNode",
+    });
+    expect(["outdoor-1", "outdoor-2"]).toContain(issue.target!.id);
+    expect(issue.nodeId).toBe(issue.target!.id);
+  });
+
+  it("disconnected-component info issue carries a representative node target", () => {
+    const issue = validateNavigationGraph(disconnectedCampus()).issues.find(
+      (i) => i.type === "nav_disconnected_component" && i.severity === "info",
+    )!;
+    expect(issue).toBeTruthy();
+    expect(issue.target?.selectionType).toBe("navNode");
+    // The target references a REAL node that exists in the campus graph.
+    const ids = disconnectedCampus().navNodes!.map((n) => n.id);
+    expect(ids).toContain(issue.target!.id);
+  });
+
+  it("disconnected-component targets resolve through resolveIssueTarget", () => {
+    const issues = validateNavigationGraph(disconnectedCampus()).issues.filter(
+      (i) => i.type === "nav_disconnected_component",
+    );
+    for (const issue of issues) {
+      const resolved = resolveIssueTarget(issue);
+      expect(resolved).not.toBeNull();
+      expect(resolved).toEqual(issue.target);
+      expect(resolved!.selectionType).toBe("navNode");
+    }
+  });
+});
+
+describe("B7 Phase 1 — emergency exits need a navigation link", () => {
+  function campusWithExitDoor(overrides?: Partial<Campus>): Campus {
+    return baseCampus({
+      buildings: [building({ id: "b1", floors: [{
+        id: "f1",
+        doors: [{ id: "d1", x: 10, y: 10, width: 8, direction: "left", color: "#000", isEmergencyExit: true }],
+        rooms: [], walls: [], windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [],
+      } as any] })],
+      navNodes: [],
+      navEdges: [],
+      ...overrides,
+    });
+  }
+
+  it("emergency-exit door without a linked node is flagged as a warning", () => {
+    const issue = validateNavigationGraph(campusWithExitDoor()).issues.find((i) => i.type === "emergency_exit_no_nav")!;
+    expect(issue).toBeTruthy();
+    expect(issue.severity).toBe("warning");
+  });
+
+  it("normal door without a nav node is not flagged by this rule", () => {
+    const campus = campusWithExitDoor();
+    campus.buildings![0].floors![0].doors![0] = { ...campus.buildings![0].floors![0].doors![0], isEmergencyExit: false };
+    const issues = validateNavigationGraph(campus).issues;
+    expect(issues.some((i) => i.type === "emergency_exit_no_nav")).toBe(false);
+  });
+
+  it("linked emergency-exit door is clean", () => {
+    const campus = campusWithExitDoor({
+      navNodes: [node({ id: "n1", type: "room_access", buildingId: "b1", floorId: "f1", doorId: "d1" })],
+    });
+    const issues = validateNavigationGraph(campus).issues;
+    expect(issues.some((i) => i.type === "emergency_exit_no_nav")).toBe(false);
+  });
+
+  it("issue targets the physical Door in Design mode", () => {
+    const issue = validateNavigationGraph(campusWithExitDoor()).issues.find((i) => i.type === "emergency_exit_no_nav")!;
+    expect(issue.target).toEqual({
+      scope: "floor",
+      mode: "design",
+      buildingId: "b1",
+      floorId: "f1",
+      selectionType: "door",
+      id: "d1",
+    });
+  });
+
+  it("adding the linked nav node removes the issue", () => {
+    expect(validateNavigationGraph(campusWithExitDoor()).issues.some((i) => i.type === "emergency_exit_no_nav")).toBe(true);
+    const fixed = campusWithExitDoor({
+      navNodes: [node({ id: "n1", type: "room_access", buildingId: "b1", floorId: "f1", doorId: "d1" })],
+    });
+    expect(validateNavigationGraph(fixed).issues.some((i) => i.type === "emergency_exit_no_nav")).toBe(false);
   });
 });
