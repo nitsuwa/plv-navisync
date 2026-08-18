@@ -533,7 +533,7 @@ describe("Phase 1.7 — wall connection snapping", () => {
   it("snaps wall creation to a managed perimeter wall without making it selectable", () => {
     const campus = makeSnapCampus();
     campus.buildings[0].floors[0].walls = [
-      { id: "perim-top", x1: 0, y1: 0, x2: 580, y2: 0, thickness: 6, color: "#334155", material: "concrete", managedKind: "perimeter", perimeterSide: "top" },
+      { id: "perim-top", x1: 0, y1: 0, x2: 580, y2: 0, thickness: 6, color: "#64748b", material: "concrete", managedKind: "perimeter", perimeterSide: "top" },
     ];
     const { container } = render(<Harness initialCampus={campus} onCampusChange={(c) => { latestCampus = c; }} />);
     const svg = stubSvgRect(container, 580, 380);

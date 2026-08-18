@@ -252,7 +252,7 @@ describe("floorGeometry", () => {
       label: "Ground Floor",
       canvasW: 220,
       canvasH: 160,
-      walls: [{ id: "perim-top", x1: 0, y1: 0, x2: 220, y2: 0, thickness: 6, color: "#334155", locked: true, managedKind: "perimeter", perimeterSide: "top" }],
+      walls: [{ id: "perim-top", x1: 0, y1: 0, x2: 220, y2: 0, thickness: 6, color: "#64748b", locked: true, managedKind: "perimeter", perimeterSide: "top" }],
       doors: [{ id: "door-a", x: 110, y: 0, width: 36, doorType: "double", wallId: "perim-top", offset: 0.5, direction: "double", swingSide: "a", color: "#d97706" }],
     });
 

@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   computeLiveValidationIssues,
   validationIssuesForFloor,
+  validationIssuesForBuilding,
   mergeFloorIssueLists,
   validationIssueToFloorIssue,
 } from "../liveValidation";
@@ -190,6 +191,101 @@ describe("validationIssuesForFloor (B7 Phase 1 floor filtering)", () => {
     expect(validationIssuesForFloor(renamed, "f1").some((i) => i.type === "duplicate_room_name")).toBe(false);
     expect(computeLiveValidationIssues(renamed).some((i) => i.type === "duplicate_room_name")).toBe(false);
   });
+
+describe("validationIssuesForBuilding (Issue 1 — building surfaces its floor issues)", () => {
+  it("aggregates the building's own issue AND descendant floor issues", () => {
+    const c = campus({
+      buildings: [building({
+        id: "b1",
+        name: "", // building-level missing_name warning
+        floors: [
+          floor({
+            id: "f1", number: 1, label: "Ground Floor",
+            rooms: [room({ id: "r1", name: "Lab A" }), room({ id: "r2", name: "lab a" })], // duplicate_room_name
+          }),
+          floor({ id: "f2", number: 2, label: "Floor 2" }),
+        ],
+      })],
+    });
+    const issues = validationIssuesForBuilding(computeLiveValidationIssues(c), "b1");
+    // Building-level issue present.
+    expect(issues.some((i) => i.type === "missing_name" && i.buildingId === "b1")).toBe(true);
+    // Descendant floor issue present (floor-scoped, buildingId = b1).
+    expect(issues.some((i) => i.type === "duplicate_room_name")).toBe(true);
+    const floorIssue = issues.find((i) => i.type === "duplicate_room_name")!;
+    expect(floorIssue.floorId).toBe("f1");
+  });
+
+  it("issue retains floor identity and severity", () => {
+    const c = campus({
+      buildings: [building({
+        floors: [floor({
+          id: "f1", number: 1, label: "Ground Floor",
+          rooms: [room({ id: "r1", name: "Room X" }), room({ id: "r2", name: "Room X" })],
+        })],
+      })],
+    });
+    const issues = validationIssuesForBuilding(computeLiveValidationIssues(c), "b1");
+    const dup = issues.find((i) => i.type === "duplicate_room_name");
+    expect(dup).toBeDefined();
+    expect(dup!.severity).toBe("warning");
+    expect(dup!.floorId).toBe("f1");
+    const target = dup!.target ?? { scope: "floor" as const };
+    expect(target.scope).toBe("floor");
+    expect(target.buildingId).toBe("b1");
+    expect(target.floorId).toBe("f1");
+  });
+
+  it("excludes issues from OTHER buildings' floors", () => {
+    const c = campus({
+      buildings: [
+        building({
+          id: "b1",
+          floors: [floor({ id: "f1", number: 1, label: "Floor 1", rooms: [room({ id: "r1", name: "Dup" }), room({ id: "r2", name: "dup" })] })],
+        }),
+        building({
+          id: "b2",
+          x: 300,
+          floors: [floor({ id: "f2", number: 1, label: "Floor 1", rooms: [room({ id: "r3", name: "Unique", floorId: "f2" })] })],
+        }),
+      ],
+    });
+    const b1Issues = validationIssuesForBuilding(computeLiveValidationIssues(c), "b1");
+    expect(b1Issues.some((i) => i.type === "duplicate_room_name")).toBe(true);
+    // b2's floor issues must NOT leak into b1's list.
+    expect(b1Issues.some((i) => i.buildingId === "b2" || i.floorId === "f2")).toBe(false);
+  });
+
+  it("no duplicate issue when the building-level issue is already represented", () => {
+    const c = campus({
+      buildings: [building({ id: "b1", name: "", floors: [floor({ id: "f1", number: 1, label: "Ground Floor" })] })],
+    });
+    const issues = validationIssuesForBuilding(computeLiveValidationIssues(c), "b1");
+    // missing_name must appear exactly once.
+    expect(issues.filter((i) => i.type === "missing_name").length).toBe(1);
+  });
+
+  it("issue clears automatically when the underlying floor problem is fixed", () => {
+    const withDup = campus({
+      buildings: [building({
+        floors: [floor({
+          id: "f1", number: 1, label: "Ground Floor",
+          rooms: [room({ id: "r1", name: "Lab" }), room({ id: "r2", name: "Lab" })],
+        })],
+      })],
+    });
+    expect(validationIssuesForBuilding(computeLiveValidationIssues(withDup), "b1").some((i) => i.type === "duplicate_room_name")).toBe(true);
+    const fixed = campus({
+      buildings: [building({
+        floors: [floor({
+          id: "f1", number: 1, label: "Ground Floor",
+          rooms: [room({ id: "r1", name: "Lab" }), room({ id: "r2", name: "Office" })],
+        })],
+      })],
+    });
+    expect(validationIssuesForBuilding(computeLiveValidationIssues(fixed), "b1").some((i) => i.type === "duplicate_room_name")).toBe(false);
+  });
+});
 
   it("emergency_exit_no_nav is floor-scoped and locatable to the door", () => {
     const c = campus({

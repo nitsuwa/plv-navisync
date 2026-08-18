@@ -54,7 +54,9 @@ describe("floorPlanNormalization", () => {
     expect(first.canvasH).toBe(450);
     expect(first.gridSize).toBe(20);
     expect(first.rooms).toEqual([]);
-    expect(third.walls).toEqual([]);
+    // B7 QA: new floors include managed structural perimeter walls by default.
+    expect(third.walls.length).toBe(4);
+    expect(third.walls.every((w) => w.managedKind === "perimeter")).toBe(true);
   });
 
   it("normalizes floor grid presets to the supported 10/20/40 values", () => {
@@ -145,7 +147,7 @@ describe("floorPlanNormalization", () => {
       buildingId: "b1",
       number: 1,
       walls: [
-        { id: "managed-perimeter-51f6bdeb-3188-49c7-b286-7901c81e73d5-top", x1: 0, y1: 0, x2: 220, y2: 0, thickness: 6, color: "#334155", managedKind: "perimeter", perimeterSide: "top" },
+        { id: "managed-perimeter-51f6bdeb-3188-49c7-b286-7901c81e73d5-top", x1: 0, y1: 0, x2: 220, y2: 0, thickness: 6, color: "#64748b", managedKind: "perimeter", perimeterSide: "top" },
       ],
       doors: [{ id: "d1", x: 110, y: 0, width: 24, direction: "left", color: "#b45309", wallId: "managed-perimeter-51f6bdeb-3188-49c7-b286-7901c81e73d5-top", offset: 0.5 }],
       windows: [{ id: "w1", x: 120, y: 0, width: 32, height: 6, color: "#0284c7", wallId: "managed-perimeter-51f6bdeb-3188-49c7-b286-7901c81e73d5-top", offset: 0.55 }],

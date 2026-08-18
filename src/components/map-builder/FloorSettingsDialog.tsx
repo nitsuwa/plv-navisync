@@ -59,7 +59,7 @@ function perimeterDraftFromFloor(floor: FloorPlan) {
     perimeterEnabled: perimeterWalls.length > 0,
     perimeterThickness: first?.thickness ?? 6,
     perimeterMaterial: first?.material ?? "concrete",
-    perimeterColor: first?.color ?? "#334155",
+    perimeterColor: first?.color ?? "#64748b",
   };
 }
 
@@ -150,7 +150,8 @@ export function FloorSettingsDialog({
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 z-[150] flex items-center justify-center bg-background/70 backdrop-blur-sm p-4"
+          className="fixed inset-0 z-[200] flex items-center justify-center bg-background/85 backdrop-blur p-4"
+          style={{ isolation: "isolate" }}
           data-testid="floor-settings-dialog"
         >
           <motion.div
@@ -158,7 +159,8 @@ export function FloorSettingsDialog({
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.96, y: 10 }}
             transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
-            className="w-full max-w-lg max-h-[calc(100vh-2rem)] bg-card border border-border rounded-2xl shadow-2xl overflow-hidden flex flex-col"
+            className="w-full max-w-lg bg-card border border-border rounded-2xl shadow-2xl overflow-hidden flex flex-col"
+            style={{ maxHeight: "min(calc(100vh - 2rem), 640px)" }}
             onClick={(e) => e.stopPropagation()}
           >
             {/* Header */}

@@ -165,4 +165,35 @@ describe("Hierarchy floor management UX", () => {
     expect(screen.queryByRole("dialog", { name: "Delete Floor" })).toBeNull();
     expect(screen.getByRole("button", { name: "Floor actions: Ground Floor" })).toBeInTheDocument();
   });
+
+  // ── Issue 4: hierarchy building name truncates instead of colliding with
+  // the floor-count / actions at narrow widths ──
+  it("building name gets truncate so it never pushes into the floor count", () => {
+    const campus = makeCampus();
+    campus.buildings[0].name = "A Very Long Building Name That Cannot Possibly Fit In A Narrow Sidebar";
+    const { container } = render(<Harness initialCampus={campus} />);
+
+    const nameEl = screen.getByText(campus.buildings[0].name);
+    // The name element must ellipsize (truncate) instead of wrapping/overflowing
+    // into the floor-count + action buttons on the right.
+    expect(nameEl.className).toContain("truncate");
+    expect(nameEl.className).toContain("min-w-0");
+    // Floor count remains visible and does not overlap the name (separate node).
+    expect(screen.getByText("3F")).toBeInTheDocument();
+    // The building name span sits in the same row as the floor count.
+    const row = nameEl.closest("[draggable='true']");
+    expect(row).toBeTruthy();
+    const countEl = screen.getByText("3F");
+    expect(row!.contains(countEl)).toBe(true);
+  });
+
+  it("floor rows truncate their labels the same way", () => {
+    const campus = makeCampus();
+    campus.buildings[0].floors[1].label = "Second Floor With An Extremely Long Descriptive Label For QA";
+    render(<Harness initialCampus={campus} />);
+
+    const labelEl = screen.getByText(campus.buildings[0].floors[1].label);
+    expect(labelEl.className).toContain("truncate");
+    expect(labelEl.className).toContain("min-w-0");
+  });
 });

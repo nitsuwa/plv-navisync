@@ -190,7 +190,7 @@ describe("campus structure mapping", () => {
         floors: [{
           ...campus.buildings[0].floors[0],
           rooms: [],
-          walls: [{ id: syntheticId, x1: 0, y1: 0, x2: 220, y2: 0, thickness: 6, color: "#334155", locked: true, managedKind: "perimeter", perimeterSide: "top" }],
+          walls: [{ id: syntheticId, x1: 0, y1: 0, x2: 220, y2: 0, thickness: 6, color: "#64748b", locked: true, managedKind: "perimeter", perimeterSide: "top" }],
           doors: [{ id: "10000000-0000-4000-8000-000000000021", x: 110, y: 0, width: 24, direction: "left", color: "#b45309", wallId: syntheticId, offset: 0.5 }],
           windows: [{ id: "10000000-0000-4000-8000-000000000022", x: 120, y: 0, width: 32, height: 6, color: "#0284c7", wallId: syntheticId, offset: 0.55 }],
         }],
