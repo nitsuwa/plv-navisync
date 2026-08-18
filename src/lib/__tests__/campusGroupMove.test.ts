@@ -3,6 +3,8 @@ import {
   computeGroupTranslation,
   groupBBoxAfterTranslation,
   computeGroupAlignmentGuides,
+  snapRectToVisibleBounds,
+  rectVisibleBounds,
 } from "../campusGroupMove";
 import type { GroupMoveMember } from "../campusGroupMove";
 
@@ -211,5 +213,68 @@ describe("computeGroupAlignmentGuides", () => {
   it("emits no guides when nothing is aligned", () => {
     const guides = computeGroupAlignmentGuides(100, 100, 280, 80, [{ x: 500, y: 400, width: 120, height: 80 }], 6);
     expect(guides).toHaveLength(0);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Issue 2B — rotated alignment uses visible world-space bounds
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe("snapRectToVisibleBounds — rotated building alignment (Issue 2B)", () => {
+  it("uses the rotated AABB, not the raw rect, for a 270-degree building", () => {
+    // Building A rotated 270°: raw 100×60 becomes a 60×100 visible AABB.
+    const aabb = rectVisibleBounds({ x: 0, y: 0, width: 100, height: 60, rotation: 270 });
+    expect(aabb.width).toBeCloseTo(60, 5);
+    expect(aabb.height).toBeCloseTo(100, 5);
+  });
+
+  it("rotated-vs-unrotated edge alignment produces a guide + snap (QA repro)", () => {
+    // Building A (rotated 270°, raw 100×60 → visible 60×100 centered on the
+    // rect center) is dragged so its visible BOTTOM lines up with the BOTTOM
+    // of an unrotated building whose bottom edge sits at y=420.
+    //
+    // A at x=300,y=350: center = (350, 380) → visible AABB [320, 330, 60, 100]
+    // → visible bottom = 430. Within 12 of 420 (|430-420| = 10) and closer than
+    // every other Y target (top 330 vs 300/420/360 = 30/90/30) → snap to 420.
+    const rotated = { x: 300, y: 350, width: 100, height: 60, rotation: 270 };
+    const refs = [{ x: 0, y: 300, width: 240, height: 120, rotation: 0 }]; // bottom = 420
+    const result = snapRectToVisibleBounds(rotated, refs, 12);
+    expect(result.y).toBe(340); // bottom 430 → 420 (dy -10)
+    expect(result.guides.some((g) => g.type === "h" && g.pos === 420)).toBe(true);
+  });
+
+  it("rotated visible right edge aligns to an unrotated building's right edge", () => {
+    // Building A rotated 270° (visible 60×100) — its visible RIGHT edge must
+    // participate in X alignment even though the raw rect is 100 wide.
+    // A at x=300,y=500: center = (350, 530) → visible AABB [320, 480, 60, 100]
+    // → visible right = 380, center X = 350. Ref right edge X = 260.
+    const rotated = { x: 300, y: 500, width: 100, height: 60, rotation: 270 };
+    const refs = [{ x: 0, y: 300, width: 260, height: 120, rotation: 0 }]; // right edge X=260
+    const result = snapRectToVisibleBounds(rotated, refs, 12);
+    // No X snap (|380-260| = 120, |350-260| = 90); Y: |480-420| = 60, |530-360| = 170 → no.
+    expect(result.x).toBe(300);
+    expect(result.y).toBe(500);
+    expect(result.guides.length).toBe(0);
+
+    // Now move A's visible right edge to within 12 of ref right (260).
+    // Visible right = (x + 50) + 30 = x + 80 → x=178 gives 258 (within 12 of 260).
+    const near = { x: 178, y: 500, width: 100, height: 60, rotation: 270 };
+    const result2 = snapRectToVisibleBounds(near, refs, 12);
+    expect(result2.x).toBe(180); // right 258 → 260 (dx +2)
+    expect(result2.guides.some((g) => g.type === "v" && g.pos === 260)).toBe(true);
+  });
+
+  it("group bbox respects member rotations", () => {
+    const members = [
+      { kind: "building" as const, id: "b1", x: 0, y: 0, width: 100, height: 60, rotation: 270 },
+      { kind: "building" as const, id: "b2", x: 200, y: 300, width: 100, height: 100, rotation: 0 },
+    ];
+    const box = groupBBoxAfterTranslation(members, 0, 0);
+    // b1 visible AABB = [20, -20, 60, 100]; b2 = [200, 300, 100, 100]
+    // → union x=20, y=-20, width=300-20=280, height=400-(-20)=420.
+    expect(box.x).toBeCloseTo(20, 5);
+    expect(box.y).toBeCloseTo(-20, 5);
+    expect(box.width).toBeCloseTo(280, 5);
+    expect(box.height).toBeCloseTo(420, 5);
   });
 });

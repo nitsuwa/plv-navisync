@@ -221,7 +221,27 @@ export function normalizeFloor(input: Partial<FloorPlan> | null | undefined, def
 }
 
 export function createDefaultFloor(defaults: FloorDefaults = {}): FloorPlan {
-  return normalizeFloor({}, { canvasW: DEFAULT_FLOOR_CANVAS.w, canvasH: DEFAULT_FLOOR_CANVAS.h, ...defaults });
+  const canvas = normalizeFloorCanvasSize(defaults.canvasW ?? DEFAULT_FLOOR_CANVAS.w, defaults.canvasH ?? DEFAULT_FLOOR_CANVAS.h);
+  // B7 QA: new floors include managed structural perimeter walls by default.
+  const id = defaults.id ?? crypto.randomUUID();
+  const perimeterSides = ["top", "right", "bottom", "left"] as const;
+  const perimeterWalls: FloorWall[] = perimeterSides.map((side, index) => ({
+    id: `managed-perimeter-${id}-${side}`,
+    x1: side === "top" ? 0 : side === "right" ? canvas.w : side === "bottom" ? canvas.w : 0,
+    y1: side === "top" ? 0 : side === "right" ? 0 : side === "bottom" ? canvas.h : canvas.h,
+    x2: side === "top" ? canvas.w : side === "right" ? canvas.w : side === "bottom" ? 0 : 0,
+    y2: side === "top" ? 0 : side === "right" ? canvas.h : side === "bottom" ? canvas.h : 0,
+    thickness: 6,
+    color: "#64748b",
+    material: "concrete",
+    managedKind: "perimeter" as const,
+    perimeterSide: side,
+    layer: "structure",
+    visible: true,
+    locked: true,
+    zOrder: -100 + index,
+  }));
+  return normalizeFloor({ walls: perimeterWalls }, { canvasW: canvas.w, canvasH: canvas.h, ...defaults });
 }
 
 export interface FloorDuplicateIdMaps {

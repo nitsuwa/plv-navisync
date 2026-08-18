@@ -34,12 +34,12 @@ import type {
 import { BUILDING_TYPE_MAP, DECOR_ASSET_MAP } from "./constants";
 import { ToolbarTooltip } from "./ToolbarTooltip";
 import { validateCampusData, computeBuildingOverlaps } from "../../lib/campusValidation";
-import { computeLiveValidationIssues, validationIssuesForCampusSelection } from "../../lib/liveValidation";
+import { computeLiveValidationIssues, validationIssuesForCampusSelection, validationIssuesForBuilding } from "../../lib/liveValidation";
 import { validationIssuesToItems } from "./ObjectIssueSection";
-import { resolveIssueTarget, floorSelectionForTarget, resolveIssueLocateTarget, polylineMidpoint } from "../../lib/issueLocate";
+import { resolveIssueTarget, issueKey, floorSelectionForTarget, resolveIssueLocateTarget, polylineMidpoint } from "../../lib/issueLocate";
 import type { IssueTarget } from "./ValidationErrorsDialog";
 import { computeBuildingPlacement, resetTransientToolState, pointInBuilding, polylineCrossesObstacle, polylineCrossesPlacedObject } from "../../lib/editorPlacement";
-import { computeGroupTranslation, groupBBoxAfterTranslation, computeGroupAlignmentGuides } from "../../lib/campusGroupMove";
+import { computeGroupTranslation, groupBBoxAfterTranslation, computeGroupAlignmentGuides, snapRectToVisibleBounds } from "../../lib/campusGroupMove";
 import {
   createNavNode, createNavEdge, findDuplicateNavEdge, isSelfEdge, removeNavNode, findNavNodeAtPoint,
   findEntranceNavNode, navGraphSelectionIdsInRect, syncEntranceNodePositions, pruneOrphanedEntranceNodes,
@@ -609,25 +609,19 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
   const SNAP_DIST = 12;
   const snap = useCallback((v: number) => (snapGrid ? Math.round(v / 20) * 20 : Math.round(v)), [snapGrid]);
 
-  /** Edge-snap a building position to nearby buildings */
+  /** Edge-snap a building position to nearby buildings (visible AABB aware). */
   const edgeSnapBuilding = useCallback(
     (b: CampusBuilding, all: CampusBuilding[]): CampusBuilding => {
       if (!edgeSnap) return b;
-      let rx = b.x, ry = b.y;
-      const snapVal = (val: number, target: number) =>
-        Math.abs(val - target) <= SNAP_DIST ? target : val;
-      for (const o of all) {
-        if (o.id === b.id) continue;
-        rx = snapVal(rx, o.x);
-        rx = snapVal(rx, o.x + o.width);
-        rx = snapVal(rx + b.width, o.x) - b.width;
-        rx = snapVal(rx + b.width, o.x + o.width) - b.width;
-        ry = snapVal(ry, o.y);
-        ry = snapVal(ry, o.y + o.height);
-        ry = snapVal(ry + b.height, o.y) - b.height;
-        ry = snapVal(ry + b.height, o.y + o.height) - b.height;
-      }
-      return { ...b, x: rx, y: ry };
+      const refs = all
+        .filter((o) => o.id !== b.id)
+        .map((o) => ({ x: o.x, y: o.y, width: o.width, height: o.height, rotation: o.rotation ?? 0 }));
+      const snapped = snapRectToVisibleBounds(
+        { x: b.x, y: b.y, width: b.width, height: b.height, rotation: b.rotation ?? 0 },
+        refs,
+        SNAP_DIST,
+      );
+      return { ...b, x: snapped.x, y: snapped.y };
     },
     [edgeSnap]
   );
@@ -1153,7 +1147,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     const members: GroupMoveMember[] = [];
     for (const b of buildings) {
       if (b.locked) continue;
-      if (sel.includes(b.id)) members.push({ kind: "building", id: b.id, x: b.x, y: b.y, width: b.width, height: b.height });
+      if (sel.includes(b.id)) members.push({ kind: "building", id: b.id, x: b.x, y: b.y, width: b.width, height: b.height, rotation: b.rotation ?? 0 });
     }
     for (const da of decorAssets) {
       if (!sel.includes(da.id)) continue;
@@ -1959,7 +1953,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
       const groupIds = new Set(group.map((m) => m.id));
       const otherBuildings = buildings
         .filter((b) => !groupIds.has(b.id))
-        .map((b) => ({ x: b.x, y: b.y, width: b.width, height: b.height }));
+        .map((b) => ({ x: b.x, y: b.y, width: b.width, height: b.height, rotation: b.rotation ?? 0 }));
       const { dx, dy } = computeGroupTranslation({
         members: group,
         draggedId: drag.id,
@@ -2266,7 +2260,18 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
       const rawY = drag.oy + (pt.y - drag.sy);
       const targetX = snap(rawX);
       const targetY = snap(rawY);
-      const targetB = edgeSnapBuilding({ ...b, x: targetX, y: targetY }, buildings);
+      // Snap + guides from the SAME visible-bounds result (rotation-aware):
+      // a single alignment pass drives both the snapped position and the
+      // guide lines, so the guide always matches the committed position.
+      const refsForSnap = buildings
+        .filter((o) => o.id !== drag.id)
+        .map((o) => ({ x: o.x, y: o.y, width: o.width, height: o.height, rotation: o.rotation ?? 0 }));
+      const snapResult = snapRectToVisibleBounds(
+        { x: targetX, y: targetY, width: b.width, height: b.height, rotation: b.rotation ?? 0 },
+        refsForSnap,
+        SNAP_DIST,
+      );
+      const targetB = edgeSnapBuilding({ ...b, x: snapResult.x, y: snapResult.y }, buildings);
       gestureChangedRef.current = true;
       const nextBuildings = buildings.map((bld) => (bld.id === drag.id ? { ...bld, x: targetB.x, y: targetB.y } : bld));
       onUpdate({
@@ -2274,17 +2279,8 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
         buildings: nextBuildings,
         navNodes: syncEntranceNodePositions(nextBuildings, navNodes),
       });
-      // Alignment guides
-      const guidesList: { type: "h" | "v"; pos: number }[] = [];
-      for (const o of buildings) {
-        if (o.id === drag.id) continue;
-        if (Math.abs(targetB.x - o.x) < 6) guidesList.push({ type: "v", pos: o.x });
-        if (Math.abs(targetB.x + targetB.width - o.x - o.width) < 6) guidesList.push({ type: "v", pos: o.x + o.width });
-        if (Math.abs(targetB.y - o.y) < 6) guidesList.push({ type: "h", pos: o.y });
-        if (Math.abs(targetB.y + targetB.height - o.y - o.height) < 6) guidesList.push({ type: "h", pos: o.y + o.height });
-        if (Math.abs(targetB.x + targetB.width / 2 - o.x - o.width / 2) < 6) guidesList.push({ type: "v", pos: o.x + o.width / 2 });
-        if (Math.abs(targetB.y + targetB.height / 2 - o.y - o.height / 2) < 6) guidesList.push({ type: "h", pos: o.y + o.height / 2 });
-      }
+      // Alignment guides — same visible-bounds result that drove the snap.
+      const guidesList: { type: "h" | "v"; pos: number }[] = snapResult.guides;
       // Check overlaps during drag
       const movedBldgs = buildings.map((bld) => (bld.id === drag.id ? targetB : bld));
       const overlaps = computeOverlaps(movedBldgs);
@@ -4846,13 +4842,39 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
   // ── B7 Phase 2: contextual issue guidance for the SELECTED object ──
   // Same canonical live list as the global Issues control + on-canvas markers:
   // selecting an object that has a marker explains exactly what is wrong.
+  // For a BUILDING the list aggregates the building's own issues PLUS every
+  // descendant floor issue, each prefixed with its floor label so the admin
+  // knows which floor needs attention without opening it.
   const selectedIssueItems = useMemo(() => {
     if (!effectiveSelected) return [];
     const type = effectiveSelected.type;
     if (type !== "building" && type !== "entrance" && type !== "navNode" && type !== "navEdge") return [];
-    const issues = validationIssuesForCampusSelection(validationIssues, type, effectiveSelected.id);
-    return validationIssuesToItems(issues);
-  }, [effectiveSelected, validationIssues]);
+    let issues: ValidationIssue[];
+    if (type === "building") {
+      issues = validationIssuesForBuilding(validationIssues, effectiveSelected.id);
+    } else {
+      issues = validationIssuesForCampusSelection(validationIssues, type, effectiveSelected.id);
+    }
+    const building = type === "building" ? buildings.find((b) => b.id === effectiveSelected.id) : undefined;
+    const items = validationIssuesToItems(issues);
+    // Prefix floor-scoped rows with the floor label ("Floor 2 — …") so the
+    // building panel identifies WHICH floor the issue belongs to.
+    if (building) {
+      for (const item of items) {
+        const issue = issues.find((x) => issueKey(x) === item.key);
+        if (!issue) continue;
+        const target = resolveIssueTarget(issue);
+        if (target?.scope === "floor" && target.floorId) {
+          const floor = building.floors.find((f) => f.id === target.floorId);
+          if (floor) {
+            const prefix = floor.label || `Floor ${floor.number}`;
+            item.message = `${prefix} — ${item.message}`;
+          }
+        }
+      }
+    }
+    return items;
+  }, [effectiveSelected, validationIssues, buildings]);
   const connectEntranceToIndoorDoor = useCallback((buildingId: string, entranceId: string, doorNodeId: string) => {
     const existing = findEntranceTransitionForDoor(campus.navNodes ?? [], campus.navEdges ?? [], doorNodeId);
     const existingDoor = existing ? doorNodeForEdge(existing, campus.navNodes ?? []) : undefined;

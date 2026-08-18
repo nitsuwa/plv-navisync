@@ -85,6 +85,33 @@ export function validationIssuesForCampusSelection(
 }
 
 /**
+ * The canonical issues that belong to ONE building when it is selected in the
+ * Outdoor Campus Editor: the building's OWN issues PLUS every descendant floor
+ * issue (any issue whose resolved target is floor-scoped inside that building).
+ *
+ * This lets the building Properties panel explain floor problems without the
+ * admin having to open each floor. It is derived from the SAME canonical list
+ * as the global Issues control, so an issue appears/clears automatically as the
+ * underlying floor problem is created/fixed, and the same logical issue never
+ * appears twice (dedupe happens upstream via `dedupeValidationIssues`).
+ */
+export function validationIssuesForBuilding(
+  issues: ValidationIssue[],
+  buildingId: string,
+): ValidationIssue[] {
+  return issues.filter((issue) => {
+    const target = resolveIssueTarget(issue);
+    if (!target) return false;
+    // The building's own campus-scoped issues.
+    if (target.scope === "campus" && target.selectionType === "building" && target.id === buildingId) return true;
+    // Descendant floor issues (target may be a room/door/stairs/nav node… on
+    // any floor of this building).
+    if (target.scope === "floor" && target.buildingId === buildingId) return true;
+    return false;
+  });
+}
+
+/**
  * The floor issues (canonical + floor-local live checks) that target ONE floor
  * object selection. Used by the Floor Editor's Properties panels so the
  * selected object's contextual guidance matches the Issues panel + markers.

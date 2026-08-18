@@ -1646,6 +1646,12 @@ export function Canvas({
                   )}
                   <text x={cx} y={b.y + b.height / 2 - 8} textAnchor="middle" fill="white" fontSize={11} fontWeight="800" className="pointer-events-none select-none">{b.code}</text>
                   {b.floors.length > 0 && <text x={cx} y={b.y + b.height / 2 + 4} textAnchor="middle" fill="rgba(255,255,255,0.7)" fontSize={7} className="pointer-events-none select-none">{b.floors.length}F</text>}
+                  {/* Building name — INSIDE rotation group so it rotates with building code */}
+                  {zoom > 0.7 && b.name !== "New Building" && (
+                    <text x={cx} y={b.y + b.height / 2 + 14} textAnchor="middle" fill="rgba(255,255,255,0.55)" fontSize={5.5} fontWeight="600" className="pointer-events-none select-none" stroke="rgba(0,0,0,0.15)" strokeWidth={1.5} paintOrder="stroke">
+                      {b.name.length > 16 ? b.name.slice(0, 14) + "…" : b.name}
+                    </text>
+                  )}
                   {isLocked && (
                     <g>
                       <rect x={b.x + b.width - 16} y={b.y + 4} width={12} height={10} rx={2} fill="rgba(255,255,255,0.85)" />
@@ -1714,28 +1720,20 @@ export function Canvas({
                       decor assets). */}
                   {isOverlapping && (
                     <g className="pointer-events-none select-none">
-                      <rect x={b.x + b.width - 18} y={b.y - 14} width={32} height={16} rx={4} fill="#dc2626" opacity={0.95} />
-                      <text x={b.x + b.width - 2} y={b.y - 3} textAnchor="middle" fill="white" fontSize={7} fontWeight="900">OVERLAP</text>
+                      {/* OVERLAP badge — top-right INSIDE the building, rotates with it */}
+                      <rect x={b.x + b.width - 34} y={b.y + 3} width={31} height={13} rx={3} fill="#dc2626" opacity={0.92} />
+                      <text x={b.x + b.width - 18.5} y={b.y + 12} textAnchor="middle" fill="white" fontSize={7} fontWeight="900">OVERLAP</text>
                     </g>
                   )}
                   {isInvalid && !isOverlapping && (
                     <g className="pointer-events-none select-none">
-                      <rect x={b.x + b.width - 16} y={b.y - 14} width={30} height={16} rx={4} fill="#dc2626" opacity={0.95} />
-                      <text x={b.x + b.width - 1} y={b.y - 3} textAnchor="middle" fill="white" fontSize={8} fontWeight="900">⚠</text>
+                      {/* Warning badge — top-right INSIDE the building, rotates with it */}
+                      <rect x={b.x + b.width - 18} y={b.y + 3} width={15} height={13} rx={3} fill="#dc2626" opacity={0.92} />
+                      <text x={b.x + b.width - 10.5} y={b.y + 12} textAnchor="middle" fill="white" fontSize={8} fontWeight="900">⚠</text>
                     </g>
                   )}
                 </g>
-                {/* Building name — OUTSIDE rotation group so text stays horizontal & readable */}
-                {zoom > 0.7 && b.name !== "New Building" && (() => {
-                  const rotAABB = getRotatedAABB(b.x, b.y, b.width, b.height, rot);
-                  const rotCx = rotAABB.x + rotAABB.width / 2;
-                  const rotCy = rotAABB.y + rotAABB.height / 2;
-                  return (
-                    <text x={rotCx} y={rotCy + 16} textAnchor="middle" fill="rgba(255,255,255,0.75)" fontSize={6} fontWeight="600" className="pointer-events-none select-none" stroke="rgba(0,0,0,0.2)" strokeWidth={2} paintOrder="stroke">
-                      {b.name.length > 16 ? b.name.slice(0, 14) + "…" : b.name}
-                    </text>
-                  );
-                })()}
+
                 {/* ══ Degree indicators — OUTSIDE rotation group so text stays axis-aligned & readable ══ */}
                 {/* Static degree badge (non-rotating) */}
                 {isSel && !isLocked && rotatingId !== b.id && rot !== 0 && (() => {

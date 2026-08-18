@@ -563,7 +563,7 @@ export function HierarchyPanel({
                 <ChevronRight className="h-3 w-3 text-muted-foreground shrink-0" />
               )}
               <Building2 className="h-3 w-3 shrink-0" style={{ color: b.color }} />
-              <span className="text-xs font-semibold text-foreground ml-0.5 flex-1 min-w-0" title={b.name}>{b.name}</span>
+              <span className="text-xs font-semibold text-foreground ml-0.5 flex-1 min-w-0 truncate" title={b.name}>{b.name}</span>
               {b.locked && <Lock className="h-2.5 w-2.5 text-amber-500 shrink-0" />}
               {!(b.visible ?? true) && <EyeOff className="h-2.5 w-2.5 text-muted-foreground/50 shrink-0" />}
               <span className="text-[9px] text-muted-foreground shrink-0 mr-1">{b.floors.length}F</span>
@@ -624,10 +624,10 @@ export function HierarchyPanel({
                         className="flex-1 flex items-center gap-2 px-1 py-1 hover:bg-muted/50 transition-colors text-left min-w-0"
                       >
                         <Layers className="h-3 w-3 text-muted-foreground shrink-0" />
-                        <span className="text-xs text-muted-foreground group-hover:text-foreground transition-colors truncate flex-1" title={f.label}>
+                        <span className="text-xs text-muted-foreground group-hover:text-foreground transition-colors truncate flex-1 min-w-0" title={f.label}>
                           {f.label}
                         </span>
-                        <span className="text-[9px] text-muted-foreground">
+                        <span className="text-[9px] text-muted-foreground shrink-0 ml-1">
                           {f.rooms.length}R
                         </span>
                       </button>
@@ -651,7 +651,7 @@ export function HierarchyPanel({
                             title={`${room.name} (${room.type})`}
                           >
                             <div className="w-2 h-2 rounded-sm shrink-0" style={{ background: room.type === "classroom" ? "#3b82f6" : room.type === "lab" ? "#8b5cf6" : room.type === "office" ? "#f59e0b" : "#6b7280" }} />
-                            <span className="text-[10px] text-muted-foreground truncate flex-1">
+                            <span className="text-[10px] text-muted-foreground truncate flex-1 min-w-0">
                               {room.name}
                             </span>
                           </div>
