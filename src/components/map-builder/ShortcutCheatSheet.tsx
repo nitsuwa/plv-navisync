@@ -1,8 +1,8 @@
-import { useEffect, useCallback } from "react";
+import { useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import {
-  Keyboard, X, MousePointer2, Square, MapPin, GitBranch, Trash2,
-  Layers, RotateCcw, Grid3X3, Undo2, Redo2, Save,
+  Keyboard, X, MousePointer2, Square, GitBranch,
+  Layers, Grid3X3,
   ArrowUp, Pointer,
 } from "lucide-react";
 import { cn } from "../../lib/utils";
@@ -24,32 +24,30 @@ const GROUPS: ShortcutGroup[] = [
     label: "Tools",
     icon: MousePointer2,
     shortcuts: [
-      { keys: "V", desc: "Select tool" },
-      { keys: "B", desc: "Building tool (Campus layer)" },
-      { keys: "M", desc: "Add Waypoint (Navigation) / Add Event (Events)" },
-      { keys: "P", desc: "Connect Path (Navigation)" },
-      { keys: "E", desc: "Erase / Remove tool" },
-      { keys: "R", desc: "Room / elevator marker tool" },
+      { keys: "V", desc: "Select and edit items" },
+      { keys: "Space", desc: "Hold to pan the canvas" },
+      { keys: "B / A", desc: "Building in Campus; restriction area in Events" },
+      { keys: "P", desc: "Pathway in Campus; Connect in Navigation" },
+      { keys: "M", desc: "Walking Point in Navigation; event marker in Events" },
+      { keys: "E / X", desc: "Remove tool" },
     ],
   },
   {
-    label: "Layers",
+    label: "Workspace",
     icon: Layers,
     shortcuts: [
-      { keys: "1", desc: "Campus layer" },
-      { keys: "2", desc: "Navigation layer" },
-      { keys: "3", desc: "Events layer" },
-      { keys: "0", desc: "Reset view" },
+      { keys: "1", desc: "Campus workspace" },
+      { keys: "2", desc: "Show Navigation focus and the walking network" },
+      { keys: "3", desc: "Events workspace" },
     ],
   },
   {
-    label: "Navigation",
-    icon: ArrowUp,
+    label: "View",
+    icon: Grid3X3,
     shortcuts: [
       { keys: "Ctrl + Scroll", desc: "Zoom in / out (toward cursor)" },
       { keys: "0", desc: "Reset view" },
-      { keys: "Arrows", desc: "Nudge selected building / marker 1px" },
-      { keys: "Shift + Arrows", desc: "Nudge selected building / marker 10px" },
+      { keys: "Ctrl + G", desc: "Toggle Grid Snap" },
     ],
   },
   {
@@ -58,9 +56,9 @@ const GROUPS: ShortcutGroup[] = [
     shortcuts: [
       { keys: "Click", desc: "Select single item" },
       { keys: "Shift + Click", desc: "Add / remove from selection" },
-      { keys: "Ctrl + A", desc: "Select all buildings" },
       { keys: "Drag", desc: "Rubber-band select (on empty space)" },
-      { keys: "Escape", desc: "Deselect / cancel path" },
+      { keys: "Ctrl + A", desc: "Select all buildings" },
+      { keys: "Escape", desc: "Cancel the active tool or Connect action" },
     ],
   },
   {
@@ -70,11 +68,20 @@ const GROUPS: ShortcutGroup[] = [
       { keys: "Delete / Bksp", desc: "Delete selected" },
       { keys: "Ctrl + C", desc: "Copy selected" },
       { keys: "Ctrl + V", desc: "Paste copied with new IDs" },
+      { keys: "Ctrl + D", desc: "Duplicate selected" },
       { keys: "Ctrl + Z", desc: "Undo" },
-      { keys: "Ctrl + Y", desc: "Redo" },
+      { keys: "Ctrl + Y / Ctrl + Shift + Z", desc: "Redo" },
       { keys: "Ctrl + S", desc: "Save draft" },
-      { keys: "Ctrl + G", desc: "Toggle snap to grid" },
-      { keys: "Ctrl + D", desc: "Duplicate selected building" },
+      { keys: "Arrows", desc: "Nudge selected item 1px" },
+      { keys: "Shift + Arrows", desc: "Nudge selected item 10px" },
+    ],
+  },
+  {
+    label: "Path / Navigation Authoring",
+    icon: GitBranch,
+    shortcuts: [
+      { keys: "Escape", desc: "Cancel Pathway or Connect authoring" },
+      { keys: "Delete", desc: "Remove the last Connect bend while authoring" },
     ],
   },
 ];
@@ -84,23 +91,31 @@ const FLOOR_GROUPS: ShortcutGroup[] = [
     label: "Tools",
     icon: MousePointer2,
     shortcuts: [
-      { keys: "V", desc: "Select tool" },
-      { keys: "Space", desc: "Hold for pan" },
+      { keys: "V", desc: "Select and edit floor items" },
+      { keys: "Space", desc: "Hold to pan the floor canvas" },
       { keys: "W", desc: "Wall tool" },
-      { keys: "Shift + Click", desc: "Finish wall and keep drawing" },
       { keys: "R", desc: "Room tool" },
       { keys: "D", desc: "Door tool" },
       { keys: "I", desc: "Window tool" },
+      { keys: "S", desc: "Stairs tool" },
+      { keys: "L", desc: "Elevator tool" },
+      { keys: "A", desc: "Ramp tool" },
       { keys: "F", desc: "Furniture tool" },
+      { keys: "T", desc: "Label tool" },
+      { keys: "P", desc: "Floor path tool" },
+      { keys: "E", desc: "Remove tool (or navigation Remove when the overlay is on)" },
+      { keys: "N", desc: "Walking Point when Navigation is on" },
+      { keys: "C", desc: "Connect when Navigation is on" },
     ],
   },
   {
-    label: "Navigation",
+    label: "View & Navigation",
     icon: ArrowUp,
     shortcuts: [
       { keys: "Ctrl + Scroll", desc: "Zoom in / out toward cursor" },
       { keys: "0", desc: "Fit floor / reset view" },
       { keys: "Middle Drag", desc: "Pan canvas" },
+      { keys: "H", desc: "Pan tool when Navigation is on" },
     ],
   },
   {
@@ -111,7 +126,7 @@ const FLOOR_GROUPS: ShortcutGroup[] = [
       { keys: "Shift + Click", desc: "Add / remove from selection" },
       { keys: "Ctrl + A", desc: "Select all floor objects" },
       { keys: "Drag", desc: "Marquee select on empty floor" },
-      { keys: "Escape", desc: "Deselect / cancel drawing" },
+      { keys: "Escape", desc: "Cancel drawing or unfinished navigation authoring" },
     ],
   },
   {
@@ -125,6 +140,8 @@ const FLOOR_GROUPS: ShortcutGroup[] = [
       { keys: "Ctrl + Y", desc: "Redo" },
       { keys: "Ctrl + D", desc: "Duplicate selected floor object(s)" },
       { keys: "Ctrl + S", desc: "Save floor" },
+      { keys: "Arrows", desc: "Nudge selected item 1px" },
+      { keys: "Shift + Arrows", desc: "Nudge selected item 10px" },
     ],
   },
 ];
@@ -158,18 +175,20 @@ export function ShortcutCheatSheet({ open, onClose, variant = "campus" }: Shortc
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.93, y: -8 }}
             transition={{ type: "spring", stiffness: 350, damping: 25 }}
-            className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden"
+            className="flex max-h-[calc(100vh-2rem)] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-2xl"
             onClick={(e) => e.stopPropagation()}
-            style={{ maxHeight: "85vh" }}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="shortcut-cheat-sheet-title"
           >
             {/* Header */}
-            <div className="flex items-center justify-between px-6 py-4 border-b border-border shrink-0">
+            <div className="sticky top-0 z-10 flex shrink-0 items-center justify-between border-b border-border bg-card/95 px-6 py-4 backdrop-blur">
               <div className="flex items-center gap-2.5">
                 <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center">
                   <Keyboard className="h-5 w-5 text-primary" />
                 </div>
                 <div>
-                  <h2 className="font-extrabold text-foreground text-base" style={{ fontFamily: "var(--font-sans)" }}>
+                  <h2 id="shortcut-cheat-sheet-title" className="font-extrabold text-foreground text-base" style={{ fontFamily: "var(--font-sans)" }}>
                     {title}
                   </h2>
                   <p className="text-xs text-muted-foreground" style={{ fontFamily: "var(--font-body)" }}>
@@ -177,13 +196,13 @@ export function ShortcutCheatSheet({ open, onClose, variant = "campus" }: Shortc
                   </p>
                 </div>
               </div>
-              <button onClick={onClose} className="w-8 h-8 rounded-xl bg-muted flex items-center justify-center hover:bg-secondary transition-colors text-muted-foreground">
+              <button onClick={onClose} aria-label="Close Keyboard Shortcuts" className="w-8 h-8 rounded-xl bg-muted flex items-center justify-center hover:bg-secondary transition-colors text-muted-foreground">
                 <X className="h-4 w-4" />
               </button>
             </div>
 
             {/* Content */}
-            <div className="flex-1 overflow-y-auto scrollbar-show-on-hover p-6 space-y-5">
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain scrollbar-show-on-hover p-6 space-y-5">
               {groups.map((group) => (
                 <div key={group.label}>
                   <div className="flex items-center gap-2 mb-2">
@@ -194,10 +213,10 @@ export function ShortcutCheatSheet({ open, onClose, variant = "campus" }: Shortc
                   </div>
                   <div className="space-y-1">
                     {group.shortcuts.map((s) => (
-                      <div key={s.keys} className="flex items-center justify-between px-3 py-1.5 rounded-lg hover:bg-muted/50 transition-colors">
-                        <span className="text-xs text-foreground">{s.desc}</span>
+                      <div key={s.keys} className="flex items-center justify-between gap-3 px-3 py-1.5 rounded-lg hover:bg-muted/50 transition-colors">
+                        <span className="min-w-0 pr-2 text-xs text-foreground">{s.desc}</span>
                         <kbd className={cn(
-                          "inline-flex items-center justify-center h-6 px-2 rounded-md border text-[10px] font-bold font-mono",
+                          "inline-flex shrink-0 items-center justify-center h-6 px-2 rounded-md border text-[10px] font-bold font-mono",
                           "bg-muted/50 border-border text-muted-foreground",
                           s.keys.includes("+") || s.keys.length > 3 ? "min-w-[60px]" : "min-w-[28px]"
                         )}>

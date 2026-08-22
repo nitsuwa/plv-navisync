@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect, useMemo } from "react";
+import { Fragment, useState, useRef, useCallback, useEffect, useMemo, type ElementType } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import {
   ArrowLeft, Globe, Map as MapIcon, CheckCircle2, Undo2, Redo2, X,
@@ -6,7 +6,7 @@ import {
   AlignVerticalJustifyCenter, AlignHorizontalDistributeCenter, AlignVerticalDistributeCenter,
   Grid3X3, Magnet, ZoomIn, ZoomOut, Maximize2, Settings2,
   MousePointer2, Square, MapPin, GitBranch, Trash2, Hand, Keyboard, AlertTriangle,
-  Loader2, HelpCircle, ChevronLeft, Navigation, Eye, EyeOff,
+  Loader2, HelpCircle, ChevronLeft, Eye, EyeOff, Route, Waypoints, Star,
 } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { useCanvasControls, isSpacePressed } from "./useCanvasControls";
@@ -15,7 +15,7 @@ import { HierarchyPanel } from "./HierarchyPanel";
 import { PropertiesPanel } from "./PropertiesPanel";
 import { RoutesPanel } from "./RoutesPanel";
 import { SaveScreen } from "./SaveScreen";
-import { LAYERS, LAYER_TOOLS, BUILDING_COLORS } from "./constants";
+import { LAYER_TOOLS, BUILDING_COLORS } from "./constants";
 import { genId } from "./constants";
 import { useToast } from "../../hooks/useToast";
 import type { ValidationIssue } from "./ValidationErrorsDialog";
@@ -64,15 +64,44 @@ import {
   reconcileEntranceTransitions,
   removeEntranceIndoorConnection,
 } from "../../lib/entranceTransitions";
+import { convertPathwaysToNavigation, pathwayHasLegacyNavigationChain, reconcilePathwayNavigation } from "../../lib/campusPathNavigation";
+import {
+  isPathwayGeneratedEdge,
+  isPathwayGeneratedNode,
+  movePathMemberPreservingJunctions,
+  pathNetworkNavigationStatus,
+  pathNetworkSelectionIds,
+} from "../../lib/campusPathNetwork";
 
 // ── Per-layer marker configuration ──
 const LAYER_MARKER_CONFIG: Record<string, { name: string; type: string; color: string }> = {
   campus: { name: "Point of Interest", type: "poi", color: "#0e2a6e" },
-  navigation: { name: "Waypoint", type: "waypoint", color: "#16a34a" },
+  navigation: { name: "Walking Point", type: "waypoint", color: "#16a34a" },
   accessibility: { name: "Ramp", type: "ramp", color: "#2563eb" },
   emergency: { name: "Emergency Exit", type: "exit", color: "#dc2626" },
   events: { name: "Event Marker", type: "event", color: "#d97706" },
 };
+
+type UnifiedCampusTool = {
+  key: string;
+  id: SimpleTool;
+  icon: ElementType;
+  label: string;
+  shortcut: string;
+  hint: string;
+  domain: "shared" | "physical" | "navigation" | "context";
+  dividerBefore?: boolean;
+};
+
+const UNIFIED_CAMPUS_TOOLS: UnifiedCampusTool[] = [
+  { key: "select", id: "select", icon: MousePointer2, label: "Select", shortcut: "V", hint: "Select, move, resize, and edit items on the canvas.", domain: "shared" },
+  { key: "pan", id: "pan", icon: Hand, label: "Pan", shortcut: "Space", hint: "Move around the campus canvas without changing any objects.", domain: "shared" },
+  { key: "building", id: "building", icon: Square, label: "Building", shortcut: "B", hint: "Add a building footprint, then configure its name, floors, entrances, and other details.", domain: "physical", dividerBefore: true },
+  { key: "pathway", id: "path", icon: Route, label: "Pathway", shortcut: "P", hint: "Draw a campus pathway, then use it to build the walking network.", domain: "physical" },
+  { key: "walking-point", id: "marker", icon: MapPin, label: "Walking Point", shortcut: "M", hint: "Add a Walking Point when physical pathways do not provide the routing point you need.", domain: "navigation", dividerBefore: true },
+  { key: "connect", id: "path", icon: Waypoints, label: "Connect", shortcut: "P", hint: "Connect Walking Points and entrances for routes that need a manual connection.", domain: "navigation" },
+  { key: "remove-navigation", id: "erase", icon: Trash2, label: "Remove", shortcut: "E", hint: "Remove Walking Points or Walking Paths from the navigation network.", domain: "navigation" },
+];
 
 // ── Per-layer path configuration ──
 const LAYER_PATH_CONFIG: Record<string, { type: string; color: string; width: number }> = {
@@ -457,6 +486,9 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
   const [renameValue, setRenameValue] = useState("");
   // ── Context menu ──
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; type: "building" | "marker" | "path" | "decorAsset"; id: string } | null>(null);
+  // Generated junctions can belong to several physical Pathways. Alt-click
+  // presents an explicit owner choice instead of guessing from coordinates.
+  const [pathChoiceMenu, setPathChoiceMenu] = useState<{ x: number; y: number; pathIds: string[] } | null>(null);
   // ── Erase/delete confirmation ──
   const [deleteConfirm, setDeleteConfirm] = useState<{ type: "building" | "marker" | "path" | "decorAsset"; id: string; name: string } | null>(null);
   // ── Batch delete confirmation ──
@@ -499,10 +531,14 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
   const [hierarchyOpen, setHierarchyOpen] = useState(true);
   // ── Test navigation panel (Navigation layer) ──
   const [testNavOpen, setTestNavOpen] = useState(false);
+  // ── Routes sidebar panel — NOT auto-opened; user must explicitly toggle ──
+  const [showRoutesPanel, setShowRoutesPanel] = useState(false);
   // ── Route highlighted by the test-navigation panel (drawn on the canvas) ──
   const [highlightedRoute, setHighlightedRoute] = useState<{ waypoints: { x: number; y: number }[]; color: string } | null>(null);
   // ── Keyboard shortcut cheat sheet ──
   const [showCheatSheet, setShowCheatSheet] = useState(false);
+  // Navigation is a visibility/editing overlay on the Campus workspace. The
+  // internal layer still identifies which tool domain owns canvas gestures.
   const [showCampusNavOverlay, setShowCampusNavOverlay] = useState(false);
   const [groundPaintType, setGroundPaintType] = useState<CampusDecorAsset["groundType"]>("grass");
   const [groundBrushSize, setGroundBrushSize] = useState(3);
@@ -513,6 +549,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
   const groundEraseGesture = useRef<PaintRect[]>([]);
   const [pathPaintType, setPathPaintType] = useState<CampusPath["type"]>("walkway");
   const [pathPaintWidth, setPathPaintWidth] = useState(12);
+  const [pathSettingsOpen, setPathSettingsOpen] = useState(false);
   const [pathPaintPreview, setPathPaintPreview] = useState<PathStrokePreview | null>(null);
   const pathPaintStroke = useRef<{ points: { x: number; y: number }[]; moved: boolean } | null>(null);
   const pathExtendRef = useRef<{ pathId: string; atStart: boolean } | null>(null);
@@ -642,6 +679,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
   } | null>(null);
   const dragGroupStartRef = useRef<GroupMoveMember[] | null>(null);
   const pathGroupOriginRef = useRef<Map<string, { x: number; y: number }[]> | null>(null);
+  const suppressPathClickRef = useRef<string | null>(null);
   // ── B5 Phase 1.6: rigid nav-node group drag — snapshots the original
   // positions of every multi-selected waypoint at gesture start so dragging
   // one moves the whole selection without distorting internal spacing.
@@ -688,7 +726,11 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     for (const issue of validationIssues) {
       const target = resolveIssueTarget(issue);
       if (!target || target.scope !== "campus") continue;
-      if (target.selectionType !== "building" && target.selectionType !== "entrance" && target.selectionType !== "navNode" && target.selectionType !== "navEdge") continue;
+      // B8: buildings already render their own per-building badge inside the
+      // Canvas rotation group — exclude from the global issueMarkers layer to
+      // avoid a duplicate warning indicator.
+      if (target.selectionType === "building") continue;
+      if (target.selectionType !== "entrance" && target.selectionType !== "navNode" && target.selectionType !== "navEdge") continue;
       if (issue.severity === "info") continue;
       const key = `${target.selectionType}:${target.id}`;
       const existing = markers.get(key);
@@ -768,7 +810,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
       if (!a || !b) continue;
       const pts = [
         { x: a.x, y: a.y },
-        ...(e.bendPoints ?? []).map((p) => ({ x: p.x, y: p.y })),
+        ...(isPathwayGeneratedEdge(e) ? [] : (e.bendPoints ?? []).map((p) => ({ x: p.x, y: p.y }))),
         { x: b.x, y: b.y },
       ];
       if (polylineCrossesPlacedObject(pts, buildings, decorAssets)) blocked.add(e.id);
@@ -776,7 +818,14 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     return blocked;
   }, [outdoorEdges, outdoorNodes, buildings, decorAssets]);
 
-  const upd = (c: Partial<Campus>) => { pushHistory(); onUpdate({ ...campus, ...c }); };
+  // Every pathway mutation passes through the same provenance-aware
+  // reconciliation boundary. This keeps generated navigation aligned even
+  // when the overlay is hidden, while manual/linked navigation remains intact.
+  const upd = (c: Partial<Campus>) => {
+    const next = reconcilePathwayNavigation({ ...campus, ...c }, genId);
+    pushHistory();
+    onUpdate(next);
+  };
   // B5 Phase 1.8: any building mutation re-syncs entrance-linked nav nodes so
   // they always match the resolved world position of their linked B3 entrance
   // (no manual navigation repair after a building move/resize/rotate).
@@ -848,6 +897,9 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
       if (path.id !== target.pathId) return path;
       const existing = path.points.some((point) => point.x === target.point.x && point.y === target.point.y);
       if (existing) return path;
+      const vertexIds = path.navigationVertexIds?.length === path.points.length
+        ? [...path.navigationVertexIds.slice(0, target.segmentIndex + 1), genId("pv"), ...path.navigationVertexIds.slice(target.segmentIndex + 1)]
+        : undefined;
       return {
         ...path,
         points: [
@@ -855,6 +907,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
           target.point,
           ...path.points.slice(target.segmentIndex + 1),
         ],
+        ...(vertexIds ? { navigationVertexIds: vertexIds } : {}),
       };
     });
   }, []);
@@ -909,10 +962,19 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
   }, [paths]);
 
   const pathNetworkIdsForPath = useCallback((pathId: string) => {
-    const path = paths.find((candidate) => candidate.id === pathId);
-    if (!path?.pathNetworkId) return [pathId];
-    return paths.filter((candidate) => candidate.pathNetworkId === path.pathNetworkId).map((candidate) => candidate.id);
+    return pathNetworkSelectionIds(paths, pathId, "network");
   }, [paths]);
+
+  const exitPathMemberEditToNetwork = useCallback(() => {
+    const memberId = pathMemberEditId;
+    setPathMemberEditId(null);
+    setSelectedPathPoint(null);
+    if (!memberId) return;
+    const networkIds = pathNetworkSelectionIds(paths, memberId, "network");
+    setSelected({ type: "path", id: memberId });
+    setMultiSelected(networkIds.length > 1 ? networkIds : []);
+    setShowAlignTools(networkIds.length > 1);
+  }, [pathMemberEditId, paths]);
 
   const assignPathNetwork = useCallback((sourcePaths: CampusPath[], ids: string[], requestedId?: string) => {
     const uniqueIds = Array.from(new Set(ids));
@@ -1080,7 +1142,11 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
         const nextPoints = extension.atStart
           ? [finalEnd, ...path.points]
           : [...path.points, finalEnd];
-        return { ...path, points: nextPoints };
+        const existingVertexIds = path.navigationVertexIds?.length === path.points.length ? [...path.navigationVertexIds] : undefined;
+        const nextVertexIds = existingVertexIds
+          ? (extension.atStart ? [genId("pv"), ...existingVertexIds] : [...existingVertexIds, genId("pv")])
+          : undefined;
+        return { ...path, points: nextPoints, ...(nextVertexIds ? { navigationVertexIds: nextVertexIds } : {}) };
       });
       const adjustedSnapTarget = snapTarget?.kind === "segment" && snapTarget.pathId === extension.pathId && extension.atStart && snapTarget.segmentIndex !== undefined
         ? { ...snapTarget, segmentIndex: snapTarget.segmentIndex + 1 }
@@ -1090,7 +1156,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
       const nextPaths = snapTarget?.pathId
         ? mergePathNetworksForJunction(withJunction, extension.pathId, snapTarget.pathId)
         : withJunction;
-      const next = { ...campus, paths: nextPaths };
+      const next = reconcilePathwayNavigation({ ...campus, paths: nextPaths }, genId);
       onUpdate(next);
       pushHistory(next);
       setSelected({ type: "path", id: extension.pathId });
@@ -1125,6 +1191,8 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     setMultiSelected([]);
     setAnimatingPathId(newPath.id);
     setTimeout(() => setAnimatingPathId((cur) => (cur === newPath.id ? null : cur)), 900);
+    setTool("select");
+    setPathSettingsOpen(false);
     toast.success("Pathway created", "2 editable points created.");
   }, [assignPathNetwork, campus, insertPathJunctionPoint, onUpdate, pathPaintType, pathPaintWidth, pathSnapTargetForPoint, paths, toast]);
 
@@ -1157,7 +1225,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
       members.push({ kind: "decorAsset", id: da.id, x: da.x, y: da.y, width: size.width, height: size.height });
     }
     for (const path of paths) {
-      if (!sel.includes(path.id) || path.locked || path.visible === false) continue;
+      if (!sel.includes(path.id) || path.locked) continue;
       const bounds = pathSelectionBounds(path, { includeHidden: true });
       if (bounds) members.push({ kind: "path", id: path.id, x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height });
     }
@@ -1196,6 +1264,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
 
   // ── SVG event handlers ──
   const handleSvgDown = (e: React.MouseEvent<SVGSVGElement>) => {
+    setPathChoiceMenu(null);
     // Hold Spacebar + drag: pan (like Figma/Photoshop)
     if (isSpacePressed()) {
       e.preventDefault();
@@ -1226,8 +1295,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
       // network exits member edit back to the WHOLE-NETWORK selection (no
       // ungrouping, group bounds + rotation stay visible).
       if (pathMemberEditId) {
-        setPathMemberEditId(null);
-        setSelectedPathPoint(null);
+        exitPathMemberEditToNetwork();
         return;
       }
       // In Navigation mode Select touches only graph elements, but empty-space
@@ -1259,7 +1327,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
             // existing entrance-linked waypoint + give clear feedback.
             setSelected({ type: "navNode", id: existing.id });
             setTool("select");
-            toast.info("Entrance already connected to the navigation network", "The existing entrance waypoint is selected.");
+            toast.info("Entrance already connected to the navigation network", "The existing entrance walking point is selected.");
             return;
           }
           const ee = buildEntranceNode(entranceHit.buildingId, entranceHit.entranceId, entranceHit.x, entranceHit.y);
@@ -1275,7 +1343,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
         // arbitrary points inside a building footprint are rejected with clear
         // feedback instead of silently creating a node under the roof.
         if (buildings.some((b) => pointInBuilding(b, clampedPt))) {
-          toast.warning("Connect through a building entrance", "Outdoor waypoints belong outside buildings — click the building's entrance instead.");
+          toast.warning("Connect through a building entrance", "Outdoor walking points belong outside buildings — click the building's entrance instead.");
           return;
         }
         const pathSnap = pathSnapTargetForPoint(clampedPt);
@@ -1284,7 +1352,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
           : navAlignmentForPoint(clampedPt);
         setGuides(aligned.guides);
         const cfg = LAYER_MARKER_CONFIG.navigation;
-        const nn = createNavNode({ id: genId("nn"), x: aligned.point.x, y: aligned.point.y, campusId: campus.id, name: "Waypoint", type: "outdoor", color: cfg.color });
+        const nn = createNavNode({ id: genId("nn"), x: aligned.point.x, y: aligned.point.y, campusId: campus.id, name: "Walking Point", type: "outdoor", color: cfg.color });
         // B5 Phase 6.4: detect edge insertion using RAW cursor position (not aligned)
         const clickNodeMap = Object.fromEntries(outdoorNodes.map((n) => [n.id, { x: n.x, y: n.y }]));
         const clickEdgeHit = findNavEdgeAtPoint(outdoorEdges, clickNodeMap, clampedPt);
@@ -1292,7 +1360,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
           const targetEdge = navEdges.find((e) => e.id === clickEdgeHit.edge.id);
           if (targetEdge) {
             const insertPt = clickEdgeHit.nearest;
-            const insertNode = createNavNode({ id: nn.id, x: insertPt.x, y: insertPt.y, campusId: campus.id, name: "Waypoint", type: "outdoor", color: cfg.color });
+            const insertNode = createNavNode({ id: nn.id, x: insertPt.x, y: insertPt.y, campusId: campus.id, name: "Walking Point", type: "outdoor", color: cfg.color });
             const splitResult = splitNavEdge(targetEdge, insertNode, navNodes);
             if (splitResult) {
               const nextEdges = navEdges.filter((e) => e.id !== targetEdge.id);
@@ -1303,7 +1371,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
               setSelected({ type: "navNode", id: insertNode.id });
               setWaypointEdgeSnap(null);
               setTool("select");
-              toast.success("Waypoint inserted", "Edge split into two connections.");
+              toast.success("Walking Point inserted", "Edge split into two connections.");
               return;
             }
           }
@@ -1396,7 +1464,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
             setSelected({ type: "navNode", id: startId });
             return;
           }
-          toast.info("Select a starting waypoint or entrance", "Use Waypoint to place a new point first.");
+          toast.info("Select a starting walking point or entrance", "Use Walking Point to place a new point first.");
           setNavPreview({ x: clampedPt.x, y: clampedPt.y });
         } else {
           if (entranceHit) {
@@ -1506,7 +1574,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
       setNavEntranceHover(null);
     };
     if (isSelfEdge(startId, endId)) {
-      toast.warning("Cannot connect a waypoint to itself", "Pick a different destination waypoint.");
+      toast.warning("Cannot connect a walking point to itself", "Pick a different destination walking point.");
       clearConnect();
       return false;
     }
@@ -1555,7 +1623,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     pushHistory(next);
     setSelected({ type: "navEdge", id: edge.id });
     clearConnect();
-    toast.success("Connection created", `Waypoints connected (${edge.distance} units).`);
+    toast.success("Connection created", `Walking points connected (${edge.distance} units).`);
     // pushHistory is intentionally omitted from deps: it accepts an explicit
     // post-change state and only touches the stable historyRef, so the first-render
     // closure stays correct (and referencing it here would hit the TDZ since it
@@ -1697,6 +1765,8 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     setNavPreviewPins([]);
     navConnectBendGroupsRef.current = [];
     connectRedoStackRef.current = [];
+    setWaypointEdgeSnap(null);
+    setConnectBlocked(false);
     setNavEntranceHover(null);
     toast.success("Connection created", `Connected to ${nn.name} (${edge.distance} units).`);
   }, [buildEntranceNode, campus, commitNavEdge, findDuplicateNavEdge, isSelfEdge, navConnectBends, navEdges, navNodes, onUpdate, outdoorEdgeDistance, outdoorEdges, outdoorNodes, toast]);
@@ -1707,8 +1777,13 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
   // node cleanup. Used by the keyboard Delete shortcut AND the panel's
   // "Delete Selected" so the behavior can never diverge.
   const deleteNavSelection = useCallback((nodeIds: string[], edgeIds: string[]) => {
-    const nodeSet = new Set(nodeIds);
-    const edgeSet = new Set(edgeIds);
+    const nodeSet = new Set(nodeIds.filter((id) => !isPathwayGeneratedNode((campus.navNodes ?? []).find((node) => node.id === id))));
+    const edgeSet = new Set(edgeIds.filter((id) => !isPathwayGeneratedEdge((campus.navEdges ?? []).find((edge) => edge.id === id))));
+    const managedCount = nodeIds.length + edgeIds.length - nodeSet.size - edgeSet.size;
+    if (nodeSet.size === 0 && edgeSet.size === 0) {
+      toast.info("Pathway navigation is managed automatically", "Edit or delete the owning physical Pathway instead.");
+      return;
+    }
     const nextNodes = (campus.navNodes ?? []).filter((n) => !nodeSet.has(n.id));
     const nextEdges = (campus.navEdges ?? []).filter(
       (e) => !edgeSet.has(e.id) && !nodeSet.has(e.startNodeId) && !nodeSet.has(e.endNodeId)
@@ -1719,8 +1794,9 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     setMultiSelected([]);
     setSelected(null);
     setShowAlignTools(false);
-    const removed = nodeIds.length + edgeIds.length;
+    const removed = nodeSet.size + edgeSet.size;
     toast.success("Deleted", `Removed ${removed} graph element${removed !== 1 ? "s" : ""}.`);
+    if (managedCount > 0) toast.info("Managed navigation preserved", `${managedCount} Pathway-generated item${managedCount === 1 ? " was" : "s were"} kept.`);
     // pushHistory intentionally omitted from deps — see commitNavEdge note:
     // it is declared later in the body (TDZ) and only touches the stable
     // historyRef, so the first-render closure stays correct.
@@ -1871,6 +1947,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
       const segDrag = navSegDragRef.current;
       const segEdge = navEdges.find((ed) => ed.id === segDrag.edgeId);
       if (!segEdge) { navSegDragRef.current = null; return; }
+      if (isPathwayGeneratedEdge(segEdge)) { navSegDragRef.current = null; return; }
       const delta = segDrag.isHorizontal
         ? Math.round(pt.y) - segDrag.oy
         : Math.round(pt.x) - segDrag.ox;
@@ -1972,7 +2049,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
         const start = startById.get(b.id);
         return start?.kind === "building" ? { ...b, x: start.x + dx, y: start.y + dy } : b;
       });
-      onUpdate({
+      onUpdate(reconcilePathwayNavigation({
         ...campus,
         buildings: nextBuildings,
         navNodes: syncEntranceNodePositions(nextBuildings, navNodes),
@@ -1987,7 +2064,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
           const start = startById.get(da.id);
           return start?.kind === "decorAsset" ? { ...da, x: start.x + dx, y: start.y + dy } : da;
         }),
-      });
+      }, genId));
       const bbox = groupBBoxAfterTranslation(group, dx, dy);
       setOverlappingBuildings(computeOverlaps(nextBuildings));
       setGuides(computeGroupAlignmentGuides(bbox.x, bbox.y, bbox.width, bbox.height, otherBuildings));
@@ -2009,6 +2086,20 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
       const dy = pt.y - drag.sy;
       const startPoints = drag.points ?? [];
       gestureChangedRef.current = true;
+      if (pathMemberEditId === drag.id && pathGroupOriginRef.current) {
+        onUpdate(reconcilePathwayNavigation({
+          ...campus,
+          paths: movePathMemberPreservingJunctions(
+            paths,
+            drag.id,
+            pathGroupOriginRef.current,
+            dx,
+            dy,
+            snap,
+          ),
+        }, genId));
+        return;
+      }
       const selectedPathIds = new Set(multiSelected.filter((id) => paths.some((path) => path.id === id)));
       const externalJunctionKeys = new Set<string>();
       if (selectedPathIds.size <= 1) {
@@ -2020,7 +2111,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
           }
         });
       }
-      onUpdate({
+      onUpdate(reconcilePathwayNavigation({
         ...campus,
         paths: paths.map((p) => p.id === drag.id
           ? { ...p, points: startPoints.map((point) => {
@@ -2028,7 +2119,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
               return externalJunctionKeys.has(pathPointKey(point)) ? { x: nextPoint.x + 0.001, y: nextPoint.y } : nextPoint;
             }) }
           : p),
-      });
+      }, genId));
       return;
     }
     if (drag.type === "pathPoint") {
@@ -2076,7 +2167,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
         // Merge networks between the moved path and the snap target
         nextPaths = mergePathNetworksForJunction(nextPaths, drag.id, target.pathId);
       }
-      onUpdate({ ...campus, paths: nextPaths });
+      onUpdate(reconcilePathwayNavigation({ ...campus, paths: nextPaths }, genId));
       return;
     }
     // B5 Phase 1: waypoint drag — same one-gesture/one-history pattern as
@@ -2093,15 +2184,16 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
       const nextWidth = Math.max(3, Math.min(32, Math.round(startWidth + (currentDistance - startDistance) * 2)));
       if (nextWidth === path.width) return;
       gestureChangedRef.current = true;
-      onUpdate({
+      onUpdate(reconcilePathwayNavigation({
         ...campus,
         paths: paths.map((p) => p.id === drag.id ? { ...p, width: nextWidth } : p),
-      });
+      }, genId));
       return;
     }
     if (drag.type === "navEdgeBend") {
       const edge = navEdges.find((ed) => ed.id === drag.id);
       if (!edge || drag.pointIndex === undefined) return;
+      if (isPathwayGeneratedEdge(edge)) return;
       const bends = [...(edge.bendPoints ?? [])];
       if (!bends[drag.pointIndex]) return;
       // B5 Phase 6.9: Floor Editor parity — NO grid snap on bend drags. Shift
@@ -2168,6 +2260,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
       // independently (onItemDown already blocks the drag start; this guard
       // also protects stale drags).
       if (node.entranceId) return;
+      if (node.generatedFromPathVertices?.length) return;
       // B5 Phase 1.6: dragging a waypoint that is part of a multi-selection
       // moves the whole selected node group rigidly (connected edges follow
       // automatically because edge geometry is derived from node positions).
@@ -2297,9 +2390,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
 
   const handleResizeStart = (e: React.MouseEvent, b: CampusBuilding, corner: string) => {
     e.stopPropagation();
-    // B5 Phase 1.7: campus geometry is context-only in Navigation mode — resize
-    // handles are never interactive while authoring the route graph.
-    if (layer === "navigation") return;
+    // B8 Phase 1: unified editor — resize works in all layers.
     const pt = getPoint(e, cw, ch);
     gestureHistoryPushed.current = false;
     setResizing({ id: b.id, corner, sx: pt.x, sy: pt.y, ox: b.x, oy: b.y, ow: b.width, oh: b.height });
@@ -2308,8 +2399,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
   // ── Rotation handler ──
   const handleRotateStart = useCallback((e: React.MouseEvent, b: CampusBuilding) => {
     e.stopPropagation();
-    // B5 Phase 1.7: campus geometry is context-only in Navigation mode.
-    if (layer === "navigation") return;
+    // B8 Phase 1: unified editor — rotation works in all layers.
     const pt = getPoint(e, cw, ch);
     const cx = b.x + b.width / 2;
     const cy = b.y + b.height / 2;
@@ -2383,12 +2473,12 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
       });
       gestureChangedRef.current = true;
       beginGestureHistory();
-      onUpdate({
+      onUpdate(reconcilePathwayNavigation({
         ...campus,
         paths: paths.map((path) => starts.has(path.id)
           ? { ...path, points: (starts.get(path.id) ?? path.points).map(rotatePt) }
           : path),
-      });
+      }, genId));
       setRotatingAngle(angle);
       // B5 Phase 5.14: update the rotated frame's angle so Canvas renders
       // the selection outline with SVG transform.
@@ -2410,12 +2500,12 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
       });
       const starts = new globalThis.Map(pathGroupScale.starts.map((path) => [path.id, path.points]));
       gestureChangedRef.current = true;
-      onUpdate({
+      onUpdate(reconcilePathwayNavigation({
         ...campus,
         paths: paths.map((path) => starts.has(path.id)
           ? { ...path, points: (starts.get(path.id) ?? path.points).map(scalePoint) }
           : path),
-      });
+      }, genId));
       return;
     }
     // ── Handle active decor rotation first ──
@@ -2608,9 +2698,17 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     // complete gesture. The pre-gesture state is still the previous history
     // tip, so a drag adds exactly one new entry — never one per object/move.
     const dragCommitted = gestureChangedRef.current;
+    const draggedPathId = dragging.current?.type === "path" ? dragging.current.id : null;
+    if (dragCommitted && draggedPathId && pathMemberEditId === draggedPathId) {
+      suppressPathClickRef.current = draggedPathId;
+      window.setTimeout(() => {
+        if (suppressPathClickRef.current === draggedPathId) suppressPathClickRef.current = null;
+      }, 0);
+    }
     endPan();
     dragging.current = null;
     dragGroupStartRef.current = null;
+    pathGroupOriginRef.current = null;
     navGroupOriginRef.current = null;
     navGroupEdgeOriginsRef.current = null;
     if (resizing) setResizing(null);
@@ -2757,6 +2855,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
   const switchTool = useCallback((t: SimpleTool) => {
     const reset = resetTransientToolState();
     setTool(t);
+    setPathSettingsOpen(false);
     setDP(reset.drawingPath);
     setNavConnectStart(null);
     setNavConnectBends([]);
@@ -2764,6 +2863,8 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     setNavPreviewPins([]);
     navConnectBendGroupsRef.current = [];
     connectRedoStackRef.current = [];
+    setWaypointEdgeSnap(null);
+    setConnectBlocked(false);
     setNavEntranceHover(null);
     navGroupOriginRef.current = null;
     navGroupEdgeOriginsRef.current = null;
@@ -2790,6 +2891,9 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
   const switchLayer = useCallback((next: EditorLayer) => {
     const reset = resetTransientToolState();
     setLayer(next);
+    setPathSettingsOpen(false);
+    if (next === "navigation") setShowCampusNavOverlay(true);
+    if (next === "events") setShowCampusNavOverlay(false);
     setTool("select");
     setSelected(null);
     setMultiSelected([]);
@@ -2803,6 +2907,8 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     setNavPreviewPins([]);
     navConnectBendGroupsRef.current = [];
     connectRedoStackRef.current = [];
+    setWaypointEdgeSnap(null);
+    setConnectBlocked(false);
     setNavEntranceHover(null);
     navGroupOriginRef.current = null;
     navGroupEdgeOriginsRef.current = null;
@@ -2821,6 +2927,8 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     setGuides(reset.guides);
     setSelectedBuildingType(reset.selectedBuildingType);
     setHighlightedRoute(null);
+    setTestNavOpen(false);
+    setShowRoutesPanel(false);
   }, []);
 
   const handleDblClick = () => {
@@ -2851,7 +2959,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
         ? mergePathNetworksForJunction(withNewPath, newPath.id, snapTarget.pathId)
         : withNewPath;
       updPaths(nextPaths);
-      setDP([]); setTool("select");
+      setDP([]); setTool("select"); setPathSettingsOpen(false);
       // Play the draw-in animation for the just-completed path
       setAnimatingPathId(newPath.id);
       setTimeout(() => setAnimatingPathId((cur) => (cur === newPath.id ? null : cur)), 900);
@@ -2860,9 +2968,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
   };
 
   const handleBuildingDoubleClick = useCallback((id: string) => {
-    // Navigation mode treats campus geometry as context only — double-click
-    // rename stays on the Campus layer.
-    if (layer === "navigation") return;
+    // B8 Phase 1: unified editor — double-click rename works in all layers.
     const b = buildings.find((x) => x.id === id);
     if (!b) return;
     setSelected({ type: "building", id });
@@ -2876,7 +2982,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
   // applies one total delta to these originals every frame — the group tracks
   // the cursor 1:1 and keeps its exact shape.
   const snapshotNavGroup = useCallback((ids: string[]) => {
-    const freeNodes = navNodes.filter((n) => ids.includes(n.id) && !n.entranceId);
+    const freeNodes = navNodes.filter((n) => ids.includes(n.id) && !n.entranceId && !n.generatedFromPathVertices?.length);
     navGroupOriginRef.current = freeNodes.length >= 2
       ? new globalThis.Map(freeNodes.map((n) => [n.id, { x: n.x, y: n.y }]))
       : null;
@@ -2892,6 +2998,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
 
   const onItemDown = (e: React.MouseEvent, type: "building" | "marker" | "decorAsset" | "navNode", id: string, ox: number, oy: number) => {
     e.stopPropagation();
+    setPathChoiceMenu(null);
     // Spacebar held: pan instead of interacting with items
     if (isSpacePressed()) {
       startPan(e);
@@ -2903,29 +3010,68 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
       onNavNodeClick(id);
       return;
     }
+    // Overlap rule: a normal click on an exposed node selects the node. Alt is
+    // handled here (the node stops propagation), so it reliably reaches the
+    // explicit generated-path provenance rather than a coordinate guess.
+    if (tool === "select" && type === "navNode") {
+      const node = navNodes.find((candidate) => candidate.id === id);
+      const ownedPathIds = [...new Set((node?.generatedFromPathVertices ?? [])
+        .map((ref) => ref.pathId)
+        .filter((pathId) => paths.some((path) => path.id === pathId)))];
+      if (e.altKey) {
+        if (ownedPathIds.length === 1) {
+          onPathDown(e, ownedPathIds[0]);
+          return;
+        }
+        if (ownedPathIds.length > 1) {
+          setPathChoiceMenu({ x: e.clientX, y: e.clientY, pathIds: ownedPathIds });
+          return;
+        }
+      }
+      // Once a physical Pathway is selected, its own vertex handles/body have
+      // priority over an overlapping generated node. Route directly to the
+      // proven vertex index so editing cannot silently target another Pathway.
+      if (selected?.type === "path" && ownedPathIds.includes(selected.id)) {
+        const selectedPath = paths.find((path) => path.id === selected.id);
+        const ownedRef = node?.generatedFromPathVertices?.find((ref) => ref.pathId === selected.id);
+        const vertexIndex = (ownedRef && selectedPath?.navigationVertexIds?.indexOf(ownedRef.vertexId)) ?? -1;
+        if (selectedPath && vertexIndex >= 0) {
+          onPathPointDown(e, selectedPath.id, vertexIndex);
+          return;
+        }
+        onPathDown(e, selected.id);
+        return;
+      }
+    }
     // B5 Phase 1.6: in the Navigation layer, clicking a building BODY with the
     // Waypoint or Connect Path tools is rejected with clear feedback — outdoor
     // waypoints belong outside buildings; routes enter through entrances.
     if (layer === "navigation" && (tool === "marker" || tool === "path") && type === "building") {
-      toast.warning("Connect through a building entrance", "Outdoor waypoints belong outside buildings — click the building's entrance instead.");
+      toast.warning("Connect through a building entrance", "Outdoor walking points belong outside buildings — click the building's entrance instead.");
       return;
     }
     if (tool === "erase") {
-      // In Navigation mode the Remove tool only touches graph elements — campus
-      // geometry is protected from accidental deletion while authoring routes.
-      if (layer === "navigation" && type !== "navNode") return;
+      // Navigation Remove is deliberately scoped to the walking network so a
+      // visible campus object can never be deleted by the nav-focused tool.
+      if (layer === "navigation" && type !== "navNode") {
+        return;
+      }
       if (type === "navNode") {
         // Waypoint erase: deterministic connected-edge cleanup + clear feedback
         // (never leaves dangling edge references).
         const node = navNodes.find((n) => n.id === id);
         if (!node) return;
+        if (node.generatedFromPathVertices?.length) {
+          toast.info("Pathway walking point is managed automatically", "Edit the physical Pathway to move this generated point.");
+          return;
+        }
         const connected = navEdges.filter((e) => e.startNodeId === id || e.endNodeId === id).length;
         const next = removeNavNode(navNodes, navEdges, id);
         const nextCampus = { ...campus, navNodes: next.nodes, navEdges: next.edges };
         onUpdate(nextCampus);
         pushHistory(nextCampus);
         setSelected(null);
-        toast.success("Waypoint deleted", connected > 0 ? `Removed ${connected} connected connection${connected !== 1 ? "s" : ""}.` : undefined);
+        toast.success("Walking Point deleted", connected > 0 ? `Removed ${connected} connected connection${connected !== 1 ? "s" : ""}.` : undefined);
         return;
       }
       if (type === "decorAsset") {
@@ -2954,11 +3100,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
       setGuides([]);
       return;
     }
-    // In the Navigation layer, Select interacts ONLY with graph elements —
-    // campus geometry stays visible as context but is never selected or
-    // dragged while the admin is building routes.
-    // B5 Phase 6.2: entrances are selectable in Navigation mode (read-only)
-    if (tool === "select" && layer === "navigation" && type !== "navNode" && type !== "entrance") return;
+    // B8 Phase 1: unified editor — select tool works on all objects in all layers.
     if (tool !== "select") return;
     if (e.shiftKey) {
       // Shift+click toggles membership against the currently visible
@@ -2969,6 +3111,25 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
         : selected
           ? [selected.id]
           : [];
+      // Cross-domain guard: physical and navigation items cannot be mixed
+      // in the same multi-selection group. If the user shift-clicks across
+      // domains, clear the current selection and start fresh with just the
+      // new item.
+      const isPhysicalType = (t: string) => t === "building" || t === "path" || t === "decorAsset" || t === "entrance" || t === "marker";
+      const isNavType = (t: string) => t === "navNode" || t === "navEdge";
+      if (base.length > 0 && !base.includes(id)) {
+        const baseSelection = selectionForId(base[0]);
+        const currentDomain = baseSelection && isPhysicalType(baseSelection.type) ? "physical" : baseSelection && isNavType(baseSelection.type) ? "nav" : null;
+        const clickedDomain = isPhysicalType(type) ? "physical" : isNavType(type) ? "nav" : null;
+        if (currentDomain && clickedDomain && currentDomain !== clickedDomain) {
+          // Cross-domain shift-click: clear existing selection, select only the new item
+          setMultiSelected([]);
+          setSelected({ type, id });
+          setShowAlignTools(false);
+          setGuides([]);
+          return;
+        }
+      }
       const next = base.includes(id) ? base.filter((x) => x !== id) : [...base, id];
       setShowAlignTools(next.length > 1);
       if (next.length > 1) {
@@ -2993,7 +3154,11 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
       // B5 Phase 1.8: an entrance-linked node can never be the drag anchor —
       // selection is kept but the gesture is not armed (no mutation/history).
       if (type === "navNode" && navNodes.find((n) => n.id === id)?.entranceId) {
-        toast.info("Entrance waypoints follow their building entrance", "Move the building or its entrance to reposition it.");
+        toast.info("Entrance walking points follow their building entrance", "Move the building or its entrance to reposition it.");
+        return;
+      }
+      if (type === "navNode" && navNodes.find((n) => n.id === id)?.generatedFromPathVertices?.length) {
+        toast.info("Pathway walking points follow their physical Pathway", "Edit the Pathway vertex instead of dragging this generated point.");
         return;
       }
       const pt = getPoint(e, cw, ch);
@@ -3022,9 +3187,14 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
       toast.info("Entrance waypoints follow their building entrance", "Move the building or its entrance to reposition it.");
       return;
     }
-    // B5 Phase 6.2: entrance is selectable in Navigation mode but not draggable
-    if (layer === "navigation" && type === "entrance") {
-      toast.info("Entrance navigation info", "Building entrances cannot be moved in Navigation mode.");
+    if (type === "navNode" && navNodes.find((n) => n.id === id)?.generatedFromPathVertices?.length) {
+      toast.info("Pathway walking points follow their physical Pathway", "Edit the Pathway vertex instead of dragging this generated point.");
+      return;
+    }
+    // Unified editor: entrances are draggable in all layers with Select/Pan tools.
+    // Only block with active nav authoring tools (marker/path/erase for nav).
+    if (layer === "navigation" && type === "entrance" && (tool === "marker" || tool === "path")) {
+      toast.info("Entrance navigation info", "Use the Select tool to move building entrances.");
       return;
     }
     const pt = getPoint(e, cw, ch);
@@ -3039,15 +3209,13 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     if (tool !== "select" || e.shiftKey || multiSelected.length < 2) return;
     const pt = getPoint(e, cw, ch);
 
-    // ── B5 correction: Navigation layer — the multi-selected nav graph
-    // group's outline interior is a REAL drag surface. Pointerdown on empty
-    // space INSIDE the group bounds starts the SAME rigid group drag as
-    // grabbing a member waypoint (identical snapshot pipeline — only the
-    // pointerdown origin differs). It must NOT clear selection / rubber-band.
-    if (layer === "navigation") {
+    // ── B8 Phase 1: unified editor — nav group drag works when selected
+    // objects are nav nodes (regardless of layer).
+    const hasNavNodes = multiSelected.some((id) => navNodes.some((n) => n.id === id));
+    if (hasNavNodes) {
       const freeIds = multiSelected.filter((id) => {
         const n = navNodes.find((x) => x.id === id);
-        return Boolean(n && !n.entranceId);
+        return Boolean(n && !n.entranceId && !n.generatedFromPathVertices?.length);
       });
       if (freeIds.length < 2) return;
       const anchor = navNodes.find((n) => n.id === freeIds[0]);
@@ -3095,7 +3263,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
   }, [buildings, cw, ch, decorAssets, getPoint, layer, multiSelected, navEdges, navNodes, paths, selectionForId, snapshotNavGroup, tool]);
 
   const onPathGroupScaleStart = useCallback((e: React.MouseEvent, corner: "nw" | "ne" | "sw" | "se", bounds: { x: number; y: number; width: number; height: number }) => {
-    if (layer === "navigation" || tool !== "select" || multiSelectedPaths.length < 2) return;
+    if (tool !== "select" || multiSelectedPaths.length < 2) return;
     e.stopPropagation();
     e.preventDefault();
     gestureChangedRef.current = false;
@@ -3112,7 +3280,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
   // resulting coordinates, never an SVG transform) with ONE history entry on
   // pointer-up; Shift snaps to 15° increments.
   const onPathGroupRotateStart = useCallback((e: React.MouseEvent, center: { x: number; y: number }) => {
-    if (layer === "navigation" || tool !== "select" || multiSelectedPaths.length < 2) return;
+    if (tool !== "select" || multiSelectedPaths.length < 2) return;
     e.stopPropagation();
     e.preventDefault();
     const pt = getPoint(e, cw, ch);
@@ -3186,15 +3354,10 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
       }
       return;
     }
-    // B5 Phase 1.7: in Navigation mode an entrance is CONTEXT-ONLY unless the
-    // admin is explicitly targeting it with Add Waypoint / Connect Path (handled
-    // above). Select tool in Navigation mode selects the entrance (read-only).
-    if (layer === "navigation") {
-      if (tool === "select") {
-        setSelected({ type: "entrance", id: entranceId, buildingId });
-        setMultiSelected([]);
-        setShowAlignTools(false);
-      }
+    // Navigation Remove never deletes a physical entrance. Select/Pan continue
+    // through the normal Campus interaction path so entrances remain editable
+    // while the walking network is visible.
+    if (layer === "navigation" && tool === "erase") {
       return;
     }
     setMultiSelected([]);
@@ -3314,14 +3477,16 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
       ...campus,
       paths: paths.map((p) => p.id === id ? { ...p, ...typeDefaults, ...changes } : p),
     };
-    onUpdate(next);
-    pushHistory(next);
+    const reconciled = reconcilePathwayNavigation(next, genId);
+    onUpdate(reconciled);
+    pushHistory(reconciled);
   };
 
   const onDeletePath = (id: string) => {
     const next: Campus = { ...campus, paths: paths.filter((p) => p.id !== id) };
-    onUpdate(next);
-    pushHistory(next);
+    const reconciled = reconcilePathwayNavigation(next, genId);
+    onUpdate(reconciled);
+    pushHistory(reconciled);
     setSelected(null);
     setSelectedPathPoint(null);
     setPathMemberEditId(null);
@@ -3341,9 +3506,11 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
   // ── Floor manager helpers (delegated to HierarchyPanel) ──
 
   const onPathClick = (id: string) => {
-    // Campus walkways are context-only in Navigation mode — never selected or
-    // removed while authoring the graph.
-    if (layer === "navigation") return;
+    if (suppressPathClickRef.current === id) {
+      suppressPathClickRef.current = null;
+      return;
+    }
+    // B8 Phase 1: unified editor — paths are selectable in all layers.
     if (tool === "erase") {
       const p = paths.find((x) => x.id === id);
       if (p) setDeleteConfirm({ type: "path", id, name: "Path" });
@@ -3358,6 +3525,8 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
         : [];
       if (pathMemberEditId && pathMemberEditId !== id) {
         setSelected({ type: "path", id });
+        setMultiSelected([]);
+        setShowAlignTools(false);
         setSelectedPathPoint(null);
         setPathMemberEditId(id);
         return;
@@ -3379,10 +3548,10 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
   };
 
   // B5 Phase 5.12 — double-click a network member to enter MEMBER EDIT MODE:
-  // the group relationship stays intact (multi-selection keeps the network ids
-  // so group drag/rotation still work) while this path's points become editable.
+  // the group relationship stays intact while only this path becomes the active
+  // physical object. Network transforms return when member edit is exited.
   const onPathDblClick = useCallback((id: string) => {
-    if (layer === "navigation" || tool !== "select") return;
+    if (tool !== "select") return;
     const path = paths.find((p) => p.id === id);
     if (!path || path.locked) return;
     const networkMembers = path.pathNetworkId
@@ -3392,18 +3561,31 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     setSelected({ type: "path", id });
     setSelectedPathPoint(null);
     setPathMemberEditId(id);
-    setMultiSelected(networkMembers.map((member) => member.id));
-    setShowAlignTools(true);
+    setMultiSelected([]);
+    setShowAlignTools(false);
   }, [layer, paths, tool]);
 
   const onPathDown = useCallback((e: React.MouseEvent, id: string) => {
-    if (layer === "navigation") return;
+    setPathChoiceMenu(null);
+    // B8 Phase 1: unified editor — paths selectable in all layers.
     const path = paths.find((p) => p.id === id);
     if (!path || path.locked) return;
     if (tool !== "select") return;
+    const editingThisMember = pathMemberEditId === id;
     const networkIds = pathNetworkIdsForPath(id);
     if (e.shiftKey) {
       const base = multiSelected.length > 0 ? multiSelected : selected ? [selected.id] : [];
+      // Cross-domain guard: physical and navigation items cannot be mixed
+      const baseSelection = base.length > 0 ? selectionForId(base[0]) : null;
+      const isNavSelection = baseSelection?.type === "navNode" || baseSelection?.type === "navEdge";
+      if (base.length > 0 && !base.includes(id) && isNavSelection) {
+        setMultiSelected([]);
+        setSelected({ type: "path", id });
+        setShowAlignTools(false);
+        setSelectedPathPoint(null);
+        setGuides([]);
+        return;
+      }
       const next = base.includes(id) ? base.filter((x) => x !== id) : [...base, id];
       setShowAlignTools(next.length > 1);
       if (next.length > 1) {
@@ -3424,8 +3606,13 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     gestureHistoryPushed.current = false;
     gestureChangedRef.current = false;
     dragging.current = { type: "path", id, sx: pt.x, sy: pt.y, ox: 0, oy: 0, points: structuredClone(path.points) };
-    const activeGroupIds = networkIds.length > 1 ? networkIds : multiSelected;
-    if (activeGroupIds.includes(id)) {
+    const activeGroupIds = editingThisMember ? [id] : networkIds.length > 1 ? networkIds : multiSelected;
+    if (editingThisMember) {
+      dragGroupStartRef.current = null;
+      pathGroupOriginRef.current = new globalThis.Map(paths.map((candidate) => [candidate.id, structuredClone(candidate.points)]));
+      setMultiSelected([]);
+      setShowAlignTools(false);
+    } else if (activeGroupIds.includes(id)) {
       dragGroupStartRef.current = buildDragGroup({ type: "path", id }, activeGroupIds);
       pathGroupOriginRef.current = dragGroupStartRef.current?.some((member) => member.kind === "path")
         ? new globalThis.Map(paths.filter((candidate) => activeGroupIds.includes(candidate.id)).map((candidate) => [candidate.id, structuredClone(candidate.points)]))
@@ -3442,11 +3629,12 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     }
     setSelected({ type: "path", id });
     setSelectedPathPoint(null);
-  }, [buildDragGroup, cw, ch, getPoint, layer, multiSelected, pathNetworkIdsForPath, paths, selected, selectionForId, tool]);
+  }, [buildDragGroup, cw, ch, getPoint, layer, multiSelected, pathMemberEditId, pathNetworkIdsForPath, paths, selected, selectionForId, tool]);
 
   const onPathPointDown = useCallback((e: React.MouseEvent, id: string, pointIndex: number) => {
     e.stopPropagation();
-    if (layer === "navigation") return;
+    setPathChoiceMenu(null);
+    // B8 Phase 1: unified editor — path points editable in all layers.
     const path = paths.find((p) => p.id === id);
     if (!path || path.locked) return;
     const pt = getPoint(e as React.MouseEvent<SVGSVGElement>, cw, ch);
@@ -3460,7 +3648,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
   const onPathExtendStart = useCallback((e: React.MouseEvent, id: string, pointIndex: number) => {
     e.stopPropagation();
     e.preventDefault();
-    if (layer === "navigation") return;
+    // B8 Phase 1: unified editor — path extend works in all layers.
     const path = paths.find((p) => p.id === id);
     const start = path?.points[pointIndex];
     if (!path || path.locked || !start || (pointIndex !== 0 && pointIndex !== path.points.length - 1)) return;
@@ -3478,7 +3666,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
 
   const onPathWidthDown = useCallback((e: React.MouseEvent, id: string, segmentIndex: number, handlePoint: { x: number; y: number }) => {
     e.stopPropagation();
-    if (layer === "navigation") return;
+    // B8 Phase 1: unified editor — path width editable in all layers.
     const path = paths.find((p) => p.id === id);
     const a = path?.points[segmentIndex];
     const b = path?.points[segmentIndex + 1];
@@ -3504,12 +3692,20 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
   const onPathAddPoint = (id: string, pointIndex: number, point: { x: number; y: number }) => {
     const path = paths.find((p) => p.id === id);
     if (!path || path.locked) return;
+    const vertexIds = path.navigationVertexIds?.length === path.points.length
+      ? [...path.navigationVertexIds.slice(0, pointIndex), genId("pv"), ...path.navigationVertexIds.slice(pointIndex)]
+      : undefined;
     const next = {
       ...campus,
-      paths: paths.map((p) => p.id === id ? { ...p, points: [...p.points.slice(0, pointIndex), point, ...p.points.slice(pointIndex)] } : p),
+      paths: paths.map((p) => p.id === id ? {
+        ...p,
+        points: [...p.points.slice(0, pointIndex), point, ...p.points.slice(pointIndex)],
+        ...(vertexIds ? { navigationVertexIds: vertexIds } : {}),
+      } : p),
     };
-    onUpdate(next);
-    pushHistory(next);
+    const reconciled = reconcilePathwayNavigation(next, genId);
+    onUpdate(reconciled);
+    pushHistory(reconciled);
     setSelected({ type: "path", id });
     setSelectedPathPoint({ pathId: id, pointIndex });
   };
@@ -3531,12 +3727,16 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     const path = paths.find((p) => p.id === selectedPathPoint.pathId);
     if (!path) return;
     const nextPoints = path.points.filter((_, index) => index !== selectedPathPoint.pointIndex);
+    const nextVertexIds = path.navigationVertexIds?.length === path.points.length
+      ? path.navigationVertexIds.filter((_, index) => index !== selectedPathPoint.pointIndex)
+      : undefined;
     const next: Campus = {
       ...campus,
-      paths: paths.map((p) => p.id === path.id ? { ...p, points: nextPoints } : p),
+      paths: paths.map((p) => p.id === path.id ? { ...p, points: nextPoints, ...(nextVertexIds ? { navigationVertexIds: nextVertexIds } : {}) } : p),
     };
-    onUpdate(next);
-    pushHistory(next);
+    const reconciled = reconcilePathwayNavigation(next, genId);
+    onUpdate(reconciled);
+    pushHistory(reconciled);
     setSelected({ type: "path", id: path.id });
     setSelectedPathPoint(null);
   };
@@ -3559,11 +3759,18 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     const next: Campus = {
       ...campus,
       paths: paths.map((p) => p.id === pathId
-        ? { ...p, points: [...p.points.slice(0, segmentIndex + 1), point, ...p.points.slice(segmentIndex + 1)] }
+        ? {
+            ...p,
+            points: [...p.points.slice(0, segmentIndex + 1), point, ...p.points.slice(segmentIndex + 1)],
+            ...(p.navigationVertexIds?.length === p.points.length
+              ? { navigationVertexIds: [...p.navigationVertexIds.slice(0, segmentIndex + 1), genId("pv"), ...p.navigationVertexIds.slice(segmentIndex + 1)] }
+              : {}),
+          }
         : p),
     };
-    onUpdate(next);
-    pushHistory(next);
+    const reconciled = reconcilePathwayNavigation(next, genId);
+    onUpdate(reconciled);
+    pushHistory(reconciled);
     setSelected({ type: "path", id: pathId });
     setSelectedPathPoint({ pathId, pointIndex: segmentIndex + 1 });
   };
@@ -3580,8 +3787,9 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
         ? { ...p, disconnectedJunctionKeys: Array.from(new Set([...(p.disconnectedJunctionKeys ?? []), key])) }
         : p),
     };
-    onUpdate(next);
-    pushHistory(next);
+    const reconciled = reconcilePathwayNavigation(next, genId);
+    onUpdate(reconciled);
+    pushHistory(reconciled);
     setSelected({ type: "path", id: path.id });
     setSelectedPathPoint(selectedPathPoint);
   };
@@ -3597,7 +3805,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
       x: Math.round(point.x),
       y: Math.round(point.y),
       campusId: campus.id,
-      name: "Waypoint",
+      name: "Walking Point",
       type: "outdoor",
       color: LAYER_MARKER_CONFIG.navigation.color,
     });
@@ -3611,7 +3819,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     const ensured = ensureOutdoorNavNodeAt(point, navNodes);
     if (!ensured.created) {
       setSelected({ type: "navNode", id: ensured.node.id });
-      toast.info("Waypoint already exists", "Selected the existing navigation waypoint at this pathway point.");
+      toast.info("Walking Point already exists", "Selected the existing Walking Point at this pathway point.");
       return;
     }
     const next: Campus = { ...campus, navNodes: ensured.nodes };
@@ -3619,7 +3827,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     pushHistory(next);
     setSelected({ type: "navNode", id: ensured.node.id });
     setMultiSelected([]);
-    toast.success("Waypoint added", "Snapped to the selected pathway point.");
+    toast.success("Walking Point added", "Snapped to the selected pathway point.");
   };
 
   const onAddPathToNavigation = (pathId: string) => {
@@ -3627,43 +3835,29 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
   };
 
   const onAddPathsToNavigation = (pathIds: string[]) => {
-    const pathSet = paths.filter((p) => pathIds.includes(p.id) && p.points.length >= 2);
-    if (pathSet.length === 0) return;
-    let nextNodes = [...navNodes];
-    let nextEdges = [...navEdges];
-    let createdNodes = 0;
-    let createdEdges = 0;
-
-    for (const path of pathSet) {
-      const nodeIds: string[] = [];
-      for (const point of path.points) {
-        const ensured = ensureOutdoorNavNodeAt(point, nextNodes);
-        if (ensured.created) createdNodes += 1;
-        nextNodes = ensured.nodes;
-        nodeIds.push(ensured.node.id);
-      }
-
-      for (let index = 0; index < nodeIds.length - 1; index += 1) {
-        const startNodeId = nodeIds[index];
-        const endNodeId = nodeIds[index + 1];
-        if (!startNodeId || !endNodeId || isSelfEdge(startNodeId, endNodeId)) continue;
-        if (findDuplicateNavEdge(nextEdges, startNodeId, endNodeId)) continue;
-        const edge = createNavEdge({ id: genId("ne"), startNodeId, endNodeId, nodes: nextNodes });
-        nextEdges = [...nextEdges, edge];
-        createdEdges += 1;
-      }
-    }
-
-    if (createdNodes === 0 && createdEdges === 0) {
-      toast.info(pathSet.length > 1 ? "Network already in navigation" : "Pathway already in navigation", "All pathway waypoints and connections already exist.");
+    const requestedPaths = paths.filter((p) => pathIds.includes(p.id) && p.points.length >= 2);
+    const missingIds = new Set(pathNetworkNavigationStatus(requestedPaths, navNodes, navEdges).missingPathIds);
+    const pathSet = requestedPaths.filter((path) => missingIds.has(path.id));
+    if (requestedPaths.length > 0 && pathSet.length === 0) {
+      toast.info(requestedPaths.length > 1 ? "Network already in navigation" : "Pathway already in navigation", "The generated walking network already follows this pathway.");
       return;
     }
-    const next: Campus = { ...campus, navNodes: nextNodes, navEdges: nextEdges };
-    onUpdate(next);
-    pushHistory(next);
-    setSelected({ type: "path", id: pathSet[0].id });
-    setMultiSelected(pathSet.length > 1 ? pathSet.map((path) => path.id) : []);
-    toast.success(pathSet.length > 1 ? "Network added to navigation" : "Path added to navigation", `${createdNodes} waypoint${createdNodes === 1 ? "" : "s"} and ${createdEdges} connection${createdEdges === 1 ? "" : "s"} added.`);
+    if (pathSet.length === 0) return;
+    const result = convertPathwaysToNavigation(campus, pathSet.map((path) => path.id), genId);
+    if (result.legacyPathIds.length > 0 && result.createdNodes === 0 && result.createdEdges === 0) {
+      toast.info("Legacy navigation needs reconnecting", "Existing walking data was preserved; this pathway needs an explicit rebuild before it can follow geometry changes.");
+      return;
+    }
+    const next: Campus = result.campus;
+    const reconciled = reconcilePathwayNavigation(next, genId);
+    onUpdate(reconciled);
+    pushHistory(reconciled);
+    setSelected({ type: "path", id: requestedPaths[0].id });
+    setMultiSelected(requestedPaths.length > 1 ? requestedPaths.map((path) => path.id) : []);
+    const addedDetail = result.createdNodes === 0 && result.createdEdges === 0
+      ? `${pathSet.length} missing Pathway${pathSet.length === 1 ? "" : "s"} linked to the existing generated network.`
+      : `${result.createdNodes} Walking Point${result.createdNodes === 1 ? "" : "s"} and ${result.createdEdges} walking path${result.createdEdges === 1 ? "" : "s"} added.`;
+    toast.success(requestedPaths.length > 1 ? "Network navigation updated" : "Path added to navigation", addedDetail);
   };
 
   const onGroupPaths = (ids: string[]) => {
@@ -3696,7 +3890,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     e.stopPropagation();
     const edge = navEdges.find((ed) => ed.id === id);
     const bend = edge?.bendPoints?.[bendIndex];
-    if (!edge || !bend) return;
+    if (!edge || !bend || isPathwayGeneratedEdge(edge)) return;
     gestureHistoryPushed.current = false;
     gestureChangedRef.current = false;
     dragging.current = { type: "navEdgeBend", id, pointIndex: bendIndex, sx: bend.x, sy: bend.y, ox: bend.x, oy: bend.y };
@@ -3716,7 +3910,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     const edge = navEdges.find((ed) => ed.id === id);
     const start = navNodes.find((n) => n.id === edge?.startNodeId);
     const end = navNodes.find((n) => n.id === edge?.endNodeId);
-    if (!edge || !start || !end) return;
+    if (!edge || !start || !end || isPathwayGeneratedEdge(edge)) return;
     const pts = [{ x: start.x, y: start.y }, ...(edge.bendPoints ?? []), { x: end.x, y: end.y }];
     const idx = Math.max(0, Math.min(bendIndex, pts.length - 2));
     const a = pts[idx];
@@ -3776,7 +3970,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
 
   const onNavEdgeRemoveBend = (id: string, bendIndex?: number) => {
     const edge = navEdges.find((ed) => ed.id === id);
-    if (!edge || !edge.bendPoints || edge.bendPoints.length === 0) return;
+    if (!edge || isPathwayGeneratedEdge(edge) || !edge.bendPoints || edge.bendPoints.length === 0) return;
     const index = bendIndex ?? edge.bendPoints.length - 1;
     if (index < 0 || index >= edge.bendPoints.length) return;
     // B5 Phase 6.8: normalize the survivor list against the full polyline — the
@@ -3811,7 +4005,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     const edge = navEdges.find((ed) => ed.id === id);
     const a = navNodes.find((n) => n.id === edge?.startNodeId);
     const b = navNodes.find((n) => n.id === edge?.endNodeId);
-    if (!edge || !a || !b) return;
+    if (!edge || !a || !b || isPathwayGeneratedEdge(edge)) return;
     const direct = [{ x: a.x, y: a.y }, { x: b.x, y: b.y }];
     if (polylineCrossesObstacle(direct, buildings, decorAssets)) {
       toast.warning("Can't straighten", "The direct path crosses a building or obstacle — keep a bend.");
@@ -4329,7 +4523,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
       } else if (sel.type === "path") {
         const p = paths.find((x) => x.id === sel.id);
         if (!p) continue;
-        const np = { ...p, id: genId("pth"), points: (p.points ?? []).map((pt) => ({ x: Math.round(pt.x + offset), y: Math.round(pt.y + offset) })) };
+        const np = { ...p, id: genId("pth"), points: (p.points ?? []).map((pt) => ({ x: Math.round(pt.x + offset), y: Math.round(pt.y + offset) })), navigationVertexIds: undefined };
         nextPaths.push(np);
         newIds.push(np.id);
       }
@@ -4391,7 +4585,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     if (selNode) nodeIds = multiSelected.length > 0 ? [...new Set([...multiSelected, selNode])] : [selNode];
     else nodeIds = multiSelected.filter((id) => navNodes.some((n) => n.id === id));
     const selectedNodes = navNodes.filter((n) => nodeIds.includes(n.id));
-    const freeNodes = selectedNodes.filter((n) => !n.entranceId);
+    const freeNodes = selectedNodes.filter((n) => !n.entranceId && !n.generatedFromPathVertices?.length);
     const linkedCount = selectedNodes.length - freeNodes.length;
     const freeIds = new Set(freeNodes.map((n) => n.id));
     const edges = navEdges.filter((e) => freeIds.has(e.startNodeId) && freeIds.has(e.endNodeId));
@@ -4407,7 +4601,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     outdoorNavClipboardRef.current = { nodes: structuredClone(nodes), edges: structuredClone(edges) };
     pasteOffsetRef.current = 25;
     if (linkedCount > 0) {
-      toast.info("Entrance waypoints not copied", `${linkedCount} entrance waypoint${linkedCount !== 1 ? "s" : ""} follow their building entrance and cannot be copied.`);
+      toast.info("Managed walking points not copied", `${linkedCount} entrance or pathway-generated point${linkedCount !== 1 ? "s" : ""} follow their owner and cannot be copied.`);
     } else {
       toast.success("Copied", `${nodes.length} waypoint${nodes.length !== 1 ? "s" : ""} copied (Ctrl+V to paste).`);
     }
@@ -4450,7 +4644,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
       return;
     }
     if (linkedCount > 0) {
-      toast.info("Entrance waypoints excluded", `${linkedCount} entrance waypoint${linkedCount !== 1 ? "s" : ""} follow their building entrance and cannot be duplicated.`);
+      toast.info("Managed walking points excluded", `${linkedCount} entrance or pathway-generated point${linkedCount !== 1 ? "s" : ""} follow their owner and cannot be duplicated.`);
     }
     outdoorNavClipboardRef.current = { nodes: structuredClone(nodes), edges: structuredClone(edges) };
     pasteOffsetRef.current = 25;
@@ -4536,8 +4730,9 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
         const pathIds = paths.filter((p) => multiSelected.includes(p.id)).map((p) => p.id);
         if (pathIds.length > 0 && bIds.length === 0 && mIds.length === 0 && daIds.length === 0) {
           const next: Campus = { ...campus, paths: paths.filter((p) => !pathIds.includes(p.id)) };
-          onUpdate(next);
-          pushHistory(next);
+          const reconciled = reconcilePathwayNavigation(next, genId);
+          onUpdate(reconciled);
+          pushHistory(reconciled);
           setMultiSelected([]);
           setSelected(null);
           setSelectedPathPoint(null);
@@ -4580,12 +4775,20 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
         }
         else if (selected.type === "navNode") {
           // Single waypoint delete: deterministic connected-edge cleanup.
+          if (navNodes.find((node) => node.id === selected.id)?.generatedFromPathVertices?.length) {
+            toast.info("Pathway walking point is managed automatically", "Edit or delete the physical Pathway instead.");
+            return;
+          }
           const next = removeNavNode(navNodes, navEdges, selected.id);
           const nextCampus = { ...campus, navNodes: next.nodes, navEdges: next.edges };
           onUpdate(nextCampus);
           pushHistory(nextCampus);
         }
         else if (selected.type === "navEdge") {
+          if (isPathwayGeneratedEdge(navEdges.find((edge) => edge.id === selected.id))) {
+            toast.info("Pathway walking path is managed automatically", "Edit or delete the owning physical Pathway instead.");
+            return;
+          }
           // Single edge delete — never leaves a dangling reference.
           const nextCampus = { ...campus, navEdges: navEdges.filter((e2) => e2.id !== selected.id) };
           onUpdate(nextCampus);
@@ -4606,8 +4809,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
         // B5 Phase 5.12 — Escape while editing one path inside its network
         // returns to the WHOLE-NETWORK selection (group stays intact).
         if (pathMemberEditId) {
-          setPathMemberEditId(null);
-          setSelectedPathPoint(null);
+          exitPathMemberEditToNetwork();
           return;
         }
         setDP([]);
@@ -4652,7 +4854,12 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
         }
         if (e.key === "m" || e.key === "M") { if (canUseTool("marker")) switchTool("marker"); }
         if (e.key === "b" || e.key === "B") { if (canUseTool("building")) switchTool("building"); }
-        if (e.key === "p" || e.key === "P") { if (canUseTool("path")) switchTool("path"); }
+        if (e.key === "p" || e.key === "P") {
+          if (canUseTool("path")) {
+            switchTool("path");
+            if (layer === "campus") setPathSettingsOpen(true);
+          }
+        }
         if (e.key === "e" || e.key === "E") { if (canUseTool("erase")) switchTool("erase"); }
         if (e.key === "x" || e.key === "X") { if (canUseTool("erase")) switchTool("erase"); }
         if (e.key === "a" || e.key === "A") { if (canUseTool("building")) switchTool("building"); }
@@ -4713,7 +4920,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
               dx,
               dy,
             );
-            onUpdate({
+            onUpdate(reconcilePathwayNavigation({
               ...campus,
               buildings: nextBuildings,
               navNodes: movedNavNodes.map((n) =>
@@ -4725,7 +4932,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
               markers: markers.map((m) => multiSelected.includes(m.id) ? { ...m, x: m.x + dx, y: m.y + dy } : m),
               decorAssets: decorAssets.map((d) => multiSelected.includes(d.id) ? { ...d, x: d.x + dx, y: d.y + dy } : d),
               paths: paths.map((p) => multiSelected.includes(p.id) ? { ...p, points: p.points.map((pt) => ({ ...pt, x: pt.x + dx, y: pt.y + dy })) } : p),
-            });
+            }, genId));
             return;
           }
           if (!selected) return;
@@ -4751,13 +4958,13 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
           } else if (selected.type === "decorAsset") {
             onUpdate({ ...campus, decorAssets: decorAssets.map((d) => d.id === selected.id ? { ...d, x: d.x + dx, y: d.y + dy } : d) });
           } else if (selected.type === "path") {
-            onUpdate({
+            onUpdate(reconcilePathwayNavigation({
               ...campus,
               paths: paths.map((p) => p.id === selected.id ? { ...p, points: p.points.map((pt) => ({ ...pt, x: pt.x + dx, y: pt.y + dy })) } : p),
-            });
+            }, genId));
           } else if (selected.type === "navNode") {
             const n = outdoorNodes.find((x) => x.id === selected.id);
-            if (!n || n.entranceId) return;
+            if (!n || n.entranceId || n.generatedFromPathVertices?.length) return;
             onUpdate({
               ...campus,
               navNodes: navNodes.map((x) => x.id === selected.id
@@ -4783,14 +4990,15 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
       }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "d") {
         e.preventDefault();
-        if (layer === "navigation") { duplicateOutdoorNavSelection(); return; }
+        // B8 Phase 1: duplicate nav selection when a nav node is selected.
+        if (selected?.type === "navNode" || multiSelected.some((id) => navNodes.some((n) => n.id === id))) { duplicateOutdoorNavSelection(); return; }
         duplicateOutdoorSelection();
         return;
       }
     };
     window.addEventListener("keydown", k);
     return () => window.removeEventListener("keydown", k);
-  }, [selected, selectedPathPoint, tool, layer, buildings, markers, paths, multiSelected, navNodes, navEdges, decorAssets, outdoorNodes, cw, ch, syncEntranceNodePositions, deleteNavSelection, removeNavNode, onDeleteBuilding, undoEdit, redoEdit, runSave, pushHistory, campus, onUpdate, switchTool, switchLayer, copyOutdoorSelection, pasteOutdoorSelection, duplicateOutdoorSelection, copyOutdoorNavSelection, pasteOutdoorNavSelection, duplicateOutdoorNavSelection, pathMemberEditId]);
+  }, [selected, selectedPathPoint, tool, layer, buildings, markers, paths, multiSelected, navNodes, navEdges, decorAssets, outdoorNodes, cw, ch, syncEntranceNodePositions, deleteNavSelection, removeNavNode, onDeleteBuilding, undoEdit, redoEdit, runSave, pushHistory, campus, onUpdate, switchTool, switchLayer, copyOutdoorSelection, pasteOutdoorSelection, duplicateOutdoorSelection, copyOutdoorNavSelection, pasteOutdoorNavSelection, duplicateOutdoorNavSelection, pathMemberEditId, exitPathMemberEditToNetwork]);
 
   // ── Space keyup: restore previous tool when space is released (hold-to-pan) ──
   useEffect(() => {
@@ -4836,6 +5044,8 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
   const selectedEntranceDoorOptions = selEntrance && selEntranceParent
     ? indoorDoorOptionsForEntrance(campus, selEntranceParent.id, selEntrance.id)
     : [];
+  const selPath = effectiveSelected?.type === "path" ? paths.find((path) => path.id === effectiveSelected.id) : undefined;
+  const pathNavigationLegacy = !!selPath && pathwayHasLegacyNavigationChain(selPath, navNodes, navEdges);
   const selMkr = effectiveSelected?.type === "marker" ? markers.find((m) => m.id === effectiveSelected.id) : undefined;
   const selDecorAsset = effectiveSelected?.type === "decorAsset" ? (campus.decorAssets ?? []).find((d) => d.id === effectiveSelected.id) : undefined;
 
@@ -4920,15 +5130,104 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
               ? "crosshair"
               : "default";
 
-  const activeLayer = LAYERS.find((l) => l.id === layer)!;
+  const isUnifiedCampusWorkspace = layer === "campus" || layer === "navigation";
+  const navigationVisible = showCampusNavOverlay && layer !== "events";
 
   // ── Tool config for compact palette — contextual per active layer ──
-  // Each layer exposes only the tools that genuinely apply to it (e.g.
-  // Navigation = Select/Pan/Add Waypoint/Connect Path/Remove; no campus
-  // building or Marker tools, and no navigation tools on the Campus layer).
+  // Campus + Navigation share this one canonical rail. LAYER_TOOLS remains
+  // available for legacy shortcuts and the separate Events workspace, but is
+  // never rendered alongside the unified Campus tool list.
   const layerTools = LAYER_TOOLS[layer] ?? LAYER_TOOLS.campus;
-  const toolConfig: { id: SimpleTool; icon: React.ElementType; label: string; shortcut: string; hint: string }[] =
-    layerTools.map((t) => ({ id: t.id as SimpleTool, icon: t.icon, label: t.label, shortcut: t.key, hint: t.hint }));
+  const toolConfig: UnifiedCampusTool[] = isUnifiedCampusWorkspace
+    ? UNIFIED_CAMPUS_TOOLS
+    : layerTools.map((t) => ({
+        key: `${layer}-${t.id}`,
+        id: t.id as SimpleTool,
+        icon: t.icon,
+        label: t.label,
+        shortcut: t.key,
+        hint: t.hint,
+        domain: "context" as const,
+      }));
+
+  const activateToolbarTool = (descriptor: UnifiedCampusTool) => {
+    if (descriptor.domain === "navigation") {
+      const wasHidden = !navigationVisible;
+      if (layer !== "navigation") switchLayer("navigation");
+      switchTool(descriptor.id);
+      if (wasHidden) {
+        setShowCampusNavOverlay(true);
+        toast.info("Navigation shown", "Walking Points and walking paths are now visible.");
+      }
+      return;
+    }
+    if (descriptor.domain === "physical") {
+      if (layer !== "campus") switchLayer("campus");
+      switchTool(descriptor.id);
+      setPathSettingsOpen(descriptor.key === "pathway");
+      return;
+    }
+    if (descriptor.domain === "shared") {
+      const targetLayer: EditorLayer = navigationVisible ? "navigation" : "campus";
+      if (layer !== targetLayer) switchLayer(targetLayer);
+    }
+    switchTool(descriptor.id);
+  };
+
+  const toggleCampusNavigation = () => {
+    if (navigationVisible) {
+      setShowCampusNavOverlay(false);
+      if (layer === "navigation") switchLayer("campus");
+      else switchTool("select");
+      return;
+    }
+    setShowCampusNavOverlay(true);
+    if (layer !== "navigation") switchLayer("navigation");
+    else switchTool("select");
+    toast.info("Navigation shown", "Walking Points and walking paths are now visible.");
+  };
+
+  const connectEntranceToWalkingNetwork = useCallback((buildingId: string, entranceId: string) => {
+    const parent = buildings.find((building) => building.id === buildingId);
+    const entrance = parent?.entrances?.find((item) => item.id === entranceId);
+    if (!parent || !entrance) return;
+    const position = entranceWorldPosition(parent, entrance);
+
+    // Reuse the existing safe entrance-node + Connect workflow. This does not
+    // infer nearby Pathways or create an automatic proximity edge.
+    if (layer !== "navigation") switchLayer("navigation");
+    switchTool("path");
+    setShowCampusNavOverlay(true);
+    const nodeId = ensureEntranceNavNode(buildingId, entranceId, position.x, position.y);
+    if (!nodeId) return;
+    setNavConnectStart(nodeId);
+    setNavPreview({ x: position.x, y: position.y });
+    setNavPreviewPins([]);
+    navConnectBendGroupsRef.current = [];
+    setSelected({ type: "navNode", id: nodeId });
+    toast.info("Select a Walking Point", "Click a Walking Point or pathway endpoint to connect this entrance.");
+  }, [buildings, ensureEntranceNavNode, layer, switchLayer, switchTool, toast]);
+
+  const toggleTestRoute = () => {
+    if (testNavOpen && navigationVisible) {
+      setTestNavOpen(false);
+      setHighlightedRoute(null);
+      return;
+    }
+    const wasHidden = !navigationVisible;
+    if (layer !== "navigation") switchLayer("navigation");
+    switchTool("select");
+    setShowCampusNavOverlay(true);
+    setTestNavOpen(true);
+    if (wasHidden) toast.info("Navigation shown", "Walking Points and walking paths are now visible.");
+  };
+
+  const toolbarToolIsActive = (descriptor: UnifiedCampusTool) => {
+    if (tool !== descriptor.id) return false;
+    if (descriptor.domain === "physical") return layer === "campus";
+    if (descriptor.domain === "navigation") return layer === "navigation";
+    return true;
+  };
 
   return (
     <div className="flex flex-col w-full flex-1" style={{ minHeight: 0 }}>
@@ -4942,22 +5241,27 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
           ═══════════════════════════════════════════════════════════════════ */}
       <div className="shrink-0 bg-card border-b border-border" style={campus.themeColor ? { borderBottomColor: campus.themeColor, borderBottomWidth: '2px' } : undefined}>
         {/* Row 1: Clean toolbar — balanced left/right with perfectly centered tools */}
-        <div className="flex items-center h-10 px-2 gap-0.5">
-          {/* ── Left section (flex-1 to balance right section) ── */}
-          <div className="flex-1 flex items-center gap-0.5 min-w-0">
-            <button onClick={handleBack}
-              className="flex items-center justify-center h-7 w-7 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-all shrink-0 group"
-              title="Back to campus list"
-            >
-              <ArrowLeft className="h-3.5 w-3.5 group-hover:-translate-x-0.5 transition-transform" />
-            </button>
+        <div
+          className="relative grid h-16 min-h-16 min-w-0 grid-cols-[minmax(0,1fr)_420px_minmax(0,1fr)] items-center gap-2 px-3"
+          data-testid="campus-editor-header"
+        >
+          {/* ── Left section — campus context, capped width for center alignment ── */}
+          <div className="flex min-w-0 max-w-full items-center gap-1.5 overflow-hidden">
+            <ToolbarTooltip tool="back" label="Back" shortcut="" hint="Return to the campus list.">
+              <button onClick={handleBack}
+                aria-label="Back to campus list"
+                className="flex items-center justify-center h-8 w-8 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-all shrink-0 group"
+              >
+                <ArrowLeft className="h-3.5 w-3.5 group-hover:-translate-x-0.5 transition-transform" />
+              </button>
+            </ToolbarTooltip>
             <span className="text-sm font-extrabold text-foreground truncate max-w-[100px] flex items-center gap-1" style={{ fontFamily: "var(--font-sans)" }}>
               {campus.themeColor && (
                 <span className="w-3 h-3 rounded shrink-0 inline-block" style={{ backgroundColor: campus.themeColor }} />
               )}
               {campus.name}
             </span>
-            <span className={cn("text-[8px] font-bold px-1 py-0.5 rounded-md border shrink-0 hidden sm:flex items-center gap-1",
+            <span className={cn("text-[8px] font-bold px-1.5 py-0.5 rounded-md border shrink-0 hidden sm:flex items-center gap-1",
               campus.publishStatus === "published"
                 ? isDirty
                   ? "bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800/30 text-amber-700 dark:text-amber-400"
@@ -4976,6 +5280,24 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
                 : campus.publishedAt ? "Draft" : "New"}
             </span>
 
+            <ToolbarTooltip tool="events" label="Events" shortcut="" hint="Manage campus events and temporary restrictions.">
+              <button
+                type="button"
+                onClick={() => switchLayer(layer === "events" ? "campus" : "events")}
+                aria-label="Events"
+                aria-pressed={layer === "events"}
+                className={cn(
+                  "flex h-8 shrink-0 items-center gap-1 rounded-md border px-2 text-[10px] font-bold transition-colors duration-200",
+                  layer === "events"
+                    ? "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400"
+                    : "border-border/70 text-muted-foreground hover:bg-muted hover:text-foreground"
+                )}
+              >
+                <Star className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">Events</span>
+              </button>
+            </ToolbarTooltip>
+
             {/* Drawing path indicator */}
             {drawingPath.length > 0 && (
               <div className="flex items-center gap-1 px-1.5 h-5 rounded-md border text-[9px] font-semibold shrink-0"
@@ -4985,265 +5307,380 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
               </div>
             )}
 
-            {/* Navigation edge-authoring status (B5 Phase 1) */}
-            {layer === "navigation" && tool === "path" && (
-              <div data-testid="nav-path-status"
-                className="flex items-center gap-1 px-2 h-5 rounded-md border text-[9px] font-semibold shrink-0"
-                style={{ background: "color-mix(in srgb,#16a34a 10%,transparent)", borderColor: "color-mix(in srgb,#16a34a 30%,transparent)", color: "#16a34a" }}>
-                {navConnectStart ? "Click destination · Shift for H/V · Esc to cancel" : "Select or place start point"}
-                {navConnectStart && (
-                  <button onClick={() => {
-                    setNavConnectStart(null);
-                    setNavPreview(null);
-                    setNavPreviewPins([]);
-                    setNavConnectBends([]);
-                    navConnectBendGroupsRef.current = [];
-                    connectRedoStackRef.current = [];
-                    setConnectBlocked(false);
-                  }} className="hover:opacity-70" aria-label="Cancel connection">
-                    <X className="h-2 w-2" />
-                  </button>
-                )}
-              </div>
-            )}
           </div>
 
-          {/* ── Center: Tool palette (main tools, highlighted, perfectly centered) ── */}
-          <div className="flex items-center justify-center">
-            <div data-testid="editor-toolbar" className="flex items-center gap-0.5 px-2 py-0.5 rounded-lg" style={{ background: "color-mix(in srgb, var(--muted) 30%, transparent)" }}>
-              {toolConfig.map((t) => (
-                <ToolbarTooltip key={t.id} tool={t.id} label={t.label} shortcut={t.shortcut} hint={t.hint} isActive={tool === t.id}>
-                  <button
-                    aria-label={t.label}
-                    title={t.label}
-                    onClick={() => switchTool(t.id)}
-                    className={cn(
-                      "flex items-center justify-center h-8 w-8 rounded-md transition-all",
-                      tool === t.id
-                        ? t.id === "erase"
-                          ? "bg-destructive text-destructive-foreground shadow-sm scale-105"
-                          : "bg-primary text-primary-foreground shadow-sm scale-105"
-                        : t.id === "erase"
-                          ? "text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                          : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                    )}
+          {/* ── Center: Tool palette — visually centered over canvas ── */}
+          <div className="relative flex h-full min-w-0 items-center justify-center overflow-visible">
+            <div
+              data-testid="editor-toolbar"
+                className="absolute left-1/2 top-1/2 flex shrink-0 -translate-x-1/2 -translate-y-1/2 items-center gap-1 whitespace-nowrap rounded-xl border border-border/70 bg-muted/40 px-3 py-1.5 shadow-sm"
+            >
+              {toolConfig.map((t) => {
+                const isActive = toolbarToolIsActive(t);
+                const isMutedNavigationTool = t.domain === "navigation" && !navigationVisible;
+                return (
+                  <Fragment key={t.key}>
+                    {t.dividerBefore && <div className="mx-1.5 h-5 w-px shrink-0 bg-border/70" />}
+                    <div className="relative flex shrink-0">
+                      <ToolbarTooltip tool={t.id} label={t.label} shortcut={t.shortcut} hint={t.hint} isActive={isActive}>
+                        <button
+                          aria-label={t.label}
+                          onClick={() => activateToolbarTool(t)}
+                          className={cn(
+                            "flex h-[34px] w-[34px] items-center justify-center rounded-md transition-colors duration-200",
+                            isActive
+                              ? t.id === "erase"
+                                ? "bg-destructive text-destructive-foreground shadow-sm"
+                                : "bg-primary text-primary-foreground shadow-sm"
+                              : t.id === "erase"
+                                ? isMutedNavigationTool
+                                  ? "text-muted-foreground/50 hover:bg-destructive/10 hover:text-destructive"
+                                  : "text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                                : isMutedNavigationTool
+                                  ? "text-muted-foreground/50 hover:bg-muted hover:text-foreground"
+                                  : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                          )}
+                        >
+                          <t.icon className="h-[15px] w-[15px]" />
+                        </button>
+                      </ToolbarTooltip>
+
+                      {t.key === "pathway" && (
+                        <AnimatePresence>
+                          {pathSettingsOpen && (
+                            <motion.div
+                              initial={{ opacity: 0, y: -4, scale: 0.98 }}
+                              animate={{ opacity: 1, y: 0, scale: 1 }}
+                              exit={{ opacity: 0, y: -4, scale: 0.98 }}
+                              transition={{ duration: 0.16, ease: "easeOut" }}
+                              className="pointer-events-auto absolute left-1/2 top-full z-50 mt-2 w-64 max-w-[calc(100vw-24px)] -translate-x-1/2 rounded-lg border border-border bg-card p-3 text-card-foreground shadow-xl"
+                              onMouseDown={(event) => event.stopPropagation()}
+                            >
+                              <div className="mb-2 flex items-center justify-between gap-2">
+                                <span className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-foreground">Pathway</span>
+                                <button
+                                  type="button"
+                                  onClick={() => setPathSettingsOpen(false)}
+                                  aria-label="Close Pathway settings"
+                                  className="rounded p-0.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                                >
+                                  <X className="h-3 w-3" />
+                                </button>
+                              </div>
+
+                              <div className="space-y-2.5">
+                                <div>
+                                  <div className="mb-1 text-[9px] font-bold text-muted-foreground">Type</div>
+                                  <div className="grid grid-cols-3 gap-1">
+                                    {PATH_PAINT_TYPES.map((type) => (
+                                      <button
+                                        key={type.value}
+                                        type="button"
+                                        onClick={() => {
+                                          setPathPaintType(type.value);
+                                          setPathPaintWidth(type.defaultWidth);
+                                        }}
+                                        aria-pressed={pathPaintType === type.value}
+                                        className={cn(
+                                          "min-h-8 rounded-md border px-1.5 py-1 text-[9px] font-bold leading-tight transition-colors",
+                                          pathPaintType === type.value
+                                            ? "border-primary/40 bg-primary/10 text-primary"
+                                            : "border-border text-muted-foreground hover:bg-muted hover:text-foreground"
+                                        )}
+                                      >
+                                        {type.label}
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
+
+                                <div>
+                                  <div className="mb-1 flex items-center justify-between text-[9px] font-bold text-muted-foreground">
+                                    <span>Width</span>
+                                    <span className="tabular-nums text-foreground">{pathPaintWidth}</span>
+                                  </div>
+                                  <input
+                                    aria-label="Pathway width"
+                                    type="range"
+                                    min={6}
+                                    max={36}
+                                    step={2}
+                                    value={pathPaintWidth}
+                                    onChange={(event) => setPathPaintWidth(Number(event.target.value))}
+                                    className="w-full accent-primary"
+                                  />
+                                </div>
+
+                                <div className="flex items-start gap-1.5 border-t border-border/60 pt-2 text-[9px] leading-snug text-muted-foreground">
+                                  <Route className="mt-0.5 h-3 w-3 shrink-0 text-primary" />
+                                  <span>Drag on the canvas to draw a path.</span>
+                                  <HelpCircle
+                                    className="mt-0.5 h-3 w-3 shrink-0"
+                                    aria-label="Pathway authoring help"
+                                    title="Guides help alignment. Hold Shift for 45° angles."
+                                  />
+                                </div>
+                              </div>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+                      )}
+                    </div>
+                  </Fragment>
+                );
+              })}
+              {isUnifiedCampusWorkspace && (
+                <>
+                  <ToolbarTooltip
+                    tool="navigationVisibility"
+                    label={navigationVisible ? "Hide Navigation" : "Show Navigation"}
+                    shortcut=""
+                    hint={navigationVisible ? "Hide the walking network and return focus to the physical campus." : "Show and edit Walking Points and Walking Paths."}
+                    isActive={navigationVisible}
                   >
-                    <t.icon className="h-4 w-4" />
-                  </button>
-                </ToolbarTooltip>
-              ))}
+                    <button
+                      type="button"
+                      onClick={toggleCampusNavigation}
+                      aria-label={navigationVisible ? "Hide the walking network" : "Show and edit the walking network"}
+                      aria-pressed={navigationVisible}
+                      className={cn(
+                        "flex h-[34px] w-[34px] items-center justify-center rounded-md border transition-colors duration-200",
+                        navigationVisible
+                          ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 shadow-sm"
+                          : "border-border/60 text-muted-foreground/60 hover:bg-muted hover:text-foreground"
+                      )}
+                    >
+                      {navigationVisible ? <EyeOff className="h-[15px] w-[15px]" /> : <Eye className="h-[15px] w-[15px]" />}
+                    </button>
+                  </ToolbarTooltip>
+                  <div className="mx-1.5 h-5 w-px shrink-0 bg-border/70" />
+                  <ToolbarTooltip
+                    tool="path"
+                    label="Test Route"
+                    shortcut=""
+                    hint="Choose a start and destination to check whether the walking network can produce a valid route."
+                    isActive={testNavOpen}
+                  >
+                    <button
+                      aria-label="Test Route"
+                      onClick={toggleTestRoute}
+                      aria-pressed={testNavOpen}
+                      className={cn(
+                        "flex h-[34px] w-[34px] items-center justify-center rounded-md border transition-colors duration-200",
+                        testNavOpen
+                          ? "border-blue-500/40 bg-blue-500/15 text-blue-600 dark:text-blue-400 shadow-sm"
+                          : navigationVisible
+                            ? "border-border/70 text-blue-600 dark:text-blue-400 hover:bg-blue-500/10"
+                            : "border-border/60 text-muted-foreground/50 hover:bg-blue-500/10 hover:text-blue-600 dark:hover:text-blue-400"
+                      )}
+                    >
+                      <Route className="h-[15px] w-[15px]" />
+                    </button>
+                  </ToolbarTooltip>
+                </>
+              )}
             </div>
+
+            <AnimatePresence>
+              {navigationVisible && layer === "navigation" && tool === "path" && (
+                <motion.div
+                  key={navConnectStart ? "connect-destination-hint" : "connect-start-hint"}
+                  data-testid="nav-path-status"
+                  initial={{ opacity: 0, y: -4 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -4 }}
+                  transition={{ duration: 0.18, ease: "easeOut" }}
+                  className="pointer-events-none absolute left-1/2 top-1/2 z-50 mt-[29px] -translate-x-1/2 whitespace-nowrap rounded-md border border-border bg-popover px-2.5 py-1.5 text-[10px] font-semibold text-popover-foreground shadow-md"
+                >
+                  {navConnectStart
+                    ? "Now select a destination. Click empty space to add a bend. Esc to cancel."
+                    : "Select or place a start point."}
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
 
-          {/* ── Right section (flex-1 to balance left, with secondary controls) ── */}
-          <div className="flex-1 flex items-center justify-end gap-0.5 min-w-0">
+          {/* ── Right section — grouped: history | view | editor | save/publish ── */}
+          <div className="flex min-h-0 min-w-0 max-w-full items-center justify-self-end gap-1 overflow-hidden pr-1">
             {/* Undo / Redo — disabled at history bounds with step-count tooltips */}
             <div className="flex items-center gap-0.5">
-              <button onClick={undoEdit}
-                disabled={!canUndo}
-                className={cn(
-                  "flex items-center justify-center h-7 w-7 rounded-md transition-all",
-                  canUndo ? "text-muted-foreground hover:text-foreground hover:bg-muted" : "text-muted-foreground/30 cursor-not-allowed"
-                )}
-                title={canUndo ? `Undo (Ctrl+Z) — ${undoSteps} step${undoSteps !== 1 ? "s" : ""} available` : "Nothing to undo"}>
-                <Undo2 className="h-3.5 w-3.5" />
-              </button>
-              <button onClick={redoEdit}
-                disabled={!canRedo}
-                className={cn(
-                  "flex items-center justify-center h-7 w-7 rounded-md transition-all",
-                  canRedo ? "text-muted-foreground hover:text-foreground hover:bg-muted" : "text-muted-foreground/30 cursor-not-allowed"
-                )}
-                title={canRedo ? `Redo (Ctrl+Shift+Z) — ${redoSteps} step${redoSteps !== 1 ? "s" : ""} available` : "Nothing to redo"}>
-                <Redo2 className="h-3.5 w-3.5" />
-              </button>
+              <ToolbarTooltip tool="undo" label="Undo" shortcut="Ctrl + Z" hint="Reverse your most recent editor change.">
+                <button onClick={undoEdit}
+                  aria-label="Undo"
+                  disabled={!canUndo}
+                  className={cn(
+                    "flex items-center justify-center h-8 w-8 rounded-md transition-all",
+                    canUndo ? "text-muted-foreground hover:text-foreground hover:bg-muted" : "text-muted-foreground/30 cursor-not-allowed"
+                  )}>
+                  <Undo2 className="h-4 w-4" />
+                </button>
+              </ToolbarTooltip>
+              <ToolbarTooltip tool="redo" label="Redo" shortcut="Ctrl + Shift + Z" hint="Restore the most recently undone change.">
+                <button onClick={redoEdit}
+                  aria-label="Redo"
+                  disabled={!canRedo}
+                  className={cn(
+                    "flex items-center justify-center h-8 w-8 rounded-md transition-all",
+                    canRedo ? "text-muted-foreground hover:text-foreground hover:bg-muted" : "text-muted-foreground/30 cursor-not-allowed"
+                  )}>
+                  <Redo2 className="h-4 w-4" />
+                </button>
+              </ToolbarTooltip>
             </div>
 
             {/* Snap & zoom controls */}
-            <div className="hidden md:flex items-center gap-0.5">
-              <div className="w-px h-4 bg-border mx-0.5" />
-              <button
-                onClick={() => setSnapGrid(v => !v)}
-                className={cn(
-                  "flex items-center justify-center h-7 w-7 rounded-md transition-all",
-                  snapGrid ? "text-primary bg-primary/10" : "text-muted-foreground hover:text-foreground hover:bg-muted"
-                )}
-                title={`Grid snap ${snapGrid ? 'ON' : 'OFF'} (Ctrl+G)`}
-              >
-                <Grid3X3 className="h-3.5 w-3.5" />
-              </button>
-              <button
-                onClick={() => setEdgeSnap(v => !v)}
-                className={cn(
-                  "flex items-center justify-center h-7 w-7 rounded-md transition-all",
-                  edgeSnap ? "text-primary bg-primary/10" : "text-muted-foreground hover:text-foreground hover:bg-muted"
-                )}
-                title={`Edge snap ${edgeSnap ? 'ON' : 'OFF'}`}
-              >
-                <Magnet className="h-3.5 w-3.5" />
-              </button>
-              <div className="w-px h-4 bg-border mx-0.5" />
-              <button onClick={zoomIn}
-                className="flex items-center justify-center h-7 w-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
-                title="Zoom in">
-                <ZoomIn className="h-3.5 w-3.5" />
-              </button>
+            <div className="w-px h-5 bg-border mx-0.5 shrink-0" />
+            <div className="hidden xl:flex items-center gap-0.5">
+              <ToolbarTooltip tool="gridSnap" label="Grid Snap" shortcut="Ctrl + G" hint={snapGrid ? "Objects snap to the canvas grid while you place or move them." : "Grid snapping is off. Objects can move freely."}>
+                <button
+                  onClick={() => setSnapGrid(v => !v)}
+                  aria-label="Grid Snap"
+                  aria-pressed={snapGrid}
+                  className={cn(
+                    "flex items-center justify-center h-8 w-8 rounded-md transition-all",
+                    snapGrid ? "text-primary bg-primary/10" : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                  )}
+                >
+                  <Grid3X3 className="h-4 w-4" />
+                </button>
+              </ToolbarTooltip>
+              <ToolbarTooltip tool="edgeSnap" label="Edge Snap" shortcut="" hint={edgeSnap ? "Helps align objects and path points with nearby edges." : "Edge snapping is off."}>
+                <button
+                  onClick={() => setEdgeSnap(v => !v)}
+                  aria-label="Edge Snap"
+                  aria-pressed={edgeSnap}
+                  className={cn(
+                    "flex items-center justify-center h-8 w-8 rounded-md transition-all",
+                    edgeSnap ? "text-primary bg-primary/10" : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                  )}
+                >
+                  <Magnet className="h-4 w-4" />
+                </button>
+              </ToolbarTooltip>
+              <div className="w-px h-5 bg-border mx-0.5" />
+              <ToolbarTooltip tool="zoomIn" label="Zoom In" shortcut="" hint="Zoom closer into the canvas.">
+                <button onClick={zoomIn}
+                  aria-label="Zoom In"
+                  className="flex items-center justify-center h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-all">
+                  <ZoomIn className="h-4 w-4" />
+                </button>
+              </ToolbarTooltip>
               <span className="text-[9px] font-mono text-muted-foreground/50 w-8 text-center tabular-nums">{Math.round(zoom * 100)}%</span>
-              <button onClick={zoomOut}
-                className="flex items-center justify-center h-7 w-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
-                title="Zoom out">
-                <ZoomOut className="h-3.5 w-3.5" />
-              </button>
-              <button onClick={resetView}
-                className="flex items-center justify-center h-7 w-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
-                title="Reset view (0)">
-                <Maximize2 className="h-3 w-3" />
-              </button>
+              <ToolbarTooltip tool="zoomOut" label="Zoom Out" shortcut="" hint="Zoom farther out from the canvas.">
+                <button onClick={zoomOut}
+                  aria-label="Zoom Out"
+                  className="flex items-center justify-center h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-all">
+                  <ZoomOut className="h-4 w-4" />
+                </button>
+              </ToolbarTooltip>
+              <ToolbarTooltip tool="resetView" label="Reset View" shortcut="0" hint="Return the canvas to its default zoom and position.">
+                <button onClick={resetView}
+                  aria-label="Reset View"
+                  className="flex items-center justify-center h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-all">
+                  <Maximize2 className="h-3.5 w-3.5" />
+                </button>
+              </ToolbarTooltip>
             </div>
 
+            <div className="w-px h-5 bg-border mx-0.5 shrink-0" />
             {onOpenCanvasSettings && (
-              <button
-                onClick={onOpenCanvasSettings}
-                className="hidden md:flex items-center justify-center h-7 w-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
-                title="Canvas Settings"
-              >
-                <Settings2 className="h-3.5 w-3.5" />
-              </button>
+              <ToolbarTooltip tool="canvasSettings" label="Canvas Settings" shortcut="" hint="Adjust canvas display and editing preferences.">
+                <button
+                  onClick={onOpenCanvasSettings}
+                  aria-label="Canvas Settings"
+                  className="hidden xl:flex items-center justify-center h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
+                >
+                  <Settings2 className="h-4 w-4" />
+                </button>
+              </ToolbarTooltip>
             )}
-            <button
-              onClick={() => setShowCheatSheet(true)}
-              className="flex items-center justify-center h-7 w-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
-              title="Keyboard shortcuts (?)"
-              aria-label="Keyboard shortcuts"
-            >
-              <Keyboard className="h-3.5 w-3.5" />
-            </button>
-
-            <div className="flex items-center gap-1 ml-0.5">
+            <ToolbarTooltip tool="keyboardShortcuts" label="Keyboard Shortcuts" shortcut="?" hint="View the available keyboard controls for the Map Builder.">
               <button
-                onClick={runSave}
-                disabled={saving || isProcessing || !isDirty}
-                className={cn(
-                  "flex items-center gap-1 h-7 px-2 rounded-md border text-[9px] font-bold transition-all disabled:opacity-50 disabled:cursor-not-allowed",
-                  isDirty ? "border-primary text-primary bg-primary/10" : "border-border text-foreground hover:bg-muted"
-                )}
+                onClick={() => setShowCheatSheet(true)}
+                className="flex items-center justify-center h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
+                aria-label="Keyboard shortcuts"
               >
-                {saving ? (
-                  <><Loader2 className="w-3 h-3 animate-spin" /> Saving</>
-                ) : (
-                  <><MapIcon className="h-3 w-3" /> {isDirty ? "Save" : "Saved"}</>
-                )}
+                <Keyboard className="h-4 w-4" />
               </button>
+            </ToolbarTooltip>
 
-              <button
-                onClick={() => {
-                  if (isProcessing) return;
-                  // B7 Phase 2: PUBLISH gating lives in PrePublishDialog, which
-                  // consumes the canonical live validation list and blocks on
-                  // errors / requires explicit warning confirmation there —
-                  // severity is the source of truth, never a type hard-code.
-                  setShowPublishConfirm(true);
-                }}
-                disabled={
-                  !publishingEnabled || isProcessing || isDirty ||
-                  (!isDirty && campus.publishStatus === "published" && !hasDraftChanges && campus.updatedAt === campus.publishedAt)
-                }
-                title={
+            <div className="w-px h-5 bg-border mx-0.5 shrink-0" />
+            <div className="flex items-center gap-2">
+              <ToolbarTooltip
+                tool="save"
+                label="Save"
+                shortcut="Ctrl + S"
+                hint={isDirty ? "Save your current draft changes." : "Your current draft is saved."}
+              >
+                <button
+                  onClick={runSave}
+                  aria-label="Save"
+                  disabled={saving || isProcessing || !isDirty}
+                  className={cn(
+                    "flex items-center gap-1.5 h-8 px-2.5 rounded-md border text-[10px] font-bold transition-all disabled:opacity-50 disabled:cursor-not-allowed",
+                    isDirty ? "border-primary text-primary bg-primary/10" : "border-border text-foreground hover:bg-muted"
+                  )}
+                >
+                  {saving ? (
+                    <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Saving</>
+                  ) : (
+                    <><MapIcon className="h-3.5 w-3.5" /> <span className="hidden xl:inline">{isDirty ? "Save" : "Saved"}</span></>
+                  )}
+                </button>
+              </ToolbarTooltip>
+
+              <ToolbarTooltip
+                tool="publish"
+                label="Publish"
+                shortcut=""
+                hint={
                   !publishingEnabled
-                    ? "Publishing becomes available in A6"
+                    ? "Publishing is currently unavailable."
                     : isDirty
-                    ? "Save your draft first before publishing"
+                    ? "Save your latest changes before publishing."
                     : campus.publishStatus === "published" && !hasDraftChanges && campus.updatedAt === campus.publishedAt
-                      ? "Already published — make changes and save to enable publishing"
-                      : "Publish the current draft to make it live"
+                      ? "Make and save a new change before publishing again."
+                      : "Publish the saved campus so it becomes available to users."
                 }
-                className={cn(
-                  "flex items-center gap-1 h-7 px-2 rounded-md text-[9px] font-extrabold transition-all shadow-sm",
-                  !publishingEnabled
-                    ? "bg-muted text-muted-foreground cursor-not-allowed"
-                    : isProcessing
-                    ? "bg-primary/70 text-primary-foreground/70 cursor-not-allowed"
-                    : isDirty
-                      ? "bg-muted text-muted-foreground cursor-not-allowed"
-                      : !isDirty && campus.publishStatus === "published" && !hasDraftChanges && campus.updatedAt === campus.publishedAt
-                        ? "bg-muted text-muted-foreground cursor-not-allowed"
-                        : "bg-primary text-primary-foreground hover:bg-primary/90"
-                )}
               >
-                {isProcessing ? (
-                  <><Loader2 className="w-3 h-3 animate-spin" /> Publishing</>
-                ) : (
-                  <><Globe className="h-3 w-3" /> Publish</>
-                )}
-              </button>
+                <button
+                  onClick={() => {
+                    if (isProcessing) return;
+                    // B7 Phase 2: PUBLISH gating lives in PrePublishDialog, which
+                    // consumes the canonical live validation list and blocks on
+                    // errors / requires explicit warning confirmation there —
+                    // severity is the source of truth, never a type hard-code.
+                    setShowPublishConfirm(true);
+                  }}
+                  aria-label="Publish"
+                  disabled={
+                    !publishingEnabled || isProcessing || isDirty ||
+                    (!isDirty && campus.publishStatus === "published" && !hasDraftChanges && campus.updatedAt === campus.publishedAt)
+                  }
+                  className={cn(
+                    "flex items-center gap-1.5 h-8 px-2.5 rounded-md text-[10px] font-extrabold transition-all shadow-sm",
+                    !publishingEnabled
+                      ? "bg-muted text-muted-foreground cursor-not-allowed"
+                      : isProcessing
+                      ? "bg-primary/70 text-primary-foreground/70 cursor-not-allowed"
+                      : isDirty
+                        ? "bg-muted text-muted-foreground cursor-not-allowed"
+                        : !isDirty && campus.publishStatus === "published" && !hasDraftChanges && campus.updatedAt === campus.publishedAt
+                          ? "bg-muted text-muted-foreground cursor-not-allowed"
+                          : "bg-primary text-primary-foreground hover:bg-primary/90"
+                  )}
+                >
+                  {isProcessing ? (
+                    <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Publishing</>
+                  ) : (
+                    <><Globe className="h-3.5 w-3.5" /> <span className="hidden xl:inline">Publish</span></>
+                  )}
+                </button>
+              </ToolbarTooltip>
             </div>
           </div>
         </div>
 
-        {/* ── Layer bar (Row 2) — animated with smooth transitions ── */}
-        <motion.div layout className="flex items-center gap-1 px-3 pb-1.5 overflow-x-auto no-scrollbar">
-          {LAYERS.map((l) => {
-            const Icon = l.icon;
-            const isActive = layer === l.id;
-            return (
-              <motion.button
-                key={l.id}
-                layout
-                onClick={() => switchLayer(l.id)}
-                className={cn(
-                  "relative flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[10px] font-bold shrink-0 whitespace-nowrap",
-                  !isActive && "text-muted-foreground hover:text-foreground hover:bg-muted/60"
-                )}
-                animate={{
-                  background: isActive ? l.accent : "transparent",
-                  color: isActive ? l.color : "var(--muted-foreground)",
-                  scale: isActive ? 1 : 1,
-                }}
-                transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
-                title={l.hint}
-              >
-                {/* Active indicator bar — smoothly slides between layers */}
-                {isActive && (
-                  <motion.div
-                    layoutId="active-layer-bg"
-                    className="absolute inset-0 rounded-md"
-                    style={{
-                      background: l.accent,
-                      boxShadow: `0 0 0 1px ${l.color}40`,
-                    }}
-                    transition={{ type: "spring", stiffness: 400, damping: 32 }}
-                  />
-                )}
-
-                {/* Icon with color transition */}
-                <motion.div
-                  className="relative z-10 flex items-center gap-1.5"
-                  animate={{ color: isActive ? l.color : "var(--muted-foreground)" }}
-                  transition={{ duration: 0.3, ease: "easeOut" }}
-                >
-                  <Icon className="h-3 w-3 shrink-0" />
-                  {l.label}
-                </motion.div>
-              </motion.button>
-            );
-          })}
-          {layer === "campus" && (
-            <button
-              type="button"
-              onClick={() => setShowCampusNavOverlay((v) => !v)}
-              aria-pressed={showCampusNavOverlay}
-              className={cn(
-                "ml-1 flex items-center justify-center h-6 w-6 rounded-md border transition-all shrink-0",
-                showCampusNavOverlay
-                  ? "border-green-500/40 bg-green-500/10 text-green-600"
-                  : "border-border text-muted-foreground hover:text-foreground hover:bg-muted/60"
-              )}
-              title={showCampusNavOverlay ? "Hide navigation overlay" : "Show navigation overlay"}
-            >
-              {showCampusNavOverlay ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
-            </button>
-          )}
-        </motion.div>
       </div>
 
       {/* ── Context menu ── */}
@@ -5266,6 +5703,39 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
           the shared svgRef to null — silently breaking every subsequent
           pointer→world conversion (waypoints placed at x=0,y=0 in the real
           browser). switchLayer already resets all transient tool state. */}
+      <AnimatePresence>
+        {pathChoiceMenu && (
+          <motion.div
+            initial={{ opacity: 0, y: 4 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 4 }}
+            transition={{ duration: 0.16 }}
+            className="fixed z-[120] min-w-[190px] rounded-xl border border-border bg-card p-1.5 shadow-xl"
+            style={{ left: pathChoiceMenu.x, top: pathChoiceMenu.y }}
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div className="px-2 py-1 text-[9px] font-extrabold uppercase tracking-widest text-muted-foreground">Select Pathway</div>
+            {pathChoiceMenu.pathIds.map((pathId) => (
+              <button
+                key={pathId}
+                type="button"
+                className="flex w-full items-center rounded-lg px-2 py-2 text-left text-[10px] font-semibold text-foreground hover:bg-muted"
+                onClick={() => {
+                  setMultiSelected([]);
+                  setShowAlignTools(false);
+                  setSelectedPathPoint(null);
+                  setPathMemberEditId(null);
+                  setSelected({ type: "path", id: pathId });
+                  setPathChoiceMenu(null);
+                }}
+              >
+                {paths.find((path) => path.id === pathId)?.name ?? "Pathway"}
+              </button>
+            ))}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
         <div className="flex flex-1 overflow-hidden min-h-0 relative">
         {/* ── Left: Hierarchy Panel (collapsible) ── */}
         <div className="flex items-stretch">
@@ -5277,59 +5747,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
             }}
           >
             <div className="w-56 h-full bg-card border-r border-border flex flex-col">
-              <>
-                {tool === "path" && layer !== "navigation" && (
-                  <div data-testid="paint-controls" className="border-b border-border p-2 space-y-2">
-                    <div className="flex items-center gap-1.5 text-[9px] font-extrabold uppercase tracking-widest text-muted-foreground">
-                      <GitBranch className="h-3 w-3" />
-                      Pathway Segment
-                      <HelpCircle
-                        className="h-3 w-3"
-                        aria-label="Pathway authoring help"
-                        title="Drag to create a straight path. Alignment guides help with horizontal, vertical and diagonal placement. Hold Shift to constrain to 45-degree angles. Select endpoints to extend or join paths."
-                      />
-                    </div>
-                    <p className="text-[10px] leading-snug text-muted-foreground">
-                      Drag to create a straight path. Guides help alignment. Hold Shift for 45-degree angles. Select endpoints to extend or join paths.
-                    </p>
-                    <div className="space-y-1">
-                      {PATH_PAINT_TYPES.map((type) => (
-                        <button
-                          key={type.value}
-                          type="button"
-                          onClick={() => {
-                            setPathPaintType(type.value);
-                            setPathPaintWidth(type.defaultWidth);
-                          }}
-                          aria-pressed={pathPaintType === type.value}
-                          className={cn(
-                            "w-full rounded-md border px-2 py-1 text-left text-[10px] font-bold",
-                            pathPaintType === type.value ? "border-primary/40 bg-primary/10 text-primary" : "border-border text-muted-foreground hover:text-foreground hover:bg-muted/50"
-                          )}
-                        >
-                          {type.label}
-                        </button>
-                      ))}
-                    </div>
-                    <div>
-                      <div className="mb-1 flex items-center justify-between text-[9px] font-bold text-muted-foreground">
-                        <span>Width</span>
-                        <span>{pathPaintWidth}</span>
-                      </div>
-                      <input
-                        aria-label="Pathway width"
-                        type="range"
-                        min={6}
-                        max={36}
-                        step={2}
-                        value={pathPaintWidth}
-                        onChange={(e) => setPathPaintWidth(Number(e.target.value))}
-                        className="w-full accent-primary"
-                      />
-                    </div>
-                  </div>
-                )}
-                <div className="min-h-0 flex-1" data-testid={layer === "navigation" ? "navigation-hierarchy-sidebar" : undefined}>
+              <div className="min-h-0 flex-1" data-testid={layer === "navigation" ? "navigation-hierarchy-sidebar" : undefined}>
                   <HierarchyPanel
                     campus={campus}
                     selected={selected}
@@ -5337,7 +5755,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
                     onOpenFloor={requestOpenFloor}
                     onAddBuilding={onAddBuilding}
                     onUpdateBuilding={onUpdateBuilding}
-                    onUpdate={(c) => { pushHistory(); onUpdate({ ...campus, ...c }); }}
+                    onUpdate={(c) => { const next = reconcilePathwayNavigation({ ...campus, ...c }, genId); pushHistory(); onUpdate(next); }}
                     pushHistory={pushHistory}
                     toast={toast}
                     onSelectBuildingType={(type) => {
@@ -5348,10 +5766,9 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
                     activeBuildingType={selectedBuildingType?.id}
                     onPlaceDecorAsset={handlePlaceDecorAsset}
                     decorAssetCount={(campus.decorAssets ?? []).filter((asset) => asset.type !== "ground-area").length}
-                    assetsEnabled={layer !== "navigation"}
+                    assetsEnabled={true}
                   />
-                </div>
-              </>
+              </div>
             </div>
           </div>
           {/* Toggle button — thin vertical strip on the canvas edge */}
@@ -5379,7 +5796,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
           pathPaintPreview={pathPaintPreview}
           navNodes={outdoorNodes}
           navEdges={outdoorEdges}
-          showNavigationOverlay={layer === "campus" && showCampusNavOverlay}
+          showNavigationOverlay={navigationVisible}
           navConnectStartId={navConnectStart}
           navPreview={navPreview}
           navConnectBends={navConnectBends}
@@ -5396,11 +5813,28 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
           pathMemberEditId={pathMemberEditId}
           onNavEdgeSelect={(e, id) => {
             e.stopPropagation();
+            if (tool === "erase") {
+              deleteNavSelection([], [id]);
+              return;
+            }
             if (tool !== "select") return;
             // B5 Phase 1.6: Shift-click toggles an edge's membership in the
             // multi-selection (same semantics as waypoint shift-click).
             if (e.shiftKey) {
               const base = multiSelected.length > 0 ? multiSelected : selected ? [selected.id] : [];
+              const baseSelection = base.length > 0 ? selectionForId(base[0]) : null;
+              const baseIsPhysical = baseSelection?.type === "building"
+                || baseSelection?.type === "path"
+                || baseSelection?.type === "decorAsset"
+                || baseSelection?.type === "entrance"
+                || baseSelection?.type === "marker";
+              if (base.length > 0 && !base.includes(id) && baseIsPhysical) {
+                setMultiSelected([]);
+                setSelected({ type: "navEdge", id });
+                setShowAlignTools(false);
+                setGuides([]);
+                return;
+              }
               const next = base.includes(id) ? base.filter((x) => x !== id) : [...base, id];
               setShowAlignTools(next.length > 1);
               if (next.length > 1) {
@@ -5425,7 +5859,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
             { const isAlreadySel = selected?.type === "navEdge" && selected.id === id;
             if (isAlreadySel && tool === "select") {
               const edge = navEdges.find((ed) => ed.id === id);
-              if (edge) {
+              if (edge && !isPathwayGeneratedEdge(edge)) {
                 const pt = getPoint(e, cw, ch);
                 // Build full polyline from node positions + bends
                 const startN = outdoorNodes.find((n) => n.id === edge.startNodeId);
@@ -5538,28 +5972,58 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
             "Needs attention" section for a precise, non-misaligned result. */}
         {null}
 
-        {/* ── Test Navigation panel (Navigation layer) — slides up over the canvas only ── */}
+        {/* PART 3: Test Route — floating utility card over the canvas.
+            Always positioned absolute so it never steals canvas layout space.
+            Right offset dynamically accounts for the Properties sidebar (248px) when open. */}
         <AnimatePresence>
-          {layer === "navigation" && testNavOpen && (
-            <motion.div
-              initial={{ opacity: 0, y: 40 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 40 }}
-              transition={{ type: "spring", stiffness: 350, damping: 32 }}
-              className="absolute bottom-0 left-0 right-0 z-40 max-h-[45%] overflow-y-auto scrollbar-show-on-hover"
-              style={{ background: "var(--card)", boxShadow: "0 -8px 30px rgba(0,0,0,0.12)" }}
-            >
-              <TestNavigationPanel
-                campus={campus}
-                onHighlightRoute={(route) => setHighlightedRoute(route)}
-                onFocusNode={(nodeId) => {
-                  const n = (campus.navNodes ?? []).find((x) => x.id === nodeId);
-                  if (n) zoomToBuilding(n.x - 30, n.y - 30, 60, 60);
+          {navigationVisible && testNavOpen && (
+            <>
+              {/* Desktop: floating card — absolute inside the canvas wrapper */}
+              <motion.div
+                initial={{ opacity: 0, scale: 0.97 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.97 }}
+                transition={{ type: "spring", stiffness: 350, damping: 32 }}
+                className="absolute top-3 z-30 w-80 rounded-xl border border-border overflow-hidden hidden lg:block"
+                style={{
+                  background: "var(--card)",
+                  boxShadow: "0 8px 30px rgba(0,0,0,0.12)",
+                  right: (selected || multiSelected.length > 0) ? "calc(248px + 12px)" : "12px",
                 }}
-              />
-            </motion.div>
+              >
+                <TestNavigationPanel
+                  campus={campus}
+                  onHighlightRoute={(route) => setHighlightedRoute(route)}
+                  onFocusNode={(nodeId) => {
+                    const n = (campus.navNodes ?? []).find((x) => x.id === nodeId);
+                    if (n) zoomToBuilding(n.x - 30, n.y - 30, 60, 60);
+                  }}
+                  onClose={() => setTestNavOpen(false)}
+                />
+              </motion.div>
+              {/* Narrow: bottom-sheet overlay */}
+              <motion.div
+                initial={{ opacity: 0, y: 40 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 40 }}
+                transition={{ type: "spring", stiffness: 350, damping: 32 }}
+                className="absolute bottom-0 left-0 right-0 z-40 h-[50%] lg:hidden overflow-hidden border-t border-border rounded-t-xl"
+                style={{ background: "var(--card)", boxShadow: "0 -4px 20px rgba(0,0,0,0.12)" }}
+              >
+                <TestNavigationPanel
+                  campus={campus}
+                  onHighlightRoute={(route) => setHighlightedRoute(route)}
+                  onFocusNode={(nodeId) => {
+                    const n = (campus.navNodes ?? []).find((x) => x.id === nodeId);
+                    if (n) zoomToBuilding(n.x - 30, n.y - 30, 60, 60);
+                  }}
+                  onClose={() => setTestNavOpen(false)}
+                />
+              </motion.div>
+            </>
           )}
         </AnimatePresence>
+
         </div>
 
         {/* ── Alignment toolbar (multi-select) ── */}
@@ -5645,8 +6109,8 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
           )}
         </AnimatePresence>
 
-        {/* ── Routes Panel (Navigation layer) ── */}
-        {layer === "navigation" && (
+        {/* ── Routes Panel (Navigation layer) — only when explicitly opened ── */}
+        {layer === "navigation" && showRoutesPanel && (
           <RoutesPanel
             routes={routes}
             selectedRouteId={selRouteId}
@@ -5665,7 +6129,8 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
           selEntrance={selEntrance}
           selEntranceParent={selEntranceParent}
           selMkr={selMkr}
-          selPath={selected?.type === "path" ? paths.find((p) => p.id === selected.id) : undefined}
+          selPath={selPath}
+          pathNavigationLegacy={pathNavigationLegacy}
           allPaths={paths}
           selectedPathPoint={selectedPathPoint}
           selectedPathPointIsJunction={!!selectedPathPoint && pathPointIsJunction(selectedPathPoint.pathId, selectedPathPoint.pointIndex)}
@@ -5717,10 +6182,19 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
           onUpdateEntrance={onUpdateEntrance}
           onDeleteEntrance={onDeleteEntrance}
           onConnectEntranceToDoor={connectEntranceToIndoorDoor}
+          onConnectEntranceToWalkingNetwork={connectEntranceToWalkingNetwork}
           onRemoveEntranceConnection={removeEntranceConnection}
           onViewEntranceIndoorDoor={viewEntranceIndoorDoor}
           onUpdateMarker={onUpdateMarker}
           onUpdatePath={onUpdatePath}
+          onSelectPath={(pathId) => {
+            const networkIds = pathNetworkSelectionIds(paths, pathId, "network");
+            setMultiSelected([]);
+            setShowAlignTools(false);
+            setSelectedPathPoint(null);
+            setPathMemberEditId(networkIds.length > 1 ? pathId : null);
+            setSelected({ type: "path", id: pathId });
+          }}
           onAddPathBend={onAddPathBend}
           onRemoveSelectedPathPoint={onRemoveSelectedPathPoint}
           onDisconnectSelectedPathPoint={onDisconnectSelectedPathPoint}
@@ -5730,14 +6204,23 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
           onGroupPaths={onGroupPaths}
           onUngroupPaths={onUngroupPaths}
           pathMemberEditing={!!pathMemberEditId}
-          onExitPathMemberEdit={() => setPathMemberEditId(null)}
+          onExitPathMemberEdit={exitPathMemberEditToNetwork}
           onDeletePath={onDeletePath}
           onUpdateRoute={onUpdateRoute}
           onUpdateNavNode={(id, changes) => {
+            const node = navNodes.find((candidate) => candidate.id === id);
+            if (node?.generatedFromPathVertices?.length && (changes.x !== undefined || changes.y !== undefined)) {
+              toast.info("Pathway walking point is managed automatically", "Edit the physical Pathway vertex instead.");
+              return;
+            }
             pushHistory();
             onUpdate({ ...campus, navNodes: (campus.navNodes ?? []).map(n => n.id === id ? { ...n, ...changes } : n) });
           }}
           onDeleteNavNode={(id) => {
+            if (navNodes.find((node) => node.id === id)?.generatedFromPathVertices?.length) {
+              toast.info("Pathway walking point is managed automatically", "Edit or delete the physical Pathway instead.");
+              return;
+            }
             // Deterministic connected-edge cleanup — never leave dangling edges.
             const connected = navEdges.filter((e) => e.startNodeId === id || e.endNodeId === id).length;
             const next = removeNavNode(navNodes, navEdges, id);
@@ -5749,18 +6232,32 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
             }
           }}
           onUpdateNavEdge={(id, changes) => {
+            const edge = (campus.navEdges ?? []).find((candidate) => candidate.id === id);
+            let safeChanges = changes;
+            if (isPathwayGeneratedEdge(edge)) {
+              const { bendPoints: _bendPoints, distance: _distance, startNodeId, endNodeId, ...routingChanges } = changes;
+              const exactReverse = Boolean(edge && startNodeId === edge.endNodeId && endNodeId === edge.startNodeId);
+              safeChanges = exactReverse
+                ? { ...routingChanges, startNodeId, endNodeId }
+                : routingChanges;
+            }
             pushHistory();
-            onUpdate({ ...campus, navEdges: (campus.navEdges ?? []).map(e => e.id === id ? { ...e, ...changes } : e) });
+            onUpdate(reconcilePathwayNavigation({
+              ...campus,
+              navEdges: (campus.navEdges ?? []).map(e => e.id === id ? { ...e, ...safeChanges } : e),
+            }, genId));
           }}
           onBatchUpdatePaths={(ids, changes) => {
             const next: Campus = { ...campus, paths: paths.map((path) => ids.includes(path.id) ? { ...path, ...changes } : path) };
-            onUpdate(next);
-            pushHistory(next);
+            const reconciled = reconcilePathwayNavigation(next, genId);
+            onUpdate(reconciled);
+            pushHistory(reconciled);
           }}
           onBatchDeletePaths={(ids) => {
             const next: Campus = { ...campus, paths: paths.filter((path) => !ids.includes(path.id)) };
-            onUpdate(next);
-            pushHistory(next);
+            const reconciled = reconcilePathwayNavigation(next, genId);
+            onUpdate(reconciled);
+            pushHistory(reconciled);
             setMultiSelected([]);
             setSelected(null);
             setShowAlignTools(false);
@@ -5769,7 +6266,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
             const edge = navEdges.find((e) => e.id === id);
             const start = navNodes.find((n) => n.id === edge?.startNodeId);
             const end = navNodes.find((n) => n.id === edge?.endNodeId);
-            if (!edge || !start || !end) return;
+            if (!edge || !start || !end || isPathwayGeneratedEdge(edge)) return;
             const points = [{ x: start.x, y: start.y }, ...(edge.bendPoints ?? []), { x: end.x, y: end.y }];
             const segmentIndex = Math.max(0, Math.floor((points.length - 1) / 2));
             const a = points[segmentIndex];
@@ -5789,6 +6286,10 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
           }}
           onDeleteNavSelection={(nodeIds, edgeIds) => deleteNavSelection(nodeIds, edgeIds)}
           onDeleteNavEdge={(id) => {
+            if (isPathwayGeneratedEdge(navEdges.find((edge) => edge.id === id))) {
+              toast.info("Pathway walking path is managed automatically", "Edit or delete the owning physical Pathway instead.");
+              return;
+            }
             pushHistory();
             onUpdate({ ...campus, navEdges: (campus.navEdges ?? []).filter(e => e.id !== id) });
             setSelected(null);
@@ -6067,57 +6568,30 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
       {/* ═══════════════════════════════════════════════════════════════════
           STATUS BAR: Figma/VS Code-style footer
           ═══════════════════════════════════════════════════════════════════ */}
-      <div className="h-7 shrink-0 border-t border-border bg-card flex items-center px-3 gap-3">
+      <div className="h-7 shrink-0 border-t border-border bg-card flex items-center px-3 gap-2 min-w-0 overflow-hidden">
         {/* Zoom level */}
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1.5 shrink-0">
           <ZoomIn className="h-3 w-3 text-muted-foreground/50" />
           <span className="text-[10px] font-mono text-muted-foreground/70 tabular-nums font-medium">{Math.round(zoom * 100)}%</span>
-          <span className="text-[8px] font-mono text-muted-foreground/30 hidden sm:inline">⌨ Ctrl+Scroll</span>
         </div>
 
-        <div className="w-px h-3 bg-border" />
+        <div className="w-px h-3 bg-border shrink-0" />
 
-        {/* Canvas dimensions */}
-        <span className="text-[10px] font-mono text-muted-foreground/50 tabular-nums">{cw} × {ch}</span>
+        {/* Canvas dimensions — hidden on very narrow */}
+        <span className="text-[10px] font-mono text-muted-foreground/50 tabular-nums shrink-0 hidden md:inline">{cw} × {ch}</span>
 
-        <div className="w-px h-3 bg-border" />
+        <div className="w-px h-3 bg-border shrink-0 hidden md:block" />
 
-        {/* Cursor position */}
+        {/* Cursor position — hidden on narrow */}
         {cursorPos ? (
-          <span className="text-[10px] font-mono text-muted-foreground/50 tabular-nums">
+          <span className="text-[10px] font-mono text-muted-foreground/50 tabular-nums shrink-0 hidden sm:inline">
             X: {cursorPos.x}  Y: {cursorPos.y}
           </span>
         ) : (
-          <span className="text-[10px] text-muted-foreground/30">—</span>
+          <span className="text-[10px] text-muted-foreground/30 shrink-0 hidden sm:inline">—</span>
         )}
 
-        <div className="w-px h-3 bg-border" />
-
-        {/* Snap status */}
-        <div className="flex items-center gap-2">
-          <div className={cn("flex items-center gap-1", snapGrid ? "text-primary/70" : "text-muted-foreground/30")}>
-            <Grid3X3 className="h-2.5 w-2.5" />
-            <span className="text-[9px] font-medium">Grid</span>
-          </div>
-          <div className={cn("flex items-center gap-1", edgeSnap ? "text-primary/70" : "text-muted-foreground/30")}>
-            <Magnet className="h-2.5 w-2.5" />
-            <span className="text-[9px] font-medium">Snap</span>
-          </div>
-        </div>
-
-        <div className="w-px h-3 bg-border" />
-
-        {/* Active tool */}
-        <span className="text-[10px] text-muted-foreground/50 flex items-center gap-1">
-          <MousePointer2 className="h-2.5 w-2.5" />
-          {toolConfig.find(t => t.id === tool)?.label ?? tool}
-        </span>
-
-        {/* Layer indicator */}
-        <div className="flex items-center gap-1" style={{ color: activeLayer.color }}>
-          <div className="w-2 h-2 rounded-full" style={{ background: activeLayer.color }} />
-          <span className="text-[9px] font-semibold">{activeLayer.label}</span>
-        </div>
+        <div className="w-px h-3 bg-border shrink-0 hidden sm:block" />
 
         {/* Real-time error count — IssuesPopover with hover */}
         {errorCount > 0 ? (
@@ -6128,16 +6602,16 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
             }}
           />
         ) : (
-          <div className="flex items-center gap-1 px-1.5 py-0.5 rounded-sm" style={{ background: "color-mix(in srgb, #22c55e 8%, transparent)" }}>
+          <div className="flex items-center gap-1 px-1.5 py-0.5 rounded-sm shrink-0" style={{ background: "color-mix(in srgb, #22c55e 8%, transparent)" }}>
             <CheckCircle2 className="h-2.5 w-2.5 shrink-0" style={{ color: "#22c55e" }} />
             <span className="text-[9px] font-extrabold" style={{ color: "#22c55e" }}>OK</span>
           </div>
         )}
 
-        <div className="flex-1" />
+        <div className="flex-1 min-w-0" />
 
-        {/* Building / marker / path counts */}
-        <span className="text-[9px] text-muted-foreground/40 flex items-center gap-2">
+        {/* Building / marker / path counts — hidden on narrow */}
+        <span className="text-[9px] text-muted-foreground/40 flex items-center gap-2 shrink-0 hidden lg:flex">
           <Square className="h-2.5 w-2.5" />
           {buildings.length} bldg{buildings.length !== 1 ? 's' : ''}
           <MapPin className="h-2.5 w-2.5 ml-1" />
@@ -6146,32 +6620,23 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
           {paths.length} path{paths.length !== 1 ? 's' : ''}
         </span>
 
-        <div className="w-px h-3 bg-border" />
-
-        {/* Test Navigation toggle (Navigation layer) */}
+        {/* Routes panel toggle (Navigation layer) — explicit action to open routes sidebar */}
         {layer === "navigation" && (
-          <button
-            onClick={() => setTestNavOpen((v) => !v)}
-            className={cn(
-              "flex items-center gap-1 transition-colors",
-              testNavOpen ? "text-blue-500" : "text-muted-foreground/40 hover:text-muted-foreground"
-            )}
-            title="Test navigation routes on this campus"
-          >
-            <Navigation className="h-2.5 w-2.5" />
-            <span className="text-[9px] hidden sm:inline">Test Nav</span>
-          </button>
+          <>
+            <div className="w-px h-3 bg-border shrink-0" />
+            <button
+              onClick={() => setShowRoutesPanel((v) => !v)}
+              className={cn(
+                "flex items-center gap-1 transition-colors shrink-0",
+                showRoutesPanel ? "text-green-600" : "text-muted-foreground/40 hover:text-muted-foreground"
+              )}
+              title={showRoutesPanel ? "Hide routes panel" : "Show routes panel"}
+            >
+              <Route className="h-2.5 w-2.5" />
+              <span className="text-[9px] hidden sm:inline">Routes</span>
+            </button>
+          </>
         )}
-
-        {/* Help */}
-        <button
-          onClick={() => setShowCheatSheet(true)}
-          className="flex items-center gap-1 text-muted-foreground/40 hover:text-muted-foreground transition-colors"
-          title="Keyboard shortcuts (?)"
-        >
-          <Keyboard className="h-2.5 w-2.5" />
-          <span className="text-[9px] hidden sm:inline">Shortcuts</span>
-        </button>
       </div>
 
       {/* Save screen overlay — retry reuses the shared save flow */}

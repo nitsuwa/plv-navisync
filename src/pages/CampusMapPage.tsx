@@ -20,6 +20,7 @@ import { findIndoorRoute, findIndoorRouteForFloor, type IndoorRoute } from "../l
 import { planBuildingRoute, planRouteFromPoint, type PlannedRoute } from "../lib/routePlanner";
 import { latLngToMapPoint, snapToNearest } from "../lib/geo";
 import { NODES as STATIC_NAV_NODES } from "../lib/pathfinding";
+import { pathIsPubliclyVisible } from "../lib/campusPathNetwork";
 import {
   RoutePlannerDialog, RouteStepsPanel, RouteMapOverlay,
   ReportModal, SignInPrompt,
@@ -1362,7 +1363,7 @@ const buildingFill = (id: string) =>
             </>}
             {/* Walkway paths + areas (red brick walkways, quadrangle, roads) */}
             {activeCampus?.paths?.map((p) => {
-              if (!p.points || p.points.length < 2) return null;
+              if (!pathIsPubliclyVisible(p) || !p.points || p.points.length < 2) return null;
               const pts = p.points.map((pt) => `${pt.x},${pt.y}`).join(" ");
               const closed = p.points.length >= 4 &&
                 Math.hypot(p.points[0].x - p.points[p.points.length - 1].x, p.points[0].y - p.points[p.points.length - 1].y) < 1;

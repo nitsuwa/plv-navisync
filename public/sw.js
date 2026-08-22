@@ -2,7 +2,9 @@
 // Improved caching: stale-while-revalidate for navigation, cache-first for
 // static assets, network-first for API calls, and an offline fallback page.
 
-const VERSION = "v1.1";
+// Bump this whenever the worker's caching policy changes so existing clients
+// do not remain controlled by an older policy.
+const VERSION = "v1.2";
 const CACHE_PREFIX = "plv-navisync";
 const CACHE = `${CACHE_PREFIX}-${VERSION}`;
 
@@ -72,6 +74,15 @@ const isNavigation = (r) => r.mode === "navigate";
 const isStaticAsset = (r) => {
   const url = new URL(r.url);
   return /\.(js|css|woff2?|ttf|eot)$/i.test(url.pathname);
+};
+// Vite serves source modules and styles directly from these paths during
+// development. They must never be cache-first: doing so makes HMR show the
+// current CSS while a clean page load receives an older cached header layout.
+const isViteDevAsset = (r) => {
+  const url = new URL(r.url);
+  return url.pathname.startsWith("/@vite/")
+    || url.pathname.startsWith("/src/")
+    || url.pathname.startsWith("/node_modules/");
 };
 const isImage = (r) => {
   const url = new URL(r.url);
@@ -198,6 +209,15 @@ self.addEventListener("fetch", (event) => {
   }
 
   // ── Static JS/CSS assets ───────────────────────────────────────────
+  // Never cache Vite's live development modules/styles. A stale service-worker
+  // response here makes fresh `pnpm dev` loads differ from HMR state.
+  if (isSameOrigin(request) && isViteDevAsset(request)) {
+    event.respondWith(
+      fetch(request, { cache: "no-store" }).catch(() => caches.match(request))
+    );
+    return;
+  }
+
   // Cache-first: these change only on deploy, so disk cache is ideal
   if (isSameOrigin(request) && isStaticAsset(request)) {
     event.respondWith(

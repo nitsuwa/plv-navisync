@@ -90,6 +90,31 @@ export function floorIssuesToItems(issues: FloorIssue[]): ObjectIssueItem[] {
   return out;
 }
 
+/**
+ * Group items by floor prefix. Messages like "Floor 2 — …" or "Building — …"
+ * are split so the floor label becomes the group header. Items without a
+ * recognized prefix go into a "General" group.
+ */
+function groupByFloor(items: ObjectIssueItem[]): { label: string; items: ObjectIssueItem[] }[] {
+  const FLOOR_RE = /^(Floor \d+|Ground Floor|Building|General)\s*—\s*/i;
+  const groups = new Map<string, ObjectIssueItem[]>();
+  const groupOrder: string[] = [];
+  for (const item of items) {
+    const match = item.message?.match(FLOOR_RE);
+    const label = match ? match[1] : "General";
+    if (!groups.has(label)) {
+      groups.set(label, []);
+      groupOrder.push(label);
+    }
+    groups.get(label)!.push({
+      ...item,
+      // Strip the floor prefix from the message so it doesn't repeat in the list.
+      message: match ? item.message.slice(match[0].length) : item.message,
+    });
+  }
+  return groupOrder.map((label) => ({ label, items: groups.get(label)! }));
+}
+
 export function ObjectIssueSection({ items }: { items: ObjectIssueItem[] }) {
   if (items.length === 0) return null;
   const worst: "error" | "warning" | "info" = items.some((i) => i.severity === "error")
@@ -97,6 +122,8 @@ export function ObjectIssueSection({ items }: { items: ObjectIssueItem[] }) {
     : items.some((i) => i.severity === "warning")
       ? "warning"
       : "info";
+  const groups = groupByFloor(items);
+  const hasMultipleGroups = groups.length > 1;
   return (
     <div
       data-testid="object-issue-section"
@@ -119,23 +146,36 @@ export function ObjectIssueSection({ items }: { items: ObjectIssueItem[] }) {
           <Info className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
         )}
         <span className="text-[9px] font-extrabold uppercase tracking-widest text-foreground">Needs attention</span>
+        <span className="ml-auto text-[8px] font-bold text-muted-foreground tabular-nums">{items.length}</span>
       </div>
-      <div className="space-y-1.5">
-        {items.map((item) => (
-          <div key={item.key} className="space-y-0.5">
-            <p
-              className={cn(
-                "text-[10px] font-bold leading-snug",
-                item.severity === "error" ? "text-red-700 dark:text-red-400"
-                  : item.severity === "warning" ? "text-amber-700 dark:text-amber-400"
-                  : "text-foreground"
-              )}
-            >
-              {item.title}
-            </p>
-            {item.message && (
-              <p className="text-[9px] leading-relaxed text-muted-foreground">{item.message}</p>
+      {/* Scrollable issue list — constrained so it never takes over the sidebar. */}
+      <div className="max-h-[260px] overflow-y-auto overflow-x-hidden space-y-1.5 pr-1 scrollbar-show-on-hover">
+        {groups.map((group) => (
+          <div key={group.label}>
+            {hasMultipleGroups && (
+              <p className="text-[8px] font-extrabold uppercase tracking-wider text-muted-foreground/70 mb-0.5 px-0.5">
+                {group.label}
+              </p>
             )}
+            <div className="space-y-1">
+              {group.items.map((item) => (
+                <div key={item.key} className="space-y-0.5">
+                  <p
+                    className={cn(
+                      "text-[10px] font-bold leading-snug",
+                      item.severity === "error" ? "text-red-700 dark:text-red-400"
+                        : item.severity === "warning" ? "text-amber-700 dark:text-amber-400"
+                        : "text-foreground"
+                    )}
+                  >
+                    {item.title}
+                  </p>
+                  {item.message && (
+                    <p className="text-[9px] leading-relaxed text-muted-foreground">{item.message}</p>
+                  )}
+                </div>
+              ))}
+            </div>
           </div>
         ))}
       </div>

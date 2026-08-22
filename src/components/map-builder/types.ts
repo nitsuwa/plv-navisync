@@ -419,6 +419,8 @@ export interface CampusMarker {
 export interface CampusPath {
   id: string;
   points: { x: number; y: number }[];
+  /** Stable per-vertex IDs used only when this pathway owns generated navigation. */
+  navigationVertexIds?: string[];
   type: "walkway" | "road" | "accessible" | string;
   color: string;
   width: number;
@@ -457,6 +459,8 @@ export interface NavigationNode {
   stairId?: string;
   elevatorId?: string;
   rampId?: string;
+  /** Explicit provenance for pathway-generated vertices. Manual/linked nodes omit this. */
+  generatedFromPathVertices?: { pathId: string; vertexId: string }[];
   accessible: boolean;
   /** Reason this node is not accessible (only relevant when accessible=false) */
   inaccessibleReason?: "stairs" | "narrow_path" | "restricted_access" | "uneven_surface" | "other";
@@ -490,6 +494,8 @@ export interface NavigationEdge {
   type: string;
   color: string;
   width: number;
+  /** Pathway IDs that explicitly generated this edge. Manual edges omit this. */
+  generatedFromPathIds?: string[];
 }
 
 // ── Route (Navigation layer) ────────────────────────────────────────────────

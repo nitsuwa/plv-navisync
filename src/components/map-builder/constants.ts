@@ -112,8 +112,8 @@ export const LAYER_TOOLS: Record<string, LayerToolDescriptor[]> = {
   navigation: [
     { id: "select",   icon: MousePointer2, label: "Select",   hint: "Select waypoints and connections to edit routing properties. Campus objects stay visible as context.", key: "V" },
     { id: "pan",      icon: Hand,          label: "Pan",      hint: "Hold Space + drag to pan around the canvas", key: "Space" },
-    { id: "marker",   icon: MapPin,        label: "Add Waypoint", hint: "Place a routing point. Click a valid empty location — inside buildings use entrances instead.", key: "M" },
-    { id: "path",     icon: GitBranch,     label: "Connect", hint: "Connect waypoints and entrances. Click a start point, optional bend points, then a destination point.", key: "P" },
+    { id: "marker",   icon: MapPin,        label: "Add Walking Point", hint: "Add a Walking Point when physical pathways do not provide the routing point you need.", key: "M" },
+    { id: "path",     icon: GitBranch,     label: "Connect", hint: "Connect Walking Points and entrances for routes that need a manual connection.", key: "P" },
     { id: "erase",    icon: Trash2,        label: "Remove",   hint: "Click a waypoint or connection to remove it from the navigation network. Deleting a waypoint removes all its connections.", key: "E" },
   ],
   // Accessibility and Emergency are ROUTING PROPERTIES of the navigation graph
@@ -247,9 +247,9 @@ export interface LayerDescriptor {
 }
 
 export const LAYERS: LayerDescriptor[] = [
-  { id: "campus",        icon: Map,          label: "1. Campus",       color: "var(--primary)",     accent: "color-mix(in srgb,var(--primary) 12%,transparent)",      hint: "Start here: add buildings, give them floors, and draw outdoor walkways" },
-  { id: "navigation",    icon: Navigation,   label: "2. Navigation",   color: "#16a34a",             accent: "color-mix(in srgb,#16a34a 12%,transparent)",              hint: "Add waypoints and connect them into a walking network. Accessibility and emergency flags are properties of each waypoint/connection." },
-  { id: "events",        icon: Star,         label: "3. Events",       color: "#d97706",             accent: "color-mix(in srgb,#d97706 12%,transparent)",              hint: "Add event pins and link them to existing campus locations" },
+  { id: "campus",        icon: Map,          label: "Campus",       color: "var(--primary)",     accent: "color-mix(in srgb,var(--primary) 12%,transparent)",      hint: "Start here: add buildings, give them floors, and draw outdoor walkways" },
+  { id: "navigation",    icon: Navigation,   label: "Navigation",   color: "#16a34a",             accent: "color-mix(in srgb,#16a34a 12%,transparent)",              hint: "Add waypoints and connect them into a walking network. Accessibility and emergency flags are properties of each waypoint/connection." },
+  { id: "events",        icon: Star,         label: "Events",       color: "#d97706",             accent: "color-mix(in srgb,#d97706 12%,transparent)",              hint: "Add event pins and link them to existing campus locations" },
 ];
 
 // ── Building color palette ──────────────────────────────────────────────────

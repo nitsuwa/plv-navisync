@@ -374,9 +374,45 @@ export { NODES, EDGES, BUILDING_ENTRANCE_MAP };
  */
 export function buildTransitionEdges(
   navNodes: { id: string; x: number; y: number; name?: string; transitionSharedId?: string; floorId?: string }[],
-  navEdges: { startNodeId: string; endNodeId: string; distance: number; bidirectional: boolean; accessible: boolean }[],
-): { startNodeId: string; endNodeId: string; distance: number; bidirectional: boolean; accessible: boolean }[] {
-  const extraEdges: { startNodeId: string; endNodeId: string; distance: number; bidirectional: boolean; accessible: boolean }[] = [];
+  navEdges: {
+    startNodeId: string;
+    endNodeId: string;
+    distance: number;
+    bidirectional: boolean;
+    accessible: boolean;
+    type?: string;
+    closed?: boolean;
+  }[],
+): {
+  startNodeId: string;
+  endNodeId: string;
+  distance: number;
+  bidirectional: boolean;
+  accessible: boolean;
+  emergencySafe?: boolean;
+}[] {
+  const extraEdges: {
+    startNodeId: string;
+    endNodeId: string;
+    distance: number;
+    bidirectional: boolean;
+    accessible: boolean;
+    emergencySafe?: boolean;
+  }[] = [];
+
+  // Cross-floor transitions are persisted by the Floor Editor when linked
+  // stair/elevator nodes are reconciled.  Do not add a second virtual edge for
+  // an existing transition pair: a closed persisted transition must remain
+  // closed instead of being bypassed by the derived fallback edge.
+  const persistedTransitionPairs = new Map<string, boolean>();
+  for (const edge of navEdges) {
+    if (edge.type !== "floor_transition") continue;
+    const key = [edge.startNodeId, edge.endNodeId].sort().join("|");
+    const prior = persistedTransitionPairs.get(key);
+    // If duplicate transition records exist, an open record keeps the pair
+    // available; otherwise a closed record blocks it.
+    persistedTransitionPairs.set(key, prior === false ? false : edge.closed === true);
+  }
 
   // Group nav nodes by transitionSharedId
   const groups = new Map<string, typeof navNodes>();
@@ -389,6 +425,14 @@ export function buildTransitionEdges(
   // For each shared transition, create virtual edges between all pairs on different floors
   for (const [sharedId, nodes] of groups.entries()) {
     if (nodes.length < 2) continue;
+    // Persisted transition records are authoritative for this shared group.
+    // Avoid virtual all-pairs edges that could bypass a closed transition.
+    const groupNodeIds = new Set(nodes.map((node) => node.id));
+    const hasPersistedTransition = Array.from(persistedTransitionPairs.keys()).some((key) => {
+      const [a, b] = key.split("|");
+      return groupNodeIds.has(a) && groupNodeIds.has(b);
+    });
+    if (hasPersistedTransition) continue;
 
     // Determine type from IDs — elevator or stairs
     const isElevator = sharedId.includes("el_");
@@ -400,7 +444,6 @@ export function buildTransitionEdges(
         const b = nodes[j];
         // Only create edge if they're on different floors
         if (a.floorId === b.floorId) continue;
-
         const edge = {
           startNodeId: a.id,
           endNodeId: b.id,
@@ -418,7 +461,16 @@ export function buildTransitionEdges(
 
 export function findNavigationRoute(
   navNodes: { id: string; x: number; y: number; name?: string; transitionSharedId?: string; floorId?: string }[],
-  navEdges: { startNodeId: string; endNodeId: string; distance: number; bidirectional: boolean; accessible: boolean; emergencySafe?: boolean }[],
+  navEdges: {
+    startNodeId: string;
+    endNodeId: string;
+    distance: number;
+    bidirectional: boolean;
+    accessible: boolean;
+    emergencySafe?: boolean;
+    type?: string;
+    closed?: boolean;
+  }[],
   fromNodeId: string,
   toNodeId: string,
   accessibleOnly = false,
@@ -440,6 +492,10 @@ export function findNavigationRoute(
   // Build adjacency list (include emergencySafe for emergency routing)
   const adj = new Map<string, { nodeId: string; dist: number; accessible: boolean; emergencySafe: boolean }[]>();
   for (const edge of navEdges) {
+    // Closed/unavailable connections are never traversable, regardless of
+    // route mode.  The editor exposes this flag as the canonical availability
+    // control for authored walking paths and floor transitions.
+    if (edge.closed === true) continue;
     if (!adj.has(edge.startNodeId)) adj.set(edge.startNodeId, []);
     if (!adj.has(edge.endNodeId)) adj.set(edge.endNodeId, []);
     const safe = edge.emergencySafe !== false; // default to safe if not set
