@@ -111,7 +111,7 @@ function campusMarkers(container: HTMLElement): HTMLElement[] {
 }
 
 function switchToNavLayer() {
-  fireEvent.click(screen.getByText("2. Navigation"));
+  fireEvent.click(screen.getByText("Navigation"));
 }
 
 // ── Floor Editor Harness ───────────────────────────────────────────────────

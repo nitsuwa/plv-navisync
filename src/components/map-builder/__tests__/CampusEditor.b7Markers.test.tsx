@@ -133,7 +133,7 @@ describe("CampusEditor on-canvas issue markers (B7 Phase 1)", () => {
     const designMarkers = campusMarkers(container);
     expect(designMarkers).toHaveLength(0);
     // Switch to Navigation layer — the nav marker appears.
-    fireEvent.click(screen.getByText("2. Navigation"));
+    fireEvent.click(screen.getByText("Navigation"));
     const navMarkers = campusMarkers(container);
     expect(navMarkers).toHaveLength(1);
     expect(navMarkers[0].getAttribute("data-issue-object")).toBe("navNode:n1");
@@ -169,7 +169,7 @@ describe("CampusEditor on-canvas issue markers (B7 Phase 1)", () => {
     const { container } = render(<Harness initialCampus={campus} />);
     // B7 correction: nav markers are hidden in Design mode (default layer).
     // Switch to Navigation to see the marker, then fix the issue.
-    fireEvent.click(screen.getByText("2. Navigation"));
+    fireEvent.click(screen.getByText("Navigation"));
     expect(campusMarkers(container)).toHaveLength(1);
 
     // Replace the campus (as if the admin deleted the orphan node) — the

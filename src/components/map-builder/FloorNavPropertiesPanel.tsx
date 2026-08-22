@@ -1,20 +1,9 @@
 import { useState, type ReactNode } from "react";
-import { X, Trash2, Link2, Waypoints, MapPin, AlertTriangle } from "lucide-react";
+import { X, Trash2, Link2, Waypoints, MapPin, AlertTriangle, CheckCircle2 } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { ObjectIssueSection, type ObjectIssueItem } from "./ObjectIssueSection";
-import type { NavigationNode, NavigationEdge, NavigationNodeType } from "./types";
+import type { NavigationNode, NavigationEdge } from "./types";
 import { linkedObjectRef } from "../../lib/indoorNavigationGraph";
-
-const NODE_TYPE_OPTIONS: { value: NavigationNodeType; label: string }[] = [
-  { value: "hallway", label: "Indoor Waypoint" },
-  { value: "room_access", label: "Room Destination" },
-  { value: "stair", label: "Stairs" },
-  { value: "elevator", label: "Elevator" },
-  { value: "ramp", label: "Ramp" },
-  { value: "emergency_exit", label: "Emergency Exit" },
-  { value: "assembly", label: "Assembly Area" },
-  { value: "safe_area", label: "Safe Area" },
-];
 
 const INACCESSIBLE_REASONS: { value: NonNullable<NavigationEdge["inaccessibleReason"]>; label: string }[] = [
   { value: "stairs", label: "Stairs" },
@@ -118,6 +107,22 @@ function PopSelect({ value, options, onChange, disabled }: {
   );
 }
 
+function AdvancedRoutingSection({ title, children }: { title: string; children: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="border border-border rounded-lg overflow-hidden">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center justify-between px-2 py-1.5 text-[9px] font-extrabold uppercase tracking-wider text-muted-foreground hover:bg-muted/30 transition-colors"
+      >
+        <span>{title}</span>
+        <span className={cn("text-[8px] transition-transform", open && "rotate-180")}>▾</span>
+      </button>
+      {open && <div className="px-2 pb-2 space-y-2 border-t border-border pt-2 pr-1">{children}</div>}
+    </div>
+  );
+}
+
 interface FloorNavPropertiesPanelProps {
   selected: { type: "node" | "edge"; id: string };
   /** B7 Phase 2: live validation issues for the currently selected nav object. */
@@ -159,8 +164,8 @@ export function FloorNavPropertiesPanel({
     // a deliberately placed routable location — distinct from a technical Waypoint.
     const isDest = !isLinked && node.type === "room_access";
     const heading = isLinked
-      ? `${LINKED_LABEL[ref.kind]} Point`
-      : isDest ? "Destination" : "Waypoint";
+      ? `Linked ${LINKED_LABEL[ref.kind]}`
+      : isDest ? "Destination" : "Walking Point";
     const connections = edges.filter((e) => e.startNodeId === node.id || e.endNodeId === node.id);
     return (
       <div data-testid="floor-nav-node-props" className="w-60 border-l border-border bg-card/80 backdrop-blur flex flex-col shrink-0">
@@ -180,23 +185,22 @@ export function FloorNavPropertiesPanel({
             <input
               value={node.name}
               onChange={(e) => onUpdateNode(node.id, { name: e.target.value })}
-              placeholder={isDest ? "Destination name" : "Waypoint name"}
-              aria-label={isDest ? "Destination name" : "Waypoint name"}
+              placeholder={isDest ? "Destination name" : "Walking Point name"}
+              aria-label={isDest ? "Destination name" : "Walking Point name"}
               className="w-full h-8 rounded-lg border border-border bg-card px-2 text-[11px] font-semibold text-foreground outline-none focus:border-primary/50"
             />
-            <FieldLabel>Type</FieldLabel>
-            {isLinked ? (
+            {/* Type indicator only for linked/destination nodes — free walking points don't need type selection */}
+            {isLinked && (
               <div>
-                <div className="h-8 rounded-lg border border-border bg-muted/40 px-2 flex items-center text-[11px] font-bold text-foreground">
-                  {LINKED_LABEL[ref.kind]} Point
+                <div className="h-8 rounded-lg border border-emerald-200/80 bg-emerald-50/60 px-2 flex items-center gap-1.5 text-[11px] font-bold text-emerald-700 dark:border-emerald-800/50 dark:bg-emerald-900/10 dark:text-emerald-400">
+                  <CheckCircle2 className="h-3.5 w-3.5" /> Linked to Navigation
                 </div>
                 <p className="text-[9px] text-muted-foreground mt-1 leading-relaxed">
-                  Linked to a {LINKED_LABEL[ref.kind].toLowerCase()}. Linked points follow their building object and cannot be moved freely.
+                  {node.name || LINKED_LABEL[ref.kind]} follows the linked physical object and cannot be moved freely.
                 </p>
               </div>
-            ) : isDest ? (
-              /* B5 Phase 2.2: destinations keep a fixed semantic type — no raw
-                 type fiddling that could turn a Destination into a Hallway. */
+            )}
+            {isDest && (
               <div>
                 <div className="h-8 rounded-lg border border-border bg-muted/40 px-2 flex items-center text-[11px] font-bold text-foreground">
                   Destination
@@ -205,32 +209,30 @@ export function FloorNavPropertiesPanel({
                   A deliberate routable location. Give it a name students will recognize.
                 </p>
               </div>
-            ) : (
-              <PopSelect
-                value={node.type}
-                options={NODE_TYPE_OPTIONS}
-                onChange={(v) => onUpdateNode(node.id, { type: v as NavigationNodeType })}
-              />
             )}
           </Section>
-          <Section title="Routing">
+          {/* Connections */}
+          <Section title="Connections">
+            <div className="text-[11px] font-bold text-foreground">
+              {connections.length} path{connections.length !== 1 ? "s" : ""}
+            </div>
+            {connections.length === 0 && (
+              <p className="text-[9px] text-amber-600 font-semibold leading-relaxed">
+                Isolated — connect this walking point with Connect.
+              </p>
+            )}
+          </Section>
+          {/* Advanced Routing — collapsed section with accessibility for free nodes */}
+          {!isLinked && !isDest && (
+          <AdvancedRoutingSection title="Advanced Routing">
             <FieldLabel>Accessible</FieldLabel>
             <Seg2
               value={node.accessible !== false}
               onValue={(v) => onUpdateNode(node.id, { accessible: v })}
               labels={["Yes", "No"]}
             />
-            {connections.length === 0 && (
-              <p className="text-[9px] text-amber-600 font-semibold leading-relaxed">
-                Isolated — connect this waypoint with Connect Path.
-              </p>
-            )}
-          </Section>
-          <Section title="Connections">
-            <div className="text-[11px] font-bold text-foreground">
-              {connections.length} path{connections.length !== 1 ? "s" : ""}
-            </div>
-          </Section>
+          </AdvancedRoutingSection>
+          )}
           {/* B5 Phase 3: cross-floor transition status for linked Stair / Elevator
               / Ramp nodes — concise authoring feedback only (never a routing UI). */}
           {ref?.kind === "elevator" && (
@@ -312,7 +314,7 @@ export function FloorNavPropertiesPanel({
             onClick={onDelete}
             className="w-full h-8 rounded-lg border border-destructive/30 text-[11px] font-bold text-destructive hover:bg-destructive/10 transition-colors flex items-center justify-center gap-1.5"
           >
-            <Trash2 className="h-3 w-3" /> Delete {isDest ? "Destination" : isLinked ? "Link" : "Waypoint"}
+            <Trash2 className="h-3 w-3" /> Delete {isDest ? "Destination" : isLinked ? "Link" : "Walking Point"}
           </button>
         </div>
       </div>
@@ -327,7 +329,7 @@ export function FloorNavPropertiesPanel({
     <div data-testid="floor-nav-edge-props" className="w-60 border-l border-border bg-card/80 backdrop-blur flex flex-col shrink-0">
       <div className="flex items-center justify-between px-3 h-9 border-b border-border">
         <span className="flex items-center gap-1.5 text-[10px] font-extrabold uppercase tracking-wider text-muted-foreground">
-          <Link2 className="h-3 w-3 text-primary" /> Navigation Path
+          <Link2 className="h-3 w-3 text-primary" /> Walking Path
         </span>
         <button onClick={onClose} aria-label="Close properties" className="text-muted-foreground hover:text-foreground">
           <X className="h-3.5 w-3.5" />
@@ -338,7 +340,7 @@ export function FloorNavPropertiesPanel({
         <ObjectIssueSection items={issueItems} />
         <Section title="Connection">
           <div className="text-[11px] font-bold text-foreground">
-            {from?.name || "Waypoint"} <span className="text-muted-foreground font-semibold">→</span> {to?.name || "Waypoint"}
+            {from?.name || "Walking Point"} <span className="text-muted-foreground font-semibold">→</span> {to?.name || "Walking Point"}
           </div>
           <div className="text-[10px] text-muted-foreground">
             Distance {Math.round(edge.distance)} world units
@@ -351,7 +353,7 @@ export function FloorNavPropertiesPanel({
           <div data-testid="nav-edge-blocked-warning" className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-2.5 py-2">
             <AlertTriangle className="h-3.5 w-3.5 text-destructive shrink-0 mt-0.5" />
             <p className="text-[10px] font-bold text-destructive leading-snug">
-              Path blocked by wall. Move a segment, add/move a bend, or reposition a free waypoint.
+              Path blocked by wall. Move a segment, add/move a bend, or reposition a free walking point.
             </p>
           </div>
         )}
@@ -359,7 +361,7 @@ export function FloorNavPropertiesPanel({
             the hovered (or longest) segment, Remove Bend removes the SELECTED
             bend, Straighten removes all bends unless the direct line would cross
             a wall. Each action is ONE history gesture (handled in the editor). */}
-        <Section title="Path Shape">
+        <Section title="Geometry">
           {(() => {
             const bends = edge.bendPoints ?? [];
             return (
@@ -384,7 +386,7 @@ export function FloorNavPropertiesPanel({
                 </button>
                 <p className="text-[9px] text-muted-foreground leading-relaxed">
                   {straightenBlocked
-                    ? "The direct line crosses a wall — keep a bend or add a door opening."
+                    ? "Can't straighten — the direct route would cross a wall."
                     : "Drag a bend handle to reshape (Shift keeps it axis-aligned). Remove Bend targets the selected bend; Add Bend splits the hovered segment."}
                 </p>
               </>
@@ -398,7 +400,7 @@ export function FloorNavPropertiesPanel({
             labels={["Bidirectional", "One Way"]}
           />
         </Section>
-        <Section title="Route Availability">
+        <AdvancedRoutingSection title="Advanced Routing">
           <FieldLabel>Accessible</FieldLabel>
           <Seg2
             value={edge.accessible !== false}
@@ -432,12 +434,12 @@ export function FloorNavPropertiesPanel({
             labels={["Open", "Closed"]}
           />
           <p className="text-[9px] text-muted-foreground leading-relaxed">Closed paths are excluded from routing.</p>
-        </Section>
+        </AdvancedRoutingSection>
         <button
           onClick={onDelete}
           className="w-full h-8 rounded-lg border border-destructive/30 text-[11px] font-bold text-destructive hover:bg-destructive/10 transition-colors flex items-center justify-center gap-1.5"
         >
-          <Trash2 className="h-3 w-3" /> Delete Path
+            <Trash2 className="h-3 w-3" /> Delete Walking Path
         </button>
       </div>
     </div>

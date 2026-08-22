@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { CheckCircle2, XCircle } from "lucide-react";
+import { CheckCircle2, XCircle, Navigation as NavigationIcon } from "lucide-react";
 import { MARKER_STYLES } from "../../data/mapData";
 import type { Campus, CampusBuilding, CampusMarker, SimpleTool, EditorLayer, CampusSelection, RubberBand, CampusDecorAsset, CampusPath, NavigationNode, NavigationEdge } from "./types";
 import { DECOR_ASSET_MAP, BUILDING_TYPE_MAP, genId, getRotatedAABB } from "./constants";
@@ -11,6 +11,12 @@ import { outdoorGroupSelectionBounds } from "../../lib/campusSelection";
 import { navGroupSelectionBounds } from "../../lib/navigationGraph";
 import { DecorAssetArt, DecorAssetVisual } from "./DecorAssetVisual";
 import { BUILDING_ENTRANCE_TYPE_COLORS, entranceDisplayName, entranceWorldPosition, normalizeEntranceType } from "../../lib/buildingEntrances";
+import {
+  editorPathRenderMode,
+  isPathwayGeneratedEdge,
+  isPathwayGeneratedNode,
+  shouldRenderPathwayAuthoringPreview,
+} from "../../lib/campusPathNetwork";
 
 // ── Rotation-aware resize cursor helpers (shared by buildings and decor assets) ──
 function angleToCursor(deg: number): string {
@@ -645,6 +651,10 @@ export function Canvas({
   }, [paths]);
   const pathOnlyMultiSelect = multiSelected.length >= 2
     && multiSelected.every((id) => paths.some((path) => path.id === id));
+  const selectedPhysicalPathIds = new Set([
+    ...(selected?.type === "path" ? [selected.id] : []),
+    ...multiSelected.filter((id) => paths.some((path) => path.id === id)),
+  ]);
 
   // Normalized canvas dimensions: prefer the explicit props (CampusEditor
   // passes its safe/normalized dims) so a transiently-unset campus can never
@@ -672,7 +682,7 @@ export function Canvas({
   const stackedOutdoor = mergeOutdoorStack(buildings, foregroundDecorAssets);
   const groupSelectionBounds = useMemo(() => {
     if (!showGroupOutline) return null;
-    if (layer === "navigation") return null;
+    // Unified editor — group outlines visible in all layers
     return outdoorGroupSelectionBounds(multiSelected, buildings, decorAssets, DECOR_ASSET_MAP, paths, { includeHidden: true });
   }, [buildings, decorAssets, layer, multiSelected, paths, showGroupOutline]);
 
@@ -893,15 +903,12 @@ export function Canvas({
 
   const renderPathControls = (p: CampusPath) => {
     const isSel = selected?.type === "path" && selected.id === p.id;
-    const canEditPath = layer !== "navigation";
-    // B5 Phase 5.12 — Canva-style group editing: a whole-network selection shows
-    // group bounds only. Individual point/width controls appear only for a
-    // single path or the member currently being edited (double-click entry).
+    // Unified editor — path controls visible in all layers when path is selected
     const inNetworkGroup = !!p.pathNetworkId
       && (pathNetworkSize.get(p.pathNetworkId) ?? 1) > 1
       && pathOnlyMultiSelect;
     const showControls = isSel && (!inNetworkGroup || pathMemberEditId === p.id);
-    if (!canEditPath || !showControls || p.visible === false) return null;
+    if (!showControls) return null;
     const kind = p.type === "road" || p.type === "driveway" ? "road" : p.type === "accessible" ? "accessible" : "walkway";
     const baseWidth = Math.max(3, p.width ?? (kind === "road" ? 18 : 10));
     const widthSegmentIndex = p.points.length > 1
@@ -1074,13 +1081,7 @@ export function Canvas({
           )}
 
           {/* All SVG content (unchanged from original) */}
-          {/* Navigation empty state */}
-          {layer === "navigation" && renderNavNodes.length === 0 && (
-            <g opacity={0.5}>
-              <text x={cw / 2} y={ch / 2 - 20} textAnchor="middle" fontSize={14} fontWeight="800" fill="#16a34a" className="pointer-events-none select-none">Build the Walking Network</text>
-              <text x={cw / 2} y={ch / 2} textAnchor="middle" fontSize={10} fill="#6b7280" className="pointer-events-none select-none">Add waypoints at intersections and destinations, then connect them with Connect.</text>
-            </g>
-          )}
+          {/* Navigation empty state — rendered as HTML overlay below (see end of Canvas) */}
 
           {/* Major grid lines */}
           <g opacity={0.12}>
@@ -1322,11 +1323,40 @@ export function Canvas({
             })}
           </g>
 
+          {/* Hidden physical Pathways remain recoverable in the admin editor.
+              They are excluded from the normal network surface above and render
+              only as a subdued, dashed editor ghost. */}
+          <g data-testid="hidden-path-editor-layer" className="pointer-events-none">
+            {paths.filter((path) => editorPathRenderMode(path) === "ghost").map((path) => {
+              const style = pathRenderStyle(path);
+              const mid = path.points[Math.floor((path.points.length - 1) / 2)];
+              return (
+                <g key={`${path.id}-hidden-ghost`} data-testid="hidden-campus-path-ghost" data-path-id={path.id}>
+                  <polyline
+                    points={path.points.map((point) => `${point.x},${point.y}`).join(" ")}
+                    fill="none"
+                    stroke={style.surface}
+                    strokeWidth={style.baseWidth}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeDasharray="7 5"
+                    opacity={0.28}
+                  />
+                  {mid && (
+                    <g transform={`translate(${mid.x} ${mid.y})`}>
+                      <circle r={7} fill="var(--card)" stroke="var(--muted-foreground)" strokeWidth={1.2} opacity={0.9} />
+                      <path d="M-4 4 L4 -4" stroke="var(--muted-foreground)" strokeWidth={1.5} strokeLinecap="round" />
+                    </g>
+                  )}
+                </g>
+              );
+            })}
+          </g>
+
           {paths.map((p) => {
-            if (p.visible === false) return null;
             const kind = p.type === "road" || p.type === "driveway" ? "road" : p.type === "accessible" ? "accessible" : "walkway";
             const baseWidth = Math.max(3, p.width ?? (kind === "road" ? 18 : 10));
-            const canEditPath = layer !== "navigation";
+            // Unified editor — paths always interactive in select/erase/pan tools
             return (
               <g
                 key={`${p.id}-hit`}
@@ -1334,11 +1364,11 @@ export function Canvas({
                 data-path-id={p.id}
                 data-path-network-id={p.pathNetworkId}
                 data-path-kind={kind}
-                onMouseDown={(e) => { e.stopPropagation(); if (canEditPath && tool === "select") onPathDown?.(e, p.id); }}
-                onClick={(e) => { e.stopPropagation(); if (!canEditPath) return; if (tool === "erase") { onSelect(null); } else onPathClick(p.id); }}
-                onDoubleClick={(e) => { e.stopPropagation(); if (canEditPath && tool === "select") onPathDblClick?.(p.id); }}
-                onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); if (canEditPath) onItemContextMenu?.(e, "path", p.id); }}
-                style={{ cursor: !canEditPath ? "default" : p.locked ? "not-allowed" : tool === "erase" ? "not-allowed" : tool === "select" ? "move" : "pointer" }}
+                onMouseDown={(e) => { e.stopPropagation(); if (tool === "select") onPathDown?.(e, p.id); }}
+                onClick={(e) => { e.stopPropagation(); if (tool === "erase") { onSelect(null); } else onPathClick(p.id); }}
+                onDoubleClick={(e) => { e.stopPropagation(); if (tool === "select") onPathDblClick?.(p.id); }}
+                onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onItemContextMenu?.(e, "path", p.id); }}
+                style={{ cursor: p.locked ? "not-allowed" : tool === "erase" ? "not-allowed" : tool === "select" ? "move" : "pointer" }}
               >
                 <polyline points={p.points.map((pt) => `${pt.x},${pt.y}`).join(" ")} fill="none" stroke="transparent" strokeWidth={baseWidth + 2} strokeLinecap="butt" strokeLinejoin={kind === "road" ? "bevel" : "round"} />
               </g>
@@ -1350,7 +1380,7 @@ export function Canvas({
           {renderPathJunctionLayer()}
           {paths.map((p) => renderPathControls(p))}
 
-          {pathPaintPreview && layer !== "navigation" && (
+          {pathPaintPreview && shouldRenderPathwayAuthoringPreview(true, layer === "navigation") && (
             <g data-testid="path-paint-preview" data-path-kind={pathPaintPreview.type} className="pointer-events-none">
               {pathPaintPreview.points.length > 1 ? (
                 <>
@@ -1658,12 +1688,7 @@ export function Canvas({
                       <text x={b.x + b.width - 10} y={b.y + 12} textAnchor="middle" fill="#92400e" fontSize={8} fontWeight="900" className="pointer-events-none select-none">🔒</text>
                     </g>
                   )}
-                  {isInvalid && !isOverlapping && (
-                    <>
-                      <rect x={b.x - 5} y={b.y - 5} width={b.width + 10} height={b.height + 10} rx={10} fill="none" stroke="#dc2626" strokeWidth={2.5} strokeDasharray="8 4" opacity={0.85} className="animate-validation-pulse" />
-                      <rect x={b.x - 7} y={b.y - 7} width={b.width + 14} height={b.height + 14} rx={12} fill="none" stroke="#dc2626" strokeWidth={1} strokeDasharray="4 6" opacity={0.35} />
-                    </>
-                  )}
+                  {/* Issue indicator replaced with subtle badge — see below */}
                   {/* Single selection outlines + resize handles — rendered ABOVE the body so the rotation-aware resize cursors are visible on hover (rotated with building) */}
                   {isSel && (
                     <>
@@ -1727,9 +1752,9 @@ export function Canvas({
                   )}
                   {isInvalid && !isOverlapping && (
                     <g className="pointer-events-none select-none">
-                      {/* Warning badge — top-right INSIDE the building, rotates with it */}
-                      <rect x={b.x + b.width - 18} y={b.y + 3} width={15} height={13} rx={3} fill="#dc2626" opacity={0.92} />
-                      <text x={b.x + b.width - 10.5} y={b.y + 12} textAnchor="middle" fill="white" fontSize={8} fontWeight="900">⚠</text>
+                      {/* Subtle warning badge — outside top-right of building AABB, rotates with it */}
+                      <circle cx={b.x + b.width - 2} cy={b.y - 2} r={6} fill="#fef3c7" stroke="#d97706" strokeWidth={1.2} opacity={0.95} />
+                      <text x={b.x + b.width - 2} y={b.y + 1.5} textAnchor="middle" fill="#b45309" fontSize={8} fontWeight="900">⚠</text>
                     </g>
                   )}
                 </g>
@@ -1993,9 +2018,14 @@ export function Canvas({
                 if (!a || !b) return null;
                 const isSel = selected?.type === "navEdge" && selected.id === e.id;
                 const isMultiSel = multiSelected.includes(e.id);
+                const pathwayGenerated = isPathwayGeneratedEdge(e);
+                const selectedPhysicalPathOwnsEdge = Boolean(
+                  pathwayGenerated
+                  && e.generatedFromPathIds?.some((pathId) => selectedPhysicalPathIds.has(pathId)),
+                );
                 const oneWay = e.bidirectional === false;
                 const isClosed = e.closed === true;
-                const edgePoints = [{ x: a.x, y: a.y }, ...(e.bendPoints ?? []), { x: b.x, y: b.y }];
+                const edgePoints = [{ x: a.x, y: a.y }, ...(pathwayGenerated ? [] : (e.bendPoints ?? [])), { x: b.x, y: b.y }];
                 const edgePts = edgePoints.map((pt) => `${pt.x},${pt.y}`).join(" ");
                 const middleSegmentIndex = Math.max(0, Math.floor((edgePoints.length - 1) / 2));
                 const middleA = edgePoints[middleSegmentIndex];
@@ -2010,7 +2040,7 @@ export function Canvas({
                 const isBlocked = navBlockedEdgeIds?.has(e.id) ?? false;
                 const edgeColor = isBlocked ? "#dc2626" : (isSel || isMultiSel ? "var(--accent)" : e.color || "#16a34a");
                 return (
-                  <g key={e.id} data-testid="nav-edge" className="group/nav-edge"
+                  <g key={e.id} data-testid="nav-edge" data-pathway-generated={pathwayGenerated ? "true" : undefined} className="group/nav-edge"
                     onMouseDown={(ev) => {
                       if (!navGraphInteractive) return;
                       // B5 Phase 6.7/6.8: Waypoint AND Connect tools must not be
@@ -2023,10 +2053,13 @@ export function Canvas({
                       ev.stopPropagation();
                       onNavEdgeSelect?.(ev, e.id);
                     }}
-                    style={{ cursor: navGraphInteractive ? (tool === "select" ? "pointer" : tool === "marker" ? "crosshair" : "crosshair") : "default" }}
+                    style={{
+                      cursor: navGraphInteractive ? (tool === "select" ? "pointer" : tool === "marker" ? "crosshair" : "crosshair") : "default",
+                      pointerEvents: selectedPhysicalPathOwnsEdge ? "none" : undefined,
+                    }}
                   >
                     {/* Invisible generous hit target so thin edges are clickable */}
-                    <polyline points={edgePts} fill="none" stroke="transparent" strokeWidth={14} strokeLinecap="round" strokeLinejoin="round" />
+                    <polyline points={edgePts} fill="none" stroke="transparent" strokeWidth={pathwayGenerated ? 6 : 14} strokeLinecap="round" strokeLinejoin="round" />
                     {/* Hover halo — reveals the edge is interactive without color noise */}
                     <polyline points={edgePts} fill="none"
                       stroke="var(--accent)"
@@ -2067,7 +2100,7 @@ export function Canvas({
                         />
                       </g>
                     )}
-                    {navGraphInteractive && isSel && tool === "select" && edgePoints.slice(0, -1).map((point, index) => {
+                    {navGraphInteractive && !pathwayGenerated && isSel && tool === "select" && edgePoints.slice(0, -1).map((point, index) => {
                       const next = edgePoints[index + 1];
                       const addPoint = { x: Math.round((point.x + next.x) / 2), y: Math.round((point.y + next.y) / 2) };
                       return (
@@ -2084,7 +2117,7 @@ export function Canvas({
                         />
                       );
                     })}
-                    {navGraphInteractive && isSel && tool === "select" && (e.bendPoints ?? []).map((point, index) => (
+                    {navGraphInteractive && !pathwayGenerated && isSel && tool === "select" && (e.bendPoints ?? []).map((point, index) => (
                       <circle
                         key={`${e.id}-bend-${index}`}
                         cx={point.x}
@@ -2130,6 +2163,11 @@ export function Canvas({
                 const isSafeArea = n.type === "safe_area";
                 const isEntrance = n.type === "entrance";
                 const isDestination = n.type === "room_access";
+                const pathwayGenerated = isPathwayGeneratedNode(n);
+                const selectedPhysicalPathOwnsNode = Boolean(
+                  pathwayGenerated
+                  && n.generatedFromPathVertices?.some((ref) => selectedPhysicalPathIds.has(ref.pathId)),
+                );
                 // B5 Phase 1.8: an entrance-linked node is DERIVED geometry of
                 // the physical door — the door symbol is the primary visual, so
                 // the node renders ONLY a small subtle connected badge + one
@@ -2153,8 +2191,16 @@ export function Canvas({
                 return (
                   <g key={n.id} data-testid="nav-node" data-entrance-linked={isEntranceLinked ? "true" : undefined} className="group/nav-node"
                     onMouseDown={(e) => { if (navGraphInteractive) onItemDown(e, "navNode", n.id, n.x, n.y); }}
-                    onContextMenu={(e) => { if (!navGraphInteractive) return; e.preventDefault(); e.stopPropagation(); onItemContextMenu?.(e, "navNode", n.id); }}
-                    style={{ cursor: navGraphInteractive ? (tool === "select" ? "move" : cursor) : "default" }}
+                    onContextMenu={(e) => {
+                      if (!navGraphInteractive) return;
+                      e.preventDefault();
+                      e.stopPropagation();
+                      if (!pathwayGenerated) onItemContextMenu?.(e, "navNode", n.id);
+                    }}
+                    style={{
+                      cursor: navGraphInteractive ? (pathwayGenerated ? "pointer" : tool === "select" ? "move" : cursor) : "default",
+                      pointerEvents: selectedPhysicalPathOwnsNode ? "none" : undefined,
+                    }}
                   >
                     {/* B5 Phase 6.8: invisible hit area matching NAV_NODE_HIT_THRESHOLD
                         (12) so Connect/Waypoint destination clicks are reliable —
@@ -2290,11 +2336,13 @@ export function Canvas({
           {issueMarkers.length > 0 && (
             <g className="pointer-events-none" data-testid="campus-issue-marker-layer">
               {issueMarkers.map((m) => {
-                const color = m.severity === "error" ? "#dc2626" : "#d97706";
+                const bg = m.severity === "error" ? "#fef2f2" : "#fef3c7";
+                const fg = m.severity === "error" ? "#b91c1c" : "#b45309";
+                const stroke = m.severity === "error" ? "#dc2626" : "#d97706";
                 return (
                   <g key={m.key} data-testid="campus-issue-marker" data-issue-object={m.key} data-issue-severity={m.severity}>
-                    <circle cx={m.x} cy={m.y - 13} r={7} fill="none" stroke={color} strokeWidth={0.8} opacity={0.45} />
-                    <circle cx={m.x} cy={m.y - 13} r={4.5} fill={color} stroke="white" strokeWidth={1.4} />
+                    <circle cx={m.x} cy={m.y - 13} r={6.5} fill={bg} stroke={stroke} strokeWidth={1.1} opacity={0.95} />
+                    <text x={m.x} y={m.y - 10} textAnchor="middle" fill={fg} fontSize={8} fontWeight="900">⚠</text>
                   </g>
                 );
               })}
@@ -2317,6 +2365,19 @@ export function Canvas({
           {layer === "events" && <div className="absolute inset-0" style={{ background: "rgba(217,119,6,0.03)" }} />}
         </motion.div>
       </AnimatePresence>
+
+      {/* Navigation empty state — foreground coachmark, above all canvas content */}
+      {layer === "navigation" && renderNavNodes.length === 0 && (
+        <div className="absolute top-3 left-1/2 -translate-x-1/2 z-20 pointer-events-none">
+          <div className="flex items-center gap-2 rounded-lg border border-green-500/30 bg-card/95 backdrop-blur px-3 py-2 shadow-md max-w-[min(500px,calc(100%-24px))]">
+            <NavigationIcon className="h-4 w-4 text-green-600 shrink-0" />
+            <div>
+              <div className="text-[11px] font-extrabold text-green-700">Build the Walking Network</div>
+              <div className="text-[10px] text-muted-foreground">Place Walking Points at intersections, then connect them with Connect.</div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Status bar */}
       <motion.div

@@ -164,6 +164,10 @@ export function AdminMapBuilderPage() {
   const archiveCampus = useCallback(async (id: string) => {
     const campus = campuses.find((c) => c.id === id);
     if (!campus?.databaseUpdatedAt) return;
+    if (campus.publishStatus === "published" && campus.status !== "archived") {
+      toast.error("Unpublish First", { description: `"${campus.name}" is currently available to students. Unpublish it before archiving.` });
+      return;
+    }
     try {
       const updated = await campusService.archive(id, campus.databaseUpdatedAt);
       updateCampusMetadata(updated);
@@ -179,6 +183,16 @@ export function AdminMapBuilderPage() {
       updateCampusMetadata(updated);
       toast.success("Campus Restored", { description: `"${campus.name}" was restored as a private draft.` });
     } catch (error) { toast.error("Could not restore campus", { description: userFacingCampusMessage(error) }); }
+  }, [campuses, updateCampusMetadata]);
+
+  const unpublishCampus = useCallback(async (id: string) => {
+    const campus = campuses.find((c) => c.id === id);
+    if (!campus?.databaseUpdatedAt || campus.publishStatus !== "published" || campus.status === "archived") return;
+    try {
+      const updated = await campusService.unpublish(id, campus.databaseUpdatedAt);
+      updateCampusMetadata(updated);
+      toast.success("Campus Unpublished", { description: `"${campus.name}" is no longer visible to students.` });
+    } catch (error) { toast.error("Could not unpublish campus", { description: userFacingCampusMessage(error) }); }
   }, [campuses, updateCampusMetadata]);
 
   const editDetails = useCallback((id: string) => {
@@ -451,6 +465,7 @@ export function AdminMapBuilderPage() {
                 onOpen={goToCampus}
                 onCreate={() => setView({ type: "wizard", step: 1, draft: {} })}
                 onDuplicate={duplicateCampus}
+                onUnpublish={unpublishCampus}
                 onArchive={archiveCampus}
                 onRestore={restoreCampus}
                 onEditDetails={editDetails}

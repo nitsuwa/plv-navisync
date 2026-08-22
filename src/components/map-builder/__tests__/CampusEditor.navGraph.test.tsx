@@ -83,7 +83,7 @@ function canvasSvg(container: HTMLElement): SVGSVGElement {
 
 /** Switch to the Navigation layer via its tab, then return the ACTIVE editor svg. */
 function openNavigationLayer(container: HTMLElement): SVGSVGElement {
-  fireEvent.click(screen.getByText("2. Navigation"));
+  fireEvent.click(screen.getByText("Navigation"));
   return canvasSvg(container);
 }
 
@@ -616,7 +616,7 @@ describe("B5 Phase 1.5 — navigation authoring UX / tool architecture correctio
   it("Navigation Remove protects campus objects — no delete confirmation for a building", () => {
     let latest: Campus | undefined;
     const { container } = render(<Harness initialCampus={seededCampus()} onCampusChange={(c) => { latest = c; }} />);
-    fireEvent.click(screen.getByText("2. Navigation"));
+    fireEvent.click(screen.getByText("Navigation"));
     fireEvent.keyDown(window, { key: "e" }); // Remove tool
     const building = Array.from(container.querySelectorAll<SVGRectElement>("svg rect")).find((r) =>
       Math.abs(Number(r.getAttribute("x")) - 100) < 2 &&
@@ -1202,13 +1202,13 @@ describe("B5 Phase 1.7 — outdoor navigation manual-QA corrections", () => {
     const draftNodes = latest!.navNodes!.length;
 
     // Switch to Campus — no dialog, draft stays, Save stays enabled.
-    fireEvent.click(screen.getByText("1. Campus"));
+    fireEvent.click(screen.getByText("Campus"));
     expect(screen.queryByText(/Unsaved changes/)).toBeNull();
     expect(screen.getByText("Changes")).toBeTruthy();
     expect(latest!.navNodes).toHaveLength(draftNodes);
 
     // Switch back to Navigation — graph remains.
-    fireEvent.click(screen.getByText("2. Navigation"));
+    fireEvent.click(screen.getByText("Navigation"));
     expect(screen.getByText("Changes")).toBeTruthy();
     expect(latest!.navNodes).toHaveLength(draftNodes);
   });
@@ -1217,9 +1217,9 @@ describe("B5 Phase 1.7 — outdoor navigation manual-QA corrections", () => {
     const { container } = render(<Harness initialCampus={seededCampus()} />);
     openNavigationLayer(container);
     expect(screen.getByText("Live")).toBeTruthy();
-    fireEvent.click(screen.getByText("1. Campus"));
-    fireEvent.click(screen.getByText("2. Navigation"));
-    fireEvent.click(screen.getByText("3. Events"));
+    fireEvent.click(screen.getByText("Campus"));
+    fireEvent.click(screen.getByText("Navigation"));
+    fireEvent.click(screen.getByText("Events"));
     expect(screen.getByText("Live")).toBeTruthy();
   });
 });
@@ -2156,7 +2156,7 @@ describe("B5 Phase 1.9 — entrance navigation visual cleanup", () => {
     expect(screen.getByTestId("navigation-hierarchy-sidebar")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Assets" })).toBeNull();
     expect(screen.queryByText("Workflow")).toBeNull();
-    fireEvent.click(screen.getByText("1. Campus"));
+    fireEvent.click(screen.getByText("Campus"));
     expect(screen.getByRole("button", { name: "Assets" })).toBeTruthy();
   });
 
@@ -2654,13 +2654,13 @@ describe("B5 Final — placed objects turn touching nav edges red", () => {
 
     // Back to the Campus layer, drag the fountain far from the edge — the
     // live memo must re-derive and clear the red state immediately.
-    fireEvent.click(screen.getByText("1. Campus"));
+    fireEvent.click(screen.getByText("Campus"));
     fireEvent.mouseDown(decorGroup(container, "fountain"), { clientX: 236, clientY: 186, bubbles: true });
     fireEvent.mouseMove(svg, { clientX: 600, clientY: 500, bubbles: true });
     fireEvent.mouseUp(svg, { bubbles: true });
     expect(latest!.decorAssets!.find((d) => d.id === "d1")!.x).toBeGreaterThan(500);
 
-    fireEvent.click(screen.getByText("2. Navigation"));
+    fireEvent.click(screen.getByText("Navigation"));
     expect(edgeStrokes(container)).not.toContain("#dc2626");
   });
 });

@@ -78,6 +78,7 @@ export interface CampusHomeProps {
   onDelete?: (id: string) => void;
   onDuplicate?: (id: string) => void;
   onTogglePublish?: (id: string, force?: "publish" | "unpublish") => void;
+  onUnpublish?: (id: string) => void;
   onArchive?: (id: string) => void;
   onRestore?: (id: string) => void;
   onEditDetails?: (id: string) => void;
@@ -203,6 +204,7 @@ function QuickActions({
   campus,
   onDuplicate,
   onTogglePublish,
+  onUnpublish,
   onArchive,
   onEditDetails,
   onDeleteRequest,
@@ -210,6 +212,7 @@ function QuickActions({
   campus: Campus;
   onDuplicate?: (id: string) => void;
   onTogglePublish?: (id: string, force?: "publish" | "unpublish") => void;
+  onUnpublish?: (id: string) => void;
   onArchive?: (id: string) => void;
   onEditDetails?: (id: string) => void;
   onDeleteRequest?: (id: string) => void;
@@ -278,13 +281,14 @@ function QuickActions({
     // Simulate a brief loading delay, then execute the action
     progressTimeoutRef.current = setTimeout(() => {
       try {
-        onTogglePublish?.(id, action);
+        if (action === "unpublish" && !onTogglePublish) onUnpublish?.(id);
+        else onTogglePublish?.(id, action);
         setActionProgress((prev) => (prev ? { ...prev, state: "success" } : prev));
       } catch {
         setActionProgress((prev) => (prev ? { ...prev, state: "error" } : prev));
       }
     }, 1500);
-  }, [onTogglePublish]);
+  }, [onTogglePublish, onUnpublish]);
 
   const handlePublishConfirm = useCallback(() => {
     if (!publishConfirm) return;
@@ -340,7 +344,8 @@ function QuickActions({
         if (currentAction === "publishing") {
           onTogglePublish?.(campus.id, "publish");
         } else if (currentAction === "unpublishing") {
-          onTogglePublish?.(campus.id, "unpublish");
+          if (!onTogglePublish) onUnpublish?.(campus.id);
+          else onTogglePublish(campus.id, "unpublish");
         } else if (currentAction === "duplicating") {
           onDuplicate?.(campus.id);
         } else if (currentAction === "archiving") {
@@ -351,7 +356,7 @@ function QuickActions({
         setActionProgress((prev) => (prev ? { ...prev, state: "error" } : prev));
       }
     }, 1500);
-  }, [actionProgress, onTogglePublish, onDuplicate, onArchive, campus.id]);
+  }, [actionProgress, onTogglePublish, onUnpublish, onDuplicate, onArchive, campus.id]);
 
   // Cleanup timeout on unmount
   useEffect(() => {
@@ -366,7 +371,7 @@ function QuickActions({
     ...(onEditDetails ? [{ icon: Pencil, label: "Edit Details", action: () => { setOpen(false); onEditDetails(campus.id); } }] : []),
     ...(onDuplicate ? [{ icon: Copy, label: "Duplicate Campus", action: () => { setOpen(false); setDuplicateTarget(campus.id); } }] : []),
     { type: "separator" as const },
-    ...(onTogglePublish ? [{
+    ...((onTogglePublish || (isPublished && onUnpublish)) ? [{
       icon: isPublished ? EyeOff : Eye,
       label: isPublished ? "Unpublish" : "Publish",
       action: () => {
@@ -585,6 +590,7 @@ export function CampusHome({
   onDelete,
   onDuplicate,
   onTogglePublish,
+  onUnpublish,
   onArchive,
   onRestore,
   onEditDetails,
@@ -643,15 +649,14 @@ export function CampusHome({
         />
       )}
 
-      {/* Restore confirmation — only when the archived campus was published */}
       {restoreConfirm && (
         <ConfirmDialog
           open={!!restoreConfirm}
-          title="Restore Published Campus?"
-          message={`"${restoreConfirm.name}" was published before it was archived. Restoring it will bring it back to the active list and make it visible to all students again immediately.`}
-          confirmLabel="Restore"
+          title="Restore Campus?"
+          message={`"${restoreConfirm.name}" will return to your active campuses as an unpublished campus. It will not become visible to students automatically.`}
+          confirmLabel="Restore Campus"
           cancelLabel="Cancel"
-          variant="warning"
+          variant="info"
           onConfirm={() => {
             onRestore?.(restoreConfirm.id);
             setRestoreConfirm(null);
@@ -867,14 +872,14 @@ export function CampusHome({
                           "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold border shadow-sm backdrop-blur-sm",
                           campus.publishStatus === "published"
                             ? "bg-green-50/90 dark:bg-green-900/25 border-green-200 dark:border-green-700/30 text-green-700 dark:text-green-400"
-                            : campus.publishedAt
+                            : campus.lifecycleStatus === "unpublished" || campus.publishedAt
                               ? "bg-amber-50/90 dark:bg-amber-900/20 border-amber-200 dark:border-amber-700/30 text-amber-700 dark:text-amber-400"
                               : "bg-slate-50/90 dark:bg-slate-800/20 border-slate-200 dark:border-slate-700/30 text-slate-500 dark:text-slate-400"
                         )}
                       >
                         {campus.publishStatus === "published" ? (
                           <><Globe className="h-2.5 w-2.5" /> Published</>
-                        ) : campus.publishedAt ? (
+                        ) : campus.lifecycleStatus === "unpublished" || campus.publishedAt ? (
                           <><Clock className="h-2.5 w-2.5" /> Draft</>
                         ) : (
                           <><Clock className="h-2.5 w-2.5" /> Never Published</>
@@ -893,7 +898,8 @@ export function CampusHome({
                         campus={campus}
                         onDuplicate={onDuplicate}
                         onTogglePublish={onTogglePublish}
-                        onArchive={onArchive}
+                        onUnpublish={onUnpublish}
+                        onArchive={campus.publishStatus === "published" ? undefined : onArchive}
                         onEditDetails={onEditDetails}
                         onDeleteRequest={onDelete ? (id) => {
                           const target = campuses.find((x) => x.id === id);
@@ -1058,14 +1064,7 @@ export function CampusHome({
                         <p className="text-[10px] text-muted-foreground font-mono">{campus.code}</p>
                       </div>
                       <button
-                        onClick={() => {
-                          // Restoring a previously-published campus makes it live again — confirm first
-                          if (campus.publishStatus === "published") {
-                            setRestoreConfirm({ id: campus.id, name: campus.name });
-                          } else {
-                            onRestore?.(campus.id);
-                          }
-                        }}
+                        onClick={() => setRestoreConfirm({ id: campus.id, name: campus.name })}
                         className="text-xs font-bold text-primary hover:underline shrink-0"
                       >
                         Restore

@@ -55,7 +55,8 @@ export type CampusStatusFilter = "all" | "published" | "draft" | "never";
  * published / draft (was published, now draft) / never published.
  */
 export function campusStatusOf(c: Campus): "published" | "draft" | "never" {
-  return c.publishStatus === "published" ? "published" : c.publishedAt ? "draft" : "never";
+  if (c.publishStatus === "published" || c.lifecycleStatus === "published") return "published";
+  return c.lifecycleStatus === "unpublished" || !!c.publishedAt ? "draft" : "never";
 }
 
 /**
@@ -240,12 +241,17 @@ export function createCampusClone(
       buildingId: nn.buildingId ? bldMap.get(nn.buildingId) ?? nn.buildingId : undefined,
       floorId: nn.floorId ? floorMap.get(nn.floorId) ?? nn.floorId : undefined,
       transitionSharedId: nn.transitionSharedId ? remapShared(nn.transitionSharedId) : undefined,
+      generatedFromPathVertices: nn.generatedFromPathVertices?.map((ref) => ({
+        ...ref,
+        pathId: pathMap.get(ref.pathId) ?? ref.pathId,
+      })),
     })),
     navEdges: (source.navEdges ?? []).map((e) => ({
       ...structuredClone(e),
       id: edgeMap.get(e.id)!,
       startNodeId: nodeMap.get(e.startNodeId) ?? e.startNodeId,
       endNodeId: nodeMap.get(e.endNodeId) ?? e.endNodeId,
+      generatedFromPathIds: e.generatedFromPathIds?.map((pathId) => pathMap.get(pathId) ?? pathId),
     })),
     routes: (source.routes ?? []).map((r) => ({
       ...structuredClone(r),

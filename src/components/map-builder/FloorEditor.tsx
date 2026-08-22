@@ -4,11 +4,11 @@ import {
   ArrowLeft, ChevronRight, ChevronDown, CheckCircle2, Save, X, ZoomIn, ZoomOut, Undo2, Redo2,
   ChevronLeft,
   Grid3X3, Layers, Paintbrush, Sofa, SeparatorHorizontal, MoveVertical,
-  DoorOpen, Binary, Text, PanelRightClose, Navigation, LandPlot,
-  MousePointer2, Hand, HelpCircle, AlertTriangle, Maximize2, MoreHorizontal,
-  Square as SquareIcon, GitBranch as GitBranchIcon, Trash2 as TrashIcon, Copy, Settings2,
+  DoorOpen, Binary, Text, PanelRightClose, PanelRightOpen, Navigation, LandPlot,
+  MousePointer2, Hand, HelpCircle, AlertTriangle, Maximize2,
+  Square as SquareIcon, GitBranch as GitBranchIcon, Trash2 as TrashIcon, Copy, Settings2, Route,
   Loader2, Globe2, Eye, EyeOff, Lock, Unlock, Plus, Pencil, Waypoints, Link2, MapPin,
-  Accessibility as AccessibilityIcon, Search,
+  Accessibility as AccessibilityIcon, Search, MoreHorizontal,
 } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { useCanvasControls, isSpacePressed } from "./useCanvasControls";
@@ -19,11 +19,13 @@ import {
 } from "./constants";
 import { FloorPropertiesPanel } from "./FloorPropertiesPanel";
 import { FloorNavPropertiesPanel } from "./FloorNavPropertiesPanel";
+import { TestNavigationPanel } from "./TestNavigationPanel";
 import { NavigationRelationshipCard } from "./NavigationRelationshipCard";
 import { FloorOverviewSidebar } from "./FloorOverviewSidebar";
 import { FloorActionsMenu } from "./FloorActionsMenu";
 import { FloorSettingsDialog, type FloorSettingsDraft } from "./FloorSettingsDialog";
 import { ShortcutCheatSheet } from "./ShortcutCheatSheet";
+import { ToolbarTooltip } from "./ToolbarTooltip";
 import { UnsavedChangesDialog } from "./UnsavedChangesDialog";
 import { useUnsavedChangesGuard } from "./useUnsavedChangesGuard";
 import { useToast } from "../../hooks/useToast";
@@ -826,7 +828,7 @@ function FloorContextMenu({
   const canvasActions = [
     { id: "fit-floor", label: "Fit Floor", icon: Maximize2 },
     { id: "floor-settings", label: "Floor Settings", icon: PanelRightClose },
-    { id: "toggle-grid", label: "Toggle Grid", icon: Grid3X3 },
+    { id: "toggle-grid", label: "Snap to Grid", icon: Grid3X3 },
   ];
   const openingActions = menu.type === "door"
     ? [
@@ -1082,10 +1084,13 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
   const floor = normalizeFloor(rawFloor, { buildingId });
 
   // ── Core state ──
-  const [mode, setMode] = useState<FloorEditorMode>("structure");
-  // B5 Phase 2: indoor Navigation authoring mode (Design vs Navigation).
-  const navMode = mode === "navigation";
+  const [showNavOverlay, setShowNavOverlay] = useState(false);
+  // B8 Phase 1: navMode is now true when the nav overlay is active AND a nav
+  // tool is selected (or a nav object is selected). Physical tools always work.
+  const navMode = showNavOverlay;
   const [navTool, setNavTool] = useState<"select" | "pan" | "waypoint" | "destination" | "connect" | "link" | "erase">("select");
+  // B8: Test route panel toggle — explicit action, NOT auto-opened.
+  const [testNavOpen, setTestNavOpen] = useState(false);
   // B5 Phase 2.2: destructive-hover target for the Remove tool (node or edge).
   const [navEraseHover, setNavEraseHover] = useState<{ type: "node" | "edge"; id: string } | null>(null);
   const [navSelected, setNavSelected] = useState<{ type: "node" | "edge"; id: string } | null>(null);
@@ -1194,12 +1199,11 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
       setNavTool("select");
       setNavSelected({ type: initialSelection.type === "navNode" ? "node" : "edge", id: initialSelection.id });
       setShowProperties(true);
-      setMode("navigation");
+      if (!showNavOverlay) setShowNavOverlay(true);
     } else {
       setSelected(initialSelection);
       setMultiSelected([]);
       setShowProperties(true);
-      setMode("structure");
     }
   }, [initialSelection]);
   const [rubberBand, setRubberBand] = useState<{ sx: number; sy: number; cx: number; cy: number } | null>(null);
@@ -1233,9 +1237,6 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
   // partially-added duplicate floor behind.
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [showIssues, setShowIssues] = useState(false);
-  // B5 Phase 2.5: Design-mode "Show Navigation" view preference — a READ-ONLY
-  // graph overlay for alignment/reference. Pure view state: no dirty, no history.
-  const [showNavOverlay, setShowNavOverlay] = useState(false);
   const [showMoreTools, setShowMoreTools] = useState(false);
   // ── B5 Final: arrow-key nudge batching (groups rapid nudges into one undo step) ──
   const lastNudgeRef = useRef(0);
@@ -2248,6 +2249,9 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
   const selectFloorItem = useCallback((selection: FloorSelection | null) => {
     setMultiSelected([]);
     setSelected(selection);
+    setNavSelected(null);
+    setNavMultiSelected([]);
+    setNavPhysicalSelected(null);
     setShowProperties(true);
   }, []);
 
@@ -2344,6 +2348,13 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
       return;
     }
     setTool(next);
+    // Selecting a physical floor tool gives pointer ownership back to the
+    // floor canvas while the navigation overlay remains visible.
+    setNavTool("select");
+    setNavConnectStart(null);
+    setNavPreview(null);
+    setNavConnectBends([]);
+    navConnectBendGroupsRef.current = [];
     setWallStart(null);
     setWallPreview(null);
     setWallSnapIndicator(null);
@@ -2995,7 +3006,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
     // B7 correction: nav-only markers (navNode, navEdge) are hidden when the
     // Navigation layer is not active — the issue stays in the Issues list but
     // no floating marker appears on an invisible object.
-    const navVisible = mode === "navigation";
+    const navVisible = showNavOverlay;
     const add = (selection: FloorSelection | undefined, severity: "error" | "warning" | "info") => {
       if (!selection || severity === "info") return;
       if (selection.type === "wall" || selection.type === "path" || selection.type === "window" || selection.type === "furniture" || selection.type === "label") return;
@@ -3010,7 +3021,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
     for (const issue of floorIssues) add(issue.selection, issue.severity);
     for (const edgeId of navBlockedEdgeIds) add({ type: "navEdge", id: edgeId }, "warning");
     return markers;
-  }, [floorIssues, navBlockedEdgeIds, mode]);
+  }, [floorIssues, navBlockedEdgeIds, showNavOverlay]);
 
   // ── B7 Phase 2: contextual issue guidance for the SELECTED object ──
   // Same floor issue list the Issues panel + markers use: selecting an object
@@ -3573,7 +3584,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
       else if (navMultiSelected.length > 0) nodeIds = navMultiSelected;
     }
     if (nodeIds.length === 0 && edgeIds.length === 0) {
-      toast.info("Nothing selected", "Select a waypoint or path to remove it.");
+      toast.info("Nothing selected", "Select a walking point or path to remove it.");
       return;
     }
     const nodeIdSet = new Set(nodeIds);
@@ -3602,12 +3613,12 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
       setNavMultiSelected([]);
     }
     toast.success(
-      nodeIds.length > 0 && removedEdges.length > 0 ? "Waypoints removed"
-      : nodeIds.length > 0 ? "Waypoint removed"
+      nodeIds.length > 0 && removedEdges.length > 0 ? "Walking Points removed"
+      : nodeIds.length > 0 ? "Walking Point removed"
       : "Path removed",
       removedEdges.length > 0
         ? `Removed ${nodeIds.length} waypoint${nodeIds.length !== 1 ? "s" : ""} and ${removedEdges.length} path${removedEdges.length !== 1 ? "s" : ""}.`
-        : "The selected waypoint was removed."
+        : "The selected walking point was removed."
     );
   }, [commitNavGraph, indoorEdges, indoorNodes, navMultiSelected, navSelected, toast]);
 
@@ -3621,12 +3632,27 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
       return distToSegment(pt, { x: a.x, y: a.y }, { x: b.x, y: b.y }) <= 10;
     });
     if (hitEdge) { deleteNavSelection({ type: "edge", id: hitEdge.id }); return; }
-    toast.info("Nothing to remove", "Click a waypoint or path to remove it.");
+    toast.info("Nothing to remove", "Click a walking point or path to remove it.");
   };
 
   const handleNavNodeDown = (e: React.MouseEvent, node: NavigationNode) => {
     e.stopPropagation();
     if (isSpacePressed()) { startPan(e); return; }
+    // Linked navigation cues are derived from their physical owners. With
+    // Select active, clicking the cue should still reach the normal physical
+    // editor so Rooms, Doors, Stairs, Elevators, and Ramps remain editable
+    // while the navigation overlay is visible.
+    const linked = linkedObjectRef(node);
+    if (navTool === "select" && linked) {
+      const physicalType: FloorSelection["type"] = linked.kind === "stair" ? "stairs" : linked.kind as FloorSelection["type"];
+      setNavSelected(null);
+      setNavMultiSelected([]);
+      setNavPhysicalSelected(null);
+      setSelected({ type: physicalType, id: linked.id });
+      setMultiSelected([]);
+      setShowProperties(true);
+      return;
+    }
     const pt = navPointFromEvent(e);
     if (navTool === "erase") { deleteNavSelection({ type: "node", id: node.id }); return; }
     if (navTool === "waypoint" || navTool === "destination") {
@@ -3713,10 +3739,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
     const physical = resolveNavTargetAt(pt);
     if (physical) {
       e.stopPropagation();
-      setNavPhysicalSelected({ type: physical.kind, id: physical.id });
-      setNavSelected(null);
-      setNavMultiSelected([]);
-      setShowProperties(true);
+      selectFloorItem({ type: physical.kind, id: physical.id });
       return;
     }
     const freeIds = navMultiSelected.filter((id) => {
@@ -3749,6 +3772,13 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
     if (isSpacePressed()) { startPan(e); return; }
     if (navTool === "erase") { deleteNavSelection({ type: "edge", id: edge.id }); return; }
     if (navTool === "connect") return;
+    if (navTool === "select") {
+      const physical = resolveNavTargetAt(navPointFromEvent(e));
+      if (physical) {
+        selectFloorItem({ type: physical.kind, id: physical.id });
+        return;
+      }
+    }
     // B5 Phase 2.7: dragging a SEGMENT of the already-selected segmented path
     // translates it perpendicular (draw.io-style); a plain click still selects.
     const isSel = navSelected?.type === "edge" && navSelected.id === edge.id;
@@ -3826,41 +3856,46 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
     setShowProperties(true);
   };
 
-  const switchFloorEditorMode = useCallback((nextMode: FloorEditorMode) => {
-    if (nextMode === mode) return;
-    setMode(nextMode);
-    setNavConnectStart(null);
-    setNavPreview(null);
-    setNavConnectBends([]);
-    navConnectBendGroupsRef.current = [];
-    setNavTargetHover(null);
-    setNavDragPreview(null);
-    setNavDragBlocked(null);
-    setNavEraseHover(null);
-    setNavNodeHover(null);
-    setNavSelectedBend(null);
-    setNavSegmentHover(null);
-    setNavAlignGuides([]);
-    navDragWallWarnedRef.current = false;
-    navLibraryDragRef.current = null;
-    navBendDragRef.current = null;
-    navSegDragRef.current = null;
-    setRubberBand(null);
-    if (nextMode === "navigation") {
-      setNavTool("select");
-      setSelected(null);
-      setMultiSelected([]);
-      // B5 Phase 2.1: the Properties sidebar represents the CURRENT SELECTION —
-      // entering Navigation must never auto-open it just to show tutorial text.
-      setShowProperties(false);
-    } else {
+  // B8 Phase 1: unified editor — toggle navigation overlay on/off.
+  // When ON: nav graph visible + editable, physical tools still work.
+  // When OFF: clean design workspace.
+  const toggleNavigation = useCallback(() => {
+    const next = !showNavOverlay;
+    setShowNavOverlay(next);
+    if (!next) {
+      // Turning OFF: reset all nav state so the canvas is clean.
+      setNavConnectStart(null);
+      setNavPreview(null);
+      setNavConnectBends([]);
+      navConnectBendGroupsRef.current = [];
+      setNavTargetHover(null);
+      setNavDragPreview(null);
+      setNavDragBlocked(null);
+      setNavEraseHover(null);
+      setNavNodeHover(null);
+      setNavSelectedBend(null);
+      setNavSegmentHover(null);
+      setNavAlignGuides([]);
+      navDragWallWarnedRef.current = false;
+      navLibraryDragRef.current = null;
+      navBendDragRef.current = null;
+      navSegDragRef.current = null;
+      setRubberBand(null);
       setNavSelected(null);
       setNavMultiSelected([]);
+      setNavTool("select");
       setTool("select");
+      setTestNavOpen(false); // Close test route panel when nav overlay turns off.
     }
-  }, [mode]);
+  }, [showNavOverlay]);
+  // Keep backward compat for any remaining callers.
+  const switchFloorEditorMode = useCallback((nextMode: FloorEditorMode) => {
+    if (nextMode === "navigation" && !showNavOverlay) toggleNavigation();
+    else if (nextMode === "structure" && showNavOverlay) toggleNavigation();
+  }, [showNavOverlay, toggleNavigation]);
 
   const selectNavTool = useCallback((id: "select" | "pan" | "waypoint" | "destination" | "connect" | "link" | "erase") => {
+    if (id !== "select" && id !== "pan") setShowNavOverlay(true);
     if (id !== "connect") { setNavConnectStart(null); setNavPreview(null); setNavConnectBends([]); navConnectBendGroupsRef.current = []; }
     setNavTool(id);
     setNavEraseHover(null);
@@ -3884,7 +3919,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
       navConnectBendGroupsRef.current = [];
     };
     if (startId === endId) {
-      toast.info("Cannot connect a waypoint to itself", "Pick a different destination.");
+      toast.info("Cannot connect a walking point to itself", "Pick a different destination.");
       clearConnect();
       return false;
     }
@@ -3935,7 +3970,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
     setNavMultiSelected([]);
     setShowProperties(true);
     clearConnect();
-    toast.success("Connection created", `Waypoints connected (${edge.distance} units).`);
+    toast.success("Connection created", `Walking points connected (${edge.distance} units).`);
     return true;
   }, [commitNavGraph, doors, indoorEdges, indoorNodes, toast, walls]);
 
@@ -4318,7 +4353,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
         // Insert waypoint into existing edge — split it
         const insertNode = createIndoorNavNode({
           id: genId("nn"), x: edgeHit.nearest.x, y: edgeHit.nearest.y, buildingId, floorId, campusId: campus.id,
-          name: isDest ? "Destination" : "Waypoint",
+          name: isDest ? "Destination" : "Walking Point",
           type: isDest ? "room_access" : "hallway",
         });
         const splitResult = splitIndoorNavEdge(edgeHit.edge, insertNode, indoorNodes);
@@ -4330,7 +4365,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
           setNavMultiSelected([]);
           setShowProperties(true);
           setNavTool("select");
-          toast.success("Waypoint inserted", "Edge split into two connections.");
+          toast.success("Walking Point inserted", "Edge split into two connections.");
           return;
         }
       }
@@ -4472,15 +4507,15 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
   const copyNavSelection = useCallback(() => {
     const { nodes, edges, linkedCount } = navSelectionGraph();
     if (nodes.length === 0) {
-      toast.info("Nothing to copy", "Select free waypoints first (Ctrl+C).");
+      toast.info("Nothing to copy", "Select free walking points first (Ctrl+C).");
       return;
     }
     navClipboardRef.current = { nodes: structuredClone(nodes), edges: structuredClone(edges) };
     navPasteOffsetRef.current = 12;
     if (linkedCount > 0) {
-      toast.info("Linked waypoints not copied", `${linkedCount} linked waypoint${linkedCount !== 1 ? "s" : ""} follow their physical object and cannot be copied.`);
+      toast.info("Linked walking points not copied", `${linkedCount} linked walking point${linkedCount !== 1 ? "s" : ""} follow their physical object and cannot be copied.`);
     } else {
-      toast.success("Copied", `${nodes.length} waypoint${nodes.length !== 1 ? "s" : ""} copied (Ctrl+V to paste).`);
+      toast.success("Copied", `${nodes.length} walking point${nodes.length !== 1 ? "s" : ""} copied (Ctrl+V to paste).`);
     }
   }, [navSelectionGraph, toast]);
 
@@ -4539,25 +4574,25 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
 
   const pasteNavSelection = useCallback(() => {
     if (!navClipboardRef.current || navClipboardRef.current.nodes.length === 0) {
-      toast.info("Nothing to paste", "Copy waypoints first (Ctrl+C).");
+      toast.info("Nothing to paste", "Copy walking points first (Ctrl+C).");
       return;
     }
     const count = pasteNavGraph(navClipboardRef.current.nodes, navClipboardRef.current.edges, navPasteOffsetRef.current);
     navPasteOffsetRef.current += 12;
-    toast.success("Waypoints pasted", `${count} waypoint${count !== 1 ? "s" : ""} pasted with fresh connections.`);
+    toast.success("Walking Points pasted", `${count} walking point${count !== 1 ? "s" : ""} pasted with fresh connections.`);
   }, [pasteNavGraph, toast]);
 
   const duplicateNavSelection = useCallback(() => {
     const { nodes, edges, linkedCount } = navSelectionGraph();
     if (nodes.length === 0) {
-      toast.info("Nothing to duplicate", "Select free waypoints first (Ctrl+D).");
+      toast.info("Nothing to duplicate", "Select free walking points first (Ctrl+D).");
       return;
     }
     if (linkedCount > 0) {
-      toast.info("Linked waypoints excluded", `${linkedCount} linked waypoint${linkedCount !== 1 ? "s" : ""} follow their physical object and cannot be duplicated.`);
+      toast.info("Linked walking points excluded", `${linkedCount} linked walking point${linkedCount !== 1 ? "s" : ""} follow their physical object and cannot be duplicated.`);
     }
     const count = pasteNavGraph(nodes, edges, 12);
-    toast.success("Waypoints duplicated", `${count} waypoint${count !== 1 ? "s" : ""} duplicated.`);
+    toast.success("Walking Points duplicated", `${count} walking point${count !== 1 ? "s" : ""} duplicated.`);
   }, [navSelectionGraph, pasteNavGraph, toast]);
 
   // ── B5 Phase 2.1: Navigation Library drag-and-drop ─────────────────────────
@@ -4619,7 +4654,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
       }
       const node = createIndoorNavNode({
         id: genId("nn"), x: pt.x, y: pt.y, buildingId, floorId, campusId: campus.id,
-        name: kind === "destination" ? "Destination" : "Waypoint",
+        name: kind === "destination" ? "Destination" : "Walking Point",
         type: kind === "destination" ? "room_access" : "hallway",
       });
       commitNavGraph([...indoorNodes, node], indoorEdges);
@@ -4627,17 +4662,19 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
       setNavMultiSelected([]);
       setShowProperties(true);
       setNavTool("select");
-      toast.success(kind === "destination" ? "Destination placed" : "Waypoint placed", "Added to the walking network.");
+      toast.success(kind === "destination" ? "Destination placed" : "Walking Point placed", "Added to the walking network.");
       return;
     }
     // B5 Phase 2.2: linked kinds are NO LONGER draggable — the unified Link
     // Location tool infers the type from the actual object under the pointer,
-    // so a wrong-type drop can never occur. Defensive reject for unknown kinds.
-    toast.info("Use Link Location", "Drag Waypoints and Destinations; link Rooms, Doors, Stairs, Elevators and Ramps with Link Location.");
+    // so a wrong-type drop can never occur. Defensive reject for unknown kinds.      toast.info("Use Link Location", "Drag Walking Points and Destinations; link Rooms, Doors, Stairs, Elevators and Ramps with Link Location.");
   }, [buildingId, campus.id, commitNavGraph, doors, elevators, floorId, indoorEdges, indoorNodes, ramps, rooms, selectDuplicateNavNode, stairs, toast]);
 
   const handleSvgDown = (e: React.MouseEvent<SVGSVGElement>) => {
-    if (navMode) { handleNavSvgDown(e); return; }
+    // B8 Phase 1: when a nav tool is active, route to nav handler.
+    // Otherwise, fall through to physical object handling.
+    const isNavToolActive = showNavOverlay && navTool !== "select" && navTool !== "pan";
+    if (isNavToolActive) { handleNavSvgDown(e); return; }
     if (e.button === 1) { e.preventDefault(); startPan(e); return; }
     if (isSpacePressed()) { e.preventDefault(); startPan(e); return; }
     const target = e.target as SVGElement;
@@ -5092,7 +5129,10 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
         commitNavGraph(nextNodes, nextEdges);
         return;
       }
-      return;
+      // Navigation visibility alone must not own the physical pointer stream.
+      // Only an active exclusive navigation tool should stop the floor editor's
+      // normal move/resize/placement pipeline here.
+      if (showNavOverlay && navTool !== "select" && navTool !== "pan") return;
     }
 
     if (calibrationDraft.active || tool === "measure") return;
@@ -5688,7 +5728,11 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
     endPan();
     // B7 QA: room alignment guides disappear after gesture.
     setAlignGuides([]);
-    if (navMode) {
+    // Navigation visibility alone must not swallow the end of a physical
+    // drag or placement gesture. Only an actual navigation gesture gets the
+    // early graph-commit path; Select-mode floor interactions continue through
+    // the normal physical cleanup/finalization below.
+    if (navMode && (navDragRef.current || navBendDragRef.current || navSegDragRef.current)) {
       setNavTargetHover(null);
       setNavNodeHover(null);
       // B5 Phase 2.8: alignment guides disappear after the drag.
@@ -5907,7 +5951,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
   };
 
   const handleDblClick = () => {
-    if (navMode) return;
+    if (showNavOverlay && navTool !== "select" && navTool !== "pan") return;  // nav tool active
     if (drawingPath.length >= 2) {
       const newPath = { id: genId("fp"), points: drawingPath, type: "footpath", color: "#94a3b8", width: 3 };
       updFloor(rooms, [...fpaths, newPath]);
@@ -5920,20 +5964,19 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
   // ── Item mouse handlers ──
 
   const onItemDown = (e: React.MouseEvent, type: string, id: string, item: any) => {
-    // B5 Phase 6.2: Navigation mode — select physical objects for navigation context
-    // but do NOT allow physical editing (drag/resize/rotate).
+    // B8 Phase 1: when a nav tool is active, route to nav handling.
+    const isNavToolActive = showNavOverlay && navTool !== "select" && navTool !== "pan";
+    if (isNavToolActive) {
+      // Nav tools own the click — physical objects are not selectable.
+      return;
+    }
+    // When nav overlay is ON but no exclusive nav tool owns the pointer,
+    // selecting a physical object switches cleanly back to the physical
+    // selection domain without disabling the overlay.
     if (navMode) {
-      if (navTool !== "select") return;
-      // Only navigation-relevant physical objects are selectable
-      const navTypes = ["room", "door", "stairs", "elevator", "ramp"];
-      if (!navTypes.includes(type)) return;
-      e.stopPropagation();
-      // Set the physical object nav selection for nav-only properties
-      setNavPhysicalSelected({ type: type as any, id });
       setNavSelected(null);
       setNavMultiSelected([]);
-      setShowProperties(true);
-      return;
+      setNavPhysicalSelected(null);
     }
     if (isSpacePressed()) { e.stopPropagation(); startPan(e); return; }
     if (tool !== "select" && tool !== "erase") return;
@@ -6089,7 +6132,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
   };
 
   const onItemContextMenu = (e: React.MouseEvent, type: FloorSelection["type"], id: string) => {
-    if (navMode) return; // Navigation mode: floor objects are context-only.
+    if (showNavOverlay && navTool !== "select" && navTool !== "pan") return; // nav tool active
     e.preventDefault();
     e.stopPropagation();
     const item = getSelectionItem(type, id);
@@ -6144,7 +6187,9 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
       if ((e.ctrlKey || e.metaKey) && (e.key === "y" || (e.key === "z" && e.shiftKey))) { e.preventDefault(); applyEntry(redo()); return; }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") {
         e.preventDefault();
-        if (navMode) {
+        // B8 Phase 1: Ctrl+A selects nav nodes when a nav object is selected,
+        // or all floor objects when no nav selection exists.
+        if (navSelected || navMultiSelected.length > 0) {
           if (indoorNodes.length === 0) return;
           setNavMultiSelected(indoorNodes.map((n) => n.id));
           setNavSelected({ type: "node", id: indoorNodes[indoorNodes.length - 1].id });
@@ -6178,7 +6223,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
         if (navMode) duplicateNavSelection(); else duplicateSelection();
         return;
       }
-      if ((e.key === "Delete" || e.key === "Backspace") && navMode) {
+      if ((e.key === "Delete" || e.key === "Backspace") && (navSelected || navMultiSelected.length > 0)) {
         e.preventDefault();
         // B5 Phase 2.6: a specifically selected bend is removed on Delete —
         // inner bends can be deleted in any order, not just reverse creation.
@@ -6195,7 +6240,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
         return;
       }
       if (e.key === "Escape") {
-        if (navMode) {
+        if (navSelected || navMultiSelected.length > 0 || navConnectStart || navTool !== "select") {
           setNavConnectStart(null);
           setNavPreview(null);
           setNavConnectBends([]);
@@ -6230,9 +6275,9 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
         if (e.key === "ArrowLeft") dx = -step;
         else if (e.key === "ArrowRight") dx = step;
         else if (e.key === "ArrowUp") dy = -step;
-        else if (e.key === "ArrowDown") dy = step;
-        if (dx || dy) {
-          if (navMode) {
+        else if (e.key === "ArrowDown") dy = step;          if (dx || dy) {
+          // B8 Phase 1: nudge nav nodes when they are selected, physical objects otherwise.
+          if (navSelected || navMultiSelected.length > 0) {
             const targets = navMultiSelected.length > 0
               ? navMultiSelected
               : navSelected?.type === "node" ? [navSelected.id] : [];
@@ -6322,12 +6367,11 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
         }
       }
       if (navMode) {
-        if (e.key === "v" || e.key === "V") selectNavTool("select");
-        if (e.key === "h" || e.key === "H") selectNavTool("pan");
-        if (e.key === "n" || e.key === "N") selectNavTool("waypoint");
-        if (e.key === "c" || e.key === "C") selectNavTool("connect");
-        if (e.key === "e" || e.key === "E") selectNavTool("erase");
-        return;
+        if (e.key === "v" || e.key === "V") { selectNavTool("select"); return; }
+        if (e.key === "h" || e.key === "H") { selectNavTool("pan"); return; }
+        if (e.key === "n" || e.key === "N") { selectNavTool("waypoint"); return; }
+        if (e.key === "c" || e.key === "C") { selectNavTool("connect"); return; }
+        if (e.key === "e" || e.key === "E") { selectNavTool("erase"); return; }
       }
       if (e.key === "v" || e.key === "V") switchTool("select");
       if (e.key === "w" || e.key === "W") switchTool("wall");
@@ -6368,24 +6412,11 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
     { id: "select" as SimpleTool, icon: MousePointer2, label: "Select", key: "V" },
     { id: "pan" as SimpleTool, icon: Hand, label: "Pan", key: "Space" },
   ];
-  const moreTools = [
-    { id: "wall" as SimpleTool, icon: SeparatorHorizontal, label: "Wall", key: "W" },
-    { id: "room" as SimpleTool, icon: SquareIcon, label: "Room", key: "R" },
-    { id: "door" as SimpleTool, icon: DoorOpen, label: "Door", key: "D" },
-    { id: "window" as SimpleTool, icon: LandPlot, label: "Window", key: "I" },
-    { id: "stairs" as SimpleTool, icon: MoveVertical, label: "Stairs", key: "S" },
-    { id: "ramp" as SimpleTool, icon: Navigation, label: "Ramp", key: "A" },
-    { id: "elevator" as SimpleTool, icon: Binary, label: "Elevator", key: "L" },
-    { id: "furniture" as SimpleTool, icon: Sofa, label: "Furniture", key: "F" },
-    { id: "text" as SimpleTool, icon: Text, label: "Text", key: "T" },
-    { id: "path" as SimpleTool, icon: GitBranchIcon, label: "Path", key: "P" },
-    { id: "erase" as SimpleTool, icon: TrashIcon, label: "Erase", key: "E" },
-  ];
   const navTools = [
-    { id: "select" as const, icon: MousePointer2, label: "Select", hint: "Select waypoints and paths" },
-    { id: "pan" as const, icon: Hand, label: "Pan", hint: "Pan the floor canvas" },
-    { id: "connect" as const, icon: Link2, label: "Connect", hint: "Connect routing points and locations" },
-    { id: "erase" as const, icon: TrashIcon, label: "Remove", hint: "Remove — Delete the selected waypoint or path" },
+    { id: "waypoint" as const, icon: Waypoints, label: "Walking Point" },
+    { id: "connect" as const, icon: Link2, label: "Connect" },
+    { id: "link" as const, icon: MapPin, label: "Link Location" },
+    { id: "erase" as const, icon: TrashIcon, label: "Remove", hint: "Remove Walking Points or Walking Paths." },
   ];
 
   // ── Selected item for properties panel ──
@@ -6552,11 +6583,11 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
         transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
         className="shrink-0 bg-card border-b border-border"
       >
-        {/* B5 Phase 6.9: de-cramped top toolbar — always wraps into tidy rows
-            (breadcrumb/floor selector/mode/tools on the first, utilities + Save
-            on the second) instead of forcing every control into one squeezed
-            line at xl widths; slightly taller hit area + breathing room. */}
-        <div className="flex flex-wrap items-center min-h-11 px-3 py-1.5 gap-x-3 gap-y-2">
+        {/* B5 Phase 6.9: de-cramped single header row with reserved left,
+            center, and right zones so context, tools, and utilities never
+            compete for the same horizontal space. */}
+        <div className="relative grid h-16 min-h-16 min-w-0 grid-cols-[minmax(0,1fr)_360px_minmax(0,1fr)] items-center gap-x-3 overflow-hidden px-3" data-testid="floor-editor-header">
+          <div className="flex h-full min-w-0 items-center gap-x-3 overflow-hidden">
           {/* Breadcrumb */}
           <div className="flex items-center gap-1 min-w-0 shrink min-w-[120px] max-w-[280px] overflow-hidden">
             <button onClick={handleBack} className="flex items-center gap-1 h-7 px-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-all text-[11px] font-semibold shrink-0 group">
@@ -6702,55 +6733,12 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
             )}
           </div>
 
-          {/* Mode switch — Design architectural authoring vs Navigation graph authoring */}
-          <div className="flex items-center p-0.5 rounded-lg border border-border bg-muted/30 mx-0.5 shrink-0" role="tablist" aria-label="Floor editor mode">
-            {[
-              { id: "structure" as FloorEditorMode, label: "Design" },
-              { id: "navigation" as FloorEditorMode, label: "Navigation" },
-            ].map((m) => (
-              <button
-                key={m.id}
-                role="tab"
-                aria-selected={mode === m.id}
-                onClick={() => switchFloorEditorMode(m.id)}
-                className={cn("h-6 px-2.5 rounded-md text-[10px] font-extrabold transition-all",
-                  mode === m.id ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground hover:bg-muted")}
-                title={m.id === "structure" ? "Edit rooms, walls, doors and furniture" : "Author the indoor walking network"}
-              >
-                {m.label}
-              </button>
-            ))}
           </div>
 
-          {/* Contextual tools — Navigation toolbar replaces the design toolbar.
-              B5 Phase 2.2: a restrained keyed fade/slide (150–220ms) so the
-              switch feels intentional; the canvas itself never remounts. */}
-          <motion.div
-            key={navMode ? "nav-toolbar" : "design-toolbar"}
-            initial={{ opacity: 0, x: navMode ? 6 : -6 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
-            className="flex items-center shrink-0"
-          >
-          {navMode ? (
-            <div className="flex items-center gap-0.5 p-0.5 rounded-lg border border-border bg-muted/30" data-testid="floor-nav-toolbar">
-              {navTools.map((t) => {
-                const Icon = t.icon;
-                const isActive = navTool === t.id;
-                return (
-                  <button key={t.id} onClick={() => selectNavTool(t.id)}
-                    title={t.hint}
-                    aria-label={t.hint}
-                    className={cn("flex items-center gap-1 h-6 px-2 rounded-md text-[10px] font-extrabold transition-all",
-                      isActive ? "bg-primary text-primary-foreground shadow-sm"
-                      : "text-muted-foreground hover:text-foreground hover:bg-muted")}>
-                    <Icon className="h-3 w-3" />
-                    <span className="hidden md:inline">{t.label}</span>
-                  </button>
-                );
-              })}
-            </div>
-          ) : (
+          {/* B8 Phase 1: Navigation toggle — single button to show/hide the nav overlay */}
+          {/* B8 Phase 1: Design tools always visible. Nav tools shown when overlay is ON. */}
+          <div className="hidden">
+            {/* Design tools — always available */}
             <div className="flex items-center gap-0.5 p-0.5 rounded-lg border border-border bg-muted/30">
               {toolbarTools.map((t) => {
                 const Icon = t.icon;
@@ -6765,44 +6753,106 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
                   </button>
                 );
               })}
-              <div className="relative">
-                <button
-                  onClick={() => setShowMoreTools((v) => !v)}
-                  title="More tools"
-                  aria-label="More tools"
-                  className={cn("flex items-center gap-1 h-6 px-2 rounded-md text-[10px] font-extrabold transition-all",
-                    showMoreTools ? "bg-primary/10 text-primary" : "text-muted-foreground hover:text-foreground hover:bg-muted")}
-                >
-                  <MoreHorizontal className="h-3.5 w-3.5" />
-                  <span className="hidden md:inline">More tools</span>
-                </button>
-                {showMoreTools && (
-                  <div className="absolute right-0 top-8 z-50 w-56 rounded-xl border border-border bg-card shadow-2xl p-1.5 grid grid-cols-2 gap-1">
-                    {moreTools.map((t) => {
-                      const Icon = t.icon;
-                      const isActive = tool === t.id;
-                      return (
-                        <button
-                          key={t.id}
-                          onClick={() => switchTool(t.id)}
-                          className={cn("flex items-center gap-2 h-8 px-2 rounded-lg text-[11px] font-bold transition-all text-left",
-                            isActive && t.id === "erase" ? "bg-destructive text-destructive-foreground"
-                            : isActive ? "bg-primary text-primary-foreground"
-                            : "text-muted-foreground hover:bg-muted hover:text-foreground")}
-                        >
-                          <Icon className="h-3.5 w-3.5 shrink-0" />
-                          <span className="truncate">{t.label}</span>
-                          <span className="ml-auto text-[8px] opacity-70">{t.key}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
             </div>
-          )}
-          </motion.div>
+            {/* Nav tools — shown when overlay is ON */}
+            {showNavOverlay && (
+            <div className="flex items-center gap-0.5 p-0.5 rounded-lg border border-border bg-muted/30 ml-1" data-testid="floor-nav-toolbar-legacy">
+              {navTools.map((t) => {
+                const Icon = t.icon;
+                const isActive = navTool === t.id;
+                return (
+                  <button key={t.id} onClick={() => selectNavTool(t.id)}
+                    title={t.label}
+                    aria-label={t.label}
+                    className={cn("flex items-center gap-1 h-6 px-2 rounded-md text-[10px] font-extrabold transition-all",
+                      isActive ? "bg-primary text-primary-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground hover:bg-muted")}>
+                    <Icon className="h-3 w-3" />
+                    <span className="hidden md:inline">{t.label}</span>
+                  </button>
+                );
+              })}
+              <div className="w-px h-4 bg-border mx-0.5" />
+              <button
+                onClick={() => setTestNavOpen((v) => !v)}
+                className={cn("flex items-center gap-1 h-6 px-2 rounded-md text-[10px] font-extrabold transition-all",
+                  testNavOpen ? "bg-blue-500/10 text-blue-600 dark:text-blue-400" : "text-muted-foreground hover:text-foreground hover:bg-muted")}
+                title="Test navigation routes on this floor"
+              >
+                <Route className="h-3 w-3" />
+                <span className="hidden md:inline">Test Route</span>
+              </button>
+            </div>
+            )}
+          </div>
 
+          <div className="relative z-20 flex h-full min-w-0 items-center justify-center overflow-visible">
+          {/* Stable interaction rail. Physical creation stays in Object Library;
+              navigation actions remain visible and clickable in both states. */}
+          <div className="absolute left-1/2 top-1/2 flex w-max max-w-full -translate-x-1/2 -translate-y-1/2 items-center justify-center">
+            <div className="flex max-w-full items-center gap-1 overflow-x-auto whitespace-nowrap rounded-xl border border-border/70 bg-muted/40 px-2 py-1.5 shadow-sm">
+              <div className="flex items-center gap-0.5 shrink-0">
+                {toolbarTools.map((t) => {
+                    const Icon = t.icon;
+                    const isActive = tool === t.id;
+                    return (
+                      <ToolbarTooltip key={t.id} tool={t.id} isActive={isActive}
+                      hint={t.id === "select" ? "Select, move, resize, and edit floor items." : t.id === "pan" ? "Move around the floor canvas without changing objects." : t.id === "path" ? "Draw a floor path through the interior plan." : undefined}>
+                        <button type="button" onClick={() => switchTool(t.id)}
+                          aria-label={`${t.label}${t.key ? ` (${t.key})` : ""}`}
+                          className={cn("flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-md text-[10px] font-bold transition-all",
+                            isActive ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:bg-muted hover:text-foreground")}>
+                          <Icon className="h-[15px] w-[15px]" />
+                        </button>
+                      </ToolbarTooltip>
+                    );
+                })}
+              </div>
+              <div className="mx-1.5 h-5 w-px shrink-0 bg-border/70" />
+              <div className="flex items-center gap-0.5 shrink-0" data-testid="floor-nav-toolbar">
+                {navTools.map((t) => {
+                  const Icon = t.icon;
+                  const isActive = showNavOverlay && navTool === t.id;
+                  return (
+                    <ToolbarTooltip key={t.id} tool={t.id === "link" ? "linkLocation" : t.id} isActive={isActive}
+                      label={t.id === "erase" ? "Remove" : undefined}
+                      hint={t.id === "waypoint" ? "Place points along hallways or open circulation areas." : t.id === "connect" ? "Connect the points to define where people can walk." : t.id === "link" ? "Link Rooms, Doors, Stairs, Elevators, and Ramps to the walking network." : "Remove Walking Points or Walking Paths."}>
+                      <button type="button" onClick={() => selectNavTool(t.id)}
+                        aria-label={t.label}
+                      className={cn("flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-md text-[10px] font-extrabold transition-all",
+                          isActive ? "bg-primary text-primary-foreground shadow-sm" : !showNavOverlay ? "text-muted-foreground/60 hover:bg-muted hover:text-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground")}>
+                        <Icon className="h-[15px] w-[15px]" />
+                      </button>
+                    </ToolbarTooltip>
+                  );
+                })}
+                <ToolbarTooltip tool="navigationVisibility" isActive={showNavOverlay}
+                  label={showNavOverlay ? "Hide Navigation" : "Show Navigation"}
+                  hint={showNavOverlay ? "Hide the indoor walking network." : "Show and edit the indoor walking network."}>
+                  <button type="button" onClick={toggleNavigation}
+                    aria-label={showNavOverlay ? "Hide Navigation" : "Show Navigation"}
+                    aria-pressed={showNavOverlay}
+                    className={cn("flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-md text-[10px] font-extrabold transition-all",
+                      showNavOverlay ? "bg-green-500/10 text-green-700 dark:text-green-400" : "text-muted-foreground/60 hover:bg-muted hover:text-foreground")}>
+                    {showNavOverlay ? <EyeOff className="h-[15px] w-[15px]" /> : <Eye className="h-[15px] w-[15px]" />}
+                  </button>
+                </ToolbarTooltip>
+              </div>
+              <div className="mx-1.5 h-5 w-px shrink-0 bg-border/70" />
+              <ToolbarTooltip tool="testRoute" isActive={testNavOpen} hint="Choose a start and destination to verify the route.">
+                <button type="button" onClick={() => { if (!showNavOverlay) setShowNavOverlay(true); setNavTool("select"); setTestNavOpen((v) => !v); }}
+                  aria-label="Test Route"
+                  className={cn("flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-md text-[10px] font-extrabold transition-all",
+                    testNavOpen ? "bg-blue-500/10 text-blue-600 dark:text-blue-400" : !showNavOverlay ? "text-muted-foreground/60 hover:bg-muted hover:text-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground")}>
+                  <Route className="h-[15px] w-[15px]" />
+                </button>
+              </ToolbarTooltip>
+            </div>
+          </div>
+
+          </div>
+
+          <div className="flex h-full min-w-0 max-w-full items-center justify-end gap-1 overflow-hidden pr-1">
           {selectedLabel && multiSelected.length <= 1 && !inlineLabelEdit && (
             <>
               <div className="hidden sm:block w-px h-5 bg-border mx-1" />
@@ -6843,116 +6893,119 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
 
           {/* Undo/Redo — grouped so the pair never splits across wrapped rows */}
           <div className="flex items-center gap-0.5 shrink-0">
-            <button onClick={() => applyEntry(undo())} disabled={!canUndo}
+            <ToolbarTooltip tool="undo">
+            <button onClick={() => applyEntry(undo())} disabled={!canUndo} aria-label="Undo"
               className={cn("flex items-center justify-center h-7 w-7 rounded-md transition-all",
-                canUndo ? "text-muted-foreground hover:text-foreground hover:bg-muted" : "text-muted-foreground/40 cursor-not-allowed")}
-              title="Undo (Ctrl+Z)">
+                canUndo ? "text-muted-foreground hover:text-foreground hover:bg-muted" : "text-muted-foreground/40 cursor-not-allowed")}>
               <Undo2 className="h-3.5 w-3.5" />
             </button>
-            <button onClick={() => applyEntry(redo())} disabled={!canRedo}
+            </ToolbarTooltip>
+            <ToolbarTooltip tool="redo">
+            <button onClick={() => applyEntry(redo())} disabled={!canRedo} aria-label="Redo"
               className={cn("flex items-center justify-center h-7 w-7 rounded-md transition-all",
-                canRedo ? "text-muted-foreground hover:text-foreground hover:bg-muted" : "text-muted-foreground/40 cursor-not-allowed")}
-              title="Redo (Ctrl+Y)">
+                canRedo ? "text-muted-foreground hover:text-foreground hover:bg-muted" : "text-muted-foreground/40 cursor-not-allowed")}>
               <Redo2 className="h-3.5 w-3.5" />
             </button>
+            </ToolbarTooltip>
           </div>
 
           <div className="hidden lg:block flex-1 min-w-8" />
           <div className="hidden sm:block w-px h-5 bg-border mx-1" />
 
           {/* Snap toggle */}
-          <button onClick={() => setSnapOn((v) => !v)}
-            title="Toggle grid snap"
+          <ToolbarTooltip tool="gridSnap" isActive={snapOn}
+            label="Grid Snap"
+            hint={snapOn ? "Objects snap to the floor grid while you place or move them." : "Grid snapping is off. Objects can move freely."}>
+          <button onClick={() => setSnapOn((v) => !v)} onMouseEnter={(e) => e.currentTarget.removeAttribute("title")}
+            title={snapOn ? "Snap to grid: ON — click to disable" : "Snap to grid: OFF — click to enable"}
+            aria-pressed={snapOn}
+            aria-label="Toggle snap to grid"
             className={cn("flex items-center justify-center h-7 px-2 rounded-md text-[10px] font-bold transition-all border shrink-0",
               snapOn ? "bg-primary/10 border-primary/30 text-primary" : "border-border text-muted-foreground hover:text-foreground hover:bg-muted")}>
             <Grid3X3 className="h-3 w-3" />
-            <span className="hidden md:inline ml-1">Grid</span>
+            <span className="hidden xl:inline ml-1">Snap</span>
           </button>
+          </ToolbarTooltip>
 
-          {/* B5 Phase 2.5: Design-mode READ-ONLY navigation overlay — a view
-              preference for alignment/reference (never marks the draft dirty). */}
-          {!navMode && (
-            <button onClick={() => setShowNavOverlay((v) => !v)}
-              title="Show the navigation graph as a read-only overlay while editing the floor"
-              aria-label="Show Navigation overlay"
-              className={cn("flex items-center justify-center h-7 px-2 rounded-md text-[10px] font-bold transition-all border shrink-0",
-                showNavOverlay ? "bg-primary/10 border-primary/30 text-primary" : "border-border text-muted-foreground hover:text-foreground hover:bg-muted")}>
-              <Waypoints className="h-3 w-3" />
-              <span className="hidden lg:inline ml-1">Show Navigation</span>
-            </button>
-          )}
 
+          <ToolbarTooltip tool="resetView" label="Fit View" hint="Fit the current floor content inside the visible canvas.">
           <button onClick={fitFloor}
-            title="Fit Floor"
             aria-label="Fit Floor"
             className="flex items-center justify-center h-7 w-7 shrink-0 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-all">
             <Maximize2 className="h-3.5 w-3.5" />
           </button>
+          </ToolbarTooltip>
 
           {/* B5 Phase 3.1: compact one-line Issues control — whitespace-nowrap
               keeps icon + label + count chip on a single line at desktop widths
               (the old "Issues 0" text could wrap vertically). */}
+          <ToolbarTooltip tool="canvasSettings" label="Issues" hint="Review floor items that need attention before publishing.">
           <button onClick={() => setShowIssues(true)}
-            title="Issues"
             aria-label={`Issues: ${totalIssues}`}
             data-testid="issues-toolbar"
             className={cn("flex items-center gap-1.5 h-7 px-2.5 rounded-md text-[10px] font-extrabold whitespace-nowrap shrink-0 transition-all border",
               hasAnyIssues ? "border-destructive/30 bg-destructive/10 text-destructive" : "border-border text-emerald-600 hover:bg-muted")}>
             {hasAnyIssues ? <AlertTriangle className="h-3 w-3" /> : <CheckCircle2 className="h-3 w-3" />}
-            <span>Issues</span>
+            <span className="hidden xl:inline">Issues</span>
             <span className={cn("min-w-[18px] h-4 px-1 rounded-full text-[9px] flex items-center justify-center",
               hasAnyIssues ? "bg-destructive/15 text-destructive" : "bg-emerald-500/10 text-emerald-700")}>
               {totalIssues}
             </span>
           </button>
+          </ToolbarTooltip>
 
+          <ToolbarTooltip tool="keyboardShortcuts">
           <button onClick={() => setShowShortcuts(true)}
-            title="Keyboard shortcuts"
             aria-label="Keyboard shortcuts"
             className="flex items-center justify-center h-7 w-7 shrink-0 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-all">
             <HelpCircle className="h-3.5 w-3.5" />
           </button>
+          </ToolbarTooltip>
 
           {/* Properties toggle */}
+          <ToolbarTooltip tool="canvasSettings" label="Properties" hint="Show or hide properties for the selected floor item.">
           <button onClick={() => setShowProperties((v) => !v)}
+            aria-pressed={showProperties}
+            aria-label="Toggle properties panel"
             className={cn("flex items-center justify-center h-7 w-7 shrink-0 rounded-md transition-all",
               showProperties ? "bg-primary/10 text-primary" : "text-muted-foreground hover:text-foreground hover:bg-muted")}
-            title="Toggle Properties Panel">
-            <PanelRightClose className="h-3.5 w-3.5" />
+            >
+            {showProperties ? <PanelRightClose className="h-3.5 w-3.5" /> : <PanelRightOpen className="h-3.5 w-3.5" />}
           </button>
+          </ToolbarTooltip>
 
           {/* Floor Settings dialog */}
+          <ToolbarTooltip tool="canvasSettings" label="Floor Settings" hint="Adjust floor display and editing preferences.">
           <button onClick={() => setShowFloorSettings(true)}
-            title="Floor Settings"
             aria-label="Floor Settings"
             className="flex items-center justify-center h-7 w-7 shrink-0 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-all">
             <Settings2 className="h-3.5 w-3.5" />
           </button>
+          </ToolbarTooltip>
 
           {/* Save / Publish — grouped so the pair never splits across wrapped rows */}
           <div className="flex items-center gap-2 shrink-0">
+            <ToolbarTooltip tool="save" label="Save" hint={isFloorDirty ? "Save your current floor draft changes." : "Your current floor draft is saved."}>
             <button onClick={handleSave} disabled={saving || !isFloorDirty}
-              title={isFloorDirty ? "Save floor draft changes" : "No floor changes to save"}
               className={cn("flex items-center gap-1 h-7 px-2.5 rounded-md text-[10px] font-extrabold transition-all border shadow-sm",
                 isFloorDirty ? "bg-primary text-primary-foreground border-primary hover:bg-primary/90" : "bg-muted/40 text-muted-foreground border-border cursor-not-allowed")}>
               {saving ? <Loader2 className="h-3 w-3 animate-spin" /> :
                 saved ? <CheckCircle2 className="h-3 w-3" /> : <Save className="h-3 w-3" />}
-              {saving ? "Saving..." : saved ? "Saved" : "Save"}
+              <span className="hidden xl:inline">{saving ? "Saving..." : saved ? "Saved" : "Save"}</span>
             </button>
+            </ToolbarTooltip>
+            <ToolbarTooltip tool="publish" label="Publish" hint={isFloorDirty ? "Save your latest changes before publishing." : "Publish the saved floor so it becomes available to users."}>
             <button
               onClick={handlePublish}
               disabled={!publishingEnabled || saving || isFloorDirty}
-              title={
-                !publishingEnabled ? "Publishing becomes available in A6"
-                : isFloorDirty ? "Save your draft first before publishing"
-                : "Publish the current campus draft"
-              }
               className={cn("flex items-center gap-1 h-7 px-2.5 rounded-md text-[10px] font-extrabold transition-all border",
                 !publishingEnabled || isFloorDirty || saving ? "border-border text-muted-foreground/60 cursor-not-allowed" : "border-emerald-500/30 text-emerald-700 bg-emerald-500/10 hover:bg-emerald-500/15")}
             >
               <Globe2 className="h-3 w-3" />
-              Publish
+              <span className="hidden xl:inline">Publish</span>
             </button>
+            </ToolbarTooltip>
+          </div>
           </div>
         </div>
       </motion.div>
@@ -6960,7 +7013,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
       {/* ═══════════════════════════════════════════════════════════════════
           MAIN BODY
           ═══════════════════════════════════════════════════════════════════ */}
-      <div className="flex flex-1 overflow-hidden min-h-0">
+      <div className="relative flex flex-1 overflow-hidden min-h-0">
         {/* ── LEFT SIDEBAR ── */}
         <motion.div
           initial={{ opacity: 0, x: -12 }}
@@ -6970,58 +7023,54 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
         >
           {/* B5 Phase 2.2: subtle keyed transition for the sidebar content on
               Design ↔ Navigation switch — never touches the canvas camera. */}
+          <AnimatePresence mode="wait">
           <motion.div
-            key={navMode ? "nav-library" : "object-library"}
+            key="object-library"
             initial={{ opacity: 0, x: -8 }}
             animate={{ opacity: 1, x: 0 }}
-            transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+            exit={{ opacity: 0, x: -4 }}
+            transition={{ duration: 0.15, ease: [0.16, 1, 0.3, 1] }}
             className="flex flex-col flex-1 min-h-0 overflow-hidden"
           >
-          {navMode ? (
+          {false ? (
             <>
               <div className="px-3 py-2.5 border-b border-border">
-                <p className="text-[10px] font-extrabold uppercase tracking-widest text-muted-foreground">Navigation Library</p>
-                <p className="text-[10px] text-muted-foreground/70 mt-0.5">Author the indoor walking network</p>
+                <p className="text-[10px] font-extrabold uppercase tracking-widest text-muted-foreground">Navigation</p>
+                <p className="text-[10px] text-muted-foreground/70 mt-0.5">Build the indoor walking network</p>
               </div>
               <div className="flex-1 overflow-y-auto scrollbar-show-on-hover scroll-smooth p-2 space-y-3">
                 <div>
-                  <span className="px-1 text-[9px] font-extrabold uppercase tracking-wider text-muted-foreground">Create</span>
-                  <div className="grid grid-cols-2 gap-1 mt-1">
-                    {[
-                      { kind: "waypoint", label: "Waypoint", icon: Waypoints, tool: "waypoint" as const, tip: "Drag onto the floor to place a routing point. Click to arm the Waypoint tool." },
-                      { kind: "destination", label: "Destination", icon: MapPin, tool: "destination" as const, tip: "Drag onto the floor to place a destination point. Click to arm the Destination tool." },
-                    ].map((item) => (
-                      <button
-                        key={item.kind}
-                        data-testid={`nav-library-${item.kind}`}
-                        draggable
-                        onDragStart={(e) => {
-                          e.dataTransfer.setData("text/plain", item.kind);
-                          e.dataTransfer.effectAllowed = "copy";
-                          navLibraryDragRef.current = item.kind;
-                        }}
-                        onDragEnd={() => { navLibraryDragRef.current = null; setNavDragPreview(null); setNavDragBlocked(null); setNavTargetHover(null); }}
-                        onClick={() => selectNavTool(item.tool)}
-                        className="h-14 rounded-lg border text-left px-2 py-1.5 transition-all hover:bg-muted/60 text-foreground"
-                        title={item.tip}
-                      >
-                        <item.icon className="h-4 w-4 mb-1" />
-                        <span className="text-[10px] font-bold block truncate">{item.label}</span>
-                      </button>
-                    ))}
+                  <span className="px-1 text-[9px] font-extrabold uppercase tracking-wider text-muted-foreground">Build Walking Network</span>
+                  <div className="grid grid-cols-1 gap-1 mt-1">
+                    <button
+                      data-testid="nav-library-waypoint"
+                      draggable
+                      onDragStart={(e) => {
+                        e.dataTransfer.setData("text/plain", "waypoint");
+                        e.dataTransfer.effectAllowed = "copy";
+                        navLibraryDragRef.current = "waypoint";
+                      }}
+                      onDragEnd={() => { navLibraryDragRef.current = null; setNavDragPreview(null); setNavDragBlocked(null); setNavTargetHover(null); }}
+                      onClick={() => selectNavTool("waypoint")}
+                      className="h-12 rounded-lg border text-left px-2 py-1.5 transition-all hover:bg-muted/60 text-foreground"
+                      title="Place points along hallways and intersections, then connect them to build the walking network."
+                    >
+                      <span className="flex items-center gap-2">
+                        <Waypoints className="h-4 w-4 shrink-0" />
+                        <span className="text-[10px] font-bold block truncate">Walking Point</span>
+                      </span>
+                    </button>
                   </div>
-                  <p className="px-1 mt-1.5 text-[9px] leading-relaxed text-muted-foreground/70">Drag onto the floor to place, or click to arm the placement tool.</p>
+                  <p className="px-1 mt-1.5 text-[9px] leading-relaxed text-muted-foreground/70">Place points along hallways, then connect them.</p>
                 </div>
 
-                {/* B5 Phase 2.2: ONE unified Link Location action — the type is
-                    inferred from the physical object you click (Room / Door /
-                    Stairs / Elevator / Ramp), so wrong-type links are impossible. */}
+                {/* Link Location — unified action; type inferred from physical object. */}
                 <div>
-                  <span className="px-1 text-[9px] font-extrabold uppercase tracking-wider text-muted-foreground">Link</span>
+                  <span className="px-1 text-[9px] font-extrabold uppercase tracking-wider text-muted-foreground">Link Locations</span>
                   <button
                     data-testid="nav-library-link"
                     onClick={() => selectNavTool("link")}
-                    className={cn("h-10 w-full rounded-lg border text-left px-2 py-1.5 transition-all",
+                    className={cn("h-12 w-full rounded-lg border text-left px-2 py-1.5 transition-all",
                       navTool === "link" ? "border-primary bg-primary/8 text-primary" : "border-border hover:bg-muted/60 text-foreground")}
                     title="Link an existing Room, Door, Stair, Elevator or Ramp to the walking network"
                   >
@@ -7031,7 +7080,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
                     </span>
                   </button>
                   <p className="px-1 mt-1.5 text-[9px] leading-relaxed text-muted-foreground/70">
-                    Link an existing Room, Door, Stair, Elevator or Ramp to the walking network.
+                    Link a Room, Door, Stair, Elevator or Ramp to the walking network.
                   </p>
                 </div>
               </div>
@@ -7136,6 +7185,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
               <div className="grid grid-cols-2 gap-1 mt-1">
                 {[
                   { id: "text" as SimpleTool, label: "Text", icon: Text },
+                  { id: "path" as SimpleTool, label: "Path", icon: GitBranchIcon },
                   ...(ADVANCED_FLOOR_REFERENCE_ENABLED ? [{ id: "measure" as SimpleTool, label: "Measure", icon: Text }] : []),
                 ].map((item) => {
                   const Icon = item.icon;
@@ -7158,6 +7208,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
             </>
           )}
           </motion.div>
+          </AnimatePresence>
         </motion.div>
 
         {/* ── CANVAS ── */}
@@ -7175,7 +7226,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
             if (e.target === e.currentTarget) { setNavDragPreview(null); setNavDragBlocked(null); setNavTargetHover(null); }
           }}
           onMouseDown={(e) => {
-            if (navMode) return; // Navigation mode clears its own graph selection.
+            if (showNavOverlay && navTool !== "select" && navTool !== "pan") return;
             if (e.target !== containerRef.current || tool !== "select" || e.shiftKey) return;
             setSelected(null);
             setMultiSelected([]);
@@ -8466,8 +8517,8 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
                 </g>
               )}
 
-              {/* ═══ INDOOR NAVIGATION LAYER (Navigation mode) ═══ */}
-              {navMode && (
+              {/* ═══ INDOOR NAVIGATION LAYER (visible when overlay is ON) ═══ */}
+              {showNavOverlay && (
                 <g data-testid="floor-nav-layer">
                   {/* B5 correction: empty-space drag surface for the nav graph
                       group. Rendered BEFORE edges/nodes so they stay on top
@@ -8641,8 +8692,8 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
                     const isDest = !isLinked && node.type === "room_access";
                     const isEraseHover = navEraseHover?.type === "node" && navEraseHover.id === node.id;
                     const isDuplicateWarn = navDuplicateNodeId === node.id;
-                    const label = (node.name || "Waypoint").trim();
-                    const showLabel = !isLinked && label && label !== "Waypoint";
+                    const label = (node.name || "Walking Point").trim();
+                    const showLabel = !isLinked && label && label !== "Walking Point";
                     // B5 Phase 2.7: the linked routing cue ALWAYS renders at the
                     // node's LOGICAL anchor (node.x/node.y — synced to the owner:
                     // room anchor, door position, circulation center). For ramps
@@ -9028,7 +9079,9 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
                   {Array.from(floorIssueMarkers.values()).map(({ severity, selection }) => {
                     const anchor = floorMarkerAnchor(selection);
                     if (!anchor) return null;
-                    const color = severity === "error" ? "#dc2626" : "#d97706";
+                    const bg = severity === "error" ? "#fef2f2" : "#fef3c7";
+                    const fg = severity === "error" ? "#b91c1c" : "#b45309";
+                    const stroke = severity === "error" ? "#dc2626" : "#d97706";
                     return (
                       <g
                         key={`${selection.type}:${selection.id}`}
@@ -9036,9 +9089,9 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
                         data-issue-object={`${selection.type}:${selection.id}`}
                         data-issue-severity={severity}
                       >
-                        {/* Soft halo so the badge reads on any background */}
-                        <circle cx={anchor.x} cy={anchor.y} r={7} fill="none" stroke={color} strokeWidth={0.8} opacity={0.45} />
-                        <circle cx={anchor.x} cy={anchor.y} r={4.5} fill={color} stroke="white" strokeWidth={1.4} />
+                        {/* Subtle warning badge — small pill with ⚠ icon */}
+                        <circle cx={anchor.x} cy={anchor.y} r={6.5} fill={bg} stroke={stroke} strokeWidth={1.1} opacity={0.95} />
+                        <text x={anchor.x} y={anchor.y + 3} textAnchor="middle" fill={fg} fontSize={8} fontWeight="900">⚠</text>
                       </g>
                     );
                   })}
@@ -9242,24 +9295,62 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
 
           {/* Zoom controls */}
           <div className="absolute bottom-10 right-3 z-20 flex items-center gap-1 p-1 rounded-xl border border-border shadow-md bg-card">
-            <button onClick={zoomOut} title="Zoom Out" aria-label="Zoom Out" className="w-7 h-7 rounded-lg flex items-center justify-center text-muted-foreground hover:bg-muted hover:text-foreground transition-all">
+            <ToolbarTooltip tool="zoomOut">
+            <button onClick={zoomOut} aria-label="Zoom Out" className="w-7 h-7 rounded-lg flex items-center justify-center text-muted-foreground hover:bg-muted hover:text-foreground transition-all">
               <ZoomOut className="h-3.5 w-3.5" />
             </button>
+            </ToolbarTooltip>
             <span className="w-10 text-center text-[10px] font-mono font-bold text-foreground tabular-nums">{Math.round(zoom * 100)}%</span>
-            <button onClick={zoomIn} title="Zoom In" aria-label="Zoom In" className="w-7 h-7 rounded-lg flex items-center justify-center text-muted-foreground hover:bg-muted hover:text-foreground transition-all">
+            <ToolbarTooltip tool="zoomIn">
+            <button onClick={zoomIn} aria-label="Zoom In" className="w-7 h-7 rounded-lg flex items-center justify-center text-muted-foreground hover:bg-muted hover:text-foreground transition-all">
               <ZoomIn className="h-3.5 w-3.5" />
             </button>
-            <button onClick={fitFloor} title="Fit Floor" aria-label="Fit Floor" className="w-7 h-7 rounded-lg flex items-center justify-center text-muted-foreground hover:bg-muted hover:text-foreground transition-all">
+            </ToolbarTooltip>
+            <ToolbarTooltip tool="resetView" label="Fit View" hint="Fit the current floor content inside the visible canvas.">
+            <button onClick={fitFloor} aria-label="Fit Floor" className="w-7 h-7 rounded-lg flex items-center justify-center text-muted-foreground hover:bg-muted hover:text-foreground transition-all">
               <Maximize2 className="h-3.5 w-3.5" />
             </button>
+            </ToolbarTooltip>
           </div>
+
+          {/* Test Navigation panel — slides up over the canvas */}
+          <AnimatePresence>
+            {showNavOverlay && testNavOpen && (
+              <motion.div
+                initial={{ opacity: 0, x: 8, y: 6 }}
+                animate={{ opacity: 1, x: 0, y: 0 }}
+                exit={{ opacity: 0, x: 8, y: 6 }}
+                transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+                className={cn(
+                  "absolute top-3 z-40 flex h-[min(620px,calc(100%-24px))] max-h-[calc(100%-24px)] w-80 max-w-[calc(100%-24px)] overflow-hidden rounded-xl border border-border bg-card shadow-xl",
+                  showProperties ? "right-[16.5rem]" : "right-3",
+                )}
+              >
+                <TestNavigationPanel
+                  campus={campus}
+                  onHighlightRoute={() => {}}
+                  onFocusNode={(nodeId) => {
+                    const n = indoorNodes.find((x) => x.id === nodeId);
+                    if (n) zoomToFit(Math.max(0, n.x - 60), Math.max(0, n.y - 60), 120, 120, 48);
+                  }}
+                  onClose={() => setTestNavOpen(false)}
+                />
+              </motion.div>
+            )}
+          </AnimatePresence>
         </motion.div>
 
         {/* ── PROPERTIES PANEL ── */}
+        <AnimatePresence initial={false}>
         {showProperties && multiSelected.length > 1 && (
-          <div
+          <motion.div
+            key="floor-multi-properties"
+            initial={{ opacity: 0, x: 10 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: 10 }}
+            transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
             data-testid="floor-multi-properties-panel"
-            className="w-64 shrink-0 flex flex-col border-l border-border overflow-hidden bg-card"
+            className="absolute inset-y-0 right-0 z-50 flex h-full w-64 flex-col border-l border-border overflow-hidden bg-card pointer-events-auto"
           >
             <div className="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
               <div>
@@ -9325,23 +9416,26 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
                 Floor settings and single-object properties stay separate — they are intentionally not shown here.
               </p>
             </div>
-          </div>
+          </motion.div>
         )}
+        </AnimatePresence>
         {/* B5 Phase 2.2: nav properties fade in per selection state (single /
             multi / none) — a restrained 180ms, never re-mounting the canvas. */}
+        <AnimatePresence initial={false}>
         {navMode && showProperties && navMultiSelected.length > 1 && (
           <motion.div
             key="nav-multi-props"
             initial={{ opacity: 0, x: 8 }}
             animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: 8 }}
             transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
-            className="shrink-0 flex"
+            className="absolute inset-y-0 right-0 z-50 flex h-full pointer-events-auto"
           >
           <div data-testid="floor-nav-multi-props" className="w-60 shrink-0 flex flex-col border-l border-border overflow-hidden bg-card">
             <div className="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
               <div>
-                <span className="text-xs font-extrabold uppercase tracking-wide text-foreground">Selected Navigation Objects</span>
-                <p className="text-[10px] text-muted-foreground mt-0.5">{navMultiSelected.length} waypoint{navMultiSelected.length !== 1 ? "s" : ""} selected</p>
+                <span className="text-xs font-extrabold uppercase tracking-wide text-foreground">Selected Objects</span>
+                <p className="text-[10px] text-muted-foreground mt-0.5">{navMultiSelected.length} walking point{navMultiSelected.length !== 1 ? "s" : ""} selected</p>
               </div>
               <button onClick={() => setShowProperties(false)} className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-muted transition-colors text-muted-foreground">
                 <X className="h-3.5 w-3.5" />
@@ -9362,7 +9456,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
                 return (
                   <div className="rounded-xl border border-border bg-muted/25 p-3 space-y-2">
                     {[
-                      { label: "Waypoints", value: waypointCount },
+                      { label: "Walking Points", value: waypointCount },
                       { label: "Destinations", value: destCount },
                       { label: "Linked Locations", value: linkedCount },
                       { label: "Paths", value: pathCount },
@@ -9399,8 +9493,9 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
             key="nav-single-props"
             initial={{ opacity: 0, x: 8 }}
             animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: 8 }}
             transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
-            className="shrink-0 flex"
+            className="absolute inset-y-0 right-0 z-50 flex h-full pointer-events-auto"
           >
           <FloorNavPropertiesPanel
             selected={navSelected}
@@ -9428,8 +9523,9 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
             key="nav-physical-props"
             initial={{ opacity: 0, x: 8 }}
             animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: 8 }}
             transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
-            className="shrink-0 flex"
+            className="absolute inset-y-0 right-0 z-50 flex h-full pointer-events-auto"
           >
             <PhysicalNavPropertiesPanel
               physicalType={navPhysicalSelected.type}
@@ -9448,27 +9544,19 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
             />
           </motion.div>
         )}
-        {navMode && showProperties && !navSelected && !navPhysicalSelected && (
-          <div data-testid="floor-nav-empty-state" className="shrink-0 flex">
-            <div className="w-60 border-l border-border bg-card/80 backdrop-blur flex flex-col">
-              <div className="flex items-center justify-between px-3 h-9 border-b border-border">
-                <span className="text-[10px] font-extrabold uppercase tracking-wider text-muted-foreground">Navigation</span>
-                <button onClick={() => setShowProperties(false)} aria-label="Close properties" className="text-muted-foreground hover:text-foreground">
-                  <X className="h-3.5 w-3.5" />
-                </button>
-              </div>
-              <div className="p-3 space-y-3">
-                {/* B5 Phase 2.1: minimal neutral state — instructions live on the canvas empty state. */}
-                <div className="text-xs font-bold text-foreground">Nothing selected</div>
-                <p className="text-[11px] leading-relaxed text-muted-foreground">
-                  Select a waypoint or path to edit its properties, or use the Navigation Library to add one.
-                </p>
-              </div>
-            </div>
-          </div>
-        )}
+        </AnimatePresence>
+
+        <AnimatePresence initial={false}>
         {!navMode && showProperties && multiSelected.length <= 1 && !selected && (
-          <div data-testid="floor-properties-panel" className="shrink-0 flex">
+          <motion.div
+            key="floor-overview-properties"
+            initial={{ opacity: 0, x: 10 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: 10 }}
+            transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+            data-testid="floor-properties-panel"
+            className="absolute inset-y-0 right-0 z-50 flex h-full w-64 pointer-events-auto"
+          >
             <FloorOverviewSidebar
               floor={floor}
               canvasW={FP_W}
@@ -9488,12 +9576,22 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
               onDelete={() => requestDeleteFloor(floorId)}
               perimeterEnabled={walls.some(isManagedPerimeterWall)}
             />
-          </div>
+          </motion.div>
         )}
+        </AnimatePresence>
+        <AnimatePresence initial={false}>
         {showProperties && multiSelected.length <= 1 && selected && (
+          <motion.div
+            key="floor-properties"
+            initial={{ opacity: 0, x: 10 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: 10 }}
+            transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+            className="absolute inset-y-0 right-0 z-50 flex h-full w-64 pointer-events-auto"
+          >
           <FloorPropertiesPanel
             selected={selected}
-            mode={mode}
+            mode={showNavOverlay ? "navigation" : "structure"}
             issueItems={selectedIssueItems}
             rooms={rooms}
             walls={walls}
@@ -9611,7 +9709,9 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
             onLayerAction={(action) => applyLayerAction(selected, action)}
             onClose={() => setShowProperties(false)}
           />
+          </motion.div>
         )}
+        </AnimatePresence>
 
         {/* ── CONTEXT MENU ── */}
         <AnimatePresence>

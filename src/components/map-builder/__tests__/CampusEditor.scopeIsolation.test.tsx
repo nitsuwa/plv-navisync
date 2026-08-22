@@ -78,7 +78,7 @@ function canvasSvg(container: HTMLElement): SVGSVGElement {
 }
 
 function openNavigationLayer(container: HTMLElement): SVGSVGElement {
-  fireEvent.click(screen.getByText("2. Navigation"));
+  fireEvent.click(screen.getByText("Navigation"));
   return canvasSvg(container);
 }
 

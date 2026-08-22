@@ -78,7 +78,7 @@ describe("bent-path direction arrows", () => {
       { id: "ne1", startNodeId: "nnA", endNodeId: "nnB", distance: 300, bidirectional: false, accessible: true, emergencySafe: true, type: "walkway", color: "#16a34a", width: 3, bendPoints: [{ x: 400, y: 200 }] },
     ];
     const { container } = render(<Harness initialCampus={campus} />);
-    fireEvent.click(screen.getByText("2. Navigation"));
+    fireEvent.click(screen.getByText("Navigation"));
 
     const arrow = container.querySelector("[data-testid='nav-edge-direction']");
     expect(arrow).toBeTruthy();
@@ -103,7 +103,7 @@ describe("bent-path direction arrows", () => {
       { id: "ne1", startNodeId: "nnA", endNodeId: "nnB", distance: 100, bidirectional: true, accessible: true, emergencySafe: true, type: "walkway", color: "#16a34a", width: 3 },
     ];
     const { container } = render(<Harness initialCampus={campus} />);
-    fireEvent.click(screen.getByText("2. Navigation"));
+    fireEvent.click(screen.getByText("Navigation"));
     expect(container.querySelector("[data-testid='nav-edge-direction']")).toBeNull();
   });
 });

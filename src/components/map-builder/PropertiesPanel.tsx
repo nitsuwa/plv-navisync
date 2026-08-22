@@ -38,6 +38,13 @@ import type {
   CampusEntrance, CampusPath,
 } from "./types";
 import type { DoorOption, EntranceIndoorLinkStatus } from "../../lib/entranceTransitions";
+import { pathwayHasLegacyNavigationChain, pathwayHasOwnedNavigation } from "../../lib/campusPathNavigation";
+import {
+  isPathwayGeneratedEdge,
+  navigationEdgePermissions,
+  navigationNodePermissions,
+  pathNetworkNavigationStatus,
+} from "../../lib/campusPathNetwork";
 
 type TabId = "basic" | "style" | "advanced";
 
@@ -107,15 +114,20 @@ interface PropertiesPanelProps {
   onUpdateEntrance: (buildingId: string, entranceId: string, changes: Partial<CampusEntrance>) => void;
   onDeleteEntrance: (buildingId: string, entranceId: string) => void;
   onConnectEntranceToDoor?: (buildingId: string, entranceId: string, doorNodeId: string) => void;
+  onConnectEntranceToWalkingNetwork?: (buildingId: string, entranceId: string) => void;
   onRemoveEntranceConnection?: (buildingId: string, entranceId: string) => void;
   onViewEntranceIndoorDoor?: (buildingId: string, floorId: string, doorId: string) => void;
   onUpdateMarker: (id: string, changes: Partial<CampusMarker>) => void;
   onUpdatePath?: (id: string, changes: Partial<CampusPath>) => void;
+  /** Select a physical Pathway from generated navigation provenance. */
+  onSelectPath?: (id: string) => void;
   onAddPathBend?: (id: string) => void;
   onRemoveSelectedPathPoint?: () => void;
   onDisconnectSelectedPathPoint?: () => void;
   onAddWaypointAtSelectedPathPoint?: () => void;
   onAddPathToNavigation?: (id: string) => void;
+  /** Conservative warning for old conversions that have no persisted provenance. */
+  pathNavigationLegacy?: boolean;
   onDeletePath?: (id: string) => void;
   onUpdateRoute?: (id: string, changes: Partial<CampusRoute>) => void;
   onUpdateEventOverlay?: (id: string, changes: Partial<CampusEventOverlay>) => void;
@@ -147,74 +159,13 @@ interface PropertiesPanelProps {
 const inputCls = "w-full h-10 px-3 rounded-xl border border-border bg-input-background text-foreground text-xs focus:outline-none focus:ring-2 focus:ring-primary/30 transition-all duration-200";
 const labelCls = "block text-[10px] font-bold uppercase tracking-wide mb-1 text-muted-foreground";
 
-// ── B5 Phase 1.6: human-readable waypoint types (custom selector options) ──
-const WAYPOINT_TYPE_LABELS: Record<string, string> = {
-  outdoor: "Outdoor Waypoint",
-  entrance: "Building Entrance",
-  hallway: "Hallway",
-  room_access: "Destination",
-  stair: "Staircase",
-  elevator: "Elevator",
-  transition: "Floor Transition",
-  emergency_exit: "Emergency Exit",
-  assembly: "Assembly Area",
-  safe_area: "Safe Area",
-};
-// B5 Phase 1.7: the OUTDOOR authoring menu only exposes types that are
-// meaningful for outdoor route planning. Indoor-only enum members (hallway /
-// stair / elevator / transition) belong to the future Floor Editor graph and
-// are not shown here — a type is never exposed just because the enum has it.
-const WAYPOINT_TYPE_ORDER = [
-  "outdoor", "entrance", "room_access", "emergency_exit", "assembly", "safe_area",
-];
+type PathNavigationState = "unused" | "used" | "legacy";
 
-/** Compact custom dropdown used for the Waypoint Type selector (no native select). */
-function WaypointTypeMenu({ value, onChange }: { value: string; onChange: (t: string) => void }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const onDocDown = (ev: MouseEvent) => {
-      if (ref.current && !ref.current.contains(ev.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", onDocDown);
-    return () => document.removeEventListener("mousedown", onDocDown);
-  }, [open]);
-  return (
-    <div ref={ref} className="relative">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        className="w-full h-10 px-3 rounded-xl border border-border bg-input-background text-foreground text-xs font-semibold flex items-center justify-between gap-2 hover:border-primary/40 transition-colors"
-      >
-        <span className="truncate">{WAYPOINT_TYPE_LABELS[value] ?? value}</span>
-        <ChevronDown className={`h-3.5 w-3.5 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`} />
-      </button>
-      {open && (
-        <div className="absolute right-0 left-0 z-50 mt-1 rounded-xl border border-border bg-card shadow-xl overflow-hidden" role="listbox">
-          {WAYPOINT_TYPE_ORDER.map((t) => (
-            <button
-              key={t}
-              type="button"
-              role="option"
-              aria-selected={value === t}
-              onClick={() => { onChange(t); setOpen(false); }}
-              className={cn(
-                "w-full flex items-center justify-between px-3 py-2 text-[11px] font-medium text-left hover:bg-muted transition-colors",
-                value === t ? "text-primary bg-primary/5" : "text-foreground"
-              )}
-            >
-              {WAYPOINT_TYPE_LABELS[t] ?? t}
-              {value === t && <CheckCircle2 className="h-3 w-3 text-primary" />}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
+/**
+ * Legacy detection is intentionally conservative: it is only a status hint and
+ * never claims ownership of nearby manual navigation objects.
+ */
+// ── B5 Phase 1.6: human-readable waypoint types (custom selector options) ──
 
 /**
  * B5 Phase 1.8: comfortable custom Yes/No (or Open/Closed) segmented control
@@ -231,7 +182,7 @@ function BoolSegmented({ value, onYes, onNo, label, yesLabel = "Yes", noLabel = 
   noLabel?: string;
 }) {
   return (
-    <div role="radiogroup" aria-label={label} className="grid grid-cols-2 gap-1.5 p-1.5 rounded-xl border border-border bg-muted/30 w-[136px] shrink-0">
+    <div role="radiogroup" aria-label={label} className="grid grid-cols-2 gap-1.5 p-1.5 rounded-xl border border-border bg-muted/30 w-[140px] shrink-0">
       <button
         type="button"
         onClick={onYes}
@@ -333,6 +284,209 @@ function ReasonMenu({ value, options, onChange, placeholder }: {
   );
 }
 
+/** Advanced Routing collapsible for nav edge properties — collapsed by default. */
+function NavEdgeAdvancedRouting({ edge, onUpdateEdge }: {
+  edge: NavigationEdge;
+  onUpdateEdge?: (id: string, changes: Partial<NavigationEdge>) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="pt-3 mt-3 border-t border-border">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center justify-between py-1.5 text-[9px] font-extrabold uppercase tracking-widest text-muted-foreground hover:text-foreground transition-colors"
+      >
+        <span className="flex items-center gap-1.5">
+          <Accessibility className="h-3 w-3" /> Advanced Routing
+        </span>
+        <span className={cn("text-[8px] transition-transform", open && "rotate-180")}>▾</span>
+      </button>
+      {open && (
+        <div className="space-y-4 mt-2 pr-1">
+          {/* Accessible */}
+          <div>
+            <div className="flex items-center justify-between gap-3 mb-2">
+              <span className="text-[11px] font-semibold text-foreground flex items-center gap-1.5"><CheckCircle2 className="h-3.5 w-3.5 text-green-600 shrink-0" /> Accessible</span>
+              <BoolSegmented
+                value={edge.accessible}
+                onYes={() => onUpdateEdge?.(edge.id, { accessible: true, inaccessibleReason: undefined })}
+                onNo={() => onUpdateEdge?.(edge.id, { accessible: false, inaccessibleReason: edge.inaccessibleReason ?? "other" })}
+                label="Accessible"
+              />
+            </div>
+            {edge.accessible === false && (
+              <ReasonMenu
+                value={edge.inaccessibleReason ?? "other"}
+                options={INACCESSIBLE_REASONS}
+                onChange={(r) => onUpdateEdge?.(edge.id, { inaccessibleReason: r as NavigationEdge["inaccessibleReason"] })}
+                placeholder="Why is this not accessible?"
+              />
+            )}
+          </div>
+          {/* Emergency Safe */}
+          <div>
+            <div className="flex items-center justify-between gap-3 mb-2">
+              <span className="text-[11px] font-semibold text-foreground flex items-center gap-1.5"><AlertTriangle className="h-3.5 w-3.5 text-amber-600 shrink-0" /> Emergency Safe</span>
+              <BoolSegmented
+                value={edge.emergencySafe !== false}
+                onYes={() => onUpdateEdge?.(edge.id, { emergencySafe: true, emergencyReason: undefined })}
+                onNo={() => onUpdateEdge?.(edge.id, { emergencySafe: false, emergencyReason: edge.emergencyReason ?? "hazard" })}
+                label="Emergency Safe"
+              />
+            </div>
+            {edge.emergencySafe === false && (
+              <ReasonMenu
+                value={edge.emergencyReason ?? "hazard"}
+                options={EMERGENCY_REASONS}
+                onChange={(r) => onUpdateEdge?.(edge.id, { emergencyReason: r as NavigationEdge["emergencyReason"] })}
+                placeholder="Why not emergency-safe?"
+              />
+            )}
+          </div>
+          {/* Closed / Open */}
+          <div>
+            <div className="flex items-center justify-between gap-3 mb-2">
+              <span className="text-[11px] font-semibold text-foreground flex items-center gap-1.5"><XCircle className="h-3.5 w-3.5 text-amber-600 shrink-0" /> Availability</span>
+              <BoolSegmented
+                value={edge.closed !== true}
+                onYes={() => onUpdateEdge?.(edge.id, { closed: false })}
+                onNo={() => onUpdateEdge?.(edge.id, { closed: true })}
+                label="Availability"
+                yesLabel="Open"
+                noLabel="Closed"
+              />
+            </div>
+            <p className="px-1 text-[9px] text-muted-foreground">Closed paths are temporarily excluded from routing.</p>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Advanced Routing collapsible for nav node properties — collapsed by default. */
+function NavNodeAdvancedRouting({ node, buildingName, onUpdateNode, allNavEdges, allPaths, onSelectPath, labelCls, inputCls }: {
+  node: NavigationNode;
+  buildingName?: string;
+  onUpdateNode?: (id: string, changes: Partial<NavigationNode>) => void;
+  allNavEdges?: NavigationEdge[];
+  allPaths?: CampusPath[];
+  onSelectPath?: (id: string) => void;
+  labelCls: string;
+  inputCls: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const pathwayGenerated = Boolean(node.generatedFromPathVertices?.length);
+  return (
+    <div className="pt-3 mt-3 border-t border-border">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center justify-between py-1.5 text-[9px] font-extrabold uppercase tracking-widest text-muted-foreground hover:text-foreground transition-colors"
+      >
+        <span className="flex items-center gap-1.5">
+          <Settings2 className="h-3 w-3" /> Advanced Routing
+        </span>
+        <span className={cn("text-[8px] transition-transform", open && "rotate-180")}>▾</span>
+      </button>
+      {open && (
+        <div className="space-y-3 mt-2 pr-1">
+          {pathwayGenerated && (
+            <div className="rounded-xl border border-emerald-200/70 bg-emerald-50/50 px-2.5 py-2 text-[10px] text-emerald-700 dark:border-emerald-800/50 dark:bg-emerald-900/10 dark:text-emerald-300">
+              This Walking Point follows its physical Pathway. Edit the Pathway vertex instead.
+              {onSelectPath && (
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {[...new Set((node.generatedFromPathVertices ?? []).map((ref) => ref.pathId))].map((pathId) => (
+                    <button
+                      key={pathId}
+                      type="button"
+                      onClick={() => onSelectPath(pathId)}
+                      className="rounded-md border border-emerald-300/70 px-2 py-1 text-[9px] font-bold text-emerald-700 hover:bg-emerald-100/70 dark:border-emerald-700/60 dark:text-emerald-300 dark:hover:bg-emerald-900/30"
+                    >
+                      {allPaths?.find((path) => path.id === pathId)?.name ?? "Select physical Pathway"}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+          {/* Type badge — read-only for special/existing nodes */}
+          {node.entranceId ? (
+            <div className="w-full h-8 px-2.5 rounded-lg border border-blue-200 dark:border-blue-700/30 bg-blue-50 dark:bg-blue-900/10 text-[10px] font-bold text-blue-600 dark:text-blue-400 flex items-center gap-1.5">
+              <DoorOpen className="h-3 w-3" />
+              Building Entrance
+              <span className="ml-auto text-[9px] font-medium text-blue-500/60">Linked</span>
+            </div>
+          ) : node.type === "destination" ? (
+            <div className="w-full h-8 px-2.5 rounded-lg border border-amber-200 dark:border-amber-700/30 bg-amber-50 dark:bg-amber-900/10 text-[10px] font-bold text-amber-600 dark:text-amber-400 flex items-center gap-1.5">
+              Destination
+            </div>
+          ) : node.type === "assembly" ? (
+            <div className="w-full h-8 px-2.5 rounded-lg border border-red-200 dark:border-red-700/30 bg-red-50 dark:bg-red-900/10 text-[10px] font-bold text-red-600 dark:text-red-400 flex items-center gap-1.5">
+              Assembly Area
+            </div>
+          ) : node.type === "safe_area" ? (
+            <div className="w-full h-8 px-2.5 rounded-lg border border-emerald-200 dark:border-emerald-700/30 bg-emerald-50 dark:bg-emerald-900/10 text-[10px] font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5">
+              Safe Area
+            </div>
+          ) : node.type === "emergency_exit" ? (
+            <div className="w-full h-8 px-2.5 rounded-lg border border-orange-200 dark:border-orange-700/30 bg-orange-50 dark:bg-orange-900/10 text-[10px] font-bold text-orange-600 dark:text-orange-400 flex items-center gap-1.5">
+              Emergency Exit
+            </div>
+          ) : null}
+          {/* Accessible */}
+          <div>
+            <div className="flex items-center justify-between gap-2 mb-1.5">
+              <span className="text-[10px] font-semibold text-foreground flex items-center gap-1.5"><CheckCircle2 className="h-3.5 w-3.5 text-green-600 shrink-0" /> Accessible</span>
+              <BoolSegmented
+                value={node.accessible}
+                onYes={() => onUpdateNode?.(node.id, { accessible: true, inaccessibleReason: undefined })}
+                onNo={() => onUpdateNode?.(node.id, { accessible: false, inaccessibleReason: node.inaccessibleReason ?? "other" })}
+                label="Accessible"
+              />
+            </div>
+            {node.accessible === false && (
+              <ReasonMenu
+                value={node.inaccessibleReason ?? "other"}
+                options={INACCESSIBLE_REASONS}
+                onChange={(r) => onUpdateNode?.(node.id, { inaccessibleReason: r as NavigationNode["inaccessibleReason"] })}
+                placeholder="Why is this not accessible?"
+              />
+            )}
+          </div>
+          {node.type === "entrance" && node.buildingId && (
+            <div className="px-2.5 py-2 rounded-xl border border-border text-[10px] bg-muted/30 text-muted-foreground">
+              Linked to building entrance — outdoor routes enter the building through here.
+            </div>
+          )}
+          {/* Generated vertices expose no independent coordinates: the physical Pathway owns them. */}
+          {!pathwayGenerated && <div>
+            <label className={labelCls}>Position</label>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className={labelCls}>X</label>
+                <input type="number" value={node.x} disabled={!!node.entranceId || pathwayGenerated}
+                  onChange={(e) => onUpdateNode?.(node.id, { x: parseInt(e.target.value) || 0 })}
+                  className={`${inputCls} font-mono ${node.entranceId || pathwayGenerated ? "opacity-60 cursor-not-allowed" : ""}`} />
+              </div>
+              <div>
+                <label className={labelCls}>Y</label>
+                <input type="number" value={node.y} disabled={!!node.entranceId || pathwayGenerated}
+                  onChange={(e) => onUpdateNode?.(node.id, { y: parseInt(e.target.value) || 0 })}
+                  className={`${inputCls} font-mono ${node.entranceId || pathwayGenerated ? "opacity-60 cursor-not-allowed" : ""}`} />
+              </div>
+            </div>
+            {node.entranceId && (
+              <p className="px-1 pt-1.5 text-[9px] text-muted-foreground">Derived from the linked building entrance — move the building or entrance instead.</p>
+            )}
+          </div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function TabBar({ active, onChange }: { active: TabId; onChange: (t: TabId) => void }) {
   return (
     <div className="flex border-b border-border shrink-0">
@@ -373,9 +527,9 @@ export function PropertiesPanel({
   multiSelected, multiSelectedBuildings, selectedOutdoorCount,
   onBatchUpdateBuildings, onBatchDeleteBuildings, onBatchUpdatePaths, onBatchDeletePaths, onGroupPaths, onUngroupPaths, onAddPathNetworkToNavigation, pathMemberEditing = false, onExitPathMemberEdit, onClearMultiSelect, onLayerOrder,
   onUpdateBuilding, onAddEntrance, onSelectEntrance, onUpdateEntrance, onDeleteEntrance,
-  onConnectEntranceToDoor, onRemoveEntranceConnection, onViewEntranceIndoorDoor,
-  onUpdateMarker, onUpdatePath, onAddPathBend, onRemoveSelectedPathPoint,
-  onDisconnectSelectedPathPoint, onAddWaypointAtSelectedPathPoint, onAddPathToNavigation,
+  onConnectEntranceToDoor, onConnectEntranceToWalkingNetwork, onRemoveEntranceConnection, onViewEntranceIndoorDoor,
+  onUpdateMarker, onUpdatePath, onSelectPath, onAddPathBend, onRemoveSelectedPathPoint,
+  onDisconnectSelectedPathPoint, onAddWaypointAtSelectedPathPoint, onAddPathToNavigation, pathNavigationLegacy,
   onDeletePath, onUpdateRoute,
   onUpdateEventOverlay,
   onDeleteBuilding, onDeleteMarker, onDeleteRoute,
@@ -442,6 +596,11 @@ export function PropertiesPanel({
   const selectedPathsAreOneExplicitNetwork = multiSelectedPaths.length > 1
     && selectedPathNetworkIds.length === 1
     && multiSelectedPaths.every((path) => path.pathNetworkId === selectedPathNetworkIds[0]);
+  const selectedPathNavigationStatus = pathNetworkNavigationStatus(multiSelectedPaths, allNavNodes, allNavEdges);
+  const generatedNavEdgePaths = selNavEdge?.generatedFromPathIds?.length
+    ? allPaths.filter((path) => selNavEdge.generatedFromPathIds?.includes(path.id))
+    : [];
+  const generatedNavEdge = isPathwayGeneratedEdge(selNavEdge);
   // B5 — Width draft state: local string while typing, commit on Enter/blur only.
   const [batchWidthDraft, setBatchWidthDraft] = useState<string>(String(multiSelectedPaths[0]?.width ?? 12));
   const [singleWidthDraft, setSingleWidthDraft] = useState<string>(String(selPath?.width ?? 12));
@@ -468,6 +627,12 @@ export function PropertiesPanel({
   // graph summary + routing bulk flags + delete instead of layer/align tools.
   const multiNavNodeIds = multiSelected.filter((id) => allNavNodes?.some((n) => n.id === id) ?? false);
   const multiNavEdgeIds = multiSelected.filter((id) => allNavEdges?.some((e) => e.id === id) ?? false);
+  const independentlyDeletableNavNodeIds = multiNavNodeIds.filter((id) =>
+    navigationNodePermissions(allNavNodes?.find((node) => node.id === id)).independentlyDeletable
+  );
+  const independentlyDeletableNavEdgeIds = multiNavEdgeIds.filter((id) =>
+    navigationEdgePermissions(allNavEdges?.find((edge) => edge.id === id)).independentlyDeletable
+  );
   const isNavMultiMode = layer === "navigation" && multiSelected.length > 0 && selectedOutdoorCount === 0
     && (multiNavNodeIds.length > 0 || multiNavEdgeIds.length > 0)
     && multiNavNodeIds.length + multiNavEdgeIds.length === multiSelected.length;
@@ -503,6 +668,19 @@ export function PropertiesPanel({
     : !option.entryFloor ? "Not on the building entry floor"
     : option.hidden ? "Linked Door is hidden"
     : "Navigation linked";
+  const selectedEntranceNavNode = selEntrance && selEntranceParent
+    ? (allNavNodes ?? []).find((node) => node.entranceId === selEntrance.id && node.buildingId === selEntranceParent.id)
+    : undefined;
+  const selectedEntranceIsConnected = !!selectedEntranceNavNode
+    && (allNavEdges ?? []).some((edge) =>
+      edge.type !== "entrance_transition" &&
+      (edge.startNodeId === selectedEntranceNavNode.id || edge.endNodeId === selectedEntranceNavNode.id)
+    );
+  const pathNavigationState: PathNavigationState = pathwayHasOwnedNavigation(selPath)
+    ? "used"
+    : (pathNavigationLegacy || pathwayHasLegacyNavigationChain(selPath, allNavNodes, allNavEdges))
+      ? "legacy"
+      : "unused";
 
   return (
     <>
@@ -520,9 +698,11 @@ export function PropertiesPanel({
         <span className="text-xs font-extrabold uppercase tracking-wide text-foreground" style={{ fontFamily: "var(--font-sans)" }}>
           {isNavMultiMode
             ? `Graph Multi-Select (${multiNavNodeIds.length + multiNavEdgeIds.length})`
+            : isPathOnlyMultiMode && selectedPathsAreOneExplicitNetwork
+              ? `Path Network (${multiSelectedPaths.length})`
             : isMultiMode
               ? `Multi-Select (${selectedOutdoorCount})`
-              : selBldg ? "Building" : selEntrance ? "Entrance" : selMkr ? "Marker" : selPath ? (pathMemberEditing ? "Pathway (in Network)" : "Pathway") : selDecorAsset ? "Decorative Asset" : selRoute ? "Route" : selected?.type === "navNode" ? "Waypoint" : selected?.type === "navEdge" ? "Navigation Connection" : "Properties"}
+              : selBldg ? "Building" : selEntrance ? "Entrance" : selMkr ? "Marker" : selPath ? (pathMemberEditing ? "Edit Pathway" : "Pathway") : selDecorAsset ? "Decorative Asset" : selRoute ? "Route" : selected?.type === "navNode" ? "Walking Point" : selected?.type === "navEdge" ? "Walking Path" : "Properties"}
         </span>
         <button
           onClick={() => { onClearMultiSelect(); onClose(); }}
@@ -549,14 +729,14 @@ export function PropertiesPanel({
             </div>
             <div className="px-2.5 py-2 rounded-xl border border-border text-[10px] bg-muted/30 text-muted-foreground space-y-1">
               <div className="flex justify-between">
-                <span>Waypoints</span>
+                <span>Walking Points</span>
                 <span className="font-bold">{multiNavNodeIds.length}</span>
               </div>
               <div className="flex justify-between">
-                <span>Connections</span>
+                <span>Paths</span>
                 <span className="font-bold">{multiNavEdgeIds.length}</span>
               </div>
-              <p className="text-[9px] pt-1 border-t border-border">Drag a waypoint to move the selected nodes together. Connections follow their waypoints.</p>
+              <p className="text-[9px] pt-1 border-t border-border">Drag a walking point to move the selected nodes together. Paths follow their walking points.</p>
             </div>
             {multiNavEdgeIds.length > 0 && (
               <div className="pt-3 mt-3 border-t border-border space-y-2">
@@ -625,12 +805,14 @@ export function PropertiesPanel({
               </div>
             )}
             <div className="pt-3 mt-3 border-t border-border">
-              <button
-                onClick={() => onDeleteNavSelection?.(multiNavNodeIds, multiNavEdgeIds)}
+              {independentlyDeletableNavNodeIds.length + independentlyDeletableNavEdgeIds.length > 0 ? <button
+                onClick={() => onDeleteNavSelection?.(independentlyDeletableNavNodeIds, independentlyDeletableNavEdgeIds)}
                 className="w-full h-10 rounded-xl border border-destructive/30 text-xs font-bold text-destructive hover:bg-destructive/10 transition-colors"
               >
                 <span className="flex items-center justify-center gap-1.5"><AlertTriangle className="h-3 w-3" /> Delete Selected</span>
-              </button>
+              </button> : (
+                <p className="text-[9px] text-muted-foreground">Generated navigation is removed only with its owning physical Pathway.</p>
+              )}
             </div>
           </div>
         )}
@@ -772,14 +954,31 @@ export function PropertiesPanel({
                         <Copy className="h-3 w-3" />
                         Ungroup Paths
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => onAddPathNetworkToNavigation?.(multiSelectedPaths.map((path) => path.id))}
-                        className="h-9 rounded-xl border border-primary/30 bg-primary/5 text-xs font-bold text-primary hover:bg-primary/10 transition-colors flex items-center justify-center gap-1.5"
-                      >
-                        <NavigationIcon className="h-3 w-3" />
-                        Add Network to Navigation
-                      </button>
+                      <p className="px-1 text-[9px] leading-snug text-muted-foreground">Double-click a Pathway to edit it individually without ungrouping.</p>
+                      <div className="rounded-xl border border-border bg-muted/20 px-2.5 py-2 space-y-2" data-testid="path-network-navigation-status">
+                        <div className="flex items-center gap-1.5">
+                          <NavigationIcon className="h-3 w-3 text-primary" />
+                          <span className="text-[9px] font-extrabold uppercase tracking-widest text-muted-foreground">Navigation</span>
+                        </div>
+                        <p className={cn(
+                          "text-[10px] font-bold",
+                          selectedPathNavigationStatus.state === "complete" ? "text-emerald-700 dark:text-emerald-400" : "text-foreground",
+                        )}>
+                          {selectedPathNavigationStatus.enabled} of {selectedPathNavigationStatus.total} Pathways enabled{selectedPathNavigationStatus.state === "complete" ? " ✓" : ""}
+                        </p>
+                        {selectedPathNavigationStatus.state === "complete" ? (
+                          <p className="text-[9px] text-muted-foreground">Network used for navigation</p>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => onAddPathNetworkToNavigation?.(multiSelectedPaths.map((path) => path.id))}
+                            className="w-full h-9 rounded-xl border border-primary/30 bg-primary/5 text-[10px] font-bold text-primary hover:bg-primary/10 transition-colors flex items-center justify-center gap-1.5"
+                          >
+                            <NavigationIcon className="h-3 w-3" />
+                            {selectedPathNavigationStatus.state === "partial" ? "Add Missing Pathways to Navigation" : "Enable Pathways for Navigation"}
+                          </button>
+                        )}
+                      </div>
                     </>
                   ) : (
                     <button
@@ -795,7 +994,7 @@ export function PropertiesPanel({
                 <div>
                   <label className={labelCls}>Path Type</label>
                   <div className="grid grid-cols-3 gap-1 p-1 rounded-xl border border-border bg-muted/30">
-                    {[["walkway", "Walkway"], ["road", "Road"], ["accessible", "Accessible"]].map(([value, label]) => (
+                    {[["walkway", "Walkway"], ["road", "Road / Driveway"], ["accessible", "Accessible Path"]].map(([value, label]) => (
                       <button
                         key={value}
                         type="button"
@@ -1091,16 +1290,6 @@ export function PropertiesPanel({
                     <span className="text-xs font-mono text-muted-foreground w-8 text-right shrink-0">{selBldg.rotation ?? 0}°</span>
                   </div>
                 </div>
-                <div>
-                  <label className={labelCls}>Layer</label>
-                  <Combobox
-                    value={selBldg.layer ?? "campus"}
-                    onChange={(v) => onUpdateBuilding(selBldg.id, { layer: v })}
-                    options={LAYERS.map((l) => ({ value: l.id, label: l.label, icon: l.icon }))}
-                    placeholder="Select layer"
-                    searchPlaceholder="Search layers..."
-                  />
-                </div>
                 <div className="pt-1">
                   <label className={labelCls}>Visibility</label>
                   <div className="grid grid-cols-2 gap-2">
@@ -1156,79 +1345,66 @@ export function PropertiesPanel({
                     </div>
                   ))}
                 </div>
-                {/* Navigation Connection section */}
+                {/* Navigation summary */}
                 <div className="pt-3 border-t border-border">
                   <div className="flex items-center gap-1.5 mb-2">
                     <Route className="h-3 w-3 text-blue-500" />
-                    <span className="text-[9px] font-extrabold uppercase tracking-widest text-muted-foreground">Navigation Connection</span>
+                    <span className="text-[9px] font-extrabold uppercase tracking-widest text-muted-foreground">Navigation</span>
                   </div>
-                  <div className="mb-2">
-                    <label className={labelCls}>Entrance Waypoint</label>
-                    <select
-                      value={selBldg.entranceNodeId ?? ""}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        onUpdateBuilding(selBldg.id, { entranceNodeId: val || undefined });
-                      }}
-                      className="w-full h-8 px-2 rounded-lg border border-border bg-input-background text-foreground text-xs focus:outline-none focus:ring-2 focus:ring-primary/20 custom-select"
-                    >
-                      <option value="">None — not connected</option>
-                      {(allNavNodes ?? []).map((n) => (
-                        <option key={n.id} value={n.id}>
-                          {n.name || n.id} ({n.type}) {n.buildingId === selBldg.id ? '📍' : ''}
-                        </option>
-                      ))}
-                    </select>
+                  <div className="px-2.5 py-2 rounded-xl border border-border bg-muted/20 text-[10px] text-muted-foreground space-y-1.5">
+                    <div className="flex justify-between">
+                      <span>Primary Entrance</span>
+                      <span className="font-bold text-foreground truncate ml-2">
+                        {selBldg.entrances?.find(e => e.isPrimary)?.name ?? selBldg.entrances?.[0]?.name ?? 'Not set'}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Outdoor Network</span>
+                      <span className={cn("font-bold", selBldg.entranceNodeId ? "text-green-600" : "text-amber-600")}>
+                        {selBldg.entranceNodeId ? 'Connected' : 'Not connected'}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Indoor Connection</span>
+                      <span className={cn("font-bold", (selBldg.entrances?.length ?? 0) > 0 ? "text-green-600" : "text-amber-600")}>
+                        {(selBldg.entrances?.length ?? 0) > 0 ? `${selBldg.entrances.length} entrance(s)` : 'None'}
+                      </span>
+                    </div>
                   </div>
-                  {selBldg.entranceNodeId ? (
-                    <div className="px-2.5 py-2 rounded-xl border border-green-200 dark:border-green-700/30 bg-green-50 dark:bg-green-900/10 text-[10px]">
-                      <div className="flex items-center gap-1.5 mb-1">
-                        <CheckCircle2 className="h-3 w-3 text-green-500" />
-                        <span className="font-bold text-green-600 dark:text-green-400">Connected</span>
-                      </div>
-                      <p className="text-muted-foreground text-[9px]">
-                        Entrance linked to nav node "{allNavNodes?.find(n => n.id === selBldg.entranceNodeId)?.name || selBldg.entranceNodeId}".
-                      </p>
-                    </div>
-                  ) : (
-                    <div className="px-2.5 py-2 rounded-xl border border-amber-200 dark:border-amber-700/30 bg-amber-50 dark:bg-amber-900/10 text-[10px]">
-                      <div className="flex items-center gap-1.5 mb-1">
-                        <AlertTriangle className="h-3 w-3 text-amber-500" />
-                        <span className="font-bold text-amber-600 dark:text-amber-400">Not Connected</span>
-                      </div>
-                      <p className="text-muted-foreground text-[9px]">
-                        No entrance navigation node assigned. Select a waypoint from the dropdown above, or create one in the Navigation layer.
-                      </p>
-                    </div>
-                  )}
+                  <p className="text-[9px] text-muted-foreground mt-1.5 px-1">Navigation is configured through building entrances. Select an entrance to manage its connections.</p>
                 </div>
-                {/* Accessibility section */}
+                {/* Accessibility summary */}
                 <div className="pt-3 border-t border-border">
                   <div className="flex items-center gap-1.5 mb-2">
                     <Accessibility className="h-3 w-3 text-blue-500" />
                     <span className="text-[9px] font-extrabold uppercase tracking-widest text-muted-foreground">Accessibility</span>
                   </div>
-                  <p className="text-[9px] text-muted-foreground mb-2">Basic accessibility information for this building.</p>
-                  <div className="space-y-2">
-                    {[
-                      { key: "wheelchairAccessible" as const, label: "Wheelchair Accessible" },
-                      { key: "hasElevator" as const, label: "Has Elevator" },
-                      { key: "hasRamp" as const, label: "Has Wheelchair Ramp" },
-                      { key: "accessibleEntrance" as const, label: "Accessible Entrance" },
-                    ].map(({ key, label }) => (
-                      <label key={key} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-muted/30 transition-colors cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={selBldg.accessibility?.[key] ?? false}
-                          onChange={(e) => {
-                            const current = selBldg.accessibility || { wheelchairAccessible: false, hasElevator: false, hasRamp: false, accessibleEntrance: false };
-                            onUpdateBuilding(selBldg.id, { accessibility: { ...current, [key]: e.target.checked } });
-                          }}
-                          className="accent-primary h-3.5 w-3.5 rounded"
-                        />
-                        <span className="text-[10px] text-foreground font-medium">{label}</span>
-                      </label>
-                    ))}
+                  <div className="px-2.5 py-2 rounded-xl border border-border bg-muted/20 text-[10px] text-muted-foreground space-y-1.5">
+                    <div className="flex justify-between">
+                      <span>Accessible entrance</span>
+                      <span className={cn("font-bold", selBldg.accessibility?.accessibleEntrance ? "text-green-600" : "text-amber-600")}>
+                        {selBldg.accessibility?.accessibleEntrance ? 'Yes' : 'No'}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Elevator</span>
+                      <span className={cn("font-bold", selBldg.accessibility?.hasElevator ? "text-green-600" : "text-muted-foreground")}>
+                        {selBldg.accessibility?.hasElevator ? 'Available' : 'None'}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Wheelchair ramp</span>
+                      <span className={cn("font-bold", selBldg.accessibility?.hasRamp ? "text-green-600" : "text-muted-foreground")}>
+                        {selBldg.accessibility?.hasRamp ? 'Available' : 'None'}
+                      </span>
+                    </div>
+                    <div className="flex justify-between border-t border-border pt-1.5 mt-1">
+                      <span className="font-semibold">Overall</span>
+                      <span className={cn("font-bold",
+                        selBldg.accessibility?.wheelchairAccessible ? "text-green-600" : "text-amber-600")}>
+                        {selBldg.accessibility?.wheelchairAccessible ? 'Accessible' : 'Limited'}
+                      </span>
+                    </div>
                   </div>
                 </div>
                 <div className="pt-3 border-t border-border">
@@ -1361,6 +1537,31 @@ export function PropertiesPanel({
               <div className="flex items-center gap-1.5">
                 <NavigationIcon className="h-3 w-3 text-primary" />
                 <span className={labelCls}>Navigation</span>
+              </div>
+              {/* Outdoor Network Status */}
+              <div className="px-2.5 py-2 rounded-xl border border-border text-[10px] bg-muted/20">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="font-semibold text-muted-foreground">Outdoor Network</span>
+                  <span className={cn("font-bold", selectedEntranceIsConnected ? "text-green-600" : "text-amber-600")}>
+                    {selectedEntranceIsConnected ? 'Connected' : 'Not connected'}
+                  </span>
+                </div>
+                {!selectedEntranceIsConnected && (
+                  <>
+                    <p className="text-[9px] text-muted-foreground mb-2">Connect this entrance to the outdoor walking network.</p>
+                    <button
+                      type="button"
+                      onClick={() => onConnectEntranceToWalkingNetwork?.(selEntranceParent.id, selEntrance.id)}
+                      className="w-full h-8 rounded-lg border border-primary/30 bg-primary/5 text-[10px] font-extrabold text-primary hover:bg-primary/10 transition-colors flex items-center justify-center gap-1.5"
+                    >
+                      <NavigationIcon className="h-3 w-3" /> Connect to Walking Network
+                    </button>
+                  </>
+                )}
+              </div>
+              {/* Indoor Connection */}
+              <div className="flex items-center gap-1.5">
+                <span className="text-[9px] font-extrabold uppercase tracking-widest text-muted-foreground">Indoor Connection</span>
               </div>
               {entranceLinkStatus?.state === "linked" ? (
                 <div className={cn(
@@ -1496,9 +1697,9 @@ export function PropertiesPanel({
             {pathMemberEditing && (
               <div className="rounded-xl border border-primary/30 bg-primary/5 px-2.5 py-2 space-y-1.5">
                 <div className="flex items-center justify-between gap-2">
-                  <span className="text-[9px] font-extrabold uppercase tracking-widest text-primary">Path Network</span>
-                  <span className="text-[9px] font-semibold text-muted-foreground">Editing 1 path</span>
+                  <span className="text-[9px] font-extrabold uppercase tracking-widest text-primary">Pathway · Part of Path Network</span>
                 </div>
+                <p className="text-[9px] text-muted-foreground">Editing this Pathway individually.</p>
                 <button
                   type="button"
                   onClick={() => onExitPathMemberEdit?.()}
@@ -1520,7 +1721,7 @@ export function PropertiesPanel({
             <div>
               <label className={labelCls}>Type</label>
               <div className="grid grid-cols-3 gap-1 p-1 rounded-xl border border-border bg-muted/30">
-                {[["walkway", "Walkway"], ["road", "Road"], ["accessible", "Accessible"]].map(([value, label]) => (
+                {[["walkway", "Walkway"], ["road", "Road / Driveway"], ["accessible", "Accessible Path"]].map(([value, label]) => (
                   <button
                     key={value}
                     type="button"
@@ -1570,6 +1771,45 @@ export function PropertiesPanel({
                 <div className="h-10 px-3 rounded-xl border border-border bg-muted/30 text-xs font-mono flex items-center">{selPath.points.length}</div>
               </div>
             </div>
+            <div className="space-y-2 pt-3 border-t border-border" data-testid="pathway-navigation-section">
+              <div className="flex items-center gap-1.5">
+                <NavigationIcon className="h-3 w-3 text-primary" />
+                <span className={labelCls}>Navigation</span>
+              </div>
+              {pathNavigationState === "used" ? (
+                <div className="rounded-xl border border-emerald-200/80 bg-emerald-50/60 px-2.5 py-2 dark:border-emerald-800/50 dark:bg-emerald-900/10">
+                  <div className="flex items-center gap-1.5 text-[10px] font-extrabold text-emerald-700 dark:text-emerald-400">
+                    <CheckCircle2 className="h-3.5 w-3.5" /> Used for navigation ✓
+                  </div>
+                  <p className="mt-1 text-[9px] leading-snug text-emerald-700/80 dark:text-emerald-300/80">
+                    Walking network created from and following this pathway.
+                  </p>
+                </div>
+              ) : pathNavigationState === "legacy" ? (
+                <div className="rounded-xl border border-amber-200 bg-amber-50/70 px-2.5 py-2 text-amber-800 dark:border-amber-900/50 dark:bg-amber-900/10 dark:text-amber-300">
+                  <div className="flex items-center gap-1.5 text-[10px] font-extrabold">
+                    <AlertTriangle className="h-3.5 w-3.5" /> Legacy navigation needs reconnecting.
+                  </div>
+                  <p className="mt-1 text-[9px] leading-snug">
+                    This pathway was converted before ownership tracking was available. Existing walking data is preserved; rebuild it explicitly before relying on automatic geometry updates.
+                  </p>
+                </div>
+              ) : (
+                <>
+                  <div className="rounded-xl border border-border bg-muted/20 px-2.5 py-2 text-[10px] font-semibold text-muted-foreground">
+                    Not used for navigation
+                  </div>
+                  <p className="text-[9px] leading-snug text-muted-foreground">Create the walking network along this physical pathway.</p>
+                  <button
+                    type="button"
+                    onClick={() => onAddPathToNavigation?.(selPath.id)}
+                    className="w-full h-9 rounded-xl border border-primary/30 bg-primary/5 text-xs font-bold text-primary hover:bg-primary/10 transition-colors flex items-center justify-center gap-1.5"
+                  >
+                    <NavigationIcon className="h-3 w-3" /> Use for Navigation
+                  </button>
+                </>
+              )}
+            </div>
             <div className="grid grid-cols-2 gap-2 pt-2 border-t border-border">
               <button
                 type="button"
@@ -1610,15 +1850,6 @@ export function PropertiesPanel({
                   <Plus className="h-3 w-3" />
                   Add Bend
                 </button>
-                <button
-                  type="button"
-                  onClick={() => onAddPathToNavigation?.(selPath.id)}
-                  title="Creates navigation waypoints and connections along this physical pathway. The visual pathway remains independently editable."
-                  className="w-full h-9 rounded-xl border border-primary/30 bg-primary/5 text-xs font-bold text-primary hover:bg-primary/10 transition-colors flex items-center justify-center gap-1.5"
-                >
-                  <NavigationIcon className="h-3 w-3" />
-                  Add Path to Navigation
-                </button>
               </div>
               )}
               {selectedPathPointForPath && !selectedPathPointIsJunction && !selectedPathPointIsEndpoint && (
@@ -1638,11 +1869,11 @@ export function PropertiesPanel({
                 <button
                   type="button"
                   onClick={() => onAddWaypointAtSelectedPathPoint?.()}
-                  title="Creates or reuses a navigation waypoint exactly at this pathway point."
+                  title="Creates or reuses a navigation walking point exactly at this pathway point."
                   className="h-9 rounded-xl border border-border text-xs font-bold transition-colors flex items-center justify-center gap-1.5 hover:bg-muted"
                 >
                   <MapPin className="h-3 w-3" />
-                  {selectedPathPointHasWaypoint ? "View Waypoint" : "Add Waypoint Here"}
+                  {selectedPathPointHasWaypoint ? "View Walking Point" : "Add Walking Point Here"}
                 </button>
               </div>
               )}
@@ -1651,11 +1882,11 @@ export function PropertiesPanel({
                 <button
                   type="button"
                   onClick={() => onAddWaypointAtSelectedPathPoint?.()}
-                  title="Creates or reuses a navigation waypoint exactly at this pathway endpoint."
+                  title="Creates or reuses a navigation walking point exactly at this pathway endpoint."
                   className="h-9 rounded-xl border border-border text-xs font-bold transition-colors flex items-center justify-center gap-1.5 hover:bg-muted"
                 >
                   <MapPin className="h-3 w-3" />
-                  {selectedPathPointHasWaypoint ? "View Waypoint" : "Add Waypoint Here"}
+                  {selectedPathPointHasWaypoint ? "View Walking Point" : "Add Walking Point Here"}
                 </button>
                 <p className="text-[9px] leading-snug text-muted-foreground">Use the endpoint handle on the canvas to extend this path.</p>
               </div>
@@ -1665,13 +1896,13 @@ export function PropertiesPanel({
                 <button
                   type="button"
                   onClick={() => onAddWaypointAtSelectedPathPoint?.()}
-                  title="Creates or reuses a navigation waypoint exactly at this shared junction."
+                  title="Creates or reuses a navigation walking point exactly at this shared junction."
                   className="h-9 rounded-xl border border-border text-xs font-bold transition-colors flex items-center justify-center gap-1.5 hover:bg-muted"
                 >
                   <MapPin className="h-3 w-3" />
-                  {selectedPathPointHasWaypoint ? "View Waypoint" : "Add Waypoint Here"}
+                  {selectedPathPointHasWaypoint ? "View Walking Point" : "Add Walking Point Here"}
                 </button>
-                {selectedPathPointHasWaypoint && <p className="text-[9px] leading-snug text-emerald-600 font-semibold">Waypoint linked</p>}
+                {selectedPathPointHasWaypoint && <p className="text-[9px] leading-snug text-emerald-600 font-semibold">Walking Point linked</p>}
                 <button
                   type="button"
                   onClick={() => onDisconnectSelectedPathPoint?.()}
@@ -1853,7 +2084,7 @@ export function PropertiesPanel({
           <div data-testid="nav-node-props">
             <div className="flex items-center gap-1.5 mb-3">
               <Route className="h-3 w-3 text-green-500" />
-              <span className="text-[9px] font-extrabold uppercase tracking-widest text-muted-foreground">Waypoint</span>
+              <span className="text-[9px] font-extrabold uppercase tracking-widest text-muted-foreground">Walking Point</span>
             </div>
 
             {/* GENERAL */}
@@ -1863,57 +2094,18 @@ export function PropertiesPanel({
                 <span className="text-[9px] font-extrabold uppercase tracking-widest text-muted-foreground">General</span>
               </div>
               <div>
-                <label htmlFor="nav-name" className={labelCls}>Name</label>
+                <label htmlFor="nav-name" className={labelCls}>Name (optional)</label>
                 <input id="nav-name" value={selNavNode.name} onChange={(e) => onUpdateNavNode?.(selNavNode.id, { name: e.target.value })}
-                  className={inputCls} placeholder="Waypoint name" />
+                  className={inputCls} placeholder="Walking Point name" />
               </div>
-              <div>
-                <label className={labelCls}>Type</label>
-                {/* B5 Phase 1.7: an entrance-linked waypoint is permanently a
-                    Building Entrance — the type is locked so a generic Type
-                    change can never silently break the B3 entrance relationship. */}
-                {selNavNode.entranceId ? (
-                  <div className="w-full h-10 px-3 rounded-xl border border-border bg-muted/40 text-foreground text-xs font-semibold flex items-center gap-2">
+              {/* Type only shown for entrance-linked nodes as read-only indicator */}
+              {selNavNode.entranceId && (
+                <div>
+                  <div className="w-full h-8 px-2.5 rounded-lg border border-border bg-muted/30 text-foreground text-[10px] font-semibold flex items-center gap-2">
                     <DoorOpen className="h-3.5 w-3.5 text-blue-500" />
                     <span className="truncate">Building Entrance</span>
                     <span className="ml-auto text-[9px] text-muted-foreground font-medium">Linked</span>
                   </div>
-                ) : (
-                  <WaypointTypeMenu value={selNavNode.type} onChange={(t) => onUpdateNavNode?.(selNavNode.id, { type: t as NavigationNode["type"] })} />
-                )}
-              </div>
-            </div>
-
-            {/* ROUTING */}
-            <div className="pt-3 mt-3 border-t border-border space-y-3">
-              <div className="flex items-center gap-1.5">
-                <Accessibility className="h-3 w-3 text-muted-foreground" />
-                <span className="text-[9px] font-extrabold uppercase tracking-widest text-muted-foreground">Routing</span>
-              </div>
-              {/* B5 Phase 1.8: comfortable custom Yes/No segmented control + custom
-                  reason selector. Accessible = may be used for an Accessible route. */}
-              <div>
-                <div className="flex items-center justify-between gap-2 mb-1.5">
-                  <span className="text-[10px] font-semibold text-foreground flex items-center gap-1.5"><CheckCircle2 className="h-3.5 w-3.5 text-green-600 shrink-0" /> Accessible</span>
-                  <BoolSegmented
-                    value={selNavNode.accessible}
-                    onYes={() => onUpdateNavNode?.(selNavNode.id, { accessible: true, inaccessibleReason: undefined })}
-                    onNo={() => onUpdateNavNode?.(selNavNode.id, { accessible: false, inaccessibleReason: selNavNode.inaccessibleReason ?? "other" })}
-                    label="Accessible"
-                  />
-                </div>
-                {selNavNode.accessible === false && (
-                  <ReasonMenu
-                    value={selNavNode.inaccessibleReason ?? "other"}
-                    options={INACCESSIBLE_REASONS}
-                    onChange={(r) => onUpdateNavNode?.(selNavNode.id, { inaccessibleReason: r as NavigationNode["inaccessibleReason"] })}
-                    placeholder="Why is this not accessible?"
-                  />
-                )}
-              </div>
-              {selNavNode.type === "entrance" && selNavNode.buildingId && (
-                <div className="px-2.5 py-2 rounded-xl border border-border text-[10px] bg-muted/30 text-muted-foreground">
-                  Linked to building entrance — outdoor routes enter the building through here.
                 </div>
               )}
             </div>
@@ -1951,44 +2143,33 @@ export function PropertiesPanel({
                     <AlertTriangle className="h-3 w-3 text-amber-500" />
                     <span className="font-bold text-amber-600 dark:text-amber-400">Isolated</span>
                   </div>
-                  <p className="text-muted-foreground">This waypoint has no connections. Use Connect to link it into the walking network.</p>
+                  <p className="text-muted-foreground">This walking point has no connections. Use Connect to link it into the walking network.</p>
                 </div>
               )}
             </div>
 
-            {/* POSITION — compact secondary fields, never the focus. Entrance-
-                linked nodes are derived geometry: position is read-only because
-                it always follows the linked building entrance. */}
-            <div className="pt-3 mt-3 border-t border-border">
-              <div className="flex items-center gap-1.5 mb-2">
-                <Settings2 className="h-3 w-3 text-muted-foreground" />
-                <span className="text-[9px] font-extrabold uppercase tracking-widest text-muted-foreground">Position</span>
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className={labelCls}>X</label>
-                  <input type="number" value={selNavNode.x} disabled={!!selNavNode.entranceId}
-                    onChange={(e) => onUpdateNavNode?.(selNavNode.id, { x: parseInt(e.target.value) || 0 })}
-                    className={`${inputCls} font-mono ${selNavNode.entranceId ? "opacity-60 cursor-not-allowed" : ""}`} />
-                </div>
-                <div>
-                  <label className={labelCls}>Y</label>
-                  <input type="number" value={selNavNode.y} disabled={!!selNavNode.entranceId}
-                    onChange={(e) => onUpdateNavNode?.(selNavNode.id, { y: parseInt(e.target.value) || 0 })}
-                    className={`${inputCls} font-mono ${selNavNode.entranceId ? "opacity-60 cursor-not-allowed" : ""}`} />
-                </div>
-              </div>
-              {selNavNode.entranceId && (
-                <p className="px-1 pt-1.5 text-[9px] text-muted-foreground">Derived from the linked building entrance — move the building or entrance instead.</p>
-              )}
-            </div>
+            {/* ADVANCED ROUTING — collapsed by default; contains Type, Accessible, Position */}
+            <NavNodeAdvancedRouting
+              node={selNavNode}
+              buildingName={selNavNode.buildingId ? (allBuildings.find((b) => b.id === selNavNode.buildingId)?.name ?? selNavNode.buildingId) : undefined}
+              onUpdateNode={onUpdateNavNode}
+              allNavEdges={allNavEdges}
+              allPaths={allPaths}
+              onSelectPath={onSelectPath}
+              labelCls={labelCls}
+              inputCls={inputCls}
+            />
 
             {/* ACTIONS */}
             <div className="pt-3 mt-3 border-t border-border">
-              <button onClick={() => onDeleteNavNode?.(selNavNode.id)}
-                className="w-full h-10 rounded-xl border border-destructive/30 text-xs font-bold text-destructive hover:bg-destructive/10 transition-colors">
-                <span className="flex items-center justify-center gap-1.5"><AlertTriangle className="h-3 w-3" /> Delete Waypoint</span>
-              </button>
+              {selNavNode.generatedFromPathVertices?.length ? (
+                <p className="text-[9px] text-muted-foreground">Generated walking points are removed with their owning Pathway.</p>
+              ) : (
+                <button onClick={() => onDeleteNavNode?.(selNavNode.id)}
+                  className="w-full h-10 rounded-xl border border-destructive/30 text-xs font-bold text-destructive hover:bg-destructive/10 transition-colors">
+                  <span className="flex items-center justify-center gap-1.5"><AlertTriangle className="h-3 w-3" /> Delete Walking Point</span>
+                </button>
+              )}
             </div>
           </div>
         )}
@@ -1998,8 +2179,27 @@ export function PropertiesPanel({
           <>
             <div className="flex items-center gap-1.5 mb-3">
               <Route className="h-3 w-3 text-green-500" />
-              <span className="text-[9px] font-extrabold uppercase tracking-widest text-muted-foreground">Navigation Connection</span>
+              <span className="text-[9px] font-extrabold uppercase tracking-widest text-muted-foreground">Walking Path</span>
             </div>
+
+            {generatedNavEdge && (
+              <div className="rounded-xl border border-emerald-200/80 bg-emerald-50/60 px-2.5 py-2 text-[10px] text-emerald-700 dark:border-emerald-800/50 dark:bg-emerald-900/10 dark:text-emerald-300" data-testid="generated-nav-edge-status">
+                <p className="font-extrabold">Generated from:</p>
+                <div className="mt-1 flex flex-wrap gap-1.5">
+                  {generatedNavEdgePaths.map((path) => (
+                    <button
+                      key={path.id}
+                      type="button"
+                      onClick={() => onSelectPath?.(path.id)}
+                      className="rounded-md border border-emerald-300/70 px-2 py-1 text-[9px] font-bold hover:bg-emerald-100/70 dark:border-emerald-700/60 dark:hover:bg-emerald-900/30"
+                    >
+                      {path.name || (path.type === "accessible" ? "Accessible Path" : path.type === "road" || path.type === "driveway" ? "Road / Driveway" : "Walkway")}
+                    </button>
+                  ))}
+                  {generatedNavEdgePaths.length === 0 && <span>Physical Pathway</span>}
+                </div>
+              </div>
+            )}
 
             {/* CONNECTION */}
             <div>
@@ -2010,11 +2210,11 @@ export function PropertiesPanel({
               <div className="px-2.5 py-2 rounded-xl border border-border text-[10px] bg-muted/30 text-muted-foreground space-y-1">
                 <div className="flex justify-between">
                   <span>From</span>
-                  <span className="font-bold text-[9px]">{allNavNodes?.find(n => n.id === selNavEdge.startNodeId)?.name ?? "Waypoint"}</span>
+                  <span className="font-bold text-[9px]">{allNavNodes?.find(n => n.id === selNavEdge.startNodeId)?.name ?? "Walking Point"}</span>
                 </div>
                 <div className="flex justify-between">
                   <span>To</span>
-                  <span className="font-bold text-[9px]">{allNavNodes?.find(n => n.id === selNavEdge.endNodeId)?.name ?? "Waypoint"}</span>
+                  <span className="font-bold text-[9px]">{allNavNodes?.find(n => n.id === selNavEdge.endNodeId)?.name ?? "Walking Point"}</span>
                 </div>
                 <div className="flex justify-between border-t border-border pt-1 mt-1">
                   <span>Distance</span>
@@ -2028,7 +2228,9 @@ export function PropertiesPanel({
               <div data-testid="nav-edge-blocked-warning" className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-2.5 py-2 mb-3">
                 <AlertTriangle className="h-3.5 w-3.5 text-destructive shrink-0 mt-0.5" />
                 <p className="text-[10px] font-bold text-destructive leading-snug">
-                  Connection blocked by obstacle. Move a waypoint, segment, or bend to repair it.
+                  {generatedNavEdge
+                    ? "Connection blocked by obstacle. Edit the owning physical Pathway to repair it."
+                    : "Connection blocked by obstacle. Move a walking point, segment, or bend to repair it."}
                 </p>
               </div>
             )}
@@ -2041,6 +2243,12 @@ export function PropertiesPanel({
                 <GripVertical className="h-3 w-3 text-muted-foreground" />
                 <span className="text-[9px] font-extrabold uppercase tracking-widest text-muted-foreground">Geometry</span>
               </div>
+              {generatedNavEdge ? (
+                <div className="rounded-xl border border-border bg-muted/30 px-2.5 py-2 text-[10px] text-muted-foreground" data-testid="generated-nav-edge-geometry-lock">
+                  Geometry follows the physical Pathway.
+                </div>
+              ) : (
+              <>
               {/* B5 Phase 6.10: responsive geometry layout — bend count on row 1,
                   Add/Remove on row 2, Straighten on row 3. No horizontal overflow. */}
               <div className="px-2.5 py-2 rounded-xl border border-border bg-muted/30 text-[10px] text-muted-foreground mb-1.5">
@@ -2064,13 +2272,15 @@ export function PropertiesPanel({
                     ? "border-amber-200/70 bg-amber-50/40 text-amber-700 dark:border-amber-900/40 dark:bg-amber-900/10 dark:text-amber-400"
                     : "border-border text-foreground hover:bg-muted",
                   "disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent")}
-                title={straightenBlocked ? "The direct path crosses a building or obstacle — keep a bend." : undefined}>
+                title={straightenBlocked ? "Can't straighten — the direct route would cross an obstacle." : undefined}>
                 Straighten
               </button>
               {straightenBlocked && (
                 <p className="text-[9px] text-amber-600 dark:text-amber-400 font-semibold leading-snug mt-1">
-                  The direct line crosses a building or obstacle — keep a bend.
+                  Can't straighten — the direct route would cross an obstacle.
                 </p>
+              )}
+              </>
               )}
             </div>
 
@@ -2127,75 +2337,19 @@ export function PropertiesPanel({
               )}
             </div>
 
-            {/* ROUTE AVAILABILITY — one shared graph, routing flags per edge */}
-            <div className="pt-3 mt-3 border-t border-border space-y-4">
-              <div className="flex items-center gap-1.5 mb-2">
-                <Accessibility className="h-3.5 w-3.5 text-muted-foreground" />
-                <span className="text-[9px] font-extrabold uppercase tracking-widest text-muted-foreground">Route Availability</span>
-              </div>
-              {/* Accessible — segmented Yes/No + custom reason (no native select) */}
-              <div>
-                <div className="flex items-center justify-between gap-3 mb-2">
-                  <span className="text-[11px] font-semibold text-foreground flex items-center gap-1.5"><CheckCircle2 className="h-3.5 w-3.5 text-green-600 shrink-0" /> Accessible</span>
-                  <BoolSegmented
-                    value={selNavEdge.accessible}
-                    onYes={() => onUpdateNavEdge?.(selNavEdge.id, { accessible: true, inaccessibleReason: undefined })}
-                    onNo={() => onUpdateNavEdge?.(selNavEdge.id, { accessible: false, inaccessibleReason: selNavEdge.inaccessibleReason ?? "other" })}
-                    label="Accessible"
-                  />
-                </div>
-                {selNavEdge.accessible === false && (
-                  <ReasonMenu
-                    value={selNavEdge.inaccessibleReason ?? "other"}
-                    options={INACCESSIBLE_REASONS}
-                    onChange={(r) => onUpdateNavEdge?.(selNavEdge.id, { inaccessibleReason: r as NavigationEdge["inaccessibleReason"] })}
-                    placeholder="Why is this not accessible?"
-                  />
-                )}
-              </div>
-              {/* Emergency Safe — segmented Yes/No + custom reason */}
-              <div>
-                <div className="flex items-center justify-between gap-3 mb-2">
-                  <span className="text-[11px] font-semibold text-foreground flex items-center gap-1.5"><AlertTriangle className="h-3.5 w-3.5 text-amber-600 shrink-0" /> Emergency Safe</span>
-                  <BoolSegmented
-                    value={selNavEdge.emergencySafe !== false}
-                    onYes={() => onUpdateNavEdge?.(selNavEdge.id, { emergencySafe: true, emergencyReason: undefined })}
-                    onNo={() => onUpdateNavEdge?.(selNavEdge.id, { emergencySafe: false, emergencyReason: selNavEdge.emergencyReason ?? "hazard" })}
-                    label="Emergency Safe"
-                  />
-                </div>
-                {selNavEdge.emergencySafe === false && (
-                  <ReasonMenu
-                    value={selNavEdge.emergencyReason ?? "hazard"}
-                    options={EMERGENCY_REASONS}
-                    onChange={(r) => onUpdateNavEdge?.(selNavEdge.id, { emergencyReason: r as NavigationEdge["emergencyReason"] })}
-                    placeholder="Why not emergency-safe?"
-                  />
-                )}
-              </div>
-              {/* Closed — Open / Closed segmented */}
-              <div>
-                <div className="flex items-center justify-between gap-3 mb-2">
-                  <span className="text-[11px] font-semibold text-foreground flex items-center gap-1.5"><XCircle className="h-3.5 w-3.5 text-amber-600 shrink-0" /> Availability</span>
-                  <BoolSegmented
-                    value={selNavEdge.closed !== true}
-                    onYes={() => onUpdateNavEdge?.(selNavEdge.id, { closed: false })}
-                    onNo={() => onUpdateNavEdge?.(selNavEdge.id, { closed: true })}
-                    label="Availability"
-                    yesLabel="Open"
-                    noLabel="Closed"
-                  />
-                </div>
-                <p className="px-1 text-[9px] text-muted-foreground">Closed connections are temporarily excluded from routing.</p>
-              </div>
-            </div>
+            {/* ADVANCED ROUTING — collapsed by default */}
+            <NavEdgeAdvancedRouting edge={selNavEdge} onUpdateEdge={onUpdateNavEdge} />
 
             {/* ACTIONS */}
             <div className="pt-3 mt-3 border-t border-border">
-              <button onClick={() => onDeleteNavEdge?.(selNavEdge.id)}
-                className="w-full h-10 rounded-xl border border-destructive/30 text-xs font-bold text-destructive hover:bg-destructive/10 transition-colors">
-                <span className="flex items-center justify-center gap-1.5"><AlertTriangle className="h-3 w-3" /> Delete Connection</span>
-              </button>
+              {generatedNavEdge ? (
+                <p className="text-[9px] text-muted-foreground">Generated Walking Paths are removed with their owning physical Pathway.</p>
+              ) : (
+                <button onClick={() => onDeleteNavEdge?.(selNavEdge.id)}
+                  className="w-full h-10 rounded-xl border border-destructive/30 text-xs font-bold text-destructive hover:bg-destructive/10 transition-colors">
+                  <span className="flex items-center justify-center gap-1.5"><AlertTriangle className="h-3 w-3" /> Delete Path</span>
+                </button>
+              )}
             </div>
           </>
         )}
@@ -2234,7 +2388,7 @@ export function PropertiesPanel({
                 <span className="font-bold">{selRoute.durationMin} min</span>
               </div>
               <div className="flex justify-between">
-                <span>Waypoints</span>
+                <span>Walking Points</span>
                 <span className="font-bold">{selRoute.waypoints.length}</span>
               </div>
             </div>

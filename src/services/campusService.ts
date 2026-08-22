@@ -370,7 +370,13 @@ export function updateCampus(id: string, input: CampusUpdateInput, expectedUpdat
   return updateWithVersion(id, expectedUpdatedAt, input);
 }
 
-export function archiveCampus(id: string, expectedUpdatedAt: string): Promise<Campus> {
+export async function archiveCampus(id: string, expectedUpdatedAt: string): Promise<Campus> {
+  const { data, error } = await getSupabase().from("campuses").select("status").eq("id", id).maybeSingle();
+  assertOk(error, "check campus archive eligibility");
+  if (!data) throw new Error("Campus not found.");
+  if (data.status === "published") {
+    throw new Error("Unpublish this campus before archiving it.");
+  }
   return updateWithVersion(id, expectedUpdatedAt, { status: "archived", archived_at: new Date().toISOString(), is_default: false });
 }
 
