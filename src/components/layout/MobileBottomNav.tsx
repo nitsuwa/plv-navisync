@@ -2,11 +2,18 @@ import { Link, useLocation } from "react-router";
 import { Home, Map, HelpCircle, User, Compass, Building2 } from "lucide-react";
 import { motion } from "motion/react";
 import { cn } from "../../lib/utils";
-import { useStudentAuth } from "../../hooks/useStudentAuth";  const TABS = [
+import { useStudentAuth } from "../../hooks/useStudentAuth";
+
+const ALL_TABS = [
     { to: "/", icon: Home, label: "Home" },
     { to: "/map", icon: Compass, label: "Map" },
     { to: "/buildings", icon: Building2, label: "Buildings" },
     { to: "/help", icon: HelpCircle, label: "Help" },
+    { to: "/student", icon: User, label: "Profile", auth: true },
+  ];
+
+const STUDENT_TABS = [
+    { to: "/map", icon: Compass, label: "Map" },
     { to: "/student", icon: User, label: "Profile", auth: true },
   ];
 
@@ -17,6 +24,8 @@ export function MobileBottomNav() {
   const { pathname } = useLocation();
   const { loading: authLoading, isStudent } = useStudentAuth();
 
+  const tabs = isStudent ? STUDENT_TABS : ALL_TABS;
+
   const isActive = (to: string) =>
     to === "/"
       ? pathname === "/"
@@ -24,7 +33,7 @@ export function MobileBottomNav() {
         ? pathname.startsWith("/student")
         : pathname.startsWith(to);
 
-  const activeIndex = TABS.findIndex(t => isActive(t.to));
+  const activeIndex = tabs.findIndex(t => isActive(t.to));
 
   return (
     <nav
@@ -48,14 +57,14 @@ export function MobileBottomNav() {
                 layoutId="mobile-nav-active"
                 className="absolute top-0.5 bottom-0.5 bg-primary/12 rounded-2xl"
                 style={{
-                  width: `${100 / TABS.length}%`,
-                  left: `${(activeIndex / TABS.length) * 100}%`,
+                  width: `${100 / tabs.length}%`,
+                  left: `${(activeIndex / tabs.length) * 100}%`,
                 }}
                 transition={{ type: "spring", stiffness: 450, damping: 30, mass: 0.8 }}
               />
             )}
 
-            {TABS.map(({ to, icon: Icon, label, auth }) => {
+            {tabs.map(({ to, icon: Icon, label, auth }) => {
               const active = isActive(to);
               const href = auth && !isStudent && !authLoading ? "/admin" : to;
 

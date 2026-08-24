@@ -1,11 +1,13 @@
-import { MapPin, Phone, Mail, Github, Globe, ArrowUpRight, CheckCircle2 } from "lucide-react";
+import { MapPin, Phone, Mail, Github, Globe, ArrowUpRight, CheckCircle2, MessageCircle, HelpCircle } from "lucide-react";
 import { Link } from "react-router";
 import { PLVLogo } from "../ui/PLVLogo";
+import { useStudentAuth } from "../../hooks/useStudentAuth";
 
 const CURRENT_VERSION = "v1.0.3";
 const LAST_UPDATED = "July 2026";
 
 export function Footer() {
+  const { isStudent } = useStudentAuth();
   return (
     <footer className="border-t border-border bg-card">
       <div className="max-w-7xl mx-auto px-5 sm:px-7 py-12 lg:py-16">
@@ -43,6 +45,10 @@ export function Footer() {
                 { label: "Campus Map",  to: "/map" },
                 { label: "Help Center", to: "/help" },
                 { label: "Login",       to: "/admin" },
+                ...(isStudent ? [
+                  { label: "Send Message", to: "/help#contact-form" },
+                  { label: "FAQ",          to: "/help#faq" },
+                ] : []),
               ].map(({ label, to }) => (
                 <li key={to}>                    <Link
                       to={to}

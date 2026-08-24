@@ -8,11 +8,13 @@ import { MobileBottomNav } from "./MobileBottomNav";
 import { NavigationProgress } from "../ui/NavigationProgress";
 import { cn } from "../../lib/utils";
 import { motion } from "motion/react";
+import { useStudentAuth } from "../../hooks/useStudentAuth";
 
 export function PublicLayout() {
   const { pathname } = useLocation();
+  const { isStudent } = useStudentAuth();
 
-  const showFooter    = pathname === "/";
+  const showFooter    = pathname === "/" || isStudent;
   const isMapPage     = pathname === "/map";
   const showBottomNav = true;
 
