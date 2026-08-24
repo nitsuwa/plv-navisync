@@ -277,12 +277,45 @@ const GYM_FLOORS: Floor[] = [
   {
     number: 2, label: "2nd Floor",
     rooms: [
-      { id:"g201", name:"Fitness Center",      x:20,  y:80,  w:200, h:120, type:"lab"      },
-      { id:"g202", name:"VIP Gallery",         x:230, y:80,  w:120, h:60,  type:"lobby"    },
-      { id:"g203", name:"Coaches Office",      x:230, y:148, w:80,  h:52,  type:"office"   },
-      { id:"g204", name:"Sports Store",        x:20,  y:210, w:130, h:60,  type:"storage"  },
-      { id:"g205", name:"PE Faculty Room",     x:160, y:210, w:90,  h:60,  type:"office"   },
-      { id:"g206", name:"Stairs",              x:370, y:80,  w:40,  h:40,  type:"stairs"   },
+      { id:"g201", name:"Fitness Room",        x:20,  y:80,  w:160, h:120, type:"gym"      },
+      { id:"g202", name:"Aerobics Room",       x:190, y:80,  w:120, h:120, type:"gym"      },
+      { id:"g203", name:"Storage",             x:325, y:80,  w:60,  h:60,  type:"storage"  },
+      { id:"g204", name:"Stairs",              x:370, y:80,  w:40,  h:40,  type:"stairs"   },
+    ],
+  },
+];
+
+
+// ── CABA — College of Accountancy & Business Administration (1 floor) ──────
+const CABA_FLOORS: Floor[] = [
+  {
+    number: 1, label: "Ground Floor",
+    rooms: [
+      // ── Upper Row (above hallway) ──────────────────────────────────
+      { id: "caba_r_stairs_l", name: "Stairs (Left)",             x: 8,   y: 10,  w: 34,  h: 80,  type: "stairs"   },
+      { id: "caba_r_elec",     name: "Electrical Room",           x: 42,  y: 10,  w: 50,  h: 36,  type: "storage"  },
+      { id: "caba_r_stor1",    name: "Storage (Left)",            x: 42,  y: 46,  w: 50,  h: 44,  type: "storage"  },
+      { id: "caba_r102",       name: "CABA-102",                  x: 92,  y: 10,  w: 106, h: 80,  type: "classroom" },
+      { id: "caba_r103",       name: "CABA-103",                  x: 198, y: 10,  w: 106, h: 80,  type: "classroom" },
+      { id: "caba_r104",       name: "CABA-104",                  x: 304, y: 10,  w: 106, h: 80,  type: "classroom" },
+      { id: "caba_r_cr_f",     name: "Female CR",                 x: 410, y: 10,  w: 26,  h: 80,  type: "restroom" },
+      { id: "caba_r_cr_m",     name: "Male CR",                   x: 436, y: 10,  w: 27,  h: 45,  type: "restroom" },
+      { id: "caba_r_pwd",      name: "PWD CR",                    x: 436, y: 55,  w: 27,  h: 35,  type: "restroom" },
+      { id: "caba_r_elev",     name: "Elevator",                  x: 463, y: 35,  w: 45,  h: 55,  type: "elevator" },
+      { id: "caba_r_stor_rt",  name: "Storage Room (Right Top)",  x: 508, y: 10,  w: 50,  h: 36,  type: "storage"  },
+      { id: "caba_r_stor_rb",  name: "Storage (Right)",           x: 508, y: 46,  w: 50,  h: 44,  type: "storage"  },
+      { id: "caba_r_stairs_r", name: "Stairs (Right)",            x: 558, y: 10,  w: 34,  h: 80,  type: "stairs"   },
+
+      // ── Middle Corridor / Hallway ─────────────────────────────────
+      { id: "caba_r_hallway",  name: "Hallway",                   x: 8,   y: 90,  w: 584, h: 40,  type: "corridor" },
+
+      // ── Lower Row (below hallway) ──────────────────────────────────
+      { id: "caba_r_biz",      name: "Business Office Sim Room",  x: 8,   y: 130, w: 90,  h: 80,  type: "lab"      },
+      { id: "caba_r101",       name: "CABA-101",                  x: 98,  y: 130, w: 106, h: 80,  type: "classroom" },
+      { id: "caba_r_lobby",    name: "Lobby",                     x: 204, y: 130, w: 106, h: 80,  type: "lobby"    },
+      { id: "caba_r_veranda",  name: "Veranda",                   x: 204, y: 210, w: 106, h: 35,  type: "lobby"    },
+      { id: "caba_r_grad",     name: "Graduate Studies Office",   x: 310, y: 130, w: 78,  h: 80,  type: "office"   },
+      { id: "caba_r_sim",      name: "Simulation Room",           x: 388, y: 130, w: 170, h: 80,  type: "lab"      },
     ],
   },
 ];
@@ -294,9 +327,9 @@ export const FLOOR_PLANS: Record<string, FloorPlanData> = {
   b4: { buildingId: "b4", buildingName: "Engineering Laboratory Building",     floors: ELB_FLOORS },
   b5: { buildingId: "b5", buildingName: "Gymnasium & Sports Complex",          floors: GYM_FLOORS },
   b6: { buildingId: "b6", buildingName: "Student Services Center",             floors: SSC_FLOORS },
+  b7: { buildingId: "b7", buildingName: "College of Accountancy & Business Administration", floors: CABA_FLOORS },
 };
 
-// Room type colors
 export const ROOM_COLORS: Record<RoomType, { fill: string; stroke: string; text: string }> = {
   classroom: { fill: "#dbeafe", stroke: "#3b82f6", text: "#1e40af" },
   office:    { fill: "#e0e7ff", stroke: "#6366f1", text: "#3730a3" },
