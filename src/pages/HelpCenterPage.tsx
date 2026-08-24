@@ -1292,7 +1292,7 @@ export function HelpCenterPage() {
         </section>
 
         {/* 4. FAQ with Search */}
-        <section>
+        <section id="faq">
           <Reveal>
             <div className="text-center mb-8">
               <SectionLabel>FAQ</SectionLabel>

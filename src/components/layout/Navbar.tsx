@@ -1,7 +1,7 @@
 import { Link, useLocation, useNavigate } from "react-router";
 import {
   Map, Home, HelpCircle, LogIn, LogOut, User, Bookmark, Flag, Settings,
-  ChevronDown, Building2,
+  ChevronDown, Building2, Bell,
 } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
@@ -14,11 +14,15 @@ import { reportService } from "../../services/reportService";
 import { notificationService } from "../../lib/notificationService";
 import { cn } from "../../lib/utils";
 
-const NAV_LINKS = [
+const ALL_NAV_LINKS = [
   { label: "Home", path: "/", icon: Home },
   { label: "Map", path: "/map", icon: Map },
   { label: "Directory", path: "/buildings", icon: Building2 },
   { label: "Help Center", path: "/help", icon: HelpCircle },
+];
+
+const STUDENT_NAV_LINKS = [
+  { label: "Map", path: "/map", icon: Map },
 ];
 
 export function Navbar() {
@@ -96,6 +100,8 @@ export function Navbar() {
   const isActive = (path: string) =>
     path === "/" ? location.pathname === "/" : location.pathname.startsWith(path);
 
+  const navLinks = isStudent ? STUDENT_NAV_LINKS : ALL_NAV_LINKS;
+
   const initials = isStudent ? username.slice(0, 2).toUpperCase() : "";
 
 
@@ -140,7 +146,7 @@ export function Navbar() {
 
           {/* ── Desktop centre nav links ── */}
           <div className="hidden md:flex items-center gap-0.5 flex-1 justify-center max-w-xs">
-            {NAV_LINKS.map(({ label, path, icon: Icon }) => {
+            {navLinks.map(({ label, path, icon: Icon }) => {
               const active = isActive(path);
               return (
                 <Link key={path} to={path}
@@ -172,6 +178,29 @@ export function Navbar() {
           {/* ── Right actions ── */}
           <div className="flex items-center gap-1.5 shrink-0">
             <ThemeToggle theme={theme} onToggle={toggleTheme} />
+
+            {!authLoading && isStudent && (
+              <motion.div whileTap={{ scale: 0.9 }}>
+                <Link
+                  to="/announcements"
+                  aria-label="Announcements"
+                  aria-current={isActive("/announcements") ? "page" : undefined}
+                  title="Announcements"
+                  className={cn(
+                    "flex h-9 w-9 items-center justify-center rounded-xl border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+                    showWhiteText
+                      ? isActive("/announcements")
+                        ? "border-white/40 bg-white/20 text-white"
+                        : "border-white/20 text-white/90 hover:bg-white/10 hover:text-white"
+                      : isActive("/announcements")
+                        ? "border-primary/30 bg-primary/10 text-primary"
+                        : "border-border text-muted-foreground hover:bg-muted hover:text-foreground"
+                  )}
+                >
+                  <Bell className="h-4 w-4" aria-hidden="true" />
+                </Link>
+              </motion.div>
+            )}
 
             {authLoading ? (
               /* Session still resolving — placeholder sized like the controls it
