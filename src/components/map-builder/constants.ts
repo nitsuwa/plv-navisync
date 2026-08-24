@@ -709,31 +709,121 @@ export const SEED_CAMPUSES: Campus[] = [
       },
       {
         id: "b_caba", name: "CABA Building", code: "CABA", category: "Academic",
-        description: "College of Accountancy and Business Administration.",
+        description: "College of Accountancy and Business Administration — Ground Floor.",
         x: 130, y: 400, width: 100, height: 190, color: "#1e40af", expanded: false,
         floors: [
           {
-            id: "f_caba_1", number: 1, label: "Ground Floor", paths: [],
-            rooms: [
-              { id: "caba_r1", name: "Lobby", type: "lobby", x: 20, y: 60, w: 80, h: 50 },
-              { id: "caba_r2", name: "Room 101", type: "classroom", x: 120, y: 60, w: 70, h: 45 },
-              { id: "caba_r3", name: "Room 102", type: "classroom", x: 200, y: 60, w: 70, h: 45 },
-              { id: "caba_r4", name: "Room 103", type: "classroom", x: 280, y: 60, w: 70, h: 45 },
-              { id: "caba_r5", name: "Stairs A", type: "stairs", x: 360, y: 60, w: 30, h: 30 },
+            id: "f_caba_1", number: 1, label: "Ground Floor",
+            canvasW: 600, canvasH: 260,
+            paths: [
+              { id: "path_hallway", points: [{ x: 8, y: 110 }, { x: 300, y: 110 }, { x: 592, y: 110 }], type: "walkway", color: "#94a3b8", width: 3 },
+              { id: "path_veranda", points: [{ x: 257, y: 130 }, { x: 257, y: 245 }], type: "walkway", color: "#94a3b8", width: 2 },
+              { id: "path_fire_l", points: [{ x: 8, y: 110 }, { x: 0, y: 110 }], type: "emergency", color: "#dc2626", width: 2 },
+              { id: "path_fire_r", points: [{ x: 592, y: 110 }, { x: 600, y: 110 }], type: "emergency", color: "#dc2626", width: 2 },
             ],
-          },
-          {
-            id: "f_caba_2", number: 2, label: "Floor 2", paths: [],
             rooms: [
-              { id: "caba_r6", name: "Room 201", type: "classroom", x: 20, y: 60, w: 80, h: 50 },
-              { id: "caba_r7", name: "Room 202", type: "classroom", x: 120, y: 60, w: 70, h: 45 },
-              { id: "caba_r8", name: "Room 203", type: "classroom", x: 200, y: 60, w: 70, h: 45 },
-              { id: "caba_r9", name: "Stairs A", type: "stairs", x: 360, y: 60, w: 30, h: 30 },
+              // ── Upper Row (above hallway) ──────────────────────────────
+              { id: "caba_r_stairs_l", name: "Stairs (Left)",             x: 8,   y: 10,  w: 34,  h: 80,  type: "stairs"    },
+              { id: "caba_r_elec",     name: "Electrical Room",           x: 42,  y: 10,  w: 50,  h: 36,  type: "storage"   },
+              { id: "caba_r_stor1",    name: "Storage (Left)",            x: 42,  y: 46,  w: 50,  h: 44,  type: "storage"   },
+              { id: "caba_r102",       name: "CABA-102",                  x: 92,  y: 10,  w: 106, h: 80,  type: "classroom" },
+              { id: "caba_r103",       name: "CABA-103",                  x: 198, y: 10,  w: 106, h: 80,  type: "classroom" },
+              { id: "caba_r104",       name: "CABA-104",                  x: 304, y: 10,  w: 106, h: 80,  type: "classroom" },
+              { id: "caba_r_cr_f",     name: "Female CR",                 x: 410, y: 10,  w: 26,  h: 80,  type: "restroom"  },
+              { id: "caba_r_cr_m",     name: "Male CR",                   x: 436, y: 10,  w: 27,  h: 45,  type: "restroom"  },
+              { id: "caba_r_pwd",      name: "PWD CR",                    x: 436, y: 55,  w: 27,  h: 35,  type: "restroom"  },
+              { id: "caba_r_elev",     name: "Elevator",                  x: 463, y: 35,  w: 45,  h: 55,  type: "elevator"  },
+              { id: "caba_r_stor_rt",  name: "Storage Room (Right Top)",  x: 508, y: 10,  w: 50,  h: 36,  type: "storage"   },
+              { id: "caba_r_stor_rb",  name: "Storage (Right)",           x: 508, y: 46,  w: 50,  h: 44,  type: "storage"   },
+              { id: "caba_r_stairs_r", name: "Stairs (Right)",            x: 558, y: 10,  w: 34,  h: 80,  type: "stairs"    },
+
+              // ── Middle Corridor / Hallway ─────────────────────────────
+              { id: "caba_r_hallway",  name: "Hallway",                   x: 8,   y: 90,  w: 584, h: 40,  type: "hallway"   },
+
+              // ── Lower Row (below hallway) ──────────────────────────────
+              { id: "caba_r_biz",      name: "Business Office Sim Room",  x: 8,   y: 130, w: 90,  h: 80,  type: "lab"       },
+              { id: "caba_r101",       name: "CABA-101",                  x: 98,  y: 130, w: 106, h: 80,  type: "classroom" },
+              { id: "caba_r_lobby",    name: "Lobby",                     x: 204, y: 130, w: 106, h: 80,  type: "lobby"     },
+              { id: "caba_r_veranda",  name: "Veranda",                   x: 204, y: 210, w: 106, h: 35,  type: "lobby"     },
+              { id: "caba_r_grad",     name: "Graduate Studies Office",   x: 310, y: 130, w: 78,  h: 80,  type: "office"    },
+              { id: "caba_r_sim",      name: "Simulation Room",           x: 388, y: 130, w: 170, h: 80,  type: "lab"       },
+            ],
+            walls: [
+              // ── Outer Perimeter ─────────────────────────────────────────
+              { id: "wall_top",          x1: 8,   y1: 10,  x2: 592, y2: 10,  thickness: 4, color: "#1e293b" },
+              { id: "wall_bot",          x1: 8,   y1: 210, x2: 558, y2: 210, thickness: 4, color: "#1e293b" },
+              { id: "wall_left",         x1: 8,   y1: 10,  x2: 8,   y2: 210, thickness: 4, color: "#1e293b" },
+              { id: "wall_right_top",    x1: 592, y1: 10,  x2: 592, y2: 130, thickness: 4, color: "#1e293b" },
+              { id: "wall_right_bot",    x1: 558, y1: 130, x2: 558, y2: 210, thickness: 4, color: "#1e293b" },
+              // ── Veranda Perimeter ───────────────────────────────────────
+              { id: "wall_veranda_l",    x1: 204, y1: 210, x2: 204, y2: 245, thickness: 3, color: "#1e293b" },
+              { id: "wall_veranda_r",    x1: 310, y1: 210, x2: 310, y2: 245, thickness: 3, color: "#1e293b" },
+              { id: "wall_veranda_b",    x1: 204, y1: 245, x2: 310, y2: 245, thickness: 3, color: "#1e293b" },
+              // ── Hallway Horizontal Walls ────────────────────────────────
+              { id: "wall_hall_top",     x1: 8,   y1: 90,  x2: 592, y2: 90,  thickness: 3, color: "#475569" },
+              { id: "wall_hall_bot",     x1: 8,   y1: 130, x2: 558, y2: 130, thickness: 3, color: "#475569" },
+              // ── Upper Row Partitions ────────────────────────────────────
+              { id: "w_u_stairs_l",      x1: 42,  y1: 10,  x2: 42,  y2: 90,  thickness: 2, color: "#64748b" },
+              { id: "w_u_elec_stor",     x1: 42,  y1: 46,  x2: 92,  y2: 46,  thickness: 2, color: "#64748b" },
+              { id: "w_u_stor1",         x1: 92,  y1: 10,  x2: 92,  y2: 90,  thickness: 2, color: "#64748b" },
+              { id: "w_u_102",           x1: 198, y1: 10,  x2: 198, y2: 90,  thickness: 2, color: "#64748b" },
+              { id: "w_u_103",           x1: 304, y1: 10,  x2: 304, y2: 90,  thickness: 2, color: "#64748b" },
+              { id: "w_u_104",           x1: 410, y1: 10,  x2: 410, y2: 90,  thickness: 2, color: "#64748b" },
+              { id: "w_u_cr_fm",         x1: 436, y1: 10,  x2: 436, y2: 90,  thickness: 2, color: "#64748b" },
+              { id: "w_u_cr_pwd",        x1: 436, y1: 55,  x2: 463, y2: 55,  thickness: 2, color: "#64748b" },
+              { id: "w_u_elev",          x1: 463, y1: 10,  x2: 463, y2: 90,  thickness: 2, color: "#64748b" },
+              { id: "w_u_stor_r",        x1: 508, y1: 10,  x2: 508, y2: 90,  thickness: 2, color: "#64748b" },
+              { id: "w_u_stor_rt_rb",    x1: 508, y1: 46,  x2: 558, y2: 46,  thickness: 2, color: "#64748b" },
+              { id: "w_u_stairs_r",      x1: 558, y1: 10,  x2: 558, y2: 90,  thickness: 2, color: "#64748b" },
+              // ── Lower Row Partitions ────────────────────────────────────
+              { id: "w_l_biz",           x1: 98,  y1: 130, x2: 98,  y2: 210, thickness: 2, color: "#64748b" },
+              { id: "w_l_101",           x1: 204, y1: 130, x2: 204, y2: 210, thickness: 2, color: "#64748b" },
+              { id: "w_l_lobby",         x1: 310, y1: 130, x2: 310, y2: 210, thickness: 2, color: "#64748b" },
+              { id: "w_l_grad",          x1: 388, y1: 130, x2: 388, y2: 210, thickness: 2, color: "#64748b" },
+            ],
+            doors: [
+              // ── Upper Row Doors (Attached to wall_hall_top) ─────────────
+              { id: "d_stairs_l", wallId: "wall_hall_top", offset: 0.029, x: 25,  y: 90, width: 14, doorType: "single", direction: "left", color: "#ec4899", label: "Stairs (Left)" },
+              { id: "d_stor_l",   wallId: "wall_hall_top", offset: 0.101, x: 67,  y: 90, width: 14, doorType: "single", direction: "left", color: "#eab308", label: "Storage (Left)" },
+              { id: "d_102_1",    wallId: "wall_hall_top", offset: 0.183, x: 115, y: 90, width: 16, doorType: "single", direction: "left", color: "#f59e0b", label: "CABA-102 (Door 1)" },
+              { id: "d_102_2",    wallId: "wall_hall_top", offset: 0.286, x: 175, y: 90, width: 16, doorType: "single", direction: "right", color: "#f59e0b", label: "CABA-102 (Door 2)" },
+              { id: "d_103_1",    wallId: "wall_hall_top", offset: 0.365, x: 221, y: 90, width: 16, doorType: "single", direction: "left", color: "#f59e0b", label: "CABA-103 (Door 1)" },
+              { id: "d_103_2",    wallId: "wall_hall_top", offset: 0.467, x: 281, y: 90, width: 16, doorType: "single", direction: "right", color: "#f59e0b", label: "CABA-103 (Door 2)" },
+              { id: "d_104_1",    wallId: "wall_hall_top", offset: 0.546, x: 327, y: 90, width: 16, doorType: "single", direction: "left", color: "#f59e0b", label: "CABA-104 (Door 1)" },
+              { id: "d_104_2",    wallId: "wall_hall_top", offset: 0.649, x: 387, y: 90, width: 16, doorType: "single", direction: "right", color: "#f59e0b", label: "CABA-104 (Door 2)" },
+              { id: "d_cr_f",     wallId: "wall_hall_top", offset: 0.711, x: 423, y: 90, width: 14, doorType: "single", direction: "left", color: "#94a3b8", label: "Female CR" },
+              { id: "d_cr_m",     wallId: "wall_hall_top", offset: 0.755, x: 449, y: 90, width: 14, doorType: "single", direction: "right", color: "#94a3b8", label: "Male / PWD CR" },
+              { id: "d_elev",     wallId: "wall_hall_top", offset: 0.817, x: 485, y: 90, width: 18, doorType: "double", direction: "double", color: "#8b5cf6", label: "Elevator Door" },
+              { id: "d_stor_r",   wallId: "wall_hall_top", offset: 0.899, x: 533, y: 90, width: 14, doorType: "single", direction: "left", color: "#eab308", label: "Storage (Right)" },
+              { id: "d_stairs_r", wallId: "wall_hall_top", offset: 0.971, x: 575, y: 90, width: 14, doorType: "single", direction: "right", color: "#ec4899", label: "Stairs (Right)" },
+              // ── Lower Row Doors (Attached to wall_hall_bot) ─────────────
+              { id: "d_biz_1",    wallId: "wall_hall_bot", offset: 0.040, x: 30,  y: 130, width: 16, doorType: "single", direction: "left", color: "#22c55e", label: "Business Office Sim (Door 1)" },
+              { id: "d_biz_2",    wallId: "wall_hall_bot", offset: 0.124, x: 76,  y: 130, width: 16, doorType: "single", direction: "right", color: "#22c55e", label: "Business Office Sim (Door 2)" },
+              { id: "d_101_1",    wallId: "wall_hall_bot", offset: 0.204, x: 120, y: 130, width: 16, doorType: "single", direction: "left", color: "#f59e0b", label: "CABA-101 (Door 1)" },
+              { id: "d_101_2",    wallId: "wall_hall_bot", offset: 0.313, x: 180, y: 130, width: 16, doorType: "single", direction: "right", color: "#f59e0b", label: "CABA-101 (Door 2)" },
+              { id: "d_lobby_in", wallId: "wall_hall_bot", offset: 0.453, x: 257, y: 130, width: 24, doorType: "double", direction: "double", color: "#22c55e", label: "Lobby Entrance" },
+              { id: "d_grad",     wallId: "wall_hall_bot", offset: 0.620, x: 349, y: 130, width: 16, doorType: "single", direction: "left", color: "#6366f1", label: "Graduate Studies Office" },
+              { id: "d_sim_1",    wallId: "wall_hall_bot", offset: 0.767, x: 430, y: 130, width: 16, doorType: "single", direction: "left", color: "#22c55e", label: "Simulation Room (Door 1)" },
+              { id: "d_sim_2",    wallId: "wall_hall_bot", offset: 0.913, x: 510, y: 130, width: 16, doorType: "single", direction: "right", color: "#22c55e", label: "Simulation Room (Door 2)" },
+              // ── Fire Exits & Main Veranda Exit ──────────────────────────
+              { id: "d_fire_l",   wallId: "wall_left",     offset: 0.500, x: 8,   y: 110, width: 20, doorType: "double", direction: "double", color: "#dc2626", isEmergencyExit: true, label: "Fire Exit (Left)" },
+              { id: "d_fire_r",   wallId: "wall_right_top", offset: 0.833, x: 592, y: 110, width: 20, doorType: "double", direction: "double", color: "#dc2626", isEmergencyExit: true, label: "Fire Exit (Right)" },
+              { id: "d_veranda",  wallId: "wall_veranda_b", offset: 0.500, x: 257, y: 245, width: 24, doorType: "double", direction: "double", color: "#22c55e", label: "Main Exit to Veranda" },
+            ],
+            stairs: [
+              { id: "stairs_left",  x: 8,   y: 10, width: 34, height: 80, direction: "both", label: "Stairs (Left)",  sharedId: "caba_stairs_l" },
+              { id: "stairs_right", x: 558, y: 10, width: 34, height: 80, direction: "both", label: "Stairs (Right)", sharedId: "caba_stairs_r" },
+            ],
+            elevators: [
+              { id: "elevator_main", x: 463, y: 35, width: 45, height: 55, doorWidth: 14, label: "Elevator", sharedId: "caba_elevator", accessible: true },
+            ],
+            labels: [
+              { id: "lbl_hallway", x: 300, y: 110, text: "MAIN HALLWAY", fontSize: 11, color: "#64748b", rotation: 0 },
+              { id: "lbl_veranda", x: 257, y: 228, text: "VERANDA", fontSize: 10, color: "#64748b", rotation: 0 },
             ],
           },
         ],
-      },
-      {
+      },{
         id: "b_coed", name: "COED Building", code: "COED", category: "Academic",
         description: "College of Education — teacher education programs.",
         x: 620, y: 60, width: 230, height: 130, color: "#0d9488", expanded: false,
