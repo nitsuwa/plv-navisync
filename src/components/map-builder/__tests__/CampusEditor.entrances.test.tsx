@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { useState } from "react";
 import { CampusEditor } from "../CampusEditor";
 import type { Campus } from "../types";
@@ -42,7 +42,7 @@ function makeCampus(): Campus {
   };
 }
 
-function Harness({ onCampusChange, initialCampus }: { onCampusChange?: (c: Campus) => void; initialCampus?: Campus }) {
+function Harness({ onCampusChange, initialCampus, onPreviewStudent }: { onCampusChange?: (c: Campus) => void; initialCampus?: Campus; onPreviewStudent?: (c: Campus, isDirty: boolean) => void }) {
   const [campus, setCampus] = useState<Campus>(() => initialCampus ?? makeCampus());
   return (
     <CampusEditor
@@ -52,6 +52,7 @@ function Harness({ onCampusChange, initialCampus }: { onCampusChange?: (c: Campu
       onPublish={() => {}}
       onOpenFloor={() => {}}
       onAddBuilding={() => {}}
+      onPreviewStudent={onPreviewStudent}
     />
   );
 }
@@ -99,12 +100,18 @@ afterEach(() => {
 let latestCampus: Campus | null = null;
 
 describe("CampusEditor building entrances", () => {
+  it("uses one Review & Publish lifecycle action", () => {
+    render(<Harness onPreviewStudent={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "Review & Publish" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Preview Student View" })).not.toBeInTheDocument();
+  });
+
   it("adds, renders, and selects a building-attached entrance", () => {
     const { container } = render(<Harness onCampusChange={(c) => { latestCampus = c; }} />);
     addEntrance(container);
 
     const entrance = latestCampus!.buildings[0].entrances![0];
-    expect(entrance).toMatchObject({ buildingId: "b1", edge: "bottom", offset: 0.5, type: "general", isPrimary: true, accessible: false });
+    expect(entrance).toMatchObject({ buildingId: "b1", edge: "bottom", offset: 0.5, type: "general", isPrimary: true, accessible: true });
     expect(container.querySelector(`[data-entrance-id="${entrance.id}"]`)).toBeTruthy();
     expect(screen.getAllByText("Entrance").length).toBeGreaterThan(0);
     expect(screen.getByText("Parent")).toBeTruthy();
@@ -121,7 +128,7 @@ describe("CampusEditor building entrances", () => {
     fireEvent.mouseMove(svg, { clientX: 222, clientY: 150, bubbles: true });
     fireEvent.mouseUp(svg, { clientX: 222, clientY: 150, bubbles: true });
 
-    expect(latestCampus!.buildings[0].entrances![0]).toMatchObject({ edge: "right", offset: 0.625 });
+    expect(latestCampus!.buildings[0].entrances![0]).toMatchObject({ edge: "right", offset: 0.5 });
 
     fireEvent.click(screen.getByText("Delete Entrance"));
     expect(latestCampus!.buildings[0].entrances).toEqual([]);
@@ -137,7 +144,7 @@ describe("CampusEditor building entrances", () => {
     setTextInput(nameInput, "North Gate");
 
     expect(container.querySelector("#entrance-type")).toBeNull();
-    fireEvent.click(screen.getByText("Service Entrance"));
+    fireEvent.click(screen.getByText("Service Access"));
 
     expect(container.querySelector("#entrance-edge")).toBeNull();
     fireEvent.click(screen.getByText("North"));
@@ -146,7 +153,8 @@ describe("CampusEditor building entrances", () => {
     fireEvent.change(positionSlider, { target: { value: "0.25" } });
     fireEvent.blur(positionSlider);
 
-    fireEvent.click(screen.getByLabelText("Accessible"));
+    const accessibleCheckbox = screen.getByLabelText("Accessible") as HTMLInputElement;
+    if (!accessibleCheckbox.checked) fireEvent.click(accessibleCheckbox);
 
     expect(latestCampus!.buildings[0].entrances![0]).toMatchObject({
       type: "service",

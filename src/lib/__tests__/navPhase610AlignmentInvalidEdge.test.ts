@@ -56,18 +56,19 @@ describe("navAlignSnap — connected-node priority", () => {
   });
 
   it("connected node wins over closer unconnected node on same axis", () => {
-    const target = { x: 500, y: 201 };
+    const target = { x: 500, y: 200 };
     const others = [
-      { x: 505, y: 200, id: "farConnected" },   // connected, Y diff 1
-      { x: 503, y: 200, id: "closeUnconnected" }, // unconnected, Y diff 1
+      { x: 505, y: 206, id: "farConnected" },   // connected, Y diff 6
+      { x: 503, y: 201, id: "closeUnconnected" }, // unconnected, Y diff 1
     ];
     const connectedIds = new Set(["farConnected"]);
     const result = navAlignSnap(target, others, 8, connectedIds);
-    expect(result.y).toBe(200);
-    // Both have Y=200 so both are within threshold; Y snaps to 200.
-    // X also snaps (505 and 503 are both within 8 of 500).
+    // The connected reference wins even though the unrelated reference is
+    // closer on both axes; this is the Door/connected-Walking-Point rule.
+    expect(result.y).toBe(206);
+    expect(result.x).toBe(505);
     const yGuide = result.guides.find((g) => g.type === "h");
-    expect(yGuide?.pos).toBe(200);
+    expect(yGuide?.pos).toBe(206);
     expect(yGuide).toBeDefined();
   });
 

@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { useState } from "react";
 import { FloorEditor } from "../FloorEditor";
 import { replaceBuildingFloorsAndReconcileTransitions } from "../../../lib/indoorNavigationGraph";
+import { reconcileStairDirectionsForFloorOrder } from "../../../lib/floorManagement";
 import { ENTRANCE_TRANSITION_EDGE_TYPE } from "../../../lib/entranceTransitions";
 import type { Campus } from "../types";
 
@@ -173,7 +174,8 @@ function OuterReorderHarness({ onCampusChange, initialCampus, floorId = "f3" }: 
     const building = campus.buildings[0];
     const byId = new Map(building.floors.map((floor) => [floor.id, floor]));
     const floors = ["f3", "f1", "f2"].map((id) => byId.get(id)!);
-    updateCampus(replaceBuildingFloorsAndReconcileTransitions(campus, "b1", floors));
+    const reconciled = reconcileStairDirectionsForFloorOrder(floors);
+    updateCampus(replaceBuildingFloorsAndReconcileTransitions(campus, "b1", reconciled.floors));
   };
   return (
     <div>
@@ -404,7 +406,7 @@ describe("B5 Phase 3.2 — non-blocking nav empty-state + circulation quick-link
     expect(screen.queryByTestId("floor-nav-canvas-empty-state")).toBeNull();
   });
 
-  it("reordering floors revalidates an existing Stair's direction immediately", () => {
+  it("reordering floors automatically reconciles an existing Stair's direction", () => {
     const campus = makeBaseCampus();
     campus.buildings[0].floors = [
       { id: "f1", buildingId: "b1", number: 1, label: "Ground Floor", canvasW: 220, canvasH: 160, rooms: [], walls: [], doors: [], windows: [], furniture: [], stairs: [{ id: "st1", x: 10, y: 120, width: 20, height: 16, rotation: 0, direction: "up", label: "Stairs", sharedId: "stair-core-a" }], ramps: [], elevators: [], labels: [], paths: [] },
@@ -425,10 +427,11 @@ describe("B5 Phase 3.2 — non-blocking nav empty-state + circulation quick-link
     // Canonical array order is now [Floor 2, Floor 3, Ground Floor] — Ground is
     // HIGHEST, so the existing "up" direction is flagged invalid immediately.
     expect(latestCampus(onCampusChange).buildings[0].floors.map((f) => f.label)).toEqual(["Floor 2", "Floor 3", "Ground Floor"]);
-    expect(screen.getByTestId("stair-direction-invalid")).toBeTruthy();
+    expect(screen.queryByTestId("stair-direction-invalid")).toBeNull();
+    expect(latestCampus(onCampusChange).buildings[0].floors[2].stairs[0].direction).toBe("down");
   });
 
-  it("outer hierarchy reorder immediately revalidates an existing stored Stair direction without overwriting it", () => {
+  it("outer hierarchy reorder reconciles an existing stored Stair direction", () => {
     const rendered = render(<OuterReorderHarness initialCampus={threeFloorCampus()} onCampusChange={onCampusChange} />);
     container = rendered.container;
     selectStair(container);
@@ -437,12 +440,12 @@ describe("B5 Phase 3.2 — non-blocking nav empty-state + circulation quick-link
 
     fireEvent.click(screen.getByRole("button", { name: "Outer Move Floor 3 First" }));
 
-    expect(screen.getByTestId("stair-direction-invalid")).toBeTruthy();
+    expect(screen.queryByTestId("stair-direction-invalid")).toBeNull();
     expect(stairDirectionButtons().up).not.toBeDisabled();
     expect(stairDirectionButtons().down).toBeDisabled();
     const latest = latestCampus(onCampusChange);
     const floor3 = latest.buildings[0].floors.find((floor) => floor.id === "f3")!;
-    expect(floor3.stairs[0].direction).toBe("down");
+    expect(floor3.stairs[0].direction).toBe("up");
   });
 
   it("new Stairs after an outer hierarchy reorder use the canonical default for the reordered floor", () => {

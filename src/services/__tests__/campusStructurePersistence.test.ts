@@ -689,8 +689,8 @@ function makeMaximalCampus(): Campus {
       { id: "node-out-b", name: "Plaza", type: "outdoor" as const, x: 450, y: 500, campusId: IDs.campus, accessible: true, color: "#3b82f6" },
       { id: "node-door-f2", name: "Main Door", type: "hallway" as const, x: 100, y: 50, campusId: IDs.campus, buildingId: "bldg-eng", floorId: "flr-2", doorId: "door-f2", accessible: true, color: "#64748b" },
       { id: "node-room101", name: "Room 101", type: "room_access" as const, x: 150, y: 150, campusId: IDs.campus, buildingId: "bldg-eng", floorId: "flr-g", roomId: "room-101", accessible: true, color: "#64748b" },
-      { id: "node-stair-g", name: "Stairwell A", type: "stair" as const, x: 220, y: 100, campusId: IDs.campus, buildingId: "bldg-eng", floorId: "flr-g", stairId: "stair-g", transitionSharedId: "stairwell-a", accessible: false, inaccessibleReason: "stairs" as const, color: "#64748b" },
-      { id: "node-stair-2", name: "Stairwell A", type: "stair" as const, x: 220, y: 100, campusId: IDs.campus, buildingId: "bldg-eng", floorId: "flr-2", stairId: "stair-2", transitionSharedId: "stairwell-a", accessible: false, inaccessibleReason: "stairs" as const, color: "#64748b" },
+      { id: "node-stair-g", name: "Stairwell A", type: "stair" as const, x: 220, y: 140, campusId: IDs.campus, buildingId: "bldg-eng", floorId: "flr-g", stairId: "stair-g", transitionSharedId: "stairwell-a", accessible: false, inaccessibleReason: "stairs" as const, color: "#64748b" },
+      { id: "node-stair-2", name: "Stairwell A", type: "stair" as const, x: 220, y: 140, campusId: IDs.campus, buildingId: "bldg-eng", floorId: "flr-2", stairId: "stair-2", transitionSharedId: "stairwell-a", accessible: false, inaccessibleReason: "stairs" as const, color: "#64748b" },
       { id: "node-elev-g", name: "Elevator A", type: "elevator" as const, x: 362, y: 55, campusId: IDs.campus, buildingId: "bldg-eng", floorId: "flr-g", elevatorId: "elev-1", transitionSharedId: "elev-a", accessible: true, color: "#64748b" },
       { id: "node-ramp-g", name: "Access Ramp", type: "ramp" as const, x: 315, y: 80, campusId: IDs.campus, buildingId: "bldg-eng", floorId: "flr-g", rampId: "ramp-1", accessible: true, color: "#64748b" },
     ],
@@ -805,8 +805,8 @@ describe("B6 Phase 2 — deterministic round-trip + save/reload integrity", () =
     expect(node.get("node-out-b")).toMatchObject({ type: "outdoor", x: 450, y: 500 });
     expect(node.get("node-door-f2")).toMatchObject({ type: "hallway", x: 100, y: 50, buildingId: "bldg-eng", floorId: "flr-2", doorId: "door-f2" });
     expect(node.get("node-room101")).toMatchObject({ type: "room_access", x: 150, y: 150, floorId: "flr-g", roomId: "room-101" });
-    expect(node.get("node-stair-g")).toMatchObject({ type: "stair", x: 220, y: 100, floorId: "flr-g", stairId: "stair-g", transitionSharedId: "stairwell-a", accessible: false, inaccessibleReason: "stairs" });
-    expect(node.get("node-stair-2")).toMatchObject({ type: "stair", x: 220, y: 100, floorId: "flr-2", stairId: "stair-2", transitionSharedId: "stairwell-a", accessible: false, inaccessibleReason: "stairs" });
+    expect(node.get("node-stair-g")).toMatchObject({ type: "stair", x: 220, y: 140, floorId: "flr-g", stairId: "stair-g", transitionSharedId: "stairwell-a", accessible: false, inaccessibleReason: "stairs" });
+    expect(node.get("node-stair-2")).toMatchObject({ type: "stair", x: 220, y: 140, floorId: "flr-2", stairId: "stair-2", transitionSharedId: "stairwell-a", accessible: false, inaccessibleReason: "stairs" });
     expect(node.get("node-elev-g")).toMatchObject({ type: "elevator", x: 362, y: 55, elevatorId: "elev-1", transitionSharedId: "elev-a" });
     expect(node.get("node-ramp-g")).toMatchObject({ type: "ramp", x: 315, y: 80, rampId: "ramp-1" });
 
@@ -908,5 +908,49 @@ describe("B6 Phase 2 — deterministic round-trip + save/reload integrity", () =
       emergencySafe: false, emergencyReason: "blocked", closed: true,
       bendPoints: [{ x: 20, y: 20 }, { x: 30, y: 30 }], type: "hallway", color: "#64748b", width: 2,
     });
+  });
+
+  it("keeps a disconnected manual point and its bent path after save/reload", () => {
+    const campus = makeCampus([{ id: IDs.floorA, number: 1 }]) as Campus;
+    campus.navNodes = [
+      { id: "manual-a", name: "A", type: "outdoor", x: 20, y: 30, campusId: IDs.campus, accessible: true, color: "#2563eb" },
+      { id: "manual-b", name: "B", type: "outdoor", x: 180, y: 30, campusId: IDs.campus, accessible: true, color: "#2563eb" },
+      { id: "manual-free", name: "Unconnected", type: "outdoor", x: 90, y: 160, campusId: IDs.campus, accessible: true, color: "#2563eb" },
+    ];
+    campus.navEdges = [{
+      id: "manual-edge", startNodeId: "manual-a", endNodeId: "manual-b", distance: 190,
+      bidirectional: true, accessible: true, emergencySafe: true, bendPoints: [{ x: 80, y: 30 }, { x: 80, y: 100 }],
+      type: "walkway", color: "#2563eb", width: 2,
+    }];
+    const hydrated = roundTripHydrate(campus);
+    expect(hydrated.navNodes?.map((node) => node.id)).toEqual(["manual-a", "manual-b", "manual-free"]);
+    expect(hydrated.navEdges).toEqual(campus.navEdges);
+    expect(hydrated.navNodes?.find((node) => node.id === "manual-free")).toMatchObject({ x: 90, y: 160, name: "Unconnected" });
+  });
+
+  it("hydrates legacy navigation rows from database columns when metadata.ui is absent", () => {
+    const campus = makeCampus([{ id: IDs.floorA, number: 1 }]) as Campus;
+    const rows = serializeCampusStructure({
+      ...campus,
+      navNodes: [
+        { id: "legacy-a", name: "Legacy A", type: "outdoor", x: 12, y: 24, campusId: IDs.campus, accessible: true, color: "#123456" },
+        { id: "legacy-b", name: "Legacy B", type: "outdoor", x: 100, y: 24, campusId: IDs.campus, accessible: true, color: "#123456" },
+      ],
+      navEdges: [{ id: "legacy-edge", startNodeId: "legacy-a", endNodeId: "legacy-b", distance: 88, bidirectional: false, accessible: true, emergencySafe: true, type: "walkway", color: "#123456", width: 3, bendPoints: [{ x: 50, y: 40 }] }],
+    } as Campus);
+    const hydrated = hydrateCampusStructure(campus, {
+      buildings: rows.buildings as never,
+      floors: rows.floors.map((row) => ({ ...row, display_order: Number(row.display_order ?? 0), floor_number: Number(row.floor_number ?? 1) })) as never,
+      mapElements: rows.map_elements as never,
+      navigationNodes: rows.navigation_nodes.map((row) => ({ ...row, campus_id: IDs.campus, metadata: null })) as never,
+      navigationEdges: rows.navigation_edges.map((row) => ({ ...row, campus_id: IDs.campus, metadata: null })) as never,
+    });
+    expect(hydrated.navNodes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "legacy-a", name: "Legacy A", type: "outdoor", x: 12, y: 24, campusId: IDs.campus, accessible: true }),
+      expect.objectContaining({ id: "legacy-b", name: "Legacy B", type: "outdoor", x: 100, y: 24, campusId: IDs.campus, accessible: true }),
+    ]));
+    expect(hydrated.navEdges).toEqual([
+      expect.objectContaining({ id: "legacy-edge", startNodeId: "legacy-a", endNodeId: "legacy-b", distance: 88, bidirectional: false, type: "walkway" }),
+    ]);
   });
 });

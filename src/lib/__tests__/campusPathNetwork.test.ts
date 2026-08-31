@@ -8,6 +8,7 @@ import {
   navigationEdgePermissions,
   navigationNodePermissions,
   pathIsPubliclyVisible,
+  pathNetworkMemberLabel,
   pathNetworkNavigationStatus,
   pathNetworkSelectionIds,
   shouldRenderPathwayAuthoringPreview,
@@ -34,6 +35,12 @@ describe("campus physical Path Network UX helpers", () => {
 
   it("uses only the double-clicked member in individual edit mode", () => {
     expect(pathNetworkSelectionIds(grouped, "a", "member")).toEqual(["a"]);
+  });
+
+  it("gives unnamed network members stable editor-only labels", () => {
+    expect(pathNetworkMemberLabel(grouped, "a")).toBe("Walkway 1");
+    expect(pathNetworkMemberLabel(grouped, "b")).toBe("Walkway 2");
+    expect(pathNetworkMemberLabel([{ ...grouped[0], name: "North Walk" }], "a")).toBe("North Walk");
   });
 
   it("moves one member body without rigidly translating the other member", () => {

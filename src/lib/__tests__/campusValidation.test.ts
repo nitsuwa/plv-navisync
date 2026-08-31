@@ -70,6 +70,14 @@ describe("validateCampusData", () => {
     expect(validateCampusData(campus())).toEqual([]);
   });
 
+  it("can warn when Emergency mode is enabled without a designated exit", () => {
+    const issues = validateCampusData(campus(), undefined, true);
+    expect(issues.find((issue) => issue.type === "no_emergency_exit_configured")).toMatchObject({
+      severity: "warning",
+      buildingId: "b1",
+    });
+  });
+
   it("flags duplicate room names within the same floor as warnings", () => {
     const errs = validateCampusData(campus({ buildings: [buildingWithRooms([
       room({ id: "r1", name: "Room 201" }),

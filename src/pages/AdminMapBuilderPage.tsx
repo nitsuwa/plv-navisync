@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from "motion/react";
 import { toast } from "sonner";
 import { useUnsavedChangesContext } from "../components/map-builder/UnsavedChangesContext";
 import { createCampusClone } from "../lib/campusHelpers";
-import { campusService, CampusConflictError, userFacingCampusMessage, type CampusCreateInput, type CampusUpdateInput } from "../services/campusService";
+import { campusService, CampusConflictError, CampusDeletionError, CampusServiceError, userFacingCampusMessage, type CampusCreateInput, type CampusUpdateInput } from "../services/campusService";
 import { campusStructureService } from "../services/campusStructureService";
 import {
   CampusHome,
@@ -16,7 +16,11 @@ import {
   CanvasSettingsModal,
   genId,
   BUILDING_COLORS,
+  TestRouteSessionProvider,
+  StudentPreview,
 } from "../components/map-builder";
+import { computeLiveValidationIssues } from "../lib/liveValidation";
+import type { BulkDeleteFailure, BulkDeleteProgress, BulkDeleteResult } from "../components/map-builder";
 import type { Campus, View, BuildingWizardData, FloorSelection } from "../components/map-builder/types";
 
 const shouldLogCampusDiagnostics = import.meta.env.DEV && import.meta.env.MODE !== "test";
@@ -102,6 +106,9 @@ export function AdminMapBuilderPage() {
   const [campuses, setCampuses] = useState<Campus[]>([]);
   const [view, setView] = useState<View>({ type: "home" });
   const [showBuildingWizard, setShowBuildingWizard] = useState(false);
+  const [studentPreviewCampus, setStudentPreviewCampus] = useState<Campus | null>(null);
+  const [previewSaveCampus, setPreviewSaveCampus] = useState<Campus | null>(null);
+  const [previewSaving, setPreviewSaving] = useState(false);
   const directionRef = useRef(1);
 
   // ── Single dirty-state source of truth ──
@@ -119,6 +126,14 @@ export function AdminMapBuilderPage() {
       toast.error("Could not load campuses", { description: error.message });
     });
     return () => { active = false; };
+  }, []);
+
+  // Re-read the authoritative Supabase campus list after lifecycle writes.
+  // Cards must never claim success from local React state alone.
+  const refreshCampuses = useCallback(async () => {
+    const rows = await campusService.list();
+    setCampuses(rows);
+    return rows;
   }, []);
 
   const activeCampus =
@@ -147,23 +162,76 @@ export function AdminMapBuilderPage() {
 
   const duplicateCampus = useCallback(async (id: string) => {
     const source = campuses.find((c) => c.id === id);
-    if (!source) return;
-    const clone = createCampusClone(
-      source,
-      new Set(campuses.map((c) => c.name)),
-      new Set(campuses.map((c) => c.code).filter(Boolean)),
-      genId
-    );
+    if (!source) throw new Error("Campus not found.");
+    let created: Campus | null = null;
     try {
-      const created = await campusService.create({ ...campusInput(clone), logo_path: null, overview_image_path: null, is_default: false });
-      setCampuses((p) => [...p, created]);
-      toast.success("Campus Duplicated", { description: `"${source.name}" has been copied as "${created.name}".` });
-    } catch (error) { toast.error("Could not duplicate campus", { description: userFacingCampusMessage(error) }); }
-  }, [campuses]);
+      // The list intentionally carries lightweight preview buildings. Hydrate
+      // the authoritative structure before cloning so duplication includes the
+      // complete authored map/navigation tree rather than just card metadata.
+      const loaded = await campusStructureService.load(source);
+      const clone = createCampusClone(
+        loaded ?? source,
+        new Set(campuses.map((c) => c.name)),
+        new Set(campuses.map((c) => c.code).filter(Boolean)),
+        genId,
+      );
+      created = await campusService.create({ ...campusInput(clone), logo_path: null, overview_image_path: null, is_default: false });
+      // The database assigns the campus id. Keep all freshly generated child
+      // ids, but bind the cloned structure to that persisted campus id.
+      const cloneForSave: Campus = {
+        ...clone,
+        ...created,
+        id: created.id,
+        name: clone.name,
+        code: clone.code,
+        status: "active",
+        publishStatus: "draft",
+        lifecycleStatus: "draft",
+        visibleToStudents: false,
+        publishedAt: undefined,
+        buildings: clone.buildings,
+        markers: clone.markers,
+        paths: clone.paths,
+        routes: clone.routes,
+        accessibilityFeatures: clone.accessibilityFeatures,
+        assemblyPoints: clone.assemblyPoints,
+        eventOverlays: clone.eventOverlays,
+        decorAssets: clone.decorAssets,
+        navNodes: clone.navNodes?.map((node) => ({ ...node, campusId: created!.id })),
+        navEdges: clone.navEdges,
+      };
+      const saved = await campusStructureService.save(cloneForSave);
+      const complete = saved ?? cloneForSave;
+      const withPreview = {
+        ...complete,
+        previewBuildingCount: complete.buildings.length,
+        previewFloorCount: campusFloorCount(complete),
+        previewRoomCount: campusRoomCount(complete),
+        previewBuildingsLoaded: true,
+      };
+      await refreshCampuses();
+      toast.success("Campus Duplicated", { description: `"${source.name}" has been copied as "${withPreview.name}".` });
+    } catch (error) {
+      // If structure saving fails after the metadata row is created, quarantine
+      // that incomplete row in the archive instead of leaving a misleading
+      // active campus. Permanent deletion remains an explicit admin action.
+      if (created?.databaseUpdatedAt) {
+        try {
+          await campusService.archive(created.id, created.databaseUpdatedAt);
+        } catch {
+          // The original failure is the actionable error shown to the admin.
+        }
+      }
+      await refreshCampuses().catch(() => undefined);
+      toast.error("Could not duplicate campus", { description: userFacingCampusMessage(error) });
+      throw error;
+    }
+  }, [campuses, refreshCampuses]);
 
   const archiveCampus = useCallback(async (id: string) => {
     const campus = campuses.find((c) => c.id === id);
-    if (!campus?.databaseUpdatedAt) return;
+    if (!campus) throw new Error("Campus not found.");
+    if (!campus.databaseUpdatedAt) throw new Error("Refresh before archiving this campus.");
     if (campus.publishStatus === "published" && campus.status !== "archived") {
       toast.error("Unpublish First", { description: `"${campus.name}" is currently available to students. Unpublish it before archiving.` });
       return;
@@ -171,29 +239,144 @@ export function AdminMapBuilderPage() {
     try {
       const updated = await campusService.archive(id, campus.databaseUpdatedAt);
       updateCampusMetadata(updated);
+      await refreshCampuses();
       toast.success("Campus Archived", { description: `"${campus.name}" is private until restored.` });
-    } catch (error) { toast.error("Could not archive campus", { description: userFacingCampusMessage(error) }); }
-  }, [campuses, updateCampusMetadata]);
+    } catch (error) {
+      toast.error("Could not archive campus", { description: userFacingCampusMessage(error) });
+      throw error;
+    }
+  }, [campuses, refreshCampuses, updateCampusMetadata]);
 
   const restoreCampus = useCallback(async (id: string) => {
     const campus = campuses.find((c) => c.id === id);
-    if (!campus?.databaseUpdatedAt) return;
+    if (!campus) throw new Error("Campus not found.");
+    if (!campus.databaseUpdatedAt) throw new Error("Refresh before restoring this campus.");
     try {
       const updated = await campusService.restore(id, campus.databaseUpdatedAt);
       updateCampusMetadata(updated);
+      await refreshCampuses();
       toast.success("Campus Restored", { description: `"${campus.name}" was restored as a private draft.` });
-    } catch (error) { toast.error("Could not restore campus", { description: userFacingCampusMessage(error) }); }
-  }, [campuses, updateCampusMetadata]);
+    } catch (error) {
+      toast.error("Could not restore campus", { description: userFacingCampusMessage(error) });
+      throw error;
+    }
+  }, [campuses, refreshCampuses, updateCampusMetadata]);
 
   const unpublishCampus = useCallback(async (id: string) => {
     const campus = campuses.find((c) => c.id === id);
-    if (!campus?.databaseUpdatedAt || campus.publishStatus !== "published" || campus.status === "archived") return;
+    if (!campus) throw new Error("Campus not found.");
+    if (!campus.databaseUpdatedAt) throw new Error("Refresh before unpublishing this campus.");
+    if (campus.publishStatus !== "published" || campus.status === "archived") return;
     try {
       const updated = await campusService.unpublish(id, campus.databaseUpdatedAt);
       updateCampusMetadata(updated);
+      await refreshCampuses();
       toast.success("Campus Unpublished", { description: `"${campus.name}" is no longer visible to students.` });
-    } catch (error) { toast.error("Could not unpublish campus", { description: userFacingCampusMessage(error) }); }
-  }, [campuses, updateCampusMetadata]);
+    } catch (error) {
+      toast.error("Could not unpublish campus", { description: userFacingCampusMessage(error) });
+      throw error;
+    }
+  }, [campuses, refreshCampuses, updateCampusMetadata]);
+
+  const bulkRestoreCampuses = useCallback(async (ids: string[]) => {
+    const selected = ids
+      .map((id) => campuses.find((campus) => campus.id === id))
+      .filter((campus): campus is Campus => Boolean(campus));
+    try {
+      for (const campus of selected) {
+        if (!campus.databaseUpdatedAt) throw new Error(`Refresh before restoring "${campus.name}".`);
+        await campusService.restore(campus.id, campus.databaseUpdatedAt);
+      }
+      await refreshCampuses();
+      toast.success("Campuses Restored", { description: `${selected.length} campus${selected.length === 1 ? "" : "es"} returned as private drafts.` });
+    } catch (error) {
+      await refreshCampuses().catch(() => undefined);
+      toast.error("Could not restore all campuses", { description: userFacingCampusMessage(error) });
+      throw error;
+    }
+  }, [campuses, refreshCampuses]);
+
+  const permanentlyDeleteCampus = useCallback(async (id: string) => {
+    const campus = campuses.find((candidate) => candidate.id === id);
+    if (!campus) throw new Error("Campus not found.");
+    if (campus.status !== "archived") {
+      throw new Error("Only archived campuses can be permanently deleted.");
+    }
+    try {
+      await campusService.permanentlyDelete(id);
+      await refreshCampuses();
+      toast.success("Campus Permanently Deleted", { description: `"${campus.name}" and its authored map data were removed.` });
+    } catch (error) {
+      await refreshCampuses().catch(() => undefined);
+      toast.error("Could not permanently delete campus", { description: userFacingCampusMessage(error) });
+      throw error;
+    }
+  }, [campuses, refreshCampuses]);
+
+  const bulkPermanentlyDeleteCampuses = useCallback(async (
+    ids: string[],
+    onProgress?: (progress: BulkDeleteProgress) => void,
+  ): Promise<BulkDeleteResult> => {
+    const selected = ids.map((id) => campuses.find((campus) => campus.id === id));
+    const succeededIds: string[] = [];
+    const failedIds: string[] = [];
+    const failures: BulkDeleteFailure[] = [];
+
+    const recordFailure = (id: string, name: string, error: unknown) => {
+      const serviceError = error instanceof CampusServiceError ? error : undefined;
+      const deletionError = error instanceof CampusDeletionError ? error : undefined;
+      const failure: BulkDeleteFailure = {
+        id,
+        name,
+        stage: deletionError?.stage,
+        code: serviceError?.dbCode,
+        message: error instanceof Error ? error.message : "Permanent deletion failed.",
+        details: serviceError?.dbDetails,
+        hint: serviceError?.dbHint,
+        userMessage: userFacingCampusMessage(error),
+      };
+      failures.push(failure);
+      if (import.meta.env.DEV) {
+        console.error("[campusService] bulk permanent delete failed", failure);
+      }
+    };
+
+    for (let index = 0; index < selected.length; index += 1) {
+      const campus = selected[index];
+      if (!campus) {
+        failedIds.push(ids[index]);
+        recordFailure(ids[index], ids[index], new Error("Campus not found. Refresh the campus list."));
+      } else if (campus.status !== "archived") {
+        failedIds.push(campus.id);
+        recordFailure(campus.id, campus.name, new Error(`Only archived campuses can be permanently deleted ("${campus.name}" is not archived).`));
+      } else {
+        try {
+          await campusService.permanentlyDelete(campus.id);
+          succeededIds.push(campus.id);
+        } catch (error) {
+          failedIds.push(campus.id);
+          recordFailure(campus.id, campus.name, error);
+        }
+      }
+      onProgress?.({ completed: index + 1, total: selected.length, currentName: campus?.name });
+    }
+
+    await refreshCampuses();
+    if (failedIds.length > 0) {
+      const failureMessage = failures.length > 0 ? failures[0].userMessage : "Some campuses could not be deleted.";
+      toast.error("Some campuses could not be deleted", {
+        description: `${succeededIds.length} deleted; ${failedIds.length} could not be deleted. ${failureMessage}`,
+      });
+    } else {
+      toast.success("Campuses Permanently Deleted", { description: `${succeededIds.length} campus${succeededIds.length === 1 ? "" : "es"} removed.` });
+    }
+    return {
+      succeededIds,
+      failedIds,
+      failureMessage: failures.length > 0 ? `${failedIds.length} campus${failedIds.length === 1 ? "" : "es"} could not be deleted. ${failures[0].userMessage}` : undefined,
+      failures,
+    };
+  }, [campuses, refreshCampuses]);
 
   const editDetails = useCallback((id: string) => {
     const campus = campuses.find((c) => c.id === id);
@@ -262,6 +445,67 @@ export function AdminMapBuilderPage() {
     savedSnapshotsRef.current = { ...savedSnapshotsRef.current, [saved.id]: JSON.stringify(savedWithPreviewCount) };
     return savedWithPreviewCount;
   }, [updateCampus]);
+
+  const openStudentPreview = useCallback((campus: Campus, isDirty: boolean) => {
+    if (isDirty) {
+      setPreviewSaveCampus(campus);
+      return;
+    }
+    setStudentPreviewCampus(campus);
+  }, []);
+
+  const saveAndOpenStudentPreview = useCallback(async () => {
+    if (!previewSaveCampus) return;
+    setPreviewSaving(true);
+    try {
+      const saved = await saveCampusStructure(previewSaveCampus);
+      setPreviewSaveCampus(null);
+      setStudentPreviewCampus(saved);
+    } catch (error) {
+      toast.error("Could not save before preview", { description: userFacingCampusMessage(error) });
+    } finally {
+      setPreviewSaving(false);
+    }
+  }, [previewSaveCampus, saveCampusStructure]);
+
+  const publishStudentPreview = useCallback(async () => {
+    const candidate = studentPreviewCampus;
+    if (!candidate) return;
+    const issues = computeLiveValidationIssues(candidate);
+    const errors = issues.filter((issue) => issue.severity === "error").length;
+    const warnings = issues.filter((issue) => issue.severity === "warning").length;
+    if (errors > 0) throw new Error("Fix the blocking validation issues before publishing this campus.");
+    const total = Math.max(1, issues.length);
+    const published = await campusService.publishVersion(candidate, {
+      errors,
+      warnings,
+      passed: Math.max(0, total - errors - warnings),
+      total,
+    });
+    const rows = await refreshCampuses();
+    // `campusService.list()` intentionally returns lightweight card rows. Keep
+    // the complete candidate structure mounted after the publish refresh so
+    // returning from the preview cannot replace the editor's authored map
+    // with a preview-only campus shell, while adopting the database timestamps
+    // and lifecycle fields returned by the refresh.
+    const refreshedRow = rows.find((row) => row.id === candidate.id);
+    const refreshed = refreshedRow ? {
+      ...published,
+      status: refreshedRow.status,
+      publishStatus: refreshedRow.publishStatus,
+      lifecycleStatus: refreshedRow.lifecycleStatus,
+      visibleToStudents: refreshedRow.visibleToStudents,
+      updatedAt: refreshedRow.updatedAt,
+      publishedAt: refreshedRow.publishedAt ?? published.publishedAt,
+      databaseUpdatedAt: refreshedRow.databaseUpdatedAt,
+    } : published;
+    updateCampus(refreshed);
+    savedSnapshotsRef.current = { ...savedSnapshotsRef.current, [refreshed.id]: JSON.stringify(refreshed) };
+    setStudentPreviewCampus(refreshed);
+    toast.success("Campus Published", { description: `${refreshed.name} is now available to students.` });
+  }, [studentPreviewCampus, refreshCampuses, updateCampus]);
+
+  const closeStudentPreview = useCallback(() => setStudentPreviewCampus(null), []);
 
   // ── Page-level unsaved-changes handler for the shared guard ──────────────
   // The editors guard their OWN internal exits (back, floor switch, add floor);
@@ -446,6 +690,7 @@ export function AdminMapBuilderPage() {
   return (
     <div className="flex flex-col w-full flex-1" style={{ minHeight: 0 }}>
       {/* ── Main views with animated transitions ── */}
+      <TestRouteSessionProvider key={activeCampus?.id ?? "none"}>
       <AnimatePresence mode="wait" custom={directionRef.current}>
         {!isOverlay && (
           <motion.div
@@ -468,6 +713,9 @@ export function AdminMapBuilderPage() {
                 onUnpublish={unpublishCampus}
                 onArchive={archiveCampus}
                 onRestore={restoreCampus}
+                onBulkRestore={bulkRestoreCampuses}
+                onPermanentDelete={permanentlyDeleteCampus}
+                onBulkPermanentDelete={bulkPermanentlyDeleteCampuses}
                 onEditDetails={editDetails}
               />
             )}
@@ -480,8 +728,9 @@ export function AdminMapBuilderPage() {
                   onBack={goHome}
                   onUpdate={updateCampus}
                   onSave={saveCampusStructure}
-                  onPublish={() => toast.info("Publishing is implemented in A6.")}
-                  publishingEnabled={false}
+                  onPublish={() => undefined}
+                  onPreviewStudent={openStudentPreview}
+                  publishingEnabled
                   onOpenFloor={handleOpenFloor}
                   onAddBuilding={() => setShowBuildingWizard(true)}
                   onOpenCanvasSettings={() => setShowCanvasSettings(true)}
@@ -518,11 +767,13 @@ export function AdminMapBuilderPage() {
                 buildingId={view.buildingId}
                 floorId={view.floorId}
                 onBack={() => goToCampusFromFloor(activeCampus.id)}
-                onSwitchFloor={(fId) => setView({ ...view, floorId: fId, initialSelection: undefined })}
+                onOpenFloor={handleOpenFloor}
+                onSwitchFloor={(fId, selection) => setView({ ...view, floorId: fId, initialSelection: selection })}
                 onUpdate={updateCampus}
                 onSave={saveCampusStructure}
-                onPublish={() => toast.info("Publishing is implemented in A6.")}
-                publishingEnabled={false}
+                onPublish={() => undefined}
+                onPreviewStudent={openStudentPreview}
+                publishingEnabled
                 savedSnapshot={savedSnapshotsRef.current[activeCampus.id]}
                 initialSelection={view.initialSelection}
               />
@@ -546,6 +797,7 @@ export function AdminMapBuilderPage() {
           </motion.div>
         )}
       </AnimatePresence>
+      </TestRouteSessionProvider>
 
       {/* ── Wizard — campus creation wizard (renders as overlay) ── */}
       {view.type === "wizard" && (
@@ -578,6 +830,32 @@ export function AdminMapBuilderPage() {
           campus={activeCampus}
           onSave={handleCanvasSettingsSave}
           onClose={() => setShowCanvasSettings(false)}
+        />
+      )}
+
+      {previewSaveCampus && (
+        <div className="fixed inset-0 z-[280] flex items-center justify-center bg-black/35 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="Save before preview">
+          <div className="w-full max-w-sm rounded-2xl border border-border bg-card p-5 shadow-2xl">
+            <h2 className="text-base font-extrabold text-foreground">You have unsaved changes</h2>
+            <p className="mt-1 text-xs leading-relaxed text-muted-foreground">Save this campus before opening Student Preview so the preview is coherent.</p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button onClick={() => setPreviewSaveCampus(null)} disabled={previewSaving} className="h-9 rounded-lg border border-border px-3 text-xs font-bold text-foreground hover:bg-muted">Cancel</button>
+              <button onClick={saveAndOpenStudentPreview} disabled={previewSaving} className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-primary px-3 text-xs font-extrabold text-primary-foreground disabled:opacity-60">
+                {previewSaving && <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-primary-foreground/40 border-t-primary-foreground" />}
+                Save &amp; Preview
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {studentPreviewCampus && (
+        <StudentPreview
+          campus={studentPreviewCampus}
+          validationIssues={computeLiveValidationIssues(studentPreviewCampus)}
+          onBack={closeStudentPreview}
+          onPublish={publishStudentPreview}
+          onViewPublished={() => { setStudentPreviewCampus(null); window.location.assign("/map"); }}
         />
       )}
     </div>

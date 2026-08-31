@@ -11,7 +11,7 @@
 
 import type { CampusBuilding } from "../components/map-builder/types";
 import { getRotatedAABB } from "../components/map-builder/constants";
-import { normalizeBuildingEntrances, primaryEligibleEntrances } from "./buildingEntrances";
+import { normalizeBuildingEntrances, normalizeEntranceType, primaryEligibleEntrances } from "./buildingEntrances";
 import type { ValidationIssue } from "../components/map-builder/ValidationErrorsDialog";
 
 /** The subset of Campus that the baseline validation reads. */
@@ -64,7 +64,8 @@ export function computeBuildingOverlaps(buildings: CampusBuilding[]): Set<string
  */
 export function validateCampusData(
   campus: CampusValidationInput,
-  overlaps?: Set<string>
+  overlaps?: Set<string>,
+  includeEmergencyExitWarnings = false,
 ): ValidationIssue[] {
   const errors: ValidationIssue[] = [];
   const seenIds = new Set<string>();
@@ -164,6 +165,20 @@ export function validateCampusData(
         errors.push({
           type: "multiple_primary_entrances",
           message: `Building "${b.code}" has more than one primary entrance. Keep only one Primary entrance.`,
+          buildingId: b.id,
+          target: buildingTarget,
+        });
+      }
+    }
+    if (includeEmergencyExitWarnings
+      && !entrances.some((entrance) => normalizeEntranceType(entrance.type) === "emergency_exit")) {
+      const key = `${b.id}-no_emergency_exit_configured`;
+      if (!seenIds.has(key)) {
+        seenIds.add(key);
+        errors.push({
+          type: "no_emergency_exit_configured",
+          severity: "warning",
+          message: `No Emergency Exit is configured for Building "${b.code}". Emergency routing may use a safe General entrance as fallback.`,
           buildingId: b.id,
           target: buildingTarget,
         });

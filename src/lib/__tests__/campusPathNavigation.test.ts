@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Campus, CampusPath, NavigationEdge, NavigationNode } from "../../components/map-builder/types";
 import { convertPathwaysToNavigation, reconcilePathwayNavigation } from "../campusPathNavigation";
 import { pathNetworkNavigationStatus } from "../campusPathNetwork";
+import { validateNavigationGraph } from "../validateNavigationGraph";
 
 const makeIdFactory = () => {
   let sequence = 0;
@@ -115,6 +116,31 @@ describe("campus Pathway navigation ownership reconciliation", () => {
     expect(ownedNodes(value, "b")).toHaveLength(2);
   });
 
+  it("forms one validated graph component for generated pathways sharing a junction", () => {
+    const result = convertPathwaysToNavigation(campus([
+      path("a", [{ x: 0, y: 0 }, { x: 100, y: 0 }]),
+      path("b", [{ x: 100, y: 0 }, { x: 100, y: 100 }]),
+    ]), ["a", "b"], makeIdFactory());
+    const shared = result.campus.navNodes?.filter((node) => (node.generatedFromPathVertices?.length ?? 0) > 1);
+    expect(shared).toHaveLength(1);
+    expect(validateNavigationGraph(result.campus).issues.filter((issue) => issue.type === "nav_disconnected_component")).toHaveLength(0);
+  });
+
+  it("canonicalizes a shared junction when members are enabled in separate operations", () => {
+    const factory = makeIdFactory();
+    const source = campus([
+      { ...path("a", [{ x: 0, y: 0 }, { x: 100, y: 0 }]), pathNetworkId: "network-1" },
+      { ...path("b", [{ x: 100, y: 0 }, { x: 100, y: 100 }]), pathNetworkId: "network-1" },
+    ]);
+    const first = convertPathwaysToNavigation(source, ["a"], factory).campus;
+    const second = convertPathwaysToNavigation(first, ["b"], factory).campus;
+    const shared = second.navNodes?.filter((node) => (node.generatedFromPathVertices ?? []).length === 2) ?? [];
+    expect(shared).toHaveLength(1);
+    expect(second.navEdges?.filter((edge) => edge.generatedFromPathIds?.includes("a"))).toHaveLength(1);
+    expect(second.navEdges?.filter((edge) => edge.generatedFromPathIds?.includes("b"))).toHaveLength(1);
+    expect(validateNavigationGraph(second).issues.filter((issue) => issue.type === "nav_disconnected_component")).toHaveLength(0);
+  });
+
   it("collapses duplicate explicitly-owned copies without touching manual nodes", () => {
     const manual: NavigationNode = { id: "manual", name: "Manual", type: "outdoor", x: 10, y: 10, accessible: true, color: "#16a34a" };
     const canonical: NavigationNode = { id: "owned-1", name: "Walking Point", type: "outdoor", x: 0, y: 0, accessible: true, color: "#16a34a", generatedFromPathVertices: [{ pathId: "p1", vertexId: "v1" }] };
@@ -203,5 +229,35 @@ describe("campus Pathway navigation ownership reconciliation", () => {
       closed: true,
       bidirectional: false,
     });
+  });
+
+  it("removes an Entrance bridge when its generated target vertex is structurally removed", () => {
+    const factory = makeIdFactory();
+    const converted = convertPathwaysToNavigation(
+      campus([path("p1", [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 200, y: 0 }])]),
+      ["p1"],
+      factory,
+    ).campus;
+    const target = ownedNodes(converted, "p1")[1];
+    const entrance: NavigationNode = {
+      id: "entrance-node", name: "Main Entrance", type: "entrance", x: 100, y: 30,
+      buildingId: "b1", entranceId: "e1", accessible: true, color: "#16a34a",
+    };
+    const bridged: Campus = {
+      ...converted,
+      navNodes: [...(converted.navNodes ?? []), entrance],
+      navEdges: [...(converted.navEdges ?? []), {
+        id: "entrance-bridge", startNodeId: entrance.id, endNodeId: target.id, distance: 30,
+        bidirectional: true, accessible: true, emergencySafe: true, type: "walkway", color: "#16a34a", width: 4,
+      }],
+    };
+    const ids = bridged.paths[0].navigationVertexIds!;
+    const after = reconcilePathwayNavigation({
+      ...bridged,
+      paths: [path("p1", [{ x: 0, y: 0 }, { x: 200, y: 0 }], [ids[0], ids[2]])],
+    }, factory);
+    expect(after.navEdges?.some((edge) => edge.id === "entrance-bridge")).toBe(false);
+    expect(after.navNodes?.some((node) => node.id === target.id)).toBe(false);
+    expect(after.navNodes?.some((node) => node.id === entrance.id)).toBe(true);
   });
 });

@@ -49,6 +49,26 @@ function lCornerCampus(overrides: Partial<CampusPath>[] = []): Campus {
   return campus;
 }
 
+function generatedCornerCampus(): Campus {
+  const campus = lCornerCampus([
+    { navigationVertexIds: ["a0", "a1"] },
+    { navigationVertexIds: ["b0", "b1"] },
+  ]);
+  campus.navNodes = [
+    { id: "na0", name: "A start", type: "outdoor", x: 100, y: 100, accessible: true, generatedFromPathVertices: [{ pathId: "p-a", vertexId: "a0" }] },
+    { id: "shared", name: "Junction", type: "outdoor", x: 200, y: 100, accessible: true, generatedFromPathVertices: [
+      { pathId: "p-a", vertexId: "a1" },
+      { pathId: "p-b", vertexId: "b0" },
+    ] },
+    { id: "nb1", name: "B end", type: "outdoor", x: 200, y: 180, accessible: true, generatedFromPathVertices: [{ pathId: "p-b", vertexId: "b1" }] },
+  ];
+  campus.navEdges = [
+    { id: "ea", startNodeId: "na0", endNodeId: "shared", bidirectional: true, distance: 100, generatedFromPathIds: ["p-a"] },
+    { id: "eb", startNodeId: "shared", endNodeId: "nb1", bidirectional: true, distance: 80, generatedFromPathIds: ["p-b"] },
+  ];
+  return campus;
+}
+
 // ── Canvas-level rendering tests ─────────────────────────────────────────────
 
 function renderCanvas(overrides: Partial<ComponentProps<typeof Canvas>> = {}) {
@@ -258,10 +278,57 @@ describe("B5 Phase 5.12 — Canva-style group/member editing", () => {
     fireEvent.mouseMove(svg, { clientX: 10, clientY: 10 });
     fireEvent.mouseUp(svg, { clientX: 10, clientY: 10 });
 
-    expect(screen.getByText("Path Network (2)")).toBeTruthy();
+    expect(screen.getAllByText("Path Network (2)").length).toBeGreaterThan(0);
     expect(container.querySelector("[data-testid='campus-group-outline']")).toBeTruthy();
     // No individual point handles in network-group mode.
     expect(container.querySelector("[data-testid='path-point-handle']")).toBeNull();
+  });
+
+  it("keeps the path-only group bounds hit surface inert so members remain reachable", () => {
+    const { container } = renderCanvas({
+      selected: { type: "path", id: "p-a" },
+      multiSelected: ["p-a", "p-b"],
+    });
+    const surface = container.querySelector("[data-testid='campus-group-drag-surface']") as SVGRectElement;
+    expect(surface).toBeTruthy();
+    expect(surface.style.pointerEvents).toBe("none");
+  });
+
+  it("a second normal member click enters edit mode and a body drag moves only that member", () => {
+    const onCampusChange = vi.fn();
+    const { container } = render(<Harness onCampusChange={onCampusChange} />);
+    const svg = canvasSvg(container);
+    const member = pathGroup(container, "p-a");
+
+    // First click selects the network; the next click drills into the member
+    // without requiring Ungroup or a double-click timing race.
+    fireEvent.click(member);
+    expect(screen.getAllByText("Path Network (2)").length).toBeGreaterThan(0);
+    fireEvent.click(member);
+    expect(screen.getByText("Edit Pathway")).toBeTruthy();
+    expect(container.querySelector("[data-testid='path-point-handle'][data-path-id='p-a']")).toBeTruthy();
+
+    fireEvent.mouseDown(member, { clientX: 150, clientY: 100 });
+    fireEvent.mouseMove(svg, { clientX: 170, clientY: 120 });
+    fireEvent.mouseUp(svg, { clientX: 170, clientY: 120 });
+
+    const latest = onCampusChange.mock.calls[onCampusChange.mock.calls.length - 1]?.[0] as Campus;
+    const a = latest.paths.find((p) => p.id === "p-a")!;
+    const b = latest.paths.find((p) => p.id === "p-b")!;
+    expect(a.points).not.toEqual(lCornerCampus().paths[0].points);
+    expect(b.points[0]).toEqual(a.points[1]);
+    expect(b.points[1]).toEqual(lCornerCampus().paths[1].points[1]);
+  });
+
+  it("a Selected Objects member row enters edit mode without ungrouping", () => {
+    const { container } = render(<Harness />);
+    fireEvent.click(pathGroup(container, "p-a"));
+    const memberRow = container.querySelector("[data-testid='selected-path-member'][data-path-id='p-b']") as HTMLButtonElement;
+    expect(memberRow).toBeTruthy();
+    fireEvent.click(memberRow);
+    expect(screen.getByText("Edit Pathway")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Back to Network/i })).toBeTruthy();
+    expect(container.querySelector("[data-testid='path-point-handle'][data-path-id='p-b']")).toBeTruthy();
   });
 
   it("double-click enters member edit; Escape returns to the network selection", () => {
@@ -269,13 +336,13 @@ describe("B5 Phase 5.12 — Canva-style group/member editing", () => {
     const svg = canvasSvg(container);
 
     fireEvent.doubleClick(pathGroup(container, "p-a"));
-    expect(screen.getByText("Pathway (in Network)")).toBeTruthy();
+    expect(screen.getByText("Edit Pathway")).toBeTruthy();
     expect(screen.getByRole("button", { name: /Back to Network/i })).toBeTruthy();
     expect(container.querySelector("[data-testid='path-point-handle'][data-path-id='p-a']")).toBeTruthy();
 
     fireEvent.keyDown(window, { key: "Escape" });
-    expect(screen.queryByText("Pathway (in Network)")).toBeNull();
-    expect(screen.getByText("Path Network (2)")).toBeTruthy();
+    expect(screen.queryByText("Edit Pathway")).toBeNull();
+    expect(screen.getAllByText("Path Network (2)").length).toBeGreaterThan(0);
   });
 
   it("member point editing preserves network membership and junction topology", () => {
@@ -299,6 +366,65 @@ describe("B5 Phase 5.12 — Canva-style group/member editing", () => {
     // Shared junction stays exactly shared.
     expect(a.points[1]).toEqual({ x: 200, y: 100 });
     expect(b.points[0]).toEqual({ x: 200, y: 100 });
+  });
+
+  it("generated Walking Point clicks inspect without moving, while a drag proxies its physical vertex", () => {
+    const onCampusChange = vi.fn();
+    const { container } = render(<Harness onCampusChange={onCampusChange} initialCampus={generatedCornerCampus()} />);
+    const svg = canvasSvg(container);
+    fireEvent.click(screen.getByRole("button", { name: /Show and edit the walking network/i }));
+    const node = container.querySelector("[data-testid='nav-node'][data-node-id='na0']")!;
+
+    fireEvent.mouseDown(node, { clientX: 100, clientY: 100 });
+    fireEvent.mouseUp(svg, { clientX: 100, clientY: 100 });
+    expect(onCampusChange).not.toHaveBeenCalled();
+
+    fireEvent.mouseDown(node, { clientX: 100, clientY: 100 });
+    fireEvent.mouseMove(svg, { clientX: 140, clientY: 120 });
+    fireEvent.mouseUp(svg, { clientX: 140, clientY: 120 });
+    const latest = onCampusChange.mock.calls[onCampusChange.mock.calls.length - 1]?.[0] as Campus;
+    expect(latest.paths.find((path) => path.id === "p-a")?.points[0]).toEqual({ x: 140, y: 120 });
+    expect(latest.navNodes?.find((navNode) => navNode.id === "na0")?.generatedFromPathVertices).toEqual([{ pathId: "p-a", vertexId: "a0" }]);
+  });
+
+  it("generated shared-junction proxy drag moves only the shared physical vertices", () => {
+    const onCampusChange = vi.fn();
+    const { container } = render(<Harness onCampusChange={onCampusChange} initialCampus={generatedCornerCampus()} />);
+    const svg = canvasSvg(container);
+    fireEvent.click(screen.getByRole("button", { name: /Show and edit the walking network/i }));
+    const node = container.querySelector("[data-testid='nav-node'][data-node-id='shared']")!;
+    fireEvent.mouseDown(node, { clientX: 200, clientY: 100 });
+    fireEvent.mouseMove(svg, { clientX: 240, clientY: 120 });
+    fireEvent.mouseUp(svg, { clientX: 240, clientY: 120 });
+
+    const latest = onCampusChange.mock.calls[onCampusChange.mock.calls.length - 1]?.[0] as Campus;
+    const a = latest.paths.find((path) => path.id === "p-a")!;
+    const b = latest.paths.find((path) => path.id === "p-b")!;
+    expect(a.points[1]).toEqual({ x: 240, y: 120 });
+    expect(b.points[0]).toEqual({ x: 240, y: 120 });
+    expect(a.points[0]).toEqual({ x: 100, y: 100 });
+    expect(b.points[1]).toEqual({ x: 200, y: 180 });
+    expect(latest.navNodes?.filter((navNode) => navNode.generatedFromPathVertices?.some((ref) => ref.vertexId === "a1" || ref.vertexId === "b0"))).toHaveLength(1);
+  });
+
+  it("dragging empty space inside a selected Path Network bounds uses the rigid group pipeline", () => {
+    const onCampusChange = vi.fn();
+    const { container } = render(<Harness onCampusChange={onCampusChange} />);
+    const svg = canvasSvg(container);
+    fireEvent.click(pathGroup(container, "p-a"));
+    const emptySurface = container.querySelector("[data-testid='campus-path-network-empty-drag-surface']")!;
+    fireEvent.mouseDown(emptySurface, { clientX: 150, clientY: 140 });
+    fireEvent.mouseMove(svg, { clientX: 180, clientY: 160 });
+    fireEvent.mouseUp(svg, { clientX: 180, clientY: 160 });
+    const latest = onCampusChange.mock.calls[onCampusChange.mock.calls.length - 1]?.[0] as Campus;
+    const original = lCornerCampus();
+    const a = latest.paths.find((path) => path.id === "p-a")!;
+    const b = latest.paths.find((path) => path.id === "p-b")!;
+    const dx = a.points[0].x - original.paths[0].points[0].x;
+    const dy = a.points[0].y - original.paths[0].points[0].y;
+    expect(dx).not.toBe(0);
+    expect(dy).not.toBe(0);
+    expect(b.points[0]).toEqual({ x: original.paths[1].points[0].x + dx, y: original.paths[1].points[0].y + dy });
   });
 
   it("Ungroup keeps the physical junction geometry (only the group id is cleared)", () => {

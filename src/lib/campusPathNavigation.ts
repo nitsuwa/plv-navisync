@@ -1,5 +1,6 @@
 import type { Campus, CampusPath, NavigationEdge, NavigationNode } from "../components/map-builder/types";
 import { createNavEdge, createNavNode, findDuplicateNavEdge, isSelfEdge } from "./navigationGraph";
+import { reconcileEntranceOutdoorConnections } from "./entranceTransitions";
 
 export type PathwayIdFactory = (prefix: string) => string;
 
@@ -201,19 +202,118 @@ function collapseDuplicateOwnedObjects(
 }
 
 /**
+ * Collapse generated nodes that represent the same explicit physical
+ * junction.  A coordinate match is only eligible when every reference is a
+ * valid persisted Pathway vertex, no owner has explicitly disconnected that
+ * junction, and the topology is unambiguous (same editor network, or shared
+ * endpoints).  Manual/linked nodes are never considered.
+ */
+function collapseSharedGeneratedJunctions(
+  nodes: NavigationNode[],
+  edges: NavigationEdge[],
+  paths: CampusPath[],
+): { nodes: NavigationNode[]; edges: NavigationEdge[] } {
+  const pathById = new Map(paths.map((path) => [path.id, path]));
+  const grouped = new Map<string, NavigationNode[]>();
+  for (const node of nodes) {
+    if (!(node.generatedFromPathVertices?.length)) continue;
+    grouped.set(pointKey(node), [...(grouped.get(pointKey(node)) ?? []), node]);
+  }
+  const rewire = new Map<string, string>();
+  const merged = new Map<string, NavigationNode>();
+
+  for (const candidates of grouped.values()) {
+    if (candidates.length < 2) continue;
+    const refs = candidates.flatMap((node) => node.generatedFromPathVertices ?? []);
+    const uniqueRefs = Array.from(new Map(refs.map((ref) => [refKey(ref), ref])).values());
+    const ownerPaths = uniqueRefs.map((ref) => pathById.get(ref.pathId));
+    if (ownerPaths.some((path) => !path)) continue;
+    if (new Set(uniqueRefs.map((ref) => ref.pathId)).size !== uniqueRefs.length) continue;
+    if (uniqueRefs.some((ref) => {
+      const path = pathById.get(ref.pathId);
+      const index = path ? validVertexIds(path)?.indexOf(ref.vertexId) ?? -1 : -1;
+      const point = index >= 0 ? path?.points[index] : undefined;
+      return !point || pointKey(point) !== pointKey(candidates[0]) || pathPointIsDisconnected(path, point);
+    })) continue;
+    const sameNetwork = new Set(ownerPaths.map((path) => path?.pathNetworkId).filter(Boolean)).size === 1
+      && ownerPaths.every((path) => Boolean(path?.pathNetworkId));
+    const endpointOnly = uniqueRefs.every((ref) => {
+      const path = pathById.get(ref.pathId);
+      const index = path ? validVertexIds(path)?.indexOf(ref.vertexId) ?? -1 : -1;
+      return index === 0 || index === (path?.points.length ?? 0) - 1;
+    });
+    if (!sameNetwork && !endpointOnly) continue;
+
+    const canonical = candidates[0];
+    const mergedRefs = uniqueRefs;
+    merged.set(canonical.id, { ...canonical, generatedFromPathVertices: mergedRefs });
+    for (const duplicate of candidates.slice(1)) rewire.set(duplicate.id, canonical.id);
+  }
+  if (rewire.size === 0) return { nodes, edges };
+
+  const nextNodes = nodes
+    .filter((node) => !rewire.has(node.id))
+    .map((node) => merged.get(node.id) ?? node);
+  const nextEdges: NavigationEdge[] = [];
+  for (const edge of edges) {
+    const startNodeId = rewire.get(edge.startNodeId) ?? edge.startNodeId;
+    const endNodeId = rewire.get(edge.endNodeId) ?? edge.endNodeId;
+    if (isSelfEdge(startNodeId, endNodeId)) continue;
+    const remapped = startNodeId === edge.startNodeId && endNodeId === edge.endNodeId
+      ? edge
+      : { ...edge, startNodeId, endNodeId };
+    const pair = [startNodeId, endNodeId].sort().join("::");
+    // Manual edges are independent authored objects; preserve parallel manual
+    // connections even when a generated junction rewire gives them the same
+    // endpoint pair.
+    if (!remapped.generatedFromPathIds?.length) {
+      nextEdges.push(remapped);
+      continue;
+    }
+    const existingIndex = nextEdges.findIndex((candidate) =>
+      candidate.generatedFromPathIds?.length
+      && [candidate.startNodeId, candidate.endNodeId].sort().join("::") === pair
+    );
+    const existing = existingIndex >= 0 ? nextEdges[existingIndex] : undefined;
+    if (!existing) {
+      nextEdges.push(remapped);
+      continue;
+    }
+    if (existing.generatedFromPathIds?.length && remapped.generatedFromPathIds?.length) {
+      nextEdges[existingIndex] = {
+        ...existing,
+        generatedFromPathIds: [...new Set([
+          ...existing.generatedFromPathIds,
+          ...remapped.generatedFromPathIds,
+        ])],
+      };
+    }
+  }
+  return { nodes: nextNodes, edges: nextEdges };
+}
+
+/**
  * Reconciles only navigation objects carrying explicit pathway provenance.
  * Manual points, entrance nodes, linked indoor nodes, and manual edges are
  * never claimed by coordinate proximity and are never removed by this pass.
  */
 export function reconcilePathwayNavigation(campus: Campus, makeId: PathwayIdFactory): Campus {
   const paths = campus.paths ?? [];
+  // Keep the pre-reconciliation identity sets so an Entrance bridge to a
+  // generated target can be removed when that target's physical vertex is
+  // structurally deleted. A generated node may otherwise be conservatively
+  // retained as an unowned node because an authored edge still references it.
+  const originalNodes = campus.navNodes ?? [];
+  const originalEntranceNodeIds = new Set(originalNodes.filter((node) => node.entranceId && !node.floorId).map((node) => node.id));
+  const originalGeneratedNodeIds = new Set(originalNodes.filter((node) => node.generatedFromPathVertices?.length).map((node) => node.id));
   const collapsed = collapseDuplicateOwnedObjects(
     [...(campus.navNodes ?? [])],
     [...(campus.navEdges ?? [])],
     paths,
   );
-  let nodes = collapsed.nodes;
-  let edges = collapsed.edges;
+  const sharedCollapsed = collapseSharedGeneratedJunctions(collapsed.nodes, collapsed.edges, paths);
+  let nodes = sharedCollapsed.nodes;
+  let edges = sharedCollapsed.edges;
   const pathById = new Map(paths.map((path) => [path.id, path]));
   const pathNodeIds = new Map<string, string[]>();
 
@@ -233,6 +333,18 @@ export function reconcilePathwayNavigation(campus: Campus, makeId: PathwayIdFact
       // reference so the other pathway keeps its original junction node.
       const currentNode = nodeIndex >= 0 ? nodes[nodeIndex] : undefined;
       const hasOtherOwner = Boolean(currentNode?.generatedFromPathVertices?.some((candidate) => refKey(candidate) !== refKey(ref)));
+      // When a proxy drag moves every physical vertex represented by a shared
+      // canonical node, all of its explicit owners arrive at the same new
+      // coordinate in this reconciliation pass. Treat that as one junction
+      // translation and keep the shared node/provenance intact; detaching on
+      // the first pathway would otherwise manufacture a replacement node and
+      // leave the old canonical node behind.
+      const sharedOwnersRemainTogether = Boolean(currentNode && hasOtherOwner &&
+        (currentNode.generatedFromPathVertices ?? []).every((candidate) => {
+          const ownerPath = pathById.get(candidate.pathId);
+          const ownerPoint = refPoint(pathById, candidate);
+          return Boolean(ownerPath && ownerPoint && !pathPointIsDisconnected(ownerPath, ownerPoint) && pointKey(ownerPoint) === pointKey(point));
+        }));
       const hasDisconnectedSharedRef = Boolean(currentNode && pathPointIsDisconnected(path, point) &&
         currentNode.generatedFromPathVertices?.some((candidate) => {
           if (refKey(candidate) === refKey(ref)) return false;
@@ -240,7 +352,7 @@ export function reconcilePathwayNavigation(campus: Campus, makeId: PathwayIdFact
           const ownerPoint = refPoint(pathById, candidate);
           return Boolean(ownerPath && ownerPath.id !== path.id && ownerPoint && pointKey(ownerPoint) === pointKey(point));
         }));
-      if (nodeIndex >= 0 && (hasOtherOwner && pointKey(nodes[nodeIndex]) !== pointKey(point) || hasDisconnectedSharedRef)) {
+      if (nodeIndex >= 0 && ((hasOtherOwner && pointKey(nodes[nodeIndex]) !== pointKey(point) && !sharedOwnersRemainTogether) || hasDisconnectedSharedRef)) {
         const current = nodes[nodeIndex];
         const remaining = (current.generatedFromPathVertices ?? []).filter((candidate) => refKey(candidate) !== refKey(ref));
         nodes[nodeIndex] = remaining.length > 0
@@ -329,6 +441,28 @@ export function reconcilePathwayNavigation(campus: Campus, makeId: PathwayIdFact
     }];
   });
 
+  // Remove stale Entrance bridges before deciding which formerly generated
+  // nodes are still referenced. Otherwise the bridge itself would keep a
+  // deleted generated target alive as an unowned manual node.
+  const currentNodesBeforeCleanup = new Map(nodes.map((node) => [node.id, node]));
+  edges = edges.filter((edge) => {
+    if (edge.type === "entrance_transition") return true;
+    const entranceId = originalEntranceNodeIds.has(edge.startNodeId)
+      ? edge.startNodeId
+      : originalEntranceNodeIds.has(edge.endNodeId)
+        ? edge.endNodeId
+        : undefined;
+    if (!entranceId) return true;
+    const targetId = edge.startNodeId === entranceId ? edge.endNodeId : edge.startNodeId;
+    const target = currentNodesBeforeCleanup.get(targetId);
+    if (!target) return false;
+    const targetStillGenerated = (target.generatedFromPathVertices ?? []).some((ref) => {
+      const owner = pathById.get(ref.pathId);
+      return Boolean(owner && validVertexIds(owner)?.includes(ref.vertexId));
+    });
+    return !(originalGeneratedNodeIds.has(targetId) && !targetStillGenerated);
+  });
+
   const referencedNodeIds = new Set(edges.flatMap((edge) => [edge.startNodeId, edge.endNodeId]));
   nodes = nodes.flatMap((node) => {
     if (!node.generatedFromPathVertices?.length) return [node];
@@ -347,7 +481,10 @@ export function reconcilePathwayNavigation(campus: Campus, makeId: PathwayIdFact
     return [];
   });
 
-  return { ...campus, navNodes: nodes, navEdges: edges };
+  // Pathway moves can move an Entrance's generated target without changing
+  // the bridge IDs. Recompute only that bridge's bend geometry so it continues
+  // to leave the building safely while preserving every other edge/object.
+  return reconcileEntranceOutdoorConnections({ ...campus, navNodes: nodes, navEdges: edges });
 }
 
 export interface PathwayConversionResult {

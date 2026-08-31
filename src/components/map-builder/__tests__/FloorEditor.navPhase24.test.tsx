@@ -374,7 +374,7 @@ describe("B5 Phase 2.4 — Indoor Navigation Tool Simplification + Route Anchor 
     expect(arrow.getAttribute("transform")).toContain("translate(20 128)");
   });
 
-  it("Stairs Up / Down / Both arrow paths are all centered", () => {
+  it("single-floor Stairs keep a neutral travel cue", () => {
     cleanup();
     const campus = withCirculation(makeBaseCampus());
     campus.buildings[0].floors[0].stairs[0].direction = "up";
@@ -387,7 +387,10 @@ describe("B5 Phase 2.4 — Indoor Navigation Tool Simplification + Route Anchor 
     const r2 = render(<Harness initialCampus={campusDown} />);
     const down = r2.container.querySelector('[data-testid="stairs-arrow"] path') as SVGPathElement | null;
     expect(down).toBeTruthy();
-    expect(down!.getAttribute("d")).not.toBe(up!.getAttribute("d"));
+    // A one-floor building has no cross-floor travel direction, even if a
+    // persisted Stair direction value is present.
+    expect(up!.getAttribute("d")).toBe("M -3.5 0 L 3.5 0");
+    expect(down!.getAttribute("d")).toBe("M -3.5 0 L 3.5 0");
   });
 
   // ── 5. ELEVATOR VISUAL POLISH ──

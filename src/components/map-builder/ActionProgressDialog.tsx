@@ -1,13 +1,14 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import {
   Save, Globe, CheckCircle2, AlertTriangle, X, RotateCcw,
   Upload, RefreshCw, Copy, FileDown, Loader2, EyeOff, Archive,
+  Trash2,
 } from "lucide-react";
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
-export type ActionType = "saving" | "publishing" | "unpublishing" | "updating" | "auto-saving" | "restoring" | "duplicating" | "exporting" | "archiving";
+export type ActionType = "saving" | "publishing" | "unpublishing" | "updating" | "auto-saving" | "restoring" | "duplicating" | "exporting" | "archiving" | "deleting";
 
 export type ActionState = "loading" | "success" | "error";
 
@@ -20,6 +21,16 @@ export interface ActionProgressDialogProps {
   action: ActionType;
   /** Optional campus/building name for personalized messages */
   entityName?: string;
+  /** Optional copy overrides for lifecycle batches and stage-specific errors. */
+  titleOverride?: string;
+  loadingMessageOverride?: string;
+  successTitleOverride?: string;
+  successMessageOverride?: string;
+  errorTitleOverride?: string;
+  errorMessageOverride?: string;
+  progressMessage?: string;
+  failureItems?: Array<{ id: string; name: string; reason: string }>;
+  retryLabel?: string;
   /** Called when the dialog closes */
   onClose: () => void;
   /** Called when the user clicks retry */
@@ -193,6 +204,21 @@ const ACTION_CONFIGS: Record<ActionType, ActionConfig> = {
       "Almost done...",
     ],
   },
+  deleting: {
+    icon: Trash2,
+    title: "Deleting Campus",
+    loadingMessage: "Permanently removing this archived campus and its authored map data.",
+    successTitle: "Campus Permanently Deleted",
+    successMessage: "The archived campus and its authored map data have been removed.",
+    errorTitle: "Permanent Delete Failed",
+    errorMessage: "The campus was not removed. Refresh and try again after checking its lifecycle state.",
+    statusMessages: [
+      "Checking archive status...",
+      "Removing campus-owned data...",
+      "Removing saved snapshots...",
+      "Finalizing deletion...",
+    ],
+  },
 };
 
 // ── Component ───────────────────────────────────────────────────────────────
@@ -206,10 +232,22 @@ export function ActionProgressDialog({
   onRetry,
   onReviewIssues,
   autoDismissMs = 1200,
+  titleOverride,
+  loadingMessageOverride,
+  successTitleOverride,
+  successMessageOverride,
+  errorTitleOverride,
+  errorMessageOverride,
+  progressMessage,
+  failureItems,
+  retryLabel = "Retry",
 }: ActionProgressDialogProps) {
   const cfg = ACTION_CONFIGS[action];
   const ActionIcon = cfg.icon;
   const [messageIndex, setMessageIndex] = useState(0);
+  const [showFailures, setShowFailures] = useState(false);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   // Rotate through status messages every 2s during loading
   useEffect(() => {
@@ -221,14 +259,20 @@ export function ActionProgressDialog({
     return () => clearInterval(interval);
   }, [state, cfg.statusMessages.length]);
 
-  // Auto-dismiss on success
   useEffect(() => {
-    if (state !== "success") return;
+    if (state !== "error") setShowFailures(false);
+  }, [state]);
+
+  // Auto-dismiss only while the success dialog is actually open.  Keeping
+  // `open` in the contract prevents a timer from a hidden success state from
+  // firing after a later save reopens the dialog.
+  useEffect(() => {
+    if (!open || state !== "success" || autoDismissMs <= 0) return;
     const timer = setTimeout(() => {
-      onClose();
+      onCloseRef.current();
     }, autoDismissMs);
     return () => clearTimeout(timer);
-  }, [state, autoDismissMs, onClose]);
+  }, [open, state, autoDismissMs]);
 
   const handleRetry = useCallback(() => {
     onRetry?.();
@@ -311,10 +355,10 @@ export function ActionProgressDialog({
                 </div>
 
                 <h2 className="text-lg font-extrabold text-foreground mb-1.5" style={{ fontFamily: "var(--font-sans)" }}>
-                  {cfg.title}
+                  {titleOverride ?? cfg.title}
                 </h2>
                 <p className="text-sm text-muted-foreground mb-6 leading-relaxed max-w-[260px]" style={{ fontFamily: "var(--font-body)" }}>
-                  {cfg.loadingMessage}
+                  {loadingMessageOverride ?? cfg.loadingMessage}
                 </p>
 
                 {/* Rotating status message */}
@@ -329,7 +373,7 @@ export function ActionProgressDialog({
                       className="text-xs text-muted-foreground font-medium flex items-center gap-2"
                     >
                       <span className="w-1.5 h-1.5 rounded-full bg-primary/50 animate-pulse" />
-                      {cfg.statusMessages[messageIndex]}
+                      {progressMessage ?? cfg.statusMessages[messageIndex]}
                     </motion.span>
                   </AnimatePresence>
                 </div>
@@ -396,12 +440,12 @@ export function ActionProgressDialog({
                 </div>
 
                 <h2 className="text-lg font-extrabold text-foreground mb-1.5" style={{ fontFamily: "var(--font-sans)" }}>
-                  {cfg.successTitle}
+                  {successTitleOverride ?? cfg.successTitle}
                 </h2>
                 <p className="text-sm text-muted-foreground leading-relaxed max-w-[280px]" style={{ fontFamily: "var(--font-body)" }}>
                   {entityName
                     ? `"${entityName}" — ${cfg.successMessage}`
-                    : cfg.successMessage}
+                    : successMessageOverride ?? cfg.successMessage}
                 </p>
 
                 {/* Auto-dismiss indicator */}
@@ -449,13 +493,34 @@ export function ActionProgressDialog({
                 </div>
 
                 <h2 className="text-lg font-extrabold text-foreground mb-1.5" style={{ fontFamily: "var(--font-sans)" }}>
-                  {cfg.errorTitle}
+                  {errorTitleOverride ?? cfg.errorTitle}
                 </h2>
                 <p className="text-sm text-muted-foreground mb-6 leading-relaxed max-w-[280px]" style={{ fontFamily: "var(--font-body)" }}>
-                  {entityName && action === "saving" || action === "publishing"
-                    ? `${cfg.errorMessage}`
-                    : cfg.errorMessage}
+                  {errorMessageOverride ?? cfg.errorMessage}
                 </p>
+
+                {failureItems && failureItems.length > 0 && (
+                  <div className="w-full mb-5 text-left">
+                    <button
+                      type="button"
+                      aria-expanded={showFailures}
+                      onClick={() => setShowFailures((visible) => !visible)}
+                      className="w-full rounded-lg border border-border px-3 py-2 text-xs font-bold text-foreground hover:bg-muted transition-colors"
+                    >
+                      {showFailures ? "Hide Failed Campuses" : "View Failed Campuses"} ({failureItems.length})
+                    </button>
+                    {showFailures && (
+                      <ul className="mt-2 max-h-36 overflow-y-auto space-y-1.5 rounded-lg bg-muted/50 p-2" aria-label="Failed campuses">
+                        {failureItems.map((failure) => (
+                          <li key={failure.id} className="rounded-md px-2 py-1.5">
+                            <p className="text-xs font-bold text-foreground truncate">{failure.name}</p>
+                            <p className="text-[11px] leading-snug text-muted-foreground">{failure.reason}</p>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                )}
 
                 {/* Action buttons */}
                 <div className="flex gap-3 w-full">
@@ -477,7 +542,7 @@ export function ActionProgressDialog({
                     onClick={handleRetry}
                     className="flex-1 h-10 rounded-xl bg-primary text-primary-foreground text-xs font-extrabold hover:bg-primary/90 transition-colors shadow-sm flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    <RotateCcw className="h-4 w-4" /> Retry
+                    <RotateCcw className="h-4 w-4" /> {retryLabel}
                   </button>
                 </div>
               </div>

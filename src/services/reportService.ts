@@ -9,7 +9,8 @@ export type ReportStatus = "pending" | "under_review" | "in_progress" | "resolve
 
 export interface IssueReport {
   id: string;
-  campusId: string;
+  /** Null when the campus was permanently deleted; the report remains audit history. */
+  campusId: string | null;
   buildingId?: string | null;
   buildingName?: string;
   floorId?: string | null;

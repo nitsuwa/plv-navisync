@@ -14,6 +14,8 @@
 
 import type { Campus, NavigationNode, NavigationEdge, CampusBuilding } from "../components/map-builder/types";
 import type { ValidationIssue, IssueTarget } from "../components/map-builder/ValidationErrorsDialog";
+import { doorDisplayName, doorHasIndoorNavigationConnection, doorNodeForEdge } from "./entranceTransitions";
+import { edgePolylinePoints, roomDisplayName, isDoorEligibleForRoom, roomAccessDoorIds, segmentBlockedByWall } from "./indoorNavigationGraph";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -147,21 +149,10 @@ function transitionTarget(node: NavigationNode | undefined, fallbackId: string):
 }
 
 /**
- * Pick a meaningful representative node for a connected component so a
- * disconnected-graph issue can be located. Prefers an outdoor/entrance node
- * (visible on the campus canvas) and falls back to any surviving node of the
+ * Disconnected-component findings are intentionally network-level and do not
+ * identify an arbitrary representative node for the admin.
  * component — never invents nodes or IDs.
  */
-function representativeNodeForComponent(
-  component: Set<string>,
-  nodeMap: Map<string, NavigationNode>,
-): NavigationNode | undefined {
-  const nodes = [...component]
-    .map((id) => nodeMap.get(id))
-    .filter((n): n is NavigationNode => !!n);
-  return nodes.find((n) => n.type === "outdoor" || n.type === "entrance") ?? nodes[0];
-}
-
 // ── Main validation ────────────────────────────────────────────────────────
 
 export function validateNavigationGraph(campus: Campus): NavGraphReadinessResult {
@@ -236,23 +227,117 @@ export function validateNavigationGraph(campus: Campus): NavGraphReadinessResult
 
   // ── C. Orphan navigation nodes ─────────────────────────────────────────
   const connectedNodeIds = new Set<string>();
-  for (const edge of activeEdges) {
+  // A closed edge is unavailable for routing, but it is still a persisted
+  // connection. Treating only active edges as structural connections made
+  // otherwise healthy pathway-generated endpoint nodes look orphaned (and
+  // produced misleading warning badges) as soon as an edge was closed.
+  for (const edge of edges) {
     if (edge.startNodeId) connectedNodeIds.add(edge.startNodeId);
     if (edge.endNodeId) connectedNodeIds.add(edge.endNodeId);
   }
   for (const node of nodes) {
-    if (connectedNodeIds.has(node.id)) continue;
+    const linkedDoorContext = node.doorId && node.buildingId && node.floorId
+      ? (() => {
+          const building = buildings.find((candidate) => candidate.id === node.buildingId);
+          const floor = building?.floors.find((candidate) => candidate.id === node.floorId);
+          const door = floor?.doors?.find((candidate) => candidate.id === node.doorId);
+          return building && floor && door ? { floor, door } : undefined;
+        })()
+      : undefined;
+    const linkedDoor = linkedDoorContext?.door;
+    const linkedRoomContext = node.roomId && node.buildingId && node.floorId
+      ? (() => {
+          const building = buildings.find((candidate) => candidate.id === node.buildingId);
+          const floor = building?.floors.find((candidate) => candidate.id === node.floorId);
+          const roomIndex = floor?.rooms?.findIndex((candidate) => candidate.id === node.roomId) ?? -1;
+          const room = roomIndex >= 0 ? floor?.rooms?.[roomIndex] : undefined;
+          return building && floor && room ? { floor, room, roomIndex } : undefined;
+        })()
+      : undefined;
+    const linkedRoom = linkedRoomContext?.room;
+    const linkedRoomTarget = linkedRoom && node.roomId && node.buildingId && node.floorId
+      ? {
+          scope: "floor" as const,
+          mode: "design" as const,
+          buildingId: node.buildingId,
+          floorId: node.floorId,
+          selectionType: "room" as const,
+          id: node.roomId,
+        }
+      : undefined;
+    // An entrance_transition is a semantic bridge, not an indoor Walking Path.
+    // A Door connected only to an Entrance is therefore still an object-level
+    // navigation issue and must be surfaced in Door Properties.
+    const doorNeedsIndoorConnection = Boolean(
+      linkedDoor && !doorHasIndoorNavigationConnection(nodes, edges, node),
+    );
+    // Rooms are destinations reached through their physical Door.  Keep the
+    // canonical room_access node for routing compatibility, but surface the
+    // incomplete relationship on the Room rather than asking admins to wire a
+    // hidden point through a wall.
+    if (linkedRoom && linkedRoomContext) {
+      const linkedRoomDoors = roomAccessDoorIds(linkedRoom)
+        .map((doorId) => linkedRoomContext.floor.doors?.find((door) => door.id === doorId))
+        .filter((door): door is NonNullable<typeof door> => Boolean(door));
+      const validRoomDoors = linkedRoomDoors.filter((door) => isDoorEligibleForRoom(linkedRoom, door, linkedRoomContext.floor.walls, nodes, { rooms: linkedRoomContext.floor.rooms ?? [] }));
+      const roomDoorIssue = validRoomDoors.length === 0
+        ? {
+            message: `Room "${roomDisplayName(linkedRoom, linkedRoomContext.roomIndex)}" needs an entrance Door. Link a Door to this Room so routes know where to enter.`,
+          }
+        : !(() => {
+            return validRoomDoors.some((door) => {
+              const doorNode = nodes.find((candidate) => candidate.doorId === door.id);
+              return doorNode && doorHasIndoorNavigationConnection(nodes, edges, doorNode);
+            });
+          })()
+            ? {
+                message: `The Door linked to Room "${roomDisplayName(linkedRoom, linkedRoomContext.roomIndex)}" is not connected to the Walking Network.`,
+              }
+            : null;
+      if (roomDoorIssue) {
+        issues.push({
+          type: "nav_orphan_node",
+          severity: "warning",
+          message: roomDoorIssue.message,
+          nodeId: node.id,
+          buildingId: node.buildingId,
+          floorId: node.floorId,
+          target: linkedRoomTarget!,
+        });
+        continue;
+      }
+    }
+    if (!doorNeedsIndoorConnection && connectedNodeIds.has(node.id)) continue;
     // Entrance nodes that are unlinked are warnings, not errors
     const severity = node.type === "entrance" ? "warning" : "warning";
     const label = node.name || node.type;
+    // A linked Door's orphaned navigation anchor is an issue on the physical
+    // Door, not an anonymous graph point.  Targeting the Door keeps the global
+    // Issues locate action and the Floor Editor's Door Properties inspector on
+    // the same object; the canonical node remains available in the graph.
+    const linkedDoorTarget = linkedDoor && node.doorId && node.buildingId && node.floorId
+      ? {
+          scope: "floor" as const,
+          mode: "design" as const,
+          buildingId: node.buildingId,
+          floorId: node.floorId,
+          selectionType: "door" as const,
+          id: node.doorId,
+        }
+      : undefined;
+    const orphanMessage = linkedDoorTarget
+      ? `Door "${doorDisplayName(linkedDoor, linkedDoorContext!.floor)}" is not connected to the indoor Walking Network. Connect this Door to a Walking Point so routes can enter or leave through it.`
+      : linkedRoomTarget
+        ? `Room "${roomDisplayName(linkedRoom, linkedRoomContext!.roomIndex)}" is not connected to the Walking Network. Connect this Room to a Walking Point so routes can reach it.`
+      : `"${label}" has no navigation connections.`;
     issues.push({
       type: "nav_orphan_node",
       severity,
-      message: `"${label}" has no navigation connections.`,
+      message: orphanMessage,
       nodeId: node.id,
       buildingId: node.buildingId,
       floorId: node.floorId,
-      target: navNodeTarget(node, node.id),
+      target: linkedDoorTarget ?? linkedRoomTarget ?? navNodeTarget(node, node.id),
     });
   }
 
@@ -284,20 +369,48 @@ export function validateNavigationGraph(campus: Campus): NavGraphReadinessResult
         continue;
       }
       // Check for entrance_transition edge from this entrance node
-      const hasTransition = activeEdges.some(
+      const transition = activeEdges.find(
         (e) =>
           (e.startNodeId === entranceNode.id || e.endNodeId === entranceNode.id) &&
           e.type === "entrance_transition",
       );
-      if (!hasTransition && building.floors.length > 0) {
+      if (!transition && building.floors.length > 0) {
         issues.push({
           type: "nav_entrance_door_missing",
           severity: "warning",
-          message: `Building entrance "${entrance.name || entrance.type}" is linked but has no entrance transition to an indoor door.`,
+          message: `Building entrance "${entrance.name || entrance.type}" is not linked to an indoor Door.`,
           buildingId: building.id,
           nodeId: entranceNode.id,
-          target: navNodeTarget(entranceNode, entranceNode.id),
+          // This is an incomplete relationship on the physical Entrance, not
+          // an orphaned generic navigation node. Targeting the Entrance keeps
+          // the global issue, canvas badge, and Entrance Properties inspector
+          // on the same user-facing object.
+          target: {
+            scope: "campus",
+            mode: "navigation",
+            buildingId: building.id,
+            selectionType: "entrance",
+            id: entrance.id,
+          },
         });
+      } else if (transition && building.floors.length > 0) {
+        const doorNode = doorNodeForEdge(transition, nodes);
+        if (doorNode && !doorHasIndoorNavigationConnection(nodes, edges, doorNode)) {
+          issues.push({
+            type: "nav_entrance_door_not_connected",
+            severity: "warning",
+            message: "The linked indoor Door is not connected to the Walking Network.",
+            buildingId: building.id,
+            nodeId: entranceNode.id,
+            target: {
+              scope: "campus",
+              mode: "navigation",
+              buildingId: building.id,
+              selectionType: "entrance",
+              id: entrance.id,
+            },
+          });
+        }
       }
     }
   }
@@ -366,7 +479,7 @@ export function validateNavigationGraph(campus: Campus): NavGraphReadinessResult
         issues.push({
           type: "emergency_exit_no_nav",
           severity: "warning",
-          message: `Emergency exit door "${door.label || door.id}" has no navigation waypoint. Add one linked to this door so the exit participates in the navigation graph.`,
+          message: `Emergency exit ${doorDisplayName(door, floor)} has no navigation waypoint. Add one linked to this door so the exit participates in the navigation graph.`,
           buildingId: building.id,
           floorId: floor.id,
           target: {
@@ -514,17 +627,12 @@ export function validateNavigationGraph(campus: Campus): NavGraphReadinessResult
       if (hasEntrance && hasIndoor) {
         // This component bridges outdoor and indoor — good
       } else if (hasEntrance && !hasIndoor) {
-        // Target a representative outdoor/entrance node of THIS component so
-        // the admin can locate the stranded outdoor network and rejoin it.
-        const rep = representativeNodeForComponent(comp, nodeMap);
+        // This is a campus/network-level readiness finding. It intentionally
+        // has no object target: no individual generated node is defective.
         issues.push({
           type: "nav_disconnected_component",
           severity: "warning",
           message: `Outdoor navigation network has no connection to any indoor floor.`,
-          nodeId: rep?.id,
-          buildingId: rep?.buildingId,
-          floorId: rep?.floorId,
-          target: rep ? navNodeTarget(rep, rep.id) : undefined,
         });
       }
     }
@@ -532,27 +640,12 @@ export function validateNavigationGraph(campus: Campus): NavGraphReadinessResult
     if (significantComponents.length >= 2) {
       const totalNodes = significantComponents.reduce((sum, c) => sum + c.size, 0);
       if (totalNodes >= 3) {
-        // Target a representative node of the LARGEST component — the natural
-        // anchor the admin should rejoin the other components to.
-        let rep: NavigationNode | undefined;
-        let repSize = 0;
-        for (const comp of significantComponents) {
-          if (comp.size > repSize) {
-            const candidate = representativeNodeForComponent(comp, nodeMap);
-            if (candidate) {
-              rep = candidate;
-              repSize = comp.size;
-            }
-          }
-        }
+        // This is a campus/network-level summary, not an issue owned by one
+        // arbitrarily selected node.
         issues.push({
           type: "nav_disconnected_component",
           severity: "info",
           message: `Navigation graph has ${significantComponents.length} disconnected components. Consider connecting them for end-to-end routing.`,
-          nodeId: rep?.id,
-          buildingId: rep?.buildingId,
-          floorId: rep?.floorId,
-          target: rep ? navNodeTarget(rep, rep.id) : undefined,
         });
       }
     }
@@ -629,13 +722,10 @@ export function validateNavigationGraph(campus: Campus): NavGraphReadinessResult
         const doors = floor.doors ?? [];
         const furniture = floor.furniture ?? [];
         const floorNodes = nodes.filter((n) => n.buildingId === building.id && n.floorId === floor.id);
-        const floorNodeMap = new Map(floorNodes.map((n) => [n.id, n]));
         for (const edge of activeEdges) {
           if (edge.type === "floor_transition") continue;
-          const a = floorNodeMap.get(edge.startNodeId);
-          const b = floorNodeMap.get(edge.endNodeId);
-          if (!a || !b) continue;
-          const pts = [{ x: a.x, y: a.y }, ...(edge.bendPoints ?? []).map((p) => ({ x: p.x, y: p.y })), { x: b.x, y: b.y }];
+          const pts = edgePolylinePoints(edge, floorNodes);
+          if (!pts) continue;
           const blockedTarget: IssueTarget = {
             scope: "floor",
             mode: "navigation",
@@ -644,77 +734,41 @@ export function validateNavigationGraph(campus: Campus): NavGraphReadinessResult
             selectionType: "navEdge",
             id: edge.id,
           };
-          // Simplified wall check: perpendicular distance from segment to wall centerline
-          const WALL_CLEARANCE = 6;
-          for (const wall of walls) {
-            if (wall.visible === false) continue;
-            const wx = wall.x2 - wall.x1;
-            const wy = wall.y2 - wall.y1;
-            const wallLen = Math.hypot(wx, wy);
-            if (wallLen === 0) continue;
-            const r = wall.thickness / 2 + WALL_CLEARANCE;
-            let blocked = false;
-            for (let i = 0; i < pts.length - 1 && !blocked; i++) {
-              const ax = pts[i + 1].x - pts[i].x;
-              const ay = pts[i + 1].y - pts[i].y;
-              const ux = wx / wallLen;
-              const uy = wy / wallLen;
-              const c0 = (pts[i].x - wall.x1) * uy - (pts[i].y - wall.y1) * ux;
-              const c1 = ax * uy - ay * ux;
-              const t0 = c1 === 0 ? (Math.abs(c0) <= r ? 0 : 1) : Math.max(0, Math.min(1, (-r - c0) / c1));
-              const t1 = c1 === 0 ? (Math.abs(c0) <= r ? 1 : 0) : Math.max(0, Math.min(1, (r - c0) / c1));
-              const lo = Math.min(t0, t1);
-              const hi = Math.max(t0, t1);
-              if (lo <= hi) {
-                // Check if overlap falls within wall span
-                const p0 = (pts[i].x - wall.x1) * ux + (pts[i].y - wall.y1) * uy;
-                const p1 = ax * ux + ay * uy;
-                const projLo = p0 + p1 * lo;
-                const projHi = p0 + p1 * hi;
-                if (projHi >= 0 && projLo <= wallLen) {
-                  // Check if NOT within a door opening
-                  const inDoor = doors.some((d) => {
-                    if (d.visible === false) return false;
-                    if (d.wallId && d.wallId !== wall.id) return false;
-                    const doorPos = ((d.x - wall.x1) * wx + (d.y - wall.y1) * wy) / wallLen;
-                    return projLo >= doorPos - d.width / 2 && projHi <= doorPos + d.width / 2;
-                  });
-                  if (!inDoor) blocked = true;
-                }
-              }
-            }
-            if (blocked) {
-              issues.push({
-                type: "nav_edge_blocked_by_obstacle",
-                severity: "warning",
-                message: "Navigation connection intersects a blocking obstacle.",
-                edgeId: edge.id,
-                target: blockedTarget,
-              });
-              break;
-            }
-          }
+          // Use the same thick-wall + local Door-aperture primitive as the
+          // Floor Editor. The previous validator duplicated a centerline
+          // approximation here, so valid Door crossings could be reported as
+          // blocked even while the editor considered the edge clear.
+          let blocked = pts.some((point, index) =>
+            index < pts.length - 1 && walls.some((wall) =>
+              segmentBlockedByWall(point, pts[index + 1], wall, doors) !== null
+            )
+          );
           // Check blocking furniture (any visible furniture blocks)
           const blockers = furniture.filter((f) => f.visible !== false);
-          if (blockers.length > 0) {
+          if (!blocked && blockers.length > 0) {
             for (let i = 0; i < pts.length - 1; i++) {
               for (let t = 0.1; t <= 0.9; t += 0.2) {
                 const px = pts[i].x + (pts[i + 1].x - pts[i].x) * t;
                 const py = pts[i].y + (pts[i + 1].y - pts[i].y) * t;
                 for (const fb of blockers) {
                   if (pointInBuildingRect({ x: fb.x, y: fb.y, width: fb.width, height: fb.height, rotation: fb.rotation }, px, py)) {
-                    issues.push({
-                      type: "nav_edge_blocked_by_obstacle",
-                      severity: "warning",
-                      message: "Navigation connection intersects a blocking obstacle.",
-                      edgeId: edge.id,
-                      target: blockedTarget,
-                    });
+                    blocked = true;
                     break;
                   }
                 }
+                if (blocked) break;
               }
+              if (blocked) break;
             }
+          }
+          if (blocked) {
+            issues.push({
+              type: "nav_edge_blocked_by_obstacle",
+              severity: "warning",
+              message: "Navigation connection intersects a blocking obstacle.",
+              edgeId: edge.id,
+              target: blockedTarget,
+            });
           }
         }
       }

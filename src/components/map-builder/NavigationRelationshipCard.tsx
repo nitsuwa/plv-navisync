@@ -1,4 +1,5 @@
 import { Navigation, Unlink } from "lucide-react";
+import { cn } from "../../lib/utils";
 
 type PhysicalType = "room" | "door" | "stairs" | "elevator" | "ramp";
 
@@ -15,6 +16,8 @@ interface NavigationRelationshipCardProps {
   mode: "design" | "navigation";
   /** Called when user clicks View in Navigation / View Linked Node */
   onView: () => void;
+  /** Some physical inspectors already have the selected object in view. */
+  showView?: boolean;
   /** Called when user clicks Add to Navigation (only for unlinked) */
   onAdd: () => void;
   /** Called when user clicks Remove from Navigation (only for linked) */
@@ -35,6 +38,7 @@ export function NavigationRelationshipCard({
   title,
   mode,
   onView,
+  showView = true,
   onAdd,
   onRemove,
   connectionCount,
@@ -47,15 +51,25 @@ export function NavigationRelationshipCard({
       {linked ? (
         <div className="rounded-xl border border-emerald-200/80 dark:border-emerald-800/50 bg-emerald-50/60 dark:bg-emerald-900/10 px-3 py-3 space-y-3 shadow-sm">
           <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2 text-[10px] font-extrabold uppercase tracking-wide text-emerald-700 dark:text-emerald-400">
+            <div className={cn(
+              "flex items-center gap-2 text-[10px] font-extrabold uppercase tracking-wide",
+              connectionCount === 0
+                ? "text-amber-700 dark:text-amber-400"
+                : "text-emerald-700 dark:text-emerald-400",
+            )}>
               <span className="h-5 w-5 rounded-full bg-emerald-500/12 flex items-center justify-center">
                 <Navigation className="h-3.5 w-3.5 shrink-0" />
               </span>
-              Linked
+              {connectionCount === 0 ? "Added to Navigation" : "Connected to Walking Network"}
             </div>
           </div>
           {/* Detail + group info */}
           <div className="space-y-1.5">
+            {connectionCount === 0 && (
+              <p data-testid="navigation-connection-needed" className="text-[10px] font-bold text-amber-700 dark:text-amber-400">
+                Navigation connection needed
+              </p>
+            )}
             {detail && (
               <p className="text-[10px] leading-snug text-emerald-700/80 dark:text-emerald-300/80">
                 {detail}
@@ -74,14 +88,16 @@ export function NavigationRelationshipCard({
           </div>
           {/* Actions */}
           <div className="grid grid-cols-1 gap-2 pt-1">
-            <button
-              type="button"
-              onClick={onView}
-              className="h-8 rounded-lg border border-emerald-300/70 dark:border-emerald-700/50 bg-background/60 text-[10px] font-bold text-emerald-700 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-900/30 transition-all flex items-center justify-center gap-1.5"
-            >
-              <Navigation className="h-3 w-3" />{" "}
-              {mode === "navigation" ? "View Linked Node" : "View in Navigation"}
-            </button>
+            {showView && (
+              <button
+                type="button"
+                onClick={onView}
+                className="h-8 rounded-lg border border-emerald-300/70 dark:border-emerald-700/50 bg-background/60 text-[10px] font-bold text-emerald-700 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-900/30 transition-all flex items-center justify-center gap-1.5"
+              >
+                <Navigation className="h-3 w-3" />{" "}
+                {mode === "navigation" ? "View Linked Node" : "View in Navigation"}
+              </button>
+            )}
             <button
               type="button"
               onClick={onRemove}
