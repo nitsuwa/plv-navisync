@@ -284,6 +284,18 @@ describe("B5 Phase 3.1 — stair direction guards", () => {
     fireEvent.click(screen.getByRole("button", { name: /^Issues/ }));
     expect(screen.getByText(/Stair direction is invalid for this floor/i)).toBeInTheDocument();
   });
+
+  it("shows a separate continuation warning when a Stair points to the wrong floor", () => {
+    const campus = withFloors(makeBaseCampus(), 3, { stairFloor: 2 });
+    const lowerStair = { ...STAIR, id: "s-lower", sharedId: "stair-core", direction: "both" };
+    const currentStair = { ...STAIR, id: "s-current", sharedId: "stair-core", direction: "up" };
+    campus.buildings[0].floors[0].stairs = [lowerStair];
+    campus.buildings[0].floors[1].stairs = [currentStair];
+    render(<Harness initialCampus={campus} floorId="f2" />);
+    fireEvent.click(screen.getByRole("button", { name: /^Issues/ }));
+    expect(screen.getByText(/Stair direction does not match its continuation/i)).toBeInTheDocument();
+    expect(screen.getByTestId("issue-marker")).toHaveAttribute("data-issue-object", "stairs:s-current");
+  });
 });
 
 describe("B5 Phase 3.1 — Issues toolbar badge", () => {

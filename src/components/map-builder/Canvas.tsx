@@ -3,6 +3,8 @@ import { motion, AnimatePresence } from "motion/react";
 import { CheckCircle2, XCircle, Navigation as NavigationIcon } from "lucide-react";
 import { MARKER_STYLES } from "../../data/mapData";
 import type { Campus, CampusBuilding, CampusMarker, SimpleTool, EditorLayer, CampusSelection, RubberBand, CampusDecorAsset, CampusPath, NavigationNode, NavigationEdge } from "./types";
+import type { TestRouteHighlight, TestRouteTransitionMarker } from "./TestNavigationPanel";
+import { RouteEndpointMarker, RouteTransitionMarker } from "./RouteTransitionMarker";
 import { DECOR_ASSET_MAP, BUILDING_TYPE_MAP, genId, getRotatedAABB } from "./constants";
 import { computeBuildingPlacement, screenToWorld } from "../../lib/editorPlacement";
 import { decorRenderScale, decorSelectionOutlineBox, decorWorldSize } from "../../lib/decorVisual";
@@ -10,7 +12,10 @@ import { mergeOutdoorStack } from "../../lib/campusStack";
 import { outdoorGroupSelectionBounds } from "../../lib/campusSelection";
 import { navGroupSelectionBounds } from "../../lib/navigationGraph";
 import { DecorAssetArt, DecorAssetVisual } from "./DecorAssetVisual";
+import { OutdoorBuildingVisual } from "./ReadonlyOutdoorVisuals";
 import { BUILDING_ENTRANCE_TYPE_COLORS, entranceDisplayName, entranceWorldPosition, normalizeEntranceType } from "../../lib/buildingEntrances";
+import { exteriorEmergencyStairWorldPosition } from "../../lib/exteriorEmergencyStairs";
+import { pathRenderStyle, type OutdoorPathRenderStyle } from "../../lib/outdoorPathVisual";
 import {
   editorPathRenderMode,
   isPathwayGeneratedEdge,
@@ -36,28 +41,12 @@ const getCornerCursor = (corner: string, rot: number) => angleToCursor((CORNER_A
 const getEdgeCursor = (edge: string, rot: number) => angleToCursor((EDGE_ANGLES[edge] ?? 0) + rot);
 const pathPointRenderKey = (point: { x: number; y: number }) => `${Number(point.x.toFixed(3))}:${Number(point.y.toFixed(3))}`;
 
-type PathRenderStyle = {
-  kind: "road" | "accessible" | "walkway";
-  baseWidth: number;
-  surface: string;
-  edge: string;
-};
-
 type PathJunctionBranch = PathRenderStyle & {
   ux: number;
   uy: number;
 };
 
-function pathRenderStyle(path: CampusPath): PathRenderStyle {
-  const kind = path.type === "road" || path.type === "driveway" ? "road" : path.type === "accessible" ? "accessible" : "walkway";
-  const baseWidth = Math.max(3, path.width ?? (kind === "road" ? 18 : 10));
-  return {
-    kind,
-    baseWidth,
-    surface: kind === "road" ? "#cbd5e1" : kind === "accessible" ? "#a7f3d0" : path.color || "#94a3b8",
-    edge: kind === "road" ? "#64748b" : kind === "accessible" ? "#059669" : "#64748b",
-  };
-}
+type PathRenderStyle = OutdoorPathRenderStyle;
 
 type Pt = { x: number; y: number };
 
@@ -436,6 +425,9 @@ interface CanvasProps {
   onPathDown?: (e: React.MouseEvent, id: string) => void;
   /** Double-click a member pathway — enters member edit mode for that path. */
   onPathDblClick?: (id: string) => void;
+  /** Hovered physical pathway member for temporary network identification. */
+  hoveredPathId?: string | null;
+  onPathHover?: (id: string | null) => void;
   /** Path currently being edited inside its network (member edit mode). */
   pathMemberEditId?: string | null;
   onPathPointDown?: (e: React.MouseEvent, id: string, pointIndex: number) => void;
@@ -443,6 +435,8 @@ interface CanvasProps {
   onPathAddPoint?: (id: string, pointIndex: number, point: { x: number; y: number }) => void;
   onPathWidthDown?: (e: React.MouseEvent, id: string, segmentIndex: number, handlePoint: { x: number; y: number }) => void;
   onEntranceDown?: (e: React.MouseEvent, buildingId: string, entranceId: string, ox: number, oy: number) => void;
+  onExteriorEmergencyStairDown?: (e: React.MouseEvent, buildingId: string, stairId: string) => void;
+  onExteriorEmergencyStairFloorNavigate?: (buildingId: string, floorId: string, stairId: string) => void;
   onItemContextMenu?: (e: React.MouseEvent, type: "building" | "marker" | "path" | "decorAsset", id: string) => void;
   onResizeStart?: (e: React.MouseEvent, b: CampusBuilding, corner: string) => void;
   onRotateStart?: (e: React.MouseEvent, b: CampusBuilding) => void;
@@ -454,18 +448,31 @@ interface CanvasProps {
   navEdges?: NavigationEdge[];
   /** Read-only outdoor navigation overlay for the Campus layer. */
   showNavigationOverlay?: boolean;
+  /** Test Route presentation mode hides authoring graph visuals and hit targets. */
+  routePreview?: boolean;
   /** Node the Path tool is currently connecting FROM (dashed start ring + live preview). */
   navConnectStartId?: string | null;
   /** Live pointer position while the Path tool has an active start node. */
   navPreview?: { x: number; y: number } | null;
   navConnectBends?: { x: number; y: number }[];
+  /** Exact manual Walking Path segment/projection captured by Connect hover. */
+  navPathTargetHover?: {
+    edgeId: string;
+    segmentIndex: number;
+    point: { x: number; y: number };
+  } | null;
   /** B5 Phase 6.9: the FULL proposed pin shape (corner + click point) the
    *  preview renders — the exact geometry a click would pin (preview == commit). */
   navPreviewPins?: { x: number; y: number }[];
   /** Entrance currently targeted by Add Waypoint / Connect Path (highlighted). */
   navEntranceHover?: { buildingId: string; entranceId: string; x: number; y: number } | null;
   /** B5 Phase 6.1: edge snap preview for waypoint-on-edge insertion. */
-  edgeSnapPreview?: { edgeId: string; nearest: { x: number; y: number } } | null;
+  edgeSnapPreview?: {
+    edgeId: string;
+    nearest: { x: number; y: number };
+    /** Optional context-specific helper for a read-only managed connector. */
+    helper?: string;
+  } | null;
   /** B5 Phase 6.2: outdoor Connect blocked preview (crosses building). */
   connectBlocked?: boolean;
   /** B5 Phase 6.10: set of edge IDs currently blocked by obstacles (rendered red). */
@@ -506,7 +513,13 @@ interface CanvasProps {
   /** Called when a decor asset resize corner/edge is grabbed */
   onDecorResizeStart?: (e: React.MouseEvent, da: CampusDecorAsset, corner: string) => void;
   /** Route to highlight from the test-navigation panel (waypoints + color) */
-  highlightedRoute?: { waypoints: { x: number; y: number }[]; color: string } | null;
+  highlightedRoute?: TestRouteHighlight | null;
+  onRouteTransitionClick?: (marker: TestRouteTransitionMarker) => void;
+  /** Current-context Test Route map picking. Only physical semantic targets
+   * (buildings/entrances) are surfaced here; generic graph nodes stay hidden. */
+  testRoutePickKind?: "start" | "destination" | null;
+  testRoutePickHover?: { type: "building" | "entrance"; id: string } | null;
+  onTestRoutePickHover?: (target: { type: "building" | "entrance"; id: string } | null) => void;
   /** ID of a just-completed path to play the draw-in animation on */
   animatingPathId?: string | null;
 }
@@ -597,13 +610,32 @@ function DragOverlay({
   );
 }
 
+function routeDirectionMarkers(points: { x: number; y: number }[]): { x: number; y: number; angle: number }[] {
+  const markers: { x: number; y: number; angle: number }[] = [];
+  for (let i = 0; i < points.length - 1; i += 1) {
+    const a = points[i];
+    const b = points[i + 1];
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const length = Math.hypot(dx, dy);
+    if (length < 18) continue;
+    const count = Math.max(1, Math.floor(length / 72));
+    for (let j = 1; j <= count; j += 1) {
+      const t = j / (count + 1);
+      markers.push({ x: a.x + dx * t, y: a.y + dy * t, angle: Math.atan2(dy, dx) * 180 / Math.PI });
+    }
+  }
+  return markers;
+}
+
 export function Canvas({
   campus, tool, layer, selected, multiSelected, selectedPathPoint = null, showGroupOutline = true, rubberBand, drawingPath, snapGrid,
   zoom, pan, svgRef, containerRef, cursor,
   buildingDrag, groundBrushPreview, groundErasePreview, groundPaintType = "grass", pathPaintPreview, guides, cursorPos, overlappingBuildings,
   onCanvasDown, onCanvasMove, onCanvasUp, onCanvasLeave, onCanvasDblClick,
-  onItemDown, onGroupSurfaceDown, onPathDown, onPathPointDown, onPathExtendStart, onPathAddPoint, onPathWidthDown, onEntranceDown, onItemContextMenu, onResizeStart, onBuildingDoubleClick, onPathClick, onSelect,
-  onPathGroupScaleStart, onPathGroupRotateStart, pathGroupRotationActive = false, pathGroupRotationBounds = null, onPathDblClick, pathMemberEditId = null,
+  onItemDown, onGroupSurfaceDown, onPathDown, onPathPointDown, onPathExtendStart, onPathAddPoint, onPathWidthDown, onEntranceDown, onExteriorEmergencyStairDown, onItemContextMenu, onResizeStart, onBuildingDoubleClick, onPathClick, onSelect,
+  onExteriorEmergencyStairFloorNavigate,
+  onPathGroupScaleStart, onPathGroupRotateStart, pathGroupRotationActive = false, pathGroupRotationBounds = null, onPathDblClick, pathMemberEditId = null, hoveredPathId = null, onPathHover,
   onResetView, onZoomIn, onZoomOut, onSetTool, onToggleSnap,
   onWheel, invalidBuildings = new Set(),
   onDropAsset, onDropBuilding,
@@ -611,8 +643,9 @@ export function Canvas({
   rotatingId, rotatingAngle,
   resizingId, highlightedRoute, animatingPathId,
   decorRotatingId, decorResizingId, onDecorRotateStart, onDecorResizeStart,
-  navNodes, navEdges, showNavigationOverlay = false, navConnectStartId, navPreview, navConnectBends = [], navPreviewPins = [], navEntranceHover, edgeSnapPreview, connectBlocked, navBlockedEdgeIds, onNavEdgeSelect, onNavEdgeBendDown, onNavEdgeAddBend,
+  navNodes, navEdges, showNavigationOverlay = false, routePreview = false, navConnectStartId, navPreview, navConnectBends = [], navPreviewPins = [], navPathTargetHover, navEntranceHover, edgeSnapPreview, connectBlocked, navBlockedEdgeIds, onNavEdgeSelect, onNavEdgeBendDown, onNavEdgeAddBend,
   issueMarkers = [],
+  testRoutePickKind = null, testRoutePickHover = null, onTestRoutePickHover, onRouteTransitionClick,
 }: CanvasProps) {
   const buildings = campus.buildings;
   const markers = campus.markers;
@@ -628,6 +661,26 @@ export function Canvas({
   const decorAssets = campus.decorAssets ?? [];
   const groundAreas = decorAssets.filter((asset) => asset.type === "ground-area");
   const foregroundDecorAssets = decorAssets.filter((asset) => asset.type !== "ground-area");
+  const [exteriorQuickNavKey, setExteriorQuickNavKey] = useState<string | null>(null);
+  const exteriorQuickNavTimer = useRef<number | null>(null);
+  const cancelExteriorQuickNavClose = () => {
+    if (exteriorQuickNavTimer.current !== null) {
+      window.clearTimeout(exteriorQuickNavTimer.current);
+      exteriorQuickNavTimer.current = null;
+    }
+  };
+  const closeExteriorQuickNav = () => {
+    cancelExteriorQuickNavClose();
+    setExteriorQuickNavKey(null);
+  };
+  const scheduleExteriorQuickNavClose = () => {
+    cancelExteriorQuickNavClose();
+    exteriorQuickNavTimer.current = window.setTimeout(() => {
+      exteriorQuickNavTimer.current = null;
+      setExteriorQuickNavKey(null);
+    }, 180);
+  };
+  useEffect(() => () => cancelExteriorQuickNavClose(), []);
 
   // B5 Phase 2.9: the nav props are the SCOPED collection the outdoor editor
   // derives (outdoor-only entities) — indoor floor nodes/edges never render
@@ -635,8 +688,8 @@ export function Canvas({
   // only a safety net for legacy direct usage.
   const renderNavNodes = navNodes ?? campus.navNodes ?? [];
   const renderNavEdges = navEdges ?? campus.navEdges ?? [];
-  const navGraphInteractive = layer === "navigation";
-  const shouldRenderNavGraph = navGraphInteractive || showNavigationOverlay;
+  const navGraphInteractive = layer === "navigation" && !routePreview;
+  const shouldRenderNavGraph = !routePreview && (navGraphInteractive || showNavigationOverlay);
 
   // B5 Phase 5.12 — continuous path-network geometry: joined same-style records
   // render as ONE stroke (no internal seams/caps, continuous road centerlines),
@@ -651,10 +704,14 @@ export function Canvas({
   }, [paths]);
   const pathOnlyMultiSelect = multiSelected.length >= 2
     && multiSelected.every((id) => paths.some((path) => path.id === id));
-  const selectedPhysicalPathIds = new Set([
-    ...(selected?.type === "path" ? [selected.id] : []),
-    ...multiSelected.filter((id) => paths.some((path) => path.id === id)),
-  ]);
+  // A physical Pathway owns the overlay hit surface only while that member is
+  // explicitly being edited.  Normal Navigation Select must still be able to
+  // select generated nodes/edges after a Pathway or network was inspected.
+  const selectedPhysicalPathIds = new Set(
+    pathMemberEditId && paths.some((path) => path.id === pathMemberEditId)
+      ? [pathMemberEditId]
+      : [],
+  );
 
   // Normalized canvas dimensions: prefer the explicit props (CampusEditor
   // passes its safe/normalized dims) so a transiently-unset campus can never
@@ -1275,6 +1332,26 @@ export function Canvas({
             </g>
           )}
 
+          {/* A selected physical Path Network owns the empty interior of its
+              bounds, but this hit surface is deliberately rendered UNDER the
+              physical path, nav, entrance, and handle layers. Those higher
+              priority targets therefore keep their normal interactions while
+              truly empty space starts the same group-drag pipeline. */}
+          {pathOnlyMultiSelect && !pathMemberEditId && tool === "select" && groupSelectionBounds && (
+            <rect
+              data-testid="campus-path-network-empty-drag-surface"
+              x={groupSelectionBounds.x - 4}
+              y={groupSelectionBounds.y - 4}
+              width={groupSelectionBounds.width + 8}
+              height={groupSelectionBounds.height + 8}
+              rx={2}
+              fill="transparent"
+              stroke="none"
+              style={{ cursor: "move", pointerEvents: "fill" }}
+              onMouseDown={(e) => onGroupSurfaceDown?.(e)}
+            />
+          )}
+
           {/* Paths — B5 Phase 5.17: two-pass rendering so surface strokes always
               cover edge strokes at junctions. Pass 1: all edge strokes (background).
               Pass 2: all surface strokes + centerlines + selection highlights (foreground).
@@ -1286,8 +1363,12 @@ export function Canvas({
               const baseWidth = chain.style.baseWidth;
               const d = buildChainPathD(chain);
               const join = kind === "road" ? "bevel" : "round";
+              const hoveredNetworkId = hoveredPathId ? paths.find((path) => path.id === hoveredPathId)?.pathNetworkId : undefined;
+              const networkHoverActive = !!hoveredNetworkId && chain.pathIds.some((id) => paths.some((path) => path.id === id && path.pathNetworkId === hoveredNetworkId));
+              const chainHasHoveredMember = !!hoveredPathId && chain.pathIds.includes(hoveredPathId);
+              const chainOpacity = networkHoverActive ? (chainHasHoveredMember ? 1 : 0.42) : 1;
               return (
-                <path key={`${chain.id}-edge`} d={d} fill="none" stroke={chain.style.edge} strokeWidth={baseWidth + 2} strokeLinecap="butt" strokeLinejoin={join} opacity={1} />
+                <path key={`${chain.id}-edge`} d={d} fill="none" stroke={chain.style.edge} strokeWidth={baseWidth + 2} strokeLinecap="butt" strokeLinejoin={join} opacity={chainOpacity} />
               );
             })}
             {/* Pass 2: surface strokes + centerlines + selection (all chains, rendered second = foreground) */}
@@ -1299,6 +1380,10 @@ export function Canvas({
               const isMultiSel = chain.pathIds.some((id) => multiSelected.includes(id));
               const isAnimating = !!animatingPathId && chain.pathIds.includes(animatingPathId);
               const join = kind === "road" ? "bevel" : "round";
+              const hoveredNetworkId = hoveredPathId ? paths.find((path) => path.id === hoveredPathId)?.pathNetworkId : undefined;
+              const networkHoverActive = !!hoveredNetworkId && chain.pathIds.some((id) => paths.some((path) => path.id === id && path.pathNetworkId === hoveredNetworkId));
+              const chainHasHoveredMember = !!hoveredPathId && chain.pathIds.includes(hoveredPathId);
+              const chainOpacity = networkHoverActive ? (chainHasHoveredMember ? 1 : 0.42) : 1;
               return (
                 <g key={chain.id} data-testid="path-chain" data-chain-kind={kind} data-path-ids={chain.pathIds.join(",")}>
                   {isAnimating ? (
@@ -1310,17 +1395,36 @@ export function Canvas({
                       strokeLinecap="butt"
                       strokeLinejoin={join}
                       initial={{ pathLength: 0, opacity: 1 }}
-                      animate={{ pathLength: 1, opacity: 1 }}
+                      animate={{ pathLength: 1, opacity: chainOpacity }}
                       transition={{ duration: 0.7, ease: [0.16, 1, 0.3, 1] }}
                     />
                   ) : (
-                    <path d={d} fill="none" stroke={chain.style.surface} strokeWidth={baseWidth} strokeLinecap="butt" strokeLinejoin={join} opacity={1} />
+                    <path d={d} fill="none" stroke={chain.style.surface} strokeWidth={baseWidth} strokeLinecap="butt" strokeLinejoin={join} opacity={chainOpacity} />
                   )}
-                  {kind === "road" && <path d={d} fill="none" stroke="#f8fafc" strokeWidth={1.2} strokeLinecap="butt" strokeLinejoin="bevel" strokeDasharray="10 10" opacity={0.72} />}
-                  {(isSel || isMultiSel) && <path d={d} fill="none" stroke={isSel ? "var(--accent)" : "var(--primary)"} strokeWidth={baseWidth + 6} strokeLinecap="butt" strokeLinejoin={join} opacity={isSel ? 0.18 : 0.12} />}
+                  {kind === "road" && <path d={d} fill="none" stroke="#f8fafc" strokeWidth={1.2} strokeLinecap="butt" strokeLinejoin="bevel" strokeDasharray="10 10" opacity={0.72 * chainOpacity} />}
+                  {(isSel || isMultiSel) && <path d={d} fill="none" stroke={isSel ? "var(--accent)" : "var(--primary)"} strokeWidth={baseWidth + 6} strokeLinecap="butt" strokeLinejoin={join} opacity={(isSel ? 0.18 : 0.12) * chainOpacity} />}
                 </g>
               );
             })}
+            {hoveredPathId && (() => {
+              const hoveredPath = paths.find((path) => path.id === hoveredPathId);
+              if (!hoveredPath?.pathNetworkId) return null;
+              const kind = hoveredPath.type === "road" || hoveredPath.type === "driveway" ? "road" : hoveredPath.type === "accessible" ? "accessible" : "walkway";
+              const width = Math.max(3, hoveredPath.width ?? (kind === "road" ? 18 : 10));
+              return (
+                <polyline
+                  data-testid="hovered-path-highlight"
+                  data-path-id={hoveredPath.id}
+                  points={hoveredPath.points.map((point) => `${point.x},${point.y}`).join(" ")}
+                  fill="none"
+                  stroke="var(--accent)"
+                  strokeWidth={width + 5}
+                  strokeLinecap="butt"
+                  strokeLinejoin={kind === "road" ? "bevel" : "round"}
+                  opacity={0.28}
+                />
+              );
+            })()}
           </g>
 
           {/* Hidden physical Pathways remain recoverable in the admin editor.
@@ -1364,7 +1468,21 @@ export function Canvas({
                 data-path-id={p.id}
                 data-path-network-id={p.pathNetworkId}
                 data-path-kind={kind}
-                onMouseDown={(e) => { e.stopPropagation(); if (tool === "select") onPathDown?.(e, p.id); }}
+                onMouseEnter={() => onPathHover?.(p.id)}
+                onMouseLeave={() => onPathHover?.(null)}
+                onMouseDown={(e) => {
+                  // Navigation authoring tools need the canvas to see a
+                  // physical-path hit so they can place a manual point or
+                  // explain why Connect needs a real navigation anchor first.
+                  // Select/erase retain the path surface's existing isolated
+                  // interaction behavior.
+                  if (tool === "select") {
+                    e.stopPropagation();
+                    onPathDown?.(e, p.id);
+                  } else if (!(layer === "navigation" && (tool === "marker" || tool === "path"))) {
+                    e.stopPropagation();
+                  }
+                }}
                 onClick={(e) => { e.stopPropagation(); if (tool === "erase") { onSelect(null); } else onPathClick(p.id); }}
                 onDoubleClick={(e) => { e.stopPropagation(); if (tool === "select") onPathDblClick?.(p.id); }}
                 onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onItemContextMenu?.(e, "path", p.id); }}
@@ -1443,7 +1561,8 @@ export function Canvas({
           )}
 
           {/* Test-navigation highlighted route */}
-          {highlightedRoute && highlightedRoute.waypoints.length > 0 && (
+          {!highlightedRoute?.routeNodeIds?.length && highlightedRoute && (highlightedRoute.waypoints.length > 0 || (highlightedRoute.endpointMarkers?.length ?? 0) > 0 || (highlightedRoute.transitionMarkers?.length ?? 0) > 0) && (
+            <>
             <g pointerEvents="none">
               {/* Soft glow underlay */}
               <polyline
@@ -1455,21 +1574,33 @@ export function Canvas({
                 strokeLinejoin="round"
                 opacity={0.25}
               />
-              {/* Animated dashed main line */}
+              {/* Clean route stroke. A light dash animation communicates travel
+                  direction without turning the preview into an editable path. */}
               <polyline
                 points={highlightedRoute.waypoints.map((w) => `${w.x},${w.y}`).join(" ")}
                 fill="none"
                 stroke={highlightedRoute.color}
-                strokeWidth={3}
+                strokeWidth={4}
                 strokeLinecap="round"
                 strokeLinejoin="round"
-                strokeDasharray="10 6"
+                strokeDasharray="12 8"
                 opacity={0.95}
-              />
-              {/* Start + end markers */}
-              <circle cx={highlightedRoute.waypoints[0].x} cy={highlightedRoute.waypoints[0].y} r={6} fill={highlightedRoute.color} stroke="white" strokeWidth={2} />
-              <circle cx={highlightedRoute.waypoints[highlightedRoute.waypoints.length - 1].x} cy={highlightedRoute.waypoints[highlightedRoute.waypoints.length - 1].y} r={6} fill={highlightedRoute.color} stroke="white" strokeWidth={2} />
+              >
+                <animate attributeName="stroke-dashoffset" from="0" to="-40" dur="1.2s" repeatCount="indefinite" />
+              </polyline>
+              {routeDirectionMarkers(highlightedRoute.waypoints).map((marker, index) => (
+                <path
+                  key={`route-arrow-${index}`}
+                  d="M -5 -4 L 5 0 L -5 4 Z"
+                  transform={`translate(${marker.x} ${marker.y}) rotate(${marker.angle})`}
+                  fill={highlightedRoute.color}
+                  stroke="white"
+                  strokeWidth={1}
+                  opacity={0.95}
+                />
+              ))}
             </g>
+            </>
           )}
 
           {/* Alignment guides */}
@@ -1520,7 +1651,13 @@ export function Canvas({
             // The transparent hit surface is interactive for BOTH the outdoor
             // object-group UX (campus layer) and the nav graph group (nav
             // layer); it stays inert when it is only a visual outline.
-            const surfaceInteractive = !!groupSelectionBounds || !!pathGroupRotationBounds || renderNavDragSurface;
+            // A path-only network is selected through the physical path hit
+            // targets themselves. Its transparent bounds must not sit above
+            // those targets, otherwise the second click (and member drag)
+            // can only re-enter the group transform and never reach the
+            // individual Pathway. Mixed object groups and nav groups retain
+            // their existing bounds drag surface.
+            const surfaceInteractive = (!isPathOnlyGroup && !!groupSelectionBounds) || !!pathGroupRotationBounds || renderNavDragSurface;
             // B5 Phase 5.14: during rotation, the selection frame rotates with
             // the network via SVG transform around the captured pivot center.
             const rotationAngle = pathGroupRotationBounds?.angle ?? 0;
@@ -1647,11 +1784,22 @@ export function Canvas({
             const opacity = b.opacity ?? 1;
             const editorOpacity = isVisible ? opacity : Math.min(opacity, isSel || isMultiSel ? 0.35 : 0.28);
             return (
-              <g key={b.id} data-hidden={isVisible ? undefined : "true"} onMouseDown={(e) => { if (isLocked) return; onItemDown(e, "building", b.id, b.x, b.y); }} onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); if (isLocked) return; onItemContextMenu?.(e, "building", b.id); }} onDoubleClick={(e) => { if (isLocked) return; e.stopPropagation(); onBuildingDoubleClick?.(b.id); }} style={{ cursor: isLocked ? "default" : tool === "select" ? "move" : cursor, opacity: editorOpacity }}>
+              <g key={b.id} data-hidden={isVisible ? undefined : "true"} onMouseDown={(e) => { if (isLocked) return; onItemDown(e, "building", b.id, b.x, b.y); }} onMouseEnter={() => { if (testRoutePickKind) onTestRoutePickHover?.({ type: "building", id: b.id }); }} onMouseLeave={() => { if (testRoutePickHover?.type === "building" && testRoutePickHover.id === b.id) onTestRoutePickHover?.(null); }} onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); if (isLocked) return; onItemContextMenu?.(e, "building", b.id); }} onDoubleClick={(e) => { if (isLocked) return; e.stopPropagation(); onBuildingDoubleClick?.(b.id); }} style={{ cursor: isLocked ? "default" : tool === "select" ? "move" : cursor, opacity: editorOpacity }}>
                 {/* ── Rotated group: shadow, outline, handles, overlap borders, and body all rotate together ── */}
                 <g transform={rot !== 0 ? `rotate(${rot}, ${cx}, ${cy})` : ''}>
-                  {/* Shadow (rotated with building so it follows the visual) */}
-                  <rect x={b.x + 3} y={b.y + 4} width={b.width} height={b.height} rx={8} fill="rgba(0,0,0,0.12)" />
+                  {/* The editor wrapper owns hit testing; the shared visual
+                      remains pointer-transparent in Admin mode. */}
+                  <rect
+                    data-testid="building-hit-target"
+                    x={b.x - 2}
+                    y={b.y - 2}
+                    width={b.width + 4}
+                    height={b.height + 4}
+                    rx={9}
+                    fill="transparent"
+                    stroke="none"
+                    pointerEvents="all"
+                  />
                   {/* Multi-selection highlight */}
                   {isMultiSel && !isSel && (
                     <rect x={b.x - 4} y={b.y - 4} width={b.width + 8} height={b.height + 8} rx={8} fill="none" stroke="var(--primary)" strokeWidth={1} strokeDasharray="3 4" opacity={0.35} />
@@ -1664,8 +1812,21 @@ export function Canvas({
                     </>
                   )}
                   {/* Building body */}
-                  <rect x={b.x} y={b.y} width={b.width} height={b.height} rx={8} fill={b.color} stroke={isSel ? "var(--accent)" : "rgba(255,255,255,0.5)"} strokeWidth={isSel ? 2.5 : 1.5} opacity={0.92} />
-                  <rect x={b.x} y={b.y} width={b.width} height={7} rx={8} fill="rgba(0,0,0,0.12)" />
+                  {testRoutePickKind && (
+                    <rect x={b.x - 5} y={b.y - 5} width={b.width + 10} height={b.height + 10} rx={10}
+                      fill="none" stroke="#8b5cf6" strokeWidth={testRoutePickHover?.type === "building" && testRoutePickHover.id === b.id ? 3 : 1.6}
+                      strokeDasharray={testRoutePickHover?.type === "building" && testRoutePickHover.id === b.id ? undefined : "5 4"} opacity={testRoutePickHover?.type === "building" && testRoutePickHover.id === b.id ? 1 : 0.55} className="pointer-events-none" />
+                  )}
+                  <OutdoorBuildingVisual
+                    building={b}
+                    applyTransform={false}
+                    applyOpacity={false}
+                    interactive={false}
+                    showName={zoom > 0.7 && b.name !== "New Building"}
+                    showFloorCount
+                    labelLayout="editor"
+                    bodyOpacity={0.92}
+                  />
                   {!isVisible && (
                     <g className="pointer-events-none select-none" opacity={0.95}>
                       <rect x={b.x + 5} y={b.y + 5} width={18} height={14} rx={4} fill="var(--card)" stroke="var(--border)" strokeWidth={1} />
@@ -1674,10 +1835,8 @@ export function Canvas({
                       <line x1={b.x + 8} y1={b.y + 17} x2={b.x + 21} y2={b.y + 6} stroke="var(--muted-foreground)" strokeWidth={1.5} strokeLinecap="round" />
                     </g>
                   )}
-                  <text x={cx} y={b.y + b.height / 2 - 8} textAnchor="middle" fill="white" fontSize={11} fontWeight="800" className="pointer-events-none select-none">{b.code}</text>
-                  {b.floors.length > 0 && <text x={cx} y={b.y + b.height / 2 + 4} textAnchor="middle" fill="rgba(255,255,255,0.7)" fontSize={7} className="pointer-events-none select-none">{b.floors.length}F</text>}
                   {/* Building name — INSIDE rotation group so it rotates with building code */}
-                  {zoom > 0.7 && b.name !== "New Building" && (
+                  {false && zoom > 0.7 && b.name !== "New Building" && (
                     <text x={cx} y={b.y + b.height / 2 + 14} textAnchor="middle" fill="rgba(255,255,255,0.55)" fontSize={5.5} fontWeight="600" className="pointer-events-none select-none" stroke="rgba(0,0,0,0.15)" strokeWidth={1.5} paintOrder="stroke">
                       {b.name.length > 16 ? b.name.slice(0, 14) + "…" : b.name}
                     </text>
@@ -1945,6 +2104,42 @@ export function Canvas({
             );
           })}
 
+          {/* Building-attached Exterior Emergency Stairs sit in the outdoor
+              overlay, outside the footprint, while their served-floor landing
+              occurrences are rendered by FloorEditor. */}
+          {buildings.flatMap((building) => (building.exteriorEmergencyStairs ?? []).map((stair) => {
+            if (stair.visible === false || stair.state === "closed") return null;
+            const pos = exteriorEmergencyStairWorldPosition(building, stair);
+            const isSel = selected?.type === "building" && selected.id === building.id;
+            return (
+              <g key={`exterior-emergency-stair-${stair.id}`} data-testid="exterior-emergency-stair" transform={`translate(${pos.x},${pos.y}) rotate(${pos.angle})`} onMouseDown={(e) => { e.stopPropagation(); onExteriorEmergencyStairDown?.(e, building.id, stair.id); }} style={{ cursor: tool === "select" ? "pointer" : cursor }}>
+                <line x1={0} y1={0} x2={0} y2={-18} stroke="#dc2626" strokeWidth={2} strokeDasharray="4 3" opacity={0.75} className="pointer-events-none" />
+                <rect x={-stair.width / 2} y={-stair.height / 2} width={stair.width} height={stair.height} rx={4} fill="#fef2f2" stroke={isSel ? "var(--accent)" : "#dc2626"} strokeWidth={isSel ? 2.5 : 1.8} />
+                <path d={`M${-stair.width / 2 + 5} ${-stair.height / 2 + 9} H${stair.width / 2 - 5} M${-stair.width / 2 + 5} 0 H${stair.width / 2 - 5} M${-stair.width / 2 + 5} ${stair.height / 2 - 9} H${stair.width / 2 - 5}`} stroke="#dc2626" strokeWidth={1.5} className="pointer-events-none" />
+                <circle cx={stair.width / 2 - 3} cy={-stair.height / 2 + 4} r={4} fill="#dc2626" stroke="white" strokeWidth={1} />
+                {(stair.servedFloorIds?.length ?? 0) > 1 && <g
+                  data-testid="exterior-emergency-stair-quick-nav"
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`View connected Floors for ${stair.label}`}
+                  className="cursor-pointer"
+                  onMouseEnter={() => { cancelExteriorQuickNavClose(); setExteriorQuickNavKey(stair.id); }}
+                  onMouseLeave={scheduleExteriorQuickNavClose}
+                  onFocus={() => { cancelExteriorQuickNavClose(); setExteriorQuickNavKey(stair.id); }}
+                  onBlur={(event) => { if (!event.currentTarget.parentElement?.contains(event.relatedTarget as Node | null)) scheduleExteriorQuickNavClose(); }}
+                  onMouseDown={(event) => { event.preventDefault(); event.stopPropagation(); }}
+                  onClick={(event) => { event.stopPropagation(); setExteriorQuickNavKey(stair.id); }}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setExteriorQuickNavKey(stair.id); }
+                    if (event.key === "Escape") { event.preventDefault(); closeExteriorQuickNav(); }
+                  }}
+                ><circle cx={-stair.width / 2 - 3} cy={-stair.height / 2 + 4} r={4} fill="#475569" stroke="white" strokeWidth={1} /><path d="M-5 -1 H-1 M-5 1 H-1" stroke="white" strokeWidth={0.8} strokeLinecap="round" /></g>}
+                <text x={0} y={4} textAnchor="middle" fill="#991b1b" fontSize={7} fontWeight="900" className="pointer-events-none select-none">EXIT</text>
+                <title>{stair.label} · Exterior Emergency Stair</title>
+              </g>
+            );
+          }))}
+
           {/* Building entrances: functional editor overlay, not part of z-order. */}
           {buildings.flatMap((b) => {
             const entrances = b.entrances ?? [];
@@ -1952,6 +2147,13 @@ export function Canvas({
             const isParentLocked = b.locked ?? false;
             return entrances.map((entrance) => {
               const pos = entranceWorldPosition(b, entrance);
+              const entranceName = entranceDisplayName(entrance, entrances.findIndex((e) => e.id === entrance.id));
+              const entranceTypeLabel = normalizeEntranceType(entrance.type) === "emergency_exit"
+                ? "Emergency Exit"
+                : normalizeEntranceType(entrance.type) === "service"
+                  ? "Service Access"
+                  : entrance.isPrimary ? "Primary Entrance" : "General Access";
+              const entranceQuickInfo = `${entranceName} · ${entranceTypeLabel}`;
               const isSel = selected?.type === "entrance" && selected.id === entrance.id;
               const isNavTarget = navEntranceHover?.buildingId === b.id && navEntranceHover?.entranceId === entrance.id;
               const stroke = BUILDING_ENTRANCE_TYPE_COLORS[normalizeEntranceType(entrance.type)];
@@ -1964,10 +2166,12 @@ export function Canvas({
                   data-hidden={isParentVisible ? undefined : "true"}
                   transform={`translate(${pos.x},${pos.y}) rotate(${pos.angle})`}
                   opacity={opacity}
+                  tabIndex={0}
+                  aria-label={entranceQuickInfo}
                   style={{ cursor: isParentLocked ? "default" : showNavigationOverlay && tool === "select" ? "pointer" : tool === "select" ? "grab" : cursor }}
                   onMouseDown={(e) => onEntranceDown?.(e, b.id, entrance.id, pos.x, pos.y)}
                 >
-                  <title>{entranceDisplayName(entrance, entrances.findIndex((e) => e.id === entrance.id))}</title>
+                  <title>{entranceQuickInfo}</title>
                   <circle cx={0} cy={0} r={12} fill="transparent" />
                   {/* Navigation routing-target highlight (Add Waypoint / Connect Path) —
                       B5 Phase 1.9: this is the SINGLE Connect Target indicator; the
@@ -2019,6 +2223,9 @@ export function Canvas({
                 const isSel = selected?.type === "navEdge" && selected.id === e.id;
                 const isMultiSel = multiSelected.includes(e.id);
                 const pathwayGenerated = isPathwayGeneratedEdge(e);
+                const entranceManaged = e.type !== "entrance_transition" && Boolean(
+                  (a.entranceId && !a.floorId) || (b.entranceId && !b.floorId),
+                );
                 const selectedPhysicalPathOwnsEdge = Boolean(
                   pathwayGenerated
                   && e.generatedFromPathIds?.some((pathId) => selectedPhysicalPathIds.has(pathId)),
@@ -2039,8 +2246,17 @@ export function Canvas({
                 // B5 Phase 6.10: blocked edges render red (obstacle intersection)
                 const isBlocked = navBlockedEdgeIds?.has(e.id) ?? false;
                 const edgeColor = isBlocked ? "#dc2626" : (isSel || isMultiSel ? "var(--accent)" : e.color || "#16a34a");
+                const connectPathTarget = navGraphInteractive
+                  && !pathwayGenerated
+                  && !entranceManaged
+                  && navConnectStartId
+                  && navPathTargetHover?.edgeId === e.id
+                  && navPathTargetHover.segmentIndex >= 0
+                  && navPathTargetHover.segmentIndex < edgePoints.length - 1
+                  ? navPathTargetHover
+                  : null;
                 return (
-                  <g key={e.id} data-testid="nav-edge" data-pathway-generated={pathwayGenerated ? "true" : undefined} className="group/nav-edge"
+                  <g key={e.id} data-testid="nav-edge" data-edge-id={e.id} data-pathway-generated={pathwayGenerated ? "true" : undefined} data-entrance-managed={entranceManaged ? "true" : undefined} className="group/nav-edge"
                     onMouseDown={(ev) => {
                       if (!navGraphInteractive) return;
                       // B5 Phase 6.7/6.8: Waypoint AND Connect tools must not be
@@ -2069,6 +2285,27 @@ export function Canvas({
                       opacity={0}
                       className="pointer-events-none transition-opacity duration-150 group-hover/nav-edge:opacity-20"
                     />
+                    {connectPathTarget && (() => {
+                      const p = edgePoints[connectPathTarget.segmentIndex];
+                      const q = edgePoints[connectPathTarget.segmentIndex + 1];
+                      return (
+                        <g className="pointer-events-none" data-testid="nav-connect-path-target">
+                          <line x1={p.x} y1={p.y} x2={q.x} y2={q.y}
+                            stroke="#f59e0b" strokeWidth={5} opacity={0.82}
+                            strokeDasharray="7 3" strokeLinecap="round" />
+                          <circle cx={connectPathTarget.point.x} cy={connectPathTarget.point.y} r={6}
+                            fill="rgba(245,158,11,0.16)" stroke="#f59e0b"
+                            strokeWidth={1.7} strokeDasharray="2 2" />
+                          <circle cx={connectPathTarget.point.x} cy={connectPathTarget.point.y} r={2} fill="#f59e0b" />
+                          <text x={connectPathTarget.point.x + 9} y={connectPathTarget.point.y - 9}
+                            fill="#b45309" fontSize={7} fontWeight={700}
+                            stroke="rgba(255,255,255,0.92)" strokeWidth={1.8}
+                            paintOrder="stroke" data-testid="nav-connect-path-hint">
+                            Click to connect to path
+                          </text>
+                        </g>
+                      );
+                    })()}
                     <polyline points={edgePts} fill="none"
                       stroke={edgeColor}
                       strokeWidth={isSel || isMultiSel ? 4 : e.width ?? 3}
@@ -2164,6 +2401,12 @@ export function Canvas({
                 const isEntrance = n.type === "entrance";
                 const isDestination = n.type === "room_access";
                 const pathwayGenerated = isPathwayGeneratedNode(n);
+                const activeRouteNodeIds = highlightedRoute?.routeNodeIds;
+                const isRouteNode = !!activeRouteNodeIds?.includes(n.id);
+                const deEmphasizeForRoute = !!activeRouteNodeIds?.length && !isRouteNode && !isSel && !isMultiSel && tool === "select";
+                const nodeName = (n.name ?? "").trim();
+                const anonymousNode = !nodeName || /^(?:generated\s+)?(?:walking point|waypoint|path junction)(?:\s+\d+)?$/i.test(nodeName);
+                const nodeRadius = pathwayGenerated && !isSel && !isMultiSel ? 4 : 7;
                 const selectedPhysicalPathOwnsNode = Boolean(
                   pathwayGenerated
                   && n.generatedFromPathVertices?.some((ref) => selectedPhysicalPathIds.has(ref.pathId)),
@@ -2189,7 +2432,7 @@ export function Canvas({
                   return entranceDisplayName(entrance, (parent.entrances ?? []).findIndex((en) => en.id === entrance.id));
                 })();
                 return (
-                  <g key={n.id} data-testid="nav-node" data-entrance-linked={isEntranceLinked ? "true" : undefined} className="group/nav-node"
+                  <g key={n.id} data-testid="nav-node" data-node-id={n.id} data-entrance-linked={isEntranceLinked ? "true" : undefined} className="group/nav-node"
                     onMouseDown={(e) => { if (navGraphInteractive) onItemDown(e, "navNode", n.id, n.x, n.y); }}
                     onContextMenu={(e) => {
                       if (!navGraphInteractive) return;
@@ -2199,9 +2442,16 @@ export function Canvas({
                     }}
                     style={{
                       cursor: navGraphInteractive ? (pathwayGenerated ? "pointer" : tool === "select" ? "move" : cursor) : "default",
-                      pointerEvents: selectedPhysicalPathOwnsNode ? "none" : undefined,
+                      // A Building Entrance is the single admin-visible
+                      // representation of its canonical graph anchor. In
+                      // normal Select, let the physical Entrance hit target
+                      // receive the click; Connect/marker modes still need
+                      // the internal node as a routing target.
+                      pointerEvents: selectedPhysicalPathOwnsNode || (isEntranceLinked && tool === "select") ? "none" : undefined,
+                      ...(deEmphasizeForRoute ? { opacity: 0.2 } : pathwayGenerated && !isSel && !isMultiSel ? { opacity: 0.62 } : {}),
                     }}
                   >
+                    <title>{nodeName || "Walking Point"}</title>
                     {/* B5 Phase 6.8: invisible hit area matching NAV_NODE_HIT_THRESHOLD
                         (12) so Connect/Waypoint destination clicks are reliable —
                         the live preview snaps within the same radius, so the click
@@ -2237,15 +2487,13 @@ export function Canvas({
                         // ONE clean selection ring, sized to the entrance icon.
                         <circle cx={n.x} cy={n.y} r={12} fill="none" stroke="var(--accent)" strokeWidth={1.6} opacity={0.9} className="pointer-events-none" />
                       ) : (
-                        // Connected/normal: the tiny badge ring doubles as the
-                        // single hover highlight (one subtle cue, ~150ms).
-                        <g className="pointer-events-none">
-                          <circle cx={n.x} cy={n.y} r={4} fill="#16a34a" stroke="white" strokeWidth={1.5} opacity={0.95} />
-                          <circle cx={n.x} cy={n.y} r={6.5} fill="none" stroke="#16a34a" strokeWidth={1.1} opacity={0.55} className="transition-opacity duration-150 group-hover/nav-node:opacity-100" />
-                        </g>
+                        // Connected/normal: the physical Entrance marker is
+                        // the only visible representation. Keep the canonical
+                        // node in the graph without stacking a waypoint badge.
+                        null
                       )
                     ) : (
-                      <circle cx={n.x} cy={n.y} r={7} fill={n.color || "#16a34a"} stroke={isSel || isMultiSel ? "var(--accent)" : "white"} strokeWidth={2}
+                      <circle cx={n.x} cy={n.y} r={nodeRadius} fill={n.color || "#16a34a"} stroke={isSel || isMultiSel ? "var(--accent)" : "white"} strokeWidth={2}
                         opacity={dimmed ? 0.45 : 1} strokeDasharray={dimmed ? "3 2" : undefined} />
                     )}
                     {/* Compact type glyphs — one small path each, pointer-events none */}
@@ -2254,19 +2502,24 @@ export function Canvas({
                     {!isEntranceLinked && isSafeArea && <path d={`M${n.x},${n.y - 3.2} L${n.x + 2.6},${n.y - 1.6} L${n.x + 2.6},${n.y + 0.6} L${n.x},${n.y + 2.8} L${n.x - 2.6},${n.y + 0.6} L${n.x - 2.6},${n.y - 1.6} Z`} fill="#0d9488" className="pointer-events-none" />}
                     {!isEntranceLinked && isEntrance && <rect x={n.x - 2.4} y={n.y - 3.4} width={4.8} height={6.8} rx={0.8} fill="#2563eb" className="pointer-events-none" />}
                     {!isEntranceLinked && isDestination && <g className="pointer-events-none"><circle cx={n.x} cy={n.y} r={1.6} fill="#7c3aed" /><circle cx={n.x} cy={n.y} r={3.6} fill="none" stroke="#7c3aed" strokeWidth={1.1} /></g>}
-                    {zoom > 0.6 && (
-                      <text x={n.x} y={n.y + 20} textAnchor="middle" fill={n.color || "#16a34a"} fontSize={9} fontWeight={700}
-                        stroke="rgba(240,238,234,0.95)" strokeWidth={3} paintOrder="stroke"
-                        className="pointer-events-none select-none">{entranceDisplay ?? n.name}</text>
-                    )}
+                    {zoom > 0.6 && !isEntranceLinked && !anonymousNode && (() => {
+                      const nodeLabel = nodeName;
+                      const displayLabel = nodeLabel.length > 22 ? `${nodeLabel.slice(0, 21)}…` : nodeLabel;
+                      return (
+                        <g className="pointer-events-none select-none">
+                          <text x={n.x} y={n.y + 22} textAnchor="middle" fill="#1f2937" fontSize={9} fontWeight={700}
+                            stroke="rgba(255,255,255,0.92)" strokeWidth={2.6} paintOrder="stroke" strokeLinejoin="round">
+                            {displayLabel}
+                          </text>
+                        </g>
+                      );
+                    })()}
                   </g>
                 );
               })}
 
-              {/* Connect Path preview — the dashed line from the start waypoint
-                  to the pointer, plus the would-be waypoint node at the pointer
-                  (also shown before the first click: hovering empty space with
-                  Connect Path active previews that a click places a Waypoint). */}
+              {/* Connect Path preview — a temporary dashed line from the start
+                  waypoint to the current node, Entrance, Pathway, or cursor. */}
               {navGraphInteractive && navPreview && (() => {
                 const start = renderNavNodes.find((n) => n.id === navConnectStartId);
                 // B5 Phase 6.9 (Floor parity): render the FULL proposed pin shape
@@ -2276,7 +2529,19 @@ export function Canvas({
                 const proposed = navPreviewPins ?? [];
                 let previewPoints: { x: number; y: number }[];
                 if (start) {
-                  previewPoints = [{ x: start.x, y: start.y }, ...navConnectBends, ...proposed];
+                  const previewEnd = proposed[proposed.length - 1];
+                  const entranceTarget = previewEnd
+                    ? renderNavNodes.find((node) => node.entranceId && !node.floorId
+                      && node.x === previewEnd.x && node.y === previewEnd.y)
+                    : undefined;
+                  // Entrance connectors are resolved by the shared outward
+                  // geometry helper. Do not prepend stale manually pinned
+                  // bends to that authoritative preview: commit and later
+                  // reconciliation intentionally use only the helper route.
+                  const entranceRoute = Boolean(start.entranceId && !start.floorId)
+                    || Boolean(entranceTarget)
+                    || Boolean(navEntranceHover);
+                  previewPoints = [{ x: start.x, y: start.y }, ...(entranceRoute ? [] : navConnectBends), ...proposed];
                 } else {
                   previewPoints = [navPreview];
                 }
@@ -2285,6 +2550,14 @@ export function Canvas({
                 // the ghost waypoint node on top of the entrance's single target
                 // ring — keep only the dashed edge preview line.
                 const overEntranceTarget = !!navEntranceHover;
+                // Existing Walking Points already render their own destination
+                // highlight. Do not draw a second ghost dot on the same node;
+                // the dashed preview still terminates there.
+                const overNodeTarget = Boolean(
+                  start
+                  && ringPos
+                  && renderNavNodes.some((node) => node.id !== start.id && node.x === ringPos.x && node.y === ringPos.y),
+                );
                 return (
                   <g data-testid="nav-path-preview" className="pointer-events-none">
                     {start && (
@@ -2296,7 +2569,7 @@ export function Canvas({
                         ))}
                       </>
                     )}
-                    {!overEntranceTarget && ringPos && (
+                    {!overEntranceTarget && !overNodeTarget && ringPos && (
                       <>
                         <circle cx={ringPos.x} cy={ringPos.y} r={9} fill="none" stroke={connectBlocked ? "#dc2626" : "#16a34a"} strokeWidth={1.5} strokeDasharray="3 3" opacity={0.9} />
                         <circle cx={ringPos.x} cy={ringPos.y} r={3.5} fill={connectBlocked ? "#dc2626" : "#16a34a"} opacity={0.95} />
@@ -2323,8 +2596,9 @@ export function Canvas({
                 fill="#7c3aed" opacity={0.95} />
               <text x={edgeSnapPreview.nearest.x} y={edgeSnapPreview.nearest.y - 14}
                 textAnchor="middle" fontSize={10} fontWeight={600} fill="#7c3aed" opacity={0.95}
-                style={{ fontFamily: "var(--font-sans)" }}>
-                Insert waypoint into connection
+                style={{ fontFamily: "var(--font-sans)" }}
+                data-testid={edgeSnapPreview.helper ? "entrance-edge-helper" : "edge-snap-helper"}>
+                {edgeSnapPreview.helper ?? "Add connection point"}
               </text>
             </g>
           )}
@@ -2348,8 +2622,128 @@ export function Canvas({
               })}
             </g>
           )}
+
+          {/* Entrance endpoint priority: the physical Entrance remains the
+              primary Select target even when an auto-managed connector's
+              transparent hit stroke reaches the same coordinates. */}
+          {navGraphInteractive && tool === "select" && (
+            <g data-testid="entrance-hit-priority-layer">
+              {buildings.flatMap((building) => (building.entrances ?? []).map((entrance) => {
+                const position = entranceWorldPosition(building, entrance);
+                return (
+                  <circle
+                    key={`entrance-hit-${building.id}-${entrance.id}`}
+                    data-testid="entrance-hit-priority"
+                    data-entrance-id={entrance.id}
+                    cx={position.x}
+                    cy={position.y}
+                    r={15}
+                    fill="transparent"
+                    style={{ cursor: building.locked ? "default" : "pointer" }}
+                    onMouseDown={(event) => onEntranceDown?.(event, building.id, entrance.id, position.x, position.y)}
+                  />
+                );
+              }))}
+            </g>
+          )}
+          {/* Keep route endpoint/transition controls in the final world-space
+              layer so nav hit targets and physical artwork cannot cover them. */}
+          {highlightedRoute && (
+            <>
+              {!!highlightedRoute.routeNodeIds?.length && highlightedRoute.waypoints.length > 0 && (
+                <g data-testid="test-route-active-overlay" className="pointer-events-none">
+                  <polyline
+                    points={highlightedRoute.waypoints.map((w) => `${w.x},${w.y}`).join(" ")}
+                    fill="none"
+                    stroke={highlightedRoute.color}
+                    strokeWidth={8}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    opacity={0.28}
+                  />
+                  <polyline
+                    points={highlightedRoute.waypoints.map((w) => `${w.x},${w.y}`).join(" ")}
+                    fill="none"
+                    stroke={highlightedRoute.color}
+                    strokeWidth={4}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeDasharray="12 8"
+                    opacity={1}
+                  >
+                    <animate attributeName="stroke-dashoffset" from="0" to="-40" dur="1.2s" repeatCount="indefinite" />
+                  </polyline>
+                  {routeDirectionMarkers(highlightedRoute.waypoints).map((marker, index) => (
+                    <path
+                      key={`active-route-arrow-${index}`}
+                      d="M -5 -4 L 5 0 L -5 4 Z"
+                      transform={`translate(${marker.x} ${marker.y}) rotate(${marker.angle})`}
+                      fill={highlightedRoute.color}
+                      stroke="white"
+                      strokeWidth={1}
+                      opacity={1}
+                    />
+                  ))}
+                </g>
+              )}
+              {(highlightedRoute.endpointMarkers ?? []).map((marker) => (
+                <RouteEndpointMarker key={`route-endpoint-${marker.kind}`} {...marker} color={highlightedRoute.color} />
+              ))}
+              {(highlightedRoute.transitionMarkers ?? []).map((marker) => (
+                <RouteTransitionMarker key={marker.id} marker={marker} zoom={zoom} viewport={{ width: cw, height: ch, pan }} onClick={onRouteTransitionClick} />
+              ))}
+            </>
+          )}
         </g>
       </svg>
+
+      {(() => {
+        const stair = buildings.flatMap((building) => (building.exteriorEmergencyStairs ?? []).map((item) => ({ building, item })))
+          .find(({ item }) => item.id === exteriorQuickNavKey)?.item;
+        const building = buildings.find((candidate) => (candidate.exteriorEmergencyStairs ?? []).some((item) => item.id === exteriorQuickNavKey));
+        if (!stair || !building || stair.state === "closed" || stair.servedFloorIds.length <= 1) return null;
+        const pos = exteriorEmergencyStairWorldPosition(building, stair);
+        const floors = building.floors.filter((floor) => stair.servedFloorIds.includes(floor.id));
+        const rect = containerRef.current?.getBoundingClientRect();
+        const svgRect = svgRef.current?.getBoundingClientRect();
+        if (!rect || !svgRect) return null;
+        const scale = Math.min(svgRect.width / cw, svgRect.height / ch);
+        const offsetX = (svgRect.width - cw * scale) / 2;
+        const offsetY = (svgRect.height - ch * scale) / 2;
+        const anchorX = svgRect.left - rect.left + offsetX + (pan.x + pos.x * zoom) * scale;
+        const anchorY = svgRect.top - rect.top + offsetY + (pan.y + pos.y * zoom) * scale;
+        const popupWidth = 206;
+        const popupHeight = Math.min(250, 38 + floors.length * 30);
+        const openLeft = anchorX > rect.width - popupWidth - 28;
+        const left = Math.max(8, Math.min(rect.width - popupWidth - 8, anchorX + (openLeft ? -popupWidth - 12 : 12)));
+        const top = Math.max(8, Math.min(rect.height - popupHeight - 8, anchorY - popupHeight / 2));
+        return <div
+          data-testid="exterior-emergency-stair-quick-nav-popover"
+          className="absolute z-[45] w-[206px] rounded-lg border border-red-200/70 bg-card/95 p-1.5 text-foreground shadow-lg backdrop-blur-sm"
+          style={{ left, top }}
+          onMouseEnter={cancelExteriorQuickNavClose}
+          onMouseLeave={scheduleExteriorQuickNavClose}
+          onMouseDown={(event) => event.stopPropagation()}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") {
+              event.preventDefault();
+              closeExteriorQuickNav();
+            }
+          }}
+        >
+          <div className="mb-1 px-1 text-[8px] font-bold uppercase tracking-[0.12em] text-muted-foreground">Connected Floors</div>
+          <div className="max-h-[214px] space-y-0.5 overflow-y-auto">
+            {floors.map((floor) => {
+              const occurrence = floor.stairs.find((item) => item.exteriorEmergencyStairId === stair.id);
+              if (!occurrence) return null;
+              return <button key={floor.id} type="button" className="flex w-full items-center gap-1 rounded-md border border-border/70 bg-background/60 px-1.5 py-1 text-left text-[10px] font-semibold transition-colors hover:border-red-300 hover:bg-red-50/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400 dark:hover:bg-red-950/20" onClick={() => { closeExteriorQuickNav(); onExteriorEmergencyStairFloorNavigate?.(building.id, floor.id, stair.id); }}>
+                <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded bg-red-100 text-[9px] text-red-700 dark:bg-red-950/50 dark:text-red-300">E</span>
+                <span className="min-w-0 flex-1 truncate">{floor.label} · {occurrence.label || stair.label}</span>
+              </button>;
+            })}
+          </div>
+        </div>;
+      })()}
 
       {/* Layer overlay animation */}
       <AnimatePresence>

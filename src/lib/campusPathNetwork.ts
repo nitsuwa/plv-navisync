@@ -21,6 +21,23 @@ export function pathNetworkSelectionIds(
     .map((candidate) => candidate.id);
 }
 
+/** Stable editor-only label for a pathway member. Unnamed members are numbered
+ * within their explicit network without mutating persisted pathway names. */
+export function pathNetworkMemberLabel(paths: CampusPath[], pathId: string): string {
+  const path = paths.find((candidate) => candidate.id === pathId);
+  if (!path) return "Pathway";
+  if (path.name?.trim()) return path.name.trim();
+  const kind = path.type === "road" || path.type === "driveway"
+    ? "Road"
+    : path.type === "accessible"
+      ? "Accessible Path"
+      : "Walkway";
+  if (!path.pathNetworkId) return kind;
+  const members = paths.filter((candidate) => candidate.pathNetworkId === path.pathNetworkId);
+  const memberIndex = members.findIndex((candidate) => candidate.id === path.id);
+  return `${kind} ${Math.max(1, memberIndex + 1)}`;
+}
+
 /**
  * Translate one physical Pathway while preserving connected shared junctions.
  * Only matching shared vertices in other Pathways follow; their remaining

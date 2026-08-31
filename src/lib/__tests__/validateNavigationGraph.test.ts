@@ -1,6 +1,5 @@
 import { describe, it, expect } from "vitest";
 import { validateNavigationGraph } from "../validateNavigationGraph";
-import { resolveIssueTarget } from "../issueLocate";
 import type { Campus, NavigationNode, NavigationEdge, CampusBuilding } from "../../components/map-builder/types";
 
 // ── Helpers ──────────────────────────────────────────────────────────────
@@ -113,6 +112,28 @@ describe("validateNavigationGraph", () => {
     expect(result.issues.find((i) => i.type === "nav_orphan_node")?.nodeId).toBe("orphan-1");
   });
 
+  it("targets an orphan Room node at the physical Room with human-readable copy", () => {
+    const campus = baseCampus({
+      buildings: [building({
+        id: "b1",
+        floors: [{
+          id: "f1",
+          label: "Ground Floor",
+          rooms: [{ id: "r1", name: "  ", type: "classroom", x: 20, y: 20, w: 80, h: 50, floorId: "f1", buildingId: "b1" }],
+          doors: [], walls: [], windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [],
+        } as any],
+      })],
+      navNodes: [node({ id: "room-node", type: "room_access", buildingId: "b1", floorId: "f1", roomId: "r1" })],
+      navEdges: [],
+    });
+    const issue = validateNavigationGraph(campus).issues.find((item) => item.type === "nav_orphan_node");
+    expect(issue).toMatchObject({
+      target: { scope: "floor", mode: "design", buildingId: "b1", floorId: "f1", selectionType: "room", id: "r1" },
+    });
+    expect(issue?.message).toContain('Room "Room 1" needs an entrance Door.');
+    expect(issue?.message).toContain("Link a Door to this Room so routes know where to enter.");
+  });
+
   it("flags missing-node edge as error", () => {
     const campus = baseCampus({
       navNodes: [node({ id: "n1", type: "outdoor" })],
@@ -121,6 +142,15 @@ describe("validateNavigationGraph", () => {
     const result = validateNavigationGraph(campus);
     expect(result.issues.some((i) => i.type === "nav_broken_edge" && i.severity === "error")).toBe(true);
     expect(result.status).toBe("not_ready");
+  });
+
+  it("does not mark nodes on a closed persisted edge as orphaned", () => {
+    const campus = baseCampus({
+      navNodes: [node({ id: "n1", type: "outdoor" }), node({ id: "n2", type: "outdoor", x: 100 })],
+      navEdges: [edge({ id: "closed-edge", startNodeId: "n1", endNodeId: "n2", closed: true })],
+    });
+    const result = validateNavigationGraph(campus);
+    expect(result.issues.filter((issue) => issue.type === "nav_orphan_node")).toHaveLength(0);
   });
 
   it("flags duplicate edge as warning", () => {
@@ -145,7 +175,29 @@ describe("validateNavigationGraph", () => {
       navEdges: [],
     });
     const result = validateNavigationGraph(campus);
-    expect(result.issues.some((i) => i.type === "nav_entrance_door_missing")).toBe(true);
+    expect(result.issues.find((i) => i.type === "nav_entrance_door_missing")).toMatchObject({
+      target: { scope: "campus", mode: "navigation", buildingId: "b1", selectionType: "entrance", id: "e1" },
+    });
+  });
+
+  it("flags an entrance whose linked Door has no indoor walking connection", () => {
+    const campus = baseCampus({
+      buildings: [building({
+        id: "b1",
+        floors: [{ id: "f1", doors: [{ id: "d1", label: "Main Door" } as any], rooms: [], walls: [], windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [] } as any],
+        entrances: [{ id: "e1", buildingId: "b1", edge: "bottom", offset: 0.5 }],
+      })],
+      navNodes: [
+        node({ id: "entrance-1", type: "entrance", buildingId: "b1", entranceId: "e1" }),
+        node({ id: "door-1", type: "hallway", buildingId: "b1", floorId: "f1", doorId: "d1" }),
+      ],
+      navEdges: [edge({ id: "transition", startNodeId: "entrance-1", endNodeId: "door-1", type: "entrance_transition" })],
+    });
+    const result = validateNavigationGraph(campus);
+    expect(result.issues.find((issue) => issue.type === "nav_entrance_door_not_connected")).toMatchObject({
+      severity: "warning",
+      target: { selectionType: "entrance", id: "e1" },
+    });
   });
 
   it("does not flag entrance bridge when building has no floors", () => {
@@ -313,6 +365,46 @@ describe("validateNavigationGraph", () => {
     });
   });
 
+  it("linked Door orphan issue targets the physical Door for Properties", () => {
+    const campus = baseCampus({
+      buildings: [building({
+        id: "b1",
+        floors: [{ id: "f1", doors: [{ id: "d1", label: "Main Door" } as any], rooms: [], walls: [], windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [] } as any],
+      })],
+      navNodes: [node({ id: "door-node", type: "room_access", buildingId: "b1", floorId: "f1", doorId: "d1" })],
+      navEdges: [],
+    });
+    const issue = validateNavigationGraph(campus).issues.find((i) => i.type === "nav_orphan_node")!;
+    expect(issue.message).toContain("not connected to the indoor Walking Network");
+    expect(issue.message).toContain('Door "Main Door"');
+    expect(issue.message).not.toContain("d1");
+    expect(issue.target).toEqual({
+      scope: "floor",
+      mode: "design",
+      buildingId: "b1",
+      floorId: "f1",
+      selectionType: "door",
+      id: "d1",
+    });
+  });
+
+  it("Entrance transition does not satisfy the Door's indoor connection requirement", () => {
+    const campus = baseCampus({
+      buildings: [building({
+        id: "b1",
+        floors: [{ id: "f1", doors: [{ id: "d1" } as any], rooms: [], walls: [], windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [] } as any],
+        entrances: [{ id: "e1", buildingId: "b1", edge: "bottom", offset: 0.5 }],
+      })],
+      navNodes: [
+        node({ id: "entrance-node", type: "entrance", buildingId: "b1", entranceId: "e1" }),
+        node({ id: "door-node", type: "room_access", buildingId: "b1", floorId: "f1", doorId: "d1" }),
+      ],
+      navEdges: [edge({ id: "bridge", startNodeId: "entrance-node", endNodeId: "door-node", type: "entrance_transition" })],
+    });
+    const issue = validateNavigationGraph(campus).issues.find((i) => i.type === "nav_orphan_node" && i.nodeId === "door-node");
+    expect(issue?.target).toMatchObject({ selectionType: "door", id: "d1" });
+  });
+
   it("broken door reference targets the broken nav node (door is gone)", () => {
     const campus = baseCampus({
       buildings: [building({ id: "b1", floors: [{ id: "f1", doors: [], rooms: [], walls: [], windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [] } as any] })],
@@ -388,6 +480,28 @@ describe("validateNavigationGraph", () => {
     });
   });
 
+  it("allows an indoor edge to cross its Door aperture", () => {
+    const campus = baseCampus({
+      buildings: [building({
+        id: "b1",
+        floors: [{
+          id: "f1",
+          doors: [{ id: "d1", x: 150, y: 50, width: 30, wallId: "w1" } as any],
+          walls: [{ id: "w1", x1: 50, y1: 50, x2: 250, y2: 50, thickness: 4 } as any],
+          rooms: [], windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [],
+        } as any],
+      })],
+      navNodes: [
+        node({ id: "n1", type: "hallway", buildingId: "b1", floorId: "f1", x: 150, y: 20 }),
+        node({ id: "n2", type: "room_access", buildingId: "b1", floorId: "f1", x: 150, y: 80 }),
+      ],
+      navEdges: [edge({ id: "e1", startNodeId: "n1", endNodeId: "n2" })],
+    });
+    expect(validateNavigationGraph(campus).issues.some(
+      (issue) => issue.type === "nav_edge_blocked_by_obstacle" && issue.edgeId === "e1",
+    )).toBe(false);
+  });
+
   it("outdoor blocked edge targets a campus-scoped nav edge", () => {
     const campus = baseCampus({
       // Building straddles the y=0 polyline so the straight outdoor edge
@@ -442,41 +556,22 @@ describe("B7 Phase 1 — locatable disconnected-component issues", () => {
     });
   }
 
-  it("outdoor-no-indoor-connection warning targets a representative outdoor node", () => {
+  it("outdoor-no-indoor-connection warning remains campus-level", () => {
     const issue = validateNavigationGraph(disconnectedCampus()).issues.find(
       (i) => i.type === "nav_disconnected_component" && i.severity === "warning",
     )!;
     expect(issue).toBeTruthy();
-    expect(issue.target).toMatchObject({
-      scope: "campus",
-      mode: "navigation",
-      selectionType: "navNode",
-    });
-    expect(["outdoor-1", "outdoor-2"]).toContain(issue.target!.id);
-    expect(issue.nodeId).toBe(issue.target!.id);
+    expect(issue.target).toBeUndefined();
+    expect(issue.nodeId).toBeUndefined();
   });
 
-  it("disconnected-component info issue carries a representative node target", () => {
+  it("disconnected-component info issue remains campus-level", () => {
     const issue = validateNavigationGraph(disconnectedCampus()).issues.find(
       (i) => i.type === "nav_disconnected_component" && i.severity === "info",
     )!;
     expect(issue).toBeTruthy();
-    expect(issue.target?.selectionType).toBe("navNode");
-    // The target references a REAL node that exists in the campus graph.
-    const ids = disconnectedCampus().navNodes!.map((n) => n.id);
-    expect(ids).toContain(issue.target!.id);
-  });
-
-  it("disconnected-component targets resolve through resolveIssueTarget", () => {
-    const issues = validateNavigationGraph(disconnectedCampus()).issues.filter(
-      (i) => i.type === "nav_disconnected_component",
-    );
-    for (const issue of issues) {
-      const resolved = resolveIssueTarget(issue);
-      expect(resolved).not.toBeNull();
-      expect(resolved).toEqual(issue.target);
-      expect(resolved!.selectionType).toBe("navNode");
-    }
+    expect(issue.target).toBeUndefined();
+    expect(issue.nodeId).toBeUndefined();
   });
 });
 

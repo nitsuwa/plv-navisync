@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { roomsOverlap, findOverlappingRoom, snapRoomToNearbyEdges, computeRoomAlignmentGuides, computeAlignmentGuides, computeResizeAlignmentGuides, computeResizeLimits, snapResizeEdges } from "../roomOverlap";
+import { roomsOverlap, findOverlappingRoom, snapRoomToNearbyEdges, computeRoomAlignmentGuides, computeAlignmentGuides, computeResizeAlignmentGuides, computeResizeLimits, snapResizeEdges, resolveStableAlignmentAxis } from "../roomOverlap";
 import type { FloorRoom } from "../../components/map-builder/types";
 
 function makeRoom(overrides: Partial<FloorRoom> = {}): FloorRoom {
@@ -156,6 +156,13 @@ describe("snapRoomToNearbyEdges", () => {
     const candidate = { x: 125, y: 10, w: 50, h: 80, id: "r2" };
     const result = snapRoomToNearbyEdges(candidate, rooms);
     expect(result.x).toBe(125);
+  });
+
+  it("releases the lighter edge snap once the cursor is clearly outside the 8-unit assistance range", () => {
+    const rooms = [makeRoom({ id: "r1", x: 10, y: 10, w: 100, h: 80 })];
+    const candidate = { x: 119, y: 10, w: 50, h: 80, id: "r2" };
+    const result = snapRoomToNearbyEdges(candidate, rooms);
+    expect(result.x).toBe(119);
   });
 
   it("does not snap to itself", () => {
@@ -474,6 +481,25 @@ describe("computeAlignmentGuides (universal move/placement alignment)", () => {
     expect(result.guides.length).toBe(0);
     expect(result.snappedX).toBe(400);
     expect(result.snappedY).toBe(400);
+  });
+
+  it("keeps a snap target stable while raw movement stays within release hysteresis", () => {
+    const guide = { type: "v" as const, pos: 100, x1: 100, y1: 0, x2: 100, y2: 400 };
+    const first = resolveStableAlignmentAxis(103, 100, guide, null);
+    const next = resolveStableAlignmentAxis(106, 108, { ...guide, pos: 108, x1: 108, x2: 108 }, first.lock);
+    expect(first.snapped).toBe(true);
+    expect(next.lock).toBe(first.lock);
+    expect(next.position).toBe(100);
+    expect(next.delta).toBe(-6);
+  });
+
+  it("releases a locked target only after the raw position leaves the release range", () => {
+    const guide = { type: "v" as const, pos: 100, x1: 100, y1: 0, x2: 100, y2: 400 };
+    const first = resolveStableAlignmentAxis(103, 100, guide, null);
+    const released = resolveStableAlignmentAxis(109, 109, undefined, first.lock);
+    expect(released.lock).toBeNull();
+    expect(released.snapped).toBe(false);
+    expect(released.position).toBe(109);
   });
 });
 

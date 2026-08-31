@@ -48,13 +48,14 @@ export function resolvePublishTarget(wasPublished: boolean, force?: "publish" | 
 // ── Campus list search & filter ─────────────────────────────────────────────
 
 /** Status buckets used by the campus management list filter (mirrors card badges). */
-export type CampusStatusFilter = "all" | "published" | "draft" | "never";
+export type CampusStatusFilter = "all" | "published" | "draft" | "never" | "archived";
 
 /**
  * Classify a campus into a status bucket. Mirrors the card badge logic:
  * published / draft (was published, now draft) / never published.
  */
-export function campusStatusOf(c: Campus): "published" | "draft" | "never" {
+export function campusStatusOf(c: Campus): "published" | "draft" | "never" | "archived" {
+  if (c.status === "archived" || c.lifecycleStatus === "archived") return "archived";
   if (c.publishStatus === "published" || c.lifecycleStatus === "published") return "published";
   return c.lifecycleStatus === "unpublished" || !!c.publishedAt ? "draft" : "never";
 }
@@ -144,7 +145,11 @@ export function createCampusClone(
 
   // ── Unique name & code so repeated duplicates never collide ──
   const baseName = `${source.name} (Copy)`;
-  const baseCode = source.code ? `${source.code}-CP` : "";
+  // Campus codes are capped at 30 characters by the persistence contract.
+  // Reserve room for the copy suffix so duplicating a valid max-length code
+  // remains a valid operation instead of failing validation.
+  const sourceCode = source.code?.trim().toUpperCase() ?? "";
+  const baseCode = sourceCode ? `${sourceCode.slice(0, 27)}-CP` : "";
   let name = baseName;
   let code = baseCode;
   let n = 2;
@@ -159,6 +164,18 @@ export function createCampusClone(
   const floorMap = new Map<string, string>();
   const roomMap = new Map<string, string>();
   const fpMap = new Map<string, string>();
+  const wallMap = new Map<string, string>();
+  const doorMap = new Map<string, string>();
+  const windowMap = new Map<string, string>();
+  const furnitureMap = new Map<string, string>();
+  const stairMap = new Map<string, string>();
+  const exteriorStairMap = new Map<string, string>();
+  const rampMap = new Map<string, string>();
+  const elevatorMap = new Map<string, string>();
+  const labelMap = new Map<string, string>();
+  const vertexMap = new Map<string, string>();
+  const entranceMap = new Map<string, string>();
+  const circulationGroupMap = new Map<string, string>();
   const markerMap = new Map<string, string>();
   const pathMap = new Map<string, string>();
   const nodeMap = new Map<string, string>();
@@ -168,20 +185,47 @@ export function createCampusClone(
   const assemMap = new Map<string, string>();
   // Stairs/ramps/elevators share one id across floors of the same building
   const sharedMap = new Map<string, string>();
+  const pathNetworkMap = new Map<string, string>();
   const remapShared = (s: string) => {
     if (!sharedMap.has(s)) sharedMap.set(s, gen("sh"));
     return sharedMap.get(s)!;
   };
+  const remapPathNetwork = (s: string) => {
+    if (!pathNetworkMap.has(s)) pathNetworkMap.set(s, gen("pn"));
+    return pathNetworkMap.get(s)!;
+  };
+  const cloneId = gen("campus");
 
-  source.buildings.forEach((b) => bldMap.set(b.id, gen("bld")));
+  source.buildings.forEach((b) => {
+    bldMap.set(b.id, gen("bld"));
+    (b.entrances ?? []).forEach((entrance) => entranceMap.set(entrance.id, gen("ent")));
+    (b.circulationGroups ?? []).forEach((group) => circulationGroupMap.set(group.id, gen("cg")));
+    (b.exteriorEmergencyStairs ?? []).forEach((stair) => exteriorStairMap.set(stair.id, gen("exst")));
+  });
   source.buildings.forEach((b) => (Array.isArray(b.floors) ? b.floors : []).forEach((rawFloor) => {
     const f = normalizeFloor(rawFloor, { buildingId: b.id });
     floorMap.set(f.id, gen("fl"));
     f.rooms.forEach((r) => roomMap.set(r.id, gen("rm")));
-    f.paths.forEach((p) => fpMap.set(p.id, gen("fp")));
+    f.paths.forEach((p) => {
+      fpMap.set(p.id, gen("fp"));
+      (p.navigationVertexIds ?? []).forEach((vertexId) => vertexMap.set(vertexId, gen("nv")));
+    });
+    (f.walls ?? []).forEach((w) => wallMap.set(w.id, gen("w")));
+    (f.doors ?? []).forEach((d) => doorMap.set(d.id, gen("d")));
+    (f.windows ?? []).forEach((w) => windowMap.set(w.id, gen("wi")));
+    (f.furniture ?? []).forEach((fu) => furnitureMap.set(fu.id, gen("fu")));
+    (f.stairs ?? []).forEach((s) => stairMap.set(s.id, gen("st")));
+    (f.ramps ?? []).forEach((r) => rampMap.set(r.id, gen("ra")));
+    (f.elevators ?? []).forEach((e) => elevatorMap.set(e.id, gen("el")));
+    (f.labels ?? []).forEach((l) => labelMap.set(l.id, gen("lb")));
   }));
   source.markers.forEach((m) => markerMap.set(m.id, gen("mk")));
-  source.paths.forEach((p) => pathMap.set(p.id, gen("pt")));
+  source.paths.forEach((p) => {
+    pathMap.set(p.id, gen("pt"));
+    (p.navigationVertexIds ?? []).forEach((vertexId) => {
+      if (!vertexMap.has(vertexId)) vertexMap.set(vertexId, gen("nv"));
+    });
+  });
   (source.navNodes ?? []).forEach((nn) => nodeMap.set(nn.id, gen("nn")));
   (source.navEdges ?? []).forEach((e) => edgeMap.set(e.id, gen("ne")));
   (source.decorAssets ?? []).forEach((d) => decorMap.set(d.id, gen("da")));
@@ -190,11 +234,14 @@ export function createCampusClone(
 
   const clone: Campus = {
     ...structuredClone(source),
-    id: gen("campus"),
+    id: cloneId,
     name,
     code,
+    status: "active",
     publishStatus: "draft",
+    lifecycleStatus: "draft",
     visibleToStudents: false,
+    isDefault: false,
     createdAt: now,
     updatedAt: now,
     publishedAt: undefined,
@@ -203,7 +250,20 @@ export function createCampusClone(
       return {
         ...structuredClone(b),
         id: nbId,
-        entrances: (b.entrances ?? []).map((entrance) => ({ ...structuredClone(entrance), id: gen("ent"), buildingId: nbId })),
+        exteriorEmergencyStairs: (b.exteriorEmergencyStairs ?? []).map((stair) => ({
+          ...structuredClone(stair),
+          id: exteriorStairMap.get(stair.id) ?? gen("exst"),
+          buildingId: nbId,
+          sharedId: stair.sharedId ? remapShared(stair.sharedId) : undefined,
+          outdoorNodeId: stair.outdoorNodeId ? nodeMap.get(stair.outdoorNodeId) ?? stair.outdoorNodeId : undefined,
+          occurrenceIds: stair.occurrenceIds ? Object.fromEntries(Object.entries(stair.occurrenceIds).map(([floorId, occurrenceId]) => [floorMap.get(floorId) ?? floorId, stairMap.get(occurrenceId) ?? occurrenceId])) : undefined,
+        })),
+        circulationGroups: (b.circulationGroups ?? []).map((group) => ({
+          ...structuredClone(group),
+          id: circulationGroupMap.get(group.id) ?? gen("cg"),
+          buildingId: nbId,
+        })),
+        entrances: (b.entrances ?? []).map((entrance) => ({ ...structuredClone(entrance), id: entranceMap.get(entrance.id) ?? gen("ent"), buildingId: nbId })),
         entranceNodeId: b.entranceNodeId ? nodeMap.get(b.entranceNodeId) ?? b.entranceNodeId : undefined,
         floors: (Array.isArray(b.floors) ? b.floors : []).map((rawFloor) => {
           const f = normalizeFloor(rawFloor, { buildingId: b.id });
@@ -218,32 +278,58 @@ export function createCampusClone(
               buildingId: nbId,
               floorId: nfId,
               accessNodeId: r.accessNodeId ? nodeMap.get(r.accessNodeId) ?? r.accessNodeId : undefined,
+              accessDoorId: r.accessDoorId ? doorMap.get(r.accessDoorId) ?? r.accessDoorId : undefined,
+              accessDoorIds: r.accessDoorIds?.map((doorId) => doorMap.get(doorId) ?? doorId),
             })),
-            paths: f.paths.map((p) => ({ ...structuredClone(p), id: fpMap.get(p.id)! })),
+            paths: f.paths.map((p) => ({
+              ...structuredClone(p),
+              id: fpMap.get(p.id)!,
+              navigationVertexIds: p.navigationVertexIds?.map((vertexId) => vertexMap.get(vertexId) ?? vertexId),
+              pathNetworkId: p.pathNetworkId ? remapPathNetwork(p.pathNetworkId) : undefined,
+            })),
             // Older persisted campuses may predate these floor collections — guard with ?? []
-            walls: (f.walls ?? []).map((w) => ({ ...structuredClone(w), id: gen("w") })),
-            doors: (f.doors ?? []).map((d) => ({ ...structuredClone(d), id: gen("d") })),
-            windows: (f.windows ?? []).map((w) => ({ ...structuredClone(w), id: gen("wi") })),
-            furniture: (f.furniture ?? []).map((fu) => ({ ...structuredClone(fu), id: gen("fu") })),
-            stairs: (f.stairs ?? []).map((s) => ({ ...structuredClone(s), id: gen("st"), sharedId: s.sharedId ? remapShared(s.sharedId) : undefined })),
-            ramps: (f.ramps ?? []).map((r) => ({ ...structuredClone(r), id: gen("ra"), sharedId: r.sharedId ? remapShared(r.sharedId) : undefined })),
-            elevators: (f.elevators ?? []).map((e) => ({ ...structuredClone(e), id: gen("el"), sharedId: e.sharedId ? remapShared(e.sharedId) : undefined })),
-            labels: (f.labels ?? []).map((l) => ({ ...structuredClone(l), id: gen("lb") })),
+            walls: (f.walls ?? []).map((w) => ({
+              ...structuredClone(w),
+              id: wallMap.get(w.id)!,
+              startAnchor: w.startAnchor ? { ...w.startAnchor, roomId: roomMap.get(w.startAnchor.roomId) ?? w.startAnchor.roomId } : undefined,
+              endAnchor: w.endAnchor ? { ...w.endAnchor, roomId: roomMap.get(w.endAnchor.roomId) ?? w.endAnchor.roomId } : undefined,
+            })),
+            doors: (f.doors ?? []).map((d) => ({ ...structuredClone(d), id: doorMap.get(d.id)!, wallId: d.wallId ? wallMap.get(d.wallId) ?? d.wallId : undefined })),
+            windows: (f.windows ?? []).map((w) => ({ ...structuredClone(w), id: windowMap.get(w.id)!, wallId: w.wallId ? wallMap.get(w.wallId) ?? w.wallId : undefined })),
+            furniture: (f.furniture ?? []).map((fu) => ({ ...structuredClone(fu), id: furnitureMap.get(fu.id)! })),
+            stairs: (f.stairs ?? []).map((s) => ({ ...structuredClone(s), id: stairMap.get(s.id)!, sharedId: s.sharedId ? remapShared(s.sharedId) : undefined, exteriorEmergencyStairId: s.exteriorEmergencyStairId ? exteriorStairMap.get(s.exteriorEmergencyStairId) ?? s.exteriorEmergencyStairId : undefined })),
+            ramps: (f.ramps ?? []).map((r) => ({ ...structuredClone(r), id: rampMap.get(r.id)!, sharedId: r.sharedId ? remapShared(r.sharedId) : undefined })),
+            elevators: (f.elevators ?? []).map((e) => ({ ...structuredClone(e), id: elevatorMap.get(e.id)!, sharedId: e.sharedId ? remapShared(e.sharedId) : undefined })),
+            labels: (f.labels ?? []).map((l) => ({ ...structuredClone(l), id: labelMap.get(l.id)! })),
           };
         }),
       };
     }),
     markers: source.markers.map((m) => ({ ...structuredClone(m), id: markerMap.get(m.id)! })),
-    paths: source.paths.map((p) => ({ ...structuredClone(p), id: pathMap.get(p.id)! })),
+    paths: source.paths.map((p) => ({
+      ...structuredClone(p),
+      id: pathMap.get(p.id)!,
+      navigationVertexIds: p.navigationVertexIds?.map((vertexId) => vertexMap.get(vertexId) ?? vertexId),
+      pathNetworkId: p.pathNetworkId ? remapPathNetwork(p.pathNetworkId) : undefined,
+    })),
     navNodes: (source.navNodes ?? []).map((nn) => ({
       ...structuredClone(nn),
       id: nodeMap.get(nn.id)!,
+      campusId: cloneId,
       buildingId: nn.buildingId ? bldMap.get(nn.buildingId) ?? nn.buildingId : undefined,
       floorId: nn.floorId ? floorMap.get(nn.floorId) ?? nn.floorId : undefined,
+      entranceId: nn.entranceId ? entranceMap.get(nn.entranceId) ?? nn.entranceId : undefined,
       transitionSharedId: nn.transitionSharedId ? remapShared(nn.transitionSharedId) : undefined,
+      roomId: nn.roomId ? roomMap.get(nn.roomId) ?? nn.roomId : undefined,
+      doorId: nn.doorId ? doorMap.get(nn.doorId) ?? nn.doorId : undefined,
+      stairId: nn.stairId ? stairMap.get(nn.stairId) ?? nn.stairId : undefined,
+      exteriorEmergencyStairId: nn.exteriorEmergencyStairId ? exteriorStairMap.get(nn.exteriorEmergencyStairId) ?? nn.exteriorEmergencyStairId : undefined,
+      elevatorId: nn.elevatorId ? elevatorMap.get(nn.elevatorId) ?? nn.elevatorId : undefined,
+      rampId: nn.rampId ? rampMap.get(nn.rampId) ?? nn.rampId : undefined,
       generatedFromPathVertices: nn.generatedFromPathVertices?.map((ref) => ({
         ...ref,
-        pathId: pathMap.get(ref.pathId) ?? ref.pathId,
+        pathId: pathMap.get(ref.pathId) ?? fpMap.get(ref.pathId) ?? ref.pathId,
+        vertexId: vertexMap.get(ref.vertexId) ?? ref.vertexId,
       })),
     })),
     navEdges: (source.navEdges ?? []).map((e) => ({
@@ -251,7 +337,9 @@ export function createCampusClone(
       id: edgeMap.get(e.id)!,
       startNodeId: nodeMap.get(e.startNodeId) ?? e.startNodeId,
       endNodeId: nodeMap.get(e.endNodeId) ?? e.endNodeId,
-      generatedFromPathIds: e.generatedFromPathIds?.map((pathId) => pathMap.get(pathId) ?? pathId),
+      generatedFromPathIds: e.generatedFromPathIds?.map((pathId) => pathMap.get(pathId) ?? fpMap.get(pathId) ?? pathId),
+      pathJunctionId: e.pathJunctionId ? nodeMap.get(e.pathJunctionId) ?? e.pathJunctionId : undefined,
+      pathJunctionIds: e.pathJunctionIds?.map((junctionId) => nodeMap.get(junctionId) ?? junctionId),
     })),
     routes: (source.routes ?? []).map((r) => ({
       ...structuredClone(r),

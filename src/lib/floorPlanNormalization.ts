@@ -157,15 +157,22 @@ export function normalizeFloor(input: Partial<FloorPlan> | null | undefined, def
     gridSize: normalizeGridSize(source.gridSize),
     backgroundImage: normalizeFloorPlanBackground(source.backgroundImage, canvas.w, canvas.h),
     calibration: normalizeCalibration(source.calibration),
-    rooms: arrayCopy<FloorPlan["rooms"][number]>(source.rooms).map((room, index) => ({
-      ...room,
-      buildingId: room.buildingId ?? buildingId,
-      floorId: room.floorId ?? id,
-      rotation: normalizedNumber(room.rotation, 0),
-      zOrder: normalizedNumber(room.zOrder, index),
-      visible: room.visible !== false,
-      locked: room.locked === true,
-    })),
+    rooms: arrayCopy<FloorPlan["rooms"][number]>(source.rooms).map((room, index) => {
+      const accessDoorIds = Array.from(new Set([
+        ...(room.accessDoorId ? [room.accessDoorId] : []),
+        ...(Array.isArray(room.accessDoorIds) ? room.accessDoorIds : []),
+      ].filter((doorId): doorId is string => typeof doorId === "string" && doorId.trim().length > 0)));
+      return {
+        ...room,
+        ...(Array.isArray(room.accessDoorIds) ? { accessDoorIds: accessDoorIds.length > 0 ? accessDoorIds : undefined } : {}),
+        buildingId: room.buildingId ?? buildingId,
+        floorId: room.floorId ?? id,
+        rotation: normalizedNumber(room.rotation, 0),
+        zOrder: normalizedNumber(room.zOrder, index),
+        visible: room.visible !== false,
+        locked: room.locked === true,
+      };
+    }),
     paths: arrayCopy<FloorPlan["paths"][number]>(source.paths),
     walls: normalizedWalls.walls,
     doors: arrayCopy<FloorPlan["doors"][number]>(source.doors).map((item, index) => ({

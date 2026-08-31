@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, act, within } from "@testing-library/react";
+import { cleanup, render, screen, act, fireEvent, within, waitFor } from "@testing-library/react";
 import { toast } from "sonner";
 import { useState } from "react";
 import { FloorEditor } from "../FloorEditor";
@@ -193,6 +193,30 @@ describe("FloorEditor Issues panel — canonical campus issues for the current f
     act(() => { screen.getByTestId("issues-toolbar").click(); });
     expect(screen.getByText(/Room is outside the floor canvas/)).toBeTruthy();
   });
+
+  it("does not report a missing Stair continuation when the authored edge is present", () => {
+    const floors = [
+      floor({
+        id: "f1", number: 1, label: "Ground Floor",
+        stairs: [{ id: "s1", x: 20, y: 20, width: 24, height: 32, rotation: 0, direction: "up", label: "Stair", sharedId: "stair-core" } as any],
+      }),
+      floor({
+        id: "f2", number: 2, label: "Floor 2",
+        stairs: [{ id: "s2", x: 20, y: 20, width: 24, height: 32, rotation: 0, direction: "down", label: "Stair", sharedId: "stair-core" } as any],
+      }),
+    ];
+    const campus = makeCampus(
+      floors,
+      [
+        { id: "n1", name: "Stair", type: "stair", x: 32, y: 36, buildingId: "b1", floorId: "f1", stairId: "s1", accessible: false, color: "#16a34a" },
+        { id: "n2", name: "Stair", type: "stair", x: 32, y: 36, buildingId: "b1", floorId: "f2", stairId: "s2", accessible: false, color: "#16a34a" },
+      ],
+      [{ id: "legacy-transition", startNodeId: "n1", endNodeId: "n2", distance: 1, bidirectional: true, accessible: false, emergencySafe: true, type: "cross_floor", color: "#475569", width: 1 }],
+    );
+    render(<Harness campus={campus} />);
+    fireEvent.click(screen.getByTestId("issues-toolbar"));
+    expect(screen.queryByText(/Stair continuation is missing or unavailable/i)).toBeNull();
+  });
 });
 
 describe("FloorEditor on-canvas issue markers (B7 Phase 1)", () => {
@@ -208,6 +232,9 @@ describe("FloorEditor on-canvas issue markers (B7 Phase 1)", () => {
     expect(markers).toHaveLength(1);
     expect(markers[0].getAttribute("data-issue-object")).toBe("door:d1");
     expect(markers[0].getAttribute("data-issue-severity")).toBe("warning");
+    expect(markers[0].querySelector("circle")?.getAttribute("cy")).toBe("87");
+    fireEvent.mouseDown(markers[0]);
+    expect(screen.getByTestId("floor-properties-panel")).toBeTruthy();
   });
 
   it("the marker disappears immediately after the door is linked to a nav node", () => {
@@ -336,5 +363,51 @@ describe("FloorEditor object issue guidance in Properties (B7 Phase 2)", () => {
     expect(section!.getAttribute("data-severity")).toBe("error");
     expect(section!.textContent).toContain("starts from a non-transition node");
     expect(section!.textContent).toContain("missing a shared transition ID");
+  });
+
+  it("clears selected navigation properties when Select clicks empty floor canvas", async () => {
+    const campus = makeCampus(
+      [floor({ id: "f1", number: 1, label: "Ground Floor" })],
+      [{ id: "wp-1", name: "Walking Point", type: "hallway", x: 120, y: 120, buildingId: "b1", floorId: "f1", accessible: true, color: "#16a34a" }],
+    );
+    render(<Harness campus={campus} initialSelection={{ type: "navNode", id: "wp-1" }} />);
+    expect(screen.getByTestId("floor-nav-node-props")).toBeTruthy();
+    fireEvent.mouseDown(screen.getByTestId("floor-canvas-boundary"));
+    await waitFor(() => expect(screen.queryByTestId("floor-nav-node-props")).toBeNull());
+  });
+
+  it("keeps the physical Door hit surface above its linked navigation anchor", () => {
+    const campus = makeCampus(
+      [floor({
+        id: "f1", number: 1, label: "Ground Floor",
+        walls: [{ id: "w1", x1: 20, y1: 120, x2: 300, y2: 120, thickness: 6, color: "#64748b" }],
+        doors: [{ id: "d1", x: 120, y: 120, width: 18, direction: "left", color: "#b45309", wallId: "w1", offset: 0.36 }],
+      })],
+      [{ id: "door-node", name: "Door", type: "room_access", x: 120, y: 120, buildingId: "b1", floorId: "f1", doorId: "d1", accessible: true, color: "#16a34a" }],
+    );
+    render(<Harness campus={campus} initialSelection={{ type: "navNode", id: "door-node" }} />);
+    const hit = screen.getByTestId("floor-door-physical-hit");
+    fireEvent.mouseDown(hit, { button: 0, clientX: 120, clientY: 120 });
+    expect(screen.getByTestId("floor-properties-panel")).toBeTruthy();
+    expect(screen.getByDisplayValue("18")).toBeTruthy();
+    expect(screen.getAllByTestId("opening-resize-handle")).toHaveLength(2);
+    fireEvent.change(screen.getByDisplayValue("18"), { target: { value: "24" } });
+    expect(screen.getByDisplayValue("24")).toBeTruthy();
+  });
+
+  it("routes a Door issue marker to the full Door inspector while Navigation is on", () => {
+    const campus = makeCampus(
+      [floor({
+        id: "f1", number: 1, label: "Ground Floor",
+        doors: [{ id: "d1", x: 100, y: 100, width: 18, direction: "left", color: "#b45309" }],
+      })],
+      [{ id: "door-node", name: "Door", type: "room_access", x: 100, y: 100, buildingId: "b1", floorId: "f1", doorId: "d1", accessible: true, color: "#16a34a" }],
+    );
+    const { container } = render(<Harness campus={campus} initialSelection={{ type: "navNode", id: "door-node" }} />);
+    const marker = container.querySelector('[data-testid="issue-marker"][data-issue-object="door:d1"]');
+    expect(marker).toBeTruthy();
+    fireEvent.mouseDown(marker!);
+    expect(screen.getByTestId("floor-properties-panel")).toBeTruthy();
+    expect(screen.getByText(/Needs attention/i)).toBeTruthy();
   });
 });

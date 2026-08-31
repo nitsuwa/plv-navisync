@@ -45,16 +45,45 @@
         });
 
         // ── Service Worker Registration ────────────────────────────
+        // A production service worker must never sit in front of the Vite
+        // editor during local development: its cache/update lifecycle can
+        // make a working Map Builder appear to refresh or remount. Unregister
+        // only this origin's stale worker in local dev; production retains the
+        // non-blocking update notification contract below.
         if ('serviceWorker' in navigator) {
-          window.addEventListener('load', function () {
+          var isLocalDev = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+          var clearLocalServiceWorkers = function () {
+            if (!isLocalDev) return;
+            // Run before the React/Vite module boots as well as on load. A
+            // worker left behind by a previous production build must not get
+            // a chance to serve stale editor HTML or participate in HMR.
+            navigator.serviceWorker.getRegistrations().then(function (registrations) {
+              return Promise.all(registrations.map(function (registration) {
+                return registration.unregister();
+              }));
+            }).then(function () {
+              if (!('caches' in window)) return;
+              return caches.keys().then(function (keys) {
+                return Promise.all(keys.filter(function (key) {
+                  return key.indexOf('plv-navisync') === 0;
+                }).map(function (key) { return caches.delete(key); }));
+              });
+            }).catch(function () {});
+          };
+          if (isLocalDev) {
+            clearLocalServiceWorkers();
+            window.addEventListener('load', clearLocalServiceWorkers, { once: true });
+          } else {
             var swUrl = '/sw.js';
             navigator.serviceWorker.register(swUrl).then(function (reg) {
-              // Listen for updates
+              // Listen for updates, but do not force a reload while an editor
+              // may contain unsaved work. The React shell may offer an update
+              // action explicitly when one is needed.
               reg.addEventListener('updatefound', function () {
                 var newWorker = reg.installing;
+                if (!newWorker) return;
                 newWorker.addEventListener('statechange', function () {
                   if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-                    // New version available — dispatch a custom event the React app can listen to
                     window.dispatchEvent(new CustomEvent('plv-sw-update', { detail: { registration: reg } }));
                   }
                 });
@@ -62,7 +91,7 @@
             }).catch(function () {
               // SW registration failed silently — app continues to work without it
             });
-          });
+          }
         }
       })();
     </script>

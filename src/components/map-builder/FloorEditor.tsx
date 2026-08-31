@@ -3,23 +3,24 @@ import { motion, AnimatePresence } from "motion/react";
 import {
   ArrowLeft, ChevronRight, ChevronDown, CheckCircle2, Save, X, ZoomIn, ZoomOut, Undo2, Redo2,
   ChevronLeft,
-  Grid3X3, Layers, Paintbrush, Sofa, SeparatorHorizontal, MoveVertical,
-  DoorOpen, Binary, Text, PanelRightClose, PanelRightOpen, Navigation, LandPlot,
+  Grid3X3, Layers, Sofa, SeparatorHorizontal, MoveVertical,
+  DoorOpen, Binary, Text, PanelRightClose, PanelRightOpen, LandPlot,
   MousePointer2, Hand, HelpCircle, AlertTriangle, Maximize2,
   Square as SquareIcon, GitBranch as GitBranchIcon, Trash2 as TrashIcon, Copy, Settings2, Route,
-  Loader2, Globe2, Eye, EyeOff, Lock, Unlock, Plus, Pencil, Waypoints, Link2, MapPin,
+  Loader2, Globe2, Eye, EyeOff, Lock, Unlock, Plus, Pencil, Waypoints, Link2,
   Accessibility as AccessibilityIcon, Search, MoreHorizontal,
 } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { useCanvasControls, isSpacePressed } from "./useCanvasControls";
 import { useFloorHistory } from "./useFloorHistory";
 import {
-  ROOM_TYPES, ROOM_MAP,
+  ROOM_MAP,
   FURNITURE_CATEGORIES, genId,
 } from "./constants";
 import { FloorPropertiesPanel } from "./FloorPropertiesPanel";
 import { FloorNavPropertiesPanel } from "./FloorNavPropertiesPanel";
-import { TestNavigationPanel } from "./TestNavigationPanel";
+import { TestNavigationPanel, useTestRouteSession, type TestRouteHighlight, type TestRouteTransitionMarker } from "./TestNavigationPanel";
+import { RouteEndpointMarker, RouteTransitionMarker } from "./RouteTransitionMarker";
 import { NavigationRelationshipCard } from "./NavigationRelationshipCard";
 import { FloorOverviewSidebar } from "./FloorOverviewSidebar";
 import { FloorActionsMenu } from "./FloorActionsMenu";
@@ -46,13 +47,21 @@ import {
   navEdgePolylineDistance,
   navGroupAlignSnap,
   normalizeBendPoints,
+  normalizeNavigationEdges,
   orthogonalBendsFor,
   pointInsideWallObstacle,
   pruneOrphanedIndoorNodes,
   translateOrthogonalSegment,
   rampLinkedCuePosition,
   remapIndoorNavForFloorCopy,
+  roomDisplayName,
+  isDoorEligibleForRoom,
+  roomAccessDoorIds,
+  reconcileRoomDoorEdges,
+  ROOM_DOOR_EDGE_TYPE,
   roomLinkedCuePosition,
+  stairEntryPosition,
+  elevatorEntryPosition,
   syncIndoorLinkedNodePositions,
   linkedObjectRef,
   findNavNodeAtPoint,
@@ -63,8 +72,9 @@ import {
   findCrossFloorOwnerInfo,
   reconcileCrossFloorTransitions,
   replaceBuildingFloorsAndReconcileTransitions,
+  type NavPoint,
 } from "../../lib/indoorNavigationGraph";
-import { findNavEdgeAtPoint, translateSelectedNavGraph, navGroupSelectionBounds } from "../../lib/navigationGraph";
+import { findNavEdgeAtPoint, NAV_EDGE_SNAP_THRESHOLD, NAV_NODE_HIT_THRESHOLD, translateSelectedNavGraph, navGroupSelectionBounds } from "../../lib/navigationGraph";
 import {
   addFloorToBuilding,
   countFloorAuthoredItems,
@@ -72,14 +82,19 @@ import {
   duplicateFloorInBuilding,
   moveFloorInBuilding,
   renameFloorInBuilding,
+  stairContinuationDirectionAllows,
   stairDirectionsForFloorInOrder,
   defaultStairDirectionForFloorInOrder,
+  stairLabelForEntrySide,
+  isDefaultStairLabel,
+  reconcileStairDirectionsForFloorOrder,
+  validateStairContinuation,
 } from "../../lib/floorManagement";
 import { doorDisplayName, doorEntranceLinkStatus, reconcileEntranceTransitions } from "../../lib/entranceTransitions";
 import { validationIssuesForFloor, mergeFloorIssueLists, floorIssuesForSelection } from "../../lib/liveValidation";
 import { floorIssuesToItems } from "./ObjectIssueSection";
 import { floorObjectCenter, polylineMidpoint } from "../../lib/issueLocate";
-import { findOverlappingRoom, snapRoomToNearbyEdges, computeRoomAlignmentGuides, computeResizeLimits, snapResizeEdges, computeAlignmentGuides, computeResizeAlignmentGuides, clampNudgeToEdge } from "../../lib/roomOverlap";
+import { findOverlappingRoom, snapRoomToNearbyEdges, computeRoomAlignmentGuides, computeResizeLimits, snapResizeEdges, computeAlignmentGuides, computeResizeAlignmentGuides, clampNudgeToEdge, resolveStableAlignmentAxis, type AlignmentAxisSnapLock, type RoomAlignGuide } from "../../lib/roomOverlap";
 import {
   createFittedFloorPlanBackground,
   createFloorScaleCalibration,
@@ -132,6 +147,15 @@ import type {
   RoomResizeState, FloorUndoEntry, FloorWallEndpointAnchor,
   NavigationNode, NavigationEdge, FloorNavGraphState,
 } from "./types";
+import { elevatorSystemNumberOf, nextElevatorSystemNumber } from "./types";
+
+type FloorClipboardEntry = { type: Exclude<FloorSelection["type"], "navNode" | "navEdge">; id: string; item: any };
+type FloorClipboard = { campusId: string; sourceFloorId: string; entries: FloorClipboardEntry[] };
+// Clipboard contents intentionally live outside an individual FloorEditor
+// mount so Ctrl+C on one floor can be followed by Ctrl+V after switching
+// floors. This is transient editor state only; it is never persisted to a
+// campus or navigation graph.
+let floorObjectClipboard: FloorClipboard | null = null;
 
 // ── Constants ───────────────────────────────────────────────────────────────
 
@@ -156,6 +180,74 @@ function clamp(v: number, min: number, max: number) {
   return clampFloorValue(v, min, max);
 }
 
+/** Return a deterministic, floor-local name for a newly authored Room. */
+export function nextRoomName(rooms: Pick<FloorRoom, "name">[], preferred?: string): string {
+  const used = new Set(rooms.map((room) => (room.name ?? "").trim().toLocaleLowerCase()).filter(Boolean));
+  const source = (preferred ?? "").trim();
+  const numbered = /^room\s+(\d+)$/i.test(source) || source === "" || /^room$/i.test(source);
+  if (numbered) {
+    let number = 1;
+    while (used.has(`room ${number}`)) number += 1;
+    return `Room ${number}`;
+  }
+  const copyBase = `${source} Copy`;
+  if (!used.has(copyBase.toLocaleLowerCase())) return copyBase;
+  let suffix = 2;
+  while (used.has(`${copyBase} ${suffix}`.toLocaleLowerCase())) suffix += 1;
+  return `${copyBase} ${suffix}`;
+}
+
+/** Return the next human-friendly Elevator label on a Floor.  Generated
+ * labels are floor-local; an explicit/custom source label is copied without
+ * changing the physical Elevator identity. */
+export function nextElevatorName(
+  elevators: Pick<FloorElevatorItem, "label" | "systemNumber">[],
+  preferred?: string,
+): string {
+  const used = new Set(elevators.map((elevator) => (elevator.label ?? "").trim().toLocaleLowerCase()).filter(Boolean));
+  const source = (preferred ?? "").trim();
+  const isGenerated = !source || /^elevator(?:\s+\d+)?$/i.test(source);
+  if (!isGenerated) {
+    const copyBase = `${source} Copy`;
+    if (!used.has(copyBase.toLocaleLowerCase())) return copyBase;
+    let suffix = 2;
+    while (used.has(`${copyBase} ${suffix}`.toLocaleLowerCase())) suffix += 1;
+    return `${copyBase} ${suffix}`;
+  }
+  // Numbering is intentionally floor-local.  Use the stable system number
+  // when present and retain a legacy-label fallback for older saved floors.
+  let number = nextElevatorSystemNumber(elevators);
+  while (used.has(`elevator ${number}`)) number += 1;
+  return `Elevator ${number}`;
+}
+
+/** The complete physical/navigation gate used by Room → Add Door mode. */
+export function roomDoorLinkTargetIsValid(
+  room: FloorRoom | undefined,
+  door: FloorDoor | undefined,
+  walls: FloorWall[],
+  nodes: NavigationNode[],
+  buildingId: string,
+  floorId: string,
+  linkedDoorIds: string[] = [],
+  allRooms: FloorRoom[] = [],
+): boolean {
+  // Keep the exported helper for existing tests/callers, but delegate all
+  // eligibility decisions to the shared graph-level authority.
+  if (!room || room.buildingId !== buildingId || room.floorId !== floorId) return false;
+  return isDoorEligibleForRoom(room, door, walls, nodes, { excludeDoorIds: linkedDoorIds, rooms: allRooms });
+}
+
+function visibleDuplicateDelta(bounds: { x: number; y: number; w: number; h: number }[], offset: number, canvasW: number, canvasH: number) {
+  const candidates = [
+    { dx: offset, dy: offset },
+    { dx: -offset, dy: offset },
+    { dx: offset, dy: -offset },
+    { dx: -offset, dy: -offset },
+  ].map(({ dx, dy }) => constrainDeltaForBounds(bounds, dx, dy, canvasW, canvasH));
+  return candidates.sort((a, b) => Math.hypot(b.dx, b.dy) - Math.hypot(a.dx, a.dy))[0] ?? { dx: 0, dy: 0 };
+}
+
 /** Snap a value to the grid */
 function snapToGrid(v: number, grid: number) {
   return Math.round(v / grid) * grid;
@@ -176,6 +268,45 @@ function distToSegment(p: { x: number; y: number }, a: { x: number; y: number },
   if (l2 === 0) return Math.hypot(p.x - a.x, p.y - a.y);
   const t = Math.max(0, Math.min(1, ((p.x - a.x) * (b.x - a.x) + (p.y - a.y) * (b.y - a.y)) / l2));
   return Math.hypot(p.x - (a.x + t * (b.x - a.x)), p.y - (a.y + t * (b.y - a.y)));
+}
+
+function pointInRect(point: { x: number; y: number }, rect: { x: number; y: number; w: number; h: number }) {
+  return point.x >= rect.x && point.x <= rect.x + rect.w && point.y >= rect.y && point.y <= rect.y + rect.h;
+}
+
+function segmentsIntersect(a: { x: number; y: number }, b: { x: number; y: number }, c: { x: number; y: number }, d: { x: number; y: number }) {
+  const cross = (p: typeof a, q: typeof a, r: typeof a) => (q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x);
+  const onSegment = (p: typeof a, q: typeof a, r: typeof a) =>
+    Math.min(p.x, r.x) <= q.x && q.x <= Math.max(p.x, r.x)
+    && Math.min(p.y, r.y) <= q.y && q.y <= Math.max(p.y, r.y);
+  const abC = cross(a, b, c);
+  const abD = cross(a, b, d);
+  const cdA = cross(c, d, a);
+  const cdB = cross(c, d, b);
+  if (Math.abs(abC) < 0.001 && onSegment(a, c, b)) return true;
+  if (Math.abs(abD) < 0.001 && onSegment(a, d, b)) return true;
+  if (Math.abs(cdA) < 0.001 && onSegment(c, a, d)) return true;
+  if (Math.abs(cdB) < 0.001 && onSegment(c, b, d)) return true;
+  return (abC > 0) !== (abD > 0) && (cdA > 0) !== (cdB > 0);
+}
+
+function polylineIntersectsRect(points: { x: number; y: number }[], rect: { x: number; y: number; w: number; h: number }) {
+  if (points.some((point) => pointInRect(point, rect))) return true;
+  const corners = [
+    { x: rect.x, y: rect.y },
+    { x: rect.x + rect.w, y: rect.y },
+    { x: rect.x + rect.w, y: rect.y + rect.h },
+    { x: rect.x, y: rect.y + rect.h },
+  ];
+  for (let i = 1; i < points.length; i++) {
+    const a = points[i - 1];
+    const b = points[i];
+    if (segmentsIntersect(a, b, corners[0], corners[1])
+      || segmentsIntersect(a, b, corners[1], corners[2])
+      || segmentsIntersect(a, b, corners[2], corners[3])
+      || segmentsIntersect(a, b, corners[3], corners[0])) return true;
+  }
+  return false;
 }
 
 function textMetrics(value: string, fontSize: number) {
@@ -448,7 +579,14 @@ function nearestPointOnSegment(point: { x: number; y: number }, wall: FloorWall)
   return { x: wall.x1 + t * dx, y: wall.y1 + t * dy };
 }
 
-type WallSnapTarget = { x: number; y: number; edge?: { x1: number; y1: number; x2: number; y2: number }; roomAnchor?: FloorWallEndpointAnchor };
+type WallSnapTarget = {
+  x: number;
+  y: number;
+  edge?: { x1: number; y1: number; x2: number; y2: number };
+  roomAnchor?: FloorWallEndpointAnchor;
+  /** Temporary straight-line assistance (independent of structural snapping). */
+  guide?: "h" | "v";
+};
 type LayerAction = "bring-forward" | "send-backward" | "bring-front" | "send-back";
 
 function visibleOpacity(item: { visible?: boolean }) {
@@ -685,30 +823,103 @@ function CirculationSelectionHandles({
   );
 }
 
-function StairsSymbol({ item, selected }: { item: FloorStairs; selected: boolean }) {
-  const stroke = selected ? "var(--accent)" : "#6b7280";
+type StairVisualDirection = "up" | "down" | "both" | "none";
+
+/**
+ * Resolve the direction cue shown inside a Stair from the current, ordered
+ * building floors.  The persisted Stair direction still controls routing on
+ * middle floors; the boundary floors are clamped visually because they cannot
+ * lead beyond the building. A one-floor building keeps a neutral cue for the
+ * default Both direction; legacy explicit one-way values remain legible.
+ */
+function stairVisualDirection(
+  direction: FloorStairs["direction"],
+  floorIndex?: number,
+  floorCount?: number,
+): StairVisualDirection {
+  if (floorIndex == null || floorCount == null || floorIndex < 0) return "none";
+  // A single-floor building has no cross-floor implication, so keep the symbol
+  // neutral regardless of any persisted direction value.
+  if (floorCount <= 1) return "none";
+  if (floorIndex === 0) return "up";
+  if (floorIndex === floorCount - 1) return "down";
+  return direction === "up" ? "up" : direction === "down" ? "down" : "both";
+}
+
+function stairArrowPath(direction: "up" | "down", size: number) {
+  const y1 = direction === "up" ? size * 0.72 : -size * 0.72;
+  const y2 = direction === "up" ? -size * 0.52 : size * 0.52;
+  return `M 0 ${y1} L 0 ${y2}`;
+}
+
+function stairArrowHeadPath(direction: "up" | "down", size: number) {
+  const tipY = direction === "up" ? -size * 0.86 : size * 0.86;
+  const baseY = direction === "up" ? -size * 0.5 : size * 0.5;
+  const halfWidth = size * 0.4;
+  return `M 0 ${tipY} L ${-halfWidth} ${baseY} L ${halfWidth} ${baseY} Z`;
+}
+
+/**
+ * Keep alignment assistance legible while preserving the underlying snap
+ * calculation.  Resize matching can produce several edge/size guides for the
+ * same axis; the canvas only needs the strongest guide in each orientation.
+ */
+function compactAlignmentGuides<T extends { type: "h" | "v"; pos: number }>(guides: T[]): T[] {
+  const byAxis = new Map<T["type"], T>();
+  for (const guide of guides) {
+    if (!byAxis.has(guide.type)) byAxis.set(guide.type, guide);
+  }
+  return (["v", "h"] as const)
+    .map((axis) => byAxis.get(axis))
+    .filter((guide): guide is T => !!guide);
+}
+
+function LegacyStairsSymbol({
+  item,
+  selected,
+  floorIndex,
+  floorCount,
+}: {
+  item: FloorStairs;
+  selected: boolean;
+  floorIndex?: number;
+  floorCount?: number;
+}) {
+  const stroke = selected ? "var(--accent)" : "#475569";
   const cx = item.x + item.width / 2;
   const cy = item.y + item.height / 2;
+  const inset = Math.max(2, Math.min(item.width, item.height) * 0.08);
+  const wellX = item.x + inset;
+  const wellY = item.y + inset;
+  const wellWidth = Math.max(4, item.width - inset * 2);
+  const wellHeight = Math.max(4, item.height - inset * 2);
+  const landingHeight = Math.max(2.5, Math.min(6, wellHeight * 0.16));
   // B5 Phase 2.3: recognizable top-down straight stair — repeated tread lines
   // across the run plus a centered directional arrow. Everything is in the
   // object's local frame, so the parent rotate() keeps it aligned; the arrow
   // clearly communicates ascent (up) / descent (down) / transition (both).
-  const treadCount = Math.max(3, Math.min(8, Math.floor(item.width / 7)));
-  const dir = item.direction === "up" ? "up" : item.direction === "down" ? "down" : "both";
+  const treadCount = Math.max(3, Math.min(10, Math.floor(wellHeight / 5)));
+  const dir = stairVisualDirection(item.direction, floorIndex, floorCount);
   return (
     <>
-      <rect x={item.x} y={item.y} width={item.width} height={item.height} rx={1.5}
-        fill={selected ? "rgba(14,42,110,0.12)" : "#f8fafc"} stroke={stroke} strokeWidth={selected ? 1.8 : 1.1} />
+      <rect x={item.x} y={item.y} width={item.width} height={item.height} rx={2.5}
+        fill={selected ? "rgba(30,64,175,0.14)" : "#e8eef7"} stroke={stroke} strokeWidth={selected ? 1.8 : 1.15} />
+      <rect data-testid="stairs-well" x={wellX} y={wellY} width={wellWidth} height={wellHeight} rx={1.5}
+        fill={selected ? "rgba(255,255,255,0.72)" : "#f8fafc"} stroke="#94a3b8" strokeWidth={0.8} />
+      <rect data-testid="stairs-landing" x={wellX + 0.8} y={wellY + 0.8} width={wellWidth - 1.6} height={landingHeight}
+        rx={0.8} fill={selected ? "#dbeafe" : "#e2e8f0"} />
+      <rect data-testid="stairs-landing" x={wellX + 0.8} y={wellY + wellHeight - landingHeight - 0.8} width={wellWidth - 1.6} height={landingHeight}
+        rx={0.8} fill={selected ? "#dbeafe" : "#e2e8f0"} />
       {/* B5 Phase 2.4: subtle boundary guard rails inside the footprint edges —
           they follow the run axis and rotate with the object (local frame). */}
-      <line data-testid="stairs-rail" x1={item.x + 1.5} y1={item.y + 2} x2={item.x + 1.5} y2={item.y + item.height - 2} stroke="#94a3b8" strokeWidth={0.7} opacity={0.55} />
-      <line data-testid="stairs-rail" x1={item.x + item.width - 1.5} y1={item.y + 2} x2={item.x + item.width - 1.5} y2={item.y + item.height - 2} stroke="#94a3b8" strokeWidth={0.7} opacity={0.55} />
+      <line data-testid="stairs-rail" x1={wellX + 1.2} y1={wellY + landingHeight + 1} x2={wellX + 1.2} y2={wellY + wellHeight - landingHeight - 1} stroke="#94a3b8" strokeWidth={0.8} opacity={0.8} />
+      <line data-testid="stairs-rail" x1={wellX + wellWidth - 1.2} y1={wellY + landingHeight + 1} x2={wellX + wellWidth - 1.2} y2={wellY + wellHeight - landingHeight - 1} stroke="#94a3b8" strokeWidth={0.8} opacity={0.8} />
       {Array.from({ length: treadCount }, (_, i) => {
-        const tx = item.x + (item.width / (treadCount + 1)) * (i + 1);
-        return <line key={i} data-testid="stairs-tread" x1={tx} y1={item.y + 2} x2={tx} y2={item.y + item.height - 2} stroke="#64748b" strokeWidth={0.85} />;
+        const ty = wellY + (wellHeight / (treadCount + 1)) * (i + 1);
+        return <line key={i} data-testid="stairs-tread" x1={wellX + 2} y1={ty} x2={wellX + wellWidth - 2} y2={ty} stroke="#64748b" strokeWidth={0.85} />;
       })}
       {/* Center dashed run line + directional arrow, both centered on the object. */}
-      <line data-testid="stairs-center-line" x1={cx} y1={item.y + 3} x2={cx} y2={item.y + item.height - 3} stroke="#94a3b8" strokeWidth={0.8} strokeDasharray="2 2" />
+      <line data-testid="stairs-center-line" x1={cx} y1={wellY + landingHeight + 2} x2={cx} y2={wellY + wellHeight - landingHeight - 2} stroke="#94a3b8" strokeWidth={0.8} strokeDasharray="2 2" />
       <g data-testid="stairs-arrow" transform={`translate(${cx} ${cy})`}>
         {dir === "up" && (
           <path d="M 0 6 L 0 -6 M 0 -6 L -3.2 -1.6 M 0 -6 L 3.2 -1.6" fill="none" stroke="#334155" strokeWidth={1.3} strokeLinecap="round" strokeLinejoin="round" />
@@ -718,6 +929,176 @@ function StairsSymbol({ item, selected }: { item: FloorStairs; selected: boolean
         )}
         {dir === "both" && (
           <path d="M 0 6 L 0 -6 M 0 -6 L -3.2 -1.6 M 0 -6 L 3.2 -1.6 M 0 6 L -3.2 1.6 M 0 6 L 3.2 1.6" fill="none" stroke="#334155" strokeWidth={1.3} strokeLinecap="round" strokeLinejoin="round" />
+        )}
+        {dir === "none" && (
+          <path d="M -3.5 0 L 3.5 0" fill="none" stroke="#64748b" strokeWidth={1.15} strokeLinecap="round" />
+        )}
+      </g>
+    </>
+  );
+}
+
+function StairsSymbol({
+  item,
+  selected,
+  floorIndex,
+  floorCount,
+}: {
+  item: FloorStairs;
+  selected: boolean;
+  floorIndex?: number;
+  floorCount?: number;
+}) {
+  const stroke = selected ? "var(--accent)" : "#475569";
+  const cx = item.x + item.width / 2;
+  const cy = item.y + item.height / 2;
+  const inset = Math.max(2, Math.min(item.width, item.height) * 0.08);
+  const wellX = item.x + inset;
+  const wellY = item.y + inset;
+  const wellWidth = Math.max(4, item.width - inset * 2);
+  const wellHeight = Math.max(4, item.height - inset * 2);
+  // A conventional half-landing/U-shaped plan symbol. All geometry is in the
+  // Stair's local frame; the existing parent rotate() carries it with the object.
+  const landingHeight = Math.max(4, Math.min(12, wellHeight * 0.2));
+  const flightGap = Math.max(2.5, Math.min(8, wellWidth * 0.1));
+  const flightWidth = Math.max(4, (wellWidth - flightGap) / 2);
+  const leftFlightX = wellX;
+  const rightFlightX = wellX + flightWidth + flightGap;
+  // Entry-side orientation is a horizontal mirror only.  The landing remains
+  // at the same end of the local stairwell so Entry Right never reverses the
+  // semantic Up/Down travel cue.
+  const landingAtTop = true;
+  const flightY = landingAtTop ? wellY + landingHeight : wellY;
+  const flightHeight = Math.max(4, wellHeight - landingHeight);
+  const landingY = landingAtTop ? wellY : wellY + wellHeight - landingHeight;
+  const treadCount = Math.max(3, Math.min(10, Math.floor(flightHeight / 5)));
+  const dir = stairVisualDirection(item.direction, floorIndex, floorCount);
+  const entryFlightX = item.flip ? rightFlightX : leftFlightX;
+  const continuationFlightX = item.flip ? leftFlightX : rightFlightX;
+  const visualUp = "up" as const;
+  const visualDown = "down" as const;
+  // Keep the cue readable on the small default Stair while leaving the tread
+  // pattern legible.  The shaft nearly spans the flight and terminates just
+  // inside each landing/entry edge.
+  const arrowLimit = Math.max(3.2, flightHeight / 2 - 1.1);
+  const arrowSize = Math.min(9, Math.max(4, flightHeight * 0.28), arrowLimit);
+  const arrowStrokeWidth = Math.max(1.05, Math.min(1.65, Math.min(flightWidth, flightHeight) * 0.1));
+  const arrowY = flightY + flightHeight * 0.5;
+  // A subtle continuous travel line follows the complete U-turn: it starts at
+  // the floor-facing entry, crosses the landing, and returns along the second
+  // flight.  The line is intentionally separate from the directional
+  // arrowheads so the symbol reads as one stair path without changing the
+  // semantic Up/Down state or the canonical navigation anchor.
+  const travelEntryInset = Math.min(2.2, Math.max(0.8, flightHeight * 0.1));
+  const travelEntryY = landingAtTop ? flightY + flightHeight - travelEntryInset : flightY + travelEntryInset;
+  const travelTurnY = landingY + landingHeight / 2;
+  const entryFlightCenterX = entryFlightX + flightWidth / 2;
+  const continuationFlightCenterX = continuationFlightX + flightWidth / 2;
+  const travelPathUpD = [
+    `M ${entryFlightCenterX - cx} ${travelEntryY - cy}`,
+    `L ${entryFlightCenterX - cx} ${travelTurnY - cy}`,
+    `L ${continuationFlightCenterX - cx} ${travelTurnY - cy}`,
+    `L ${continuationFlightCenterX - cx} ${travelEntryY - cy}`,
+  ].join(" ");
+  const travelPathDownD = [
+    `M ${continuationFlightCenterX - cx} ${travelEntryY - cy}`,
+    `L ${continuationFlightCenterX - cx} ${travelTurnY - cy}`,
+    `L ${entryFlightCenterX - cx} ${travelTurnY - cy}`,
+    `L ${entryFlightCenterX - cx} ${travelEntryY - cy}`,
+  ].join(" ");
+  const travelPathD = dir === "down" ? travelPathDownD : travelPathUpD;
+  const renderArrow = (flightX: number, arrowDirection: "up" | "down") => (
+    <g
+      data-testid="stairs-arrow-flight"
+      transform={`translate(${flightX + flightWidth / 2 - cx} ${arrowY - cy})`}
+    >
+      {/* A restrained light underlay keeps the cue legible over treads without
+          making the arrow look like a heavy icon. */}
+      <path
+        d={stairArrowPath(arrowDirection, arrowSize)}
+        fill="none"
+        stroke="#f8fafc"
+        strokeWidth={arrowStrokeWidth + 1.2}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        opacity={0.86}
+        className="pointer-events-none"
+      />
+      <path
+        data-testid="stairs-arrow-path"
+        d={stairArrowPath(arrowDirection, arrowSize)}
+        fill="none"
+        stroke="#0f172a"
+        strokeWidth={arrowStrokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        className="pointer-events-none"
+      />
+      <path
+        data-testid="stairs-arrow-head"
+        d={stairArrowHeadPath(arrowDirection, arrowSize)}
+        fill="#0f172a"
+        stroke="#0f172a"
+        strokeWidth={0.3}
+        strokeLinejoin="round"
+        className="pointer-events-none"
+      />
+    </g>
+  );
+  return (
+    <>
+      <rect x={item.x} y={item.y} width={item.width} height={item.height} rx={2.5}
+        fill={selected ? "rgba(30,64,175,0.14)" : "#e8eef7"} stroke={stroke} strokeWidth={selected ? 1.8 : 1.15} />
+      <rect data-testid="stairs-well" x={wellX} y={wellY} width={wellWidth} height={wellHeight} rx={1.5}
+        fill={selected ? "rgba(255,255,255,0.72)" : "#f8fafc"} stroke="#94a3b8" strokeWidth={0.8} />
+      <rect data-testid="stairs-landing" x={wellX + 0.8} y={landingY + 0.8} width={wellWidth - 1.6} height={Math.max(2, landingHeight - 1.6)}
+        rx={0.8} fill={selected ? "#dbeafe" : "#e2e8f0"} />
+      {[leftFlightX, rightFlightX].map((flightX) => (
+        <g key={flightX} data-testid="stairs-flight">
+          {/* Keep both stringers on the inner edges of the two flights.  Entry
+              side mirrors the composition, but must not swap these rails to
+              the outer edges and create a visually heavier Left variant. */}
+          <line data-testid="stairs-rail" x1={flightX === leftFlightX ? flightX + flightWidth - 1 : flightX + 1} y1={flightY} x2={flightX === leftFlightX ? flightX + flightWidth - 1 : flightX + 1} y2={flightY + flightHeight} stroke="#64748b" strokeWidth={0.8} opacity={0.8} />
+          {Array.from({ length: treadCount }, (_, i) => {
+            const ty = flightY + (flightHeight / (treadCount + 1)) * (i + 1);
+            return <line key={i} data-testid="stairs-tread" x1={flightX + 2} y1={ty} x2={flightX + flightWidth - 2} y2={ty} stroke="#64748b" strokeWidth={0.85} />;
+          })}
+        </g>
+      ))}
+      {/* The central opening/stringer gap makes the U-turn legible without a grate-like fill. */}
+      <rect x={wellX + flightWidth} y={flightY} width={flightGap} height={flightHeight} fill={selected ? "rgba(226,232,240,0.65)" : "#eef2f7"} stroke="#cbd5e1" strokeWidth={0.55} />
+      <line data-testid="stairs-center-line" x1={wellX + flightWidth + flightGap / 2} y1={flightY + 1} x2={wellX + flightWidth + flightGap / 2} y2={flightY + flightHeight - 1} stroke="#94a3b8" strokeWidth={0.65} strokeDasharray="2 2" />
+      <g data-testid="stairs-arrow" transform={`translate(${cx} ${cy})`}>
+        {dir !== "none" && (
+          <>
+            <path
+              d={travelPathD}
+              fill="none"
+              stroke="#f8fafc"
+              strokeWidth={arrowStrokeWidth + 2.1}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              opacity={0.9}
+              className="pointer-events-none"
+            />
+            <path
+              data-testid="stairs-travel-path"
+              d={travelPathD}
+              fill="none"
+              stroke="#0f172a"
+              strokeWidth={Math.max(0.9, arrowStrokeWidth * 0.72)}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              opacity={0.72}
+              className="pointer-events-none"
+            />
+          </>
+        )}
+        {dir === "up" && renderArrow(entryFlightX, visualUp)}
+        {dir === "down" && renderArrow(continuationFlightX, visualDown)}
+        {dir === "both" && <>{renderArrow(entryFlightX, visualUp)}{renderArrow(continuationFlightX, visualDown)}</>}
+        {dir === "none" && (
+          <path d="M -3.5 0 L 3.5 0" fill="none" stroke="#64748b" strokeWidth={1.15} strokeLinecap="round" />
         )}
       </g>
     </>
@@ -852,7 +1233,7 @@ function FloorContextMenu({
           <button
             key={action.id}
             onClick={() => onAction(action.id)}
-            className={cn(
+                  className={cn(
               "flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[11px] font-bold transition-colors",
               action.danger ? "text-destructive hover:bg-destructive/10" : "text-foreground hover:bg-muted"
             )}
@@ -873,10 +1254,14 @@ interface FloorEditorProps {
   buildingId: string;
   floorId: string;
   onBack: () => void;
-  onSwitchFloor: (floorId: string) => void;
+  /** Open an arbitrary Building/Floor directly for a calculated route origin. */
+  onOpenFloor?: (buildingId: string, floorId: string) => void;
+  /** Switch the visible floor, optionally selecting an authored object there. */
+  onSwitchFloor: (floorId: string, initialSelection?: FloorSelection) => void;
   onUpdate: (c: Campus) => void;
   onSave?: (c: Campus) => Promise<Campus>;
   onPublish?: (c: Campus) => void;
+  onPreviewStudent?: (c: Campus, isDirty: boolean) => void | Promise<void>;
   publishingEnabled?: boolean;
   // B5 Phase 3.1.4: the page's persisted campus snapshot (same value the outer
   // CampusEditor compares against). Deriving the STRUCTURE dirty from this
@@ -897,6 +1282,123 @@ function distanceToSegment(p: { x: number; y: number }, a: { x: number; y: numbe
   let t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / lenSq;
   t = Math.max(0, Math.min(1, t));
   return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
+}
+
+/** Manual same-floor Walking Paths are the only edges eligible for the basic
+ * duplicate-pair guard. Coordinate overlap is not connectivity. */
+function isManualIndoorWalkingEdge(edge: NavigationEdge, nodes: NavigationNode[]): boolean {
+  if ((edge.type !== "hallway" && edge.type !== "walkway") || edge.generatedFromPathIds?.length) return false;
+  const a = nodes.find((node) => node.id === edge.startNodeId);
+  const b = nodes.find((node) => node.id === edge.endNodeId);
+  return !!a && !!b && ((!a.floorId && !b.floorId) || (!!a.floorId && !!b.floorId && a.floorId === b.floorId));
+}
+
+/** Return true only for an obvious duplicate of the proposed authored path.
+ * Same endpoints alone are not enough: meaningful parallel paths (direction,
+ * accessibility, emergency, closure, bends, or provenance) must remain. */
+function isEquivalentManualIndoorWalkingEdge(
+  edge: NavigationEdge,
+  nodes: NavigationNode[],
+  startId: string,
+  endId: string,
+  proposedBends: { x: number; y: number }[],
+): boolean {
+  if (!isManualIndoorWalkingEdge(edge, nodes)) return false;
+  const forward = edge.startNodeId === startId && edge.endNodeId === endId;
+  const reverse = edge.bidirectional !== false && edge.startNodeId === endId && edge.endNodeId === startId;
+  if (!forward && !reverse) return false;
+  const existingBends = normalizeBendPoints((edge.bendPoints ?? []).map((point) => ({ x: point.x, y: point.y })), 2);
+  const orientedBends = reverse && !forward ? [...existingBends].reverse() : existingBends;
+  const rounded = (points: { x: number; y: number }[]) => points.map((point) => [Math.round(point.x), Math.round(point.y)]);
+  const coreSemantics = (candidate: NavigationEdge) => [
+    candidate.bidirectional !== false,
+    candidate.accessible ?? true,
+    candidate.emergencySafe ?? true,
+    candidate.closed ?? false,
+    candidate.width ?? 4,
+    candidate.inaccessibleReason ?? null,
+    candidate.emergencyReason ?? null,
+  ];
+  const semantics = (candidate: NavigationEdge) => [
+    ...coreSemantics(candidate),
+    candidate.pathJunctionId ?? null,
+    candidate.pathJunctionParent ?? false,
+    [...(candidate.pathJunctionIds ?? [])].sort(),
+  ];
+  const proposedSemantics: NavigationEdge = {
+    // Connect creates a normal manual hallway edge.  Do not copy the existing
+    // edge's routing metadata into the proposal: accessibility, emergency,
+    // closure, direction, bends, and junction provenance are what distinguish
+    // meaningful parallel paths from an accidental duplicate.
+    id: "proposed",
+    type: "hallway",
+    startNodeId: startId,
+    endNodeId: endId,
+    distance: 0,
+    bidirectional: true,
+    accessible: true,
+    emergencySafe: true,
+    closed: undefined,
+    width: 4,
+    color: "#16a34a",
+    inaccessibleReason: undefined,
+    pathJunctionId: undefined,
+    pathJunctionParent: undefined,
+    pathJunctionIds: undefined,
+  };
+  const sameGeometry = JSON.stringify(rounded(orientedBends)) === JSON.stringify(rounded(proposedBends));
+  if (!sameGeometry) return false;
+  if (JSON.stringify(semantics(edge)) === JSON.stringify(semantics(proposedSemantics))) return true;
+
+  // A split corridor segment carries path-junction provenance on purpose. If
+  // an admin explicitly reconnects to that same canonical junction, the new
+  // authored connector has no provenance of its own but is still the same
+  // logical edge. Suppress only this narrow case (the endpoint is a persisted
+  // junction and the proposed edge is provenance-free); meaningful metadata
+  // variants and unrelated parallel paths remain distinct.
+  const proposedUsesJunction = nodes.some((node) =>
+    (node.id === startId || node.id === endId) && node.pathJunction === true,
+  );
+  const proposedHasNoJunctionProvenance = !proposedSemantics.pathJunctionId
+    && proposedSemantics.pathJunctionParent !== true
+    && !(proposedSemantics.pathJunctionIds?.length);
+  const existingHasJunctionProvenance = !!edge.pathJunctionId
+    || edge.pathJunctionParent === true
+    || !!edge.pathJunctionIds?.length;
+  return proposedUsesJunction
+    && proposedHasNoJunctionProvenance
+    && existingHasJunctionProvenance
+    && JSON.stringify(coreSemantics(edge)) === JSON.stringify(coreSemantics(proposedSemantics));
+}
+
+/** Rebuild an authored edge from its current endpoint positions while retaining
+ * its authored bends and all routing metadata. This is geometry normalization
+ * only: it never changes edge identity, direction, availability, or provenance. */
+function rebuildEdgeGeometryFromCurrentNodes(
+  edge: NavigationEdge,
+  nodes: NavigationNode[],
+  staleEndpointPositions: { x: number; y: number }[] = [],
+): NavigationEdge {
+  const points = edgePolylinePoints(edge, nodes);
+  if (!points || points.length < 2) return edge;
+  const start = points[0];
+  const end = points[points.length - 1];
+  const near = (a: { x: number; y: number }, b: { x: number; y: number }, eps = 3) => Math.hypot(a.x - b.x, a.y - b.y) <= eps;
+  const bends = normalizeBendPoints(points.slice(1, -1).filter((point) =>
+    !near(point, start)
+    && !near(point, end)
+    && !staleEndpointPositions.some((old) => !near(old, start) && !near(old, end) && near(point, old))
+  ));
+  return {
+    ...edge,
+    bendPoints: bends.length > 0 ? bends : undefined,
+    distance: navEdgePolylineDistance([start, ...bends, end]),
+  };
+}
+
+function edgeIsParentForJunction(edge: NavigationEdge, junctionId: string): boolean {
+  return edge.pathJunctionParent === true
+    && (edge.pathJunctionId === junctionId || edge.pathJunctionIds?.includes(junctionId) === true);
 }
 
 /**
@@ -1001,7 +1503,7 @@ function PhysicalNavPropertiesPanel({
   ).length : 0;
 
   return (
-    <div className="w-60 shrink-0 border-l border-border bg-card/80 backdrop-blur flex flex-col">
+    <div data-testid="floor-nav-physical-props" className="w-60 shrink-0 border-l border-border bg-card/80 backdrop-blur flex flex-col">
       <div className="flex items-center justify-between px-3 h-9 border-b border-border">
         <span className="text-xs font-extrabold uppercase tracking-wide text-foreground flex items-center gap-1.5">
           <Icon className="h-3 w-3 text-blue-500" />
@@ -1024,6 +1526,7 @@ function PhysicalNavPropertiesPanel({
           detail={linkedNode ? `Connected to navigation node "${linkedNode.name}"` : `Add ${physicalType} to the navigation network.`}
           mode="navigation"
           connectionCount={connCount}
+          showView={false}
           onView={() => {
             if (onView) { onView(physicalType, physicalId); return; }
             setNavPhysicalSelected(null);
@@ -1058,7 +1561,25 @@ function PhysicalNavPropertiesPanel({
   );
 }
 
-export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor, onUpdate, onSave, onPublish, publishingEnabled = false, savedSnapshot, initialSelection }: FloorEditorProps) {
+function floorRouteArrowPoints(points: { x: number; y: number }[]) {
+  const markers: { x: number; y: number; angle: number }[] = [];
+  for (let i = 0; i < points.length - 1; i += 1) {
+    const a = points[i];
+    const b = points[i + 1];
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const length = Math.hypot(dx, dy);
+    if (length < 18) continue;
+    const count = Math.max(1, Math.floor(length / 72));
+    for (let j = 1; j <= count; j += 1) {
+      const t = j / (count + 1);
+      markers.push({ x: a.x + dx * t, y: a.y + dy * t, angle: Math.atan2(dy, dx) * 180 / Math.PI });
+    }
+  }
+  return markers;
+}
+
+export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, onSwitchFloor, onUpdate, onSave, onPublish, onPreviewStudent, publishingEnabled = false, savedSnapshot, initialSelection }: FloorEditorProps) {
   const building = campus.buildings.find((b) => b.id === buildingId);
   const rawFloor = building?.floors.find((f) => f.id === floorId);
 
@@ -1084,13 +1605,45 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
   const floor = normalizeFloor(rawFloor, { buildingId });
 
   // ── Core state ──
-  const [showNavOverlay, setShowNavOverlay] = useState(false);
+  const testRouteSessionContext = useTestRouteSession();
+  const routePreview = Boolean(testRouteSessionContext.session?.previewRoute && testRouteSessionContext.session?.result);
+  const { navigationEnabled, setNavigationEnabled } = testRouteSessionContext;
   // B8 Phase 1: navMode is now true when the nav overlay is active AND a nav
   // tool is selected (or a nav object is selected). Physical tools always work.
-  const navMode = showNavOverlay;
+  // Preview keeps the Navigation session enabled for routing, but presents the
+  // editor as non-authoring: graph visuals and graph hit targets are suppressed.
+  const [testNavOpen, setLocalTestNavOpen] = useState(testRouteSessionContext.open);
+  const [localNavigationEnabled, setLocalNavigationEnabled] = useState(navigationEnabled || testNavOpen);
+  const showNavOverlay = localNavigationEnabled || navigationEnabled || testNavOpen || routePreview;
+  const setShowNavOverlay = useCallback((enabled: boolean) => {
+    if (testNavOpen || routePreview) return;
+    setLocalNavigationEnabled(enabled);
+    setNavigationEnabled(enabled);
+  }, [routePreview, setNavigationEnabled, testNavOpen]);
+  useEffect(() => {
+    setLocalNavigationEnabled(navigationEnabled || testNavOpen);
+  }, [navigationEnabled, testNavOpen]);
+  const navMode = showNavOverlay && !routePreview;
   const [navTool, setNavTool] = useState<"select" | "pan" | "waypoint" | "destination" | "connect" | "link" | "erase">("select");
   // B8: Test route panel toggle — explicit action, NOT auto-opened.
-  const [testNavOpen, setTestNavOpen] = useState(false);
+  const setTestNavOpen = useCallback((open: boolean) => {
+    setLocalTestNavOpen(open);
+    testRouteSessionContext.setOpen(open);
+  }, [testRouteSessionContext.setOpen]);
+  useEffect(() => {
+    setLocalTestNavOpen(testRouteSessionContext.open);
+  }, [testRouteSessionContext.open]);
+  // Test Route reports its compact live-monitor presentation separately from
+  // the inspector visibility.  Keeping this in the editor host lets the
+  // floating panel animate its width without changing canvas coordinates.
+  const [testRouteCompact, setTestRouteCompact] = useState(() => Boolean(
+    testRouteSessionContext.session?.manualCollapsed
+      || (testRouteSessionContext.session?.hasCalculatedRoute && !testRouteSessionContext.session.manualExpanded),
+  ));
+  // Elevator transitions switch floors directly.  The route marker itself is
+  // the lightweight, hover/focus-readable cue; no blocking loading card is
+  // needed for this admin-only editor action.
+  const cancelElevatorTransition = useCallback(() => undefined, []);
   // B5 Phase 2.2: destructive-hover target for the Remove tool (node or edge).
   const [navEraseHover, setNavEraseHover] = useState<{ type: "node" | "edge"; id: string } | null>(null);
   const [navSelected, setNavSelected] = useState<{ type: "node" | "edge"; id: string } | null>(null);
@@ -1117,9 +1670,24 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
   // the selected path (Add Bend splits the hovered segment, else the longest).
   const [navSelectedBend, setNavSelectedBend] = useState<{ edgeId: string; index: number } | null>(null);
   const [navSegmentHover, setNavSegmentHover] = useState<{ edgeId: string; index: number } | null>(null);
+  // Connect-mode path targeting is a presentation-only state.  It records the
+  // nearest segment and projected join point without touching the graph; the
+  // click handler performs the authoritative split/reuse commit.
+  const [navPathTargetHover, setNavPathTargetHover] = useState<{
+    edgeId: string;
+    index: number;
+    point: { x: number; y: number };
+  } | null>(null);
   // B5 Phase 2.7: multi-bend Connect — empty-space clicks PIN geometry bends on
   // ONE edge (never NavigationNodes) until a routing node finishes the edge.
   const [navConnectBends, setNavConnectBends] = useState<{ x: number; y: number }[]>([]);
+  const [highlightedRoute, setHighlightedRoute] = useState<TestRouteHighlight | null>(null);
+  // Route overlays belong to the page-level session.  Clear this editor's
+  // derived overlay immediately when the session/result disappears so a
+  // responsive host cannot leave a stale stroke behind after Clear or Close.
+  useEffect(() => {
+    if (!testNavOpen || !testRouteSessionContext.session?.result) setHighlightedRoute(null);
+  }, [testNavOpen, testRouteSessionContext.session?.result]);
   // B5 Phase 2.9: per-click pin counts — ONE empty-space click pins the FULL
   // segment shape the preview showed (an L corner + the click point, or the
   // click point alone on a straight continuation), and temporary Ctrl+Z must
@@ -1157,6 +1725,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
     origBends: { x: number; y: number }[];
     origPts: { x: number; y: number }[];
     isHorizontal: boolean;
+    isDiagonal?: boolean;
   } | null>(null);
   // B5 Phase 2.8: always-on alignment guides (outdoor-editor philosophy, no
   // Shift) — temporary h/v lines shown while a free node / bend drags near
@@ -1175,8 +1744,11 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
     x2: number;
     y2: number;
   }[]>([]);
-  // B5 Phase 2.1: editor-local clipboards + Navigation Library drag state.
-  const [clipboard, setClipboard] = useState<{ type: FloorSelection["type"]; id: string }[] | null>(null);
+  // B5 Phase 2.1: the design clipboard is transient but shared across
+  // FloorEditor mounts so a copied object can be pasted on another floor.
+  const [clipboard, setClipboard] = useState<FloorClipboard | null>(() => (
+    floorObjectClipboard?.campusId === campus.id ? floorObjectClipboard : null
+  ));
   const pasteOffsetRef = useRef(12);
   const navClipboardRef = useRef<{ nodes: NavigationNode[]; edges: NavigationEdge[] } | null>(null);
   const navPasteOffsetRef = useRef(12);
@@ -1188,6 +1760,23 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
   const [tool, setTool] = useState<SimpleTool>("select");
   const [selected, setSelected] = useState<FloorSelection | null>(null);
   const [multiSelected, setMultiSelected] = useState<string[]>([]);
+  useEffect(() => {
+    if (!routePreview) return;
+    setNavTool("select");
+    setRoomDrag(null);
+    alignmentSnapLocksRef.current = { x: null, y: null };
+    setNavAlignGuides([]);
+    setAlignGuides([]);
+    setNavTargetHover(null);
+    setNavNodeHover(null);
+    setNavSegmentHover(null);
+    setNavSelectedBend(null);
+    setNavSelected(null);
+    setNavMultiSelected([]);
+    setNavPhysicalSelected(null);
+    setShowProperties(false);
+    setTestRoutePickKind(null);
+  }, [routePreview]);
   useEffect(() => {
     if (!initialSelection) return;
     // B5 Final: issue-locate selections — nav targets land in Navigation mode
@@ -1220,10 +1809,53 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
   const [wallPreview, setWallPreview] = useState<{ x: number; y: number } | null>(null);
   const [openingPreview, setOpeningPreview] = useState<{ type: "door" | "window"; wallId: string; x: number; y: number; offset: number; width: number; angle: number } | null>(null);
   const [roomDrag, setRoomDrag] = useState<{ sx: number; sy: number; cx: number; cy: number } | null>(null);
+  // Room↔Door authoring is a physical-location workflow, separate from the
+  // generic navigation tools.  Keeping it explicit prevents accidental direct
+  // Room→Walking Point edges and gives Escape a deterministic cancel path.
+  const [roomDoorLinking, setRoomDoorLinking] = useState(false);
+  const [roomDoorLinkMode, setRoomDoorLinkMode] = useState<"replace" | "add">("replace");
+  const [roomDoorHoverId, setRoomDoorHoverId] = useState<string | null>(null);
+  const [roomDoorInspectorHoverId, setRoomDoorInspectorHoverId] = useState<string | null>(null);
+  const clearRoomDoorLinkState = useCallback(() => {
+    setRoomDoorLinking(false);
+    setRoomDoorLinkMode("replace");
+    setRoomDoorHoverId(null);
+    setRoomDoorInspectorHoverId(null);
+  }, []);
+  useEffect(() => {
+    // Door-row highlights are transient inspector cues, never selection state.
+    // Clear them whenever the selected physical object changes.
+    setRoomDoorInspectorHoverId(null);
+    setRoomDoorHoverId(null);
+  }, [selected?.id, selected?.type]);
+  useEffect(() => {
+    if (roomDoorLinking && selected?.type !== "room") clearRoomDoorLinkState();
+    if (!roomDoorLinking) setRoomDoorHoverId(null);
+  }, [clearRoomDoorLinkState, roomDoorLinking, selected?.type]);
+  const [testRoutePickKind, setTestRoutePickKind] = useState<"start" | "destination" | null>(null);
+  const [testRouteMapPick, setTestRouteMapPick] = useState<{ kind: "start" | "destination"; value: string } | null>(null);
+  const [testRoutePickHover, setTestRoutePickHover] = useState<{ type: string; id: string } | null>(null);
+  useEffect(() => {
+    if (testRoutePickKind) clearRoomDoorLinkState();
+  }, [clearRoomDoorLinkState, testRoutePickKind]);
+  // Keep the live route visible during an actual geometry drag.  A click may
+  // still open Properties, but the first movement of a route-related object
+  // closes that inspector so it cannot cover the canvas while the route is
+  // being inspected.  The shared docking state then moves Test Route back to
+  // the right immediately.
   const [drawingPath, setDP] = useState<{ x: number; y: number }[]>([]);
   // ── Sidebar ──
   const [sidebarCategory, setSidebarCategory] = useState<string | null>(null);
-  const [showProperties, setShowProperties] = useState(false);
+  // Seed inspector visibility from issue/selection navigation so Test Route's
+  // very first render uses the correct dock; it must not flash at the right
+  // margin and then jump left after the initial-selection effect runs.
+  const [showProperties, setShowProperties] = useState(() => Boolean(initialSelection));
+  useEffect(() => {
+    if (!showProperties) {
+      if (roomDoorLinking) clearRoomDoorLinkState();
+      setRoomDoorInspectorHoverId(null);
+    }
+  }, [clearRoomDoorLinkState, roomDoorLinking, showProperties]);
   // ── Furniture placement ──
   const [furnitureTemplate, setFurnitureTemplate] = useState<{ type: string; name: string; width: number; height: number; color: string } | null>(null);
   // ── Saving ──
@@ -1332,19 +1964,73 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
     [floor, FP_W, FP_H]
   );
   const wallJoints = useMemo(() => {
-    const joints = new Map<string, { x: number; y: number; radius: number; color: string; count: number; managedCount: number }>();
+    const joints = new Map<string, {
+      x: number; y: number; radius: number; color: string; casingColor: string;
+      appearanceKey: string; count: number; managedCount: number;
+    }>();
     for (const wall of walls) {
-      for (const point of [{ x: wall.x1, y: wall.y1 }, { x: wall.x2, y: wall.y2 }]) {
+      for (const [point, other] of [
+        [{ x: wall.x1, y: wall.y1 }, { x: wall.x2, y: wall.y2 }],
+        [{ x: wall.x2, y: wall.y2 }, { x: wall.x1, y: wall.y1 }],
+      ] as const) {
         const key = `${Math.round(point.x * 100) / 100},${Math.round(point.y * 100) / 100}`;
+        const material = wallMaterialStyle(wall.material);
+        const appearanceKey = `${wall.color}|${wall.material ?? "concrete"}|${wall.thickness}`;
         const existing = joints.get(key);
         const radius = Math.max(2, wall.thickness / 2 + 1);
         if (existing) {
+          // Keep one deterministic compact joint style. The thickest incident
+          // wall wins; equal-width styles retain stable first-seen ordering.
+          if (existing.appearanceKey !== appearanceKey && radius > existing.radius) {
+            existing.color = wall.color;
+            existing.casingColor = material.casing;
+            existing.appearanceKey = appearanceKey;
+          }
           existing.radius = Math.max(existing.radius, radius);
           existing.count += 1;
           if (isManagedPerimeterWall(wall)) existing.managedCount += 1;
         } else {
-          joints.set(key, { ...point, radius, color: wall.color, count: 1, managedCount: isManagedPerimeterWall(wall) ? 1 : 0 });
+          joints.set(key, {
+            ...point,
+            radius,
+            color: wall.color,
+            casingColor: material.casing,
+            appearanceKey,
+            count: 1,
+            managedCount: isManagedPerimeterWall(wall) ? 1 : 0,
+          });
         }
+      }
+    }
+    // Endpoint-to-segment joins do not create a target Wall endpoint record.
+    // Add the two half-segments of every Wall whose centerline contains the
+    // shared point so T/cross/angled junctions receive the same N-way union
+    // patch as endpoint-to-endpoint joins.
+    for (const joint of joints.values()) {
+      for (const wall of walls) {
+        const ax = wall.x1;
+        const ay = wall.y1;
+        const bx = wall.x2;
+        const by = wall.y2;
+        const dx = bx - ax;
+        const dy = by - ay;
+        const lenSq = dx * dx + dy * dy;
+        if (lenSq < 0.001) continue;
+        const t = ((joint.x - ax) * dx + (joint.y - ay) * dy) / lenSq;
+        if (t <= 0.01 || t >= 0.99) continue;
+        const px = ax + t * dx;
+        const py = ay + t * dy;
+        if (Math.hypot(joint.x - px, joint.y - py) > 1.2) continue;
+        const material = wallMaterialStyle(wall.material);
+        const appearanceKey = `${wall.color}|${wall.material ?? "concrete"}|${wall.thickness}`;
+        joint.count += 2;
+        if (isManagedPerimeterWall(wall)) joint.managedCount += 2;
+        if (joint.appearanceKey !== appearanceKey && wall.thickness / 2 + 1 > joint.radius) {
+          joint.color = wall.color;
+          joint.casingColor = material.casing;
+          joint.appearanceKey = appearanceKey;
+        }
+        joint.radius = Math.max(joint.radius, wall.thickness / 2 + 1);
       }
     }
     return Array.from(joints.values()).filter((joint) => joint.count > 1 && joint.managedCount < joint.count);
@@ -1369,10 +2055,60 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
   const [locateFlash, setLocateFlash] = useState<{ world: { x: number; y: number } } | null>(null);
   useEffect(() => {
     if (!locateFlash) return;
-    const t = window.setTimeout(() => setLocateFlash(null), 2600);
+    // Keep a destination jump cue brief; the normal selection styling remains
+    // after the transient highlight fades.
+    const t = window.setTimeout(() => setLocateFlash(null), 900);
     return () => window.clearTimeout(t);
   }, [locateFlash]);
   const locateFocusedRef = useRef<string | null>(null);
+
+  // Authoring quick-navigation for linked Stairs/Elevators. This is deliberately
+  // separate from Test Route transition markers: it only helps an admin inspect
+  // the same physical circulation object on another floor and never mutates the
+  // graph or route session.
+  const [quickNavOpenKey, setQuickNavOpenKey] = useState<string | null>(null);
+  const quickNavCloseTimerRef = useRef<number | null>(null);
+  const cancelQuickNavClose = useCallback(() => {
+    if (quickNavCloseTimerRef.current !== null) {
+      window.clearTimeout(quickNavCloseTimerRef.current);
+      quickNavCloseTimerRef.current = null;
+    }
+  }, []);
+  const closeQuickNav = useCallback(() => {
+    cancelQuickNavClose();
+    setQuickNavOpenKey(null);
+  }, [cancelQuickNavClose]);
+  const openQuickNav = useCallback((key: string) => {
+    cancelQuickNavClose();
+    setQuickNavOpenKey(key);
+  }, [cancelQuickNavClose]);
+  const scheduleQuickNavClose = useCallback(() => {
+    cancelQuickNavClose();
+    quickNavCloseTimerRef.current = window.setTimeout(() => {
+      quickNavCloseTimerRef.current = null;
+      setQuickNavOpenKey(null);
+    }, 180);
+  }, [cancelQuickNavClose]);
+  useEffect(() => () => {
+    cancelQuickNavClose();
+  }, [cancelQuickNavClose]);
+  useEffect(() => {
+    if (!quickNavOpenKey) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeQuickNav();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [closeQuickNav, quickNavOpenKey]);
+  const quickNavSelectionRef = useRef<string | null>(null);
+  useEffect(() => {
+    const selectionKey = selected ? `${selected.type}:${selected.id}` : null;
+    if (quickNavSelectionRef.current !== null && quickNavSelectionRef.current !== selectionKey) closeQuickNav();
+    quickNavSelectionRef.current = selectionKey;
+  }, [closeQuickNav, selected]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1393,12 +2129,16 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
 
   // ── Data refs for drag operations ──
   const dragging = useRef<{ entries: { type: FloorSelection["type"]; id: string; origin: any }[]; sx: number; sy: number; fromBackground?: boolean } | null>(null);
+  // Universal object dragging keeps one stable alignment target per axis for
+  // the current gesture.  The target is resolved from the raw drag geometry,
+  // never from the already-snapped display geometry.
+  const alignmentSnapLocksRef = useRef<{ x: AlignmentAxisSnapLock | null; y: AlignmentAxisSnapLock | null }>({ x: null, y: null });
   const resizing = useRef<RoomResizeState | null>(null);
   // B7 QA: last-valid-geometry tracker for room resize — prevents invalid
   // geometry (overlap / out-of-bounds) from ever entering canonical state.
   const lastValidResizeRef = useRef<{ x: number; y: number; w: number; h: number } | null>(null);
   // B7 QA: last-used wall color for authoring — new walls default to this color.
-  const lastWallColorRef = useRef("#64748b");
+  const lastWallStyleRef = useRef<{ color: string; thickness: number; material: string }>({ color: "#64748b", thickness: 4, material: "concrete" });
   const furnitureResizing = useRef<{ id: string; corner: string; sx: number; sy: number; origin: FloorFurniture } | null>(null);
   const circulationResizing = useRef<{ type: "stairs" | "ramp" | "elevator"; id: string; corner: string; sx: number; sy: number; origin: FloorStairs | FloorRamp | FloorElevatorItem } | null>(null);
   const rotating = useRef<{ type: "room" | "furniture" | "stairs" | "ramp" | "elevator"; id: string; cx: number; cy: number; originRotation: number; startAngle: number } | null>(null);
@@ -1437,6 +2177,120 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
     () => indoorNavEdges(campus.navEdges, indoorNodes, buildingId, floorId),
     [campus.navEdges, indoorNodes, buildingId, floorId]
   );
+  // Room↔Door edges are semantic destination relationships. They remain in
+  // the canonical graph for routing, but are intentionally excluded from all
+  // generic Walking Path authoring/rendering surfaces.
+  const walkableIndoorEdges = useMemo(
+    () => indoorEdges.filter((edge) => edge.type !== ROOM_DOOR_EDGE_TYPE),
+    [indoorEdges]
+  );
+  const marqueeIndoorEdges = useMemo(
+    () => walkableIndoorEdges.filter((edge) => edge.type !== CROSS_FLOOR_EDGE_TYPE && !(edge.generatedFromPathIds?.length)),
+    [walkableIndoorEdges]
+  );
+  // Only ordinary, hand-authored indoor paths may be split by the Walking
+  // Point tool.  Semantic Room↔Door links, floor transitions, and generated
+  // pathway geometry remain graph-owned and read-only.
+  const editableIndoorEdges = useMemo(
+    () => marqueeIndoorEdges,
+    [marqueeIndoorEdges]
+  );
+  // Shared Canva/Figma-style alignment references for indoor navigation drags.
+  // The graph nodes remain the connectivity authority; these physical anchors
+  // are visual/snap references only. Stairs use their floor-facing entry edge;
+  // other semantic objects use their established center/cue anchor.
+  const indoorAlignmentReferences = useMemo(() => {
+    // Prefer the canonical navigation anchor's coordinates whenever an object
+    // is already linked.  Physical object centres are only a fallback for
+    // unlinked objects; snapping a Walking Point to a Door therefore aligns to
+    // the actual routing endpoint rather than an arbitrary rectangle centre.
+    const linkedPoint = (kind: "door" | "room" | "stairs" | "ramp" | "elevator", id: string, fallback: { x: number; y: number }) => {
+      const node = indoorNodes.find((candidate) => (
+        kind === "door" ? candidate.doorId === id
+          : kind === "room" ? candidate.roomId === id
+            : kind === "stairs" ? candidate.stairId === id
+              : kind === "ramp" ? candidate.rampId === id
+                : candidate.elevatorId === id
+      ));
+      return node ? { x: node.x, y: node.y } : fallback;
+    };
+    return [
+      ...indoorNodes.map((node) => ({ x: node.x, y: node.y, id: node.id })),
+      ...doors.map((door) => ({ ...linkedPoint("door", door.id, { x: door.x, y: door.y }), id: indoorNodes.find((node) => node.doorId === door.id)?.id ?? `door:${door.id}` })),
+      ...rooms.map((room) => ({ ...linkedPoint("room", room.id, { x: room.x + room.w / 2, y: room.y + room.h / 2 }), id: indoorNodes.find((node) => node.roomId === room.id)?.id ?? `room:${room.id}` })),
+      ...stairs.map((item) => ({ ...linkedPoint("stairs", item.id, stairEntryPosition(item)), id: indoorNodes.find((node) => node.stairId === item.id)?.id ?? `stairs:${item.id}` })),
+      ...ramps.map((item) => ({ ...linkedPoint("ramp", item.id, { x: item.x + item.width / 2, y: item.y + item.height / 2 }), id: indoorNodes.find((node) => node.rampId === item.id)?.id ?? `ramp:${item.id}` })),
+      ...elevators.map((item) => ({ ...linkedPoint("elevator", item.id, elevatorEntryPosition(item)), id: indoorNodes.find((node) => node.elevatorId === item.id)?.id ?? `elevator:${item.id}` })),
+    ];
+  }, [doors, elevators, indoorNodes, ramps, rooms, stairs]);
+
+  // A Door's physical movement is constrained to its wall. Align only along
+  // the wall's free axis so the Door remains attached while its canonical nav
+  // anchor can line up with any useful nearby navigation anchor (connected
+  // anchors are preferred). This is visual/snap assistance only; graph
+  // identity and edge creation remain unchanged.
+  const alignDoorOnWallToConnectedPoint = useCallback((
+    doorId: string,
+    wall: FloorWall,
+    point: { x: number; y: number },
+  ): { point: { x: number; y: number }; guides: { type: "h" | "v"; pos: number }[] } => {
+    const doorNode = indoorNodes.find((node) => node.doorId === doorId);
+    if (!doorNode) return { point, guides: [] };
+    const connectedIds = new Set<string>();
+    for (const edge of indoorEdges) {
+      if (edge.startNodeId === doorNode.id) connectedIds.add(edge.endNodeId);
+      if (edge.endNodeId === doorNode.id) connectedIds.add(edge.startNodeId);
+    }
+    const wallDx = wall.x2 - wall.x1;
+    const wallDy = wall.y2 - wall.y1;
+    const horizontal = Math.abs(wallDx) >= Math.abs(wallDy);
+    const lengthSq = wallDx * wallDx + wallDy * wallDy;
+    if (lengthSq <= 0) return { point, guides: [] };
+    const selfIds = new Set([doorNode.id, `door:${doorId}`]);
+    const references = indoorAlignmentReferences.filter((reference) => {
+      if (selfIds.has(reference.id)) return false;
+      const value = horizontal ? reference.x : reference.y;
+      const start = horizontal ? wall.x1 : wall.y1;
+      const end = horizontal ? wall.x2 : wall.y2;
+      const span = end - start;
+      if (Math.abs(span) < 0.001) return false;
+      const t = (value - start) / span;
+      return Number.isFinite(t) && t >= 0 && t <= 1;
+    });
+    if (references.length === 0) return { point, guides: [] };
+
+    // navAlignSnap supplies deterministic nearest candidates and gives
+    // directly connected anchors priority. Keep the chosen axis locked against
+    // the raw Door position for this drag so the displayed Door never feeds
+    // back into a different candidate on the next pointer frame.
+    const snapped = navAlignSnap(point, references, 8, connectedIds);
+    const guideType = horizontal ? "v" : "h";
+    const candidate = snapped.guides.find((guide) => guide.type === guideType);
+    const candidateGuide: RoomAlignGuide | undefined = candidate
+      ? horizontal
+        ? { type: "v", pos: candidate.pos, x1: candidate.pos, y1: wall.y1, x2: candidate.pos, y2: wall.y2 }
+        : { type: "h", pos: candidate.pos, x1: wall.x1, y1: candidate.pos, x2: wall.x2, y2: candidate.pos }
+      : undefined;
+    const rawAxis = horizontal ? point.x : point.y;
+    const stable = resolveStableAlignmentAxis(
+      rawAxis,
+      candidate?.pos ?? rawAxis,
+      candidateGuide,
+      horizontal ? alignmentSnapLocksRef.current.x : alignmentSnapLocksRef.current.y,
+    );
+    if (horizontal) alignmentSnapLocksRef.current.x = stable.lock;
+    else alignmentSnapLocksRef.current.y = stable.lock;
+    if (!stable.snapped) return { point, guides: [] };
+    const value = stable.position;
+    const t = horizontal ? (value - wall.x1) / wallDx : (value - wall.y1) / wallDy;
+    return {
+      point: {
+        x: Math.round(wall.x1 + wallDx * t),
+        y: Math.round(wall.y1 + wallDy * t),
+      },
+      guides: [{ type: guideType, pos: value }],
+    };
+  }, [alignmentSnapLocksRef, indoorAlignmentReferences, indoorEdges, indoorNodes]);
   // B5 Phase 2.6: straightening the selected segmented path is blocked (button
   // disabled + guidance) when the direct A→B line would cross a wall without a
   // door opening — never silently create an invalid wall-crossing route.
@@ -1568,6 +2422,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
     edge: NavigationEdge,
     waypoint: NavigationNode,
     allNodes: NavigationNode[],
+    preferredSegmentIndex?: number,
   ): { newEdges: NavigationEdge[] } | null => {
     const nodeMap: Record<string, { x: number; y: number }> = Object.fromEntries(allNodes.map((n) => [n.id, { x: n.x, y: n.y }]));
     const startNode = nodeMap[edge.startNodeId];
@@ -1579,41 +2434,65 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
       { x: endNode.x, y: endNode.y },
     ];
     const nearest = findNavEdgeAtPoint([edge], nodeMap, { x: waypoint.x, y: waypoint.y });
-    if (!nearest) return null;
-    const splitIdx = nearest.nearest.segIndex;
-    const beforePoints = allPoints.slice(0, splitIdx + 1);
+    const splitIdx = Number.isInteger(preferredSegmentIndex)
+      && preferredSegmentIndex! >= 0
+      && preferredSegmentIndex! < allPoints.length - 1
+      ? preferredSegmentIndex!
+      : nearest?.nearest.segIndex;
+    if (splitIdx == null) return null;
+    // `segIndex` identifies the segment between allPoints[index] and
+    // allPoints[index + 1].  The inserted node must terminate the first edge;
+    // omitting it leaves the original start-side geometry ending at the old
+    // bend and produces a malformed/red diagonal after insertion.
+    const beforePoints = [...allPoints.slice(0, splitIdx + 1), { x: waypoint.x, y: waypoint.y }];
     const afterPoints = [{ x: waypoint.x, y: waypoint.y }, ...allPoints.slice(splitIdx + 1)];
     const edgeBendBefore = beforePoints.length > 2 ? beforePoints.slice(1, -1) : [];
     const edgeBendAfter = afterPoints.length > 2 ? afterPoints.slice(1, -1) : [];
     const distBefore = navEdgePolylineDistance(beforePoints);
     const distAfter = navEdgePolylineDistance(afterPoints);
+    const inheritedJunctionIds = [
+      ...(edge.pathJunctionIds ?? []),
+      ...(edge.pathJunctionId ? [edge.pathJunctionId] : []),
+      waypoint.id,
+    ].filter((id, index, all) => all.indexOf(id) === index);
     const edgeBefore: NavigationEdge = {
       ...edge, id: genId("ne"), startNodeId: edge.startNodeId, endNodeId: waypoint.id,
       bendPoints: edgeBendBefore, distance: distBefore,
+      pathJunctionId: waypoint.id,
+      pathJunctionParent: true,
+      pathJunctionIds: inheritedJunctionIds,
     };
     const edgeAfter: NavigationEdge = {
       ...edge, id: genId("ne"), startNodeId: waypoint.id, endNodeId: edge.endNodeId,
       bendPoints: edgeBendAfter, distance: distAfter,
+      pathJunctionId: waypoint.id,
+      pathJunctionParent: true,
+      pathJunctionIds: inheritedJunctionIds,
     };
     return { newEdges: [edgeBefore, edgeAfter] };
   }, []);
 
-  const commitNavGraph = useCallback((nextNodes: NavigationNode[], nextEdges: NavigationEdge[]) => {
+  const commitNavGraph = useCallback((
+    nextNodes: NavigationNode[],
+    nextEdges: NavigationEdge[],
+    options?: { splitNodeIds?: Set<string> },
+  ) => {
     const syncedNodes = syncIndoorLinkedNodePositions(nextNodes, {
       rooms, doors, stairs, ramps, elevators,
     });
-    const pruned = pruneOrphanedIndoorNodes(syncedNodes, nextEdges, {
+    const roomDoorEdges = reconcileRoomDoorEdges(syncedNodes, nextEdges, rooms, doors, walls);
+    const pruned = pruneOrphanedIndoorNodes(syncedNodes, roomDoorEdges, {
       rooms, doors, stairs, ramps, elevators,
     });
     // B5 Phase 2.5: segmented edges report their CURRENT total polyline length
     // (start → bends → end) so distance stays accurate after node/bend edits.
-    const finalEdges = pruned.edges.map((e) => {
+    const finalEdges = normalizeNavigationEdges(pruned.edges.map((e) => {
       if (!e.bendPoints || e.bendPoints.length === 0) return e;
       const pts = edgePolylinePoints(e, pruned.nodes);
       if (!pts) return e;
       const dist = navEdgePolylineDistance(pts);
       return dist === e.distance ? e : { ...e, distance: dist };
-    });
+    }), pruned.nodes, 2, options);
     const merged = mergeFloorNavIntoCampus(pruned.nodes, finalEdges);
     // B5 Phase 3: reconcile the building's cross-floor transition edges against
     // the CURRENT linked circulation nodes — fully derived + idempotent, so a
@@ -1637,7 +2516,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
       });
     }
     onUpdate(reconciled);
-  }, [buildingId, doors, elevators, floor, mergeFloorNavIntoCampus, onUpdate, pushHistory, ramps, rooms, stairs]);
+  }, [buildingId, doors, elevators, floor, mergeFloorNavIntoCampus, onUpdate, pushHistory, ramps, rooms, stairs, walls]);
 
   const clearTransientEditorState = useCallback(() => {
     setSelected(null);
@@ -1647,6 +2526,8 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
     setWallSnapIndicator(null);
     setWallPreview(null);
     setRoomDrag(null);
+    alignmentSnapLocksRef.current = { x: null, y: null };
+    clearRoomDoorLinkState();
     setDP([]);
     setContextMenu(null);
     setShowProperties(false);
@@ -1662,7 +2543,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
     groupTransforming.current = null;
     suppressHistoryRef.current = false;
     gestureMoved.current = false;
-  }, []);
+  }, [clearRoomDoorLinkState]);
 
   useEffect(() => {
     baselineFloorRef.current = structuredClone(floor);
@@ -1686,16 +2567,20 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
       // B5 Phase 2: after a physical-object edit, re-sync + prune the indoor nav
       // graph against the NEW floor geometry so linked nodes follow their owner
       // (and orphans never linger) in the SAME campus update — no extra history.
+      const nextRooms = updates.rooms ?? rooms;
+      const nextWalls = updates.walls ?? walls;
+      const nextDoors = updates.doors ?? doors;
       const synced = syncIndoorLinkedNodePositions(updates.navNodes ?? indoorNodes, {
-        rooms: updates.rooms ?? rooms,
-        doors: updates.doors ?? doors,
+        rooms: nextRooms,
+        doors: nextDoors,
         stairs: updates.stairs ?? stairs,
         ramps: updates.ramps ?? ramps,
         elevators: updates.elevators ?? elevators,
       });
-      const pruned = pruneOrphanedIndoorNodes(synced, updates.navEdges ?? indoorEdges, {
-        rooms: updates.rooms ?? rooms,
-        doors: updates.doors ?? doors,
+      const roomDoorEdges = reconcileRoomDoorEdges(synced, updates.navEdges ?? indoorEdges, nextRooms, nextDoors, nextWalls);
+      const pruned = pruneOrphanedIndoorNodes(synced, roomDoorEdges, {
+        rooms: nextRooms,
+        doors: nextDoors,
         stairs: updates.stairs ?? stairs,
         ramps: updates.ramps ?? ramps,
         elevators: updates.elevators ?? elevators,
@@ -1737,7 +2622,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
       onUpdate(updatedCampus);
       return updatedCampus;
     },
-    [campus, buildingId, floorId, indoorEdges, indoorNodes, mergeFloorNavIntoCampus, onUpdate, rooms, doors, stairs, ramps, elevators]
+    [campus, buildingId, floorId, indoorEdges, indoorNodes, mergeFloorNavIntoCampus, onUpdate, rooms, doors, stairs, ramps, elevators, walls]
   );
 
   const updFloor = useCallback(
@@ -1765,14 +2650,20 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
           rooms: newRooms, doors: syncedOpenings.doors,
           stairs: newStairs ?? stairs, ramps: newRamps ?? ramps, elevators: newElevators ?? elevators,
         }),
-        navEdges: indoorEdges,
+        navEdges: reconcileRoomDoorEdges(
+          indoorNodes,
+          indoorEdges,
+          newRooms,
+          syncedOpenings.doors,
+          nextWalls,
+        ),
       };
       // Record the POST-change state as the new history tip (unless we are in the
       // middle of a drag gesture — that commit happens once on pointer release).
       if (!suppressHistoryRef.current) pushHistory(next);
       buildFloorUpdates(next);
     },
-    [buildFloorUpdates, floor.canvasW, floor.canvasH, floor.backgroundColor, floor.showGrid, floor.gridSize, floor.backgroundImage, floor.calibration, floor.label, walls, doors, windows, furniture, stairs, ramps, elevators, labels, pushHistory]
+    [buildFloorUpdates, floor.canvasW, floor.canvasH, floor.backgroundColor, floor.showGrid, floor.gridSize, floor.backgroundImage, floor.calibration, floor.label, walls, doors, windows, furniture, stairs, ramps, elevators, labels, pushHistory, indoorNodes, indoorEdges]
   );
 
   const updateCirculationGroupMetadata = useCallback((groups: NonNullable<Campus["buildings"][number]["circulationGroups"]>) => {
@@ -1800,8 +2691,8 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
       });
       if (duplicate) {
         toast.warning(
-          type === "stairs" ? "Stair Connection already used" : "Elevator Shaft already used",
-          `${type === "stairs" ? "This stair connection" : "This elevator shaft"} is already assigned to another ${type === "stairs" ? "stair" : "elevator"} on this floor.`
+          type === "stairs" ? "Stair continuation already used" : "Elevator already used",
+          `${type === "stairs" ? "This Stair continuation" : "This elevator shaft"} is already assigned to another ${type === "stairs" ? "Stair" : "elevator"} on this Floor.`
         );
         return;
       }
@@ -1809,6 +2700,437 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
     if (type === "stairs") buildFloorUpdates({ stairs: stairs.map((s) => s.id === objectId ? { ...s, sharedId } : s) });
     else buildFloorUpdates({ elevators: elevators.map((e) => e.id === objectId ? { ...e, sharedId } : e) });
   }, [building?.floors, buildFloorUpdates, elevators, floorId, stairs, toast]);
+
+  /**
+   * Connect exactly one Stair occurrence to exactly one target occurrence.
+   * The persisted sharedId remains the canonical chain identity; the target
+   * object id is used only to prevent a same-floor Stair from being treated as
+   * an interchangeable member of the chain.
+   */
+  const changeStairConnection = useCallback((stairId: string, targetFloorId: string, targetStairId: string) => {
+    const floors = (building?.floors ?? []).map((candidateFloor) => ({
+      ...candidateFloor,
+      stairs: [...(candidateFloor.stairs ?? [])],
+    }));
+    const sourceFloorIndex = floors.findIndex((candidateFloor) => candidateFloor.id === floorId);
+    const targetFloorIndex = floors.findIndex((candidateFloor) => candidateFloor.id === targetFloorId);
+    const sourceFloor = floors[sourceFloorIndex];
+    const targetFloor = floors[targetFloorIndex];
+    const source = sourceFloor?.stairs?.find((stair) => stair.id === stairId);
+    const target = targetFloor?.stairs?.find((stair) => stair.id === targetStairId);
+    if (!source || !target || sourceFloorIndex < 0 || targetFloorIndex < 0 || sourceFloorIndex === targetFloorIndex) return;
+    // Stair continuations remain the existing adjacent-floor model even when
+    // a caller supplies an exact target occurrence.
+    if (Math.abs(targetFloorIndex - sourceFloorIndex) !== 1) return;
+    if (!stairContinuationDirectionAllows(source.direction ?? "both", sourceFloorIndex, targetFloorIndex)) {
+      toast.warning("Stair direction blocks this connection", "Change the Stair direction before choosing this Floor.");
+      return;
+    }
+    // Preserve the selected Stair's established chain when adding a second
+    // adjacent link.  Each occurrence starts with its own generated identity,
+    // so the target may have a different provisional chain; joining it must
+    // never replace the source's opposite-side relationship.
+    const sourceSharedId = source.sharedId ?? target.sharedId ?? `shared_stair_${buildingId}_${genId("chain")}`;
+    const targetSharedId = target.sharedId;
+    const sourceChainHasTargetFloor = (building?.floors ?? []).some((candidateFloor) => candidateFloor.id === targetFloorId
+      && (candidateFloor.stairs ?? []).some((stair) => stair.id !== targetStairId && stair.sharedId === sourceSharedId));
+    const targetChainHasSourceFloor = !!targetSharedId && targetSharedId !== sourceSharedId
+      && (building?.floors ?? []).some((candidateFloor) => candidateFloor.id === floorId
+        && (candidateFloor.stairs ?? []).some((stair) => stair.id !== stairId && stair.sharedId === targetSharedId));
+    if (sourceChainHasTargetFloor || targetChainHasSourceFloor) {
+      toast.warning("Stair continuation already used", "Choose a Stair that is not already part of another chain on this Floor.");
+      return;
+    }
+    const nextFloors = floors.map((candidateFloor, index) => {
+      if (index === sourceFloorIndex) {
+        return { ...candidateFloor, stairs: (candidateFloor.stairs ?? []).map((stair) => stair.id === stairId ? { ...stair, sharedId: sourceSharedId } : stair) };
+      }
+      // Merge only the target occurrence's already-established chain into the
+      // source chain after the floor-conflict checks above. This preserves any
+      // existing links on the source's opposite side (Both direction).
+      if (targetSharedId && targetSharedId !== sourceSharedId) {
+        return { ...candidateFloor, stairs: (candidateFloor.stairs ?? []).map((stair) => stair.sharedId === targetSharedId ? { ...stair, sharedId: sourceSharedId } : stair) };
+      }
+      // A target without an identity is uncommon, but assigning the exact
+      // occurrence keeps the explicit choice coherent without labels/coords.
+      if (index === targetFloorIndex && !targetSharedId) {
+        return { ...candidateFloor, stairs: (candidateFloor.stairs ?? []).map((stair) => stair.id === targetStairId ? { ...stair, sharedId: sourceSharedId } : stair) };
+      }
+      return candidateFloor;
+    });
+    const groupsWithSource = ensureCirculationGroupName("stairs", sourceSharedId, source.label || target.label || "Stair");
+    const groups = targetSharedId && targetSharedId !== sourceSharedId
+      ? groupsWithSource.filter((group) => group.id !== targetSharedId)
+      : groupsWithSource;
+    pushHistory(floorUndoEntryFromFloor(floor));
+    const nextCampus = replaceBuildingFloorsAndReconcileTransitions({
+      ...campus,
+      buildings: campus.buildings.map((buildingItem) => buildingItem.id === buildingId
+        ? { ...buildingItem, floors: nextFloors, circulationGroups: groups }
+        : buildingItem),
+    }, buildingId, nextFloors);
+    onUpdate(nextCampus);
+  }, [building?.floors, buildingId, campus, ensureCirculationGroupName, floor, floorId, onUpdate, pushHistory, toast]);
+
+  /** Elevator links use the existing sharedId identity, but each authoring
+   * action still names one exact target occurrence. Elevators intentionally do
+   * not inherit Stair adjacency rules; served-floor metadata remains the
+   * source of truth for which floors may receive transitions. */
+  const connectElevatorConnections = useCallback((elevatorId: string, targets: Array<{ targetFloorId: string; targetElevatorId: string }>) => {
+    if (targets.length === 0) return;
+    const floors = (building?.floors ?? []).map((candidateFloor) => ({
+      ...candidateFloor,
+      elevators: [...(candidateFloor.elevators ?? [])],
+    }));
+    const sourceFloorIndex = floors.findIndex((candidateFloor) => candidateFloor.id === floorId);
+    if (sourceFloorIndex < 0 || !floors[sourceFloorIndex]?.elevators?.some((elevator) => elevator.id === elevatorId)) return;
+    let sourceSharedId = floors[sourceFloorIndex].elevators?.find((elevator) => elevator.id === elevatorId)?.sharedId;
+    const removedGroupIds = new Set<string>();
+    const joinedFloorIds = new Set<string>();
+    for (const targetSpec of targets) {
+      const targetFloorIndex = floors.findIndex((candidateFloor) => candidateFloor.id === targetSpec.targetFloorId);
+      const target = floors[targetFloorIndex]?.elevators?.find((elevator) => elevator.id === targetSpec.targetElevatorId);
+      const source = floors[sourceFloorIndex].elevators?.find((elevator) => elevator.id === elevatorId);
+      if (!source || !target || targetFloorIndex < 0 || targetFloorIndex === sourceFloorIndex) return;
+      joinedFloorIds.add(targetSpec.targetFloorId);
+      const targetSharedId = target.sharedId;
+      const sourceGroupSize = sourceSharedId
+        ? floors.reduce((count, candidateFloor) => count + (candidateFloor.elevators ?? []).filter((item) => item.sharedId === sourceSharedId).length, 0)
+        : 1;
+      const targetGroupSize = targetSharedId
+        ? floors.reduce((count, candidateFloor) => count + (candidateFloor.elevators ?? []).filter((item) => item.sharedId === targetSharedId).length, 0)
+        : 0;
+      sourceSharedId = sourceSharedId ?? targetSharedId ?? `shared_elevator_${buildingId}_${genId("chain")}`;
+      // A shaft may have at most one occurrence on a Floor.  Check both the
+      // source shaft and the target shaft before any join/move branch runs;
+      // otherwise a malformed/legacy duplicate on the target Floor could be
+      // silently preserved or created by an otherwise valid join.
+      const sourceChainHasTargetFloor = floors.some((candidateFloor) => candidateFloor.id === targetSpec.targetFloorId
+        && (candidateFloor.elevators ?? []).some((elevator) => elevator.id !== targetSpec.targetElevatorId && elevator.sharedId === sourceSharedId));
+      const targetChainHasTargetFloor = !!targetSharedId && floors.some((candidateFloor) => candidateFloor.id === targetSpec.targetFloorId
+        && (candidateFloor.elevators ?? []).some((elevator) => elevator.id !== targetSpec.targetElevatorId && elevator.sharedId === targetSharedId));
+      const targetChainHasSourceFloor = !!targetSharedId
+        && floors.some((candidateFloor) => candidateFloor.id === floorId
+          && (candidateFloor.elevators ?? []).some((elevator) => elevator.id !== elevatorId && elevator.sharedId === targetSharedId));
+      // If the selected source shaft already has another occurrence on the
+      // target Floor, an explicit candidate click can still mean “move this
+      // exact source occurrence to that other shaft” (for example Floor 1
+      // Elevator 1 -> Floor 2 Elevator 2 while Floor 2 Elevator 1 remains in
+      // place).  Treat that as a deliberate membership move, not an invalid
+      // duplicate, provided the destination shaft has no occurrence on either
+      // endpoint Floor.  Ordinary joins continue to reject duplicate shaft
+      // occupancy on the same Floor.
+      const moveSourceToTargetShaft = !!targetSharedId
+        && targetSharedId !== sourceSharedId
+        && sourceChainHasTargetFloor
+        && !targetChainHasTargetFloor
+        && !targetChainHasSourceFloor;
+      if ((sourceChainHasTargetFloor && !moveSourceToTargetShaft) || targetChainHasTargetFloor || targetChainHasSourceFloor) {
+        toast.warning("Elevator connection already used", "Choose an Elevator occurrence that is not assigned to another shaft on this Floor.");
+        return;
+      }
+      if (moveSourceToTargetShaft) {
+        // Keep the two shafts independent: only the selected source occurrence
+        // changes membership, while every other member remains untouched.
+        floors[sourceFloorIndex].elevators = (floors[sourceFloorIndex].elevators ?? []).map((item) => item.id === elevatorId
+          ? { ...item, sharedId: targetSharedId }
+          : item);
+        sourceSharedId = targetSharedId;
+      } else if (targetSharedId && targetSharedId !== sourceSharedId && sourceGroupSize > 1 && targetGroupSize > 1) {
+        // Change: move only this exact floor occurrence to the selected
+        // existing shaft.  The two established shafts remain independent.
+        floors[sourceFloorIndex].elevators = (floors[sourceFloorIndex].elevators ?? []).map((item) => item.id === elevatorId
+          ? { ...item, sharedId: targetSharedId }
+          : item);
+      } else if (targetSharedId && targetSharedId !== sourceSharedId && targetGroupSize > 1) {
+        // Join: a provisional occurrence adopts the established shaft ID;
+        // no pairwise edge authoring or duplicate shaft is created.
+        floors[sourceFloorIndex].elevators = (floors[sourceFloorIndex].elevators ?? []).map((item) => item.id === elevatorId
+          ? { ...item, sharedId: targetSharedId }
+          : item);
+        removedGroupIds.add(sourceSharedId);
+        sourceSharedId = targetSharedId;
+      } else if (targetSharedId && targetSharedId !== sourceSharedId && sourceGroupSize > 1) {
+        // Join: an established shaft adopts the newly authored target
+        // occurrence. This is the common “add Floor 3 to Elevator 1” flow.
+        floors[targetFloorIndex].elevators = (floors[targetFloorIndex].elevators ?? []).map((item) => item.id === targetSpec.targetElevatorId
+          ? { ...item, sharedId: sourceSharedId }
+          : item);
+        // The target was a provisional one-occurrence shaft.  Once its only
+        // member adopts the established source identity, drop the now-empty
+        // group so it cannot reappear as a phantom shaft in the manager.
+        removedGroupIds.add(targetSharedId);
+      } else if (targetSharedId && targetSharedId !== sourceSharedId) {
+        floors[sourceFloorIndex].elevators = (floors[sourceFloorIndex].elevators ?? []).map((item) => item.id === elevatorId
+          ? { ...item, sharedId: sourceSharedId }
+          : item);
+        floors.forEach((candidateFloor, index) => {
+          floors[index] = {
+            ...candidateFloor,
+            elevators: (candidateFloor.elevators ?? []).map((item) => item.sharedId === targetSharedId
+              ? { ...item, sharedId: sourceSharedId }
+              : item),
+          };
+        });
+        removedGroupIds.add(targetSharedId);
+      } else if (!targetSharedId || targetSharedId === sourceSharedId) {
+        floors[targetFloorIndex].elevators = (floors[targetFloorIndex].elevators ?? []).map((item) => item.id === targetSpec.targetElevatorId
+          ? { ...item, sharedId: sourceSharedId }
+          : item);
+      }
+    }
+    if (!sourceSharedId) return;
+    // Always persist the source occurrence's canonical identity as part of the
+    // same mutation. Legacy/hand-authored data may omit sharedId on the source;
+    // leaving it unset would make the connection appear only from the target
+    // Floor after a context switch.
+    floors[sourceFloorIndex].elevators = (floors[sourceFloorIndex].elevators ?? []).map((item) => item.id === elevatorId
+      ? { ...item, sharedId: sourceSharedId }
+      : item);
+    // Keep the shaft's explicit served-floor metadata coherent with the
+    // identity join.  Reconciliation uses this list to decide which Elevator
+    // occurrences participate in transitions and quick-nav; changing only
+    // sharedId would leave a restricted shaft unaware of its newly joined stop.
+    const shaftEntries = floors.flatMap((candidateFloor) => (candidateFloor.elevators ?? [])
+      .filter((item) => item.sharedId === sourceSharedId)
+      .map((item) => ({ floor: candidateFloor, item })));
+    const explicitServedFloors = new Set(shaftEntries.flatMap(({ item }) => item.floors?.length ? item.floors : []));
+    if (explicitServedFloors.size > 0) {
+      shaftEntries.forEach(({ floor }) => explicitServedFloors.add(floor.number));
+      joinedFloorIds.forEach((targetFloorId) => {
+        const targetFloor = floors.find((candidateFloor) => candidateFloor.id === targetFloorId);
+        if (targetFloor) explicitServedFloors.add(targetFloor.number);
+      });
+      const servedFloors = [...explicitServedFloors].sort((a, b) => a - b);
+      floors.forEach((candidateFloor, index) => {
+        floors[index] = {
+          ...candidateFloor,
+          elevators: (candidateFloor.elevators ?? []).map((item) => item.sharedId === sourceSharedId
+            ? { ...item, floors: servedFloors }
+            : item),
+        };
+      });
+    }
+    const existingGroups = building?.circulationGroups ?? [];
+    const sourceLabel = floors[sourceFloorIndex].elevators?.find((item) => item.id === elevatorId)?.label || "Elevator";
+    const groupsWithSource = existingGroups.some((group) => group.id === sourceSharedId && group.kind === "elevator")
+      ? existingGroups
+      : [...existingGroups, { id: sourceSharedId, buildingId, kind: "elevator" as const, name: sourceLabel }];
+    const groups = groupsWithSource.filter((group) => !removedGroupIds.has(group.id));
+    pushHistory(floorUndoEntryFromFloor(floor));
+    const nextCampus = replaceBuildingFloorsAndReconcileTransitions({
+      ...campus,
+      buildings: campus.buildings.map((buildingItem) => buildingItem.id === buildingId
+        ? { ...buildingItem, floors, circulationGroups: groups }
+        : buildingItem),
+    }, buildingId, floors);
+    onUpdate(nextCampus);
+  }, [building?.circulationGroups, building?.floors, buildingId, campus, floor, floorId, onUpdate, pushHistory, toast]);
+
+  const changeElevatorConnection = useCallback((elevatorId: string, targetFloorId: string, targetElevatorId: string) => {
+    connectElevatorConnections(elevatorId, [{ targetFloorId, targetElevatorId }]);
+  }, [connectElevatorConnections]);
+
+  /** Split only the explicitly selected target occurrence from the existing
+   * shaft identity. Other Elevator occurrences and the source relationship
+   * remain untouched. */
+  const disconnectElevatorConnection = useCallback((elevatorId: string, targetFloorId: string, targetElevatorId: string) => {
+    const floors = (building?.floors ?? []).map((candidateFloor) => ({
+      ...candidateFloor,
+      elevators: [...(candidateFloor.elevators ?? [])],
+    }));
+    const sourceFloor = floors.find((candidateFloor) => candidateFloor.id === floorId);
+    const targetFloor = floors.find((candidateFloor) => candidateFloor.id === targetFloorId);
+    const source = sourceFloor?.elevators?.find((elevator) => elevator.id === elevatorId);
+    const target = targetFloor?.elevators?.find((elevator) => elevator.id === targetElevatorId);
+    if (!source?.sharedId || !target || target.sharedId !== source.sharedId) return;
+    const splitSharedId = `shared_elevator_${buildingId}_${genId("chain")}`;
+    const nextFloors = floors.map((candidateFloor) => candidateFloor.id === targetFloorId
+      ? { ...candidateFloor, elevators: (candidateFloor.elevators ?? []).map((elevator) => elevator.id === targetElevatorId ? { ...elevator, sharedId: splitSharedId } : elevator) }
+      : candidateFloor);
+    const groups = ensureCirculationGroupName("elevator", splitSharedId, target.label || "Elevator");
+    pushHistory(floorUndoEntryFromFloor(floor));
+    const nextCampus = replaceBuildingFloorsAndReconcileTransitions({
+      ...campus,
+      buildings: campus.buildings.map((buildingItem) => buildingItem.id === buildingId
+        ? { ...buildingItem, floors: nextFloors, circulationGroups: groups }
+        : buildingItem),
+    }, buildingId, nextFloors);
+    onUpdate(nextCampus);
+  }, [building?.floors, buildingId, campus, ensureCirculationGroupName, floor, floorId, onUpdate, pushHistory]);
+
+  /** Clear only cross-floor membership for the selected Elevator shaft.  Each
+   * physical occurrence remains in place (and keeps its local nav node); it
+   * receives a fresh one-occurrence identity so transition reconciliation
+   * cannot reconnect the stops after the destructive action. */
+  const disconnectAllElevatorConnections = useCallback((elevatorId: string) => {
+    const floors = (building?.floors ?? []).map((candidateFloor) => ({
+      ...candidateFloor,
+      elevators: [...(candidateFloor.elevators ?? [])],
+    }));
+    const sourceFloor = floors.find((candidateFloor) => candidateFloor.id === floorId);
+    const source = sourceFloor?.elevators?.find((elevator) => elevator.id === elevatorId);
+    if (!source?.sharedId) return;
+    const shaftId = source.sharedId;
+    const members = floors.flatMap((candidateFloor) => (candidateFloor.elevators ?? [])
+      .filter((elevator) => elevator.sharedId === shaftId)
+      .map((elevator) => ({ floorId: candidateFloor.id, elevator })));
+    const memberFloorIds = new Set(members.map((member) => member.floorId));
+    if (memberFloorIds.size <= 1) return;
+    const shaftGroup = (building?.circulationGroups ?? []).find((group) => group.id === shaftId && group.kind === "elevator");
+    const freshIdentityByOccurrence = new Map<string, string>();
+    members.forEach(({ elevator }) => {
+      freshIdentityByOccurrence.set(elevator.id, `shared_elevator_${buildingId}_${genId("chain")}`);
+    });
+    const nextFloors = floors.map((candidateFloor) => ({
+      ...candidateFloor,
+      elevators: (candidateFloor.elevators ?? []).map((elevator) => {
+        const freshId = freshIdentityByOccurrence.get(elevator.id);
+        return freshId ? { ...elevator, sharedId: freshId } : elevator;
+      }),
+    }));
+    const retainedGroups = (building?.circulationGroups ?? []).filter((group) => group.id !== shaftId || group.kind !== "elevator");
+    const splitGroups = members.map(({ elevator }) => ({
+      id: freshIdentityByOccurrence.get(elevator.id)!,
+      buildingId,
+      kind: "elevator" as const,
+      name: shaftGroup?.name || elevator.label || "Elevator",
+    }));
+    pushHistory(floorUndoEntryFromFloor(floor));
+    const nextCampus = replaceBuildingFloorsAndReconcileTransitions({
+      ...campus,
+      buildings: campus.buildings.map((buildingItem) => buildingItem.id === buildingId
+        ? { ...buildingItem, floors: nextFloors, circulationGroups: [...retainedGroups, ...splitGroups] }
+        : buildingItem),
+    }, buildingId, nextFloors);
+    onUpdate(nextCampus);
+  }, [building?.circulationGroups, building?.floors, buildingId, campus, floor, floorId, onUpdate, pushHistory]);
+
+  /**
+   * Commit the optional "Connect Matching Stairs" action as one explicit
+   * authoring edit.  Each target occurrence is validated independently, then
+   * all requested adjacent links are reconciled from the same floor snapshot
+   * so adding Above never replaces an existing Below relationship.
+   */
+  const connectMatchingStairConnections = useCallback((stairId: string, targets: Array<{ targetFloorId: string; targetStairId: string }>) => {
+    if (targets.length === 0) return;
+    const floors = (building?.floors ?? []).map((candidateFloor) => ({
+      ...candidateFloor,
+      stairs: [...(candidateFloor.stairs ?? [])],
+    }));
+    const sourceFloorIndex = floors.findIndex((candidateFloor) => candidateFloor.id === floorId);
+    const sourceFloor = floors[sourceFloorIndex];
+    if (!sourceFloor || sourceFloorIndex < 0) return;
+    let source = sourceFloor.stairs?.find((stair) => stair.id === stairId);
+    if (!source) return;
+    let sourceSharedId = source.sharedId;
+    const removedGroupIds = new Set<string>();
+
+    for (const targetSpec of targets) {
+      const targetFloorIndex = floors.findIndex((candidateFloor) => candidateFloor.id === targetSpec.targetFloorId);
+      const targetFloor = floors[targetFloorIndex];
+      const target = targetFloor?.stairs?.find((stair) => stair.id === targetSpec.targetStairId);
+      if (!target || targetFloorIndex < 0 || targetFloorIndex === sourceFloorIndex) return;
+      if (Math.abs(targetFloorIndex - sourceFloorIndex) !== 1) {
+        toast.warning("Stair connection unavailable", "Choose an adjacent Floor for this Stair.");
+        return;
+      }
+      if (!stairContinuationDirectionAllows(source.direction ?? "both", sourceFloorIndex, targetFloorIndex)) {
+        toast.warning("Stair direction blocks this connection", "Change the Stair direction before choosing this Floor.");
+        return;
+      }
+      sourceSharedId = sourceSharedId ?? target.sharedId ?? `shared_stair_${buildingId}_${genId("chain")}`;
+      const targetSharedId = target.sharedId;
+      const sourceChainHasTargetFloor = floors.some((candidateFloor) => candidateFloor.id === targetSpec.targetFloorId
+        && (candidateFloor.stairs ?? []).some((stair) => stair.id !== targetSpec.targetStairId && stair.sharedId === sourceSharedId));
+      const targetChainHasSourceFloor = !!targetSharedId && targetSharedId !== sourceSharedId
+        && floors.some((candidateFloor) => candidateFloor.id === floorId
+          && (candidateFloor.stairs ?? []).some((stair) => stair.id !== stairId && stair.sharedId === targetSharedId));
+      if (sourceChainHasTargetFloor || targetChainHasSourceFloor) {
+        toast.warning("Stair continuation already used", "Choose a Stair that is not already part of another chain on this Floor.");
+        return;
+      }
+
+      // Keep the source occurrence on the selected chain for every requested
+      // side.  Merging a target's prior provisional/explicit chain is only
+      // done for this exact, explicitly chosen target occurrence after the
+      // conflict checks above.
+      floors[sourceFloorIndex].stairs = (floors[sourceFloorIndex].stairs ?? []).map((stair) => stair.id === stairId
+        ? { ...stair, sharedId: sourceSharedId }
+        : stair);
+      if (targetSharedId && targetSharedId !== sourceSharedId) {
+        floors.forEach((candidateFloor, index) => {
+          floors[index] = {
+            ...candidateFloor,
+            stairs: (candidateFloor.stairs ?? []).map((stair) => stair.sharedId === targetSharedId
+              ? { ...stair, sharedId: sourceSharedId }
+              : stair),
+          };
+        });
+        removedGroupIds.add(targetSharedId);
+      } else if (!targetSharedId) {
+        floors[targetFloorIndex].stairs = (floors[targetFloorIndex].stairs ?? []).map((stair) => stair.id === targetSpec.targetStairId
+          ? { ...stair, sharedId: sourceSharedId }
+          : stair);
+      }
+      source = floors[sourceFloorIndex].stairs?.find((stair) => stair.id === stairId) ?? source;
+    }
+
+    if (!sourceSharedId) return;
+    const existingGroups = building?.circulationGroups ?? [];
+    const groupsWithSource = existingGroups.some((group) => group.id === sourceSharedId && group.kind === "stair")
+      ? existingGroups
+      : [...existingGroups, { id: sourceSharedId, buildingId, kind: "stair" as const, name: source.label || "Stair" }];
+    const groups = groupsWithSource.filter((group) => !removedGroupIds.has(group.id));
+    pushHistory(floorUndoEntryFromFloor(floor));
+    const nextCampus = replaceBuildingFloorsAndReconcileTransitions({
+      ...campus,
+      buildings: campus.buildings.map((buildingItem) => buildingItem.id === buildingId
+        ? { ...buildingItem, floors, circulationGroups: groups }
+        : buildingItem),
+    }, buildingId, floors);
+    onUpdate(nextCampus);
+  }, [building?.circulationGroups, building?.floors, buildingId, campus, floor, floorId, onUpdate, pushHistory, toast]);
+
+  /**
+   * Disconnect one adjacent relationship while preserving the rest of the
+   * chain.  Since one Stair occurrence has one canonical sharedId, the
+   * target-side occurrences are partitioned into a fresh identity instead of
+   * clearing the selected Stair's unrelated opposite-side connection.
+   */
+  const disconnectStairConnection = useCallback((stairId: string, targetFloorId: string, targetStairId: string) => {
+    const floors = (building?.floors ?? []).map((candidateFloor) => ({
+      ...candidateFloor,
+      stairs: [...(candidateFloor.stairs ?? [])],
+    }));
+    const sourceFloorIndex = floors.findIndex((candidateFloor) => candidateFloor.id === floorId);
+    const targetFloorIndex = floors.findIndex((candidateFloor) => candidateFloor.id === targetFloorId);
+    const sourceFloor = floors[sourceFloorIndex];
+    const targetFloor = floors[targetFloorIndex];
+    const source = sourceFloor?.stairs?.find((stair) => stair.id === stairId);
+    const target = targetFloor?.stairs?.find((stair) => stair.id === targetStairId);
+    if (!source?.sharedId || !target || target.sharedId !== source.sharedId || sourceFloorIndex < 0 || targetFloorIndex < 0) return;
+    if (Math.abs(targetFloorIndex - sourceFloorIndex) !== 1) return;
+    const movingUp = targetFloorIndex > sourceFloorIndex;
+    const splitSharedId = `shared_stair_${buildingId}_${genId("chain")}`;
+    const nextFloors = floors.map((candidateFloor, index) => {
+      const onTargetSide = movingUp ? index > sourceFloorIndex : index < sourceFloorIndex;
+      if (!onTargetSide) return candidateFloor;
+      return {
+        ...candidateFloor,
+        stairs: (candidateFloor.stairs ?? []).map((stair) => stair.sharedId === source.sharedId ? { ...stair, sharedId: splitSharedId } : stair),
+      };
+    });
+    const groups = ensureCirculationGroupName("stairs", splitSharedId, target.label || "Stair");
+    pushHistory(floorUndoEntryFromFloor(floor));
+    const nextCampus = replaceBuildingFloorsAndReconcileTransitions({
+      ...campus,
+      buildings: campus.buildings.map((buildingItem) => buildingItem.id === buildingId
+        ? { ...buildingItem, floors: nextFloors, circulationGroups: groups }
+        : buildingItem),
+    }, buildingId, nextFloors);
+    onUpdate(nextCampus);
+  }, [building?.floors, buildingId, campus, ensureCirculationGroupName, floor, floorId, onUpdate, pushHistory]);
 
   const createCirculationGroup = useCallback((type: "stairs" | "elevator", objectId: string, name: string) => {
     const prefix = type === "stairs" ? "stair" : "el";
@@ -1884,7 +3206,14 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
     // genuine persistence failures (below) can prevent a save.
     setSaving(true);
     try {
-      const candidate = buildFloorUpdates({});
+      // Navigation commits update navGraphRef immediately, while React props
+      // may still contain the previous render for one tick. Serialize that
+      // current graph so a fast Save cannot overwrite newly authored nodes or
+      // edges with a stale indoorNodes/indoorEdges snapshot.
+      const candidate = buildFloorUpdates({
+        navNodes: navGraphRef.current.nodes,
+        navEdges: navGraphRef.current.edges,
+      });
       const savedCampus = onSave ? await onSave(candidate) : candidate;
       onUpdate(savedCampus);
       const savedFloor = normalizeFloor(
@@ -1950,6 +3279,10 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
   }, [guardNavigation, onBack]);
 
   const handlePublish = useCallback(() => {
+    if (onPreviewStudent) {
+      onPreviewStudent(campus, isFloorDirty);
+      return;
+    }
     // B7 Phase 2: PUBLISH uses the SAME canonical live issue list as the Issues
     // panel — the floor-local geometry checks merged with the canonical
     // campus/navigation issues that target this floor. Errors block publishing;
@@ -1975,15 +3308,15 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
       return;
     }
     onPublish(campus);
-  }, [campus, floor, floorId, onPublish, publishingEnabled, toast]);
+  }, [campus, floor, floorId, onPublish, onPreviewStudent, publishingEnabled, toast, isFloorDirty]);
 
-  const switchToFloor = useCallback((targetFloorId: string) => {
+  const switchToFloor = useCallback((targetFloorId: string, initialSelection?: FloorSelection) => {
     if (targetFloorId === floorId) return;
     clearTransientEditorState();
-    onSwitchFloor(targetFloorId);
+    onSwitchFloor(targetFloorId, initialSelection);
   }, [clearTransientEditorState, floorId, onSwitchFloor]);
 
-  const requestFloorSwitch = useCallback((targetFloorId: string) => {
+  const requestFloorSwitch = useCallback((targetFloorId: string, initialSelection?: FloorSelection) => {
     if (targetFloorId === floorId) return;
     setFloorMenu(null);
     setFloorSelectorOpen(false);
@@ -1991,10 +3324,77 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
     // Dirty floor edits go through the shared unsaved-changes guard (same
     // flow as Add Floor and back). The pending action resumes after
     // Save Changes / Discard Changes or is cancelled by Keep Editing.
-    guardNavigation(() => switchToFloor(targetFloorId), {
+    guardNavigation(() => switchToFloor(targetFloorId, initialSelection), {
       description: `Save or discard changes to ${floor.label} before switching floors.`,
     });
   }, [clearTransientEditorState, floor, floorId, guardNavigation, switchToFloor]);
+
+  // A successful route calculation may switch from Outdoor or another floor
+  // into this editor. Consume the one-shot origin focus only after this floor
+  // has mounted and its canvas controls are ready; otherwise the previous
+  // editor can consume the request and the new floor opens at its default view.
+  useEffect(() => {
+    const request = testRouteSessionContext.session?.pendingFocus;
+    if (!request || request.context.kind !== "floor"
+      || request.context.buildingId !== buildingId
+      || request.context.floorId !== floorId) return;
+    const node = indoorNodes.find((candidate) => candidate.id === request.nodeId);
+    if (!node) return;
+    const frame = window.requestAnimationFrame(() => {
+      // Keep automatic route focus useful without pinning the camera tightly
+      // to a Stair/Room. A moderate context window lets the admin orient on
+      // the surrounding floor plan immediately.
+      zoomToFit(Math.max(0, node.x - 140), Math.max(0, node.y - 110), 280, 220, 72);
+      const current = testRouteSessionContext.session;
+      if (current?.pendingFocus?.nodeId === request.nodeId
+        && current.pendingFocus.context.kind === "floor"
+        && current.pendingFocus.context.floorId === floorId) {
+        testRouteSessionContext.setSession({ ...current, pendingFocus: undefined });
+      }
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [buildingId, floorId, indoorNodes, testRouteSessionContext.session, testRouteSessionContext.setSession, zoomToFit]);
+
+  const handleTestRouteTransition = useCallback((marker: TestRouteTransitionMarker) => {
+    if (marker.kind === "elevator" && marker.targetContext.kind === "floor" && marker.targetContext.floorId) {
+      const targetNode = marker.targetNodeId
+        ? (campus.navNodes ?? []).find((node) => node.id === marker.targetNodeId)
+        : undefined;
+      const initialSelection: FloorSelection | undefined = targetNode?.elevatorId
+        ? { type: "elevator", id: targetNode.elevatorId }
+        : targetNode?.stairId
+          ? { type: "stairs", id: targetNode.stairId }
+          : targetNode?.doorId
+            ? { type: "door", id: targetNode.doorId }
+            : undefined;
+      requestFloorSwitch(marker.targetContext.floorId, initialSelection);
+      return;
+    }
+    if (marker.targetContext.kind === "outdoor") {
+      const current = testRouteSessionContext.session;
+      if (current && marker.targetNodeId) {
+        testRouteSessionContext.setSession({
+          ...current,
+          pendingFocus: { nodeId: marker.targetNodeId, context: marker.targetContext },
+        });
+      }
+      handleBack();
+      return;
+    }
+    if (marker.targetContext.buildingId === buildingId && marker.targetContext.floorId) {
+      const targetNode = marker.targetNodeId
+        ? (campus.navNodes ?? []).find((node) => node.id === marker.targetNodeId)
+        : undefined;
+      const initialSelection: FloorSelection | undefined = targetNode?.elevatorId
+        ? { type: "elevator", id: targetNode.elevatorId }
+        : targetNode?.stairId
+          ? { type: "stairs", id: targetNode.stairId }
+          : targetNode?.doorId
+            ? { type: "door", id: targetNode.doorId }
+            : undefined;
+      requestFloorSwitch(marker.targetContext.floorId, initialSelection);
+    }
+  }, [buildingId, campus.navNodes, handleBack, requestFloorSwitch, testRouteSessionContext]);
 
   const updateFloorSelectorPosition = useCallback(() => {
     const trigger = floorSelectorButtonRef.current;
@@ -2027,14 +3427,19 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
   }, [floorSelectorOpen, updateFloorSelectorPosition]);
 
   const updateBuildingFloors = useCallback((nextFloors: FloorPlan[]) => {
+    const reconciledDirections = reconcileStairDirectionsForFloorOrder(nextFloors);
     const updatedCampus = replaceBuildingFloorsAndReconcileTransitions(
       campus,
       buildingId,
-      nextFloors.map((nextFloor) => normalizeFloor(nextFloor, { buildingId }))
+      reconciledDirections.floors.map((nextFloor) => normalizeFloor(nextFloor, { buildingId }))
     );
     onUpdate(updatedCampus);
+    for (const adjustment of reconciledDirections.adjustments) {
+      const directionLabel = adjustment.to === "both" ? "Both" : adjustment.to === "up" ? "Up" : "Down";
+      toast.info("Stair direction updated", `${adjustment.stairLabel} is now ${directionLabel} on ${adjustment.floorLabel}.`);
+    }
     return updatedCampus;
-  }, [buildingId, campus, onUpdate]);
+  }, [buildingId, campus, onUpdate, toast]);
 
   // ── Floor management — ALL surfaces (the `...` button, tab right-clicks,
   //    the rename/delete dialogs, and the Floor Overview sidebar) route through
@@ -2070,29 +3475,38 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
   const requestDuplicateFloor = useCallback((targetId: string) => {
     // B5 Phase 2: pass the campus nav graph so the duplicate floor also clones
     // its indoor nav graph (new IDs, remapped floorId + linked object refs).
-    const { floors, copy, navNodes, navEdges } = duplicateFloorInBuilding(building.floors, buildingId, targetId, campus.navNodes, campus.navEdges);
+    const { floors: duplicatedFloors, copy, navNodes, navEdges } = duplicateFloorInBuilding(building.floors, buildingId, targetId, campus.navNodes, campus.navEdges);
     if (!copy) {
       setFloorMenu(null);
       return;
     }
+    // A duplicated floor changes the authoritative floor position for every
+    // Stair in the building. Reconcile boundary directions in the same write
+    // as the duplicate so a one-floor stair that becomes a lower/middle stair
+    // never retains a stale direction in Properties or validation.
+    const reconciledDirections = reconcileStairDirectionsForFloorOrder(duplicatedFloors);
     const baseCampus: Campus = {
       ...campus,
       navNodes: navNodes ?? campus.navNodes,
       navEdges: navEdges ?? campus.navEdges,
       buildings: campus.buildings.map((b) =>
-        b.id === buildingId ? { ...b, floors } : b
+        b.id === buildingId ? { ...b, floors: reconciledDirections.floors } : b
       ),
     };
-    // B5 Phase 3: reconcile transitions after the duplicated floor's circulation
-    // objects land (duplication preserves sharedId, so matching chains keep
-    // their intended cross-floor continuity without manual re-linking).
-    const reconciledEdges = reconcileCrossFloorTransitions(
-      baseCampus.navNodes, baseCampus.navEdges,
-      (baseCampus.buildings ?? []).find((b) => b.id === buildingId)?.floors,
-      buildingId
+    // B5 Phase 3: replace floors through the shared helper. Besides rebuilding
+    // derived transitions, it re-resolves linked Stair anchors after any
+    // direction reconciliation so a duplicated/reordered floor cannot leave a
+    // canonical node at its old physical entry.
+    const updatedCampus = replaceBuildingFloorsAndReconcileTransitions(
+      baseCampus,
+      buildingId,
+      reconciledDirections.floors
     );
-    const updatedCampus: Campus = { ...baseCampus, navEdges: reconciledEdges };
     onUpdate(updatedCampus);
+    for (const adjustment of reconciledDirections.adjustments) {
+      const directionLabel = adjustment.to === "both" ? "Both" : adjustment.to === "up" ? "Up" : "Down";
+      toast.info("Stair direction updated", `${adjustment.stairLabel} is now ${directionLabel} on ${adjustment.floorLabel}.`);
+    }
     clearTransientEditorState();
     setFloorMenu(null);
     onSwitchFloor(copy.id);
@@ -2241,19 +3655,44 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
       const b = aabb(el.x, el.y, el.width, el.height, el.rotation);
       refs.push({ ...b, id: el.id });
     }
+    // Structural and navigation anchors are alignment references only. They do
+    // not create ownership or graph connectivity; they simply let a movable
+    // object line up with a wall, Door, or nearby path point.
+    for (const wall of walls) {
+      if (excludeIds.has(wall.id)) continue;
+      refs.push({
+        x: Math.min(wall.x1, wall.x2), y: Math.min(wall.y1, wall.y2),
+        w: Math.max(1, Math.abs(wall.x2 - wall.x1)), h: Math.max(1, Math.abs(wall.y2 - wall.y1)),
+        id: `wall:${wall.id}`,
+      });
+    }
+    for (const door of doors) {
+      if (excludeIds.has(door.id)) continue;
+      refs.push({ x: door.x - 1, y: door.y - 1, w: 2, h: 2, id: `door:${door.id}` });
+    }
+    for (const node of indoorNodes) {
+      if (node.roomId) continue;
+      refs.push({ x: node.x - 1, y: node.y - 1, w: 2, h: 2, id: `nav:${node.id}` });
+    }
+    for (const path of fpaths) {
+      for (const [index, point] of path.points.entries()) {
+        refs.push({ x: point.x - 1, y: point.y - 1, w: 2, h: 2, id: `path:${path.id}:${index}` });
+      }
+    }
     // Labels are excluded from alignment references per spec — they don't
     // serve as useful spatial alignment targets for rooms/furniture/circulation.
     return refs;
-  }, [rooms, furniture, stairs, ramps, elevators, labels]);
+  }, [doors, elevators, fpaths, furniture, indoorNodes, labels, ramps, rooms, stairs, walls]);
 
   const selectFloorItem = useCallback((selection: FloorSelection | null) => {
+    clearRoomDoorLinkState();
     setMultiSelected([]);
     setSelected(selection);
     setNavSelected(null);
     setNavMultiSelected([]);
     setNavPhysicalSelected(null);
     setShowProperties(true);
-  }, []);
+  }, [clearRoomDoorLinkState]);
 
   // ── B5 Final: issue-locate camera focus ───────────────────────────────
   // After an initialSelection arrives (issue clicked on the campus editor),
@@ -2348,6 +3787,15 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
       return;
     }
     setTool(next);
+    // A physical placement gesture belongs to the tool that armed it. Clear
+    // stale placement state before another tool can receive a canvas click.
+    setRoomDrag(null);
+    alignmentSnapLocksRef.current = { x: null, y: null };
+    clearRoomDoorLinkState();
+    setRoomDoorInspectorHoverId(null);
+    setTestRoutePickKind(null);
+    setTestRoutePickHover(null);
+    setTestRouteMapPick(null);
     // Selecting a physical floor tool gives pointer ownership back to the
     // floor canvas while the navigation overlay remains visible.
     setNavTool("select");
@@ -2362,7 +3810,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
     setDP([]);
     if (next !== "measure") setMeasureDraft({});
     setShowMoreTools(false);
-  }, [calibratedMetersPerUnit, toast]);
+  }, [calibratedMetersPerUnit, clearRoomDoorLinkState, toast]);
 
   const selectionsFromIds = useCallback((ids: string[]) =>
     ids.map((id) => selectionForId(id)).filter((value): value is FloorSelection => !!value),
@@ -2572,8 +4020,9 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
    * action. Returns the copied object ids.
    */
   const duplicateEntrySet = useCallback((
-    entries: { type: FloorSelection["type"]; id: string; item: any }[],
-    offset: number
+    entries: { type: Exclude<FloorSelection["type"], "navNode" | "navEdge">; id: string; item: any }[],
+    offset: number,
+    options: { resetCirculationIdentity?: boolean } = {},
   ): string[] => {
     if (entries.length === 0) return [];
     if (entries.some((entry) => isSelectionLocked({ type: entry.type, id: entry.id }))) {
@@ -2584,7 +4033,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
     const bounds = valid
       .map((entry) => itemBounds(entry.type, entry.item))
       .filter((value): value is NonNullable<typeof value> => !!value);
-    const delta = constrainDeltaForBounds(bounds, offset, offset, FP_W, FP_H);
+    const delta = visibleDuplicateDelta(bounds, offset, FP_W, FP_H);
     const nextRooms = [...rooms];
     const nextWalls = [...walls];
     const nextDoors = [...doors];
@@ -2597,21 +4046,37 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
     const nextIds: string[] = [];
     const duplicatedRoomIds = new Map(valid.filter((entry) => entry.type === "room").map((entry) => [entry.id, genId("rm")]));
     const duplicatedWallIds = new Map(valid.filter((entry) => entry.type === "wall").map((entry) => [entry.id, genId("wl")]));
-    const selectedWallIds = new Set(duplicatedWallIds.keys());
     for (const entry of valid) {
       if (entry.type === "room") {
-        const copy = translateFloorItem("room", { ...(entry.item as FloorRoom), id: duplicatedRoomIds.get(entry.id) ?? genId("rm"), name: `${(entry.item as FloorRoom).name} Copy` }, delta.dx, delta.dy, FP_W, FP_H) as FloorRoom;
+        const sourceRoom = entry.item as FloorRoom;
+        const copy = translateFloorItem("room", {
+          ...sourceRoom,
+          id: duplicatedRoomIds.get(entry.id) ?? genId("rm"),
+          name: nextRoomName(nextRooms, sourceRoom.name),
+          ...(options.resetCirculationIdentity ? {
+            buildingId,
+            floorId,
+            navConnection: undefined,
+            accessNodeId: undefined,
+            accessDoorId: undefined,
+            accessDoorIds: undefined,
+          } : {}),
+        }, delta.dx, delta.dy, FP_W, FP_H) as FloorRoom;
         nextRooms.push(copy); nextIds.push(copy.id);
       } else if (entry.type === "wall") {
         const source = entry.item as FloorWall;
         const startAnchor = source.startAnchor && duplicatedRoomIds.has(source.startAnchor.roomId)
           ? { ...source.startAnchor, roomId: duplicatedRoomIds.get(source.startAnchor.roomId)! }
-          : undefined;
+          : options.resetCirculationIdentity ? undefined : source.startAnchor;
         const endAnchor = source.endAnchor && duplicatedRoomIds.has(source.endAnchor.roomId)
           ? { ...source.endAnchor, roomId: duplicatedRoomIds.get(source.endAnchor.roomId)! }
-          : undefined;
+          : options.resetCirculationIdentity ? undefined : source.endAnchor;
         const copy = translateFloorItem("wall", { ...source, id: duplicatedWallIds.get(entry.id) ?? genId("wl"), startAnchor, endAnchor }, delta.dx, delta.dy, FP_W, FP_H) as FloorWall;
         nextWalls.push(copy); nextIds.push(copy.id);
+        // Attached openings are part of the copied wall composition on both
+        // same-floor duplicates and cross-floor pastes.  Cross-floor copies
+        // intentionally reset navigation identity elsewhere, but must not
+        // lose the authored Door/Window geometry.
         doors.filter((door) => door.wallId === source.id).forEach((door) => {
           const doorCopy = syncOpeningsToWalls([{ ...door, id: genId("dr"), wallId: copy.id }], [], [copy]).doors[0];
           nextDoors.push(doorCopy);
@@ -2623,24 +4088,43 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
           nextIds.push(winCopy.id);
         });
       } else if (entry.type === "door") {
-        if ((entry.item as FloorDoor).wallId && selectedWallIds.has((entry.item as FloorDoor).wallId!)) continue;
-        const copy = translateFloorItem("door", { ...(entry.item as FloorDoor), id: genId("dr") }, delta.dx, delta.dy, FP_W, FP_H) as FloorDoor;
+        if ((entry.item as FloorDoor).wallId && duplicatedWallIds.has((entry.item as FloorDoor).wallId!)) continue;
+        const sourceDoor = entry.item as FloorDoor;
+        const copy = translateFloorItem("door", { ...sourceDoor, id: genId("dr"), wallId: duplicatedWallIds.get(sourceDoor.wallId ?? "") ?? (options.resetCirculationIdentity ? undefined : sourceDoor.wallId) }, delta.dx, delta.dy, FP_W, FP_H) as FloorDoor;
         nextDoors.push(copy); nextIds.push(copy.id);
       } else if (entry.type === "window") {
-        if ((entry.item as FloorWindow).wallId && selectedWallIds.has((entry.item as FloorWindow).wallId!)) continue;
-        const copy = translateFloorItem("window", { ...(entry.item as FloorWindow), id: genId("wn") }, delta.dx, delta.dy, FP_W, FP_H) as FloorWindow;
+        if ((entry.item as FloorWindow).wallId && duplicatedWallIds.has((entry.item as FloorWindow).wallId!)) continue;
+        const sourceWindow = entry.item as FloorWindow;
+        const copy = translateFloorItem("window", { ...sourceWindow, id: genId("wn"), wallId: duplicatedWallIds.get(sourceWindow.wallId ?? "") ?? (options.resetCirculationIdentity ? undefined : sourceWindow.wallId) }, delta.dx, delta.dy, FP_W, FP_H) as FloorWindow;
         nextWindows.push(copy); nextIds.push(copy.id);
       } else if (entry.type === "furniture") {
         const copy = translateFloorItem("furniture", { ...(entry.item as FloorFurniture), id: genId("fn"), name: `${(entry.item as FloorFurniture).name} Copy` }, delta.dx, delta.dy, FP_W, FP_H) as FloorFurniture;
         nextFurniture.push(copy); nextIds.push(copy.id);
       } else if (entry.type === "stairs") {
-        const copy = translateFloorItem("stairs", { ...(entry.item as FloorStairs), id: genId("st") }, delta.dx, delta.dy, FP_W, FP_H) as FloorStairs;
+        const source = entry.item as FloorStairs;
+        const copy = translateFloorItem("stairs", {
+          ...source,
+          ...(options.resetCirculationIdentity ? { sharedId: undefined } : {}),
+          id: genId("st"),
+        }, delta.dx, delta.dy, FP_W, FP_H) as FloorStairs;
         nextStairs.push(copy); nextIds.push(copy.id);
       } else if (entry.type === "ramp") {
         const copy = translateFloorItem("ramp", { ...(entry.item as FloorRamp), id: genId("rmp") }, delta.dx, delta.dy, FP_W, FP_H) as FloorRamp;
         nextRamps.push(copy); nextIds.push(copy.id);
       } else if (entry.type === "elevator") {
-        const copy = translateFloorItem("elevator", { ...(entry.item as FloorElevatorItem), id: genId("ev") }, delta.dx, delta.dy, FP_W, FP_H) as FloorElevatorItem;
+        const source = entry.item as FloorElevatorItem;
+        const copy = translateFloorItem("elevator", {
+          ...source,
+          label: nextElevatorName(nextElevators, source.label),
+          // A duplicate is a new physical occurrence.  Give it a fresh
+          // floor-local system number even when the source uses a custom
+          // display label.  It must never inherit the source shaft identity:
+          // one floor can contain only one occurrence per physical shaft.
+          systemNumber: nextElevatorSystemNumber(nextElevators),
+          sharedId: undefined,
+          floors: undefined,
+          id: genId("ev"),
+        }, delta.dx, delta.dy, FP_W, FP_H) as FloorElevatorItem;
         nextElevators.push(copy); nextIds.push(copy.id);
       } else if (entry.type === "label") {
         const copy = translateFloorItem("label", { ...(entry.item as FloorLabel), id: genId("lb"), text: `${(entry.item as FloorLabel).text} Copy` }, delta.dx, delta.dy, FP_W, FP_H) as FloorLabel;
@@ -2672,7 +4156,10 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
     if (!item) return;
     const offset = 12;
     if (selection.type === "room") {
-      const copy = translateFloorItem("room", { ...(item as FloorRoom), id: genId("rm"), name: `${(item as FloorRoom).name} Copy` }, offset, offset, FP_W, FP_H) as FloorRoom;
+      const sourceRoom = item as FloorRoom;
+      const sourceBounds = itemBounds("room", sourceRoom);
+      const delta = sourceBounds ? visibleDuplicateDelta([sourceBounds], offset, FP_W, FP_H) : { dx: offset, dy: offset };
+      const copy = translateFloorItem("room", { ...sourceRoom, id: genId("rm"), name: nextRoomName(rooms, sourceRoom.name) }, delta.dx, delta.dy, FP_W, FP_H) as FloorRoom;
       updFloor([...rooms, copy], fpaths);
       selectFloorItem({ type: "room", id: copy.id });
     } else if (selection.type === "wall") {
@@ -2706,7 +4193,17 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
       updFloor(rooms, fpaths, walls, doors, windows, furniture, stairs, elevators, labels, [...ramps, copy]);
       selectFloorItem({ type: "ramp", id: copy.id });
     } else if (selection.type === "elevator") {
-      const copy = translateFloorItem("elevator", { ...(item as FloorElevatorItem), id: genId("ev") }, offset, offset, FP_W, FP_H) as FloorElevatorItem;
+      const sourceElevator = item as FloorElevatorItem;
+      const copy = translateFloorItem("elevator", {
+        ...sourceElevator,
+        id: genId("ev"),
+        label: nextElevatorName(elevators, sourceElevator.label),
+        systemNumber: nextElevatorSystemNumber(elevators),
+        // A duplicated Elevator is a new physical shaft occurrence, never a
+        // second occurrence of the source shaft on this Floor.
+        sharedId: undefined,
+        floors: undefined,
+      }, offset, offset, FP_W, FP_H) as FloorElevatorItem;
       updFloor(rooms, fpaths, walls, doors, windows, furniture, stairs, [...elevators, copy]);
       selectFloorItem({ type: "elevator", id: copy.id });
     } else if (selection.type === "label") {
@@ -2727,48 +4224,60 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
   // ── B5 Phase 2.1: Design copy / paste (Ctrl+C / Ctrl+V) ────────────────────
 
   const copySelection = useCallback(() => {
-    const ids: { type: FloorSelection["type"]; id: string }[] = [];
+    const selections: FloorSelection[] = [];
     if (multiSelected.length > 1) {
       for (const id of multiSelected) {
         const sel = selectionForId(id);
-        if (sel) ids.push(sel);
+        if (sel) selections.push(sel);
       }
     } else if (selected) {
-      ids.push({ type: selected.type, id: selected.id });
+      selections.push(selected);
     }
-    if (ids.length === 0) {
-      toast.info("Nothing to copy", "Select a floor object first (Ctrl+C).");
-      return;
-    }
-    setClipboard(ids);
-    pasteOffsetRef.current = 12;
-    toast.success("Copied", `${ids.length} object${ids.length !== 1 ? "s" : ""} copied (Ctrl+V to paste).`);
-  }, [multiSelected, selected, selectionForId, toast]);
-
-  const pasteSelection = useCallback(() => {
-    if (!clipboard || clipboard.length === 0) {
-      toast.info("Nothing to paste", "Copy a floor object first (Ctrl+C).");
-      return;
-    }
-    const entries = clipboard
+    const entries = selections
+      .filter((sel): sel is Exclude<FloorSelection, { type: "navNode" | "navEdge" }> => sel.type !== "navNode" && sel.type !== "navEdge")
       .map((sel) => {
         const item = getSelectionItem(sel.type, sel.id);
         return item ? { type: sel.type, id: sel.id, item: structuredClone(item) } : null;
       })
-      .filter((entry): entry is NonNullable<typeof entry> => !!entry);
+      .filter((entry): entry is FloorClipboardEntry => !!entry);
+    // Include openings attached to copied walls so a cross-floor paste keeps
+    // the authored wall/door/window composition without carrying source-wall
+    // references into the destination floor.
+    const copiedWallIds = new Set(entries.filter((entry) => entry.type === "wall").map((entry) => entry.id));
+    for (const opening of [...doors, ...windows]) {
+      if (!opening.wallId || !copiedWallIds.has(opening.wallId) || entries.some((entry) => entry.id === opening.id)) continue;
+      const type = "direction" in opening ? "door" : "window";
+      entries.push({ type, id: opening.id, item: structuredClone(opening) } as FloorClipboardEntry);
+    }
     if (entries.length === 0) {
-      toast.info("Nothing to paste", "The copied object no longer exists on this floor.");
+      toast.info("Nothing to copy", "Select a floor object first (Ctrl+C).");
       return;
     }
-    const nextIds = duplicateEntrySet(entries, pasteOffsetRef.current);
+    const nextClipboard: FloorClipboard = { campusId: campus.id, sourceFloorId: floorId, entries };
+    floorObjectClipboard = nextClipboard;
+    setClipboard(nextClipboard);
+    pasteOffsetRef.current = 12;
+    toast.success("Copied", `${entries.length} object${entries.length !== 1 ? "s" : ""} copied (Ctrl+V to paste).`);
+  }, [campus.id, floorId, getSelectionItem, multiSelected, selected, selectionForId, toast]);
+
+  const pasteSelection = useCallback(() => {
+    const sourceClipboard = floorObjectClipboard ?? clipboard;
+    if (!sourceClipboard || sourceClipboard.campusId !== campus.id || sourceClipboard.entries.length === 0) {
+      toast.info("Nothing to paste", "Copy a floor object first (Ctrl+C).");
+      return;
+    }
+    const crossFloor = sourceClipboard.sourceFloorId !== floorId;
+    const nextIds = duplicateEntrySet(sourceClipboard.entries, pasteOffsetRef.current, {
+      resetCirculationIdentity: crossFloor,
+    });
     pasteOffsetRef.current += 12;
     if (nextIds.length === 1) {
       // Single paste feels like the single-item duplicate: select the copy directly.
       setMultiSelected([]);
-      setSelected({ type: entries[0].type, id: nextIds[0] });
+      setSelected({ type: sourceClipboard.entries[0].type, id: nextIds[0] });
     }
     toast.success("Pasted", `${nextIds.length} object${nextIds.length !== 1 ? "s" : ""} pasted with fresh IDs.`);
-  }, [clipboard, duplicateEntrySet, getSelectionItem, toast]);
+  }, [campus.id, clipboard, duplicateEntrySet, floorId, toast]);
 
   // Wall connection snapping priority (verified in Phase 1.7):
   //   1. existing wall endpoint   (exact coordinates)
@@ -2840,14 +4349,64 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
     return boundarySnap.x !== Math.round(point.x) || boundarySnap.y !== Math.round(point.y) ? boundarySnap : null;
   }, [FP_W, FP_H, findWallSnapTarget]);
 
+  // Resolve an endpoint that is simultaneously axis-aligned with its fixed
+  // endpoint and attached to another wall. Structural snapping used to win
+  // first, which made the straight guide disappear at the junction.
+  const findAxisWallAttachment = useCallback((
+    raw: { x: number; y: number },
+    fixed: { x: number; y: number },
+    axis: "h" | "v",
+    ignoreWallId?: string,
+  ): WallSnapTarget | null => {
+    if (!snapOn) return null;
+    let best: (WallSnapTarget & { d: number }) | null = null;
+    for (const wall of walls) {
+      if (wall.id === ignoreWallId) continue;
+      const dx = wall.x2 - wall.x1;
+      const dy = wall.y2 - wall.y1;
+      const denominator = axis === "h" ? dy : dx;
+      if (Math.abs(denominator) < 1e-6) {
+        for (const point of [{ x: wall.x1, y: wall.y1 }, { x: wall.x2, y: wall.y2 }]) {
+          if ((axis === "h" ? Math.abs(point.y - fixed.y) : Math.abs(point.x - fixed.x)) > 1) continue;
+          const d = Math.hypot(raw.x - point.x, raw.y - point.y);
+          if (d <= SNAP_THRESHOLD * 1.5 && (!best || d < best.d)) best = { ...point, guide: axis, d };
+        }
+        continue;
+      }
+      const t = axis === "h" ? (fixed.y - wall.y1) / dy : (fixed.x - wall.x1) / dx;
+      if (t < -1e-6 || t > 1 + 1e-6) continue;
+      const point = { x: wall.x1 + dx * t, y: wall.y1 + dy * t };
+      const d = Math.hypot(raw.x - point.x, raw.y - point.y);
+      if (d <= SNAP_THRESHOLD * 1.5 && (!best || d < best.d)) best = { ...point, guide: axis, d };
+    }
+    return best;
+  }, [snapOn, walls]);
+
   // Structural wall snapping is resolved from the RAW pointer FIRST (endpoint →
   // segment → boundary). A stronger structural target always beats grid/angle
   // assistance and is never moved away from afterwards — the exact coordinate
   // becomes the committed geometry, so visually connected walls truly meet with
   // no 2–5px stroke/rounding gaps.
   const wallDrawCursor = useCallback((raw: { x: number; y: number }, shiftHeld: boolean) => {
+    if (!shiftHeld && wallStart) {
+      const axis: "h" | "v" | undefined = snapOn && Math.abs(raw.y - wallStart.y) <= SNAP_THRESHOLD
+        ? "h"
+        : snapOn && Math.abs(raw.x - wallStart.x) <= SNAP_THRESHOLD
+          ? "v"
+          : undefined;
+      if (axis) {
+        const combined = findAxisWallAttachment(raw, wallStart, axis);
+        if (combined) return { point: combined, indicator: combined };
+      }
+    }
     const structural = findWallSnapTarget(raw);
-    if (structural) return { point: structural, indicator: { x: structural.x, y: structural.y } };
+    if (structural) {
+      const guide = !shiftHeld && wallStart && snapOn
+        ? Math.abs(structural.y - wallStart.y) <= 1 ? "h" as const
+          : Math.abs(structural.x - wallStart.x) <= 1 ? "v" as const : undefined
+        : undefined;
+      return { point: structural, indicator: { ...structural, ...(guide ? { guide } : {}) } };
+    }
     const s = (v: number) => (snapOn ? snapToGrid(v, floorGridSize) : Math.round(v));
     let ex = s(raw.x);
     let ey = s(raw.y);
@@ -2855,15 +4414,30 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
     if (!shiftHeld && wallStart) {
       const dx = ex - wallStart.x;
       const dy = ey - wallStart.y;
-      const angle = Math.atan2(dy, dx) * (180 / Math.PI);
-      const snappedAngle = snapAngleDeg(angle, WALL_SNAP_ANGLE);
-      const len = Math.sqrt(dx * dx + dy * dy);
-      ex = wallStart.x + Math.cos(snappedAngle * (Math.PI / 180)) * len;
-      ey = wallStart.y + Math.sin(snappedAngle * (Math.PI / 180)) * len;
+      if (snapOn && Math.abs(dx) <= SNAP_THRESHOLD) {
+        ex = wallStart.x;
+      } else if (snapOn && Math.abs(dy) <= SNAP_THRESHOLD) {
+        ey = wallStart.y;
+      } else {
+        const angle = Math.atan2(dy, dx) * (180 / Math.PI);
+        const snappedAngle = snapAngleDeg(angle, WALL_SNAP_ANGLE);
+        const len = Math.sqrt(dx * dx + dy * dy);
+        ex = wallStart.x + Math.cos(snappedAngle * (Math.PI / 180)) * len;
+        ey = wallStart.y + Math.sin(snappedAngle * (Math.PI / 180)) * len;
+      }
     }
     const bounded = { x: clamp(ex, 0, FP_W), y: clamp(ey, 0, FP_H) };
-    return { point: snapPointToFloorBounds(bounded, FP_W, FP_H, SNAP_THRESHOLD), indicator: findSnapIndicator(bounded) };
-  }, [FP_W, FP_H, findWallSnapTarget, findSnapIndicator, snapOn, floorGridSize, wallStart]);
+    const guide = !shiftHeld && wallStart
+      ? Math.abs(raw.y - wallStart.y) <= SNAP_THRESHOLD ? "h" as const
+        : Math.abs(raw.x - wallStart.x) <= SNAP_THRESHOLD ? "v" as const
+          : undefined
+      : undefined;
+    const snapIndicator = findSnapIndicator(bounded);
+    return {
+      point: snapPointToFloorBounds(bounded, FP_W, FP_H, SNAP_THRESHOLD),
+      indicator: guide ? { ...(snapIndicator ?? bounded), guide } : snapIndicator,
+    };
+  }, [FP_W, FP_H, findWallSnapTarget, findAxisWallAttachment, findSnapIndicator, snapOn, floorGridSize, wallStart]);
 
   // Wall-start placement: structural → grid (coarse) → boundary. No angle pivot yet.
   const wallStartCursor = useCallback((raw: { x: number; y: number }) => {
@@ -2878,8 +4452,26 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
   // orientation — drag away to detach and re-angle); Shift holds 15° angle
   // assistance around the fixed endpoint. Structural snaps always win.
   const wallEndpointCursor = useCallback((raw: { x: number; y: number }, shiftHeld: boolean, ep: NonNullable<typeof wallEndpointDrag.current>) => {
+    const fixed = ep.endpoint === "x1" ? { x: ep.origin.x2, y: ep.origin.y2 } : { x: ep.origin.x1, y: ep.origin.y1 };
+    if (!shiftHeld) {
+      const axis: "h" | "v" | undefined = snapOn && Math.abs(raw.y - fixed.y) <= SNAP_THRESHOLD
+        ? "h"
+        : snapOn && Math.abs(raw.x - fixed.x) <= SNAP_THRESHOLD
+          ? "v"
+          : undefined;
+      if (axis) {
+        const combined = findAxisWallAttachment(raw, fixed, axis, ep.wallId);
+        if (combined) return { point: combined, indicator: combined };
+      }
+    }
     const structural = findWallSnapTarget(raw, ep.wallId);
-    if (structural) return { point: structural, indicator: { x: structural.x, y: structural.y } };
+    if (structural) {
+      const guide = !shiftHeld && snapOn
+        ? Math.abs(structural.y - fixed.y) <= 1 ? "h" as const
+          : Math.abs(structural.x - fixed.x) <= 1 ? "v" as const : undefined
+        : undefined;
+      return { point: structural, indicator: { ...structural, ...(guide ? { guide } : {}) } };
+    }
     const s = (v: number) => (snapOn ? snapToGrid(v, floorGridSize) : Math.round(v));
     let nx = s(raw.x);
     let ny = s(raw.y);
@@ -2893,10 +4485,26 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
       const len = Math.sqrt(dx * dx + dy * dy);
       nx = fixedX + Math.cos(snappedAngle * (Math.PI / 180)) * len;
       ny = fixedY + Math.sin(snappedAngle * (Math.PI / 180)) * len;
+    } else if (snapOn) {
+      const fixedX = ep.endpoint === "x1" ? ep.origin.x2 : ep.origin.x1;
+      const fixedY = ep.endpoint === "x1" ? ep.origin.y2 : ep.origin.y1;
+      if (Math.abs(nx - fixedX) <= SNAP_THRESHOLD) nx = fixedX;
+      if (Math.abs(ny - fixedY) <= SNAP_THRESHOLD) ny = fixedY;
     }
     const bounded = { x: clamp(nx, 0, FP_W), y: clamp(ny, 0, FP_H) };
-    return { point: snapPointToFloorBounds(bounded, FP_W, FP_H, SNAP_THRESHOLD), indicator: findSnapIndicator(bounded) };
-  }, [FP_W, FP_H, findWallSnapTarget, findSnapIndicator, snapOn, floorGridSize]);
+    const fixedX = ep.endpoint === "x1" ? ep.origin.x2 : ep.origin.x1;
+    const fixedY = ep.endpoint === "x1" ? ep.origin.y2 : ep.origin.y1;
+    const guide = !shiftHeld
+      ? Math.abs(raw.y - fixedY) <= SNAP_THRESHOLD ? "h" as const
+        : Math.abs(raw.x - fixedX) <= SNAP_THRESHOLD ? "v" as const
+          : undefined
+      : undefined;
+    const snapIndicator = findSnapIndicator(bounded, ep.wallId);
+    return {
+      point: snapPointToFloorBounds(bounded, FP_W, FP_H, SNAP_THRESHOLD),
+      indicator: guide ? { ...(snapIndicator ?? bounded), guide } : snapIndicator,
+    };
+  }, [FP_W, FP_H, findWallSnapTarget, findAxisWallAttachment, findSnapIndicator, snapOn, floorGridSize]);
 
   const openingWallTarget = useCallback((point: { x: number; y: number }, type: "door" | "window") => {
     const width = type === "door" ? DOOR_DEFAULT_WIDTH : WINDOW_DEFAULT_WIDTH;
@@ -2926,11 +4534,11 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
   // on — no persisted field, no migration.
   const navBlockedEdgeIds = useMemo(() => {
     const blocked = new Set<string>();
-    for (const e of indoorEdges) {
+    for (const e of walkableIndoorEdges) {
       if (navEdgeIsBlockedExtended(e, indoorNodes, walls, doors, floor.furniture)) blocked.add(e.id);
     }
     return blocked;
-  }, [indoorEdges, indoorNodes, walls, doors, floor.furniture]);
+  }, [walkableIndoorEdges, indoorNodes, walls, doors, floor.furniture]);
 
   // ── Floor Issues (B7 Phase 1) ──
   // = FloorEditor-local live checks (floor geometry, stair direction, door/
@@ -2950,15 +4558,53 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
     // issue so the admin notices and corrects it. Single-floor buildings are
     // exempt — direction has no cross-floor meaning there.
     const orderedFloors = (campus.buildings ?? []).find((b) => b.id === buildingId)?.floors ?? [];
+    const currentTransitionEdges = reconcileCrossFloorTransitions(
+      campus.navNodes,
+      campus.navEdges,
+      orderedFloors,
+      buildingId,
+    );
     const allowed = stairDirectionsForFloorInOrder(floor.id, orderedFloors);
-    const stairIssues: FloorIssue[] = orderedFloors.length <= 1 ? [] : stairs
-      .filter((s) => !allowed.includes(s.direction))
-      .map((s) => ({
-        id: `stair-dir-${s.id}`,
-        severity: "warning" as const,
-        message: `Stair direction is invalid for this floor — no floor ${s.direction === "down" ? "below" : s.direction === "up" ? "above" : "connection"} available.`,
-        selection: { type: "stairs", id: s.id } as FloorSelection,
-      }));
+    const stairIssues: FloorIssue[] = orderedFloors.length <= 1 ? [] : stairs.flatMap((s) => {
+      const issues: FloorIssue[] = [];
+      if (!allowed.includes(s.direction)) {
+        issues.push({
+          id: `stair-dir-${s.id}`,
+          severity: "warning" as const,
+          message: `Stair direction is invalid for this floor — no floor ${s.direction === "down" ? "below" : s.direction === "up" ? "above" : "connection"} available.`,
+          selection: { type: "stairs", id: s.id } as FloorSelection,
+        });
+      }
+      // A shared continuation can be present in the authoring data while its
+      // direction or derived floor-transition is no longer valid. Keep this
+      // warning separate from the local Walking Network check so the Stair's
+      // issue badge explains the actual authoring problem.
+      if (allowed.includes(s.direction)) {
+        const continuation = validateStairContinuation(
+          s,
+          floor.id,
+          orderedFloors,
+          campus.navNodes ?? [],
+          currentTransitionEdges,
+        );
+        if (continuation.state === "direction-mismatch") {
+          issues.push({
+            id: `stair-continuation-direction-${s.id}`,
+            severity: "warning" as const,
+            message: "Stair direction does not match its continuation. Change the Stair direction or choose a valid continuation.",
+            selection: { type: "stairs", id: s.id } as FloorSelection,
+          });
+        } else if (continuation.state === "missing") {
+          issues.push({
+            id: `stair-continuation-missing-${s.id}`,
+            severity: "warning" as const,
+            message: "Stair continuation is missing or unavailable. Choose a valid Stair on another Floor.",
+            selection: { type: "stairs", id: s.id } as FloorSelection,
+          });
+        }
+      }
+      return issues;
+    });
     const doorIssues: FloorIssue[] = doors.flatMap((door) => {
       const status = doorEntranceLinkStatus(campus, buildingId, floorId, door.id);
       if (status.state !== "linked" || !status.entranceName) return [];
@@ -3047,29 +4693,52 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
       case "room": {
         const r = rooms.find((x) => x.id === selection.id);
         if (!r) return null;
-        // Inside the room, top-right corner with padding.
+        // Prefer the top-right corner, then fall back to another inward corner
+        // when the room is clipped or a boundary makes the preferred location
+        // unsafe.  The final clamp keeps the full badge in the floor overlay.
         const pad = 9;
-        return { x: r.x + r.w - pad, y: r.y + pad };
+        const radius = 7;
+        const candidates = [
+          { x: r.x + r.w - pad, y: r.y + pad },
+          { x: r.x + pad, y: r.y + pad },
+          { x: r.x + r.w - pad, y: r.y + r.h - pad },
+          { x: r.x + pad, y: r.y + r.h - pad },
+        ];
+        const visible = candidates.find((candidate) =>
+          candidate.x >= radius && candidate.x <= FP_W - radius
+          && candidate.y >= radius && candidate.y <= FP_H - radius
+        );
+        const point = visible ?? candidates[0];
+        return {
+          x: clamp(point.x, radius, FP_W - radius),
+          y: clamp(point.y, radius, FP_H - radius),
+        };
       }
       case "door": {
         const d = doors.find((x) => x.id === selection.id);
-        return d ? { x: d.x, y: d.y } : null;
+        return d ? { x: d.x, y: d.y - 13 } : null;
       }
       case "stairs": {
         const s = stairs.find((x) => x.id === selection.id);
-        return s ? floorObjectCenter("stairs", s) : null;
+        if (!s) return null;
+        const center = floorObjectCenter("stairs", s);
+        return { x: center.x, y: center.y - 13 };
       }
       case "elevator": {
         const e = elevators.find((x) => x.id === selection.id);
-        return e ? floorObjectCenter("elevator", e) : null;
+        if (!e) return null;
+        const center = floorObjectCenter("elevator", e);
+        return { x: center.x, y: center.y - 13 };
       }
       case "ramp": {
         const r = ramps.find((x) => x.id === selection.id);
-        return r ? floorObjectCenter("ramp", r) : null;
+        if (!r) return null;
+        const center = floorObjectCenter("ramp", r);
+        return { x: center.x, y: center.y - 13 };
       }
       case "navNode": {
         const n = indoorNodes.find((x) => x.id === selection.id);
-        return n ? { x: n.x, y: n.y } : null;
+        return n ? { x: n.x, y: n.y - 13 } : null;
       }
       case "navEdge": {
         const e = indoorEdges.find((x) => x.id === selection.id);
@@ -3081,7 +4750,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
       default:
         return null;
     }
-  }, [rooms, doors, stairs, elevators, ramps, indoorNodes, indoorEdges]);
+  }, [rooms, doors, stairs, elevators, ramps, indoorNodes, indoorEdges, FP_W, FP_H]);
 
   // B5 Phase 3: cross-floor transition status for the CURRENT floor's nodes —
   // connected floor labels (authoring feedback) + sharedId match state. Fully
@@ -3090,11 +4759,38 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
     () => (campus.buildings ?? []).find((b) => b.id === buildingId)?.floors ?? [],
     [buildingId, campus.buildings]
   );
+
   const activeFloorIndex = buildingFloors.findIndex((f) => f.id === floorId);
   const previousFloor = activeFloorIndex > 0 ? buildingFloors[activeFloorIndex - 1] : null;
   const nextFloor = activeFloorIndex >= 0 && activeFloorIndex < buildingFloors.length - 1
     ? buildingFloors[activeFloorIndex + 1]
     : null;
+  // Keep persisted Stair directions in sync when an external editor action
+  // changes the active floor context/order.  The first render is intentionally
+  // observed without mutation so legacy invalid data can still be reviewed;
+  // only a subsequent floor-order/context change triggers reconciliation.
+  const stairContextKey = `${floorId}|${buildingFloors.map((candidate) => `${candidate.id}:${candidate.number}:${candidate.label}`).join("|")}`;
+  const lastStairContextKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (lastStairContextKeyRef.current === null) {
+      lastStairContextKeyRef.current = stairContextKey;
+      return;
+    }
+    if (lastStairContextKeyRef.current === stairContextKey) return;
+    lastStairContextKeyRef.current = stairContextKey;
+    const reconciledDirections = reconcileStairDirectionsForFloorOrder(buildingFloors);
+    if (reconciledDirections.adjustments.length === 0) return;
+    const updatedCampus = replaceBuildingFloorsAndReconcileTransitions(
+      campus,
+      buildingId,
+      reconciledDirections.floors.map((nextFloor) => normalizeFloor(nextFloor, { buildingId }))
+    );
+    onUpdate(updatedCampus);
+    for (const adjustment of reconciledDirections.adjustments) {
+      const directionLabel = adjustment.to === "both" ? "Both" : adjustment.to === "up" ? "Up" : "Down";
+      toast.info("Stair direction updated", `${adjustment.stairLabel} is now ${directionLabel} on ${adjustment.floorLabel}.`);
+    }
+  }, [buildingFloors, buildingId, campus, onUpdate, stairContextKey, toast]);
   const filteredFloorOptions = useMemo(() => {
     const query = floorSelectorSearch.trim().toLowerCase();
     if (!query) return buildingFloors;
@@ -3112,13 +4808,19 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
     const stored = building?.circulationGroups ?? [];
     const makeGroups = (kind: "stair" | "elevator") => {
       const storedById = new Map(stored.filter((g) => g.kind === kind).map((g) => [g.id, g.name]));
-      const usage = new Map<string, { id: string; label: string; objectId: string; objectLabel: string }[]>();
+       const usage = new Map<string, { id: string; label: string; objectId: string; objectLabel: string; systemNumber?: number }[]>();
       for (const f of buildingFloors) {
         const items = kind === "stair" ? (f.stairs ?? []) : (f.elevators ?? []);
         for (const item of items) {
           if (!item.sharedId) continue;
           const list = usage.get(item.sharedId) ?? [];
-          list.push({ id: f.id, label: labels.get(f.id) ?? f.label, objectId: item.id, objectLabel: item.label });
+           list.push({
+             id: f.id,
+             label: labels.get(f.id) ?? f.label,
+             objectId: item.id,
+             objectLabel: item.label,
+             systemNumber: kind === "elevator" ? elevatorSystemNumberOf(item) : undefined,
+           });
           usage.set(item.sharedId, list);
         }
       }
@@ -3128,7 +4830,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
         const objectLabel = usedFloors.find((u) => u.objectLabel && !/^stairs?$/i.test(u.objectLabel) && !/^elevator$/i.test(u.objectLabel))?.objectLabel;
         return {
           id,
-          name: storedById.get(id) ?? objectLabel ?? `${kind === "stair" ? "Stair Connection" : "Elevator Shaft"} ${fallbackIndex++}`,
+          name: storedById.get(id) ?? objectLabel ?? `${kind === "stair" ? "Stair" : "Elevator"} ${fallbackIndex++}`,
           usedFloors,
         };
       }).sort((a, b) => a.name.localeCompare(b.name));
@@ -3159,7 +4861,10 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
       }
       const floors: { id: string; label: string }[] = [];
       for (const e of reconciledTransitionEdges) {
-        if (e.type !== CROSS_FLOOR_EDGE_TYPE) continue;
+        // Keep legacy `cross_floor` edges readable during hydration. New
+        // mutations use CROSS_FLOOR_EDGE_TYPE, but both spellings describe the
+        // same authored continuation for this status-only view.
+        if (e.type !== CROSS_FLOOR_EDGE_TYPE && e.type !== "cross_floor") continue;
         const otherId = e.startNodeId === node.id ? e.endNodeId : e.endNodeId === node.id ? e.startNodeId : null;
         if (!otherId) continue;
         const other = (campus.navNodes ?? []).find((n) => n.id === otherId);
@@ -3172,6 +4877,96 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
     }
     return status;
   }, [buildingFloors, buildingId, campus.navNodes, indoorNodes, reconciledTransitionEdges]);
+
+  type QuickNavigationTarget = {
+    floorId: string;
+    floorLabel: string;
+    objectId: string;
+    objectLabel: string;
+    relation: "above" | "below";
+    usable: boolean;
+    /** Elevator popovers include the selected occurrence for context. */
+    isCurrent?: boolean;
+  };
+
+  // Resolve the small authoring shortcut from the same canonical transition
+  // edges used by the Navigation overlay. Physical proximity and labels are
+  // intentionally ignored: the occurrence must share the explicit identity
+  // and have a real transition edge to the current node.
+  const quickNavigationTargets = useMemo(() => {
+    const result = new Map<string, QuickNavigationTarget[]>();
+    const nodeByPhysicalKey = new Map<string, NavigationNode>();
+    for (const node of campus.navNodes ?? []) {
+      if (node.stairId) nodeByPhysicalKey.set(`stairs:${node.stairId}`, node);
+      if (node.elevatorId) nodeByPhysicalKey.set(`elevator:${node.elevatorId}`, node);
+    }
+    const floorIndexById = new Map(buildingFloors.map((candidate, index) => [candidate.id, index]));
+    const addTargets = (kind: "stairs" | "elevator", items: Array<FloorStairs | FloorElevatorItem>) => {
+      for (const item of items) {
+        if (!item.sharedId) continue;
+        const key = `${kind}:${item.id}`;
+        const fromIndex = floorIndexById.get(floorId) ?? -1;
+
+        // Elevator quick navigation follows the authoritative occurrence
+        // identity and served-floor list, not the transition-edge adjacency
+        // used by Stairs.  A shaft can skip floors, so resolving only the
+        // immediately adjacent transition would hide valid stops such as
+        // Ground -> Floor 2 -> Floor 5 from the popup.
+        if (kind === "elevator") {
+          const servedFloors = item.floors?.length ? new Set(item.floors) : null;
+          const targets = buildingFloors.flatMap((targetFloor) => {
+            if (servedFloors && !servedFloors.has(targetFloor.number)) return [];
+            const targetItem = (targetFloor.elevators ?? []).find((candidate) => candidate.sharedId === item.sharedId);
+            if (!targetItem) return [];
+            const targetIndex = floorIndexById.get(targetFloor.id) ?? -1;
+            return [{
+              floorId: targetFloor.id,
+              floorLabel: targetFloor.label,
+              objectId: targetItem.id,
+              objectLabel: targetItem.label?.trim() || "Elevator",
+              relation: targetIndex > fromIndex ? "above" as const : "below" as const,
+              usable: true,
+              isCurrent: targetFloor.id === floorId,
+            }];
+          });
+          const unique = targets.filter((target, index, all) => all.findIndex((candidate) => candidate.floorId === target.floorId && candidate.objectId === target.objectId) === index);
+          if (unique.length > 0) result.set(key, unique.sort((a, b) => (floorIndexById.get(a.floorId) ?? 0) - (floorIndexById.get(b.floorId) ?? 0)));
+          continue;
+        }
+
+        const localNode = nodeByPhysicalKey.get(key);
+        const status = localNode ? navNodeTransitionStatus.get(localNode.id) : undefined;
+        if (!localNode || status?.state !== "linked" || status.floors.length === 0) continue;
+        const targets = status.floors.flatMap((statusFloor) => {
+          const targetFloor = buildingFloors.find((candidate) => candidate.id === statusFloor.id);
+          const targetIndex = targetFloor ? floorIndexById.get(targetFloor.id) ?? -1 : -1;
+          if (!targetFloor || targetIndex < 0 || targetIndex === fromIndex) return [];
+          const targetItem = kind === "stairs"
+            ? (targetFloor.stairs ?? []).find((candidate) => candidate.sharedId === item.sharedId)
+            : (targetFloor.elevators ?? []).find((candidate) => candidate.sharedId === item.sharedId);
+          if (!targetItem) return [];
+          const targetNode = nodeByPhysicalKey.get(`${kind}:${targetItem.id}`);
+          if (!targetNode) return [];
+          return [{
+            floorId: targetFloor.id,
+            floorLabel: targetFloor.label,
+            objectId: targetItem.id,
+            objectLabel: targetItem.label?.trim() || (kind === "stairs" ? "Stair" : "Elevator"),
+            relation: targetIndex > fromIndex ? "above" as const : "below" as const,
+            usable: kind === "stairs"
+              ? stairContinuationDirectionAllows((item as FloorStairs).direction, fromIndex, targetIndex)
+              : true,
+          }];
+        });
+        const unique = targets.filter((target, index, all) => all.findIndex((candidate) => candidate.floorId === target.floorId && candidate.objectId === target.objectId) === index);
+        if (unique.length > 0) result.set(key, unique.sort((a, b) => (floorIndexById.get(b.floorId) ?? 0) - (floorIndexById.get(a.floorId) ?? 0)));
+      }
+    };
+    const currentFloor = buildingFloors.find((candidate) => candidate.id === floorId);
+    addTargets("stairs", currentFloor?.stairs ?? []);
+    addTargets("elevator", currentFloor?.elevators ?? []);
+    return result;
+  }, [buildingFloors, campus.navNodes, floorId, indoorNodes, navNodeTransitionStatus]);
 
   const navSelectedElevatorServedFloors = useMemo(() => {
     if (navSelected?.type !== "node") return [];
@@ -3235,11 +5030,43 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
             };
           })
       : [];
+    const selectedStairDirection = kind === "stairs"
+      ? (localOwner as FloorStairs | undefined)?.direction
+      : undefined;
+    // Only transitions that are actually traversable FROM this occurrence are
+    // presented as connected.  A directed Stair edge can touch the node while
+    // still pointing into it from the other floor; counting that as a local
+    // continuation makes an Up-only upper Stair look connected downward.
     const connectedFloors = localNode
-      ? (navNodeTransitionStatus.get(localNode.id)?.floors ?? [])
+      ? reconciledTransitionEdges
+        .filter((edge) => (edge.type === CROSS_FLOOR_EDGE_TYPE || edge.type === "cross_floor")
+          && (edge.startNodeId === localNode.id || (edge.bidirectional && edge.endNodeId === localNode.id)))
+        .map((edge) => {
+          const otherId = edge.startNodeId === localNode.id ? edge.endNodeId : edge.startNodeId;
+          const other = (campus.navNodes ?? []).find((node) => node.id === otherId);
+          if (!other) return null;
+          const floor = buildingFloors.find((candidate) => candidate.id === other.floorId);
+          return floor ? { id: floor.id, label: floor.label } : null;
+        })
+        .filter((floor): floor is { id: string; label: string } => !!floor)
+        .filter((floor, index, all) => all.findIndex((candidate) => candidate.id === floor.id) === index)
       : [];
     const connected = new Set(connectedFloors.map((f) => f.id));
-    const waitingFloors = matching
+    const validMatching = matching.filter(({ floor }) => kind !== "stairs"
+      || localFloorOrder < 0
+      || stairContinuationDirectionAllows(
+        selectedStairDirection,
+        localFloorOrder,
+        buildingFloors.findIndex((candidate) => candidate.id === floor.id),
+      ));
+    const invalidDirectionMatching = matching.filter(({ floor }) => kind === "stairs"
+      && localFloorOrder >= 0
+      && !stairContinuationDirectionAllows(
+        selectedStairDirection,
+        localFloorOrder,
+        buildingFloors.findIndex((candidate) => candidate.id === floor.id),
+      ));
+    const waitingFloors = validMatching
       .filter(({ floor, ownerId }) => {
         if (connected.has(floor.id)) return false;
         return !(campus.navNodes ?? []).some((n) =>
@@ -3250,32 +5077,95 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
         );
       })
       .map(({ floor }) => ({ id: floor.id, label: floor.label }));
+    const directionBlockedFloors = [
+      ...invalidDirectionMatching.map(({ floor }) => ({ id: floor.id, label: floor.label })),
+      ...validMatching
+      .filter(({ floor, ownerId }) => {
+        const linked = (campus.navNodes ?? []).some((n) => n.floorId === floor.id && (
+          kind === "stairs" ? n.stairId === ownerId : n.elevatorId === ownerId
+        ));
+        return linked && !connected.has(floor.id);
+      })
+      .map(({ floor }) => ({ id: floor.id, label: floor.label })),
+    ].filter((floor, index, all) => all.findIndex((candidate) => candidate.id === floor.id) === index);
     const owner = kind === "stairs" ? stairs.find((s) => s.id === selected.id)
       : kind === "elevator" ? elevators.find((e) => e.id === selected.id)
       : ramps.find((r) => r.id === selected.id);
     const groupLabel = owner?.sharedId
       ? (kind === "stairs" ? circulationGroups.stairs : circulationGroups.elevators).find((g) => g.id === owner.sharedId)?.name
       : undefined;
-    const connectedLabel = connectedFloors.length > 0 ? `Connected to ${connectedFloors.map((f) => f.label).join(", ")}` : "Linked to the walking network";
+    const localConnectionCount = localNode
+      ? indoorEdges.filter((e) => e.type !== CROSS_FLOOR_EDGE_TYPE && e.type !== "cross_floor" && !e.closed
+        && (e.startNodeId === localNode.id || e.endNodeId === localNode.id)).length
+      : 0;
+    const connectedLabel = connectedFloors.length > 0 ? `Connected to ${connectedFloors.map((f) => f.label).join(", ")}` : "Ready for routing";
+    const stairDetail = !localNode
+      ? "Add this stair as a local stair navigation anchor."
+      : connectedFloors.length > 0 && localConnectionCount === 0
+        ? `Connect this Stair to the Walking Network. ${connectedLabel}.`
+        : localConnectionCount === 0
+          ? "Connect this Stair to the Walking Network."
+          : connectedFloors.length > 0
+            ? `Ready for routing · ${connectedLabel}`
+          : buildingFloors.length <= 1
+            ? "Ready for routing"
+            : directionBlockedFloors.length > 0
+              ? `Direction does not allow travel to ${directionBlockedFloors.map((f) => f.label).join(", ")}.`
+              : waitingFloors.length > 0
+              ? `No matching Stair is available on ${waitingFloors.map((f) => f.label).join(", ")}.`
+              : "No matching Stair is available on an adjacent floor.";
+    const elevatorDetail = !localNode
+      ? "Add this elevator as a local elevator navigation anchor."
+      : localConnectionCount === 0
+        ? "Connect this Elevator to the Walking Network."
+        : connectedFloors.length > 0
+          ? `Ready for routing · ${connectedLabel}`
+          : buildingFloors.length <= 1
+            ? "Ready for routing"
+            : servedFloors.length > 0 && servedFloors.filter((f) => f.hasPhysical).length < 2
+              ? "No matching Elevator is available on another served floor."
+              : "No matching Elevator is connected on another served floor.";
     return {
       kind,
       linked: !!localNode,
       connectedFloors: kind === "ramp" ? [] : connectedFloors,
       waitingFloors: kind === "ramp" ? [] : waitingFloors,
+      directionBlockedFloors: kind === "stairs" ? directionBlockedFloors : [],
       servedFloors,
       // B5 Phase 6.8: shared-card content (Design + Navigation parity).
-      title: kind === "stairs" ? "Stair Connection" : kind === "elevator" ? "Elevator Shaft" : "Ramp",
-      detail: kind === "ramp"
-        ? (localNode ? "Accessible path anchor for local walking routes." : "Add this ramp as an accessible path anchor.")
-        : kind === "stairs"
-          ? (localNode ? connectedLabel : "Add this stair as a local stair navigation anchor.")
-          : (localNode ? "Linked to the walking network" : "Add this elevator as a local elevator navigation anchor."),
+      title: kind === "stairs" ? "Stair" : kind === "elevator" ? "Elevator" : "Ramp",
+        detail: kind === "ramp"
+          ? (localNode ? "Accessible path anchor for local walking routes." : "Add this ramp as an accessible path anchor.")
+          : kind === "stairs"
+          ? stairDetail
+          : elevatorDetail,
       groupLabel: groupLabel ?? owner?.label,
-      connectionCount: localNode
-        ? indoorEdges.filter((e) => e.startNodeId === localNode.id || e.endNodeId === localNode.id).length
-        : undefined,
+      connectionCount: localNode ? (kind === "stairs" ? localConnectionCount : indoorEdges.filter((e) => e.type !== CROSS_FLOOR_EDGE_TYPE && e.type !== "cross_floor" && !e.closed && (e.startNodeId === localNode.id || e.endNodeId === localNode.id)).length) : undefined,
     };
-  }, [buildingFloors, campus.navNodes, circulationGroups.elevators, circulationGroups.stairs, elevators, floorId, indoorEdges, indoorNodes, navNodeTransitionStatus, ramps, selected, stairs]);
+  }, [buildingFloors, campus.navNodes, circulationGroups.elevators, circulationGroups.stairs, elevators, floorId, indoorEdges, indoorNodes, navNodeTransitionStatus, ramps, reconciledTransitionEdges, selected, stairs]);
+
+  // Small canvas status cues are derived from the same canonical Floor data as
+  // the manager. A shared identity with members on more than one Floor is a
+  // connected shaft/continuation; a one-floor identity is intentionally shown
+  // as unconnected without changing any routing or transition data.
+  const circulationConnectionFloorCounts = useMemo(() => {
+    const collect = <T extends { id: string; sharedId?: string }>(itemsForFloor: (candidateFloor: FloorPlan) => T[] | undefined) => {
+      const floorsByIdentity = new Map<string, Set<string>>();
+      for (const candidateFloor of buildingFloors) {
+        for (const item of itemsForFloor(candidateFloor) ?? []) {
+          if (!item.sharedId) continue;
+          const members = floorsByIdentity.get(item.sharedId) ?? new Set<string>();
+          members.add(candidateFloor.id);
+          floorsByIdentity.set(item.sharedId, members);
+        }
+      }
+      return new Map([...floorsByIdentity.entries()].map(([sharedId, floorIds]) => [sharedId, floorIds.size]));
+    };
+    return {
+      stairs: collect((candidateFloor) => candidateFloor.stairs),
+      elevators: collect((candidateFloor) => candidateFloor.elevators),
+    };
+  }, [buildingFloors]);
 
   const selectIssue = useCallback((issue: FloorIssue) => {
     if (issue.selection) {
@@ -3340,13 +5230,19 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
       return;
     }
     setShowFloorSettings(false);
+    setRoomDrag(null);
+    alignmentSnapLocksRef.current = { x: null, y: null };
     setTool("select");
     setCalibrationDraft({ active: true, distanceInput: "" });
   }, [floor.backgroundImage, toast]);
 
   const removeCalibration = useCallback(() => {
     updateFloorMetadata({ calibration: undefined }, "Floor scale calibration removed");
-    if (tool === "measure") setTool("select");
+    if (tool === "measure") {
+      setRoomDrag(null);
+      alignmentSnapLocksRef.current = { x: null, y: null };
+      setTool("select");
+    }
     setMeasureDraft({});
   }, [tool, updateFloorMetadata]);
 
@@ -3501,12 +5397,75 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
         : circ.kind === "elevator" ? elevators.find((el) => el.id === circ.id)
         : ramps.find((r) => r.id === circ.id);
       if (owner) {
-        return { kind: circ.kind, id: circ.id, x: Math.round(owner.x + owner.width / 2), y: Math.round(owner.y + owner.height / 2) };
+        const anchor = circ.kind === "stairs"
+          ? stairEntryPosition(owner as FloorStairs)
+          : circ.kind === "elevator"
+            ? elevatorEntryPosition(owner as FloorElevatorItem)
+            : { x: Math.round(owner.x + owner.width / 2), y: Math.round(owner.y + owner.height / 2) };
+        return { kind: circ.kind, id: circ.id, x: anchor.x, y: anchor.y };
       }
     }
     const room = findRoomAtPoint(rooms, pt);
-    if (room) return { kind: "room", id: room.id, x: Math.round(room.x + room.w / 2), y: Math.round(room.y + room.h / 2) };
+    if (room) {
+      const anchor = roomLinkedCuePosition(room);
+      return { kind: "room", id: room.id, x: anchor.x, y: anchor.y };
+    }
     return null;
+  };
+
+  // Normal Select is physical-first when the transparent navigation hit line
+  // sits over a real map object. Keep this resolver deliberately narrow: it is
+  // only used for pointer events whose target is a navigation hit surface, so
+  // ordinary physical-object drags and navigation-only tools keep their native
+  // event paths.
+  const resolvePhysicalSelectAt = (pt: { x: number; y: number }): FloorSelection | null => {
+    const door = findDoorAtPoint(doors, pt);
+    if (door) return { type: "door", id: door.id };
+    // Furniture is also physical floor geometry. Use its rotated footprint so
+    // a wide nav hit line cannot swallow a desk, chair, or other placed object.
+    const furnitureHit = [...furniture].reverse().find((item) => {
+      if (item.visible === false) return false;
+      const angle = -((item.rotation ?? 0) * Math.PI) / 180;
+      const dx = pt.x - (item.x + item.width / 2);
+      const dy = pt.y - (item.y + item.height / 2);
+      const localX = dx * Math.cos(angle) - dy * Math.sin(angle);
+      const localY = dx * Math.sin(angle) + dy * Math.cos(angle);
+      return Math.abs(localX) <= item.width / 2 && Math.abs(localY) <= item.height / 2;
+    });
+    if (furnitureHit) return { type: "furniture", id: furnitureHit.id };
+    let nearestWall: { id: string; distance: number } | null = null;
+    for (const wall of walls) {
+      if (wall.visible === false || isManagedPerimeterWall(wall)) continue;
+      const distance = distanceToSegment(pt, { x: wall.x1, y: wall.y1 }, { x: wall.x2, y: wall.y2 });
+      const tolerance = Math.max(6, wall.thickness / 2 + 4);
+      if (distance > tolerance || (nearestWall && distance >= nearestWall.distance)) continue;
+      nearestWall = { id: wall.id, distance };
+    }
+    if (nearestWall) return { type: "wall", id: nearestWall.id };
+    const physical = resolveNavTargetAt(pt);
+    if (!physical) return null;
+    return { type: physical.kind === "stairs" ? "stairs" : physical.kind, id: physical.id };
+  };
+
+  const handlePhysicalSelectCapture = (e: React.MouseEvent<SVGSVGElement>) => {
+    if (!showNavOverlay || navTool !== "select" || roomDoorLinking) return;
+    const target = e.target as Element;
+    const navHit = target.closest?.('[data-testid="nav-edge-hit"], [data-testid="nav-node-hit"]');
+    if (!navHit) return;
+    const physical = resolvePhysicalSelectAt(navPointFromEvent(e));
+    if (!physical) return;
+    e.preventDefault();
+    e.stopPropagation();
+    selectFloorItem(physical);
+  };
+
+  const handleSvgDownCapture = (e: React.MouseEvent<SVGSVGElement>) => {
+    // A canvas/context change dismisses the authoring quick navigator. The
+    // indicator and its popover are explicitly exempt so their internal
+    // controls remain interactive.
+    const target = e.target as Element;
+    if (!target.closest?.("[data-testid^='circulation-quick-nav']")) closeQuickNav();
+    handlePhysicalSelectCapture(e);
   };
 
   const linkedNodeForPhysical = useCallback((
@@ -3537,7 +5496,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
     if (kind === "room") {
       const room = rooms.find((r) => r.id === id);
       if (!room) return null;
-      return { x: Math.round(room.x + room.w / 2), y: Math.round(room.y + room.h / 2) };
+      return roomLinkedCuePosition(room);
     }
     if (kind === "door") {
       const door = doors.find((d) => d.id === id);
@@ -3546,11 +5505,20 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
     const owner = kind === "stairs" ? stairs.find((s) => s.id === id)
       : kind === "elevator" ? elevators.find((el) => el.id === id)
       : ramps.find((r) => r.id === id);
-    return owner ? { x: Math.round(owner.x + owner.width / 2), y: Math.round(owner.y + owner.height / 2) } : null;
+    if (!owner) return null;
+    return kind === "stairs"
+      ? stairEntryPosition(owner as FloorStairs)
+      : kind === "elevator"
+        ? elevatorEntryPosition(owner as FloorElevatorItem)
+        : { x: Math.round(owner.x + owner.width / 2), y: Math.round(owner.y + owner.height / 2) };
   }, [doors, elevators, ramps, rooms, stairs]);
 
   const physicalNavLabel = useCallback((kind: "room" | "door" | "stairs" | "elevator" | "ramp", id: string) => {
-    if (kind === "room") return rooms.find((r) => r.id === id)?.name ?? "Room";
+    if (kind === "room") {
+      const index = rooms.findIndex((r) => r.id === id);
+      const room = rooms[index];
+      return room ? roomDisplayName(room, index) : "Room";
+    }
     if (kind === "door") return doors.find((d) => d.id === id)?.label ?? "Door";
     if (kind === "stairs") return stairs.find((s) => s.id === id)?.label ?? "Stairs";
     if (kind === "elevator") return elevators.find((el) => el.id === id)?.label ?? "Elevator";
@@ -3588,6 +5556,85 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
       return;
     }
     const nodeIdSet = new Set(nodeIds);
+    const linkedNodes = indoorNodes.filter((node) => nodeIds.includes(node.id) && !!linkedObjectRef(node));
+    if (linkedNodes.length > 0) {
+      toast.info("Navigation anchor", "Edit or remove navigation from the owning Room, Door, or circulation object.");
+      return;
+    }
+    const selectedJunctions = indoorNodes.filter((node) => nodeIds.includes(node.id) && node.pathJunction);
+    if (selectedJunctions.length > 0 && (selectedJunctions.length !== 1 || nodeIds.length !== 1 || edgeIds.length > 0)) {
+      toast.warning("Walking Point selected", "Remove or disconnect this point separately so its connected paths stay safe.");
+      return;
+    }
+
+    // A point inserted onto a manual path may retain internal split provenance.
+    // Removing a bare two-segment split point is safe: restore the original
+    // corridor in one history action. A branched point is blocked so Delete can
+    // never silently destroy a connected route. The admin-facing object remains
+    // an ordinary Walking Point in either case.
+    if (nodeIds.length === 1 && edgeIds.length === 0) {
+      const junction = indoorNodes.find((node) => node.id === nodeIds[0] && node.pathJunction);
+      if (junction) {
+        const incident = indoorEdges.filter((edge) => edge.startNodeId === junction.id || edge.endNodeId === junction.id);
+        // A path junction is only special while its split branches still exist.
+        // Once the authoritative current graph has no incident edges, it is an
+        // ordinary isolated manual Walking Point and must follow the normal
+        // deletion path below (no stale "connected branches" warning).
+        if (incident.length === 0) {
+          // fall through to the generic node removal below
+        } else {
+        const parents = incident.filter((edge) => edgeIsParentForJunction(edge, junction.id));
+        if (parents.length !== 2 || incident.length !== 2) {
+          toast.warning("Walking Point has connected branches", "Disconnect the branches before removing this point.");
+          return;
+        }
+        const [first, second] = parents;
+        const compatible = first.type === second.type
+          && first.bidirectional === second.bidirectional
+          && first.accessible === second.accessible
+          && first.emergencySafe === second.emergencySafe
+          && first.closed === second.closed;
+        if (!compatible) {
+          toast.warning("Walking Point cannot be merged", "Its connected paths use different routing settings.");
+          return;
+        }
+        const firstPoints = edgePolylinePoints(first, indoorNodes);
+        const secondPoints = edgePolylinePoints(second, indoorNodes);
+        if (!firstPoints || !secondPoints) return;
+        const orientToJunction = (edge: NavigationEdge, points: { x: number; y: number }[]) =>
+          edge.endNodeId === junction.id ? points : [...points].reverse();
+        const left = orientToJunction(first, firstPoints);
+        const right = orientToJunction(second, secondPoints);
+        const mergedPoints = [...left, ...right.slice(1)];
+        const merged: NavigationEdge = {
+          ...first,
+          id: genId("ne"),
+          startNodeId: first.startNodeId === junction.id ? first.endNodeId : first.startNodeId,
+          endNodeId: second.startNodeId === junction.id ? second.endNodeId : second.startNodeId,
+          bendPoints: normalizeBendPoints(mergedPoints.slice(1, -1)),
+          distance: navEdgePolylineDistance(mergedPoints),
+          pathJunctionId: undefined,
+          pathJunctionParent: undefined,
+          pathJunctionIds: [...new Set([
+            ...(first.pathJunctionIds ?? []),
+            ...(second.pathJunctionIds ?? []),
+          ])].filter((id) => id !== junction.id),
+        };
+        if (merged.pathJunctionIds && merged.pathJunctionIds.length > 0) {
+          merged.pathJunctionId = merged.pathJunctionIds[merged.pathJunctionIds.length - 1];
+          merged.pathJunctionParent = true;
+        }
+        commitNavGraph(
+          indoorNodes.filter((node) => node.id !== junction.id),
+          indoorEdges.filter((edge) => !parents.some((parent) => parent.id === edge.id)).concat(merged),
+        );
+        setNavSelected(null);
+        setNavMultiSelected([]);
+        toast.success("Walking Point removed", "The corridor was merged back into one walking path.");
+        return;
+        }
+      }
+    }
     const removedEdges = indoorEdges.filter((edge) =>
       nodeIdSet.has(edge.startNodeId) || nodeIdSet.has(edge.endNodeId) || edgeIds.includes(edge.id)
     );
@@ -3623,9 +5670,9 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
   }, [commitNavGraph, indoorEdges, indoorNodes, navMultiSelected, navSelected, toast]);
 
   const navEraseAt = (pt: { x: number; y: number }) => {
-    const hitNode = findNavNodeAtPoint(indoorNodes, pt);
+    const hitNode = findNavNodeAtPoint(indoorNodes.filter((node) => !node.roomId), pt);
     if (hitNode) { deleteNavSelection({ type: "node", id: hitNode.id }); return; }
-    const hitEdge = indoorEdges.find((edge) => {
+    const hitEdge = walkableIndoorEdges.find((edge) => {
       const a = indoorNodes.find((n) => n.id === edge.startNodeId);
       const b = indoorNodes.find((n) => n.id === edge.endNodeId);
       if (!a || !b) return false;
@@ -3771,7 +5818,14 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
     e.stopPropagation();
     if (isSpacePressed()) { startPan(e); return; }
     if (navTool === "erase") { deleteNavSelection({ type: "edge", id: edge.id }); return; }
-    if (navTool === "connect") return;
+    if (navTool === "connect") {
+      const point = navPointFromEvent(e);
+      const hoveredTarget = navPathTargetHover?.edgeId === edge.id
+        ? navPathTargetHover
+        : undefined;
+      navConnectAtPoint(point, edge, hoveredTarget);
+      return;
+    }
     if (navTool === "select") {
       const physical = resolveNavTargetAt(navPointFromEvent(e));
       if (physical) {
@@ -3782,7 +5836,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
     // B5 Phase 2.7: dragging a SEGMENT of the already-selected segmented path
     // translates it perpendicular (draw.io-style); a plain click still selects.
     const isSel = navSelected?.type === "edge" && navSelected.id === edge.id;
-    if (navTool === "select" && isSel && edge.bendPoints && edge.bendPoints.length > 0) {
+    if (navTool === "select") {
       const pt = navPointFromEvent(e);
       const segPts = edgePolylinePoints(edge, indoorNodes);
       if (segPts && segPts.length >= 2) {
@@ -3794,11 +5848,22 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
         }
         const p0 = segPts[best];
         const p1 = segPts[best + 1];
-        // Only axis-aligned segments are draggable (Straighten diagonals are not).
-        if (p0.x === p1.x || p0.y === p1.y) {
+        const axisAligned = p0.x === p1.x || p0.y === p1.y;
+        const diagonal = !axisAligned;
+        // Axis-aligned segment dragging remains available for authored bends;
+        // a plain diagonal edge is also draggable and is reshaped into a clean
+        // orthogonal dog-leg while its canonical endpoints stay fixed.
+        if ((axisAligned && isSel && edge.bendPoints && edge.bendPoints.length > 0) || diagonal) {
           suppressHistoryRef.current = true;
           gestureMoved.current = false;
           navDragWallWarnedRef.current = false;
+          // A diagonal can be dragged directly from an unselected path. Keep
+          // the normal selection semantics while the gesture starts.
+          if (!isSel) {
+            setNavSelected({ type: "edge", id: edge.id });
+            setNavMultiSelected([]);
+            setShowProperties(true);
+          }
           // B5 Phase 2.8: store the IMMUTABLE drag-start snapshot — geometry is
           // always computed from this + the current delta, never compounded on
           // already-modified live bends (the exaggerated-movement bug) and never
@@ -3810,7 +5875,8 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
             oy: pt.y,
             origBends: [...(edge.bendPoints ?? [])],
             origPts: segPts,
-            isHorizontal: p0.y === p1.y,
+            isHorizontal: p0.y === p1.y || (diagonal && Math.abs(p1.x - p0.x) >= Math.abs(p1.y - p0.y)),
+            isDiagonal: diagonal,
           };
           return;
         }
@@ -3825,6 +5891,34 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
   // B5 Phase 2.6: hovering the SELECTED path's hit line remembers which segment
   // the pointer is nearest — Add Bend then splits that exact segment.
   const handleNavEdgeMove = (e: React.MouseEvent, edge: NavigationEdge) => {
+    if (navTool === "connect") {
+      // Connect uses the edge only as a lightweight hit target; the actual
+      // split/junction mutation occurs on click.  Keep the nearest segment and
+      // projected point as transient UI state so the line itself visibly reads
+      // as a valid target (without reconciling or mutating the graph on move).
+      if (!navConnectStart || !isManualIndoorWalkingEdge(edge, indoorNodes)) {
+        setNavPathTargetHover(null);
+        setNavSegmentHover(null);
+        return;
+      }
+      const point = navPointFromEvent(e);
+      const nodeMap: Record<string, { x: number; y: number }> = Object.fromEntries(
+        indoorNodes.map((node) => [node.id, { x: node.x, y: node.y }]),
+      );
+      const hit = findNavEdgeAtPoint([edge], nodeMap, point);
+      if (!hit) {
+        setNavPathTargetHover(null);
+        setNavSegmentHover(null);
+        return;
+      }
+      // Keep the mathematical projection, not a rounded cursor coordinate, so
+      // the preview marker and the committed junction remain on the same
+      // segment (including diagonal segments).
+      const nearest = { x: hit.nearest.x, y: hit.nearest.y };
+      setNavPathTargetHover({ edgeId: edge.id, index: hit.nearest.segIndex, point: nearest });
+      setNavSegmentHover(null);
+      return;
+    }
     if (navTool !== "select" || !(navSelected?.type === "edge" && navSelected.id === edge.id)) return;
     const pt = navPointFromEvent(e);
     const pts = edgePolylinePoints(edge, indoorNodes);
@@ -3861,8 +5955,10 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
   // When OFF: clean design workspace.
   const toggleNavigation = useCallback(() => {
     const next = !showNavOverlay;
+    if (!next && testNavOpen) return;
     setShowNavOverlay(next);
     if (!next) {
+      cancelElevatorTransition();
       // Turning OFF: reset all nav state so the canvas is clean.
       setNavConnectStart(null);
       setNavPreview(null);
@@ -3875,6 +5971,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
       setNavNodeHover(null);
       setNavSelectedBend(null);
       setNavSegmentHover(null);
+      setNavPathTargetHover(null);
       setNavAlignGuides([]);
       navDragWallWarnedRef.current = false;
       navLibraryDragRef.current = null;
@@ -3884,10 +5981,12 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
       setNavSelected(null);
       setNavMultiSelected([]);
       setNavTool("select");
+      setRoomDrag(null);
+      alignmentSnapLocksRef.current = { x: null, y: null };
       setTool("select");
       setTestNavOpen(false); // Close test route panel when nav overlay turns off.
     }
-  }, [showNavOverlay]);
+  }, [cancelElevatorTransition, showNavOverlay, testNavOpen]);
   // Keep backward compat for any remaining callers.
   const switchFloorEditorMode = useCallback((nextMode: FloorEditorMode) => {
     if (nextMode === "navigation" && !showNavOverlay) toggleNavigation();
@@ -3895,6 +5994,9 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
   }, [showNavOverlay, toggleNavigation]);
 
   const selectNavTool = useCallback((id: "select" | "pan" | "waypoint" | "destination" | "connect" | "link" | "erase") => {
+    clearRoomDoorLinkState();
+    setRoomDrag(null);
+    alignmentSnapLocksRef.current = { x: null, y: null };
     if (id !== "select" && id !== "pan") setShowNavOverlay(true);
     if (id !== "connect") { setNavConnectStart(null); setNavPreview(null); setNavConnectBends([]); navConnectBendGroupsRef.current = []; }
     setNavTool(id);
@@ -3903,7 +6005,8 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
     setNavAlignGuides([]);
     if (id !== "select") setNavSelectedBend(null);
     setNavSegmentHover(null);
-  }, []);
+    setNavPathTargetHover(null);
+  }, [clearRoomDoorLinkState]);
 
   const commitNavEdgeBetween = useCallback((
     startId: string,
@@ -3917,24 +6020,21 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
       setNavPreview(null);
       setNavConnectBends([]);
       navConnectBendGroupsRef.current = [];
+      setNavPathTargetHover(null);
     };
     if (startId === endId) {
       toast.info("Cannot connect a walking point to itself", "Pick a different destination.");
       clearConnect();
       return false;
     }
-    const dup = edges.find((e) =>
-      (e.startNodeId === startId && e.endNodeId === endId) ||
-      (e.bidirectional !== false && e.startNodeId === endId && e.endNodeId === startId)
-    );
-    if (dup) {
-      toast.info("Those points are already connected", "Select the existing path to edit it.");
-      clearConnect();
-      return false;
-    }
     const a = nodes.find((n) => n.id === startId);
     const b = nodes.find((n) => n.id === endId);
     if (!a || !b) return false;
+    if (a.roomId || b.roomId) {
+      toast.info("Use the Room Door", "Rooms use their linked Door. Select the Room and choose Link Room Door.");
+      clearConnect();
+      return false;
+    }
     // B5 Phase 2.5/2.7: indoor connectors stay ORTHOGONAL by default. Every
     // pinned bend (Phase 2.7 empty-space clicks) becomes part of THIS one edge,
     // and the final segment from the last pinned point (or the start) to the
@@ -3956,23 +6056,217 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
       toast.warning("Paths must pass through a door opening", `The path crosses a wall at (${blocked.x}, ${blocked.y}).`);
       return false;
     }
-    const edge = createNavEdge({ id: genId("ne"), startNodeId: startId, endNodeId: endId, nodes, type: "hallway" });
-    if (bends.length > 0 && polyline) {
+    const candidatePoints = polyline ?? [{ x: a.x, y: a.y }, { x: b.x, y: b.y }];
+    const proposedBends = normalizeBendPoints(bends.map((point) => ({ x: Math.round(point.x), y: Math.round(point.y) })));
+    const dup = edges.find((edge) => isEquivalentManualIndoorWalkingEdge(edge, nodes, startId, endId, proposedBends));
+    if (dup) {
+      toast.info("These Walking Points are already connected.", "Select the existing path to edit it.");
+      clearConnect();
+      return false;
+    }
+    // A Connect commit always creates one edge between its two explicit
+    // canonical targets. There is intentionally no geometric path splitting
+    // or implicit convergence here.
+    const pieces = [{ startNodeId: startId, endNodeId: endId, points: candidatePoints }];
+    const created: NavigationEdge[] = [];
+    for (const piece of pieces) {
+      const normalized = normalizeBendPoints(piece.points.slice(1, -1).map((point) => ({ x: Math.round(point.x), y: Math.round(point.y) })));
+      // Endpoint equality alone is not a duplicate: authored parallel paths
+      // may intentionally differ in direction, accessibility, emergency
+      // safety, closure, bends, or other routing metadata. Reuse the same
+      // equivalence contract as the graph normalizer instead.
+      const existing = edges.find((existingEdge) => isEquivalentManualIndoorWalkingEdge(
+        existingEdge,
+        nodes,
+        piece.startNodeId,
+        piece.endNodeId,
+        normalized,
+      ));
+      if (existing) continue;
+      const nextEdge = createNavEdge({ id: genId("ne"), startNodeId: piece.startNodeId, endNodeId: piece.endNodeId, nodes, type: "hallway" });
+      nextEdge.bendPoints = normalized.length > 0 ? normalized : undefined;
+      nextEdge.distance = navEdgePolylineDistance([piece.points[0], ...normalized, piece.points[piece.points.length - 1]]);
+      created.push(nextEdge);
+    }
+    if (created.length === 0) {
+      toast.info("These Walking Points are already connected.", "Select the existing path to edit it.");
+      clearConnect();
+      return false;
+    }
+    if (bends.length > 0 && polyline && pieces.length === 1 && created.length === 1) {
       // B5 Phase 2.8: normalize the committed polyline (drop duplicate /
       // collinear bends) so authored geometry stays clean.
       const normalized = normalizeBendPoints(bends.map((bp) => ({ x: Math.round(bp.x), y: Math.round(bp.y) })));
-      edge.bendPoints = normalized;
+      created[0].bendPoints = normalized;
       // Distance/weight = TOTAL polyline length (start → bends → end).
-      edge.distance = navEdgePolylineDistance([polyline[0], ...normalized, polyline[polyline.length - 1]]);
+      created[0].distance = navEdgePolylineDistance([polyline[0], ...normalized, polyline[polyline.length - 1]]);
     }
-    commitNavGraph(nodes, [...edges, edge]);
-    setNavSelected({ type: "edge", id: edge.id });
+    commitNavGraph(nodes, [...edges, ...created]);
+    setNavSelected({ type: "edge", id: created[0].id });
     setNavMultiSelected([]);
     setShowProperties(true);
     clearConnect();
-    toast.success("Connection created", `Walking points connected (${edge.distance} units).`);
+    toast.success("Connection created", `Walking points connected (${created[0].distance} units).`);
     return true;
   }, [commitNavGraph, doors, indoorEdges, indoorNodes, toast, walls]);
+
+  /**
+   * Connect an existing semantic/free navigation node directly to a manual
+   * Walking Path.  A path click is an explicit junction authoring action: the
+   * target edge is split into two canonical edges, then the source connector
+   * terminates at the new (or reused endpoint) node in the SAME commit.  This
+   * deliberately never infers connectivity from coordinate overlap elsewhere
+   * in the graph.
+   */
+  const commitNavEdgeToExistingPath = useCallback((
+    startId: string,
+    targetEdge: NavigationEdge,
+    point: { x: number; y: number },
+    nodes: NavigationNode[] = indoorNodes,
+    edges: NavigationEdge[] = indoorEdges,
+    pinnedBends: { x: number; y: number }[] = [],
+    /** Exact target captured by the Connect hover.  When present, the commit
+     * must use this edge segment/projected point rather than resolving a new
+     * generic nearest-node target on mouse-up. */
+    pathTarget?: { edgeId: string; segmentIndex: number; projectedPoint: { x: number; y: number } },
+  ): boolean => {
+    const edge = edges.find((candidate) => candidate.id === targetEdge.id);
+    if (!edge || !isManualIndoorWalkingEdge(edge, nodes)) {
+      toast.info("This connection is managed", "Connect onto a manual Walking Path or use its existing junction.");
+      return false;
+    }
+    const nodeMap: Record<string, { x: number; y: number }> = Object.fromEntries(
+      nodes.map((node) => [node.id, { x: node.x, y: node.y }]),
+    );
+    const targetSegment = pathTarget?.edgeId === edge.id
+      ? pathTarget.segmentIndex
+      : undefined;
+    const edgePoints = edgePolylinePoints(edge, nodes);
+    let hit: ReturnType<typeof findNavEdgeAtPoint> = null;
+    // The hover state already projected the pointer onto a specific segment.
+    // Preserve that exact segment through commit; only reject it if the graph
+    // changed underneath the pointer and the captured projection is no longer
+    // on that segment.  The fallback is used for direct edge clicks where no
+    // prior mousemove was delivered (e.g. keyboard/synthetic events).
+    if (
+      Number.isInteger(targetSegment)
+      && edgePoints
+      && targetSegment! >= 0
+      && targetSegment! < edgePoints.length - 1
+      && pathTarget
+    ) {
+      const a = edgePoints[targetSegment!];
+      const b = edgePoints[targetSegment! + 1];
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const lenSq = dx * dx + dy * dy;
+      if (lenSq > 0) {
+        let t = ((pathTarget.projectedPoint.x - a.x) * dx + (pathTarget.projectedPoint.y - a.y) * dy) / lenSq;
+        t = Math.max(0, Math.min(1, t));
+        const projected = { x: a.x + dx * t, y: a.y + dy * t };
+        const dist = Math.hypot(pathTarget.projectedPoint.x - projected.x, pathTarget.projectedPoint.y - projected.y);
+        if (dist <= NAV_EDGE_SNAP_THRESHOLD) {
+          hit = {
+            edge,
+            nearest: {
+              // Keep the captured projected point (rather than the nearest
+              // node) as the authoritative join location. It remains exact so
+              // persisted diagonal junctions stay mathematically on-segment.
+              x: pathTarget.projectedPoint.x,
+              y: pathTarget.projectedPoint.y,
+              dist,
+              segIndex: targetSegment!,
+              t,
+            },
+          };
+        }
+      }
+    }
+    if (!hit) hit = findNavEdgeAtPoint([edge], nodeMap, point);
+    if (!hit) return false;
+
+    // Endpoint/junction reuse is based on actual canvas distance, not a broad
+    // percentage of the edge.  A midpoint on a short/long path must still
+    // split; only a genuinely nearby endpoint is reused.
+    const startNode = nodes.find((node) => node.id === edge.startNodeId);
+    const endNode = nodes.find((node) => node.id === edge.endNodeId);
+    const endpointDistance = (node: NavigationNode | undefined) => node
+      ? Math.hypot(hit!.nearest.x - node.x, hit!.nearest.y - node.y)
+      : Infinity;
+    const endpoint = endpointDistance(startNode) <= NAV_NODE_HIT_THRESHOLD
+      ? startNode
+      : endpointDistance(endNode) <= NAV_NODE_HIT_THRESHOLD
+        ? endNode
+        : undefined;
+    if (endpoint) {
+      return commitNavEdgeBetween(startId, endpoint.id, nodes, edges, pinnedBends);
+    }
+
+    // A pre-existing node on the target segment is an explicit canonical
+    // target. Reuse it only when it lies on the hovered segment and is actually
+    // close to the captured projection; unrelated nearby nodes must not steal a
+    // midpoint path click. (This intentionally includes user Walking Points as
+    // well as internally-created path junctions.)
+    if (edgePoints && Number.isInteger(hit.nearest.segIndex)) {
+      const segIndex = hit.nearest.segIndex;
+      const a = edgePoints[segIndex];
+      const b = edgePoints[segIndex + 1];
+      const existingJunction = nodes
+        .filter((node) => node.id !== startId)
+        .map((node) => ({ node, distance: Math.hypot(node.x - hit!.nearest.x, node.y - hit!.nearest.y), onSegment: distanceToSegment(node, a, b) }))
+        .filter(({ distance, onSegment }) => distance <= NAV_NODE_HIT_THRESHOLD && onSegment <= NAV_NODE_HIT_THRESHOLD)
+        .sort((left, right) => left.distance - right.distance)[0]?.node;
+      if (existingJunction) {
+        return commitNavEdgeBetween(startId, existingJunction.id, nodes, edges, pinnedBends);
+      }
+    }
+
+    // The projected point captured by Connect is the source of truth for the
+    // new junction. createIndoorNavNode intentionally rounds ordinary authored
+    // coordinates, but rounding a diagonal projection can move the junction
+    // off the segment. Keep the canonical node metadata from the helper while
+    // retaining the exact segment coordinate for this explicit split.
+    const junctionBase = createIndoorNavNode({
+      id: genId("nn"),
+      x: hit.nearest.x,
+      y: hit.nearest.y,
+      buildingId,
+      floorId,
+      campusId: campus.id,
+      name: "Waypoint",
+      type: "hallway",
+      pathJunction: true,
+    });
+    const junction = { ...junctionBase, x: hit.nearest.x, y: hit.nearest.y };
+    const split = splitIndoorNavEdge(edge, junction, nodes, hit.nearest.segIndex);
+    if (!split) return false;
+    const nextNodes = [...nodes, junction];
+    const nextEdges = edges
+      .filter((candidate) => candidate.id !== edge.id)
+      .concat(split.newEdges);
+    // If the source is already one endpoint of the target path, the split
+    // edge itself is the canonical source↔junction connector.  Do not add a
+    // second indistinguishable edge on top of it.
+    if (startId === edge.startNodeId || startId === edge.endNodeId) {
+      commitNavGraph(nextNodes, nextEdges, { splitNodeIds: new Set([junction.id]) });
+      const sourceEdge = split.newEdges.find((candidate) =>
+        candidate.startNodeId === startId || candidate.endNodeId === startId,
+      );
+      if (sourceEdge) setNavSelected({ type: "edge", id: sourceEdge.id });
+      setNavMultiSelected([]);
+      setShowProperties(true);
+      setNavConnectStart(null);
+      setNavPreview(null);
+      setNavConnectBends([]);
+      navConnectBendGroupsRef.current = [];
+      setNavPathTargetHover(null);
+      toast.success("Junction created", "The existing Walking Path was split at the connection.");
+      return true;
+    }
+    // commitNavEdgeBetween calls commitNavGraph exactly once, so the split and
+    // source connector become one logical undo/history action.
+    return commitNavEdgeBetween(startId, junction.id, nextNodes, nextEdges, pinnedBends);
+  }, [buildingId, campus.id, commitNavEdgeBetween, commitNavGraph, floorId, indoorEdges, indoorNodes, splitIndoorNavEdge, toast]);
 
   // ── B5 Phase 2.6: bend editing actions — ONE history action each ───────────
 
@@ -4103,7 +6397,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
 
   const navWaypointAt = useCallback((pt: { x: number; y: number }) => {
     // 1. Existing node → select it (or use as connect target).
-    const hit = findNavNodeAtPoint(indoorNodes, pt);
+    const hit = findNavNodeAtPoint(indoorNodes.filter((node) => !node.roomId), pt);
     if (hit) return { kind: "node" as const, node: hit };
     // 2. Door target → create/reuse its canonical door node.
     const door = findDoorAtPoint(doors, pt);
@@ -4137,7 +6431,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
       const anchor = roomLinkedCuePosition(room);
       const node = createIndoorNavNode({
         id: genId("nn"), x: anchor.x, y: anchor.y, buildingId, floorId, campusId: campus.id,
-        name: room.name, type: "room_access", roomId: room.id,
+        name: roomDisplayName(room, rooms.findIndex((candidate) => candidate.id === room.id)), type: "room_access", roomId: room.id,
       });
       commitNavGraph([...indoorNodes, node], indoorEdges);
       setNavSelected({ type: "node", id: node.id });
@@ -4162,16 +6456,24 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
       // route edges terminate there. The visual ramp badge may offset
       // (rampLinkedCuePosition) so it never covers the centered accessibility
       // icon, but the routing node coordinate stays the transformed center.
-      const cx = Math.round(owner.x + owner.width / 2);
-      const cy = Math.round(owner.y + owner.height / 2);
+      // The Stair node follows the physical floor-facing entry; other
+      // circulation anchors keep their established center semantics.
+      const anchor = circ.kind === "stairs"
+        ? stairEntryPosition(owner as FloorStairs)
+        : circ.kind === "elevator"
+          ? elevatorEntryPosition(owner as FloorElevatorItem)
+          : { x: Math.round(owner.x + owner.width / 2), y: Math.round(owner.y + owner.height / 2) };
       const type = circ.kind === "stairs" ? "stair" : circ.kind === "elevator" ? "elevator" : "ramp";
       const node = createIndoorNavNode({
-        id: genId("nn"), x: cx, y: cy, buildingId, floorId, campusId: campus.id,
+        id: genId("nn"), x: anchor.x, y: anchor.y, buildingId, floorId, campusId: campus.id,
         name: circ.kind === "stairs" ? (owner as FloorStairs).label ?? "Stairs" : circ.kind === "elevator" ? (owner as FloorElevatorItem).label ?? "Elevator" : (owner as FloorRamp).label ?? "Ramp",
         type,
         stairId: circ.kind === "stairs" ? circ.id : undefined,
         elevatorId: circ.kind === "elevator" ? circ.id : undefined,
         rampId: circ.kind === "ramp" ? circ.id : undefined,
+        transitionSharedId: circ.kind === "stairs" || circ.kind === "elevator"
+          ? (owner as FloorStairs | FloorElevatorItem).sharedId
+          : undefined,
       });
       commitNavGraph([...indoorNodes, node], indoorEdges);
       setNavSelected({ type: "node", id: node.id });
@@ -4199,10 +6501,11 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
     // panel, keep that panel open — the shared card flips to Linked in place.
     // (navWaypointAt internally selects the freshly created node, so we must
     // re-assert the physical selection here to stay on the physical panel.)
-    if (navMode && navPhysicalSelected) {
+    const keepsPhysicalInspector = navMode && selected?.type === type && selected.id === id;
+    if (keepsPhysicalInspector || (navMode && navPhysicalSelected)) {
       setNavSelected(null);
       setNavMultiSelected([]);
-      setNavPhysicalSelected({ type, id });
+      setNavPhysicalSelected(keepsPhysicalInspector ? null : { type, id });
     } else {
       setNavSelected({ type: "node", id: result.node.id });
       setNavMultiSelected([]);
@@ -4212,7 +6515,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
     } else {
       toast.info("Already added to navigation", `${physicalNavLabel(type, id)} is already linked.`);
     }
-  }, [ensureLinkedNavigationNode, navMode, navPhysicalSelected, physicalNavLabel, toast]);
+  }, [ensureLinkedNavigationNode, navMode, navPhysicalSelected, physicalNavLabel, selected, toast]);
 
   const viewPhysicalInNavigation = useCallback((type: "room" | "door" | "stairs" | "elevator" | "ramp", id: string) => {
     const node = linkedNodeForPhysical(type, id);
@@ -4227,15 +6530,29 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
 
   const removePhysicalFromNavigation = useCallback((type: "room" | "door" | "stairs" | "elevator" | "ramp", id: string) => {
     const nodes = linkedNodesForPhysical(type, id);
-    if (nodes.length === 0) return;
     const nodeIds = new Set(nodes.map((node) => node.id));
     const nextNodes = indoorNodes.filter((n) => !nodeIds.has(n.id));
     const nextEdges = indoorEdges.filter((edge) => !nodeIds.has(edge.startNodeId) && !nodeIds.has(edge.endNodeId));
-    commitNavGraph(nextNodes, nextEdges);
+    if (type === "room") {
+      const nextRooms = rooms.map((room) => room.id === id
+        ? { ...room, accessDoorId: undefined, accessDoorIds: undefined, accessType: undefined, accessNodeId: undefined }
+        : room);
+      const nextEntry = {
+        ...floorUndoEntryFromFloor(floor),
+        rooms: nextRooms,
+        navNodes: nextNodes,
+        navEdges: nextEdges,
+      };
+      pushHistory(nextEntry);
+      buildFloorUpdates(nextEntry);
+    } else {
+      if (nodes.length === 0) return;
+      commitNavGraph(nextNodes, nextEdges);
+    }
     setNavSelected(null);
     setNavMultiSelected([]);
     toast.success("Removed from navigation", `${physicalNavLabel(type, id)} remains on the floor plan.`);
-  }, [commitNavGraph, indoorEdges, indoorNodes, linkedNodesForPhysical, physicalNavLabel, toast]);
+  }, [buildFloorUpdates, commitNavGraph, floor, floorUndoEntryFromFloor, indoorEdges, indoorNodes, linkedNodesForPhysical, physicalNavLabel, pushHistory, rooms, toast]);
 
   const physicalNavStatus = useMemo(() => {
     if (!selected) return undefined;
@@ -4254,7 +6571,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
         kind: "room" as const,
         linked,
         title: "Room",
-        detail: linked ? "Destination linked" : "Create the destination anchor used by routing.",
+        detail: linked ? "Room destination" : "Add this Room as a navigation destination.",
         connectionCount,
       };
     }
@@ -4282,7 +6599,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
       return {
         kind: "stairs" as const,
         linked,
-        title: "Stair Connection",
+        title: "Stair",
         detail: linked ? "Linked" : "Add this stair as a local stair navigation anchor.",
         groupLabel: groupLabel ?? stair?.label,
         connectionCount,
@@ -4293,12 +6610,97 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
     return {
       kind: "elevator" as const,
       linked,
-      title: "Elevator Shaft",
+      title: "Elevator",
       detail: linked ? "Linked" : "Add this elevator as a local elevator navigation anchor.",
       groupLabel: groupLabel ?? elevator?.label,
       connectionCount,
     };
   }, [circulationGroups.elevators, circulationGroups.stairs, elevators, indoorEdges, linkedNodeForPhysical, selected, stairs]);
+
+  const roomDoorStatus = useMemo(() => {
+    if (selected?.type !== "room") return undefined;
+    const room = rooms.find((candidate) => candidate.id === selected.id);
+    if (!room) return undefined;
+    const roomNode = indoorNodes.find((node) => node.roomId === room.id);
+    const linkedDoors = roomAccessDoorIds(room)
+      .map((doorId) => doors.find((door) => door.id === doorId))
+      .filter((door): door is NonNullable<typeof door> => !!door);
+    const validDoors = linkedDoors.filter((door) => isDoorEligibleForRoom(room, door, walls, indoorNodes, { rooms }));
+    const linkedDoor = validDoors[0];
+    const doorNodes = validDoors.map((door) => indoorNodes.find((node) => node.doorId === door.id)).filter((node): node is NonNullable<typeof node> => !!node);
+    const connectedDoorNodes = doorNodes.filter((doorNode) => indoorEdges.some((edge) => edge.type !== ROOM_DOOR_EDGE_TYPE && !edge.closed
+      && (edge.startNodeId === doorNode.id || edge.endNodeId === doorNode.id)));
+    const connectionCount = connectedDoorNodes.reduce((sum, doorNode) => sum + indoorEdges.filter((edge) => edge.type !== ROOM_DOOR_EDGE_TYPE && !edge.closed
+      && (edge.startNodeId === doorNode.id || edge.endNodeId === doorNode.id)).length, 0);
+    const state = !roomNode ? "not_added"
+      : linkedDoors.length === 0 ? "door_needed"
+      : validDoors.length === 0 ? "door_invalid"
+      : connectedDoorNodes.length > 0 ? "ready" : "door_not_connected";
+    return {
+      state,
+      roomNodeId: roomNode?.id,
+      doorId: linkedDoors[0]?.id,
+      doorName: linkedDoors[0] ? doorDisplayName(linkedDoors[0], floor) : undefined,
+      doorIds: linkedDoors.map((door) => door.id),
+      doorNames: linkedDoors.map((door) => doorDisplayName(door, floor)),
+      connectionCount,
+      valid: validDoors.length > 0,
+    } as const;
+  }, [doors, floor, indoorEdges, indoorNodes, rooms, selected, walls]);
+
+  const roomNavigationCueStatus = useMemo(() => {
+    const result = new Map<string, "not_added" | "door_needed" | "door_invalid" | "door_not_connected" | "ready">();
+    for (const room of rooms) {
+      const roomNode = indoorNodes.find((node) => node.roomId === room.id);
+      if (!roomNode) { result.set(room.id, "not_added"); continue; }
+      const linkedDoors = roomAccessDoorIds(room).map((id) => doors.find((candidate) => candidate.id === id)).filter((door): door is NonNullable<typeof door> => !!door);
+      const validDoors = linkedDoors.filter((door) => isDoorEligibleForRoom(room, door, walls, indoorNodes, { rooms }));
+      if (linkedDoors.length === 0) { result.set(room.id, "door_needed"); continue; }
+      if (validDoors.length === 0) { result.set(room.id, "door_invalid"); continue; }
+      const connected = validDoors.some((door) => {
+        const doorNode = indoorNodes.find((node) => node.doorId === door.id);
+        return !!doorNode && indoorEdges.some((edge) => edge.type !== ROOM_DOOR_EDGE_TYPE && !edge.closed
+          && (edge.startNodeId === doorNode.id || edge.endNodeId === doorNode.id));
+      });
+      result.set(room.id, connected ? "ready" : "door_not_connected");
+    }
+    return result;
+  }, [doors, indoorEdges, indoorNodes, rooms, walls]);
+
+  const beginRoomDoorLink = useCallback((roomId: string, mode: "replace" | "add" = "replace") => {
+    if (!rooms.some((room) => room.id === roomId)) return;
+    if (!indoorNodes.some((node) => node.roomId === roomId)) {
+      toast.info("Add Room to Navigation first", "Create the Room destination before choosing its Door.");
+      return;
+    }
+    setRoomDoorLinking(true);
+    setRoomDoorLinkMode(mode);
+    setRoomDrag(null);
+    alignmentSnapLocksRef.current = { x: null, y: null };
+    setTool("select");
+    setNavTool("select");
+    setShowProperties(true);
+    toast.info("Select a Door", "Select a Door for this Room. Press Esc to cancel.");
+  }, [indoorNodes, rooms, toast]);
+
+  const selectRoomDoor = useCallback((doorId: string) => {
+    selectFloorItem({ type: "door", id: doorId });
+  }, [selectFloorItem]);
+
+  const removeRoomDoor = useCallback((roomId: string, doorId: string) => {
+    const room = rooms.find((candidate) => candidate.id === roomId);
+    if (!room) return;
+    const nextIds = roomAccessDoorIds(room).filter((id) => id !== doorId);
+    updFloor(rooms.map((candidate) => candidate.id === roomId
+      ? { ...candidate, accessDoorId: nextIds[0], accessDoorIds: nextIds.length > 0 ? nextIds : undefined }
+      : candidate), fpaths);
+  }, [fpaths, rooms, updFloor]);
+
+  const roomDoorTargetIsValid = useCallback((door: FloorDoor) => {
+    if (!roomDoorLinking || selected?.type !== "room") return false;
+    const room = rooms.find((candidate) => candidate.id === selected.id);
+    return roomDoorLinkTargetIsValid(room, door, walls, indoorNodes, buildingId, floorId, room ? roomAccessDoorIds(room) : [], rooms);
+  }, [buildingId, floorId, indoorNodes, roomDoorLinking, rooms, selected, walls]);
 
   const selectedDoorEntranceStatus = useMemo(() => {
     if (selected?.type !== "door") return undefined;
@@ -4330,7 +6732,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
 
     if (navTool === "waypoint" || navTool === "destination") {
       const isDest = navTool === "destination";
-      const existing = findNavNodeAtPoint(indoorNodes, pt);
+      const existing = findNavNodeAtPoint(indoorNodes.filter((node) => !node.roomId), pt);
       if (existing) {
         selectDuplicateNavNode(existing);
         setNavTool("select");
@@ -4348,19 +6750,30 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
       }
       // B5 Phase 6.3: check if click is near an existing nav edge for insertion
       const edgeNodeMap = Object.fromEntries(indoorNodes.map((n) => [n.id, { x: n.x, y: n.y }]));
-      const edgeHit = findNavEdgeAtPoint(indoorEdges, edgeNodeMap, pt);
+      const managedEdgeHit = findNavEdgeAtPoint(walkableIndoorEdges, edgeNodeMap, pt);
+      if (managedEdgeHit && !editableIndoorEdges.some((edge) => edge.id === managedEdgeHit.edge.id)) {
+        toast.info("This connection is managed", "Entrance, Room, and generated pathway connections cannot be split.");
+        return;
+      }
+      const edgeHit = findNavEdgeAtPoint(editableIndoorEdges, edgeNodeMap, pt);
       if (edgeHit) {
         // Insert waypoint into existing edge — split it
-        const insertNode = createIndoorNavNode({
+        const insertNodeBase = createIndoorNavNode({
           id: genId("nn"), x: edgeHit.nearest.x, y: edgeHit.nearest.y, buildingId, floorId, campusId: campus.id,
-          name: isDest ? "Destination" : "Walking Point",
+          name: isDest ? "Destination" : "Waypoint",
           type: isDest ? "room_access" : "hallway",
+          pathJunction: true,
         });
+        const insertNode = { ...insertNodeBase, x: edgeHit.nearest.x, y: edgeHit.nearest.y };
         const splitResult = splitIndoorNavEdge(edgeHit.edge, insertNode, indoorNodes);
         if (splitResult) {
           const nextEdges = indoorEdges.filter((e) => e.id !== edgeHit.edge.id);
           nextEdges.push(...splitResult.newEdges);
-          commitNavGraph([...indoorNodes, insertNode], nextEdges);
+          commitNavGraph(
+            [...indoorNodes, insertNode],
+            nextEdges,
+            { splitNodeIds: new Set([insertNode.id]) },
+          );
           setNavSelected({ type: "node", id: insertNode.id });
           setNavMultiSelected([]);
           setShowProperties(true);
@@ -4411,9 +6824,18 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
 
   // Shared Connect Path interaction — used by both the canvas background and
   // existing-waypoint clicks so every surface behaves identically.
-  const navConnectAtPoint = (pt: { x: number; y: number }) => {
-    const result = navWaypointAt(pt);
+  const navConnectAtPoint = (
+    pt: { x: number; y: number },
+    targetEdge?: NavigationEdge,
+    pathTarget?: { edgeId: string; index: number; point: { x: number; y: number } },
+  ) => {
     if (!navConnectStart) {
+      const roomTarget = findRoomAtPoint(rooms, pt);
+      if (roomTarget) {
+        toast.info("Use the Room Door", "Link this Room to its physical Door, then connect that Door to the Walking Network.");
+        return;
+      }
+      const result = navWaypointAt(pt);
       // B5 Phase 2.8: a connection MUST begin by clicking an existing valid
       // routing node (or a linked-location target that becomes one). Clicking
       // EMPTY floor space before a start does NOTHING — no waypoint, no node,
@@ -4427,6 +6849,34 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
       setNavSelected({ type: "node", id: startId });
       return;
     }
+    // A manual Walking Path is an explicit Connect target.  Reuse the same
+    // canonical split semantics as the Walking Point tool, then terminate the
+    // new connector at that junction.  Managed/generated paths remain read-only
+    // and never become independent manual graph data.
+    // The hovered edge + projected point are the explicit target. Resolve it
+    // before generic waypoint/room hit testing so a nearby endpoint cannot
+    // steal a midpoint click on the path.
+    if (targetEdge) {
+      const committed = commitNavEdgeToExistingPath(
+        navConnectStart,
+        targetEdge,
+        pt,
+        indoorNodes,
+        indoorEdges,
+        navConnectBends,
+        pathTarget?.edgeId === targetEdge.id
+          ? { edgeId: targetEdge.id, segmentIndex: pathTarget.index, projectedPoint: pathTarget.point }
+          : undefined,
+      );
+      if (committed) setNavTool("select");
+      return;
+    }
+    const roomTarget = findRoomAtPoint(rooms, pt);
+    if (roomTarget) {
+      toast.info("Use the Room Door", "Link this Room to its physical Door, then connect that Door to the Walking Network.");
+      return;
+    }
+    const result = navWaypointAt(pt);
     const endId = result.kind === "node" ? result.node.id : null;
     if (endId) {
       // Finish: commit ONE edge carrying every pinned bend (one history action).
@@ -4639,7 +7089,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
     if (!kind) return;
     const pt = navPointFromDrag(e);
     if (kind === "waypoint" || kind === "destination") {
-      const existing = findNavNodeAtPoint(indoorNodes, pt);
+      const existing = findNavNodeAtPoint(indoorNodes.filter((node) => !node.roomId), pt);
       if (existing) {
         selectDuplicateNavNode(existing);
         setNavTool("select");
@@ -4671,6 +7121,21 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
   }, [buildingId, campus.id, commitNavGraph, doors, elevators, floorId, indoorEdges, indoorNodes, ramps, rooms, selectDuplicateNavNode, stairs, toast]);
 
   const handleSvgDown = (e: React.MouseEvent<SVGSVGElement>) => {
+    if (roomDoorLinking) {
+      const target = e.target as SVGElement;
+      const isBg = target === svgRef.current || target.dataset.bg === "true"
+        || target.closest?.('[data-bg="true"]') != null;
+      if (isBg) {
+        clearRoomDoorLinkState();
+        setSelected(null);
+        setMultiSelected([]);
+        setShowProperties(false);
+        return;
+      }
+      e.preventDefault();
+      toast.info("Select a Door", "Select a Door for this Room. Press Esc to cancel.");
+      return;
+    }
     // B8 Phase 1: when a nav tool is active, route to nav handler.
     // Otherwise, fall through to physical object handling.
     const isNavToolActive = showNavOverlay && navTool !== "select" && navTool !== "pan";
@@ -4711,6 +7176,18 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
     if (tool === "pan") { if (isBg) startPan(e); return; }
     if (tool === "select" || tool === "erase") {
       if (isBg && tool === "select") {
+        // Navigation selections live in a separate state domain from floor
+        // objects.  Clear both domains together when Select is used on empty
+        // canvas; otherwise a nav node/edge can keep the Properties panel open
+        // after its visible highlight is gone.  Exclusive navigation tools are
+        // handled by handleNavSvgDown above and never reach this branch.
+        if (navMode && navTool === "select") {
+          setNavSelected(null);
+          setNavMultiSelected([]);
+          setNavPhysicalSelected(null);
+          setNavSelectedBend(null);
+          setNavSegmentHover(null);
+        }
         if (
           !e.shiftKey &&
           multiBounds &&
@@ -4742,7 +7219,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
         if (!e.shiftKey) {
           setSelected(null);
           setMultiSelected([]);
-          setShowProperties(true);
+          setShowProperties(navMode && navTool === "select" ? false : true);
         }
         setRubberBand({ sx: boundedPt.x, sy: boundedPt.y, cx: boundedPt.x, cy: boundedPt.y });
       }
@@ -4768,7 +7245,9 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
           id: genId("wl"),
           x1: wallStart.x, y1: wallStart.y,
           x2: resolved.point.x, y2: resolved.point.y,
-          thickness: 4, color: lastWallColorRef.current, material: "concrete",
+          thickness: lastWallStyleRef.current.thickness,
+          color: lastWallStyleRef.current.color,
+          material: lastWallStyleRef.current.material,
           startAnchor: wallStart.roomAnchor,
           endAnchor: resolved.point.roomAnchor,
         }, rooms);
@@ -4854,8 +7333,10 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
         { x: rawFx, y: rawFy, w: furnitureTemplate.width, h: furnitureTemplate.height },
         refs,
       );
-      const fx = Math.max(0, Math.min(alignResult.snappedX, FP_W - furnitureTemplate.width));
-      const fy = Math.max(0, Math.min(alignResult.snappedY, FP_H - furnitureTemplate.height));
+      if (alignResult.guides.length > 0) setAlignGuides(alignResult.guides);
+      else setAlignGuides([]);
+      const fx = Math.max(0, Math.min(snapOn ? alignResult.snappedX : rawFx, FP_W - furnitureTemplate.width));
+      const fy = Math.max(0, Math.min(snapOn ? alignResult.snappedY : rawFy, FP_H - furnitureTemplate.height));
       const newItem: FloorFurniture = {
         id: genId("fn"),
         type: furnitureTemplate.type,
@@ -4905,23 +7386,61 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
       movePan(e);
       // Connect preview follows the pointer; authoring targets highlight live.
       if (navTool === "waypoint" || navTool === "destination" || navTool === "connect" || navTool === "link") {
-        setNavTargetHover(resolveNavTargetAt(pt));
+        const resolvedTarget = resolveNavTargetAt(pt);
+        // A Room's canonical access node is semantic and intentionally not a
+        // generic Connect target. Keep the Room guidance path, but do not paint
+        // it with the same valid target cue used for Walking Points.
+        setNavTargetHover(navTool === "connect" && resolvedTarget?.kind === "room" ? null : resolvedTarget);
       } else {
         setNavTargetHover(null);
       }
       // B5 Phase 6.4: detect edge snap for waypoint insertion in Floor Editor
       if (navTool === "waypoint" || navTool === "destination") {
         const edgeNodeMap = Object.fromEntries(indoorNodes.map((n) => [n.id, { x: n.x, y: n.y }]));
-        const edgeHit = findNavEdgeAtPoint(indoorEdges, edgeNodeMap, pt);
+        const edgeHit = findNavEdgeAtPoint(editableIndoorEdges, edgeNodeMap, pt);
         setFloorEdgeSnap(edgeHit ? { edgeId: edgeHit.edge.id, nearest: edgeHit.nearest } : null);
       } else {
         setFloorEdgeSnap(null);
       }
       if (navConnectStart) {
-        setNavPreview(pt);
-        // B5 Phase 2.9: the pin-snap guide feedback is transient — it appears
-        // right after an empty-click pin and clears once the pointer moves.
-        setNavAlignGuides([]);
+        const startNode = indoorNodes.find((node) => node.id === navConnectStart);
+        // Resolve the live pointer target directly as well as from hover state.
+        // Mouse-enter state can lag one render behind a fast Connect move (and
+        // tests/trackpads may dispatch move events on the SVG rather than the
+        // node group), so the guide must not depend on a stale hover id.
+        const hoveredNode = (navNodeHover ? indoorNodes.find((node) => node.id === navNodeHover && !node.roomId) : undefined)
+          ?? findNavNodeAtPoint(indoorNodes.filter((node) => !node.roomId), boundedPt);
+        const livePhysicalTarget = resolveNavTargetAt(boundedPt) ?? navTargetHover;
+        const hoveredLinkedNode = !hoveredNode && livePhysicalTarget
+          ? linkedNodeForPhysical(livePhysicalTarget.kind, livePhysicalTarget.id)
+          : undefined;
+        const targetNode = hoveredNode ?? hoveredLinkedNode;
+        if (targetNode && startNode) {
+          // Existing nodes and linked Door anchors are fixed graph targets. Show
+          // the same center-axis guide the eventual explicit connection will
+          // use, without changing either node or creating connectivity.
+          const aligned = navAlignSnap(
+            { x: targetNode.x, y: targetNode.y },
+            [{ x: startNode.x, y: startNode.y, id: startNode.id }],
+            8,
+            new Set([startNode.id]),
+          );
+          setNavPreview({ x: targetNode.x, y: targetNode.y });
+          setNavAlignGuides(aligned.guides);
+        } else if (startNode) {
+          // Empty-space Connect uses the same pin helper as click/commit, so
+          // hover guides and the eventual bend geometry stay identical.
+          const last = navConnectBends.length > 0
+            ? navConnectBends[navConnectBends.length - 1]
+            : { x: startNode.x, y: startNode.y };
+          const geo = navPinGeometryFor(boundedPt, last, indoorNodes, walls, doors, { width: FP_W, height: FP_H });
+          const previewPoint = geo.pins[geo.pins.length - 1] ?? boundedPt;
+          setNavPreview(previewPoint);
+          setNavAlignGuides(geo.snapped ? geo.guides : []);
+        } else {
+          setNavPreview(boundedPt);
+          setNavAlignGuides([]);
+        }
       }
       // Nav marquee (rubber band over graph elements).
       if (rubberBand) { setRubberBand({ ...rubberBand, cx: boundedPt.x, cy: boundedPt.y }); return; }
@@ -4935,15 +7454,62 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
       if (navSegDragRef.current) {
         const segDrag = navSegDragRef.current;
         const segEdge = indoorEdges.find((ed) => ed.id === segDrag.edgeId);
-        if (!segEdge || !segEdge.bendPoints || segEdge.bendPoints.length === 0) { navSegDragRef.current = null; return; }
-        const delta = segDrag.isHorizontal
+        if (!segEdge) { navSegDragRef.current = null; return; }
+        const segmentStart = segDrag.origPts[segDrag.segIndex];
+        const segmentEnd = segDrag.origPts[segDrag.segIndex + 1];
+        if (!segmentStart || !segmentEnd) { navSegDragRef.current = null; return; }
+        let delta = segDrag.isHorizontal
           ? Math.round(boundedPt.y) - segDrag.oy
           : Math.round(boundedPt.x) - segDrag.ox;
+        // Manual segment drags can align their translated axis to nearby
+        // endpoints, bends, or navigation anchors.  Keep the orthogonal
+        // segment constraint; only the perpendicular delta is adjusted.
+        if (segmentStart && segmentEnd) {
+          const references = [
+            ...indoorAlignmentReferences,
+            ...segDrag.origPts.map((point, index) => ({ ...point, id: `edge-point:${segDrag.edgeId}:${index}` })),
+          ].filter((reference) =>
+            !((reference.x === segmentStart.x && reference.y === segmentStart.y)
+              || (reference.x === segmentEnd.x && reference.y === segmentEnd.y))
+          );
+          const axisTarget = segDrag.isDiagonal
+            ? segDrag.isHorizontal
+              ? { x: Math.round((segmentStart.x + segmentEnd.x) / 2), y: Math.round((segmentStart.y + segmentEnd.y) / 2) + delta }
+              : { x: Math.round((segmentStart.x + segmentEnd.x) / 2) + delta, y: Math.round((segmentStart.y + segmentEnd.y) / 2) }
+            : segDrag.isHorizontal
+              ? { x: segmentStart.x, y: segmentStart.y + delta }
+              : { x: segmentStart.x + delta, y: segmentStart.y };
+          const aligned = navAlignSnap(axisTarget, references, 8);
+          const axisGuide = aligned.guides.find((guide) => guide.type === (segDrag.isHorizontal ? "h" : "v"));
+          if (axisGuide) {
+            delta = segDrag.isHorizontal
+              ? axisGuide.pos - (segDrag.isDiagonal ? Math.round((segmentStart.y + segmentEnd.y) / 2) : segmentStart.y)
+              : axisGuide.pos - (segDrag.isDiagonal ? Math.round((segmentStart.x + segmentEnd.x) / 2) : segmentStart.x);
+            setNavAlignGuides([axisGuide]);
+          } else {
+            setNavAlignGuides([]);
+          }
+        }
         if (delta !== 0) gestureMoved.current = true;
         if (delta === 0) return;
         // Clamp the translation delta so the segment tracks the cursor 1:1 and
         // stays inside floor bounds (same intuitive rate as other draggables).
-        let nextBends = translateOrthogonalSegment(segDrag.origPts, segDrag.origBends, segDrag.segIndex, delta, segDrag.isHorizontal);
+        let nextBends: { x: number; y: number }[];
+        if (segDrag.isDiagonal) {
+          // Replace only the selected diagonal segment with the smallest
+          // orthogonal dog-leg.  Prefix/suffix bends remain untouched, and the
+          // segment's canonical endpoints are never moved or reassigned.
+          const midX = Math.round((segmentStart.x + segmentEnd.x) / 2);
+          const midY = Math.round((segmentStart.y + segmentEnd.y) / 2);
+          const localBends = segDrag.isHorizontal
+            ? [{ x: segmentStart.x, y: midY + delta }, { x: segmentEnd.x, y: midY + delta }]
+            : [{ x: midX + delta, y: segmentStart.y }, { x: midX + delta, y: segmentEnd.y }];
+          const prefix = segDrag.origPts.slice(1, segDrag.segIndex + 1);
+          const suffix = segDrag.origPts.slice(segDrag.segIndex + 2, segDrag.origPts.length - 1);
+          nextBends = normalizeBendPoints([...prefix, ...localBends, ...suffix]);
+        } else {
+          nextBends = translateOrthogonalSegment(segDrag.origPts, segDrag.origBends, segDrag.segIndex, delta, segDrag.isHorizontal);
+        }
         nextBends = normalizeBendPoints(nextBends.map((bp) => ({
           x: clamp(Math.round(bp.x), 0, FP_W),
           y: clamp(Math.round(bp.y), 0, FP_H),
@@ -5015,6 +7581,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
             ...(aNode ? [{ x: aNode.x, y: aNode.y }] : []),
             ...(bNode ? [{ x: bNode.x, y: bNode.y }] : []),
             ...dragEdge.bendPoints.filter((_, i) => i !== drag.index),
+            ...indoorAlignmentReferences,
           ];
           const snap = navAlignSnap({ x: nx, y: ny }, others);
           nx = snap.x;
@@ -5085,23 +7652,41 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
           }
           const xs = drag.origins.map((o) => o.x);
           const ys = drag.origins.map((o) => o.y);
-          const others = indoorNodes
-            .filter((n) => !drag.ids.includes(n.id))
-            .map((n) => ({ x: n.x, y: n.y, id: n.id }));
-          const snap = navGroupAlignSnap(
-            {
-              minX: Math.min(...xs),
-              minY: Math.min(...ys),
-              width: Math.max(...xs) - Math.min(...xs),
-              height: Math.max(...ys) - Math.min(...ys),
-            },
-            dx,
-            dy,
-            others
-          );
-          dx = snap.dx;
-          dy = snap.dy;
-          setNavAlignGuides(snap.guides);
+          const others = indoorAlignmentReferences
+            .filter((candidate) => !drag.ids.includes(candidate.id))
+            .map((candidate) => ({ x: candidate.x, y: candidate.y, id: candidate.id }));
+          // A single free Walking Point should align by its actual anchor, so
+          // the connected segment can become mathematically straight when the
+          // pointer comes near a neighbour.  Group drags retain the rigid-bbox
+          // behaviour; only the one-node path uses the per-axis connected-node
+          // priority helper.
+          if (drag.ids.length === 1) {
+            const origin = drag.origins[0];
+            const aligned = navAlignSnap(
+              { x: origin.x + dx, y: origin.y + dy },
+              others,
+              8,
+              connectedIds,
+            );
+            dx = aligned.x - origin.x;
+            dy = aligned.y - origin.y;
+            setNavAlignGuides(aligned.guides);
+          } else {
+            const snap = navGroupAlignSnap(
+              {
+                minX: Math.min(...xs),
+                minY: Math.min(...ys),
+                width: Math.max(...xs) - Math.min(...xs),
+                height: Math.max(...ys) - Math.min(...ys),
+              },
+              dx,
+              dy,
+              others
+            );
+            dx = snap.dx;
+            dy = snap.dy;
+            setNavAlignGuides(snap.guides);
+          }
         }
         // B5 correction: TRUE 1:1 RIGID TRANSLATION. `dx/dy` are the TOTAL
         // world delta from the drag-start pointer (already snapped/shifted as a
@@ -5121,10 +7706,26 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
           if (x === n.x && y === n.y) return n;
           return { ...n, x, y };
         });
+        const movingIds = new Set(drag.ids);
         const nextEdges = indoorEdges.map((e) => {
           const originBends = drag.edgeOrigins.get(e.id);
-          if (!originBends || originBends.length === 0) return e;
-          return { ...e, bendPoints: originBends.map((b) => ({ x: b.x + rdx, y: b.y + rdy })) };
+          const translated = originBends && originBends.length > 0
+            ? { ...e, bendPoints: originBends.map((b) => ({ x: b.x + rdx, y: b.y + rdy })) }
+            : e;
+          // A split-on-path point is an ordinary freely movable point. Rebuild
+          // every incident manual edge from the CURRENT node positions so its
+          // endpoint follows the point without retaining stale parent-corridor
+          // bends or creating a hidden/retracing shortcut.
+          if (!movingIds.has(e.startNodeId) && !movingIds.has(e.endNodeId)) return translated;
+          return isManualIndoorWalkingEdge(translated, nextNodes)
+            ? rebuildEdgeGeometryFromCurrentNodes(
+                translated,
+                nextNodes,
+                drag.origins
+                  .filter((origin) => origin.id === e.startNodeId || origin.id === e.endNodeId)
+                  .map((origin) => ({ x: origin.x, y: origin.y })),
+              )
+            : translated;
         });
         commitNavGraph(nextNodes, nextEdges);
         return;
@@ -5162,12 +7763,17 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
       const wall = wallById.get(state.wallId);
       if (!wall) return;
       const nearest = nearestPointOnWall(pt, wall);
+      const doorAlignment = state.type === "door"
+        ? alignDoorOnWallToConnectedPoint(state.id, wall, { x: nearest.x, y: nearest.y })
+        : { point: { x: nearest.x, y: nearest.y }, guides: [] as { type: "h" | "v"; pos: number }[] };
+      const alignedNearest = nearestPointOnWall(doorAlignment.point, wall);
+      setNavAlignGuides(doorAlignment.guides);
       const length = Math.hypot(wall.x2 - wall.x1, wall.y2 - wall.y1);
       if (length < OPENING_MIN_WIDTH) return;
       const minWidth = state.type === "door" ? doorMinWidth(effectiveDoorType(state.origin as FloorDoor)) : OPENING_MIN_WIDTH;
       const maxWidth = state.type === "door" ? doorMaxWidth(effectiveDoorType(state.origin as FloorDoor)) : WINDOW_MAX_WIDTH;
       const width = clamp(state.origin.width, Math.min(minWidth, length), maxOpeningWidthForWall(wall, maxWidth, minWidth));
-      const offset = clampWallOpeningOffset(wall, width, nearest.t);
+      const offset = clampWallOpeningOffset(wall, width, alignedNearest.t);
       const x = Math.round(wall.x1 + (wall.x2 - wall.x1) * offset);
       const y = Math.round(wall.y1 + (wall.y2 - wall.y1) * offset);
       if (Math.abs((state.origin.offset ?? 0) - offset) > 0.001 || state.origin.x !== x || state.origin.y !== y) gestureMoved.current = true;
@@ -5263,12 +7869,18 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
         const rh = Math.max(Math.abs(cy - roomDrag.sy), 15);
         const rx = Math.min(roomDrag.sx, cx);
         const ry = Math.min(roomDrag.sy, cy);
-        const snapped = snapRoomToNearbyEdges({ x: rx, y: ry, w: rw, h: rh }, rooms);
+        const rawCandidate = { x: rx, y: ry, w: rw, h: rh };
+        const alignment = computeRoomAlignmentGuides(rawCandidate, rooms);
+        const snapped = snapOn
+          ? snapRoomToNearbyEdges({ x: alignment.snappedX, y: alignment.snappedY, w: rw, h: rh }, rooms)
+          : rawCandidate;
         if (snapped.x !== rx) cx = cx >= roomDrag.sx ? snapped.x + rw : snapped.x;
         if (snapped.y !== ry) cy = cy >= roomDrag.sy ? snapped.y + rh : snapped.y;
-        // Preview guide lines: compute from the SNAPPED rect so the guide is
-        // drawn exactly at the edge the commit will use (same snap source).
-        const guideResult = computeRoomAlignmentGuides({ x: snapped.x, y: snapped.y, w: rw, h: rh }, rooms);
+        // Guides remain useful with Snap OFF, but only Snap ON resolves the
+        // candidate to the guide.
+        const guideResult = snapOn
+          ? computeRoomAlignmentGuides({ x: snapped.x, y: snapped.y, w: rw, h: rh }, rooms)
+          : alignment;
         if (guideResult.guides.length > 0) {
           setAlignGuides(guideResult.guides);
         } else {
@@ -5284,7 +7896,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
         const ry = Math.min(roomDrag.sy, cy);
         const refs = collectAlignRefs();
         const alignResult = computeAlignmentGuides({ x: rx, y: ry, w: rw, h: rh }, refs);
-        if (alignResult.snappedX !== rx || alignResult.snappedY !== ry) {
+        if (snapOn && (alignResult.snappedX !== rx || alignResult.snappedY !== ry)) {
           const dsx = alignResult.snappedX - rx;
           const dsy = alignResult.snappedY - ry;
           cx = Math.round(cx + dsx);
@@ -5340,7 +7952,9 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
       // This avoids oscillation from full alignment snapping changing the
       // size, which anchor restoration then overwrites.
       const snapResult = snapResizeEdges(candidate, corner, limits, otherRooms);
-      candidate = { x: snapResult.x, y: snapResult.y, w: snapResult.w, h: snapResult.h };
+      if (snapOn) {
+        candidate = { x: snapResult.x, y: snapResult.y, w: snapResult.w, h: snapResult.h };
+      }
       // Show alignment guides during resize.
       if (snapResult.guides.length > 0) {
         setAlignGuides(snapResult.guides);
@@ -5412,10 +8026,10 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
         refs, true,
       );
       let furnitureCandidate = { ...resized };
-      if (alignResult.snappedX !== resized.x) furnitureCandidate.x = alignResult.snappedX;
-      if (alignResult.snappedY !== resized.y) furnitureCandidate.y = alignResult.snappedY;
-      if (alignResult.snappedW !== undefined) furnitureCandidate.width = alignResult.snappedW;
-      if (alignResult.snappedH !== undefined) furnitureCandidate.height = alignResult.snappedH;
+      if (snapOn && alignResult.snappedX !== resized.x) furnitureCandidate.x = alignResult.snappedX;
+      if (snapOn && alignResult.snappedY !== resized.y) furnitureCandidate.y = alignResult.snappedY;
+      if (snapOn && alignResult.snappedW !== undefined) furnitureCandidate.width = alignResult.snappedW;
+      if (snapOn && alignResult.snappedH !== undefined) furnitureCandidate.height = alignResult.snappedH;
       // Clamp to floor using AABB for rotated furniture (no rounding until final)
       const fAabb = rotatedRectBounds(furnitureCandidate.x, furnitureCandidate.y, furnitureCandidate.width, furnitureCandidate.height, furnitureCandidate.rotation);
       let fDx = 0, fDy = 0;
@@ -5429,6 +8043,8 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
       // Show guides
       if (alignResult.guides.length > 0) {
         setAlignGuides(alignResult.guides);
+      } else {
+        setAlignGuides([]);
       }
       if (furnitureCandidate.x !== state.origin.x || furnitureCandidate.y !== state.origin.y ||
         furnitureCandidate.width !== state.origin.width || furnitureCandidate.height !== state.origin.height) {
@@ -5452,13 +8068,14 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
         refs, true,
       );
       let circCandidate = { ...resized };
-      if (alignResult.snappedX !== resized.x) circCandidate.x = alignResult.snappedX;
-      if (alignResult.snappedY !== resized.y) circCandidate.y = alignResult.snappedY;
-      if (alignResult.snappedW !== undefined) circCandidate.width = alignResult.snappedW;
-      if (alignResult.snappedH !== undefined) circCandidate.height = alignResult.snappedH;
+      if (snapOn && alignResult.snappedX !== resized.x) circCandidate.x = alignResult.snappedX;
+      if (snapOn && alignResult.snappedY !== resized.y) circCandidate.y = alignResult.snappedY;
+      if (snapOn && alignResult.snappedW !== undefined) circCandidate.width = alignResult.snappedW;
+      if (snapOn && alignResult.snappedH !== undefined) circCandidate.height = alignResult.snappedH;
       circCandidate.x = Math.max(0, Math.min(circCandidate.x, FP_W - circCandidate.width));
       circCandidate.y = Math.max(0, Math.min(circCandidate.y, FP_H - circCandidate.height));
       if (alignResult.guides.length > 0) setAlignGuides(alignResult.guides);
+      else setAlignGuides([]);
       if (circCandidate.x !== state.origin.x || circCandidate.y !== state.origin.y ||
         circCandidate.width !== state.origin.width || circCandidate.height !== state.origin.height) {
         gestureMoved.current = true;
@@ -5590,20 +8207,67 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
     let allMoveGuides: { type: "h" | "v"; pos: number; x1: number; y1: number; x2: number; y2: number }[] = [];
     const movedIds = new Set(moved.map((e) => e.id));
     const refs = collectAlignRefs(movedIds);
-    // Snap each moved object against all stationary references.
+    // Resolve alignment once per axis from the first eligible RAW object in
+    // this gesture.  The lock keeps a nearly-equal edge/centre target stable;
+    // applying one delta to the selected set also prevents multi-selection
+    // members from fighting over different guides.
+    const eligibleMoved = moved
+      .filter((entry) => entry.type !== "wall" && entry.type !== "door" && entry.type !== "window" && entry.type !== "path")
+      .map((entry) => ({ entry, bounds: itemBounds(entry.type, entry.item) }))
+      .filter((value): value is { entry: typeof moved[number]; bounds: NonNullable<ReturnType<typeof itemBounds>> } => !!value.bounds);
+    let axisDxSnap = 0;
+    let axisDySnap = 0;
+    let axisXGuide: RoomAlignGuide | undefined;
+    let axisYGuide: RoomAlignGuide | undefined;
+    if (!snapOn) {
+      alignmentSnapLocksRef.current = { x: null, y: null };
+    } else {
+      // Prefer the first moved object, but allow another selected object to
+      // establish the axis when the first has no nearby candidate.
+      for (const { entry, bounds: b } of eligibleMoved) {
+        const result = computeAlignmentGuides({ x: b.x, y: b.y, w: b.w, h: b.h, id: entry.id }, refs);
+        if (!alignmentSnapLocksRef.current.x || !axisXGuide) {
+          const resolvedX = resolveStableAlignmentAxis(
+            b.x,
+            result.snappedX,
+            result.guides.find((guide) => guide.type === "v"),
+            alignmentSnapLocksRef.current.x,
+          );
+          alignmentSnapLocksRef.current.x = resolvedX.lock;
+          if (resolvedX.snapped) {
+            axisDxSnap = resolvedX.delta;
+            axisXGuide = resolvedX.lock?.guide;
+          }
+        }
+        if (!alignmentSnapLocksRef.current.y || !axisYGuide) {
+          const resolvedY = resolveStableAlignmentAxis(
+            b.y,
+            result.snappedY,
+            result.guides.find((guide) => guide.type === "h"),
+            alignmentSnapLocksRef.current.y,
+          );
+          alignmentSnapLocksRef.current.y = resolvedY.lock;
+          if (resolvedY.snapped) {
+            axisDySnap = resolvedY.delta;
+            axisYGuide = resolvedY.lock?.guide;
+          }
+        }
+        // Existing locks are resolved against the first eligible object. Once
+        // both axes are settled, later objects must not replace them.
+        if (alignmentSnapLocksRef.current.x && alignmentSnapLocksRef.current.y) break;
+      }
+      if (axisXGuide) allMoveGuides.push(axisXGuide);
+      if (axisYGuide) allMoveGuides.push(axisYGuide);
+    }
     // Labels ARE snapped (their anchor box participates like any other rect)
     // so dragging a label near a room/furniture edge aligns visibly.
     for (const entry of moved) {
       if (entry.type === "wall" || entry.type === "door" || entry.type === "window" || entry.type === "path") continue;
       const b = itemBounds(entry.type, entry.item);
       if (!b) continue;
-      const result = computeAlignmentGuides({ x: b.x, y: b.y, w: b.w, h: b.h, id: entry.id }, refs);
-      if (result.guides.length > 0 && allMoveGuides.length === 0) {
-        allMoveGuides = result.guides;
-      }
-      if (result.snappedX === b.x && result.snappedY === b.y) continue;
-      const dxSnap = result.snappedX - b.x;
-      const dySnap = result.snappedY - b.y;
+      const dxSnap = snapOn ? axisDxSnap : 0;
+      const dySnap = snapOn ? axisDySnap : 0;
+      if (dxSnap === 0 && dySnap === 0) continue;
       if (entry.type === "room") {
         nextRooms = nextRooms.map((r) => r.id === entry.id ? { ...r, x: r.x + dxSnap, y: r.y + dySnap } : r);
         byId.set(entry.id, { ...entry.item, x: entry.item.x + dxSnap, y: entry.item.y + dySnap });
@@ -5726,15 +8390,20 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
 
   const handleSvgUp = () => {
     endPan();
+    alignmentSnapLocksRef.current = { x: null, y: null };
     // B7 QA: room alignment guides disappear after gesture.
     setAlignGuides([]);
+    // Navigation-anchor guides (including Door-on-wall guides) are transient
+    // as well; never leave the last drag's guide visible after mouseup.
+    setNavAlignGuides([]);
     // Navigation visibility alone must not swallow the end of a physical
     // drag or placement gesture. Only an actual navigation gesture gets the
     // early graph-commit path; Select-mode floor interactions continue through
     // the normal physical cleanup/finalization below.
-    if (navMode && (navDragRef.current || navBendDragRef.current || navSegDragRef.current)) {
+    if (navMode && (rubberBand || navDragRef.current || navBendDragRef.current || navSegDragRef.current)) {
       setNavTargetHover(null);
       setNavNodeHover(null);
+      setNavPathTargetHover(null);
       // B5 Phase 2.8: alignment guides disappear after the drag.
       setNavAlignGuides([]);
       navDragWallWarnedRef.current = false;
@@ -5745,14 +8414,22 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
           w: Math.abs(rubberBand.cx - rubberBand.sx),
           h: Math.abs(rubberBand.cy - rubberBand.sy),
         };
-        const captured = rect.w >= 3 || rect.h >= 3
-          ? indoorNodes.filter((n) =>
-              n.x >= rect.x - 2 && n.x <= rect.x + rect.w + 2 &&
-              n.y >= rect.y - 2 && n.y <= rect.y + rect.h + 2
+        const capturedNodes = rect.w >= 3 || rect.h >= 3
+          ? indoorNodes.filter((n) => !n.roomId && !linkedObjectRef(n)
+              && n.x >= rect.x - 2 && n.x <= rect.x + rect.w + 2
+              && n.y >= rect.y - 2 && n.y <= rect.y + rect.h + 2
             ).map((n) => n.id)
           : [];
+        const capturedEdges = rect.w >= 3 || rect.h >= 3
+          ? marqueeIndoorEdges.filter((edge) => {
+              const points = edgePolylinePoints(edge, indoorNodes);
+              return points ? polylineIntersectsRect(points, rect) : false;
+            }).map((edge) => edge.id)
+          : [];
+        const captured = [...capturedNodes, ...capturedEdges];
         if (captured.length > 0) {
-          setNavSelected({ type: "node", id: captured[captured.length - 1] });
+          const last = captured[captured.length - 1];
+          setNavSelected(capturedEdges.includes(last) ? { type: "edge", id: last } : { type: "node", id: last });
           setNavMultiSelected(captured);
           setShowProperties(true);
         } else {
@@ -5841,6 +8518,14 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
     if (resizing.current) { resizing.current = null; return; }
 
     // Finalize room/stairs/elevator creation
+    // If the placement tool was switched while a pointer gesture was still
+    // pending, discard that stale gesture instead of allowing an empty click
+    // in Select/Connect/Pan mode to create an object.
+    if (roomDrag && tool !== "room" && tool !== "stairs" && tool !== "ramp" && tool !== "elevator") {
+      setRoomDrag(null);
+      return;
+    }
+    setNavPathTargetHover(null);
     if (roomDrag && tool === "room") {
       const rw = Math.max(Math.abs(roomDrag.cx - roomDrag.sx), 20);
       const rh = Math.max(Math.abs(roomDrag.cy - roomDrag.sy), 15);
@@ -5850,7 +8535,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
       // B7 Authoring: snap to nearby room edges before overlap check so adjacent
       // rooms line up cleanly.
       const rawCandidate = { x: Math.round(rx), y: Math.round(ry), w: Math.round(rw), h: Math.round(rh) };
-      const snapped = snapRoomToNearbyEdges(rawCandidate, rooms);
+      const snapped = snapOn ? snapRoomToNearbyEdges(rawCandidate, rooms) : rawCandidate;
       // B7 Fix: clamp snapped position back within floor canvas so edge
       // snapping cannot push a newly-created room outside the perimeter.
       const candidate = {
@@ -5866,7 +8551,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
         return;
       }
       const newRoom: FloorRoom = {
-        id: genId("rm"), name: "Room",
+         id: genId("rm"), name: nextRoomName(rooms),
         type: sidebarCategory && ROOM_MAP[sidebarCategory] ? sidebarCategory : "classroom", x: candidate.x, y: candidate.y,
         w: candidate.w, h: candidate.h,
         floorId,
@@ -5881,20 +8566,32 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
     }
 
     if (roomDrag && tool === "stairs") {
-      const rw = Math.max(Math.abs(roomDrag.cx - roomDrag.sx), 16);
-      const rh = Math.max(Math.abs(roomDrag.cy - roomDrag.sy), 12);
+      // A click-to-place Stair uses a compact, practical stairwell footprint.  A
+      // deliberate drag still controls the dimensions exactly as before; this
+      // only improves the default size for newly placed objects and never
+      // resizes persisted Stairs.
+      const rawWidth = Math.abs(roomDrag.cx - roomDrag.sx);
+      const rawHeight = Math.abs(roomDrag.cy - roomDrag.sy);
+      const isDefaultPlacement = rawWidth < 2 && rawHeight < 2;
+      const rw = isDefaultPlacement ? 36 : Math.max(rawWidth, 16);
+      const rh = isDefaultPlacement ? 44 : Math.max(rawHeight, 12);
       const rx = clamp(Math.min(roomDrag.sx, roomDrag.cx), 0, FP_W - rw);
       const ry = clamp(Math.min(roomDrag.sy, roomDrag.cy), 0, FP_H - rh);
-      // Auto-generate a sharedId so this stair can be linked across floors
-      const stairSharedId = `shared_stair_${buildingId}_${(        stairs.filter(s => s.label === 'Stairs').length + 1)}`;
+      // Each physical Stair occurrence starts its own explicit continuation
+      // identity.  Deriving this from the generic label/count caused a
+      // renamed Stair to reuse another Stair's sharedId on the same Floor.
+      // Keep the stable prefix for backwards compatibility, but make the
+      // identity independent of labels and existing chain membership.
+      const newStairId = genId("st");
+      const stairSharedId = `shared_stair_${buildingId}_${newStairId}`;
       // B5 Phase 3.1: context-aware default direction — a stair on the lowest
       // floor defaults to Up, highest to Down, middle floors to Both, so the
       // authoring UI never silently creates an impossible cross-floor direction.
       const stairDirection = defaultStairDirectionForFloorInOrder(floor.id, buildingFloors);
       const newStairs: FloorStairs = {
-        id: genId("st"), x: Math.round(rx), y: Math.round(ry),
+        id: newStairId, x: Math.round(rx), y: Math.round(ry),
         width: Math.round(rw), height: Math.round(rh),
-        rotation: 0, direction: stairDirection, label: "Stairs",
+        rotation: 0, direction: stairDirection, label: stairLabelForEntrySide(false),
         sharedId: stairSharedId,
       };
       updFloor(rooms, fpaths, walls, doors, windows, furniture, [...stairs, newStairs]);
@@ -5931,12 +8628,17 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
       const rh = Math.max(Math.abs(roomDrag.cy - roomDrag.sy), 14);
       const rx = clamp(Math.min(roomDrag.sx, roomDrag.cx), 0, FP_W - rw);
       const ry = clamp(Math.min(roomDrag.sy, roomDrag.cy), 0, FP_H - rh);
-      // Auto-generate a sharedId so this elevator can be linked across floors
-      const elevatorSharedId = `shared_el_${buildingId}_${(elevators.filter(e => e.label === 'Elevator').length + 1)}`;
+      // New Elevators get a useful display name immediately. Identity remains
+      // a fresh sharedId and is established across floors only through the
+      // explicit connection workflow. Number defaults are floor-local so the
+      // same numbered candidates can be matched across Floors intentionally.
+      const elevatorSystemNumber = nextElevatorSystemNumber(elevators);
+      const elevatorLabel = nextElevatorName(elevators);
+      const elevatorSharedId = `shared_el_${buildingId}_${genId("chain")}`;
       const newElevator: FloorElevatorItem = {
         id: genId("ev"), x: Math.round(rx), y: Math.round(ry),
         width: Math.round(rw), height: Math.round(rh),
-        rotation: 0, doorWidth: 6, label: "Elevator",
+        rotation: 0, doorWidth: 6, label: elevatorLabel, systemNumber: elevatorSystemNumber,
         sharedId: elevatorSharedId,
         accessible: true, // Elevators are always accessible
       };
@@ -5964,6 +8666,75 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
   // ── Item mouse handlers ──
 
   const onItemDown = (e: React.MouseEvent, type: string, id: string, item: any) => {
+    if (testRoutePickKind) {
+      if (type === "door") {
+        toast.info("Choose a Room", "Normal Test Route picking uses Rooms. Doors are available under Advanced infrastructure.");
+        return;
+      }
+      const node = indoorNodes.find((candidate) =>
+        (type === "room" && candidate.roomId === id && (() => {
+          const room = rooms.find((candidateRoom) => candidateRoom.id === id);
+          return !!room && roomAccessDoorIds(room).some((doorId) => {
+            const door = doors.find((candidateDoor) => candidateDoor.id === doorId);
+            const doorNode = door ? indoorNodes.find((candidateNode) => candidateNode.doorId === door.id) : undefined;
+            return !!door && isDoorEligibleForRoom(room, door, walls, indoorNodes, { rooms })
+              && !!doorNode && doorNode.id !== candidate.id
+              && walkableIndoorEdges.some((edge) => edge.startNodeId === doorNode.id || edge.endNodeId === doorNode.id);
+          });
+        })())
+        || (type === "stairs" && candidate.stairId === id)
+        || (type === "elevator" && candidate.elevatorId === id)
+        || (type === "ramp" && candidate.rampId === id),
+      );
+      if (node) {
+        const value = type === "room" ? `room:${buildingId}:${id}` : `node:${node.id}`;
+        setTestRouteMapPick({ kind: testRoutePickKind, value });
+        setTestRoutePickKind(null);
+        setTestRoutePickHover(null);
+        toast.success("Location selected", "Test Route endpoint set.");
+      } else {
+        toast.info("Location is not ready", "Choose a Room, Door, or circulation point connected to the Walking Network.");
+      }
+      return;
+    }
+    if (roomDoorLinking) {
+      e.stopPropagation();
+      if (type !== "door") {
+        setRoomDoorHoverId(null);
+        toast.info("Choose a Door on this Room", "Only a valid Door on the selected Room can be linked.");
+        return;
+      }
+      const roomId = selected?.type === "room" ? selected.id : undefined;
+      const room = roomId ? rooms.find((candidate) => candidate.id === roomId) : undefined;
+      const door = doors.find((candidate) => candidate.id === id);
+      const currentIds = room ? roomAccessDoorIds(room) : [];
+      if (room && currentIds.includes(id)) {
+        setRoomDoorHoverId(null);
+        toast.info("Door already linked to this Room", "Choose another Door or remove this relationship first.");
+        return;
+      }
+      const doorNode = door ? indoorNodes.find((node) => node.doorId === door.id) : undefined;
+      if (!doorNode || doorNode.buildingId !== buildingId || doorNode.floorId !== floorId) {
+        setRoomDoorHoverId(null);
+        toast.info("Door must be added to Navigation", "Add this Door to the indoor Walking Network before linking it to the Room.");
+        return;
+      }
+      if (!room || !door || !isDoorEligibleForRoom(room, door, walls, indoorNodes, { rooms })) {
+        setRoomDoorHoverId(null);
+        toast.warning("Door is not associated with this Room", "Choose a Door on this Room's boundary.");
+        return;
+      }
+      const nextIds = roomDoorLinkMode === "add" ? Array.from(new Set([...currentIds, door.id])) : [door.id];
+      const nextRooms = rooms.map((candidate) => candidate.id === room.id
+        ? { ...candidate, accessDoorId: nextIds[0], accessDoorIds: nextIds, accessType: "door" as const }
+        : candidate);
+      updFloor(nextRooms, fpaths);
+      clearRoomDoorLinkState();
+      setTool("select");
+      selectFloorItem({ type: "room", id: room.id });
+      toast.success("Room Door linked", `${door.label?.trim() || "Door"} is now an entry for ${roomDisplayName(room, rooms.findIndex((candidate) => candidate.id === room.id))}.`);
+      return;
+    }
     // B8 Phase 1: when a nav tool is active, route to nav handling.
     const isNavToolActive = showNavOverlay && navTool !== "select" && navTool !== "pan";
     if (isNavToolActive) {
@@ -6060,9 +8831,12 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
         return;
       }
       openingDrag.current = { type: type as "door" | "window", id, wallId: item.wallId, origin: structuredClone(item) };
+      alignmentSnapLocksRef.current = { x: null, y: null };
+      setNavAlignGuides([]);
       return;
     }
     roomOverlapWarnedRef.current = false;
+    alignmentSnapLocksRef.current = { x: null, y: null };
     dragging.current = { entries, sx: pt.x, sy: pt.y };
   };
 
@@ -6240,6 +9014,37 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
         return;
       }
       if (e.key === "Escape") {
+        if (testRoutePickKind) {
+          setTestRoutePickKind(null);
+          setTestRouteMapPick(null);
+          setTestRoutePickHover(null);
+          toast.info("Map pick cancelled", "Test Route endpoint was not changed.");
+          return;
+        }
+        if (roomDoorLinking) {
+          clearRoomDoorLinkState();
+          setTool("select");
+          toast.info("Room Door linking cancelled", "The Room's Door was not changed.");
+          return;
+        }
+        // Physical Room placement is a cancellable click-drag mode.  Keep its
+        // Escape path explicit so the instruction pill/crosshair disappear even
+        // when no drag has started yet.
+        if (tool === "room") {
+          setRoomDrag(null);
+          setTool("select");
+          return;
+        }
+        if (tool === "furniture") {
+          setFurnitureTemplate(null);
+          setTool("select");
+          return;
+        }
+        if (tool === "stairs" || tool === "ramp" || tool === "elevator") {
+          setRoomDrag(null);
+          setTool("select");
+          return;
+        }
         if (navSelected || navMultiSelected.length > 0 || navConnectStart || navTool !== "select") {
           setNavConnectStart(null);
           setNavPreview(null);
@@ -6255,13 +9060,17 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
           setNavSelected(null);
           setNavMultiSelected([]);
           setRubberBand(null);
-          // Link Location / Destination return to Select on cancel.
-          if (navTool === "link" || navTool === "destination") setNavTool("select");
+          // Temporary navigation authoring modes return to Select on cancel.
+          if (navTool === "link" || navTool === "destination" || navTool === "connect" || navTool === "waypoint") {
+            setNavTool("select");
+          }
           return;
         }
         setWallStart(null); setWallPreview(null); setWallSnapIndicator(null); setDP([]);
         setSelected(null); setMultiSelected([]); setRubberBand(null); setContextMenu(null);
         setCalibrationDraft({ active: false, distanceInput: "" }); setMeasureDraft({});
+        setRoomDrag(null);
+        alignmentSnapLocksRef.current = { x: null, y: null };
         suppressHistoryRef.current = false; gestureMoved.current = false; dragging.current = null;
         if (tool === "path" || tool === "measure") setTool("select");
       }
@@ -6303,12 +9112,16 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
               dx,
               dy,
             );
-            commitNavGraph(
-              nudgedNodes.map((n) => movingIds.has(n.id)
-                ? { ...n, x: clamp(n.x, 0, FP_W), y: clamp(n.y, 0, FP_H) }
-                : n),
-              nudgedEdges,
+            const clampedNodes = nudgedNodes.map((n) => movingIds.has(n.id)
+              ? { ...n, x: clamp(n.x, 0, FP_W), y: clamp(n.y, 0, FP_H) }
+              : n);
+            const rebuiltEdges = nudgedEdges.map((edge) =>
+              (movingIds.has(edge.startNodeId) || movingIds.has(edge.endNodeId))
+                && isManualIndoorWalkingEdge(edge, clampedNodes)
+                ? rebuildEdgeGeometryFromCurrentNodes(edge, clampedNodes)
+                : edge
             );
+            commitNavGraph(clampedNodes, rebuiltEdges);
             suppressHistoryRef.current = false;
             return;
           }
@@ -6390,7 +9203,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
     };
     window.addEventListener("keydown", k);
     return () => window.removeEventListener("keydown", k);
-  }, [allSelectableIds, selected, multiSelected, tool, navTool, undo, redo, applyEntry, handleSave, fitFloor, switchTool, deleteSelection, duplicateSelection, copySelection, pasteSelection, copyNavSelection, pasteNavSelection, duplicateNavSelection, selectFloorItem, selectionForId, navMode, indoorNodes, indoorEdges, deleteNavSelection, selectNavTool, navSelected, navMultiSelected, navSelectedBend, removeBendFromEdge, navConnectStart, navConnectBends, pushHistory, commitNavGraph, updFloor, isSelectionLocked, linkedObjectRef, floorUndoEntryFromFloor, floor, rooms, fpaths, walls, doors, windows, furniture, stairs, elevators, labels, ramps, FP_W, FP_H]);
+  }, [allSelectableIds, selected, multiSelected, tool, navTool, undo, redo, applyEntry, handleSave, fitFloor, switchTool, deleteSelection, duplicateSelection, copySelection, pasteSelection, copyNavSelection, pasteNavSelection, duplicateNavSelection, selectFloorItem, selectionForId, navMode, indoorNodes, indoorEdges, deleteNavSelection, selectNavTool, navSelected, navMultiSelected, navSelectedBend, removeBendFromEdge, navConnectStart, navConnectBends, pushHistory, commitNavGraph, updFloor, isSelectionLocked, linkedObjectRef, floorUndoEntryFromFloor, rooms, fpaths, walls, doors, windows, furniture, stairs, elevators, labels, ramps, FP_W, FP_H, roomDoorLinking, clearRoomDoorLinkState, toast]);
 
   // ── Cursor ──
   const cursor = navMode
@@ -6415,7 +9228,6 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
   const navTools = [
     { id: "waypoint" as const, icon: Waypoints, label: "Walking Point" },
     { id: "connect" as const, icon: Link2, label: "Connect" },
-    { id: "link" as const, icon: MapPin, label: "Link Location" },
     { id: "erase" as const, icon: TrashIcon, label: "Remove", hint: "Remove Walking Points or Walking Paths." },
   ];
 
@@ -6572,6 +9384,122 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
     setContextMenu(null);
   }, [contextMenu, fitFloor, selectFloorItem, duplicateSelection, deleteSelection, toast, applyLayerAction, setSelectionState, selectedContextState, doors, rooms, fpaths, walls, windows, updFloor, wallById]);
 
+  // Quick navigation is authoring UI, not map geometry.  Keep the indicator in
+  // the SVG for precise hit testing, but render its popover as a sibling HTML
+  // overlay so later-painted Rooms/status layers cannot cover it and canvas
+  // zoom never scales the content.
+  const quickNavOverlay = (() => {
+    if (!quickNavOpenKey || routePreview || highlightedRoute || testRouteSessionContext.session?.result) return null;
+    const separator = quickNavOpenKey.indexOf(":");
+    if (separator < 0) return null;
+    const quickKind = quickNavOpenKey.slice(0, separator) as "stairs" | "elevator";
+    if (quickKind !== "stairs" && quickKind !== "elevator") return null;
+    const objectId = quickNavOpenKey.slice(separator + 1);
+    const source = quickKind === "stairs"
+      ? stairs.find((item) => item.id === objectId)
+      : elevators.find((item) => item.id === objectId);
+    const quickTargets = quickNavigationTargets.get(quickNavOpenKey) ?? [];
+    if (!source || quickTargets.length === 0) return null;
+    const cx = source.x + source.width / 2;
+    const cy = source.y + source.height / 2;
+    const indicator = rotatePoint(
+      { x: source.x + source.width - 7, y: source.y + 7 },
+      cx,
+      cy,
+      source.rotation ?? 0,
+    );
+    const width = quickKind === "elevator" ? 188 : 196;
+    const height = Math.min(220, 44 + quickTargets.length * 31);
+    const viewX = Math.max(0, Math.min(1, (pan.x + indicator.x * zoom) / FP_W));
+    const viewY = Math.max(0, Math.min(1, (pan.y + indicator.y * zoom) / FP_H));
+    // Keep the popover associated with the indicator.  Only flip when the
+    // anchored point is genuinely near the viewport edge; flipping early
+    // makes a compact popup appear detached from a Stair in ordinary layouts.
+    const viewportWidth = containerRef.current?.clientWidth ?? FP_W;
+    const viewportHeight = containerRef.current?.clientHeight ?? FP_H;
+    const popupWidthRatio = Math.min(0.9, width / Math.max(viewportWidth, 1));
+    const popupHeightRatio = Math.min(0.9, height / Math.max(viewportHeight, 1));
+    const openLeft = viewX > 1 - popupWidthRatio - 0.02;
+    const openAbove = viewY > 1 - popupHeightRatio / 2 - 0.03;
+    const openBelow = !openAbove && viewY < popupHeightRatio / 2 + 0.03;
+    const stopQuickEvent = (event: React.SyntheticEvent) => event.stopPropagation();
+    return (
+      <div className="pointer-events-none absolute inset-0 z-[35]" data-testid="circulation-quick-nav-overlay">
+        <div
+          data-testid={`circulation-quick-nav-popover-${quickKind}`}
+          className="pointer-events-auto absolute z-[200]"
+           style={{
+             left: `${viewX * 100}%`,
+             top: openAbove || openBelow
+               ? `${viewY * 100}%`
+               : `clamp(${Math.ceil(height / 2) + 4}px, ${viewY * 100}%, calc(100% - ${Math.ceil(height / 2) + 4}px))`,
+             width: `${width}px`,
+             transform: `${openLeft ? "translateX(calc(-100% - 10px))" : "translateX(10px)"} ${openAbove ? "translateY(calc(-100% - 10px))" : openBelow ? "translateY(10px)" : "translateY(-50%)"}`,
+           }}
+          onMouseEnter={cancelQuickNavClose}
+          onMouseLeave={scheduleQuickNavClose}
+          onMouseDown={stopQuickEvent}
+          onClick={stopQuickEvent}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") {
+              event.preventDefault();
+              closeQuickNav();
+            }
+          }}
+        >
+          <div
+            role="dialog"
+            aria-label="Connected Floors"
+            style={{ width: `${width}px`, transform: "scale(1)", transformOrigin: "top left" }}
+            className="rounded-lg border border-border/80 bg-card/95 p-1.5 text-foreground shadow-lg backdrop-blur-sm motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-1 motion-reduce:animate-none"
+          >
+            <div className="mb-1 flex items-center justify-between gap-2 px-1">
+              <span className="text-[8px] font-bold uppercase tracking-[0.12em] text-muted-foreground">Connected Floors</span>
+              <span className="text-[8px] text-muted-foreground">{quickKind === "stairs" ? "Stair" : "Elevator"}</span>
+            </div>
+            <div className="max-h-[184px] space-y-0.5 overflow-y-auto">
+              {quickTargets.map((target) => {
+                const directionGlyph = quickKind === "stairs" ? (target.relation === "above" ? "↑" : "↓") : "•";
+                const isCurrent = quickKind === "elevator" && target.isCurrent;
+                const statusText = quickKind === "stairs" && !target.usable
+                  ? "Not usable from this floor"
+                  : "Open floor";
+                return (
+                  <button
+                    key={`${target.floorId}:${target.objectId}`}
+                    type="button"
+                    disabled={!target.usable || !!isCurrent}
+                    aria-label={`${target.floorLabel} · ${target.objectLabel}${!target.usable ? ", not usable from this floor" : ""}`}
+                    className={cn(
+                      "flex w-full items-center gap-1 rounded-md border px-1 py-0.5 text-left transition-colors",
+                      target.usable && !isCurrent
+                        ? "border-border/70 bg-background/60 hover:border-violet-400/70 hover:bg-violet-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400"
+                        : "cursor-not-allowed border-border/40 bg-muted/40 text-muted-foreground opacity-60",
+                    )}
+                    onClick={() => {
+                      if (!target.usable || isCurrent) return;
+                      closeQuickNav();
+                      requestFloorSwitch(target.floorId, { type: quickKind, id: target.objectId });
+                    }}
+                  >
+                    <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded bg-muted text-[10px] font-semibold text-muted-foreground" aria-hidden="true">{directionGlyph}</span>
+                    <span className="min-w-0 flex-1">
+                      <span className="flex min-w-0 items-center gap-1">
+                        <span className="min-w-0 flex-1 truncate text-[10px] font-semibold text-foreground">{target.floorLabel} · {target.objectLabel}</span>
+                        {isCurrent && <span className="shrink-0 text-[8px] font-extrabold uppercase tracking-wide text-primary">CURRENT</span>}
+                      </span>
+                      {!isCurrent && <span className="block truncate text-[8px] text-muted-foreground">{statusText}</span>}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  })();
+
   return (
     <div className="relative flex flex-col w-full flex-1" style={{ minHeight: 0 }}>
       {/* ═══════════════════════════════════════════════════════════════════
@@ -6586,10 +9514,10 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
         {/* B5 Phase 6.9: de-cramped single header row with reserved left,
             center, and right zones so context, tools, and utilities never
             compete for the same horizontal space. */}
-        <div className="relative grid h-16 min-h-16 min-w-0 grid-cols-[minmax(0,1fr)_360px_minmax(0,1fr)] items-center gap-x-3 overflow-hidden px-3" data-testid="floor-editor-header">
-          <div className="flex h-full min-w-0 items-center gap-x-3 overflow-hidden">
+        <div className="relative grid h-16 min-h-16 min-w-0 grid-cols-[minmax(0,1fr)_minmax(200px,max-content)_minmax(0,1fr)] items-center gap-x-1.5 overflow-hidden px-1.5 sm:gap-x-3 sm:px-3" data-testid="floor-editor-header">
+          <div className="flex h-full min-w-0 items-center gap-x-1.5 overflow-hidden overscroll-contain sm:gap-x-3">
           {/* Breadcrumb */}
-          <div className="flex items-center gap-1 min-w-0 shrink min-w-[120px] max-w-[280px] overflow-hidden">
+          <div className="flex items-center gap-1 min-w-[84px] shrink max-w-[220px] overflow-hidden sm:min-w-[120px] sm:max-w-[280px]">
             <button onClick={handleBack} className="flex items-center gap-1 h-7 px-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-all text-[11px] font-semibold shrink-0 group">
               <ArrowLeft className="h-3.5 w-3.5 group-hover:-translate-x-0.5 transition-transform" />
               <span className="hidden sm:inline max-w-[120px] truncate">{campus.name}</span>
@@ -6607,7 +9535,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
               B5 Phase 3.1.4: the tab LIST lives in a BOUNDED flex-1 scroll region so many floors
               never push the pinned Add Floor (+) / Floor actions (…) controls off-screen; the
               active tab auto-scrolls into view on creation/switch. */}
-          <div className="relative flex items-center gap-1.5 min-w-[150px] flex-[1_1_200px] max-w-[320px] xl:flex-none xl:w-[300px]" data-testid="floor-tab-bar">
+          <div className="relative flex items-center gap-1 min-w-[108px] flex-[1_1_160px] max-w-[260px] sm:gap-1.5 sm:min-w-[150px] sm:flex-[1_1_200px] sm:max-w-[320px] xl:flex-none xl:w-[300px]" data-testid="floor-tab-bar">
             <button
               type="button"
               onClick={() => previousFloor && requestFloorSwitch(previousFloor.id)}
@@ -6774,7 +9702,22 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
               })}
               <div className="w-px h-4 bg-border mx-0.5" />
               <button
-                onClick={() => setTestNavOpen((v) => !v)}
+                onClick={() => {
+                  if (testNavOpen) {
+                    cancelElevatorTransition();
+                    setTestNavOpen(false);
+                    testRouteSessionContext.setSession(null);
+                    setTestRouteCompact(false);
+                    setHighlightedRoute(null);
+                    setTestRoutePickKind(null);
+                    setTestRouteMapPick(null);
+                    setTestRoutePickHover(null);
+                  } else {
+                    setNavTool("select");
+                    setRoomDrag(null);
+                    setTestNavOpen(true);
+                  }
+                }}
                 className={cn("flex items-center gap-1 h-6 px-2 rounded-md text-[10px] font-extrabold transition-all",
                   testNavOpen ? "bg-blue-500/10 text-blue-600 dark:text-blue-400" : "text-muted-foreground hover:text-foreground hover:bg-muted")}
                 title="Test navigation routes on this floor"
@@ -6786,11 +9729,11 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
             )}
           </div>
 
-          <div className="relative z-20 flex h-full min-w-0 items-center justify-center overflow-visible">
+          <div className="relative z-20 flex h-full min-w-0 items-center justify-center overflow-hidden">
           {/* Stable interaction rail. Physical creation stays in Object Library;
               navigation actions remain visible and clickable in both states. */}
-          <div className="absolute left-1/2 top-1/2 flex w-max max-w-full -translate-x-1/2 -translate-y-1/2 items-center justify-center">
-            <div className="flex max-w-full items-center gap-1 overflow-x-auto whitespace-nowrap rounded-xl border border-border/70 bg-muted/40 px-2 py-1.5 shadow-sm">
+            <div className="mx-auto flex min-w-0 max-w-full items-center justify-center">
+            <div className="flex min-w-0 max-w-full items-center gap-0.5 overflow-hidden whitespace-nowrap rounded-xl border border-border/70 bg-muted/40 px-1.5 py-1 shadow-sm sm:gap-1 sm:px-2 sm:py-1.5 lg:px-2.5">
               <div className="flex items-center gap-0.5 shrink-0">
                 {toolbarTools.map((t) => {
                     const Icon = t.icon;
@@ -6800,7 +9743,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
                       hint={t.id === "select" ? "Select, move, resize, and edit floor items." : t.id === "pan" ? "Move around the floor canvas without changing objects." : t.id === "path" ? "Draw a floor path through the interior plan." : undefined}>
                         <button type="button" onClick={() => switchTool(t.id)}
                           aria-label={`${t.label}${t.key ? ` (${t.key})` : ""}`}
-                          className={cn("flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-md text-[10px] font-bold transition-all",
+                          className={cn("flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-[10px] font-bold transition-all sm:h-[30px] sm:w-[30px] lg:h-[34px] lg:w-[34px]",
                             isActive ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:bg-muted hover:text-foreground")}>
                           <Icon className="h-[15px] w-[15px]" />
                         </button>
@@ -6819,7 +9762,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
                       hint={t.id === "waypoint" ? "Place points along hallways or open circulation areas." : t.id === "connect" ? "Connect the points to define where people can walk." : t.id === "link" ? "Link Rooms, Doors, Stairs, Elevators, and Ramps to the walking network." : "Remove Walking Points or Walking Paths."}>
                       <button type="button" onClick={() => selectNavTool(t.id)}
                         aria-label={t.label}
-                      className={cn("flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-md text-[10px] font-extrabold transition-all",
+                      className={cn("flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-[10px] font-extrabold transition-all sm:h-[30px] sm:w-[30px] lg:h-[34px] lg:w-[34px]",
                           isActive ? "bg-primary text-primary-foreground shadow-sm" : !showNavOverlay ? "text-muted-foreground/60 hover:bg-muted hover:text-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground")}>
                         <Icon className="h-[15px] w-[15px]" />
                       </button>
@@ -6832,7 +9775,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
                   <button type="button" onClick={toggleNavigation}
                     aria-label={showNavOverlay ? "Hide Navigation" : "Show Navigation"}
                     aria-pressed={showNavOverlay}
-                    className={cn("flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-md text-[10px] font-extrabold transition-all",
+                    className={cn("flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-[10px] font-extrabold transition-all sm:h-[30px] sm:w-[30px] lg:h-[34px] lg:w-[34px]",
                       showNavOverlay ? "bg-green-500/10 text-green-700 dark:text-green-400" : "text-muted-foreground/60 hover:bg-muted hover:text-foreground")}>
                     {showNavOverlay ? <EyeOff className="h-[15px] w-[15px]" /> : <Eye className="h-[15px] w-[15px]" />}
                   </button>
@@ -6840,9 +9783,24 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
               </div>
               <div className="mx-1.5 h-5 w-px shrink-0 bg-border/70" />
               <ToolbarTooltip tool="testRoute" isActive={testNavOpen} hint="Choose a start and destination to verify the route.">
-                <button type="button" onClick={() => { if (!showNavOverlay) setShowNavOverlay(true); setNavTool("select"); setTestNavOpen((v) => !v); }}
+                <button type="button" onClick={() => {
+                  if (testNavOpen) {
+                    cancelElevatorTransition();
+                    setTestNavOpen(false);
+                    testRouteSessionContext.setSession(null);
+                    setTestRouteCompact(false);
+                    setHighlightedRoute(null);
+                    setTestRoutePickKind(null);
+                    setTestRouteMapPick(null);
+                    setTestRoutePickHover(null);
+                  } else {
+                    setNavTool("select");
+                    setRoomDrag(null);
+                    setTestNavOpen(true);
+                  }
+                }}
                   aria-label="Test Route"
-                  className={cn("flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-md text-[10px] font-extrabold transition-all",
+                  className={cn("flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-[10px] font-extrabold transition-all sm:h-[30px] sm:w-[30px] lg:h-[34px] lg:w-[34px]",
                     testNavOpen ? "bg-blue-500/10 text-blue-600 dark:text-blue-400" : !showNavOverlay ? "text-muted-foreground/60 hover:bg-muted hover:text-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground")}>
                   <Route className="h-[15px] w-[15px]" />
                 </button>
@@ -6852,12 +9810,12 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
 
           </div>
 
-          <div className="flex h-full min-w-0 max-w-full items-center justify-end gap-1 overflow-hidden pr-1">
+          <div className="flex h-full min-w-0 max-w-full items-center justify-end gap-0.5 overflow-hidden pr-0.5 sm:gap-1 sm:pr-1">
           {selectedLabel && multiSelected.length <= 1 && !inlineLabelEdit && (
             <>
               <div className="hidden sm:block w-px h-5 bg-border mx-1" />
               <div
-                className="flex items-center gap-1 rounded-lg border border-border bg-muted/30 p-0.5 shrink-0"
+                className="hidden xl:flex items-center gap-1 rounded-lg border border-border bg-muted/30 p-0.5 shrink-0"
                 data-testid="selected-label-font-controls"
               >
                 <button
@@ -6895,14 +9853,14 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
           <div className="flex items-center gap-0.5 shrink-0">
             <ToolbarTooltip tool="undo">
             <button onClick={() => applyEntry(undo())} disabled={!canUndo} aria-label="Undo"
-              className={cn("flex items-center justify-center h-7 w-7 rounded-md transition-all",
+              className={cn("flex items-center justify-center h-6 w-6 sm:h-7 sm:w-7 rounded-md transition-all",
                 canUndo ? "text-muted-foreground hover:text-foreground hover:bg-muted" : "text-muted-foreground/40 cursor-not-allowed")}>
               <Undo2 className="h-3.5 w-3.5" />
             </button>
             </ToolbarTooltip>
             <ToolbarTooltip tool="redo">
             <button onClick={() => applyEntry(redo())} disabled={!canRedo} aria-label="Redo"
-              className={cn("flex items-center justify-center h-7 w-7 rounded-md transition-all",
+              className={cn("flex items-center justify-center h-6 w-6 sm:h-7 sm:w-7 rounded-md transition-all",
                 canRedo ? "text-muted-foreground hover:text-foreground hover:bg-muted" : "text-muted-foreground/40 cursor-not-allowed")}>
               <Redo2 className="h-3.5 w-3.5" />
             </button>
@@ -6920,7 +9878,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
             title={snapOn ? "Snap to grid: ON — click to disable" : "Snap to grid: OFF — click to enable"}
             aria-pressed={snapOn}
             aria-label="Toggle snap to grid"
-            className={cn("flex items-center justify-center h-7 px-2 rounded-md text-[10px] font-bold transition-all border shrink-0",
+            className={cn("flex items-center justify-center h-6 px-1 sm:h-7 sm:px-2 rounded-md text-[10px] font-bold transition-all border shrink-0",
               snapOn ? "bg-primary/10 border-primary/30 text-primary" : "border-border text-muted-foreground hover:text-foreground hover:bg-muted")}>
             <Grid3X3 className="h-3 w-3" />
             <span className="hidden xl:inline ml-1">Snap</span>
@@ -6931,7 +9889,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
           <ToolbarTooltip tool="resetView" label="Fit View" hint="Fit the current floor content inside the visible canvas.">
           <button onClick={fitFloor}
             aria-label="Fit Floor"
-            className="flex items-center justify-center h-7 w-7 shrink-0 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-all">
+            className="flex items-center justify-center h-6 w-6 sm:h-7 sm:w-7 shrink-0 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-all">
             <Maximize2 className="h-3.5 w-3.5" />
           </button>
           </ToolbarTooltip>
@@ -6943,7 +9901,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
           <button onClick={() => setShowIssues(true)}
             aria-label={`Issues: ${totalIssues}`}
             data-testid="issues-toolbar"
-            className={cn("flex items-center gap-1.5 h-7 px-2.5 rounded-md text-[10px] font-extrabold whitespace-nowrap shrink-0 transition-all border",
+            className={cn("flex items-center gap-1 h-6 px-1 sm:h-7 sm:px-2.5 rounded-md text-[10px] font-extrabold whitespace-nowrap shrink-0 transition-all border",
               hasAnyIssues ? "border-destructive/30 bg-destructive/10 text-destructive" : "border-border text-emerald-600 hover:bg-muted")}>
             {hasAnyIssues ? <AlertTriangle className="h-3 w-3" /> : <CheckCircle2 className="h-3 w-3" />}
             <span className="hidden xl:inline">Issues</span>
@@ -6957,7 +9915,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
           <ToolbarTooltip tool="keyboardShortcuts">
           <button onClick={() => setShowShortcuts(true)}
             aria-label="Keyboard shortcuts"
-            className="flex items-center justify-center h-7 w-7 shrink-0 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-all">
+            className="hidden lg:flex items-center justify-center h-6 w-6 sm:h-7 sm:w-7 shrink-0 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-all">
             <HelpCircle className="h-3.5 w-3.5" />
           </button>
           </ToolbarTooltip>
@@ -6967,7 +9925,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
           <button onClick={() => setShowProperties((v) => !v)}
             aria-pressed={showProperties}
             aria-label="Toggle properties panel"
-            className={cn("flex items-center justify-center h-7 w-7 shrink-0 rounded-md transition-all",
+            className={cn("flex items-center justify-center h-6 w-6 sm:h-7 sm:w-7 shrink-0 rounded-md transition-all",
               showProperties ? "bg-primary/10 text-primary" : "text-muted-foreground hover:text-foreground hover:bg-muted")}
             >
             {showProperties ? <PanelRightClose className="h-3.5 w-3.5" /> : <PanelRightOpen className="h-3.5 w-3.5" />}
@@ -6978,28 +9936,28 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
           <ToolbarTooltip tool="canvasSettings" label="Floor Settings" hint="Adjust floor display and editing preferences.">
           <button onClick={() => setShowFloorSettings(true)}
             aria-label="Floor Settings"
-            className="flex items-center justify-center h-7 w-7 shrink-0 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-all">
+            className="hidden xl:flex items-center justify-center h-6 w-6 sm:h-7 sm:w-7 shrink-0 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-all">
             <Settings2 className="h-3.5 w-3.5" />
           </button>
           </ToolbarTooltip>
 
           {/* Save / Publish — grouped so the pair never splits across wrapped rows */}
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex items-center gap-1 shrink-0 sm:gap-2">
             <ToolbarTooltip tool="save" label="Save" hint={isFloorDirty ? "Save your current floor draft changes." : "Your current floor draft is saved."}>
             <button onClick={handleSave} disabled={saving || !isFloorDirty}
-              className={cn("flex items-center gap-1 h-7 px-2.5 rounded-md text-[10px] font-extrabold transition-all border shadow-sm",
+              className={cn("flex items-center justify-center gap-1 h-6 w-6 px-0 sm:h-7 sm:w-auto sm:px-2.5 rounded-md text-[10px] font-extrabold transition-all border shadow-sm",
                 isFloorDirty ? "bg-primary text-primary-foreground border-primary hover:bg-primary/90" : "bg-muted/40 text-muted-foreground border-border cursor-not-allowed")}>
               {saving ? <Loader2 className="h-3 w-3 animate-spin" /> :
                 saved ? <CheckCircle2 className="h-3 w-3" /> : <Save className="h-3 w-3" />}
               <span className="hidden xl:inline">{saving ? "Saving..." : saved ? "Saved" : "Save"}</span>
             </button>
             </ToolbarTooltip>
-            <ToolbarTooltip tool="publish" label="Publish" hint={isFloorDirty ? "Save your latest changes before publishing." : "Publish the saved floor so it becomes available to users."}>
+            <ToolbarTooltip tool="publish" label={onPreviewStudent ? "Preview Student View" : "Publish"} hint={onPreviewStudent ? "Review the saved campus as students will see it before publishing." : isFloorDirty ? "Save your latest changes before publishing." : "Publish the saved floor so it becomes available to users."}>
             <button
               onClick={handlePublish}
-              disabled={!publishingEnabled || saving || isFloorDirty}
-              className={cn("flex items-center gap-1 h-7 px-2.5 rounded-md text-[10px] font-extrabold transition-all border",
-                !publishingEnabled || isFloorDirty || saving ? "border-border text-muted-foreground/60 cursor-not-allowed" : "border-emerald-500/30 text-emerald-700 bg-emerald-500/10 hover:bg-emerald-500/15")}
+              disabled={!publishingEnabled || saving || (isFloorDirty && !onPreviewStudent)}
+              className={cn("flex items-center justify-center gap-1 h-6 w-6 px-0 sm:h-7 sm:w-auto sm:px-2.5 rounded-md text-[10px] font-extrabold transition-all border",
+                !publishingEnabled || (isFloorDirty && !onPreviewStudent) || saving ? "border-border text-muted-foreground/60 cursor-not-allowed" : "border-emerald-500/30 text-emerald-700 bg-emerald-500/10 hover:bg-emerald-500/15")}
             >
               <Globe2 className="h-3 w-3" />
               <span className="hidden xl:inline">Publish</span>
@@ -7064,25 +10022,6 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
                   <p className="px-1 mt-1.5 text-[9px] leading-relaxed text-muted-foreground/70">Place points along hallways, then connect them.</p>
                 </div>
 
-                {/* Link Location — unified action; type inferred from physical object. */}
-                <div>
-                  <span className="px-1 text-[9px] font-extrabold uppercase tracking-wider text-muted-foreground">Link Locations</span>
-                  <button
-                    data-testid="nav-library-link"
-                    onClick={() => selectNavTool("link")}
-                    className={cn("h-12 w-full rounded-lg border text-left px-2 py-1.5 transition-all",
-                      navTool === "link" ? "border-primary bg-primary/8 text-primary" : "border-border hover:bg-muted/60 text-foreground")}
-                    title="Link an existing Room, Door, Stair, Elevator or Ramp to the walking network"
-                  >
-                    <span className="flex items-center gap-2">
-                      <Link2 className="h-3.5 w-3.5 shrink-0" />
-                      <span className="text-[10px] font-bold block truncate">Link Location</span>
-                    </span>
-                  </button>
-                  <p className="px-1 mt-1.5 text-[9px] leading-relaxed text-muted-foreground/70">
-                    Link a Room, Door, Stair, Elevator or Ramp to the walking network.
-                  </p>
-                </div>
               </div>
             </>
           ) : (
@@ -7116,25 +10055,28 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
 
             <div>
               <span className="px-1 text-[9px] font-extrabold uppercase tracking-wider text-muted-foreground">Rooms</span>
-              <div className="grid grid-cols-2 gap-1 mt-1">
-                {ROOM_TYPES.filter((rt) => !["elevator", "stairs"].includes(rt.type)).map((rt) => (
-                  <button key={rt.type} onClick={() => { switchTool("room"); setSidebarCategory(rt.type); setFurnitureTemplate(null); }}
-                    className={cn("h-14 rounded-lg border text-left px-2 py-1.5 transition-all",
-                      tool === "room" && sidebarCategory === rt.type ? "border-primary bg-primary/8" : "border-border hover:bg-muted/60")}
-                    title={rt.label}>
-                    <div className="w-4 h-4 rounded border mb-1" style={{ background: rt.fill, borderColor: rt.stroke }} />
-                    <span className="text-[10px] font-bold block truncate text-foreground">{rt.label}</span>
-                  </button>
-                ))}
+              <div className="mt-1">
+                <button
+                  data-testid="room-library-tool"
+                  onClick={() => { switchTool("room"); setSidebarCategory("classroom"); setFurnitureTemplate(null); }}
+                  className={cn("w-full h-14 rounded-lg border text-left px-2 py-1.5 transition-all",
+                    tool === "room" ? "border-primary bg-primary/8 text-primary" : "border-border hover:bg-muted/60 text-foreground")}
+                  title="Room"
+                >
+                  <span className="flex items-center gap-2">
+                    <SquareIcon className="h-4 w-4 shrink-0" />
+                    <span className="text-[10px] font-bold truncate">+ Room</span>
+                  </span>
+                  <span className="text-[9px] text-muted-foreground block mt-1">Place any room footprint</span>
+                </button>
               </div>
             </div>
 
             <div>
               <span className="px-1 text-[9px] font-extrabold uppercase tracking-wider text-muted-foreground">Circulation</span>
-              <div className="grid grid-cols-3 gap-1 mt-1">
+              <div className="grid grid-cols-2 gap-1 mt-1">
                 {[
                   { id: "stairs" as SimpleTool, label: "Stairs", icon: MoveVertical },
-                  { id: "ramp" as SimpleTool, label: "Ramp", icon: Navigation },
                   { id: "elevator" as SimpleTool, label: "Elevator", icon: Binary },
                 ].map((item) => {
                   const Icon = item.icon;
@@ -7219,6 +10161,13 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
           transition={{ duration: 0.3, delay: 0.05, ease: [0.16, 1, 0.3, 1] }}
           className="flex-1 overflow-hidden relative"
           style={{ background: "#b0ada8" }}
+          >
+          {testRoutePickKind && (
+            <div className="absolute top-3 left-1/2 -translate-x-1/2 z-50 rounded-full border border-violet-300 bg-card/95 px-3 py-1.5 text-[10px] font-bold text-violet-700 shadow-lg pointer-events-none">
+              {testRoutePickKind === "start" ? "Select a starting location · Esc to cancel" : "Select a destination · Esc to cancel"}
+            </div>
+          )}
+          <div className="contents"
           onWheel={handleWheel}
           onDragOver={(e) => handleNavLibraryDragOver(e)}
           onDrop={(e) => handleNavLibraryDrop(e)}
@@ -7226,17 +10175,31 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
             if (e.target === e.currentTarget) { setNavDragPreview(null); setNavDragBlocked(null); setNavTargetHover(null); }
           }}
           onMouseDown={(e) => {
+            if (roomDoorLinking) return;
             if (showNavOverlay && navTool !== "select" && navTool !== "pan") return;
-            if (e.target !== containerRef.current || tool !== "select" || e.shiftKey) return;
+            const target = e.target as Element;
+            const isCanvasBackground = e.target === containerRef.current
+              || target?.dataset?.bg === "true"
+              || target?.closest?.('[data-bg="true"]') != null;
+            if (!isCanvasBackground || tool !== "select" || e.shiftKey) return;
+            if (showNavOverlay && navTool === "select") {
+              setNavSelected(null);
+              setNavMultiSelected([]);
+              setNavPhysicalSelected(null);
+              setNavSelectedBend(null);
+              setNavSegmentHover(null);
+              setShowProperties(false);
+            }
             setSelected(null);
             setMultiSelected([]);
-            setShowProperties(true);
+            if (!(showNavOverlay && navTool === "select")) setShowProperties(true);
           }}
-        >
+          >
           <svg ref={svgRef}
             viewBox={`0 0 ${FP_W} ${FP_H}`}
             className="w-full h-full"
-            style={{ cursor, userSelect: "none" }}
+            style={{ cursor: roomDoorLinking ? "crosshair" : cursor, userSelect: "none" }}
+            onMouseDownCapture={handleSvgDownCapture}
             onMouseDown={handleSvgDown}
             onMouseMove={handleSvgMove}
             onMouseUp={handleSvgUp}
@@ -7319,6 +10282,34 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
                 )}
               </g>
 
+              {!highlightedRoute?.routeNodeIds?.length && highlightedRoute && (highlightedRoute.waypoints.length > 0 || (highlightedRoute.endpointMarkers?.length ?? 0) > 0 || (highlightedRoute.transitionMarkers?.length ?? 0) > 0) && (
+                <>
+                <g data-testid="floor-test-route-preview" className="pointer-events-none">
+                  <polyline
+                    points={highlightedRoute.waypoints.map((point) => `${point.x},${point.y}`).join(" ")}
+                    fill="none" stroke={highlightedRoute.color} strokeWidth={7}
+                    strokeLinecap="round" strokeLinejoin="round" opacity={0.2}
+                  />
+                  <polyline
+                    points={highlightedRoute.waypoints.map((point) => `${point.x},${point.y}`).join(" ")}
+                    fill="none" stroke={highlightedRoute.color} strokeWidth={3}
+                    strokeLinecap="round" strokeLinejoin="round" strokeDasharray="12 8"
+                  >
+                    <animate attributeName="stroke-dashoffset" from="0" to="-40" dur="1.2s" repeatCount="indefinite" />
+                  </polyline>
+                  {floorRouteArrowPoints(highlightedRoute.waypoints).map((marker, index) => (
+                    <path key={`floor-route-arrow-${index}`} d="M -5 -4 L 5 0 L -5 4 Z"
+                      transform={`translate(${marker.x} ${marker.y}) rotate(${marker.angle})`}
+                      fill={highlightedRoute.color} stroke="white" strokeWidth={1} />
+                  ))}
+                  {(highlightedRoute.semanticEndpoints ?? []).map((endpoint) => (
+                    <rect key={`semantic-route-${endpoint.kind}`} x={endpoint.x - 4} y={endpoint.y - 4} width={endpoint.width + 8} height={endpoint.height + 8}
+                      rx={4} fill="none" stroke={endpoint.kind === "start" ? "#16a34a" : "#7c3aed"} strokeWidth={2} strokeDasharray="5 3" opacity={0.85} />
+                  ))}
+                </g>
+                </>
+              )}
+
               {isEmpty && (
                 <g data-testid="floor-empty-state" transform={`translate(${FP_W / 2}, ${FP_H / 2})`} className="pointer-events-none">
                   <rect x={-52} y={-26} width={104} height={52} rx={4} fill="rgba(255,255,255,0.58)" stroke="rgba(95,90,82,0.18)" />
@@ -7334,22 +10325,33 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
               {/* ═══ WALLS ═══ */}
               {orderedRooms.map((room) => {
                 const rt = ROOM_MAP[room.type] ?? ROOM_MAP.classroom;
+                const roomFill = room.color ?? rt.fill;
+                const roomStroke = room.color ?? rt.stroke;
                 const isSel = (selected?.type === "room" && selected.id === room.id) || multiSelected.includes(room.id);
+                const roomAccessDoors = roomAccessDoorIds(room).map((id) => doors.find((door) => door.id === id)).filter((door): door is NonNullable<typeof door> => !!door);
+                const roomPickReady = !!testRoutePickKind && roomAccessDoors.some((roomDoor) => {
+                  const roomDoorNode = indoorNodes.find((node) => node.doorId === roomDoor.id);
+                  return isDoorEligibleForRoom(room, roomDoor, walls, indoorNodes, { rooms }) && !!roomDoorNode
+                    && indoorEdges.some((edge) => edge.type !== ROOM_DOOR_EDGE_TYPE
+                      && (edge.startNodeId === roomDoorNode.id || edge.endNodeId === roomDoorNode.id));
+                });
+                const roomPickHover = testRoutePickHover?.type === "room" && testRoutePickHover.id === room.id;
                 // B7 Part F: visual overlap indicator
                 const isOverlap = overlappingRoomIds.has(room.id);
                 const rotation = room.rotation ?? 0;
                 const cx = room.x + room.w / 2;
                 const cy = room.y + room.h / 2;
                 return (
-                  <g key={room.id} data-floor-title={room.name} aria-label={room.name} onMouseDown={(e) => onItemDown(e, "room", room.id, room)}
+                  <g key={room.id} data-floor-title={room.name} aria-label={room.name} onMouseEnter={() => { if (roomPickReady) setTestRoutePickHover({ type: "room", id: room.id }); }} onMouseLeave={() => { if (roomPickHover) setTestRoutePickHover(null); }} onMouseDown={(e) => onItemDown(e, "room", room.id, room)}
                     onContextMenu={(e) => onItemContextMenu(e, "room", room.id)}
                     opacity={visibleOpacity(room)}
                     style={{ cursor: tool === "select" ? room.locked ? "default" : "move" : cursor }}>
                     <g transform={`rotate(${rotation}, ${cx}, ${cy})`} clipPath={`url(#${floorClipId})`}>
+                      {roomPickReady && <rect x={room.x - 5} y={room.y - 5} width={room.w + 10} height={room.h + 10} rx={3} fill={roomPickHover ? "rgba(139,92,246,0.14)" : "none"} stroke="#8b5cf6" strokeWidth={roomPickHover ? 3 : 1.5} strokeDasharray={roomPickHover ? undefined : "5 4"} className="pointer-events-none" />}
                       <rect x={room.x} y={room.y} width={room.w} height={room.h} rx={1}
-                        fill={isSel ? "rgba(14,42,110,0.15)" : rt.fill}
+                         fill={roomFill}
                         fillOpacity={isSel ? 0.72 : 0.58}
-                        stroke={isOverlap ? "#dc2626" : isSel ? "var(--accent)" : rt.stroke}
+                        stroke={isOverlap ? "#dc2626" : isSel ? "var(--accent)" : roomStroke}
                         strokeWidth={isOverlap ? 2.5 : isSel ? 2 : 1}
                         strokeDasharray={isOverlap ? "4 2" : undefined} />
                       <line x1={room.x + 1} y1={room.y + 1} x2={room.x + room.w - 1} y2={room.y + 1}
@@ -7442,17 +10444,18 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
 
               {/* ═══ WALL ENDPOINT DRAG PREVIEW ═══ */}
               {wallJoints.map((joint) => (
-                <circle
-                  key={`${joint.x}-${joint.y}`}
-                  data-testid="wall-joint-cap"
-                  cx={joint.x}
-                  cy={joint.y}
-                  r={joint.radius}
-                  fill={joint.color}
-                  stroke="#2f3a46"
-                  strokeWidth={0.7}
-                  className="pointer-events-none"
-                />
+                <g key={`${joint.x}-${joint.y}`} data-testid="wall-joint-cap" className="pointer-events-none">
+                  {/* Compact square structural union. Its size is derived from
+                      the thickest incident Wall; it is deliberately not an
+                      editor handle or navigation node, and stays below the
+                      independently rendered endpoint handles. */}
+                  <rect x={joint.x - joint.radius} y={joint.y - joint.radius}
+                    width={joint.radius * 2} height={joint.radius * 2}
+                    fill={joint.casingColor} opacity={0.96} />
+                  <rect x={joint.x - Math.max(1, joint.radius - 1)} y={joint.y - Math.max(1, joint.radius - 1)}
+                    width={Math.max(2, (joint.radius - 1) * 2)} height={Math.max(2, (joint.radius - 1) * 2)}
+                    fill={joint.color} />
+                </g>
               ))}
 
               {(() => {
@@ -7504,17 +10507,66 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
 
               {orderedDoors.map((door) => {
                 const isSel = (selected?.type === "door" && selected.id === door.id) || multiSelected.includes(door.id);
+                const linkTarget = roomDoorTargetIsValid(door);
+                const linkHover = linkTarget && roomDoorHoverId === door.id;
+                const inspectorDoorHover = roomDoorInspectorHoverId === door.id;
+                const currentRoom = selected?.type === "room" ? rooms.find((room) => room.id === selected.id) : undefined;
+                const linkedToCurrentRoom = !!roomDoorLinking && selected?.type === "room"
+                  && !!currentRoom && roomAccessDoorIds(currentRoom).includes(door.id);
+                const routePickReady = false;
+                const routePickHover = testRoutePickHover?.type === "door" && testRoutePickHover.id === door.id;
                 const geom = resolveWallOpeningGeometry(door, door.wallId ? wallById.get(door.wallId) : undefined);
+                const doorNavConnected = indoorNodes.some((node) => node.doorId === door.id);
+                const doorQuickInfo = `${door.label?.trim() || "Door"} · ${door.isEmergencyExit ? "Emergency Exit Door" : "Indoor door"}${doorNavConnected ? " · Connected to Walking Network" : ""}`;
                 if (geom) {
                   return (
                     <g key={door.id} onMouseDown={(e) => onItemDown(e, "door", door.id, door)}
                       data-testid="attached-door-opening-symbol"
                       data-floor-title={door.label ?? "Door"}
-                      aria-label={door.label ?? "Door"}
+                      aria-label={doorQuickInfo}
+                      tabIndex={0}
                       onContextMenu={(e) => onItemContextMenu(e, "door", door.id)}
+                      onMouseEnter={() => { if (linkTarget || linkedToCurrentRoom) setRoomDoorHoverId(door.id); if (routePickReady) setTestRoutePickHover({ type: "door", id: door.id }); }}
+                      onMouseLeave={() => { if (roomDoorHoverId === door.id) setRoomDoorHoverId(null); if (routePickHover) setTestRoutePickHover(null); }}
                       opacity={visibleOpacity(door)}
                       transform={openingSymbolTransform(geom)}
-                      style={{ cursor: tool === "select" ? "pointer" : cursor }}>
+                    style={{ cursor: tool === "select" ? "pointer" : cursor }}>
+                      <title>{doorQuickInfo}</title>
+                      {/* Expanded physical hit area stays inside the Door group,
+                          below its resize handles, so the linked nav cue cannot
+                          steal body clicks while handles retain their own
+                          stopPropagation behavior. */}
+                      <rect
+                        x={-geom.width / 2 - 6}
+                        y={-(geom.wall.thickness / 2 + 7)}
+                        width={geom.width + 12}
+                        height={geom.wall.thickness + 14}
+                        rx={3}
+                        fill="transparent"
+                        data-testid="floor-door-physical-hit"
+                      />
+                      {routePickReady && <rect data-testid="test-route-door-target" x={-geom.width / 2 - 11} y={-(geom.wall.thickness / 2 + 12)} width={geom.width + 22} height={geom.wall.thickness + 24} rx={4} fill={routePickHover ? "rgba(139,92,246,0.16)" : "none"} stroke="#8b5cf6" strokeWidth={routePickHover ? 2.5 : 1.3} strokeDasharray={routePickHover ? undefined : "5 4"} className="pointer-events-none" />}
+                      {linkTarget && (
+                        <rect
+                          data-testid="room-door-link-target"
+                          x={-geom.width / 2 - 9}
+                          y={-(geom.wall.thickness / 2 + 10)}
+                          width={geom.width + 18}
+                          height={geom.wall.thickness + 20}
+                          rx={4}
+                          fill={linkHover ? "rgba(139,92,246,0.14)" : "transparent"}
+                          stroke="#8b5cf6"
+                          strokeWidth={linkHover ? 2 : 1.2}
+                          strokeDasharray={linkHover ? undefined : "4 3"}
+                          opacity={linkHover ? 1 : 0.62}
+                          className="pointer-events-none"
+                        />
+                      )}
+                      {linkedToCurrentRoom && !linkTarget && (
+                        <rect data-testid="room-door-already-linked" x={-geom.width / 2 - 9} y={-(geom.wall.thickness / 2 + 10)} width={geom.width + 18} height={geom.wall.thickness + 20} rx={4}
+                          fill="rgba(34,197,94,0.08)" stroke="#22c55e" strokeWidth={1.2} strokeDasharray="3 3" opacity={0.8} className="pointer-events-none" />
+                      )}
+                      {inspectorDoorHover && <rect data-testid="room-door-inspector-hover" x={-geom.width / 2 - 12} y={-(geom.wall.thickness / 2 + 13)} width={geom.width + 24} height={geom.wall.thickness + 26} rx={5} fill="rgba(139,92,246,0.08)" stroke="#8b5cf6" strokeWidth={1.4} className="pointer-events-none" />}
                       <WallOpeningSymbol
                         kind="door"
                         width={geom.width}
@@ -7570,10 +10622,44 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
                   );
                 }
                 return (
-                  <g key={door.id} clipPath={`url(#${floorClipId})`} data-floor-title={door.label ?? "Door"} aria-label={door.label ?? "Door"} onMouseDown={(e) => onItemDown(e, "door", door.id, door)}
+                  <g key={door.id} clipPath={`url(#${floorClipId})`} data-floor-title={door.label ?? "Door"} aria-label={doorQuickInfo} tabIndex={0} onMouseDown={(e) => onItemDown(e, "door", door.id, door)}
                     onContextMenu={(e) => onItemContextMenu(e, "door", door.id)}
+                    onMouseEnter={() => { if (linkTarget || linkedToCurrentRoom) setRoomDoorHoverId(door.id); if (routePickReady) setTestRoutePickHover({ type: "door", id: door.id }); }}
+                    onMouseLeave={() => { if (roomDoorHoverId === door.id) setRoomDoorHoverId(null); if (routePickHover) setTestRoutePickHover(null); }}
                     opacity={visibleOpacity(door)}
                     style={{ cursor: tool === "select" ? "pointer" : cursor }}>
+                    <title>{doorQuickInfo}</title>
+                    <rect
+                      x={door.x - door.width / 2 - 6}
+                      y={door.y - 9}
+                      width={door.width + 12}
+                      height={18}
+                      rx={3}
+                      fill="transparent"
+                      data-testid="floor-door-physical-hit"
+                    />
+                    {routePickReady && <rect data-testid="test-route-door-target" x={door.x - door.width / 2 - 11} y={door.y - 14} width={door.width + 22} height={28} rx={4} fill={routePickHover ? "rgba(139,92,246,0.16)" : "none"} stroke="#8b5cf6" strokeWidth={routePickHover ? 2.5 : 1.3} strokeDasharray={routePickHover ? undefined : "5 4"} className="pointer-events-none" />}
+                    {linkTarget && (
+                      <rect
+                        data-testid="room-door-link-target"
+                        x={door.x - door.width / 2 - 9}
+                        y={door.y - 12}
+                        width={door.width + 18}
+                        height={24}
+                        rx={4}
+                        fill={linkHover ? "rgba(139,92,246,0.14)" : "transparent"}
+                        stroke="#8b5cf6"
+                        strokeWidth={linkHover ? 2 : 1.2}
+                        strokeDasharray={linkHover ? undefined : "4 3"}
+                        opacity={linkHover ? 1 : 0.62}
+                        className="pointer-events-none"
+                      />
+                    )}
+                    {linkedToCurrentRoom && !linkTarget && (
+                      <rect data-testid="room-door-already-linked" x={door.x - door.width / 2 - 9} y={door.y - 12} width={door.width + 18} height={24} rx={4}
+                        fill="rgba(34,197,94,0.08)" stroke="#22c55e" strokeWidth={1.2} strokeDasharray="3 3" opacity={0.8} className="pointer-events-none" />
+                    )}
+                    {inspectorDoorHover && <rect data-testid="room-door-inspector-hover" x={door.x - door.width / 2 - 12} y={door.y - 15} width={door.width + 24} height={30} rx={5} fill="rgba(139,92,246,0.08)" stroke="#8b5cf6" strokeWidth={1.4} className="pointer-events-none" />}
                     {/* Door rectangle */}
                     <rect x={door.x - door.width / 2} y={door.y - 2} width={door.width} height={4} rx={1}
                       fill={isSel ? "var(--accent)" : door.color}
@@ -7827,7 +10913,11 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
 
                 if (entry.type === "ramp" || entry.type === "stairs" || entry.type === "elevator") {
                   const item = entry.item;
+                  const isExteriorEmergency = entry.type === "stairs" && Boolean(item.exteriorEmergencyStairId);
                   const isSel = (selected?.type === entry.type && selected.id === item.id) || multiSelected.includes(item.id);
+                  const routeNode = indoorNodes.find((node) => (entry.type === "ramp" && node.rampId === item.id) || (entry.type === "stairs" && node.stairId === item.id) || (entry.type === "elevator" && node.elevatorId === item.id));
+                  const routePickReady = !!testRoutePickKind && !!routeNode && walkableIndoorEdges.some((edge) => edge.startNodeId === routeNode.id || edge.endNodeId === routeNode.id);
+                  const routePickHover = testRoutePickHover?.type === entry.type && testRoutePickHover.id === item.id;
                   const cx = item.x + item.width / 2;
                   const cy = item.y + item.height / 2;
                   const rotation = item.rotation ?? 0;
@@ -7837,7 +10927,24 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
                       data-layer-key={`${entry.type}:${entry.id}`}
                       data-floor-title={item.label}
                       aria-label={item.label}
-                      onMouseDown={(e) => onItemDown(e, entry.type, item.id, item)}
+                      onMouseEnter={() => { if (routePickReady) setTestRoutePickHover({ type: entry.type, id: item.id }); }}
+                      onMouseLeave={() => { if (routePickHover) setTestRoutePickHover(null); }}
+                      onMouseDown={(e) => {
+                        if (isExteriorEmergency) {
+                          e.stopPropagation();
+                          if (navMode) {
+                            setNavSelected(null);
+                            setNavMultiSelected([]);
+                            setNavPhysicalSelected({ type: "stairs", id: item.id });
+                          } else {
+                            setSelected({ type: "stairs", id: item.id });
+                            setMultiSelected([]);
+                          }
+                          setShowProperties(true);
+                        } else {
+                          onItemDown(e, entry.type, item.id, item);
+                        }
+                      }}
                       onContextMenu={(e) => onItemContextMenu(e, entry.type, item.id)}
                       opacity={visibleOpacity(item)}
                       style={{ cursor: tool === "select" ? "move" : cursor }}
@@ -7853,11 +10960,115 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
                           onRotate={(event) => onRotateStart(event, entry.type, item.id, item)}
                         />
                       )}
+                      {routePickReady && <rect x={item.x - 5} y={item.y - 5} width={item.width + 10} height={item.height + 10} rx={4} fill={routePickHover ? "rgba(139,92,246,0.16)" : "none"} stroke="#8b5cf6" strokeWidth={routePickHover ? 2.5 : 1.3} strokeDasharray={routePickHover ? undefined : "5 4"} className="pointer-events-none" />}
                       <g data-testid={`${entry.type}-symbol`} transform={`rotate(${rotation}, ${cx}, ${cy})`}>
                         {entry.type === "ramp" ? <RampSymbol item={item} selected={isSel} /> : null}
-                        {entry.type === "stairs" ? <StairsSymbol item={item} selected={isSel} /> : null}
+                        {entry.type === "stairs" ? (
+                          <StairsSymbol
+                            item={item}
+                            selected={isSel}
+                            floorIndex={activeFloorIndex}
+                            floorCount={buildingFloors.length}
+                          />
+                        ) : null}
                         {entry.type === "elevator" ? <ElevatorSymbol item={item} selected={isSel} /> : null}
                       </g>
+                      {isExteriorEmergency && (
+                        <g className="pointer-events-none select-none">
+                          <circle cx={item.x + item.width - 5} cy={item.y + 5} r={5} fill="#dc2626" stroke="white" strokeWidth={1} />
+                          <text x={item.x + item.width - 5} y={item.y + 7.5} textAnchor="middle" fill="white" fontSize={5.5} fontWeight="900">E</text>
+                        </g>
+                      )}
+                      {(entry.type === "elevator" || entry.type === "stairs") && (() => {
+                        const statusKind = entry.type === "elevator" ? "elevators" : "stairs";
+                        const connectedFloorCount = item.sharedId
+                          ? (circulationConnectionFloorCounts[statusKind].get(item.sharedId) ?? 1)
+                          : 1;
+                        const connected = connectedFloorCount > 1;
+                        const statusLabel = connected
+                          ? `Connected to ${connectedFloorCount} floors`
+                          : "Not connected to another floor";
+                        return (
+                          <g
+                            data-testid={`${entry.type}-connection-status`}
+                            role="img"
+                            tabIndex={0}
+                            aria-label={statusLabel}
+                            className="cursor-help outline-none"
+                          >
+                            <circle
+                              cx={item.x + item.width - 5}
+                              cy={item.y + item.height - 5}
+                              r={4}
+                              fill={connected ? "#059669" : "#d97706"}
+                              stroke="white"
+                              strokeWidth={1}
+                              opacity={0.92}
+                            />
+                            <title>{statusLabel}</title>
+                          </g>
+                        );
+                      })()}
+                      {entry.type !== "ramp" && (() => {
+                        const quickKind = entry.type as "stairs" | "elevator";
+                        const quickKey = `${quickKind}:${item.id}`;
+                        const quickTargets = quickNavigationTargets.get(quickKey) ?? [];
+                        // Route markers own the interaction surface while a Test
+                        // Route is active. The authoring shortcut returns as soon
+                        // as the route session is cleared, without touching it.
+                        const quickNavVisible = (quickKind === "elevator"
+                          ? quickTargets.some((target) => !target.isCurrent)
+                          : quickTargets.length > 0)
+                          && !routePreview
+                          && !highlightedRoute
+                          && !testRouteSessionContext.session?.result;
+                        if (!quickNavVisible) return null;
+                        const quickOpen = quickNavOpenKey === quickKey;
+                        const indicator = rotatePoint(
+                          { x: item.x + item.width - 7, y: item.y + 7 },
+                          cx,
+                          cy,
+                          rotation,
+                        );
+                        const showQuick = () => openQuickNav(quickKey);
+                        return (
+                          <>
+                            <g
+                              data-testid={`circulation-quick-nav-${quickKind}`}
+                              role="button"
+                              tabIndex={0}
+                              aria-label={`View connected Floors for ${item.label || (quickKind === "stairs" ? "Stair" : "Elevator")}`}
+                              transform={`translate(${indicator.x} ${indicator.y})`}
+                              style={{ cursor: "pointer" }}
+                              onMouseEnter={showQuick}
+                              onMouseLeave={scheduleQuickNavClose}
+                              onFocus={showQuick}
+                              onBlur={(event) => {
+                                if (!event.currentTarget.parentElement?.contains(event.relatedTarget as Node | null)) scheduleQuickNavClose();
+                              }}
+                              onMouseDown={(event) => { event.preventDefault(); event.stopPropagation(); }}
+                              onClick={(event) => { event.stopPropagation(); showQuick(); }}
+                              onKeyDown={(event) => {
+                                if (event.key === "Enter" || event.key === " ") {
+                                  event.preventDefault();
+                                  event.stopPropagation();
+                                  showQuick();
+                                }
+                                if (event.key === "Escape") {
+                                  event.preventDefault();
+                                  closeQuickNav();
+                                }
+                              }}
+                            >
+                              {quickOpen || isSel ? (
+                                <circle r={6.5} fill="#7c3aed" opacity={0.2} className="motion-safe:animate-pulse motion-reduce:animate-none" />
+                              ) : null}
+                              <circle r={4.5} fill="#475569" stroke="#f8fafc" strokeWidth={1} opacity={quickOpen || isSel ? 0.98 : 0.7} />
+                              <path d="M -2.2 -1.4 H 2.2 M -2.2 1.4 H 2.2" stroke="#f8fafc" strokeWidth={0.8} strokeLinecap="round" />
+                            </g>
+                          </>
+                        );
+                      })()}
                     </g>
                   );
                 }
@@ -8043,7 +11254,12 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
                       />
                     )}
                     <g data-testid="stairs-symbol" transform={`rotate(${rotation}, ${cx}, ${cy})`}>
-                      <StairsSymbol item={st} selected={isSel} />
+                      <StairsSymbol
+                        item={st}
+                        selected={isSel}
+                        floorIndex={activeFloorIndex}
+                        floorCount={buildingFloors.length}
+                      />
                     </g>
                   </g>
                 );
@@ -8432,33 +11648,23 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
                 </g>
               )}
 
-              {rooms.filter(r => r.navConnection).map((room) => {
-                const nc = room.navConnection!;
-                const cx = FP_W / 2;
-                const cy = FP_H / 2;
-                return (
-                  <g key={`nav-${room.id}`} className="pointer-events-none">
-                    {/* Dashed line from nav node toward floor center (representing corridor connection) */}
-                    <line x1={nc.x} y1={nc.y} x2={cx} y2={cy}
-                      stroke="#16a34a" strokeWidth={1.5} strokeDasharray="4 3" opacity={0.4} />
-                    {/* Glow ring */}
-                    <circle cx={nc.x} cy={nc.y} r={9}
-                      fill="none" stroke="#16a34a" strokeWidth={3} opacity={0.25} />
-                    {/* Solid node */}
-                    <circle cx={nc.x} cy={nc.y} r={5}
-                      fill="#16a34a" stroke="white" strokeWidth={2} />
-                    {/* Direction indicator — small arrow pointing outward from room toward corridor */}
-                    <text x={nc.x} y={nc.y + 1.5} textAnchor="middle" fill="white"
-                      fontSize={6} fontWeight="900" className="select-none">
-                      {(nc.x < room.x + room.w / 2) ? "◀" : (nc.x > room.x + room.w / 2) ? "▶" : (nc.y < room.y + room.h / 2) ? "▲" : "▼"}
-                    </text>
-                  </g>
-                );
-              })}
-
               {/* ═══ DRAWING PREVIEWS ═══ */}
               {wallSnapIndicator && (
                 <g data-testid="wall-snap-indicator" className="pointer-events-none">
+                  {wallSnapIndicator.guide === "h" && (
+                    <line
+                      data-testid="wall-alignment-guide"
+                      x1={0} y1={wallSnapIndicator.y} x2={FP_W} y2={wallSnapIndicator.y}
+                      stroke="var(--primary)" strokeWidth={1} strokeDasharray="5 4" opacity={0.62}
+                    />
+                  )}
+                  {wallSnapIndicator.guide === "v" && (
+                    <line
+                      data-testid="wall-alignment-guide"
+                      x1={wallSnapIndicator.x} y1={0} x2={wallSnapIndicator.x} y2={FP_H}
+                      stroke="var(--primary)" strokeWidth={1} strokeDasharray="5 4" opacity={0.62}
+                    />
+                  )}
                   {wallSnapIndicator.edge && (
                     <line
                       x1={wallSnapIndicator.edge.x1}
@@ -8518,7 +11724,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
               )}
 
               {/* ═══ INDOOR NAVIGATION LAYER (visible when overlay is ON) ═══ */}
-              {showNavOverlay && (
+              {navMode && (
                 <g data-testid="floor-nav-layer">
                   {/* B5 correction: empty-space drag surface for the nav graph
                       group. Rendered BEFORE edges/nodes so they stay on top
@@ -8526,10 +11732,10 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
                       The handler re-checks physical objects under the pointer
                       so rooms/doors/circulation keep their nav selection. */}
                   {navTool === "select" && navMultiSelected.length > 1 && (() => {
-                    const nodeIds = new Set(navMultiSelected.filter((id) => indoorNodes.some((n) => n.id === id)));
-                    const edgeIds = new Set(navMultiSelected.filter((id) => indoorEdges.some((e) => e.id === id)));
+                    const nodeIds = new Set(navMultiSelected.filter((id) => indoorNodes.some((n) => n.id === id && !n.roomId)));
+                    const edgeIds = new Set(navMultiSelected.filter((id) => walkableIndoorEdges.some((e) => e.id === id)));
                     if (nodeIds.size === 0 && edgeIds.size === 0) return null;
-                    const bounds = navGroupSelectionBounds(indoorNodes, indoorEdges, nodeIds, edgeIds);
+                    const bounds = navGroupSelectionBounds(indoorNodes, walkableIndoorEdges, nodeIds, edgeIds);
                     if (!bounds) return null;
                     return (
                       <rect
@@ -8547,7 +11753,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
                     );
                   })()}
                   {/* Edges — geometry derived from node positions, drawn under nodes */}
-                  {indoorEdges.map((edge) => {
+                  {walkableIndoorEdges.map((edge) => {
                     const a = indoorNodes.find((n) => n.id === edge.startNodeId);
                     const b = indoorNodes.find((n) => n.id === edge.endNodeId);
                     if (!a || !b) return null;
@@ -8557,7 +11763,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
                     const pts = edgePolylinePoints(edge, indoorNodes) ?? [];
                     const poly = pts.length > 2;
                     const pointsStr = pts.map((p) => `${p.x},${p.y}`).join(" ");
-                    const isSel = navSelected?.type === "edge" && navSelected.id === edge.id;
+                    const isSel = (navSelected?.type === "edge" && navSelected.id === edge.id) || navMultiSelected.includes(edge.id);
                     const closed = edge.closed === true;
                     // B5 Phase 2.11: an existing edge that currently crosses /
                     // overlaps a wall (strict Phase 2.10 model) renders RED so an
@@ -8567,6 +11773,13 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
                     const midX = mid.x;
                     const midY = mid.y;
                     const edgeStroke = closed ? "#b45309" : invalid ? "#dc2626" : isSel ? "var(--accent)" : "#3f6212";
+                    const connectPathHover = navTool === "connect"
+                      && !!navConnectStart
+                      && !navNodeHover
+                      && navPathTargetHover?.edgeId === edge.id
+                      && isManualIndoorWalkingEdge(edge, indoorNodes)
+                      && pts[navPathTargetHover.index]
+                      && pts[navPathTargetHover.index + 1];
                     return (
                       <g key={edge.id}>
                         {poly ? (
@@ -8576,7 +11789,8 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
                             strokeLinejoin="round" strokeLinecap="round"
                             opacity={closed ? 0.75 : 0.9}
                             data-invalid={invalid ? "true" : undefined}
-                            data-testid={isSel ? "nav-edge-selected" : "nav-edge"} />
+                            data-testid={isSel ? "nav-edge-selected" : "nav-edge"}
+                            className="pointer-events-none" />
                         ) : (
                           <line x1={a.x} y1={a.y} x2={b.x} y2={b.y}
                             stroke={edgeStroke}
@@ -8584,8 +11798,32 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
                             strokeDasharray={closed ? "5 3" : undefined}
                             opacity={closed ? 0.75 : 0.9}
                             data-invalid={invalid ? "true" : undefined}
-                            data-testid={isSel ? "nav-edge-selected" : "nav-edge"} />
+                            data-testid={isSel ? "nav-edge-selected" : "nav-edge"}
+                            className="pointer-events-none" />
                         )}
+                        {connectPathHover && (() => {
+                          const i = navPathTargetHover!.index;
+                          const p = pts[i];
+                          const q = pts[i + 1];
+                          const join = navPathTargetHover!.point;
+                          return (
+                            <g className="pointer-events-none" data-testid="nav-connect-path-target">
+                              <line x1={p.x} y1={p.y} x2={q.x} y2={q.y}
+                                stroke="#f59e0b" strokeWidth={4} opacity={0.82}
+                                strokeDasharray="6 3" strokeLinecap="round" />
+                              <circle cx={join.x} cy={join.y} r={5}
+                                fill="rgba(245,158,11,0.18)" stroke="#f59e0b"
+                                strokeWidth={1.7} strokeDasharray="2 2" />
+                              <circle cx={join.x} cy={join.y} r={1.8} fill="#f59e0b" />
+                              <text x={join.x + 8} y={join.y - 8} fill="#b45309"
+                                fontSize={6.5} fontWeight={700}
+                                stroke="rgba(255,255,255,0.92)" strokeWidth={1.8}
+                                paintOrder="stroke" data-testid="nav-connect-path-hint">
+                                Click to connect to path
+                              </text>
+                            </g>
+                          );
+                        })()}
                         {edge.bidirectional === false && (() => {
                           // Direction arrow anchored at the polyline midpoint and
                           // oriented along the segment that contains it.
@@ -8609,7 +11847,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
                           const p2 = { x: back.x + Math.cos(ang - 2.6) * size, y: back.y + Math.sin(ang - 2.6) * size };
                           return (
                             <path d={`M ${midX} ${midY} L ${p1.x} ${p1.y} L ${p2.x} ${p2.y} Z`}
-                              fill={closed ? "#b45309" : invalid ? "#dc2626" : "#3f6212"} opacity={0.9} data-testid="nav-edge-direction" />
+                              fill={closed ? "#b45309" : invalid ? "#dc2626" : "#3f6212"} opacity={0.9} data-testid="nav-edge-direction" className="pointer-events-none" />
                           );
                         })()}
                         {/* B5 Phase 2.11: selected INVALID edge — small warning
@@ -8632,6 +11870,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
                             onMouseLeave={() => {
                               setNavEraseHover((h) => h?.type === "edge" && h.id === edge.id ? null : h);
                               setNavSegmentHover((h) => (h?.edgeId === edge.id ? null : h));
+                              setNavPathTargetHover((h) => (h?.edgeId === edge.id ? null : h));
                             }}
                             style={{ cursor: navTool === "erase" ? "not-allowed" : "pointer" }} data-testid="nav-edge-hit" />
                         ) : (
@@ -8642,6 +11881,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
                             onMouseLeave={() => {
                               setNavEraseHover((h) => h?.type === "edge" && h.id === edge.id ? null : h);
                               setNavSegmentHover((h) => (h?.edgeId === edge.id ? null : h));
+                              setNavPathTargetHover((h) => (h?.edgeId === edge.id ? null : h));
                             }}
                             style={{ cursor: navTool === "erase" ? "not-allowed" : "pointer" }} data-testid="nav-edge-hit" />
                         )}
@@ -8686,24 +11926,40 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
                   {indoorNodes.map((node) => {
                     const ref = linkedObjectRef(node);
                     const isLinked = !!ref;
+                    const isStairLinked = ref?.kind === "stairs";
+                    // The Room itself is the visible navigation anchor. Keep
+                    // the canonical linked node for graph identity and Connect
+                    // targeting, but never paint a duplicate waypoint over it.
+                    if (node.roomId) return null;
                     const isSel = navSelected?.type === "node" && navSelected.id === node.id;
                     const isMulti = navMultiSelected.includes(node.id);
                     const isConnectStart = navConnectStart === node.id;
                     const isDest = !isLinked && node.type === "room_access";
+                    const isInternalJunction = !isLinked && node.pathJunction === true;
                     const isEraseHover = navEraseHover?.type === "node" && navEraseHover.id === node.id;
                     const isDuplicateWarn = navDuplicateNodeId === node.id;
-                    const label = (node.name || "Walking Point").trim();
-                    const showLabel = !isLinked && label && label !== "Walking Point";
+                    // Path-inserted points are real canonical graph nodes, but
+                    // they are implementation junctions rather than user-named
+                    // waypoints. Keep them selectable/debuggable while using a
+                    // compact visual and no large "Waypoint" label.
+                    const label = ((node.name || "Walking Point").trim() === "Path Junction"
+                      ? "Waypoint"
+                      : (node.name || "Walking Point").trim());
+                    const showLabel = !isLinked && !isInternalJunction && label && label !== "Walking Point";
                     // B5 Phase 2.7: the linked routing cue ALWAYS renders at the
                     // node's LOGICAL anchor (node.x/node.y — synced to the owner:
-                    // room anchor, door position, circulation center). For ramps
+                    // room anchor, door position, or stair entry edge). For ramps
                     // the anchor is the exact center; only a tiny presentation-only
                     // corner badge marks "linked" (never a routing location).
                     const rampOwner = node.rampId ? ramps.find((r) => r.id === node.rampId) : null;
                     const cue = { x: node.x, y: node.y };
+                    const stairTransitionLinked = isStairLinked && (() => {
+                      const transition = navNodeTransitionStatus.get(node.id);
+                      return transition?.state === "linked" && transition.floors.length > 0;
+                    })();
                     return (
                       <g key={node.id}
-                        data-testid={isLinked ? "nav-linked-node" : "nav-node"}
+                        data-testid={isLinked ? "nav-linked-node" : isInternalJunction ? "nav-path-junction" : "nav-node"}
                         onMouseDown={(e) => handleNavNodeDown(e, node)}
                         onMouseEnter={() => {
                           if (navTool === "erase") setNavEraseHover({ type: "node", id: node.id });
@@ -8720,13 +11976,21 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
                             physical object underneath), so a transparent circle is the
                             actual click/drag surface. This is the click-selection fix. */}
                         <circle cx={cue.x} cy={cue.y} r={11} fill="transparent"
-                          data-testid="nav-node-hit" />
+                          data-testid="nav-node-hit"
+                          style={{ pointerEvents: isLinked && navTool === "select" ? "none" : undefined }} />
                         {isLinked ? (
                           // B5 Phase 2.7: the actual routing node stays VISIBLE even
                           // while the violet Connect ring surrounds it — the ring is
                           // feedback around the node, never a replacement for it.
                           <g className="pointer-events-none">
-                            <circle cx={cue.x} cy={cue.y} r={4} fill="rgba(21,128,61,0.85)" data-testid="nav-linked-cue" />
+                            {isStairLinked ? (
+                              <g data-testid={stairTransitionLinked ? "nav-transition-badge" : "nav-stair-access-marker"}>
+                                <rect x={cue.x - 4} y={cue.y - 4} width={8} height={8} rx={2} fill="#64748b" stroke="#f8fafc" strokeWidth={1} />
+                                <circle cx={cue.x} cy={cue.y} r={1.2} fill="#f8fafc" />
+                              </g>
+                            ) : (
+                              <circle cx={cue.x} cy={cue.y} r={4} fill="rgba(21,128,61,0.85)" data-testid="nav-linked-cue" />
+                            )}
                             <circle cx={cue.x} cy={cue.y} r={6.5} fill="none"
                               stroke={isSel || isMulti ? "var(--accent)" : "rgba(21,128,61,0.45)"}
                               strokeWidth={isSel || isMulti ? 1.8 : 1} />
@@ -8750,11 +12014,11 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
                           </g>
                         ) : (
                           <g className="pointer-events-none">
-                            <circle cx={node.x} cy={node.y} r={4.5}
-                              fill={isSel || isMulti ? "var(--accent)" : "#16a34a"}
-                              stroke="#f8fafc" strokeWidth={1} />
+                            <circle cx={node.x} cy={node.y} r={isInternalJunction ? 3.2 : 4.5}
+                              fill={isSel || isMulti ? "var(--accent)" : isInternalJunction ? "#d97706" : "#16a34a"}
+                              stroke="#f8fafc" strokeWidth={isInternalJunction ? 0.8 : 1} />
                             {(isSel || isMulti) && (
-                              <circle cx={node.x} cy={node.y} r={7.5} fill="none"
+                              <circle cx={node.x} cy={node.y} r={isInternalJunction ? 6 : 7.5} fill="none"
                                 stroke="var(--accent)" strokeWidth={1.6} data-testid="nav-node-selected" />
                             )}
                             {isConnectStart && (
@@ -8762,10 +12026,13 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
                                 stroke="var(--accent)" strokeWidth={1.4} strokeDasharray="3 2" data-testid="nav-connect-start" />
                             )}
                             {showLabel && (
-                              <text x={node.x} y={node.y + 13} textAnchor="middle" fontSize={5.5}
-                                fill="#334155" fontWeight={600} className="pointer-events-none select-none">
-                                {label.length > 14 ? `${label.slice(0, 13)}…` : label}
-                              </text>
+                              <g className="pointer-events-none select-none">
+                                <text x={node.x} y={node.y + 15} textAnchor="middle" fontSize={5.5}
+                                  fill="#1f2937" fontWeight={600} stroke="rgba(255,255,255,0.92)"
+                                  strokeWidth={1.8} paintOrder="stroke" strokeLinejoin="round">
+                                  {label.length > 14 ? `${label.slice(0, 13)}…` : label}
+                                </text>
+                              </g>
                             )}
                           </g>
                         )}
@@ -8773,7 +12040,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
                             linked circulation node with floor-to-floor links — a
                             small neutral up/down chevron badge (never a waypoint,
                             never a routing location; the node stays the anchor). */}
-                        {isLinked && (() => {
+                        {isLinked && !isStairLinked && (() => {
                           const t = navNodeTransitionStatus.get(node.id);
                           if (!t || t.state !== "linked" || t.floors.length === 0) return null;
                           return (
@@ -8820,7 +12087,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
                       while CONNECT is active the routing NODE is the target (violet
                       ring on the semantic node/cue), so the yellow physical-object
                       highlight is suppressed to avoid yellow/violet competition. */}
-                  {navTargetHover && (navTool === "waypoint" || navTool === "destination" || navTool === "connect" || navTool === "link" || navLibraryDragRef.current != null) && !navNodeHover && !(navTool === "connect" && navTargetHasLinkedNode) && (
+                  {navTargetHover && (navTool === "waypoint" || navTool === "destination" || navTool === "connect" || navTool === "link" || navLibraryDragRef.current != null) && !navNodeHover && !(navTool === "connect" && navTargetHasLinkedNode && navTargetHover.kind !== "room") && (
                     <g className="pointer-events-none" data-testid="floor-nav-target">
                       <circle cx={navTargetHover.x} cy={navTargetHover.y} r={12} fill="none"
                         stroke="var(--accent)" strokeWidth={1.6} strokeDasharray="4 3" />
@@ -8948,10 +12215,10 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
                       of edges whose both endpoints are selected), so the frame
                       communicates the whole substructure moves together. */}
                   {navMultiSelected.length > 1 && (() => {
-                    const nodeIds = new Set(navMultiSelected.filter((id) => indoorNodes.some((n) => n.id === id)));
-                    const edgeIds = new Set(navMultiSelected.filter((id) => indoorEdges.some((e) => e.id === id)));
+                    const nodeIds = new Set(navMultiSelected.filter((id) => indoorNodes.some((n) => n.id === id && !n.roomId)));
+                    const edgeIds = new Set(navMultiSelected.filter((id) => walkableIndoorEdges.some((e) => e.id === id)));
                     if (nodeIds.size === 0 && edgeIds.size === 0) return null;
-                    const bounds = navGroupSelectionBounds(indoorNodes, indoorEdges, nodeIds, edgeIds);
+                    const bounds = navGroupSelectionBounds(indoorNodes, walkableIndoorEdges, nodeIds, edgeIds);
                     if (!bounds) return null;
                     return (
                       <g className="pointer-events-none" data-testid="floor-nav-group-outline">
@@ -8975,7 +12242,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
 
               {/* Outdoor-style alignment guides (yellow/orange dashed) for move/resize/place.
                   Rendered OUTSIDE the navMode block so they show in both design and navigation modes. */}
-              {alignGuides.map((guide, i) => {
+              {compactAlignmentGuides(alignGuides).map((guide, i) => {
                 const isV = guide.type === "v";
                 const y1 = isV ? 0 : guide.pos;
                 const y2 = isV ? FP_H : guide.pos;
@@ -9002,9 +12269,9 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
                   only while "Show Navigation" is on. Reduced opacity, thinner
                   lines, smaller nodes; pointer-events-none so Design Select keeps
                   editing ONLY floor objects (graph is not selectable/movable). */}
-              {!navMode && showNavOverlay && (indoorNodes.length > 0 || indoorEdges.length > 0) && (
+              {!navMode && showNavOverlay && !routePreview && (indoorNodes.length > 0 || indoorEdges.length > 0) && (
                 <g data-testid="floor-nav-overlay" className="pointer-events-none">
-                  {indoorEdges.map((edge) => {
+                  {walkableIndoorEdges.map((edge) => {
                     const pts = edgePolylinePoints(edge, indoorNodes);
                     if (!pts || pts.length < 2) return null;
                     // B5 Phase 2.11: the read-only overlay also flags an invalid
@@ -9022,6 +12289,9 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
                     // — just subdued, so the graph still communicates what each
                     // element is while staying a reference-only view.
                     const isLinked = !!linkedObjectRef(node);
+                    // Room destinations are represented by their physical Room
+                    // marker, not a second generic marker in the overlay.
+                    if (node.roomId) return null;
                     const isDest = !isLinked && node.type === "room_access";
                     return (
                       <circle key={node.id} cx={node.x} cy={node.y} r={isDest ? 2.6 : 2.2}
@@ -9074,7 +12344,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
                   Issues panel shows. Warnings stay amber, errors stay red; the
                   layer is pointer-events-none and clipped to the floor so it
                   never intercepts canvas interactions or spills outside. ── */}
-              {floorIssueMarkers.size > 0 && (
+              {!routePreview && floorIssueMarkers.size > 0 && (
                 <g className="pointer-events-none" data-testid="issue-marker-layer">
                   {Array.from(floorIssueMarkers.values()).map(({ severity, selection }) => {
                     const anchor = floorMarkerAnchor(selection);
@@ -9088,6 +12358,34 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
                         data-testid="issue-marker"
                         data-issue-object={`${selection.type}:${selection.id}`}
                         data-issue-severity={severity}
+                        className="pointer-events-auto cursor-pointer"
+                        onMouseDown={(event) => {
+                          event.stopPropagation();
+                          setNavSelected(null);
+                          setNavMultiSelected([]);
+                          if (selection.type === "navNode") {
+                            setSelected(null);
+                            setNavPhysicalSelected(null);
+                            setNavSelected({ type: "node", id: selection.id });
+                            setShowNavOverlay(true);
+                            setNavTool("select");
+                            setShowProperties(true);
+                          } else if (selection.type === "navEdge") {
+                            setSelected(null);
+                            setNavPhysicalSelected(null);
+                            setNavSelected({ type: "edge", id: selection.id });
+                            setShowNavOverlay(true);
+                            setNavTool("select");
+                            setShowProperties(true);
+                          } else if (showNavOverlay && (selection.type === "room" || selection.type === "door" || selection.type === "stairs" || selection.type === "elevator" || selection.type === "ramp")) {
+                            // Issue markers target the physical object, even
+                            // with Navigation visible, so the full Door/Room
+                            // inspector (including physical controls) opens.
+                            selectFloorItem(selection);
+                          } else {
+                            selectFloorItem(selection);
+                          }
+                        }}
                       >
                         {/* Subtle warning badge — small pill with ⚠ icon */}
                         <circle cx={anchor.x} cy={anchor.y} r={6.5} fill={bg} stroke={stroke} strokeWidth={1.1} opacity={0.95} />
@@ -9098,19 +12396,66 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
                 </g>
               )}
 
+              {/* Ready cues live in the final overlay layer so walls, floor
+                  boundaries, and room artwork can never cover the badge. */}
+              {Array.from(roomNavigationCueStatus.entries()).map(([roomId, state]) => {
+                if (state !== "ready") return null;
+                const anchor = floorMarkerAnchor({ type: "room", id: roomId });
+                if (!anchor) return null;
+                return (
+                  <g key={`room-ready-${roomId}`} data-testid="room-navigation-status-cue"
+                    data-room-nav-state="ready" className="pointer-events-none">
+                    <circle cx={anchor.x} cy={anchor.y} r={4.5} fill="#16a34a" stroke="#fff" strokeWidth={1} opacity={0.98} />
+                    <path d={`M${anchor.x - 2} ${anchor.y} L${anchor.x - 0.5} ${anchor.y + 1.5} L${anchor.x + 2.5} ${anchor.y - 2}`}
+                      stroke="#fff" strokeWidth={0.9} strokeLinecap="round" strokeLinejoin="round" />
+                  </g>
+                );
+              })}
+
+              {/* Route controls are the final world-space layer so physical and
+                  navigation hit targets cannot cover a transition marker. */}
+              {highlightedRoute && (
+                <>
+                  {!!highlightedRoute.routeNodeIds?.length && highlightedRoute.waypoints.length > 0 && (
+                    <g data-testid="floor-test-route-active-overlay" className="pointer-events-none">
+                      <polyline
+                        points={highlightedRoute.waypoints.map((point) => `${point.x},${point.y}`).join(" ")}
+                        fill="none" stroke={highlightedRoute.color} strokeWidth={8}
+                        strokeLinecap="round" strokeLinejoin="round" opacity={0.28}
+                      />
+                      <polyline
+                        points={highlightedRoute.waypoints.map((point) => `${point.x},${point.y}`).join(" ")}
+                        fill="none" stroke={highlightedRoute.color} strokeWidth={4}
+                        strokeLinecap="round" strokeLinejoin="round" strokeDasharray="12 8" opacity={1}
+                      >
+                        <animate attributeName="stroke-dashoffset" from="0" to="-40" dur="1.2s" repeatCount="indefinite" />
+                      </polyline>
+                      {floorRouteArrowPoints(highlightedRoute.waypoints).map((marker, index) => (
+                        <path key={`floor-active-route-arrow-${index}`} d="M -5 -4 L 5 0 L -5 4 Z"
+                          transform={`translate(${marker.x} ${marker.y}) rotate(${marker.angle})`}
+                          fill={highlightedRoute.color} stroke="white" strokeWidth={1} />
+                      ))}
+                    </g>
+                  )}
+                  {(highlightedRoute.endpointMarkers ?? []).map((marker) => (
+                    <RouteEndpointMarker key={`floor-route-endpoint-${marker.kind}`} {...marker} color={highlightedRoute.color} />
+                  ))}
+                  {(highlightedRoute.transitionMarkers ?? []).map((marker) => (
+                    <RouteTransitionMarker key={marker.id} marker={marker} zoom={zoom} viewport={{ width: FP_W, height: FP_H, pan }} onClick={handleTestRouteTransition} />
+                  ))}
+                </>
+              )}
+
             </g>
           </svg>
 
+          {quickNavOverlay}
+
           {/* Furniture tooltip — shows when furniture tool is active */}
           {tool === "furniture" && furnitureTemplate && (
-            <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20">
-              <div className="px-3 py-1.5 rounded-lg border shadow-sm bg-card text-[11px] font-semibold text-foreground flex items-center gap-2">
-                <Paintbrush className="h-3 w-3 text-primary" />
-                Placing: {furnitureTemplate.name}
-                <button onClick={() => { setFurnitureTemplate(null); switchTool("select"); }}
-                  className="ml-1 text-muted-foreground hover:text-foreground">
-                  <X className="h-3 w-3" />
-                </button>
+            <div data-testid="furniture-placement-instruction" className="absolute top-4 left-1/2 -translate-x-1/2 z-20 pointer-events-none">
+              <div className="px-3 py-1.5 rounded-lg border shadow-sm bg-card text-[11px] font-semibold text-foreground">
+                Click to place {furnitureTemplate.name} · Esc to cancel
               </div>
             </div>
           )}
@@ -9120,6 +12465,24 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
             <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20">
               <div className="px-3 py-1.5 rounded-lg border shadow-sm bg-card text-[11px] font-semibold text-foreground">
                 Click again to finish wall · Shift-click to continue · Esc to cancel
+              </div>
+            </div>
+          )}
+
+          {/* Physical Room placement feedback mirrors the navigation-tool pill
+              and describes the actual click-drag interaction. */}
+          {tool === "room" && (
+            <div data-testid="room-placement-instruction" className="absolute top-4 left-1/2 -translate-x-1/2 z-20 pointer-events-none">
+              <div className="px-3 py-1.5 rounded-lg border shadow-sm bg-card text-[11px] font-semibold text-foreground">
+                Click and drag to place Room · Esc to cancel
+              </div>
+            </div>
+          )}
+
+          {roomDoorLinking && (
+            <div data-testid="room-door-link-instruction" className="absolute top-4 left-1/2 -translate-x-1/2 z-20 pointer-events-none">
+              <div className="px-3 py-1.5 rounded-lg border border-primary/30 shadow-sm bg-card text-[11px] font-semibold text-foreground">
+                Select a Door for this Room · Esc to cancel
               </div>
             </div>
           )}
@@ -9314,30 +12677,73 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
           </div>
 
           {/* Test Navigation panel — slides up over the canvas */}
-          <AnimatePresence>
+          <AnimatePresence initial={false}>
             {showNavOverlay && testNavOpen && (
               <motion.div
-                initial={{ opacity: 0, x: 8, y: 6 }}
+                initial={{ opacity: 0, x: 0, y: 0 }}
                 animate={{ opacity: 1, x: 0, y: 0 }}
                 exit={{ opacity: 0, x: 8, y: 6 }}
                 transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
                 className={cn(
-                  "absolute top-3 z-40 flex h-[min(620px,calc(100%-24px))] max-h-[calc(100%-24px)] w-80 max-w-[calc(100%-24px)] overflow-hidden rounded-xl border border-border bg-card shadow-xl",
-                  showProperties ? "right-[16.5rem]" : "right-3",
+                  "absolute top-3 z-40 flex max-w-[calc(100%-24px)]",
+                  testRouteCompact
+                    ? "h-auto max-h-none w-[420px] overflow-visible"
+                    : "h-[min(620px,calc(100%-24px))] max-h-[calc(100%-24px)] w-80 overflow-hidden rounded-xl border border-border bg-card shadow-xl",
                 )}
+                style={{
+                  background: testRouteCompact ? "transparent" : undefined,
+                  boxShadow: testRouteCompact ? "none" : undefined,
+                  left: "auto",
+                  bottom: "auto",
+                  right: showProperties ? "264px" : "12px",
+                  transformOrigin: "top right",
+                  width: testRouteCompact ? "min(420px, calc(100% - 24px))" : "320px",
+                  height: testRouteCompact ? "auto" : undefined,
+                  transition: "right 180ms cubic-bezier(0.16, 1, 0.3, 1), width 160ms cubic-bezier(0.16, 1, 0.3, 1), height 160ms cubic-bezier(0.16, 1, 0.3, 1)",
+                }}
               >
                 <TestNavigationPanel
                   campus={campus}
-                  onHighlightRoute={() => {}}
+                  onHighlightRoute={setHighlightedRoute}
+                  inspectorVisible={showProperties}
+                  onCompactModeChange={setTestRouteCompact}
+                  currentBuildingId={buildingId}
+                  currentFloorId={floorId}
+                  onPickOnMap={(kind) => { setTestRoutePickKind(kind); setTestRoutePickHover(null); }}
+                  mapPickResult={testRouteMapPick}
+                  onMapPickResultConsumed={() => setTestRouteMapPick(null)}
                   onFocusNode={(nodeId) => {
                     const n = indoorNodes.find((x) => x.id === nodeId);
                     if (n) zoomToFit(Math.max(0, n.x - 60), Math.max(0, n.y - 60), 120, 120, 48);
                   }}
-                  onClose={() => setTestNavOpen(false)}
+                  onRouteStartFocus={(nodeId, context) => {
+                    if (context.kind === "outdoor") {
+                      handleBack();
+                      return;
+                    }
+                    if (context.buildingId === buildingId && context.floorId === floorId) {
+                      const n = indoorNodes.find((x) => x.id === nodeId);
+                      if (n) zoomToFit(Math.max(0, n.x - 140), Math.max(0, n.y - 110), 280, 220, 72);
+                      return;
+                    }
+                    if (context.buildingId === buildingId && context.floorId) {
+                      requestFloorSwitch(context.floorId);
+                      return;
+                    }
+                    if (context.buildingId && context.floorId && onOpenFloor) {
+                      guardNavigation(() => onOpenFloor(context.buildingId!, context.floorId!));
+                      return;
+                    }
+                    handleBack();
+                  }}
+                  onRouteTransitionCancel={cancelElevatorTransition}
+                  onClose={() => { cancelElevatorTransition(); setTestNavOpen(false); testRouteSessionContext.setSession(null); setTestRouteCompact(false); setHighlightedRoute(null); setTestRoutePickKind(null); setTestRouteMapPick(null); setTestRoutePickHover(null); }}
+                  currentContext={{ kind: "floor", buildingId, floorId }}
                 />
               </motion.div>
             )}
           </AnimatePresence>
+          </div>
         </motion.div>
 
         {/* ── PROPERTIES PANEL ── */}
@@ -9505,7 +12911,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
             onUpdateNode={(id, ch) => commitNavGraph(indoorNodes.map((n) => n.id === id ? { ...n, ...ch } : n), indoorEdges)}
             onUpdateEdge={(id, ch) => commitNavGraph(indoorNodes, indoorEdges.map((e) => e.id === id ? { ...e, ...ch } : e))}
             onDelete={() => deleteNavSelection()}
-            onClose={() => { setNavSelected(null); setNavMultiSelected([]); }}
+            onClose={() => { setNavSelected(null); setNavMultiSelected([]); setShowProperties(false); }}
             onAddBend={addBendToEdge}
             onRemoveBend={removeBendFromEdge}
             onStraighten={straightenEdge}
@@ -9580,7 +12986,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
         )}
         </AnimatePresence>
         <AnimatePresence initial={false}>
-        {showProperties && multiSelected.length <= 1 && selected && (
+        {showProperties && multiSelected.length <= 1 && selected && (!navMode || (navMode && navTool === "select" && !navSelected)) && (
           <motion.div
             key="floor-properties"
             initial={{ opacity: 0, x: 10 }}
@@ -9607,19 +13013,36 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
             circulationGroups={circulationGroups}
             circulationNavStatus={circulationNavStatus}
             physicalNavStatus={physicalNavStatus}
+            roomDoorStatus={roomDoorStatus}
             entranceConnectionStatus={selectedDoorEntranceStatus}
             onAddPhysicalToNavigation={addPhysicalToNavigation}
             onViewPhysicalInNavigation={viewPhysicalInNavigation}
             onRemovePhysicalFromNavigation={removePhysicalFromNavigation}
+            onLinkRoomDoor={beginRoomDoorLink}
+            onSelectRoomDoor={selectRoomDoor}
+            onRemoveRoomDoor={removeRoomDoor}
+            onHoverRoomDoor={setRoomDoorInspectorHoverId}
             onCirculationGroupChange={assignCirculationGroup}
+            onElevatorConnectionChange={changeElevatorConnection}
+            onElevatorConnectionsChange={connectElevatorConnections}
+            onElevatorConnectionDisconnect={disconnectElevatorConnection}
+            onElevatorConnectionsDisconnectAll={disconnectAllElevatorConnections}
+            onStairConnectionChange={changeStairConnection}
+            onStairConnectionsChange={connectMatchingStairConnections}
+            onStairConnectionDisconnect={disconnectStairConnection}
             onCreateCirculationGroup={createCirculationGroup}
             onRenameCirculationGroup={renameCirculationGroup}
             onGoToFloor={(targetFloorId) => requestFloorSwitch(targetFloorId)}
             onUpdateRoom={(id, ch) => { updFloor(rooms.map((r) => r.id === id ? { ...r, ...ch } : r), fpaths); }}
             onUpdateWall={(id, ch) => {
-              // B7 QA: track last-used wall color for authoring default.
-              if ("color" in ch && typeof ch.color === "string") lastWallColorRef.current = ch.color;
+              if ("color" in ch && typeof ch.color === "string") lastWallStyleRef.current = { ...lastWallStyleRef.current, color: ch.color };
+              if ("thickness" in ch && typeof ch.thickness === "number") lastWallStyleRef.current = { ...lastWallStyleRef.current, thickness: ch.thickness };
+              if ("material" in ch && typeof ch.material === "string") lastWallStyleRef.current = { ...lastWallStyleRef.current, material: ch.material };
               updFloor(rooms, fpaths, walls.map((w) => w.id === id ? { ...w, ...ch } : w));
+            }}
+            onApplyWallStyleToFloor={(style) => {
+              lastWallStyleRef.current = style;
+              updFloor(rooms, fpaths, walls.map((wall) => ({ ...wall, ...style })));
             }}
             onUpdateDoor={(id, ch) => {
               const door = doors.find((d) => d.id === id);
@@ -9694,7 +13117,21 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onSwitchFloor
               }));
             }}
             onUpdateFurniture={(id, ch) => { updFloor(rooms, fpaths, walls, doors, windows, furniture.map((f) => f.id === id ? { ...f, ...ch } : f)); }}
-            onUpdateStairs={(id, ch) => { updFloor(rooms, fpaths, walls, doors, windows, furniture, stairs.map((s) => s.id === id ? { ...s, ...ch } : s)); }}
+            onUpdateStairs={(id, ch) => {
+              const current = stairs.find((stair) => stair.id === id);
+              // Continuation identity is authored only by the explicit Stair
+              // connection controls.  Never let a Direction/property update
+              // carry a stale sharedId and accidentally absorb another
+              // occurrence during graph reconciliation.
+              const safeChanges = { ...ch };
+              if ("sharedId" in safeChanges) delete (safeChanges as Partial<FloorStairs>).sharedId;
+              const generatedLabel = "flip" in safeChanges && isDefaultStairLabel(current?.label)
+                ? stairLabelForEntrySide(safeChanges.flip)
+                : undefined;
+              updFloor(rooms, fpaths, walls, doors, windows, furniture, stairs.map((s) => s.id === id
+                ? { ...s, ...safeChanges, ...(generatedLabel ? { label: generatedLabel } : {}) }
+                : s));
+            }}
             onUpdateRamp={(id, ch) => { updFloor(rooms, fpaths, walls, doors, windows, furniture, stairs, elevators, labels, ramps.map((r) => r.id === id ? { ...r, ...ch } : r)); }}
             onUpdateElevator={(id, ch) => { updFloor(rooms, fpaths, walls, doors, windows, furniture, stairs, elevators.map((e) => e.id === id ? { ...e, ...ch } : e)); }}
             onUpdateLabel={updateLabel}

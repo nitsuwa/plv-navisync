@@ -159,7 +159,7 @@ describe("locationsFromCampus", () => {
     const locations = locationsFromCampus(makeCampus());
     expect(locations.some((l) => l.id === "campus-b1" && l.type === "landmark")).toBe(true);
     expect(locations.some((l) => l.id === "campus-ent1" && l.name === "South Door" && l.type === "entrance")).toBe(true);
-    expect(locations.find((l) => l.id === "campus-ent1")?.description).toBe("Primary General Entrance of Main Academic Building");
+    expect(locations.find((l) => l.id === "campus-ent1")?.description).toBe("Primary General Access of Main Academic Building");
   });
 
   it("skips structural rooms (hallway, stairs, elevator) but keeps destinations", () => {

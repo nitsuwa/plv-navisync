@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, act } from "@testing-library/react";
+import { render, screen, fireEvent, act, waitFor, within } from "@testing-library/react";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { Toaster, toast } from "sonner";
 import type { Campus } from "../../components/map-builder/types";
@@ -15,6 +15,7 @@ vi.mock("../../services/campusService", () => ({
     update: vi.fn(),
     archive: vi.fn(),
     restore: vi.fn(),
+    permanentlyDelete: vi.fn(),
     getById: vi.fn(),
     selectActive: vi.fn(),
     listVersions: vi.fn(),
@@ -649,5 +650,46 @@ describe("AdminMapBuilderPage — campus lifecycle", () => {
     expect(screen.getByRole("menuitem", { name: /archive/i })).toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: /delete/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /delete campus/i })).not.toBeInTheDocument();
+  });
+
+  it("DUPLICATE: saves a real draft structure and refreshes the authoritative campus list", async () => {
+    const source = makeCampus({ canvasConfigured: true });
+    const copy = makeCampus({ id: "campus-copy", name: "Main Campus (Copy)", code: "MAIN-CP", canvasConfigured: true });
+    (campusService.list as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce([source])
+      .mockResolvedValueOnce([source, copy]);
+    (campusStructureService.load as ReturnType<typeof vi.fn>).mockResolvedValue(source);
+    (campusService.create as ReturnType<typeof vi.fn>).mockResolvedValue(copy);
+    (campusStructureService.save as ReturnType<typeof vi.fn>).mockResolvedValue(copy);
+
+    renderPage();
+    await flush();
+    fireEvent.click(screen.getByRole("button", { name: /actions for main campus/i }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /duplicate campus/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^duplicate$/i }));
+
+    await waitFor(() => expect(campusStructureService.save).toHaveBeenCalled());
+    await waitFor(() => expect(campusService.list).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText("Main Campus (Copy)")).toBeInTheDocument();
+    expect(campusService.create).toHaveBeenCalledWith(expect.objectContaining({ name: "Main Campus (Copy)", code: "MAIN-CP", is_default: false }));
+  });
+
+  it("DELETE: archived campus calls the authoritative RPC service and refreshes the list", async () => {
+    const archived = makeCampus({ id: "campus-archived", name: "Archived Campus", status: "archived", lifecycleStatus: "archived" });
+    (campusService.list as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce([archived])
+      .mockResolvedValueOnce([]);
+    (campusService.permanentlyDelete as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+
+    renderPage();
+    await flush();
+    fireEvent.click(screen.getByRole("button", { name: /actions for archived campus/i }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /delete permanently/i }));
+    const dialog = screen.getByRole("dialog", { name: /permanently delete this campus/i });
+    fireEvent.change(screen.getByRole("textbox", { name: /type archived campus to confirm/i }), { target: { value: "Archived Campus" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: /delete permanently/i }));
+
+    await waitFor(() => expect(campusService.permanentlyDelete).toHaveBeenCalledWith("campus-archived"));
+    await waitFor(() => expect(campusService.list).toHaveBeenCalledTimes(2));
   });
 });

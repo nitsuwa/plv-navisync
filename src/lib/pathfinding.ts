@@ -373,7 +373,21 @@ export { NODES, EDGES, BUILDING_ENTRANCE_MAP };
  * the same transitionSharedId, enabling multi-floor pathfinding.
  */
 export function buildTransitionEdges(
-  navNodes: { id: string; x: number; y: number; name?: string; transitionSharedId?: string; floorId?: string }[],
+  navNodes: {
+    id: string;
+    x: number;
+    y: number;
+    name?: string;
+    transitionSharedId?: string;
+    floorId?: string;
+    type?: string;
+    stairId?: string;
+    elevatorId?: string;
+    /** Optional emergency override for a transition-capable physical node. */
+    emergencySafe?: boolean;
+    emergencyStair?: boolean;
+    accessible?: boolean;
+  }[],
   navEdges: {
     startNodeId: string;
     endNodeId: string;
@@ -435,8 +449,12 @@ export function buildTransitionEdges(
     if (hasPersistedTransition) continue;
 
     // Determine type from IDs — elevator or stairs
-    const isElevator = sharedId.includes("el_");
-    const virtualDist = 5; // Short virtual distance for floor transitions
+    const isElevator = nodes.some((node) => node.elevatorId || node.type === "elevator")
+      || sharedId.toLowerCase().includes("el_");
+    // Designated emergency stairs are the preferred emergency egress when a
+    // valid route exists.  This is only a cost hint on the existing virtual
+    // transition edges; it does not alter A* or create a second graph.
+    const virtualDist = nodes.some((node) => node.emergencyStair === true) ? 1 : 5;
 
     for (let i = 0; i < nodes.length; i++) {
       for (let j = i + 1; j < nodes.length; j++) {
@@ -449,7 +467,13 @@ export function buildTransitionEdges(
           endNodeId: b.id,
           distance: virtualDist,
           bidirectional: true,
-          accessible: isElevator, // Elevator transitions are always accessible
+          accessible: isElevator && nodes.every((node) => node.accessible !== false),
+          // Stairs are a valid emergency egress by default. Elevators are
+          // intentionally opt-in until their physical/transition metadata
+          // explicitly marks them emergency-safe.
+          emergencySafe: isElevator
+            ? nodes.some((node) => node.emergencySafe === true)
+            : nodes.every((node) => node.emergencySafe !== false),
         };
         extraEdges.push(edge);
       }
@@ -460,7 +484,23 @@ export function buildTransitionEdges(
 }
 
 export function findNavigationRoute(
-  navNodes: { id: string; x: number; y: number; name?: string; transitionSharedId?: string; floorId?: string }[],
+  navNodes: {
+    id: string;
+    x: number;
+    y: number;
+    name?: string;
+    transitionSharedId?: string;
+    floorId?: string;
+    type?: string;
+    accessible?: boolean;
+    stairId?: string;
+    elevatorId?: string;
+    /** Optional emergency override for a transition-capable physical node. */
+    emergencySafe?: boolean;
+    emergencyStair?: boolean;
+    rampId?: string;
+    entranceId?: string;
+  }[],
   navEdges: {
     startNodeId: string;
     endNodeId: string;
@@ -474,9 +514,32 @@ export function findNavigationRoute(
   fromNodeId: string,
   toNodeId: string,
   accessibleOnly = false,
-  emergencySafeOnly = false
+  emergencySafeOnly = false,
+  options: {
+    /** Standard-mode hint for choosing one kind of cross-floor transition. */
+    transitionPreference?: "stairs" | "elevator";
+    /** When an Elevator is explicitly selected as an endpoint, keep
+     * intermediate Elevator travel on that authored shaft. */
+    preferredElevatorSharedIds?: string[];
+  } = {},
 ): GraphPath | null {
   if (!fromNodeId || !toNodeId) return null;
+  if (accessibleOnly) {
+    const endpointNodes = navNodes.filter((node) => node.id === fromNodeId || node.id === toNodeId);
+    if (endpointNodes.length < 2 && fromNodeId !== toNodeId) return null;
+    if (endpointNodes.some((node) => node.type === "stair" || node.stairId || node.accessible === false)) return null;
+  }
+  const emergencyNodeSafe = (node: typeof navNodes[number] | undefined): boolean => {
+    if (!node) return false;
+    // Ordinary Elevators are not an emergency egress method.  They can only
+    // participate when every occurrence explicitly opts into evacuation use.
+    return !(node.type === "elevator" || node.elevatorId) || node.emergencySafe === true;
+  };
+  if (emergencySafeOnly) {
+    const startNode = navNodes.find((node) => node.id === fromNodeId);
+    const destinationNode = navNodes.find((node) => node.id === toNodeId);
+    if (!emergencyNodeSafe(startNode) || !emergencyNodeSafe(destinationNode)) return null;
+  }
   if (fromNodeId === toNodeId) {
     const node = navNodes.find(n => n.id === fromNodeId);
     if (!node) return null;
@@ -489,37 +552,92 @@ export function findNavigationRoute(
     };
   }
 
-  // Build adjacency list (include emergencySafe for emergency routing)
-  const adj = new Map<string, { nodeId: string; dist: number; accessible: boolean; emergencySafe: boolean }[]>();
+  const nodeMap = new Map<string, typeof navNodes[number]>();
+  for (const n of navNodes) nodeMap.set(n.id, n);
+  const transitionKindFor = (fromId: string, toId: string): "stair" | "elevator" | undefined => {
+    const from = nodeMap.get(fromId);
+    const to = nodeMap.get(toId);
+    if (from?.elevatorId || to?.elevatorId || from?.type === "elevator" || to?.type === "elevator") return "elevator";
+    if (from?.stairId || to?.stairId || from?.type === "stair" || to?.type === "stair") return "stair";
+    const sharedId = from?.transitionSharedId && from.transitionSharedId === to?.transitionSharedId
+      ? from.transitionSharedId.toLowerCase()
+      : "";
+    if (sharedId.includes("el_")) return "elevator";
+    if (sharedId.includes("stair") || sharedId.includes("st_")) return "stair";
+    return undefined;
+  };
+  const transitionSharedIdFor = (fromId: string, toId: string): string | undefined => {
+    const from = nodeMap.get(fromId);
+    const to = nodeMap.get(toId);
+    return from?.transitionSharedId && from.transitionSharedId === to?.transitionSharedId
+      ? from.transitionSharedId
+      : undefined;
+  };
+  const preferredTransitionKind = options.transitionPreference === "stairs" ? "stair" : options.transitionPreference;
+  type NavigationNeighbor = {
+    nodeId: string;
+    dist: number;
+    accessible: boolean;
+    emergencySafe: boolean;
+    transitionKind?: "stair" | "elevator";
+    transitionSharedId?: string;
+  };
+  const adj = new Map<string, NavigationNeighbor[]>();
+  const addNeighbor = (fromId: string, toId: string, distance: number, accessible: boolean, emergencySafe: boolean, isTransition: boolean) => {
+    const transitionKind = isTransition ? transitionKindFor(fromId, toId) : undefined;
+    const transitionSharedId = transitionKind === "elevator" ? transitionSharedIdFor(fromId, toId) : undefined;
+    const preferencePenalty = preferredTransitionKind
+      && transitionKind
+      && transitionKind !== preferredTransitionKind
+      ? 1_000_000
+      : 0;
+    if (!adj.has(fromId)) adj.set(fromId, []);
+    adj.get(fromId)!.push({
+      nodeId: toId,
+      dist: distance + preferencePenalty,
+      accessible,
+      emergencySafe,
+      transitionKind,
+      transitionSharedId,
+    });
+  };
   for (const edge of navEdges) {
     // Closed/unavailable connections are never traversable, regardless of
     // route mode.  The editor exposes this flag as the canonical availability
     // control for authored walking paths and floor transitions.
     if (edge.closed === true) continue;
-    if (!adj.has(edge.startNodeId)) adj.set(edge.startNodeId, []);
-    if (!adj.has(edge.endNodeId)) adj.set(edge.endNodeId, []);
     const safe = edge.emergencySafe !== false; // default to safe if not set
-    adj.get(edge.startNodeId)!.push({ nodeId: edge.endNodeId, dist: edge.distance, accessible: edge.accessible, emergencySafe: safe });
+    const isTransition = edge.type === "floor_transition" || edge.type === "cross_floor";
+    addNeighbor(edge.startNodeId, edge.endNodeId, edge.distance, edge.accessible, safe, isTransition);
     if (edge.bidirectional) {
-      adj.get(edge.endNodeId)!.push({ nodeId: edge.startNodeId, dist: edge.distance, accessible: edge.accessible, emergencySafe: safe });
+      addNeighbor(edge.endNodeId, edge.startNodeId, edge.distance, edge.accessible, safe, isTransition);
     }
   }
 
   // Add virtual floor-transition edges from shared stair/elevator IDs
   const transitionEdges = buildTransitionEdges(navNodes, navEdges);
   for (const edge of transitionEdges) {
-    if (!adj.has(edge.startNodeId)) adj.set(edge.startNodeId, []);
-    if (!adj.has(edge.endNodeId)) adj.set(edge.endNodeId, []);
     const safe = edge.emergencySafe !== false;
-    adj.get(edge.startNodeId)!.push({ nodeId: edge.endNodeId, dist: edge.distance, accessible: edge.accessible, emergencySafe: safe });
+    addNeighbor(edge.startNodeId, edge.endNodeId, edge.distance, edge.accessible, safe, true);
     if (edge.bidirectional) {
-      adj.get(edge.endNodeId)!.push({ nodeId: edge.startNodeId, dist: edge.distance, accessible: edge.accessible, emergencySafe: safe });
+      addNeighbor(edge.endNodeId, edge.startNodeId, edge.distance, edge.accessible, safe, true);
     }
   }
 
-  // Node position map for heuristic
-  const nodeMap = new Map<string, { x: number; y: number; name?: string }>();
-  for (const n of navNodes) nodeMap.set(n.id, n);
+  // Keep canonical node accessibility beside its position.  Accessible mode
+  // must reject semantic nodes (especially Stairs) even when a legacy local
+  // edge was incorrectly persisted as accessible.
+  const accessibleNode = (node: typeof navNodes[number] | undefined): boolean => {
+    if (!node) return false;
+    if (node.type === "stair" || node.stairId) return false;
+    return node.accessible !== false;
+  };
+
+  if (accessibleOnly) {
+    const startNode = navNodes.find((node) => node.id === fromNodeId);
+    const destinationNode = navNodes.find((node) => node.id === toNodeId);
+    if (!accessibleNode(startNode) || !accessibleNode(destinationNode)) return null;
+  }
 
   const h = (a: string, b: string): number => {
     const na = nodeMap.get(a);
@@ -598,10 +716,19 @@ export function findNavigationRoute(
     closed.add(current.id);
 
     const neighbors = adj.get(current.id) ?? [];
-    for (const { nodeId: neighborId, dist, accessible, emergencySafe } of neighbors) {
+    for (const { nodeId: neighborId, dist, accessible, emergencySafe, transitionKind, transitionSharedId } of neighbors) {
       if (closed.has(neighborId)) continue;
+      if (transitionKind === "elevator" && options.preferredElevatorSharedIds?.length) {
+        // Exact endpoint identity wins over geometric convenience: a selected
+        // Elevator may use its own authored shaft, while Stairs remain an
+        // independent valid fallback when the Standard preference asks for
+        // them or the selected shaft cannot reach the target.
+        if (!transitionSharedId || !options.preferredElevatorSharedIds.includes(transitionSharedId)) continue;
+      }
       if (accessibleOnly && !accessible) continue;
+      if (accessibleOnly && !accessibleNode(navNodes.find((node) => node.id === neighborId))) continue;
       if (emergencySafeOnly && !emergencySafe) continue;
+      if (emergencySafeOnly && !emergencyNodeSafe(navNodes.find((node) => node.id === neighborId))) continue;
 
       const tentG = current.g + dist;
       const existing = open.get(neighborId);

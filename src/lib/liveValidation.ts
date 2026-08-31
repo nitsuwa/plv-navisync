@@ -46,7 +46,7 @@ function legacySeverity(type: string): "error" | "warning" | "info" {
  * building geometry (identical derivation).
  */
 export function computeLiveValidationIssues(campus: Campus, overlaps?: Set<string>): ValidationIssue[] {
-  const errs = validateCampusData(campus, overlaps);
+  const errs = validateCampusData(campus, overlaps, campus.features?.emergencyRoutes === true);
   const campusIssues = errs.map((e) => ({
     ...e,
     severity: (e.severity ?? legacySeverity(e.type)) as "error" | "warning" | "info",

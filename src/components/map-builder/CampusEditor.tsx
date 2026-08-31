@@ -21,7 +21,7 @@ import { useToast } from "../../hooks/useToast";
 import type { ValidationIssue } from "./ValidationErrorsDialog";
 import { ContextMenu } from "./ContextMenu";
 import { PrePublishDialog } from "./PrePublishDialog";
-import { TestNavigationPanel } from "./TestNavigationPanel";
+import { TestNavigationPanel, useTestRouteSession, type TestRouteHighlight, type TestRouteTransitionMarker } from "./TestNavigationPanel";
 import { ShortcutCheatSheet } from "./ShortcutCheatSheet";
 import { UnsavedChangesDialog } from "./UnsavedChangesDialog";
 import { useUnsavedChangesGuard } from "./useUnsavedChangesGuard";
@@ -29,21 +29,22 @@ import { IssuesPopover } from "./IssuesPopover";
 import type {
   Campus, CampusBuilding, CampusMarker, CampusSelection,
   SimpleTool, EditorLayer, RubberBand, CampusRoute, CampusPath,
-  CampusDecorAsset, BuildingTypeDescriptor, CampusEntrance, NavigationNode, NavigationEdge, FloorSelection,
+  CampusDecorAsset, BuildingTypeDescriptor, CampusEntrance, NavigationNode, NavigationEdge, FloorSelection, ExteriorEmergencyStair,
 } from "./types";
 import { BUILDING_TYPE_MAP, DECOR_ASSET_MAP } from "./constants";
 import { ToolbarTooltip } from "./ToolbarTooltip";
 import { validateCampusData, computeBuildingOverlaps } from "../../lib/campusValidation";
+import { nextDefaultBuildingIdentity, type BuildingIdentity } from "../../lib/buildingDefaults";
 import { computeLiveValidationIssues, validationIssuesForCampusSelection, validationIssuesForBuilding } from "../../lib/liveValidation";
 import { validationIssuesToItems } from "./ObjectIssueSection";
 import { resolveIssueTarget, issueKey, floorSelectionForTarget, resolveIssueLocateTarget, polylineMidpoint } from "../../lib/issueLocate";
 import type { IssueTarget } from "./ValidationErrorsDialog";
-import { computeBuildingPlacement, resetTransientToolState, pointInBuilding, polylineCrossesObstacle, polylineCrossesPlacedObject } from "../../lib/editorPlacement";
+import { computeBuildingPlacement, resetTransientToolState, pointInBuilding, polylineCrossesBuilding, polylineCrossesObstacle } from "../../lib/editorPlacement";
 import { computeGroupTranslation, groupBBoxAfterTranslation, computeGroupAlignmentGuides, snapRectToVisibleBounds } from "../../lib/campusGroupMove";
 import {
   createNavNode, createNavEdge, findDuplicateNavEdge, isSelfEdge, removeNavNode, findNavNodeAtPoint,
   findEntranceNavNode, navGraphSelectionIdsInRect, syncEntranceNodePositions, pruneOrphanedEntranceNodes,
-  outdoorNavNodes, outdoorNavEdges, findNavEdgeAtPoint, nearestPointOnEdgePolyline,
+  outdoorNavNodes, outdoorNavEdges, findNavEdgeAtPoint, nearestPointOnEdgePolyline, NAV_NODE_HIT_THRESHOLD,
   translateSelectedNavGraph, navGroupSelectionBounds, applyBulkRoutingAction,
 } from "../../lib/navigationGraph";
 import type { GroupMoveMember } from "../../lib/campusGroupMove";
@@ -53,18 +54,26 @@ import { duplicateDecorAsset } from "../../lib/decorAsset";
 import { decorRenderScale, decorWorldSize } from "../../lib/decorVisual";
 import { outdoorGroupSelectionBounds, outdoorSelectionIdsInRect, pathSelectionBounds, selectionRectFromPoints } from "../../lib/campusSelection";
 import { arrangeSelectedOutdoorObjects, selectedOutdoorCount, type OutdoorArrangementAction } from "../../lib/campusArrangement";
-import { defaultEntrance, normalizeBuildingEntrances, promotePrimaryEntrance, pointerToEntranceAttachment, updateBuildingEntrance, entranceWorldPosition, findEntranceAtPoint, entranceDisplayName } from "../../lib/buildingEntrances";
+import { alignEntranceAttachment, defaultEntrance, normalizeBuildingEntrances, promotePrimaryEntrance, updateBuildingEntrance, entranceWorldPosition, findEntranceAtPoint, entranceDisplayName } from "../../lib/buildingEntrances";
+import { createDefaultFloor } from "../../lib/floorPlanNormalization";
 import { navEdgePolylineDistance, orthogonalBendsFor, translateOrthogonalSegment, translateStraightSegment, normalizeBendPoints, edgePolylinePoints, navAlignSnap } from "../../lib/indoorNavigationGraph";
 import {
   doorNodeForEdge,
+  entranceOutdoorLinkStatus,
   entranceIndoorLinkStatus,
+  entryFloorForBuilding,
   findEntranceTransitionForDoor,
+  findEntranceOutdoorConnection,
   indoorDoorOptionsForEntrance,
   linkEntranceToIndoorDoor,
   reconcileEntranceTransitions,
+  reconcileEntranceOutdoorConnections,
+  removeEntranceOutdoorConnection,
   removeEntranceIndoorConnection,
 } from "../../lib/entranceTransitions";
-import { convertPathwaysToNavigation, pathwayHasLegacyNavigationChain, reconcilePathwayNavigation } from "../../lib/campusPathNavigation";
+import { entranceConnectorDistance, entranceConnectorGeometry } from "../../lib/entranceConnector";
+import { syncExteriorEmergencyStairGraph } from "../../lib/exteriorEmergencyStairs";
+import { convertPathwaysToNavigation, pathwayHasLegacyNavigationChain, pathwayHasOwnedNavigation, reconcilePathwayNavigation } from "../../lib/campusPathNavigation";
 import {
   isPathwayGeneratedEdge,
   isPathwayGeneratedNode,
@@ -355,7 +364,10 @@ const closestPointOnSegment = (point: { x: number; y: number }, a: { x: number; 
   const lenSq = dx * dx + dy * dy;
   if (lenSq <= 0) return { point: { x: a.x, y: a.y }, t: 0, distance: Math.hypot(point.x - a.x, point.y - a.y) };
   const t = Math.max(0, Math.min(1, ((point.x - a.x) * dx + (point.y - a.y) * dy) / lenSq));
-  const projected = { x: Math.round(a.x + t * dx), y: Math.round(a.y + t * dy) };
+  // Keep the true projection. Physical Pathway/manual-path connection points
+  // must lie on the selected segment; rounding a diagonal projection can move
+  // the inserted vertex visibly off the line.
+  const projected = { x: a.x + t * dx, y: a.y + t * dy };
   return { point: projected, t, distance: Math.hypot(point.x - projected.x, point.y - projected.y) };
 };
 const constrainTo45Degrees = (start: { x: number; y: number }, rawEnd: { x: number; y: number }, canvasW: number, canvasH: number) => {
@@ -385,6 +397,8 @@ interface CampusEditorProps {
   onUpdate: (c: Campus) => void;
   onSave?: (c: Campus) => Promise<Campus>;
   onPublish: (c: Campus) => void;
+  /** Open the read-only Student Preview; the page handles Save & Preview. */
+  onPreviewStudent?: (c: Campus, isDirty: boolean) => void | Promise<void>;
   publishingEnabled?: boolean;
   onOpenFloor: (buildingId: string, floorId: string, initialSelection?: FloorSelection) => void;
   onAddBuilding: () => void;
@@ -400,11 +414,24 @@ interface CampusEditorProps {
   savedSnapshot?: string;
 }
 
-export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publishingEnabled = true, onOpenFloor, onAddBuilding, onOpenCanvasSettings, savedSnapshot }: CampusEditorProps) {
+export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPreviewStudent, publishingEnabled = true, onOpenFloor, onAddBuilding, onOpenCanvasSettings, savedSnapshot }: CampusEditorProps) {
   const campusRef = useRef(campus);
   useEffect(() => { campusRef.current = campus; }, [campus]);
+  // `save_campus_structure` retires removed Buildings as archived rows. Their
+  // campus/code uniqueness key remains occupied, so keep every generated
+  // default identity reserved until this campus editor session ends.
+  const defaultBuildingReservationsRef = useRef<{ campusId: string; values: BuildingIdentity[] } | null>(null);
+  if (defaultBuildingReservationsRef.current?.campusId !== campus.id) {
+    defaultBuildingReservationsRef.current = {
+      campusId: campus.id,
+      values: (campus.buildings ?? []).map(({ name, code }) => ({ name, code })),
+    };
+  }
   const [tool, setTool] = useState<SimpleTool>("select");
   const [selected, setSelected] = useState<CampusSelection | null>(null);
+  const [propertiesOpen, setPropertiesOpen] = useState(false);
+  const [propertiesDismissed, setPropertiesDismissed] = useState(false);
+  const [hoveredPathId, setHoveredPathId] = useState<string | null>(null);
   const [drawingPath, setDP] = useState<{ x: number; y: number }[]>([]);
   // ── B5 Phase 1: navigation-layer Path tool = edge authoring. navConnectStart
   // is the node the admin is connecting FROM; navPreview is the live pointer
@@ -412,19 +439,88 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
   const [navConnectStart, setNavConnectStart] = useState<string | null>(null);
   const [navConnectBends, setNavConnectBends] = useState<{ x: number; y: number }[]>([]);
   const [navPreview, setNavPreview] = useState<{ x: number; y: number } | null>(null);
+  // Connect preview is transient UI. Keep the latest pointer result in refs and
+  // flush it at most once per animation frame so a busy Outdoor canvas does not
+  // rerender the entire editor for every mouse event.
+  const connectPreviewFrameRef = useRef<number | null>(null);
+  const connectPreviewPendingRef = useRef<{
+    point: { x: number; y: number } | null;
+    pins: { x: number; y: number }[];
+    blocked: boolean;
+  } | null>(null);
+  const connectPreviewFrameKindRef = useRef<"raf" | "timeout" | null>(null);
+  const cancelConnectPreviewFrame = useCallback(() => {
+    const frame = connectPreviewFrameRef.current;
+    if (frame !== null) {
+      if (connectPreviewFrameKindRef.current === "raf" && typeof window !== "undefined") {
+        window.cancelAnimationFrame(frame);
+      } else if (typeof window !== "undefined") {
+        window.clearTimeout(frame);
+      }
+      connectPreviewFrameRef.current = null;
+      connectPreviewFrameKindRef.current = null;
+    }
+    connectPreviewPendingRef.current = null;
+  }, []);
+  const queueConnectPreview = useCallback((
+    point: { x: number; y: number } | null,
+    pins: { x: number; y: number }[] = [],
+    blocked = false,
+  ) => {
+    connectPreviewPendingRef.current = { point, pins, blocked };
+    if (connectPreviewFrameRef.current !== null || typeof window === "undefined") return;
+    const flush = () => {
+      connectPreviewFrameRef.current = null;
+      connectPreviewFrameKindRef.current = null;
+      const pending = connectPreviewPendingRef.current;
+      if (!pending) return;
+      setNavPreview(pending.point);
+      setNavPreviewPins(pending.pins);
+      setConnectBlocked(pending.blocked);
+    };
+    if (typeof window.requestAnimationFrame === "function") {
+      connectPreviewFrameKindRef.current = "raf";
+      connectPreviewFrameRef.current = window.requestAnimationFrame(flush);
+    } else {
+      connectPreviewFrameKindRef.current = "timeout";
+      connectPreviewFrameRef.current = window.setTimeout(flush, 0);
+    }
+  }, []);
+  useEffect(() => () => cancelConnectPreviewFrame(), [cancelConnectPreviewFrame]);
   // ── B5 Phase 6.9: the FULL proposed pin shape for the current pointer (the
   // exact geometry a click would pin) — the preview renders this so what the
   // user sees before clicking is what commits (Floor-parity preview == commit).
   const [navPreviewPins, setNavPreviewPins] = useState<{ x: number; y: number }[]>([]);
   // ── B5 Phase 6.1: edge snap preview for waypoint-on-edge insertion ──
-  const [waypointEdgeSnap, setWaypointEdgeSnap] = useState<{ edgeId: string; nearest: { x: number; y: number } } | null>(null);
+  const [waypointEdgeSnap, setWaypointEdgeSnap] = useState<{
+    edgeId: string;
+    nearest: { x: number; y: number };
+    /** Entrance-managed connectors are read-only; expose guidance instead of insertion. */
+    helper?: string;
+  } | null>(null);
+  // Connect-path hover captures the exact manual edge segment + projection so
+  // the outdoor mouseup commits the same target the user saw, rather than
+  // resolving a fresh nearest endpoint after the pointer has moved slightly.
+  const [navPathTargetHover, setNavPathTargetHover] = useState<{
+    edgeId: string;
+    segmentIndex: number;
+    point: { x: number; y: number };
+  } | null>(null);
   // ── B5 Phase 6.2: outdoor Connect blocked preview ──
   const [connectBlocked, setConnectBlocked] = useState(false);
   // ── B5 Phase 1.6: entrance target the Add Waypoint / Connect Path tools are
   // currently hovering (highlighted as a special routing target).
   const [navEntranceHover, setNavEntranceHover] = useState<{ buildingId: string; entranceId: string; x: number; y: number } | null>(null);
+  // Keep the Connect guidance toast scoped to one armed operation. Repeated
+  // clicks on the same Entrance action must not stack identical toasts.
+  const connectGuidanceShownRef = useRef(false);
   const [saveScreen, setSaveScreen] = useState<{ open: boolean; state: "saving" | "success" | "error" }>({ open: false, state: "saving" });
   const [layer, setLayer] = useState<EditorLayer>("campus");
+  useEffect(() => {
+    if (tool !== "path" || layer !== "navigation" || !navConnectStart) {
+      setNavPathTargetHover(null);
+    }
+  }, [layer, navConnectStart, tool]);
   // ── Dirty state: snapshot of last-saved campus ──
   // The page supplies the persisted baseline so a remount after editing floors
   // (when this editor is unmounted) still detects the Floor Editor changes.
@@ -469,6 +565,11 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
   const [selRouteId, setSelRouteId] = useState<string | null>(null);
   // ── Multi-selection ──
   const [multiSelected, setMultiSelected] = useState<string[]>([]);
+  useEffect(() => {
+    setPropertiesDismissed(false);
+    setPropertiesOpen(Boolean(selected || multiSelected.length > 0));
+  }, [selected?.type, selected?.id, multiSelected.join("|")]);
+  const inspectorVisible = !propertiesDismissed && (propertiesOpen || Boolean(selected || multiSelected.length > 0));
   const [rubberBand, setRubberBand] = useState<RubberBand | null>(null);
   const [showAlignTools, setShowAlignTools] = useState(false);
   const [showGroupOutline, setShowGroupOutline] = useState(true);
@@ -488,7 +589,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; type: "building" | "marker" | "path" | "decorAsset"; id: string } | null>(null);
   // Generated junctions can belong to several physical Pathways. Alt-click
   // presents an explicit owner choice instead of guessing from coordinates.
-  const [pathChoiceMenu, setPathChoiceMenu] = useState<{ x: number; y: number; pathIds: string[] } | null>(null);
+  const [pathChoiceMenu, setPathChoiceMenu] = useState<{ x: number; y: number; pathIds: string[]; nodeIds?: string[] } | null>(null);
   // ── Erase/delete confirmation ──
   const [deleteConfirm, setDeleteConfirm] = useState<{ type: "building" | "marker" | "path" | "decorAsset"; id: string; name: string } | null>(null);
   // ── Batch delete confirmation ──
@@ -529,17 +630,74 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
   const [decorResizingId, setDecorResizingId] = useState<string | null>(null);
   // ── Hierarchy panel toggle ──
   const [hierarchyOpen, setHierarchyOpen] = useState(true);
+  const testRouteSessionContext = useTestRouteSession();
+  const { navigationEnabled, setNavigationEnabled } = testRouteSessionContext;
   // ── Test navigation panel (Navigation layer) ──
-  const [testNavOpen, setTestNavOpen] = useState(false);
+  const [testNavOpen, setLocalTestNavOpen] = useState(testRouteSessionContext.open);
+  const setTestNavOpen = useCallback((open: boolean) => {
+    setLocalTestNavOpen(open);
+    testRouteSessionContext.setOpen(open);
+  }, [testRouteSessionContext.setOpen]);
+  useEffect(() => {
+    setLocalTestNavOpen(testRouteSessionContext.open);
+  }, [testRouteSessionContext.open]);
+  const [testRouteCompact, setTestRouteCompact] = useState(() => Boolean(
+    testRouteSessionContext.session?.manualCollapsed
+      || (testRouteSessionContext.session?.hasCalculatedRoute && !testRouteSessionContext.session.manualExpanded),
+  ));
+  const [testRoutePickKind, setTestRoutePickKind] = useState<"start" | "destination" | null>(null);
+  const [testRouteMapPick, setTestRouteMapPick] = useState<{ kind: "start" | "destination"; value: string } | null>(null);
+  const [testRoutePickHover, setTestRoutePickHover] = useState<{ type: "building" | "entrance"; id: string } | null>(null);
+  const routePreview = Boolean(testRouteSessionContext.session?.previewRoute && testRouteSessionContext.session?.result);
+  // Route Preview is presentation-only. Keep the navigation session available
+  // for route rendering, but cancel any in-progress authoring gesture so hidden
+  // graph objects cannot retain stale hit targets while preview is active.
+  useEffect(() => {
+    if (!routePreview) return;
+    setTool("select");
+    connectGuidanceShownRef.current = false;
+    setNavConnectStart(null);
+    setNavConnectBends([]);
+    setNavPreview(null);
+    setNavPreviewPins([]);
+    setNavEntranceHover(null);
+    setWaypointEdgeSnap(null);
+    setConnectBlocked(false);
+    setGuides([]);
+    setSelected(null);
+    setMultiSelected([]);
+    setTestRoutePickKind(null);
+    setTestRoutePickHover(null);
+  }, [routePreview]);
   // ── Routes sidebar panel — NOT auto-opened; user must explicitly toggle ──
   const [showRoutesPanel, setShowRoutesPanel] = useState(false);
   // ── Route highlighted by the test-navigation panel (drawn on the canvas) ──
-  const [highlightedRoute, setHighlightedRoute] = useState<{ waypoints: { x: number; y: number }[]; color: string } | null>(null);
+  const [highlightedRoute, setHighlightedRoute] = useState<TestRouteHighlight | null>(null);
+  // The page-level session is the only source of truth for route presentation.
+  // If a responsive Test Route host unmounts or the session is cleared, remove
+  // any host-local overlay on the same render cycle instead of waiting for the
+  // panel's local state effect to catch up.
+  useEffect(() => {
+    if (!testNavOpen || !testRouteSessionContext.session?.result) setHighlightedRoute(null);
+  }, [testNavOpen, testRouteSessionContext.session?.result]);
   // ── Keyboard shortcut cheat sheet ──
   const [showCheatSheet, setShowCheatSheet] = useState(false);
   // Navigation is a visibility/editing overlay on the Campus workspace. The
   // internal layer still identifies which tool domain owns canvas gestures.
-  const [showCampusNavOverlay, setShowCampusNavOverlay] = useState(false);
+  // Navigation visibility is a campus-scoped editor preference. Campus and
+  // Floor editors remount while moving through the builder, so keeping this
+  // in the existing provider preserves it without saving UI state to campus.
+  // Test Route temporarily forces visibility but never overwrites preference.
+  const [localNavigationEnabled, setLocalNavigationEnabled] = useState(navigationEnabled || testNavOpen);
+  const showCampusNavOverlay = localNavigationEnabled || navigationEnabled || testNavOpen || routePreview;
+  const setShowCampusNavOverlay = useCallback((enabled: boolean) => {
+    if (testNavOpen || routePreview) return;
+    setLocalNavigationEnabled(enabled);
+    setNavigationEnabled(enabled);
+  }, [routePreview, setNavigationEnabled, testNavOpen]);
+  useEffect(() => {
+    setLocalNavigationEnabled(navigationEnabled || testNavOpen);
+  }, [navigationEnabled, testNavOpen]);
   const [groundPaintType, setGroundPaintType] = useState<CampusDecorAsset["groundType"]>("grass");
   const [groundBrushSize, setGroundBrushSize] = useState(3);
   const [groundBrushPreview, setGroundBrushPreview] = useState<PaintRect | null>(null);
@@ -582,14 +740,20 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
   // ── Clear guides + test-route highlight when switching tools or layers ──
   useEffect(() => {
     setGuides([]);
-    setHighlightedRoute(null);
   }, [tool, layer]);
+  useEffect(() => {
+    if (tool === "path" && layer === "navigation") return;
+    cancelConnectPreviewFrame();
+    connectPreviewPendingRef.current = null;
+  }, [cancelConnectPreviewFrame, layer, tool]);
 
   // ── Hierarchy selection also clears multi-selection for sync ──
   const handleHierarchySelect = useCallback((sel: CampusSelection | null) => {
     setMultiSelected([]);
     setShowAlignTools(false);
     setSelected(sel);
+    setPropertiesDismissed(false);
+    setPropertiesOpen(Boolean(sel));
   }, []);
 
   // ── Shake animation for validation failures ──
@@ -611,8 +775,8 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     // Narrow deps mirror the original inline implementation: the checks only
     // read name/buildings/canvasW/canvasH, so the memo must not re-create on
     // unrelated campus mutations (markers, paths, navNodes, …).
-    return validateCampusData(campus, overlappingBuildings);
-  }, [campus.name, campus.buildings, campus.canvasW, campus.canvasH, overlappingBuildings]);
+    return validateCampusData(campus, overlappingBuildings, campus.features?.emergencyRoutes === true);
+  }, [campus.name, campus.buildings, campus.canvasW, campus.canvasH, campus.features?.emergencyRoutes, overlappingBuildings]);
 
   // ── Live validation issues for the toolbar popover + dialogs ──
   // Derived from the CURRENT campus on every render-relevant change (B5 Final:
@@ -640,6 +804,12 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
 
   const toast = useToast();
 
+  const showConnectGuidance = useCallback(() => {
+    if (connectGuidanceShownRef.current) return;
+    connectGuidanceShownRef.current = true;
+    toast.info("Select a Walking Point or Pathway", "Click an existing Walking Point or a physical Pathway segment to connect this Entrance.");
+  }, [toast]);
+
   const { zoom, pan, panning, svgRef, containerRef, getPoint, startPan, movePan, endPan, resetView, zoomIn, zoomOut, zoomToFit, zoomToBuilding, handleMiddleMouseDown, handleWheel } =
     useCanvasControls(cw, ch);
 
@@ -663,7 +833,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     [edgeSnap]
   );
   const dragging = useRef<{
-    type: "building" | "marker" | "decorAsset" | "entrance" | "navNode" | "path" | "pathPoint" | "pathWidth" | "navEdgeBend";
+    type: "building" | "marker" | "decorAsset" | "entrance" | "navNode" | "path" | "pathPoint" | "pathWidth" | "navEdgeBend" | "generatedPathPoint";
     id: string;
     buildingId?: string;
     pointIndex?: number;
@@ -676,10 +846,28 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     ox: number;
     oy: number;
     points?: { x: number; y: number }[];
+    /** Explicit physical vertices controlled by a generated-point proxy drag. */
+    generatedVertexRefs?: { pathId: string; pointIndex: number }[];
+    /** Canonical generated node being proxy-dragged, for self-reference exclusion. */
+    generatedNodeId?: string;
+  } | null>(null);
+  // A generated Walking Point remains selected as a nav object for a click,
+  // but becomes a physical-vertex gesture only after the normal drag threshold
+  // is crossed. This keeps inspection clicks from mutating the Pathway.
+  const generatedPointProxyRef = useRef<{
+    nodeId: string;
+    sx: number;
+    sy: number;
+    refs: { pathId: string; pointIndex: number }[];
   } | null>(null);
   const dragGroupStartRef = useRef<GroupMoveMember[] | null>(null);
   const pathGroupOriginRef = useRef<Map<string, { x: number; y: number }[]> | null>(null);
   const suppressPathClickRef = useRef<string | null>(null);
+  // A node drag can finish over a physical Pathway.  SVG may still deliver the
+  // release/click to that Pathway after the node gesture has been consumed;
+  // suppress that one synthetic click so a drag can never fall through to
+  // pathway selection/split authoring.
+  const suppressNextPathClickRef = useRef(false);
   // ── B5 Phase 1.6: rigid nav-node group drag — snapshots the original
   // positions of every multi-selected waypoint at gesture start so dragging
   // one moves the whole selection without distorting internal spacing.
@@ -724,6 +912,10 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
   const campusIssueMarkers = useMemo(() => {
     const markers = new Map<string, { severity: "error" | "warning"; selectionType: string; id: string }>();
     for (const issue of validationIssues) {
+      // Disconnected-component findings describe a campus/network state, not
+      // a defect owned by one arbitrary representative node. They remain in
+      // the Issues summary but must never become a per-node canvas badge.
+      if (issue.type === "nav_disconnected_component") continue;
       const target = resolveIssueTarget(issue);
       if (!target || target.scope !== "campus") continue;
       // B8: buildings already render their own per-building badge inside the
@@ -797,26 +989,38 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
   // indoor graph is never dropped or rewritten by outdoor edits.
   const outdoorNodes = useMemo(() => outdoorNavNodes(navNodes), [navNodes]);
   const outdoorEdges = useMemo(() => outdoorNavEdges(navEdges, outdoorNodes), [navEdges, outdoorNodes]);
-  // B5 Phase 6.10 + placement-reality fix: live invalid-state for outdoor
-  // edges blocked by ANY placed object (buildings + every non-background decor
-  // asset) — so placing a bench/fountain/flower bed/trash bin/gazebo etc. on a
-  // nav line immediately turns that edge red, in the Campus overlay AND the
-  // Navigation layer. Recomputed live on every placement/move/delete.
+  // Reuse one stable node-coordinate lookup for hit testing.  Connect hover
+  // runs every animation frame; rebuilding this map per pointer event makes a
+  // populated Outdoor canvas needlessly expensive.
+  const outdoorNodeMap = useMemo<Record<string, { x: number; y: number }>>(
+    () => Object.fromEntries(outdoorNodes.map((node) => [node.id, { x: node.x, y: node.y }])),
+    [outdoorNodes],
+  );
+  // Outdoor route blockers are deliberately conservative: only physical
+  // Building footprints are structural obstacles. Decorative campus assets
+  // remain visible but do not silently become navigation barriers.
   const outdoorBlockedEdgeIds = useMemo(() => {
     const blocked = new Set<string>();
     for (const e of outdoorEdges) {
+      // The canonical Entrance connector is the one legitimate path through a
+      // Building boundary. Its own geometry/bridge validation remains
+      // authoritative, so do not mark it blocked merely because it reaches the
+      // footprint aperture.
       const a = outdoorNodes.find((n) => n.id === e.startNodeId);
       const b = outdoorNodes.find((n) => n.id === e.endNodeId);
       if (!a || !b) continue;
+      if (e.type === "entrance_transition"
+        || (!!a.entranceId && !a.floorId)
+        || (!!b.entranceId && !b.floorId)) continue;
       const pts = [
         { x: a.x, y: a.y },
         ...(isPathwayGeneratedEdge(e) ? [] : (e.bendPoints ?? []).map((p) => ({ x: p.x, y: p.y }))),
         { x: b.x, y: b.y },
       ];
-      if (polylineCrossesPlacedObject(pts, buildings, decorAssets)) blocked.add(e.id);
+      if (polylineCrossesBuilding(pts, buildings)) blocked.add(e.id);
     }
     return blocked;
-  }, [outdoorEdges, outdoorNodes, buildings, decorAssets]);
+  }, [outdoorEdges, outdoorNodes, buildings]);
 
   // Every pathway mutation passes through the same provenance-aware
   // reconciliation boundary. This keeps generated navigation aligned even
@@ -829,7 +1033,15 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
   // B5 Phase 1.8: any building mutation re-syncs entrance-linked nav nodes so
   // they always match the resolved world position of their linked B3 entrance
   // (no manual navigation repair after a building move/resize/rotate).
-  const updBuildings = (b: CampusBuilding[]) => upd({ buildings: b, navNodes: syncEntranceNodePositions(b, navNodes) });
+  const updBuildings = (b: CampusBuilding[]) => {
+    const synced = syncExteriorEmergencyStairGraph({
+      ...campus,
+      buildings: b,
+      navNodes: syncEntranceNodePositions(b, navNodes),
+      navEdges,
+    });
+    upd({ buildings: synced.buildings, navNodes: synced.navNodes, navEdges: synced.navEdges });
+  };
   const updMarkers = (m: CampusMarker[]) => upd({ markers: m });
   const updPaths = (p: typeof paths) => upd({ paths: p });
 
@@ -854,11 +1066,11 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     return { point: { x: Math.max(0, Math.min(cw, Math.round(point.x))), y: Math.max(0, Math.min(ch, Math.round(point.y))) }, guides: guidesList };
   }, [SNAP_DIST, ch, cw]);
 
-  const pathSnapTargetForPoint = useCallback((point: { x: number; y: number }, excludePathId?: string, excludePoint?: { x: number; y: number }): PathSnapTarget | null => {
+  const pathSnapTargetForPoint = useCallback((point: { x: number; y: number }, excludePathId?: string, excludePoint?: { x: number; y: number }, onlyPathId?: string): PathSnapTarget | null => {
     let bestPoint: PathSnapTarget | null = null;
     let bestSegment: PathSnapTarget | null = null;
     for (const path of paths) {
-      if (path.id === excludePathId || path.visible === false) continue;
+      if (path.id === excludePathId || path.visible === false || (onlyPathId && path.id !== onlyPathId)) continue;
       const threshold = Math.max(12, pathPaintWidth / 2 + 8, (path.width ?? 6) / 2 + 8);
       path.points.forEach((candidate, index) => {
         if (excludePoint && candidate.x === excludePoint.x && candidate.y === excludePoint.y) return;
@@ -888,6 +1100,10 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
         }
       }
     }
+    // A segment projection is the more precise target whenever the pointer is
+    // actually over the line. Do not let an endpoint merely inside the broad
+    // path hit radius steal a midpoint click from the selected segment.
+    if (bestPoint && bestSegment) return bestSegment.distance <= bestPoint.distance ? bestSegment : bestPoint;
     return bestPoint ?? bestSegment;
   }, [pathPaintWidth, paths]);
 
@@ -1019,8 +1235,11 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     const key = pathPointKey(point);
     let count = 0;
     for (const candidatePath of paths) {
+      // A bend/vertex is not a junction merely because the same Pathway has a
+      // duplicate coordinate.  Junction status is reserved for a shared point
+      // owned by two distinct physical Pathways.
+      if (candidatePath.id === pathId) continue;
       for (let index = 0; index < candidatePath.points.length; index += 1) {
-        if (candidatePath.id === pathId && index === pointIndex) continue;
         if (pathPointIsDisconnected(path, key) || pathPointIsDisconnected(candidatePath, key)) continue;
         if (pathPointKey(candidatePath.points[index]) === key) count += 1;
       }
@@ -1193,6 +1412,9 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     setTimeout(() => setAnimatingPathId((cur) => (cur === newPath.id ? null : cur)), 900);
     setTool("select");
     setPathSettingsOpen(false);
+    setTestRoutePickKind(null);
+    setTestRoutePickHover(null);
+    setTestRouteMapPick(null);
     toast.success("Pathway created", "2 editable points created.");
   }, [assignPathNetwork, campus, insertPathJunctionPoint, onUpdate, pathPaintType, pathPaintWidth, pathSnapTargetForPoint, paths, toast]);
 
@@ -1254,17 +1476,28 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
 
   const navAlignmentForPoint = useCallback((point: { x: number; y: number }, excludeId?: string, connectedIds?: Set<string>) => {
     const pathCandidates = paths.flatMap((path) => path.points.map((pathPoint) => ({ id: `${path.id}:${pathPoint.x}:${pathPoint.y}`, x: pathPoint.x, y: pathPoint.y })));
+    // Entrances are semantic navigation anchors even though their canonical
+    // graph nodes are intentionally hidden behind the Entrance marker.  Keep
+    // them in the same lightweight alignment reference set so outdoor Walking
+    // Points and Pathway vertices can line up with an Entrance without creating
+    // connectivity from visual alignment alone.
+    const entranceCandidates = buildings.flatMap((building) => (building.entrances ?? []).map((entrance) => {
+      const position = entranceWorldPosition(building, entrance);
+      return { id: `entrance:${building.id}:${entrance.id}`, x: position.x, y: position.y };
+    }));
     const candidates = [
       ...outdoorNodes.filter((node) => node.id !== excludeId),
       ...pathCandidates,
+      ...entranceCandidates,
     ];
     const result = navAlignSnap(point, candidates, SNAP_DIST, connectedIds);
     return { point: { x: result.x, y: result.y }, guides: result.guides };
-  }, [outdoorNodes, paths]);
+  }, [buildings, outdoorNodes, paths]);
 
   // ── SVG event handlers ──
   const handleSvgDown = (e: React.MouseEvent<SVGSVGElement>) => {
     setPathChoiceMenu(null);
+    if (tool === "path" && layer === "navigation") cancelConnectPreviewFrame();
     // Hold Spacebar + drag: pan (like Figma/Photoshop)
     if (isSpacePressed()) {
       e.preventDefault();
@@ -1317,27 +1550,48 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
       // Waypoint tool — it creates a real NavigationNode (selectable, movable,
       // deletable, undoable) instead of a decorative CampusMarker.
       if (layer === "navigation") {
-        // B5 Phase 1.6: clicking a building entrance creates/reuses an
-        // entrance-linked waypoint instead of a generic point underneath it.
-        const entranceHit = findEntranceAtPoint(buildings, clampedPt);
+        // The physical Entrance is already the canonical visible navigation
+        // anchor. Resolve its hit region before checking graph nodes so the
+        // hidden Entrance node or a legacy overlapping manual point can never
+        // receive a new placement click first.
+        const entranceElement = target.closest?.("[data-testid='entrance-hit-priority'], [data-entrance-id]");
+        const nearBuilding = buildings.some((building) => {
+          const padding = 24;
+          return clampedPt.x >= building.x - padding
+            && clampedPt.x <= building.x + building.width + padding
+            && clampedPt.y >= building.y - padding
+            && clampedPt.y <= building.y + building.height + padding;
+        });
+        const entranceHit = entranceElement || nearBuilding
+          ? findEntranceAtPoint(buildings, clampedPt)
+          : undefined;
         if (entranceHit) {
-          const existing = findEntranceNavNode(outdoorNodes, entranceHit.buildingId, entranceHit.entranceId);
-          if (existing) {
-            // B5 Phase 1.8: no duplicate node, no mutation — select the
-            // existing entrance-linked waypoint + give clear feedback.
-            setSelected({ type: "navNode", id: existing.id });
-            setTool("select");
-            toast.info("Entrance already connected to the navigation network", "The existing entrance walking point is selected.");
-            return;
+          setSelected({ type: "entrance", id: entranceHit.entranceId, buildingId: entranceHit.buildingId });
+          setMultiSelected([]);
+          setTool("select");
+          setNavEntranceHover(null);
+          setWaypointEdgeSnap(null);
+          setConnectBlocked(false);
+          setConnectBlocked(false);
+          toast.info("Entrance is already a navigation connection point", "Use this Entrance directly for navigation connections.");
+          return;
+        }
+        // Reuse an existing canonical node instead of stacking another point
+        // at the same hit target. Provenance stays explicit: a generated point
+        // remains Pathway-owned, while a manual point remains manual.
+        const existingNodeHit = findNavNodeAtPoint(outdoorNodes, clampedPt);
+        if (existingNodeHit) {
+          setSelected({ type: "navNode", id: existingNodeHit.id });
+          setMultiSelected([]);
+          setTool("select");
+          setNavEntranceHover(null);
+          setWaypointEdgeSnap(null);
+          if (existingNodeHit.generatedFromPathVertices?.length) {
+            toast.info("Generated Walking Point", "This point follows its physical Pathway. Drag to adjust the Pathway vertex.");
+          } else {
+            toast.info("Walking Point already exists", "The existing manual Walking Point is selected.");
           }
-          const ee = buildEntranceNode(entranceHit.buildingId, entranceHit.entranceId, entranceHit.x, entranceHit.y);
-          if (ee) {
-            const next = { ...campus, navNodes: [...navNodes, ee] };
-            onUpdate(next); pushHistory(next);
-            setSelected({ type: "navNode", id: ee.id });
-            setTool("select");
-            return;
-          }
+          return;
         }
         // B5 Phase 1.6: outdoor waypoints belong to outdoor navigable space —
         // arbitrary points inside a building footprint are rejected with clear
@@ -1354,14 +1608,42 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
         const cfg = LAYER_MARKER_CONFIG.navigation;
         const nn = createNavNode({ id: genId("nn"), x: aligned.point.x, y: aligned.point.y, campusId: campus.id, name: "Walking Point", type: "outdoor", color: cfg.color });
         // B5 Phase 6.4: detect edge insertion using RAW cursor position (not aligned)
-        const clickNodeMap = Object.fromEntries(outdoorNodes.map((n) => [n.id, { x: n.x, y: n.y }]));
-        const clickEdgeHit = findNavEdgeAtPoint(outdoorEdges, clickNodeMap, clampedPt);
+        const clickEdgeHit = findNavEdgeAtPoint(outdoorEdges, outdoorNodeMap, clampedPt);
         if (clickEdgeHit) {
           const targetEdge = navEdges.find((e) => e.id === clickEdgeHit.edge.id);
           if (targetEdge) {
+            // Entrance bridges are auto-routed from the Entrance and must never
+            // be split by the generic Walking Point insertion tool.  Keep the
+            // tool active so the admin can branch from the target Walking Point
+            // instead, and explain the special ownership rule immediately.
+            if (isEntranceManagedNavEdge(targetEdge)) {
+              setWaypointEdgeSnap(null);
+              toast.info(
+                "Entrance connection is auto-routed",
+                "Branch from its Walking Point instead.",
+              );
+              return;
+            }
+            if (isPathwayGeneratedEdge(targetEdge)) {
+              const target = generatedEdgePathSegment(targetEdge, clampedPt);
+              if (target) {
+                // Walking Point on a generated edge is an explicit
+                // source-of-truth operation: insert one physical vertex and
+                // let reconciliation create/reuse the generated node/chain.
+                onPathAddPoint(target.path.id, target.segmentIndex + 1, target.point);
+                setWaypointEdgeSnap(null);
+                setTool("select");
+                toast.success("Connection point added", "A physical Pathway vertex and generated Walking Point were created.");
+                return;
+              }
+              toast.info("Pathway connection point unavailable", "Move onto a generated Pathway segment to add a connection point.");
+              setWaypointEdgeSnap(null);
+              return;
+            }
             const insertPt = clickEdgeHit.nearest;
-            const insertNode = createNavNode({ id: nn.id, x: insertPt.x, y: insertPt.y, campusId: campus.id, name: "Walking Point", type: "outdoor", color: cfg.color });
-            const splitResult = splitNavEdge(targetEdge, insertNode, navNodes);
+            const insertNodeBase = createNavNode({ id: nn.id, x: insertPt.x, y: insertPt.y, campusId: campus.id, name: "Walking Point", type: "outdoor", color: cfg.color });
+            const insertNode = { ...insertNodeBase, x: insertPt.x, y: insertPt.y };
+            const splitResult = splitNavEdge(targetEdge, insertNode, navNodes, clickEdgeHit.nearest.segIndex);
             if (splitResult) {
               const nextEdges = navEdges.filter((e) => e.id !== targetEdge.id);
               nextEdges.push(...splitResult.newEdges);
@@ -1395,10 +1677,13 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     } else if (tool === "building") {
       // If a building type is selected from the palette, place it directly
       if (selectedBuildingType) {
+        const buildingId = genId("bld");
+        const identity = nextDefaultBuildingIdentity(buildings, defaultBuildingReservationsRef.current?.values);
+        defaultBuildingReservationsRef.current?.values.push(identity);
         const nb: CampusBuilding = {
-          id: genId("bld"),
-          name: selectedBuildingType.label,
-          code: selectedBuildingType.label.slice(0, 3).toUpperCase(),
+          id: buildingId,
+          name: identity.name,
+          code: identity.code,
           category: selectedBuildingType.category,
           description: selectedBuildingType.description,
           x: Math.round(Math.max(0, Math.min(cw - selectedBuildingType.defaultWidth, clampedPt.x - selectedBuildingType.defaultWidth / 2))),
@@ -1407,7 +1692,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
           height: selectedBuildingType.defaultHeight,
           color: selectedBuildingType.color,
           expanded: false,
-          floors: [{ id: genId("fl"), number: 1, label: "Ground Floor", rooms: [], paths: [] }],
+          floors: [createDefaultFloor({ id: genId("fl"), buildingId, number: 1 })],
         };
         updBuildings([...buildings, nb]);
         setSelected({ type: "building", id: nb.id });
@@ -1443,13 +1728,81 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
           onNavNodeClick(nodeHit.id);
           return;
         }
+        // A physical Pathway segment is a first-class Connect target. Reuse the
+        // source-of-truth vertex/reconciliation helper, then commit the
+        // connector in one logical update/history action.
+        const physicalPathId = target.closest?.("[data-testid='campus-path']")?.getAttribute("data-path-id");
+        if (physicalPathId) {
+          const physicalPath = paths.find((path) => path.id === physicalPathId);
+          if (physicalPath) {
+            const pathTarget = pathSnapTargetForPoint(clampedPt, undefined, undefined, physicalPath.id);
+            if (navConnectStart && pathTarget?.pathId === physicalPath.id && pathTarget.kind === "segment") {
+              connectPathwaySegment(pathTarget);
+            } else if (navConnectStart) {
+              toast.info("Pathway connection point unavailable", "Click directly on a Pathway segment.");
+            }
+            return;
+          }
+        }
+        // An empty-canvas click should not build a node map or scan every
+        // authored edge. Only inspect an edge when SVG hit-testing identifies
+        // the click as landing on an actual edge element.
+        const edgeElement = target.closest?.("[data-testid='nav-edge']");
+        if (edgeElement) {
+          const edgeHit = findNavEdgeAtPoint(
+            outdoorEdges,
+            outdoorNodeMap,
+            clampedPt,
+          );
+          const generatedHitEdge = edgeHit ? navEdges.find((edge) => edge.id === edgeHit.edge.id) : undefined;
+          if (edgeHit && isPathwayGeneratedEdge(generatedHitEdge)) {
+            const generatedTarget = generatedHitEdge ? generatedEdgePathSegment(generatedHitEdge, clampedPt) : null;
+            if (navConnectStart && generatedTarget) {
+              connectPathwaySegment({
+                point: generatedTarget.point,
+                distance: generatedTarget.distance,
+                pathId: generatedTarget.path.id,
+                kind: "segment",
+                segmentIndex: generatedTarget.segmentIndex,
+              });
+            } else {
+              toast.info("Pathway connection point unavailable", "Click directly on a Pathway segment.");
+            }
+            return;
+          }
+          if (edgeHit && generatedHitEdge && navConnectStart) {
+            if (isEntranceManagedNavEdge(generatedHitEdge) || generatedHitEdge.type === "floor_transition" || generatedHitEdge.type === "entrance_transition") {
+              toast.info("Entrance connection is auto-routed", "Choose a Walking Point or another Walking Network segment.");
+              return;
+            }
+            const capturedTarget = navPathTargetHover?.edgeId === generatedHitEdge.id
+              ? navPathTargetHover
+              : undefined;
+            connectManualNavSegment(
+              generatedHitEdge,
+              capturedTarget?.point ?? edgeHit.nearest,
+              capturedTarget?.segmentIndex ?? edgeHit.nearest.segIndex,
+            );
+            return;
+          }
+          }
         // B5 Phase 1.7 ordering fix: entrance targets are checked BEFORE the
         // building-body rejection. Entrances sit exactly on the building edge
         // and pointInBuilding uses inclusive bounds, so a wrong order would
         // reject every entrance click with "Connect through a building
         // entrance". Entrance first, building-body rejection second — the same
         // order the Add Waypoint branch already uses.
-        const entranceHit = findEntranceAtPoint(buildings, clampedPt);
+        const entranceElement = target.closest?.("[data-testid='entrance-hit-priority'], [data-entrance-id]");
+        const nearBuilding = buildings.some((building) => {
+          const padding = 24;
+          return clampedPt.x >= building.x - padding
+            && clampedPt.x <= building.x + building.width + padding
+            && clampedPt.y >= building.y - padding
+            && clampedPt.y <= building.y + building.height + padding;
+        });
+        const entranceHit = entranceElement || nearBuilding
+          ? findEntranceAtPoint(buildings, clampedPt)
+          : undefined;
         if (!entranceHit && buildings.some((b) => pointInBuilding(b, clampedPt))) {
           toast.warning("Connect through a building entrance", "Outdoor paths run outside buildings — connect to the building's entrance instead.");
           return;
@@ -1477,7 +1830,8 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
             commitNavEdgeWithEntrance(navConnectStart, entranceHit.buildingId, entranceHit.entranceId, entranceHit.x, entranceHit.y);
             return;
           }
-          // B5 Phase 6.9 (Floor parity): ONE empty-space click pins the FULL
+          // Empty Connect clicks are inert. Only an existing node, Entrance,
+          // or physical Pathway segment is a valid authoring target.
           // segment shape the preview shows — the orthogonal corner resolved
           // from the current anchor/latest bend PLUS the click point itself (or
           // just the click point on a straight continuation). The click point
@@ -1485,7 +1839,14 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
           // preview starts from it — a click can never drop back onto the
           // source/old diagonal. No NavigationNode is ever created from an
           // empty Connect click.
-          pinConnectBend(clampedPt, e.shiftKey);
+          // Empty Connect clicks are inert. Clear any stale target preview while
+          // preserving the armed source for the next pointer move.
+          cancelConnectPreviewFrame();
+          setNavPreview(null);
+          setNavPreviewPins([]);
+          setNavEntranceHover(null);
+          setConnectBlocked(false);
+          return;
         }
         return;
       }
@@ -1513,6 +1874,61 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
       return sum + Math.hypot(point.x - prev.x, point.y - prev.y);
     }, 0));
   }, [outdoorNodes]);
+
+  /** Rebuild authored outdoor edge geometry from the CURRENT node positions.
+   * Endpoint-like bends from the drag-start snapshot are stale once a waypoint
+   * moves, so remove only those bends before normalizing and recomputing cost.
+   * Generated/semantic bridge edges are reconciled by their owning helpers and
+   * are intentionally left untouched here. */
+  const rebuildOutdoorEdgeGeometry = useCallback((
+    edge: NavigationEdge,
+    nodes: NavigationNode[],
+    staleEndpoints: { x: number; y: number }[] = [],
+  ): NavigationEdge => {
+    if (edge.generatedFromPathIds?.length || edge.type === "entrance_transition" || edge.type === "floor_transition" || edge.type === "cross_floor" || edge.type === "room_door") return edge;
+    const startNode = nodes.find((node) => node.id === edge.startNodeId);
+    const endNode = nodes.find((node) => node.id === edge.endNodeId);
+    if (startNode?.entranceId || endNode?.entranceId) return edge;
+    const points = edgePolylinePoints(edge, nodes);
+    if (!points || points.length < 2) return edge;
+    const start = points[0];
+    const end = points[points.length - 1];
+    const near = (a: { x: number; y: number }, b: { x: number; y: number }, eps = 3) => Math.hypot(a.x - b.x, a.y - b.y) <= eps;
+    const bends = normalizeBendPoints(
+      points.slice(1, -1).filter((point) =>
+        !near(point, start) && !near(point, end)
+        && !staleEndpoints.some((old) => !near(old, start) && !near(old, end) && near(point, old))
+      ),
+    );
+    return {
+      ...edge,
+      bendPoints: bends.length > 0 ? bends : undefined,
+      distance: navEdgePolylineDistance([start, ...bends, end]),
+    };
+  }, []);
+
+  // Entrance bridges use one geometry resolver for live preview, commit, and
+  // later target movement. The physical Entrance side supplies the outward
+  // first leg; the helper then chooses the shortest valid orthogonal route.
+  const entranceConnectorForNodes = useCallback((startNode: NavigationNode, endNode: NavigationNode) => {
+    const entranceNode = startNode.entranceId && !startNode.floorId ? startNode : endNode.entranceId && !endNode.floorId ? endNode : undefined;
+    if (!entranceNode?.buildingId || !entranceNode.entranceId) return null;
+    const building = buildings.find((candidate) => candidate.id === entranceNode.buildingId);
+    const entrance = building?.entrances?.find((candidate) => candidate.id === entranceNode.entranceId);
+    if (!building || !entrance) return null;
+    const target = entranceNode.id === startNode.id ? endNode : startNode;
+    const geometry = entranceConnectorGeometry(building, entrance, target, buildings, decorAssets);
+    if (geometry.blocked) return { blocked: true, bends: [], distance: 0 };
+    const points = entranceNode.id === startNode.id ? geometry.points : [...geometry.points].reverse();
+    return { blocked: false, bends: points.slice(1, -1), distance: entranceConnectorDistance(points) };
+  }, [buildings, decorAssets]);
+
+  const isEntranceManagedNavEdge = useCallback((edge: NavigationEdge | undefined) => {
+    if (!edge || edge.type === "entrance_transition") return false;
+    return [edge.startNodeId, edge.endNodeId]
+      .map((nodeId) => navNodes.find((node) => node.id === nodeId))
+      .some((node) => !!node?.entranceId && !node.floorId);
+  }, [navNodes]);
 
   // B5 Phase 6.9 (Floor parity): ONE empty-space click during an ACTIVE
   // connection pins the FULL segment shape the preview shows — the orthogonal
@@ -1563,8 +1979,10 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     connectRedoStackRef.current = [];
   };
 
-  const commitNavEdge = useCallback((startId: string, endId: string): boolean => {
+  const commitNavEdge = useCallback((startId: string, endId: string, previewPins: { x: number; y: number }[] = []): boolean => {
     const clearConnect = () => {
+      cancelConnectPreviewFrame();
+      connectGuidanceShownRef.current = false;
       setNavConnectStart(null);
       setNavConnectBends([]);
       setNavPreview(null);
@@ -1581,17 +1999,31 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     // B5 Phase 6.2: reject edges that cross building/obstacle footprints
     const startNode = outdoorNodes.find((n) => n.id === startId);
     const endNode = outdoorNodes.find((n) => n.id === endId);
+    const entranceGeometry = startNode && endNode ? entranceConnectorForNodes(startNode, endNode) : null;
+    const previewEnd = previewPins[previewPins.length - 1];
+    const previewMatchesTarget = Boolean(previewEnd && endNode
+      && previewEnd.x === endNode.x && previewEnd.y === endNode.y);
+    const previewBends = previewMatchesTarget ? previewPins.slice(0, -1) : undefined;
+    const previewMatchesAuthoritativeGeometry = Boolean(entranceGeometry && previewBends
+      && previewBends.length === entranceGeometry.bends.length
+      && previewBends.every((point, index) => {
+        const expected = entranceGeometry.bends[index];
+        return point.x === expected.x && point.y === expected.y;
+      }));
+    const entranceBends = entranceGeometry
+      ? (previewMatchesAuthoritativeGeometry ? previewBends! : entranceGeometry.bends)
+      : undefined;
     if (startNode && endNode) {
-      // Compute the full orthogonal polyline for collision check
+      if (entranceGeometry?.blocked) {
+        toast.warning("Connection blocked by building", "Move the Walking Point to a route with a clear outward exit.");
+        return false;
+      }
+      // Compute the full orthogonal polyline for non-Entrance connections.
       const anchor = navConnectBends.length > 0 ? navConnectBends[navConnectBends.length - 1] : { x: startNode.x, y: startNode.y };
       const tail = orthogonalBendsFor(anchor, { x: endNode.x, y: endNode.y }, undefined, undefined);
-      const fullBends = [...navConnectBends, ...tail];
-      const pts = [
-        { x: startNode.x, y: startNode.y },
-        ...fullBends,
-        { x: endNode.x, y: endNode.y },
-      ];
-      if (polylineCrossesObstacle(pts, buildings, decorAssets)) {
+      const fullBends = entranceGeometry ? entranceBends! : [...navConnectBends, ...tail];
+      const pts = [{ x: startNode.x, y: startNode.y }, ...fullBends, { x: endNode.x, y: endNode.y }];
+      if (!entranceGeometry && polylineCrossesObstacle(pts, buildings, decorAssets)) {
         toast.warning("Connection blocked", "The connection crosses an obstacle.");
         return false;
       }
@@ -1610,15 +2042,30 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     // collapses into ONE clean bend: no stacked/near-overlapping handles, no
     // micro segments, no redundant collinear points. Simple 90° routes always
     // commit exactly ONE bendPoint.
-    const allBends = normalizedEdgeBends(startNode!, [...navConnectBends, ...tail], endNode!);
+    const allBends = normalizedEdgeBends(startNode!, entranceGeometry ? entranceBends! : [...navConnectBends, ...tail], endNode!);
     const polyline = allBends.length > 0
       ? [{ x: startNode!.x, y: startNode!.y }, ...allBends, { x: endNode!.x, y: endNode!.y }]
       : null;
     const edge = {
       ...createNavEdge({ id: genId("ne"), startNodeId: startId, endNodeId: endId, nodes: outdoorNodes }),
+      accessible: (startNode?.entranceId ? startNode.accessible : endNode?.entranceId ? endNode.accessible : true) !== false,
       ...(allBends.length > 0 && polyline ? { bendPoints: allBends, distance: navEdgePolylineDistance(polyline) } : {}),
     };
-    const next = { ...campus, navEdges: [...navEdges, edge] };
+    // An Entrance has one normal outdoor bridge.  Reconnecting it replaces
+    // only its previous outdoor connector; the Entrance node, target Walking
+    // Point, and every unrelated network edge remain intact.
+    const entranceNode = startNode?.entranceId && !startNode.floorId
+      ? startNode
+      : endNode?.entranceId && !endNode.floorId
+        ? endNode
+        : undefined;
+    const withoutPreviousEntranceConnection = entranceNode?.buildingId && entranceNode.entranceId
+      ? removeEntranceOutdoorConnection(campus, entranceNode.buildingId, entranceNode.entranceId)
+      : campus;
+    const next = {
+      ...withoutPreviousEntranceConnection,
+      navEdges: [...(withoutPreviousEntranceConnection.navEdges ?? []), edge],
+    };
     onUpdate(next);
     pushHistory(next);
     setSelected({ type: "navEdge", id: edge.id });
@@ -1629,7 +2076,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     // closure stays correct (and referencing it here would hit the TDZ since it
     // is declared later in the component body).
     return true;
-  }, [campus, navConnectBends, navEdges, outdoorEdgeDistance, outdoorEdges, outdoorNodes, onUpdate, toast]);
+  }, [campus, buildings, cancelConnectPreviewFrame, decorAssets, entranceConnectorForNodes, navConnectBends, navEdges, outdoorEdgeDistance, outdoorEdges, outdoorNodes, onUpdate, toast]);
 
   // ── B5 Phase 1.6: entrance-linked waypoint helpers ────────────────────────
   // Outdoor navigation enters buildings through entrances. Clicking an
@@ -1656,6 +2103,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     edge: NavigationEdge,
     waypoint: NavigationNode,
     allNodes: NavigationNode[],
+    preferredSegmentIndex?: number,
   ): { newEdges: NavigationEdge[] } | null => {
     const nodeMap: Record<string, { x: number; y: number }> = Object.fromEntries(allNodes.map((n) => [n.id, { x: n.x, y: n.y }]));
     const startNode = nodeMap[edge.startNodeId];
@@ -1669,7 +2117,11 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     const nearest = nearestPointOnEdgePolyline(edge, nodeMap, { x: waypoint.x, y: waypoint.y });
     if (!nearest) return null;
     // Split at the segment boundary closest to the insertion point
-    const splitIdx = nearest.segIndex;
+    const splitIdx = Number.isInteger(preferredSegmentIndex)
+      && preferredSegmentIndex! >= 0
+      && preferredSegmentIndex! < allPoints.length - 1
+      ? preferredSegmentIndex!
+      : nearest.segIndex;
     // Points before the split segment + waypoint position. The split waypoint
     // must be the END of the "before" edge — the previous code sliced
     // [0, splitIdx+1) which DROPPED the waypoint, producing a zero-length
@@ -1700,6 +2152,33 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     return { newEdges: [edgeBefore, edgeAfter] };
   }, []);
 
+  /** Resolve a generated edge back to the physical Pathway segment it owns. */
+  const generatedEdgePathSegment = useCallback((edge: NavigationEdge, point: { x: number; y: number }) => {
+    if (!edge.generatedFromPathIds?.length) return null;
+    const candidates: { path: CampusPath; segmentIndex: number; point: { x: number; y: number }; distance: number }[] = [];
+    for (const pathId of edge.generatedFromPathIds) {
+      const path = paths.find((candidate) => candidate.id === pathId);
+      if (!path || !path.navigationVertexIds || path.navigationVertexIds.length !== path.points.length) continue;
+      const nodeIdForVertex = new Map<string, string>();
+      for (const node of outdoorNodes) {
+        for (const ref of node.generatedFromPathVertices ?? []) {
+          if (ref.pathId === path.id) nodeIdForVertex.set(ref.vertexId, node.id);
+        }
+      }
+      for (let index = 0; index < path.points.length - 1; index += 1) {
+        const startNodeId = nodeIdForVertex.get(path.navigationVertexIds[index]);
+        const endNodeId = nodeIdForVertex.get(path.navigationVertexIds[index + 1]);
+        if (!startNodeId || !endNodeId) continue;
+        const samePair = (edge.startNodeId === startNodeId && edge.endNodeId === endNodeId)
+          || (edge.startNodeId === endNodeId && edge.endNodeId === startNodeId);
+        if (!samePair) continue;
+        const projected = closestPointOnSegment(point, path.points[index], path.points[index + 1]);
+        candidates.push({ path, segmentIndex: index, point: projected.point, distance: projected.distance });
+      }
+    }
+    return candidates.sort((a, b) => a.distance - b.distance)[0] ?? null;
+  }, [outdoorNodes, paths]);
+
   /** Reuse an existing entrance node or create one (node creation = one history action). */
   const ensureEntranceNavNode = useCallback((buildingId: string, entranceId: string, x: number, y: number): string | null => {
     const existing = findEntranceNavNode(outdoorNodes, buildingId, entranceId);
@@ -1725,19 +2204,25 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     // B5 Phase 6.3: reject edges that cross building footprints
     const startNode = outdoorNodes.find((n) => n.id === startId);
     if (startNode) {
+      const entranceGeometry = entranceConnectorForNodes(startNode, nn);
+      if (entranceGeometry?.blocked) {
+        toast.warning("Connection blocked by building", "Move the Walking Point to a route with a clear outward exit.");
+        return;
+      }
       const pts = [
         { x: startNode.x, y: startNode.y },
-        ...(navConnectBends.length > 0 ? navConnectBends : []),
+        ...(entranceGeometry ? entranceGeometry.bends : navConnectBends.length > 0 ? navConnectBends : []),
         { x: nn.x, y: nn.y },
       ];
-      if (polylineCrossesObstacle(pts, buildings, decorAssets)) {
-        toast.warning("Connection blocked", "The connection crosses a building footprint.");
+      if (!entranceGeometry && polylineCrossesObstacle(pts, buildings, decorAssets)) {
+        toast.warning("Connection blocked", "The connection crosses an obstacle.");
         return;
       }
     }
     const dup = findDuplicateNavEdge(outdoorEdges, startId, nn.id);
     if (dup) {
       toast.warning("Those points are already connected", "Select the existing connection to edit it.");
+      connectGuidanceShownRef.current = false;
       setNavConnectStart(null);
       setNavConnectBends([]);
       setNavPreview(null);
@@ -1749,16 +2234,20 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     }
     // B5 Phase 6.8: normalize pinned bends for the entrance path too.
     const startNode0 = outdoorNodes.find((n) => n.id === startId);
-    const bends = normalizedEdgeBends(startNode0 ?? { x, y }, navConnectBends, nn);
+    const entranceGeometry = startNode0 ? entranceConnectorForNodes(startNode0, nn) : null;
+    const bends = normalizedEdgeBends(startNode0 ?? { x, y }, entranceGeometry ? entranceGeometry.bends : navConnectBends, nn);
     const nextNodeSet = [...navNodes, nn];
     const edge = {
       ...createNavEdge({ id: genId("ne"), startNodeId: startId, endNodeId: nn.id, nodes: nextNodeSet }),
+      accessible: nn.accessible !== false,
       ...(bends.length > 0 ? { bendPoints: bends, distance: outdoorEdgeDistance(startId, nn.id, bends, nextNodeSet) } : {}),
     };
     const next = { ...campus, navNodes: nextNodeSet, navEdges: [...navEdges, edge] };
     onUpdate(next);
     pushHistory(next);
     setSelected({ type: "navEdge", id: edge.id });
+    cancelConnectPreviewFrame();
+    connectGuidanceShownRef.current = false;
     setNavConnectStart(null);
     setNavConnectBends([]);
     setNavPreview(null);
@@ -1769,7 +2258,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     setConnectBlocked(false);
     setNavEntranceHover(null);
     toast.success("Connection created", `Connected to ${nn.name} (${edge.distance} units).`);
-  }, [buildEntranceNode, campus, commitNavEdge, findDuplicateNavEdge, isSelfEdge, navConnectBends, navEdges, navNodes, onUpdate, outdoorEdgeDistance, outdoorEdges, outdoorNodes, toast]);
+  }, [buildEntranceNode, buildings, cancelConnectPreviewFrame, campus, commitNavEdge, decorAssets, entranceConnectorForNodes, findDuplicateNavEdge, isSelfEdge, navConnectBends, navEdges, navNodes, onUpdate, outdoorEdgeDistance, outdoorEdges, outdoorNodes, toast]);
 
   // ── B5 Phase 1.7: shared navigation multi-delete ──
   // ONE history action: remove the selected nodes (with every edge touching
@@ -1778,7 +2267,10 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
   // "Delete Selected" so the behavior can never diverge.
   const deleteNavSelection = useCallback((nodeIds: string[], edgeIds: string[]) => {
     const nodeSet = new Set(nodeIds.filter((id) => !isPathwayGeneratedNode((campus.navNodes ?? []).find((node) => node.id === id))));
-    const edgeSet = new Set(edgeIds.filter((id) => !isPathwayGeneratedEdge((campus.navEdges ?? []).find((edge) => edge.id === id))));
+    const edgeSet = new Set(edgeIds.filter((id) => {
+      const edge = (campus.navEdges ?? []).find((candidate) => candidate.id === id);
+      return !isPathwayGeneratedEdge(edge) && !isEntranceManagedNavEdge(edge);
+    }));
     const managedCount = nodeIds.length + edgeIds.length - nodeSet.size - edgeSet.size;
     if (nodeSet.size === 0 && edgeSet.size === 0) {
       toast.info("Pathway navigation is managed automatically", "Edit or delete the owning physical Pathway instead.");
@@ -1800,11 +2292,12 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     // pushHistory intentionally omitted from deps — see commitNavEdge note:
     // it is declared later in the body (TDZ) and only touches the stable
     // historyRef, so the first-render closure stays correct.
-  }, [campus, onUpdate, toast]);
+  }, [campus, isEntranceManagedNavEdge, onUpdate, toast]);
 
   // Path tool clicked an EXISTING waypoint (node clicks stop propagation, so
   // this is the only path into edge authoring from a node).
   const onNavNodeClick = useCallback((nodeId: string) => {
+    cancelConnectPreviewFrame();
     if (!navConnectStart) {
       const n = outdoorNodes.find((x) => x.id === nodeId);
       setNavConnectStart(nodeId);
@@ -1812,15 +2305,23 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
       setNavPreviewPins([]);
       connectRedoStackRef.current = [];
       navConnectBendGroupsRef.current = [];
-      setSelected({ type: "navNode", id: nodeId });
+      if (n?.entranceId && n.buildingId && !n.floorId) {
+        // Treat a click on the Entrance's canonical graph anchor exactly like
+        // the Properties "Connect to Walking Network" action. The node remains
+        // the internal source while the physical Entrance stays selected.
+        setSelected({ type: "entrance", id: n.entranceId, buildingId: n.buildingId });
+        showConnectGuidance();
+      } else {
+        setSelected({ type: "navNode", id: nodeId });
+      }
       return;
     }
     // B5 Phase 6.9 (Floor parity): the tool returns to Select ONLY on a
     // successful commit — a rejected one (self-edge / obstacle / duplicate)
     // keeps Connect active so the admin can reposition.
-    const committed = commitNavEdge(navConnectStart, nodeId);
+    const committed = commitNavEdge(navConnectStart, nodeId, navPreviewPins);
     if (committed) setTool("select");
-  }, [commitNavEdge, navConnectStart, outdoorNodes]);
+  }, [cancelConnectPreviewFrame, commitNavEdge, navConnectStart, navPreviewPins, outdoorNodes, showConnectGuidance]);
 
   const handleSvgMove = (e: React.MouseEvent<SVGSVGElement>) => {
     if (tool === "pan") {
@@ -1829,7 +2330,12 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     }
 
     const pt = getPoint(e, cw, ch);
-    setCursorPos({ x: Math.round(pt.x), y: Math.round(pt.y) });
+    // Cursor coordinates are useful in ordinary authoring, but they are not
+    // part of Connect's transient preview. Avoid a component-wide state write
+    // for every pointer event while the lightweight Connect loop is active.
+    if (!(tool === "path" && layer === "navigation")) {
+      setCursorPos({ x: Math.round(pt.x), y: Math.round(pt.y) });
+    }
 
     if ((tool === "path" && layer !== "navigation") || pathExtendRef.current) {
       const stroke = pathPaintStroke.current;
@@ -1868,6 +2374,115 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     // highlights it and (for Connect Path) snaps the live preview to the
     // entrance's resolved world position so the click commits an exact point.
     if (layer === "navigation" && (tool === "path" || tool === "marker")) {
+      // Outdoor Connect is intentionally a preview-only pointer loop. Resolve
+      // the nearest existing target, then defer all routing/obstacle/pathway
+      // work to the click handlers below. This early branch keeps the legacy
+      // marker preview untouched while preventing Connect hover from doing a
+      // full alignment + geometry + obstacle pass on every mouse event.
+      if (tool === "path") {
+        const rawPoint = { x: Math.max(0, Math.min(cw, Math.round(pt.x))), y: Math.max(0, Math.min(ch, Math.round(pt.y))) };
+        const hit = findNavNodeAtPoint(outdoorNodes, rawPoint);
+        const targetElement = e.target as SVGElement;
+        const hoveredPathElement = targetElement.closest?.("[data-testid='campus-path']");
+        const hoveredPathId = hoveredPathElement?.getAttribute("data-path-id");
+        const hoveredPathTarget = !hit && hoveredPathId
+          ? pathSnapTargetForPoint(rawPoint, undefined, undefined, hoveredPathId)
+          : null;
+        // A manual Walking Network edge has its own transparent hit surface.
+        // Resolve only that hovered edge (rather than scanning the entire graph)
+        // so the preview snaps to the exact point that a line click will split.
+        const hoveredEdgeElement = targetElement.closest?.("[data-testid='nav-edge']");
+        const hoveredEdgeId = hoveredEdgeElement?.getAttribute("data-testid") === "nav-edge"
+          ? hoveredEdgeElement.getAttribute("data-edge-id")
+          : null;
+        const hoveredEdge = hoveredEdgeId
+          ? outdoorEdges.find((edge) => edge.id === hoveredEdgeId)
+          : undefined;
+        const hoveredEdgeTarget = !hit && !hoveredPathTarget && hoveredEdge
+          ? nearestPointOnEdgePolyline(
+              hoveredEdge,
+              outdoorNodeMap,
+              rawPoint,
+            )
+          : null;
+        if (navConnectStart && hoveredEdgeTarget && hoveredEdge) {
+          setNavPathTargetHover({
+            edgeId: hoveredEdge.id,
+            segmentIndex: hoveredEdgeTarget.segIndex,
+            point: { x: hoveredEdgeTarget.x, y: hoveredEdgeTarget.y },
+          });
+        } else {
+          setNavPathTargetHover(null);
+        }
+        // The transparent Entrance hit layer is the only place that can yield
+        // an Entrance target. Keep a cheap expanded-footprint fallback for
+        // trackpads/tests that dispatch the move on the SVG root, but avoid
+        // scanning every Building/Entrance when the pointer is far from one.
+        const entranceElement = targetElement.closest?.("[data-testid='entrance-hit-priority'], [data-entrance-id]");
+        const nearBuilding = buildings.some((building) => {
+          const padding = 24;
+          return rawPoint.x >= building.x - padding
+            && rawPoint.x <= building.x + building.width + padding
+            && rawPoint.y >= building.y - padding
+            && rawPoint.y <= building.y + building.height + padding;
+        });
+        const entranceHit = !hit && !hoveredPathTarget && (entranceElement || nearBuilding)
+          ? findEntranceAtPoint(buildings, rawPoint)
+          : undefined;
+        const nextEntranceHover = entranceHit
+          ? { buildingId: entranceHit.buildingId, entranceId: entranceHit.entranceId, x: entranceHit.x, y: entranceHit.y }
+          : null;
+        const sameEntranceHover = navEntranceHover?.buildingId === nextEntranceHover?.buildingId
+          && navEntranceHover?.entranceId === nextEntranceHover?.entranceId;
+        if (!sameEntranceHover) setNavEntranceHover(nextEntranceHover);
+        const targetPoint = hit
+          ? { x: hit.x, y: hit.y }
+          : hoveredPathTarget
+            ? hoveredPathTarget.point
+            : hoveredEdgeTarget
+              ? { x: hoveredEdgeTarget.x, y: hoveredEdgeTarget.y }
+            : entranceHit
+              ? { x: entranceHit.x, y: entranceHit.y }
+              : null;
+        const startNode = navConnectStart
+          ? outdoorNodes.find((node) => node.id === navConnectStart)
+          : undefined;
+        const previewTarget = targetPoint ?? rawPoint;
+        const anchor = navConnectBends.length > 0
+          ? navConnectBends[navConnectBends.length - 1]
+          : startNode
+            ? { x: startNode.x, y: startNode.y }
+            : null;
+        // Keep hover work presentation-only. A cheap endpoint-in-footprint check
+        // provides useful red feedback for an obviously blocked target while the
+        // authoritative connector/obstacle validation still runs on click.
+        const obviousBuildingBlock = Boolean(
+          startNode
+          && !entranceHit
+          && buildings.some((building) => {
+            const padding = 1;
+            if (previewTarget.x < building.x - padding
+              || previewTarget.x > building.x + building.width + padding
+              || previewTarget.y < building.y - padding
+              || previewTarget.y > building.y + building.height + padding) return false;
+            return pointInBuilding(building, previewTarget);
+          }),
+        );
+        // Match Floor Editor's live Connect affordance: a dashed orthogonal
+        // preview plus a ghost endpoint follows the cursor, but this is never
+        // persisted until a valid click reaches the commit handlers.
+        const previewPins = startNode && anchor
+          ? [...orthogonalBendsFor(anchor, previewTarget, undefined, undefined), previewTarget]
+          : [];
+        queueConnectPreview(
+          previewTarget,
+          previewPins,
+          obviousBuildingBlock,
+        );
+        if (guides.length > 0) setGuides([]);
+        movePan(e);
+        return;
+      }
       const entranceHit = findEntranceAtPoint(buildings, pt);
       setNavEntranceHover(entranceHit
         ? { buildingId: entranceHit.buildingId, entranceId: entranceHit.entranceId, x: entranceHit.x, y: entranceHit.y }
@@ -1879,8 +2494,24 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
       // unsnapped pointer coordinate.
       if (tool === "path") {
         const hit = findNavNodeAtPoint(outdoorNodes, pt);
-        const aligned = navAlignmentForPoint({ x: Math.max(0, Math.min(cw, Math.round(pt.x))), y: Math.max(0, Math.min(ch, Math.round(pt.y))) });
-        setGuides(hit || entranceHit ? [] : aligned.guides);
+        const rawAlignedPoint = { x: Math.max(0, Math.min(cw, Math.round(pt.x))), y: Math.max(0, Math.min(ch, Math.round(pt.y))) };
+        const aligned = navAlignmentForPoint(rawAlignedPoint);
+        const hoveredPathId = (e.target as SVGElement).closest?.("[data-testid='campus-path']")?.getAttribute("data-path-id");
+        const hoveredPathTarget = hoveredPathId ? pathSnapTargetForPoint(rawAlignedPoint) : null;
+        // A hovered existing node/Entrance is still a valid Connect target;
+        // show the explicit start↔target center guide instead of suppressing
+        // guides just because the target has an identity.
+        const connectStartNode = navConnectStart ? outdoorNodes.find((node) => node.id === navConnectStart) : undefined;
+        const explicitTarget = hit ?? (entranceHit ? { x: entranceHit.x, y: entranceHit.y } : null);
+        const targetGuides = connectStartNode && explicitTarget
+          ? navAlignSnap(
+              { x: explicitTarget.x, y: explicitTarget.y },
+              [{ x: connectStartNode.x, y: connectStartNode.y, id: connectStartNode.id }],
+              SNAP_DIST,
+              new Set([connectStartNode.id]),
+            ).guides
+          : [];
+        setGuides(targetGuides.length > 0 ? targetGuides : aligned.guides);
         if (navConnectStart) {
           // B5 Phase 6.9 (Floor parity): the preview must show EXACTLY what a
           // click would pin/commit — the SAME pin-geometry helper the click
@@ -1893,24 +2524,63 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
             : startNode ? { x: startNode.x, y: startNode.y } : null;
           if (anchor) {
             let proposed: { x: number; y: number }[];
-            if (hit) {
-              proposed = [...orthogonalBendsFor(anchor, { x: hit.x, y: hit.y }, undefined, undefined), { x: hit.x, y: hit.y }];
-            } else if (entranceHit) {
-              proposed = [...orthogonalBendsFor(anchor, { x: entranceHit.x, y: entranceHit.y }, undefined, undefined), { x: entranceHit.x, y: entranceHit.y }];
-            } else {
-              let target = aligned.point;
-              // B5 Phase 6.3: Shift H/V constraint for Connect preview
-              if (e.shiftKey) {
-                const dx = Math.abs(target.x - anchor.x);
-                const dy = Math.abs(target.y - anchor.y);
-                target = dx >= dy ? { x: target.x, y: anchor.y } : { x: anchor.x, y: target.y };
+            let smartBlocked = false;
+            let usesEntranceGeometry = false;
+            const hitEntranceNode = hit?.entranceId && !hit.floorId ? hit : undefined;
+            if (hit && (hitEntranceNode || startNode?.entranceId)) {
+              const smart = entranceConnectorForNodes(startNode, hit);
+              if (smart) {
+                proposed = [...smart.bends, { x: hit.x, y: hit.y }];
+                smartBlocked = smart.blocked;
+                usesEntranceGeometry = true;
+              } else {
+                proposed = [...orthogonalBendsFor(anchor, { x: hit.x, y: hit.y }, undefined, undefined), { x: hit.x, y: hit.y }];
               }
-              proposed = outdoorConnectPinGeometryFor(target, anchor, outdoorNodes, { width: cw, height: ch }).pins;
+            } else if (entranceHit) {
+              const parent = buildings.find((building) => building.id === entranceHit.buildingId);
+              const entrance = parent?.entrances?.find((item) => item.id === entranceHit.entranceId);
+              const smart = parent && entrance
+                // The helper is anchored at the hovered destination Entrance;
+                // resolve a route from that boundary to the current source and
+                // reverse it for the source-to-destination preview.
+                ? entranceConnectorGeometry(parent, entrance, { x: startNode?.x ?? entranceHit.x, y: startNode?.y ?? entranceHit.y }, buildings, decorAssets)
+                : null;
+              if (smart && startNode) {
+                const points = [...smart.points].reverse();
+                proposed = [...points.slice(1, -1), { x: entranceHit.x, y: entranceHit.y }];
+                smartBlocked = smart.blocked;
+                usesEntranceGeometry = true;
+              } else {
+                proposed = [...orthogonalBendsFor(anchor, { x: entranceHit.x, y: entranceHit.y }, undefined, undefined), { x: entranceHit.x, y: entranceHit.y }];
+              }
+            } else if (hoveredPathTarget?.pathId === hoveredPathId && hoveredPathTarget.kind === "segment") {
+              const parent = startNode?.entranceId
+                ? buildings.find((building) => building.id === startNode.buildingId)
+                : undefined;
+              const entrance = parent?.entrances?.find((item) => item.id === startNode?.entranceId);
+              const smart = parent && entrance
+                ? entranceConnectorGeometry(parent, entrance, hoveredPathTarget.point, buildings, decorAssets)
+                : null;
+              if (smart && startNode) {
+                proposed = [...smart.bends, hoveredPathTarget.point];
+                smartBlocked = smart.blocked;
+                usesEntranceGeometry = true;
+              } else {
+                proposed = [hoveredPathTarget.point];
+              }
+            } else {
+              // With a source armed, an empty hover is not a pending waypoint
+              // target. Keep the canvas clear until the pointer reaches an
+              // existing node, Entrance, or physical Pathway segment.
+              setNavPreview(null);
+              setNavPreviewPins([]);
+              setConnectBlocked(false);
+              return;
             }
             setNavPreviewPins(proposed);
             setNavPreview(proposed[proposed.length - 1]);
             // B5 Phase 6.2: detect building/asset collision for Connect preview
-            setConnectBlocked(polylineCrossesObstacle([anchor, ...proposed], buildings, decorAssets));
+            setConnectBlocked(smartBlocked || (!usesEntranceGeometry && polylineCrossesObstacle([anchor, ...proposed], buildings, decorAssets)));
           }
         } else {
           // No source yet: keep the pre-start ghost pointer preview.
@@ -1931,9 +2601,19 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
           : navAlignmentForPoint(basePoint);
         setGuides(entranceHit ? [] : aligned.guides);
         // B5 Phase 6.1: detect waypoint-on-edge snap for insertion
-        const nodeMap = Object.fromEntries(outdoorNodes.map((n) => [n.id, { x: n.x, y: n.y }]));
-        const edgeHit = findNavEdgeAtPoint(outdoorEdges, nodeMap, aligned.point);
-        setWaypointEdgeSnap(edgeHit && !entranceHit ? { edgeId: edgeHit.edge.id, nearest: { x: edgeHit.nearest.x, y: edgeHit.nearest.y } } : null);
+        const edgeHit = findNavEdgeAtPoint(outdoorEdges, outdoorNodeMap, aligned.point);
+        const hitEdge = edgeHit ? navEdges.find((edge) => edge.id === edgeHit.edge.id) : undefined;
+        if (edgeHit && !entranceHit) {
+          setWaypointEdgeSnap({
+            edgeId: edgeHit.edge.id,
+            nearest: { x: edgeHit.nearest.x, y: edgeHit.nearest.y },
+            helper: isEntranceManagedNavEdge(hitEdge)
+              ? "Entrance connection is auto-routed. Branch from its Walking Point instead."
+              : undefined,
+          });
+        } else {
+          setWaypointEdgeSnap(null);
+        }
       }
     } else if (!dragging.current) {
       setGuides([]);
@@ -1948,9 +2628,37 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
       const segEdge = navEdges.find((ed) => ed.id === segDrag.edgeId);
       if (!segEdge) { navSegDragRef.current = null; return; }
       if (isPathwayGeneratedEdge(segEdge)) { navSegDragRef.current = null; return; }
-      const delta = segDrag.isHorizontal
+      let delta = segDrag.isHorizontal
         ? Math.round(pt.y) - segDrag.oy
         : Math.round(pt.x) - segDrag.ox;
+      // Manual and Entrance-connector segment drags stay orthogonal but can
+      // line up with nearby Walking Points, neighboring bends, or the segment's
+      // own endpoints. Pathway-generated geometry remains managed elsewhere.
+      const segmentStart = segDrag.origPts[segDrag.segIndex];
+      const segmentEnd = segDrag.origPts[segDrag.segIndex + 1];
+      if (segmentStart && segmentEnd) {
+        const endpointIds = new Set([segEdge.startNodeId, segEdge.endNodeId]);
+        const references = [
+          ...outdoorNodes
+            .filter((node) => !endpointIds.has(node.id))
+            .map((node) => ({ x: node.x, y: node.y, id: node.id })),
+          ...segDrag.origPts.map((point, index) => ({ ...point, id: `edge-point:${segDrag.edgeId}:${index}` })),
+        ].filter((reference) =>
+          !((reference.x === segmentStart.x && reference.y === segmentStart.y)
+            || (reference.x === segmentEnd.x && reference.y === segmentEnd.y))
+        );
+        const axisTarget = segDrag.isHorizontal
+          ? { x: segmentStart.x, y: segmentStart.y + delta }
+          : { x: segmentStart.x + delta, y: segmentStart.y };
+        const aligned = navAlignSnap(axisTarget, references, SNAP_DIST);
+        const axisGuide = aligned.guides.find((guide) => guide.type === (segDrag.isHorizontal ? "h" : "v"));
+        if (axisGuide) {
+          delta = segDrag.isHorizontal ? axisGuide.pos - segmentStart.y : axisGuide.pos - segmentStart.x;
+          setGuides([axisGuide]);
+        } else {
+          setGuides([]);
+        }
+      }
       if (delta !== 0) gestureChangedRef.current = true;
       if (delta === 0) return;
       // B5 Phase 6.8: straight (bend-less) edges build a Floor-style U-dog-leg
@@ -1999,13 +2707,63 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
       return;
     }
 
+    // Generated Walking Points are physical-vertex proxies. Keep the initial
+    // pointer-down as an inspection selection, then enter the existing
+    // Pathway vertex pipeline only after a real drag threshold is crossed.
+    const pendingGeneratedPoint = generatedPointProxyRef.current;
+    if (pendingGeneratedPoint && dragging.current?.type === "generatedPathPoint") {
+      const moved = Math.hypot(pt.x - pendingGeneratedPoint.sx, pt.y - pendingGeneratedPoint.sy);
+      if (moved < 3) return;
+      const primary = pendingGeneratedPoint.refs[0];
+      const owner = primary ? paths.find((path) => path.id === primary.pathId) : undefined;
+      if (!primary || !owner || owner.locked) {
+        generatedPointProxyRef.current = null;
+        dragging.current = null;
+        return;
+      }
+      // Reuse the physical point-drag branch below. The explicit refs preserve
+      // shared-junction ownership without coordinate-based adoption.
+      dragging.current = {
+        type: "pathPoint",
+        id: primary.pathId,
+        pointIndex: primary.pointIndex,
+        sx: pendingGeneratedPoint.sx,
+        sy: pendingGeneratedPoint.sy,
+        ox: owner.points[primary.pointIndex]?.x ?? owner.points[0]?.x ?? 0,
+        oy: owner.points[primary.pointIndex]?.y ?? owner.points[0]?.y ?? 0,
+        generatedVertexRefs: pendingGeneratedPoint.refs,
+        generatedNodeId: pendingGeneratedPoint.nodeId,
+      };
+      generatedPointProxyRef.current = null;
+      setSelected({ type: "path", id: primary.pathId });
+      setSelectedPathPoint({ pathId: primary.pathId, pointIndex: primary.pointIndex });
+    }
+
     const drag = dragging.current;
     if (!drag) return;
 
     if (drag.type === "entrance" && drag.buildingId) {
       const parent = buildings.find((b) => b.id === drag.buildingId);
       if (!parent || parent.locked) return;
-      const attachment = pointerToEntranceAttachment(parent, pt);
+      // Keep Entrances attached to the perimeter while giving them the same
+      // axis-alignment assistance as navigation points. References are only
+      // used for an explicit, small snap during this drag; no connectivity is
+      // inferred from coincident coordinates.
+      const entranceReferences = [
+        ...outdoorNodes
+          .filter((node) => !(node.entranceId === drag.id && node.buildingId === parent.id))
+          .map((node) => ({ id: node.id, x: node.x, y: node.y })),
+        ...paths.flatMap((path) => path.points.map((point, index) => ({ id: `${path.id}:${index}`, ...point }))),
+        ...(parent.entrances ?? [])
+          .filter((entrance) => entrance.id !== drag.id)
+          .map((entrance) => {
+            const position = entranceWorldPosition(parent, entrance);
+            return { id: `entrance:${entrance.id}`, x: position.x, y: position.y };
+          }),
+      ];
+      const aligned = alignEntranceAttachment(parent, pt, entranceReferences, SNAP_DIST);
+      const attachment = aligned.attachment;
+      setGuides(aligned.guides);
       const nextBuildings = buildings.map((b) =>
         b.id === parent.id
           ? { ...b, entrances: (b.entrances ?? []).map((entrance) => entrance.id === drag.id ? { ...entrance, ...attachment } : entrance) }
@@ -2049,7 +2807,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
         const start = startById.get(b.id);
         return start?.kind === "building" ? { ...b, x: start.x + dx, y: start.y + dy } : b;
       });
-      onUpdate(reconcilePathwayNavigation({
+      onUpdate(reconcilePathwayNavigation(syncExteriorEmergencyStairGraph({
         ...campus,
         buildings: nextBuildings,
         navNodes: syncEntranceNodePositions(nextBuildings, navNodes),
@@ -2064,7 +2822,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
           const start = startById.get(da.id);
           return start?.kind === "decorAsset" ? { ...da, x: start.x + dx, y: start.y + dy } : da;
         }),
-      }, genId));
+      }), genId));
       const bbox = groupBBoxAfterTranslation(group, dx, dy);
       setOverlappingBuildings(computeOverlaps(nextBuildings));
       setGuides(computeGroupAlignmentGuides(bbox.x, bbox.y, bbox.width, bbox.height, otherBuildings));
@@ -2140,35 +2898,64 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
         },
         { point: rawPoint, guides: [] as { type: "h" | "v"; pos: number }[], distance: Number.POSITIVE_INFINITY }
       );
-      const target = pathSnapTargetForPoint(aligned.point, path.id);
-      const nextPoint = target?.point ?? aligned.point;
-      setGuides(target
-        ? [{ type: "v", pos: target.point.x }, { type: "h", pos: target.point.y }]
-        : aligned.guides);
+       // Moving an existing Pathway vertex is a geometry edit only.  It must
+       // never adopt another Pathway segment or create a junction as a side
+       // effect of crossing/landing on that segment.  The explicit Walking
+       // Point tool remains the only operation that inserts/splits a path.
+       const topologyPoint = aligned.point;
+      const generatedNode = drag.generatedNodeId ? outdoorNodes.find((node) => node.id === drag.generatedNodeId) : undefined;
+      const connectedIds = generatedNode
+        ? new Set(navEdges.flatMap((edge) => {
+            if (edge.startNodeId === generatedNode.id) return [edge.endNodeId];
+            if (edge.endNodeId === generatedNode.id) return [edge.startNodeId];
+            return [];
+          }))
+        : undefined;
+       const navAligned = navAlignSnap(topologyPoint, outdoorNodes.filter((node) => node.id !== drag.generatedNodeId), SNAP_DIST, connectedIds);
+       const nextPoint = { x: navAligned.x, y: navAligned.y };
+       setGuides(navAligned.guides.length > 0 ? navAligned.guides : aligned.guides);
       gestureChangedRef.current = true;
       const oldPoint = drag.pointIndex !== undefined ? path.points[drag.pointIndex] : undefined;
       const oldKey = oldPoint ? pathPointKey(oldPoint) : "";
       const moveLinkedJunction = drag.pointIndex !== undefined && pathPointIsJunction(path.id, drag.pointIndex);
-      // B5 Phase 5.14: when snapping to a segment (T-junction), insert the
-      // junction point in the target path, and merge networks.
-      let nextPaths = paths.map((p) => ({
-        ...p,
+      const explicitProxyRefs = drag.generatedVertexRefs;
+      const proxyRefKeys = explicitProxyRefs
+        ? new Set(explicitProxyRefs.map((ref) => `${ref.pathId}:${ref.pointIndex}`))
+        : null;
+       const nextPaths = paths.map((p) => ({
+         ...p,
         points: p.points.map((point, index) => {
-          if (moveLinkedJunction && pathPointKey(point) === oldKey) return nextPoint;
+          // Proxy drags carry explicit provenance refs for every physical
+          // vertex represented by the canonical generated node. This is the
+          // shared-junction path; never widen it to nearby coordinate matches.
+          if (proxyRefKeys?.has(`${p.id}:${index}`)) return nextPoint;
+          if (!proxyRefKeys && moveLinkedJunction && pathPointKey(point) === oldKey) return nextPoint;
           if (p.id === drag.id && index === drag.pointIndex) return nextPoint;
           return point;
         }),
-      }));
-      if (target?.kind === "segment" && target.pathId && target.segmentIndex !== undefined) {
-        // Insert junction point into the target path if not already present
-        nextPaths = insertPathJunctionPoint(nextPaths, target);
-      }
-      if (target?.pathId && target.pathId !== drag.id) {
-        // Merge networks between the moved path and the snap target
-        nextPaths = mergePathNetworksForJunction(nextPaths, drag.id, target.pathId);
-      }
-      onUpdate(reconcilePathwayNavigation({ ...campus, paths: nextPaths }, genId));
-      return;
+       }));
+       const reconciled = reconcilePathwayNavigation({ ...campus, paths: nextPaths }, genId);
+       // Reconcile moves generated nodes, but independently-authored branch
+       // edges incident to that node still need their bends/cost rebuilt from
+       // the new endpoint.  Keep the edge IDs/metadata; only replace stale
+       // endpoint geometry.
+       const movedNodeIds = new Set<string>();
+       if (drag.generatedNodeId) movedNodeIds.add(drag.generatedNodeId);
+       const movedRefKeys = new Set((explicitProxyRefs ?? []).map((ref) => `${ref.pathId}:${ref.pointIndex}`));
+       const movedVertexId = drag.pointIndex !== undefined ? path.navigationVertexIds?.[drag.pointIndex] : undefined;
+       reconciled.navNodes?.forEach((node) => {
+         if ((node.generatedFromPathVertices ?? []).some((ref) =>
+           movedRefKeys.has(`${ref.pathId}:${path.navigationVertexIds?.indexOf(ref.vertexId) ?? -1}`)
+           || (movedVertexId && ref.pathId === path.id && ref.vertexId === movedVertexId)
+         )) movedNodeIds.add(node.id);
+       });
+       const rebuiltEdges = (reconciled.navEdges ?? []).map((edge) =>
+         movedNodeIds.has(edge.startNodeId) || movedNodeIds.has(edge.endNodeId)
+           ? rebuildOutdoorEdgeGeometry(edge, reconciled.navNodes ?? [], oldPoint ? [{ x: oldPoint.x, y: oldPoint.y }] : [])
+           : edge
+       );
+       onUpdate({ ...reconciled, navEdges: rebuiltEdges });
+       return;
     }
     // B5 Phase 1: waypoint drag — same one-gesture/one-history pattern as
     // markers, clamped to the canvas and grid-snapped.
@@ -2230,11 +3017,19 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
         const aNode = outdoorNodes.find((n) => n.id === edge.startNodeId);
         const bNode = outdoorNodes.find((n) => n.id === edge.endNodeId);
         const others = [
-          ...(aNode ? [{ x: aNode.x, y: aNode.y }] : []),
-          ...(bNode ? [{ x: bNode.x, y: bNode.y }] : []),
+          ...(aNode ? [{ x: aNode.x, y: aNode.y, id: edge.startNodeId }] : []),
+          ...(bNode ? [{ x: bNode.x, y: bNode.y, id: edge.endNodeId }] : []),
           ...bends.filter((_, i) => i !== drag.pointIndex),
+          ...outdoorNodes
+            .filter((node) => node.id !== edge.startNodeId && node.id !== edge.endNodeId)
+            .map((node) => ({ x: node.x, y: node.y, id: node.id })),
         ];
-        const snapAlign = navAlignSnap({ x: nx, y: ny }, others);
+        const snapAlign = navAlignSnap(
+          { x: nx, y: ny },
+          others,
+          SNAP_DIST,
+          new Set([edge.startNodeId, edge.endNodeId]),
+        );
         nx = snapAlign.x;
         ny = snapAlign.y;
         setGuides(snapAlign.guides);
@@ -2281,26 +3076,33 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
           if (Math.abs(rawDx) >= Math.abs(rawDy)) rawDy = 0;
           else rawDx = 0;
         }
-        const dx = Math.round(rawDx);
-        const dy = Math.round(rawDy);
-        gestureChangedRef.current = true;
-        const edgeBendOrigins = navGroupEdgeOriginsRef.current;
-        onUpdate({
-          ...campus,
-          navNodes: navNodes.map((n) => {
-            const origin = navGroup.get(n.id);
-            return origin
-              ? { ...n, x: Math.max(0, Math.min(cw, Math.round(origin.x + dx))), y: Math.max(0, Math.min(ch, Math.round(origin.y + dy))) }
-              : n;
-          }),
-          navEdges: edgeBendOrigins && edgeBendOrigins.size > 0
-            ? navEdges.map((e) => {
-                const originBends = edgeBendOrigins.get(e.id);
-                if (!originBends || originBends.length === 0) return e;
-                return { ...e, bendPoints: originBends.map((b) => ({ x: b.x + dx, y: b.y + dy })) };
-              })
-            : navEdges,
-        });
+         const dx = Math.round(rawDx);
+         const dy = Math.round(rawDy);
+         gestureChangedRef.current = true;
+         const edgeBendOrigins = navGroupEdgeOriginsRef.current;
+         const movedNodeIds = new Set(navGroup.keys());
+         const nextNodes = navNodes.map((n) => {
+           const origin = navGroup.get(n.id);
+           return origin
+             ? { ...n, x: Math.max(0, Math.min(cw, Math.round(origin.x + dx))), y: Math.max(0, Math.min(ch, Math.round(origin.y + dy))) }
+             : n;
+         });
+         const nextEdges = navEdges.map((edge) => {
+           const originBends = edgeBendOrigins?.get(edge.id);
+           const translated = originBends && originBends.length > 0
+             ? { ...edge, bendPoints: originBends.map((b) => ({ x: b.x + dx, y: b.y + dy })) }
+             : edge;
+           if (!movedNodeIds.has(edge.startNodeId) && !movedNodeIds.has(edge.endNodeId)) return translated;
+           const stalePositions = [edge.startNodeId, edge.endNodeId]
+             .map((id) => navGroup.get(id))
+             .filter(Boolean) as { x: number; y: number }[];
+           return rebuildOutdoorEdgeGeometry(translated, nextNodes, stalePositions);
+         });
+         onUpdate(reconcileEntranceOutdoorConnections({
+           ...campus,
+           navNodes: nextNodes,
+           navEdges: nextEdges,
+         }));
         return;
       }
       // B5 Phase 6.9/6.10: Floor Editor parity — nav node drags are NOT
@@ -2331,17 +3133,24 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
         if (e.startNodeId === drag.id) connectedIds.add(e.endNodeId);
         if (e.endNodeId === drag.id) connectedIds.add(e.startNodeId);
       }
-      const aligned = navAlignmentForPoint({ x: finalX, y: finalY }, drag.id, connectedIds);
-      setGuides(aligned.guides);
-      gestureChangedRef.current = true;
-      onUpdate({
-        ...campus,
-        navNodes: navNodes.map((n) =>
-          n.id === drag.id
-            ? { ...n, x: aligned.point.x, y: aligned.point.y }
-            : n
-        ),
-      });
+       const aligned = navAlignmentForPoint({ x: finalX, y: finalY }, drag.id, connectedIds);
+       setGuides(aligned.guides);
+       gestureChangedRef.current = true;
+       const nextNodes = navNodes.map((n) =>
+         n.id === drag.id
+           ? { ...n, x: aligned.point.x, y: aligned.point.y }
+           : n
+       );
+       const stalePosition = { x: drag.ox, y: drag.oy };
+       const nextEdges = navEdges.map((edge) => {
+         if (edge.startNodeId !== drag.id && edge.endNodeId !== drag.id) return edge;
+         return rebuildOutdoorEdgeGeometry(edge, nextNodes, [stalePosition]);
+       });
+       onUpdate(reconcileEntranceOutdoorConnections({
+         ...campus,
+         navNodes: nextNodes,
+         navEdges: nextEdges,
+       }));
       return;
     }
     if (drag.type === "building") {
@@ -2367,11 +3176,11 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
       const targetB = edgeSnapBuilding({ ...b, x: snapResult.x, y: snapResult.y }, buildings);
       gestureChangedRef.current = true;
       const nextBuildings = buildings.map((bld) => (bld.id === drag.id ? { ...bld, x: targetB.x, y: targetB.y } : bld));
-      onUpdate({
+      onUpdate(syncExteriorEmergencyStairGraph({
         ...campus,
         buildings: nextBuildings,
         navNodes: syncEntranceNodePositions(nextBuildings, navNodes),
-      });
+      }));
       // Alignment guides — same visible-bounds result that drove the snap.
       const guidesList: { type: "h" | "v"; pos: number }[] = snapResult.guides;
       // Check overlaps during drag
@@ -2586,13 +3395,13 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
       if (b) {
         const nextBuildings = buildings.map(bld => bld.id === id ? { ...bld, rotation: snapped } : bld);
         beginGestureHistory();
-        onUpdate({
+        onUpdate(syncExteriorEmergencyStairGraph({
           ...campus,
           buildings: nextBuildings,
           // B5 Phase 1.8: rotating a building moves its entrances → the linked
           // nav nodes follow in the same gesture.
           navNodes: syncEntranceNodePositions(nextBuildings, navNodes),
-        });
+        }));
         setRotatingAngle(snapped);
       }
       return;
@@ -2638,13 +3447,13 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
       return { ...b, x: Math.round(nx), y: Math.round(ny), width: nw, height: nh };
     });
     beginGestureHistory();
-    onUpdate({
+    onUpdate(syncExteriorEmergencyStairGraph({
       ...campus,
       buildings: nextBuildings,
       // B5 Phase 1.8: resizing a building moves its entrances → the linked nav
       // nodes follow in the same gesture.
       navNodes: syncEntranceNodePositions(nextBuildings, navNodes),
-    });
+    }));
   };
 
   const handleSvgUpResize = () => {
@@ -2699,6 +3508,11 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     // tip, so a drag adds exactly one new entry — never one per object/move.
     const dragCommitted = gestureChangedRef.current;
     const draggedPathId = dragging.current?.type === "path" ? dragging.current.id : null;
+    const consumedNavigationDrag = dragCommitted && (dragging.current?.type === "navNode" || dragging.current?.type === "generatedPathPoint" || dragging.current?.type === "pathPoint");
+    if (consumedNavigationDrag) {
+      suppressNextPathClickRef.current = true;
+      window.setTimeout(() => { suppressNextPathClickRef.current = false; }, 0);
+    }
     if (dragCommitted && draggedPathId && pathMemberEditId === draggedPathId) {
       suppressPathClickRef.current = draggedPathId;
       window.setTimeout(() => {
@@ -2707,6 +3521,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     }
     endPan();
     dragging.current = null;
+    generatedPointProxyRef.current = null;
     dragGroupStartRef.current = null;
     pathGroupOriginRef.current = null;
     navGroupOriginRef.current = null;
@@ -2780,12 +3595,15 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
         buildingDrag.sx, buildingDrag.sy, buildingDrag.cx, buildingDrag.cy,
         cw, ch
       );
+      const buildingId = genId("bld");
+      const identity = nextDefaultBuildingIdentity(buildings, defaultBuildingReservationsRef.current?.values);
+      defaultBuildingReservationsRef.current?.values.push(identity);
       const nb: CampusBuilding = {
-        id: genId("bld"), name: "New Building", code: "NEW", category: "Academic", description: "",
+        id: buildingId, name: identity.name, code: identity.code, category: "Academic", description: "",
         x: rect.x, y: rect.y, width: rect.width, height: rect.height,
         color: BUILDING_COLORS[Math.floor(Math.random() * BUILDING_COLORS.length)],
         expanded: false,
-        floors: [{ id: genId("fl"), number: 1, label: "Ground Floor", rooms: [], paths: [] }],
+        floors: [createDefaultFloor({ id: genId("fl"), buildingId, number: 1 })],
       };
       // updBuildings called via upd which pushes history
       updBuildings([...buildings, nb]);
@@ -2809,7 +3627,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     gestureChangedRef.current = false;
     gestureHistoryPushed.current = false;
   };
-  const handleSvgUp = () => { endPan(); dragging.current = null; dragGroupStartRef.current = null; pathGroupOriginRef.current = null; navGroupOriginRef.current = null; navGroupEdgeOriginsRef.current = null; pathGroupRotating.current = null; setPathGroupRotationBounds(null); setPathGroupScale(null); setRotatingAngle(0); setGuides([]); gestureHistoryPushed.current = false; };
+  const handleSvgUp = () => { endPan(); dragging.current = null; generatedPointProxyRef.current = null; dragGroupStartRef.current = null; pathGroupOriginRef.current = null; navGroupOriginRef.current = null; navGroupEdgeOriginsRef.current = null; pathGroupRotating.current = null; setPathGroupRotationBounds(null); setPathGroupScale(null); setRotatingAngle(0); setGuides([]); gestureHistoryPushed.current = false; };
 
   // ── Mouse leaves the canvas mid-gesture: CANCEL placement/drawing instead of
   // finalizing it. (onMouseLeave previously ran the same handler as mouseup, so
@@ -2822,6 +3640,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     gestureChangedRef.current = false;
     endPan();
     dragging.current = null;
+    generatedPointProxyRef.current = null;
     dragGroupStartRef.current = null;
     pathGroupOriginRef.current = null;
     navGroupOriginRef.current = null;
@@ -2844,6 +3663,14 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     setGroundErasePreview(null);
     setPathPaintPreview(null);
     setGuides([]);
+    // Leaving the canvas ends only the transient preview. Keep the armed
+    // Entrance/Walking Point source so re-entering the canvas resumes Connect,
+    // but never leave a stale ghost endpoint behind while the pointer is out.
+    if (tool === "path" && layer === "navigation") {
+      cancelConnectPreviewFrame();
+      setNavPreview(null);
+      setNavPreviewPins([]);
+    }
     setNavEntranceHover(null);
     setWaypointEdgeSnap(null);
     setConnectBlocked(false);
@@ -2854,7 +3681,11 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
   // never leaves an unfinished path preview, building drag, or rubber band ──
   const switchTool = useCallback((t: SimpleTool) => {
     const reset = resetTransientToolState();
+    if (t !== "path") connectGuidanceShownRef.current = false;
     setTool(t);
+    setTestRoutePickKind(null);
+    setTestRoutePickHover(null);
+    setTestRouteMapPick(null);
     setPathSettingsOpen(false);
     setDP(reset.drawingPath);
     setNavConnectStart(null);
@@ -2888,18 +3719,27 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
   // ── Layer switching — clears ALL transient tool state and returns to the
   // select tool so an incompatible active tool can never leak between
   // Campus / Navigation / Accessibility / Emergency / Events ──
-  const switchLayer = useCallback((next: EditorLayer) => {
+  const switchLayer = useCallback((next: EditorLayer, preservePathMemberEdit = false) => {
     const reset = resetTransientToolState();
+    connectGuidanceShownRef.current = false;
     setLayer(next);
     setPathSettingsOpen(false);
-    if (next === "navigation") setShowCampusNavOverlay(true);
-    if (next === "events") setShowCampusNavOverlay(false);
+    setTestRoutePickKind(null);
+    setTestRoutePickHover(null);
+    setTestRouteMapPick(null);
     setTool("select");
-    setSelected(null);
-    setMultiSelected([]);
-    setShowAlignTools(false);
-    setPathMemberEditId(null);
-    setSelectedPathPoint(null);
+    if (!preservePathMemberEdit) {
+      setSelected(null);
+      setMultiSelected([]);
+      setShowAlignTools(false);
+      setPathMemberEditId(null);
+      setSelectedPathPoint(null);
+    } else {
+      // Navigation visibility is presentation-only. Keep the active physical
+      // member and its edit handles intact while the overlay is toggled.
+      setMultiSelected([]);
+      setShowAlignTools(false);
+    }
     setDP(reset.drawingPath);
     setNavConnectStart(null);
     setNavConnectBends([]);
@@ -2926,10 +3766,16 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     setRubberBand(reset.rubberBand);
     setGuides(reset.guides);
     setSelectedBuildingType(reset.selectedBuildingType);
-    setHighlightedRoute(null);
-    setTestNavOpen(false);
     setShowRoutesPanel(false);
   }, []);
+
+  // Test Route owns a temporary navigation-visibility session. A context
+  // remount must not leave the route panel without its graph overlay.
+  useEffect(() => {
+    if (!testNavOpen) return;
+    if (!showCampusNavOverlay) setShowCampusNavOverlay(true);
+    if (layer === "events") switchLayer("navigation");
+  }, [layer, showCampusNavOverlay, switchLayer, testNavOpen]);
 
   const handleDblClick = () => {
     if (tool === "path" && layer !== "navigation" && drawingPath.length >= 2) {
@@ -2967,15 +3813,6 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     }
   };
 
-  const handleBuildingDoubleClick = useCallback((id: string) => {
-    // B8 Phase 1: unified editor — double-click rename works in all layers.
-    const b = buildings.find((x) => x.id === id);
-    if (!b) return;
-    setSelected({ type: "building", id });
-    setRenameDialog({ id, name: b.name });
-    setRenameValue(b.name);
-  }, [buildings, layer]);
-
   // ── B5 correction: immutable drag-start snapshot for nav graph groups ──
   // Captures the ORIGINAL free-node positions plus the ORIGINAL bendPoints of
   // every INTERNAL edge (both endpoints in the moving set). The drag handler
@@ -2999,6 +3836,27 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
   const onItemDown = (e: React.MouseEvent, type: "building" | "marker" | "decorAsset" | "navNode", id: string, ox: number, oy: number) => {
     e.stopPropagation();
     setPathChoiceMenu(null);
+    if (testRoutePickKind) {
+      if (type === "building") {
+        setTestRouteMapPick({ kind: testRoutePickKind, value: `building:${id}` });
+        setTestRoutePickKind(null);
+        setTestRoutePickHover(null);
+        toast.success("Location selected", "Test Route endpoint set.");
+      } else if (type === "navNode") {
+        const node = navNodes.find((candidate) => candidate.id === id);
+        if (node?.entranceId && node.buildingId) {
+          setTestRouteMapPick({ kind: testRoutePickKind, value: `building:${node.buildingId}` });
+          setTestRoutePickKind(null);
+          setTestRoutePickHover(null);
+          toast.success("Location selected", "Test Route endpoint set.");
+        } else {
+          toast.info("Choose a named location", "Walking Points are available through the searchable location list.");
+        }
+      } else {
+        toast.info("Choose a building or entrance", "Select a valid route location on the map.");
+      }
+      return;
+    }
     // Spacebar held: pan instead of interacting with items
     if (isSpacePressed()) {
       startPan(e);
@@ -3007,8 +3865,62 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     // B5 Phase 1: navigation-layer Path tool connects waypoints by clicking
     // them — node clicks never reach handleSvgDown (they stop propagation).
     if (tool === "path" && layer === "navigation" && type === "navNode") {
+      const clickedNode = navNodes.find((node) => node.id === id);
+      const overlappingNodeIds = clickedNode
+        ? outdoorNodes
+            .filter((node) => node.id === id || Math.hypot(node.x - clickedNode.x, node.y - clickedNode.y) <= 2)
+            .map((node) => node.id)
+        : [id];
+      if (overlappingNodeIds.length > 1) {
+        setPathChoiceMenu({ x: e.clientX, y: e.clientY, pathIds: [], nodeIds: overlappingNodeIds });
+        return;
+      }
       onNavNodeClick(id);
       return;
+    }
+    // Walking Point reuses an existing canonical node instead of stacking a
+    // second point. Generated points remain Pathway-owned; manual points stay
+    // ordinary reusable anchors.
+    if (tool === "marker" && layer === "navigation" && type === "navNode") {
+      const node = navNodes.find((candidate) => candidate.id === id);
+      if (!node) return;
+      if (node.entranceId && node.buildingId && !node.floorId) {
+        setSelected({ type: "entrance", id: node.entranceId, buildingId: node.buildingId });
+        setMultiSelected([]);
+        setTool("select");
+        setNavEntranceHover(null);
+        setWaypointEdgeSnap(null);
+        setConnectBlocked(false);
+        toast.info("Entrance is already a navigation connection point", "Use this Entrance directly for navigation connections.");
+        return;
+      }
+      const overlappingNodeIds = outdoorNodes
+        .filter((candidate) => Math.hypot(candidate.x - node.x, candidate.y - node.y) <= 2)
+        .map((candidate) => candidate.id);
+      if (overlappingNodeIds.length > 1) {
+        setPathChoiceMenu({ x: e.clientX, y: e.clientY, pathIds: [], nodeIds: overlappingNodeIds });
+        return;
+      }
+      setSelected({ type: "navNode", id });
+      setMultiSelected([]);
+      setTool("select");
+      if (node.generatedFromPathVertices?.length) {
+        toast.info("Generated Walking Point", "This point follows its physical Pathway. Drag to adjust the Pathway vertex.");
+      } else {
+        toast.info("Walking Point already exists", "The existing manual Walking Point is selected.");
+      }
+      return;
+    }
+    // Entrance anchors are graph identities, not a second admin-visible
+    // Walking Point. In normal Navigation Select, route the hit back to the
+    // physical Entrance so its properties stay reachable without hiding the
+    // overlay. Connect/marker modes intentionally keep their target behavior.
+    if (tool === "select" && layer === "navigation" && type === "navNode") {
+      const node = navNodes.find((candidate) => candidate.id === id);
+      if (node?.entranceId && node.buildingId && !node.floorId) {
+        onEntranceDown(e, node.buildingId, node.entranceId, node.x, node.y);
+        return;
+      }
     }
     // Overlap rule: a normal click on an exposed node selects the node. Alt is
     // handled here (the node stops propagation), so it reliably reaches the
@@ -3031,7 +3943,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
       // Once a physical Pathway is selected, its own vertex handles/body have
       // priority over an overlapping generated node. Route directly to the
       // proven vertex index so editing cannot silently target another Pathway.
-      if (selected?.type === "path" && ownedPathIds.includes(selected.id)) {
+      if (pathMemberEditId && selected?.type === "path" && selected.id === pathMemberEditId && ownedPathIds.includes(selected.id)) {
         const selectedPath = paths.find((path) => path.id === selected.id);
         const ownedRef = node?.generatedFromPathVertices?.find((ref) => ref.pathId === selected.id);
         const vertexIndex = (ownedRef && selectedPath?.navigationVertexIds?.indexOf(ownedRef.vertexId)) ?? -1;
@@ -3040,6 +3952,31 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
           return;
         }
         onPathDown(e, selected.id);
+        return;
+      }
+      if (node?.generatedFromPathVertices?.length) {
+        const refs = node.generatedFromPathVertices
+          .map((ref) => {
+            const owner = paths.find((path) => path.id === ref.pathId);
+            const pointIndex = owner?.navigationVertexIds?.indexOf(ref.vertexId) ?? -1;
+            return owner && pointIndex >= 0 ? { pathId: owner.id, pointIndex, locked: !!owner.locked } : null;
+          })
+          .filter(Boolean) as { pathId: string; pointIndex: number; locked: boolean }[];
+        const proxyRefs = refs.map(({ pathId, pointIndex }) => ({ pathId, pointIndex }));
+        const pt = getPoint(e, cw, ch);
+        setSelected({ type: "navNode", id });
+        setMultiSelected([]);
+        setShowAlignTools(false);
+        setSelectedPathPoint(null);
+        gestureHistoryPushed.current = false;
+        gestureChangedRef.current = false;
+        const canProxyDrag = proxyRefs.length > 0
+          && proxyRefs.length === node.generatedFromPathVertices.length
+          && refs.every((ref) => !ref.locked);
+        generatedPointProxyRef.current = canProxyDrag
+          ? { nodeId: id, sx: pt.x, sy: pt.y, refs: proxyRefs }
+          : null;
+        dragging.current = { type: "generatedPathPoint", id, sx: pt.x, sy: pt.y, ox: node.x, oy: node.y };
         return;
       }
     }
@@ -3062,7 +3999,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
         const node = navNodes.find((n) => n.id === id);
         if (!node) return;
         if (node.generatedFromPathVertices?.length) {
-          toast.info("Pathway walking point is managed automatically", "Edit the physical Pathway to move this generated point.");
+          onRemoveGeneratedPathwayPoint(id);
           return;
         }
         const connected = navEdges.filter((e) => e.startNodeId === id || e.endNodeId === id).length;
@@ -3158,7 +4095,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
         return;
       }
       if (type === "navNode" && navNodes.find((n) => n.id === id)?.generatedFromPathVertices?.length) {
-        toast.info("Pathway walking points follow their physical Pathway", "Edit the Pathway vertex instead of dragging this generated point.");
+        toast.info("Generated Walking Point", "This point follows its physical Pathway. Drag to adjust the Pathway vertex.");
         return;
       }
       const pt = getPoint(e, cw, ch);
@@ -3188,7 +4125,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
       return;
     }
     if (type === "navNode" && navNodes.find((n) => n.id === id)?.generatedFromPathVertices?.length) {
-      toast.info("Pathway walking points follow their physical Pathway", "Edit the Pathway vertex instead of dragging this generated point.");
+      toast.info("Generated Walking Point", "This point follows its physical Pathway. Drag to adjust the Pathway vertex.");
       return;
     }
     // Unified editor: entrances are draggable in all layers with Select/Pan tools.
@@ -3312,6 +4249,16 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
 
   const onEntranceDown = (e: React.MouseEvent, buildingId: string, entranceId: string, ox: number, oy: number) => {
     e.stopPropagation();
+    if (testRoutePickKind) {
+      // Outdoor Pick on Map is semantic and Building-first. Clicking an
+      // entrance footprint commits its parent Building; direct Entrance
+      // diagnostics remain available from Search/Advanced locations.
+      setTestRouteMapPick({ kind: testRoutePickKind, value: `building:${buildingId}` });
+      setTestRoutePickKind(null);
+      setTestRoutePickHover(null);
+      toast.success("Location selected", "Building endpoint set.");
+      return;
+    }
     const parent = buildings.find((b) => b.id === buildingId);
     if (!parent) return;
     // B5 Phase 1.6: in the Navigation layer an entrance is a routing TARGET —
@@ -3320,22 +4267,14 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     if (layer === "navigation" && (tool === "marker" || tool === "path")) {
       const pos = entranceWorldPosition(parent, parent.entrances?.find((en) => en.id === entranceId) ?? { edge: "bottom", offset: 0.5 });
       if (tool === "marker") {
-        const existing = findEntranceNavNode(navNodes, buildingId, entranceId);
-        if (existing) {
-          // B5 Phase 1.8: no duplicate node, no mutation — select the existing
-          // entrance-linked waypoint + give clear feedback.
-          setSelected({ type: "navNode", id: existing.id });
-          setTool("select");
-          toast.info("Entrance already connected to the navigation network", "The existing entrance waypoint is selected.");
-          return;
-        }
-        const ee = buildEntranceNode(buildingId, entranceId, pos.x, pos.y);
-        if (ee) {
-          const next = { ...campus, navNodes: [...navNodes, ee] };
-          onUpdate(next); pushHistory(next);
-          setSelected({ type: "navNode", id: ee.id });
-          setTool("select");
-        }
+        setSelected({ type: "entrance", id: entranceId, buildingId });
+        setTool("select");
+        // A rejected Walking Point placement must not leave the Entrance's
+        // temporary target cue active after the tool has exited.
+        setNavEntranceHover(null);
+        setWaypointEdgeSnap(null);
+        setConnectBlocked(false);
+        toast.info("Entrance is already a navigation connection point", "Use this Entrance directly for navigation connections.");
         return;
       }
       // Connect Path tool on an entrance.
@@ -3346,7 +4285,13 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
         const start = navNodes.find((n) => n.id === startId);
         setNavConnectStart(startId);
         setNavPreview(start ? { x: start.x, y: start.y } : { x: pos.x, y: pos.y });
-        setSelected({ type: "navNode", id: startId });
+        setNavPreviewPins([]);
+        navConnectBendGroupsRef.current = [];
+        setNavEntranceHover(null);
+        // Keep the physical Entrance selected, matching the Properties action;
+        // its canonical graph node remains the internal Connect source.
+        setSelected({ type: "entrance", id: entranceId, buildingId });
+        showConnectGuidance();
       } else if (entranceNodeId) {
         commitNavEdge(navConnectStart, entranceNodeId);
       } else {
@@ -3385,6 +4330,72 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     updBuildings(buildings.map((b) => (b.id === id ? { ...b, ...changes } : b)));
   };
 
+  const onAddExteriorEmergencyStair = (buildingId: string) => {
+    const current = campusRef.current;
+    const building = current.buildings.find((candidate) => candidate.id === buildingId);
+    if (!building || building.locked) return;
+    const id = genId("exst");
+    const stair = {
+      id,
+      buildingId,
+      label: `Emergency Stair ${(building.exteriorEmergencyStairs?.length ?? 0) + 1}`,
+      state: "open" as const,
+      width: 28,
+      height: 42,
+      attachment: { edge: "right" as const, offset: 0.5 },
+      servedFloorIds: building.floors.map((floor) => floor.id),
+      sharedId: id,
+      emergencySafe: true,
+      visible: true,
+    };
+    const nextBuildings = current.buildings.map((candidate) => candidate.id === buildingId
+      ? { ...candidate, exteriorEmergencyStairs: [...(candidate.exteriorEmergencyStairs ?? []), stair] }
+      : candidate);
+    const next = syncExteriorEmergencyStairGraph({
+      ...current,
+      buildings: nextBuildings,
+      navNodes: syncEntranceNodePositions(nextBuildings, current.navNodes ?? []),
+      navEdges: current.navEdges ?? [],
+    });
+    pushHistory(next);
+    onUpdate(next);
+    setSelected({ type: "building", id: buildingId });
+    toast.success("Exterior Emergency Stair added", "Configure served Floors in the building properties.");
+  };
+
+  const onUpdateExteriorEmergencyStair = (buildingId: string, stairId: string, changes: Partial<ExteriorEmergencyStair>) => {
+    const current = campusRef.current;
+    const nextBuildings = current.buildings.map((building) => building.id !== buildingId ? building : {
+      ...building,
+      exteriorEmergencyStairs: (building.exteriorEmergencyStairs ?? []).map((stair) => stair.id === stairId ? { ...stair, ...changes } : stair),
+    });
+    const next = syncExteriorEmergencyStairGraph({
+      ...current,
+      buildings: nextBuildings,
+      navNodes: syncEntranceNodePositions(nextBuildings, current.navNodes ?? []),
+      navEdges: current.navEdges ?? [],
+    });
+    pushHistory(next);
+    onUpdate(next);
+  };
+
+  const onDeleteExteriorEmergencyStair = (buildingId: string, stairId: string) => {
+    const current = campusRef.current;
+    const nextBuildings = current.buildings.map((building) => building.id !== buildingId ? building : {
+      ...building,
+      exteriorEmergencyStairs: (building.exteriorEmergencyStairs ?? []).filter((stair) => stair.id !== stairId),
+    });
+    const next = syncExteriorEmergencyStairGraph({
+      ...current,
+      buildings: nextBuildings,
+      navNodes: syncEntranceNodePositions(nextBuildings, current.navNodes ?? []),
+      navEdges: current.navEdges ?? [],
+    });
+    pushHistory(next);
+    onUpdate(next);
+    toast.info("Exterior Emergency Stair removed", "Its generated floor landings and transition anchors were removed.");
+  };
+
   const onAddEntrance = (buildingId: string) => {
     const currentCampus = campusRef.current;
     const currentBuildings = currentCampus.buildings;
@@ -3407,6 +4418,15 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     setShowAlignTools(false);
     setSelected({ type: "entrance", id: entranceId, buildingId });
     setGuides([]);
+    if (tool === "path" && layer === "navigation") {
+      cancelConnectPreviewFrame();
+      setNavPreview(null);
+      setNavPreviewPins([]);
+      setConnectBlocked(false);
+    }
+    setNavEntranceHover(null);
+    setWaypointEdgeSnap(null);
+    setConnectBlocked(false);
   };
 
   const onUpdateEntrance = (buildingId: string, entranceId: string, changes: Partial<CampusEntrance>) => {
@@ -3429,9 +4449,10 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
       buildings: nextBuildings,
       navNodes: syncEntranceNodePositions(nextBuildings, currentCampus.navNodes ?? []),
     });
-    campusRef.current = next;
-    onUpdate(next);
-    pushHistory(next);
+    const reconciled = reconcileEntranceOutdoorConnections(next);
+    campusRef.current = reconciled;
+    onUpdate(reconciled);
+    pushHistory(reconciled);
   };
 
   const onDeleteEntrance = (buildingId: string, entranceId: string) => {
@@ -3497,8 +4518,9 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     // nodes + connected edges in the SAME mutation (no stale references).
     const nextBuildings = buildings.filter((b) => b.id !== id);
     const { nodes, edges } = pruneOrphanedEntranceNodes(nextBuildings, navNodes, navEdges);
+    const next = { ...campus, buildings: nextBuildings, navNodes: nodes, navEdges: edges };
     pushHistory();
-    onUpdate({ ...campus, buildings: nextBuildings, navNodes: nodes, navEdges: edges });
+    onUpdate(next);
     setSelected(null);
   };
   const onDeleteMarker = (id: string) => { updMarkers(markers.filter((m) => m.id !== id)); setSelected(null); };
@@ -3506,6 +4528,10 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
   // ── Floor manager helpers (delegated to HierarchyPanel) ──
 
   const onPathClick = (id: string) => {
+    if (suppressNextPathClickRef.current) {
+      suppressNextPathClickRef.current = false;
+      return;
+    }
     if (suppressPathClickRef.current === id) {
       suppressPathClickRef.current = null;
       return;
@@ -3518,12 +4544,35 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
       // B5 Phase 5.12 — Canva-style network selection:
       // - while editing one member, clicking another member switches edit focus;
       // - clicking any member of an explicit Path Network selects the WHOLE
-      //   network (no individual point controls) — double-click enters member edit.
+      //   network first; the next normal click (or double-click) enters member edit.
       const path = paths.find((x) => x.id === id);
       const networkMembers = path?.pathNetworkId
         ? paths.filter((candidate) => candidate.pathNetworkId === path.pathNetworkId)
         : [];
       if (pathMemberEditId && pathMemberEditId !== id) {
+        setSelected({ type: "path", id });
+        setMultiSelected([]);
+        setShowAlignTools(false);
+        setSelectedPathPoint(null);
+        setPathMemberEditId(id);
+        return;
+      }
+      if (pathMemberEditId === id) {
+        setSelected({ type: "path", id });
+        setMultiSelected([]);
+        setShowAlignTools(false);
+        setSelectedPathPoint(null);
+        return;
+      }
+      // A path-network click is intentionally two-stage: the first click
+      // selects the convenient network group, while the next normal click on
+      // any member drills into that member. Keep this transition explicit so
+      // the group-selection branch below cannot immediately reconstruct the
+      // network and discard member-edit state.
+      const networkAlreadySelected = networkMembers.length > 1 &&
+        multiSelected.length === networkMembers.length &&
+        networkMembers.every((member) => multiSelected.includes(member.id));
+      if (networkAlreadySelected) {
         setSelected({ type: "path", id });
         setMultiSelected([]);
         setShowAlignTools(false);
@@ -3573,6 +4622,18 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     if (tool !== "select") return;
     const editingThisMember = pathMemberEditId === id;
     const networkIds = pathNetworkIdsForPath(id);
+    // The group is selected by the first click. On the next pointer-down,
+    // enter member mode before arming the drag so a click-drag cannot briefly
+    // arm the network transform and move every member together.
+    const networkAlreadySelected = !editingThisMember && networkIds.length > 1 &&
+      multiSelected.length === networkIds.length &&
+      networkIds.every((memberId) => multiSelected.includes(memberId));
+    const memberEditActive = editingThisMember || networkAlreadySelected;
+    if (networkAlreadySelected) {
+      setPathMemberEditId(id);
+      setMultiSelected([]);
+      setShowAlignTools(false);
+    }
     if (e.shiftKey) {
       const base = multiSelected.length > 0 ? multiSelected : selected ? [selected.id] : [];
       // Cross-domain guard: physical and navigation items cannot be mixed
@@ -3606,8 +4667,8 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     gestureHistoryPushed.current = false;
     gestureChangedRef.current = false;
     dragging.current = { type: "path", id, sx: pt.x, sy: pt.y, ox: 0, oy: 0, points: structuredClone(path.points) };
-    const activeGroupIds = editingThisMember ? [id] : networkIds.length > 1 ? networkIds : multiSelected;
-    if (editingThisMember) {
+    const activeGroupIds = memberEditActive ? [id] : networkIds.length > 1 ? networkIds : multiSelected;
+    if (memberEditActive) {
       dragGroupStartRef.current = null;
       pathGroupOriginRef.current = new globalThis.Map(paths.map((candidate) => [candidate.id, structuredClone(candidate.points)]));
       setMultiSelected([]);
@@ -3637,13 +4698,14 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     // B8 Phase 1: unified editor — path points editable in all layers.
     const path = paths.find((p) => p.id === id);
     if (!path || path.locked) return;
+    if (path.pathNetworkId && paths.filter((candidate) => candidate.pathNetworkId === path.pathNetworkId).length > 1 && pathMemberEditId !== id) return;
     const pt = getPoint(e as React.MouseEvent<SVGSVGElement>, cw, ch);
     gestureHistoryPushed.current = false;
     gestureChangedRef.current = false;
     dragging.current = { type: "pathPoint", id, pointIndex, sx: pt.x, sy: pt.y, ox: 0, oy: 0 };
     setSelected({ type: "path", id });
     setSelectedPathPoint({ pathId: id, pointIndex });
-  }, [cw, ch, getPoint, layer, paths]);
+  }, [cw, ch, getPoint, layer, pathMemberEditId, paths]);
 
   const onPathExtendStart = useCallback((e: React.MouseEvent, id: string, pointIndex: number) => {
     e.stopPropagation();
@@ -3652,6 +4714,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     const path = paths.find((p) => p.id === id);
     const start = path?.points[pointIndex];
     if (!path || path.locked || !start || (pointIndex !== 0 && pointIndex !== path.points.length - 1)) return;
+    if (path.pathNetworkId && paths.filter((candidate) => candidate.pathNetworkId === path.pathNetworkId).length > 1 && pathMemberEditId !== id) return;
     const cfg = pathPaintTypeConfig(path.type);
     pathExtendRef.current = { pathId: id, atStart: pointIndex === 0 };
     pathPaintStroke.current = { points: [start], moved: false };
@@ -3662,7 +4725,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     setSelectedPathPoint({ pathId: id, pointIndex });
     setMultiSelected([]);
     setGuides([]);
-  }, [layer, paths]);
+  }, [layer, pathMemberEditId, paths]);
 
   const onPathWidthDown = useCallback((e: React.MouseEvent, id: string, segmentIndex: number, handlePoint: { x: number; y: number }) => {
     e.stopPropagation();
@@ -3671,6 +4734,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     const a = path?.points[segmentIndex];
     const b = path?.points[segmentIndex + 1];
     if (!path || path.locked || !a || !b) return;
+    if (path.pathNetworkId && paths.filter((candidate) => candidate.pathNetworkId === path.pathNetworkId).length > 1 && pathMemberEditId !== id) return;
     const pt = getPoint(e as React.MouseEvent<SVGSVGElement>, cw, ch);
     gestureHistoryPushed.current = false;
     gestureChangedRef.current = false;
@@ -3687,7 +4751,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
       handlePoint,
     };
     setSelected({ type: "path", id });
-  }, [cw, ch, getPoint, layer, paths]);
+  }, [cw, ch, getPoint, layer, pathMemberEditId, paths]);
 
   const onPathAddPoint = (id: string, pointIndex: number, point: { x: number; y: number }) => {
     const path = paths.find((p) => p.id === id);
@@ -3709,6 +4773,185 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     setSelected({ type: "path", id });
     setSelectedPathPoint({ pathId: id, pointIndex });
   };
+
+  /**
+   * Connect an active authoring gesture directly to a physical Pathway
+   * segment. The Pathway remains the source of truth: insert one persisted
+   * vertex, reconcile its generated node/edges, and append the authored
+   * connector in the same campus snapshot/history entry.
+   */
+  const connectPathwaySegment = useCallback((target: PathSnapTarget): boolean => {
+    if (!navConnectStart || target.kind !== "segment" || target.segmentIndex === undefined) return false;
+    const path = paths.find((candidate) => candidate.id === target.pathId);
+    if (!path || path.locked) return false;
+    const pointIndex = target.segmentIndex + 1;
+    // A visible physical Pathway is a valid target even before its generated
+    // navigation ownership has been initialized. Reuse the canonical
+    // conversion helper first, then insert exactly one clicked vertex.
+    const preparedCampus = pathwayHasOwnedNavigation(path)
+      ? campus
+      : convertPathwaysToNavigation(campus, [path.id], genId).campus;
+    const preparedPaths = preparedCampus.paths ?? [];
+    const nextPaths = insertPathJunctionPoint(preparedPaths, target);
+    const reconciled = reconcilePathwayNavigation({ ...preparedCampus, paths: nextPaths }, genId);
+    const updatedPath = reconciled.paths.find((candidate) => candidate.id === target.pathId);
+    const vertexId = updatedPath?.navigationVertexIds?.[pointIndex];
+    const endNode = vertexId
+      ? reconciled.navNodes.find((node) => node.generatedFromPathVertices?.some((ref) => ref.pathId === target.pathId && ref.vertexId === vertexId))
+      : undefined;
+    const startNode = outdoorNodes.find((node) => node.id === navConnectStart);
+    if (!startNode || !endNode || isSelfEdge(startNode.id, endNode.id)) return false;
+
+    const clearConnect = () => {
+      cancelConnectPreviewFrame();
+      connectGuidanceShownRef.current = false;
+      setNavConnectStart(null);
+      setNavConnectBends([]);
+      setNavPreview(null);
+      setNavPreviewPins([]);
+      navConnectBendGroupsRef.current = [];
+      connectRedoStackRef.current = [];
+      setNavEntranceHover(null);
+      setWaypointEdgeSnap(null);
+      setConnectBlocked(false);
+    };
+
+    if (findDuplicateNavEdge(reconciled.navEdges, startNode.id, endNode.id)) {
+      toast.warning("Those points are already connected", "Select the existing connection to edit it.");
+      clearConnect();
+      return false;
+    }
+
+    const entranceGeometry = entranceConnectorForNodes(startNode, endNode);
+    if (entranceGeometry?.blocked) {
+      toast.warning("Connection blocked by building", "Move the Walking Point to a route with a clear outward exit.");
+      return false;
+    }
+    const anchor = navConnectBends.length > 0 ? navConnectBends[navConnectBends.length - 1] : { x: startNode.x, y: startNode.y };
+    const tail = orthogonalBendsFor(anchor, { x: endNode.x, y: endNode.y }, undefined, undefined);
+    const allBends = normalizedEdgeBends(startNode, entranceGeometry ? entranceGeometry.bends : [...navConnectBends, ...tail], endNode);
+    const polyline = [{ x: startNode.x, y: startNode.y }, ...allBends, { x: endNode.x, y: endNode.y }];
+    if (!entranceGeometry && polylineCrossesObstacle(polyline, buildings, decorAssets)) {
+      toast.warning("Connection blocked", "The connection crosses a building or obstacle.");
+      return false;
+    }
+    const edge = {
+      ...createNavEdge({ id: genId("ne"), startNodeId: startNode.id, endNodeId: endNode.id, nodes: reconciled.navNodes }),
+      accessible: (startNode.entranceId ? startNode.accessible : endNode.entranceId ? endNode.accessible : true) !== false,
+      ...(allBends.length > 0 ? { bendPoints: allBends, distance: navEdgePolylineDistance(polyline) } : {}),
+    };
+    const entranceNode = startNode.entranceId && !startNode.floorId
+      ? startNode
+      : endNode.entranceId && !endNode.floorId
+        ? endNode
+        : undefined;
+    const withoutPreviousEntranceConnection = entranceNode?.buildingId && entranceNode.entranceId
+      ? removeEntranceOutdoorConnection(reconciled, entranceNode.buildingId, entranceNode.entranceId)
+      : reconciled;
+    const next: Campus = {
+      ...withoutPreviousEntranceConnection,
+      navEdges: [...(withoutPreviousEntranceConnection.navEdges ?? []), edge],
+    };
+    onUpdate(next);
+    pushHistory(next);
+    setSelected({ type: "navEdge", id: edge.id });
+    setSelectedPathPoint({ pathId: target.pathId, pointIndex });
+    clearConnect();
+    toast.success("Connection created", `Pathway connection point added to ${path.name || "Pathway"}.`);
+    return true;
+  }, [buildings, cancelConnectPreviewFrame, campus, decorAssets, entranceConnectorForNodes, findDuplicateNavEdge, insertPathJunctionPoint, navConnectBends, navConnectStart, onUpdate, outdoorNodes, paths, toast]);
+
+  /**
+   * Split a visible, authored Walking Network edge at the click position and
+   * use the new canonical point as the Entrance's replacement target. The
+   * physical Pathway branch above remains the source of truth for generated
+   * segments; this helper is only for ordinary manual outdoor edges.
+   */
+  const connectManualNavSegment = useCallback((
+    targetEdge: NavigationEdge,
+    nearest: { x: number; y: number },
+    preferredSegmentIndex?: number,
+  ): boolean => {
+    if (!navConnectStart || isPathwayGeneratedEdge(targetEdge) || isEntranceManagedNavEdge(targetEdge)) return false;
+    const startNode = outdoorNodes.find((node) => node.id === navConnectStart);
+    if (!startNode) return false;
+    // The hover projection is authoritative. Preserve it for diagonal and
+    // bent segments instead of rounding back toward an endpoint on commit.
+    const clickPoint = { x: nearest.x, y: nearest.y };
+    const edgeStart = outdoorNodes.find((node) => node.id === targetEdge.startNodeId);
+    const edgeEnd = outdoorNodes.find((node) => node.id === targetEdge.endNodeId);
+    if (!edgeStart || !edgeEnd) return false;
+    if (Math.hypot(clickPoint.x - edgeStart.x, clickPoint.y - edgeStart.y) <= NAV_NODE_HIT_THRESHOLD
+      || Math.hypot(clickPoint.x - edgeEnd.x, clickPoint.y - edgeEnd.y) <= NAV_NODE_HIT_THRESHOLD) {
+      toast.info("Choose a point along the Walking Network", "Click between the existing Walking Points to insert a connection point.");
+      return false;
+    }
+
+    const insertNodeBase = createNavNode({
+      id: genId("nn"),
+      x: clickPoint.x,
+      y: clickPoint.y,
+      campusId: campus.id,
+      name: "Walking Point",
+      type: "outdoor",
+      color: LAYER_MARKER_CONFIG.navigation.color,
+    });
+    const insertNode = { ...insertNodeBase, x: clickPoint.x, y: clickPoint.y };
+    const entranceGeometry = entranceConnectorForNodes(startNode, insertNode);
+    if (entranceGeometry?.blocked) {
+      toast.warning("Connection blocked by building", "Move the Entrance or choose a clear Walking Network segment.");
+      return false;
+    }
+    const connectorAnchor = { x: startNode.x, y: startNode.y };
+    const connectorBends = entranceGeometry
+      ? entranceGeometry.bends
+      : orthogonalBendsFor(connectorAnchor, clickPoint, undefined, undefined);
+    const connectorPoints = [{ x: startNode.x, y: startNode.y }, ...connectorBends, clickPoint];
+    if (!entranceGeometry && polylineCrossesObstacle(connectorPoints, buildings, decorAssets)) {
+      toast.warning("Connection blocked", "The connection crosses a building or obstacle.");
+      return false;
+    }
+    const splitResult = splitNavEdge(targetEdge, insertNode, outdoorNodes, preferredSegmentIndex);
+    if (!splitResult) return false;
+
+    const entranceNode = startNode.entranceId && !startNode.floorId
+      ? startNode
+      : insertNode.entranceId && !insertNode.floorId
+        ? insertNode
+        : undefined;
+    const withoutPreviousEntranceConnection = entranceNode?.buildingId && entranceNode.entranceId
+      ? removeEntranceOutdoorConnection(campus, entranceNode.buildingId, entranceNode.entranceId)
+      : campus;
+    const splitEdges = splitResult.newEdges.filter((edge) => edge.id !== targetEdge.id);
+    const connectorEdge = {
+      ...createNavEdge({ id: genId("ne"), startNodeId: startNode.id, endNodeId: insertNode.id, nodes: [...outdoorNodes, insertNode] }),
+      accessible: startNode.accessible !== false,
+      ...(connectorBends.length > 0 ? { bendPoints: connectorBends, distance: navEdgePolylineDistance(connectorPoints) } : {}),
+    };
+    const retainedEdges = (withoutPreviousEntranceConnection.navEdges ?? []).filter((edge) => edge.id !== targetEdge.id);
+    const next: Campus = {
+      ...withoutPreviousEntranceConnection,
+      navNodes: [...(withoutPreviousEntranceConnection.navNodes ?? []), insertNode],
+      navEdges: [...retainedEdges, ...splitEdges, connectorEdge],
+    };
+    onUpdate(next);
+    pushHistory(next);
+    setSelected({ type: "navNode", id: insertNode.id });
+    setSelectedPathPoint(null);
+    cancelConnectPreviewFrame();
+    connectGuidanceShownRef.current = false;
+    setNavConnectStart(null);
+    setNavConnectBends([]);
+    setNavPreview(null);
+    setNavPreviewPins([]);
+    navConnectBendGroupsRef.current = [];
+    connectRedoStackRef.current = [];
+    setNavEntranceHover(null);
+    setWaypointEdgeSnap(null);
+    setConnectBlocked(false);
+    toast.success("Connection created", "Walking Network point inserted and Entrance connected.");
+    return true;
+  }, [buildings, cancelConnectPreviewFrame, campus, decorAssets, entranceConnectorForNodes, isEntranceManagedNavEdge, navConnectStart, onUpdate, outdoorNodes, splitNavEdge, toast]);
 
   const selectedPathPointCanBeRemoved = () => {
     if (!selectedPathPoint) return false;
@@ -3740,6 +4983,68 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     setSelected({ type: "path", id: path.id });
     setSelectedPathPoint(null);
   };
+
+  /**
+   * Remove an explicit physical Pathway vertex that owns a generated outdoor
+   * node.  Generated navigation objects are never deleted directly: the
+   * Pathway remains the source of truth and reconciliation rebuilds only the
+   * affected generated nodes/edges.  Shared/junction vertices are protected
+   * because removing one would silently damage another Pathway or bridge.
+   */
+  const onRemoveGeneratedPathwayPoint = useCallback((nodeId: string) => {
+    const node = navNodes.find((candidate) => candidate.id === nodeId);
+    const refs = node?.generatedFromPathVertices ?? [];
+    if (!node || refs.length === 0) return false;
+    if (refs.length !== 1) {
+      toast.warning("Pathway point is shared", "This point connects multiple Pathways. Edit the connected Pathways first.");
+      return false;
+    }
+    const ref = refs[0];
+    const path = paths.find((candidate) => candidate.id === ref.pathId);
+    const vertexIds = path?.navigationVertexIds;
+    const pointIndex = vertexIds?.length === path?.points.length ? vertexIds.indexOf(ref.vertexId) : -1;
+    if (!path || !vertexIds || pointIndex < 0 || path.locked) {
+      toast.warning("Pathway point cannot be removed", path?.locked ? "Unlock the physical Pathway first." : "The physical Pathway vertex identity is unavailable.");
+      return false;
+    }
+    const first = path.points[0];
+    const last = path.points[path.points.length - 1];
+    const closed = Boolean(first && last && path.points.length > 2 && pathPointKey(first) === pathPointKey(last));
+    const isSharedJunction = pathPointIsJunction(path.id, pointIndex)
+      || navEdges.some((edge) => {
+        if (edge.startNodeId !== nodeId && edge.endNodeId !== nodeId) return false;
+        return edge.type === "entrance_transition" || !edge.generatedFromPathIds?.includes(path.id);
+      });
+    if (isSharedJunction || closed && (pointIndex === 0 || pointIndex === path.points.length - 1)) {
+      toast.warning("Pathway point is shared", "This point connects multiple Pathways or a building bridge. Edit the connected Pathways first.");
+      return false;
+    }
+    if (path.points.length <= 2) {
+      toast.info("Pathway needs two points", "Add another Pathway vertex before removing this point.");
+      return false;
+    }
+    const nextPoints = path.points.filter((_, index) => index !== pointIndex);
+    if (nextPoints.length < 2) {
+      toast.info("Pathway needs two points", "A Pathway must keep at least two points.");
+      return false;
+    }
+    const nextVertexIds = vertexIds.filter((_, index) => index !== pointIndex);
+    const next: Campus = {
+      ...campus,
+      paths: paths.map((candidate) => candidate.id === path.id
+        ? { ...candidate, points: nextPoints, navigationVertexIds: nextVertexIds }
+        : candidate),
+    };
+    const reconciled = reconcilePathwayNavigation(next, genId);
+    onUpdate(reconciled);
+    pushHistory(reconciled);
+    setSelected({ type: "path", id: path.id });
+    setSelectedPathPoint(null);
+    toast.success("Pathway point removed", "The generated walking network was reconciled from the physical Pathway.");
+    return true;
+    // pushHistory is intentionally omitted: evaluating it here would hit the
+    // component's later history callback declaration during render.
+  }, [campus, navEdges, navNodes, onUpdate, pathPointIsJunction, paths, toast]);
 
   const onAddPathBend = (pathId: string) => {
     const path = paths.find((p) => p.id === pathId);
@@ -4158,13 +5463,19 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
         case "duplicate": {
           pushHistory();
           const nbId = genId("bld");
+          const entranceIdMap = new Map((b.entrances ?? []).map((entrance) => [entrance.id, genId("ent")]));
+          const clonedEntrances = normalizeBuildingEntrances(b).map((entrance) => ({
+            ...entrance,
+            id: entranceIdMap.get(entrance.id) ?? genId("ent"),
+            buildingId: nbId,
+          }));
           const nb: CampusBuilding = {
             ...b,
             id: nbId,
             name: `${b.name} (copy)`,
             x: b.x + 20,
             y: b.y + 20,
-            entrances: normalizeBuildingEntrances(b).map((entrance) => ({ ...entrance, id: genId("ent"), buildingId: nbId })),
+            entrances: clonedEntrances,
           };
           updBuildings([...buildings, nb]);
           setSelected({ type: "building", id: nb.id });
@@ -4453,6 +5764,78 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     guard(() => onOpenFloor(buildingId, floorId, initialSelection));
   }, [guard, onOpenFloor]);
 
+  const handleExteriorEmergencyStairFloorNavigate = useCallback((buildingId: string, floorId: string, stairId: string) => {
+    const building = campusRef.current.buildings.find((candidate) => candidate.id === buildingId);
+    const floor = building?.floors.find((candidate) => candidate.id === floorId);
+    const occurrence = floor?.stairs.find((candidate) => candidate.exteriorEmergencyStairId === stairId);
+    if (!building || !floor || !occurrence) return;
+    requestOpenFloor(buildingId, floorId, { type: "stairs", id: occurrence.id });
+  }, [requestOpenFloor]);
+
+  // A Building double-click is an explicit enter action, never an inline
+  // rename shortcut. Rename remains available from Properties/hierarchy.
+  const handleBuildingDoubleClick = useCallback((id: string) => {
+    const building = buildings.find((candidate) => candidate.id === id);
+    if (!building) return;
+    setSelected({ type: "building", id });
+    const floor = entryFloorForBuilding(building)
+      ?? [...building.floors].sort((a, b) => (a.number ?? 0) - (b.number ?? 0))[0];
+    if (floor) {
+      requestOpenFloor(building.id, floor.id);
+    } else {
+      toast.info("Building has no floors", "Add a floor in Building Properties before entering this building.");
+    }
+  }, [buildings, requestOpenFloor, toast]);
+
+  // A route-origin focus request can survive the Campus -> Floor unmount.  If
+  // the origin is outdoor, consume it here after the campus canvas is ready;
+  // floor-owned requests are consumed by the target FloorEditor instead.
+  useEffect(() => {
+    const request = testRouteSessionContext.session?.pendingFocus;
+    if (!request || request.context.kind !== "outdoor") return;
+    const node = outdoorNodes.find((candidate) => candidate.id === request.nodeId);
+    if (!node) return;
+    const timer = window.setTimeout(() => {
+      if (node.entranceId && node.buildingId) {
+        setSelected({ type: "entrance", id: node.entranceId, buildingId: node.buildingId });
+      }
+      // Keep route-origin focus legible without an overly tight camera crop.
+      zoomToBuilding(node.x - 110, node.y - 90, 220, 180);
+      const current = testRouteSessionContext.session;
+      if (current?.pendingFocus?.nodeId === request.nodeId) {
+        testRouteSessionContext.setSession({ ...current, pendingFocus: undefined });
+      }
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [outdoorNodes, setSelected, testRouteSessionContext.session, testRouteSessionContext.setSession, zoomToBuilding]);
+
+  const handleTestRouteTransition = useCallback((marker: TestRouteTransitionMarker) => {
+    if (marker.targetContext.kind === "floor" && marker.targetContext.buildingId && marker.targetContext.floorId) {
+      const targetNode = marker.targetNodeId
+        ? (campus.navNodes ?? []).find((node) => node.id === marker.targetNodeId)
+        : undefined;
+      const initialSelection: FloorSelection | undefined = targetNode?.elevatorId
+        ? { type: "elevator", id: targetNode.elevatorId }
+        : targetNode?.stairId
+          ? { type: "stairs", id: targetNode.stairId }
+          : targetNode?.doorId
+            ? { type: "door", id: targetNode.doorId }
+            : undefined;
+      requestOpenFloor(marker.targetContext.buildingId, marker.targetContext.floorId, initialSelection);
+      return;
+    }
+    if (marker.targetContext.kind === "outdoor" && marker.targetNodeId) {
+      const current = testRouteSessionContext.session;
+      if (current) {
+        testRouteSessionContext.setSession({
+          ...current,
+          pendingFocus: { nodeId: marker.targetNodeId, context: marker.targetContext },
+        });
+      }
+      handleBack();
+    }
+  }, [campus.navNodes, handleBack, requestOpenFloor, testRouteSessionContext]);
+
   // ── B5 Phase 2.1: copy / paste / duplicate (editor-local clipboards) ───────
   const outdoorClipboardRef = useRef<{ type: string; id: string }[] | null>(null);
   const outdoorNavClipboardRef = useRef<{ nodes: NavigationNode[]; edges: NavigationEdge[] } | null>(null);
@@ -4498,13 +5881,19 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
         const b = buildings.find((x) => x.id === sel.id);
         if (!b) continue;
         const nbId = genId("bld");
+        const entranceIdMap = new Map((b.entrances ?? []).map((entrance) => [entrance.id, genId("ent")]));
+        const clonedEntrances = normalizeBuildingEntrances(b).map((entrance) => ({
+          ...entrance,
+          id: entranceIdMap.get(entrance.id) ?? genId("ent"),
+          buildingId: nbId,
+        }));
         const nb: CampusBuilding = {
           ...b,
           id: nbId,
           name: `${b.name} (copy)`,
           x: Math.round(Math.max(0, Math.min(cw - b.width, b.x + offset))),
           y: Math.round(Math.max(0, Math.min(ch - b.height, b.y + offset))),
-          entrances: normalizeBuildingEntrances(b).map((entrance) => ({ ...entrance, id: genId("ent"), buildingId: nbId })),
+          entrances: clonedEntrances,
         };
         nextBuildings.push(nb);
         newIds.push(nbId);
@@ -4545,13 +5934,19 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
       if (!b) return;
       pushHistory();
       const nbId = genId("bld");
+      const entranceIdMap = new Map((b.entrances ?? []).map((entrance) => [entrance.id, genId("ent")]));
+      const clonedEntrances = normalizeBuildingEntrances(b).map((entrance) => ({
+        ...entrance,
+        id: entranceIdMap.get(entrance.id) ?? genId("ent"),
+        buildingId: nbId,
+      }));
       const nb: CampusBuilding = {
         ...b,
         id: nbId,
         name: `${b.name} (copy)`,
         x: b.x + 25,
         y: b.y + 25,
-        entrances: normalizeBuildingEntrances(b).map((entrance) => ({ ...entrance, id: genId("ent"), buildingId: nbId })),
+        entrances: clonedEntrances,
       };
       updBuildings([...buildings, nb]);
       setSelected({ type: "building", id: nb.id });
@@ -4673,6 +6068,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
             setNavConnectBends((b) => b.slice(0, Math.max(0, b.length - group)));
             connectRedoStackRef.current = [...connectRedoStackRef.current, removed];
           } else {
+            connectGuidanceShownRef.current = false;
             setNavConnectStart(null);
             setNavPreview(null);
             setNavPreviewPins([]);
@@ -4753,7 +6149,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
         } else if (selected.type === "marker") { updMarkers(markers.filter((m) => m.id !== selected.id)); pushHistory(); }
         else if (selected.type === "path") {
           if (selectedPathPoint?.pathId === selected.id && pathPointIsJunction(selected.id, selectedPathPoint.pointIndex)) {
-            toast.info("Use Disconnect Junction", "Delete does not remove connected paths from a selected junction.");
+            toast.info("Disconnect Pathways first", "This shared point keeps its Pathways connected until you separate them.");
             return;
           }
           if (selectedPathPoint?.pathId === selected.id && selectedPathPointCanBeRemoved()) {
@@ -4774,9 +6170,14 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
           setDeleteConfirm({ type: "decorAsset", id: selected.id, name: template?.label ?? da?.type ?? "Asset" });
         }
         else if (selected.type === "navNode") {
+          const selectedNode = navNodes.find((node) => node.id === selected.id);
+          if (selectedNode?.roomId || selectedNode?.doorId || selectedNode?.entranceId || selectedNode?.stairId || selectedNode?.elevatorId || selectedNode?.rampId) {
+            toast.info("Navigation anchor", "Edit or remove navigation from the owning Room, Door, Entrance, or circulation object.");
+            return;
+          }
           // Single waypoint delete: deterministic connected-edge cleanup.
-          if (navNodes.find((node) => node.id === selected.id)?.generatedFromPathVertices?.length) {
-            toast.info("Pathway walking point is managed automatically", "Edit or delete the physical Pathway instead.");
+          if (selectedNode?.generatedFromPathVertices?.length) {
+            onRemoveGeneratedPathwayPoint(selected.id);
             return;
           }
           const next = removeNavNode(navNodes, navEdges, selected.id);
@@ -4806,6 +6207,9 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
         return; // Don't fall through to the single-letter "a" → building tool
       }
       if (e.key === "Escape") {
+        setTestRoutePickKind(null);
+        setTestRouteMapPick(null);
+        setTestRoutePickHover(null);
         // B5 Phase 5.12 — Escape while editing one path inside its network
         // returns to the WHOLE-NETWORK selection (group stays intact).
         if (pathMemberEditId) {
@@ -4821,6 +6225,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
         setGroundErasePreview(null);
         setPathPaintPreview(null);
         // Cancel an in-progress navigation edge (never leaves an orphan edge).
+        connectGuidanceShownRef.current = false;
         setNavConnectStart(null);
         setNavConnectBends([]);
         setNavPreview(null);
@@ -4920,7 +6325,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
               dx,
               dy,
             );
-            onUpdate(reconcilePathwayNavigation({
+            onUpdate(reconcilePathwayNavigation(syncExteriorEmergencyStairGraph({
               ...campus,
               buildings: nextBuildings,
               navNodes: movedNavNodes.map((n) =>
@@ -4932,7 +6337,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
               markers: markers.map((m) => multiSelected.includes(m.id) ? { ...m, x: m.x + dx, y: m.y + dy } : m),
               decorAssets: decorAssets.map((d) => multiSelected.includes(d.id) ? { ...d, x: d.x + dx, y: d.y + dy } : d),
               paths: paths.map((p) => multiSelected.includes(p.id) ? { ...p, points: p.points.map((pt) => ({ ...pt, x: pt.x + dx, y: pt.y + dy })) } : p),
-            }, genId));
+            }), genId));
             return;
           }
           if (!selected) return;
@@ -4952,7 +6357,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
           if (isNewBurst) pushHistory();
           if (selected.type === "building") {
             const nextBuildings = buildings.map((x) => x.id === selected.id ? { ...x, x: x.x + dx, y: x.y + dy } : x);
-            onUpdate({ ...campus, buildings: nextBuildings, navNodes: syncEntranceNodePositions(nextBuildings, navNodes) });
+            onUpdate(syncExteriorEmergencyStairGraph({ ...campus, buildings: nextBuildings, navNodes: syncEntranceNodePositions(nextBuildings, navNodes), navEdges }));
           } else if (selected.type === "marker") {
             onUpdate({ ...campus, markers: markers.map((m) => m.id === selected.id ? { ...m, x: m.x + dx, y: m.y + dy } : m) });
           } else if (selected.type === "decorAsset") {
@@ -5041,6 +6446,9 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
   const selectedEntranceLinkStatus = selEntrance && selEntranceParent
     ? entranceIndoorLinkStatus(campus, selEntranceParent.id, selEntrance.id)
     : undefined;
+  const selectedEntranceOutdoorStatus = selEntrance && selEntranceParent
+    ? entranceOutdoorLinkStatus(campus, selEntranceParent.id, selEntrance.id)
+    : undefined;
   const selectedEntranceDoorOptions = selEntrance && selEntranceParent
     ? indoorDoorOptionsForEntrance(campus, selEntranceParent.id, selEntrance.id)
     : [];
@@ -5061,7 +6469,11 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     if (type !== "building" && type !== "entrance" && type !== "navNode" && type !== "navEdge") return [];
     let issues: ValidationIssue[];
     if (type === "building") {
-      issues = validationIssuesForBuilding(validationIssues, effectiveSelected.id);
+      // A blocked indoor connection belongs to the specific Walking Path, not
+      // to the containing Building. Keep the global issue targeted to that
+      // edge so Building Properties never shows an unlocatable warning.
+      issues = validationIssuesForBuilding(validationIssues, effectiveSelected.id)
+        .filter((issue) => issue.type !== "nav_edge_blocked_by_obstacle");
     } else {
       issues = validationIssuesForCampusSelection(validationIssues, type, effectiveSelected.id);
     }
@@ -5113,6 +6525,23 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     toast.success("Indoor connection removed", "The entrance, door, and local navigation node were preserved.");
   }, [campus, onUpdate, pushHistory, toast]);
 
+  const disconnectEntranceFromWalkingNetwork = useCallback((buildingId: string, entranceId: string) => {
+    const next = removeEntranceOutdoorConnection(campus, buildingId, entranceId);
+    if (next === campus) return;
+    pushHistory();
+    onUpdate(next);
+    toast.success("Outdoor connection removed", "The Entrance and indoor Door connection were preserved.");
+  }, [campus, onUpdate, pushHistory, toast]);
+
+  const selectEntranceWalkingConnection = useCallback((buildingId: string, entranceId: string) => {
+    const edge = findEntranceOutdoorConnection(campus.navNodes ?? [], campus.navEdges ?? [], buildingId, entranceId);
+    if (!edge) return;
+    setMultiSelected([]);
+    setSelected({ type: "navEdge", id: edge.id });
+    setLayer("navigation");
+    setShowCampusNavOverlay(true);
+  }, [campus.navEdges, campus.navNodes]);
+
   const viewEntranceIndoorDoor = useCallback((buildingId: string, floorId: string, doorId: string) => {
     onOpenFloor(buildingId, floorId, { type: "door", id: doorId });
   }, [onOpenFloor]);
@@ -5153,7 +6582,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
   const activateToolbarTool = (descriptor: UnifiedCampusTool) => {
     if (descriptor.domain === "navigation") {
       const wasHidden = !navigationVisible;
-      if (layer !== "navigation") switchLayer("navigation");
+      if (layer !== "navigation") switchLayer("navigation", Boolean(pathMemberEditId));
       switchTool(descriptor.id);
       if (wasHidden) {
         setShowCampusNavOverlay(true);
@@ -5175,14 +6604,16 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
   };
 
   const toggleCampusNavigation = () => {
+    if (testNavOpen && navigationVisible) return;
+    const preservePathEdit = Boolean(pathMemberEditId && selected?.type === "path" && selected.id === pathMemberEditId);
     if (navigationVisible) {
       setShowCampusNavOverlay(false);
-      if (layer === "navigation") switchLayer("campus");
+      if (layer === "navigation") switchLayer("campus", preservePathEdit);
       else switchTool("select");
       return;
     }
     setShowCampusNavOverlay(true);
-    if (layer !== "navigation") switchLayer("navigation");
+    if (layer !== "navigation") switchLayer("navigation", preservePathEdit);
     else switchTool("select");
     toast.info("Navigation shown", "Walking Points and walking paths are now visible.");
   };
@@ -5192,6 +6623,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     const entrance = parent?.entrances?.find((item) => item.id === entranceId);
     if (!parent || !entrance) return;
     const position = entranceWorldPosition(parent, entrance);
+    cancelConnectPreviewFrame();
 
     // Reuse the existing safe entrance-node + Connect workflow. This does not
     // infer nearby Pathways or create an automatic proximity edge.
@@ -5204,20 +6636,28 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
     setNavPreview({ x: position.x, y: position.y });
     setNavPreviewPins([]);
     navConnectBendGroupsRef.current = [];
-    setSelected({ type: "navNode", id: nodeId });
-    toast.info("Select a Walking Point", "Click a Walking Point or pathway endpoint to connect this entrance.");
-  }, [buildings, ensureEntranceNavNode, layer, switchLayer, switchTool, toast]);
+    // Keep the physical Entrance as the active object while Connect mode is
+    // armed. The canonical graph node is an internal anchor, not a competing
+    // Walking Point that should take over Entrance Properties.
+    setSelected({ type: "entrance", id: entranceId, buildingId });
+    setNavEntranceHover(null);
+    showConnectGuidance();
+  }, [buildings, cancelConnectPreviewFrame, ensureEntranceNavNode, layer, showConnectGuidance, switchLayer, switchTool]);
 
   const toggleTestRoute = () => {
-    if (testNavOpen && navigationVisible) {
+    if (testNavOpen) {
       setTestNavOpen(false);
       setHighlightedRoute(null);
+      testRouteSessionContext.setSession(null);
+      setTestRouteCompact(false);
+      setTestRoutePickKind(null);
+      setTestRoutePickHover(null);
+      setTestRouteMapPick(null);
       return;
     }
     const wasHidden = !navigationVisible;
     if (layer !== "navigation") switchLayer("navigation");
     switchTool("select");
-    setShowCampusNavOverlay(true);
     setTestNavOpen(true);
     if (wasHidden) toast.info("Navigation shown", "Walking Points and walking paths are now visible.");
   };
@@ -5240,16 +6680,18 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
           TOP BAR: Clean centered tool palette
           ═══════════════════════════════════════════════════════════════════ */}
       <div className="shrink-0 bg-card border-b border-border" style={campus.themeColor ? { borderBottomColor: campus.themeColor, borderBottomWidth: '2px' } : undefined}>
-        {/* Row 1: Clean toolbar — balanced left/right with perfectly centered tools */}
+        {/* Row 1: grouped toolbar — keep the editing palette centered while
+            reserving predictable breathing room for lifecycle actions. */}
         <div
-          className="relative grid h-16 min-h-16 min-w-0 grid-cols-[minmax(0,1fr)_420px_minmax(0,1fr)] items-center gap-2 px-3"
+          className="relative grid h-16 min-h-16 min-w-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-1 overflow-hidden px-2 sm:grid-cols-[minmax(180px,1fr)_auto_minmax(240px,1fr)] sm:gap-2 sm:px-4"
           data-testid="campus-editor-header"
         >
           {/* ── Left section — campus context, capped width for center alignment ── */}
-          <div className="flex min-w-0 max-w-full items-center gap-1.5 overflow-hidden">
+          <div className="flex min-w-0 max-w-full items-center gap-1 overflow-hidden overscroll-contain">
             <ToolbarTooltip tool="back" label="Back" shortcut="" hint="Return to the campus list.">
               <button onClick={handleBack}
                 aria-label="Back to campus list"
+                title="Back to campus list"
                 className="flex items-center justify-center h-8 w-8 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-all shrink-0 group"
               >
                 <ArrowLeft className="h-3.5 w-3.5 group-hover:-translate-x-0.5 transition-transform" />
@@ -5310,10 +6752,10 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
           </div>
 
           {/* ── Center: Tool palette — visually centered over canvas ── */}
-          <div className="relative flex h-full min-w-0 items-center justify-center overflow-visible">
+          <div className="relative flex h-full min-w-0 max-w-full items-center justify-center overflow-hidden">
             <div
               data-testid="editor-toolbar"
-                className="absolute left-1/2 top-1/2 flex shrink-0 -translate-x-1/2 -translate-y-1/2 items-center gap-1 whitespace-nowrap rounded-xl border border-border/70 bg-muted/40 px-3 py-1.5 shadow-sm"
+                className="mx-auto flex min-w-0 max-w-full items-center gap-0.5 overflow-hidden whitespace-nowrap rounded-xl border border-border/70 bg-muted/40 px-1.5 py-1 shadow-sm sm:gap-1 sm:px-2 lg:px-3 lg:py-1.5"
             >
               {toolConfig.map((t) => {
                 const isActive = toolbarToolIsActive(t);
@@ -5327,7 +6769,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
                           aria-label={t.label}
                           onClick={() => activateToolbarTool(t)}
                           className={cn(
-                            "flex h-[34px] w-[34px] items-center justify-center rounded-md transition-colors duration-200",
+                            "flex h-5 w-5 items-center justify-center rounded-md transition-colors duration-200 sm:h-[30px] sm:w-[30px] lg:h-[34px] lg:w-[34px]",
                             isActive
                               ? t.id === "erase"
                                 ? "bg-destructive text-destructive-foreground shadow-sm"
@@ -5444,7 +6886,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
                       aria-label={navigationVisible ? "Hide the walking network" : "Show and edit the walking network"}
                       aria-pressed={navigationVisible}
                       className={cn(
-                        "flex h-[34px] w-[34px] items-center justify-center rounded-md border transition-colors duration-200",
+                        "flex h-5 w-5 items-center justify-center rounded-md border transition-colors duration-200 sm:h-[30px] sm:w-[30px] lg:h-[34px] lg:w-[34px]",
                         navigationVisible
                           ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 shadow-sm"
                           : "border-border/60 text-muted-foreground/60 hover:bg-muted hover:text-foreground"
@@ -5466,7 +6908,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
                       onClick={toggleTestRoute}
                       aria-pressed={testNavOpen}
                       className={cn(
-                        "flex h-[34px] w-[34px] items-center justify-center rounded-md border transition-colors duration-200",
+                        "flex h-5 w-5 items-center justify-center rounded-md border transition-colors duration-200 sm:h-[30px] sm:w-[30px] lg:h-[34px] lg:w-[34px]",
                         testNavOpen
                           ? "border-blue-500/40 bg-blue-500/15 text-blue-600 dark:text-blue-400 shadow-sm"
                           : navigationVisible
@@ -5493,7 +6935,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
                   className="pointer-events-none absolute left-1/2 top-1/2 z-50 mt-[29px] -translate-x-1/2 whitespace-nowrap rounded-md border border-border bg-popover px-2.5 py-1.5 text-[10px] font-semibold text-popover-foreground shadow-md"
                 >
                   {navConnectStart
-                    ? "Now select a destination. Click empty space to add a bend. Esc to cancel."
+                    ? "Now select a destination Walking Point or Pathway. Esc to cancel."
                     : "Select or place a start point."}
                 </motion.div>
               )}
@@ -5501,7 +6943,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
           </div>
 
           {/* ── Right section — grouped: history | view | editor | save/publish ── */}
-          <div className="flex min-h-0 min-w-0 max-w-full items-center justify-self-end gap-1 overflow-hidden pr-1">
+          <div className="flex min-h-0 min-w-0 max-w-full items-center justify-self-end gap-1 overflow-hidden pr-0.5 sm:gap-1.5 sm:pr-1">
             {/* Undo / Redo — disabled at history bounds with step-count tooltips */}
             <div className="flex items-center gap-0.5">
               <ToolbarTooltip tool="undo" label="Undo" shortcut="Ctrl + Z" hint="Reverse your most recent editor change.">
@@ -5509,7 +6951,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
                   aria-label="Undo"
                   disabled={!canUndo}
                   className={cn(
-                    "flex items-center justify-center h-8 w-8 rounded-md transition-all",
+                    "flex items-center justify-center h-7 w-7 sm:h-8 sm:w-8 rounded-md transition-all",
                     canUndo ? "text-muted-foreground hover:text-foreground hover:bg-muted" : "text-muted-foreground/30 cursor-not-allowed"
                   )}>
                   <Undo2 className="h-4 w-4" />
@@ -5520,7 +6962,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
                   aria-label="Redo"
                   disabled={!canRedo}
                   className={cn(
-                    "flex items-center justify-center h-8 w-8 rounded-md transition-all",
+                    "flex items-center justify-center h-7 w-7 sm:h-8 sm:w-8 rounded-md transition-all",
                     canRedo ? "text-muted-foreground hover:text-foreground hover:bg-muted" : "text-muted-foreground/30 cursor-not-allowed"
                   )}>
                   <Redo2 className="h-4 w-4" />
@@ -5537,7 +6979,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
                   aria-label="Grid Snap"
                   aria-pressed={snapGrid}
                   className={cn(
-                    "flex items-center justify-center h-8 w-8 rounded-md transition-all",
+                    "flex items-center justify-center h-7 w-7 sm:h-8 sm:w-8 rounded-md transition-all",
                     snapGrid ? "text-primary bg-primary/10" : "text-muted-foreground hover:text-foreground hover:bg-muted"
                   )}
                 >
@@ -5550,7 +6992,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
                   aria-label="Edge Snap"
                   aria-pressed={edgeSnap}
                   className={cn(
-                    "flex items-center justify-center h-8 w-8 rounded-md transition-all",
+                    "flex items-center justify-center h-7 w-7 sm:h-8 sm:w-8 rounded-md transition-all",
                     edgeSnap ? "text-primary bg-primary/10" : "text-muted-foreground hover:text-foreground hover:bg-muted"
                   )}
                 >
@@ -5561,7 +7003,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
               <ToolbarTooltip tool="zoomIn" label="Zoom In" shortcut="" hint="Zoom closer into the canvas.">
                 <button onClick={zoomIn}
                   aria-label="Zoom In"
-                  className="flex items-center justify-center h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-all">
+                  className="flex items-center justify-center h-7 w-7 sm:h-8 sm:w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-all">
                   <ZoomIn className="h-4 w-4" />
                 </button>
               </ToolbarTooltip>
@@ -5569,14 +7011,14 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
               <ToolbarTooltip tool="zoomOut" label="Zoom Out" shortcut="" hint="Zoom farther out from the canvas.">
                 <button onClick={zoomOut}
                   aria-label="Zoom Out"
-                  className="flex items-center justify-center h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-all">
+                  className="flex items-center justify-center h-7 w-7 sm:h-8 sm:w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-all">
                   <ZoomOut className="h-4 w-4" />
                 </button>
               </ToolbarTooltip>
               <ToolbarTooltip tool="resetView" label="Reset View" shortcut="0" hint="Return the canvas to its default zoom and position.">
                 <button onClick={resetView}
                   aria-label="Reset View"
-                  className="flex items-center justify-center h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-all">
+                  className="flex items-center justify-center h-7 w-7 sm:h-8 sm:w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-all">
                   <Maximize2 className="h-3.5 w-3.5" />
                 </button>
               </ToolbarTooltip>
@@ -5588,7 +7030,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
                 <button
                   onClick={onOpenCanvasSettings}
                   aria-label="Canvas Settings"
-                  className="hidden xl:flex items-center justify-center h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
+                  className="hidden xl:flex items-center justify-center h-7 w-7 sm:h-8 sm:w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
                 >
                   <Settings2 className="h-4 w-4" />
                 </button>
@@ -5597,7 +7039,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
             <ToolbarTooltip tool="keyboardShortcuts" label="Keyboard Shortcuts" shortcut="?" hint="View the available keyboard controls for the Map Builder.">
               <button
                 onClick={() => setShowCheatSheet(true)}
-                className="flex items-center justify-center h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
+                className="flex items-center justify-center h-7 w-7 sm:h-8 sm:w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
                 aria-label="Keyboard shortcuts"
               >
                 <Keyboard className="h-4 w-4" />
@@ -5605,7 +7047,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
             </ToolbarTooltip>
 
             <div className="w-px h-5 bg-border mx-0.5 shrink-0" />
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1 sm:gap-2">
               <ToolbarTooltip
                 tool="save"
                 label="Save"
@@ -5617,12 +7059,12 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
                   aria-label="Save"
                   disabled={saving || isProcessing || !isDirty}
                   className={cn(
-                    "flex items-center gap-1.5 h-8 px-2.5 rounded-md border text-[10px] font-bold transition-all disabled:opacity-50 disabled:cursor-not-allowed",
+                    "flex items-center justify-center gap-1 h-7 w-7 px-0 sm:h-8 sm:w-auto sm:px-2.5 rounded-md border text-[10px] font-bold transition-all disabled:opacity-50 disabled:cursor-not-allowed",
                     isDirty ? "border-primary text-primary bg-primary/10" : "border-border text-foreground hover:bg-muted"
                   )}
                 >
                   {saving ? (
-                    <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Saving</>
+                    <><Loader2 className="w-3.5 h-3.5 animate-spin" /><span className="hidden sm:inline">Saving</span></>
                   ) : (
                     <><MapIcon className="h-3.5 w-3.5" /> <span className="hidden xl:inline">{isDirty ? "Save" : "Saved"}</span></>
                   )}
@@ -5630,50 +7072,58 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
               </ToolbarTooltip>
 
               <ToolbarTooltip
-                tool="publish"
-                label="Publish"
+                tool="reviewPublish"
+                label="Review & Publish"
                 shortcut=""
                 hint={
                   !publishingEnabled
                     ? "Publishing is currently unavailable."
+                    : onPreviewStudent
+                    ? isDirty
+                      ? "Save and review the student view before publishing."
+                      : "Review the saved campus as students will see it before publishing."
                     : isDirty
                     ? "Save your latest changes before publishing."
                     : campus.publishStatus === "published" && !hasDraftChanges && campus.updatedAt === campus.publishedAt
                       ? "Make and save a new change before publishing again."
-                      : "Publish the saved campus so it becomes available to users."
+                    : "Review the saved campus as students will see it, then publish it."
                 }
               >
                 <button
                   onClick={() => {
                     if (isProcessing) return;
+                    if (onPreviewStudent) {
+                      onPreviewStudent(campus, isDirty);
+                      return;
+                    }
                     // B7 Phase 2: PUBLISH gating lives in PrePublishDialog, which
                     // consumes the canonical live validation list and blocks on
                     // errors / requires explicit warning confirmation there —
                     // severity is the source of truth, never a type hard-code.
                     setShowPublishConfirm(true);
                   }}
-                  aria-label="Publish"
+                  aria-label="Review & Publish"
                   disabled={
-                    !publishingEnabled || isProcessing || isDirty ||
-                    (!isDirty && campus.publishStatus === "published" && !hasDraftChanges && campus.updatedAt === campus.publishedAt)
+                    !publishingEnabled || isProcessing || (isDirty && !onPreviewStudent) ||
+                    (!onPreviewStudent && !isDirty && campus.publishStatus === "published" && !hasDraftChanges && campus.updatedAt === campus.publishedAt)
                   }
                   className={cn(
-                    "flex items-center gap-1.5 h-8 px-2.5 rounded-md text-[10px] font-extrabold transition-all shadow-sm",
+                    "flex items-center justify-center gap-1 h-7 w-7 px-0 sm:h-8 sm:w-auto sm:px-2.5 rounded-md text-[10px] font-extrabold transition-all shadow-sm",
                     !publishingEnabled
                       ? "bg-muted text-muted-foreground cursor-not-allowed"
                       : isProcessing
                       ? "bg-primary/70 text-primary-foreground/70 cursor-not-allowed"
-                      : isDirty
+                      : isDirty && !onPreviewStudent
                         ? "bg-muted text-muted-foreground cursor-not-allowed"
-                        : !isDirty && campus.publishStatus === "published" && !hasDraftChanges && campus.updatedAt === campus.publishedAt
+                        : !onPreviewStudent && !isDirty && campus.publishStatus === "published" && !hasDraftChanges && campus.updatedAt === campus.publishedAt
                           ? "bg-muted text-muted-foreground cursor-not-allowed"
                           : "bg-primary text-primary-foreground hover:bg-primary/90"
                   )}
                 >
                   {isProcessing ? (
-                    <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Publishing</>
+                    <><Loader2 className="w-3.5 h-3.5 animate-spin" /><span className="hidden sm:inline">Publishing</span></>
                   ) : (
-                    <><Globe className="h-3.5 w-3.5" /> <span className="hidden xl:inline">Publish</span></>
+                    <><Globe className="h-3.5 w-3.5" /> <span className="hidden lg:inline">Review &amp; Publish</span><span className="hidden sm:inline lg:hidden">Review</span></>
                   )}
                 </button>
               </ToolbarTooltip>
@@ -5714,8 +7164,31 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
             style={{ left: pathChoiceMenu.x, top: pathChoiceMenu.y }}
             onMouseDown={(event) => event.stopPropagation()}
           >
-            <div className="px-2 py-1 text-[9px] font-extrabold uppercase tracking-widest text-muted-foreground">Select Pathway</div>
-            {pathChoiceMenu.pathIds.map((pathId) => (
+            <div className="px-2 py-1 text-[9px] font-extrabold uppercase tracking-widest text-muted-foreground">{pathChoiceMenu.nodeIds ? "Select Walking Point" : "Select Pathway"}</div>
+            {pathChoiceMenu.nodeIds ? pathChoiceMenu.nodeIds.map((nodeId) => {
+              const node = outdoorNodes.find((candidate) => candidate.id === nodeId);
+              if (!node) return null;
+              const label = node.generatedFromPathVertices?.length ? "Generated Walking Point" : (node.name || "Walking Point");
+              return (
+                <button
+                  key={nodeId}
+                  type="button"
+                  className="flex w-full items-center rounded-lg px-2 py-2 text-left text-[10px] font-semibold text-foreground hover:bg-muted"
+                  onClick={() => {
+                    if (tool === "path") {
+                      onNavNodeClick(nodeId);
+                    } else {
+                      setSelected({ type: "navNode", id: nodeId });
+                      setMultiSelected([]);
+                      setTool("select");
+                    }
+                    setPathChoiceMenu(null);
+                  }}
+                >
+                  {label}
+                </button>
+              );
+            }) : pathChoiceMenu.pathIds.map((pathId) => (
               <button
                 key={pathId}
                 type="button"
@@ -5801,6 +7274,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
           navPreview={navPreview}
           navConnectBends={navConnectBends}
           navPreviewPins={navPreviewPins}
+          navPathTargetHover={navPathTargetHover}
           navEntranceHover={navEntranceHover}
           connectBlocked={connectBlocked}
           navBlockedEdgeIds={outdoorBlockedEdgeIds}
@@ -5811,6 +7285,8 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
           pathGroupRotationActive={!!pathGroupRotating.current}
           pathGroupRotationBounds={pathGroupRotationBounds}
           pathMemberEditId={pathMemberEditId}
+          hoveredPathId={hoveredPathId}
+          onPathHover={setHoveredPathId}
           onNavEdgeSelect={(e, id) => {
             e.stopPropagation();
             if (tool === "erase") {
@@ -5818,6 +7294,34 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
               return;
             }
             if (tool !== "select") return;
+            // Entrance markers are the physical owner of their boundary
+            // endpoint.  The navigation edge has a deliberately generous hit
+            // target, so resolve a click that is genuinely on the marker back
+            // to the Entrance before selecting the connector itself.  Clicking
+            // farther along the line still selects the editable connector.
+            const clickedEdge = navEdges.find((edge) => edge.id === id);
+            const pointer = getPoint(e, cw, ch);
+            const entranceEndpoint = clickedEdge
+              ? [clickedEdge.startNodeId, clickedEdge.endNodeId]
+                .map((nodeId) => outdoorNodes.find((node) => node.id === nodeId))
+                .find((node) => {
+                  if (!node?.entranceId || node.floorId) return false;
+                  const building = buildings.find((candidate) => (candidate.entrances ?? []).some((entrance) => entrance.id === node.entranceId));
+                  const entrance = building?.entrances?.find((candidate) => candidate.id === node.entranceId);
+                  if (!building || !entrance) return false;
+                  const position = entranceWorldPosition(building, entrance);
+                  return Math.hypot(pointer.x - position.x, pointer.y - position.y) <= 16;
+                })
+              : undefined;
+            if (entranceEndpoint?.entranceId) {
+              const building = buildings.find((candidate) => (candidate.entrances ?? []).some((entrance) => entrance.id === entranceEndpoint.entranceId));
+              if (building) {
+                setSelected({ type: "entrance", id: entranceEndpoint.entranceId, buildingId: building.id });
+                setMultiSelected([]);
+                setGuides([]);
+                return;
+              }
+            }
             // B5 Phase 1.6: Shift-click toggles an edge's membership in the
             // multi-selection (same semantics as waypoint shift-click).
             if (e.shiftKey) {
@@ -5861,7 +7365,9 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
               const edge = navEdges.find((ed) => ed.id === id);
               if (edge && !isPathwayGeneratedEdge(edge)) {
                 const pt = getPoint(e, cw, ch);
-                // Build full polyline from node positions + bends
+                // Build full polyline from node positions + bends. Managed
+                // Entrance connectors are editable geometry; Pathway-generated
+                // edges remain protected by the guard above.
                 const startN = outdoorNodes.find((n) => n.id === edge.startNodeId);
                 const endN = outdoorNodes.find((n) => n.id === edge.endNodeId);
                 if (startN && endN) {
@@ -5916,6 +7422,15 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
           onNavEdgeBendDown={onNavEdgeBendDown}
           onNavEdgeAddBend={onNavEdgeAddBend}
           onEntranceDown={onEntranceDown}
+          onExteriorEmergencyStairDown={(e, buildingId) => {
+            e.stopPropagation();
+            if (tool !== "select") return;
+            setMultiSelected([]);
+            setSelected({ type: "building", id: buildingId });
+            setPropertiesDismissed(false);
+            setPropertiesOpen(true);
+          }}
+          onExteriorEmergencyStairFloorNavigate={handleExteriorEmergencyStairFloorNavigate}
           onItemContextMenu={handleContextMenu}
           onResizeStart={handleResizeStart}
           onRotateStart={handleRotateStart}
@@ -5926,7 +7441,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
           onBuildingDoubleClick={handleBuildingDoubleClick}
           onPathClick={onPathClick}
           onPathDblClick={onPathDblClick}
-          onSelect={setSelected}
+          onSelect={(selection) => { setSelected(selection); setPropertiesDismissed(false); setPropertiesOpen(Boolean(selection)); }}
           onResetView={resetView}
           onDropAsset={(asset) => {
             pushHistory();
@@ -5936,10 +7451,13 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
           onDropBuilding={(type, x, y) => {
             const bldgType = BUILDING_TYPE_MAP[type];
             if (!bldgType) return;
+            const buildingId = genId("bld");
+            const identity = nextDefaultBuildingIdentity(buildings, defaultBuildingReservationsRef.current?.values);
+            defaultBuildingReservationsRef.current?.values.push(identity);
             const nb: CampusBuilding = {
-              id: genId("bld"),
-              name: bldgType.label,
-              code: bldgType.label.slice(0, 3).toUpperCase(),
+              id: buildingId,
+              name: identity.name,
+              code: identity.code,
               category: bldgType.category,
               description: bldgType.description,
               x: Math.round(Math.max(0, Math.min(cw - bldgType.defaultWidth, x - bldgType.defaultWidth / 2))),
@@ -5948,7 +7466,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
               height: bldgType.defaultHeight,
               color: bldgType.color,
               expanded: false,
-              floors: [{ id: genId("fl"), number: 1, label: "Ground Floor", rooms: [], paths: [] }],
+              floors: [createDefaultFloor({ id: genId("fl"), buildingId, number: 1 })],
             };
             pushHistory();
             updBuildings([...buildings, nb]);
@@ -5963,8 +7481,13 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
           onToggleSnap={() => setSnapGrid((v) => !v)}
           onWheel={handleWheel}
           highlightedRoute={highlightedRoute}
+          routePreview={routePreview}
+          onRouteTransitionClick={handleTestRouteTransition}
+          testRoutePickKind={testRoutePickKind}
+          testRoutePickHover={testRoutePickHover}
+          onTestRoutePickHover={setTestRoutePickHover}
           animatingPathId={animatingPathId}
-          issueMarkers={campusMarkerLayer}
+          issueMarkers={routePreview ? [] : campusMarkerLayer}
         />
 
         {/* B7 Correction: locate flash overlay removed — locate behavior now
@@ -5975,30 +7498,62 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
         {/* PART 3: Test Route — floating utility card over the canvas.
             Always positioned absolute so it never steals canvas layout space.
             Right offset dynamically accounts for the Properties sidebar (248px) when open. */}
-        <AnimatePresence>
+        <AnimatePresence initial={false}>
           {navigationVisible && testNavOpen && (
             <>
+              {testRoutePickKind && (
+                <div className="absolute top-3 left-1/2 -translate-x-1/2 z-50 rounded-full border border-violet-300 bg-card/95 px-3 py-1.5 text-[10px] font-bold text-violet-700 shadow-lg pointer-events-none">
+                  {testRoutePickKind === "start" ? "Select a starting location · Esc to cancel" : "Select a destination · Esc to cancel"}
+                </div>
+              )}
               {/* Desktop: floating card — absolute inside the canvas wrapper */}
               <motion.div
                 initial={{ opacity: 0, scale: 0.97 }}
                 animate={{ opacity: 1, scale: 1 }}
                 exit={{ opacity: 0, scale: 0.97 }}
                 transition={{ type: "spring", stiffness: 350, damping: 32 }}
-                className="absolute top-3 z-30 w-80 rounded-xl border border-border overflow-hidden hidden lg:block"
+                className={cn(
+                  "absolute top-3 z-30 hidden lg:block",
+                  testRouteCompact
+                    ? "h-auto max-h-none w-[420px] overflow-visible"
+                    : "h-[min(620px,calc(100%-24px))] max-h-[calc(100%-24px)] w-80 overflow-hidden rounded-xl border border-border",
+                )}
                 style={{
-                  background: "var(--card)",
-                  boxShadow: "0 8px 30px rgba(0,0,0,0.12)",
-                  right: (selected || multiSelected.length > 0) ? "calc(248px + 12px)" : "12px",
+                  background: testRouteCompact ? "transparent" : "var(--card)",
+                  boxShadow: testRouteCompact ? "none" : "0 8px 30px rgba(0,0,0,0.12)",
+                  left: "auto",
+                  bottom: "auto",
+                  right: inspectorVisible ? "260px" : "12px",
+                  transformOrigin: "top right",
+                  width: testRouteCompact ? "min(420px, calc(100% - 24px))" : "320px",
+                  height: testRouteCompact ? "auto" : undefined,
+                  transition: "right 180ms cubic-bezier(0.16, 1, 0.3, 1), width 160ms cubic-bezier(0.16, 1, 0.3, 1), height 160ms cubic-bezier(0.16, 1, 0.3, 1)",
                 }}
               >
                 <TestNavigationPanel
                   campus={campus}
                   onHighlightRoute={(route) => setHighlightedRoute(route)}
+                  inspectorVisible={inspectorVisible}
+                  onCompactModeChange={setTestRouteCompact}
+                  onPickOnMap={(kind) => { setTestRoutePickKind(kind); setTestRoutePickHover(null); }}
+                  // The desktop variant is the sole map-pick result consumer;
+                  // the responsive mobile view hydrates from the shared session.
+                  mapPickResult={testRouteMapPick}
+                  onMapPickResultConsumed={() => setTestRouteMapPick(null)}
+                  currentContext={{ kind: "outdoor" }}
                   onFocusNode={(nodeId) => {
                     const n = (campus.navNodes ?? []).find((x) => x.id === nodeId);
                     if (n) zoomToBuilding(n.x - 30, n.y - 30, 60, 60);
                   }}
-                  onClose={() => setTestNavOpen(false)}
+                  onRouteStartFocus={(nodeId, context) => {
+                    if (context.kind === "floor" && context.buildingId && context.floorId) {
+                      requestOpenFloor(context.buildingId, context.floorId);
+                      return;
+                    }
+                    const n = (campus.navNodes ?? []).find((x) => x.id === nodeId);
+                    if (n) zoomToBuilding(n.x - 110, n.y - 90, 220, 180);
+                  }}
+                  onClose={() => { setTestNavOpen(false); testRouteSessionContext.setSession(null); setTestRouteCompact(false); setHighlightedRoute(null); setTestRoutePickKind(null); setTestRoutePickHover(null); setTestRouteMapPick(null); }}
                 />
               </motion.div>
               {/* Narrow: bottom-sheet overlay */}
@@ -6007,17 +7562,38 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: 40 }}
                 transition={{ type: "spring", stiffness: 350, damping: 32 }}
-                className="absolute bottom-0 left-0 right-0 z-40 h-[50%] lg:hidden overflow-hidden border-t border-border rounded-t-xl"
-                style={{ background: "var(--card)", boxShadow: "0 -4px 20px rgba(0,0,0,0.12)" }}
+                className={cn(
+                    "absolute z-40 lg:hidden",
+                  testRouteCompact
+                    ? "top-3 right-3 bottom-auto left-auto h-auto w-[380px] max-w-[calc(100%-24px)] overflow-visible"
+                    : "bottom-0 left-0 right-0 h-[50%] overflow-hidden rounded-t-xl border-t border-border",
+                )}
+                style={{
+                  background: testRouteCompact ? "transparent" : "var(--card)",
+                  boxShadow: testRouteCompact ? "none" : "0 -4px 20px rgba(0,0,0,0.12)",
+                  transition: "height 160ms cubic-bezier(0.16, 1, 0.3, 1)",
+                }}
               >
                 <TestNavigationPanel
                   campus={campus}
                   onHighlightRoute={(route) => setHighlightedRoute(route)}
+                  onCompactModeChange={setTestRouteCompact}
+                  onPickOnMap={(kind) => { setTestRoutePickKind(kind); setTestRoutePickHover(null); }}
+                  mapPickResult={null}
+                  currentContext={{ kind: "outdoor" }}
                   onFocusNode={(nodeId) => {
                     const n = (campus.navNodes ?? []).find((x) => x.id === nodeId);
                     if (n) zoomToBuilding(n.x - 30, n.y - 30, 60, 60);
                   }}
-                  onClose={() => setTestNavOpen(false)}
+                  onRouteStartFocus={(nodeId, context) => {
+                    if (context.kind === "floor" && context.buildingId && context.floorId) {
+                      requestOpenFloor(context.buildingId, context.floorId);
+                      return;
+                    }
+                    const n = (campus.navNodes ?? []).find((x) => x.id === nodeId);
+                    if (n) zoomToBuilding(n.x - 110, n.y - 90, 220, 180);
+                  }}
+                  onClose={() => { setTestNavOpen(false); testRouteSessionContext.setSession(null); setTestRouteCompact(false); setHighlightedRoute(null); setTestRoutePickKind(null); setTestRoutePickHover(null); setTestRouteMapPick(null); }}
                 />
               </motion.div>
             </>
@@ -6123,6 +7699,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
         {/* ── Right: Properties Panel ── */}
         <PropertiesPanel
           layer={layer}
+          open={inspectorVisible}
           selected={selected}
           issueItems={selectedIssueItems}
           selBldg={selBldg}
@@ -6140,6 +7717,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
           allNavNodes={campus.navNodes ?? []}
           allNavEdges={campus.navEdges ?? []}
           entranceLinkStatus={selectedEntranceLinkStatus}
+          entranceOutdoorLinkStatus={selectedEntranceOutdoorStatus}
           entranceDoorOptions={selectedEntranceDoorOptions}
           selNavNode={selected?.type === 'navNode' ? (campus.navNodes ?? []).find(n => n.id === selected.id) : undefined}
           selNavEdge={selected?.type === 'navEdge' ? (campus.navEdges ?? []).find(e => e.id === selected.id) : undefined}
@@ -6177,12 +7755,17 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
           onClearMultiSelect={() => { setMultiSelected([]); setShowAlignTools(false); }}
           onLayerOrder={handleLayerOrder}
           onUpdateBuilding={onUpdateBuilding}
+          onAddExteriorEmergencyStair={onAddExteriorEmergencyStair}
+          onUpdateExteriorEmergencyStair={onUpdateExteriorEmergencyStair}
+          onDeleteExteriorEmergencyStair={onDeleteExteriorEmergencyStair}
           onAddEntrance={onAddEntrance}
           onSelectEntrance={onSelectEntrance}
           onUpdateEntrance={onUpdateEntrance}
           onDeleteEntrance={onDeleteEntrance}
           onConnectEntranceToDoor={connectEntranceToIndoorDoor}
           onConnectEntranceToWalkingNetwork={connectEntranceToWalkingNetwork}
+          onDisconnectEntranceFromWalkingNetwork={disconnectEntranceFromWalkingNetwork}
+          onSelectEntranceWalkingConnection={selectEntranceWalkingConnection}
           onRemoveEntranceConnection={removeEntranceConnection}
           onViewEntranceIndoorDoor={viewEntranceIndoorDoor}
           onUpdateMarker={onUpdateMarker}
@@ -6195,6 +7778,8 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
             setPathMemberEditId(networkIds.length > 1 ? pathId : null);
             setSelected({ type: "path", id: pathId });
           }}
+          hoveredPathId={hoveredPathId}
+          onPathHover={setHoveredPathId}
           onAddPathBend={onAddPathBend}
           onRemoveSelectedPathPoint={onRemoveSelectedPathPoint}
           onDisconnectSelectedPathPoint={onDisconnectSelectedPathPoint}
@@ -6217,8 +7802,13 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
             onUpdate({ ...campus, navNodes: (campus.navNodes ?? []).map(n => n.id === id ? { ...n, ...changes } : n) });
           }}
           onDeleteNavNode={(id) => {
-            if (navNodes.find((node) => node.id === id)?.generatedFromPathVertices?.length) {
-              toast.info("Pathway walking point is managed automatically", "Edit or delete the physical Pathway instead.");
+            const node = navNodes.find((candidate) => candidate.id === id);
+            if (node?.roomId || node?.doorId || node?.entranceId || node?.stairId || node?.elevatorId || node?.rampId) {
+              toast.info("Navigation anchor", "Edit or remove navigation from the owning Room, Door, Entrance, or circulation object.");
+              return;
+            }
+            if (node?.generatedFromPathVertices?.length) {
+              onRemoveGeneratedPathwayPoint(id);
               return;
             }
             // Deterministic connected-edge cleanup — never leave dangling edges.
@@ -6234,7 +7824,15 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
           onUpdateNavEdge={(id, changes) => {
             const edge = (campus.navEdges ?? []).find((candidate) => candidate.id === id);
             let safeChanges = changes;
-            if (isPathwayGeneratedEdge(edge)) {
+            if (isEntranceManagedNavEdge(edge)) {
+              // Entrance connectors remain managed topology (their canonical
+              // endpoints and single-connector ownership cannot be edited),
+              // but their authored bend geometry is normal editor geometry.
+              // Keep bendPoints/distance updates so selected connectors can be
+              // reshaped without turning them into generic Walking Paths.
+              const { startNodeId: _startNodeId, endNodeId: _endNodeId, type: _type, ...geometryChanges } = changes;
+              safeChanges = geometryChanges;
+            } else if (isPathwayGeneratedEdge(edge)) {
               const { bendPoints: _bendPoints, distance: _distance, startNodeId, endNodeId, ...routingChanges } = changes;
               const exactReverse = Boolean(edge && startNodeId === edge.endNodeId && endNodeId === edge.startNodeId);
               safeChanges = exactReverse
@@ -6286,7 +7884,12 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
           }}
           onDeleteNavSelection={(nodeIds, edgeIds) => deleteNavSelection(nodeIds, edgeIds)}
           onDeleteNavEdge={(id) => {
-            if (isPathwayGeneratedEdge(navEdges.find((edge) => edge.id === id))) {
+            const edge = navEdges.find((candidate) => candidate.id === id);
+            if (isEntranceManagedNavEdge(edge)) {
+              toast.info("Entrance connector is managed automatically", "Use Disconnect in Entrance Properties instead.");
+              return;
+            }
+            if (isPathwayGeneratedEdge(edge)) {
               toast.info("Pathway walking path is managed automatically", "Edit or delete the owning physical Pathway instead.");
               return;
             }
@@ -6306,7 +7909,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, publ
           onDeleteBuilding={onDeleteBuilding}
           onDeleteMarker={onDeleteMarker}
           onDeleteRoute={onDeleteRoute}
-          onClose={() => { setSelected(null); setSelRouteId(null); }}
+          onClose={() => { setPropertiesDismissed(true); setPropertiesOpen(false); setSelRouteId(null); }}
         />
         </div>
 

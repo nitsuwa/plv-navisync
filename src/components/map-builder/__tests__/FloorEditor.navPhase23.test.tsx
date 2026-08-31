@@ -95,6 +95,28 @@ function withCirculation(campus: Campus): Campus {
   return next;
 }
 
+function withSecondFloor(campus: Campus): Campus {
+  const next = structuredClone(campus);
+  const first = next.buildings[0].floors[0];
+  next.buildings[0].floors.push({
+    ...structuredClone(first),
+    id: "f2",
+    number: 2,
+    label: "Floor 2",
+    rooms: [],
+    walls: [],
+    doors: [],
+    windows: [],
+    furniture: [],
+    stairs: [],
+    ramps: [],
+    elevators: [],
+    labels: [],
+    paths: [],
+  });
+  return next;
+}
+
 // ── Harness ──────────────────────────────────────────────────────────────────
 
 function Harness({ onCampusChange, initialCampus = makeBaseCampus() }: {
@@ -470,6 +492,76 @@ describe("B5 Phase 2.3 — Indoor Navigation Multi-Select + Placement Rules + Ci
     // Arrow is centered on the stair object (translate to its center).
     const st = campus.buildings[0].floors[0].stairs[0];
     expect(arrow!.getAttribute("transform")).toContain(`translate(${st.x + st.width / 2} ${st.y + st.height / 2})`);
+  });
+
+  it("Stairs use two local flights and a single half-landing", () => {
+    cleanup();
+    const campus = withSecondFloor(withCirculation(makeBaseCampus()));
+    const rendered = render(<Harness initialCampus={campus} />);
+    const symbol = rendered.container.querySelector('[data-testid="stairs-symbol"]') as SVGGElement;
+    expect(symbol.querySelectorAll('[data-testid="stairs-flight"]')).toHaveLength(2);
+    expect(symbol.querySelectorAll('[data-testid="stairs-landing"]')).toHaveLength(1);
+    const tread = symbol.querySelector('[data-testid="stairs-tread"]') as SVGLineElement;
+    expect(tread.getAttribute("x1")).not.toBe(tread.getAttribute("x2"));
+    expect(tread.getAttribute("y1")).toBe(tread.getAttribute("y2"));
+  });
+
+  it("keeps inner stair stringers balanced for both entry sides", () => {
+    cleanup();
+    const normal = render(<Harness initialCampus={withCirculation(makeBaseCampus())} />);
+    const normalRails = Array.from(normal.container.querySelectorAll('[data-testid="stairs-rail"]'))
+      .map((rail) => rail.getAttribute("x1"));
+    cleanup();
+    const flippedCampus = withSecondFloor(withCirculation(makeBaseCampus()));
+    flippedCampus.buildings[0].floors[0].stairs[0].flip = true;
+    const flipped = render(<Harness initialCampus={flippedCampus} />);
+    const flippedRails = Array.from(flipped.container.querySelectorAll('[data-testid="stairs-rail"]'))
+      .map((rail) => rail.getAttribute("x1"));
+    expect(flippedRails).toEqual(normalRails);
+  });
+
+  it("Stair direction cue has a readable arrowhead and mirrors with entry side", () => {
+    cleanup();
+    const campus = withSecondFloor(withCirculation(makeBaseCampus()));
+    campus.buildings[0].floors[0].stairs[0].direction = "up";
+    const rendered = render(<Harness initialCampus={campus} />);
+    const arrow = rendered.container.querySelector('[data-testid="stairs-arrow"]') as SVGGElement;
+    const flight = arrow.querySelector('[data-testid="stairs-arrow-flight"]') as SVGGElement;
+    const shaft = flight.querySelector('[data-testid="stairs-arrow-path"]') as SVGPathElement;
+    expect(flight).toBeTruthy();
+    expect(shaft).toBeTruthy();
+    expect(flight.querySelector('[data-testid="stairs-arrow-head"]')).toBeTruthy();
+    // The cue is a real travel shaft, not the old center dash.
+    expect(shaft.getAttribute("d")).toMatch(/M 0 [\d.-]+ L 0 -?[\d.-]+/);
+    const normalTransform = flight.getAttribute("transform");
+    const normalPath = shaft.getAttribute("d");
+    const normalTravelPath = rendered.container.querySelector('[data-testid="stairs-travel-path"]')?.getAttribute("d");
+
+    cleanup();
+    const flippedCampus = withSecondFloor(withCirculation(makeBaseCampus()));
+    flippedCampus.buildings[0].floors[0].stairs[0].direction = "up";
+    flippedCampus.buildings[0].floors[0].stairs[0].flip = true;
+    const flipped = render(<Harness initialCampus={flippedCampus} />);
+    const flippedFlight = flipped.container.querySelector('[data-testid="stairs-arrow-flight"]') as SVGGElement;
+    const flippedShaft = flippedFlight.querySelector('[data-testid="stairs-arrow-path"]') as SVGPathElement;
+    expect(flippedFlight.getAttribute("transform")).not.toBe(normalTransform);
+    // Entry-side mirroring moves the arrow to the opposite flight but does not
+    // reverse its semantic Up direction.
+    expect(flippedShaft.getAttribute("d")).toBe(normalPath);
+    expect(flipped.container.querySelector('[data-testid="stairs-travel-path"]')?.getAttribute("d"))
+      .not.toBe(normalTravelPath);
+  });
+
+  it("Stair travel cue follows both flights through the landing", () => {
+    cleanup();
+    const campus = withSecondFloor(withCirculation(makeBaseCampus()));
+    campus.buildings[0].floors[0].stairs[0].direction = "up";
+    const rendered = render(<Harness initialCampus={campus} />);
+    const travelPath = rendered.container.querySelector('[data-testid="stairs-travel-path"]') as SVGPathElement | null;
+    expect(travelPath).toBeTruthy();
+    // The cue is a continuous U-turn (first flight → landing → second flight),
+    // not an isolated center dash or single-flight arrow.
+    expect((travelPath?.getAttribute("d") ?? "").match(/L/g)?.length).toBeGreaterThanOrEqual(3);
   });
 
   it("Elevator renders shaft frame + cab + centered door + symmetric chevrons", () => {

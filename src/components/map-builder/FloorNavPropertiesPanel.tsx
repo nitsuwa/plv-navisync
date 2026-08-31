@@ -160,6 +160,7 @@ export function FloorNavPropertiesPanel({
     if (!node) return null;
     const ref = linkedObjectRef(node);
     const isLinked = !!ref;
+    const isPathJunction = node.pathJunction === true;
     // B5 Phase 2.2: a free destination (room_access without a physical owner) is
     // a deliberately placed routable location — distinct from a technical Waypoint.
     const isDest = !isLinked && node.type === "room_access";
@@ -310,12 +311,22 @@ export function FloorNavPropertiesPanel({
               <p className="text-[9px] text-muted-foreground leading-relaxed">Position is derived from the linked object.</p>
             )}
           </Section>
-          <button
-            onClick={onDelete}
-            className="w-full h-8 rounded-lg border border-destructive/30 text-[11px] font-bold text-destructive hover:bg-destructive/10 transition-colors flex items-center justify-center gap-1.5"
-          >
-            <Trash2 className="h-3 w-3" /> Delete {isDest ? "Destination" : isLinked ? "Link" : "Walking Point"}
-          </button>
+          {isLinked ? (
+            <div className="rounded-lg border border-blue-200/70 bg-blue-50/60 px-2.5 py-2 text-[10px] leading-snug text-blue-700 dark:border-blue-800/50 dark:bg-blue-900/10 dark:text-blue-300">
+              This navigation anchor belongs to its physical {LINKED_LABEL[ref.kind].toLowerCase()}. Edit or remove navigation from that object.
+            </div>
+          ) : isPathJunction && connections.length > 2 ? (
+            <div className="rounded-lg border border-amber-200 bg-amber-50/70 px-2.5 py-2 text-[10px] leading-snug text-amber-700 dark:border-amber-800/50 dark:bg-amber-900/10 dark:text-amber-300">
+              This Walking Point connects multiple paths. Disconnect the branches before removing it.
+            </div>
+          ) : (
+            <button
+              onClick={onDelete}
+              className="w-full h-8 rounded-lg border border-destructive/30 text-[11px] font-bold text-destructive hover:bg-destructive/10 transition-colors flex items-center justify-center gap-1.5"
+            >
+              <Trash2 className="h-3 w-3" /> Delete {isDest ? "Destination" : "Walking Point"}
+            </button>
+          )}
         </div>
       </div>
     );

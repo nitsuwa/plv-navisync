@@ -174,6 +174,65 @@ describe("findNavigationRoute (authored nav graph)", () => {
     expect(findNavigationRoute(nodes, edges, "a", "b", false)).not.toBeNull();
   });
 
+  it("excludes Stair nodes from accessible routes even when a legacy local edge is marked accessible", () => {
+    const nodes = [
+      { id: "start", name: "Start", x: 0, y: 0, floorId: "f1", type: "hallway", accessible: true },
+      { id: "stair", name: "Stair", x: 50, y: 0, floorId: "f1", type: "stair", stairId: "s1", accessible: true },
+      { id: "upper", name: "Upper", x: 100, y: 0, floorId: "f2", type: "hallway", accessible: true },
+    ];
+    const edges = [
+      { id: "local", startNodeId: "start", endNodeId: "stair", distance: 10, bidirectional: true, accessible: true, type: "hallway", color: "#000", width: 2 },
+      { id: "transition", startNodeId: "stair", endNodeId: "upper", distance: 1, bidirectional: true, accessible: true, type: "floor_transition", color: "#000", width: 2 },
+    ];
+    expect(findNavigationRoute(nodes, edges, "start", "upper")).not.toBeNull();
+    expect(findNavigationRoute(nodes, edges, "start", "upper", true)).toBeNull();
+  });
+
+  it("derives accessible virtual transitions from explicit Elevator node metadata", () => {
+    const nodes = [
+      { id: "e1", name: "Elevator F1", x: 0, y: 0, floorId: "f1", type: "elevator", elevatorId: "e-f1", transitionSharedId: "vertical-core", accessible: true },
+      { id: "e2", name: "Elevator F2", x: 0, y: 0, floorId: "f2", type: "elevator", elevatorId: "e-f2", transitionSharedId: "vertical-core", accessible: true },
+      { id: "target", name: "Target", x: 50, y: 0, floorId: "f2", type: "hallway", accessible: true },
+    ];
+    const edges = [
+      { id: "from-e2", startNodeId: "e2", endNodeId: "target", distance: 10, bidirectional: true, accessible: true, type: "hallway", color: "#000", width: 2 },
+    ];
+    expect(findNavigationRoute(nodes, edges, "e1", "target", true)?.nodeIds).toEqual(["e1", "e2", "target"]);
+  });
+
+  it("uses the Elevator instead of a competing Stair in accessible mode", () => {
+    const nodes = [
+      { id: "start", name: "Start", x: 0, y: 0, floorId: "f1", type: "hallway", accessible: true },
+      { id: "stair-f1", name: "Stair F1", x: 95, y: 0, floorId: "f1", type: "stair", stairId: "s1", transitionSharedId: "stair-core", accessible: false },
+      { id: "stair-f2", name: "Stair F2", x: 95, y: 0, floorId: "f2", type: "stair", stairId: "s2", transitionSharedId: "stair-core", accessible: false },
+      { id: "elevator-f1", name: "Elevator F1", x: 40, y: 0, floorId: "f1", type: "elevator", elevatorId: "e1", transitionSharedId: "lift-core", accessible: true },
+      { id: "elevator-f2", name: "Elevator F2", x: 40, y: 0, floorId: "f2", type: "elevator", elevatorId: "e2", transitionSharedId: "lift-core", accessible: true },
+      { id: "target", name: "Target", x: 100, y: 0, floorId: "f2", type: "hallway", accessible: true },
+    ];
+    const edges = [
+      { id: "start-stair", startNodeId: "start", endNodeId: "stair-f1", distance: 1, bidirectional: true, accessible: true, type: "hallway", color: "#000", width: 2 },
+      { id: "stair-target", startNodeId: "stair-f2", endNodeId: "target", distance: 1, bidirectional: true, accessible: true, type: "hallway", color: "#000", width: 2 },
+      { id: "start-elevator", startNodeId: "start", endNodeId: "elevator-f1", distance: 10, bidirectional: true, accessible: true, type: "hallway", color: "#000", width: 2 },
+      { id: "elevator-target", startNodeId: "elevator-f2", endNodeId: "target", distance: 10, bidirectional: true, accessible: true, type: "hallway", color: "#000", width: 2 },
+    ];
+    expect(findNavigationRoute(nodes, edges, "start", "target")?.nodeIds).toEqual(["start", "stair-f1", "stair-f2", "target"]);
+    expect(findNavigationRoute(nodes, edges, "start", "target", true)?.nodeIds).toEqual(["start", "elevator-f1", "elevator-f2", "target"]);
+  });
+
+  it("excludes Elevator transitions from Emergency mode unless explicitly marked safe", () => {
+    const nodes = [
+      { id: "e1", name: "Elevator F1", x: 0, y: 0, floorId: "f1", type: "elevator", elevatorId: "e-f1", transitionSharedId: "lift-core", accessible: true },
+      { id: "e2", name: "Elevator F2", x: 0, y: 0, floorId: "f2", type: "elevator", elevatorId: "e-f2", transitionSharedId: "lift-core", accessible: true },
+      { id: "target", name: "Target", x: 50, y: 0, floorId: "f2", type: "hallway", accessible: true },
+    ];
+    const edges = [
+      { id: "local", startNodeId: "e2", endNodeId: "target", distance: 10, bidirectional: true, accessible: true, type: "hallway", color: "#000", width: 2 },
+    ];
+    expect(findNavigationRoute(nodes, edges, "e1", "target", false, true)).toBeNull();
+    const explicitlySafe = nodes.map((node) => node.type === "elevator" ? { ...node, emergencySafe: true } : node);
+    expect(findNavigationRoute(explicitlySafe, edges, "e1", "target", false, true)?.nodeIds).toEqual(["e1", "e2", "target"]);
+  });
+
   it("skips emergency-unsafe edges in emergency mode", () => {
     const nodes = [
       { id: "a", name: "A", x: 0, y: 0 },
@@ -207,6 +266,16 @@ describe("findNavigationRoute (authored nav graph)", () => {
 // ── buildTransitionEdges (cross-floor stair/elevator stitching) ─────────────
 
 describe("buildTransitionEdges", () => {
+  it("marks designated emergency stair transitions with the preferred low logical cost", () => {
+    const nodes = [
+      { id: "g", x: 0, y: 0, floorId: "f1", transitionSharedId: "emergency", type: "stair", emergencyStair: true, accessible: false },
+      { id: "u", x: 0, y: 0, floorId: "f2", transitionSharedId: "emergency", type: "stair", emergencyStair: true, accessible: false },
+    ];
+    const edges = buildTransitionEdges(nodes, []);
+    expect(edges).toHaveLength(1);
+    expect(edges[0].distance).toBe(1);
+    expect(edges[0].emergencySafe).toBe(true);
+  });
   const baseEdges: {
     startNodeId: string; endNodeId: string; distance: number; bidirectional: boolean; accessible: boolean;
   }[] = [];
@@ -249,6 +318,49 @@ describe("buildTransitionEdges", () => {
 // ── Multi-floor routing through virtual transition edges ────────────────────
 
 describe("findNavigationRoute across floors", () => {
+  it("keeps an explicitly selected Elevator on its authored shaft instead of taking a nearby lift", () => {
+    const nodes = [
+      { id: "e1-f1", name: "Elevator 1", x: 0, y: 0, floorId: "f1", type: "elevator", elevatorId: "e1", transitionSharedId: "lift-1", accessible: true },
+      { id: "e2-f1", name: "Elevator 2", x: 1, y: 0, floorId: "f1", type: "elevator", elevatorId: "e2", transitionSharedId: "lift-2", accessible: true },
+      { id: "e1-f2", name: "Elevator 1", x: 0, y: 0, floorId: "f2", type: "elevator", elevatorId: "e1-upper", transitionSharedId: "lift-1", accessible: true },
+      { id: "e2-f2", name: "Elevator 2", x: 1, y: 0, floorId: "f2", type: "elevator", elevatorId: "e2-upper", transitionSharedId: "lift-2", accessible: true },
+      { id: "target", name: "Target", x: 100, y: 0, floorId: "f2", accessible: true },
+    ];
+    const edges = [
+      { id: "same-floor-lifts", startNodeId: "e1-f1", endNodeId: "e2-f1", distance: 1, bidirectional: true, accessible: true, type: "hallway" },
+      { id: "lift-1-long-walk", startNodeId: "e1-f2", endNodeId: "target", distance: 100, bidirectional: true, accessible: true, type: "hallway" },
+      { id: "lift-2-short-walk", startNodeId: "e2-f2", endNodeId: "target", distance: 1, bidirectional: true, accessible: true, type: "hallway" },
+    ];
+    expect(findNavigationRoute(nodes, edges, "e1-f1", "target")?.nodeIds).toEqual(["e1-f1", "e2-f1", "e2-f2", "target"]);
+    expect(findNavigationRoute(nodes, edges, "e1-f1", "target", false, false, { preferredElevatorSharedIds: ["lift-1"] })?.nodeIds)
+      .toEqual(["e1-f1", "e1-f2", "target"]);
+  });
+
+  it("applies Standard transition preferences without changing the canonical graph", () => {
+    const nodes = [
+      { id: "start", name: "Start", x: 0, y: 0, floorId: "f1", type: "hallway", accessible: true },
+      { id: "stair-f1", name: "Stair", x: 10, y: 0, floorId: "f1", type: "stair", stairId: "s1", transitionSharedId: "stairs", accessible: false },
+      { id: "stair-f2", name: "Stair", x: 10, y: 0, floorId: "f2", type: "stair", stairId: "s2", transitionSharedId: "stairs", accessible: false },
+      { id: "elevator-f1", name: "Elevator", x: 1, y: 0, floorId: "f1", type: "elevator", elevatorId: "e1", transitionSharedId: "lift", accessible: true },
+      { id: "elevator-f2", name: "Elevator", x: 1, y: 0, floorId: "f2", type: "elevator", elevatorId: "e2", transitionSharedId: "lift", accessible: true },
+      { id: "target", name: "Target", x: 20, y: 0, floorId: "f2", type: "hallway", accessible: true },
+    ];
+    const edges = [
+      { id: "start-stair", startNodeId: "start", endNodeId: "stair-f1", distance: 20, bidirectional: true, accessible: true, type: "hallway" },
+      { id: "stair-target", startNodeId: "stair-f2", endNodeId: "target", distance: 20, bidirectional: true, accessible: true, type: "hallway" },
+      { id: "start-elevator", startNodeId: "start", endNodeId: "elevator-f1", distance: 1, bidirectional: true, accessible: true, type: "hallway" },
+      { id: "elevator-target", startNodeId: "elevator-f2", endNodeId: "target", distance: 1, bidirectional: true, accessible: true, type: "hallway" },
+    ];
+    expect(findNavigationRoute(nodes, edges, "start", "target")?.nodeIds).toEqual(["start", "elevator-f1", "elevator-f2", "target"]);
+    expect(findNavigationRoute(nodes, edges, "start", "target", false, false, { transitionPreference: "stairs" })?.nodeIds)
+      .toEqual(["start", "stair-f1", "stair-f2", "target"]);
+    expect(findNavigationRoute(nodes, edges, "start", "target", false, false, { transitionPreference: "elevator" })?.nodeIds)
+      .toEqual(["start", "elevator-f1", "elevator-f2", "target"]);
+    const noStair = edges.filter((edge) => !edge.id.includes("stair"));
+    expect(findNavigationRoute(nodes, noStair, "start", "target", false, false, { transitionPreference: "stairs" })?.nodeIds)
+      .toEqual(["start", "elevator-f1", "elevator-f2", "target"]);
+  });
+
   it("routes through a shared elevator transition to reach another floor", () => {
     const nodes = [
       { id: "n1", name: "F1 Elevator", x: 0, y: 0, floorId: "f1", transitionSharedId: "elA" },

@@ -121,6 +121,8 @@ export interface FloorStairs {
   height: number;
   /** Rotation in degrees. Optional for legacy saved stair objects. */
   rotation?: number;
+  /** Mirrors the half-landing layout across its local vertical axis (left/right entry flight). */
+  flip?: boolean;
   direction: StairDirection;
   label: string;
   floors?: number[];
@@ -128,6 +130,12 @@ export interface FloorStairs {
   sharedId?: string;
   /** Whether this staircase is wheelchair-accessible */
   accessible?: boolean;
+  /** Emergency-safe designation for emergency egress routing. */
+  emergencySafe?: boolean;
+  /** Links a generated landing to a building-attached Exterior Emergency Stair. */
+  exteriorEmergencyStairId?: string;
+  /** Building perimeter attachment copied onto generated exterior landings. */
+  attachment?: { edge: BuildingEntranceEdge; offset: number };
   zOrder?: number;
   visible?: boolean;
   locked?: boolean;
@@ -170,15 +178,51 @@ export interface FloorElevatorItem {
   /** Rotation in degrees. Optional for legacy saved elevator objects. */
   rotation?: number;
   doorWidth: number;
+  /**
+   * Stable, generated system number used only as a matching hint.  It is
+   * intentionally separate from the editable display label and from the
+   * authoritative sharedId shaft identity.  Legacy records may omit it; the
+   * editor derives it from a generated `Elevator N` label when possible.
+   */
+  systemNumber?: number;
   label: string;
   floors?: number[];
   /** Shared ID linking the same physical elevator across multiple floors */
   sharedId?: string;
   /** Whether this elevator is wheelchair-accessible (always true for elevators) */
   accessible?: boolean;
+  /** Optional explicit opt-in for emergency evacuation use. */
+  emergencySafe?: boolean;
   zOrder?: number;
   visible?: boolean;
   locked?: boolean;
+}
+
+/** Resolve the immutable generated Elevator number for matching hints.
+ * Custom display labels are deliberately not parsed as identity. */
+export function elevatorSystemNumberOf(
+  item: Pick<FloorElevatorItem, "label" | "systemNumber"> | undefined,
+): number | undefined {
+  const explicit = item?.systemNumber;
+  if (Number.isInteger(explicit) && (explicit as number) > 0) return explicit;
+  const match = item?.label?.trim().match(/^elevator\s+(\d+)$/i);
+  return match ? Number(match[1]) : undefined;
+}
+
+/** Return the next monotonically increasing generated system number on the
+ * current Floor.  Numbers are not recycled after a removal, which keeps the
+ * authoring history legible while still guaranteeing uniqueness. */
+export function nextElevatorSystemNumber(
+  elevators: Pick<FloorElevatorItem, "label" | "systemNumber">[],
+): number {
+  const used = new Set(
+    elevators
+      .map((elevator) => elevatorSystemNumberOf(elevator))
+      .filter((number): number is number => number !== undefined),
+  );
+  let number = used.size > 0 ? Math.max(...used) + 1 : 1;
+  while (used.has(number)) number += 1;
+  return number;
 }
 
 // ── Indoor Label / Text ─────────────────────────────────────────────────────
@@ -237,6 +281,8 @@ export interface FloorRoom {
   y: number;
   w: number;
   h: number;
+  /** Optional custom Room fill color; absent values continue using room type palette. */
+  color?: string;
   rotation?: number;
   zOrder?: number;
   visible?: boolean;
@@ -257,6 +303,10 @@ export interface FloorRoom {
   /** Campus navigation node ID — links this room to the campus-level navigation graph.
    * Set when the admin assigns a nav access point to this room. */
   accessNodeId?: string;
+  /** Physical Door used as this Room's access point; persisted in floor metadata. */
+  accessDoorId?: string;
+  /** Optional multi-door extension. The legacy accessDoorId remains the primary compatibility field. */
+  accessDoorIds?: string[];
   /** How this room is accessed from the navigation graph */
   accessType?: "door" | "access_point";
 }
@@ -339,6 +389,8 @@ export interface CampusBuilding {
     hasRamp: boolean;
     accessibleEntrance: boolean;
   };
+  /** Building-attached Exterior Emergency Stairs; occurrences are derived on served Floors. */
+  exteriorEmergencyStairs?: ExteriorEmergencyStair[];
 }
 
 export interface CirculationGroup {
@@ -361,6 +413,28 @@ export interface CampusEntrance {
   name?: string;
   isPrimary?: boolean;
   accessible?: boolean;
+}
+
+/** One physical Emergency Stair attached to a Building perimeter. */
+export interface ExteriorEmergencyStair {
+  id: string;
+  buildingId: string;
+  label: string;
+  state: "open" | "closed";
+  width: number;
+  height: number;
+  attachment: { edge: BuildingEntranceEdge; offset: number };
+  /** Explicitly served Floor IDs; no occurrence is created for other Floors. */
+  servedFloorIds: string[];
+  /** Existing circulation identity used by the canonical Stair transition graph. */
+  sharedId: string;
+  /** Stable generated occurrence IDs, keyed by Floor ID. */
+  occurrenceIds?: Record<string, string>;
+  /** Stable outdoor discharge/navigation anchor. */
+  outdoorNodeId?: string;
+  emergencySafe?: boolean;
+  zOrder?: number;
+  visible?: boolean;
 }
 
 export interface RoomResizeState {
@@ -457,11 +531,21 @@ export interface NavigationNode {
   roomId?: string;
   doorId?: string;
   stairId?: string;
+  /** Building-attached exterior Emergency Stair owner, when applicable. */
+  exteriorEmergencyStairId?: string;
   elevatorId?: string;
   rampId?: string;
   /** Explicit provenance for pathway-generated vertices. Manual/linked nodes omit this. */
   generatedFromPathVertices?: { pathId: string; vertexId: string }[];
+  /** A manually inserted point that split an authored indoor path.  This is
+   * persisted as ordinary navigation metadata (no schema change) so the
+   * editor can keep the junction constrained to its parent corridor. */
+  pathJunction?: boolean;
   accessible: boolean;
+  /** Optional explicit emergency override for semantic transition nodes. */
+  emergencySafe?: boolean;
+  /** Marks a designated emergency evacuation stair for route preference. */
+  emergencyStair?: boolean;
   /** Reason this node is not accessible (only relevant when accessible=false) */
   inaccessibleReason?: "stairs" | "narrow_path" | "restricted_access" | "uneven_surface" | "other";
   color: string;
@@ -496,6 +580,13 @@ export interface NavigationEdge {
   width: number;
   /** Pathway IDs that explicitly generated this edge. Manual edges omit this. */
   generatedFromPathIds?: string[];
+  /** Provenance for the two corridor segments created by an explicit path
+   * junction split.  These flags are editor metadata, not a new edge type. */
+  pathJunctionId?: string;
+  pathJunctionParent?: boolean;
+  /** Supports a later junction split on an already segmented corridor without
+   * losing the parent relationship of the earlier junction. */
+  pathJunctionIds?: string[];
 }
 
 // ── Route (Navigation layer) ────────────────────────────────────────────────

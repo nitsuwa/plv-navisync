@@ -20,7 +20,7 @@ import { findIndoorRoute, findIndoorRouteForFloor, type IndoorRoute } from "../l
 import { planBuildingRoute, planRouteFromPoint, type PlannedRoute } from "../lib/routePlanner";
 import { latLngToMapPoint, snapToNearest } from "../lib/geo";
 import { NODES as STATIC_NAV_NODES } from "../lib/pathfinding";
-import { pathIsPubliclyVisible } from "../lib/campusPathNetwork";
+import { projectReadonlyOutdoorCampus } from "../lib/readonlyOutdoorCampus";
 import {
   RoutePlannerDialog, RouteStepsPanel, RouteMapOverlay,
   ReportModal, SignInPrompt,
@@ -28,6 +28,8 @@ import {
 } from "../components/map";
 import { studentAccountService } from "../services/studentAccountService";
 import { usageAnalyticsService } from "../services/usageAnalyticsService";
+import type { Campus as EditorCampus } from "../components/map-builder/types";
+import { ReadonlyOutdoorCampusScene } from "../components/map-builder/ReadonlyOutdoorVisuals";
 
 type MapMode  = "standard" | "accessible" | "emergency";
 
@@ -109,9 +111,16 @@ const BUILDING_ACCESSIBILITY: Record<string, string[]> = {
 };
 
 // ═════════════════════════════════════════════════════════════════════════════
-export function CampusMapPage() {
+export interface CampusMapPageProps {
+  /** Candidate campus supplied by Admin Student Preview. */
+  previewCampus?: EditorCampus | null;
+  /** Remove the public-layout header offset when embedded full-screen. */
+  fullScreen?: boolean;
+}
+
+export function CampusMapPage({ previewCampus = null, fullScreen = false }: CampusMapPageProps = {}) {
   const studentAuth = useStudentAuth();
-  const publishedCampusState = usePublishedCampus();
+  const publishedCampusState = usePublishedCampus(previewCampus);
 
   const {
     campuses: availableCampuses,
@@ -153,6 +162,16 @@ export function CampusMapPage() {
     }
     return LEGACY_FLOOR_PLANS;
   }, [activeCampus]);
+
+  // Canonical authored outdoor data is the source of truth whenever a saved
+  // Campus (or Preview candidate) is available.  The legacy adapter above is
+  // retained for the existing Student route/search contracts and for the
+  // no-campus compatibility fallback, but it no longer owns the physical
+  // outdoor rendering.
+  const readonlyOutdoorCampus = useMemo(
+    () => activeCampus ? projectReadonlyOutdoorCampus(activeCampus) : null,
+    [activeCampus],
+  );
 
   const BUILDING_FACILITIES: Record<string, string[]> = useMemo(() => {
     if (activeCampus) {
@@ -271,9 +290,9 @@ export function CampusMapPage() {
   const pinchRef       = useRef<{ dist: number; initZoom: number } | null>(null);
   const getScale = useCallback(() => {
     const svg = svgRef.current;
-    const vw = floorViewRef.current !== null ? FP_W : SVG_W;
+    const vw = floorViewRef.current !== null ? FP_W : activeCampus?.canvasW || SVG_W;
     return svg ? vw / svg.getBoundingClientRect().width : 1;
-  }, []);
+  }, [activeCampus]);
   const floorViewRef    = useRef(floorView);
   useEffect(() => { floorViewRef.current = floorView; }, [floorView]);
 
@@ -339,8 +358,10 @@ export function CampusMapPage() {
   const floorNums         = currentFloorData?.floors.map(f => f.number) ?? [];
 
   // SVG center shifts with mode (floor plan is 440×290, campus 900×680)
-  const viewCX = isFloorMode ? FP_W / 2 : SVG_CX;
-  const viewCY = isFloorMode ? FP_H / 2 : SVG_CY;
+  const outdoorCanvasW = activeCampus?.canvasW || SVG_W;
+  const outdoorCanvasH = activeCampus?.canvasH || SVG_H;
+  const viewCX = isFloorMode ? FP_W / 2 : outdoorCanvasW / 2;
+  const viewCY = isFloorMode ? FP_H / 2 : outdoorCanvasH / 2;
   const tx = viewCX * (1 - displayZoom) + pan.x;
   const ty = viewCY * (1 - displayZoom) + pan.y;
 
@@ -490,7 +511,13 @@ export function CampusMapPage() {
         clearTimeout(safety);
         setLocating(false);
         const anchor = activeCampus?.coordinates ?? { lat: 14.7062, lng: 120.9813 };
-        const raw = latLngToMapPoint(pos.coords.latitude, pos.coords.longitude, anchor, SVG_W, SVG_H);
+        const raw = latLngToMapPoint(
+          pos.coords.latitude,
+          pos.coords.longitude,
+          anchor,
+          activeCampus?.canvasW || SVG_W,
+          activeCampus?.canvasH || SVG_H,
+        );
         const snapped = snapPointToGraph(raw);
         setYouAreHere(snapped);
         setUseMyLocation(true);
@@ -764,11 +791,11 @@ export function CampusMapPage() {
       const minX = Math.min(...xs), maxX = Math.max(...xs);
       const minY = Math.min(...ys), maxY = Math.max(...ys);
       const routeW = maxX - minX, routeH = maxY - minY;
-      const fitZoom = Math.min(SVG_W / (routeW + 200), SVG_H / (routeH + 200), 2.0);
+      const fitZoom = Math.min(outdoorCanvasW / (routeW + 200), outdoorCanvasH / (routeH + 200), 2.0);
       setZoom(parseFloat(Math.max(0.5, Math.min(fitZoom, 2.0)).toFixed(2)));
       setPan({
-        x: SVG_CX - (minX + routeW / 2) * fitZoom,
-        y: SVG_CY - (minY + routeH / 2) * fitZoom,
+        x: outdoorCanvasW / 2 - (minX + routeW / 2) * fitZoom,
+        y: outdoorCanvasH / 2 - (minY + routeH / 2) * fitZoom,
       });
       
       setShowArrival(false);
@@ -786,8 +813,8 @@ export function CampusMapPage() {
         const cy = pos.y + pos.h / 2;
         const sidePanelOffset = typeof window !== "undefined" && window.innerWidth >= 768 ? -80 : 0;
         panTargetRef.current = {
-          x: SVG_CX - cx * zoom + sidePanelOffset,
-          y: SVG_CY - cy * zoom,
+          x: outdoorCanvasW / 2 - cx * zoom + sidePanelOffset,
+          y: outdoorCanvasH / 2 - cy * zoom,
         };
       }
     }
@@ -1047,7 +1074,7 @@ const buildingFill = (id: string) =>
     <div
       ref={mapContainerRef}
       className="relative overflow-hidden animate-fade-in"
-      style={{ height:"calc(100dvh - 56px)", background: isFloorMode ? "var(--map-floor-corridor)" : "var(--map-bg)", cursor: isDragging ? "grabbing" : "grab", touchAction:"none" }}
+      style={{ height: fullScreen ? "100dvh" : "calc(100dvh - 56px)", background: isFloorMode ? "var(--map-floor-corridor)" : "var(--map-bg)", cursor: isDragging ? "grabbing" : "grab", touchAction:"none" }}
       onMouseDown={onMouseDown} onMouseMove={onMouseMove}
       onMouseUp={onMouseUp} onMouseLeave={onMouseUp}
       onTouchStart={onTouchStart} onTouchMove={onTouchMove}
@@ -1099,7 +1126,7 @@ const buildingFill = (id: string) =>
 
       {/* ══════════════════════════ MAP SVG ══════════════════════════ */}
       <svg ref={svgRef}
-        viewBox={isFloorMode ? `0 0 ${FP_W} ${FP_H}` : `0 0 ${SVG_W} ${SVG_H}`}
+        viewBox={isFloorMode ? `0 0 ${FP_W} ${FP_H}` : `0 0 ${outdoorCanvasW} ${outdoorCanvasH}`}
         className="absolute inset-0 w-full h-full select-none"
         preserveAspectRatio="xMidYMid meet"
         onDoubleClick={e => {
@@ -1320,11 +1347,11 @@ const buildingFill = (id: string) =>
           })() : (
           /* ════════ CAMPUS MAP mode ════════ */
           <>
-            <rect data-bg="true" width={SVG_W} height={SVG_H} fill="var(--map-bg)" style={{ cursor: pinning ? "crosshair" : undefined }}/>
-            <rect x={6} y={6} width={SVG_W-12} height={SVG_H-12} fill="none" stroke="var(--map-boundary)" strokeWidth={3} rx={4} opacity={0.5} strokeDasharray="8 4"/>
+            <rect data-bg="true" width={outdoorCanvasW} height={outdoorCanvasH} fill="var(--map-bg)" style={{ cursor: pinning ? "crosshair" : undefined }}/>
+            <rect x={6} y={6} width={Math.max(0, outdoorCanvasW - 12)} height={Math.max(0, outdoorCanvasH - 12)} fill="none" stroke="var(--map-boundary)" strokeWidth={3} rx={4} opacity={0.5} strokeDasharray="8 4"/>
 
-            {/* Accessible overlay */}
-            {mapMode === "accessible" && <>
+            {/* Legacy overlays remain only for the compatibility/demo map. */}
+            {!activeCampus && mapMode === "accessible" && <>
               <path d="M 119,289 L 155,289 L 155,170" fill="none" stroke="#16a34a" strokeWidth={7} opacity={0.5} strokeDasharray="12,6" strokeLinecap="round"/>
               <path d="M 414,289 L 540,289 L 540,373" fill="none" stroke="#16a34a" strokeWidth={7} opacity={0.5} strokeDasharray="12,6" strokeLinecap="round"/>
               <path d="M 414,289 L 414,435 L 305,435" fill="none" stroke="#16a34a" strokeWidth={7} opacity={0.5} strokeDasharray="12,6" strokeLinecap="round"/>
@@ -1355,41 +1382,33 @@ const buildingFill = (id: string) =>
               ))}
             </>}
             {/* Emergency overlay */}
-            {mapMode === "emergency" && <>
+            {!activeCampus && mapMode === "emergency" && <>
               <rect x={0} y={272} width={SVG_W} height={26} fill="rgba(220,38,38,0.15)"/>
               {([[119,285,"EXIT"],[680,285,"EXIT"],[401,285,"RALLY"]] as [number,number,string][]).map(([cx,cy,lbl],i) => (
                 <g key={i}><circle cx={cx} cy={cy} r={16} fill="#dc2626" stroke="white" strokeWidth={2.5}/><text x={cx} y={cy+4} textAnchor="middle" fill="white" fontSize={7} fontWeight="900" className="select-none">{lbl}</text></g>
               ))}
             </>}
-            {/* Walkway paths + areas (red brick walkways, quadrangle, roads) */}
-            {activeCampus?.paths?.map((p) => {
-              if (!pathIsPubliclyVisible(p) || !p.points || p.points.length < 2) return null;
-              const pts = p.points.map((pt) => `${pt.x},${pt.y}`).join(" ");
-              const closed = p.points.length >= 4 &&
-                Math.hypot(p.points[0].x - p.points[p.points.length - 1].x, p.points[0].y - p.points[p.points.length - 1].y) < 1;
-              if (closed) {
-                // Closed paths = filled areas (quadrangle green, Tongco street)
-                return <polygon key={p.id} points={pts} fill={p.color} fillOpacity={0.30} stroke={p.color} strokeWidth={1} strokeOpacity={0.35} strokeLinejoin="round" />;
-              }
-              return (
-                <polyline
-                  key={p.id}
-                  points={pts}
-                  fill="none"
-                  stroke={p.color}
-                  strokeWidth={Math.max(2, p.width || 4)}
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  opacity={0.85}
-                />
-              );
-            })}
+            {readonlyOutdoorCampus && (
+              <ReadonlyOutdoorCampusScene
+                campus={readonlyOutdoorCampus}
+                showBuildings={layers.buildings}
+                selectedBuildingId={selected?.id ?? null}
+                onSelectBuilding={(buildingId) => {
+                  const building = MOCK_BUILDINGS.find((item) => item.id === buildingId);
+                  if (building) selectBuilding(selected?.id === buildingId ? null : building);
+                }}
+                onDoubleClickBuilding={(buildingId) => {
+                  const building = MOCK_BUILDINGS.find((item) => item.id === buildingId);
+                  if (building) openFloorPlan(building);
+                }}
+              />
+            )}
             {/* Route */}
             {route && (
               <RouteMapOverlay points={route.points} mode={mapMode} fading={routeFading} walkProgress={walkProgress} />
             )}
-                        {/* Buildings */}
-            {layers.buildings && MOCK_BUILDINGS.map(b => {
+            {/* Legacy demo buildings are used only when no canonical campus is available. */}
+            {!activeCampus && layers.buildings && MOCK_BUILDINGS.map(b => {
               const pos = B_POS[b.id]; if (!pos) return null;
               const isSel = selected?.id === b.id;
               const googleFill = mapMode === "standard"

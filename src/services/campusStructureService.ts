@@ -4,6 +4,7 @@ import { nextFloorNumberForBuilding } from "../lib/floorManagement";
 import { syncEntranceNodePositions } from "../lib/navigationGraph";
 import { syncIndoorLinkedNodePositions } from "../lib/indoorNavigationGraph";
 import { ENTRANCE_TRANSITION_EDGE_TYPE, reconcileEntranceTransitions } from "../lib/entranceTransitions";
+import { syncExteriorEmergencyStairGraph } from "../lib/exteriorEmergencyStairs";
 import type { Database, Json, Tables, TablesInsert, TablesUpdate } from "../types/database.generated";
 import type {
   AccessibilityFeature, AssemblyPoint, Campus, CampusBuilding, CampusDecorAsset,
@@ -55,6 +56,128 @@ function jsonUi<T>(value: T): JsonObject { return { ui: value as Json }; }
 function uiFrom<T>(metadata: Json | null): T | undefined {
   return metadata && typeof metadata === "object" && !Array.isArray(metadata) ? (metadata.ui as T | undefined) : undefined;
 }
+
+/**
+ * Older navigation rows were written before the editor UI snapshot was
+ * consistently stored under metadata.ui. Keep those rows authoritative by
+ * hydrating from their first-class database columns (and retain any legacy
+ * metadata fields that are still useful). Current rows still round-trip the
+ * complete UI object through metadata.ui, including bends and semantic refs.
+ */
+function jsonRecord(value: Json | null | undefined): Record<string, Json | undefined> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, Json | undefined>
+    : undefined;
+}
+
+/** Read metadata written by the removed Building Accessible Approach feature. */
+function removedAccessibleApproachMetadata(value: Json | null | undefined): Record<string, Json | undefined> | undefined {
+  const metadata = jsonRecord(value);
+  const source = jsonRecord(metadata?.ui as Json | undefined) ?? metadata;
+  return source && (typeof source.accessibleApproachId === "string"
+    || typeof source.accessibleApproachLeg === "string") ? source : undefined;
+}
+
+/** Drop removed ramp graph legs while restoring the old direct Entrance edge
+ * that was temporarily disabled by the former ramp implementation. */
+function restoreLegacyAccessibleApproachEdge(row: NavigationEdgeRow): NavigationEdgeRow | undefined {
+  const metadata = jsonRecord(row.metadata);
+  const ui = jsonRecord(metadata?.ui as Json | undefined);
+  const source = removedAccessibleApproachMetadata(row.metadata);
+  if (!source) return row;
+  if (source.accessibleApproachLeg !== "bypass") return undefined;
+  const cleanSource = { ...source };
+  const originalAccessible = cleanSource.accessibleApproachBypassOriginalAccessible;
+  const originalReason = cleanSource.accessibleApproachBypassOriginalInaccessibleReason;
+  delete cleanSource.accessibleApproachId;
+  delete cleanSource.accessibleApproachLeg;
+  delete cleanSource.accessibleApproachBypassOriginalAccessible;
+  delete cleanSource.accessibleApproachBypassOriginalInaccessibleReason;
+  if (typeof originalAccessible === "boolean") cleanSource.accessible = originalAccessible;
+  if (typeof originalReason === "string") cleanSource.inaccessibleReason = originalReason;
+  else delete cleanSource.inaccessibleReason;
+  const cleanMetadata = ui
+    ? { ...(metadata ?? {}), ui: cleanSource as Json }
+    : cleanSource as Json;
+  return {
+    ...row,
+    is_accessible: typeof originalAccessible === "boolean" ? originalAccessible : row.is_accessible,
+    metadata: cleanMetadata as Json,
+  };
+}
+
+function finiteOr(value: unknown, fallback = 0): number {
+  const number = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(number) ? number : fallback;
+}
+
+function nodeTypeFromDatabase(value: string | null | undefined): NavigationNode["type"] {
+  switch (value) {
+    case "entrance": return "entrance";
+    case "destination": return "room_access";
+    case "stairs": return "stair";
+    case "elevator": return "elevator";
+    case "ramp": return "ramp";
+    case "exit": return "emergency_exit";
+    case "assembly_area": return "assembly";
+    case "floor_transition": return "transition";
+    case "waypoint":
+    default: return "outdoor";
+  }
+}
+
+function edgeTypeFromDatabase(value: string | null | undefined): string {
+  if (value === "transition") return "floor_transition";
+  return value && value.trim().length > 0 ? value : "walkway";
+}
+
+function navigationNodeFromRow(row: NavigationNodeRow): NavigationNode {
+  const metadata = jsonRecord(row.metadata);
+  const ui = jsonRecord(metadata?.ui as Json | undefined);
+  const source = ui ?? metadata ?? {};
+  const hasUiSnapshot = Boolean(ui);
+  return {
+    ...(source as unknown as Partial<NavigationNode>),
+    id: row.id,
+    name: row.name ?? String(source.name ?? "Walking Point"),
+    type: (source.type as NavigationNode["type"] | undefined) ?? nodeTypeFromDatabase(row.node_type),
+    x: finiteOr(row.x, finiteOr(source.x)),
+    y: finiteOr(row.y, finiteOr(source.y)),
+    campusId: (typeof source.campusId === "string" ? source.campusId : undefined) ?? row.campus_id,
+    buildingId: row.building_id ?? (typeof source.buildingId === "string" ? source.buildingId : undefined),
+    floorId: row.floor_id ?? (typeof source.floorId === "string" ? source.floorId : undefined),
+    accessible: hasUiSnapshot && typeof source.accessible === "boolean" ? source.accessible : row.is_accessible,
+    ...(hasUiSnapshot
+      ? (typeof source.emergencySafe === "boolean" ? { emergencySafe: source.emergencySafe } : {})
+      : { emergencySafe: row.is_emergency_safe }),
+    color: typeof source.color === "string" ? source.color : "#3b82f6",
+  };
+}
+
+function navigationEdgeFromRow(row: NavigationEdgeRow): NavigationEdge {
+  const metadata = jsonRecord(row.metadata);
+  const ui = jsonRecord(metadata?.ui as Json | undefined);
+  const source = ui ?? metadata ?? {};
+  const hasUiSnapshot = Boolean(ui);
+  return {
+    ...(source as unknown as Partial<NavigationEdge>),
+    id: row.id,
+    startNodeId: row.from_node_id,
+    endNodeId: row.to_node_id,
+    distance: finiteOr(source.distance, finiteOr(row.distance_m)),
+    bidirectional: hasUiSnapshot && typeof source.bidirectional === "boolean" ? source.bidirectional : row.is_bidirectional,
+    accessible: hasUiSnapshot && typeof source.accessible === "boolean" ? source.accessible : row.is_accessible,
+    ...(hasUiSnapshot
+      ? (typeof source.emergencySafe === "boolean" ? { emergencySafe: source.emergencySafe } : {})
+      : { emergencySafe: row.is_emergency_safe }),
+    type: (source.type as string | undefined) ?? edgeTypeFromDatabase(row.edge_type),
+    color: typeof source.color === "string" ? source.color : "#3b82f6",
+    width: finiteOr(source.width, 2),
+    // `closed` remains part of the UI snapshot; is_temporarily_closed is the
+    // persistence retirement flag filtered by selectStructure. Do not add an
+    // explicit undefined property, or a reload would mutate JSON on next save.
+  };
+}
 function normalizedBuildingCategory(value: string): string {
   const category = value.trim().toLowerCase();
   return BUILDING_CATEGORIES.has(category) ? category : "other";
@@ -81,6 +204,34 @@ function normalizedEdgeType(value: string): string {
   if (value === "floor_transition") return "transition";
   if (value === ENTRANCE_TRANSITION_EDGE_TYPE) return "transition";
   return new Set(["walkway", "hallway", "stairs", "elevator", "ramp", "door", "crossing", "transition"]).has(value) ? value : "walkway";
+}
+
+/**
+ * `map_elements.name` is a required searchable display field even when the
+ * editor's optional label/name field is empty. Keep the fallback in the
+ * persistence mapper (rather than mutating the editor object) so unnamed
+ * objects remain visually optional while every database row is valid.
+ */
+function defaultElementName(kind: StructureKind): string {
+  return ({
+    floor_path: "Walking Path",
+    campus_path: "Campus Path",
+    accessibility_feature: "Accessibility Feature",
+    assembly_point: "Assembly Point",
+    event_overlay: "Event Overlay",
+    marker: "Marker",
+    route: "Route",
+    room: "Room",
+    wall: "Wall",
+    door: "Door",
+    window: "Window",
+    furniture: "Furniture",
+    stairs: "Stairs",
+    ramp: "Ramp",
+    elevator: "Elevator",
+    label: "Label",
+    decor: "Decorative Asset",
+  } as Record<StructureKind, string>)[kind];
 }
 
 interface ExistingNavigationEdgePair {
@@ -110,7 +261,9 @@ function element(kind: StructureKind, campusId: string, value: Record<string, un
   const points = "points" in value ? value.points as Json : undefined;
   const width = Number("w" in value ? value.w : value.width);
   const height = Number("h" in value ? value.h : value.height);
-  const name = String(value.name ?? value.title ?? value.label ?? value.text ?? kind.replaceAll("_", " "));
+  const rawName = [value.name, value.title, value.label, value.text]
+    .find((candidate): candidate is string => typeof candidate === "string" && candidate.trim().length > 0);
+  const name = (rawName ?? defaultElementName(kind)).trim();
   const roomType = kind === "room" ? normalizedElementType(String(value.type ?? "room")) : undefined;
   // Walls are endpoint-based (x1/y1/x2/y2). Their canonical anchor location is
   // the START point; the full segment geometry is retained in metadata.ui and
@@ -151,7 +304,7 @@ export function serializeCampusStructure(campus: Campus): CampusStructurePayload
   const floors: JsonObject[] = [];
   const map_elements: JsonObject[] = [];
   (canonicalCampus.buildings ?? []).forEach((building, buildingOrder) => {
-    const { floors: buildingFloors, ...buildingUi } = building;
+    const { floors: buildingFloors, accessibleApproach: _removedApproach, ...buildingUi } = building as CampusBuilding & { accessibleApproach?: unknown };
     buildings.push({
       id: building.id, name: building.name, code: building.code, description: building.description,
       category: normalizedBuildingCategory(building.category),
@@ -262,20 +415,24 @@ export function hydrateCampusStructure(campus: Campus, rows: CampusStructureRows
       elevators: byKind("elevator"), labels: byKind("label") } as Partial<FloorPlan>, { buildingId: row.building_id });
     floorsByBuilding.set(row.building_id, [...(floorsByBuilding.get(row.building_id) ?? []), floor]);
   });
-  const buildings = [...rows.buildings].sort((a, b) => Number((a.metadata as JsonObject)?.display_order ?? 0) - Number((b.metadata as JsonObject)?.display_order ?? 0)).map((row) => ({
-    ...(uiFrom<Partial<CampusBuilding>>(row.metadata) ?? {}), id: row.id, name: row.name, code: row.code,
+  const buildings = [...rows.buildings].sort((a, b) => Number((a.metadata as JsonObject)?.display_order ?? 0) - Number((b.metadata as JsonObject)?.display_order ?? 0)).map((row) => {
+    const { accessibleApproach: _removedApproach, ...buildingUi } = uiFrom<Partial<CampusBuilding> & { accessibleApproach?: unknown }>(row.metadata) ?? {};
+    return ({
+    ...buildingUi, id: row.id, name: row.name, code: row.code,
     category: row.category, description: row.description ?? "", x: row.x, y: row.y, width: row.width,
     height: row.height, rotation: row.rotation, visible: row.is_visible, floors: floorsByBuilding.get(row.id) ?? [],
-  })) as CampusBuilding[];
+  });
+  }) as CampusBuilding[];
   const top = <T>(kind: StructureKind) => rows.mapElements.filter((item) => !item.floor_id && (item.metadata as JsonObject | null)?.kind === kind).map((item) => uiFrom<T>(item.metadata)).filter((v): v is T => Boolean(v));
   const hydratedNavNodes = rows.navigationNodes
     .filter((row) => row.is_active !== false)
-    .map((row) => uiFrom<NavigationNode>(row.metadata))
-    .filter((v): v is NavigationNode => Boolean(v));
+    .filter((row) => !removedAccessibleApproachMetadata(row.metadata))
+    .map(navigationNodeFromRow);
   const hydratedNavEdges = rows.navigationEdges
     .filter((row) => row.is_temporarily_closed !== true)
-    .map((row) => uiFrom<NavigationEdge>(row.metadata))
-    .filter((v): v is NavigationEdge => Boolean(v));
+    .map(restoreLegacyAccessibleApproachEdge)
+    .filter((row): row is NavigationEdgeRow => Boolean(row))
+    .map(navigationEdgeFromRow);
   // B5 Phase 1.8: entrance-linked nav nodes are DERIVED geometry — a stale
   // persisted x/y (older save, hand-edited metadata) is re-synced against the
   // linked building entrance on load. IDs + graph relationships are preserved.
@@ -303,11 +460,12 @@ export function hydrateCampusStructure(campus: Campus, rows: CampusStructureRows
     return Boolean(a && b);
   });
   const reconciledGraph = reconcileEntranceTransitions({ ...campus, buildings, navNodes: finalNodes, navEdges: finalEdges });
-  return { ...campus, buildings, markers: top<CampusMarker>("marker"), paths: top<CampusPath>("campus_path"),
+  const withExteriorEmergencyStairs = syncExteriorEmergencyStairGraph({ ...campus, buildings, navNodes: finalNodes, navEdges: reconciledGraph.navEdges ?? [] });
+  return { ...withExteriorEmergencyStairs, markers: top<CampusMarker>("marker"), paths: top<CampusPath>("campus_path"),
     routes: top<CampusRoute>("route"), accessibilityFeatures: top<AccessibilityFeature>("accessibility_feature"),
     assemblyPoints: top<AssemblyPoint>("assembly_point"), decorAssets: top<CampusDecorAsset>("decor"),
     eventOverlays: top<CampusEventOverlay>("event_overlay"),
-    navNodes: finalNodes, navEdges: reconciledGraph.navEdges ?? [] };
+    navNodes: withExteriorEmergencyStairs.navNodes ?? [], navEdges: withExteriorEmergencyStairs.navEdges ?? [], buildings: withExteriorEmergencyStairs.buildings };
 }
 
 async function selectStructure(campusId: string): Promise<CampusStructureRows> {

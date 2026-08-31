@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  alignEntranceAttachment,
   defaultEntrance,
   entranceDisplayName,
   entranceLocalPoint,
@@ -73,6 +74,14 @@ describe("building entrance geometry", () => {
     expect(pointerToEntranceAttachment(b, rightMid)).toEqual({ edge: "right", offset: 0.5 });
   });
 
+  it("snaps entrance placement to the edge center and nearby anchors", () => {
+    const b = building();
+    const aligned = alignEntranceAttachment(b, { x: 161, y: 271 }, [{ x: 160, y: 280 }], 12);
+    expect(aligned.attachment).toMatchObject({ edge: "bottom", offset: 0.5 });
+    expect(aligned.point).toMatchObject({ x: 160, y: 280 });
+    expect(aligned.guides).toEqual([{ type: "v", pos: 160 }]);
+  });
+
   it("creates a building-owned default entrance", () => {
     const b = building({ accessibility: { wheelchairAccessible: true, hasElevator: false, hasRamp: true, accessibleEntrance: true } });
     expect(defaultEntrance(b, "ent1")).toMatchObject({
@@ -82,7 +91,7 @@ describe("building entrance geometry", () => {
       offset: 0.5,
       type: "general",
       isPrimary: true,
-      accessible: false,
+      accessible: true,
     });
     expect(defaultEntrance({ ...b, entrances: [defaultEntrance(b, "ent1")] }, "ent2")).toMatchObject({
       type: "general",
@@ -91,7 +100,7 @@ describe("building entrance geometry", () => {
   });
 
   it("uses friendly entrance labels and type labels", () => {
-    expect(entranceTypeLabel("service")).toBe("Service Entrance");
+    expect(entranceTypeLabel("service")).toBe("Service Access");
     expect(entranceDisplayName({ name: "  North Gate  ", type: "general" })).toBe("North Gate");
     expect(entranceDisplayName({ type: "general" }, 1)).toBe("Entrance 2");
     expect(entranceDisplayName({ type: "emergency_exit" }, 1)).toBe("Emergency Exit");

@@ -21,7 +21,7 @@ const campus = {
     accessibility: { wheelchairAccessible: true, hasElevator: false, hasRamp: true, accessibleEntrance: true },
     floors: [{ id: ids.floor, buildingId: ids.building, number: 1, label: "Ground Floor",
       rooms: [{ id: ids.room, buildingId: ids.building, floorId: ids.floor, name: "ENG 101", type: "classroom",
-        x: 5, y: 6, w: 80, h: 50, accessibility: true, accessNodeId: ids.nodeB }],
+        x: 5, y: 6, w: 80, h: 50, accessibility: true, accessNodeId: ids.nodeB, accessDoorId: "door-1" }],
       paths: [], walls: [], doors: [], windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [] }] }],
   markers: [], paths: [], navNodes: [
     { id: ids.nodeA, name: "Entrance", type: "entrance", x: 1, y: 2, buildingId: ids.building, accessible: true, color: "green" },
@@ -41,6 +41,24 @@ describe("campus structure mapping", () => {
     expect(payload.navigation_edges).toHaveLength(1);
     expect(payload.buildings[0]).toMatchObject({ category: "academic", rotation: 15, is_accessible: true });
     expect(payload.map_elements[0]).toMatchObject({ element_type: "classroom", floor_id: ids.floor, is_accessible: true });
+  });
+
+  it("derives a nonblank persistence name when an optional floor-object label is empty", () => {
+    const withUnnamedDoor = {
+      ...campus,
+      buildings: [{
+        ...campus.buildings[0],
+        floors: [{
+          ...campus.buildings[0].floors[0],
+          doors: [{ id: "door-unnamed", x: 20, y: 20, width: 18, direction: "left", color: "#b45309", label: "   " }],
+        }],
+      }],
+    } as Campus;
+    const payload = serializeCampusStructure(withUnnamedDoor);
+    const door = payload.map_elements.find((row) => row.element_type === "door");
+    expect(door).toMatchObject({ id: "door-unnamed", name: "Door" });
+    expect(String(door?.name).trim()).not.toBe("");
+    expect(payload.map_elements.every((row) => String(row.name ?? "").trim().length > 0)).toBe(true);
   });
 
   it("B5 Phase 3.1: renumbers colliding per-building floor numbers before persisting", () => {
@@ -86,7 +104,7 @@ describe("campus structure mapping", () => {
       navigationNodes: payload.navigation_nodes.map((v) => v as never), navigationEdges: payload.navigation_edges.map((v) => v as never),
     });
     expect(hydrated.buildings[0].color).toBe("#123456");
-    expect(hydrated.buildings[0].floors[0].rooms[0]).toMatchObject({ id: ids.room, floorId: ids.floor, accessibility: true });
+    expect(hydrated.buildings[0].floors[0].rooms[0]).toMatchObject({ id: ids.room, floorId: ids.floor, accessibility: true, accessDoorId: "door-1" });
     expect(hydrated.navEdges?.[0]).toMatchObject({ id: ids.edge, emergencySafe: true });
   });
 
