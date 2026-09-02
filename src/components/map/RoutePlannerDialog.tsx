@@ -50,8 +50,10 @@ export function RoutePlannerDialog({
   const canPlan = bothSet;
 
   return (
+    <>
+    {/* Desktop: floating panel */}
     <div
-      className="rounded-2xl border border-border shadow-xl overflow-y-auto max-h-[72dvh] md:max-h-[85dvh] animate-scale-in"
+      className="hidden md:block rounded-2xl border border-border shadow-xl overflow-y-auto max-h-[85dvh] animate-scale-in"
       style={{ background: "var(--card)", color: "var(--foreground)" }}
     >
       {/* Header */}
@@ -233,5 +235,121 @@ export function RoutePlannerDialog({
         </div>
       </div>
     </div>
+
+    {/* Mobile: bottom sheet — sits above bottom nav */}
+    <div
+      className="md:hidden fixed inset-x-0 z-50 rounded-t-3xl border-t border-border/60 overflow-y-auto"
+      style={{ background: "var(--card)", color: "var(--foreground)", maxHeight: 'calc(100vh - 100px)', bottom: '76px', boxShadow: '0 -8px 32px rgba(0,0,0,0.12)' }}
+    >
+      {/* Drag handle */}
+      <div className="flex items-center justify-center pt-3 pb-2">
+        <div className="w-10 h-1 rounded-full bg-muted-foreground/20" />
+      </div>
+      <div className="px-4 pb-6 space-y-3">
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-primary flex items-center justify-center shadow-lg shadow-primary/25">
+              <Navigation className="h-5 w-5 text-primary-foreground" />
+            </div>
+            <div>
+              <p className="text-sm font-extrabold text-foreground leading-none">Route Planner</p>
+              <p className="text-[11px] text-muted-foreground mt-0.5">Plan your trip around campus</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="w-9 h-9 rounded-full bg-muted/60 flex items-center justify-center active:scale-90 transition-all" aria-label="Close directions">
+            <X className="h-4 w-4 text-muted-foreground" />
+          </button>
+        </div>
+
+        {/* Mode chips */}
+        <div className="flex items-center gap-1.5 rounded-2xl bg-muted/30 p-1">
+          {MODES.map((m) => (
+            <button key={m.key} onClick={() => onModeChange(m.key)}
+              className={cn(
+                "flex flex-1 items-center justify-center gap-1.5 rounded-xl px-2 py-2.5 text-[11px] font-bold transition-all",
+                mode === m.key
+                  ? m.key === "accessible" ? "bg-green-500 text-white shadow-lg shadow-green-500/30"
+                    : m.key === "emergency" ? "bg-destructive text-white shadow-lg shadow-destructive/30"
+                    : "bg-primary text-primary-foreground shadow-lg shadow-primary/30"
+                  : "text-muted-foreground hover:text-foreground hover:bg-white/50 dark:hover:bg-white/5"
+              )}>
+              {m.icon}
+              <span>{m.label}</span>
+            </button>
+          ))}
+        </div>
+
+        {/* Pickers */}
+        {youAreHere && (
+          <div className="flex items-center gap-1.5">
+            <button onClick={() => onUseMyLocationChange(!useMyLocation)}
+              className={cn(
+                "flex flex-1 items-center gap-1.5 px-3 py-2.5 rounded-xl text-[11px] font-bold transition-all",
+                useMyLocation
+                  ? "bg-blue-500/15 text-blue-700 dark:text-blue-400 border border-blue-500/30 shadow-sm"
+                  : "border border-border text-muted-foreground hover:bg-muted"
+              )}>
+              <Crosshair className={cn("h-3.5 w-3.5", useMyLocation ? "animate-pulse" : "")} />
+              <span>You are here</span>
+            </button>
+          </div>
+        )}
+        {useMyLocation && youAreHere ? (
+          <div className="flex items-center gap-2.5 px-3 py-3 rounded-xl border border-blue-500/30 bg-blue-500/8">
+            <span className="w-6 h-6 rounded-full bg-blue-500 text-white flex items-center justify-center text-[10px] font-black">A</span>
+            <div className="min-w-0 flex-1">
+              <p className="text-[11px] font-extrabold text-foreground leading-tight">You are here</p>
+              <p className="text-[9px] text-muted-foreground">Using your current location</p>
+            </div>
+            <button onClick={() => onUseMyLocationChange(false)} className="text-[10px] font-bold text-primary hover:underline">Change</button>
+          </div>
+        ) : (
+          <BuildingPicker badge="A" badgeColor="#16a34a" value={from} onSelect={onFromChange} onClear={() => onFromChange(null)} placeholder="Starting point…" buildings={buildings} />
+        )}
+        {!useMyLocation && (
+          <div className="flex items-center justify-center">
+            <button onClick={() => { const tmp = from; onFromChange(to); onToChange(tmp); }} className="w-9 h-9 rounded-full border border-border bg-card shadow-sm flex items-center justify-center active:scale-90 transition-all" aria-label="Swap start and destination">
+              <ArrowUpDown className="h-3.5 w-3.5 text-muted-foreground" />
+            </button>
+          </div>
+        )}
+        <BuildingPicker badge="B" badgeColor="#dc2626" value={to} onSelect={onToChange} onClear={() => onToChange(null)} placeholder="Destination…" buildings={buildings} />
+
+        {/* Route summary */}
+        {route ? (
+          <div className="p-3.5 rounded-xl bg-primary/8 border border-primary/20">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-[10px] font-extrabold text-primary uppercase tracking-widest flex items-center gap-1">
+                <RouteIcon className="h-3 w-3" /> Route Ready
+              </span>
+              <span className="w-2 h-2 rounded-full bg-accent animate-pulse" />
+            </div>
+            <div className="flex items-end gap-3">
+              <p className="text-xl font-extrabold text-foreground">{formatDistance(route.dist)}</p>
+              <p className="text-sm font-semibold text-muted-foreground pb-0.5">· {formatMinutes(route.mins)}</p>
+            </div>
+          </div>
+        ) : bothSet ? (
+          <RouteErrorState fromCode={from?.code ?? "A"} toCode={to?.code ?? "B"} mode={mode} onSwitchMode={onModeChange} />
+        ) : (
+          <div className="flex items-center gap-2.5 px-3 py-3 rounded-xl bg-muted/40 text-muted-foreground">
+            <MapPin className="h-4 w-4 shrink-0" />
+            <span className="text-[11px] font-semibold">Pick start and destination</span>
+          </div>
+        )}
+
+        {/* Actions — extra bottom padding so nothing is hidden behind the nav */}
+        <div className="flex items-center gap-2.5 pt-1">
+          <button onClick={onClear} className="h-11 px-5 rounded-xl border border-border text-muted-foreground text-xs font-bold hover:bg-muted active:scale-[0.97] transition-all">Clear</button>
+          <button onClick={onFindRoute} disabled={!canPlan}
+            className={cn("flex-1 h-11 rounded-xl text-xs font-bold transition-all",
+              canPlan ? "bg-primary text-primary-foreground shadow-lg shadow-primary/30 active:scale-[0.97]" : "bg-muted text-muted-foreground/75 cursor-not-allowed")}>
+            {route ? "Navigate" : "Find Route"}
+          </button>
+        </div>
+      </div>
+    </div>
+    </>
   );
 }

@@ -304,10 +304,120 @@ export function AdminLoginPage() {
     }
   };
 
-  return (
-    <div className="min-h-screen flex" style={{ fontFamily: "var(--font-body)" }}>
+  // ── Mobile login form (overlays on dark background) ──
+  const mobileForm = (
+    <div className="lg:hidden fixed inset-0 z-0 flex flex-col items-center justify-center px-6" style={{
+      background: "radial-gradient(ellipse 90% 70% at 45% 40%, #0d2470 0%, #071440 55%, #020a1c 100%)",
+    }}>
+      <StarField opacity={0.40}/>
+      <LavaLampBackground/>
+      <div className="absolute inset-0 pointer-events-none animate-grid-pulse" style={{
+        backgroundImage: `linear-gradient(rgba(255,255,255,0.03) 1px,transparent 1px),
+                          linear-gradient(90deg,rgba(255,255,255,0.03) 1px,transparent 1px)`,
+        backgroundSize: "48px 48px",
+      }}/>
+      <div className="absolute inset-0 flex items-center justify-center opacity-30 pointer-events-none">
+        <CampusIllustration/>
+      </div>
+      {/* Back link */}
+      <Link to="/" className="absolute top-4 left-4 z-20 inline-flex items-center gap-1 text-sm text-white/50 hover:text-white transition-colors">
+        <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+        Back
+      </Link>
+      {/* Centered form card */}
+      <div className="relative z-10 w-full max-w-[340px]">
+        <div className="flex flex-col items-center mb-6">
+          <PLVLogo size={52} className="mb-3"/>
+          <h1 className="text-2xl font-extrabold text-white text-center">Welcome Back</h1>
+          <p className="text-sm text-white/50 text-center mt-1">Sign in to your PLV NaviSync account</p>
+        </div>
+        {/* Mobile demo account quick-fill */}
+        {DEMO_ACCOUNTS.length > 0 && (
+          <div className="mb-2">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-[11px] font-bold text-white/40 uppercase tracking-widest">
+                Quick Fill
+              </span>
+              <span className="flex-1 h-px bg-white/10"/>
+            </div>
+            <div className="flex gap-2">
+              {DEMO_ACCOUNTS.map(account => (
+                <button
+                  key={account.id}
+                  type="button"
+                  onClick={() => {
+                    setForm({ email: account.email, password: account.password });
+                    setSelectedDemoId(account.id);
+                    setError("");
+                  }}
+                  className={cn(
+                    "flex-1 flex items-center justify-center gap-2 h-10 rounded-xl border text-sm font-semibold transition-all",
+                    selectedDemoId === account.id
+                      ? "border-white/40 bg-white/15 text-white"
+                      : "border-white/15 bg-white/5 text-white/60 hover:bg-white/10 hover:text-white"
+                  )}
+                >
+                  <account.icon className="h-3.5 w-3.5"/>
+                  <span className="truncate text-xs">{account.id === 'demo-admin' ? 'Admin' : 'Student'}</span>
+                </button>
+              ))}
+            </div>
+            <p className="text-[10px] text-white/30 text-center mt-1.5">
+              Quick fill only — you still press Sign In
+            </p>
+          </div>
+        )}
 
-      {/* ══════════ LEFT — full-bleed campus visual ══════════ */}
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label htmlFor="login-email-m" className="block text-xs font-bold text-white/70 mb-1.5 uppercase tracking-widest">Email</label>
+            <input id="login-email-m" type="email" value={form.email} autoComplete="email"
+              onChange={e => { setForm({...form, email:e.target.value}); if (error) setError(""); }}
+              placeholder="Enter your email" required aria-invalid={!!error}
+              className="w-full h-11 px-4 rounded-xl border border-white/15 bg-white/10 text-white placeholder:text-white/40 focus:outline-none focus:ring-2 focus:ring-white/30 focus:border-white/30 transition-all text-sm backdrop-blur-sm"/>
+          </div>
+          <div>
+            <label htmlFor="login-password-m" className="block text-xs font-bold text-white/70 mb-1.5 uppercase tracking-widest">Password</label>
+            <div className="relative">
+              <input id="login-password-m" type={showPw?"text":"password"} value={form.password} autoComplete="current-password"
+                onChange={e => { setForm({...form, password:e.target.value}); if (error) setError(""); }}
+                placeholder="Enter your password" required aria-invalid={!!error}
+                className="w-full h-11 px-4 pr-11 rounded-xl border border-white/15 bg-white/10 text-white placeholder:text-white/40 focus:outline-none focus:ring-2 focus:ring-white/30 focus:border-white/30 transition-all text-sm backdrop-blur-sm"/>
+              <button type="button" onClick={()=>setShowPw(!showPw)} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-white/50 hover:text-white transition-colors">
+                {showPw?<EyeOff className="h-4 w-4"/>:<Eye className="h-4 w-4"/>}
+              </button>
+            </div>
+          </div>
+          {error && (
+            <motion.div initial={{ opacity: 0, y: -8, height: 0 }} animate={{ opacity: 1, y: 0, height: 'auto' }} transition={{ duration: 0.2 }}
+              role="alert" className="flex items-start gap-2.5 p-3 rounded-xl bg-red-500/15 border border-red-400/30 text-red-300 text-sm">
+              <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+              <p className="flex-1 font-semibold">{error}</p>
+            </motion.div>
+          )}
+          <Button type="submit" variant="primary" size="lg" isLoading={loading} className="w-full h-11">
+            <LogIn className="h-4 w-4"/> Sign In
+          </Button>
+        </form>
+        <div className="mt-3 text-center">
+          <Link to="/auth/forgot-password" className="text-sm font-bold text-white/50 hover:text-white transition-colors">Forgot your password?</Link>
+        </div>
+        <div className="mt-4 text-center">
+          <p className="text-sm text-white/40">
+            New student? <Link to="/register" className="text-white font-bold hover:text-white/80 transition-colors">Create Account</Link>
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="h-screen flex overflow-hidden" style={{ fontFamily: "var(--font-body)" }}>
+
+      {/* Mobile: full background + centered form */}
+      {mobileForm}
+
+      {/* ══════════ LEFT — full-bleed campus visual (desktop only) ══════════ */}
       <div className="hidden lg:flex lg:flex-1 relative overflow-hidden flex-col justify-between p-10 xl:p-14">
         {/* Dark gradient */}
         <div className="absolute inset-0" style={{
@@ -350,8 +460,8 @@ export function AdminLoginPage() {
         </div>
       </div>
 
-      {/* ══════════ RIGHT — login form ══════════ */}
-      <div className="flex-1 lg:max-w-[460px] flex flex-col bg-background">
+      {/* ══════════ RIGHT — login form (desktop only) ══════════ */}
+      <div className="hidden lg:flex flex-1 lg:max-w-[460px] flex-col bg-background">
         {/* Top bar */}
         <div className="flex items-center justify-between px-5 sm:px-8 pt-5 sm:pt-6 pb-2">
           <Link to="/" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors">

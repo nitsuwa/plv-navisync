@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { AlertTriangle, Info, ShieldAlert, X } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { useEmergencyAlert, type EmergencyLevel } from "../../hooks/useEmergencyAlert";
@@ -34,7 +34,15 @@ const STYLES: Record<
  */
 export function EmergencyBanner() {
   const alert = useEmergencyAlert();
-  const [dismissed, setDismissed] = useState(false);
+  const [dismissed, setDismissed] = useState(() => {
+    try { return sessionStorage.getItem("emergency-dismissed") === "1"; } catch { return false; }
+  });
+
+  useEffect(() => {
+    if (dismissed) {
+      try { sessionStorage.setItem("emergency-dismissed", "1"); } catch {}
+    }
+  }, [dismissed]);
 
   const show = alert.active && !dismissed;
   const style = STYLES[alert.level];

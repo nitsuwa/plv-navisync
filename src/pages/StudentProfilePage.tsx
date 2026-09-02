@@ -49,12 +49,7 @@ function SectionHeading({ children }: { children: React.ReactNode }) {
 // ── Data ────────────────────────────────────────────────────────────────────
 // ═════════════════════════════════════════════════════════════════════════════
 
-const RECENT_ACTIVITY = [
-  { icon: MapPin, text: "Viewed ADM Building floor plan", time: "2 hours ago", color: "text-primary" },
-  { icon: Navigation, text: "Got directions to Library", time: "Yesterday", color: "text-green-500" },
-  { icon: Bookmark, text: "Saved MAB Building to favorites", time: "2 days ago", color: "text-accent" },
-  { icon: Flag, text: "Reported broken light in GYM", time: "3 days ago", color: "text-amber-500" },
-];
+const RECENT_ACTIVITY: { icon: typeof MapPin; text: string; time: string; color: string }[] = [];
 
 // ═════════════════════════════════════════════════════════════════════════════
 // ── MAIN COMPONENT ──────────────────────────────────────────────────────────
@@ -231,8 +226,6 @@ export function StudentProfilePage() {
   const STATS = [
     { label: "Saved", value: String(savedCount), icon: Bookmark, color: "text-primary" },
     { label: "Reports", value: String(reportsCount), icon: Flag, color: "text-amber-500" },
-    { label: "Routes", value: "12", icon: Navigation, color: "text-green-500" },
-    { label: "Status", value: "Active", icon: Shield, color: "text-emerald-500" },
   ];
 
   return (
@@ -336,10 +329,10 @@ export function StudentProfilePage() {
                 {/* Academic info chips */}
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 justify-center sm:justify-start text-xs">
                   {[
-                    { label: "Student ID", value: "2024-00123", icon: Award },
-                    { label: "School Year", value: "2024–2025", icon: CalendarDays },
-                    { label: "Program", value: "BS Computer Science", icon: Activity },
-                  ].map(f => (
+                    profile?.student_id ? { label: "Student ID", value: profile.student_id, icon: Award } : null,
+                    profile?.school_year ? { label: "School Year", value: profile.school_year, icon: CalendarDays } : null,
+                    profile?.program ? { label: "Program", value: profile.program, icon: Activity } : null,
+                  ].filter(Boolean).map(f => f && (
                     <div key={f.label} className="flex items-center gap-1.5">
                       <f.icon className="h-3 w-3 text-muted-foreground shrink-0" />
                       <span className="text-muted-foreground font-semibold">{f.label}:</span>
@@ -365,7 +358,7 @@ export function StudentProfilePage() {
               initial={{ opacity: 0, y: 16 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.2, duration: 0.4 }}
-              className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-6"
+              className="grid grid-cols-2 gap-3 mt-6"
             >
               {STATS.map(({ label, value, icon: StatIcon, color }, i) => (
                 <motion.div
@@ -398,9 +391,14 @@ export function StudentProfilePage() {
               <h2 id="activity-heading" className="sr-only">Recent Activity</h2>
 
               <div className="relative">
-                <div className="absolute left-[18px] top-2 bottom-2 w-px bg-gradient-to-b from-primary/30 via-primary/15 to-transparent" aria-hidden="true" />
+                {RECENT_ACTIVITY.length > 0 && (
+                  <div className="absolute left-[18px] top-2 bottom-2 w-px bg-gradient-to-b from-primary/30 via-primary/15 to-transparent" aria-hidden="true" />
+                )}
 
                 <div className="space-y-0.5">
+                  {RECENT_ACTIVITY.length === 0 && (
+                    <p className="text-sm text-muted-foreground text-center py-6">No recent activity yet.</p>
+                  )}
                   {RECENT_ACTIVITY.map((item, i) => (
                     <motion.div
                       key={i}

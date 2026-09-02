@@ -44,12 +44,24 @@ const LEVEL_STYLE = {
 // ── Toggle switch ─────────────────────────────────────────────────────────
 function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) {
   return (
-    <button type="button" onClick={() => onChange(!on)} aria-pressed={on}
+    <button
+      type="button"
+      role="switch"
+      aria-checked={on}
       aria-label={on ? "Disable feature" : "Enable feature"}
-      className={cn("relative w-10 h-6 rounded-full transition-colors shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50",
-        on ? "bg-green-500" : "bg-muted-foreground/25")}>
-      <span className={cn("absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow-sm transition-transform",
-        on ? "translate-x-4" : "translate-x-0")}/>
+      onClick={() => onChange(!on)}
+      className={cn(
+        "relative inline-flex h-[24px] w-[44px] shrink-0 cursor-pointer rounded-full transition-all duration-300 ease-in-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 focus-visible:ring-offset-2",
+        on ? "bg-green-500 shadow-md shadow-green-500/20" : "bg-gray-200 dark:bg-gray-700"
+      )}
+    >
+      <span
+        aria-hidden="true"
+        className={cn(
+          "absolute top-[2px] h-[20px] w-[20px] rounded-full bg-white shadow-md transition-all duration-300 ease-in-out",
+          on ? "left-[22px]" : "left-[2px]"
+        )}
+      />
     </button>
   );
 }
