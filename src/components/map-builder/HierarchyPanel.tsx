@@ -19,6 +19,7 @@ import {
   duplicateFloorInBuilding,
   moveFloorInBuilding,
   renameFloorInBuilding,
+  reconcileStairDirectionsForFloorOrder,
 } from "../../lib/floorManagement";
 import type { Campus, CampusBuilding, CampusSelection, BuildingTypeDescriptor, CampusDecorAsset, DecorAssetType } from "./types";
 
@@ -62,7 +63,11 @@ export function HierarchyPanel({
   const [expandedBuildingCats, setExpandedBuildingCats] = useState<Set<string>>(new Set(["Academic", "Laboratory"]));
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const [collapsedFloorIds, setCollapsedFloorIds] = useState<Set<string>>(() =>
+    new Set(campus.buildings.flatMap((building) => building.floors.slice(1).map((floor) => floor.id)))
+  );
   const dragItemRef = useRef<number | null>(null);
+  const floorDragRef = useRef<{ buildingId: string; floorId: string } | null>(null);
   // ── Floor row `...` menu ──
   const [floorMenu, setFloorMenu] = useState<{ buildingId: string; floorId: string; x: number; y: number } | null>(null);
   useEffect(() => {
@@ -81,18 +86,26 @@ export function HierarchyPanel({
       ? { width: 150, height: 95, groundType: "grass" as const, zOrder: -1000 }
       : { scale: 1 }),
   });
-  const filteredBuildings = searchQuery
-    ? buildings.filter(
-        (b) =>
-          b.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          b.code.toLowerCase().includes(searchQuery.toLowerCase())
-      )
-    : buildings;
+  const normalizedSearch = searchQuery.trim().toLowerCase();
+  const buildingMatchesSearch = (b: CampusBuilding) => !normalizedSearch
+    || b.name.toLowerCase().includes(normalizedSearch)
+    || b.code.toLowerCase().includes(normalizedSearch)
+    || b.floors.some((f) => f.label.toLowerCase().includes(normalizedSearch)
+      || f.rooms.some((room) => room.name.toLowerCase().includes(normalizedSearch)));
+  const floorMatchesSearch = (floor: CampusBuilding["floors"][number]) => !normalizedSearch
+    || floor.label.toLowerCase().includes(normalizedSearch)
+    || floor.rooms.some((room) => room.name.toLowerCase().includes(normalizedSearch));
+  const filteredBuildings = buildings.filter(buildingMatchesSearch);
 
   const updBuildings = (b: CampusBuilding[]) => onUpdate({ buildings: b });
   const replaceBuildingFloors = (buildingId: string, floors: CampusBuilding["floors"]) => {
-    const next = replaceBuildingFloorsAndReconcileTransitions(campus, buildingId, floors);
+    const reconciledDirections = reconcileStairDirectionsForFloorOrder(floors);
+    const next = replaceBuildingFloorsAndReconcileTransitions(campus, buildingId, reconciledDirections.floors);
     onUpdate({ buildings: next.buildings, navEdges: next.navEdges });
+    for (const adjustment of reconciledDirections.adjustments) {
+      const directionLabel = adjustment.to === "both" ? "Both" : adjustment.to === "up" ? "Up" : "Down";
+      toast.info("Stair direction updated", `${adjustment.stairLabel} is now ${directionLabel} on ${adjustment.floorLabel}.`);
+    }
   };
 
   // ── Floor manager helpers ──
@@ -505,6 +518,11 @@ export function HierarchyPanel({
 
         {filteredBuildings.map((b, idx) => (
           <div key={b.id}>
+            {(() => {
+              const searchExpandsBuilding = Boolean(normalizedSearch) && b.floors.some(floorMatchesSearch);
+              const buildingExpanded = b.expanded || searchExpandsBuilding;
+              return (
+              <>
             {/* Drop indicator above item */}
             {dragOverIndex === idx && (
               <div className="h-0.5 bg-primary mx-5 rounded-full my-0.5" />
@@ -557,7 +575,7 @@ export function HierarchyPanel({
               <span className="opacity-0 group-hover:opacity-40 cursor-grab active:cursor-grabbing text-muted-foreground shrink-0" title="Drag to reorder">
                 <GripVertical className="h-3 w-3" />
               </span>
-              {b.expanded ? (
+              {buildingExpanded ? (
                 <ChevronDown className="h-3 w-3 text-muted-foreground shrink-0" />
               ) : (
                 <ChevronRight className="h-3 w-3 text-muted-foreground shrink-0" />
@@ -607,20 +625,61 @@ export function HierarchyPanel({
 
             {/* Expanded floors — draggable rows reorder directly; the `...` button
                 opens the same shared floor actions menu used by the Floor Editor. */}
-            {b.expanded && (
+            {buildingExpanded && (
               <div className="pl-8">
                 {b.floors.map((f, floorIndex) => (
                   <div key={f.id}>
+                    {(() => {
+                      const floorExpanded = !collapsedFloorIds.has(f.id) || (Boolean(normalizedSearch) && floorMatchesSearch(f));
+                      return (
+                      <>
 
                     <div
+                      draggable
                       className="group flex items-center"
+                      onDragStart={(event) => {
+                        floorDragRef.current = { buildingId: b.id, floorId: f.id };
+                        event.dataTransfer.effectAllowed = "move";
+                        event.dataTransfer.setData("text/plain", f.id);
+                      }}
+                      onDragOver={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        event.dataTransfer.dropEffect = "move";
+                      }}
+                      onDrop={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        const drag = floorDragRef.current;
+                        if (drag && drag.buildingId === b.id && drag.floorId !== f.id) {
+                          const source = b.floors.findIndex((floor) => floor.id === drag.floorId);
+                          const target = b.floors.findIndex((floor) => floor.id === f.id);
+                          if (source >= 0 && target >= 0) {
+                            const reordered = [...b.floors];
+                            const [moved] = reordered.splice(source, 1);
+                            reordered.splice(target, 0, moved);
+                            pushHistory();
+                            replaceBuildingFloors(b.id, reordered);
+                            toast.success("Floor Reordered", `"${moved.label}" moved.`);
+                          }
+                        }
+                        floorDragRef.current = null;
+                      }}
+                      onDragEnd={() => { floorDragRef.current = null; }}
                       onContextMenu={(e) => handleFloorContextMenu(e, b.id, f.id)}
                     >
                       {/* No drag handle — floor reordering uses Move Up/Down controls */}
                       <button
-                        onClick={() => {
-                          onOpenFloor(b.id, f.id);
-                        }}
+                        type="button"
+                        aria-label={`${floorExpanded ? "Collapse" : "Expand"} ${f.label}`}
+                        onClick={(e) => { e.stopPropagation(); setCollapsedFloorIds((current) => { const next = new Set(current); if (next.has(f.id)) next.delete(f.id); else next.add(f.id); return next; }); }}
+                        className="w-6 h-6 flex items-center justify-center shrink-0 text-muted-foreground hover:text-foreground"
+                      >
+                        {floorExpanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onOpenFloor(b.id, f.id)}
                         className="flex-1 flex items-center gap-2 px-1 py-1 hover:bg-muted/50 transition-colors text-left min-w-0"
                       >
                         <Layers className="h-3 w-3 text-muted-foreground shrink-0" />
@@ -642,7 +701,7 @@ export function HierarchyPanel({
                       </button>
                     </div>
                     {/* Rooms under this floor */}
-                    {f.rooms.length > 0 && (
+                    {floorExpanded && f.rooms.length > 0 && (
                       <div className="pl-4 space-y-0.5 py-0.5">
                         {f.rooms.map((room) => (
                           <div
@@ -658,11 +717,14 @@ export function HierarchyPanel({
                         ))}
                       </div>
                     )}
-                    {f.rooms.length === 0 && (
+                    {floorExpanded && f.rooms.length === 0 && (
                       <div className="pl-6 py-0.5 text-[9px] text-muted-foreground/50 italic">
                         No rooms yet
                       </div>
                     )}
+                      </>
+                      );
+                    })()}
                   </div>
                 ))}
                 <button
@@ -674,6 +736,9 @@ export function HierarchyPanel({
                 </button>
               </div>
             )}
+              </>
+              );
+            })()}
           </div>
         ))}
 

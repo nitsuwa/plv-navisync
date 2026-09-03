@@ -18,7 +18,9 @@ const OVERLAP_TOLERANCE = 2;
  * within this distance of an existing room's edge, snap it into alignment so
  * adjacent rooms line up cleanly.
  */
-const ROOM_EDGE_SNAP_THRESHOLD = 12;
+// Keep edge assistance close to the cursor.  A wide threshold made every
+// movable Floor object feel magnetically locked to distant room edges.
+const ROOM_EDGE_SNAP_THRESHOLD = 8;
 
 /**
  * Axis-aligned bounding-box test (rooms are axis-aligned in the floor model).
@@ -226,7 +228,10 @@ export function snapRoomToNearbyEdges(
  * is within this distance of an existing room's corresponding edge or center,
  * an alignment guide is shown and the position is snapped.
  */
-const ALIGN_GUIDE_THRESHOLD = 6;
+// Alignment is an aid, not a magnetic lock. Keep activation tighter than the
+// old six-unit window so Rooms, Stairs, and other Floor objects release as the
+// pointer moves away.
+const ALIGN_GUIDE_THRESHOLD = 5;
 
 /**
  * Width/height match threshold in units. When a candidate room's width (or
@@ -243,6 +248,57 @@ export type RoomAlignGuide = {
   x2: number;
   y2: number;
 };
+
+/** A single axis target retained for the duration of one drag gesture. */
+export interface AlignmentAxisSnapLock {
+  /** Absolute displayed position of the snapped object edge/center. */
+  snapPosition: number;
+  /** The guide that corresponds to the locked target. */
+  guide: RoomAlignGuide;
+}
+
+export interface StableAxisSnapResult {
+  position: number;
+  delta: number;
+  lock: AlignmentAxisSnapLock | null;
+  snapped: boolean;
+}
+
+/**
+ * Resolve one axis of universal alignment without feeding the snapped
+ * position back into candidate selection.  A lock remains active while the
+ * raw drag position is close to its fixed target, which prevents two nearly
+ * equal edges/centres from oscillating as the displayed object moves.
+ */
+export function resolveStableAlignmentAxis(
+  rawPosition: number,
+  candidatePosition: number,
+  candidateGuide: RoomAlignGuide | undefined,
+  lock: AlignmentAxisSnapLock | null,
+  activationThreshold = ALIGN_GUIDE_THRESHOLD,
+  releaseThreshold = ALIGN_GUIDE_THRESHOLD + 3,
+): StableAxisSnapResult {
+  if (lock && Math.abs(rawPosition - lock.snapPosition) <= releaseThreshold) {
+    return {
+      position: lock.snapPosition,
+      delta: lock.snapPosition - rawPosition,
+      lock,
+      snapped: true,
+    };
+  }
+
+  if (candidateGuide && Math.abs(candidatePosition - rawPosition) <= activationThreshold) {
+    const nextLock: AlignmentAxisSnapLock = { snapPosition: candidatePosition, guide: candidateGuide };
+    return {
+      position: candidatePosition,
+      delta: candidatePosition - rawPosition,
+      lock: nextLock,
+      snapped: true,
+    };
+  }
+
+  return { position: rawPosition, delta: 0, lock: null, snapped: false };
+}
 
 /**
  * Compute Canva/Figma-style alignment guides for a candidate room relative

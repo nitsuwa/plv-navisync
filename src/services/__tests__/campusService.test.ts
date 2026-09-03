@@ -1,6 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getSupabase } from "../../lib/supabase";
-import { CampusServiceError, createCampus, listCampuses, normalizeCampusCode, userFacingCampusMessage } from "../campusService";
+import {
+  CampusDeletionError,
+  CampusServiceError,
+  cleanupCampusStorage,
+  createCampus,
+  listCampuses,
+  normalizeCampusCode,
+  permanentlyDeleteCampus,
+  userFacingCampusMessage,
+} from "../campusService";
 
 vi.mock("../../lib/supabase", () => ({ getSupabase: vi.fn() }));
 
@@ -95,6 +104,31 @@ describe("userFacingCampusMessage (concise, no DB internals leaked)", () => {
       })
     );
     expect(msg).not.toContain("campuses_code_format_check");
+  });
+
+  it("uses lifecycle-specific messages for permanent-delete failures", () => {
+    expect(userFacingCampusMessage(new CampusServiceError({
+      operation: "permanently delete campus",
+      message: "only archived campuses can be permanently deleted",
+      code: "22023",
+    }))).toBe("Only archived campuses can be permanently deleted.");
+    expect(userFacingCampusMessage(new CampusDeletionError({
+      stage: "storage_remove_failed",
+      operation: "permanently delete campus storage",
+      message: "storage denied",
+    }))).toContain("stored map files");
+    expect(userFacingCampusMessage(new CampusDeletionError({
+      stage: "database_delete_failed",
+      operation: "permanently delete campus",
+      message: "append-only dependency",
+      code: "P0001",
+    }))).toContain("database dependency");
+    expect(userFacingCampusMessage(new CampusDeletionError({
+      stage: "database_delete_failed",
+      operation: "permanently delete campus",
+      message: "protected lifecycle dependency",
+      code: "23514",
+    }))).toContain("lifecycle dependency");
   });
 });
 
@@ -280,5 +314,173 @@ describe("listCampuses (campus preview summary boundary)", () => {
       rotation: 15,
       floors: [],
     });
+  });
+});
+
+describe("permanentlyDeleteCampus (Storage API + authoritative RPC boundary)", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  type SupabaseTestError = { message: string; code?: string; details?: string | null; hint?: string | null };
+  type StorageEntries = Record<string, Array<{ name: string; id?: string | null }>>;
+
+  function makeDeleteClient(options: {
+    status?: string;
+    rpcResult?: { data: unknown; error: null | SupabaseTestError };
+    lists?: Record<string, StorageEntries>;
+    listError?: SupabaseTestError;
+    removeError?: SupabaseTestError;
+  } = {}) {
+    const rpc = vi.fn().mockResolvedValue(options.rpcResult ?? { data: { deleted: true }, error: null });
+    const maybeSingle = vi.fn().mockResolvedValue({
+      data: options.status === undefined ? { status: "archived" } : { status: options.status },
+      error: null,
+    });
+    const eq = vi.fn().mockReturnValue({ maybeSingle });
+    const select = vi.fn().mockReturnValue({ eq });
+    const from = vi.fn((table: string) => {
+      if (table !== "campuses") throw new Error(`unexpected table ${table}`);
+      return { select };
+    });
+    const list = vi.fn();
+    const remove = vi.fn().mockImplementation(async () => ({ data: [], error: options.removeError ?? null }));
+    const storageFrom = vi.fn((bucket: string) => ({
+      list: vi.fn().mockImplementation(async (prefix: string) => {
+        list(bucket, prefix);
+        return { data: options.lists?.[bucket]?.[prefix] ?? [], error: options.listError ?? null };
+      }),
+      remove: vi.fn().mockImplementation(async (paths: string[]) => {
+        remove(paths);
+        return { data: [], error: options.removeError ?? null };
+      }),
+    }));
+    vi.mocked(getSupabase).mockReturnValue({ from, storage: { from: storageFrom }, rpc } as never);
+    return { rpc, from, storageFrom, list, remove };
+  }
+
+  it("calls the single database-owned delete contract after Storage API cleanup", async () => {
+    const client = makeDeleteClient({
+      lists: {
+        "campus-images": { "campus-archived": [{ name: "logo.png", id: "image-1" }] },
+        "floor-plans": {
+          "campus-archived": [{ name: "building-1", id: null }],
+          "campus-archived/building-1": [{ name: "floor-1", id: null }],
+          "campus-archived/building-1/floor-1": [{ name: "plan.png", id: "plan-1" }],
+        },
+      },
+    });
+
+    await permanentlyDeleteCampus("campus-archived");
+
+    expect(client.rpc).toHaveBeenCalledTimes(1);
+    expect(client.rpc).toHaveBeenCalledWith("permanently_delete_campus", {
+      target_campus_id: "campus-archived",
+    });
+    expect(client.remove).toHaveBeenCalledWith(["campus-archived/logo.png"]);
+    expect(client.remove).toHaveBeenCalledWith(["campus-archived/building-1/floor-1/plan.png"]);
+  });
+
+  it("lists and removes nested campus files through the Storage API", async () => {
+    const client = makeDeleteClient({
+      lists: {
+        "campus-images": { "campus-1": [{ name: "a", id: "a" }] },
+        "floor-plans": {
+          "campus-1": [{ name: "building", id: null }],
+          "campus-1/building": [{ name: "floor", id: null }],
+          "campus-1/building/floor": [{ name: "plan.pdf", id: "p" }],
+        },
+      },
+    });
+
+    await cleanupCampusStorage("campus-1");
+
+    expect(client.storageFrom).toHaveBeenCalledWith("campus-images");
+    expect(client.storageFrom).toHaveBeenCalledWith("floor-plans");
+    expect(client.remove).toHaveBeenCalledWith(["campus-1/a"]);
+    expect(client.remove).toHaveBeenCalledWith(["campus-1/building/floor/plan.pdf"]);
+  });
+
+  it("rejects a non-archived campus before touching Storage or the RPC", async () => {
+    const client = makeDeleteClient({ status: "draft" });
+
+    await expect(permanentlyDeleteCampus("campus-active")).rejects.toThrow(/Only archived campuses/);
+    await expect(permanentlyDeleteCampus("campus-active")).rejects.toMatchObject({ stage: "invalid_lifecycle_state" });
+    expect(client.list).not.toHaveBeenCalled();
+    expect(client.remove).not.toHaveBeenCalled();
+    expect(client.rpc).not.toHaveBeenCalled();
+  });
+
+  it("does not call the RPC when Storage listing fails", async () => {
+    const client = makeDeleteClient({ listError: { message: "storage unavailable" } });
+
+    await expect(permanentlyDeleteCampus("campus-archived")).rejects.toMatchObject({
+      operation: "permanently delete campus storage (campus-images)",
+      stage: "storage_list_failed",
+    });
+    expect(client.rpc).not.toHaveBeenCalled();
+    expect(userFacingCampusMessage(new CampusServiceError({
+      operation: "permanently delete campus storage (campus-images)",
+      message: "storage unavailable",
+    }))).toBe("Campus files could not be removed. The campus was not deleted.");
+  });
+
+  it("does not call the RPC when Storage removal fails", async () => {
+    const client = makeDeleteClient({
+      lists: { "campus-images": { "campus-archived": [{ name: "logo.png", id: "image-1" }] } },
+      removeError: { message: "remove denied", code: "storage_error" },
+    });
+
+    await expect(permanentlyDeleteCampus("campus-archived")).rejects.toMatchObject({
+      operation: "permanently delete campus storage (campus-images)",
+      stage: "storage_remove_failed",
+    });
+    expect(client.rpc).not.toHaveBeenCalled();
+  });
+
+  it("surfaces an RPC failure after Storage cleanup without claiming success", async () => {
+    const client = makeDeleteClient({
+      lists: { "campus-images": { "campus-archived": [{ name: "logo.png", id: "image-1" }] } },
+      rpcResult: { data: null, error: { message: "database unavailable", code: "XX000" } },
+    });
+
+    await expect(permanentlyDeleteCampus("campus-archived")).rejects.toMatchObject({
+      operation: "permanently delete campus",
+      dbCode: "XX000",
+      stage: "database_delete_failed",
+    });
+    expect(client.remove).toHaveBeenCalledWith(["campus-archived/logo.png"]);
+    expect(client.rpc).toHaveBeenCalledTimes(1);
+  });
+
+  it("calls the RPC when no campus files exist", async () => {
+    const client = makeDeleteClient();
+
+    await permanentlyDeleteCampus("campus-archived");
+
+    expect(client.rpc).toHaveBeenCalledTimes(1);
+    expect(client.rpc).toHaveBeenCalledWith("permanently_delete_campus", {
+      target_campus_id: "campus-archived",
+    });
+  });
+
+  it("surfaces the real RPC failure and does not report success", async () => {
+    const client = makeDeleteClient({ status: "archived", rpcResult: {
+      data: null,
+      error: { message: "only archived campuses can be permanently deleted", code: "22023", details: null, hint: null },
+    } });
+    const diagnostics = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await expect(permanentlyDeleteCampus("campus-active")).rejects.toMatchObject({
+      operation: "permanently delete campus",
+      dbCode: "22023",
+    });
+
+    expect(client.rpc).toHaveBeenCalledTimes(1);
+    diagnostics.mockRestore();
+  });
+
+  it("rejects an RPC response without the database confirmation", async () => {
+    makeDeleteClient({ rpcResult: { data: null, error: null } });
+
+    await expect(permanentlyDeleteCampus("campus-archived")).rejects.toThrow(/authoritative confirmation/);
   });
 });

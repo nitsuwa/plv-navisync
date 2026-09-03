@@ -1,6 +1,6 @@
 import type {
   Campus, NavigationNode, NavigationEdge, FloorPlan, FloorRoom, FloorDoor,
-  FloorStairs, FloorRamp, FloorElevatorItem, FloorWall, NavigationNodeType,
+  FloorStairs, FloorRamp, FloorElevatorItem, FloorWall, NavigationNodeType, StairDirection,
 } from "../components/map-builder/types";
 import { createNavNode, createNavEdge, findNavNodeAtPoint } from "./navigationGraph";
 import { genId } from "../components/map-builder/constants";
@@ -58,7 +58,13 @@ export interface CreateIndoorNodeInput {
   stairId?: string;
   elevatorId?: string;
   rampId?: string;
+  /** Shared circulation identity copied onto transition-capable nodes. */
+  transitionSharedId?: string;
   accessible?: boolean;
+  emergencySafe?: boolean;
+  emergencyStair?: boolean;
+  exteriorEmergencyStairId?: string;
+  pathJunction?: boolean;
 }
 
 /** Canonical indoor node creation — every authoring surface creates through here. */
@@ -83,6 +89,11 @@ export function createIndoorNavNode(input: CreateIndoorNodeInput): NavigationNod
     ...(input.stairId ? { stairId: input.stairId } : {}),
     ...(input.elevatorId ? { elevatorId: input.elevatorId } : {}),
     ...(input.rampId ? { rampId: input.rampId } : {}),
+    ...(input.transitionSharedId ? { transitionSharedId: input.transitionSharedId } : {}),
+    ...(input.emergencySafe !== undefined ? { emergencySafe: input.emergencySafe } : {}),
+    ...(input.emergencyStair ? { emergencyStair: true } : {}),
+    ...(input.exteriorEmergencyStairId ? { exteriorEmergencyStairId: input.exteriorEmergencyStairId } : {}),
+    ...(input.pathJunction ? { pathJunction: true } : {}),
   };
 }
 
@@ -94,6 +105,60 @@ export function linkedObjectRef(node: NavigationNode): { kind: string; id: strin
   if (node.elevatorId) return { kind: "elevator", id: node.elevatorId };
   if (node.rampId) return { kind: "ramp", id: node.rampId };
   return null;
+}
+
+/**
+ * Resolve a Stair's physical floor-entry anchor in its local frame, then carry
+ * it through the object's rotation. The access point is intentionally neutral:
+ * it is centred on the floor-facing edge, independent of Entry Side and
+ * Direction. A Stair occurrence has one canonical node, so its location must
+ * remain stable while traversal semantics and the artwork change.
+ */
+export function stairEntryPosition(
+  stair: Pick<FloorStairs, "x" | "y" | "width" | "height" | "rotation" | "flip">
+    & { direction?: StairDirection }
+): { x: number; y: number } {
+  const cx = stair.x + stair.width / 2;
+  const cy = stair.y + stair.height / 2;
+  // Keep the anchor aligned with the actual flight center rather than the
+  // footprint center. This is the physical point where a local Walking Path
+  // reaches the Stair. `flip` is retained for persistence compatibility but is
+  // now intentionally only a horizontal entry-side mirror (Left ↔ Right).
+  // Keep one neutral access point at the centre of the floor-facing edge,
+  // rather than inside a flight. `flip` and `direction` remain presentation
+  // and routing metadata; neither may move this canonical semantic node.
+  const localX = cx;
+  const localY = stair.y + stair.height;
+  const rotation = ((stair.rotation ?? 0) * Math.PI) / 180;
+  const dx = localX - cx;
+  const dy = localY - cy;
+  return {
+    x: Math.round(cx + dx * Math.cos(rotation) - dy * Math.sin(rotation)),
+    y: Math.round(cy + dx * Math.sin(rotation) + dy * Math.cos(rotation)),
+  };
+}
+
+/**
+ * Resolve the stable local access anchor for an Elevator occurrence.  Like a
+ * Stair, an Elevator has one canonical navigation node; keep it at the centre
+ * of the floor-facing edge so the local Walking Network reaches the entrance
+ * rather than the middle of the shaft.  Rotation is presentation metadata and
+ * does not change node identity.
+ */
+export function elevatorEntryPosition(
+  elevator: Pick<FloorElevatorItem, "x" | "y" | "width" | "height" | "rotation">
+): { x: number; y: number } {
+  const cx = elevator.x + elevator.width / 2;
+  const cy = elevator.y + elevator.height / 2;
+  const localX = cx;
+  const localY = elevator.y + elevator.height;
+  const rotation = ((elevator.rotation ?? 0) * Math.PI) / 180;
+  const dx = localX - cx;
+  const dy = localY - cy;
+  return {
+    x: Math.round(cx + dx * Math.cos(rotation) - dy * Math.sin(rotation)),
+    y: Math.round(cy + dx * Math.sin(rotation) + dy * Math.cos(rotation)),
+  };
 }
 
 /** Resolve the stable world position for a linked node from its physical owner. */
@@ -120,7 +185,7 @@ export function resolveIndoorLinkedPosition(
   if (ref.kind === "stair") {
     const s = (floor.stairs ?? []).find((x) => x.id === ref.id);
     if (!s) return null;
-    return { x: Math.round(s.x + s.width / 2), y: Math.round(s.y + s.height / 2) };
+    return stairEntryPosition(s);
   }
   if (ref.kind === "ramp") {
     const r = (floor.ramps ?? []).find((x) => x.id === ref.id);
@@ -133,7 +198,7 @@ export function resolveIndoorLinkedPosition(
   }
   const el = (floor.elevators ?? []).find((x) => x.id === ref.id);
   if (!el) return null;
-  return { x: Math.round(el.x + el.width / 2), y: Math.round(el.y + el.height / 2) };
+  return elevatorEntryPosition(el);
 }
 
 /**
@@ -146,10 +211,32 @@ export function syncIndoorLinkedNodePositions(
   floor: Pick<FloorPlan, "rooms" | "doors" | "stairs" | "ramps" | "elevators">
 ): NavigationNode[] {
   return (nodes ?? []).map((n) => {
-    const pos = linkedObjectRef(n) ? resolveIndoorLinkedPosition(n, floor) : null;
+    const ref = linkedObjectRef(n);
+    // Building-owned Exterior Emergency Stairs are positioned from their
+    // perimeter attachment by the exterior-stair synchronizer.  Do not move
+    // their canonical node to the ordinary indoor stair entry anchor when a
+    // floor edit commits; doing so would detach the landing from the building
+    // side until the next full hydration.
+    if (ref?.kind === "stair") {
+      const stair = (floor.stairs ?? []).find((item) => item.id === ref.id);
+      if (stair?.exteriorEmergencyStairId) {
+        const transitionSharedId = stair.sharedId;
+        if (transitionSharedId === n.transitionSharedId) return n;
+        return transitionSharedId ? { ...n, transitionSharedId } : n;
+      }
+    }
+    const pos = ref ? resolveIndoorLinkedPosition(n, floor) : null;
     if (!pos) return n;
-    if (pos.x === n.x && pos.y === n.y) return n;
-    return { ...n, x: pos.x, y: pos.y };
+    let transitionSharedId: string | undefined;
+    if (ref?.kind === "stair") transitionSharedId = (floor.stairs ?? []).find((item) => item.id === ref.id)?.sharedId;
+    if (ref?.kind === "elevator") transitionSharedId = (floor.elevators ?? []).find((item) => item.id === ref.id)?.sharedId;
+    const samePosition = pos.x === n.x && pos.y === n.y;
+    const sameTransitionIdentity = transitionSharedId === n.transitionSharedId;
+    if (samePosition && sameTransitionIdentity) return n;
+    const next = { ...n, x: pos.x, y: pos.y };
+    if (transitionSharedId) next.transitionSharedId = transitionSharedId;
+    else delete next.transitionSharedId;
+    return next;
   });
 }
 
@@ -214,15 +301,20 @@ export function findCirculationAtPoint(
   ramps: FloorRamp[] | undefined,
   point: { x: number; y: number }
 ): { kind: "stairs" | "elevator" | "ramp"; id: string } | null {
-  const items: { kind: "stairs" | "elevator" | "ramp"; id: string; cx: number; cy: number }[] = [
-    ...(stairs ?? []).map((s) => ({ kind: "stairs" as const, id: s.id, cx: s.x + s.width / 2, cy: s.y + s.height / 2 })),
-    ...(elevators ?? []).map((el) => ({ kind: "elevator" as const, id: el.id, cx: el.x + el.width / 2, cy: el.y + el.height / 2 })),
+  const items: { kind: "stairs" | "elevator" | "ramp"; id: string; cx: number; cy: number; entry?: { x: number; y: number } }[] = [
+    ...(stairs ?? []).map((s) => ({ kind: "stairs" as const, id: s.id, cx: s.x + s.width / 2, cy: s.y + s.height / 2, entry: stairEntryPosition(s) })),
+    ...(elevators ?? []).map((el) => ({ kind: "elevator" as const, id: el.id, cx: el.x + el.width / 2, cy: el.y + el.height / 2, entry: elevatorEntryPosition(el) })),
     ...(ramps ?? []).map((r) => ({ kind: "ramp" as const, id: r.id, cx: r.x + r.width / 2, cy: r.y + r.height / 2 })),
   ];
   let best: typeof items[number] | null = null;
   let bestD = 20;
   for (const item of items) {
-    const dist = Math.hypot(point.x - item.cx, point.y - item.cy);
+    const centerDist = Math.hypot(point.x - item.cx, point.y - item.cy);
+    // A linked Stair is authored from its floor-facing entry edge. Keep the
+    // existing center hit target, but also recognize that semantic entry point
+    // so larger/resized stairs still resolve to the same canonical owner.
+    const entryDist = item.entry ? Math.hypot(point.x - item.entry.x, point.y - item.entry.y) : Number.POSITIVE_INFINITY;
+    const dist = Math.min(centerDist, entryDist);
     if (dist <= bestD) { best = item; bestD = dist; }
   }
   return best ? { kind: best.kind, id: best.id } : null;
@@ -277,6 +369,142 @@ export function roomLinkedCuePosition(room: FloorRoom): { x: number; y: number }
     x: Math.round(cx + Math.sin(rad) * d),
     y: Math.round(cy - Math.cos(rad) * d),
   };
+}
+
+/**
+ * Stable editor-facing name for a Room.  Custom names remain optional in the
+ * editor, but validation and navigation UI must never fall back to an internal
+ * UUID (or an empty string).  The ordinal is floor-local and display-only.
+ */
+export function roomDisplayName(room: Pick<FloorRoom, "name">, ordinal?: number): string {
+  const name = typeof room.name === "string" ? room.name.trim() : "";
+  if (name) return name;
+  return ordinal !== undefined ? `Room ${ordinal + 1}` : "Room";
+}
+
+/**
+ * A Room↔Door relationship is physical authoring metadata, not coordinate
+ * proximity.  Prefer the existing wall endpoint→Room anchors; for legacy
+ * floors without endpoint anchors, accept only a Door whose current wall
+ * position lies on the Room boundary (with a small editing tolerance).
+ */
+export function roomDoorIsValid(
+  room: FloorRoom | undefined,
+  door: FloorDoor | undefined,
+  walls: FloorWall[] | undefined,
+): boolean {
+  if (!room || !door || door.visible === false || !door.wallId) return false;
+  const wall = (walls ?? []).find((candidate) => candidate.id === door.wallId);
+  if (!wall || wall.visible === false) return false;
+  // Explicit endpoint anchors are authoritative for the low-level relationship
+  // helper. Shared-boundary handling belongs to the higher-level eligibility
+  // helper, which has the complete Room set available to prove the boundary is
+  // genuinely shared rather than merely nearby.
+  if (wall.startAnchor || wall.endAnchor) return wall.startAnchor?.roomId === room.id || wall.endAnchor?.roomId === room.id;
+
+  return roomDoorBoundaryContains(room, door);
+}
+
+function roomDoorBoundaryContains(room: FloorRoom, door: FloorDoor): boolean {
+
+  // Legacy fallback: compare the Door's world position with the rotated Room
+  // boundary.  This remains deliberately local; a Door elsewhere on the floor
+  // cannot be linked merely because it shares a floor/building.
+  const cx = room.x + room.w / 2;
+  const cy = room.y + room.h / 2;
+  const angle = -((room.rotation ?? 0) * Math.PI) / 180;
+  const dx = door.x - cx;
+  const dy = door.y - cy;
+  const localX = dx * Math.cos(angle) - dy * Math.sin(angle);
+  const localY = dx * Math.sin(angle) + dy * Math.cos(angle);
+  const halfW = room.w / 2;
+  const halfH = room.h / 2;
+  const tolerance = Math.max(8, Math.min(door.width / 2 + 6, 18));
+  const onVerticalEdge = Math.abs(Math.abs(localX) - halfW) <= tolerance && Math.abs(localY) <= halfH + tolerance;
+  const onHorizontalEdge = Math.abs(Math.abs(localY) - halfH) <= tolerance && Math.abs(localX) <= halfW + tolerance;
+  return onVerticalEdge || onHorizontalEdge;
+}
+
+/**
+ * Single source of truth for Room → Door authoring and readiness eligibility.
+ * Physical association, same-floor navigation identity, visibility, and
+ * optional duplicate exclusion all live here so target cues, click commits,
+ * validation, and semantic-edge reconciliation cannot drift apart.
+ */
+export function isDoorEligibleForRoom(
+  room: FloorRoom | undefined,
+  door: FloorDoor | undefined,
+  walls: FloorWall[] | undefined,
+  nodes: NavigationNode[] | undefined,
+  options?: { excludeDoorIds?: Iterable<string>; rooms?: FloorRoom[] },
+): boolean {
+  if (!room || !door) return false;
+  const wall = (walls ?? []).find((candidate) => candidate.id === door.wallId);
+  const physicallyValid = roomDoorIsValid(room, door, walls) || Boolean(
+    wall && (wall.startAnchor || wall.endAnchor)
+      && (options?.rooms ?? []).some((candidate) => candidate.id !== room.id && roomDoorIsValid(candidate, door, walls))
+      && roomDoorBoundaryContains(room, door),
+  );
+  if (!physicallyValid) return false;
+  const excluded = options?.excludeDoorIds ? new Set(options.excludeDoorIds) : undefined;
+  if (excluded?.has(door.id)) return false;
+  const doorNode = (nodes ?? []).find((node) => node.doorId === door.id);
+  if (!doorNode) return false;
+  if (doorNode.buildingId !== room.buildingId || doorNode.floorId !== room.floorId) return false;
+  return true;
+}
+
+/** Return the deduplicated Room access Doors while preserving legacy primary order. */
+export function roomAccessDoorIds(room: Pick<FloorRoom, "accessDoorId" | "accessDoorIds"> | undefined): string[] {
+  if (!room) return [];
+  return Array.from(new Set([
+    ...(room.accessDoorId ? [room.accessDoorId] : []),
+    ...(Array.isArray(room.accessDoorIds) ? room.accessDoorIds : []),
+  ].filter((id): id is string => typeof id === "string" && id.trim().length > 0)));
+}
+
+/** Stable type for the semantic Room↔Door bridge edge. */
+export const ROOM_DOOR_EDGE_TYPE = "room_door_transition";
+
+/**
+ * Reconcile semantic Room↔Door bridge edges from the persisted physical
+ * relationship.  These edges are bidirectional graph links used to resolve a
+ * Room destination through its Door; they are not ordinary indoor walking
+ * connections and are therefore excluded from Door readiness validation.
+ */
+export function reconcileRoomDoorEdges(
+  nodes: NavigationNode[] | undefined,
+  edges: NavigationEdge[] | undefined,
+  rooms: FloorRoom[] | undefined,
+  doors: FloorDoor[] | undefined,
+  walls: FloorWall[] | undefined,
+): NavigationEdge[] {
+  const safeNodes = nodes ?? [];
+  const retained = (edges ?? []).filter((edge) => edge.type !== ROOM_DOOR_EDGE_TYPE);
+  const next = [...retained];
+  for (const room of rooms ?? []) {
+    const roomNode = safeNodes.find((node) => node.roomId === room.id);
+    if (!roomNode) continue;
+    for (const doorId of roomAccessDoorIds(room)) {
+      const door = (doors ?? []).find((candidate) => candidate.id === doorId);
+      if (!isDoorEligibleForRoom(room, door, walls, safeNodes, { rooms: rooms ?? [] })) continue;
+      const doorNode = safeNodes.find((node) => node.doorId === doorId);
+      if (!doorNode || roomNode.id === doorNode.id) continue;
+      const exists = next.some((edge) =>
+        (edge.startNodeId === roomNode.id && edge.endNodeId === doorNode.id)
+        || (edge.startNodeId === doorNode.id && edge.endNodeId === roomNode.id),
+      );
+      if (exists) continue;
+      next.push(createNavEdge({
+        id: genId("ne"),
+        startNodeId: roomNode.id,
+        endNodeId: doorNode.id,
+        nodes: safeNodes,
+        type: ROOM_DOOR_EDGE_TYPE,
+      }));
+    }
+  }
+  return next;
 }
 
 /**
@@ -611,11 +839,15 @@ export function edgePolylineCrossesWallWithoutDoor(
  * Returns false for a straight edge too when its direct line crosses a wall.
  */
 export function navEdgeIsBlocked(
-  edge: Pick<NavigationEdge, "startNodeId" | "endNodeId" | "bendPoints">,
+  edge: Pick<NavigationEdge, "startNodeId" | "endNodeId" | "bendPoints"> & { type?: string },
   nodes: Pick<NavigationNode, "id" | "x" | "y">[],
   walls: FloorWall[] | undefined,
   doors: FloorDoor[] | undefined
 ): boolean {
+  // Room↔Door is a semantic destination/access relationship, not a physical
+  // Walking Path.  It must remain in the canonical graph but is not validated
+  // as a traversable floor segment.
+  if (edge.type === ROOM_DOOR_EDGE_TYPE) return false;
   const pts = edgePolylinePoints(edge, nodes);
   if (!pts || pts.length < 2) return false;
   return edgePolylineCrossesWallWithoutDoor(pts, walls, doors) !== null;
@@ -670,12 +902,13 @@ export function edgeCrossesBlockingFurniture(
 /** B5 Phase 6.10: extended edge-blocked check — wall crossing OR blocking
  *  furniture intersection. */
 export function navEdgeIsBlockedExtended(
-  edge: Pick<NavigationEdge, "startNodeId" | "endNodeId" | "bendPoints">,
+  edge: Pick<NavigationEdge, "startNodeId" | "endNodeId" | "bendPoints"> & { type?: string },
   nodes: Pick<NavigationNode, "id" | "x" | "y">[],
   walls: FloorWall[] | undefined,
   doors: FloorDoor[] | undefined,
   furniture: Array<{ x: number; y: number; width: number; height: number; type: string; rotation?: number; visible?: boolean }> | undefined
 ): boolean {
+  if (edge.type === ROOM_DOOR_EDGE_TYPE) return false;
   const pts = edgePolylinePoints(edge, nodes);
   if (!pts || pts.length < 2) return false;
   if (edgePolylineCrossesWallWithoutDoor(pts, walls, doors) !== null) return true;
@@ -804,6 +1037,106 @@ export function normalizeBendPoints(bends: NavPoint[], eps = 2): NavPoint[] {
   return out;
 }
 
+/** Canonicalize authored edge geometry and remove duplicate semantic edges.
+ *
+ * `splitNodeIds` is intentionally explicit: merely placing a node on top of
+ * an existing segment must not silently delete a valid edge.  Only an
+ * authoring operation that actually split an edge may retire the old direct
+ * segment.
+ */
+export function normalizeNavigationEdges(
+  edges: NavigationEdge[],
+  nodes: NavigationNode[],
+  eps = 2,
+  options?: { splitNodeIds?: Set<string> },
+): NavigationEdge[] {
+  const nodeMap = new Map(nodes.map((node) => [node.id, node]));
+  const seen = new Set<string>();
+  const result: NavigationEdge[] = [];
+  for (const edge of edges) {
+    const a = nodeMap.get(edge.startNodeId);
+    const b = nodeMap.get(edge.endNodeId);
+    if (!a || !b) continue;
+    // Only ordinary same-floor authored Walking Paths participate in this
+    // duplicate/split normalization. Semantic bridges, floor transitions,
+    // and pathway-generated edges retain their independent provenance.
+    const manualPath = (edge.type === "hallway" || edge.type === "walkway")
+      && !edge.generatedFromPathIds
+      && ((!a.floorId && !b.floorId) || (!!a.floorId && !!b.floorId && a.floorId === b.floorId));
+    // A same-endpoint pair is only an accidental duplicate when its authored
+    // routing semantics and geometry also match.  Keep legitimate parallel
+    // paths that differ in direction, accessibility/emergency availability,
+    // closure, width, bends, or explicit junction provenance.  For
+    // bidirectional edges, canonicalize the bend orientation alongside the
+    // endpoint order so the same path authored in reverse is still recognized.
+    const key = manualPath
+      ? (() => {
+        const bidirectional = edge.bidirectional !== false;
+        const ordered = bidirectional
+          ? [edge.startNodeId, edge.endNodeId].sort()
+          : [edge.startNodeId, edge.endNodeId];
+        const reverse = bidirectional && ordered[0] !== edge.startNodeId;
+        const bends = (edge.bendPoints ?? []).map((point) => [
+          Math.round(point.x * 1000) / 1000,
+          Math.round(point.y * 1000) / 1000,
+        ]);
+        if (reverse) bends.reverse();
+        const junctionIds = [...(edge.pathJunctionIds ?? [])].sort();
+        const semanticSignature = [
+          // Keep all routing flags in the identity key.  Hallway and walkway
+          // are both ordinary manual Walking Paths, so their legacy type
+          // spelling is intentionally not treated as a separate route.
+          // Undefined legacy values use the same defaults as newly-created
+          // edges, so an old `undefined`/new `true` pair is still recognized
+          // as the same edge, while meaningful variants remain parallel.
+          bidirectional ? "bi" : "directed",
+          edge.accessible ?? true,
+          edge.emergencySafe ?? true,
+          edge.closed ?? false,
+          edge.width ?? 4,
+          edge.inaccessibleReason ?? null,
+          edge.emergencyReason ?? null,
+          edge.pathJunctionId ?? null,
+          edge.pathJunctionParent ?? false,
+          junctionIds,
+          bends,
+        ];
+        return `manual|${ordered.join("::")}|${JSON.stringify(semanticSignature)}`;
+      })()
+      : null;
+    if (key && seen.has(key)) continue;
+    if (key) seen.add(key);
+    // A floor transition is a logical Stair/Elevator transfer, not a
+    // same-floor polyline.  Its distance is intentionally authored by the
+    // transition reconciler (and must not become the Euclidean distance between
+    // unrelated floor coordinate systems during normalization).
+    if (edge.type === CROSS_FLOOR_EDGE_TYPE) {
+      result.push({ ...edge, bendPoints: undefined });
+      continue;
+    }
+    const bends = normalizeBendPoints((edge.bendPoints ?? []).filter((point) =>
+      Math.hypot(point.x - a.x, point.y - a.y) > eps
+      && Math.hypot(point.x - b.x, point.y - b.y) > eps), eps);
+    const points = [{ x: a.x, y: a.y }, ...bends, { x: b.x, y: b.y }];
+    // A split operation must not leave the old direct edge routable when a
+    // newly inserted node lies exactly on its authored geometry.
+    const splitNodeIds = options?.splitNodeIds;
+    const hasInsertedNodeOnPath = manualPath && !!splitNodeIds && Array.from(nodeMap.entries())
+      .some(([nodeId, node]) => nodeId !== edge.startNodeId && nodeId !== edge.endNodeId
+        && splitNodeIds.has(nodeId)
+        && node.buildingId === a.buildingId && node.floorId === a.floorId
+        && points.slice(0, -1).some((start, index) => {
+          const end = points[index + 1];
+          const cross = (node.x - start.x) * (end.y - start.y) - (node.y - start.y) * (end.x - start.x);
+          const dot = (node.x - start.x) * (node.x - end.x) + (node.y - start.y) * (node.y - end.y);
+          return Math.abs(cross) <= eps && dot <= eps * eps;
+        }));
+    if (hasInsertedNodeOnPath) continue;
+    result.push({ ...edge, bendPoints: bends, distance: navEdgePolylineDistance(points) });
+  }
+  return result;
+}
+
 /**
  * B5 Phase 2.8: translate ONE segment of an orthogonal polyline perpendicular
  * to itself, computed from the IMMUTABLE drag-start snapshot (origPts /
@@ -898,13 +1231,22 @@ export function navAlignSnap(
         return aConn - bConn;
       })
     : others;
-  let bestX: { d: number; pos: number } | null = null;
-  let bestY: { d: number; pos: number } | null = null;
+  let bestX: { d: number; pos: number; connected: boolean } | null = null;
+  let bestY: { d: number; pos: number; connected: boolean } | null = null;
   for (const o of sorted) {
+    const isConnected = Boolean(o.id && connectedIds?.has(o.id));
     const dx = Math.abs(o.x - target.x);
-    if (dx <= threshold && (!bestX || dx < bestX.d)) bestX = { d: dx, pos: o.x };
+    if (dx <= threshold && (!bestX
+      || (isConnected && !bestX.connected)
+      || (isConnected === bestX.connected && dx < bestX.d))) {
+      bestX = { d: dx, pos: o.x, connected: isConnected };
+    }
     const dy = Math.abs(o.y - target.y);
-    if (dy <= threshold && (!bestY || dy < bestY.d)) bestY = { d: dy, pos: o.y };
+    if (dy <= threshold && (!bestY
+      || (isConnected && !bestY.connected)
+      || (isConnected === bestY.connected && dy < bestY.d))) {
+      bestY = { d: dy, pos: o.y, connected: isConnected };
+    }
   }
   const guides: NavAlignGuide[] = [];
   let x = target.x;
@@ -1060,6 +1402,8 @@ export interface CrossFloorOwnerInfo {
   floorOrder: number;
   floorNumber: number;
   floorLabel: string;
+  /** Stair direction as authored on this floor. Elevators do not use it. */
+  direction?: StairDirection;
   /** Elevator served floors (floor NUMBERS) — undefined when unspecified. */
   servedFloors?: number[];
 }
@@ -1085,7 +1429,11 @@ export function findCrossFloorOwnerInfo(
   if (node.stairId) {
     const owner = (floor.stairs ?? []).find((s) => s.id === node.stairId);
     if (!owner?.sharedId) return null;
-    return { kind: "stair", ownerId: node.stairId, sharedId: owner.sharedId, floorId: floor.id, floorOrder, floorNumber: floor.number ?? 0, floorLabel: floor.label };
+    return {
+      kind: "stair", ownerId: node.stairId, sharedId: owner.sharedId,
+      floorId: floor.id, floorOrder, floorNumber: floor.number ?? 0,
+      floorLabel: floor.label, direction: owner.direction,
+    };
   }
   if (node.elevatorId) {
     const owner = (floor.elevators ?? []).find((e) => e.id === node.elevatorId);
@@ -1138,10 +1486,17 @@ export function reconcileCrossFloorTransitions(
   }
   // 2) Desired pairs: adjacent canonical floors/stops only; elevators filtered
   // to served floors.
-  const desired = new Map<string, { a: string; b: string; accessible: boolean }>();
+  const desired = new Map<string, { a: string; b: string; accessible: boolean; bidirectional: boolean; emergencyStair: boolean; emergencySafe: boolean }>();
   for (const group of groups.values()) {
     if (group.length < 2) continue;
     const kind = group[0].info.kind;
+    const exteriorEmergencyGroup = kind === "stair"
+      && group.some((entry) => !!entry.node.exteriorEmergencyStairId);
+    // A Stair identity may have at most one occurrence on a Floor.  Legacy
+    // label/count-based IDs could put two same-floor Stairs in one group; do
+    // not let the sorted list pair one of them with the next Floor by accident.
+    // The authoring UI can then surface the conflict for an explicit repair.
+    if (kind === "stair" && new Set(group.map((entry) => entry.info.floorId)).size !== group.length) continue;
     // Elevator served floors: as soon as ANY member of the chain declares a
     // served-floor list, the list set is authoritative — a node whose floor is
     // in NO member's served list never participates (no invented stops), while
@@ -1158,9 +1513,49 @@ export function reconcileCrossFloorTransitions(
       const a = sorted[i];
       const b = sorted[i + 1];
       if (a.info.floorId === b.info.floorId) continue; // same floor — not a transition
-      if (kind === "stair" && Math.abs(a.info.floorOrder - b.info.floorOrder) !== 1) continue;
+      // Normal indoor stairs remain adjacent-floor only. A building-attached
+      // Exterior Emergency Stair is different: its explicit served-floor list
+      // is authoritative, so configured landings may skip an unserved floor
+      // (for example Ground, Floor 2, Floor 3, Floor 5).
+      if (kind === "stair" && !exteriorEmergencyGroup && Math.abs(a.info.floorOrder - b.info.floorOrder) !== 1) continue;
       const pairKey = [a.node.id, b.node.id].sort().join("|");
-      desired.set(pairKey, { a: a.node.id, b: b.node.id, accessible: crossFloorTransitionAccessible(kind) });
+      if (kind === "stair") {
+        // The lower occurrence's Up permission and the upper occurrence's
+        // Down permission are independent.  Keep a one-way NavigationEdge
+        // when only one direction is authored; use a bidirectional edge only
+        // when both directions are valid.  This preserves the canonical
+        // NavigationEdge contract without teaching A* about Stair semantics.
+        const lower = a.info.floorOrder < b.info.floorOrder ? a : b;
+        const upper = lower === a ? b : a;
+        const lowerDirection = lower.info.direction ?? "both";
+        const upperDirection = upper.info.direction ?? "both";
+        const canGoUp = lowerDirection === "up" || lowerDirection === "both";
+        const canGoDown = upperDirection === "down" || upperDirection === "both";
+        if (!canGoUp && !canGoDown) continue;
+        const bidirectional = canGoUp && canGoDown;
+        const emergencySafe = kind === "elevator"
+          ? group.every((entry) => entry.node.emergencySafe === true)
+          : group.every((entry) => entry.node.emergencySafe !== false);
+        desired.set(pairKey, {
+          a: bidirectional || canGoUp ? lower.node.id : upper.node.id,
+          b: bidirectional || canGoUp ? upper.node.id : lower.node.id,
+          accessible: crossFloorTransitionAccessible(kind),
+          bidirectional,
+          emergencyStair: group.some((entry) => entry.node.emergencyStair === true),
+          emergencySafe,
+        });
+        continue;
+      }
+      desired.set(pairKey, {
+        a: a.node.id,
+        b: b.node.id,
+        accessible: crossFloorTransitionAccessible(kind),
+        bidirectional: true,
+        emergencyStair: group.some((entry) => entry.node.emergencyStair === true),
+        emergencySafe: kind === "elevator"
+          ? group.every((entry) => entry.node.emergencySafe === true)
+          : group.every((entry) => entry.node.emergencySafe !== false),
+      });
     }
   }
   // 3) Reuse existing transition edges for identical pairs (idempotent ids).
@@ -1174,31 +1569,54 @@ export function reconcileCrossFloorTransitions(
     const pairKey = [entry.a, entry.b].sort().join("|");
     const existing = existingByPair.get(pairKey);
     transitionEdges.push(existing
-      ? { ...existing, accessible: entry.accessible }
+      ? {
+          ...existing,
+          startNodeId: entry.a,
+          endNodeId: entry.b,
+          bidirectional: entry.bidirectional,
+          accessible: entry.accessible,
+          emergencySafe: entry.emergencySafe,
+          ...(entry.emergencyStair && entry.emergencySafe
+            ? { distance: Math.min(existing.distance, 0.5), emergencySafe: true }
+            : {}),
+        }
       : {
           id: genId("ne"),
           startNodeId: entry.a,
           endNodeId: entry.b,
-          distance: 1,
-          bidirectional: true,
+          distance: entry.emergencyStair ? 0.5 : 1,
+          bidirectional: entry.bidirectional,
           accessible: entry.accessible,
-          emergencySafe: true,
+          emergencySafe: entry.emergencySafe,
           type: CROSS_FLOOR_EDGE_TYPE,
           color: "#475569",
           width: 1,
         });
   }
   // 4) Non-transition edges pass through; stale transitions are dropped.
-  return [...safeEdges.filter((e) => e.type !== CROSS_FLOOR_EDGE_TYPE), ...transitionEdges];
+  const nodeById = new Map(safeNodes.map((node) => [node.id, node]));
+  const isTargetBuildingTransition = (edge: NavigationEdge) => {
+    if (edge.type !== CROSS_FLOOR_EDGE_TYPE) return false;
+    const start = nodeById.get(edge.startNodeId);
+    const end = nodeById.get(edge.endNodeId);
+    // A transition whose endpoint was deleted is stale regardless of which
+    // building owned it; never leave an orphaned floor edge in the graph.
+    if (!start || !end) return true;
+    return start.buildingId === buildingId && end.buildingId === buildingId;
+  };
+  return [
+    ...safeEdges.filter((e) => e.type !== CROSS_FLOOR_EDGE_TYPE || !isTargetBuildingTransition(e)),
+    ...transitionEdges,
+  ];
 }
 
 /**
  * Canonical floor-order mutation used by both the outer Campus hierarchy and
  * the Floor Editor. Replacing the floors array changes the building's canonical
  * order, then immediately reconciles derived cross-floor transition edges
- * against that same order. Stair direction validity/defaults are derived in UI
- * from this array, so callers must route floor reorder/add/delete/rename
- * through here rather than splicing a separate local path.
+ * against that same order. Callers additionally reconcile persisted Stair
+ * direction values before invoking this helper so floor-order changes cannot
+ * leave an impossible boundary direction behind.
  */
 export function replaceBuildingFloorsAndReconcileTransitions(
   campus: Campus,
@@ -1211,10 +1629,37 @@ export function replaceBuildingFloorsAndReconcileTransitions(
       building.id === buildingId ? { ...building, floors } : building
     ),
   };
+  // Floor-order mutations can also reconcile a Stair's persisted direction
+  // (for example, a former middle-floor Both Stair becoming the highest-floor
+  // Down Stair). Re-resolve every linked indoor node from the updated owner in
+  // the same mutation so its physical entry anchor and incident path endpoint
+  // cannot lag behind the visible direction cue. Node IDs and free waypoints
+  // remain untouched.
+  const floorsById = new Map(floors.map((floor) => [floor.id, floor]));
+  const movedLinkedNodeIds = new Set<string>();
+  const syncedNodes = (next.navNodes ?? []).map((node) => {
+    if (node.buildingId !== buildingId) return node;
+    const ownerFloor = floorsById.get(node.floorId);
+    if (!ownerFloor) return node;
+    const synced = syncIndoorLinkedNodePositions([node], ownerFloor)[0] ?? node;
+    if (synced.x !== node.x || synced.y !== node.y) movedLinkedNodeIds.add(node.id);
+    return synced;
+  });
+  // A linked Stair anchor is part of the current edge geometry. Keep the
+  // distance metadata in step with its new endpoint so route costs cannot use
+  // a stale pre-direction-change length. Transition edges keep their derived
+  // logical cost; all other affected edges use their current bends/endpoints.
+  const syncedEdges = (next.navEdges ?? []).map((edge) => {
+    if (edge.type === CROSS_FLOOR_EDGE_TYPE
+      || (!movedLinkedNodeIds.has(edge.startNodeId) && !movedLinkedNodeIds.has(edge.endNodeId))) return edge;
+    const points = edgePolylinePoints(edge, syncedNodes);
+    return points ? { ...edge, distance: navEdgePolylineDistance(points) } : edge;
+  });
   return {
     ...next,
+    navNodes: syncedNodes,
     navEdges: reconcileCrossFloorTransitions(
-      next.navNodes, next.navEdges,
+      syncedNodes, syncedEdges,
       next.buildings.find((building) => building.id === buildingId)?.floors,
       buildingId
     ),

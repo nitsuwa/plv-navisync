@@ -17,7 +17,7 @@ interface UsePublishedCampusResult {
   refetch: () => Promise<void>;
 }
 
-export function usePublishedCampus(): UsePublishedCampusResult {
+export function usePublishedCampus(previewCampus?: Campus | null): UsePublishedCampusResult {
   const [campuses, setCampuses] = useState<Campus[]>([]);
   const [selectedCampusId, setSelectedCampusId] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
@@ -44,13 +44,21 @@ export function usePublishedCampus(): UsePublishedCampusResult {
     setLoading(true);
     setError(null);
     try {
-      // Fetch all campuses from Supabase via campusService
-      const allCampuses = await campusService.list();
-      
-      // Filter for published, non-archived campuses only
-      let published = allCampuses.filter(
-        (c) => c.publishStatus === "published" || c.visibleToStudents === true
-      );
+      // Prefer immutable published snapshots. This keeps draft/editor edits
+      // out of the public map until the database publication RPC succeeds.
+      let published: Campus[] = [];
+      try {
+        published = await campusService.listPublishedSnapshots();
+      } catch {
+        // Compatibility fallback for environments that predate the version
+        // table; the live list still contains the legacy published marker.
+      }
+      if (published.length === 0) {
+        const allCampuses = await campusService.list();
+        published = allCampuses.filter(
+          (c) => c.publishStatus === "published" || c.visibleToStudents === true
+        );
+      }
 
       // Fallback: If database has no published campuses yet (fresh seed state),
       // use SEED_CAMPUSES so the public map displays the default published PLV campus.
@@ -97,8 +105,19 @@ export function usePublishedCampus(): UsePublishedCampusResult {
   }, [getCachedCampuses]);
 
   useEffect(() => {
+    if (previewCampus) {
+      // Preview is intentionally read-only and must never fall back to the
+      // published directory. It renders exactly the saved candidate passed by
+      // the Admin Map Builder.
+      setCampuses([previewCampus]);
+      setSelectedCampusId(previewCampus.id);
+      setLoading(false);
+      setError(null);
+      setIsCached(false);
+      return;
+    }
     fetchPublishedCampuses();
-  }, [fetchPublishedCampuses]);
+  }, [fetchPublishedCampuses, previewCampus]);
 
   // Derived active campus
   const activeCampus = useMemo(() => {

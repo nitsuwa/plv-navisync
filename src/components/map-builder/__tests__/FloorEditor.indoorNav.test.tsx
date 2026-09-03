@@ -249,6 +249,222 @@ describe("B5 Phase 2 — Floor Editor indoor Navigation mode", () => {
     expect(screen.getByText("Navigation Path")).toBeTruthy();
   });
 
+  it("Connect Path splits an existing manual path and terminates at one canonical junction", () => {
+    const withPath = makeBaseCampus();
+    withPath.navNodes = [
+      { id: "nav-a", name: "A", type: "hallway", x: 40, y: 80, buildingId: "b1", floorId: "f1", accessible: true, color: "#16a34a" },
+      { id: "nav-b", name: "B", type: "hallway", x: 180, y: 80, buildingId: "b1", floorId: "f1", accessible: true, color: "#16a34a" },
+      { id: "nav-source", name: "Elevator", type: "hallway", x: 110, y: 130, buildingId: "b1", floorId: "f1", accessible: true, color: "#16a34a" },
+    ];
+    withPath.navEdges = [{ id: "edge-ab", startNodeId: "nav-a", endNodeId: "nav-b", distance: 140, bidirectional: true, accessible: true, emergencySafe: true, type: "hallway", color: "#16a34a", width: 4 }];
+    cleanup();
+    const rendered = render(<Harness onCampusChange={onCampusChange} initialCampus={withPath} />);
+    container = rendered.container;
+    fireEvent.click(screen.getByRole("button", { name: "Show Navigation" }));
+    const svg = stubSvgRect(container);
+    fireEvent.click(within(screen.getByTestId("floor-nav-toolbar")).getByRole("button", { name: "Connect" }));
+    fireEvent.mouseDown(navNodes(container).find((node) => node.getAttribute("data-node-id") === "nav-source") ?? navNodes(container)[2], { clientX: 110, clientY: 130, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    const pathHit = container.querySelector('[data-testid="nav-edge-hit"]');
+    expect(pathHit).toBeTruthy();
+    fireEvent.mouseDown(pathHit!, { clientX: 110, clientY: 80, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+
+    const latest = onCampusChange.mock.calls[onCampusChange.mock.calls.length - 1]?.[0] as Campus;
+    const floorNodes = (latest.navNodes ?? []).filter((node) => node.floorId === "f1");
+    const floorEdges = (latest.navEdges ?? []).filter((edge) => {
+      const ids = new Set(floorNodes.map((node) => node.id));
+      return ids.has(edge.startNodeId) && ids.has(edge.endNodeId);
+    });
+    const junction = floorNodes.find((node) => node.pathJunction);
+    expect(junction).toBeTruthy();
+    expect(junction?.x).toBe(110);
+    expect(junction?.y).toBe(80);
+    expect(floorNodes).toHaveLength(4);
+    expect(floorEdges).toHaveLength(3);
+    expect(floorEdges.some((edge) => edge.startNodeId === "nav-a" && edge.endNodeId === "nav-b")).toBe(false);
+    expect(floorEdges.some((edge) => new Set([edge.startNodeId, edge.endNodeId]).has("nav-source") && new Set([edge.startNodeId, edge.endNodeId]).has(junction!.id))).toBe(true);
+  });
+
+  it("shows the hovered manual path as a projected Connect target", () => {
+    const withPath = makeBaseCampus();
+    withPath.navNodes = [
+      { id: "nav-a", name: "A", type: "hallway", x: 40, y: 80, buildingId: "b1", floorId: "f1", accessible: true, color: "#16a34a" },
+      { id: "nav-b", name: "B", type: "hallway", x: 180, y: 80, buildingId: "b1", floorId: "f1", accessible: true, color: "#16a34a" },
+      { id: "nav-source", name: "Elevator", type: "hallway", x: 110, y: 130, buildingId: "b1", floorId: "f1", accessible: true, color: "#16a34a" },
+    ];
+    withPath.navEdges = [{ id: "edge-ab", startNodeId: "nav-a", endNodeId: "nav-b", distance: 140, bidirectional: true, accessible: true, emergencySafe: true, type: "hallway", color: "#16a34a", width: 4 }];
+    cleanup();
+    const rendered = render(<Harness onCampusChange={onCampusChange} initialCampus={withPath} />);
+    container = rendered.container;
+    fireEvent.click(screen.getByRole("button", { name: "Show Navigation" }));
+    const svg = stubSvgRect(container);
+    fireEvent.click(within(screen.getByTestId("floor-nav-toolbar")).getByRole("button", { name: "Connect" }));
+    const source = navNodes(container)[2];
+    expect(source).toBeTruthy();
+    fireEvent.mouseDown(source!, { clientX: 110, clientY: 130, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    const pathHit = container.querySelector('[data-testid="nav-edge-hit"]');
+    expect(pathHit).toBeTruthy();
+    fireEvent.mouseMove(pathHit!, { clientX: 110, clientY: 80, bubbles: true });
+    expect(screen.getByTestId("nav-connect-path-target")).toBeTruthy();
+    expect(screen.getByTestId("nav-connect-path-hint")).toHaveTextContent("Click to connect to path");
+
+    // The commit must consume the exact hovered edge/segment projection rather
+    // than re-running generic nearest-node hit testing on mouse-up.  A midpoint
+    // click therefore creates a canonical split at the preview marker.
+    fireEvent.mouseDown(pathHit!, { clientX: 110, clientY: 80, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    const latest = onCampusChange.mock.calls[onCampusChange.mock.calls.length - 1]?.[0] as Campus;
+    const floorNodes = (latest.navNodes ?? []).filter((node) => node.floorId === "f1");
+    const floorEdges = (latest.navEdges ?? []).filter((edge) => {
+      const ids = new Set(floorNodes.map((node) => node.id));
+      return ids.has(edge.startNodeId) && ids.has(edge.endNodeId);
+    });
+    const junction = floorNodes.find((node) => node.pathJunction);
+    expect(junction).toBeTruthy();
+    expect(junction?.x).toBe(110);
+    expect(junction?.y).toBe(80);
+    expect(floorEdges.some((edge) => edge.startNodeId === "nav-a" && edge.endNodeId === "nav-b")).toBe(false);
+    expect(floorEdges).toHaveLength(3);
+  });
+
+  it("splits the exact hovered segment of a bent Walking Path", () => {
+    const withBentPath = makeBaseCampus();
+    withBentPath.navNodes = [
+      { id: "nav-a", name: "A", type: "hallway", x: 40, y: 40, buildingId: "b1", floorId: "f1", accessible: true, color: "#16a34a" },
+      { id: "nav-b", name: "B", type: "hallway", x: 160, y: 140, buildingId: "b1", floorId: "f1", accessible: true, color: "#16a34a" },
+      { id: "nav-source", name: "Door", type: "hallway", x: 110, y: 140, buildingId: "b1", floorId: "f1", accessible: true, color: "#16a34a" },
+    ];
+    withBentPath.navEdges = [{
+      id: "edge-bent", startNodeId: "nav-a", endNodeId: "nav-b", distance: 220,
+      bidirectional: true, accessible: true, emergencySafe: true, type: "hallway", color: "#16a34a", width: 4,
+      bendPoints: [{ x: 40, y: 100 }, { x: 160, y: 100 }],
+    }];
+    cleanup();
+    const rendered = render(<Harness onCampusChange={onCampusChange} initialCampus={withBentPath} />);
+    container = rendered.container;
+    fireEvent.click(screen.getByRole("button", { name: "Show Navigation" }));
+    const svg = stubSvgRect(container);
+    fireEvent.click(within(screen.getByTestId("floor-nav-toolbar")).getByRole("button", { name: "Connect" }));
+    const source = navNodes(container).find((node) => {
+      const circle = node.querySelector("circle");
+      return circle?.getAttribute("cx") === "110" && circle?.getAttribute("cy") === "140";
+    });
+    expect(source).toBeTruthy();
+    fireEvent.mouseDown(source!, { clientX: 110, clientY: 140, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    const pathHit = container.querySelector('[data-testid="nav-edge-hit"]');
+    expect(pathHit).toBeTruthy();
+    fireEvent.mouseMove(pathHit!, { clientX: 110, clientY: 100, bubbles: true });
+    fireEvent.mouseDown(pathHit!, { clientX: 110, clientY: 100, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+
+    const latest = onCampusChange.mock.calls[onCampusChange.mock.calls.length - 1]?.[0] as Campus;
+    const floorNodes = (latest.navNodes ?? []).filter((node) => node.floorId === "f1");
+    const floorEdges = (latest.navEdges ?? []).filter((edge) => {
+      const ids = new Set(floorNodes.map((node) => node.id));
+      return ids.has(edge.startNodeId) && ids.has(edge.endNodeId);
+    });
+    const junction = floorNodes.find((node) => node.pathJunction);
+    expect(junction).toBeTruthy();
+    expect(junction?.x).toBe(110);
+    expect(junction?.y).toBe(100);
+    expect(floorEdges).toHaveLength(3);
+    expect(floorEdges.some((edge) => edge.startNodeId === "nav-a" && edge.endNodeId === "nav-b")).toBe(false);
+    const left = floorEdges.find((edge) => new Set([edge.startNodeId, edge.endNodeId]).has("nav-a") && new Set([edge.startNodeId, edge.endNodeId]).has(junction!.id));
+    const right = floorEdges.find((edge) => new Set([edge.startNodeId, edge.endNodeId]).has("nav-b") && new Set([edge.startNodeId, edge.endNodeId]).has(junction!.id));
+    expect(left?.bendPoints).toEqual([{ x: 40, y: 100 }]);
+    expect(right?.bendPoints).toEqual([{ x: 160, y: 100 }]);
+  });
+
+  it("keeps a diagonal Connect junction on the exact projected segment", () => {
+    const withDiagonalPath = makeBaseCampus();
+    withDiagonalPath.navNodes = [
+      { id: "nav-a", name: "A", type: "hallway", x: 40, y: 40, buildingId: "b1", floorId: "f1", accessible: true, color: "#16a34a" },
+      { id: "nav-b", name: "B", type: "hallway", x: 180, y: 140, buildingId: "b1", floorId: "f1", accessible: true, color: "#16a34a" },
+      { id: "nav-source", name: "Source", type: "hallway", x: 110, y: 145, buildingId: "b1", floorId: "f1", accessible: true, color: "#16a34a" },
+    ];
+    withDiagonalPath.navEdges = [{ id: "edge-diagonal", startNodeId: "nav-a", endNodeId: "nav-b", distance: 172,
+      bidirectional: true, accessible: true, emergencySafe: true, type: "hallway", color: "#16a34a", width: 4 }];
+    cleanup();
+    const rendered = render(<Harness onCampusChange={onCampusChange} initialCampus={withDiagonalPath} />);
+    container = rendered.container;
+    fireEvent.click(screen.getByRole("button", { name: "Show Navigation" }));
+    const svg = stubSvgRect(container);
+    fireEvent.click(within(screen.getByTestId("floor-nav-toolbar")).getByRole("button", { name: "Connect" }));
+    const source = navNodes(container)[2];
+    expect(source).toBeTruthy();
+    fireEvent.mouseDown(source!, { clientX: 110, clientY: 145, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    const pathHit = container.querySelector('[data-testid="nav-edge-hit"]');
+    expect(pathHit).toBeTruthy();
+    // Deliberately click several pixels off the diagonal. The projected point,
+    // not this raw pointer coordinate or an endpoint, is authoritative.
+    fireEvent.mouseMove(pathHit!, { clientX: 110, clientY: 95, bubbles: true });
+    fireEvent.mouseDown(pathHit!, { clientX: 110, clientY: 95, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+
+    const latest = onCampusChange.mock.calls[onCampusChange.mock.calls.length - 1]?.[0] as Campus;
+    const junction = latest.navNodes.find((node) => node.pathJunction);
+    expect(junction).toBeTruthy();
+    const dx = 180 - 40;
+    const dy = 140 - 40;
+    const cross = (junction!.x - 40) * dy - (junction!.y - 40) * dx;
+    expect(Math.abs(cross)).toBeLessThan(0.0001);
+    expect(junction!.x).not.toBe(180);
+    expect(junction!.y).not.toBe(140);
+  });
+
+  it("allows an isolated internal junction to be deleted after its paths are gone", () => {
+    const withJunction = makeBaseCampus();
+    withJunction.navNodes = [
+      { id: "nav-junction", name: "Waypoint", type: "hallway", x: 110, y: 80, buildingId: "b1", floorId: "f1", pathJunction: true, accessible: true, color: "#d97706" },
+    ];
+    cleanup();
+    const rendered = render(<Harness onCampusChange={onCampusChange} initialCampus={withJunction} />);
+    container = rendered.container;
+    fireEvent.click(screen.getByRole("button", { name: "Show Navigation" }));
+    const junction = container.querySelector('[data-testid="nav-path-junction"]');
+    expect(junction).toBeTruthy();
+    fireEvent.mouseDown(junction!, { clientX: 110, clientY: 80, bubbles: true });
+    fireEvent.keyDown(window, { key: "Delete" });
+    expect(container.querySelector('[data-testid="nav-path-junction"]')).toBeNull();
+    const latest = onCampusChange.mock.calls[onCampusChange.mock.calls.length - 1]?.[0] as Campus;
+    expect((latest.navNodes ?? []).some((node) => node.id === "nav-junction")).toBe(false);
+  });
+
+  it("reshapes a diagonal path segment with bends while keeping endpoints fixed", () => {
+    const withDiagonal = makeBaseCampus();
+    withDiagonal.navNodes = [
+      { id: "nav-a", name: "A", type: "hallway", x: 40, y: 30, buildingId: "b1", floorId: "f1", accessible: true, color: "#16a34a" },
+      { id: "nav-b", name: "B", type: "hallway", x: 180, y: 120, buildingId: "b1", floorId: "f1", accessible: true, color: "#16a34a" },
+    ];
+    withDiagonal.navEdges = [{ id: "edge-diagonal", startNodeId: "nav-a", endNodeId: "nav-b", distance: 166, bidirectional: true, accessible: true, emergencySafe: true, type: "hallway", color: "#16a34a", width: 4 }];
+    cleanup();
+    const rendered = render(<Harness onCampusChange={onCampusChange} initialCampus={withDiagonal} />);
+    container = rendered.container;
+    fireEvent.click(screen.getByRole("button", { name: "Show Navigation" }));
+    const svg = stubSvgRect(container);
+    const pathHit = container.querySelector('[data-testid="nav-edge-hit"]');
+    expect(pathHit).toBeTruthy();
+    // First click selects the edge; the second begins the segment gesture.
+    fireEvent.mouseDown(pathHit!, { clientX: 110, clientY: 75, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    fireEvent.mouseDown(pathHit!, { clientX: 110, clientY: 75, bubbles: true });
+    fireEvent.mouseMove(svg, { clientX: 110, clientY: 100, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    const edited = container.querySelector('[data-testid="nav-edge-selected"]') as SVGPolylineElement | null;
+    expect(edited).toBeTruthy();
+    const points = (edited?.getAttribute("points") ?? "").trim().split(/\s+/).map((p) => p.split(",").map(Number));
+    expect(points.length).toBeGreaterThan(2);
+    expect(points[0]).toEqual([40, 30]);
+    expect(points[points.length - 1]).toEqual([180, 120]);
+    for (let i = 1; i < points.length; i++) {
+      expect(points[i][0] === points[i - 1][0] || points[i][1] === points[i - 1][1]).toBe(true);
+    }
+  });
+
   it("Connect Path empty-space clicks do nothing BEFORE a start; after a start they PIN bends (no waypoints)", () => {
     enterNavigationMode();
     const svg = stubSvgRect(container);

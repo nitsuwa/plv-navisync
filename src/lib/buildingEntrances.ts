@@ -14,8 +14,8 @@ const clamp01 = (value: number) => Math.max(0, Math.min(1, Number.isFinite(value
 export const BUILDING_ENTRANCE_TYPES: BuildingEntranceType[] = ["general", "service", "emergency_exit"];
 
 export const BUILDING_ENTRANCE_TYPE_LABELS: Record<BuildingEntranceType, string> = {
-  general: "General Entrance",
-  service: "Service Entrance",
+  general: "General Access",
+  service: "Service Access",
   emergency_exit: "Emergency Exit",
 };
 
@@ -184,6 +184,78 @@ export function pointerToEntranceAttachment(
   return { edge: "left", offset: clamp01((unrotated.y - building.y) / building.height) };
 }
 
+export interface EntranceAlignmentReference extends Point {
+  id?: string;
+}
+
+export interface EntranceAlignmentResult {
+  attachment: Pick<CampusEntrance, "edge" | "offset">;
+  point: EntranceWorldPosition;
+  guides: { type: "h" | "v"; pos: number }[];
+}
+
+/**
+ * Snap an Entrance's perimeter attachment to a nearby useful reference.  The
+ * reference is projected onto the currently selected edge, so the Entrance
+ * remains edge-attached even when the pointer is slightly outside the wall.
+ * This deliberately snaps only along the edge (never by globally merging
+ * coordinates) and returns the same lightweight guide format used elsewhere in
+ * the editors.
+ */
+export function alignEntranceAttachment(
+  building: Pick<CampusBuilding, "x" | "y" | "width" | "height" | "rotation">,
+  pointer: Point,
+  references: EntranceAlignmentReference[] = [],
+  threshold = 12,
+): EntranceAlignmentResult {
+  const base = pointerToEntranceAttachment(building, pointer);
+  const current = entranceWorldPosition(building, base);
+  const centerOffset = 0.5;
+  const candidates: { offset: number; distance: number; kind: "center" | "reference" }[] = [
+    { offset: centerOffset, distance: Number.POSITIVE_INFINITY, kind: "center" },
+  ];
+  const centerPoint = entranceWorldPosition(building, { edge: base.edge, offset: centerOffset });
+  const tangentLength = base.edge === "top" || base.edge === "bottom" ? building.width : building.height;
+  const centerTangent = base.edge === "top" || base.edge === "bottom" ? current.x : current.y;
+  const centerTarget = base.edge === "top" || base.edge === "bottom" ? centerPoint.x : centerPoint.y;
+  candidates[0].distance = Math.abs(centerTangent - centerTarget);
+
+  const center = { x: building.x + building.width / 2, y: building.y + building.height / 2 };
+  const rotation = building.rotation ?? 0;
+  // Compare references in the building's local coordinate space so rotation
+  // does not detach or skew the edge + offset attachment.
+  for (const reference of references) {
+    const local = rotatePoint(reference, center, -rotation);
+    const along = base.edge === "top" || base.edge === "bottom"
+      ? local.x - building.x
+      : local.y - building.y;
+    const offset = clamp01(along / Math.max(1, tangentLength));
+    const candidate = entranceWorldPosition(building, { edge: base.edge, offset });
+    // A reference only participates when the pointer is actually close to the
+    // projected edge location.  Comparing the full world distance prevents a
+    // far-away anchor that happens to share an x/y coordinate from pulling an
+    // Entrance across the perimeter unexpectedly.
+    const referenceDistance = Math.hypot(candidate.x - pointer.x, candidate.y - pointer.y);
+    candidates.push({ offset, distance: referenceDistance, kind: "reference" });
+  }
+
+  const nearest = candidates.reduce((best, candidate) => candidate.distance < best.distance ? candidate : best, candidates[0]);
+  if (!nearest || nearest.distance > threshold) {
+    return { attachment: base, point: current, guides: [] };
+  }
+  const attachment = { edge: base.edge, offset: clamp01(nearest.offset) };
+  const point = entranceWorldPosition(building, attachment);
+  // For an unrotated building the edge tangent is exactly horizontal/vertical;
+  // use the corresponding global guide. Rotated buildings still snap along
+  // their edge but do not draw a misleading axis guide.
+  const guides = rotation % 180 === 0
+    ? (base.edge === "top" || base.edge === "bottom"
+      ? [{ type: "v" as const, pos: point.x }]
+      : [{ type: "h" as const, pos: point.y }])
+    : [];
+  return { attachment, point, guides };
+}
+
 export interface EntranceHitResult extends EntranceWorldPosition {
   buildingId: string;
   entranceId: string;
@@ -239,7 +311,9 @@ export function defaultEntrance(building: CampusBuilding, id: string): CampusEnt
     offset: 0.5,
     type: "general",
     isPrimary: isFirstEntrance,
-    accessible: false,
+    // General entrances are accessible by default.  Existing saved values are
+    // never rewritten by normalization; this only affects new authoring.
+    accessible: true,
   };
   if (isFirstEntrance) return base;
 

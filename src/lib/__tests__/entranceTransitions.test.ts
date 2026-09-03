@@ -6,13 +6,16 @@ import { moveFloorInBuilding } from "../floorManagement";
 import { outdoorNavEdges, outdoorNavNodes } from "../navigationGraph";
 import {
   ENTRANCE_TRANSITION_EDGE_TYPE,
+  entranceOutdoorLinkStatus,
   entranceIndoorLinkStatus,
   doorEntranceLinkStatus,
   doorDisplayName,
   indoorDoorOptionsForEntrance,
   linkEntranceToIndoorDoor,
+  removeEntranceOutdoorConnection,
   reconcileEntranceTransitions,
   removeEntranceIndoorConnection,
+  reconcileEntranceOutdoorConnections,
 } from "../entranceTransitions";
 
 function makeCampus(accessible = true): Campus {
@@ -87,6 +90,65 @@ const ids = (() => {
 })();
 
 describe("B5 Phase 4 - entrance transition graph", () => {
+  it("reports and removes an explicit outdoor Entrance bridge without touching the indoor link", () => {
+    const campus = makeCampus();
+    campus.navNodes.push({
+      id: "entrance-node", x: 160, y: 160, campusId: "c1", buildingId: "b1", entranceId: "ent-main",
+      name: "Main Entrance", type: "entrance", accessible: true, color: "#16a34a",
+    });
+    campus.navNodes.push({
+      id: "outdoor-node", x: 150, y: 180, campusId: "c1", name: "Walking Point", type: "outdoor", accessible: true, color: "#16a34a",
+    });
+    campus.navEdges.push({
+      id: "outdoor-bridge", startNodeId: "outdoor-node", endNodeId: "entrance-node", distance: 10,
+      bidirectional: true, accessible: true, emergencySafe: true, type: "walkway", color: "#16a34a", width: 4,
+    });
+    const linked = linkEntranceToIndoorDoor(campus, "b1", "ent-main", "door-node", ids);
+    expect(entranceOutdoorLinkStatus(linked, "b1", "ent-main")).toMatchObject({
+      state: "connected", edgeId: "outdoor-bridge", targetNodeId: "outdoor-node", targetName: "Walking Point",
+    });
+    const disconnected = removeEntranceOutdoorConnection(linked, "b1", "ent-main");
+    expect(disconnected.navEdges.some((edge) => edge.id === "outdoor-bridge")).toBe(false);
+    expect(disconnected.navEdges.some((edge) => edge.type === ENTRANCE_TRANSITION_EDGE_TYPE)).toBe(true);
+  });
+
+  it("preserves the shared outward connector bends when an outdoor bridge is reconciled", () => {
+    const campus = makeCampus();
+    campus.navNodes.push({
+      id: "entrance-node", x: 160, y: 160, campusId: "c1", buildingId: "b1", entranceId: "ent-main",
+      name: "Main Entrance", type: "entrance", accessible: true, color: "#16a34a",
+    });
+    campus.navNodes.push({
+      id: "outdoor-node", x: 250, y: 200, campusId: "c1", name: "Walking Point", type: "outdoor", accessible: true, color: "#16a34a",
+    });
+    campus.navEdges.push({
+      id: "outdoor-bridge", startNodeId: "entrance-node", endNodeId: "outdoor-node", distance: 0,
+      bidirectional: true, accessible: true, emergencySafe: true, type: "walkway", color: "#16a34a", width: 4,
+    });
+    const reconciled = reconcileEntranceOutdoorConnections(campus);
+    const edge = reconciled.navEdges.find((candidate) => candidate.id === "outdoor-bridge");
+    expect(edge?.bendPoints).toEqual([{ x: 160, y: 200 }]);
+    expect(edge?.distance).toBe(130);
+  });
+
+  it("marks a linked Door incomplete until it has an indoor walking connection", () => {
+    const campus = makeCampus();
+    const linked = linkEntranceToIndoorDoor(campus, "b1", "ent-main", "door-node", ids);
+    expect(entranceIndoorLinkStatus(linked, "b1", "ent-main")).toMatchObject({
+      state: "linked", doorNavigationConnected: false, warning: "Connect the Door to the indoor walking network.",
+    });
+    linked.navNodes.push(createIndoorNavNode({
+      id: "indoor-waypoint", x: 80, y: 20, campusId: "c1", buildingId: "b1", floorId: "f1", name: "Lobby", type: "hallway",
+    }));
+    linked.navEdges.push({
+      id: "door-walk", startNodeId: "door-node", endNodeId: "indoor-waypoint", distance: 30,
+      bidirectional: true, accessible: true, emergencySafe: true, type: "walkway", color: "#16a34a", width: 4,
+    });
+    expect(entranceIndoorLinkStatus(linked, "b1", "ent-main")).toMatchObject({
+      state: "linked", doorNavigationConnected: true, warning: undefined,
+    });
+  });
+
   it("creates one outdoor entrance node and exactly one transition to an existing door node", () => {
     const linked = linkEntranceToIndoorDoor(makeCampus(), "b1", "ent-main", "door-node", ids);
 
@@ -296,7 +358,7 @@ describe("B5 Phase 4 - entrance transition graph", () => {
     }));
     const linked = linkEntranceToIndoorDoor(campus, "b1", "ent-main", "door-node", ids);
 
-    expect(entranceIndoorLinkStatus(linked, "b1", "ent-main")).toMatchObject({ state: "linked", entryFloor: true, warning: undefined });
+    expect(entranceIndoorLinkStatus(linked, "b1", "ent-main")).toMatchObject({ state: "linked", entryFloor: true, doorNavigationConnected: false, warning: "Connect the Door to the indoor walking network." });
     expect(indoorDoorOptionsForEntrance(linked, "b1", "ent-main").map((option) => ({
       floorId: option.floorId,
       doorId: option.doorId,
@@ -338,7 +400,7 @@ describe("B5 Phase 4 - entrance transition graph", () => {
       ...reordered,
       buildings: [{ ...reordered.buildings[0], floors: restoredFloors }],
     };
-    expect(entranceIndoorLinkStatus(restored, "b1", "ent-main")).toMatchObject({ state: "linked", entryFloor: true, warning: undefined });
+    expect(entranceIndoorLinkStatus(restored, "b1", "ent-main")).toMatchObject({ state: "linked", entryFloor: true, doorNavigationConnected: false, warning: "Connect the Door to the indoor walking network." });
     expect(restored.navEdges.filter((edge) => edge.type === ENTRANCE_TRANSITION_EDGE_TYPE)).toHaveLength(1);
   });
 });

@@ -4,10 +4,9 @@ import { motion } from "motion/react";
 import {
   Plus, Map, Building2, Layers, Globe, X, DoorOpen, MapPin, SearchX,
   MoreHorizontal, ExternalLink, Clock, HelpCircle,
-  Pencil, Copy, Eye, EyeOff, Archive, Trash2, CheckCircle2,
+  Pencil, Copy, Eye, EyeOff, Archive, CheckCircle2, Check, Loader2, Trash2,
 } from "lucide-react";
 import { cn } from "../../lib/utils";
-import { TypeToConfirmDialog } from "../ui/TypeToConfirmDialog";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
 import { ActionProgressDialog, type ActionType, type ActionState } from "./ActionProgressDialog";
 import { Tooltip } from "../ui/Tooltip";
@@ -15,6 +14,7 @@ import { SearchBar } from "../ui/SearchBar";
 import { useDebounce } from "../../hooks/useDebounce";
 import { highlightSearch } from "../../hooks/useSearchHighlight";
 import { campusMatchesQuery, campusStatusOf, type CampusStatusFilter } from "../../lib/campusHelpers";
+import { userFacingCampusMessage } from "../../services/campusService";
 import { CreateCampusGuide } from "./CreateCampusGuide";
 import type { Campus } from "./types";
 
@@ -75,13 +75,44 @@ export interface CampusHomeProps {
   campuses: Campus[];
   onOpen: (id: string) => void;
   onCreate: () => void;
-  onDelete?: (id: string) => void;
-  onDuplicate?: (id: string) => void;
-  onTogglePublish?: (id: string, force?: "publish" | "unpublish") => void;
-  onUnpublish?: (id: string) => void;
-  onArchive?: (id: string) => void;
-  onRestore?: (id: string) => void;
+  onDuplicate?: (id: string) => void | Promise<void>;
+  onTogglePublish?: (id: string, force?: "publish" | "unpublish") => void | Promise<void>;
+  onUnpublish?: (id: string) => void | Promise<void>;
+  onArchive?: (id: string) => void | Promise<void>;
+  onRestore?: (id: string) => void | Promise<void>;
+  onBulkRestore?: (ids: string[]) => void | Promise<void>;
+  onPermanentDelete?: (id: string) => void | Promise<void>;
+  onBulkPermanentDelete?: (
+    ids: string[],
+    onProgress?: (progress: BulkDeleteProgress) => void,
+  ) => void | Promise<BulkDeleteResult | void>;
+  /** Kept for callers that have not applied the database delete migration yet. */
+  permanentDeleteUnavailableReason?: string;
   onEditDetails?: (id: string) => void;
+}
+
+export interface BulkDeleteProgress {
+  completed: number;
+  total: number;
+  currentName?: string;
+}
+
+export interface BulkDeleteFailure {
+  id: string;
+  name: string;
+  stage?: string;
+  code?: string;
+  message: string;
+  details?: string;
+  hint?: string;
+  userMessage: string;
+}
+
+export interface BulkDeleteResult {
+  succeededIds: string[];
+  failedIds: string[];
+  failureMessage?: string;
+  failures?: BulkDeleteFailure[];
 }
 
 // ── Search & filter helpers ─────────────────────────────────────────────────
@@ -90,6 +121,7 @@ const STATUS_FILTERS: { id: CampusStatusFilter; label: string }[] = [
   { id: "published", label: "Published" },
   { id: "draft", label: "Draft" },
   { id: "never", label: "Never Published" },
+  { id: "archived", label: "Archived" },
 ];
 
 /** Renders text with search matches highlighted (or plain when there is no query). */
@@ -198,24 +230,109 @@ interface ArchiveConfirm {
   wasPublished: boolean;
 }
 
+interface PermanentDeleteConfirm {
+  id: string;
+  name: string;
+}
+
+function TypedConfirmationDialog({
+  open,
+  title,
+  message,
+  expected,
+  confirmLabel,
+  onConfirm,
+  onCancel,
+}: {
+  open: boolean;
+  title: string;
+  message: string;
+  expected: string;
+  confirmLabel: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [value, setValue] = useState("");
+  useEffect(() => {
+    if (!open) {
+      setValue("");
+      return;
+    }
+    requestAnimationFrame(() => inputRef.current?.focus());
+  }, [open]);
+  if (!open) return null;
+  const matches = value === expected;
+  return (
+    <motion.div
+      role="dialog"
+      aria-modal="true"
+      aria-label={title}
+      className="fixed inset-0 z-[70] flex items-center justify-center bg-background/70 backdrop-blur-sm p-4"
+      onClick={onCancel}
+    >
+      <motion.div
+        initial={{ opacity: 0, scale: 0.95, y: 10 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        className="w-full max-w-md rounded-2xl border border-red-200 dark:border-red-900/50 bg-card p-5 shadow-2xl"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="flex items-start gap-3">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400">
+            <Trash2 className="h-4 w-4" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <h3 className="text-sm font-extrabold text-foreground">{title}</h3>
+            <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{message}</p>
+          </div>
+          <button type="button" aria-label="Close dialog" onClick={onCancel} className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <label className="mt-4 block text-[11px] font-bold text-foreground">
+          Type <span className="font-mono text-destructive">{expected}</span> to confirm
+          <input
+            ref={inputRef}
+            value={value}
+            onChange={(event) => setValue(event.target.value)}
+            onKeyDown={(event) => { if (event.key === "Escape") onCancel(); if (event.key === "Enter" && matches) onConfirm(); }}
+            className="mt-1.5 h-10 w-full rounded-xl border border-border bg-background px-3 text-sm font-medium text-foreground outline-none focus-visible:ring-2 focus-visible:ring-destructive/40"
+            aria-label={`Type ${expected} to confirm`}
+          />
+        </label>
+        <div className="mt-4 flex gap-2">
+          <button type="button" onClick={onCancel} className="h-10 flex-1 rounded-xl border border-border text-xs font-bold text-muted-foreground hover:bg-muted">Cancel</button>
+          <button type="button" disabled={!matches} onClick={onConfirm} className="h-10 flex-1 rounded-xl bg-destructive text-xs font-extrabold text-destructive-foreground hover:bg-destructive/90 disabled:cursor-not-allowed disabled:opacity-40">{confirmLabel}</button>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
 // ── Quick actions dropdown ──────────────────────────────────────────────────
 
 function QuickActions({
   campus,
+  archived = false,
+  onOpen,
   onDuplicate,
   onTogglePublish,
   onUnpublish,
   onArchive,
+  onRestore,
+  onPermanentDelete,
   onEditDetails,
-  onDeleteRequest,
 }: {
   campus: Campus;
-  onDuplicate?: (id: string) => void;
-  onTogglePublish?: (id: string, force?: "publish" | "unpublish") => void;
-  onUnpublish?: (id: string) => void;
-  onArchive?: (id: string) => void;
+  archived?: boolean;
+  onOpen?: (id: string) => void;
+  onDuplicate?: (id: string) => void | Promise<void>;
+  onTogglePublish?: (id: string, force?: "publish" | "unpublish") => void | Promise<void>;
+  onUnpublish?: (id: string) => void | Promise<void>;
+  onArchive?: (id: string) => void | Promise<void>;
+  onRestore?: (id: string) => void | Promise<void>;
+  onPermanentDelete?: (id: string) => void | Promise<void>;
   onEditDetails?: (id: string) => void;
-  onDeleteRequest?: (id: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [dropdownPos, setDropdownPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
@@ -226,8 +343,14 @@ function QuickActions({
   const [emptyPublishConfirm, setEmptyPublishConfirm] = useState<PublishConfirm | null>(null);
   const [archiveConfirm, setArchiveConfirm] = useState<ArchiveConfirm | null>(null);
   const [duplicateTarget, setDuplicateTarget] = useState<string | null>(null);
-  const [actionProgress, setActionProgress] = useState<{ open: boolean; state: ActionState; action: ActionType } | null>(null);
-  const progressTimeoutRef = useRef<ReturnType<typeof setTimeout>>();
+  const [restoreTarget, setRestoreTarget] = useState<string | null>(null);
+  const [permanentDeleteTarget, setPermanentDeleteTarget] = useState<PermanentDeleteConfirm | null>(null);
+  const [actionProgress, setActionProgress] = useState<{
+    open: boolean;
+    state: ActionState;
+    action: ActionType;
+    errorMessage?: string;
+  } | null>(null);
 
   // ── Keyboard-accessible menu (role="menu", arrow keys, Escape, focus mgmt) ──
   const menuId = useId();
@@ -274,20 +397,21 @@ function QuickActions({
     }
   }, [closeMenu, focusMenuItem]);
 
-  const startPublishProgress = useCallback((id: string, action: "publish" | "unpublish") => {
+  const startPublishProgress = useCallback(async (id: string, action: "publish" | "unpublish") => {
     const progressAction: ActionType = action === "unpublish" ? "unpublishing" : "publishing";
     setActionProgress({ open: true, state: "loading", action: progressAction });
-
-    // Simulate a brief loading delay, then execute the action
-    progressTimeoutRef.current = setTimeout(() => {
-      try {
-        if (action === "unpublish" && !onTogglePublish) onUnpublish?.(id);
-        else onTogglePublish?.(id, action);
-        setActionProgress((prev) => (prev ? { ...prev, state: "success" } : prev));
-      } catch {
-        setActionProgress((prev) => (prev ? { ...prev, state: "error" } : prev));
+    try {
+      if (action === "unpublish" && !onTogglePublish) {
+        if (!onUnpublish) throw new Error("Unpublish is not available for this campus.");
+        await onUnpublish(id);
+      } else {
+        if (!onTogglePublish) throw new Error("Publish is not available yet.");
+        await onTogglePublish(id, action);
       }
-    }, 1500);
+      setActionProgress((prev) => (prev ? { ...prev, state: "success" } : prev));
+    } catch (error) {
+      setActionProgress((prev) => (prev ? { ...prev, state: "error", errorMessage: userFacingCampusMessage(error) } : prev));
+    }
   }, [onTogglePublish, onUnpublish]);
 
   const handlePublishConfirm = useCallback(() => {
@@ -304,94 +428,137 @@ function QuickActions({
     startPublishProgress(id, action);
   }, [publishConfirm, campus.buildings.length, campus.name, startPublishProgress]);
 
-  const handleDuplicateConfirm = useCallback(() => {
+  const handleDuplicateConfirm = useCallback(async () => {
     if (!duplicateTarget) return;
     const id = duplicateTarget;
     setDuplicateTarget(null);
     setActionProgress({ open: true, state: "loading", action: "duplicating" });
-    progressTimeoutRef.current = setTimeout(() => {
-      try {
-        onDuplicate?.(id);
-        setActionProgress((prev) => (prev ? { ...prev, state: "success" } : prev));
-      } catch {
-        setActionProgress((prev) => (prev ? { ...prev, state: "error" } : prev));
-      }
-    }, 1200);
+    try {
+      if (!onDuplicate) throw new Error("Duplicate is not available for this campus.");
+      await onDuplicate(id);
+      setActionProgress((prev) => (prev ? { ...prev, state: "success" } : prev));
+    } catch (error) {
+      setActionProgress((prev) => (prev ? { ...prev, state: "error", errorMessage: userFacingCampusMessage(error) } : prev));
+    }
   }, [duplicateTarget, onDuplicate]);
 
-  const handleArchiveConfirm = useCallback(() => {
+  const handleArchiveConfirm = useCallback(async () => {
     if (!archiveConfirm) return;
     const { id } = archiveConfirm;
     setArchiveConfirm(null);
+    // Published campuses must be explicitly unpublished first; the admin
+    // can then choose Archive again once it is private.
+    if (archiveConfirm.wasPublished) {
+      await startPublishProgress(id, "unpublish");
+      return;
+    }
     setActionProgress({ open: true, state: "loading", action: "archiving" });
-    progressTimeoutRef.current = setTimeout(() => {
-      try {
-        onArchive?.(id);
-        setActionProgress((prev) => (prev ? { ...prev, state: "success" } : prev));
-      } catch {
-        setActionProgress((prev) => (prev ? { ...prev, state: "error" } : prev));
-      }
-    }, 1200);
-  }, [archiveConfirm, onArchive]);
+    try {
+      if (!onArchive) throw new Error("Archive is not available for this campus.");
+      await onArchive(id);
+      setActionProgress((prev) => (prev ? { ...prev, state: "success" } : prev));
+    } catch (error) {
+      setActionProgress((prev) => (prev ? { ...prev, state: "error", errorMessage: userFacingCampusMessage(error) } : prev));
+    }
+  }, [archiveConfirm, onArchive, startPublishProgress]);
+
+  const handleRestoreConfirm = useCallback(async () => {
+    if (!restoreTarget) return;
+    const id = restoreTarget;
+    setRestoreTarget(null);
+    setActionProgress({ open: true, state: "loading", action: "restoring" });
+    try {
+      if (!onRestore) throw new Error("Restore is not available for this campus.");
+      await onRestore(id);
+      setActionProgress((prev) => (prev ? { ...prev, state: "success" } : prev));
+    } catch (error) {
+      setActionProgress((prev) => (prev ? { ...prev, state: "error", errorMessage: userFacingCampusMessage(error) } : prev));
+    }
+  }, [restoreTarget, onRestore]);
+
+  const handlePermanentDeleteConfirm = useCallback(async () => {
+    if (!permanentDeleteTarget || actionProgress?.state === "loading") return;
+    const id = permanentDeleteTarget.id;
+    setPermanentDeleteTarget(null);
+    setActionProgress({ open: true, state: "loading", action: "deleting" });
+    try {
+      if (!onPermanentDelete) throw new Error("Permanent deletion is not available for this campus.");
+      await onPermanentDelete(id);
+      setActionProgress((prev) => (prev ? { ...prev, state: "success" } : prev));
+    } catch (error) {
+      setActionProgress((prev) => (prev ? { ...prev, state: "error", errorMessage: userFacingCampusMessage(error) } : prev));
+    }
+  }, [permanentDeleteTarget, actionProgress?.state, onPermanentDelete]);
+
 
   const handleProgressRetry = useCallback(() => {
     if (!actionProgress) return;
     setActionProgress({ ...actionProgress, state: "loading" });
     const currentAction = actionProgress.action;
-    progressTimeoutRef.current = setTimeout(() => {
+    const run = async () => {
       try {
         // Re-run the exact same direction so retrying an unpublish doesn't re-publish
         if (currentAction === "publishing") {
-          onTogglePublish?.(campus.id, "publish");
+          if (!onTogglePublish) throw new Error("Publish is not available yet.");
+          await onTogglePublish(campus.id, "publish");
         } else if (currentAction === "unpublishing") {
-          if (!onTogglePublish) onUnpublish?.(campus.id);
-          else onTogglePublish(campus.id, "unpublish");
+          if (onTogglePublish) await onTogglePublish(campus.id, "unpublish");
+          else if (onUnpublish) await onUnpublish(campus.id);
+          else throw new Error("Unpublish is not available for this campus.");
         } else if (currentAction === "duplicating") {
-          onDuplicate?.(campus.id);
+          if (!onDuplicate) throw new Error("Duplicate is not available for this campus.");
+          await onDuplicate(campus.id);
         } else if (currentAction === "archiving") {
-          onArchive?.(campus.id);
+          if (!onArchive) throw new Error("Archive is not available for this campus.");
+          await onArchive(campus.id);
+        } else if (currentAction === "restoring") {
+          if (!onRestore) throw new Error("Restore is not available for this campus.");
+          await onRestore(campus.id);
+        } else if (currentAction === "deleting") {
+          if (!onPermanentDelete) throw new Error("Permanent deletion is not available for this campus.");
+          await onPermanentDelete(campus.id);
         }
         setActionProgress((prev) => (prev ? { ...prev, state: "success" } : prev));
-      } catch {
-        setActionProgress((prev) => (prev ? { ...prev, state: "error" } : prev));
+      } catch (error) {
+        setActionProgress((prev) => (prev ? { ...prev, state: "error", errorMessage: userFacingCampusMessage(error) } : prev));
       }
-    }, 1500);
-  }, [actionProgress, onTogglePublish, onUnpublish, onDuplicate, onArchive, campus.id]);
-
-  // Cleanup timeout on unmount
-  useEffect(() => {
-    return () => {
-      if (progressTimeoutRef.current) clearTimeout(progressTimeoutRef.current);
     };
-  }, []);
+    void run();
+  }, [actionProgress, onTogglePublish, onUnpublish, onDuplicate, onArchive, onRestore, onPermanentDelete, campus.id]);
 
   const isPublished = campus.publishStatus === "published";
 
-  const actions = [
-    ...(onEditDetails ? [{ icon: Pencil, label: "Edit Details", action: () => { setOpen(false); onEditDetails(campus.id); } }] : []),
-    ...(onDuplicate ? [{ icon: Copy, label: "Duplicate Campus", action: () => { setOpen(false); setDuplicateTarget(campus.id); } }] : []),
-    { type: "separator" as const },
-    ...((onTogglePublish || (isPublished && onUnpublish)) ? [{
-      icon: isPublished ? EyeOff : Eye,
-      label: isPublished ? "Unpublish" : "Publish",
-      action: () => {
+  const actions = archived
+    ? [
+      ...(onRestore ? [{ icon: Archive, label: "Restore Campus", action: () => { setOpen(false); setRestoreTarget(campus.id); } }] : []),
+      ...(onPermanentDelete ? [{ icon: Trash2, label: "Delete Permanently", danger: true, action: () => {
+        if (actionProgress?.state === "loading") return;
         setOpen(false);
-        setPublishConfirm({ id: campus.id, action: isPublished ? "unpublish" : "publish", name: campus.name });
-      },
-    }] : []),
-    ...(onArchive && campus.status !== "archived" ? [{
-      icon: Archive,
-      label: "Archive",
-      action: () => {
-        setOpen(false);
-        setArchiveConfirm({ id: campus.id, name: campus.name, wasPublished: campus.publishStatus === "published" });
-      },
-    }] : []),
-    ...(onDeleteRequest ? [
+        setPermanentDeleteTarget({ id: campus.id, name: campus.name });
+      } }] : []),
+    ]
+    : [
+      ...(onOpen ? [{ icon: ExternalLink, label: "Open Campus", action: () => { setOpen(false); onOpen(campus.id); } }] : []),
+      ...(onEditDetails ? [{ icon: Pencil, label: "Edit Details", action: () => { setOpen(false); onEditDetails(campus.id); } }] : []),
+      ...(onDuplicate ? [{ icon: Copy, label: "Duplicate Campus", action: () => { setOpen(false); setDuplicateTarget(campus.id); } }] : []),
       { type: "separator" as const },
-      { icon: Trash2, label: "Delete", danger: true, action: () => { setOpen(false); onDeleteRequest(campus.id); } },
-    ] : []),
-  ];
+      ...((onTogglePublish || (isPublished && onUnpublish)) ? [{
+        icon: isPublished ? EyeOff : Eye,
+        label: isPublished ? "Unpublish" : "Publish",
+        action: () => {
+          setOpen(false);
+          setPublishConfirm({ id: campus.id, action: isPublished ? "unpublish" : "publish", name: campus.name });
+        },
+      }] : []),
+      ...(onArchive && campus.status !== "archived" ? [{
+        icon: Archive,
+        label: "Archive Campus",
+        action: () => {
+          setOpen(false);
+          setArchiveConfirm({ id: campus.id, name: campus.name, wasPublished: campus.publishStatus === "published" });
+        },
+      }] : []),
+    ];
 
   const progressActionType = actionProgress?.action ?? "publishing";
 
@@ -464,7 +631,8 @@ function QuickActions({
                           key={idx}
                           ref={(el) => { itemRefs.current[idx] = el; }}
                           role="menuitem"
-                          onClick={() => {
+                          onClick={(event) => {
+                            event.stopPropagation();
                             setOpen(false);
                             item.action();
                           }}
@@ -527,17 +695,45 @@ function QuickActions({
       {createPortal(
         <ConfirmDialog
           open={archiveConfirm !== null}
-          title="Archive Campus?"
+          title={archiveConfirm?.wasPublished ? "Unpublish before archiving?" : "Archive this campus?"}
           message={
             archiveConfirm?.wasPublished
-              ? `"${archiveConfirm.name}" will be hidden from all students and visitors. All buildings, floor plans, routes, and settings will be preserved. You can restore this campus at any time.`
-              : `"${archiveConfirm?.name}" is currently a draft and not visible to students. Archiving will move it to the archived section. You can restore it at any time.`
+              ? `"${archiveConfirm.name}" is currently published. Unpublish it before archiving so it is no longer visible to students.`
+              : `"${archiveConfirm?.name}" will be removed from the active campus list. Buildings, floors, navigation, and other data will be preserved and can be restored later.`
           }
-          confirmLabel="Archive"
+          confirmLabel={archiveConfirm?.wasPublished ? "Unpublish Campus" : "Archive Campus"}
           cancelLabel="Cancel"
           variant="warning"
           onConfirm={handleArchiveConfirm}
           onCancel={() => setArchiveConfirm(null)}
+        />,
+        document.body
+      )}
+
+      {createPortal(
+        <TypedConfirmationDialog
+          open={permanentDeleteTarget !== null}
+          title="Permanently delete this campus?"
+          message="This permanently removes the campus and all of its map data. This cannot be undone."
+          expected={permanentDeleteTarget?.name ?? ""}
+          confirmLabel="Delete Permanently"
+          onConfirm={() => void handlePermanentDeleteConfirm()}
+          onCancel={() => setPermanentDeleteTarget(null)}
+        />,
+        document.body
+      )}
+
+      {/* Restore confirmation dialog */}
+      {createPortal(
+        <ConfirmDialog
+          open={restoreTarget !== null}
+          title="Restore this campus?"
+          message={`"${campus.name}" will return to the active list as an unpublished draft. Its buildings, floors, and navigation data will be preserved.`}
+          confirmLabel="Restore Campus"
+          cancelLabel="Cancel"
+          variant="info"
+          onConfirm={handleRestoreConfirm}
+          onCancel={() => setRestoreTarget(null)}
         />,
         document.body
       )}
@@ -572,6 +768,7 @@ function QuickActions({
           state={actionProgress?.state ?? "loading"}
           action={progressActionType}
           entityName={campus.name}
+          errorMessageOverride={actionProgress?.errorMessage}
           onClose={() => setActionProgress(null)}
           onRetry={handleProgressRetry}
           autoDismissMs={1500}
@@ -587,23 +784,18 @@ export function CampusHome({
   campuses,
   onOpen,
   onCreate,
-  onDelete,
   onDuplicate,
   onTogglePublish,
   onUnpublish,
   onArchive,
   onRestore,
+  onBulkRestore,
+  onPermanentDelete,
+  onBulkPermanentDelete,
+  permanentDeleteUnavailableReason,
   onEditDetails,
 }: CampusHomeProps) {
   const [showGuide, setShowGuide] = useState(false);
-  const [deleteConfirm, setDeleteConfirm] = useState<{ id: string; name: string } | null>(null);
-  const [restoreConfirm, setRestoreConfirm] = useState<{ id: string; name: string } | null>(null);
-  // Whether a campus is currently live for students (used for warning copy).
-  // Archived campuses are never live even if their publishStatus is still "published".
-  const isCampusLive = (id: string) => {
-    const c = campuses.find((x) => x.id === id);
-    return c?.publishStatus === "published" && c.status !== "archived";
-  };
   // Filter out archived campuses unless we want to show them
   const activeCampuses = campuses.filter((c) => c.status !== "archived");
   const archivedCampuses = campuses.filter((c) => c.status === "archived");
@@ -618,8 +810,110 @@ export function CampusHome({
 
   const activeVisible = activeCampuses.filter(matches);
   const archivedVisible = archivedCampuses.filter(matches);
+  const [selectedArchivedIds, setSelectedArchivedIds] = useState<Set<string>>(new Set());
+  const [bulkRestoreConfirm, setBulkRestoreConfirm] = useState<string[] | null>(null);
+  const [bulkDeleteConfirm, setBulkDeleteConfirm] = useState<string[] | null>(null);
+  const [bulkProgress, setBulkProgress] = useState<{
+    action: "restoring" | "deleting";
+    state: ActionState;
+    ids: string[];
+    total: number;
+    completed: number;
+    currentName?: string;
+    failedIds?: string[];
+    failures?: BulkDeleteFailure[];
+    errorMessage?: string;
+  } | null>(null);
+
+  useEffect(() => {
+    const visibleIds = new Set(archivedVisible.map((campus) => campus.id));
+    setSelectedArchivedIds((previous) => {
+      const next = new Set([...previous].filter((id) => visibleIds.has(id)));
+      return next.size === previous.size ? previous : next;
+    });
+  }, [archivedVisible.map((campus) => campus.id).join("|")]);
+
+  const toggleArchivedSelection = useCallback((id: string) => {
+    setSelectedArchivedIds((previous) => {
+      const next = new Set(previous);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const selectAllArchived = useCallback(() => {
+    setSelectedArchivedIds((previous) => {
+      const allVisible = archivedVisible.every((campus) => previous.has(campus.id));
+      return allVisible ? new Set() : new Set(archivedVisible.map((campus) => campus.id));
+    });
+  }, [archivedVisible]);
+
+  const runBulkRestore = useCallback(async (ids: string[]) => {
+    if (!onBulkRestore || ids.length === 0) return;
+    setBulkProgress({ action: "restoring", state: "loading", ids, total: ids.length, completed: 0 });
+    try {
+      await onBulkRestore(ids);
+      setBulkProgress((prev) => (prev ? { ...prev, state: "success", completed: ids.length } : prev));
+      setSelectedArchivedIds(new Set());
+      window.setTimeout(() => setBulkProgress(null), 1800);
+    } catch {
+      setBulkProgress((prev) => (prev ? { ...prev, state: "error", errorMessage: userFacingCampusMessage(new Error("Some campuses could not be restored.")) } : prev));
+    }
+  }, [onBulkRestore]);
+
+  const runBulkDelete = useCallback(async (ids: string[]) => {
+    if (!onBulkPermanentDelete || ids.length === 0 || bulkProgress?.state === "loading") return;
+    setBulkProgress({ action: "deleting", state: "loading", ids, total: ids.length, completed: 0 });
+    try {
+      const reportProgress = (progress: BulkDeleteProgress) => {
+        setBulkProgress((prev) => (prev ? {
+          ...prev,
+          completed: progress.completed,
+          currentName: progress.currentName,
+        } : prev));
+      };
+      // Keep compatibility with existing integrations that still accept the
+      // original one-argument callback while the page uses the progress-aware
+      // form. Real callbacks declare the second parameter; test/legacy mocks
+      // therefore continue to receive exactly the original argument list.
+      const result = onBulkPermanentDelete.length >= 2
+        ? await onBulkPermanentDelete(ids, reportProgress)
+        : await onBulkPermanentDelete(ids);
+      const failedIds = result?.failedIds ?? [];
+      if (failedIds.length > 0) {
+        setSelectedArchivedIds(new Set(failedIds));
+        setBulkProgress((prev) => (prev ? {
+          ...prev,
+          state: "error",
+          completed: ids.length,
+          failedIds,
+          failures: result.failures,
+          errorMessage: result.failureMessage ?? `${failedIds.length} campus${failedIds.length === 1 ? "" : "es"} could not be deleted.`,
+        } : prev));
+        return;
+      }
+      setSelectedArchivedIds(new Set());
+      setBulkProgress((prev) => (prev ? { ...prev, state: "success", completed: ids.length } : prev));
+    } catch (error) {
+      setSelectedArchivedIds(new Set(ids));
+      setBulkProgress((prev) => (prev ? {
+        ...prev,
+        state: "error",
+        completed: ids.length,
+        failedIds: ids,
+        failures: ids.map((id) => {
+          const campus = archivedCampuses.find((candidate) => candidate.id === id);
+          return { id, name: campus?.name ?? id, message: error instanceof Error ? error.message : "Delete failed.", userMessage: userFacingCampusMessage(error) };
+        }),
+        errorMessage: userFacingCampusMessage(error),
+      } : prev));
+    }
+  }, [onBulkPermanentDelete, bulkProgress?.state, archivedCampuses]);
+
+  const selectedArchived = [...selectedArchivedIds];
+  const allArchivedSelected = archivedVisible.length > 0 && archivedVisible.every((campus) => selectedArchivedIds.has(campus.id));
   const statusCounts: Record<CampusStatusFilter, number> = {
-    all: campuses.length, published: 0, draft: 0, never: 0,
+    all: campuses.length, published: 0, draft: 0, never: 0, archived: 0,
   };
   for (const c of campuses) statusCounts[campusStatusOf(c)]++;
   const isFiltering = q.length > 0 || statusFilter !== "all";
@@ -632,39 +926,6 @@ export function CampusHome({
 
   return (
     <div className="flex-1 overflow-y-auto scrollbar-show-on-hover scroll-smooth p-6 lg:p-8">
-      {/* Type-to-confirm delete dialog for X button */}
-      {deleteConfirm && onDelete && (
-        <TypeToConfirmDialog
-          open={!!deleteConfirm}
-          title="Delete Campus"
-          message={`This action cannot be undone. All buildings, floors, and room data for "${deleteConfirm.name}" will be permanently removed.` + (isCampusLive(deleteConfirm.id) ? " This campus is currently live for students and will disappear from the student map immediately." : "")}
-          confirmText={deleteConfirm.name}
-          confirmLabel="Delete Campus"
-          variant="danger"
-          onConfirm={() => {
-            onDelete(deleteConfirm.id);
-            setDeleteConfirm(null);
-          }}
-          onCancel={() => setDeleteConfirm(null)}
-        />
-      )}
-
-      {restoreConfirm && (
-        <ConfirmDialog
-          open={!!restoreConfirm}
-          title="Restore Campus?"
-          message={`"${restoreConfirm.name}" will return to your active campuses as an unpublished campus. It will not become visible to students automatically.`}
-          confirmLabel="Restore Campus"
-          cancelLabel="Cancel"
-          variant="info"
-          onConfirm={() => {
-            onRestore?.(restoreConfirm.id);
-            setRestoreConfirm(null);
-          }}
-          onCancel={() => setRestoreConfirm(null)}
-        />
-      )}
-
       {/* Campus Creation Guide */}
       <CreateCampusGuide
         open={showGuide}
@@ -821,8 +1082,13 @@ export function CampusHome({
               const hydratedFloors = totalFloors(campus);
               const hydratedRooms = totalRooms(campus);
               const previewBuildingCount = campus.previewBuildingCount ?? hydratedBuildingCount;
-              const floors = hydratedFloors > 0 ? hydratedFloors : campus.previewFloorCount ?? 0;
-              const rooms = hydratedRooms > 0 ? hydratedRooms : campus.previewRoomCount ?? 0;
+              // `preview_*_count` is the authoritative lightweight summary
+              // returned by campusService.list(). Prefer it even when the
+              // hydrated editor shape currently contains zero items; using a
+              // stale non-zero hydrated/fallback value made Room counts lag
+              // until the Map Builder was opened again.
+              const floors = campus.previewFloorCount ?? hydratedFloors;
+              const rooms = campus.previewRoomCount ?? hydratedRooms;
               const hasHydratedPreview = hydratedBuildingCount > 0;
               const markerCount = campus.markers.length;
               return (
@@ -831,7 +1097,17 @@ export function CampusHome({
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1], delay: index * 0.04 }}
-                  className="group bg-card rounded-2xl border border-border shadow-sm overflow-hidden hover:shadow-lg transition-shadow duration-300 flex flex-col"
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`Open campus ${campus.name}`}
+                  onClick={() => onOpen(campus.id)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      onOpen(campus.id);
+                    }
+                  }}
+                  className="group bg-card rounded-2xl border border-border shadow-sm overflow-hidden hover:shadow-lg transition-shadow duration-300 flex flex-col cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
                   style={campus.themeColor ? { borderTopColor: campus.themeColor, borderTopWidth: '3px', willChange: 'transform, opacity', transform: 'translateZ(0)' } as React.CSSProperties : { willChange: 'transform, opacity', transform: 'translateZ(0)' } as React.CSSProperties}
                 >
                   {/* Preview area */}
@@ -892,30 +1168,17 @@ export function CampusHome({
                       )}
                     </div>
 
-                    {/* Quick actions — always visible delete button + dropdown */}
+                    {/* Quick actions — lifecycle actions stay behind the overflow menu. */}
                     <div className="absolute top-2.5 right-2.5 flex items-center gap-1">
                       <QuickActions
                         campus={campus}
+                        onOpen={onOpen}
                         onDuplicate={onDuplicate}
                         onTogglePublish={onTogglePublish}
                         onUnpublish={onUnpublish}
-                        onArchive={campus.publishStatus === "published" ? undefined : onArchive}
+                        onArchive={onArchive}
                         onEditDetails={onEditDetails}
-                        onDeleteRequest={onDelete ? (id) => {
-                          const target = campuses.find((x) => x.id === id);
-                          if (target) setDeleteConfirm({ id, name: target.name });
-                        } : undefined}
                       />
-                      {onDelete && <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setDeleteConfirm({ id: campus.id, name: campus.name });
-                        }}
-                        className="w-7 h-7 rounded-full bg-background/60 backdrop-blur-sm flex items-center justify-center text-destructive/60 hover:bg-destructive/10 hover:text-destructive transition-colors"
-                        title="Delete campus"
-                      >
-                        <X className="h-3.5 w-3.5" />
-                      </button>}
                     </div>
 
                     {/* Campus code badge at bottom */}
@@ -1001,7 +1264,7 @@ export function CampusHome({
 
                       {/* Open button */}
                       <button
-                        onClick={() => onOpen(campus.id)}
+                        onClick={(event) => { event.stopPropagation(); onOpen(campus.id); }}
                         className={cn(
                           "w-full mt-3 h-9 rounded-xl text-xs font-extrabold transition-all flex items-center justify-center gap-1.5",
                           campus.themeColor
@@ -1043,17 +1306,62 @@ export function CampusHome({
               transition={{ delay: 0.3, duration: 0.4 }}
               className="mt-8"
             >
-              <h3 className="text-sm font-extrabold text-muted-foreground mb-3 flex items-center gap-2">
-                <Archive className="h-4 w-4" />
-                Archived Campuses ({archivedVisible.length})
-              </h3>
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                <h3 className="text-sm font-extrabold text-muted-foreground flex items-center gap-2">
+                  <Archive className="h-4 w-4" />
+                  Archived Campuses ({archivedVisible.length})
+                </h3>
+                <div className="flex flex-wrap items-center gap-2" role="toolbar" aria-label="Archived campus actions">
+                  <label className="inline-flex items-center gap-2 text-xs font-semibold text-muted-foreground cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={allArchivedSelected}
+                      onChange={selectAllArchived}
+                      aria-label="Select all visible archived campuses"
+                      className="h-4 w-4 rounded border-border accent-primary"
+                    />
+                    Select All
+                  </label>
+                  {selectedArchived.length > 0 && (
+                    <>
+                      <span className="text-xs font-bold text-foreground tabular-nums" role="status" aria-live="polite">{selectedArchived.length} selected</span>
+                      {onBulkRestore && (
+                        <button
+                          type="button"
+                          disabled={bulkProgress?.state === "loading"}
+                          onClick={() => setBulkRestoreConfirm(selectedArchived)}
+                          className="h-8 rounded-lg bg-primary/10 px-3 text-[11px] font-extrabold text-primary hover:bg-primary hover:text-primary-foreground disabled:opacity-50"
+                        >Restore</button>
+                      )}
+                      {onBulkPermanentDelete ? (
+                        <button
+                          type="button"
+                          disabled={bulkProgress?.state === "loading"}
+                          onClick={() => setBulkDeleteConfirm(selectedArchived)}
+                          className="h-8 rounded-lg bg-destructive/10 px-3 text-[11px] font-extrabold text-destructive hover:bg-destructive hover:text-destructive-foreground disabled:opacity-50"
+                        >Delete Permanently</button>
+                      ) : permanentDeleteUnavailableReason ? (
+                        <span className="max-w-xs text-[10px] leading-tight text-muted-foreground" title={permanentDeleteUnavailableReason}>Permanent deletion unavailable</span>
+                      ) : null}
+                      <button type="button" onClick={() => setSelectedArchivedIds(new Set())} className="h-8 rounded-lg border border-border px-3 text-[11px] font-bold text-muted-foreground hover:bg-muted">Clear</button>
+                    </>
+                  )}
+                </div>
+              </div>
               <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
                 {archivedVisible.map((campus) => (
                   <div
                     key={campus.id}
-                    className="bg-muted/30 rounded-2xl border border-border/50 p-4 opacity-60 hover:opacity-90 transition-opacity"
+                    className={cn("relative bg-muted/30 rounded-2xl border p-4 opacity-60 hover:opacity-90 transition-all", selectedArchivedIds.has(campus.id) ? "border-primary ring-2 ring-primary/20" : "border-border/50")}
                   >
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-3 pr-8">
+                      <input
+                        type="checkbox"
+                        checked={selectedArchivedIds.has(campus.id)}
+                        onChange={() => toggleArchivedSelection(campus.id)}
+                        aria-label={`Select archived campus ${campus.name}`}
+                        className="h-4 w-4 shrink-0 rounded border-border accent-primary"
+                      />
                       <div className="w-10 h-10 rounded-xl bg-muted flex items-center justify-center">
                         <Archive className="h-5 w-5 text-muted-foreground" />
                       </div>
@@ -1062,25 +1370,70 @@ export function CampusHome({
                           <HighlightedName text={campus.name} query={q} />
                         </p>
                         <p className="text-[10px] text-muted-foreground font-mono">{campus.code}</p>
+                        <span className="inline-flex items-center gap-1 mt-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold border border-border bg-muted text-muted-foreground">
+                          <Archive className="h-2.5 w-2.5" /> Archived
+                        </span>
                       </div>
-                      <button
-                        onClick={() => setRestoreConfirm({ id: campus.id, name: campus.name })}
-                        className="text-xs font-bold text-primary hover:underline shrink-0"
-                      >
-                        Restore
-                      </button>
-                      {onDelete && <button
-                        onClick={() => setDeleteConfirm({ id: campus.id, name: campus.name })}
-                        className="text-xs font-bold text-destructive/70 hover:text-destructive hover:underline shrink-0"
-                        title="Permanently delete this archived campus"
-                      >
-                        Delete
-                      </button>}
+                    </div>
+                    <div className="absolute top-2.5 right-2.5">
+                      <QuickActions campus={campus} archived onRestore={onRestore} onPermanentDelete={onPermanentDelete} />
                     </div>
                   </div>
                 ))}
               </div>
             </motion.div>
+            )}
+            {bulkRestoreConfirm && createPortal(
+              <ConfirmDialog
+                open
+                title={`Restore ${bulkRestoreConfirm.length} campus${bulkRestoreConfirm.length === 1 ? "" : "es"}?`}
+                message="The selected campuses will return to the active list as private drafts. Their map data will be preserved."
+                confirmLabel="Restore Campuses"
+                cancelLabel="Cancel"
+                variant="info"
+                onConfirm={() => {
+                  const ids = bulkRestoreConfirm;
+                  setBulkRestoreConfirm(null);
+                  void runBulkRestore(ids);
+                }}
+                onCancel={() => setBulkRestoreConfirm(null)}
+              />, document.body
+            )}
+            {bulkDeleteConfirm && createPortal(
+              <TypedConfirmationDialog
+                open
+                title={`Permanently delete ${bulkDeleteConfirm.length} campus${bulkDeleteConfirm.length === 1 ? "" : "es"}?`}
+                message="This permanently removes the selected campuses and all associated map data. This cannot be undone."
+                expected={`DELETE ${bulkDeleteConfirm.length} CAMPUSES`}
+                confirmLabel="Delete Permanently"
+                onConfirm={() => {
+                  const ids = bulkDeleteConfirm;
+                  setBulkDeleteConfirm(null);
+                  void runBulkDelete(ids);
+                }}
+                onCancel={() => setBulkDeleteConfirm(null)}
+              />, document.body
+            )}
+            {bulkProgress?.action === "deleting" && (
+              <ActionProgressDialog
+                open
+                state={bulkProgress.state}
+                action="deleting"
+                titleOverride="Deleting Campuses"
+                loadingMessageOverride="Permanently removing the selected archived campuses and their authored map data."
+                progressMessage={bulkProgress.state === "loading"
+                  ? `${bulkProgress.completed} of ${bulkProgress.total}${bulkProgress.currentName ? ` · ${bulkProgress.currentName}` : ""}`
+                  : undefined}
+                successTitleOverride="Campuses Permanently Deleted"
+                successMessageOverride={`${bulkProgress.total} campus${bulkProgress.total === 1 ? "" : "es"} and their authored map data were removed.`}
+                errorTitleOverride="Some Campuses Were Not Deleted"
+                errorMessageOverride={bulkProgress.errorMessage}
+                failureItems={bulkProgress.failures?.map((failure) => ({ id: failure.id, name: failure.name, reason: failure.userMessage }))}
+                onClose={() => setBulkProgress(null)}
+                onRetry={() => void runBulkDelete(bulkProgress.failedIds?.length ? bulkProgress.failedIds : bulkProgress.ids)}
+                retryLabel="Retry Failed"
+                autoDismissMs={bulkProgress.state === "success" ? 1500 : 0}
+              />
             )}
             </>
           )}

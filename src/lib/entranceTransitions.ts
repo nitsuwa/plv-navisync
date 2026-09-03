@@ -2,6 +2,8 @@ import type { Campus, CampusBuilding, CampusEntrance, FloorDoor, FloorPlan, Navi
 import { genId as defaultGenId } from "../components/map-builder/constants";
 import { entranceDisplayName, entranceWorldPosition } from "./buildingEntrances";
 import { createNavNode, DEFAULT_NAV_NODE_COLOR, findEntranceNavNode } from "./navigationGraph";
+import { entranceConnectorDistance, entranceConnectorGeometry } from "./entranceConnector";
+import { ROOM_DOOR_EDGE_TYPE } from "./indoorNavigationGraph";
 
 export const ENTRANCE_TRANSITION_EDGE_TYPE = "entrance_transition";
 
@@ -31,6 +33,18 @@ export interface EntranceIndoorLinkStatus {
   edgeId?: string;
   entryFloor?: boolean;
   hidden?: boolean;
+  warning?: string;
+  /** Whether the linked Door has a non-entrance edge into its indoor network. */
+  doorNavigationConnected?: boolean;
+}
+
+export interface EntranceOutdoorLinkStatus {
+  state: "not_connected" | "connected" | "missing";
+  edgeId?: string;
+  entranceNodeId?: string;
+  targetNodeId?: string;
+  targetName?: string;
+  targetKind?: "generated" | "manual" | "entrance" | "indoor";
   warning?: string;
 }
 
@@ -77,6 +91,157 @@ export function findEntranceTransitionForDoor(
   );
 }
 
+/**
+ * Find the explicit outdoor bridge edge for an Entrance.  Indoor
+ * `entrance_transition` edges are deliberately excluded: the Entrance node
+ * is shared by both sides of the bridge, but the two connections have
+ * different semantics.
+ */
+export function findEntranceOutdoorConnection(
+  nodes: NavigationNode[] | undefined,
+  edges: NavigationEdge[] | undefined,
+  buildingId: string,
+  entranceId: string,
+): NavigationEdge | undefined {
+  const entranceNode = findEntranceNavNode(nodes ?? [], buildingId, entranceId);
+  if (!entranceNode) return undefined;
+  return (edges ?? []).find((edge) =>
+    !isEntranceTransitionEdge(edge)
+    && (edge.startNodeId === entranceNode.id || edge.endNodeId === entranceNode.id)
+  );
+}
+
+/** Human-facing status for the Entrance's outdoor Walking Network bridge. */
+export function entranceOutdoorLinkStatus(
+  campus: Pick<Campus, "navNodes" | "navEdges">,
+  buildingId: string,
+  entranceId: string,
+): EntranceOutdoorLinkStatus {
+  const nodes = campus.navNodes ?? [];
+  const entranceNode = findEntranceNavNode(nodes, buildingId, entranceId);
+  if (!entranceNode) return { state: "not_connected" };
+  const edge = findEntranceOutdoorConnection(nodes, campus.navEdges, buildingId, entranceId);
+  if (!edge) return { state: "not_connected", entranceNodeId: entranceNode.id };
+  const targetId = edge.startNodeId === entranceNode.id ? edge.endNodeId : edge.startNodeId;
+  const target = nodes.find((node) => node.id === targetId);
+  if (!target) {
+    return {
+      state: "missing",
+      edgeId: edge.id,
+      entranceNodeId: entranceNode.id,
+      targetNodeId: targetId,
+      warning: "The connected Walking Point no longer exists.",
+    };
+  }
+  const targetKind = target.generatedFromPathVertices?.length
+    ? "generated"
+    : target.entranceId
+      ? "entrance"
+      : target.floorId
+        ? "indoor"
+        : "manual";
+  return {
+    state: "connected",
+    edgeId: edge.id,
+    entranceNodeId: entranceNode.id,
+    targetNodeId: target.id,
+    targetName: target.name || "Walking Point",
+    targetKind,
+  };
+}
+
+/** Remove only the outdoor bridge edge(s), preserving the Entrance and its
+ * indoor Door transition. */
+export function removeEntranceOutdoorConnection(
+  campus: Campus,
+  buildingId: string,
+  entranceId: string,
+): Campus {
+  const entranceNode = findEntranceNavNode(campus.navNodes ?? [], buildingId, entranceId);
+  if (!entranceNode) return campus;
+  const nextEdges = (campus.navEdges ?? []).filter((edge) =>
+    isEntranceTransitionEdge(edge)
+    || !(edge.startNodeId === entranceNode.id || edge.endNodeId === entranceNode.id)
+  );
+  return nextEdges.length === (campus.navEdges ?? []).length
+    ? campus
+    : { ...campus, navEdges: nextEdges };
+}
+
+/**
+ * Remove dangling outdoor Entrance bridge edges after a target node is
+ * deleted.  This is intentionally scoped to edges touching an explicit
+ * Entrance node; unrelated manual graph edges are never swept.
+ */
+export function reconcileEntranceOutdoorConnections(campus: Campus): Campus {
+  const nodes = campus.navNodes ?? [];
+  const nodeIds = new Set(nodes.map((node) => node.id));
+  const entranceNodes = new Map(nodes.filter((node) => node.entranceId && !node.floorId).map((node) => [node.id, node]));
+  const nextEdges = (campus.navEdges ?? []).filter((edge) => {
+    if (isEntranceTransitionEdge(edge)) return true;
+    const touchesEntrance = entranceNodes.has(edge.startNodeId) || entranceNodes.has(edge.endNodeId);
+    if (!touchesEntrance) return true;
+    return nodeIds.has(edge.startNodeId) && nodeIds.has(edge.endNodeId);
+  }).map((edge) => {
+    if (isEntranceTransitionEdge(edge)) return edge;
+    const entranceNode = entranceNodes.get(edge.startNodeId) ?? entranceNodes.get(edge.endNodeId);
+    if (!entranceNode) return edge;
+    const accessible = entranceNode.accessible !== false;
+    const building = campus.buildings.find((candidate) => candidate.id === entranceNode.buildingId);
+    const entrance = building?.entrances?.find((candidate) => candidate.id === entranceNode.entranceId);
+    const targetId = edge.startNodeId === entranceNode.id ? edge.endNodeId : edge.startNodeId;
+    const target = nodes.find((node) => node.id === targetId);
+    if (!building || !entrance || !target) {
+      return edge.accessible === accessible ? edge : { ...edge, accessible };
+    }
+    const geometry = entranceConnectorGeometry(
+      building,
+      entrance,
+      { x: target.x, y: target.y },
+      campus.buildings,
+      campus.decorAssets ?? [],
+    );
+    // Keep a previously valid connector intact if a later edit makes the
+    // target genuinely unreachable. The next authoring attempt can surface
+    // the blocked state without destroying the last known-good edge.
+    if (geometry.blocked) return edge.accessible === accessible ? edge : { ...edge, accessible };
+    const points = edge.startNodeId === entranceNode.id ? geometry.points : [...geometry.points].reverse();
+    const bends = points.slice(1, -1);
+    const distance = entranceConnectorDistance(points);
+    const sameBends = (edge.bendPoints ?? []).length === bends.length
+      && (edge.bendPoints ?? []).every((point, index) => point.x === bends[index].x && point.y === bends[index].y);
+    if (edge.accessible === accessible && sameBends && edge.distance === distance) return edge;
+    return { ...edge, accessible, bendPoints: bends.length > 0 ? bends : undefined, distance };
+  });
+  const unchanged = nextEdges.length === (campus.navEdges ?? []).length
+    && nextEdges.every((edge, index) => edge === (campus.navEdges ?? [])[index]);
+  return unchanged ? campus : { ...campus, navEdges: nextEdges };
+}
+
+/** A Door is indoor-network connected only when it has a real non-entrance
+ * edge to another node on the same building/floor. The Entrance transition
+ * itself is not mistaken for indoor walking connectivity. */
+export function doorHasIndoorNavigationConnection(
+  nodes: NavigationNode[] | undefined,
+  edges: NavigationEdge[] | undefined,
+  doorNode: NavigationNode | undefined,
+  includeClosed = false,
+): boolean {
+  if (!doorNode?.buildingId || !doorNode.floorId || !doorNode.doorId) return false;
+  const nodeIds = new Set((nodes ?? []).map((node) => node.id));
+  return (edges ?? []).some((edge) => {
+    if (isEntranceTransitionEdge(edge) || edge.type === ROOM_DOOR_EDGE_TYPE || (!includeClosed && edge.closed)) return false;
+    const otherId = edge.startNodeId === doorNode.id
+      ? edge.endNodeId
+      : edge.endNodeId === doorNode.id
+        ? edge.startNodeId
+        : undefined;
+    if (!otherId || !nodeIds.has(otherId)) return false;
+    const other = (nodes ?? []).find((node) => node.id === otherId);
+    return other?.buildingId === doorNode.buildingId && other.floorId === doorNode.floorId;
+  });
+}
+
 function findDoor(building: CampusBuilding | undefined, floorId: string | undefined, doorId: string | undefined): { floor: FloorPlan; door: FloorDoor } | null {
   if (!building || !floorId || !doorId) return null;
   const floor = building.floors.find((f) => f.id === floorId);
@@ -110,6 +275,7 @@ export function entranceIndoorLinkStatus(
   const entryFloor = entryFloorForBuilding(building);
   const onEntryFloor = !!entryFloor && resolved.floor.id === entryFloor.id;
   const hidden = resolved.door.visible === false;
+  const doorNavigationConnected = doorHasIndoorNavigationConnection(nodes, campus.navEdges, doorNode);
   return {
     state: "linked",
     floorId: resolved.floor.id,
@@ -120,9 +286,11 @@ export function entranceIndoorLinkStatus(
     edgeId: edge.id,
     entryFloor: onEntryFloor,
     hidden,
+    doorNavigationConnected,
     warning: !onEntryFloor
       ? "Connected door is no longer on the building entry floor."
-      : hidden ? "Linked Door is hidden." : undefined,
+      : hidden ? "Linked Door is hidden."
+        : !doorNavigationConnected ? "Connect the Door to the indoor walking network." : undefined,
   };
 }
 
@@ -145,6 +313,7 @@ export function doorEntranceLinkStatus(
   const onEntryFloor = !!entryFloor && floorId === entryFloor.id;
   const resolved = findDoor(building, floorId, doorId);
   const hidden = resolved?.door.visible === false;
+  const doorNavigationConnected = doorHasIndoorNavigationConnection(nodes, campus.navEdges, doorNode);
   return {
     state: "linked",
     floorId,
@@ -154,9 +323,11 @@ export function doorEntranceLinkStatus(
     edgeId: edge.id,
     entryFloor: onEntryFloor,
     hidden,
+    doorNavigationConnected,
     warning: !onEntryFloor
       ? "Connected door is no longer on the building entry floor."
-      : hidden ? "Linked Door is hidden." : undefined,
+      : hidden ? "Linked Door is hidden."
+        : !doorNavigationConnected ? "Connect the Door to the indoor walking network." : undefined,
   };
 }
 

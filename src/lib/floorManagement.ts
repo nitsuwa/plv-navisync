@@ -73,12 +73,190 @@ export function defaultStairDirectionForFloorInOrder(floorId: string, floors: Ar
   return "both";
 }
 
+/**
+ * Whether a Stair occurrence may continue from one ordered floor to another
+ * according to its authored direction.  The floor array is the source of
+ * truth; numeric floor labels are intentionally not consulted here.  This is
+ * shared by the continuation picker and its status presentation so an
+ * impossible lower/higher candidate can never be offered in one place and
+ * shown as valid in another.
+ */
+export function stairContinuationDirectionAllows(
+  direction: StairDirection | undefined,
+  fromFloorIndex: number,
+  toFloorIndex: number,
+): boolean {
+  if (fromFloorIndex < 0 || toFloorIndex < 0 || fromFloorIndex === toFloorIndex) return false;
+  if (direction === "up") return toFloorIndex > fromFloorIndex;
+  if (direction === "down") return toFloorIndex < fromFloorIndex;
+  return true;
+}
+
+export type StairContinuationValidationState = "none" | "direction-mismatch" | "missing";
+
+export interface StairContinuationValidation {
+  /** No explicit continuation identity is configured for this occurrence. */
+  state: StairContinuationValidationState;
+  /** Floors occupied by the same physical Stair identity. */
+  continuationFloorIds: string[];
+  /** Same-identity floors that conflict with the authored direction. */
+  invalidDirectionFloorIds: string[];
+  /** Same-direction floors without an adjacent, traversable transition. */
+  unavailableFloorIds: string[];
+}
+
+/**
+ * Validate one Stair occurrence against its explicit shared continuation and
+ * the currently-derived floor transition graph.  This is intentionally a
+ * small authoring/readiness helper: it does not mutate the graph or alter A*.
+ * The building's ordered floor array is authoritative, and a Stair may only
+ * continue to an adjacent floor.  A missing local nav node is left to the
+ * existing Navigation connectivity issue so this check does not collapse two
+ * different authoring problems into one warning.
+ */
+export function validateStairContinuation(
+  stair: Pick<FloorStairs, "id" | "sharedId" | "direction">,
+  floorId: string,
+  floors: Array<Pick<FloorPlan, "id" | "stairs">>,
+  navNodes?: Array<Pick<NavigationNode, "id" | "floorId" | "stairId">>,
+  navEdges?: Array<Pick<NavigationEdge, "startNodeId" | "endNodeId" | "type" | "bidirectional" | "closed">>,
+): StairContinuationValidation {
+  if (!stair.sharedId) {
+    return { state: "none", continuationFloorIds: [], invalidDirectionFloorIds: [], unavailableFloorIds: [] };
+  }
+  const fromIndex = floors.findIndex((floor) => floor.id === floorId);
+  if (fromIndex < 0) {
+    return { state: "none", continuationFloorIds: [], invalidDirectionFloorIds: [], unavailableFloorIds: [] };
+  }
+  const occurrences = floors.flatMap((floor, index) => (floor.stairs ?? [])
+    .filter((candidate) => candidate.sharedId === stair.sharedId && !(floor.id === floorId && candidate.id === stair.id))
+    .map((candidate) => ({ floor, index, candidate })));
+  const continuationFloorIds = [...new Set(occurrences.map(({ floor }) => floor.id))];
+  if (occurrences.length === 0) {
+    // A newly placed, non-navigation Stair may carry an auto-generated
+    // sharedId before the admin has authored its continuation.  Keep that
+    // ordinary authoring state quiet; once the local anchor is linked, the
+    // missing continuation becomes actionable and is surfaced here.
+    const linkedLocally = navNodes?.some((node) => node.floorId === floorId && node.stairId === stair.id);
+    return { state: linkedLocally ? "missing" : "none", continuationFloorIds, invalidDirectionFloorIds: [], unavailableFloorIds: [] };
+  }
+
+  // A multi-floor Stair identity commonly has occurrences on both sides of a
+  // middle floor.  Direction only governs which *adjacent* transition can be
+  // traversed from this occurrence; an otherwise valid upper (or lower)
+  // connection must not be reported as invalid merely because the same
+  // physical stair also exists on the opposite side.  Non-adjacent occurrences
+  // are context, not required direct continuations.
+  const adjacentOccurrences = occurrences.filter(({ index }) => Math.abs(index - fromIndex) === 1);
+  const validDirectionOccurrences = adjacentOccurrences.filter(({ index }) =>
+    stairContinuationDirectionAllows(stair.direction, fromIndex, index)
+  );
+  const invalidDirectionFloorIds = [...new Set(adjacentOccurrences
+    .filter(({ index }) => !stairContinuationDirectionAllows(stair.direction, fromIndex, index))
+    .map(({ floor }) => floor.id))];
+  if (invalidDirectionFloorIds.length > 0 && validDirectionOccurrences.length === 0) {
+    return { state: "direction-mismatch", continuationFloorIds, invalidDirectionFloorIds, unavailableFloorIds: [] };
+  }
+
+  const localNode = navNodes?.find((node) => node.floorId === floorId && node.stairId === stair.id);
+  const unavailableFloorIds = [...new Set(validDirectionOccurrences
+    .filter(({ index, floor, candidate }) => {
+      // When no graph snapshot is supplied, structural validity is all this
+      // helper can assess.  FloorEditor supplies the canonical snapshot.
+      if (!navNodes || !navEdges || !localNode) return false;
+      // Resolve the exact occurrence on this floor instead of pairing by
+      // coordinates or by label.
+      const targetNodeIds = new Set(navNodes.filter((node) => node.floorId === floor.id && node.stairId === candidate.id).map((node) => node.id));
+      if (targetNodeIds.size === 0) return true;
+      // `cross_floor` is the legacy spelling used by older saved campuses;
+      // current writes use `floor_transition`.  Both represent the same
+      // authored Stair continuation here, while exact endpoint identity and
+      // direction checks remain authoritative.
+      return !navEdges.some((edge) => (edge.type === "floor_transition" || edge.type === "cross_floor") && !edge.closed && (
+        (edge.startNodeId === localNode.id && targetNodeIds.has(edge.endNodeId))
+        || (edge.bidirectional && edge.endNodeId === localNode.id && targetNodeIds.has(edge.startNodeId))
+      ));
+    })
+    .map(({ floor }) => floor.id))];
+  return {
+    state: unavailableFloorIds.length > 0 ? "missing" : "none",
+    continuationFloorIds,
+    invalidDirectionFloorIds,
+    unavailableFloorIds,
+  };
+}
+
+export interface StairDirectionAdjustment {
+  floorId: string;
+  floorLabel: string;
+  stairId: string;
+  stairLabel: string;
+  from: StairDirection;
+  to: StairDirection;
+}
+
+/**
+ * Reconcile persisted Stair direction values after the canonical floor order
+ * changes.  Valid, intentional middle-floor choices are preserved; only an
+ * impossible boundary value (or a one-floor value with cross-floor meaning)
+ * is replaced with that floor's safe default.  The helper is pure so callers
+ * can keep the mutation in their existing history/save pipeline and surface a
+ * small UI notice when an adjustment actually occurred.
+ */
+export function reconcileStairDirectionsForFloorOrder(floors: FloorPlan[]): {
+  floors: FloorPlan[];
+  adjustments: StairDirectionAdjustment[];
+} {
+  const adjustments: StairDirectionAdjustment[] = [];
+  const nextFloors = floors.map((floor) => {
+    const allowed = stairDirectionsForFloorInOrder(floor.id, floors);
+    let changed = false;
+    const nextStairs = (floor.stairs ?? []).map((stair) => {
+      const direction = stair.direction;
+      const isValid = floors.length > 1 && allowed.includes(direction);
+      if (isValid) return stair;
+      const nextDirection = defaultStairDirectionForFloorInOrder(floor.id, floors);
+      if (nextDirection === direction) return stair;
+      changed = true;
+      adjustments.push({
+        floorId: floor.id,
+        floorLabel: floor.label,
+        stairId: stair.id,
+        stairLabel: stair.label?.trim() || "Stair",
+        from: direction,
+        to: nextDirection,
+      });
+      return { ...stair, direction: nextDirection };
+    });
+    return changed ? { ...floor, stairs: nextStairs } : floor;
+  });
+  return { floors: nextFloors, adjustments };
+}
+
 export function stairDirectionsForFloor(floorNumber: number, floorNumbers: number[]): StairDirection[] {
   return stairDirectionsForFloorInOrder(String(floorNumber), floorNumbers.map((number) => ({ id: String(number) })));
 }
 
 export function defaultStairDirectionForFloor(floorNumber: number, floorNumbers: number[]): StairDirection {
   return defaultStairDirectionForFloorInOrder(String(floorNumber), floorNumbers.map((number) => ({ id: String(number) })));
+}
+
+/**
+ * The authored entry side is the corridor-facing side of the Stair.  PLV's
+ * physical Stair labels intentionally use the opposite side name, so this
+ * helper is the single source of truth for generated defaults.
+ */
+export function stairLabelForEntrySide(flip: boolean | undefined): string {
+  return flip ? "Left Stair" : "Right Stair";
+}
+
+/**
+ * Labels in this set are generated by the editor and may safely follow an
+ * Entry Side change.  Any other label is admin-authored and must be preserved.
+ */
+export function isDefaultStairLabel(label: string | undefined): boolean {
+  const normalized = label?.trim().toLocaleLowerCase();
+  return normalized === "stairs" || normalized === "stair" || normalized === "left stair" || normalized === "right stair";
 }
 
 /** Append a new default floor (600x450, empty, normalized) to the collection. */

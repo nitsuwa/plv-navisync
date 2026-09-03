@@ -1111,7 +1111,7 @@ export type Database = {
           archived_at: string | null
           assigned_admin_id: string | null
           building_id: string | null
-          campus_id: string
+          campus_id: string | null
           category: string
           created_at: string
           description: string
@@ -1131,7 +1131,7 @@ export type Database = {
           archived_at?: string | null
           assigned_admin_id?: string | null
           building_id?: string | null
-          campus_id: string
+          campus_id?: string | null
           category: string
           created_at?: string
           description: string
@@ -1151,7 +1151,7 @@ export type Database = {
           archived_at?: string | null
           assigned_admin_id?: string | null
           building_id?: string | null
-          campus_id?: string
+          campus_id?: string | null
           category?: string
           created_at?: string
           description?: string
@@ -1410,6 +1410,10 @@ export type Database = {
       }
       save_campus_structure: {
         Args: { p_campus_id: string; p_payload: Json }
+        Returns: Json
+      }
+      permanently_delete_campus: {
+        Args: { target_campus_id: string }
         Returns: Json
       }
     }

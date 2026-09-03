@@ -2,6 +2,7 @@ import { getSupabase } from "../lib/supabase";
 import { DEFAULT_FEATURES } from "../components/map-builder/constants";
 import type { Campus, CampusBuilding } from "../components/map-builder/types";
 import type { Json, Tables, TablesInsert, TablesUpdate } from "../types/database.generated";
+import { serializeCampusStructure } from "./campusStructureService";
 
 export type CampusRow = Tables<"campuses">;
 export type CampusVersionRow = Tables<"campus_versions">;
@@ -100,7 +101,46 @@ export function deriveCampusLifecycleStatus(row: CampusRow): CampusLifecycleStat
  * (e.g. client-side validation or the duplicate-code pre-check).
  */
 export function userFacingCampusMessage(error: unknown): string {
+  if (error instanceof CampusDeletionError) {
+    switch (error.stage) {
+      case "storage_list_failed":
+      case "storage_remove_failed":
+        return "We couldn't remove this campus's stored map files. The campus is still available.";
+      case "invalid_lifecycle_state":
+        return "This campus is not archived.";
+      case "authorization_failed":
+        return "Your account is not allowed to permanently delete campuses.";
+      case "database_delete_failed":
+        if (error.dbCode === "P0002") return "That campus no longer exists. Refresh the campus list.";
+        if (error.dbCode === "22023") return "Only archived campuses can be permanently deleted.";
+        if (error.dbCode === "42501") return "Your account is not allowed to permanently delete campuses.";
+        if (error.dbCode === "23514") return "A protected campus lifecycle dependency prevented deletion. The campus is still available.";
+        if (error.dbCode === "P0001" || error.dbCode === "23503") {
+          return "A database dependency prevented deletion. The campus is still available.";
+        }
+        return "We couldn't complete the database deletion. The campus is still available.";
+    }
+  }
+  if (error instanceof CampusServiceError && error.operation.includes("permanently delete") && error.operation.includes("storage")) {
+    return "Campus files could not be removed. The campus was not deleted.";
+  }
   if (error instanceof CampusServiceError && error.dbCode) {
+    if (error.operation.includes("permanently delete")) {
+      switch (error.dbCode) {
+        case "22023":
+          return "Only archived campuses can be permanently deleted.";
+        case "42501":
+          return "Your account is not allowed to permanently delete campuses.";
+        case "23514":
+          return "A protected campus lifecycle dependency prevented deletion. The campus is still available.";
+        case "23503":
+          return "This campus still has protected dependent data. Refresh and try again.";
+        case "P0002":
+          return "That campus no longer exists. Refresh the campus list.";
+        default:
+          return "The campus could not be permanently deleted. Try again or refresh the page.";
+      }
+    }
     switch (error.dbCode) {
       case "23505": // unique_violation
         return "A campus with this code already exists. Choose a different code.";
@@ -289,6 +329,32 @@ export async function listCampuses(): Promise<Campus[]> {
   return mapRows((data ?? []) as CampusListRow[]);
 }
 
+/** Read the immutable snapshots that are currently visible to students. */
+export async function listPublishedCampusSnapshots(): Promise<Campus[]> {
+  const { data, error } = await getSupabase()
+    .from("campus_versions")
+    .select("campus_id,snapshot,published_at")
+    .eq("state", "published")
+    .order("published_at", { ascending: false });
+  assertOk(error, "list published campus versions");
+  const result: Campus[] = [];
+  for (const row of data ?? []) {
+    const snapshot = row.snapshot;
+    if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) continue;
+    const campus = (snapshot as { campus?: unknown }).campus;
+    if (!campus || typeof campus !== "object" || Array.isArray(campus)) continue;
+    const value = campus as Campus;
+    result.push({
+      ...value,
+      publishStatus: "published",
+      lifecycleStatus: "published",
+      visibleToStudents: true,
+      publishedAt: row.published_at ?? value.publishedAt,
+    });
+  }
+  return result;
+}
+
 /** Choose a usable campus without assuming the database contains one. */
 export function selectActiveCampus(campuses: Campus[], preferredId?: string): Campus | null {
   const available = campuses.filter((campus) => campus.status !== "archived");
@@ -394,6 +460,238 @@ export async function listCampusVersions(campusId: string): Promise<CampusVersio
   return data ?? [];
 }
 
+const CAMPUS_STORAGE_BUCKETS = ["campus-images", "floor-plans"] as const;
+const STORAGE_LIST_PAGE_SIZE = 100;
+const STORAGE_REMOVE_BATCH_SIZE = 1000;
+
+type CampusStorageBucket = (typeof CAMPUS_STORAGE_BUCKETS)[number];
+type StorageListEntry = { name: string; id?: string | null; metadata?: unknown };
+
+function storagePath(prefix: string, name: string): string {
+  return prefix ? `${prefix}/${name}` : name;
+}
+
+/**
+ * Supabase Storage folders are prefixes, not recursively deletable objects.
+ * Walk each campus prefix and return only file paths (folder entries have no
+ * object id) so the caller can remove them through the Storage API.
+ */
+export async function listCampusStoragePaths(
+  bucket: CampusStorageBucket,
+  campusId: string,
+): Promise<string[]> {
+  const storage = getSupabase().storage.from(bucket);
+  const paths: string[] = [];
+
+  const walk = async (prefix: string): Promise<void> => {
+    let offset = 0;
+    while (true) {
+      const { data, error } = await storage.list(prefix, {
+        limit: STORAGE_LIST_PAGE_SIZE,
+        offset,
+        sortBy: { column: "name", order: "asc" },
+      });
+      assertOk(error, `permanently delete campus storage (${bucket})`);
+      const entries = (data ?? []) as StorageListEntry[];
+      if (entries.length === 0) break;
+
+      for (const entry of entries) {
+        if (!entry?.name) continue;
+        const path = storagePath(prefix, entry.name);
+        if (entry.id || entry.metadata) {
+          paths.push(path);
+        } else {
+          await walk(path);
+        }
+      }
+
+      if (entries.length < STORAGE_LIST_PAGE_SIZE) break;
+      offset += entries.length;
+    }
+  };
+
+  await walk(campusId);
+  return paths;
+}
+
+/** Remove actual campus-owned files through Supabase Storage, in batches. */
+export async function removeCampusStoragePaths(
+  bucket: CampusStorageBucket,
+  paths: string[],
+): Promise<void> {
+  if (paths.length === 0) return;
+  const storage = getSupabase().storage.from(bucket);
+  for (let index = 0; index < paths.length; index += STORAGE_REMOVE_BATCH_SIZE) {
+    const batch = paths.slice(index, index + STORAGE_REMOVE_BATCH_SIZE);
+    const { error } = await storage.remove(batch);
+    assertOk(error, `permanently delete campus storage (${bucket})`);
+  }
+}
+
+export type CampusDeletionStage =
+  | "storage_list_failed"
+  | "storage_remove_failed"
+  | "invalid_lifecycle_state"
+  | "authorization_failed"
+  | "database_delete_failed";
+
+/** A permanent-delete failure with an actionable stage for the lifecycle UI. */
+export class CampusDeletionError extends CampusServiceError {
+  readonly stage: CampusDeletionStage;
+  readonly causeError?: unknown;
+
+  constructor(opts: {
+    stage: CampusDeletionStage;
+    operation: string;
+    message: string;
+    code?: string;
+    details?: string;
+    hint?: string;
+    cause?: unknown;
+  }) {
+    super(opts);
+    this.name = "CampusDeletionError";
+    this.stage = opts.stage;
+    this.causeError = opts.cause;
+  }
+}
+
+function asCampusDeletionError(
+  stage: CampusDeletionStage,
+  operation: string,
+  error: unknown,
+  fallbackMessage: string,
+): CampusDeletionError {
+  if (error instanceof CampusDeletionError) return error;
+  if (error instanceof CampusServiceError) {
+    return new CampusDeletionError({
+      stage,
+      operation,
+      message: error.message,
+      code: error.dbCode,
+      details: error.dbDetails,
+      hint: error.dbHint,
+      cause: error,
+    });
+  }
+  return new CampusDeletionError({
+    stage,
+    operation,
+    message: error instanceof Error ? error.message : fallbackMessage,
+    cause: error,
+  });
+}
+
+/**
+ * Clean campus-owned files before invoking the relational delete RPC. Storage
+ * and Postgres cannot share a transaction; the caller therefore surfaces any
+ * later RPC failure honestly instead of claiming the campus was deleted.
+ */
+export async function cleanupCampusStorage(campusId: string): Promise<void> {
+  // Discover every bucket first. A listing failure must not leave an earlier
+  // bucket's files removed while the relational campus still exists.
+  const filesByBucket = await Promise.all(
+    CAMPUS_STORAGE_BUCKETS.map(async (bucket) => {
+      try {
+        return { bucket, paths: await listCampusStoragePaths(bucket, campusId) };
+      } catch (error) {
+        throw asCampusDeletionError(
+          "storage_list_failed",
+          `permanently delete campus storage (${bucket})`,
+          error,
+          "Campus storage could not be listed.",
+        );
+      }
+    }),
+  );
+  for (const { bucket, paths } of filesByBucket) {
+    try {
+      await removeCampusStoragePaths(bucket, paths);
+    } catch (error) {
+      throw asCampusDeletionError(
+        "storage_remove_failed",
+        `permanently delete campus storage (${bucket})`,
+        error,
+        "Campus storage could not be removed.",
+      );
+    }
+  }
+}
+
+async function assertCampusArchivedForPermanentDelete(id: string): Promise<void> {
+  const { data, error } = await getSupabase()
+    .from("campuses")
+    .select("status")
+    .eq("id", id)
+    .maybeSingle();
+  try {
+    assertOk(error, "check permanent delete eligibility");
+  } catch (failure) {
+    throw asCampusDeletionError(
+      failure instanceof CampusServiceError && failure.dbCode === "42501" ? "authorization_failed" : "database_delete_failed",
+      "check permanent delete eligibility",
+      failure,
+      "Permanent delete eligibility could not be checked.",
+    );
+  }
+  if (!data) {
+    throw new CampusDeletionError({
+      stage: "invalid_lifecycle_state",
+      operation: "check permanent delete eligibility",
+      message: "Campus not found.",
+    });
+  }
+  if (data.status !== "archived") {
+    throw new CampusDeletionError({
+      stage: "invalid_lifecycle_state",
+      operation: "check permanent delete eligibility",
+      message: "Only archived campuses can be permanently deleted.",
+    });
+  }
+}
+
+/**
+ * Permanently delete an archived campus through the Storage API followed by
+ * the database-owned lifecycle contract. The RPC performs relational
+ * dependency cleanup in one transaction; the browser deliberately never
+ * issues child-table deletes itself. Storage and Postgres are separate
+ * services, so a later RPC failure is surfaced rather than reported as a
+ * successful campus deletion.
+ */
+export async function permanentlyDeleteCampus(id: string): Promise<void> {
+  await assertCampusArchivedForPermanentDelete(id);
+  try {
+    await cleanupCampusStorage(id);
+  } catch (error) {
+    throw asCampusDeletionError(
+      error instanceof CampusDeletionError ? error.stage : "storage_list_failed",
+      "permanently delete campus storage",
+      error,
+      "Campus storage cleanup failed.",
+    );
+  }
+  const { data, error } = await getSupabase().rpc("permanently_delete_campus", {
+    target_campus_id: id,
+  });
+  try {
+    assertOk(error, "permanently delete campus");
+  } catch (failure) {
+    throw asCampusDeletionError(
+      failure instanceof CampusServiceError && failure.dbCode === "42501" ? "authorization_failed" : "database_delete_failed",
+      "permanently delete campus",
+      failure,
+      "The relational campus deletion failed.",
+    );
+  }
+  if (!data || typeof data !== "object" || Array.isArray(data) || (data as { deleted?: unknown }).deleted !== true) {
+    throw new CampusDeletionError({
+      stage: "database_delete_failed",
+      operation: "permanently delete campus",
+      message: "The campus delete operation did not return an authoritative confirmation.",
+    });
+  }
+}
+
 const ALLOWED_IMAGES = new Set(["image/jpeg", "image/png", "image/webp"]);
 export function validateCampusImage(file: Blob): void {
   if (!ALLOWED_IMAGES.has(file.type)) throw new Error("Use a JPEG, PNG, or WebP image.");
@@ -409,8 +707,81 @@ export async function uploadCampusImage(campusId: string, kind: "logo" | "overvi
   return path;
 }
 
+/**
+ * Persist the current authored campus as a version and publish it through the
+ * database-owned publication contract.  Keeping this operation here means
+ * Preview and the eventual public consumer share one immutable snapshot,
+ * rather than relying on the editor's in-memory state.
+ */
+export async function publishCampusVersion(
+  campus: Campus,
+  validation: { errors: number; warnings: number; passed: number; total: number },
+): Promise<Campus> {
+  if (validation.errors > 0) {
+    throw new Error("Fix the blocking validation issues before publishing this campus.");
+  }
+  const userId = await requireCurrentUserId();
+  const existingVersions = await listCampusVersions(campus.id);
+  const nextVersion = existingVersions.reduce((max, version) => Math.max(max, version.version_number), 0) + 1;
+  const snapshot = {
+    version: 1,
+    campus: JSON.parse(JSON.stringify(campus)) as Campus,
+    structure: serializeCampusStructure(campus),
+  } as unknown as Json;
+  const score = validation.total > 0
+    ? Math.round((validation.passed / validation.total) * 100)
+    : 100;
+  const { data: version, error: versionError } = await getSupabase()
+    .from("campus_versions")
+    .insert({
+      campus_id: campus.id,
+      version_number: nextVersion,
+      state: "draft",
+      snapshot,
+      validation_score: score,
+      change_summary: "Published from Admin Student Preview",
+      created_by: userId,
+    })
+    .select("id")
+    .single();
+  assertOk(versionError, "create campus publish version");
+  if (!version?.id) throw new Error("The publish version was not created.");
+
+  const status = validation.warnings > 0 ? "warning" : "passed";
+  const { error: validationError } = await getSupabase()
+    .from("validation_runs")
+    .insert({
+      campus_id: campus.id,
+      campus_version_id: version.id,
+      status,
+      score,
+      errors_count: validation.errors,
+      warnings_count: validation.warnings,
+      passed_count: validation.passed,
+      run_by: userId,
+    });
+  assertOk(validationError, "record campus publish validation");
+
+  const { data: publishedId, error: publishError } = await getSupabase()
+    .rpc("publish_campus_version", { p_version_id: version.id });
+  assertOk(publishError, "publish campus version");
+  if (typeof publishedId !== "string" || publishedId !== version.id) {
+    throw new Error("Publishing did not return an authoritative version confirmation.");
+  }
+  const publishedAt = new Date().toISOString();
+  return {
+    ...campus,
+    publishStatus: "published",
+    lifecycleStatus: "published",
+    visibleToStudents: true,
+    publishedAt,
+  };
+}
+
 export const campusService = {
   list: listCampuses, getById: getCampusById, create: createCampus, update: updateCampus,
   archive: archiveCampus, restore: restoreCampus, unpublish: unpublishCampus, selectActive: selectActiveCampus,
-  listVersions: listCampusVersions, validateImage: validateCampusImage, uploadImage: uploadCampusImage,
+  listVersions: listCampusVersions, listPublishedSnapshots: listPublishedCampusSnapshots, permanentlyDelete: permanentlyDeleteCampus,
+  validateImage: validateCampusImage, uploadImage: uploadCampusImage,
+  publishVersion: publishCampusVersion,
 };

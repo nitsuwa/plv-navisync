@@ -5,6 +5,7 @@ import {
   indoorNodeAccessibleDefault,
   createIndoorNavNode,
   linkedObjectRef,
+  stairEntryPosition,
   resolveIndoorLinkedPosition,
   syncIndoorLinkedNodePositions,
   pruneOrphanedIndoorNodes,
@@ -21,13 +22,21 @@ import {
   navAlignSnap,
   navGroupAlignSnap,
   remapIndoorNavForFloorCopy,
+  replaceBuildingFloorsAndReconcileTransitions,
   navEdgeIsBlocked,
   CROSS_FLOOR_EDGE_TYPE,
   crossFloorTransitionAccessible,
   findCrossFloorOwnerInfo,
   reconcileCrossFloorTransitions,
+  roomDisplayName,
+  roomDoorIsValid,
+  reconcileRoomDoorEdges,
+  roomAccessDoorIds,
+  normalizeNavigationEdges,
+  ROOM_DOOR_EDGE_TYPE,
 } from "../indoorNavigationGraph";
 import { createNavEdge, normalizeNavGraph } from "../navigationGraph";
+import { findNavigationRoute } from "../pathfinding";
 import type {
   FloorPlan, FloorWall, FloorDoor, NavigationNode, NavigationEdge,
 } from "../../components/map-builder/types";
@@ -101,11 +110,60 @@ describe("B5 Phase 2 — linked position resolution + sync", () => {
     // deterministic offset above the center so edges never land on the label.
     expect(resolveIndoorLinkedPosition(createIndoorNavNode({ id: "n1", x: 0, y: 0, buildingId: "b1", floorId: "f1", roomId: "r1", type: "room_access" }), floor)).toEqual({ x: 50, y: 30 });
     expect(resolveIndoorLinkedPosition(createIndoorNavNode({ id: "n2", x: 0, y: 0, buildingId: "b1", floorId: "f1", doorId: "d1" }), floor)).toEqual({ x: 80, y: 40 });
-    expect(resolveIndoorLinkedPosition(createIndoorNavNode({ id: "n3", x: 0, y: 0, buildingId: "b1", floorId: "f1", stairId: "s1" }), floor)).toEqual({ x: 110, y: 88 });
-    expect(resolveIndoorLinkedPosition(createIndoorNavNode({ id: "n4", x: 0, y: 0, buildingId: "b1", floorId: "f1", elevatorId: "e1" }), floor)).toEqual({ x: 177, y: 67 });
+    // Stairs use one neutral access point at the centred floor-facing edge,
+    // not a flight-specific point inside the footprint.
+    expect(resolveIndoorLinkedPosition(createIndoorNavNode({ id: "n3", x: 0, y: 0, buildingId: "b1", floorId: "f1", stairId: "s1" }), floor)).toEqual({ x: 110, y: 96 });
+    expect(resolveIndoorLinkedPosition(createIndoorNavNode({ id: "n4", x: 0, y: 0, buildingId: "b1", floorId: "f1", elevatorId: "e1" }), floor)).toEqual({ x: 177, y: 74 });
     // B5 Phase 2.6: the ramp's LOGICAL routing anchor is the object CENTER
     // (route edges terminate there); the visual badge may offset separately.
     expect(resolveIndoorLinkedPosition(createIndoorNavNode({ id: "n5", x: 0, y: 0, buildingId: "b1", floorId: "f1", rampId: "r1c" }), floor)).toEqual({ x: 150, y: 86 });
+  });
+
+  it("keeps one neutral stair anchor through mirror and rotation", () => {
+    const stair = { x: 100, y: 80, width: 20, height: 16, rotation: 0, flip: false };
+    expect(stairEntryPosition(stair)).toEqual({ x: 110, y: 96 });
+    expect(stairEntryPosition({ ...stair, flip: true })).toEqual({ x: 110, y: 96 });
+    expect(stairEntryPosition({ ...stair, rotation: 90 })).toEqual({ x: 102, y: 88 });
+  });
+
+  it("keeps the same anchor for Up, Down, Both, and either Entry Side", () => {
+    const stair = { x: 100, y: 80, width: 20, height: 16, rotation: 0, flip: false, direction: "up" as const };
+    expect(stairEntryPosition(stair)).toEqual({ x: 110, y: 96 });
+    expect(stairEntryPosition({ ...stair, direction: "down" })).toEqual({ x: 110, y: 96 });
+    expect(stairEntryPosition({ ...stair, flip: true, direction: "down" })).toEqual({ x: 110, y: 96 });
+    expect(stairEntryPosition({ ...stair, direction: "both", rotation: 90 })).toEqual({ x: 102, y: 88 });
+  });
+
+  it("moves the existing linked Stair node when its direction changes", () => {
+    const stair = { id: "s1", x: 100, y: 80, width: 20, height: 16, rotation: 0, flip: false, direction: "up" as const, label: "Stairs" };
+    const linked = createIndoorNavNode({ id: "stair-node", x: 110, y: 96, buildingId: "b1", floorId: "f1", stairId: "s1", type: "stair" });
+    const synced = syncIndoorLinkedNodePositions([linked], { ...floor, stairs: [stair] });
+    const down = syncIndoorLinkedNodePositions(synced, { ...floor, stairs: [{ ...stair, direction: "down" }] });
+    expect(down).toHaveLength(1);
+    expect(down[0].id).toBe("stair-node");
+    expect(down[0]).toMatchObject({ x: 110, y: 96 });
+  });
+
+  it("re-resolves the same Stair node when floor-order reconciliation changes its direction", () => {
+    const stair = { id: "s1", x: 100, y: 80, width: 20, height: 16, rotation: 0, flip: false, direction: "both" as const, label: "Stairs" };
+    const floors = [
+      { ...makeFloor(), id: "f1", number: 1, label: "Ground Floor", stairs: [] },
+      { ...makeFloor(), id: "f2", number: 2, label: "Floor 2", stairs: [stair] },
+      { ...makeFloor(), id: "f3", number: 3, label: "Floor 3", stairs: [] },
+    ] as unknown as FloorPlan[];
+    const stairNode = createIndoorNavNode({ id: "stair-node", x: 110, y: 96, buildingId: "b1", floorId: "f2", stairId: "s1", type: "stair" });
+    const corridorNode = createIndoorNavNode({ id: "corridor-node", x: 130, y: 96, buildingId: "b1", floorId: "f2", type: "hallway" });
+    const campus = {
+      id: "c1",
+      buildings: [{ id: "b1", floors }],
+      navNodes: [stairNode, corridorNode],
+      navEdges: [{ id: "edge-1", startNodeId: "stair-node", endNodeId: "corridor-node", distance: 25, bidirectional: true, accessible: true, type: "hallway", color: "#475569", width: 1 }],
+    } as unknown as import("../../components/map-builder/types").Campus;
+    const reordered = [floors[0], floors[2], { ...floors[1], stairs: [{ ...stair, direction: "down" as const }] }];
+    const updated = replaceBuildingFloorsAndReconcileTransitions(campus, "b1", reordered);
+    const updatedNode = updated.navNodes.find((node) => node.id === "stair-node");
+    expect(updatedNode).toMatchObject({ id: "stair-node", x: 110, y: 96 });
+    expect(updated.navEdges.find((edge) => edge.id === "edge-1")?.distance).toBe(25);
   });
 
   it("syncs linked nodes to their owner after the owner moves; free nodes untouched", () => {
@@ -117,6 +175,37 @@ describe("B5 Phase 2 — linked position resolution + sync", () => {
     expect(syncedRoom.x).toBe(130);
     expect(syncedRoom.y).toBe(70); // room routing anchor (offset above the moved center)
     expect(synced.find((n) => n.id === "n2")).toEqual(free);
+  });
+});
+
+describe("Room navigation display identity", () => {
+  it("uses the explicit Room name and a stable floor-local fallback", () => {
+    expect(roomDisplayName({ name: "  Library  " }, 0)).toBe("Library");
+    expect(roomDisplayName({ name: "" }, 0)).toBe("Room 1");
+    expect(roomDisplayName({ name: "   " }, 2)).toBe("Room 3");
+    expect(roomDisplayName({ name: "" })).toBe("Room");
+  });
+});
+
+describe("Room Door access relationship", () => {
+  const room = { id: "r1", name: "Room A", type: "classroom", x: 20, y: 20, w: 60, h: 40, floorId: "f1", buildingId: "b1", accessDoorId: "d1" } as FloorPlan["rooms"][number];
+  const door = { id: "d1", x: 80, y: 40, width: 8, direction: "left", color: "#d97706", wallId: "w1", offset: 0.5 } as FloorDoor;
+  const wall = { id: "w1", x1: 80, y1: 20, x2: 80, y2: 60, thickness: 4, color: "#64748b", startAnchor: { targetType: "room", roomId: "r1", edge: "right", offset: 0.5 } } as FloorWall;
+
+  it("accepts only a Door physically associated with the Room boundary", () => {
+    expect(roomDoorIsValid(room, door, [wall])).toBe(true);
+    expect(roomDoorIsValid(room, { ...door, x: 160 }, [wall])).toBe(true); // wall anchor is authoritative
+    expect(roomDoorIsValid(room, { ...door, wallId: "other" }, [wall])).toBe(false);
+    expect(roomDoorIsValid(room, door, [{ ...wall, startAnchor: { ...wall.startAnchor!, roomId: "other-room" } }])).toBe(false);
+  });
+
+  it("derives one semantic Room-to-Door edge without merging identities", () => {
+    const roomNode = createIndoorNavNode({ id: "room-node", x: 0, y: 0, buildingId: "b1", floorId: "f1", roomId: "r1", type: "room_access" });
+    const doorNode = createIndoorNavNode({ id: "door-node", x: 0, y: 0, buildingId: "b1", floorId: "f1", doorId: "d1", type: "hallway" });
+    const edges = reconcileRoomDoorEdges([roomNode, doorNode], [], [room], [door], [wall]);
+    expect(edges).toHaveLength(1);
+    expect(edges[0]).toMatchObject({ startNodeId: "room-node", endNodeId: "door-node", type: ROOM_DOOR_EDGE_TYPE });
+    expect(reconcileRoomDoorEdges([roomNode, doorNode], edges, [room], [door], [wall])).toHaveLength(1);
   });
 });
 
@@ -161,6 +250,7 @@ describe("B5 Phase 2 — point target finders", () => {
 
   it("findCirculationAtPoint resolves the nearest circulation center", () => {
     expect(findCirculationAtPoint(floor.stairs, floor.elevators, floor.ramps, { x: 110, y: 88 })).toEqual({ kind: "stairs", id: "s1" });
+    expect(findCirculationAtPoint(floor.stairs, floor.elevators, floor.ramps, { x: 110, y: 96 })).toEqual({ kind: "stairs", id: "s1" });
     expect(findCirculationAtPoint(floor.stairs, floor.elevators, floor.ramps, { x: 177, y: 67 })).toEqual({ kind: "elevator", id: "e1" });
     expect(findCirculationAtPoint(floor.stairs, floor.elevators, floor.ramps, { x: 5, y: 5 })).toBeNull();
   });
@@ -537,6 +627,10 @@ describe("B5 Phase 2.11 — live validity of EXISTING authored edges (navEdgeIsB
   it("an edge wholly clear of walls is valid", () => {
     expect(navEdgeIsBlocked({ startNodeId: "n1", endNodeId: "n2", bendPoints: [{ x: 20, y: 100 }] }, nodes, [wall], [])).toBe(false);
   });
+
+  it("keeps the semantic Room→Door relationship out of physical path validation", () => {
+    expect(navEdgeIsBlocked({ ...edge, type: ROOM_DOOR_EDGE_TYPE }, nodes, [wall], [])).toBe(false);
+  });
 });
 
 describe("B5 Phase 3 — cross-floor navigation transitions", () => {
@@ -571,6 +665,41 @@ describe("B5 Phase 3 — cross-floor navigation transitions", () => {
     expect(t.accessible).toBe(false);
     expect(crossFloorTransitionAccessible("stair")).toBe(false);
     expect([t.startNodeId, t.endNodeId].sort()).toEqual(["n1", "n2"]);
+  });
+
+  it("changing Direction only never creates a new Stair connection", () => {
+    const authoredFloors = [
+      { ...floors[0], stairs: [{ ...stair("s1", "left-chain"), direction: "both" as const }] },
+      { ...floors[1], stairs: [{ ...stair("s2", "left-chain"), direction: "down" as const }] },
+      { ...floors[2], stairs: [{ ...stair("s3", "unrelated-chain"), direction: "both" as const }] },
+    ];
+    const nodes = [
+      linked("n1", "f1", { stairId: "s1" }),
+      linked("n2", "f2", { stairId: "s2" }),
+      linked("n3", "f3", { stairId: "s3" }),
+    ];
+    const before = reconcileCrossFloorTransitions(nodes, [], authoredFloors, "b1");
+    const directionChanged = authoredFloors.map((floor) => floor.id === "f2"
+      ? { ...floor, stairs: [{ ...floor.stairs[0], direction: "both" as const }] }
+      : floor);
+    const after = reconcileCrossFloorTransitions(nodes, before, directionChanged, "b1");
+    expect(directionChanged.flatMap((floor) => floor.stairs).map((item) => item.sharedId)).toEqual([
+      "left-chain", "left-chain", "unrelated-chain",
+    ]);
+    expect(after.map((edge) => [edge.startNodeId, edge.endNodeId].sort().join("|"))).toEqual(["n1|n2"]);
+  });
+
+  it("does not cross-pair duplicate same-floor Stair occurrences sharing a legacy identity", () => {
+    const duplicateFloors = [
+      { ...floors[0], stairs: [stair("s1-left", "legacy-core"), stair("s1-right", "legacy-core")] },
+      { ...floors[1], stairs: [stair("s2-left", "legacy-core")] },
+    ];
+    const nodes = [
+      linked("n1-left", "f1", { stairId: "s1-left" }),
+      linked("n1-right", "f1", { stairId: "s1-right" }),
+      linked("n2-left", "f2", { stairId: "s2-left" }),
+    ];
+    expect(reconcileCrossFloorTransitions(nodes, [], duplicateFloors, "b1")).toHaveLength(0);
   });
 
   it("unrelated sharedIds do not connect", () => {
@@ -1008,5 +1137,179 @@ describe("B5 Phase 3 — cross-floor navigation transitions", () => {
     const edges = reconcileCrossFloorTransitions(nodes, [], reordered, "b1");
     expect(edges).toHaveLength(1);
     expect([edges[0].startNodeId, edges[0].endNodeId].sort()).toEqual(["n1", "n3"]);
+  });
+
+  it("marks ordinary Elevator transitions unsafe for Emergency unless every stop opts in", () => {
+    const floors: Pick<FloorPlan, "id" | "number" | "label" | "stairs" | "ramps" | "elevators">[] = [
+      { id: "f1", number: 1, label: "Ground Floor", stairs: [], ramps: [], elevators: [elevator("e1", "el-a", [1, 2])] },
+      { id: "f2", number: 2, label: "Floor 2", stairs: [], ramps: [], elevators: [elevator("e2", "el-a", [1, 2])] },
+    ];
+    const nodes = [linked("n1", "f1", { elevatorId: "e1", type: "elevator" }), linked("n2", "f2", { elevatorId: "e2", type: "elevator" })];
+    expect(reconcileCrossFloorTransitions(nodes, [], floors, "b1")[0].emergencySafe).toBe(false);
+    const safeNodes = nodes.map((node) => ({ ...node, emergencySafe: true }));
+    expect(reconcileCrossFloorTransitions(safeNodes, [], floors, "b1")[0].emergencySafe).toBe(true);
+  });
+
+  it("honors Stair direction per occurrence without changing the A* implementation", () => {
+    const directionalFloors = [
+      { ...floors[0], stairs: [{ ...stair("s1", "directional"), direction: "up" as const }] },
+      { ...floors[1], stairs: [{ ...stair("s2", "directional"), direction: "up" as const }] },
+    ];
+    const nodes = [
+      linked("n1", "f1", { stairId: "s1" }),
+      linked("n2", "f2", { stairId: "s2" }),
+    ];
+    const transitions = reconcileCrossFloorTransitions(nodes, [], directionalFloors, "b1");
+    expect(transitions).toHaveLength(1);
+    expect(transitions[0]).toMatchObject({ startNodeId: "n1", endNodeId: "n2", bidirectional: false });
+    expect(findNavigationRoute(nodes, transitions, "n1", "n2")?.nodeIds).toEqual(["n1", "n2"]);
+    expect(findNavigationRoute(nodes, transitions, "n2", "n1")).toBeNull();
+  });
+
+  it("reuses the transition id while refreshing direction after a Stair edit", () => {
+    const nodes = [
+      linked("n1", "f1", { stairId: "s1" }),
+      linked("n2", "f2", { stairId: "s2" }),
+    ];
+    const first = reconcileCrossFloorTransitions(nodes, [], floors, "b1");
+    const changedFloors = [
+      { ...floors[0], stairs: [{ ...stair("s1", "stair-core-a"), direction: "up" as const }] },
+      { ...floors[1], stairs: [{ ...stair("s2", "stair-core-a"), direction: "up" as const }] },
+    ];
+    const next = reconcileCrossFloorTransitions(nodes, first, changedFloors, "b1");
+    expect(next).toHaveLength(1);
+    expect(next[0].id).toBe(first[0].id);
+    expect(next[0].bidirectional).toBe(false);
+    expect(next[0].startNodeId).toBe("n1");
+    expect(next[0].endNodeId).toBe("n2");
+  });
+
+  it("removes a Stair transition when the ordered directions no longer permit either way", () => {
+    const nodes = [
+      linked("n1", "f1", { stairId: "s1" }),
+      linked("n2", "f2", { stairId: "s2" }),
+    ];
+    const first = reconcileCrossFloorTransitions(nodes, [], floors, "b1");
+    const blockedFloors = [
+      { ...floors[0], stairs: [{ ...stair("s1", "stair-core-a"), direction: "down" as const }] },
+      { ...floors[1], stairs: [{ ...stair("s2", "stair-core-a"), direction: "up" as const }] },
+    ];
+    expect(reconcileCrossFloorTransitions(nodes, first, blockedFloors, "b1")).toHaveLength(0);
+  });
+
+  it("finds a standard F1→F2 route through local Walking Network edges and a Stair transition", () => {
+    const nodes = [
+      { ...freeNode("f1-start", 10, 10), floorId: "f1" },
+      linked("stair-f1", "f1", { stairId: "s1", x: 40, y: 48 }),
+      linked("stair-f2", "f2", { stairId: "s2", x: 40, y: 48 }),
+      { ...freeNode("f2-destination", 90, 10), floorId: "f2" },
+    ];
+    const transitions = reconcileCrossFloorTransitions(nodes, [], floors.slice(0, 2), "b1");
+    const localEdges: NavigationEdge[] = [
+      { id: "walk-f1", startNodeId: "f1-start", endNodeId: "stair-f1", distance: 10, bidirectional: true, accessible: true, type: "hallway", color: "#16a34a" },
+      { id: "walk-f2", startNodeId: "stair-f2", endNodeId: "f2-destination", distance: 10, bidirectional: true, accessible: true, type: "hallway", color: "#16a34a" },
+    ];
+    const route = findNavigationRoute(nodes, [...localEdges, ...transitions], "f1-start", "f2-destination");
+    expect(route?.nodeIds).toEqual(["f1-start", "stair-f1", "stair-f2", "f2-destination"]);
+    const reverse = findNavigationRoute(nodes, [...localEdges, ...transitions], "f2-destination", "f1-start");
+    expect(reverse?.nodeIds).toEqual(["f2-destination", "stair-f2", "stair-f1", "f1-start"]);
+  });
+
+  it("a missing local Stair connection makes the cross-floor route unavailable", () => {
+    const nodes = [
+      { ...freeNode("f1-start", 10, 10), floorId: "f1" },
+      linked("stair-f1", "f1", { stairId: "s1" }),
+      linked("stair-f2", "f2", { stairId: "s2" }),
+      { ...freeNode("f2-destination", 90, 10), floorId: "f2" },
+    ];
+    const transitions = reconcileCrossFloorTransitions(nodes, [], floors.slice(0, 2), "b1");
+    const route = findNavigationRoute(nodes, transitions, "f1-start", "f2-destination");
+    expect(route).toBeNull();
+  });
+
+  it("a three-floor Stair route uses adjacent transitions only", () => {
+    const nodes = [
+      { ...freeNode("f1-start", 0, 0), floorId: "f1" },
+      linked("stair-f1", "f1", { stairId: "s1" }),
+      linked("stair-f2", "f2", { stairId: "s2" }),
+      linked("stair-f3", "f3", { stairId: "s3" }),
+      { ...freeNode("f3-destination", 100, 0), floorId: "f3" },
+    ];
+    const transitions = reconcileCrossFloorTransitions(nodes, [], floors, "b1");
+    const route = findNavigationRoute(nodes, [
+      { id: "walk-f1", startNodeId: "f1-start", endNodeId: "stair-f1", distance: 10, bidirectional: true, accessible: true, type: "hallway", color: "#16a34a" },
+      { id: "walk-f3", startNodeId: "stair-f3", endNodeId: "f3-destination", distance: 10, bidirectional: true, accessible: true, type: "hallway", color: "#16a34a" },
+      ...transitions,
+    ], "f1-start", "f3-destination");
+    expect(route?.nodeIds).toEqual(["f1-start", "stair-f1", "stair-f2", "stair-f3", "f3-destination"]);
+    expect(transitions.map((edge) => [edge.startNodeId, edge.endNodeId].sort().join("|"))).toEqual([
+      "stair-f1|stair-f2",
+      "stair-f2|stair-f3",
+    ]);
+    const reverse = findNavigationRoute(nodes, [
+      { id: "walk-f1", startNodeId: "f1-start", endNodeId: "stair-f1", distance: 10, bidirectional: true, accessible: true, type: "hallway", color: "#16a34a" },
+      { id: "walk-f3", startNodeId: "stair-f3", endNodeId: "f3-destination", distance: 10, bidirectional: true, accessible: true, type: "hallway", color: "#16a34a" },
+      ...transitions,
+    ], "f3-destination", "f1-start");
+    expect(reverse?.nodeIds).toEqual(["f3-destination", "stair-f3", "stair-f2", "stair-f1", "f1-start"]);
+  });
+
+  it("keeps legacy accessDoorId while exposing deduplicated multi-door access", () => {
+    expect(roomAccessDoorIds({ accessDoorId: "west", accessDoorIds: ["east", "west", "east"] })).toEqual(["west", "east"]);
+    expect(roomAccessDoorIds({})).toEqual([]);
+  });
+
+  it("normalizes split edge geometry and removes duplicate direct edges", () => {
+    const nodes = [
+      { id: "a", x: 0, y: 0 }, { id: "c", x: 50, y: 0 }, { id: "b", x: 100, y: 0 },
+    ] as NavigationNode[];
+    const edges = [
+      { id: "ac", startNodeId: "a", endNodeId: "c", bidirectional: true, type: "hallway", bendPoints: [{ x: 50, y: 0 }, { x: 50, y: 0 }] },
+      { id: "cb", startNodeId: "c", endNodeId: "b", bidirectional: true, type: "hallway", bendPoints: [{ x: 75, y: 0 }] },
+      { id: "old", startNodeId: "a", endNodeId: "b", bidirectional: true, type: "hallway", bendPoints: [] },
+      { id: "old-duplicate", startNodeId: "b", endNodeId: "a", bidirectional: true, type: "hallway", bendPoints: [] },
+    ] as NavigationEdge[];
+    const normalized = normalizeNavigationEdges(edges, nodes, 2, { splitNodeIds: new Set(["c"]) });
+    expect(normalized.filter((edge) => edge.startNodeId === "a" && edge.endNodeId === "b" || edge.startNodeId === "b" && edge.endNodeId === "a")).toHaveLength(0);
+    expect(normalized.find((edge) => edge.id === "ac")?.bendPoints).toEqual([]);
+    expect(normalized.find((edge) => edge.id === "cb")?.distance).toBe(50);
+  });
+
+  it("does not treat coordinate overlap as an implicit split", () => {
+    const nodes = [
+      { id: "a", x: 0, y: 0 }, { id: "c", x: 50, y: 0 }, { id: "b", x: 100, y: 0 },
+    ] as NavigationNode[];
+    const direct = {
+      id: "direct", startNodeId: "a", endNodeId: "b", bidirectional: true,
+      type: "hallway", bendPoints: [], distance: 100,
+    } as NavigationEdge;
+    expect(normalizeNavigationEdges([direct], nodes).map((edge) => edge.id)).toEqual(["direct"]);
+  });
+
+  it("deduplicates equivalent manual hallway and walkway segments by node pair", () => {
+    const nodes = [
+      { id: "a", x: 0, y: 0, floorId: "f1" }, { id: "b", x: 100, y: 0, floorId: "f1" },
+    ] as NavigationNode[];
+    const hallway = { id: "hallway", startNodeId: "a", endNodeId: "b", bidirectional: true, type: "hallway", distance: 100 } as NavigationEdge;
+    const walkway = { id: "walkway", startNodeId: "b", endNodeId: "a", bidirectional: true, type: "walkway", distance: 100 } as NavigationEdge;
+    expect(normalizeNavigationEdges([hallway, walkway], nodes)).toHaveLength(1);
+  });
+
+  it("keeps meaningful parallel paths while collapsing exact duplicates", () => {
+    const nodes = [
+      { id: "a", x: 0, y: 0, floorId: "f1" }, { id: "b", x: 100, y: 0, floorId: "f1" },
+    ] as NavigationNode[];
+    const base = {
+      startNodeId: "a", endNodeId: "b", bidirectional: true, type: "hallway",
+      distance: 100, accessible: true, emergencySafe: true, closed: false,
+    } as const;
+    const exact = { id: "exact", ...base } as NavigationEdge;
+    const duplicate = { id: "duplicate", ...base } as NavigationEdge;
+    const inaccessible = { id: "inaccessible", ...base, accessible: false } as NavigationEdge;
+    const bent = { id: "bent", ...base, bendPoints: [{ x: 50, y: 20 }] } as NavigationEdge;
+
+    const normalized = normalizeNavigationEdges([exact, duplicate, inaccessible, bent], nodes);
+
+    expect(normalized.map((edge) => edge.id)).toEqual(["exact", "inaccessible", "bent"]);
   });
 });

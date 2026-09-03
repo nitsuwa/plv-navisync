@@ -258,6 +258,13 @@ describe("createCampusClone", () => {
     expect(clone.code).toBe("MAIN-CP-2");
   });
 
+  it("keeps the generated copy code within the database length limit", () => {
+    const src = { ...makeSourceCampus(), code: "A".repeat(30) };
+    const clone = createCampusClone(src, new Set(), new Set(), seqGen());
+    expect(clone.code).toHaveLength(30);
+    expect(clone.code.endsWith("-CP")).toBe(true);
+  });
+
   it("gives every nested entity a fresh id and never reuses a source id", () => {
     const src = makeSourceCampus();
     const srcIds = new Set(allIds(src));
@@ -369,6 +376,32 @@ describe("createCampusClone", () => {
     const snapshot = JSON.stringify(src);
     createCampusClone(src, new Set(), new Set(), seqGen());
     expect(JSON.stringify(src)).toBe(snapshot);
+  });
+
+  it("remaps outdoor generated vertices and circulation-group identities", () => {
+    const src = makeSourceCampus();
+    src.buildings[0].circulationGroups = [{ id: "cg1", buildingId: "b1", kind: "stair", name: "Stair A" }];
+    src.paths[0] = { ...src.paths[0], navigationVertexIds: ["out-v1", "out-v2"] };
+    src.navNodes = [
+      ...(src.navNodes ?? []),
+      {
+        id: "n5", name: "Outdoor Generated", type: "outdoor", x: 25, y: 25,
+        generatedFromPathVertices: [{ pathId: "p1", vertexId: "out-v1" }],
+        accessible: true, color: "#666",
+      },
+    ];
+
+    const clone = createCampusClone(src, new Set(), new Set(), seqGen());
+    const clonedBuilding = clone.buildings[0];
+    const clonedPath = clone.paths[0];
+    const clonedNode = clone.navNodes!.find((node) => node.name === "Outdoor Generated")!;
+
+    expect(clonedBuilding.circulationGroups?.[0].id).not.toBe("cg1");
+    expect(clonedBuilding.circulationGroups?.[0].buildingId).toBe(clonedBuilding.id);
+    expect(clonedPath.id).not.toBe("p1");
+    expect(clonedPath.navigationVertexIds).not.toEqual(src.paths[0].navigationVertexIds);
+    expect(clonedNode.generatedFromPathVertices?.[0].pathId).toBe(clonedPath.id);
+    expect(clonedNode.generatedFromPathVertices?.[0].vertexId).toBe(clonedPath.navigationVertexIds?.[0]);
   });
 });
 
