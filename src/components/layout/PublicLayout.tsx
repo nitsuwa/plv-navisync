@@ -45,14 +45,18 @@ export function PublicLayout() {
       />
       <NavigationProgress />
       <ScrollToTop />
-      <Navbar />
-      <EmergencyBanner />
+      {/* Navbar hidden on mobile map for immersive experience */}
+      <div className={isMapPage ? "hidden md:block" : ""}>
+        <Navbar />
+      </div>
+      {/* Emergency banner hidden on map view */}
+      {!isMapPage && <EmergencyBanner />}
 
       <main
         id="main-content"
         className={cn(
-          "relative z-[1] flex-1 w-full max-w-full",
-          isMapPage ? "overflow-hidden flex flex-col" : "overflow-x-hidden",
+          "relative z-[1] w-full max-w-full",
+          isMapPage ? "overflow-hidden flex-1" : "overflow-x-hidden",
           showBottomNav && !isMapPage && "pb-[calc(88px+env(safe-area-inset-bottom,0px))] md:pb-0"
         )}
       >
@@ -67,7 +71,7 @@ export function PublicLayout() {
         </motion.div>
       </main>
 
-      {showFooter && <Footer />}
+      {showFooter && <div className="hidden md:block"><Footer /></div>}
       {showBottomNav && <MobileBottomNav />}
     </div>
   );

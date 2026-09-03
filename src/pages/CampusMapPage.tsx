@@ -146,6 +146,7 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
   const [selected,     setSelected]     = useState<Building|null>(null);
   const [mapMode,      setMapMode]      = useState<MapMode>("standard");
   const [zoom,         setZoom]         = useState(1);
+  const zoomRef = useRef(1);
   const [displayZoom,  setDisplayZoom]  = useState(1);
   const [pan,          setPan]          = useState<Pt>({ x:0, y:0 });
   const [saved,        setSaved]        = useState<Set<string>>(new Set());
@@ -292,20 +293,8 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
           initialSelectionRef.current = true;
           // Clean the URL to prevent stale query params on subsequent navigations
           window.history.replaceState({}, "", window.location.pathname);
-        }
-      } else {
-        const last = loadLastViewed();
-        if (last) {
-          const b = MOCK_BUILDINGS.find(
-            (building) =>
-              building.id === last.buildingId ||
-              building.code.toLowerCase() === last.buildingId.toLowerCase()
-          );
-          if (b) {
-            setSelected(b);
-            setZoom(last.zoom);
-          }
-        }
+        }      } else {
+        // Don't auto-restore last building — start with a clean map
         initialSelectionRef.current = true;
       }
     }
@@ -343,6 +332,7 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
   const vbY = (isFloorMode ? floorCanvasH : outdoorCanvasH) / 2 - vbH / 2;
 
   // ── Smooth zoom lerp ───────────────────────────────────────────────────
+  useEffect(() => { zoomRef.current = zoom; }, [zoom]);
   useEffect(() => {
     let animId: number;
     const lerp = () => {
@@ -827,21 +817,39 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
   useEffect(() => {
     if (selected && !isFloorMode && !route) {
       const pos = B_POS[selected.id];
-      if (pos) {
-        const cx = pos.x + pos.w / 2;
-        const cy = pos.y + pos.h / 2;
-        const sidePanelOffset = typeof window !== "undefined" && window.innerWidth >= 768 ? -80 : 0;
-        panTargetRef.current = {
-          x: outdoorCanvasW / 2 - cx * zoom + sidePanelOffset,
-          y: outdoorCanvasH / 2 - cy * zoom,
-        };
+      if (!pos) return;
+      const cx = pos.x + pos.w / 2;
+      const cy = pos.y + pos.h / 2;
+      const isMobile = typeof window !== "undefined" && window.innerWidth < 768;
+      const currentZoom = zoomRef.current;
+      const targetZoom = isMobile && currentZoom < 1.4 ? 1.4 : currentZoom;
+      const sidePanelOffset = isMobile ? 0 : -80;
+      let mobileYOffset = 0;
+      if (isMobile) {
+        const vh = window.innerHeight;
+        const vw = window.innerWidth;
+        const svgRenderScale = Math.min(vw / SVG_W, vh / SVG_H);
+        mobileYOffset = -(vh * 0.18) / svgRenderScale;
+      }
+      panTargetRef.current = {
+        x: (SVG_CX - cx) * targetZoom + sidePanelOffset,
+        y: (SVG_CY - cy) * targetZoom + mobileYOffset,
+      };
+      if (isMobile && currentZoom < 1.4) {
+        setZoom(1.4);
       }
     }
-  }, [selected, B_POS, isFloorMode, route, zoom]);
+  }, [selected?.id, B_POS, isFloorMode, route]);
 
   const selectBuilding = useCallback((b: Building|null) => {
     setSelected(b);
     setSearchFocused(false); setSearch(""); setShowQR(false);
+    // Close route planner when selecting a building
+    if (b && directionsMode) {
+      setDirectionsMode(false);
+      setFromBuilding(null);
+      setToBuilding(null);
+    }
     if (b) {
       if (!recentSearches.includes(b.name))
         setRecentSearches(prev => [b.name, ...prev].slice(0, 5));
@@ -1093,18 +1101,23 @@ const buildingFill = (id: string) =>
     <div
       ref={mapContainerRef}
       className="relative overflow-hidden animate-fade-in"
-      style={{ height: fullScreen ? "100dvh" : "calc(100dvh - 56px)", background: isFloorMode ? "var(--map-floor-corridor)" : "var(--map-bg)", cursor: isDragging ? "grabbing" : "grab", touchAction:"none" }}
+      style={{
+        height: fullScreen ? "100dvh" : "calc(100dvh - 76px)",
+        background: isFloorMode ? "var(--map-floor-corridor)" : "var(--map-bg)",
+        cursor: isDragging ? "grabbing" : "grab",
+        touchAction: "none"
+      }}
       onMouseDown={onMouseDown} onMouseMove={onMouseMove}
       onMouseUp={onMouseUp} onMouseLeave={onMouseUp}
       onTouchStart={onTouchStart} onTouchMove={onTouchMove}
       onTouchEnd={onTouchEnd}>
 
-      {/* Cached Offline Banner */}
+      {/* Cached Offline Banner — small inline toast */}
       {isCampusCached && (
-        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-40 flex items-center gap-2 px-4 py-2 rounded-xl bg-amber-500/90 text-white text-xs font-bold shadow-xl backdrop-blur-md border border-amber-400/30">
-          <AlertTriangle className="h-4 w-4 shrink-0" />
-          <span>Viewing cached campus map (offline mode).</span>
-          <button onClick={() => refetchCampus()} className="underline ml-2 hover:opacity-80">
+        <div data-no-drag className="absolute top-2 left-2 right-2 z-40 flex items-center gap-2 px-3 py-1.5 rounded-lg bg-amber-500/90 text-white text-[10px] font-bold shadow-md backdrop-blur-md border border-amber-400/20 md:top-4 md:left-auto md:right-auto md:left-1/2 md:-translate-x-1/2 md:w-auto md:px-4 md:py-2 md:rounded-xl md:text-xs">
+          <AlertTriangle className="h-3 w-3 md:h-4 md:w-4 shrink-0" />
+          <span>Offline — cached map</span>
+          <button onClick={() => refetchCampus()} className="underline ml-1 hover:opacity-80">
             Refresh
           </button>
         </div>
@@ -1259,8 +1272,8 @@ const buildingFill = (id: string) =>
         className={cn(
           "absolute z-20",
           directionsMode
-            ? // Mobile: full-width bottom sheet above the app's bottom nav; desktop: floating panel
-              "inset-x-3 bottom-[74px] md:inset-x-auto md:bottom-auto md:top-3 md:left-3 md:w-[350px]"
+            ? // Mobile: dialog handles its own fixed positioning; desktop: floating panel
+              "md:inset-x-auto md:bottom-auto md:top-3 md:left-3 md:w-[350px]"
             : "top-3 left-3 hidden md:block"
         )}
         style={directionsMode ? undefined : { width: 300, maxWidth: "min(300px, calc(50vw - 160px))" }}
@@ -1494,8 +1507,8 @@ const buildingFill = (id: string) =>
         </div>
       )}
 
-      {/* ══════════════ ZOOM CONTROLS — always visible ══════════════ */}
-      <div data-no-drag className={cn("absolute bottom-20 md:bottom-5 right-3 z-20 flex flex-col gap-1", route && "hidden md:flex")}>
+      {/* ══════════════ ZOOM CONTROLS — desktop only ══════════════ */}
+      <div data-no-drag className={cn("absolute bottom-20 md:bottom-5 right-3 z-20 hidden md:flex flex-col gap-1", route && "hidden")}>
         <button onClick={e => { e.stopPropagation(); setShowLayers(v => !v); }} title="Layers"
           className={cn("w-9 h-9 rounded-xl border shadow-md flex items-center justify-center transition-all",
             showLayers ? "bg-primary border-primary text-primary-foreground" : "bg-card border-border/60 text-muted-foreground hover:border-primary/30")}>
@@ -1750,7 +1763,7 @@ const buildingFill = (id: string) =>
       )}
 
       {/* ══════════════ CAMPUS SELECTOR / MAP LABEL ══════════════ */}
-      <div data-no-drag className={cn("absolute bottom-[76px] md:bottom-6 left-1/2 -translate-x-1/2 z-20", route && "hidden md:block")}>
+      <div data-no-drag className={cn("absolute bottom-[76px] md:bottom-6 left-1/2 -translate-x-1/2 z-20 hidden md:block", (route || directionsMode) && "hidden")}>
         {isFloorMode ? (
           /* Floor plan: breadcrumb label */
           <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-border shadow-sm"
@@ -1805,19 +1818,21 @@ const buildingFill = (id: string) =>
         )}
       </div>
 
-      {/* ══════════════ MOBILE: top search ══════════════ */}
-      <div data-no-drag className="absolute top-3 left-3 right-14 z-20 md:hidden">
-        <div className="flex items-center gap-2 h-10 px-3.5 rounded-2xl border border-border/60 shadow-lg"
-          style={{ background:"var(--card)", backdropFilter:"blur(16px)", WebkitBackdropFilter:"blur(16px)" }}>
-          {isFloorMode && (
+      {/* ══════════════ MOBILE: immersive floating UI ══════════════ */}
+      <div data-no-drag className="absolute top-2 left-2 right-2 z-20 md:hidden space-y-1.5">
+        {/* Search bar — floating glass pill */}
+        <div className="flex items-center gap-2 h-10 px-3.5 rounded-full border border-white/20 shadow-xl"
+          style={{ background:"rgba(255,255,255,0.85)", backdropFilter:"blur(20px) saturate(180%)", WebkitBackdropFilter:"blur(20px) saturate(180%)" }}>
+          {isFloorMode ? (
             <button onClick={closeFloorPlan} className="text-primary shrink-0 flex items-center gap-1" aria-label="Back to campus map">
               <ChevronLeft className="h-4 w-4"/>
               <span className="text-[10px] font-bold text-foreground truncate max-w-[110px]">
                 {floorView?.building.code} · {currentFloor?.label ?? `Floor ${floorView?.floor}`}
               </span>
             </button>
+          ) : (
+            <Search className="h-4 w-4 text-muted-foreground shrink-0"/>
           )}
-          <Search className="h-4 w-4 text-muted-foreground shrink-0"/>
           <input type="text" value={search}
             onChange={e => setSearch(e.target.value)}
             onFocus={() => setSearchFocused(true)}
@@ -1825,15 +1840,51 @@ const buildingFill = (id: string) =>
             placeholder={isFloorMode ? "Search rooms…" : "Search buildings…"}
             className="flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
             style={{ fontFamily:"var(--font-body)" }}/>
-          {search && <button onClick={() => setSearch("")}><X className="h-3.5 w-3.5 text-muted-foreground"/></button>}
-          <button onClick={e => { e.stopPropagation(); setDirectionsMode(true); }} title="Directions"
-            className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 transition-all hover:bg-primary/10"
-            style={{ color: "var(--muted-foreground)" }}>
-            <Navigation className="h-4 w-4"/>
+          {search && <button onClick={() => setSearch("")}><X className="h-4 w-4 text-muted-foreground"/></button>}
+          <div className="w-px h-5 bg-border/60 shrink-0"/>
+          <button onClick={e => { e.stopPropagation(); setDirectionsMode(true); }}
+            className="flex items-center gap-1 text-[11px] font-bold text-primary hover:text-primary/80 transition-colors shrink-0">
+            <Navigation className="h-3.5 w-3.5"/>
+            <span className="hidden sm:inline">Directions</span>
           </button>
         </div>
-      </div>
 
+        {/* Filter chips — floating glass (hidden when building selected or route planner active) */}
+        {!isFloorMode && !searchFocused && !search && !directionsMode && !selected && (
+          <div className="flex gap-1 overflow-x-auto no-scrollbar">
+            {(["standard","accessible","emergency"] as MapMode[]).map(m => {
+              const Icon = m === "standard" ? Compass : m === "accessible" ? Accessibility : AlertTriangle;
+              const label = m === "standard" ? "All Buildings" : m === "accessible" ? "PWD Routes" : "Emergency";
+              return (
+                <button key={m} onClick={e => { e.stopPropagation(); setMapMode(m); }}
+                  className={cn("flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-bold whitespace-nowrap border transition-all shrink-0",
+                    mapMode === m
+                      ? m === "accessible" ? "border-green-400/40 text-green-700 dark:text-green-300"
+                        : m === "emergency" ? "border-red-400/40 text-red-600 dark:text-red-300"
+                        : "border-primary/40 text-primary"
+                      : "border-white/30 text-foreground/70")}
+                  style={{ background: mapMode === m ? undefined : "rgba(255,255,255,0.7)", backdropFilter: "blur(12px)", WebkitBackdropFilter: "blur(12px)" }}>
+                  <Icon className="h-3 w-3"/>
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Building list — floating glass chips (hidden when building selected or route planner active) */}
+        {!isFloorMode && !searchFocused && !search && mapMode === "standard" && !directionsMode && !selected && (
+          <div className="flex gap-1 overflow-x-auto no-scrollbar pb-0.5">
+            {MOCK_BUILDINGS.map(b => (
+              <button key={b.id} onClick={e => { e.stopPropagation(); selectBuilding(b); }}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-bold whitespace-nowrap border border-white/30 text-foreground/70 hover:text-primary hover:border-primary/30 transition-all shrink-0"
+                style={{ background:"rgba(255,255,255,0.7)", backdropFilter:"blur(12px)", WebkitBackdropFilter:"blur(12px)" }}>
+                <MapPin className="h-3 w-3 text-primary/60"/>
+                {b.code}
+              </button>
+            ))}
+          </div>
+        )}
       {/* ══════════════ MOBILE: mode chips ══════════════ */}
       <div data-no-drag className="absolute top-3 right-3 z-20 md:hidden flex flex-col gap-1">
         {(["standard","accessible","emergency"] as MapMode[]).map(m => {

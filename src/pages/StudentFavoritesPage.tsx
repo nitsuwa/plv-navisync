@@ -10,6 +10,7 @@ import { StudentPageHeader } from "../components/ui/StudentPageHeader";
 import { PageTransition } from "../components/ui/PageTransition";
 import { EmptyState } from "../components/ui/EmptyState";
 import { SkeletonList } from "../components/ui/Skeleton";
+import { BuildingDetailModal } from "../components/ui/BuildingDetailModal";
 import { useScrollReveal } from "../hooks/useScrollReveal";
 import { useToast } from "../hooks/useToast";
 import type { Building } from "../types";
@@ -62,6 +63,7 @@ export function StudentFavoritesPage() {
   const [savedBuildings, setSavedBuildings] = useState<Building[]>([]);
   const [search, setSearch] = useState("");
   const [removingId, setRemovingId] = useState<string | null>(null);
+  const [selectedBuilding, setSelectedBuilding] = useState<Building | null>(null);
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: "instant" });
@@ -182,7 +184,8 @@ export function StudentFavoritesPage() {
                       }}
                       exit={{ opacity: 0, x: 100 }}
                       transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
-                      className="group flex items-center gap-4 px-4 py-4 rounded-2xl border border-border/60 bg-card/50 hover:bg-card hover:border-primary/15 hover:shadow-sm transition-all duration-200"
+                      onClick={() => setSelectedBuilding(b)}
+                      className="group flex items-center gap-4 px-4 py-4 rounded-2xl border border-border/60 bg-card/50 hover:bg-card hover:border-primary/15 hover:shadow-sm transition-all duration-200 cursor-pointer"
                     >
                       {b.image_url ? (
                         <img src={b.image_url} alt="" className="w-14 h-14 rounded-xl object-cover shrink-0 ring-1 ring-border" />
@@ -232,6 +235,14 @@ export function StudentFavoritesPage() {
             </AnimatePresence>
           )}
         </div>
+        {/* ══ BUILDING DETAIL MODAL ══ */}
+        <BuildingDetailModal
+          building={selectedBuilding}
+          onClose={() => setSelectedBuilding(null)}
+          isSaved={true}
+          onToggleSave={remove}
+        />
+
         {/* Safe area spacer */}
         <div className="h-6 md:hidden" />
       </div>

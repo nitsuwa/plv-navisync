@@ -31,6 +31,7 @@ const StudentFavoritesPage = lazy(() => import("../pages/StudentFavoritesPage").
 const StudentReportsPage   = lazy(() => import("../pages/StudentReportsPage").then(m => ({ default: m.StudentReportsPage })));
 const StudentSettingsPage  = lazy(() => import("../pages/StudentSettingsPage").then(m => ({ default: m.StudentSettingsPage })));
 const StudentMyDayPage     = lazy(() => import("../pages/StudentMyDayPage").then(m => ({ default: m.StudentMyDayPage })));
+const StudentHomePage      = lazy(() => import("../pages/StudentHomePage").then(m => ({ default: m.StudentHomePage })));
 const VerificationPendingPage = lazy(() => import("../pages/AuthLifecyclePages").then(m => ({ default: m.VerificationPendingPage })));
 const AuthCallbackPage     = lazy(() => import("../pages/AuthLifecyclePages").then(m => ({ default: m.AuthCallbackPage })));
 const ForgotPasswordPage   = lazy(() => import("../pages/AuthLifecyclePages").then(m => ({ default: m.ForgotPasswordPage })));
@@ -140,6 +141,7 @@ export const router = createBrowserRouter([
       { path: "announcements", element: <SuspensePage><AnnouncementsPage /></SuspensePage> },
 
       // Student portal
+      { path: "home", element: <SuspensePage><StudentHomePage /></SuspensePage> },
       { path: "my-day", element: <SuspensePage><StudentMyDayPage /></SuspensePage> },
       { path: "student", element: <SuspensePage><StudentProfilePage /></SuspensePage> },
       { path: "student/favorites", element: <SuspensePage><StudentFavoritesPage /></SuspensePage> },
