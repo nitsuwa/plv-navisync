@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
-import { Bell, AlertTriangle, Filter, Search, Circle, Megaphone } from "lucide-react";
+import { Bell, AlertTriangle, Filter, Search, Circle, Megaphone, ChevronDown, X } from "lucide-react";
+import { motion, AnimatePresence } from "motion/react";
 import { AnnouncementCard } from "../components/ui/AnnouncementCard";
 import { SearchBar } from "../components/ui/SearchBar";
 import { MOCK_ANNOUNCEMENTS } from "../data/mockData";
@@ -29,12 +30,14 @@ const PRIORITIES = [
   { value: "high", label: "High" },
   { value: "normal", label: "Normal" },
   { value: "low", label: "Low" },
-];
-
-export function AnnouncementsPage() {
+];export function AnnouncementsPage() {
   const [search, setSearch] = useState("");
+  const [filtersOpen, setFiltersOpen] = useState(false);
+
   const [category, setCategory] = useState("all");
   const [priority, setPriority] = useState("all");
+
+  const activeFilterCount = (category !== "all" ? 1 : 0) + (priority !== "all" ? 1 : 0);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -98,30 +101,87 @@ export function AnnouncementsPage() {
           />
         </div>
 
-        <div className="flex flex-wrap gap-1.5 items-center">
-          <Filter className="h-3.5 w-3.5 text-muted-foreground mr-0.5" />
-          {CATEGORIES.map(({ value, label }) => (
-            <button key={value} onClick={() => setCategory(value)}
-              className={cn(
-                "px-3 py-1.5 rounded-lg text-xs font-bold transition-all",
-                category === value ? "bg-primary text-primary-foreground shadow-sm" : "bg-muted text-muted-foreground hover:bg-secondary hover:text-foreground"
-              )}>
-              {label}
-            </button>
-          ))}
+        {/* Desktop: inline chips | Mobile: collapsible filter button + bottom sheet */}
+        <div className="hidden md:block">
+          <div className="flex flex-wrap gap-1.5 items-center">
+            <Filter className="h-3.5 w-3.5 text-muted-foreground mr-0.5" />
+            {CATEGORIES.map(({ value, label }) => (
+              <button key={value} onClick={() => setCategory(value)}
+                className={cn(
+                  "px-3 py-1.5 rounded-lg text-xs font-bold transition-all",
+                  category === value ? "bg-primary text-primary-foreground shadow-sm" : "bg-muted text-muted-foreground hover:bg-secondary hover:text-foreground"
+                )}>
+                {label}
+              </button>
+            ))}
+          </div>
+          <div className="flex flex-wrap gap-1.5 mt-2">
+            {PRIORITIES.map(({ value, label }) => (
+              <button key={value} onClick={() => setPriority(value)}
+                className={cn(
+                  "px-3 py-1.5 rounded-lg text-xs font-bold border transition-all flex items-center gap-1.5",
+                  priority === value ? "border-primary bg-primary/8 text-primary" : "border-border text-muted-foreground hover:border-primary/30"
+                )}>
+                {value !== "all" && <Circle className={cn("h-2.5 w-2.5 fill-current", PRIORITY_COLORS[value])} />}
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
 
-        <div className="flex flex-wrap gap-1.5">
-          {PRIORITIES.map(({ value, label }) => (
-            <button key={value} onClick={() => setPriority(value)}
-              className={cn(
-                "px-3 py-1.5 rounded-lg text-xs font-bold border transition-all flex items-center gap-1.5",
-                priority === value ? "border-primary bg-primary/8 text-primary" : "border-border text-muted-foreground hover:border-primary/30"
-              )}>
-              {value !== "all" && <Circle className={cn("h-2.5 w-2.5 fill-current", PRIORITY_COLORS[value])} />}
-              {label}
-            </button>
-          ))}
+        {/* Mobile: compact filter toggle */}
+        <div className="md:hidden">
+          <button
+            onClick={() => setFiltersOpen(v => !v)}
+            className="flex items-center gap-2 px-3 py-2 rounded-xl bg-muted/50 hover:bg-muted transition-all w-full"
+          >
+            <Filter className="h-3.5 w-3.5 text-muted-foreground" />
+            <span className="text-xs font-bold text-foreground">Filters</span>
+            {activeFilterCount > 0 && (
+              <span className="ml-auto min-w-5 h-5 px-1.5 rounded-full bg-primary text-primary-foreground text-[10px] font-extrabold flex items-center justify-center">
+                {activeFilterCount}
+              </span>
+            )}
+            <ChevronDown className={cn("h-3.5 w-3.5 text-muted-foreground transition-transform", filtersOpen && "rotate-180")} />
+          </button>
+
+          <AnimatePresence>
+            {filtersOpen && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: "auto", opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.2 }}
+                className="overflow-hidden mt-2"
+              >
+                <div className="space-y-2 pb-1">
+                  <div className="flex flex-wrap gap-1.5">
+                    {CATEGORIES.map(({ value, label }) => (
+                      <button key={value} onClick={() => setCategory(value)}
+                        className={cn(
+                          "px-3 py-1.5 rounded-lg text-xs font-bold transition-all",
+                          category === value ? "bg-primary text-primary-foreground shadow-sm" : "bg-muted text-muted-foreground"
+                        )}>
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {PRIORITIES.map(({ value, label }) => (
+                      <button key={value} onClick={() => setPriority(value)}
+                        className={cn(
+                          "px-3 py-1.5 rounded-lg text-xs font-bold border transition-all flex items-center gap-1.5",
+                          priority === value ? "border-primary bg-primary/8 text-primary" : "border-border text-muted-foreground"
+                        )}>
+                        {value !== "all" && <Circle className={cn("h-2.5 w-2.5 fill-current", PRIORITY_COLORS[value])} />}
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
       </div>
 
