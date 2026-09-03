@@ -9,13 +9,12 @@ import {
 } from "lucide-react";
 
 import { useDebounce, usePublishedCampus, useCampusSearch, useReducedMotion, type SearchResult } from "../hooks";
-import { MOCK_BUILDINGS as LEGACY_BUILDINGS } from "../data/mockData";
-import { FLOOR_PLANS as LEGACY_FLOOR_PLANS, type RoomType } from "../data/floorPlans";
+import { type RoomType } from "../data/floorPlans";
 import type { Building } from "../types";
 import { cn } from "../lib/utils";
 import { useStudentAuth } from "../hooks/useStudentAuth";
-import { useCampusData } from "../contexts/CampusDataContext";
-import { buildingPositionsFromCampus, floorPlansFromCampus, buildingsFromCampus } from "../lib/mapDataAdapter";
+
+import { buildingPositionsFromCampus, floorPlansFromCampus, buildingsFromCampus, facilitiesFromCampus, accessibilityFromCampus } from "../lib/mapDataAdapter";
 import { findIndoorRoute, findIndoorRouteForFloor, type IndoorRoute } from "../lib/indoorPathfinding";
 import { planBuildingRoute, planRouteFromPoint, type PlannedRoute } from "../lib/routePlanner";
 import { latLngToMapPoint, snapToNearest } from "../lib/geo";
@@ -30,6 +29,7 @@ import { studentAccountService } from "../services/studentAccountService";
 import { usageAnalyticsService } from "../services/usageAnalyticsService";
 import type { Campus as EditorCampus } from "../components/map-builder/types";
 import { ReadonlyOutdoorCampusScene } from "../components/map-builder/ReadonlyOutdoorVisuals";
+import { ReadonlyFloorPlanScene } from "../components/map-builder/ReadonlyFloorPlanVisuals";
 
 type MapMode  = "standard" | "accessible" | "emergency";
 
@@ -70,45 +70,7 @@ const FP_W   = 440;  // floor plan viewBox width
 const FP_H   = 290;  // floor plan viewBox height
 interface Pt { x: number; y: number; }
 
-const B_POS: Record<string, { x:number; y:number; w:number; h:number; color:string }> = {
-  b1: { x:155, y:130, w:125, h:80,  color:"#1e40af" },
-  b2: { x:395, y:115, w:105, h:72,  color:"#1e3a8a" },
-  b3: { x:545, y:295, w:115, h:78,  color:"#1d4ed8" },
-  b4: { x:165, y:305, w:105, h:62,  color:"#1e40af" },
-  b5: { x:305, y:435, w:145, h:82,  color:"#2563eb" },
-  b6: { x:605, y:415, w:112, h:72,  color:"#1d4ed8" },
-};
-const STATUS: Record<string, "Open"|"Busy"|"Closed"> = {
-  b1:"Open", b2:"Open", b3:"Open", b4:"Open", b5:"Busy", b6:"Open",
-};
-const STATUS_COLOR = { Open:"text-green-500", Busy:"text-amber-500", Closed:"text-red-500" };
-const STATUS_DOT   = { Open:"bg-green-500",   Busy:"bg-amber-500",   Closed:"bg-red-500"   };
 
-const EVENT_MARKERS: { id:string; title:string; x:number; y:number; color:string; date:string; venue:string; org:string; desc:string }[] = [];
-const POPULAR = [
-  { label:"Student Center",   buildingId:"b_scb" },
-  { label:"Canteen",          buildingId:"b_canteen" },
-  { label:"CABA",             buildingId:"b_caba" },
-  { label:"COED",             buildingId:"b_coed" },
-  { label:"CEIT",             buildingId:"b_ceit" },
-  { label:"Guard House",      buildingId:"b_guard" },
-];
-const BUILDING_FACILITIES: Record<string, string[]> = {
-  b1: ["Lecture Rooms", "Computer Labs", "Faculty Offices", "Study Rooms"],
-  b2: ["Admin Offices", "Registrar", "Cashier", "Conference Rooms", "VP Office"],
-  b3: ["Main Library", "Reading Rooms", "Computer Access", "Study Booths", "Media Section"],
-  b4: ["Engineering Labs", "Workshops", "Drawing Rooms", "Project Rooms"],
-  b5: ["Main Gymnasium", "Bleachers", "Locker Rooms", "Equipment Storage"],
-  b6: ["Student Council Office", "Canteen", "Student Lounge", "Organization Rooms"],
-};
-const BUILDING_ACCESSIBILITY: Record<string, string[]> = {
-  b1: ["Wheelchair Ramp (G/F)", "Accessible Restroom", "Wide Corridors"],
-  b2: ["Elevator (all floors)", "Wheelchair Ramp", "Accessible Parking", "Accessible Restroom"],
-  b3: ["Ground Floor Access", "Wide Doorways", "Accessible Restroom"],
-  b4: ["Ramp at Main Entrance", "Accessible Lab Benches"],
-  b5: ["Level Entry", "Accessible Seating", "Accessible Restroom"],
-  b6: ["Ground Floor Access", "Wide Corridors"],
-};
 
 // ═════════════════════════════════════════════════════════════════════════════
 export interface CampusMapPageProps {
@@ -134,33 +96,26 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
     refetch: refetchCampus,
   } = publishedCampusState;
 
-  // ── Use Map Builder data if available, fall back to legacy data ──
+  // ── Buildings derived exclusively from the published campus ──
   const MOCK_BUILDINGS = useMemo(() => {
     if (activeCampus) {
       return buildingsFromCampus(activeCampus);
     }
-    return LEGACY_BUILDINGS;
+    return [];
   }, [activeCampus]);
 
   const B_POS = useMemo<Record<string, {x:number;y:number;w:number;h:number;color:string}>>(() => {
     if (activeCampus) {
       return buildingPositionsFromCampus(activeCampus);
     }
-    return {
-      b1: { x:155, y:130, w:125, h:80,  color:"#1e40af" },
-      b2: { x:395, y:115, w:105, h:72,  color:"#1e3a8a" },
-      b3: { x:545, y:295, w:115, h:78,  color:"#1d4ed8" },
-      b4: { x:165, y:305, w:105, h:62,  color:"#1e40af" },
-      b5: { x:305, y:435, w:145, h:82,  color:"#2563eb" },
-      b6: { x:605, y:415, w:112, h:72,  color:"#1d4ed8" },
-    };
+    return {};
   }, [activeCampus]);
 
   const FLOOR_PLANS = useMemo(() => {
     if (activeCampus) {
       return floorPlansFromCampus(activeCampus);
     }
-    return LEGACY_FLOOR_PLANS;
+    return {};
   }, [activeCampus]);
 
   // Canonical authored outdoor data is the source of truth whenever a saved
@@ -175,38 +130,16 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
 
   const BUILDING_FACILITIES: Record<string, string[]> = useMemo(() => {
     if (activeCampus) {
-      const result: Record<string, string[]> = {};
-      for (const b of activeCampus.buildings) {
-        result[b.id] = b.facilities || [];
-      }
-      return result;
+      return facilitiesFromCampus(activeCampus);
     }
-    return {
-      b1: ["Lecture Rooms", "Computer Labs", "Faculty Offices", "Study Rooms"],
-      b2: ["Admin Offices", "Registrar", "Cashier", "Conference Rooms", "VP Office"],
-      b3: ["Main Library", "Reading Rooms", "Computer Access", "Study Booths", "Media Section"],
-      b4: ["Engineering Labs", "Workshops", "Drawing Rooms", "Project Rooms"],
-      b5: ["Main Gymnasium", "Bleachers", "Locker Rooms", "Equipment Storage"],
-      b6: ["Student Council Office", "Canteen", "Student Lounge", "Organization Rooms"],
-    };
+    return {};
   }, [activeCampus]);
 
   const BUILDING_ACCESSIBILITY: Record<string, string[]> = useMemo(() => {
     if (activeCampus) {
-      const result: Record<string, string[]> = {};
-      for (const b of activeCampus.buildings) {
-        result[b.id] = b.accessibility || [];
-      }
-      return result;
+      return accessibilityFromCampus(activeCampus);
     }
-    return {
-      b1: ["Wheelchair Ramp (G/F)", "Accessible Restroom", "Wide Corridors"],
-      b2: ["Elevator (all floors)", "Wheelchair Ramp", "Accessible Parking", "Accessible Restroom"],
-      b3: ["Ground Floor Access", "Wide Doorways", "Accessible Restroom"],
-      b4: ["Ramp at Main Entrance", "Accessible Lab Benches"],
-      b5: ["Level Entry", "Accessible Seating", "Accessible Restroom"],
-      b6: ["Ground Floor Access", "Wide Corridors"],
-    };
+    return {};
   }, [activeCampus]);
 
   // Core map state
@@ -221,7 +154,7 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
 
   // Load initial bookmarked buildings from studentAccountService
   useEffect(() => {
-    studentAccountService.getSavedBuildings().then((buildings) => {
+    studentAccountService.getSavedBuildings(MOCK_BUILDINGS).then((buildings) => {
       const idSet = new Set<string>();
       buildings.forEach((b) => {
         idSet.add(b.id);
@@ -288,6 +221,33 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
   const panAnimRef     = useRef<number>(0);
   // ── Pinch-to-zoom ref ──
   const pinchRef       = useRef<{ dist: number; initZoom: number } | null>(null);
+  // ── Cursor-anchored zoom refs ──
+  // Last known pointer position over the map (anchors +/- and keyboard zoom
+  // when there's no live cursor event to read).
+  const zoomAnchorRef  = useRef<{ clientX: number; clientY: number } | null>(null);
+  // Latest target zoom, so stable listeners (wheel / keyboard) can step from it.
+  const zoomStateRef   = useRef(1);
+  // Latest applyZoomAt — stable listeners always anchor against fresh zoom/pan.
+  const applyZoomAtRef = useRef<(clientX: number, clientY: number, nextZoom: number) => void>(() => {});
+
+  /** Resolve the zoom anchor: last known cursor position over the map, falling
+   *  back to the container center when the pointer never touched the map. */
+  const zoomAtCursor = useCallback((nextZoom: number) => {
+    const anchor = zoomAnchorRef.current;
+    const el = mapContainerRef.current;
+    if (anchor) {
+      applyZoomAtRef.current(anchor.clientX, anchor.clientY, nextZoom);
+    } else if (el) {
+      const r = el.getBoundingClientRect();
+      applyZoomAtRef.current(r.left + r.width / 2, r.top + r.height / 2, nextZoom);
+    } else {
+      setZoom(nextZoom);
+    }
+  }, []);
+
+  // Keep the latest target zoom readable by stable listeners.
+  useEffect(() => { zoomStateRef.current = zoom; });
+
   const getScale = useCallback(() => {
     const svg = svgRef.current;
     const vw = floorViewRef.current !== null ? FP_W : activeCampus?.canvasW || SVG_W;
@@ -353,17 +313,34 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
 
   // ── Computed floor plan values ─────────────────────────────────────────
   const isFloorMode       = floorView !== null;
+  // Use the actual FloorPlan from the published campus (authored in Map Builder)
+  const activeFloorPlan   = useMemo(() => {
+    if (!floorView || !activeCampus) return null;
+    const building = activeCampus.buildings.find(b => b.id === floorView.building.id);
+    if (!building) return null;
+    return building.floors.find(f => f.number === floorView.floor) ?? building.floors[0] ?? null;
+  }, [floorView, activeCampus]);
+  // Legacy floor data for stair navigation UI
   const currentFloorData  = floorView ? FLOOR_PLANS[floorView.building.id] : null;
   const currentFloor      = currentFloorData?.floors.find(f => f.number === floorView?.floor) ?? currentFloorData?.floors[0];
   const floorNums         = currentFloorData?.floors.map(f => f.number) ?? [];
+  // Use actual floor canvas dimensions if available
+  const floorCanvasW = activeFloorPlan?.canvasW || FP_W;
+  const floorCanvasH = activeFloorPlan?.canvasH || FP_H;
 
-  // SVG center shifts with mode (floor plan is 440×290, campus 900×680)
+  // SVG center shifts with mode (floor plan uses authored canvas, campus uses campus canvas)
   const outdoorCanvasW = activeCampus?.canvasW || SVG_W;
   const outdoorCanvasH = activeCampus?.canvasH || SVG_H;
-  const viewCX = isFloorMode ? FP_W / 2 : outdoorCanvasW / 2;
-  const viewCY = isFloorMode ? FP_H / 2 : outdoorCanvasH / 2;
+  const viewCX = isFloorMode ? floorCanvasW / 2 : outdoorCanvasW / 2;
+  const viewCY = isFloorMode ? floorCanvasH / 2 : outdoorCanvasH / 2;
   const tx = viewCX * (1 - displayZoom) + pan.x;
   const ty = viewCY * (1 - displayZoom) + pan.y;
+
+  // Dynamic viewBox: expands with zoom so scaled content is never clipped.
+  const vbW = (isFloorMode ? floorCanvasW : outdoorCanvasW) / displayZoom;
+  const vbH = (isFloorMode ? floorCanvasH : outdoorCanvasH) / displayZoom;
+  const vbX = (isFloorMode ? floorCanvasW : outdoorCanvasW) / 2 - vbW / 2;
+  const vbY = (isFloorMode ? floorCanvasH : outdoorCanvasH) / 2 - vbH / 2;
 
   // ── Smooth zoom lerp ───────────────────────────────────────────────────
   useEffect(() => {
@@ -412,7 +389,8 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
       const step = e.deltaMode === 1 ? e.deltaY * 0.08 : e.deltaY * 0.003;
-      setZoom(z => parseFloat(Math.max(0.35, Math.min(3.5, z - step)).toFixed(2)));
+      // Zoom toward the cursor: keep the world point under the pointer fixed.
+      applyZoomAtRef.current(e.clientX, e.clientY, zoomStateRef.current - step);
     };
     el.addEventListener("wheel", onWheel, { passive: false });
     return () => el.removeEventListener("wheel", onWheel);
@@ -422,12 +400,12 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (document.activeElement?.tagName === "INPUT" || document.activeElement?.tagName === "TEXTAREA") return;
-      if (e.key === "+"||e.key === "=") { e.preventDefault(); setZoom(z => Math.min(3.5,+(z+0.2).toFixed(2))); }
-      if (e.key === "-")                { e.preventDefault(); setZoom(z => Math.max(0.35,+(z-0.2).toFixed(2))); }
+      if (e.key === "+"||e.key === "=") { e.preventDefault(); zoomAtCursor(zoomStateRef.current + 0.2); }
+      if (e.key === "-")                { e.preventDefault(); zoomAtCursor(zoomStateRef.current - 0.2); }
       if (e.key === "0")                { e.preventDefault(); setZoom(1); setPan({x:0,y:0}); }
       if (e.key === "Escape") {
         setSelected(null); setSearchFocused(false);
-        setReportModal(null); setSelectedEvent(null); setSignInPrompt(null);
+        setReportModal(null); setSignInPrompt(null);
         if (floorViewRef.current) { setFloorView(null); setZoom(1); setPan({x:0,y:0}); }
       }
       const PAN = 30;
@@ -549,6 +527,43 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
     return { x: (p.x - tx) / displayZoom, y: (p.y - ty) / displayZoom };
   }, [tx, ty, displayZoom]);
 
+  /**
+   * Cursor-anchored zoom: change the zoom level while keeping the world point
+   * under (clientX, clientY) pinned to the same screen position.
+   *
+   * With the center-based viewBox model the screen position of a world point is
+   *   screen_x ∝ (Wx·z + Cx·(1/z − z) + pan.x) · z     (Cx = canvasW/2)
+   * so the pan that keeps it fixed when z → z′ is
+   *   pan′.x = A/z′ − Wx·z′ − Cx·(1/z′ − z′),   A = (Wx·z + Cx·(1/z − z) + pan.x)·z
+   */
+  const applyZoomAt = useCallback((clientX: number, clientY: number, nextZoom: number) => {
+    const clamped = parseFloat(Math.max(0.35, Math.min(3.5, nextZoom)).toFixed(2));
+    const pt = svgPointFromClient(clientX, clientY);
+    if (!pt) {
+      setZoom(clamped);
+      return;
+    }
+    const canvasW = isFloorMode ? floorCanvasW : outdoorCanvasW;
+    const canvasH = isFloorMode ? floorCanvasH : outdoorCanvasH;
+    const z = displayZoom;
+    const Cx = canvasW / 2;
+    const Cy = canvasH / 2;
+    const ax = (pt.x * z + Cx * (1 / z - z) + pan.x) * z;
+    const ay = (pt.y * z + Cy * (1 / z - z) + pan.y) * z;
+    // Don't let the auto-pan-to-selected-building animation fight the anchor.
+    panTargetRef.current = null;
+    setPan({
+      x: ax / clamped - pt.x * clamped - Cx * (1 / clamped - clamped),
+      y: ay / clamped - pt.y * clamped - Cy * (1 / clamped - clamped),
+    });
+    setZoom(clamped);
+  }, [displayZoom, pan, svgPointFromClient, isFloorMode, floorCanvasW, floorCanvasH, outdoorCanvasW, outdoorCanvasH]);
+
+  // Keep stable listeners (wheel, keys, pinch) anchored against the latest zoom/pan.
+  useEffect(() => {
+    applyZoomAtRef.current = applyZoomAt;
+  });
+
   /** Tap-on-map handler while pinning — places the "You are here" marker. */
   const handleMapPinTap = useCallback((clientX: number, clientY: number) => {
     if (dragRef.current?.moved) return;
@@ -590,6 +605,8 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
   }, [pan]);
 
   const onMouseMove = useCallback((e: React.MouseEvent) => {
+    // Track the pointer so +/- and keyboard zoom can anchor to the cursor.
+    zoomAnchorRef.current = { clientX: e.clientX, clientY: e.clientY };
     const drag = dragRef.current;
     if (!drag) return;
     const dx = e.clientX - drag.sx, dy = e.clientY - drag.sy;
@@ -650,7 +667,9 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
       const t1 = e.touches[0], t2 = e.touches[1];
       const curDist = Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY);
       const ratio = curDist / pinchRef.current.dist;
-      setZoom(z => parseFloat(Math.max(0.35, Math.min(3.5, pinchRef.current!.initZoom * ratio)).toFixed(2)));
+      const next = parseFloat(Math.max(0.35, Math.min(3.5, pinchRef.current.initZoom * ratio)).toFixed(2));
+      // Pinch zooms toward the midpoint of the two fingers.
+      applyZoomAtRef.current((t1.clientX + t2.clientX) / 2, (t1.clientY + t2.clientY) / 2, next);
       return;
     }
     // Single-finger drag-to-pan
@@ -1126,13 +1145,13 @@ const buildingFill = (id: string) =>
 
       {/* ══════════════════════════ MAP SVG ══════════════════════════ */}
       <svg ref={svgRef}
-        viewBox={isFloorMode ? `0 0 ${FP_W} ${FP_H}` : `0 0 ${outdoorCanvasW} ${outdoorCanvasH}`}
+        viewBox={`${vbX} ${vbY} ${vbW} ${vbH}`}
         className="absolute inset-0 w-full h-full select-none"
         preserveAspectRatio="xMidYMid meet"
         onDoubleClick={e => {
           e.preventDefault();
           if (!isFloorMode && (e.target as Element).closest("[data-bldg]")) return;
-          setZoom(z => Math.min(3.5, +(z+0.35).toFixed(2)));
+          applyZoomAt(e.clientX, e.clientY, zoom + 0.35);
         }}>
         <defs>
           <filter id="bldg-shadow" x="-10%" y="-10%" width="120%" height="120%">
@@ -1154,195 +1173,18 @@ const buildingFill = (id: string) =>
 
           {/* ════════ FLOOR PLAN mode ════════ */}
           {isFloorMode ? (() => {
-            if (!currentFloor) return null;
+            if (!activeFloorPlan) return null;
             return (
-              <>
-                {/* ── Architectural wall background ── */}
-                <rect width={FP_W} height={FP_H} fill="var(--map-floor-bg)"/>
-                {/* Grid for scale reference */}
-                {[...Array(22)].map((_,i) => <line key={`gv${i}`} x1={i*20} y1={0} x2={i*20} y2={FP_H} stroke="var(--map-boundary)" strokeWidth={0.5} opacity={0.15}/>)}
-                {[...Array(15)].map((_,i) => <line key={`gh${i}`} x1={0} y1={i*20} x2={FP_W} y2={i*20} stroke="var(--map-boundary)" strokeWidth={0.5} opacity={0.15}/>)}
-                {/* Outer building wall — thick */}
-                <rect x={8} y={8} width={FP_W-16} height={FP_H-16} rx={2}
-                  fill="var(--map-floor-wall)" stroke="var(--map-floor-wall-stroke)" strokeWidth={5}/>
-                {/* Corridor floor */}
-                <rect x={13} y={13} width={FP_W-26} height={FP_H-26} fill="var(--map-floor-corridor)"/>
-                {/* Mode tints */}
-                {mapMode === "emergency" && <rect x={8} y={8} width={FP_W-16} height={FP_H-16} fill="var(--map-route)" opacity={0.08}/>}
-                {mapMode === "accessible" && <rect x={8} y={8} width={FP_W-16} height={FP_H-16} fill="var(--map-route-start)" opacity={0.08}/>}
-
-                {/* ── Rooms ── */}
-                {(() => {
-                  const hasUp = floorNums.some(n => n > (floorView?.floor ?? 1));
-                  const hasDn = floorNums.some(n => n < (floorView?.floor ?? 1));
-                  const archFills: Record<string,string> = {
-                    classroom:"var(--map-room-classroom)", office:"var(--map-room-office)", lab:"var(--map-room-lab)",
-                    lobby:"var(--map-room-default)", restroom:"var(--map-room-restroom)", stairs:"var(--map-room-stairs)",
-                    storage:"var(--map-room-storage)", elevator:"var(--map-room-elevator)",
-                  };
-                  return currentFloor.rooms.map(room => {
-                    const isNav  = room.type === "stairs" || room.type === "elevator";
-                    const isHov  = hoveredRoom === room.id;
-                    const isHigh = highlightedRoom === room.id;
-                    const cx = room.x + room.w / 2, cy = room.y + room.h / 2;
-                    const navColor = room.type === "elevator"
-                      ? (hasUp && hasDn ? "#7c3aed" : hasUp ? "#16a34a" : "#f97316")
-                      : (hasUp && hasDn ? "#2563eb" : hasUp ? "#2563eb" : "#f97316");
-                    const roomFill = isHigh ? "var(--map-route)" :
-                      isHov && isNav ? "var(--map-route)" :
-                      isHov ? (archFills[room.type] ?? "var(--map-room-default)") :
-                      (mapMode === "accessible" && (room.type === "elevator" || room.name.toLowerCase().includes("restroom")))
-                        ? "var(--map-route-start)" :
-                      archFills[room.type] ?? "var(--map-room-default)";
-                    const roomFillOpacity = isHigh ? 0.15 : (mapMode === "accessible" && (room.type === "elevator" || room.name.toLowerCase().includes("restroom"))) ? 0.25 : 1;
-
-                    return (
-                      <g key={room.id} data-room
-                        onMouseEnter={() => setHoveredRoom(room.id)}
-                        onMouseLeave={() => setHoveredRoom(null)}
-                        onClick={e => {
-                          e.stopPropagation();
-                          if (dragRef.current?.moved || !isNav) return;
-                          const fv = floorViewRef.current;
-                          const fd = fv ? FLOOR_PLANS[fv.building.id] : null;
-                          if (!fv || !fd) return;
-                          const nums = fd.floors.map(f => f.number);
-                          const upF = nums.find(n => n > fv.floor) ?? null;
-                          const dnF = [...nums].reverse().find(n => n < fv.floor) ?? null;
-                          if (upF && dnF) {
-                            setStairChoice({
-                              roomType: room.type as RoomType, upFloor: upF, dnFloor: dnF,
-                              upLabel: fd.floors.find(f => f.number === upF)?.label ?? `Floor ${upF}`,
-                              dnLabel: fd.floors.find(f => f.number === dnF)?.label ?? `Floor ${dnF}`,
-                            });
-                          } else { navigateStair(room.type as RoomType); }
-                        }}
-                        style={{ cursor: isNav ? "pointer" : "default" }}>
-
-                        {/* Search highlight */}
-                        {isHigh && <rect x={room.x-3} y={room.y-3} width={room.w+6} height={room.h+6} rx={2}
-                          fill="none" stroke="#0e2a6e" strokeWidth={2.5}
-                          style={{ animation:"border-glow 2s ease-in-out infinite" }}/>}
-
-                        {/* Room slab */}
-                        <rect x={room.x} y={room.y} width={room.w} height={room.h} rx={1}
-                          fill={roomFill}
-                          fillOpacity={roomFillOpacity}
-                          stroke={isHigh ? "var(--map-route)" : isHov ? navColor : isNav ? navColor : "var(--map-floor-wall-stroke)"}
-                          strokeWidth={isHigh || isHov ? 2.5 : isNav ? 1.5 : 1}/>
-
-                        {/* Interior shadow edges (gives depth) */}
-                        {!isNav && !isHigh && <>
-                          <line x1={room.x+1} y1={room.y+1} x2={room.x+room.w-1} y2={room.y+1} stroke="var(--map-room-text)" strokeWidth={1.5} opacity={0.08}/>
-                          <line x1={room.x+1} y1={room.y+1} x2={room.x+1} y2={room.y+room.h-1} stroke="var(--map-room-text)" strokeWidth={1.5} opacity={0.08}/>
-                          <line x1={room.x} y1={room.y+room.h} x2={room.x+room.w} y2={room.y+room.h} stroke="var(--map-room-text)" strokeWidth={1} opacity={0.06}/>
-                          <line x1={room.x+room.w} y1={room.y} x2={room.x+room.w} y2={room.y+room.h} stroke="var(--map-room-text)" strokeWidth={1} opacity={0.06}/>
-                        </>}
-
-                        {/* Room name */}
-                        {room.w >= 44 && room.h >= 18 && !isNav && (
-                          <text x={cx} y={cy+3} textAnchor="middle"
-                            fill={isHov ? "var(--map-route)" : "var(--map-room-text)"}
-                            fontSize={room.w > 90 ? 8 : 6.5} fontWeight="600"
-                            className="pointer-events-none select-none">
-                            {room.name.length > 14 ? room.name.slice(0,13)+"…" : room.name}
-                          </text>
-                        )}
-
-                        {/* Nav room: colored disc + icon */}
-                        {isNav && (() => {
-                          const r = Math.min(room.w, room.h) * 0.24;
-                          return (
-                            <>
-                              <circle cx={cx} cy={cy} r={r} fill={isHov ? "white" : navColor} opacity={0.95}/>
-                              {room.type === "stairs" ? (
-                                <g fill="none" stroke={isHov ? navColor : "white"} strokeWidth={1.4} strokeLinecap="round" className="pointer-events-none">
-                                  <path d={`M${cx-r*.6},${cy+r*.5} h${r*.5} v-${r*.5} h${r*.5} v-${r*.5}`}/>
-                                </g>
-                              ) : (
-                                <g fill="none" stroke={isHov ? navColor : "white"} strokeWidth={1.4} strokeLinecap="round" strokeLinejoin="round" className="pointer-events-none">
-                                  <path d={`M${cx-r*.5},${cy-r*.2} L${cx},${cy-r*.7} L${cx+r*.5},${cy-r*.2}`}/>
-                                  <path d={`M${cx-r*.5},${cy+r*.2} L${cx},${cy+r*.7} L${cx+r*.5},${cy+r*.2}`}/>
-                                </g>
-                              )}
-                              {/* Direction arrows outside disc */}
-                              {hasUp && <text x={cx} y={room.y+7} textAnchor="middle" fontSize={8} fontWeight="900"
-                                fill={isHov ? "white" : navColor} className="pointer-events-none select-none">↑</text>}
-                              {hasDn && <text x={cx} y={room.y+room.h-1} textAnchor="middle" fontSize={8} fontWeight="900"
-                                fill={isHov ? "white" : navColor} className="pointer-events-none select-none">↓</text>}
-                              {/* Type label */}
-                              {room.h >= 28 && <text x={cx} y={room.y+room.h-8} textAnchor="middle" fontSize={5.5} fontWeight="700"
-                                fill={isHov ? "white" : "var(--map-room-text)"} className="pointer-events-none select-none">
-                                {room.type === "elevator" ? "ELEV" : "STAIR"}
-                              </text>}
-                            </>
-                          );
-                        })()}
-
-                        {/* Emergency exit label */}
-                        {mapMode === "emergency" && isNav && (
-                          <text x={cx} y={room.y-5} textAnchor="middle" fontSize={6} fontWeight="900"
-                            fill="#dc2626" className="pointer-events-none select-none">EXIT</text>
-                        )}
-                      </g>
-                    );
-                  });
-                })()}
-
-                {/* ── Indoor route path ── */}
-                {indoorRoute && indoorRoute.waypoints.length >= 2 && (
-                  <g>
-                    {/* Shadow path */}
-                    <polyline
-                      points={indoorRoute.waypoints.map(p => `${p.x},${p.y}`).join(" ")}
-                      fill="none" stroke="rgba(0,0,0,0.20)"
-                      strokeWidth={8} strokeLinecap="round" strokeLinejoin="round"
-                    />
-                    {/* Solid path */}
-                    <polyline
-                      points={indoorRoute.waypoints.map(p => `${p.x},${p.y}`).join(" ")}
-                      fill="none" stroke="var(--map-route)"
-                      strokeWidth={5} strokeLinecap="round" strokeLinejoin="round"
-                      strokeDasharray="1200" strokeDashoffset="1200"
-                      style={{ animation:"draw-route 1s cubic-bezier(0.4,0,0.2,1) forwards" }}
-                    />
-                    {/* Dashed marching ants overlay */}
-                    <polyline
-                      points={indoorRoute.waypoints.map(p => `${p.x},${p.y}`).join(" ")}
-                      fill="none" stroke="rgba(255,255,255,0.6)"
-                      strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round"
-                      strokeDasharray="6 10"
-                      style={{ animation:"draw-route 1s 0.3s ease forwards, dash-flow 1s 1.5s linear infinite" }}
-                    />
-                    {/* Start marker */}
-                    <circle cx={indoorRoute.waypoints[0].x} cy={indoorRoute.waypoints[0].y} r={6}
-                      fill="#16a34a" stroke="white" strokeWidth={2}
-                      style={{ animation:"scale-in 0.3s 0.5s ease both" }}/>
-                    {/* End marker (pulsing) */}
-                    <circle cx={indoorRoute.waypoints[indoorRoute.waypoints.length - 1].x}
-                      cy={indoorRoute.waypoints[indoorRoute.waypoints.length - 1].y}
-                      r={7} fill="var(--map-route)" stroke="white" strokeWidth={2.5}
-                      style={{ animation:"scale-in 0.3s 0.7s ease both" }}/>
-                    <circle cx={indoorRoute.waypoints[indoorRoute.waypoints.length - 1].x}
-                      cy={indoorRoute.waypoints[indoorRoute.waypoints.length - 1].y}
-                      r={12} fill="none" stroke="var(--map-route)" strokeWidth={2} opacity={0.4}
-                      style={{ animation:"pulse-ring 1.8s ease-in-out infinite" }}/>
-                  </g>
-                )}
-
-                {/* ── Compass rose ── */}
-                <g transform={`translate(${FP_W-22},20)`}>
-                  <circle r={12} fill="var(--map-compass-bg)" stroke="var(--map-floor-wall-stroke)" strokeWidth={1}/>
-                  <text textAnchor="middle" y={-2} fontSize={7} fontWeight="900" fill="var(--map-compass-n)">N</text>
-                  <line y1={0} y2={-8} stroke="var(--map-compass-n)" strokeWidth={2} strokeLinecap="round"/>
-                  <line y1={0} y2={7} stroke="var(--map-compass-n)" strokeWidth={1} strokeLinecap="round" opacity={0.5}/>
-                </g>
-                {/* Floor watermark */}
-                <text x={FP_W/2} y={FP_H-5} textAnchor="middle" fontSize={7} fontWeight="600"
-                  fill="#7a7672" opacity={0.8} className="select-none pointer-events-none">
-                  {currentFloor.label} — {floorView?.building.code}
-                </text>
-              </>
+              <ReadonlyFloorPlanScene
+                floor={activeFloorPlan}
+                mapMode={mapMode}
+                highlightedRoomId={highlightedRoom}
+                hoveredRoomId={hoveredRoom}
+                onRoomClick={(roomId) => showIndoorRoute(roomId)}
+                onRoomHover={(roomId) => setHoveredRoom(roomId)}
+                onRoomHoverEnd={() => setHoveredRoom(null)}
+                onDoorClick={() => closeFloorPlan()}
+              />
             );
           })() : (
           /* ════════ CAMPUS MAP mode ════════ */
@@ -1350,44 +1192,6 @@ const buildingFill = (id: string) =>
             <rect data-bg="true" width={outdoorCanvasW} height={outdoorCanvasH} fill="var(--map-bg)" style={{ cursor: pinning ? "crosshair" : undefined }}/>
             <rect x={6} y={6} width={Math.max(0, outdoorCanvasW - 12)} height={Math.max(0, outdoorCanvasH - 12)} fill="none" stroke="var(--map-boundary)" strokeWidth={3} rx={4} opacity={0.5} strokeDasharray="8 4"/>
 
-            {/* Legacy overlays remain only for the compatibility/demo map. */}
-            {!activeCampus && mapMode === "accessible" && <>
-              <path d="M 119,289 L 155,289 L 155,170" fill="none" stroke="#16a34a" strokeWidth={7} opacity={0.5} strokeDasharray="12,6" strokeLinecap="round"/>
-              <path d="M 414,289 L 540,289 L 540,373" fill="none" stroke="#16a34a" strokeWidth={7} opacity={0.5} strokeDasharray="12,6" strokeLinecap="round"/>
-              <path d="M 414,289 L 414,435 L 305,435" fill="none" stroke="#16a34a" strokeWidth={7} opacity={0.5} strokeDasharray="12,6" strokeLinecap="round"/>
-              {([[155,290,"#16a34a"],[414,373,"#16a34a"],[414,435,"#16a34a"]] as [number,number,string][]).map(([cx,cy,clr],i) => (
-                <g key={i}>
-                  <circle cx={cx} cy={cy} r={12} fill="white" stroke={clr} strokeWidth={2.5} style={{ animation:"scale-in 0.3s ease both" }}/>
-                  <svg x={cx-8} y={cy-8} width={16} height={16} viewBox="0 0 24 24" fill="none" stroke={clr} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="select-none">
-                    <circle cx="16" cy="4" r="1"/>
-                    <path d="m18 19 1-7-6 1"/>
-                    <path d="m5 8 3-3 5.5 3-2.36 3.5"/>
-                    <path d="M4.24 14.5a5 5 0 0 0 6.88 6"/>
-                    <path d="M13.76 17.5a5 5 0 0 0-6.88-6"/>
-                  </svg>
-                  {!reducedMotion && (
-                    <circle cx={cx} cy={cy} r={12} fill="none" stroke={clr} strokeWidth={2} opacity={0.3}>
-                      <animate attributeName="r" from="12" to="20" dur="1.5s" repeatCount="indefinite"/>
-                      <animate attributeName="opacity" from="0.3" to="0" dur="1.5s" repeatCount="indefinite"/>
-                    </circle>
-                  )}
-                </g>
-              ))}
-              {/* Building entrance accessibility markers */}
-              {([[155,170,"MAB - Ramp Access"],[395,115,"ADM - Elevator"],[540,295,"LRC - Ground"],[165,305,"ELB - Ramp"],[305,435,"GYM - Level"],[605,415,"SSC - Ground"]] as [number,number,string][]).map(([ex,ey,label],i) => (
-                <g key={`acc${i}`}>
-                  <rect x={ex-10} y={ey-10} width={20} height={10} rx={4} fill="#16a34a" fillOpacity={0.85} stroke="white" strokeWidth={1}/>
-                  <text x={ex} y={ey-3} textAnchor="middle" fill="white" fontSize={5.5} fontWeight="900" className="select-none pointer-events-none">{label}</text>
-                </g>
-              ))}
-            </>}
-            {/* Emergency overlay */}
-            {!activeCampus && mapMode === "emergency" && <>
-              <rect x={0} y={272} width={SVG_W} height={26} fill="rgba(220,38,38,0.15)"/>
-              {([[119,285,"EXIT"],[680,285,"EXIT"],[401,285,"RALLY"]] as [number,number,string][]).map(([cx,cy,lbl],i) => (
-                <g key={i}><circle cx={cx} cy={cy} r={16} fill="#dc2626" stroke="white" strokeWidth={2.5}/><text x={cx} y={cy+4} textAnchor="middle" fill="white" fontSize={7} fontWeight="900" className="select-none">{lbl}</text></g>
-              ))}
-            </>}
             {readonlyOutdoorCampus && (
               <ReadonlyOutdoorCampusScene
                 campus={readonlyOutdoorCampus}
@@ -1401,67 +1205,16 @@ const buildingFill = (id: string) =>
                   const building = MOCK_BUILDINGS.find((item) => item.id === buildingId);
                   if (building) openFloorPlan(building);
                 }}
+                onClickEntrance={(buildingId) => {
+                  const building = MOCK_BUILDINGS.find((item) => item.id === buildingId);
+                  if (building) openFloorPlan(building);
+                }}
               />
             )}
             {/* Route */}
             {route && (
               <RouteMapOverlay points={route.points} mode={mapMode} fading={routeFading} walkProgress={walkProgress} />
             )}
-            {/* Legacy demo buildings are used only when no canonical campus is available. */}
-            {!activeCampus && layers.buildings && MOCK_BUILDINGS.map(b => {
-              const pos = B_POS[b.id]; if (!pos) return null;
-              const isSel = selected?.id === b.id;
-              const googleFill = mapMode === "standard"
-                ? (b.category === "sports" ? "var(--map-building-sports-fill)" : b.category === "library" || b.category === "facility" ? "var(--map-building-library-fill)" : "var(--map-building-default-fill)")
-                : buildingFill(b.id);
-              return (
-                <g key={b.id} data-bldg style={{ cursor: isDragging ? "grabbing" : "pointer" }}
-                  onClick={e => { e.stopPropagation(); if (!dragRef.current?.moved) selectBuilding(isSel ? null : b); }}
-                  onDoubleClick={e => { e.stopPropagation(); openFloorPlan(b); }}>
-                  {isSel && <rect x={pos.x-7} y={pos.y-7} width={pos.w+14} height={pos.h+14} rx={10}
-                    fill="none" stroke="#1e40af" strokeWidth={3} opacity={0.9}
-                    style={{ animation:"border-glow 1.5s ease-in-out infinite" }}/>}
-                  <rect x={pos.x+3} y={pos.y+4} width={pos.w} height={pos.h} rx={5} fill="rgba(0,0,0,0.10)" filter="url(#bldg-shadow)"/>
-                  {/* Building body */}
-                  <rect x={pos.x} y={pos.y} width={pos.w} height={pos.h} rx={4}
-                    fill={mapMode === "standard" ? googleFill : buildingFill(b.id)}
-                    stroke={isSel ? "#1e40af" : mapMode === "standard" ? "var(--map-building-stroke)" : "rgba(255,255,255,0.5)"}
-                    strokeWidth={isSel ? 2.5 : 1} opacity={isSel ? 1 : 0.94}/>
-                  {/* Roof band */}
-                  <rect x={pos.x} y={pos.y} width={pos.w} height={6} rx={4}
-                    fill={mapMode === "standard" ? "rgba(0,0,0,0.10)" : "rgba(0,0,0,0.18)"}/>
-                  {/* Windows (standard mode only, when big enough) */}
-                  {mapMode === "standard" && pos.w >= 60 && pos.h >= 40 && (
-                    <>
-                      {[...Array(Math.min(4, Math.floor(pos.w/22)))].map((_,wi) =>
-                        [0,1].map(ri => {
-                          const wx = pos.x + 8 + wi*((pos.w-16)/Math.min(4,Math.floor(pos.w/22)));
-                          const wy = pos.y + 14 + ri*12;
-                          if (wy + 7 > pos.y + pos.h - 4) return null;
-                          return <rect key={`w${wi}-${ri}`} x={wx} y={wy} width={8} height={6} rx={1}
-                            fill="rgba(255,255,255,0.55)" stroke="rgba(0,0,0,0.08)" strokeWidth={0.5}/>;
-                        })
-                      )}
-                    </>
-                  )}
-                  {/* Building code */}
-                  <text x={pos.x+pos.w/2} y={pos.y+pos.h/2+3} textAnchor="middle"
-                    fill={mapMode === "standard" ? "var(--map-building-text)" : "white"}
-                    fontSize={10} fontWeight="800" letterSpacing="-0.3"
-                    className="pointer-events-none select-none">{b.code}</text>
-                  {/* Building name label */}
-                  {displayZoom > 0.7 && <text x={pos.x+pos.w/2} y={pos.y+pos.h+13}
-                    textAnchor="middle" fill={mapMode === "standard" ? "var(--map-building-name)" : "rgba(255,255,255,0.9)"}
-                    fontSize={7} fontWeight="600"
-                    style={{ textShadow: mapMode === "standard" ? "0 1px 3px rgba(255,255,255,0.95)" : "none" }}
-                    className="pointer-events-none select-none">
-                    {b.name.length > 20 ? b.name.slice(0,18)+"…" : b.name}
-                  </text>}
-                  {/* Floor plan indicator */}
-                  {FLOOR_PLANS[b.id] && <circle cx={pos.x+pos.w-6} cy={pos.y+6} r={4} fill="#16a34a" stroke="white" strokeWidth={1.5}/>}
-                </g>
-              );
-            })}
             {/* "You are here" marker (kiosk-style start) */}
             {youAreHere && !isFloorMode && (
               <g data-you-are-here style={{ pointerEvents: "none" }}>
@@ -1594,22 +1347,18 @@ const buildingFill = (id: string) =>
                     </div>
                   </div>
                 )}
-                {/* Popular (campus mode, no query) */}
-                {!isFloorMode && !search && (
+                {/* Quick access buildings (campus mode, no query) */}
+                {!isFloorMode && !search && MOCK_BUILDINGS.length > 0 && (
                   <div className="px-4 py-3 border-t border-border">
-                    <p className="text-[10px] font-extrabold text-muted-foreground uppercase tracking-widest mb-2">Popular</p>
+                    <p className="text-[10px] font-extrabold text-muted-foreground uppercase tracking-widest mb-2">Quick Access</p>
                     <div className="grid grid-cols-2 gap-1">
-                      {POPULAR.map(p => {
-                        const b = MOCK_BUILDINGS.find(bld => bld.id === p.buildingId);
-                        if (!b) return null;
-                        return (
-                          <button key={p.label} onMouseDown={e => { e.preventDefault(); selectBuilding(b); }}
-                            className="flex items-center gap-2 px-2.5 py-1.5 rounded-xl hover:bg-muted transition-colors text-left">
-                            <MapPin className="h-3 w-3 text-primary shrink-0"/>
-                            <span className="text-xs font-semibold text-foreground">{p.label}</span>
-                          </button>
-                        );
-                      })}
+                      {MOCK_BUILDINGS.slice(0, 6).map(b => (
+                        <button key={b.id} onMouseDown={e => { e.preventDefault(); selectBuilding(b); }}
+                          className="flex items-center gap-2 px-2.5 py-1.5 rounded-xl hover:bg-muted transition-colors text-left">
+                          <MapPin className="h-3 w-3 text-primary shrink-0"/>
+                          <span className="text-xs font-semibold text-foreground">{b.name}</span>
+                        </button>
+                      ))}
                     </div>
                   </div>
                 )}
@@ -1752,18 +1501,18 @@ const buildingFill = (id: string) =>
             showLayers ? "bg-primary border-primary text-primary-foreground" : "bg-card border-border/60 text-muted-foreground hover:border-primary/30")}>
           <Layers className="h-4 w-4"/>
         </button>
-        <button onClick={e => { e.stopPropagation(); setZoom(z => Math.min(3.5,+(z+0.4).toFixed(2))); }} title="Zoom in"
+        <button onClick={e => { e.stopPropagation(); zoomAtCursor(zoom + 0.4); }} title="Zoom in"
           className="w-10 h-10 md:w-9 md:h-9 rounded-xl bg-card border border-border/60 shadow-md flex items-center justify-center text-muted-foreground hover:text-primary hover:border-primary/30 active:scale-95 transition-all" aria-label="Zoom in">
           <ZoomIn className="h-4 w-4"/>
         </button>
-        <button onClick={e => { e.stopPropagation(); setZoom(z => Math.max(0.35,+(z-0.4).toFixed(2))); }} title="Zoom out"
+        <button onClick={e => { e.stopPropagation(); zoomAtCursor(zoom - 0.4); }} title="Zoom out"
           className="w-10 h-10 md:w-9 md:h-9 rounded-xl bg-card border border-border/60 shadow-md flex items-center justify-center text-muted-foreground hover:text-primary hover:border-primary/30 active:scale-95 transition-all" aria-label="Zoom out">
           <ZoomOut className="h-4 w-4"/>
         </button>
         <button onClick={e => { e.stopPropagation(); handleLocate(); }} title={youAreHere ? "Re-locate your position" : "You are here — set your location"}
-          className={cn("w-10 h-10 md:w-9 md:h-9 rounded-xl border shadow-md flex items-center justify-center transition-all",
+          className={cn("flex w-10 h-10 md:w-9 md:h-9 rounded-xl border shadow-md items-center justify-center transition-all",
             youAreHere
-              ? "bg-blue-500 border-blue-500 text-white"
+              ? "bg-blue-500 border-blue-500 text-white shadow-blue-500/30"
               : pinning
                 ? "bg-blue-500/15 border-blue-500/40 text-blue-500"
                 : "bg-card border-border/60 text-muted-foreground hover:text-primary hover:border-primary/30")}
@@ -2077,6 +1826,11 @@ const buildingFill = (id: string) =>
             className="flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
             style={{ fontFamily:"var(--font-body)" }}/>
           {search && <button onClick={() => setSearch("")}><X className="h-3.5 w-3.5 text-muted-foreground"/></button>}
+          <button onClick={e => { e.stopPropagation(); setDirectionsMode(true); }} title="Directions"
+            className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 transition-all hover:bg-primary/10"
+            style={{ color: "var(--muted-foreground)" }}>
+            <Navigation className="h-4 w-4"/>
+          </button>
         </div>
       </div>
 
@@ -2084,11 +1838,17 @@ const buildingFill = (id: string) =>
       <div data-no-drag className="absolute top-3 right-3 z-20 md:hidden flex flex-col gap-1">
         {(["standard","accessible","emergency"] as MapMode[]).map(m => {
           const Icon = m === "standard" ? Compass : m === "accessible" ? Accessibility : AlertTriangle;
+          const label = m === "standard" ? "Std" : m === "accessible" ? "Acc" : "SOS";
           return (
             <button key={m} onClick={e => { e.stopPropagation(); setMapMode(m); }}
-              className={cn("w-9 h-9 rounded-xl shadow-md border flex items-center justify-center transition-all backdrop-blur-sm",
-                mapMode === m ? "bg-primary text-primary-foreground border-primary" : "bg-card/90 border-border/60 text-muted-foreground")}>
-              <Icon className="h-4 w-4"/>
+              className={cn("flex items-center gap-1 h-9 px-2 rounded-xl shadow-md border transition-all backdrop-blur-sm",
+                mapMode === m
+                  ? m === "accessible" ? "bg-green-500 text-white border-green-500"
+                    : m === "emergency" ? "bg-destructive text-destructive-foreground border-destructive"
+                    : "bg-primary text-primary-foreground border-primary"
+                  : "bg-card/90 border-border/60 text-muted-foreground")}>
+              <Icon className="h-4 w-4 shrink-0"/>
+              <span className="text-[10px] font-extrabold leading-none">{label}</span>
             </button>
           );
         })}

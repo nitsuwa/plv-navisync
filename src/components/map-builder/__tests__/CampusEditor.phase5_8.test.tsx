@@ -151,10 +151,10 @@ describe("B5 Phase 5.9 — pathway cleanup and campus graph overlay", () => {
 
   it("renders the outdoor navigation graph as a read-only Campus overlay only when toggled", () => {
     const navNodes: NavigationNode[] = [
-      { id: "n1", campusId: "c1", name: "A", type: "outdoor", x: 120, y: 120, color: "#16a34a" },
-      { id: "n2", campusId: "c1", name: "B", type: "outdoor", x: 180, y: 120, color: "#16a34a" },
+      { id: "n1", campusId: "c1", name: "A", type: "outdoor", x: 120, y: 120, accessible: true, color: "#16a34a" },
+      { id: "n2", campusId: "c1", name: "B", type: "outdoor", x: 180, y: 120, accessible: true, color: "#16a34a" },
     ];
-    const navEdges: NavigationEdge[] = [{ id: "e1", startNodeId: "n1", endNodeId: "n2", bidirectional: true }];
+    const navEdges: NavigationEdge[] = [{ id: "e1", startNodeId: "n1", endNodeId: "n2", bidirectional: true, distance: 100, accessible: true, type: "walkway", color: "#16a34a", width: 3 }];
 
     const hidden = renderCanvas({ layer: "campus", navNodes, navEdges, showNavigationOverlay: false });
     expect(hidden.container.querySelector("[data-testid='nav-graph-layer']")).toBeNull();

@@ -131,7 +131,7 @@ export function AdminBuildingsPage() {
   const handleDelete = async (id: string) => {
     const deleted = buildings.find((b) => b.id === id) as DbBuilding | undefined;
     if (deleted) {
-      await buildingService.remove(id);
+      await buildingService.delete(id);
       toast.success("Building deleted", `${deleted.name} has been removed.`);
     }
   };

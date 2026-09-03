@@ -68,7 +68,7 @@ function makeCampus(): Campus {
     }],
     createdAt: "2026-01-01",
     updatedAt: "2026-01-01",
-  } as Campus;
+  } as unknown as Campus;
 }
 
 function Harness({
@@ -140,7 +140,7 @@ describe("B7 Phase 2 — Save Draft is never blocked by validation", () => {
   it("saves a draft that has validation WARNINGS", async () => {
     // Orphan nav node → nav_orphan_node warning. Saving must NOT be blocked.
     const current = makeCampus();
-    current.navNodes!.push({ id: "orphan", campusId: "c1", name: "Orphan", type: "outdoor", x: 500, y: 500, accessible: true } as Campus["navNodes"][number]);
+    current.navNodes!.push({ id: "orphan", campusId: "c1", name: "Orphan", type: "outdoor", x: 500, y: 500, accessible: true } as NonNullable<Campus["navNodes"]>[number]);
     const saved = { ...current, navEdges: [] };
     const onSave = vi.fn(async (c: Campus) => c);
     const onBack = vi.fn();
@@ -176,7 +176,7 @@ describe("B7 Phase 2 — Save Draft is never blocked by validation", () => {
 
   it("successful save does NOT remove validation issues and clears dirty state", async () => {
     const current = makeCampus();
-    current.navNodes!.push({ id: "orphan", campusId: "c1", name: "Orphan", type: "outdoor", x: 500, y: 500, accessible: true } as Campus["navNodes"][number]);
+    current.navNodes!.push({ id: "orphan", campusId: "c1", name: "Orphan", type: "outdoor", x: 500, y: 500, accessible: true } as NonNullable<Campus["navNodes"]>[number]);
     const saved = { ...current, navEdges: [] };
     const onSave = vi.fn(async (c: Campus) => c);
     const onBack = vi.fn();

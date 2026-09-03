@@ -17,8 +17,6 @@ import { cn } from "../../lib/utils";
 const ALL_NAV_LINKS = [
   { label: "Home", path: "/", icon: Home },
   { label: "Map", path: "/map", icon: Map },
-  { label: "Directory", path: "/buildings", icon: Building2 },
-  { label: "Help Center", path: "/help", icon: HelpCircle },
 ];
 
 const STUDENT_NAV_LINKS = [

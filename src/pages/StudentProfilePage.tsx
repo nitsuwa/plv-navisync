@@ -78,7 +78,7 @@ export function StudentProfilePage() {
   useEffect(() => {
     let mounted = true;
     Promise.all([
-      studentAccountService.getSavedBuildings(),
+      Promise.resolve(studentAccountService.getSavedBuildingIds()),
       reportService.getStudentReports(),
     ]).then(([saved, rpts]) => {
       if (mounted) {

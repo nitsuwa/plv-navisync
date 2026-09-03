@@ -7,14 +7,11 @@ import { useStudentAuth } from "../../hooks/useStudentAuth";
 const ALL_TABS = [
     { to: "/", icon: Home, label: "Home" },
     { to: "/map", icon: Compass, label: "Map" },
-    { to: "/buildings", icon: Building2, label: "Buildings" },
-    { to: "/help", icon: HelpCircle, label: "Help" },
     { to: "/student", icon: User, label: "Profile", auth: true },
   ];
 
 const STUDENT_TABS = [
-    { to: "/map", icon: Compass, label: "Map" },
-    { to: "/student", icon: User, label: "Profile", auth: true },
+    { to: "/map", icon: Compass, label: "Map", auth: false },
   ];
 
   const landscapeClasses = "max-md:landscape:px-6 max-md:landscape:pb-1 max-md:landscape:gap-0";

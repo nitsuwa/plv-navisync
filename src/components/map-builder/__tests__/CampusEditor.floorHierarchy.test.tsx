@@ -36,9 +36,9 @@ function makeCampus(): Campus {
       color: "#1e40af",
       expanded: true,
       floors: [
-        { id: "f1", buildingId: "b1", number: 1, label: "Ground Floor", rooms: [], paths: [] },
-        { id: "f2", buildingId: "b1", number: 2, label: "Floor 2", rooms: [], paths: [] },
-        { id: "f3", buildingId: "b1", number: 3, label: "Floor 3", rooms: [], paths: [] },
+        { id: "f1", buildingId: "b1", number: 1, label: "Ground Floor", rooms: [], paths: [], walls: [], doors: [], windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [] },
+        { id: "f2", buildingId: "b1", number: 2, label: "Floor 2", rooms: [], paths: [], walls: [], doors: [], windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [] },
+        { id: "f3", buildingId: "b1", number: 3, label: "Floor 3", rooms: [], paths: [], walls: [], doors: [], windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [] },
       ],
     }],
     markers: [],

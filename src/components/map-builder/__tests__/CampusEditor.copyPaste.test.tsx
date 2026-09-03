@@ -34,7 +34,7 @@ function makeCampus(): Campus {
       height: 80,
       color: "#1e40af",
       expanded: false,
-      floors: [{ id: "f1", buildingId: "b1", number: 1, label: "Ground Floor", rooms: [], paths: [] }],
+      floors: [{ id: "f1", buildingId: "b1", number: 1, label: "Ground Floor", rooms: [], paths: [], walls: [], doors: [], windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [] }],
     }],
     markers: [],
     paths: [],
@@ -99,7 +99,7 @@ function seededCampus(): Campus {
     { id: "nnB", name: "Gate B", type: "outdoor", x: 300, y: 200, campusId: "c1", accessible: true, color: "#16a34a" },
   ];
   campus.navNodes = nodes;
-  campus.navEdges = [{ id: "ne1", startNodeId: "nnA", endNodeId: "nnB", direction: "bidirectional", accessible: true, emergencySafe: true, closed: false }];
+  campus.navEdges = [{ id: "ne1", startNodeId: "nnA", endNodeId: "nnB", distance: 100, bidirectional: true, accessible: true, emergencySafe: true, closed: false, type: "walkway", color: "#16a34a", width: 3 }];
   return campus;
 }
 
@@ -108,7 +108,7 @@ function buildingGroup(container: HTMLElement): SVGGElement {
     (r) => r.getAttribute("fill") === "#1e40af"
   );
   expect(rect, "building body rect").toBeTruthy();
-  return rect!.parentElement as SVGGElement;
+  return rect!.parentElement as unknown as SVGGElement;
 }
 
 function markerGroup(container: HTMLElement, x: number, y: number): SVGGElement {
@@ -162,7 +162,7 @@ describe("B5 Phase 2.1 — outdoor Campus copy / paste / duplicate", () => {
   it("Ctrl+C copies a marker and Ctrl+V pastes it offset with a fresh id", () => {
     let latest: Campus | undefined;
     const campus = makeCampus();
-    campus.markers = [{ id: "mk1", name: "Info Booth", x: 420, y: 300, color: "#dc2626" }];
+    campus.markers = [{ id: "mk1", name: "Info Booth", type: "info", x: 420, y: 300, color: "#dc2626" }];
     const { container } = render(<Harness onCampusChange={(c) => { latest = c; }} initialCampus={campus} />);
     // Click the marker element directly to select it.
     fireEvent.mouseDown(markerGroup(container, 420, 300), { bubbles: true });
@@ -219,9 +219,9 @@ describe("B5 Phase 2.1 — outdoor Navigation copy / paste / duplicate", () => {
 
     expect(latest!.navNodes).toHaveLength(4);
     expect(latest!.navEdges).toHaveLength(2);
-    const newNodes = latest!.navNodes.filter((n) => n.id !== "nnA" && n.id !== "nnB");
+    const newNodes = latest!.navNodes!.filter((n) => n.id !== "nnA" && n.id !== "nnB");
     expect(newNodes).toHaveLength(2);
-    const newEdge = latest!.navEdges.find((e) => e.id !== "ne1")!;
+    const newEdge = latest!.navEdges!.find((e) => e.id !== "ne1")!;
     // The pasted edge must connect the two NEW nodes, never the originals.
     expect(newEdge.startNodeId).not.toBe("nnA");
     expect(newEdge.endNodeId).not.toBe("nnB");
@@ -270,7 +270,7 @@ describe("B5 Phase 2.1 — outdoor Navigation copy / paste / duplicate", () => {
   it("copying an entrance-linked waypoint is excluded from the copied free set", () => {
     const campus = seededCampus();
     // Turn Gate A into an entrance-linked node (derived geometry, not copyable).
-    campus.navNodes = campus.navNodes.map((n) => (n.id === "nnA" ? { ...n, entranceId: "ent1", buildingId: "b1" } : n));
+    campus.navNodes = campus.navNodes!.map((n) => (n.id === "nnA" ? { ...n, entranceId: "ent1", buildingId: "b1" } : n));
     const { container } = render(<Harness initialCampus={campus} />);
     const svg = openNavigationLayer(container);
     fireEvent.keyDown(window, { key: "v" });
