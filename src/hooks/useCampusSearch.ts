@@ -29,11 +29,7 @@ export interface UseCampusSearchResult {
   clearSearch: () => void;
 }
 
-export function useCampusSearch(
-  campus: Campus | null, 
-  initialCategory: string = "all",
-  events: import("../components/map-builder/types").CampusEventOverlay[] = []
-): UseCampusSearchResult {
+export function useCampusSearch(campus: Campus | null, initialCategory: string = "all"): UseCampusSearchResult {
   const [query, setQuery] = useState<string>("");
   const [selectedCategory, setSelectedCategory] = useState<string>(initialCategory);
   
@@ -120,25 +116,8 @@ export function useCampusSearch(
       });
     });
 
-    // 4. Index Active Events
-    events.forEach((evt) => {
-      const eName = evt.title;
-      entries.push({
-        id: evt.id,
-        name: eName,
-        kind: "marker", // Map to marker to render correctly in UI
-        category: "event",
-        buildingId: evt.locationRef?.buildingId,
-        buildingName: evt.locationRef?.label,
-        floorId: evt.locationRef?.floorId,
-        description: evt.description || "Campus Event",
-        accessible: true,
-        keywords: [eName.toLowerCase(), (evt.organizer || "").toLowerCase(), "event", "fair", "org"],
-      });
-    });
-
     return entries;
-  }, [campus, events]);
+  }, [campus]);
 
   // Filtered search results
   const results = useMemo(() => {

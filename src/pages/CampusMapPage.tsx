@@ -1,5 +1,4 @@
 import { useState, useCallback, useMemo, useRef, useEffect } from "react";
-import { AnimatePresence } from "motion/react";
 
 import {
   Search, Layers, ZoomIn, ZoomOut, LocateFixed, Building2, X,
@@ -16,8 +15,6 @@ import type { Building } from "../types";
 import { cn } from "../lib/utils";
 import { useStudentAuth } from "../hooks/useStudentAuth";
 import { useCampusData } from "../contexts/CampusDataContext";
-import { eventOverlayService } from "../services/eventOverlayService";
-import type { CampusEventOverlay } from "../components/map-builder/types";
 import { buildingPositionsFromCampus, floorPlansFromCampus, buildingsFromCampus } from "../lib/mapDataAdapter";
 import { findIndoorRoute, findIndoorRouteForFloor, type IndoorRoute } from "../lib/indoorPathfinding";
 import { planBuildingRoute, planRouteFromPoint, type PlannedRoute } from "../lib/routePlanner";
@@ -27,8 +24,7 @@ import { projectReadonlyOutdoorCampus } from "../lib/readonlyOutdoorCampus";
 import {
   RoutePlannerDialog, RouteStepsPanel, RouteMapOverlay,
   ReportModal, SignInPrompt,
-  BuildingInfoPanel, MobileBuildingSheet, RouteErrorState,
-  EventInfoPanel, ActiveEventsList,
+  BuildingInfoPanel, MobileBuildingSheet,
 } from "../components/map";
 import { studentAccountService } from "../services/studentAccountService";
 import { usageAnalyticsService } from "../services/usageAnalyticsService";
@@ -277,19 +273,12 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
   const [recentSearches, setRecentSearches] = useState<string[]>([]);
   const [showQR,         setShowQR]         = useState(false);
 
+  // Unified Search Engine Hook for C3
+  const campusSearch = useCampusSearch(activeCampus);
+
   // Modals
   const [reportModal,   setReportModal]   = useState<Building|null>(null);
   const [signInPrompt,  setSignInPrompt]  = useState<string|null>(null);
-  const [selectedEvent, setSelectedEvent] = useState<CampusEventOverlay|null>(null);
-  const [showEventsList, setShowEventsList] = useState(false);
-
-  const [allActiveEvents, setAllActiveEvents] = useState<CampusEventOverlay[]>([]);
-  useEffect(() => {
-    eventOverlayService.getActiveApprovedOverlays().then(setAllActiveEvents).catch(() => setAllActiveEvents([]));
-  }, []);
-
-  // Unified Search Engine Hook for C3
-  const campusSearch = useCampusSearch(activeCampus, "all", allActiveEvents);
 
   // Refs
   const mapContainerRef = useRef<HTMLDivElement>(null);
@@ -356,27 +345,6 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
   const currentFloorData  = floorView ? FLOOR_PLANS[floorView.building.id] : null;
   const currentFloor      = currentFloorData?.floors.find(f => f.number === floorView?.floor) ?? currentFloorData?.floors[0];
   const floorNums         = currentFloorData?.floors.map(f => f.number) ?? [];
-
-  // ── Event Overlays (approved events for current floor) ───────────────
-  // The demo floor plans are keyed by building id + floor number, so the
-  // canonical floor id used by event overlays is `${buildingId}-f${number}`
-  // (this must match the locationRef.floorId saved by the event editor).
-  const [activeOverlays, setActiveOverlays] = useState<CampusEventOverlay[]>([]);
-
-  const floorLookupId =
-    isFloorMode && floorView && currentFloor
-      ? `${floorView.building.id}-f${currentFloor.number}`
-      : null;
-  useEffect(() => {
-    if (!floorLookupId) {
-      setActiveOverlays([]);
-      return;
-    }
-    eventOverlayService
-      .getApprovedOverlaysForFloor(floorLookupId)
-      .then(setActiveOverlays)
-      .catch(() => setActiveOverlays([]));
-  }, [floorLookupId]);
 
   // SVG center shifts with mode (floor plan is 440×290, campus 900×680)
   const outdoorCanvasW = activeCampus?.canvasW || SVG_W;
@@ -872,22 +840,7 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
 
   const handleSelectSearchResult = useCallback((item: SearchResult) => {
     usageAnalyticsService.track("search", item.name);
-    if (item.category === "event") {
-      const evt = allActiveEvents.find(e => e.id === item.id);
-      if (evt && evt.locationRef?.buildingId) {
-        const b = MOCK_BUILDINGS.find((building) => building.id === evt.locationRef!.buildingId);
-        if (b) {
-          selectBuilding(b);
-          if (evt.locationRef.floorId) {
-            const match = evt.locationRef.floorId.match(/-f(\d+)$/);
-            const floorNum = match ? parseInt(match[1], 10) : 1;
-            setFloorView({ building: b, floor: floorNum });
-          }
-          // We need a slight delay to allow the floor view to open before showing the event modal
-          setTimeout(() => setSelectedEvent(evt), 50);
-        }
-      }
-    } else if (item.kind === "building" || !item.buildingId) {
+    if (item.kind === "building" || !item.buildingId) {
       const b = MOCK_BUILDINGS.find((building) => building.id === item.buildingId || building.name.toLowerCase() === item.name.toLowerCase());
       if (b) selectBuilding(b);
     } else {
@@ -904,7 +857,7 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
     }
     setSearch(item.name);
     setSearchFocused(false);
-  }, [MOCK_BUILDINGS, selectBuilding, allActiveEvents]);
+  }, [MOCK_BUILDINGS, selectBuilding]);
 
   const startDirectionsTo = useCallback((b: Building) => {
     setToBuilding(b); setFromBuilding(null);
@@ -1390,71 +1343,6 @@ const buildingFill = (id: string) =>
                   </g>
                 )}
 
-                {/* ── Event Overlay (approved events for this floor) ── */}
-                {activeOverlays.map((overlay) => (
-                  <g 
-                    key={overlay.id} 
-                    className="cursor-pointer transition-opacity hover:opacity-80"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      if (!dragRef.current?.moved) setSelectedEvent(overlay);
-                    }}
-                  >
-                    {/* Event furniture */}
-                    {(overlay.eventFurniture ?? []).map((f) => (
-                      <g key={f.id} transform={`translate(${f.x},${f.y}) rotate(${f.rotation || 0},${f.width / 2},${f.height / 2})`}>
-                        <rect
-                          width={f.width}
-                          height={f.height}
-                          fill={f.color}
-                          fillOpacity={0.75}
-                          rx={2}
-                          stroke="white"
-                          strokeWidth={1.5}
-                        />
-                        <text
-                          x={f.width / 2}
-                          y={f.height / 2}
-                          textAnchor="middle"
-                          dominantBaseline="middle"
-                          fontSize={8}
-                          fontWeight="bold"
-                          fill="white"
-                          className="select-none pointer-events-none"
-                        >
-                          {f.name}
-                        </text>
-                      </g>
-                    ))}
-                    {/* Event labels */}
-                    {(overlay.eventLabels ?? []).map((l) => (
-                      <text
-                        key={l.id}
-                        x={l.x}
-                        y={l.y}
-                        fontSize={l.fontSize || 10}
-                        fontWeight="bold"
-                        fill={l.color || '#1f2937'}
-                        transform={l.rotation ? `rotate(${l.rotation},${l.x},${l.y})` : undefined}
-                        className="select-none pointer-events-none"
-                      >
-                        {l.text}
-                      </text>
-                    ))}
-                    {/* Event overlay indicator */}
-                    <text
-                      x={10}
-                      y={FP_H - 20}
-                      fontSize={7}
-                      fontWeight="bold"
-                      fill="#8b5cf6"
-                      className="select-none pointer-events-none"
-                    >
-                      🎪 {overlay.title}
-                    </text>
-                  </g>
-                ))}
-
                 {/* ── Compass rose ── */}
                 <g transform={`translate(${FP_W-22},20)`}>
                   <circle r={12} fill="var(--map-compass-bg)" stroke="var(--map-floor-wall-stroke)" strokeWidth={1}/>
@@ -1871,37 +1759,7 @@ const buildingFill = (id: string) =>
       )}
 
       {/* ══════════════ ZOOM CONTROLS — desktop only ══════════════ */}
-      <div data-no-drag className={cn("absolute bottom-20 md:bottom-5 right-3 z-20 flex flex-col gap-1", route && "hidden")}>
-        {allActiveEvents.length > 0 && (
-          <div className="relative mb-2">
-            <button
-              onClick={() => setShowEventsList(v => !v)}
-              className="w-10 h-10 md:w-9 md:h-9 rounded-xl bg-card border border-border/60 shadow-lg flex flex-col items-center justify-center gap-0.5 hover:bg-muted transition-colors relative group"
-            >
-              <CalendarDays className="h-4 w-4 text-primary group-hover:scale-110 transition-transform" />
-              <span className="absolute -top-1.5 -right-1.5 min-w-[16px] h-4 bg-red-500 rounded-full border border-background px-1 text-[8px] font-bold text-white flex items-center justify-center shadow-sm">
-                {allActiveEvents.length}
-              </span>
-            </button>
-            <AnimatePresence>
-              {showEventsList && (
-                <ActiveEventsList
-                  events={allActiveEvents}
-                  onSelectEvent={(evt) => {
-                    handleSelectSearchResult({
-                      id: evt.id,
-                      name: evt.title,
-                      kind: "marker",
-                      category: "event"
-                    });
-                  }}
-                  onClose={() => setShowEventsList(false)}
-                />
-              )}
-            </AnimatePresence>
-          </div>
-        )}
-
+      <div data-no-drag className={cn("absolute bottom-20 md:bottom-5 right-3 z-20 hidden md:flex flex-col gap-1", route && "hidden")}>
         <button onClick={e => { e.stopPropagation(); setShowLayers(v => !v); }} title="Layers"
           className={cn("w-9 h-9 rounded-xl border shadow-md flex items-center justify-center transition-all",
             showLayers ? "bg-primary border-primary text-primary-foreground" : "bg-card border-border/60 text-muted-foreground hover:border-primary/30")}>
@@ -2368,24 +2226,10 @@ const buildingFill = (id: string) =>
             </button>
           </div>
         </div>
-      )}      {reportModal   && <ReportModal building={reportModal} onClose={() => setReportModal(null)}/>}
+      )}      {/* ══════════════ MODALS ══════════════ */}
+      {reportModal   && <ReportModal building={reportModal} onClose={() => setReportModal(null)}/>}
       {signInPrompt  && <SignInPrompt message={signInPrompt} onClose={() => setSignInPrompt(null)}/>}
-      {selectedEvent && (
-        <EventInfoPanel 
-          event={selectedEvent} 
-          onClose={() => setSelectedEvent(null)}
-          onNavigate={() => {
-            if (selectedEvent.locationRef?.buildingId) {
-              const b = MOCK_BUILDINGS[selectedEvent.locationRef.buildingId] ||
-                        Object.values(MOCK_BUILDINGS).find((b: any) => b.id === selectedEvent.locationRef?.buildingId);
-              if (b) {
-                startDirectionsTo(b);
-                setSelectedEvent(null);
-              }
-            }
-          }}
-        />
-      )}
+
       {/* Campus switching loading overlay */}
       {campusTransitioning && (
         <div className="absolute inset-0 z-30 flex items-center justify-center bg-background/60 backdrop-blur-sm" style={{ animation:"fadeIn 0.15s ease-out both" }}>

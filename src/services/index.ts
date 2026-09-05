@@ -12,7 +12,6 @@ export { reportService } from "./reportService";
 export { locationService } from "./locationService";
 export { routeService } from "./routeService";
 export { eventService } from "./eventService";
-export { eventOverlayService } from "./eventOverlayService";
 export { settingsService } from "./settingsService";
 export { campusService } from "./campusService";
 export { dashboardService, type DashboardStats, type WeeklyActivityPoint } from "./dashboardService";

@@ -12,9 +12,8 @@ interface StudentAuthState {
   profile: Profile | null;
   loading: boolean;
   isStudent: boolean;
-  isStudentOrg: boolean;
   username: string;
-  role: "student" | "student_org" | "faculty";
+  role: "student" | "faculty";
   signOut: () => Promise<void>;
 }
 
@@ -76,18 +75,16 @@ export function StudentAuthProvider({ children }: { children: ReactNode }) {
     setLoading(false);
   }, []);
 
-  // Both student and student_org get full student experience access
-  const isStudent = !!profile && (profile.role === "student" || profile.role === "student_org") && profile.is_active;
-  const isStudentOrg = !!profile && profile.role === "student_org" && profile.is_active;
+  const isStudent = !!profile && profile.role === "student" && profile.is_active;
   const username = profile
     ? [profile.first_name, profile.last_name].filter(Boolean).join(" ") ||
       profile.email.split("@")[0] ||
       "Student"
     : "";
-  const role = profile?.role === "student" ? "student" : profile?.role === "student_org" ? "student_org" : "faculty";
+  const role = profile?.role === "student" ? "student" : "faculty";
 
   return (
-    <StudentAuthContext.Provider value={{ profile, loading, isStudent, isStudentOrg, username, role, signOut }}>
+    <StudentAuthContext.Provider value={{ profile, loading, isStudent, username, role, signOut }}>
       {children}
     </StudentAuthContext.Provider>
   );
@@ -106,7 +103,6 @@ export function useStudentAuth(): StudentAuthState {
       profile: null,
       loading: true,
       isStudent: false,
-      isStudentOrg: false,
       username: "",
       role: "faculty",
       signOut: async () => {},
