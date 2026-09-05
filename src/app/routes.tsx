@@ -24,6 +24,7 @@ const AdminRoutesPage      = lazy(() => import("../pages/AdminRoutesPage").then(
 const AdminReportsPage     = lazy(() => import("../pages/AdminReportsPage").then(m => ({ default: m.AdminReportsPage })));
 const AdminAccessibilityPage = lazy(() => import("../pages/AdminAccessibilityPage").then(m => ({ default: m.AdminAccessibilityPage })));
 const AdminEventsPage      = lazy(() => import("../pages/AdminEventsPage").then(m => ({ default: m.AdminEventsPage })));
+const AdminEventLayoutsPage = lazy(() => import("../pages/AdminEventLayoutsPage").then(m => ({ default: m.AdminEventLayoutsPage })));
 const AdminAnnouncementsPage = lazy(() => import("../pages/AdminAnnouncementsPage").then(m => ({ default: m.AdminAnnouncementsPage })));
 const AdminActivityLogsPage = lazy(() => import("../pages/AdminActivityLogsPage").then(m => ({ default: m.AdminActivityLogsPage })));
 const StudentProfilePage   = lazy(() => import("../pages/StudentProfilePage").then(m => ({ default: m.StudentProfilePage })));
@@ -32,6 +33,8 @@ const StudentReportsPage   = lazy(() => import("../pages/StudentReportsPage").th
 const StudentSettingsPage  = lazy(() => import("../pages/StudentSettingsPage").then(m => ({ default: m.StudentSettingsPage })));
 const StudentMyDayPage     = lazy(() => import("../pages/StudentMyDayPage").then(m => ({ default: m.StudentMyDayPage })));
 const StudentHomePage      = lazy(() => import("../pages/StudentHomePage").then(m => ({ default: m.StudentHomePage })));
+const StudentMyEventsPage  = lazy(() => import("../pages/StudentMyEventsPage").then(m => ({ default: m.StudentMyEventsPage })));
+const StudentEventEditPage = lazy(() => import("../pages/StudentEventEditPage").then(m => ({ default: m.StudentEventEditPage })));
 const VerificationPendingPage = lazy(() => import("../pages/AuthLifecyclePages").then(m => ({ default: m.VerificationPendingPage })));
 const AuthCallbackPage     = lazy(() => import("../pages/AuthLifecyclePages").then(m => ({ default: m.AuthCallbackPage })));
 const ForgotPasswordPage   = lazy(() => import("../pages/AuthLifecyclePages").then(m => ({ default: m.ForgotPasswordPage })));
@@ -147,6 +150,8 @@ export const router = createBrowserRouter([
       { path: "student/favorites", element: <SuspensePage><StudentFavoritesPage /></SuspensePage> },
       { path: "student/reports", element: <SuspensePage><StudentReportsPage /></SuspensePage> },
       { path: "student/settings", element: <SuspensePage><StudentSettingsPage /></SuspensePage> },
+      { path: "student/events", element: <SuspensePage><StudentMyEventsPage /></SuspensePage> },
+      { path: "student/events/:id/edit", element: <SuspensePage><StudentEventEditPage /></SuspensePage> },
 
       { path: "*", element: <NotFound /> },
     ],
@@ -176,6 +181,7 @@ export const router = createBrowserRouter([
       { path: "reports", element: <SuspensePage><AdminReportsPage /></SuspensePage> },
       { path: "accessibility", element: <SuspensePage><AdminAccessibilityPage /></SuspensePage> },
       { path: "events", element: <SuspensePage><AdminEventsPage /></SuspensePage> },
+      { path: "event-layouts", element: <SuspensePage><AdminEventLayoutsPage /></SuspensePage> },
       { path: "announcements", element: <SuspensePage><AdminAnnouncementsPage /></SuspensePage> },
       { path: "activity-logs", element: <SuspensePage><AdminActivityLogsPage /></SuspensePage> },
     ],
