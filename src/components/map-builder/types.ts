@@ -656,20 +656,6 @@ export interface CampusEventOverlay {
   locationRef?: EventLocationRef;
   restrictedAreas: { points: { x: number; y: number }[] }[];
   isActive: boolean;
-
-  // ── Event Map Layout & Approval fields ──────────────────────────────────
-  /** Approval status: pending → approved or disapproved */
-  status?: "pending" | "approved" | "disapproved";
-  /** Admin feedback when disapproving */
-  adminComment?: string;
-  /** Event-specific furniture items (booths, tents, stages, etc.) */
-  eventFurniture?: FloorFurniture[];
-  /** Event-specific text labels */
-  eventLabels?: FloorLabel[];
-  /** Poster image URL for the event */
-  posterUrl?: string;
-  /** User ID of the student org member who created this overlay */
-  createdByUserId?: string;
 }
 
 // ── Campus Features (replaces CampusSettings) ────────────────────────────────

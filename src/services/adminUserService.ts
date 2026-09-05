@@ -1,6 +1,6 @@
 import { getSupabase, type Profile } from "../lib/supabase";
 
-export type ManagedRole = "student" | "admin" | "student_org";
+export type ManagedRole = "student" | "admin";
 
 export interface ManagedProfile extends Omit<Profile, "role"> {
   role: ManagedRole;
@@ -27,7 +27,7 @@ export interface InviteManagedUserInput extends Omit<UpdateManagedProfileInput, 
 }
 
 function isManagedRole(role: string): role is ManagedRole {
-  return role === "student" || role === "admin" || role === "student_org";
+  return role === "student" || role === "admin";
 }
 
 function asManagedProfile(profile: Profile): ManagedProfile {
@@ -58,31 +58,7 @@ export async function listManagedProfiles(filters: ProfileFilters = {}): Promise
 }
 
 export async function updateManagedProfile(input: UpdateManagedProfileInput): Promise<ManagedProfile> {
-  const client = getSupabase();
-
-  // The backend RPC only accepts "student" and "admin".
-  // For "student_org", use a direct update on the profiles table.
-  if (input.role === "student_org") {
-    const { data, error } = await client
-      .from("profiles")
-      .update({
-        first_name: input.firstName,
-        last_name: input.lastName,
-        department: input.department ?? "",
-        student_number: input.studentNumber ?? "",
-        role: input.role,
-        is_active: input.isActive,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", input.id)
-      .select("*")
-      .single();
-    if (error) throw error;
-    if (!data) throw new Error("The profile update returned no data.");
-    return asManagedProfile(data as Profile);
-  }
-
-  const { data, error } = await client.rpc("admin_update_profile", {
+  const { data, error } = await getSupabase().rpc("admin_update_profile", {
     p_target_id: input.id,
     p_first_name: input.firstName,
     p_last_name: input.lastName,

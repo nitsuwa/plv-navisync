@@ -286,13 +286,8 @@ export function AdminLoginPage() {
         return;
       }
 
-      // Students land on the campus map; Student Orgs go to the home page
-      // where the My Events section is visible.
-      if (profile.role === "student_org") {
-        toast.success("Signed in", "Welcome to the student experience!");
-        navigate("/home", { replace: true });
-        return;
-      }
+      // Students land on the student campus map experience. Any other role
+      // (there are only student/admin in the schema) is rejected safely.
       if (profile.role === "student") {
         toast.success("Signed in", "Welcome to the student experience!");
         navigate("/map", { replace: true });
