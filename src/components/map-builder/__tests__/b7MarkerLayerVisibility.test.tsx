@@ -51,7 +51,7 @@ function withBuilding(campus: Campus, overrides: Partial<Campus["buildings"][num
       id: "b1", name: "Building One", code: "B1", category: "Academic",
       description: "", x: 100, y: 100, width: 120, height: 80,
       color: "#1e40af", expanded: false,
-      floors: [{ id: "f1", buildingId: "b1", number: 1, label: "Ground Floor", rooms: [], paths: [] }],
+      floors: [{ id: "f1", buildingId: "b1", number: 1, label: "Ground Floor", rooms: [], paths: [], walls: [], doors: [], windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [] }],
       entrances: [{ id: "e1", buildingId: "b1", edge: "bottom", offset: 0.5, type: "general" }],
       ...overrides,
     }],

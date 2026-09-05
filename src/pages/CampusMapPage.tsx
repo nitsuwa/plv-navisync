@@ -151,7 +151,7 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
   const [pan,          setPan]          = useState<Pt>({ x:0, y:0 });
   const [saved,        setSaved]        = useState<Set<string>>(new Set());
   const [layers,       setLayers]       = useState({ buildings:true, accessibility:false, emergency:false });
-  const animFrameRef   = useRef<number>();
+  const animFrameRef   = useRef<number>(undefined);
 
   // Load initial bookmarked buildings from studentAccountService
   useEffect(() => {
@@ -178,7 +178,7 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
   }|null>(null);
   const [showCampusSelector, setShowCampusSelector] = useState(false);
   const [campusTransitioning, setCampusTransitioning] = useState(false);
-  const transitioningRef = useRef<ReturnType<typeof setTimeout>>();
+  const transitioningRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const initialSelectionRef = useRef(false);
   const [indoorRoute, setIndoorRoute] = useState<IndoorRoute | null>(null);
   const [activeRouteRoom, setActiveRouteRoom] = useState<string | null>(null);
@@ -1885,6 +1885,8 @@ const buildingFill = (id: string) =>
             ))}
           </div>
         )}
+      </div>
+
       {/* ══════════════ MOBILE: mode chips ══════════════ */}
       <div data-no-drag className="absolute top-3 right-3 z-20 md:hidden flex flex-col gap-1">
         {(["standard","accessible","emergency"] as MapMode[]).map(m => {

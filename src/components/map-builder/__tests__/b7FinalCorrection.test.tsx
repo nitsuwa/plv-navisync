@@ -113,7 +113,7 @@ describe("B7 Correction — locate flash removed", () => {
         height: 150,
         color: "#3b82f6",
         expanded: false,
-        floors: [{ id: "f1", buildingId: "b1", number: 1, label: "Ground Floor", rooms: [], paths: [] }],
+        floors: [{ id: "f1", buildingId: "b1", number: 1, label: "Ground Floor", rooms: [], paths: [], walls: [], doors: [], windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [] }],
         entrances: [],
       }],
     });
@@ -191,7 +191,7 @@ describe("B7 Correction — floor drag handle removed", () => {
         height: 150,
         color: "#3b82f6",
         expanded: true,
-        floors: [{ id: "f1", buildingId: "b1", number: 1, label: "Ground Floor", rooms: [], paths: [] }],
+        floors: [{ id: "f1", buildingId: "b1", number: 1, label: "Ground Floor", rooms: [], paths: [], walls: [], doors: [], windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [] }],
         entrances: [],
       }],
     });
@@ -228,7 +228,7 @@ describe("B7 Correction — floor drag handle removed", () => {
         height: 150,
         color: "#3b82f6",
         expanded: true,
-        floors: [{ id: "f1", buildingId: "b1", number: 1, label: "Ground Floor", rooms: [], paths: [] }],
+        floors: [{ id: "f1", buildingId: "b1", number: 1, label: "Ground Floor", rooms: [], paths: [], walls: [], doors: [], windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [] }],
         entrances: [],
       }],
     });
@@ -255,8 +255,8 @@ describe("B7 Correction — PropertiesPanel floor rows have no grip handle", () 
     height: 150,
     color: "#3b82f6",
     floors: [
-      { id: "f1", buildingId: "b1", number: 1, label: "Ground Floor", rooms: [], paths: [] },
-      { id: "f2", buildingId: "b1", number: 2, label: "Floor 2", rooms: [], paths: [] },
+      { id: "f1", buildingId: "b1", number: 1, label: "Ground Floor", rooms: [], paths: [], walls: [], doors: [], windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [] },
+      { id: "f2", buildingId: "b1", number: 2, label: "Floor 2", rooms: [], paths: [], walls: [], doors: [], windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [] },
     ],
     entrances: [],
   };
@@ -370,8 +370,8 @@ describe("B7 Correction — PropertiesPanel floor delete confirmation", () => {
     height: 150,
     color: "#3b82f6",
     floors: [
-      { id: "f1", buildingId: "b1", number: 1, label: "Ground Floor", rooms: [], paths: [] },
-      { id: "f2", buildingId: "b1", number: 2, label: "Floor 2", rooms: [], paths: [] },
+      { id: "f1", buildingId: "b1", number: 1, label: "Ground Floor", rooms: [], paths: [], walls: [], doors: [], windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [] },
+      { id: "f2", buildingId: "b1", number: 2, label: "Floor 2", rooms: [], paths: [], walls: [], doors: [], windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [] },
     ],
     entrances: [],
   };
@@ -617,7 +617,7 @@ describe("B7 Correction — PropertiesPanel floor delete confirmation", () => {
   it("delete button is disabled when only one floor exists", () => {
     const singleFloorBuilding = {
       ...buildingWithFloors,
-      floors: [{ id: "f1", buildingId: "b1", number: 1, label: "Ground Floor", rooms: [], paths: [] }],
+      floors: [{ id: "f1", buildingId: "b1", number: 1, label: "Ground Floor", rooms: [], paths: [], walls: [], doors: [], windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [] }],
     };
     render(
       <PropertiesPanel

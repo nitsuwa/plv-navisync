@@ -6,12 +6,6 @@ import { cn } from "../../lib/utils";
 import { useStudentAuth } from "../../hooks/useStudentAuth";
 import { MoreSheet } from "../ui/MoreSheet";
 
-const ALL_TABS = [
-    { to: "/", icon: Home, label: "Home" },
-    { to: "/map", icon: Compass, label: "Map" },
-    { to: "/student", icon: User, label: "Profile", auth: true },
-  ];
-
 const STUDENT_TABS = [
   { to: "/home", label: "Home" },
   { to: "/map", label: "Navigate" },
@@ -21,11 +15,6 @@ const GUEST_TABS = [
   { to: "/", label: "Home" },
   { to: "/map", label: "Map" },
 ];
-    { to: "/map", icon: Compass, label: "Map", auth: false },
-  ];
-
-  const landscapeClasses = "max-md:landscape:px-6 max-md:landscape:pb-1 max-md:landscape:gap-0";
-  const landscapeDock = "max-md:landscape:rounded-[20px] max-md:landscape:max-w-none max-md:landscape:mx-0 max-md:landscape:flex-row max-md:landscape:px-2 max-md:landscape:py-1";
 
 export function MobileBottomNav() {
   const { pathname } = useLocation();
