@@ -1,9 +1,9 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useCallback } from "react";
 import { useNavigate, Link } from "react-router";
 import {
   GraduationCap, MapPin, Clock, Navigation, BookOpen,
   Building2, Bell, ArrowUpRight, Search, CalendarDays,
-  Flag, Compass, Route,
+  Flag, Compass, Route, Plus, CheckCircle2, XCircle, Loader2,
 } from "lucide-react";
 import { motion } from "motion/react";
 import { useStudentAuth } from "../hooks/useStudentAuth";
@@ -37,7 +37,7 @@ function getShortTime(): string {
 // ── Main Component ─────────────────────────────────────────────────────────
 export function StudentHomePage() {
   const navigate = useNavigate();
-  const { username } = useStudentAuth();
+  const { username, isStudentOrg } = useStudentAuth();
   const [loading, setLoading] = useState(true);
   const [selectedBuilding, setSelectedBuilding] = useState<Building | null>(null);
 
@@ -480,6 +480,46 @@ export function StudentHomePage() {
             ))}
           </div>
         </motion.div>
+
+      {/* ══ MY EVENTS (Student Org Only) ══ */}
+      {isStudentOrg && (
+        <motion.div
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4, delay: 0.3 }}
+        >
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-extrabold text-foreground flex items-center gap-2">
+              <CalendarDays className="h-4 w-4 text-primary" />
+              My Events
+            </h2>
+            <Link
+              to="/student/events"
+              className="flex items-center gap-1 text-[10px] font-bold text-primary hover:underline"
+            >
+              View All <ArrowUpRight className="h-3 w-3" />
+            </Link>
+          </div>
+          <div className="space-y-2">
+            <Link
+              to="/student/events"
+              className="flex items-center gap-3 p-4 rounded-2xl bg-card border border-border/60 hover:border-primary/20 hover:bg-primary/5 transition-all"
+            >
+              <div className="w-10 h-10 rounded-xl bg-purple-500/10 flex items-center justify-center">
+                <Plus className="h-5 w-5 text-purple-600" />
+              </div>
+              <div className="flex-1">
+                <p className="text-sm font-bold text-foreground">Create Event Layout</p>
+                <p className="text-xs text-muted-foreground">
+                  Design your event map layout with booths, stages, and signage
+                </p>
+              </div>
+              <ArrowUpRight className="h-4 w-4 text-muted-foreground" />
+            </Link>
+          </div>
+        </motion.div>
+      )}
+
       </div>
 
       {/* ══ BUILDING DETAIL MODAL ══ */}

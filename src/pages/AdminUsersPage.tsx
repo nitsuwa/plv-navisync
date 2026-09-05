@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { motion } from "motion/react";
-import { Mail, Pencil, Plus, Search, Shield, UserPlus, Users, X } from "lucide-react";
+import { Mail, Pencil, Plus, Search, Shield, UserPlus, Users, X, CalendarDays } from "lucide-react";
 import { Button } from "../components/ui/Button";
 import { EmptyState } from "../components/ui/EmptyState";
 import { FormField } from "../components/ui/FormField";
@@ -199,7 +199,7 @@ export function AdminUsersPage() {
       <div className="flex flex-col lg:flex-row gap-3">
         <div className="flex-1 max-w-md"><SearchBar placeholder="Search name, email, department, or student number" value={search} onSearch={setSearch} onClear={() => setSearch("")} size="md" /></div>
         <div className="flex flex-wrap gap-1.5">
-          {(["all", "student", "admin"] as const).map((role) => <button key={role} type="button" onClick={() => setRoleFilter(role)} className={cn("px-3 py-1.5 rounded-xl text-xs font-bold capitalize", roleFilter === role ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground")}>{role === "all" ? "All roles" : role}</button>)}
+          {(["all", "student", "student_org", "admin"] as const).map((role) => <button key={role} type="button" onClick={() => setRoleFilter(role)} className={cn("px-3 py-1.5 rounded-xl text-xs font-bold capitalize", roleFilter === role ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground")}>{role === "all" ? "All roles" : role === "student_org" ? "Student Org" : role}</button>)}
           {(["all", "active", "inactive"] as const).map((status) => <button key={status} type="button" onClick={() => setStatusFilter(status)} className={cn("px-3 py-1.5 rounded-xl text-xs font-bold capitalize", statusFilter === status ? "bg-accent text-accent-foreground" : "bg-muted text-muted-foreground")}>{status === "all" ? "Any status" : status}</button>)}
         </div>
       </div>
@@ -211,7 +211,7 @@ export function AdminUsersPage() {
           const isSelf = currentProfile?.id === user.id;
           return <tr key={user.id} className="border-b border-border last:border-0 hover:bg-muted/30">
             <td className="px-5 py-3.5"><div className="flex items-center gap-3"><div className="w-9 h-9 rounded-full bg-gradient-to-br from-primary to-accent flex items-center justify-center text-xs font-extrabold text-white">{initials(user)}</div><div><p className="font-bold">{displayName(user)} {isSelf && <span className="text-[10px] text-primary">(you)</span>}</p><p className="text-xs text-muted-foreground flex items-center gap-1"><Mail className="h-3 w-3" />{user.email}</p></div></div></td>
-            <td className="px-4 py-3.5"><span className={cn("px-2.5 py-1 rounded-full text-xs font-bold capitalize", user.role === "admin" ? "bg-primary/10 text-primary" : "bg-secondary text-secondary-foreground")}>{user.role}</span></td>
+            <td className="px-4 py-3.5"><span className={cn("px-2.5 py-1 rounded-full text-xs font-bold capitalize", user.role === "admin" ? "bg-primary/10 text-primary" : user.role === "student_org" ? "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400" : "bg-secondary text-secondary-foreground")}>{user.role === "student_org" ? "Student Org" : user.role}</span></td>
             <td className="px-4 py-3.5 hidden lg:table-cell text-muted-foreground">{user.department || "—"}</td>
             <td className="px-4 py-3.5"><button type="button" disabled={isSelf} title={isSelf ? "You cannot change your own active status" : undefined} onClick={() => void toggleStatus(user)} className={cn("px-2.5 py-1 rounded-full text-xs font-bold disabled:opacity-50", user.is_active ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" : "bg-muted text-muted-foreground")}>{user.is_active ? "● Active" : "○ Inactive"}</button></td>
             <td className="px-5 py-3.5 text-right"><button type="button" aria-label={`Edit ${displayName(user)}`} onClick={() => openEdit(user)} className="w-8 h-8 rounded-lg inline-flex items-center justify-center text-muted-foreground hover:bg-primary/10 hover:text-primary"><Pencil className="h-3.5 w-3.5" /></button></td>
@@ -227,7 +227,9 @@ export function AdminUsersPage() {
             <FormField label="Email" id="user-email" value={form.email} onChange={(email) => setForm((value) => ({ ...value, email }))} error={formErrors.email} type="email" required disabled={!!editTarget} helper={editTarget ? "Auth email changes require a separate verified workflow." : "An invitation email will be sent by Supabase Auth."} />
             <FormField label="Department" id="department" value={form.department} onChange={(department) => setForm((value) => ({ ...value, department }))} maxLength={120} />
             <FormField label="Student number" id="student-number" value={form.studentNumber} onChange={(studentNumber) => setForm((value) => ({ ...value, studentNumber }))} maxLength={50} />
-            <div className="grid grid-cols-2 gap-4"><div><label htmlFor="user-role" className="block text-xs font-bold mb-1.5 uppercase">Role</label><select id="user-role" value={form.role} disabled={editTarget?.id === currentProfile?.id} onChange={(event) => setForm((value) => ({ ...value, role: event.target.value as ManagedRole }))} className="custom-select w-full h-10 px-4 rounded-xl border border-border bg-input-background disabled:opacity-50"><option value="student">Student</option><option value="admin">Administrator</option></select></div>
+            <div className="grid grid-cols-2 gap-4"><div><label htmlFor="user-role" className="block text-xs font-bold mb-1.5 uppercase">Role</label><select id="user-role" value={form.role} disabled={editTarget?.id === currentProfile?.id} onChange={(event) => setForm((value) => ({ ...value, role: event.target.value as ManagedRole }))} className="custom-select w-full h-10 px-4 rounded-xl border border-border bg-input-background disabled:opacity-50">            <option value="student">Student</option>
+              <option value="student_org">Student Org</option>
+              <option value="admin">Administrator</option></select></div>
               <div><label htmlFor="user-status" className="block text-xs font-bold mb-1.5 uppercase">Status</label><select id="user-status" value={form.isActive ? "active" : "inactive"} disabled={!editTarget || editTarget.id === currentProfile?.id} onChange={(event) => setForm((value) => ({ ...value, isActive: event.target.value === "active" }))} className="custom-select w-full h-10 px-4 rounded-xl border border-border bg-input-background disabled:opacity-50"><option value="active">Active</option><option value="inactive">Inactive</option></select></div></div>
           </div>
           <div className="flex gap-3 px-6 pb-6"><Button variant="outline" onClick={() => setShowModal(false)} className="flex-1">Cancel</Button><Button onClick={() => void handleSave()} isLoading={saving} className="flex-1">{editTarget ? "Save Changes" : "Send Invitation"}</Button></div>
