@@ -8,7 +8,7 @@ import { cn } from "../../lib/utils";
 interface ContextMenuProps {
   x: number;
   y: number;
-  type: "building" | "marker" | "path" | "floor" | "wall" | "decorAsset";
+  type: "building" | "marker" | "path" | "floor" | "wall" | "decorAsset" | "navNode";
   onClose: () => void;
   onAction: (action: string) => void;
 }

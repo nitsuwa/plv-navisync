@@ -36,12 +36,12 @@ function makeCampus(overrides: Partial<Campus> = {}): Campus {
       {
         id: "b1", name: "Building One", code: "B1", category: "Academic", description: "",
         x: 100, y: 100, width: 120, height: 80, color: "#1e40af", expanded: false,
-        floors: [{ id: "f1", buildingId: "b1", number: 1, label: "Ground Floor", rooms: [], paths: [] }],
+        floors: [{ id: "f1", buildingId: "b1", number: 1, label: "Ground Floor", rooms: [], paths: [], walls: [], doors: [], windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [] }],
       },
       {
         id: "b2", name: "Building Two", code: "B2", category: "Academic", description: "",
         x: 260, y: 100, width: 120, height: 80, color: "#7c3aed", expanded: false,
-        floors: [{ id: "f2", buildingId: "b2", number: 1, label: "Ground Floor", rooms: [], paths: [] }],
+        floors: [{ id: "f2", buildingId: "b2", number: 1, label: "Ground Floor", rooms: [], paths: [], walls: [], doors: [], windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [] }],
       },
     ],
     decorAssets: [

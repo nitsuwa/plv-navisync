@@ -29,19 +29,19 @@ function makeCampus(): Campus {
       {
         id: "b1", name: "Building One", code: "B1", category: "Academic", description: "",
         x: 100, y: 100, width: 120, height: 80, color: "#1e40af", expanded: false,
-        floors: [{ id: "f1", buildingId: "b1", number: 1, label: "Ground Floor", rooms: [], paths: [] }],
+        floors: [{ id: "f1", buildingId: "b1", number: 1, label: "Ground Floor", rooms: [], paths: [], walls: [], doors: [], windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [] }],
       },
       {
         id: "b2", name: "Building Two", code: "B2", category: "Academic", description: "",
         x: 260, y: 100, width: 120, height: 80, color: "#7c3aed", expanded: false,
-        floors: [{ id: "f2", buildingId: "b2", number: 1, label: "Ground Floor", rooms: [], paths: [] }],
+        floors: [{ id: "f2", buildingId: "b2", number: 1, label: "Ground Floor", rooms: [], paths: [], walls: [], doors: [], windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [] }],
       },
       {
         // Placed well away from the selection so its edges never trigger an
         // unintended edge-snap of a dragged group (edge snap is 12px).
         id: "b3", name: "Building Three", code: "B3", category: "Academic", description: "",
         x: 700, y: 300, width: 120, height: 80, color: "#059669", expanded: false,
-        floors: [{ id: "f3", buildingId: "b3", number: 1, label: "Ground Floor", rooms: [], paths: [] }],
+        floors: [{ id: "f3", buildingId: "b3", number: 1, label: "Ground Floor", rooms: [], paths: [], walls: [], doors: [], windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [] }],
       },
     ],
     decorAssets: [

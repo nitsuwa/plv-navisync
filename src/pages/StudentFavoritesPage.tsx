@@ -1,9 +1,11 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Building2, Navigation, MapPin, Search, Bookmark, Trash2, Sparkles } from "lucide-react";
 import { SearchBar } from "../components/ui/SearchBar";
 import { motion, AnimatePresence } from "motion/react";
 import { Link, useNavigate } from "react-router";
 import { useStudentAuth } from "../hooks/useStudentAuth";
+import { usePublishedCampus } from "../hooks";
+import { buildingsFromCampus } from "../lib/mapDataAdapter";
 import { StudentPageHeader } from "../components/ui/StudentPageHeader";
 import { PageTransition } from "../components/ui/PageTransition";
 import { EmptyState } from "../components/ui/EmptyState";
@@ -53,6 +55,11 @@ export function StudentFavoritesPage() {
   const { loading: authLoading, isStudent } = useStudentAuth();
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
+  const { activeCampus } = usePublishedCampus();
+  const campusBuildings: Building[] = useMemo(() => {
+    if (activeCampus) return buildingsFromCampus(activeCampus) as Building[];
+    return [];
+  }, [activeCampus]);
   const [savedBuildings, setSavedBuildings] = useState<Building[]>([]);
   const [search, setSearch] = useState("");
   const [removingId, setRemovingId] = useState<string | null>(null);
@@ -61,7 +68,7 @@ export function StudentFavoritesPage() {
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: "instant" });
     let mounted = true;
-    studentAccountService.getSavedBuildings().then((res) => {
+    studentAccountService.getSavedBuildings(campusBuildings).then((res) => {
       if (mounted) {
         setSavedBuildings(res);
         setLoading(false);
@@ -70,7 +77,7 @@ export function StudentFavoritesPage() {
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [campusBuildings]);
 
   if (authLoading || loading) return (
     <PageTransition>

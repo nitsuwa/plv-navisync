@@ -340,7 +340,7 @@ describe("validateNavigationGraph — obstacle-blocked edges", () => {
         id: "b1", name: "B1", code: "B1", category: "Academic", description: "", x: 0, y: 0, width: 200, height: 200, color: "#000", expanded: false,
         floors: [{
           id: "f1", buildingId: "b1", number: 1, label: "G",
-          rooms: [], paths: [],
+          rooms: [], paths: [], walls: [], doors: [], windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [],
           walls: [{ id: "w1", x1: 148, y1: 150, x2: 152, y2: 250, thickness: 4, visible: true }],
           doors: [],
         }],

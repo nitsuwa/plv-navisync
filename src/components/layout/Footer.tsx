@@ -43,14 +43,12 @@ export function Footer() {
               {[
                 { label: "Home",        to: "/" },
                 { label: "Campus Map",  to: "/map" },
-                { label: "Help Center", to: "/help" },
+                { label: "Login",       to: "/admin" },
                 ...(isStudent ? [
-                  { label: "My Profile",     to: "/student" },
-                  { label: "Send Message",   to: "/help#contact-form" },
-                  { label: "FAQ",            to: "/help#faq" },
-                ] : [
-                  { label: "Login",          to: "/admin" },
-                ]),
+                  { label: "Help Center",    to: "/help" },
+                  { label: "Send Message", to: "/help#contact-form" },
+                  { label: "FAQ",          to: "/help#faq" },
+                ] : []),
               ].map(({ label, to }) => (
                 <li key={to}>                    <Link
                       to={to}

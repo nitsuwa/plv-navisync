@@ -6,8 +6,7 @@ import {
   Bell, ArrowRight, Layers,
 } from "lucide-react";
 import { motion } from "motion/react";
-import { MOCK_BUILDINGS } from "../data/mockData";
-import { useCampusData } from "../contexts/CampusDataContext";
+import { usePublishedCampus } from "../hooks";
 import { buildingsFromCampus } from "../lib/mapDataAdapter";
 import {
   MOCK_SCHEDULE, getTodayClasses, getNextClass,
@@ -40,17 +39,14 @@ export function StudentMyDayPage() {
   const { username } = useStudentAuth();
   const [loading, setLoading] = useState(true);
 
-  // Derive buildings from published campus data, fall back to hardcoded data
-  const campusData = useCampusData();
+  // Derive buildings exclusively from the published campus
+  const { activeCampus } = usePublishedCampus();
   const buildings = useMemo(() => {
-    const activeCampus = campusData.campuses.find(
-      (c) => c.publishStatus !== "draft" && c.status !== "archived"
-    );
     if (activeCampus) {
-      return buildingsFromCampus(activeCampus) as typeof MOCK_BUILDINGS;
+      return buildingsFromCampus(activeCampus);
     }
-    return MOCK_BUILDINGS;
-  }, [campusData.campuses]);
+    return [];
+  }, [activeCampus]);
 
   useEffect(() => {
     const timer = setTimeout(() => setLoading(false), 500);

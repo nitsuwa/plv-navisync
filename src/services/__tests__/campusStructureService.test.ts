@@ -87,7 +87,7 @@ describe("campus structure mapping", () => {
       buildings: [{
         ...campus.buildings[0],
         floors: [{
-          id: ids.floor, number: 1, label: "Ground Floor", rooms: [], paths: [],
+          id: ids.floor, number: 1, label: "Ground Floor", rooms: [], paths: [], walls: [], doors: [], windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [],
         }],
       }],
     } as Campus;

@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useState } from "react";
 import { toast } from "sonner";
 import { CampusEditor } from "../CampusEditor";
@@ -40,7 +40,7 @@ function makeCampus(): Campus {
       height: 80,
       color: "#1e40af",
       expanded: false,
-      floors: [{ id: "f1", buildingId: "b1", number: 1, label: "Ground Floor", rooms: [], paths: [] }],
+      floors: [{ id: "f1", buildingId: "b1", number: 1, label: "Ground Floor", rooms: [], paths: [], walls: [], doors: [], windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [] }],
     }],
     markers: [],
     paths: [],

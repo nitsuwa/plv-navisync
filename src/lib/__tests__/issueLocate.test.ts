@@ -171,7 +171,7 @@ describe("resolveIssueLocateTarget", () => {
       buildings: [{
         id: "b1", name: "B", code: "B", category: "Academic", description: "",
         x: 0, y: 0, width: 10, height: 10, color: "#000", expanded: false,
-        floors: [{ id: "f1", buildingId: "b1", number: 1, label: "Ground", rooms: [], paths: [] }],
+        floors: [{ id: "f1", buildingId: "b1", number: 1, label: "Ground", rooms: [], paths: [], walls: [], doors: [], windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [] }],
       }],
       navNodes: [navNode({ id: "n1", type: "hallway", buildingId: "b1", floorId: "f1" })],
     });
@@ -186,7 +186,7 @@ describe("resolveIssueLocateTarget", () => {
       buildings: [{
         id: "b1", name: "B", code: "B", category: "Academic", description: "",
         x: 0, y: 0, width: 10, height: 10, color: "#000", expanded: false,
-        floors: [{ id: "f2", buildingId: "b1", number: 2, label: "Second", rooms: [], paths: [] }],
+        floors: [{ id: "f2", buildingId: "b1", number: 2, label: "Second", rooms: [], paths: [], walls: [], doors: [], windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [] }],
       }],
       navNodes: [navNode({ id: "n1", type: "room_access", buildingId: "b1", floorId: "f1", doorId: "missing" })],
     });
@@ -223,7 +223,7 @@ describe("resolveIssueLocateTarget", () => {
       buildings: [{
         id: "b1", name: "B", code: "B", category: "Academic", description: "",
         x: 0, y: 0, width: 10, height: 10, color: "#000", expanded: false,
-        floors: [{ id: "f1", buildingId: "b1", number: 1, label: "Ground", rooms: [], paths: [] }],
+        floors: [{ id: "f1", buildingId: "b1", number: 1, label: "Ground", rooms: [], paths: [], walls: [], doors: [], windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [] }],
       }],
       navNodes: [navNode({ id: "n1", type: "hallway", buildingId: "b1", floorId: "f1" })],
     });

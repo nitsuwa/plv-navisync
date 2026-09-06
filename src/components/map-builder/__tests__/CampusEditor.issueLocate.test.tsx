@@ -78,7 +78,7 @@ function withBuilding(campus: Campus): Campus {
       height: 80,
       color: "#1e40af",
       expanded: false,
-      floors: [{ id: "f1", buildingId: "b1", number: 1, label: "Ground Floor", rooms: [], paths: [] }],
+      floors: [{ id: "f1", buildingId: "b1", number: 1, label: "Ground Floor", rooms: [], paths: [], walls: [], doors: [], windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [] }],
       entrances: [{ id: "e1", buildingId: "b1", edge: "bottom", offset: 0.5, type: "general" }],
     }],
   };
@@ -211,7 +211,7 @@ describe("live issues", () => {
         height: 80,
         color: "#1e40af",
         expanded: false,
-        floors: [{ id: "f1", buildingId: "b1", number: 1, label: "Ground Floor", rooms: [], paths: [] }],
+        floors: [{ id: "f1", buildingId: "b1", number: 1, label: "Ground Floor", rooms: [], paths: [], walls: [], doors: [], windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [] }],
       }],
       navNodes: [node({ id: "door-node", type: "room_access", buildingId: "b1", floorId: "f1", doorId: "missing-door" })],
     }));
@@ -225,7 +225,7 @@ describe("live issues", () => {
       buildings: [{
         ...campus.buildings[0],
         floors: [{
-          id: "f1", buildingId: "b1", number: 1, label: "Ground Floor", rooms: [], paths: [],
+          id: "f1", buildingId: "b1", number: 1, label: "Ground Floor", rooms: [], paths: [], walls: [], windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [],
           doors: [{ id: "missing-door", x: 10, y: 10, width: 8, direction: "left", color: "#000" }],
         }],
       }],
@@ -333,7 +333,7 @@ describe("indoor locate", () => {
         height: 80,
         color: "#1e40af",
         expanded: false,
-        floors: [{ id: "f1", buildingId: "b1", number: 1, label: "Ground Floor", rooms: [], paths: [] }],
+        floors: [{ id: "f1", buildingId: "b1", number: 1, label: "Ground Floor", rooms: [], paths: [], walls: [], doors: [], windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [] }],
       }],
       navNodes: [node({ id: "door-node", type: "room_access", buildingId: "b1", floorId: "f1", doorId: "missing-door" })],
     }));
@@ -362,7 +362,7 @@ describe("indoor locate", () => {
         height: 80,
         color: "#1e40af",
         expanded: false,
-        floors: [{ id: "f1", buildingId: "b1", number: 1, label: "Ground Floor", rooms: [], paths: [] }],
+        floors: [{ id: "f1", buildingId: "b1", number: 1, label: "Ground Floor", rooms: [], paths: [], walls: [], doors: [], windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [] }],
       }],
       navNodes: [node({ id: "room-node", type: "room_access", buildingId: "b1", floorId: "f1", roomId: "missing-room" })],
     }));
@@ -395,7 +395,7 @@ describe("indoor locate", () => {
         height: 80,
         color: "#1e40af",
         expanded: false,
-        floors: [{ id: "f2", buildingId: "b1", number: 2, label: "Second Floor", rooms: [], paths: [] }],
+        floors: [{ id: "f2", buildingId: "b1", number: 2, label: "Second Floor", rooms: [], paths: [], walls: [], doors: [], windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [] }],
       }],
       navNodes: [node({ id: "door-node", type: "room_access", buildingId: "b1", floorId: "f1", doorId: "missing-door" })],
     });
@@ -468,8 +468,8 @@ describe("indoor locate", () => {
         color: "#1e40af",
         expanded: false,
         floors: [
-          { id: "f1", buildingId: "b1", number: 1, label: "Ground Floor", rooms: [], paths: [] },
-          { id: "f2", buildingId: "b1", number: 2, label: "Second Floor", rooms: [], paths: [] },
+          { id: "f1", buildingId: "b1", number: 1, label: "Ground Floor", rooms: [], paths: [], walls: [], doors: [], windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [] },
+          { id: "f2", buildingId: "b1", number: 2, label: "Second Floor", rooms: [], paths: [], walls: [], doors: [], windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [] },
         ],
       }],
       navNodes: [
