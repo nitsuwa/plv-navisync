@@ -15,8 +15,9 @@ import { cn } from "../lib/utils";
 import { useStudentAuth } from "../hooks/useStudentAuth";
 
 import { buildingPositionsFromCampus, floorPlansFromCampus, buildingsFromCampus, facilitiesFromCampus, accessibilityFromCampus } from "../lib/mapDataAdapter";
-import { findIndoorRoute, findIndoorRouteForFloor, type IndoorRoute } from "../lib/indoorPathfinding";
-import { planBuildingRoute, planRouteFromPoint, type PlannedRoute } from "../lib/routePlanner";
+import { findIndoorRoute, findIndoorRouteForFloor, type IndoorRoute, type RoomLike } from "../lib/indoorPathfinding";
+import { planBuildingRoute, planRouteFromPoint, type PlannedRoute, type RouteStep } from "../lib/routePlanner";
+import type { RoomDest } from "../lib/combinedPathfinding";
 import { latLngToMapPoint, snapToNearest } from "../lib/geo";
 import { NODES as STATIC_NAV_NODES } from "../lib/pathfinding";
 import { projectReadonlyOutdoorCampus } from "../lib/readonlyOutdoorCampus";
@@ -69,6 +70,59 @@ const SVG_CY = SVG_H / 2;
 const FP_W   = 440;  // floor plan viewBox width
 const FP_H   = 290;  // floor plan viewBox height
 interface Pt { x: number; y: number; }
+
+/**
+ * Append the indoor "enter building → room" leg to a planned outdoor route
+ * that ends at the destination building. Used when the student navigates to
+ * a specific room/floor inside a building: the outdoor walk plays first,
+ * then the map auto-enters the floor plan (see the walk-arrival effect).
+ */
+function withDestinationRoomLeg(
+  planned: PlannedRoute,
+  target: RoomDest,
+  floorRooms: RoomLike[] | undefined,
+  accessibleOnly: boolean
+): PlannedRoute {
+  const indoor = floorRooms && floorRooms.length > 0
+    ? findIndoorRouteForFloor(target.buildingId, target.floorNumber, target.roomId, floorRooms, accessibleOnly)
+    : null;
+
+  const extraSteps: RouteStep[] = [
+    { id: "enter-bldg", icon: "enter", instruction: `Enter ${target.buildingLabel} (${target.buildingCode})` },
+  ];
+  if (target.floorNumber > 1) {
+    extraSteps.push({
+      id: "change-floor",
+      icon: "stairs",
+      instruction: `Take the stairs/elevator to Floor ${target.floorNumber}`,
+    });
+  }
+  if (indoor) {
+    indoor.steps.forEach((step, i) => {
+      extraSteps.push({ id: `indoor-${i}`, icon: "walk", instruction: step });
+    });
+  } else {
+    extraSteps.push({ id: "arrive-room", icon: "arrive", instruction: `Arrive at ${target.roomName}` });
+  }
+
+  const extraDist = indoor?.distanceMeters ?? 0;
+  const extraSeconds = indoor?.estimatedSeconds ?? 0;
+  return {
+    ...planned,
+    dist: Math.round(planned.dist + extraDist),
+    mins: Math.max(1, Math.round((planned.mins * 60 + extraSeconds) / 60)),
+    steps: [...planned.steps, ...extraSteps],
+    transitions:
+      target.floorNumber > 1
+        ? [...(planned.transitions ?? []), `Take the stairs/elevator to Floor ${target.floorNumber}`]
+        : planned.transitions,
+    destinationRoom: {
+      buildingId: target.buildingId,
+      floorNumber: target.floorNumber,
+      roomId: target.roomId,
+    },
+  };
+}
 
 
 
@@ -192,6 +246,8 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
   const [directionsMode, setDirectionsMode] = useState(false);
   const [fromBuilding,   setFromBuilding]   = useState<Building|null>(null);
   const [toBuilding,     setToBuilding]     = useState<Building|null>(null);
+  // When set, the destination is a specific room/floor inside toBuilding.
+  const [roomDestination, setRoomDestination] = useState<RoomDest | null>(null);
 
   // "You are here" (kiosk-style start) state
   const [youAreHere,    setYouAreHere]    = useState<{ x: number; y: number } | null>(null);
@@ -220,6 +276,10 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
   const inertiaRef      = useRef<number>(0);
   const panTargetRef    = useRef<Pt | null>(null);
   const panAnimRef     = useRef<number>(0);
+  // Latest route (kept in a ref so early callbacks like replayWalk can read it).
+  const routeRef = useRef<PlannedRoute | null>(null);
+  // Destination room the walk already entered (prevents re-opening the floor).
+  const enteredRoomRef = useRef<string | null>(null);
   // ── Pinch-to-zoom ref ──
   const pinchRef       = useRef<{ dist: number; initZoom: number } | null>(null);
   // ── Cursor-anchored zoom refs ──
@@ -491,6 +551,7 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
         setUseMyLocation(true);
         setFromBuilding(null);
         setToBuilding(null);
+        setRoomDestination(null);
         // Deliberately do NOT auto-open the Route Planner: dropping a pin
         // should just place the marker. The user taps "Plan route" on the
         // "You are here" chip when they are ready (kiosk-style flow).
@@ -565,6 +626,7 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
     setUseMyLocation(true);
     setFromBuilding(null);
     setToBuilding(null);
+    setRoomDestination(null);
     // No auto-open of the Route Planner here either — the "You are here"
     // chip with its "Plan route" button is the single, clear next step.
   }, [svgPointFromClient, snapPointToGraph]);
@@ -575,6 +637,7 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
     setUseMyLocation(false);
     setPinning(false);
     setFromBuilding(null);
+    setRoomDestination(null);
   }, []);
 
   /** Restart the walk animation from the start. */
@@ -583,6 +646,35 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
     walkAnimRef.current = null;
     setWalkProgress(0);
     setWalkNonce((n) => n + 1);
+    // If the previous walk finished inside a destination building, return to
+    // the campus map so the whole journey (outdoor walk → enter) replays.
+    if (routeRef.current?.destinationRoom && floorViewRef.current) {
+      setFloorView(null);
+      setIndoorRoute(null);
+      setActiveRouteRoom(null);
+      setHighlightedRoom(null);
+      enteredRoomRef.current = null;
+    }
+  }, []);
+
+  /** End the active navigation and return the map to its normal state. */
+  const endNavigation = useCallback(() => {
+    setRouteFading(true);
+    setTimeout(() => {
+      setFromBuilding(null);
+      setToBuilding(null);
+      setRoomDestination(null);
+      setDirectionsMode(false);
+      setRouteFading(false);
+      // Exit the destination floor plan if the walk had auto-entered it.
+      if (routeRef.current?.destinationRoom && floorViewRef.current) {
+        setFloorView(null);
+        setIndoorRoute(null);
+        setActiveRouteRoom(null);
+        setHighlightedRoom(null);
+      }
+      enteredRoomRef.current = null;
+    }, 300);
   }, []);
 
   const onMouseDown = useCallback((e: React.MouseEvent) => {
@@ -705,6 +797,8 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
     setFloorView(null);
     setZoom(1); setPan({ x:0, y:0 });
     setHighlightedRoom(null); setHoveredRoom(null); setStairLoading(null);
+    setIndoorRoute(null);
+    setActiveRouteRoom(null);
   }, []);
 
   const navigateStair = useCallback((roomType: RoomType) => {
@@ -726,29 +820,45 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
   }, []);
 
   // ── Route ──────────────────────────────────────────────────────────────
+  // Computes the outdoor leg (point/building → destination building). When
+  // the destination is a specific room/floor (roomDestination), the indoor
+  // "enter → room" leg is appended so the steps cover the full journey.
   const route = useMemo<PlannedRoute | null>(() => {
+    let planned: PlannedRoute | null = null;
     if (useMyLocation && youAreHere && toBuilding) {
       // Kiosk-style: start from the "You are here" marker.
-      return planRouteFromPoint(
+      planned = planRouteFromPoint(
         youAreHere,
         { id: toBuilding.id, code: toBuilding.code, name: toBuilding.name },
         mapMode,
         activeCampus,
         B_POS
       );
+    } else if (fromBuilding && toBuilding) {
+      // Use the route planner: real graph stats in ALL modes, with an SVG
+      // estimate fallback when the buildings are not on the walkway graph.
+      planned = planBuildingRoute(
+        { id: fromBuilding.id, code: fromBuilding.code, name: fromBuilding.name },
+        { id: toBuilding.id, code: toBuilding.code, name: toBuilding.name },
+        mapMode,
+        B_POS,
+        activeCampus
+      );
     }
-    if (!fromBuilding || !toBuilding) return null;
 
-    // Use the route planner: real graph stats in ALL modes, with an SVG
-    // estimate fallback when the buildings are not on the walkway graph.
-    return planBuildingRoute(
-      { id: fromBuilding.id, code: fromBuilding.code, name: fromBuilding.name },
-      { id: toBuilding.id, code: toBuilding.code, name: toBuilding.name },
-      mapMode,
-      B_POS,
-      activeCampus
-    );
-  }, [fromBuilding, toBuilding, useMyLocation, youAreHere, mapMode, B_POS, activeCampus]);
+    if (planned && roomDestination) {
+      const destFloor = activeCampus?.buildings
+        .find((b) => b.id === roomDestination.buildingId)
+        ?.floors.find((f) => f.number === roomDestination.floorNumber);
+      planned = withDestinationRoomLeg(
+        planned,
+        roomDestination,
+        destFloor?.rooms as RoomLike[] | undefined,
+        mapMode === "accessible"
+      );
+    }
+    return planned;
+  }, [fromBuilding, toBuilding, useMyLocation, youAreHere, mapMode, B_POS, activeCampus, roomDestination]);
 
   // ── Auto-close planner when the route becomes ready ────────────────────
   // The compact RouteStepsPanel (bottom-left) takes over, so the full
@@ -760,6 +870,7 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
       setDirectionsMode(false);
     }
     prevRouteRef.current = route;
+    routeRef.current = route;
   }, [route]);
 
   // ── Route recalculation transition ─────────────────────────────────────
@@ -791,27 +902,53 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
     }
   }, [routeKey]);
 
-  // ── Zoom to route + arrival simulation ────────────────────────────────
+  // ── Zoom to route (start + end both in focus) + arrival simulation ────
+  /**
+   * Frame the active route in the viewport when navigation starts so BOTH
+   * endpoints are in focus:
+   *   • zoom fits the whole route (padding included), so the destination can
+   *     never leave the screen, and
+   *   • the viewport centers on the route midpoint — the starting point and
+   *     the arrival point are both visible and equally framed.
+   * The pan glides smoothly to the target (via panTargetRef, which wheel,
+   * drag and pinch cancel) together with the zoom lerp, so the camera
+   * visibly moves instead of jumping. Pan keeps world point (midX, midY) at
+   * the canvas center: pan = z·(center − p).
+   */
+  const frameRouteView = useCallback((zoomOverride?: number) => {
+    if (!route || route.points.length === 0) return;
+    const xs = route.points.map(p => p.x);
+    const ys = route.points.map(p => p.y);
+    const minX = Math.min(...xs), maxX = Math.max(...xs);
+    const minY = Math.min(...ys), maxY = Math.max(...ys);
+    const routeW = maxX - minX, routeH = maxY - minY;
+    const fitZoom = Math.min(outdoorCanvasW / (routeW + 200), outdoorCanvasH / (routeH + 200), 2.0);
+    // Manual "zoom to route" may zoom in deeper (e.g. ≥ 1.5) but never past
+    // the fit zoom, so the whole route — including the end point — always
+    // stays inside the viewport.
+    const z = parseFloat(Math.max(0.5, Math.min(zoomOverride ?? fitZoom, fitZoom)).toFixed(2));
+    const midX = (minX + maxX) / 2;
+    const midY = (minY + maxY) / 2;
+    // Animate the pan smoothly toward the route midpoint (the existing pan
+    // lerp drives it; wheel/drag/pinch cancel it via panTargetRef = null).
+    panTargetRef.current = {
+      x: z * (outdoorCanvasW / 2 - midX),
+      y: z * (outdoorCanvasH / 2 - midY),
+    };
+    setZoom(z);
+  }, [route, outdoorCanvasW, outdoorCanvasH]);
+
+  // When a route is computed (navigation starts), zoom in so BOTH the
+  // starting point and the end point are in focus — the viewport centers
+  // on the route midpoint and the whole route stays on screen.
   useEffect(() => {
-    if (route) {
-      // Automatically zoom to show the full route
-      const xs = route.points.map(p => p.x);
-      const ys = route.points.map(p => p.y);
-      const minX = Math.min(...xs), maxX = Math.max(...xs);
-      const minY = Math.min(...ys), maxY = Math.max(...ys);
-      const routeW = maxX - minX, routeH = maxY - minY;
-      const fitZoom = Math.min(outdoorCanvasW / (routeW + 200), outdoorCanvasH / (routeH + 200), 2.0);
-      setZoom(parseFloat(Math.max(0.5, Math.min(fitZoom, 2.0)).toFixed(2)));
-      setPan({
-        x: outdoorCanvasW / 2 - (minX + routeW / 2) * fitZoom,
-        y: outdoorCanvasH / 2 - (minY + routeH / 2) * fitZoom,
-      });
-      
+    if (route && route.points.length > 0) {
+      frameRouteView();
       setShowArrival(false);
     } else {
       setShowArrival(false);
     }
-  }, [route]);
+  }, [route, frameRouteView]);
 
   // ── Pan to selected building on click (smooth animated lerp) ──────
   useEffect(() => {
@@ -849,6 +986,7 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
       setDirectionsMode(false);
       setFromBuilding(null);
       setToBuilding(null);
+      setRoomDestination(null);
     }
     if (b) {
       if (!recentSearches.includes(b.name))
@@ -865,6 +1003,11 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
     } else {
       const b = MOCK_BUILDINGS.find((building) => building.id === item.buildingId);
       if (b) {
+        // Selecting a fresh room target cancels any previous room destination
+        // (the floor plan opens with the room highlighted; the "Directions to
+        // room" chip offers full navigation).
+        setRoomDestination(null);
+        setIndoorRoute(null);
         selectBuilding(b);
         if (item.floorNumber !== undefined) {
           setFloorView({ building: b, floor: item.floorNumber });
@@ -880,6 +1023,7 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
 
   const startDirectionsTo = useCallback((b: Building) => {
     setToBuilding(b); setFromBuilding(null);
+    setRoomDestination(null); // building directions, not room directions
     setSelected(null); // Close building info panel to avoid overlap with route planner
     setDirectionsMode(true);
   }, []);
@@ -978,11 +1122,11 @@ const buildingFill = (id: string) =>
         )
       : findIndoorRoute(floorView.building.id, floorView.floor, roomId);
 
-    if (route) {
-      setIndoorRoute(route);
-      setActiveRouteRoom(roomId);
-      setHighlightedRoom(roomId);
-    }
+    // Track the active room even when no indoor path exists, so the
+    // "Directions to room" flow stays available.
+    setActiveRouteRoom(roomId);
+    setHighlightedRoom(roomId);
+    if (route) setIndoorRoute(route);
   }, [floorView, activeCampus, currentFloor]);
 
   const clearIndoorRoute = useCallback(() => {
@@ -990,6 +1134,121 @@ const buildingFill = (id: string) =>
     setActiveRouteRoom(null);
     setHighlightedRoom(null);
   }, []);
+
+  // ── Indoor walk animation state ────────────────────────────────────────
+  // Separate from the outdoor walk animation. Starts when the floor plan
+  // opens after the outdoor walk arrives at the building, and reuses the same
+  // animated avatar style from RouteMapOverlay.
+  const [indoorWalkProgress, setIndoorWalkProgress] = useState(0);
+  const indoorWalkAnimRef = useRef<number | null>(null);
+  const [indoorWalkNonce, setIndoorWalkNonce] = useState(0);
+  // The indoor walk start point: the building door/waypoint the outdoor walk
+  // arrives at. Set when the floor plan opens. Falls back to the first indoor
+  // waypoint if the outdoor walk didn't carry an explicit entrance position.
+  const [indoorWalkStart, setIndoorWalkStart] = useState<{ x: number; y: number } | null>(null);
+
+  /**
+   * Start full navigation to a room/floor the student clicked inside the
+   * floor plan. With an outdoor start ("You are here" or a different from
+   * building) the journey plays on the campus map and auto-enters the
+   * building when the walking dot arrives. Without one, the destination
+   * building itself is the start and the indoor leg is shown right away.
+   */
+  const startRoomDirections = useCallback((roomId: string) => {
+    const fv = floorViewRef.current;
+    if (!fv) return;
+    const room =
+      currentFloor?.rooms.find((r) => r.id === roomId) ??
+      activeFloorPlan?.rooms.find((r) => r.id === roomId);
+    if (!room) return;
+
+    const building = fv.building;
+    const target: RoomDest = {
+      type: "room",
+      buildingId: building.id,
+      floorNumber: fv.floor,
+      roomId,
+      roomName: room.name,
+      buildingLabel: building.name,
+      buildingCode: building.code,
+    };
+
+    setRoomDestination(target);
+    setToBuilding(building);
+    setDirectionsMode(false);
+    setSelected(null);
+    setSearch("");
+    setSearchFocused(false);
+
+    // Always start the normal navigation flow when a room's Directions button is
+    // pressed. The outdoor->indoor journey (or indoor-only if already at the
+    // building) is handled by the `route` memo + walk animation, exactly like
+    // the building-to-building flow. Do NOT create a separate indoor-only flow
+    // here.
+    if (!fromBuilding) setFromBuilding(building);
+    setHighlightedRoom(roomId);
+    setActiveRouteRoom(roomId);
+
+    const startsOutside =
+      (useMyLocation && youAreHere) ||
+      (fromBuilding !== null && fromBuilding.id !== building.id);
+    if (startsOutside) {
+      // Outdoor walk first: leave the floor plan, walk to the building, then
+      // the map auto-enters the destination floor (walk-arrival effect).
+      setFloorView(null);
+      setIndoorRoute(null);
+      setActiveRouteRoom(null);
+      setHighlightedRoom(null);
+      setStairLoading(null);
+    }
+  }, [
+    floorViewRef, currentFloor, activeFloorPlan,
+    fromBuilding, youAreHere, useMyLocation,
+  ]);
+
+  // ── Walk arrival → enter the destination building's floor plan ────────
+  // When the walking dot reaches the end of an outdoor route that targets a
+  // specific room (route.destinationRoom), automatically open that building's
+  // floor at the destination floor, highlight the room and draw the final
+  // indoor leg from the entrance to the room.
+  useEffect(() => {
+    const dest = route?.destinationRoom;
+    if (!dest) {
+      enteredRoomRef.current = null;
+      return;
+    }
+    const key = `${dest.buildingId}:${dest.floorNumber}:${dest.roomId}`;
+    if (walkProgress < 1) {
+      if (enteredRoomRef.current === key) enteredRoomRef.current = null;
+      return;
+    }
+    if (enteredRoomRef.current === key || isFloorMode) return;
+    enteredRoomRef.current = key;
+
+    const building = MOCK_BUILDINGS.find((b) => b.id === dest.buildingId);
+    if (!building) return;
+    const destFloorData = activeCampus?.buildings
+      .find((b) => b.id === dest.buildingId)
+      ?.floors.find((f) => f.number === dest.floorNumber);
+
+    // Enter the floor plan at its default framing (fresh zoom/pan).
+    panTargetRef.current = null;
+    setZoom(1);
+    setPan({ x: 0, y: 0 });
+    setFloorView({ building, floor: dest.floorNumber });
+    setHighlightedRoom(dest.roomId);
+    setActiveRouteRoom(dest.roomId);
+    const indoor = destFloorData
+      ? findIndoorRouteForFloor(
+          dest.buildingId,
+          dest.floorNumber,
+          dest.roomId,
+          destFloorData.rooms as RoomLike[],
+          mapMode === "accessible"
+        )
+      : null;
+    setIndoorRoute(indoor);
+  }, [walkProgress, route, isFloorMode, MOCK_BUILDINGS, activeCampus, mapMode]);
 
   // ── Map skeleton loading ──
   if (isLoading) {
@@ -1156,6 +1415,47 @@ const buildingFill = (id: string) =>
         </div>
       )}
 
+      {/* "Directions to this room" chip — starts full outdoor → indoor nav.
+          Shown when a room is active in the floor plan (from search or a
+          click). Hidden while the standalone indoor-route panel is open,
+          because that panel carries its own Directions button. */}
+      {isFloorMode && !directionsMode && !stairLoading && (() => {
+        const activeRoomId = activeRouteRoom ?? highlightedRoom;
+        if (!activeRoomId) return null;
+        const room =
+          currentFloor?.rooms.find((r) => r.id === activeRoomId) ??
+          activeFloorPlan?.rooms.find((r) => r.id === activeRoomId);
+        if (!room) return null;
+        const alreadyTargeted =
+          !!route?.destinationRoom &&
+          route.destinationRoom.buildingId === floorView?.building.id &&
+          route.destinationRoom.floorNumber === floorView?.floor &&
+          route.destinationRoom.roomId === activeRoomId;
+        // The indoor panel already offers directions; avoid a duplicate chip.
+        const indoorPanelOpen = !!indoorRoute && !route?.destinationRoom;
+        if (alreadyTargeted || indoorPanelOpen || walkProgress >= 1) return null;
+        return (
+          <div
+            data-no-drag
+            className="absolute top-14 left-1/2 -translate-x-1/2 z-40 flex items-center gap-2 px-3 py-1.5 rounded-full border border-border shadow-xl animate-fade-in"
+            style={{ background: "var(--card)", backdropFilter: "blur(16px)", WebkitBackdropFilter: "blur(16px)" }}
+          >
+            <Navigation className="h-3.5 w-3.5 shrink-0" style={{ color: "var(--primary)" }} />
+            <span className="text-[11px] font-bold max-w-[170px] truncate" style={{ color: "var(--foreground)" }}>
+              {room.name}
+            </span>
+            <button
+              onClick={(e) => { e.stopPropagation(); startRoomDirections(room.id); }}
+              className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold hover:brightness-110 transition-all active:scale-95"
+              style={{ background: "var(--primary)", color: "var(--primary-foreground)" }}
+              aria-label={`Get directions to ${room.name}`}
+            >
+              Directions
+            </button>
+          </div>
+        );
+      })()}
+
       {/* ══════════════════════════ MAP SVG ══════════════════════════ */}
       <svg ref={svgRef}
         viewBox={`${vbX} ${vbY} ${vbW} ${vbH}`}
@@ -1188,16 +1488,33 @@ const buildingFill = (id: string) =>
           {isFloorMode ? (() => {
             if (!activeFloorPlan) return null;
             return (
-              <ReadonlyFloorPlanScene
-                floor={activeFloorPlan}
-                mapMode={mapMode}
-                highlightedRoomId={highlightedRoom}
-                hoveredRoomId={hoveredRoom}
-                onRoomClick={(roomId) => showIndoorRoute(roomId)}
-                onRoomHover={(roomId) => setHoveredRoom(roomId)}
-                onRoomHoverEnd={() => setHoveredRoom(null)}
-                onDoorClick={() => closeFloorPlan()}
-              />
+              <>
+                <ReadonlyFloorPlanScene
+                  floor={activeFloorPlan}
+                  mapMode={mapMode}
+                  highlightedRoomId={highlightedRoom}
+                  hoveredRoomId={hoveredRoom}
+                  onRoomClick={(roomId) => showIndoorRoute(roomId)}
+                  onRoomHover={(roomId) => setHoveredRoom(roomId)}
+                  onRoomHoverEnd={() => setHoveredRoom(null)}
+                  onDoorClick={() => closeFloorPlan()}
+                />
+                {/* Indoor navigation path (entrance → active room) */}
+                {indoorRoute && indoorRoute.waypoints.length >= 2 && (() => {
+                  const wps = indoorRoute.waypoints;
+                  const pts = wps.map((p) => `${p.x},${p.y}`).join(" ");
+                  const last = wps[wps.length - 1];
+                  return (
+                    <g data-testid="floor-indoor-route" style={{ pointerEvents: "none" }}>
+                      <polyline points={pts} fill="none" stroke="#1e40af" strokeOpacity={0.18} strokeWidth={8}
+                        strokeLinecap="round" strokeLinejoin="round" />
+                      <polyline points={pts} fill="none" stroke="#1e40af" strokeWidth={3.5}
+                        strokeLinecap="round" strokeLinejoin="round" />
+                      <circle cx={last.x} cy={last.y} r={6.5} fill="#dc2626" stroke="white" strokeWidth={2} />
+                    </g>
+                  );
+                })()}
+              </>
             );
           })() : (
           /* ════════ CAMPUS MAP mode ════════ */
@@ -1308,8 +1625,8 @@ const buildingFill = (id: string) =>
             youAreHere={youAreHere}
             useMyLocation={useMyLocation}
             onUseMyLocationChange={setUseMyLocation}
-            onClose={() => { setDirectionsMode(false); setFromBuilding(null); setToBuilding(null); }}
-            onClear={() => { setFromBuilding(null); setToBuilding(null); }}
+            onClose={() => { setDirectionsMode(false); setFromBuilding(null); setToBuilding(null); setRoomDestination(null); }}
+            onClear={() => { setFromBuilding(null); setToBuilding(null); setRoomDestination(null); }}
             onFindRoute={() => { if ((useMyLocation && toBuilding) || (fromBuilding && toBuilding)) setDirectionsMode(false); }}
           />
         ) : (
@@ -1508,7 +1825,7 @@ const buildingFill = (id: string) =>
       )}
 
       {/* ══════════════ ZOOM CONTROLS — desktop only ══════════════ */}
-      <div data-no-drag className={cn("absolute bottom-20 md:bottom-5 right-3 z-20 hidden md:flex flex-col gap-1", route && "hidden")}>
+      <div data-no-drag className="absolute bottom-20 md:bottom-5 right-3 z-20 hidden md:flex flex-col gap-1">
         <button onClick={e => { e.stopPropagation(); setShowLayers(v => !v); }} title="Layers"
           className={cn("w-9 h-9 rounded-xl border shadow-md flex items-center justify-center transition-all",
             showLayers ? "bg-primary border-primary text-primary-foreground" : "bg-card border-border/60 text-muted-foreground hover:border-primary/30")}>
@@ -1567,19 +1884,11 @@ const buildingFill = (id: string) =>
               <RouteStepsPanel
                 route={route}
                 mode={mapMode}
-                toName={toBuilding?.name ?? "Destination"}
+                toName={roomDestination?.roomName ?? toBuilding?.name ?? "Destination"}
                 walkProgress={walkProgress}
                 onReplay={replayWalk}
-                onEnd={() => {
-                  setRouteFading(true);
-                  setTimeout(() => {
-                    setFromBuilding(null);
-                    setToBuilding(null);
-                    setDirectionsMode(false);
-                    setRouteFading(false);
-                  }, 300);
-                }}
-                onZoom={() => setZoom(1.5)}
+                onEnd={endNavigation}
+                onZoom={() => frameRouteView(Math.max(zoomRef.current, 1.5))}
               />
             </div>
           </div>
@@ -1588,19 +1897,11 @@ const buildingFill = (id: string) =>
             <RouteStepsPanel
               route={route}
               mode={mapMode}
-              toName={toBuilding?.name ?? "Destination"}
+              toName={roomDestination?.roomName ?? toBuilding?.name ?? "Destination"}
               walkProgress={walkProgress}
               onReplay={replayWalk}
-              onEnd={() => {
-                setRouteFading(true);
-                setTimeout(() => {
-                  setFromBuilding(null);
-                  setToBuilding(null);
-                  setDirectionsMode(false);
-                  setRouteFading(false);
-                }, 300);
-              }}
-              onZoom={() => setZoom(1.5)}
+              onEnd={endNavigation}
+              onZoom={() => frameRouteView(Math.max(zoomRef.current, 1.5))}
             />
           </div>
         </>
@@ -1666,7 +1967,7 @@ const buildingFill = (id: string) =>
                 Dismiss
               </button>
               <button
-                onClick={() => { setShowArrival(false); setFromBuilding(null); setToBuilding(null); setDirectionsMode(false); }}
+                onClick={() => { setShowArrival(false); setFromBuilding(null); setToBuilding(null); setRoomDestination(null); setDirectionsMode(false); }}
                 className="h-9 px-5 rounded-xl bg-primary text-primary-foreground text-xs font-bold hover:bg-primary/90 transition-colors">
                 End Navigation
               </button>
@@ -1708,7 +2009,8 @@ const buildingFill = (id: string) =>
       )}
 
       {/* ══════════════ INDOOR ROUTE DIRECTIONS PANEL ══════════════ */}
-      {indoorRoute && isFloorMode && !stairLoading && (
+      {/* Hidden when a full outdoor→indoor route already shows the same leg. */}
+      {indoorRoute && isFloorMode && !stairLoading && !route?.destinationRoom && (
         <div className="absolute top-16 left-1/2 -translate-x-1/2 z-20 animate-slide-up">
           <div className="rounded-2xl border border-border/60 shadow-xl overflow-hidden"
             style={{ background:"var(--card)", backdropFilter:"blur(16px)", WebkitBackdropFilter:"blur(16px)", width:280, maxWidth:"calc(100vw - 40px)" }}>
@@ -1743,10 +2045,20 @@ const buildingFill = (id: string) =>
                 ))}
               </div>
             </div>
-            <div className="px-3 pb-2.5">
+            <div className="flex gap-1.5 px-3 pb-2.5">
+              {activeRouteRoom && (
+                <button
+                  onClick={() => startRoomDirections(activeRouteRoom)}
+                  className="flex-1 h-7 rounded-lg text-[10px] font-bold inline-flex items-center justify-center gap-1 hover:brightness-110 transition-all active:scale-[0.98]"
+                  style={{ background: "var(--primary)", color: "var(--primary-foreground)" }}
+                >
+                  <Navigation className="h-3 w-3" />
+                  Directions to room
+                </button>
+              )}
               <button onClick={clearIndoorRoute}
-                className="w-full h-7 rounded-lg border border-destructive/30 text-destructive text-[10px] font-bold hover:bg-destructive/10 transition-colors">
-                Clear Route
+                className={cn("h-7 rounded-lg border border-destructive/30 text-destructive text-[10px] font-bold hover:bg-destructive/10 transition-colors", activeRouteRoom ? "px-2.5" : "w-full")}>
+                Clear
               </button>
             </div>
           </div>
