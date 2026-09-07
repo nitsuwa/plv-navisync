@@ -89,24 +89,25 @@ function makeSnapCampus(): Campus {
   return campus;
 }
 
-function makeOpeningVisualCampus(): Campus {
+function makeOpeningVisualCampus(options: { separated?: boolean } = {}): Campus {
+  const separated = options.separated === true;
   const campus = makeRichCampus();
   const floor = campus.buildings[0].floors[0];
   floor.rooms = [];
   floor.walls = [
-    { id: "wh", x1: 20, y1: 20, x2: 100, y2: 20, thickness: 6, color: "#64748b", material: "concrete" },
-    { id: "wv", x1: 130, y1: 20, x2: 130, y2: 100, thickness: 6, color: "#64748b", material: "concrete" },
+    { id: "wh", x1: 20, y1: 20, x2: separated ? 200 : 100, y2: 20, thickness: 6, color: "#64748b", material: "concrete" },
+    { id: "wv", x1: 130, y1: 20, x2: 130, y2: separated ? 140 : 100, thickness: 6, color: "#64748b", material: "concrete" },
     { id: "wd", x1: 160, y1: 20, x2: 210, y2: 70, thickness: 6, color: "#64748b", material: "concrete" },
   ];
   floor.doors = [
-    { id: "dh", x: 60, y: 20, width: 20, direction: "left", color: "#b45309", wallId: "wh", offset: 0.5 },
-    { id: "dv", x: 130, y: 60, width: 20, direction: "right", color: "#b45309", wallId: "wv", offset: 0.5 },
-    { id: "dd", x: 185, y: 45, width: 20, direction: "left", color: "#b45309", wallId: "wd", offset: 0.5 },
+    { id: "dh", x: separated ? 40 : 60, y: 20, width: 20, direction: "left", color: "#b45309", wallId: "wh", offset: separated ? 0.25 : 0.5 },
+    { id: "dv", x: 130, y: separated ? 40 : 60, width: 20, direction: "right", color: "#b45309", wallId: "wv", offset: separated ? 0.25 : 0.5 },
+    { id: "dd", x: separated ? 172.5 : 185, y: separated ? 32.5 : 45, width: 20, direction: "left", color: "#b45309", wallId: "wd", offset: separated ? 0.25 : 0.5 },
   ];
   floor.windows = [
-    { id: "winh", x: 60, y: 20, width: 28, height: 6, color: "#0284c7", wallId: "wh", offset: 0.5 },
-    { id: "winv", x: 130, y: 60, width: 28, height: 6, color: "#0284c7", wallId: "wv", offset: 0.5 },
-    { id: "wind", x: 185, y: 45, width: 28, height: 6, color: "#0284c7", wallId: "wd", offset: 0.5 },
+    { id: "winh", x: separated ? 164 : 60, y: 20, width: 28, height: 6, color: "#0284c7", wallId: "wh", offset: separated ? 0.8 : 0.5 },
+    { id: "winv", x: 130, y: separated ? 116 : 60, width: 28, height: 6, color: "#0284c7", wallId: "wv", offset: separated ? 0.8 : 0.5 },
+    { id: "wind", x: separated ? 200 : 185, y: separated ? 60 : 45, width: 28, height: 6, color: "#0284c7", wallId: "wd", offset: separated ? 0.8 : 0.5 },
   ];
   floor.furniture = [];
   floor.stairs = [];
@@ -991,11 +992,11 @@ describe("Phase 2.1 - room layering, state, and structural snapping", () => {
     expect(latestCampus!.buildings[0].floors[0].doors[0]).toMatchObject({ wallId: "w1", x: 103, y: 57 });
 
     fireEvent.keyDown(window, { key: "i" });
-    fireEvent.mouseMove(wall, { clientX: 123, clientY: 57, bubbles: true });
+    fireEvent.mouseMove(wall, { clientX: 143, clientY: 57, bubbles: true });
     expect(screen.getByTestId("window-wall-preview")).toBeInTheDocument();
-    fireEvent.mouseDown(wall, { clientX: 123, clientY: 57, bubbles: true });
+    fireEvent.mouseDown(wall, { clientX: 143, clientY: 57, bubbles: true });
     fireEvent.mouseUp(svg, { bubbles: true });
-    expect(latestCampus!.buildings[0].floors[0].windows[0]).toMatchObject({ wallId: "w1", x: 123, y: 57 });
+    expect(latestCampus!.buildings[0].floors[0].windows[0]).toMatchObject({ wallId: "w1", x: 129, y: 57 });
   });
 
   it("clamps new Door and Window openings fully away from wall ends", () => {
@@ -1019,6 +1020,56 @@ describe("Phase 2.1 - room layering, state, and structural snapping", () => {
     expect(floor.windows[0].offset).toBeLessThanOrEqual(0.77);
   });
 
+  it("shows a red attempted preview and blocks a wall-opening overlap", () => {
+    const campus = makeSnapCampus();
+    const floor = campus.buildings[0].floors[0];
+    floor.doors = [
+      { id: "door-a", x: 85, y: 57, width: 18, direction: "left", color: "#b45309", wallId: "w1", offset: 0.32 },
+      { id: "door-b", x: 121, y: 57, width: 18, direction: "left", color: "#b45309", wallId: "w1", offset: 0.68 },
+    ];
+    const { container } = render(<Harness initialCampus={campus} onCampusChange={(c) => { latestCampus = c; }} />);
+    const svg = stubSvgRect(container, 580, 380);
+    const firstDoor = screen.getAllByTestId("attached-door-opening-symbol")[0];
+
+    fireEvent.mouseDown(firstDoor, { clientX: 85, clientY: 57, bubbles: true });
+    fireEvent.mouseMove(svg, { clientX: 121, clientY: 57, bubbles: true });
+
+    expect(screen.getByTestId("door-wall-preview")).toHaveAttribute("data-preview-valid", "false");
+    expect(screen.getByTestId("placement-warning-badge")).toHaveAttribute("aria-label", "Overlaps another Door");
+    fireEvent.mouseUp(svg, { bubbles: true });
+    expect(latestCampus).toBeNull();
+  });
+
+  it("uses the candidate wall orientation for an invalid cross-wall opening preview", () => {
+    const campus = makeOpeningVisualCampus({ separated: true });
+    // A preview must keep the exact source Door artwork as well as rotating
+    // to the candidate wall.  This catches the old generic single/left ghost.
+    Object.assign(campus.buildings[0].floors[0].doors[0], {
+      doorType: "double" as const,
+      direction: "double",
+      swingSide: "b" as const,
+    });
+    const { container } = render(<Harness initialCampus={campus} onCampusChange={(c) => { latestCampus = c; }} />);
+    const svg = stubSvgRect(container);
+    const firstDoor = screen.getAllByTestId("attached-door-opening-symbol")[0];
+
+    // Drag the horizontal Door onto the existing vertical Door aperture. The
+    // committed Door stays on its original wall, while the attempted red
+    // candidate must rotate to the vertical target wall.
+    fireEvent.mouseDown(firstDoor, { clientX: 40, clientY: 20, bubbles: true });
+    fireEvent.mouseMove(svg, { clientX: 130, clientY: 40, bubbles: true });
+
+    const preview = screen.getByTestId("door-wall-preview");
+    expect(preview).toHaveAttribute("data-preview-valid", "false");
+    expect(preview).toHaveAttribute("data-preview-door-type", "double");
+    expect(preview).toHaveAttribute("data-preview-direction", "double");
+    expect(preview).toHaveAttribute("data-preview-swing-side", "b");
+    expect(preview.querySelectorAll('[data-testid="door-leaf"]')).toHaveLength(2);
+    expect(preview.querySelector("g")?.getAttribute("transform")).toContain("rotate(90");
+    fireEvent.mouseUp(svg, { bubbles: true });
+    expect(latestCampus).toBeNull();
+  });
+
   it("keeps perimeter corner placements inside the parent wall and defaults doors inward", () => {
     const campus = makePerimeterOpeningCampus();
     campus.buildings[0].floors[0].doors = [];
@@ -1039,7 +1090,7 @@ describe("Phase 2.1 - room layering, state, and structural snapping", () => {
   });
 
   it("persists independent Door hinge and swing-side controls without native dropdowns", () => {
-    const { container } = render(<Harness initialCampus={makeOpeningVisualCampus()} onCampusChange={(c) => { latestCampus = c; }} />);
+    const { container } = render(<Harness initialCampus={makeOpeningVisualCampus({ separated: true })} onCampusChange={(c) => { latestCampus = c; }} />);
     const svg = stubSvgRect(container);
 
     fireEvent.mouseDown(screen.getAllByTestId("attached-door-opening-symbol")[0], { clientX: 60, clientY: 20, bubbles: true });
@@ -1058,7 +1109,7 @@ describe("Phase 2.1 - room layering, state, and structural snapping", () => {
   });
 
   it("offers exactly two along-wall resize handles for selected Door and Window openings", () => {
-    const { container } = render(<Harness initialCampus={makeOpeningVisualCampus()} onCampusChange={(c) => { latestCampus = c; }} />);
+    const { container } = render(<Harness initialCampus={makeOpeningVisualCampus({ separated: true })} onCampusChange={(c) => { latestCampus = c; }} />);
     const svg = stubSvgRect(container);
 
     fireEvent.mouseDown(screen.getAllByTestId("attached-door-opening-symbol")[0], { clientX: 60, clientY: 20, bubbles: true });
@@ -1139,7 +1190,7 @@ describe("Phase 2.1 - room layering, state, and structural snapping", () => {
   });
 
   it("resizes Door openings wider and narrower from along-wall handles", () => {
-    const { container } = render(<Harness initialCampus={makeOpeningVisualCampus()} onCampusChange={(c) => { latestCampus = c; }} />);
+    const { container } = render(<Harness initialCampus={makeOpeningVisualCampus({ separated: true })} onCampusChange={(c) => { latestCampus = c; }} />);
     const svg = stubSvgRect(container);
 
     fireEvent.mouseDown(screen.getAllByTestId("attached-door-opening-symbol")[0], { clientX: 60, clientY: 20, bubbles: true });
@@ -1212,7 +1263,7 @@ describe("Phase 2.1 - room layering, state, and structural snapping", () => {
   });
 
   it("persists Door Type changes and hides Hinge controls for Double Door", () => {
-    const { container } = render(<Harness initialCampus={makeOpeningVisualCampus()} onCampusChange={(c) => { latestCampus = c; }} />);
+    const { container } = render(<Harness initialCampus={makeOpeningVisualCampus({ separated: true })} onCampusChange={(c) => { latestCampus = c; }} />);
     const svg = stubSvgRect(container);
 
     fireEvent.mouseDown(screen.getAllByTestId("attached-door-opening-symbol")[0], { clientX: 60, clientY: 20, bubbles: true });
@@ -1248,7 +1299,7 @@ describe("Phase 2.1 - room layering, state, and structural snapping", () => {
   });
 
   it("keeps Window placement and resize behavior unchanged after Door type changes", () => {
-    const { container } = render(<Harness initialCampus={makeOpeningVisualCampus()} onCampusChange={(c) => { latestCampus = c; }} />);
+    const { container } = render(<Harness initialCampus={makeOpeningVisualCampus({ separated: true })} onCampusChange={(c) => { latestCampus = c; }} />);
     const svg = stubSvgRect(container);
 
     fireEvent.mouseDown(screen.getAllByTestId("attached-window-opening-symbol")[0], { clientX: 60, clientY: 20, bubbles: true });
@@ -1908,22 +1959,34 @@ describe("Phase 1.8 — wall connection quality", () => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe("Phase 1.8 — curated furniture library", () => {
-  it("keeps a small default library with no pointless duplicates", () => {
+  it("keeps a curated, reusable floor-plan library with stable asset keys", () => {
     const allTypes = FURNITURE_CATEGORIES.flatMap((c) => c.items.map((i) => i.type));
-    expect(allTypes).toEqual([
-      "chair", "bench", "sofa",
-      "desk", "table",
-      "cabinet", "bookshelf",
-      "computer-workstation",
-      "plant",
-    ]);
-    // The redundant variants were removed from the DEFAULT palette…
-    expect(allTypes).not.toContain("student-chair");
-    expect(allTypes).not.toContain("student-desk");
-    expect(allTypes).not.toContain("teacher-desk");
+    expect(allTypes).toEqual(expect.arrayContaining([
+      "chair", "bench", "sofa", "lecture-row-4", "lecture-row-6", "lecture-row-8", "waiting-bench",
+      "desk", "table", "student-desk-chair", "study-table-4", "study-table-6", "conference-table-6", "conference-table-8", "lab-workbench", "lab-workbench-stools", "faculty-desk-chair", "office-desk-visitors", "library-study-table",
+      "whiteboard", "lectern", "laboratory-sink",
+      "cabinet", "bookshelf", "library-bookshelf", "double-sided-library-shelf", "tall-storage-cabinet", "equipment-cabinet",
+      "locker",
+      "computer-workstation", "computer-workstation-chair", "computer-workstation-row-4", "computer-workstation-row-6", "projector", "wall-display",
+      "printer-copier", "server-rack",
+      "toilet", "urinal", "sink", "double-sink", "toilet-stall", "pwd-toilet-stall", "mirror", "restroom-trash-bin",
+      "fire-extinguisher", "exit-sign", "emergency-light", "first-aid-cabinet", "plant", "indoor-trash-bin",
+    ]));
+    expect(new Set(allTypes).size).toBe(allTypes.length);
     // …and no two entries share a display name
     const names = FURNITURE_CATEGORIES.flatMap((c) => c.items.map((i) => i.name));
     expect(new Set(names).size).toBe(names.length);
+  });
+
+  it("keeps library defaults compact and template-friendly", () => {
+    const items = FURNITURE_CATEGORIES.flatMap((category) => category.items);
+    expect(items.every((item) => Number.isFinite(item.width) && Number.isFinite(item.height) && item.width > 0 && item.height > 0)).toBe(true);
+    expect(items.find((item) => item.type === "fire-extinguisher")).toMatchObject({ width: 8, height: 14 });
+    expect(items.find((item) => item.type === "pwd-toilet-stall")).toMatchObject({ width: 34, height: 34 });
+    expect(items.find((item) => item.type === "library-bookshelf")).toMatchObject({ width: 30, height: 10 });
+    expect(items.find((item) => item.type === "whiteboard")).toMatchObject({ width: 40, height: 6 });
+    expect(items.find((item) => item.type === "laboratory-sink")).toMatchObject({ width: 26, height: 12 });
+    expect(items.find((item) => item.type === "server-rack")).toMatchObject({ width: 18, height: 24 });
   });
 
   it("renders legacy furniture types safely (removed from palette, still renderable)", () => {
@@ -1985,6 +2048,87 @@ describe("Phase 1.8 — curated furniture library", () => {
     expect(signature("Computer Workstation").rects).toBe(3);
     // Plant: planter + organic leaves
     expect(signature("Plant").circles).toBe(3);
+  });
+
+  it("renders the university floor-plan library as real composite and fixture symbols", () => {
+    const campus = makeRichCampus();
+    const types = [
+      ["lecture-row-6", "Lecture Row 6", "seating", 10, 10, 70, 14, "#4b5563"],
+      ["study-table-6", "Study Table + 6 Chairs", "tables", 10, 40, 54, 38, "#8b6f4e"],
+      ["lab-workbench-stools", "Workbench + Stools", "tables", 80, 40, 58, 32, "#64748b"],
+      ["computer-workstation-row-4", "Workstation Row 4", "electronics", 10, 90, 62, 18, "#475569"],
+      ["library-bookshelf", "Bookshelf", "storage", 90, 90, 30, 10, "#6b5b45"],
+      ["toilet", "Toilet", "restroom", 130, 90, 12, 16, "#dbe4ea"],
+      ["toilet-stall", "Toilet Stall", "restroom", 150, 90, 26, 28, "#e2e8f0"],
+      ["pwd-toilet-stall", "Accessible / PWD Stall", "restroom", 180, 90, 34, 34, "#dbeafe"],
+      ["sink", "Sink / Wash Basin", "restroom", 10, 130, 16, 10, "#cbd5e1"],
+      ["fire-extinguisher", "Wall Fire Extinguisher", "safety", 40, 130, 8, 14, "#dc2626"],
+      ["whiteboard", "Whiteboard / Teaching Board", "tables", 60, 130, 40, 6, "#f8fafc"],
+      ["laboratory-sink", "Laboratory Sink", "tables", 105, 130, 26, 12, "#cbd5e1"],
+      ["server-rack", "Server / Network Rack", "electronics", 140, 130, 18, 24, "#334155"],
+      ["lectern", "Lectern / Podium", "tables", 165, 130, 16, 16, "#7a5c3a"],
+      ["printer-copier", "Printer / Copier", "electronics", 185, 130, 18, 16, "#64748b"],
+      ["locker", "Locker", "storage", 10, 145, 30, 12, "#64748b"],
+    ] as const;
+    campus.buildings[0].floors[0].furniture = types.map(([type, name, category, x, y, width, height, color], i) => ({
+      id: `library-${i}`, type, name, category, x, y, width, height, rotation: 0, color,
+    }));
+    const { container } = render(<Harness initialCampus={campus} />);
+    stubSvgRect(container);
+    for (const [, name] of types) {
+      const group = furnitureGroup(container, name);
+      expect(group.querySelector('[data-furniture-symbol]') ?? group.querySelector("rect,ellipse,circle,path")).toBeTruthy();
+    }
+    expect(furnitureGroup(container, "Lecture Row 6").querySelectorAll("rect").length).toBeGreaterThan(2);
+    expect(furnitureGroup(container, "Study Table + 6 Chairs").querySelectorAll("rect").length).toBeGreaterThan(4);
+    expect(furnitureGroup(container, "Toilet Stall").querySelectorAll("line").length).toBeGreaterThan(0);
+    expect(furnitureGroup(container, "Wall Fire Extinguisher").querySelector("rect")?.getAttribute("fill")).toBe("#dc2626");
+    expect(furnitureGroup(container, "Whiteboard / Teaching Board").querySelectorAll("line").length).toBe(2);
+    expect(furnitureGroup(container, "Lectern / Podium").querySelector("path")).toBeTruthy();
+    expect(furnitureGroup(container, "Printer / Copier").querySelector("circle")).toBeTruthy();
+    expect(furnitureGroup(container, "Laboratory Sink").querySelector("ellipse")).toBeTruthy();
+    expect(furnitureGroup(container, "Server / Network Rack").querySelectorAll("line").length).toBe(3);
+    expect(furnitureGroup(container, "Locker").querySelectorAll("line").length).toBeGreaterThan(0);
+
+    // Representative symbols keep their visible primitives inside the same
+    // footprint used by transforms/selection (a one-unit allowance covers a
+    // hairline stroke without hiding excessive SVG padding).
+    for (const [name, x, y, width, height] of [
+      ["Whiteboard / Teaching Board", 60, 130, 40, 6],
+      ["Laboratory Sink", 105, 130, 26, 12],
+      ["Server / Network Rack", 140, 130, 18, 24],
+    ] as const) {
+      const group = furnitureGroup(container, name);
+      const primitives = Array.from(group.querySelectorAll("rect,ellipse,circle,line"));
+      const xs: number[] = [];
+      const ys: number[] = [];
+      for (const primitive of primitives) {
+        const tag = primitive.tagName.toLowerCase();
+        if (tag === "line") {
+          xs.push(Number(primitive.getAttribute("x1")), Number(primitive.getAttribute("x2")));
+          ys.push(Number(primitive.getAttribute("y1")), Number(primitive.getAttribute("y2")));
+        } else if (tag === "circle") {
+          const cx = Number(primitive.getAttribute("cx"));
+          const cy = Number(primitive.getAttribute("cy"));
+          const r = Number(primitive.getAttribute("r"));
+          xs.push(cx - r, cx + r); ys.push(cy - r, cy + r);
+        } else if (tag === "ellipse") {
+          const cx = Number(primitive.getAttribute("cx"));
+          const cy = Number(primitive.getAttribute("cy"));
+          xs.push(cx - Number(primitive.getAttribute("rx")), cx + Number(primitive.getAttribute("rx")));
+          ys.push(cy - Number(primitive.getAttribute("ry")), cy + Number(primitive.getAttribute("ry")));
+        } else {
+          const rx = Number(primitive.getAttribute("x"));
+          const ry = Number(primitive.getAttribute("y"));
+          xs.push(rx, rx + Number(primitive.getAttribute("width")));
+          ys.push(ry, ry + Number(primitive.getAttribute("height")));
+        }
+      }
+      expect(Math.min(...xs)).toBeGreaterThanOrEqual(x - 1);
+      expect(Math.max(...xs)).toBeLessThanOrEqual(x + width + 1);
+      expect(Math.min(...ys)).toBeGreaterThanOrEqual(y - 1);
+      expect(Math.max(...ys)).toBeLessThanOrEqual(y + height + 1);
+    }
   });
 
   it("color is a real functional property — the renderer honors it", () => {
@@ -2056,6 +2200,53 @@ describe("Phase 1.8 — curated furniture library", () => {
     fireEvent.mouseDown(roomGroup(container), { clientX: 45, clientY: 40, bubbles: true });
     fireEvent.mouseUp(svg, { bubbles: true });
     expect(screen.getByTestId("floor-properties-panel")).toHaveTextContent("Room");
+  });
+
+  it("places a composite library item through the normal furniture lifecycle", () => {
+    const { container } = render(<Harness onCampusChange={(c) => { latestCampus = c; }} />);
+    const svg = stubSvgRect(container);
+    fireEvent.click(screen.getByRole("button", { name: /Tables \/ Work/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Study Table + 6 Chairs" }));
+    fireEvent.mouseDown(svg, { clientX: 160, clientY: 120, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+
+    const added = latestCampus!.buildings[0].floors[0].furniture.at(-1)!;
+    expect(added.type).toBe("study-table-6");
+    expect(added.name).toBe("Study Table + 6 Chairs");
+    expect(added.width).toBe(54);
+    expect(added.height).toBe(38);
+  });
+
+  it("keeps the existing indoor navigation graph byte-for-byte stable when furniture is placed", () => {
+    const campus = makeRichCampus();
+    const floor = campus.buildings[0].floors[0];
+    floor.rooms = [];
+    floor.walls = [];
+    floor.doors = [];
+    floor.windows = [];
+    campus.navNodes = [
+      { id: "nav-a", name: "Waypoint A", type: "hallway", x: 30, y: 30, campusId: "c1", buildingId: "b1", floorId: "f1", accessible: true, color: "#16a34a" },
+      { id: "nav-b", name: "Waypoint B", type: "hallway", x: 100, y: 30, campusId: "c1", buildingId: "b1", floorId: "f1", accessible: true, color: "#16a34a" },
+    ];
+    campus.navEdges = [{ id: "nav-edge", startNodeId: "nav-a", endNodeId: "nav-b", distance: 70, bidirectional: true, accessible: true, emergencySafe: true, type: "hallway", color: "#16a34a", width: 3 }];
+    const beforeNodes = structuredClone(campus.navNodes);
+    const beforeEdges = structuredClone(campus.navEdges);
+    let latestCampus: Campus | null = null;
+    const { container } = render(<Harness initialCampus={campus} onCampusChange={(next) => { latestCampus = next; }} />);
+    const svg = stubSvgRect(container);
+
+    fireEvent.click(screen.getByRole("button", { name: /Tables \/ Work/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Whiteboard / Teaching Board" }));
+    fireEvent.mouseDown(svg, { clientX: 150, clientY: 100, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    fireEvent.mouseDown(furnitureGroup(container, "Whiteboard / Teaching Board"), { clientX: 150, clientY: 100, bubbles: true });
+    fireEvent.mouseMove(svg, { clientX: 165, clientY: 110, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    fireEvent.keyDown(window, { key: "Delete", code: "Delete" });
+
+    expect(latestCampus?.navNodes).toEqual(beforeNodes);
+    expect(latestCampus?.navEdges).toEqual(beforeEdges);
+    expect(latestCampus?.buildings[0].floors[0].furniture.some((item) => item.type === "whiteboard")).toBe(false);
   });
 
   it("resizes a single dimension from a side handle", () => {

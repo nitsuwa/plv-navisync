@@ -26,7 +26,7 @@ import { rotatedRectBounds } from "./floorGeometry";
  * centered on (x, y).
  */
 export interface GroupMoveMember {
-  kind: "building" | "decorAsset" | "path";
+  kind: "building" | "decorAsset" | "path" | "marker";
   id: string;
   /** Building/path bounds: top-left x. Decor asset: center x. */
   x: number;
@@ -40,7 +40,7 @@ export interface GroupMoveMember {
   rotation?: number;
 }
 
-/** A rectangle used as an edge-snap target (other, non-group buildings). */
+/** A rectangle used as an edge-snap target for another physical object. */
 export interface GroupEdgeRect {
   x: number;
   y: number;
@@ -55,7 +55,7 @@ export interface GroupEdgeRect {
  * Rotated buildings use their rotated AABB; everything else is unrotated.
  */
 export function memberVisibleBounds(m: GroupMoveMember): { x: number; y: number; width: number; height: number } {
-  if (m.kind === "decorAsset") {
+  if (m.kind === "decorAsset" || m.kind === "marker") {
     // Center-positioned: translate to top-left bounds.
     const left = m.x - m.width / 2;
     const top = m.y - m.height / 2;
@@ -197,12 +197,105 @@ export interface ComputeGroupTranslationParams {
   edgeSnap?: boolean;
   /** Edge-snap distance threshold in canvas units (default 12). */
   edgeThreshold?: number;
+  /** Small physical-object inset from the canvas frame. */
+  boundsInset?: number;
 }
 
 export interface GroupTranslation {
   /** Final translation to apply to EVERY group member (rigid). */
   dx: number;
   dy: number;
+}
+
+export type GroupResizeCorner = "nw" | "ne" | "sw" | "se";
+
+export interface GroupResizeBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * Resolve the new outer frame for a physical multi-selection resize.  The
+ * opposite corner stays fixed; the dragged corner is grid-snapped and the
+ * frame is clamped to the canvas instead of moving any content implicitly.
+ */
+export function computeGroupResizeBounds(
+  bounds: GroupResizeBounds,
+  corner: GroupResizeCorner,
+  pointer: { x: number; y: number },
+  canvasW: number,
+  canvasH: number,
+  snapGrid = false,
+  gridSize = 20,
+  minSize = 20,
+  boundsInset = 0,
+): GroupResizeBounds {
+  const snap = (value: number) => snapGrid ? Math.round(value / Math.max(1, gridSize)) * Math.max(1, gridSize) : Math.round(value);
+  const fixedX = corner.includes("w") ? bounds.x + bounds.width : bounds.x;
+  const fixedY = corner.includes("n") ? bounds.y + bounds.height : bounds.y;
+  const pointerX = snap(pointer.x);
+  const pointerY = snap(pointer.y);
+  const dx = (pointerX - fixedX) * (corner.includes("w") ? -1 : 1);
+  const dy = (pointerY - fixedY) * (corner.includes("n") ? -1 : 1);
+  // A group keeps one aspect ratio while resizing.  Use the dominant pointer
+  // axis so a corner drag feels responsive while the other axis follows the
+  // original selection proportions.  This avoids the compounded/non-uniform
+  // distortion that occurred when each member was resized from its previous
+  // frame on every mousemove.
+  const requestedScale = Math.max(
+    dx / Math.max(1, bounds.width),
+    dy / Math.max(1, bounds.height),
+  );
+  const inset = Math.max(0, Math.min(Math.min(canvasW, canvasH) / 2, boundsInset));
+  const safeMaxX = Math.max(inset, canvasW - inset);
+  const safeMaxY = Math.max(inset, canvasH - inset);
+  const availableW = corner.includes("w") ? fixedX - inset : safeMaxX - fixedX;
+  const availableH = corner.includes("n") ? fixedY - inset : safeMaxY - fixedY;
+  const minimumScale = minSize / Math.max(1, Math.min(bounds.width, bounds.height));
+  const maximumScale = Math.max(0.01, Math.min(
+    availableW / Math.max(1, bounds.width),
+    availableH / Math.max(1, bounds.height),
+  ));
+  // The fixed corner is assumed to be inside the canvas (as it is for a
+  // normal selection).  Clamping the scale, rather than width and height
+  // independently, keeps the outer frame and every member proportional.
+  const scale = Math.min(maximumScale, Math.max(minimumScale, requestedScale));
+  const width = Math.max(minSize, bounds.width * scale);
+  const height = Math.max(minSize, bounds.height * scale);
+  const x = corner.includes("w") ? fixedX - width : fixedX;
+  const y = corner.includes("n") ? fixedY - height : fixedY;
+  return { x, y, width, height };
+}
+
+/** Apply an outer-frame scale to physical members while preserving their
+ * relative location in the original selection.  Building positions are
+ * top-left based; decor and markers are center based. */
+export function resizeGroupMembers(
+  members: GroupMoveMember[],
+  from: GroupResizeBounds,
+  to: GroupResizeBounds,
+): GroupMoveMember[] {
+  const sx = from.width > 0 ? to.width / from.width : 1;
+  const sy = from.height > 0 ? to.height / from.height : 1;
+  return members.map((member) => {
+    const visible = memberVisibleBounds(member);
+    const centerX = visible.x + visible.width / 2;
+    const centerY = visible.y + visible.height / 2;
+    const nextCenterX = to.x + (centerX - from.x) * sx;
+    const nextCenterY = to.y + (centerY - from.y) * sy;
+    const width = Math.max(1, member.width * Math.abs(sx));
+    const height = Math.max(1, member.height * Math.abs(sy));
+    const centerPositioned = member.kind === "decorAsset" || member.kind === "marker";
+    return {
+      ...member,
+      x: centerPositioned ? nextCenterX : nextCenterX - width / 2,
+      y: centerPositioned ? nextCenterY : nextCenterY - height / 2,
+      width,
+      height,
+    };
+  });
 }
 
 /**
@@ -269,16 +362,44 @@ export function computeGroupTranslation(p: ComputeGroupTranslationParams): Group
   }
 
   // 3. Canvas-boundary clamp (rigid — shifts the entire group).
+  const inset = Math.max(0, Math.min(Math.min(p.canvasW, p.canvasH) / 2, p.boundsInset ?? 0));
+  const safeMinX = inset;
+  const safeMinY = inset;
+  const safeMaxX = Math.max(safeMinX, p.canvasW - inset);
+  const safeMaxY = Math.max(safeMinY, p.canvasH - inset);
   const afterMinX = minX + dx;
   const afterMaxX = minX + bboxW + dx;
   const afterMinY = minY + dy;
   const afterMaxY = minY + bboxH + dy;
-  if (afterMinX < 0) dx += -afterMinX;
-  if (afterMaxX > p.canvasW) dx -= afterMaxX - p.canvasW;
-  if (afterMinY < 0) dy += -afterMinY;
-  if (afterMaxY > p.canvasH) dy -= afterMaxY - p.canvasH;
+  if (afterMinX < safeMinX) dx += safeMinX - afterMinX;
+  if (afterMaxX > safeMaxX) dx -= afterMaxX - safeMaxX;
+  if (afterMinY < safeMinY) dy += safeMinY - afterMinY;
+  if (afterMaxY > safeMaxY) dy -= afterMaxY - safeMaxY;
 
   return { dx, dy };
+}
+
+/** Clamp a single rigidly-translated physical object by its visible bounds.
+ * The returned delta applies equally to center- and top-left-positioned
+ * objects and preserves size/rotation. */
+export function clampMemberTranslation(
+  member: GroupMoveMember,
+  rawDx: number,
+  rawDy: number,
+  canvasW: number,
+  canvasH: number,
+  boundsInset = 0,
+): GroupTranslation {
+  const visible = memberVisibleBounds(member);
+  const inset = Math.max(0, Math.min(Math.min(canvasW, canvasH) / 2, boundsInset));
+  const minDx = inset - visible.x;
+  const maxDx = Math.max(minDx, canvasW - inset - (visible.x + visible.width));
+  const minDy = inset - visible.y;
+  const maxDy = Math.max(minDy, canvasH - inset - (visible.y + visible.height));
+  return {
+    dx: Math.max(minDx, Math.min(maxDx, rawDx)),
+    dy: Math.max(minDy, Math.min(maxDy, rawDy)),
+  };
 }
 
 /**
@@ -318,27 +439,24 @@ export function computeGroupAlignmentGuides(
   threshold = 6
 ): { type: "h" | "v"; pos: number }[] {
   const guides: { type: "h" | "v"; pos: number }[] = [];
-  const bboxCenterX = minX + width / 2;
-  const bboxCenterY = minY + height / 2;
-  const pushVertical = (pos: number) => {
-    if (Math.abs(pos - minX) < threshold) guides.push({ type: "v", pos: minX });
-    if (Math.abs(pos - (minX + width)) < threshold) guides.push({ type: "v", pos: minX + width });
-    if (Math.abs(pos - bboxCenterX) < threshold) guides.push({ type: "v", pos: bboxCenterX });
-  };
-  for (const o of others) {
-    // Compare against the reference's VISIBLE AABB so a rotated building's
-    // visible side/center participates in the alignment comparison.
-    const ob = rectVisibleBounds(o);
-    // Vertical alignment targets
-    pushVertical(ob.x);
-    pushVertical(ob.x + ob.width);
-    pushVertical(ob.x + ob.width / 2);
-    // Horizontal alignment targets
-    if (Math.abs(ob.y - minY) < threshold) guides.push({ type: "h", pos: minY });
-    if (Math.abs(ob.y - (minY + height)) < threshold) guides.push({ type: "h", pos: minY + height });
-    if (Math.abs(ob.y + ob.height - minY) < threshold) guides.push({ type: "h", pos: minY });
-    if (Math.abs(ob.y + ob.height - (minY + height)) < threshold) guides.push({ type: "h", pos: minY + height });
-    if (Math.abs(ob.y + ob.height / 2 - bboxCenterY) < threshold) guides.push({ type: "h", pos: bboxCenterY });
+  const groupX = [minX, minX + width / 2, minX + width];
+  const groupY = [minY, minY + height / 2, minY + height];
+  let bestX: { distance: number; pos: number } | null = null;
+  let bestY: { distance: number; pos: number } | null = null;
+  for (const other of others) {
+    const ref = rectVisibleBounds(other);
+    const refX = [ref.x, ref.x + ref.width / 2, ref.x + ref.width];
+    const refY = [ref.y, ref.y + ref.height / 2, ref.y + ref.height];
+    for (const source of groupX) for (const target of refX) {
+      const distance = Math.abs(source - target);
+      if (distance <= threshold && (!bestX || distance < bestX.distance)) bestX = { distance, pos: target };
+    }
+    for (const source of groupY) for (const target of refY) {
+      const distance = Math.abs(source - target);
+      if (distance <= threshold && (!bestY || distance < bestY.distance)) bestY = { distance, pos: target };
+    }
   }
+  if (bestX) guides.push({ type: "v", pos: bestX.pos });
+  if (bestY) guides.push({ type: "h", pos: bestY.pos });
   return guides;
 }

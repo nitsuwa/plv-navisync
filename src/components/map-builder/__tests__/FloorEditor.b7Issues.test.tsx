@@ -135,6 +135,7 @@ describe("FloorEditor Issues panel — canonical campus issues for the current f
     render(<Harness campus={campus} />);
     expect(issuesCount()).toBe("Issues: 1");
     act(() => { screen.getByTestId("issues-toolbar").click(); });
+    expect(screen.getByTestId("floor-issues-popover").className).toContain("top-2");
     expect(screen.getByText(/Room name .Room 201. is duplicated/i)).toBeTruthy();
   });
 

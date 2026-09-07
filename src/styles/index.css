@@ -4,3 +4,124 @@
 
 /* Leaflet map styles (required for map rendering) */
 @import 'leaflet/dist/leaflet.css';
+
+/* Map Builder/Floor Editor toolbar: container queries use the effective
+   editor width (after sidebars), rather than the full browser viewport. */
+.editor-toolbar-container {
+  container-type: inline-size;
+  container-name: editor-toolbar;
+  min-width: 0;
+  isolation: isolate;
+}
+
+/* Keep the query container on the wrapper, not the grid itself. Container
+   queries evaluate an element's nearest ancestor container; placing
+   container-type on the shell would therefore never reflow that shell. */
+.editor-toolbar-shell {
+  min-width: 0;
+  min-height: 4rem;
+  column-gap: 0.5rem;
+  padding-block: 0.25rem;
+}
+
+/* `xl` is based on the browser viewport, but the editor can be much narrower
+   once its navigation and properties panels are open. Compact the existing
+   secondary utilities by the actual header width first, so the lifecycle
+   cluster remains inside its grid column without prematurely adding height. */
+@container editor-toolbar (max-width: 1500px) {
+  .editor-toolbar-shell {
+    column-gap: 0.375rem;
+    padding-inline: 0.5rem;
+  }
+
+  .editor-toolbar-shell [data-toolbar-lifecycle-label],
+  .editor-toolbar-shell [data-toolbar-secondary],
+  .editor-toolbar-shell [data-toolbar-secondary-divider] {
+    display: none !important;
+  }
+
+  .editor-toolbar-shell [data-testid="campus-toolbar-right"],
+  .editor-toolbar-shell [data-testid="floor-toolbar-right"] {
+    min-width: max-content;
+    max-width: 100%;
+  }
+
+  .editor-toolbar-shell [data-testid="editor-toolbar"],
+  .editor-toolbar-shell [data-testid="floor-toolbar-center"] > div > div {
+    gap: 0.25rem;
+    padding-inline: 0.5rem;
+  }
+}
+
+/* Keep the compact desktop row until the editor itself is genuinely narrow.
+   At a 1920px desktop, even with both editor sidebars present, the usable
+   canvas region normally exceeds this threshold. */
+@container editor-toolbar (max-width: 1080px) {
+  .editor-toolbar-shell {
+    height: auto;
+    min-height: 6rem;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: 2.25rem 2.75rem;
+    grid-template-areas:
+      "left right"
+      "center center";
+    align-items: center;
+    column-gap: 0.5rem;
+    row-gap: 0.25rem;
+    padding-block: 0.375rem;
+  }
+
+  .editor-toolbar-shell [data-testid="campus-toolbar-left"],
+  .editor-toolbar-shell [data-testid="floor-toolbar-left"] {
+    grid-area: left;
+    min-width: 0;
+  }
+
+  .editor-toolbar-shell [data-testid="campus-toolbar-center"],
+  .editor-toolbar-shell [data-testid="floor-toolbar-center"] {
+    grid-area: center;
+    min-width: 0;
+    width: 100%;
+    min-height: 2.75rem;
+    align-self: center;
+  }
+
+  .editor-toolbar-shell [data-testid="campus-toolbar-right"],
+  .editor-toolbar-shell [data-testid="floor-toolbar-right"] {
+    grid-area: right;
+    min-width: max-content;
+    justify-self: end;
+    align-self: center;
+  }
+}
+
+/* Exterior-architecture inspectors intentionally use the same compact rhythm
+   as the rest of the Map Builder sidebar. These selectors are scoped to the
+   new object family so ordinary Floor controls retain their established size. */
+[data-testid="exterior-zone-inspector"],
+[data-testid="entrance-steps-inspector"],
+[data-testid="entrance-ramp-inspector"] {
+  font-size: 0.5625rem;
+}
+
+[data-testid="exterior-zone-inspector"] > div:first-child,
+[data-testid="entrance-steps-inspector"] > div:first-child,
+[data-testid="entrance-ramp-inspector"] > div:first-child {
+  min-height: 2.25rem;
+  height: 2.25rem;
+  padding-inline: 0.625rem;
+}
+
+[data-testid="exterior-zone-inspector"] > div:last-child,
+[data-testid="entrance-steps-inspector"] > div:last-child,
+[data-testid="entrance-ramp-inspector"] > div:last-child {
+  gap: 0.375rem;
+  padding: 0.625rem;
+}
+
+[data-testid="exterior-zone-inspector"] input[type="range"],
+[data-testid="entrance-steps-inspector"] input[type="range"],
+[data-testid="entrance-ramp-inspector"] input[type="range"] {
+  height: 0.25rem;
+  margin-top: 0.25rem;
+}

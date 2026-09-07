@@ -33,7 +33,8 @@ export interface ObjectIssueItem {
 /** A few hand-written titles where the raw type name reads awkwardly. */
 const TITLE_OVERRIDES: Record<string, string> = {
   emergency_exit_no_nav: "Emergency exit is not connected to Navigation",
-  no_emergency_exit_configured: "No Emergency Exit configured",
+  no_emergency_exit_configured: "No dedicated emergency egress configured",
+  exterior_emergency_stair_incomplete: "Exterior Emergency Stair needs attention",
   nav_edge_blocked_by_obstacle: "Navigation connection is blocked",
   nav_orphan_node: "Navigation connection needed",
   nav_entrance_door_missing: "Indoor Door Needed",

@@ -78,4 +78,19 @@ describe("duplicateDecorAsset", () => {
     expect(copy.x).toBe(140);
     expect(copy.y).toBe(200);
   });
+
+  it("does not share legacy surface-cell arrays between copies", () => {
+    const original = {
+      id: "surface-1",
+      type: "ground-area",
+      x: 100,
+      y: 200,
+      surfaceCells: [{ x: 1, y: 2 }],
+    };
+    const copy = duplicateDecorAsset(original, "surface-2");
+    expect(copy.surfaceCells).toEqual(original.surfaceCells);
+    expect(copy.surfaceCells).not.toBe(original.surfaceCells);
+    copy.surfaceCells[0].x = 99;
+    expect(original.surfaceCells[0].x).toBe(1);
+  });
 });

@@ -5,6 +5,10 @@ import {
   computeGroupAlignmentGuides,
   snapRectToVisibleBounds,
   rectVisibleBounds,
+  computeGroupResizeBounds,
+  resizeGroupMembers,
+  clampMemberTranslation,
+  memberVisibleBounds,
 } from "../campusGroupMove";
 import type { GroupMoveMember } from "../campusGroupMove";
 
@@ -203,6 +207,62 @@ describe("groupBBoxAfterTranslation", () => {
   });
 });
 
+describe("physical group resize", () => {
+  it("scales all selected members around the outer frame while preserving relative placement", () => {
+    const members = [bld("b1", 100, 100, 100, 60), decor("tree", 300, 160, 40, 40)];
+    const from = { x: 100, y: 100, width: 220, height: 100 };
+    const to = computeGroupResizeBounds(from, "se", { x: 440, y: 200 }, 900, 680, false);
+    expect(to.x).toBe(100);
+    expect(to.y).toBe(100);
+    expect(to.width).toBeCloseTo(340, 6);
+    expect(to.height).toBeCloseTo(154.545, 3);
+    const resized = resizeGroupMembers(members, from, to);
+    expect(resized[0].x).toBeCloseTo(100, 6);
+    expect(resized[0].width).toBeCloseTo(154.55, 1);
+    expect(resized[0].height).toBeCloseTo(92.73, 1);
+    expect(resized[1].x).toBeCloseTo(409.09, 1);
+    expect(resized[1].y).toBeCloseTo(192.73, 1);
+    expect(resized[1].width).toBeCloseTo(61.82, 1);
+  });
+
+  it("keeps the opposite corner fixed and clamps the dragged frame to the canvas", () => {
+    const from = { x: 80, y: 80, width: 180, height: 120 };
+    const to = computeGroupResizeBounds(from, "nw", { x: -100, y: -100 }, 400, 300, true, 20);
+    expect(to.x).toBe(0);
+    expect(to.y).toBeCloseTo(26.667, 3);
+    expect(to.x + to.width).toBe(from.x + from.width);
+    expect(to.y + to.height).toBeCloseTo(from.y + from.height, 6);
+  });
+
+  it("clamps a rotated physical object by its visible bounds", () => {
+    const member: GroupMoveMember = { kind: "decorAsset", id: "tree", x: 30, y: 30, width: 40, height: 80, rotation: 45 };
+    const delta = clampMemberTranslation(member, -100, -100, 500, 400, 12);
+    const bounds = memberVisibleBounds(member);
+    expect(bounds.x + delta.dx).toBeGreaterThanOrEqual(12 - 1e-6);
+    expect(bounds.y + delta.dy).toBeGreaterThanOrEqual(12 - 1e-6);
+  });
+
+  it("uses the safe inset for rigid group movement while preserving spacing", () => {
+    const members = [bld("b1", 100, 100), bld("b2", 260, 100)];
+    const result = computeGroupTranslation({
+      members, draggedId: "b1", rawDx: -200, rawDy: -200,
+      ...CANVAS, snapGrid: false, boundsInset: 12,
+    });
+    expect(members[0].x + result.dx).toBe(12);
+    expect(members[0].y + result.dy).toBe(12);
+    expect(members[1].x + result.dx - (members[0].x + result.dx)).toBe(160);
+  });
+
+  it("keeps a physical group resize inside the safe frame", () => {
+    const from = { x: 100, y: 80, width: 220, height: 120 };
+    const to = computeGroupResizeBounds(from, "se", { x: 890, y: 690 }, 900, 700, false, 20, 20, 12);
+    expect(to.x).toBeGreaterThanOrEqual(12);
+    expect(to.y).toBeGreaterThanOrEqual(12);
+    expect(to.x + to.width).toBeLessThanOrEqual(888);
+    expect(to.y + to.height).toBeLessThanOrEqual(688);
+  });
+});
+
 describe("computeGroupAlignmentGuides", () => {
   it("emits h/v guides when the group bbox aligns with another building", () => {
     // Group bbox at [100,100,380,180]; other building top edge at y=100 → horizontal guide.
@@ -213,6 +273,31 @@ describe("computeGroupAlignmentGuides", () => {
   it("emits no guides when nothing is aligned", () => {
     const guides = computeGroupAlignmentGuides(100, 100, 280, 80, [{ x: 500, y: 400, width: 120, height: 80 }], 6);
     expect(guides).toHaveLength(0);
+  });
+
+  it("treats decor references as first-class physical alignment targets", () => {
+    // A scanner-row-sized group whose center X/Y is within the shared world
+    // tolerance of another decor asset should receive the same guide treatment
+    // as a building reference.
+    const guides = computeGroupAlignmentGuides(
+      100, 100, 180, 60,
+      [{ x: 288, y: 106, width: 180, height: 60 }],
+      8,
+    );
+    expect(guides).toEqual(expect.arrayContaining([
+      { type: "h", pos: 106 },
+      { type: "v", pos: 288 },
+    ]));
+  });
+
+  it("snaps a transformed decor bounds box to physical references without graph data", () => {
+    const result = snapRectToVisibleBounds(
+      { x: 188, y: 188, width: 60, height: 24 },
+      [{ x: 200, y: 300, width: 60, height: 24 }],
+      12,
+    );
+    expect(result.x).toBe(200); // left edges align exactly
+    expect(result.guides).toContainEqual({ type: "v", pos: 200 });
   });
 });
 

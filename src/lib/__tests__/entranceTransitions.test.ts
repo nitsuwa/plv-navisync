@@ -16,6 +16,8 @@ import {
   reconcileEntranceTransitions,
   removeEntranceIndoorConnection,
   reconcileEntranceOutdoorConnections,
+  reconcileEntranceDoors,
+  entranceDoorPosition,
 } from "../entranceTransitions";
 
 function makeCampus(accessible = true): Campus {
@@ -90,6 +92,77 @@ const ids = (() => {
 })();
 
 describe("B5 Phase 4 - entrance transition graph", () => {
+  it("reconciles one editable Ground-floor Door without inventing a walking edge", () => {
+    const campus = makeCampus();
+    const idsForTest = (() => { let i = 0; return (prefix: string) => `${prefix}-generated-${++i}`; })();
+    const reconciled = reconcileEntranceDoors(campus, idsForTest);
+    const floor = reconciled.buildings[0].floors[0];
+    const generated = floor.doors.find((door) => door.buildingEntranceId === "ent-main");
+    expect(generated).toMatchObject({ label: "Main Entrance Door", locked: false, x: 300, y: 450 });
+    expect(reconciled.navNodes.filter((node) => node.buildingEntranceId === "ent-main")).toHaveLength(1);
+    expect(reconciled.navEdges.filter((edge) => edge.type === ENTRANCE_TRANSITION_EDGE_TYPE)).toHaveLength(1);
+    const twice = reconcileEntranceDoors(reconciled, idsForTest);
+    expect(twice.buildings[0].floors[0].doors.filter((door) => door.buildingEntranceId === "ent-main")).toHaveLength(1);
+    expect(entranceDoorPosition(floor, campus.buildings[0].entrances![0])).toEqual({ x: 300, y: 450 });
+  });
+
+  it("gives multiple generated entrance doors distinct identifiable labels", () => {
+    const campus = makeCampus();
+    campus.buildings[0].entrances = [
+      ...campus.buildings[0].entrances!,
+      { id: "ent-side", name: "Side Entrance", type: "general", edge: "top", offset: 0.25, accessible: true },
+    ];
+    let generatedId = 0;
+    const reconciled = reconcileEntranceDoors(campus, (prefix) => `${prefix}-multi-${++generatedId}`);
+    const generated = reconciled.buildings[0].floors[0].doors.filter((door) => door.buildingEntranceId);
+    expect(generated).toHaveLength(2);
+    expect(new Set(generated.map((door) => door.label)).size).toBe(2);
+    expect(generated.map((door) => door.label)).toEqual(expect.arrayContaining(["Main Entrance Door", "Side Entrance Door"]));
+  });
+
+  it("keeps normalized perimeter offsets physical on reversed bottom/left walls without auto-linking the Door", () => {
+    const campus = makeCampus();
+    const floor = campus.buildings[0].floors[0];
+    campus.buildings[0].entrances = [{ ...campus.buildings[0].entrances![0], offset: 0.25 }];
+    floor.canvasW = 220;
+    floor.canvasH = 160;
+    floor.walls = [
+      { id: "bottom", x1: 220, y1: 160, x2: 0, y2: 160, thickness: 6, color: "#64748b", managedKind: "perimeter", perimeterSide: "bottom" },
+    ];
+    campus.navNodes.push(createIndoorNavNode({ id: "hall", x: 100, y: 120, campusId: "c1", buildingId: "b1", floorId: "f1", type: "hallway", name: "Lobby" }));
+    let generatedId = 0;
+    const reconciled = reconcileEntranceDoors(campus, (prefix) => `${prefix}-new-${++generatedId}`);
+    const generated = reconciled.buildings[0].floors[0].doors.find((door) => door.buildingEntranceId === "ent-main")!;
+    expect(generated.x).toBe(55);
+    expect(generated.y).toBe(160);
+    const doorNode = reconciled.navNodes.find((node) => node.doorId === generated.id)!;
+    expect(reconciled.navEdges.some((edge) => edge.type === "walkway" && (edge.startNodeId === doorNode.id || edge.endNodeId === doorNode.id))).toBe(false);
+    expect(entranceIndoorLinkStatus(reconciled, "b1", "ent-main").doorNavigationConnected).toBe(false);
+    expect(entranceDoorPosition(floor, campus.buildings[0].entrances![0])).toEqual({ x: 55, y: 160 });
+
+    const leftCampus = makeCampus();
+    leftCampus.buildings[0].entrances = [{ ...leftCampus.buildings[0].entrances![0], edge: "left", offset: 0.25 }];
+    leftCampus.buildings[0].floors[0].canvasW = 220;
+    leftCampus.buildings[0].floors[0].canvasH = 160;
+    leftCampus.buildings[0].floors[0].walls = [
+      { id: "left", x1: 0, y1: 160, x2: 0, y2: 0, thickness: 6, color: "#64748b", managedKind: "perimeter", perimeterSide: "left" },
+    ];
+    const left = reconcileEntranceDoors(leftCampus, (prefix) => `${prefix}-left-${++generatedId}`);
+    expect(left.buildings[0].floors[0].doors.find((door) => door.buildingEntranceId === "ent-main")).toMatchObject({ x: 0, y: 40 });
+  });
+
+  it("removes only generated Door infrastructure when its Building Entrance is deleted", () => {
+    const idsForTest = (() => { let i = 0; return (prefix: string) => `${prefix}-generated-${++i}`; })();
+    const campus = reconcileEntranceDoors(makeCampus(), idsForTest);
+    const building = campus.buildings[0];
+    const withoutEntrance: Campus = { ...campus, buildings: [{ ...building, entrances: [] }] };
+    const cleaned = reconcileEntranceDoors(withoutEntrance, idsForTest);
+    expect(cleaned.buildings[0].floors[0].doors.some((door) => door.buildingEntranceId)).toBe(false);
+    expect(cleaned.navNodes.some((node) => node.buildingEntranceId)).toBe(false);
+    expect(cleaned.navEdges.some((edge) => edge.type === ENTRANCE_TRANSITION_EDGE_TYPE)).toBe(false);
+    expect(cleaned.buildings[0].floors[0].doors.some((door) => door.id === "door-main")).toBe(true);
+  });
+
   it("reports and removes an explicit outdoor Entrance bridge without touching the indoor link", () => {
     const campus = makeCampus();
     campus.navNodes.push({
@@ -135,7 +208,7 @@ describe("B5 Phase 4 - entrance transition graph", () => {
     const campus = makeCampus();
     const linked = linkEntranceToIndoorDoor(campus, "b1", "ent-main", "door-node", ids);
     expect(entranceIndoorLinkStatus(linked, "b1", "ent-main")).toMatchObject({
-      state: "linked", doorNavigationConnected: false, warning: "Connect the Door to the indoor walking network.",
+      state: "linked", doorNavigationConnected: false, warning: "Connect the linked indoor Door to the indoor Walking Network.",
     });
     linked.navNodes.push(createIndoorNavNode({
       id: "indoor-waypoint", x: 80, y: 20, campusId: "c1", buildingId: "b1", floorId: "f1", name: "Lobby", type: "hallway",
@@ -358,7 +431,7 @@ describe("B5 Phase 4 - entrance transition graph", () => {
     }));
     const linked = linkEntranceToIndoorDoor(campus, "b1", "ent-main", "door-node", ids);
 
-    expect(entranceIndoorLinkStatus(linked, "b1", "ent-main")).toMatchObject({ state: "linked", entryFloor: true, doorNavigationConnected: false, warning: "Connect the Door to the indoor walking network." });
+    expect(entranceIndoorLinkStatus(linked, "b1", "ent-main")).toMatchObject({ state: "linked", entryFloor: true, doorNavigationConnected: false, warning: "Connect the linked indoor Door to the indoor Walking Network." });
     expect(indoorDoorOptionsForEntrance(linked, "b1", "ent-main").map((option) => ({
       floorId: option.floorId,
       doorId: option.doorId,
@@ -400,7 +473,7 @@ describe("B5 Phase 4 - entrance transition graph", () => {
       ...reordered,
       buildings: [{ ...reordered.buildings[0], floors: restoredFloors }],
     };
-    expect(entranceIndoorLinkStatus(restored, "b1", "ent-main")).toMatchObject({ state: "linked", entryFloor: true, doorNavigationConnected: false, warning: "Connect the Door to the indoor walking network." });
+    expect(entranceIndoorLinkStatus(restored, "b1", "ent-main")).toMatchObject({ state: "linked", entryFloor: true, doorNavigationConnected: false, warning: "Connect the linked indoor Door to the indoor Walking Network." });
     expect(restored.navEdges.filter((edge) => edge.type === ENTRANCE_TRANSITION_EDGE_TYPE)).toHaveLength(1);
   });
 });

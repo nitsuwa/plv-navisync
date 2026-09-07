@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Campus } from "../../components/map-builder/types";
-import { directoryFromSnapshot, hydrateCampusStructure, serializeCampusStructure } from "../campusStructureService";
+import { canvasAppearanceRecordId, directoryFromSnapshot, hydrateCampusStructure, serializeCampusStructure } from "../campusStructureService";
 
 const ids = {
   campus: "10000000-0000-4000-8000-000000000001",
@@ -32,6 +32,31 @@ const campus = {
 } as Campus;
 
 describe("campus structure mapping", () => {
+  it("hydrates legacy metadata.ui rows completely on the first load", () => {
+    const legacyCampus = { ...campus, markers: [], paths: [], decorAssets: [], navNodes: [], navEdges: [] } as Campus;
+    const rows = {
+      buildings: [{
+        id: ids.building, campus_id: ids.campus, name: "Engineering", code: "ENG", category: "academic",
+        description: "", x: 10, y: 20, width: 200, height: 100, rotation: 0, is_visible: true,
+        metadata: { ui: { ...campus.buildings[0], entrances: [{ id: "entrance-1", edge: "bottom", offset: 0.5, type: "general", name: "Main Entrance" }] } },
+      }],
+      floors: [],
+      mapElements: [
+        { id: "path-1", campus_id: ids.campus, element_type: "custom", floor_id: null, metadata: { ui: { kind: "campus_path", id: "path-1", points: [{ x: 2, y: 3 }, { x: 40, y: 3 }], type: "walkway", color: "#94a3b8", width: 8 } } },
+        { id: "gate-1", campus_id: ids.campus, element_type: "gate", floor_id: null, metadata: { ui: { kind: "gate", id: "gate-1", type: "gate", purpose: "general", x: 44, y: 3, width: 30, height: 20, color: "#2563eb" } } },
+        { id: "decor-1", campus_id: ids.campus, element_type: "custom", floor_id: null, metadata: { ui: { kind: "decor", id: "decor-1", type: "tree", x: 80, y: 40, scale: 1, rotation: 0, name: "Tree" } } },
+      ],
+      navigationNodes: [],
+      navigationEdges: [],
+    } as never;
+    const hydrated = hydrateCampusStructure(legacyCampus, rows);
+    expect(hydrated.paths).toHaveLength(1);
+    expect(hydrated.markers).toHaveLength(1);
+    expect(hydrated.markers[0]?.type).toBe("gate");
+    expect(hydrated.decorAssets).toHaveLength(1);
+    expect(hydrated.buildings[0]?.entrances).toHaveLength(1);
+  });
+
   it("serializes all approved entity layers with database-safe properties", () => {
     const payload = serializeCampusStructure(campus);
     expect(payload.buildings).toHaveLength(1);
@@ -41,6 +66,31 @@ describe("campus structure mapping", () => {
     expect(payload.navigation_edges).toHaveLength(1);
     expect(payload.buildings[0]).toMatchObject({ category: "academic", rotation: 15, is_accessible: true });
     expect(payload.map_elements[0]).toMatchObject({ element_type: "classroom", floor_id: ids.floor, is_accessible: true });
+  });
+
+  it("round-trips canvas ground appearance through the existing structure JSON channel", () => {
+    const styled = { ...campus, canvasGroundMaterial: "pavers" as const, canvasGroundColor: "#b9ad98", canvasGroundTexture: "subtle" as const };
+    const payload = serializeCampusStructure(styled);
+    const appearance = payload.map_elements.find((row) => (row.metadata as { kind?: string })?.kind === "canvas_appearance");
+    expect(appearance).toBeTruthy();
+    expect((appearance?.metadata as { ui: Campus }).ui).toMatchObject({ canvasGroundMaterial: "pavers", canvasGroundColor: "#b9ad98", canvasGroundTexture: "subtle" });
+    const hydrated = hydrateCampusStructure(styled, {
+      buildings: payload.buildings.map((v) => ({ ...v, campus_id: ids.campus }) as never),
+      floors: payload.floors.map((v) => v as never), mapElements: payload.map_elements.map((v) => v as never),
+      navigationNodes: payload.navigation_nodes.map((v) => v as never), navigationEdges: payload.navigation_edges.map((v) => v as never),
+    });
+    expect(hydrated).toMatchObject({ canvasGroundMaterial: "pavers", canvasGroundColor: "#b9ad98", canvasGroundTexture: "subtle" });
+  });
+
+  it("uses a stable valid UUID for the canvas appearance record", () => {
+    const id = canvasAppearanceRecordId(ids.campus);
+    expect(id).toMatch(UUID_RE);
+    expect(id).not.toContain(":");
+    expect(canvasAppearanceRecordId(ids.campus)).toBe(id);
+    const appearance = serializeCampusStructure({ ...campus, canvasGroundMaterial: "grass" }).map_elements
+      .find((row) => (row.metadata as { kind?: string })?.kind === "canvas_appearance");
+    expect(appearance?.id).toBe(id);
+    expect(String(appearance?.id)).not.toContain(":canvas-appearance");
   });
 
   it("derives a nonblank persistence name when an optional floor-object label is empty", () => {

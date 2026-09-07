@@ -5,7 +5,7 @@ export type CampusStatus = "active" | "hidden" | "archived";
 export type PublishStatus = "draft" | "published";
 
 /** Tools available on the campus canvas */
-export type SimpleTool = "select" | "marker" | "building" | "path" | "erase" | "room" | "pan" | "wall" | "door" | "window" | "stairs" | "elevator" | "ramp" | "furniture" | "text" | "measure";
+export type SimpleTool = "select" | "marker" | "gate" | "decor" | "building" | "path" | "connect" | "erase" | "room" | "pan" | "wall" | "door" | "window" | "stairs" | "elevator" | "ramp" | "furniture" | "text" | "measure" | "exterior-zone" | "entrance-steps" | "entrance-ramp";
 
 /** Layer modes for the editor */
 export type EditorLayer = "campus" | "navigation" | "accessibility" | "emergency" | "events";
@@ -74,6 +74,9 @@ export interface FloorDoor {
   label?: string;
   /** Whether this door is designated as an emergency exit */
   isEmergencyExit?: boolean;
+  /** Building-owned Entrance relationship for an automatically generated
+   * Ground-floor entrance Door. Manual Doors leave this unset. */
+  buildingEntranceId?: string;
 }
 
 // ── Indoor Window ───────────────────────────────────────────────────────────
@@ -109,6 +112,8 @@ export interface FloorFurniture {
   zOrder?: number;
   visible?: boolean;
   locked?: boolean;
+  /** Optional host exterior zone for stable outdoor coordinate semantics. */
+  exteriorZoneId?: string;
 }
 
 // ── Indoor Stairs (free placement) ──────────────────────────────────────────
@@ -196,6 +201,92 @@ export interface FloorElevatorItem {
   zOrder?: number;
   visible?: boolean;
   locked?: boolean;
+}
+
+/** Optional rectangular semi-outdoor architectural space attached to a Floor wall. */
+export type ExteriorZoneType = "veranda" | "entrance_landing" | "covered_walkway" | "exterior_platform";
+export interface FloorExteriorZone {
+  id: string;
+  type: ExteriorZoneType;
+  side: BuildingEntranceEdge;
+  /** Normalized center position along the attached wall. */
+  offset: number;
+  /** Wall-parallel span in authoring units. */
+  width: number;
+  /** Outward depth from the wall in authoring units. */
+  depth: number;
+  /** Optional persisted projection coordinates for compatibility/read-only renderers. */
+  x?: number;
+  y?: number;
+  rotation?: number;
+  label?: string;
+  /** Presentation-only label offset in floor canvas units. */
+  labelOffsetX?: number;
+  labelOffsetY?: number;
+  /** Presentation-only visibility toggle. */
+  labelVisible?: boolean;
+  zOrder?: number;
+  visible?: boolean;
+  locked?: boolean;
+}
+
+/** Local entrance steps. This is architectural circulation, not a floor Stair. */
+export interface FloorEntranceSteps {
+  id: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  rotation?: number;
+  label: string;
+  accessible?: false;
+  emergencySafe?: boolean;
+  zOrder?: number;
+  visible?: boolean;
+  locked?: boolean;
+  /** Optional authored parent exterior zone. Legacy records may omit this. */
+  parentZoneId?: string;
+  /** Local attachment on the parent's outside edge. */
+  /** Outer or side edge of the parent zone. Legacy records default to outer. */
+  attachmentEdge?: "outer" | "start" | "end";
+  /** Normalized position along the parent's outside edge. */
+  attachmentOffset?: number;
+  /** Reverses the local approach cue without changing its parent edge. */
+  direction?: "forward" | "reverse";
+  /** Mirrors the local presentation without changing the parent attachment. */
+  flipHorizontal?: boolean;
+  flipVertical?: boolean;
+}
+
+/** Local accessible entrance ramp. It never creates a cross-floor transition. */
+export interface FloorEntranceRamp {
+  id: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  rotation?: number;
+  label: string;
+  accessible?: true;
+  emergencySafe?: boolean;
+  handrails?: boolean;
+  zOrder?: number;
+  visible?: boolean;
+  locked?: boolean;
+  /** Optional authored parent exterior zone. Legacy records may omit this. */
+  parentZoneId?: string;
+  /** Local attachment on the parent's outside edge. */
+  /** Outer or side edge of the parent zone. Legacy records default to outer. */
+  attachmentEdge?: "outer" | "start" | "end";
+  /** Normalized position along the parent's outside edge. */
+  attachmentOffset?: number;
+  /** Reverses the local approach cue without changing its parent edge. */
+  direction?: "forward" | "reverse";
+  /** Mirrors the local presentation without changing the parent attachment. */
+  flipHorizontal?: boolean;
+  flipVertical?: boolean;
+  /** Constrained visual presentation for a local ramp. */
+  layout?: "straight" | "l_turn_left" | "l_turn_right";
 }
 
 /** Resolve the immutable generated Elevator number for matching hints.
@@ -338,6 +429,10 @@ export interface FloorPlan {
   ramps: FloorRamp[];
   elevators: FloorElevatorItem[];
   labels: FloorLabel[];
+  /** Optional semi-outdoor authored architecture. Legacy floors omit these. */
+  exteriorZones?: FloorExteriorZone[];
+  entranceSteps?: FloorEntranceSteps[];
+  entranceRamps?: FloorEntranceRamp[];
 }
 
 export interface FloorPath {
@@ -403,6 +498,8 @@ export interface CirculationGroup {
 export type BuildingEntranceEdge = "top" | "right" | "bottom" | "left";
 export type BuildingEntranceType = "general" | "service" | "emergency_exit";
 export type LegacyBuildingEntranceType = "main" | "secondary" | "emergency";
+/** Presentation scale for a generated Exterior Emergency Stair module. */
+export type ExteriorEmergencyStairVisualSize = "small" | "medium" | "large";
 
 export interface CampusEntrance {
   id: string;
@@ -430,9 +527,20 @@ export interface ExteriorEmergencyStair {
   sharedId: string;
   /** Stable generated occurrence IDs, keyed by Floor ID. */
   occurrenceIds?: Record<string, string>;
+  /** Stable generated navigation-node IDs, keyed by served Floor ID. */
+  occurrenceNodeIds?: Record<string, string>;
   /** Stable outdoor discharge/navigation anchor. */
   outdoorNodeId?: string;
+  /**
+   * Authored local Walking Network edges temporarily retained while a Floor
+   * is removed from servedFloorIds.  This is optional compatibility metadata,
+   * not a second graph: live edges are restored only when their target nodes
+   * still exist.
+   */
+  floorConnectionSnapshots?: Record<string, NavigationEdge[]>;
   emergencySafe?: boolean;
+  /** Optional presentation-only scale; legacy records default to medium. */
+  visualSize?: ExteriorEmergencyStairVisualSize;
   zOrder?: number;
   visible?: boolean;
 }
@@ -468,9 +576,19 @@ export interface FloorUndoEntry {
   ramps: FloorRamp[];
   elevators: FloorElevatorItem[];
   labels: FloorLabel[];
+  exteriorZones?: FloorExteriorZone[];
+  entranceSteps?: FloorEntranceSteps[];
+  entranceRamps?: FloorEntranceRamp[];
   /** B5 Phase 2: floor-scoped nav graph snapshot for undo/redo integration. */
   navNodes?: NavigationNode[];
   navEdges?: NavigationEdge[];
+  /**
+   * Editor-only snapshot of the Building-owned exterior emergency stair
+   * records.  A generated occurrence is never authoritative for attachment
+   * position; keeping this alongside floor history lets undo/redo restore the
+   * canonical stair and every served-floor occurrence together.
+   */
+  exteriorEmergencyStairs?: ExteriorEmergencyStair[];
 }
 
 /** B5 Phase 2: floor-scoped indoor nav graph state (reused by undo entries). */
@@ -488,6 +606,14 @@ export interface CampusMarker {
   x: number;
   y: number;
   color: string;
+  /** Optional physical display dimensions; legacy markers use the default. */
+  width?: number;
+  height?: number;
+  /** Optional functional campus-gate metadata. Gate markers remain in the
+   * existing top-level outdoor collection for backward-compatible persistence,
+   * while their linked NavigationNode provides the routable identity. */
+  purpose?: "general" | "emergency_exit";
+  navNodeId?: string;
 }
 
 export interface CampusPath {
@@ -525,6 +651,8 @@ export interface NavigationNode {
   floorId?: string;
   /** Building-entrance ID when this node represents a building entrance target */
   entranceId?: string;
+  /** Building-owned Entrance relationship for a generated indoor Door node. */
+  buildingEntranceId?: string;
   /** Shared stair/elevator transition ID — links nav nodes across floors for the same physical stair/elevator */
   transitionSharedId?: string;
   /** Indoor linked physical objects (B5 Phase 2) — exactly one is set for a linked node. */
@@ -533,6 +661,8 @@ export interface NavigationNode {
   stairId?: string;
   /** Building-attached exterior Emergency Stair owner, when applicable. */
   exteriorEmergencyStairId?: string;
+  /** Canonical Campus Gate owner, when this node is a generated gate anchor. */
+  gateId?: string;
   elevatorId?: string;
   rampId?: string;
   /** Explicit provenance for pathway-generated vertices. Manual/linked nodes omit this. */
@@ -700,6 +830,12 @@ export interface Campus {
   mapType?: MapType;
   gridSize?: number;
   snapToGrid?: boolean;
+  /** Base outdoor canvas appearance. Optional for backwards-compatible maps. */
+  canvasGroundMaterial?: CampusGroundMaterial;
+  canvasGroundColor?: string;
+  canvasGroundTexture?: CampusGroundTexture;
+  /** Legacy canvas color field retained for older drafts/published snapshots. */
+  canvasColor?: string;
   backgroundColor?: string;
   backgroundImage?: string;
   backgroundOpacity?: number;
@@ -774,6 +910,7 @@ export type CampusSelection =
   | { type: "building"; id: string }
   | { type: "entrance"; id: string; buildingId: string }
   | { type: "marker"; id: string }
+  | { type: "gate"; id: string }
   | { type: "path"; id: string }
   | { type: "route"; id: string }
   | { type: "navNode"; id: string }
@@ -792,6 +929,9 @@ export type FloorSelection =
   | { type: "elevator"; id: string }
   | { type: "ramp"; id: string }
   | { type: "label"; id: string }
+  | { type: "exteriorZone"; id: string }
+  | { type: "entranceSteps"; id: string }
+  | { type: "entranceRamp"; id: string }
   // B5 Final: issue-locate selections for indoor navigation targets. When the
   // Floor Editor receives one of these via onOpenFloor's initialSelection it
   // switches to Navigation mode and selects the node/edge directly.
@@ -820,6 +960,8 @@ export interface FurnitureItemTemplate {
   width: number;
   height: number;
   color: string;
+  /** Optional short description shown in the editor's rich asset tooltip. */
+  description?: string;
 }
 
 // ── Room type descriptor ────────────────────────────────────────────────────
@@ -847,19 +989,24 @@ export interface CanvasSizeOption {
 export type MapType = "campus-overview" | "building" | "floor-plan" | "outdoor-area" | "parking" | "other";
 
 export type MeasurementUnit = "pixels" | "meters" | "feet";
+export type CampusGroundMaterial = "neutral" | "grass" | "concrete" | "pavers" | "asphalt" | "custom";
+export type CampusGroundTexture = "none" | "subtle";
 
 // ── Decorative Asset (outdoor campus visual-only objects) ─────────────────
 
 export type DecorAssetType =
   | "ground-area"
+  | "lawn-area" | "garden-area" | "plaza-area"
+  | "monument"
   | "tree" | "tree-large" | "palm"
   | "bench" | "bench-long"
   | "plant" | "bush" | "flower"
-  | "sign" | "flag"
+  | "sign" | "flag" | "directory-board" | "philippine-flag"
+  | "gate-scanner"
   | "trash-bin" | "recycle-bin"
   | "lamp-post" | "bollard"
-  | "bike-rack" | "fountain"
-  | "picnic-table" | "gazebo";
+  | "bike-rack" | "fountain" | "guard-booth"
+  | "picnic-table" | "gazebo" | "parking-lot";
 
 export interface CampusDecorAsset {
   id: string;
@@ -870,7 +1017,13 @@ export interface CampusDecorAsset {
   width?: number;
   height?: number;
   /** Appearance variant for the flexible Ground Area asset. */
-  groundType?: "grass" | "planted" | "plaza" | "field";
+  groundType?: "grass" | "planted" | "plaza" | "field" | "parking";
+  /** Sparse grid cells for the tile-painted Campus Surface layer.  Coordinates
+   * are integer grid indices; legacy rectangular ground assets leave this
+   * field undefined and continue using their existing geometry. */
+  surfaceCells?: { x: number; y: number }[];
+  /** Grid spacing captured when the surface was authored. */
+  surfaceCellSize?: number;
   rotation?: number;
   scale?: number;
   /** Whether this asset is visible on the canvas */

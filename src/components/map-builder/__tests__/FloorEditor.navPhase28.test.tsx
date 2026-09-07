@@ -76,6 +76,22 @@ function withWall(campus: Campus): Campus {
   return next;
 }
 
+/** A wall-attached Door with a connected derived nav anchor. */
+function withLinkedDoor(campus: Campus): Campus {
+  const next = withWall(campus);
+  next.buildings[0].floors[0].doors = [
+    { id: "door-linked", x: 70, y: 70, width: 20, direction: "left", color: "#b45309", wallId: "w1", offset: 0.3 },
+  ];
+  next.navNodes = [
+    { id: "door-linked-node", name: "Door", type: "door", x: 70, y: 70, campusId: "c1", buildingId: "b1", floorId: "f1", doorId: "door-linked", accessible: true, emergencySafe: true, color: "#b45309" },
+    { id: "door-linked-waypoint", name: "Waypoint", type: "hallway", x: 100, y: 45, campusId: "c1", buildingId: "b1", floorId: "f1", accessible: true, emergencySafe: true, color: "#16a34a" },
+  ];
+  next.navEdges = [
+    { id: "door-linked-edge", startNodeId: "door-linked-node", endNodeId: "door-linked-waypoint", distance: 30, bidirectional: true, accessible: true, emergencySafe: true, type: "hallway", color: "#16a34a", width: 3 },
+  ];
+  return next;
+}
+
 /** Ramp (170,20,24x12 → center 182,26). */
 function withRamp(campus: Campus): Campus {
   const next = structuredClone(campus);
@@ -417,6 +433,24 @@ describe("B5 Phase 2.8 — Wall-Aware Connector + Connect Empty-Click + Temp Und
     expect(container.querySelectorAll('[data-testid="nav-align-guide"]').length).toBe(0);
     const edge = latestCampus(onCampusChange).navEdges.find((e) => e.id === "e1")!;
     expect(edge.bendPoints[0].x).toBe(160);
+  });
+
+  it("nav-linked Door drag aligns its derived anchor to the connected node", () => {
+    cleanup();
+    const rendered = render(<Harness onCampusChange={onCampusChange} initialCampus={withLinkedDoor(makeBaseCampus())} />);
+    container = rendered.container;
+    const svg = stubSvgRect(container);
+    const door = screen.getByTestId("attached-door-opening-symbol");
+    fireEvent.mouseDown(door, { clientX: 70, clientY: 70, bubbles: true });
+    // The connected waypoint is x=100; x=96 is within the shared 8-unit
+    // navAlignSnap tolerance and should move the physical Door, not its node.
+    fireEvent.mouseMove(svg, { clientX: 96, clientY: 70, bubbles: true });
+    expect(container.querySelectorAll('[data-testid="nav-align-guide"]').length).toBeGreaterThan(0);
+    fireEvent.mouseUp(svg, { bubbles: true });
+    const latest = latestCampus(onCampusChange);
+    expect(latest.buildings[0].floors[0].doors[0].x).toBe(100);
+    expect(latest.navEdges[0].startNodeId).toBe("door-linked-node");
+    expect(latest.navEdges[0].endNodeId).toBe("door-linked-waypoint");
   });
 
   // ── 7. CONNECT TARGET VISUALS + RAMP REGRESSION ──

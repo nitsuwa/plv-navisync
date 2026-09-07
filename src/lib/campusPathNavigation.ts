@@ -1,6 +1,6 @@
 import type { Campus, CampusPath, NavigationEdge, NavigationNode } from "../components/map-builder/types";
 import { createNavEdge, createNavNode, findDuplicateNavEdge, isSelfEdge } from "./navigationGraph";
-import { reconcileEntranceOutdoorConnections } from "./entranceTransitions";
+import { reconcileEntranceOutdoorConnections, type EntranceOutdoorReconciliationOptions } from "./entranceTransitions";
 
 export type PathwayIdFactory = (prefix: string) => string;
 
@@ -297,7 +297,13 @@ function collapseSharedGeneratedJunctions(
  * Manual points, entrance nodes, linked indoor nodes, and manual edges are
  * never claimed by coordinate proximity and are never removed by this pass.
  */
-export function reconcilePathwayNavigation(campus: Campus, makeId: PathwayIdFactory): Campus {
+export interface PathwayReconciliationOptions extends EntranceOutdoorReconciliationOptions {}
+
+export function reconcilePathwayNavigation(
+  campus: Campus,
+  makeId: PathwayIdFactory,
+  options: PathwayReconciliationOptions = {},
+): Campus {
   const paths = campus.paths ?? [];
   // Keep the pre-reconciliation identity sets so an Entrance bridge to a
   // generated target can be removed when that target's physical vertex is
@@ -460,7 +466,16 @@ export function reconcilePathwayNavigation(campus: Campus, makeId: PathwayIdFact
       const owner = pathById.get(ref.pathId);
       return Boolean(owner && validVertexIds(owner)?.includes(ref.vertexId));
     });
-    return !(originalGeneratedNodeIds.has(targetId) && !targetStillGenerated);
+    // Physical Pathway edits/deletes are local graph mutations.  When the
+    // caller explicitly preserves authored geometry, keep an Entrance edge
+    // aimed at a formerly-generated vertex instead of retargeting/removing it
+    // during this reconciliation pass.  The vertex cleanup below strips stale
+    // provenance and keeps it as a manual canonical point while the edge still
+    // references it.  The default hydration/reconciliation behavior retains
+    // the historical stale-bridge cleanup for genuinely removed structure.
+    return options.preserveAuthoredGeometry
+      ? true
+      : !(originalGeneratedNodeIds.has(targetId) && !targetStillGenerated);
   });
 
   const referencedNodeIds = new Set(edges.flatMap((edge) => [edge.startNodeId, edge.endNodeId]));
@@ -484,7 +499,7 @@ export function reconcilePathwayNavigation(campus: Campus, makeId: PathwayIdFact
   // Pathway moves can move an Entrance's generated target without changing
   // the bridge IDs. Recompute only that bridge's bend geometry so it continues
   // to leave the building safely while preserving every other edge/object.
-  return reconcileEntranceOutdoorConnections({ ...campus, navNodes: nodes, navEdges: edges });
+  return reconcileEntranceOutdoorConnections({ ...campus, navNodes: nodes, navEdges: edges }, options);
 }
 
 export interface PathwayConversionResult {

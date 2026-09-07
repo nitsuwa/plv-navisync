@@ -42,6 +42,48 @@ export interface GraphPath {
   steps: string[];
 }
 
+/**
+ * Keep a semantic route endpoint terminal.  A Building destination is an
+ * exterior Entrance by contract; if a legacy/session route contains an
+ * appended indoor tail, trim it at that canonical endpoint before the route
+ * is published to any editor context.  This helper is intentionally local to
+ * the route result and never mutates graph nodes or edges.
+ */
+export function truncateGraphPathAtNode(
+  path: GraphPath,
+  terminalNodeId: string,
+  nodes: { id: string; x: number; y: number }[],
+  edges: { startNodeId: string; endNodeId: string; distance: number; bidirectional: boolean }[],
+): GraphPath {
+  const terminalIndex = path.nodeIds.indexOf(terminalNodeId);
+  if (terminalIndex < 0 || terminalIndex === path.nodeIds.length - 1) return path;
+  const nodeIds = path.nodeIds.slice(0, terminalIndex + 1);
+  const nodeMap = new Map(nodes.map((node) => [node.id, node]));
+  const waypoints = nodeIds.map((id) => {
+    const node = nodeMap.get(id);
+    return node ? { x: node.x, y: node.y } : { x: 0, y: 0 };
+  });
+  let totalUnits = 0;
+  for (let index = 0; index < nodeIds.length - 1; index += 1) {
+    const from = nodeIds[index];
+    const to = nodeIds[index + 1];
+    const edge = edges.find((candidate) =>
+      (candidate.startNodeId === from && candidate.endNodeId === to)
+      || (candidate.bidirectional && candidate.startNodeId === to && candidate.endNodeId === from),
+    );
+    if (edge) totalUnits += Math.max(0, Number(edge.distance) || 0);
+  }
+  const distanceM = Math.round(totalUnits * M_PER_UNIT);
+  return {
+    ...path,
+    nodeIds,
+    waypoints,
+    distanceM,
+    minutes: distanceM > 0 ? Math.max(1, Math.round(distanceM / 80)) : 0,
+    steps: path.steps.slice(0, Math.max(1, nodeIds.length)),
+  };
+}
+
 // ── Campus walkway graph — PLV Main Campus ────────────────────────────────
 // Nodes are key locations: building entrances, gates, walkway intersections.
 
@@ -639,11 +681,27 @@ export function findNavigationRoute(
     if (!accessibleNode(startNode) || !accessibleNode(destinationNode)) return null;
   }
 
+  // A persisted graph may contain semantic/transition edges whose authored
+  // cost is intentionally smaller than the coordinate distance (for example
+  // a floor transition). Using raw Euclidean distance in that graph makes the
+  // heuristic inadmissible and can close a node before a cheaper outdoor loop
+  // is discovered. Scale the geometric heuristic by the smallest observed
+  // cost-per-coordinate-unit; when the graph has a zero/under-cost semantic
+  // edge this naturally falls back to Dijkstra (h=0) while preserving all
+  // edge direction and safety filters.
+  const heuristicEdges = [...navEdges, ...transitionEdges];
+  const heuristicScale = heuristicEdges.reduce((scale, edge) => {
+    const start = nodeMap.get(edge.startNodeId);
+    const end = nodeMap.get(edge.endNodeId);
+    const geometric = start && end ? Math.hypot(start.x - end.x, start.y - end.y) : 0;
+    const cost = Number.isFinite(edge.distance) ? Math.max(0, edge.distance) : 0;
+    return geometric > 0 ? Math.min(scale, cost / geometric) : scale;
+  }, 1);
   const h = (a: string, b: string): number => {
     const na = nodeMap.get(a);
     const nb = nodeMap.get(b);
     if (!na || !nb) return 0;
-    return Math.hypot(na.x - nb.x, na.y - nb.y);
+    return Math.hypot(na.x - nb.x, na.y - nb.y) * Math.max(0, Math.min(1, heuristicScale));
   };
 
   interface NavAStarNode {

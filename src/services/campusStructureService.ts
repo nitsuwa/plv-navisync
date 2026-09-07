@@ -5,6 +5,7 @@ import { syncEntranceNodePositions } from "../lib/navigationGraph";
 import { syncIndoorLinkedNodePositions } from "../lib/indoorNavigationGraph";
 import { ENTRANCE_TRANSITION_EDGE_TYPE, reconcileEntranceTransitions } from "../lib/entranceTransitions";
 import { syncExteriorEmergencyStairGraph } from "../lib/exteriorEmergencyStairs";
+import { syncCampusGateNavigation } from "../lib/campusGates";
 import type { Database, Json, Tables, TablesInsert, TablesUpdate } from "../types/database.generated";
 import type {
   AccessibilityFeature, AssemblyPoint, Campus, CampusBuilding, CampusDecorAsset,
@@ -20,7 +21,7 @@ export type NavigationEdgeRow = Tables<"navigation_edges">;
 type JsonObject = Record<string, Json | undefined>;
 type StructureKind =
   | "marker" | "campus_path" | "route" | "accessibility_feature" | "assembly_point" | "decor" | "event_overlay"
-  | "room" | "floor_path" | "wall" | "door" | "window" | "furniture" | "stairs" | "ramp" | "elevator" | "label";
+  | "gate" | "canvas_appearance" | "room" | "floor_path" | "wall" | "door" | "window" | "furniture" | "stairs" | "ramp" | "elevator" | "label";
 
 export interface CampusStructurePayload {
   buildings: JsonObject[];
@@ -54,7 +55,37 @@ const BUILDING_CATEGORIES = new Set(["academic", "administration", "library", "l
 
 function jsonUi<T>(value: T): JsonObject { return { ui: value as Json }; }
 function uiFrom<T>(metadata: Json | null): T | undefined {
-  return metadata && typeof metadata === "object" && !Array.isArray(metadata) ? (metadata.ui as T | undefined) : undefined;
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return undefined;
+  // Current rows wrap the editor snapshot in metadata.ui. Older map-element
+  // rows stored that same snapshot directly in metadata; accepting both
+  // shapes makes the first hydration complete instead of silently dropping
+  // legacy paths, gates, entrances, or floor content.
+  const object = metadata as JsonObject;
+  if (object.ui && typeof object.ui === "object" && !Array.isArray(object.ui)) return object.ui as T;
+  return metadata as T;
+}
+
+function metadataKind(metadata: Json | null | undefined): string | undefined {
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return undefined;
+  const object = metadata as JsonObject;
+  const ui = object.ui;
+  if (ui && typeof ui === "object" && !Array.isArray(ui)) {
+    const kind = (ui as JsonObject).kind;
+    if (typeof kind === "string" && kind.trim()) return kind;
+  }
+  return typeof object.kind === "string" && object.kind.trim() ? object.kind : undefined;
+}
+
+function structureKindForRow(row: Pick<MapElementRow, "element_type" | "metadata">): string | undefined {
+  const explicit = metadataKind(row.metadata);
+  if (explicit) return explicit;
+  // These first-class element types were introduced after the original
+  // editor serializer. They are safe fallbacks for rows that predate the
+  // metadata.kind discriminator.
+  if (row.element_type === "gate") return "gate";
+  if (row.element_type === "canvas_appearance") return "canvas_appearance";
+  if (row.element_type === "landmark") return "marker";
+  return undefined;
 }
 
 /**
@@ -231,6 +262,8 @@ function defaultElementName(kind: StructureKind): string {
     elevator: "Elevator",
     label: "Label",
     decor: "Decorative Asset",
+    gate: "Campus Gate",
+    canvas_appearance: "Canvas Appearance",
   } as Record<StructureKind, string>)[kind];
 }
 
@@ -273,10 +306,10 @@ function element(kind: StructureKind, campusId: string, value: Record<string, un
   const rawRotation = value.rotation;
   const rotationValue = finiteNumber(rawRotation, kind, value.id, "rotation");
   const typeMap: Partial<Record<StructureKind, string>> = {
-    marker: "landmark", route: "custom", campus_path: "custom", accessibility_feature: "custom",
+    marker: "landmark", gate: "gate", route: "custom", campus_path: "custom", accessibility_feature: "custom",
     assembly_point: "assembly_area", decor: "custom", event_overlay: "custom", floor_path: "hallway", wall: "wall",
     door: value.isEmergencyExit ? "emergency_exit" : "door", window: "window", furniture: "furniture",
-    stairs: "stairs", ramp: "ramp", elevator: "elevator", label: "custom",
+    stairs: "stairs", ramp: "ramp", elevator: "elevator", label: "custom", canvas_appearance: "canvas_appearance",
   };
   return {
     id: String(value.id), campus_id: campusId, building_id: buildingId, floor_id: floorId,
@@ -293,20 +326,141 @@ function element(kind: StructureKind, campusId: string, value: Record<string, un
     metadata: { kind, ui: value as Json },
     is_accessible: Boolean(value.accessibility ?? value.accessible),
     is_emergency_asset: Boolean(value.isEmergencyExit || kind === "assembly_point"),
-    is_searchable: !["wall", "window", "furniture", "decor", "floor_path", "campus_path", "label"].includes(kind),
+    is_searchable: !["wall", "window", "furniture", "decor", "floor_path", "campus_path", "label", "canvas_appearance"].includes(kind),
     is_visible: value.visible !== false,
   };
 }
 
+/**
+ * Return a deterministic RFC-4122 UUID for records that need a stable
+ * identity but do not have a dedicated database row.  `map_elements.id` is a
+ * UUID column, so semantic keys such as `${campusId}:canvas-appearance` must
+ * never be sent directly to Supabase.  This intentionally uses a tiny
+ * dependency-free hash rather than introducing another UUID/client library.
+ */
+export function canvasAppearanceRecordId(campusId: string): string {
+  const source = String(campusId);
+  const hex = source.replace(/[^0-9a-f]/gi, "").toLowerCase();
+  let seed = 0x811c9dc5;
+  for (const char of `${source}:canvas-appearance`) {
+    seed ^= char.charCodeAt(0);
+    seed = Math.imul(seed, 0x01000193) >>> 0;
+  }
+  const bytes: number[] = [];
+  for (let index = 0; index < 16; index += 1) {
+    const offset = (index * 2) % Math.max(2, hex.length);
+    const sourceByte = hex.length >= 2 ? Number.parseInt(hex.slice(offset, offset + 2), 16) : 0;
+    seed = Math.imul(seed ^ (index * 0x9e3779b9), 0x45d9f3b) >>> 0;
+    bytes.push((sourceByte ^ (seed >>> ((index % 4) * 8))) & 0xff);
+  }
+  bytes[6] = (bytes[6] & 0x0f) | 0x50; // version 5 (name-based/deterministic)
+  bytes[8] = (bytes[8] & 0x3f) | 0x80; // RFC-4122 variant
+  const groups = [4, 2, 2, 2, 6];
+  let cursor = 0;
+  return groups.map((length) => {
+    const group = bytes.slice(cursor, cursor + length).map((byte) => byte.toString(16).padStart(2, "0")).join("");
+    cursor += length;
+    return group;
+  }).join("-");
+}
+
+/**
+ * Building codes are a table-wide campus key in the persistence schema. Keep
+ * the payload valid even when a legacy/editor draft contains two buildings
+ * with the same (or blank) code. The first authored code wins; later
+ * collisions receive the same short, human-readable default identity used by
+ * the editor's create/duplicate actions.
+ */
+function nextPayloadBuildingCode(candidate: unknown, usedCodes: Set<string>): string {
+  const authored = typeof candidate === "string" ? candidate.trim() : "";
+  if (authored && !usedCodes.has(authored.toUpperCase())) {
+    usedCodes.add(authored.toUpperCase());
+    return authored;
+  }
+  let index = 1;
+  let generated = `BLDG-${String(index).padStart(2, "0")}`;
+  while (usedCodes.has(generated)) {
+    index += 1;
+    generated = `BLDG-${String(index).padStart(2, "0")}`;
+  }
+  usedCodes.add(generated);
+  return generated;
+}
+
+/**
+ * The database keeps removed Buildings as archived rows and the historical
+ * `(campus_id, code)` constraint still covers them. A fresh draft Building can
+ * therefore collide with a code that is no longer visible in the editor. Read
+ * the campus code ledger before the RPC and move only new/conflicting payload
+ * rows to the next short default code. Existing row IDs retain their authored
+ * code; the loaded RPC result becomes the new canonical editor state.
+ */
+async function avoidArchivedBuildingCodeConflicts(
+  campusId: string,
+  payload: CampusStructurePayload,
+): Promise<CampusStructurePayload> {
+  try {
+    const { data, error } = await getSupabase()
+      .from("buildings")
+      .select("id,code")
+      .eq("campus_id", campusId);
+    if (error || !Array.isArray(data)) return payload;
+
+    const payloadIds = new Set(payload.buildings.map((building) => String(building.id)));
+    const occupiedCodes = new Set(
+      data
+        .filter((row) => !payloadIds.has(String(row.id)))
+        .map((row) => String(row.code ?? "").trim().toUpperCase())
+        .filter(Boolean),
+    );
+    const authoredCodes = new Set(
+      payload.buildings
+        .map((building) => String(building.code ?? "").trim().toUpperCase())
+        .filter(Boolean),
+    );
+    const claimedCodes = new Set<string>();
+    let changed = false;
+    const buildings = payload.buildings.map((building) => {
+      const authored = String(building.code ?? "").trim();
+      const normalized = authored.toUpperCase();
+      if (authored && !occupiedCodes.has(normalized) && !claimedCodes.has(normalized)) {
+        claimedCodes.add(normalized);
+        return building;
+      }
+
+      let index = 1;
+      let replacement = `BLDG-${String(index).padStart(2, "0")}`;
+      while (occupiedCodes.has(replacement) || authoredCodes.has(replacement) || claimedCodes.has(replacement)) {
+        index += 1;
+        replacement = `BLDG-${String(index).padStart(2, "0")}`;
+      }
+      claimedCodes.add(replacement);
+      changed = true;
+      return { ...building, code: replacement };
+    });
+    return changed ? { ...payload, buildings } : payload;
+  } catch {
+    // This is a defensive ledger read. The authoritative RPC remains the
+    // source of truth if a transient read is unavailable.
+    return payload;
+  }
+}
+
 export function serializeCampusStructure(campus: Campus): CampusStructurePayload {
-  const canonicalCampus = reconcileEntranceTransitions(campus);
+  // Persist the canonical Campus Gate anchor alongside the physical marker.
+  // Hydrated/editor state normally already contains it, but reconciling here
+  // also makes legacy/partially-authored campuses safe to save and prevents a
+  // gate from silently round-tripping without its routable navigation node.
+  const canonicalCampus = syncCampusGateNavigation(reconcileEntranceTransitions(campus));
   const buildings: JsonObject[] = [];
+  const usedBuildingCodes = new Set<string>();
   const floors: JsonObject[] = [];
   const map_elements: JsonObject[] = [];
   (canonicalCampus.buildings ?? []).forEach((building, buildingOrder) => {
     const { floors: buildingFloors, accessibleApproach: _removedApproach, ...buildingUi } = building as CampusBuilding & { accessibleApproach?: unknown };
+    const code = nextPayloadBuildingCode(building.code, usedBuildingCodes);
     buildings.push({
-      id: building.id, name: building.name, code: building.code, description: building.description,
+      id: building.id, name: building.name, code, description: building.description,
       category: normalizedBuildingCategory(building.category),
       x: finiteNumber(building.x, "building", building.id, "x"),
       y: finiteNumber(building.y, "building", building.id, "y"),
@@ -359,13 +513,31 @@ export function serializeCampusStructure(campus: Campus): CampusStructurePayload
       labels.forEach((v) => map_elements.push(element("label", campus.id, v as unknown as Record<string, unknown>, building.id, floor.id)));
     });
   });
-  (campus.markers ?? []).forEach((v) => map_elements.push(element("marker", campus.id, v as unknown as Record<string, unknown>)));
+  (campus.markers ?? []).forEach((v) => map_elements.push(element(v.type === "gate" ? "gate" : "marker", campus.id, v as unknown as Record<string, unknown>)));
   (campus.paths ?? []).forEach((v) => map_elements.push(element("campus_path", campus.id, v as unknown as Record<string, unknown>)));
   (campus.routes ?? []).forEach((v) => map_elements.push(element("route", campus.id, v as unknown as Record<string, unknown>)));
   (campus.accessibilityFeatures ?? []).forEach((v) => map_elements.push(element("accessibility_feature", campus.id, v as unknown as Record<string, unknown>, v.buildingId)));
   (campus.assemblyPoints ?? []).forEach((v) => map_elements.push(element("assembly_point", campus.id, v as unknown as Record<string, unknown>)));
   (campus.decorAssets ?? []).forEach((v) => map_elements.push(element("decor", campus.id, v as unknown as Record<string, unknown>)));
   (campus.eventOverlays ?? []).forEach((v) => map_elements.push(element("event_overlay", campus.id, v as unknown as Record<string, unknown>, v.locationRef?.buildingId)));
+  // Campus appearance lives in the existing map_elements JSON channel. This
+  // deterministic, non-rendered record avoids a schema migration while still
+  // round-tripping ground material/tint for editor reloads and published
+  // snapshots. It is intentionally not a decor asset or navigation object.
+  if (campus.canvasGroundMaterial !== undefined || campus.canvasGroundColor !== undefined
+    || campus.canvasGroundTexture !== undefined || campus.canvasColor !== undefined) {
+    map_elements.push(element("canvas_appearance", campus.id, {
+      // Keep the logical record stable across repeated saves while satisfying
+      // the UUID type of map_elements.id.  The semantic discriminator is
+      // carried by element_type/metadata, not encoded into the UUID string.
+      id: canvasAppearanceRecordId(campus.id),
+      canvasAppearanceKey: "canvas-appearance",
+      canvasGroundMaterial: campus.canvasGroundMaterial,
+      canvasGroundColor: campus.canvasGroundColor,
+      canvasGroundTexture: campus.canvasGroundTexture,
+      canvasColor: campus.canvasColor,
+    }));
+  }
   return {
     buildings, floors, map_elements,
     navigation_nodes: (canonicalCampus.navNodes ?? []).map((node) => ({
@@ -390,7 +562,10 @@ export function hydrateCampusStructure(campus: Campus, rows: CampusStructureRows
   const floorsByBuilding = new Map<string, FloorPlan[]>();
   [...rows.floors].sort((a, b) => a.display_order - b.display_order || a.floor_number - b.floor_number).forEach((row) => {
     const values = floorElements.get(row.id) ?? [];
-    const byKind = <T>(kind: StructureKind) => values.filter((item) => uiFrom<{ kind?: string }>(item.metadata)?.kind === kind || (item.metadata as JsonObject | null)?.kind === kind).map((item) => uiFrom<T>(item.metadata)).filter((v): v is T => Boolean(v));
+    const byKind = <T>(kind: StructureKind) => values
+      .filter((item) => structureKindForRow(item) === kind)
+      .map((item) => uiFrom<T>(item.metadata))
+      .filter((v): v is T => Boolean(v));
     // Legacy normalization: walls are endpoint-based (x1/y1/x2/y2). Older editor
     // builds could leave stray non-finite x/y fields on wall objects (a broken
     // drag wrote NaN there). Strip those so they never render or re-serialize.
@@ -423,7 +598,11 @@ export function hydrateCampusStructure(campus: Campus, rows: CampusStructureRows
     height: row.height, rotation: row.rotation, visible: row.is_visible, floors: floorsByBuilding.get(row.id) ?? [],
   });
   }) as CampusBuilding[];
-  const top = <T>(kind: StructureKind) => rows.mapElements.filter((item) => !item.floor_id && (item.metadata as JsonObject | null)?.kind === kind).map((item) => uiFrom<T>(item.metadata)).filter((v): v is T => Boolean(v));
+  const top = <T>(kind: StructureKind) => rows.mapElements
+    .filter((item) => !item.floor_id && structureKindForRow(item) === kind)
+    .map((item) => uiFrom<T>(item.metadata))
+    .filter((v): v is T => Boolean(v));
+  const canvasAppearance = top<Pick<Campus, "canvasGroundMaterial" | "canvasGroundColor" | "canvasGroundTexture" | "canvasColor">>("canvas_appearance")[0];
   const hydratedNavNodes = rows.navigationNodes
     .filter((row) => row.is_active !== false)
     .filter((row) => !removedAccessibleApproachMetadata(row.metadata))
@@ -460,12 +639,20 @@ export function hydrateCampusStructure(campus: Campus, rows: CampusStructureRows
     return Boolean(a && b);
   });
   const reconciledGraph = reconcileEntranceTransitions({ ...campus, buildings, navNodes: finalNodes, navEdges: finalEdges });
-  const withExteriorEmergencyStairs = syncExteriorEmergencyStairGraph({ ...campus, buildings, navNodes: finalNodes, navEdges: reconciledGraph.navEdges ?? [] });
-  return { ...withExteriorEmergencyStairs, markers: top<CampusMarker>("marker"), paths: top<CampusPath>("campus_path"),
+  const withExteriorEmergencyStairs = syncExteriorEmergencyStairGraph({ ...campus, buildings, markers: [...top<CampusMarker>("marker"), ...top<CampusMarker>("gate")], navNodes: finalNodes, navEdges: reconciledGraph.navEdges ?? [] });
+  const withCampusGates = syncCampusGateNavigation({ ...withExteriorEmergencyStairs, markers: [...top<CampusMarker>("marker"), ...top<CampusMarker>("gate")] });
+  return { ...withCampusGates,
+    ...(canvasAppearance ? {
+      canvasGroundMaterial: canvasAppearance.canvasGroundMaterial,
+      canvasGroundColor: canvasAppearance.canvasGroundColor,
+      canvasGroundTexture: canvasAppearance.canvasGroundTexture,
+      canvasColor: canvasAppearance.canvasColor,
+    } : {}),
+    markers: withCampusGates.markers, paths: top<CampusPath>("campus_path"),
     routes: top<CampusRoute>("route"), accessibilityFeatures: top<AccessibilityFeature>("accessibility_feature"),
     assemblyPoints: top<AssemblyPoint>("assembly_point"), decorAssets: top<CampusDecorAsset>("decor"),
     eventOverlays: top<CampusEventOverlay>("event_overlay"),
-    navNodes: withExteriorEmergencyStairs.navNodes ?? [], navEdges: withExteriorEmergencyStairs.navEdges ?? [], buildings: withExteriorEmergencyStairs.buildings };
+    navNodes: withCampusGates.navNodes ?? [], navEdges: withCampusGates.navEdges ?? [], buildings: withCampusGates.buildings };
 }
 
 async function selectStructure(campusId: string): Promise<CampusStructureRows> {
@@ -518,7 +705,7 @@ export const entranceService = { ...mapElementService, list: async (campusId: st
 export const campusStructureService = {
   async load(campus: Campus): Promise<Campus> { return hydrateCampusStructure(campus, await selectStructure(campus.id)); },
   async save(campus: Campus): Promise<Campus> {
-    const payload = serializeCampusStructure(campus);
+    const payload = await avoidArchivedBuildingCodeConflicts(campus.id, serializeCampusStructure(campus));
     validateNavigationEdgePayload(payload);
     const payloadWithStableEdgeRows = await reuseExistingNavigationEdgePairRows(campus.id, payload);
     validateNavigationEdgePayload(payloadWithStableEdgeRows);

@@ -46,7 +46,7 @@ const CHECK_GROUPS: CheckGroup[] = [
       "nav_broken_edge", "nav_duplicate_edge", "nav_orphan_node",
       "nav_disconnected_component", "nav_entrance_bridge_missing",
       "nav_entrance_door_missing", "nav_floor_transition_invalid",
-      "nav_edge_blocked_by_obstacle", "emergency_exit_no_nav", "no_emergency_exit_configured",
+      "nav_edge_blocked_by_obstacle", "emergency_exit_no_nav", "no_emergency_exit_configured", "exterior_emergency_stair_incomplete",
     ],
   },
   {
@@ -87,6 +87,7 @@ function suggestedResolution(type: string): string | null {
     duplicate_room_name: "Rename one of the rooms so names are unique on this floor.",
     emergency_exit_no_nav: "Add this door to the navigation network.",
     no_emergency_exit_configured: "Add a designated Emergency Exit or verify the safe General entrance fallback.",
+    exterior_emergency_stair_incomplete: "Resolve the Exterior Emergency Stair readiness issue before relying on it for egress.",
     nav_disconnected_component: "Connect this navigation section to the main network.",
     no_building_entrance: "Add at least one usable building entrance.",
     no_primary_entrance: "Mark one entrance as Primary.",

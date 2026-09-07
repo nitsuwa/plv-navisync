@@ -20,10 +20,11 @@ import {
   syncOpeningsToWalls,
   translateFloorItem,
   validateFloorGeometry,
+  wallOpeningSpansOverlap,
   wallLengthLabelPosition,
 } from "../floorGeometry";
 import { duplicateFloorForBuilding, normalizeFloor } from "../floorPlanNormalization";
-import type { FloorFurniture, FloorRoom, FloorWall } from "../../components/map-builder/types";
+import type { FloorDoor, FloorFurniture, FloorRoom, FloorWall, FloorWindow } from "../../components/map-builder/types";
 
 describe("floorGeometry", () => {
   it("normalizes floor canvas size through the canonical defaults", () => {
@@ -83,6 +84,40 @@ describe("floorGeometry", () => {
     });
 
     expect(validateFloorGeometry(floor)).toHaveLength(1);
+  });
+
+  it("does not flag furniture contained by a Veranda outside the indoor canvas", () => {
+    const floor = normalizeFloor({
+      id: "f1",
+      buildingId: "b1",
+      number: 1,
+      label: "Ground Floor",
+      canvasW: 220,
+      canvasH: 160,
+      exteriorZones: [{
+        id: "veranda-1",
+        type: "veranda",
+        side: "bottom",
+        offset: 0.5,
+        width: 120,
+        depth: 48,
+        label: "Veranda",
+      }],
+      furniture: [{
+        id: "chair-1",
+        type: "chair",
+        name: "Chair",
+        category: "seating",
+        x: 100,
+        y: 176,
+        width: 18,
+        height: 18,
+        rotation: 0,
+        color: "#475569",
+      }],
+    });
+
+    expect(validateFloorGeometry(floor)).toEqual([]);
   });
 
   it("marquee selection includes walls, doors, windows and circulation but never floor paths", () => {
@@ -242,6 +277,28 @@ describe("floorGeometry", () => {
     expect(windows[0].x).toBe(70);
     expect(windows[0].width).toBe(68);
     expect(resolveWallOpeningGeometry(doors[0], wall)?.angle).toBe(0);
+  });
+
+  it("detects only physical aperture overlap on the same wall", () => {
+    const wall: FloorWall = { id: "wall-a", x1: 0, y1: 40, x2: 200, y2: 40, thickness: 6, color: "#64748b" };
+    const doorA: FloorDoor = { id: "door-a", x: 40, y: 40, width: 20, wallId: wall.id, offset: 0.2, direction: "left", color: "#d97706" };
+    const doorB: FloorDoor = { id: "door-b", x: 56, y: 40, width: 20, wallId: wall.id, offset: 0.28, direction: "left", color: "#d97706" };
+    const window: FloorWindow = { id: "window-a", x: 140, y: 40, width: 20, height: 4, wallId: wall.id, offset: 0.7, color: "#7dd3fc" };
+    const windowOverlap: FloorWindow = { id: "window-b", x: 145, y: 40, width: 20, height: 4, wallId: wall.id, offset: 0.72, color: "#7dd3fc" };
+    expect(wallOpeningSpansOverlap(doorA, doorB, wall)).toBe(true);
+    expect(wallOpeningSpansOverlap(doorA, window, wall)).toBe(false);
+    expect(wallOpeningSpansOverlap(doorB, window, wall)).toBe(false);
+    expect(wallOpeningSpansOverlap(window, windowOverlap, wall)).toBe(true);
+  });
+
+  it("allows adjacent openings and ignores openings on unrelated walls", () => {
+    const wall: FloorWall = { id: "wall-a", x1: 0, y1: 40, x2: 200, y2: 40, thickness: 6, color: "#64748b" };
+    const otherWall: FloorWall = { id: "wall-b", x1: 100, y1: 0, x2: 100, y2: 100, thickness: 6, color: "#64748b" };
+    const door: FloorDoor = { id: "door-a", x: 30, y: 40, width: 20, wallId: wall.id, offset: 0.15, direction: "left", color: "#d97706" };
+    const adjacent: FloorWindow = { id: "window-a", x: 60, y: 40, width: 20, height: 4, wallId: wall.id, offset: 0.3, color: "#7dd3fc" };
+    const perpendicular: FloorWindow = { id: "window-b", x: 100, y: 30, width: 20, height: 4, wallId: otherWall.id, offset: 0.3, color: "#7dd3fc" };
+    expect(wallOpeningSpansOverlap(door, adjacent, wall)).toBe(false);
+    expect(wallOpeningSpansOverlap(door, perpendicular, wall)).toBe(false);
   });
 
   it("does not treat a managed perimeter Door swing as outside the floor canvas", () => {

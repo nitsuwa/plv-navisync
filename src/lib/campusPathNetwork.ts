@@ -88,7 +88,11 @@ export type GeneratedNavigationPermissions = {
 /** Physical Pathways are the sole geometry/deletion owner of generated nodes. */
 export function navigationNodePermissions(node: NavigationNode | undefined): GeneratedNavigationPermissions {
   const generated = isPathwayGeneratedNode(node);
-  return { geometryEditable: !generated, independentlyDeletable: !generated };
+  // Campus Gate anchors are derived from the canonical outdoor Gate marker.
+  // They remain valid Connect targets, but their coordinates/identity are
+  // authored by the physical gate and cannot be edited as free waypoints.
+  const gateManaged = Boolean(node?.gateId);
+  return { geometryEditable: !generated && !gateManaged, independentlyDeletable: !generated && !gateManaged };
 }
 
 /** Generated edge routing flags remain editable; only geometry/deletion are owned. */
