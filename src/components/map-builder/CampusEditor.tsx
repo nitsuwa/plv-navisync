@@ -9450,21 +9450,23 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
 
         {pendingCanvasResize && createPortal(
           <div className="pointer-events-none fixed inset-0 z-[140]" data-testid="canvas-resize-confirmation">
-            <div className="pointer-events-auto absolute bottom-5 left-1/2 w-[min(92vw,380px)] -translate-x-1/2 rounded-2xl border border-amber-200 bg-card/95 p-4 shadow-2xl backdrop-blur dark:border-amber-800/40">
+            <div className="pointer-events-auto absolute left-1/2 top-[4.5rem] w-[min(92vw,420px)] -translate-x-1/2 rounded-2xl border border-amber-200 bg-card/95 p-3 shadow-2xl backdrop-blur dark:border-amber-800/40">
               <div className="flex items-start gap-3">
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-amber-500/10 text-amber-600"><AlertTriangle className="h-4 w-4" /></div>
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-amber-500/10 text-amber-600"><AlertTriangle className="h-4 w-4" /></div>
                 <div className="min-w-0">
-                  <h3 className="text-sm font-extrabold text-foreground">Resize canvas?</h3>
-                  <p className="mt-1 text-xs leading-relaxed text-muted-foreground">Review the proposed canvas size before applying. Nothing will be moved or deleted.</p>
+                  <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                    <h3 className="text-sm font-extrabold text-foreground">Canvas resize</h3>
+                    <p className="text-[10px] font-mono text-muted-foreground/70">{pendingCanvasResize.width} × {pendingCanvasResize.height}px</p>
+                  </div>
+                  <p className="mt-0.5 text-[10px] leading-relaxed text-muted-foreground">Review the proposed size before applying. Nothing will be moved or deleted.</p>
                   {pendingCanvasResizeClips
-                    ? <p className="mt-1 text-[10px] font-semibold text-amber-700 dark:text-amber-300">Some authored content extends beyond this size. Increase the canvas or fit content before applying.</p>
-                    : <p className="mt-1 text-[10px] font-semibold text-emerald-700 dark:text-emerald-300">All authored content fits inside this proposed canvas.</p>}
-                  <p className="mt-1 text-[10px] font-mono text-muted-foreground/70">{pendingCanvasResize.width} × {pendingCanvasResize.height}px</p>
+                    ? <p className="mt-0.5 text-[10px] font-semibold text-amber-700 dark:text-amber-300">Some authored content would be clipped. Expand the canvas or move content before applying.</p>
+                    : <p className="mt-0.5 text-[10px] font-semibold text-emerald-700 dark:text-emerald-300">All authored content fits inside this proposed canvas.</p>}
                 </div>
               </div>
-              <div className="mt-5 flex gap-2">
-                <button type="button" onClick={() => { setPendingCanvasResize(null); setCanvasResizePreview(null); canvasResizeOriginalRef.current = null; canvasResizeRef.current = null; setCanvasResizeMode(true); setGuides([]); }} className="flex-1 rounded-xl border border-border px-3 py-2 text-xs font-bold text-muted-foreground hover:bg-muted">Cancel</button>
-                <button type="button" disabled={pendingCanvasResizeClips} onClick={() => { if (pendingCanvasResizeClips) return; const next = { ...campus, canvasW: pendingCanvasResize.width, canvasH: pendingCanvasResize.height }; campusRef.current = next; onUpdate(next); pushHistory(next); setPendingCanvasResize(null); setCanvasResizePreview(null); canvasResizeOriginalRef.current = null; setCanvasResizeMode(true); }} className="flex-1 rounded-xl bg-primary px-3 py-2 text-xs font-extrabold text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-45">{pendingCanvasResizeClips ? "Resize blocked" : "Apply resize"}</button>
+              <div className="mt-2.5 flex justify-end gap-2">
+                <button type="button" onClick={() => { setPendingCanvasResize(null); setCanvasResizePreview(null); canvasResizeOriginalRef.current = null; canvasResizeRef.current = null; setCanvasResizeMode(false); setGuides([]); }} className="rounded-xl border border-border px-3 py-1.5 text-xs font-bold text-muted-foreground hover:bg-muted">Cancel</button>
+                <button type="button" disabled={pendingCanvasResizeClips} onClick={() => { if (pendingCanvasResizeClips) return; const next = { ...campus, canvasW: pendingCanvasResize.width, canvasH: pendingCanvasResize.height }; campusRef.current = next; onUpdate(next); pushHistory(next); setPendingCanvasResize(null); setCanvasResizePreview(null); canvasResizeOriginalRef.current = null; setCanvasResizeMode(false); setGuides([]); toast.success("Canvas resized", `Canvas size updated to ${next.canvasW} × ${next.canvasH}.`); }} className="rounded-xl bg-primary px-3 py-1.5 text-xs font-extrabold text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-45">{pendingCanvasResizeClips ? "Resize blocked" : "Apply resize"}</button>
               </div>
             </div>
           </div>,

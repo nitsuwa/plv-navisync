@@ -26,6 +26,7 @@ import {
 } from "../../lib/campusPathNetwork";
 import { surfaceCellRuns } from "../../lib/campusSurface";
 import { campusGroundAppearance, campusGroundPatternId, campusObjectSafeBounds } from "../../lib/campusCanvas";
+import { CampusGroundPatternDefs } from "./CampusGroundPatternDefs";
 
 // ── Rotation-aware resize cursor helpers (shared by buildings and decor assets) ──
 function angleToCursor(deg: number): string {
@@ -1204,42 +1205,7 @@ export function Canvas({
           <filter id="dropShadow" x="-20%" y="-20%" width="140%" height="140%">
             <feDropShadow dx={0} dy={1} stdDeviation={2} floodColor="rgba(0,0,0,0.3)" />
           </filter>
-          {/* Lightweight site-plan textures. They use user-space units so the
-              marks stay proportional when an area is resized rather than
-              stretching with the rectangle. */}
-          <pattern id="campus-lawn-pattern" width="28" height="28" patternUnits="userSpaceOnUse">
-            <path d="M5 17 l2 -4 M8 18 l2 -3 M20 7 l2 -4 M22 8 l2 -3" stroke="#6f9f68" strokeWidth="1" strokeLinecap="round" opacity="0.22" />
-            <circle cx="14" cy="23" r="1" fill="#6f9f68" opacity="0.16" />
-          </pattern>
-          <pattern id="campus-garden-pattern" width="30" height="30" patternUnits="userSpaceOnUse">
-            <circle cx="8" cy="9" r="2.2" fill="#6b9860" opacity="0.24" />
-            <circle cx="11" cy="7" r="1.7" fill="#7eaa6a" opacity="0.22" />
-            <circle cx="23" cy="20" r="2" fill="#6b9860" opacity="0.2" />
-          </pattern>
-          <pattern id="campus-plaza-pattern" width="36" height="36" patternUnits="userSpaceOnUse">
-            <path d="M0 0H36M0 18H36M12 0V18M30 18V36" fill="none" stroke="#aaa59d" strokeWidth="0.8" opacity="0.16" />
-          </pattern>
-          <pattern id="campus-ground-grass-pattern" width="32" height="32" patternUnits="userSpaceOnUse">
-            <path d="M6 20l2-4m2 5 2-3m14-9 2-4m2 5 2-3" stroke="#4f7d53" strokeWidth="1" strokeLinecap="round" opacity="0.22" />
-            <circle cx="17" cy="27" r="0.9" fill="#4f7d53" opacity="0.12" />
-          </pattern>
-          <pattern id="campus-ground-concrete-pattern" width="72" height="64" patternUnits="userSpaceOnUse">
-            <path d="M0 32H72" fill="none" stroke="#b2aea7" strokeWidth="0.8" opacity="0.18" />
-            <path d="M36 0V32M18 32V64" fill="none" stroke="#b2aea7" strokeWidth="0.8" opacity="0.12" />
-          </pattern>
-          <pattern id="campus-ground-pavers-pattern" width="64" height="40" patternUnits="userSpaceOnUse">
-            <path d="M0 0H64M0 20H64" fill="none" stroke="#a59d91" strokeWidth="1" opacity="0.2" />
-            <path d="M16 0V20M48 0V20M0 20V40M32 20V40" fill="none" stroke="#a59d91" strokeWidth="1" opacity="0.16" />
-          </pattern>
-          <pattern id="campus-ground-asphalt-pattern" width="34" height="34" patternUnits="userSpaceOnUse">
-            <circle cx="7" cy="9" r="0.8" fill="#d8dde0" opacity="0.16" />
-            <circle cx="24" cy="19" r="0.7" fill="#d8dde0" opacity="0.13" />
-            <circle cx="14" cy="29" r="0.6" fill="#d8dde0" opacity="0.12" />
-          </pattern>
-          <pattern id="campus-ground-custom-pattern" width="48" height="48" patternUnits="userSpaceOnUse">
-            <circle cx="11" cy="16" r="0.7" fill="#64748b" opacity="0.1" />
-            <circle cx="35" cy="31" r="0.6" fill="#64748b" opacity="0.08" />
-          </pattern>
+          <CampusGroundPatternDefs />
         </defs>
         <g transform={`translate(${pan.x},${pan.y}) scale(${zoom})`}>
           {/* Canvas material is independent from the logical/editor snapping grid. */}
