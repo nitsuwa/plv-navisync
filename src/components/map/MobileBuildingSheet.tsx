@@ -19,7 +19,7 @@ interface MobileBuildingSheetProps {
   hasFloorPlans: boolean;
 }
 
-const SHEET_HEIGHT = 55;
+const SHEET_HEIGHT = 72;
 const SNAP_THRESHOLD = 80;
 
 export function MobileBuildingSheet({
@@ -28,6 +28,12 @@ export function MobileBuildingSheet({
 }: MobileBuildingSheetProps) {
   useEscToClose(onClose);
   const controls = useDragControls();
+
+  // Signal to MobileBottomNav to hide when sheet is open
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent("building-sheet-toggle", { detail: { open: true } }));
+    return () => { window.dispatchEvent(new CustomEvent("building-sheet-toggle", { detail: { open: false } })); };
+  }, []);
   const dragY = useMotionValue(0);
   const sheetOpacity = useTransform(dragY, [0, SNAP_THRESHOLD * 2], [1, 0]);
   const sheetScale = useTransform(dragY, [0, SNAP_THRESHOLD * 2], [1, 0.92]);
@@ -53,7 +59,7 @@ export function MobileBuildingSheet({
   return (
     <motion.div
       data-no-drag
-      className="md:hidden fixed inset-x-0 z-40 will-change-transform landscape-minimized"
+      className="md:hidden fixed inset-x-0 z-50 will-change-transform landscape-minimized"
       style={{
         bottom: 0,
         y: dragY,
@@ -72,8 +78,8 @@ export function MobileBuildingSheet({
       transition={{ type: "spring", stiffness: 400, damping: 30, mass: 0.9 }}
     >
       <div
-        className="bg-card/96 backdrop-blur-2xl border-t border-border shadow-2xl overflow-hidden flex flex-col"
-        style={{ borderRadius, maxHeight: `${SHEET_HEIGHT}vh` }}
+        className="bg-card/96 backdrop-blur-2xl border-t border-border overflow-hidden flex flex-col"
+        style={{ borderRadius, maxHeight: `${SHEET_HEIGHT}vh`, boxShadow: "0 -8px 40px rgba(0,0,0,0.18), 0 -2px 12px rgba(0,0,0,0.12)" }}
       >
         {/* Building image header */}
         {selected.image_url && (
@@ -114,21 +120,21 @@ export function MobileBuildingSheet({
         </div>
 
         {/* Horizontal action buttons — Google Maps style */}
-        <div className="flex items-center gap-2 px-4 pb-3 shrink-0 overflow-x-auto no-scrollbar">
+        <div className="flex items-center gap-1.5 px-4 pb-3 shrink-0 overflow-x-auto no-scrollbar">
           <button
             onClick={() => onDirections(selected)}
-            className="flex items-center gap-1.5 h-9 px-4 rounded-full bg-primary text-primary-foreground text-xs font-bold hover:bg-primary/90 active:scale-95 transition-all shrink-0"
+            className="flex items-center gap-1 h-8 px-3 rounded-full bg-primary text-primary-foreground text-[11px] font-bold hover:bg-primary/90 active:scale-95 transition-all shrink-0"
           >
-            <Navigation className="h-3.5 w-3.5" />
+            <Navigation className="h-3 w-3" />
             Directions
           </button>
 
           {hasFloorPlans && (
             <button
               onClick={() => onFloorPlan(selected)}
-              className="flex items-center gap-1.5 h-9 px-4 rounded-full bg-muted text-muted-foreground text-xs font-bold border border-border hover:bg-secondary active:scale-95 transition-all shrink-0"
+              className="flex items-center gap-1 h-8 px-3 rounded-full bg-muted text-muted-foreground text-[11px] font-bold border border-border hover:bg-secondary active:scale-95 transition-all shrink-0"
             >
-              <Layers className="h-3.5 w-3.5" />
+              <Layers className="h-3 w-3" />
               Floor Plan
             </button>
           )}
@@ -139,22 +145,22 @@ export function MobileBuildingSheet({
               <button
                 onClick={() => onSave(selected.id)}
                 className={cn(
-                  "flex items-center gap-1.5 h-9 px-4 rounded-full text-xs font-bold border active:scale-95 transition-all shrink-0",
+                  "flex items-center gap-1 h-8 px-3 rounded-full text-[11px] font-bold border active:scale-95 transition-all shrink-0",
                   isSaved
                     ? "bg-accent/15 text-accent border-accent/30"
                     : "bg-muted text-muted-foreground border-border hover:bg-secondary"
                 )}
               >
-                <Bookmark className={cn("h-3.5 w-3.5", isSaved && "fill-current")} />
+                <Bookmark className={cn("h-3 w-3", isSaved && "fill-current")} />
                 {isSaved ? "Saved" : "Save"}
               </button>
             );
           })() : (
             <button
               onClick={() => onSignInPrompt("save locations")}
-              className="flex items-center gap-1.5 h-9 px-4 rounded-full bg-muted/60 text-muted-foreground/80 text-xs font-semibold border border-dashed border-border/60 shrink-0"
+              className="flex items-center gap-1 h-8 px-3 rounded-full bg-muted/60 text-muted-foreground/80 text-[11px] font-semibold border border-dashed border-border/60 shrink-0"
             >
-              <Bookmark className="h-3.5 w-3.5" />
+              <Bookmark className="h-3 w-3" />
               Save
             </button>
           )}
@@ -162,17 +168,17 @@ export function MobileBuildingSheet({
           {studentAuth.isStudent ? (
             <button
               onClick={() => onReport(selected)}
-              className="flex items-center gap-1.5 h-9 px-4 rounded-full bg-muted text-muted-foreground text-xs font-bold border border-border hover:bg-destructive/10 hover:text-destructive active:scale-95 transition-all shrink-0"
+              className="flex items-center gap-1 h-8 px-3 rounded-full bg-muted text-muted-foreground text-[11px] font-bold border border-border hover:bg-destructive/10 hover:text-destructive active:scale-95 transition-all shrink-0"
             >
-              <Flag className="h-3.5 w-3.5" />
+              <Flag className="h-3 w-3" />
               Report
             </button>
           ) : (
             <button
               onClick={() => onSignInPrompt("report issues")}
-              className="flex items-center gap-1.5 h-9 px-4 rounded-full bg-muted/60 text-muted-foreground/80 text-xs font-semibold border border-dashed border-border/60 shrink-0"
+              className="flex items-center gap-1 h-8 px-3 rounded-full bg-muted/60 text-muted-foreground/80 text-[11px] font-semibold border border-dashed border-border/60 shrink-0"
             >
-              <Flag className="h-3.5 w-3.5" />
+              <Flag className="h-3 w-3" />
               Report
             </button>
           )}

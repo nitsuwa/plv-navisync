@@ -317,7 +317,7 @@ export function ResetPasswordPage() {
 
   if (state === "checking") return <AuthShell><StatusIcon state="loading" /><h1 className="text-2xl font-extrabold text-foreground">Checking reset link</h1><p className="mt-3 text-sm text-muted-foreground">Restoring the secure recovery session…</p></AuthShell>;
   if (state === "invalid" || state === "expired") return <AuthShell><StatusIcon state="error" /><h1 className="text-2xl font-extrabold text-foreground">{state === "expired" ? "Reset link expired" : "Invalid reset link"}</h1><p className="mt-3 text-sm text-muted-foreground">Request a fresh password-reset email to continue.</p><Link to="/auth/forgot-password" className="mt-7 inline-flex h-11 w-full items-center justify-center rounded-xl bg-primary text-sm font-bold text-primary-foreground">Request New Link</Link></AuthShell>;
-  if (state === "success") return <AuthShell><StatusIcon state="success" /><h1 className="text-2xl font-extrabold text-foreground">Password updated</h1><p className="mt-3 text-sm text-muted-foreground">Your password has changed and your student session remains active.</p><Button onClick={() => navigate("/map", { replace: true })} variant="primary" size="lg" className="mt-7 w-full">Continue to Campus Map</Button></AuthShell>;
+  if (state === "success") return <AuthShell><StatusIcon state="success" /><h1 className="text-2xl font-extrabold text-foreground">Password updated</h1><p className="mt-3 text-sm text-muted-foreground">Your password has changed and your student session remains active.</p><Button onClick={() => navigate("/home", { replace: true })} variant="primary" size="lg" className="mt-7 w-full">Continue to NaviSync</Button></AuthShell>;
 
   return (
     <AuthShell>

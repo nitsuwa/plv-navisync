@@ -1,5 +1,4 @@
 import type { Building } from "../types";
-import { MOCK_BUILDINGS } from "../data/mockData";
 
 const SAVED_BUILDINGS_KEY = "plv_student_saved_buildings_v1";
 const RECENT_DESTINATIONS_KEY = "plv_student_recent_destinations_v1";
@@ -12,13 +11,14 @@ export interface RecentDestination {
   timestamp: string;
 }
 
-// Get student's bookmarked buildings
-export async function getSavedBuildings(): Promise<Building[]> {
+// Get student's bookmarked building IDs
+export async function getSavedBuildings(allBuildings?: Building[]): Promise<Building[]> {
   const savedIds: string[] = getLocalSavedBuildingIds();
   if (savedIds.length === 0) return [];
+  if (!allBuildings || allBuildings.length === 0) return [];
 
-  // Filter MOCK_BUILDINGS matching by id, code, or lowercased id/code
-  const savedBuildings = MOCK_BUILDINGS.filter((b) =>
+  // Resolve saved IDs against the provided building list (published campus data)
+  const savedBuildings = allBuildings.filter((b) =>
     savedIds.some(
       (id) =>
         id === b.id ||
@@ -80,6 +80,11 @@ export function addRecentDestination(item: { id: string; name: string; code?: st
   }
 }
 
+// Get raw saved building IDs (for pages that resolve IDs themselves)
+export function getSavedBuildingIds(): string[] {
+  return getLocalSavedBuildingIds();
+}
+
 // Helpers
 function getLocalSavedBuildingIds(): string[] {
   try {
@@ -97,6 +102,7 @@ function getLocalSavedBuildingIds(): string[] {
 
 export const studentAccountService = {
   getSavedBuildings,
+  getSavedBuildingIds,
   toggleSaveBuilding,
   getRecentDestinations,
   addRecentDestination,

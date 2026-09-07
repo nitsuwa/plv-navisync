@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import {
-  Moon, Sun, Lock, Bell, LogOut, ChevronDown, Shield, MapPin, HelpCircle,
+  Moon, Sun, Lock, Bell, ChevronDown, Shield, MapPin, HelpCircle,
   Smartphone, Globe, CheckCircle2, ChevronRight, Sparkles,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
@@ -69,10 +69,7 @@ export function StudentSettingsPage() {
     return () => clearTimeout(timer);
   }, []);
 
-  const handleLogout = async () => {
-    await signOut();
-    navigate("/");
-  };
+
 
   // Wait for the Supabase session/profile check before deciding. Reuse the
   // branded skeleton so there is no blank flash while the session resolves.
@@ -125,21 +122,24 @@ export function StudentSettingsPage() {
 
   function Toggle({ on, onToggle }: { on: boolean; onToggle: () => void }) {
     return (
-      <motion.button
+      <button
+        type="button"
+        role="switch"
+        aria-checked={on}
         onClick={onToggle}
-        aria-pressed={on}
         className={cn(
-          "relative w-12 h-7 rounded-full transition-colors shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
-          on ? "bg-primary" : "bg-muted-foreground/25"
+          "relative inline-flex items-center h-[28px] w-[50px] shrink-0 cursor-pointer rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-2",
+          on ? "bg-primary" : "bg-gray-200 dark:bg-gray-700"
         )}
-        whileTap={{ scale: 0.95 }}
       >
-        <motion.span
-          className="absolute top-0.5 left-0.5 w-6 h-6 rounded-full bg-white shadow-sm"
-          animate={{ x: on ? 20 : 0 }}
-          transition={{ type: "spring", stiffness: 300, damping: 20 }}
+        <span
+          aria-hidden="true"
+          className={cn(
+            "block h-[22px] w-[22px] rounded-full bg-white shadow-sm transition-transform duration-200",
+            on ? "translate-x-[25px]" : "translate-x-[3px]"
+          )}
         />
-      </motion.button>
+      </button>
     );
   }
 
@@ -178,14 +178,17 @@ export function StudentSettingsPage() {
                 key={key}
                 onClick={() => setActiveSection(key)}
                 className={cn(
-                  "flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex-1 justify-center",
+                  "flex flex-col items-center gap-1 px-2 py-2.5 rounded-xl text-xs font-bold transition-all flex-1 justify-center relative",
                   activeSection === key
-                    ? "bg-card text-primary shadow-sm border border-border/80"
+                    ? "text-primary"
                     : "text-muted-foreground hover:text-foreground"
                 )}
               >
-                <SecIcon className="h-3.5 w-3.5" />
-                <span className="hidden sm:inline">{label}</span>
+                <SecIcon className="h-4 w-4" />
+                <span className="text-[10px] font-semibold leading-tight">{label}</span>
+                {activeSection === key && (
+                  <span className="absolute bottom-0 left-2 right-2 h-0.5 rounded-full bg-primary" />
+                )}
               </button>
             ))}
           </div>
@@ -355,19 +358,6 @@ export function StudentSettingsPage() {
             </motion.div>
           </AnimatePresence>
 
-          {/* Logout */}
-          <Reveal>
-            <motion.button
-              onClick={handleLogout}
-              className="w-full flex items-center justify-center gap-2 h-12 rounded-2xl border border-destructive/30 transition-all hover:bg-destructive/8 text-destructive"
-              whileTap={{ scale: 0.98 }}
-            >
-              <LogOut className="h-4 w-4" />
-              <span className="text-sm font-bold">Sign Out</span>
-            </motion.button>
-          </Reveal>
-
-          <div className="h-4" />
           <div className="h-6 md:hidden" />
         </div>
       </div>

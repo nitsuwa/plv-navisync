@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { campusService } from "../services/campusService";
-import { SEED_CAMPUSES } from "../components/map-builder/constants";
+import { campusStructureService } from "../services/campusStructureService";
 import type { Campus } from "../components/map-builder/types";
 
 const SESSION_CACHE_KEY = "plv_published_campuses_cache_v1";
@@ -49,6 +49,9 @@ export function usePublishedCampus(previewCampus?: Campus | null): UsePublishedC
       let published: Campus[] = [];
       try {
         published = await campusService.listPublishedSnapshots();
+        // Published snapshots carry the full campus object including buildings,
+        // floors, rooms, walls, and navigation data from the serialized
+        // structure payload — no additional hydration needed.
       } catch {
         // Compatibility fallback for environments that predate the version
         // table; the live list still contains the legacy published marker.
@@ -58,16 +61,18 @@ export function usePublishedCampus(previewCampus?: Campus | null): UsePublishedC
         published = allCampuses.filter(
           (c) => c.publishStatus === "published" || c.visibleToStudents === true
         );
-      }
-
-      // Fallback: If database has no published campuses yet (fresh seed state),
-      // use SEED_CAMPUSES so the public map displays the default published PLV campus.
-      if (published.length === 0 && SEED_CAMPUSES.length > 0) {
-        published = SEED_CAMPUSES.map((c) => ({
-          ...c,
-          publishStatus: "published" as const,
-          visibleToStudents: true,
-        }));
+        // The list() path returns lightweight campus rows with empty floors.
+        // Hydrate each campus so buildings carry their authored floor plans,
+        // rooms, and walls — required by the public CampusMapPage.
+        if (published.length > 0) {
+          const hydrated = await Promise.allSettled(
+            published.map(async (campus) => {
+              try { return await campusStructureService.load(campus); }
+              catch { return campus; }
+            }),
+          );
+          published = hydrated.map((r, i) => r.status === "fulfilled" ? r.value : published[i]);
+        }
       }
 
       setCampuses(published);
@@ -82,18 +87,10 @@ export function usePublishedCampus(previewCampus?: Campus | null): UsePublishedC
         }
       }
     } catch (err: unknown) {
-      // Fallback: Try sessionStorage cache first, then SEED_CAMPUSES
+      // Fallback: Try sessionStorage cache first
       const cached = getCachedCampuses();
       if (cached.length > 0) {
         setCampuses(cached);
-        setIsCached(true);
-      } else if (SEED_CAMPUSES.length > 0) {
-        const defaultSeeds = SEED_CAMPUSES.map((c) => ({
-          ...c,
-          publishStatus: "published" as const,
-          visibleToStudents: true,
-        }));
-        setCampuses(defaultSeeds);
         setIsCached(true);
       } else {
         const msg = err instanceof Error ? err.message : "Failed to load published campus map.";
@@ -117,6 +114,21 @@ export function usePublishedCampus(previewCampus?: Campus | null): UsePublishedC
       return;
     }
     fetchPublishedCampuses();
+  }, [fetchPublishedCampuses, previewCampus]);
+
+  // ── Real-time publishing: refetch when the user returns to this tab ──
+  // When an admin publishes a new campus version, student tabs that were
+  // backgrounded will pick it up on refocus without requiring a manual
+  // page reload.
+  useEffect(() => {
+    if (previewCampus) return;
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") {
+        fetchPublishedCampuses();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => document.removeEventListener("visibilitychange", onVisibility);
   }, [fetchPublishedCampuses, previewCampus]);
 
   // Derived active campus

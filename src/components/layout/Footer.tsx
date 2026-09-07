@@ -43,9 +43,9 @@ export function Footer() {
               {[
                 { label: "Home",        to: "/" },
                 { label: "Campus Map",  to: "/map" },
-                { label: "Help Center", to: "/help" },
                 { label: "Login",       to: "/admin" },
                 ...(isStudent ? [
+                  { label: "Help Center",    to: "/help" },
                   { label: "Send Message", to: "/help#contact-form" },
                   { label: "FAQ",          to: "/help#faq" },
                 ] : []),

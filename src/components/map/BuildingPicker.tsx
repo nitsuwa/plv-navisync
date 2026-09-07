@@ -1,6 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { Building2, X, ChevronDown } from "lucide-react";
-import { MOCK_BUILDINGS as LEGACY_BUILDINGS } from "../../data/mockData";
 import type { Building } from "../../types";
 
 interface BuildingPickerProps {
@@ -38,7 +37,7 @@ export function BuildingPicker({
     activeEl?.scrollIntoView({ block: "nearest" });
   }, [activeIdx, open]);
 
-  const list = (buildings ?? LEGACY_BUILDINGS) as Building[];
+  const list = (buildings ?? []) as Building[];
   const filtered = list.filter(
     (b) =>
       !query ||

@@ -221,12 +221,12 @@ const SOLID_ASSET_TYPES = new Set([
 export function polylineCrossesObstacle(
   points: { x: number; y: number }[],
   buildings: { x: number; y: number; width: number; height: number; rotation?: number }[],
-  assets: { x: number; y: number; width: number; height: number; type: string; rotation?: number; scale?: number }[],
+  assets: { x: number; y: number; width?: number; height?: number; type: string; rotation?: number; scale?: number }[],
 ): boolean {
   // Check buildings first
   if (polylineCrossesBuilding(points, buildings)) return true;
   // Check solid assets
-  const solidAssets = assets.filter((a) => SOLID_ASSET_TYPES.has(a.type));
+  const solidAssets = assets.filter((a) => SOLID_ASSET_TYPES.has(a.type) && a.width != null && a.height != null);
   if (solidAssets.length === 0) return false;
   for (let i = 0; i < points.length - 1; i++) {
     const a = points[i];
@@ -236,8 +236,8 @@ export function polylineCrossesObstacle(
       const py = a.y + (b.y - a.y) * t;
       for (const asset of solidAssets) {
         const scale = asset.scale ?? 1;
-        const w = asset.width * scale;
-        const h = asset.height * scale;
+        const w = (asset.width ?? 0) * scale;
+        const h = (asset.height ?? 0) * scale;
         if (pointInBuilding({ x: asset.x, y: asset.y, width: w, height: h, rotation: asset.rotation }, { x: px, y: py })) {
           return true;
         }
@@ -384,7 +384,7 @@ export function polylineCrossesObstacleAfterSourceDeparture(
 export function outdoorEdgeIsBlocked(
   points: { x: number; y: number }[],
   buildings: { x: number; y: number; width: number; height: number; rotation?: number }[],
-  assets: { x: number; y: number; width: number; height: number; type: string; rotation?: number; scale?: number }[],
+  assets: { x: number; y: number; width?: number; height?: number; type: string; rotation?: number; scale?: number }[],
 ): boolean {
   return polylineCrossesObstacle(points, buildings, assets);
 }
@@ -404,12 +404,12 @@ const NON_BLOCKING_ASSET_TYPES = new Set(["ground-area", "lawn-area", "garden-ar
 export function polylineCrossesPlacedObject(
   points: { x: number; y: number }[],
   buildings: { x: number; y: number; width: number; height: number; rotation?: number }[],
-  assets: { x: number; y: number; width: number; height: number; type: string; rotation?: number; scale?: number; visible?: boolean }[],
+  assets: { x: number; y: number; width?: number; height?: number; type: string; rotation?: number; scale?: number; visible?: boolean }[],
 ): boolean {
   // Buildings always block
   if (polylineCrossesBuilding(points, buildings)) return true;
   // EVERY placed non-background asset blocks (visible ones only)
-  const blockers = assets.filter((a) => a.visible !== false && !NON_BLOCKING_ASSET_TYPES.has(a.type));
+  const blockers = assets.filter((a) => a.visible !== false && !NON_BLOCKING_ASSET_TYPES.has(a.type) && a.width != null && a.height != null);
   if (blockers.length === 0) return false;
   for (let i = 0; i < points.length - 1; i++) {
     const a = points[i];
@@ -419,8 +419,8 @@ export function polylineCrossesPlacedObject(
       const py = a.y + (b.y - a.y) * t;
       for (const asset of blockers) {
         const scale = asset.scale ?? 1;
-        const w = asset.width * scale;
-        const h = asset.height * scale;
+        const w = (asset.width ?? 0) * scale;
+        const h = (asset.height ?? 0) * scale;
         if (pointInBuilding({ x: asset.x, y: asset.y, width: w, height: h, rotation: asset.rotation }, { x: px, y: py })) {
           return true;
         }

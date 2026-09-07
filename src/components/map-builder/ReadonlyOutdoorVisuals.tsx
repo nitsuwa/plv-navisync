@@ -238,7 +238,7 @@ export function OutdoorEntranceVisual({ building, entrance }: { building: Campus
   const label = entranceDisplayName(entrance, (building.entrances ?? []).findIndex((item) => item.id === entrance.id));
   const color = entrance.type === "emergency_exit" || entrance.type === "emergency" ? "#dc2626" : entrance.type === "service" ? "#7c3aed" : "#0f766e";
   return (
-    <g data-testid="readonly-entrance" data-entrance-id={entrance.id} transform={`translate(${position.x},${position.y}) rotate(${position.angle ?? 0})`}>
+    <g data-testid="readonly-entrance" data-entrance-id={entrance.id} transform={`translate(${position.x},${position.y}) rotate(${position.angle ?? 0})`} style={{ cursor: onClick ? "pointer" : undefined }} onClick={onClick ? (e) => { e.stopPropagation(); onClick(building.id); } : undefined}>
       <title>{label}{entrance.accessible ? " · Accessible" : ""}</title>
       <path d="M-9,-6 H9 V6 H-9 Z" fill="var(--card, #fff)" stroke={color} strokeWidth={1.8} />
       <path d="M-3,6 V-2 H3 V6" fill={color} opacity={0.9} />
@@ -331,10 +331,11 @@ export interface ReadonlyOutdoorCampusSceneProps {
   selectedBuildingId?: string | null;
   onSelectBuilding?: (buildingId: string) => void;
   onDoubleClickBuilding?: (buildingId: string) => void;
+  onClickEntrance?: (buildingId: string) => void;
 }
 
 /** Read-only scene composition shared by Preview and the public campus map. */
-export function ReadonlyOutdoorCampusScene({ campus, showBuildings = true, selectedBuildingId, onSelectBuilding, onDoubleClickBuilding }: ReadonlyOutdoorCampusSceneProps) {
+export function ReadonlyOutdoorCampusScene({ campus, showBuildings = true, selectedBuildingId, onSelectBuilding, onDoubleClickBuilding, onClickEntrance }: ReadonlyOutdoorCampusSceneProps) {
   const buildingById = new Map(campus.buildings.map((building) => [building.id, building]));
   const stack: { zOrder: number; order: number; node: ReactNode }[] = [];
   campus.paths.forEach((path, index) => stack.push({ zOrder: -1000, order: index, node: <OutdoorPathVisual key={`path-${path.id}`} path={path} /> }));
@@ -420,7 +421,7 @@ export function ReadonlyOutdoorCampusScene({ campus, showBuildings = true, selec
       {stack.map((entry) => entry.node)}
       {showBuildings && campus.entrances.map((entrance) => {
         const building = buildingById.get(entrance.buildingId);
-        return building ? <OutdoorEntranceVisual key={`entrance-${entrance.id}`} building={building} entrance={entrance} /> : null;
+        return building ? <OutdoorEntranceVisual key={`entrance-${entrance.id}`} building={building} entrance={entrance} onClick={onClickEntrance} /> : null;
       })}
       {showBuildings && campus.exteriorEmergencyStairs.map((stair) => {
         const building = buildingById.get(stair.buildingId);

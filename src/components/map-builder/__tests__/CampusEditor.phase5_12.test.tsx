@@ -39,7 +39,7 @@ function baseCampus(): Campus {
 
 /** The primary manual-QA case: two same-style walkways (width 12) joined at an
  *  endpoint into an L-shape — one continuous Path Network. */
-function lCornerCampus(overrides: Partial<CampusPath>[] = []): Campus {
+function lCornerCampus(overrides: (Partial<CampusPath> | undefined)[] = []): Campus {
   const campus = baseCampus();
   const defaults: CampusPath[] = [
     { id: "p-a", name: "A", type: "walkway", color: "#94a3b8", width: 12, points: [{ x: 100, y: 100 }, { x: 200, y: 100 }], pathNetworkId: "pnet-1" },
@@ -55,16 +55,16 @@ function generatedCornerCampus(): Campus {
     { navigationVertexIds: ["b0", "b1"] },
   ]);
   campus.navNodes = [
-    { id: "na0", name: "A start", type: "outdoor", x: 100, y: 100, accessible: true, generatedFromPathVertices: [{ pathId: "p-a", vertexId: "a0" }] },
-    { id: "shared", name: "Junction", type: "outdoor", x: 200, y: 100, accessible: true, generatedFromPathVertices: [
+    { id: "na0", name: "A start", type: "outdoor", x: 100, y: 100, accessible: true, color: "#16a34a", generatedFromPathVertices: [{ pathId: "p-a", vertexId: "a0" }] },
+    { id: "shared", name: "Junction", type: "outdoor", x: 200, y: 100, accessible: true, color: "#16a34a", generatedFromPathVertices: [
       { pathId: "p-a", vertexId: "a1" },
       { pathId: "p-b", vertexId: "b0" },
     ] },
-    { id: "nb1", name: "B end", type: "outdoor", x: 200, y: 180, accessible: true, generatedFromPathVertices: [{ pathId: "p-b", vertexId: "b1" }] },
+    { id: "nb1", name: "B end", type: "outdoor", x: 200, y: 180, accessible: true, color: "#16a34a", generatedFromPathVertices: [{ pathId: "p-b", vertexId: "b1" }] },
   ];
   campus.navEdges = [
-    { id: "ea", startNodeId: "na0", endNodeId: "shared", bidirectional: true, distance: 100, generatedFromPathIds: ["p-a"] },
-    { id: "eb", startNodeId: "shared", endNodeId: "nb1", bidirectional: true, distance: 80, generatedFromPathIds: ["p-b"] },
+    { id: "ea", startNodeId: "na0", endNodeId: "shared", bidirectional: true, distance: 100, accessible: true, type: "walkway", color: "#16a34a", width: 3, generatedFromPathIds: ["p-a"] },
+    { id: "eb", startNodeId: "shared", endNodeId: "nb1", bidirectional: true, distance: 80, accessible: true, type: "walkway", color: "#16a34a", width: 3, generatedFromPathIds: ["p-b"] },
   ];
   return campus;
 }

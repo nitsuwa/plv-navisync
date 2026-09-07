@@ -787,7 +787,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
   const [renameDialog, setRenameDialog] = useState<{ id: string; name: string } | null>(null);
   const [renameValue, setRenameValue] = useState("");
   // ── Context menu ──
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; type: "building" | "marker" | "path" | "decorAsset"; id: string } | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; type: "building" | "marker" | "path" | "decorAsset" | "navNode"; id: string } | null>(null);
   // Generated junctions can belong to several physical Pathways. Alt-click
   // presents an explicit owner choice instead of guessing from coordinates.
   const [pathChoiceMenu, setPathChoiceMenu] = useState<{ x: number; y: number; pathIds: string[]; nodeIds?: string[] } | null>(null);
@@ -1389,7 +1389,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     // A segment projection is the more precise target whenever the pointer is
     // actually over the line. Do not let an endpoint merely inside the broad
     // path hit radius steal a midpoint click from the selected segment.
-    if (bestPoint && bestSegment) return bestSegment.distance <= bestPoint.distance ? bestSegment : bestPoint;
+    if (bestPoint && bestSegment) return (bestSegment as PathSnapTarget).distance <= (bestPoint as PathSnapTarget).distance ? bestSegment : bestPoint;
     return bestPoint ?? bestSegment;
   }, [pathPaintWidth, paths]);
 
@@ -1400,14 +1400,14 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
       const existing = path.points.some((point) => point.x === target.point.x && point.y === target.point.y);
       if (existing) return path;
       const vertexIds = path.navigationVertexIds?.length === path.points.length
-        ? [...path.navigationVertexIds.slice(0, target.segmentIndex + 1), genId("pv"), ...path.navigationVertexIds.slice(target.segmentIndex + 1)]
+        ? [...path.navigationVertexIds.slice(0, target.segmentIndex! + 1), genId("pv"), ...path.navigationVertexIds.slice(target.segmentIndex! + 1)]
         : undefined;
       return {
         ...path,
         points: [
-          ...path.points.slice(0, target.segmentIndex + 1),
+          ...path.points.slice(0, target.segmentIndex! + 1),
           target.point,
-          ...path.points.slice(target.segmentIndex + 1),
+          ...path.points.slice(target.segmentIndex! + 1),
         ],
         ...(vertexIds ? { navigationVertexIds: vertexIds } : {}),
       };
@@ -3150,7 +3150,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
             let usesEntranceGeometry = false;
             const hitEntranceNode = hit?.entranceId && !hit.floorId ? hit : undefined;
             if (hit && (hitEntranceNode || startNode?.entranceId)) {
-              const smart = entranceConnectorForNodes(startNode, hit);
+              const smart = entranceConnectorForNodes(startNode!, hit);
               if (smart) {
                 proposed = [...smart.bends, { x: hit.x, y: hit.y }];
                 smartBlocked = smart.blocked;
@@ -3175,7 +3175,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
               } else {
                 proposed = [...orthogonalBendsFor(anchor, { x: entranceHit.x, y: entranceHit.y }, undefined, undefined), { x: entranceHit.x, y: entranceHit.y }];
               }
-            } else if (hoveredPathTarget?.pathId === hoveredPathId && hoveredPathTarget.kind === "segment") {
+            } else if (hoveredPathTarget && hoveredPathTarget.pathId === hoveredPathId && hoveredPathTarget.kind === "segment") {
               const parent = startNode?.entranceId
                 ? buildings.find((building) => building.id === startNode.buildingId)
                 : undefined;
@@ -3610,7 +3610,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
       const alignedOptions = neighbors.map((neighbor) => e.shiftKey
         ? { point: constrainTo45Degrees(neighbor, rawPoint, cw, ch), guides: [] as { type: "h" | "v"; pos: number }[] }
         : pathAlignmentForSegment(neighbor, rawPoint));
-      const aligned = alignedOptions.reduce(
+      const aligned = alignedOptions.reduce<{ point: { x: number; y: number }; guides: { type: "h" | "v"; pos: number }[]; distance: number }>(
         (best, option) => {
           const dist = Math.hypot(option.point.x - rawPoint.x, option.point.y - rawPoint.y);
           return dist < best.distance ? { point: option.point, guides: option.guides, distance: dist } : best;
@@ -6364,7 +6364,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     const updatedPath = reconciled.paths.find((candidate) => candidate.id === target.pathId);
     const vertexId = updatedPath?.navigationVertexIds?.[pointIndex];
     const endNode = vertexId
-      ? reconciled.navNodes.find((node) => node.generatedFromPathVertices?.some((ref) => ref.pathId === target.pathId && ref.vertexId === vertexId))
+      ? (reconciled.navNodes ?? []).find((node) => node.generatedFromPathVertices?.some((ref) => ref.pathId === target.pathId && ref.vertexId === vertexId))
       : undefined;
     // Resolve the canonical node from the reconciled snapshot.  The fallback
     // by Stair identity handles the one-time legacy ID migration above while
@@ -6391,7 +6391,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
       setConnectBlocked(false);
     };
 
-    if (findDuplicateNavEdge(reconciled.navEdges, startNode.id, endNode.id)) {
+    if (findDuplicateNavEdge(reconciled.navEdges ?? [], startNode.id, endNode.id)) {
       toast.warning("Those points are already connected", "Select the existing connection to edit it.");
       clearConnect();
       return false;
@@ -6649,7 +6649,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     const ref = refs[0];
     const path = paths.find((candidate) => candidate.id === ref.pathId);
     const vertexIds = path?.navigationVertexIds;
-    const pointIndex = vertexIds?.length === path?.points.length ? vertexIds.indexOf(ref.vertexId) : -1;
+    const pointIndex = vertexIds && vertexIds.length === path?.points.length ? vertexIds.indexOf(ref.vertexId) : -1;
     if (!path || !vertexIds || pointIndex < 0 || path.locked) {
       toast.warning("Pathway point cannot be removed", path?.locked ? "Unlock the physical Pathway first." : "The physical Pathway vertex identity is unavailable.");
       return false;
@@ -6990,7 +6990,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     connectRedoStackRef.current = [];
     }
     setContextMenu({ x: e.clientX, y: e.clientY, type, id });
-    setSelected({ type, id });
+    setSelected({ type, id } as CampusSelection);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tool, layer]);
 
@@ -8682,8 +8682,6 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
                                   <span>Drag on the canvas to draw a path.</span>
                                   <HelpCircle
                                     className="mt-0.5 h-3 w-3 shrink-0"
-                                    aria-label="Pathway authoring help"
-                                    title="Guides help alignment. Hold Shift for 45° angles."
                                   />
                                 </div>
                               </div>
@@ -8951,7 +8949,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
                   aria-label="Save"
                   disabled={saving || isProcessing || !isDirty}
                   className={cn(
-                    "flex items-center justify-center gap-1 h-7 w-7 px-0 sm:h-8 sm:w-auto sm:px-2.5 rounded-md border text-[10px] font-bold transition-all disabled:opacity-50 disabled:cursor-not-allowed",
+                    "flex items-center justify-center gap-1.5 h-8 px-2.5 rounded-md border text-[10px] font-bold transition-all disabled:opacity-50 disabled:cursor-not-allowed shrink-0",
                     isDirty ? "border-primary text-primary bg-primary/10" : "border-border text-foreground hover:bg-muted"
                   )}
                 >
@@ -9000,7 +8998,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
                     (!onPreviewStudent && !isDirty && campus.publishStatus === "published" && !hasDraftChanges && campus.updatedAt === campus.publishedAt)
                   }
                   className={cn(
-                    "flex items-center justify-center gap-1 h-7 w-7 px-0 sm:h-8 sm:w-auto sm:px-2.5 rounded-md text-[10px] font-extrabold transition-all shadow-sm",
+                    "flex items-center justify-center gap-1.5 h-8 px-2.5 rounded-md text-[10px] font-extrabold transition-all shadow-sm shrink-0",
                     !publishingEnabled
                       ? "bg-muted text-muted-foreground cursor-not-allowed"
                       : isProcessing
@@ -9013,7 +9011,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
                   )}
                 >
                   {isProcessing ? (
-                    <><Loader2 className="w-3.5 h-3.5 animate-spin" /><span className="hidden sm:inline">Publishing</span></>
+                    <><Loader2 className="h-3.5 w-3.5 animate-spin" /><span className="hidden sm:inline">Publishing</span></>
                   ) : (
                     <><Globe className="h-3.5 w-3.5" /> <span data-toolbar-lifecycle-label className="hidden lg:inline">Review &amp; Publish</span><span data-toolbar-lifecycle-label className="hidden sm:inline lg:hidden">Review</span></>
                   )}
@@ -9705,7 +9703,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
           selNavNode={selected?.type === 'navNode' ? (campus.navNodes ?? []).find(n => n.id === selected.id) : undefined}
           selNavEdge={selected?.type === 'navEdge' ? (campus.navEdges ?? []).find(e => e.id === selected.id) : undefined}
           navEdgeBlocked={selected?.type === 'navEdge' ? outdoorBlockedEdgeIds.has(selected.id) : undefined}
-          selEventOverlay={selected?.type === 'event' ? (campus.eventOverlays ?? []).find(ev => ev.id === selected.id) : undefined}
+          selEventOverlay={selected?.type === 'eventOverlay' ? (campus.eventOverlays ?? []).find(ev => ev.id === selected.id) : undefined}
           selDecorAsset={selDecorAsset}
           allDecorAssets={campus.decorAssets ?? []}
           onUpdateDecorAsset={onUpdateDecorAsset}

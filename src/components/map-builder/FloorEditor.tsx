@@ -2118,7 +2118,7 @@ function FloorContextMenu({
         { id: "flip-swing", label: "Flip Swing Side", icon: DoorOpen },
       ]
     : [];
-  const actions = menu.type === "canvas" ? canvasActions : [...openingActions, ...objectActions];
+  const actions: { id: string; label: string; icon: React.ElementType; danger?: boolean }[] = menu.type === "canvas" ? canvasActions : [...openingActions, ...objectActions];
   return (
     <motion.div
       initial={{ opacity: 0, y: 4, scale: 0.98 }}
@@ -2394,9 +2394,9 @@ function PhysicalNavPropertiesPanel({
 
   const name = physicalType === "room" ? (physical as FloorRoom)?.name
     : physicalType === "door" ? (physical as FloorDoor)?.label ?? "Door"
-    : physicalType === "stairs" ? (physical as FloorStairs)?.name
-    : physicalType === "elevator" ? (physical as FloorElevatorItem)?.name
-    : (physical as FloorRamp)?.name ?? "Ramp";
+    : physicalType === "stairs" ? (physical as FloorStairs)?.label ?? "Stairs"
+    : physicalType === "elevator" ? (physical as FloorElevatorItem)?.label ?? "Elevator"
+    : (physical as FloorRamp)?.label ?? "Ramp";
 
   // Count connections for the linked node
   const connCount = linkedNode ? navEdges.filter((e) =>
@@ -2430,8 +2430,7 @@ function PhysicalNavPropertiesPanel({
           showView={false}
           onView={() => {
             if (onView) { onView(physicalType, physicalId); return; }
-            setNavPhysicalSelected(null);
-            setNavSelected({ type: "node", id: linkedNode!.id });
+            onClose();
           }}
           onAdd={() => onAdd?.(physicalType, physicalId)}
           onRemove={() => onRemove?.(physicalType, physicalId)}
@@ -3856,7 +3855,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
     onUpdate(nextCampus);
   }, [buildingId, campus, floor, onUpdate, pushHistory]);
 
-  const ensureCirculationGroupName = useCallback((type: "stairs" | "elevator", sharedId: string, fallbackName: string) => {
+  const ensureCirculationGroupName = useCallback((type: "stairs" | "elevator", sharedId: string, fallbackName: string): CirculationGroup[] => {
     const kind = type === "stairs" ? "stair" : "elevator";
     const groups = building?.circulationGroups ?? [];
     if (groups.some((g) => g.id === sharedId && g.kind === kind)) return groups;
@@ -4324,7 +4323,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
   }, [buildFloorUpdates, elevators, ensureCirculationGroupName, stairs]);
 
   const renameCirculationGroup = useCallback((type: "stairs" | "elevator", sharedId: string, name: string) => {
-    const kind = type === "stairs" ? "stair" : "elevator";
+    const kind: "stair" | "elevator" = type === "stairs" ? "stair" : "elevator";
     const groups = building?.circulationGroups ?? [];
     const nextGroups = groups.some((g) => g.id === sharedId && g.kind === kind)
       ? groups.map((g) => g.id === sharedId && g.kind === kind ? { ...g, name } : g)
@@ -4469,15 +4468,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
     // warnings/info may proceed (severity is the source of truth).
     const localGeometryErrors = validateFloorGeometry(floor).filter((issue) => issue.severity === "error");
     const canonicalFloorErrors = validationIssuesForFloor(campus, floorId).filter((issue) => issue.severity === "error");
-    const seen = new Set<string>();
-    const errors: FloorIssue[] = [];
-    for (const issue of [...localGeometryErrors, ...canonicalFloorErrors]) {
-      const selection = issue.selection ? `${issue.selection.type}|${issue.selection.id}` : "";
-      const key = `${issue.id ?? ""}|${selection}|${issue.message}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      errors.push(issue);
-    }
+    const errors = mergeFloorIssueLists(localGeometryErrors, canonicalFloorErrors);
     if (errors.length > 0) {
       setShowIssues(true);
       toast.error("Resolve floor issues before publishing", `${errors.length} blocking issue${errors.length !== 1 ? "s" : ""} found on this floor.`);

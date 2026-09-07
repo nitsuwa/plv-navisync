@@ -5,7 +5,7 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { BuildingCard } from "../components/ui/BuildingCard";
-import { MOCK_BUILDINGS } from "../data/mockData";
+
 import { useCampusData } from "../contexts/CampusDataContext";
 import { buildingsFromCampus } from "../lib/mapDataAdapter";
 import { cn } from "../lib/utils";
@@ -44,12 +44,12 @@ export function BuildingsPage() {
 
   const { activeCampus, loading: isCampusLoading } = usePublishedCampus();
 
-  // Derive buildings from published campus data, fall back to hardcoded data
+  // Derive buildings exclusively from the published campus
   const buildings: Building[] = useMemo(() => {
     if (activeCampus) {
       return buildingsFromCampus(activeCampus) as Building[];
     }
-    return MOCK_BUILDINGS;
+    return [];
   }, [activeCampus]);
 
   const isLoading = isCampusLoading;

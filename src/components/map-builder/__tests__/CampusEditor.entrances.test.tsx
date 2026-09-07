@@ -34,7 +34,7 @@ function makeCampus(): Campus {
       height: 80,
       color: "#1e40af",
       expanded: false,
-      floors: [{ id: "f1", buildingId: "b1", number: 1, label: "Ground Floor", rooms: [], paths: [] }],
+      floors: [{ id: "f1", buildingId: "b1", number: 1, label: "Ground Floor", rooms: [], paths: [], walls: [], doors: [], windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [] }],
     }],
     markers: [],
     paths: [],

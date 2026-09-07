@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useState } from "react";
 import { toast } from "sonner";
 import { CampusEditor } from "../CampusEditor";
@@ -21,7 +21,7 @@ function makeCampus(): Campus {
     features: { indoorNavigation: true, accessibilityNavigation: true, emergencyRoutes: true, issueReporting: true },
     canvasW: 900, canvasH: 680,
     settings: { accessibility: true, emergency: true, eventLayer: true, gps: true },
-    buildings: [{ id: "b1", name: "Building One", code: "B1", category: "Academic", description: "", x: 100, y: 100, width: 120, height: 80, color: "#1e40af", expanded: false, floors: [{ id: "f1", buildingId: "b1", number: 1, label: "Ground Floor", rooms: [], paths: [] }] }],
+    buildings: [{ id: "b1", name: "Building One", code: "B1", category: "Academic", description: "", x: 100, y: 100, width: 120, height: 80, color: "#1e40af", expanded: false, floors: [{ id: "f1", buildingId: "b1", number: 1, label: "Ground Floor", rooms: [], paths: [], walls: [], doors: [], windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [] }] }],
     markers: [], paths: [], navNodes: [], navEdges: [],
     createdAt: "2026-01-01", updatedAt: "2026-01-01",
   };
@@ -121,13 +121,13 @@ describe("B5 Phase 6.9 — Connect clicks fall through the edge hit polyline (di
     fireEvent.keyDown(window, { key: "m" });
     fireEvent.mouseDown(svg, { clientX: 300, clientY: 300, bubbles: true });
     fireEvent.mouseUp(svg, { bubbles: true });
-    const w = latest!.navNodes.find((n) => n.x === 300 && n.y === 300);
+    const w = latest!.navNodes!.find((n) => n.x === 300 && n.y === 300);
     expect(w).toBeTruthy();
     // The split edge A→W must carry a REAL distance (not the old zero-length bug).
-    const aToW = latest!.navEdges.find((e) => e.startNodeId === "nnA" && e.endNodeId === w!.id);
+    const aToW = latest!.navEdges!.find((e) => e.startNodeId === "nnA" && e.endNodeId === w!.id);
     expect(aToW).toBeTruthy();
     expect(aToW!.distance).toBeGreaterThan(0);
-    const wToB = latest!.navEdges.find((e) => e.startNodeId === w!.id && e.endNodeId === "nnB");
+    const wToB = latest!.navEdges!.find((e) => e.startNodeId === w!.id && e.endNodeId === "nnB");
     expect(wToB).toBeTruthy();
     expect(wToB!.distance).toBeGreaterThan(0);
 
@@ -151,7 +151,7 @@ describe("B5 Phase 6.9 — Connect clicks fall through the edge hit polyline (di
     // Commit to C: one clean L-bend, W→C.
     fireEvent.mouseDown(svg, { clientX: 400, clientY: 200, bubbles: true });
     fireEvent.mouseUp(svg, { bubbles: true });
-    const wc = latest!.navEdges.find((e) => e.startNodeId === w!.id && e.endNodeId === "nnC");
+    const wc = latest!.navEdges!.find((e) => e.startNodeId === w!.id && e.endNodeId === "nnC");
     expect(wc).toBeTruthy();
     expect(wc!.bendPoints).toEqual([{ x: 400, y: 300 }]);
   });
@@ -176,7 +176,7 @@ describe("B5 Phase 6.9 — Connect clicks fall through the edge hit polyline (di
     // No crash, source still armed — finish the connection to confirm commit.
     fireEvent.mouseDown(svg, { clientX: 400, clientY: 200, bubbles: true });
     fireEvent.mouseUp(svg, { bubbles: true });
-    expect(latest!.navEdges.find((e) => e.startNodeId === "nnA" && e.endNodeId === "nnC")).toBeTruthy();
+    expect(latest!.navEdges!.find((e) => e.startNodeId === "nnA" && e.endNodeId === "nnC")).toBeTruthy();
   });
 });
 
@@ -242,7 +242,7 @@ describe("B5 Phase 6.9 — Floor-parity node dragging (no grid snap, edges can b
     // 317 is NOT a multiple of 20 — grid snap would round to 320.
     fireEvent.mouseMove(svg, { clientX: 317, clientY: 200, bubbles: true });
     fireEvent.mouseUp(svg, { bubbles: true });
-    const moved = latest!.navNodes.find((n) => n.id === "nnB");
+    const moved = latest!.navNodes!.find((n) => n.id === "nnB");
     expect(moved).toMatchObject({ x: 317, y: 200 });
   });
 
@@ -262,7 +262,7 @@ describe("B5 Phase 6.9 — Floor-parity node dragging (no grid snap, edges can b
     // Dragging toward y=200 (within the 12px SNAP_DIST of nnB's y) aligns Y.
     fireEvent.mouseMove(svg, { clientX: 160, clientY: 204, bubbles: true });
     fireEvent.mouseUp(svg, { bubbles: true });
-    const moved = latest!.navNodes.find((n) => n.id === "nnD");
+    const moved = latest!.navNodes!.find((n) => n.id === "nnD");
     expect(moved!.y).toBe(200);
   });
 });

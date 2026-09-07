@@ -5,11 +5,13 @@
  * This allows the public map to display data created in the Map Builder.
  */
 
-import type { SharedCampusData, SharedBuilding } from "../contexts/CampusDataContext";
+import type { Campus, CampusBuilding, FloorPlan, FloorRoom } from "../components/map-builder/types";
 import { entranceDescription, entranceDisplayName } from "./buildingEntrances";
 
-function visibleBuildings(campus: SharedCampusData): SharedBuilding[] {
-  return campus.buildings.filter((building) => (building as SharedBuilding & { visible?: boolean }).visible !== false);
+type CampusWithOptionalBuildings = Campus & { buildings: CampusBuilding[] };
+
+function visibleBuildings(campus: CampusWithOptionalBuildings): CampusBuilding[] {
+  return campus.buildings.filter((building) => building.visible !== false);
 }
 
 // ── Building position map (legacy B_POS format) ────────────────────────────
@@ -17,7 +19,7 @@ export interface BuildingPosition {
   x: number; y: number; w: number; h: number; color: string;
 }
 
-export function buildingPositionsFromCampus(campus: SharedCampusData): Record<string, BuildingPosition> {
+export function buildingPositionsFromCampus(campus: CampusWithOptionalBuildings): Record<string, BuildingPosition> {
   const result: Record<string, BuildingPosition> = {};
   for (const b of visibleBuildings(campus)) {
     result[b.id] = { x: b.x, y: b.y, w: b.width, h: b.height, color: b.color };
@@ -37,20 +39,23 @@ interface LegacyFloorPlan {
   buildingId: string; buildingName: string; floors: LegacyFloor[];
 }
 
-export function floorPlansFromCampus(campus: SharedCampusData): Record<string, LegacyFloorPlan> {
+export function floorPlansFromCampus(campus: CampusWithOptionalBuildings): Record<string, LegacyFloorPlan> {
   const result: Record<string, LegacyFloorPlan> = {};
   for (const b of visibleBuildings(campus)) {
     if (!b.floors || b.floors.length === 0) continue;
     result[b.id] = {
       buildingId: b.id,
       buildingName: b.name,
-      floors: b.floors.map(f => ({
+      floors: b.floors.map((f: FloorPlan) => ({
         number: f.number,
         label: f.label,
-        rooms: f.rooms.map(r => ({
+        rooms: (f.rooms || []).map((r: FloorRoom) => ({
           id: r.id,
           name: r.name,
-          x: r.x, y: r.y, w: r.w, h: r.h,
+          x: r.x,
+          y: r.y,
+          w: r.w,
+          h: r.h,
           type: r.type,
           accessibility: r.accessibility,
         })),
@@ -61,30 +66,22 @@ export function floorPlansFromCampus(campus: SharedCampusData): Record<string, L
 }
 
 // ── Building info (legacy MOCK_BUILDINGS format) ──────────────────────────
-interface LegacyBuilding {
-  id: string; name: string; code: string;
-  description: string; category: string;
-  floor_count: number;
-  image_url?: string;
-  latitude?: number; longitude?: number;
-  departments?: string[];
-  operating_hours?: string;
-  contact?: string;
-  created_at: string;
-}
+import type { Building } from "../types";
 
-export function buildingsFromCampus(campus: SharedCampusData): LegacyBuilding[] {
+type LegacyBuilding = Building;
+
+export function buildingsFromCampus(campus: CampusWithOptionalBuildings): LegacyBuilding[] {
   return visibleBuildings(campus).map(b => ({
     id: b.id,
     name: b.name,
     code: b.code,
     description: b.description || "",
-    category: b.category.toLowerCase(),
+    category: b.category.toLowerCase() as Building["category"],
     floor_count: b.floors.length,
-    image_url: b.image_url,
-    operating_hours: b.operating_hours,
-    contact: b.contact,
-    departments: b.facilities || [],
+    image_url: undefined,
+    operating_hours: undefined,
+    contact: undefined,
+    departments: [],
     created_at: new Date().toISOString(),
   }));
 }
@@ -95,18 +92,28 @@ export const STATUS_COLOR = { Open: "text-green-500", Busy: "text-amber-500", Cl
 export const STATUS_DOT = { Open: "bg-green-500", Busy: "bg-amber-500", Closed: "bg-red-500" };
 
 // ── Facilities & accessibility (helpers from building data) ────────────────
-export function facilitiesFromCampus(campus: SharedCampusData): Record<string, string[]> {
+export function facilitiesFromCampus(campus: CampusWithOptionalBuildings): Record<string, string[]> {
   const result: Record<string, string[]> = {};
   for (const b of visibleBuildings(campus)) {
-    result[b.id] = b.facilities || [];
+    result[b.id] = [];
   }
   return result;
 }
 
-export function accessibilityFromCampus(campus: SharedCampusData): Record<string, string[]> {
+export function accessibilityFromCampus(campus: CampusWithOptionalBuildings): Record<string, string[]> {
   const result: Record<string, string[]> = {};
   for (const b of visibleBuildings(campus)) {
-    result[b.id] = b.accessibility || [];
+    const acc = b.accessibility;
+    if (acc && typeof acc === "object") {
+      const items: string[] = [];
+      if (acc.wheelchairAccessible) items.push("Wheelchair Accessible");
+      if (acc.hasElevator) items.push("Elevator Available");
+      if (acc.hasRamp) items.push("Ramp Access");
+      if (acc.accessibleEntrance) items.push("Accessible Entrance");
+      result[b.id] = items;
+    } else {
+      result[b.id] = [];
+    }
   }
   return result;
 }
@@ -143,7 +150,7 @@ function mapMarkerTypeToLocationType(markerType: string): CampusLocation["type"]
  * and markers.  Prefixes IDs with `campus-` to distinguish from manual
  * locations.
  */
-export function locationsFromCampus(campus: SharedCampusData): CampusLocation[] {
+export function locationsFromCampus(campus: CampusWithOptionalBuildings): CampusLocation[] {
   const locations: CampusLocation[] = [];
 
   // 1. Outdoor markers (entrances, parking, landmarks, etc.)
@@ -153,7 +160,6 @@ export function locationsFromCampus(campus: SharedCampusData): CampusLocation[] 
       name: m.name,
       type: mapMarkerTypeToLocationType(m.type),
       description: `Auto-generated from campus map marker`,
-      building_id: m.building_id,
     });
   }
 
@@ -227,7 +233,7 @@ export function locationsFromCampus(campus: SharedCampusData): CampusLocation[] 
 
 /** Build a human-readable room label, e.g. "Room 204 — Computer Laboratory" */
 function buildRoomLabel(
-  building: SharedBuilding,
+  building: CampusBuilding,
   floor: { number: number; label: string },
   room: { name: string; type?: string }
 ): string {

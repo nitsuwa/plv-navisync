@@ -35,7 +35,7 @@ function makeCampus(): Campus {
       height: 80,
       color: "#1e40af",
       expanded: false,
-      floors: [{ id: "f1", buildingId: "b1", number: 1, label: "Ground Floor", rooms: [], paths: [] }],
+      floors: [{ id: "f1", buildingId: "b1", number: 1, label: "Ground Floor", rooms: [], paths: [], walls: [], doors: [], windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [] }],
     }],
     markers: [],
     paths: [],
@@ -113,7 +113,7 @@ function buildingGroup(container: HTMLElement): SVGGElement {
     (r) => r.getAttribute("fill") === "#1e40af"
   );
   expect(rect, "building body rect").toBeTruthy();
-  return rect!.parentElement as SVGGElement;
+  return rect!.parentElement as unknown as SVGGElement;
 }
 
 function buildingGroupByFill(container: HTMLElement, fill: string): SVGGElement {
@@ -121,7 +121,7 @@ function buildingGroupByFill(container: HTMLElement, fill: string): SVGGElement 
     (r) => r.getAttribute("fill") === fill
   );
   expect(rect, `building body rect ${fill}`).toBeTruthy();
-  return rect!.parentElement as SVGGElement;
+  return rect!.parentElement as unknown as SVGGElement;
 }
 
 function decorGroup(container: HTMLElement, type = "tree"): SVGGElement {
@@ -501,7 +501,7 @@ describe("B5 Phase 1.5 — navigation authoring UX / tool architecture correctio
       r.getAttribute("width") === "120"
     )?.closest("g") ?? null;
     expect(building, "building body group").toBeTruthy();
-    fireEvent.mouseDown(building, { clientX: 130, clientY: 130, bubbles: true });
+    fireEvent.mouseDown(building!, { clientX: 130, clientY: 130, bubbles: true });
     fireEvent.mouseMove(svg, { clientX: 220, clientY: 200, bubbles: true });
     fireEvent.mouseUp(svg, { bubbles: true });
     expect(latest).toBeUndefined();

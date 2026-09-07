@@ -6,7 +6,7 @@ import {
   Accessibility,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
-import { MOCK_BUILDINGS } from "../data/mockData";
+
 import { usePublishedCampus } from "../hooks";
 import { buildingsFromCampus, facilitiesFromCampus, accessibilityFromCampus } from "../lib/mapDataAdapter";
 import { BuildingCategoryBadge } from "../components/ui/Badge";
@@ -38,40 +38,26 @@ export function BuildingDetailsPage() {
   // detail page resolves seeded building ids like b_scb consistently.
   const { activeCampus } = usePublishedCampus();
 
-  // Derive buildings from published campus data, fall back to hardcoded data
+  // Derive buildings exclusively from the published campus
   const buildings: Building[] = useMemo(() => {
     if (activeCampus) {
       return buildingsFromCampus(activeCampus) as Building[];
     }
-    return MOCK_BUILDINGS;
+    return [];
   }, [activeCampus]);
 
   const buildingFacilities: Record<string, string[]> = useMemo(() => {
     if (activeCampus) {
       return facilitiesFromCampus(activeCampus);
     }
-    return {
-      b1: ["Lecture Rooms", "Computer Labs", "Faculty Offices", "Study Rooms"],
-      b2: ["Admin Offices", "Registrar", "Cashier", "Conference Rooms", "VP Office"],
-      b3: ["Main Library", "Reading Rooms", "Computer Access", "Study Booths", "Media Section"],
-      b4: ["Engineering Labs", "Workshops", "Drawing Rooms", "Project Rooms"],
-      b5: ["Main Gymnasium", "Bleachers", "Locker Rooms", "Equipment Storage"],
-      b6: ["Student Council Office", "Canteen", "Student Lounge", "Organization Rooms"],
-    };
+    return {};
   }, [activeCampus]);
 
   const buildingAccessibility: Record<string, string[]> = useMemo(() => {
     if (activeCampus) {
       return accessibilityFromCampus(activeCampus);
     }
-    return {
-      b1: ["Wheelchair Ramp (G/F)", "Accessible Restroom", "Wide Corridors"],
-      b2: ["Elevator (all floors)", "Wheelchair Ramp", "Accessible Parking", "Accessible Restroom"],
-      b3: ["Ground Floor Access", "Wide Doorways", "Accessible Restroom"],
-      b4: ["Ramp at Main Entrance", "Accessible Lab Benches"],
-      b5: ["Level Entry", "Accessible Seating", "Accessible Restroom"],
-      b6: ["Ground Floor Access", "Wide Corridors"],
-    };
+    return {};
   }, [activeCampus]);
 
   useEffect(() => {

@@ -870,24 +870,24 @@ export const SEED_CAMPUSES: Campus[] = [
         x: 170, y: 70, width: 240, height: 110, color: "#7c3aed", expanded: false,
         floors: [
           {
-            id: "f_scb_1", number: 1, label: "Ground Floor", paths: [],
+            id: "f_scb_1", buildingId: "b_scb", number: 1, label: "Ground Floor", paths: [], walls: [], doors: [], windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [],
             rooms: [
-              { id: "scb_r1", name: "Lobby", type: "lobby", x: 20, y: 60, w: 80, h: 50 },
-              { id: "scb_r2", name: "Registration", type: "office", x: 120, y: 60, w: 70, h: 45 },
-              { id: "scb_r3", name: "Student Lounge", type: "lounge", x: 200, y: 60, w: 90, h: 50 },
-              { id: "scb_r4", name: "Stairs A", type: "stairs", x: 310, y: 60, w: 30, h: 30 },
-              { id: "scb_r5", name: "Restroom", type: "restroom", x: 350, y: 60, w: 40, h: 30 },
+              { id: "scb_r1", name: "Lobby", type: "lobby", x: 20, y: 60, w: 80, h: 50, floorId: "f_scb_1", buildingId: "b_scb" },
+              { id: "scb_r2", name: "Registration", type: "office", x: 120, y: 60, w: 70, h: 45, floorId: "f_scb_1", buildingId: "b_scb" },
+              { id: "scb_r3", name: "Student Lounge", type: "lounge", x: 200, y: 60, w: 90, h: 50, floorId: "f_scb_1", buildingId: "b_scb" },
+              { id: "scb_r4", name: "Stairs A", type: "stairs", x: 310, y: 60, w: 30, h: 30, floorId: "f_scb_1", buildingId: "b_scb" },
+              { id: "scb_r5", name: "Restroom", type: "restroom", x: 350, y: 60, w: 40, h: 30, floorId: "f_scb_1", buildingId: "b_scb" },
             ],
           },
           {
-            id: "f_scb_2", number: 2, label: "Floor 2", paths: [],
+            id: "f_scb_2", buildingId: "b_scb", number: 2, label: "Floor 2", paths: [], walls: [], doors: [], windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [],
             rooms: [
-              { id: "scb_r6", name: "Org Room 201", type: "office", x: 20, y: 60, w: 80, h: 50 },
-              { id: "scb_r7", name: "Org Room 202", type: "office", x: 120, y: 60, w: 80, h: 50 },
-              { id: "scb_r8", name: "Stairs A", type: "stairs", x: 310, y: 60, w: 30, h: 30 },
+              { id: "scb_r6", name: "Org Room 201", type: "office", x: 20, y: 60, w: 80, h: 50, floorId: "f_scb_2", buildingId: "b_scb" },
+              { id: "scb_r7", name: "Org Room 202", type: "office", x: 120, y: 60, w: 80, h: 50, floorId: "f_scb_2", buildingId: "b_scb" },
+              { id: "scb_r8", name: "Stairs A", type: "stairs", x: 310, y: 60, w: 30, h: 30, floorId: "f_scb_2", buildingId: "b_scb" },
             ],
           },
-          { id: "f_scb_3", number: 3, label: "Floor 3", paths: [], rooms: [] },
+          { id: "f_scb_3", buildingId: "b_scb", number: 3, label: "Floor 3", paths: [], rooms: [], walls: [], doors: [], windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [] },
         ],
       },
       {
@@ -896,12 +896,12 @@ export const SEED_CAMPUSES: Campus[] = [
         x: 480, y: 85, width: 110, height: 70, color: "#d97706", expanded: false,
         floors: [
           {
-            id: "f_can_1", number: 1, label: "Ground Floor", paths: [],
+            id: "f_can_1", buildingId: "b_canteen", number: 1, label: "Ground Floor", paths: [], walls: [], doors: [], windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [],
             rooms: [
-              { id: "can_r1", name: "Dining Area", type: "canteen", x: 20, y: 40, w: 180, h: 90 },
-              { id: "can_r2", name: "Kitchen", type: "kitchen", x: 220, y: 40, w: 100, h: 70 },
-              { id: "can_r3", name: "Stairs", type: "stairs", x: 340, y: 40, w: 30, h: 30 },
-              { id: "can_r4", name: "Restroom", type: "restroom", x: 380, y: 40, w: 40, h: 30 },
+              { id: "can_r1", name: "Dining Area", type: "canteen", x: 20, y: 40, w: 180, h: 90, floorId: "f_can_1", buildingId: "b_canteen" },
+              { id: "can_r2", name: "Kitchen", type: "kitchen", x: 220, y: 40, w: 100, h: 70, floorId: "f_can_1", buildingId: "b_canteen" },
+              { id: "can_r3", name: "Stairs", type: "stairs", x: 340, y: 40, w: 30, h: 30, floorId: "f_can_1", buildingId: "b_canteen" },
+              { id: "can_r4", name: "Restroom", type: "restroom", x: 380, y: 40, w: 40, h: 30, floorId: "f_can_1", buildingId: "b_canteen" },
             ],
           },
         ],
@@ -912,7 +912,7 @@ export const SEED_CAMPUSES: Campus[] = [
         x: 130, y: 400, width: 100, height: 190, color: "#1e40af", expanded: false,
         floors: [
           {
-            id: "f_caba_1", number: 1, label: "Ground Floor",
+            id: "f_caba_1", buildingId: "b_caba", number: 1, label: "Ground Floor", windows: [], furniture: [], ramps: [],
             canvasW: 600, canvasH: 260,
             paths: [
               { id: "path_hallway", points: [{ x: 8, y: 110 }, { x: 300, y: 110 }, { x: 592, y: 110 }], type: "walkway", color: "#94a3b8", width: 3 },
@@ -922,30 +922,30 @@ export const SEED_CAMPUSES: Campus[] = [
             ],
             rooms: [
               // ── Upper Row (above hallway) ──────────────────────────────
-              { id: "caba_r_stairs_l", name: "Stairs (Left)",             x: 8,   y: 10,  w: 34,  h: 80,  type: "stairs"    },
-              { id: "caba_r_elec",     name: "Electrical Room",           x: 42,  y: 10,  w: 50,  h: 36,  type: "storage"   },
-              { id: "caba_r_stor1",    name: "Storage (Left)",            x: 42,  y: 46,  w: 50,  h: 44,  type: "storage"   },
-              { id: "caba_r102",       name: "CABA-102",                  x: 92,  y: 10,  w: 106, h: 80,  type: "classroom" },
-              { id: "caba_r103",       name: "CABA-103",                  x: 198, y: 10,  w: 106, h: 80,  type: "classroom" },
-              { id: "caba_r104",       name: "CABA-104",                  x: 304, y: 10,  w: 106, h: 80,  type: "classroom" },
-              { id: "caba_r_cr_f",     name: "Female CR",                 x: 410, y: 10,  w: 26,  h: 80,  type: "restroom"  },
-              { id: "caba_r_cr_m",     name: "Male CR",                   x: 436, y: 10,  w: 27,  h: 45,  type: "restroom"  },
-              { id: "caba_r_pwd",      name: "PWD CR",                    x: 436, y: 55,  w: 27,  h: 35,  type: "restroom"  },
-              { id: "caba_r_elev",     name: "Elevator",                  x: 463, y: 35,  w: 45,  h: 55,  type: "elevator"  },
-              { id: "caba_r_stor_rt",  name: "Storage Room (Right Top)",  x: 508, y: 10,  w: 50,  h: 36,  type: "storage"   },
-              { id: "caba_r_stor_rb",  name: "Storage (Right)",           x: 508, y: 46,  w: 50,  h: 44,  type: "storage"   },
-              { id: "caba_r_stairs_r", name: "Stairs (Right)",            x: 558, y: 10,  w: 34,  h: 80,  type: "stairs"    },
+              { id: "caba_r_stairs_l", name: "Stairs (Left)",             x: 8,   y: 10,  w: 34,  h: 80,  type: "stairs", floorId: "f_caba_1", buildingId: "b_caba"    },
+              { id: "caba_r_elec",     name: "Electrical Room",           x: 42,  y: 10,  w: 50,  h: 36,  type: "storage", floorId: "f_caba_1", buildingId: "b_caba"   },
+              { id: "caba_r_stor1",    name: "Storage (Left)",            x: 42,  y: 46,  w: 50,  h: 44,  type: "storage", floorId: "f_caba_1", buildingId: "b_caba"   },
+              { id: "caba_r102",       name: "CABA-102",                  x: 92,  y: 10,  w: 106, h: 80,  type: "classroom", floorId: "f_caba_1", buildingId: "b_caba" },
+              { id: "caba_r103",       name: "CABA-103",                  x: 198, y: 10,  w: 106, h: 80,  type: "classroom", floorId: "f_caba_1", buildingId: "b_caba" },
+              { id: "caba_r104",       name: "CABA-104",                  x: 304, y: 10,  w: 106, h: 80,  type: "classroom", floorId: "f_caba_1", buildingId: "b_caba" },
+              { id: "caba_r_cr_f",     name: "Female CR",                 x: 410, y: 10,  w: 26,  h: 80,  type: "restroom", floorId: "f_caba_1", buildingId: "b_caba"  },
+              { id: "caba_r_cr_m",     name: "Male CR",                   x: 436, y: 10,  w: 27,  h: 45,  type: "restroom", floorId: "f_caba_1", buildingId: "b_caba"  },
+              { id: "caba_r_pwd",      name: "PWD CR",                    x: 436, y: 55,  w: 27,  h: 35,  type: "restroom", floorId: "f_caba_1", buildingId: "b_caba"  },
+              { id: "caba_r_elev",     name: "Elevator",                  x: 463, y: 35,  w: 45,  h: 55,  type: "elevator", floorId: "f_caba_1", buildingId: "b_caba"  },
+              { id: "caba_r_stor_rt",  name: "Storage Room (Right Top)",  x: 508, y: 10,  w: 50,  h: 36,  type: "storage", floorId: "f_caba_1", buildingId: "b_caba"   },
+              { id: "caba_r_stor_rb",  name: "Storage (Right)",           x: 508, y: 46,  w: 50,  h: 44,  type: "storage", floorId: "f_caba_1", buildingId: "b_caba"   },
+              { id: "caba_r_stairs_r", name: "Stairs (Right)",            x: 558, y: 10,  w: 34,  h: 80,  type: "stairs", floorId: "f_caba_1", buildingId: "b_caba"    },
 
               // ── Middle Corridor / Hallway ─────────────────────────────
-              { id: "caba_r_hallway",  name: "Hallway",                   x: 8,   y: 90,  w: 584, h: 40,  type: "hallway"   },
+              { id: "caba_r_hallway",  name: "Hallway",                   x: 8,   y: 90,  w: 584, h: 40,  type: "hallway", floorId: "f_caba_1", buildingId: "b_caba"   },
 
               // ── Lower Row (below hallway) ──────────────────────────────
-              { id: "caba_r_biz",      name: "Business Office Sim Room",  x: 8,   y: 130, w: 90,  h: 80,  type: "lab"       },
-              { id: "caba_r101",       name: "CABA-101",                  x: 98,  y: 130, w: 106, h: 80,  type: "classroom" },
-              { id: "caba_r_lobby",    name: "Lobby",                     x: 204, y: 130, w: 106, h: 80,  type: "lobby"     },
-              { id: "caba_r_veranda",  name: "Veranda",                   x: 204, y: 210, w: 106, h: 35,  type: "lobby"     },
-              { id: "caba_r_grad",     name: "Graduate Studies Office",   x: 310, y: 130, w: 78,  h: 80,  type: "office"    },
-              { id: "caba_r_sim",      name: "Simulation Room",           x: 388, y: 130, w: 170, h: 80,  type: "lab"       },
+              { id: "caba_r_biz",      name: "Business Office Sim Room",  x: 8,   y: 130, w: 90,  h: 80,  type: "lab", floorId: "f_caba_1", buildingId: "b_caba"       },
+              { id: "caba_r101",       name: "CABA-101",                  x: 98,  y: 130, w: 106, h: 80,  type: "classroom", floorId: "f_caba_1", buildingId: "b_caba" },
+              { id: "caba_r_lobby",    name: "Lobby",                     x: 204, y: 130, w: 106, h: 80,  type: "lobby", floorId: "f_caba_1", buildingId: "b_caba"     },
+              { id: "caba_r_veranda",  name: "Veranda",                   x: 204, y: 210, w: 106, h: 35,  type: "lobby", floorId: "f_caba_1", buildingId: "b_caba"     },
+              { id: "caba_r_grad",     name: "Graduate Studies Office",   x: 310, y: 130, w: 78,  h: 80,  type: "office", floorId: "f_caba_1", buildingId: "b_caba"    },
+              { id: "caba_r_sim",      name: "Simulation Room",           x: 388, y: 130, w: 170, h: 80,  type: "lab", floorId: "f_caba_1", buildingId: "b_caba"       },
             ],
             walls: [
               // ── Outer Perimeter ─────────────────────────────────────────
@@ -1028,22 +1028,22 @@ export const SEED_CAMPUSES: Campus[] = [
         x: 620, y: 60, width: 230, height: 130, color: "#0d9488", expanded: false,
         floors: [
           {
-            id: "f_coed_1", number: 1, label: "Ground Floor", paths: [],
+            id: "f_coed_1", buildingId: "b_coed", number: 1, label: "Ground Floor", paths: [], walls: [], doors: [], windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [],
             rooms: [
-              { id: "coed_r1", name: "Lobby", type: "lobby", x: 20, y: 60, w: 80, h: 50 },
-              { id: "coed_r2", name: "Room 301", type: "classroom", x: 120, y: 60, w: 70, h: 45 },
-              { id: "coed_r3", name: "Room 302", type: "classroom", x: 200, y: 60, w: 70, h: 45 },
-              { id: "coed_r4", name: "Room 303", type: "classroom", x: 280, y: 60, w: 70, h: 45 },
-              { id: "coed_r5", name: "Stairs A", type: "stairs", x: 360, y: 60, w: 30, h: 30 },
+              { id: "coed_r1", name: "Lobby", type: "lobby", x: 20, y: 60, w: 80, h: 50, floorId: "f_coed_1", buildingId: "b_coed" },
+              { id: "coed_r2", name: "Room 301", type: "classroom", x: 120, y: 60, w: 70, h: 45, floorId: "f_coed_1", buildingId: "b_coed" },
+              { id: "coed_r3", name: "Room 302", type: "classroom", x: 200, y: 60, w: 70, h: 45, floorId: "f_coed_1", buildingId: "b_coed" },
+              { id: "coed_r4", name: "Room 303", type: "classroom", x: 280, y: 60, w: 70, h: 45, floorId: "f_coed_1", buildingId: "b_coed" },
+              { id: "coed_r5", name: "Stairs A", type: "stairs", x: 360, y: 60, w: 30, h: 30, floorId: "f_coed_1", buildingId: "b_coed" },
             ],
           },
           {
-            id: "f_coed_2", number: 2, label: "Floor 2", paths: [],
+            id: "f_coed_2", buildingId: "b_coed", number: 2, label: "Floor 2", paths: [], walls: [], doors: [], windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [],
             rooms: [
-              { id: "coed_r6", name: "Room 401", type: "classroom", x: 20, y: 60, w: 80, h: 50 },
-              { id: "coed_r7", name: "Room 402", type: "classroom", x: 120, y: 60, w: 70, h: 45 },
-              { id: "coed_r8", name: "Room 403", type: "classroom", x: 200, y: 60, w: 70, h: 45 },
-              { id: "coed_r9", name: "Stairs A", type: "stairs", x: 360, y: 60, w: 30, h: 30 },
+              { id: "coed_r6", name: "Room 401", type: "classroom", x: 20, y: 60, w: 80, h: 50, floorId: "f_coed_2", buildingId: "b_coed" },
+              { id: "coed_r7", name: "Room 402", type: "classroom", x: 120, y: 60, w: 70, h: 45, floorId: "f_coed_2", buildingId: "b_coed" },
+              { id: "coed_r8", name: "Room 403", type: "classroom", x: 200, y: 60, w: 70, h: 45, floorId: "f_coed_2", buildingId: "b_coed" },
+              { id: "coed_r9", name: "Stairs A", type: "stairs", x: 360, y: 60, w: 30, h: 30, floorId: "f_coed_2", buildingId: "b_coed" },
             ],
           },
         ],
@@ -1054,20 +1054,20 @@ export const SEED_CAMPUSES: Campus[] = [
         x: 660, y: 330, width: 100, height: 230, color: "#059669", expanded: false,
         floors: [
           {
-            id: "f_ceit_1", number: 1, label: "Ground Floor", paths: [],
+            id: "f_ceit_1", buildingId: "b_ceit", number: 1, label: "Ground Floor", paths: [], walls: [], doors: [], windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [],
             rooms: [
-              { id: "ceit_r1", name: "Lobby", type: "lobby", x: 20, y: 60, w: 80, h: 50 },
-              { id: "ceit_r2", name: "Lab 501", type: "lab", x: 120, y: 60, w: 90, h: 55 },
-              { id: "ceit_r3", name: "Lab 502", type: "lab", x: 230, y: 60, w: 90, h: 55 },
-              { id: "ceit_r4", name: "Stairs A", type: "stairs", x: 340, y: 60, w: 30, h: 30 },
+              { id: "ceit_r1", name: "Lobby", type: "lobby", x: 20, y: 60, w: 80, h: 50, floorId: "f_ceit_1", buildingId: "b_ceit" },
+              { id: "ceit_r2", name: "Lab 501", type: "lab", x: 120, y: 60, w: 90, h: 55, floorId: "f_ceit_1", buildingId: "b_ceit" },
+              { id: "ceit_r3", name: "Lab 502", type: "lab", x: 230, y: 60, w: 90, h: 55, floorId: "f_ceit_1", buildingId: "b_ceit" },
+              { id: "ceit_r4", name: "Stairs A", type: "stairs", x: 340, y: 60, w: 30, h: 30, floorId: "f_ceit_1", buildingId: "b_ceit" },
             ],
           },
           {
-            id: "f_ceit_2", number: 2, label: "Floor 2", paths: [],
+            id: "f_ceit_2", buildingId: "b_ceit", number: 2, label: "Floor 2", paths: [], walls: [], doors: [], windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [],
             rooms: [
-              { id: "ceit_r5", name: "Lab 601", type: "lab", x: 20, y: 60, w: 90, h: 55 },
-              { id: "ceit_r6", name: "Lab 602", type: "lab", x: 130, y: 60, w: 90, h: 55 },
-              { id: "ceit_r7", name: "Stairs A", type: "stairs", x: 340, y: 60, w: 30, h: 30 },
+              { id: "ceit_r5", name: "Lab 601", type: "lab", x: 20, y: 60, w: 90, h: 55, floorId: "f_ceit_2", buildingId: "b_ceit" },
+              { id: "ceit_r6", name: "Lab 602", type: "lab", x: 130, y: 60, w: 90, h: 55, floorId: "f_ceit_2", buildingId: "b_ceit" },
+              { id: "ceit_r7", name: "Stairs A", type: "stairs", x: 340, y: 60, w: 30, h: 30, floorId: "f_ceit_2", buildingId: "b_ceit" },
             ],
           },
         ],
@@ -1078,9 +1078,9 @@ export const SEED_CAMPUSES: Campus[] = [
         x: 110, y: 300, width: 80, height: 55, color: "#64748b", expanded: false,
         floors: [
           {
-            id: "f_guard_1", number: 1, label: "Ground Floor", paths: [],
+            id: "f_guard_1", buildingId: "b_guard", number: 1, label: "Ground Floor", paths: [], walls: [], doors: [], windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [],
             rooms: [
-              { id: "guard_r1", name: "Guard Post", type: "office", x: 20, y: 60, w: 120, h: 70 },
+              { id: "guard_r1", name: "Guard Post", type: "office", x: 20, y: 60, w: 120, h: 70, floorId: "f_guard_1", buildingId: "b_guard" },
             ],
           },
         ],
@@ -1236,10 +1236,10 @@ export const SEED_CAMPUSES: Campus[] = [
         x: 100, y: 80, width: 120, height: 75, color: "#1e40af", expanded: false,
         floors: [
           {
-            id: "fn_1_1", number: 1, label: "Ground Floor", paths: [],
+            id: "fn_1_1", buildingId: "bn_1", number: 1, label: "Ground Floor", paths: [], walls: [], doors: [], windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [],
             rooms: [
-              { id: "rn1", name: "Chemistry Lab", type: "lab", x: 20, y: 40, w: 100, h: 60 },
-              { id: "rn2", name: "Physics Lab", type: "lab", x: 140, y: 40, w: 100, h: 60 },
+              { id: "rn1", name: "Chemistry Lab", type: "lab", x: 20, y: 40, w: 100, h: 60, floorId: "fn_1_1", buildingId: "bn_1" },
+              { id: "rn2", name: "Physics Lab", type: "lab", x: 140, y: 40, w: 100, h: 60, floorId: "fn_1_1", buildingId: "bn_1" },
             ],
           },
         ],
@@ -1248,7 +1248,7 @@ export const SEED_CAMPUSES: Campus[] = [
         id: "bn_2", name: "Student Dormitory", code: "DORM", category: "Dormitory",
         description: "On-campus student housing.",
         x: 350, y: 100, width: 100, height: 80, color: "#1e3a8a", expanded: false,
-        floors: [{ id: "fn_2_1", number: 1, label: "Ground Floor", paths: [], rooms: [] }],
+        floors: [{ id: "fn_2_1", buildingId: "bn_2", number: 1, label: "Ground Floor", paths: [], rooms: [], walls: [], doors: [], windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [] }],
       },
     ],
   },
