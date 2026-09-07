@@ -52,3 +52,37 @@ export function nextDefaultBuildingIdentity(
     index += 1;
   }
 }
+
+/**
+ * Return a persistence-safe identity for a building copy.
+ *
+ * Building codes are unique per campus in the database (including rows that
+ * have been archived by the structure-save RPC). Copying a building must
+ * therefore never carry the source code forward. Use the same short,
+ * human-readable BLDG-NN sequence as new buildings instead of exposing an
+ * implementation/id token in the code shown to administrators.
+ */
+export function nextBuildingCopyIdentity(
+  source: Partial<BuildingIdentity>,
+  buildings: ReadonlyArray<Partial<BuildingIdentity>>,
+  reserved: ReadonlyArray<Partial<BuildingIdentity>> = [],
+  _copyToken = "",
+): BuildingIdentity {
+  const sourceName = typeof source.name === "string" && source.name.trim().length > 0
+    ? source.name.trim()
+    : "Building";
+  const identity = nextDefaultBuildingIdentity(buildings, reserved);
+
+  const usedNames = new Set<string>();
+  for (const building of [...buildings, ...reserved]) {
+    const name = normalizedName(building.name);
+    if (name) usedNames.add(name);
+  }
+  let name = `${sourceName} (copy)`;
+  let nameIndex = 2;
+  while (usedNames.has(normalizedName(name))) {
+    name = `${sourceName} (copy ${nameIndex})`;
+    nameIndex += 1;
+  }
+  return { name, code: identity.code };
+}

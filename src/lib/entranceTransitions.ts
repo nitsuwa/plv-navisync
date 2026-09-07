@@ -1,11 +1,36 @@
 import type { Campus, CampusBuilding, CampusEntrance, FloorDoor, FloorPlan, NavigationEdge, NavigationNode } from "../components/map-builder/types";
 import { genId as defaultGenId } from "../components/map-builder/constants";
 import { entranceDisplayName, entranceWorldPosition } from "./buildingEntrances";
-import { createNavNode, DEFAULT_NAV_NODE_COLOR, findEntranceNavNode } from "./navigationGraph";
+import { createNavNode, navEdgeDistance, findEntranceNavNode, syncEntranceNodePositions, pruneOrphanedEntranceNodes, DEFAULT_NAV_NODE_COLOR } from "./navigationGraph";
 import { entranceConnectorDistance, entranceConnectorGeometry } from "./entranceConnector";
-import { ROOM_DOOR_EDGE_TYPE } from "./indoorNavigationGraph";
+import { createIndoorNavNode, ROOM_DOOR_EDGE_TYPE } from "./indoorNavigationGraph";
+import { DEFAULT_FLOOR_CANVAS, clampWallOpeningOffset, maxOpeningWidthForWall, wallLength } from "./floorGeometry";
 
 export const ENTRANCE_TRANSITION_EDGE_TYPE = "entrance_transition";
+
+/** Apply a Floor Door edit to its canonical outdoor owner before reconciliation. */
+export function syncEntrancesFromFloorDoors(campus: Campus, buildingId: string, floorId: string, previousDoors: FloorDoor[]): Campus {
+  const buildings = campus.buildings.map((building) => {
+    if (building.id !== buildingId) return building;
+    const floor = building.floors.find((item) => item.id === floorId);
+    if (!floor) return building;
+    const removed = new Set(previousDoors.filter((door) => door.buildingEntranceId && !floor.doors.some((item) => item.id === door.id)).map((door) => door.buildingEntranceId));
+    const entrances = (building.entrances ?? []).filter((entrance) => !removed.has(entrance.id)).map((entrance) => {
+      const door = floor.doors.find((item) => item.buildingEntranceId === entrance.id);
+      const wall = door && floor.walls.find((item) => item.id === door.wallId);
+      if (!door || !wall) return entrance;
+      const horizontal = entrance.edge === "top" || entrance.edge === "bottom";
+      const start = horizontal ? Math.min(wall.x1, wall.x2) : Math.min(wall.y1, wall.y2);
+      const length = horizontal ? Math.abs(wall.x2 - wall.x1) : Math.abs(wall.y2 - wall.y1);
+      const offset = Math.max(0, Math.min(1, ((horizontal ? door.x : door.y) - start) / Math.max(1, length)));
+      return { ...entrance, offset };
+    });
+    return { ...building, entrances };
+  });
+  const synced = syncEntranceNodePositions(buildings, campus.navNodes ?? []);
+  const graph = pruneOrphanedEntranceNodes(buildings, synced, campus.navEdges ?? []);
+  return reconcileEntranceDoors({ ...campus, buildings, navNodes: graph.nodes, navEdges: graph.edges });
+}
 
 export interface DoorOption {
   floorId: string;
@@ -173,7 +198,20 @@ export function removeEntranceOutdoorConnection(
  * deleted.  This is intentionally scoped to edges touching an explicit
  * Entrance node; unrelated manual graph edges are never swept.
  */
-export function reconcileEntranceOutdoorConnections(campus: Campus): Campus {
+export interface EntranceOutdoorReconciliationOptions {
+  /**
+   * Preserve authored bend geometry while a physical Pathway target moves.
+   * Entrance edits still use the normal connector resolver; Pathway transforms
+   * pass this flag so a committed Connect route is not re-authored as an
+   * automatic shortest connector on every pointer frame.
+   */
+  preserveAuthoredGeometry?: boolean;
+}
+
+export function reconcileEntranceOutdoorConnections(
+  campus: Campus,
+  options: EntranceOutdoorReconciliationOptions = {},
+): Campus {
   const nodes = campus.navNodes ?? [];
   const nodeIds = new Set(nodes.map((node) => node.id));
   const entranceNodes = new Map(nodes.filter((node) => node.entranceId && !node.floorId).map((node) => [node.id, node]));
@@ -193,6 +231,20 @@ export function reconcileEntranceOutdoorConnections(campus: Campus): Campus {
     const target = nodes.find((node) => node.id === targetId);
     if (!building || !entrance || !target) {
       return edge.accessible === accessible ? edge : { ...edge, accessible };
+    }
+    if (options.preserveAuthoredGeometry) {
+      // The bend list is the user's committed geometry.  Keep it byte-for-byte
+      // stable while the target node follows its owning Pathway; only the
+      // endpoint-derived distance is refreshed for routing cost/labels.
+      const startNode = nodes.find((node) => node.id === edge.startNodeId);
+      const endNode = nodes.find((node) => node.id === edge.endNodeId);
+      if (startNode && endNode) {
+        const points = [startNode, ...(edge.bendPoints ?? []), endNode];
+        const distance = entranceConnectorDistance(points);
+        return edge.accessible === accessible && edge.distance === distance
+          ? edge
+          : { ...edge, accessible, distance };
+      }
     }
     const geometry = entranceConnectorGeometry(
       building,
@@ -253,6 +305,348 @@ export function entryFloorForBuilding(building: Pick<CampusBuilding, "floors"> |
   return building?.floors?.[0];
 }
 
+/** Resolve the Ground-floor Door position from the same edge + normalized
+ * offset used by the canonical outdoor Building Entrance.  Floor plans use a
+ * stable authoring canvas, so this remains valid through building move,
+ * resize, and rotation without storing a second raw campus coordinate. */
+export function entranceDoorPosition(
+  floor: Pick<FloorPlan, "canvasW" | "canvasH" | "walls">,
+  entrance: Pick<CampusEntrance, "edge" | "offset">,
+): { x: number; y: number } {
+  const perimeterWall = (floor.walls ?? []).find((wall) => wall.perimeterSide === entrance.edge)
+    ?? (floor.walls ?? []).find((wall) => wall.managedKind === "perimeter" && (
+      (entrance.edge === "top" && wall.y1 === 0 && wall.y2 === 0)
+      || (entrance.edge === "bottom" && wall.y1 === floor.canvasH && wall.y2 === floor.canvasH)
+      || (entrance.edge === "left" && wall.x1 === 0 && wall.x2 === 0)
+      || (entrance.edge === "right" && wall.x1 === floor.canvasW && wall.x2 === floor.canvasW)
+    ));
+  if (perimeterWall) {
+    const length = wallLength(perimeterWall);
+    if (length > 0) {
+      const offset = Math.max(0, Math.min(1, Number.isFinite(Number(entrance.offset)) ? Number(entrance.offset) : 0.5));
+      // Entrance offsets are measured in the canonical perimeter direction:
+      // left→right on horizontal sides and top→bottom on vertical sides.
+      // Managed floor walls intentionally use a clockwise winding, so the
+      // bottom and left wall endpoints run in the opposite direction. Using
+      // side semantics here prevents a physical outside move from mirroring
+      // the generated Door inside the floor editor.
+      const minX = Math.min(perimeterWall.x1, perimeterWall.x2);
+      const maxX = Math.max(perimeterWall.x1, perimeterWall.x2);
+      const minY = Math.min(perimeterWall.y1, perimeterWall.y2);
+      const maxY = Math.max(perimeterWall.y1, perimeterWall.y2);
+      switch (entrance.edge) {
+        case "top": return { x: Math.round(minX + (maxX - minX) * offset), y: Math.round((perimeterWall.y1 + perimeterWall.y2) / 2) };
+        case "right": return { x: Math.round((perimeterWall.x1 + perimeterWall.x2) / 2), y: Math.round(minY + (maxY - minY) * offset) };
+        case "left": return { x: Math.round((perimeterWall.x1 + perimeterWall.x2) / 2), y: Math.round(minY + (maxY - minY) * offset) };
+        case "bottom":
+        default: return { x: Math.round(minX + (maxX - minX) * offset), y: Math.round((perimeterWall.y1 + perimeterWall.y2) / 2) };
+      }
+    }
+  }
+  const width = floor.canvasW ?? DEFAULT_FLOOR_CANVAS.w;
+  const height = floor.canvasH ?? DEFAULT_FLOOR_CANVAS.h;
+  const offset = Math.max(0, Math.min(1, Number.isFinite(Number(entrance.offset)) ? Number(entrance.offset) : 0.5));
+  switch (entrance.edge) {
+    case "top": return { x: Math.round(width * offset), y: 0 };
+    case "right": return { x: width, y: Math.round(height * offset) };
+    case "left": return { x: 0, y: Math.round(height * offset) };
+    case "bottom":
+    default: return { x: Math.round(width * offset), y: height };
+  }
+}
+
+function entrancePerimeterWall(
+  floor: Pick<FloorPlan, "canvasW" | "canvasH" | "walls">,
+  edge: Pick<CampusEntrance, "edge">["edge"],
+) {
+  return (floor.walls ?? []).find((wall) => wall.perimeterSide === edge)
+    ?? (floor.walls ?? []).find((wall) => wall.managedKind === "perimeter" && (
+      (edge === "top" && wall.y1 === 0 && wall.y2 === 0)
+      || (edge === "bottom" && wall.y1 === floor.canvasH && wall.y2 === floor.canvasH)
+      || (edge === "left" && wall.x1 === 0 && wall.x2 === 0)
+      || (edge === "right" && wall.x1 === floor.canvasW && wall.x2 === floor.canvasW)
+    ));
+}
+
+function entranceDoorWallOffset(
+  wall: NonNullable<ReturnType<typeof entrancePerimeterWall>>,
+  entrance: Pick<CampusEntrance, "edge" | "offset">,
+): number {
+  const requested = normalizedEntranceOffset(entrance);
+  const ascending = entrance.edge === "top" || entrance.edge === "bottom"
+    ? wall.x2 >= wall.x1
+    : wall.y2 >= wall.y1;
+  return ascending ? requested : 1 - requested;
+}
+
+function entranceDoorWidth(wall: ReturnType<typeof entrancePerimeterWall> | undefined): number {
+  if (!wall) return 28;
+  return Math.round(maxOpeningWidthForWall(wall, 32, 28));
+}
+
+function entranceDoorWallId(floor: Pick<FloorPlan, "canvasW" | "canvasH" | "walls">, entrance: Pick<CampusEntrance, "edge">): string | undefined {
+  return (floor.walls ?? []).find((wall) => wall.perimeterSide === entrance.edge)?.id
+    ?? (floor.walls ?? []).find((wall) => wall.managedKind === "perimeter" && (
+      (entrance.edge === "top" && wall.y1 === 0 && wall.y2 === 0)
+      || (entrance.edge === "bottom" && wall.y1 === floor.canvasH && wall.y2 === floor.canvasH)
+      || (entrance.edge === "left" && wall.x1 === 0 && wall.x2 === 0)
+      || (entrance.edge === "right" && wall.x1 === floor.canvasW && wall.x2 === floor.canvasW)
+    ))?.id;
+}
+
+function normalizedEntranceOffset(entrance: Pick<CampusEntrance, "offset">): number {
+  const value = Number(entrance.offset);
+  return Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0.5));
+}
+
+function generatedEntranceDoorLabel(entrance: CampusEntrance, index = 0): string {
+  const name = entrance.name?.trim();
+  if (name) return /door$/i.test(name) ? name : `${name} Door`;
+  switch (entrance.type) {
+    case "service": return "Service Entrance";
+    case "emergency_exit":
+    case "emergency": return "Emergency Exit";
+    default: return entrance.isPrimary ? "Main Entrance" : `Entrance ${index + 1}`;
+  }
+}
+
+/**
+ * Reconcile Building Entrance -> Ground-floor Door infrastructure. A Door
+ * created by this helper is marked with `buildingEntranceId` so it remains
+ * associated with the canonical perimeter relationship while still being
+ * editable on its valid parent wall. Existing manually linked Doors are
+ * preserved; only Entrances without a link get a generated Door. The returned
+ * Campus is referentially stable when nothing changed, which makes it safe to
+ * call after hydration and ordinary building edits.
+ */
+export function reconcileEntranceDoors(
+  campus: Campus,
+  genId: (prefix: string) => string = defaultGenId,
+): Campus {
+  let buildingsChanged = false;
+  const nextBuildings = (campus.buildings ?? []).map((building) => {
+    const entrances = building.entrances ?? [];
+    const validEntranceIds = new Set(entrances.map((entrance) => entrance.id));
+    const entryFloorId = building.floors[0]?.id;
+    let changed = false;
+    let floors = building.floors.map((floor) => {
+      const nextDoors = (floor.doors ?? []).filter((door) => {
+        if (!door.buildingEntranceId) return true;
+        // Generated Entrance Doors belong to the building's current entry
+        // floor (the ordered floor array is authoritative). Move the
+        // relationship on reconciliation instead of leaving a stale Door on
+        // a floor that was demoted/reordered.
+        const keep = validEntranceIds.has(door.buildingEntranceId)
+          && (!entryFloorId || floor.id === entryFloorId);
+        if (!keep) changed = true;
+        return keep;
+      });
+      if (nextDoors.length !== (floor.doors ?? []).length) return { ...floor, doors: nextDoors };
+      return floor;
+    });
+    const entryFloor = entryFloorForBuilding({ floors });
+    if (entryFloor) {
+      let entryDoors = entryFloor.doors ?? [];
+      // Generated doors need stable, human-identifiable labels even when a
+      // building has several entrances with the same/default name. Keep the
+      // primary entrance's familiar label, then add a deterministic suffix
+      // only when another generated entrance would collide with it.
+      const generatedDoorLabels = new Set<string>();
+      for (const entrance of entrances) {
+        const linkedTransition = findEntranceTransitionForEntrance(campus.navNodes, campus.navEdges, building.id, entrance.id);
+        const linkedDoorNode = linkedTransition ? doorNodeForEdge(linkedTransition, campus.navNodes ?? []) : undefined;
+        const linkedDoor = linkedDoorNode
+          ? entryDoors.find((door) => door.id === linkedDoorNode.doorId)
+          : undefined;
+        // Existing manually linked Door records remain authoritative. A
+        // generated Door is identified explicitly and is safe to update.
+        let generated = entryDoors.find((door) => door.buildingEntranceId === entrance.id);
+        if (!generated && linkedDoor) continue;
+        const perimeterWall = entrancePerimeterWall(entryFloor, entrance.edge);
+        const width = perimeterWall ? maxOpeningWidthForWall(perimeterWall, generated?.width ?? 32, 28) : (generated?.width ?? 32);
+        const requestedOffset = normalizedEntranceOffset(entrance);
+        const wallOffset = perimeterWall
+          ? clampWallOpeningOffset(perimeterWall, width, entranceDoorWallOffset(perimeterWall, entrance))
+          : requestedOffset;
+        const canonicalOffset = perimeterWall
+          ? (entranceDoorWallOffset(perimeterWall, entrance) === requestedOffset ? wallOffset : 1 - wallOffset)
+          : requestedOffset;
+        const position = entranceDoorPosition(entryFloor, { ...entrance, offset: canonicalOffset });
+        const wallId = entranceDoorWallId(entryFloor, entrance);
+        const offset = wallOffset;
+        const baseDoorLabel = generatedEntranceDoorLabel(entrance, entrances.indexOf(entrance));
+        let doorLabel = baseDoorLabel;
+        let labelSuffix = 2;
+        while (generatedDoorLabels.has(doorLabel.toLowerCase())) {
+          doorLabel = `${baseDoorLabel} ${labelSuffix}`;
+          labelSuffix += 1;
+        }
+        generatedDoorLabels.add(doorLabel.toLowerCase());
+        if (!generated) {
+          generated = {
+            id: genId("dr"),
+            x: position.x,
+            y: position.y,
+            width,
+            ...(wallId ? { wallId, offset } : {}),
+            direction: "double" as const,
+            color: "#b45309",
+            label: doorLabel,
+            locked: false,
+            visible: true,
+            buildingEntranceId: entrance.id,
+            ...(entrance.type === "emergency_exit" || entrance.type === "emergency"
+              ? { isEmergencyExit: true }
+              : {}),
+          };
+          entryDoors = [...entryDoors, generated];
+          changed = true;
+        } else {
+          const nextGenerated = {
+            ...generated,
+            x: position.x,
+            y: position.y,
+            width,
+            ...(wallId ? { wallId, offset } : { wallId: undefined, offset: undefined }),
+            label: doorLabel,
+            locked: false,
+            visible: generated.visible !== false,
+            ...(entrance.type === "emergency_exit" || entrance.type === "emergency"
+              ? { isEmergencyExit: true }
+              : { isEmergencyExit: undefined }),
+          };
+          if (JSON.stringify(nextGenerated) !== JSON.stringify(generated)) {
+            entryDoors = entryDoors.map((door) => door.id === generated!.id ? nextGenerated : door);
+            generated = nextGenerated;
+            changed = true;
+          }
+        }
+
+        const doorFloorId = entryFloor.id;
+        let doorNode = (campus.navNodes ?? []).find((node) =>
+          node.buildingId === building.id && node.floorId === doorFloorId && node.doorId === generated!.id,
+        );
+        if (!doorNode) {
+          doorNode = createIndoorNavNode({
+            id: genId("nn"),
+            x: generated!.x,
+            y: generated!.y,
+            campusId: campus.id,
+            buildingId: building.id,
+            floorId: doorFloorId,
+            doorId: generated!.id,
+            buildingEntranceId: entrance.id,
+            name: generated!.label,
+            type: "hallway",
+            accessible: entrance.accessible !== false,
+            emergencySafe: entrance.type === "emergency_exit" || entrance.type === "emergency" ? true : undefined,
+          });
+          changed = true;
+        }
+      }
+      if (entryDoors !== entryFloor.doors) {
+        floors = floors.map((floor) => floor.id === entryFloor.id ? { ...floor, doors: entryDoors } : floor);
+      }
+    }
+    if (!changed) return building;
+    buildingsChanged = true;
+    return { ...building, floors };
+  });
+
+  // The loop above creates Door nodes lazily; rebuild from the resulting
+  // physical records so legacy campuses and newly-added Entrances converge in
+  // one pass without duplicate IDs.
+  let next: Campus = buildingsChanged ? { ...campus, buildings: nextBuildings } : campus;
+  const nextNodes = [...(next.navNodes ?? [])];
+  let nodesChanged = false;
+  const liveGeneratedDoorKeys = new Set(
+    (next.buildings ?? []).flatMap((building) => {
+      const floor = entryFloorForBuilding(building);
+      return (floor?.doors ?? []).filter((door) => door.buildingEntranceId).map((door) => `${building.id}:${floor!.id}:${door.id}`);
+    }),
+  );
+  for (let index = nextNodes.length - 1; index >= 0; index -= 1) {
+    const node = nextNodes[index];
+    if (node.buildingEntranceId && !liveGeneratedDoorKeys.has(`${node.buildingId}:${node.floorId}:${node.doorId}`)) {
+      nextNodes.splice(index, 1);
+      nodesChanged = true;
+    }
+  }
+  for (const building of next.buildings ?? []) {
+    const entryFloor = entryFloorForBuilding(building);
+    if (!entryFloor) continue;
+    for (const door of entryFloor.doors ?? []) {
+      if (!door.buildingEntranceId) continue;
+        const entrance = building.entrances?.find((item) => item.id === door.buildingEntranceId);
+        if (!entrance) continue;
+        const existing = nextNodes.find((node) => node.buildingId === building.id && node.floorId === entryFloor.id && node.doorId === door.id);
+        if (existing) {
+          const perimeterWall = entrancePerimeterWall(entryFloor, entrance.edge);
+          const width = door.width;
+          const requestedOffset = normalizedEntranceOffset(entrance);
+          const wallOffset = perimeterWall
+            ? clampWallOpeningOffset(perimeterWall, width, entranceDoorWallOffset(perimeterWall, entrance))
+            : requestedOffset;
+          const canonicalOffset = perimeterWall
+            ? (entranceDoorWallOffset(perimeterWall, entrance) === requestedOffset ? wallOffset : 1 - wallOffset)
+            : requestedOffset;
+          const position = entranceDoorPosition(entryFloor, { ...entrance, offset: canonicalOffset });
+          if (existing.x !== position.x || existing.y !== position.y || existing.buildingEntranceId !== entrance.id || existing.name !== door.label) {
+            const index = nextNodes.indexOf(existing);
+            nextNodes[index] = { ...existing, x: position.x, y: position.y, buildingEntranceId: entrance.id, name: door.label || "Entrance" };
+            nodesChanged = true;
+        }
+      } else {
+        nextNodes.push(createIndoorNavNode({
+          id: genId("nn"), x: door.x, y: door.y, campusId: next.id,
+          buildingId: building.id, floorId: entryFloor.id, doorId: door.id,
+          buildingEntranceId: entrance.id, name: door.label || "Entrance", type: "hallway",
+          accessible: entrance.accessible !== false,
+          emergencySafe: entrance.type === "emergency_exit" || entrance.type === "emergency" ? true : undefined,
+        }));
+        nodesChanged = true;
+      }
+    }
+  }
+  if (nodesChanged) next = { ...next, navNodes: nextNodes };
+  if (nodesChanged) {
+    const liveNodeIds = new Set(nextNodes.map((node) => node.id));
+    const retainedEdges = (next.navEdges ?? []).filter((edge) => liveNodeIds.has(edge.startNodeId) && liveNodeIds.has(edge.endNodeId));
+    if (retainedEdges.length !== (next.navEdges ?? []).length) next = { ...next, navEdges: retainedEdges };
+  }
+  // Indoor walking links are explicitly authored with Connect. Reconciliation
+  // owns only the Door anchor and its outdoor Entrance bridge.
+  const generatedDoorNodes = nextNodes.filter((node) => node.buildingEntranceId && node.floorId && node.doorId);
+  let nextEdges = [...(next.navEdges ?? [])];
+  let edgesChanged = false;
+  const generatedDoorNodeIds = new Set(generatedDoorNodes.map((node) => node.id));
+  const refreshedEdges = nextEdges.map((edge) => {
+    if (!generatedDoorNodeIds.has(edge.startNodeId) && !generatedDoorNodeIds.has(edge.endNodeId)) return edge;
+    const start = nextNodes.find((node) => node.id === edge.startNodeId);
+    const end = nextNodes.find((node) => node.id === edge.endNodeId);
+    if (!start || !end || edge.type === ENTRANCE_TRANSITION_EDGE_TYPE || edge.type === ROOM_DOOR_EDGE_TYPE) return edge;
+    const distance = navEdgeDistance(start, end);
+    return edge.distance === distance ? edge : { ...edge, distance };
+  });
+  if (refreshedEdges.some((edge, index) => edge !== nextEdges[index])) {
+    nextEdges = refreshedEdges;
+    edgesChanged = true;
+  }
+  if (edgesChanged) next = { ...next, navEdges: nextEdges };
+  const linked = (next.buildings ?? []).reduce((current, building) => {
+    for (const entrance of building.entrances ?? []) {
+      const floor = entryFloorForBuilding(building);
+      const door = floor?.doors?.find((candidate) => candidate.buildingEntranceId === entrance.id);
+      const node = door && (current.navNodes ?? []).find((candidate) => candidate.buildingId === building.id && candidate.floorId === floor!.id && candidate.doorId === door.id);
+      if (node && !findEntranceTransitionForEntrance(current.navNodes, current.navEdges, building.id, entrance.id)) {
+        return linkEntranceToIndoorDoor(current, building.id, entrance.id, node.id, genId);
+      }
+    }
+    return current;
+  }, next);
+  return reconcileEntranceTransitions(linked);
+}
+
 export function doorDisplayName(door: Pick<FloorDoor, "label" | "id">, floor: Pick<FloorPlan, "doors">): string {
   const label = door.label?.trim();
   if (label) return label;
@@ -290,7 +684,7 @@ export function entranceIndoorLinkStatus(
     warning: !onEntryFloor
       ? "Connected door is no longer on the building entry floor."
       : hidden ? "Linked Door is hidden."
-        : !doorNavigationConnected ? "Connect the Door to the indoor walking network." : undefined,
+        : !doorNavigationConnected ? "Connect the linked indoor Door to the indoor Walking Network." : undefined,
   };
 }
 
@@ -327,7 +721,7 @@ export function doorEntranceLinkStatus(
     warning: !onEntryFloor
       ? "Connected door is no longer on the building entry floor."
       : hidden ? "Linked Door is hidden."
-        : !doorNavigationConnected ? "Connect the Door to the indoor walking network." : undefined,
+        : !doorNavigationConnected ? "Connect the linked indoor Door to the indoor Walking Network." : undefined,
   };
 }
 
@@ -469,5 +863,7 @@ export function reconcileEntranceTransitions(campus: Campus): Campus {
     const accessible = entrance?.accessible !== false;
     return edge.accessible === accessible ? edge : { ...edge, accessible };
   });
-  return nextEdges === campus.navEdges ? campus : { ...campus, navEdges: nextEdges };
+  const unchanged = nextEdges.length === (campus.navEdges ?? []).length
+    && nextEdges.every((edge, index) => edge === (campus.navEdges ?? [])[index]);
+  return unchanged ? campus : { ...campus, navEdges: nextEdges };
 }

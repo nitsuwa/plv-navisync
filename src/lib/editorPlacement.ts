@@ -248,6 +248,133 @@ export function polylineCrossesObstacle(
 }
 
 /**
+ * A source-aware variant for outdoor Connect.  A connector owned by a
+ * building is allowed to leave that building through its own perimeter side,
+ * but only for the first, outward-facing segment.  The normal obstacle rules
+ * resume immediately afterwards; unrelated buildings and solid assets are
+ * never exempted.
+ */
+export interface OutdoorSourceDeparture {
+  buildingId: string;
+  edge?: "top" | "right" | "bottom" | "left";
+}
+
+function worldToBuildingLocal(
+  building: { x: number; y: number; width: number; height: number; rotation?: number },
+  point: { x: number; y: number },
+) {
+  const rotation = building.rotation ?? 0;
+  const cx = building.x + building.width / 2;
+  const cy = building.y + building.height / 2;
+  const radians = (-rotation * Math.PI) / 180;
+  const cos = Math.cos(radians);
+  const sin = Math.sin(radians);
+  const dx = point.x - cx;
+  const dy = point.y - cy;
+  return {
+    x: dx * cos - dy * sin,
+    y: dx * sin + dy * cos,
+  };
+}
+
+function sourceOutwardVector(
+  building: { rotation?: number },
+  edge: OutdoorSourceDeparture["edge"],
+) {
+  const baseAngle = edge === "top" ? -90 : edge === "right" ? 0 : edge === "bottom" ? 90 : 180;
+  const radians = ((baseAngle + (building.rotation ?? 0)) * Math.PI) / 180;
+  return { x: Math.cos(radians), y: Math.sin(radians) };
+}
+
+function sourceIsOnPerimeter(
+  building: { x: number; y: number; width: number; height: number; rotation?: number },
+  point: { x: number; y: number },
+  edge?: OutdoorSourceDeparture["edge"],
+) {
+  const local = worldToBuildingLocal(building, point);
+  const halfW = building.width / 2;
+  const halfH = building.height / 2;
+  const tolerance = 4;
+  const distances = {
+    top: Math.abs(local.y + halfH),
+    right: Math.abs(local.x - halfW),
+    bottom: Math.abs(local.y - halfH),
+    left: Math.abs(local.x + halfW),
+  } as const;
+  const nearest = edge ? distances[edge] : Math.min(...Object.values(distances));
+  return nearest <= tolerance;
+}
+
+function pointStrictlyInsideBuilding(
+  building: { x: number; y: number; width: number; height: number; rotation?: number },
+  point: { x: number; y: number },
+) {
+  const local = worldToBuildingLocal(building, point);
+  const epsilon = 0.5;
+  return local.x > -building.width / 2 + epsilon
+    && local.x < building.width / 2 - epsilon
+    && local.y > -building.height / 2 + epsilon
+    && local.y < building.height / 2 - epsilon;
+}
+
+/**
+ * Validate a Connect polyline while allowing only the minimal departure from
+ * a source-owned building boundary.  This is deliberately separate from the
+ * general obstacle check so existing authored edges retain their strict
+ * collision semantics.
+ */
+export function polylineCrossesObstacleAfterSourceDeparture(
+  points: { x: number; y: number }[],
+  buildings: { id?: string; x: number; y: number; width: number; height: number; rotation?: number }[],
+  assets: { x: number; y: number; width: number; height: number; type: string; rotation?: number; scale?: number }[],
+  source?: OutdoorSourceDeparture,
+): boolean {
+  if (!source || points.length < 2) return polylineCrossesObstacle(points, buildings, assets);
+  const owner = buildings.find((building) => building.id === source.buildingId);
+  if (!owner) return polylineCrossesObstacle(points, buildings, assets);
+
+  const first = points[0];
+  const firstNext = points[1];
+  if (!sourceIsOnPerimeter(owner, first, source.edge)) return polylineCrossesObstacle(points, buildings, assets);
+
+  // A source connector may leave only in the outward direction.  This rejects
+  // boundary-hugging and inward first legs while permitting the short exit
+  // segment through its own wall.
+  const local = worldToBuildingLocal(owner, first);
+  const halfW = owner.width / 2;
+  const halfH = owner.height / 2;
+  const inferredEdge = source.edge ?? (
+    Math.abs(local.y + halfH) <= Math.min(Math.abs(local.x - halfW), Math.abs(local.y - halfH), Math.abs(local.x + halfW))
+      ? "top"
+      : Math.abs(local.x - halfW) <= Math.min(Math.abs(local.y - halfH), Math.abs(local.x + halfW))
+        ? "right"
+        : Math.abs(local.y - halfH) <= Math.abs(local.x + halfW)
+          ? "bottom"
+          : "left"
+  );
+  const outward = sourceOutwardVector(owner, inferredEdge);
+  const dx = firstNext.x - first.x;
+  const dy = firstNext.y - first.y;
+  if (dx * outward.x + dy * outward.y <= 0.5) return true;
+
+  // The first segment may touch the perimeter, but it must never pass through
+  // the source building's interior.  Sample densely enough to catch a short
+  // inward segment that the legacy five-sample check would miss.
+  for (let t = 0.02; t < 1; t += 0.05) {
+    const sample = { x: first.x + dx * t, y: first.y + dy * t };
+    if (pointStrictlyInsideBuilding(owner, sample)) return true;
+  }
+
+  for (let index = 0; index < points.length - 1; index += 1) {
+    const segmentBuildings = index === 0
+      ? buildings.filter((building) => building !== owner && (!owner.id || building.id !== owner.id))
+      : buildings;
+    if (polylineCrossesObstacle([points[index], points[index + 1]], segmentBuildings, assets)) return true;
+  }
+  return false;
+}
+
+/**
  * B5 Phase 6.10: check if an outdoor NavigationEdge (as a polyline of points)
  * is blocked by buildings or solid obstacles. This is the LIVE revalidation
  * function — called on every render to mark invalid edges red.
@@ -272,7 +399,7 @@ export function outdoorEdgeIsBlocked(
  * background terrain you deliberately paint paths over, so they never block;
  * hidden assets don't block either.
  */
-const NON_BLOCKING_ASSET_TYPES = new Set(["ground-area"]);
+const NON_BLOCKING_ASSET_TYPES = new Set(["ground-area", "lawn-area", "garden-area", "plaza-area", "parking-lot"]);
 
 export function polylineCrossesPlacedObject(
   points: { x: number; y: number }[],

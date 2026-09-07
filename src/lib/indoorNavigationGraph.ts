@@ -60,6 +60,8 @@ export interface CreateIndoorNodeInput {
   rampId?: string;
   /** Shared circulation identity copied onto transition-capable nodes. */
   transitionSharedId?: string;
+  /** Building-owned Entrance relationship for generated Ground-floor Doors. */
+  buildingEntranceId?: string;
   accessible?: boolean;
   emergencySafe?: boolean;
   emergencyStair?: boolean;
@@ -90,6 +92,7 @@ export function createIndoorNavNode(input: CreateIndoorNodeInput): NavigationNod
     ...(input.elevatorId ? { elevatorId: input.elevatorId } : {}),
     ...(input.rampId ? { rampId: input.rampId } : {}),
     ...(input.transitionSharedId ? { transitionSharedId: input.transitionSharedId } : {}),
+    ...(input.buildingEntranceId ? { buildingEntranceId: input.buildingEntranceId } : {}),
     ...(input.emergencySafe !== undefined ? { emergencySafe: input.emergencySafe } : {}),
     ...(input.emergencyStair ? { emergencyStair: true } : {}),
     ...(input.exteriorEmergencyStairId ? { exteriorEmergencyStairId: input.exteriorEmergencyStairId } : {}),
@@ -1602,6 +1605,16 @@ export function reconcileCrossFloorTransitions(
     // A transition whose endpoint was deleted is stale regardless of which
     // building owned it; never leave an orphaned floor edge in the graph.
     if (!start || !end) return true;
+    // Exterior Emergency Stair Ground discharge bridges use this same
+    // transition edge type, but connect a floor occurrence to its
+    // Building-owned outdoor anchor. Their lifecycle is owned by the
+    // Exterior Stair synchronizer, so preserve the bridge here.
+    const exteriorDischarge = start.exteriorEmergencyStairId
+      && end.exteriorEmergencyStairId
+      && start.exteriorEmergencyStairId === end.exteriorEmergencyStairId
+      && start.buildingId === end.buildingId
+      && (!start.floorId || !end.floorId);
+    if (exteriorDischarge) return false;
     return start.buildingId === buildingId && end.buildingId === buildingId;
   };
   return [

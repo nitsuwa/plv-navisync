@@ -256,6 +256,20 @@ describe("CampusEditor decorative asset properties", () => {
     expect(decorById(latestCampus!, "da1").scale).toBe(2);
   });
 
+  it("resizes a decor asset from its visible canvas handle", () => {
+    const { container } = render(<Harness onCampusChange={(c) => { latestCampus = c; }} />);
+    const svg = stubSvgRect(container);
+    selectItem(decorG(container, "tree"), 450, 120);
+    const handle = container.querySelector("[data-testid='decor-resize-handle'][data-corner='se']") as SVGRectElement | null;
+    expect(handle).toBeTruthy();
+    const before = makeCampus().decorAssets!.find((asset) => asset.id === "da1")!;
+    const beforeScale = before.scale ?? 1;
+    fireEvent.mouseDown(handle!, { clientX: 500, clientY: 170, bubbles: true });
+    fireEvent.mouseMove(svg, { clientX: 560, clientY: 230, bubbles: true });
+    fireEvent.mouseUp(svg, { clientX: 560, clientY: 230, bubbles: true });
+    expect(decorById(latestCampus!, "da1").scale).toBeGreaterThan(beforeScale);
+  });
+
   it("visibility hides the asset on the canvas and is undoable", () => {
     const { container } = render(<Harness onCampusChange={(c) => { latestCampus = c; }} />);
     const svg = stubSvgRect(container);

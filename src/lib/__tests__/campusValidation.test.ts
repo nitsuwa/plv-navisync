@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { validateCampusData, computeBuildingOverlaps, type CampusValidationInput } from "../campusValidation";
 import { getRotatedAABB } from "../../components/map-builder/constants";
-import type { CampusBuilding, FloorRoom } from "../../components/map-builder/types";
+import type { CampusBuilding, ExteriorEmergencyStair, FloorRoom } from "../../components/map-builder/types";
 
 // ── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -76,6 +76,26 @@ describe("validateCampusData", () => {
       severity: "warning",
       buildingId: "b1",
     });
+  });
+
+  it("treats a ready Exterior Emergency Stair as dedicated emergency egress", () => {
+    const exterior: ExteriorEmergencyStair = {
+      id: "stair-1", buildingId: "b1", label: "legacy label", state: "open", width: 28, height: 42,
+      attachment: { edge: "right", offset: 0.5 }, servedFloorIds: ["f1"], sharedId: "shared-1", emergencySafe: true,
+    };
+    const issues = validateCampusData(campus({ buildings: [building({ exteriorEmergencyStairs: [exterior] })] }), undefined, true);
+    expect(issues.some((issue) => issue.type === "no_emergency_exit_configured")).toBe(false);
+    expect(issues.some((issue) => issue.type === "exterior_emergency_stair_incomplete")).toBe(false);
+  });
+
+  it("reports an incomplete Exterior Emergency Stair without the generic missing-egress warning", () => {
+    const exterior: ExteriorEmergencyStair = {
+      id: "stair-1", buildingId: "b1", label: "legacy label", state: "open", width: 28, height: 42,
+      attachment: { edge: "right", offset: 0.5 }, servedFloorIds: [], sharedId: "shared-1", emergencySafe: true,
+    };
+    const issues = validateCampusData(campus({ buildings: [building({ exteriorEmergencyStairs: [exterior] })] }), undefined, true);
+    expect(issues.some((issue) => issue.type === "exterior_emergency_stair_incomplete")).toBe(true);
+    expect(issues.some((issue) => issue.type === "no_emergency_exit_configured")).toBe(false);
   });
 
   it("flags duplicate room names within the same floor as warnings", () => {

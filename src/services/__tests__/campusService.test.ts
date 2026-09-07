@@ -8,6 +8,7 @@ import {
   listCampuses,
   normalizeCampusCode,
   permanentlyDeleteCampus,
+  updateCampus,
   userFacingCampusMessage,
 } from "../campusService";
 
@@ -220,6 +221,24 @@ describe("createCampus (create/INSERT boundary)", () => {
       expect.objectContaining({ code: "23514", details: expect.stringContaining("Failing row") })
     );
     consoleError.mockRestore();
+  });
+});
+
+describe("updateCampus (versioned update boundary)", () => {
+  it("uses the canonical authenticated client/RLS path without an eager getUser lookup", async () => {
+    const maybeSingle = vi.fn().mockResolvedValue({ data: campusRow, error: null });
+    const select = vi.fn(() => ({ maybeSingle }));
+    const secondEq = vi.fn(() => ({ select }));
+    const firstEq = vi.fn(() => ({ eq: secondEq }));
+    const update = vi.fn(() => ({ eq: firstEq }));
+    const auth = { getUser: vi.fn().mockRejectedValue(new Error("Auth session missing!")) };
+    vi.mocked(getSupabase).mockReturnValue({ from: vi.fn(() => ({ update })), auth } as never);
+
+    const updated = await updateCampus("c1", { canvas_width: 1200 }, campusRow.updated_at);
+
+    expect(updated).toMatchObject({ id: "c1", canvasW: 900, canvasH: 680 });
+    expect(update).toHaveBeenCalledWith({ canvas_width: 1200 });
+    expect(auth.getUser).not.toHaveBeenCalled();
   });
 });
 

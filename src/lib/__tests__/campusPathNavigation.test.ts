@@ -260,4 +260,123 @@ describe("campus Pathway navigation ownership reconciliation", () => {
     expect(after.navNodes?.some((node) => node.id === target.id)).toBe(false);
     expect(after.navNodes?.some((node) => node.id === entrance.id)).toBe(true);
   });
+
+  it("preserves committed Entrance→Pathway bends while a Pathway target translates", () => {
+    const factory = makeIdFactory();
+    const source = campus([path("p1", [{ x: 220, y: 220 }, { x: 320, y: 220 }], ["v1", "v2"])]);
+    const converted = convertPathwaysToNavigation(source, ["p1"], factory).campus;
+    const target = ownedNodes(converted, "p1")[1];
+    const entrance = { id: "entrance-node", name: "Main Entrance", type: "entrance" as const, x: 140, y: 140, buildingId: "b1", entranceId: "e1", accessible: true, color: "#16a34a" } as NavigationNode;
+    const building = {
+      id: "b1", name: "Building", code: "B1", category: "Academic", description: "",
+      x: 100, y: 100, width: 100, height: 80, entrances: [{ id: "e1", name: "Main Entrance", edge: "bottom", offset: 0.5, type: "general", accessible: true, isPrimary: true }], floors: [],
+    } as Campus["buildings"][number];
+    const authoredBends = [{ x: 140, y: 180 }, { x: 180, y: 210 }];
+    const before: Campus = {
+      ...converted,
+      buildings: [building],
+      navNodes: [...(converted.navNodes ?? []), entrance],
+      navEdges: [{ id: "entrance-bridge", startNodeId: entrance.id, endNodeId: target.id, distance: 0, bidirectional: true, accessible: true, emergencySafe: true, type: "walkway", color: "#16a34a", width: 4, bendPoints: authoredBends }],
+    };
+    const moved = reconcilePathwayNavigation({
+      ...before,
+      paths: [path("p1", [{ x: 240, y: 240 }, { x: 340, y: 240 }], ["v1", "v2"])],
+    }, factory, { preserveAuthoredGeometry: true });
+    const afterEdge = moved.navEdges?.find((edge) => edge.id === "entrance-bridge");
+    const afterTarget = moved.navNodes?.find((node) => node.id === target.id);
+    expect(afterTarget).toMatchObject({ x: 340, y: 240 });
+    expect(afterEdge?.startNodeId).toBe(entrance.id);
+    expect(afterEdge?.endNodeId).toBe(target.id);
+    expect(afterEdge?.bendPoints).toEqual(authoredBends);
+    expect(afterEdge?.distance).toBeGreaterThan(0);
+  });
+
+  it("keeps a zero-movement Pathway reconciliation logically unchanged", () => {
+    const factory = makeIdFactory();
+    const converted = convertPathwaysToNavigation(campus([path("p1", [{ x: 20, y: 20 }, { x: 120, y: 20 }])]), ["p1"], factory).campus;
+    const again = reconcilePathwayNavigation({ ...converted, paths: converted.paths.map((item) => ({ ...item, points: item.points.map((point) => ({ ...point })) })) }, factory, { preserveAuthoredGeometry: true });
+    expect(again).toEqual(converted);
+  });
+
+  it("preserves an external connection when an unrelated Pathway is deleted", () => {
+    const factory = makeIdFactory();
+    const converted = convertPathwaysToNavigation(campus([
+      path("main", [{ x: 100, y: 100 }, { x: 200, y: 100 }], ["main-a", "main-b"]),
+      path("other", [{ x: 500, y: 300 }, { x: 600, y: 300 }], ["other-a", "other-b"]),
+    ]), ["main", "other"], factory).campus;
+    const target = ownedNodes(converted, "main")[1];
+    const entrance: NavigationNode = {
+      id: "entrance-external", name: "Entrance", type: "entrance", x: 100, y: 140,
+      buildingId: "building-1", entranceId: "entrance-1", accessible: true, color: "#16a34a",
+    };
+    const authoredBends = [{ x: 100, y: 170 }, { x: 160, y: 190 }];
+    const before: Campus = {
+      ...converted,
+      navNodes: [...(converted.navNodes ?? []), entrance],
+      navEdges: [...(converted.navEdges ?? []), {
+        id: "external-connection", startNodeId: entrance.id, endNodeId: target.id,
+        distance: 0, bidirectional: true, accessible: true, emergencySafe: true,
+        type: "walkway", color: "#16a34a", width: 4, bendPoints: authoredBends,
+      }],
+    };
+    const after = reconcilePathwayNavigation({
+      ...before,
+      paths: before.paths.filter((item) => item.id !== "other"),
+    }, factory, { preserveAuthoredGeometry: true });
+    const edge = after.navEdges?.find((item) => item.id === "external-connection");
+    expect(edge).toMatchObject({ startNodeId: entrance.id, endNodeId: target.id, bendPoints: authoredBends });
+    expect(after.navNodes?.some((node) => node.id === target.id)).toBe(true);
+    expect(after.navNodes?.some((node) => node.generatedFromPathVertices?.some((ref) => ref.pathId === "other"))).toBe(false);
+  });
+
+  it("keeps a shared vertex and leaves a gap when the trailing Pathway segment is removed", () => {
+    const factory = makeIdFactory();
+    const converted = convertPathwaysToNavigation(
+      campus([path("p1", [{ x: 100, y: 100 }, { x: 200, y: 100 }, { x: 300, y: 100 }], ["a", "b", "c"])]),
+      ["p1"],
+      factory,
+    ).campus;
+    const beforeIds = converted.paths[0].navigationVertexIds!;
+    const beforeNodeIds = beforeIds.map((vertexId) => converted.navNodes?.find((node) =>
+      node.generatedFromPathVertices?.some((ref) => ref.pathId === "p1" && ref.vertexId === vertexId),
+    )?.id);
+    const after = reconcilePathwayNavigation({
+      ...converted,
+      paths: [path("p1", [{ x: 100, y: 100 }, { x: 200, y: 100 }], [beforeIds[0], beforeIds[1]])],
+    }, factory, { preserveAuthoredGeometry: true });
+    expect(after.paths[0].navigationVertexIds).toEqual([beforeIds[0], beforeIds[1]]);
+    expect(after.navEdges?.some((edge) => edge.generatedFromPathIds?.includes("p1")
+      && [edge.startNodeId, edge.endNodeId].includes(beforeNodeIds[0]!))).toBe(true);
+    expect(after.navEdges?.some((edge) => edge.generatedFromPathIds?.includes("p1")
+      && [edge.startNodeId, edge.endNodeId].includes(beforeNodeIds[2]!))).toBe(false);
+    expect(after.navEdges?.some((edge) =>
+      [edge.startNodeId, edge.endNodeId].includes(beforeNodeIds[0]!)
+      && [edge.startNodeId, edge.endNodeId].includes(beforeNodeIds[2]!))).toBe(false);
+  });
+
+  it("preserves canonical endpoint IDs when a diagonal Pathway receives an authored bend", () => {
+    const factory = makeIdFactory();
+    const converted = convertPathwaysToNavigation(
+      campus([path("diagonal", [{ x: 100, y: 100 }, { x: 300, y: 300 }])]),
+      ["diagonal"],
+      factory,
+    ).campus;
+    const originalVertexIds = converted.paths[0].navigationVertexIds!;
+    const withBend = reconcilePathwayNavigation({
+      ...converted,
+      paths: [path("diagonal", [
+        { x: 100, y: 100 }, { x: 200, y: 170 }, { x: 300, y: 300 },
+      ], [originalVertexIds[0], "diagonal-bend", originalVertexIds[1]])],
+    }, factory, { preserveAuthoredGeometry: true });
+    expect(withBend.paths[0].navigationVertexIds).toEqual([
+      originalVertexIds[0], "diagonal-bend", originalVertexIds[1],
+    ]);
+    expect(ownedNodes(withBend, "diagonal")).toHaveLength(3);
+    expect(ownedNodes(withBend, "diagonal").some((node) =>
+      node.generatedFromPathVertices?.some((ref) => ref.vertexId === originalVertexIds[0]),
+    )).toBe(true);
+    expect(ownedNodes(withBend, "diagonal").some((node) =>
+      node.generatedFromPathVertices?.some((ref) => ref.vertexId === originalVertexIds[1]),
+    )).toBe(true);
+  });
 });

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { screenToWorld, panToKeepWorldPoint, getSvgContentBox, computeBuildingPlacement, pointInBuilding } from "../editorPlacement";
+import { screenToWorld, panToKeepWorldPoint, getSvgContentBox, computeBuildingPlacement, pointInBuilding, polylineCrossesObstacleAfterSourceDeparture } from "../editorPlacement";
 
 const CANVAS = { canvasW: 900, canvasH: 680 };
 
@@ -156,5 +156,44 @@ describe("pointInBuilding — outdoor waypoints must not be placed under buildin
     const rotated = { ...building, rotation: 90 };
     expect(pointInBuilding(rotated, { x: 150, y: 140 })).toBe(true);
     expect(pointInBuilding(rotated, { x: 300, y: 140 })).toBe(false);
+  });
+});
+
+describe("polylineCrossesObstacleAfterSourceDeparture - local building exit", () => {
+  const owner = { id: "b1", x: 100, y: 100, width: 120, height: 80, rotation: 0 };
+  const source = { x: 160, y: 180 };
+
+  it("allows a short outward departure from the source building boundary", () => {
+    expect(polylineCrossesObstacleAfterSourceDeparture(
+      [source, { x: 160, y: 192 }, { x: 300, y: 192 }],
+      [owner],
+      [],
+      { buildingId: "b1", edge: "bottom" },
+    )).toBe(false);
+  });
+
+  it("still blocks a boundary-hugging or inward first leg", () => {
+    expect(polylineCrossesObstacleAfterSourceDeparture(
+      [source, { x: 100, y: 180 }, { x: 100, y: 240 }],
+      [owner],
+      [],
+      { buildingId: "b1", edge: "bottom" },
+    )).toBe(true);
+    expect(polylineCrossesObstacleAfterSourceDeparture(
+      [source, { x: 160, y: 160 }],
+      [owner],
+      [],
+      { buildingId: "b1", edge: "bottom" },
+    )).toBe(true);
+  });
+
+  it("continues to block an unrelated building after the source exit", () => {
+    const other = { id: "b2", x: 220, y: 170, width: 90, height: 50, rotation: 0 };
+    expect(polylineCrossesObstacleAfterSourceDeparture(
+      [source, { x: 160, y: 192 }, { x: 260, y: 192 }],
+      [owner, other],
+      [],
+      { buildingId: "b1", edge: "bottom" },
+    )).toBe(true);
   });
 });

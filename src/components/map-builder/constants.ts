@@ -8,6 +8,7 @@ import {
 import type {
   SimpleTool, EditorLayer, RoomTypeDescriptor, CanvasSizeOption,
   Campus, CampusBuilding, FloorPlan, FurnitureCategory,
+  CampusDecorAsset,
 } from "./types";
 import { INITIAL_MARKERS, INITIAL_PATHS, MARKER_STYLES } from "../../data/mapData";
 import { shade } from "../../lib/color";
@@ -113,7 +114,7 @@ export const LAYER_TOOLS: Record<string, LayerToolDescriptor[]> = {
     { id: "select",   icon: MousePointer2, label: "Select",   hint: "Select waypoints and connections to edit routing properties. Campus objects stay visible as context.", key: "V" },
     { id: "pan",      icon: Hand,          label: "Pan",      hint: "Hold Space + drag to pan around the canvas", key: "Space" },
     { id: "marker",   icon: MapPin,        label: "Add Walking Point", hint: "Add a Walking Point when physical pathways do not provide the routing point you need.", key: "M" },
-    { id: "path",     icon: GitBranch,     label: "Connect", hint: "Connect Walking Points and entrances for routes that need a manual connection.", key: "P" },
+    { id: "connect",  icon: GitBranch,     label: "Connect", hint: "Connect Walking Points and entrances for routes that need a manual connection.", key: "P" },
     { id: "erase",    icon: Trash2,        label: "Remove",   hint: "Click a waypoint or connection to remove it from the navigation network. Deleting a waypoint removes all its connections.", key: "E" },
   ],
   // Accessibility and Emergency are ROUTING PROPERTIES of the navigation graph
@@ -168,15 +169,25 @@ export const INDOOR_LAYERS = [
 
 // ── Furniture categories ────────────────────────────────────────────────────
 
+/**
+ * Reusable visual-only floor-plan symbols.  The `type` keys are deliberately
+ * stable: placement, duplication, persistence, and future room templates can
+ * all instantiate the same ordinary FloorFurniture records without coupling
+ * furniture to the navigation graph.
+ */
 export const FURNITURE_CATEGORIES: FurnitureCategory[] = [
   {
     id: "seating",
     label: "Seating",
     icon: "Armchair",
     items: [
-      { type: "chair",           name: "Chair",            width: 12, height: 12, color: "#4b5563" },
-      { type: "bench",           name: "Bench",            width: 30, height: 10, color: "#6b5b45" },
-      { type: "sofa",            name: "Sofa",             width: 34, height: 16, color: "#3f3f46" },
+      { type: "chair", name: "Chair", width: 12, height: 12, color: "#4b5563" },
+      { type: "bench", name: "Bench", width: 30, height: 10, color: "#6b5b45" },
+      { type: "sofa", name: "Sofa", width: 34, height: 16, color: "#3f3f46" },
+      { type: "lecture-row-4", name: "Lecture Row 4", width: 48, height: 14, color: "#4b5563" },
+      { type: "lecture-row-6", name: "Lecture Row 6", width: 70, height: 14, color: "#4b5563" },
+      { type: "lecture-row-8", name: "Lecture Row 8", width: 92, height: 14, color: "#4b5563" },
+      { type: "waiting-bench", name: "Waiting Bench", width: 36, height: 11, color: "#665343" },
     ],
   },
   {
@@ -184,8 +195,21 @@ export const FURNITURE_CATEGORIES: FurnitureCategory[] = [
     label: "Tables / Work",
     icon: "Table",
     items: [
-      { type: "desk",             name: "Desk",              width: 26, height: 16, color: "#7a5c3a" },
-      { type: "table",            name: "Table",             width: 28, height: 18, color: "#8b6f4e" },
+      { type: "desk", name: "Desk", width: 26, height: 16, color: "#7a5c3a" },
+      { type: "table", name: "Table", width: 28, height: 18, color: "#8b6f4e" },
+      { type: "student-desk-chair", name: "Student Desk + Chair", width: 30, height: 24, color: "#7a5c3a" },
+      { type: "study-table-4", name: "Study Table + 4 Chairs", width: 44, height: 34, color: "#8b6f4e" },
+      { type: "study-table-6", name: "Study Table + 6 Chairs", width: 54, height: 38, color: "#8b6f4e" },
+      { type: "conference-table-6", name: "Conference Table + 6 Chairs", width: 62, height: 34, color: "#795548" },
+      { type: "conference-table-8", name: "Conference Table + 8 Chairs", width: 76, height: 38, color: "#795548" },
+      { type: "lab-workbench", name: "Laboratory Workbench", width: 52, height: 20, color: "#64748b" },
+      { type: "lab-workbench-stools", name: "Workbench + Stools", width: 58, height: 32, color: "#64748b" },
+      { type: "faculty-desk-chair", name: "Faculty Desk + Chair", width: 34, height: 26, color: "#7a5c3a" },
+      { type: "office-desk-visitors", name: "Office Desk + 2 Visitor Chairs", width: 52, height: 34, color: "#7a5c3a" },
+      { type: "library-study-table", name: "Library Study Table + Chairs", width: 48, height: 30, color: "#8b6f4e" },
+      { type: "whiteboard", name: "Whiteboard / Teaching Board", width: 40, height: 6, color: "#f8fafc" },
+      { type: "lectern", name: "Lectern / Podium", width: 16, height: 16, color: "#7a5c3a" },
+      { type: "laboratory-sink", name: "Laboratory Sink", width: 26, height: 12, color: "#cbd5e1" },
     ],
   },
   {
@@ -193,8 +217,13 @@ export const FURNITURE_CATEGORIES: FurnitureCategory[] = [
     label: "Storage",
     icon: "Container",
     items: [
-      { type: "cabinet",         name: "Cabinet",         width: 18, height: 12, color: "#71717a" },
-      { type: "bookshelf",       name: "Shelf",           width: 18, height: 10, color: "#6b5b45" },
+      { type: "cabinet", name: "Cabinet", width: 18, height: 12, color: "#71717a" },
+      { type: "bookshelf", name: "Shelf", width: 18, height: 10, color: "#6b5b45" },
+      { type: "library-bookshelf", name: "Bookshelf", width: 30, height: 10, color: "#6b5b45" },
+      { type: "double-sided-library-shelf", name: "Double-Sided Library Shelf", width: 42, height: 12, color: "#6b5b45" },
+      { type: "tall-storage-cabinet", name: "Tall Storage Cabinet", width: 18, height: 24, color: "#71717a" },
+      { type: "equipment-cabinet", name: "Equipment Cabinet", width: 24, height: 18, color: "#64748b" },
+      { type: "locker", name: "Locker", width: 30, height: 12, color: "#64748b" },
     ],
   },
   {
@@ -203,6 +232,45 @@ export const FURNITURE_CATEGORIES: FurnitureCategory[] = [
     icon: "Monitor",
     items: [
       { type: "computer-workstation", name: "Computer Workstation", width: 28, height: 16, color: "#475569" },
+      { type: "computer-workstation-chair", name: "Computer Workstation + Chair", width: 30, height: 24, color: "#475569" },
+      { type: "computer-workstation-row-4", name: "Workstation Row 4", width: 62, height: 18, color: "#475569" },
+      { type: "computer-workstation-row-6", name: "Workstation Row 6", width: 90, height: 18, color: "#475569" },
+      { type: "projector", name: "Projector", width: 12, height: 10, color: "#64748b" },
+      { type: "wall-display", name: "Wall Display / TV", width: 24, height: 6, color: "#334155" },
+      { type: "printer-copier", name: "Printer / Copier", width: 18, height: 16, color: "#64748b" },
+      { type: "server-rack", name: "Server / Network Rack", width: 18, height: 24, color: "#334155" },
+    ],
+  },
+  {
+    id: "restroom",
+    label: "Restroom / Fixtures",
+    icon: "Bath",
+    items: [
+      { type: "toilet", name: "Toilet", width: 12, height: 16, color: "#dbe4ea" },
+      { type: "urinal", name: "Urinal", width: 10, height: 14, color: "#dbe4ea" },
+      { type: "sink", name: "Sink / Wash Basin", width: 16, height: 10, color: "#cbd5e1" },
+      { type: "double-sink", name: "Double Sink", width: 26, height: 10, color: "#cbd5e1" },
+      { type: "faucet", name: "Faucet", width: 7, height: 7, color: "#64748b", description: "Wall or counter-mounted tap" },
+      { type: "toilet-stall", name: "Toilet Stall", width: 26, height: 28, color: "#e2e8f0" },
+      { type: "pwd-toilet-stall", name: "Accessible / PWD Stall", width: 34, height: 34, color: "#dbeafe" },
+      { type: "stall-partition", name: "Stall Partition", width: 28, height: 4, color: "#cbd5e1", description: "Thin restroom divider panel" },
+      { type: "mirror", name: "Mirror", width: 22, height: 5, color: "#93c5fd" },
+      { type: "soap-dispenser", name: "Soap Dispenser", width: 7, height: 9, color: "#94a3b8" },
+      { type: "tissue-dispenser", name: "Tissue / Toilet Paper Dispenser", width: 8, height: 8, color: "#94a3b8" },
+      { type: "hand-dryer", name: "Hand Dryer", width: 10, height: 8, color: "#64748b" },
+      { type: "restroom-trash-bin", name: "Restroom Trash Bin", width: 10, height: 10, color: "#64748b" },
+      { type: "floor-drain", name: "Floor Drain", width: 7, height: 7, color: "#94a3b8" },
+    ],
+  },
+  {
+    id: "safety",
+    label: "Safety / Facilities",
+    icon: "ShieldAlert",
+    items: [
+      { type: "fire-extinguisher", name: "Wall Fire Extinguisher", width: 8, height: 14, color: "#dc2626" },
+      { type: "exit-sign", name: "Exit Sign", width: 20, height: 6, color: "#16a34a" },
+      { type: "emergency-light", name: "Emergency Light", width: 10, height: 8, color: "#f59e0b" },
+      { type: "first-aid-cabinet", name: "First Aid Cabinet", width: 12, height: 14, color: "#ef4444" },
     ],
   },
   {
@@ -210,7 +278,8 @@ export const FURNITURE_CATEGORIES: FurnitureCategory[] = [
     label: "Decor",
     icon: "Lamp",
     items: [
-      { type: "plant",            name: "Plant",           width: 10, height: 10, color: "#3f7d4a" },
+      { type: "plant", name: "Plant", width: 10, height: 10, color: "#3f7d4a" },
+      { type: "indoor-trash-bin", name: "Indoor Trash Bin", width: 10, height: 10, color: "#64748b" },
     ],
   },
 ];
@@ -306,8 +375,52 @@ export interface DecorAssetDescriptor {
   defaultHeight: number;
 }
 
+/** Area-style outdoor assets render as quiet ground layers rather than
+ * foreground objects. Legacy `ground-area` records remain supported. */
+export function isDecorAreaType(type: string): boolean {
+  return type === "ground-area" || type === "lawn-area" || type === "garden-area" || type === "plaza-area" || type === "parking-lot";
+}
+
+export function groundTypeForDecorType(type: string): CampusDecorAsset["groundType"] {
+  switch (type) {
+    case "garden-area": return "planted";
+    case "plaza-area": return "plaza";
+    case "parking-lot": return "parking";
+    case "lawn-area": return "grass";
+    default: return undefined;
+  }
+}
+
 export const DECOR_ASSET_TYPES: DecorAssetDescriptor[] = [
   // Outdoor areas
+  {
+    type: "lawn-area", label: "Lawn / Grass Area", category: "Areas", color: "#78ad70",
+    svgPath: "M0 0 H180 V110 H0 Z",
+    parts: [
+      { d: "M0 0 H180 V110 H0 Z", fill: "#cfe6c7" },
+      { d: "M20 28 l2 -4 M26 30 l2 -4 M96 78 l2 -4 M102 80 l2 -4 M144 34 l2 -4", fill: "none", stroke: "#9bc68e", strokeWidth: 1, strokeLinecap: "round", fillOpacity: 0.55 },
+    ],
+    defaultWidth: 180, defaultHeight: 110,
+  },
+  {
+    type: "garden-area", label: "Garden / Planting Area", category: "Areas", color: "#8caf68",
+    svgPath: "M0 0 H160 V105 H0 Z",
+    parts: [
+      { d: "M0 0 H160 V105 H0 Z", fill: "#d9e4bf" },
+      { d: "M20 26 a4 4 0 1 0 8 0 a4 4 0 1 0 -8 0 M64 70 a4 4 0 1 0 8 0 a4 4 0 1 0 -8 0 M118 32 a4 4 0 1 0 8 0 a4 4 0 1 0 -8 0 M132 78 a3 3 0 1 0 6 0 a3 3 0 1 0 -6 0", fill: "#a7bf76", fillOpacity: 0.72 },
+      { d: "M14 52 l3 -5 M20 54 l3 -5 M84 28 l3 -5 M90 30 l3 -5", fill: "none", stroke: "#93b56e", strokeWidth: 1, strokeLinecap: "round", fillOpacity: 0.55 },
+    ],
+    defaultWidth: 160, defaultHeight: 105,
+  },
+  {
+    type: "plaza-area", label: "Plaza / Concrete Area", category: "Areas", color: "#a8a39b",
+    svgPath: "M0 0 H180 V100 H0 Z",
+    parts: [
+      { d: "M0 0 H180 V100 H0 Z", fill: "#ddd9d1" },
+      { d: "M0 34 H180 M0 67 H180 M60 0 V100 M120 0 V100", fill: "none", stroke: "#c2bdb4", strokeWidth: 0.8, strokeOpacity: 0.32 },
+    ],
+    defaultWidth: 180, defaultHeight: 100,
+  },
   {
     type: "ground-area", label: "Ground Area", category: "Outdoor Areas", color: "#86b879",
     svgPath: "M2 2 L38 2 L38 26 L2 26 Z",
@@ -427,6 +540,47 @@ export const DECOR_ASSET_TYPES: DecorAssetDescriptor[] = [
     defaultWidth: 24, defaultHeight: 30,
   },
   {
+    type: "directory-board", label: "Directory Board", category: "Wayfinding", color: "#1d4ed8",
+    svgPath: "M3 4 H25 V16 H3 Z",
+    parts: [
+      { d: "M3 4 H25 V16 H3 Z", fill: "#1d4ed8", stroke: "#1e3a8a", strokeWidth: 0.9 },
+      { d: "M7 8 H21 M7 11 H17", fill: "none", stroke: "#dbeafe", strokeWidth: 1.1, strokeLinecap: "round" },
+      { d: "M12 16 V28 H14 V16 Z M8 28 H18 V30 H8 Z", fill: "#64748b" },
+    ],
+    defaultWidth: 28, defaultHeight: 32,
+  },
+  {
+    type: "gate-scanner", label: "Gate Scanner / Turnstile", category: "Security / Access", color: "#0f766e",
+    // A compact three-lane bank is more useful at campus and building
+    // entrances than a single reader.  It remains one ordinary decor record;
+    // rotation/scale/duplication are supplied by the shared asset transform.
+    svgPath: "M2 3 H20 V21 H2 Z M25 3 H43 V21 H25 Z M48 3 H66 V21 H48 Z",
+    parts: [
+      // Repeated top-down scanner bodies with a small reader head and a
+      // central lane cue.  Tight 2..66 × 3..21 geometry keeps the selection
+      // bounds honest while preserving a clear architectural symbol at zoom.
+      { d: "M2 3 H20 V21 H2 Z M25 3 H43 V21 H25 Z M48 3 H66 V21 H48 Z", fill: "#dbeafe", stroke: "#0f766e", strokeWidth: 1.1, strokeLinejoin: "round" },
+      { d: "M4 5 H18 V9 H4 Z M27 5 H41 V9 H27 Z M50 5 H64 V9 H50 Z", fill: "#0f766e", fillOpacity: 0.9, stroke: "#115e59", strokeWidth: 0.65, strokeLinejoin: "round" },
+      { d: "M6 6.5 H16 V7.5 H6 Z M29 6.5 H39 V7.5 H29 Z M52 6.5 H62 V7.5 H52 Z", fill: "#99f6e4" },
+      { d: "M11 9 V18 M7 13.5 H15 M34 9 V18 M30 13.5 H38 M57 9 V18 M53 13.5 H61", fill: "none", stroke: "#5eead4", strokeWidth: 1.05, strokeLinecap: "round" },
+      { d: "M3 21 H19 V22.5 H3 Z M26 21 H42 V22.5 H26 Z M49 21 H65 V22.5 H49 Z", fill: "#64748b", stroke: "#475569", strokeWidth: 0.65, strokeLinejoin: "round" },
+    ],
+    defaultWidth: 68, defaultHeight: 24,
+  },
+  {
+    type: "philippine-flag", label: "Philippine Flag / Flagpole", category: "Campus Features", color: "#2563eb",
+    svgPath: "M14 4 H27 V14 H14 Z",
+    parts: [
+      { d: "M12 3 H14 V28 H12 Z", fill: "#64748b" },
+      { d: "M14 4 H27 V9 H14 Z", fill: "#1d4ed8" },
+      { d: "M14 9 H27 V14 H14 Z", fill: "#dc2626" },
+      { d: "M14 4 L20 9 L14 14 Z", fill: "#fffaf0" },
+      { d: "M11 28 H15 L14 30 H12 Z", fill: "#475569" },
+      { d: "M16 8.6 a1.1 1.1 0 1 0 2.2 0 a1.1 1.1 0 1 0 -2.2 0 Z", fill: "#fbbf24" },
+    ],
+    defaultWidth: 30, defaultHeight: 32,
+  },
+  {
     type: "flag", label: "Flag", category: "Wayfinding", color: "#dc2626",
     svgPath: "M13 4 L23 4 L21 7 L23 10 L13 10 Z",
     parts: [
@@ -514,6 +668,41 @@ export const DECOR_ASSET_TYPES: DecorAssetDescriptor[] = [
     ],
     defaultWidth: 30, defaultHeight: 28,
   },
+  {
+    type: "parking-lot", label: "Parking Lot", category: "Outdoor Areas", color: "#64748b",
+    svgPath: "M2 2 L118 2 L118 70 L2 70 Z",
+    parts: [
+      { d: "M2 2 L118 2 L118 70 L2 70 Z", fill: "#cbd5e1", stroke: "#475569", strokeWidth: 1.4, strokeLinejoin: "round" },
+      { d: "M8 10 L8 62 M28 10 L28 62 M48 10 L48 62 M68 10 L68 62 M88 10 L88 62 M108 10 L108 62", fill: "none", stroke: "#f8fafc", strokeWidth: 1.8, strokeLinecap: "round" },
+      { d: "M14 18 L22 18 L22 32 L14 32 Z M34 18 L42 18 L42 32 L34 32 Z M54 18 L62 18 L62 32 L54 32 Z M74 18 L82 18 L82 32 L74 32 Z M94 18 L102 18 L102 32 L94 32 Z", fill: "#94a3b8", stroke: "#ffffff", strokeWidth: 0.7 },
+      { d: "M14 40 L22 40 L22 54 L14 54 Z M34 40 L42 40 L42 54 L34 54 Z M54 40 L62 40 L62 54 L54 54 Z M74 40 L82 40 L82 54 L74 54 Z M94 40 L102 40 L102 54 L94 54 Z", fill: "#94a3b8", stroke: "#ffffff", strokeWidth: 0.7 },
+    ],
+    defaultWidth: 120, defaultHeight: 72,
+  },
+  {
+    type: "guard-booth", label: "Guard / Reception Booth", category: "Campus Features", color: "#8b5e3c",
+    svgPath: "M3 5 H33 V27 H3 Z",
+    parts: [
+      { d: "M3 5 H33 V27 H3 Z", fill: "#d9c2a8", stroke: "#7c5a3d", strokeWidth: 1.2 },
+      { d: "M7 9 H29 V16 H7 Z", fill: "#bae6fd", stroke: "#5b8ca8", strokeWidth: 0.8 },
+      { d: "M5 19 H31 V25 H5 Z", fill: "#b9936b" },
+      { d: "M15 19 V25 H21 V19 Z", fill: "#8b5e3c" },
+    ],
+    defaultWidth: 36, defaultHeight: 28,
+  },
+  // Landmarks
+  {
+    type: "monument", label: "Monument / Statue", category: "Landmarks", color: "#a16207",
+    svgPath: "M10 24 L22 24 L20 7 L12 7 Z",
+    parts: [
+      { d: "M5 24 L27 24 L27 28 L5 28 Z", fill: "#d6d3d1", stroke: "#78716c", strokeWidth: 0.8, strokeLinejoin: "round" },
+      { d: "M9 20 L23 20 L22 24 L10 24 Z", fill: "#a8a29e", stroke: "#78716c", strokeWidth: 0.7 },
+      { d: "M11 7 L21 7 L20 20 L12 20 Z", fill: "#b8a27a", stroke: "#785a2a", strokeWidth: 0.9 },
+      { d: "M13 4 L19 4 L21 7 L11 7 Z", fill: "#8b6f47", stroke: "#674c2e", strokeWidth: 0.8 },
+      { d: "M15 1 L17 1 L18 4 L14 4 Z", fill: "#6b7280", stroke: "#4b5563", strokeWidth: 0.7 },
+    ],
+    defaultWidth: 32, defaultHeight: 30,
+  },
 ];
 
 export const DECOR_ASSET_MAP = Object.fromEntries(DECOR_ASSET_TYPES.map((a) => [a.type, a]));
@@ -524,27 +713,37 @@ export const DECOR_ASSET_MAP = Object.fromEntries(DECOR_ASSET_TYPES.map((a) => [
 // existing saved campuses (backward compatible) — they are simply not offered
 // in the placement palette because they read as clip-art at campus scale.
 export const DECOR_PALETTE_TYPES: string[] = [
-  // Greenery
-  "tree", "tree-large", "palm", "bush", "plant",
-  // Seating
+  "lawn-area", "garden-area", "plaza-area", "parking-lot",
+  "tree", "tree-large", "bush", "plant",
   "bench", "bench-long",
-  // Wayfinding
-  "sign",
-  // Utilities
-  "trash-bin", "recycle-bin", "lamp-post",
-  // Facilities
-  "bike-rack", "gazebo",
+  "sign", "directory-board",
+  "gate-scanner",
+  "trash-bin", "recycle-bin", "lamp-post", "bike-rack",
+  "guard-booth", "philippine-flag", "monument",
 ];
 
 // ── Decor categories for the panel ────────────────────────────────────────
 
 export const DECOR_CATEGORIES = [
-  { id: "greenery",   label: "Greenery",  types: ["tree", "tree-large", "palm", "bush", "plant", "flower"] },
-  { id: "seating",    label: "Seating",   types: ["bench", "bench-long", "picnic-table"] },
-  { id: "wayfinding", label: "Wayfinding", types: ["sign", "flag"] },
-  { id: "utilities",  label: "Utilities", types: ["trash-bin", "recycle-bin", "lamp-post", "bollard"] },
-  { id: "facilities", label: "Facilities", types: ["bike-rack", "fountain", "gazebo"] },
+  { id: "areas",      label: "Areas",      types: ["lawn-area", "garden-area", "plaza-area", "parking-lot"] },
+  { id: "greenery",   label: "Greenery",   types: ["tree", "tree-large", "bush", "plant"] },
+  { id: "seating",    label: "Seating",    types: ["bench", "bench-long"] },
+  { id: "wayfinding", label: "Wayfinding", types: ["sign", "directory-board"] },
+  { id: "security",   label: "Security / Access", types: ["gate-scanner"] },
+  { id: "utilities",  label: "Utilities",  types: ["trash-bin", "recycle-bin", "lamp-post", "bike-rack"] },
+  { id: "features",   label: "Campus Features", types: ["guard-booth", "philippine-flag", "monument"] },
 ];
+
+/** Small, stable palette for the grid-painted Campus Surface layer.  The
+ * values intentionally reuse the existing Ground Area variants so old saved
+ * campuses and the read-only renderer keep the same color semantics. */
+export const CAMPUS_SURFACE_MATERIALS = [
+  { key: "grass", label: "Grass", color: "#86b879" },
+  { key: "planted", label: "Landscape", color: "#6da567" },
+  { key: "plaza", label: "Concrete / Plaza", color: "#a8a29e" },
+  { key: "parking", label: "Pavement", color: "#89939b" },
+  { key: "field", label: "Soil / Field", color: "#9db76d" },
+] as const;
 
 // ── Rotated bounding box helper ─────────────────────────────────────────────
 // Compute the axis-aligned bounding box (AABB) of a potentially rotated rectangle.

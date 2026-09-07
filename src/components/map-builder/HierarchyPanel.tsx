@@ -1,16 +1,19 @@
 import { useEffect, useState, useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import {
-  Building2, Layers, Plus, Pencil, Trash2, Copy, GripVertical, MoreHorizontal,
-  ChevronRight, ChevronDown, FolderOpen, Search, Eye, EyeOff, Lock, TreePine, Sparkles,
+  Building2, Plus, Pencil, Trash2, Copy, GripVertical, MoreHorizontal,
+  ChevronRight, ChevronDown, FolderOpen, Search, Eye, EyeOff, Lock, TreePine, Sparkles, Layers,
+  DoorOpen,
 } from "lucide-react";
 import { cn } from "../../lib/utils";
-import { genId, BUILDING_TYPES, DECOR_PALETTE_TYPES, DECOR_ASSET_MAP } from "./constants";
+import { genId, DECOR_PALETTE_TYPES, DECOR_ASSET_MAP, DECOR_CATEGORIES, groundTypeForDecorType, isDecorAreaType } from "./constants";
 import { DecorAssetVisual } from "./DecorAssetVisual";
+import { CampusGateVisual } from "./CampusGateVisual";
 import { ContextMenu } from "./ContextMenu";
 import { FloorActionsMenu } from "./FloorActionsMenu";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
 import { duplicateFloorForBuilding, normalizeFloor } from "../../lib/floorPlanNormalization";
+import { nextBuildingCopyIdentity, type BuildingIdentity } from "../../lib/buildingDefaults";
 import { replaceBuildingFloorsAndReconcileTransitions } from "../../lib/indoorNavigationGraph";
 import {
   addFloorToBuilding,
@@ -30,6 +33,8 @@ interface HierarchyPanelProps {
   onOpenFloor: (buildingId: string, floorId: string) => void;
   onAddBuilding: () => void;
   onUpdateBuilding: (id: string, changes: Partial<CampusBuilding>) => void;
+  /** Canonical Building deletion, including Building-owned generated graph. */
+  onDeleteBuilding?: (id: string) => void;
   onUpdate: (c: Partial<Campus>) => void;
   pushHistory: () => void;
   toast: {
@@ -43,17 +48,32 @@ interface HierarchyPanelProps {
   activeBuildingType?: string | null;
   /** Called when a decorative asset should be placed */
   onPlaceDecorAsset?: (asset: CampusDecorAsset) => void;
+  /** Arms a decorative asset for click-to-place authoring. */
+  onArmDecorAsset?: (assetType: DecorAssetType) => void;
+  /** Currently armed decorative asset type. */
+  activeDecorAssetType?: DecorAssetType | null;
+  /** Arm the canonical Campus Gate placement tool. */
+  onSelectCampusGate?: () => void;
+  /** Whether the Campus Gate placement tool is currently armed. */
+  activeCampusGatePlacement?: boolean;
   /** Number of decorative assets placed */
   decorAssetCount?: number;
   /** Whether the authoring asset palette is available in this mode */
   assetsEnabled?: boolean;
+  /** Codes allocated earlier in this editor session, including deleted drafts. */
+  buildingIdentityReservations?: ReadonlyArray<Partial<BuildingIdentity>>;
+  /** Reserve a generated identity before the parent draft is updated. */
+  onReserveBuildingIdentity?: (identity: BuildingIdentity) => void;
 }
 
 export function HierarchyPanel({
   campus, selected, onSelect, onOpenFloor, onAddBuilding,
   onUpdateBuilding, onUpdate, pushHistory, toast,
-  onSelectBuildingType, activeBuildingType, onPlaceDecorAsset, decorAssetCount = 0,
-  assetsEnabled = true,
+  onDeleteBuilding,
+  onSelectBuildingType, activeBuildingType, decorAssetCount = 0,
+  assetsEnabled = true, buildingIdentityReservations = [], onReserveBuildingIdentity,
+  onSelectCampusGate, activeCampusGatePlacement = false,
+  onArmDecorAsset, activeDecorAssetType = null,
 }: HierarchyPanelProps) {
   // ── Panel tab: "hierarchy" | "assets" ──
   const [panelTab, setPanelTab] = useState<"hierarchy" | "assets">("hierarchy");
@@ -61,6 +81,12 @@ export function HierarchyPanel({
   const [assetSearch, setAssetSearch] = useState("");
   const [expandedDecorCats, setExpandedDecorCats] = useState<Set<string>>(new Set(["Greenery"]));
   const [expandedBuildingCats, setExpandedBuildingCats] = useState<Set<string>>(new Set(["Academic", "Laboratory"]));
+  // Expansion is editor UI state, not campus graph data. Keep it local so a
+  // simple hierarchy click cannot enter the Pathway/Entrance reconciliation
+  // pipeline and rewrite authored connector geometry.
+  const [expandedBuildingIds, setExpandedBuildingIds] = useState<Set<string>>(() =>
+    new Set(campus.buildings.filter((building) => building.expanded).map((building) => building.id))
+  );
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [collapsedFloorIds, setCollapsedFloorIds] = useState<Set<string>>(() =>
@@ -73,19 +99,24 @@ export function HierarchyPanel({
   useEffect(() => {
     if (!assetsEnabled && panelTab !== "hierarchy") setPanelTab("hierarchy");
   }, [assetsEnabled, panelTab]);
+  useEffect(() => {
+    setExpandedBuildingIds((current) => {
+      const ids = new Set(campus.buildings.map((building) => building.id));
+      const next = new Set([...current].filter((id) => ids.has(id)));
+      for (const building of campus.buildings) {
+        if (!current.has(building.id) && building.expanded) next.add(building.id);
+      }
+      return next;
+    });
+  }, [campus.buildings]);
 
   const buildings = campus.buildings;
-  const activeDecorPalette = DECOR_PALETTE_TYPES.filter((type) => type !== "ground-area");
-  const createDecorAsset = (asset: { type: DecorAssetType; defaultWidth: number; defaultHeight: number }): CampusDecorAsset => ({
-    id: genId("dec"),
-    type: asset.type,
-    x: Math.round(campus.canvasW / 2 + (Math.random() - 0.5) * 100),
-    y: Math.round(campus.canvasH / 2 + (Math.random() - 0.5) * 100),
-    rotation: 0,
-    ...(asset.type === "ground-area"
-      ? { width: 150, height: 95, groundType: "grass" as const, zOrder: -1000 }
-      : { scale: 1 }),
-  });
+  // Building creation remains on the main Building tool; the Assets tab only
+  // exposes functional campus/decor assets and never fake building presets.
+  const activeDecorPalette = DECOR_PALETTE_TYPES;
+  const visibleDecorPalette = (assetSearch
+    ? activeDecorPalette.map((t) => DECOR_ASSET_MAP[t]).filter(Boolean).filter(a => a.label.toLowerCase().includes(assetSearch.toLowerCase()))
+    : activeDecorPalette.map((t) => DECOR_ASSET_MAP[t]).filter(Boolean));
   const normalizedSearch = searchQuery.trim().toLowerCase();
   const buildingMatchesSearch = (b: CampusBuilding) => !normalizedSearch
     || b.name.toLowerCase().includes(normalizedSearch)
@@ -219,10 +250,13 @@ export function HierarchyPanel({
     if (!b) return;
     pushHistory();
     const nbId = genId("bld");
+    const identity = nextBuildingCopyIdentity(b, buildings, buildingIdentityReservations, nbId);
+    onReserveBuildingIdentity?.(identity);
     const nb: CampusBuilding = {
       ...structuredClone(b),
       id: nbId,
-      name: `${b.name} (copy)`,
+      name: identity.name,
+      code: identity.code,
       x: b.x + 25,
       y: b.y + 25,
       floors: b.floors.map((f) => duplicateFloorForBuilding(f, {
@@ -249,8 +283,15 @@ export function HierarchyPanel({
   const executeDeleteBuilding = (id: string) => {
     const b = buildings.find((x) => x.id === id);
     if (!b) return;
-    pushHistory();
-    updBuildings(buildings.filter((x) => x.id !== id));
+    if (onDeleteBuilding) {
+      // CampusEditor owns the canonical deletion so generated Exterior
+      // Emergency Stair landings, the outdoor discharge, and incident edges
+      // are removed together with the physical Building.
+      onDeleteBuilding(id);
+    } else {
+      pushHistory();
+      updBuildings(buildings.filter((x) => x.id !== id));
+    }
     onSelect(null);
     toast.success("Building Deleted", `"${b.name}" has been removed.`);
   };
@@ -336,7 +377,7 @@ export function HierarchyPanel({
       initial={{ opacity: 0, x: -12 }}
       animate={{ opacity: 1, x: 0 }}
       transition={{ duration: 0.3, delay: 0.12, ease: [0.16, 1, 0.3, 1] }}
-      className="w-56 border-r border-border bg-card flex flex-col overflow-hidden shrink-0"
+      className="w-56 h-full min-h-0 border-r border-border bg-card flex flex-col overflow-hidden shrink-0"
     >
       {/* Header with tab switcher */}
       <div className="px-2 pt-2 pb-0 border-b border-border">
@@ -395,18 +436,27 @@ export function HierarchyPanel({
 
       {/* ═══ ASSETS TAB ═══ */}
       {assetsEnabled && panelTab === "assets" && (
-        <div className="flex-1 overflow-y-auto scrollbar-show-on-hover scroll-smooth py-2 px-2 space-y-3">
-          {/* Combined Assets Grid — buildings + outdoor assets */}
+        <div data-testid="outdoor-assets-scroll" className="h-0 min-h-0 flex-1 overflow-y-auto overscroll-contain scrollbar-show-on-hover scroll-smooth py-2 px-2 space-y-3" onWheelCapture={(event) => event.stopPropagation()} style={{ overscrollBehaviorY: "contain" }}>
           <div>
+            <span className="text-[9px] font-extrabold uppercase tracking-widest text-muted-foreground px-1 flex items-center gap-1.5"><DoorOpen className="h-2.5 w-2.5" />Functional</span>
+            <div className="mt-1.5 grid grid-cols-2 gap-1.5">
+              <button type="button" data-testid="asset-campus-gate" aria-label="Place Campus Gate" title="Place Campus Gate" onClick={() => onSelectCampusGate?.()} draggable onDragStart={(event) => { event.dataTransfer.setData("text/plain", JSON.stringify({ type: "campusGate" })); event.dataTransfer.effectAllowed = "copy"; }} className={cn("flex min-h-[70px] min-w-0 flex-col items-center justify-start gap-1 p-1.5 rounded-md border transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 group active:scale-95", activeCampusGatePlacement ? "border-primary/40 bg-primary/8 ring-1 ring-primary/20" : "border-transparent hover:bg-muted/50")}>
+                <div className="w-9 h-9 rounded-lg flex items-center justify-center" style={{ backgroundColor: "#2563eb14", border: "1px solid #2563eb35" }}><CampusGateVisual width={30} height={25} color="#2563eb" /></div>
+                <span className="block max-w-full text-[8px] font-semibold text-foreground/70 group-hover:text-foreground text-center leading-tight">Campus Gate</span>
+              </button>
+            </div>
+          </div>
+          {/* Combined Assets Grid — buildings + outdoor assets */}
+          {false && <div>
             <span className="text-[9px] font-extrabold uppercase tracking-widest text-muted-foreground px-1 flex items-center gap-1.5">
               <Sparkles className="h-2.5 w-2.5" />
-              Campus Objects
+              Legacy Building Presets
               {decorAssetCount > 0 && <span className="text-[8px] font-mono opacity-60">({decorAssetCount})</span>}
             </span>
             <div className="mt-1.5 grid grid-cols-2 gap-2">
               {(assetSearch
-                ? BUILDING_TYPES.filter(t => t.label.toLowerCase().includes(assetSearch.toLowerCase()) || t.category.toLowerCase().includes(assetSearch.toLowerCase()))
-                : BUILDING_TYPES
+                ? []
+                : []
               ).map((type) => (
                 <button
                   key={type.id}
@@ -439,32 +489,30 @@ export function HierarchyPanel({
                 </button>
               ))}
             </div>
-          </div>
+          </div>}
 
-          {/* Decorative Assets — visual grid (no categories, flat) */}
+          {/* Decorative Assets — grouped by the small set of useful campus
+              categories while retaining the existing drag/place behavior. */}
           <div className="border-t border-border pt-2">
             <span className="text-[9px] font-extrabold uppercase tracking-widest text-muted-foreground px-1 flex items-center gap-1.5">
               <TreePine className="h-2.5 w-2.5" />
-              Outdoor Decor
+              Campus Objects
               {decorAssetCount > 0 && <span className="text-[8px] font-mono opacity-60">({decorAssetCount})</span>}
             </span>
-            <div className="mt-1.5 grid grid-cols-3 gap-1.5">
-              {/* Curated placement palette — a focused public-campus-map set.
-                  Unlisted legacy types still render on the canvas if a saved
-                  campus contains them (backward compatible). */}
-              {(assetSearch
-                ? activeDecorPalette.map((t) => DECOR_ASSET_MAP[t]).filter(Boolean).filter(a => a.label.toLowerCase().includes(assetSearch.toLowerCase()))
-                : activeDecorPalette.map((t) => DECOR_ASSET_MAP[t]).filter(Boolean)
-              ).map((asset) => (
+            {DECOR_CATEGORIES.map((category) => {
+              const assets = visibleDecorPalette.filter((asset) => category.types.includes(asset.type));
+              if (assets.length === 0) return null;
+               return (<div key={category.id} className="mt-2"><div className="px-1 pb-1 text-[8px] font-bold uppercase tracking-wider text-muted-foreground/70">{category.label}</div><div className="grid grid-cols-3 gap-1.5">{assets.map((asset) => (
                 <button
                   key={asset.type}
-                  onClick={() => {
-                    onPlaceDecorAsset?.(createDecorAsset(asset));
-                  }}
-                  className="flex min-h-[70px] min-w-0 flex-col items-center justify-start gap-1 p-1.5 rounded-md hover:bg-muted/50 transition-all group active:scale-95"
+                  onClick={() => onArmDecorAsset?.(asset.type)}
+                  data-armed={activeDecorAssetType === asset.type ? "true" : undefined}
+                  aria-label={`Place ${asset.label}`}
+                  title={`Place ${asset.label}`}
+                  className={cn("flex min-h-[70px] min-w-0 flex-col items-center justify-start gap-1 p-1.5 rounded-md border transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 group active:scale-95", activeDecorAssetType === asset.type ? "border-primary/40 bg-primary/8 ring-1 ring-primary/20" : "border-transparent hover:bg-muted/50")}
                   draggable
                   onDragStart={(e) => {
-                    e.dataTransfer.setData("text/plain", JSON.stringify({ type: "decorAsset", assetType: asset.type, w: asset.defaultWidth, h: asset.defaultHeight, groundArea: asset.type === "ground-area" }));
+                    e.dataTransfer.setData("text/plain", JSON.stringify({ type: "decorAsset", assetType: asset.type, w: asset.defaultWidth, h: asset.defaultHeight, groundArea: isDecorAreaType(asset.type), groundType: groundTypeForDecorType(asset.type) }));
                     e.dataTransfer.effectAllowed = "copy";
                   }}
                 >
@@ -475,8 +523,11 @@ export function HierarchyPanel({
                     {asset.label}
                   </span>
                 </button>
-              ))}
-            </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
@@ -520,7 +571,7 @@ export function HierarchyPanel({
           <div key={b.id}>
             {(() => {
               const searchExpandsBuilding = Boolean(normalizedSearch) && b.floors.some(floorMatchesSearch);
-              const buildingExpanded = b.expanded || searchExpandsBuilding;
+              const buildingExpanded = expandedBuildingIds.has(b.id) || searchExpandsBuilding;
               return (
               <>
             {/* Drop indicator above item */}
@@ -567,7 +618,11 @@ export function HierarchyPanel({
                 dragItemRef.current === idx ? "opacity-40" : ""
               )}
               onClick={() => {
-                onUpdate({ buildings: buildings.map((x) => (x.id === b.id ? { ...x, expanded: !x.expanded } : x)) });
+                setExpandedBuildingIds((current) => {
+                  const next = new Set(current);
+                  if (next.has(b.id)) next.delete(b.id); else next.add(b.id);
+                  return next;
+                });
                 onSelect({ type: "building", id: b.id });
               }}
             >
@@ -588,35 +643,40 @@ export function HierarchyPanel({
               {/* Building hover actions */}
               <button
                 onClick={(e) => { e.stopPropagation(); renameBuilding(b.id); }}
-                className="opacity-0 group-hover:opacity-100 w-5 h-5 rounded flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted transition-all shrink-0"
+                aria-label={`Rename ${b.name}`}
+                className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 w-5 h-5 rounded flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted transition-all shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
                 title="Rename"
               >
                 <Pencil className="h-2.5 w-2.5" />
               </button>
               <button
                 onClick={(e) => { e.stopPropagation(); duplicateBuilding(b.id); }}
-                className="opacity-0 group-hover:opacity-100 w-5 h-5 rounded flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted transition-all shrink-0"
+                aria-label={`Duplicate ${b.name}`}
+                className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 w-5 h-5 rounded flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted transition-all shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
                 title="Duplicate"
               >
                 <Copy className="h-2.5 w-2.5" />
               </button>
               <button
                 onClick={(e) => { e.stopPropagation(); toggleLockBuilding(b.id); }}
-                className="opacity-0 group-hover:opacity-100 w-5 h-5 rounded flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted transition-all shrink-0"
+                aria-label={`${b.locked ? "Unlock" : "Lock"} ${b.name}`}
+                className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 w-5 h-5 rounded flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted transition-all shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
                 title={b.locked ? "Unlock" : "Lock"}
               >
                 <Lock className={cn("h-2.5 w-2.5", b.locked && "text-amber-500")} />
               </button>
               <button
                 onClick={(e) => { e.stopPropagation(); toggleVisibleBuilding(b.id); }}
-                className="opacity-0 group-hover:opacity-100 w-5 h-5 rounded flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted transition-all shrink-0"
+                aria-label={`${(b.visible ?? true) ? "Hide" : "Show"} ${b.name}`}
+                className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 w-5 h-5 rounded flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted transition-all shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
                 title={(b.visible ?? true) ? "Hide" : "Show"}
               >
                 {b.visible ?? true ? <Eye className="h-2.5 w-2.5" /> : <EyeOff className="h-2.5 w-2.5" />}
               </button>
               <button
                 onClick={(e) => { e.stopPropagation(); confirmDeleteBuilding(b.id); }}
-                className="opacity-0 group-hover:opacity-100 w-5 h-5 rounded flex items-center justify-center text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-all shrink-0"
+                aria-label={`Delete ${b.name}`}
+                className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 w-5 h-5 rounded flex items-center justify-center text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-all shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive/50"
                 title="Delete"
               >
                 <Trash2 className="h-2.5 w-2.5" />

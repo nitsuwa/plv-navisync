@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { mergeOutdoorStack, reorderOutdoorStack, effectiveStackKey } from "../campusStack";
+import { mergeOutdoorStack, reorderOutdoorStack, effectiveStackKey, sortOutdoorGroundAssets } from "../campusStack";
 import type { LayerOrderAction } from "../campusLayerOrder";
 
 interface B { id: string; name: string; zOrder?: number }
@@ -10,6 +10,9 @@ function bldg(id: string, zOrder?: number): B {
 }
 function decor(id: string, zOrder?: number): D {
   return zOrder === undefined ? { id, type: id } : { id, type: id, zOrder };
+}
+function area(id: string, zOrder?: number): D {
+  return zOrder === undefined ? { id, type: "lawn-area" } : { id, type: "lawn-area", zOrder };
 }
 
 function mergedIds(buildings: B[], decor: D[]): string[] {
@@ -145,5 +148,33 @@ describe("reorderOutdoorStack — cross-type layer ordering", () => {
     const res = run(b, d, ["da1"], "front");
     expect(res.buildings).toBe(b);
     expect(res.decorAssets).toBe(d);
+  });
+
+  it("reorders area assets within their dedicated background layer", () => {
+    const b = [bldg("b1")];
+    const d = [area("lawn-a"), area("lawn-b"), decor("tree")];
+    const res = run(b, d, ["lawn-a"], "front");
+    expect(res.changed).toBe(true);
+    const lawnA = res.decorAssets.find((item) => item.id === "lawn-a");
+    const lawnB = res.decorAssets.find((item) => item.id === "lawn-b");
+    expect(lawnA?.zOrder).toBeGreaterThan(lawnB?.zOrder ?? -Infinity);
+    // Reordering a ground asset must not rewrite foreground objects.
+    expect(res.decorAssets.find((item) => item.id === "tree")?.zOrder).toBeUndefined();
+    expect(res.buildings[0].zOrder).toBeUndefined();
+  });
+
+  it("renders ground assets by their persisted order while preserving legacy ties", () => {
+    const d = [area("lawn-a", -999998), decor("tree"), area("lawn-b", -999999)];
+    expect(sortOutdoorGroundAssets(d).map((item) => item.id)).toEqual(["lawn-b", "lawn-a"]);
+  });
+
+  it("handles a mixed area + foreground selection without losing either layer", () => {
+    const b = [bldg("b1")];
+    const d = [area("lawn-a"), area("lawn-b"), decor("tree")];
+    const res = run(b, d, ["lawn-a", "tree"], "front");
+    expect(res.changed).toBe(true);
+    expect(res.decorAssets.find((item) => item.id === "lawn-a")?.zOrder)
+      .toBeGreaterThan(res.decorAssets.find((item) => item.id === "lawn-b")?.zOrder ?? -Infinity);
+    expect(res.decorAssets.find((item) => item.id === "tree")?.zOrder).toBe(1);
   });
 });

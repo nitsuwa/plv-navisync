@@ -12,6 +12,7 @@ import type {
   FloorWall,
   FloorWallEndpointAnchor,
 } from "../components/map-builder/types";
+import { exteriorZoneGeometry } from "./exteriorFloorZones";
 
 export const DEFAULT_FLOOR_CANVAS = { w: 600, h: 450 };
 export const MIN_FLOOR_CANVAS = { w: 120, h: 100 };
@@ -234,6 +235,41 @@ export function resolveWallOpeningGeometry(opening: FloorDoor | FloorWindow, wal
   };
 }
 
+/**
+ * Returns the physical aperture interval measured along a wall's local axis.
+ * Interaction affordances (selection handles, labels, swing arcs, and hit
+ * padding) deliberately do not participate in this span.
+ */
+export function wallOpeningSpan(opening: FloorDoor | FloorWindow, wall: FloorWall | undefined) {
+  const geometry = resolveWallOpeningGeometry(opening, wall);
+  if (!geometry) return null;
+  const center = geometry.offset * geometry.length;
+  return {
+    start: center - geometry.width / 2,
+    end: center + geometry.width / 2,
+    width: geometry.width,
+  };
+}
+
+/**
+ * Tests whether two wall-mounted apertures overlap on the same physical wall.
+ * A small tolerance permits adjacent openings to touch at their jambs without
+ * treating a shared edge as an overlap.
+ */
+export function wallOpeningSpansOverlap(
+  first: FloorDoor | FloorWindow,
+  second: FloorDoor | FloorWindow,
+  wall: FloorWall | undefined,
+  tolerance = 0.5,
+) {
+  if (!wall || first.wallId !== wall.id || second.wallId !== wall.id) return false;
+  const firstSpan = wallOpeningSpan(first, wall);
+  const secondSpan = wallOpeningSpan(second, wall);
+  if (!firstSpan || !secondSpan) return false;
+  const overlap = Math.min(firstSpan.end, secondSpan.end) - Math.max(firstSpan.start, secondSpan.start);
+  return overlap > Math.max(0, tolerance);
+}
+
 export function syncOpeningsToWalls(doors: FloorDoor[], windows: FloorWindow[], walls: FloorWall[]) {
   const wallById = new Map(walls.map((wall) => [wall.id, wall]));
   return {
@@ -421,6 +457,13 @@ export function itemBounds(type: FloorSelection["type"], item: unknown): Rect | 
   if (type === "elevator") {
     const elevator = value as FloorElevatorItem;
     return rotatedRectBounds(elevator.x, elevator.y, elevator.width, elevator.height, elevator.rotation ?? 0);
+  }
+  if (type === "entranceSteps" || type === "entranceRamp") {
+    return rotatedRectBounds(value.x, value.y, value.width, value.height, value.rotation ?? 0);
+  }
+  if (type === "exteriorZone") {
+    if (typeof value.x !== "number" || typeof value.y !== "number") return null;
+    return { x: value.x, y: value.y, w: value.width ?? 0, h: value.depth ?? 0 };
   }
   if (type === "label") {
     return labelBounds(value as FloorLabel);
@@ -738,6 +781,16 @@ export function scaleFloorItemFromBounds(
     };
     return clampRotatedRectPosition(next, canvasW, canvasH);
   }
+  if (type === "entranceSteps" || type === "entranceRamp") {
+    const next = {
+      ...item,
+      x: Math.round(mapX(item.x)),
+      y: Math.round(mapY(item.y)),
+      width: Math.max(8, Math.round(item.width * sx)),
+      height: Math.max(8, Math.round(item.height * sy)),
+    };
+    return clampRotatedRectPosition(next, canvasW, canvasH);
+  }
   return item;
 }
 
@@ -800,10 +853,14 @@ export function selectionIdsInRect(floor: FloorPlan, rect: Rect) {
     ["ramp", floor.ramps],
     ["elevator", floor.elevators],
     ["label", floor.labels],
+    ["entranceSteps", floor.entranceSteps ?? []],
+    ["entranceRamp", floor.entranceRamps ?? []],
+    ["exteriorZone", floor.exteriorZones ?? []],
   ];
   return pairs.flatMap(([type, items]) =>
     items
       .filter((item) => {
+        if (item?.locked) return false;
         const bounds = itemBounds(type, item);
         return bounds ? rectsIntersect(rect, bounds) : false;
       })
@@ -816,6 +873,17 @@ export function validateFloorGeometry(floor: FloorPlan): FloorIssue[] {
   const canvasH = floor.canvasH ?? DEFAULT_FLOOR_CANVAS.h;
   const issues: FloorIssue[] = [];
   const wallById = new Map(floor.walls.map((wall) => [wall.id, wall]));
+  const furnitureIsInsideExteriorZone = (item: FloorFurniture) => {
+    const bounds = itemBounds("furniture", item);
+    if (!bounds) return false;
+    return (floor.exteriorZones ?? []).some((zone) => {
+      const zoneBounds = exteriorZoneGeometry(zone, canvasW, canvasH);
+      return bounds.x >= zoneBounds.x - 0.5
+        && bounds.y >= zoneBounds.y - 0.5
+        && bounds.x + bounds.w <= zoneBounds.x + zoneBounds.width + 0.5
+        && bounds.y + bounds.h <= zoneBounds.y + zoneBounds.height + 0.5;
+    });
+  };
   const pairs: Array<[FloorSelection["type"], any[], string]> = [
     ["room", floor.rooms, "Room"],
     ["wall", floor.walls, "Wall"],
@@ -829,6 +897,7 @@ export function validateFloorGeometry(floor: FloorPlan): FloorIssue[] {
   ];
   for (const [type, items, label] of pairs) {
     for (const item of items) {
+      if (type === "furniture" && furnitureIsInsideExteriorZone(item as FloorFurniture)) continue;
       if ((type === "door" || type === "window") && item.wallId) {
         const wall = wallById.get(item.wallId);
         const openingLabel = type === "door" ? "Door" : "Window";

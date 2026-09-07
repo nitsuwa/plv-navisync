@@ -2235,6 +2235,27 @@ describe("B5 Phase 1.9 — entrance navigation visual cleanup", () => {
     expect(latest!.paths[0].points).toEqual([{ x: 100, y: 100 }, { x: 200, y: 200 }]);
   });
 
+  it("Phase 5.7 dragging a diagonal segment midpoint inserts and positions one bend", () => {
+    let latest: Campus | undefined;
+    const campus = makeCampus();
+    campus.paths = [{ id: "diag-drag", type: "walkway", color: "#94a3b8", width: 12, points: [{ x: 100, y: 100 }, { x: 200, y: 200 }] }];
+    const { container } = render(<Harness initialCampus={campus} onCampusChange={(value) => { latest = value; }} />);
+    const svg = canvasSvg(container);
+    fireEvent.mouseDown(container.querySelector("[data-path-id='diag-drag']")!, { clientX: 150, clientY: 150, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+
+    const midpoint = container.querySelector("[data-testid='path-add-bend-handle']")!;
+    fireEvent.mouseDown(midpoint, { clientX: 150, clientY: 150, bubbles: true });
+    fireEvent.mouseMove(svg, { clientX: 150, clientY: 180, bubbles: true });
+    fireEvent.mouseUp(svg, { clientX: 150, clientY: 180, bubbles: true });
+
+    expect(latest!.paths[0].points).toEqual([
+      { x: 100, y: 100 },
+      { x: 160, y: 180 },
+      { x: 200, y: 200 },
+    ]);
+  });
+
   it("Phase 5.7 moving a shared pathway junction preserves exact coordinate links", () => {
     let latest: Campus | undefined;
     const campus = makeCampus();

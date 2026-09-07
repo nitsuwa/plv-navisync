@@ -448,4 +448,69 @@ describe("CampusEditor multi-object movement", () => {
     fireEvent.click(undoButton(container)!);
     expect(buildingPos(latestCampus!, "b3")).toEqual({ x: 700, y: 300 });
   });
+
+  it("moves an asset-only selection left as one rigid group", () => {
+    const initial = makeCampus();
+    initial.buildings = [];
+    initial.decorAssets = [
+      { id: "tree-a", type: "tree", x: 520, y: 220, rotation: 0, scale: 1 },
+      { id: "bench-a", type: "bench", x: 620, y: 220, rotation: 0, scale: 1 },
+    ];
+    const { container } = render(<Harness campus={initial} onCampusChange={(c) => { latestCampus = c; }} />);
+    const svg = stubSvgRect(container);
+    const tree = decorG(container, "tree");
+    const bench = decorG(container, "bench");
+    shiftClick(tree, 520, 220);
+    shiftClick(bench, 620, 220);
+    fireEvent.mouseDown(tree, { clientX: 520, clientY: 220 });
+    fireEvent.mouseMove(svg, { clientX: 460, clientY: 220 });
+    fireEvent.mouseUp(svg);
+    expect(latestCampus).toBeTruthy();
+    expect(decorPos(latestCampus!, "tree-a").x).toBe(460);
+    expect(decorPos(latestCampus!, "bench-a").x).toBe(560);
+  });
+
+  it("moves an asset-only selection left from the group surface without snapping to the center", () => {
+    const initial = makeCampus();
+    initial.buildings = [];
+    initial.decorAssets = [
+      { id: "tree-s", type: "tree", x: 520, y: 220, rotation: 0, scale: 1 },
+      { id: "bench-s", type: "bench", x: 620, y: 220, rotation: 0, scale: 1 },
+    ];
+    const { container } = render(<Harness campus={initial} onCampusChange={(c) => { latestCampus = c; }} />);
+    const svg = stubSvgRect(container);
+    shiftClick(decorG(container, "tree"), 520, 220);
+    shiftClick(decorG(container, "bench"), 620, 220);
+    const surface = container.querySelector("[data-testid='campus-group-drag-surface']") as SVGRectElement | null;
+    expect(surface).toBeTruthy();
+    fireEvent.mouseDown(surface!, { clientX: 570, clientY: 220 });
+    fireEvent.mouseMove(svg, { clientX: 450, clientY: 220 });
+    fireEvent.mouseUp(svg);
+    expect(latestCampus).toBeTruthy();
+    expect(decorPos(latestCampus!, "tree-s").x).toBe(400);
+    expect(decorPos(latestCampus!, "bench-s").x).toBe(500);
+  });
+
+  it("edge-snaps a decor-only group to a nearby building as one rigid unit", () => {
+    const initial = makeCampus();
+    initial.buildings = [{ ...initial.buildings[0], x: 320, y: 160, width: 200, height: 120 }];
+    initial.decorAssets = [
+      { id: "tree-edge", type: "tree", x: 600, y: 260, rotation: 0, scale: 1 },
+      { id: "bench-edge", type: "bench", x: 700, y: 260, rotation: 0, scale: 1 },
+    ];
+    const { container } = render(<Harness campus={initial} onCampusChange={(c) => { latestCampus = c; }} />);
+    const svg = stubSvgRect(container);
+    shiftClick(decorG(container, "tree"), 600, 260);
+    shiftClick(decorG(container, "bench"), 700, 260);
+    fireEvent.mouseDown(decorG(container, "tree"), { clientX: 600, clientY: 260 });
+    fireEvent.mouseMove(svg, { clientX: 560, clientY: 260 });
+    fireEvent.mouseUp(svg);
+    expect(latestCampus).toBeTruthy();
+    // The group visible left edge (tree at x=600, width=72) would land at
+    // 524 after the raw drag. It is within the shared 12-unit tolerance of
+    // the building's right edge (520), so the whole group snaps by -44.
+    expect(decorPos(latestCampus!, "tree-edge").x).toBe(556);
+    expect(decorPos(latestCampus!, "bench-edge").x).toBe(656);
+  });
+
 });

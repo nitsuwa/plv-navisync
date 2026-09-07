@@ -2,13 +2,14 @@ import { describe, expect, it } from "vitest";
 import {
   buildingSelectionBounds,
   decorSelectionBounds,
+  markerSelectionBounds,
   outdoorSelectionIdsInRect,
   pathSelectionBounds,
   rectsIntersect,
   selectionRectFromPoints,
 } from "../campusSelection";
 import { DECOR_ASSET_MAP } from "../../components/map-builder/constants";
-import type { CampusBuilding, CampusDecorAsset, CampusPath } from "../../components/map-builder/types";
+import type { CampusBuilding, CampusDecorAsset, CampusMarker, CampusPath } from "../../components/map-builder/types";
 
 function building(overrides: Partial<CampusBuilding> = {}): CampusBuilding {
   return {
@@ -50,6 +51,10 @@ function path(overrides: Partial<CampusPath> = {}): CampusPath {
     width: 12,
     ...overrides,
   };
+}
+
+function gate(overrides: Partial<CampusMarker> = {}): CampusMarker {
+  return { id: "g1", name: "Main Gate", type: "gate", purpose: "general", x: 320, y: 120, color: "#2563eb", ...overrides };
 }
 
 describe("campusSelection helpers", () => {
@@ -118,5 +123,24 @@ describe("campusSelection helpers", () => {
     );
 
     expect(ids).toEqual(["b1", "p1"]);
+  });
+
+  it("captures a physical Campus Gate while keeping its derived anchor out of selection", () => {
+    expect(markerSelectionBounds(gate())).toMatchObject({ id: "g1", kind: "marker", x: 298, y: 103 });
+    const ids = outdoorSelectionIdsInRect(
+      { x: 290, y: 95, width: 70, height: 60 },
+      [], [], DECOR_ASSET_MAP, [], {}, [gate()],
+    );
+    expect(ids).toEqual(["g1"]);
+  });
+
+  it("excludes locked objects from rubber-band and group transform bounds", () => {
+    const ids = outdoorSelectionIdsInRect(
+      { x: 80, y: 80, width: 500, height: 180 },
+      [building(), building({ id: "locked-building", x: 260, locked: true })],
+      [decor({ id: "locked-tree", x: 320, locked: true }), decor({ id: "da2", x: 460 })],
+      DECOR_ASSET_MAP,
+    );
+    expect(ids).toEqual(["b1", "da2"]);
   });
 });

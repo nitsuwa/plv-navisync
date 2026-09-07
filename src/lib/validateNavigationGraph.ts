@@ -417,7 +417,11 @@ export function validateNavigationGraph(campus: Campus): NavGraphReadinessResult
 
   // ── E. Indoor node validation ──────────────────────────────────────────
   for (const node of nodes) {
-    if (node.type === "outdoor" || node.type === "entrance") continue;
+    // Building-owned Exterior Emergency Stair discharge anchors are generated
+    // outdoor infrastructure. They intentionally have no floorId, remain
+    // connectable in the outdoor editor, and must not be reported as broken
+    // indoor nodes merely because their type is `stair`.
+    if (node.type === "outdoor" || node.type === "entrance" || (node.exteriorEmergencyStairId && !node.floorId)) continue;
     // Indoor nodes should have a floorId
     if (!node.floorId) {
       issues.push({

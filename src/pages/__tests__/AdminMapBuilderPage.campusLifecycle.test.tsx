@@ -346,6 +346,33 @@ describe("AdminMapBuilderPage — campus lifecycle", () => {
     expect(screen.queryByText("No buildings yet")).not.toBeInTheDocument();
   }, 10_000);
 
+  it("CANVAS SETTINGS: appearance-only updates use the canonical structure save without a campus-row auth lookup", async () => {
+    const campus = makeCampus({ canvasConfigured: true });
+    const hydrated = { ...campus, previewBuildingsLoaded: true };
+    (campusService.list as ReturnType<typeof vi.fn>).mockResolvedValue([campus]);
+    (campusStructureService.load as ReturnType<typeof vi.fn>).mockResolvedValue(hydrated);
+    (campusStructureService.save as ReturnType<typeof vi.fn>).mockImplementation(async (candidate: Campus) => candidate);
+
+    renderPage();
+    await flush();
+    fireEvent.click(screen.getByRole("button", { name: /open editor/i }));
+    fireEvent.click(await screen.findByTestId("canvas-settings-trigger"));
+    fireEvent.click(await screen.findByRole("button", { name: /more canvas settings/i }));
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Ground material" }), { target: { value: "grass" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Settings" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save Changes" }));
+
+    await waitFor(() => expect(campusStructureService.save).toHaveBeenCalledTimes(1));
+    expect(campusService.update).not.toHaveBeenCalled();
+    expect(campusStructureService.save).toHaveBeenCalledWith(expect.objectContaining({
+      canvasGroundMaterial: "grass",
+      canvasConfigured: true,
+      buildings: hydrated.buildings,
+      paths: hydrated.paths,
+    }));
+  });
+
   it("CREATE: New Campus opens the wizard; completing it calls campusService.create exactly once with valid non-zero canvas dims and lands on success", async () => {
     (campusService.list as ReturnType<typeof vi.fn>).mockResolvedValue([]);
     const created = makeCampus({ id: "campus-new", name: "Test Campus", code: "TST" });

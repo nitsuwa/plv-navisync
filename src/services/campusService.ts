@@ -424,8 +424,13 @@ export async function createCampus(input: CampusCreateInput): Promise<Campus> {
 }
 
 async function updateWithVersion(id: string, expectedUpdatedAt: string, changes: TablesUpdate<"campuses">): Promise<Campus> {
-  const userId = await requireCurrentUserId();
-  const { data, error } = await getSupabase().from("campuses").update({ ...changes, updated_by: userId })
+  // The browser Supabase client and the campuses RLS policy are the
+  // authentication boundary for updates.  Do not perform a second, eager
+  // auth.getUser() lookup here: during token restoration it can transiently
+  // throw "Auth session missing!" even though the canonical client still has
+  // an authenticated session.  The database lifecycle trigger populates
+  // updated_by from auth.uid() and RLS still rejects unauthenticated writes.
+  const { data, error } = await getSupabase().from("campuses").update(changes)
     .eq("id", id).eq("updated_at", expectedUpdatedAt).select("*").maybeSingle();
   assertOk(error, "update campus");
   if (!data) throw new CampusConflictError();

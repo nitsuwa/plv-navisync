@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
 interface TooltipProps {
   content: string;
@@ -8,11 +8,29 @@ interface TooltipProps {
 export function Tooltip({ content, children }: TooltipProps) {
   const [show, setShow] = useState(false);
   const [pos, setPos] = useState({ x: 0, y: 0 });
+  const timerRef = useRef<number | null>(null);
+  const clearTimer = () => {
+    if (timerRef.current !== null && typeof window !== "undefined") window.clearTimeout(timerRef.current);
+    timerRef.current = null;
+  };
   const showAt = (target: HTMLElement) => {
+    clearTimer();
     const rect = target.getBoundingClientRect();
     setPos({ x: rect.left + rect.width / 2, y: rect.top });
-    setShow(true);
+    // A short delay keeps dense editor palettes from flashing tooltips while
+    // the pointer crosses adjacent cards. Focused keyboard users still get
+    // the same hint without needing a separate tooltip implementation.
+    if (typeof window === "undefined") {
+      setShow(true);
+      return;
+    }
+    timerRef.current = window.setTimeout(() => {
+      timerRef.current = null;
+      setShow(true);
+    }, 180);
   };
+  const hide = () => { clearTimer(); setShow(false); };
+  useEffect(() => () => clearTimer(), []);
 
   return (
     <>
@@ -21,9 +39,9 @@ export function Tooltip({ content, children }: TooltipProps) {
         tabIndex={0}
         aria-label={content}
         onFocus={(e) => showAt(e.currentTarget)}
-        onBlur={() => setShow(false)}
+        onBlur={hide}
         onMouseEnter={(e) => showAt(e.currentTarget)}
-        onMouseLeave={() => setShow(false)}
+        onMouseLeave={hide}
       >
         {children}
       </span>

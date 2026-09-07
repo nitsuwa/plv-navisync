@@ -2,16 +2,19 @@
  * Pure campus validation for the Map Builder.
  *
  * Extracted from CampusEditor.tsx so the pre-publish / pre-save checks can be
- * unit-tested and reused without React. Behavior is identical to the original
- * inline implementation (same issue types, messages, and dedupe keys).
+ * unit-tested and reused without React. Emergency egress readiness is kept
+ * semantic here: a ready Building-owned Exterior Emergency Stair satisfies
+ * the dedicated-egress check alongside a designated Emergency Exit entrance.
  *
  * This is the B1 baseline slice of the editor's validation; the complete
  * validation and issues workflow is owned by package B7.
  */
 
-import type { CampusBuilding } from "../components/map-builder/types";
+import type { CampusBuilding, CampusMarker, NavigationEdge, NavigationNode } from "../components/map-builder/types";
 import { getRotatedAABB } from "../components/map-builder/constants";
 import { normalizeBuildingEntrances, normalizeEntranceType, primaryEligibleEntrances } from "./buildingEntrances";
+import { canonicalExteriorEmergencyStairsForBuilding, exteriorEmergencyStairReadiness, exteriorEmergencyStairRouteReadiness } from "./exteriorEmergencyStairs";
+import { campusGates, outdoorNetworkReachesCampusGate } from "./campusGates";
 import type { ValidationIssue } from "../components/map-builder/ValidationErrorsDialog";
 
 /** The subset of Campus that the baseline validation reads. */
@@ -20,6 +23,11 @@ export interface CampusValidationInput {
   canvasW: number;
   canvasH: number;
   buildings: CampusBuilding[];
+  /** Optional live graph used for semantic Emergency readiness.  Older pure
+   * validation callers may omit these and retain structural-only checks. */
+  navNodes?: NavigationNode[];
+  navEdges?: NavigationEdge[];
+  markers?: CampusMarker[];
 }
 
 /**
@@ -170,18 +178,56 @@ export function validateCampusData(
         });
       }
     }
-    if (includeEmergencyExitWarnings
-      && !entrances.some((entrance) => normalizeEntranceType(entrance.type) === "emergency_exit")) {
-      const key = `${b.id}-no_emergency_exit_configured`;
+    const hasDesignatedEmergencyExit = entrances.some((entrance) => normalizeEntranceType(entrance.type) === "emergency_exit");
+    const exteriorStairs = canonicalExteriorEmergencyStairsForBuilding(b);
+    const hasGraph = Array.isArray(campus.navNodes) && Array.isArray(campus.navEdges);
+    const stairStatuses = exteriorStairs.map((stair) => hasGraph
+      ? exteriorEmergencyStairRouteReadiness(b, stair, campus.navNodes, campus.navEdges)
+      : exteriorEmergencyStairReadiness(b, stair));
+    const gates = campusGates({ markers: campus.markers ?? [] });
+    // Fully hydrated editor campuses always carry a markers array. A stair is
+    // a complete emergency egress only when that outdoor graph can reach an
+    // authored Campus Gate; undefined markers denotes a legacy pure-validation
+    // payload and keeps its structural-only behavior backwards compatible.
+    const gateReachable = (status: typeof stairStatuses[number]) => campus.markers === undefined
+      || (gates.length > 0 && !!status.outdoorNodeId && outdoorNetworkReachesCampusGate(status.outdoorNodeId, campus.navNodes ?? [], campus.navEdges ?? []));
+    const readyExteriorStair = stairStatuses.find((status) => status.ready && gateReachable(status));
+    const readyStairWithoutCampusExit = stairStatuses.find((status) => status.ready && !gateReachable(status));
+    if (includeEmergencyExitWarnings && readyStairWithoutCampusExit) {
+      const key = `${b.id}-no_reachable_campus_gate`;
       if (!seenIds.has(key)) {
         seenIds.add(key);
         errors.push({
-          type: "no_emergency_exit_configured",
+          type: "exterior_emergency_stair_no_campus_exit",
           severity: "warning",
-          message: `No Emergency Exit is configured for Building "${b.code}". Emergency routing may use a safe General entrance as fallback.`,
+          message: "Emergency route reaches the Ground discharge but cannot reach a Campus Gate.",
           buildingId: b.id,
           target: buildingTarget,
         });
+      }
+    }
+    if (includeEmergencyExitWarnings && !hasDesignatedEmergencyExit && !readyExteriorStair && !readyStairWithoutCampusExit) {
+      const key = `${b.id}-no_emergency_exit_configured`;
+      if (!seenIds.has(key)) {
+        seenIds.add(key);
+        const stairIssue = stairStatuses
+          .map((status) => status.issue)
+          .find((issue): issue is string => Boolean(issue));
+        errors.push(stairIssue
+          ? {
+              type: "exterior_emergency_stair_incomplete",
+              severity: "warning",
+              message: stairIssue,
+              buildingId: b.id,
+              target: buildingTarget,
+            }
+          : {
+              type: "no_emergency_exit_configured",
+              severity: "warning",
+              message: `No dedicated emergency egress configured for Building "${b.code}". This Building has no designated Emergency Exit or Exterior Emergency Stair. Emergency routing may use a safe General Entrance as fallback.`,
+              buildingId: b.id,
+              target: buildingTarget,
+            });
       }
     }
     // B7 Phase 1: duplicate room names WITHIN the same floor. Comparison is
