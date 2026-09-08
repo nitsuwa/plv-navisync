@@ -6,7 +6,10 @@ import type {
   CampusMarker,
   CampusPath,
   ExteriorEmergencyStair,
+  CampusGroundMaterial,
+  CampusGroundTexture,
 } from "../components/map-builder/types";
+import { canonicalExteriorEmergencyStairsForBuilding } from "./exteriorEmergencyStairs";
 
 /**
  * The public map only needs the authored physical campus scene.  Keeping this
@@ -27,6 +30,10 @@ export interface ReadonlyOutdoorCampus {
   backgroundImage?: string;
   backgroundOpacity?: number;
   backgroundFit?: Campus["backgroundFit"];
+  canvasGroundMaterial?: CampusGroundMaterial;
+  canvasGroundColor?: string;
+  canvasGroundTexture?: CampusGroundTexture;
+  canvasColor?: string;
   buildings: readonly CampusBuilding[];
   paths: readonly CampusPath[];
   entrances: readonly ReadonlyOutdoorEntrance[];
@@ -64,7 +71,7 @@ export function projectReadonlyOutdoorCampus(campus: Campus): ReadonlyOutdoorCam
         legacyPosition: { x: building.entrance.x, y: building.entrance.y },
       });
     }
-    for (const stair of building.exteriorEmergencyStairs ?? []) {
+    for (const stair of canonicalExteriorEmergencyStairsForBuilding(building)) {
       exteriorEmergencyStairs.push({ ...stair, buildingId: building.id });
     }
   }
@@ -77,6 +84,10 @@ export function projectReadonlyOutdoorCampus(campus: Campus): ReadonlyOutdoorCam
     backgroundImage: campus.backgroundImage,
     backgroundOpacity: campus.backgroundOpacity,
     backgroundFit: campus.backgroundFit,
+    canvasGroundMaterial: campus.canvasGroundMaterial,
+    canvasGroundColor: campus.canvasGroundColor,
+    canvasGroundTexture: campus.canvasGroundTexture,
+    canvasColor: campus.canvasColor,
     buildings,
     paths: (campus.paths ?? []).filter((path) => path.visible !== false),
     entrances,

@@ -84,7 +84,10 @@ function canvasSvg(container: HTMLElement): SVGSVGElement {
 }
 
 function openNavigationLayer(container: HTMLElement): SVGSVGElement {
-  fireEvent.click(screen.getByText("Navigation"));
+  // The toolbar exposes Navigation as an accessible toggle rather than a
+  // visible text tab at narrow editor widths.  Use its stable accessible name
+  // so these geometry regressions exercise the current UI entry point.
+  fireEvent.click(screen.getByRole("button", { name: /show and edit the walking network/i }));
   return canvasSvg(container);
 }
 
@@ -268,8 +271,8 @@ describe("B5 Phase 6.8 — outdoor Connect bend cleanup + node target priority",
 
     expect(container.querySelectorAll("[data-testid='nav-edge']")).toHaveLength(0);
     expect(warningSpy).toHaveBeenCalledWith(
-      "Cannot connect a waypoint to itself",
-      expect.objectContaining({ description: "Pick a different destination waypoint." })
+      "Cannot connect a walking point to itself",
+      expect.objectContaining({ description: "Pick a different destination walking point." })
     );
   });
 
@@ -357,10 +360,10 @@ describe("B5 Phase 6.8 — Floor-parity outdoor segment drag", () => {
     fireEvent.mouseUp(svg, { bubbles: true });
     expect(latest!.navEdges![0].bendPoints).toHaveLength(2);
 
-    fireEvent.click(screen.getByTitle(/Undo/));
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
     expect(latest!.navEdges![0].bendPoints).toBeUndefined();
     expect(latest!.navEdges![0].distance).toBe(100);
-    fireEvent.click(screen.getByTitle(/Redo/));
+    fireEvent.click(screen.getByRole("button", { name: "Redo" }));
     expect(latest!.navEdges![0].bendPoints).toEqual([
       { x: 200, y: 250 },
       { x: 300, y: 250 },

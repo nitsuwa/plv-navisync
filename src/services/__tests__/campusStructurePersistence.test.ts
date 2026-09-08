@@ -226,6 +226,29 @@ describe("B5 Phase 3.1.2 — floor unique-constraint persistence (write order)",
     expect(new Set(payload.floors.map((f) => f.floor_number)).size).toBe(2);
   });
 
+  it("serializer repairs duplicate or blank building codes before persistence", () => {
+    const campus = makeCampus([{ id: IDs.floorA, number: 1 }]) as Campus;
+    campus.buildings.push({
+      ...structuredClone(campus.buildings[0]),
+      id: "10000000-0000-4000-8000-000000000017",
+      name: "Engineering Copy",
+      code: "ENG",
+      floors: [],
+    });
+    campus.buildings.push({
+      ...structuredClone(campus.buildings[0]),
+      id: "10000000-0000-4000-8000-000000000018",
+      name: "Unassigned",
+      code: "",
+      floors: [],
+    });
+
+    const payload = serializeCampusStructure(campus);
+    expect(payload.buildings.map((building) => building.code)).toEqual(["ENG", "BLDG-01", "BLDG-02"]);
+    expect(new Set(payload.buildings.map((building) => String(building.code).toUpperCase())).size)
+      .toBe(payload.buildings.length);
+  });
+
   it("floor IDs referenced by nav nodes and transition edges survive the save payload", () => {
     const campus = makeCampus([
       { id: IDs.floorA, number: 1 },

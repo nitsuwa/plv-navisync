@@ -1,4 +1,5 @@
 import { useEffect, useRef, useCallback } from "react";
+import { createPortal } from "react-dom";
 import { AlertTriangle, X } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { cn } from "../../lib/utils";
@@ -96,7 +97,7 @@ export function ConfirmDialog({
 
   const vs = variantStyles[variant];
 
-  return (
+  const dialog = (
     <AnimatePresence>
       {open && (
         <motion.div
@@ -157,4 +158,5 @@ export function ConfirmDialog({
       )}
     </AnimatePresence>
   );
+  return typeof document === "undefined" ? null : createPortal(dialog, document.body);
 }

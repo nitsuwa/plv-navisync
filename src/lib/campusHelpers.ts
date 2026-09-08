@@ -2,6 +2,7 @@ import type { Campus } from "../components/map-builder/types";
 import type { SharedCampusData } from "../contexts/CampusDataContext";
 import { normalizeBuildingEntrances } from "./buildingEntrances";
 import { normalizeFloor } from "./floorPlanNormalization";
+import { canonicalExteriorEmergencyStairsForBuilding } from "./exteriorEmergencyStairs";
 
 /**
  * Build the shared, student-facing snapshot of a campus used by all publish
@@ -200,7 +201,7 @@ export function createCampusClone(
     bldMap.set(b.id, gen("bld"));
     (b.entrances ?? []).forEach((entrance) => entranceMap.set(entrance.id, gen("ent")));
     (b.circulationGroups ?? []).forEach((group) => circulationGroupMap.set(group.id, gen("cg")));
-    (b.exteriorEmergencyStairs ?? []).forEach((stair) => exteriorStairMap.set(stair.id, gen("exst")));
+    canonicalExteriorEmergencyStairsForBuilding(b).forEach((stair) => exteriorStairMap.set(stair.id, gen("exst")));
   });
   source.buildings.forEach((b) => (Array.isArray(b.floors) ? b.floors : []).forEach((rawFloor) => {
     const f = normalizeFloor(rawFloor, { buildingId: b.id });
@@ -250,13 +251,30 @@ export function createCampusClone(
       return {
         ...structuredClone(b),
         id: nbId,
-        exteriorEmergencyStairs: (b.exteriorEmergencyStairs ?? []).map((stair) => ({
+        exteriorEmergencyStairs: canonicalExteriorEmergencyStairsForBuilding(b).map((stair) => ({
           ...structuredClone(stair),
           id: exteriorStairMap.get(stair.id) ?? gen("exst"),
           buildingId: nbId,
           sharedId: stair.sharedId ? remapShared(stair.sharedId) : undefined,
           outdoorNodeId: stair.outdoorNodeId ? nodeMap.get(stair.outdoorNodeId) ?? stair.outdoorNodeId : undefined,
           occurrenceIds: stair.occurrenceIds ? Object.fromEntries(Object.entries(stair.occurrenceIds).map(([floorId, occurrenceId]) => [floorMap.get(floorId) ?? floorId, stairMap.get(occurrenceId) ?? occurrenceId])) : undefined,
+          occurrenceNodeIds: stair.occurrenceNodeIds
+            ? Object.fromEntries(Object.entries(stair.occurrenceNodeIds).map(([floorId, nodeId]) => [
+              floorMap.get(floorId) ?? floorId,
+              nodeMap.get(nodeId) ?? nodeId,
+            ]))
+            : undefined,
+          floorConnectionSnapshots: stair.floorConnectionSnapshots
+            ? Object.fromEntries(Object.entries(stair.floorConnectionSnapshots).map(([floorId, snapshots]) => [
+              floorMap.get(floorId) ?? floorId,
+              snapshots.map((edge) => ({
+                ...edge,
+                id: edgeMap.get(edge.id) ?? edge.id,
+                startNodeId: nodeMap.get(edge.startNodeId) ?? edge.startNodeId,
+                endNodeId: nodeMap.get(edge.endNodeId) ?? edge.endNodeId,
+              })),
+            ]))
+            : undefined,
         })),
         circulationGroups: (b.circulationGroups ?? []).map((group) => ({
           ...structuredClone(group),
@@ -305,7 +323,11 @@ export function createCampusClone(
         }),
       };
     }),
-    markers: source.markers.map((m) => ({ ...structuredClone(m), id: markerMap.get(m.id)! })),
+    markers: source.markers.map((m) => ({
+      ...structuredClone(m),
+      id: markerMap.get(m.id)!,
+      navNodeId: m.navNodeId ? nodeMap.get(m.navNodeId) ?? m.navNodeId : undefined,
+    })),
     paths: source.paths.map((p) => ({
       ...structuredClone(p),
       id: pathMap.get(p.id)!,
@@ -324,6 +346,7 @@ export function createCampusClone(
       doorId: nn.doorId ? doorMap.get(nn.doorId) ?? nn.doorId : undefined,
       stairId: nn.stairId ? stairMap.get(nn.stairId) ?? nn.stairId : undefined,
       exteriorEmergencyStairId: nn.exteriorEmergencyStairId ? exteriorStairMap.get(nn.exteriorEmergencyStairId) ?? nn.exteriorEmergencyStairId : undefined,
+      gateId: nn.gateId ? markerMap.get(nn.gateId) ?? nn.gateId : undefined,
       elevatorId: nn.elevatorId ? elevatorMap.get(nn.elevatorId) ?? nn.elevatorId : undefined,
       rampId: nn.rampId ? rampMap.get(nn.rampId) ?? nn.rampId : undefined,
       generatedFromPathVertices: nn.generatedFromPathVertices?.map((ref) => ({

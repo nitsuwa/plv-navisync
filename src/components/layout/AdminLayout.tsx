@@ -107,7 +107,13 @@ export function AdminLayout() {
 
   // Show a loader while the session/profile is being checked, and keep showing
   // it for the brief moment after the redirect above is triggered.
-  if (loading || !isAdmin) return <AuthGateLoader />;
+  // Keep an already-authorized layout mounted while Supabase revalidates a
+  // session in the background (most noticeable when returning to a tab). A
+  // transient auth check must not unmount the Map Builder and discard its
+  // in-memory draft; the hook still clears `profile` on an authoritative
+  // sign-out or role change, which sends the user through the gate below.
+  if (loading && !profile) return <AuthGateLoader />;
+  if (!isAdmin) return <AuthGateLoader />;
 
   const pageTitle = ROUTE_LABELS[location.pathname] ?? "Admin";
 

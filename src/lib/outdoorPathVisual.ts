@@ -19,7 +19,7 @@ export function pathRenderStyle(path: CampusPath): OutdoorPathRenderStyle {
   return {
     kind,
     baseWidth,
-    surface: kind === "road" ? "#cbd5e1" : kind === "accessible" ? "#a7f3d0" : path.color || "#94a3b8",
-    edge: kind === "road" ? "#64748b" : kind === "accessible" ? "#059669" : "#64748b",
+    surface: kind === "road" ? "#cbd5e1" : kind === "accessible" ? "#a7f3d0" : path.color || "#b8aea2",
+    edge: kind === "road" ? "#64748b" : kind === "accessible" ? "#059669" : "#776f67",
   };
 }

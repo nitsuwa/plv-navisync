@@ -9,13 +9,21 @@ import { CANVAS_SIZES } from "./constants";
 import { PLVLogo } from "../ui/PLVLogo";
 import { ColorPicker } from "../ui/ColorPicker";
 import type { Campus } from "./types";
+import { CAMPUS_GROUND_DEFAULTS, CAMPUS_GROUND_MATERIALS, campusGroundAppearance, normalizeCampusGroundTexture, normalizeCampusGroundMaterial, fitCampusCanvas, centeredRotatedBounds } from "../../lib/campusCanvas";
+import { DECOR_ASSET_MAP, isDecorAreaType } from "./constants";
+import { decorWorldSize } from "../../lib/decorVisual";
+import { CompactDropdown } from "./CompactDropdown";
+import { CampusGroundPreview } from "./CampusGroundPreview";
 
 // ── Props ──────────────────────────────────────────────────────────────────
 
 interface CanvasSettingsModalProps {
   open: boolean;
   campus: Campus;
-  onSave: (updates: Partial<Campus>) => void;
+  /** Persist the complete settings update. A rejected promise keeps this
+   * dialog open so a transient backend/auth failure cannot discard the local
+   * appearance draft. */
+  onSave: (updates: Partial<Campus>) => Promise<void> | void;
   onClose: () => void;
 }
 
@@ -46,6 +54,9 @@ function orientationLabel(w: number, h: number): string {
 interface ResizeImpact {
   buildingsOutside: number;
   markersOutside: number;
+  pathsOutside: number;
+  nodesOutside: number;
+  decorOutside: number;
   totalBuildings: number;
   totalMarkers: number;
   maxX: number;
@@ -55,26 +66,79 @@ interface ResizeImpact {
 function analyzeResizeImpact(campus: Campus, newW: number, newH: number): ResizeImpact {
   let buildingsOutside = 0;
   let markersOutside = 0;
+  let pathsOutside = 0;
+  let nodesOutside = 0;
+  let decorOutside = 0;
   let maxX = 0;
   let maxY = 0;
+  const outside = (bounds: { minX: number; minY: number; maxX: number; maxY: number }) =>
+    bounds.minX < 0 || bounds.minY < 0 || bounds.maxX > newW || bounds.maxY > newH;
 
   for (const b of campus.buildings) {
-    const right = b.x + b.width;
-    const bottom = b.y + b.height;
-    if (right > newW || bottom > newH) buildingsOutside++;
-    maxX = Math.max(maxX, right);
-    maxY = Math.max(maxY, bottom);
+    const bounds = centeredRotatedBounds(b.x + b.width / 2, b.y + b.height / 2, b.width, b.height, b.rotation ?? 0);
+    if (outside(bounds)) buildingsOutside++;
+    maxX = Math.max(maxX, bounds.maxX);
+    maxY = Math.max(maxY, bounds.maxY);
   }
 
   for (const m of campus.markers) {
-    if (m.x > newW || m.y > newH) markersOutside++;
-    maxX = Math.max(maxX, m.x);
-    maxY = Math.max(maxY, m.y);
+    // Gate markers may intentionally sit on the perimeter; the anchor is the
+    // semantic extent for those records. Other physical markers use their
+    // rendered dimensions so a clipped frame cannot be applied silently.
+    const bounds = m.type === "gate" || m.purpose
+      ? { minX: m.x, minY: m.y, maxX: m.x, maxY: m.y }
+      : centeredRotatedBounds(m.x, m.y, m.width ?? 24, m.height ?? 24);
+    if (outside(bounds)) markersOutside++;
+    maxX = Math.max(maxX, bounds.maxX);
+    maxY = Math.max(maxY, bounds.maxY);
+  }
+
+  for (const path of campus.paths ?? []) {
+    const halfWidth = Math.max(0, Number(path.width) || 0) / 2;
+    if ((path.points ?? []).some((point) => outside({ minX: point.x - halfWidth, minY: point.y - halfWidth, maxX: point.x + halfWidth, maxY: point.y + halfWidth }))) pathsOutside++;
+    for (const point of path.points ?? []) {
+      maxX = Math.max(maxX, point.x + halfWidth);
+      maxY = Math.max(maxY, point.y + halfWidth);
+    }
+  }
+  for (const node of campus.navNodes ?? []) {
+    if (node.x > newW || node.y > newH || node.x < 0 || node.y < 0) nodesOutside++;
+    maxX = Math.max(maxX, node.x);
+    maxY = Math.max(maxY, node.y);
+  }
+  for (const asset of campus.decorAssets ?? []) {
+    if (asset.visible === false) continue;
+    if (asset.surfaceCells?.length) {
+      const cellSize = Math.max(1, asset.surfaceCellSize ?? campus.gridSize ?? 20);
+      let assetOutside = false;
+      for (const cell of asset.surfaceCells) {
+        const right = (cell.x + 1) * cellSize;
+        const bottom = (cell.y + 1) * cellSize;
+        if (cell.x * cellSize < 0 || cell.y * cellSize < 0 || right > newW || bottom > newH) assetOutside = true;
+        maxX = Math.max(maxX, right);
+        maxY = Math.max(maxY, bottom);
+      }
+      if (assetOutside) decorOutside++;
+      continue;
+    }
+    const template = DECOR_ASSET_MAP[asset.type];
+    const size = isDecorAreaType(asset.type)
+      ? { width: asset.width ?? template?.defaultWidth ?? 0, height: asset.height ?? template?.defaultHeight ?? 0 }
+      : template
+        ? decorWorldSize(template, asset.scale)
+        : { width: asset.width ?? 0, height: asset.height ?? 0 };
+    const bounds = centeredRotatedBounds(asset.x, asset.y, size.width, size.height, asset.rotation ?? 0);
+    if (outside(bounds)) decorOutside++;
+    maxX = Math.max(maxX, bounds.maxX);
+    maxY = Math.max(maxY, bounds.maxY);
   }
 
   return {
     buildingsOutside,
     markersOutside,
+    pathsOutside,
+    nodesOutside,
+    decorOutside,
     totalBuildings: campus.buildings.length,
     totalMarkers: campus.markers.length,
     maxX,
@@ -160,7 +224,12 @@ export function CanvasSettingsModal({ open, campus, onSave, onClose }: CanvasSet
   const [validationError, setValidationError] = useState<string | null>(null);
 
   // ── Appearance ──
-  const [canvasColor, setCanvasColor] = useState((campus as unknown as { canvasColor?: string }).canvasColor ?? "#f5f3ef");
+  const initialGround = campusGroundAppearance(campus);
+  const [groundMaterial, setGroundMaterial] = useState(initialGround.material);
+  const [groundColor, setGroundColor] = useState(initialGround.color);
+  const [groundTexture, setGroundTexture] = useState(initialGround.texture);
+  // Keep the legacy local name as an alias for existing preview/reset paths.
+  const canvasColor = groundColor;
   const [defaultZoom, setDefaultZoom] = useState(campus.defaultZoom ?? 1);
 
   // ── Resize confirmation state ──
@@ -187,7 +256,10 @@ export function CanvasSettingsModal({ open, campus, onSave, onClose }: CanvasSet
   useEffect(() => {
     setCanvasW(campus.canvasW);
     setCanvasH(campus.canvasH);
-    setCanvasColor((campus as unknown as { canvasColor?: string }).canvasColor ?? "#f5f3ef");
+    const appearance = campusGroundAppearance(campus);
+    setGroundMaterial(appearance.material);
+    setGroundColor(appearance.color);
+    setGroundTexture(appearance.texture);
     setDefaultZoom(campus.defaultZoom ?? 1);
     setShowResizeConfirm(false);
     setPendingChanges(null);
@@ -202,17 +274,24 @@ export function CanvasSettingsModal({ open, campus, onSave, onClose }: CanvasSet
   const aspectRatio = useMemo(() => aspectRatioLabel(canvasW, canvasH), [canvasW, canvasH]);
   const orientation = useMemo(() => orientationLabel(canvasW, canvasH), [canvasW, canvasH]);
 
-  const hasObjects = campus.buildings.length > 0 || campus.markers.length > 0 || campus.paths.length > 0;
+  const hasObjects = campus.buildings.length > 0 || campus.markers.length > 0 || campus.paths.length > 0
+    || (campus.navNodes?.length ?? 0) > 0 || (campus.decorAssets ?? []).some((asset) => asset.visible !== false);
   const dimensionsChanged = canvasW !== campus.canvasW || canvasH !== campus.canvasH;
   const impact = analyzeResizeImpact(campus, canvasW, canvasH);
-  const willClip = impact.buildingsOutside > 0 || impact.markersOutside > 0;
+  const willClip = impact.buildingsOutside > 0 || impact.markersOutside > 0 || impact.pathsOutside > 0 || impact.nodesOutside > 0 || impact.decorOutside > 0;
+  const clippedCount = impact.buildingsOutside + impact.markersOutside + impact.pathsOutside + impact.nodesOutside + impact.decorOutside;
+  const fittedCanvas = useMemo(() => fitCampusCanvas(campus), [campus]);
 
   const buildUpdates = useCallback((): Partial<Campus> => ({
     canvasW: Math.max(100, Math.min(5000, canvasW)),
     canvasH: Math.max(100, Math.min(5000, canvasH)),
-    canvasColor: canvasColor || undefined,
+    canvasGroundMaterial: groundMaterial,
+    canvasGroundColor: groundColor || undefined,
+    canvasGroundTexture: groundTexture,
+    // Preserve this legacy field for older snapshots/readers.
+    canvasColor: groundColor || undefined,
     defaultZoom,
-  }), [canvasW, canvasH, canvasColor, defaultZoom]);
+  }), [canvasW, canvasH, groundMaterial, groundColor, groundTexture, defaultZoom]);
 
   // ── Apply preset ──
   const applyPreset = useCallback((w: number, h: number) => {
@@ -251,37 +330,50 @@ export function CanvasSettingsModal({ open, campus, onSave, onClose }: CanvasSet
     setShowSaveConfirm(true);
   }, [buildUpdates, dimensionsChanged, hasObjects, willClip, canvasW, canvasH, validateDimensions]);
 
-  const handleConfirmSave = useCallback(() => {
+  const handleConfirmSave = useCallback(async () => {
     setShowSaveConfirm(false);
     setShowSaving(true);
     const updates = buildUpdates();
-    setTimeout(() => {
-      onSave({ ...updates, canvasConfigured: true });
+    try {
+      await onSave({ ...updates, canvasConfigured: true });
       setShowSaving(false);
       setHasChanges(false);
       onClose();
-    }, 1500);
+    } catch {
+      // The parent owns the user-facing error toast. Keep this editor mounted
+      // with its local values intact so the admin can retry without losing the
+      // appearance draft or being redirected by a failed save.
+      setShowSaving(false);
+    }
   }, [buildUpdates, onSave, onClose]);
 
-  const handleConfirmResize = useCallback(() => {
-    if (pendingChanges) {
-      setShowResizeConfirm(false);
-      setShowSaving(true);
-      setTimeout(() => {
-        onSave({ ...pendingChanges, canvasConfigured: true });
-        setPendingChanges(null);
-        setShowSaving(false);
-        setHasChanges(false);
-        onClose();
-      }, 1500);
+  const handleConfirmResize = useCallback(async () => {
+    if (!pendingChanges) return;
+    // A shrink that clips authored content is not safe to apply from this
+    // confirmation. Keep the draft and warning visible so the admin can
+    // choose a larger size (or Fit to Content) instead of silently committing
+    // a canvas that renders objects outside its authored frame.
+    if (willClip) return;
+    setShowResizeConfirm(false);
+    setShowSaving(true);
+    try {
+      await onSave({ ...pendingChanges, canvasConfigured: true });
+      setPendingChanges(null);
+      setShowSaving(false);
+      setHasChanges(false);
+      onClose();
+    } catch {
+      // Keep pendingChanges and the modal state available for a retry after a
+      // transient persistence/auth failure.
+      setShowSaving(false);
     }
-  }, [pendingChanges, onSave, onClose]);
+  }, [pendingChanges, onSave, onClose, willClip]);
 
   if (!open) return null;
 
   const hasChangesSummary = [
     canvasW !== campus.canvasW || canvasH !== campus.canvasH ? "Canvas dimensions" : null,
-    canvasColor !== ((campus as unknown as { canvasColor?: string }).canvasColor ?? "#f5f3ef") ? "Canvas color" : null,
+    groundMaterial !== campusGroundAppearance(campus).material || groundColor !== campusGroundAppearance(campus).color || groundTexture !== campusGroundAppearance(campus).texture ? "Canvas appearance" : null,
     defaultZoom !== (campus.defaultZoom ?? 1) ? "Default zoom" : null,
   ].filter(Boolean);
 
@@ -350,6 +442,16 @@ export function CanvasSettingsModal({ open, campus, onSave, onClose }: CanvasSet
                   );
                 })}
               </div>
+
+              <button
+                type="button"
+                onClick={() => applyPreset(fittedCanvas.width, fittedCanvas.height)}
+                className="mb-4 flex w-full items-center justify-center gap-2 rounded-xl border border-primary/25 bg-primary/5 px-3 py-2 text-[10px] font-extrabold text-primary transition-colors hover:bg-primary/10"
+              >
+                <Maximize2 className="h-3.5 w-3.5" />
+                Fit to Content
+                <span className="font-mono text-[9px] opacity-60">{fittedCanvas.width}×{fittedCanvas.height}</span>
+              </button>
 
               {/* Width & Height inputs */}
               <div className="grid grid-cols-2 gap-3">
@@ -453,28 +555,15 @@ export function CanvasSettingsModal({ open, campus, onSave, onClose }: CanvasSet
                     style={{
                       width: "100%", maxWidth: 240,
                       aspectRatio: `${canvasW} / ${canvasH}`,
-                      background: canvasColor || "#f5f3ef",
                     }}
                   >
-                    {/* Checkerboard pattern for light backgrounds */}
-                    <div
-                      className="absolute inset-0 opacity-[0.04]"
-                      style={{
-                        backgroundImage: "repeating-conic-gradient(#000 0% 25%, transparent 0% 50%)",
-                        backgroundSize: "8px 8px",
-                      }}
-                    />
+                    <CampusGroundPreview material={groundMaterial} color={groundColor} texture={groundTexture} width={canvasW} height={canvasH} />
                     {/* Dimension label */}
                     <div className="absolute inset-0 flex items-center justify-center">
                       <span className="text-[10px] font-mono font-bold text-foreground/20 select-none">
                         {canvasW} × {canvasH}
                       </span>
                     </div>
-                    {/* Aspect ratio diagonal guide lines */}
-                    <svg className="absolute inset-0 w-full h-full pointer-events-none" viewBox={`0 0 ${canvasW} ${canvasH}`} preserveAspectRatio="none">
-                      <line x1={0} y1={0} x2={canvasW} y2={canvasH} stroke="currentColor" strokeWidth={1} opacity={0.06} />
-                      <line x1={canvasW} y1={0} x2={0} y2={canvasH} stroke="currentColor" strokeWidth={1} opacity={0.06} />
-                    </svg>
                   </div>
                 </div>
               )}
@@ -491,10 +580,13 @@ export function CanvasSettingsModal({ open, campus, onSave, onClose }: CanvasSet
                     <>
                       <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5 text-amber-500" />
                       <div>
-                        <p className="font-bold">Resize may clip {impact.buildingsOutside + impact.markersOutside} object{impact.buildingsOutside + impact.markersOutside !== 1 ? "s" : ""}</p>
+                        <p className="font-bold">Resize may clip {clippedCount} authored item{clippedCount !== 1 ? "s" : ""}</p>
                         <p className="mt-0.5 opacity-80">
                           {impact.buildingsOutside > 0 && `${impact.buildingsOutside} building${impact.buildingsOutside > 1 ? "s" : ""} `}
                           {impact.markersOutside > 0 && `${impact.markersOutside} marker${impact.markersOutside > 1 ? "s" : ""} `}
+                          {impact.pathsOutside > 0 && `${impact.pathsOutside} path${impact.pathsOutside > 1 ? "s" : ""} `}
+                          {impact.nodesOutside > 0 && `${impact.nodesOutside} navigation node${impact.nodesOutside > 1 ? "s" : ""} `}
+                          {impact.decorOutside > 0 && `${impact.decorOutside} decor item${impact.decorOutside > 1 ? "s" : ""} `}
                           extend beyond the new canvas boundary. A confirmation dialog will appear before saving.
                         </p>
                       </div>
@@ -525,15 +617,52 @@ export function CanvasSettingsModal({ open, campus, onSave, onClose }: CanvasSet
             <div>
               <div className="flex items-center gap-2 mb-3">
                 <Palette className="h-4 w-4 text-muted-foreground" />
-                <span className="text-xs font-extrabold text-foreground uppercase tracking-wide">Canvas Background</span>
+                <span className="text-xs font-extrabold text-foreground uppercase tracking-wide">Canvas Appearance</span>
               </div>
 
-              {/* Canvas background color */}
+              <div className="grid grid-cols-2 gap-3 mb-4">
+                <div>
+                  <label htmlFor="canvas-ground-material" className="block text-[10px] font-bold uppercase tracking-wide mb-2 text-muted-foreground">Ground Material</label>
+                  <CompactDropdown
+                    value={groundMaterial}
+                    options={[...CAMPUS_GROUND_MATERIALS]}
+                    ariaLabel="Ground material"
+                    id="canvas-ground-material"
+                    testId="canvas-ground-material"
+                    onChange={(value) => {
+                      const next = normalizeCampusGroundMaterial(value);
+                      setGroundMaterial(next);
+                      setGroundColor(CAMPUS_GROUND_DEFAULTS[next]);
+                      markChanged();
+                    }}
+                    className="h-10 rounded-xl px-3 text-xs font-bold"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="canvas-ground-texture" className="block text-[10px] font-bold uppercase tracking-wide mb-2 text-muted-foreground">Texture</label>
+                  <CompactDropdown
+                    value={groundTexture}
+                    options={[{ value: "subtle", label: "Subtle" }, { value: "none", label: "None" }]}
+                    ariaLabel="Ground texture"
+                    id="canvas-ground-texture"
+                    testId="canvas-ground-texture"
+                    onChange={(value) => { setGroundTexture(normalizeCampusGroundTexture(value)); markChanged(); }}
+                    className="h-10 rounded-xl px-3 text-xs font-bold"
+                  />
+                </div>
+              </div>
+
+              {/* Canvas ground color */}
               <div className="mb-4">
-                <label className="block text-[10px] font-bold uppercase tracking-wide mb-2 text-muted-foreground">Background Color</label>
+                <label className="block text-[10px] font-bold uppercase tracking-wide mb-2 text-muted-foreground">Ground Color</label>
                 <ColorPicker
-                  value={canvasColor}
-                  onChange={(c) => { setCanvasColor(c); markChanged(); }}
+                  value={groundColor}
+                  // A custom tint should not discard the selected material.
+                  // Keep Grass/Concrete/Pavers/Asphalt active so their tiled
+                  // renderer remains visible; choosing Custom in the material
+                  // dropdown is still available when a neutral custom surface
+                  // is desired.
+                  onChange={(c) => { setGroundColor(c); markChanged(); }}
                 />
               </div>
 
@@ -570,7 +699,10 @@ export function CanvasSettingsModal({ open, campus, onSave, onClose }: CanvasSet
               onClick={() => {
                 setCanvasW(campus.canvasW);
                 setCanvasH(campus.canvasH);
-                setCanvasColor((campus as unknown as { canvasColor?: string }).canvasColor ?? "#f5f3ef");
+                const appearance = campusGroundAppearance(campus);
+                setGroundMaterial(appearance.material);
+                setGroundColor(appearance.color);
+                setGroundTexture(appearance.texture);
                 setDefaultZoom(campus.defaultZoom ?? 1);
                 setHasChanges(false);
                 setValidationError(null);
@@ -743,7 +875,9 @@ export function CanvasSettingsModal({ open, campus, onSave, onClose }: CanvasSet
                 </div>
 
                 <p className="text-[11px] text-muted-foreground mt-3 leading-relaxed">
-                  Objects extending beyond the new boundary will be preserved at their current coordinates but may be clipped visually.
+                  {willClip
+                    ? "Increase the canvas size or use Fit to Content before applying this shrink."
+                    : "All authored content fits inside the proposed canvas boundary."}
                 </p>
               </div>
               <div className="flex gap-2.5 px-6 pb-6 pt-3">
@@ -756,9 +890,10 @@ export function CanvasSettingsModal({ open, campus, onSave, onClose }: CanvasSet
                 </button>
                 <button
                   onClick={handleConfirmResize}
-                  className="flex-1 h-10 rounded-xl text-xs font-extrabold text-white transition-colors shadow-sm bg-amber-500 hover:bg-amber-600"
+                  disabled={willClip}
+                  className="flex-1 h-10 rounded-xl text-xs font-extrabold text-white transition-colors shadow-sm bg-amber-500 hover:bg-amber-600 disabled:cursor-not-allowed disabled:opacity-45"
                 >
-                  Apply Resize
+                  {willClip ? "Resize blocked" : "Apply Resize"}
                 </button>
               </div>
             </motion.div>

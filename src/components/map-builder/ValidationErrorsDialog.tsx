@@ -108,6 +108,7 @@ export interface ValidationIssue {
     // ── Phase 6: Emergency checks ──
     | "emergency_exit_no_nav"
     | "no_emergency_exit_configured"
+    | "exterior_emergency_stair_incomplete"
     | "assembly_point_unreachable"
     | "room_no_evacuation_route"
     | "emergency_route_blocked"
@@ -250,6 +251,7 @@ const ISSUE_CATEGORY: Record<string, string> = {
   elevator_disconnected_nav: "navigation",
   emergency_exit_no_nav: "navigation",
   no_emergency_exit_configured: "navigation",
+  exterior_emergency_stair_incomplete: "navigation",
   assembly_point_unreachable: "boundary",
   room_no_evacuation_route: "navigation",
   emergency_route_blocked: "boundary",
@@ -300,6 +302,7 @@ const ISSUE_ICONS: Record<string, React.ElementType> = {
   elevator_disconnected_nav: MapPin,
   emergency_exit_no_nav: AlertTriangle,
   no_emergency_exit_configured: AlertTriangle,
+  exterior_emergency_stair_incomplete: AlertTriangle,
   assembly_point_unreachable: MapPin,
   room_no_evacuation_route: AlertTriangle,
   emergency_route_blocked: AlertTriangle,

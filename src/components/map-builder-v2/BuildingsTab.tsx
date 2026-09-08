@@ -11,6 +11,8 @@ import { cn } from "../../lib/utils";
 import { genId, BUILDING_COLORS } from "../map-builder/constants";
 import { useToast } from "../../hooks/useToast";
 import type { Campus, CampusBuilding, SimpleTool } from "../map-builder/types";
+import { nextBuildingCopyIdentity } from "../../lib/buildingDefaults";
+import { duplicateFloorForBuilding } from "../../lib/floorPlanNormalization";
 
 // ── Props ────────────────────────────────────────────────────────────────────
 
@@ -423,13 +425,18 @@ export function BuildingsTab({ campus, onUpdate, onOpenFloorPlan }: BuildingsTab
   const duplicateBuilding = useCallback((id: string) => {
     const source = buildings.find((b) => b.id === id);
     if (!source) return;
+    const copyId = genId("bld");
+    const identity = nextBuildingCopyIdentity(source, buildings, [], copyId);
     const clone: CampusBuilding = {
       ...structuredClone(source),
-      id: genId("bld"),
-      name: `${source.name} (Copy)`,
-      code: `${source.code}-CP`,
+      id: copyId,
+      name: identity.name,
+      code: identity.code,
       x: source.x + 30,
       y: source.y + 30,
+      floors: (source.floors ?? []).map((floor) => duplicateFloorForBuilding(floor, {
+        id: genId("fl"), buildingId: copyId, number: floor.number, label: floor.label,
+      })),
     };
     pushHistory();
     onUpdate({ ...campus, buildings: [...buildings, clone] });

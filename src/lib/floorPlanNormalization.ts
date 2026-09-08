@@ -13,6 +13,9 @@ const FLOOR_COLLECTION_KEYS = [
   "ramps",
   "elevators",
   "labels",
+  "exteriorZones",
+  "entranceSteps",
+  "entranceRamps",
 ] as const;
 
 type FloorCollectionKey = typeof FLOOR_COLLECTION_KEYS[number];
@@ -223,6 +226,37 @@ export function normalizeFloor(input: Partial<FloorPlan> | null | undefined, def
       visible: label.visible !== false,
       locked: label.locked === true,
     })),
+    exteriorZones: arrayCopy<NonNullable<FloorPlan["exteriorZones"]>[number]>(source.exteriorZones).map((zone, index) => ({
+      ...zone,
+      side: zone.side === "top" || zone.side === "right" || zone.side === "bottom" || zone.side === "left" ? zone.side : "bottom",
+      offset: Math.max(0, Math.min(1, normalizedNumber(zone.offset, 0.5))),
+      width: Math.max(48, normalizedNumber(zone.width, 180)),
+      depth: Math.max(32, normalizedNumber(zone.depth, 72)),
+      labelOffsetX: normalizedNumber(zone.labelOffsetX, 0),
+      labelOffsetY: normalizedNumber(zone.labelOffsetY, 0),
+      labelVisible: zone.labelVisible !== false,
+      zOrder: normalizedNumber(zone.zOrder, index),
+      visible: zone.visible !== false,
+      locked: zone.locked === true,
+    })),
+    entranceSteps: arrayCopy<NonNullable<FloorPlan["entranceSteps"]>[number]>(source.entranceSteps).map((item, index) => ({
+      ...item,
+      rotation: normalizedNumber(item.rotation, 0),
+      ...(item.parentZoneId ? { parentZoneId: item.parentZoneId, attachmentEdge: item.attachmentEdge === "start" || item.attachmentEdge === "end" ? item.attachmentEdge : "outer" as const, attachmentOffset: Math.max(0, Math.min(1, normalizedNumber(item.attachmentOffset, 0.5))) } : {}),
+      accessible: false as const,
+      zOrder: normalizedNumber(item.zOrder, index),
+      visible: item.visible !== false,
+      locked: item.locked === true,
+    })),
+    entranceRamps: arrayCopy<NonNullable<FloorPlan["entranceRamps"]>[number]>(source.entranceRamps).map((item, index) => ({
+      ...item,
+      rotation: normalizedNumber(item.rotation, 0),
+      ...(item.parentZoneId ? { parentZoneId: item.parentZoneId, attachmentEdge: item.attachmentEdge === "start" || item.attachmentEdge === "end" ? item.attachmentEdge : "outer" as const, attachmentOffset: Math.max(0, Math.min(1, normalizedNumber(item.attachmentOffset, 0.5))) } : {}),
+      accessible: true as const,
+      zOrder: normalizedNumber(item.zOrder, index),
+      visible: item.visible !== false,
+      locked: item.locked === true,
+    })),
   };
   return normalized as FloorPlan;
 }
@@ -281,6 +315,7 @@ export function duplicateFloorForBuilding(
   const stairIdMap = new Map(floor.stairs.map((s) => [s.id, generateFloorId()]));
   const rampIdMap = new Map(floor.ramps.map((r) => [r.id, generateFloorId()]));
   const elevatorIdMap = new Map(floor.elevators.map((e) => [e.id, generateFloorId()]));
+  const exteriorZoneIdMap = new Map((floor.exteriorZones ?? []).map((zone) => [zone.id, generateFloorId()]));
   if (outIdMaps) {
     outIdMaps.rooms = roomIdMap;
     outIdMaps.walls = wallIdMap;
@@ -308,6 +343,9 @@ export function duplicateFloorForBuilding(
     furniture: floor.furniture.map((item) => ({ ...item, id: generateFloorId() })),
     stairs: floor.stairs.map((item) => ({ ...item, id: stairIdMap.get(item.id) ?? generateFloorId() })),
     ramps: floor.ramps.map((item) => ({ ...item, id: rampIdMap.get(item.id) ?? generateFloorId() })),
+    exteriorZones: (floor.exteriorZones ?? []).map((item) => ({ ...item, id: exteriorZoneIdMap.get(item.id) ?? generateFloorId() })),
+    entranceSteps: (floor.entranceSteps ?? []).map((item) => ({ ...item, id: generateFloorId(), parentZoneId: item.parentZoneId ? exteriorZoneIdMap.get(item.parentZoneId) : undefined })),
+    entranceRamps: (floor.entranceRamps ?? []).map((item) => ({ ...item, id: generateFloorId(), parentZoneId: item.parentZoneId ? exteriorZoneIdMap.get(item.parentZoneId) : undefined })),
     elevators: floor.elevators.map((item) => ({ ...item, id: elevatorIdMap.get(item.id) ?? generateFloorId() })),
     labels: floor.labels.map((item) => ({ ...item, id: generateFloorId() })),
   }, { ...defaults, id, buildingId });

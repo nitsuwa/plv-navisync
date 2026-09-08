@@ -2,19 +2,21 @@ import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { CheckCircle2, XCircle, Navigation as NavigationIcon } from "lucide-react";
 import { MARKER_STYLES } from "../../data/mapData";
-import type { Campus, CampusBuilding, CampusMarker, SimpleTool, EditorLayer, CampusSelection, RubberBand, CampusDecorAsset, CampusPath, NavigationNode, NavigationEdge } from "./types";
+import type { Campus, CampusBuilding, CampusMarker, SimpleTool, EditorLayer, CampusSelection, RubberBand, CampusDecorAsset, CampusPath, NavigationNode, NavigationEdge, BuildingTypeDescriptor } from "./types";
+import { campusGateSize, isCampusGate } from "../../lib/campusGates";
 import type { TestRouteHighlight, TestRouteTransitionMarker } from "./TestNavigationPanel";
 import { RouteEndpointMarker, RouteTransitionMarker } from "./RouteTransitionMarker";
-import { DECOR_ASSET_MAP, BUILDING_TYPE_MAP, genId, getRotatedAABB } from "./constants";
+import { DECOR_ASSET_MAP, BUILDING_TYPE_MAP, genId, getRotatedAABB, groundTypeForDecorType, isDecorAreaType } from "./constants";
 import { computeBuildingPlacement, screenToWorld } from "../../lib/editorPlacement";
 import { decorRenderScale, decorSelectionOutlineBox, decorWorldSize } from "../../lib/decorVisual";
-import { mergeOutdoorStack } from "../../lib/campusStack";
+import { mergeOutdoorStack, sortOutdoorGroundAssets } from "../../lib/campusStack";
 import { outdoorGroupSelectionBounds } from "../../lib/campusSelection";
 import { navGroupSelectionBounds } from "../../lib/navigationGraph";
 import { DecorAssetArt, DecorAssetVisual } from "./DecorAssetVisual";
-import { OutdoorBuildingVisual } from "./ReadonlyOutdoorVisuals";
+import { CampusGateVisual } from "./CampusGateVisual";
+import { OutdoorBuildingVisual, OutdoorEmergencyStairVisual, exteriorEmergencyStairVisualDimensions } from "./ReadonlyOutdoorVisuals";
 import { BUILDING_ENTRANCE_TYPE_COLORS, entranceDisplayName, entranceWorldPosition, normalizeEntranceType } from "../../lib/buildingEntrances";
-import { exteriorEmergencyStairWorldPosition } from "../../lib/exteriorEmergencyStairs";
+import { canonicalExteriorEmergencyStairsForBuilding, exteriorEmergencyStairWorldPosition } from "../../lib/exteriorEmergencyStairs";
 import { pathRenderStyle, type OutdoorPathRenderStyle } from "../../lib/outdoorPathVisual";
 import {
   editorPathRenderMode,
@@ -22,6 +24,8 @@ import {
   isPathwayGeneratedNode,
   shouldRenderPathwayAuthoringPreview,
 } from "../../lib/campusPathNetwork";
+import { surfaceCellRuns } from "../../lib/campusSurface";
+import { campusGroundAppearance, campusGroundPatternId, campusObjectSafeBounds } from "../../lib/campusCanvas";
 
 // ── Rotation-aware resize cursor helpers (shared by buildings and decor assets) ──
 function angleToCursor(deg: number): string {
@@ -400,9 +404,13 @@ interface CanvasProps {
   containerRef: React.RefObject<HTMLDivElement | null>;
   cursor: string;
   buildingDrag?: { sx: number; sy: number; cx: number; cy: number } | null;
+  buildingPlacementPreview?: BuildingTypeDescriptor | null;
   groundBrushPreview?: { x: number; y: number; width: number; height: number } | null;
   groundErasePreview?: { x: number; y: number; width: number; height: number } | null;
   groundPaintType?: CampusDecorAsset["groundType"];
+  /** Armed click-to-place outdoor asset preview. */
+  armedDecorAssetType?: string | null;
+  armedCampusGatePlacement?: boolean;
   pathPaintPreview?: { points: { x: number; y: number }[]; width: number; type: string; color: string; snapKind?: "endpoint" | "bend" | "segment" } | null;
   guides?: { type: "h" | "v"; pos: number }[];
   cursorPos?: { x: number; y: number } | null;
@@ -414,8 +422,9 @@ interface CanvasProps {
   /** Fired when the cursor leaves the canvas (defaults to onCanvasUp for backward compatibility) */
   onCanvasLeave?: (e: React.MouseEvent<SVGSVGElement>) => void;
   onCanvasDblClick: (e: React.MouseEvent<SVGSVGElement>) => void;
-  onItemDown: (e: React.MouseEvent, type: "building" | "marker" | "decorAsset" | "navNode", id: string, ox: number, oy: number) => void;
+  onItemDown: (e: React.MouseEvent, type: "building" | "marker" | "gate" | "decorAsset" | "navNode", id: string, ox: number, oy: number) => void;
   onGroupSurfaceDown?: (e: React.MouseEvent) => void;
+  onGroupResizeStart?: (e: React.MouseEvent, corner: "nw" | "ne" | "sw" | "se", bounds: { x: number; y: number; width: number; height: number }) => void;
   onPathGroupScaleStart?: (e: React.MouseEvent, corner: "nw" | "ne" | "sw" | "se", bounds: { x: number; y: number; width: number; height: number }) => void;
   onPathGroupRotateStart?: (e: React.MouseEvent, center: { x: number; y: number }) => void;
   /** True while a path-group/network rotation gesture is active (floating degree label). */
@@ -433,12 +442,17 @@ interface CanvasProps {
   onPathPointDown?: (e: React.MouseEvent, id: string, pointIndex: number) => void;
   onPathExtendStart?: (e: React.MouseEvent, id: string, pointIndex: number) => void;
   onPathAddPoint?: (id: string, pointIndex: number, point: { x: number; y: number }) => void;
+  /** Insert a Pathway bend and keep the pointer gesture armed so the new
+   * vertex can be positioned in the same drag. */
+  onPathAddPointDragStart?: (e: React.MouseEvent, id: string, pointIndex: number, point: { x: number; y: number }) => void;
   onPathWidthDown?: (e: React.MouseEvent, id: string, segmentIndex: number, handlePoint: { x: number; y: number }) => void;
   onEntranceDown?: (e: React.MouseEvent, buildingId: string, entranceId: string, ox: number, oy: number) => void;
   onExteriorEmergencyStairDown?: (e: React.MouseEvent, buildingId: string, stairId: string) => void;
+  exteriorEmergencyStairPreview?: { buildingId: string; stairId: string; edge: "top" | "right" | "bottom" | "left"; offset: number; valid: boolean } | null;
   onExteriorEmergencyStairFloorNavigate?: (buildingId: string, floorId: string, stairId: string) => void;
   onItemContextMenu?: (e: React.MouseEvent, type: "building" | "marker" | "path" | "decorAsset", id: string) => void;
   onResizeStart?: (e: React.MouseEvent, b: CampusBuilding, corner: string) => void;
+  onMarkerResizeStart?: (e: React.MouseEvent, marker: CampusMarker, corner: string) => void;
   onRotateStart?: (e: React.MouseEvent, b: CampusBuilding) => void;
   onBuildingDoubleClick?: (id: string) => void;
   onPathClick: (id: string) => void;
@@ -493,11 +507,18 @@ interface CanvasProps {
   snapGrid?: boolean;
   /** Called when an asset is dropped from the palette onto the canvas */
   onDropAsset?: (asset: CampusDecorAsset) => void;
+  /** Called when the functional Campus Gate asset is dropped on the canvas. */
+  onDropCampusGate?: (x: number, y: number) => void;
   /** Called when a building type is dropped from the palette */
   onDropBuilding?: (type: string, x: number, y: number) => void;
   /** Canvas width/height for coordinate conversion */
   canvasW?: number;
   canvasH?: number;
+  /** Visual resize mode/handle gesture. */
+  canvasResizeMode?: boolean;
+  /** Proposed canvas dimensions currently outside the authored content bounds. */
+  canvasResizeInvalid?: boolean;
+  onCanvasResizeStart?: (e: React.MouseEvent, handle: "n" | "s" | "e" | "w" | "ne" | "nw" | "se" | "sw") => void;
   /** ID of the building currently being rotated (handle hidden during rotation, like Canva) */
   rotatingId?: string | null;
   /** Current rotation angle while actively rotating (for floating degree indicator) */
@@ -508,6 +529,8 @@ interface CanvasProps {
   decorRotatingId?: string | null;
   /** ID of the decor asset currently being resized (shows scale indicator) */
   decorResizingId?: string | null;
+  /** ID of a Campus Gate currently being resized. */
+  markerResizingId?: string | null;
   /** Called when the decor asset rotation handle is grabbed */
   onDecorRotateStart?: (e: React.MouseEvent, da: CampusDecorAsset) => void;
   /** Called when a decor asset resize corner/edge is grabbed */
@@ -516,10 +539,10 @@ interface CanvasProps {
   highlightedRoute?: TestRouteHighlight | null;
   onRouteTransitionClick?: (marker: TestRouteTransitionMarker) => void;
   /** Current-context Test Route map picking. Only physical semantic targets
-   * (buildings/entrances) are surfaced here; generic graph nodes stay hidden. */
+   * (buildings/entrances/gates) are surfaced here; generic graph nodes stay hidden. */
   testRoutePickKind?: "start" | "destination" | null;
-  testRoutePickHover?: { type: "building" | "entrance"; id: string } | null;
-  onTestRoutePickHover?: (target: { type: "building" | "entrance"; id: string } | null) => void;
+  testRoutePickHover?: { type: "building" | "entrance" | "gate"; id: string } | null;
+  onTestRoutePickHover?: (target: { type: "building" | "entrance" | "gate"; id: string } | null) => void;
   /** ID of a just-completed path to play the draw-in animation on */
   animatingPathId?: string | null;
 }
@@ -530,7 +553,7 @@ function DragOverlay({
   type, assetType,
 }: {
   x: number; y: number; valid: boolean; label: string;
-  type: "decorAsset" | "buildingType";
+  type: "decorAsset" | "buildingType" | "campusGate";
   assetType?: string;
 }) {
   const decor = type === "decorAsset" && assetType ? DECOR_ASSET_MAP[assetType] : null;
@@ -579,7 +602,10 @@ function DragOverlay({
               </text>
             </svg>
           )}
-          {!decor && !building && (
+          {type === "campusGate" && (
+            <CampusGateVisual width={34} height={30} color="#2563eb" className="drop-shadow-md" />
+          )}
+          {!decor && !building && type !== "campusGate" && (
             <div className="w-7 h-7 rounded-lg border-2 border-dashed" style={{ borderColor }} />
           )}
         </div>
@@ -610,6 +636,7 @@ function DragOverlay({
   );
 }
 
+
 function routeDirectionMarkers(points: { x: number; y: number }[]): { x: number; y: number; angle: number }[] {
   const markers: { x: number; y: number; angle: number }[] = [];
   for (let i = 0; i < points.length - 1; i += 1) {
@@ -631,18 +658,19 @@ function routeDirectionMarkers(points: { x: number; y: number }[]): { x: number;
 export function Canvas({
   campus, tool, layer, selected, multiSelected, selectedPathPoint = null, showGroupOutline = true, rubberBand, drawingPath, snapGrid,
   zoom, pan, svgRef, containerRef, cursor,
-  buildingDrag, groundBrushPreview, groundErasePreview, groundPaintType = "grass", pathPaintPreview, guides, cursorPos, overlappingBuildings,
+  buildingDrag, buildingPlacementPreview, groundBrushPreview, groundErasePreview, groundPaintType = "grass", armedDecorAssetType, armedCampusGatePlacement = false, pathPaintPreview, guides, cursorPos, overlappingBuildings,
   onCanvasDown, onCanvasMove, onCanvasUp, onCanvasLeave, onCanvasDblClick,
-  onItemDown, onGroupSurfaceDown, onPathDown, onPathPointDown, onPathExtendStart, onPathAddPoint, onPathWidthDown, onEntranceDown, onExteriorEmergencyStairDown, onItemContextMenu, onResizeStart, onBuildingDoubleClick, onPathClick, onSelect,
+  onItemDown, onGroupSurfaceDown, onGroupResizeStart, onPathDown, onPathPointDown, onPathExtendStart, onPathAddPoint, onPathAddPointDragStart, onPathWidthDown, onEntranceDown, onExteriorEmergencyStairDown, exteriorEmergencyStairPreview, onItemContextMenu, onResizeStart, onMarkerResizeStart, onBuildingDoubleClick, onPathClick, onSelect,
   onExteriorEmergencyStairFloorNavigate,
   onPathGroupScaleStart, onPathGroupRotateStart, pathGroupRotationActive = false, pathGroupRotationBounds = null, onPathDblClick, pathMemberEditId = null, hoveredPathId = null, onPathHover,
   onResetView, onZoomIn, onZoomOut, onSetTool, onToggleSnap,
   onWheel, invalidBuildings = new Set(),
-  onDropAsset, onDropBuilding,
+  onDropAsset, onDropCampusGate, onDropBuilding,
   onRotateStart, canvasW, canvasH,
+  canvasResizeMode = false, canvasResizeInvalid = false, onCanvasResizeStart,
   rotatingId, rotatingAngle,
   resizingId, highlightedRoute, animatingPathId,
-  decorRotatingId, decorResizingId, onDecorRotateStart, onDecorResizeStart,
+  decorRotatingId, decorResizingId, markerResizingId = null, onDecorRotateStart, onDecorResizeStart,
   navNodes, navEdges, showNavigationOverlay = false, routePreview = false, navConnectStartId, navPreview, navConnectBends = [], navPreviewPins = [], navPathTargetHover, navEntranceHover, edgeSnapPreview, connectBlocked, navBlockedEdgeIds, onNavEdgeSelect, onNavEdgeBendDown, onNavEdgeAddBend,
   issueMarkers = [],
   testRoutePickKind = null, testRoutePickHover = null, onTestRoutePickHover, onRouteTransitionClick,
@@ -659,8 +687,15 @@ export function Canvas({
     });
   });
   const decorAssets = campus.decorAssets ?? [];
-  const groundAreas = decorAssets.filter((asset) => asset.type === "ground-area");
-  const foregroundDecorAssets = decorAssets.filter((asset) => asset.type !== "ground-area");
+  // Ground/area assets remain in the dedicated background layer (below paths
+  // and foreground objects), but they still honour the same optional z-order
+  // field as every other outdoor asset.  Previously this list was rendered in
+  // raw array order, so the Layer Order controls appeared to work yet had no
+  // visible effect for Lawn/Garden/Plaza/Parking records.  Keep the semantic
+  // background layer while sorting within it; the original array index is the
+  // deterministic legacy tie-break for records without an explicit order.
+  const groundAreas = sortOutdoorGroundAssets(decorAssets);
+  const foregroundDecorAssets = decorAssets.filter((asset) => !isDecorAreaType(asset.type));
   const [exteriorQuickNavKey, setExteriorQuickNavKey] = useState<string | null>(null);
   const exteriorQuickNavTimer = useRef<number | null>(null);
   const cancelExteriorQuickNavClose = () => {
@@ -689,6 +724,10 @@ export function Canvas({
   const renderNavNodes = navNodes ?? campus.navNodes ?? [];
   const renderNavEdges = navEdges ?? campus.navEdges ?? [];
   const navGraphInteractive = layer === "navigation" && !routePreview;
+  // `path` was the historical runtime id for Navigation Connect.  Keep that
+  // alias guarded here so a stale editor/session state cannot fall through to
+  // a child authoring surface while the canonical `connect` tool is active.
+  const connectCanvasActive = navGraphInteractive && (tool === "connect" || tool === "path");
   const shouldRenderNavGraph = !routePreview && (navGraphInteractive || showNavigationOverlay);
 
   // B5 Phase 5.12 — continuous path-network geometry: joined same-style records
@@ -718,17 +757,21 @@ export function Canvas({
   // render a degenerate viewBox or collapse pointer conversion toward (0,0).
   const cw = (canvasW ?? campus.canvasW) || 900;
   const ch = (canvasH ?? campus.canvasH) || 680;
+  const groundAppearance = campusGroundAppearance(campus);
+  const groundPattern = campusGroundPatternId(groundAppearance.material, groundAppearance.texture);
   const groundStyle = (kind: CampusDecorAsset["groundType"] = "grass") => {
     switch (kind) {
       case "planted":
-        return { fill: "#cfe7c8", stroke: "#6da567", accent: "#8bbf7a", label: "Planted" };
+        return { fill: "#b8cfab", stroke: "#739b69", accent: "#8daf7a", pattern: "campus-garden-pattern", label: "Planted" };
       case "plaza":
-        return { fill: "#d9d6cf", stroke: "#a8a29a", accent: "#b8b2a8", label: "Plaza" };
+        return { fill: "#d8d5ce", stroke: "#a8a29a", accent: "#b8b2a8", pattern: "campus-plaza-pattern", label: "Plaza" };
       case "field":
-        return { fill: "#dbe8c2", stroke: "#9db76d", accent: "#b6ca86", label: "Open Field" };
+        return { fill: "#dbe8c2", stroke: "#9db76d", accent: "#b6ca86", pattern: "campus-garden-pattern", label: "Open Field" };
+      case "parking":
+        return { fill: "#8a9296", stroke: "#626b70", accent: "#f8fafc", pattern: undefined, label: "Parking" };
       case "grass":
       default:
-        return { fill: "#d7e9ce", stroke: "#86b879", accent: "#a9cf9b", label: "Grass" };
+        return { fill: "#bfd4b8", stroke: "#7fa876", accent: "#9fbe91", pattern: "campus-lawn-pattern", label: "Grass" };
     }
   };
 
@@ -740,8 +783,8 @@ export function Canvas({
   const groupSelectionBounds = useMemo(() => {
     if (!showGroupOutline) return null;
     // Unified editor — group outlines visible in all layers
-    return outdoorGroupSelectionBounds(multiSelected, buildings, decorAssets, DECOR_ASSET_MAP, paths, { includeHidden: true });
-  }, [buildings, decorAssets, layer, multiSelected, paths, showGroupOutline]);
+    return outdoorGroupSelectionBounds(multiSelected, buildings, decorAssets, DECOR_ASSET_MAP, paths, { includeHidden: true }, markers);
+  }, [buildings, decorAssets, layer, markers, multiSelected, paths, showGroupOutline]);
 
   // B5 correction — nav graph multi-select group outline: bounds come from the
   // ACTUAL selected graph geometry (node coords + the bends of edges whose
@@ -773,18 +816,31 @@ export function Canvas({
   }, [layer, multiSelected, renderNavNodes]);
   const isPathOnlyGroup = multiSelected.length >= 2
     && multiSelected.every((id) => paths.some((path) => path.id === id));
+  const physicalGroupMemberCount = multiSelected.filter((id) => {
+    const building = buildings.find((item) => item.id === id);
+    if (building) return !building.locked;
+    const asset = decorAssets.find((item) => item.id === id);
+    if (asset) return !asset.locked && !!DECOR_ASSET_MAP[asset.type];
+    const marker = markers.find((item) => item.id === id);
+    return Boolean(marker && isCampusGate(marker));
+  }).length;
+  const physicalGroupResizeEligible = Boolean(groupSelectionBounds)
+    && !isPathOnlyGroup
+    && multiSelected.length >= 2
+    && multiSelected.every((id) => !paths.some((path) => path.id === id))
+    && physicalGroupMemberCount >= 2;
 
   // ── Drag-and-drop state ──
   const [dragOver, setDragOver] = useState<{
     x: number; y: number;
     canvasX: number; canvasY: number;
     valid: boolean; label: string;
-    type: "decorAsset" | "buildingType";
+  type: "decorAsset" | "buildingType" | "campusGate";
     assetType?: string;
   } | null>(null);
   const dragCounterRef = useRef(0);
   const dragLabelRef = useRef("Item");
-  const dragTypeRef = useRef<"decorAsset" | "buildingType">("decorAsset");
+  const dragTypeRef = useRef<"decorAsset" | "buildingType" | "campusGate">("decorAsset");
   // Use refs to avoid stale closures in drag handlers
   const buildingsRef = useRef(buildings);
   buildingsRef.current = buildings;
@@ -875,6 +931,10 @@ export function Canvas({
           type: "buildingType",
           assetType: data.assetType,
         });
+      } else if (data.type === "campusGate") {
+        dragLabelRef.current = "Campus Gate";
+        dragTypeRef.current = "campusGate";
+        setDragOver({ x: cx, y: cy, canvasX: 0, canvasY: 0, valid: true, label: "Campus Gate", type: "campusGate" });
       }
     } catch {
       // Not our data format — ignore
@@ -911,15 +971,17 @@ export function Canvas({
       const raw = e.dataTransfer.getData("text/plain");
       const data = JSON.parse(raw);
 
-      if (data.type === "decorAsset" && onDropAsset) {
-        const isGroundArea = data.assetType === "ground-area";
+      if (data.type === "campusGate" && onDropCampusGate) {
+        onDropCampusGate(clampedX, clampedY);
+      } else if (data.type === "decorAsset" && onDropAsset) {
+        const isGroundArea = isDecorAreaType(data.assetType);
         const asset: CampusDecorAsset = {
           id: genId("dec"),
           type: data.assetType,
           x: clampedX,
           y: clampedY,
           rotation: 0,
-          ...(isGroundArea ? { width: 150, height: 95, groundType: "grass" as const, zOrder: -1000 } : { scale: 1 }),
+          ...(isGroundArea ? { width: Number(data.w) || DECOR_ASSET_MAP[data.assetType]?.defaultWidth || 180, height: Number(data.h) || DECOR_ASSET_MAP[data.assetType]?.defaultHeight || 110, groundType: (data.groundType || groundTypeForDecorType(data.assetType) || "grass") as CampusDecorAsset["groundType"], zOrder: -1000 } : { scale: 1 }),
         };
         onDropAsset(asset);
       } else if (data.type === "buildingType" && onDropBuilding) {
@@ -928,7 +990,7 @@ export function Canvas({
     } catch {
       // Ignore invalid data
     }
-  }, [cw, ch, pan, zoom, svgRef, onDropAsset, onDropBuilding]);
+  }, [cw, ch, pan, zoom, svgRef, onDropAsset, onDropCampusGate, onDropBuilding]);
 
   // Cleanup drag counter on unmount
   useEffect(() => {
@@ -1035,7 +1097,11 @@ export function Canvas({
                     fill="var(--accent)"
                     opacity={0.75}
                     style={{ cursor: "copy", pointerEvents: "all" }}
-                    onMouseDown={(e) => { e.stopPropagation(); onPathAddPoint?.(p.id, index + 1, mid); }}
+                    onMouseDown={(e) => {
+                      e.stopPropagation();
+                      if (onPathAddPointDragStart) onPathAddPointDragStart(e, p.id, index + 1, mid);
+                      else onPathAddPoint?.(p.id, index + 1, mid);
+                    }}
                     onClick={(e) => e.stopPropagation()}
                   />
                 );
@@ -1079,7 +1145,7 @@ export function Canvas({
     <div
       ref={containerRef}
       className="flex-1 overflow-hidden relative"
-      style={{ background: "#e8eaf0" }}
+      style={{ background: "#f3f1ec" }}
       onWheel={onWheel}
       onDragOver={handleDragOver}
       onDragEnter={handleDragEnter}
@@ -1099,35 +1165,137 @@ export function Canvas({
       )}
 
       {/* Dot grid pattern overlay — uses campus gridSize */}
-      <div className="absolute inset-0 z-0 pointer-events-none" style={{
-        backgroundImage: `radial-gradient(circle at 1px 1px, rgba(14,42,110,0.06) 1px, transparent 0)`,
-        backgroundSize: `${campus.gridSize ?? 20}px ${campus.gridSize ?? 20}px`,
-      }} />
       {/* SVG Canvas */}
       <svg
         ref={svgRef}
         viewBox={`0 0 ${cw} ${ch}`}
         className="w-full h-full"
         style={{ cursor, userSelect: "none" }}
-        onMouseDown={onCanvasDown}
+        // Connect is an exclusive canvas interaction.  Capture it before
+        // child Pathway/marker hit surfaces can bubble the same pointer into
+        // their ordinary authoring handlers (which would create a loose
+        // Walking Point instead of a draft bend).  The normal canvas handler
+        // remains unchanged for every other tool.
+        onMouseDownCapture={(event) => {
+          if (connectCanvasActive) {
+            event.stopPropagation();
+            onCanvasDown(event);
+          }
+        }}
+        onMouseDown={connectCanvasActive ? undefined : onCanvasDown}
+        onClickCapture={(event) => {
+          // A completed browser click follows mouse down/up.  Keep Connect's
+          // canvas ownership exclusive for that trailing click as well, so a
+          // Pathway's ordinary selection onClick cannot process the same
+          // gesture after the Connect state machine has handled it.
+          if (connectCanvasActive) event.stopPropagation();
+        }}
         onMouseMove={onCanvasMove}
         onMouseUp={onCanvasUp}
-        onMouseLeave={onCanvasLeave ?? onCanvasUp}
+        // A resize gesture is a draft transaction. Do not let a transient
+        // pointer leave invoke the generic "finish everything" path and hide
+        // the resize handles before Apply/Cancel. Other tools retain the
+        // existing leave fallback for backwards compatibility.
+        onMouseLeave={canvasResizeMode ? onCanvasLeave : (onCanvasLeave ?? onCanvasUp)}
         onDoubleClick={onCanvasDblClick}
         onContextMenu={(e) => e.preventDefault()}
       >
         <defs>
-          <pattern id="dotPattern" width={campus.gridSize ?? 20} height={campus.gridSize ?? 20} patternUnits="userSpaceOnUse">
-            <circle cx={(campus.gridSize ?? 20) / 2} cy={(campus.gridSize ?? 20) / 2} r={1} fill="rgba(14,42,110,0.08)" />
-          </pattern>
           <filter id="dropShadow" x="-20%" y="-20%" width="140%" height="140%">
             <feDropShadow dx={0} dy={1} stdDeviation={2} floodColor="rgba(0,0,0,0.3)" />
           </filter>
+          {/* Lightweight site-plan textures. They use user-space units so the
+              marks stay proportional when an area is resized rather than
+              stretching with the rectangle. */}
+          <pattern id="campus-lawn-pattern" width="28" height="28" patternUnits="userSpaceOnUse">
+            <path d="M5 17 l2 -4 M8 18 l2 -3 M20 7 l2 -4 M22 8 l2 -3" stroke="#6f9f68" strokeWidth="1" strokeLinecap="round" opacity="0.22" />
+            <circle cx="14" cy="23" r="1" fill="#6f9f68" opacity="0.16" />
+          </pattern>
+          <pattern id="campus-garden-pattern" width="30" height="30" patternUnits="userSpaceOnUse">
+            <circle cx="8" cy="9" r="2.2" fill="#6b9860" opacity="0.24" />
+            <circle cx="11" cy="7" r="1.7" fill="#7eaa6a" opacity="0.22" />
+            <circle cx="23" cy="20" r="2" fill="#6b9860" opacity="0.2" />
+          </pattern>
+          <pattern id="campus-plaza-pattern" width="36" height="36" patternUnits="userSpaceOnUse">
+            <path d="M0 0H36M0 18H36M12 0V18M30 18V36" fill="none" stroke="#aaa59d" strokeWidth="0.8" opacity="0.16" />
+          </pattern>
+          <pattern id="campus-ground-grass-pattern" width="32" height="32" patternUnits="userSpaceOnUse">
+            <path d="M6 20l2-4m2 5 2-3m14-9 2-4m2 5 2-3" stroke="#4f7d53" strokeWidth="1" strokeLinecap="round" opacity="0.22" />
+            <circle cx="17" cy="27" r="0.9" fill="#4f7d53" opacity="0.12" />
+          </pattern>
+          <pattern id="campus-ground-concrete-pattern" width="72" height="64" patternUnits="userSpaceOnUse">
+            <path d="M0 32H72" fill="none" stroke="#b2aea7" strokeWidth="0.8" opacity="0.18" />
+            <path d="M36 0V32M18 32V64" fill="none" stroke="#b2aea7" strokeWidth="0.8" opacity="0.12" />
+          </pattern>
+          <pattern id="campus-ground-pavers-pattern" width="64" height="40" patternUnits="userSpaceOnUse">
+            <path d="M0 0H64M0 20H64" fill="none" stroke="#a59d91" strokeWidth="1" opacity="0.2" />
+            <path d="M16 0V20M48 0V20M0 20V40M32 20V40" fill="none" stroke="#a59d91" strokeWidth="1" opacity="0.16" />
+          </pattern>
+          <pattern id="campus-ground-asphalt-pattern" width="34" height="34" patternUnits="userSpaceOnUse">
+            <circle cx="7" cy="9" r="0.8" fill="#d8dde0" opacity="0.16" />
+            <circle cx="24" cy="19" r="0.7" fill="#d8dde0" opacity="0.13" />
+            <circle cx="14" cy="29" r="0.6" fill="#d8dde0" opacity="0.12" />
+          </pattern>
+          <pattern id="campus-ground-custom-pattern" width="48" height="48" patternUnits="userSpaceOnUse">
+            <circle cx="11" cy="16" r="0.7" fill="#64748b" opacity="0.1" />
+            <circle cx="35" cy="31" r="0.6" fill="#64748b" opacity="0.08" />
+          </pattern>
         </defs>
         <g transform={`translate(${pan.x},${pan.y}) scale(${zoom})`}>
-          {/* Canvas background with subtle grid */}
-          <rect data-bg="true" width={cw} height={ch} fill={(campus as unknown as { canvasColor?: string }).canvasColor ?? "#f5f3ef"} />
-          <rect data-bg="true" width={cw} height={ch} fill="url(#dotPattern)" opacity={0.3} />
+          {/* Canvas material is independent from the logical/editor snapping grid. */}
+          <rect data-bg="true" data-ground-material={groundAppearance.material} width={cw} height={ch} fill={groundAppearance.color} />
+          {groundPattern && <rect data-testid="campus-ground-texture" width={cw} height={ch} fill={`url(#${groundPattern})`} pointerEvents="none" opacity={0.82} />}
+          {/* A restrained perimeter makes the authored campus extent explicit
+              without adding another interactive object or affecting hit tests. */}
+            <rect
+            data-testid="campus-canvas-boundary"
+            x={0}
+            y={0}
+            width={cw}
+            height={ch}
+            fill="none"
+            stroke={canvasResizeInvalid ? "#dc2626" : "rgba(14,42,110,0.28)"}
+            strokeWidth={1.5}
+            pointerEvents="none"
+          />
+          {canvasResizeMode && (
+            <g data-testid="canvas-resize-handles" className="pointer-events-auto">
+              {([
+                { handle: "n", x: cw / 2 - 18, y: 0, width: 36, height: 10, cursor: "ns-resize" },
+                { handle: "s", x: cw / 2 - 18, y: ch - 10, width: 36, height: 10, cursor: "ns-resize" },
+                { handle: "w", x: 0, y: ch / 2 - 18, width: 10, height: 36, cursor: "ew-resize" },
+                { handle: "e", x: cw - 10, y: ch / 2 - 18, width: 10, height: 36, cursor: "ew-resize" },
+                { handle: "nw", x: 0, y: 0, width: 14, height: 14, cursor: "nwse-resize" },
+                { handle: "ne", x: cw - 14, y: 0, width: 14, height: 14, cursor: "nesw-resize" },
+                { handle: "sw", x: 0, y: ch - 14, width: 14, height: 14, cursor: "nesw-resize" },
+                { handle: "se", x: cw - 14, y: ch - 14, width: 14, height: 14, cursor: "nwse-resize" },
+              ] as const).map(({ handle, x, y, width, height, cursor: handleCursor }) => (
+                <rect
+                  key={handle}
+                  data-testid={`canvas-resize-handle-${handle}`}
+                  role="button"
+                  aria-label={`Resize campus canvas ${handle}`}
+                  title={`Resize canvas ${handle}`}
+                  x={x}
+                  y={y}
+                  width={width}
+                  height={height}
+                  rx={handle.length === 2 ? 2 : 3}
+                  fill={canvasResizeInvalid ? "#fef2f2" : "var(--card)"}
+                  stroke={canvasResizeInvalid ? "#dc2626" : "var(--accent)"}
+                  strokeWidth={2}
+                  style={{ cursor: handleCursor }}
+                  onMouseDown={(event) => { event.stopPropagation(); onCanvasResizeStart?.(event, handle); }}
+                />
+              ))}
+              {canvasResizeInvalid && (
+                <g data-testid="canvas-resize-invalid-feedback" className="pointer-events-none">
+                  <rect x={cw / 2 - 124} y={12} width={248} height={24} rx={8} fill="#fef2f2" stroke="#dc2626" strokeWidth={1.2} opacity={0.96} />
+                  <text x={cw / 2} y={28} textAnchor="middle" fontSize={10} fontWeight={700} fill="#b91c1c">Some authored content would be clipped</text>
+                </g>
+              )}
+            </g>
+          )}
 
           {/* Empty state — compact contextual prompt, not a tutorial */}
           {layer === "campus" && buildings.length === 0 && (
@@ -1140,17 +1308,8 @@ export function Canvas({
           {/* All SVG content (unchanged from original) */}
           {/* Navigation empty state — rendered as HTML overlay below (see end of Canvas) */}
 
-          {/* Major grid lines */}
-          <g opacity={0.12}>
-            {Array.from({ length: Math.ceil(cw / ((campus.gridSize ?? 20) * 4)) }, (_, i) => (
-              <line key={`v${i}`} x1={i * (campus.gridSize ?? 20) * 4} y1={0} x2={i * (campus.gridSize ?? 20) * 4} y2={ch} stroke="rgba(14,42,110,0.2)" strokeWidth={0.5} />
-            ))}
-          </g>
-          <g opacity={0.12}>
-            {Array.from({ length: Math.ceil(ch / ((campus.gridSize ?? 20) * 4)) }, (_, i) => (
-              <line key={`h${i}`} x1={0} y1={i * (campus.gridSize ?? 20) * 4} x2={cw} y2={i * (campus.gridSize ?? 20) * 4} stroke="rgba(14,42,110,0.2)" strokeWidth={0.5} />
-            ))}
-          </g>
+          {/* The outdoor grid remains logical for snapping, but is intentionally
+              hidden in the normal map view so the site plan stays quiet. */}
 
           {/* Layer-specific indicators */}
           {/* B5 Phase 1.7: the old static green dashed "entrance connector" was
@@ -1172,17 +1331,37 @@ export function Canvas({
           {groundAreas.map((area) => {
             const template = DECOR_ASSET_MAP[area.type];
             if (!template) return null;
+            if (area.surfaceCells?.length) {
+              const size = Math.max(4, area.surfaceCellSize ?? campus.gridSize ?? 20);
+              const style = groundStyle(area.groundType);
+              const opacity = area.visible === false ? 0.16 : 0.9;
+              return (
+                <g key={area.id} data-testid="campus-surface" data-surface-material={area.groundType ?? "grass"} className="pointer-events-none" opacity={opacity}>
+                  {surfaceCellRuns(area.surfaceCells).map((run) => (
+                    <rect key={`${area.id}-${run.x}-${run.y}`} x={run.x * size} y={run.y * size} width={run.width * size + 0.5} height={size + 0.5} fill={style.fill} />
+                  ))}
+                </g>
+              );
+            }
             const rot = area.rotation ?? 0;
             const isVisible = area.visible ?? true;
             const isLocked = area.locked ?? false;
+            const isAreaType = area.type !== "ground-area";
+            const areaKind = area.groundType ?? groundTypeForDecorType(area.type) ?? "grass";
             const isSel = selected?.type === "decorAsset" && selected.id === area.id;
             const isMultiSel = multiSelected.includes(area.id);
             const width = Math.max(30, area.width ?? template.defaultWidth * decorRenderScale(area.scale));
             const height = Math.max(24, area.height ?? template.defaultHeight * decorRenderScale(area.scale));
             const hw = width / 2;
             const hh = height / 2;
-            const style = groundStyle(area.groundType);
-            const editorOpacity = isVisible ? (isSel ? 0.96 : 0.82) : (isSel || isMultiSel ? 0.34 : 0.2);
+            const style = groundStyle(areaKind);
+            // New area assets are opaque ground paint, so adjacent/overlapping
+            // same-material rectangles composite as one continuous surface
+            // instead of darkening at their shared edges. Legacy Ground Area
+            // records retain the softer historical opacity for compatibility.
+            const editorOpacity = isVisible
+              ? (isSel ? 0.98 : isAreaType ? 1 : 0.94)
+              : (isSel || isMultiSel ? 0.34 : 0.2);
             const aabb = getRotatedAABB(area.x - hw, area.y - hh, width, height, rot);
             const rotRad = (rot * Math.PI) / 180;
             const cosR = Math.cos(rotRad);
@@ -1194,8 +1373,8 @@ export function Canvas({
             return (
               <g
                 key={area.id}
-                data-testid="ground-area"
-                data-ground-type={area.groundType ?? "grass"}
+                data-testid={isAreaType ? "campus-area" : "ground-area"}
+                data-ground-type={areaKind}
                 data-hidden={isVisible ? undefined : "true"}
                 opacity={editorOpacity}
                 style={{ cursor: isLocked ? "default" : tool === "select" ? "move" : cursor }}
@@ -1208,47 +1387,98 @@ export function Canvas({
                     y={area.y - hh}
                     width={width}
                     height={height}
-                    rx={area.groundType === "plaza" ? 5 : 10}
+                    rx={isAreaType ? 0 : areaKind === "plaza" ? 5 : 10}
                     fill={style.fill}
-                    stroke={isSel ? "var(--accent)" : "transparent"}
-                    strokeWidth={isSel ? 2 : 0}
+                    stroke={isSel ? "var(--accent)" : areaKind === "parking" ? style.stroke : "transparent"}
+                    strokeWidth={isSel ? 2 : areaKind === "parking" ? 0.8 : 0}
                   />
-                  <path
-                    d={`M${area.x - hw + 10} ${area.y - hh + height * 0.35} H${area.x + hw - 10} M${area.x - hw + 10} ${area.y + hh - height * 0.35} H${area.x + hw - 10}`}
-                    fill="none"
-                    stroke={style.accent}
-                    strokeWidth={area.groundType === "plaza" ? 0.8 : 1}
-                    strokeLinecap="round"
-                    strokeDasharray={area.groundType === "plaza" ? "8 6" : area.groundType === "planted" ? "3 5" : undefined}
-                    opacity={isSel ? 0.55 : 0.28}
-                  />
+                  {style.pattern && (
+                    <rect
+                      x={area.x - hw}
+                      y={area.y - hh}
+                      width={width}
+                      height={height}
+                      fill={`url(#${style.pattern})`}
+                      opacity={isSel ? 0.9 : 0.75}
+                      pointerEvents="none"
+                    />
+                  )}
+                  {areaKind === "parking" && (
+                    <g data-testid="parking-stalls" pointerEvents="none" opacity={isSel ? 0.86 : 0.68}>
+                      {(() => {
+                        const horizontal = width >= height;
+                        const span = horizontal ? width : height;
+                        const depth = horizontal ? height : width;
+                        const aisle = Math.max(14, Math.min(24, depth * 0.28));
+                        const stallDepth = Math.max(8, (depth - aisle) / 2);
+                        // Keep stalls visually consistent as the area is
+                        // resized: derive a reasonable count from the current
+                        // span rather than stretching a fixed illustration.
+                        const count = Math.max(2, Math.min(14, Math.floor(span / 22)));
+                        const x0 = area.x - hw;
+                        const y0 = area.y - hh;
+                        const x1 = area.x + hw;
+                        const y1 = area.y + hh;
+                        if (horizontal) {
+                          const aisleTop = area.y - aisle / 2;
+                          const aisleBottom = area.y + aisle / 2;
+                          return (
+                            <>
+                              <line x1={x0 + 3} y1={area.y} x2={x1 - 3} y2={area.y} stroke="#8b949b" strokeWidth={1.1} opacity={0.6} />
+                              {Array.from({ length: count + 1 }, (_, index) => {
+                                const x = x0 + (index * span) / count;
+                                return <g key={`parking-v-${index}`}><line x1={x} y1={y0 + 3} x2={x} y2={aisleTop - 2} stroke={style.accent} strokeWidth={1.1} /><line x1={x} y1={aisleBottom + 2} x2={x} y2={y1 - 3} stroke={style.accent} strokeWidth={1.1} /></g>;
+                              })}
+                              <line x1={x0 + 3} y1={y0 + stallDepth} x2={x1 - 3} y2={y0 + stallDepth} stroke="#f8fafc" strokeWidth={0.8} opacity={0.45} />
+                              <line x1={x0 + 3} y1={y1 - stallDepth} x2={x1 - 3} y2={y1 - stallDepth} stroke="#f8fafc" strokeWidth={0.8} opacity={0.45} />
+                            </>
+                          );
+                        }
+                        const aisleLeft = area.x - aisle / 2;
+                        const aisleRight = area.x + aisle / 2;
+                        return (
+                          <>
+                            <line x1={area.x} y1={y0 + 3} x2={area.x} y2={y1 - 3} stroke="#8b949b" strokeWidth={1.1} opacity={0.6} />
+                            {Array.from({ length: count + 1 }, (_, index) => {
+                              const y = y0 + (index * depth) / count;
+                              return <g key={`parking-h-${index}`}><line x1={x0 + 3} y1={y} x2={aisleLeft - 2} y2={y} stroke={style.accent} strokeWidth={1.1} /><line x1={aisleRight + 2} y1={y} x2={x1 - 3} y2={y} stroke={style.accent} strokeWidth={1.1} /></g>;
+                            })}
+                            <line x1={x0 + stallDepth} y1={y0 + 3} x2={x0 + stallDepth} y2={y1 - 3} stroke="#f8fafc" strokeWidth={0.8} opacity={0.45} />
+                            <line x1={x1 - stallDepth} y1={y0 + 3} x2={x1 - stallDepth} y2={y1 - 3} stroke="#f8fafc" strokeWidth={0.8} opacity={0.45} />
+                          </>
+                        );
+                      })()}
+                    </g>
+                  )}
                   {(isSel || isMultiSel) && (
                     <rect
                       x={area.x - hw - 5}
                       y={area.y - hh - 5}
                       width={width + 10}
                       height={height + 10}
-                      rx={area.groundType === "plaza" ? 7 : 12}
+                      rx={isAreaType ? 2 : areaKind === "plaza" ? 7 : 12}
                       fill="none"
                       stroke={isSel ? "var(--accent)" : "var(--primary)"}
                       strokeWidth={isSel ? 2 : 1}
-                      strokeDasharray="3 4"
+                      strokeDasharray={undefined}
                       opacity={isSel ? 0.72 : 0.35}
                     />
                   )}
                 </g>
-                {isSel && !isLocked && tool === "select" && ["nw", "ne", "sw", "se"].map((corner) => {
+                {isSel && !physicalGroupResizeEligible && !isLocked && tool === "select" && ["nw", "ne", "sw", "se"].map((corner) => {
                   const lx = corner.includes("e") ? hw : -hw;
                   const ly = corner.includes("s") ? hh : -hh;
                   const p = cornerPos(lx, ly);
                   return (
                     <g key={corner}>
-                      <rect data-testid="ground-area-resize-handle" data-corner={corner} x={p.x - 12} y={p.y - 12} width={24} height={24} fill="transparent" style={{ cursor: getCornerCursor(corner, rot) }} onMouseDown={(e) => { e.stopPropagation(); onDecorResizeStart?.(e, area, corner); }} />
-                      <rect x={p.x - 6} y={p.y - 6} width={12} height={12} rx={2} fill="white" stroke="var(--accent)" strokeWidth={2} className="pointer-events-none" />
+                      {/* Keep a slightly larger invisible hit target while making
+                          the visible grip proportional to small outdoor assets. */}
+                      <rect data-testid="ground-area-resize-handle" data-corner={corner} x={p.x - 10} y={p.y - 10} width={20} height={20} fill="transparent" style={{ cursor: getCornerCursor(corner, rot) }} onMouseDown={(e) => { e.stopPropagation(); onDecorResizeStart?.(e, area, corner); }} />
+                      <rect x={p.x - 5} y={p.y - 5} width={10} height={10} rx={2} fill="white" stroke="var(--accent)" strokeWidth={1.6} className="pointer-events-none" />
                     </g>
                   );
                 })}
-                {isSel && !isLocked && tool === "select" && ["n", "s", "e", "w"].map((side) => {
+                {isSel && !physicalGroupResizeEligible && !isLocked && tool === "select" && ["n", "s", "e", "w"].map((side) => {
                   const lx = side === "e" ? hw : side === "w" ? -hw : 0;
                   const ly = side === "s" ? hh : side === "n" ? -hh : 0;
                   const p = cornerPos(lx, ly);
@@ -1259,10 +1489,10 @@ export function Canvas({
                       data-corner={side}
                       cx={p.x}
                       cy={p.y}
-                      r={6}
+                      r={5}
                       fill="white"
                       stroke="var(--accent)"
-                      strokeWidth={2}
+                      strokeWidth={1.6}
                       style={{ cursor: getEdgeCursor(side, rot) }}
                       onMouseDown={(e) => { e.stopPropagation(); onDecorResizeStart?.(e, area, side); }}
                     />
@@ -1277,6 +1507,18 @@ export function Canvas({
               </g>
             );
           })}
+
+          {armedDecorAssetType && cursorPos && tool === "decor" && DECOR_ASSET_MAP[armedDecorAssetType] && (() => {
+            const descriptor = DECOR_ASSET_MAP[armedDecorAssetType];
+            return (
+              <g data-testid="decor-placement-preview" transform={`translate(${cursorPos.x},${cursorPos.y})`} opacity={0.42} className="pointer-events-none">
+                <rect x={-descriptor.defaultWidth / 2 - 4} y={-descriptor.defaultHeight / 2 - 4} width={descriptor.defaultWidth + 8} height={descriptor.defaultHeight + 8} rx={4} fill="rgba(34,197,94,0.12)" stroke="#16a34a" strokeWidth={1.2} />
+                <g transform={`translate(${-descriptor.defaultWidth / 2},${-descriptor.defaultHeight / 2})`}>
+                  <DecorAssetArt descriptor={descriptor} />
+                </g>
+              </g>
+            );
+          })()}
 
           {groundBrushPreview && layer !== "navigation" && (
             <g data-testid="ground-brush-preview" data-ground-type={groundPaintType} className="pointer-events-none">
@@ -1479,7 +1721,7 @@ export function Canvas({
                   if (tool === "select") {
                     e.stopPropagation();
                     onPathDown?.(e, p.id);
-                  } else if (!(layer === "navigation" && (tool === "marker" || tool === "path"))) {
+                  } else if (!(layer === "navigation" && (tool === "marker" || tool === "connect" || tool === "path"))) {
                     e.stopPropagation();
                   }
                 }}
@@ -1692,13 +1934,13 @@ export function Canvas({
                   strokeDasharray="4 3"
                   className="pointer-events-none"
                 />
-                {isPathOnlyGroup && (["nw", "ne", "sw", "se"] as const).map((corner) => {
+                {(isPathOnlyGroup || physicalGroupResizeEligible) && (["nw", "ne", "sw", "se"] as const).map((corner) => {
                   const hx = corner.includes("e") ? x + w : x;
                   const hy = corner.includes("s") ? y + h : y;
                   return (
                     <rect
                       key={corner}
-                      data-testid="path-group-scale-handle"
+                      data-testid={isPathOnlyGroup ? "path-group-scale-handle" : "campus-group-resize-handle"}
                       data-corner={corner}
                       x={hx - 5}
                       y={hy - 5}
@@ -1709,7 +1951,10 @@ export function Canvas({
                       stroke="var(--accent)"
                       strokeWidth={2}
                       style={{ cursor: corner === "nw" || corner === "se" ? "nwse-resize" : "nesw-resize", pointerEvents: "all" }}
-                      onMouseDown={(e) => onPathGroupScaleStart?.(e, corner, groupSelectionBounds)}
+                      onMouseDown={(e) => {
+                        if (isPathOnlyGroup) onPathGroupScaleStart?.(e, corner, groupSelectionBounds);
+                        else onGroupResizeStart?.(e, corner, groupSelectionBounds!);
+                      }}
                     />
                   );
                 })}
@@ -1745,13 +1990,37 @@ export function Canvas({
               buildingDrag.sx, buildingDrag.sy, buildingDrag.cx, buildingDrag.cy,
               cw, ch
             );
+            const safe = campusObjectSafeBounds(cw, ch);
+            const width = Math.min(r.width, safe.maxX - safe.minX);
+            const height = Math.min(r.height, safe.maxY - safe.minY);
+            const x = Math.max(safe.minX, Math.min(safe.maxX - width, r.x));
+            const y = Math.max(safe.minY, Math.min(safe.maxY - height, r.y));
             return (
               <g>
-                <rect x={r.x} y={r.y} width={r.width} height={r.height} rx={6} fill="var(--primary)" fillOpacity={0.12} stroke="var(--primary)" strokeWidth={2} strokeDasharray="8 4" />
+                <rect x={x} y={y} width={width} height={height} rx={6} fill="var(--primary)" fillOpacity={0.12} stroke="var(--primary)" strokeWidth={2} strokeDasharray="8 4" />
                 <text x={r.x + r.width / 2} y={r.y + r.height / 2 + 3} textAnchor="middle" fill="var(--primary)" fontSize={10} fontWeight="700" className="pointer-events-none select-none">{r.width}×{r.height}</text>
               </g>
             );
           })()}
+          {buildingPlacementPreview && cursorPos && tool === "building" && !buildingDrag && (() => {
+            const safe = campusObjectSafeBounds(cw, ch);
+            const width = Math.min(buildingPlacementPreview.defaultWidth, safe.maxX - safe.minX);
+            const height = Math.min(buildingPlacementPreview.defaultHeight, safe.maxY - safe.minY);
+            const x = Math.max(safe.minX, Math.min(safe.maxX - width, cursorPos.x - width / 2));
+            const y = Math.max(safe.minY, Math.min(safe.maxY - height, cursorPos.y - height / 2));
+            return (
+              <g data-testid="building-placement-preview" className="pointer-events-none" opacity={0.42}>
+                <rect x={x} y={y} width={buildingPlacementPreview.defaultWidth} height={buildingPlacementPreview.defaultHeight} rx={6} fill={buildingPlacementPreview.color} fillOpacity={0.18} stroke={buildingPlacementPreview.color} strokeWidth={2} strokeDasharray="8 4" />
+                <text x={x + buildingPlacementPreview.defaultWidth / 2} y={y + buildingPlacementPreview.defaultHeight / 2 + 3} textAnchor="middle" fill={buildingPlacementPreview.color} fontSize={10} fontWeight="700" className="select-none">{buildingPlacementPreview.label}</text>
+              </g>
+            );
+          })()}
+          {armedCampusGatePlacement && cursorPos && tool === "gate" && (
+            <g data-testid="campus-gate-placement-preview" transform={`translate(${cursorPos.x},${cursorPos.y})`} opacity={0.45} className="pointer-events-none">
+              <rect x={-24} y={-19} width={48} height={38} rx={5} fill="rgba(37,99,235,0.1)" stroke="#2563eb" strokeWidth={1.5} strokeDasharray="4 3" />
+              <CampusGateVisual x={-22} y={-17} width={44} height={34} color="#2563eb" />
+            </g>
+          )}
 
           {/* Drawing path */}
           {drawingPath.length > 0 && (
@@ -1825,7 +2094,7 @@ export function Canvas({
                     showName={zoom > 0.7 && b.name !== "New Building"}
                     showFloorCount
                     labelLayout="editor"
-                    bodyOpacity={0.92}
+                    bodyOpacity={0.82}
                   />
                   {!isVisible && (
                     <g className="pointer-events-none select-none" opacity={0.95}>
@@ -1849,7 +2118,7 @@ export function Canvas({
                   )}
                   {/* Issue indicator replaced with subtle badge — see below */}
                   {/* Single selection outlines + resize handles — rendered ABOVE the body so the rotation-aware resize cursors are visible on hover (rotated with building) */}
-                  {isSel && (
+                  {isSel && !physicalGroupResizeEligible && !isLocked && (
                     <>
                       <rect x={b.x - 8} y={b.y - 8} width={b.width + 16} height={b.height + 16} rx={12} fill="none" stroke="var(--accent)" strokeWidth={5} opacity={0.15} />
                       <rect x={b.x - 6} y={b.y - 6} width={b.width + 12} height={b.height + 12} rx={10} fill="none" stroke="var(--accent)" strokeWidth={2.5} opacity={0.8} />
@@ -1886,7 +2155,7 @@ export function Canvas({
                     </>
                   )}
                   {/* Rotation handle — INSIDE rotation group so it rotates with building */}
-                  {isSel && !isLocked && rotatingId !== b.id && (
+                  {isSel && !physicalGroupResizeEligible && !isLocked && rotatingId !== b.id && (
                     <g>
                       <line x1={cx} y1={b.y} x2={cx} y2={b.y - 32} stroke="var(--accent)" strokeWidth={1.5} strokeDasharray="3 2" opacity={0.5} />
                       <circle cx={cx} cy={b.y - 32} r={6} fill="var(--accent)" stroke="white" strokeWidth={2}
@@ -1986,7 +2255,7 @@ export function Canvas({
             // Axis-aligned AABB of the rotated asset (for axis-aligned badges)
             const aabb = getRotatedAABB(da.x - hw, da.y - hh, hw * 2, hh * 2, rot);
             const visCx = aabb.x + aabb.width / 2;
-            const rotHandlePos = cornerPos(0, -(hh + 30));
+            const rotHandlePos = cornerPos(0, -(hh + 24));
 
             return (
               <g key={da.id}
@@ -2041,18 +2310,18 @@ export function Canvas({
                     <line x1={aabb.x + 7} y1={aabb.y + 16} x2={aabb.x + 20} y2={aabb.y + 5} stroke="var(--muted-foreground)" strokeWidth={1.5} strokeLinecap="round" />
                   </g>
                 )}
-                {isSel && tool === "select" && (
+                {isSel && !physicalGroupResizeEligible && tool === "select" && (
                   <>
                     {/* Rotation handle — sits above the rotated asset */}
                     {decorRotatingId !== da.id && (
                       <g>
-                        <line x1={da.x} y1={da.y} x2={rotHandlePos.x} y2={rotHandlePos.y} stroke="var(--accent)" strokeWidth={1.5} strokeDasharray="3 2" opacity={0.5} />
-                        <circle cx={rotHandlePos.x} cy={rotHandlePos.y} r={6} fill="var(--accent)" stroke="white" strokeWidth={2}
+                        <line x1={da.x} y1={da.y} x2={rotHandlePos.x} y2={rotHandlePos.y} stroke="var(--accent)" strokeWidth={1.2} strokeDasharray="3 2" opacity={0.5} />
+                        <circle cx={rotHandlePos.x} cy={rotHandlePos.y} r={5} fill="var(--accent)" stroke="white" strokeWidth={1.6}
                           style={{ cursor: "grab" }}
                           onMouseDown={(e) => { e.stopPropagation(); onDecorRotateStart?.(e, da); }}
                         />
-                        <path d={`M${rotHandlePos.x - 2.5} ${rotHandlePos.y - 2} Q${rotHandlePos.x} ${rotHandlePos.y - 5} ${rotHandlePos.x + 2.5} ${rotHandlePos.y - 2}`}
-                          fill="none" stroke="white" strokeWidth={1.5} strokeLinecap="round" />
+                        <path d={`M${rotHandlePos.x - 2} ${rotHandlePos.y - 1.5} Q${rotHandlePos.x} ${rotHandlePos.y - 4} ${rotHandlePos.x + 2} ${rotHandlePos.y - 1.5}`}
+                          fill="none" stroke="white" strokeWidth={1.2} strokeLinecap="round" />
                       </g>
                     )}
                     {/* Corner resize handles — rotate with the asset via rotation-aware cursors */}
@@ -2063,8 +2332,8 @@ export function Canvas({
                       const cornerCursor = getCornerCursor(corner, rot);
                       return (
                         <g key={corner}>
-                          <rect x={p.x - 12} y={p.y - 12} width={24} height={24} fill="transparent" stroke="none" style={{ cursor: cornerCursor }} onMouseDown={(e) => { e.stopPropagation(); onDecorResizeStart?.(e, da, corner); }} />
-                          <rect x={p.x - 7} y={p.y - 7} width={14} height={14} rx={2} fill="white" stroke="var(--accent)" strokeWidth={2} style={{ pointerEvents: "none", cursor: cornerCursor }} />
+                          <rect data-testid="decor-resize-handle" data-asset-id={da.id} data-corner={corner} x={p.x - 10} y={p.y - 10} width={20} height={20} fill="transparent" stroke="none" style={{ cursor: cornerCursor, pointerEvents: "all" }} onMouseDown={(e) => { e.stopPropagation(); onDecorResizeStart?.(e, da, corner); }} />
+                          <rect x={p.x - 5} y={p.y - 5} width={10} height={10} rx={2} fill="white" stroke="var(--accent)" strokeWidth={1.6} style={{ pointerEvents: "none", cursor: cornerCursor }} />
                         </g>
                       );
                     })}
@@ -2107,16 +2376,24 @@ export function Canvas({
           {/* Building-attached Exterior Emergency Stairs sit in the outdoor
               overlay, outside the footprint, while their served-floor landing
               occurrences are rendered by FloorEditor. */}
-          {buildings.flatMap((building) => (building.exteriorEmergencyStairs ?? []).map((stair) => {
+          {buildings.flatMap((building) => canonicalExteriorEmergencyStairsForBuilding(building).map((stair) => {
             if (stair.visible === false || stair.state === "closed") return null;
-            const pos = exteriorEmergencyStairWorldPosition(building, stair);
+            const preview = exteriorEmergencyStairPreview?.buildingId === building.id && exteriorEmergencyStairPreview.stairId === stair.id
+              ? exteriorEmergencyStairPreview
+              : null;
+            const displayStair = preview
+              ? { ...stair, attachment: { ...stair.attachment, edge: preview.edge, offset: preview.offset } }
+              : stair;
+            const pos = exteriorEmergencyStairWorldPosition(building, displayStair);
             const isSel = selected?.type === "building" && selected.id === building.id;
+            const { width: visualWidth, height: visualHeight } = exteriorEmergencyStairVisualDimensions(displayStair);
             return (
-              <g key={`exterior-emergency-stair-${stair.id}`} data-testid="exterior-emergency-stair" transform={`translate(${pos.x},${pos.y}) rotate(${pos.angle})`} onMouseDown={(e) => { e.stopPropagation(); onExteriorEmergencyStairDown?.(e, building.id, stair.id); }} style={{ cursor: tool === "select" ? "pointer" : cursor }}>
-                <line x1={0} y1={0} x2={0} y2={-18} stroke="#dc2626" strokeWidth={2} strokeDasharray="4 3" opacity={0.75} className="pointer-events-none" />
-                <rect x={-stair.width / 2} y={-stair.height / 2} width={stair.width} height={stair.height} rx={4} fill="#fef2f2" stroke={isSel ? "var(--accent)" : "#dc2626"} strokeWidth={isSel ? 2.5 : 1.8} />
-                <path d={`M${-stair.width / 2 + 5} ${-stair.height / 2 + 9} H${stair.width / 2 - 5} M${-stair.width / 2 + 5} 0 H${stair.width / 2 - 5} M${-stair.width / 2 + 5} ${stair.height / 2 - 9} H${stair.width / 2 - 5}`} stroke="#dc2626" strokeWidth={1.5} className="pointer-events-none" />
-                <circle cx={stair.width / 2 - 3} cy={-stair.height / 2 + 4} r={4} fill="#dc2626" stroke="white" strokeWidth={1} />
+              <g key={`exterior-emergency-stair-${stair.id}`} data-testid="exterior-emergency-stair" transform={`translate(${pos.x},${pos.y}) rotate(${pos.angle})`} onMouseDown={(e) => { e.stopPropagation(); onExteriorEmergencyStairDown?.(e, building.id, stair.id); }} style={{ cursor: tool === "select" ? (preview ? ((preview.edge === "top" || preview.edge === "bottom") ? "ew-resize" : "ns-resize") : "grab") : cursor }}>
+                {/* Keep the wrapper as the authoritative Admin hit surface; the
+                    shared visual is presentation-only and pointer-transparent. */}
+                <rect x={-visualWidth / 2 - 13} y={-visualHeight / 2 - 5} width={visualWidth + 26} height={visualHeight + 10} rx={6} fill="transparent" pointerEvents="all" />
+                <OutdoorEmergencyStairVisual building={building} stair={displayStair} selected={isSel} applyTransform={false} />
+                {preview && !preview.valid && <rect data-testid="exterior-emergency-stair-blocked-preview" x={-visualWidth / 2 - 7} y={-visualHeight / 2 - 7} width={visualWidth + 14} height={visualHeight + 14} rx={6} fill="rgba(220,38,38,0.18)" stroke="#dc2626" strokeWidth={2} strokeDasharray="4 3" pointerEvents="none" />}
                 {(stair.servedFloorIds?.length ?? 0) > 1 && <g
                   data-testid="exterior-emergency-stair-quick-nav"
                   role="button"
@@ -2133,8 +2410,7 @@ export function Canvas({
                     if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setExteriorQuickNavKey(stair.id); }
                     if (event.key === "Escape") { event.preventDefault(); closeExteriorQuickNav(); }
                   }}
-                ><circle cx={-stair.width / 2 - 3} cy={-stair.height / 2 + 4} r={4} fill="#475569" stroke="white" strokeWidth={1} /><path d="M-5 -1 H-1 M-5 1 H-1" stroke="white" strokeWidth={0.8} strokeLinecap="round" /></g>}
-                <text x={0} y={4} textAnchor="middle" fill="#991b1b" fontSize={7} fontWeight="900" className="pointer-events-none select-none">EXIT</text>
+                ><circle cx={-visualWidth / 2 - 3} cy={-visualHeight / 2 + 4} r={4} fill="#475569" stroke="white" strokeWidth={1} /><path d="M-5 -1 H-1 M-5 1 H-1" stroke="white" strokeWidth={0.8} strokeLinecap="round" /></g>}
                 <title>{stair.label} · Exterior Emergency Stair</title>
               </g>
             );
@@ -2194,13 +2470,36 @@ export function Canvas({
           {markers.map((m) => {
             const style = MARKER_STYLES[m.type] ?? MARKER_STYLES.custom;
             const color = m.color || style.color;
-            const isSel = selected?.type === "marker" && selected.id === m.id;
+            const isGate = isCampusGate(m);
+            const isSel = (selected?.type === "marker" || selected?.type === "gate") && selected.id === m.id;
+            const isPickHover = isGate && testRoutePickHover?.type === "gate" && testRoutePickHover.id === m.id;
+            const isPickTarget = isGate && !!testRoutePickKind;
+            const gateSize = isGate ? campusGateSize(m) : null;
             return (
-              <g key={m.id} onMouseDown={(e) => onItemDown(e, "marker", m.id, m.x, m.y)} onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onItemContextMenu?.(e, "marker", m.id); }} style={{ cursor: tool === "select" ? "move" : cursor }}>
-                {isSel && <circle cx={m.x} cy={m.y} r={22} fill="none" stroke="var(--accent)" strokeWidth={2} opacity={0.6} />}
-                <ellipse cx={m.x} cy={m.y + 1} rx={10} ry={5} fill="rgba(0,0,0,0.18)" />
-                <circle cx={m.x} cy={m.y} r={13} fill={color} stroke={isSel ? "var(--accent)" : "white"} strokeWidth={isSel ? 2.5 : 2} />
-                <text x={m.x} y={m.y + 4} textAnchor="middle" fill="white" fontSize={10} fontWeight="900" className="pointer-events-none select-none">{style.symbol}</text>
+              <g key={m.id} data-testid={isGate ? "campus-gate" : undefined} pointerEvents={isGate ? "all" : undefined} onMouseDown={(e) => onItemDown(e, isGate ? "gate" : "marker", m.id, m.x, m.y)} onMouseEnter={() => { if (isPickTarget) onTestRoutePickHover?.({ type: "gate", id: m.id }); }} onMouseLeave={() => { if (testRoutePickHover?.type === "gate" && testRoutePickHover.id === m.id) onTestRoutePickHover?.(null); }} onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onItemContextMenu?.(e, "marker", m.id); }} style={{ cursor: testRoutePickKind ? "pointer" : tool === "select" ? "move" : cursor }}>
+                {(isSel || isPickTarget || isPickHover) && <rect x={m.x - (gateSize?.width ?? 22) / 2 - (isPickHover ? 8 : 5)} y={m.y - (gateSize?.height ?? 22) / 2 - (isPickHover ? 8 : 5)} width={(gateSize?.width ?? 22) + (isPickHover ? 16 : 10)} height={(gateSize?.height ?? 22) + (isPickHover ? 16 : 10)} rx={5} fill={isPickTarget && !isSel ? "rgba(22,163,74,0.08)" : "none"} stroke={isPickTarget && !isSel ? "#16a34a" : "var(--accent)"} strokeWidth={isPickHover ? 2.6 : 2} strokeDasharray={isPickTarget && !isSel ? "5 3" : undefined} opacity={isPickTarget && !isSel ? (isPickHover ? 1 : 0.75) : 0.6} pointerEvents="none" />}
+                {isGate ? (
+                  <g transform={`translate(${m.x} ${m.y})`} className="pointer-events-auto">
+                    <rect x={-(gateSize?.width ?? 44) / 2} y={-(gateSize?.height ?? 34) / 2} width={gateSize?.width ?? 44} height={gateSize?.height ?? 34} fill="transparent" />
+                    <CampusGateVisual x={-(gateSize?.width ?? 44) / 2} y={-(gateSize?.height ?? 34) / 2} width={gateSize?.width ?? 44} height={gateSize?.height ?? 34} color={isSel ? "var(--accent)" : color} />
+                    <circle cx={-(gateSize?.width ?? 44) / 2 + 4} cy={-(gateSize?.height ?? 34) / 2 + 4} r={4} fill={m.purpose === "emergency_exit" ? "#dc2626" : "#2563eb"} stroke="white" strokeWidth={1} />
+                    {isSel && !physicalGroupResizeEligible && tool === "select" && !markerResizingId && (
+                      <g className="pointer-events-auto">
+                        {(["nw", "ne", "sw", "se"] as const).map((corner) => {
+                          const hx = corner.includes("e") ? (gateSize?.width ?? 44) / 2 : -(gateSize?.width ?? 44) / 2;
+                          const hy = corner.includes("s") ? (gateSize?.height ?? 34) / 2 : -(gateSize?.height ?? 34) / 2;
+                          return <rect key={corner} data-testid={`campus-gate-resize-handle-${corner}`} x={hx - 4} y={hy - 4} width={8} height={8} rx={2} fill="var(--card)" stroke="var(--accent)" strokeWidth={1.5} style={{ cursor: corner === "nw" || corner === "se" ? "nwse-resize" : "nesw-resize" }} onMouseDown={(event) => { event.stopPropagation(); onMarkerResizeStart?.(event, m, corner); }} />;
+                        })}
+                      </g>
+                    )}
+                  </g>
+                ) : (
+                  <>
+                    <ellipse cx={m.x} cy={m.y + 1} rx={10} ry={5} fill="rgba(0,0,0,0.18)" />
+                    <circle cx={m.x} cy={m.y} r={13} fill={color} stroke={isSel ? "var(--accent)" : "white"} strokeWidth={isSel ? 2.5 : 2} />
+                    <text x={m.x} y={m.y + 4} textAnchor="middle" fill="white" fontSize={10} fontWeight="900" className="pointer-events-none select-none">{style.symbol}</text>
+                  </>
+                )}
                 {zoom > 0.6 && (
                   <text x={m.x} y={m.y + 25} textAnchor="middle" fill={color} fontSize={9} fontWeight="700" stroke="rgba(240,238,234,0.95)" strokeWidth={3} paintOrder="stroke" className="pointer-events-none select-none">{m.name}</text>
                 )}
@@ -2248,7 +2547,6 @@ export function Canvas({
                 const edgeColor = isBlocked ? "#dc2626" : (isSel || isMultiSel ? "var(--accent)" : e.color || "#16a34a");
                 const connectPathTarget = navGraphInteractive
                   && !pathwayGenerated
-                  && !entranceManaged
                   && navConnectStartId
                   && navPathTargetHover?.edgeId === e.id
                   && navPathTargetHover.segmentIndex >= 0
@@ -2265,13 +2563,18 @@ export function Canvas({
                       // so stopPropagation here would swallow the node click before
                       // handleSvgDown's node-target priority ever runs. Fall through
                       // for both marker and path (Connect) tools.
-                      if (tool === "marker" || tool === "path") return;
+                      if (tool === "marker" || tool === "connect" || tool === "path") return;
                       ev.stopPropagation();
                       onNavEdgeSelect?.(ev, e.id);
                     }}
                     style={{
                       cursor: navGraphInteractive ? (tool === "select" ? "pointer" : tool === "marker" ? "crosshair" : "crosshair") : "default",
-                      pointerEvents: selectedPhysicalPathOwnsEdge ? "none" : undefined,
+                      // A selected physical Pathway owns its generated edge
+                      // for ordinary selection/editing, but Connect still
+                      // needs to receive the edge hit so an admin can target
+                      // that existing network without falling through to an
+                      // empty-canvas bend.
+                      pointerEvents: selectedPhysicalPathOwnsEdge && tool === "select" ? "none" : undefined,
                     }}
                   >
                     {/* Invisible generous hit target so thin edges are clickable */}
@@ -2396,17 +2699,31 @@ export function Canvas({
                 // glance without making the graph noisy. Ordinary outdoor nodes
                 // stay neutral; special roles get a small glyph + ring.
                 const isEmergency = n.type === "emergency_exit";
+                const gateManaged = Boolean(n.gateId);
+                const isGatePickTarget = gateManaged && !!testRoutePickKind;
+                const isGatePickHover = gateManaged && testRoutePickHover?.type === "gate" && testRoutePickHover.id === n.gateId;
                 const isAssembly = n.type === "assembly";
                 const isSafeArea = n.type === "safe_area";
                 const isEntrance = n.type === "entrance";
                 const isDestination = n.type === "room_access";
                 const pathwayGenerated = isPathwayGeneratedNode(n);
+                const isPathJunction = n.pathJunction === true;
+                // A ground Exterior Emergency Stair discharge is a generated
+                // Building-owned anchor: it remains a visible Connect target,
+                // but is not an independently authored Walking Point.
+                const generatedExteriorStair = Boolean(n.exteriorEmergencyStairId && !n.floorId);
                 const activeRouteNodeIds = highlightedRoute?.routeNodeIds;
                 const isRouteNode = !!activeRouteNodeIds?.includes(n.id);
                 const deEmphasizeForRoute = !!activeRouteNodeIds?.length && !isRouteNode && !isSel && !isMultiSel && tool === "select";
                 const nodeName = (n.name ?? "").trim();
                 const anonymousNode = !nodeName || /^(?:generated\s+)?(?:walking point|waypoint|path junction)(?:\s+\d+)?$/i.test(nodeName);
-                const nodeRadius = pathwayGenerated && !isSel && !isMultiSel ? 4 : 7;
+                const nodeRadius = gateManaged
+                  ? (isSel || isMultiSel || navConnectStartId ? 6.5 : 5.5)
+                  : generatedExteriorStair
+                  ? (isSel || isMultiSel || navConnectStartId ? 9 : 8)
+                  : isPathJunction
+                  ? (isSel || isMultiSel || navConnectStartId ? 7.5 : 5.5)
+                  : pathwayGenerated && !isSel && !isMultiSel ? 5.5 : 7.5;
                 const selectedPhysicalPathOwnsNode = Boolean(
                   pathwayGenerated
                   && n.generatedFromPathVertices?.some((ref) => selectedPhysicalPathIds.has(ref.pathId)),
@@ -2432,26 +2749,33 @@ export function Canvas({
                   return entranceDisplayName(entrance, (parent.entrances ?? []).findIndex((en) => en.id === entrance.id));
                 })();
                 return (
-                  <g key={n.id} data-testid="nav-node" data-node-id={n.id} data-entrance-linked={isEntranceLinked ? "true" : undefined} className="group/nav-node"
+                  <g key={n.id} data-testid="nav-node" data-node-id={n.id} data-path-junction={isPathJunction ? "true" : undefined} data-entrance-linked={isEntranceLinked ? "true" : undefined} className="group/nav-node"
                     onMouseDown={(e) => { if (navGraphInteractive) onItemDown(e, "navNode", n.id, n.x, n.y); }}
+                    onMouseEnter={() => { if (isGatePickTarget && n.gateId) onTestRoutePickHover?.({ type: "gate", id: n.gateId }); }}
+                    onMouseLeave={() => { if (testRoutePickHover?.type === "gate" && testRoutePickHover.id === n.gateId) onTestRoutePickHover?.(null); }}
                     onContextMenu={(e) => {
                       if (!navGraphInteractive) return;
                       e.preventDefault();
                       e.stopPropagation();
-                      if (!pathwayGenerated) onItemContextMenu?.(e, "navNode", n.id);
+                      if (!pathwayGenerated && !generatedExteriorStair && !gateManaged) onItemContextMenu?.(e, "navNode", n.id);
                     }}
                     style={{
-                      cursor: navGraphInteractive ? (pathwayGenerated ? "pointer" : tool === "select" ? "move" : cursor) : "default",
+                      cursor: navGraphInteractive ? ((pathwayGenerated || generatedExteriorStair || gateManaged) ? "pointer" : tool === "select" ? "move" : cursor) : "default",
                       // A Building Entrance is the single admin-visible
                       // representation of its canonical graph anchor. In
                       // normal Select, let the physical Entrance hit target
                       // receive the click; Connect/marker modes still need
                       // the internal node as a routing target.
-                      pointerEvents: selectedPhysicalPathOwnsNode || (isEntranceLinked && tool === "select") ? "none" : undefined,
-                      ...(deEmphasizeForRoute ? { opacity: 0.2 } : pathwayGenerated && !isSel && !isMultiSel ? { opacity: 0.62 } : {}),
+                      // Keep generated Pathway vertices available as real
+                      // Connect targets.  They are hidden only while the
+                      // physical Pathway is selected in ordinary Select mode;
+                      // disabling them during Connect made target clicks fall
+                      // through and pin stray waypoints on the canvas.
+                      pointerEvents: (selectedPhysicalPathOwnsNode && tool === "select") || (isEntranceLinked && tool === "select") ? "none" : undefined,
+                      ...(deEmphasizeForRoute ? { opacity: 0.24 } : pathwayGenerated && !isSel && !isMultiSel ? { opacity: 0.9 } : {}),
                     }}
                   >
-                    <title>{nodeName || "Walking Point"}</title>
+                    <title>{generatedExteriorStair ? "Generated Stair Exit (Connect target)" : gateManaged ? "Campus Gate navigation anchor (Connect target)" : nodeName || "Walking Point"}</title>
                     {/* B5 Phase 6.8: invisible hit area matching NAV_NODE_HIT_THRESHOLD
                         (12) so Connect/Waypoint destination clicks are reliable —
                         the live preview snaps within the same radius, so the click
@@ -2492,9 +2816,28 @@ export function Canvas({
                         // node in the graph without stacking a waypoint badge.
                         null
                       )
+                    ) : generatedExteriorStair ? (
+                      <>
+                        <circle cx={n.x} cy={n.y} r={nodeRadius + 5} fill="rgba(220,38,38,0.12)"
+                          stroke={navConnectStartId ? "#f59e0b" : "#dc2626"} strokeWidth={navConnectStartId ? 2.2 : 1.8}
+                          strokeDasharray={navConnectStartId ? "4 2" : undefined} className="pointer-events-none" />
+                        <circle cx={n.x} cy={n.y} r={nodeRadius} fill="#dc2626"
+                          stroke={isSel || isMultiSel ? "var(--accent)" : "white"} strokeWidth={isSel || isMultiSel ? 2.5 : 2} />
+                        <path d={`M${n.x - 4},${n.y + 3} L${n.x - 4},${n.y - 2} L${n.x},${n.y - 4} L${n.x + 4},${n.y - 2} L${n.x + 4},${n.y + 3} Z`}
+                          fill="white" className="pointer-events-none" />
+                      </>
+                    ) : gateManaged ? (
+                      <>
+                        <circle cx={n.x} cy={n.y} r={isGatePickHover ? nodeRadius + 6 : nodeRadius + 3.5} fill={isGatePickTarget ? "rgba(22,163,74,0.10)" : "rgba(37,99,235,0.10)"}
+                          stroke={isGatePickTarget ? "#16a34a" : navConnectStartId ? "#f59e0b" : (isEmergency ? "#dc2626" : "#2563eb")} strokeWidth={isGatePickHover ? 2.6 : navConnectStartId ? 2.2 : 1.8}
+                          strokeDasharray={isGatePickTarget || navConnectStartId ? "4 2" : undefined} className="pointer-events-none" />
+                        <circle cx={n.x} cy={n.y} r={nodeRadius} fill={isEmergency ? "#dc2626" : "#2563eb"}
+                          stroke={isSel || isMultiSel ? "var(--accent)" : "white"} strokeWidth={isSel || isMultiSel ? 2.5 : 2} />
+                        <path d={`M${n.x - 4},${n.y - 4} V${n.y + 4} M${n.x - 1},${n.y - 4} V${n.y + 4} M${n.x + 2},${n.y - 4} V${n.y + 4} M${n.x + 5},${n.y - 4} V${n.y + 4}`} stroke="white" strokeWidth={1.2} strokeLinecap="round" className="pointer-events-none" />
+                      </>
                     ) : (
                       <circle cx={n.x} cy={n.y} r={nodeRadius} fill={n.color || "#16a34a"} stroke={isSel || isMultiSel ? "var(--accent)" : "white"} strokeWidth={2}
-                        opacity={dimmed ? 0.45 : 1} strokeDasharray={dimmed ? "3 2" : undefined} />
+                        opacity={dimmed ? 0.55 : 1} strokeDasharray={dimmed ? "3 2" : undefined} />
                     )}
                     {/* Compact type glyphs — one small path each, pointer-events none */}
                     {!isEntranceLinked && isEmergency && <path d={`M${n.x - 3.5},${n.y + 3} L${n.x - 3.5},${n.y - 2} L${n.x},${n.y - 3.5} L${n.x + 3.5},${n.y - 2} L${n.x + 3.5},${n.y + 3} Z`} fill="#dc2626" className="pointer-events-none" />}
@@ -2502,7 +2845,7 @@ export function Canvas({
                     {!isEntranceLinked && isSafeArea && <path d={`M${n.x},${n.y - 3.2} L${n.x + 2.6},${n.y - 1.6} L${n.x + 2.6},${n.y + 0.6} L${n.x},${n.y + 2.8} L${n.x - 2.6},${n.y + 0.6} L${n.x - 2.6},${n.y - 1.6} Z`} fill="#0d9488" className="pointer-events-none" />}
                     {!isEntranceLinked && isEntrance && <rect x={n.x - 2.4} y={n.y - 3.4} width={4.8} height={6.8} rx={0.8} fill="#2563eb" className="pointer-events-none" />}
                     {!isEntranceLinked && isDestination && <g className="pointer-events-none"><circle cx={n.x} cy={n.y} r={1.6} fill="#7c3aed" /><circle cx={n.x} cy={n.y} r={3.6} fill="none" stroke="#7c3aed" strokeWidth={1.1} /></g>}
-                    {zoom > 0.6 && !isEntranceLinked && !anonymousNode && (() => {
+                    {zoom > 0.6 && !isEntranceLinked && !generatedExteriorStair && !gateManaged && !anonymousNode && (() => {
                       const nodeLabel = nodeName;
                       const displayLabel = nodeLabel.length > 22 ? `${nodeLabel.slice(0, 21)}…` : nodeLabel;
                       return (
@@ -2528,28 +2871,45 @@ export function Canvas({
                 // preview algorithm, no L-shape-then-different-commit).
                 const proposed = navPreviewPins ?? [];
                 let previewPoints: { x: number; y: number }[];
-                if (start) {
-                  const previewEnd = proposed[proposed.length - 1];
-                  const entranceTarget = previewEnd
-                    ? renderNavNodes.find((node) => node.entranceId && !node.floorId
-                      && node.x === previewEnd.x && node.y === previewEnd.y)
-                    : undefined;
-                  // Entrance connectors are resolved by the shared outward
-                  // geometry helper. Do not prepend stale manually pinned
-                  // bends to that authoritative preview: commit and later
-                  // reconciliation intentionally use only the helper route.
-                  const entranceRoute = Boolean(start.entranceId && !start.floorId)
-                    || Boolean(entranceTarget)
-                    || Boolean(navEntranceHover);
-                  previewPoints = [{ x: start.x, y: start.y }, ...(entranceRoute ? [] : navConnectBends), ...proposed];
+                 if (start) {
+                   // CampusEditor supplies the complete canonical candidate
+                   // bends for the current target. Render that one list as-is
+                   // so the dashed preview is byte-for-byte the geometry that
+                   // the commit path persists (draft bends are already folded
+                   // into `proposed`).
+                     if (proposed.length > 0) {
+                       const candidateBends = [...proposed];
+                       const lastBend = candidateBends[candidateBends.length - 1];
+                       if (!lastBend || lastBend.x !== navPreview.x || lastBend.y !== navPreview.y) {
+                         candidateBends.push(navPreview);
+                       }
+                       previewPoints = [{ x: start.x, y: start.y }, ...candidateBends];
+                     } else {
+                      const fallbackBends = [...navConnectBends];
+                      const lastBend = fallbackBends[fallbackBends.length - 1];
+                      // After an empty click, navPreview is the latest pinned
+                      // bend until the next pointer move. Do not append that
+                      // same coordinate twice; the preview must remain the
+                      // exact source→bend chain the user committed.
+                      if (!lastBend || lastBend.x !== navPreview.x || lastBend.y !== navPreview.y) {
+                        fallbackBends.push(navPreview);
+                      }
+                      previewPoints = [{ x: start.x, y: start.y }, ...fallbackBends];
+                    }
                 } else {
                   previewPoints = [navPreview];
                 }
-                const ringPos = proposed.length > 0 ? proposed[proposed.length - 1] : navPreview;
+                 // navPreview is always the canonical target endpoint.  The
+                 // last bend is not necessarily the target, especially when a
+                 // multi-bend candidate is being previewed.
+                 const ringPos = navPreview;
                 // B5 Phase 1.9: hovering a connect-target entrance must NOT stack
                 // the ghost waypoint node on top of the entrance's single target
                 // ring — keep only the dashed edge preview line.
-                const overEntranceTarget = !!navEntranceHover;
+                const overEntranceTarget = Boolean(navEntranceHover
+                  && !(start?.entranceId && !start.floorId
+                    && start.buildingId === navEntranceHover.buildingId
+                    && start.entranceId === navEntranceHover.entranceId));
                 // Existing Walking Points already render their own destination
                 // highlight. Do not draw a second ghost dot on the same node;
                 // the dashed preview still terminates there.
@@ -2565,7 +2925,13 @@ export function Canvas({
                         <polyline points={previewPoints.map((point) => `${point.x},${point.y}`).join(" ")}
                           fill="none" stroke={connectBlocked ? "#dc2626" : "#16a34a"} strokeWidth={2.5} strokeDasharray="6 4" strokeLinecap="round" strokeLinejoin="round" opacity={0.8} />
                         {navConnectBends.map((bend, index) => (
-                          <circle key={`nav-preview-bend-${index}`} data-testid="nav-connect-pin" cx={bend.x} cy={bend.y} r={4} fill={connectBlocked ? "#dc2626" : "#16a34a"} opacity={0.85} />
+                          /* Match Floor Editor's draft affordance: a small
+                             neutral geometry handle, deliberately distinct
+                             from a persisted green Walking Point. */
+                          <rect key={`nav-preview-bend-${index}`} data-testid="nav-connect-pin"
+                            x={bend.x - 2} y={bend.y - 2} width={4} height={4} rx={0.8}
+                            fill="none" stroke={connectBlocked ? "#dc2626" : "var(--muted-foreground)"}
+                            strokeWidth={1.1} opacity={0.9} />
                         ))}
                       </>
                     )}
@@ -2698,9 +3064,9 @@ export function Canvas({
       </svg>
 
       {(() => {
-        const stair = buildings.flatMap((building) => (building.exteriorEmergencyStairs ?? []).map((item) => ({ building, item })))
+        const stair = buildings.flatMap((building) => canonicalExteriorEmergencyStairsForBuilding(building).map((item) => ({ building, item })))
           .find(({ item }) => item.id === exteriorQuickNavKey)?.item;
-        const building = buildings.find((candidate) => (candidate.exteriorEmergencyStairs ?? []).some((item) => item.id === exteriorQuickNavKey));
+        const building = buildings.find((candidate) => canonicalExteriorEmergencyStairsForBuilding(candidate).some((item) => item.id === exteriorQuickNavKey));
         if (!stair || !building || stair.state === "closed" || stair.servedFloorIds.length <= 1) return null;
         const pos = exteriorEmergencyStairWorldPosition(building, stair);
         const floors = building.floors.filter((floor) => stair.servedFloorIds.includes(floor.id));

@@ -32,5 +32,18 @@ export function duplicateDecorAsset<T extends { id: string; x: number; y: number
   offsetX = 20,
   offsetY = 20
 ): T {
-  return { ...asset, id: newId, x: asset.x + offsetX, y: asset.y + offsetY };
+  // Keep nested legacy surface cells independent as well.  Normal outdoor
+  // assets are flat records, but older Ground Area payloads may still carry a
+  // mutable cell collection; sharing that array would make editing one copy
+  // unexpectedly modify the other.
+  const surfaceCells = Array.isArray((asset as { surfaceCells?: unknown }).surfaceCells)
+    ? ((asset as { surfaceCells: { x: number; y: number }[] }).surfaceCells).map((cell) => ({ ...cell }))
+    : undefined;
+  return {
+    ...asset,
+    ...(surfaceCells ? { surfaceCells } : {}),
+    id: newId,
+    x: asset.x + offsetX,
+    y: asset.y + offsetY,
+  };
 }

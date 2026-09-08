@@ -5,6 +5,7 @@ import {
   calculateTransition,
   buildTransitionEdges,
   findNavigationRoute,
+  truncateGraphPathAtNode,
   NODES,
   EDGES,
   BUILDING_ENTRANCE_MAP,
@@ -110,6 +111,30 @@ describe("findBuildingPath / calculateTransition (legacy)", () => {
 // ── findNavigationRoute (map-builder authored nav graph) ────────────────────
 
 describe("findNavigationRoute (authored nav graph)", () => {
+  it("trims a stale indoor tail at an explicit building exterior endpoint", () => {
+    const path = {
+      nodeIds: ["start", "entrance", "door", "room"],
+      distanceM: 30,
+      minutes: 1,
+      waypoints: [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 12, y: 0 }, { x: 20, y: 0 }],
+      steps: ["Start from start", "Walk 2m to entrance", "Enter through door", "Arrive at room"],
+    };
+    const trimmed = truncateGraphPathAtNode(path, "entrance", [
+      { id: "start", x: 0, y: 0 },
+      { id: "entrance", x: 10, y: 0 },
+      { id: "door", x: 12, y: 0 },
+      { id: "room", x: 20, y: 0 },
+    ], [
+      { startNodeId: "start", endNodeId: "entrance", distance: 10, bidirectional: true },
+      { startNodeId: "entrance", endNodeId: "door", distance: 2, bidirectional: true },
+      { startNodeId: "door", endNodeId: "room", distance: 18, bidirectional: true },
+    ]);
+    expect(trimmed.nodeIds).toEqual(["start", "entrance"]);
+    expect(trimmed.waypoints).toEqual([{ x: 0, y: 0 }, { x: 10, y: 0 }]);
+    expect(trimmed.distanceM).toBe(2);
+    expect(trimmed.minutes).toBe(1);
+  });
+
   it("finds a route across a simple graph with steps and distances", () => {
     const path = findNavigationRoute(lineNodes, lineEdges, "a", "c");
     expect(path).not.toBeNull();
@@ -275,6 +300,26 @@ describe("buildTransitionEdges", () => {
     expect(edges).toHaveLength(1);
     expect(edges[0].distance).toBe(1);
     expect(edges[0].emergencySafe).toBe(true);
+  });
+
+  it("chooses the lowest-cost outdoor loop even when a semantic edge is cheaper than its coordinate span", () => {
+    const nodes = [
+      { id: "start", name: "Start", x: 0, y: 0 },
+      { id: "long", name: "Long Way", x: 50, y: 0 },
+      { id: "short", name: "Short Way", x: 0, y: 100 },
+      { id: "gate", name: "Campus Gate", x: 100, y: 0 },
+    ];
+    const edges = [
+      { id: "long-a", startNodeId: "start", endNodeId: "long", distance: 50, bidirectional: true, accessible: true, emergencySafe: true, type: "walkway", color: "#000", width: 2 },
+      { id: "long-b", startNodeId: "long", endNodeId: "gate", distance: 50, bidirectional: true, accessible: true, emergencySafe: true, type: "walkway", color: "#000", width: 2 },
+      // This models a canonical connector/transition whose route cost is
+      // authored independently of the two endpoint coordinates.
+      { id: "short-a", startNodeId: "start", endNodeId: "short", distance: 1, bidirectional: true, accessible: true, emergencySafe: true, type: "entrance_transition", color: "#000", width: 2 },
+      { id: "short-b", startNodeId: "short", endNodeId: "gate", distance: 1, bidirectional: true, accessible: true, emergencySafe: true, type: "walkway", color: "#000", width: 2 },
+    ];
+    const route = findNavigationRoute(nodes, edges, "start", "gate", false, true);
+    expect(route?.nodeIds).toEqual(["start", "short", "gate"]);
+    expect(route?.distanceM).toBe(0);
   });
   const baseEdges: {
     startNodeId: string; endNodeId: string; distance: number; bidirectional: boolean; accessible: boolean;

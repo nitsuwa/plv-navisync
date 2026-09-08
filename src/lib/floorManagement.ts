@@ -22,7 +22,10 @@ export function countFloorAuthoredItems(floor: FloorPlan): number {
     + (floor.ramps?.length ?? 0)
     + (floor.elevators?.length ?? 0)
     + (floor.labels?.length ?? 0)
-    + (floor.paths?.length ?? 0);
+    + (floor.paths?.length ?? 0)
+    + (floor.exteriorZones?.length ?? 0)
+    + (floor.entranceSteps?.length ?? 0)
+    + (floor.entranceRamps?.length ?? 0);
 }
 
 /**

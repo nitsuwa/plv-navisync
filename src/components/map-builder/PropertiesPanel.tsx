@@ -15,13 +15,16 @@ import { normalizeRotation, clampDecorScale, DECOR_SCALE_MIN, DECOR_SCALE_MAX } 
 import { createDefaultFloor } from "../../lib/floorPlanNormalization";
 import { nextFloorNumberForBuilding, countFloorAuthoredItems, deleteFloorFromBuilding } from "../../lib/floorManagement";
 import { DecorAssetVisual } from "./DecorAssetVisual";
+import { exteriorEmergencyStairSafeOffsetRange } from "./ReadonlyOutdoorVisuals";
+import { canonicalExteriorEmergencyStairsForBuilding, exteriorEmergencyStairOutdoorDischargeConnected, exteriorEmergencyStairRouteReadiness } from "../../lib/exteriorEmergencyStairs";
 import { ObjectIssueSection, type ObjectIssueItem } from "./ObjectIssueSection";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
 import { cn } from "../../lib/utils";
 import { MARKER_STYLES } from "../../data/mapData";
-import { LAYERS, LAYER_TOOLS, DECOR_ASSET_MAP, DECOR_ASSET_TYPES, genId } from "./constants";
+import { LAYERS, LAYER_TOOLS, DECOR_ASSET_MAP, DECOR_ASSET_TYPES, genId, isDecorAreaType } from "./constants";
 import { Combobox } from "../ui/Combobox";
 import { ColorPicker } from "../ui/ColorPicker";
+import { CompactDropdown } from "./CompactDropdown";
 import {
   BUILDING_ENTRANCE_EDGE_LABELS,
   BUILDING_ENTRANCE_TYPES,
@@ -36,6 +39,7 @@ import type {
   EventLocationRef, FloorPlan, CampusDecorAsset, DecorAssetType,
   BuildingEntranceEdge, BuildingEntranceType,
   CampusEntrance, CampusPath, ExteriorEmergencyStair,
+  ExteriorEmergencyStairVisualSize,
 } from "./types";
 import type { DoorOption, EntranceIndoorLinkStatus, EntranceOutdoorLinkStatus } from "../../lib/entranceTransitions";
 import { pathwayHasLegacyNavigationChain, pathwayHasOwnedNavigation } from "../../lib/campusPathNavigation";
@@ -46,6 +50,7 @@ import {
   pathNetworkMemberLabel,
   pathNetworkNavigationStatus,
 } from "../../lib/campusPathNetwork";
+import { isCampusGate } from "../../lib/campusGates";
 
 type TabId = "basic" | "style" | "advanced";
 
@@ -389,6 +394,7 @@ function NavNodeAdvancedRouting({ node, buildingName, onUpdateNode, allNavEdges,
 }) {
   const [open, setOpen] = useState(false);
   const pathwayGenerated = Boolean(node.generatedFromPathVertices?.length);
+  const gateManaged = Boolean(node.gateId);
   return (
     <div className="pt-3 mt-3 border-t border-border">
       <button
@@ -423,7 +429,13 @@ function NavNodeAdvancedRouting({ node, buildingName, onUpdateNode, allNavEdges,
             </div>
           )}
           {/* Type badge — read-only for special/existing nodes */}
-          {node.entranceId ? (
+          {gateManaged ? (
+            <div className="w-full h-8 px-2.5 rounded-lg border border-blue-200 dark:border-blue-700/30 bg-blue-50 dark:bg-blue-900/10 text-[10px] font-bold text-blue-600 dark:text-blue-400 flex items-center gap-1.5">
+              <DoorOpen className="h-3 w-3" />
+              Campus Gate anchor
+              <span className="ml-auto text-[9px] font-medium text-blue-500/60">Derived</span>
+            </div>
+          ) : node.entranceId ? (
             <div className="w-full h-8 px-2.5 rounded-lg border border-blue-200 dark:border-blue-700/30 bg-blue-50 dark:bg-blue-900/10 text-[10px] font-bold text-blue-600 dark:text-blue-400 flex items-center gap-1.5">
               <DoorOpen className="h-3 w-3" />
               Building Entrance
@@ -477,19 +489,22 @@ function NavNodeAdvancedRouting({ node, buildingName, onUpdateNode, allNavEdges,
             <div className="grid grid-cols-2 gap-2">
               <div>
                 <label className={labelCls}>X</label>
-                <input type="number" value={node.x} disabled={!!node.entranceId || pathwayGenerated}
+                <input type="number" value={node.x} disabled={!!node.entranceId || gateManaged || pathwayGenerated}
                   onChange={(e) => onUpdateNode?.(node.id, { x: parseInt(e.target.value) || 0 })}
-                  className={`${inputCls} font-mono ${node.entranceId || pathwayGenerated ? "opacity-60 cursor-not-allowed" : ""}`} />
+                  className={`${inputCls} font-mono ${node.entranceId || gateManaged || pathwayGenerated ? "opacity-60 cursor-not-allowed" : ""}`} />
               </div>
               <div>
                 <label className={labelCls}>Y</label>
-                <input type="number" value={node.y} disabled={!!node.entranceId || pathwayGenerated}
+                <input type="number" value={node.y} disabled={!!node.entranceId || gateManaged || pathwayGenerated}
                   onChange={(e) => onUpdateNode?.(node.id, { y: parseInt(e.target.value) || 0 })}
-                  className={`${inputCls} font-mono ${node.entranceId || pathwayGenerated ? "opacity-60 cursor-not-allowed" : ""}`} />
+                  className={`${inputCls} font-mono ${node.entranceId || gateManaged || pathwayGenerated ? "opacity-60 cursor-not-allowed" : ""}`} />
               </div>
             </div>
             {node.entranceId && (
               <p className="px-1 pt-1.5 text-[9px] text-muted-foreground">Derived from the linked building entrance — move the building or entrance instead.</p>
+            )}
+            {gateManaged && (
+              <p className="px-1 pt-1.5 text-[9px] text-muted-foreground">Derived from the physical Campus Gate; move or edit the gate instead.</p>
             )}
           </div>}
         </div>
@@ -554,7 +569,7 @@ export function PropertiesPanel({
   onClose,
 }: PropertiesPanelProps) {
   const [tab, setTab] = useState<TabId>("basic");
-  const [deleteConfirm, setDeleteConfirm] = useState<{ type: "building" | "marker" | "path" | "route" | "batch" | "decorAsset" | "floor"; id: string; label: string; buildingId?: string; itemCount?: number } | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<{ type: "building" | "marker" | "path" | "route" | "batch" | "decorAsset" | "floor" | "exteriorEmergencyStair"; id: string; label: string; buildingId?: string; stairId?: string; itemCount?: number } | null>(null);
   const [entranceDoorPickerOpen, setEntranceDoorPickerOpen] = useState(false);
   const [entranceDoorSearch, setEntranceDoorSearch] = useState("");
   const [expandedEntranceFloors, setExpandedEntranceFloors] = useState<Set<string>>(new Set());
@@ -674,7 +689,27 @@ export function PropertiesPanel({
   );
   const selectedNavNodeIsSemanticAnchor = Boolean(selNavNode && (
     selNavNode.roomId || selNavNode.doorId || selNavNode.entranceId
-    || selNavNode.stairId || selNavNode.elevatorId || selNavNode.rampId
+    || selNavNode.stairId || selNavNode.elevatorId || selNavNode.rampId || selNavNode.gateId
+  ));
+  // Ground Exterior Emergency Stair discharge anchors are generated outdoor
+  // infrastructure, not generic Walking Points. Keep their inspector read
+  // only and describe the authored object that owns their position.
+  const selectedGeneratedExteriorDischarge = Boolean(selNavNode?.exteriorEmergencyStairId && !selNavNode.floorId);
+  // A generated discharge always has an internal Ground transition once the
+  // stair graph is reconciled. That transition alone is not an outdoor
+  // discharge: readiness requires a real, open edge to another outdoor
+  // Walking Network node. Keep this inspector status aligned with the route
+  // readiness rule so an isolated discharge cannot look connected merely
+  // because its generated bridge exists.
+  const selectedGeneratedDischargeHasOutdoorEdge = selectedGeneratedExteriorDischarge && Boolean(
+    selNavNode?.id && exteriorEmergencyStairOutdoorDischargeConnected(selNavNode.id, allNavNodes ?? [], allNavEdges ?? []),
+  );
+  const selectedCampusGate = isCampusGate(selMkr) ? selMkr : undefined;
+  const selectedCampusGateNode = selectedCampusGate?.navNodeId
+    ? allNavNodes?.find((node) => node.id === selectedCampusGate.navNodeId)
+    : undefined;
+  const selectedCampusGateConnected = Boolean(selectedCampusGateNode && (allNavEdges ?? []).some((edge) =>
+    !edge.closed && (edge.startNodeId === selectedCampusGateNode.id || edge.endNodeId === selectedCampusGateNode.id),
   ));
   const isNavMultiMode = layer === "navigation" && multiSelected.length > 0 && selectedOutdoorCount === 0
     && (multiNavNodeIds.length > 0 || multiNavEdgeIds.length > 0)
@@ -747,7 +782,7 @@ export function PropertiesPanel({
               ? `Path Network (${multiSelectedPaths.length})`
             : isMultiMode
               ? `Multi-Select (${selectedOutdoorCount})`
-              : selBldg ? "Building" : selEntrance ? "Entrance" : selMkr ? "Marker" : selPath ? (pathMemberEditing ? "Edit Pathway" : "Pathway") : selDecorAsset ? "Decorative Asset" : selRoute ? "Route" : selected?.type === "navNode" ? "Walking Point" : selected?.type === "navEdge" ? "Walking Path" : "Properties"}
+            : selBldg ? "Building" : selEntrance ? "Entrance" : selectedCampusGate ? "Campus Gate" : selMkr ? "Marker" : selPath ? (pathMemberEditing ? "Edit Pathway" : "Pathway") : selDecorAsset ? "Decorative Asset" : selRoute ? "Route" : selected?.type === "navNode" ? "Walking Point" : selected?.type === "navEdge" ? "Walking Path" : "Properties"}
         </span>
         <button
           onClick={() => { onClearMultiSelect(); onClose(); }}
@@ -891,7 +926,7 @@ export function PropertiesPanel({
               ))}
             </div>
             <p className="text-[8px] text-muted-foreground mt-1.5 italic">
-              Reorders buildings and outdoor assets in one shared stack without moving them. One undo step per action.
+              Reorders the selected campus objects within their visual layer without moving them. One undo step per action.
             </p>
           </div>
         )}
@@ -1287,20 +1322,34 @@ export function PropertiesPanel({
                 {onAddExteriorEmergencyStair && (
                   <div className="pt-2 border-t border-border" data-testid="exterior-emergency-stairs-properties">
                     <div className="flex items-center justify-between mb-2">
-                      <div className="flex items-center gap-1.5"><AlertTriangle className="h-3 w-3 text-red-600" /><span className="text-[9px] font-extrabold uppercase tracking-widest text-muted-foreground">Exterior Emergency Stairs</span></div>
-                      <button type="button" onClick={() => onAddExteriorEmergencyStair(selBldg.id)} disabled={selBldg.locked} className="flex items-center gap-1 h-6 px-2 rounded-lg border border-red-300/60 text-[9px] font-bold text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-all disabled:opacity-40"><Plus className="h-3 w-3" /> Add</button>
+                      <div className="flex items-center gap-1.5"><AlertTriangle className="h-3 w-3 text-red-600" /><span className="text-[9px] font-extrabold uppercase tracking-widest text-muted-foreground">Exterior Emergency Stair</span></div>
+                      {(selBldg.exteriorEmergencyStairs?.length ?? 0) === 0 && <button type="button" onClick={() => onAddExteriorEmergencyStair(selBldg.id)} disabled={selBldg.locked} className="flex items-center gap-1 h-6 px-2 rounded-lg border border-red-300/60 text-[9px] font-bold text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-all disabled:opacity-40"><Plus className="h-3 w-3" /> Add</button>}
                     </div>
-                    {(selBldg.exteriorEmergencyStairs?.length ?? 0) === 0 ? <p className="text-[9px] text-muted-foreground italic">Add an exterior stair for emergency discharge.</p> : (
-                      <div className="space-y-2 max-h-[260px] overflow-y-auto scrollbar-show-on-hover">
-                        {(selBldg.exteriorEmergencyStairs ?? []).map((stair) => (
-                          <div key={stair.id} className="rounded-xl border border-red-200/60 dark:border-red-800/40 bg-red-50/40 dark:bg-red-950/10 p-2 space-y-2">
-                            <div className="flex items-center gap-1.5"><input aria-label="Emergency Stair name" value={stair.label} onChange={(e) => onUpdateExteriorEmergencyStair?.(selBldg.id, stair.id, { label: e.target.value })} className={`${inputCls} flex-1`} /><button type="button" title="Delete Emergency Stair" aria-label={`Delete ${stair.label}`} onClick={() => onDeleteExteriorEmergencyStair?.(selBldg.id, stair.id)} className="w-7 h-7 rounded-lg text-destructive hover:bg-destructive/10 flex items-center justify-center"><Trash2 className="h-3 w-3" /></button></div>
-                            <div className="grid grid-cols-2 gap-1.5"><label className="text-[9px] text-muted-foreground">Attached side<select value={stair.attachment.edge} onChange={(e) => onUpdateExteriorEmergencyStair?.(selBldg.id, stair.id, { attachment: { ...stair.attachment, edge: e.target.value as BuildingEntranceEdge } })} className="mt-1 w-full h-7 rounded-lg border border-border bg-input-background px-1.5 text-[10px] text-foreground">{Object.entries(BUILDING_ENTRANCE_EDGE_LABELS).map(([edge, label]) => <option key={edge} value={edge}>{label}</option>)}</select></label><label className="text-[9px] text-muted-foreground">Position<input type="range" min={0} max={1} step={0.05} value={stair.attachment.offset} onChange={(e) => onUpdateExteriorEmergencyStair?.(selBldg.id, stair.id, { attachment: { ...stair.attachment, offset: Number(e.target.value) } })} className="mt-2 w-full h-1.5 accent-red-600" /></label></div>
-                            <div className="flex items-center justify-between"><span className="text-[9px] text-muted-foreground">State</span><button type="button" onClick={() => onUpdateExteriorEmergencyStair?.(selBldg.id, stair.id, { state: stair.state === "open" ? "closed" : "open" })} className={cn("px-2 py-1 rounded-md border text-[9px] font-bold", stair.state === "open" ? "border-emerald-300 text-emerald-700 dark:text-emerald-300" : "border-amber-300 text-amber-700 dark:text-amber-300")}>{stair.state === "open" ? "Open" : "Closed"}</button></div>
-                            <div><span className="block text-[9px] font-bold text-muted-foreground mb-1">Served Floors</span><div className="grid grid-cols-2 gap-1">{selBldg.floors.map((floor) => { const checked = stair.servedFloorIds.includes(floor.id); return <label key={floor.id} className="flex items-center gap-1.5 text-[9px] text-foreground"><input type="checkbox" checked={checked} onChange={() => { const servedFloorIds = checked ? stair.servedFloorIds.filter((id) => id !== floor.id) : [...stair.servedFloorIds, floor.id]; onUpdateExteriorEmergencyStair?.(selBldg.id, stair.id, { servedFloorIds }); }} className="accent-red-600" />{floor.label}</label>; })}</div></div>
-                            <div className="flex items-center justify-between text-[9px]"><span className="text-muted-foreground">{stair.servedFloorIds.length} served floor{stair.servedFloorIds.length === 1 ? "" : "s"}</span><span className="font-bold text-red-600">Emergency evacuation stair</span></div>
-                          </div>
-                        ))}
+                    {(selBldg.exteriorEmergencyStairs?.length ?? 0) > 1 && <p className="mb-2 rounded-lg border border-amber-300/60 bg-amber-50/70 px-2 py-1 text-[9px] text-amber-700 dark:border-amber-800/50 dark:bg-amber-950/20 dark:text-amber-300">Only one exterior emergency stair is supported; legacy duplicates are ignored.</p>}
+                    {canonicalExteriorEmergencyStairsForBuilding(selBldg).length === 0 ? <p className="text-[9px] text-muted-foreground italic">No exterior emergency stair configured.</p> : (
+                      <div className="space-y-2 max-h-[280px] overflow-y-auto scrollbar-show-on-hover">
+                        {canonicalExteriorEmergencyStairsForBuilding(selBldg).map((stair) => {
+                          const readiness = exteriorEmergencyStairRouteReadiness(selBldg, stair, allNavNodes ?? [], allNavEdges ?? []);
+                          return <div key={stair.id} className="rounded-xl border border-red-200/60 dark:border-red-800/40 bg-red-50/35 dark:bg-red-950/10 p-2.5 space-y-2">
+                            <div className="flex items-center justify-between gap-2"><div className="min-w-0"><p className="text-[10px] font-extrabold uppercase tracking-wide text-foreground truncate">Exterior Emergency Stair</p><p className="text-[8px] text-muted-foreground">Building-owned evacuation infrastructure</p></div><button type="button" title="Delete Exterior Emergency Stair" aria-label="Delete Exterior Emergency Stair" onClick={() => setDeleteConfirm({ type: "exteriorEmergencyStair", id: stair.id, stairId: stair.id, buildingId: selBldg.id, label: "Exterior Emergency Stair" })} className="w-7 h-7 rounded-lg text-destructive hover:bg-destructive/10 flex items-center justify-center shrink-0"><Trash2 className="h-3 w-3" /></button></div>
+                            <div className="grid grid-cols-2 gap-2">
+                              <label className="text-[9px] text-muted-foreground">Attached side<CompactDropdown ariaLabel="Attached side" value={stair.attachment.edge} options={Object.entries(BUILDING_ENTRANCE_EDGE_LABELS).map(([edge, label]) => ({ value: edge as BuildingEntranceEdge, label }))} onChange={(nextEdge) => onUpdateExteriorEmergencyStair?.(selBldg.id, stair.id, { attachment: { ...stair.attachment, edge: nextEdge } })} className="mt-1" /></label>
+                              {(() => {
+                                const span = stair.attachment.edge === "top" || stair.attachment.edge === "bottom" ? selBldg.width : selBldg.height;
+                                const range = exteriorEmergencyStairSafeOffsetRange(stair.attachment.edge, span, stair.width, stair.height, stair.visualSize);
+                                const rawOffset = Number(stair.attachment.offset);
+                                const normalizedOffset = Number.isFinite(rawOffset) ? rawOffset : 0.5;
+                                const value = Math.max(range.min, Math.min(range.max, normalizedOffset));
+                                return <label className="text-[9px] text-muted-foreground">Position <span className="float-right tabular-nums text-foreground">{Math.round(value * 100)}%</span><input aria-label="Position along side" type="range" min={range.min} max={range.max} step={0.01} value={value} onChange={(e) => onUpdateExteriorEmergencyStair?.(selBldg.id, stair.id, { attachment: { ...stair.attachment, offset: Number(e.target.value) } })} className="mt-2 w-full h-1.5 accent-red-600" /></label>;
+                              })()}
+                            </div>
+                            <label className="block text-[9px] text-muted-foreground">Visual size<CompactDropdown ariaLabel="Exterior stair visual size" value={stair.visualSize ?? "medium"} options={[{ value: "small", label: "Small" }, { value: "medium", label: "Medium" }, { value: "large", label: "Large" }]} onChange={(nextSize) => onUpdateExteriorEmergencyStair?.(selBldg.id, stair.id, { visualSize: nextSize as ExteriorEmergencyStairVisualSize })} className="mt-1" /></label>
+                            <div className="flex items-center justify-between rounded-lg border border-border/60 bg-background/45 px-2 py-1.5"><span className="text-[9px] text-muted-foreground">State</span><button type="button" onClick={() => onUpdateExteriorEmergencyStair?.(selBldg.id, stair.id, { state: stair.state === "open" ? "closed" : "open" })} className={cn("px-2 py-1 rounded-md border text-[9px] font-bold", stair.state === "open" ? "border-emerald-300 text-emerald-700 dark:text-emerald-300" : "border-amber-300 text-amber-700 dark:text-amber-300")}>{stair.state === "open" ? "Open" : "Closed"}</button></div>
+                            <div><div className="flex items-center justify-between mb-1"><span className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground">Served Floors</span><span className="text-[9px] tabular-nums text-muted-foreground">{selBldg.floors.filter((floor) => stair.servedFloorIds.includes(floor.id)).length} {selBldg.floors.filter((floor) => stair.servedFloorIds.includes(floor.id)).length === 1 ? "floor" : "floors"} served</span></div><p className="mb-1.5 text-[8px] leading-snug text-muted-foreground">Choose the Floors that have access to this stair.</p><div className="grid grid-cols-2 gap-1 rounded-lg border border-border/50 bg-background/35 p-1.5">{selBldg.floors.map((floor) => { const checked = stair.servedFloorIds.includes(floor.id); return <label key={floor.id} className={cn("flex min-w-0 items-center gap-1.5 rounded-md px-1.5 py-1 text-[9px] text-foreground transition-colors", checked ? "bg-red-100/70 dark:bg-red-900/20" : "hover:bg-muted/60")}><input type="checkbox" checked={checked} onChange={() => { const servedFloorIds = checked ? stair.servedFloorIds.filter((id) => id !== floor.id) : [...stair.servedFloorIds, floor.id]; onUpdateExteriorEmergencyStair?.(selBldg.id, stair.id, { servedFloorIds }); }} className="accent-red-600 shrink-0" /><span className="truncate">{floor.label}</span></label>; })}</div></div>
+                            <div className="flex items-center justify-between text-[9px] border-t border-red-200/50 dark:border-red-800/30 pt-1.5"><span data-testid="exterior-stair-readiness-status" className={cn("font-semibold", stair.state === "closed" ? "text-amber-700 dark:text-amber-300" : readiness.ready ? "text-emerald-700 dark:text-emerald-300" : "text-amber-700 dark:text-amber-300")}>{stair.state === "closed" ? "Closed" : readiness.ready ? "Ready" : "Needs attention"}</span><span className="text-muted-foreground">Emergency evacuation</span></div>
+                            {!readiness.ready && <div data-testid="exterior-stair-readiness-issue" className="flex items-start gap-1.5 rounded-lg border border-amber-300/60 bg-amber-50/70 px-2 py-1.5 text-[8px] leading-snug text-amber-800 dark:border-amber-800/50 dark:bg-amber-950/20 dark:text-amber-200"><AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" /><span>{stair.state === "closed" ? "Open the stair when it is available for evacuation." : readiness.issue ?? "Connect the stair to the required local and outdoor walking networks."}</span></div>}
+                          </div>;
+                        })}
                       </div>
                     )}
                   </div>
@@ -1701,7 +1750,7 @@ export function PropertiesPanel({
                       {entranceLinkStatus.warning}
                     </p>
                   )}
-                  {entranceLinkStatus.doorNavigationConnected === false && (
+                  {false && entranceLinkStatus.doorNavigationConnected === false && (
                     <p className="text-[9px] leading-snug font-semibold text-amber-800/80 dark:text-amber-300/80">
                       Indoor Door linked · navigation connection needed
                     </p>
@@ -1769,26 +1818,49 @@ export function PropertiesPanel({
           <>
             {/* Basic */}
             <div className="flex items-center gap-1.5 mb-2">
-              <Info className="h-3 w-3 text-primary" />
-              <span className="text-[9px] font-extrabold uppercase tracking-widest text-muted-foreground">Marker Info</span>
+              {selectedCampusGate ? <DoorOpen className="h-3 w-3 text-primary" /> : <Info className="h-3 w-3 text-primary" />}
+              <span className="text-[9px] font-extrabold uppercase tracking-widest text-muted-foreground">{selectedCampusGate ? "Campus Gate" : "Marker Info"}</span>
             </div>
             <div>
               <label htmlFor="mkr-name" className={labelCls}>Name</label>
-              <input id="mkr-name" value={selMkr.name} onChange={(e) => onUpdateMarker(selMkr.id, { name: e.target.value })} className={inputCls} placeholder="Marker name" />
+              <input id="mkr-name" value={selMkr.name} onChange={(e) => onUpdateMarker(selMkr.id, { name: e.target.value })} className={inputCls} placeholder={selectedCampusGate ? "Campus Gate name" : "Marker name"} />
             </div>
-            <div>
-              <label className={labelCls}>Type</label>
-              <Combobox
-                value={selMkr.type}
-                onChange={(v) => {
-                  const style = MARKER_STYLES[v];
-                  onUpdateMarker(selMkr.id, { type: v, color: style?.color || selMkr.color });
-                }}
-                options={Object.entries(MARKER_STYLES).map(([v, c]) => ({ value: v, label: c.label, color: c.color }))}
-                placeholder="Select type"
-                searchPlaceholder="Search marker types..."
-              />
-            </div>
+            {selectedCampusGate ? (
+              <div>
+                <label className={labelCls}>Purpose</label>
+                <div className="grid grid-cols-2 gap-1.5">
+                  {(["general", "emergency_exit"] as const).map((purpose) => (
+                    <button
+                      key={purpose}
+                      type="button"
+                      onClick={() => onUpdateMarker(selMkr.id, { purpose, color: purpose === "emergency_exit" ? "#dc2626" : "#2563eb" })}
+                      className={cn(
+                        "h-9 rounded-lg border text-[9px] font-bold transition-colors",
+                        selectedCampusGate.purpose === purpose
+                          ? purpose === "emergency_exit" ? "border-red-400 bg-red-50 text-red-700" : "border-blue-400 bg-blue-50 text-blue-700"
+                          : "border-border text-muted-foreground hover:bg-muted",
+                      )}
+                    >
+                      {purpose === "emergency_exit" ? "Emergency Exit" : "General Gate"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div>
+                <label className={labelCls}>Type</label>
+                <Combobox
+                  value={selMkr.type}
+                  onChange={(v) => {
+                    const style = MARKER_STYLES[v];
+                    onUpdateMarker(selMkr.id, { type: v, color: style?.color || selMkr.color });
+                  }}
+                  options={Object.entries(MARKER_STYLES).map(([v, c]) => ({ value: v, label: c.label, color: c.color }))}
+                  placeholder="Select type"
+                  searchPlaceholder="Search marker types..."
+                />
+              </div>
+            )}
             <div className="pt-2 border-t border-border">
               <span className={labelCls}>Position</span>
               <div className="grid grid-cols-2 gap-2">
@@ -1802,11 +1874,20 @@ export function PropertiesPanel({
             </div>
             <div>
               <label className={labelCls}>Color</label>
-              <ColorPicker value={selMkr.color || "#0e2a6e"} onChange={(c) => onUpdateMarker(selMkr.id, { color: c })} />
+              {!selectedCampusGate && <ColorPicker value={selMkr.color || "#0e2a6e"} onChange={(c) => onUpdateMarker(selMkr.id, { color: c })} />}
+              {selectedCampusGate && (
+                <div className={cn(
+                  "rounded-xl border px-2.5 py-2 text-[10px] flex items-center justify-between",
+                  selectedCampusGateConnected ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-amber-200 bg-amber-50 text-amber-700",
+                )}>
+                  <span>{selectedCampusGateConnected ? "Connected to outdoor network" : "Connect this gate to the outdoor network"}</span>
+                  <span className="font-bold">{selectedCampusGateConnected ? "Ready" : "Needs connection"}</span>
+                </div>
+              )}
             </div>
             <div className="pt-3 border-t border-border">
               <button onClick={() => setDeleteConfirm({ type: "marker", id: selMkr.id, label: selMkr.name })} className="w-full h-10 rounded-xl border border-destructive/30 text-xs font-bold text-destructive hover:bg-destructive/10 hover:border-destructive/50 transition-colors duration-200">
-                <span className="flex items-center justify-center gap-1.5"><AlertTriangle className="h-3 w-3" /> Delete Marker</span>
+                <span className="flex items-center justify-center gap-1.5"><AlertTriangle className="h-3 w-3" /> Delete {selectedCampusGate ? "Campus Gate" : "Marker"}</span>
               </button>
             </div>
           </>
@@ -1857,6 +1938,13 @@ export function PropertiesPanel({
                   </button>
                 ))}
               </div>
+            </div>
+            <div>
+              <label className={labelCls}>Color</label>
+              <ColorPicker
+                value={selPath.color ?? "#b4535a"}
+                onChange={(color) => onUpdatePath?.(selPath.id, { color })}
+              />
             </div>
             <div className="grid grid-cols-2 gap-2">
               <div>
@@ -2087,7 +2175,7 @@ export function PropertiesPanel({
             const template = DECOR_ASSET_MAP[selDecorAsset.type];
             const rot = normalizeRotation(selDecorAsset.rotation ?? 0);
             const scale = clampDecorScale(selDecorAsset.scale ?? 1);
-            const isGroundArea = selDecorAsset.type === "ground-area";
+            const isGroundArea = isDecorAreaType(selDecorAsset.type);
             return (
               <>
                 {/* Asset summary */}
@@ -2113,8 +2201,18 @@ export function PropertiesPanel({
                   />
                 </div>
                 {isGroundArea ? (
-                  <div className="rounded-xl border border-border bg-muted/25 px-2.5 py-2 text-[10px] leading-snug text-muted-foreground">
-                    Legacy ground-area data is preserved for old campuses but is no longer an active authoring asset.
+                  <div className="space-y-2">
+                    <div>
+                      <label className={labelCls}>Surface</label>
+                      <Combobox
+                        value={selDecorAsset.groundType ?? "grass"}
+                        onChange={(v) => onUpdateDecorAsset(selDecorAsset.id, { groundType: v as CampusDecorAsset["groundType"] })}
+                        options={["grass", "planted", "plaza", "parking", "field"].map((value) => ({ value, label: value === "grass" ? "Grass / Lawn" : value === "planted" ? "Planted Area" : value === "plaza" ? "Paved / Plaza" : value === "parking" ? "Parking Area" : "Open Field" }))}
+                        placeholder="Choose surface"
+                        searchPlaceholder="Search surfaces..."
+                      />
+                    </div>
+                    <p className="rounded-lg border border-border bg-muted/25 px-2.5 py-1.5 text-[9px] leading-snug text-muted-foreground">Visual campus surface. It does not change navigation.</p>
                   </div>
                 ) : (
                   <div>
@@ -2148,6 +2246,22 @@ export function PropertiesPanel({
                       </div>
                     ))}
                   </div>
+                  {isGroundArea && (
+                    <div className="mt-2 grid grid-cols-2 gap-2">
+                      {[["width", "Width"], ["height", "Height"]].map(([k, l]) => (
+                        <div key={k}>
+                          <label htmlFor={`decor-${k}`} className={labelCls}>{l}</label>
+                          <CommittedNumberInput
+                            id={`decor-${k}`}
+                            value={Math.round(selDecorAsset[k as "width" | "height"] ?? 100)}
+                            min={30}
+                            onCommit={(v) => onUpdateDecorAsset(selDecorAsset.id, { [k]: Math.max(30, v) })}
+                            className={`${inputCls} font-mono`}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  )}
                   <div className="mt-2">
                     <label htmlFor="decor-rotation" className={labelCls}>Rotation</label>
                     <div className="flex items-center gap-2">
@@ -2227,7 +2341,7 @@ export function PropertiesPanel({
                   </button>
                   <button
                     title="Delete Asset"
-                    onClick={() => setDeleteConfirm({ type: "decorAsset", id: selDecorAsset.id, label: selDecorAsset.name || template?.label || "this asset" })}
+                    onClick={() => onDeleteDecorAsset(selDecorAsset.id)}
                     className="w-full h-10 rounded-xl border border-destructive/30 text-xs font-bold text-destructive hover:bg-destructive/10 hover:border-destructive/50 transition-colors duration-200"
                   >
                     <span className="flex items-center justify-center gap-1.5"><AlertTriangle className="h-3 w-3" /> Delete Asset</span>
@@ -2244,7 +2358,20 @@ export function PropertiesPanel({
             <div className="flex items-center gap-1.5 mb-3">
               <Route className="h-3 w-3 text-green-500" />
               <span className="text-[9px] font-extrabold uppercase tracking-widest text-muted-foreground">Walking Point</span>
+              {selectedGeneratedExteriorDischarge && (
+                <span data-testid="generated-stair-exit-badge" className="rounded-md border border-red-300/70 bg-red-50 px-1.5 py-0.5 text-[8px] font-extrabold uppercase tracking-wide text-red-700 dark:border-red-800/60 dark:bg-red-900/20 dark:text-red-300">Stair Exit</span>
+              )}
             </div>
+
+            {selectedGeneratedExteriorDischarge && (
+              <div data-testid="generated-stair-exit-inspector" className="mb-3 rounded-xl border border-border bg-muted/30 px-2.5 py-2 text-[10px] leading-snug text-muted-foreground">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="font-extrabold text-foreground">Generated / Locked</p>
+                  <Lock className="h-3 w-3 shrink-0 text-muted-foreground" />
+                </div>
+                <p className="mt-1">This Stair Exit is generated from the Building-owned Exterior Emergency Stair.</p>
+              </div>
+            )}
 
             {/* GENERAL */}
             <div className="space-y-3">
@@ -2252,11 +2379,13 @@ export function PropertiesPanel({
                 <Info className="h-3 w-3 text-muted-foreground" />
                 <span className="text-[9px] font-extrabold uppercase tracking-widest text-muted-foreground">General</span>
               </div>
-              <div>
-                <label htmlFor="nav-name" className={labelCls}>Name (optional)</label>
-                <input id="nav-name" value={selNavNode.name} onChange={(e) => onUpdateNavNode?.(selNavNode.id, { name: e.target.value })}
-                  className={inputCls} placeholder="Walking Point name" />
-              </div>
+              {!selectedGeneratedExteriorDischarge && (
+                <div>
+                  <label htmlFor="nav-name" className={labelCls}>Name (optional)</label>
+                  <input id="nav-name" value={selNavNode.name} onChange={(e) => onUpdateNavNode?.(selNavNode.id, { name: e.target.value })}
+                    className={inputCls} placeholder="Walking Point name" />
+                </div>
+              )}
               {/* Type only shown for entrance-linked nodes as read-only indicator */}
               {selNavNode.entranceId && (
                 <div>
@@ -2295,8 +2424,26 @@ export function PropertiesPanel({
                   </div>
                 )}
               </div>
-              {/* Isolated warning — only when genuinely isolated */}
-              {allNavEdges && allNavEdges.filter(e => e.startNodeId === selNavNode.id || e.endNodeId === selNavNode.id).length === 0 && (
+              {/* Generated discharge has its own readiness copy; do not call it
+                  an ordinary floorless Walking Point. */}
+              {selectedGeneratedExteriorDischarge && !selectedGeneratedDischargeHasOutdoorEdge && (
+                <div className="mt-2 px-2.5 py-2 rounded-xl border border-amber-200 dark:border-amber-700/30 bg-amber-50 dark:bg-amber-900/10 text-[10px]">
+                  <div className="flex items-center gap-1.5 mb-1">
+                    <AlertTriangle className="h-3 w-3 text-amber-500" />
+                    <span className="font-bold text-amber-600 dark:text-amber-400">Needs Outdoor Connection</span>
+                  </div>
+                  <p className="text-muted-foreground">Connect this Stair Exit to the Outdoor Walking Network.</p>
+                  <p className="mt-1 text-[9px] text-muted-foreground">Emergency routing cannot use this stair until the discharge is connected.</p>
+                </div>
+              )}
+              {selectedGeneratedExteriorDischarge && selectedGeneratedDischargeHasOutdoorEdge && (
+                <div data-testid="generated-stair-exit-connected" className="mt-2 flex items-center gap-1.5 rounded-xl border border-emerald-200/70 bg-emerald-50/60 px-2.5 py-2 text-[10px] font-bold text-emerald-700 dark:border-emerald-800/50 dark:bg-emerald-900/10 dark:text-emerald-300">
+                  <CheckCircle2 className="h-3 w-3" />
+                  <span>Connected</span>
+                </div>
+              )}
+              {!selectedGeneratedExteriorDischarge && allNavEdges
+                && allNavEdges.filter(e => e.startNodeId === selNavNode.id || e.endNodeId === selNavNode.id).length === 0 && (
                 <div className="mt-2 px-2.5 py-2 rounded-xl border border-amber-200 dark:border-amber-700/30 bg-amber-50 dark:bg-amber-900/10 text-[10px]">
                   <div className="flex items-center gap-1.5 mb-1">
                     <AlertTriangle className="h-3 w-3 text-amber-500" />
@@ -2308,23 +2455,34 @@ export function PropertiesPanel({
             </div>
 
             {/* ADVANCED ROUTING — collapsed by default; contains Type, Accessible, Position */}
-            <NavNodeAdvancedRouting
-              node={selNavNode}
-              buildingName={selNavNode.buildingId ? (allBuildings.find((b) => b.id === selNavNode.buildingId)?.name ?? selNavNode.buildingId) : undefined}
-              onUpdateNode={onUpdateNavNode}
-              allNavEdges={allNavEdges}
-              allPaths={allPaths}
-              onSelectPath={onSelectPath}
-              labelCls={labelCls}
-              inputCls={inputCls}
-            />
+            {!selectedGeneratedExteriorDischarge && (
+              <NavNodeAdvancedRouting
+                node={selNavNode}
+                buildingName={selNavNode.buildingId ? (allBuildings.find((b) => b.id === selNavNode.buildingId)?.name ?? selNavNode.buildingId) : undefined}
+                onUpdateNode={onUpdateNavNode}
+                allNavEdges={allNavEdges}
+                allPaths={allPaths}
+                onSelectPath={onSelectPath}
+                labelCls={labelCls}
+                inputCls={inputCls}
+              />
+            )}
 
             {/* ACTIONS */}
             <div className="pt-3 mt-3 border-t border-border">
-              {selectedNavNodeIsSemanticAnchor ? (
+              {selectedGeneratedExteriorDischarge ? (
+                <div className="rounded-xl border border-border bg-muted/20 px-2.5 py-2 text-[10px] leading-snug text-muted-foreground">
+                  To reposition this generated point, move the physical Exterior Emergency Stair.
+                </div>
+              ) : selectedNavNodeIsSemanticAnchor ? (
                 <div className="rounded-xl border border-blue-200/70 bg-blue-50/60 px-2.5 py-2 text-[10px] leading-snug text-blue-700 dark:border-blue-800/50 dark:bg-blue-900/10 dark:text-blue-300">
                   This navigation anchor belongs to its physical location. Edit or remove navigation from the owning Room, Door, Entrance, or circulation object.
                 </div>
+              ) : selNavNode.pathJunction ? (
+                <button onClick={() => onDeleteNavNode?.(selNavNode.id)}
+                  className="w-full h-10 rounded-xl border border-amber-300/70 text-xs font-bold text-amber-700 hover:bg-amber-50 dark:border-amber-700/60 dark:text-amber-300 dark:hover:bg-amber-900/20 transition-colors">
+                  <span className="flex items-center justify-center gap-1.5"><Minus className="h-3 w-3" /> Remove Junction</span>
+                </button>
               ) : selNavNode.generatedFromPathVertices?.length ? (
                 <button onClick={() => onDeleteNavNode?.(selNavNode.id)}
                   className="w-full h-10 rounded-xl border border-amber-300/70 text-xs font-bold text-amber-700 hover:bg-amber-50 dark:border-amber-700/60 dark:text-amber-300 dark:hover:bg-amber-900/20 transition-colors">
@@ -2411,11 +2569,9 @@ export function PropertiesPanel({
                 <GripVertical className="h-3 w-3 text-muted-foreground" />
                 <span className="text-[9px] font-extrabold uppercase tracking-widest text-muted-foreground">Geometry</span>
               </div>
-              {generatedNavEdge || entranceManagedNavEdge ? (
+              {generatedNavEdge ? (
                 <div className="rounded-xl border border-border bg-muted/30 px-2.5 py-2 text-[10px] text-muted-foreground" data-testid="generated-nav-edge-geometry-lock">
-                  {entranceManagedNavEdge
-                    ? "Geometry follows the Building Entrance and target Walking Point."
-                    : "Geometry follows the physical Pathway."}
+                  Geometry follows the physical Pathway.
                 </div>
               ) : (
               <>
@@ -2764,14 +2920,18 @@ export function PropertiesPanel({
         open={deleteConfirm !== null}
         title={deleteConfirm?.type === "batch" ? "Delete Selected Objects?"
           : deleteConfirm?.type === "floor" ? "Delete Floor"
+          : deleteConfirm?.type === "exteriorEmergencyStair" ? "Remove Exterior Emergency Stair?"
           : `Delete ${deleteConfirm?.type === "building" ? "Building" : deleteConfirm?.type === "marker" ? "Marker" : deleteConfirm?.type === "path" ? "Pathway" : deleteConfirm?.type === "decorAsset" ? "Asset" : "Route"}?`}
         message={deleteConfirm?.type === "batch"
           ? `This action cannot be undone. "${deleteConfirm?.label}" will be permanently removed from the map.`
           : deleteConfirm?.type === "floor"
           ? `Delete "${deleteConfirm?.label}" and its ${deleteConfirm?.itemCount ?? 0} authored ${(deleteConfirm?.itemCount ?? 0) === 1 ? "item" : "items"}? This action cannot be undone.`
+          : deleteConfirm?.type === "exteriorEmergencyStair"
+          ? "This will remove the Exterior Emergency Stair from this Building, including its generated occurrences on all served Floors and its emergency navigation connections."
           : `This action cannot be undone. "${deleteConfirm?.label ?? "this item"}" will be permanently removed from the map.`}
         confirmLabel={deleteConfirm?.type === "batch" ? "Delete All"
           : deleteConfirm?.type === "floor" ? "Delete Floor"
+          : deleteConfirm?.type === "exteriorEmergencyStair" ? "Remove Stair"
           : `Delete ${deleteConfirm?.type === "building" ? "Building" : deleteConfirm?.type === "marker" ? "Marker" : deleteConfirm?.type === "path" ? "Pathway" : deleteConfirm?.type === "decorAsset" ? "Asset" : "Route"}`}
         variant="danger"
         onConfirm={() => {
@@ -2790,6 +2950,7 @@ export function PropertiesPanel({
               })),
             });
           } else if (deleteConfirm.type === "building") onDeleteBuilding(deleteConfirm.id);
+          else if (deleteConfirm.type === "exteriorEmergencyStair") onDeleteExteriorEmergencyStair?.(deleteConfirm.buildingId!, deleteConfirm.stairId ?? deleteConfirm.id);
           else if (deleteConfirm.type === "marker") onDeleteMarker(deleteConfirm.id);
           else if (deleteConfirm.type === "path") onDeletePath?.(deleteConfirm.id);
           else if (deleteConfirm.type === "decorAsset") onDeleteDecorAsset(deleteConfirm.id);

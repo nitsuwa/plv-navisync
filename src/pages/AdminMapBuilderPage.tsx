@@ -5,6 +5,8 @@ import { useUnsavedChangesContext } from "../components/map-builder/UnsavedChang
 import { createCampusClone } from "../lib/campusHelpers";
 import { campusService, CampusConflictError, CampusDeletionError, CampusServiceError, userFacingCampusMessage, type CampusCreateInput, type CampusUpdateInput } from "../services/campusService";
 import { campusStructureService } from "../services/campusStructureService";
+import { nextDefaultBuildingIdentity } from "../lib/buildingDefaults";
+import { canPersistCampusStructure, clearCampusDraft, restoreCampusDraft, shouldPersistCampusDraft, writeCampusDraft } from "../lib/campusDraftPersistence";
 import {
   CampusHome,
   CampusWizard,
@@ -110,6 +112,10 @@ export function AdminMapBuilderPage() {
   const [previewSaveCampus, setPreviewSaveCampus] = useState<Campus | null>(null);
   const [previewSaving, setPreviewSaving] = useState(false);
   const directionRef = useRef(1);
+  // Keep codes allocated during this editing session reserved even when a
+  // draft Building is deleted. The structure-save RPC archives removed rows,
+  // while buildings_campus_code_uq still covers those rows.
+  const buildingCodeReservationsRef = useRef<Map<string, Set<string>>>(new Map());
 
   // ── Single dirty-state source of truth ──
   // JSON snapshot of the last PERSISTED campus per campus id. The outdoor
@@ -119,6 +125,71 @@ export function AdminMapBuilderPage() {
   // level so Floor Editor mutations (which update the same campus draft through
   // onUpdate) still enable the outer Save when the user returns.
   const savedSnapshotsRef = useRef<Record<string, string>>({});
+  // Campus cards are lightweight until the structure load completes. Never
+  // allow a structure write against that pre-hydration state.
+  const hydratedCampusIdsRef = useRef<Set<string>>(new Set());
+  const campusesRef = useRef<Campus[]>([]);
+  campusesRef.current = campuses;
+
+  // Keep in-progress edits recoverable if a browser suspends this tab or a
+  // transient auth/layout remount occurs. Canvas gestures can update the draft
+  // many times per second, so writes are throttled; lifecycle events flush the
+  // latest value synchronously.
+  const pendingDraftsRef = useRef<Map<string, Campus>>(new Map());
+  const draftWriteTimersRef = useRef<Map<string, number>>(new Map());
+  const clearDraft = useCallback((campusId: string) => {
+    const timer = draftWriteTimersRef.current.get(campusId);
+    if (timer !== undefined && typeof window !== "undefined") window.clearTimeout(timer);
+    draftWriteTimersRef.current.delete(campusId);
+    pendingDraftsRef.current.delete(campusId);
+    clearCampusDraft(campusId);
+  }, []);
+  const flushDraft = useCallback((campusId: string) => {
+    const draft = pendingDraftsRef.current.get(campusId);
+    if (!draft) return;
+    const timer = draftWriteTimersRef.current.get(campusId);
+    if (timer !== undefined && typeof window !== "undefined") window.clearTimeout(timer);
+    draftWriteTimersRef.current.delete(campusId);
+    pendingDraftsRef.current.delete(campusId);
+    const baselineRaw = savedSnapshotsRef.current[campusId];
+    if (!shouldPersistCampusDraft(draft, baselineRaw)) {
+      clearCampusDraft(campusId);
+      return;
+    }
+    let baseline: Campus | undefined;
+    try { baseline = JSON.parse(baselineRaw) as Campus; } catch { /* best-effort recovery */ }
+    writeCampusDraft(draft, baseline);
+  }, []);
+  const queueDraft = useCallback((draft: Campus) => {
+    const baselineRaw = savedSnapshotsRef.current[draft.id];
+    // A campus card can be present before its structure has hydrated. Never
+    // queue/save that temporary empty state as a draft; only a changed campus
+    // with a known persisted baseline is eligible for draft recovery.
+    if (!shouldPersistCampusDraft(draft, baselineRaw)) {
+      clearDraft(draft.id);
+      return;
+    }
+    pendingDraftsRef.current.set(draft.id, draft);
+    if (typeof window === "undefined" || draftWriteTimersRef.current.has(draft.id)) return;
+    const timer = window.setTimeout(() => flushDraft(draft.id), 250);
+    draftWriteTimersRef.current.set(draft.id, timer);
+  }, [clearDraft, flushDraft]);
+
+  useEffect(() => {
+    const flushAll = () => {
+      for (const campusId of pendingDraftsRef.current.keys()) flushDraft(campusId);
+    };
+    const handleVisibility = () => {
+      if (document.visibilityState === "hidden") flushAll();
+    };
+    window.addEventListener("pagehide", flushAll);
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => {
+      window.removeEventListener("pagehide", flushAll);
+      document.removeEventListener("visibilitychange", handleVisibility);
+      flushAll();
+    };
+  }, [flushDraft]);
 
   useEffect(() => {
     let active = true;
@@ -143,9 +214,24 @@ export function AdminMapBuilderPage() {
 
   // ── Campus CRUD ──────────────────────────────────────────────────────────
 
-  const updateCampus = useCallback((updated: Campus) =>
-    setCampuses((p) => p.map((c) => (c.id === updated.id ? updated : c))),
-  []);
+  const updateCampus = useCallback((updated: Campus) => {
+    // Editor callbacks normally carry the complete hydrated structure. Keep a
+    // defensive boundary here for startup/remount races where a lightweight
+    // campus card or partial reconciliation could briefly emit empty arrays.
+    // Do not let that transient value replace an already-loaded map (or queue
+    // a destructive draft); intentional deletions retain previewBuildingCount
+    // and therefore continue through unchanged.
+    const previous = campusesRef.current.find((campus) => campus.id === updated.id);
+    const safeUpdated = preserveStructureIfMissing(updated, previous);
+    const reserved = buildingCodeReservationsRef.current.get(updated.id) ?? new Set<string>();
+    for (const building of safeUpdated.buildings ?? []) {
+      const code = typeof building.code === "string" ? building.code.trim().toUpperCase() : "";
+      if (code) reserved.add(code);
+    }
+    buildingCodeReservationsRef.current.set(updated.id, reserved);
+    setCampuses((p) => p.map((c) => (c.id === safeUpdated.id ? safeUpdated : c)));
+    queueDraft(safeUpdated);
+  }, [queueDraft]);
 
   const updateCampusMetadata = useCallback((updated: Campus) => {
     setCampuses((p) => p.map((c) => (c.id === updated.id ? preserveStructureIfMissing(updated, c) : c)));
@@ -157,8 +243,9 @@ export function AdminMapBuilderPage() {
     if (previous) {
       const stored = preserveStructureIfMissing(updated, previous);
       savedSnapshotsRef.current = { ...savedSnapshotsRef.current, [stored.id]: JSON.stringify(stored) };
+      clearDraft(stored.id);
     }
-  }, [campuses]);
+  }, [campuses, clearDraft]);
 
   const duplicateCampus = useCallback(async (id: string) => {
     const source = campuses.find((c) => c.id === id);
@@ -419,10 +506,13 @@ export function AdminMapBuilderPage() {
           previewBuildingCount: campus?.previewBuildingCount ?? hydrated.previewBuildingCount ?? hydrated.buildings.length,
           previewFloorCount: campusFloorCount(hydrated),
           previewRoomCount: campusRoomCount(hydrated),
+          previewBuildingsLoaded: true,
         };
-        updateCampus(hydratedWithPreview);
+        const restored = restoreCampusDraft(hydratedWithPreview);
         // Hydration is a read of the persisted state — it becomes the baseline.
         savedSnapshotsRef.current = { ...savedSnapshotsRef.current, [campusId]: JSON.stringify(hydratedWithPreview) };
+        hydratedCampusIdsRef.current.add(campusId);
+        updateCampus(restored);
       } catch (error) {
         toast.error("Could not load map", { description: (error as Error).message });
         return;
@@ -432,6 +522,10 @@ export function AdminMapBuilderPage() {
   }, [campuses, updateCampus]);
 
   const saveCampusStructure = useCallback(async (campus: Campus) => {
+    const baseline = savedSnapshotsRef.current[campus.id];
+    if (!canPersistCampusStructure(campus, baseline, hydratedCampusIdsRef.current.has(campus.id))) {
+      throw new Error("Map data is still loading. Refresh the map before saving.");
+    }
     const saved = await campusStructureService.save(campus);
     const savedWithPreviewCount = {
       ...saved,
@@ -440,11 +534,12 @@ export function AdminMapBuilderPage() {
       previewRoomCount: campusRoomCount(saved),
       previewBuildingsLoaded: true,
     };
-    updateCampus(savedWithPreviewCount);
     // A successful save is the canonical baseline for the outer dirty check.
     savedSnapshotsRef.current = { ...savedSnapshotsRef.current, [saved.id]: JSON.stringify(savedWithPreviewCount) };
+    updateCampus(savedWithPreviewCount);
+    clearDraft(saved.id);
     return savedWithPreviewCount;
-  }, [updateCampus]);
+  }, [clearDraft, updateCampus]);
 
   const openStudentPreview = useCallback((campus: Campus, isDirty: boolean) => {
     if (isDirty) {
@@ -499,11 +594,12 @@ export function AdminMapBuilderPage() {
       publishedAt: refreshedRow.publishedAt ?? published.publishedAt,
       databaseUpdatedAt: refreshedRow.databaseUpdatedAt,
     } : published;
-    updateCampus(refreshed);
     savedSnapshotsRef.current = { ...savedSnapshotsRef.current, [refreshed.id]: JSON.stringify(refreshed) };
+    updateCampus(refreshed);
+    clearDraft(refreshed.id);
     setStudentPreviewCampus(refreshed);
     toast.success("Campus Published", { description: `${refreshed.name} is now available to students.` });
-  }, [studentPreviewCampus, refreshCampuses, updateCampus]);
+  }, [clearDraft, studentPreviewCampus, refreshCampuses, updateCampus]);
 
   const closeStudentPreview = useCallback(() => setStudentPreviewCampus(null), []);
 
@@ -670,7 +766,10 @@ export function AdminMapBuilderPage() {
       const updated = await campusService.update(canvasSetupCampus.id, {
         canvas_width: updates.canvasW, canvas_height: updates.canvasH, canvas_configured: true,
       }, canvasSetupCampus.databaseUpdatedAt!);
-      updateCampusMetadata({ ...updated, canvasConfigured: true });
+      // Appearance is stored in the existing structure JSON channel; the
+      // campus row continues to own only dimensions/configuration.
+      const saved = await campusStructureService.save({ ...updated, ...updates, canvasConfigured: true });
+      updateCampusMetadata({ ...saved, canvasConfigured: true });
       setView({ type: "campus", campusId: canvasSetupCampus.id });
     } catch (error) { toast.error("Could not save canvas", { description: (error as Error).message }); }
   }, [canvasSetupCampus, updateCampusMetadata]);
@@ -680,12 +779,44 @@ export function AdminMapBuilderPage() {
   const handleCanvasSettingsSave = useCallback(async (updates: Partial<Campus>) => {
     if (!activeCampus) return;
     try {
-      const updated = await campusService.update(activeCampus.id, {
-        canvas_width: updates.canvasW, canvas_height: updates.canvasH, canvas_configured: true,
-      }, activeCampus.databaseUpdatedAt!);
-      updateCampusMetadata({ ...updated, canvasConfigured: true });
-    } catch (error) { toast.error("Could not update canvas", { description: (error as Error).message }); }
-  }, [activeCampus, updateCampusMetadata]);
+      const current = activeCampus;
+      const nextWidth = updates.canvasW ?? current.canvasW;
+      const nextHeight = updates.canvasH ?? current.canvasH;
+      const dimensionsChanged = nextWidth !== current.canvasW || nextHeight !== current.canvasH;
+
+      // Appearance-only changes belong to the same canonical structure-save
+      // transaction as the rest of the editor. The old path always performed
+      // a separate campus-row update first, which called auth.getUser() and
+      // could surface Supabase's transient "Auth session missing!" error even
+      // though the editor was authenticated and fully hydrated.
+      let candidate = preserveStructureIfMissing(
+        { ...current, ...updates, canvasW: nextWidth, canvasH: nextHeight, canvasConfigured: true },
+        current,
+      );
+
+      // Keep the campus row as the source of truth for dimensions, but only
+      // use that metadata update when dimensions actually changed. Ground
+      // material/color/texture therefore never take a second auth-sensitive
+      // write, and all authored structure remains in the full save payload.
+      if (dimensionsChanged) {
+        if (!current.databaseUpdatedAt) throw new Error("Refresh the campus before changing canvas dimensions.");
+        const updated = await campusService.update(current.id, {
+          canvas_width: nextWidth, canvas_height: nextHeight, canvas_configured: true,
+        }, current.databaseUpdatedAt);
+        candidate = preserveStructureIfMissing(
+          { ...current, ...updated, ...updates, canvasW: nextWidth, canvasH: nextHeight, canvasConfigured: true },
+          current,
+        );
+      }
+
+      await saveCampusStructure(candidate);
+    } catch (error) {
+      toast.error("Could not update canvas", { description: userFacingCampusMessage(error) });
+      // CanvasSettingsModal awaits this rejection and keeps its local draft
+      // open for retry. Do not turn a persistence failure into a logout.
+      throw error;
+    }
+  }, [activeCampus, saveCampusStructure]);
 
   return (
     <div className="flex flex-col w-full flex-1" style={{ minHeight: 0 }}>
@@ -741,10 +872,26 @@ export function AdminMapBuilderPage() {
                   <BuildingWizardModal
                     onClose={() => setShowBuildingWizard(false)}
                     onSave={(bldg: BuildingWizardData) => {
+                      const requestedCode = bldg.code.trim().toUpperCase();
+                      const reservedCodes = buildingCodeReservationsRef.current.get(activeCampus.id) ?? new Set<string>();
+                      const codeTaken = reservedCodes.has(requestedCode)
+                        || activeCampus.buildings.some((building) => building.code?.trim().toUpperCase() === requestedCode);
+                      const fallbackIdentity = codeTaken
+                        ? nextDefaultBuildingIdentity(
+                          activeCampus.buildings,
+                          [...reservedCodes].map((code) => ({ code })),
+                        )
+                        : null;
+                      if (fallbackIdentity) {
+                        toast.info("Building code already in use", {
+                          description: `Using ${fallbackIdentity.code} for this new building.`,
+                        });
+                      }
                       const color = BUILDING_COLORS[Math.floor(Math.random() * BUILDING_COLORS.length)];
                       const nb: Campus["buildings"][0] = {
                         id: genId("bld"),
                         ...bldg,
+                        code: fallbackIdentity?.code ?? requestedCode,
                         x: 80 + Math.random() * (activeCampus.canvasW - 200),
                         y: 80 + Math.random() * (activeCampus.canvasH - 160),
                         width: 110,

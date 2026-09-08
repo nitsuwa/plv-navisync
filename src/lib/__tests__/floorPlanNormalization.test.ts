@@ -78,6 +78,24 @@ describe("floorPlanNormalization", () => {
     expect(floors[1].label).toBe("Penthouse");
   });
 
+  it("preserves reusable floor-plan furniture keys through normalization and duplication", () => {
+    const furniture = [
+      "lecture-row-6", "study-table-6", "lab-workbench-stools", "computer-workstation-row-4",
+      "bookshelf", "library-bookshelf", "toilet", "toilet-stall", "pwd-toilet-stall", "sink", "fire-extinguisher",
+      "whiteboard", "lectern", "printer-copier", "server-rack", "laboratory-sink", "locker",
+    ].map((type, index) => ({
+      id: `f-${index}`, type, name: type, category: "furniture", x: index * 12, y: 20,
+      width: 24, height: 16, rotation: index * 15, color: "#64748b",
+    }));
+    const floor = normalizeFloor({ id: "f1", buildingId: "b1", number: 1, furniture });
+    expect(floor.furniture.map((item) => item.type)).toEqual(furniture.map((item) => item.type));
+    expect(floor.furniture.map((item) => item.rotation)).toEqual(furniture.map((item) => item.rotation));
+
+    const copy = duplicateFloorForBuilding(floor, { id: "f2", buildingId: "b2", number: 2 });
+    expect(copy.furniture.map((item) => item.type)).toEqual(furniture.map((item) => item.type));
+    expect(copy.furniture.every((item, index) => item.id !== furniture[index].id)).toBe(true);
+  });
+
   it("duplicates floors for a new building while remapping nested element ids", () => {
     const source = normalizeFloor({
       id: "f1",
@@ -138,6 +156,9 @@ describe("floorPlanNormalization", () => {
       ramps: [],
       elevators: [],
       labels: [],
+      exteriorZones: [],
+      entranceSteps: [],
+      entranceRamps: [],
     });
   });
 
@@ -195,5 +216,23 @@ describe("floorPlanNormalization", () => {
 
     expect(floor.backgroundImage).toMatchObject({ storagePath: "campus/building/floor/plan.png", opacity: 0.5 });
     expect(floor.calibration?.metersPerUnit).toBe(0.05);
+  });
+
+  it("preserves explicit exterior-zone parent relationships", () => {
+    const floor = normalizeFloor({
+      id: "f1", buildingId: "b1", number: 1,
+      exteriorZones: [{ id: "zone-1", type: "veranda", side: "bottom", offset: 0.5, width: 180, depth: 72 }],
+      entranceSteps: [{ id: "steps-1", x: 0, y: 0, width: 80, height: 32, label: "Steps", parentZoneId: "zone-1", attachmentOffset: 0.7 }],
+    });
+    expect(floor.entranceSteps?.[0]).toMatchObject({ parentZoneId: "zone-1", attachmentEdge: "outer", attachmentOffset: 0.7, accessible: false });
+  });
+
+  it("preserves optional exposed-edge attachment metadata", () => {
+    const floor = normalizeFloor({
+      id: "f2", buildingId: "b1", number: 1,
+      exteriorZones: [{ id: "zone-2", type: "veranda", side: "bottom", offset: 0.5, width: 180, depth: 72 }],
+      entranceRamps: [{ id: "ramp-1", x: 0, y: 0, width: 56, height: 28, label: "Ramp", parentZoneId: "zone-2", attachmentEdge: "start", attachmentOffset: 0.5 }],
+    });
+    expect(floor.entranceRamps?.[0]).toMatchObject({ parentZoneId: "zone-2", attachmentEdge: "start", attachmentOffset: 0.5, accessible: true });
   });
 });

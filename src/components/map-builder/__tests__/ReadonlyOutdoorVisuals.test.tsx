@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import type { Campus } from "../types";
 import { projectReadonlyOutdoorCampus } from "../../../lib/readonlyOutdoorCampus";
-import { ReadonlyOutdoorCampusScene } from "../ReadonlyOutdoorVisuals";
+import { ReadonlyOutdoorCampusScene, exteriorEmergencyStairVisualDimensions } from "../ReadonlyOutdoorVisuals";
 
 const campus = {
   id: "c1",
@@ -16,7 +16,11 @@ const campus = {
   }],
   markers: [{ id: "m1", name: "Gate", type: "entrance", x: 30, y: 40, color: "#111827" }],
   paths: [{ id: "p1", points: [{ x: 0, y: 0 }, { x: 100, y: 80 }], type: "walkway", color: "#b45309", width: 10 }],
-  decorAssets: [{ id: "d1", type: "tree" as const, x: 60, y: 60, scale: 1 }],
+  decorAssets: [
+    { id: "d1", type: "tree" as const, x: 60, y: 60, scale: 1 },
+    { id: "surface-parking", type: "ground-area" as const, groundType: "parking" as const, x: 420, y: 360, width: 220, height: 120, scale: 1, zOrder: -1000 },
+    { id: "monument-1", type: "monument" as const, x: 460, y: 290, scale: 1 },
+  ],
 } as unknown as Campus;
 
 describe("ReadonlyOutdoorCampusScene", () => {
@@ -27,7 +31,12 @@ describe("ReadonlyOutdoorCampusScene", () => {
     expect(screen.getByTestId("readonly-campus-path")).toHaveAttribute("data-path-id", "p1");
     expect(screen.getByTestId("readonly-entrance")).toHaveAttribute("data-entrance-id", "e1");
     expect(screen.getByTestId("readonly-exterior-emergency-stair")).toHaveAttribute("data-stair-id", "s1");
-    expect(screen.getByTestId("readonly-decor")).toHaveAttribute("data-asset-id", "d1");
+    expect(screen.getByTestId("exterior-stair-module")).toBeInTheDocument();
+    expect(screen.getByTestId("exterior-stair-landing")).toBeInTheDocument();
+    expect(screen.getAllByTestId("exterior-stair-tread").length).toBeGreaterThan(2);
+    expect(screen.getAllByTestId("readonly-decor").some((node) => node.getAttribute("data-asset-id") === "d1")).toBe(true);
+    expect(screen.getByTestId("readonly-ground-area")).toHaveAttribute("data-ground-type", "parking");
+    expect(screen.getAllByTestId("readonly-decor").some((node) => node.getAttribute("data-asset-id") === "monument-1")).toBe(true);
     expect(screen.queryByTestId("nav-graph-layer")).not.toBeInTheDocument();
   });
 
@@ -50,5 +59,24 @@ describe("ReadonlyOutdoorCampusScene", () => {
     render(<svg><ReadonlyOutdoorCampusScene campus={projectReadonlyOutdoorCampus(campus)} showBuildings={false} /></svg>);
     expect(screen.getByTestId("readonly-campus-path")).toBeInTheDocument();
     expect(screen.queryByTestId("readonly-building")).not.toBeInTheDocument();
+  });
+
+  it("renders parking as adaptive stall markings without a dominant P card label", () => {
+    render(<svg><ReadonlyOutdoorCampusScene campus={projectReadonlyOutdoorCampus(campus)} /></svg>);
+    const lot = screen.getByTestId("readonly-ground-area");
+    expect(lot).toHaveAttribute("data-ground-type", "parking");
+    expect(lot.querySelectorAll("line").length).toBeGreaterThan(4);
+    expect(lot.textContent).not.toContain("P");
+  });
+
+  it("uses a medium legacy default with constrained visual size options", () => {
+    const base = { width: 28, height: 42 } as const;
+    const small = exteriorEmergencyStairVisualDimensions({ ...base, visualSize: "small" });
+    const medium = exteriorEmergencyStairVisualDimensions({ ...base, visualSize: undefined });
+    const large = exteriorEmergencyStairVisualDimensions({ ...base, visualSize: "large" });
+    expect(medium.width).toBeGreaterThan(base.width);
+    expect(medium.height).toBeGreaterThan(base.height);
+    expect(small.width).toBeLessThan(medium.width);
+    expect(large.height).toBeGreaterThan(medium.height);
   });
 });

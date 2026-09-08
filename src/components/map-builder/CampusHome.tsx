@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect, useId } from "react";
+import { useState, useRef, useCallback, useEffect, useId, useLayoutEffect } from "react";
 import { createPortal } from "react-dom";
 import { motion } from "motion/react";
 import {
@@ -335,8 +335,13 @@ function QuickActions({
   onEditDetails?: (id: string) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const [dropdownPos, setDropdownPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [dropdownLayout, setDropdownLayout] = useState<{ left: number; top: number; transformOrigin: string }>({
+    left: 8,
+    top: 8,
+    transformOrigin: "top right",
+  });
   const btnRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   // Publish/unpublish confirmation + progress
   const [publishConfirm, setPublishConfirm] = useState<PublishConfirm | null>(null);
@@ -560,6 +565,54 @@ function QuickActions({
       }] : []),
     ];
 
+  // The actions menu is portaled to body, so it is not clipped by the campus
+  // card/page.  Recalculate against the viewport after it mounts: cards near
+  // the bottom edge should open upward, while long menus remain scrollable.
+  const positionMenu = useCallback(() => {
+    if (!btnRef.current || !menuRef.current || typeof window === "undefined") return;
+    const trigger = btnRef.current.getBoundingClientRect();
+    const menu = menuRef.current.getBoundingClientRect();
+    const padding = 8;
+    const gap = 4;
+    const menuWidth = Math.max(1, menu.width || 208);
+    const menuHeight = Math.max(1, menu.height);
+    const spaceBelow = window.innerHeight - trigger.bottom - gap - padding;
+    const spaceAbove = trigger.top - gap - padding;
+    const opensAbove = spaceBelow < menuHeight && spaceAbove > spaceBelow;
+    const maxTop = Math.max(padding, window.innerHeight - menuHeight - padding);
+    const top = Math.max(padding, Math.min(
+      opensAbove ? trigger.top - menuHeight - gap : trigger.bottom + gap,
+      maxTop,
+    ));
+    const preferredRight = trigger.right + gap;
+    const preferredLeft = trigger.left - menuWidth - gap;
+    const left = Math.max(
+      padding,
+      Math.min(
+        preferredRight + menuWidth <= window.innerWidth - padding ? preferredRight : preferredLeft,
+        window.innerWidth - menuWidth - padding,
+      ),
+    );
+    setDropdownLayout({
+      left,
+      top,
+      transformOrigin: opensAbove ? "bottom right" : "top right",
+    });
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    positionMenu();
+    const update = () => positionMenu();
+    window.addEventListener("resize", update);
+    // Capture scroll from the page/card scroll container as well as window.
+    window.addEventListener("scroll", update, true);
+    return () => {
+      window.removeEventListener("resize", update);
+      window.removeEventListener("scroll", update, true);
+    };
+  }, [open, positionMenu, actions.length]);
+
   const progressActionType = actionProgress?.action ?? "publishing";
 
   return (
@@ -571,7 +624,7 @@ function QuickActions({
             e.stopPropagation();
             if (btnRef.current) {
               const rect = btnRef.current.getBoundingClientRect();
-              setDropdownPos({ x: rect.right, y: rect.bottom });
+              setDropdownLayout({ left: rect.right + 4, top: rect.bottom + 4, transformOrigin: "top right" });
             }
             setOpen((v) => !v);
           }}
@@ -607,12 +660,13 @@ function QuickActions({
               transition={{ duration: 0.12 }}
               style={{
                 position: 'fixed',
-                left: Math.min(dropdownPos.x + 4, window.innerWidth - 228),
-                top: dropdownPos.y + 4,
+                left: dropdownLayout.left,
+                top: dropdownLayout.top,
                 zIndex: 50,
-                transformOrigin: 'top right',
+                transformOrigin: dropdownLayout.transformOrigin,
               }}
-              className="w-52 rounded-xl border border-border bg-card shadow-xl overflow-hidden"
+              ref={menuRef}
+              className="w-52 max-h-[calc(100vh-16px)] overflow-y-auto rounded-xl border border-border bg-card shadow-xl scrollbar-show-on-hover"
               onKeyDown={handleMenuKeyDown}
             >
                 {/* Campus details header */}

@@ -138,7 +138,10 @@ describe("B5 Phase 2.1 — outdoor Campus copy / paste / duplicate", () => {
     expect(latest!.buildings).toHaveLength(2);
     const copy = latest!.buildings.find((b) => b.id !== "b1")!;
     expect(copy.name).toBe("Building One (copy)");
+    expect(copy.code).not.toBe("B1");
     expect(copy.id).not.toBe("b1");
+    expect(copy.floors[0].id).not.toBe("f1");
+    expect(copy.floors[0].buildingId).toBe(copy.id);
     expect(copy.x).toBe(125);
     expect(copy.y).toBe(125);
     expect(copy.entrances).toEqual([]);
@@ -156,7 +159,10 @@ describe("B5 Phase 2.1 — outdoor Campus copy / paste / duplicate", () => {
     fireEvent.keyDown(window, { key: "d", ctrlKey: true });
 
     expect(latest!.buildings).toHaveLength(2);
-    expect(latest!.buildings.find((b) => b.id !== "b1")!.name).toBe("Building One (copy)");
+    const copy = latest!.buildings.find((b) => b.id !== "b1")!;
+    expect(copy.name).toBe("Building One (copy)");
+    expect(copy.code).not.toBe("B1");
+    expect(copy.floors[0].id).not.toBe("f1");
   });
 
   it("Ctrl+C copies a marker and Ctrl+V pastes it offset with a fresh id", () => {

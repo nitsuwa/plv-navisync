@@ -73,8 +73,8 @@ export function BuildingWizardModal({ onClose, onSave }: BuildingWizardModalProp
                 </label>
                 <input id="wizard-bldg-code"
                   value={code}
-                  onChange={(e) => setCode(e.target.value.toUpperCase().slice(0, 5))}
-                  placeholder="MAB"
+                  onChange={(e) => setCode(e.target.value.toUpperCase().slice(0, 30))}
+                  placeholder="BLDG-01"
                   className={inputCls}
                   style={{ fontFamily: "var(--font-body)" }}
                 />

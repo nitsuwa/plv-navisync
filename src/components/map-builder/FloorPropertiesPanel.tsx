@@ -212,8 +212,14 @@ function stairLabelsMatch(selected?: string, candidate?: string): boolean {
   return normalizedStairLabel(selected) === normalizedStairLabel(candidate);
 }
 
-const inputCls = "w-full h-9 px-3 rounded-xl border border-border bg-input-background text-foreground text-xs focus:outline-none focus:ring-2 focus:ring-primary/30 transition-all duration-200";
-const labelCls = "block text-[9px] font-bold uppercase tracking-wider mb-1 text-muted-foreground";
+/** Shared inspector primitives. Exterior architecture inspectors consume the
+ * same label/value language as the room/door/stair inspector instead of
+ * maintaining a second, oversized typography scale. */
+export const FLOOR_PROPERTY_INPUT_CLASS = "w-full h-9 px-3 rounded-xl border border-border bg-input-background text-foreground text-xs focus:outline-none focus:ring-2 focus:ring-primary/30 transition-all duration-200";
+export const FLOOR_PROPERTY_LABEL_CLASS = "block text-[9px] font-bold uppercase tracking-wider mb-1 text-muted-foreground";
+
+const inputCls = FLOOR_PROPERTY_INPUT_CLASS;
+const labelCls = FLOOR_PROPERTY_LABEL_CLASS;
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
