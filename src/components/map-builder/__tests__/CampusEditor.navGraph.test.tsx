@@ -83,8 +83,15 @@ function canvasSvg(container: HTMLElement): SVGSVGElement {
 
 /** Switch to the Navigation layer via its tab, then return the ACTIVE editor svg. */
 function openNavigationLayer(container: HTMLElement): SVGSVGElement {
-  fireEvent.click(screen.getByText("Navigation"));
+  const navigationControl = screen.queryByText("Navigation")
+    ?? screen.getByRole("button", { name: /Show and edit the walking network|Hide navigation/ });
+  fireEvent.click(navigationControl);
   return canvasSvg(container);
+}
+
+function clickWalkingPointTool(container: HTMLElement): void {
+  const toolbar = within(container.querySelector("[data-testid='editor-toolbar']")!);
+  fireEvent.click(toolbar.getByRole("button", { name: /Add Waypoint|Add Walking Point|Walking Point/ }));
 }
 
 /** Find the rendered nav-node group at (x, y). */
@@ -440,7 +447,7 @@ describe("B5 Phase 1.5 — navigation authoring UX / tool architecture correctio
     expect(toolbar.queryByRole("button", { name: "Add POI" })).toBeNull();
     expect(toolbar.queryByRole("button", { name: "Draw Walkway" })).toBeNull();
     // …and no navigation authoring tools leak into Campus mode
-    expect(toolbar.queryByRole("button", { name: "Add Waypoint" })).toBeNull();
+    expect(toolbar.queryByRole("button", { name: /Add Waypoint|Add Walking Point|Walking Point/ })).toBeNull();
     expect(toolbar.queryByRole("button", { name: "Connect" })).toBeNull();
     expect(toolbar.queryByRole("button", { name: "Remove" })).toBeNull();
     // No ambiguous legacy naming either — Marker/Walkway are now explicit
@@ -452,7 +459,7 @@ describe("B5 Phase 1.5 — navigation authoring UX / tool architecture correctio
     const { container } = render(<Harness />);
     openNavigationLayer(container);
     const toolbar = within(screen.getByTestId("editor-toolbar"));
-    expect(toolbar.getByRole("button", { name: "Add Waypoint" })).toBeTruthy();
+    expect(toolbar.getByRole("button", { name: /Add Waypoint|Add Walking Point|Walking Point/ })).toBeTruthy();
     expect(toolbar.getByRole("button", { name: "Connect" })).toBeTruthy();
     expect(toolbar.getByRole("button", { name: "Remove" })).toBeTruthy();
     // No campus building tool and no generic "Marker" naming in Navigation mode
@@ -659,6 +666,89 @@ describe("B5 Phase 1.5 — navigation authoring UX / tool architecture correctio
     expect(screen.getByText("100 units")).toBeTruthy();
     // No raw developer IDs as primary controls
     expect(screen.queryByText("nnA")).toBeNull();
+  });
+
+  it("removes a simple degree-2 path junction by merging its compatible edges", () => {
+    let latest: Campus | undefined;
+    const campus = seededCampus();
+    campus.navNodes = [
+      { id: "junction-a", name: "A", type: "outdoor", x: 100, y: 200, campusId: "c1", accessible: true, color: "#16a34a" },
+      { id: "junction-j", name: "Path Junction", type: "outdoor", x: 200, y: 200, campusId: "c1", accessible: true, color: "#16a34a", pathJunction: true },
+      { id: "junction-b", name: "B", type: "outdoor", x: 300, y: 200, campusId: "c1", accessible: true, color: "#16a34a" },
+    ];
+    campus.navEdges = [
+      { id: "junction-edge-a", startNodeId: "junction-a", endNodeId: "junction-j", distance: 100, bidirectional: true, accessible: true, emergencySafe: true, type: "walkway", color: "#16a34a", width: 4 },
+      { id: "junction-edge-b", startNodeId: "junction-j", endNodeId: "junction-b", distance: 100, bidirectional: true, accessible: true, emergencySafe: true, type: "walkway", color: "#16a34a", width: 4 },
+    ];
+    const { container } = render(<Harness initialCampus={campus} onCampusChange={(value) => { latest = value; }} />);
+    const svg = openNavigationLayer(container);
+    fireEvent.keyDown(window, { key: "e" });
+    fireEvent.mouseDown(navNodeAt(container, 200, 200), { clientX: 200, clientY: 200, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+
+    expect(latest?.navNodes?.map((node) => node.id)).toEqual(["junction-a", "junction-b"]);
+    expect(latest?.navEdges).toHaveLength(1);
+    expect(latest?.navEdges?.[0]).toMatchObject({
+      id: "junction-edge-a",
+      startNodeId: "junction-a",
+      endNodeId: "junction-b",
+    });
+  });
+
+  it("blocks removal of a branching junction without changing the graph", () => {
+    let latest: Campus | undefined;
+    const campus = seededCampus();
+    campus.navNodes = [
+      { id: "branch-a", name: "A", type: "outdoor", x: 100, y: 200, campusId: "c1", accessible: true, color: "#16a34a" },
+      { id: "branch-j", name: "Path Junction", type: "outdoor", x: 200, y: 200, campusId: "c1", accessible: true, color: "#16a34a", pathJunction: true },
+      { id: "branch-b", name: "B", type: "outdoor", x: 300, y: 200, campusId: "c1", accessible: true, color: "#16a34a" },
+      { id: "branch-c", name: "C", type: "outdoor", x: 200, y: 300, campusId: "c1", accessible: true, color: "#16a34a" },
+    ];
+    campus.navEdges = [
+      { id: "branch-edge-a", startNodeId: "branch-a", endNodeId: "branch-j", distance: 100, bidirectional: true, accessible: true, emergencySafe: true, type: "walkway", color: "#16a34a", width: 4 },
+      { id: "branch-edge-b", startNodeId: "branch-j", endNodeId: "branch-b", distance: 100, bidirectional: true, accessible: true, emergencySafe: true, type: "walkway", color: "#16a34a", width: 4 },
+      { id: "branch-edge-c", startNodeId: "branch-j", endNodeId: "branch-c", distance: 100, bidirectional: true, accessible: true, emergencySafe: true, type: "walkway", color: "#16a34a", width: 4 },
+    ];
+    const { container } = render(<Harness initialCampus={campus} onCampusChange={(value) => { latest = value; }} />);
+    const svg = openNavigationLayer(container);
+    fireEvent.keyDown(window, { key: "e" });
+    fireEvent.mouseDown(navNodeAt(container, 200, 200), { clientX: 200, clientY: 200, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+
+    expect(latest).toBeUndefined();
+    expect(container.querySelector("[data-testid='nav-node'][data-node-id='branch-j']")).toBeTruthy();
+    expect(container.querySelectorAll("[data-testid='nav-edge']")).toHaveLength(3);
+  });
+
+  it("protects a Pathway-owned node even if a stale payload marks it as a manual junction", () => {
+    let latest: Campus | undefined;
+    const campus = seededCampus();
+    campus.paths = [{
+      id: "owned-path",
+      points: [{ x: 100, y: 200 }, { x: 200, y: 200 }, { x: 300, y: 200 }],
+      navigationVertexIds: ["owned-a", "owned-j", "owned-b"],
+      type: "walkway",
+      color: "#94a3b8",
+      width: 10,
+    }];
+    campus.navNodes = [
+      { id: "owned-a-node", name: "Walking Point", type: "outdoor", x: 100, y: 200, campusId: "c1", accessible: true, color: "#16a34a", generatedFromPathVertices: [{ pathId: "owned-path", vertexId: "owned-a" }] },
+      { id: "owned-j-node", name: "Path Junction", type: "outdoor", x: 200, y: 200, campusId: "c1", accessible: true, color: "#16a34a", pathJunction: true, generatedFromPathVertices: [{ pathId: "owned-path", vertexId: "owned-j" }] },
+      { id: "owned-b-node", name: "Walking Point", type: "outdoor", x: 300, y: 200, campusId: "c1", accessible: true, color: "#16a34a", generatedFromPathVertices: [{ pathId: "owned-path", vertexId: "owned-b" }] },
+    ];
+    campus.navEdges = [
+      { id: "owned-edge-a", startNodeId: "owned-a-node", endNodeId: "owned-j-node", distance: 100, bidirectional: true, accessible: true, emergencySafe: true, type: "walkway", color: "#16a34a", width: 4, generatedFromPathIds: ["owned-path"] },
+      { id: "owned-edge-b", startNodeId: "owned-j-node", endNodeId: "owned-b-node", distance: 100, bidirectional: true, accessible: true, emergencySafe: true, type: "walkway", color: "#16a34a", width: 4, generatedFromPathIds: ["owned-path"] },
+    ];
+    const { container } = render(<Harness initialCampus={campus} onCampusChange={(value) => { latest = value; }} />);
+    const svg = openNavigationLayer(container);
+    fireEvent.keyDown(window, { key: "e" });
+    fireEvent.mouseDown(navNodeAt(container, 200, 200), { clientX: 200, clientY: 200, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+
+    expect(latest).toBeUndefined();
+    expect(container.querySelector("[data-testid='nav-node'][data-node-id='owned-j-node']")).toBeTruthy();
+    expect(container.querySelectorAll("[data-testid='nav-edge']")).toHaveLength(2);
   });
 });
 
@@ -2030,7 +2120,7 @@ describe("B5 Phase 1.9 — entrance navigation visual cleanup", () => {
   it("Phase 5.5 outdoor Waypoint alignment guides appear within threshold", () => {
     const { container } = render(<Harness initialCampus={seededCampus()} />);
     const svg = openNavigationLayer(container);
-    fireEvent.click(screen.getByRole("button", { name: "Add Waypoint" }));
+    clickWalkingPointTool(container);
     fireEvent.mouseMove(svg, { clientX: 210, clientY: 260, bubbles: true });
 
     expect(container.querySelector("[data-testid='alignment-guide']")).toBeTruthy();
@@ -2137,12 +2227,12 @@ describe("B5 Phase 1.9 — entrance navigation visual cleanup", () => {
     ];
     const { container } = render(<Harness initialCampus={campus} onCampusChange={(c) => { latest = c; }} />);
     const svg = openNavigationLayer(container);
-    fireEvent.click(screen.getByRole("button", { name: "Add Waypoint" }));
+    clickWalkingPointTool(container);
     fireEvent.mouseDown(svg, { clientX: 376, clientY: 374, bubbles: true });
     fireEvent.mouseUp(svg, { bubbles: true });
     expect(latest!.navNodes![0]).toMatchObject({ x: 375, y: 375 });
 
-    fireEvent.click(screen.getByRole("button", { name: "Add Waypoint" }));
+    clickWalkingPointTool(container);
     fireEvent.mouseDown(svg, { clientX: 353, clientY: 349, bubbles: true });
     fireEvent.mouseUp(svg, { bubbles: true });
     expect(latest!.navNodes![1]).toMatchObject({ x: 350, y: 350 });
@@ -2312,11 +2402,11 @@ describe("B5 Phase 1.9 — entrance navigation visual cleanup", () => {
     const svg = canvasSvg(container);
     fireEvent.mouseDown(container.querySelector("[data-path-id='loop']")!, { clientX: 140, clientY: 100, bubbles: true });
     fireEvent.mouseUp(svg, { bubbles: true });
-    fireEvent.click(screen.getByRole("button", { name: /Add Path to Navigation/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Add Path to Navigation|Use for Navigation/ }));
     expect(latest!.navNodes).toHaveLength(3);
     expect(latest!.navEdges).toHaveLength(3);
 
-    fireEvent.click(screen.getByRole("button", { name: /Add Path to Navigation/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Add Path to Navigation|Use for Navigation/ }));
     expect(latest!.navNodes).toHaveLength(3);
     expect(latest!.navEdges).toHaveLength(3);
   });
@@ -2332,10 +2422,10 @@ describe("B5 Phase 1.9 — entrance navigation visual cleanup", () => {
     const svg = canvasSvg(container);
     fireEvent.mouseDown(container.querySelector("[data-path-id='main']")!, { clientX: 180, clientY: 100, bubbles: true });
     fireEvent.mouseUp(svg, { bubbles: true });
-    fireEvent.click(screen.getByRole("button", { name: /Add Path to Navigation/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Add Path to Navigation|Use for Navigation/ }));
     fireEvent.mouseDown(container.querySelector("[data-path-id='branch']")!, { clientX: 200, clientY: 150, bubbles: true });
     fireEvent.mouseUp(svg, { bubbles: true });
-    fireEvent.click(screen.getByRole("button", { name: /Add Path to Navigation/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Add Path to Navigation|Use for Navigation/ }));
 
     expect(latest!.navNodes!.filter((node) => node.x === 200 && node.y === 100)).toHaveLength(1);
     expect(latest!.navNodes).toHaveLength(4);

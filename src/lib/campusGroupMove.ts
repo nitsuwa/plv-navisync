@@ -1,8 +1,9 @@
 /**
  * Pure helpers for B2 multi-object movement on the outdoor campus canvas.
  *
- * A multi-selection of buildings and decorative assets is dragged as ONE rigid
- * group: the anchor (the grabbed object) is grid-snapped, the group bounding
+ * A multi-selection of buildings, decorative assets, and physical Pathways is
+ * dragged as ONE rigid group: the anchor (the grabbed object) is grid-snapped,
+ * the group bounding
  * box is edge-snapped against non-group buildings, and the whole group is
  * clamped to the canvas — all without distorting the internal spacing between
  * members (every member receives the exact same translation).
@@ -178,7 +179,7 @@ export function snapRectToVisibleBounds(
 }
 
 export interface ComputeGroupTranslationParams {
-  /** Every selected movable member of the group (buildings + decor assets). */
+  /** Every selected movable member of the group (buildings, decor, paths). */
   members: GroupMoveMember[];
   /** The member the pointer grabbed (must exist in `members`). */
   draggedId: string;

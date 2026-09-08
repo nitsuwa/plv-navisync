@@ -231,7 +231,16 @@ export function OutdoorGroundAreaVisual({ asset }: { asset: CampusDecorAsset }) 
   );
 }
 
-export function OutdoorEntranceVisual({ building, entrance }: { building: CampusBuilding; entrance: ReadonlyOutdoorEntrance }) {
+export function OutdoorEntranceVisual({
+  building,
+  entrance,
+  onClick,
+}: {
+  building: CampusBuilding;
+  entrance: ReadonlyOutdoorEntrance;
+  /** Optional read-only map callback for selecting the entrance's building. */
+  onClick?: (buildingId: string) => void;
+}) {
   const position = entrance.legacyPosition
     ? { ...entrance.legacyPosition, angle: 0 }
     : entranceWorldPosition(building, entrance);

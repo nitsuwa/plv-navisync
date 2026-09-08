@@ -1,5 +1,5 @@
-import type { Campus, CampusGroundMaterial, CampusGroundTexture } from "../components/map-builder/types";
-import { DECOR_ASSET_MAP, isDecorAreaType } from "../components/map-builder/constants";
+import type { Campus, CampusDecorAsset, CampusGroundMaterial, CampusGroundTexture } from "../components/map-builder/types";
+import { DECOR_ASSET_MAP, groundTypeForDecorType, isDecorAreaType } from "../components/map-builder/constants";
 import { decorWorldSize } from "./decorVisual";
 
 export const CAMPUS_GROUND_DEFAULTS: Record<CampusGroundMaterial, string> = {
@@ -59,6 +59,59 @@ export function campusGroundAppearance(campus: Pick<Campus, "canvasGroundMateria
 export function campusGroundPatternId(material: CampusGroundMaterial, texture: CampusGroundTexture): string | undefined {
   if (texture === "none" || material === "neutral") return undefined;
   return `campus-ground-${material}-pattern`;
+}
+
+/**
+ * Resolve the visual presentation of an Outdoor area through the same ground
+ * material vocabulary used by Canvas Settings.  `type`/`groundType` remain
+ * semantic authoring data; these optional fields only override presentation.
+ * Keeping this helper next to the canvas appearance resolver means the live
+ * Canvas, area surfaces, and settings preview cannot drift into separate
+ * pattern systems.
+ */
+export function campusAreaGroundAppearance(
+  asset: Pick<CampusDecorAsset, "type" | "groundType" | "groundMaterial" | "groundTexture" | "groundColor">,
+) {
+  const semanticType = asset.groundType ?? groundTypeForDecorType(asset.type);
+  const defaultMaterial: CampusGroundMaterial = asset.groundMaterial
+    ? normalizeCampusGroundMaterial(asset.groundMaterial)
+    : asset.type === "ground-area" && !asset.groundType
+      ? "neutral"
+      : semanticType === "plaza"
+        ? "concrete"
+        : semanticType === "parking"
+          ? "asphalt"
+          : semanticType === "grass" || semanticType === "planted" || semanticType === "field"
+            ? "grass"
+            : "neutral";
+  const material = normalizeCampusGroundMaterial(defaultMaterial);
+  const texture = asset.groundTexture !== undefined
+    ? normalizeCampusGroundTexture(asset.groundTexture)
+    : asset.groundMaterial !== undefined
+      ? "subtle"
+      : asset.type === "ground-area" && !asset.groundType
+        ? "none"
+        : "subtle";
+  // Preserve the restrained legacy semantic tints until an area receives an
+  // explicit color.  The pattern itself still comes from the shared material
+  // renderer, so changing the tint never silently changes the material.
+  const legacyColor = semanticType === "planted"
+    ? "#b8cfab"
+    : semanticType === "plaza"
+      ? "#d8d5ce"
+      : semanticType === "parking"
+        ? "#8a9296"
+        : semanticType === "field"
+          ? "#dbe8c2"
+          : material === "grass"
+            ? CAMPUS_GROUND_DEFAULTS.grass
+            : CAMPUS_GROUND_DEFAULTS[material];
+  return {
+    material,
+    texture,
+    color: asset.groundColor || legacyColor,
+    pattern: campusGroundPatternId(material, texture),
+  };
 }
 
 export interface CampusContentBounds {

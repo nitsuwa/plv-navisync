@@ -214,7 +214,7 @@ describe("CampusEditor building entrances", () => {
     expect(screen.getByText(/1000 × 680px/)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-    expect(screen.getByTestId("canvas-resize-handles")).toBeInTheDocument();
+    expect(screen.queryByTestId("canvas-resize-handles")).not.toBeInTheDocument();
     expect(screen.queryByTestId("canvas-resize-confirmation")).not.toBeInTheDocument();
     expect(latestCampus).toBeNull();
   });

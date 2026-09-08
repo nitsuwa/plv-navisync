@@ -21,6 +21,41 @@ export interface SelectionBoundsOptions {
   includeHidden?: boolean;
 }
 
+export interface TransformControlMetrics {
+  /** Visible grip size in world units (screen-size is zoom independent). */
+  handleSize: number;
+  /** Transparent pointer target size in world units. */
+  hitSize: number;
+  /** Radius of the visible circular rotation grip in world units. */
+  rotationRadius: number;
+  /** Distance from the object's top edge to the rotation grip in world units. */
+  rotationOffset: number;
+  /** Selection-stroke width in world units. */
+  strokeWidth: number;
+}
+
+/**
+ * Resolve transform-control dimensions from the visible object's screen size.
+ * The SVG canvas is zoom-scaled, so world-unit constants make tiny assets
+ * acquire enormous grips at high zoom (and microscopic grips when zoomed out).
+ * Keep the visible controls in a compact screen-pixel clamp while retaining a
+ * modestly larger, independent pointer target for accessibility.
+ */
+export function transformControlMetrics(width: number, height: number, zoom: number): TransformControlMetrics {
+  const safeZoom = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
+  const visibleSpanPx = Math.max(0, Math.min(Math.abs(width), Math.abs(height))) * safeZoom;
+  const visibleSizePx = Math.max(4.5, Math.min(7, 4.5 + visibleSpanPx / 60));
+  const hitSizePx = Math.max(9, Math.min(13, visibleSizePx + 4));
+  const rotationOffsetPx = Math.max(10, Math.min(18, 10 + visibleSpanPx / 40));
+  return {
+    handleSize: visibleSizePx / safeZoom,
+    hitSize: hitSizePx / safeZoom,
+    rotationRadius: visibleSizePx / (2 * safeZoom),
+    rotationOffset: rotationOffsetPx / safeZoom,
+    strokeWidth: Math.max(0.55, Math.min(2.4, 1.35 / safeZoom)),
+  };
+}
+
 export function selectionRectFromPoints(sx: number, sy: number, cx: number, cy: number): SelectionRect {
   return {
     x: Math.min(sx, cx),
@@ -109,12 +144,10 @@ export function outdoorGroupSelectionBounds(
   const opts = Array.isArray(pathsOrOptions) ? options : pathsOrOptions;
   if (ids.length < 2) return null;
   const selected = new Set(ids);
-  // A Pathway is a navigation-owned object with its own transform semantics.
-  // Keep path-only selections eligible for their dedicated network outline,
-  // but never include a Pathway in a mixed physical-object group frame.
-  const hasPhysicalSelection = buildings.some((building) => selected.has(building.id))
-    || decorAssets.some((asset) => selected.has(asset.id))
-    || markers.some((marker) => selected.has(marker.id) && isCampusGate(marker));
+  // Pathways can move rigidly with a physical selection.  Their dedicated
+  // point/scale semantics remain separate from generic resize; including their
+  // visible bounds here keeps the mixed-selection frame honest and makes group
+  // alignment use the complete selected geometry.
   const rects: SelectionRect[] = [];
   for (const building of buildings) {
     if (!selected.has(building.id) || building.locked) continue;
@@ -126,12 +159,10 @@ export function outdoorGroupSelectionBounds(
     const bounds = decorSelectionBounds(asset, decorTemplates[asset.type], opts);
     if (bounds) rects.push(bounds);
   }
-  if (!hasPhysicalSelection) {
-    for (const path of paths) {
-      if (!selected.has(path.id) || path.locked) continue;
-      const bounds = pathSelectionBounds(path, opts);
-      if (bounds) rects.push(bounds);
-    }
+  for (const path of paths) {
+    if (!selected.has(path.id) || path.locked) continue;
+    const bounds = pathSelectionBounds(path, opts);
+    if (bounds) rects.push(bounds);
   }
   for (const marker of markers) {
     if (!selected.has(marker.id)) continue;
