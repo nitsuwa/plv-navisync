@@ -1018,6 +1018,12 @@ export interface CampusDecorAsset {
   height?: number;
   /** Appearance variant for the flexible Ground Area asset. */
   groundType?: "grass" | "planted" | "plaza" | "field" | "parking";
+  /** Optional visual material override for area/surface assets.  This is
+   * intentionally separate from the semantic `type`/`groundType` so a Lawn
+   * remains a Lawn when its presentation changes. */
+  groundMaterial?: CampusGroundMaterial;
+  groundTexture?: CampusGroundTexture;
+  groundColor?: string;
   /** Sparse grid cells for the tile-painted Campus Surface layer.  Coordinates
    * are integer grid indices; legacy rectangular ground assets leave this
    * field undefined and continue using their existing geometry. */

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Campus } from "../../components/map-builder/types";
-import { CAMPUS_GROUND_DEFAULTS, CAMPUS_OBJECT_SAFE_INSET, campusContentBounds, campusGroundAppearance, campusGroundPatternId, campusObjectSafeBounds, fitCampusCanvas, resizeCampusCanvasFromHandle } from "../campusCanvas";
+import { CAMPUS_GROUND_DEFAULTS, CAMPUS_OBJECT_SAFE_INSET, campusAreaGroundAppearance, campusContentBounds, campusGroundAppearance, campusGroundPatternId, campusObjectSafeBounds, fitCampusCanvas, resizeCampusCanvasFromHandle } from "../campusCanvas";
 
 const base: Pick<Campus, "canvasW" | "canvasH" | "buildings" | "markers" | "paths" | "navNodes" | "decorAssets" | "gridSize"> = {
   canvasW: 500, canvasH: 400,
@@ -20,6 +20,20 @@ describe("campus canvas bounds", () => {
   it("keeps legacy canvas colors as safe defaults", () => {
     expect(campusGroundAppearance({ canvasColor: "#decdb7" })).toMatchObject({ material: "neutral", color: "#decdb7" });
     expect(campusGroundAppearance({})).toMatchObject({ material: "neutral", color: CAMPUS_GROUND_DEFAULTS.neutral, texture: "subtle" });
+  });
+
+  it("maps semantic areas to shared material defaults without changing their type", () => {
+    expect(campusAreaGroundAppearance({ type: "lawn-area" })).toMatchObject({ material: "grass", texture: "subtle", pattern: "campus-ground-grass-pattern" });
+    expect(campusAreaGroundAppearance({ type: "garden-area" })).toMatchObject({ material: "grass", texture: "subtle" });
+    expect(campusAreaGroundAppearance({ type: "plaza-area" })).toMatchObject({ material: "concrete", texture: "subtle", pattern: "campus-ground-concrete-pattern" });
+    expect(campusAreaGroundAppearance({ type: "parking-lot" })).toMatchObject({ material: "asphalt", texture: "subtle", pattern: "campus-ground-asphalt-pattern" });
+    expect(campusAreaGroundAppearance({ type: "ground-area" })).toMatchObject({ material: "neutral", texture: "none", pattern: undefined });
+  });
+
+  it("keeps a selected material pattern when an area receives a custom tint", () => {
+    const appearance = campusAreaGroundAppearance({ type: "lawn-area", groundMaterial: "grass", groundTexture: "subtle", groundColor: "#abc123" });
+    expect(appearance).toMatchObject({ material: "grass", texture: "subtle", color: "#abc123", pattern: "campus-ground-grass-pattern" });
+    expect(campusAreaGroundAppearance({ type: "lawn-area", groundMaterial: "grass", groundTexture: "none", groundColor: "#abc123" }).pattern).toBeUndefined();
   });
 
   it("fits visible content without moving authored positions", () => {

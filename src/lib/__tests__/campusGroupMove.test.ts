@@ -225,6 +225,22 @@ describe("physical group resize", () => {
     expect(resized[1].width).toBeCloseTo(61.82, 1);
   });
 
+  it("moves a Pathway with physical members as one rigid group", () => {
+    const members = [pathMember("p1", 100, 100), decor("da1", 340, 120)];
+    const { dx, dy } = computeGroupTranslation({
+      members,
+      draggedId: "da1",
+      rawDx: 23,
+      rawDy: 17,
+      ...CANVAS,
+      snapGrid: false,
+      edgeSnap: false,
+    });
+    expect({ dx, dy }).toEqual({ dx: 23, dy: 17 });
+    expect({ x: members[0].x + dx, y: members[0].y + dy }).toEqual({ x: 123, y: 117 });
+    expect({ x: members[1].x + dx, y: members[1].y + dy }).toEqual({ x: 363, y: 137 });
+  });
+
   it("keeps the opposite corner fixed and clamps the dragged frame to the canvas", () => {
     const from = { x: 80, y: 80, width: 180, height: 120 };
     const to = computeGroupResizeBounds(from, "nw", { x: -100, y: -100 }, 400, 300, true, 20);

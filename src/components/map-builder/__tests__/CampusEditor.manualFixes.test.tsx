@@ -103,6 +103,12 @@ function decorG(container: HTMLElement, type = "tree"): SVGGElement {
   return g as SVGGElement;
 }
 
+function pathG(container: HTMLElement, id = "p1"): SVGGElement {
+  const g = container.querySelector(`[data-testid="campus-path"][data-path-id="${id}"]`);
+  expect(g, `path ${id}`).toBeTruthy();
+  return g as SVGGElement;
+}
+
 function selectItem(g: SVGGElement, clientX: number, clientY: number) {
   fireEvent.mouseDown(g, { clientX, clientY });
   fireEvent.mouseUp(g);
@@ -183,6 +189,43 @@ describe("multi-selection", () => {
     // Non-selected objects untouched.
     expect(latestCampus!.buildings.find((b) => b.id === "b2")!.x).toBe(260);
     expect((latestCampus!.decorAssets ?? []).find((d) => d.id === "da2")!.x).toBe(550);
+  });
+
+  it("keeps a mixed Pathway selection move-only without exposing generic resize handles", () => {
+    const campus = makeCampus({
+      paths: [{ id: "p1", points: [{ x: 420, y: 300 }, { x: 620, y: 300 }], type: "walkway", color: "#64748b", width: 10 }],
+    });
+    const { container } = render(<Harness campus={campus} onCampusChange={(c) => { latestCampus = c; }} />);
+    stubSvgRect(container);
+
+    // Make the physical object the active member after adding the Pathway so
+    // this catches the subtle regression where single-object handles leaked
+    // through even though the generic group resize was unavailable.
+    selectItem(pathG(container), 500, 300);
+    shiftClick(buildingG(container, "#1e40af"), 100, 100);
+
+    expect(container.querySelectorAll('[data-testid="campus-group-resize-handle"]').length).toBe(0);
+    expect(container.querySelectorAll('[data-testid="decor-resize-handle"]').length).toBe(0);
+    expect(container.querySelectorAll('[data-testid^="campus-gate-resize-handle-"]').length).toBe(0);
+    expect(container.querySelectorAll('[data-testid="campus-path"]').length).toBe(1);
+  });
+
+  it("moves a mixed Pathway selection rigidly while preserving the Pathway identity", () => {
+    const campus = makeCampus({
+      paths: [{ id: "p1", points: [{ x: 420, y: 300 }, { x: 620, y: 300 }], type: "walkway", color: "#64748b", width: 10 }],
+    });
+    const { container } = render(<Harness campus={campus} onCampusChange={(c) => { latestCampus = c; }} />);
+    const svg = stubSvgRect(container);
+
+    selectItem(pathG(container), 500, 300);
+    shiftClick(buildingG(container, "#1e40af"), 100, 100);
+    fireEvent.mouseDown(buildingG(container, "#1e40af"), { clientX: 100, clientY: 100 });
+    fireEvent.mouseMove(svg, { clientX: 140, clientY: 140 });
+    fireEvent.mouseUp(svg);
+
+    const movedPath = latestCampus?.paths?.find((path) => path.id === "p1");
+    expect(movedPath?.id).toBe("p1");
+    expect(movedPath?.points).toEqual([{ x: 460, y: 340 }, { x: 660, y: 340 }]);
   });
 });
 
@@ -267,6 +310,32 @@ describe("properties panel cleanup", () => {
     expect(Array.from(container.querySelectorAll("label")).some((l) => l.textContent?.trim() === "Building Type")).toBe(false);
     // Useful basic info remains.
     expect(Array.from(container.querySelectorAll("label")).some((l) => l.textContent?.trim() === "Name")).toBe(true);
+  });
+
+  it("keeps decorative asset type immutable and does not expose the area type picker", () => {
+    const { container } = render(<Harness />);
+    stubSvgRect(container);
+    selectItem(decorG(container, "tree"), 450, 120);
+
+    expect(container.textContent).toContain("Asset type is fixed after placement");
+    expect(Array.from(container.querySelectorAll("label")).some((label) => label.textContent?.trim() === "Type")).toBe(false);
+    expect(container.textContent).toContain("Asset Info");
+  });
+
+  it("shows dedicated material controls for area assets without changing their semantic type", () => {
+    const campus = makeCampus({
+      decorAssets: [{ id: "lawn", type: "lawn-area", x: 450, y: 300, width: 180, height: 110, visible: true }],
+    });
+    const { container } = render(<Harness campus={campus} />);
+    stubSvgRect(container);
+    const lawn = container.querySelector("[data-testid='campus-area']") as SVGGElement;
+    expect(lawn).toBeTruthy();
+    selectItem(lawn, 450, 300);
+
+    expect(container.textContent).toContain("Surface Appearance");
+    expect(container.textContent).toContain("Ground Material");
+    expect(container.textContent).toContain("Ground Color / Tint");
+    expect(Array.from(container.querySelectorAll("label")).some((label) => label.textContent?.trim() === "Type")).toBe(false);
   });
 });
 

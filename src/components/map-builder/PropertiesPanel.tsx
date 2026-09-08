@@ -21,7 +21,7 @@ import { ObjectIssueSection, type ObjectIssueItem } from "./ObjectIssueSection";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
 import { cn } from "../../lib/utils";
 import { MARKER_STYLES } from "../../data/mapData";
-import { LAYERS, LAYER_TOOLS, DECOR_ASSET_MAP, DECOR_ASSET_TYPES, genId, isDecorAreaType } from "./constants";
+import { LAYERS, LAYER_TOOLS, DECOR_ASSET_MAP, genId, isDecorAreaType } from "./constants";
 import { Combobox } from "../ui/Combobox";
 import { ColorPicker } from "../ui/ColorPicker";
 import { CompactDropdown } from "./CompactDropdown";
@@ -36,7 +36,8 @@ import {
 import type {
   CampusBuilding, CampusMarker, CampusSelection, EditorLayer,
   CampusRoute, NavigationNode, NavigationEdge, CampusEventOverlay,
-  EventLocationRef, FloorPlan, CampusDecorAsset, DecorAssetType,
+  EventLocationRef, FloorPlan, CampusDecorAsset,
+  CampusGroundMaterial, CampusGroundTexture,
   BuildingEntranceEdge, BuildingEntranceType,
   CampusEntrance, CampusPath, ExteriorEmergencyStair,
   ExteriorEmergencyStairVisualSize,
@@ -51,6 +52,7 @@ import {
   pathNetworkNavigationStatus,
 } from "../../lib/campusPathNetwork";
 import { isCampusGate } from "../../lib/campusGates";
+import { CAMPUS_GROUND_MATERIALS, campusAreaGroundAppearance } from "../../lib/campusCanvas";
 
 type TabId = "basic" | "style" | "advanced";
 
@@ -2176,6 +2178,7 @@ export function PropertiesPanel({
             const rot = normalizeRotation(selDecorAsset.rotation ?? 0);
             const scale = clampDecorScale(selDecorAsset.scale ?? 1);
             const isGroundArea = isDecorAreaType(selDecorAsset.type);
+            const areaAppearance = isGroundArea ? campusAreaGroundAppearance(selDecorAsset) : null;
             return (
               <>
                 {/* Asset summary */}
@@ -2201,7 +2204,7 @@ export function PropertiesPanel({
                   />
                 </div>
                 {isGroundArea ? (
-                  <div className="space-y-2">
+                  <div className="space-y-3">
                     <div>
                       <label className={labelCls}>Surface</label>
                       <Combobox
@@ -2212,19 +2215,40 @@ export function PropertiesPanel({
                         searchPlaceholder="Search surfaces..."
                       />
                     </div>
+                    <div className="pt-2 border-t border-border space-y-2">
+                      <span className="text-[9px] font-extrabold uppercase tracking-widest text-muted-foreground">Surface Appearance</span>
+                      <div>
+                        <label className={labelCls}>Ground Material</label>
+                        <Combobox
+                          value={areaAppearance?.material ?? "neutral"}
+                          onChange={(v) => onUpdateDecorAsset(selDecorAsset.id, { groundMaterial: v as CampusGroundMaterial })}
+                          options={CAMPUS_GROUND_MATERIALS.map((item) => ({ value: item.value, label: item.label }))}
+                          placeholder="Choose material"
+                          searchPlaceholder="Search materials..."
+                        />
+                      </div>
+                      <div>
+                        <label className={labelCls}>Texture</label>
+                        <Combobox
+                          value={areaAppearance?.texture ?? "subtle"}
+                          onChange={(v) => onUpdateDecorAsset(selDecorAsset.id, { groundTexture: v as CampusGroundTexture })}
+                          options={[{ value: "none", label: "None" }, { value: "subtle", label: "Subtle" }]}
+                          placeholder="Choose texture"
+                          searchPlaceholder="Search textures..."
+                        />
+                      </div>
+                      <div>
+                        <label className={labelCls}>Ground Color / Tint</label>
+                        <ColorPicker
+                          value={areaAppearance?.color ?? "#f3f1ec"}
+                          onChange={(color) => onUpdateDecorAsset(selDecorAsset.id, { groundColor: color })}
+                        />
+                      </div>
+                    </div>
                     <p className="rounded-lg border border-border bg-muted/25 px-2.5 py-1.5 text-[9px] leading-snug text-muted-foreground">Visual campus surface. It does not change navigation.</p>
                   </div>
                 ) : (
-                  <div>
-                    <label className={labelCls}>Type</label>
-                    <Combobox
-                      value={selDecorAsset.type}
-                      onChange={(v) => onUpdateDecorAsset(selDecorAsset.id, { type: v as DecorAssetType })}
-                      options={DECOR_ASSET_TYPES.map((t) => ({ value: t.type, label: t.label, color: t.color }))}
-                      placeholder="Select asset type"
-                      searchPlaceholder="Search asset types..."
-                    />
-                  </div>
+                  <p className="rounded-lg border border-border bg-muted/25 px-2.5 py-1.5 text-[9px] leading-snug text-muted-foreground">Asset type is fixed after placement. Place another asset to use a different visual.</p>
                 )}
 
                 {/* Transform */}
