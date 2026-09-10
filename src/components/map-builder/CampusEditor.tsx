@@ -1746,9 +1746,10 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
 
   // ── Build the rigid group-drag member list ──
   // When the grabbed object is part of the current multi-selection, the whole
-  // selection of buildings + decorative assets + functional Campus Gates moves
-  // as one unit. Locked buildings are excluded; generated nav anchors remain
-  // graph infrastructure and are never part of the physical group.
+  // selection of buildings + decorative assets + functional Campus Gates +
+  // physical Pathways moves as one unit. Locked members are excluded;
+  // generated nav anchors remain graph infrastructure and are never part of
+  // the physical group.
   const buildDragGroup = (drag: { type: string; id: string }, sel: string[]): GroupMoveMember[] | null => {
     if (!sel.includes(drag.id)) return null;
     const members: GroupMoveMember[] = [];
@@ -1777,16 +1778,13 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
       const size = campusGateSize(marker);
       members.push({ kind: "marker", id: marker.id, x: marker.x, y: marker.y, width: size.width, height: size.height });
     }
-    // Pathways keep their dedicated network transform semantics. A mixed
-    // physical + Pathway selection must never enter the generic physical group
-    // gesture; path-only selections continue through their existing path-group
-    // controls below.
-    if (members.length === 0) {
-      for (const path of paths) {
-        if (!sel.includes(path.id) || path.locked) continue;
-        const bounds = pathSelectionBounds(path, { includeHidden: true });
-        if (bounds) members.push({ kind: "path", id: path.id, x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height });
-      }
+    // Pathways participate in rigid group movement (including mixed physical
+    // selections), but never in the generic group-resize gesture.  Their
+    // points remain owned by the existing Pathway reconciliation path below.
+    for (const path of paths) {
+      if (!sel.includes(path.id) || path.locked) continue;
+      const bounds = pathSelectionBounds(path, { includeHidden: true });
+      if (bounds) members.push({ kind: "path", id: path.id, x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height });
     }
     return members.length >= 2 ? members : null;
   };
@@ -5410,19 +5408,18 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
         : selected
           ? [selected.id]
           : [];
-      // Cross-domain guard: physical and navigation items cannot be mixed
-      // in the same multi-selection group. If the user shift-clicks across
-      // domains, clear the current selection and start fresh with just the
-      // new item.
-      const isPhysicalType = (t: string) => t === "building" || t === "decorAsset" || t === "entrance" || t === "marker" || t === "gate";
-      const isPathType = (t: string) => t === "path";
+      // Navigation graph items remain a separate selection domain. Physical
+      // objects and Pathways, however, are intentionally allowed together so
+      // a mixed selection can move rigidly while Pathways stay excluded from
+      // generic group resize.
       const isNavType = (t: string) => t === "navNode" || t === "navEdge";
       if (base.length > 0 && !base.includes(id)) {
         const baseSelection = selectionForId(base[0]);
-        const currentDomain = baseSelection && isPhysicalType(baseSelection.type) ? "physical" : baseSelection && isPathType(baseSelection.type) ? "path" : baseSelection && isNavType(baseSelection.type) ? "nav" : null;
-        const clickedDomain = isPhysicalType(type) ? "physical" : isPathType(type) ? "path" : isNavType(type) ? "nav" : null;
-        if (currentDomain && clickedDomain && currentDomain !== clickedDomain) {
-          // Cross-domain shift-click: clear existing selection, select only the new item
+        const currentIsNav = Boolean(baseSelection && isNavType(baseSelection.type));
+        const clickedIsNav = isNavType(type);
+        if (currentIsNav !== clickedIsNav) {
+          // Navigation and physical/path selections cannot share a generic
+          // transform group; start a fresh selection in the clicked domain.
           setMultiSelected([]);
           setSelected({ type, id });
           setShowAlignTools(false);
@@ -7035,9 +7032,15 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
   const onUpdateDecorAsset = useCallback((id: string, changes: Partial<CampusDecorAsset>) => {
     const nextAssets = (campus.decorAssets ?? []).map((asset) => {
       if (asset.id !== id) return asset;
-      const proposed = { ...asset, ...changes };
+      // An authored decorative asset keeps its semantic type for its entire
+      // lifetime.  Surface appearance is edited through the area-specific
+      // material fields; never reinterpret a placed asset as another asset or
+      // area through a generic property update.
+      const { type: _ignoredType, ...safeChanges } = changes;
+      void _ignoredType;
+      const proposed = { ...asset, ...safeChanges };
       const geometryChanged = changes.x !== undefined || changes.y !== undefined
-        || changes.width !== undefined || changes.height !== undefined || changes.scale !== undefined || changes.rotation !== undefined || changes.type !== undefined;
+        || changes.width !== undefined || changes.height !== undefined || changes.scale !== undefined || changes.rotation !== undefined;
       if (!geometryChanged) return proposed;
       const template = DECOR_ASSET_MAP[proposed.type];
       if (!template) return proposed;
@@ -7046,7 +7049,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
         ? { width: Math.max(1, proposed.width ?? template.defaultWidth), height: Math.max(1, proposed.height ?? template.defaultHeight) }
         : decorWorldSize(template, proposed.scale);
       let boundedProposed = proposed;
-      if (area && (changes.width !== undefined || changes.height !== undefined || changes.type !== undefined)) {
+      if (area && (changes.width !== undefined || changes.height !== undefined)) {
         const fitted = fitDecorSizeToCanvas(proposed.x, proposed.y, size.width, size.height, proposed.rotation ?? 0, cw, ch);
         boundedProposed = {
           ...boundedProposed,
@@ -9463,21 +9466,23 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
 
         {pendingCanvasResize && createPortal(
           <div className="pointer-events-none fixed inset-0 z-[140]" data-testid="canvas-resize-confirmation">
-            <div className="pointer-events-auto absolute bottom-5 left-1/2 w-[min(92vw,380px)] -translate-x-1/2 rounded-2xl border border-amber-200 bg-card/95 p-4 shadow-2xl backdrop-blur dark:border-amber-800/40">
+            <div className="pointer-events-auto absolute left-1/2 top-[4.5rem] w-[min(92vw,420px)] -translate-x-1/2 rounded-2xl border border-amber-200 bg-card/95 p-3 shadow-2xl backdrop-blur dark:border-amber-800/40">
               <div className="flex items-start gap-3">
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-amber-500/10 text-amber-600"><AlertTriangle className="h-4 w-4" /></div>
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-amber-500/10 text-amber-600"><AlertTriangle className="h-4 w-4" /></div>
                 <div className="min-w-0">
-                  <h3 className="text-sm font-extrabold text-foreground">Resize canvas?</h3>
-                  <p className="mt-1 text-xs leading-relaxed text-muted-foreground">Review the proposed canvas size before applying. Nothing will be moved or deleted.</p>
+                  <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                    <h3 className="text-sm font-extrabold text-foreground">Canvas resize</h3>
+                    <p className="text-[10px] font-mono text-muted-foreground/70">{pendingCanvasResize.width} × {pendingCanvasResize.height}px</p>
+                  </div>
+                  <p className="mt-0.5 text-[10px] leading-relaxed text-muted-foreground">Review the proposed size before applying. Nothing will be moved or deleted.</p>
                   {pendingCanvasResizeClips
-                    ? <p className="mt-1 text-[10px] font-semibold text-amber-700 dark:text-amber-300">Some authored content extends beyond this size. Increase the canvas or fit content before applying.</p>
-                    : <p className="mt-1 text-[10px] font-semibold text-emerald-700 dark:text-emerald-300">All authored content fits inside this proposed canvas.</p>}
-                  <p className="mt-1 text-[10px] font-mono text-muted-foreground/70">{pendingCanvasResize.width} × {pendingCanvasResize.height}px</p>
+                    ? <p className="mt-0.5 text-[10px] font-semibold text-amber-700 dark:text-amber-300">Some authored content would be clipped. Expand the canvas or move content before applying.</p>
+                    : <p className="mt-0.5 text-[10px] font-semibold text-emerald-700 dark:text-emerald-300">All authored content fits inside this proposed canvas.</p>}
                 </div>
               </div>
-              <div className="mt-5 flex gap-2">
-                <button type="button" onClick={() => { setPendingCanvasResize(null); setCanvasResizePreview(null); canvasResizeOriginalRef.current = null; canvasResizeRef.current = null; setCanvasResizeMode(true); setGuides([]); }} className="flex-1 rounded-xl border border-border px-3 py-2 text-xs font-bold text-muted-foreground hover:bg-muted">Cancel</button>
-                <button type="button" disabled={pendingCanvasResizeClips} onClick={() => { if (pendingCanvasResizeClips) return; const next = { ...campus, canvasW: pendingCanvasResize.width, canvasH: pendingCanvasResize.height }; campusRef.current = next; onUpdate(next); pushHistory(next); setPendingCanvasResize(null); setCanvasResizePreview(null); canvasResizeOriginalRef.current = null; setCanvasResizeMode(true); }} className="flex-1 rounded-xl bg-primary px-3 py-2 text-xs font-extrabold text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-45">{pendingCanvasResizeClips ? "Resize blocked" : "Apply resize"}</button>
+              <div className="mt-2.5 flex justify-end gap-2">
+                <button type="button" onClick={() => { setPendingCanvasResize(null); setCanvasResizePreview(null); canvasResizeOriginalRef.current = null; canvasResizeRef.current = null; setCanvasResizeMode(false); setGuides([]); }} className="rounded-xl border border-border px-3 py-1.5 text-xs font-bold text-muted-foreground hover:bg-muted">Cancel</button>
+                <button type="button" disabled={pendingCanvasResizeClips} onClick={() => { if (pendingCanvasResizeClips) return; const next = { ...campus, canvasW: pendingCanvasResize.width, canvasH: pendingCanvasResize.height }; campusRef.current = next; onUpdate(next); pushHistory(next); setPendingCanvasResize(null); setCanvasResizePreview(null); canvasResizeOriginalRef.current = null; setCanvasResizeMode(false); setGuides([]); toast.success("Canvas resized", `Canvas size updated to ${next.canvasW} × ${next.canvasH}.`); }} className="rounded-xl bg-primary px-3 py-1.5 text-xs font-extrabold text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-45">{pendingCanvasResizeClips ? "Resize blocked" : "Apply resize"}</button>
               </div>
             </div>
           </div>,

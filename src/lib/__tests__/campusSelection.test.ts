@@ -4,9 +4,11 @@ import {
   decorSelectionBounds,
   markerSelectionBounds,
   outdoorSelectionIdsInRect,
+  outdoorGroupSelectionBounds,
   pathSelectionBounds,
   rectsIntersect,
   selectionRectFromPoints,
+  transformControlMetrics,
 } from "../campusSelection";
 import { DECOR_ASSET_MAP } from "../../components/map-builder/constants";
 import type { CampusBuilding, CampusDecorAsset, CampusMarker, CampusPath } from "../../components/map-builder/types";
@@ -142,5 +144,32 @@ describe("campusSelection helpers", () => {
       DECOR_ASSET_MAP,
     );
     expect(ids).toEqual(["b1", "da2"]);
+  });
+
+  it("keeps transform grips in a compact screen-pixel range across zoom", () => {
+    for (const zoom of [0.5, 0.75, 1, 1.25, 1.5, 3]) {
+      const metrics = transformControlMetrics(18, 16, zoom);
+      expect(metrics.handleSize * zoom).toBeGreaterThanOrEqual(4.5);
+      expect(metrics.handleSize * zoom).toBeLessThanOrEqual(7);
+      expect(metrics.hitSize).toBeGreaterThan(metrics.handleSize);
+      expect(metrics.rotationOffset * zoom).toBeGreaterThanOrEqual(10);
+      expect(metrics.rotationOffset * zoom).toBeLessThanOrEqual(18);
+    }
+  });
+
+  it("includes Pathway bounds in a mixed movement frame without changing its identity", () => {
+    const bounds = outdoorGroupSelectionBounds(
+      ["da1", "p1"],
+      [],
+      [decor({ id: "da1", x: 420, y: 120 })],
+      DECOR_ASSET_MAP,
+      [path({ id: "p1", points: [{ x: 100, y: 100 }, { x: 200, y: 100 }] })],
+      { includeHidden: true },
+    );
+    const pathBounds = pathSelectionBounds(path({ id: "p1", points: [{ x: 100, y: 100 }, { x: 200, y: 100 }] }))!;
+    expect(bounds).toBeTruthy();
+    expect(bounds!.x).toBeLessThanOrEqual(pathBounds.x);
+    expect(bounds!.x + bounds!.width).toBeGreaterThanOrEqual(pathBounds.x + pathBounds.width);
+    expect(bounds!.y + bounds!.height).toBeGreaterThan(pathBounds.y + pathBounds.height);
   });
 });

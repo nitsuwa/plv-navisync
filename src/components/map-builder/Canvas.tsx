@@ -10,7 +10,7 @@ import { DECOR_ASSET_MAP, BUILDING_TYPE_MAP, genId, getRotatedAABB, groundTypeFo
 import { computeBuildingPlacement, screenToWorld } from "../../lib/editorPlacement";
 import { decorRenderScale, decorSelectionOutlineBox, decorWorldSize } from "../../lib/decorVisual";
 import { mergeOutdoorStack, sortOutdoorGroundAssets } from "../../lib/campusStack";
-import { outdoorGroupSelectionBounds } from "../../lib/campusSelection";
+import { outdoorGroupSelectionBounds, transformControlMetrics } from "../../lib/campusSelection";
 import { navGroupSelectionBounds } from "../../lib/navigationGraph";
 import { DecorAssetArt, DecorAssetVisual } from "./DecorAssetVisual";
 import { CampusGateVisual } from "./CampusGateVisual";
@@ -25,7 +25,8 @@ import {
   shouldRenderPathwayAuthoringPreview,
 } from "../../lib/campusPathNetwork";
 import { surfaceCellRuns } from "../../lib/campusSurface";
-import { campusGroundAppearance, campusGroundPatternId, campusObjectSafeBounds } from "../../lib/campusCanvas";
+import { campusAreaGroundAppearance, campusGroundAppearance, campusGroundPatternId, campusObjectSafeBounds } from "../../lib/campusCanvas";
+import { CampusGroundPatternDefs } from "./CampusGroundPatternDefs";
 
 // ── Rotation-aware resize cursor helpers (shared by buildings and decor assets) ──
 function angleToCursor(deg: number): string {
@@ -759,19 +760,20 @@ export function Canvas({
   const ch = (canvasH ?? campus.canvasH) || 680;
   const groundAppearance = campusGroundAppearance(campus);
   const groundPattern = campusGroundPatternId(groundAppearance.material, groundAppearance.texture);
-  const groundStyle = (kind: CampusDecorAsset["groundType"] = "grass") => {
+  const groundStyle = (kind: CampusDecorAsset["groundType"] = "grass", asset?: CampusDecorAsset) => {
+    const appearance = campusAreaGroundAppearance(asset ?? { type: "ground-area", groundType: kind });
     switch (kind) {
       case "planted":
-        return { fill: "#b8cfab", stroke: "#739b69", accent: "#8daf7a", pattern: "campus-garden-pattern", label: "Planted" };
+        return { fill: appearance.color, stroke: "#739b69", accent: "#8daf7a", pattern: appearance.pattern, label: "Planted" };
       case "plaza":
-        return { fill: "#d8d5ce", stroke: "#a8a29a", accent: "#b8b2a8", pattern: "campus-plaza-pattern", label: "Plaza" };
+        return { fill: appearance.color, stroke: "#a8a29a", accent: "#b8b2a8", pattern: appearance.pattern, label: "Plaza" };
       case "field":
-        return { fill: "#dbe8c2", stroke: "#9db76d", accent: "#b6ca86", pattern: "campus-garden-pattern", label: "Open Field" };
+        return { fill: appearance.color, stroke: "#9db76d", accent: "#b6ca86", pattern: appearance.pattern, label: "Open Field" };
       case "parking":
-        return { fill: "#8a9296", stroke: "#626b70", accent: "#f8fafc", pattern: undefined, label: "Parking" };
+        return { fill: appearance.color, stroke: "#626b70", accent: "#f8fafc", pattern: appearance.pattern, label: "Parking" };
       case "grass":
       default:
-        return { fill: "#bfd4b8", stroke: "#7fa876", accent: "#9fbe91", pattern: "campus-lawn-pattern", label: "Grass" };
+        return { fill: appearance.color, stroke: "#7fa876", accent: "#9fbe91", pattern: appearance.pattern, label: "Grass" };
     }
   };
 
@@ -829,6 +831,12 @@ export function Canvas({
     && multiSelected.length >= 2
     && multiSelected.every((id) => !paths.some((path) => path.id === id))
     && physicalGroupMemberCount >= 2;
+  // A Pathway may move with a mixed physical selection, but that selection is
+  // deliberately MOVE ONLY.  Suppress the single-object transform overlays
+  // as well as the group handles; otherwise the selected physical anchor
+  // would still expose a misleading resize/rotate gesture next to a Pathway.
+  const pathwayInSelection = multiSelected.some((id) => paths.some((path) => path.id === id));
+  const singlePhysicalTransformEligible = !physicalGroupResizeEligible && !pathwayInSelection;
 
   // ── Drag-and-drop state ──
   const [dragOver, setDragOver] = useState<{
@@ -1204,42 +1212,7 @@ export function Canvas({
           <filter id="dropShadow" x="-20%" y="-20%" width="140%" height="140%">
             <feDropShadow dx={0} dy={1} stdDeviation={2} floodColor="rgba(0,0,0,0.3)" />
           </filter>
-          {/* Lightweight site-plan textures. They use user-space units so the
-              marks stay proportional when an area is resized rather than
-              stretching with the rectangle. */}
-          <pattern id="campus-lawn-pattern" width="28" height="28" patternUnits="userSpaceOnUse">
-            <path d="M5 17 l2 -4 M8 18 l2 -3 M20 7 l2 -4 M22 8 l2 -3" stroke="#6f9f68" strokeWidth="1" strokeLinecap="round" opacity="0.22" />
-            <circle cx="14" cy="23" r="1" fill="#6f9f68" opacity="0.16" />
-          </pattern>
-          <pattern id="campus-garden-pattern" width="30" height="30" patternUnits="userSpaceOnUse">
-            <circle cx="8" cy="9" r="2.2" fill="#6b9860" opacity="0.24" />
-            <circle cx="11" cy="7" r="1.7" fill="#7eaa6a" opacity="0.22" />
-            <circle cx="23" cy="20" r="2" fill="#6b9860" opacity="0.2" />
-          </pattern>
-          <pattern id="campus-plaza-pattern" width="36" height="36" patternUnits="userSpaceOnUse">
-            <path d="M0 0H36M0 18H36M12 0V18M30 18V36" fill="none" stroke="#aaa59d" strokeWidth="0.8" opacity="0.16" />
-          </pattern>
-          <pattern id="campus-ground-grass-pattern" width="32" height="32" patternUnits="userSpaceOnUse">
-            <path d="M6 20l2-4m2 5 2-3m14-9 2-4m2 5 2-3" stroke="#4f7d53" strokeWidth="1" strokeLinecap="round" opacity="0.22" />
-            <circle cx="17" cy="27" r="0.9" fill="#4f7d53" opacity="0.12" />
-          </pattern>
-          <pattern id="campus-ground-concrete-pattern" width="72" height="64" patternUnits="userSpaceOnUse">
-            <path d="M0 32H72" fill="none" stroke="#b2aea7" strokeWidth="0.8" opacity="0.18" />
-            <path d="M36 0V32M18 32V64" fill="none" stroke="#b2aea7" strokeWidth="0.8" opacity="0.12" />
-          </pattern>
-          <pattern id="campus-ground-pavers-pattern" width="64" height="40" patternUnits="userSpaceOnUse">
-            <path d="M0 0H64M0 20H64" fill="none" stroke="#a59d91" strokeWidth="1" opacity="0.2" />
-            <path d="M16 0V20M48 0V20M0 20V40M32 20V40" fill="none" stroke="#a59d91" strokeWidth="1" opacity="0.16" />
-          </pattern>
-          <pattern id="campus-ground-asphalt-pattern" width="34" height="34" patternUnits="userSpaceOnUse">
-            <circle cx="7" cy="9" r="0.8" fill="#d8dde0" opacity="0.16" />
-            <circle cx="24" cy="19" r="0.7" fill="#d8dde0" opacity="0.13" />
-            <circle cx="14" cy="29" r="0.6" fill="#d8dde0" opacity="0.12" />
-          </pattern>
-          <pattern id="campus-ground-custom-pattern" width="48" height="48" patternUnits="userSpaceOnUse">
-            <circle cx="11" cy="16" r="0.7" fill="#64748b" opacity="0.1" />
-            <circle cx="35" cy="31" r="0.6" fill="#64748b" opacity="0.08" />
-          </pattern>
+          <CampusGroundPatternDefs />
         </defs>
         <g transform={`translate(${pan.x},${pan.y}) scale(${zoom})`}>
           {/* Canvas material is independent from the logical/editor snapping grid. */}
@@ -1333,12 +1306,15 @@ export function Canvas({
             if (!template) return null;
             if (area.surfaceCells?.length) {
               const size = Math.max(4, area.surfaceCellSize ?? campus.gridSize ?? 20);
-              const style = groundStyle(area.groundType);
+              const style = groundStyle(area.groundType, area);
               const opacity = area.visible === false ? 0.16 : 0.9;
               return (
                 <g key={area.id} data-testid="campus-surface" data-surface-material={area.groundType ?? "grass"} className="pointer-events-none" opacity={opacity}>
                   {surfaceCellRuns(area.surfaceCells).map((run) => (
-                    <rect key={`${area.id}-${run.x}-${run.y}`} x={run.x * size} y={run.y * size} width={run.width * size + 0.5} height={size + 0.5} fill={style.fill} />
+                    <g key={`${area.id}-${run.x}-${run.y}`}>
+                      <rect x={run.x * size} y={run.y * size} width={run.width * size + 0.5} height={size + 0.5} fill={style.fill} />
+                      {style.pattern && <rect x={run.x * size} y={run.y * size} width={run.width * size + 0.5} height={size + 0.5} fill={`url(#${style.pattern})`} opacity={0.75} />}
+                    </g>
                   ))}
                 </g>
               );
@@ -1354,7 +1330,8 @@ export function Canvas({
             const height = Math.max(24, area.height ?? template.defaultHeight * decorRenderScale(area.scale));
             const hw = width / 2;
             const hh = height / 2;
-            const style = groundStyle(areaKind);
+            const controls = transformControlMetrics(width, height, zoom);
+            const style = groundStyle(areaKind, area);
             // New area assets are opaque ground paint, so adjacent/overlapping
             // same-material rectangles composite as one continuous surface
             // instead of darkening at their shared edges. Legacy Ground Area
@@ -1459,13 +1436,13 @@ export function Canvas({
                       rx={isAreaType ? 2 : areaKind === "plaza" ? 7 : 12}
                       fill="none"
                       stroke={isSel ? "var(--accent)" : "var(--primary)"}
-                      strokeWidth={isSel ? 2 : 1}
+                      strokeWidth={isSel ? controls.strokeWidth : Math.max(0.5, controls.strokeWidth * 0.65)}
                       strokeDasharray={undefined}
                       opacity={isSel ? 0.72 : 0.35}
                     />
                   )}
                 </g>
-                {isSel && !physicalGroupResizeEligible && !isLocked && tool === "select" && ["nw", "ne", "sw", "se"].map((corner) => {
+                {isSel && singlePhysicalTransformEligible && !isLocked && tool === "select" && ["nw", "ne", "sw", "se"].map((corner) => {
                   const lx = corner.includes("e") ? hw : -hw;
                   const ly = corner.includes("s") ? hh : -hh;
                   const p = cornerPos(lx, ly);
@@ -1473,29 +1450,29 @@ export function Canvas({
                     <g key={corner}>
                       {/* Keep a slightly larger invisible hit target while making
                           the visible grip proportional to small outdoor assets. */}
-                      <rect data-testid="ground-area-resize-handle" data-corner={corner} x={p.x - 10} y={p.y - 10} width={20} height={20} fill="transparent" style={{ cursor: getCornerCursor(corner, rot) }} onMouseDown={(e) => { e.stopPropagation(); onDecorResizeStart?.(e, area, corner); }} />
-                      <rect x={p.x - 5} y={p.y - 5} width={10} height={10} rx={2} fill="white" stroke="var(--accent)" strokeWidth={1.6} className="pointer-events-none" />
+                      <rect data-testid="ground-area-resize-handle" data-corner={corner} x={p.x - controls.hitSize / 2} y={p.y - controls.hitSize / 2} width={controls.hitSize} height={controls.hitSize} fill="transparent" style={{ cursor: getCornerCursor(corner, rot) }} onMouseDown={(e) => { e.stopPropagation(); onDecorResizeStart?.(e, area, corner); }} />
+                      <rect x={p.x - controls.handleSize / 2} y={p.y - controls.handleSize / 2} width={controls.handleSize} height={controls.handleSize} rx={Math.min(2, controls.handleSize / 4)} fill="white" stroke="var(--accent)" strokeWidth={controls.strokeWidth} className="pointer-events-none" />
                     </g>
                   );
                 })}
-                {isSel && !physicalGroupResizeEligible && !isLocked && tool === "select" && ["n", "s", "e", "w"].map((side) => {
+                {isSel && singlePhysicalTransformEligible && !isLocked && tool === "select" && ["n", "s", "e", "w"].map((side) => {
                   const lx = side === "e" ? hw : side === "w" ? -hw : 0;
                   const ly = side === "s" ? hh : side === "n" ? -hh : 0;
                   const p = cornerPos(lx, ly);
                   return (
-                    <circle
-                      key={side}
-                      data-testid="ground-area-resize-handle"
-                      data-corner={side}
-                      cx={p.x}
-                      cy={p.y}
-                      r={5}
-                      fill="white"
-                      stroke="var(--accent)"
-                      strokeWidth={1.6}
-                      style={{ cursor: getEdgeCursor(side, rot) }}
-                      onMouseDown={(e) => { e.stopPropagation(); onDecorResizeStart?.(e, area, side); }}
-                    />
+                    <g key={side}>
+                      <circle
+                        data-testid="ground-area-resize-handle"
+                        data-corner={side}
+                        cx={p.x}
+                        cy={p.y}
+                        r={controls.hitSize / 2}
+                        fill="transparent"
+                        style={{ cursor: getEdgeCursor(side, rot) }}
+                        onMouseDown={(e) => { e.stopPropagation(); onDecorResizeStart?.(e, area, side); }}
+                      />
+                      <circle cx={p.x} cy={p.y} r={controls.rotationRadius} fill="white" stroke="var(--accent)" strokeWidth={controls.strokeWidth} className="pointer-events-none" />
+                    </g>
                   );
                 })}
                 {decorResizingId === area.id && (
@@ -2051,6 +2028,8 @@ export function Canvas({
             const isVisible = b.visible ?? true;
             const isLocked = b.locked ?? false;
             const opacity = b.opacity ?? 1;
+            const controls = transformControlMetrics(b.width, b.height, zoom);
+            const selectionPad = Math.max(2, controls.handleSize * 0.55);
             const editorOpacity = isVisible ? opacity : Math.min(opacity, isSel || isMultiSel ? 0.35 : 0.28);
             return (
               <g key={b.id} data-hidden={isVisible ? undefined : "true"} onMouseDown={(e) => { if (isLocked) return; onItemDown(e, "building", b.id, b.x, b.y); }} onMouseEnter={() => { if (testRoutePickKind) onTestRoutePickHover?.({ type: "building", id: b.id }); }} onMouseLeave={() => { if (testRoutePickHover?.type === "building" && testRoutePickHover.id === b.id) onTestRoutePickHover?.(null); }} onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); if (isLocked) return; onItemContextMenu?.(e, "building", b.id); }} onDoubleClick={(e) => { if (isLocked) return; e.stopPropagation(); onBuildingDoubleClick?.(b.id); }} style={{ cursor: isLocked ? "default" : tool === "select" ? "move" : cursor, opacity: editorOpacity }}>
@@ -2118,26 +2097,26 @@ export function Canvas({
                   )}
                   {/* Issue indicator replaced with subtle badge — see below */}
                   {/* Single selection outlines + resize handles — rendered ABOVE the body so the rotation-aware resize cursors are visible on hover (rotated with building) */}
-                  {isSel && !physicalGroupResizeEligible && !isLocked && (
+                  {isSel && singlePhysicalTransformEligible && !isLocked && (
                     <>
-                      <rect x={b.x - 8} y={b.y - 8} width={b.width + 16} height={b.height + 16} rx={12} fill="none" stroke="var(--accent)" strokeWidth={5} opacity={0.15} />
-                      <rect x={b.x - 6} y={b.y - 6} width={b.width + 12} height={b.height + 12} rx={10} fill="none" stroke="var(--accent)" strokeWidth={2.5} opacity={0.8} />
+                      <rect x={b.x - selectionPad} y={b.y - selectionPad} width={b.width + selectionPad * 2} height={b.height + selectionPad * 2} rx={Math.min(12, selectionPad * 2)} fill="none" stroke="var(--accent)" strokeWidth={controls.strokeWidth * 2.5} opacity={0.15} />
+                      <rect x={b.x - selectionPad * 0.75} y={b.y - selectionPad * 0.75} width={b.width + selectionPad * 1.5} height={b.height + selectionPad * 1.5} rx={Math.min(10, selectionPad * 1.6)} fill="none" stroke="var(--accent)" strokeWidth={controls.strokeWidth} opacity={0.8} />
                       {(() => {
                         return ["nw", "ne", "sw", "se"].map((corner) => {
-                          const hs = 14;
+                          const hs = controls.handleSize;
                           const hx = corner.includes("e") ? b.x + b.width - hs / 2 : b.x - hs / 2;
                           const hy = corner.includes("s") ? b.y + b.height - hs / 2 : b.y - hs / 2;
                           const cornerCursor = getCornerCursor(corner, rot);
                           return (
                             <g key={corner}>
-                              <rect x={hx - 5} y={hy - 5} width={hs + 10} height={hs + 10} fill="transparent" stroke="none" style={{ cursor: cornerCursor }} onMouseDown={(e) => { e.stopPropagation(); onResizeStart?.(e, b, corner); }} />
-                              <rect x={hx} y={hy} width={hs} height={hs} rx={2} fill="white" stroke="var(--accent)" strokeWidth={2} style={{ pointerEvents: "none", cursor: cornerCursor }} />
+                              <rect x={hx + hs / 2 - controls.hitSize / 2} y={hy + hs / 2 - controls.hitSize / 2} width={controls.hitSize} height={controls.hitSize} fill="transparent" stroke="none" style={{ cursor: cornerCursor }} onMouseDown={(e) => { e.stopPropagation(); onResizeStart?.(e, b, corner); }} />
+                              <rect x={hx} y={hy} width={hs} height={hs} rx={Math.min(2, hs / 4)} fill="white" stroke="var(--accent)" strokeWidth={controls.strokeWidth} style={{ pointerEvents: "none", cursor: cornerCursor }} />
                             </g>
                           );
                         });
                       })()}
                       {["n", "s", "e", "w"].map((corner) => {
-                        const HIT_EDGE = 24;
+                        const HIT_EDGE = controls.hitSize;
                         const edgeW = corner === "n" || corner === "s" ? b.width : HIT_EDGE;
                         const edgeH = corner === "e" || corner === "w" ? b.height : HIT_EDGE;
                         const edgeX = corner === "e" ? b.x + b.width - HIT_EDGE / 2 : corner === "w" ? b.x - HIT_EDGE / 2 : b.x;
@@ -2145,7 +2124,7 @@ export function Canvas({
                         return <rect key={corner} x={edgeX} y={edgeY} width={edgeW} height={edgeH} fill="transparent" stroke="none" style={{ cursor: getEdgeCursor(corner, rot) }} onMouseDown={(e) => { e.stopPropagation(); onResizeStart?.(e, b, corner); }} />;
                       })}
                       {["n", "s", "e", "w"].map((corner) => {
-                        const INSET = 10;
+                        const INSET = controls.hitSize * 0.6;
                         const innerW = corner === "n" || corner === "s" ? b.width : INSET;
                         const innerH = corner === "e" || corner === "w" ? b.height : INSET;
                         const innerX = corner === "n" || corner === "s" ? b.x : (corner === "e" ? b.x + b.width - INSET : b.x);
@@ -2155,15 +2134,18 @@ export function Canvas({
                     </>
                   )}
                   {/* Rotation handle — INSIDE rotation group so it rotates with building */}
-                  {isSel && !physicalGroupResizeEligible && !isLocked && rotatingId !== b.id && (
+                  {isSel && singlePhysicalTransformEligible && !isLocked && rotatingId !== b.id && (
                     <g>
-                      <line x1={cx} y1={b.y} x2={cx} y2={b.y - 32} stroke="var(--accent)" strokeWidth={1.5} strokeDasharray="3 2" opacity={0.5} />
-                      <circle cx={cx} cy={b.y - 32} r={6} fill="var(--accent)" stroke="white" strokeWidth={2}
+                      <line x1={cx} y1={b.y} x2={cx} y2={b.y - controls.rotationOffset} stroke="var(--accent)" strokeWidth={controls.strokeWidth} strokeDasharray="3 2" opacity={0.5} />
+                      <circle cx={cx} cy={b.y - controls.rotationOffset} r={controls.hitSize / 2} fill="transparent"
                         style={{ cursor: "grab" }}
                         onMouseDown={(e) => { e.stopPropagation(); onRotateStart?.(e, b); }}
                       />
-                      <path d={`M${cx - 2.5} ${b.y - 34} Q${cx} ${b.y - 37} ${cx + 2.5} ${b.y - 34}`}
-                        fill="none" stroke="white" strokeWidth={1.5} strokeLinecap="round" />
+                      <circle cx={cx} cy={b.y - controls.rotationOffset} r={controls.rotationRadius} fill="var(--accent)" stroke="white" strokeWidth={controls.strokeWidth}
+                        className="pointer-events-none"
+                      />
+                      <path d={`M${cx - controls.rotationRadius * 0.45} ${b.y - controls.rotationOffset - controls.rotationRadius * 0.2} Q${cx} ${b.y - controls.rotationOffset - controls.rotationRadius * 0.8} ${cx + controls.rotationRadius * 0.45} ${b.y - controls.rotationOffset - controls.rotationRadius * 0.2}`}
+                        fill="none" stroke="white" strokeWidth={controls.strokeWidth} strokeLinecap="round" className="pointer-events-none" />
                     </g>
                   )}
                   {/* Issue/warning badges — rendered AFTER the selection outline and
@@ -2255,7 +2237,8 @@ export function Canvas({
             // Axis-aligned AABB of the rotated asset (for axis-aligned badges)
             const aabb = getRotatedAABB(da.x - hw, da.y - hh, hw * 2, hh * 2, rot);
             const visCx = aabb.x + aabb.width / 2;
-            const rotHandlePos = cornerPos(0, -(hh + 24));
+            const controls = transformControlMetrics(worldW, worldH, zoom);
+            const rotHandlePos = cornerPos(0, -(hh + controls.rotationOffset));
 
             return (
               <g key={da.id}
@@ -2288,7 +2271,7 @@ export function Canvas({
                     rx={outline.rx}
                     fill="none"
                     stroke={isSel ? "var(--accent)" : "var(--primary)"}
-                    strokeWidth={isSel ? 2 : 1}
+                    strokeWidth={isSel ? controls.strokeWidth : Math.max(0.5, controls.strokeWidth * 0.65)}
                     strokeDasharray="3 4"
                     opacity={isSel ? 0.8 : 0.35}
                     transform={`rotate(${rot}, ${da.x}, ${da.y})`}
@@ -2310,18 +2293,19 @@ export function Canvas({
                     <line x1={aabb.x + 7} y1={aabb.y + 16} x2={aabb.x + 20} y2={aabb.y + 5} stroke="var(--muted-foreground)" strokeWidth={1.5} strokeLinecap="round" />
                   </g>
                 )}
-                {isSel && !physicalGroupResizeEligible && tool === "select" && (
+                {isSel && singlePhysicalTransformEligible && tool === "select" && (
                   <>
                     {/* Rotation handle — sits above the rotated asset */}
                     {decorRotatingId !== da.id && (
                       <g>
-                        <line x1={da.x} y1={da.y} x2={rotHandlePos.x} y2={rotHandlePos.y} stroke="var(--accent)" strokeWidth={1.2} strokeDasharray="3 2" opacity={0.5} />
-                        <circle cx={rotHandlePos.x} cy={rotHandlePos.y} r={5} fill="var(--accent)" stroke="white" strokeWidth={1.6}
+                        <line x1={da.x} y1={da.y} x2={rotHandlePos.x} y2={rotHandlePos.y} stroke="var(--accent)" strokeWidth={controls.strokeWidth} strokeDasharray="3 2" opacity={0.5} />
+                        <circle cx={rotHandlePos.x} cy={rotHandlePos.y} r={controls.hitSize / 2} fill="transparent"
                           style={{ cursor: "grab" }}
                           onMouseDown={(e) => { e.stopPropagation(); onDecorRotateStart?.(e, da); }}
                         />
-                        <path d={`M${rotHandlePos.x - 2} ${rotHandlePos.y - 1.5} Q${rotHandlePos.x} ${rotHandlePos.y - 4} ${rotHandlePos.x + 2} ${rotHandlePos.y - 1.5}`}
-                          fill="none" stroke="white" strokeWidth={1.2} strokeLinecap="round" />
+                        <circle cx={rotHandlePos.x} cy={rotHandlePos.y} r={controls.rotationRadius} fill="var(--accent)" stroke="white" strokeWidth={controls.strokeWidth} className="pointer-events-none" />
+                        <path d={`M${rotHandlePos.x - controls.rotationRadius * 0.45} ${rotHandlePos.y - controls.rotationRadius * 0.2} Q${rotHandlePos.x} ${rotHandlePos.y - controls.rotationRadius * 0.8} ${rotHandlePos.x + controls.rotationRadius * 0.45} ${rotHandlePos.y - controls.rotationRadius * 0.2}`}
+                          fill="none" stroke="white" strokeWidth={controls.strokeWidth} strokeLinecap="round" className="pointer-events-none" />
                       </g>
                     )}
                     {/* Corner resize handles — rotate with the asset via rotation-aware cursors */}
@@ -2332,8 +2316,8 @@ export function Canvas({
                       const cornerCursor = getCornerCursor(corner, rot);
                       return (
                         <g key={corner}>
-                          <rect data-testid="decor-resize-handle" data-asset-id={da.id} data-corner={corner} x={p.x - 10} y={p.y - 10} width={20} height={20} fill="transparent" stroke="none" style={{ cursor: cornerCursor, pointerEvents: "all" }} onMouseDown={(e) => { e.stopPropagation(); onDecorResizeStart?.(e, da, corner); }} />
-                          <rect x={p.x - 5} y={p.y - 5} width={10} height={10} rx={2} fill="white" stroke="var(--accent)" strokeWidth={1.6} style={{ pointerEvents: "none", cursor: cornerCursor }} />
+                          <rect data-testid="decor-resize-handle" data-asset-id={da.id} data-corner={corner} x={p.x - controls.hitSize / 2} y={p.y - controls.hitSize / 2} width={controls.hitSize} height={controls.hitSize} fill="transparent" stroke="none" style={{ cursor: cornerCursor, pointerEvents: "all" }} onMouseDown={(e) => { e.stopPropagation(); onDecorResizeStart?.(e, da, corner); }} />
+                          <rect x={p.x - controls.handleSize / 2} y={p.y - controls.handleSize / 2} width={controls.handleSize} height={controls.handleSize} rx={Math.min(2, controls.handleSize / 4)} fill="white" stroke="var(--accent)" strokeWidth={controls.strokeWidth} style={{ pointerEvents: "none", cursor: cornerCursor }} />
                         </g>
                       );
                     })}
@@ -2475,6 +2459,7 @@ export function Canvas({
             const isPickHover = isGate && testRoutePickHover?.type === "gate" && testRoutePickHover.id === m.id;
             const isPickTarget = isGate && !!testRoutePickKind;
             const gateSize = isGate ? campusGateSize(m) : null;
+            const gateControls = gateSize ? transformControlMetrics(gateSize.width, gateSize.height, zoom) : null;
             return (
               <g key={m.id} data-testid={isGate ? "campus-gate" : undefined} pointerEvents={isGate ? "all" : undefined} onMouseDown={(e) => onItemDown(e, isGate ? "gate" : "marker", m.id, m.x, m.y)} onMouseEnter={() => { if (isPickTarget) onTestRoutePickHover?.({ type: "gate", id: m.id }); }} onMouseLeave={() => { if (testRoutePickHover?.type === "gate" && testRoutePickHover.id === m.id) onTestRoutePickHover?.(null); }} onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onItemContextMenu?.(e, "marker", m.id); }} style={{ cursor: testRoutePickKind ? "pointer" : tool === "select" ? "move" : cursor }}>
                 {(isSel || isPickTarget || isPickHover) && <rect x={m.x - (gateSize?.width ?? 22) / 2 - (isPickHover ? 8 : 5)} y={m.y - (gateSize?.height ?? 22) / 2 - (isPickHover ? 8 : 5)} width={(gateSize?.width ?? 22) + (isPickHover ? 16 : 10)} height={(gateSize?.height ?? 22) + (isPickHover ? 16 : 10)} rx={5} fill={isPickTarget && !isSel ? "rgba(22,163,74,0.08)" : "none"} stroke={isPickTarget && !isSel ? "#16a34a" : "var(--accent)"} strokeWidth={isPickHover ? 2.6 : 2} strokeDasharray={isPickTarget && !isSel ? "5 3" : undefined} opacity={isPickTarget && !isSel ? (isPickHover ? 1 : 0.75) : 0.6} pointerEvents="none" />}
@@ -2483,12 +2468,16 @@ export function Canvas({
                     <rect x={-(gateSize?.width ?? 44) / 2} y={-(gateSize?.height ?? 34) / 2} width={gateSize?.width ?? 44} height={gateSize?.height ?? 34} fill="transparent" />
                     <CampusGateVisual x={-(gateSize?.width ?? 44) / 2} y={-(gateSize?.height ?? 34) / 2} width={gateSize?.width ?? 44} height={gateSize?.height ?? 34} color={isSel ? "var(--accent)" : color} />
                     <circle cx={-(gateSize?.width ?? 44) / 2 + 4} cy={-(gateSize?.height ?? 34) / 2 + 4} r={4} fill={m.purpose === "emergency_exit" ? "#dc2626" : "#2563eb"} stroke="white" strokeWidth={1} />
-                    {isSel && !physicalGroupResizeEligible && tool === "select" && !markerResizingId && (
+                {isSel && singlePhysicalTransformEligible && tool === "select" && !markerResizingId && (
                       <g className="pointer-events-auto">
                         {(["nw", "ne", "sw", "se"] as const).map((corner) => {
                           const hx = corner.includes("e") ? (gateSize?.width ?? 44) / 2 : -(gateSize?.width ?? 44) / 2;
                           const hy = corner.includes("s") ? (gateSize?.height ?? 34) / 2 : -(gateSize?.height ?? 34) / 2;
-                          return <rect key={corner} data-testid={`campus-gate-resize-handle-${corner}`} x={hx - 4} y={hy - 4} width={8} height={8} rx={2} fill="var(--card)" stroke="var(--accent)" strokeWidth={1.5} style={{ cursor: corner === "nw" || corner === "se" ? "nwse-resize" : "nesw-resize" }} onMouseDown={(event) => { event.stopPropagation(); onMarkerResizeStart?.(event, m, corner); }} />;
+                          const metrics = gateControls ?? transformControlMetrics(gateSize?.width ?? 44, gateSize?.height ?? 34, zoom);
+                          return <g key={corner}>
+                            <rect data-testid={`campus-gate-resize-handle-${corner}`} x={hx - metrics.hitSize / 2} y={hy - metrics.hitSize / 2} width={metrics.hitSize} height={metrics.hitSize} fill="transparent" style={{ cursor: corner === "nw" || corner === "se" ? "nwse-resize" : "nesw-resize" }} onMouseDown={(event) => { event.stopPropagation(); onMarkerResizeStart?.(event, m, corner); }} />
+                            <rect x={hx - metrics.handleSize / 2} y={hy - metrics.handleSize / 2} width={metrics.handleSize} height={metrics.handleSize} rx={Math.min(2, metrics.handleSize / 4)} fill="var(--card)" stroke="var(--accent)" strokeWidth={metrics.strokeWidth} className="pointer-events-none" />
+                          </g>;
                         })}
                       </g>
                     )}

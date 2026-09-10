@@ -55,6 +55,15 @@ describe("ReadonlyOutdoorCampusScene", () => {
     expect(screen.getByTestId("readonly-building")).toHaveAttribute("pointer-events", "none");
   });
 
+  it("renders entrance callbacks without throwing and reports the owning building", () => {
+    const onClickEntrance = vi.fn();
+    render(<svg><ReadonlyOutdoorCampusScene campus={projectReadonlyOutdoorCampus(campus)} onClickEntrance={onClickEntrance} /></svg>);
+
+    fireEvent.click(screen.getByTestId("readonly-entrance"));
+    expect(onClickEntrance).toHaveBeenCalledTimes(1);
+    expect(onClickEntrance).toHaveBeenCalledWith("b1");
+  });
+
   it("keeps authored physical paths visible when the building layer is hidden", () => {
     render(<svg><ReadonlyOutdoorCampusScene campus={projectReadonlyOutdoorCampus(campus)} showBuildings={false} /></svg>);
     expect(screen.getByTestId("readonly-campus-path")).toBeInTheDocument();

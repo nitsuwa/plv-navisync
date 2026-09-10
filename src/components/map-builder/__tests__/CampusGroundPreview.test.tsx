@@ -1,6 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { CampusGroundPreview } from "../CampusGroundPreview";
+import { CampusGroundPatternDefs } from "../CampusGroundPatternDefs";
 
 describe("CampusGroundPreview", () => {
   it.each([
@@ -29,5 +30,13 @@ describe("CampusGroundPreview", () => {
     expect(second).toHaveAttribute("fill", `url(#${patternId})`);
     expect(second).toHaveAttribute("width", "1200");
     expect(second).toHaveAttribute("height", "900");
+  });
+
+  it("exposes the same fixed-size pattern definitions used by the live canvas", () => {
+    const { container } = render(<svg><defs><CampusGroundPatternDefs /></defs></svg>);
+    for (const material of ["grass", "concrete", "pavers", "asphalt", "custom"]) {
+      const pattern = container.querySelector(`#campus-ground-${material}-pattern`);
+      expect(pattern).toHaveAttribute("patternUnits", "userSpaceOnUse");
+    }
   });
 });
