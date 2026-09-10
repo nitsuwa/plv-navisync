@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   buildFloorGraphFromRooms,
   findIndoorRouteForFloor,
+  findIndoorRouteFromNavigationGraph,
   findMultiFloorIndoorRoute,
   type RoomLike,
 } from "../indoorPathfinding";
@@ -89,6 +90,92 @@ describe("findIndoorRouteForFloor", () => {
 
   it("refuses non-accessible rooms in accessible-only mode", () => {
     expect(findIndoorRouteForFloor("b1", 1, "roomB", makeAccessibleFloor(), true)).toBeNull();
+  });
+});
+
+// ── findIndoorRouteFromNavigationGraph ─────────────────────────────────────
+
+describe("findIndoorRouteFromNavigationGraph", () => {
+  const node = (id: string, name: string, x: number, y: number, extra: Record<string, unknown> = {}) => ({
+    id,
+    name,
+    type: "hallway" as const,
+    x,
+    y,
+    buildingId: "b1",
+    floorId: "f1",
+    accessible: true,
+    color: "#16a34a",
+    ...extra,
+  });
+  const edge = (id: string, startNodeId: string, endNodeId: string, distance: number, extra: Record<string, unknown> = {}) => ({
+    id,
+    startNodeId,
+    endNodeId,
+    distance,
+    bidirectional: true,
+    accessible: true,
+    emergencySafe: true,
+    type: "hallway",
+    color: "#16a34a",
+    width: 4,
+    ...extra,
+  });
+
+  it("uses the authored shortest graph and preserves edge bend points", () => {
+    const nodes = [
+      node("entry-door", "Main Door", 20, 100, { doorId: "door-main" }),
+      node("hall-a", "Hallway", 80, 100),
+      node("room-access", "Room 101 access", 140, 40, { type: "room_access", roomId: "room-101" }),
+    ];
+    const edges = [
+      edge("door-hall", "entry-door", "hall-a", 60, { bendPoints: [{ x: 50, y: 100 }] }),
+      edge("hall-room", "hall-a", "room-access", 90, { bendPoints: [{ x: 80, y: 40 }] }),
+    ];
+
+    const route = findIndoorRouteFromNavigationGraph(
+      nodes,
+      edges,
+      { buildingId: "b1", floorId: "f1", roomId: "room-101", roomName: "Room 101" },
+      "entry-door",
+    );
+
+    expect(route).not.toBeNull();
+    expect(route!.waypoints.map(({ x, y }) => ({ x, y }))).toEqual([
+      { x: 20, y: 100 },
+      { x: 50, y: 100 },
+      { x: 80, y: 100 },
+      { x: 80, y: 40 },
+      { x: 140, y: 40 },
+    ]);
+    expect(route!.steps[0]).toContain("Main Door");
+    expect(route!.steps.at(-1)).toContain("Room 101");
+  });
+
+  it("returns only the destination-floor leg after an authored floor transition", () => {
+    const nodes = [
+      node("entry-door", "Main Door", 20, 100, { doorId: "door-main" }),
+      node("stair-ground", "Stairwell", 80, 100, { type: "stair", stairId: "stair-g", accessible: false }),
+      node("stair-upper", "Stairwell", 80, 100, { floorId: "f2", type: "stair", stairId: "stair-2", accessible: false }),
+      node("room-upper", "Room 201 access", 140, 40, { floorId: "f2", type: "room_access", roomId: "room-201" }),
+    ];
+    const edges = [
+      edge("door-stair", "entry-door", "stair-ground", 60),
+      edge("floor-transition", "stair-ground", "stair-upper", 5, { type: "floor_transition", accessible: false }),
+      edge("stair-room", "stair-upper", "room-upper", 90, { floorId: "f2" }),
+    ];
+
+    const route = findIndoorRouteFromNavigationGraph(
+      nodes,
+      edges,
+      { buildingId: "b1", floorId: "f2", roomId: "room-201", roomName: "Room 201" },
+      "entry-door",
+    );
+
+    expect(route).not.toBeNull();
+    expect(route!.waypoints[0]).toMatchObject({ x: 80, y: 100 });
+    expect(route!.waypoints.at(-1)).toMatchObject({ x: 140, y: 40 });
+    expect(route!.waypoints).not.toContainEqual({ x: 20, y: 100 });
   });
 });
 

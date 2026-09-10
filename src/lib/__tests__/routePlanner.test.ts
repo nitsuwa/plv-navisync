@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   planBuildingRoute,
   planRouteFromPoint,
+  planPointToDestinationRoute,
   planDestinationRoute,
+  planAuthoredDestinationRoute,
+  hasNavigableRoute,
   stepsFromGraphPath,
   detectFloorTransitions,
   formatDistance,
@@ -51,16 +54,14 @@ describe("planBuildingRoute (building → building)", () => {
     expect(route!.steps.length).toBeGreaterThanOrEqual(3);
   });
 
-  it("returns a graph-based route in accessible mode (filters non-accessible edges)", () => {
+  it("returns no route while accessibility planning is unavailable", () => {
     const route = planBuildingRoute(MAB, SSC, "accessible", POSITIONS);
-    expect(route).not.toBeNull();
-    expect(route!.isGraphBased).toBe(true);
+    expect(route).toBeNull();
   });
 
-  it("returns a graph-based route in emergency mode", () => {
+  it("does not claim emergency safety without an authored graph", () => {
     const route = planBuildingRoute(GYM, SSC, "emergency", POSITIONS);
-    expect(route).not.toBeNull();
-    expect(route!.isGraphBased).toBe(true);
+    expect(route).toBeNull();
   });
 
   it("falls back to an SVG estimate when the buildings are not on the graph", () => {
@@ -109,7 +110,7 @@ describe("planBuildingRoute (published-campus nav graph — C4 Phase 2 bridge)",
     expect(route!.points[route!.points.length - 1]).toEqual({ x: 375, y: 476 });
   });
 
-  it("honors accessible mode by filtering non-accessible edges", () => {
+  it("keeps accessibility unavailable even when a published graph exists", () => {
     const graph: CampusNavGraph = {
       navNodes: CAMPUS_GRAPH.navNodes,
       navEdges: [
@@ -124,9 +125,164 @@ describe("planBuildingRoute (published-campus nav graph — C4 Phase 2 bridge)",
       CAMPUS_POSITIONS,
       graph
     );
-    // MAB → Gate edge is inaccessible, so the only path is via the gate.
+    expect(route).toBeNull();
+  });
+
+  it("treats authored nodes without edges as disconnected instead of falling back", () => {
+    const route = planBuildingRoute(
+      { id: "b1", code: "MAB", name: "Main Academic Building" },
+      { id: "b5", code: "GYM", name: "Gymnasium" },
+      "standard",
+      POSITIONS,
+      { navNodes: [{ id: "mab-entry", type: "entrance", x: 155, y: 170, buildingId: "b1" }] },
+    );
+    expect(route).toBeNull();
+  });
+
+  it("treats an explicitly supplied empty graph as authoritative", () => {
+    const emptyGraph: CampusNavGraph = { navNodes: [], navEdges: [] };
+    expect(planBuildingRoute(MAB, GYM, "standard", POSITIONS, emptyGraph)).toBeNull();
+    expect(planRouteFromPoint({ x: 155, y: 170 }, GYM, "standard", emptyGraph, POSITIONS)).toBeNull();
+  });
+
+  it("uses the open lowest-cost duplicate edge for authored bend geometry", () => {
+    const graph: CampusNavGraph = {
+      navNodes: [
+        { id: "a-entry", name: "A Entrance", type: "entrance", x: 0, y: 0, buildingId: "a" },
+        { id: "b-entry", name: "B Entrance", type: "entrance", x: 100, y: 0, buildingId: "b" },
+      ],
+      navEdges: [
+        {
+          id: "closed-shortcut",
+          startNodeId: "a-entry",
+          endNodeId: "b-entry",
+          distance: 1,
+          bidirectional: true,
+          accessible: true,
+          closed: true,
+          bendPoints: [{ x: 50, y: 50 }],
+        },
+        {
+          id: "open-route",
+          startNodeId: "a-entry",
+          endNodeId: "b-entry",
+          distance: 10,
+          bidirectional: true,
+          accessible: true,
+          bendPoints: [{ x: 50, y: 0 }],
+        },
+      ],
+    };
+    const route = planBuildingRoute(
+      { id: "a", code: "A", name: "A" },
+      { id: "b", code: "B", name: "B" },
+      "standard",
+      undefined,
+      graph,
+    );
+    expect(route?.points).toEqual([{ x: 0, y: 0 }, { x: 50, y: 0 }, { x: 100, y: 0 }]);
+  });
+});
+
+describe("authored destination endpoint combinations", () => {
+  const graph: CampusNavGraph = {
+    navNodes: [
+      { id: "b1-entry", name: "Building 1 Entrance", type: "entrance", x: 0, y: 0, buildingId: "b1" },
+      { id: "b2-entry", name: "Building 2 Entrance", type: "entrance", x: 200, y: 0, buildingId: "b2" },
+      { id: "b1-door", name: "Building 1 Lobby Door", type: "entrance", x: 10, y: 0, buildingId: "b1", floorId: "f1", doorId: "door-b1" },
+      { id: "b2-door", name: "Building 2 Lobby Door", type: "entrance", x: 210, y: 0, buildingId: "b2", floorId: "f1", doorId: "door-b2" },
+      { id: "room-1", name: "Room 1", type: "room_access", x: 20, y: 0, buildingId: "b1", floorId: "f1", roomId: "r1" },
+      { id: "stair-1", name: "Stairs", type: "stair", x: 40, y: 0, buildingId: "b1", floorId: "f1", stairId: "s1" },
+      { id: "stair-2", name: "Stairs", type: "stair", x: 40, y: 0, buildingId: "b1", floorId: "f2", stairId: "s2" },
+      { id: "room-2", name: "Room 2", type: "room_access", x: 60, y: 0, buildingId: "b1", floorId: "f2", roomId: "r2" },
+      { id: "room-3", name: "Room 3", type: "room_access", x: 220, y: 0, buildingId: "b2", floorId: "f1", roomId: "r3" },
+    ],
+    navEdges: [
+      { id: "e-entry-door-b1", startNodeId: "b1-entry", endNodeId: "b1-door", distance: 10, bidirectional: true, accessible: true, type: "entrance_transition" },
+      { id: "e-door-room-b1", startNodeId: "b1-door", endNodeId: "room-1", distance: 10, bidirectional: true, accessible: true },
+      { id: "e-room-stair", startNodeId: "room-1", endNodeId: "stair-1", distance: 20, bidirectional: true, accessible: true },
+      { id: "e-stair-transition", startNodeId: "stair-1", endNodeId: "stair-2", distance: 5, bidirectional: true, accessible: false, type: "floor_transition", emergencySafe: true },
+      { id: "e-stair-room", startNodeId: "stair-2", endNodeId: "room-2", distance: 20, bidirectional: true, accessible: true },
+      { id: "e-outdoor", startNodeId: "b1-entry", endNodeId: "b2-entry", distance: 200, bidirectional: true, accessible: true, emergencySafe: true },
+      { id: "e-entry-door-b2", startNodeId: "b2-entry", endNodeId: "b2-door", distance: 10, bidirectional: true, accessible: true, type: "entrance_transition" },
+      { id: "e-door-room-b2", startNodeId: "b2-door", endNodeId: "room-3", distance: 10, bidirectional: true, accessible: true },
+    ],
+  };
+  const building = (buildingId: string, code: string) => ({ type: "building" as const, buildingId, label: code, code });
+  const room = (buildingId: string, roomId: string, floorNumber: number, code: string) => ({
+    type: "room" as const, buildingId, roomId, floorNumber, roomName: roomId,
+    buildingLabel: code, buildingCode: code,
+  });
+
+  it("routes building→room, room→room across floors, and room→room across buildings", () => {
+    const targetRoom = { ...room("b1", "r2", 2, "B1"), roomName: "Room 201" };
+    const buildingToRoom = planAuthoredDestinationRoute(building("b1", "B1"), targetRoom, "standard", graph);
+    expect(buildingToRoom?.destinationRoom?.roomId).toBe("r2");
+    expect(buildingToRoom?.toCode).toBe("Room 201");
+    expect(buildingToRoom?.steps.at(-1)?.instruction).toBe("Arrive at Room 201");
+    expect(buildingToRoom?.points.length).toBeLessThan(2);
+    expect(buildingToRoom?.indoorSegments?.some((segment) => segment.floorNumber === 2)).toBe(true);
+    const sameBuilding = planDestinationRoute(room("b1", "r1", 1, "B1"), room("b1", "r2", 2, "B1"), "standard", graph);
+    expect(sameBuilding?.points).toEqual([]);
+    expect(sameBuilding?.indoorSegments?.map((segment) => segment.floorId)).toEqual(["f1", "f2"]);
+    expect(sameBuilding?.indoorSegments?.every((segment) => segment.waypoints.length >= 2)).toBe(true);
+    expect(sameBuilding?.transitionDetails).toEqual([
+      expect.objectContaining({ kind: "stairs", nodeId: "stair-2", fromFloorId: "f1", toFloorId: "f2" }),
+    ]);
+    expect(sameBuilding?.steps.some((step) => /Take the stairs/i.test(step.instruction))).toBe(true);
+    const roomToBuilding = planDestinationRoute(room("b1", "r2", 2, "B1"), building("b1", "B1"), "standard", graph);
+    expect(roomToBuilding?.destinationRoom).toBeUndefined();
+    expect(roomToBuilding?.points.length).toBeLessThan(2);
+    expect(roomToBuilding?.indoorSegments?.some((segment) => segment.floorNumber === 2)).toBe(true);
+    const crossBuilding = planDestinationRoute(
+      room("b1", "r1", 1, "B1"),
+      room("b2", "r3", 1, "B2"),
+      "standard",
+      graph,
+    );
+    expect(crossBuilding).not.toBeNull();
+    expect(crossBuilding?.points.length).toBeGreaterThanOrEqual(2);
+    expect(crossBuilding?.indoorSegments?.map((segment) => ({
+      buildingId: segment.buildingId,
+      floorNumber: segment.floorNumber,
+    }))).toEqual([
+      { buildingId: "b1", floorNumber: 1 },
+      { buildingId: "b2", floorNumber: 1 },
+    ]);
+    expect(crossBuilding?.indoorSegments?.every((segment) => segment.waypoints.length >= 2)).toBe(true);
+    const emergencyRoute = planDestinationRoute(room("b1", "r2", 2, "B1"), building("b2", "B2"), "emergency", graph);
+    expect(emergencyRoute).not.toBeNull();
+    expect(emergencyRoute!.steps.some((step) => step.icon === "stairs")).toBe(true);
+  });
+
+  it("keeps a point→room route fully authored and prices the floor transition", () => {
+    const targetRoom = { ...room("b1", "r2", 2, "B1"), roomName: "Room 202" };
+    const route = planPointToDestinationRoute(
+      { x: 0, y: 0 },
+      targetRoom,
+      "standard",
+      graph,
+    );
     expect(route).not.toBeNull();
-    expect(route!.isGraphBased).toBe(true);
+    expect(route!.points).toEqual([{ x: 0, y: 0 }]);
+    expect(route!.toCode).toBe("Room 202");
+    expect(route!.steps.at(-1)?.instruction).toBe("Arrive at Room 202");
+    expect(route!.indoorSegments?.map((segment) => segment.floorId)).toEqual(["f1", "f2"]);
+    expect(route!.dist).toBeGreaterThan(0);
+    expect(route!.transitions).toContain("Take the stairs to Stairs");
+    expect(route!.transitionDetails?.[0]).toMatchObject({ kind: "stairs", nodeId: "stair-2" });
+    expect(hasNavigableRoute(route)).toBe(true);
+  });
+
+  it("does not treat a zero-length authored route as navigable", () => {
+    const route = planAuthoredDestinationRoute(
+      room("b1", "r1", 1, "B1"),
+      room("b1", "r1", 1, "B1"),
+      "standard",
+      graph,
+    );
+    expect(route).toBeNull();
+    expect(hasNavigableRoute(null)).toBe(false);
   });
 });
 
@@ -202,6 +358,8 @@ describe("planDestinationRoute (combined routing)", () => {
     );
     expect(route).not.toBeNull();
     expect(route!.destinationRoom).toEqual({ buildingId: "b1", floorNumber: 2, roomId: "m203" });
+    expect(route!.toCode).toBe("Room 201");
+    expect(route!.steps.at(-1)?.instruction).toBe("Arrive at Room 201");
     expect(route!.steps.length).toBeGreaterThanOrEqual(2);
   });
 

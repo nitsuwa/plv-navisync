@@ -1,4 +1,4 @@
-import { MapPin, Phone, Mail, Github, Globe, ArrowUpRight, CheckCircle2, MessageCircle, HelpCircle } from "lucide-react";
+import { MapPin, Phone, Mail, Github, Globe, CheckCircle2 } from "lucide-react";
 import { Link } from "react-router";
 import { PLVLogo } from "../ui/PLVLogo";
 import { useStudentAuth } from "../../hooks/useStudentAuth";
@@ -45,7 +45,6 @@ export function Footer() {
                 { label: "Campus Map",  to: "/map" },
                 { label: "Login",       to: "/admin" },
                 ...(isStudent ? [
-                  { label: "Help Center",    to: "/help" },
                   { label: "Send Message", to: "/help#contact-form" },
                   { label: "FAQ",          to: "/help#faq" },
                 ] : []),
