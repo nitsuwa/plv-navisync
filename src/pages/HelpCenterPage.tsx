@@ -1,15 +1,14 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import { format } from "date-fns";
-import { motion, AnimatePresence, useScroll, useTransform, useSpring } from "motion/react";
+import { useLocation } from "react-router";
+import { motion, AnimatePresence } from "motion/react";
 import {
   Send, ChevronDown, CheckCircle2, Bot, User, Sparkles, HelpCircle, Mail, Phone, MapPin, Clock, ArrowRight,
   Search, Building2, GraduationCap, CreditCard, BookOpen, HeartHandshake, Stethoscope, Shield, Monitor,
   Map, Navigation, ChevronRight, Plus, X, MessageCircle, Loader2, Upload, ExternalLink, AlertCircle,
 } from "lucide-react";
-import { LavaLampBackground } from "../components/ui/HeroBackground";
 import { useScrollReveal } from "../hooks/useScrollReveal";
 import { useStudentAuth } from "../hooks/useStudentAuth";
-import { Footer } from "../components/layout/Footer";
 import { cn } from "../lib/utils";
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -1168,14 +1167,14 @@ function FinalCTA() {
 // ═════════════════════════════════════════════════════════════════════════════
 
 export function HelpCenterPage() {
-  const studentAuth = useStudentAuth();
-  const { scrollY } = useScroll();
-  const smoothY = useSpring(scrollY, { stiffness: 60, damping: 35, mass: 0.6 });
-  const heroBgY = useTransform(smoothY, [0, 600], [0, 60]);
+  const { hash } = useLocation();
+
+  const showContact = hash === "#contact-form";
+  const showFAQ = hash === "#faq";
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: "instant" });
-  }, []);
+  }, [hash]);
 
   // ── FAQ search state ──
   const [faqSearch, setFaqSearch] = useState("");
@@ -1187,95 +1186,9 @@ export function HelpCenterPage() {
 
   return (
     <div className="min-h-screen bg-background">
-      {/* ════════════════════════════════ HERO ══ */}
-      <section className="relative overflow-hidden">
-        <motion.div className="absolute inset-0" style={{ y: heroBgY, background: "linear-gradient(135deg, #07123a 0%, #0e2a6e 40%, #0a1e5a 70%, #050e2e 100%)" }}>
-          <LavaLampBackground />
-          <div className="absolute inset-0 bg-grid-pattern opacity-30" />
-          <HeroFloatingElements />
-        </motion.div>
-
-        <div className="relative z-10 max-w-3xl mx-auto px-6 pt-24 pb-40 text-center">
-          <motion.div
-            initial={{ opacity: 0, y: -10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.4 }}
-            className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border border-white/15 bg-white/8 mb-6 shadow-lg"
-          >
-            <HelpCircle className="h-3.5 w-3.5 text-white/70" />
-            <span className="text-[10px] font-bold text-white/75 tracking-[0.18em] uppercase">Help Center</span>
-          </motion.div>
-
-          <motion.h1
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.1, duration: 0.5 }}
-            className="font-extrabold text-gradient leading-tight mb-5"
-            style={{ fontSize: "clamp(2rem, 5vw, 3.25rem)", letterSpacing: "-0.02em", lineHeight: 1.15 }}
-          >
-            How can we help?
-          </motion.h1>
-
-          <motion.p
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.2, duration: 0.5 }}
-            className="text-white/65 leading-relaxed mx-auto"
-            style={{ fontSize: "clamp(0.9rem, 2vw, 1.05rem)", lineHeight: 1.75, maxWidth: "38ch" }}
-          >
-            Ask our AI assistant, send a message, or browse the FAQ. We are here to help you navigate PLV campus.
-          </motion.p>
-        </div>
-
-        {/* Wavy bottom edge */}
-        <div className="absolute bottom-0 left-0 right-0 pointer-events-none select-none" style={{ height: 130, zIndex: 10 }}>
-          <div className="absolute bottom-0 left-0 right-0" style={{ height: 4, background: "var(--background)" }} />
-          <svg viewBox="0 0 1440 130" preserveAspectRatio="none" className="absolute inset-0 w-full h-full" aria-hidden="true">
-            <path d="M0,85 C100,52 200,105 340,72 C480,38 580,96 720,64 C860,30 980,88 1100,58 C1220,26 1340,75 1440,52 L1440,130 L0,130 Z" fill="var(--background)" />
-          </svg>
-        </div>
-      </section>
-
-      {/* ════════════════════════════════ CONTENT ══ */}
-      <div className="max-w-6xl mx-auto px-6 py-16 space-y-24">
-
-        {/* 1. AI Campus Assistant */}
-        <section id="ai-assistant">
-          <Reveal>
-            <div className="text-center mb-8">
-              <SectionLabel>AI-Powered</SectionLabel>
-              <h2 className="text-2xl font-extrabold text-foreground mb-2">Campus Assistant</h2>
-              <p className="text-sm text-muted-foreground max-w-lg mx-auto">
-                Ask anything about campus navigation, buildings, offices, and facilities.
-                {!studentAuth.isStudent && (
-                  <span className="block mt-1">
-                    Guests get {GUEST_LIMIT} free questions per day.{' '}
-                    <a href="/admin" className="font-bold text-primary hover:underline">Log in for unlimited access.</a>
-                  </span>
-                )}
-              </p>
-            </div>
-          </Reveal>
-          <Reveal delay={80}>
-            <AIChatSection studentAuth={studentAuth} />
-          </Reveal>
-        </section>
-
-        {/* 2. Popular Campus Services */}
-        <section>
-          <Reveal>
-            <div className="text-center mb-8">
-              <SectionLabel>Services</SectionLabel>
-              <h2 className="text-2xl font-extrabold text-foreground mb-2">Popular Campus Services</h2>
-              <p className="text-sm text-muted-foreground">
-                Important campus offices and departments — find them fast on the map.
-              </p>
-            </div>
-          </Reveal>
-          <CampusServices />
-        </section>
-
-        {/* 3. Contact & Inquiry */}
+      <div className="max-w-4xl mx-auto px-6 py-16 space-y-24">
+        {/* Footer links open one support component at a time. */}
+        {(!showFAQ || showContact) && (
         <section id="contact-form">
           <Reveal>
             <div className="text-center mb-8">
@@ -1290,8 +1203,9 @@ export function HelpCenterPage() {
             <InquiryForm />
           </Reveal>
         </section>
+        )}
 
-        {/* 4. FAQ with Search */}
+        {(!showContact || showFAQ) && (
         <section id="faq">
           <Reveal>
             <div className="text-center mb-8">
@@ -1311,14 +1225,9 @@ export function HelpCenterPage() {
             )}
           </div>
         </section>
-
-        {/* 5. Final CTA */}
-        <Reveal>
-          <FinalCTA />
-        </Reveal>
+        )}
       </div>
 
-      <Footer />
     </div>
   );
 }

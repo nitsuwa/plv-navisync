@@ -9,6 +9,8 @@
  */
 
 import { FLOOR_PLANS, type Room } from "../data/floorPlans";
+import type { NavigationEdge, NavigationNode } from "../components/map-builder/types";
+import { findNavigationRoute } from "./pathfinding";
 
 export interface IndoorWaypoint {
   x: number;
@@ -25,6 +27,170 @@ export interface IndoorRoute {
   distanceMeters: number;
   /** Estimated walking time in seconds */
   estimatedSeconds: number;
+}
+
+export type IndoorEntryPreference = "any" | "lobby" | "vertical";
+
+/**
+ * A room target resolved from the published Map Builder model.  The optional
+ * access fields are the persisted links created by the admin's Link Location
+ * workflow; roomId remains the compatibility fallback for older maps.
+ */
+export interface PublishedIndoorRouteTarget {
+  buildingId: string;
+  floorId: string;
+  roomId: string;
+  roomName?: string;
+  accessNodeId?: string;
+  accessDoorIds?: string[];
+}
+
+/**
+ * Find the target-floor portion of an admin-authored campus navigation route.
+ *
+ * The route is computed by the same A* engine used for outdoor navigation,
+ * over Campus.navNodes/navEdges.  For a multi-floor route, only the contiguous
+ * run on the destination floor is returned for the floor-plan view; the full
+ * graph route still determines which stair/elevator and which room access path
+ * is fastest.  Authored edge bend points are preserved so the student path
+ * follows the admin's corridor geometry instead of cutting diagonally through
+ * rooms and walls.
+ */
+export function findIndoorRouteFromNavigationGraph(
+  navNodes: NavigationNode[] | undefined,
+  navEdges: NavigationEdge[] | undefined,
+  target: PublishedIndoorRouteTarget,
+  entryNodeId: string,
+  accessibleOnly = false,
+  metersPerUnit = SVG_TO_METERS,
+  emergencyOnly = false,
+): IndoorRoute | null {
+  const nodes = navNodes ?? [];
+  const edges = navEdges ?? [];
+  if (!entryNodeId || nodes.length === 0 || edges.length === 0) return null;
+
+  const targetNode = target.accessNodeId
+    ? nodes.find((node) =>
+        node.id === target.accessNodeId
+        && node.buildingId === target.buildingId
+        && node.floorId === target.floorId
+      )
+    : undefined;
+  const roomNode = targetNode
+    ?? nodes.find((node) =>
+      node.buildingId === target.buildingId
+      && node.floorId === target.floorId
+      && node.roomId === target.roomId
+    )
+    ?? (target.accessDoorIds ?? [])
+      .map((doorId) => nodes.find((node) =>
+        node.buildingId === target.buildingId
+        && node.floorId === target.floorId
+        && node.doorId === doorId
+      ))
+      .find((node): node is NavigationNode => Boolean(node));
+  if (!roomNode) return null;
+
+  const graphRoute = findNavigationRoute(
+    nodes,
+    edges,
+    entryNodeId,
+    roomNode.id,
+    accessibleOnly,
+    emergencyOnly,
+    { useDerivedTransitions: false },
+  );
+  if (!graphRoute || graphRoute.nodeIds.length < 2) return null;
+
+  const nodeById = new Map(nodes.map((node) => [node.id, node]));
+  const targetIndex = graphRoute.nodeIds.lastIndexOf(roomNode.id);
+  if (targetIndex < 0) return null;
+
+  // Select the contiguous destination-floor run ending at the room. This
+  // deliberately omits the cross-floor transition itself so no diagonal line
+  // is drawn between two different floor coordinate systems.
+  let runStart = targetIndex;
+  while (runStart > 0) {
+    const previous = nodeById.get(graphRoute.nodeIds[runStart - 1]);
+    if (previous?.buildingId !== target.buildingId || previous.floorId !== target.floorId) break;
+    runStart -= 1;
+  }
+
+  const localNodeIds = graphRoute.nodeIds.slice(runStart, targetIndex + 1);
+  if (localNodeIds.length < 2) return null;
+
+  const edgeFor = (fromId: string, toId: string): { edge: NavigationEdge | undefined; reversed: boolean } => {
+    const direct = edges.find((edge) =>
+      !edge.closed
+      && edge.startNodeId === fromId
+      && edge.endNodeId === toId
+    );
+    if (direct) return { edge: direct, reversed: false };
+    const reverse = edges.find((edge) =>
+      !edge.closed
+      &&
+      edge.bidirectional
+      && edge.startNodeId === toId
+      && edge.endNodeId === fromId
+    );
+    return { edge: reverse, reversed: true };
+  };
+
+  const samePoint = (a: IndoorWaypoint, b: IndoorWaypoint) => a.x === b.x && a.y === b.y;
+  const waypoints: IndoorWaypoint[] = [];
+  const first = nodeById.get(localNodeIds[0]);
+  if (!first) return null;
+  waypoints.push({ x: first.x, y: first.y, label: first.name });
+
+  let distanceUnits = 0;
+  for (let index = 1; index < localNodeIds.length; index += 1) {
+    const fromId = localNodeIds[index - 1];
+    const toId = localNodeIds[index];
+    const from = nodeById.get(fromId);
+    const to = nodeById.get(toId);
+    if (!from || !to) continue;
+
+    const { edge, reversed } = edgeFor(fromId, toId);
+    const bends = edge?.bendPoints
+      ? (reversed ? [...edge.bendPoints].reverse() : edge.bendPoints)
+      : [];
+    for (const bend of bends) {
+      const point = { x: bend.x, y: bend.y };
+      if (!samePoint(waypoints[waypoints.length - 1], point)) waypoints.push(point);
+    }
+    const endpoint = { x: to.x, y: to.y, label: to.name };
+    if (!samePoint(waypoints[waypoints.length - 1], endpoint)) waypoints.push(endpoint);
+    distanceUnits += edge?.distance ?? Math.hypot(to.x - from.x, to.y - from.y);
+  }
+
+  if (waypoints.length < 2) return null;
+
+  const scale = Number.isFinite(metersPerUnit) && metersPerUnit > 0
+    ? metersPerUnit
+    : SVG_TO_METERS;
+  const distanceMeters = Number((distanceUnits * scale).toFixed(1));
+  const startNode = nodeById.get(localNodeIds[0]);
+  const targetName = target.roomName || roomNode.name || "the destination room";
+  const steps = [`Start at ${startNode?.name || "the building entrance"}`];
+  for (let index = 1; index < localNodeIds.length; index += 1) {
+    const fromId = localNodeIds[index - 1];
+    const toId = localNodeIds[index];
+    const { edge } = edgeFor(fromId, toId);
+    const segmentDistance = edge?.distance ?? Math.hypot(
+      (nodeById.get(toId)?.x ?? 0) - (nodeById.get(fromId)?.x ?? 0),
+      (nodeById.get(toId)?.y ?? 0) - (nodeById.get(fromId)?.y ?? 0),
+    );
+    const destinationName = nodeById.get(toId)?.name || "the next waypoint";
+    steps.push(`Walk ${Math.max(1, Math.round(segmentDistance * scale))}m to ${destinationName}`);
+  }
+  steps.push(`Arrive at ${targetName}`);
+
+  return {
+    waypoints,
+    steps,
+    distanceMeters,
+    estimatedSeconds: Math.max(1, Math.round(distanceMeters / 1.2)),
+  };
 }
 
 // ── Graph node used internally for A* ──────────────────────────────────────
@@ -47,6 +213,8 @@ export interface RoomLike {
   type: string;
   /** Whether this room is wheelchair-accessible (used in accessible-only routing) */
   accessibility?: boolean;
+  /** Explicit admin-authored access point on the room boundary. */
+  navConnection?: { x: number; y: number };
 }
 
 // ── Build floor navigation graph from room data ───────────────────────────
@@ -376,7 +544,7 @@ function buildIndoorSteps(
   nodeMap: Map<string, CorridorNode>,
   graph: { nodes: CorridorNode[]; edges: CorridorEdge[]; roomNodeMap: Map<string, string>; stairNodes: string[] },
   targetRoomId: string,
-  rooms: Room[]
+  rooms: Array<{ id: string; name: string; type: string }>
 ): string[] {
   const steps: string[] = [];
   if (pathIds.length < 2) return steps;
@@ -465,7 +633,9 @@ export function findIndoorRouteForFloor(
   floorNumber: number,
   targetRoomId: string,
   rooms: RoomLike[],
-  accessibleOnly = false
+  accessibleOnly = false,
+  entryPreference: IndoorEntryPreference = "any",
+  entryPoint?: IndoorWaypoint
 ): IndoorRoute | null {
   const graph = buildFloorGraphFromRooms(rooms, accessibleOnly);
   if (!graph) return null;
@@ -478,7 +648,35 @@ export function findIndoorRouteForFloor(
 
   let bestRoute: { pathIds: string[]; totalDist: number; entryNodeId: string } | null = null;
 
-  for (const entryNodeId of graph.stairNodes) {
+  const lobbyEntries = graph.stairNodes.filter((id) => id.startsWith("entrance_"));
+  const verticalEntries = graph.stairNodes.filter((id) => id.startsWith("service_"));
+  const authoredLobbyEntry = entryPoint && lobbyEntries.length > 0 ? [lobbyEntries[0]] : lobbyEntries;
+  const preferredEntries = entryPreference === "lobby"
+    ? authoredLobbyEntry
+    : entryPreference === "vertical"
+      ? verticalEntries
+      : graph.stairNodes;
+  const entryNodes = preferredEntries.length > 0 ? preferredEntries : graph.stairNodes;
+
+  // When the authored floor provides a real main entrance door, use that
+  // coordinate for the lobby entry node instead of the lobby room's edge.
+  // Recalculate the connected edge weights so A* follows the same geometry.
+  if (entryPoint && lobbyEntries.length > 0) {
+    const lobbyNodeId = lobbyEntries[0];
+    const lobbyNode = graph.nodes.find((node) => node.id === lobbyNodeId);
+    if (lobbyNode) {
+      lobbyNode.x = entryPoint.x;
+      lobbyNode.y = entryPoint.y;
+      for (const edge of graph.edges) {
+        if (edge.from !== lobbyNodeId && edge.to !== lobbyNodeId) continue;
+        const otherId = edge.from === lobbyNodeId ? edge.to : edge.from;
+        const other = graph.nodes.find((node) => node.id === otherId);
+        if (other) edge.dist = Math.hypot(lobbyNode.x - other.x, lobbyNode.y - other.y);
+      }
+    }
+  }
+
+  for (const entryNodeId of entryNodes) {
     const result = aStarFloor(entryNodeId, doorNode, graph.nodes, graph.edges);
     if (result) {
       if (!bestRoute || result.totalDist < bestRoute.totalDist) {

@@ -9099,6 +9099,19 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
         )}
       </AnimatePresence>
 
+      {navigationVisible && layer === "navigation" && (
+        <div
+          data-testid="navigation-routing-contract"
+          className="pointer-events-none z-30 mx-auto hidden max-w-[min(34rem,calc(100vw-2rem))] shrink-0 items-center gap-2 rounded-lg border border-emerald-500/20 bg-card/90 px-3 py-2 text-[10px] leading-snug text-muted-foreground shadow-sm backdrop-blur-sm lg:flex"
+        >
+          <Route className="h-3.5 w-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+          <span>
+            <strong className="font-extrabold text-foreground">Student routes follow connected Walking Points and Pathways.</strong>{" "}
+            Emergency floor changes use stair connections. Accessibility routing is not active yet.
+          </span>
+        </div>
+      )}
+
         <div className="flex flex-1 overflow-hidden min-h-0 h-full relative">
         {/* ── Left: Hierarchy Panel (collapsible) ── */}
         <div className="flex h-full min-h-0 items-stretch">

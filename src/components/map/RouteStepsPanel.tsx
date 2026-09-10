@@ -18,6 +18,17 @@ interface RouteStepsPanelProps {
   walkProgress?: number;
   /** Replays the walk animation */
   onReplay?: () => void;
+  /**
+   * Optional authored sub-leg currently being walked. This keeps indoor
+   * progress scoped to its own steps instead of applying it to the complete
+   * room-to-room journey and prematurely announcing the final arrival.
+   */
+  activeLeg?: {
+    steps: PlannedRoute["steps"];
+    distanceM: number;
+    progress: number;
+    statusInstruction?: string;
+  };
 }
 
 /** Index of the step currently being walked, based on cumulative distance. */
@@ -29,10 +40,34 @@ function activeStepIndex(
   if (steps.length === 0) return 0;
   if (progress <= 0) return 0;
   if (progress >= 1) return steps.length - 1;
+  if (!Number.isFinite(totalDist) || totalDist <= 0) return 0;
+
+  const distances = steps.map((step) => {
+    const distance = step.distanceM;
+    return typeof distance === "number" && Number.isFinite(distance) && distance >= 0 ? distance : null;
+  });
+  const knownDistance = distances.reduce<number>((sum, distance) => sum + (distance ?? 0), 0);
+  const missingCount = distances.filter((distance) => distance === null).length;
+
+  // Mixed routes can omit distances for transitions or indoor/enter steps.
+  // Do not treat those steps as zero-length: that makes the loop fall through
+  // to the final arrival step at the first non-zero progress update. Share
+  // any remaining route distance across missing steps; if the data is unsafe,
+  // conservatively keep the first step active.
+  if (missingCount > 0) {
+    const remainingDistance = totalDist - knownDistance;
+    if (!Number.isFinite(remainingDistance) || remainingDistance < 0) return 0;
+    const fallbackDistance = remainingDistance / missingCount;
+    if (!Number.isFinite(fallbackDistance)) return 0;
+    for (let i = 0; i < distances.length; i++) {
+      if (distances[i] === null) distances[i] = fallbackDistance;
+    }
+  }
+
   const traveled = progress * totalDist;
   let acc = 0;
   for (let i = 0; i < steps.length; i++) {
-    acc += steps[i].distanceM ?? 0;
+    acc += distances[i] ?? 0;
     if (acc >= traveled) return i;
   }
   return steps.length - 1;
@@ -63,23 +98,32 @@ function stepDot(isFirst: boolean, isLast: boolean) {
  * (desktop bottom-left card, mobile sheet).
  */
 export function RouteStepsPanel({
-  route, mode, toName, onEnd, onZoom, walkProgress, onReplay,
+  route, mode, toName, onEnd, onZoom, walkProgress, onReplay, activeLeg,
 }: RouteStepsPanelProps) {
-  const steps = route.steps;
+  const hasActiveLegSteps = Boolean(activeLeg?.steps.length);
+  const steps = hasActiveLegSteps ? activeLeg!.steps : route.steps;
+  const trackedProgress = activeLeg?.progress ?? walkProgress;
+  const trackedDistance = activeLeg?.distanceM ?? route.dist;
   const modeColor =
     mode === "accessible" ? "#16a34a" : mode === "emergency" ? "#dc2626" : "var(--primary)";
   const activeIndex =
-    typeof walkProgress === "number"
-      ? activeStepIndex(steps, walkProgress, route.dist)
-      : null;
+    typeof trackedProgress === "number" && (!activeLeg || hasActiveLegSteps)
+      ? activeStepIndex(steps, trackedProgress, trackedDistance)
+      : steps.length > 0 ? 0 : null;
+  const currentInstruction = activeLeg?.statusInstruction
+    ?? (activeIndex !== null ? steps[activeIndex]?.instruction : undefined);
 
   return (
-    <div className="rounded-2xl border border-border/60 shadow-xl overflow-hidden animate-slide-up"
+    <div
+      className="rounded-2xl border border-border/60 shadow-xl overflow-hidden animate-slide-up"
+      role="region"
+      aria-label={`Active route to ${toName}`}
+      data-testid="route-steps-panel"
       style={{ background: "var(--card)", backdropFilter: "blur(16px)", WebkitBackdropFilter: "blur(16px)" }}>
       {/* Header — destination name + live indicator */}
       <div className="flex items-center gap-2 px-3 py-2" style={{ background: modeColor }}>
         <Navigation className="h-3.5 w-3.5 text-white shrink-0" />
-        <span className="text-[11px] font-extrabold text-white truncate flex-1">{toName}</span>
+        <span data-testid="route-destination" className="text-[11px] font-extrabold text-white truncate flex-1">To {toName}</span>
         <span className="w-1.5 h-1.5 rounded-full bg-green-300 animate-pulse shrink-0" />
       </div>
 
@@ -101,6 +145,26 @@ export function RouteStepsPanel({
           </p>
         </div>
       </div>
+
+      <p data-testid="active-route-source" className="px-3 pt-2 text-[9px] font-semibold text-muted-foreground">
+        {route.isAuthoredGraph
+          ? "Following the admin-authored map paths"
+          : route.isGraphBased
+            ? "Following the built-in walkway graph"
+            : "Approximate route — map path not published"}
+      </p>
+
+      {currentInstruction && (
+        <p
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+          data-testid="current-route-step"
+          className="sr-only"
+        >
+          Current step: {currentInstruction}
+        </p>
+      )}
 
       {/* Floor-transition badges */}
       {route.transitions.length > 0 && (
@@ -124,6 +188,8 @@ export function RouteStepsPanel({
             return (
               <div
                 key={step.id}
+                aria-current={isActive ? "step" : undefined}
+                data-testid={isActive ? "active-route-step" : "route-step"}
                 className={cn(
                   "relative flex items-start gap-2 rounded-lg transition-all",
                   isActive && "bg-primary/10 ring-1 ring-primary/30 px-1.5 -mx-1.5 py-1"

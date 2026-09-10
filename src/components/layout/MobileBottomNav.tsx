@@ -7,8 +7,7 @@ import { useStudentAuth } from "../../hooks/useStudentAuth";
 import { MoreSheet } from "../ui/MoreSheet";
 
 const STUDENT_TABS = [
-  { to: "/home", label: "Home" },
-  { to: "/map", label: "Navigate" },
+  { to: "/map", label: "Map" },
 ];
 
 const GUEST_TABS = [
@@ -36,7 +35,8 @@ export function MobileBottomNav() {
   const isActive = (to: string) =>
     to === "/" ? pathname === "/" : pathname.startsWith(to);
 
-  const homeActive = isActive(tabs[0].to);
+  const homeTab = isStudent ? undefined : tabs[0];
+  const homeActive = homeTab ? isActive(homeTab.to) : false;
   const navActive = isStudent ? isActive("/map") : isActive("/map");
 
   if (sheetOpen) return null;
@@ -67,44 +67,46 @@ export function MobileBottomNav() {
                 />
               )}
 
-              {/* Home tab */}
-              <Link
-                to={tabs[0].to}
-                aria-current={homeActive ? "page" : undefined}
-                className="flex-1 flex flex-col items-center justify-center gap-0 relative min-h-[56px] group"
-              >
-                <motion.div
-                  whileTap={{ scale: 0.88 }}
-                  transition={{ type: "spring", stiffness: 400, damping: 15 }}
-                  className={cn(
-                    "flex items-center justify-center rounded-xl transition-all duration-200",
-                    homeActive
-                      ? "w-[50px] h-9 bg-primary text-primary-foreground shadow-md shadow-primary/25"
-                      : "w-10 h-9 text-muted-foreground"
-                  )}
+              {/* Home is available to guests only. */}
+              {homeTab ? (
+                <Link
+                  to={homeTab.to}
+                  aria-current={homeActive ? "page" : undefined}
+                  className="flex-1 flex flex-col items-center justify-center gap-0 relative min-h-[56px] group"
                 >
-                  <Home className="h-5 w-5" />
-                </motion.div>
-                <motion.span
-                  className={cn(
-                    "text-[10px] font-bold leading-none tracking-tight",
-                    homeActive ? "text-primary" : "text-muted-foreground/70"
-                  )}
-                  animate={{ scale: homeActive ? 1.05 : 1 }}
-                  transition={{ type: "spring", stiffness: 300, damping: 20 }}
-                >
-                  {tabs[0].label}
-                </motion.span>
-                {homeActive && (
                   <motion.div
-                    layoutId="mobile-nav-dot"
-                    className="absolute -bottom-0.5 w-1 h-1 rounded-full bg-primary"
-                    transition={{ type: "spring", stiffness: 500, damping: 25 }}
-                  />
-                )}
-              </Link>
+                    whileTap={{ scale: 0.88 }}
+                    transition={{ type: "spring", stiffness: 400, damping: 15 }}
+                    className={cn(
+                      "flex items-center justify-center rounded-xl transition-all duration-200",
+                      homeActive
+                        ? "w-[50px] h-9 bg-primary text-primary-foreground shadow-md shadow-primary/25"
+                        : "w-10 h-9 text-muted-foreground"
+                    )}
+                  >
+                    <Home className="h-5 w-5" />
+                  </motion.div>
+                  <motion.span
+                    className={cn(
+                      "text-[10px] font-bold leading-none tracking-tight",
+                      homeActive ? "text-primary" : "text-muted-foreground/70"
+                    )}
+                    animate={{ scale: homeActive ? 1.05 : 1 }}
+                    transition={{ type: "spring", stiffness: 300, damping: 20 }}
+                  >
+                    {homeTab.label}
+                  </motion.span>
+                  {homeActive && (
+                    <motion.div
+                      layoutId="mobile-nav-dot"
+                      className="absolute -bottom-0.5 w-1 h-1 rounded-full bg-primary"
+                      transition={{ type: "spring", stiffness: 500, damping: 25 }}
+                    />
+                  )}
+                </Link>
+              ) : <div className="flex-1" aria-hidden="true" />}
 
-              {/* Center - ELEVATED Navigate button (always visible, not "selected") */}
+              {/* Center - elevated Map button (always visible, not "selected") */}
               <div className="flex-1 flex flex-col items-center justify-end relative" style={{ marginTop: -36 }}>
                 <motion.div
                   whileTap={{ scale: 0.92 }}
@@ -126,7 +128,7 @@ export function MobileBottomNav() {
                   >
                     <Compass className={cn("h-6 w-6", navActive ? "text-primary-foreground" : "text-primary")} strokeWidth={2.5} />
                     <span className={cn("text-[9px] font-extrabold leading-none tracking-tight", navActive ? "text-primary-foreground" : "text-foreground")}>
-                      Navigate
+                      Map
                     </span>
                   </Link>
                 </motion.div>

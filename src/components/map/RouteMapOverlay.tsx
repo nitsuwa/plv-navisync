@@ -11,6 +11,16 @@ interface RouteMapOverlayProps {
   walkProgress?: number;
 }
 
+/** SVG bearing in degrees, where 0 points right and positive angles turn down. */
+export function segmentBearing(from: Pt, to: Pt): number {
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  // A repeated waypoint has no direction. Returning a finite value keeps the
+  // helper safe for callers; the renderer omits an arrow for that segment.
+  if (dx === 0 && dy === 0) return 0;
+  return (Math.atan2(dy, dx) * 180) / Math.PI;
+}
+
 /**
  * SVG route overlay — the animated route line, direction arrows, junction
  * waypoints, start/destination markers and the moving walk avatar. Rendered
@@ -67,12 +77,16 @@ export function RouteMapOverlay({ points, mode, fading = false, walkProgress }: 
         const mx = (p.x + next.x) / 2;
         const my = (p.y + next.y) / 2;
         if (i % 2 !== 0) return null; // show on alternating segments
+        if (p.x === next.x && p.y === next.y) return null;
+        const bearing = segmentBearing(p, next);
         return (
           <polygon
             key={i}
             points={`${mx - 4},${my - 6} ${mx + 4},${my} ${mx - 4},${my + 6}`}
             fill={color} opacity={0.5}
-            style={{ animation: `fade-in 1.4s ${0.6 + i * 0.1}s ease both` }}
+            transform={`rotate(${bearing} ${mx} ${my})`}
+            data-testid="route-direction-arrow"
+            style={reducedMotion ? undefined : { animation: `fade-in 1.4s ${0.6 + i * 0.1}s ease both` }}
           />
         );
       })}
