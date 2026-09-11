@@ -76,6 +76,7 @@ export interface CampusNavNode {
   doorId?: string;
   transitionSharedId?: string;
   stairId?: string;
+  exteriorEmergencyStairId?: string;
   elevatorId?: string;
   emergencySafe?: boolean;
   emergencyStair?: boolean;
@@ -388,9 +389,16 @@ function authoredDestinationEndpoint(
   nodes: CampusNavNode[],
   destination: Destination,
   accessibleOnly: boolean,
+  emergencyOnly = false,
 ): CampusNavNode | undefined {
   if (destination.type === "room") return resolveRoomNode(nodes, destination);
-  return resolveBuildingEntranceNode(nodes, destination.buildingId, destination.entranceNodeId, accessibleOnly);
+  return resolveBuildingEntranceNode(
+    nodes,
+    destination.buildingId,
+    destination.entranceNodeId,
+    accessibleOnly,
+    emergencyOnly,
+  );
 }
 
 /**
@@ -410,8 +418,9 @@ export function planAuthoredDestinationRoute(
   const campusGraph = resolveCampusGraph(graph);
   if (!campusGraph || !from?.buildingId || !to?.buildingId) return null;
 
-  const fromNode = authoredDestinationEndpoint(campusGraph.nodes, from, false);
-  const toNode = authoredDestinationEndpoint(campusGraph.nodes, to, false);
+  const emergencyOnly = mode === "emergency";
+  const fromNode = authoredDestinationEndpoint(campusGraph.nodes, from, false, emergencyOnly);
+  const toNode = authoredDestinationEndpoint(campusGraph.nodes, to, false, emergencyOnly);
   if (!fromNode || !toNode) return null;
 
   const path = findNavigationRoute(
@@ -469,14 +478,28 @@ function resolveCampusGraph(graph?: CampusNavGraph | null): {
   return { nodes, edges };
 }
 
+function isEmergencyEndpointNode(node: CampusNavNode): boolean {
+  const label = `${node.name ?? ""} ${node.entranceId ?? ""}`.toLowerCase();
+  return node.emergencyStair === true
+    || Boolean(node.exteriorEmergencyStairId)
+    || node.type === "emergency_exit"
+    || node.type === "stair"
+    || label.includes("emergency")
+    || label.includes("fire exit")
+    || label.includes("egress");
+}
+
 /** Pick the outdoor Entrance node for a building, never an indoor room/door
- * node.  Published buildings can have several entrances; the primary/main
- * candidate is preferred so the outdoor route hands off at the real gate. */
+ * node. Published buildings can have several entrances; the primary/main
+ * candidate is preferred for normal routes. Emergency routes prefer the
+ * authored emergency exit / exterior-stair discharge when one exists, so a
+ * safe route cannot silently hand off through the normal lobby door. */
 function resolveBuildingEntranceNode(
   nodes: CampusNavNode[],
   buildingId: string,
   preferredNodeId?: string,
   accessibleOnly = false,
+  emergencyOnly = false,
 ): CampusNavNode | undefined {
   const preferred = preferredNodeId
     ? nodes.find((node) => node.id === preferredNodeId
@@ -484,15 +507,46 @@ function resolveBuildingEntranceNode(
       && !node.floorId
       && (!accessibleOnly || node.accessible !== false))
     : undefined;
-  if (preferred) return preferred;
+  if (preferred && (
+    !emergencyOnly
+    || (isEmergencyEndpointNode(preferred) && preferred.emergencySafe !== false)
+  )) return preferred;
 
   const candidates = nodes.filter((node) =>
     node.buildingId === buildingId
     && !node.floorId
-    && (node.entranceId || node.type === "entrance")
+    && (node.entranceId || node.type === "entrance" || isEmergencyEndpointNode(node))
+    && (!accessibleOnly || node.accessible !== false)
   );
+
+  if (emergencyOnly) {
+    const emergencyCandidates = candidates.filter((node) =>
+      isEmergencyEndpointNode(node) && node.emergencySafe !== false,
+    );
+    if (emergencyCandidates.length > 0) {
+      return [...emergencyCandidates].sort((a, b) => {
+        const score = (node: CampusNavNode) => {
+          const label = `${node.name ?? ""} ${node.entranceId ?? ""}`.toLowerCase();
+          return (node.emergencyStair ? 3000 : 0)
+            + (node.exteriorEmergencyStairId ? 2500 : 0)
+            + (node.type === "emergency_exit" ? 2000 : 0)
+            + (node.type === "stair" || node.stairId ? 1000 : 0)
+            + (label.includes("emergency") || label.includes("fire exit") || label.includes("egress") ? 500 : 0);
+        };
+        return score(b) - score(a);
+      })[0];
+    }
+    // An emergency route without an authored emergency discharge is not a
+    // safe route. Do not silently downgrade to the primary/lobby entrance.
+    return undefined;
+  }
+
   if (candidates.length === 0) {
-    return nodes.find((node) => node.buildingId === buildingId && !node.floorId);
+    return nodes.find((node) =>
+      node.buildingId === buildingId
+      && !node.floorId
+      && (!accessibleOnly || node.accessible !== false),
+    );
   }
   return [...candidates].sort((a, b) => {
     const score = (node: CampusNavNode) => {
@@ -710,8 +764,9 @@ export function planBuildingRoute(
   // 0. Published-campus nav graph (real routes for any campus with one)
   const campusGraph = resolveCampusGraph(graph);
   if (campusGraph) {
-    const fromNode = resolveBuildingEntranceNode(campusGraph.nodes, from.id, from.entranceNodeId, false);
-    const toNode = resolveBuildingEntranceNode(campusGraph.nodes, to.id, to.entranceNodeId, false);
+    const emergencyOnly = mode === "emergency";
+    const fromNode = resolveBuildingEntranceNode(campusGraph.nodes, from.id, from.entranceNodeId, false, emergencyOnly);
+    const toNode = resolveBuildingEntranceNode(campusGraph.nodes, to.id, to.entranceNodeId, false, emergencyOnly);
     if (fromNode && toNode) {
       const p = findNavigationRoute(
         campusGraph.nodes,
@@ -796,7 +851,13 @@ export function planRouteFromPoint(
   // Destination node: campus graph building node, or static entrance map.
   let toNodeId: string | undefined;
   if (campusGraph) {
-    toNodeId = resolveBuildingEntranceNode(campusGraph.nodes, to.id, to.entranceNodeId, false)?.id;
+    toNodeId = resolveBuildingEntranceNode(
+      campusGraph.nodes,
+      to.id,
+      to.entranceNodeId,
+      false,
+      mode === "emergency",
+    )?.id;
   } else {
     toNodeId = BUILDING_ENTRANCE_MAP[to.id];
   }
@@ -872,7 +933,7 @@ export function planPointToDestinationRoute(
       ? node
       : best;
   }, undefined);
-  const toNode = authoredDestinationEndpoint(campusGraph.nodes, to, false);
+  const toNode = authoredDestinationEndpoint(campusGraph.nodes, to, false, mode === "emergency");
   if (!fromNode || !toNode) return null;
 
   const path = findNavigationRoute(

@@ -8,7 +8,7 @@ import {
   Footprints, QrCode, Loader2, RefreshCw, AlertCircle, Crosshair,
 } from "lucide-react";
 
-import { useDebounce, usePublishedCampus, useCampusSearch, useReducedMotion, type SearchResult } from "../hooks";
+import { usePublishedCampus, useCampusSearch, useReducedMotion, type SearchResult } from "../hooks";
 import { type RoomType } from "../data/floorPlans";
 import type { Building } from "../types";
 import { cn } from "../lib/utils";
@@ -26,6 +26,12 @@ import type { RoomDest } from "../lib/combinedPathfinding";
 import { latLngToMapPoint, snapToNearest } from "../lib/geo";
 import { NODES as STATIC_NAV_NODES } from "../lib/pathfinding";
 import { projectReadonlyOutdoorCampus } from "../lib/readonlyOutdoorCampus";
+import {
+  STUDENT_MAP_MAX_ZOOM,
+  STUDENT_MAP_MIN_ZOOM,
+  STUDENT_MAP_ZOOM_STEP,
+  clampStudentMapZoom,
+} from "../lib/mapViewport";
 import {
   RoutePlannerDialog, RouteStepsPanel, RouteMapOverlay,
   ReportModal, SignInPrompt,
@@ -235,12 +241,37 @@ function mainIndoorDoorPoint(floor: { doors?: Array<{ x: number; y: number; labe
  * a nearest service room: the floor route must begin at the actual building
  * entrance used by the outdoor route.
  */
-function mainIndoorEntryNode(campus: EditorCampus, buildingId: string): NavigationNode | null {
+function mainIndoorEntryNode(campus: EditorCampus, buildingId: string, emergencyOnly = false): NavigationNode | null {
   const building = campus.buildings.find((candidate) => candidate.id === buildingId);
-  const entryFloor = building?.floors?.[0];
+  const entryFloor = building?.floors?.find((floor) => floor.number === 1) ?? building?.floors?.[0];
   const nodes = campus.navNodes ?? [];
   const edges = campus.navEdges ?? [];
   if (!building || !entryFloor) return null;
+
+  if (emergencyOnly) {
+    // Emergency indoor legs must begin at a stair authored for evacuation,
+    // not at the normal lobby door. Generated exterior emergency stairs carry
+    // both `emergencyStair` and `exteriorEmergencyStairId`; older maps may
+    // only have the stair semantic, so keep that as a compatible fallback.
+    const emergencyStairs = nodes
+      .filter((node) =>
+        node.buildingId === buildingId
+        && node.floorId === entryFloor.id
+        && node.emergencySafe !== false
+        && (node.emergencyStair === true || node.exteriorEmergencyStairId || node.type === "stair" || node.stairId),
+      )
+      .sort((a, b) => {
+        const score = (node: NavigationNode) =>
+          (node.emergencyStair ? 3000 : 0)
+          + (node.exteriorEmergencyStairId ? 2500 : 0)
+          + (node.type === "stair" || node.stairId ? 1000 : 0);
+        return score(b) - score(a);
+      });
+    if (emergencyStairs.length > 0) return emergencyStairs[0];
+    // Never fall through to the ordinary lobby door for an SOS route. The
+    // published graph must explicitly provide a stair connection first.
+    return null;
+  }
 
   const entranceMetadata = new Map((building.entrances ?? []).map((entrance) => [entrance.id, entrance]));
   const transitionCandidates = edges.flatMap((edge) => {
@@ -320,7 +351,7 @@ function findPublishedIndoorRoute(
   accessibleOnly: boolean,
   emergencyOnly = false,
 ): IndoorRoute | null {
-  const entryNode = mainIndoorEntryNode(campus, buildingId);
+  const entryNode = mainIndoorEntryNode(campus, buildingId, emergencyOnly);
   const targetRoom = targetFloor.rooms.find((room) => room.id === roomId);
   if (!entryNode || !targetRoom) return null;
 
@@ -498,7 +529,6 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
 
   // Floating UI state
   const [search,         setSearch]         = useState("");
-  const debouncedSearch = useDebounce(search, 150);
   const [searchFocused,  setSearchFocused]  = useState(false);
   const [directionsMode, setDirectionsMode] = useState(false);
   const [fromBuilding,   setFromBuilding]   = useState<Building|null>(null);
@@ -528,6 +558,7 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
 
   // Unified Search Engine Hook for C3
   const campusSearch = useCampusSearch(activeCampus);
+  const setCampusSearchQuery = campusSearch.setQuery;
 
   // Modals
   const [reportModal,   setReportModal]   = useState<Building|null>(null);
@@ -572,7 +603,7 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
   }, []);
 
   // Keep the latest target zoom readable by stable listeners.
-  useEffect(() => { zoomStateRef.current = zoom; });
+  useEffect(() => { zoomStateRef.current = zoom; }, [zoom]);
   useEffect(() => { panRef.current = pan; }, [pan]);
 
   const getScale = useCallback(() => {
@@ -594,8 +625,8 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
 
   // Sync search input with campusSearch query
   useEffect(() => {
-    campusSearch.setQuery(search);
-  }, [search, campusSearch]);
+    setCampusSearchQuery(search);
+  }, [search, setCampusSearchQuery]);
 
   // Anonymous page-view tracking for usage analytics
   useEffect(() => {
@@ -703,6 +734,9 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
     const el = mapContainerRef.current;
     if (!el) return;
     const onWheel = (e: WheelEvent) => {
+      // UI overlays own their scrolling. Do not let the map's native wheel
+      // listener consume a dropdown scroll as a zoom gesture.
+      if (e.target instanceof Element && e.target.closest("[data-no-drag]")) return;
       e.preventDefault();
       const step = e.deltaMode === 1 ? e.deltaY * 0.08 : e.deltaY * 0.003;
       // Zoom toward the cursor: keep the world point under the pointer fixed.
@@ -716,8 +750,8 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (document.activeElement?.tagName === "INPUT" || document.activeElement?.tagName === "TEXTAREA") return;
-      if (e.key === "+"||e.key === "=") { e.preventDefault(); zoomAtCursor(zoomStateRef.current + 0.2); }
-      if (e.key === "-")                { e.preventDefault(); zoomAtCursor(zoomStateRef.current - 0.2); }
+      if (e.key === "+"||e.key === "=") { e.preventDefault(); zoomAtCursor(zoomStateRef.current + STUDENT_MAP_ZOOM_STEP); }
+      if (e.key === "-")                { e.preventDefault(); zoomAtCursor(zoomStateRef.current - STUDENT_MAP_ZOOM_STEP); }
       if (e.key === "0")                { e.preventDefault(); setZoom(1); setPan({x:0,y:0}); }
       if (e.key === "Escape") {
         setSelected(null); setSearchFocused(false);
@@ -873,7 +907,7 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
    *   pan′.x = A/z′ − Wx·z′ − Cx·(1/z′ − z′),   A = (Wx·z + Cx·(1/z − z) + pan.x)·z
    */
   const applyZoomAt = useCallback((clientX: number, clientY: number, nextZoom: number) => {
-    const clamped = parseFloat(Math.max(0.35, Math.min(3.5, nextZoom)).toFixed(2));
+    const clamped = clampStudentMapZoom(nextZoom);
     const pt = svgPointFromClient(clientX, clientY);
     if (!pt) {
       setZoom(clamped);
@@ -898,7 +932,7 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
   // Keep stable listeners (wheel, keys, pinch) anchored against the latest zoom/pan.
   useEffect(() => {
     applyZoomAtRef.current = applyZoomAt;
-  });
+  }, [applyZoomAt]);
 
   /** Tap-on-map handler while pinning — places the "You are here" marker. */
   const handleMapPinTap = useCallback((clientX: number, clientY: number) => {
@@ -1076,7 +1110,7 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
       const t1 = e.touches[0], t2 = e.touches[1];
       const curDist = Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY);
       const ratio = curDist / pinchRef.current.dist;
-      const next = parseFloat(Math.max(0.35, Math.min(3.5, pinchRef.current.initZoom * ratio)).toFixed(2));
+      const next = clampStudentMapZoom(pinchRef.current.initZoom * ratio);
       // Pinch zooms toward the midpoint of the two fingers.
       applyZoomAtRef.current((t1.clientX + t2.clientX) / 2, (t1.clientY + t2.clientY) / 2, next);
       return;
@@ -1372,7 +1406,7 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
     // Manual "zoom to route" may zoom in deeper (e.g. ≥ 1.5) but never past
     // the fit zoom, so the whole route — including the end point — always
     // stays inside the viewport.
-    const z = parseFloat(Math.max(0.5, Math.min(zoomOverride ?? fitZoom, fitZoom)).toFixed(2));
+    const z = clampStudentMapZoom(Math.min(zoomOverride ?? fitZoom, fitZoom));
     const midX = (minX + maxX) / 2;
     const midY = (minY + maxY) / 2;
     // Animate the pan smoothly toward the route midpoint (the existing pan
@@ -1397,7 +1431,7 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
     panTargetRef.current = null;
     const startZoom = zoomRef.current;
     const startPan = panRef.current;
-    const targetZoom = Math.max(0.35, Math.min(startZoom, 0.45));
+    const targetZoom = Math.max(STUDENT_MAP_MIN_ZOOM, Math.min(startZoom, 0.85));
     const duration = reducedMotion ? 0 : 650;
     const startedAt = performance.now();
 
@@ -1447,16 +1481,26 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
   // When a route is computed (navigation starts), zoom in so BOTH the
   // starting point and the end point are in focus — the viewport centers
   // on the route midpoint and the whole route stays on screen.
+  const autoFramedRouteRef = useRef<string | null>(null);
+  const autoFrameKey = route && route.points.length > 0 && !route.destinationRoom
+    ? `${routeKey}:${route.points.length}:${route.points[0].x},${route.points[0].y}:${route.points.at(-1)?.x},${route.points.at(-1)?.y}`
+    : null;
   useEffect(() => {
     // Room routes are previewed in the planner. Their campus framing is
     // applied by the transition above only after Navigate is confirmed.
-    if (route && route.points.length > 0 && !route.destinationRoom) {
-      frameRouteView();
-      setShowArrival(false);
-    } else {
-      setShowArrival(false);
+    if (!autoFrameKey) {
+      autoFramedRouteRef.current = null;
+      setShowArrival((visible) => visible ? false : visible);
+      return;
     }
-  }, [route, frameRouteView]);
+    // Published campus refreshes may recreate an equivalent route object.
+    // Frame each route geometry once so a refresh cannot create an
+    // effect -> camera state -> render loop.
+    if (autoFramedRouteRef.current === autoFrameKey) return;
+    autoFramedRouteRef.current = autoFrameKey;
+    frameRouteView();
+    setShowArrival((visible) => visible ? false : visible);
+  }, [autoFrameKey, frameRouteView]);
 
   // ── Pan to selected building on click (smooth animated lerp) ──────
   useEffect(() => {
@@ -1517,12 +1561,16 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
         // room" chip offers full navigation).
         setRoomDestination(null);
         setIndoorRoute(null);
-        selectBuilding(b);
+        // Keep the floor plan as the active surface. Opening the building
+        // details panel here makes a room selection appear to do nothing and
+        // hides the highlighted room behind that panel.
+        setSelected(null);
         if (item.floorNumber !== undefined) {
           setFloorView({ building: b, floor: item.floorNumber });
         } else {
           setFloorView({ building: b, floor: 1 });
         }
+        setActiveRouteRoom(item.id);
         setHighlightedRoom(item.id);
       }
     }
@@ -1589,17 +1637,22 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
     });
   }, [selected]);
 
-  // ── Search results (buildings on campus, rooms on floor plan) ──────────
-  const buildingResults = !isFloorMode && debouncedSearch
-    ? MOCK_BUILDINGS.filter(b =>
-        b.name.toLowerCase().includes(debouncedSearch.toLowerCase()) ||
-        b.code.toLowerCase().includes(debouncedSearch.toLowerCase()))
-    : [];
-  const roomResults = isFloorMode && debouncedSearch
-    ? (currentFloor?.rooms ?? []).filter(r =>
-        r.name.toLowerCase().includes(debouncedSearch.toLowerCase()) ||
-        r.type.toLowerCase().includes(debouncedSearch.toLowerCase()))
-    : [];
+  // ── Search results (buildings on campus, rooms on the active floor) ────
+  // The shared search index is useful at campus level, but showing every room
+  // on every floor while the student is indoors makes the dropdown look like
+  // it ignored the current map. Scope indoor results to the floor being
+  // viewed so selecting one keeps the user in the correct coordinate space.
+  const visibleSearchResults = useMemo(() => {
+    if (!isFloorMode) return campusSearch.results;
+    const buildingId = floorView?.building.id;
+    const floorNumber = floorView?.floor;
+    if (!buildingId || floorNumber === undefined) return [];
+    return campusSearch.results.filter((item) =>
+      item.kind !== "building"
+      && item.buildingId === buildingId
+      && item.floorNumber === floorNumber,
+    );
+  }, [campusSearch.results, floorView?.building.id, floorView?.floor, isFloorMode]);
 
   const isDragging = dragRef.current?.moved ?? false;
 const buildingFill = (id: string) =>
@@ -2535,7 +2588,7 @@ const buildingFill = (id: string) =>
                 style={{ background:"var(--card)", color:"var(--foreground)" }}>
                 <Search className="h-4 w-4 shrink-0" style={{ color:"var(--muted-foreground)" }}/>
                 <input type="text" value={search}
-                  onChange={e => setSearch(e.target.value)}
+                  onChange={e => { setSearch(e.target.value); setSearchFocused(true); }}
                   onFocus={() => setSearchFocused(true)}
                   onBlur={() => setTimeout(() => setSearchFocused(false), 150)}
                   placeholder={isFloorMode ? "Search rooms, offices, labs…" : "Search buildings, offices…"}
@@ -2552,7 +2605,10 @@ const buildingFill = (id: string) =>
 
             {/* Search dropdown */}
             {searchFocused && (
-              <div className="mt-1.5 rounded-2xl border border-border shadow-xl overflow-hidden"
+              <div
+                className="mt-1.5 rounded-2xl border border-border shadow-xl overflow-hidden"
+                onWheelCapture={(event) => event.stopPropagation()}
+                onTouchMoveCapture={(event) => event.stopPropagation()}
                 style={{ background:"var(--card)", color:"var(--foreground)" }}>
                 {/* Recent (campus mode) */}
                 {!isFloorMode && !search && recentSearches.length > 0 && (
@@ -2591,12 +2647,12 @@ const buildingFill = (id: string) =>
                 )}
                 {/* Unified Search Results (C3) */}
                 {search && (
-                  <div className="max-h-60 overflow-y-auto divide-y divide-border/40">
-                    {campusSearch.results.length > 0 ? (
-                      campusSearch.results.map((item) => (
+                  <div className="max-h-60 overflow-y-auto overscroll-contain divide-y divide-border/40">
+                    {visibleSearchResults.length > 0 ? (
+                      visibleSearchResults.map((item) => (
                         <button
                           key={item.id}
-                          onMouseDown={(e) => {
+                          onPointerDown={(e) => {
                             e.preventDefault();
                             handleSelectSearchResult(item);
                           }}
@@ -2631,7 +2687,7 @@ const buildingFill = (id: string) =>
                         </div>
                         <p className="text-sm font-bold text-foreground mb-0.5">No results found</p>
                         <p className="text-xs text-muted-foreground max-w-[200px]">
-                          We couldn&apos;t find anything matching &ldquo;{search}&rdquo;. Try a different building or room name.
+                          We couldn&apos;t find anything matching &ldquo;{search}&rdquo;. Try a different {isFloorMode ? "room" : "building or room"} name.
                         </p>
                         <button
                           onClick={() => setSearch("")}
@@ -2703,6 +2759,24 @@ const buildingFill = (id: string) =>
 
       {/* ══════════════ MAP RESET CONTROL — desktop only ══════════════ */}
       <div data-no-drag className="absolute bottom-20 md:bottom-5 right-3 z-20 hidden md:flex flex-col gap-1">
+        <button
+          onClick={(event) => { event.stopPropagation(); zoomAtCursor(zoomStateRef.current + STUDENT_MAP_ZOOM_STEP); }}
+          disabled={zoom >= STUDENT_MAP_MAX_ZOOM}
+          title="Zoom in"
+          aria-label="Zoom in"
+          className="w-10 h-10 md:w-9 md:h-9 rounded-xl bg-card border border-border/60 shadow-md flex items-center justify-center text-lg font-bold text-muted-foreground hover:text-primary hover:border-primary/30 active:scale-95 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          +
+        </button>
+        <button
+          onClick={(event) => { event.stopPropagation(); zoomAtCursor(zoomStateRef.current - STUDENT_MAP_ZOOM_STEP); }}
+          disabled={zoom <= STUDENT_MAP_MIN_ZOOM}
+          title="Zoom out"
+          aria-label="Zoom out"
+          className="w-10 h-10 md:w-9 md:h-9 rounded-xl bg-card border border-border/60 shadow-md flex items-center justify-center text-lg font-bold text-muted-foreground hover:text-primary hover:border-primary/30 active:scale-95 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          −
+        </button>
         <button onClick={e => { e.stopPropagation(); setZoom(1); setPan({x:0,y:0}); }} title="Reset view"
           className="w-10 h-10 md:w-9 md:h-9 rounded-xl bg-card border border-border/60 shadow-md flex items-center justify-center text-muted-foreground hover:text-primary hover:border-primary/30 active:scale-95 transition-all" aria-label="Reset view">
           <LocateFixed className="h-4 w-4"/>
@@ -2986,7 +3060,7 @@ const buildingFill = (id: string) =>
             <Search className="h-4 w-4 text-muted-foreground shrink-0"/>
           )}
           <input type="text" value={search}
-            onChange={e => setSearch(e.target.value)}
+            onChange={e => { setSearch(e.target.value); setSearchFocused(true); }}
             onFocus={() => setSearchFocused(true)}
             onBlur={() => setTimeout(() => setSearchFocused(false), 150)}
             placeholder={isFloorMode ? "Search rooms…" : "Search buildings…"}
@@ -3000,6 +3074,53 @@ const buildingFill = (id: string) =>
             <span className="hidden sm:inline">Directions</span>
           </button>
         </div>
+
+        {/* Search results are rendered here as well as in the desktop panel.
+            Without this list the mobile indoor search could accept input but
+            offered no selectable room options. Keep it inside the no-drag
+            layer so wheel/touch scrolling belongs to the list, not the map. */}
+        {searchFocused && search && (
+          <div
+            className="rounded-2xl border border-border/60 shadow-xl overflow-hidden overscroll-contain max-h-[min(60vh,22rem)] overflow-y-auto"
+            onWheelCapture={(event) => event.stopPropagation()}
+            onTouchMoveCapture={(event) => event.stopPropagation()}
+            style={{ background: "var(--card)", color: "var(--foreground)" }}
+          >
+            {visibleSearchResults.length > 0 ? (
+              visibleSearchResults.map((item) => (
+                <button
+                  key={item.id}
+                  onPointerDown={(event) => {
+                    event.preventDefault();
+                    handleSelectSearchResult(item);
+                  }}
+                  className="w-full flex items-center justify-between gap-3 px-4 py-3 border-b border-border/40 last:border-b-0 text-left active:bg-muted"
+                >
+                  <span className="flex items-center gap-2.5 min-w-0">
+                    <span className="w-8 h-8 rounded-xl bg-primary/10 text-primary flex items-center justify-center shrink-0">
+                      {item.kind === "building" ? <Building2 className="h-4 w-4" /> : <MapPin className="h-4 w-4" />}
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block text-sm font-bold text-foreground truncate">{item.name}</span>
+                      <span className="block text-[11px] text-muted-foreground truncate">
+                        {item.buildingName ? `${item.buildingName} ${item.floorLabel ? `· ${item.floorLabel}` : ""}` : item.code || item.category || "Building"}
+                      </span>
+                    </span>
+                  </span>
+                  {item.accessible && (
+                    <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-md bg-green-500/10 text-green-500 shrink-0">Accessible</span>
+                  )}
+                </button>
+              ))
+            ) : (
+              <div className="px-4 py-6 text-center">
+                <Search className="h-5 w-5 mx-auto mb-2 text-muted-foreground/50" />
+                <p className="text-sm font-bold text-foreground">No rooms found</p>
+                <p className="text-xs text-muted-foreground mt-1">Try another room name on this floor.</p>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Filter chips — floating glass (hidden when building selected or route planner active) */}
         {!isFloorMode && !searchFocused && !search && !directionsMode && !selected && (

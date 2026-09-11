@@ -250,9 +250,11 @@ describe("authored destination endpoint combinations", () => {
       { buildingId: "b2", floorNumber: 1 },
     ]);
     expect(crossBuilding?.indoorSegments?.every((segment) => segment.waypoints.length >= 2)).toBe(true);
+    // The graph has a normal lobby entrance but no published emergency
+    // discharge. SOS routing must refuse it instead of drawing the unsafe
+    // normal-door path.
     const emergencyRoute = planDestinationRoute(room("b1", "r2", 2, "B1"), building("b2", "B2"), "emergency", graph);
-    expect(emergencyRoute).not.toBeNull();
-    expect(emergencyRoute!.steps.some((step) => step.icon === "stairs")).toBe(true);
+    expect(emergencyRoute).toBeNull();
   });
 
   it("keeps a point→room route fully authored and prices the floor transition", () => {
@@ -283,6 +285,80 @@ describe("authored destination endpoint combinations", () => {
     );
     expect(route).toBeNull();
     expect(hasNavigableRoute(null)).toBe(false);
+  });
+
+  it("uses the published emergency stair instead of the normal lobby entrance", () => {
+    const emergencyGraph: CampusNavGraph = {
+      navNodes: [
+        ...graph.navNodes!,
+        {
+          id: "b1-emergency-outdoor",
+          name: "Building 1 Emergency Stair Discharge",
+          type: "stair",
+          x: -20,
+          y: 40,
+          buildingId: "b1",
+          exteriorEmergencyStairId: "ext-stair-b1",
+          emergencyStair: true,
+          emergencySafe: true,
+        },
+        {
+          id: "b1-emergency-floor",
+          name: "Building 1 Fire Stairs",
+          type: "stair",
+          x: 40,
+          y: 40,
+          buildingId: "b1",
+          floorId: "f1",
+          stairId: "stair-fire-b1",
+          emergencyStair: true,
+          emergencySafe: true,
+        },
+      ],
+      navEdges: [
+        ...graph.navEdges!,
+        {
+          id: "e-emergency-discharge",
+          startNodeId: "b1-emergency-outdoor",
+          endNodeId: "b1-emergency-floor",
+          distance: 1,
+          bidirectional: true,
+          accessible: false,
+          emergencySafe: true,
+          type: "floor_transition",
+        },
+        {
+          id: "e-room-fire-stairs",
+          startNodeId: "room-1",
+          endNodeId: "b1-emergency-floor",
+          distance: 8,
+          bidirectional: true,
+          accessible: true,
+          emergencySafe: true,
+          type: "walkway",
+        },
+      ],
+    };
+
+    const roomToBuilding = planDestinationRoute(
+      room("b1", "r1", 1, "B1"),
+      building("b1", "B1"),
+      "emergency",
+      emergencyGraph,
+    );
+    expect(roomToBuilding).not.toBeNull();
+    expect(roomToBuilding?.indoorSegments?.[0].waypoints).toContainEqual({ x: 40, y: 40 });
+    expect(roomToBuilding?.indoorSegments?.[0].waypoints).not.toContainEqual({ x: 10, y: 0 });
+    expect(roomToBuilding?.steps.some((step) => step.icon === "stairs")).toBe(true);
+
+    const buildingToRoom = planDestinationRoute(
+      building("b1", "B1"),
+      room("b1", "r1", 1, "B1"),
+      "emergency",
+      emergencyGraph,
+    );
+    expect(buildingToRoom).not.toBeNull();
+    expect(buildingToRoom?.indoorSegments?.[0].waypoints[0]).toEqual({ x: 40, y: 40 });
   });
 });
 
