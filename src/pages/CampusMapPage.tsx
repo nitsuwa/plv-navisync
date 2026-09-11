@@ -8,7 +8,7 @@ import {
   Footprints, QrCode, Loader2, RefreshCw, AlertCircle, Crosshair,
 } from "lucide-react";
 
-import { usePublishedCampus, useCampusSearch, useReducedMotion, type SearchResult } from "../hooks";
+import { usePublishedCampus, useCampusSearch, searchFloorRooms, useReducedMotion, type SearchResult } from "../hooks";
 import { type RoomType } from "../data/floorPlans";
 import type { Building } from "../types";
 import { cn } from "../lib/utils";
@@ -1645,14 +1645,30 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
   const visibleSearchResults = useMemo(() => {
     if (!isFloorMode) return campusSearch.results;
     const buildingId = floorView?.building.id;
+    if (!buildingId) return [];
+
+    const activeBuilding = activeCampus?.buildings.find((building) => building.id === buildingId);
+    const floor = activeFloorPlan ?? undefined;
+
+    // Indoor search must reflect the active floor immediately. Falling back
+    // to the debounced campus index here caused stale results to remain on
+    // screen while the student was changing the query.
+    if (activeBuilding && floor) {
+      return searchFloorRooms(floor, activeBuilding, search);
+    }
+
+    // Compatibility fallback for legacy floor data that has no hydrated
+    // published FloorPlan. It remains floor-scoped, but is only used when the
+    // authored floor cannot be read directly.
     const floorNumber = floorView?.floor;
-    if (!buildingId || floorNumber === undefined) return [];
+    if (floorNumber === undefined) return [];
     return campusSearch.results.filter((item) =>
       item.kind !== "building"
       && item.buildingId === buildingId
-      && item.floorNumber === floorNumber,
+      && item.floorNumber === floorNumber
+      && item.keywords.some((keyword) => keyword.includes(search.trim().toLowerCase())),
     );
-  }, [campusSearch.results, floorView?.building.id, floorView?.floor, isFloorMode]);
+  }, [activeCampus, activeFloorPlan, campusSearch.results, floorView?.building.id, floorView?.floor, isFloorMode, search]);
 
   const isDragging = dragRef.current?.moved ?? false;
 const buildingFill = (id: string) =>
