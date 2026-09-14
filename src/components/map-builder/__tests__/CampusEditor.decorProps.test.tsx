@@ -240,6 +240,102 @@ describe("CampusEditor decorative asset properties", () => {
     expect(undoButton(container)).toBeNull();
   });
 
+  it("rotates a decor asset freely, snaps cardinal angles, and commits one undo step", () => {
+    const { container } = render(<Harness onCampusChange={(c) => { latestCampus = c; }} />);
+    const svg = stubSvgRect(container);
+
+    selectItem(decorG(container, "tree"), 450, 120);
+    const handle = container.querySelector("[data-testid='decor-rotation-handle-hit']") as SVGCircleElement | null;
+    expect(handle).toBeTruthy();
+    const cx = Number(handle!.getAttribute("cx"));
+    const cy = Number(handle!.getAttribute("cy"));
+
+    // The handle begins at the asset's top (-90°). Move 13° clockwise: this
+    // remains free rotation rather than the old fixed 5° increments.
+    fireEvent.mouseDown(handle!, { clientX: cx, clientY: cy, bubbles: true });
+    const freeAngle = (-90 + 13) * Math.PI / 180;
+    fireEvent.mouseMove(svg, {
+      clientX: 450 + Math.cos(freeAngle) * 100,
+      clientY: 120 + Math.sin(freeAngle) * 100,
+      bubbles: true,
+    });
+    expect(decorById(latestCampus!, "da1").rotation).toBeCloseTo(13, 5);
+
+    // Continue into the cardinal snap zone; the stored value becomes exactly
+    // 90° while the active label remains a clean integer.
+    const cardinalAngle = 0 * Math.PI / 180;
+    fireEvent.mouseMove(svg, {
+      clientX: 450 + Math.cos(cardinalAngle) * 100,
+      clientY: 120 + Math.sin(cardinalAngle) * 100,
+      bubbles: true,
+    });
+    expect(decorById(latestCampus!, "da1").rotation).toBe(90);
+    expect(decorPos(latestCampus!, "da1")).toEqual({ x: 450, y: 120 });
+    expect(container.querySelector("[data-testid='decor-rotation-angle']")?.textContent).toContain("90");
+    fireEvent.mouseUp(svg, { bubbles: true });
+
+    expect(container.querySelector("[data-testid='decor-rotation-handle-hit']")).toBeTruthy();
+    expect(container.querySelector("[data-testid='decor-rotation-angle']")).toBeNull();
+    expect(undoButton(container)).toBeTruthy();
+    fireEvent.click(undoButton(container)!);
+    expect(decorById(latestCampus!, "da1").rotation).toBe(0);
+    expect(undoButton(container)).toBeNull();
+  });
+
+  it("switches between Shift 15-degree snapping and free rotation during one gesture", () => {
+    const { container } = render(<Harness onCampusChange={(c) => { latestCampus = c; }} />);
+    const svg = stubSvgRect(container);
+    selectItem(decorG(container, "tree"), 450, 120);
+    const handle = container.querySelector("[data-testid='decor-rotation-handle-hit']") as SVGCircleElement;
+    const cx = Number(handle.getAttribute("cx"));
+    const cy = Number(handle.getAttribute("cy"));
+    fireEvent.mouseDown(handle, { clientX: cx, clientY: cy, bubbles: true });
+
+    const snappedAngle = (-90 + 43) * Math.PI / 180;
+    fireEvent.mouseMove(svg, {
+      clientX: 450 + Math.cos(snappedAngle) * 100,
+      clientY: 120 + Math.sin(snappedAngle) * 100,
+      shiftKey: true,
+      bubbles: true,
+    });
+    expect(decorById(latestCampus!, "da1").rotation).toBe(45);
+
+    const freeAngle = (-90 + 13) * Math.PI / 180;
+    fireEvent.mouseMove(svg, {
+      clientX: 450 + Math.cos(freeAngle) * 100,
+      clientY: 120 + Math.sin(freeAngle) * 100,
+      shiftKey: false,
+      bubbles: true,
+    });
+    expect(decorById(latestCampus!, "da1").rotation).toBeCloseTo(13, 5);
+    fireEvent.mouseUp(svg, { bubbles: true });
+  });
+
+  it("keeps a building rotation centered and undoable as one gesture", () => {
+    const { container } = render(<Harness onCampusChange={(c) => { latestCampus = c; }} />);
+    const svg = stubSvgRect(container);
+    selectItem(buildingG(container, "#1e40af"), 100, 100);
+    const handle = container.querySelector("[data-testid='building-rotation-handle-hit']") as SVGCircleElement | null;
+    expect(handle).toBeTruthy();
+    const cx = Number(handle!.getAttribute("cx"));
+    const cy = Number(handle!.getAttribute("cy"));
+    fireEvent.mouseDown(handle!, { clientX: cx, clientY: cy, bubbles: true });
+    const angle = (-90 + 13) * Math.PI / 180;
+    fireEvent.mouseMove(svg, {
+      clientX: 160 + Math.cos(angle) * 200,
+      clientY: 140 + Math.sin(angle) * 200,
+      bubbles: true,
+    });
+    expect(latestCampus?.buildings.find((building) => building.id === "b1")?.rotation).toBeCloseTo(13, 5);
+    expect(latestCampus?.buildings.find((building) => building.id === "b1")).toMatchObject({ x: 100, y: 100 });
+    fireEvent.mouseUp(svg, { bubbles: true });
+
+    expect(undoButton(container)).toBeTruthy();
+    fireEvent.click(undoButton(container)!);
+    expect(latestCampus?.buildings.find((building) => building.id === "b1")?.rotation ?? 0).toBe(0);
+    expect(undoButton(container)).toBeNull();
+  });
+
   it("scale clamps to the canvas resize-handle bounds and updates the asset", () => {
     const { container } = render(<Harness onCampusChange={(c) => { latestCampus = c; }} />);
     const svg = stubSvgRect(container);

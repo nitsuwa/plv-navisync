@@ -27,6 +27,8 @@ export { useUnsavedChangesGuard } from "./useUnsavedChangesGuard";
 export { UnsavedChangesProvider, useUnsavedChangesContext } from "./UnsavedChangesContext";
 export { CreateCampusGuide } from "./CreateCampusGuide";
 export { ShortcutCheatSheet } from "./ShortcutCheatSheet";
+export { EditorTutorial, TutorialInvitation, useEditorTutorial, OUTDOOR_TUTORIAL_STEPS, FLOOR_TUTORIAL_STEPS } from "./EditorTutorial";
+export type { EditorTutorialKind, EditorTutorialController, TutorialPreference, TutorialPlacement, TutorialStep } from "./EditorTutorial";
 export { ActionProgressDialog } from "./ActionProgressDialog";
 export type { ActionType, ActionState, ActionProgressDialogProps } from "./ActionProgressDialog";
 export { SaveScreen } from "./SaveScreen";

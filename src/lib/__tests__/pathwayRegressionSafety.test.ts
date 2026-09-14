@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Campus, CampusPath, NavigationEdge, NavigationNode } from "../../components/map-builder/types";
 import {
   convertPathwaysToNavigation,
+  joinPathwayVerticesExplicitly,
   pathwayHasLegacyNavigationChain,
   reconcilePathwayNavigation,
 } from "../campusPathNavigation";
@@ -109,6 +110,72 @@ const rowsFromPayload = (payload: ReturnType<typeof serializeCampusStructure>) =
 });
 
 describe("Outdoor Pathway regression safety wall", () => {
+  it("explicitly joins two owned vertices into the target canonical node and retargets only the source connector", () => {
+    const factory = makeIdFactory();
+    const converted = convertPathwaysToNavigation(makeCampus([
+      makePath("p1", [{ x: 0, y: 100 }, { x: 100, y: 100 }]),
+      makePath("p2", [{ x: 400, y: 100 }, { x: 600, y: 100 }]),
+    ]), ["p1", "p2"], factory).campus;
+    const p1Source = generatedNodesFor(converted, "p1").find((node) => node.x === 100)!;
+    const p2Target = generatedNodesFor(converted, "p2").find((node) => node.x === 400)!;
+    const sourceNode: NavigationNode = { id: "external-source", name: "Entrance", type: "entrance", x: 100, y: 40, accessible: true, color: "#16a34a" };
+    const before = {
+      ...converted,
+      navNodes: [...(converted.navNodes ?? []), sourceNode],
+      navEdges: [...(converted.navEdges ?? []), {
+        id: "authored-source-edge",
+        startNodeId: sourceNode.id,
+        endNodeId: p1Source.id,
+        distance: 60,
+        bidirectional: true,
+        accessible: true,
+        emergencySafe: true,
+        type: "walkway",
+        color: "#16a34a",
+        width: 4,
+        bendPoints: [{ x: 100, y: 70 }, { x: 80, y: 80 }],
+      }],
+    } as Campus;
+
+    const joined = joinPathwayVerticesExplicitly(before, "p1", 1, "p2", 0, factory);
+    const targetAfter = joined.navNodes?.find((node) => node.id === p2Target.id);
+    const sourceAfter = joined.navNodes?.find((node) => node.id === p1Source.id);
+    const connectorAfter = joined.navEdges?.find((edge) => edge.id === "authored-source-edge");
+
+    expect(joined.paths.find((path) => path.id === "p1")?.points[1]).toEqual({ x: 400, y: 100 });
+    expect(joined.paths.find((path) => path.id === "p2")?.points[0]).toEqual({ x: 400, y: 100 });
+    expect(targetAfter?.id).toBe(p2Target.id);
+    expect(sourceAfter).toBeUndefined();
+    expect(targetAfter?.generatedFromPathVertices).toEqual(expect.arrayContaining([
+      { pathId: "p1", vertexId: converted.paths.find((path) => path.id === "p1")!.navigationVertexIds![1] },
+      { pathId: "p2", vertexId: converted.paths.find((path) => path.id === "p2")!.navigationVertexIds![0] },
+    ]));
+    expect(joined.navNodes?.filter((node) => node.generatedFromPathVertices?.some((ref) => ref.pathId === "p1" && ref.vertexId === converted.paths.find((path) => path.id === "p1")!.navigationVertexIds![1]))).toHaveLength(1);
+    expect(connectorAfter).toMatchObject({
+      startNodeId: sourceNode.id,
+      endNodeId: p2Target.id,
+      bendPoints: before.navEdges?.find((edge) => edge.id === "authored-source-edge")?.bendPoints,
+    });
+    expect(joined.navEdges?.filter((edge) => edge.generatedFromPathIds?.includes("p1")).map((edge) => edge.id)).toEqual(
+      converted.navEdges?.filter((edge) => edge.generatedFromPathIds?.includes("p1")).map((edge) => edge.id),
+    );
+  });
+
+  it("does not merge nearby owned vertices unless the explicit join helper is invoked", () => {
+    const factory = makeIdFactory();
+    const converted = convertPathwaysToNavigation(makeCampus([
+      makePath("p1", [{ x: 0, y: 0 }, { x: 100, y: 100 }]),
+      makePath("p2", [{ x: 103, y: 100 }, { x: 300, y: 100 }]),
+    ]), ["p1", "p2"], factory).campus;
+    const before = pathwaySnapshot(converted);
+    // A normal reconciliation with unchanged, merely-nearby geometry is not
+    // an explicit authoring join and therefore must not collapse these nodes.
+    const reconciled = reconcilePathwayNavigation(converted, factory);
+    expect(pathwaySnapshot(reconciled)).toEqual(before);
+    expect(generatedNodesFor(reconciled, "p1")).toHaveLength(2);
+    expect(generatedNodesFor(reconciled, "p2")).toHaveLength(2);
+  });
+
   it("keeps Pathway, vertex, generated-node, and generated-edge IDs stable when a middle vertex moves", () => {
     const factory = makeIdFactory();
     const initial = convertPathwaysToNavigation(

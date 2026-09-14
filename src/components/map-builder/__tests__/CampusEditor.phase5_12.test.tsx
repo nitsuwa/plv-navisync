@@ -178,6 +178,27 @@ describe("B5 Phase 5.12 — continuous path-network visuals (no internal seams)"
     expect(container.querySelector("[data-testid='path-point-handle']")).toBeNull();
   });
 
+  it("renders a dedicated, screen-sized rotation knob and separate hit target for a small decor asset", () => {
+    const campus = lCornerCampus();
+    campus.decorAssets = [{ id: "tree-small", type: "tree", x: 420, y: 240, rotation: 0, scale: 1 }];
+    const { container } = renderCanvas({
+      campus,
+      selected: { type: "decorAsset", id: "tree-small" },
+      zoom: 3,
+    });
+
+    const visible = container.querySelector("[data-testid='decor-rotation-handle-visible']");
+    const hit = container.querySelector("[data-testid='decor-rotation-handle-hit']");
+    expect(visible).toBeTruthy();
+    expect(hit).toBeTruthy();
+    const visibleDiameterPx = Number(visible?.getAttribute("r")) * 2 * 3;
+    const hitDiameterPx = Number(hit?.getAttribute("r")) * 2 * 3;
+    expect(visibleDiameterPx).toBeGreaterThanOrEqual(9);
+    expect(visibleDiameterPx).toBeLessThanOrEqual(12);
+    expect(hitDiameterPx).toBeGreaterThanOrEqual(20);
+    expect(hitDiameterPx).toBeLessThanOrEqual(24);
+  });
+
   it("double-clicks a member to enter member edit without ungrouping (member controls + group bounds)", () => {
     const onPathDblClick = vi.fn();
     const { container, rerender } = renderCanvas({

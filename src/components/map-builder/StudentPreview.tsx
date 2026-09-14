@@ -84,19 +84,39 @@ export function StudentPreview({ campus, validationIssues, onBack, onPublish, on
         )}
       </AnimatePresence>
 
-      {published && (
-        <div className="fixed inset-0 z-[350] flex items-center justify-center bg-background/70 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-sm rounded-2xl border border-border bg-card p-6 text-center shadow-2xl">
-            <CheckCircle2 className="mx-auto h-10 w-10 text-emerald-600" />
-            <h2 className="mt-3 text-lg font-extrabold text-foreground">Campus Published</h2>
-            <p className="mt-1 text-xs text-muted-foreground">Students will now see this version of the campus.</p>
-            <div className="mt-5 flex justify-center gap-2">
-              {onViewPublished && <button onClick={onViewPublished} className="h-9 rounded-lg bg-primary px-3 text-xs font-bold text-primary-foreground hover:bg-primary/90">View Published Student Map</button>}
-              <button onClick={onBack} className="h-9 rounded-lg border border-border px-3 text-xs font-bold text-foreground hover:bg-muted">Back to Map Builder</button>
-            </div>
-          </div>
-        </div>
-      )}
+      <AnimatePresence>
+        {published && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2, ease: "easeOut" }}
+            className="fixed inset-0 z-[350] flex items-center justify-center bg-background/70 p-4 backdrop-blur-sm"
+            role="presentation"
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.97, y: 6 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.98, y: 4 }}
+              transition={{ duration: 0.22, ease: "easeOut" }}
+              className="w-full max-w-md rounded-2xl border border-border bg-card p-6 text-center shadow-2xl sm:p-7"
+              role="dialog"
+              aria-modal="true"
+              aria-label="Campus Published"
+            >
+              <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-emerald-500/10 text-emerald-600">
+                <CheckCircle2 className="h-7 w-7" aria-hidden="true" />
+              </div>
+              <h2 className="mt-4 text-lg font-extrabold text-foreground">Campus Published</h2>
+              <p className="mx-auto mt-1 max-w-xs text-sm leading-5 text-muted-foreground">The latest campus version is now available to students.</p>
+              <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:justify-center">
+                {onViewPublished && <button onClick={onViewPublished} className="inline-flex h-10 flex-1 items-center justify-center rounded-lg bg-primary px-4 text-xs font-bold text-primary-foreground transition-colors hover:bg-primary/90 sm:flex-none">View Student Map</button>}
+                <button onClick={onBack} className="inline-flex h-10 flex-1 items-center justify-center rounded-lg border border-border px-4 text-xs font-bold text-foreground transition-colors hover:bg-muted sm:flex-none">Back to Map Builder</button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <AnimatePresence>
         {confirmOpen && !published && (

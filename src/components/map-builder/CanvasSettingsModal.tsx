@@ -171,10 +171,12 @@ function SavingOverlay({ campusName }: { campusName: string }) {
   useEffect(() => {
     const timers: ReturnType<typeof setTimeout>[] = [];
     steps.forEach((_, i) => {
-      timers.push(setTimeout(() => setPhase(i), i * 250));
+      timers.push(setTimeout(() => setPhase(i), i * 220));
     });
     return () => timers.forEach(clearTimeout);
   }, []);
+
+  const progress = ((phase + 1) / steps.length) * 100;
 
   return (
     <motion.div
@@ -191,6 +193,14 @@ function SavingOverlay({ campusName }: { campusName: string }) {
         <div className="text-center">
           <p className="text-white/40 text-xs font-semibold tracking-widest uppercase mb-1">{campusName}</p>
           <h2 className="text-lg font-extrabold text-white tracking-tight">Saving Settings</h2>
+        </div>
+        <div className="h-1 w-56 overflow-hidden rounded-full bg-white/10" aria-hidden="true">
+          <motion.div
+            className="h-full rounded-full bg-emerald-300"
+            initial={{ width: "0%" }}
+            animate={{ width: `${progress}%` }}
+            transition={{ duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
+          />
         </div>
         <div className="w-56 space-y-2">
           {steps.map((label, i) => (

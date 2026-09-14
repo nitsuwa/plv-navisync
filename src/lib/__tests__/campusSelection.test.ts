@@ -8,6 +8,9 @@ import {
   pathSelectionBounds,
   rectsIntersect,
   selectionRectFromPoints,
+  normalizeRotationAngle,
+  rotationDisplayAngle,
+  snapRotationAngle,
   transformControlMetrics,
 } from "../campusSelection";
 import { DECOR_ASSET_MAP } from "../../components/map-builder/constants";
@@ -152,9 +155,37 @@ describe("campusSelection helpers", () => {
       expect(metrics.handleSize * zoom).toBeGreaterThanOrEqual(4.5);
       expect(metrics.handleSize * zoom).toBeLessThanOrEqual(7);
       expect(metrics.hitSize).toBeGreaterThan(metrics.handleSize);
-      expect(metrics.rotationOffset * zoom).toBeGreaterThanOrEqual(10);
-      expect(metrics.rotationOffset * zoom).toBeLessThanOrEqual(18);
+      expect(metrics.rotationOffset * zoom).toBeGreaterThanOrEqual(18);
+      expect(metrics.rotationOffset * zoom).toBeLessThanOrEqual(28);
+      expect(metrics.rotationRadius * zoom * 2).toBeGreaterThanOrEqual(11);
+      expect(metrics.rotationRadius * zoom * 2).toBeLessThanOrEqual(15);
+      expect(metrics.rotationHitSize * zoom).toBeGreaterThanOrEqual(23);
+      expect(metrics.rotationHitSize * zoom).toBeLessThanOrEqual(27);
     }
+  });
+
+  it("keeps free rotation while magnetically snapping only near cardinal angles", () => {
+    expect(snapRotationAngle(87)).toBe(90);
+    expect(snapRotationAngle(92)).toBe(90);
+    expect(snapRotationAngle(78)).toBe(78);
+    expect(snapRotationAngle(359)).toBe(0);
+    expect(snapRotationAngle(-90)).toBe(270);
+  });
+
+  it("uses 15-degree increments while Shift is held", () => {
+    expect(snapRotationAngle(43, true)).toBe(45);
+    expect(snapRotationAngle(88, true)).toBe(90);
+    expect(snapRotationAngle(101, true)).toBe(105);
+  });
+
+  it("normalizes and rounds the live angle label without changing stored precision", () => {
+    expect(normalizeRotationAngle(360)).toBe(0);
+    expect(normalizeRotationAngle(-90)).toBe(270);
+    expect(normalizeRotationAngle(450)).toBe(90);
+    expect(rotationDisplayAngle(89.9999)).toBe(90);
+    expect(rotationDisplayAngle(190.47766689740877)).toBe(190);
+    expect(rotationDisplayAngle(-90)).toBe(270);
+    expect(rotationDisplayAngle(360)).toBe(0);
   });
 
   it("includes Pathway bounds in a mixed movement frame without changing its identity", () => {

@@ -12,6 +12,7 @@ import type { LayerOrderAction } from "../../lib/campusLayerOrder";
 import { polylineCrossesObstacle } from "../../lib/editorPlacement";
 import type { BulkRoutingAction } from "../../lib/navigationGraph";
 import { normalizeRotation, clampDecorScale, DECOR_SCALE_MIN, DECOR_SCALE_MAX } from "../../lib/decorAsset";
+import { rotationDisplayAngle } from "../../lib/campusSelection";
 import { createDefaultFloor } from "../../lib/floorPlanNormalization";
 import { nextFloorNumberForBuilding, countFloorAuthoredItems, deleteFloorFromBuilding } from "../../lib/floorManagement";
 import { DecorAssetVisual } from "./DecorAssetVisual";
@@ -1417,7 +1418,7 @@ export function PropertiesPanel({
                   <label htmlFor="bldg-rotation" className={labelCls}>Rotation</label>
                   <div className="flex items-center gap-2">
                     <input id="bldg-rotation" type="range" min={0} max={360} step={15} value={selBldg.rotation ?? 0} onChange={(e) => onUpdateBuilding(selBldg.id, { rotation: parseInt(e.target.value) })} className="flex-1 h-1.5 accent-primary" />
-                    <span className="text-xs font-mono text-muted-foreground w-8 text-right shrink-0">{selBldg.rotation ?? 0}°</span>
+                    <span className="text-xs font-mono text-muted-foreground w-8 text-right shrink-0">{rotationDisplayAngle(selBldg.rotation ?? 0)}°</span>
                   </div>
                 </div>
                 <div className="pt-1">

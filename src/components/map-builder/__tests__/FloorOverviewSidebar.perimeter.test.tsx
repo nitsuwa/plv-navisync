@@ -74,4 +74,19 @@ describe("Part D — FloorOverviewSidebar Perimeter Wall section", () => {
     render(<FloorOverviewSidebar floor={makeFloor()} {...baseProps} />);
     expect(screen.getByText("Off")).toBeTruthy();
   });
+
+  it("disables authoring-grid size controls for textured floors", () => {
+    render(<FloorOverviewSidebar floor={makeFloor({ appearance: { material: "ceramic_tile", texture: "subtle", color: "#e5e7eb" } })} {...baseProps} />);
+    expect(screen.getByRole("button", { name: "Show Grid" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Floor grid 10" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Floor grid 20" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Floor grid 40" })).toBeDisabled();
+    expect(screen.getByTestId("floor-grid-disabled-help")).toBeInTheDocument();
+  });
+
+  it("enables authoring-grid size controls for Neutral with Texture None", () => {
+    render(<FloorOverviewSidebar floor={makeFloor({ appearance: { material: "neutral", texture: "none", color: "#e8e1d7" } })} {...baseProps} />);
+    expect(screen.getByRole("button", { name: "Show Grid" })).not.toBeDisabled();
+    expect(screen.getByRole("button", { name: "Floor grid 10" })).not.toBeDisabled();
+  });
 });

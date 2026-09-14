@@ -26,12 +26,53 @@ export interface TransformControlMetrics {
   handleSize: number;
   /** Transparent pointer target size in world units. */
   hitSize: number;
-  /** Radius of the visible circular rotation grip in world units. */
+  /** Radius of the dedicated, more prominent rotation grip in world units. */
   rotationRadius: number;
+  /** Transparent pointer target diameter for the rotation grip. */
+  rotationHitSize: number;
   /** Distance from the object's top edge to the rotation grip in world units. */
   rotationOffset: number;
   /** Selection-stroke width in world units. */
   strokeWidth: number;
+}
+
+export const ROTATION_CARDINAL_SNAP_THRESHOLD = 5;
+export const ROTATION_SHIFT_INCREMENT = 15;
+
+/** Normalize an authored rotation into the editor's canonical [0, 360) range. */
+export function normalizeRotationAngle(angle: number): number {
+  if (!Number.isFinite(angle)) return 0;
+  const normalized = ((angle % 360) + 360) % 360;
+  return normalized >= 359.999999 ? 0 : normalized;
+}
+
+/** Return the shortest absolute distance between two normalized angles. */
+export function rotationAngleDistance(a: number, b: number): number {
+  const delta = Math.abs(normalizeRotationAngle(a) - normalizeRotationAngle(b));
+  return Math.min(delta, 360 - delta);
+}
+
+/**
+ * Resolve live rotation feedback.  Without Shift rotation remains free except
+ * for a narrow magnetic snap around the four cardinal orientations.  Shift
+ * makes 15-degree increments authoritative for precision architectural turns.
+ */
+export function snapRotationAngle(
+  rawAngle: number,
+  shiftKey = false,
+  cardinalThreshold = ROTATION_CARDINAL_SNAP_THRESHOLD,
+): number {
+  const normalized = normalizeRotationAngle(rawAngle);
+  if (shiftKey) return normalizeRotationAngle(Math.round(normalized / ROTATION_SHIFT_INCREMENT) * ROTATION_SHIFT_INCREMENT);
+  const cardinal = [0, 90, 180, 270];
+  const target = cardinal.find((angle) => rotationAngleDistance(normalized, angle) <= cardinalThreshold);
+  return target === undefined ? normalized : target;
+}
+
+/** Keep the active-gesture label readable without exposing floating-point noise. */
+export function rotationDisplayAngle(angle: number): number {
+  const normalized = normalizeRotationAngle(angle);
+  return Math.round(normalized) % 360;
 }
 
 /**
@@ -46,11 +87,16 @@ export function transformControlMetrics(width: number, height: number, zoom: num
   const visibleSpanPx = Math.max(0, Math.min(Math.abs(width), Math.abs(height))) * safeZoom;
   const visibleSizePx = Math.max(4.5, Math.min(7, 4.5 + visibleSpanPx / 60));
   const hitSizePx = Math.max(9, Math.min(13, visibleSizePx + 4));
-  const rotationOffsetPx = Math.max(10, Math.min(18, 10 + visibleSpanPx / 40));
+  // Rotation is intentionally more prominent than resize: a compact but
+  // obvious 11–15px screen-space knob with a modestly larger hit target.
+  const rotationDiameterPx = Math.max(11, Math.min(15, 11 + visibleSpanPx / 80));
+  const rotationHitSizePx = Math.max(23, Math.min(27, rotationDiameterPx + 10));
+  const rotationOffsetPx = Math.max(18, Math.min(28, 18 + visibleSpanPx / 80));
   return {
     handleSize: visibleSizePx / safeZoom,
     hitSize: hitSizePx / safeZoom,
-    rotationRadius: visibleSizePx / (2 * safeZoom),
+    rotationRadius: rotationDiameterPx / (2 * safeZoom),
+    rotationHitSize: rotationHitSizePx / safeZoom,
     rotationOffset: rotationOffsetPx / safeZoom,
     strokeWidth: Math.max(0.55, Math.min(2.4, 1.35 / safeZoom)),
   };

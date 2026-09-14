@@ -1431,6 +1431,41 @@ describe("Phase 2.0 - transform and property UX completion", () => {
     expect(outline.closest("g")?.getAttribute("transform")).toContain("rotate(35");
   });
 
+  it("gives furniture the precise rotation interaction and transient angle badge", () => {
+    const { container } = render(<Harness onCampusChange={(c) => { latestCampus = c; }} />);
+    const svg = stubSvgRect(container);
+
+    fireEvent.mouseDown(furnitureGroup(container, "Desk"), { clientX: 99, clientY: 96, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+
+    const hit = screen.getByTestId("furniture-rotate-handle-hit");
+    expect(Number(hit.getAttribute("r"))).toBeGreaterThan(Number(screen.getByTestId("furniture-rotate-handle").getAttribute("r")));
+    fireEvent.mouseDown(hit, { clientX: 99, clientY: 72, bubbles: true });
+    fireEvent.mouseMove(svg, { clientX: 117, clientY: 96, bubbles: true });
+
+    expect(latestCampus?.buildings[0].floors[0].furniture[0].rotation).toBe(90);
+    expect(screen.getByTestId("furniture-rotation-angle")).toHaveTextContent("90°");
+    fireEvent.mouseUp(svg, { bubbles: true });
+    expect(screen.queryByTestId("furniture-rotation-angle")).not.toBeInTheDocument();
+  });
+
+  it("magnetically snaps furniture to cardinals and uses Shift for 15-degree turns", () => {
+    const { container } = render(<Harness onCampusChange={(c) => { latestCampus = c; }} />);
+    const svg = stubSvgRect(container);
+    fireEvent.mouseDown(furnitureGroup(container, "Desk"), { clientX: 99, clientY: 96, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+
+    const hit = screen.getByTestId("furniture-rotate-handle-hit");
+    fireEvent.mouseDown(hit, { clientX: 99, clientY: 72, bubbles: true });
+    // About 43 degrees from the top handle; Shift rounds the final angle to 45.
+    fireEvent.mouseMove(svg, { clientX: 120, clientY: 74, shiftKey: true, bubbles: true });
+    expect(latestCampus?.buildings[0].floors[0].furniture[0].rotation).toBe(45);
+    fireEvent.mouseMove(svg, { clientX: 120, clientY: 74, shiftKey: false, bubbles: true });
+    expect(latestCampus?.buildings[0].floors[0].furniture[0].rotation).toBeGreaterThan(40);
+    expect(latestCampus?.buildings[0].floors[0].furniture[0].rotation).toBeLessThan(46);
+    fireEvent.mouseUp(svg, { bubbles: true });
+  });
+
   it("clicking empty space inside a multi-selection moves the group instead of clearing it", () => {
     const { container } = render(<Harness onCampusChange={(c) => { latestCampus = c; }} />);
     const svg = marqueeSelect(container);
@@ -1840,6 +1875,21 @@ describe("Phase 1.8 — Selected Objects inspector", () => {
     expect(screen.queryByLabelText("Floor canvas height")).toBeNull();
     // Floor Settings is not reachable from the multi panel
     expect(panel.textContent).not.toContain("Floor Settings");
+    // Multi-selection productivity is intentionally compact: alignment and
+    // distribution remain helper-level capabilities, but are not exposed as
+    // visible sidebar actions.
+    for (const action of [
+      "Distribute Horizontally",
+      "Distribute Vertically",
+      "Align Left",
+      "Align Center X",
+      "Align Right",
+      "Align Top",
+      "Align Center Y",
+      "Align Bottom",
+    ]) {
+      expect(screen.queryByRole("button", { name: action })).toBeNull();
+    }
   });
 
   it("mixed selection count stays correct across modifier clicks", () => {
@@ -2260,8 +2310,9 @@ describe("Phase 1.8 — curated furniture library", () => {
     fireEvent.mouseUp(svg, { bubbles: true });
 
     const item = latestCampus!.buildings[0].floors[0].furniture[0];
-    // Only the width changed (east handle → desk ceiling 74); height stayed put
-    expect(item.width).toBe(74);
+    // Only the width changed. Furniture may grow beyond the former type cap;
+    // the practical maximum is the available floor boundary.
+    expect(item.width).toBeGreaterThan(74);
     expect(item.height).toBe(12);
     expect(item.x + item.width).toBeLessThanOrEqual(220);
   });
@@ -2606,13 +2657,15 @@ describe("Phase 1.8 — Floor Settings dialog", () => {
 
     fireEvent.change(screen.getByLabelText("Floor canvas width"), { target: { value: "300" } });
     fireEvent.change(screen.getByLabelText("Floor canvas height"), { target: { value: "220" } });
+    fireEvent.change(screen.getByLabelText("Floor material"), { target: { value: "ceramic_tile" } });
+    fireEvent.change(screen.getByLabelText("Floor texture"), { target: { value: "subtle" } });
     fireEvent.click(screen.getByRole("button", { name: /Background Warm White/i }));
     fireEvent.click(screen.getByRole("button", { name: /Show canvas grid/i }));
     fireEvent.click(screen.getByRole("button", { name: "Grid size 40" }));
     fireEvent.click(screen.getByRole("button", { name: "Save Changes" }));
 
     const floor = latestCampus!.buildings[0].floors[0];
-    expect(floor).toMatchObject({ canvasW: 300, canvasH: 220, backgroundColor: "#faf7f0", showGrid: false, gridSize: 40 });
+    expect(floor).toMatchObject({ canvasW: 300, canvasH: 220, backgroundColor: "#faf7f0", appearance: { material: "ceramic_tile", texture: "subtle", color: "#faf7f0" }, showGrid: false, gridSize: 40 });
 
     // The floor surface visually uses the applied background; grid lines hide
     const boundary = screen.getByTestId("floor-canvas-boundary");
@@ -2714,6 +2767,23 @@ describe("Phase 1.8 — Floor Settings dialog", () => {
     openSettings();
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     await waitFor(() => expect(screen.queryByTestId("floor-settings-dialog")).toBeNull());
+  });
+
+  it("enters an in-canvas floor resize mode and restores normal properties controls on cancel", async () => {
+    const { container } = render(<Harness />);
+    stubSvgRect(container);
+    openSettings();
+
+    fireEvent.click(screen.getByRole("button", { name: "Resize on canvas" }));
+
+    await waitFor(() => expect(screen.queryByTestId("floor-settings-dialog")).toBeNull());
+    expect(screen.getByTestId("floor-resize-panel")).toBeInTheDocument();
+    expect(screen.getByTestId("floor-resize-handle-se")).toHaveAttribute("role", "button");
+    expect((screen.getByRole("button", { name: "Toggle properties panel" }) as HTMLButtonElement).disabled).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel floor resize" }));
+    await waitFor(() => expect(screen.queryByTestId("floor-resize-panel")).toBeNull());
+    expect((screen.getByRole("button", { name: "Toggle properties panel" }) as HTMLButtonElement).disabled).toBe(false);
   });
 
   it("does not leak Floor Settings controls into multi-selection or single-object properties", () => {

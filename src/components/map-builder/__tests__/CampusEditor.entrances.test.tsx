@@ -209,13 +209,14 @@ describe("CampusEditor building entrances", () => {
     fireEvent.mouseUp(svg, { clientX: 1000, clientY: 340, bubbles: true });
 
     expect(screen.getByTestId("canvas-resize-handles")).toBeInTheDocument();
-    expect(screen.getByTestId("canvas-resize-confirmation")).toBeInTheDocument();
+    expect(screen.getByTestId("canvas-resize-panel")).toBeInTheDocument();
+    expect(screen.getByTestId("canvas-resize-panel").closest('[data-testid="map-editor-workspace"]')).toBeTruthy();
     expect(latestCampus).toBeNull();
     expect(screen.getByText(/1000 × 680px/)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.queryByTestId("canvas-resize-handles")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("canvas-resize-confirmation")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("canvas-resize-panel")).not.toBeInTheDocument();
     expect(latestCampus).toBeNull();
   });
 
@@ -230,8 +231,26 @@ describe("CampusEditor building entrances", () => {
     fireEvent.mouseLeave(svg, { bubbles: true });
 
     expect(screen.getByTestId("canvas-resize-handles")).toBeInTheDocument();
-    expect(screen.getByTestId("canvas-resize-confirmation")).toBeInTheDocument();
+    expect(screen.getByTestId("canvas-resize-panel")).toBeInTheDocument();
     expect(screen.getByText(/1000 × 680px/)).toBeInTheDocument();
+  });
+
+  it("suppresses Properties while resizing and restores it after Escape", () => {
+    const { container } = render(<Harness />);
+    const svg = canvasSvg(container);
+    fireEvent.mouseDown(buildingGroup(container), { clientX: 120, clientY: 120, bubbles: true });
+    fireEvent.mouseUp(svg, { clientX: 120, clientY: 120, bubbles: true });
+    expect(screen.getByText("Building", { exact: true })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("canvas-settings-trigger"));
+    fireEvent.click(screen.getByRole("button", { name: "Resize on canvas" }));
+    const hiddenProperties = screen.getByText("Building", { exact: true }).parentElement?.parentElement;
+    expect(hiddenProperties).toHaveStyle({ transform: "translateX(100%)" });
+    expect(screen.getByTestId("canvas-resize-panel")).toBeInTheDocument();
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByTestId("canvas-resize-panel")).not.toBeInTheDocument();
+    expect(screen.getByText("Building", { exact: true }).parentElement?.parentElement).toHaveStyle({ transform: "translateX(0)" });
   });
 
   it("opens the campus-specific keyboard shortcut help from the toolbar", () => {

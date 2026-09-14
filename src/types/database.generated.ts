@@ -812,6 +812,69 @@ export type Database = {
           },
         ]
       }
+      map_templates: {
+        Row: {
+          id: string
+          name: string
+          description: string | null
+          scope: string
+          category: string
+          source_scope: string
+          campus_id: string | null
+          created_by: string
+          template_data: Json
+          preview_metadata: Json | null
+          is_archived: boolean
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          name: string
+          description?: string | null
+          scope: string
+          category: string
+          source_scope: string
+          campus_id?: string | null
+          created_by: string
+          template_data: Json
+          preview_metadata?: Json | null
+          is_archived?: boolean
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          name?: string
+          description?: string | null
+          scope?: string
+          category?: string
+          source_scope?: string
+          campus_id?: string | null
+          created_by?: string
+          template_data?: Json
+          preview_metadata?: Json | null
+          is_archived?: boolean
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "map_templates_campus_id_fkey"
+            columns: ["campus_id"]
+            isOneToOne: false
+            referencedRelation: "campuses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "map_templates_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       navigation_edges: {
         Row: {
           campus_id: string

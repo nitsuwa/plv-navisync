@@ -4,6 +4,7 @@ import {
 } from "lucide-react";
 import { cn } from "../../lib/utils";
 import type { FloorPlan } from "./types";
+import { isFloorAuthoringGridEligible, normalizeFloorAppearance } from "../../lib/floorAppearance";
 
 interface FloorOverviewSidebarProps {
   floor: FloorPlan;
@@ -20,6 +21,7 @@ interface FloorOverviewSidebarProps {
   onShowGrid: (visible: boolean) => void;
   onGridSize: (size: 10 | 20 | 40) => void;
   onOpenSettings: () => void;
+  onSaveAsTemplate?: () => void;
   onDuplicate: () => void;
   onMoveUp: () => void;
   onMoveDown: () => void;
@@ -79,11 +81,14 @@ function CommitInput({ ariaLabel, value, onCommit, min = 1 }: {
 export function FloorOverviewSidebar({
   floor, canvasW, canvasH, isFirst, isLast, isOnly,
   onClose, onRename, onCanvasSize, onShowGrid, onGridSize,
-  onOpenSettings, onDuplicate, onMoveUp, onMoveDown, onDelete,
+  onOpenSettings, onSaveAsTemplate, onDuplicate, onMoveUp, onMoveDown, onDelete,
   perimeterEnabled = false,
 }: FloorOverviewSidebarProps) {
   const showGrid = floor.showGrid !== false;
   const gridSize = floor.gridSize ?? 20;
+  const appearance = normalizeFloorAppearance(floor.appearance, floor.backgroundColor ?? "#e8e1d7");
+  const authoringGridEligible = isFloorAuthoringGridEligible(appearance.material, appearance.texture);
+  const visualGridVisible = showGrid && authoringGridEligible;
 
   return (
     <div className="w-64 shrink-0 flex flex-col border-l border-border overflow-hidden bg-card">
@@ -139,27 +144,38 @@ export function FloorOverviewSidebar({
           <button
             type="button"
             aria-label="Show Grid"
-            aria-pressed={showGrid}
-            onClick={() => onShowGrid(!showGrid)}
-            className="w-full h-8 px-2.5 rounded-lg border border-border bg-muted/20 flex items-center gap-2 text-left transition-all hover:bg-muted/40"
+            aria-pressed={visualGridVisible}
+            disabled={!authoringGridEligible}
+            onClick={() => { if (authoringGridEligible) onShowGrid(!showGrid); }}
+            title={authoringGridEligible ? "Toggle the visual authoring grid" : "Authoring grid is only available with Neutral material and Texture None."}
+            className={cn(
+              "w-full h-8 px-2.5 rounded-lg border border-border bg-muted/20 flex items-center gap-2 text-left transition-all hover:bg-muted/40",
+              !authoringGridEligible && "cursor-not-allowed opacity-55 hover:bg-muted/20",
+            )}
           >
-            <Grid3X3 className={cn("h-3.5 w-3.5", showGrid ? "text-primary" : "text-muted-foreground/60")} />
+            <Grid3X3 className={cn("h-3.5 w-3.5", visualGridVisible ? "text-primary" : "text-muted-foreground/60")} />
             <span className="text-[11px] font-bold flex-1">Show Grid</span>
-            <span className="text-[9px] opacity-70">{showGrid ? "Visible" : "Hidden"}</span>
-            {showGrid ? <Eye className="h-3 w-3 text-primary" /> : <EyeOff className="h-3 w-3 text-muted-foreground/60" />}
+            <span className="text-[9px] opacity-70">{!authoringGridEligible ? "Unavailable" : visualGridVisible ? "Visible" : "Hidden"}</span>
+            {visualGridVisible ? <Eye className="h-3 w-3 text-primary" /> : <EyeOff className="h-3 w-3 text-muted-foreground/60" />}
           </button>
+          {!authoringGridEligible && (
+            <p className="mt-1.5 text-[9px] leading-relaxed text-muted-foreground" data-testid="floor-grid-disabled-help">
+              Authoring grid is only available with Neutral material and Texture None.
+            </p>
+          )}
           <div className="mt-2">
             <span className={labelCls}>Grid Size</span>
-            <div className="grid grid-cols-3 gap-1 rounded-lg border border-border bg-muted/20 p-1">
+            <div className={cn("grid grid-cols-3 gap-1 rounded-lg border border-border bg-muted/20 p-1", !authoringGridEligible && "opacity-55")}>
               {([10, 20, 40] as const).map((size) => (
                 <button
                   key={size}
                   type="button"
                   aria-label={`Floor grid ${size}`}
                   aria-pressed={gridSize === size}
-                  onClick={() => onGridSize(size)}
+                  disabled={!authoringGridEligible}
+                  onClick={() => { if (authoringGridEligible) onGridSize(size); }}
                   className={cn(
-                    "h-7 rounded-md text-[10px] font-extrabold transition-all",
+                    "h-7 rounded-md text-[10px] font-extrabold transition-all disabled:cursor-not-allowed disabled:hover:bg-transparent",
                     gridSize === size
                       ? "bg-primary text-primary-foreground shadow-sm"
                       : "text-muted-foreground hover:bg-background hover:text-foreground"
@@ -203,6 +219,7 @@ export function FloorOverviewSidebar({
             <button type="button" onClick={onOpenSettings} className={`${actionBtnCls} bg-primary/10 text-primary hover:bg-primary/15`}>
               <Settings2 className="h-3.5 w-3.5" /> Open Floor Settings
             </button>
+            {onSaveAsTemplate && <button type="button" onClick={onSaveAsTemplate} className={actionBtnCls}><Copy className="h-3.5 w-3.5" /> Save Floor as Template</button>}
             <button type="button" onClick={onDuplicate} className={actionBtnCls}>
               <Copy className="h-3.5 w-3.5" /> Duplicate Floor
             </button>

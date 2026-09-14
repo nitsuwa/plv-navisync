@@ -13,6 +13,7 @@ import type {
 } from "./types";
 import { elevatorSystemNumberOf } from "./types";
 import { doorDisplayName, type EntranceIndoorLinkStatus } from "../../lib/entranceTransitions";
+import { rotationDisplayAngle } from "../../lib/campusSelection";
 
 type TabId = "basic" | "style" | "advanced";
 
@@ -102,6 +103,7 @@ interface FloorPropertiesPanelProps {
   onGoToFloor?: (floorId: string) => void;
   onDeleteSelected: () => void;
   onDuplicateSelected: () => void;
+  onSaveRoomAsTemplate?: (roomId: string) => void;
   onSetSelectedState: (changes: { visible?: boolean; locked?: boolean }) => void;
   onLayerAction: (action: "bring-forward" | "send-backward" | "bring-front" | "send-back") => void;
   onClose: () => void;
@@ -273,7 +275,7 @@ function effectiveDoorType(door: FloorDoor): "single" | "double" {
   onApplyWallColorToFloor,
   onUpdateFurniture,  onUpdateStairs, onUpdateRamp, onUpdateElevator, onUpdateLabel,
   onToggleNavConnection,
-  onDeleteSelected, onDuplicateSelected, onSetSelectedState, onLayerAction, onClose,
+  onDeleteSelected, onDuplicateSelected, onSaveRoomAsTemplate, onSetSelectedState, onLayerAction, onClose,
   floorId, buildingFloors, circulationGroups, circulationNavStatus, physicalNavStatus,
   entranceConnectionStatus,
   roomDoorStatus,
@@ -1497,6 +1499,11 @@ function effectiveDoorType(door: FloorDoor): "single" | "double" {
                 </Field>
             </div>
             <RoomNavigationCard />
+            {onSaveRoomAsTemplate && (
+              <button type="button" onClick={() => onSaveRoomAsTemplate(selRoom.id)} className="w-full h-9 rounded-xl border border-primary/30 bg-primary/5 text-xs font-bold text-primary hover:bg-primary/10 transition-colors">
+                Save as Template
+              </button>
+            )}
             <button onClick={onDeleteSelected}
               className="w-full h-9 rounded-xl border border-destructive/30 text-xs font-bold text-destructive hover:bg-destructive/10 transition-colors">
               <span className="flex items-center justify-center gap-1.5"><AlertTriangle className="h-3 w-3" /> Delete Room</span>
@@ -1805,7 +1812,7 @@ function effectiveDoorType(door: FloorDoor): "single" | "double" {
                 <input type="range" min={0} max={360} step={15} value={selFurniture.rotation}
                   onChange={(e) => onUpdateFurniture(selFurniture.id, { rotation: parseInt(e.target.value) })}
                   className="flex-1 h-1.5 accent-primary" />
-                <span className="text-xs font-mono text-muted-foreground w-8 text-right shrink-0">{selFurniture.rotation}°</span>
+                <span className="text-xs font-mono text-muted-foreground w-8 text-right shrink-0">{rotationDisplayAngle(selFurniture.rotation)}°</span>
               </div>
             </Field>
             <Field label="Color">

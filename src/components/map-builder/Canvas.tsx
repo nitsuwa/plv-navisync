@@ -10,7 +10,7 @@ import { DECOR_ASSET_MAP, BUILDING_TYPE_MAP, genId, getRotatedAABB, groundTypeFo
 import { computeBuildingPlacement, screenToWorld } from "../../lib/editorPlacement";
 import { decorRenderScale, decorSelectionOutlineBox, decorWorldSize } from "../../lib/decorVisual";
 import { mergeOutdoorStack, sortOutdoorGroundAssets } from "../../lib/campusStack";
-import { outdoorGroupSelectionBounds, transformControlMetrics } from "../../lib/campusSelection";
+import { outdoorGroupSelectionBounds, rotationDisplayAngle, transformControlMetrics } from "../../lib/campusSelection";
 import { navGroupSelectionBounds } from "../../lib/navigationGraph";
 import { DecorAssetArt, DecorAssetVisual } from "./DecorAssetVisual";
 import { CampusGateVisual } from "./CampusGateVisual";
@@ -25,8 +25,9 @@ import {
   shouldRenderPathwayAuthoringPreview,
 } from "../../lib/campusPathNetwork";
 import { surfaceCellRuns } from "../../lib/campusSurface";
-import { campusAreaGroundAppearance, campusGroundAppearance, campusGroundPatternId, campusObjectSafeBounds } from "../../lib/campusCanvas";
+import { campusAreaGroundAppearance, campusGroundAppearance, campusObjectSafeBounds } from "../../lib/campusCanvas";
 import { CampusGroundPatternDefs } from "./CampusGroundPatternDefs";
+import { CampusGroundSurface } from "./CampusGroundSurface";
 
 // ── Rotation-aware resize cursor helpers (shared by buildings and decor assets) ──
 function angleToCursor(deg: number): string {
@@ -395,6 +396,8 @@ interface CanvasProps {
   selected: CampusSelection | null;
   multiSelected: string[];
   selectedPathPoint?: { pathId: string; pointIndex: number } | null;
+  /** Explicit physical Pathway vertex currently highlighted as a join target. */
+  pathVertexSnapTarget?: { pathId: string; pointIndex: number } | null;
   showGroupOutline?: boolean;
   rubberBand: RubberBand | null;
   drawingPath: { x: number; y: number }[];
@@ -657,7 +660,7 @@ function routeDirectionMarkers(points: { x: number; y: number }[]): { x: number;
 }
 
 export function Canvas({
-  campus, tool, layer, selected, multiSelected, selectedPathPoint = null, showGroupOutline = true, rubberBand, drawingPath, snapGrid,
+  campus, tool, layer, selected, multiSelected, selectedPathPoint = null, pathVertexSnapTarget = null, showGroupOutline = true, rubberBand, drawingPath, snapGrid,
   zoom, pan, svgRef, containerRef, cursor,
   buildingDrag, buildingPlacementPreview, groundBrushPreview, groundErasePreview, groundPaintType = "grass", armedDecorAssetType, armedCampusGatePlacement = false, pathPaintPreview, guides, cursorPos, overlappingBuildings,
   onCanvasDown, onCanvasMove, onCanvasUp, onCanvasLeave, onCanvasDblClick,
@@ -687,6 +690,15 @@ export function Canvas({
       pathPointCounts.set(key, (pathPointCounts.get(key) ?? 0) + 1);
     });
   });
+  // Keep one visible handle for a shared physical junction while retaining
+  // each underlying vertex hit target for explicit owner-aware editing.
+  const pathJunctionVisualOwner = new Map<string, string>();
+  paths.forEach((path) => path.points.forEach((point, index) => {
+    const key = pathPointRenderKey(point);
+    if ((pathPointCounts.get(key) ?? 0) > 1 && !pathJunctionVisualOwner.has(key)) {
+      pathJunctionVisualOwner.set(key, `${path.id}:${index}`);
+    }
+  }));
   const decorAssets = campus.decorAssets ?? [];
   // Ground/area assets remain in the dedicated background layer (below paths
   // and foreground objects), but they still honour the same optional z-order
@@ -759,7 +771,6 @@ export function Canvas({
   const cw = (canvasW ?? campus.canvasW) || 900;
   const ch = (canvasH ?? campus.canvasH) || 680;
   const groundAppearance = campusGroundAppearance(campus);
-  const groundPattern = campusGroundPatternId(groundAppearance.material, groundAppearance.texture);
   const groundStyle = (kind: CampusDecorAsset["groundType"] = "grass", asset?: CampusDecorAsset) => {
     const appearance = campusAreaGroundAppearance(asset ?? { type: "ground-area", groundType: kind });
     switch (kind) {
@@ -1050,6 +1061,7 @@ export function Canvas({
         {p.points.map((point, index) => {
           const pointKey = `${Number(point.x.toFixed(3))}:${Number(point.y.toFixed(3))}`;
           const isJunctionPoint = (pathPointCounts.get(pointKey) ?? 0) > 1;
+          const isPrimaryJunctionVisual = !isJunctionPoint || pathJunctionVisualOwner.get(pointKey) === `${p.id}:${index}`;
           const isSelectedPoint = selectedPathPoint?.pathId === p.id && selectedPathPoint.pointIndex === index;
           return (
             <g key={`${p.id}-pt-${index}`}>
@@ -1063,7 +1075,7 @@ export function Canvas({
                 fill={isSelectedPoint ? "var(--accent)" : "var(--card)"}
                 stroke={isJunctionPoint ? "#f59e0b" : "var(--accent)"}
                 strokeWidth={isSelectedPoint || isJunctionPoint ? 2.5 : 2}
-                style={{ cursor: "grab", pointerEvents: "all" }}
+                style={{ cursor: "grab", pointerEvents: "all", ...(isPrimaryJunctionVisual ? {} : { opacity: 0, fill: "transparent", stroke: "transparent" }) }}
                 onMouseDown={(e) => onPathPointDown?.(e, p.id, index)}
                 onClick={(e) => e.stopPropagation()}
               />
@@ -1216,8 +1228,15 @@ export function Canvas({
         </defs>
         <g transform={`translate(${pan.x},${pan.y}) scale(${zoom})`}>
           {/* Canvas material is independent from the logical/editor snapping grid. */}
-          <rect data-bg="true" data-ground-material={groundAppearance.material} width={cw} height={ch} fill={groundAppearance.color} />
-          {groundPattern && <rect data-testid="campus-ground-texture" width={cw} height={ch} fill={`url(#${groundPattern})`} pointerEvents="none" opacity={0.82} />}
+          <CampusGroundSurface
+            material={groundAppearance.material}
+            color={groundAppearance.color}
+            texture={groundAppearance.texture}
+            width={cw}
+            height={ch}
+            baseIsBackground
+            textureTestId="campus-ground-texture"
+          />
           {/* A restrained perimeter makes the authored campus extent explicit
               without adding another interactive object or affecting hit tests. */}
             <rect
@@ -1471,7 +1490,7 @@ export function Canvas({
                         style={{ cursor: getEdgeCursor(side, rot) }}
                         onMouseDown={(e) => { e.stopPropagation(); onDecorResizeStart?.(e, area, side); }}
                       />
-                      <circle cx={p.x} cy={p.y} r={controls.rotationRadius} fill="white" stroke="var(--accent)" strokeWidth={controls.strokeWidth} className="pointer-events-none" />
+                      <circle cx={p.x} cy={p.y} r={controls.handleSize / 2} fill="white" stroke="var(--accent)" strokeWidth={controls.strokeWidth} className="pointer-events-none" />
                     </g>
                   );
                 })}
@@ -1716,6 +1735,25 @@ export function Canvas({
               internal end outlines; same-style joins are one continuous chain). */}
           {renderPathJunctionLayer()}
           {paths.map((p) => renderPathControls(p))}
+          {pathVertexSnapTarget && (() => {
+            const targetPath = paths.find((path) => path.id === pathVertexSnapTarget.pathId);
+            const targetPoint = targetPath?.points[pathVertexSnapTarget.pointIndex];
+            if (!targetPoint) return null;
+            return (
+              <circle
+                data-testid="path-vertex-snap-target"
+                cx={targetPoint.x}
+                cy={targetPoint.y}
+                r={12}
+                fill="none"
+                stroke="var(--accent)"
+                strokeWidth={2}
+                strokeDasharray="4 3"
+                opacity={0.9}
+                className="pointer-events-none"
+              />
+            );
+          })()}
 
           {pathPaintPreview && shouldRenderPathwayAuthoringPreview(true, layer === "navigation") && (
             <g data-testid="path-paint-preview" data-path-kind={pathPaintPreview.type} className="pointer-events-none">
@@ -2137,11 +2175,11 @@ export function Canvas({
                   {isSel && singlePhysicalTransformEligible && !isLocked && rotatingId !== b.id && (
                     <g>
                       <line x1={cx} y1={b.y} x2={cx} y2={b.y - controls.rotationOffset} stroke="var(--accent)" strokeWidth={controls.strokeWidth} strokeDasharray="3 2" opacity={0.5} />
-                      <circle cx={cx} cy={b.y - controls.rotationOffset} r={controls.hitSize / 2} fill="transparent"
+                      <circle data-testid="building-rotation-handle-hit" cx={cx} cy={b.y - controls.rotationOffset} r={controls.rotationHitSize / 2} fill="transparent"
                         style={{ cursor: "grab" }}
                         onMouseDown={(e) => { e.stopPropagation(); onRotateStart?.(e, b); }}
                       />
-                      <circle cx={cx} cy={b.y - controls.rotationOffset} r={controls.rotationRadius} fill="var(--accent)" stroke="white" strokeWidth={controls.strokeWidth}
+                      <circle data-testid="building-rotation-handle-visible" cx={cx} cy={b.y - controls.rotationOffset} r={controls.rotationRadius} fill="var(--accent)" stroke="white" strokeWidth={controls.strokeWidth}
                         className="pointer-events-none"
                       />
                       <path d={`M${cx - controls.rotationRadius * 0.45} ${b.y - controls.rotationOffset - controls.rotationRadius * 0.2} Q${cx} ${b.y - controls.rotationOffset - controls.rotationRadius * 0.8} ${cx + controls.rotationRadius * 0.45} ${b.y - controls.rotationOffset - controls.rotationRadius * 0.2}`}
@@ -2170,28 +2208,20 @@ export function Canvas({
                 </g>
 
                 {/* ══ Degree indicators — OUTSIDE rotation group so text stays axis-aligned & readable ══ */}
-                {/* Static degree badge (non-rotating) */}
-                {isSel && !isLocked && rotatingId !== b.id && rot !== 0 && (() => {
-                  const rotAABB = getRotatedAABB(b.x, b.y, b.width, b.height, rot);
-                  const visCx = rotAABB.x + rotAABB.width / 2;
-                  const visTop = rotAABB.y;
-                  return (
-                    <g className="pointer-events-none select-none">
-                      <rect x={visCx - 16} y={visTop - 14} width={32} height={14} rx={3} fill="var(--accent)" opacity={0.9} />
-                      <text x={visCx} y={visTop - 4} textAnchor="middle" fill="white" fontSize={8} fontWeight="800">{rot}°</text>
-                    </g>
-                  );
-                })()}
                 {/* Floating degree indicator during active rotation (axis-aligned, readable) */}
                 {isSel && !isLocked && rotatingId === b.id && (() => {
                   const rotAABB = getRotatedAABB(b.x, b.y, b.width, b.height, rot);
                   const visCx = rotAABB.x + rotAABB.width / 2;
                   const visTop = rotAABB.y;
+                  const labelW = 44 / Math.max(0.01, zoom);
+                  const labelH = 18 / Math.max(0.01, zoom);
+                  const labelTop = visTop - 40 / Math.max(0.01, zoom);
+                  const labelTextY = visTop - 27 / Math.max(0.01, zoom);
                   return (
-                    <g className="pointer-events-none select-none">
-                      <line x1={visCx} y1={visTop} x2={visCx} y2={visTop - 24} stroke="var(--accent)" strokeWidth={1.5} strokeDasharray="4 3" opacity={0.6} />
-                      <rect x={visCx - 22} y={visTop - 40} width={44} height={18} rx={5} fill="var(--accent)" opacity={0.95} filter="url(#dropShadow)" />
-                      <text x={visCx} y={visTop - 27} textAnchor="middle" fill="white" fontSize={10} fontWeight="900">{rotatingAngle ?? rot}°</text>
+                    <g data-testid="building-rotation-angle" className="pointer-events-none select-none">
+                      <line x1={visCx} y1={visTop} x2={visCx} y2={visTop - 24 / Math.max(0.01, zoom)} stroke="var(--accent)" strokeWidth={1.5 / Math.max(0.01, zoom)} strokeDasharray="4 3" opacity={0.6} />
+                      <rect x={visCx - labelW / 2} y={labelTop} width={labelW} height={labelH} rx={5 / Math.max(0.01, zoom)} fill="var(--accent)" opacity={0.95} filter="url(#dropShadow)" />
+                      <text x={visCx} y={labelTextY} textAnchor="middle" fill="white" fontSize={10 / Math.max(0.01, zoom)} fontWeight="900">{rotationDisplayAngle(rotatingAngle ?? rot)}°</text>
                     </g>
                   );
                 })()}
@@ -2299,11 +2329,11 @@ export function Canvas({
                     {decorRotatingId !== da.id && (
                       <g>
                         <line x1={da.x} y1={da.y} x2={rotHandlePos.x} y2={rotHandlePos.y} stroke="var(--accent)" strokeWidth={controls.strokeWidth} strokeDasharray="3 2" opacity={0.5} />
-                        <circle cx={rotHandlePos.x} cy={rotHandlePos.y} r={controls.hitSize / 2} fill="transparent"
+                        <circle data-testid="decor-rotation-handle-hit" cx={rotHandlePos.x} cy={rotHandlePos.y} r={controls.rotationHitSize / 2} fill="transparent"
                           style={{ cursor: "grab" }}
                           onMouseDown={(e) => { e.stopPropagation(); onDecorRotateStart?.(e, da); }}
                         />
-                        <circle cx={rotHandlePos.x} cy={rotHandlePos.y} r={controls.rotationRadius} fill="var(--accent)" stroke="white" strokeWidth={controls.strokeWidth} className="pointer-events-none" />
+                        <circle data-testid="decor-rotation-handle-visible" cx={rotHandlePos.x} cy={rotHandlePos.y} r={controls.rotationRadius} fill="var(--accent)" stroke="white" strokeWidth={controls.strokeWidth} className="pointer-events-none" />
                         <path d={`M${rotHandlePos.x - controls.rotationRadius * 0.45} ${rotHandlePos.y - controls.rotationRadius * 0.2} Q${rotHandlePos.x} ${rotHandlePos.y - controls.rotationRadius * 0.8} ${rotHandlePos.x + controls.rotationRadius * 0.45} ${rotHandlePos.y - controls.rotationRadius * 0.2}`}
                           fill="none" stroke="white" strokeWidth={controls.strokeWidth} strokeLinecap="round" className="pointer-events-none" />
                       </g>
@@ -2321,18 +2351,11 @@ export function Canvas({
                         </g>
                       );
                     })}
-                    {/* Static degree badge (axis-aligned, readable) */}
-                    {rot !== 0 && decorRotatingId !== da.id && (
-                      <g className="pointer-events-none select-none">
-                        <rect x={visCx - 16} y={aabb.y - 14} width={32} height={14} rx={3} fill="var(--accent)" opacity={0.9} />
-                        <text x={visCx} y={aabb.y - 4} textAnchor="middle" fill="white" fontSize={8} fontWeight="800">{rot}°</text>
-                      </g>
-                    )}
                     {/* Floating degree indicator during active rotation */}
                     {decorRotatingId === da.id && (
-                      <g className="pointer-events-none select-none">
-                        <rect x={visCx - 22} y={aabb.y - 40} width={44} height={18} rx={5} fill="var(--accent)" opacity={0.95} filter="url(#dropShadow)" />
-                        <text x={visCx} y={aabb.y - 27} textAnchor="middle" fill="white" fontSize={10} fontWeight="900">{rotatingAngle ?? rot}°</text>
+                      <g data-testid="decor-rotation-angle" className="pointer-events-none select-none">
+                        <rect x={visCx - 22 / Math.max(0.01, zoom)} y={aabb.y - 40 / Math.max(0.01, zoom)} width={44 / Math.max(0.01, zoom)} height={18 / Math.max(0.01, zoom)} rx={5 / Math.max(0.01, zoom)} fill="var(--accent)" opacity={0.95} filter="url(#dropShadow)" />
+                        <text x={visCx} y={aabb.y - 27 / Math.max(0.01, zoom)} textAnchor="middle" fill="white" fontSize={10 / Math.max(0.01, zoom)} fontWeight="900">{rotationDisplayAngle(rotatingAngle ?? rot)}°</text>
                       </g>
                     )}
                     {/* Scale indicator during resize */}

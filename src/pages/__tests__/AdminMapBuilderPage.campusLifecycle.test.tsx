@@ -373,6 +373,107 @@ describe("AdminMapBuilderPage — campus lifecycle", () => {
     }));
   });
 
+  it("HYDRATION: never mounts the editor from a lightweight card while the complete structure is loading", async () => {
+    sessionStorage.clear();
+    const lightweight = makeCampus({
+      id: "campus-hydration",
+      name: "Hydration Campus",
+      code: "HYD",
+      canvasConfigured: true,
+      buildings: [makePreviewBuilding("preview")],
+      previewBuildingCount: 1,
+      previewBuildingsLoaded: true,
+    });
+    const hydrated = makeCampus({
+      ...lightweight,
+      buildings: [{ ...makePreviewBuilding("canonical"), floors: [] }],
+      paths: [{ id: "path-1", name: "Walkway", type: "walkway", points: [{ x: 20, y: 20 }, { x: 180, y: 20 }], width: 12, color: "#2563eb" }],
+      markers: [{ id: "gate-1", name: "Campus Gate", type: "gate", purpose: "general", x: 30, y: 30, width: 24, height: 24, color: "#2563eb" }],
+      decorAssets: [{ id: "decor-1", type: "monument", name: "Monument", category: "Landmarks", x: 90, y: 90, scale: 1, rotation: 0, color: "#64748b" }],
+      navNodes: [],
+      navEdges: [],
+    });
+    let resolveLoad!: (value: Campus) => void;
+    (campusService.list as ReturnType<typeof vi.fn>).mockResolvedValue([lightweight]);
+    (campusStructureService.load as ReturnType<typeof vi.fn>).mockImplementation(() => new Promise<Campus>((resolve) => { resolveLoad = resolve; }));
+
+    renderPage();
+    await flush();
+    fireEvent.click(screen.getByRole("button", { name: /open editor/i }));
+    expect(screen.getByTestId("campus-structure-loading")).toBeInTheDocument();
+    expect(screen.queryByTitle("Back to campus list")).not.toBeInTheDocument();
+    expect(campusStructureService.save).not.toHaveBeenCalled();
+    expect(sessionStorage.length).toBe(0);
+
+    await act(async () => { resolveLoad(hydrated); await Promise.resolve(); });
+    expect(await screen.findByTitle("Back to campus list")).toBeInTheDocument();
+    expect(screen.queryByTestId("campus-structure-loading")).not.toBeInTheDocument();
+    expect(screen.getAllByTestId("campus-path")).toHaveLength(1);
+    expect(screen.getByTestId("campus-gate")).toBeInTheDocument();
+    expect(screen.getByTestId("decor-hitbox")).toBeInTheDocument();
+    expect(sessionStorage.length).toBe(0);
+  });
+
+  it("HYDRATION: first entry and back/re-entry render the same canonical campus snapshot", async () => {
+    const lightweight = makeCampus({
+      id: "campus-equivalence",
+      name: "Equivalence Campus",
+      code: "EQU",
+      canvasConfigured: true,
+      buildings: [makePreviewBuilding("preview")],
+      previewBuildingCount: 1,
+      previewBuildingsLoaded: true,
+    });
+    const hydrated = makeCampus({
+      ...lightweight,
+      buildings: [{
+        ...makePreviewBuilding("canonical"),
+        floors: [{
+          id: "floor-1", buildingId: "canonical", number: 1, label: "Ground Floor",
+          rooms: [{ id: "room-1", buildingId: "canonical", floorId: "floor-1", name: "Room 1", type: "classroom", x: 10, y: 10, w: 40, h: 30 }],
+          paths: [], walls: [], doors: [], windows: [],
+          furniture: [{ id: "furniture-1", type: "chair", name: "Chair", x: 20, y: 20, width: 12, height: 12, rotation: 0 }],
+          stairs: [], ramps: [], elevators: [], labels: [],
+        }],
+      }],
+      paths: [{ id: "path-1", name: "Walkway", type: "walkway", points: [{ x: 20, y: 20 }, { x: 180, y: 20 }], navigationVertexIds: ["vertex-1", "vertex-2"], width: 12, color: "#2563eb" }],
+      markers: [{ id: "gate-1", name: "Campus Gate", type: "gate", purpose: "general", x: 30, y: 30, width: 24, height: 24, color: "#2563eb" }],
+      decorAssets: [{ id: "decor-1", type: "monument", name: "Monument", category: "Landmarks", x: 90, y: 90, scale: 1, rotation: 0, color: "#64748b" }],
+      navNodes: [
+        { id: "nav-1", name: "Walking Point", type: "outdoor", x: 20, y: 20, campusId: lightweight.id, accessible: true, color: "#16a34a", generatedFromPathVertices: [{ pathId: "path-1", vertexId: "vertex-1" }] },
+        { id: "nav-2", name: "Walking Point", type: "outdoor", x: 180, y: 20, campusId: lightweight.id, accessible: true, color: "#16a34a", generatedFromPathVertices: [{ pathId: "path-1", vertexId: "vertex-2" }] },
+      ],
+      navEdges: [{ id: "edge-1", startNodeId: "nav-1", endNodeId: "nav-2", distance: 160, bidirectional: true, accessible: true, emergencySafe: true, type: "walkway", color: "#16a34a", width: 4, generatedFromPathIds: ["path-1"] }],
+    });
+    (campusService.list as ReturnType<typeof vi.fn>).mockResolvedValue([lightweight]);
+    (campusStructureService.load as ReturnType<typeof vi.fn>).mockResolvedValue(hydrated);
+
+    renderPage();
+    await flush();
+    fireEvent.click(screen.getByRole("button", { name: /open editor/i }));
+    expect(screen.getByTestId("campus-structure-loading")).toBeInTheDocument();
+
+    await screen.findByTestId("campus-path");
+    const firstSnapshot = {
+      paths: screen.getAllByTestId("campus-path").length,
+      gates: screen.getAllByTestId("campus-gate").length,
+      decor: screen.getAllByTestId("decor-hitbox").length,
+    };
+    expect(firstSnapshot).toEqual({ paths: 1, gates: 1, decor: 1 });
+
+    fireEvent.click(screen.getByTitle("Back to campus list"));
+    expect(await screen.findByRole("heading", { name: "Campus Management" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /open editor/i }));
+    const secondSnapshot = {
+      paths: (await screen.findAllByTestId("campus-path")).length,
+      gates: (await screen.findAllByTestId("campus-gate")).length,
+      decor: (await screen.findAllByTestId("decor-hitbox")).length,
+    };
+    expect(secondSnapshot).toEqual(firstSnapshot);
+    expect(campusStructureService.load).toHaveBeenCalledTimes(2);
+    expect(screen.queryByTestId("campus-structure-loading")).not.toBeInTheDocument();
+  });
+
   it("CREATE: New Campus opens the wizard; completing it calls campusService.create exactly once with valid non-zero canvas dims and lands on success", async () => {
     (campusService.list as ReturnType<typeof vi.fn>).mockResolvedValue([]);
     const created = makeCampus({ id: "campus-new", name: "Test Campus", code: "TST" });

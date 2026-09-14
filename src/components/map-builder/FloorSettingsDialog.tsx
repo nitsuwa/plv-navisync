@@ -5,13 +5,19 @@ import { cn } from "../../lib/utils";
 import { MIN_FLOOR_CANVAS, normalizeFloorCanvasSize } from "../../lib/floorGeometry";
 import { WALL_THICKNESSES } from "./constants";
 import { ColorPicker } from "../ui/ColorPicker";
-import type { FloorPlan, FloorPlanBackground } from "./types";
+import type { FloorPlan, FloorPlanBackground, FloorMaterial, FloorTexture } from "./types";
+import { FloorGroundSurface } from "./FloorGroundSurface";
+import { DEFAULT_FLOOR_APPEARANCE, FLOOR_MATERIAL_OPTIONS, FLOOR_TEXTURE_OPTIONS, defaultFloorColorForMaterial, isFloorAuthoringGridEligible, normalizeFloorAppearance } from "../../lib/floorAppearance";
+import { CompactDropdown } from "./CompactDropdown";
 
 export interface FloorSettingsDraft {
   label: string;
   canvasW: number;
   canvasH: number;
   backgroundColor: string;
+  material: FloorMaterial;
+  texture: FloorTexture;
+  color: string;
   showGrid: boolean;
   gridSize: 10 | 20 | 40;
   perimeterEnabled: boolean;
@@ -32,6 +38,7 @@ interface FloorSettingsDialogProps {
   onResetBackground?: () => void;
   onStartCalibration?: () => void;
   onRemoveCalibration?: () => void;
+  onStartResize?: () => void;
 }
 
 /** Restrained floor-surface presets that keep walls/furniture/selection readable. */
@@ -74,17 +81,28 @@ export function FloorSettingsDialog({
   onResetBackground,
   onStartCalibration,
   onRemoveCalibration,
+  onStartResize,
 }: FloorSettingsDialogProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const persistedAppearance = normalizeFloorAppearance(floor.appearance, floor.backgroundColor ?? "#e8e1d7");
+  const initialAppearance = persistedAppearance;
   const [draft, setDraft] = useState<FloorSettingsDraft>(() => ({
     label: floor.label,
     canvasW: normalizeFloorCanvasSize(floor.canvasW, floor.canvasH).w,
     canvasH: normalizeFloorCanvasSize(floor.canvasW, floor.canvasH).h,
     backgroundColor: floor.backgroundColor ?? "#e8e1d7",
+    material: initialAppearance.material,
+    texture: initialAppearance.texture,
+    color: initialAppearance.color,
     showGrid: floor.showGrid !== false,
     gridSize: floor.gridSize ?? 20,
     ...perimeterDraftFromFloor(floor),
   }));
+  // A color is considered intentional once the author picks a swatch or uses
+  // the color picker. Material changes only replace an untouched legacy/default
+  // tint; this keeps the material vocabulary useful without erasing authored
+  // color choices.
+  const [colorCustomized, setColorCustomized] = useState(false);
 
   // Re-seed the draft whenever the dialog OPENS so it always reflects the floor.
   // (`floor` is intentionally not a dependency — normalizeFloor produces a fresh
@@ -92,15 +110,32 @@ export function FloorSettingsDialog({
   useEffect(() => {
     if (!open) return;
     const canvas = normalizeFloorCanvasSize(floor.canvasW, floor.canvasH);
+    const persistedDefault = defaultFloorColorForMaterial(persistedAppearance.material).toLowerCase();
+    const persistedColor = persistedAppearance.color.toLowerCase();
+    const legacyNeutralColor = (floor.backgroundColor ?? "#e8e1d7").toLowerCase();
+    // Normalized legacy floors receive an appearance object derived from their
+    // old backgroundColor. Treat that inherited tint as untouched so a
+    // material change can adopt its own sensible default. Also surface the
+    // corrected material default immediately when reopening an affected floor.
+    const inheritedLegacyTint = persistedColor === legacyNeutralColor
+      && persistedColor !== persistedDefault
+      && persistedAppearance.material !== "neutral";
+    const draftColor = inheritedLegacyTint
+      ? defaultFloorColorForMaterial(persistedAppearance.material)
+      : persistedAppearance.color;
     setDraft({
       label: floor.label,
       canvasW: canvas.w,
       canvasH: canvas.h,
-      backgroundColor: floor.backgroundColor ?? "#e8e1d7",
+      backgroundColor: inheritedLegacyTint ? draftColor : (floor.backgroundColor ?? "#e8e1d7"),
+      material: persistedAppearance.material,
+      texture: persistedAppearance.texture,
+      color: draftColor,
       showGrid: floor.showGrid !== false,
       gridSize: floor.gridSize ?? 20,
       ...perimeterDraftFromFloor(floor),
     });
+    setColorCustomized(persistedColor !== persistedDefault && !inheritedLegacyTint);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
@@ -114,12 +149,20 @@ export function FloorSettingsDialog({
   }, [open, onClose]);
 
   const canvas = normalizeFloorCanvasSize(draft.canvasW, draft.canvasH);
+  const authoringGridEligible = isFloorAuthoringGridEligible(draft.material, draft.texture);
+  useEffect(() => {
+    if (!open || authoringGridEligible || !draft.showGrid) return;
+    setDraft((current) => current.showGrid ? { ...current, showGrid: false } : current);
+  }, [authoringGridEligible, draft.showGrid, open]);
   const floorPerimeter = perimeterDraftFromFloor(floor);
   const isDirty =
     canvas.w !== normalizeFloorCanvasSize(floor.canvasW, floor.canvasH).w ||
     canvas.h !== normalizeFloorCanvasSize(floor.canvasW, floor.canvasH).h ||
     draft.label !== floor.label ||
     draft.backgroundColor !== (floor.backgroundColor ?? "#e8e1d7") ||
+    draft.material !== persistedAppearance.material ||
+    draft.texture !== persistedAppearance.texture ||
+    draft.color !== persistedAppearance.color ||
     draft.showGrid !== (floor.showGrid !== false) ||
     draft.gridSize !== (floor.gridSize ?? 20) ||
     draft.perimeterEnabled !== floorPerimeter.perimeterEnabled ||
@@ -236,6 +279,15 @@ export function FloorSettingsDialog({
                 <p className="text-[10px] text-muted-foreground leading-relaxed">
                   Expanding keeps existing coordinates. Shrinking is blocked when authored objects would fall outside the new floor size.
                 </p>
+                {onStartResize && (
+                  <button
+                    type="button"
+                    onClick={onStartResize}
+                    className="flex h-9 w-full items-center justify-center gap-1.5 rounded-xl border border-primary/30 bg-primary/5 text-[10px] font-extrabold text-primary transition-colors hover:bg-primary/10"
+                  >
+                    <Maximize2 className="h-3.5 w-3.5" /> Resize on canvas
+                  </button>
+                )}
               </section>
 
               {/* ── Appearance ── */}
@@ -243,56 +295,101 @@ export function FloorSettingsDialog({
                 <div className="flex items-center gap-1.5 text-[10px] font-extrabold uppercase tracking-widest text-muted-foreground">
                   <span className="text-primary">03</span> Appearance
                 </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <label className="block">
+                    <span className="block text-[9px] font-bold uppercase tracking-wider mb-1 text-muted-foreground">Material</span>
+                    <CompactDropdown
+                      ariaLabel="Floor material"
+                      value={draft.material}
+                      options={FLOOR_MATERIAL_OPTIONS}
+                      onChange={(nextMaterial) => setDraft((d) => {
+                        const nextColor = colorCustomized ? d.color : defaultFloorColorForMaterial(nextMaterial);
+                        return {
+                          ...d,
+                          material: nextMaterial,
+                          color: nextColor,
+                          backgroundColor: nextColor,
+                          showGrid: isFloorAuthoringGridEligible(nextMaterial, d.texture) ? d.showGrid : false,
+                        };
+                      })}
+                      className="h-9 rounded-xl px-2.5 text-xs"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="block text-[9px] font-bold uppercase tracking-wider mb-1 text-muted-foreground">Texture</span>
+                    <CompactDropdown
+                      ariaLabel="Floor texture"
+                      value={draft.texture}
+                      options={FLOOR_TEXTURE_OPTIONS}
+                      onChange={(nextTexture) => setDraft((d) => ({
+                        ...d,
+                        texture: nextTexture,
+                        showGrid: isFloorAuthoringGridEligible(d.material, nextTexture) ? d.showGrid : false,
+                      }))}
+                      className="h-9 rounded-xl px-2.5 text-xs"
+                    />
+                  </label>
+                </div>
                 <div>
-                  <span className="block text-[9px] font-bold uppercase tracking-wider mb-1.5 text-muted-foreground">Floor Background Color</span>
+                  <span className="block text-[9px] font-bold uppercase tracking-wider mb-1.5 text-muted-foreground">Floor Color</span>
                   <div className="flex items-center gap-2 flex-wrap">
                     {FLOOR_BACKGROUND_PRESETS.map((preset) => {
-                      const active = draft.backgroundColor.toLowerCase() === preset.value;
+                      const active = draft.color.toLowerCase() === preset.value;
                       return (
-                        <button
-                          key={preset.value}
-                          type="button"
-                          title={preset.label}
-                          aria-label={`Background ${preset.label}`}
-                          onClick={() => setDraft((d) => ({ ...d, backgroundColor: preset.value }))}
-                          className={cn(
-                            "h-9 rounded-xl border-2 transition-all flex items-center gap-1.5 px-2.5 text-[10px] font-bold",
-                            active
-                              ? "border-primary bg-primary/10 text-primary"
-                              : "border-border bg-muted/20 text-muted-foreground hover:border-primary/40 hover:text-foreground"
-                          )}
+                        <button key={preset.value} type="button" title={preset.label} aria-label={`Background ${preset.label}`}
+                          onClick={() => { setColorCustomized(true); setDraft((d) => ({ ...d, color: preset.value, backgroundColor: preset.value })); }}
+                          className={cn("h-9 rounded-xl border-2 transition-all flex items-center gap-1.5 px-2.5 text-[10px] font-bold",
+                            active ? "border-primary bg-primary/10 text-primary" : "border-border bg-muted/20 text-muted-foreground hover:border-primary/40 hover:text-foreground")}
                         >
                           <span className="w-4 h-4 rounded border border-border/50 shrink-0" style={{ background: preset.value }} />
-                          {preset.label}
-                          {active && <Check className="h-3 w-3" />}
+                          {preset.label}{active && <Check className="h-3 w-3" />}
                         </button>
                       );
                     })}
                   </div>
-                  <div className="mt-2">
-                    <span className="block text-[9px] font-bold uppercase tracking-wider mb-1 text-muted-foreground">Custom Color</span>
-                    <ColorPicker
-                      value={draft.backgroundColor}
-                      onChange={(c) => setDraft((d) => ({ ...d, backgroundColor: c }))}
-                    />
-                  </div>
+                  <div className="mt-2"><ColorPicker value={draft.color} onChange={(c) => { setColorCustomized(true); setDraft((d) => ({ ...d, color: c, backgroundColor: c })); }} /></div>
                 </div>
+
+                <div className="rounded-xl border border-border bg-muted/15 p-2.5 space-y-1.5" data-testid="floor-appearance-preview">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground">Preview</span>
+                    <span className="text-[9px] text-muted-foreground">{FLOOR_MATERIAL_OPTIONS.find((o) => o.value === draft.material)?.label}</span>
+                  </div>
+                  <svg viewBox="0 0 360 150" width="100%" height="150" role="img" aria-label="Floor appearance preview" className="rounded-lg overflow-hidden border border-border/70">
+                    <FloorGroundSurface width={360} height={150} appearance={{ material: draft.material, texture: draft.texture, color: draft.color }} idPrefix="floor-settings-preview" dataTestId="floor-appearance-preview-surface" />
+                  </svg>
+                </div>
+                <button type="button" aria-label="Reset floor appearance" onClick={() => { setColorCustomized(false); setDraft((d) => { const color = defaultFloorColorForMaterial(DEFAULT_FLOOR_APPEARANCE.material); return { ...d, material: DEFAULT_FLOOR_APPEARANCE.material, texture: DEFAULT_FLOOR_APPEARANCE.texture, color, backgroundColor: color }; }); }}
+                  className="h-8 px-2.5 rounded-lg border border-border text-[10px] font-bold text-muted-foreground hover:bg-muted/60">Reset appearance</button>
 
                 <button
                   type="button"
-                  onClick={() => setDraft((d) => ({ ...d, showGrid: !d.showGrid }))}
+                  onClick={() => {
+                    if (!authoringGridEligible) return;
+                    setDraft((d) => ({ ...d, showGrid: !d.showGrid }));
+                  }}
+                  disabled={!authoringGridEligible}
                   aria-pressed={draft.showGrid}
+                  aria-label="Show canvas grid (authoring grid)"
+                  title={authoringGridEligible ? "Toggle the visual authoring grid" : "Authoring grid is only available with Neutral material and Texture None."}
                   className={cn(
                     "w-full h-10 px-3 rounded-xl border flex items-center gap-2 text-xs font-bold transition-all",
-                    draft.showGrid
+                    !authoringGridEligible
+                      ? "border-border bg-muted/35 text-muted-foreground/60 cursor-not-allowed"
+                      : draft.showGrid
                       ? "border-primary/40 bg-primary/5 text-primary"
                       : "border-border text-muted-foreground hover:bg-muted/60"
                   )}
                 >
                   <Grid3X3 className={cn("h-3.5 w-3.5", draft.showGrid ? "text-primary" : "text-muted-foreground/60")} />
-                  Show canvas grid
+                  Show authoring grid
                   <span className="ml-auto text-[9px] opacity-70">{draft.showGrid ? "Visible" : "Hidden"}</span>
                 </button>
+                {!authoringGridEligible && (
+                  <p className="text-[10px] leading-relaxed text-muted-foreground" data-testid="floor-grid-disabled-help">
+                    Authoring grid is only available with Neutral material and Texture None.
+                  </p>
+                )}
 
                 <div>
                   <span className="block text-[9px] font-bold uppercase tracking-wider mb-1.5 text-muted-foreground">Grid Size</span>
@@ -303,9 +400,11 @@ export function FloorSettingsDialog({
                         type="button"
                         aria-label={`Grid size ${size}`}
                         aria-pressed={draft.gridSize === size}
-                        onClick={() => setDraft((d) => ({ ...d, gridSize: size as 10 | 20 | 40 }))}
+                        disabled={!authoringGridEligible}
+                        title={authoringGridEligible ? `Set floor grid size to ${size}` : "Grid size is unavailable while the authoring grid is disabled."}
+                        onClick={() => { if (authoringGridEligible) setDraft((d) => ({ ...d, gridSize: size as 10 | 20 | 40 })); }}
                         className={cn(
-                          "h-8 rounded-lg text-[11px] font-extrabold transition-all",
+                          "h-8 rounded-lg text-[11px] font-extrabold transition-all disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent",
                           draft.gridSize === size
                             ? "bg-primary text-primary-foreground shadow-sm"
                             : "text-muted-foreground hover:bg-muted hover:text-foreground"

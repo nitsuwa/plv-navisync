@@ -207,6 +207,7 @@ describe("multi-selection", () => {
     expect(container.querySelectorAll('[data-testid="campus-group-resize-handle"]').length).toBe(0);
     expect(container.querySelectorAll('[data-testid="decor-resize-handle"]').length).toBe(0);
     expect(container.querySelectorAll('[data-testid^="campus-gate-resize-handle-"]').length).toBe(0);
+    expect(container.querySelectorAll('[data-testid="building-rotation-handle-hit"], [data-testid="decor-rotation-handle-hit"]').length).toBe(0);
     expect(container.querySelectorAll('[data-testid="campus-path"]').length).toBe(1);
   });
 
