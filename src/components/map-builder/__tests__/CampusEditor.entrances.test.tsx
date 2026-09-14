@@ -131,6 +131,21 @@ describe("CampusEditor building entrances", () => {
     await waitFor(() => expect(screen.queryAllByTestId("test-route-full")).toHaveLength(0));
   });
 
+  it("keeps Navigation View functional without the obsolete routing info banner", () => {
+    render(<Harness />);
+
+    expect(screen.queryByTestId("navigation-routing-contract")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Show and edit the walking network" }));
+
+    expect(screen.getByRole("button", { name: "Hide the walking network" })).toBeInTheDocument();
+    expect(screen.queryByTestId("navigation-routing-contract")).toBeNull();
+    expect(screen.queryByText(/Accessibility routing is not active yet/i)).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Hide the walking network" }));
+    expect(screen.getByRole("button", { name: "Show and edit the walking network" })).toBeInTheDocument();
+    expect(screen.queryByTestId("navigation-routing-contract")).toBeNull();
+  });
+
   it("closing Test Route leaves Navigation on when Navigation was already enabled", async () => {
     render(<Harness />);
 

@@ -39,6 +39,15 @@ interface FloorSettingsDialogProps {
   onStartCalibration?: () => void;
   onRemoveCalibration?: () => void;
   onStartResize?: () => void;
+  /**
+   * Called before a user turns the managed perimeter wall set off. Returning
+   * false keeps the draft enabled (for example when attached objects block
+   * removal) without making the dialog dirty.
+   */
+  onRequestDisablePerimeter?: () => boolean;
+  /** Increments when a removal confirmation is cancelled so the draft can
+   * restore the still-enabled managed wall state without losing other edits. */
+  perimeterRemovalResetToken?: number;
 }
 
 /** Restrained floor-surface presets that keep walls/furniture/selection readable. */
@@ -70,6 +79,70 @@ function perimeterDraftFromFloor(floor: FloorPlan) {
   };
 }
 
+const DEFAULT_FLOOR_BACKGROUND_COLOR = "#e8e1d7";
+
+function normalizeSettingsGridSize(value: FloorPlan["gridSize"]): 10 | 20 | 40 {
+  return value === 10 || value === 20 || value === 40 ? value : 20;
+}
+
+/** Normalize only persisted Floor Settings fields for baseline/draft parity. */
+export function normalizeFloorSettings(floor: FloorPlan): FloorSettingsDraft {
+  const backgroundColor = typeof floor.backgroundColor === "string" && floor.backgroundColor.trim().length > 0
+    ? floor.backgroundColor
+    : DEFAULT_FLOOR_BACKGROUND_COLOR;
+  const appearance = normalizeFloorAppearance(floor.appearance, backgroundColor);
+  const canvas = normalizeFloorCanvasSize(floor.canvasW, floor.canvasH);
+  const authoringGridEligible = isFloorAuthoringGridEligible(appearance.material, appearance.texture);
+  return {
+    label: floor.label,
+    canvasW: canvas.w,
+    canvasH: canvas.h,
+    backgroundColor,
+    material: appearance.material,
+    texture: appearance.texture,
+    color: appearance.color,
+    showGrid: authoringGridEligible && floor.showGrid !== false,
+    gridSize: normalizeSettingsGridSize(floor.gridSize),
+    ...perimeterDraftFromFloor(floor),
+  };
+}
+
+function normalizeFloorSettingsDraft(value: FloorSettingsDraft): FloorSettingsDraft {
+  const canvas = normalizeFloorCanvasSize(value.canvasW, value.canvasH);
+  const color = typeof value.color === "string" && value.color.trim().length > 0
+    ? value.color
+    : defaultFloorColorForMaterial(value.material);
+  const backgroundColor = typeof value.backgroundColor === "string" && value.backgroundColor.trim().length > 0
+    ? value.backgroundColor
+    : color;
+  return {
+    ...value,
+    label: String(value.label ?? ""),
+    canvasW: canvas.w,
+    canvasH: canvas.h,
+    backgroundColor,
+    color,
+    showGrid: isFloorAuthoringGridEligible(value.material, value.texture) && value.showGrid,
+    gridSize: normalizeSettingsGridSize(value.gridSize),
+  };
+}
+
+export function floorSettingsEqual(a: FloorSettingsDraft, b: FloorSettingsDraft): boolean {
+  return a.label === b.label
+    && a.canvasW === b.canvasW
+    && a.canvasH === b.canvasH
+    && a.backgroundColor === b.backgroundColor
+    && a.material === b.material
+    && a.texture === b.texture
+    && a.color === b.color
+    && a.showGrid === b.showGrid
+    && a.gridSize === b.gridSize
+    && a.perimeterEnabled === b.perimeterEnabled
+    && a.perimeterThickness === b.perimeterThickness
+    && a.perimeterMaterial === b.perimeterMaterial
+    && a.perimeterColor === b.perimeterColor;
+}
+
 export function FloorSettingsDialog({
   open,
   floor,
@@ -82,22 +155,12 @@ export function FloorSettingsDialog({
   onStartCalibration,
   onRemoveCalibration,
   onStartResize,
+  onRequestDisablePerimeter,
+  perimeterRemovalResetToken,
 }: FloorSettingsDialogProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const persistedAppearance = normalizeFloorAppearance(floor.appearance, floor.backgroundColor ?? "#e8e1d7");
-  const initialAppearance = persistedAppearance;
-  const [draft, setDraft] = useState<FloorSettingsDraft>(() => ({
-    label: floor.label,
-    canvasW: normalizeFloorCanvasSize(floor.canvasW, floor.canvasH).w,
-    canvasH: normalizeFloorCanvasSize(floor.canvasW, floor.canvasH).h,
-    backgroundColor: floor.backgroundColor ?? "#e8e1d7",
-    material: initialAppearance.material,
-    texture: initialAppearance.texture,
-    color: initialAppearance.color,
-    showGrid: floor.showGrid !== false,
-    gridSize: floor.gridSize ?? 20,
-    ...perimeterDraftFromFloor(floor),
-  }));
+  const [baseline, setBaseline] = useState<FloorSettingsDraft>(() => normalizeFloorSettings(floor));
+  const [draft, setDraft] = useState<FloorSettingsDraft>(() => normalizeFloorSettings(floor));
   // A color is considered intentional once the author picks a swatch or uses
   // the color picker. Material changes only replace an untouched legacy/default
   // tint; this keeps the material vocabulary useful without erasing authored
@@ -109,35 +172,17 @@ export function FloorSettingsDialog({
   // object each editor render, which would otherwise wipe in-progress drafts.)
   useEffect(() => {
     if (!open) return;
-    const canvas = normalizeFloorCanvasSize(floor.canvasW, floor.canvasH);
-    const persistedDefault = defaultFloorColorForMaterial(persistedAppearance.material).toLowerCase();
-    const persistedColor = persistedAppearance.color.toLowerCase();
-    const legacyNeutralColor = (floor.backgroundColor ?? "#e8e1d7").toLowerCase();
-    // Normalized legacy floors receive an appearance object derived from their
-    // old backgroundColor. Treat that inherited tint as untouched so a
-    // material change can adopt its own sensible default. Also surface the
-    // corrected material default immediately when reopening an affected floor.
-    const inheritedLegacyTint = persistedColor === legacyNeutralColor
-      && persistedColor !== persistedDefault
-      && persistedAppearance.material !== "neutral";
-    const draftColor = inheritedLegacyTint
-      ? defaultFloorColorForMaterial(persistedAppearance.material)
-      : persistedAppearance.color;
-    setDraft({
-      label: floor.label,
-      canvasW: canvas.w,
-      canvasH: canvas.h,
-      backgroundColor: inheritedLegacyTint ? draftColor : (floor.backgroundColor ?? "#e8e1d7"),
-      material: persistedAppearance.material,
-      texture: persistedAppearance.texture,
-      color: draftColor,
-      showGrid: floor.showGrid !== false,
-      gridSize: floor.gridSize ?? 20,
-      ...perimeterDraftFromFloor(floor),
-    });
-    setColorCustomized(persistedColor !== persistedDefault && !inheritedLegacyTint);
+    const nextBaseline = normalizeFloorSettings(floor);
+    setBaseline(nextBaseline);
+    setDraft({ ...nextBaseline });
+    setColorCustomized(nextBaseline.color.toLowerCase() !== defaultFloorColorForMaterial(nextBaseline.material).toLowerCase());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
+
+  useEffect(() => {
+    if (!open || perimeterRemovalResetToken === undefined) return;
+    setDraft((current) => current.perimeterEnabled ? current : { ...current, perimeterEnabled: true });
+  }, [open, perimeterRemovalResetToken]);
 
   useEffect(() => {
     if (!open) return;
@@ -154,26 +199,20 @@ export function FloorSettingsDialog({
     if (!open || authoringGridEligible || !draft.showGrid) return;
     setDraft((current) => current.showGrid ? { ...current, showGrid: false } : current);
   }, [authoringGridEligible, draft.showGrid, open]);
-  const floorPerimeter = perimeterDraftFromFloor(floor);
-  const isDirty =
-    canvas.w !== normalizeFloorCanvasSize(floor.canvasW, floor.canvasH).w ||
-    canvas.h !== normalizeFloorCanvasSize(floor.canvasW, floor.canvasH).h ||
-    draft.label !== floor.label ||
-    draft.backgroundColor !== (floor.backgroundColor ?? "#e8e1d7") ||
-    draft.material !== persistedAppearance.material ||
-    draft.texture !== persistedAppearance.texture ||
-    draft.color !== persistedAppearance.color ||
-    draft.showGrid !== (floor.showGrid !== false) ||
-    draft.gridSize !== (floor.gridSize ?? 20) ||
-    draft.perimeterEnabled !== floorPerimeter.perimeterEnabled ||
-    draft.perimeterThickness !== floorPerimeter.perimeterThickness ||
-    draft.perimeterMaterial !== floorPerimeter.perimeterMaterial ||
-    draft.perimeterColor !== floorPerimeter.perimeterColor;
+  const isDirty = !floorSettingsEqual(
+    normalizeFloorSettingsDraft({ ...draft, canvasW: canvas.w, canvasH: canvas.h }),
+    baseline,
+  );
 
   const handleSave = () => {
     const normalized = normalizeFloorCanvasSize(draft.canvasW, draft.canvasH);
-    if (onApply({ ...draft, canvasW: normalized.w, canvasH: normalized.h })) {
-      onClose();
+    const nextDraft = normalizeFloorSettingsDraft({ ...draft, canvasW: normalized.w, canvasH: normalized.h });
+    if (onApply(nextDraft)) {
+      // Rebase immediately so a successful save clears dirty state without a
+      // close/reopen cycle (or before an enclosing editor closes the dialog).
+      setBaseline({ ...nextDraft });
+      setDraft({ ...nextDraft });
+      setColorCustomized(nextDraft.color.toLowerCase() !== defaultFloorColorForMaterial(nextDraft.material).toLowerCase());
     }
   };
 
@@ -556,7 +595,10 @@ export function FloorSettingsDialog({
                 </div>
                 <button
                   type="button"
-                  onClick={() => setDraft((d) => ({ ...d, perimeterEnabled: !d.perimeterEnabled }))}
+                  onClick={() => {
+                    if (draft.perimeterEnabled && onRequestDisablePerimeter && !onRequestDisablePerimeter()) return;
+                    setDraft((d) => ({ ...d, perimeterEnabled: !d.perimeterEnabled }));
+                  }}
                   aria-pressed={draft.perimeterEnabled}
                   className={cn(
                     "w-full h-10 px-3 rounded-xl border flex items-center gap-2 text-xs font-bold transition-all",

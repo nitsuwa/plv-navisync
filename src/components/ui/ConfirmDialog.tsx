@@ -14,6 +14,8 @@ interface ConfirmDialogProps {
   variant?: "danger" | "warning" | "info";
   onConfirm: () => void;
   onCancel: () => void;
+  /** Optional stacking level for dialogs opened above another modal. */
+  zIndexClassName?: string;
 }
 
 export function ConfirmDialog({
@@ -25,6 +27,7 @@ export function ConfirmDialog({
   variant = "danger",
   onConfirm,
   onCancel,
+  zIndexClassName = "z-[60]",
 }: ConfirmDialogProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const previousActiveElement = useRef<HTMLElement | null>(null);
@@ -106,7 +109,7 @@ export function ConfirmDialog({
           exit={{ opacity: 0 }}
           transition={{ duration: DURATION.fast }}
           role="dialog" aria-modal="true" aria-label={title}
-          className="fixed inset-0 z-[60] flex items-center justify-center bg-background/70 backdrop-blur-sm p-4"
+          className={`fixed inset-0 ${zIndexClassName} flex items-center justify-center bg-background/70 backdrop-blur-sm p-4`}
           onClick={onCancel}
         >
           <motion.div
@@ -126,7 +129,7 @@ export function ConfirmDialog({
               </div>
               <div className="flex-1 min-w-0 pt-0.5">
                 <h3 className="text-sm font-extrabold text-foreground">{title}</h3>
-                <p className="text-xs text-muted-foreground mt-1 leading-relaxed">{message}</p>
+                <p className="text-xs text-muted-foreground mt-1 leading-relaxed whitespace-pre-line">{message}</p>
               </div>
               <button type="button" aria-label="Close dialog"
                 onClick={onCancel}

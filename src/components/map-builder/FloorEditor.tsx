@@ -39,6 +39,7 @@ import { useToast } from "../../hooks/useToast";
 import { floorUndoEntryFromFloor, normalizeFloor } from "../../lib/floorPlanNormalization";
 import { FloorGroundSurface } from "./FloorGroundSurface";
 import { isFloorAuthoringGridEligible, normalizeFloorAppearance } from "../../lib/floorAppearance";
+import { formatManagedPerimeterDependencies, getManagedPerimeterDependencies, type ManagedPerimeterDependencies } from "../../lib/floorPerimeterDependencies";
 import { resizeCampusCanvasFromHandle, type CanvasResizeHandle } from "../../lib/campusCanvas";
 import {
   createIndoorNavNode,
@@ -3713,6 +3714,12 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
   const [zoneDeleteConfirm, setZoneDeleteConfirm] = useState<{ selections: FloorSelection[]; zoneCount: number; childCount: number } | null>(null);
   const [stairDeleteConfirm, setStairDeleteConfirm] = useState<{ stairId: string } | null>(null);
   const [entranceDoorDeleteConfirm, setEntranceDoorDeleteConfirm] = useState<{ doorId: string; entranceId: string; name: string } | null>(null);
+  const [perimeterWallRemovalDialog, setPerimeterWallRemovalDialog] = useState<
+    | { kind: "blocked"; dependencies: ManagedPerimeterDependencies }
+    | { kind: "confirm"; draft: FloorSettingsDraft }
+    | null
+  >(null);
+  const [perimeterRemovalResetToken, setPerimeterRemovalResetToken] = useState(0);
   const [backgroundPreviewUrl, setBackgroundPreviewUrl] = useState<string | null>(null);
   const [backgroundUploading, setBackgroundUploading] = useState(false);
   const [calibrationDraft, setCalibrationDraft] = useState<{
@@ -7839,7 +7846,14 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
   // Floor Settings applies draft General/Canvas/Appearance values as ONE edit:
   // validates shrink against authored geometry, pushes one history entry, marks
   // the floor dirty, and returns whether the change was accepted.
-  const applyFloorSettings = useCallback((draft: FloorSettingsDraft): boolean => {
+  const requestDisablePerimeter = useCallback(() => {
+    const dependencies = getManagedPerimeterDependencies({ walls, doors, windows }, building.entrances ?? []);
+    if (dependencies.total === 0) return true;
+    setPerimeterWallRemovalDialog({ kind: "blocked", dependencies });
+    return false;
+  }, [building.entrances, doors, walls, windows]);
+
+  const applyFloorSettings = useCallback((draft: FloorSettingsDraft, skipPerimeterRemovalConfirmation = false): boolean => {
     const nextCanvas = normalizeFloorCanvasSize(draft.canvasW, draft.canvasH);
     const nextAuthoringGridEligible = isFloorAuthoringGridEligible(draft.material, draft.texture);
     const nextShowGrid = nextAuthoringGridEligible && draft.showGrid;
@@ -7875,15 +7889,16 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
         ...managed,
       ];
     } else if (perimeterWalls.length > 0) {
-      const perimeterIds = new Set(perimeterWalls.map((wall) => wall.id));
-      const attachedCount = doors.filter((door) => door.wallId && perimeterIds.has(door.wallId)).length
-        + windows.filter((win) => win.wallId && perimeterIds.has(win.wallId)).length;
-      if (attachedCount > 0 && !window.confirm(`Remove managed perimeter walls and ${attachedCount} attached door/window opening${attachedCount === 1 ? "" : "s"}?`)) {
+      const dependencies = getManagedPerimeterDependencies({ walls, doors, windows }, building.entrances ?? []);
+      if (dependencies.total > 0) {
+        setPerimeterWallRemovalDialog({ kind: "blocked", dependencies });
+        return false;
+      }
+      if (!skipPerimeterRemovalConfirmation) {
+        setPerimeterWallRemovalDialog({ kind: "confirm", draft });
         return false;
       }
       nextWalls = walls.filter((wall) => !isManagedPerimeterWall(wall));
-      nextDoors = doors.filter((door) => !(door.wallId && perimeterIds.has(door.wallId)));
-      nextWindows = windows.filter((win) => !(win.wallId && perimeterIds.has(win.wallId)));
     }
     const canvasChanged = nextCanvas.w !== FP_W || nextCanvas.h !== FP_H;
     let followedAttachments = { exteriorZones, entranceSteps, entranceRamps, furniture };
@@ -17432,7 +17447,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
               the whole banner is pointer-events-none so it can never intercept
               a canvas click. */}
           {navMode && indoorNodes.length === 0 && indoorEdges.length === 0 && navTool === "select" && !navConnectStart && navLibraryDragRef.current == null && (
-            <div data-testid="floor-nav-canvas-empty-state" className="absolute top-3 left-1/2 -translate-x-1/2 z-10 pointer-events-none">
+            <div data-testid="floor-nav-canvas-empty-state" className="absolute top-16 left-1/2 -translate-x-1/2 z-10 pointer-events-none">
               <div className="flex items-center gap-2 rounded-lg border border-border bg-card/90 backdrop-blur px-3 py-1.5 shadow-md max-w-[min(620px,calc(100%-24px))]">
                 <Waypoints className="h-3.5 w-3.5 text-primary shrink-0" />
                 <span className="text-[10px] font-extrabold text-foreground whitespace-nowrap">Build the Walking Network</span>
@@ -18125,6 +18140,40 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
         />
 
         <ConfirmDialog
+          open={perimeterWallRemovalDialog?.kind === "blocked"}
+          title="Perimeter walls are still in use"
+          message={perimeterWallRemovalDialog?.kind === "blocked"
+            ? formatManagedPerimeterDependencies(perimeterWallRemovalDialog.dependencies)
+            : "These structural walls cannot be removed while authored objects are attached."}
+          confirmLabel="Got it"
+          cancelLabel="Keep Perimeter Walls"
+          variant="warning"
+          zIndexClassName="z-[260]"
+          onConfirm={() => setPerimeterWallRemovalDialog(null)}
+          onCancel={() => setPerimeterWallRemovalDialog(null)}
+        />
+
+        <ConfirmDialog
+          open={perimeterWallRemovalDialog?.kind === "confirm"}
+          title="Disable structural perimeter walls?"
+          message="The managed outer walls will be removed from this Floor. The Floor canvas boundary will remain as a visual edge."
+          confirmLabel="Disable Walls"
+          cancelLabel="Cancel"
+          variant="danger"
+          zIndexClassName="z-[260]"
+          onConfirm={() => {
+            if (perimeterWallRemovalDialog?.kind !== "confirm") return;
+            const pendingDraft = perimeterWallRemovalDialog.draft;
+            setPerimeterWallRemovalDialog(null);
+            applyFloorSettings(pendingDraft, true);
+          }}
+          onCancel={() => {
+            setPerimeterWallRemovalDialog(null);
+            setPerimeterRemovalResetToken((value) => value + 1);
+          }}
+        />
+
+        <ConfirmDialog
           open={!!zoneDeleteConfirm}
           title={zoneDeleteConfirm?.zoneCount === 1 ? "Delete Exterior Zone?" : "Delete Exterior Zones?"}
           message={zoneDeleteConfirm
@@ -18410,6 +18459,8 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
           onStartCalibration={startCalibration}
           onRemoveCalibration={removeCalibration}
           onStartResize={startFloorResize}
+          onRequestDisablePerimeter={requestDisablePerimeter}
+          perimeterRemovalResetToken={perimeterRemovalResetToken}
         />
 
         {roomTemplateCatalogueOpen && (
