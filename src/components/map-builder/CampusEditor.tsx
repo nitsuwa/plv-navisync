@@ -5,7 +5,7 @@ import {
   ArrowLeft, Globe, Map as MapIcon, CheckCircle2, Undo2, Redo2, X,
   AlignLeft, AlignCenter, AlignRight, AlignStartVertical, AlignEndVertical,
   AlignVerticalJustifyCenter, AlignHorizontalDistributeCenter, AlignVerticalDistributeCenter,
-  Grid3X3, Magnet, ZoomIn, ZoomOut, Maximize2, Settings2,
+  ZoomIn, Settings2,
   MousePointer2, Square, MapPin, GitBranch, Trash2, Hand, Keyboard,
   Loader2, HelpCircle, ChevronLeft, Eye, EyeOff, Route, Waypoints, Star, BookOpen,
 } from "lucide-react";
@@ -25,7 +25,7 @@ import { ContextMenu } from "./ContextMenu";
 import { PrePublishDialog } from "./PrePublishDialog";
 import { TestNavigationPanel, useTestRouteSession, type TestRouteHighlight, type TestRouteTransitionMarker } from "./TestNavigationPanel";
 import { ShortcutCheatSheet } from "./ShortcutCheatSheet";
-import { EditorTutorial, OUTDOOR_TUTORIAL_STEPS, TutorialInvitation, useEditorTutorial } from "./EditorTutorial";
+import { EditorTutorial, OUTDOOR_TUTORIAL_STEPS, TutorialInvitation, useEditorTutorial, type TutorialStep } from "./EditorTutorial";
 import { UnsavedChangesDialog } from "./UnsavedChangesDialog";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
 import { useUnsavedChangesGuard } from "./useUnsavedChangesGuard";
@@ -845,6 +845,14 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
   const [decorResizingId, setDecorResizingId] = useState<string | null>(null);
   // ── Hierarchy panel toggle ──
   const [hierarchyOpen, setHierarchyOpen] = useState(true);
+  // Tutorial-only panel exposure; this never touches campus data or history.
+  const [tutorialPanelTab, setTutorialPanelTab] = useState<"hierarchy" | "assets" | null>(null);
+  const handleOutdoorTutorialStep = useCallback((step: TutorialStep) => {
+    if (step.id === "hierarchy" || step.id === "assets") {
+      setHierarchyOpen(true);
+      setTutorialPanelTab(step.id === "hierarchy" ? "hierarchy" : "assets");
+    }
+  }, []);
   const testRouteSessionContext = useTestRouteSession();
   const { navigationEnabled, setNavigationEnabled } = testRouteSessionContext;
   // ── Test navigation panel (Navigation layer) ──
@@ -8900,7 +8908,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
         {/* Row 1: grouped toolbar — keep the editing palette centered while
             reserving predictable breathing room for lifecycle actions. */}
         <div
-          className="editor-toolbar-shell relative grid h-16 min-h-16 min-w-0 grid-cols-[minmax(0,1fr)_minmax(0,auto)_minmax(0,1fr)] items-center gap-1 overflow-visible px-2 sm:gap-2 sm:px-4"
+          className="editor-toolbar-shell relative grid h-16 min-h-16 min-w-0 grid-cols-[minmax(0,auto)_minmax(0,1fr)_minmax(0,auto)] items-center gap-1 overflow-visible px-2 sm:gap-2 sm:px-4"
           data-testid="campus-editor-header"
         >
           {/* ── Left section — campus context, capped width for center alignment ── */}
@@ -8972,7 +8980,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
           <div data-testid="campus-toolbar-center" className="relative flex h-full min-w-0 max-w-full items-center justify-center overflow-hidden">
             <div
               data-testid="editor-toolbar"
-                className="mx-auto flex min-w-0 max-w-full items-center gap-0.5 overflow-hidden whitespace-nowrap rounded-xl border border-border/70 bg-muted/40 px-1.5 py-1 shadow-sm sm:gap-1 sm:px-2 lg:px-3 lg:py-1.5"
+                className="mx-auto flex min-w-0 max-w-full items-center gap-0.5 overflow-hidden whitespace-nowrap rounded-xl border border-border/70 bg-muted/40 px-1.5 py-1 shadow-sm sm:gap-1 sm:px-2 sm:py-1.5"
             >
               {toolConfig.map((t) => {
                 const isActive = toolbarToolIsActive(t);
@@ -8986,12 +8994,16 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
                           aria-label={t.label}
                           data-tutorial={
                             t.id === "select" ? "outdoor-select-tool" :
-                              t.id === "path" ? "outdoor-pathways" :
-                                t.id === "connect" ? "outdoor-connect" : undefined
+                              t.id === "pan" ? "outdoor-pan-tool" :
+                                t.id === "building" ? "outdoor-building-tool" :
+                                  t.id === "path" ? "outdoor-pathways" :
+                                    t.id === "marker" ? "outdoor-walking-point" :
+                                      t.id === "connect" ? "outdoor-connect" :
+                                        t.id === "erase" ? "outdoor-remove-tool" : undefined
                           }
                           onClick={() => activateToolbarTool(t)}
                           className={cn(
-                            "flex h-5 w-5 items-center justify-center rounded-md transition-colors duration-200 sm:h-[30px] sm:w-[30px] lg:h-[34px] lg:w-[34px]",
+                            "flex h-5 w-5 items-center justify-center rounded-md transition-colors duration-200 sm:h-[30px] sm:w-[30px]",
                             isActive
                               ? t.id === "erase"
                                 ? "bg-destructive text-destructive-foreground shadow-sm"
@@ -9107,7 +9119,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
                       aria-label={navigationVisible ? "Hide the walking network" : "Show and edit the walking network"}
                       aria-pressed={navigationVisible}
                       className={cn(
-                        "flex h-5 w-5 items-center justify-center rounded-md border transition-colors duration-200 sm:h-[30px] sm:w-[30px] lg:h-[34px] lg:w-[34px]",
+                        "flex h-5 w-5 items-center justify-center rounded-md border transition-colors duration-200 sm:h-[30px] sm:w-[30px]",
                         navigationVisible
                           ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 shadow-sm"
                           : "border-border/60 text-muted-foreground/60 hover:bg-muted hover:text-foreground"
@@ -9130,7 +9142,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
                       onClick={toggleTestRoute}
                       aria-pressed={testNavOpen}
                       className={cn(
-                        "flex h-5 w-5 items-center justify-center rounded-md border transition-colors duration-200 sm:h-[30px] sm:w-[30px] lg:h-[34px] lg:w-[34px]",
+                        "flex h-5 w-5 items-center justify-center rounded-md border transition-colors duration-200 sm:h-[30px] sm:w-[30px]",
                         testNavOpen
                           ? "border-blue-500/40 bg-blue-500/15 text-blue-600 dark:text-blue-400 shadow-sm"
                           : navigationVisible
@@ -9180,10 +9192,11 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
               </div>
             )}
             {/* Undo / Redo — disabled at history bounds with step-count tooltips */}
-            <div className="flex items-center gap-0.5">
+            <div className="flex items-center gap-0.5" data-tutorial="outdoor-undo-redo">
               <ToolbarTooltip tool="undo" label="Undo" shortcut="Ctrl + Z" hint="Reverse your most recent editor change.">
                 <button onClick={undoEdit}
                   aria-label="Undo"
+                  data-tutorial="outdoor-undo"
                   title={canUndo ? "Undo" : undefined}
                   disabled={!canUndo}
                   className={cn(
@@ -9196,6 +9209,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
               <ToolbarTooltip tool="redo" label="Redo" shortcut="Ctrl + Shift + Z" hint="Restore the most recently undone change.">
                 <button onClick={redoEdit}
                   aria-label="Redo"
+                  data-tutorial="outdoor-redo"
                   title={canRedo ? "Redo" : undefined}
                   disabled={!canRedo}
                   className={cn(
@@ -9203,60 +9217,6 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
                     canRedo ? "text-muted-foreground hover:text-foreground hover:bg-muted" : "text-muted-foreground/30 cursor-not-allowed"
                   )}>
                   <Redo2 className="h-4 w-4" />
-                </button>
-              </ToolbarTooltip>
-            </div>
-
-            {/* Snap & zoom controls */}
-            <div data-toolbar-secondary-divider className="w-px h-5 bg-border mx-0.5 shrink-0" />
-            <div className="hidden xl:flex items-center gap-0.5" data-toolbar-secondary>
-              <ToolbarTooltip tool="gridSnap" label="Grid Snap" shortcut="Ctrl + G" hint={snapGrid ? "Objects snap to the canvas grid while you place or move them." : "Grid snapping is off. Objects can move freely."}>
-                <button
-                  onClick={() => setSnapGrid(v => !v)}
-                  aria-label="Grid Snap"
-                  aria-pressed={snapGrid}
-                  className={cn(
-                    "flex items-center justify-center h-7 w-7 sm:h-8 sm:w-8 rounded-md transition-all",
-                    snapGrid ? "text-primary bg-primary/10" : "text-muted-foreground hover:text-foreground hover:bg-muted"
-                  )}
-                >
-                  <Grid3X3 className="h-4 w-4" />
-                </button>
-              </ToolbarTooltip>
-              <ToolbarTooltip tool="edgeSnap" label="Edge Snap" shortcut="" hint={edgeSnap ? "Helps align objects and path points with nearby edges." : "Edge snapping is off."}>
-                <button
-                  onClick={() => setEdgeSnap(v => !v)}
-                  aria-label="Edge Snap"
-                  aria-pressed={edgeSnap}
-                  className={cn(
-                    "flex items-center justify-center h-7 w-7 sm:h-8 sm:w-8 rounded-md transition-all",
-                    edgeSnap ? "text-primary bg-primary/10" : "text-muted-foreground hover:text-foreground hover:bg-muted"
-                  )}
-                >
-                  <Magnet className="h-4 w-4" />
-                </button>
-              </ToolbarTooltip>
-              <div className="w-px h-5 bg-border mx-0.5" />
-              <ToolbarTooltip tool="zoomIn" label="Zoom In" shortcut="" hint="Zoom closer into the canvas.">
-                <button onClick={zoomIn}
-                  aria-label="Zoom In"
-                  className="flex items-center justify-center h-7 w-7 sm:h-8 sm:w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-all">
-                  <ZoomIn className="h-4 w-4" />
-                </button>
-              </ToolbarTooltip>
-              <span className="text-[9px] font-mono text-muted-foreground/50 w-8 text-center tabular-nums">{Math.round(zoom * 100)}%</span>
-              <ToolbarTooltip tool="zoomOut" label="Zoom Out" shortcut="" hint="Zoom farther out from the canvas.">
-                <button onClick={zoomOut}
-                  aria-label="Zoom Out"
-                  className="flex items-center justify-center h-7 w-7 sm:h-8 sm:w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-all">
-                  <ZoomOut className="h-4 w-4" />
-                </button>
-              </ToolbarTooltip>
-              <ToolbarTooltip tool="resetView" label="Reset View" shortcut="0" hint="Return the canvas to its default zoom and position.">
-                <button onClick={resetView}
-                  aria-label="Reset View"
-                  className="flex items-center justify-center h-7 w-7 sm:h-8 sm:w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-all">
-                  <Maximize2 className="h-3.5 w-3.5" />
                 </button>
               </ToolbarTooltip>
             </div>
@@ -9344,6 +9304,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
                 onClick={() => setShowCheatSheet(true)}
                 className="flex items-center justify-center h-7 w-7 sm:h-8 sm:w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
                 aria-label="Keyboard shortcuts"
+                data-tutorial="outdoor-keyboard-shortcuts"
               >
                 <Keyboard className="h-4 w-4" />
               </button>
@@ -9354,6 +9315,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
                 onClick={outdoorTutorial.replay}
                 aria-label="Start Outdoor Map Builder tutorial"
                 data-testid="outdoor-tutorial-trigger"
+                data-tutorial="outdoor-tutorial-help"
                 className="flex items-center justify-center h-7 w-7 sm:h-8 sm:w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
               >
                 <BookOpen className="h-4 w-4" />
@@ -9371,6 +9333,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
                 <button
                   onClick={runSave}
                   aria-label="Save"
+                  data-tutorial="outdoor-save"
                   disabled={saving || isProcessing || !isDirty}
                   className={cn(
                     "flex items-center justify-center gap-1.5 h-8 px-2.5 rounded-md border text-[10px] font-bold transition-all disabled:opacity-50 disabled:cursor-not-allowed shrink-0",
@@ -9417,6 +9380,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
                     setShowPublishConfirm(true);
                   }}
                   aria-label="Review & Publish"
+                  data-tutorial="outdoor-review-publish"
                   disabled={
                     !publishingEnabled || isProcessing || (isDirty && !onPreviewStudent) ||
                     (!onPreviewStudent && !isDirty && campus.publishStatus === "published" && !hasDraftChanges && campus.updatedAt === campus.publishedAt)
@@ -9547,7 +9511,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
             }}
           >
             <div className="w-56 h-full min-h-0 bg-card border-r border-border flex flex-col">
-              <div className="h-full min-h-0 flex-1" data-testid={layer === "navigation" ? "navigation-hierarchy-sidebar" : undefined} data-tutorial="outdoor-assets">
+              <div className="h-full min-h-0 flex-1" data-testid={layer === "navigation" ? "navigation-hierarchy-sidebar" : undefined} data-tutorial="outdoor-hierarchy">
                   <HierarchyPanel
                     campus={campus}
                     selected={selected}
@@ -9591,6 +9555,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
                     activeCampusGatePlacement={tool === "gate" && layer === "campus"}
                     decorAssetCount={(campus.decorAssets ?? []).filter((asset) => asset.type !== "ground-area").length}
                     assetsEnabled={true}
+                    tutorialPanelTab={tutorialPanelTab}
                   />
               </div>
             </div>
@@ -10417,7 +10382,12 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
         onStart={outdoorTutorial.start}
         onMaybeLater={outdoorTutorial.maybeLater}
       />
-      <EditorTutorial kind="outdoor" steps={OUTDOOR_TUTORIAL_STEPS} controller={outdoorTutorial} />
+      <EditorTutorial
+        kind="outdoor"
+        steps={OUTDOOR_TUTORIAL_STEPS}
+        controller={outdoorTutorial}
+        onStepChange={handleOutdoorTutorialStep}
+      />
 
       {/* Batch delete confirmation dialog */}
       <AnimatePresence>

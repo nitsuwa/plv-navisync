@@ -620,6 +620,7 @@ function QuickActions({
       <div className="relative">
         <button
           ref={btnRef}
+          onPointerDown={(e) => e.stopPropagation()}
           onClick={(e) => {
             e.stopPropagation();
             if (btnRef.current) {
@@ -649,7 +650,15 @@ function QuickActions({
         </button>
         {open && createPortal(
           <>
-            <div className="fixed inset-0 z-40" onClick={closeMenu} />
+            {/* The dismiss layer is rendered through a portal.  Stop the
+                portal event from bubbling through the React tree into the
+                campus card's Open Campus handler. */}
+            <div
+              data-testid="campus-menu-dismiss"
+              className="fixed inset-0 z-40"
+              onPointerDown={(event) => { event.preventDefault(); event.stopPropagation(); closeMenu(); }}
+              onClick={(event) => { event.preventDefault(); event.stopPropagation(); closeMenu(); }}
+            />
             <motion.div
               id={menuId}
               role="menu"
@@ -667,6 +676,8 @@ function QuickActions({
               }}
               ref={menuRef}
               className="w-52 max-h-[calc(100vh-16px)] overflow-y-auto rounded-xl border border-border bg-card shadow-xl scrollbar-show-on-hover"
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={(event) => event.stopPropagation()}
               onKeyDown={handleMenuKeyDown}
             >
                 {/* Campus details header */}

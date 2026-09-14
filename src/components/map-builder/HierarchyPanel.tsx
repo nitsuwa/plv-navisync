@@ -60,6 +60,8 @@ interface HierarchyPanelProps {
   decorAssetCount?: number;
   /** Whether the authoring asset palette is available in this mode */
   assetsEnabled?: boolean;
+  /** Optional harmless UI exposure requested by the editor tutorial. */
+  tutorialPanelTab?: "hierarchy" | "assets" | null;
   /** Codes allocated earlier in this editor session, including deleted drafts. */
   buildingIdentityReservations?: ReadonlyArray<Partial<BuildingIdentity>>;
   /** Reserve a generated identity before the parent draft is updated. */
@@ -73,7 +75,7 @@ export function HierarchyPanel({
   onSelectBuildingType, activeBuildingType, decorAssetCount = 0,
   assetsEnabled = true, buildingIdentityReservations = [], onReserveBuildingIdentity,
   onSelectCampusGate, activeCampusGatePlacement = false,
-  onArmDecorAsset, activeDecorAssetType = null,
+  onArmDecorAsset, activeDecorAssetType = null, tutorialPanelTab = null,
 }: HierarchyPanelProps) {
   // ── Panel tab: "hierarchy" | "assets" ──
   const [panelTab, setPanelTab] = useState<"hierarchy" | "assets">("hierarchy");
@@ -99,6 +101,9 @@ export function HierarchyPanel({
   useEffect(() => {
     if (!assetsEnabled && panelTab !== "hierarchy") setPanelTab("hierarchy");
   }, [assetsEnabled, panelTab]);
+  useEffect(() => {
+    if (tutorialPanelTab && assetsEnabled) setPanelTab(tutorialPanelTab);
+  }, [assetsEnabled, tutorialPanelTab]);
   useEffect(() => {
     setExpandedBuildingIds((current) => {
       const ids = new Set(campus.buildings.map((building) => building.id));
@@ -436,7 +441,7 @@ export function HierarchyPanel({
 
       {/* ═══ ASSETS TAB ═══ */}
       {assetsEnabled && panelTab === "assets" && (
-        <div data-testid="outdoor-assets-scroll" className="h-0 min-h-0 flex-1 overflow-y-auto overscroll-contain scrollbar-show-on-hover scroll-smooth py-2 px-2 space-y-3" onWheelCapture={(event) => event.stopPropagation()} style={{ overscrollBehaviorY: "contain" }}>
+        <div data-testid="outdoor-assets-scroll" data-tutorial="outdoor-assets" className="h-0 min-h-0 flex-1 overflow-y-auto overscroll-contain scrollbar-show-on-hover scroll-smooth py-2 px-2 space-y-3" onWheelCapture={(event) => event.stopPropagation()} style={{ overscrollBehaviorY: "contain" }}>
           <div>
             <span className="text-[9px] font-extrabold uppercase tracking-widest text-muted-foreground px-1 flex items-center gap-1.5"><DoorOpen className="h-2.5 w-2.5" />Functional</span>
             <div className="mt-1.5 grid grid-cols-2 gap-1.5">

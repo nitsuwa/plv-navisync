@@ -13971,7 +13971,8 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
                       hint={t.id === "select" ? "Select, move, resize, and edit floor items." : t.id === "pan" ? "Move around the floor canvas without changing objects." : t.id === "path" ? "Draw a floor path through the interior plan." : undefined}>
                         <button type="button" onClick={() => switchTool(t.id)}
                           aria-label={`${t.label}${t.key ? ` (${t.key})` : ""}`}
-                          className={cn("flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-[10px] font-bold transition-all sm:h-[30px] sm:w-[30px] lg:h-[34px] lg:w-[34px]",
+                          data-tutorial={t.id === "select" ? "floor-select-tool" : t.id === "pan" ? "floor-pan-tool" : undefined}
+                          className={cn("flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-[10px] font-bold transition-all sm:h-[30px] sm:w-[30px]",
                             isActive ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:bg-muted hover:text-foreground")}>
                           <Icon className="h-[15px] w-[15px]" />
                         </button>
@@ -13990,7 +13991,8 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
                       hint={t.id === "waypoint" ? "Place points along hallways or open circulation areas." : t.id === "connect" ? "Connect the points to define where people can walk." : t.id === "link" ? "Link Rooms, Doors, Stairs, Elevators, and Ramps to the walking network." : "Remove Walking Points or Walking Paths."}>
                       <button type="button" onClick={() => selectNavTool(t.id)}
                         aria-label={t.label}
-                      className={cn("flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-[10px] font-extrabold transition-all sm:h-[30px] sm:w-[30px] lg:h-[34px] lg:w-[34px]",
+                        data-tutorial={t.id === "waypoint" ? "floor-walking-point-tool" : t.id === "connect" ? "floor-connect-tool" : "floor-remove-tool"}
+                      className={cn("flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-[10px] font-extrabold transition-all sm:h-[30px] sm:w-[30px]",
                           isActive ? "bg-primary text-primary-foreground shadow-sm" : !showNavOverlay ? "text-muted-foreground/60 hover:bg-muted hover:text-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground")}>
                         <Icon className="h-[15px] w-[15px]" />
                       </button>
@@ -14003,7 +14005,8 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
                   <button type="button" onClick={toggleNavigation}
                     aria-label={showNavOverlay ? "Hide Navigation" : "Show Navigation"}
                     aria-pressed={showNavOverlay}
-                    className={cn("flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-[10px] font-extrabold transition-all sm:h-[30px] sm:w-[30px] lg:h-[34px] lg:w-[34px]",
+                    data-tutorial="floor-navigation-visibility"
+                    className={cn("flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-[10px] font-extrabold transition-all sm:h-[30px] sm:w-[30px]",
                       showNavOverlay ? "bg-green-500/10 text-green-700 dark:text-green-400" : "text-muted-foreground/60 hover:bg-muted hover:text-foreground")}>
                     {showNavOverlay ? <EyeOff className="h-[15px] w-[15px]" /> : <Eye className="h-[15px] w-[15px]" />}
                   </button>
@@ -14028,7 +14031,8 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
                   }
                 }}
                   aria-label="Test Route"
-                  className={cn("flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-[10px] font-extrabold transition-all sm:h-[30px] sm:w-[30px] lg:h-[34px] lg:w-[34px]",
+                  data-tutorial="floor-test-route"
+                  className={cn("flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-[10px] font-extrabold transition-all sm:h-[30px] sm:w-[30px]",
                     testNavOpen ? "bg-blue-500/10 text-blue-600 dark:text-blue-400" : !showNavOverlay ? "text-muted-foreground/60 hover:bg-muted hover:text-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground")}>
                   <Route className="h-[15px] w-[15px]" />
                 </button>
@@ -14077,16 +14081,16 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
           )}
 
           {/* Undo/Redo — grouped so the pair never splits across wrapped rows */}
-          <div className="flex items-center gap-0.5 shrink-0">
+          <div className="flex items-center gap-0.5 shrink-0" data-tutorial="floor-undo-redo">
             <ToolbarTooltip tool="undo">
-            <button onClick={() => applyEntry(undo())} disabled={!canUndo} aria-label="Undo"
+            <button onClick={() => applyEntry(undo())} disabled={!canUndo} aria-label="Undo" data-tutorial="floor-undo"
               className={cn("flex items-center justify-center h-6 w-6 sm:h-7 sm:w-7 rounded-md transition-all",
                 canUndo ? "text-muted-foreground hover:text-foreground hover:bg-muted" : "text-muted-foreground/40 cursor-not-allowed")}>
               <Undo2 className="h-3.5 w-3.5" />
             </button>
             </ToolbarTooltip>
             <ToolbarTooltip tool="redo">
-            <button onClick={() => applyEntry(redo())} disabled={!canRedo} aria-label="Redo"
+            <button onClick={() => applyEntry(redo())} disabled={!canRedo} aria-label="Redo" data-tutorial="floor-redo"
               className={cn("flex items-center justify-center h-6 w-6 sm:h-7 sm:w-7 rounded-md transition-all",
                 canRedo ? "text-muted-foreground hover:text-foreground hover:bg-muted" : "text-muted-foreground/40 cursor-not-allowed")}>
               <Redo2 className="h-3.5 w-3.5" />
@@ -14096,25 +14100,12 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
 
           <div className="hidden sm:block w-px h-5 bg-border mx-1" />
 
-          {/* Snap toggle */}
-          <ToolbarTooltip tool="gridSnap" isActive={snapOn}
-            label="Grid Snap"
-            hint={snapOn ? "Objects snap to the floor grid while you place or move them." : "Grid snapping is off. Objects can move freely."}>
-          <button onClick={() => setSnapOn((v) => !v)} onMouseEnter={(e) => e.currentTarget.removeAttribute("title")}
-            title={snapOn ? "Snap to grid: ON — click to disable" : "Snap to grid: OFF — click to enable"}
-            aria-pressed={snapOn}
-            aria-label="Toggle snap to grid"
-            className={cn("flex items-center justify-center h-6 px-1 sm:h-7 sm:px-2 rounded-md text-[10px] font-bold transition-all border shrink-0",
-              snapOn ? "bg-primary/10 border-primary/30 text-primary" : "border-border text-muted-foreground hover:text-foreground hover:bg-muted")}>
-            <Grid3X3 className="h-3 w-3" />
-            <span className="hidden xl:inline ml-1">Snap</span>
-          </button>
-          </ToolbarTooltip>
-
-
+          {/* View and issues utilities share one compact tutorial step. */}
+          <div className="flex items-center gap-0.5 shrink-0" data-tutorial="floor-view-tools">
           <ToolbarTooltip tool="resetView" label="Fit View" hint="Fit the current floor content inside the visible canvas.">
           <button onClick={fitFloor}
             aria-label="Fit Floor"
+            data-tutorial="floor-fit-view"
             className="flex items-center justify-center h-6 w-6 sm:h-7 sm:w-7 shrink-0 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-all">
             <Maximize2 className="h-3.5 w-3.5" />
           </button>
@@ -14127,6 +14118,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
           <button onClick={() => setShowIssues(true)}
             aria-label={`Issues: ${totalIssues}`}
             data-testid="issues-toolbar"
+            data-tutorial="floor-issues"
             className={cn("flex items-center gap-1 h-6 px-1 sm:h-7 sm:px-2.5 rounded-md text-[10px] font-extrabold whitespace-nowrap shrink-0 transition-all border",
               hasAnyIssues ? "border-destructive/30 bg-destructive/10 text-destructive" : "border-border text-emerald-600 hover:bg-muted")}>
             {hasAnyIssues ? <AlertTriangle className="h-3 w-3" /> : <CheckCircle2 className="h-3 w-3" />}
@@ -14138,11 +14130,13 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
           </button>
           </ToolbarTooltip>
 
-          <ToolbarTooltip tool="keyboardShortcuts">
+          </div>
+
+          <ToolbarTooltip tool="keyboardShortcuts" label="Keyboard Shortcuts" hint="View editor keyboard controls and shortcuts.">
           <button onClick={() => setShowShortcuts(true)}
             aria-label="Keyboard shortcuts"
-            data-toolbar-secondary
-            className="hidden lg:flex items-center justify-center h-6 w-6 sm:h-7 sm:w-7 shrink-0 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-all">
+            data-tutorial="floor-keyboard-shortcuts"
+            className="flex items-center justify-center h-6 w-6 sm:h-7 sm:w-7 shrink-0 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-all">
             <HelpCircle className="h-3.5 w-3.5" />
           </button>
           </ToolbarTooltip>
@@ -14152,6 +14146,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
             onClick={floorTutorial.replay}
             aria-label="Start Floor Editor tutorial"
             data-testid="floor-tutorial-trigger"
+            data-tutorial="floor-tutorial-help"
             className="flex items-center justify-center h-6 w-6 sm:h-7 sm:w-7 shrink-0 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
           >
             <BookOpen className="h-3.5 w-3.5" />
@@ -14159,10 +14154,10 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
           </ToolbarTooltip>
 
           {/* Properties toggle */}
+          <div className="relative flex shrink-0">
           <ToolbarTooltip tool="canvasSettings" label="Properties" hint="Show or hide properties for the selected floor item.">
           <button onClick={() => { if (!floorResizeMode) setShowProperties((v) => !v); }}
             disabled={floorResizeMode}
-            data-tutorial="floor-locking"
             aria-pressed={showProperties}
             aria-label="Toggle properties panel"
             title="Toggle Properties Panel"
@@ -14172,10 +14167,11 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
             {showProperties ? <PanelRightClose className="h-3.5 w-3.5" /> : <PanelRightOpen className="h-3.5 w-3.5" />}
           </button>
           </ToolbarTooltip>
+          </div>
 
           {/* Floor Settings quick popover — Floor-specific state only. */}
-          <div ref={floorSettingsTriggerRef} className="relative hidden xl:flex shrink-0">
-            <ToolbarTooltip tool="canvasSettings" label="Floor Settings" hint="Adjust floor display and editing preferences.">
+          <div ref={floorSettingsTriggerRef} className="relative flex shrink-0">
+            <ToolbarTooltip tool="canvasSettings" label="Floor Settings" hint="Configure floor display, snapping, appearance, and canvas options.">
             <button
               type="button"
               onClick={() => {
@@ -14198,7 +14194,6 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
               aria-expanded={floorSettingsPopoverOpen}
               aria-haspopup="dialog"
               data-tutorial="floor-settings"
-              data-toolbar-secondary
               data-testid="floor-settings-trigger"
               className={cn(
                 "flex items-center justify-center h-6 w-6 sm:h-7 sm:w-7 shrink-0 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-all",
@@ -14273,6 +14268,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
           <div data-testid="floor-toolbar-lifecycle" data-tutorial="floor-save-test" className="flex items-center gap-1 shrink-0 whitespace-nowrap sm:gap-2">
             <ToolbarTooltip tool="save" label="Save" hint={isFloorDirty ? "Save your current floor draft changes." : "Your current floor draft is saved."}>
             <button onClick={handleSave} disabled={saving || !isFloorDirty}
+              data-tutorial="floor-save"
               className={cn("flex items-center justify-center gap-1 h-6 w-6 px-0 sm:h-7 sm:w-auto sm:px-2.5 rounded-md text-[10px] font-extrabold transition-all border shadow-sm",
                 isFloorDirty ? "bg-primary text-primary-foreground border-primary hover:bg-primary/90" : "bg-muted/40 text-muted-foreground border-border cursor-not-allowed")}>
               {saving ? <Loader2 className="h-3 w-3 animate-spin" /> :
@@ -14283,6 +14279,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
             <ToolbarTooltip tool="publish" label={onPreviewStudent ? "Preview Student View" : "Publish"} hint={onPreviewStudent ? "Review the saved campus as students will see it before publishing." : isFloorDirty ? "Save your latest changes before publishing." : "Publish the saved floor so it becomes available to users."}>
             <button
               onClick={handlePublish}
+              data-tutorial="floor-publish"
               disabled={!publishingEnabled || saving || (isFloorDirty && !onPreviewStudent)}
               className={cn("flex items-center justify-center gap-1 h-6 w-6 px-0 sm:h-7 sm:w-auto sm:px-2.5 rounded-md text-[10px] font-extrabold transition-all border",
                 !publishingEnabled || (isFloorDirty && !onPreviewStudent) || saving ? "border-border text-muted-foreground/60 cursor-not-allowed" : "border-emerald-500/30 text-emerald-700 bg-emerald-500/10 hover:bg-emerald-500/15")}
@@ -14402,7 +14399,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
               </div>
             </div>
 
-            <div>
+            <div data-tutorial="floor-circulation">
               <span className="px-1 text-[9px] font-extrabold uppercase tracking-wider text-muted-foreground">Circulation</span>
               <div className="grid grid-cols-2 gap-1 mt-1">
                 {[

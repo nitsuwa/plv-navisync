@@ -28,9 +28,11 @@ export const TOOL_DEFINITIONS: Record<string, ToolDescriptor> = {
   resetView:{ id: "resetView",label: "Reset View",shortcut: "0",                   description: "Return the canvas to its default zoom and position." },
   canvasSettings: { id: "canvasSettings", label: "Canvas Settings", shortcut: "", description: "Adjust canvas display and editing preferences." },
   keyboardShortcuts: { id: "keyboardShortcuts", label: "Keyboard Shortcuts", shortcut: "?", description: "View the available keyboard controls for the Map Builder." },
+  tutorial: { id: "tutorial", label: "Tutorial", shortcut: "", description: "Take a guided tour of the editor." },
   navigationVisibility: { id: "navigationVisibility", label: "Navigation", shortcut: "", description: "Show and edit Walking Points and Walking Paths." },
   save:     { id: "save",     label: "Save",     shortcut: "Ctrl + S",             description: "Your current draft is saved." },
   publish:  { id: "publish",  label: "Publish",  shortcut: "",                    description: "Publish the saved campus so it becomes available to users." },
+  reviewPublish: { id: "reviewPublish", label: "Review & Publish", shortcut: "", description: "Review validation and publish the latest campus changes." },
   wall:     { id: "wall",     label: "Wall",     shortcut: "W",     description: "Draw walls to define rooms and hallways." },
   room:     { id: "room",     label: "Room",     shortcut: "R",     description: "Add a room area to the floor plan." },
   door:     { id: "door",     label: "Door",     shortcut: "D",     description: "Place a door in a wall or room boundary." },
@@ -69,6 +71,11 @@ export function ToolbarTooltip({
   const [pos, setPos] = useState({ x: 0, y: 0, above: true });
   const triggerRef = useRef<HTMLDivElement>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const focusedRef = useRef(false);
+  // A pointer activation should dismiss the hint immediately.  The short
+  // focus guard prevents the browser's follow-up focus event from reopening
+  // it while the activated control opens a dialog/modal.
+  const suppressFocusRef = useRef(false);
 
   const def = TOOL_DEFINITIONS[tool];
   const title = label ?? def?.label ?? tool;
@@ -80,6 +87,15 @@ export function ToolbarTooltip({
       if (timerRef.current) clearTimeout(timerRef.current);
     };
   }, []);
+
+  const dismissTooltip = () => {
+    focusedRef.current = false;
+    suppressFocusRef.current = true;
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = null;
+    setShow(false);
+    window.setTimeout(() => { suppressFocusRef.current = false; }, 0);
+  };
 
   const handleMouseEnter = () => {
     if (!triggerRef.current) return;
@@ -107,8 +123,24 @@ export function ToolbarTooltip({
   };
 
   const handleMouseLeave = () => {
+    if (focusedRef.current) return;
     if (timerRef.current) clearTimeout(timerRef.current);
     setShow(false);
+  };
+
+  const handleFocus = () => {
+    if (suppressFocusRef.current) return;
+    focusedRef.current = true;
+    handleMouseEnter();
+  };
+  const handleBlur = (event: React.FocusEvent<HTMLDivElement>) => {
+    // Focus bubbles from the wrapped button. Keep the hint open while focus
+    // moves within the trigger, and dismiss it when keyboard focus leaves.
+    if (!triggerRef.current?.contains(event.relatedTarget as Node | null)) {
+      focusedRef.current = false;
+      if (timerRef.current) clearTimeout(timerRef.current);
+      setShow(false);
+    }
   };
 
   if (!def) return <>{children}</>;
@@ -118,6 +150,10 @@ export function ToolbarTooltip({
       ref={triggerRef}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
+      onPointerDown={dismissTooltip}
+      onClick={dismissTooltip}
+      onFocus={handleFocus}
+      onBlur={handleBlur}
       className="relative inline-flex"
     >
       {children}
@@ -127,7 +163,10 @@ export function ToolbarTooltip({
             position: "fixed",
             left: pos.x,
             ...(pos.above ? { top: pos.y, transform: "translate(-50%, -100%)" } : { top: pos.y, transform: "translate(-50%, 0)" }),
-            zIndex: 99999,
+            // Keep tooltips below modal/dialog stacks (and the tutorial
+            // spotlight) so a stale hint can never float above a foreground
+            // confirmation surface.
+            zIndex: 40,
             pointerEvents: "none",
           }}
         >

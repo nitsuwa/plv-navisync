@@ -107,11 +107,11 @@ describe("CampusEditor building entrances", () => {
     expect(screen.queryByRole("button", { name: "Preview Student View" })).not.toBeInTheDocument();
   });
 
-  it("keeps the outdoor toolbar in independent left, centered, and right zones", () => {
+  it("keeps the outdoor toolbar in compact left, centered, and right zones", () => {
     render(<Harness />);
     const header = screen.getByTestId("campus-editor-header");
     expect(header.className).toContain("editor-toolbar-shell");
-    expect(header.className).toContain("grid-cols-[minmax(0,1fr)_minmax(0,auto)_minmax(0,1fr)]");
+    expect(header.className).toContain("grid-cols-[minmax(0,auto)_minmax(0,1fr)_minmax(0,auto)]");
     expect(header.className).toContain("overflow-visible");
     expect(screen.getByTestId("campus-toolbar-left")).toBeInTheDocument();
     expect(screen.getByTestId("campus-toolbar-center")).toBeInTheDocument();

@@ -811,6 +811,8 @@ describe("FloorEditor top toolbar (B6 manual-QA: deterministic responsive groupi
     expect(screen.getByTestId("floor-toolbar-lifecycle")).toBeInTheDocument();
     expect(screen.getByTestId("floor-toolbar-right").querySelector(".flex-1.min-w-8")).toBeNull();
     expect(screen.getByTestId("floor-tab-bar").className).toContain("absolute");
+    expect(screen.getByTestId("floor-settings-trigger")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Toggle snap to grid" })).not.toBeInTheDocument();
   });
 
   it("keeps Save and Publish in the same shrink-0 group so a wrapped row never splits them", () => {
