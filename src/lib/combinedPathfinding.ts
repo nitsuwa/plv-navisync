@@ -25,6 +25,7 @@ export interface BuildingDest {
   buildingId: string;
   label: string;
   code: string;
+  entranceNodeId?: string;
 }
 
 export interface RoomDest {
@@ -35,6 +36,9 @@ export interface RoomDest {
   roomName: string;
   buildingLabel: string;
   buildingCode: string;
+  accessNodeId?: string;
+  accessDoorId?: string;
+  accessDoorIds?: string[];
 }
 
 export type Destination = BuildingDest | RoomDest;

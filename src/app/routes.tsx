@@ -1,41 +1,99 @@
 import { createBrowserRouter, Link } from "react-router";
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, type ComponentType } from "react";
 import { PublicLayout }  from "../components/layout/PublicLayout";
 import { AdminLayout }   from "../components/layout/AdminLayout";
+import { isDynamicImportError, RouteErrorElement } from "../components/ui/ErrorBoundary";
+
+type LazyPageModule = { default: ComponentType<any> };
+
+const LAZY_IMPORT_RELOAD_KEY = "plv-navisync:lazy-import-reload";
+
+function clearLazyImportReloadFlag(): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.removeItem(LAZY_IMPORT_RELOAD_KEY);
+  } catch {
+    // Storage can be unavailable in privacy-restricted browser contexts.
+  }
+}
+
+function reloadOnceAfterLazyImportFailure(): boolean {
+  // Vitest intentionally leaves the error available to the test router rather
+  // than trying to reload the jsdom document.
+  if (typeof window === "undefined" || import.meta.env.MODE === "test") return false;
+
+  try {
+    if (window.sessionStorage.getItem(LAZY_IMPORT_RELOAD_KEY) === "1") return false;
+    window.sessionStorage.setItem(LAZY_IMPORT_RELOAD_KEY, "1");
+    window.location.reload();
+    return true;
+  } catch {
+    // If storage or reload is unavailable, let the route error element render.
+    return false;
+  }
+}
+
+/**
+ * Retry a failed page import once. Transient dev-server/network failures can
+ * recover without interrupting the user; persistent failures are handed to
+ * the route error element, whose reload action can recover stale deployments.
+ */
+export function lazyPage(load: () => Promise<LazyPageModule>) {
+  return lazy(async () => {
+    try {
+      const page = await load();
+      clearLazyImportReloadFlag();
+      return page;
+    } catch (error) {
+      if (!isDynamicImportError(error)) throw error;
+
+      // A browser may cache a failed module record, so retry the request once
+      // and then refresh the document once to obtain a fresh module graph.
+      try {
+        const page = await load();
+        clearLazyImportReloadFlag();
+        return page;
+      } catch (retryError) {
+        reloadOnceAfterLazyImportFailure();
+        throw retryError;
+      }
+    }
+  });
+}
 
 // ── Lazy-loaded pages for code splitting ──────────────────────────────────
 // Note: All page imports use named exports, so we wrap them to convert to default exports
-const LandingPage          = lazy(() => import("../pages/LandingPage").then(m => ({ default: m.LandingPage })));
-const CampusMapPage        = lazy(() => import("../pages/CampusMapPage").then(m => ({ default: m.CampusMapPage })));
-const BuildingsPage        = lazy(() => import("../pages/BuildingsPage").then(m => ({ default: m.BuildingsPage })));
-const BuildingDetailsPage  = lazy(() => import("../pages/BuildingDetailsPage").then(m => ({ default: m.BuildingDetailsPage })));
-const HelpCenterPage       = lazy(() => import("../pages/HelpCenterPage").then(m => ({ default: m.HelpCenterPage })));
-const AnnouncementsPage    = lazy(() => import("../pages/AnnouncementsPage").then(m => ({ default: m.AnnouncementsPage })));
-const AdminLoginPage       = lazy(() => import("../pages/AdminLoginPage").then(m => ({ default: m.AdminLoginPage })));
-const AdminDashboardPage   = lazy(() => import("../pages/AdminDashboardPage").then(m => ({ default: m.AdminDashboardPage })));
-const AdminBuildingsPage   = lazy(() => import("../pages/AdminBuildingsPage").then(m => ({ default: m.AdminBuildingsPage })));
-const AdminLocationsPage   = lazy(() => import("../pages/AdminLocationsPage").then(m => ({ default: m.AdminLocationsPage })));
-const AdminUsersPage       = lazy(() => import("../pages/AdminUsersPage").then(m => ({ default: m.AdminUsersPage })));
-const AdminSettingsPage    = lazy(() => import("../pages/AdminSettingsPage").then(m => ({ default: m.AdminSettingsPage })));
-const RegistrationPage     = lazy(() => import("../pages/RegistrationPage").then(m => ({ default: m.RegistrationPage })));
-const AdminMapBuilderPage  = lazy(() => import("../pages/AdminMapBuilderPage").then(m => ({ default: m.AdminMapBuilderPage })));
-const AdminFloorPlansPage  = lazy(() => import("../pages/AdminFloorPlansPage").then(m => ({ default: m.AdminFloorPlansPage })));
-const AdminRoutesPage      = lazy(() => import("../pages/AdminRoutesPage").then(m => ({ default: m.AdminRoutesPage })));
-const AdminReportsPage     = lazy(() => import("../pages/AdminReportsPage").then(m => ({ default: m.AdminReportsPage })));
-const AdminAccessibilityPage = lazy(() => import("../pages/AdminAccessibilityPage").then(m => ({ default: m.AdminAccessibilityPage })));
-const AdminEventsPage      = lazy(() => import("../pages/AdminEventsPage").then(m => ({ default: m.AdminEventsPage })));
-const AdminAnnouncementsPage = lazy(() => import("../pages/AdminAnnouncementsPage").then(m => ({ default: m.AdminAnnouncementsPage })));
-const AdminActivityLogsPage = lazy(() => import("../pages/AdminActivityLogsPage").then(m => ({ default: m.AdminActivityLogsPage })));
-const StudentProfilePage   = lazy(() => import("../pages/StudentProfilePage").then(m => ({ default: m.StudentProfilePage })));
-const StudentFavoritesPage = lazy(() => import("../pages/StudentFavoritesPage").then(m => ({ default: m.StudentFavoritesPage })));
-const StudentReportsPage   = lazy(() => import("../pages/StudentReportsPage").then(m => ({ default: m.StudentReportsPage })));
-const StudentSettingsPage  = lazy(() => import("../pages/StudentSettingsPage").then(m => ({ default: m.StudentSettingsPage })));
-const StudentMyDayPage     = lazy(() => import("../pages/StudentMyDayPage").then(m => ({ default: m.StudentMyDayPage })));
-const StudentHomePage      = lazy(() => import("../pages/StudentHomePage").then(m => ({ default: m.StudentHomePage })));
-const VerificationPendingPage = lazy(() => import("../pages/AuthLifecyclePages").then(m => ({ default: m.VerificationPendingPage })));
-const AuthCallbackPage     = lazy(() => import("../pages/AuthLifecyclePages").then(m => ({ default: m.AuthCallbackPage })));
-const ForgotPasswordPage   = lazy(() => import("../pages/AuthLifecyclePages").then(m => ({ default: m.ForgotPasswordPage })));
-const ResetPasswordPage    = lazy(() => import("../pages/AuthLifecyclePages").then(m => ({ default: m.ResetPasswordPage })));
+const LandingPage          = lazyPage(() => import("../pages/LandingPage").then(m => ({ default: m.LandingPage })));
+const CampusMapPage        = lazyPage(() => import("../pages/CampusMapPage").then(m => ({ default: m.CampusMapPage })));
+const BuildingsPage        = lazyPage(() => import("../pages/BuildingsPage").then(m => ({ default: m.BuildingsPage })));
+const BuildingDetailsPage  = lazyPage(() => import("../pages/BuildingDetailsPage").then(m => ({ default: m.BuildingDetailsPage })));
+const HelpCenterPage       = lazyPage(() => import("../pages/HelpCenterPage").then(m => ({ default: m.HelpCenterPage })));
+const AnnouncementsPage    = lazyPage(() => import("../pages/AnnouncementsPage").then(m => ({ default: m.AnnouncementsPage })));
+const AdminLoginPage       = lazyPage(() => import("../pages/AdminLoginPage").then(m => ({ default: m.AdminLoginPage })));
+const AdminDashboardPage   = lazyPage(() => import("../pages/AdminDashboardPage").then(m => ({ default: m.AdminDashboardPage })));
+const AdminBuildingsPage   = lazyPage(() => import("../pages/AdminBuildingsPage").then(m => ({ default: m.AdminBuildingsPage })));
+const AdminLocationsPage   = lazyPage(() => import("../pages/AdminLocationsPage").then(m => ({ default: m.AdminLocationsPage })));
+const AdminUsersPage       = lazyPage(() => import("../pages/AdminUsersPage").then(m => ({ default: m.AdminUsersPage })));
+const AdminSettingsPage    = lazyPage(() => import("../pages/AdminSettingsPage").then(m => ({ default: m.AdminSettingsPage })));
+const RegistrationPage     = lazyPage(() => import("../pages/RegistrationPage").then(m => ({ default: m.RegistrationPage })));
+const AdminMapBuilderPage  = lazyPage(() => import("../pages/AdminMapBuilderPage").then(m => ({ default: m.AdminMapBuilderPage })));
+const AdminFloorPlansPage  = lazyPage(() => import("../pages/AdminFloorPlansPage").then(m => ({ default: m.AdminFloorPlansPage })));
+const AdminRoutesPage      = lazyPage(() => import("../pages/AdminRoutesPage").then(m => ({ default: m.AdminRoutesPage })));
+const AdminReportsPage     = lazyPage(() => import("../pages/AdminReportsPage").then(m => ({ default: m.AdminReportsPage })));
+const AdminAccessibilityPage = lazyPage(() => import("../pages/AdminAccessibilityPage").then(m => ({ default: m.AdminAccessibilityPage })));
+const AdminEventsPage      = lazyPage(() => import("../pages/AdminEventsPage").then(m => ({ default: m.AdminEventsPage })));
+const AdminAnnouncementsPage = lazyPage(() => import("../pages/AdminAnnouncementsPage").then(m => ({ default: m.AdminAnnouncementsPage })));
+const AdminActivityLogsPage = lazyPage(() => import("../pages/AdminActivityLogsPage").then(m => ({ default: m.AdminActivityLogsPage })));
+const StudentProfilePage   = lazyPage(() => import("../pages/StudentProfilePage").then(m => ({ default: m.StudentProfilePage })));
+const StudentFavoritesPage = lazyPage(() => import("../pages/StudentFavoritesPage").then(m => ({ default: m.StudentFavoritesPage })));
+const StudentReportsPage   = lazyPage(() => import("../pages/StudentReportsPage").then(m => ({ default: m.StudentReportsPage })));
+const StudentSettingsPage  = lazyPage(() => import("../pages/StudentSettingsPage").then(m => ({ default: m.StudentSettingsPage })));
+const StudentMyDayPage     = lazyPage(() => import("../pages/StudentMyDayPage").then(m => ({ default: m.StudentMyDayPage })));
+const StudentHomePage      = lazyPage(() => import("../pages/StudentHomePage").then(m => ({ default: m.StudentHomePage })));
+const VerificationPendingPage = lazyPage(() => import("../pages/AuthLifecyclePages").then(m => ({ default: m.VerificationPendingPage })));
+const AuthCallbackPage     = lazyPage(() => import("../pages/AuthLifecyclePages").then(m => ({ default: m.AuthCallbackPage })));
+const ForgotPasswordPage   = lazyPage(() => import("../pages/AuthLifecyclePages").then(m => ({ default: m.ForgotPasswordPage })));
+const ResetPasswordPage    = lazyPage(() => import("../pages/AuthLifecyclePages").then(m => ({ default: m.ResetPasswordPage })));
 
 // ── Suspense fallback — branded shimmer skeleton ─────────────────────────
 function PageLoading() {
@@ -72,6 +130,8 @@ function PageLoading() {
 function SuspensePage({ children }: { children: React.ReactNode }) {
   return <Suspense fallback={<PageLoading />}>{children}</Suspense>;
 }
+
+const routeErrorElement = <RouteErrorElement />;
 
 function NotFound() {
   return (
@@ -132,6 +192,7 @@ export const router = createBrowserRouter([
   {
     path: "/",
     element: <PublicLayout />,
+    errorElement: routeErrorElement,
     children: [
       { index: true, element: <SuspensePage><LandingPage /></SuspensePage> },
       { path: "map", element: <SuspensePage><CampusMapPage /></SuspensePage> },
@@ -153,17 +214,18 @@ export const router = createBrowserRouter([
   },
 
   // ── Auth pages (standalone)
-  { path: "/admin", element: <SuspensePage><AdminLoginPage /></SuspensePage> },
-  { path: "/register", element: <SuspensePage><RegistrationPage /></SuspensePage> },
-  { path: "/auth/verify", element: <SuspensePage><VerificationPendingPage /></SuspensePage> },
-  { path: "/auth/callback", element: <SuspensePage><AuthCallbackPage /></SuspensePage> },
-  { path: "/auth/forgot-password", element: <SuspensePage><ForgotPasswordPage /></SuspensePage> },
-  { path: "/auth/reset-password", element: <SuspensePage><ResetPasswordPage /></SuspensePage> },
+  { path: "/admin", element: <SuspensePage><AdminLoginPage /></SuspensePage>, errorElement: routeErrorElement },
+  { path: "/register", element: <SuspensePage><RegistrationPage /></SuspensePage>, errorElement: routeErrorElement },
+  { path: "/auth/verify", element: <SuspensePage><VerificationPendingPage /></SuspensePage>, errorElement: routeErrorElement },
+  { path: "/auth/callback", element: <SuspensePage><AuthCallbackPage /></SuspensePage>, errorElement: routeErrorElement },
+  { path: "/auth/forgot-password", element: <SuspensePage><ForgotPasswordPage /></SuspensePage>, errorElement: routeErrorElement },
+  { path: "/auth/reset-password", element: <SuspensePage><ResetPasswordPage /></SuspensePage>, errorElement: routeErrorElement },
 
   // ── Admin portal (protected by AdminLayout's auth check)
   {
     path: "/admin-dashboard",
     element: <AdminLayout />,
+    errorElement: routeErrorElement,
     children: [
       { index: true, element: <SuspensePage><AdminDashboardPage /></SuspensePage> },
       { path: "buildings", element: <SuspensePage><AdminBuildingsPage /></SuspensePage> },

@@ -104,7 +104,7 @@ export function BuildingInfoPanel({
       <div className="grid grid-cols-4 gap-1 px-2 py-2.5 border-b border-border shrink-0">
         <button
           onClick={() => onDirections(selected)}
-          className="flex items-center justify-center gap-0.5 h-8 px-1 rounded-xl bg-primary text-primary-foreground text-[10px] font-extrabold hover:bg-primary/90 active:scale-[0.97] transition-all"
+          className="flex items-center justify-center gap-1 h-9 px-2 rounded-xl bg-primary text-primary-foreground text-[10px] font-extrabold hover:bg-primary/90 active:scale-[0.97] transition-all"
         >
           <Navigation className="h-3 w-3 shrink-0" /> Directions
         </button>

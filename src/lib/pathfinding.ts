@@ -491,8 +491,11 @@ export function buildTransitionEdges(
     if (hasPersistedTransition) continue;
 
     // Determine type from IDs — elevator or stairs
+    const normalizedSharedId = sharedId.toLowerCase();
     const isElevator = nodes.some((node) => node.elevatorId || node.type === "elevator")
-      || sharedId.toLowerCase().includes("el_");
+      || normalizedSharedId.includes("elev")
+      || normalizedSharedId.includes("lift")
+      || normalizedSharedId.startsWith("el");
     // Designated emergency stairs are the preferred emergency egress when a
     // valid route exists.  This is only a cost hint on the existing virtual
     // transition edges; it does not alter A* or create a second graph.
@@ -552,6 +555,7 @@ export function findNavigationRoute(
     emergencySafe?: boolean;
     type?: string;
     closed?: boolean;
+    bendPoints?: { x: number; y: number }[];
   }[],
   fromNodeId: string,
   toNodeId: string,
@@ -563,6 +567,11 @@ export function findNavigationRoute(
     /** When an Elevator is explicitly selected as an endpoint, keep
      * intermediate Elevator travel on that authored shaft. */
     preferredElevatorSharedIds?: string[];
+    /**
+     * Compatibility switch for older callers that relied on shared-ID
+     * transitions. Published graphs must use persisted authored edges only.
+     */
+    useDerivedTransitions?: boolean;
   } = {},
 ): GraphPath | null {
   if (!fromNodeId || !toNodeId) return null;
@@ -573,9 +582,11 @@ export function findNavigationRoute(
   }
   const emergencyNodeSafe = (node: typeof navNodes[number] | undefined): boolean => {
     if (!node) return false;
-    // Ordinary Elevators are not an emergency egress method.  They can only
-    // participate when every occurrence explicitly opts into evacuation use.
-    return !(node.type === "elevator" || node.elevatorId) || node.emergencySafe === true;
+    // Elevators are never an emergency floor-change method in this contract.
+    // An explicit false on any other node is also enough to reject egress.
+    return node.type !== "elevator"
+      && !node.elevatorId
+      && node.emergencySafe !== false;
   };
   if (emergencySafeOnly) {
     const startNode = navNodes.find((node) => node.id === fromNodeId);
@@ -596,16 +607,19 @@ export function findNavigationRoute(
 
   const nodeMap = new Map<string, typeof navNodes[number]>();
   for (const n of navNodes) nodeMap.set(n.id, n);
-  const transitionKindFor = (fromId: string, toId: string): "stair" | "elevator" | undefined => {
+  const transitionKindFor = (fromId: string, toId: string, edgeType?: string): "stair" | "elevator" | undefined => {
     const from = nodeMap.get(fromId);
     const to = nodeMap.get(toId);
+    const normalizedType = edgeType?.toLowerCase() ?? "";
+    if (normalizedType.includes("elevator")) return "elevator";
+    if (normalizedType.includes("stair")) return "stair";
     if (from?.elevatorId || to?.elevatorId || from?.type === "elevator" || to?.type === "elevator") return "elevator";
     if (from?.stairId || to?.stairId || from?.type === "stair" || to?.type === "stair") return "stair";
     const sharedId = from?.transitionSharedId && from.transitionSharedId === to?.transitionSharedId
       ? from.transitionSharedId.toLowerCase()
       : "";
-    if (sharedId.includes("el_")) return "elevator";
-    if (sharedId.includes("stair") || sharedId.includes("st_")) return "stair";
+    if (sharedId.includes("elev") || sharedId.includes("lift") || sharedId.startsWith("el")) return "elevator";
+    if (sharedId.includes("stair") || sharedId.includes("stairs") || sharedId.startsWith("st")) return "stair";
     return undefined;
   };
   const transitionSharedIdFor = (fromId: string, toId: string): string | undefined => {
@@ -619,14 +633,31 @@ export function findNavigationRoute(
   type NavigationNeighbor = {
     nodeId: string;
     dist: number;
+    authoredDistance: number;
     accessible: boolean;
     emergencySafe: boolean;
     transitionKind?: "stair" | "elevator";
     transitionSharedId?: string;
+    crossesFloor: boolean;
+    edge?: typeof navEdges[number];
+    reversed: boolean;
   };
   const adj = new Map<string, NavigationNeighbor[]>();
-  const addNeighbor = (fromId: string, toId: string, distance: number, accessible: boolean, emergencySafe: boolean, isTransition: boolean) => {
-    const transitionKind = isTransition ? transitionKindFor(fromId, toId) : undefined;
+  const addNeighbor = (
+    fromId: string,
+    toId: string,
+    distance: number,
+    accessible: boolean,
+    emergencySafe: boolean,
+    isTransition: boolean,
+    edgeType?: string,
+    edge?: typeof navEdges[number],
+    reversed = false,
+  ) => {
+    const from = nodeMap.get(fromId);
+    const to = nodeMap.get(toId);
+    const crossesFloor = !!from?.floorId && !!to?.floorId && from.floorId !== to.floorId;
+    const transitionKind = isTransition ? transitionKindFor(fromId, toId, edgeType) : undefined;
     const transitionSharedId = transitionKind === "elevator" ? transitionSharedIdFor(fromId, toId) : undefined;
     const preferencePenalty = preferredTransitionKind
       && transitionKind
@@ -637,10 +668,14 @@ export function findNavigationRoute(
     adj.get(fromId)!.push({
       nodeId: toId,
       dist: distance + preferencePenalty,
+      authoredDistance: distance,
       accessible,
       emergencySafe,
       transitionKind,
       transitionSharedId,
+      crossesFloor,
+      edge,
+      reversed,
     });
   };
   for (const edge of navEdges) {
@@ -649,20 +684,26 @@ export function findNavigationRoute(
     // control for authored walking paths and floor transitions.
     if (edge.closed === true) continue;
     const safe = edge.emergencySafe !== false; // default to safe if not set
-    const isTransition = edge.type === "floor_transition" || edge.type === "cross_floor";
-    addNeighbor(edge.startNodeId, edge.endNodeId, edge.distance, edge.accessible, safe, isTransition);
+    const isTransition = edge.type === "floor_transition" || edge.type === "cross_floor"
+      || (nodeMap.get(edge.startNodeId)?.floorId !== undefined
+        && nodeMap.get(edge.endNodeId)?.floorId !== undefined
+        && nodeMap.get(edge.startNodeId)?.floorId !== nodeMap.get(edge.endNodeId)?.floorId);
+    addNeighbor(edge.startNodeId, edge.endNodeId, edge.distance, edge.accessible, safe, isTransition, edge.type, edge, false);
     if (edge.bidirectional) {
-      addNeighbor(edge.endNodeId, edge.startNodeId, edge.distance, edge.accessible, safe, isTransition);
+      addNeighbor(edge.endNodeId, edge.startNodeId, edge.distance, edge.accessible, safe, isTransition, edge.type, edge, true);
     }
   }
 
-  // Add virtual floor-transition edges from shared stair/elevator IDs
-  const transitionEdges = buildTransitionEdges(navNodes, navEdges);
+  // Shared-ID transitions are retained only for older direct callers. They
+  // are not part of an authored published graph unless persisted as edges.
+  const transitionEdges = options.useDerivedTransitions === false
+    ? []
+    : buildTransitionEdges(navNodes, navEdges);
   for (const edge of transitionEdges) {
     const safe = edge.emergencySafe !== false;
-    addNeighbor(edge.startNodeId, edge.endNodeId, edge.distance, edge.accessible, safe, true);
+    addNeighbor(edge.startNodeId, edge.endNodeId, edge.distance, edge.accessible, safe, true, undefined, undefined, false);
     if (edge.bidirectional) {
-      addNeighbor(edge.endNodeId, edge.startNodeId, edge.distance, edge.accessible, safe, true);
+      addNeighbor(edge.endNodeId, edge.startNodeId, edge.distance, edge.accessible, safe, true, undefined, undefined, true);
     }
   }
 
@@ -712,11 +753,20 @@ export function findNavigationRoute(
     edgeDist: number;
   }
 
+  type ParentArc = {
+    edge?: typeof navEdges[number];
+    reversed: boolean;
+    distance: number;
+    transitionKind?: "stair" | "elevator";
+    crossesFloor: boolean;
+  };
+
   const open = new Map<string, NavAStarNode>();
   const closed = new Set<string>();
 
   // Persistent parent map — survives nodes being moved from open → closed
   const parentMap = new Map<string, string | null>();
+  const parentArcMap = new Map<string, ParentArc>();
 
   open.set(fromNodeId, { id: fromNodeId, g: 0, f: h(fromNodeId, toNodeId), parent: null, edgeDist: 0 });
   parentMap.set(fromNodeId, null);
@@ -732,34 +782,49 @@ export function findNavigationRoute(
       // Reconstruct path using the persistent parentMap
       const pathIds: string[] = [];
       let nodeId: string | null = current.id;
+      const arcs: ParentArc[] = [];
       while (nodeId !== null) {
         pathIds.unshift(nodeId);
+        const arc = parentArcMap.get(nodeId);
+        if (arc) arcs.unshift(arc);
         nodeId = parentMap.get(nodeId) ?? null;
       }
 
-      const waypoints = pathIds.map(id => {
-        const n = nodeMap.get(id);
-        return n ? { x: n.x, y: n.y } : { x: 0, y: 0 };
-      });
+      const waypoints: { x: number; y: number }[] = [];
+      const append = (point: { x: number; y: number }) => {
+        const previous = waypoints[waypoints.length - 1];
+        if (!previous || previous.x !== point.x || previous.y !== point.y) waypoints.push(point);
+      };
+      const first = nodeMap.get(pathIds[0]);
+      if (first) append({ x: first.x, y: first.y });
 
-      // Calculate distance from edges between consecutive path nodes
+      // Reuse the exact selected edge, including its direction and cost. This
+      // avoids a duplicate/opposite edge changing the reported route.
       let totalUnits = 0;
       const steps: string[] = [];
-      for (let i = 0; i < pathIds.length - 1; i++) {
+      for (let i = 0; i < arcs.length; i++) {
         const from = pathIds[i];
         const to = pathIds[i + 1];
-        const edge = navEdges.find(
-          e => (e.startNodeId === from && e.endNodeId === to) ||
-               (e.bidirectional && e.startNodeId === to && e.endNodeId === from)
-        );
+        const arc = arcs[i];
+        const edge = arc.edge;
+        totalUnits += arc.distance;
         if (edge) {
-          totalUnits += edge.distance;
-          const fromLabel = nodeMap.get(from)?.name || from;
-          const toLabel = nodeMap.get(to)?.name || to;
-          const distM = Math.round(edge.distance * M_PER_UNIT);
-          if (i === 0) {
-            steps.push(`Start from ${fromLabel}`);
-          }
+          const bends = edge.bendPoints
+            ? (arc.reversed ? [...edge.bendPoints].reverse() : edge.bendPoints)
+            : [];
+          bends.forEach(append);
+        }
+        const destination = nodeMap.get(to);
+        if (destination) append({ x: destination.x, y: destination.y });
+        const fromLabel = nodeMap.get(from)?.name || from;
+        const toLabel = destination?.name || to;
+        const distM = Math.round(arc.distance * M_PER_UNIT);
+        const crossedDerivedArc = arcs.slice(0, i).some((prior) => !prior.edge);
+        if (steps.length === 0 && !crossedDerivedArc) steps.push(`Start from ${fromLabel}`);
+        if (arc.crossesFloor && arc.transitionKind) {
+          const transitionLabel = arc.transitionKind === "stair" ? "stairs" : "elevator";
+          steps.push(`Take the ${transitionLabel} to ${toLabel}`);
+        } else if (edge) {
           steps.push(`Walk ${Math.max(1, distM)}m to ${toLabel}`);
         }
       }
@@ -774,7 +839,7 @@ export function findNavigationRoute(
     closed.add(current.id);
 
     const neighbors = adj.get(current.id) ?? [];
-    for (const { nodeId: neighborId, dist, accessible, emergencySafe, transitionKind, transitionSharedId } of neighbors) {
+    for (const { nodeId: neighborId, dist, authoredDistance, accessible, emergencySafe, transitionKind, transitionSharedId, crossesFloor, edge, reversed } of neighbors) {
       if (closed.has(neighborId)) continue;
       if (transitionKind === "elevator" && options.preferredElevatorSharedIds?.length) {
         // Exact endpoint identity wins over geometric convenience: a selected
@@ -785,7 +850,7 @@ export function findNavigationRoute(
       }
       if (accessibleOnly && !accessible) continue;
       if (accessibleOnly && !accessibleNode(navNodes.find((node) => node.id === neighborId))) continue;
-      if (emergencySafeOnly && !emergencySafe) continue;
+      if (emergencySafeOnly && (!emergencySafe || transitionKind === "elevator" || (crossesFloor && transitionKind !== "stair"))) continue;
       if (emergencySafeOnly && !emergencyNodeSafe(navNodes.find((node) => node.id === neighborId))) continue;
 
       const tentG = current.g + dist;
@@ -793,6 +858,13 @@ export function findNavigationRoute(
 
       if (!existing || tentG < existing.g) {
         parentMap.set(neighborId, current.id);
+        parentArcMap.set(neighborId, {
+          edge,
+          reversed,
+          distance: authoredDistance,
+          transitionKind,
+          crossesFloor,
+        });
         open.set(neighborId, {
           id: neighborId,
           g: tentG,

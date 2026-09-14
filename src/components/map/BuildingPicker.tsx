@@ -34,7 +34,11 @@ export function BuildingPicker({
   useEffect(() => {
     if (!open || !listRef.current) return;
     const activeEl = listRef.current.querySelector<HTMLButtonElement>(`[data-idx="${activeIdx}"]`);
-    activeEl?.scrollIntoView({ block: "nearest" });
+    // jsdom does not implement scrollIntoView; the guard also keeps the
+    // picker resilient in embedded webviews that omit the optional method.
+    if (typeof activeEl?.scrollIntoView === "function") {
+      activeEl.scrollIntoView({ block: "nearest" });
+    }
   }, [activeIdx, open]);
 
   const list = (buildings ?? []) as Building[];
@@ -123,8 +127,12 @@ export function BuildingPicker({
       {open && (
         <div
           ref={listRef}
-          className="absolute top-full left-0 right-0 mt-1 rounded-xl border border-border bg-card shadow-xl overflow-hidden z-[60]"
-          style={{ maxHeight: 200, overflowY: "auto" }}
+          className="absolute top-full left-0 right-0 mt-1 rounded-xl border border-border bg-card shadow-xl overflow-x-hidden z-[60]"
+          style={{ maxHeight: 200, overflowY: "auto", overscrollBehaviorY: "contain" }}
+          // The map owns a native wheel listener for zoom. Capture the event
+          // here so scrolling a long endpoint list never zooms the map.
+          onWheelCapture={(event) => event.stopPropagation()}
+          onTouchMoveCapture={(event) => event.stopPropagation()}
           role="listbox"
         >
           {/* Screen reader live region for result announcements */}

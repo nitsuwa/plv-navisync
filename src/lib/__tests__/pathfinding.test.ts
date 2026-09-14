@@ -244,7 +244,7 @@ describe("findNavigationRoute (authored nav graph)", () => {
     expect(findNavigationRoute(nodes, edges, "start", "target", true)?.nodeIds).toEqual(["start", "elevator-f1", "elevator-f2", "target"]);
   });
 
-  it("excludes Elevator transitions from Emergency mode unless explicitly marked safe", () => {
+  it("always excludes Elevator transitions from Emergency mode", () => {
     const nodes = [
       { id: "e1", name: "Elevator F1", x: 0, y: 0, floorId: "f1", type: "elevator", elevatorId: "e-f1", transitionSharedId: "lift-core", accessible: true },
       { id: "e2", name: "Elevator F2", x: 0, y: 0, floorId: "f2", type: "elevator", elevatorId: "e-f2", transitionSharedId: "lift-core", accessible: true },
@@ -255,7 +255,7 @@ describe("findNavigationRoute (authored nav graph)", () => {
     ];
     expect(findNavigationRoute(nodes, edges, "e1", "target", false, true)).toBeNull();
     const explicitlySafe = nodes.map((node) => node.type === "elevator" ? { ...node, emergencySafe: true } : node);
-    expect(findNavigationRoute(explicitlySafe, edges, "e1", "target", false, true)?.nodeIds).toEqual(["e1", "e2", "target"]);
+    expect(findNavigationRoute(explicitlySafe, edges, "e1", "target", false, true)).toBeNull();
   });
 
   it("skips emergency-unsafe edges in emergency mode", () => {
@@ -418,13 +418,14 @@ describe("findNavigationRoute across floors", () => {
     const path = findNavigationRoute(nodes, edges, "n1", "n3");
     expect(path).not.toBeNull();
     expect(path!.nodeIds).toEqual(["n1", "n2", "n3"]);
-    // NOTE (intentional B1 regression pin): today the virtual floor-transition
-    // edge is used for ROUTING but excluded from the reported distance and
-    // steps (only authored edges are summed). This is current behavior and is
-    // pinned here on purpose so package B8 (route testing) can review whether
-    // it should be changed deliberately, not accidentally.
-    expect(path!.distanceM).toBe(22);
-    expect(path!.steps).toEqual(["Walk 22m to Room 201"]);
+    // The shared transition is part of the selected route cost and is
+    // surfaced as an explicit elevator instruction.
+    expect(path!.distanceM).toBe(23);
+    expect(path!.steps).toEqual([
+      "Start from F1 Elevator",
+      "Take the elevator to F2 Elevator",
+      "Walk 22m to Room 201",
+    ]);
   });
 
   it("cannot cross floors without a shared stair/elevator transition", () => {

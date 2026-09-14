@@ -1,5 +1,109 @@
-import { Component, createRef, type ErrorInfo, type ReactNode } from "react";
+import { Component, createRef, useEffect, useRef, type ErrorInfo, type ReactNode } from "react";
 import { AlertTriangle, RefreshCw, ChevronDown, Home, HelpCircle, FileWarning, Bug } from "lucide-react";
+import { useLocation, useRouteError } from "react-router";
+
+/** Errors emitted by browsers/Vite when a lazy page chunk cannot be fetched. */
+export function isDynamicImportError(error: unknown): boolean {
+  const message = error instanceof Error
+    ? error.message
+    : typeof error === "string"
+      ? error
+      : "";
+
+  return /failed to fetch dynamically imported module|importing a module script failed|error loading dynamically imported module|chunkloaderror|loading chunk|unable to preload|failed to load module script/i.test(message)
+    || (error instanceof TypeError && /^load failed$/i.test(message.trim()));
+}
+
+export function getRouteErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === "string") return error;
+  if (error && typeof error === "object") {
+    const routeError = error as { statusText?: unknown; data?: unknown };
+    if (typeof routeError.statusText === "string") return routeError.statusText;
+    if (typeof routeError.data === "string") return routeError.data;
+  }
+  return "Unknown route error";
+}
+
+export function RouteErrorElement() {
+  const error = useRouteError();
+  const { pathname } = useLocation();
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  const isAdmin = pathname === "/admin" || pathname.startsWith("/admin/") || pathname.startsWith("/admin-");
+  const isChunkError = isDynamicImportError(error);
+  const pageLabel = isAdmin ? "admin page" : "page";
+  const title = isChunkError
+    ? (isAdmin ? "Admin page needs a refresh" : "This page needs a refresh")
+    : (isAdmin ? "Admin page could not load" : "This page could not load");
+  const description = isChunkError
+    ? `The app was updated while this ${pageLabel} was open. Reload to fetch the latest version and try again.`
+    : "We could not load this page right now. Try again, or return to a safe starting point.";
+
+  useEffect(() => {
+    headingRef.current?.focus();
+  }, []);
+
+  return (
+    <main
+      role="alert"
+      aria-live="assertive"
+      aria-labelledby="route-error-title"
+      aria-describedby="route-error-description"
+      className="min-h-screen flex items-center justify-center px-4 py-12 bg-background"
+    >
+      <section className="w-full max-w-lg rounded-2xl border border-border bg-card p-8 text-center shadow-sm">
+        <div className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-destructive/10 text-destructive">
+          <FileWarning className="h-7 w-7" aria-hidden="true" />
+        </div>
+        <p className="mb-2 text-xs font-bold uppercase tracking-widest text-muted-foreground">PLV NaviSync</p>
+        <h1
+          id="route-error-title"
+          ref={headingRef}
+          tabIndex={-1}
+          className="mb-3 text-2xl font-extrabold text-foreground outline-none"
+        >
+          {title}
+        </h1>
+        <p id="route-error-description" className="mx-auto mb-7 max-w-md text-sm leading-relaxed text-muted-foreground">{description}</p>
+
+        <div className="flex flex-wrap items-center justify-center gap-3">
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            className="inline-flex items-center gap-2 rounded-xl bg-primary px-5 py-2.5 text-sm font-bold text-primary-foreground shadow-sm transition-all hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <RefreshCw className="h-4 w-4" aria-hidden="true" />
+            Reload page
+          </button>
+          <a
+            href="/"
+            className="inline-flex items-center gap-2 rounded-xl border border-border px-5 py-2.5 text-sm font-bold text-foreground transition-all hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <Home className="h-4 w-4" aria-hidden="true" />
+            Go home
+          </a>
+          {isAdmin && pathname !== "/admin" && (
+            <a
+              href="/admin"
+              className="inline-flex items-center rounded-xl border border-border px-5 py-2.5 text-sm font-bold text-foreground transition-all hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              Admin login
+            </a>
+          )}
+        </div>
+
+        {!isChunkError && import.meta.env.DEV && (
+          <details className="mt-6 text-left">
+            <summary className="cursor-pointer text-xs font-semibold text-muted-foreground">Show technical details</summary>
+            <p className="mt-2 break-words rounded-lg bg-muted/70 p-3 font-mono text-xs text-muted-foreground">
+              {getRouteErrorMessage(error)}
+            </p>
+          </details>
+        )}
+      </section>
+    </main>
+  );
+}
 
 interface ErrorBoundaryProps {
   children: ReactNode;
@@ -59,6 +163,16 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     this.setState({ hasError: false, error: null, showDetails: false });
   };
 
+  private retry = (): void => {
+    // React.lazy caches a rejected promise. Re-rendering it would show the
+    // same failure, so a chunk/import error needs a real document reload.
+    if (isDynamicImportError(this.state.error)) {
+      window.location.reload();
+      return;
+    }
+    this.reset();
+  };
+
   render(): ReactNode {
     if (this.state.hasError) {
       if (this.props.fallback) {
@@ -87,8 +201,9 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
               Something went wrong
             </h2>
             <p className="text-sm text-muted-foreground mb-8 leading-relaxed max-w-sm mx-auto">
-              An unexpected error occurred while rendering this page.
-              This is usually temporary — you can try reloading, or visit the help center for support.
+              {isDynamicImportError(this.state.error)
+                ? "This page could not download its latest code. Reload the page to continue."
+                : "An unexpected error occurred while rendering this page. This is usually temporary — you can try again, or visit the help center for support."}
             </p>
 
             {/* Categorize the error type for better messaging */}
@@ -104,7 +219,11 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
                 let bannerTitle = "Network Issue Detected";
                 let bannerDesc = "It looks like you might be offline or the server is unreachable. Check your internet connection and try again.";
 
-                if (isNetwork) {
+                if (isDynamicImportError(this.state.error)) {
+                  bannerVariant = "blue";
+                  bannerTitle = "Page update detected";
+                  bannerDesc = "This page's code changed while it was open. Reload once to fetch the latest version.";
+                } else if (isNetwork) {
                   bannerVariant = "amber";
                   bannerTitle = "Network Issue Detected";
                   bannerDesc = "It looks like you might be offline or the server is unreachable. Check your internet connection and try again.";
@@ -152,11 +271,11 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
             {/* Actions */}
             <div className="flex flex-col items-center gap-3">
               <button
-                onClick={this.reset}
+                onClick={this.retry}
                 className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-primary text-primary-foreground text-sm font-bold hover:bg-primary/90 active:scale-[0.97] transition-all shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 <RefreshCw className="h-4 w-4" />
-                Try Again
+                {isDynamicImportError(this.state.error) ? "Reload Page" : "Try Again"}
               </button>
 
               <div className="flex items-center gap-3">

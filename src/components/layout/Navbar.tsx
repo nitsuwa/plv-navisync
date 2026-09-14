@@ -1,7 +1,7 @@
 import { Link, useLocation, useNavigate } from "react-router";
 import {
   Map, Home, Compass, HelpCircle, LogIn, LogOut, User, Bookmark, Flag, Settings,
-  ChevronDown, Building2, Bell, MapPin, Sun, Moon,
+  ChevronDown, Building2, Bell,
 } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
@@ -20,8 +20,7 @@ const ALL_NAV_LINKS = [
 ];
 
 const STUDENT_NAV_LINKS = [
-  { label: "Home", path: "/home", icon: Home },
-  { label: "Navigate", path: "/map", icon: Compass },
+  { label: "Map", path: "/map", icon: Compass },
 ];
 
 export function Navbar() {
@@ -125,7 +124,7 @@ export function Navbar() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6">
         <div className="flex items-center justify-between gap-2" style={{ height: 56 }}>
           {/* ── Brand ── */}
-          <Link to={isStudent ? "/home" : "/"} className="flex items-center gap-2 shrink-0 group">
+          <Link to={isStudent ? "/map" : "/"} className="flex items-center gap-2 shrink-0 group">
             <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} transition={{ type: "spring", stiffness: 300, damping: 15 }}>
               <PLVLogo size={32} />
             </motion.div>
@@ -176,7 +175,7 @@ export function Navbar() {
 
           {/* ── Right actions ── */}
           <div className="flex items-center gap-1.5 shrink-0">
-            <ThemeToggle theme={theme} onToggle={toggleTheme} />
+            {!isStudent && <ThemeToggle theme={theme} onToggle={toggleTheme} />}
 
             {!authLoading && isStudent && (
               <motion.div whileTap={{ scale: 0.9 }}>
@@ -275,17 +274,6 @@ export function Navbar() {
                       </div>
                       <div className="h-px mx-3 bg-border" />
                       <div className="py-1.5">
-                        <Link to="/map" className="flex items-center gap-3 px-4 py-2.5 text-sm font-semibold text-foreground hover:bg-muted transition-colors">
-                          <MapPin className="h-4 w-4 text-muted-foreground shrink-0" /> Campus Map
-                        </Link>
-                      </div>
-                      <div className="h-px mx-3 bg-border" />
-                      <div className="py-1.5">
-                        <button onClick={toggleTheme}
-                          className="w-full flex items-center gap-3 px-4 py-2.5 text-sm font-semibold text-foreground hover:bg-muted transition-colors text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">
-                          {theme === "dark" ? <Sun className="h-4 w-4 text-muted-foreground shrink-0" /> : <Moon className="h-4 w-4 text-muted-foreground shrink-0" />}
-                          {theme === "dark" ? "Light Mode" : "Dark Mode"}
-                        </button>
                         <Link to="/student/settings" className="flex items-center gap-3 px-4 py-2.5 text-sm font-semibold text-foreground hover:bg-muted transition-colors">
                           <Settings className="h-4 w-4 text-muted-foreground shrink-0" /> Settings
                         </Link>
