@@ -129,6 +129,11 @@ describe("FloorEditor render (regression: LandPlot runtime crash)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Safety / Facilities" }));
     expect(screen.getByText("Wall Fire Extinguisher")).toBeInTheDocument();
     expect(screen.getByText("Emergency Light")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Facilities / Amenities" }));
+
+    const tableTennis = screen.getByRole("button", { name: "Table Tennis" });
+    expect(tableTennis).toHaveAttribute("aria-label", "Table Tennis");
+    expect(tableTennis).not.toHaveAttribute("title");
   });
 
   it("shows a recoverable message instead of creating fake data when the floor is missing", () => {

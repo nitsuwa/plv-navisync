@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { FloorEditor } from "../FloorEditor";
 import type { Campus } from "../types";
 
@@ -32,55 +32,43 @@ function campusFixture(): Campus {
   };
 }
 
-describe("FloorEditor room templates", () => {
-  it("opens the visual catalogue and searches built-in templates", () => {
+describe("FloorEditor Floor Templates", () => {
+  it("exposes the user-created Floor Templates catalogue from the Object Library", () => {
     render(<FloorEditor campus={campusFixture()} buildingId="building-1" floorId="floor-1" onBack={() => {}} onSwitchFloor={() => {}} onUpdate={() => {}} />);
-    fireEvent.click(screen.getByTestId("room-template-button"));
-    expect(screen.getByTestId("room-template-catalogue")).toBeInTheDocument();
-    expect(screen.getAllByText("Classroom — 40 Seats").length).toBeGreaterThan(0);
-    fireEvent.change(screen.getByTestId("room-template-search"), { target: { value: "computer" } });
-    expect(screen.getAllByText("Computer Laboratory").length).toBeGreaterThan(0);
-    expect(screen.queryByTestId("room-template-card-classroom-40")).toBeNull();
+    expect(screen.queryByTestId("room-template-button")).toBeNull();
+    expect(screen.queryByText("Room Templates")).toBeNull();
+    fireEvent.click(screen.getByTestId("floor-template-button"));
+    expect(screen.getByTestId("floor-template-catalogue")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Floor Templates" })).toBeInTheDocument();
+    expect(screen.queryByText("Built-in")).toBeNull();
   });
 
-  it("uses the same card preview scene for a template preview", () => {
+  it("provides a discoverable way to save the current Floor as a custom template", async () => {
     render(<FloorEditor campus={campusFixture()} buildingId="building-1" floorId="floor-1" onBack={() => {}} onSwitchFloor={() => {}} onUpdate={() => {}} />);
-    fireEvent.click(screen.getByTestId("room-template-button"));
-    fireEvent.click(screen.getAllByRole("button", { name: "Preview" })[0]);
-    expect(screen.getByTestId("room-template-detail")).toBeInTheDocument();
-    expect(screen.getAllByTestId("room-template-scene").length).toBeGreaterThanOrEqual(2);
-    expect(screen.getByText("Approximate footprint")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("floor-template-button"));
+    expect(screen.queryByTestId("floor-template-category-filter")).toBeNull();
+    await waitFor(() => expect(screen.getByTestId("floor-template-empty-state")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("save-floor-template-empty-state"));
+    expect(screen.getByTestId("template-metadata-dialog")).toBeInTheDocument();
+    expect(screen.getByText("Save Floor as Template")).toBeInTheDocument();
+    expect(screen.queryByText("Category")).toBeNull();
+    expect(screen.getByRole("button", { name: "Save Template" })).toBeDisabled();
+    expect(screen.queryByTestId("save-floor-template-library")).toBeNull();
+    expect(screen.queryByTestId("save-floor-template-settings")).toBeNull();
   });
 
-  it("commits a placed template as one normal physical-object update", () => {
-    const campus = campusFixture();
+  it("keeps catalogue and custom-template close actions read-only", async () => {
     const updates: Campus[] = [];
-    const { container } = render(<FloorEditor campus={campus} buildingId="building-1" floorId="floor-1" onBack={() => {}} onSwitchFloor={() => {}} onUpdate={(next) => updates.push(next)} />);
-    fireEvent.click(screen.getByTestId("room-template-button"));
-    fireEvent.click(screen.getByTestId("room-template-use-classroom-40"));
-    const svg = container.querySelector('svg[viewBox="0 0 900 680"]') as SVGSVGElement;
-    expect(svg).toBeTruthy();
-    Object.defineProperty(svg, "getBoundingClientRect", { configurable: true, value: () => ({ left: 0, top: 0, width: 900, height: 680, right: 900, bottom: 680 }) });
-    fireEvent.mouseMove(svg, { clientX: 450, clientY: 340, bubbles: true });
-    fireEvent.mouseDown(svg, { clientX: 450, clientY: 340, bubbles: true });
-    fireEvent.mouseUp(svg, { clientX: 450, clientY: 340, bubbles: true });
-    const placed = updates.at(-1)?.buildings[0].floors[0];
-    expect(placed?.rooms).toHaveLength(1);
-    expect(placed?.walls).toHaveLength(4);
-    expect(placed?.furniture.filter((item) => item.type === "student-desk-chair")).toHaveLength(40);
-    expect(placed?.doors).toEqual([]);
-    expect(placed?.navNodes ?? updates.at(-1)?.navNodes ?? []).toEqual([]);
-  });
+    render(<FloorEditor campus={campusFixture()} buildingId="building-1" floorId="floor-1" onBack={() => {}} onSwitchFloor={() => {}} onUpdate={(next) => updates.push(next)} />);
+    fireEvent.click(screen.getByTestId("floor-template-button"));
+    fireEvent.click(screen.getByRole("button", { name: "Close Floor Templates" }));
+    expect(updates).toHaveLength(0);
 
-  it("cancels template placement without creating objects", () => {
-    const campus = campusFixture();
-    const updates: Campus[] = [];
-    render(<FloorEditor campus={campus} buildingId="building-1" floorId="floor-1" onBack={() => {}} onSwitchFloor={() => {}} onUpdate={(next) => updates.push(next)} />);
-    fireEvent.click(screen.getByTestId("room-template-button"));
-    fireEvent.click(screen.getByTestId("room-template-use-classroom-40"));
-    expect(screen.getByTestId("room-template-placement-preview")).toBeInTheDocument();
-    fireEvent.keyDown(window, { key: "Escape" });
-    expect(screen.queryByTestId("room-template-placement-preview")).toBeNull();
+    fireEvent.click(screen.getByTestId("floor-template-button"));
+    await waitFor(() => expect(screen.getByTestId("floor-template-empty-state")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("save-floor-template-empty-state"));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.getByTestId("floor-template-catalogue")).toBeInTheDocument();
     expect(updates).toHaveLength(0);
   });
 
@@ -99,7 +87,7 @@ describe("FloorEditor room templates", () => {
     expect(updates[0].buildings[0].floors[1].rooms).toEqual([]);
   });
 
-  it("browses Floor starters and creates a physical-only Floor through Add Floor", () => {
+  it("browses the empty user-created Floor catalogue through Add Floor without mutating", async () => {
     const campus = campusFixture();
     const updates: Campus[] = [];
     const switches: string[] = [];
@@ -107,32 +95,35 @@ describe("FloorEditor room templates", () => {
     fireEvent.click(screen.getByRole("button", { name: "Add Floor" }));
     fireEvent.click(screen.getByTestId("browse-floor-templates"));
     expect(screen.getByTestId("floor-template-catalogue")).toBeInTheDocument();
-    fireEvent.change(screen.getByTestId("floor-template-search"), { target: { value: "computer" } });
-    expect(screen.getByTestId("floor-template-card-computer-laboratory-floor")).toBeInTheDocument();
-    expect(screen.getByText(/Navigation setup required/i)).toBeInTheDocument();
-    fireEvent.click(screen.getByTestId("floor-template-use-computer-laboratory-floor"));
-    expect(updates).toHaveLength(1);
-    const created = updates[0].buildings[0].floors[1];
-    expect(created.canvasW).toBe(1380);
-    expect(created.rooms.length).toBeGreaterThan(0);
-    expect(created.walls.length).toBeGreaterThan(4);
-    expect(created.furniture.length).toBeGreaterThan(0);
-    expect(created.doors).toEqual([]);
-    expect(created.stairs).toEqual([]);
-    expect(created.paths).toEqual([]);
-    expect(updates[0].navNodes ?? []).toEqual(campus.navNodes);
-    expect(updates[0].navEdges ?? []).toEqual(campus.navEdges);
-    expect(switches).toEqual([created.id]);
-    expect(screen.queryByTestId("floor-template-catalogue")).toBeNull();
+    await waitFor(() => expect(screen.getByTestId("floor-template-empty-state")).toBeInTheDocument());
+    expect(screen.queryByTestId(/floor-template-card-/)).toBeNull();
+    expect(updates).toHaveLength(0);
+    expect(switches).toHaveLength(0);
   });
 
-  it("keeps Floor template preview and creation details physical-only", () => {
+  it("keeps the empty catalogue focused on user-authored physical layouts", async () => {
     render(<FloorEditor campus={campusFixture()} buildingId="building-1" floorId="floor-1" onBack={() => {}} onSwitchFloor={() => {}} onUpdate={() => {}} />);
-    fireEvent.click(screen.getByRole("button", { name: "Add Floor" }));
-    fireEvent.click(screen.getByTestId("browse-floor-templates"));
-    fireEvent.click(screen.getAllByRole("button", { name: "Preview" })[0]);
-    expect(screen.getByTestId("floor-template-detail")).toBeInTheDocument();
-    expect(screen.getByText(/Navigation not included/i)).toBeInTheDocument();
-    expect(screen.getAllByTestId(/floor-template-scene/).length).toBeGreaterThanOrEqual(2);
+    fireEvent.click(screen.getByTestId("floor-template-button"));
+    await waitFor(() => expect(screen.getByTestId("floor-template-empty-state")).toBeInTheDocument());
+    expect(screen.getByText(/Save a completed Floor as a reusable template/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Templates include physical layout only/i)).toBeNull();
+  });
+
+  it("explains availability and saved physical scope inside the active save form", async () => {
+    render(<FloorEditor campus={campusFixture()} buildingId="building-1" floorId="floor-1" onBack={() => {}} onSwitchFloor={() => {}} onUpdate={() => {}} />);
+    fireEvent.click(screen.getByTestId("floor-template-button"));
+    await waitFor(() => expect(screen.getByTestId("floor-template-empty-state")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("save-floor-template-empty-state"));
+
+    expect(screen.getByText("This Campus")).toBeInTheDocument();
+    expect(screen.getByText("Only available in this campus.")).toBeInTheDocument();
+    expect(screen.getByText("Shared")).toBeInTheDocument();
+    expect(screen.getByText("Reusable across campuses.")).toBeInTheDocument();
+    expect(screen.queryByText(/Custom templates unavailable/i)).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /What gets saved with this template/i }));
+    expect(screen.getByText("Included")).toBeInTheDocument();
+    expect(screen.getByText("Not included")).toBeInTheDocument();
+    expect(screen.getByText("Navigation is configured separately because each Floor may use different circulation and route connections.")).toBeInTheDocument();
   });
 });

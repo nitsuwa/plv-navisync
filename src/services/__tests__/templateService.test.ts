@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getSupabase } from "../../lib/supabase";
-import { saveRoomTemplate } from "../templateService";
+import { saveFloorTemplate, saveRoomTemplate } from "../templateService";
 import type { FloorPlan } from "../../components/map-builder/types";
 
 vi.mock("../../lib/supabase", () => ({ getSupabase: vi.fn() }));
@@ -56,5 +56,44 @@ describe("templateService", () => {
     const payload = insert.mock.calls[0][0] as Record<string, unknown>;
     expect(payload.campus_id).toBe("campus-1");
     expect(JSON.stringify(payload.template_data)).not.toMatch(/door|navNode|navEdge/i);
+  });
+
+  it("persists a Floor template as physical-only campus content", async () => {
+    const inserted = {
+      id: "template-floor-1",
+      name: "Campus Physical Floor",
+      description: "Reusable physical floor",
+      scope: "floor",
+      category: "Other",
+      source_scope: "campus",
+      campus_id: "campus-1",
+      created_by: "admin-1",
+      template_data: {
+        id: "custom-floor-definition", scope: "floor", name: "Campus Physical Floor", category: "Other", description: "Reusable physical floor",
+        width: 400, height: 300, canvasWidth: 400, canvasHeight: 300, appearance: { material: "neutral", texture: "none", color: "#e8e1d7" }, tags: ["custom"], objects: [],
+      },
+      preview_metadata: null,
+      is_archived: false,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+    };
+    const insert = vi.fn(() => ({ select: vi.fn(() => ({ single: vi.fn(async () => ({ data: inserted, error: null })) })) }));
+    vi.mocked(getSupabase).mockReturnValue({
+      auth: { getUser: vi.fn(async () => ({ data: { user: { id: "admin-1" } } })) },
+      from: vi.fn(() => ({ insert })),
+    } as any);
+
+    const record = await saveFloorTemplate({
+      campusId: "campus-1",
+      floor: fixture(),
+      metadata: { name: "Campus Physical Floor", source: "campus" },
+    });
+
+    expect(record.scope).toBe("floor");
+    const payload = insert.mock.calls[0][0] as Record<string, unknown>;
+    expect(payload.scope).toBe("floor");
+    expect(payload.campus_id).toBe("campus-1");
+    expect(payload.category).toBe("Other");
+    expect(JSON.stringify(payload.template_data)).not.toMatch(/navNode|navEdge|walkingPoint|pathway|buildingEntranceId/i);
   });
 });

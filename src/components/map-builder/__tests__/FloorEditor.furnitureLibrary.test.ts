@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { render } from "@testing-library/react";
 import { createElement } from "react";
 import { FURNITURE_CATEGORIES, getFurniturePaletteCategories } from "../constants";
-import { FloorFurnitureSymbol } from "../FloorEditor";
+import { FloorFurnitureSymbol, furnitureTooltipContent } from "../FloorEditor";
 
 describe("Floor Editor furniture library", () => {
   it("exposes the complete restroom fixture set as ordinary reusable assets", () => {
@@ -68,5 +68,14 @@ describe("Floor Editor furniture library", () => {
     expect(renderSymbol("vending-machine").querySelectorAll("rect").length).toBeGreaterThanOrEqual(2);
     expect(renderSymbol("drinking-fountain").querySelector("ellipse")).toBeTruthy();
     expect(renderSymbol("reception-counter").querySelectorAll("rect").length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("keeps furniture hints concise and independent of the library category", () => {
+    const facilities = FURNITURE_CATEGORIES.find((category) => category.id === "facilities")!;
+    const reception = facilities.items.find((item) => item.type === "reception-counter")!;
+    const hint = furnitureTooltipContent(reception);
+    expect(hint).toBe("Reception / Service Counter - Service counter with workstation cue");
+    expect(hint).not.toContain("Facilities / Amenities");
+    expect(furnitureTooltipContent({ name: "Chair" })).toBe("Chair");
   });
 });

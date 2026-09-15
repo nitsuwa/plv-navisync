@@ -5,8 +5,9 @@ import {
   instantiateRoomTemplate,
   validateRoomTemplatePlacement,
 } from "../roomTemplates";
-import { FLOOR_TEMPLATES, getFloorTemplates, instantiateFloorTemplate } from "../floorTemplates";
-import { createDefaultFloor } from "../floorPlanNormalization";
+import { FLOOR_TEMPLATES, getFloorTemplates } from "../floorTemplates";
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 describe("PLV room templates", () => {
   it("ships the curated room catalogue with room-only definitions", () => {
@@ -47,52 +48,16 @@ describe("PLV room templates", () => {
     expect(first.furniture.filter((item) => item.type === "student-desk-chair")).toHaveLength(40);
     expect(first.walls).toHaveLength(4);
     expect(new Set([...firstIds, ...secondIds]).size).toBe(firstIds.length + secondIds.length);
+    expect(firstIds.every((id) => UUID_RE.test(id))).toBe(true);
+    expect(secondIds.every((id) => UUID_RE.test(id))).toBe(true);
     expect(first.room).not.toHaveProperty("accessDoorId");
     expect(first.room).toMatchObject({ floorId: "f1", buildingId: "b1", x: 12, y: 18 });
   });
 
-  it("ships curated visual-only Floor starter definitions without navigation infrastructure", () => {
-    expect(FLOOR_TEMPLATES.map((template) => template.name)).toEqual(expect.arrayContaining([
-      "Academic Classroom Floor",
-      "Computer Laboratory Floor",
-      "Engineering Laboratory Floor",
-      "Office / Administration Floor",
-      "Library / Study Floor",
-      "Student Services Floor",
-    ]));
-    const serialized = JSON.stringify(FLOOR_TEMPLATES);
-    expect(serialized).not.toMatch(/door|stair|elevator|ramp|navNode|navEdge|pathway/i);
-    expect(FLOOR_TEMPLATES.every((template) => template.scope === "floor" && template.source === "builtin")).toBe(true);
-    for (const template of FLOOR_TEMPLATES) {
-      for (const object of template.objects) {
-        if (object.kind !== "room-template") continue;
-        const nested = ROOM_TEMPLATES.find((candidate) => candidate.id === object.templateId);
-        expect(nested).toBeDefined();
-        expect(object.x + nested!.width).toBeLessThanOrEqual(template.canvasWidth);
-        expect(object.y + nested!.height).toBeLessThanOrEqual(template.canvasHeight);
-      }
-    }
+  it("keeps the active Floor catalogue user-created only", () => {
+    expect(FLOOR_TEMPLATES).toEqual([]);
+    expect(getFloorTemplates("computer")).toEqual([]);
+    expect(getFloorTemplates("", "Laboratory")).toEqual([]);
   });
 
-  it("filters Floor starters and instantiates a fresh template Floor with appearance", () => {
-    expect(getFloorTemplates("computer").map((template) => template.id)).toEqual(["computer-laboratory-floor"]);
-    expect(getFloorTemplates("", "Laboratory").map((template) => template.id)).toEqual([
-      "computer-laboratory-floor", "engineering-laboratory-floor",
-    ]);
-    const template = FLOOR_TEMPLATES.find((candidate) => candidate.id === "student-services-floor")!;
-    let sequence = 0;
-    const idFactory = (prefix: string) => `${prefix}-${++sequence}`;
-    const base = createDefaultFloor({ id: "floor-new", buildingId: "b1", number: 4, canvasW: 600, canvasH: 450 });
-    const result = instantiateFloorTemplate(template, { baseFloor: base, buildingId: "b1", idFactory });
-    expect(result.floor).toMatchObject({ id: "floor-new", buildingId: "b1", number: 4, canvasW: 1180, canvasH: 820 });
-    expect(result.floor.appearance).toEqual(template.appearance);
-    expect(result.floor.showGrid).toBe(false);
-    expect(result.floor.rooms.length).toBeGreaterThan(0);
-    expect(result.floor.walls.some((wall) => wall.managedKind === "perimeter" && wall.x2 === 1180)).toBe(true);
-    expect(result.floor.doors).toEqual([]);
-    expect(result.floor.stairs).toEqual([]);
-    expect(result.floor.paths).toEqual([]);
-    expect(result.floor).not.toHaveProperty("navNodes");
-    expect(result.floor).not.toHaveProperty("navEdges");
-  });
 });

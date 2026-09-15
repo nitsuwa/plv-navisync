@@ -24,6 +24,8 @@ export interface CustomTemplateRecord {
   updatedAt: string;
 }
 
+/** Legacy Room-template adapter retained for reading old records only. The
+ * active catalogue requests scope="floor" and never exposes this path. */
 export function customRoomTemplateDefinition(record: CustomTemplateRecord): RoomTemplateDefinition | null {
   if (record.scope !== "room" || record.templateData.scope !== "room") return null;
   return {
@@ -114,7 +116,9 @@ async function insertTemplate(input: {
     name: input.metadata.name.trim(),
     description: input.metadata.description?.trim() || null,
     scope: input.definition.scope,
-    category: input.metadata.category,
+    // `category` remains a non-null compatibility column for older rows, but
+    // the active Floor Template UX no longer asks admins to choose one.
+    category: input.metadata.category?.trim() || "Other",
     source_scope: input.metadata.source,
     campus_id: input.metadata.source === "campus" ? input.campusId : null,
     created_by: createdBy,
@@ -132,6 +136,8 @@ async function insertTemplate(input: {
   return record;
 }
 
+/** Legacy write adapter retained for backwards compatibility; the Floor Editor
+ * no longer calls it after the Room Template UX was removed. */
 export async function saveRoomTemplate(params: {
   campusId: string;
   room: FloorPlan["rooms"][number];
@@ -156,19 +162,20 @@ export async function updateCustomTemplateMetadata(params: {
   campusId: string;
   name: string;
   description?: string;
-  category: string;
+  category?: string;
   source: CustomTemplateSource;
 }): Promise<void> {
   const name = validateTemplateName(params.name);
   const userId = await currentUserId();
-  const { error } = await getSupabase().from("map_templates").update({
+  const updates: Partial<TablesInsert<"map_templates">> = {
     name,
     description: params.description?.trim() || null,
-    category: params.category,
     source_scope: params.source,
     campus_id: params.source === "campus" ? params.campusId : null,
     updated_at: new Date().toISOString(),
-  }).eq("id", params.id).eq("created_by", userId);
+  };
+  if (params.category?.trim()) updates.category = params.category.trim();
+  const { error } = await getSupabase().from("map_templates").update(updates).eq("id", params.id).eq("created_by", userId);
   if (error) throw new Error(`Unable to update template: ${error.message}`);
 }
 

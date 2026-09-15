@@ -1,15 +1,18 @@
 import type { FloorFurniture, FloorRoom, FloorWall } from "../components/map-builder/types";
 
-/** Room-only authoring templates.  Definitions intentionally contain no live
- * object IDs and no navigation data; placement creates ordinary Floor
- * objects through the existing editor update path. */
+/**
+ * Legacy room-scale definitions retained for persisted-data compatibility and
+ * for composing built-in Floor Template archetypes. The Room Template feature
+ * is no longer exposed by the Floor Editor: admins use Floor Templates only.
+ * Definitions intentionally contain no live object IDs or navigation data.
+ */
 export type RoomTemplateCategory = "Academic" | "Laboratory" | "Office" | "Study / Library" | "Facilities" | "Other";
 export type TemplateScope = "room" | "floor";
 export type TemplateSource = "builtin" | "campus" | "shared";
 
 export type RoomTemplateObject =
   | { kind: "room"; x: number; y: number; width: number; height: number; type: string; name?: string }
-  | { kind: "wall"; x1: number; y1: number; x2: number; y2: number; thickness?: number; color?: string; material?: string }
+  | { kind: "wall"; x1: number; y1: number; x2: number; y2: number; thickness?: number; color?: string; material?: string; wallKey?: string }
   | { kind: "furniture"; x: number; y: number; width: number; height: number; type: string; name: string; category: string; color: string; rotation?: number };
 
 export interface TemplateDefinitionBase<Category extends string = string> {
@@ -84,15 +87,15 @@ export const ROOM_TEMPLATES: RoomTemplateDefinition[] = [
     "Classroom — 40 Seats",
     "Academic",
     "A compact classroom with five rows of eight student stations, teaching wall, and faculty station.",
-    560,
-    420,
+    280,
+    200,
     [
-      room(560, 420, "classroom", "Classroom — 40 Seats"),
-      ...wallObjects(560, 420),
-      ...studentStations(8, 5, 42, 82, 60, 54),
-      furniture("faculty-desk-chair", "Faculty Desk + Chair", "tables", 248, 348, 34, 26, "#7a5c3a"),
-      furniture("whiteboard", "Whiteboard / Teaching Board", "tables", 260, 20, 40, 6, "#f8fafc"),
-      furniture("projector", "Projector", "electronics", 274, 50, 12, 10, "#64748b"),
+      room(280, 200, "classroom", "Classroom — 40 Seats"),
+      ...wallObjects(280, 200),
+      ...studentStations(8, 5, 18, 58, 32, 28),
+      furniture("faculty-desk-chair", "Faculty Desk + Chair", "tables", 122, 20, 34, 26, "#7a5c3a"),
+      furniture("whiteboard", "Whiteboard / Teaching Board", "tables", 100, 6, 80, 6, "#f8fafc"),
+      furniture("projector", "Projector", "electronics", 136, 36, 12, 10, "#64748b"),
     ],
     ["classroom", "academic", "40 seats", "teaching"],
   ),
@@ -101,15 +104,15 @@ export const ROOM_TEMPLATES: RoomTemplateDefinition[] = [
     "Classroom — 60 Seats",
     "Academic",
     "A large lecture classroom with six rows of ten student stations and a dedicated teaching wall.",
-    680,
-    500,
+    360,
+    240,
     [
-      room(680, 500, "classroom", "Classroom — 60 Seats"),
-      ...wallObjects(680, 500),
-      ...studentStations(10, 6, 44, 88, 61, 55),
-      furniture("faculty-desk-chair", "Faculty Desk + Chair", "tables", 310, 420, 34, 26, "#7a5c3a"),
-      furniture("whiteboard", "Whiteboard / Teaching Board", "tables", 320, 20, 40, 6, "#f8fafc"),
-      furniture("projector", "Projector", "electronics", 334, 52, 12, 10, "#64748b"),
+      room(360, 240, "classroom", "Classroom — 60 Seats"),
+      ...wallObjects(360, 240),
+      ...studentStations(10, 6, 18, 56, 32, 28),
+      furniture("faculty-desk-chair", "Faculty Desk + Chair", "tables", 162, 18, 34, 26, "#7a5c3a"),
+      furniture("whiteboard", "Whiteboard / Teaching Board", "tables", 130, 5, 100, 6, "#f8fafc"),
+      furniture("projector", "Projector", "electronics", 174, 34, 12, 10, "#64748b"),
     ],
     ["classroom", "academic", "60 seats", "lecture"],
   ),
@@ -118,20 +121,20 @@ export const ROOM_TEMPLATES: RoomTemplateDefinition[] = [
     "Computer Laboratory",
     "Laboratory",
     "Shared computer lab tables with aligned monitors, chairs, teaching wall, and equipment storage.",
-    640,
-    500,
+    360,
+    260,
     [
-      room(640, 500, "lab", "Computer Laboratory"),
-      ...wallObjects(640, 500),
-      furniture("computer-lab-table-6", "Computer Lab Table 6", "electronics", 58, 92, 92, 34, "#475569"),
-      furniture("computer-lab-table-6", "Computer Lab Table 6", "electronics", 208, 92, 92, 34, "#475569"),
-      furniture("computer-lab-table-6", "Computer Lab Table 6", "electronics", 358, 92, 92, 34, "#475569"),
-      furniture("computer-lab-table-4", "Computer Lab Table 4", "electronics", 170, 228, 64, 34, "#475569"),
-      furniture("computer-lab-table-4", "Computer Lab Table 4", "electronics", 300, 228, 64, 34, "#475569"),
-      furniture("faculty-desk-chair", "Faculty Desk + Chair", "tables", 300, 410, 34, 26, "#7a5c3a"),
-      furniture("equipment-cabinet", "Equipment Cabinet", "storage", 548, 82, 24, 18, "#64748b"),
-      furniture("whiteboard", "Whiteboard / Teaching Board", "tables", 300, 20, 40, 6, "#f8fafc"),
-      furniture("projector", "Projector", "electronics", 314, 52, 12, 10, "#64748b"),
+      room(360, 260, "lab", "Computer Laboratory"),
+      ...wallObjects(360, 260),
+      furniture("computer-lab-table-6", "Computer Lab Table 6", "electronics", 20, 74, 92, 34, "#475569"),
+      furniture("computer-lab-table-6", "Computer Lab Table 6", "electronics", 134, 74, 92, 34, "#475569"),
+      furniture("computer-lab-table-6", "Computer Lab Table 6", "electronics", 248, 74, 92, 34, "#475569"),
+      furniture("computer-lab-table-4", "Computer Lab Table 4", "electronics", 72, 140, 64, 34, "#475569"),
+      furniture("computer-lab-table-4", "Computer Lab Table 4", "electronics", 224, 140, 64, 34, "#475569"),
+      furniture("faculty-desk-chair", "Faculty Desk + Chair", "tables", 162, 210, 34, 26, "#7a5c3a"),
+      furniture("equipment-cabinet", "Equipment Cabinet", "storage", 318, 42, 24, 18, "#64748b"),
+      furniture("whiteboard", "Whiteboard / Teaching Board", "tables", 130, 6, 100, 6, "#f8fafc"),
+      furniture("projector", "Projector", "electronics", 174, 34, 12, 10, "#64748b"),
     ],
     ["computer", "lab", "workstations", "monitors"],
   ),
@@ -140,19 +143,19 @@ export const ROOM_TEMPLATES: RoomTemplateDefinition[] = [
     "Engineering Laboratory",
     "Laboratory",
     "A practical engineering lab with workbenches, drafting stations, storage, and teaching space.",
-    660,
-    520,
+    380,
+    280,
     [
-      room(660, 520, "lab", "Engineering Laboratory"),
-      ...wallObjects(660, 520),
-      furniture("lab-workbench", "Laboratory Workbench", "tables", 44, 90, 52, 20, "#64748b"),
-      furniture("lab-workbench", "Laboratory Workbench", "tables", 132, 90, 52, 20, "#64748b"),
-      furniture("lab-workbench", "Laboratory Workbench", "tables", 220, 90, 52, 20, "#64748b"),
-      furniture("drafting-table-stool", "Drafting Table + Stool", "tables", 44, 190, 46, 30, "#8b6f4e"),
-      furniture("drafting-table-stool", "Drafting Table + Stool", "tables", 128, 190, 46, 30, "#8b6f4e"),
-      furniture("faculty-desk-chair", "Faculty Desk + Chair", "tables", 302, 430, 34, 26, "#7a5c3a"),
-      furniture("equipment-cabinet", "Equipment Cabinet", "storage", 560, 84, 24, 18, "#64748b"),
-      furniture("whiteboard", "Whiteboard / Teaching Board", "tables", 310, 20, 40, 6, "#f8fafc"),
+      room(380, 280, "lab", "Engineering Laboratory"),
+      ...wallObjects(380, 280),
+      furniture("lab-workbench", "Laboratory Workbench", "tables", 24, 78, 52, 20, "#64748b"),
+      furniture("lab-workbench", "Laboratory Workbench", "tables", 112, 78, 52, 20, "#64748b"),
+      furniture("lab-workbench", "Laboratory Workbench", "tables", 200, 78, 52, 20, "#64748b"),
+      furniture("drafting-table-stool", "Drafting Table + Stool", "tables", 24, 152, 46, 30, "#8b6f4e"),
+      furniture("drafting-table-stool", "Drafting Table + Stool", "tables", 110, 152, 46, 30, "#8b6f4e"),
+      furniture("faculty-desk-chair", "Faculty Desk + Chair", "tables", 170, 232, 34, 26, "#7a5c3a"),
+      furniture("equipment-cabinet", "Equipment Cabinet", "storage", 332, 52, 24, 18, "#64748b"),
+      furniture("whiteboard", "Whiteboard / Teaching Board", "tables", 140, 6, 100, 6, "#f8fafc"),
     ],
     ["engineering", "lab", "workbench", "drafting"],
   ),
@@ -161,16 +164,16 @@ export const ROOM_TEMPLATES: RoomTemplateDefinition[] = [
     "Faculty / Administrative Office",
     "Office",
     "A focused office layout with a faculty workstation, visitor seating, and storage.",
-    360,
-    300,
+    220,
+    180,
     [
-      room(360, 300, "office", "Faculty / Administrative Office"),
-      ...wallObjects(360, 300),
-      furniture("faculty-desk-chair", "Faculty Desk + Chair", "tables", 124, 88, 34, 26, "#7a5c3a"),
-      furniture("chair", "Chair", "seating", 176, 92, 12, 12, "#4b5563"),
-      furniture("chair", "Chair", "seating", 208, 92, 12, 12, "#4b5563"),
-      furniture("cabinet", "Cabinet", "storage", 42, 46, 18, 12, "#71717a"),
-      furniture("library-bookshelf", "Bookshelf", "storage", 292, 46, 30, 10, "#6b5b45"),
+      room(220, 180, "office", "Faculty / Administrative Office"),
+      ...wallObjects(220, 180),
+      furniture("faculty-desk-chair", "Faculty Desk + Chair", "tables", 82, 82, 34, 26, "#7a5c3a"),
+      furniture("chair", "Chair", "seating", 134, 86, 12, 12, "#4b5563"),
+      furniture("chair", "Chair", "seating", 166, 86, 12, 12, "#4b5563"),
+      furniture("cabinet", "Cabinet", "storage", 24, 42, 18, 12, "#71717a"),
+      furniture("library-bookshelf", "Bookshelf", "storage", 174, 42, 30, 10, "#6b5b45"),
     ],
     ["faculty", "office", "administrative", "visitor"],
   ),
@@ -179,14 +182,14 @@ export const ROOM_TEMPLATES: RoomTemplateDefinition[] = [
     "Conference Room",
     "Office",
     "A meeting room centered on a conference table with surrounding seating and presentation space.",
-    440,
-    340,
+    280,
+    200,
     [
-      room(440, 340, "conference", "Conference Room"),
-      ...wallObjects(440, 340),
-      furniture("conference-table", "Conference Table", "tables", 128, 112, 68, 36, "#795548"),
-      furniture("wall-display", "Wall Display / TV", "electronics", 210, 24, 24, 6, "#334155"),
-      furniture("whiteboard", "Whiteboard / Teaching Board", "tables", 300, 24, 40, 6, "#f8fafc"),
+      room(280, 200, "conference", "Conference Room"),
+      ...wallObjects(280, 200),
+      furniture("conference-table", "Conference Table", "tables", 92, 78, 68, 36, "#795548"),
+      furniture("wall-display", "Wall Display / TV", "electronics", 48, 18, 48, 6, "#334155"),
+      furniture("whiteboard", "Whiteboard / Teaching Board", "tables", 180, 18, 70, 6, "#f8fafc"),
     ],
     ["meeting", "conference", "office", "presentation"],
   ),
@@ -195,14 +198,14 @@ export const ROOM_TEMPLATES: RoomTemplateDefinition[] = [
     "Study Room",
     "Study / Library",
     "A quiet study room with a six-seat study table and reference shelving.",
-    380,
-    300,
+    240,
+    180,
     [
-      room(380, 300, "study", "Study Room"),
-      ...wallObjects(380, 300),
-      furniture("study-table-6", "Study Table + 6 Chairs", "tables", 108, 108, 54, 38, "#8b6f4e"),
-      furniture("library-bookshelf", "Bookshelf", "storage", 38, 42, 30, 10, "#6b5b45"),
-      furniture("library-bookshelf", "Bookshelf", "storage", 312, 42, 30, 10, "#6b5b45"),
+      room(240, 180, "study", "Study Room"),
+      ...wallObjects(240, 180),
+      furniture("study-table-6", "Study Table + 6 Chairs", "tables", 78, 76, 54, 38, "#8b6f4e"),
+      furniture("library-bookshelf", "Bookshelf", "storage", 24, 38, 30, 10, "#6b5b45"),
+      furniture("library-bookshelf", "Bookshelf", "storage", 186, 38, 30, 10, "#6b5b45"),
     ],
     ["study", "library", "quiet", "reading"],
   ),
@@ -211,17 +214,17 @@ export const ROOM_TEMPLATES: RoomTemplateDefinition[] = [
     "Library Reading Area",
     "Study / Library",
     "A flexible reading area with library study tables and double-sided shelving.",
-    620,
-    420,
+    360,
+    240,
     [
-      room(620, 420, "library", "Library Reading Area"),
-      ...wallObjects(620, 420),
-      furniture("library-study-table", "Library Study Table + Chairs", "tables", 88, 108, 48, 30, "#8b6f4e"),
-      furniture("library-study-table", "Library Study Table + Chairs", "tables", 198, 108, 48, 30, "#8b6f4e"),
-      furniture("library-study-table", "Library Study Table + Chairs", "tables", 308, 108, 48, 30, "#8b6f4e"),
-      furniture("double-sided-library-shelf", "Double-Sided Library Shelf", "storage", 72, 270, 42, 12, "#6b5b45"),
-      furniture("double-sided-library-shelf", "Double-Sided Library Shelf", "storage", 188, 270, 42, 12, "#6b5b45"),
-      furniture("double-sided-library-shelf", "Double-Sided Library Shelf", "storage", 304, 270, 42, 12, "#6b5b45"),
+      room(360, 240, "library", "Library Reading Area"),
+      ...wallObjects(360, 240),
+      furniture("library-study-table", "Library Study Table + Chairs", "tables", 38, 82, 48, 30, "#8b6f4e"),
+      furniture("library-study-table", "Library Study Table + Chairs", "tables", 146, 82, 48, 30, "#8b6f4e"),
+      furniture("library-study-table", "Library Study Table + Chairs", "tables", 254, 82, 48, 30, "#8b6f4e"),
+      furniture("double-sided-library-shelf", "Double-Sided Library Shelf", "storage", 30, 174, 42, 12, "#6b5b45"),
+      furniture("double-sided-library-shelf", "Double-Sided Library Shelf", "storage", 136, 174, 42, 12, "#6b5b45"),
+      furniture("double-sided-library-shelf", "Double-Sided Library Shelf", "storage", 242, 174, 42, 12, "#6b5b45"),
     ],
     ["library", "reading", "shelves", "study"],
   ),
@@ -230,17 +233,17 @@ export const ROOM_TEMPLATES: RoomTemplateDefinition[] = [
     "Standard Restroom",
     "Facilities",
     "An essential restroom layout with stalls, wash basin, mirror, and urinal fixtures.",
-    360,
-    300,
+    220,
+    180,
     [
-      room(360, 300, "restroom", "Standard Restroom"),
-      ...wallObjects(360, 300),
-      furniture("toilet-stall", "Toilet Stall", "restroom", 34, 42, 26, 28, "#e2e8f0"),
-      furniture("toilet-stall", "Toilet Stall", "restroom", 76, 42, 26, 28, "#e2e8f0"),
-      furniture("urinal", "Urinal", "restroom", 124, 46, 10, 14, "#dbe4ea"),
-      furniture("double-sink", "Double Sink", "restroom", 212, 46, 26, 10, "#cbd5e1"),
-      furniture("mirror", "Mirror", "restroom", 214, 26, 22, 5, "#93c5fd"),
-      furniture("restroom-trash-bin", "Restroom Trash Bin", "restroom", 292, 246, 10, 10, "#64748b"),
+      room(220, 180, "restroom", "Standard Restroom"),
+      ...wallObjects(220, 180),
+      furniture("toilet-stall", "Toilet Stall", "restroom", 24, 42, 26, 28, "#e2e8f0"),
+      furniture("toilet-stall", "Toilet Stall", "restroom", 66, 42, 26, 28, "#e2e8f0"),
+      furniture("urinal", "Urinal", "restroom", 114, 46, 10, 14, "#dbe4ea"),
+      furniture("double-sink", "Double Sink", "restroom", 158, 46, 26, 10, "#cbd5e1"),
+      furniture("mirror", "Mirror", "restroom", 160, 26, 22, 5, "#93c5fd"),
+      furniture("restroom-trash-bin", "Restroom Trash Bin", "restroom", 188, 154, 10, 10, "#64748b"),
     ],
     ["restroom", "washroom", "toilet", "fixtures"],
   ),
@@ -249,15 +252,15 @@ export const ROOM_TEMPLATES: RoomTemplateDefinition[] = [
     "PWD Restroom",
     "Facilities",
     "An accessible restroom with a larger clearance envelope, accessible stall, sink, and mirror.",
-    390,
-    340,
+    240,
+    200,
     [
-      room(390, 340, "restroom", "PWD Restroom"),
-      ...wallObjects(390, 340),
-      furniture("pwd-toilet-stall", "Accessible / PWD Stall", "restroom", 52, 80, 34, 34, "#dbeafe"),
-      furniture("double-sink", "Double Sink", "restroom", 230, 82, 26, 10, "#cbd5e1"),
-      furniture("mirror", "Mirror", "restroom", 232, 60, 22, 5, "#93c5fd"),
-      furniture("restroom-trash-bin", "Restroom Trash Bin", "restroom", 320, 286, 10, 10, "#64748b"),
+      room(240, 200, "restroom", "PWD Restroom"),
+      ...wallObjects(240, 200),
+      furniture("pwd-toilet-stall", "Accessible / PWD Stall", "restroom", 34, 70, 34, 34, "#dbeafe"),
+      furniture("double-sink", "Double Sink", "restroom", 166, 70, 26, 10, "#cbd5e1"),
+      furniture("mirror", "Mirror", "restroom", 168, 48, 22, 5, "#93c5fd"),
+      furniture("restroom-trash-bin", "Restroom Trash Bin", "restroom", 208, 174, 10, 10, "#64748b"),
     ],
     ["pwd", "accessible", "restroom", "clearance"],
   ),
@@ -266,18 +269,249 @@ export const ROOM_TEMPLATES: RoomTemplateDefinition[] = [
     "Student Lounge",
     "Facilities",
     "A compact lounge with sofa seating, a shared table, vending, and a drinking fountain.",
-    520,
-    360,
+    320,
+    220,
     [
-      room(520, 360, "lounge", "Student Lounge"),
-      ...wallObjects(520, 360),
-      furniture("sofa", "Sofa", "seating", 52, 76, 34, 16, "#3f3f46"),
-      furniture("sofa", "Sofa", "seating", 52, 164, 34, 16, "#3f3f46"),
-      furniture("study-table-4", "Study Table + 4 Chairs", "tables", 188, 130, 44, 34, "#8b6f4e"),
-      furniture("vending-machine", "Vending Machine", "facilities", 424, 62, 16, 24, "#64748b"),
-      furniture("drinking-fountain", "Drinking Fountain / Water Dispenser", "facilities", 424, 114, 18, 12, "#38bdf8"),
+      room(320, 220, "lounge", "Student Lounge"),
+      ...wallObjects(320, 220),
+      furniture("sofa", "Sofa", "seating", 28, 56, 34, 16, "#3f3f46"),
+      furniture("sofa", "Sofa", "seating", 28, 136, 34, 16, "#3f3f46"),
+      furniture("study-table-4", "Study Table + 4 Chairs", "tables", 126, 102, 44, 34, "#8b6f4e"),
+      furniture("vending-machine", "Vending Machine", "facilities", 276, 46, 16, 24, "#64748b"),
+      furniture("drinking-fountain", "Drinking Fountain / Water Dispenser", "facilities", 276, 98, 18, 12, "#38bdf8"),
     ],
     ["lounge", "student", "amenities", "common area"],
+  ),
+  // PLV-oriented room archetypes.  These deliberately remain room-scale and
+  // use the same local-coordinate conventions as the original catalogue.
+  makeTemplate(
+    "plv-standard-classroom",
+    "PLV Standard Classroom",
+    "Academic",
+    "A PLV-style teaching room with a clear front wall, five aligned seating rows, and a compact instructor zone.",
+    280,
+    200,
+    [
+      room(280, 200, "classroom", "PLV Standard Classroom"),
+      ...wallObjects(280, 200),
+      ...studentStations(8, 5, 18, 58, 32, 28),
+      furniture("faculty-desk-chair", "Faculty Desk + Chair", "tables", 122, 20, 34, 26, "#7a5c3a"),
+      furniture("whiteboard", "Whiteboard / Teaching Board", "tables", 100, 6, 80, 6, "#f8fafc"),
+      furniture("projector", "Projector", "electronics", 136, 36, 12, 10, "#64748b"),
+    ],
+    ["plv", "classroom", "standard", "teaching"],
+  ),
+  makeTemplate(
+    "plv-large-classroom",
+    "PLV Large Classroom",
+    "Academic",
+    "A larger PLV teaching room with six seating rows, generous aisles, and a dedicated presentation wall.",
+    360,
+    240,
+    [
+      room(360, 240, "classroom", "PLV Large Classroom"),
+      ...wallObjects(360, 240),
+      ...studentStations(10, 6, 18, 56, 32, 28),
+      furniture("faculty-desk-chair", "Faculty Desk + Chair", "tables", 162, 18, 34, 26, "#7a5c3a"),
+      furniture("whiteboard", "Whiteboard / Teaching Board", "tables", 130, 5, 100, 6, "#f8fafc"),
+      furniture("projector", "Projector", "electronics", 174, 34, 12, 10, "#64748b"),
+    ],
+    ["plv", "classroom", "large", "lecture"],
+  ),
+  makeTemplate(
+    "lecture-room",
+    "Lecture Room",
+    "Academic",
+    "A presentation-focused room with forward-facing seats and a clear instructor/display wall.",
+    420,
+    260,
+    [
+      room(420, 260, "classroom", "Lecture Room"),
+      ...wallObjects(420, 260),
+      ...studentStations(10, 6, 28, 64, 38, 28),
+      furniture("faculty-desk-chair", "Faculty Desk + Chair", "tables", 192, 20, 34, 26, "#7a5c3a"),
+      furniture("whiteboard", "Whiteboard / Teaching Board", "tables", 150, 6, 120, 6, "#f8fafc"),
+      furniture("projector", "Projector", "electronics", 204, 38, 12, 10, "#64748b"),
+    ],
+    ["lecture", "academic", "presentation", "plv"],
+  ),
+  makeTemplate(
+    "lecture-hall",
+    "Lecture Hall",
+    "Academic",
+    "A compact lecture-hall archetype with dense oriented seating and a presentation zone at the front.",
+    500,
+    300,
+    [
+      room(500, 300, "lecture-hall", "Lecture Hall"),
+      ...wallObjects(500, 300),
+      ...studentStations(12, 7, 34, 70, 36, 28),
+      furniture("faculty-desk-chair", "Faculty Desk + Chair", "tables", 232, 20, 34, 26, "#7a5c3a"),
+      furniture("whiteboard", "Whiteboard / Teaching Board", "tables", 180, 6, 140, 6, "#f8fafc"),
+      furniture("projector", "Projector", "electronics", 254, 38, 12, 10, "#64748b"),
+    ],
+    ["lecture", "hall", "assembly", "plv"],
+  ),
+  makeTemplate(
+    "administrative-office",
+    "Administrative Office",
+    "Office",
+    "A practical PLV administration office with a staff workstation, visitor seating, and compact storage.",
+    240,
+    190,
+    [
+      room(240, 190, "office", "Administrative Office"),
+      ...wallObjects(240, 190),
+      furniture("faculty-desk-chair", "Faculty Desk + Chair", "tables", 92, 86, 34, 26, "#7a5c3a"),
+      furniture("chair", "Chair", "seating", 144, 90, 12, 12, "#4b5563"),
+      furniture("chair", "Chair", "seating", 176, 90, 12, 12, "#4b5563"),
+      furniture("cabinet", "Cabinet", "storage", 26, 44, 18, 12, "#71717a"),
+    ],
+    ["administration", "office", "staff", "plv"],
+  ),
+  makeTemplate(
+    "library-stack-area",
+    "Library Shelving / Stack Area",
+    "Study / Library",
+    "A compact stack-room module with double-sided shelving and an open reading aisle.",
+    360,
+    240,
+    [
+      room(360, 240, "library", "Library Shelving / Stack Area"),
+      ...wallObjects(360, 240),
+      furniture("double-sided-library-shelf", "Double-Sided Library Shelf", "storage", 32, 48, 42, 12, "#6b5b45"),
+      furniture("double-sided-library-shelf", "Double-Sided Library Shelf", "storage", 136, 48, 42, 12, "#6b5b45"),
+      furniture("double-sided-library-shelf", "Double-Sided Library Shelf", "storage", 240, 48, 42, 12, "#6b5b45"),
+      furniture("library-study-table", "Library Study Table + Chairs", "tables", 118, 140, 48, 30, "#8b6f4e"),
+    ],
+    ["library", "shelving", "stacks", "plv"],
+  ),
+  makeTemplate(
+    "mens-restroom",
+    "Men's Restroom",
+    "Facilities",
+    "A visual restroom module with stalls, urinal, wash basin, mirror, and service clearance.",
+    240,
+    190,
+    [
+      room(240, 190, "restroom", "Men's Restroom"),
+      ...wallObjects(240, 190),
+      furniture("toilet-stall", "Toilet Stall", "restroom", 24, 44, 26, 28, "#e2e8f0"),
+      furniture("toilet-stall", "Toilet Stall", "restroom", 66, 44, 26, 28, "#e2e8f0"),
+      furniture("urinal", "Urinal", "restroom", 114, 48, 10, 14, "#dbe4ea"),
+      furniture("double-sink", "Double Sink", "restroom", 170, 48, 26, 10, "#cbd5e1"),
+      furniture("mirror", "Mirror", "restroom", 172, 28, 22, 5, "#93c5fd"),
+    ],
+    ["restroom", "mens", "facilities", "plv"],
+  ),
+  makeTemplate(
+    "womens-restroom",
+    "Women's Restroom",
+    "Facilities",
+    "A visual restroom module with repeated stalls, wash basins, mirrors, and clear circulation space.",
+    240,
+    190,
+    [
+      room(240, 190, "restroom", "Women's Restroom"),
+      ...wallObjects(240, 190),
+      furniture("toilet-stall", "Toilet Stall", "restroom", 26, 44, 26, 28, "#e2e8f0"),
+      furniture("toilet-stall", "Toilet Stall", "restroom", 68, 44, 26, 28, "#e2e8f0"),
+      furniture("toilet-stall", "Toilet Stall", "restroom", 110, 44, 26, 28, "#e2e8f0"),
+      furniture("double-sink", "Double Sink", "restroom", 172, 48, 26, 10, "#cbd5e1"),
+      furniture("mirror", "Mirror", "restroom", 174, 28, 22, 5, "#93c5fd"),
+    ],
+    ["restroom", "womens", "facilities", "plv"],
+  ),
+  makeTemplate(
+    "drafting-technical-laboratory",
+    "Drafting / Technical Laboratory",
+    "Academic",
+    "A PLV-oriented technical room with drafting stations, shared work surfaces, storage, and a presentation wall.",
+    380,
+    280,
+    [
+      room(380, 280, "lab", "Drafting / Technical Laboratory"),
+      ...wallObjects(380, 280),
+      furniture("drafting-table-stool", "Drafting Table + Stool", "tables", 28, 72, 46, 30, "#8b6f4e"),
+      furniture("drafting-table-stool", "Drafting Table + Stool", "tables", 112, 72, 46, 30, "#8b6f4e"),
+      furniture("drafting-table-stool", "Drafting Table + Stool", "tables", 196, 72, 46, 30, "#8b6f4e"),
+      furniture("lab-workbench", "Laboratory Workbench", "tables", 28, 150, 52, 20, "#64748b"),
+      furniture("lab-workbench", "Laboratory Workbench", "tables", 116, 150, 52, 20, "#64748b"),
+      furniture("equipment-cabinet", "Equipment Cabinet", "storage", 326, 54, 24, 18, "#64748b"),
+      furniture("whiteboard", "Whiteboard / Teaching Board", "tables", 138, 8, 104, 6, "#f8fafc"),
+    ],
+    ["drafting", "technical", "laboratory", "academic", "plv"],
+  ),
+  makeTemplate(
+    "faculty-room",
+    "Faculty Room",
+    "Office",
+    "A shared PLV faculty room with workstations, visitor seating, storage, and a clear collaboration aisle.",
+    300,
+    220,
+    [
+      room(300, 220, "office", "Faculty Room"),
+      ...wallObjects(300, 220),
+      furniture("faculty-desk-chair", "Faculty Desk + Chair", "tables", 30, 54, 34, 26, "#7a5c3a"),
+      furniture("faculty-desk-chair", "Faculty Desk + Chair", "tables", 92, 54, 34, 26, "#7a5c3a"),
+      furniture("faculty-desk-chair", "Faculty Desk + Chair", "tables", 154, 54, 34, 26, "#7a5c3a"),
+      furniture("chair", "Chair", "seating", 44, 120, 12, 12, "#4b5563"),
+      furniture("chair", "Chair", "seating", 106, 120, 12, 12, "#4b5563"),
+      furniture("cabinet", "Cabinet", "storage", 244, 52, 18, 12, "#71717a"),
+    ],
+    ["faculty", "staff", "office", "collaboration", "plv"],
+  ),
+  makeTemplate(
+    "reception-service-office",
+    "Reception / Service Office",
+    "Office",
+    "A service-facing room with a reception counter, waiting seats, staff workstation, and compact records storage.",
+    300,
+    210,
+    [
+      room(300, 210, "office", "Reception / Service Office"),
+      ...wallObjects(300, 210),
+      furniture("reception-counter", "Reception / Service Counter", "facilities", 34, 54, 60, 18, "#7a5c3a"),
+      furniture("waiting-bench", "Waiting Bench", "seating", 34, 104, 72, 16, "#475569"),
+      furniture("faculty-desk-chair", "Faculty Desk + Chair", "tables", 160, 54, 34, 26, "#7a5c3a"),
+      furniture("cabinet", "Cabinet", "storage", 248, 48, 18, 12, "#71717a"),
+    ],
+    ["reception", "service", "office", "waiting", "plv"],
+  ),
+  makeTemplate(
+    "library-service-counter-area",
+    "Library Service / Counter Area",
+    "Study / Library",
+    "A library service module with a staffed counter, queue space, reference shelving, and a small study point.",
+    360,
+    240,
+    [
+      room(360, 240, "library", "Library Service / Counter Area"),
+      ...wallObjects(360, 240),
+      furniture("reception-counter", "Reception / Service Counter", "facilities", 28, 50, 60, 18, "#7a5c3a"),
+      furniture("waiting-bench", "Waiting Bench", "seating", 28, 94, 72, 16, "#475569"),
+      furniture("double-sided-library-shelf", "Double-Sided Library Shelf", "storage", 162, 48, 42, 12, "#6b5b45"),
+      furniture("library-study-table", "Library Study Table + Chairs", "tables", 244, 140, 48, 30, "#8b6f4e"),
+    ],
+    ["library", "service", "counter", "reference", "plv"],
+  ),
+  makeTemplate(
+    "pwd-accessible-restroom",
+    "PWD / Accessible Restroom",
+    "Facilities",
+    "An accessible restroom module with a generous turning area, PWD stall, sink, mirror, and grab-bar fixture cues.",
+    260,
+    220,
+    [
+      room(260, 220, "restroom", "PWD / Accessible Restroom"),
+      ...wallObjects(260, 220),
+      furniture("pwd-toilet-stall", "Accessible / PWD Stall", "restroom", 30, 74, 34, 34, "#dbeafe"),
+      furniture("double-sink", "Double Sink", "restroom", 184, 74, 26, 10, "#cbd5e1"),
+      furniture("mirror", "Mirror", "restroom", 186, 52, 22, 5, "#93c5fd"),
+      furniture("hand-dryer", "Hand Dryer", "restroom", 216, 116, 12, 12, "#94a3b8"),
+      furniture("restroom-trash-bin", "Restroom Trash Bin", "restroom", 220, 178, 10, 10, "#64748b"),
+    ],
+    ["pwd", "accessible", "restroom", "facilities", "plv"],
   ),
 ];
 
@@ -332,11 +566,15 @@ export interface RoomTemplateInstantiationContext {
   idFactory?: (prefix: string) => string;
 }
 
-function defaultIdFactory(prefix: string): string {
-  const uuid = typeof globalThis.crypto?.randomUUID === "function"
-    ? globalThis.crypto.randomUUID()
-    : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
-  return `${prefix}-${uuid}`;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function newUuid(): string {
+  if (typeof globalThis.crypto?.randomUUID === "function") return globalThis.crypto.randomUUID();
+  const bytes = Array.from({ length: 16 }, () => Math.floor(Math.random() * 256));
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = bytes.map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
 export function instantiateRoomTemplate(
@@ -344,7 +582,16 @@ export function instantiateRoomTemplate(
   origin: { x: number; y: number },
   context: RoomTemplateInstantiationContext,
 ): InstantiatedRoomTemplate {
-  const makeId = context.idFactory ?? defaultIdFactory;
+  const usedIds = new Set<string>(UUID_RE.test(context.floorId) ? [context.floorId] : []);
+  const makeId = (prefix: string) => {
+    // The prefix is retained only as a semantic hint for legacy test/caller
+    // factories. Persisted Floor entities always receive a bare RFC UUID.
+    const candidate = context.idFactory?.(prefix);
+    let id = candidate && UUID_RE.test(candidate) && !usedIds.has(candidate) ? candidate : newUuid();
+    while (usedIds.has(id)) id = newUuid();
+    usedIds.add(id);
+    return id;
+  };
   const roomDefinition = template.objects.find((object): object is Extract<RoomTemplateObject, { kind: "room" }> => object.kind === "room");
   const room: FloorRoom = {
     id: makeId("rm"),
@@ -359,7 +606,7 @@ export function instantiateRoomTemplate(
   };
   const walls: FloorWall[] = template.objects
     .filter((object): object is Extract<RoomTemplateObject, { kind: "wall" }> => object.kind === "wall")
-    .map((object) => ({
+    .map((object, index) => ({
       id: makeId("wl"),
       x1: Math.round(origin.x + object.x1),
       y1: Math.round(origin.y + object.y1),
@@ -371,6 +618,9 @@ export function instantiateRoomTemplate(
       layer: "structure",
       visible: true,
       locked: false,
+      // This is only used while a containing Floor Template remaps physical
+      // openings. It is not persisted as a live wall identity.
+      wallKey: object.wallKey ?? `room-wall-${index}`,
     }));
   const zBase = context.existingFurnitureCount ?? 0;
   const furnitureItems: FloorFurniture[] = template.objects

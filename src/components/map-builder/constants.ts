@@ -171,8 +171,8 @@ export const INDOOR_LAYERS = [
 
 /**
  * Reusable visual-only floor-plan symbols.  The `type` keys are deliberately
- * stable: placement, duplication, persistence, and future room templates can
- * all instantiate the same ordinary FloorFurniture records without coupling
+ * stable: placement, duplication, persistence, and Floor Template composition
+ * can all instantiate the same ordinary FloorFurniture records without coupling
  * furniture to the navigation graph.
  */
 export const FURNITURE_CATEGORIES: FurnitureCategory[] = [
@@ -291,7 +291,7 @@ export const FURNITURE_CATEGORIES: FurnitureCategory[] = [
     label: "Facilities / Amenities",
     icon: "Building2",
     items: [
-      { type: "table-tennis", name: "Table Tennis", width: 88, height: 44, color: "#2563eb", description: "Top-down table tennis court/table symbol" },
+      { type: "table-tennis", name: "Table Tennis", width: 88, height: 44, color: "#3f7f73", description: "Indoor recreation table" },
       { type: "vending-machine", name: "Vending Machine", width: 16, height: 24, color: "#64748b", description: "Compact wall/floor vending unit" },
       { type: "drinking-fountain", name: "Drinking Fountain / Water Dispenser", width: 18, height: 12, color: "#38bdf8", description: "Compact drinking fountain symbol" },
       { type: "reception-counter", name: "Reception / Service Counter", width: 60, height: 18, color: "#7a5c3a", description: "Service counter with workstation cue" },

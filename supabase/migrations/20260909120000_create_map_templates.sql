@@ -1,6 +1,8 @@
--- Custom Room/Floor templates are physical authoring definitions only.
--- Built-in templates remain in source code; this table stores campus/shared
--- admin-created definitions and never contains generated navigation data.
+-- Custom Floor templates are physical authoring definitions only. The legacy
+-- room scope/category columns remain for backwards-compatible rows, while all
+-- active editor writes use scope = 'floor'. Built-ins remain in source code;
+-- this table stores campus/shared admin-created definitions and never contains
+-- generated navigation data.
 create table if not exists public.map_templates (
   id               uuid primary key default gen_random_uuid(),
   name             text not null,
@@ -62,4 +64,4 @@ create trigger map_templates_set_updated_at
   for each row execute function public.set_updated_at();
 
 comment on table public.map_templates is
-  'Admin-created visual/physical Room and Floor templates. Navigation-sensitive data is excluded by the application sanitizer.';
+  'Admin-created visual/physical Floor templates. Legacy room rows may remain for compatibility; navigation-sensitive data is excluded by the application sanitizer.';

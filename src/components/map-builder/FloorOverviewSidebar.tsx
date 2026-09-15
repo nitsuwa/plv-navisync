@@ -219,7 +219,7 @@ export function FloorOverviewSidebar({
             <button type="button" onClick={onOpenSettings} className={`${actionBtnCls} bg-primary/10 text-primary hover:bg-primary/15`}>
               <Settings2 className="h-3.5 w-3.5" /> Open Floor Settings
             </button>
-            {onSaveAsTemplate && <button type="button" onClick={onSaveAsTemplate} className={actionBtnCls}><Copy className="h-3.5 w-3.5" /> Save Floor as Template</button>}
+            {onSaveAsTemplate && <button type="button" data-testid="save-floor-template-action" onClick={onSaveAsTemplate} className={actionBtnCls}><Copy className="h-3.5 w-3.5" /> Save Floor as Template</button>}
             <button type="button" onClick={onDuplicate} className={actionBtnCls}>
               <Copy className="h-3.5 w-3.5" /> Duplicate Floor
             </button>
