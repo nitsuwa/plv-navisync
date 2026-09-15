@@ -142,6 +142,7 @@ describe("floorPlanNormalization", () => {
       canvasW: 600,
       canvasH: 450,
       backgroundColor: "#e8e1d7",
+      appearance: { material: "neutral", texture: "subtle", color: "#e8e1d7" },
       showGrid: true,
       gridSize: 20,
       backgroundImage: undefined,

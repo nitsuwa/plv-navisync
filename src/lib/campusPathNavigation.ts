@@ -11,6 +11,17 @@ const pointKey = (point: { x: number; y: number }) => `${Number(point.x.toFixed(
 const pathPointIsDisconnected = (path: CampusPath | undefined, point: { x: number; y: number }) =>
   Boolean(path?.disconnectedJunctionKeys?.includes(pointKey(point)));
 
+const edgeDistanceWithBends = (edge: NavigationEdge, nodes: NavigationNode[]) => {
+  const start = nodes.find((node) => node.id === edge.startNodeId);
+  const end = nodes.find((node) => node.id === edge.endNodeId);
+  if (!start || !end) return edge.distance;
+  const points = [start, ...(edge.bendPoints ?? []), end];
+  return Math.round(points.slice(1).reduce((total, point, index) => {
+    const previous = points[index];
+    return total + Math.hypot(point.x - previous.x, point.y - previous.y);
+  }, 0));
+};
+
 function canShareGeneratedNode(
   node: NavigationNode,
   point: { x: number; y: number },
@@ -500,6 +511,121 @@ export function reconcilePathwayNavigation(
   // the bridge IDs. Recompute only that bridge's bend geometry so it continues
   // to leave the building safely while preserving every other edge/object.
   return reconcileEntranceOutdoorConnections({ ...campus, navNodes: nodes, navEdges: edges }, options);
+}
+
+/**
+ * Explicitly join two physical Pathway vertices.  This is intentionally a
+ * separate authoring operation: ordinary hydration/reconciliation never
+ * claims a nearby vertex by coordinate proximity.  The target vertex's
+ * generated node is canonical when it already exists; the source node (and
+ * every authored edge incident to it) is rewired to that target only as the
+ * direct consequence of this explicit drop gesture.
+ */
+export function joinPathwayVerticesExplicitly(
+  campus: Campus,
+  sourcePathId: string,
+  sourcePointIndex: number,
+  targetPathId: string,
+  targetPointIndex: number,
+  makeId: PathwayIdFactory,
+): Campus {
+  if (sourcePathId === targetPathId && sourcePointIndex === targetPointIndex) return campus;
+  const sourcePath = (campus.paths ?? []).find((path) => path.id === sourcePathId);
+  const targetPath = (campus.paths ?? []).find((path) => path.id === targetPathId);
+  const sourceIds = sourcePath ? validVertexIds(sourcePath) : null;
+  const targetIds = targetPath ? validVertexIds(targetPath) : null;
+  if (!sourcePath || !targetPath || !sourceIds || !targetIds) return campus;
+  const sourcePoint = sourcePath.points[sourcePointIndex];
+  const targetPoint = targetPath.points[targetPointIndex];
+  const sourceVertexId = sourceIds[sourcePointIndex];
+  const targetVertexId = targetIds[targetPointIndex];
+  if (!sourcePoint || !targetPoint || !sourceVertexId || !targetVertexId) return campus;
+  if (pathPointIsDisconnected(sourcePath, sourcePoint) || pathPointIsDisconnected(targetPath, targetPoint)) return campus;
+
+  const sourceRef = { pathId: sourcePathId, vertexId: sourceVertexId };
+  const targetRef = { pathId: targetPathId, vertexId: targetVertexId };
+  const nodes = [...(campus.navNodes ?? [])];
+  const sourceNode = nodes.find((node) => node.generatedFromPathVertices?.some((ref) => refKey(ref) === refKey(sourceRef)));
+  const targetNode = nodes.find((node) => node.generatedFromPathVertices?.some((ref) => refKey(ref) === refKey(targetRef)));
+
+  // If the source is already a shared canonical node, all of its physical
+  // owners move together. This is the same explicit shared-junction contract
+  // used by the generated-point proxy drag; no coordinate scan is performed.
+  const sourceRefs = sourceNode?.generatedFromPathVertices?.length
+    ? sourceNode.generatedFromPathVertices
+    : [sourceRef];
+  const movedRefKeys = new Set(sourceRefs.map(refKey));
+  const nextPaths = (campus.paths ?? []).map((path) => {
+    let changed = false;
+    const points = path.points.map((point, index) => {
+      const vertexId = validVertexIds(path)?.[index];
+      if (!vertexId || !movedRefKeys.has(refKey({ pathId: path.id, vertexId }))) return point;
+      changed = true;
+      return { x: targetPoint.x, y: targetPoint.y };
+    });
+    return changed ? { ...path, points } : path;
+  });
+
+  let nextNodes = nodes;
+  let nextEdges = [...(campus.navEdges ?? [])];
+  const survivingNodeId = targetNode?.id ?? sourceNode?.id;
+  if (survivingNodeId) {
+    const mergedRefs = Array.from(new Map([
+      ...(targetNode?.generatedFromPathVertices ?? []),
+      ...sourceRefs,
+    ].map((ref) => [refKey(ref), ref])).values());
+    nextNodes = nodes
+      .filter((node) => !sourceNode || node.id !== sourceNode.id || node.id === survivingNodeId)
+      .map((node) => node.id === survivingNodeId
+        ? { ...node, x: targetPoint.x, y: targetPoint.y, generatedFromPathVertices: mergedRefs }
+        : node);
+    if (sourceNode && targetNode && sourceNode.id !== targetNode.id) {
+      const edgePair = (startNodeId: string, endNodeId: string) => [startNodeId, endNodeId].sort().join("::");
+      const deduped: NavigationEdge[] = [];
+      for (const edge of nextEdges) {
+        const startNodeId = edge.startNodeId === sourceNode.id ? targetNode.id : edge.startNodeId;
+        const endNodeId = edge.endNodeId === sourceNode.id ? targetNode.id : edge.endNodeId;
+        if (startNodeId === endNodeId) continue;
+        const remapped = startNodeId === edge.startNodeId && endNodeId === edge.endNodeId
+          ? edge
+          : { ...edge, startNodeId, endNodeId };
+        const remappedDistance = startNodeId !== edge.startNodeId || endNodeId !== edge.endNodeId
+          ? edgeDistanceWithBends(remapped, nextNodes)
+          : remapped.distance;
+        const withDistance = remapped.distance === remappedDistance
+          ? remapped
+          : { ...remapped, distance: remappedDistance };
+        const duplicateIndex = deduped.findIndex((candidate) => edgePair(candidate.startNodeId, candidate.endNodeId) === edgePair(startNodeId, endNodeId));
+        if (duplicateIndex < 0) {
+          deduped.push(withDistance);
+          continue;
+        }
+        const existing = deduped[duplicateIndex];
+        // Only generated copies collapse. Authored/manual edges remain
+        // separate because their semantic ownership may differ even after an
+        // explicit node merge.
+        if (existing.generatedFromPathIds?.length && withDistance.generatedFromPathIds?.length) {
+          deduped[duplicateIndex] = {
+            ...existing,
+            generatedFromPathIds: [...new Set([
+              ...existing.generatedFromPathIds,
+              ...withDistance.generatedFromPathIds,
+            ])],
+          };
+        } else {
+          deduped.push(withDistance);
+        }
+      }
+      nextEdges = deduped;
+    }
+  }
+
+  return reconcilePathwayNavigation({
+    ...campus,
+    paths: nextPaths,
+    navNodes: nextNodes,
+    navEdges: nextEdges,
+  }, makeId, { preserveAuthoredGeometry: true });
 }
 
 export interface PathwayConversionResult {

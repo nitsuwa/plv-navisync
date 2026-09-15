@@ -8,6 +8,7 @@
  */
 
 import type { FloorPlan, FloorRoom, FloorWall, FloorDoor, FloorWindow, FloorStairs, FloorRamp, FloorElevatorItem, FloorLabel, FloorFurniture, FloorPath } from "./types";
+import { FloorGroundSurface } from "./FloorGroundSurface";
 import { ROOM_COLORS, type RoomType } from "../../data/floorPlans";
 
 // ── Room rendering ──────────────────────────────────────────────────────────
@@ -371,7 +372,6 @@ export function ReadonlyFloorPlanScene({
 }: ReadonlyFloorPlanSceneProps) {
   const canvasW = floor.canvasW || 440;
   const canvasH = floor.canvasH || 290;
-  const bgColor = floor.backgroundColor || "var(--map-floor-bg, #f8f6f1)";
 
   // Sort rooms by zOrder for proper layering
   const sortedRooms = [...(floor.rooms || [])].sort(
@@ -391,24 +391,16 @@ export function ReadonlyFloorPlanScene({
 
   return (
     <g data-testid="readonly-floor-plan-scene">
-      {/* Background */}
-      <rect width={canvasW} height={canvasH} fill={bgColor} />
-
-      {/* Grid (if enabled) */}
-      {floor.showGrid !== false && (
-        <>
-          {Array.from({ length: Math.ceil(canvasW / (floor.gridSize || 20)) + 1 }, (_, i) => (
-            <line key={`gv${i}`} x1={i * (floor.gridSize || 20)} y1={0}
-              x2={i * (floor.gridSize || 20)} y2={canvasH}
-              stroke="var(--map-boundary, #cbd5e1)" strokeWidth={0.5} opacity={0.15} />
-          ))}
-          {Array.from({ length: Math.ceil(canvasH / (floor.gridSize || 20)) + 1 }, (_, i) => (
-            <line key={`gh${i}`} x1={0} y1={i * (floor.gridSize || 20)}
-              x2={canvasW} y2={i * (floor.gridSize || 20)}
-              stroke="var(--map-boundary, #cbd5e1)" strokeWidth={0.5} opacity={0.15} />
-          ))}
-        </>
-      )}
+      {/* Published/read-only view shows the authored surface only; the
+          authoring grid intentionally never leaks into the student map. */}
+      <FloorGroundSurface
+        width={canvasW}
+        height={canvasH}
+        appearance={floor.appearance}
+        legacyColor={floor.backgroundColor}
+        idPrefix={`readonly-floor-${floor.id}`}
+        dataTestId="readonly-floor-surface"
+      />
 
       {/* Mode tints */}
       {mapMode === "emergency" && (

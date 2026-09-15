@@ -40,6 +40,14 @@ function archivedCampus(id: string, name: string): Campus {
   };
 }
 
+function activeCampus(id: string, name: string): Campus {
+  return {
+    ...archivedCampus(id, name),
+    status: "active",
+    lifecycleStatus: "active",
+  };
+}
+
 function renderHome(campuses: Campus[], onBulkRestore = vi.fn(), options: {
   onPermanentDelete?: ReturnType<typeof vi.fn>;
   onBulkPermanentDelete?: ReturnType<typeof vi.fn>;
@@ -61,6 +69,24 @@ function renderHome(campuses: Campus[], onBulkRestore = vi.fn(), options: {
 }
 
 describe("CampusHome archived lifecycle controls", () => {
+  it("dismisses the campus overflow menu without opening the card", async () => {
+    const onOpen = vi.fn();
+    render(
+      <CampusHome
+        campuses={[activeCampus("campus-a", "Campus A")]}
+        onOpen={onOpen}
+        onCreate={vi.fn()}
+        onRestore={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /actions for campus a/i }));
+    fireEvent.click(screen.getByTestId("campus-menu-dismiss"));
+
+    await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
+    expect(onOpen).not.toHaveBeenCalled();
+  });
+
   it("selects only visible archived cards and bulk restores through the callback", async () => {
     const restore = renderHome([archivedCampus("campus-a", "Campus A"), archivedCampus("campus-b", "Campus B")]);
 

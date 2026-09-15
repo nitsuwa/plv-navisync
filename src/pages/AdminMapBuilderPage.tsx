@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { toast } from "sonner";
+import { Loader2 } from "lucide-react";
 import { useUnsavedChangesContext } from "../components/map-builder/UnsavedChangesContext";
 import { createCampusClone } from "../lib/campusHelpers";
 import { campusService, CampusConflictError, CampusDeletionError, CampusServiceError, userFacingCampusMessage, type CampusCreateInput, type CampusUpdateInput } from "../services/campusService";
@@ -73,6 +74,13 @@ function campusRoomCount(campus: Campus): number {
   );
 }
 
+type CampusHydrationStatus = "idle" | "loading" | "hydrating" | "baseline" | "ready";
+
+interface CampusHydrationState {
+  campusId: string | null;
+  status: CampusHydrationStatus;
+}
+
 function preserveStructureIfMissing(next: Campus, previous?: Campus): Campus {
   if (!previous || (next.buildings?.length ?? 0) > 0 || next.previewBuildingCount !== undefined) return next;
   const hasPreviousPreview = previous.previewBuildingCount !== undefined || (previous.buildings?.length ?? 0) > 0;
@@ -128,6 +136,20 @@ export function AdminMapBuilderPage() {
   // Campus cards are lightweight until the structure load completes. Never
   // allow a structure write against that pre-hydration state.
   const hydratedCampusIdsRef = useRef<Set<string>>(new Set());
+  // A campus-list row is intentionally only a lightweight preview. Keep an
+  // explicit lifecycle gate so CampusEditor can never mount against that
+  // partial object while the complete structure queries are still resolving.
+  const [campusHydration, setCampusHydration] = useState<CampusHydrationState>({ campusId: null, status: "idle" });
+  const campusHydrationRef = useRef<CampusHydrationState>(campusHydration);
+  const setCampusHydrationState = useCallback((next: CampusHydrationState) => {
+    campusHydrationRef.current = next;
+    setCampusHydration(next);
+  }, []);
+  // Keep the authoritative structure separate from the lightweight campus-card
+  // collection. A list refresh is allowed to replace card metadata, but it
+  // must never replace a fully hydrated editor campus with Buildings-only
+  // preview arrays while the editor is open or when returning from Floor.
+  const [canonicalCampuses, setCanonicalCampuses] = useState<Record<string, Campus>>({});
   const campusesRef = useRef<Campus[]>([]);
   campusesRef.current = campuses;
 
@@ -209,8 +231,14 @@ export function AdminMapBuilderPage() {
 
   const activeCampus =
     view.type === "campus" || view.type === "floor"
-      ? campuses.find((c) => c.id === view.campusId) ?? null
+      ? canonicalCampuses[view.campusId] ?? campuses.find((c) => c.id === view.campusId) ?? null
       : null;
+  const campusEditorReady = Boolean(
+    activeCampus
+      && hydratedCampusIdsRef.current.has(activeCampus.id)
+      && campusHydration.campusId === activeCampus.id
+      && campusHydration.status === "ready",
+  );
 
   // ── Campus CRUD ──────────────────────────────────────────────────────────
 
@@ -230,7 +258,15 @@ export function AdminMapBuilderPage() {
     }
     buildingCodeReservationsRef.current.set(updated.id, reserved);
     setCampuses((p) => p.map((c) => (c.id === safeUpdated.id ? safeUpdated : c)));
-    queueDraft(safeUpdated);
+    if (hydratedCampusIdsRef.current.has(safeUpdated.id)) {
+      setCanonicalCampuses((p) => ({ ...p, [safeUpdated.id]: safeUpdated }));
+    }
+    // The hydration callback itself is an in-memory state handoff. Do not
+    // enqueue a draft while the canonical baseline is still being established;
+    // an empty/partial intermediate value must never become a writable draft.
+    const hydrationInProgress = campusHydrationRef.current.campusId === safeUpdated.id
+      && campusHydrationRef.current.status !== "ready";
+    if (!hydrationInProgress) queueDraft(safeUpdated);
   }, [queueDraft]);
 
   const updateCampusMetadata = useCallback((updated: Campus) => {
@@ -243,6 +279,9 @@ export function AdminMapBuilderPage() {
     if (previous) {
       const stored = preserveStructureIfMissing(updated, previous);
       savedSnapshotsRef.current = { ...savedSnapshotsRef.current, [stored.id]: JSON.stringify(stored) };
+      if (hydratedCampusIdsRef.current.has(stored.id)) {
+        setCanonicalCampuses((p) => ({ ...p, [stored.id]: stored }));
+      }
       clearDraft(stored.id);
     }
   }, [campuses, clearDraft]);
@@ -493,14 +532,22 @@ export function AdminMapBuilderPage() {
   }, []);
 
   const goToCampus = useCallback(async (campusId: string) => {
-    const campus = campuses.find((c) => c.id === campusId);
+    const campus = canonicalCampuses[campusId] ?? campuses.find((c) => c.id === campusId);
+    if (!campus) return;
     directionRef.current = 1;
     // If the campus has no canvas configured yet, redirect to canvas setup
-    if (campus && !campus.canvasConfigured) {
+    if (!campus.canvasConfigured) {
+      setCampusHydrationState({ campusId: null, status: "idle" });
       setView({ type: "create-map", campusId });
     } else {
+      // Never mount CampusEditor against the lightweight campus-card preview.
+      // Render the explicit loading surface until complete structure hydration
+      // has established the canonical baseline below.
+      setCampusHydrationState({ campusId, status: "loading" });
+      setView({ type: "campus", campusId });
       try {
-        const hydrated = await campusStructureService.load(campus!);
+        const hydrated = await campusStructureService.load(campus);
+        setCampusHydrationState({ campusId, status: "hydrating" });
         const hydratedWithPreview = {
           ...hydrated,
           previewBuildingCount: campus?.previewBuildingCount ?? hydrated.previewBuildingCount ?? hydrated.buildings.length,
@@ -510,16 +557,19 @@ export function AdminMapBuilderPage() {
         };
         const restored = restoreCampusDraft(hydratedWithPreview);
         // Hydration is a read of the persisted state — it becomes the baseline.
+        setCampusHydrationState({ campusId, status: "baseline" });
         savedSnapshotsRef.current = { ...savedSnapshotsRef.current, [campusId]: JSON.stringify(hydratedWithPreview) };
         hydratedCampusIdsRef.current.add(campusId);
         updateCampus(restored);
       } catch (error) {
+        setCampusHydrationState({ campusId: null, status: "idle" });
         toast.error("Could not load map", { description: (error as Error).message });
+        setView({ type: "home" });
         return;
       }
-      setView({ type: "campus", campusId });
+      setCampusHydrationState({ campusId, status: "ready" });
     }
-  }, [campuses, updateCampus]);
+  }, [canonicalCampuses, campuses, setCampusHydrationState, updateCampus]);
 
   const saveCampusStructure = useCallback(async (campus: Campus) => {
     const baseline = savedSnapshotsRef.current[campus.id];
@@ -613,7 +663,10 @@ export function AdminMapBuilderPage() {
   const activeCampusRef = useRef(activeCampus);
   activeCampusRef.current = activeCampus;
   const activeCampusIsDirty =
-    activeCampus !== null && JSON.stringify(activeCampus) !== savedSnapshotsRef.current[activeCampus.id];
+    activeCampus !== null
+      && campusEditorReady
+      && typeof savedSnapshotsRef.current[activeCampus.id] === "string"
+      && JSON.stringify(activeCampus) !== savedSnapshotsRef.current[activeCampus.id];
   useEffect(() => {
     if (!activeCampus || !activeCampusIsDirty) {
       registerHandler(null);
@@ -769,10 +822,18 @@ export function AdminMapBuilderPage() {
       // Appearance is stored in the existing structure JSON channel; the
       // campus row continues to own only dimensions/configuration.
       const saved = await campusStructureService.save({ ...updated, ...updates, canvasConfigured: true });
-      updateCampusMetadata({ ...saved, canvasConfigured: true });
+      const complete = { ...saved, canvasConfigured: true };
+      // Canvas setup returns a complete structure save, so it can establish
+      // the same authoritative baseline as a normal campus entry. Without
+      // this transition a newly configured campus would remain behind the
+      // loading gate because it did not enter through goToCampus().
+      savedSnapshotsRef.current = { ...savedSnapshotsRef.current, [complete.id]: JSON.stringify(complete) };
+      hydratedCampusIdsRef.current.add(complete.id);
+      updateCampusMetadata(complete);
+      setCampusHydrationState({ campusId: complete.id, status: "ready" });
       setView({ type: "campus", campusId: canvasSetupCampus.id });
     } catch (error) { toast.error("Could not save canvas", { description: (error as Error).message }); }
-  }, [canvasSetupCampus, updateCampusMetadata]);
+  }, [canvasSetupCampus, setCampusHydrationState, updateCampusMetadata]);
 
   const [showCanvasSettings, setShowCanvasSettings] = useState(false);
 
@@ -853,7 +914,17 @@ export function AdminMapBuilderPage() {
 
             {/* ── Campus editor ── */}
             {view.type === "campus" && activeCampus && (
-              <>
+              !campusEditorReady ? (
+                <div data-testid="campus-structure-loading" className="flex min-h-0 flex-1 items-center justify-center bg-background/80">
+                  <div className="flex flex-col items-center gap-3 rounded-2xl border border-border/70 bg-card/95 px-8 py-7 text-center shadow-sm">
+                    <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                    <div>
+                      <p className="text-sm font-bold text-foreground">Loading campus map…</p>
+                      <p className="mt-1 text-[11px] text-muted-foreground">Preparing buildings, paths, entrances, and authored map content.</p>
+                    </div>
+                  </div>
+                </div>
+              ) : <>
                 <CampusEditor
                   campus={activeCampus}
                   onBack={goHome}

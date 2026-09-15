@@ -12,6 +12,7 @@ import {
   resolveRoomAnchorPoint,
   resolveWallOpeningGeometry,
   resizeFurnitureWithinFloor,
+  scaleFloorItemFromBounds,
   resizeRoomWithinFloor,
   roomAnchorAtPoint,
   selectionIdsInRect,
@@ -162,15 +163,15 @@ describe("floorGeometry", () => {
     expect(itemBounds("path", { id: "p1" })).toBeNull();
   });
 
-  it("clamps furniture resize to per-type ceilings and floor bounds with no negative dimensions", () => {
+  it("uses floor bounds rather than arbitrary per-type furniture ceilings", () => {
     const chair: FloorFurniture = { id: "c1", type: "chair", name: "Chair", category: "seating", x: 10, y: 10, width: 12, height: 12, rotation: 0, color: "#4b5563" };
     const sofa: FloorFurniture = { id: "s1", type: "sofa", name: "Sofa", category: "seating", x: 10, y: 10, width: 20, height: 10, rotation: 0, color: "#3f3f46" };
     const desk: FloorFurniture = { id: "d1", type: "desk", name: "Desk", category: "tables", x: 10, y: 10, width: 20, height: 12, rotation: 0, color: "#7a5c3a" };
 
-    // Chairs are capped small so a drag can never fill the whole floor
-    expect(resizeFurnitureWithinFloor(chair, "se", 500, 500, 100, 100)).toMatchObject({ x: 10, y: 10, width: 32, height: 32 });
-    expect(resizeFurnitureWithinFloor(sofa, "se", 500, 500, 100, 100)).toMatchObject({ width: 86, height: 44 });
-    expect(resizeFurnitureWithinFloor(desk, "se", 500, 500, 100, 100)).toMatchObject({ width: 74, height: 48 });
+    // Every type can grow until its fixed opposite edge reaches the floor.
+    expect(resizeFurnitureWithinFloor(chair, "se", 500, 500, 100, 100)).toMatchObject({ x: 10, y: 10, width: 90, height: 90 });
+    expect(resizeFurnitureWithinFloor(sofa, "se", 500, 500, 100, 100)).toMatchObject({ width: 90, height: 90 });
+    expect(resizeFurnitureWithinFloor(desk, "se", 500, 500, 100, 100)).toMatchObject({ width: 90, height: 90 });
 
     // Minimum size of 8 — never negative, never vanishing
     expect(resizeFurnitureWithinFloor(chair, "se", -100, -100, 100, 100)).toMatchObject({ width: 8, height: 8 });
@@ -183,6 +184,57 @@ describe("floorGeometry", () => {
     expect(edge.height).toBeGreaterThanOrEqual(8);
     expect(edge.x + edge.width).toBeLessThanOrEqual(100);
     expect(edge.y + edge.height).toBeLessThanOrEqual(100);
+  });
+
+  it("keeps legacy large furniture large and allows further growth", () => {
+    const legacy: FloorFurniture = {
+      id: "legacy-large",
+      type: "desk",
+      name: "Legacy large desk",
+      category: "tables",
+      x: 20,
+      y: 20,
+      width: 160,
+      height: 100,
+      rotation: 0,
+      color: "#7a5c3a",
+    };
+    const grown = resizeFurnitureWithinFloor(legacy, "se", 30, 20, 300, 240);
+    expect(grown.width).toBe(190);
+    expect(grown.height).toBe(120);
+
+    // A subsequent individual edit must not re-clamp an already-large object
+    // to the removed legacy type ceiling.
+    const editedAgain = resizeFurnitureWithinFloor(grown, "se", 10, 10, 300, 240);
+    expect(editedAgain.width).toBe(200);
+    expect(editedAgain.height).toBe(130);
+  });
+
+  it("uses the same furniture floor constraint for group scaling", () => {
+    const source: FloorFurniture = {
+      id: "group-large",
+      type: "chair",
+      name: "Large chair",
+      category: "seating",
+      x: 20,
+      y: 20,
+      width: 150,
+      height: 90,
+      rotation: 0,
+      color: "#4b5563",
+    };
+    const scaled = scaleFloorItemFromBounds(
+      "furniture",
+      source,
+      { x: 0, y: 0, w: 200, h: 120 },
+      { x: 0, y: 0, w: 280, h: 180 },
+      300,
+      220,
+    ) as FloorFurniture;
+    expect(scaled.width).toBe(210);
+    expect(scaled.height).toBe(135);
+    expect(scaled.x + scaled.width).toBeLessThanOrEqual(300);
+    expect(scaled.y + scaled.height).toBeLessThanOrEqual(220);
   });
 
   it("anchors wall endpoints to room edges and propagates room-only transforms", () => {

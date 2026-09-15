@@ -1,6 +1,7 @@
 import type { FloorPlan, FloorUndoEntry, FloorWall, FloorWallEndpointAnchor } from "../components/map-builder/types";
 import { normalizeFloorPlanBackground } from "./floorPlanBackground";
 import { DEFAULT_FLOOR_CANVAS, normalizeFloorCanvasSize } from "./floorGeometry";
+import { normalizeFloorAppearance } from "./floorAppearance";
 
 const FLOOR_COLLECTION_KEYS = [
   "rooms",
@@ -51,11 +52,37 @@ function syntheticManagedPerimeterSide(wall: Partial<FloorWall>) {
   return match?.[1] as FloorWall["perimeterSide"] | undefined;
 }
 
+/**
+ * Older floors persisted managed perimeter walls without perimeterSide
+ * metadata. Recover that metadata from the complete perimeter geometry so a
+ * resize can update the existing wall IDs instead of creating a second set
+ * and orphaning wall-attached openings.
+ */
+function inferredManagedPerimeterSide(wall: Partial<FloorWall>, walls: FloorWall[]) {
+  const explicit = syntheticManagedPerimeterSide(wall);
+  if (explicit) return explicit;
+  const managed = walls.filter((candidate) => candidate.managedKind === "perimeter");
+  if (managed.length === 0) return undefined;
+  const maxX = Math.max(...managed.flatMap((candidate) => [candidate.x1, candidate.x2]));
+  const maxY = Math.max(...managed.flatMap((candidate) => [candidate.y1, candidate.y2]));
+  const horizontal = Math.abs((wall.y2 ?? 0) - (wall.y1 ?? 0)) <= 0.01;
+  const vertical = Math.abs((wall.x2 ?? 0) - (wall.x1 ?? 0)) <= 0.01;
+  if (horizontal) {
+    if (Math.abs((wall.y1 ?? 0)) <= 0.01) return "top" as const;
+    if (Math.abs((wall.y1 ?? 0) - maxY) <= 0.01) return "bottom" as const;
+  }
+  if (vertical) {
+    if (Math.abs((wall.x1 ?? 0)) <= 0.01) return "left" as const;
+    if (Math.abs((wall.x1 ?? 0) - maxX) <= 0.01) return "right" as const;
+  }
+  return undefined;
+}
+
 function normalizeManagedPerimeterWallIds(walls: FloorWall[]) {
   const remap = new Map<string, string>();
   const idsBySide = new Map<NonNullable<FloorWall["perimeterSide"]>, string>();
   const nextWalls = walls.map((wall) => {
-    const side = syntheticManagedPerimeterSide(wall);
+    const side = inferredManagedPerimeterSide(wall, walls);
     if (!side && wall.managedKind !== "perimeter") return wall;
     const existingForSide = side ? idsBySide.get(side) : undefined;
     const nextId = validUuid(wall.id) ? wall.id : existingForSide ?? generateEntityId();
@@ -156,6 +183,7 @@ export function normalizeFloor(input: Partial<FloorPlan> | null | undefined, def
     canvasW: canvas.w,
     canvasH: canvas.h,
     backgroundColor: typeof source.backgroundColor === "string" && source.backgroundColor ? source.backgroundColor : DEFAULT_FLOOR_BACKGROUND,
+    appearance: normalizeFloorAppearance(source.appearance, typeof source.backgroundColor === "string" ? source.backgroundColor : DEFAULT_FLOOR_BACKGROUND),
     showGrid: source.showGrid !== false,
     gridSize: normalizeGridSize(source.gridSize),
     backgroundImage: normalizeFloorPlanBackground(source.backgroundImage, canvas.w, canvas.h),
@@ -364,6 +392,7 @@ export function floorUndoEntryFromFloor(floor: Partial<FloorPlan>): FloorUndoEnt
       ["canvasW", normalized.canvasW],
       ["canvasH", normalized.canvasH],
       ["backgroundColor", normalized.backgroundColor],
+      ["appearance", normalized.appearance],
       ["showGrid", normalized.showGrid],
       ["gridSize", normalized.gridSize],
       ["backgroundImage", normalized.backgroundImage],

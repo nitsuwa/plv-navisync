@@ -171,8 +171,8 @@ export const INDOOR_LAYERS = [
 
 /**
  * Reusable visual-only floor-plan symbols.  The `type` keys are deliberately
- * stable: placement, duplication, persistence, and future room templates can
- * all instantiate the same ordinary FloorFurniture records without coupling
+ * stable: placement, duplication, persistence, and Floor Template composition
+ * can all instantiate the same ordinary FloorFurniture records without coupling
  * furniture to the navigation graph.
  */
 export const FURNITURE_CATEGORIES: FurnitureCategory[] = [
@@ -195,21 +195,23 @@ export const FURNITURE_CATEGORIES: FurnitureCategory[] = [
     label: "Tables / Work",
     icon: "Table",
     items: [
-      { type: "desk", name: "Desk", width: 26, height: 16, color: "#7a5c3a" },
-      { type: "table", name: "Table", width: 28, height: 18, color: "#8b6f4e" },
+      { type: "desk", name: "Desk", width: 26, height: 16, color: "#7a5c3a", description: "General-purpose work desk" },
+      { type: "table", name: "Table", width: 28, height: 18, color: "#8b6f4e", description: "General-purpose table" },
       { type: "student-desk-chair", name: "Student Desk + Chair", width: 30, height: 24, color: "#7a5c3a" },
       { type: "study-table-4", name: "Study Table + 4 Chairs", width: 44, height: 34, color: "#8b6f4e" },
       { type: "study-table-6", name: "Study Table + 6 Chairs", width: 54, height: 38, color: "#8b6f4e" },
-      { type: "conference-table-6", name: "Conference Table + 6 Chairs", width: 62, height: 34, color: "#795548" },
-      { type: "conference-table-8", name: "Conference Table + 8 Chairs", width: 76, height: 38, color: "#795548" },
+      { type: "conference-table", name: "Conference Table", width: 68, height: 36, color: "#795548", description: "Conference table with six surrounding seats" },
+      { type: "conference-table-6", name: "Conference Table + 6 Chairs", width: 62, height: 34, color: "#795548", palette: "advanced", description: "Legacy conference layout" },
+      { type: "conference-table-8", name: "Conference Table + 8 Chairs", width: 76, height: 38, color: "#795548", palette: "advanced", description: "Larger legacy conference layout" },
       { type: "lab-workbench", name: "Laboratory Workbench", width: 52, height: 20, color: "#64748b" },
-      { type: "lab-workbench-stools", name: "Workbench + Stools", width: 58, height: 32, color: "#64748b" },
+      { type: "lab-workbench-stools", name: "Workbench + Stools", width: 58, height: 32, color: "#64748b", palette: "advanced", description: "Legacy workbench with loose stools" },
       { type: "faculty-desk-chair", name: "Faculty Desk + Chair", width: 34, height: 26, color: "#7a5c3a" },
-      { type: "office-desk-visitors", name: "Office Desk + 2 Visitor Chairs", width: 52, height: 34, color: "#7a5c3a" },
+      { type: "office-desk-visitors", name: "Office Desk + 2 Visitor Chairs", width: 52, height: 34, color: "#7a5c3a", palette: "advanced", description: "Legacy office composite" },
       { type: "library-study-table", name: "Library Study Table + Chairs", width: 48, height: 30, color: "#8b6f4e" },
       { type: "whiteboard", name: "Whiteboard / Teaching Board", width: 40, height: 6, color: "#f8fafc" },
       { type: "lectern", name: "Lectern / Podium", width: 16, height: 16, color: "#7a5c3a" },
-      { type: "laboratory-sink", name: "Laboratory Sink", width: 26, height: 12, color: "#cbd5e1" },
+      { type: "laboratory-sink", name: "Laboratory Sink", width: 26, height: 12, color: "#cbd5e1", palette: "advanced" },
+      { type: "drafting-table-stool", name: "Drafting Table + Stool", width: 46, height: 30, color: "#8b6f4e", description: "Technical drafting surface with a centered stool" },
     ],
   },
   {
@@ -218,10 +220,10 @@ export const FURNITURE_CATEGORIES: FurnitureCategory[] = [
     icon: "Container",
     items: [
       { type: "cabinet", name: "Cabinet", width: 18, height: 12, color: "#71717a" },
-      { type: "bookshelf", name: "Shelf", width: 18, height: 10, color: "#6b5b45" },
+      { type: "bookshelf", name: "Shelf", width: 18, height: 10, color: "#6b5b45", palette: "advanced", description: "Generic legacy shelf" },
       { type: "library-bookshelf", name: "Bookshelf", width: 30, height: 10, color: "#6b5b45" },
       { type: "double-sided-library-shelf", name: "Double-Sided Library Shelf", width: 42, height: 12, color: "#6b5b45" },
-      { type: "tall-storage-cabinet", name: "Tall Storage Cabinet", width: 18, height: 24, color: "#71717a" },
+      { type: "tall-storage-cabinet", name: "Tall Storage Cabinet", width: 18, height: 24, color: "#71717a", palette: "advanced" },
       { type: "equipment-cabinet", name: "Equipment Cabinet", width: 24, height: 18, color: "#64748b" },
       { type: "locker", name: "Locker", width: 30, height: 12, color: "#64748b" },
     ],
@@ -231,14 +233,16 @@ export const FURNITURE_CATEGORIES: FurnitureCategory[] = [
     label: "Electronics",
     icon: "Monitor",
     items: [
-      { type: "computer-workstation", name: "Computer Workstation", width: 28, height: 16, color: "#475569" },
+      { type: "computer-workstation", name: "Computer Workstation", width: 28, height: 16, color: "#475569", palette: "advanced", description: "Single workstation without a chair" },
       { type: "computer-workstation-chair", name: "Computer Workstation + Chair", width: 30, height: 24, color: "#475569" },
-      { type: "computer-workstation-row-4", name: "Workstation Row 4", width: 62, height: 18, color: "#475569" },
-      { type: "computer-workstation-row-6", name: "Workstation Row 6", width: 90, height: 18, color: "#475569" },
+      { type: "computer-workstation-row-4", name: "Workstation Row 4", width: 62, height: 18, color: "#475569", palette: "advanced", description: "Legacy row layout" },
+      { type: "computer-workstation-row-6", name: "Workstation Row 6", width: 90, height: 18, color: "#475569", palette: "advanced", description: "Legacy row layout" },
+      { type: "computer-lab-table-4", name: "Computer Lab Table 4", width: 64, height: 34, color: "#475569", description: "Shared lab table with four monitors and chairs" },
+      { type: "computer-lab-table-6", name: "Computer Lab Table 6", width: 92, height: 34, color: "#475569", description: "Shared lab table with six monitors and chairs" },
       { type: "projector", name: "Projector", width: 12, height: 10, color: "#64748b" },
       { type: "wall-display", name: "Wall Display / TV", width: 24, height: 6, color: "#334155" },
       { type: "printer-copier", name: "Printer / Copier", width: 18, height: 16, color: "#64748b" },
-      { type: "server-rack", name: "Server / Network Rack", width: 18, height: 24, color: "#334155" },
+      { type: "server-rack", name: "Server / Network Rack", width: 18, height: 24, color: "#334155", palette: "advanced", description: "IT/server-room equipment" },
     ],
   },
   {
@@ -250,13 +254,13 @@ export const FURNITURE_CATEGORIES: FurnitureCategory[] = [
       { type: "urinal", name: "Urinal", width: 10, height: 14, color: "#dbe4ea" },
       { type: "sink", name: "Sink / Wash Basin", width: 16, height: 10, color: "#cbd5e1" },
       { type: "double-sink", name: "Double Sink", width: 26, height: 10, color: "#cbd5e1" },
-      { type: "faucet", name: "Faucet", width: 7, height: 7, color: "#64748b", description: "Wall or counter-mounted tap" },
+      { type: "faucet", name: "Faucet", width: 7, height: 7, color: "#64748b", palette: "advanced", description: "Wall or counter-mounted tap" },
       { type: "toilet-stall", name: "Toilet Stall", width: 26, height: 28, color: "#e2e8f0" },
       { type: "pwd-toilet-stall", name: "Accessible / PWD Stall", width: 34, height: 34, color: "#dbeafe" },
-      { type: "stall-partition", name: "Stall Partition", width: 28, height: 4, color: "#cbd5e1", description: "Thin restroom divider panel" },
+      { type: "stall-partition", name: "Stall Partition", width: 28, height: 4, color: "#cbd5e1", palette: "advanced", description: "Thin restroom divider panel" },
       { type: "mirror", name: "Mirror", width: 22, height: 5, color: "#93c5fd" },
-      { type: "soap-dispenser", name: "Soap Dispenser", width: 7, height: 9, color: "#94a3b8" },
-      { type: "tissue-dispenser", name: "Tissue / Toilet Paper Dispenser", width: 8, height: 8, color: "#94a3b8" },
+      { type: "soap-dispenser", name: "Soap Dispenser", width: 7, height: 9, color: "#94a3b8", palette: "advanced" },
+      { type: "tissue-dispenser", name: "Tissue / Toilet Paper Dispenser", width: 8, height: 8, color: "#94a3b8", palette: "advanced" },
       { type: "hand-dryer", name: "Hand Dryer", width: 10, height: 8, color: "#64748b" },
       { type: "restroom-trash-bin", name: "Restroom Trash Bin", width: 10, height: 10, color: "#64748b" },
       { type: "floor-drain", name: "Floor Drain", width: 7, height: 7, color: "#94a3b8" },
@@ -282,7 +286,38 @@ export const FURNITURE_CATEGORIES: FurnitureCategory[] = [
       { type: "indoor-trash-bin", name: "Indoor Trash Bin", width: 10, height: 10, color: "#64748b" },
     ],
   },
+  {
+    id: "facilities",
+    label: "Facilities / Amenities",
+    icon: "Building2",
+    items: [
+      { type: "table-tennis", name: "Table Tennis", width: 88, height: 44, color: "#3f7f73", description: "Indoor recreation table" },
+      { type: "vending-machine", name: "Vending Machine", width: 16, height: 24, color: "#64748b", description: "Compact wall/floor vending unit" },
+      { type: "drinking-fountain", name: "Drinking Fountain / Water Dispenser", width: 18, height: 12, color: "#38bdf8", description: "Compact drinking fountain symbol" },
+      { type: "reception-counter", name: "Reception / Service Counter", width: 60, height: 18, color: "#7a5c3a", description: "Service counter with workstation cue" },
+    ],
+  },
 ];
+
+/**
+ * Return the placement palette while keeping advanced/legacy entries out of
+ * the default view.  Searching is intentionally global: an admin who knows
+ * they need a faucet, server rack, or legacy shelf can still find it without
+ * opening a particular category.  `palette` is registry-only metadata and is
+ * never written into FloorFurniture records.
+ */
+export function getFurniturePaletteCategories(query = "", includeAdvanced = false): FurnitureCategory[] {
+  const normalized = query.trim().toLowerCase();
+  return FURNITURE_CATEGORIES
+    .map((category) => ({
+      ...category,
+      items: category.items.filter((item) => {
+        if (!normalized) return includeAdvanced || item.palette !== "advanced";
+        return `${item.name} ${item.type} ${item.description ?? ""}`.toLowerCase().includes(normalized);
+      }),
+    }))
+    .filter((category) => category.items.length > 0);
+}
 
 // ── Wall material colors ────────────────────────────────────────────────────
 

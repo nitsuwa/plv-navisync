@@ -73,6 +73,7 @@ describe("campus structure mapping", () => {
     const payload = serializeCampusStructure(styled);
     const appearance = payload.map_elements.find((row) => (row.metadata as { kind?: string })?.kind === "canvas_appearance");
     expect(appearance).toBeTruthy();
+    expect(appearance?.element_type).toBe("canvas_appearance");
     expect((appearance?.metadata as { ui: Campus }).ui).toMatchObject({ canvasGroundMaterial: "pavers", canvasGroundColor: "#b9ad98", canvasGroundTexture: "subtle" });
     const hydrated = hydrateCampusStructure(styled, {
       buildings: payload.buildings.map((v) => ({ ...v, campus_id: ids.campus }) as never),
@@ -80,6 +81,16 @@ describe("campus structure mapping", () => {
       navigationNodes: payload.navigation_nodes.map((v) => v as never), navigationEdges: payload.navigation_edges.map((v) => v as never),
     });
     expect(hydrated).toMatchObject({ canvasGroundMaterial: "pavers", canvasGroundColor: "#b9ad98", canvasGroundTexture: "subtle" });
+  });
+
+  it("reuses one deterministic canvas appearance row across repeated serializations", () => {
+    const styled = { ...campus, canvasGroundMaterial: "grass" as const, canvasGroundTexture: "subtle" as const };
+    const first = serializeCampusStructure(styled).map_elements.filter((row) => row.element_type === "canvas_appearance");
+    const second = serializeCampusStructure(styled).map_elements.filter((row) => row.element_type === "canvas_appearance");
+    expect(first).toHaveLength(1);
+    expect(second).toHaveLength(1);
+    expect(second[0]?.id).toBe(first[0]?.id);
+    expect(second[0]?.element_type).toBe("canvas_appearance");
   });
 
   it("uses a stable valid UUID for the canvas appearance record", () => {

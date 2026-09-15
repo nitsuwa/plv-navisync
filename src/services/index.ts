@@ -15,3 +15,4 @@ export { eventService } from "./eventService";
 export { settingsService } from "./settingsService";
 export { campusService } from "./campusService";
 export { dashboardService, type DashboardStats, type WeeklyActivityPoint } from "./dashboardService";
+export { templateService } from "./templateService";

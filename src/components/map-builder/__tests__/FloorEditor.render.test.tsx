@@ -129,6 +129,11 @@ describe("FloorEditor render (regression: LandPlot runtime crash)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Safety / Facilities" }));
     expect(screen.getByText("Wall Fire Extinguisher")).toBeInTheDocument();
     expect(screen.getByText("Emergency Light")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Facilities / Amenities" }));
+
+    const tableTennis = screen.getByRole("button", { name: "Table Tennis" });
+    expect(tableTennis).toHaveAttribute("aria-label", "Table Tennis");
+    expect(tableTennis).not.toHaveAttribute("title");
   });
 
   it("shows a recoverable message instead of creating fake data when the floor is missing", () => {
@@ -811,6 +816,8 @@ describe("FloorEditor top toolbar (B6 manual-QA: deterministic responsive groupi
     expect(screen.getByTestId("floor-toolbar-lifecycle")).toBeInTheDocument();
     expect(screen.getByTestId("floor-toolbar-right").querySelector(".flex-1.min-w-8")).toBeNull();
     expect(screen.getByTestId("floor-tab-bar").className).toContain("absolute");
+    expect(screen.getByTestId("floor-settings-trigger")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Toggle snap to grid" })).not.toBeInTheDocument();
   });
 
   it("keeps Save and Publish in the same shrink-0 group so a wrapped row never splits them", () => {

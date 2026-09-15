@@ -521,9 +521,10 @@ export function serializeCampusStructure(campus: Campus): CampusStructurePayload
   (campus.decorAssets ?? []).forEach((v) => map_elements.push(element("decor", campus.id, v as unknown as Record<string, unknown>)));
   (campus.eventOverlays ?? []).forEach((v) => map_elements.push(element("event_overlay", campus.id, v as unknown as Record<string, unknown>, v.locationRef?.buildingId)));
   // Campus appearance lives in the existing map_elements JSON channel. This
-  // deterministic, non-rendered record avoids a schema migration while still
-  // round-tripping ground material/tint for editor reloads and published
-  // snapshots. It is intentionally not a decor asset or navigation object.
+  // deterministic, non-rendered record is paired with the strict
+  // `canvas_appearance` CHECK-constraint migration so ground material/tint
+  // round-trips for editor reloads and published snapshots without being
+  // mistaken for a decor asset or navigation object.
   if (campus.canvasGroundMaterial !== undefined || campus.canvasGroundColor !== undefined
     || campus.canvasGroundTexture !== undefined || campus.canvasColor !== undefined) {
     map_elements.push(element("canvas_appearance", campus.id, {

@@ -16,7 +16,16 @@ export function Tooltip({ content, children }: TooltipProps) {
   const showAt = (target: HTMLElement) => {
     clearTimer();
     const rect = target.getBoundingClientRect();
-    setPos({ x: rect.left + rect.width / 2, y: rect.top });
+    // Keep the compact hint inside the viewport even when a palette item sits
+    // against a sidebar edge. The width matches the max-width used by the
+    // tooltip surface below, with a small breathing room on either side.
+    const viewportWidth = typeof window === "undefined" ? 320 : window.innerWidth;
+    const tooltipHalfWidth = Math.min(120, Math.max(80, (viewportWidth - 24) / 2));
+    const x = Math.min(
+      Math.max(rect.left + rect.width / 2, tooltipHalfWidth + 12),
+      viewportWidth - tooltipHalfWidth - 12,
+    );
+    setPos({ x, y: Math.max(rect.top, 12) });
     // A short delay keeps dense editor palettes from flashing tooltips while
     // the pointer crosses adjacent cards. Focused keyboard users still get
     // the same hint without needing a separate tooltip implementation.
@@ -47,6 +56,7 @@ export function Tooltip({ content, children }: TooltipProps) {
       </span>
       {show && (
         <div
+          role="tooltip"
           style={{
             position: "fixed",
             left: pos.x,
@@ -55,7 +65,7 @@ export function Tooltip({ content, children }: TooltipProps) {
             zIndex: 9999,
             pointerEvents: "none",
           }}
-          className="px-2.5 py-1.5 rounded-lg bg-foreground text-background text-[10px] font-semibold whitespace-nowrap shadow-lg"
+          className="max-w-[240px] px-2.5 py-1.5 rounded-lg bg-foreground text-background text-center text-[10px] font-semibold leading-snug whitespace-normal break-words shadow-lg"
         >
           {content}
           <div

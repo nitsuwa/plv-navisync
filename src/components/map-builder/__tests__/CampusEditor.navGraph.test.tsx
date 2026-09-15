@@ -214,6 +214,49 @@ describe("B5 Phase 1 — navigation graph authoring", () => {
     expect(moved).toMatchObject({ x: 240, y: 220 });
   });
 
+  it("treats a waypoint touch and sub-threshold movement as a graph no-op, then moves incident edges locally", () => {
+    let latest: Campus | undefined;
+    const campus = seededCampus();
+    campus.navNodes = [
+      ...campus.navNodes!,
+      { id: "nnEmergency", name: "Emergency", type: "emergency_exit", x: 200, y: 320, campusId: "c1", accessible: true, emergencySafe: true, color: "#dc2626" },
+      { id: "nnUnrelated", name: "Unrelated", type: "outdoor", x: 500, y: 420, campusId: "c1", accessible: true, color: "#16a34a" },
+    ];
+    campus.navEdges = [
+      { id: "entrance-connector", startNodeId: "nnA", endNodeId: "nnB", distance: 100, bidirectional: true, accessible: true, emergencySafe: true, type: "walkway", color: "#16a34a", width: 4, bendPoints: [{ x: 220, y: 180 }, { x: 260, y: 190 }] },
+      { id: "emergency-connector", startNodeId: "nnA", endNodeId: "nnEmergency", distance: 120, bidirectional: true, accessible: true, emergencySafe: true, type: "emergency", color: "#dc2626", width: 4, bendPoints: [{ x: 180, y: 240 }, { x: 190, y: 280 }] },
+      { id: "unrelated-connector", startNodeId: "nnB", endNodeId: "nnUnrelated", distance: 300, bidirectional: true, accessible: false, emergencySafe: false, closed: true, type: "walkway", color: "#64748b", width: 4, bendPoints: [{ x: 380, y: 300 }] },
+    ];
+    const before = structuredClone(campus);
+    const { container } = render(<Harness initialCampus={campus} onCampusChange={(value) => { latest = value; }} />);
+    const svg = openNavigationLayer(container);
+    fireEvent.keyDown(window, { key: "v" });
+
+    // Pointer-down/up and a movement below four screen pixels must not call
+    // onUpdate, mutate geometry, or create a history entry.
+    fireEvent.mouseDown(navNodeAt(container, 200, 200), { clientX: 200, clientY: 200, bubbles: true });
+    fireEvent.mouseUp(svg, { clientX: 200, clientY: 200, bubbles: true });
+    expect(latest).toBeUndefined();
+    fireEvent.mouseDown(navNodeAt(container, 200, 200), { clientX: 200, clientY: 200, bubbles: true });
+    fireEvent.mouseMove(svg, { clientX: 202, clientY: 201, bubbles: true });
+    fireEvent.mouseUp(svg, { clientX: 202, clientY: 201, bubbles: true });
+    expect(latest).toBeUndefined();
+
+    // A real drag updates only J and the coordinate-derived incident costs;
+    // authored bends, IDs, metadata, and unrelated edges remain exact.
+    fireEvent.mouseDown(navNodeAt(container, 200, 200), { clientX: 200, clientY: 200, bubbles: true });
+    fireEvent.mouseMove(svg, { clientX: 240, clientY: 230, bubbles: true });
+    fireEvent.mouseUp(svg, { clientX: 240, clientY: 230, bubbles: true });
+    expect(latest?.navNodes?.find((node) => node.id === "nnA")).toMatchObject({ x: 240, y: 230 });
+    expect(latest?.navNodes?.filter((node) => node.id !== "nnA")).toEqual(before.navNodes?.filter((node) => node.id !== "nnA"));
+    for (const id of ["entrance-connector", "emergency-connector"]) {
+      const previous = before.navEdges?.find((edge) => edge.id === id)!;
+      const next = latest?.navEdges?.find((edge) => edge.id === id)!;
+      expect(next).toMatchObject({ id, startNodeId: previous.startNodeId, endNodeId: previous.endNodeId, bendPoints: previous.bendPoints, accessible: previous.accessible, emergencySafe: previous.emergencySafe });
+    }
+    expect(latest?.navEdges?.find((edge) => edge.id === "unrelated-connector")).toEqual(before.navEdges?.find((edge) => edge.id === "unrelated-connector"));
+  });
+
   it("connects two existing waypoints with the Path tool (edge created + selected)", () => {
     let latest: Campus | undefined;
     const { container } = render(<Harness initialCampus={seededCampus()} onCampusChange={(c) => { latest = c; }} />);
@@ -2364,6 +2407,134 @@ describe("B5 Phase 1.9 — entrance navigation visual cleanup", () => {
 
     expect(latest!.paths.find((path) => path.id === "main")!.points[1]).toEqual({ x: 240, y: 240 });
     expect(latest!.paths.find((path) => path.id === "branch")!.points[0]).toEqual({ x: 240, y: 240 });
+  });
+
+  it("explicitly joins an owned Pathway vertex to another Pathway vertex", () => {
+    let latest: Campus | undefined;
+    const campus = makeCampus();
+    campus.paths = [
+      { id: "p1", type: "walkway", color: "#94a3b8", width: 12, points: [{ x: 20, y: 100 }, { x: 100, y: 100 }], navigationVertexIds: ["p1-a", "p1-b"] },
+      { id: "p2", type: "walkway", color: "#94a3b8", width: 12, points: [{ x: 300, y: 100 }, { x: 380, y: 100 }], navigationVertexIds: ["p2-c", "p2-d"] },
+    ];
+    campus.navNodes = [
+      { id: "p1-a-node", name: "Walking Point", type: "outdoor", x: 20, y: 100, campusId: "c1", accessible: true, color: "#16a34a", generatedFromPathVertices: [{ pathId: "p1", vertexId: "p1-a" }] },
+      { id: "p1-b-node", name: "Walking Point", type: "outdoor", x: 100, y: 100, campusId: "c1", accessible: true, color: "#16a34a", generatedFromPathVertices: [{ pathId: "p1", vertexId: "p1-b" }] },
+      { id: "p2-c-node", name: "Walking Point", type: "outdoor", x: 300, y: 100, campusId: "c1", accessible: true, color: "#16a34a", generatedFromPathVertices: [{ pathId: "p2", vertexId: "p2-c" }] },
+      { id: "p2-d-node", name: "Walking Point", type: "outdoor", x: 380, y: 100, campusId: "c1", accessible: true, color: "#16a34a", generatedFromPathVertices: [{ pathId: "p2", vertexId: "p2-d" }] },
+      { id: "p1-external", name: "Entrance", type: "entrance", x: 100, y: 20, campusId: "c1", accessible: true, color: "#16a34a" },
+    ];
+    campus.navEdges = [
+      { id: "p1-edge", startNodeId: "p1-a-node", endNodeId: "p1-b-node", distance: 80, bidirectional: true, accessible: true, emergencySafe: true, type: "walkway", color: "#16a34a", width: 4, generatedFromPathIds: ["p1"] },
+      { id: "p2-edge", startNodeId: "p2-c-node", endNodeId: "p2-d-node", distance: 80, bidirectional: true, accessible: true, emergencySafe: true, type: "walkway", color: "#16a34a", width: 4, generatedFromPathIds: ["p2"] },
+      { id: "p1-external-edge", startNodeId: "p1-external", endNodeId: "p1-b-node", distance: 80, bidirectional: true, accessible: true, emergencySafe: true, type: "walkway", color: "#16a34a", width: 4, bendPoints: [{ x: 80, y: 60 }, { x: 90, y: 80 }] },
+    ];
+    const { container } = render(<Harness initialCampus={campus} onCampusChange={(value) => { latest = value; }} />);
+    const svg = canvasSvg(container);
+    fireEvent.mouseDown(container.querySelector("[data-path-id='p1']")!, { clientX: 60, clientY: 100, bubbles: true });
+    fireEvent.mouseUp(svg, { clientX: 60, clientY: 100, bubbles: true });
+    const sourceHandle = container.querySelector("[data-testid='path-point-handle'][data-path-id='p1'][data-point-index='1']")!;
+    fireEvent.mouseDown(sourceHandle, { clientX: 100, clientY: 100, bubbles: true });
+    fireEvent.mouseMove(svg, { clientX: 300, clientY: 100, bubbles: true });
+    fireEvent.mouseUp(svg, { clientX: 300, clientY: 100, bubbles: true });
+
+    expect(latest?.paths.find((path) => path.id === "p1")?.points[1]).toEqual({ x: 300, y: 100 });
+    expect(latest?.paths.find((path) => path.id === "p2")?.points[0]).toEqual({ x: 300, y: 100 });
+    expect(latest?.navNodes?.find((node) => node.id === "p2-c-node")?.generatedFromPathVertices).toEqual(expect.arrayContaining([
+      { pathId: "p1", vertexId: "p1-b" },
+      { pathId: "p2", vertexId: "p2-c" },
+    ]));
+    expect(latest?.navNodes?.some((node) => node.id === "p1-b-node")).toBe(false);
+    expect(latest?.navEdges?.find((edge) => edge.id === "p1-edge")?.endNodeId).toBe("p2-c-node");
+    expect(latest?.navEdges?.find((edge) => edge.id === "p1-external-edge")?.bendPoints).toEqual([{ x: 80, y: 60 }, { x: 90, y: 80 }]);
+
+    // The explicit merge is one history transaction and redo restores the
+    // canonical shared-node topology, not the pre-merge pointer-up render.
+    fireEvent.click(screen.getByTitle(/Undo/));
+    expect(latest?.paths.find((path) => path.id === "p1")?.points[1]).toEqual({ x: 100, y: 100 });
+    expect(latest?.navNodes?.find((node) => node.id === "p1-b-node")).toBeTruthy();
+    fireEvent.click(screen.getByTitle(/Redo/));
+    expect(latest?.paths.find((path) => path.id === "p1")?.points[1]).toEqual({ x: 300, y: 100 });
+    expect(latest?.navNodes?.find((node) => node.id === "p1-b-node")).toBeFalsy();
+
+    // The surviving canonical node controls both physical owners on a later
+    // drag; the explicit junction does not split back into two vertices.
+    const sharedHandle = container.querySelector("[data-testid='path-junction-handle'][data-path-id='p1'][data-point-index='1']")!;
+    fireEvent.mouseDown(sharedHandle, { clientX: 300, clientY: 100, bubbles: true });
+    fireEvent.mouseMove(svg, { clientX: 340, clientY: 130, bubbles: true });
+    fireEvent.mouseUp(svg, { clientX: 340, clientY: 130, bubbles: true });
+    expect(latest?.paths.find((path) => path.id === "p1")?.points[1]).toEqual({ x: 340, y: 140 });
+    expect(latest?.paths.find((path) => path.id === "p2")?.points[0]).toEqual({ x: 340, y: 140 });
+    expect(latest?.navNodes?.find((node) => node.id === "p2-c-node")?.generatedFromPathVertices).toHaveLength(2);
+  });
+
+  it("keeps an explicit shared junction joined when one whole Pathway moves", () => {
+    let latest: Campus | undefined;
+    const campus = makeCampus();
+    campus.paths = [
+      { id: "p1", type: "walkway", color: "#94a3b8", width: 12, points: [{ x: 100, y: 300 }, { x: 200, y: 300 }], navigationVertexIds: ["p1-a", "p1-j"] },
+      { id: "p2", type: "walkway", color: "#94a3b8", width: 12, points: [{ x: 200, y: 300 }, { x: 300, y: 400 }], navigationVertexIds: ["p2-j", "p2-d"] },
+    ];
+    campus.navNodes = [
+      { id: "p1-a-node", name: "Walking Point", type: "outdoor", x: 100, y: 300, campusId: "c1", accessible: true, color: "#16a34a", generatedFromPathVertices: [{ pathId: "p1", vertexId: "p1-a" }] },
+      { id: "shared-node", name: "Walking Point", type: "outdoor", x: 200, y: 300, campusId: "c1", accessible: true, color: "#16a34a", generatedFromPathVertices: [{ pathId: "p1", vertexId: "p1-j" }, { pathId: "p2", vertexId: "p2-j" }] },
+      { id: "p2-d-node", name: "Walking Point", type: "outdoor", x: 300, y: 400, campusId: "c1", accessible: true, color: "#16a34a", generatedFromPathVertices: [{ pathId: "p2", vertexId: "p2-d" }] },
+    ];
+    campus.navEdges = [
+      { id: "p1-edge", startNodeId: "p1-a-node", endNodeId: "shared-node", distance: 100, bidirectional: true, accessible: true, emergencySafe: true, type: "walkway", color: "#16a34a", width: 4, generatedFromPathIds: ["p1"] },
+      { id: "p2-edge", startNodeId: "shared-node", endNodeId: "p2-d-node", distance: 141, bidirectional: true, accessible: true, emergencySafe: true, type: "walkway", color: "#16a34a", width: 4, generatedFromPathIds: ["p2"] },
+    ];
+    const { container } = render(<Harness initialCampus={campus} onCampusChange={(value) => { latest = value; }} />);
+    const svg = canvasSvg(container);
+    fireEvent.mouseDown(container.querySelector("[data-path-id='p1']")!, { clientX: 150, clientY: 300, bubbles: true });
+    fireEvent.mouseMove(svg, { clientX: 190, clientY: 340, bubbles: true });
+    fireEvent.mouseUp(svg, { clientX: 190, clientY: 340, bubbles: true });
+
+    expect(latest?.paths.find((path) => path.id === "p1")?.points).toEqual([{ x: 140, y: 340 }, { x: 240, y: 340 }]);
+    expect(latest?.paths.find((path) => path.id === "p2")?.points).toEqual([{ x: 240, y: 340 }, { x: 300, y: 400 }]);
+    expect(latest?.navNodes?.find((node) => node.id === "shared-node")).toMatchObject({ x: 240, y: 340 });
+    expect(latest?.navNodes?.find((node) => node.id === "shared-node")?.generatedFromPathVertices).toEqual(expect.arrayContaining([
+      { pathId: "p1", vertexId: "p1-j" },
+      { pathId: "p2", vertexId: "p2-j" },
+    ]));
+  });
+
+  it("creates the same canonical join when a whole Pathway is dropped on a vertex", () => {
+    let latest: Campus | undefined;
+    const campus = makeCampus();
+    campus.paths = [
+      { id: "p1", type: "walkway", color: "#94a3b8", width: 12, points: [{ x: 100, y: 300 }, { x: 200, y: 300 }], navigationVertexIds: ["p1-a", "p1-b"] },
+      { id: "p2", type: "walkway", color: "#94a3b8", width: 12, points: [{ x: 300, y: 300 }, { x: 400, y: 300 }], navigationVertexIds: ["p2-c", "p2-d"] },
+    ];
+    campus.navNodes = [
+      { id: "p1-a-node", name: "Walking Point", type: "outdoor", x: 100, y: 300, campusId: "c1", accessible: true, color: "#16a34a", generatedFromPathVertices: [{ pathId: "p1", vertexId: "p1-a" }] },
+      { id: "p1-b-node", name: "Walking Point", type: "outdoor", x: 200, y: 300, campusId: "c1", accessible: true, color: "#16a34a", generatedFromPathVertices: [{ pathId: "p1", vertexId: "p1-b" }] },
+      { id: "p2-c-node", name: "Walking Point", type: "outdoor", x: 300, y: 300, campusId: "c1", accessible: true, color: "#16a34a", generatedFromPathVertices: [{ pathId: "p2", vertexId: "p2-c" }] },
+      { id: "p2-d-node", name: "Walking Point", type: "outdoor", x: 400, y: 300, campusId: "c1", accessible: true, color: "#16a34a", generatedFromPathVertices: [{ pathId: "p2", vertexId: "p2-d" }] },
+    ];
+    campus.navEdges = [
+      { id: "p1-edge", startNodeId: "p1-a-node", endNodeId: "p1-b-node", distance: 100, bidirectional: true, accessible: true, emergencySafe: true, type: "walkway", color: "#16a34a", width: 4, generatedFromPathIds: ["p1"] },
+      { id: "p2-edge", startNodeId: "p2-c-node", endNodeId: "p2-d-node", distance: 100, bidirectional: true, accessible: true, emergencySafe: true, type: "walkway", color: "#16a34a", width: 4, generatedFromPathIds: ["p2"] },
+    ];
+    const { container } = render(<Harness initialCampus={campus} onCampusChange={(value) => { latest = value; }} />);
+    const svg = canvasSvg(container);
+    fireEvent.mouseDown(container.querySelector("[data-path-id='p1']")!, { clientX: 150, clientY: 300, bubbles: true });
+    fireEvent.mouseMove(svg, { clientX: 250, clientY: 300, bubbles: true });
+    fireEvent.mouseUp(svg, { clientX: 250, clientY: 300, bubbles: true });
+
+    expect(latest?.paths.find((path) => path.id === "p1")?.points).toEqual([{ x: 200, y: 300 }, { x: 300, y: 300 }]);
+    expect(latest?.navNodes?.find((node) => node.id === "p2-c-node")?.generatedFromPathVertices).toEqual(expect.arrayContaining([
+      { pathId: "p1", vertexId: "p1-b" },
+      { pathId: "p2", vertexId: "p2-c" },
+    ]));
+    expect(latest?.navNodes?.some((node) => node.id === "p1-b-node")).toBe(false);
+
+    // Whole-path translation + explicit join is one history transaction.
+    fireEvent.click(screen.getByTitle(/Undo/));
+    expect(latest?.paths.find((path) => path.id === "p1")?.points).toEqual([{ x: 100, y: 300 }, { x: 200, y: 300 }]);
+    expect(latest?.navNodes?.find((node) => node.id === "p1-b-node")).toBeTruthy();
+    fireEvent.click(screen.getByTitle(/Redo/));
+    expect(latest?.paths.find((path) => path.id === "p1")?.points).toEqual([{ x: 200, y: 300 }, { x: 300, y: 300 }]);
+    expect(latest?.navNodes?.find((node) => node.id === "p1-b-node")).toBeFalsy();
   });
 
   it("Phase 5.7 Disconnect breaks a coordinate-linked pathway junction without changing the other path", () => {

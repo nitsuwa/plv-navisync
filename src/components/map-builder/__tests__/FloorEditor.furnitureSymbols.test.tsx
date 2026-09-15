@@ -38,4 +38,17 @@ describe("Floor Editor furniture symbols", () => {
     expect(container.querySelector("path")).not.toBeNull();
     expect(container.querySelector("ellipse")).not.toBeNull();
   });
+
+  it("renders Table Tennis with a bounded tabletop, centre net, and two posts", () => {
+    const { container } = render(
+      <svg viewBox="0 0 100 50">
+        <FloorFurnitureSymbol type="table-tennis" x={2} y={2} width={88} height={44} color="#3f7f73" />
+      </svg>,
+    );
+    expect(container.querySelector("[data-testid='table-tennis-table']")).not.toBeNull();
+    expect(container.querySelector("[data-testid='table-tennis-boundary']")).not.toBeNull();
+    expect(container.querySelector("[data-testid='table-tennis-net']")).not.toBeNull();
+    expect(container.querySelectorAll("[data-testid='table-tennis-net-post']")).toHaveLength(2);
+    expect(container.querySelector("[data-testid='table-tennis-service-line']")).not.toBeNull();
+  });
 });

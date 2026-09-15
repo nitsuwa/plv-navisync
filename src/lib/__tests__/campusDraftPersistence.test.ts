@@ -100,4 +100,53 @@ describe("campus draft recovery", () => {
     expect(restoreCampusDraft(persisted)).toEqual(persisted);
     expect(readCampusDraft(persisted.id)).toBeNull();
   });
+
+  it("drops an unmarked draft captured before the full-structure boundary existed", () => {
+    const persisted = campus({
+      previewBuildingsLoaded: true,
+      buildings: [{ id: "b1" } as Campus["buildings"][number]],
+      paths: [{ id: "path-1" } as Campus["paths"][number]],
+    });
+    const legacyRecord = {
+      version: 1,
+      campusId: persisted.id,
+      persistedUpdatedAt: persisted.updatedAt,
+      persistedDatabaseUpdatedAt: persisted.databaseUpdatedAt,
+      savedAt: "2026-09-08T00:00:00.000Z",
+      campus: campus({
+        id: persisted.id,
+        previewBuildingsLoaded: true,
+        buildings: [{ id: "b1" } as Campus["buildings"][number]],
+        paths: [],
+      }),
+    };
+    sessionStorage.setItem(campusDraftStorageKey(persisted.id), JSON.stringify(legacyRecord));
+
+    expect(restoreCampusDraft(persisted)).toEqual(persisted);
+    expect(readCampusDraft(persisted.id)).toBeNull();
+  });
+
+  it("keeps an older unmarked draft when it already contains the complete structure", () => {
+    const persisted = campus({
+      previewBuildingsLoaded: true,
+      buildings: [{ id: "b1", floors: [{ id: "f1", furniture: [{ id: "chair-1" }] }] } as Campus["buildings"][number]],
+      paths: [{ id: "path-1" } as Campus["paths"][number]],
+      navNodes: [{ id: "node-1" } as Campus["navNodes"][number]],
+    });
+    const completeLegacyDraft = campus({
+      ...persisted,
+      buildings: [{ id: "b1", name: "Edited building", floors: [{ id: "f1", furniture: [{ id: "chair-1" }] }] } as Campus["buildings"][number]],
+    });
+    sessionStorage.setItem(campusDraftStorageKey(persisted.id), JSON.stringify({
+      version: 1,
+      campusId: persisted.id,
+      persistedUpdatedAt: persisted.updatedAt,
+      persistedDatabaseUpdatedAt: persisted.databaseUpdatedAt,
+      savedAt: "2026-09-08T00:00:00.000Z",
+      campus: completeLegacyDraft,
+    }));
+
+    expect(restoreCampusDraft(persisted)).toEqual(completeLegacyDraft);
+    expect(readCampusDraft(persisted.id)).not.toBeNull();
+  });
 });

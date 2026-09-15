@@ -5,7 +5,7 @@ import { CampusGroundPatternDefs } from "../CampusGroundPatternDefs";
 
 describe("CampusGroundPreview", () => {
   it.each([
-    ["neutral", false],
+    ["neutral", true],
     ["grass", true],
     ["concrete", true],
     ["pavers", true],
@@ -34,9 +34,15 @@ describe("CampusGroundPreview", () => {
 
   it("exposes the same fixed-size pattern definitions used by the live canvas", () => {
     const { container } = render(<svg><defs><CampusGroundPatternDefs /></defs></svg>);
-    for (const material of ["grass", "concrete", "pavers", "asphalt", "custom"]) {
+    for (const material of ["neutral", "grass", "concrete", "pavers", "asphalt", "custom"]) {
       const pattern = container.querySelector(`#campus-ground-${material}-pattern`);
       expect(pattern).toHaveAttribute("patternUnits", "userSpaceOnUse");
     }
+  });
+
+  it("keeps compact preview texture marks perceptible without changing live tile definitions", () => {
+    const { container } = render(<CampusGroundPreview material="grass" texture="subtle" width={900} height={680} />);
+    const previewPattern = container.querySelector('[id^="campus-ground-grass-pattern-preview-"]');
+    expect(previewPattern).toHaveAttribute("patternTransform", "scale(3.75)");
   });
 });

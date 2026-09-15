@@ -10,7 +10,7 @@ export interface CompactDropdownOption<T extends string = string> {
 
 interface CompactDropdownProps<T extends string = string> {
   value: T;
-  options: CompactDropdownOption<T>[];
+  options: ReadonlyArray<CompactDropdownOption<T>>;
   onChange: (value: T) => void;
   ariaLabel: string;
   id?: string;

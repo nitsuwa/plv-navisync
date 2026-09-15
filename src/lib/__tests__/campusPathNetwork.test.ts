@@ -56,6 +56,25 @@ describe("campus physical Path Network UX helpers", () => {
     ]);
   });
 
+  it("moves explicitly shared physical vertex occurrences together", () => {
+    const shared = [
+      path("p1", [{ x: 0, y: 0 }, { x: 100, y: 0 }], { navigationVertexIds: ["p1-a", "p1-j"] }),
+      path("p2", [{ x: 100, y: 0 }, { x: 100, y: 100 }], { navigationVertexIds: ["p2-j", "p2-d"] }),
+    ];
+    const origins = new Map(shared.map((candidate) => [candidate.id, structuredClone(candidate.points)]));
+    const moved = movePathMemberPreservingJunctions(
+      shared,
+      "p1",
+      origins,
+      25,
+      15,
+      (value) => value,
+      [[{ pathId: "p1", pointIndex: 1 }, { pathId: "p2", pointIndex: 0 }]],
+    );
+    expect(moved.find((candidate) => candidate.id === "p1")?.points).toEqual([{ x: 25, y: 15 }, { x: 125, y: 15 }]);
+    expect(moved.find((candidate) => candidate.id === "p2")?.points).toEqual([{ x: 125, y: 15 }, { x: 100, y: 100 }]);
+  });
+
   it("does not move an explicitly disconnected coincident point", () => {
     const disconnected = [
       grouped[0],

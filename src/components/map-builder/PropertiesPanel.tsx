@@ -12,6 +12,7 @@ import type { LayerOrderAction } from "../../lib/campusLayerOrder";
 import { polylineCrossesObstacle } from "../../lib/editorPlacement";
 import type { BulkRoutingAction } from "../../lib/navigationGraph";
 import { normalizeRotation, clampDecorScale, DECOR_SCALE_MIN, DECOR_SCALE_MAX } from "../../lib/decorAsset";
+import { rotationDisplayAngle } from "../../lib/campusSelection";
 import { createDefaultFloor } from "../../lib/floorPlanNormalization";
 import { nextFloorNumberForBuilding, countFloorAuthoredItems, deleteFloorFromBuilding } from "../../lib/floorManagement";
 import { DecorAssetVisual } from "./DecorAssetVisual";
@@ -1417,7 +1418,7 @@ export function PropertiesPanel({
                   <label htmlFor="bldg-rotation" className={labelCls}>Rotation</label>
                   <div className="flex items-center gap-2">
                     <input id="bldg-rotation" type="range" min={0} max={360} step={15} value={selBldg.rotation ?? 0} onChange={(e) => onUpdateBuilding(selBldg.id, { rotation: parseInt(e.target.value) })} className="flex-1 h-1.5 accent-primary" />
-                    <span className="text-xs font-mono text-muted-foreground w-8 text-right shrink-0">{selBldg.rotation ?? 0}°</span>
+                    <span className="text-xs font-mono text-muted-foreground w-8 text-right shrink-0">{rotationDisplayAngle(selBldg.rotation ?? 0)}°</span>
                   </div>
                 </div>
                 <div className="pt-1">
@@ -1943,10 +1944,25 @@ export function PropertiesPanel({
             </div>
             <div>
               <label className={labelCls}>Color</label>
-              <ColorPicker
-                value={selPath.color ?? "#b4535a"}
-                onChange={(color) => onUpdatePath?.(selPath.id, { color })}
-              />
+              {selPath.type === "road" || selPath.type === "driveway" ? (
+                <>
+                  <div
+                    data-testid="pathway-fixed-road-color"
+                    className="flex h-10 items-center gap-2 rounded-xl border border-border bg-muted/30 px-2.5 text-[10px] font-bold text-muted-foreground"
+                  >
+                    <span className="h-5 w-5 shrink-0 rounded-md border border-slate-400/60 bg-[#cbd5e1] shadow-inner" aria-hidden="true" />
+                    <span>Fixed road style</span>
+                  </div>
+                  <p className="mt-1 text-[9px] leading-snug text-muted-foreground">
+                    Roads use the standard roadway surface for consistent map readability.
+                  </p>
+                </>
+              ) : (
+                <ColorPicker
+                  value={selPath.color ?? "#b4535a"}
+                  onChange={(color) => onUpdatePath?.(selPath.id, { color })}
+                />
+              )}
             </div>
             <div className="grid grid-cols-2 gap-2">
               <div>

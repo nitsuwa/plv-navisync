@@ -1,7 +1,8 @@
 import { useId } from "react";
 import type { CampusGroundMaterial, CampusGroundTexture } from "./types";
-import { CAMPUS_GROUND_DEFAULTS, campusGroundPatternId } from "../../lib/campusCanvas";
+import { campusGroundPatternId } from "../../lib/campusCanvas";
 import { CampusGroundPatternDefs } from "./CampusGroundPatternDefs";
+import { CampusGroundSurface } from "./CampusGroundSurface";
 
 interface CampusGroundPreviewProps {
   material: CampusGroundMaterial;
@@ -21,7 +22,10 @@ export function CampusGroundPreview({ material, color, texture, width, height }:
   const suffix = rawId.replace(/[^a-zA-Z0-9_-]/g, "");
   const basePattern = campusGroundPatternId(material, texture);
   const patternId = basePattern ? `${basePattern}-preview-${suffix}` : undefined;
-  const fill = color || CAMPUS_GROUND_DEFAULTS[material];
+  // Keep the canonical world-space pattern definitions, but enlarge their
+  // repeated tile in the compact thumbnail so fine marks remain perceptible
+  // after the preview viewBox is reduced to a few hundred screen pixels.
+  const patternScale = basePattern ? Math.max(1, Math.max(width, height) / 240) : 1;
   return (
     <svg
       data-testid="canvas-ground-material-preview"
@@ -33,9 +37,16 @@ export function CampusGroundPreview({ material, color, texture, width, height }:
       className="absolute inset-0 h-full w-full"
       aria-label={`${material} ground preview`}
     >
-      <defs>{patternId && <CampusGroundPatternDefs idSuffix={`-preview-${suffix}`} />}</defs>
-      <rect width={Math.max(1, width)} height={Math.max(1, height)} fill={fill} />
-      {patternId && <rect data-testid="canvas-ground-material-texture" width={Math.max(1, width)} height={Math.max(1, height)} fill={`url(#${patternId})`} opacity={0.82} />}
+      <defs>{patternId && <CampusGroundPatternDefs idSuffix={`-preview-${suffix}`} patternScale={patternScale} />}</defs>
+      <CampusGroundSurface
+        material={material}
+        color={color}
+        texture={texture}
+        width={width}
+        height={height}
+        patternIdOverride={patternId}
+        textureTestId="canvas-ground-material-texture"
+      />
     </svg>
   );
 }

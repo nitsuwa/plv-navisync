@@ -11,6 +11,7 @@ const base: Pick<Campus, "canvasW" | "canvasH" | "buildings" | "markers" | "path
 describe("campus canvas bounds", () => {
   it("resolves distinct material defaults and fixed-size texture patterns", () => {
     expect(CAMPUS_GROUND_DEFAULTS.grass).not.toBe(CAMPUS_GROUND_DEFAULTS.concrete);
+    expect(campusGroundPatternId("neutral", "subtle")).toBe("campus-ground-neutral-pattern");
     expect(campusGroundPatternId("grass", "subtle")).toBe("campus-ground-grass-pattern");
     expect(campusGroundPatternId("pavers", "subtle")).toBe("campus-ground-pavers-pattern");
     expect(campusGroundPatternId("asphalt", "none")).toBeUndefined();

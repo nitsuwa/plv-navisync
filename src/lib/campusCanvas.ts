@@ -57,7 +57,7 @@ export function campusGroundAppearance(campus: Pick<Campus, "canvasGroundMateria
 }
 
 export function campusGroundPatternId(material: CampusGroundMaterial, texture: CampusGroundTexture): string | undefined {
-  if (texture === "none" || material === "neutral") return undefined;
+  if (texture === "none") return undefined;
   return `campus-ground-${material}-pattern`;
 }
 

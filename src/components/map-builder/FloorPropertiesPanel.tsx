@@ -13,6 +13,7 @@ import type {
 } from "./types";
 import { elevatorSystemNumberOf } from "./types";
 import { doorDisplayName, type EntranceIndoorLinkStatus } from "../../lib/entranceTransitions";
+import { rotationDisplayAngle } from "../../lib/campusSelection";
 
 type TabId = "basic" | "style" | "advanced";
 
@@ -1805,7 +1806,7 @@ function effectiveDoorType(door: FloorDoor): "single" | "double" {
                 <input type="range" min={0} max={360} step={15} value={selFurniture.rotation}
                   onChange={(e) => onUpdateFurniture(selFurniture.id, { rotation: parseInt(e.target.value) })}
                   className="flex-1 h-1.5 accent-primary" />
-                <span className="text-xs font-mono text-muted-foreground w-8 text-right shrink-0">{selFurniture.rotation}°</span>
+                <span className="text-xs font-mono text-muted-foreground w-8 text-right shrink-0">{rotationDisplayAngle(selFurniture.rotation)}°</span>
               </div>
             </Field>
             <Field label="Color">

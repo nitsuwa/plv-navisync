@@ -23,6 +23,16 @@ export type FeatureStatus = "present" | "missing" | "under_maintenance";
 
 export type FloorEditorMode = "structure" | "interior" | "navigation";
 
+/** Visual surface options for an indoor floor. These are presentation-only
+ * metadata and never participate in the indoor navigation graph. */
+export type FloorMaterial = "neutral" | "ceramic_tile" | "terrazzo" | "concrete" | "vinyl" | "wood" | "custom";
+export type FloorTexture = "none" | "subtle";
+export interface FloorAppearance {
+  material: FloorMaterial;
+  texture: FloorTexture;
+  color: string;
+}
+
 // ── Indoor Wall ─────────────────────────────────────────────────────────────
 
 export interface FloorWall {
@@ -112,6 +122,8 @@ export interface FloorFurniture {
   zOrder?: number;
   visible?: boolean;
   locked?: boolean;
+  /** Editor-only persistent grouping metadata. Groups never enter navigation. */
+  groupId?: string;
   /** Optional host exterior zone for stable outdoor coordinate semantics. */
   exteriorZoneId?: string;
 }
@@ -413,6 +425,9 @@ export interface FloorPlan {
   canvasH?: number;
   /** Floor surface background color (appearance). Defaults to the warm canvas tone. */
   backgroundColor?: string;
+  /** Optional canonical indoor ground appearance. Legacy floors use the
+   * backgroundColor fallback until settings are saved. */
+  appearance?: FloorAppearance;
   /** Whether the canvas grid lines are visible (persistent appearance preference). */
   showGrid?: boolean;
   /** Visual and snap grid spacing in floor authoring units. */
@@ -561,6 +576,7 @@ export interface FloorUndoEntry {
   canvasW?: number;
   canvasH?: number;
   backgroundColor?: string;
+  appearance?: FloorAppearance;
   showGrid?: boolean;
   gridSize?: 10 | 20 | 40;
   backgroundImage?: FloorPlanBackground;
@@ -960,6 +976,12 @@ export interface FurnitureItemTemplate {
   width: number;
   height: number;
   color: string;
+  /**
+   * Controls prominence in the placement palette only.  This is registry
+   * metadata, not part of a persisted FloorFurniture record: advanced items
+   * remain searchable and all legacy records remain fully supported.
+   */
+  palette?: "primary" | "advanced";
   /** Optional short description shown in the editor's rich asset tooltip. */
   description?: string;
 }

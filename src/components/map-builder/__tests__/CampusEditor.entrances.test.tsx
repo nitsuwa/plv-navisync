@@ -107,11 +107,11 @@ describe("CampusEditor building entrances", () => {
     expect(screen.queryByRole("button", { name: "Preview Student View" })).not.toBeInTheDocument();
   });
 
-  it("keeps the outdoor toolbar in independent left, centered, and right zones", () => {
+  it("keeps the outdoor toolbar in compact left, centered, and right zones", () => {
     render(<Harness />);
     const header = screen.getByTestId("campus-editor-header");
     expect(header.className).toContain("editor-toolbar-shell");
-    expect(header.className).toContain("grid-cols-[minmax(0,1fr)_minmax(0,auto)_minmax(0,1fr)]");
+    expect(header.className).toContain("grid-cols-[minmax(0,auto)_minmax(0,1fr)_minmax(0,auto)]");
     expect(header.className).toContain("overflow-visible");
     expect(screen.getByTestId("campus-toolbar-left")).toBeInTheDocument();
     expect(screen.getByTestId("campus-toolbar-center")).toBeInTheDocument();
@@ -129,6 +129,21 @@ describe("CampusEditor building entrances", () => {
 
     expect(screen.getByRole("button", { name: "Show and edit the walking network" })).toBeInTheDocument();
     await waitFor(() => expect(screen.queryAllByTestId("test-route-full")).toHaveLength(0));
+  });
+
+  it("keeps Navigation View functional without the obsolete routing info banner", () => {
+    render(<Harness />);
+
+    expect(screen.queryByTestId("navigation-routing-contract")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Show and edit the walking network" }));
+
+    expect(screen.getByRole("button", { name: "Hide the walking network" })).toBeInTheDocument();
+    expect(screen.queryByTestId("navigation-routing-contract")).toBeNull();
+    expect(screen.queryByText(/Accessibility routing is not active yet/i)).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Hide the walking network" }));
+    expect(screen.getByRole("button", { name: "Show and edit the walking network" })).toBeInTheDocument();
+    expect(screen.queryByTestId("navigation-routing-contract")).toBeNull();
   });
 
   it("closing Test Route leaves Navigation on when Navigation was already enabled", async () => {
@@ -209,13 +224,14 @@ describe("CampusEditor building entrances", () => {
     fireEvent.mouseUp(svg, { clientX: 1000, clientY: 340, bubbles: true });
 
     expect(screen.getByTestId("canvas-resize-handles")).toBeInTheDocument();
-    expect(screen.getByTestId("canvas-resize-confirmation")).toBeInTheDocument();
+    expect(screen.getByTestId("canvas-resize-panel")).toBeInTheDocument();
+    expect(screen.getByTestId("canvas-resize-panel").closest('[data-testid="map-editor-workspace"]')).toBeTruthy();
     expect(latestCampus).toBeNull();
     expect(screen.getByText(/1000 × 680px/)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.queryByTestId("canvas-resize-handles")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("canvas-resize-confirmation")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("canvas-resize-panel")).not.toBeInTheDocument();
     expect(latestCampus).toBeNull();
   });
 
@@ -230,8 +246,26 @@ describe("CampusEditor building entrances", () => {
     fireEvent.mouseLeave(svg, { bubbles: true });
 
     expect(screen.getByTestId("canvas-resize-handles")).toBeInTheDocument();
-    expect(screen.getByTestId("canvas-resize-confirmation")).toBeInTheDocument();
+    expect(screen.getByTestId("canvas-resize-panel")).toBeInTheDocument();
     expect(screen.getByText(/1000 × 680px/)).toBeInTheDocument();
+  });
+
+  it("suppresses Properties while resizing and restores it after Escape", () => {
+    const { container } = render(<Harness />);
+    const svg = canvasSvg(container);
+    fireEvent.mouseDown(buildingGroup(container), { clientX: 120, clientY: 120, bubbles: true });
+    fireEvent.mouseUp(svg, { clientX: 120, clientY: 120, bubbles: true });
+    expect(screen.getByText("Building", { exact: true })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("canvas-settings-trigger"));
+    fireEvent.click(screen.getByRole("button", { name: "Resize on canvas" }));
+    const hiddenProperties = screen.getByText("Building", { exact: true }).parentElement?.parentElement;
+    expect(hiddenProperties).toHaveStyle({ transform: "translateX(100%)" });
+    expect(screen.getByTestId("canvas-resize-panel")).toBeInTheDocument();
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByTestId("canvas-resize-panel")).not.toBeInTheDocument();
+    expect(screen.getByText("Building", { exact: true }).parentElement?.parentElement).toHaveStyle({ transform: "translateX(0)" });
   });
 
   it("opens the campus-specific keyboard shortcut help from the toolbar", () => {

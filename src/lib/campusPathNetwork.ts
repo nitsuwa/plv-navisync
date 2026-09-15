@@ -50,6 +50,7 @@ export function movePathMemberPreservingJunctions(
   dx: number,
   dy: number,
   snap: (value: number) => number = (value) => value,
+  explicitSharedGroups: ReadonlyArray<ReadonlyArray<{ pathId: string; pointIndex: number }>> = [],
 ): CampusPath[] {
   const movingPath = paths.find((path) => path.id === pathId);
   if (!movingPath) return paths;
@@ -59,11 +60,24 @@ export function movePathMemberPreservingJunctions(
     y: snap(point.y + dy),
   }));
   const movedByOriginalKey = new Map(movingOrigin.map((point, index) => [pointKey(point), movedPoints[index]]));
+  // Explicitly joined Pathway vertices are physical shared ownership, not a
+  // coordinate coincidence. When the moving Pathway contains one occurrence
+  // of such a junction, translate every represented occurrence by the same
+  // delta while leaving each owner's other vertices untouched.
+  const explicitMovedRefs = new Set<string>();
+  for (const group of explicitSharedGroups) {
+    if (group.some((ref) => ref.pathId === pathId)) {
+      for (const ref of group) explicitMovedRefs.add(`${ref.pathId}:${ref.pointIndex}`);
+    }
+  }
 
   return paths.map((path) => {
     const originPoints = originPointsByPathId.get(path.id) ?? path.points;
     if (path.id === pathId) return { ...path, points: movedPoints };
-    const nextPoints = originPoints.map((point) => {
+    const nextPoints = originPoints.map((point, pointIndex) => {
+      if (explicitMovedRefs.has(`${path.id}:${pointIndex}`)) {
+        return { x: snap(point.x + dx), y: snap(point.y + dy) };
+      }
       const moved = movedByOriginalKey.get(pointKey(point));
       if (!moved || pointIsDisconnected(movingPath, point) || pointIsDisconnected(path, point)) return point;
       return moved;

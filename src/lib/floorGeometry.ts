@@ -617,62 +617,44 @@ export function resizeFurnitureWithinFloor(
   canvasH: number,
   preserveAspect = false
 ): FloorFurniture {
-  const maxWidth = item.type.includes("chair") || item.type.includes("plant") ? 32
-    : item.type.includes("bench") || item.type.includes("sofa") ? 86
-    : item.type.includes("cabinet") || item.type.includes("shelf") || item.type.includes("bookshelf") ? 54
-    : 74;
-  const maxHeight = item.type.includes("chair") || item.type.includes("plant") ? 32
-    : item.type.includes("bench") ? 28
-    : item.type.includes("sofa") ? 44
-    : item.type.includes("cabinet") || item.type.includes("shelf") || item.type.includes("bookshelf") ? 42
-    : 48;
+  // Keep a sensible minimum, but do not cap furniture by type. The old
+  // ceilings made single-object resize disagree with group scaling and could
+  // shrink a previously-large legacy item on its next edit. The practical
+  // maximum is the available floor side from the opposite fixed handle.
+  const maxWidth = corner.includes("w")
+    ? Math.max(item.width, item.x + item.width)
+    : Math.max(item.width, canvasW - item.x);
+  const maxHeight = corner.includes("n")
+    ? Math.max(item.height, item.y + item.height)
+    : Math.max(item.height, canvasH - item.y);
   const resized = resizeRectLocal(item, corner, dx, dy, canvasW, canvasH, 8, 8, maxWidth, maxHeight, preserveAspect);
-  return { ...resized, width: Math.round(resized.width), height: Math.round(resized.height) };
-  let x = item.x;
-  let y = item.y;
-  let width = item.width;
-  let height = item.height;
-  const isCorner = corner.length === 2;
+  return constrainFurnitureToFloor({ ...resized, width: Math.round(resized.width), height: Math.round(resized.height) }, canvasW, canvasH);
+}
 
-  if (isCorner && preserveAspect) {
-    // Aspect-ratio corner resize: the horizontal delta drives the width and the
-    // height follows the original ratio (clamped to its own ceiling).
-    const ratio = item.height / item.width;
-    if (corner.includes("e")) {
-      width = clamp(item.width + dx, 8, Math.min(maxWidth, canvasW - item.x));
-    } else {
-      width = clamp(item.width - dx, 8, Math.min(maxWidth, item.x + item.width - 8));
-      x = item.x + (item.width - width);
-    }
-    height = clamp(width * ratio, 8, maxHeight);
-    if (corner.includes("n")) y = item.y + (item.height - height);
-  } else {
-    if (corner.includes("e")) width = clamp(item.width + dx, 8, Math.min(maxWidth, canvasW - item.x));
-    if (corner.includes("s")) height = clamp(item.height + dy, 8, Math.min(maxHeight, canvasH - item.y));
-    if (corner.includes("w")) {
-      const nextX = clamp(item.x + dx, 0, item.x + item.width - 8);
-      width = item.width + (item.x - nextX);
-      x = nextX;
-    }
-    if (corner.includes("n")) {
-      const nextY = clamp(item.y + dy, 0, item.y + item.height - 8);
-      height = item.height + (item.y - nextY);
-      y = nextY;
-    }
+/** Keep an explicit furniture resize candidate inside the visible floor. */
+export function constrainFurnitureToFloor(item: FloorFurniture, canvasW: number, canvasH: number): FloorFurniture {
+  const minSize = 8;
+  let width = Math.max(minSize, Number.isFinite(item.width) ? item.width : minSize);
+  let height = Math.max(minSize, Number.isFinite(item.height) ? item.height : minSize);
+  let x = Number.isFinite(item.x) ? item.x : 0;
+  let y = Number.isFinite(item.y) ? item.y : 0;
+  const rotation = item.rotation ?? 0;
+  let bounds = rotatedRectBounds(x, y, width, height, rotation);
+  if (bounds.w > canvasW || bounds.h > canvasH) {
+    const factor = Math.min(1, canvasW / Math.max(1, bounds.w), canvasH / Math.max(1, bounds.h));
+    const centerX = x + width / 2;
+    const centerY = y + height / 2;
+    width = Math.max(minSize, Math.round(width * factor));
+    height = Math.max(minSize, Math.round(height * factor));
+    x = centerX - width / 2;
+    y = centerY - height / 2;
+    bounds = rotatedRectBounds(x, y, width, height, rotation);
   }
-  width = clamp(width, 8, Math.min(maxWidth, canvasW - x));
-  height = clamp(height, 8, Math.min(maxHeight, canvasH - y));
-
-  // Rotated bounds: if the transformed AABB would poke outside the floor, pull
-  // the whole item back in (dimensions are kept — only position shifts).
-  if (item.rotation % 360 !== 0) {
-    const aabb = rotatedRectBounds(x, y, width, height, item.rotation);
-    if (aabb.x < 0) x += -aabb.x;
-    if (aabb.y < 0) y += -aabb.y;
-    if (aabb.x + aabb.w > canvasW) x -= aabb.x + aabb.w - canvasW;
-    if (aabb.y + aabb.h > canvasH) y -= aabb.y + aabb.h - canvasH;
-  }
-  return { ...item, x: Math.round(x), y: Math.round(y), width: Math.round(width), height: Math.round(height) };
+  if (bounds.x < 0) x += -bounds.x;
+  if (bounds.y < 0) y += -bounds.y;
+  if (bounds.x + bounds.w > canvasW) x -= bounds.x + bounds.w - canvasW;
+  if (bounds.y + bounds.h > canvasH) y -= bounds.y + bounds.h - canvasH;
+  return { ...item, x: Math.round(x), y: Math.round(y), width, height };
 }
 
 type ResizableCirculationItem = FloorStairs | FloorRamp | FloorElevatorItem;
@@ -779,6 +761,7 @@ export function scaleFloorItemFromBounds(
       width: Math.max(type === "elevator" ? 14 : type === "furniture" ? 8 : 16, Math.round(item.width * sx)),
       height: Math.max(type === "elevator" ? 14 : type === "furniture" ? 8 : 12, Math.round(item.height * sy)),
     };
+    if (type === "furniture") return constrainFurnitureToFloor(next as FloorFurniture, canvasW, canvasH);
     return clampRotatedRectPosition(next, canvasW, canvasH);
   }
   if (type === "entranceSteps" || type === "entranceRamp") {
