@@ -4,8 +4,8 @@ import { CheckCircle2, XCircle, Navigation as NavigationIcon } from "lucide-reac
 import { MARKER_STYLES } from "../../data/mapData";
 import type { Campus, CampusBuilding, CampusMarker, SimpleTool, EditorLayer, CampusSelection, RubberBand, CampusDecorAsset, CampusPath, NavigationNode, NavigationEdge, BuildingTypeDescriptor } from "./types";
 import { campusGateSize, isCampusGate } from "../../lib/campusGates";
-import { trimRouteFragmentAtMarkerBoundary, type TestRouteHighlight, type TestRouteTransitionMarker } from "./TestNavigationPanel";
-import { RouteContinuationMarker, RouteEndpointMarker, RouteTransitionMarker } from "./RouteTransitionMarker";
+import type { TestRouteHighlight, TestRouteTransitionMarker } from "./TestNavigationPanel";
+import { RouteEndpointMarker, RouteTransitionMarker } from "./RouteTransitionMarker";
 import { DECOR_ASSET_MAP, BUILDING_TYPE_MAP, genId, getRotatedAABB, groundTypeForDecorType, isDecorAreaType } from "./constants";
 import { computeBuildingPlacement, screenToWorld } from "../../lib/editorPlacement";
 import { decorRenderScale, decorSelectionOutlineBox, decorWorldSize } from "../../lib/decorVisual";
@@ -28,7 +28,6 @@ import { surfaceCellRuns } from "../../lib/campusSurface";
 import { campusAreaGroundAppearance, campusGroundAppearance, campusObjectSafeBounds } from "../../lib/campusCanvas";
 import { CampusGroundPatternDefs } from "./CampusGroundPatternDefs";
 import { CampusGroundSurface } from "./CampusGroundSurface";
-import { EntranceDirectionBadge } from "./EntranceDirectionBadge";
 
 // ── Rotation-aware resize cursor helpers (shared by buildings and decor assets) ──
 function angleToCursor(deg: number): string {
@@ -683,12 +682,6 @@ export function Canvas({
   const buildings = campus.buildings;
   const markers = campus.markers;
   const paths = campus.paths;
-  const highlightedRouteMarkerPoints = [
-    ...(highlightedRoute?.transitionMarkers ?? []),
-    ...(highlightedRoute?.continuationMarkers ?? []),
-  ].flatMap((marker) => marker.x !== undefined && marker.y !== undefined
-    ? [{ x: marker.x, y: marker.y }]
-    : []);
   const pathPointCounts = new Map<string, number>();
   paths.forEach((path) => {
     path.points.forEach((point) => {
@@ -1828,16 +1821,9 @@ export function Canvas({
           {!highlightedRoute?.routeNodeIds?.length && highlightedRoute && (highlightedRoute.waypoints.length > 0 || (highlightedRoute.endpointMarkers?.length ?? 0) > 0 || (highlightedRoute.transitionMarkers?.length ?? 0) > 0) && (
             <>
             <g pointerEvents="none">
-              {/* Marker glyphs are rendered above the route. Trim this legacy
-                  single-fragment path in world units derived from the current
-                  zoom so the animated stroke/arrows stop at its boundary. */}
-              {(() => {
-                const clippedWaypoints = trimRouteFragmentAtMarkerBoundary(highlightedRoute.waypoints, highlightedRouteMarkerPoints, zoom);
-                return (
-                  <>
               {/* Soft glow underlay */}
               <polyline
-                points={clippedWaypoints.map((w) => `${w.x},${w.y}`).join(" ")}
+                points={highlightedRoute.waypoints.map((w) => `${w.x},${w.y}`).join(" ")}
                 fill="none"
                 stroke={highlightedRoute.color}
                 strokeWidth={8}
@@ -1848,7 +1834,7 @@ export function Canvas({
               {/* Clean route stroke. A light dash animation communicates travel
                   direction without turning the preview into an editable path. */}
               <polyline
-                points={clippedWaypoints.map((w) => `${w.x},${w.y}`).join(" ")}
+                points={highlightedRoute.waypoints.map((w) => `${w.x},${w.y}`).join(" ")}
                 fill="none"
                 stroke={highlightedRoute.color}
                 strokeWidth={4}
@@ -1859,7 +1845,7 @@ export function Canvas({
               >
                 <animate attributeName="stroke-dashoffset" from="0" to="-40" dur="1.2s" repeatCount="indefinite" />
               </polyline>
-              {routeDirectionMarkers(clippedWaypoints).map((marker, index) => (
+              {routeDirectionMarkers(highlightedRoute.waypoints).map((marker, index) => (
                 <path
                   key={`route-arrow-${index}`}
                   d="M -5 -4 L 5 0 L -5 4 Z"
@@ -1870,28 +1856,25 @@ export function Canvas({
                   opacity={0.95}
                 />
               ))}
-                  </>
-                );
-              })()}
             </g>
             </>
           )}
 
           {/* Alignment guides */}
           {guides && guides.map((g, i) => (
-            <g key={`g${i}`} className="pointer-events-none">
+            <g key={`g${i}`}>
               {g.type === "v" ? (
-                <line data-testid="alignment-guide" x1={g.pos} y1={0} x2={g.pos} y2={ch} stroke="var(--accent)" strokeWidth={4} opacity={0.12} />
+                <line data-testid="alignment-guide" x1={g.pos} y1={0} x2={g.pos} y2={ch} stroke="var(--accent)" strokeWidth={8} opacity={0.15} />
               ) : (
-                <line data-testid="alignment-guide" x1={0} y1={g.pos} x2={cw} y2={g.pos} stroke="var(--accent)" strokeWidth={4} opacity={0.12} />
+                <line data-testid="alignment-guide" x1={0} y1={g.pos} x2={cw} y2={g.pos} stroke="var(--accent)" strokeWidth={8} opacity={0.15} />
               )}
               {g.type === "v" ? (
-                <line x1={g.pos} y1={0} x2={g.pos} y2={ch} stroke="var(--accent)" strokeWidth={1.25} strokeDasharray="5 3" opacity={0.78} />
+                <line x1={g.pos} y1={0} x2={g.pos} y2={ch} stroke="var(--accent)" strokeWidth={2} strokeDasharray="5 3" opacity={0.9} />
               ) : (
-                <line x1={0} y1={g.pos} x2={cw} y2={g.pos} stroke="var(--accent)" strokeWidth={1.25} strokeDasharray="5 3" opacity={0.78} />
+                <line x1={0} y1={g.pos} x2={cw} y2={g.pos} stroke="var(--accent)" strokeWidth={2} strokeDasharray="5 3" opacity={0.9} />
               )}
-              <rect x={g.type === "v" ? g.pos - 15 : cw - 34} y={g.type === "v" ? 6 : g.pos - 6} width={30} height={12} rx={3} fill="var(--accent)" fillOpacity={0.7} />
-              <text x={g.type === "v" ? g.pos : cw - 19} y={g.type === "v" ? 14.5 : g.pos + 3.5} textAnchor="middle" fill="white" fontSize={7} fontWeight="700" className="pointer-events-none select-none">{g.pos}</text>
+              <rect x={g.type === "v" ? g.pos - 16 : cw - 36} y={g.type === "v" ? 6 : g.pos - 7} width={32} height={14} rx={3} fill="var(--accent)" fillOpacity={0.85} />
+              <text x={g.type === "v" ? g.pos : cw - 20} y={g.type === "v" ? 15 : g.pos + 4} textAnchor="middle" fill="white" fontSize={8} fontWeight="800" className="pointer-events-none select-none">{g.pos}</text>
             </g>
           ))}
 
@@ -2464,6 +2447,7 @@ export function Canvas({
                   data-entrance-id={entrance.id}
                   data-building-id={b.id}
                   data-hidden={isParentVisible ? undefined : "true"}
+                  transform={`translate(${pos.x},${pos.y}) rotate(${pos.angle})`}
                   opacity={opacity}
                   tabIndex={0}
                   aria-label={entranceQuickInfo}
@@ -2471,7 +2455,6 @@ export function Canvas({
                   onMouseDown={(e) => onEntranceDown?.(e, b.id, entrance.id, pos.x, pos.y)}
                 >
                   <title>{entranceQuickInfo}</title>
-                  <g transform={`translate(${pos.x},${pos.y}) rotate(${pos.angle})`}>
                   <circle cx={0} cy={0} r={12} fill="transparent" />
                   {/* Navigation routing-target highlight (Add Waypoint / Connect Path) —
                       B5 Phase 1.9: this is the SINGLE Connect Target indicator; the
@@ -2485,7 +2468,6 @@ export function Canvas({
                   {entrance.isPrimary && <circle cx={8} cy={-8} r={3} fill="#f59e0b" stroke="white" strokeWidth={1} />}
                   {entrance.accessible && <circle cx={-8} cy={-8} r={3} fill="#2563eb" stroke="white" strokeWidth={1} />}
                   {isSel && !isNavTarget && <circle cx={0} cy={0} r={15} fill="none" stroke="var(--accent)" strokeWidth={1.5} strokeDasharray="4 3" />}
-                  </g>
                 </g>
               );
             });
@@ -2552,7 +2534,6 @@ export function Canvas({
                 const isSel = selected?.type === "navEdge" && selected.id === e.id;
                 const isMultiSel = multiSelected.includes(e.id);
                 const pathwayGenerated = isPathwayGeneratedEdge(e);
-                const derivedApproach = Boolean(e.derivedOwnerType);
                 const entranceManaged = e.type !== "entrance_transition" && Boolean(
                   (a.entranceId && !a.floorId) || (b.entranceId && !b.floorId),
                 );
@@ -2575,11 +2556,9 @@ export function Canvas({
                 const angle = Math.atan2(middleB.y - middleA.y, middleB.x - middleA.x) * (180 / Math.PI);
                 // B5 Phase 6.10: blocked edges render red (obstacle intersection)
                 const isBlocked = navBlockedEdgeIds?.has(e.id) ?? false;
-                const isInvalid = isBlocked || isClosed;
-                const edgeColor = isInvalid ? "#dc2626" : (isSel || isMultiSel ? "var(--accent)" : e.color || "#16a34a");
+                const edgeColor = isBlocked ? "#dc2626" : (isSel || isMultiSel ? "var(--accent)" : e.color || "#16a34a");
                 const connectPathTarget = navGraphInteractive
                   && !pathwayGenerated
-                  && !derivedApproach
                   && navConnectStartId
                   && navPathTargetHover?.edgeId === e.id
                   && navPathTargetHover.segmentIndex >= 0
@@ -2587,7 +2566,7 @@ export function Canvas({
                   ? navPathTargetHover
                   : null;
                 return (
-                  <g key={e.id} data-testid="nav-edge" data-edge-id={e.id} data-nav-invalid={isInvalid ? "true" : undefined} data-pathway-generated={pathwayGenerated ? "true" : undefined} data-entrance-managed={entranceManaged ? "true" : undefined} data-derived-approach={derivedApproach ? "true" : undefined} className="group/nav-edge"
+                  <g key={e.id} data-testid="nav-edge" data-edge-id={e.id} data-pathway-generated={pathwayGenerated ? "true" : undefined} data-entrance-managed={entranceManaged ? "true" : undefined} className="group/nav-edge"
                     onMouseDown={(ev) => {
                       if (!navGraphInteractive) return;
                       // B5 Phase 6.7/6.8: Waypoint AND Connect tools must not be
@@ -2647,9 +2626,8 @@ export function Canvas({
                       strokeWidth={isSel || isMultiSel ? 4 : e.width ?? 3}
                       strokeLinecap="round"
                       strokeLinejoin="round"
-                      strokeOpacity={isInvalid ? 0.9 : e.accessible === false ? 0.35 : e.emergencySafe === false ? 0.6 : 0.85}
-                      strokeDasharray={isInvalid ? "6 4" : derivedApproach ? "5 3" : e.accessible === false ? "4 3" : undefined}
-                      data-invalid={isInvalid ? "true" : undefined}
+                      strokeOpacity={isClosed ? 0.35 : e.accessible === false ? 0.35 : e.emergencySafe === false ? 0.6 : 0.85}
+                      strokeDasharray={isClosed ? "6 4" : e.accessible === false ? "4 3" : undefined}
                       className="pointer-events-none"
                     />
                     {(isSel || isMultiSel) && <circle cx={midX} cy={midY} r={4} fill="var(--accent)" className="pointer-events-none" />}
@@ -2674,7 +2652,7 @@ export function Canvas({
                         />
                       </g>
                     )}
-                    {navGraphInteractive && !pathwayGenerated && !derivedApproach && isSel && tool === "select" && edgePoints.slice(0, -1).map((point, index) => {
+                    {navGraphInteractive && !pathwayGenerated && isSel && tool === "select" && edgePoints.slice(0, -1).map((point, index) => {
                       const next = edgePoints[index + 1];
                       const addPoint = { x: Math.round((point.x + next.x) / 2), y: Math.round((point.y + next.y) / 2) };
                       return (
@@ -2691,7 +2669,7 @@ export function Canvas({
                         />
                       );
                     })}
-                    {navGraphInteractive && !pathwayGenerated && !derivedApproach && isSel && tool === "select" && (e.bendPoints ?? []).map((point, index) => (
+                    {navGraphInteractive && !pathwayGenerated && isSel && tool === "select" && (e.bendPoints ?? []).map((point, index) => (
                       <circle
                         key={`${e.id}-bend-${index}`}
                         cx={point.x}
@@ -2746,7 +2724,6 @@ export function Canvas({
                 // Building-owned anchor: it remains a visible Connect target,
                 // but is not an independently authored Walking Point.
                 const generatedExteriorStair = Boolean(n.exteriorEmergencyStairId && !n.floorId);
-                const derivedApproach = Boolean(n.derivedOwnerType);
                 const activeRouteNodeIds = highlightedRoute?.routeNodeIds;
                 const isRouteNode = !!activeRouteNodeIds?.includes(n.id);
                 const deEmphasizeForRoute = !!activeRouteNodeIds?.length && !isRouteNode && !isSel && !isMultiSel && tool === "select";
@@ -2756,8 +2733,6 @@ export function Canvas({
                   ? (isSel || isMultiSel || navConnectStartId ? 6.5 : 5.5)
                   : generatedExteriorStair
                   ? (isSel || isMultiSel || navConnectStartId ? 9 : 8)
-                  : derivedApproach
-                  ? (isSel || isMultiSel || navConnectStartId ? 8 : 6.5)
                   : isPathJunction
                   ? (isSel || isMultiSel || navConnectStartId ? 7.5 : 5.5)
                   : pathwayGenerated && !isSel && !isMultiSel ? 5.5 : 7.5;
@@ -2785,27 +2760,8 @@ export function Canvas({
                   if (!parent || !entrance) return undefined;
                   return entranceDisplayName(entrance, (parent.entrances ?? []).findIndex((en) => en.id === entrance.id));
                 })();
-                const entranceEdge = n.entranceId
-                  ? buildings.find((building) => building.id === n.buildingId)?.entrances?.find((entrance) => entrance.id === n.entranceId)?.edge
-                  : undefined;
-                // Base arrow points right. Outdoors it points back through the
-                // actual building edge, toward the indoor Floor context.
-                const continuationRotation = entranceEdge === "top" ? 90 : entranceEdge === "bottom" ? -90 : entranceEdge === "left" ? 0 : 180;
-                // Presentation-only handoff cue: the canonical entrance node
-                // has an entrance transition to the Ground-floor door. It
-                // does not create another portal or alter the graph.
-                // Keep the Outdoor-side handoff cue tied to the canonical
-                // Entrance↔Door bridge endpoints.  `NavigationEdge` does not
-                // have `from`/`to`; using those legacy names made the cue
-                // unreachable in the real graph.
-                const routeContinuation = highlightedRoute?.continuationMarkers?.find((marker) => marker.nodeId === n.id && (marker.kind === "entrance" || marker.kind === "waypoint"));
-                const routeTransitionAtNode = routeContinuation
-                  && highlightedRoute?.transitionMarkers?.some((marker) => marker.x === n.x && marker.y === n.y
-                    && ((routeContinuation.kind === "ramp" && marker.kind === "ramp")
-                      || (routeContinuation.kind === "steps" && marker.kind === "stair")));
-                const showRouteContinuation = !!routeContinuation && !routeTransitionAtNode;
                 return (
-                  <g key={n.id} data-testid="nav-node" data-node-id={n.id} data-path-junction={isPathJunction ? "true" : undefined} data-entrance-linked={isEntranceLinked ? "true" : undefined} data-derived-approach={derivedApproach ? "true" : undefined} className="group/nav-node"
+                  <g key={n.id} data-testid="nav-node" data-node-id={n.id} data-path-junction={isPathJunction ? "true" : undefined} data-entrance-linked={isEntranceLinked ? "true" : undefined} className="group/nav-node"
                     onMouseDown={(e) => { if (navGraphInteractive) onItemDown(e, "navNode", n.id, n.x, n.y); }}
                     onMouseEnter={() => { if (isGatePickTarget && n.gateId) onTestRoutePickHover?.({ type: "gate", id: n.gateId }); }}
                     onMouseLeave={() => { if (testRoutePickHover?.type === "gate" && testRoutePickHover.id === n.gateId) onTestRoutePickHover?.(null); }}
@@ -2813,10 +2769,10 @@ export function Canvas({
                       if (!navGraphInteractive) return;
                       e.preventDefault();
                       e.stopPropagation();
-                      if (!pathwayGenerated && !generatedExteriorStair && !gateManaged && !derivedApproach) onItemContextMenu?.(e, "navNode", n.id);
+                      if (!pathwayGenerated && !generatedExteriorStair && !gateManaged) onItemContextMenu?.(e, "navNode", n.id);
                     }}
                     style={{
-                      cursor: navGraphInteractive ? ((pathwayGenerated || generatedExteriorStair || gateManaged || derivedApproach) ? "pointer" : tool === "select" ? "move" : cursor) : "default",
+                      cursor: navGraphInteractive ? ((pathwayGenerated || generatedExteriorStair || gateManaged) ? "pointer" : tool === "select" ? "move" : cursor) : "default",
                       // A Building Entrance is the single admin-visible
                       // representation of its canonical graph anchor. In
                       // normal Select, let the physical Entrance hit target
@@ -2882,13 +2838,6 @@ export function Canvas({
                         <path d={`M${n.x - 4},${n.y + 3} L${n.x - 4},${n.y - 2} L${n.x},${n.y - 4} L${n.x + 4},${n.y - 2} L${n.x + 4},${n.y + 3} Z`}
                           fill="white" className="pointer-events-none" />
                       </>
-                    ) : derivedApproach ? (
-                      <>
-                        <circle cx={n.x} cy={n.y} r={nodeRadius + 4} fill={n.derivedOwnerType === "entrance_ramp" ? "rgba(15,118,110,0.12)" : "rgba(124,58,237,0.12)"}
-                          stroke={n.derivedOwnerType === "entrance_ramp" ? "#0f766e" : "#7c3aed"} strokeWidth={isSel || isMultiSel ? 2.2 : 1.5} strokeDasharray="4 3" className="pointer-events-none" />
-                        <circle cx={n.x} cy={n.y} r={nodeRadius} fill={n.derivedOwnerType === "entrance_ramp" ? "#0f766e" : "#7c3aed"}
-                          stroke={isSel || isMultiSel ? "var(--accent)" : "white"} strokeWidth={isSel || isMultiSel ? 2.5 : 2} />
-                      </>
                     ) : gateManaged ? (
                       <>
                         <circle cx={n.x} cy={n.y} r={isGatePickHover ? nodeRadius + 6 : nodeRadius + 3.5} fill={isGatePickTarget ? "rgba(22,163,74,0.10)" : "rgba(37,99,235,0.10)"}
@@ -2901,15 +2850,6 @@ export function Canvas({
                     ) : (
                       <circle cx={n.x} cy={n.y} r={nodeRadius} fill={n.color || "#16a34a"} stroke={isSel || isMultiSel ? "var(--accent)" : "white"} strokeWidth={2}
                         opacity={dimmed ? 0.55 : 1} strokeDasharray={dimmed ? "3 2" : undefined} />
-                    )}
-                    {showRouteContinuation && routeContinuation && (
-                      <RouteContinuationMarker
-                        marker={routeContinuation}
-                        x={n.x}
-                        y={n.y}
-                        entranceRotation={continuationRotation}
-                        context="outdoor"
-                      />
                     )}
                     {/* Compact type glyphs — one small path each, pointer-events none */}
                     {!isEntranceLinked && isEmergency && <path d={`M${n.x - 3.5},${n.y + 3} L${n.x - 3.5},${n.y - 2} L${n.x},${n.y - 3.5} L${n.x + 3.5},${n.y - 2} L${n.x + 3.5},${n.y + 3} Z`} fill="#dc2626" className="pointer-events-none" />}
@@ -2935,33 +2875,6 @@ export function Canvas({
 
               {/* Connect Path preview — a temporary dashed line from the start
                   waypoint to the current node, Entrance, Pathway, or cursor. */}
-              {/* Exterior approach anchors are intentionally hidden from the
-                  Outdoor authoring projection. Keep the active route's
-                  continuation cue visible at a hidden Ramp/Steps outer
-                  transition by resolving its canonical node from the full
-                  Campus graph. This is presentation-only; it does not expose
-                  helper nodes or add another route portal. */}
-              {(highlightedRoute?.continuationMarkers ?? []).map((marker) => {
-                if (marker.kind !== "entrance" && marker.kind !== "waypoint") return null;
-                if (renderNavNodes.some((node) => node.id === marker.nodeId)) return null;
-                const node = (campus.navNodes ?? []).find((candidate) => candidate.id === marker.nodeId);
-                if (!node) return null;
-                const entranceEdge = node.entranceId
-                  ? buildings.find((building) => building.id === node.buildingId)?.entrances?.find((entrance) => entrance.id === node.entranceId)?.edge
-                  : undefined;
-                const continuationRotation = entranceEdge === "top" ? 90 : entranceEdge === "bottom" ? -90 : entranceEdge === "left" ? 0 : 180;
-                return (
-                  <RouteContinuationMarker
-                    key={`hidden-route-continuation-${marker.nodeId}`}
-                    marker={marker}
-                    x={node.x}
-                    y={node.y}
-                    entranceRotation={continuationRotation}
-                    context="outdoor"
-                  />
-                );
-              })}
-
               {navGraphInteractive && navPreview && (() => {
                 const start = renderNavNodes.find((n) => n.id === navConnectStartId);
                 // B5 Phase 6.9 (Floor parity): render the FULL proposed pin shape
@@ -3115,75 +3028,50 @@ export function Canvas({
               layer so nav hit targets and physical artwork cannot cover them. */}
           {highlightedRoute && (
             <>
-              {!!highlightedRoute.routeNodeIds?.length && (highlightedRoute.waypointFragments ?? [highlightedRoute.waypoints]).some((fragment) => fragment.length > 0) && (
+              {!!highlightedRoute.routeNodeIds?.length && highlightedRoute.waypoints.length > 0 && (
                 <g data-testid="test-route-active-overlay" className="pointer-events-none">
-                  {(highlightedRoute.waypointFragments ?? [highlightedRoute.waypoints]).map((fragment, fragmentIndex) => {
-                    const clippedFragment = trimRouteFragmentAtMarkerBoundary(fragment, highlightedRouteMarkerPoints, zoom);
-                    if (clippedFragment.length === 0) return null;
-                    return (
-                    <g key={`active-route-fragment-${fragmentIndex}`}>
-                      <polyline
-                        points={clippedFragment.map((w) => `${w.x},${w.y}`).join(" ")}
-                        fill="none"
-                        stroke={highlightedRoute.color}
-                        strokeWidth={8}
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        opacity={0.28}
-                      />
-                      <polyline
-                        points={clippedFragment.map((w) => `${w.x},${w.y}`).join(" ")}
-                        fill="none"
-                        stroke={highlightedRoute.color}
-                        strokeWidth={4}
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeDasharray="12 8"
-                        opacity={1}
-                      >
-                        <animate attributeName="stroke-dashoffset" from="0" to="-40" dur="1.2s" repeatCount="indefinite" />
-                      </polyline>
-                      {routeDirectionMarkers(clippedFragment).map((marker, index) => (
-                        <path
-                          key={`active-route-arrow-${fragmentIndex}-${index}`}
-                          d="M -5 -4 L 5 0 L -5 4 Z"
-                          transform={`translate(${marker.x} ${marker.y}) rotate(${marker.angle})`}
-                          fill={highlightedRoute.color}
-                          stroke="white"
-                          strokeWidth={1}
-                          opacity={1}
-                        />
-                      ))}
-                    </g>
-                    );
-                  })}
+                  <polyline
+                    points={highlightedRoute.waypoints.map((w) => `${w.x},${w.y}`).join(" ")}
+                    fill="none"
+                    stroke={highlightedRoute.color}
+                    strokeWidth={8}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    opacity={0.28}
+                  />
+                  <polyline
+                    points={highlightedRoute.waypoints.map((w) => `${w.x},${w.y}`).join(" ")}
+                    fill="none"
+                    stroke={highlightedRoute.color}
+                    strokeWidth={4}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeDasharray="12 8"
+                    opacity={1}
+                  >
+                    <animate attributeName="stroke-dashoffset" from="0" to="-40" dur="1.2s" repeatCount="indefinite" />
+                  </polyline>
+                  {routeDirectionMarkers(highlightedRoute.waypoints).map((marker, index) => (
+                    <path
+                      key={`active-route-arrow-${index}`}
+                      d="M -5 -4 L 5 0 L -5 4 Z"
+                      transform={`translate(${marker.x} ${marker.y}) rotate(${marker.angle})`}
+                      fill={highlightedRoute.color}
+                      stroke="white"
+                      strokeWidth={1}
+                      opacity={1}
+                    />
+                  ))}
                 </g>
               )}
               {(highlightedRoute.endpointMarkers ?? []).map((marker) => (
                 <RouteEndpointMarker key={`route-endpoint-${marker.kind}`} {...marker} color={highlightedRoute.color} />
               ))}
-              {(highlightedRoute.transitionMarkers ?? []).filter((marker) => marker.kind !== "ramp" && marker.kind !== "stair").map((marker) => (
+              {(highlightedRoute.transitionMarkers ?? []).map((marker) => (
                 <RouteTransitionMarker key={marker.id} marker={marker} zoom={zoom} viewport={{ width: cw, height: ch, pan }} onClick={onRouteTransitionClick} />
               ))}
             </>
           )}
-          {/* Physical access semantics stay above every route/network stroke. */}
-          <g data-testid="entrance-direction-badge-layer" className="pointer-events-none">
-            {buildings.flatMap((building) => (building.entrances ?? []).map((entrance) => {
-              const position = entranceWorldPosition(building, entrance);
-              return (
-                <EntranceDirectionBadge
-                  key={`entrance-direction-badge-${building.id}-${entrance.id}`}
-                  x={position.x}
-                  y={position.y}
-                  edge={entrance.edge}
-                  direction={entrance.direction}
-                  type={entrance.type}
-                  rotation={building.rotation ?? 0}
-                />
-              );
-            }))}
-          </g>
         </g>
       </svg>
 

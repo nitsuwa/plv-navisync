@@ -118,13 +118,6 @@ describe("CampusEditor building entrances", () => {
     expect(screen.getByTestId("campus-toolbar-right")).toBeInTheDocument();
   });
 
-  it("keeps the Events workflow out of the Map Builder header", () => {
-    render(<Harness />);
-
-    expect(screen.queryByRole("button", { name: "Events" })).not.toBeInTheDocument();
-    expect(screen.getByTestId("campus-status-badge")).toBeInTheDocument();
-  });
-
   it("turning Navigation off also closes an open Test Route session", async () => {
     render(<Harness />);
 
@@ -321,9 +314,7 @@ describe("CampusEditor building entrances", () => {
     setTextInput(nameInput, "North Gate");
 
     expect(container.querySelector("#entrance-type")).toBeNull();
-    expect(screen.queryByText("Service Access")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Emergency Exit" }));
-    fireEvent.click(screen.getByRole("button", { name: "General Access" }));
+    fireEvent.click(screen.getByText("Service Access"));
 
     expect(container.querySelector("#entrance-edge")).toBeNull();
     fireEvent.click(screen.getByText("North"));
@@ -336,36 +327,11 @@ describe("CampusEditor building entrances", () => {
     if (!accessibleCheckbox.checked) fireEvent.click(accessibleCheckbox);
 
     expect(latestCampus!.buildings[0].entrances![0]).toMatchObject({
-      type: "general",
+      type: "service",
       edge: "top",
       offset: 0.25,
       accessible: true,
     });
-  });
-
-  it("keeps Emergency Exit outbound-only and disables primary/direction controls", () => {
-    const { container } = render(<Harness onCampusChange={(c) => { latestCampus = c; }} />);
-    addEntrance(container);
-    fireEvent.click(screen.getByRole("button", { name: "Emergency Exit" }));
-
-    const directionButtons = within(screen.getByTestId("entrance-direction-control")).getAllByRole("button");
-    expect(directionButtons.every((button) => (button as HTMLButtonElement).disabled)).toBe(true);
-    expect(screen.getByText("Emergency exits are outbound only.")).toBeInTheDocument();
-    expect(screen.getByLabelText("Primary Entrance")).toBeDisabled();
-    expect(latestCampus!.buildings[0].entrances![0]).toMatchObject({ type: "emergency_exit", direction: "exit_only", isPrimary: false });
-  });
-
-  it("shows a non-blocking warning when no routine outbound door is configured", () => {
-    const { container } = render(<Harness onCampusChange={(c) => { latestCampus = c; }} />);
-    addEntrance(container);
-    fireEvent.click(screen.getByRole("button", { name: "Entrance Only" }));
-
-    const svg = canvasSvg(container);
-    fireEvent.mouseDown(buildingGroup(container), { clientX: 120, clientY: 120, bubbles: true });
-    fireEvent.mouseUp(svg, { clientX: 120, clientY: 120, bubbles: true });
-
-    expect(screen.getByTestId("routine-exit-compatibility-warning")).toHaveTextContent("No routine exit configured");
-    expect(latestCampus!.buildings[0].entrances![0]).toMatchObject({ direction: "entrance_only" });
   });
 
   it("locks generated Exterior Emergency Stair discharge and confirms canonical removal", () => {

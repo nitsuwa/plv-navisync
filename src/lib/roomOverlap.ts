@@ -181,15 +181,14 @@ export function clampNudgeToEdge(
 export function snapRoomToNearbyEdges(
   candidate: { x: number; y: number; w: number; h: number; id?: string },
   rooms: FloorRoom[],
-  threshold = ROOM_EDGE_SNAP_THRESHOLD,
 ): { x: number; y: number } {
   let sx = candidate.x;
   let sy = candidate.y;
   const right = candidate.x + candidate.w;
   const bottom = candidate.y + candidate.h;
 
-  let bestDx = threshold + 1;
-  let bestDy = threshold + 1;
+  let bestDx = ROOM_EDGE_SNAP_THRESHOLD + 1;
+  let bestDy = ROOM_EDGE_SNAP_THRESHOLD + 1;
 
   for (const room of rooms) {
     if (candidate.id && room.id === candidate.id) continue;
@@ -219,8 +218,8 @@ export function snapRoomToNearbyEdges(
   }
 
   return {
-    x: bestDx <= threshold ? Math.round(sx) : candidate.x,
-    y: bestDy <= threshold ? Math.round(sy) : candidate.y,
+    x: bestDx <= ROOM_EDGE_SNAP_THRESHOLD ? Math.round(sx) : candidate.x,
+    y: bestDy <= ROOM_EDGE_SNAP_THRESHOLD ? Math.round(sy) : candidate.y,
   };
 }
 
@@ -233,17 +232,6 @@ export function snapRoomToNearbyEdges(
 // old six-unit window so Rooms, Stairs, and other Floor objects release as the
 // pointer moves away.
 const ALIGN_GUIDE_THRESHOLD = 5;
-
-/** Convert a small screen-space tolerance into bounded world units. */
-export function screenSpaceAlignmentThreshold(
-  zoom: number,
-  pixels = 6,
-  minWorldUnits = 3,
-  maxWorldUnits = 12,
-): number {
-  const safeZoom = Math.max(0.01, Number.isFinite(zoom) ? Math.abs(zoom) : 1);
-  return Math.max(minWorldUnits, Math.min(maxWorldUnits, pixels / safeZoom));
-}
 
 /**
  * Width/height match threshold in units. When a candidate room's width (or
@@ -328,12 +316,11 @@ export function computeRoomAlignmentGuides(
   candidate: { x: number; y: number; w: number; h: number; id?: string },
   rooms: FloorRoom[],
   checkSameSize = false,
-  threshold = ALIGN_GUIDE_THRESHOLD,
 ): { guides: RoomAlignGuide[]; snappedX: number; snappedY: number; snappedW?: number; snappedH?: number } {
   const guides: RoomAlignGuide[] = [];
-  let bestDx = threshold + 1;
+  let bestDx = ALIGN_GUIDE_THRESHOLD + 1;
   let snappedX = candidate.x;
-  let bestDy = threshold + 1;
+  let bestDy = ALIGN_GUIDE_THRESHOLD + 1;
   let snappedY = candidate.y;
   let bestDw = checkSameSize ? SAME_SIZE_THRESHOLD + 1 : Infinity;
   let snappedW = candidate.w;
@@ -407,17 +394,17 @@ export function computeRoomAlignmentGuides(
   const floorBottom = Math.max(...rooms.map((r) => r.y + r.h), 100);
   const floorRight = Math.max(...rooms.map((r) => r.x + r.w), 100);
 
-  if (bestDx <= threshold) {
-    const guideX = bestDx <= threshold ? snappedX + (snappedX === candidate.x ? 0 : candidate.w) : snappedX;
+  if (bestDx <= ALIGN_GUIDE_THRESHOLD) {
+    const guideX = bestDx <= ALIGN_GUIDE_THRESHOLD ? snappedX + (snappedX === candidate.x ? 0 : candidate.w) : snappedX;
     // Determine which edge matched for a more precise guide line
     let matchX = snappedX;
     for (const room of rooms) {
       if (candidate.id && room.id === candidate.id) continue;
       const rRight = room.x + room.w;
-      if (Math.abs(candidate.x - room.x) <= threshold) { matchX = room.x; break; }
-      if (Math.abs(candidate.x - rRight) <= threshold) { matchX = rRight; break; }
-      if (Math.abs(candRight - room.x) <= threshold) { matchX = room.x; break; }
-      if (Math.abs(candRight - rRight) <= threshold) { matchX = rRight; break; }
+      if (Math.abs(candidate.x - room.x) <= ALIGN_GUIDE_THRESHOLD) { matchX = room.x; break; }
+      if (Math.abs(candidate.x - rRight) <= ALIGN_GUIDE_THRESHOLD) { matchX = rRight; break; }
+      if (Math.abs(candRight - room.x) <= ALIGN_GUIDE_THRESHOLD) { matchX = room.x; break; }
+      if (Math.abs(candRight - rRight) <= ALIGN_GUIDE_THRESHOLD) { matchX = rRight; break; }
     }
     guides.push({
       type: "v", pos: matchX,
@@ -425,15 +412,15 @@ export function computeRoomAlignmentGuides(
       x2: matchX, y2: floorBottom,
     });
   }
-  if (bestDy <= threshold) {
+  if (bestDy <= ALIGN_GUIDE_THRESHOLD) {
     let matchY = snappedY;
     for (const room of rooms) {
       if (candidate.id && room.id === candidate.id) continue;
       const rBottom = room.y + room.h;
-      if (Math.abs(candidate.y - room.y) <= threshold) { matchY = room.y; break; }
-      if (Math.abs(candidate.y - rBottom) <= threshold) { matchY = rBottom; break; }
-      if (Math.abs(candBottom - room.y) <= threshold) { matchY = room.y; break; }
-      if (Math.abs(candBottom - rBottom) <= threshold) { matchY = rBottom; break; }
+      if (Math.abs(candidate.y - room.y) <= ALIGN_GUIDE_THRESHOLD) { matchY = room.y; break; }
+      if (Math.abs(candidate.y - rBottom) <= ALIGN_GUIDE_THRESHOLD) { matchY = rBottom; break; }
+      if (Math.abs(candBottom - room.y) <= ALIGN_GUIDE_THRESHOLD) { matchY = room.y; break; }
+      if (Math.abs(candBottom - rBottom) <= ALIGN_GUIDE_THRESHOLD) { matchY = rBottom; break; }
     }
     guides.push({
       type: "h", pos: matchY,
@@ -470,8 +457,8 @@ export function computeRoomAlignmentGuides(
 
   return {
     guides,
-    snappedX: bestDx <= threshold ? Math.round(snappedX) : candidate.x,
-    snappedY: bestDy <= threshold ? Math.round(snappedY) : candidate.y,
+    snappedX: bestDx <= ALIGN_GUIDE_THRESHOLD ? Math.round(snappedX) : candidate.x,
+    snappedY: bestDy <= ALIGN_GUIDE_THRESHOLD ? Math.round(snappedY) : candidate.y,
     snappedW: checkSameSize && bestDw <= SAME_SIZE_THRESHOLD ? Math.round(snappedW!) : undefined,
     snappedH: checkSameSize && bestDh <= SAME_SIZE_THRESHOLD ? Math.round(snappedH!) : undefined,
   };
@@ -600,12 +587,11 @@ export function snapResizeEdges(
   corner: string,
   limits: ResizeLimits,
   otherRooms: FloorRoom[],
-  threshold = ALIGN_GUIDE_THRESHOLD,
 ): ResizeSnapResult {
   let result = { x: candidate.x, y: candidate.y, w: candidate.w, h: candidate.h };
   const guides: RoomAlignGuide[] = [];
-  let bestDx = threshold + 1;
-  let bestDy = threshold + 1;
+  let bestDx = ALIGN_GUIDE_THRESHOLD + 1;
+  let bestDy = ALIGN_GUIDE_THRESHOLD + 1;
   // Same-size (width/height match) tracking — Issue 3: snapping a resize to
   // exactly match another object's width or height.
   let bestDw = SAME_SIZE_THRESHOLD + 1;
@@ -705,11 +691,11 @@ export function snapResizeEdges(
   }
 
   // Build guide lines for edges that actually snapped
-  if (bestDx <= threshold) {
+  if (bestDx <= ALIGN_GUIDE_THRESHOLD) {
     const guideX = movingRight ? result.x + result.w : result.x;
     guides.push({ type: "v", pos: guideX, x1: guideX, y1: 0, x2: guideX, y2: Math.max(canvasHForGuideLines(otherRooms), candidate.y + candidate.h + 20) });
   }
-  if (bestDy <= threshold) {
+  if (bestDy <= ALIGN_GUIDE_THRESHOLD) {
     const guideY = movingBottom ? result.y + result.h : result.y;
     guides.push({ type: "h", pos: guideY, x1: 0, y1: guideY, x2: Math.max(canvasWForGuideLines(otherRooms), candidate.x + candidate.w + 20), y2: guideY });
   }
@@ -772,16 +758,15 @@ export interface AlignResult {
 export function computeAlignmentGuides(
   candidate: { x: number; y: number; w: number; h: number; id?: string },
   refs: { x: number; y: number; w: number; h: number; id?: string }[],
-  threshold = ALIGN_GUIDE_THRESHOLD,
 ): AlignResult {
   const guides: RoomAlignGuide[] = [];
-  let bestDx = threshold + 1;
+  let bestDx = ALIGN_GUIDE_THRESHOLD + 1;
   let snappedX = candidate.x;
   // The world-space coordinate of the MATCHED reference edge (the shared edge
   // the guide line must be drawn at). Tracked separately from the snapped
   // position so left/right/center matches all place the line correctly.
   let guideX = candidate.x;
-  let bestDy = threshold + 1;
+  let bestDy = ALIGN_GUIDE_THRESHOLD + 1;
   let snappedY = candidate.y;
   let guideY = candidate.y;
 
@@ -844,16 +829,16 @@ export function computeAlignmentGuides(
   const floorW = canvasWForGuideLines(refs.length > 0 ? refs : [candidate]);
   const floorH = canvasHForGuideLines(refs.length > 0 ? refs : [candidate]);
 
-  if (bestDx <= threshold) {
+  if (bestDx <= ALIGN_GUIDE_THRESHOLD) {
     guides.push({ type: "v", pos: guideX, x1: guideX, y1: 0, x2: guideX, y2: floorH });
   }
-  if (bestDy <= threshold) {
+  if (bestDy <= ALIGN_GUIDE_THRESHOLD) {
     guides.push({ type: "h", pos: guideY, x1: 0, y1: guideY, x2: floorW, y2: guideY });
   }
 
   return {
-    snappedX: bestDx <= threshold ? Math.round(snappedX) : candidate.x,
-    snappedY: bestDy <= threshold ? Math.round(snappedY) : candidate.y,
+    snappedX: bestDx <= ALIGN_GUIDE_THRESHOLD ? Math.round(snappedX) : candidate.x,
+    snappedY: bestDy <= ALIGN_GUIDE_THRESHOLD ? Math.round(snappedY) : candidate.y,
     guides,
   };
 }
@@ -875,9 +860,8 @@ export function computeResizeAlignmentGuides(
   candidate: { x: number; y: number; w: number; h: number; id?: string },
   refs: { x: number; y: number; w: number; h: number; id?: string }[],
   checkSameSize = false,
-  threshold = ALIGN_GUIDE_THRESHOLD,
 ): ResizeAlignResult {
-  const alignResult = computeAlignmentGuides(candidate, refs, threshold);
+  const alignResult = computeAlignmentGuides(candidate, refs);
   let bestDw = checkSameSize ? SAME_SIZE_THRESHOLD + 1 : Infinity;
   let snappedW: number | undefined;
   let bestDh = checkSameSize ? SAME_SIZE_THRESHOLD + 1 : Infinity;

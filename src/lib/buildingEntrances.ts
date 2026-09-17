@@ -1,4 +1,4 @@
-import type { BuildingEntranceDirection, BuildingEntranceEdge, BuildingEntranceType, CampusBuilding, CampusEntrance, LegacyBuildingEntranceType } from "../components/map-builder/types";
+import type { BuildingEntranceEdge, BuildingEntranceType, CampusBuilding, CampusEntrance, LegacyBuildingEntranceType } from "../components/map-builder/types";
 
 export interface Point {
   x: number;
@@ -12,11 +12,6 @@ export interface EntranceWorldPosition extends Point {
 const clamp01 = (value: number) => Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0.5));
 
 export const BUILDING_ENTRANCE_TYPES: BuildingEntranceType[] = ["general", "service", "emergency_exit"];
-
-/** Purpose choices exposed by the current authoring UI.  Service remains in
- * BUILDING_ENTRANCE_TYPES so legacy records and routing can still hydrate it,
- * but new/edit authoring should not offer it as a selectable purpose. */
-export const BUILDING_ENTRANCE_AUTHORING_TYPES: BuildingEntranceType[] = ["general", "emergency_exit"];
 
 export const BUILDING_ENTRANCE_TYPE_LABELS: Record<BuildingEntranceType, string> = {
   general: "General Access",
@@ -94,7 +89,6 @@ export function normalizeEntrance(entrance: CampusEntrance, buildingId: string):
     buildingId,
     offset: normalizeEntranceOffset(entrance.offset),
     type,
-    ...(type === "emergency_exit" ? { direction: "exit_only" as const } : {}),
     isPrimary: type === "general" && (entrance.isPrimary === true || entrance.type === "main"),
   };
 }
@@ -164,27 +158,6 @@ export function entranceWorldPosition(
     y: rotated.y,
     angle: ((outward[entrance.edge] + (building.rotation ?? 0)) % 360 + 360) % 360,
   };
-}
-
-/** Direction is intentionally independent from purpose. Legacy General and
- * Service entrances remain bidirectional; legacy Emergency exits default to
- * outward-only without rewriting the stored record. */
-export function normalizeEntranceDirection(
-  entrance: Pick<CampusEntrance, "direction" | "type"> | undefined,
-): BuildingEntranceDirection {
-  if (normalizeEntranceType(entrance?.type) === "emergency_exit") return "exit_only";
-  if (entrance?.direction === "entrance_only" || entrance?.direction === "exit_only" || entrance?.direction === "both") return entrance.direction;
-  return "both";
-}
-
-export const BUILDING_ENTRANCE_DIRECTION_LABELS: Record<BuildingEntranceDirection, string> = {
-  both: "Entrance & Exit",
-  entrance_only: "Entrance Only",
-  exit_only: "Exit Only",
-};
-
-export function entranceDirectionLabel(entrance: Pick<CampusEntrance, "direction" | "type"> | undefined): string {
-  return BUILDING_ENTRANCE_DIRECTION_LABELS[normalizeEntranceDirection(entrance)];
 }
 
 export function pointerToEntranceAttachment(
@@ -375,7 +348,6 @@ export function updateBuildingEntrance(
     const requestedType = Object.prototype.hasOwnProperty.call(changes, "type") ? normalizeEntranceType(changes.type) : normalizeEntranceType(entrance.type);
     const requestedPrimary = Object.prototype.hasOwnProperty.call(changes, "isPrimary") ? changes.isPrimary === true : entrance.isPrimary === true;
     const nextPrimary = requestedType === "general" && requestedPrimary;
-    const forceEmergencyDirection = requestedType === "emergency_exit";
     const nextEntrance = isTarget
       ? {
           ...entrance,
@@ -384,7 +356,6 @@ export function updateBuildingEntrance(
           offset: changes.offset !== undefined ? normalizeEntranceOffset(changes.offset) : entrance.offset,
           name: Object.prototype.hasOwnProperty.call(changes, "name") ? (changes.name === "" ? undefined : changes.name) : entrance.name,
           type: requestedType,
-          ...(forceEmergencyDirection ? { direction: "exit_only" as const } : {}),
           isPrimary: nextPrimary,
         }
       : changes.isPrimary === true && nextPrimary && normalizeEntranceType(entrance.type) === "general" && entrance.isPrimary

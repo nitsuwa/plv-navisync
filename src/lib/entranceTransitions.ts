@@ -1,6 +1,6 @@
 import type { Campus, CampusBuilding, CampusEntrance, FloorDoor, FloorPlan, NavigationEdge, NavigationNode } from "../components/map-builder/types";
 import { genId as defaultGenId } from "../components/map-builder/constants";
-import { entranceDisplayName, entranceWorldPosition, normalizeEntranceDirection } from "./buildingEntrances";
+import { entranceDisplayName, entranceWorldPosition } from "./buildingEntrances";
 import { createNavNode, navEdgeDistance, findEntranceNavNode, syncEntranceNodePositions, pruneOrphanedEntranceNodes, DEFAULT_NAV_NODE_COLOR } from "./navigationGraph";
 import { entranceConnectorDistance, entranceConnectorGeometry } from "./entranceConnector";
 import { createIndoorNavNode, isRoomNavigationNode, ROOM_DOOR_EDGE_TYPE } from "./indoorNavigationGraph";
@@ -570,13 +570,7 @@ export function reconcileEntranceDoors(
   );
   for (let index = nextNodes.length - 1; index >= 0; index -= 1) {
     const node = nextNodes[index];
-    // Exterior approach thresholds also carry buildingEntranceId so they can
-    // remain semantically tied to the Entrance, but they are not generated
-    // Door nodes and intentionally have no doorId.  Only a node that carries
-    // the complete generated-Door identity may be removed by this cleanup;
-    // otherwise an Entrance edit would delete the threshold and every
-    // authored Veranda edge incident to it as a dangling edge.
-    if (node.buildingEntranceId && node.doorId && !liveGeneratedDoorKeys.has(`${node.buildingId}:${node.floorId}:${node.doorId}`)) {
+    if (node.buildingEntranceId && !liveGeneratedDoorKeys.has(`${node.buildingId}:${node.floorId}:${node.doorId}`)) {
       nextNodes.splice(index, 1);
       nodesChanged = true;
     }
@@ -820,14 +814,12 @@ export function linkEntranceToIndoorDoor(
     if (entranceEndpoint?.buildingId === buildingId && entranceEndpoint.entranceId === entranceId) return false;
     return !(nodeIds.has(edge.startNodeId) && nodeIds.has(edge.endNodeId));
   });
-  const direction = normalizeEntranceDirection(entrance);
-  const exitOnly = direction === "exit_only";
   const edge: NavigationEdge = {
     id: existingTransition?.id ?? genId("ne"),
-    startNodeId: exitOnly ? doorNode.id : entranceNode.id,
-    endNodeId: exitOnly ? entranceNode.id : doorNode.id,
+    startNodeId: entranceNode.id,
+    endNodeId: doorNode.id,
     distance: 1,
-    bidirectional: direction === "both",
+    bidirectional: true,
     accessible: entrance.accessible !== false,
     emergencySafe: true,
     type: ENTRANCE_TRANSITION_EDGE_TYPE,
@@ -877,19 +869,7 @@ export function reconcileEntranceTransitions(campus: Campus): Campus {
     const building = campus.buildings.find((b) => b.id === entranceNode?.buildingId);
     const entrance = building?.entrances?.find((en) => en.id === entranceNode?.entranceId);
     const accessible = entrance?.accessible !== false;
-    if (!entrance) return edge;
-    const direction = normalizeEntranceDirection(entrance);
-    const doorNode = doorNodeForEdge(edge, nodes);
-    if (!entranceNode || !doorNode) return edge;
-    const exitOnly = direction === "exit_only";
-    const next = {
-      ...edge,
-      startNodeId: exitOnly ? doorNode.id : entranceNode.id,
-      endNodeId: exitOnly ? entranceNode.id : doorNode.id,
-      bidirectional: direction === "both",
-      accessible,
-    };
-    return JSON.stringify(next) === JSON.stringify(edge) ? edge : next;
+    return edge.accessible === accessible ? edge : { ...edge, accessible };
   });
   const unchanged = nextEdges.length === (campus.navEdges ?? []).length
     && nextEdges.every((edge, index) => edge === (campus.navEdges ?? [])[index]);

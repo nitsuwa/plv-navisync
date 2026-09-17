@@ -82,35 +82,20 @@ function makeCampus(initialWall = false): Campus {
 
 function Harness({
   initialCampus,
-  savedSnapshot,
   onCampusChange,
   onFloorChange,
   onSave,
 }: {
   initialCampus?: Campus;
-  savedSnapshot?: string;
   onCampusChange?: (c: Campus) => void;
   onFloorChange?: (id: string) => void;
   onSave?: (c: Campus) => Promise<Campus>;
 }) {
   const [campus, setCampus] = useState<Campus>(initialCampus ?? makeCampus());
   const [floorId, setFloorId] = useState("f1");
-  const [savedBaseline, setSavedBaseline] = useState(savedSnapshot);
-  const [mountKey, setMountKey] = useState(0);
-
-  const save = onSave
-    ? async (candidate: Campus) => {
-      const persisted = await onSave(candidate);
-      setSavedBaseline(JSON.stringify(persisted));
-      return persisted;
-    }
-    : undefined;
 
   return (
-    <>
-      <button type="button" data-testid="remount-floor" onClick={() => setMountKey((key) => key + 1)}>Re-enter Floor</button>
-      <FloorEditor
-      key={mountKey}
+    <FloorEditor
       campus={campus}
       buildingId="b1"
       floorId={floorId}
@@ -123,10 +108,8 @@ function Harness({
         onCampusChange?.(c);
         setCampus(c);
       }}
-      onSave={save}
-      savedSnapshot={savedBaseline}
-      />
-    </>
+      onSave={onSave}
+    />
   );
 }
 
@@ -260,81 +243,6 @@ describe("FloorEditor floor switching", () => {
 
     expect(activeFloorId).toBe("f2");
     expect(screen.queryByText("Unsaved Floor Changes")).toBeNull();
-  });
-
-  it("hydrates a remounted Floor from the newly saved Campus baseline", async () => {
-    const initial = makeCampus();
-    const onSave = vi.fn(async (campus: Campus) => structuredClone(campus));
-    const { container } = render(
-      <Harness
-        initialCampus={initial}
-        savedSnapshot={JSON.stringify(initial)}
-        onCampusChange={(c) => { latestCampus = c; }}
-        onSave={onSave}
-      />
-    );
-
-    drawWall(container);
-    fireEvent.click(screen.getByRole("button", { name: /^Save$/i }));
-    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
-    expect((screen.getByRole("button", { name: /^(Save|Saved)$/i }) as HTMLButtonElement).disabled).toBe(true);
-
-    fireEvent.click(screen.getByTestId("remount-floor"));
-
-    await waitFor(() => {
-      expect((screen.getByRole("button", { name: /^(Save|Saved)$/i }) as HTMLButtonElement).disabled).toBe(true);
-      expect(screen.queryByText("Unsaved Floor Changes")).toBeNull();
-    });
-
-    drawWall(container, 220, 80, 300, 80);
-    await waitFor(() => {
-      expect((screen.getByRole("button", { name: /^Save$/i }) as HTMLButtonElement).disabled).toBe(false);
-    });
-    fireEvent.click(screen.getByRole("button", { name: /^Save$/i }));
-    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(2));
-    expect((screen.getByRole("button", { name: /^(Save|Saved)$/i }) as HTMLButtonElement).disabled).toBe(true);
-
-    fireEvent.click(screen.getByTestId("remount-floor"));
-    await waitFor(() => {
-      expect((screen.getByRole("button", { name: /^(Save|Saved)$/i }) as HTMLButtonElement).disabled).toBe(true);
-    });
-  });
-
-  it("does not dirty a Floor when mount-time generated stair records are rebuilt", async () => {
-    const initial = makeCampus();
-    initial.buildings[0] = {
-      ...initial.buildings[0],
-      exteriorEmergencyStairs: [{
-        id: "stair-1",
-        buildingId: "b1",
-        label: "Fire Stair",
-        state: "open",
-        width: 24,
-        height: 40,
-        attachment: { edge: "right", offset: 0.5 },
-        servedFloorIds: ["f1"],
-        sharedId: "stair-1",
-      }],
-    };
-    render(
-      <Harness
-        initialCampus={initial}
-        savedSnapshot={JSON.stringify(initial)}
-        onCampusChange={(campus) => { latestCampus = campus; }}
-      />
-    );
-
-    await waitFor(() => {
-      expect((screen.getByRole("button", { name: /^(Save|Saved)$/i }) as HTMLButtonElement).disabled).toBe(true);
-    });
-    expect(floorOne(latestCampus!).stairs).toHaveLength(1);
-    expect(floorOne(latestCampus!).stairs[0].exteriorEmergencyStairId).toBe("stair-1");
-
-    fireEvent.click(screen.getByTestId("remount-floor"));
-    await waitFor(() => {
-      expect((screen.getByRole("button", { name: /^(Save|Saved)$/i }) as HTMLButtonElement).disabled).toBe(true);
-      expect(screen.queryByText("Unsaved Floor Changes")).toBeNull();
-    });
   });
 
   it("does not treat selection-only changes or clean panning as unsaved floor edits", () => {

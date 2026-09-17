@@ -108,14 +108,6 @@ describe("edgeCrossesBlockingFurniture", () => {
     expect(edgeCrossesBlockingFurniture(pts, furniture)).toBe(false);
   });
 
-  it("catches a narrow rotated footprint even when no sampled point lands inside", () => {
-    const narrowRotated = [
-      { x: 147, y: 197, width: 4, height: 30, rotation: 45, type: "shelf" },
-    ];
-    const pts = [{ x: 100, y: 212 }, { x: 200, y: 212 }];
-    expect(edgeCrossesBlockingFurniture(pts, narrowRotated)).toBe(true);
-  });
-
   it("returns true for ANY placed furniture — plant now blocks too (placement-reality fix)", () => {
     const plant = [
       { x: 145, y: 195, width: 20, height: 20, type: "plant" },

@@ -340,18 +340,26 @@ export function computeGroupTranslation(p: ComputeGroupTranslationParams): Group
   const bboxW = maxX - minX;
   const bboxH = maxY - minY;
 
-  // 2. Rigid edge-snap of the group bounding box against non-group physical
-  // references. Use the same all-edge/all-centre resolver as single-object
-  // drags so bottom and centre matches are neither missed nor committed to a
-  // different coordinate than their visible guide.
+  // 2. Rigid edge-snap of the group bounding box against non-group buildings.
+  // References are also compared by their visible AABB (rotation-aware).
   if (p.edgeSnap !== false && p.otherBuildings && p.otherBuildings.length > 0) {
-    const aligned = snapRectToVisibleBounds(
-      { x: minX + dx, y: minY + dy, width: bboxW, height: bboxH },
-      p.otherBuildings,
-      p.edgeThreshold ?? 12,
-    );
-    dx += aligned.x - (minX + dx);
-    dy += aligned.y - (minY + dy);
+    const threshold = p.edgeThreshold ?? 12;
+    const snapVal = (val: number, target: number) => (Math.abs(val - target) <= threshold ? target : val);
+    let bx = minX + dx;
+    let by = minY + dy;
+    for (const o of p.otherBuildings) {
+      const ob = rectVisibleBounds(o);
+      bx = snapVal(bx, ob.x);
+      bx = snapVal(bx, ob.x + ob.width);
+      bx = snapVal(bx + bboxW, ob.x) - bboxW;
+      bx = snapVal(bx + bboxW, ob.x + ob.width) - bboxW;
+      by = snapVal(by, ob.y);
+      by = snapVal(by, ob.y + ob.height);
+      by = snapVal(by + bboxH, ob.y) - bboxH;
+      by = snapVal(by + bboxH, ob.y + ob.height) - bboxH;
+    }
+    dx += bx - (minX + dx);
+    dy += by - (minY + dy);
   }
 
   // 3. Canvas-boundary clamp (rigid — shifts the entire group).

@@ -547,31 +547,6 @@ describe("FloorEditor render (regression: LandPlot runtime crash)", () => {
     expect(screen.getByTestId("exterior-zone-resize-handle-depth")).toBeInTheDocument();
   });
 
-  it("selects a walkable Veranda on a Navigation click while preserving drag marquee ownership", () => {
-    const campus = makeCampus();
-    const floor = campus.buildings[0].floors[0];
-    floor.exteriorZones = [{ id: "zone-1", type: "veranda", side: "bottom", offset: 0.5, width: 180, depth: 72, label: "Veranda 1", walkable: true }];
-    render(<FloorEditor campus={campus} buildingId="b1" floorId="f1" onBack={() => {}} onSwitchFloor={() => {}} onUpdate={() => {}} />);
-
-    const svg = Array.from(document.querySelectorAll("svg")).find((candidate) => candidate.getAttribute("viewBox") === "0 0 600 450");
-    expect(svg).toBeTruthy();
-    mockFloorSvgViewport(svg!);
-    fireEvent.click(screen.getByRole("button", { name: "Show Navigation" }));
-
-    const zone = screen.getByTestId("exterior-zone");
-    fireEvent.mouseDown(zone, { clientX: 300, clientY: 480, bubbles: true });
-    fireEvent.mouseUp(svg!, { clientX: 300, clientY: 480, bubbles: true });
-
-    expect(screen.getByTestId("exterior-zone-inspector")).toBeInTheDocument();
-    expect(screen.getByTestId("exterior-zone-inspector").textContent).toContain("Veranda 1");
-
-    fireEvent.mouseDown(zone, { clientX: 300, clientY: 480, bubbles: true });
-    fireEvent.mouseMove(svg!, { clientX: 360, clientY: 510, bubbles: true });
-    expect(screen.getByTestId("floor-marquee-selection")).toBeInTheDocument();
-    fireEvent.mouseUp(svg!, { clientX: 360, clientY: 510, bubbles: true });
-    expect(screen.queryByTestId("exterior-zone-inspector")).toBeNull();
-  });
-
   it("renders parent-attached access features on their selected exposed edges", () => {
     const campus = makeCampus();
     const floor = campus.buildings[0].floors[0];

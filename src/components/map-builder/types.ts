@@ -237,12 +237,6 @@ export interface FloorExteriorZone {
   labelOffsetY?: number;
   /** Presentation-only visibility toggle. */
   labelVisible?: boolean;
-  /** Whether this exterior zone can participate in the walking network. */
-  walkable?: boolean;
-  /** Explicit Building Entrance served by this zone (never inferred by proximity). */
-  linkedEntranceId?: string;
-  /** Optional multi-entrance relationship; the singular field remains the legacy primary link. */
-  linkedEntranceIds?: string[];
   zOrder?: number;
   visible?: boolean;
   locked?: boolean;
@@ -264,8 +258,6 @@ export interface FloorEntranceSteps {
   locked?: boolean;
   /** Optional authored parent exterior zone. Legacy records may omit this. */
   parentZoneId?: string;
-  /** Explicit Building Entrance served by these steps. */
-  linkedEntranceId?: string;
   /** Local attachment on the parent's outside edge. */
   /** Outer or side edge of the parent zone. Legacy records default to outer. */
   attachmentEdge?: "outer" | "start" | "end";
@@ -295,8 +287,6 @@ export interface FloorEntranceRamp {
   locked?: boolean;
   /** Optional authored parent exterior zone. Legacy records may omit this. */
   parentZoneId?: string;
-  /** Explicit Building Entrance served by this ramp. */
-  linkedEntranceId?: string;
   /** Local attachment on the parent's outside edge. */
   /** Outer or side edge of the parent zone. Legacy records default to outer. */
   attachmentEdge?: "outer" | "start" | "end";
@@ -523,7 +513,6 @@ export interface CirculationGroup {
 export type BuildingEntranceEdge = "top" | "right" | "bottom" | "left";
 export type BuildingEntranceType = "general" | "service" | "emergency_exit";
 export type LegacyBuildingEntranceType = "main" | "secondary" | "emergency";
-export type BuildingEntranceDirection = "both" | "entrance_only" | "exit_only";
 /** Presentation scale for a generated Exterior Emergency Stair module. */
 export type ExteriorEmergencyStairVisualSize = "small" | "medium" | "large";
 
@@ -533,9 +522,6 @@ export interface CampusEntrance {
   edge: BuildingEntranceEdge;
   offset: number;
   type?: BuildingEntranceType | LegacyBuildingEntranceType;
-  /** Direction of the canonical Entrance↔Door transition. Legacy records omit
-   * this and are interpreted as bidirectional (Emergency Exit as exit-only). */
-  direction?: BuildingEntranceDirection;
   name?: string;
   isPrimary?: boolean;
   accessible?: boolean;
@@ -619,17 +605,6 @@ export interface FloorUndoEntry {
    * canonical stair and every served-floor occurrence together.
    */
   exteriorEmergencyStairs?: ExteriorEmergencyStair[];
-  /** Building-owned entrance snapshot for synchronized Door↔Entrance edits. */
-  buildingEntrances?: CampusEntrance[];
-  /**
-   * Campus-level graph snapshot used by synchronized Floor/Entrance history.
-   * Most Floor history remains floor-scoped, but an Entrance-linked Door can
-   * remove an outdoor Entrance node and its authored connections. Keeping the
-   * complete graph here lets one undo restore that relationship byte-for-byte
-   * instead of recreating only the mounted Floor projection.
-   */
-  campusNavNodes?: NavigationNode[];
-  campusNavEdges?: NavigationEdge[];
 }
 
 /** B5 Phase 2: floor-scoped indoor nav graph state (reused by undo entries). */
@@ -704,18 +679,10 @@ export interface NavigationNode {
   exteriorEmergencyStairId?: string;
   /** Canonical Campus Gate owner, when this node is a generated gate anchor. */
   gateId?: string;
-  /** Explicit provenance for navigation derived from physical exterior approach objects. */
-  derivedOwnerType?: "exterior_zone" | "entrance_steps" | "entrance_ramp" | "entrance_threshold";
-  derivedOwnerId?: string;
-  derivedRole?: "outer" | "inner" | "zone" | "threshold" | "handoff";
   elevatorId?: string;
   rampId?: string;
   /** Explicit provenance for pathway-generated vertices. Manual/linked nodes omit this. */
   generatedFromPathVertices?: { pathId: string; vertexId: string }[];
-  /** Optional physical host for an authored Walking Point placed on an
-   * Exterior Zone. This is ordinary node metadata (not a derived node) and
-   * lets the zone lifecycle suspend/clean only its own points explicitly. */
-  exteriorZoneId?: string;
   /** A manually inserted point that split an authored indoor path.  This is
    * persisted as ordinary navigation metadata (no schema change) so the
    * editor can keep the junction constrained to its parent corridor. */
@@ -759,19 +726,6 @@ export interface NavigationEdge {
   width: number;
   /** Pathway IDs that explicitly generated this edge. Manual edges omit this. */
   generatedFromPathIds?: string[];
-  /** Explicit provenance for navigation derived from physical exterior approach objects. */
-  derivedOwnerType?: "exterior_zone" | "entrance_steps" | "entrance_ramp" | "entrance_threshold";
-  derivedOwnerId?: string;
-  derivedRole?: "outer" | "inner" | "zone" | "threshold" | "fallback";
-  /** Original authored values retained while the direct Entrance fallback is deprioritized. */
-  exteriorApproachFallbackEntranceId?: string;
-  exteriorApproachFallbackOriginalClosed?: boolean;
-  exteriorApproachFallbackOriginalDistance?: number;
-  /** Explicit authored connection temporarily suspended with a non-walkable Exterior Zone. */
-  exteriorApproachSuspendedZoneId?: string;
-  exteriorApproachSuspendedOriginalClosed?: boolean;
-  /** Derived projection of the Building Entrance's existing Outdoor handoff. */
-  exteriorApproachAutoHandoffTargetId?: string;
   /** Provenance for the two corridor segments created by an explicit path
    * junction split.  These flags are editor metadata, not a new edge type. */
   pathJunctionId?: string;

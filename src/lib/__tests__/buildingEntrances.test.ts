@@ -8,8 +8,6 @@ import {
   entranceWorldPosition,
   normalizeBuildingEntrances,
   normalizeEntranceOffset,
-  normalizeEntranceDirection,
-  entranceDirectionLabel,
   normalizeEntranceType,
   pointerToEntranceAttachment,
   promotePrimaryEntrance,
@@ -122,31 +120,6 @@ describe("building entrance geometry", () => {
     }));
     expect(normalized.map((e) => e.type)).toEqual(["general", "general", "emergency_exit"]);
     expect(normalized.map((e) => e.isPrimary)).toEqual([true, true, false]);
-  });
-
-  it("keeps Entrance purpose separate from direction with safe legacy defaults", () => {
-    expect(normalizeEntranceDirection({ type: "general" })).toBe("both");
-    expect(normalizeEntranceDirection({ type: "service" })).toBe("both");
-    expect(normalizeEntranceDirection({ type: "emergency_exit" })).toBe("exit_only");
-    expect(normalizeEntranceDirection({ type: "general", direction: "entrance_only" })).toBe("entrance_only");
-    expect(entranceDirectionLabel({ type: "general", direction: "exit_only" })).toBe("Exit Only");
-    expect(normalizeEntranceDirection({ type: "emergency_exit", direction: "both" })).toBe("exit_only");
-  });
-
-  it("forces Emergency Exit updates to outbound-only and never primary", () => {
-    const b = building({
-      entrances: [{ id: "ent1", buildingId: "b1", edge: "bottom", offset: 0.5, type: "general", isPrimary: true, direction: "both" }],
-    });
-    const result = updateBuildingEntrance(b, "ent1", {
-      type: "emergency_exit",
-      direction: "both",
-      isPrimary: true,
-    });
-    expect(result.building.entrances![0]).toMatchObject({
-      type: "emergency_exit",
-      direction: "exit_only",
-      isPrimary: false,
-    });
   });
 
   it("updates entrance configuration and reports no-op changes", () => {
