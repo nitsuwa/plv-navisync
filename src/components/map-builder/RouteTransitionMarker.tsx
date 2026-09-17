@@ -1,5 +1,5 @@
-import type { TestRouteContinuationMarker, TestRouteTransitionMarker } from "./TestNavigationPanel";
-import { Accessibility, ArrowUpDown, Building2, Footprints, MapPin, PersonStanding } from "lucide-react";
+import type { TestRouteTransitionMarker } from "./TestNavigationPanel";
+import { ArrowDown, ArrowUp, ArrowUpDown, MapPin, PersonStanding } from "lucide-react";
 
 export type RouteMarkerKind = "start" | "destination" | TestRouteTransitionMarker["kind"];
 
@@ -28,24 +28,6 @@ function MarkerGlyph({ kind, color = "white" }: MarkerGlyphProps) {
   return <g {...common}><path d="M-4 4L3-3" /><path d="M0-3h3v3" /><path d="M-4 4h3" /></g>;
 }
 
-/** Shared contextual icon used inside all transition instruction pills. */
-function TransitionTooltipIcon({ kind, x, y, size = 12, color = "#c4b5fd" }: {
-  kind: "ramp" | "stair" | "entrance" | "elevator";
-  x: number;
-  y: number;
-  size?: number;
-  color?: string;
-}) {
-  const Icon = kind === "ramp"
-    ? Accessibility
-    : kind === "stair"
-      ? Footprints
-      : kind === "entrance"
-        ? Building2
-        : ArrowUpDown;
-  return <Icon data-testid={`transition-tooltip-icon-${kind}`} x={x} y={y} width={size} height={size} color={color} strokeWidth={2} aria-hidden="true" />;
-}
-
 export interface TransitionLabelLayout {
   /** Wrapped lines preserve the complete instruction without SVG text clipping. */
   lines: string[];
@@ -55,8 +37,6 @@ export interface TransitionLabelLayout {
   iconX: number;
   textX: number;
   textY: number;
-  fontSize: number;
-  lineHeight: number;
 }
 
 export interface TransitionLabelOptions {
@@ -66,8 +46,6 @@ export interface TransitionLabelOptions {
   anchor?: "center";
   /** Slightly tighter vertical treatment for a cue beside a Start marker. */
   compact?: boolean;
-  /** Keep shared tooltip styling while allowing each editor context its own density. */
-  context?: "floor" | "outdoor";
 }
 
 export interface TransitionMarkerViewport {
@@ -114,14 +92,17 @@ export function transitionLabelLayout(instruction: string, options: TransitionLa
   if (lines.length === 0) lines.push(normalized);
 
   const longestLine = Math.max(...lines.map((value) => value.length));
-  // SVG has no intrinsic text measurement. Keep Floor labels compact while
-  // giving Outdoor handoff labels a larger readable minimum. Both contexts
-  // still use this same renderer, icon, padding, and dark-pill treatment.
-  const compact = Boolean(options.compact || options.context === "floor");
-  const fontSize = compact ? 9.5 : 10.5;
-  const lineHeight = compact ? 11.5 : 12.5;
-  const width = Math.max(compact ? 90 : 140, Math.min(compact ? 220 : 240, longestLine * (fontSize * 0.53) + (compact ? 34 : 36)));
-  const height = Math.max(compact ? 20 : 22, lines.length * lineHeight + (compact ? 8 : 9));
+  // SVG has no intrinsic text measurement.  Use a font-size-matched estimate
+  // with a modest minimum instead of the old 112px floor, which made short
+  // Outdoor instructions look tiny inside a disproportionately wide pill.
+  // The same compact metrics are used by Canvas and FloorEditor.
+  const fontSize = options.compact ? 9 : 9.5;
+  const lineHeight = options.compact ? 11 : 11.5;
+  // Keep the pill content-sized.  The previous 96px floor left short Outdoor
+  // instructions with a visibly empty right side, while the smaller text made
+  // the same pill harder to read than its Floor Editor counterpart.
+  const width = Math.max(90, Math.min(220, longestLine * (fontSize * 0.53) + 34));
+  const height = Math.max(options.compact ? 19 : 20, lines.length * lineHeight + (options.compact ? 7 : 8));
   // Normal transition labels sit centered over the cue.  The previous
   // left-growing placement could overlap the marker/route line and made the
   // entrance label appear to drift to one side.  Keep the special start-Stair
@@ -134,9 +115,7 @@ export function transitionLabelLayout(instruction: string, options: TransitionLa
     x,
     iconX: x + 8,
     textX: x + 25,
-    textY: lines.length === 1 ? (compact ? 13.5 : 14.5) : (compact ? 11.5 : 12.5),
-    fontSize,
-    lineHeight,
+    textY: lines.length === 1 ? (options.compact ? 13 : 13.5) : (options.compact ? 11 : 11.5),
   };
 }
 
@@ -161,78 +140,13 @@ export function RouteEndpointMarker({ x, y, kind, color }: { x: number; y: numbe
   );
 }
 
-export function RouteContinuationMarker({ marker, x, y, entranceRotation = 0, onClick, context = "floor" }: { marker: TestRouteContinuationMarker; x: number; y: number; entranceRotation?: number; onClick?: (marker: TestRouteContinuationMarker) => void; context?: "floor" | "outdoor" }) {
-  const accent = marker.kind === "ramp" ? "#0f766e" : marker.kind === "steps" ? "#7c3aed" : "#2563eb";
-  const instruction = marker.instruction ?? (marker.kind === "ramp"
-    ? "Continue outside via ramp"
-    : marker.kind === "steps"
-      ? "Continue outside via stairs"
-       : marker.kind === "waypoint" ? "Continue outside" : context === "floor" ? "Continue outside" : "Continue inside via entrance");
-  // Use the same measured pill layout as Floor/Outdoor transition markers so
-  // the short Entrance label and longer Ramp/Steps instructions share one
-  // readable visual system.
-  const labelLayout = transitionLabelLayout(instruction, { anchor: "center", context });
-  const glyphKind: RouteMarkerKind = marker.kind === "steps" || marker.kind === "waypoint" ? (marker.kind === "steps" ? "stair" : "entrance") : marker.kind;
-  const cueX = marker.kind === "entrance" ? 12 : 12;
-  const cueY = marker.kind === "entrance" ? -14 : -14;
-  const glyphRotation = marker.kind === "entrance" ? entranceRotation : 0;
-  const handleKeyDown = (event: React.KeyboardEvent<SVGGElement>) => {
-    if (event.key !== "Enter" && event.key !== " ") return;
-    event.preventDefault();
-    event.stopPropagation();
-    onClick?.(marker);
-  };
-  return (
-    <g
-      data-testid="test-route-continuation-indicator"
-      data-continuation-kind={marker.kind}
-      aria-label={instruction}
-      role={onClick ? "button" : "img"}
-      tabIndex={0}
-      className="group"
-      transform={`translate(${x} ${y})`}
-      pointerEvents="auto"
-      style={{ cursor: onClick ? "pointer" : "default" }}
-      onMouseDown={(event) => { event.preventDefault(); event.stopPropagation(); }}
-      onClick={(event) => { event.preventDefault(); event.stopPropagation(); onClick?.(marker); }}
-      onKeyDown={handleKeyDown}
-    >
-      {/* Use the same connector, pulse, glyph, and dashed-ring treatment as
-          RouteTransitionMarker. This replaces the old tiny green arrow while
-          keeping the cue compact and independently keyboard/click accessible. */}
-      <circle r={20} fill="transparent" />
-      <circle r={15} fill="none" stroke={accent} strokeWidth={1.5} opacity={0.45} className="animate-pulse motion-reduce:animate-none" pointerEvents="none" />
-      <line x1={0} y1={0} x2={cueX} y2={cueY} stroke="white" strokeWidth={2.5} opacity={0.9} pointerEvents="none" />
-      <line x1={0} y1={0} x2={cueX} y2={cueY} stroke={accent} strokeWidth={1} opacity={0.8} pointerEvents="none" />
-      <g transform={`translate(${cueX} ${cueY})`} pointerEvents="none">
-        <circle r={9} fill="#111827" fillOpacity={0.9} stroke="white" strokeWidth={2} />
-        <circle r={12} fill="none" stroke={accent} strokeWidth={1.3} strokeDasharray="3 2" opacity={0.9} />
-        <g transform={`rotate(${glyphRotation})`}>
-          <MarkerGlyph kind={glyphKind} />
-        </g>
-      </g>
-      <g
-        data-testid="test-route-continuation-tooltip"
-        className="pointer-events-none opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus:opacity-100 motion-reduce:transition-none"
-        transform={`translate(${cueX} -${labelLayout.height + 12})`}
-      >
-        <rect x={labelLayout.x} y={0} width={labelLayout.width} height={labelLayout.height} rx={Math.min(8, labelLayout.height / 2)} fill="#111827" fillOpacity={0.94} stroke={accent} strokeWidth={0.7} />
-        <TransitionTooltipIcon kind={glyphKind} x={labelLayout.iconX} y={labelLayout.height / 2 - 5} size={10} color="#c4b5fd" />
-        <text x={labelLayout.textX} y={labelLayout.textY} fill="white" fontSize={labelLayout.fontSize} fontWeight={600}>{labelLayout.lines.map((line, index) => <tspan key={`${line}-${index}`} x={labelLayout.textX} dy={index === 0 ? 0 : labelLayout.lineHeight}>{line}</tspan>)}</text>
-      </g>
-    </g>
-  );
-}
-
 export function RouteTransitionMarker({ marker, onClick, zoom = 1, viewport }: { marker: TestRouteTransitionMarker; onClick?: (marker: TestRouteTransitionMarker) => void; zoom?: number; viewport?: TransitionMarkerViewport }) {
   const destination = marker.targetLabel ?? "the next map context";
   const directionLabel = marker.direction === "up" ? "Going up to" : marker.direction === "down" ? "Going down to" : "Continue to";
   const instruction = marker.instruction ?? `${directionLabel} ${destination}`;
   const startStairTransition = marker.kind === "stair" && marker.endpointRole === "start";
-  const labelLayout = marker.kind === "ramp" || marker.kind === "stair" || marker.kind === "elevator" || marker.kind === "entrance"
-    ? transitionLabelLayout(instruction, startStairTransition
-      ? { align: "right", compact: true, context: marker.context.kind }
-      : { anchor: "center", context: marker.context.kind })
+  const labelLayout = marker.kind === "stair" || marker.kind === "elevator" || marker.kind === "entrance"
+    ? transitionLabelLayout(instruction, startStairTransition ? { align: "right", compact: true } : { anchor: "center", compact: true })
     : null;
   const cueX = startStairTransition ? 16 : 12;
   const cueY = startStairTransition ? -17 : -14;
@@ -242,7 +156,7 @@ export function RouteTransitionMarker({ marker, onClick, zoom = 1, viewport }: {
   // Both circulation cues stay compact at rest and reveal their instruction
   // beside the marker on hover/focus. This keeps Elevator transitions aligned
   // with the polished Stair presentation without a blocking overlay card.
-  const onDemandLabel = marker.kind === "ramp" || marker.kind === "stair" || marker.kind === "elevator" || marker.kind === "entrance";
+  const onDemandLabel = marker.kind === "stair" || marker.kind === "elevator" || marker.kind === "entrance";
   // The label is positioned from the rendered cue glyph (the actual
   // transition marker), not the Building/Entrance bounds.  Keep a small,
   // stable screen-space gap so Outdoor labels do not float far above the cue.
@@ -266,6 +180,7 @@ export function RouteTransitionMarker({ marker, onClick, zoom = 1, viewport }: {
     const bottom = markerScreenY + resolvedLabelOffsetY + 1 + labelLayout.height;
     if (bottom > viewport.height - margin) resolvedLabelOffsetY = -(labelLayout.height + glyphRadius + 5);
   }
+  const DirectionIcon = marker.direction === "up" ? ArrowUp : marker.direction === "down" ? ArrowDown : ArrowUpDown;
   const labelShiftX = labelLayout ? labelX - labelLayout.x : 0;
   const handleKeyDown = (event: React.KeyboardEvent<SVGGElement>) => {
     if (event.key !== "Enter" && event.key !== " ") return;
@@ -285,6 +200,7 @@ export function RouteTransitionMarker({ marker, onClick, zoom = 1, viewport }: {
       role="button"
       tabIndex={0}
       aria-label={marker.kind === "elevator" ? `Elevator ${instruction}` : marker.kind === "stair" ? `Stair ${instruction}` : instruction}
+      title={instruction}
       style={{ cursor: onClick ? "pointer" : "default" }}
       onMouseDown={(event) => { event.preventDefault(); event.stopPropagation(); }}
       onClick={(event) => { event.preventDefault(); event.stopPropagation(); onClick?.(marker); }}
@@ -312,10 +228,10 @@ export function RouteTransitionMarker({ marker, onClick, zoom = 1, viewport }: {
             data-testid="transition-label-pill"
           >
             <rect x={labelLayout.x} y={1} width={labelLayout.width} height={labelLayout.height} rx={Math.min(8, labelLayout.height / 2)} fill="#111827" fillOpacity={0.9} stroke="#8b5cf6" strokeWidth={0.6} />
-            <TransitionTooltipIcon kind={marker.kind} x={labelLayout.iconX} y={labelLayout.height / 2 - 5} size={10} />
-            <text x={labelLayout.textX} y={labelLayout.textY} fill="white" fontSize={labelLayout.fontSize} fontWeight={600}>
+            <DirectionIcon x={labelLayout.iconX} y={labelLayout.height / 2 - 5} width={10} height={10} color="#c4b5fd" strokeWidth={2.1} />
+            <text x={labelLayout.textX} y={labelLayout.textY} fill="white" fontSize={9} fontWeight={600}>
               {labelLayout.lines.map((line, index) => (
-                <tspan key={`${line}-${index}`} x={labelLayout.textX} dy={index === 0 ? 0 : labelLayout.lineHeight}>{line}</tspan>
+                <tspan key={`${line}-${index}`} x={labelLayout.textX} dy={index === 0 ? 0 : 11}>{line}</tspan>
               ))}
             </text>
           </g>

@@ -3,8 +3,6 @@ import type { Campus } from "../../components/map-builder/types";
 import {
   campusDraftStorageKey,
   canPersistCampusStructure,
-  campusHasUnpublishedChanges,
-  campusHasUnsavedChanges,
   clearCampusDraft,
   readCampusDraft,
   restoreCampusDraft,
@@ -67,90 +65,6 @@ describe("campus draft recovery", () => {
     writeCampusDraft(campus({ name: "Draft" }), campus());
     clearCampusDraft("campus-1");
     expect(readCampusDraft("campus-1")).toBeNull();
-  });
-
-  it("models unsaved, saved-unpublished, and live as separate states", () => {
-    const published = campus({
-      publishStatus: "published",
-      lifecycleStatus: "published",
-      publishedAt: "2026-01-01T00:00:00.000Z",
-      updatedAt: "2026-01-01T00:00:00.000Z",
-    });
-    const savedDraft = campus({ ...published, buildings: [{ id: "b1" } as Campus["buildings"][number]], updatedAt: "2026-02-01T00:00:00.000Z" });
-    const current = campus({ ...savedDraft, buildings: [{ id: "b2" } as Campus["buildings"][number]] });
-
-    expect(campusHasUnsavedChanges(current, JSON.stringify(savedDraft))).toBe(true);
-    expect(campusHasUnsavedChanges(savedDraft, JSON.stringify(savedDraft))).toBe(false);
-    expect(campusHasUnpublishedChanges(savedDraft, published)).toBe(true);
-    expect(campusHasUnpublishedChanges(published, published)).toBe(false);
-  });
-
-  it("ignores lifecycle, preview, and hierarchy presentation fields in dirty comparisons", () => {
-    const saved = campus({
-      buildings: [{ id: "b1", expanded: false } as Campus["buildings"][number]],
-      previewBuildingCount: 1,
-      previewBuildingsLoaded: true,
-    });
-    const rehydrated = campus({
-      ...saved,
-      buildings: [{ id: "b1", expanded: true } as Campus["buildings"][number]],
-      previewBuildingCount: 99,
-      updatedAt: "2026-02-01",
-      databaseUpdatedAt: "2026-02-01T00:00:00.000Z",
-    });
-
-    expect(campusHasUnsavedChanges(rehydrated, JSON.stringify(saved))).toBe(false);
-  });
-
-  it("ignores generated entrance and navigation reconciliation records", () => {
-    const base = campus({
-      buildings: [{ id: "b1", floors: [{ id: "f1", doors: [] }] } as Campus["buildings"][number]],
-      navNodes: [],
-      navEdges: [],
-    });
-    const generated = structuredClone(base);
-    generated.buildings = [{
-      id: "b1",
-      floors: [{
-        id: "f1",
-        doors: [{
-          id: "generated-door",
-          x: 12,
-          y: 8,
-          width: 32,
-          direction: "double",
-          color: "#b45309",
-          buildingEntranceId: "entrance-1",
-        }],
-      }],
-    } as Campus["buildings"][number]];
-    generated.navNodes = [{
-      id: "generated-node",
-      name: "Main Entrance",
-      type: "hallway",
-      x: 12,
-      y: 8,
-      buildingId: "b1",
-      floorId: "f1",
-      doorId: "generated-door",
-      buildingEntranceId: "entrance-1",
-      accessible: true,
-      color: "#3b82f6",
-    }];
-    generated.navEdges = [{
-      id: "generated-edge",
-      startNodeId: "generated-node",
-      endNodeId: "manual-node",
-      distance: 1,
-      bidirectional: true,
-      accessible: true,
-      type: "walkway",
-      color: "#3b82f6",
-      width: 2,
-    }];
-
-    expect(campusHasUnsavedChanges(generated, JSON.stringify(base))).toBe(false);
-    expect(campusHasUnpublishedChanges(generated, base)).toBe(false);
   });
 
   it("does not treat a pre-hydration empty snapshot as a writable draft", () => {

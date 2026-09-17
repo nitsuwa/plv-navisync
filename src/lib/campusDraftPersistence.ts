@@ -21,139 +21,6 @@ export interface CampusDraftRecord {
   campus: Campus;
 }
 
-/**
- * Fields that describe the editor/session or lifecycle metadata rather than
- * authored campus content. They must not make a saved draft appear dirty when
- * the same structure is hydrated from a different session or server response.
- */
-const NON_AUTHORING_CAMPUS_KEYS = new Set([
-  "thumbnail",
-  "logo",
-  "previewBuildingCount",
-  "previewFloorCount",
-  "previewRoomCount",
-  "previewBuildingsLoaded",
-  "updatedAt",
-  "publishedAt",
-  "databaseUpdatedAt",
-  "publishStatus",
-  "visibleToStudents",
-  "lifecycleStatus",
-  "status",
-]);
-
-/**
- * Return the stable, persisted-authoring representation used by all dirty
- * comparisons. `expanded` is a hierarchy presentation flag that is currently
- * round-tripped in legacy building metadata, but is not an authored map edit.
- */
-export function campusDraftComparable(campus: Campus): Partial<Campus> {
-  const source = campus as unknown as Record<string, unknown>;
-  const comparable = Object.fromEntries(
-    Object.entries(source).filter(([key]) => !NON_AUTHORING_CAMPUS_KEYS.has(key)),
-  ) as Partial<Campus>;
-  const generatedDoorIds = new Set<string>();
-  comparable.buildings = (campus.buildings ?? []).map((building) => {
-    const floors = (building.floors ?? []).map((floor) => ({
-      ...floor,
-      // Exterior Emergency Stair occurrences are projections of the
-      // Building-owned stair and are rebuilt during Floor hydration. The
-      // authored stair definition remains on the Building; the per-Floor
-      // occurrence must not make a saved Floor dirty merely because its
-      // generated projection was remounted.
-      stairs: (floor.stairs ?? []).filter((stair) => !stair.exteriorEmergencyStairId),
-      // Entrance Doors are generated from Building-owned Entrances. Their
-      // presence/position is reconciled during hydration and is not itself an
-      // independent authoring edit.
-      doors: (floor.doors ?? []).filter((door) => {
-        if (!door.buildingEntranceId) return true;
-        generatedDoorIds.add(door.id);
-        return false;
-      }),
-    }));
-    const { expanded: _expanded, ...authoredBuilding } = building;
-    return { ...authoredBuilding, floors };
-  });
-  comparable.navNodes = (campus.navNodes ?? []).filter((node) => (
-    !node.buildingEntranceId
-    && !node.entranceId
-    && !node.exteriorEmergencyStairId
-    && !node.gateId
-    && !node.derivedOwnerType
-    && !(node.generatedFromPathVertices?.length)
-    && !generatedDoorIds.has(node.doorId ?? "")
-  ));
-  const derivedNodeIds = new Set(
-    (campus.navNodes ?? [])
-      .filter((node) => (
-        node.buildingEntranceId
-        || node.entranceId
-        || node.exteriorEmergencyStairId
-        || node.gateId
-        || node.derivedOwnerType
-        || node.generatedFromPathVertices?.length
-        || generatedDoorIds.has(node.doorId ?? "")
-      ))
-      .map((node) => node.id),
-  );
-  comparable.navEdges = (campus.navEdges ?? []).filter((edge) => (
-    edge.type !== "entrance_transition"
-    && !edge.derivedOwnerType
-    && !(edge.generatedFromPathIds?.length)
-    && !derivedNodeIds.has(edge.startNodeId)
-    && !derivedNodeIds.has(edge.endNodeId)
-  ));
-  return comparable;
-}
-
-export function campusDraftSnapshot(campus: Campus): string {
-  return JSON.stringify(campusDraftComparable(campus));
-}
-
-export function campusDraftsEqual(left: Campus, right: Campus): boolean {
-  return campusDraftSnapshot(left) === campusDraftSnapshot(right);
-}
-
-/** Compare current editor content to the last successful persisted draft. */
-export function campusHasUnsavedChanges(current: Campus, savedSnapshot?: string): boolean {
-  if (!savedSnapshot) return false;
-  try {
-    return campusDraftSnapshot(current) !== campusDraftSnapshot(JSON.parse(savedSnapshot) as Campus);
-  } catch {
-    // A malformed baseline must never silently mark arbitrary edits as saved.
-    return true;
-  }
-}
-
-/**
- * Compare the saved draft with the immutable live snapshot. The timestamp and
- * lifecycle fallback keeps old/mock campus records useful when the published
- * snapshot has not been loaded yet; production re-entry supplies the snapshot
- * so same-day saves cannot be mistaken for Live.
- */
-export function campusHasUnpublishedChanges(
-  savedDraft: Campus,
-  publishedSnapshot?: Campus | string,
-): boolean {
-  if (publishedSnapshot) {
-    try {
-      const published = typeof publishedSnapshot === "string"
-        ? JSON.parse(publishedSnapshot) as Campus
-        : publishedSnapshot;
-      return !campusDraftsEqual(savedDraft, published);
-    } catch {
-      // Fall through to the lifecycle metadata fallback.
-    }
-  }
-
-  if (savedDraft.lifecycleStatus === "unpublished") return true;
-  if (savedDraft.publishStatus !== "published") return Boolean(savedDraft.publishedAt);
-  if (!savedDraft.publishedAt || !savedDraft.updatedAt) return false;
-  const savedAt = Date.parse(savedDraft.updatedAt);
-  const publishedAt = Date.parse(savedDraft.publishedAt);
-  return Number.isFinite(savedAt) && Number.isFinite(publishedAt) && savedAt > publishedAt;
-}
-
 function storage(): Storage | null {
   if (typeof window === "undefined") return null;
   try {
@@ -223,7 +90,7 @@ export function clearCampusDraft(campusId: string): void {
  */
 export function shouldPersistCampusDraft(campus: Campus, persistedSnapshot?: string): boolean {
   if (!persistedSnapshot) return false;
-  return campusHasUnsavedChanges(campus, persistedSnapshot);
+  return persistedSnapshot !== JSON.stringify(campus);
 }
 
 /** A structure write is safe only after authoritative hydration for the same campus. */
