@@ -5,8 +5,7 @@
  * engines (pathfinding / indoorPathfinding / combinedPathfinding) behind a
  * single typed API used by the student campus map:
  *
- *   - Real graph-based stats (distance + ETA) for standard/emergency routes
- *   - Explicitly deferred accessibility mode until an accessible graph exists
+ *   - Real graph-based stats (distance + ETA) for standard/accessible/emergency routes
  *   - Structured turn-by-turn steps with icons (not plain strings)
  *   - Floor-transition detection for multi-floor / indoor segments
  *   - Graceful standard-mode fallback when a building is not on the walkway
@@ -30,6 +29,7 @@ import {
   type Destination,
   type RouteSegment,
 } from "./combinedPathfinding";
+import { exteriorFloorPointToCampusWorld } from "./exteriorApproachNavigation";
 
 export type { Destination, RouteSegment };
 
@@ -83,6 +83,10 @@ export interface CampusNavNode {
   accessible?: boolean;
   color?: string;
   width?: number;
+  /** Authored/derived Floor nodes hosted by an exterior Veranda approach. */
+  exteriorZoneId?: string;
+  derivedOwnerType?: string;
+  derivedRole?: string;
 }
 
 export interface CampusNavEdge {
@@ -103,6 +107,17 @@ export interface CampusNavEdge {
 export interface CampusNavGraph {
   navNodes?: CampusNavNode[] | null;
   navEdges?: CampusNavEdge[] | null;
+  /** Minimal physical frame data used only to project Floor-local exterior
+   * nodes into the public campus route overlay. */
+  buildings?: Array<{
+    id: string;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    rotation?: number;
+    floors?: Array<{ id: string; canvasW?: number; canvasH?: number }>;
+  }>;
 }
 
 export type RouteStepIcon =
@@ -315,6 +330,7 @@ function toPlannedRoute(
   fromPt?: Pt,
   graphNodes?: CampusNavNode[],
   graphEdges?: CampusNavEdge[],
+  graph?: CampusNavGraph | null,
 ): PlannedRoute | null {
   if (!path || path.waypoints.length === 0) return null;
   const steps = stepsFromGraphPath(path, fromCode, toCode);
@@ -325,7 +341,8 @@ function toPlannedRoute(
   const contexts = graphNodes && graphEdges
     ? authoredRouteContexts(path, graphNodes, graphEdges,
         { type: "building", buildingId: "", label: fromCode, code: fromCode },
-        { type: "building", buildingId: "", label: toCode, code: toCode })
+        { type: "building", buildingId: "", label: toCode, code: toCode },
+        graph)
     : null;
   const campusPoints = contexts?.campusPoints ?? path.waypoints;
   return {
@@ -404,14 +421,12 @@ export function planAuthoredDestinationRoute(
   mode: RouteMode,
   graph?: CampusNavGraph | null,
 ): PlannedRoute | null {
-  // Accessibility is intentionally out of scope for this slice. Keep the
-  // mode in the public type, but never return an unimplemented route.
-  if (mode === "accessible") return null;
   const campusGraph = resolveCampusGraph(graph);
   if (!campusGraph || !from?.buildingId || !to?.buildingId) return null;
 
-  const fromNode = authoredDestinationEndpoint(campusGraph.nodes, from, false);
-  const toNode = authoredDestinationEndpoint(campusGraph.nodes, to, false);
+  const accessibleOnly = mode === "accessible";
+  const fromNode = authoredDestinationEndpoint(campusGraph.nodes, from, accessibleOnly);
+  const toNode = authoredDestinationEndpoint(campusGraph.nodes, to, accessibleOnly);
   if (!fromNode || !toNode) return null;
 
   const path = findNavigationRoute(
@@ -419,7 +434,7 @@ export function planAuthoredDestinationRoute(
     campusGraph.edges,
     fromNode.id,
     toNode.id,
-    false,
+    accessibleOnly,
     mode === "emergency",
     { useDerivedTransitions: false },
   );
@@ -435,9 +450,10 @@ export function planAuthoredDestinationRoute(
     undefined,
     campusGraph.nodes,
     campusGraph.edges,
+    graph,
   );
   if (!planned) return null;
-  const contexts = authoredRouteContexts(path, campusGraph.nodes, campusGraph.edges, from, to);
+  const contexts = authoredRouteContexts(path, campusGraph.nodes, campusGraph.edges, from, to, graph);
   planned.points = contexts.campusPoints;
   planned.campusPoints = contexts.campusPoints;
   planned.indoorSegments = contexts.indoorSegments;
@@ -575,13 +591,34 @@ function transitionKindFor(
     : "stairs";
 }
 
-/** Split a selected authored graph path by coordinate space. */
+function isExteriorRouteNode(node: CampusNavNode | undefined): boolean {
+  return Boolean(node && (
+    !node.floorId
+    || node.exteriorZoneId
+    || node.derivedOwnerType
+  ));
+}
+
+function campusPointForRouteNode(node: CampusNavNode, graph?: CampusNavGraph): Pt {
+  if (!node.floorId || !isExteriorRouteNode(node) || !graph?.buildings?.length) {
+    return { x: node.x, y: node.y };
+  }
+  const building = graph.buildings.find((candidate) => candidate.id === node.buildingId);
+  const floor = building?.floors?.find((candidate) => candidate.id === node.floorId);
+  if (!building || !floor) return { x: node.x, y: node.y };
+  return exteriorFloorPointToCampusWorld(building, floor, node);
+}
+
+/** Split a selected authored graph path by coordinate space.  Exterior
+ * Veranda nodes are authored in a Floor frame but belong to the campus route;
+ * only ordinary indoor nodes remain floor-local. */
 function authoredRouteContexts(
   path: GraphPath,
   nodes: CampusNavNode[],
   edges: CampusNavEdge[],
   from: Destination,
   to: Destination,
+  graph?: CampusNavGraph,
 ): {
   campusPoints: Pt[];
   indoorSegments: RouteIndoorSegment[];
@@ -600,7 +637,7 @@ function authoredRouteContexts(
   addRoomFloorNumber(to);
   const contexts: AuthoredContext[] = [];
   const transitions: RouteTransitionDetail[] = [];
-  const pointKey = (node: CampusNavNode) => node.floorId
+  const pointKey = (node: CampusNavNode) => !isExteriorRouteNode(node)
     ? `floor:${node.buildingId ?? ""}:${node.floorId}`
     : "campus";
   const appendPoint = (points: Pt[], point: Pt) => {
@@ -608,12 +645,12 @@ function authoredRouteContexts(
     if (!previous || previous.x !== point.x || previous.y !== point.y) points.push(point);
   };
   const startContext = (node: CampusNavNode): AuthoredContext => ({
-    kind: node.floorId ? "floor" : "campus",
+    kind: isExteriorRouteNode(node) ? "campus" : "floor",
     key: pointKey(node),
     buildingId: node.buildingId,
     floorId: node.floorId,
     floorNumber: floorNumberById.get(node.id),
-    waypoints: [{ x: node.x, y: node.y }],
+    waypoints: [campusPointForRouteNode(node, graph)],
     steps: [],
     rawDistance: 0,
   });
@@ -648,9 +685,19 @@ function authoredRouteContexts(
         ?? (to.type === "room" && to.buildingId === toNode.buildingId && toNode.floorId ? to.floorNumber : undefined);
       continue;
     }
+    const projectedFrom = campusPointForRouteNode(fromNode, graph);
+    const projectedTo = campusPointForRouteNode(toNode, graph);
+    const floorNode = [fromNode, toNode].find((node) => node.floorId && isExteriorRouteNode(node));
+    const building = floorNode && graph?.buildings?.find((candidate) => candidate.id === floorNode.buildingId);
+    const floor = building?.floors?.find((candidate) => candidate.id === floorNode?.floorId);
     const bends = edge?.bendPoints ? (reversed ? [...edge.bendPoints].reverse() : edge.bendPoints) : [];
-    bends.forEach((bend) => appendPoint(current.waypoints, { x: bend.x, y: bend.y }));
-    appendPoint(current.waypoints, { x: toNode.x, y: toNode.y });
+    const projectedBends = edge?.derivedOwnerType && projectedFrom.x !== projectedTo.x && projectedFrom.y !== projectedTo.y
+      ? [{ x: projectedTo.x, y: projectedFrom.y }]
+      : floorNode && building && floor
+        ? bends.map((bend) => exteriorFloorPointToCampusWorld(building, floor, bend))
+        : bends;
+    projectedBends.forEach((bend) => appendPoint(current.waypoints, { x: bend.x, y: bend.y }));
+    appendPoint(current.waypoints, projectedTo);
     current.rawDistance += edgeDistance;
   }
   contexts.push(current);
@@ -705,25 +752,26 @@ export function planBuildingRoute(
   positions?: Record<string, RoutePosition>,
   graph?: CampusNavGraph | null
 ): PlannedRoute | null {
-  if (!from?.id || !to?.id || from.id === to.id || mode === "accessible") return null;
+  if (!from?.id || !to?.id || from.id === to.id) return null;
 
   // 0. Published-campus nav graph (real routes for any campus with one)
   const campusGraph = resolveCampusGraph(graph);
   if (campusGraph) {
-    const fromNode = resolveBuildingEntranceNode(campusGraph.nodes, from.id, from.entranceNodeId, false);
-    const toNode = resolveBuildingEntranceNode(campusGraph.nodes, to.id, to.entranceNodeId, false);
+    const accessibleOnly = mode === "accessible";
+    const fromNode = resolveBuildingEntranceNode(campusGraph.nodes, from.id, from.entranceNodeId, accessibleOnly);
+    const toNode = resolveBuildingEntranceNode(campusGraph.nodes, to.id, to.entranceNodeId, accessibleOnly);
     if (fromNode && toNode) {
       const p = findNavigationRoute(
         campusGraph.nodes,
         campusGraph.edges,
         fromNode.id,
         toNode.id,
-        false,
+        accessibleOnly,
         mode === "emergency",
         { useDerivedTransitions: false }
       );
       if (p) {
-        const planned = toPlannedRoute(p, mode, from.code, to.code, undefined, campusGraph.nodes, campusGraph.edges);
+        const planned = toPlannedRoute(p, mode, from.code, to.code, undefined, campusGraph.nodes, campusGraph.edges, graph);
         if (planned) return planned;
       }
     }
@@ -734,6 +782,9 @@ export function planBuildingRoute(
 
   // Emergency routing must never present the legacy graph as stair-safe. The
   // admin-authored graph is the only source that carries emergency semantics.
+  // Accessible routing likewise requires the authored graph so the planner
+  // can enforce Ramp-only traversal instead of silently using the legacy map.
+  if (mode === "accessible") return null;
   if (mode === "emergency") return null;
 
   // 1. Built-in walkway graph (legacy b1-b6 ids)
@@ -778,9 +829,10 @@ export function planRouteFromPoint(
   graph?: CampusNavGraph | null,
   positions?: Record<string, RoutePosition>
 ): PlannedRoute | null {
-  if (!fromPt || !to?.id || mode === "accessible") return null;
+  if (!fromPt || !to?.id) return null;
 
   const campusGraph = resolveCampusGraph(graph);
+  if (!campusGraph && mode === "accessible") return null;
   if (!campusGraph && mode === "emergency") return null;
   const nodes: CampusNavNode[] = campusGraph ? campusGraph.nodes : STATIC_NODES;
   const edges: CampusNavEdge[] = campusGraph
@@ -796,7 +848,7 @@ export function planRouteFromPoint(
   // Destination node: campus graph building node, or static entrance map.
   let toNodeId: string | undefined;
   if (campusGraph) {
-    toNodeId = resolveBuildingEntranceNode(campusGraph.nodes, to.id, to.entranceNodeId, false)?.id;
+    toNodeId = resolveBuildingEntranceNode(campusGraph.nodes, to.id, to.entranceNodeId, mode === "accessible")?.id;
   } else {
     toNodeId = BUILDING_ENTRANCE_MAP[to.id];
   }
@@ -806,7 +858,7 @@ export function planRouteFromPoint(
   }
 
   // Snap the start point to the nearest node.
-  const outdoorNodes = nodes.filter((node) => !node.floorId);
+  const outdoorNodes = nodes.filter((node) => !node.floorId && (mode !== "accessible" || node.accessible !== false));
   let fromNodeId: string | null = null;
   let bestD = Infinity;
   for (const n of outdoorNodes) {
@@ -826,7 +878,7 @@ export function planRouteFromPoint(
     edges,
     fromNodeId,
     toNodeId,
-    false,
+    mode === "accessible",
     mode === "emergency",
     { useDerivedTransitions: !campusGraph }
   );
@@ -835,7 +887,7 @@ export function planRouteFromPoint(
     return svgFallbackFromPoint(fromPt, to, mode, positions);
   }
 
-  return toPlannedRoute(path, mode, "You are here", to.code, fromPt, campusGraph?.nodes, campusGraph?.edges);
+  return toPlannedRoute(path, mode, "You are here", to.code, fromPt, campusGraph?.nodes, campusGraph?.edges, graph);
 }
 
 /**
@@ -861,18 +913,19 @@ export function planPointToDestinationRoute(
       positions,
     );
   }
-  if (!fromPt || mode === "accessible") return null;
+  if (!fromPt) return null;
   const campusGraph = resolveCampusGraph(graph);
+  if (!campusGraph && mode === "accessible") return null;
   if (!campusGraph) return null;
 
-  const outdoorNodes = campusGraph.nodes.filter((node) => !node.floorId);
+  const outdoorNodes = campusGraph.nodes.filter((node) => !node.floorId && (mode !== "accessible" || node.accessible !== false));
   const fromNode = outdoorNodes.reduce<CampusNavNode | undefined>((best, node) => {
     if (!best) return node;
     return Math.hypot(node.x - fromPt.x, node.y - fromPt.y) < Math.hypot(best.x - fromPt.x, best.y - fromPt.y)
       ? node
       : best;
   }, undefined);
-  const toNode = authoredDestinationEndpoint(campusGraph.nodes, to, false);
+  const toNode = authoredDestinationEndpoint(campusGraph.nodes, to, mode === "accessible");
   if (!fromNode || !toNode) return null;
 
   const path = findNavigationRoute(
@@ -880,7 +933,7 @@ export function planPointToDestinationRoute(
     campusGraph.edges,
     fromNode.id,
     toNode.id,
-    false,
+    mode === "accessible",
     mode === "emergency",
     { useDerivedTransitions: false },
   );
@@ -894,6 +947,7 @@ export function planPointToDestinationRoute(
     fromPt,
     campusGraph.nodes,
     campusGraph.edges,
+    graph,
   );
   if (!planned) return null;
   const pointOrigin: BuildingDest = {
@@ -902,7 +956,7 @@ export function planPointToDestinationRoute(
     label: "You are here",
     code: "You are here",
   };
-  const contexts = authoredRouteContexts(path, campusGraph.nodes, campusGraph.edges, pointOrigin, to);
+  const contexts = authoredRouteContexts(path, campusGraph.nodes, campusGraph.edges, pointOrigin, to, graph);
   planned.points = contexts.campusPoints;
   planned.campusPoints = contexts.campusPoints;
   planned.indoorSegments = contexts.indoorSegments;
@@ -960,11 +1014,12 @@ export function planDestinationRoute(
   mode: RouteMode,
   graph?: CampusNavGraph | null,
 ): PlannedRoute | null {
-  if (!from?.buildingId || !to?.buildingId || mode === "accessible") return null;
+  if (!from?.buildingId || !to?.buildingId) return null;
 
   if (resolveCampusGraph(graph)) {
     return planAuthoredDestinationRoute(from, to, mode, graph);
   }
+  if (mode === "accessible") return null;
   if (mode === "emergency") return null;
   const combined = findCompleteRoute(from, to, false);
   if (!combined) return null;

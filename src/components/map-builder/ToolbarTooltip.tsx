@@ -12,6 +12,7 @@ export interface ToolDescriptor {
 // ── Detailed tool definitions ──
 export const TOOL_DEFINITIONS: Record<string, ToolDescriptor> = {
   back:     { id: "back",     label: "Back",     shortcut: "",        description: "Return to the campus list." },
+  campusStatus: { id: "campusStatus", label: "Campus status", shortcut: "", description: "View the campus publishing status." },
   events:   { id: "events",   label: "Events",   shortcut: "",        description: "Manage campus events and temporary restrictions." },
   select:   { id: "select",   label: "Select",   shortcut: "V",     description: "Select, move, resize, and edit items on the canvas." },
   pan:      { id: "pan",      label: "Pan",      shortcut: "Space", description: "Move around the campus canvas without changing any objects." },
@@ -59,6 +60,8 @@ export function ToolbarTooltip({
   label,
   shortcut,
   hint,
+  tooltipClassName,
+  titleClassName,
 }: {
   children: React.ReactNode;
   tool: string;
@@ -66,6 +69,9 @@ export function ToolbarTooltip({
   label?: string;
   shortcut?: string;
   hint?: string;
+  /** Optional compact semantic treatment for status-like tooltips. */
+  tooltipClassName?: string;
+  titleClassName?: string;
 }) {
   const [show, setShow] = useState(false);
   const [pos, setPos] = useState({ x: 0, y: 0, above: true });
@@ -171,17 +177,18 @@ export function ToolbarTooltip({
           }}
         >
           <motion.div
+            role="tooltip"
             initial={{ opacity: 0, y: pos.above ? 4 : -4 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.16, ease: "easeOut" }}
-            className="relative w-[280px] max-w-[calc(100vw-24px)] overflow-hidden rounded-lg border border-border/60 shadow-xl"
+            className={`relative w-[280px] max-w-[calc(100vw-24px)] overflow-hidden rounded-lg border border-border/60 shadow-xl ${tooltipClassName ?? ""}`}
             style={{
               background: "var(--popover, var(--card))",
               backdropFilter: "blur(12px)",
             }}
           >
             <div className="px-3 py-2 border-b border-border/40 flex items-center justify-between gap-3">
-              <span className="text-[11px] font-extrabold text-foreground">{title}</span>
+              <span className={`text-[11px] font-extrabold text-foreground ${titleClassName ?? ""}`}>{title}</span>
               {shortcutText && (
                 <span
                   className="rounded px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wider"
@@ -195,7 +202,7 @@ export function ToolbarTooltip({
               )}
             </div>
             <div className="px-3 py-1.5">
-              <p className="text-[10px] text-muted-foreground leading-relaxed">{description}</p>
+              <p className="text-[10px] text-muted-foreground leading-relaxed whitespace-pre-line">{description}</p>
             </div>
             {/* Arrow: points down when above, up when below */}
             <div

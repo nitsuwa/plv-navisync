@@ -6,6 +6,7 @@ import { syncIndoorLinkedNodePositions } from "../lib/indoorNavigationGraph";
 import { ENTRANCE_TRANSITION_EDGE_TYPE, reconcileEntranceTransitions } from "../lib/entranceTransitions";
 import { syncExteriorEmergencyStairGraph } from "../lib/exteriorEmergencyStairs";
 import { syncCampusGateNavigation } from "../lib/campusGates";
+import { reconcileExteriorApproachNavigation } from "../lib/exteriorApproachNavigation";
 import type { Database, Json, Tables, TablesInsert, TablesUpdate } from "../types/database.generated";
 import type {
   AccessibilityFeature, AssemblyPoint, Campus, CampusBuilding, CampusDecorAsset,
@@ -451,7 +452,9 @@ export function serializeCampusStructure(campus: Campus): CampusStructurePayload
   // Hydrated/editor state normally already contains it, but reconciling here
   // also makes legacy/partially-authored campuses safe to save and prevents a
   // gate from silently round-tripping without its routable navigation node.
-  const canonicalCampus = syncCampusGateNavigation(reconcileEntranceTransitions(campus));
+  const canonicalCampus = reconcileExteriorApproachNavigation(
+    syncCampusGateNavigation(reconcileEntranceTransitions(campus)),
+  );
   const buildings: JsonObject[] = [];
   const usedBuildingCodes = new Set<string>();
   const floors: JsonObject[] = [];
@@ -642,7 +645,12 @@ export function hydrateCampusStructure(campus: Campus, rows: CampusStructureRows
   const reconciledGraph = reconcileEntranceTransitions({ ...campus, buildings, navNodes: finalNodes, navEdges: finalEdges });
   const withExteriorEmergencyStairs = syncExteriorEmergencyStairGraph({ ...campus, buildings, markers: [...top<CampusMarker>("marker"), ...top<CampusMarker>("gate")], navNodes: finalNodes, navEdges: reconciledGraph.navEdges ?? [] });
   const withCampusGates = syncCampusGateNavigation({ ...withExteriorEmergencyStairs, markers: [...top<CampusMarker>("marker"), ...top<CampusMarker>("gate")] });
-  return { ...withCampusGates,
+  // Exterior Veranda/Ramp/Steps topology is deterministic and owned by the
+  // hydrated physical records. Rebuild it once after all canonical Entrance,
+  // emergency-stair, and Campus Gate identities are restored so a save/reload
+  // round-trip produces the same approach nodes/edges without duplicates.
+  const withExteriorApproach = reconcileExteriorApproachNavigation(withCampusGates);
+  return { ...withExteriorApproach,
     ...(canvasAppearance ? {
       canvasGroundMaterial: canvasAppearance.canvasGroundMaterial,
       canvasGroundColor: canvasAppearance.canvasGroundColor,
@@ -653,7 +661,7 @@ export function hydrateCampusStructure(campus: Campus, rows: CampusStructureRows
     routes: top<CampusRoute>("route"), accessibilityFeatures: top<AccessibilityFeature>("accessibility_feature"),
     assemblyPoints: top<AssemblyPoint>("assembly_point"), decorAssets: top<CampusDecorAsset>("decor"),
     eventOverlays: top<CampusEventOverlay>("event_overlay"),
-    navNodes: withCampusGates.navNodes ?? [], navEdges: withCampusGates.navEdges ?? [], buildings: withCampusGates.buildings };
+    navNodes: withExteriorApproach.navNodes ?? [], navEdges: withExteriorApproach.navEdges ?? [], buildings: withExteriorApproach.buildings };
 }
 
 async function selectStructure(campusId: string): Promise<CampusStructureRows> {

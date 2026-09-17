@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { floorResizeIssues } from "../../../lib/floorGeometry";
 import { projectFloorResizeScene } from "../FloorEditor";
-import type { ExteriorEmergencyStair, FloorPlan } from "../types";
+import type { ExteriorEmergencyStair, FloorPlan, NavigationNode } from "../types";
 
 function resizeFixture(): FloorPlan {
   return {
@@ -94,5 +94,40 @@ describe("FloorEditor resize projection", () => {
     }]);
     expect(projected.doors[0]).toMatchObject({ id: "entrance-door", wallId: "wall-right", x: 580, y: 225, offset: 0.5 });
     expect(floorResizeIssues({ ...floor, ...projected }, 580, 450)).toEqual([]);
+  });
+
+  it("reprojects Veranda-hosted Walking Points with their physical zone", () => {
+    const zone = {
+      id: "veranda-1",
+      type: "veranda" as const,
+      side: "bottom" as const,
+      offset: 0.5,
+      width: 200,
+      depth: 40,
+      walkable: true,
+    };
+    const hosted: NavigationNode = {
+      id: "waypoint-veranda",
+      name: "Veranda point",
+      type: "hallway",
+      x: 300,
+      y: 470,
+      buildingId: "building-1",
+      floorId: "floor-1",
+      exteriorZoneId: zone.id,
+      accessible: true,
+      color: "#16a34a",
+    };
+    const projected = projectFloorResizeScene(
+      { ...resizeFixture(), exteriorZones: [zone] },
+      600,
+      520,
+      [],
+      [],
+      [hosted],
+    );
+    expect(projected.navNodes).toEqual([{ ...hosted, y: 540 }]);
+    expect(projected.navNodes?.[0].id).toBe(hosted.id);
+    expect(projected.navNodes?.[0].exteriorZoneId).toBe(zone.id);
   });
 });

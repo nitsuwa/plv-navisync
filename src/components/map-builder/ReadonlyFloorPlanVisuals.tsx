@@ -8,8 +8,10 @@
  */
 
 import type { FloorPlan, FloorRoom, FloorWall, FloorDoor, FloorWindow, FloorStairs, FloorRamp, FloorElevatorItem, FloorLabel, FloorFurniture, FloorPath } from "./types";
+import type { CampusEntrance } from "./types";
 import { FloorGroundSurface } from "./FloorGroundSurface";
 import { ROOM_COLORS, type RoomType } from "../../data/floorPlans";
+import { EntranceDirectionBadge } from "./EntranceDirectionBadge";
 
 // ── Room rendering ──────────────────────────────────────────────────────────
 
@@ -107,7 +109,7 @@ function WallVisual({ wall }: { wall: FloorWall }) {
 
 // ── Door rendering ──────────────────────────────────────────────────────────
 
-function DoorVisual({ door, onClick }: { door: FloorDoor; onClick?: (doorId: string) => void }) {
+function DoorVisual({ door, entrance, onClick }: { door: FloorDoor; entrance?: CampusEntrance; onClick?: (doorId: string) => void }) {
   if (door.visible === false) return null;
   const { x, y, width, color, direction } = door;
   const half = width / 2;
@@ -147,6 +149,13 @@ function DoorVisual({ door, onClick }: { door: FloorDoor; onClick?: (doorId: str
             strokeDasharray="2 2" />
         </>
       )}
+      {entrance && <EntranceDirectionBadge
+        x={0}
+        y={0}
+        edge={entrance.edge}
+        direction={entrance.direction}
+        type={entrance.type}
+      />}
       {/* Emergency exit marker */}
       {door.isEmergencyExit && (
         <text x={0} y={-8} textAnchor="middle" fill="#dc2626"
@@ -347,6 +356,9 @@ function FurnitureVisual({ item }: { item: FloorFurniture }) {
 
 export interface ReadonlyFloorPlanSceneProps {
   floor: FloorPlan;
+  /** Building entrances are supplied separately because FloorPlan stores only
+   * the stable buildingEntranceId on generated doors. */
+  entrances?: readonly CampusEntrance[];
   mapMode?: "standard" | "accessible" | "emergency";
   highlightedRoomId?: string | null;
   hoveredRoomId?: string | null;
@@ -362,6 +374,7 @@ export interface ReadonlyFloorPlanSceneProps {
  */
 export function ReadonlyFloorPlanScene({
   floor,
+  entrances = [],
   mapMode = "standard",
   highlightedRoomId,
   hoveredRoomId,
@@ -388,6 +401,7 @@ export function ReadonlyFloorPlanScene({
   const visibleLabels = floor.labels || [];
   const visibleFurniture = (floor.furniture || []).filter((f) => f.visible !== false);
   const visiblePaths = floor.paths || [];
+  const entranceById = new Map(entrances.map((entrance) => [entrance.id, entrance]));
 
   return (
     <g data-testid="readonly-floor-plan-scene">
@@ -441,7 +455,12 @@ export function ReadonlyFloorPlanScene({
 
       {/* Doors */}
       {visibleDoors.map((door) => (
-        <DoorVisual key={door.id} door={door} onClick={onDoorClick} />
+        <DoorVisual
+          key={door.id}
+          door={door}
+          entrance={door.buildingEntranceId ? entranceById.get(door.buildingEntranceId) : undefined}
+          onClick={onDoorClick}
+        />
       ))}
 
       {/* Stairs */}
