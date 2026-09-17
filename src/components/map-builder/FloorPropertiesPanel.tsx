@@ -1819,7 +1819,7 @@ function effectiveDoorType(door: FloorDoor): "single" | "double" {
               </button>
               <button onClick={onDeleteSelected}
                 className="w-full h-9 rounded-xl border border-destructive/30 text-xs font-bold text-destructive hover:bg-destructive/10 transition-colors">
-                <span className="flex items-center justify-center gap-1.5"><AlertTriangle className="h-3 w-3" /> Delete {selFurniture.name}</span>
+                <span className="flex items-center justify-center gap-1.5 whitespace-nowrap"><AlertTriangle className="h-3 w-3" /> Delete Furniture</span>
               </button>
             </div>
           </>

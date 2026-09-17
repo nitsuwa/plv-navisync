@@ -7,7 +7,7 @@ import { useStudentAuth } from "../../hooks/useStudentAuth";
 import { MoreSheet } from "../ui/MoreSheet";
 
 const STUDENT_TABS = [
-  { to: "/home", label: "Home" },
+  { to: "/map", label: "Map" },
 ];
 
 const GUEST_TABS = [
@@ -35,7 +35,7 @@ export function MobileBottomNav() {
   const isActive = (to: string) =>
     to === "/" ? pathname === "/" : pathname.startsWith(to);
 
-  const homeTab = tabs[0];
+  const homeTab = isStudent ? undefined : tabs[0];
   const homeActive = homeTab ? isActive(homeTab.to) : false;
   const navActive = isStudent ? isActive("/map") : isActive("/map");
 
@@ -67,7 +67,7 @@ export function MobileBottomNav() {
                 />
               )}
 
-              {/* The left tab is Home for both guests and students. */}
+              {/* Home is available to guests only. */}
               {homeTab ? (
                 <Link
                   to={homeTab.to}
@@ -163,7 +163,7 @@ export function MobileBottomNav() {
       </nav>
 
       {/* More bottom sheet */}
-      <MoreSheet open={moreOpen} onClose={() => setMoreOpen(false)} />
+      {isStudent && <MoreSheet open={moreOpen} onClose={() => setMoreOpen(false)} />}
     </>
   );
 }

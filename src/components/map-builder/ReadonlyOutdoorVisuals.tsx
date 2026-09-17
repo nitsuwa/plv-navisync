@@ -18,6 +18,7 @@ import { isCampusGate } from "../../lib/campusGates";
 import type { ReadonlyOutdoorCampus, ReadonlyOutdoorEntrance } from "../../lib/readonlyOutdoorCampus";
 import { surfaceCellRuns } from "../../lib/campusSurface";
 import { campusGroundAppearance, campusGroundPatternId } from "../../lib/campusCanvas";
+import { EntranceDirectionBadge } from "./EntranceDirectionBadge";
 
 export interface OutdoorBuildingVisualProps {
   building: CampusBuilding;
@@ -247,12 +248,22 @@ export function OutdoorEntranceVisual({
   const label = entranceDisplayName(entrance, (building.entrances ?? []).findIndex((item) => item.id === entrance.id));
   const color = entrance.type === "emergency_exit" || entrance.type === "emergency" ? "#dc2626" : entrance.type === "service" ? "#7c3aed" : "#0f766e";
   return (
-    <g data-testid="readonly-entrance" data-entrance-id={entrance.id} transform={`translate(${position.x},${position.y}) rotate(${position.angle ?? 0})`} style={{ cursor: onClick ? "pointer" : undefined }} onClick={onClick ? (e) => { e.stopPropagation(); onClick(building.id); } : undefined}>
+    <g data-testid="readonly-entrance" data-entrance-id={entrance.id} style={{ cursor: onClick ? "pointer" : undefined }} onClick={onClick ? (e) => { e.stopPropagation(); onClick(building.id); } : undefined}>
       <title>{label}{entrance.accessible ? " · Accessible" : ""}</title>
-      <path d="M-9,-6 H9 V6 H-9 Z" fill="var(--card, #fff)" stroke={color} strokeWidth={1.8} />
-      <path d="M-3,6 V-2 H3 V6" fill={color} opacity={0.9} />
-      <path d="M0,12 L-4,6 H4 Z" fill={color} />
-      {entrance.accessible && <circle cx={-7} cy={-7} r={2.5} fill="#2563eb" stroke="white" strokeWidth={0.8} />}
+      <g transform={`translate(${position.x},${position.y}) rotate(${position.angle ?? 0})`}>
+        <path d="M-9,-6 H9 V6 H-9 Z" fill="var(--card, #fff)" stroke={color} strokeWidth={1.8} />
+        <path d="M-3,6 V-2 H3 V6" fill={color} opacity={0.9} />
+        <path d="M0,12 L-4,6 H4 Z" fill={color} />
+        {entrance.accessible && <circle cx={-7} cy={-7} r={2.5} fill="#2563eb" stroke="white" strokeWidth={0.8} />}
+      </g>
+      <EntranceDirectionBadge
+        x={position.x}
+        y={position.y}
+        edge={entrance.edge}
+        direction={entrance.direction}
+        type={entrance.type}
+        rotation={entrance.legacyPosition ? 0 : building.rotation ?? 0}
+      />
     </g>
   );
 }

@@ -2,6 +2,7 @@ import { createContext, useState, useCallback, useMemo, useEffect, useRef, useCo
 import { createPortal } from "react-dom";
 import { Route, ArrowRight, ArrowRightLeft, AlertTriangle, CheckCircle2, Loader2, X, Search, MapPin, Minimize2, Maximize2, Footprints, Accessibility, ShieldAlert, Eye, EyeOff, ChevronDown } from "lucide-react";
 import { cn } from "../../lib/utils";
+import { Tooltip } from "../ui/Tooltip";
 import { findNavigationRoute, truncateGraphPathAtNode } from "../../lib/pathfinding";
 import {
   reconcileRoomDoorEdges,
@@ -18,18 +19,76 @@ import {
 import {
   doorHasIndoorNavigationConnection,
   findEntranceTransitionForEntrance,
+  entranceNodeForEdge,
   doorNodeForEdge,
   findEntranceOutdoorConnection,
 } from "../../lib/entranceTransitions";
-import { normalizeEntranceType } from "../../lib/buildingEntrances";
+import { normalizeEntranceDirection, normalizeEntranceType } from "../../lib/buildingEntrances";
 import { polylineCrossesBuilding } from "../../lib/editorPlacement";
 import { canonicalExteriorEmergencyStairsForBuilding, exteriorEmergencyStairRouteReadiness } from "../../lib/exteriorEmergencyStairs";
+import { campusWorldPointToExteriorFloor, exteriorApproachEntranceReadiness, exteriorApproachNodeId, exteriorFloorPointToCampusWorld, reconcileExteriorApproachNavigation } from "../../lib/exteriorApproachNavigation";
 import { campusGates, campusGateNodeIds, outdoorNetworkReachesCampusGate } from "../../lib/campusGates";
+import { validateNavigationGraph } from "../../lib/validateNavigationGraph";
 import type { GraphPath } from "../../lib/pathfinding";
-import type { Campus, FloorDoor, FloorPlan, FloorRoom, FloorWall, NavigationEdge, NavigationNode } from "./types";
+import type { Campus, CampusEntrance, FloorDoor, FloorPlan, FloorRoom, FloorWall, NavigationEdge, NavigationNode } from "./types";
 
 export type RouteMode = "standard" | "accessible" | "emergency";
 export type StandardRoutePreference = "best" | "stairs" | "elevator";
+type EntranceDirectionRole = "inbound" | "outbound" | "any";
+
+/** Keep route-mode color semantics in one presentation resolver so every
+ * context (Outdoor and Floor) paints the same calculated route consistently. */
+export function routeColorForMode(routeMode: RouteMode): string {
+  if (routeMode === "emergency") return "#dc2626";
+  // Keep the active Accessible route in the existing teal/emerald family,
+  // distinct from the normal authored walking-network green.
+  if (routeMode === "accessible") return "#0d9488";
+  return "#3b82f6";
+}
+
+function entranceHasNavigationConnection(campus: Campus, buildingId: string, entrance: CampusEntrance): boolean {
+  const entranceNode = (campus.navNodes ?? []).find((node) => node.buildingId === buildingId
+    && node.entranceId === entrance.id
+    && !node.floorId);
+  if (!entranceNode) return false;
+  return !!findEntranceTransitionForEntrance(campus.navNodes, campus.navEdges, buildingId, entrance.id)
+    || (campus.navEdges ?? []).some((edge) => !edge.closed
+      && (edge.startNodeId === entranceNode.id || edge.endNodeId === entranceNode.id));
+}
+
+function normalGeneralEntranceCount(campus: Campus, buildingId: string): number {
+  const building = (campus.buildings ?? []).find((candidate) => candidate.id === buildingId);
+  if (!building) return 0;
+  return (building.entrances ?? []).filter((entrance) => normalizeEntranceType(entrance.type) === "general"
+    && entranceHasNavigationConnection(campus, buildingId, entrance)).length;
+}
+
+function hasNormalOutboundGeneralEntrance(campus: Campus, buildingId: string): boolean {
+  const building = (campus.buildings ?? []).find((candidate) => candidate.id === buildingId);
+  if (!building) return false;
+  return (building.entrances ?? []).some((entrance) => normalizeEntranceType(entrance.type) === "general"
+    && normalizeEntranceDirection(entrance) !== "entrance_only"
+    && entranceHasNavigationConnection(campus, buildingId, entrance));
+}
+
+function entranceDirectionAllowed(
+  campus: Campus,
+  buildingId: string,
+  entrance: CampusEntrance,
+  role: EntranceDirectionRole,
+): boolean {
+  if (role === "any") return true;
+  if (normalizeEntranceType(entrance.type) !== "general") return true;
+  const direction = normalizeEntranceDirection(entrance);
+  const singleGeneralFallback = normalGeneralEntranceCount(campus, buildingId) === 1;
+  if (role === "inbound") return singleGeneralFallback || direction !== "exit_only";
+  // Keep the saved direction unchanged, but retain a safe compatibility route
+  // when a building has no routine outbound-capable General Access entrance at
+  // all. This is intentionally evaluated per building/candidate and does not
+  // apply to Emergency or legacy Service Access entrances.
+  return singleGeneralFallback || direction !== "entrance_only"
+    || !hasNormalOutboundGeneralEntrance(campus, buildingId);
+}
 
 export type TestRouteContext = {
   kind: "outdoor" | "floor";
@@ -58,13 +117,83 @@ export type TestRouteTransitionMarker = {
   instruction?: string;
 };
 
+export type TestRouteContinuationMarker = {
+  /** Canonical node where the active route hands off to the next semantic
+   * boundary. This is presentation-only; it never adds a graph portal. */
+  nodeId: string;
+  kind: "entrance" | "ramp" | "steps" | "waypoint";
+  /** Context-projected cue position. Canonical node coordinates remain in the graph. */
+  x?: number;
+  y?: number;
+  /** First node in the hidden continuation, when the marker is hosted by a
+   * visible waypoint rather than the semantic boundary itself. */
+  targetNodeId?: string;
+  /** Optional copy for the display-only waypoint fallback. */
+  instruction?: string;
+};
+
+/**
+ * Resolve the one physical exterior access feature represented by a
+ * calculated route.  The route node sequence is authoritative: alternatives
+ * that are merely connected to the same Veranda are not active unless their
+ * derived outer anchor is actually on this route.
+ *
+ * For the unusual case where a route crosses more than one exterior anchor,
+ * choose the anchor at the current outdoor handoff: the last qualifying
+ * feature for an indoor-to-outdoor route and the first for the reverse route.
+ * This keeps the continuation cue attached to the feature the user actually
+ * traverses at this context boundary.
+ */
+export function selectedExteriorAccessFeatureNode(
+  campus: Campus,
+  nodeIds: string[],
+  routeMode: RouteMode = "standard",
+): CampusNavNode | undefined {
+  if (routeMode === "emergency") return undefined;
+  const nodes = campus.navNodes ?? [];
+  const routeNodes = routeDisplayNodeIds(nodeIds, campus)
+    .map((id) => nodes.find((node) => node.id === id))
+    .filter((node): node is CampusNavNode => !!node);
+  const canonicalEdges = campus.navEdges ?? [];
+  const features = routeNodes.filter((node, index) => {
+    const isEligibleFeature = node.derivedRole === "outer"
+      && (routeMode === "accessible"
+        ? node.derivedOwnerType === "entrance_ramp"
+        : node.derivedOwnerType === "entrance_ramp" || node.derivedOwnerType === "entrance_steps");
+    if (!isEligibleFeature || !node.derivedOwnerId) return false;
+    // An outer anchor is a continuation owner only when the actual route also
+    // traverses its matching inner->outer transition edge.  Merely having an
+    // outer helper on the route (or near a generic Veranda junction) is not
+    // enough to make that junction a portal.
+    return [routeNodes[index - 1], routeNodes[index + 1]].some((adjacent) => {
+      if (!adjacent
+        || adjacent.derivedOwnerType !== node.derivedOwnerType
+        || adjacent.derivedOwnerId !== node.derivedOwnerId
+        || adjacent.derivedRole !== "inner") return false;
+      return canonicalEdges.some((edge) => {
+        const forward = edge.startNodeId === adjacent.id && edge.endNodeId === node.id;
+        const reverse = edge.bidirectional && edge.startNodeId === node.id && edge.endNodeId === adjacent.id;
+        return (forward || reverse)
+          && !edge.closed
+          && edge.derivedOwnerType === node.derivedOwnerType
+          && edge.derivedOwnerId === node.derivedOwnerId;
+      });
+    });
+  });
+  if (features.length === 0) return undefined;
+  return routeNodes[0]?.floorId ? features[features.length - 1] : features[0];
+}
+
 export type TestRouteHighlight = {
   waypoints: { x: number; y: number }[];
+  /** Separate visible route fragments. Hidden context segments never bridge these. */
+  waypointFragments?: { x: number; y: number }[][];
   color: string;
   /** Canonical physical node IDs represented by the current visible segment. */
   routeNodeIds?: string[];
   endpointMarkers?: { x: number; y: number; kind: "start" | "destination" }[];
   transitionMarkers?: TestRouteTransitionMarker[];
+  continuationMarkers?: TestRouteContinuationMarker[];
   semanticEndpoints?: { x: number; y: number; width: number; height: number; kind: "start" | "destination" }[];
 };
 
@@ -167,8 +296,8 @@ type OptionEntry = {
 };
 
 /** Presentation-only labels for the small active-route HUD. Stored names and
- * the full picker remain unchanged; long labels are clipped without adding a
- * visible ellipsis. */
+ * the full picker remain unchanged; the compact endpoint spans use CSS
+ * ellipsis while the Tooltip keeps the complete semantic label available. */
 export function compactRouteLocationLabel(option: Pick<OptionEntry, "label" | "kind"> | undefined, fallback: string): string {
   let label = option?.label?.trim() || fallback;
   label = label.replace(/[.…]+$/u, "").trim();
@@ -181,6 +310,28 @@ export function compactRouteLocationLabel(option: Pick<OptionEntry, "label" | "k
     if (entranceMatch) label = entranceMatch[1];
   }
   return label || fallback;
+}
+
+function CompactRouteEndpointLabel({
+  testId,
+  displayLabel,
+  fullLabel,
+}: {
+  testId: "test-route-start-summary" | "test-route-destination-summary";
+  displayLabel: string;
+  fullLabel: string;
+}) {
+  return (
+    <Tooltip content={fullLabel} className="min-w-0 flex-1 basis-0">
+      <span
+        data-testid={testId}
+        aria-label={fullLabel}
+        className="block min-w-0 truncate whitespace-nowrap text-left"
+      >
+        {displayLabel}
+      </span>
+    </Tooltip>
+  );
 }
 
 type CampusNavNode = NonNullable<Campus["navNodes"]>[number];
@@ -304,6 +455,7 @@ export function endpointReadinessMessage(
   role: "starting" | "destination",
   accessibleOnly = false,
   emergencyOnly = false,
+  directionRole: EntranceDirectionRole = "any",
 ): string | null {
   const [type, id] = value.split(":");
   const noun = role === "starting" ? "start" : "destination";
@@ -323,6 +475,7 @@ export function endpointReadinessMessage(
       ) }))
       .filter((entry): entry is { entrance: NonNullable<typeof building.entrances>[number]; node: NavigationNode } =>
         !!entry.node
+        && (emergencyOnly || entranceDirectionAllowed(campus, building.id, entry.entrance, directionRole))
         && (!accessibleOnly || (entry.entrance.accessible !== false && entry.node.accessible !== false)));
     if (entranceNodes.length === 0 && building.entranceNodeId) {
       const legacy = (campus.navNodes ?? []).find((node) => node.id === building.entranceNodeId);
@@ -495,6 +648,11 @@ function testRouteEdgeEmergencySafe(campus: Campus, edge: NavigationEdge): boole
  * derived from the persisted accessDoorId relationship, so a freshly loaded
  * campus still routes correctly even before an editor write reconciles them. */
 export function buildTestRouteEdges(campus: Campus): NavigationEdge[] {
+  // Hydrated campuses may not have gone through an editor write after the
+  // Veranda/access-feature records were loaded. Reconcile the small derived
+  // exterior projection here so Test Route sees the same continuous graph as
+  // the editor without changing the persisted Campus or the pathfinder.
+  campus = reconcileExteriorApproachNavigation(campus);
   const rooms: FloorRoom[] = [];
   const doors: FloorDoor[] = [];
   const walls: FloorWall[] = [];
@@ -517,10 +675,40 @@ export function buildTestRouteEdges(campus: Campus): NavigationEdge[] {
   // old direct-authoring workflow.  Keep that persisted data intact, but do
   // not let Test Route bypass the linked physical Door.  Only the canonical
   // semantic Room↔Door edge is allowed to touch a Room node in this adapter.
-  const routeEdges = (campus.navEdges ?? []).filter((edge) =>
-    edge.type === ROOM_DOOR_EDGE_TYPE
-      || (!roomNodeIds.has(edge.startNodeId) && !roomNodeIds.has(edge.endNodeId)),
-  );
+  const routeEdges = (campus.navEdges ?? []).filter((edge) => {
+    if (edge.type === ROOM_DOOR_EDGE_TYPE) return true;
+    if (roomNodeIds.has(edge.startNodeId) || roomNodeIds.has(edge.endNodeId)) return false;
+    // An ordinary Floor Walking Point is never an indoor/outdoor portal. Keep
+    // canonical entrance transitions, derived physical approaches, and the
+    // dedicated emergency-stair boundary intact, but ignore stale/manual
+    // cross-context shortcuts from a Veranda waypoint directly to Outdoor.
+    const nodes = campus.navNodes ?? [];
+    const start = nodes.find((node) => node.id === edge.startNodeId);
+    const end = nodes.find((node) => node.id === edge.endNodeId);
+    // A hosted Veranda Walking Point is a floor-local graph vertex, never an
+    // outdoor portal.  Reject both stale derived zone-owned boundary edges and
+    // legacy unowned shortcuts here so a malformed snapshot cannot make the
+    // middle junction the transition owner.
+    const genericVerandaNode = [start, end].find((node) => Boolean(node?.floorId && node.exteriorZoneId && !node.derivedOwnerType));
+    const otherNode = genericVerandaNode === start ? end : genericVerandaNode === end ? start : undefined;
+    if (genericVerandaNode && otherNode && !otherNode.floorId && !otherNode.entranceId && !otherNode.exteriorEmergencyStairId) return false;
+    const crossesFloorBoundary = Boolean(start?.floorId) !== Boolean(end?.floorId);
+    if (!crossesFloorBoundary) return true;
+    if (edge.derivedOwnerType || edge.type === "entrance_transition" || edge.type === "floor_transition" || edge.type === "cross_floor") return true;
+    // Canonical direct Entrance handoffs are valid boundary edges even in
+    // legacy snapshots where the campus-side endpoint was authored with a
+    // Floor id. The portal guard below is for ordinary Walking Points, which
+    // have no Entrance identity at all.
+    if (start?.entranceId || end?.entranceId) return true;
+    // A physical Building Entrance may be authored directly to a Walking
+    // Point hosted by its linked Veranda. That is the valid boundary leg;
+    // only a generic Veranda-point -> Outdoor shortcut is a portal mistake.
+    if (start?.entranceId && !start.floorId && end?.exteriorZoneId
+      && end.buildingId === start.buildingId) return true;
+    if (end?.entranceId && !end.floorId && start?.exteriorZoneId
+      && start.buildingId === end.buildingId) return true;
+    return Boolean(start?.exteriorEmergencyStairId || end?.exteriorEmergencyStairId);
+  });
   // Cross-floor transition edges are derived from the current Stair/Elevator
   // owners. Reconcile them while building the route graph as well as on
   // editor writes, so a freshly hydrated/legacy campus cannot lose its Stair
@@ -534,12 +722,33 @@ export function buildTestRouteEdges(campus: Campus): NavigationEdge[] {
       building.id,
     );
   }
-  const normalized = normalizeNavigationEdges(reconciledEdges, campus.navNodes ?? []);
+  // Exterior reconciliation deliberately keeps a direct Entrance shortcut as
+  // a very expensive compatibility fallback while a complete authored
+  // Veranda/Ramp/Steps approach exists.  Normalization recomputes ordinary
+  // polyline distances, which would accidentally turn that fallback back
+  // into the cheapest edge and make Test Route skip the physical approach.
+  // Preserve the canonical adapter cost while still normalizing every other
+  // edge's current geometry.
+  const exteriorFallbackDistances = new Map(
+    reconciledEdges
+      .filter((edge) => edge.exteriorApproachFallbackEntranceId)
+      .map((edge) => [edge.id, edge.distance]),
+  );
+  const normalized = normalizeNavigationEdges(reconciledEdges, campus.navNodes ?? []).map((edge) => {
+    const fallbackDistance = exteriorFallbackDistances.get(edge.id);
+    return fallbackDistance === undefined ? edge : { ...edge, distance: fallbackDistance };
+  });
   // Test Route must consume the same current obstacle validation as the Floor
   // Editor.  Otherwise a stale/blocked authored edge can still be traversed by
   // the preview even though the editor marks it invalid.  Semantic Room↔Door
   // and cross-context transitions are exempt; their physical passage is
   // validated by the linked Door/walking edge instead.
+  const invalidEdgeIds = new Set<string>();
+  const canonicalObstacleEdgeIds = new Set(
+    validateNavigationGraph(campus).issues
+      .filter((issue) => issue.type === "nav_edge_blocked_by_obstacle" && issue.edgeId)
+      .map((issue) => issue.edgeId as string),
+  );
   const validEdges = normalized.filter((edge) => {
     if (edge.type === ROOM_DOOR_EDGE_TYPE || edge.type === "entrance_transition" || edge.type === "floor_transition" || edge.type === "cross_floor") return true;
     const startContext = nodeContexts.get(edge.startNodeId);
@@ -552,13 +761,18 @@ export function buildTestRouteEdges(campus: Campus): NavigationEdge[] {
     const startNode = (campus.navNodes ?? []).find((node) => node.id === edge.startNodeId);
     const endNode = (campus.navNodes ?? []).find((node) => node.id === edge.endNodeId);
     if (startNode?.exteriorEmergencyStairId || endNode?.exteriorEmergencyStairId) return true;
-    return !navEdgeIsBlockedExtended(edge, campus.navNodes ?? [], startContext.walls, startContext.doors, startContext.furniture);
+    if (canonicalObstacleEdgeIds.has(edge.id)) {
+      invalidEdgeIds.add(edge.id);
+      return false;
+    }
+    const blocked = navEdgeIsBlockedExtended(edge, campus.navNodes ?? [], startContext.walls, startContext.doors, startContext.furniture);
+    if (blocked) invalidEdgeIds.add(edge.id);
+    return !blocked;
   }).filter((edge) => {
-    // Outdoor route edges use the campus building footprint as the only
-    // conservative structural obstacle.  Decorative assets remain visual
-    // clutter, not routing barriers.  Entrance-transition edges are exempted
-    // above because the canonical connector is the legitimate boundary
-    // crossing into the building at its actual access point.
+    // Outdoor route edges use the same canonical building/decor obstacle
+    // validation as the editor. Entrance-transition edges are exempted above
+    // because the canonical connector is the legitimate boundary crossing
+    // into the building at its actual access point.
     const start = (campus.navNodes ?? []).find((node) => node.id === edge.startNodeId);
     const end = (campus.navNodes ?? []).find((node) => node.id === edge.endNodeId);
     if (edge.type === ROOM_DOOR_EDGE_TYPE || edge.type === "entrance_transition" || edge.type === "floor_transition" || edge.type === "cross_floor"
@@ -568,13 +782,35 @@ export function buildTestRouteEdges(campus: Campus): NavigationEdge[] {
     // passage through that boundary, so the generic wall-crossing validator
     // must not discard it from the Test Route graph.
     if (start?.exteriorEmergencyStairId || end?.exteriorEmergencyStairId) return true;
+    if (canonicalObstacleEdgeIds.has(edge.id)) {
+      invalidEdgeIds.add(edge.id);
+      return false;
+    }
     if (!start || !end || start.floorId || end.floorId) return true;
     const points = [
       { x: start.x, y: start.y },
       ...(edge.bendPoints ?? []),
       { x: end.x, y: end.y },
     ];
-    return !polylineCrossesBuilding(points, campus.buildings ?? []);
+    const blocked = polylineCrossesBuilding(points, campus.buildings ?? []);
+    if (blocked) invalidEdgeIds.add(edge.id);
+    return !blocked;
+  }).map((edge) => {
+    if (!edge.exteriorApproachFallbackEntranceId) return edge;
+    const entranceId = edge.exteriorApproachFallbackEntranceId;
+    const ready = (campus.buildings ?? []).some((building) =>
+      (building.entrances ?? []).some((entrance) => {
+        if (entrance.id !== entranceId) return false;
+        return building.floors.some((floor) => (floor.exteriorZones ?? []).some((zone) =>
+          exteriorApproachEntranceReadiness(campus, building.id, floor.id, zone.id, entranceId, invalidEdgeIds).standardReady,
+        ));
+      }),
+    );
+    if (ready) return edge;
+    const restored = { ...edge, distance: edge.exteriorApproachFallbackOriginalDistance ?? edge.distance };
+    if (edge.exteriorApproachFallbackOriginalClosed === undefined) delete restored.closed;
+    else restored.closed = edge.exteriorApproachFallbackOriginalClosed;
+    return restored;
   });
   // Linked-object accessibility can be stale in older persisted campuses.
   // Keep the authored node/edge records intact, but expose an effective route
@@ -634,13 +870,135 @@ export function routineRouteGraph(
   campus: Campus,
   nodes: NavigationNode[] = campus.navNodes ?? [],
   routeEdges: NavigationEdge[] = buildTestRouteEdges(campus),
+  routeMode: RouteMode = "standard",
 ): { nodes: NavigationNode[]; edges: NavigationEdge[] } {
-  const routineNodes = nodes.filter((node) => !isEmergencyOnlyNavigationNode(campus, node));
+  const graphCampus = reconcileExteriorApproachNavigation(campus);
+  const graphNodes = graphCampus.navNodes ?? nodes;
+  const routineNodes = graphNodes.filter((node) => !isEmergencyOnlyNavigationNode(graphCampus, node));
   const routineNodeIds = new Set(routineNodes.map((node) => node.id));
   return {
     nodes: routineNodes,
-    edges: routeEdges.filter((edge) => routineNodeIds.has(edge.startNodeId) && routineNodeIds.has(edge.endNodeId)),
+    edges: filterCompleteExteriorFallbackEdges(
+      graphCampus,
+      filterRoutineEntranceDirectionEdges(graphCampus, routeEdges.filter((edge) => routineNodeIds.has(edge.startNodeId) && routineNodeIds.has(edge.endNodeId))),
+      routeMode,
+    ),
   };
+}
+
+/**
+ * Keep direction semantics at the route adapter boundary. Persisted Entrance
+ * transitions remain a physical relationship, while routine routing receives
+ * a directed view of that relationship: inbound uses Entrance→Door and
+ * outbound uses Door→Entrance. A single normal General Access doorway, or a
+ * building with no outbound-capable General Access doorway, keeps the safe
+ * compatibility fallback for older/incomplete authoring.
+ */
+export function filterRoutineEntranceDirectionEdges(
+  campus: Campus,
+  routeEdges: NavigationEdge[],
+): NavigationEdge[] {
+  const nodes = campus.navNodes ?? [];
+  return routeEdges.flatMap((edge) => {
+    const start = nodes.find((node) => node.id === edge.startNodeId);
+    const end = nodes.find((node) => node.id === edge.endNodeId);
+    const entranceNode = [start, end].find((node) => !!node && !!node.entranceId && !node.floorId);
+    if (!entranceNode) return [edge];
+    const otherNode = entranceNode === start ? end : start;
+    const building = (campus.buildings ?? []).find((candidate) => candidate.id === entranceNode.buildingId);
+    const entrance = building?.entrances?.find((candidate) => candidate.id === entranceNode.entranceId);
+    if (!building || !entrance || normalizeEntranceType(entrance.type) !== "general") return [edge];
+    // Direct Entrance↔Outdoor handoffs are physical fallback connections, not
+    // semantic role bridges. Give them the same directed routine view as the
+    // Entrance↔Door edge so an Entrance Only door cannot leave through a
+    // direct shortcut unless the no-routine-exit compatibility rule applies.
+    if (edge.type !== "entrance_transition") {
+      if (!otherNode) return [edge];
+      const direction = normalizeEntranceDirection(entrance);
+      const singleGeneralFallback = normalGeneralEntranceCount(campus, building.id) === 1;
+      const allowInbound = singleGeneralFallback || direction !== "exit_only";
+      const allowOutbound = singleGeneralFallback || direction !== "entrance_only"
+        || !hasNormalOutboundGeneralEntrance(campus, building.id);
+      if (allowInbound && allowOutbound) return [{ ...edge, bidirectional: true }];
+      if (allowInbound) return [{ ...edge, startNodeId: otherNode.id, endNodeId: entranceNode.id, bidirectional: false }];
+      if (allowOutbound) return [{ ...edge, startNodeId: entranceNode.id, endNodeId: otherNode.id, bidirectional: false }];
+      return [];
+    }
+    const doorNode = [start, end].find((node) => !!node && !!node.floorId && !!node.doorId);
+    if (!entranceNode || !doorNode || !entranceNode.buildingId || !entranceNode.entranceId) return [edge];
+    const direction = normalizeEntranceDirection(entrance);
+    const singleGeneralFallback = normalGeneralEntranceCount(campus, building.id) === 1;
+    const allowInbound = singleGeneralFallback || direction !== "exit_only";
+    const allowOutbound = singleGeneralFallback || direction !== "entrance_only"
+      || !hasNormalOutboundGeneralEntrance(campus, building.id);
+    if (allowInbound && allowOutbound) return [{ ...edge, startNodeId: entranceNode.id, endNodeId: doorNode.id, bidirectional: true }];
+    if (allowInbound) return [{ ...edge, startNodeId: entranceNode.id, endNodeId: doorNode.id, bidirectional: false }];
+    if (allowOutbound) return [{ ...edge, startNodeId: doorNode.id, endNodeId: entranceNode.id, bidirectional: false }];
+    return [];
+  });
+}
+
+/**
+ * A direct Entrance-to-Outdoor edge is a compatibility fallback only while
+ * the same Entrance has no complete physical Veranda approach. Older/pathway
+ * generated edges do not carry the reconciliation fallback metadata, so this
+ * routine adapter also resolves the semantic pair from its endpoint IDs.
+ * Keep the edge in the canonical graph and Emergency graph; suppress it only
+ * for the routine mode whose complete approach makes it inapplicable.
+ */
+export function filterCompleteExteriorFallbackEdges(
+  campus: Campus,
+  routeEdges: NavigationEdge[],
+  routeMode: RouteMode = "standard",
+): NavigationEdge[] {
+  if (routeMode === "emergency") return routeEdges;
+  const nodes = campus.navNodes ?? [];
+  const completeByEntrance = new Map<string, boolean>();
+  for (const building of campus.buildings ?? []) {
+    for (const floor of building.floors ?? []) {
+      for (const zone of floor.exteriorZones ?? []) {
+        const entranceIds = new Set([
+          ...(zone.linkedEntranceIds ?? []),
+          ...(zone.linkedEntranceId ? [zone.linkedEntranceId] : []),
+          ...(floor.entranceSteps ?? []).filter((feature) => feature.parentZoneId === zone.id && feature.linkedEntranceId).map((feature) => feature.linkedEntranceId as string),
+          ...(floor.entranceRamps ?? []).filter((feature) => feature.parentZoneId === zone.id && feature.linkedEntranceId).map((feature) => feature.linkedEntranceId as string),
+        ]);
+        for (const entranceId of entranceIds) {
+          const readiness = exteriorApproachEntranceReadiness(campus, building.id, floor.id, zone.id, entranceId);
+          const noRoutineOutbound = !hasNormalOutboundGeneralEntrance(campus, building.id);
+          // Directional readiness remains honest (an Entrance Only branch is
+          // inbound-ready), while the route adapter may use that same complete
+          // physical branch for outbound compatibility when this building has
+          // no routine Exit/Both entrance. The persisted direction is never
+          // changed by this exception.
+          const compatibilityComplete = noRoutineOutbound
+            && normalizeEntranceType((building.entrances ?? []).find((entrance) => entrance.id === entranceId)?.type) === "general"
+            && (routeMode === "accessible" ? readiness.accessibleInboundReady : readiness.inboundReady);
+          const complete = (routeMode === "accessible" ? readiness.accessibleReady : readiness.standardReady)
+            || compatibilityComplete;
+          completeByEntrance.set(entranceId, (completeByEntrance.get(entranceId) ?? false) || complete);
+        }
+      }
+    }
+  }
+  if (completeByEntrance.size === 0) return routeEdges;
+  const nodeById = new Map(nodes.map((node) => [node.id, node]));
+  return routeEdges.filter((edge) => {
+    if (edge.type === "entrance_transition" || edge.derivedOwnerType) return true;
+    const start = nodeById.get(edge.startNodeId);
+    const end = nodeById.get(edge.endNodeId);
+    const entranceNode = [start, end].find((node) => !!node?.entranceId && !node.floorId);
+    if (!entranceNode?.entranceId || !completeByEntrance.get(entranceNode.entranceId)) return true;
+    const other = start === entranceNode ? end : start;
+    const isCanonicalOutdoorTarget = !!other
+      // A few legacy snapshots persisted the campus-side outdoor node with a
+      // floorId. Its semantic type is still authoritative for this adapter.
+      && (other.type === "outdoor" || !other.floorId)
+      && !other.entranceId
+      && !other.derivedOwnerType
+      && !other.exteriorEmergencyStairId;
+    return !isCanonicalOutdoorTarget;
+  });
 }
 
 export function roomRouteInfo(
@@ -716,16 +1074,18 @@ function floorContext(building: Campus["buildings"][number], floor?: FloorPlan):
   return floor ? `${building.code} · ${floor.label}` : building.code;
 }
 
-/** Resolve a semantic Building endpoint through one of its actual outdoor
- * Entrance nodes. The picker exposes the Building; this adapter chooses a
- * stable routable entrance without changing the canonical graph. */
-export function resolveBuildingEntranceNodeId(
+/** Resolve the routable Entrance candidates for a semantic Building endpoint.
+ * Keep all direction-eligible candidates here; the route adapter can then let
+ * the existing path cost choose among multiple doors instead of treating the
+ * primary/index ordering as a routing decision. */
+function resolveBuildingEntranceNodeIds(
   campus: Campus,
   building: Campus["buildings"][number],
   routeEdges = buildTestRouteEdges(campus),
   accessibleOnly = false,
   emergencyOnly = false,
-): string | null {
+  directionRole: EntranceDirectionRole = "any",
+): string[] {
   const nodes = campus.navNodes ?? [];
   const candidates = (building.entrances ?? []).map((entrance, index) => {
     const node = nodes.find((candidate) => candidate.buildingId === building.id
@@ -738,6 +1098,7 @@ export function resolveBuildingEntranceNodeId(
       && (edge.startNodeId === node.id || edge.endNodeId === node.id));
     const type = normalizeEntranceType(entrance.type);
     if (!emergencyOnly && type !== "general") return null;
+    if (!emergencyOnly && !entranceDirectionAllowed(campus, building.id, entrance, directionRole)) return null;
     const priority = type === "general" ? (entrance.isPrimary ? 0 : 1) : type === "service" ? 2 : 3;
     if (accessibleOnly && (entrance.accessible === false || node.accessible === false)) return null;
     const emergencyStatus = emergencyOnly && type === "emergency_exit"
@@ -757,15 +1118,42 @@ export function resolveBuildingEntranceNodeId(
   }
   if (pool.length === 0 && !emergencyOnly) pool = candidates;
   pool.sort((left, right) => left.priority - right.priority || left.index - right.index);
-  if (pool[0]) return pool[0].node.id;
+  if (pool.length > 0) return pool.map((candidate) => candidate.node.id);
   const legacy = building.entranceNodeId ? nodes.find((node) => node.id === building.entranceNodeId) : undefined;
   if (legacy && !(building.entrances ?? []).length
     && (!accessibleOnly || legacy.accessible !== false)
     && (!accessibleOnly || routeEdges.some((edge) => !edge.closed && edge.accessible
       && (edge.startNodeId === legacy.id || edge.endNodeId === legacy.id)))
     && (!emergencyOnly || routeEdges.some((edge) => !edge.closed && edge.emergencySafe !== false
-      && (edge.startNodeId === legacy.id || edge.endNodeId === legacy.id)))) return legacy.id;
-  return null;
+      && (edge.startNodeId === legacy.id || edge.endNodeId === legacy.id)))) return [legacy.id];
+  return [];
+}
+
+/** Resolve a semantic Building endpoint through one of its actual outdoor
+ * Entrance nodes. The picker exposes the Building; callers that need a route
+ * endpoint may evaluate the returned candidates by the existing path cost. */
+export function resolveBuildingEntranceNodeId(
+  campus: Campus,
+  building: Campus["buildings"][number],
+  routeEdges = buildTestRouteEdges(campus),
+  accessibleOnly = false,
+  emergencyOnly = false,
+  directionRole: EntranceDirectionRole = "any",
+): string | null {
+  return resolveBuildingEntranceNodeIds(campus, building, routeEdges, accessibleOnly, emergencyOnly, directionRole)[0] ?? null;
+}
+
+function resolveBuildingRouteTerminalNodeId(
+  campus: Campus,
+  building: Campus["buildings"][number],
+  nodeIds: string[],
+  routeEdges: NavigationEdge[],
+  accessibleOnly: boolean,
+  directionRole: EntranceDirectionRole,
+): string | null {
+  const candidates = resolveBuildingEntranceNodeIds(campus, building, routeEdges, accessibleOnly, false, directionRole);
+  const routedTerminal = nodeIds.at(-1);
+  return routedTerminal && candidates.includes(routedTerminal) ? routedTerminal : candidates[0] ?? null;
 }
 
 /** Resolve the indoor side of a Building Entrance for callers whose semantic
@@ -784,6 +1172,10 @@ export function resolveBuildingIndoorEntranceNodeId(
       && node.entranceId === entrance.id
       && !node.floorId);
     if (!entranceNode || (accessibleOnly && (entrance.accessible === false || entranceNode.accessible === false))) return null;
+    // A Room destination is reached from outside through the Entrance→Door
+    // boundary, so an Exit Only Entrance cannot be selected for this inbound
+    // leg. The transition edge itself remains canonical and directed.
+    if (!entranceDirectionAllowed(campus, building.id, entrance, "inbound")) return null;
     const outdoorEdge = findEntranceOutdoorConnection(nodes, routeEdges, building.id, entrance.id);
     if (!outdoorEdge || outdoorEdge.closed || (accessibleOnly && outdoorEdge.accessible === false)) return null;
     const transition = findEntranceTransitionForEntrance(nodes, routeEdges, building.id, entrance.id);
@@ -1050,10 +1442,91 @@ function exteriorEmergencyStairRoute(
   return finishAtCampusGate(basePath);
 }
 
+/** Re-enable a complete physical Veranda only for Emergency's final General
+ * fallback tier. Normal Veranda edges are intentionally marked non-emergency
+ * safe so they cannot outrank a dedicated Emergency Stair/Exit; once the
+ * resolver has selected this specific General Entrance as the fallback, its
+ * own canonical approach is the physical route that must be traversed. */
+function emergencyGeneralFallbackEdges(
+  campus: Campus,
+  routeEdges: NavigationEdge[],
+  entranceId: string,
+  outdoorTargetId: string,
+): { edges: NavigationEdge[]; nodeIds: ReadonlySet<string> } {
+  const nodes = campus.navNodes ?? [];
+  const building = (campus.buildings ?? []).find((candidate) => (candidate.entrances ?? []).some((entrance) => entrance.id === entranceId));
+  if (!building) return { edges: routeEdges, nodeIds: new Set() };
+  const approachNodeIds = new Set<string>();
+  const approachFeatureIds = new Set<string>();
+  const approachZoneIds = new Set<string>();
+  let hasCompleteApproach = false;
+  for (const floor of building.floors ?? []) {
+    for (const zone of floor.exteriorZones ?? []) {
+      const readiness = exteriorApproachEntranceReadiness(campus, building.id, floor.id, zone.id, entranceId);
+      if (!readiness.standardReady) continue;
+      hasCompleteApproach = true;
+      approachZoneIds.add(zone.id);
+      approachNodeIds.add(exteriorApproachNodeId(campus.id, building.id, floor.id, "entrance_threshold", entranceId, "threshold"));
+      const approachFeatures = [
+        ...(floor.entranceSteps ?? []).filter((item) => item.parentZoneId === zone.id).map((feature) => ({ feature, featureType: "entrance_steps" as const })),
+        ...(floor.entranceRamps ?? []).filter((item) => item.parentZoneId === zone.id).map((feature) => ({ feature, featureType: "entrance_ramp" as const })),
+      ];
+      const zoneServesEntrance = [
+        ...(zone.linkedEntranceIds ?? []),
+        ...(zone.linkedEntranceId ? [zone.linkedEntranceId] : []),
+      ].includes(entranceId);
+      const linkedFeatures = approachFeatures.filter(({ feature }) => feature.linkedEntranceId
+        ? feature.linkedEntranceId === entranceId
+        : zoneServesEntrance);
+      for (const { feature, featureType } of linkedFeatures) {
+        approachFeatureIds.add(feature.id);
+        approachNodeIds.add(exteriorApproachNodeId(campus.id, building.id, floor.id, featureType, feature.id, "inner"));
+        approachNodeIds.add(exteriorApproachNodeId(campus.id, building.id, floor.id, featureType, feature.id, "outer"));
+      }
+      for (const node of nodes) {
+        if (node.floorId !== floor.id) continue;
+        if (node.exteriorZoneId === zone.id || (node.derivedOwnerType === "exterior_zone" && node.derivedOwnerId === zone.id)) {
+          approachNodeIds.add(node.id);
+        }
+      }
+      for (const node of nodes) {
+        if (node.floorId !== floor.id || !node.derivedOwnerType) continue;
+        if ((node.derivedOwnerType === "entrance_ramp" || node.derivedOwnerType === "entrance_steps")
+          && approachFeatureIds.has(node.derivedOwnerId ?? "")) approachNodeIds.add(node.id);
+        if (node.derivedOwnerType === "entrance_threshold" && node.derivedOwnerId === entranceId) approachNodeIds.add(node.id);
+      }
+    }
+  }
+  if (!hasCompleteApproach) return { edges: routeEdges, nodeIds: new Set() };
+  // The existing Building Outdoor handoff may be an authored edge from the
+  // campus target to the derived outer anchor (rather than the newer derived
+  // auto-handoff form). Include that semantic target so this specific edge is
+  // re-enabled with the rest of the selected General approach.
+  approachNodeIds.add(outdoorTargetId);
+  const edges = routeEdges.map((edge) => {
+    const approachOwned = edge.derivedOwnerType === "entrance_threshold"
+      ? edge.derivedOwnerId === entranceId
+      : edge.derivedOwnerType === "exterior_zone"
+        ? approachZoneIds.has(edge.derivedOwnerId ?? "")
+        : (edge.derivedOwnerType === "entrance_ramp" || edge.derivedOwnerType === "entrance_steps")
+          ? approachFeatureIds.has(edge.derivedOwnerId ?? "")
+          : false;
+    const sharedHandoff = edge.exteriorApproachAutoHandoffTargetId === outdoorTargetId;
+    const authoredVerandaEdge = !edge.derivedOwnerType
+      && approachNodeIds.has(edge.startNodeId)
+      && approachNodeIds.has(edge.endNodeId);
+    return edge.emergencySafe === false && (approachOwned || sharedHandoff || authoredVerandaEdge)
+      ? { ...edge, emergencySafe: true }
+      : edge;
+  });
+  return { edges, nodeIds: approachNodeIds };
+}
+
 /** An Entrance egress (Emergency Exit or General fallback) must be reached
  * through its own indoor/outdoor bridge: the route has to pass the Entrance
  * node, not reach its outdoor target by walking outside from another exit. */
 function entranceEgressRoute(
+  campus: Campus,
   routeEdges: NavigationEdge[],
   searchNodes: NavigationNode[],
   startNodeId: string,
@@ -1061,9 +1534,14 @@ function entranceEgressRoute(
 ): GraphPath | null {
   if (!candidate.entranceNodeId) return null;
   const dischargeNodeId = candidate.outdoorDischargeNodeId ?? candidate.nodeId;
-  const approachNodes = entranceEmergencyNodes(searchNodes, startNodeId, candidate.entranceNodeId, dischargeNodeId);
+  const fallbackApproach = candidate.kind === "general"
+    ? emergencyGeneralFallbackEdges(campus, routeEdges, (searchNodes.find((node) => node.id === candidate.entranceNodeId)?.entranceId) ?? "", dischargeNodeId)
+    : undefined;
+  const candidateEdges = fallbackApproach?.edges ?? routeEdges;
+  const approachNodes = entranceEmergencyNodes(searchNodes, startNodeId, candidate.entranceNodeId, dischargeNodeId, fallbackApproach?.nodeIds)
+    .map((node) => fallbackApproach?.nodeIds.has(node.id) ? { ...node, emergencySafe: true } : node);
   const approachNodeIds = new Set(approachNodes.map((node) => node.id));
-  const approachEdges = routeEdges.filter((edge) => approachNodeIds.has(edge.startNodeId) && approachNodeIds.has(edge.endNodeId));
+  const approachEdges = candidateEdges.filter((edge) => approachNodeIds.has(edge.startNodeId) && approachNodeIds.has(edge.endNodeId));
   const path = findNavigationRoute(approachNodes, approachEdges, startNodeId, dischargeNodeId, false, true);
   if (!path || !path.nodeIds.includes(candidate.entranceNodeId)) return null;
   if (dischargeNodeId === candidate.nodeId) return path;
@@ -1104,7 +1582,7 @@ export function chooseEmergencyDestinationCandidate(
       candidate,
       path: candidate.kind === "exterior_stair"
         ? exteriorEmergencyStairRoute(campus, routeEdges, searchNodes, startNodeId, candidate)
-        : entranceEgressRoute(routeEdges, searchNodes, startNodeId, candidate),
+        : entranceEgressRoute(campus, routeEdges, searchNodes, startNodeId, candidate),
     }))
     .filter((entry): entry is { candidate: EmergencyDestinationCandidate; path: GraphPath } => !!entry.path)
     .sort((left, right) => left.candidate.priority - right.candidate.priority
@@ -1183,6 +1661,12 @@ function routeLocationLabel(campus: Campus, node: CampusNavNode): { label: strin
     const entrance = (building.entrances ?? []).find((candidate) => candidate.id === node.entranceId);
     if (entrance) return { label: entrance.name || `${building.code} Entrance`, kind: "entrance" };
   }
+  if (node.derivedOwnerType === "entrance_ramp" && node.derivedRole === "outer") {
+    return { label: "Ramp", kind: "exterior_ramp" };
+  }
+  if (node.derivedOwnerType === "entrance_steps" && node.derivedRole === "outer") {
+    return { label: "Stairs", kind: "exterior_stairs" };
+  }
   if (node.stairId && building) {
     const floor = building.floors.find((candidate) => candidate.id === node.floorId);
     const index = floor?.stairs.findIndex((candidate) => candidate.id === node.stairId) ?? -1;
@@ -1221,12 +1705,13 @@ function entranceEmergencyNodes(
   startNodeId: string,
   entranceNodeId: string,
   dischargeNodeId: string,
+  additionalNodeIds: ReadonlySet<string> = new Set(),
 ): NavigationNode[] {
-  const allowed = new Set([startNodeId, entranceNodeId, dischargeNodeId]);
+  const allowed = new Set([startNodeId, entranceNodeId, dischargeNodeId, ...additionalNodeIds]);
   return nodes.filter((node) => !!node.floorId || allowed.has(node.id));
 }
 
-function humanRouteSteps(campus: Campus, nodeIds: string[], destinationValue?: string): string[] {
+export function humanRouteSteps(campus: Campus, nodeIds: string[], destinationValue?: string): string[] {
   if (nodeIds.length === 0) return [];
   const nodes = campus.navNodes ?? [];
   const locations = nodeIds.map((id) => {
@@ -1241,6 +1726,8 @@ function humanRouteSteps(campus: Campus, nodeIds: string[], destinationValue?: s
       steps.push(locations[i - 1]?.kind === "room" ? `Exit through ${location.label}` : `Enter through ${location.label}`);
     }
     else if (location.kind === "entrance") steps.push(`Pass ${location.label}`);
+    else if (location.kind === "exterior_ramp") steps.push("Continue outside via ramp");
+    else if (location.kind === "exterior_stairs") steps.push("Continue outside via stairs");
     else if (location.kind !== "walking") steps.push(`Continue to ${location.label}`);
     else if (steps[steps.length - 1] !== "Continue along the hallway") steps.push("Continue along the hallway");
   }
@@ -1500,7 +1987,7 @@ export function resolveNodeId(
  * each consecutive pair. If an edge is traversed backwards, its bendPoints
  * are reversed. Duplicate coordinates at edge junctions are avoided.
  */
-export function buildRoutePolyline(
+function buildRoutePolylineContinuous(
   nodeIds: string[],
   edges: { id: string; startNodeId: string; endNodeId: string; bidirectional: boolean; bendPoints?: { x: number; y: number }[] }[],
   nodes: { id: string; x: number; y: number }[],
@@ -1604,6 +2091,105 @@ export function buildRoutePolyline(
   return normalized;
 }
 
+/**
+ * Build route geometry without manufacturing a segment for a missing
+ * canonical edge.  Context filtering and legacy display projection can leave
+ * an endpoint pair without a drawable edge; keep the two runs separate rather
+ * than letting SVG connect them through empty space.
+ */
+export function buildRoutePolylineFragments(
+  nodeIds: string[],
+  edges: { id: string; startNodeId: string; endNodeId: string; bidirectional: boolean; bendPoints?: { x: number; y: number }[] }[],
+  nodes: { id: string; x: number; y: number }[],
+): { x: number; y: number }[][] {
+  if (nodeIds.length === 0) return [];
+  const hasEdge = (fromId: string, toId: string) => edges.some((edge) =>
+    (edge.startNodeId === fromId && edge.endNodeId === toId)
+      || (edge.bidirectional && edge.startNodeId === toId && edge.endNodeId === fromId),
+  );
+  const idFragments: string[][] = [];
+  let current = [nodeIds[0]];
+  for (let index = 0; index < nodeIds.length - 1; index += 1) {
+    const fromId = nodeIds[index];
+    const toId = nodeIds[index + 1];
+    if (hasEdge(fromId, toId)) {
+      current.push(toId);
+    } else {
+      idFragments.push(current);
+      current = [toId];
+    }
+  }
+  idFragments.push(current);
+  return idFragments
+    .map((fragment) => buildRoutePolylineContinuous(fragment, edges, nodes))
+    .filter((fragment) => fragment.length > 0);
+}
+
+/** Backwards-compatible single-polyline helper for callers that already know
+ * their route is contiguous. Rendering callers should use the fragment form
+ * above so a missing edge can never be drawn as a straight-line bridge. */
+export function buildRoutePolyline(
+  nodeIds: string[],
+  edges: { id: string; startNodeId: string; endNodeId: string; bidirectional: boolean; bendPoints?: { x: number; y: number }[] }[],
+  nodes: { id: string; x: number; y: number }[],
+): { x: number; y: number }[] {
+  return buildRoutePolylineFragments(nodeIds, edges, nodes).flat();
+}
+
+/**
+ * Trim only the rendered endpoint of a route fragment when it terminates at a
+ * transition/waypoint marker. Route strokes and marker glyphs are siblings in
+ * the same zoomed SVG world group, so the marker boundary is already expressed
+ * in the route's coordinate space. Dividing this world-space radius by zoom
+ * would double-convert it and make the route visibly too short when zoomed
+ * out. This is presentation-only: graph coordinates, edge distances, and
+ * authored bends are untouched.
+ */
+export function trimRouteFragmentAtMarkerBoundary(
+  points: { x: number; y: number }[],
+  markerPoints: { x: number; y: number }[],
+  zoom = 1,
+  markerRadiusWorld = 10,
+): { x: number; y: number }[] {
+  if (points.length < 2 || markerPoints.length === 0) return points;
+  // Keep the zoom argument for the existing renderer call sites and API
+  // compatibility. The path and marker are transformed together, therefore
+  // no zoom conversion belongs in this helper.
+  void zoom;
+  const radius = Math.max(0, markerRadiusWorld);
+  if (radius === 0) return points;
+  const trimmed = points.map((point) => ({ ...point }));
+
+  const trimEnd = (atStart: boolean, marker: { x: number; y: number }) => {
+    const endpoint = atStart ? trimmed[0] : trimmed[trimmed.length - 1];
+    if (!endpoint || Math.hypot(endpoint.x - marker.x, endpoint.y - marker.y) > radius * 2.5) return;
+    const neighbor = atStart ? trimmed[1] : trimmed[trimmed.length - 2];
+    if (!neighbor) return;
+    const dx = neighbor.x - endpoint.x;
+    const dy = neighbor.y - endpoint.y;
+    const length = Math.hypot(dx, dy);
+    if (length < 0.001) return;
+    const distance = Math.min(radius, length * 0.75);
+    const replacement = {
+      x: endpoint.x + (dx / length) * distance,
+      y: endpoint.y + (dy / length) * distance,
+    };
+    if (atStart) trimmed[0] = replacement;
+    else trimmed[trimmed.length - 1] = replacement;
+  };
+
+  for (const marker of markerPoints) {
+    const start = trimmed[0];
+    const end = trimmed[trimmed.length - 1];
+    if (!start || !end) break;
+    const startDistance = Math.hypot(start.x - marker.x, start.y - marker.y);
+    const endDistance = Math.hypot(end.x - marker.x, end.y - marker.y);
+    if (endDistance <= startDistance) trimEnd(false, marker);
+    else trimEnd(true, marker);
+  }
+  return trimmed;
+}
+
 /** Replace semantic Room endpoints with their linked physical Door for route
  * presentation. Canonical pathfinding still uses the Room node; this helper is
  * display-only and deliberately leaves the graph data untouched. */
@@ -1630,6 +2216,40 @@ export function physicalRouteNodeIds(nodeIds: string[], campus: Campus): string[
   return resolved.filter((id, index) => index === 0 || id !== resolved[index - 1]);
 }
 
+function samePoint(left: { x: number; y: number }, right: { x: number; y: number }, epsilon = 1): boolean {
+  return Math.hypot(left.x - right.x, left.y - right.y) <= epsilon;
+}
+
+function splitVisibleRouteIds(nodeIds: string[], isVisible: (id: string) => boolean): string[][] {
+  const fragments: string[][] = [];
+  let current: string[] = [];
+  const flush = () => {
+    if (current.length > 0) fragments.push(current);
+    current = [];
+  };
+  for (const id of nodeIds) {
+    if (isVisible(id)) current.push(id);
+    else flush();
+  }
+  flush();
+  return fragments;
+}
+
+/** Display-only route identity. Keep semantic Room endpoints in the polyline
+ * so the active route begins/ends at the selected location, while interior
+ * Room nodes still project to their physical Door as before. */
+export function routeDisplayNodeIds(nodeIds: string[], campus: Campus): string[] {
+  const physicalIds = physicalRouteNodeIds(nodeIds, campus);
+  if (physicalIds.length === 0) return physicalIds;
+  const nodes = campus.navNodes ?? [];
+  const first = nodes.find((node) => node.id === nodeIds[0]);
+  const last = nodes.find((node) => node.id === nodeIds[nodeIds.length - 1]);
+  const display = [...physicalIds];
+  if (first?.roomId && first.id !== display[0]) display.unshift(first.id);
+  if (last?.roomId && last.id !== display[display.length - 1]) display.push(last.id);
+  return display.filter((id, index) => index === 0 || id !== display[index - 1]);
+}
+
 export function buildPhysicalRoutePolyline(
   nodeIds: string[],
   campus: Campus,
@@ -1639,20 +2259,131 @@ export function buildPhysicalRoutePolyline(
   return buildRoutePolyline(physicalRouteNodeIds(nodeIds, campus), edges, nodes);
 }
 
-function visibleContextRouteNodeIds(
+function isExteriorRouteNode(node: CampusNavNode | undefined): boolean {
+  if (!node) return false;
+  // Veranda Walking Points are floor-scoped because they are authored in a
+  // Floor Editor, while their route is physically part of the outdoor
+  // approach.  Derived approach anchors are the same kind of boundary
+  // geometry. Keep both in the Outdoor projection; ordinary floor-local
+  // Walking Points/Doors remain private to their Floor projection.
+  return !node.floorId || Boolean(node.exteriorZoneId) || Boolean(node.derivedOwnerType);
+}
+
+function isOutdoorPresentationNode(node: CampusNavNode | undefined): boolean {
+  return Boolean(node && !node.floorId && !node.exteriorZoneId && !node.derivedOwnerType);
+}
+
+function isFloorPresentationNode(node: CampusNavNode | undefined, currentContext: Extract<TestRouteContext, { kind: "floor" }>): boolean {
+  if (!node || node.buildingId !== currentContext.buildingId) return false;
+  if (node.floorId === currentContext.floorId) return true;
+  // Entrance nodes and derived threshold/access anchors are canonical
+  // building-handoff nodes. They are shown in the selected Floor view after
+  // being projected back into the Floor coordinate space.
+  return !node.floorId && (node.entranceId !== undefined || node.derivedOwnerType !== undefined);
+}
+
+/**
+ * Convert only the Floor-authored portion of an exterior route into the
+ * Outdoor canvas coordinate space. Floor Veranda points and inner/threshold
+ * anchors are stored in their Floor frame; their Outdoor route is still the
+ * same canonical node/edge sequence, but the overlay must use the Building
+ * frame to avoid drawing a stale local-coordinate jump. Authored Veranda
+ * bends are projected unchanged in shape, while derived approach bends are
+ * recomputed from their projected endpoints.
+ */
+function exteriorRouteDisplayGeometry(
+  campus: Campus,
+  nodeIds: string[],
+  edges: NavigationEdge[],
+  nodes: CampusNavNode[],
+  currentContext?: TestRouteContext,
+): { nodes: CampusNavNode[]; edges: NavigationEdge[] } {
+  if (!currentContext) return { nodes, edges };
+  const displayNodeIds = new Set(nodeIds);
+  const projectNode = (node: CampusNavNode): CampusNavNode => {
+    if (!displayNodeIds.has(node.id)) return node;
+    const building = (campus.buildings ?? []).find((candidate) => candidate.id === node.buildingId);
+    if (currentContext.kind === "outdoor") {
+      const floor = building?.floors.find((candidate) => candidate.id === node.floorId);
+      if (!node.floorId || (!node.exteriorZoneId && !node.derivedOwnerType) || !building || !floor) return node;
+      return { ...node, ...exteriorFloorPointToCampusWorld(building, floor, node) };
+    }
+    if (node.buildingId !== currentContext.buildingId || node.floorId === currentContext.floorId) return node;
+    const floor = building?.floors.find((candidate) => candidate.id === currentContext.floorId);
+    if (!building || !floor || node.floorId || (!node.entranceId && !node.derivedOwnerType)) return node;
+    return { ...node, ...campusWorldPointToExteriorFloor(building, floor, node) };
+  };
+  const projectedNodes = nodes.map(projectNode);
+  const projectedNodeById = new Map(projectedNodes.map((node) => [node.id, node]));
+  const projectEdge = (edge: NavigationEdge): NavigationEdge => {
+    const start = nodes.find((node) => node.id === edge.startNodeId);
+    const end = nodes.find((node) => node.id === edge.endNodeId);
+    if (!start || !end || !isExteriorRouteNode(start) || !isExteriorRouteNode(end)) return edge;
+    const floorNode = [start, end].find((node) => node.floorId && isExteriorRouteNode(node));
+    if (!floorNode) return edge;
+    const projectedStart = projectedNodeById.get(start.id);
+    const projectedEnd = projectedNodeById.get(end.id);
+    if (!projectedStart || !projectedEnd) return edge;
+    const building = (campus.buildings ?? []).find((candidate) => candidate.id === floorNode.buildingId);
+    const floor = currentContext.kind === "floor"
+      ? building?.floors.find((candidate) => candidate.id === currentContext.floorId)
+      : building?.floors.find((candidate) => candidate.id === floorNode.floorId);
+    if (!building || !floor) return edge;
+    if (edge.derivedOwnerType) {
+      const bendPoints = projectedStart.x !== projectedEnd.x && projectedStart.y !== projectedEnd.y
+        ? [{ x: projectedEnd.x, y: projectedStart.y }]
+        : undefined;
+      return bendPoints ? { ...edge, bendPoints } : { ...edge, bendPoints: undefined };
+    }
+    if (!edge.bendPoints?.length) return edge;
+    if (currentContext.kind === "floor") return edge;
+    return {
+      ...edge,
+      bendPoints: edge.bendPoints.map((point) => exteriorFloorPointToCampusWorld(building, floor, point)),
+    };
+  };
+  return { nodes: projectedNodes, edges: edges.map(projectEdge) };
+}
+
+export function visibleContextRouteNodeIds(
   nodeIds: string[],
   campus: Campus,
   currentContext?: TestRouteContext,
 ): string[] {
-  const physicalIds = physicalRouteNodeIds(nodeIds, campus);
+  return visibleContextRouteNodeFragments(nodeIds, campus, currentContext).flat();
+}
+
+/**
+ * Return context-visible route runs without ever bridging over hidden route
+ * nodes. A renderer may draw each returned fragment independently; it must not
+ * flatten these runs before constructing geometry.
+ */
+export function visibleContextRouteNodeFragments(
+  nodeIds: string[],
+  campus: Campus,
+  currentContext?: TestRouteContext,
+): string[][] {
+  const physicalIds = routeDisplayNodeIds(nodeIds, campus);
   const nodes = campus.navNodes ?? [];
   const contextKey = (id: string) => {
     const node = nodes.find((candidate) => candidate.id === id);
     return node ? `${node.buildingId ?? "outdoor"}:${node.floorId ?? "outdoor"}` : "unknown";
   };
   if (!currentContext) {
+    let exteriorRun: string[] = [];
+    let bestExteriorRun: string[] = [];
+    for (const id of physicalIds) {
+      if (isExteriorRouteNode(nodes.find((candidate) => candidate.id === id))) {
+        exteriorRun.push(id);
+      } else {
+        if (exteriorRun.length > bestExteriorRun.length) bestExteriorRun = exteriorRun;
+        exteriorRun = [];
+      }
+    }
+    if (exteriorRun.length > bestExteriorRun.length) bestExteriorRun = exteriorRun;
+    if (bestExteriorRun.length > 0) return [bestExteriorRun];
     const contexts = new Set(physicalIds.map(contextKey));
-    if (contexts.size <= 1) return physicalIds;
+    if (contexts.size <= 1) return [physicalIds];
     let best: string[] = [];
     let run: string[] = [];
     let previousContext = "";
@@ -1666,25 +2397,110 @@ function visibleContextRouteNodeIds(
       run.push(id);
     }
     if (run.length > best.length) best = run;
-    return best.length > 0 ? best : physicalIds;
+    return [best.length > 0 ? best : physicalIds];
   }
-  const matches = (id: string) => {
-    const node = nodes.find((candidate) => candidate.id === id);
-    if (!node) return false;
-    if (currentContext.kind === "outdoor") return !node.floorId;
-    return node.floorId === currentContext.floorId && node.buildingId === currentContext.buildingId;
+  const matches = currentContext.kind === "outdoor"
+    ? (id: string) => isOutdoorPresentationNode(nodes.find((candidate) => candidate.id === id))
+    : (id: string) => isFloorPresentationNode(nodes.find((candidate) => candidate.id === id), currentContext);
+  return splitVisibleRouteIds(physicalIds, matches);
+}
+
+/**
+ * Collapse only a hidden exterior approach section in the Outdoor
+ * presentation when the canonical graph also contains the Building's actual
+ * Outdoor handoff edge.  The Veranda/Ramp/Steps nodes remain in the routed
+ * graph; this is strictly a display projection.  Requiring the existing
+ * Entrance<->Outdoor edge is important: it prevents filtering hidden nodes
+ * from inventing a straight line between unrelated visible fragments.
+ */
+export function collapseOutdoorHandoffFragments(
+  fragments: string[][],
+  campus: Campus,
+  edges: NavigationEdge[],
+  currentContext?: TestRouteContext,
+  routeNodeIds?: string[],
+): string[][] {
+  if (currentContext?.kind !== "outdoor" || fragments.length < 2) return fragments;
+  const nodes = campus.navNodes ?? [];
+  const nodeById = new Map(nodes.map((node) => [node.id, node]));
+  const displayRouteIds = routeNodeIds ? routeDisplayNodeIds(routeNodeIds, campus) : [];
+  const hasCanonicalHandoff = (fromId: string, toId: string): boolean => {
+    const from = nodeById.get(fromId);
+    const to = nodeById.get(toId);
+    if (!from || !to) return false;
+    const entrance = from.entranceId && !from.floorId ? from : to.entranceId && !to.floorId ? to : undefined;
+    const outdoor = entrance === from ? to : entrance === to ? from : undefined;
+    if (!entrance || !outdoor || !isOutdoorPresentationNode(outdoor)) return false;
+    if (edges.some((edge) => {
+      const forward = edge.startNodeId === fromId && edge.endNodeId === toId;
+      const reverse = edge.bidirectional && edge.startNodeId === toId && edge.endNodeId === fromId;
+      return (forward || reverse) && !edge.closed;
+    })) return true;
+    // A complete Veranda intentionally suppresses the direct Entrance->Outdoor
+    // fallback in the routine route graph.  In that case Outdoor still needs a
+    // display-only collapse, but only when the raw route proves that it crossed
+    // the physical feature transition; never infer it from the nearest node.
+    const fromIndex = displayRouteIds.indexOf(fromId);
+    const toIndex = displayRouteIds.indexOf(toId);
+    if (fromIndex < 0 || toIndex < 0 || Math.abs(toIndex - fromIndex) < 2) return false;
+    const low = Math.min(fromIndex, toIndex);
+    const high = Math.max(fromIndex, toIndex);
+    for (let index = low; index < high; index += 1) {
+      const left = nodeById.get(displayRouteIds[index]);
+      const right = nodeById.get(displayRouteIds[index + 1]);
+      const inner = left.derivedRole === "inner" && right.derivedRole === "outer" ? left : right.derivedRole === "inner" && left.derivedRole === "outer" ? right : undefined;
+      const outer = inner === left ? right : inner === right ? left : undefined;
+      if (!inner || !outer
+        || inner.derivedOwnerId !== outer.derivedOwnerId
+        || (inner.derivedOwnerType !== "entrance_ramp" && inner.derivedOwnerType !== "entrance_steps")
+        || inner.derivedOwnerType !== outer.derivedOwnerType) continue;
+      const forward = edges.some((edge) => edge.startNodeId === inner.id && edge.endNodeId === outer.id && !edge.closed);
+      const reverse = edges.some((edge) => edge.bidirectional && edge.startNodeId === outer.id && edge.endNodeId === inner.id && !edge.closed);
+      if (forward || reverse) return true;
+    }
+    return false;
   };
-  let best: string[] = [];
-  let run: string[] = [];
-  for (const id of physicalIds) {
-    if (matches(id)) run.push(id);
-    else {
-      if (run.length > best.length) best = run;
-      run = [];
+  const collapsed: string[][] = [];
+  for (const fragment of fragments) {
+    const previous = collapsed[collapsed.length - 1];
+    const previousEnd = previous?.[previous.length - 1];
+    const nextStart = fragment[0];
+    if (previous && previousEnd && nextStart && hasCanonicalHandoff(previousEnd, nextStart)) {
+      previous.push(...fragment);
+    } else {
+      collapsed.push([...fragment]);
     }
   }
-  if (run.length > best.length) best = run;
-  return best;
+  return collapsed;
+}
+
+/**
+ * Add only the canonical physical Entrance<->Outdoor handoff as a
+ * display-only projection edge when Outdoor hides a complete Veranda approach.
+ * The persisted/routed graph is never changed and generic Veranda nodes are
+ * never projected as endpoints.
+ */
+export function outdoorRouteProjectionEdges(
+  campus: Campus,
+  routeEdges: NavigationEdge[],
+  routeNodeIds: string[],
+  currentContext?: TestRouteContext,
+): NavigationEdge[] {
+  if (currentContext?.kind !== "outdoor") return routeEdges;
+  const routeIds = new Set(routeDisplayNodeIds(routeNodeIds, campus));
+  const nodes = campus.navNodes ?? [];
+  const nodeById = new Map(nodes.map((node) => [node.id, node]));
+  const projected = (campus.navEdges ?? []).filter((edge) => {
+    if (edge.closed || edge.derivedOwnerType) return false;
+    const start = nodeById.get(edge.startNodeId);
+    const end = nodeById.get(edge.endNodeId);
+    const entrance = start?.entranceId && !start.floorId ? start : end?.entranceId && !end.floorId ? end : undefined;
+    const outdoor = entrance === start ? end : entrance === end ? start : undefined;
+    return !!entrance && !!outdoor && isOutdoorPresentationNode(outdoor)
+      && routeIds.has(entrance.id) && routeIds.has(outdoor.id);
+  });
+  const existing = new Set(routeEdges.map((edge) => edge.id));
+  return [...routeEdges, ...projected.filter((edge) => !existing.has(edge.id))];
 }
 
 function contextForNode(node: CampusNavNode): TestRouteContext {
@@ -1724,7 +2540,148 @@ function transitionKind(node: CampusNavNode, next: CampusNavNode): TestRouteTran
   if (node.elevatorId || next.elevatorId) return "elevator";
   if (node.stairId || next.stairId || node.exteriorEmergencyStairId || next.exteriorEmergencyStairId) return "stair";
   if (node.rampId || next.rampId) return "ramp";
+  if (node.derivedOwnerType === "entrance_ramp" || next.derivedOwnerType === "entrance_ramp") return "ramp";
+  if (node.derivedOwnerType === "entrance_steps" || next.derivedOwnerType === "entrance_steps") return "stair";
   return "entrance";
+}
+
+/** Resolve the one active admin continuation cue from the actual calculated
+ * route. A complete physical approach points at its selected access feature;
+ * a compatibility/direct route points at the canonical Entrance boundary.
+ * Emergency routes intentionally use their existing egress presentation. */
+export function routeContinuationMarkers(
+  campus: Campus,
+  nodeIds: string[],
+  routeMode: RouteMode = "standard",
+  currentContext?: TestRouteContext,
+  destinationValue?: string,
+  startValue?: string,
+): TestRouteContinuationMarker[] {
+  // A Building is the semantic endpoint. Its route is complete at the
+  // physical Entrance, so neither the hidden exterior approach nor an
+  // "Continue inside" cue belongs in that presentation.
+  if (routeMode === "emergency"
+    || destinationValue?.startsWith("building:")
+    || (currentContext?.kind === "outdoor" && startValue?.startsWith("building:"))) return [];
+  const nodes = campus.navNodes ?? [];
+  const physicalIds = routeDisplayNodeIds(nodeIds, campus);
+  const routeNodes = physicalIds
+    .map((id) => nodes.find((node) => node.id === id))
+    .filter((node): node is CampusNavNode => !!node);
+  // A continuation cue is only applicable when this editor is showing one
+  // fragment of a route that has a real fragment in another context. A route
+  // that ends at its destination must not gain a clickable-looking marker.
+  const hiddenContextBoundary = currentContext ? (() => {
+    const isVisible = currentContext.kind === "outdoor"
+      ? (id: string) => isOutdoorPresentationNode(nodes.find((node) => node.id === id))
+      : (id: string) => isFloorPresentationNode(nodes.find((node) => node.id === id), currentContext);
+    const visibleIndices = physicalIds
+      .map((id, index) => isVisible(id) ? index : -1)
+      .filter((index) => index >= 0);
+    if (visibleIndices.length === 0) return undefined;
+    const first = visibleIndices[0];
+    const last = visibleIndices[visibleIndices.length - 1];
+    return {
+      before: first > 0,
+      after: last < physicalIds.length - 1,
+      visibleIds: visibleIndices.map((index) => physicalIds[index]),
+    };
+  })() : undefined;
+  if (currentContext && !hiddenContextBoundary?.before && !hiddenContextBoundary?.after) return [];
+  const feature = selectedExteriorAccessFeatureNode(campus, nodeIds, routeMode);
+  // Floor presentation owns the actionable access-feature cue. Outdoor
+  // presentation deliberately abstracts Veranda internals and falls through
+  // to the physical Building Entrance handoff below.
+  if (feature && currentContext?.kind !== "outdoor") {
+    const featurePosition = currentContext?.kind === "floor"
+      ? (() => {
+        const building = (campus.buildings ?? []).find((candidate) => candidate.id === feature.buildingId);
+        const floor = building?.floors.find((candidate) => candidate.id === currentContext.floorId);
+        return building && floor && feature.buildingId === currentContext.buildingId && !feature.floorId
+          ? campusWorldPointToExteriorFloor(building, floor, feature)
+          : { x: feature.x, y: feature.y };
+      })()
+      : { x: feature.x, y: feature.y };
+    return [{
+      nodeId: feature.id,
+      kind: feature.derivedOwnerType === "entrance_ramp" ? "ramp" : "steps",
+      x: featurePosition.x,
+      y: featurePosition.y,
+    }];
+  }
+  const entrance = routeNodes.find((node) => node.entranceId && !node.floorId)
+    ?? routeNodes.find((node) => node.doorId);
+  if (!entrance) {
+    // Last-resort presentation host: the visible endpoint is clickable only
+    // because the actual route has a hidden continuation after this fragment.
+    // It is deliberately not treated as an Entrance and never changes graph
+    // topology or route eligibility.
+    const visibleEndpointId = hiddenContextBoundary?.after
+      ? hiddenContextBoundary.visibleIds[hiddenContextBoundary.visibleIds.length - 1]
+      : undefined;
+    const visibleEndpoint = visibleEndpointId
+      ? nodes.find((node) => node.id === visibleEndpointId)
+      : undefined;
+    if (!visibleEndpoint) return [];
+    const endpointIndex = physicalIds.indexOf(visibleEndpoint.id);
+    const targetNodeId = endpointIndex >= 0
+      ? physicalIds.slice(endpointIndex + 1).find((id) => id !== visibleEndpoint.id)
+      : undefined;
+    return [{
+      nodeId: visibleEndpoint.id,
+      kind: "waypoint",
+      x: visibleEndpoint.x,
+      y: visibleEndpoint.y,
+      instruction: "Continue outside",
+      targetNodeId,
+    }];
+  }
+  const entrancePosition = currentContext?.kind === "floor"
+    ? (() => {
+      const building = (campus.buildings ?? []).find((candidate) => candidate.id === entrance.buildingId);
+      const floor = building?.floors.find((candidate) => candidate.id === currentContext.floorId);
+      return building && floor && entrance.buildingId === currentContext.buildingId && !entrance.floorId
+        ? campusWorldPointToExteriorFloor(building, floor, entrance)
+        : { x: entrance.x, y: entrance.y };
+    })()
+    : { x: entrance.x, y: entrance.y };
+  return [{ nodeId: entrance.id, kind: "entrance", x: entrancePosition.x, y: entrancePosition.y }];
+}
+
+/** Remove route-transition cues that are internal to the other presentation
+ * context. The canonical transition list remains unchanged for routing. */
+export function presentationRouteTransitionMarkers(
+  markers: TestRouteTransitionMarker[],
+  campus: Campus,
+  currentContext: TestRouteContext | undefined,
+  continuationMarkers: TestRouteContinuationMarker[],
+  destinationValue?: string,
+): TestRouteTransitionMarker[] {
+  const buildingDestination = destinationValue?.startsWith("building:");
+  // Keep cross-floor circulation cues available if an upper-floor route still
+  // has to descend, but never show an entrance continuation for a Building
+  // destination whose semantic endpoint is already that Entrance.
+  const withoutBuildingEntranceCue = buildingDestination
+    ? markers.filter((marker) => marker.kind !== "entrance")
+    : markers;
+  if (!currentContext) return withoutBuildingEntranceCue;
+  if (currentContext.kind === "outdoor"
+    && continuationMarkers.some((marker) => marker.kind === "entrance")) {
+    return withoutBuildingEntranceCue.filter((marker) => marker.kind !== "ramp" && marker.kind !== "stair");
+  }
+  const continuationPoints = continuationMarkers
+    .map((marker) => marker.x !== undefined && marker.y !== undefined
+      ? { x: marker.x, y: marker.y }
+      : campus.navNodes?.find((node) => node.id === marker.nodeId))
+    .filter((point): point is { x: number; y: number } => !!point);
+  const continuationNodeIds = new Set(continuationMarkers.map((marker) => marker.nodeId));
+  if (continuationPoints.length === 0) return withoutBuildingEntranceCue;
+  return withoutBuildingEntranceCue.filter((marker) => {
+    if (currentContext.kind === "floor" && marker.kind === "entrance") return false;
+    if (marker.kind !== "ramp" && marker.kind !== "stair") return true;
+    if (marker.targetNodeId && continuationNodeIds.has(marker.targetNodeId)) return false;
+    return !continuationPoints.some((point) => samePoint(point, marker));
+  });
 }
 
 /** Identify the cross-floor circulation method used by a calculated route.
@@ -1774,6 +2731,7 @@ export function routeTransitionMarkers(
   currentContext?: TestRouteContext,
   destinationValue?: string,
   routeMode?: RouteMode,
+  startValue?: string,
 ): TestRouteTransitionMarker[] {
   const nodes = campus.navNodes ?? [];
   const physicalIds = physicalRouteNodeIds(nodeIds, campus);
@@ -1871,10 +2829,13 @@ export function routeTransitionMarkers(
     // Floor that owns a terminal Stair/Elevator destination. The destination
     // side is suppressed because its red endpoint marker owns that location.
     const hasEntranceContextBoundary = kind === "entrance" && !sameRouteContext(fromContext, physicalToContext);
+    const buildingStartsAtThisBoundary = startValue?.startsWith("building:")
+      && index === 0
+      && kind === "entrance";
     const terminalAccessPointOwnsMarker = destinationIsAccessPoint && !hasEntranceContextBoundary;
     const suppressOutgoingMarker = terminalAccessPointOwnsMarker;
     const suppressIncomingMarker = terminalAccessPointOwnsMarker || terminalCirculationDestination || (destinationIsTerminal && Boolean(to.entranceId) && !hasEntranceContextBoundary);
-    if (!suppressOutgoingMarker && (!currentContext || sameRouteContext(currentContext, fromContext))) {
+    if (!suppressOutgoingMarker && !buildingStartsAtThisBoundary && (!currentContext || sameRouteContext(currentContext, fromContext))) {
       markers.push({
         id: `${from.id}->${to.id}:out`,
         x: from.x,
@@ -1890,7 +2851,7 @@ export function routeTransitionMarkers(
         ...(index === 0 && kind === "stair" ? { endpointRole: "start" as const } : {}),
       });
     }
-    if (!suppressIncomingMarker && (!currentContext || sameRouteContext(currentContext, physicalToContext))) {
+    if (!suppressIncomingMarker && !buildingStartsAtThisBoundary && (!currentContext || sameRouteContext(currentContext, physicalToContext))) {
       markers.push({
         id: `${from.id}->${to.id}:in`,
         x: to.x,
@@ -1917,7 +2878,7 @@ function routeEndpointMarkers(
   routeMode: RouteMode = "standard",
 ): { x: number; y: number; kind: "start" | "destination" }[] {
   const nodes = campus.navNodes ?? [];
-  const physicalIds = physicalRouteNodeIds(nodeIds, campus);
+  const physicalIds = routeDisplayNodeIds(nodeIds, campus);
   if (physicalIds.length === 0) return [];
   // A Building picker value is a building-level destination, not an indoor
   // Room. Keep the marker anchored to the same canonical exterior Entrance
@@ -1929,7 +2890,11 @@ function routeEndpointMarkers(
   const buildingDestinationNodeId = buildingDestinationId
     ? (() => {
       const building = (campus.buildings ?? []).find((candidate) => candidate.id === buildingDestinationId);
-      return building ? resolveBuildingEntranceNodeId(campus, building, buildTestRouteEdges(campus), routeMode === "accessible") : null;
+      const startNode = nodes.find((node) => node.id === physicalIds[0]);
+      const directionRole: EntranceDirectionRole = startNode?.floorId ? "outbound" : "inbound";
+      return building
+        ? resolveBuildingRouteTerminalNodeId(campus, building, nodeIds, buildTestRouteEdges(campus), routeMode === "accessible", directionRole)
+        : null;
     })()
     : null;
   const candidates = [
@@ -2414,9 +3379,10 @@ export function TestNavigationPanel({
   const calculateRouteRef = useRef<((isLiveRecalculation?: boolean) => void) | null>(null);
 
   const buildings = campus.buildings ?? [];
-  const nodes = campus.navNodes ?? [];
-  const edges = useMemo(() => buildTestRouteEdges(campus), [campus]);
-  const routineGraph = useMemo(() => routineRouteGraph(campus, nodes, edges), [campus, edges, nodes]);
+  const routeCampus = useMemo(() => reconcileExteriorApproachNavigation(campus), [campus]);
+  const nodes = routeCampus.navNodes ?? [];
+  const edges = useMemo(() => buildTestRouteEdges(routeCampus), [routeCampus]);
+  const routineGraph = useMemo(() => routineRouteGraph(routeCampus, nodes, edges, routeMode), [routeCampus, edges, nodes, routeMode]);
   const graphRevision = useMemo(() => JSON.stringify({
     nodes: nodes.map((node) => [node.id, node.x, node.y, node.floorId, node.buildingId, node.doorId, node.roomId]),
     edges: edges.map((edge) => [edge.id, edge.startNodeId, edge.endNodeId, edge.bidirectional, edge.closed, edge.accessible, edge.emergencySafe, edge.bendPoints ?? []]),
@@ -2487,7 +3453,9 @@ export function TestNavigationPanel({
     const building = buildings.find((candidate) => candidate.id === buildingId);
     if (!building) return;
     const routeEdges = routineGraph.edges;
-    const terminalId = resolveBuildingEntranceNodeId(campus, building, routeEdges, routeMode === "accessible");
+    const firstRouteNode = routineGraph.nodes.find((node) => node.id === result?.nodeIds[0]);
+    const destinationDirectionRole: EntranceDirectionRole = firstRouteNode?.floorId ? "outbound" : "inbound";
+    const terminalId = resolveBuildingRouteTerminalNodeId(campus, building, result.nodeIds, routeEdges, routeMode === "accessible", destinationDirectionRole);
     if (!terminalId) return;
     // A pre-fix persisted session may contain only the old indoor Door/Room
     // tail and no exterior terminal at all. Do not publish that stale route to
@@ -2506,9 +3474,9 @@ export function TestNavigationPanel({
     setResult(normalized);
     markSessionInteraction();
   }, [buildings, campus, destValue, hasCalculatedRoute, markSessionInteraction, onHighlightRoute, result, routeMode, routineGraph.edges, routineGraph.nodes]);
-  const displaySteps = useMemo(() => result ? humanRouteSteps(campus, result.nodeIds, destValue) : [], [campus, destValue, result]);
-  const displaySegments = useMemo(() => result ? routeSegments(campus, result.nodeIds) : [], [campus, result]);
-  const routeMethod = useMemo(() => result && routeMode === "standard" ? routeTransitionMethod(campus, result.nodeIds) : null, [campus, result, routeMode]);
+  const displaySteps = useMemo(() => result ? humanRouteSteps(routeCampus, result.nodeIds, destValue) : [], [destValue, result, routeCampus]);
+  const displaySegments = useMemo(() => result ? routeSegments(routeCampus, result.nodeIds) : [], [result, routeCampus]);
+  const routeMethod = useMemo(() => result && routeMode === "standard" ? routeTransitionMethod(routeCampus, result.nodeIds) : null, [result, routeCampus, routeMode]);
   useEffect(() => {
     if (!mapPickResult) return;
     markSessionInteraction();
@@ -2559,25 +3527,46 @@ export function TestNavigationPanel({
     const activeGraph = emergencyMode ? { nodes, edges } : routineGraph;
     const activeEdges = activeGraph.edges;
     const activeNodes = activeGraph.nodes;
-    const startReadiness = endpointReadinessMessage(activeStartValue, campus, activeEdges, "starting", accessibleOnly, emergencyMode);
-    const destinationReadiness = emergencyMode
-      ? null
-      : endpointReadinessMessage(activeDestValue, campus, activeEdges, "destination", accessibleOnly, emergencyMode);
+    // A Building selected as the start is an outbound semantic endpoint: the
+    // route leaves through an Exit Only/Both door. A Building destination is
+    // resolved separately below using the inbound/outbound role implied by
+    // the other endpoint.
+    const startDirectionRole: EntranceDirectionRole = activeStartValue.startsWith("building:") ? "outbound" : "any";
+    const startReadiness = endpointReadinessMessage(activeStartValue, campus, activeEdges, "starting", accessibleOnly, emergencyMode, startDirectionRole);
     // Keep a selected Room resolvable even when its local edge is currently
     // closed.  The closed edge must produce No Route below, not erase the
     // semantic endpoint and fall back to endpoint-selection copy.
-    const resolveRouteEndpoint = (value: string): string | null => {
+    const resolveRouteEndpoint = (value: string, directionRole: EntranceDirectionRole = "any"): string | null => {
       const [type, id] = value.split(":");
       if (!emergencyMode && type === "building") {
         const building = buildings.find((candidate) => candidate.id === id);
         if (building) {
-          return resolveBuildingEntranceNodeId(campus, building, activeEdges, accessibleOnly);
+          return resolveBuildingEntranceNodeId(campus, building, activeEdges, accessibleOnly, false, directionRole);
         }
       }
       return resolveNodeId(value, campus, activeEdges, accessibleOnly, emergencyMode);
     };
-    let fromId = resolveRouteEndpoint(activeStartValue);
-    let toId = emergencyMode ? null : resolveRouteEndpoint(activeDestValue);
+    const startBuildingCandidateIds = !emergencyMode && activeStartValue.startsWith("building:")
+      ? (() => {
+        const building = buildings.find((candidate) => candidate.id === activeStartValue.slice("building:".length));
+        return building ? resolveBuildingEntranceNodeIds(campus, building, activeEdges, accessibleOnly, false, startDirectionRole) : [];
+      })()
+      : [];
+    let fromId = startBuildingCandidateIds[0] ?? resolveRouteEndpoint(activeStartValue, startDirectionRole);
+    const fromNodeForDirection = fromId ? activeNodes.find((node) => node.id === fromId) : undefined;
+    const destinationDirectionRole: EntranceDirectionRole = activeDestValue.startsWith("building:")
+      ? (fromNodeForDirection?.floorId ? "outbound" : "inbound")
+      : "any";
+    const destinationReadiness = emergencyMode
+      ? null
+      : endpointReadinessMessage(activeDestValue, campus, activeEdges, "destination", accessibleOnly, emergencyMode, destinationDirectionRole);
+    const destinationBuildingCandidateIds = !emergencyMode && activeDestValue.startsWith("building:")
+      ? (() => {
+        const building = buildings.find((candidate) => candidate.id === activeDestValue.slice("building:".length));
+        return building ? resolveBuildingEntranceNodeIds(campus, building, activeEdges, accessibleOnly, false, destinationDirectionRole) : [];
+      })()
+      : [];
+    let toId = emergencyMode ? null : destinationBuildingCandidateIds[0] ?? resolveRouteEndpoint(activeDestValue, destinationDirectionRole);
     // A directly selected emergency-only node is still a valid Emergency
     // endpoint, but it must not leak back into routine searches through the
     // generic `node:<id>` picker value.
@@ -2650,7 +3639,7 @@ export function TestNavigationPanel({
       return;
     }
 
-    const routeColor = emergencyMode ? "#dc2626" : accessibleOnly ? "#2563eb" : "#3b82f6";
+    const routeColor = routeColorForMode(activeRouteMode);
     const fromNode = nodes.find((node) => node.id === fromId);
     const toNode = nodes.find((node) => node.id === toId);
     // A selected Elevator remains the authoritative cross-floor endpoint. If
@@ -2667,8 +3656,35 @@ export function TestNavigationPanel({
       ...(selectedElevatorSharedIds.length > 0 ? { preferredElevatorSharedIds: [...new Set(selectedElevatorSharedIds)] } : {}),
     };
     const routeSearchNodes = emergencyMode ? emergencySearchNodes(nodes, fromId) : activeNodes;
-    let path = emergencyPath
-      ?? findNavigationRoute(routeSearchNodes, activeEdges, fromId, toId, accessibleOnly, emergencyMode, routeOptions);
+    let path = emergencyPath;
+    if (!emergencyPath) {
+      const startCandidates = startBuildingCandidateIds.length > 0 ? startBuildingCandidateIds : [fromId];
+      const destinationCandidates = destinationBuildingCandidateIds.length > 0 ? destinationBuildingCandidateIds : [toId];
+      let selectedCandidate: { fromId: string; toId: string; path: GraphPath; preferredExterior: boolean } | null = null;
+      for (const candidateFromId of startCandidates) {
+        for (const candidateToId of destinationCandidates) {
+          if (candidateFromId === candidateToId) continue;
+          const candidatePath = findNavigationRoute(routeSearchNodes, activeEdges, candidateFromId, candidateToId, accessibleOnly, emergencyMode, routeOptions);
+          if (!candidatePath) continue;
+          const preferredExterior = activeRouteMode === "standard"
+            && activeRoutePreference === "stairs"
+            && candidatePath.nodeIds.some((id) => {
+              const node = activeNodes.find((item) => item.id === id);
+              return node?.derivedOwnerType === "entrance_steps";
+            });
+          if (!selectedCandidate
+            || Number(preferredExterior) > Number(selectedCandidate.preferredExterior)
+            || (preferredExterior === selectedCandidate.preferredExterior && candidatePath.distanceM < selectedCandidate.path.distanceM)) {
+            selectedCandidate = { fromId: candidateFromId, toId: candidateToId, path: candidatePath, preferredExterior };
+          }
+        }
+      }
+      if (selectedCandidate) {
+        fromId = selectedCandidate.fromId;
+        toId = selectedCandidate.toId;
+        path = selectedCandidate.path;
+      }
+    }
     // A designated Emergency Exit is preferred for a semantic Building
     // destination, but that preference must not strand a route when the first
     // ready exit is unreachable from this particular starting location. Try
@@ -2771,14 +3787,30 @@ export function TestNavigationPanel({
     // PART 4: Reconstruct the display polyline using actual edge geometry
     // (bendPoints) so the highlight follows the authored walking network
     // instead of drawing a misleading diagonal between node positions.
-    const displayNodeIds = visibleContextRouteNodeIds(path.nodeIds, campus, currentContext);
     const displayEdges = activeEdges.filter((edge) =>
       !edge.closed
       && (!accessibleOnly || edge.accessible)
       && (!emergencyMode || edge.emergencySafe !== false)
     );
-    const displayWaypoints = buildRoutePolyline(displayNodeIds, displayEdges, nodes);
-    const physicalStartId = physicalRouteNodeIds(path.nodeIds, campus)[0] ?? fromId;
+    const projectedDisplayEdges = emergencyMode
+      ? displayEdges
+      : outdoorRouteProjectionEdges(routeCampus, displayEdges, path.nodeIds, currentContext);
+    const displayNodeFragments = collapseOutdoorHandoffFragments(
+      visibleContextRouteNodeFragments(path.nodeIds, routeCampus, currentContext),
+      routeCampus,
+      projectedDisplayEdges,
+      currentContext,
+      path.nodeIds,
+    );
+    const displayNodeIds = displayNodeFragments.flat();
+    const displayGeometry = exteriorRouteDisplayGeometry(routeCampus, displayNodeIds, projectedDisplayEdges, nodes, currentContext);
+    const displayWaypointFragments = displayNodeFragments
+      .flatMap((fragment) => buildRoutePolylineFragments(fragment, displayGeometry.edges, displayGeometry.nodes));
+    const displayWaypoints = displayWaypointFragments.flat();
+    // Keep the existing focus behavior on the physical Door connector. The
+    // display polyline itself includes the semantic Room endpoint, so focus
+    // and geometry can serve their distinct purposes without a jump.
+    const physicalStartId = physicalRouteNodeIds(path.nodeIds, routeCampus)[0] ?? fromId;
     const physicalStart = nodes.find((node) => node.id === physicalStartId);
     const focusRequest = !isLiveRecalculation && physicalStart && (modeOverride === undefined || focusStartOnSuccess)
       ? { nodeId: physicalStart.id, context: contextForNode(physicalStart) }
@@ -2816,13 +3848,22 @@ export function TestNavigationPanel({
       previewRoute,
       pendingFocus: focusRequest,
     });
-     onHighlightRoute({
+    const continuationMarkers = routeContinuationMarkers(routeCampus, path.nodeIds, activeRouteMode, currentContext, activeDestValue, activeStartValue);
+    onHighlightRoute({
       waypoints: displayWaypoints,
+      waypointFragments: displayWaypointFragments,
       color: routeColor,
       routeNodeIds: displayNodeIds,
       semanticEndpoints,
-      endpointMarkers: routeEndpointMarkers(path.nodeIds, campus, currentContext, activeDestValue, activeRouteMode),
-      transitionMarkers: routeTransitionMarkers(path.nodeIds, campus, currentContext, activeDestValue, activeRouteMode),
+      endpointMarkers: routeEndpointMarkers(path.nodeIds, routeCampus, currentContext, activeDestValue, activeRouteMode),
+      transitionMarkers: presentationRouteTransitionMarkers(
+        routeTransitionMarkers(path.nodeIds, routeCampus, currentContext, activeDestValue, activeRouteMode, activeStartValue),
+        routeCampus,
+        currentContext,
+        continuationMarkers,
+        activeDestValue,
+      ),
+      continuationMarkers,
     });
     if (!isLiveRecalculation && (modeOverride === undefined || focusStartOnSuccess)) {
       if (physicalStart) {
@@ -2836,12 +3877,12 @@ export function TestNavigationPanel({
       }
     }
     setLoading(false);
-  }, [startValue, destValue, emergencyDestinationLabel, emergencyDestinationValue, routeMode, routePreference, nodes, edges, routineGraph, campus, currentContext, manualCollapsed, manualExpanded, markSessionInteraction, onHighlightRoute, onFocusNode, onRouteStartFocus, onRouteTransitionCancel, pendingFocus, previewRoute, setRouteSession]);
+  }, [startValue, destValue, emergencyDestinationLabel, emergencyDestinationValue, routeMode, routePreference, nodes, edges, routineGraph, campus, routeCampus, currentContext, manualCollapsed, manualExpanded, markSessionInteraction, onHighlightRoute, onFocusNode, onRouteStartFocus, onRouteTransitionCancel, pendingFocus, previewRoute, setRouteSession]);
 
   calculateRouteRef.current = handleCalculate;
     useEffect(() => {
      if (!result || !hasCalculatedRoute) return;
-     const routeColor = routeMode === "emergency" ? "#dc2626" : routeMode === "accessible" ? "#2563eb" : "#3b82f6";
+     const routeColor = routeColorForMode(routeMode);
       // Apply the same Building-only terminal invariant before publishing a
       // hydrated route highlight. This prevents one stale render from
       // painting the destination-building indoor tail while the normalization
@@ -2850,8 +3891,10 @@ export function TestNavigationPanel({
       if (routeMode !== "emergency" && destValue.startsWith("building:")) {
         const buildingId = destValue.slice("building:".length);
         const building = buildings.find((candidate) => candidate.id === buildingId);
+        const firstRouteNode = routineGraph.nodes.find((node) => node.id === result?.nodeIds[0]);
+        const destinationDirectionRole: EntranceDirectionRole = firstRouteNode?.floorId ? "outbound" : "inbound";
         const terminalId = building
-          ? resolveBuildingEntranceNodeId(campus, building, routineGraph.edges, routeMode === "accessible")
+          ? resolveBuildingRouteTerminalNodeId(campus, building, result.nodeIds, routineGraph.edges, routeMode === "accessible", destinationDirectionRole)
           : null;
         if (!terminalId || !result.nodeIds.includes(terminalId)) {
           onHighlightRoute(null);
@@ -2859,27 +3902,49 @@ export function TestNavigationPanel({
         }
         highlightResult = truncateGraphPathAtNode(result, terminalId, routineGraph.nodes, routineGraph.edges);
       }
-      const displayNodeIds = visibleContextRouteNodeIds(highlightResult.nodeIds, campus, currentContext);
-     const displayEdges = (routeMode === "emergency" ? edges : routineGraph.edges).filter((edge) =>
-       !edge.closed
-       && (routeMode !== "accessible" || edge.accessible)
-       && (routeMode !== "emergency" || edge.emergencySafe !== false)
-     );
-    const semanticEndpoints = currentContext?.floorId
+       const displayEdges = (routeMode === "emergency" ? edges : routineGraph.edges).filter((edge) =>
+         !edge.closed
+         && (routeMode !== "accessible" || edge.accessible)
+         && (routeMode !== "emergency" || edge.emergencySafe !== false)
+       );
+       const projectedDisplayEdges = routeMode === "emergency"
+         ? displayEdges
+         : outdoorRouteProjectionEdges(routeCampus, displayEdges, highlightResult.nodeIds, currentContext);
+       const displayNodeFragments = collapseOutdoorHandoffFragments(
+         visibleContextRouteNodeFragments(highlightResult.nodeIds, routeCampus, currentContext),
+         routeCampus,
+         projectedDisplayEdges,
+         currentContext,
+         highlightResult.nodeIds,
+       );
+       const displayNodeIds = displayNodeFragments.flat();
+       const displayGeometry = exteriorRouteDisplayGeometry(routeCampus, displayNodeIds, projectedDisplayEdges, nodes, currentContext);
+     const semanticEndpoints = currentContext?.floorId
       ? ([
         { kind: "start" as const, room: roomSemanticEndpoint(campus, startValue, currentContext.floorId) },
         { kind: "destination" as const, room: roomSemanticEndpoint(campus, destValue, currentContext.floorId) },
       ].filter((endpoint) => endpoint.room).map((endpoint) => ({ ...endpoint.room!, kind: endpoint.kind })))
       : undefined;
-    onHighlightRoute({
-       waypoints: buildRoutePolyline(displayNodeIds, displayEdges, nodes),
+      const displayWaypointFragments = displayNodeFragments
+        .flatMap((fragment) => buildRoutePolylineFragments(fragment, displayGeometry.edges, displayGeometry.nodes));
+       const continuationMarkers = routeContinuationMarkers(routeCampus, highlightResult.nodeIds, routeMode, currentContext, destValue, startValue);
+      onHighlightRoute({
+      waypoints: displayWaypointFragments.flat(),
+      waypointFragments: displayWaypointFragments,
       color: routeColor,
       routeNodeIds: displayNodeIds,
        semanticEndpoints,
-       endpointMarkers: routeEndpointMarkers(highlightResult.nodeIds, campus, currentContext, routeMode === "emergency" ? emergencyDestinationValue : destValue, routeMode),
-       transitionMarkers: routeTransitionMarkers(highlightResult.nodeIds, campus, currentContext, routeMode === "emergency" ? emergencyDestinationValue : destValue, routeMode),
+       endpointMarkers: routeEndpointMarkers(highlightResult.nodeIds, routeCampus, currentContext, routeMode === "emergency" ? emergencyDestinationValue : destValue, routeMode),
+       transitionMarkers: presentationRouteTransitionMarkers(
+         routeTransitionMarkers(highlightResult.nodeIds, routeCampus, currentContext, routeMode === "emergency" ? emergencyDestinationValue : destValue, routeMode, startValue),
+         routeCampus,
+         currentContext,
+         continuationMarkers,
+         destValue,
+       ),
+       continuationMarkers,
      });
-   }, [buildings, campus, currentContext, destValue, emergencyDestinationValue, edges, hasCalculatedRoute, nodes, onHighlightRoute, result, routeMode, routineGraph.edges, routineGraph.nodes, startValue]);
+   }, [buildings, campus, currentContext, destValue, emergencyDestinationValue, edges, hasCalculatedRoute, nodes, onHighlightRoute, result, routeCampus, routeMode, routineGraph.edges, routineGraph.nodes, startValue]);
   useEffect(() => {
     const previousRevision = graphRevisionRef.current;
     graphRevisionRef.current = graphRevision;
@@ -3040,15 +4105,18 @@ export function TestNavigationPanel({
       : compactRouteLocationLabel(destinationOption, "Destination");
     const fullLocationName = (option: OptionEntry | undefined, fallback: string) =>
       option ? `${option.label}${option.subtitle ? ` · ${option.subtitle}` : ""}` : fallback;
-    const fullSummary = `${fullLocationName(startOption, "Start")} → ${routeMode === "emergency" ? (emergencyDestinationLabel || "Safest exit") : fullLocationName(destinationOption, "Destination")}`;
+    const fullStartLabel = fullLocationName(startOption, "Start");
+    const fullDestinationLabel = routeMode === "emergency"
+      ? (emergencyDestinationLabel || "Safest exit")
+      : fullLocationName(destinationOption, "Destination");
     const modeLabel = routeModeOptions.find((option) => option.key === routeMode)?.label ?? "Standard";
     const statusLabel = result ? "Route Found" : routeMode === "standard" ? "No Route" : `No ${modeLabel} Route`;
     const StatusIcon = result ? CheckCircle2 : routeMode === "accessible" ? Accessibility : routeMode === "emergency" ? ShieldAlert : AlertTriangle;
     const routeSummary = (
-      <div className="flex min-w-0 items-center gap-1 text-[10px] text-foreground" title={fullSummary}>
-        <span data-testid="test-route-start-summary" className="min-w-0 max-w-[45%] overflow-hidden whitespace-nowrap text-clip" title={fullLocationName(startOption, "Start")}>{startLabel}</span>
-        <span className="shrink-0 text-muted-foreground">→</span>
-        <span data-testid="test-route-destination-summary" className="min-w-0 max-w-[45%] overflow-hidden whitespace-nowrap text-clip" title={fullLocationName(destinationOption, "Destination")}>{destinationLabel}</span>
+      <div className="flex min-w-0 flex-1 items-center gap-1 text-[10px] text-foreground">
+        <CompactRouteEndpointLabel testId="test-route-start-summary" displayLabel={startLabel} fullLabel={fullStartLabel} />
+        <span aria-hidden="true" className="shrink-0 px-1 text-muted-foreground">→</span>
+        <CompactRouteEndpointLabel testId="test-route-destination-summary" displayLabel={destinationLabel} fullLabel={fullDestinationLabel} />
       </div>
     );
     const modeButtons = (
@@ -3058,8 +4126,8 @@ export function TestNavigationPanel({
           const active = routeMode === option.key;
           const activeStyle = option.key === "standard"
             ? "border-primary/50 bg-primary/10 text-primary ring-1 ring-primary/20"
-            : option.key === "accessible"
-              ? "border-green-500/50 bg-green-500/10 text-green-600 ring-1 ring-green-500/20"
+               : option.key === "accessible"
+               ? "border-teal-500/50 bg-teal-500/10 text-teal-700 ring-1 ring-teal-500/20"
               : "border-red-500/50 bg-red-500/10 text-red-600 ring-1 ring-red-500/20";
           return (
             <button
@@ -3158,21 +4226,17 @@ export function TestNavigationPanel({
           className={cn("grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-x-1.5 rounded-xl border border-border bg-card px-2.5 shadow-xl", result ? "min-h-[42px] py-1" : "min-h-[54px] py-1")}
         >
         <div className="flex min-w-0 items-center gap-1.5 overflow-visible">
-          <StatusIcon className={cn("h-3.5 w-3.5 shrink-0", result ? "text-green-500" : routeMode === "accessible" ? "text-green-600" : routeMode === "emergency" ? "text-red-500" : "text-destructive")} />
+          <StatusIcon className={cn("h-3.5 w-3.5 shrink-0", result ? routeMode === "accessible" ? "text-teal-600" : routeMode === "emergency" ? "text-red-500" : "text-green-500" : routeMode === "accessible" ? "text-teal-600" : routeMode === "emergency" ? "text-red-500" : "text-destructive")} />
           <div className="min-w-0 flex-1 overflow-hidden leading-tight">
             {result ? (
             <>
             <div className="flex min-w-0 items-center gap-1.5">
-              <span className={cn("shrink-0 text-[10px] font-extrabold", result ? "text-green-600 dark:text-green-400" : "text-destructive")}>
+               <span className={cn("shrink-0 text-[10px] font-extrabold", result ? routeMode === "accessible" ? "text-teal-700 dark:text-teal-300" : routeMode === "emergency" ? "text-red-600 dark:text-red-400" : "text-green-600 dark:text-green-400" : "text-destructive")}>
                 {statusLabel}
               </span>
-              {result && <span className="shrink-0 text-[9px] text-muted-foreground"><strong>{result.distanceM}m</strong> · <strong>{result.minutes} min</strong></span>}
+              {result && <span data-testid="test-route-time-summary" className="shrink-0 text-[9px] text-muted-foreground"><strong>{result.minutes} min</strong></span>}
             </div>
-            <div className="flex min-w-0 items-center gap-1 text-[10px] text-foreground" title={fullSummary}>
-              <span data-testid="test-route-start-summary" className="min-w-0 max-w-[45%] overflow-hidden whitespace-nowrap text-clip" title={fullLocationName(startOption, "Start")}>{startLabel}</span>
-              <span className="shrink-0 text-muted-foreground">→</span>
-              <span data-testid="test-route-destination-summary" className="min-w-0 max-w-[45%] overflow-hidden whitespace-nowrap text-clip" title={fullLocationName(destinationOption, "Destination")}>{destinationLabel}</span>
-            </div>
+            {routeSummary}
             </>
             ) : (
               <div className="space-y-0.5">
@@ -3297,7 +4361,7 @@ export function TestNavigationPanel({
                   "h-8 rounded-md text-[11px] font-bold transition-all",
                   routeMode === m.key
                     ? m.key === "emergency" ? "bg-red-500 text-white shadow-sm"
-                    : m.key === "accessible" ? "bg-blue-500 text-white shadow-sm"
+                    : m.key === "accessible" ? "bg-teal-600 text-white shadow-sm"
                     : "bg-primary text-primary-foreground shadow-sm"
                     : "text-muted-foreground hover:text-foreground hover:bg-muted"
                 )}
@@ -3393,22 +4457,20 @@ export function TestNavigationPanel({
             routeMode === "emergency"
               ? "bg-red-50 dark:bg-red-900/10 border-red-200 dark:border-red-700/20"
               : routeMode === "accessible"
-                ? "bg-blue-50 dark:bg-blue-900/10 border-blue-200 dark:border-blue-700/20"
+                ? "bg-teal-50 dark:bg-teal-900/10 border-teal-200 dark:border-teal-700/20"
                 : "bg-green-50 dark:bg-green-900/10 border-green-200 dark:border-green-700/20"
           )}>
             <div className="flex items-center gap-2">
               <CheckCircle2 className={cn("h-3.5 w-3.5",
-                routeMode === "emergency" ? "text-red-500" : routeMode === "accessible" ? "text-blue-500" : "text-green-500"
+                routeMode === "emergency" ? "text-red-500" : routeMode === "accessible" ? "text-teal-600" : "text-green-500"
               )} />
               <span className={cn("text-[11px] font-bold",
-                routeMode === "emergency" ? "text-red-600 dark:text-red-400" : routeMode === "accessible" ? "text-blue-600 dark:text-blue-400" : "text-green-600 dark:text-green-400"
+                routeMode === "emergency" ? "text-red-600 dark:text-red-400" : routeMode === "accessible" ? "text-teal-700 dark:text-teal-300" : "text-green-600 dark:text-green-400"
               )}>
                 {routeMode === "emergency" ? "Emergency Route" : routeMode === "accessible" ? "Accessible Route" : "Route Found"}
               </span>
             </div>
             <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
-              <span><strong>{result.distanceM}m</strong> distance</span>
-              <span className="opacity-50">·</span>
               <span><strong>{result.minutes} min</strong> estimated walk</span>
               {routeMethod && <><span className="opacity-50">·</span><span data-testid="test-route-transition-method"><strong>Via {routeMethod}</strong></span></>}
             </div>

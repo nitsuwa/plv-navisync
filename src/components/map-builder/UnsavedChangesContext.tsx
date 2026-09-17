@@ -17,6 +17,8 @@ import { UnsavedChangesDialog } from "./UnsavedChangesDialog";
  */
 export interface UnsavedChangesHandler {
   isDirty: () => boolean;
+  /** Saved draft differs from the currently live/published campus. */
+  hasUnpublishedChanges?: () => boolean;
   onSave: () => Promise<boolean>;
   onDiscard: () => void;
 }
@@ -40,8 +42,9 @@ export function useUnsavedChangesContext(): UnsavedChangesContextValue {
 export function UnsavedChangesProvider({ children }: { children: ReactNode }) {
   const handlerRef = useRef<UnsavedChangesHandler | null>(null);
   const pendingRef = useRef<{ run: () => void; description?: string } | null>(null);
-  const [pending, setPending] = useState<{ description?: string } | null>(null);
+  const [pending, setPending] = useState<{ description?: string; isDirty: boolean } | null>(null);
   const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
 
   const registerHandler = useCallback((handler: UnsavedChangesHandler | null) => {
@@ -49,12 +52,15 @@ export function UnsavedChangesProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const requestGuarded = useCallback((run: () => void, opts?: { description?: string }) => {
-    if (!handlerRef.current?.isDirty()) {
+    const handler = handlerRef.current;
+    const isDirty = Boolean(handler?.isDirty());
+    const hasUnpublishedChanges = Boolean(handler?.hasUnpublishedChanges?.());
+    if (!isDirty && !hasUnpublishedChanges) {
       run();
       return;
     }
     pendingRef.current = { run, description: opts?.description };
-    setPending({ description: opts?.description });
+    setPending({ description: opts?.description, isDirty });
     setError(null);
   }, []);
 
@@ -76,31 +82,45 @@ export function UnsavedChangesProvider({ children }: { children: ReactNode }) {
 
   const saveAndContinue = useCallback(async () => {
     const pendingAction = pendingRef.current;
-    if (!pendingAction) return;
+    if (!pendingAction || savingRef.current) return;
+    savingRef.current = true;
     setSaving(true);
     setError(null);
-    const ok = await handlerRef.current?.onSave();
-    if (!ok) {
-      setSaving(false);
+    try {
+      const ok = await handlerRef.current?.onSave();
+      if (!ok) {
+        setError((prev) => prev ?? "Save failed. Your changes were not saved.");
+        return;
+      }
+      pendingRef.current = null;
+      setPending(null);
+      setError(null);
+      pendingAction.run();
+    } catch {
       setError((prev) => prev ?? "Save failed. Your changes were not saved.");
-      return;
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
     }
-    setSaving(false);
-    pendingRef.current = null;
-    setPending(null);
-    pendingAction.run();
   }, []);
 
   // Browser back / forward while the map builder has unsaved changes.
   useEffect(() => {
     const onPopState = () => {
       const handler = handlerRef.current;
-      if (!handler?.isDirty()) return;
+      const isDirty = Boolean(handler?.isDirty());
+      const hasUnpublishedChanges = Boolean(handler?.hasUnpublishedChanges?.());
+      if (!isDirty && !hasUnpublishedChanges) return;
       // Cancel the pop and re-assert the current URL; the pending action
       // replays history.back() once the user resolves the modal.
       window.history.pushState(null, "", window.location.href);
       pendingRef.current = { run: () => window.history.back() };
-      setPending({ description: "Your unsaved changes would be lost if you leave this page." });
+      setPending({
+        isDirty,
+        description: isDirty
+          ? "Your unsaved changes would be lost if you leave this page."
+          : "Your saved changes have not been published yet.",
+      });
       setError(null);
     };
     window.addEventListener("popstate", onPopState);
@@ -112,7 +132,7 @@ export function UnsavedChangesProvider({ children }: { children: ReactNode }) {
       {children}
       <UnsavedChangesDialog
         open={!!pending}
-        isDirty
+        isDirty={pending?.isDirty ?? true}
         saving={saving}
         error={error}
         description={pending?.description ?? "Your latest edits haven't been saved yet."}

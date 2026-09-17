@@ -1,9 +1,9 @@
 import type { Campus, CampusBuilding, CampusEntrance, FloorDoor, FloorPlan, NavigationEdge, NavigationNode } from "../components/map-builder/types";
 import { genId as defaultGenId } from "../components/map-builder/constants";
-import { entranceDisplayName, entranceWorldPosition } from "./buildingEntrances";
+import { entranceDisplayName, entranceWorldPosition, normalizeEntranceDirection } from "./buildingEntrances";
 import { createNavNode, navEdgeDistance, findEntranceNavNode, syncEntranceNodePositions, pruneOrphanedEntranceNodes, DEFAULT_NAV_NODE_COLOR } from "./navigationGraph";
 import { entranceConnectorDistance, entranceConnectorGeometry } from "./entranceConnector";
-import { createIndoorNavNode, isRoomNavigationNode, ROOM_DOOR_EDGE_TYPE } from "./indoorNavigationGraph";
+import { createIndoorNavNode, ROOM_DOOR_EDGE_TYPE } from "./indoorNavigationGraph";
 import { DEFAULT_FLOOR_CANVAS, clampWallOpeningOffset, maxOpeningWidthForWall, wallLength } from "./floorGeometry";
 
 export const ENTRANCE_TRANSITION_EDGE_TYPE = "entrance_transition";
@@ -290,10 +290,7 @@ export function doorHasIndoorNavigationConnection(
         : undefined;
     if (!otherId || !nodeIds.has(otherId)) return false;
     const other = (nodes ?? []).find((node) => node.id === otherId);
-    return Boolean(other
-      && !isRoomNavigationNode(other)
-      && other.buildingId === doorNode.buildingId
-      && other.floorId === doorNode.floorId);
+    return other?.buildingId === doorNode.buildingId && other.floorId === doorNode.floorId;
   });
 }
 
@@ -570,7 +567,13 @@ export function reconcileEntranceDoors(
   );
   for (let index = nextNodes.length - 1; index >= 0; index -= 1) {
     const node = nextNodes[index];
-    if (node.buildingEntranceId && !liveGeneratedDoorKeys.has(`${node.buildingId}:${node.floorId}:${node.doorId}`)) {
+    // Exterior approach thresholds also carry buildingEntranceId so they can
+    // remain semantically tied to the Entrance, but they are not generated
+    // Door nodes and intentionally have no doorId.  Only a node that carries
+    // the complete generated-Door identity may be removed by this cleanup;
+    // otherwise an Entrance edit would delete the threshold and every
+    // authored Veranda edge incident to it as a dangling edge.
+    if (node.buildingEntranceId && node.doorId && !liveGeneratedDoorKeys.has(`${node.buildingId}:${node.floorId}:${node.doorId}`)) {
       nextNodes.splice(index, 1);
       nodesChanged = true;
     }
@@ -814,12 +817,14 @@ export function linkEntranceToIndoorDoor(
     if (entranceEndpoint?.buildingId === buildingId && entranceEndpoint.entranceId === entranceId) return false;
     return !(nodeIds.has(edge.startNodeId) && nodeIds.has(edge.endNodeId));
   });
+  const direction = normalizeEntranceDirection(entrance);
+  const exitOnly = direction === "exit_only";
   const edge: NavigationEdge = {
     id: existingTransition?.id ?? genId("ne"),
-    startNodeId: entranceNode.id,
-    endNodeId: doorNode.id,
+    startNodeId: exitOnly ? doorNode.id : entranceNode.id,
+    endNodeId: exitOnly ? entranceNode.id : doorNode.id,
     distance: 1,
-    bidirectional: true,
+    bidirectional: direction === "both",
     accessible: entrance.accessible !== false,
     emergencySafe: true,
     type: ENTRANCE_TRANSITION_EDGE_TYPE,
@@ -851,12 +856,7 @@ export function reconcileEntranceTransitions(campus: Campus): Campus {
     const building = campus.buildings.find((b) => b.id === entranceNode.buildingId);
     const entranceExists = building?.entrances?.some((en) => en.id === entranceNode.entranceId);
     const doorExists = !!findDoor(building, doorNode.floorId, doorNode.doorId);
-    // Building Entrances discharge into the canonical entry floor only. A
-    // stale upper-floor bridge would let student routing skip the ground-floor
-    // corridor and stair transition, so treat it as invalid infrastructure and
-    // remove it during every reconciliation/load.
-    const entryFloor = entryFloorForBuilding(building);
-    if (!entranceExists || !doorExists || (entryFloor && doorNode.floorId !== entryFloor.id)) return false;
+    if (!entranceExists || !doorExists) return false;
     const entranceKey = `${entranceNode.buildingId}:${entranceNode.entranceId}`;
     const pairKey = [edge.startNodeId, edge.endNodeId].sort().join(":");
     if (seenEntrance.has(entranceKey) || seenPair.has(pairKey)) return false;
@@ -869,7 +869,19 @@ export function reconcileEntranceTransitions(campus: Campus): Campus {
     const building = campus.buildings.find((b) => b.id === entranceNode?.buildingId);
     const entrance = building?.entrances?.find((en) => en.id === entranceNode?.entranceId);
     const accessible = entrance?.accessible !== false;
-    return edge.accessible === accessible ? edge : { ...edge, accessible };
+    if (!entrance) return edge;
+    const direction = normalizeEntranceDirection(entrance);
+    const doorNode = doorNodeForEdge(edge, nodes);
+    if (!entranceNode || !doorNode) return edge;
+    const exitOnly = direction === "exit_only";
+    const next = {
+      ...edge,
+      startNodeId: exitOnly ? doorNode.id : entranceNode.id,
+      endNodeId: exitOnly ? entranceNode.id : doorNode.id,
+      bidirectional: direction === "both",
+      accessible,
+    };
+    return JSON.stringify(next) === JSON.stringify(edge) ? edge : next;
   });
   const unchanged = nextEdges.length === (campus.navEdges ?? []).length
     && nextEdges.every((edge, index) => edge === (campus.navEdges ?? [])[index]);

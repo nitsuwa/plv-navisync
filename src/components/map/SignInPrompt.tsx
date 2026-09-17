@@ -1,19 +1,15 @@
 import { LogIn, X } from "lucide-react";
-import { Link, useLocation } from "react-router";
+import { Link } from "react-router";
 import { createPortal } from "react-dom";
 import { useEscToClose } from "../../hooks/useEscToClose";
 
 interface SignInPromptProps {
   message: string;
   onClose: () => void;
-  /** Optional protected action to resume after authentication. */
-  returnTo?: string;
 }
 
-export function SignInPrompt({ message, onClose, returnTo }: SignInPromptProps) {
+export function SignInPrompt({ message, onClose }: SignInPromptProps) {
   useEscToClose(onClose);
-  const location = useLocation();
-  const loginReturnTo = returnTo ?? `${location.pathname}${location.search}${location.hash}`;
   // Portaled to body so this overlay clears PublicLayout's z-[1] stacking context
   // and stays above the z-50 mobile bottom navigation.
   return createPortal(
@@ -53,7 +49,6 @@ export function SignInPrompt({ message, onClose, returnTo }: SignInPromptProps) 
           </button>
           <Link
             to="/admin"
-            state={{ from: loginReturnTo }}
             className="flex-1 h-10 rounded-xl bg-primary text-primary-foreground text-xs font-bold flex items-center justify-center gap-1.5 hover:bg-primary/90 transition-all duration-200"
           >
             <LogIn className="h-3.5 w-3.5" /> Login

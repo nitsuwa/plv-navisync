@@ -104,16 +104,6 @@ export function BuildingPicker({
           value={open ? query : (value?.name ?? "")}
           onChange={(e) => { setQuery(e.target.value); setOpen(true); setActiveIdx(0); }}
           onFocus={() => { setOpen(true); setQuery(""); setActiveIdx(0); }}
-          onClick={() => {
-            // A selection/clear action can leave the input focused while the
-            // list is intentionally closed. Clicking it again must reopen
-            // the options without requiring the user to blur and refocus.
-            if (!open) {
-              setOpen(true);
-              setQuery("");
-              setActiveIdx(0);
-            }
-          }}
           onKeyDown={handleKeyDown}
           placeholder={placeholder}
           className="flex-1 bg-transparent text-xs text-foreground placeholder:text-muted-foreground focus:outline-none min-w-0 transition-all"

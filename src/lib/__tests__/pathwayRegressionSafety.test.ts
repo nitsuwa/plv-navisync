@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Campus, CampusPath, NavigationEdge, NavigationNode } from "../../components/map-builder/types";
 import {
+  cleanupDeletedPathwayNavigation,
   convertPathwaysToNavigation,
   joinPathwayVerticesExplicitly,
   pathwayHasLegacyNavigationChain,
@@ -344,6 +345,85 @@ describe("Outdoor Pathway regression safety wall", () => {
     expect(generatedEdgesFor(after, "p2").map((edge) => edge.id)).toEqual(generatedEdgesFor(before, "p2").map((edge) => edge.id));
     expect(after.navEdges?.find((edge) => edge.id === "p2-external")).toEqual(before.navEdges?.find((edge) => edge.id === "p2-external"));
     expect(pathwaySnapshot({ ...after, paths: after.paths.filter((path) => path.id === "p2") }).paths).toEqual(unrelatedBefore.paths.filter((path) => path.id === "p2"));
+  });
+
+  it("deleting a Pathway removes its Entrance connector and connector-owned junction without proximity cleanup", () => {
+    const factory = makeIdFactory();
+    const initial = convertPathwaysToNavigation(makeCampus([
+      makePath("p1", [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 200, y: 0 }]),
+    ]), ["p1"], factory).campus;
+    const target = generatedNodesFor(initial, "p1")[1];
+    const entrance: NavigationNode = { id: "entrance", name: "Entrance", type: "entrance", x: 100, y: 80, accessible: true, color: "#16a34a" };
+    const helper: NavigationNode = { id: "helper", name: "Junction", type: "outdoor", x: 100, y: 40, accessible: true, color: "#16a34a", pathJunction: true };
+    const before: Campus = {
+      ...initial,
+      navNodes: [...(initial.navNodes ?? []), entrance, helper],
+      navEdges: [
+        ...(initial.navEdges ?? []),
+        { id: "entrance-branch", startNodeId: entrance.id, endNodeId: target.id, distance: 80, bidirectional: true, accessible: true, emergencySafe: true, type: "walkway", color: "#16a34a", width: 4, pathJunctionId: helper.id },
+        { id: "helper-branch", startNodeId: helper.id, endNodeId: target.id, distance: 40, bidirectional: true, accessible: true, emergencySafe: true, type: "walkway", color: "#16a34a", width: 4, pathJunctionId: helper.id },
+      ],
+    };
+    const after = reconcilePathwayNavigation(
+      cleanupDeletedPathwayNavigation(before, { ...before, paths: [] }),
+      factory,
+      { preserveAuthoredGeometry: true },
+    );
+
+    expect(after.navNodes?.some((node) => node.id === entrance.id)).toBe(true);
+    expect(after.navNodes?.some((node) => node.id === target.id)).toBe(false);
+    expect(after.navNodes?.some((node) => node.id === helper.id)).toBe(false);
+    expect(after.navEdges?.some((edge) => edge.id === "entrance-branch")).toBe(false);
+    expect(after.navEdges?.some((edge) => edge.id === "helper-branch")).toBe(false);
+    expect(after.navEdges?.every((edge) => after.navNodes?.some((node) => node.id === edge.startNodeId) && after.navNodes?.some((node) => node.id === edge.endNodeId))).toBe(true);
+  });
+
+  it("cleans a connector helper identified by path-junction metadata even when its legacy node flag is absent", () => {
+    const factory = makeIdFactory();
+    const initial = convertPathwaysToNavigation(makeCampus([
+      makePath("p1", [{ x: 0, y: 0 }, { x: 100, y: 0 }]),
+    ]), ["p1"], factory).campus;
+    const target = generatedNodesFor(initial, "p1")[0];
+    const entrance: NavigationNode = { id: "legacy-entrance", name: "Entrance", type: "entrance", x: 40, y: 80, accessible: true, color: "#16a34a" };
+    const helper: NavigationNode = { id: "legacy-helper", name: "Legacy junction", type: "outdoor", x: 40, y: 40, accessible: true, color: "#16a34a" };
+    const before: Campus = {
+      ...initial,
+      navNodes: [...(initial.navNodes ?? []), entrance, helper],
+      navEdges: [
+        ...(initial.navEdges ?? []),
+        { id: "legacy-entrance-branch", startNodeId: entrance.id, endNodeId: target.id, distance: 80, bidirectional: true, accessible: true, emergencySafe: true, type: "walkway", color: "#16a34a", width: 4, pathJunctionId: helper.id },
+        { id: "legacy-helper-branch", startNodeId: helper.id, endNodeId: target.id, distance: 40, bidirectional: true, accessible: true, emergencySafe: true, type: "walkway", color: "#16a34a", width: 4, pathJunctionId: helper.id },
+      ],
+    };
+    const after = cleanupDeletedPathwayNavigation(before, { ...before, paths: [] });
+
+    expect(after.navNodes?.some((node) => node.id === entrance.id)).toBe(true);
+    expect(after.navNodes?.some((node) => node.id === helper.id)).toBe(false);
+    expect(after.navEdges?.some((edge) => edge.id === "legacy-entrance-branch")).toBe(false);
+    expect(after.navEdges?.some((edge) => edge.id === "legacy-helper-branch")).toBe(false);
+  });
+
+  it("preserves a genuinely shared generated junction and its surviving Entrance branch", () => {
+    const factory = makeIdFactory();
+    const converted = convertPathwaysToNavigation(makeCampus([
+      makePath("p1", [{ x: 0, y: 0 }, { x: 100, y: 0 }]),
+      makePath("p2", [{ x: 100, y: 0 }, { x: 200, y: 0 }]),
+    ]), ["p1", "p2"], factory).campus;
+    const shared = (converted.navNodes ?? []).find((node) => (node.generatedFromPathVertices ?? []).length === 2)!;
+    const entrance: NavigationNode = { id: "shared-entrance", name: "Entrance", type: "entrance", x: 100, y: 80, accessible: true, color: "#16a34a" };
+    const before: Campus = {
+      ...converted,
+      navNodes: [...(converted.navNodes ?? []), entrance],
+      navEdges: [...(converted.navEdges ?? []), { id: "shared-branch", startNodeId: entrance.id, endNodeId: shared.id, distance: 80, bidirectional: true, accessible: true, emergencySafe: true, type: "walkway", color: "#16a34a", width: 4 }],
+    };
+    const after = reconcilePathwayNavigation(
+      cleanupDeletedPathwayNavigation(before, { ...before, paths: before.paths.filter((path) => path.id !== "p1") }),
+      factory,
+      { preserveAuthoredGeometry: true },
+    );
+    const surviving = after.navNodes?.find((node) => node.id === shared.id);
+    expect(surviving?.generatedFromPathVertices).toEqual([{ pathId: "p2", vertexId: converted.paths[1].navigationVertexIds![0] }]);
+    expect(after.navEdges?.find((edge) => edge.id === "shared-branch")).toMatchObject({ endNodeId: shared.id });
   });
 
   it("does not bridge a gap when a separate Pathway object is deleted", () => {

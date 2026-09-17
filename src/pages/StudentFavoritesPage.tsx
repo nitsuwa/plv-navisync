@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from "react";
 import { Building2, Navigation, MapPin, Search, Bookmark, Trash2, Sparkles } from "lucide-react";
 import { SearchBar } from "../components/ui/SearchBar";
 import { motion, AnimatePresence } from "motion/react";
-import { Link, Navigate } from "react-router";
+import { Link, useNavigate } from "react-router";
 import { useStudentAuth } from "../hooks/useStudentAuth";
 import { usePublishedCampus } from "../hooks";
 import { buildingsFromCampus } from "../lib/mapDataAdapter";
@@ -53,9 +53,9 @@ import { studentAccountService } from "../services/studentAccountService";
 
 export function StudentFavoritesPage() {
   const { loading: authLoading, isStudent } = useStudentAuth();
-  const toast = useToast();
+  const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
-  const { activeCampus, loading: campusLoading } = usePublishedCampus();
+  const { activeCampus } = usePublishedCampus();
   const campusBuildings: Building[] = useMemo(() => {
     if (activeCampus) return buildingsFromCampus(activeCampus) as Building[];
     return [];
@@ -67,10 +67,7 @@ export function StudentFavoritesPage() {
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: "instant" });
-    if (authLoading || campusLoading || !isStudent) return;
-
     let mounted = true;
-    setLoading(true);
     studentAccountService.getSavedBuildings(campusBuildings).then((res) => {
       if (mounted) {
         setSavedBuildings(res);
@@ -80,9 +77,9 @@ export function StudentFavoritesPage() {
     return () => {
       mounted = false;
     };
-  }, [authLoading, campusBuildings, campusLoading, isStudent]);
+  }, [campusBuildings]);
 
-  if (authLoading || campusLoading) return (
+  if (authLoading || loading) return (
     <PageTransition>
       <div className="max-w-2xl mx-auto px-5 py-6">
         <SkeletonList count={4} />
@@ -91,16 +88,9 @@ export function StudentFavoritesPage() {
   );
 
   if (!isStudent) {
-    return <Navigate to="/admin" replace />;
+    navigate("/admin");
+    return null;
   }
-
-  if (loading) return (
-    <PageTransition>
-      <div className="max-w-2xl mx-auto px-5 py-6">
-        <SkeletonList count={4} />
-      </div>
-    </PageTransition>
-  );
 
   const filtered = search.trim()
     ? savedBuildings.filter((b) =>
@@ -109,10 +99,12 @@ export function StudentFavoritesPage() {
       )
     : savedBuildings;
 
+  const toast = useToast();
+
   const remove = async (id: string) => {
     const building = savedBuildings.find((b) => b.id === id);
     setRemovingId(id);
-    await studentAccountService.toggleSaveBuilding(id, building?.code ? [building.code] : []);
+    await studentAccountService.toggleSaveBuilding(id);
     setTimeout(() => {
       setSavedBuildings((prev) => prev.filter((x) => x.id !== id));
       setRemovingId(null);
@@ -213,7 +205,7 @@ export function StudentFavoritesPage() {
 
                       <div className="flex items-center gap-2 shrink-0">
                         <Link
-                          to={`/map?buildingId=${encodeURIComponent(b.id)}`}
+                          to={`/map?buildingId=${b.id}`}
                           className="flex items-center gap-1.5 h-9 px-3.5 rounded-xl border border-border text-xs font-bold hover:bg-primary hover:text-primary-foreground hover:border-primary transition-all"
                         >
                           <Navigation className="h-3.5 w-3.5" />
@@ -247,11 +239,8 @@ export function StudentFavoritesPage() {
         <BuildingDetailModal
           building={selectedBuilding}
           onClose={() => setSelectedBuilding(null)}
-          isSaved={Boolean(selectedBuilding && savedBuildings.some((b) => b.id === selectedBuilding.id))}
-          onToggleSave={(id) => {
-            setSelectedBuilding(null);
-            void remove(id);
-          }}
+          isSaved={true}
+          onToggleSave={remove}
         />
 
         {/* Safe area spacer */}

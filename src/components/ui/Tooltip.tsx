@@ -3,9 +3,10 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 interface TooltipProps {
   content: string;
   children: ReactNode;
+  className?: string;
 }
 
-export function Tooltip({ content, children }: TooltipProps) {
+export function Tooltip({ content, children, className }: TooltipProps) {
   const [show, setShow] = useState(false);
   const [pos, setPos] = useState({ x: 0, y: 0 });
   const timerRef = useRef<number | null>(null);
@@ -44,7 +45,7 @@ export function Tooltip({ content, children }: TooltipProps) {
   return (
     <>
       <span
-        className="inline-flex"
+        className={`inline-flex ${className ?? ""}`}
         tabIndex={0}
         aria-label={content}
         onFocus={(e) => showAt(e.currentTarget)}

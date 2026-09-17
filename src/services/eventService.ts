@@ -1,6 +1,6 @@
 import { getSupabase } from "../lib/supabase";
 import { resolveActiveCampusId } from "./campusService";
-import type { Tables, TablesInsert, TablesUpdate } from "../types/database.generated";
+import type { Tables, TablesInsert } from "../types/database.generated";
 import { logActivity } from "./activityLogService";
 import { getPublishedAnnouncements } from "./announcementService";
 
@@ -29,9 +29,9 @@ const MOCK_EVENTS: CampusEvent[] = [
     description: "Join fellow students, industry leaders, and faculty for keynotes on AI, software development, and campus tech solutions.",
     category: "Academic",
     organizer: "College of Information Technology & Engineering",
-    buildingId: "b_ceit",
-    buildingName: "CEIT Building",
-    locationLabel: "CEIT Lab 501",
+    buildingId: "b3",
+    buildingName: "Library & Learning Resource Center",
+    locationLabel: "LRC 3rd Floor Audio-Visual Room",
     coverImage: "https://images.unsplash.com/photo-1540575467063-178a50c2df87?w=800&auto=format&fit=crop&q=80",
     startsAt: new Date(Date.now() + 86400000 * 2).toISOString(),
     endsAt: new Date(Date.now() + 86400000 * 2 + 14400000).toISOString(),
@@ -43,9 +43,9 @@ const MOCK_EVENTS: CampusEvent[] = [
     description: "Cheer for your college team at the PLV Gymnasium! Gates open 30 minutes before tip-off.",
     category: "Sports",
     organizer: "PLV Athletics & Sports Development",
-    buildingId: null,
-    buildingName: "PLV Campus Grounds",
-    locationLabel: "Campus sports venue",
+    buildingId: "b5",
+    buildingName: "Gymnasium",
+    locationLabel: "Main Arena",
     coverImage: "https://images.unsplash.com/photo-1546519638-68e109498ffc?w=800&auto=format&fit=crop&q=80",
     startsAt: new Date(Date.now() + 86400000 * 4).toISOString(),
     endsAt: new Date(Date.now() + 86400000 * 4 + 10800000).toISOString(),
@@ -57,9 +57,9 @@ const MOCK_EVENTS: CampusEvent[] = [
     description: "A celebration of student talent featuring dance performances, live acoustic sets, and art exhibits.",
     category: "Cultural",
     organizer: "Student Center & Arts Club",
-    buildingId: "b_scb",
-    buildingName: "Student Center Building",
-    locationLabel: "Student Center grounds",
+    buildingId: "b6",
+    buildingName: "Student Services Center",
+    locationLabel: "SSC Open Grounds",
     coverImage: "https://images.unsplash.com/photo-1492684223066-81342ee5ff30?w=800&auto=format&fit=crop&q=80",
     startsAt: new Date(Date.now() + 86400000 * 7).toISOString(),
     endsAt: new Date(Date.now() + 86400000 * 7 + 21600000).toISOString(),
@@ -171,10 +171,9 @@ export async function listEvents(filters: EventFilters = {}): Promise<ManagedEve
   const { data, error } = await query;
   if (error) throw error;
 
-  const rows = data ?? [];
-  let events: ManagedEvent[] = rows.map((row) => toManagedEvent(row, []));
-  if (rows.length > 0) {
-    const ids = rows.map((row) => row.id);
+  let events = data ?? [];
+  if (events.length > 0) {
+    const ids = events.map((row) => row.id);
     const { data: locations } = await supabase
       .from("event_locations")
       .select("event_id, label")
@@ -183,7 +182,7 @@ export async function listEvents(filters: EventFilters = {}): Promise<ManagedEve
     (locations ?? []).forEach((loc) => {
       (venueMap[loc.event_id] ??= []).push(loc.label);
     });
-    events = rows.map((row) => toManagedEvent(row, venueMap[row.id] ?? []));
+    events = events.map((row) => toManagedEvent(row, venueMap[row.id] ?? []));
   }
 
   const q = filters.search?.trim().toLocaleLowerCase();
@@ -232,7 +231,7 @@ export async function createEvent(input: EventInput): Promise<ManagedEvent> {
 /** Update an event and its primary venue label. */
 export async function updateEvent(id: string, input: Partial<EventInput>): Promise<void> {
   const supabase = getSupabase();
-  const changes: TablesUpdate<"events"> = { updated_at: new Date().toISOString() };
+  const changes: TablesInsert<"events"> = { updated_at: new Date().toISOString() };
   if (input.title !== undefined) changes.title = input.title;
   if (input.description !== undefined) changes.description = input.description || null;
   if (input.category !== undefined) changes.category = input.category;

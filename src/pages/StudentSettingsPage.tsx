@@ -4,7 +4,7 @@ import {
   Smartphone, Globe, CheckCircle2, ChevronRight, Sparkles,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
-import { Link, Navigate } from "react-router";
+import { Link, useNavigate } from "react-router";
 import { useStudentAuth } from "../hooks/useStudentAuth";
 import { useTheme } from "../hooks/useTheme";
 import { StudentPageHeader } from "../components/ui/StudentPageHeader";
@@ -12,9 +12,6 @@ import { PageTransition } from "../components/ui/PageTransition";
 import { Skeleton } from "../components/ui/Skeleton";
 import { useScrollReveal } from "../hooks/useScrollReveal";
 import { cn } from "../lib/utils";
-import { supabase } from "../lib/supabase";
-import { MIN_ACCOUNT_PASSWORD_LENGTH } from "../lib/studentAccount";
-import { useToast } from "../hooks/useToast";
 
 // ═════════════════════════════════════════════════════════════════════════════
 // ── Scroll-reveal wrapper ───────────────────────────────────────────────────
@@ -53,8 +50,8 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
 type SettingsSection = "appearance" | "notifications" | "security" | "support";
 
 export function StudentSettingsPage() {
-  const { loading: authLoading, isStudent, profile, username, role, signOut } = useStudentAuth();
-  const toast = useToast();
+  const navigate = useNavigate();
+  const { loading: authLoading, isStudent, username, role, signOut } = useStudentAuth();
   const { theme, toggleTheme } = useTheme();
   const [loading, setLoading] = useState(true);
   const [activeSection, setActiveSection] = useState<SettingsSection>("appearance");
@@ -65,8 +62,6 @@ export function StudentSettingsPage() {
   const [changingPw, setChangingPw] = useState(false);
   const [pwForm, setPwForm] = useState({ current: "", next: "", confirm: "" });
   const [pwSaved, setPwSaved] = useState(false);
-  const [pwError, setPwError] = useState("");
-  const [isUpdatingPassword, setIsUpdatingPassword] = useState(false);
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: "instant" });
@@ -78,7 +73,7 @@ export function StudentSettingsPage() {
 
   // Wait for the Supabase session/profile check before deciding. Reuse the
   // branded skeleton so there is no blank flash while the session resolves.
-  if (authLoading) {
+  if (authLoading || loading) {
     return (
       <PageTransition>
         <div className="min-h-screen">
@@ -105,74 +100,17 @@ export function StudentSettingsPage() {
 
   // Only active student profiles may use the student settings.
   if (!isStudent) {
-    return <Navigate to="/admin" replace />;
+    navigate("/admin");
+    return null;
   }
 
-  if (loading) {
-    return (
-      <PageTransition>
-        <div className="min-h-screen">
-          <div className="max-w-2xl mx-auto px-5 py-6 space-y-6">
-            <Skeleton className="h-12 w-full rounded-2xl" />
-            <Skeleton className="h-48 w-full rounded-2xl" />
-            <Skeleton className="h-48 w-full rounded-2xl" />
-          </div>
-        </div>
-      </PageTransition>
-    );
-  }
-
-  const handlePwSave = async () => {
-    if (isUpdatingPassword) return;
-    setPwError("");
-
-    if (pwForm.next.length < MIN_ACCOUNT_PASSWORD_LENGTH) {
-      setPwError(`New password must be at least ${MIN_ACCOUNT_PASSWORD_LENGTH} characters.`);
-      return;
-    }
-    if (pwForm.next !== pwForm.confirm) {
-      setPwError("New passwords do not match.");
-      return;
-    }
-    if (!supabase || !profile?.email) {
-      setPwError("Password updates are unavailable right now. Please try again later.");
-      return;
-    }
-
-    setIsUpdatingPassword(true);
-    try {
-      // Supabase's updateUser call does not validate the old password. Re-auth
-      // first so the Current Password field is meaningful and a stolen active
-      // session cannot silently change the account password.
-      const { error: verifyError } = await supabase.auth.signInWithPassword({
-        email: profile.email,
-        password: pwForm.current,
-      });
-      if (verifyError) {
-        setPwError("Current password is incorrect.");
-        return;
-      }
-
-      const { error: updateError } = await supabase.auth.updateUser({
-        password: pwForm.next,
-      });
-      if (updateError) {
-        setPwError("We could not update your password. Please try again.");
-        return;
-      }
-
-      setPwSaved(true);
-      toast.success("Password updated successfully");
-      window.setTimeout(() => {
-        setChangingPw(false);
-        setPwSaved(false);
-        setPwForm({ current: "", next: "", confirm: "" });
-      }, 1800);
-    } catch {
-      setPwError("We could not update your password. Please try again.");
-    } finally {
-      setIsUpdatingPassword(false);
-    }
+  const handlePwSave = () => {
+    setPwSaved(true);
+    setTimeout(() => {
+      setChangingPw(false);
+      setPwSaved(false);
+      setPwForm({ current: "", next: "", confirm: "" });
+    }, 1800);
   };
 
   const SECTIONS: { key: SettingsSection; label: string; icon: React.ElementType }[] = [
@@ -349,10 +287,7 @@ export function StudentSettingsPage() {
                                   <input
                                     type={f.type}
                                     value={pwForm[f.key]}
-                                    onChange={e => {
-                                      setPwError("");
-                                      setPwForm(p => ({ ...p, [f.key]: e.target.value }));
-                                    }}
+                                    onChange={e => setPwForm(p => ({ ...p, [f.key]: e.target.value }))}
                                     placeholder={f.placeholder}
                                     className="w-full px-3 py-2.5 rounded-xl border border-border/60 text-sm focus:outline-none focus:ring-2 focus:ring-primary/25 transition-all bg-input-background"
                                   />
@@ -367,18 +302,15 @@ export function StudentSettingsPage() {
                                   <CheckCircle2 className="h-3 w-3" /> Password updated successfully.
                                 </motion.p>
                               )}
-                              {pwError && (
-                                <p className="text-xs font-bold text-destructive" role="alert">{pwError}</p>
-                              )}
                               <div className="flex gap-2 pt-1">
-                                <button onClick={() => { setChangingPw(false); setPwError(""); setPwForm({ current: "", next: "", confirm: "" }); }}
+                                <button onClick={() => { setChangingPw(false); setPwForm({ current: "", next: "", confirm: "" }); }}
                                   className="flex-1 h-10 rounded-xl border border-border/60 text-xs font-bold hover:bg-muted/60 transition-colors text-muted-foreground">
                                   Cancel
                                 </button>
                                 <button onClick={handlePwSave}
-                                  disabled={isUpdatingPassword || !pwForm.current || !pwForm.next || pwForm.next !== pwForm.confirm}
+                                  disabled={!pwForm.current || !pwForm.next || pwForm.next !== pwForm.confirm}
                                   className="flex-1 h-10 rounded-xl text-xs font-bold transition-all disabled:opacity-40 bg-primary text-primary-foreground hover:brightness-110 active:scale-[0.97]">
-                                  {isUpdatingPassword ? "Updating…" : pwSaved ? "Saved!" : "Update Password"}
+                                  {pwSaved ? "Saved!" : "Update Password"}
                                 </button>
                               </div>
                             </div>

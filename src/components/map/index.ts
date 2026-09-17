@@ -1,5 +1,4 @@
 export { BuildingPicker } from "./BuildingPicker";
-export { EndpointPicker } from "./EndpointPicker";
 export { LocationQR } from "./LocationQR";
 export { ReportModal } from "./ReportModal";
 export { EventPopup } from "./EventPopup";

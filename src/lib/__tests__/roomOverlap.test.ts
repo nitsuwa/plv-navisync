@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { roomsOverlap, findOverlappingRoom, snapRoomToNearbyEdges, computeRoomAlignmentGuides, computeAlignmentGuides, computeResizeAlignmentGuides, computeResizeLimits, snapResizeEdges, resolveStableAlignmentAxis } from "../roomOverlap";
+import { roomsOverlap, findOverlappingRoom, snapRoomToNearbyEdges, computeRoomAlignmentGuides, computeAlignmentGuides, computeResizeAlignmentGuides, computeResizeLimits, snapResizeEdges, resolveStableAlignmentAxis, screenSpaceAlignmentThreshold } from "../roomOverlap";
 import type { FloorRoom } from "../../components/map-builder/types";
 
 function makeRoom(overrides: Partial<FloorRoom> = {}): FloorRoom {
@@ -500,6 +500,21 @@ describe("computeAlignmentGuides (universal move/placement alignment)", () => {
     expect(released.lock).toBeNull();
     expect(released.snapped).toBe(false);
     expect(released.position).toBe(109);
+  });
+});
+
+describe("screen-space alignment tolerance", () => {
+  it("keeps the physical snap window stable across zoom levels", () => {
+    expect(screenSpaceAlignmentThreshold(1)).toBe(6);
+    expect(screenSpaceAlignmentThreshold(2)).toBe(3);
+    expect(screenSpaceAlignmentThreshold(0.25)).toBe(12);
+  });
+
+  it("allows callers to keep guides visible without broad world-unit snapping", () => {
+    const ref = makeRoom({ id: "ref", x: 100, y: 100, w: 80, h: 60 });
+    const candidate = { x: 107, y: 220, w: 40, h: 30, id: "moving" };
+    expect(computeAlignmentGuides(candidate, [{ x: ref.x, y: ref.y, w: ref.w, h: ref.h, id: ref.id }], 4).guides).toHaveLength(0);
+    expect(computeAlignmentGuides(candidate, [{ x: ref.x, y: ref.y, w: ref.w, h: ref.h, id: ref.id }], 8).guides.length).toBeGreaterThan(0);
   });
 });
 
