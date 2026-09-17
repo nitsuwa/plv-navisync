@@ -36,6 +36,32 @@ export function exteriorZoneGeometry(zone: Pick<FloorExteriorZone, "side" | "off
   return { x: canvasW, y: offset * canvasH - width / 2, width: depth, height: width, rotation: 0 };
 }
 
+/**
+ * Check a Veranda/Entrance relationship using the canonical building-side
+ * attachment, not rendered coordinates or nearest-object distance.  Both
+ * values are normalized to the same Floor wall span, so this remains stable
+ * through canvas scaling and building transforms.
+ */
+export function exteriorZoneCoversEntrance(
+  zone: Pick<FloorExteriorZone, "side" | "offset" | "width">,
+  entrance: Pick<CampusEntranceLike, "edge" | "offset">,
+  canvasW: number,
+  canvasH: number,
+): boolean {
+  if (zone.side !== entrance.edge) return false;
+  const span = zone.side === "top" || zone.side === "bottom" ? Math.max(1, canvasW) : Math.max(1, canvasH);
+  const normalized = (value: unknown) => {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? Math.max(0, Math.min(1, numeric)) : 0.5;
+  };
+  const zoneCenter = normalized(zone.offset) * span;
+  const entranceOffset = normalized(entrance.offset) * span;
+  const halfSpan = Math.max(EXTERIOR_ZONE_MIN_SPAN, Number(zone.width) || EXTERIOR_ZONE_MIN_SPAN) / 2;
+  return entranceOffset >= zoneCenter - halfSpan && entranceOffset <= zoneCenter + halfSpan;
+}
+
+type CampusEntranceLike = { edge: BuildingEntranceEdge; offset: number };
+
 export function exteriorZoneSafeOffsetRange(zone: Pick<FloorExteriorZone, "side" | "width">, canvasW: number, canvasH: number) {
   const span = zone.side === "top" || zone.side === "bottom" ? canvasW : canvasH;
   const width = Math.max(EXTERIOR_ZONE_MIN_SPAN, Number(zone.width) || EXTERIOR_ZONE_MIN_SPAN);

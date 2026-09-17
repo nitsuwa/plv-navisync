@@ -2546,6 +2546,7 @@ const buildingFill = (id: string) =>
               <>
                 <ReadonlyFloorPlanScene
                   floor={activeFloorPlan}
+                  entrances={activeCampus?.buildings.find((building) => building.id === floorView.building.id)?.entrances ?? []}
                   mapMode={mapMode}
                   highlightedRoomId={highlightedRoom}
                   hoveredRoomId={hoveredRoom}

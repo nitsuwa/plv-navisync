@@ -3,7 +3,7 @@ import { cleanup, render, screen, act, fireEvent, within, waitFor } from "@testi
 import { toast } from "sonner";
 import { useState } from "react";
 import { FloorEditor } from "../FloorEditor";
-import type { Campus, FloorRoom, FloorPlan } from "../types";
+import type { Campus, FloorRoom, FloorPlan, FloorExteriorZone } from "../types";
 
 // ── B7 Phase 1 — Floor Issues panel consistency + on-canvas markers ───────
 // The Floor Editor Issues panel must equal the canonical campus validation
@@ -272,6 +272,37 @@ describe("FloorEditor on-canvas issue markers (B7 Phase 1)", () => {
     expect(markers[0].getAttribute("data-issue-object")).toBe("door:d1");
     // Worst severity wins: error, not warning.
     expect(markers[0].getAttribute("data-issue-severity")).toBe("error");
+  });
+
+  it("surfaces one canonical Veranda readiness warning with a custom tooltip and selection", () => {
+    const zone: FloorExteriorZone = {
+      id: "zone-1",
+      type: "veranda",
+      side: "bottom",
+      offset: 0.5,
+      width: 180,
+      depth: 72,
+      walkable: true,
+      linkedEntranceId: "e1",
+      linkedEntranceIds: ["e1"],
+    };
+    const campus = makeCampus([floor({ id: "f1", number: 1, label: "Ground Floor", exteriorZones: [zone] })]);
+    const { container } = render(<Harness campus={campus} />);
+
+    const marker = container.querySelector('[data-testid="issue-marker"][data-issue-object="exteriorZone:zone-1"]');
+    expect(marker).toBeTruthy();
+    expect(marker).toHaveAttribute("role", "button");
+    expect(marker).toHaveAttribute("aria-label", "Needs walking connection");
+    expect(marker?.querySelector('[data-testid="exterior-zone-issue-tooltip"]')).toBeTruthy();
+    expect(screen.getByText("Needs walking connection")).toBeTruthy();
+
+    fireEvent.mouseDown(marker!);
+    expect(screen.getByTestId("exterior-zone-inspector")).toBeInTheDocument();
+    expect(screen.getByTestId("exterior-zone-readiness-status")).toHaveTextContent("Needs walking connection");
+    expect(screen.getByTestId("exterior-zone-readiness-issue")).toHaveTextContent("Connect this Entrance to the Veranda walking network");
+
+    fireEvent.keyDown(marker!, { key: "Enter" });
+    expect(screen.getByTestId("exterior-zone-inspector")).toBeInTheDocument();
   });
 });
 

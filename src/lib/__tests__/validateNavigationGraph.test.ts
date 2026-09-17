@@ -98,6 +98,21 @@ describe("validateNavigationGraph", () => {
     expect(result.issues.filter((i) => i.severity === "error")).toHaveLength(0);
   });
 
+  it("does not flag a campus-scoped exterior approach anchor as an indoor node", () => {
+    const campus = baseCampus({
+      navNodes: [
+        node({ id: "outdoor-1", type: "outdoor" }),
+        node({
+          id: "approach-outer", type: "ramp", buildingId: "b1",
+          derivedOwnerType: "entrance_ramp", derivedOwnerId: "r1", derivedRole: "outer",
+        }),
+      ],
+      navEdges: [edge({ id: "approach-edge", startNodeId: "outdoor-1", endNodeId: "approach-outer", type: "exterior_approach" })],
+    });
+    const result = validateNavigationGraph(campus);
+    expect(result.issues.some((issue) => issue.message.includes("no floor assignment"))).toBe(false);
+  });
+
   it("flags orphan node as warning", () => {
     const campus = baseCampus({
       navNodes: [

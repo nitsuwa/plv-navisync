@@ -59,6 +59,7 @@ export function useUnsavedChangesGuard({
   const [pendingDescription, setPendingDescription] = useState<string | undefined>(undefined);
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
 
   // NATIVE browser confirmation for refresh / tab close / window close.
@@ -105,21 +106,27 @@ export function useUnsavedChangesGuard({
 
   const saveAndContinue = useCallback(async () => {
     const pending = pendingRef.current;
-    if (!pending) return;
+    if (!pending || savingRef.current) return;
+    savingRef.current = true;
     setSaving(true);
     setError(null);
-    const ok = await onSaveRef.current();
-    if (!ok) {
+    try {
+      const ok = await onSaveRef.current();
+      if (!ok) {
       // Keep the user in place on a failed save — never discard on failure.
-      setSaving(false);
       setError((prev) => prev ?? "Save failed. Your changes were not saved.");
       return;
+      }
+      pendingRef.current = null;
+      setPendingDescription(undefined);
+      setOpen(false);
+      pending.run();
+    } catch {
+      setError((prev) => prev ?? "Save failed. Your changes were not saved.");
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
     }
-    setSaving(false);
-    pendingRef.current = null;
-    setPendingDescription(undefined);
-    setOpen(false);
-    pending.run();
   }, []);
 
   return {

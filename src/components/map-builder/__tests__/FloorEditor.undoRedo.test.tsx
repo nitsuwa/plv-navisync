@@ -66,6 +66,47 @@ function makeCampus(): Campus {
   };
 }
 
+function makeEntranceCampus(): Campus {
+  const campus = makeCampus();
+  const building = campus.buildings[0];
+  const floor = building.floors[0];
+  building.entrances = [{
+    id: "entrance-1",
+    buildingId: building.id,
+    edge: "bottom",
+    offset: 0.5,
+    name: "Main Entrance",
+    type: "general",
+    isPrimary: true,
+    accessible: true,
+  }];
+  floor.doors = [{
+    id: "door-1",
+    x: 100,
+    y: 50,
+    width: 28,
+    height: 4,
+    wallId: "w1",
+    offset: 0.5,
+    direction: "double",
+    color: "#b45309",
+    label: "Main Entrance Door",
+    buildingEntranceId: "entrance-1",
+    visible: true,
+    locked: false,
+  }];
+  campus.navNodes = [
+    { id: "outdoor-1", name: "Pathway", type: "outdoor", x: 100, y: 250, campusId: campus.id, accessible: true, color: "#16a34a" },
+    { id: "entrance-node-1", name: "Main Entrance", type: "entrance", x: 100, y: 180, campusId: campus.id, buildingId: building.id, entranceId: "entrance-1", accessible: true, color: "#16a34a" },
+    { id: "door-node-1", name: "Main Entrance Door", type: "hallway", x: 100, y: 50, campusId: campus.id, buildingId: building.id, floorId: floor.id, doorId: "door-1", buildingEntranceId: "entrance-1", accessible: true, color: "#16a34a" },
+  ];
+  campus.navEdges = [
+    { id: "outdoor-entrance-1", startNodeId: "outdoor-1", endNodeId: "entrance-node-1", distance: 70, bidirectional: true, accessible: true, emergencySafe: true, type: "manual", color: "#16a34a", width: 3 },
+    { id: "entrance-door-1", startNodeId: "entrance-node-1", endNodeId: "door-node-1", distance: 1, bidirectional: true, accessible: true, emergencySafe: true, type: "entrance_transition", color: "#2563eb", width: 2 },
+  ];
+  return campus;
+}
+
 /** Harness that keeps the editor's campus state in React so onUpdate round-trips. */
 function Harness({ onCampusChange }: { onCampusChange?: (c: Campus) => void }) {
   const [campus, setCampus] = useState<Campus>(makeCampus);
@@ -123,8 +164,8 @@ describe("FloorEditor undo/redo integration", () => {
     const { container } = render(<Harness onCampusChange={(c) => { latestCampus = c; }} />);
     const svg = stubSvgRect(container);
 
-    const undoBtn = screen.getByTitle("Undo (Ctrl+Z)");
-    const redoBtn = screen.getByTitle("Redo (Ctrl+Y)");
+    const undoBtn = screen.getByRole("button", { name: "Undo" });
+    const redoBtn = screen.getByRole("button", { name: "Redo" });
     // Disabled button states must reflect availability BEFORE any edit
     expect((undoBtn as HTMLButtonElement).disabled).toBe(true);
     expect((redoBtn as HTMLButtonElement).disabled).toBe(true);
@@ -200,7 +241,7 @@ describe("FloorEditor undo/redo integration", () => {
     expect(latestCampus!.buildings[0].floors[0].walls).toHaveLength(0);
 
     // Undo restores it
-    fireEvent.click(screen.getByTitle("Undo (Ctrl+Z)"));
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
     expect(latestCampus!.buildings[0].floors[0].walls).toHaveLength(1);
     expect(latestCampus!.buildings[0].floors[0].walls[0].id).toBe("w1");
   });
@@ -235,6 +276,46 @@ describe("FloorEditor undo/redo integration", () => {
     fireEvent.mouseUp(svg, { bubbles: true });
 
     // No movement → nothing committed → undo stays disabled
-    expect((screen.getByTitle("Undo (Ctrl+Z)") as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Undo" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("undoes and redoes a synchronized Entrance-linked Door deletion with the original IDs and graph", () => {
+    const { container } = render(
+      <FloorEditor
+        campus={makeEntranceCampus()}
+        buildingId="b1"
+        floorId="f1"
+        onBack={() => {}}
+        onSwitchFloor={() => {}}
+        onUpdate={(next) => { latestCampus = next; }}
+      />,
+    );
+    const svg = stubSvgRect(container);
+    const doorHit = container.querySelector('[data-testid="floor-door-physical-hit"]');
+    expect(doorHit).toBeTruthy();
+    fireEvent.mouseDown(doorHit!, { clientX: 100, clientY: 50, bubbles: true });
+    fireEvent.mouseUp(svg, { clientX: 100, clientY: 50, bubbles: true });
+    fireEvent.keyDown(window, { key: "Delete" });
+    expect(screen.getByRole("button", { name: "Remove Entrance" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Remove Entrance" }));
+
+    expect(latestCampus?.buildings[0].entrances ?? []).toHaveLength(0);
+    expect(latestCampus?.buildings[0].floors[0].doors ?? []).toHaveLength(0);
+    expect(latestCampus?.navNodes?.some((node) => node.id === "entrance-node-1")).toBe(false);
+    expect(latestCampus?.navEdges?.some((edge) => edge.id === "outdoor-entrance-1")).toBe(false);
+
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+    expect(latestCampus?.buildings[0].entrances?.map((entry) => entry.id)).toEqual(["entrance-1"]);
+    expect(latestCampus?.buildings[0].floors[0].doors?.map((door) => door.id)).toEqual(["door-1"]);
+    expect(latestCampus?.navNodes?.some((node) => node.id === "entrance-node-1")).toBe(true);
+    expect(latestCampus?.navNodes?.some((node) => node.id === "door-node-1")).toBe(true);
+    expect(latestCampus?.navEdges?.some((edge) => edge.id === "outdoor-entrance-1")).toBe(true);
+    expect(latestCampus?.navEdges?.some((edge) => edge.id === "entrance-door-1")).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: "Redo" }));
+    expect(latestCampus?.buildings[0].entrances ?? []).toHaveLength(0);
+    expect(latestCampus?.buildings[0].floors[0].doors ?? []).toHaveLength(0);
+    expect(latestCampus?.navNodes?.some((node) => node.id === "entrance-node-1")).toBe(false);
+    expect(latestCampus?.navEdges?.some((edge) => edge.id === "outdoor-entrance-1")).toBe(false);
   });
 });
