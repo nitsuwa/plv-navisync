@@ -10,6 +10,8 @@
 
 import { FLOOR_PLANS, type Room } from "../data/floorPlans";
 import type { NavigationEdge, NavigationNode } from "../components/map-builder/types";
+import { doorHasIndoorNavigationConnection } from "./entranceTransitions";
+import { isRoomNavigationNode, ROOM_DOOR_EDGE_TYPE } from "./indoorNavigationGraph";
 import { findNavigationRoute } from "./pathfinding";
 
 export interface IndoorWaypoint {
@@ -32,9 +34,10 @@ export interface IndoorRoute {
 export type IndoorEntryPreference = "any" | "lobby" | "vertical";
 
 /**
- * A room target resolved from the published Map Builder model.  The optional
- * access fields are the persisted links created by the admin's Link Location
- * workflow; roomId remains the compatibility fallback for older maps.
+ * A room target resolved from the published Map Builder model. The access
+ * Door ids are the persisted links created by the admin's Link Room Door
+ * workflow. `accessNodeId` is retained for floor/room metadata compatibility,
+ * but it is never used as a walking endpoint.
  */
 export interface PublishedIndoorRouteTarget {
   buildingId: string;
@@ -42,6 +45,8 @@ export interface PublishedIndoorRouteTarget {
   roomId: string;
   roomName?: string;
   accessNodeId?: string;
+  /** Legacy-compatible primary Door link; `accessDoorIds` remains canonical. */
+  accessDoorId?: string;
   accessDoorIds?: string[];
 }
 
@@ -69,38 +74,53 @@ export function findIndoorRouteFromNavigationGraph(
   const edges = navEdges ?? [];
   if (!entryNodeId || nodes.length === 0 || edges.length === 0) return null;
 
-  const targetNode = target.accessNodeId
-    ? nodes.find((node) =>
-        node.id === target.accessNodeId
-        && node.buildingId === target.buildingId
-        && node.floorId === target.floorId
-      )
-    : undefined;
-  const roomNode = targetNode
-    ?? nodes.find((node) =>
+  // A room's `accessNodeId` is the semantic room anchor created by the map
+  // builder. It is not a walking endpoint. The physical Door is the boundary
+  // where an authored hallway path ends, so every published room route must
+  // terminate at a connected Door node. This also prevents the student route
+  // from traversing the room↔door metadata edge and drawing into the room.
+  const accessDoorIds = Array.from(new Set([
+    ...(target.accessDoorId ? [target.accessDoorId] : []),
+    ...(target.accessDoorIds ?? []),
+  ].filter(Boolean)));
+  if (accessDoorIds.length === 0) return null;
+
+  const targetDoorNodes = accessDoorIds
+    .map((doorId) => nodes.find((node) =>
       node.buildingId === target.buildingId
       && node.floorId === target.floorId
-      && node.roomId === target.roomId
-    )
-    ?? (target.accessDoorIds ?? [])
-      .map((doorId) => nodes.find((node) =>
-        node.buildingId === target.buildingId
-        && node.floorId === target.floorId
-        && node.doorId === doorId
-      ))
-      .find((node): node is NavigationNode => Boolean(node));
-  if (!roomNode) return null;
+      && node.doorId === doorId
+    ))
+    .filter((node): node is NavigationNode => Boolean(node))
+    .filter((node) => doorHasIndoorNavigationConnection(nodes, edges, node));
+  if (targetDoorNodes.length === 0) return null;
 
-  const graphRoute = findNavigationRoute(
-    nodes,
-    edges,
-    entryNodeId,
-    roomNode.id,
-    accessibleOnly,
-    emergencyOnly,
-    { useDerivedTransitions: false },
-  );
-  if (!graphRoute || graphRoute.nodeIds.length < 2) return null;
+  // A room can have more than one linked Door. Evaluate all connected Doors
+  // and keep the shortest authored route, rather than making Door order in
+  // persisted room metadata affect the student's journey.
+  const roomNodeIds = new Set(nodes.filter((node) => isRoomNavigationNode(node)).map((node) => node.id));
+  const authoredEdges = edges.filter((edge) => edge.type !== ROOM_DOOR_EDGE_TYPE
+    && !roomNodeIds.has(edge.startNodeId)
+    && !roomNodeIds.has(edge.endNodeId));
+  const candidates = targetDoorNodes
+    .map((targetNode) => ({
+      targetNode,
+      graphRoute: findNavigationRoute(
+        nodes,
+        authoredEdges,
+        entryNodeId,
+        targetNode.id,
+        accessibleOnly,
+        emergencyOnly,
+        { useDerivedTransitions: false },
+      ),
+    }))
+    .filter((candidate): candidate is { targetNode: NavigationNode; graphRoute: NonNullable<ReturnType<typeof findNavigationRoute>> } => Boolean(candidate.graphRoute && candidate.graphRoute.nodeIds.length >= 2))
+    .sort((a, b) => a.graphRoute.distanceM - b.graphRoute.distanceM);
+  const selected = candidates[0];
+  if (!selected) return null;
+
+  const { targetNode: roomNode, graphRoute } = selected;
 
   const nodeById = new Map(nodes.map((node) => [node.id, node]));
   const targetIndex = graphRoute.nodeIds.lastIndexOf(roomNode.id);
@@ -120,13 +140,13 @@ export function findIndoorRouteFromNavigationGraph(
   if (localNodeIds.length < 2) return null;
 
   const edgeFor = (fromId: string, toId: string): { edge: NavigationEdge | undefined; reversed: boolean } => {
-    const direct = edges.find((edge) =>
+    const direct = authoredEdges.find((edge) =>
       !edge.closed
       && edge.startNodeId === fromId
       && edge.endNodeId === toId
     );
     if (direct) return { edge: direct, reversed: false };
-    const reverse = edges.find((edge) =>
+    const reverse = authoredEdges.find((edge) =>
       !edge.closed
       &&
       edge.bidirectional

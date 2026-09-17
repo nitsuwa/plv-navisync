@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useNavigate, Link } from "react-router";
+import { useLocation, useNavigate, Link } from "react-router";
 import { motion, AnimatePresence, useReducedMotion } from "motion/react";
 import { Eye, EyeOff, LogIn, AlertCircle, X, ChevronDown, Sparkles, ShieldCheck, GraduationCap } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -34,6 +34,35 @@ function friendlyAuthError(rawMessage?: string): string {
     return "Unable to reach the sign-in service. Check your connection and try again.";
   }
   return "Unable to sign in. Please check your email and password.";
+}
+
+function safeReturnPath(state: unknown): string {
+  if (!state || typeof state !== "object" || !("from" in state)) return "/home";
+
+  const from = (state as { from?: unknown }).from;
+  if (typeof from !== "string" || !from.startsWith("/") || from.startsWith("//")) {
+    return "/home";
+  }
+
+  try {
+    // Parse the complete relative URL so query-string intents such as
+    // /map?buildingId=...&report=1 survive authentication without allowing
+    // an external redirect.
+    const parsed = new URL(from, window.location.origin);
+    const isStudentPath = parsed.pathname === "/home"
+      || parsed.pathname === "/my-day"
+      || parsed.pathname === "/student"
+      || parsed.pathname.startsWith("/student/")
+      || parsed.pathname === "/map"
+      || parsed.pathname === "/buildings"
+      || parsed.pathname.startsWith("/buildings/");
+    if (parsed.origin === window.location.origin && isStudentPath) {
+      return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+    }
+  } catch {
+    // Fall back to the student home page for malformed navigation state.
+  }
+  return "/home";
 }
 
 // ── Demo account dropdown configuration ──────────────────────────────────────
@@ -334,6 +363,7 @@ function LegacyCampusIllustration() {
 
 // ═════════════════════════════════════════════════════════════════════════════
 export function AdminLoginPage() {
+  const location = useLocation();
   const navigate = useNavigate();
   const { theme, toggleTheme } = useTheme();
   const [form, setForm]        = useState({ email: "", password: "" });
@@ -425,11 +455,12 @@ export function AdminLoginPage() {
         return;
       }
 
-      // Students land on the student campus map experience. Any other role
-      // (there are only student/admin in the schema) is rejected safely.
+      // Students return to the protected page that sent them here. This keeps
+      // deep links such as /student/reports useful after authentication while
+      // still falling back to the student home page for a normal login.
       if (profile.role === "student") {
         toast.success("Signed in", "Welcome to the student experience!");
-        navigate("/map", { replace: true });
+        navigate(safeReturnPath(location.state), { replace: true });
         return;
       }
 

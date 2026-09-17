@@ -1,8 +1,8 @@
 import { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router";
 import {
-  Bookmark, Flag, Settings, HelpCircle, LogOut,
-  ChevronRight, MapPin, X, User, Sun, Moon,
+  Bookmark, Flag, Settings, HelpCircle, LogOut, Home, CalendarDays,
+  ChevronRight, MapPin, X, User, Sun, Moon, Building2, LogIn,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { useStudentAuth } from "../../hooks/useStudentAuth";
@@ -16,7 +16,7 @@ interface MoreSheetProps {
 
 export function MoreSheet({ open, onClose }: MoreSheetProps) {
   const navigate = useNavigate();
-  const { username, role, signOut } = useStudentAuth();
+  const { isStudent, username, role, signOut } = useStudentAuth();
   const { theme, toggleTheme } = useTheme();
 
   useEffect(() => {
@@ -36,14 +36,24 @@ export function MoreSheet({ open, onClose }: MoreSheetProps) {
 
   const initials = username.slice(0, 2).toUpperCase();
 
-  const menuItems = [
-    { icon: User, label: "My Profile", path: "/student", color: "text-primary" },
-    { icon: Bookmark, label: "Favorites", path: "/student/favorites", color: "text-amber-500" },
-    { icon: Flag, label: "My Reports", path: "/student/reports", color: "text-orange-500" },
-    { icon: MapPin, label: "Campus Map", path: "/map", color: "text-green-500" },
-    { icon: Settings, label: "Settings", path: "/student/settings", color: "text-purple-500" },
-    { icon: HelpCircle, label: "Help Center", path: "/help", color: "text-blue-500" },
-  ];
+  const menuItems = isStudent
+    ? [
+        { icon: Home, label: "Student Home", path: "/home", color: "text-primary" },
+        { icon: CalendarDays, label: "My Day", path: "/my-day", color: "text-indigo-500" },
+        { icon: User, label: "My Profile", path: "/student", color: "text-primary" },
+        { icon: Bookmark, label: "Favorites", path: "/student/favorites", color: "text-amber-500" },
+        { icon: Flag, label: "My Reports", path: "/student/reports", color: "text-orange-500" },
+        { icon: MapPin, label: "Campus Map", path: "/map", color: "text-green-500" },
+        { icon: Settings, label: "Settings", path: "/student/settings", color: "text-purple-500" },
+        { icon: HelpCircle, label: "Help Center", path: "/help", color: "text-blue-500" },
+      ]
+    : [
+        { icon: Home, label: "Home", path: "/", color: "text-primary" },
+        { icon: Building2, label: "Browse Buildings", path: "/buildings", color: "text-indigo-500" },
+        { icon: MapPin, label: "Campus Map", path: "/map", color: "text-green-500" },
+        { icon: HelpCircle, label: "Help Center", path: "/help", color: "text-blue-500" },
+        { icon: LogIn, label: "Sign In", path: "/admin", color: "text-purple-500" },
+      ];
 
   return (
     <AnimatePresence>
@@ -77,11 +87,11 @@ export function MoreSheet({ open, onClose }: MoreSheetProps) {
             <div className="flex items-center justify-between px-5 pb-4 border-b border-border/50">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-xl flex items-center justify-center text-sm font-extrabold text-primary-foreground bg-primary">
-                  {initials}
+                  {isStudent ? initials : <MapPin className="h-5 w-5" />}
                 </div>
                 <div>
-                  <p className="text-sm font-extrabold text-foreground">{username}</p>
-                  <p className="text-[11px] text-muted-foreground capitalize">{role}</p>
+                  <p className="text-sm font-extrabold text-foreground">{isStudent ? username : "Explore PLV Campus"}</p>
+                  <p className="text-[11px] text-muted-foreground capitalize">{isStudent ? role : "Guest access"}</p>
                 </div>
               </div>
               <button
@@ -134,15 +144,17 @@ export function MoreSheet({ open, onClose }: MoreSheetProps) {
             </div>
 
             {/* Sign out */}
-            <div className="px-5 pb-8 border-t border-border/50 pt-2">
-              <button
-                onClick={handleLogout}
-                className="w-full flex items-center justify-center gap-2 h-11 rounded-xl border border-destructive/30 text-destructive text-sm font-bold hover:bg-destructive/8 transition-colors"
-              >
-                <LogOut className="h-4 w-4" />
-                Sign Out
-              </button>
-            </div>
+            {isStudent && (
+              <div className="px-5 pb-8 border-t border-border/50 pt-2">
+                <button
+                  onClick={handleLogout}
+                  className="w-full flex items-center justify-center gap-2 h-11 rounded-xl border border-destructive/30 text-destructive text-sm font-bold hover:bg-destructive/8 transition-colors"
+                >
+                  <LogOut className="h-4 w-4" />
+                  Sign Out
+                </button>
+              </div>
+            )}
           </motion.div>
         </>
       )}

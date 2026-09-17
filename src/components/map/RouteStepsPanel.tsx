@@ -1,9 +1,9 @@
 import {
   Navigation, Flag, Footprints, ArrowUp, MoveVertical, DoorOpen,
-  CircleCheck, Info, Maximize2, Accessibility, RotateCcw,
+  CircleCheck, Info, Maximize2, RotateCcw,
 } from "lucide-react";
 import type { PlannedRoute, RouteMode, RouteStepIcon } from "../../lib/routePlanner";
-import { formatDistance, formatMinutes } from "../../lib/routePlanner";
+import { stripRouteMeasurement } from "../../lib/routePlanner";
 import { cn } from "../../lib/utils";
 
 interface RouteStepsPanelProps {
@@ -93,9 +93,10 @@ function stepDot(isFirst: boolean, isLast: boolean) {
 }
 
 /**
- * Turn-by-turn navigation panel — shows total distance/ETA, every step with
- * an icon and distance, and floor-transition badges. Positioned by the parent
- * (desktop bottom-left card, mobile sheet).
+ * Turn-by-turn navigation panel — shows every step and floor-transition
+ * badges. Physical distance and time estimates are intentionally omitted
+ * because the student map is not calibrated for reliable measurements.
+ * Positioned by the parent (desktop bottom-left card, mobile sheet).
  */
 export function RouteStepsPanel({
   route, mode, toName, onEnd, onZoom, walkProgress, onReplay, activeLeg,
@@ -110,8 +111,11 @@ export function RouteStepsPanel({
     typeof trackedProgress === "number" && (!activeLeg || hasActiveLegSteps)
       ? activeStepIndex(steps, trackedProgress, trackedDistance)
       : steps.length > 0 ? 0 : null;
-  const currentInstruction = activeLeg?.statusInstruction
+  const rawCurrentInstruction = activeLeg?.statusInstruction
     ?? (activeIndex !== null ? steps[activeIndex]?.instruction : undefined);
+  const currentInstruction = rawCurrentInstruction
+    ? stripRouteMeasurement(rawCurrentInstruction)
+    : undefined;
 
   return (
     <div
@@ -127,22 +131,17 @@ export function RouteStepsPanel({
         <span className="w-1.5 h-1.5 rounded-full bg-green-300 animate-pulse shrink-0" />
       </div>
 
-      {/* Stats row: distance, time, mode */}
+      {/* Guidance row — no uncalibrated distance or ETA */}
       <div className="flex gap-2 px-3 pt-2.5 pb-2 border-b border-border">
         <div className="flex-1 px-2 py-1.5 rounded-lg bg-primary/8 text-center">
-          <p className="text-[10px] text-muted-foreground font-bold uppercase tracking-wider">Dist</p>
-          <p className="text-sm font-extrabold text-foreground">{formatDistance(route.dist)}</p>
-        </div>
-        <div className="flex-1 px-2 py-1.5 rounded-lg bg-primary/8 text-center">
-          <p className="text-[10px] text-muted-foreground font-bold uppercase tracking-wider">Time</p>
-          <p className="text-sm font-extrabold text-foreground">{formatMinutes(route.mins)}</p>
-        </div>
-        <div className="flex-1 px-2 py-1.5 rounded-lg bg-primary/8 text-center">
-          <p className="text-[10px] text-muted-foreground font-bold uppercase tracking-wider">Via</p>
+          <p className="text-[10px] text-muted-foreground font-bold uppercase tracking-wider">Mode</p>
           <p className="text-sm font-extrabold text-foreground">
-            {mode === "accessible" ? <Accessibility className="h-4 w-4 inline-block align-middle" /> :
-             mode === "emergency" ? "SOS" : "Walk"}
+            {mode === "accessible" ? "Accessible" : mode === "emergency" ? "SOS" : "Standard"}
           </p>
+        </div>
+        <div className="flex-[2] px-2 py-1.5 rounded-lg bg-primary/8 text-center">
+          <p className="text-[10px] text-muted-foreground font-bold uppercase tracking-wider">Guidance</p>
+          <p className="text-sm font-extrabold text-foreground">Follow map path</p>
         </div>
       </div>
 
@@ -207,13 +206,8 @@ export function RouteStepsPanel({
                     "text-[10px] leading-snug pt-0.5",
                     isLast ? "font-bold text-foreground" : "text-muted-foreground"
                   )}>
-                    {step.instruction}
+                    {stripRouteMeasurement(step.instruction)}
                   </p>
-                  {step.distanceM !== undefined && (
-                    <span className="text-[10px] text-muted-foreground font-semibold">
-                      {formatDistance(step.distanceM)}
-                    </span>
-                  )}
                 </div>
               </div>
             );

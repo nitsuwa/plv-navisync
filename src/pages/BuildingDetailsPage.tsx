@@ -1,4 +1,4 @@
-import { useParams, Link } from "react-router";
+import { useParams, Link, useNavigate } from "react-router";
 import { useState, useEffect, useMemo } from "react";
 import {
   ArrowLeft, MapPin, Clock, Phone, Building2, Navigation, Layers, Users,
@@ -19,6 +19,10 @@ import { cn } from "../lib/utils";
 import { Reveal } from "../components/ui/Reveal";
 import { getOpenStatus } from "../lib/buildingHours";
 import type { Building } from "../types";
+import { useStudentAuth } from "../hooks/useStudentAuth";
+import { useToast } from "../hooks/useToast";
+import { studentAccountService } from "../services/studentAccountService";
+import { ReportModal } from "../components/map/ReportModal";
 
 type Tab = "about" | "departments" | "facilities" | "accessibility";
 
@@ -31,12 +35,17 @@ const TABS: { key: Tab; label: string; icon: React.ElementType }[] = [
 
 export function BuildingDetailsPage() {
   const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
+  const { loading: authLoading, isStudent } = useStudentAuth();
+  const toast = useToast();
   const [activeTab, setActiveTab] = useState<Tab>("about");
   const [isLoading, setIsLoading] = useState(true);
   const [isSaved, setIsSaved] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [reportBuilding, setReportBuilding] = useState<Building | null>(null);
   // Use the published campus (same source as the map + directory) so the
   // detail page resolves seeded building ids like b_scb consistently.
-  const { activeCampus } = usePublishedCampus();
+  const { activeCampus, loading: campusLoading } = usePublishedCampus();
 
   // Derive buildings exclusively from the published campus
   const buildings: Building[] = useMemo(() => {
@@ -73,8 +82,89 @@ export function BuildingDetailsPage() {
   ).slice(0, 3);
   const bHours = building ? getOpenStatus(building) : null;
 
+  useEffect(() => {
+    if (!building || authLoading || !isStudent) {
+      setIsSaved(false);
+      return;
+    }
 
-  if (!isLoading && !building) {
+    const buildingId = building.id.toLowerCase();
+    const buildingCode = building.code.toLowerCase();
+    const saved = studentAccountService.getSavedBuildingIds().some((savedId) => {
+      const normalized = savedId.toLowerCase();
+      return normalized === buildingId || normalized === buildingCode;
+    });
+    setIsSaved(saved);
+  }, [authLoading, building, isStudent]);
+
+  const handleSave = async () => {
+    if (!building) return;
+    if (authLoading) {
+      toast.info("Checking your account…");
+      return;
+    }
+    if (!isStudent) {
+      navigate("/admin", {
+        state: { from: `/buildings/${encodeURIComponent(building.id)}` },
+      });
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      const saved = await studentAccountService.toggleSaveBuilding(building.id, [building.code]);
+      setIsSaved(saved);
+      toast.success(saved ? "Building saved" : "Building removed from favorites");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleShare = async () => {
+    if (!building) return;
+    const url = window.location.href;
+    try {
+      if (navigator.share) {
+        await navigator.share({
+          title: `${building.name} · PLV NaviSync`,
+          text: `Explore ${building.name} on PLV NaviSync.`,
+          url,
+        });
+        return;
+      }
+
+      if (navigator.clipboard) {
+        await navigator.clipboard.writeText(url);
+        toast.success("Building link copied");
+        return;
+      }
+
+      toast.error("Sharing is unavailable in this browser");
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") return;
+      toast.error("Could not share this building");
+    }
+  };
+
+  const handleReport = () => {
+    if (!building) return;
+    if (authLoading) {
+      toast.info("Checking your account…");
+      return;
+    }
+    if (!isStudent) {
+      navigate("/admin", {
+        state: {
+          from: `/map?buildingId=${encodeURIComponent(building.id)}&report=1`,
+        },
+      });
+      return;
+    }
+    setReportBuilding(building);
+  };
+
+
+  if (!isLoading && !campusLoading && !building) {
     return (
       <PageTransition>
         <EmptyState
@@ -92,7 +182,7 @@ export function BuildingDetailsPage() {
   }
 
   // ── Loading skeleton ──
-  if (isLoading) {
+  if (isLoading || campusLoading) {
     return (
       <PageTransition>
         <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8">
@@ -213,10 +303,14 @@ export function BuildingDetailsPage() {
         <Reveal delay={80}>
           <div className="flex flex-wrap gap-2 mb-6"
         >
-          <Button variant="primary" size="md">
+          <Button
+            variant="primary"
+            size="md"
+            onClick={() => navigate(`/map?dest=${encodeURIComponent(building!.id)}`)}
+          >
             <Navigation className="h-4 w-4" /> Get Directions
           </Button>
-          <Link to="/map">
+          <Link to={`/map?buildingId=${encodeURIComponent(building!.id)}`}>
             <Button variant="outline" size="md">
               <MapPin className="h-4 w-4" /> View on Map
             </Button>
@@ -224,13 +318,14 @@ export function BuildingDetailsPage() {
           <Button
             variant="outline"
             size="md"
-            onClick={() => setIsSaved(!isSaved)}
+            onClick={handleSave}
+            disabled={isSaving}
             className={cn(isSaved && "border-accent/50 text-accent bg-accent/5")}
           >
             <Bookmark className={cn("h-4 w-4", isSaved && "fill-current")} />
             {isSaved ? "Saved" : "Save"}
           </Button>
-          <Button variant="outline" size="md">
+          <Button variant="outline" size="md" onClick={handleShare}>
             <Share2 className="h-4 w-4" /> Share
           </Button>
         </div>
@@ -383,18 +478,21 @@ export function BuildingDetailsPage() {
             {/* Quick actions */}
             <div className="surface-card p-4 space-y-2">
               <Link
-                to="/map"
+                to={`/map?dest=${encodeURIComponent(building!.id)}`}
                 className="flex items-center justify-center gap-2 py-3 rounded-xl bg-primary text-primary-foreground text-sm font-bold hover:bg-primary/90 transition-all active:scale-[0.98]"
               >
                 <Navigation className="h-4 w-4" /> Get Directions
               </Link>
               <Link
-                to="/map"
+                to={`/map?buildingId=${encodeURIComponent(building!.id)}`}
                 className="flex items-center justify-center gap-2 py-3 rounded-xl border border-border text-sm font-bold text-foreground hover:bg-muted transition-all"
               >
                 <MapPin className="h-4 w-4" /> View on Map
               </Link>
-              <button className="w-full flex items-center justify-center gap-2 py-3 rounded-xl border border-border text-sm font-bold text-muted-foreground hover:bg-destructive/5 hover:text-destructive hover:border-destructive/20 transition-all">
+              <button
+                onClick={handleReport}
+                className="w-full flex items-center justify-center gap-2 py-3 rounded-xl border border-border text-sm font-bold text-muted-foreground hover:bg-destructive/5 hover:text-destructive hover:border-destructive/20 transition-all"
+              >
                 <Flag className="h-4 w-4" /> Report Issue
               </button>
             </div>
@@ -429,6 +527,13 @@ export function BuildingDetailsPage() {
         </Reveal>
         )}
       </div>
+      {reportBuilding && (
+        <ReportModal
+          building={reportBuilding}
+          campusId={activeCampus?.id}
+          onClose={() => setReportBuilding(null)}
+        />
+      )}
     </PageTransition>
   );
 }

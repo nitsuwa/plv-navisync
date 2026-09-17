@@ -10,6 +10,7 @@ import {
   detectFloorTransitions,
   formatDistance,
   formatMinutes,
+  stripRouteMeasurement,
   type CampusNavGraph,
   type RouteSegment,
 } from "../routePlanner";
@@ -191,27 +192,40 @@ describe("authored destination endpoint combinations", () => {
       { id: "b2-entry", name: "Building 2 Entrance", type: "entrance", x: 200, y: 0, buildingId: "b2" },
       { id: "b1-door", name: "Building 1 Lobby Door", type: "entrance", x: 10, y: 0, buildingId: "b1", floorId: "f1", doorId: "door-b1" },
       { id: "b2-door", name: "Building 2 Lobby Door", type: "entrance", x: 210, y: 0, buildingId: "b2", floorId: "f1", doorId: "door-b2" },
-      { id: "room-1", name: "Room 1", type: "room_access", x: 20, y: 0, buildingId: "b1", floorId: "f1", roomId: "r1" },
+      { id: "room-1-door", name: "Room 1 Door", type: "hallway", x: 20, y: 0, buildingId: "b1", floorId: "f1", doorId: "door-room-1" },
+      { id: "room-1", name: "Room 1", type: "room_access", x: 28, y: 0, buildingId: "b1", floorId: "f1", roomId: "r1" },
       { id: "stair-1", name: "Stairs", type: "stair", x: 40, y: 0, buildingId: "b1", floorId: "f1", stairId: "s1" },
       { id: "stair-2", name: "Stairs", type: "stair", x: 40, y: 0, buildingId: "b1", floorId: "f2", stairId: "s2" },
-      { id: "room-2", name: "Room 2", type: "room_access", x: 60, y: 0, buildingId: "b1", floorId: "f2", roomId: "r2" },
-      { id: "room-3", name: "Room 3", type: "room_access", x: 220, y: 0, buildingId: "b2", floorId: "f1", roomId: "r3" },
+      { id: "room-2-door", name: "Room 2 Door", type: "hallway", x: 60, y: 0, buildingId: "b1", floorId: "f2", doorId: "door-room-2" },
+      { id: "room-2", name: "Room 2", type: "room_access", x: 68, y: 0, buildingId: "b1", floorId: "f2", roomId: "r2" },
+      { id: "room-3-door", name: "Room 3 Door", type: "hallway", x: 220, y: 0, buildingId: "b2", floorId: "f1", doorId: "door-room-3" },
+      { id: "room-3", name: "Room 3", type: "room_access", x: 228, y: 0, buildingId: "b2", floorId: "f1", roomId: "r3" },
     ],
     navEdges: [
       { id: "e-entry-door-b1", startNodeId: "b1-entry", endNodeId: "b1-door", distance: 10, bidirectional: true, accessible: true, type: "entrance_transition" },
-      { id: "e-door-room-b1", startNodeId: "b1-door", endNodeId: "room-1", distance: 10, bidirectional: true, accessible: true },
-      { id: "e-room-stair", startNodeId: "room-1", endNodeId: "stair-1", distance: 20, bidirectional: true, accessible: true },
+      { id: "e-door-room-b1", startNodeId: "b1-door", endNodeId: "room-1-door", distance: 10, bidirectional: true, accessible: true },
+      { id: "e-room-1-door-link", startNodeId: "room-1", endNodeId: "room-1-door", distance: 1, bidirectional: true, accessible: true, type: "room_door_transition" },
+      { id: "e-room-stair", startNodeId: "room-1-door", endNodeId: "stair-1", distance: 20, bidirectional: true, accessible: true },
       { id: "e-stair-transition", startNodeId: "stair-1", endNodeId: "stair-2", distance: 5, bidirectional: true, accessible: false, type: "floor_transition", emergencySafe: true },
-      { id: "e-stair-room", startNodeId: "stair-2", endNodeId: "room-2", distance: 20, bidirectional: true, accessible: true },
+      { id: "e-stair-room", startNodeId: "stair-2", endNodeId: "room-2-door", distance: 20, bidirectional: true, accessible: true },
+      { id: "e-room-2-door-link", startNodeId: "room-2", endNodeId: "room-2-door", distance: 1, bidirectional: true, accessible: true, type: "room_door_transition" },
       { id: "e-outdoor", startNodeId: "b1-entry", endNodeId: "b2-entry", distance: 200, bidirectional: true, accessible: true, emergencySafe: true },
       { id: "e-entry-door-b2", startNodeId: "b2-entry", endNodeId: "b2-door", distance: 10, bidirectional: true, accessible: true, type: "entrance_transition" },
-      { id: "e-door-room-b2", startNodeId: "b2-door", endNodeId: "room-3", distance: 10, bidirectional: true, accessible: true },
+      { id: "e-door-room-b2", startNodeId: "b2-door", endNodeId: "room-3-door", distance: 10, bidirectional: true, accessible: true },
+      { id: "e-room-3-door-link", startNodeId: "room-3", endNodeId: "room-3-door", distance: 1, bidirectional: true, accessible: true, type: "room_door_transition" },
     ],
   };
   const building = (buildingId: string, code: string) => ({ type: "building" as const, buildingId, label: code, code });
+  const roomDoorById: Record<string, string> = {
+    r1: "door-room-1",
+    r2: "door-room-2",
+    r3: "door-room-3",
+  };
   const room = (buildingId: string, roomId: string, floorNumber: number, code: string) => ({
     type: "room" as const, buildingId, roomId, floorNumber, roomName: roomId,
     buildingLabel: code, buildingCode: code,
+    accessDoorId: roomDoorById[roomId],
+    accessDoorIds: roomDoorById[roomId] ? [roomDoorById[roomId]] : undefined,
   });
 
   it("routes building→room, room→room across floors, and room→room across buildings", () => {
@@ -222,18 +236,23 @@ describe("authored destination endpoint combinations", () => {
     expect(buildingToRoom?.steps.at(-1)?.instruction).toBe("Arrive at Room 201");
     expect(buildingToRoom?.points.length).toBeLessThan(2);
     expect(buildingToRoom?.indoorSegments?.some((segment) => segment.floorNumber === 2)).toBe(true);
+    expect(buildingToRoom?.indoorSegments?.find((segment) => segment.floorNumber === 2)?.waypoints.at(-1)).toEqual({ x: 60, y: 0 });
+    expect(buildingToRoom?.legs?.map((leg) => leg.kind)).toEqual(["indoor", "transition", "indoor"]);
     const sameBuilding = planDestinationRoute(room("b1", "r1", 1, "B1"), room("b1", "r2", 2, "B1"), "standard", graph);
     expect(sameBuilding?.points).toEqual([]);
     expect(sameBuilding?.indoorSegments?.map((segment) => segment.floorId)).toEqual(["f1", "f2"]);
     expect(sameBuilding?.indoorSegments?.every((segment) => segment.waypoints.length >= 2)).toBe(true);
+    expect(sameBuilding?.indoorSegments?.find((segment) => segment.floorNumber === 2)?.waypoints.at(-1)).toEqual({ x: 60, y: 0 });
     expect(sameBuilding?.transitionDetails).toEqual([
       expect.objectContaining({ kind: "stairs", nodeId: "stair-2", fromFloorId: "f1", toFloorId: "f2" }),
     ]);
     expect(sameBuilding?.steps.some((step) => /Take the stairs/i.test(step.instruction))).toBe(true);
+    expect(sameBuilding?.legs?.map((leg) => leg.kind)).toEqual(["indoor", "transition", "indoor"]);
     const roomToBuilding = planDestinationRoute(room("b1", "r2", 2, "B1"), building("b1", "B1"), "standard", graph);
     expect(roomToBuilding?.destinationRoom).toBeUndefined();
     expect(roomToBuilding?.points.length).toBeLessThan(2);
     expect(roomToBuilding?.indoorSegments?.some((segment) => segment.floorNumber === 2)).toBe(true);
+    expect(roomToBuilding?.legs?.map((leg) => leg.kind)).toEqual(["indoor", "transition", "indoor"]);
     const crossBuilding = planDestinationRoute(
       room("b1", "r1", 1, "B1"),
       room("b2", "r3", 1, "B2"),
@@ -250,9 +269,113 @@ describe("authored destination endpoint combinations", () => {
       { buildingId: "b2", floorNumber: 1 },
     ]);
     expect(crossBuilding?.indoorSegments?.every((segment) => segment.waypoints.length >= 2)).toBe(true);
+    expect(crossBuilding?.indoorSegments?.find((segment) => segment.buildingId === "b2")?.waypoints.at(-1)).toEqual({ x: 220, y: 0 });
+    expect(crossBuilding?.legs?.map((leg) => leg.kind)).toEqual(["indoor", "outdoor", "indoor"]);
+    // The graph has a normal lobby entrance but no published emergency
+    // discharge. SOS routing must refuse it instead of drawing the unsafe
+    // normal-door path.
     const emergencyRoute = planDestinationRoute(room("b1", "r2", 2, "B1"), building("b2", "B2"), "emergency", graph);
-    expect(emergencyRoute).not.toBeNull();
-    expect(emergencyRoute!.steps.some((step) => step.icon === "stairs")).toBe(true);
+    expect(emergencyRoute).toBeNull();
+  });
+
+  it("does not let a stale entrance bridge skip the destination ground floor", () => {
+    const targetRoom = { ...room("b1", "r2", 2, "B1"), roomName: "Room 201" };
+    const graphWithHierarchy: CampusNavGraph = {
+      ...graph,
+      buildings: [{
+        id: "b1",
+        floors: [{ id: "f1", number: 1 }, { id: "f2", number: 2 }],
+      }],
+      navEdges: [
+        ...graph.navEdges!,
+        {
+          id: "e-stale-upper-floor-entry",
+          startNodeId: "b1-entry",
+          endNodeId: "stair-2",
+          distance: 0.1,
+          bidirectional: true,
+          accessible: true,
+          type: "entrance_transition",
+        },
+        {
+          id: "e-stale-generic-upper-floor-entry",
+          startNodeId: "b1-entry",
+          endNodeId: "stair-2",
+          distance: 0.05,
+          bidirectional: true,
+          accessible: true,
+          type: "walkway",
+        },
+      ],
+    };
+
+    const route = planDestinationRoute(
+      building("b1", "B1"),
+      targetRoom,
+      "standard",
+      graphWithHierarchy,
+    );
+
+    expect(route).not.toBeNull();
+    expect(route?.indoorSegments?.map((segment) => segment.floorId)).toEqual(["f1", "f2"]);
+    expect(route?.legs?.map((leg) => leg.kind)).toEqual(["indoor", "transition", "indoor"]);
+    expect(route?.legs?.[0]).toMatchObject({ kind: "indoor", floorId: "f1" });
+  });
+
+  it("keeps a room-to-room cross-building route on the destination ground floor before stairs", () => {
+    const crossBuildingGraph: CampusNavGraph = {
+      ...graph,
+      buildings: [
+        { id: "b1", floors: [{ id: "f1", number: 1 }, { id: "f2", number: 2 }] },
+        { id: "b2", floors: [{ id: "f1", number: 1 }, { id: "f2", number: 2 }] },
+      ],
+      navNodes: [
+        ...graph.navNodes!,
+        { id: "b2-stair-1", name: "B2 Stairs", type: "stair", x: 240, y: 0, buildingId: "b2", floorId: "f1", stairId: "b2-stair-1" },
+        { id: "b2-stair-2", name: "B2 Stairs", type: "stair", x: 240, y: 0, buildingId: "b2", floorId: "f2", stairId: "b2-stair-2" },
+        { id: "room-4-door", name: "Room 4 Door", type: "hallway", x: 260, y: 0, buildingId: "b2", floorId: "f2", doorId: "door-room-4" },
+        { id: "room-4", name: "Room 4", type: "room_access", x: 268, y: 0, buildingId: "b2", floorId: "f2", roomId: "r4" },
+      ],
+      navEdges: [
+        ...graph.navEdges!,
+        { id: "e-b2-door-stair", startNodeId: "b2-door", endNodeId: "b2-stair-1", distance: 15, bidirectional: true, accessible: true },
+        { id: "e-b2-stair-transition", startNodeId: "b2-stair-1", endNodeId: "b2-stair-2", distance: 5, bidirectional: true, accessible: false, type: "floor_transition", emergencySafe: true },
+        { id: "e-b2-stair-room", startNodeId: "b2-stair-2", endNodeId: "room-4-door", distance: 20, bidirectional: true, accessible: true },
+        { id: "e-room-4-door-link", startNodeId: "room-4", endNodeId: "room-4-door", distance: 1, bidirectional: true, accessible: true, type: "room_door_transition" },
+        {
+          id: "e-stale-b2-upper-floor-entry",
+          startNodeId: "b2-entry",
+          endNodeId: "b2-stair-2",
+          distance: 0.1,
+          bidirectional: true,
+          accessible: true,
+          type: "entrance_transition",
+        },
+      ],
+    };
+    const destination = {
+      type: "room" as const,
+      buildingId: "b2",
+      roomId: "r4",
+      floorNumber: 2,
+      roomName: "Room 4",
+      buildingLabel: "B2",
+      buildingCode: "B2",
+      accessDoorId: "door-room-4",
+      accessDoorIds: ["door-room-4"],
+    };
+
+    const route = planDestinationRoute(room("b1", "r1", 1, "B1"), destination, "standard", crossBuildingGraph);
+
+    expect(route).not.toBeNull();
+    expect(route?.indoorSegments?.map((segment) => ({ buildingId: segment.buildingId, floorId: segment.floorId }))).toEqual([
+      { buildingId: "b1", floorId: "f1" },
+      { buildingId: "b2", floorId: "f1" },
+      { buildingId: "b2", floorId: "f2" },
+    ]);
+    expect(route?.legs?.map((leg) => leg.kind)).toEqual(["indoor", "outdoor", "indoor", "transition", "indoor"]);
+    expect(route?.legs?.[2]).toMatchObject({ kind: "indoor", buildingId: "b2", floorId: "f1" });
+    expect(route?.transitionDetails?.[0]).toMatchObject({ fromFloorId: "f1", toFloorId: "f2" });
   });
 
   it("keeps a point→room route fully authored and prices the floor transition", () => {
@@ -271,7 +394,17 @@ describe("authored destination endpoint combinations", () => {
     expect(route!.dist).toBeGreaterThan(0);
     expect(route!.transitions).toContain("Take the stairs to Stairs");
     expect(route!.transitionDetails?.[0]).toMatchObject({ kind: "stairs", nodeId: "stair-2" });
+    expect(route!.legs?.map((leg) => leg.kind)).toEqual(["indoor", "transition", "indoor"]);
     expect(hasNavigableRoute(route)).toBe(true);
+  });
+
+  it("refuses a published room that has no linked Door even when a room node exists", () => {
+    const orphanRoom = {
+      ...room("b1", "r1", 1, "B1"),
+      accessDoorId: undefined,
+      accessDoorIds: undefined,
+    };
+    expect(planAuthoredDestinationRoute(building("b1", "B1"), orphanRoom, "standard", graph)).toBeNull();
   });
 
   it("does not treat a zero-length authored route as navigable", () => {
@@ -283,6 +416,80 @@ describe("authored destination endpoint combinations", () => {
     );
     expect(route).toBeNull();
     expect(hasNavigableRoute(null)).toBe(false);
+  });
+
+  it("uses the published emergency stair instead of the normal lobby entrance", () => {
+    const emergencyGraph: CampusNavGraph = {
+      navNodes: [
+        ...graph.navNodes!,
+        {
+          id: "b1-emergency-outdoor",
+          name: "Building 1 Emergency Stair Discharge",
+          type: "stair",
+          x: -20,
+          y: 40,
+          buildingId: "b1",
+          exteriorEmergencyStairId: "ext-stair-b1",
+          emergencyStair: true,
+          emergencySafe: true,
+        },
+        {
+          id: "b1-emergency-floor",
+          name: "Building 1 Fire Stairs",
+          type: "stair",
+          x: 40,
+          y: 40,
+          buildingId: "b1",
+          floorId: "f1",
+          stairId: "stair-fire-b1",
+          emergencyStair: true,
+          emergencySafe: true,
+        },
+      ],
+      navEdges: [
+        ...graph.navEdges!,
+        {
+          id: "e-emergency-discharge",
+          startNodeId: "b1-emergency-outdoor",
+          endNodeId: "b1-emergency-floor",
+          distance: 1,
+          bidirectional: true,
+          accessible: false,
+          emergencySafe: true,
+          type: "floor_transition",
+        },
+        {
+          id: "e-room-fire-stairs",
+          startNodeId: "room-1-door",
+          endNodeId: "b1-emergency-floor",
+          distance: 8,
+          bidirectional: true,
+          accessible: true,
+          emergencySafe: true,
+          type: "walkway",
+        },
+      ],
+    };
+
+    const roomToBuilding = planDestinationRoute(
+      room("b1", "r1", 1, "B1"),
+      building("b1", "B1"),
+      "emergency",
+      emergencyGraph,
+    );
+    expect(roomToBuilding).not.toBeNull();
+    expect(roomToBuilding?.indoorSegments?.[0].waypoints).toContainEqual({ x: 40, y: 40 });
+    expect(roomToBuilding?.indoorSegments?.[0].waypoints).not.toContainEqual({ x: 10, y: 0 });
+    expect(roomToBuilding?.steps.some((step) => step.icon === "stairs")).toBe(true);
+
+    const buildingToRoom = planDestinationRoute(
+      building("b1", "B1"),
+      room("b1", "r1", 1, "B1"),
+      "emergency",
+      emergencyGraph,
+    );
+    expect(buildingToRoom).not.toBeNull();
+    expect(buildingToRoom?.indoorSegments?.[0].waypoints[0]).toEqual({ x: 40, y: 40 });
   });
 });
 
@@ -396,6 +603,7 @@ describe("stepsFromGraphPath", () => {
     const steps = stepsFromGraphPath(path, "A", "B");
     // steps[0] is the prefixed start step; steps[1] is the Walk instruction
     expect(steps[1].distanceM).toBe(45);
+    expect(steps[1].instruction).toBe("Walk toward the gate");
   });
 });
 
@@ -430,6 +638,12 @@ describe("detectFloorTransitions", () => {
 });
 
 describe("formatting helpers", () => {
+  it("removes physical measurements from student-facing instructions", () => {
+    expect(stripRouteMeasurement("Walk 45 m toward the gate")).toBe("Walk toward the gate");
+    expect(stripRouteMeasurement("Continue for 0.2 km to Room 205")).toBe("Continue to Room 205");
+    expect(stripRouteMeasurement("Arrive at Room 205")).toBe("Arrive at Room 205");
+  });
+
   it("formats distances with the right unit", () => {
     expect(formatDistance(450)).toBe("450 m");
     expect(formatDistance(1200)).toBe("1.2 km");
