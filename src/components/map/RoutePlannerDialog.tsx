@@ -1,15 +1,14 @@
-import { useEffect, useId, useRef, type ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import {
   Navigation, X, ArrowUpDown, Compass, Accessibility, AlertTriangle,
   MapPin, Route as RouteIcon, Crosshair,
 } from "lucide-react";
 import type { Building } from "../../types";
-import { BuildingPicker } from "./BuildingPicker";
+import { EndpointPicker } from "./EndpointPicker";
 import { RouteErrorState } from "./RouteErrorState";
 import { cn } from "../../lib/utils";
 import type { PlannedRoute, RouteMode } from "../../lib/routePlanner";
 import type { RoomDest } from "../../lib/combinedPathfinding";
-import { formatDistance, formatMinutes } from "../../lib/routePlanner";
 import { useEscToClose } from "../../hooks/useEscToClose";
 
 interface RoutePlannerDialogProps {
@@ -47,90 +46,6 @@ const MODES: { key: RouteMode; label: string; icon: ReactNode }[] = [
   { key: "accessible", label: "Accessible", icon: <Accessibility className="h-3.5 w-3.5" /> },
   { key: "emergency", label: "SOS", icon: <AlertTriangle className="h-3.5 w-3.5" /> },
 ];
-
-function RoomEndpointCard({
-  room,
-  badge,
-  onChange,
-}: {
-  room: RoomDest;
-  badge: string;
-  onChange?: () => void;
-}) {
-  return (
-    <div
-      className="flex items-center gap-2 px-3 py-2.5 rounded-xl border border-primary/30 bg-primary/5"
-      data-testid={`${badge === "A" ? "from" : "to"}-room-endpoint`}
-    >
-      <span className="w-5 h-5 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-[10px] font-black">{badge}</span>
-      <div className="min-w-0 flex-1">
-        <p className="text-[11px] font-extrabold text-foreground leading-tight truncate">{room.roomName}</p>
-        <p className="text-[9px] text-muted-foreground truncate">{room.buildingCode} · Floor {room.floorNumber}</p>
-      </div>
-      {onChange && (
-        <button
-          onClick={onChange}
-          className="text-[9px] font-bold text-primary hover:underline shrink-0"
-          aria-label={`Change ${badge === "A" ? "starting" : "destination"} room`}
-        >
-          Change
-        </button>
-      )}
-    </div>
-  );
-}
-
-function RoomEndpointPicker({
-  purpose,
-  value,
-  roomOptions,
-  onChange,
-}: {
-  purpose: "starting" | "destination";
-  value: RoomDest | null;
-  roomOptions: readonly RoomDest[];
-  onChange: (room: RoomDest | null) => void;
-}) {
-  const selectId = useId();
-  const isStarting = purpose === "starting";
-  const testKey = isStarting ? "start" : "destination";
-  const label = `${isStarting ? "Starting" : "Destination"} room (optional)`;
-  const optionValue = (room: RoomDest) => `${room.buildingId}:${room.floorNumber}:${room.roomId}`;
-
-  return (
-    <div
-      className="rounded-xl border border-dashed border-primary/30 bg-primary/5 px-3 py-2"
-      data-testid={`room-${testKey}-picker`}
-      onWheelCapture={(event) => event.stopPropagation()}
-      onTouchMoveCapture={(event) => event.stopPropagation()}
-    >
-      <label htmlFor={selectId} className="block text-[10px] font-extrabold text-foreground mb-1">
-        {label}
-      </label>
-      <select
-        id={selectId}
-        data-testid={`room-${testKey}-selector`}
-        aria-label={label}
-        value={value ? optionValue(value) : ""}
-        onChange={(event) => {
-          const selected = roomOptions.find((room) => optionValue(room) === event.target.value) ?? null;
-          onChange(selected);
-        }}
-        className="w-full h-9 rounded-lg border border-border bg-card px-2 text-[11px] font-semibold text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
-      >
-        <option value="">Choose a published room…</option>
-        {roomOptions.map((room) => (
-          <option key={optionValue(room)} value={optionValue(room)}>
-            {room.roomName} · {room.buildingCode} · Floor {room.floorNumber}
-          </option>
-        ))}
-      </select>
-      <p className="mt-1 text-[9px] text-muted-foreground">
-        {isStarting ? "Or choose a starting building above." : "Or choose a destination building below."}
-      </p>
-    </div>
-  );
-}
 
 /**
  * Route planner dialog — pick start + destination, choose a travel mode,
@@ -177,6 +92,22 @@ export function RoutePlannerDialog({
   const toDisplay = toRoom
     ? `${toRoom.roomName} in ${toRoom.buildingLabel} (${toRoom.buildingCode})`
     : (to?.code ?? "B");
+  const clearFromRoom = () => {
+    if (onClearFromRoom) {
+      onClearFromRoom();
+      return;
+    }
+    onFromRoomChange?.(null);
+    onFromChange(null);
+  };
+  const clearToRoom = () => {
+    if (onClearToRoom) {
+      onClearToRoom();
+      return;
+    }
+    onToRoomChange?.(null);
+    onToChange(null);
+  };
 
   return (
     <div
@@ -300,29 +231,21 @@ export function RoutePlannerDialog({
               Change
             </button>
           </div>
-        ) : fromRoom ? (
-            <RoomEndpointCard room={fromRoom} badge="A" onChange={onClearFromRoom} />
-          ) : (
-            <>
-              <BuildingPicker
-                badge="A"
-                badgeColor="#16a34a"
-                value={from}
-                onSelect={onFromChange}
-                onClear={() => onFromChange(null)}
-                placeholder="Starting point…"
-                buildings={buildings}
-              />
-              {onFromRoomChange && roomOptions.length > 0 && (
-                <RoomEndpointPicker
-                  purpose="starting"
-                  value={null}
-                  roomOptions={roomOptions}
-                  onChange={onFromRoomChange}
-                />
-              )}
-            </>
-          )}
+        ) : (
+          <EndpointPicker
+            badge="A"
+            badgeColor="#16a34a"
+            building={from}
+            room={fromRoom}
+            onBuildingSelect={onFromChange}
+            onBuildingClear={() => onFromChange(null)}
+            onRoomSelect={onFromRoomChange}
+            onRoomClear={clearFromRoom}
+            placeholder="Starting point…"
+            buildings={buildings}
+            roomOptions={roomOptions}
+          />
+        )}
         {!useMyLocation && bothSet && (
           <div className="flex items-center justify-center">
             <button
@@ -334,29 +257,19 @@ export function RoutePlannerDialog({
             </button>
           </div>
         )}
-        {toRoom ? (
-          <RoomEndpointCard room={toRoom} badge="B" onChange={onClearToRoom} />
-        ) : (
-          <>
-            {onToRoomChange && roomOptions.length > 0 && (
-              <RoomEndpointPicker
-                purpose="destination"
-                value={null}
-                roomOptions={roomOptions}
-                onChange={onToRoomChange}
-              />
-            )}
-            <BuildingPicker
-              badge="B"
-              badgeColor="#dc2626"
-              value={to}
-              onSelect={onToChange}
-              onClear={() => onToChange(null)}
-              placeholder="Destination…"
-              buildings={buildings}
-            />
-          </>
-        )}
+        <EndpointPicker
+          badge="B"
+          badgeColor="#dc2626"
+          building={to}
+          room={toRoom}
+          onBuildingSelect={onToChange}
+          onBuildingClear={() => onToChange(null)}
+          onRoomSelect={onToRoomChange}
+          onRoomClear={clearToRoom}
+          placeholder="Destination…"
+          buildings={buildings}
+          roomOptions={roomOptions}
+        />
 
         {/* Route summary / error / empty */}
         {route ? (
@@ -367,12 +280,9 @@ export function RoutePlannerDialog({
               </span>
               <span className="w-2 h-2 rounded-full bg-accent animate-pulse" />
             </div>
-            <div className="flex items-end gap-3">
-              <p className="text-lg font-extrabold text-foreground">{formatDistance(route.dist)}</p>
-              <p className="text-sm font-semibold text-muted-foreground pb-0.5">
-                · {formatMinutes(route.mins)}
-              </p>
-            </div>
+            <p className="text-[10px] font-semibold text-foreground/80">
+              Follow the highlighted path and turn-by-turn instructions below.
+            </p>
             <p data-testid="route-source" className="mt-1 text-[9px] font-semibold text-muted-foreground">
               {route.isAuthoredGraph
                 ? "Following the admin-authored map paths"
@@ -500,21 +410,21 @@ export function RoutePlannerDialog({
             </div>
             <button onClick={() => onUseMyLocationChange(false)} className="text-[10px] font-bold text-primary hover:underline" aria-label="Choose a building as starting point instead">Change</button>
           </div>
-        ) : fromRoom ? (
-            <RoomEndpointCard room={fromRoom} badge="A" onChange={onClearFromRoom} />
-          ) : (
-            <>
-              <BuildingPicker badge="A" badgeColor="#16a34a" value={from} onSelect={onFromChange} onClear={() => onFromChange(null)} placeholder="Starting point…" buildings={buildings} />
-              {onFromRoomChange && roomOptions.length > 0 && (
-                <RoomEndpointPicker
-                  purpose="starting"
-                  value={null}
-                  roomOptions={roomOptions}
-                  onChange={onFromRoomChange}
-                />
-              )}
-            </>
-          )}
+        ) : (
+          <EndpointPicker
+            badge="A"
+            badgeColor="#16a34a"
+            building={from}
+            room={fromRoom}
+            onBuildingSelect={onFromChange}
+            onBuildingClear={() => onFromChange(null)}
+            onRoomSelect={onFromRoomChange}
+            onRoomClear={clearFromRoom}
+            placeholder="Starting point…"
+            buildings={buildings}
+            roomOptions={roomOptions}
+          />
+        )}
         {!useMyLocation && bothSet && (
           <div className="flex items-center justify-center">
             <button onClick={swapEndpoints} className="w-9 h-9 rounded-full border border-border bg-card shadow-sm flex items-center justify-center active:scale-90 transition-all" aria-label="Swap start and destination">
@@ -522,21 +432,19 @@ export function RoutePlannerDialog({
             </button>
           </div>
         )}
-        {toRoom ? (
-          <RoomEndpointCard room={toRoom} badge="B" onChange={onClearToRoom} />
-        ) : (
-          <>
-            {onToRoomChange && roomOptions.length > 0 && (
-              <RoomEndpointPicker
-                purpose="destination"
-                value={null}
-                roomOptions={roomOptions}
-                onChange={onToRoomChange}
-              />
-            )}
-            <BuildingPicker badge="B" badgeColor="#dc2626" value={to} onSelect={onToChange} onClear={() => onToChange(null)} placeholder="Destination…" buildings={buildings} />
-          </>
-        )}
+        <EndpointPicker
+          badge="B"
+          badgeColor="#dc2626"
+          building={to}
+          room={toRoom}
+          onBuildingSelect={onToChange}
+          onBuildingClear={() => onToChange(null)}
+          onRoomSelect={onToRoomChange}
+          onRoomClear={clearToRoom}
+          placeholder="Destination…"
+          buildings={buildings}
+          roomOptions={roomOptions}
+        />
 
         {/* Route summary */}
         {route ? (
@@ -547,10 +455,9 @@ export function RoutePlannerDialog({
               </span>
               <span className="w-2 h-2 rounded-full bg-accent animate-pulse" />
             </div>
-            <div className="flex items-end gap-3">
-              <p className="text-xl font-extrabold text-foreground">{formatDistance(route.dist)}</p>
-              <p className="text-sm font-semibold text-muted-foreground pb-0.5">· {formatMinutes(route.mins)}</p>
-            </div>
+            <p className="text-[11px] font-semibold text-foreground/80">
+              Follow the highlighted path and turn-by-turn instructions below.
+            </p>
             <p data-testid="route-source" className="mt-1 text-[9px] font-semibold text-muted-foreground">
               {route.isAuthoredGraph
                 ? "Following the admin-authored map paths"

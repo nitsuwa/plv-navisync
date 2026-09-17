@@ -5,7 +5,7 @@ import {
 } from "lucide-react";
 import { SearchBar } from "../components/ui/SearchBar";
 import { motion, AnimatePresence } from "motion/react";
-import { Link, useNavigate } from "react-router";
+import { Link, Navigate } from "react-router";
 import { useStudentAuth } from "../hooks/useStudentAuth";
 import { StudentPageHeader } from "../components/ui/StudentPageHeader";
 import { PageTransition } from "../components/ui/PageTransition";
@@ -67,7 +67,6 @@ const STEPS = ["Submitted", "Under Review", "Resolved"];
 
 export function StudentReportsPage() {
   const { loading: authLoading, isStudent } = useStudentAuth();
-  const navigate = useNavigate();
   const [reports, setReports] = useState<IssueReport[]>([]);
   const [loading, setLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -76,6 +75,8 @@ export function StudentReportsPage() {
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: "instant" });
+    if (authLoading || !isStudent) return;
+
     let mounted = true;
     reportService.getStudentReports().then((res) => {
       if (mounted) {
@@ -86,7 +87,7 @@ export function StudentReportsPage() {
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [authLoading, isStudent]);
 
   const refreshReports = useCallback(async () => {
     setIsRefreshing(true);
@@ -99,7 +100,7 @@ export function StudentReportsPage() {
 
   // Wait for the Supabase session/profile check before deciding. Reuse the
   // branded skeleton so there is no blank flash while the session resolves.
-  if (authLoading || loading) {
+  if (authLoading) {
     return (
       <PageTransition>
         <div className="min-h-screen">
@@ -146,8 +147,22 @@ export function StudentReportsPage() {
 
   // Only active student profiles may use the student reports.
   if (!isStudent) {
-    navigate("/admin");
-    return null;
+    return <Navigate to="/admin" replace />;
+  }
+
+  if (loading) {
+    return (
+      <PageTransition>
+        <div className="min-h-screen">
+          <div className="max-w-2xl mx-auto px-5 py-6 space-y-4">
+            <Skeleton className="h-11 w-full rounded-2xl" />
+            {Array.from({ length: 3 }).map((_, i) => (
+              <Skeleton key={i} className="h-40 w-full rounded-2xl" />
+            ))}
+          </div>
+        </div>
+      </PageTransition>
+    );
   }
 
   const filtered = reports.filter((r) => {
@@ -384,7 +399,12 @@ export function StudentReportsPage() {
 
                         {/* Footer */}
                         <div className="px-5 py-3 flex items-center justify-between bg-muted/10">
-                          <Link to="/map" className="flex items-center gap-1.5 text-xs font-bold text-primary hover:underline group">
+                          <Link
+                            to={r.buildingId
+                              ? `/map?buildingId=${encodeURIComponent(r.buildingId)}`
+                              : "/map"}
+                            className="flex items-center gap-1.5 text-xs font-bold text-primary hover:underline group"
+                          >
                             View on map <ChevronRight className="h-3 w-3 transition-transform group-hover:translate-x-0.5" />
                           </Link>
                           {r.status === "resolved" && (

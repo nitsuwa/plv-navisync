@@ -131,7 +131,9 @@ function ReportDetailModal({ report, onClose, onChanged }: {
     }
   };
 
-  const mapTarget = report.buildingId ? `/map?buildingId=${report.buildingId}` : "/map";
+  const mapTarget = report.buildingId
+    ? `/map?buildingId=${encodeURIComponent(report.buildingId)}`
+    : "/map";
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/70 backdrop-blur-sm p-4" onClick={onClose}>

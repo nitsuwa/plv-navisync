@@ -400,6 +400,51 @@ describe("B5 Phase 4 - entrance transition graph", () => {
     expect(linkEntranceToIndoorDoor(campus, "b1", "ent-main", "door-node-f2", ids)).toBe(campus);
   });
 
+  it("removes a stale entrance transition that lands on an upper-floor Door", () => {
+    const campus = makeCampus();
+    campus.buildings[0].floors.push({
+      id: "f2",
+      buildingId: "b1",
+      number: 2,
+      label: "Floor 2",
+      rooms: [],
+      paths: [],
+      walls: [],
+      doors: [{ id: "door-f2", label: "Floor 2 Door", x: 20, y: 20, width: 20, direction: "left", color: "#b45309" }],
+      windows: [],
+      furniture: [],
+      stairs: [],
+      ramps: [],
+      elevators: [],
+      labels: [],
+    });
+    campus.navNodes.push(createIndoorNavNode({
+      id: "door-node-f2",
+      x: 20,
+      y: 20,
+      campusId: "c1",
+      buildingId: "b1",
+      floorId: "f2",
+      name: "Floor 2 Door",
+      type: "hallway",
+      doorId: "door-f2",
+    }));
+
+    const linked = linkEntranceToIndoorDoor(campus, "b1", "ent-main", "door-node", ids);
+    const validTransition = linked.navEdges.find((edge) => edge.type === ENTRANCE_TRANSITION_EDGE_TYPE)!;
+    const staleUpperFloorTransition = {
+      ...validTransition,
+      id: "stale-upper-floor-transition",
+      endNodeId: "door-node-f2",
+    };
+    const dirty = { ...linked, navEdges: [staleUpperFloorTransition, validTransition] };
+
+    const reconciled = reconcileEntranceTransitions(dirty);
+
+    expect(reconciled.navEdges.filter((edge) => edge.type === ENTRANCE_TRANSITION_EDGE_TYPE).map((edge) => edge.id))
+      .toEqual([validTransition.id]);
+  });
+
   it("recomputes entry-floor eligibility from canonical floor order after reorder", () => {
     const campus = makeCampus();
     campus.buildings[0].floors.push({

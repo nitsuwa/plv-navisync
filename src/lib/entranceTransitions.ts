@@ -3,7 +3,7 @@ import { genId as defaultGenId } from "../components/map-builder/constants";
 import { entranceDisplayName, entranceWorldPosition, normalizeEntranceDirection } from "./buildingEntrances";
 import { createNavNode, navEdgeDistance, findEntranceNavNode, syncEntranceNodePositions, pruneOrphanedEntranceNodes, DEFAULT_NAV_NODE_COLOR } from "./navigationGraph";
 import { entranceConnectorDistance, entranceConnectorGeometry } from "./entranceConnector";
-import { createIndoorNavNode, ROOM_DOOR_EDGE_TYPE } from "./indoorNavigationGraph";
+import { createIndoorNavNode, isRoomNavigationNode, ROOM_DOOR_EDGE_TYPE } from "./indoorNavigationGraph";
 import { DEFAULT_FLOOR_CANVAS, clampWallOpeningOffset, maxOpeningWidthForWall, wallLength } from "./floorGeometry";
 
 export const ENTRANCE_TRANSITION_EDGE_TYPE = "entrance_transition";
@@ -290,7 +290,10 @@ export function doorHasIndoorNavigationConnection(
         : undefined;
     if (!otherId || !nodeIds.has(otherId)) return false;
     const other = (nodes ?? []).find((node) => node.id === otherId);
-    return other?.buildingId === doorNode.buildingId && other.floorId === doorNode.floorId;
+    return Boolean(other
+      && !isRoomNavigationNode(other)
+      && other.buildingId === doorNode.buildingId
+      && other.floorId === doorNode.floorId);
   });
 }
 
@@ -856,7 +859,12 @@ export function reconcileEntranceTransitions(campus: Campus): Campus {
     const building = campus.buildings.find((b) => b.id === entranceNode.buildingId);
     const entranceExists = building?.entrances?.some((en) => en.id === entranceNode.entranceId);
     const doorExists = !!findDoor(building, doorNode.floorId, doorNode.doorId);
-    if (!entranceExists || !doorExists) return false;
+    // Building Entrances discharge into the canonical entry floor only. A
+    // stale upper-floor bridge would let student routing skip the ground-floor
+    // corridor and stair transition, so treat it as invalid infrastructure and
+    // remove it during every reconciliation/load.
+    const entryFloor = entryFloorForBuilding(building);
+    if (!entranceExists || !doorExists || (entryFloor && doorNode.floorId !== entryFloor.id)) return false;
     const entranceKey = `${entranceNode.buildingId}:${entranceNode.entranceId}`;
     const pairKey = [edge.startNodeId, edge.endNodeId].sort().join(":");
     if (seenEntrance.has(entranceKey) || seenPair.has(pairKey)) return false;

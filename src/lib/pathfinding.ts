@@ -837,7 +837,11 @@ export function findNavigationRoute(
         const distM = Math.round(arc.distance * M_PER_UNIT);
         const crossedDerivedArc = arcs.slice(0, i).some((prior) => !prior.edge);
         if (steps.length === 0 && !crossedDerivedArc) steps.push(`Start from ${fromLabel}`);
-        if (arc.crossesFloor && arc.transitionKind) {
+        const isAuthoredTransition = Boolean(
+          arc.transitionKind
+          && (arc.crossesFloor || edge?.type === "floor_transition" || edge?.type === "cross_floor"),
+        );
+        if (isAuthoredTransition && arc.transitionKind) {
           const transitionLabel = arc.transitionKind === "stair" ? "stairs" : "elevator";
           steps.push(`Take the ${transitionLabel} to ${toLabel}`);
         } else if (edge) {
