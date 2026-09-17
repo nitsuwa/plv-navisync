@@ -37,6 +37,8 @@ import { EntranceDirectionBadge } from "./EntranceDirectionBadge";
 import { UnsavedChangesDialog } from "./UnsavedChangesDialog";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
 import { useUnsavedChangesGuard } from "./useUnsavedChangesGuard";
+import { CanvasAssetVisual } from "../canvas/CanvasAssetVisual";
+import { getCanvasAsset, resolveCanvasAssetKey } from "../canvas/canvasAssetCatalog";
 import { useToast } from "../../hooks/useToast";
 import { floorUndoEntryFromFloor, normalizeFloor } from "../../lib/floorPlanNormalization";
 import { FloorGroundSurface } from "./FloorGroundSurface";
@@ -1249,7 +1251,7 @@ type FloorContextMenuState =
   | { x: number; y: number; type: "group"; id?: undefined }
   | { x: number; y: number; type: "canvas"; id?: undefined };
 
-export function FloorFurnitureSymbol({ type, x, y, width, height, color, selected = false }: {
+export function FloorFurnitureSymbol({ type, x, y, width, height, color, selected = false, assetKey }: {
   type: string;
   x: number;
   y: number;
@@ -1257,6 +1259,7 @@ export function FloorFurnitureSymbol({ type, x, y, width, height, color, selecte
   height: number;
   color: string;
   selected?: boolean;
+  assetKey?: string;
 }) {
   // Furniture is deliberately rendered as compact architectural-plan artwork
   // only.  It has no navigation meaning; all transforms continue to flow
@@ -1266,6 +1269,24 @@ export function FloorFurnitureSymbol({ type, x, y, width, height, color, selecte
   const cx = x + width / 2;
   const cy = y + height / 2;
   const selStroke = selected ? 1.4 : 0.8;
+  const sharedAssetKey = resolveCanvasAssetKey({ type, assetKey });
+  const sharedAsset = sharedAssetKey ? getCanvasAsset(sharedAssetKey) : undefined;
+  if (sharedAsset?.surfaces.includes("map")) {
+    return (
+      <>
+        <CanvasAssetVisual
+          assetKey={sharedAsset.key}
+          label={sharedAsset.name}
+          x={x}
+          y={y}
+          width={width}
+          height={height}
+          style={{ color }}
+        />
+        {selected && <rect x={x - 2} y={y - 2} width={width + 4} height={height + 4} rx={1.5} fill="none" stroke="var(--accent)" strokeWidth={1.5} />}
+      </>
+    );
+  }
   const seatMark = (sx: number, sy: number, sw: number, sh = sw, key?: string) => (
     <g key={key} data-testid="furniture-seat">
       <rect x={sx - sw / 2} y={sy - sh / 2} width={sw} height={sh} rx={Math.min(sw, sh) * 0.22}
@@ -16638,7 +16659,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
                         </g>
                       )}
                       <g transform={`rotate(${fi.rotation}, ${cx}, ${cy})`}>
-                        <FloorFurnitureSymbol type={fi.type} x={fi.x} y={fi.y} width={fi.width} height={fi.height} color={fi.color} selected={isSel} />
+                        <FloorFurnitureSymbol type={fi.type} assetKey={fi.assetKey} x={fi.x} y={fi.y} width={fi.width} height={fi.height} color={fi.color} selected={isSel} />
                         <title>{fi.name}</title>
                       </g>
                       {furnitureRotationFeedback?.id === fi.id && (
@@ -17010,7 +17031,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
                       </g>
                     )}
                     <g transform={`rotate(${fi.rotation}, ${cx}, ${cy})`}>
-                      <FloorFurnitureSymbol type={fi.type} x={fi.x} y={fi.y} width={fi.width} height={fi.height} color={fi.color} selected={isSel} />
+                      <FloorFurnitureSymbol type={fi.type} assetKey={fi.assetKey} x={fi.x} y={fi.y} width={fi.width} height={fi.height} color={fi.color} selected={isSel} />
                       <title>{fi.name}</title>
                     </g>
                   </g>

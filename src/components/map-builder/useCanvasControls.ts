@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { screenToWorld, panToKeepWorldPoint } from "../../lib/editorPlacement";
+import { clampViewportPan, getViewportPanBounds, type MapViewportPanBounds } from "../../lib/mapViewport";
 
 // ── Animation constants ─────────────────────────────────────────────────────
 const ZOOM_MIN = 0.25;
@@ -9,6 +10,7 @@ const WHEEL_ZOOM_DURATION_MS = 200;
 const WHEEL_SENSITIVITY = 0.001;
 const SCROLL_LINE_SENSITIVITY = 0.05;
 const ZOOM_BUTTON_STEP = 0.25;
+const EDITOR_WORKSPACE_PADDING = 180;
 
 // ── Spacebar pan state (module-level ref so all hooks instances share) ──────
 // Use a ref rather than state to avoid re-renders on every space press
@@ -32,7 +34,16 @@ function clamp(v: number, min: number, max: number): number {
  * Hook managing SVG canvas pan, zoom, and coordinate transforms.
  * Features smooth animated zoom toward cursor position (like Figma/Canva).
  */
-export function useCanvasControls(canvasW: number, canvasH: number) {
+export interface CanvasViewportOptions {
+  mode?: "editor" | "viewer";
+  editorPadding?: number;
+}
+
+export function useCanvasControls(canvasW: number, canvasH: number, options: CanvasViewportOptions = {}) {
+  const mode = options.mode ?? "editor";
+  const workspacePadding = mode === "editor"
+    ? Math.max(0, options.editorPadding ?? EDITOR_WORKSPACE_PADDING)
+    : 0;
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
 
@@ -52,6 +63,33 @@ export function useCanvasControls(canvasW: number, canvasH: number) {
   const panning = useRef<{ sx: number; sy: number; ox: number; oy: number } | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const clampPanRef = useRef<(point: { x: number; y: number }, zoomValue: number) => { x: number; y: number }>((point) => point);
+
+  const getPanBounds = useCallback((zoomValue: number): MapViewportPanBounds => {
+    const rect = containerRef.current?.getBoundingClientRect();
+    return getViewportPanBounds({
+      mapWidth: canvasW,
+      mapHeight: canvasH,
+      viewportWidth: rect?.width || canvasW,
+      viewportHeight: rect?.height || canvasH,
+      zoom: zoomValue,
+      padding: workspacePadding,
+      zoomOrigin: "top-left",
+    });
+  }, [canvasH, canvasW, workspacePadding]);
+
+  const clampPan = useCallback((point: { x: number; y: number }, zoomValue = targetZoom.current) =>
+    clampViewportPan(point, getPanBounds(zoomValue)), [getPanBounds]);
+
+  useEffect(() => {
+    clampPanRef.current = clampPan;
+    const next = clampPan(currentPan.current, zoom);
+    if (next.x !== currentPan.current.x || next.y !== currentPan.current.y) {
+      currentPan.current = next;
+      targetPan.current = next;
+      setPan(next);
+    }
+  }, [clampPan, zoom]);
 
   // ── Start or continue the animation loop ────────────────────────────────
   const startAnimation = useCallback((duration?: number) => {
@@ -86,8 +124,12 @@ export function useCanvasControls(canvasW: number, canvasH: number) {
       const eased = easeOutCubic(progress);
 
       const newZoom = animStartZoom.current + (targetZoom.current - animStartZoom.current) * eased;
-      const newPanX = animStartPan.current.x + (targetPan.current.x - animStartPan.current.x) * eased;
-      const newPanY = animStartPan.current.y + (targetPan.current.y - animStartPan.current.y) * eased;
+      const nextPan = clampPanRef.current({
+        x: animStartPan.current.x + (targetPan.current.x - animStartPan.current.x) * eased,
+        y: animStartPan.current.y + (targetPan.current.y - animStartPan.current.y) * eased,
+      }, newZoom);
+      const newPanX = nextPan.x;
+      const newPanY = nextPan.y;
 
       currentZoom.current = newZoom;
       currentPan.current = { x: newPanX, y: newPanY };
@@ -99,9 +141,9 @@ export function useCanvasControls(canvasW: number, canvasH: number) {
       if (progress >= 1) {
         // Snap to exact target values
         currentZoom.current = targetZoom.current;
-        currentPan.current = { ...targetPan.current };
+        currentPan.current = clampPanRef.current({ ...targetPan.current }, targetZoom.current);
         setZoom(targetZoom.current);
-        setPan({ ...targetPan.current });
+        setPan({ ...currentPan.current });
         animFrame.current = null;
         animating.current = false;
         return;
@@ -193,7 +235,7 @@ export function useCanvasControls(canvasW: number, canvasH: number) {
       }
 
       targetZoom.current = clampedZoom;
-      targetPan.current = { x: newPanX, y: newPanY };
+      targetPan.current = clampPanRef.current({ x: newPanX, y: newPanY }, clampedZoom);
 
       startAnimation(duration);
     },
@@ -235,15 +277,15 @@ export function useCanvasControls(canvasW: number, canvasH: number) {
 
   const movePan = useCallback((e: React.MouseEvent) => {
     if (!panning.current) return;
-    const newPan = {
+    const newPan = clampPan({
       x: panning.current.ox + e.clientX - panning.current.sx,
       y: panning.current.oy + e.clientY - panning.current.sy,
-    };
+    });
     // Update both ref and state immediately for responsive panning
     currentPan.current = newPan;
     targetPan.current = { ...newPan };
     setPan(newPan);
-  }, []);
+  }, [clampPan]);
 
   const endPan = useCallback(() => {
     panning.current = null;
@@ -325,33 +367,37 @@ export function useCanvasControls(canvasW: number, canvasH: number) {
     const newZoom = clamp(targetZoom.current + ZOOM_BUTTON_STEP, ZOOM_MIN, ZOOM_MAX);
     // Zoom from center (no cursor position)
     const zoomRatio = newZoom / currentZoom.current;
-    const newPanX = currentPan.current.x * zoomRatio + (canvasW / 2) * (1 - zoomRatio);
-    const newPanY = currentPan.current.y * zoomRatio + (canvasH / 2) * (1 - zoomRatio);
+    const nextPan = clampPan({
+      x: currentPan.current.x * zoomRatio + (canvasW / 2) * (1 - zoomRatio),
+      y: currentPan.current.y * zoomRatio + (canvasH / 2) * (1 - zoomRatio),
+    }, newZoom);
 
     targetZoom.current = newZoom;
-    targetPan.current = { x: newPanX, y: newPanY };
+    targetPan.current = nextPan;
     setZoom(newZoom);
     startAnimation();
-  }, [canvasW, canvasH, startAnimation]);
+  }, [canvasW, canvasH, clampPan, startAnimation]);
 
   const zoomOut = useCallback(() => {
     const newZoom = clamp(targetZoom.current - ZOOM_BUTTON_STEP, ZOOM_MIN, ZOOM_MAX);
     const zoomRatio = newZoom / currentZoom.current;
-    const newPanX = currentPan.current.x * zoomRatio + (canvasW / 2) * (1 - zoomRatio);
-    const newPanY = currentPan.current.y * zoomRatio + (canvasH / 2) * (1 - zoomRatio);
+    const nextPan = clampPan({
+      x: currentPan.current.x * zoomRatio + (canvasW / 2) * (1 - zoomRatio),
+      y: currentPan.current.y * zoomRatio + (canvasH / 2) * (1 - zoomRatio),
+    }, newZoom);
 
     targetZoom.current = newZoom;
-    targetPan.current = { x: newPanX, y: newPanY };
+    targetPan.current = nextPan;
     setZoom(newZoom);
     startAnimation();
-  }, [canvasW, canvasH, startAnimation]);
+  }, [canvasW, canvasH, clampPan, startAnimation]);
 
   // ── Reset view (animated) ───────────────────────────────────────────────
   const resetView = useCallback(() => {
     targetZoom.current = 1;
-    targetPan.current = { x: 0, y: 0 };
+    targetPan.current = clampPan({ x: 0, y: 0 }, 1);
     startAnimation(ZOOM_DURATION_MS);
-  }, [startAnimation]);
+  }, [clampPan, startAnimation]);
 
   // ── Double-click to zoom in toward point (optional) ─────────────────────
   const zoomInAtPoint = useCallback(
@@ -387,13 +433,13 @@ export function useCanvasControls(canvasW: number, canvasH: number) {
       const centerY = y + h / 2;
 
       targetZoom.current = clampedZoom;
-      targetPan.current = {
+      targetPan.current = clampPan({
         x: canvasW / 2 - centerX * clampedZoom,
         y: canvasH / 2 - centerY * clampedZoom,
-      };
+      }, clampedZoom);
       startAnimation(ZOOM_DURATION_MS);
     },
-    [canvasW, canvasH, startAnimation]
+    [canvasW, canvasH, clampPan, startAnimation]
   );
 
   /** Zoom to show a specific building (animated) */
@@ -423,5 +469,6 @@ export function useCanvasControls(canvasW: number, canvasH: number) {
     /** Zoom in at a specific screen point (for double-click) */
     zoomInAtPoint,
     handleWheel,
+    mode,
   };
 }

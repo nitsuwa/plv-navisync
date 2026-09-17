@@ -1,11 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getSupabase } from "../../lib/supabase";
+import type { Campus } from "../../components/map-builder/types";
 import {
   CampusDeletionError,
   CampusServiceError,
   cleanupCampusStorage,
   createCampus,
   listCampuses,
+  listPublishedCampusSnapshots,
+  mergePublishedCampusAppearance,
   normalizeCampusCode,
   permanentlyDeleteCampus,
   updateCampus,
@@ -332,6 +335,123 @@ describe("listCampuses (campus preview summary boundary)", () => {
       color: "#123456",
       rotation: 15,
       floors: [],
+    });
+  });
+});
+
+describe("mergePublishedCampusAppearance (legacy snapshot compatibility)", () => {
+  it("fills missing campus appearance from a legacy published structure record", () => {
+    const campus = {
+      id: "c-green",
+      canvasW: 900,
+      canvasH: 680,
+      buildings: [],
+      markers: [],
+      paths: [],
+      navNodes: [],
+      navEdges: [],
+      routes: [],
+      decorAssets: [],
+      settings: {},
+    } as unknown as Campus;
+
+    const result = mergePublishedCampusAppearance(campus, {
+      map_elements: [{
+        element_type: "canvas_appearance",
+        metadata: {
+          kind: "canvas_appearance",
+          ui: {
+            canvasGroundMaterial: "grass",
+            canvasGroundColor: "#bfd4b8",
+            canvasGroundTexture: "subtle",
+            canvasColor: "#bfd4b8",
+          },
+        },
+      }],
+    });
+
+    expect(result).toMatchObject({
+      canvasGroundMaterial: "grass",
+      canvasGroundColor: "#bfd4b8",
+      canvasGroundTexture: "subtle",
+      canvasColor: "#bfd4b8",
+    });
+  });
+
+  it("keeps current top-level appearance fields ahead of legacy structure values", () => {
+    const campus = {
+      id: "c-current",
+      canvasW: 900,
+      canvasH: 680,
+      canvasGroundColor: "#123456",
+      buildings: [],
+      markers: [],
+      paths: [],
+      navNodes: [],
+      navEdges: [],
+      routes: [],
+      decorAssets: [],
+      settings: {},
+    } as unknown as Campus;
+
+    const result = mergePublishedCampusAppearance(campus, {
+      map_elements: [{
+        metadata: {
+          kind: "canvas_appearance",
+          ui: { canvasGroundColor: "#bfd4b8" },
+        },
+      }],
+    });
+
+    expect(result.canvasGroundColor).toBe("#123456");
+  });
+});
+
+describe("listPublishedCampusSnapshots (student snapshot boundary)", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("hydrates the configured campus appearance before returning a published snapshot", async () => {
+    const snapshot = {
+      campus: {
+        id: "c-published",
+        canvasW: 900,
+        canvasH: 680,
+        buildings: [],
+        markers: [],
+        paths: [],
+        navNodes: [],
+        navEdges: [],
+        routes: [],
+        decorAssets: [],
+        settings: {},
+      },
+      structure: {
+        map_elements: [{
+          element_type: "canvas_appearance",
+          metadata: { ui: { canvasGroundMaterial: "grass", canvasGroundColor: "#bfd4b8" } },
+        }],
+      },
+    };
+    const order = vi.fn().mockResolvedValue({
+      data: [{ snapshot, published_at: "2026-09-14T00:00:00Z" }],
+      error: null,
+    });
+    const eq = vi.fn(() => ({ order }));
+    const select = vi.fn(() => ({ eq }));
+    vi.mocked(getSupabase).mockReturnValue({
+      from: vi.fn(() => ({ select })),
+    } as never);
+
+    const campuses = await listPublishedCampusSnapshots();
+
+    expect(select).toHaveBeenCalledWith("campus_id,snapshot,published_at");
+    expect(eq).toHaveBeenCalledWith("state", "published");
+    expect(campuses[0]).toMatchObject({
+      id: "c-published",
+      canvasGroundMaterial: "grass",
+      canvasGroundColor: "#bfd4b8",
+      publishStatus: "published",
+      visibleToStudents: true,
     });
   });
 });

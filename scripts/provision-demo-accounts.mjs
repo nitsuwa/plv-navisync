@@ -2,10 +2,11 @@
 /**
  * PLV NaviSync — Demo Account Provisioning Utility (developer-only)
  * ============================================================================
- * Creates or safely updates two REAL Supabase Auth demo accounts:
+ * Creates or safely updates three REAL Supabase Auth demo accounts:
  *
  *   1. Demo Administrator  → role = 'admin',   is_active = true
  *   2. Demo Student        → role = 'student', is_active = true
+ *   3. Demo Org Applicant   → role = 'student', is_active = true
  *
  * Usage:
  *   cp .env.demo.example .env.demo.local    # fill in real values
@@ -58,6 +59,8 @@ const REQUIRED_VARS = [
   "DEMO_ADMIN_PASSWORD",
   "DEMO_STUDENT_EMAIL",
   "DEMO_STUDENT_PASSWORD",
+  "DEMO_ORG_STUDENT_EMAIL",
+  "DEMO_ORG_STUDENT_PASSWORD",
 ];
 
 // ---------------------------------------------------------------------------
@@ -238,7 +241,11 @@ async function main() {
 
   // Guard: a demo email must never point at the existing administrator. The
   // script would otherwise reset that administrator's password.
-  const demoEmails = [env.DEMO_ADMIN_EMAIL, env.DEMO_STUDENT_EMAIL];
+  const demoEmails = [
+    env.DEMO_ADMIN_EMAIL,
+    env.DEMO_STUDENT_EMAIL,
+    env.DEMO_ORG_STUDENT_EMAIL,
+  ];
   const collision = demoEmails.find(
     (email) => email.toLowerCase() === env.EXISTING_ADMIN_EMAIL.toLowerCase()
   );
@@ -268,7 +275,18 @@ async function main() {
   );
   await ensureProfileExists(admin, studentUser.id, env.DEMO_STUDENT_EMAIL, "student");
 
-  // 2) Demo admin — the auth trigger creates the profile as 'student' first;
+  // 2) Demo org applicant — intentionally remains a regular student so the
+  //    admin can exercise the manual Student Org approval workflow.
+  const orgApplicantUser = await ensureAuthUser(
+    admin,
+    env.DEMO_ORG_STUDENT_EMAIL,
+    env.DEMO_ORG_STUDENT_PASSWORD,
+    { first: "Demo Org", last: "Applicant" },
+    "DEMO-ORG-STUDENT"
+  );
+  await ensureProfileExists(admin, orgApplicantUser.id, env.DEMO_ORG_STUDENT_EMAIL, "student");
+
+  // 3) Demo admin — the auth trigger creates the profile as 'student' first;
   //    promotion to 'admin' happens only through the authorized workflow below.
   const adminUser = await ensureAuthUser(
     admin,
@@ -279,14 +297,20 @@ async function main() {
   );
   await ensureProfileExists(admin, adminUser.id, env.DEMO_ADMIN_EMAIL, "student");
 
-  // 3) Authorized workflow: the existing administrator signs in and finalizes
-  //    both profiles so `public.is_admin()` is satisfied for every change.
+  // 4) Authorized workflow: the existing administrator signs in and finalizes
+  //    all profiles so `public.is_admin()` is satisfied for every change.
   await signInAsExistingAdmin(userClient, env);
 
   const finalizedStudent = await finalizeProfileThroughAdmin(userClient, studentUser.id, {
     is_active: true,
     first_name: "Demo",
     last_name: "Student",
+  });
+  const finalizedOrgApplicant = await finalizeProfileThroughAdmin(userClient, orgApplicantUser.id, {
+    role: "student",
+    is_active: true,
+    first_name: "Demo Org",
+    last_name: "Applicant",
   });
   const finalizedAdmin = await finalizeProfileThroughAdmin(userClient, adminUser.id, {
     role: "admin",
@@ -301,6 +325,9 @@ async function main() {
   if (finalizedStudent.role !== "student" || finalizedStudent.is_active !== true) {
     throw new Error("Demo student profile is not in the expected state (role 'student', active).");
   }
+  if (finalizedOrgApplicant.role !== "student" || finalizedOrgApplicant.is_active !== true) {
+    throw new Error("Demo org applicant profile is not in the expected state (role 'student', active).");
+  }
 
   try {
     await userClient.auth.signOut();
@@ -308,7 +335,7 @@ async function main() {
     // Local cleanup only; nothing depends on it.
   }
 
-  // 4) Print ONLY the final demonstration login information. The service-role
+  // 5) Print ONLY the final demonstration login information. The service-role
   //    key and the existing administrator's password are never printed.
   console.log("");
   console.log("Demo accounts provisioned successfully.");
@@ -325,6 +352,12 @@ async function main() {
   console.log("Role     : student");
   console.log(`Email    : ${env.DEMO_STUDENT_EMAIL}`);
   console.log(`Password : ${env.DEMO_STUDENT_PASSWORD}`);
+  console.log("");
+  console.log("Portal   : Student portal — organization applicant");
+  console.log("Route    : /map (convert to Student Org from Admin User Management)");
+  console.log("Role     : student");
+  console.log(`Email    : ${env.DEMO_ORG_STUDENT_EMAIL}`);
+  console.log(`Password : ${env.DEMO_ORG_STUDENT_PASSWORD}`);
   console.log("");
   console.log("Guest    : no account required — public pages and the published campus map remain accessible.");
   console.log("--------------------------------------------------------------------------------");

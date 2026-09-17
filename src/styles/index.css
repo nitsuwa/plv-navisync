@@ -125,3 +125,32 @@
   height: 0.25rem;
   margin-top: 0.25rem;
 }
+
+/* Event Builder's asset catalog is intentionally an overlay. The desktop
+   panel stays beside the dock; on phones it becomes a forgiving bottom sheet
+   so the canvas height and page layout never jump when a user looks for an
+   asset. */
+@media (max-width: 767px) {
+  .event-asset-catalog-scrim {
+    background: rgb(15 23 42 / 0.28);
+  }
+
+  .event-asset-catalog-panel {
+    position: fixed !important;
+    inset-inline: 0.75rem;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 0.75rem);
+    top: auto;
+    width: auto;
+    max-height: min(70vh, 34rem);
+    padding-bottom: max(0.75rem, env(safe-area-inset-bottom, 0px));
+    overscroll-behavior: contain;
+  }
+
+  .event-asset-dock {
+    max-width: calc(100% - 1.5rem);
+  }
+
+  [data-testid="event-layout-actions"] {
+    max-width: calc(100% - 1.5rem);
+  }
+}

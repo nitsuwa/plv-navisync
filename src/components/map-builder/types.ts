@@ -118,8 +118,16 @@ export interface FloorFurniture {
   height: number;
   rotation: number;
   color: string;
+  /** Optional visual asset identity. Legacy records continue to use `type`. */
+  assetKey?: string;
+  /** Optional presentation variant for future asset-specific styling. */
+  assetVariant?: string;
+  /** Optional asset-specific settings, kept separate from geometry. */
+  assetConfig?: Record<string, string | number | boolean>;
   layer?: string;
   zOrder?: number;
+  /** Optional event-editor grouping identity. Legacy items remain ungrouped. */
+  groupId?: string;
   visible?: boolean;
   locked?: boolean;
   /** Editor-only persistent grouping metadata. Groups never enter navigation. */
@@ -828,26 +836,51 @@ export interface AssemblyPoint {
 // ── Event Overlay ───────────────────────────────────────────────────────────
 
 export interface EventLocationRef {
-  type: "building" | "room";
-  buildingId: string;
+  type: "campus" | "building" | "room";
+  buildingId?: string;
   floorId?: string;
   roomId?: string;
   /** Human-readable label like "Engineering Building — Floor 2 — Room 204" */
   label: string;
 }
 
+/** Event-owned additions for one requested campus area or building floor. */
+export interface EventOverlayLocation {
+  id: string;
+  locationRef: EventLocationRef;
+  eventFurniture: FloorFurniture[];
+  eventLabels: FloorLabel[];
+}
+
 export interface CampusEventOverlay {
   id: string;
   title: string;
   description: string;
-  dateStart: string;
-  dateEnd: string;
+  /** Legacy date fields are optional so new proposals remain date-free. */
+  dateStart?: string;
+  dateEnd?: string;
   organizer: string;
   markers: { x: number; y: number; color: string; label: string }[];
   /** Reference to an existing campus location (room or building) */
   locationRef?: EventLocationRef;
+  /** Requested locations and the event-owned additions for each one. */
+  locations?: EventOverlayLocation[];
   restrictedAreas: { points: { x: number; y: number }[] }[];
   isActive: boolean;
+
+  // ── Event Map Layout & Approval fields ──────────────────────────────────
+  /** Approval status: pending → approved or disapproved */
+  status?: "pending" | "approved" | "disapproved";
+  /** Admin feedback when disapproving */
+  adminComment?: string;
+  /** Event-specific furniture items (booths, tents, stages, etc.) */
+  eventFurniture?: FloorFurniture[];
+  /** Event-specific text labels */
+  eventLabels?: FloorLabel[];
+  /** Poster image URL for the event */
+  posterUrl?: string;
+  /** User ID of the student org member who created this overlay */
+  createdByUserId?: string;
 }
 
 // ── Campus Features (replaces CampusSettings) ────────────────────────────────

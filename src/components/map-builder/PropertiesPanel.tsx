@@ -2860,21 +2860,6 @@ export function PropertiesPanel({
                 onChange={(e) => onUpdateEventOverlay?.(selEventOverlay.id, { organizer: e.target.value })}
                 className={inputCls} placeholder="Organizer name" />
             </div>
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <label htmlFor="evt-start" className={labelCls}>Start Date</label>
-                <input id="evt-start" type="date" value={selEventOverlay.dateStart}
-                  onChange={(e) => onUpdateEventOverlay?.(selEventOverlay.id, { dateStart: e.target.value })}
-                  className={inputCls} />
-              </div>
-              <div>
-                <label htmlFor="evt-end" className={labelCls}>End Date</label>
-                <input id="evt-end" type="date" value={selEventOverlay.dateEnd}
-                  onChange={(e) => onUpdateEventOverlay?.(selEventOverlay.id, { dateEnd: e.target.value })}
-                  className={inputCls} />
-              </div>
-            </div>
-
             {/* ── Location selector ── */}
             <div className="pt-2 border-t border-border">
               <div className="flex items-center gap-1.5 mb-2">

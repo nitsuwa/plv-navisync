@@ -319,6 +319,55 @@ async function mapRows(rows: CampusListRow[]): Promise<Campus[]> {
   return Promise.all(rows.map((row) => toEditorCampus(row, summaries.get(row.id))));
 }
 
+type CampusAppearanceKey = "canvasGroundMaterial" | "canvasGroundColor" | "canvasGroundTexture" | "canvasColor";
+
+const CAMPUS_APPEARANCE_KEYS: readonly CampusAppearanceKey[] = [
+  "canvasGroundMaterial",
+  "canvasGroundColor",
+  "canvasGroundTexture",
+  "canvasColor",
+];
+
+function objectRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+/**
+ * Older published snapshots may contain the canvas appearance only in the
+ * serialized structure payload. Keep the top-level campus fields authoritative
+ * and use the structure record only to fill fields that are missing there.
+ */
+export function mergePublishedCampusAppearance(campus: Campus, structure: unknown): Campus {
+  const structureRecord = objectRecord(structure);
+  const mapElements = structureRecord?.map_elements;
+  if (!Array.isArray(mapElements)) return campus;
+
+  const appearanceElement = mapElements
+    .map(objectRecord)
+    .find((element) => {
+      if (!element) return false;
+      const metadata = objectRecord(element.metadata);
+      return element.element_type === "canvas_appearance"
+        || metadata?.kind === "canvas_appearance";
+    });
+  if (!appearanceElement) return campus;
+
+  const metadata = objectRecord(appearanceElement.metadata);
+  const source = objectRecord(metadata?.ui) ?? metadata;
+  if (!source) return campus;
+
+  const merged = { ...campus } as Campus;
+  const writable = merged as unknown as Record<CampusAppearanceKey, unknown>;
+  for (const key of CAMPUS_APPEARANCE_KEYS) {
+    if (writable[key] === undefined && typeof source[key] === "string") {
+      writable[key] = source[key];
+    }
+  }
+  return merged;
+}
+
 export async function listCampuses(): Promise<Campus[]> {
   const { data, error } = await getSupabase()
     .from("campuses")
@@ -343,7 +392,10 @@ export async function listPublishedCampusSnapshots(): Promise<Campus[]> {
     if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) continue;
     const campus = (snapshot as { campus?: unknown }).campus;
     if (!campus || typeof campus !== "object" || Array.isArray(campus)) continue;
-    const value = campus as Campus;
+    const value = mergePublishedCampusAppearance(
+      campus as Campus,
+      (snapshot as { structure?: unknown }).structure,
+    );
     result.push({
       ...value,
       publishStatus: "published",

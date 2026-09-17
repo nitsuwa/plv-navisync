@@ -1,17 +1,17 @@
 import { Link } from "react-router";
 import {
   Map, Search, Accessibility, AlertTriangle,
-  Star, Flag, CheckCircle2, ArrowRight,
+  Star, Flag, CheckCircle2, ArrowRight, ArrowDown,
   Compass, Crosshair, MapPin, Hexagon, MousePointer2,
-  Navigation, Eye, Smartphone, Wifi, Shield,
-  Sparkles, Layers, Bookmark, Clock, Route, Zap, Wrench, Megaphone, Bell, Calendar, Tag,
+  Navigation, Eye, Smartphone, Wifi, Shield, ChevronDown,
+  Sparkles, Layers, Bookmark, Clock, Route, Zap, Wrench,
 } from "lucide-react";
 import { useRef, useState, useEffect } from "react";
-import { motion, useScroll, useTransform, useSpring } from "motion/react";
+import { AnimatePresence, motion, useReducedMotion, useScroll, useTransform, useSpring } from "motion/react";
 import { PLVLogo } from "../components/ui/PLVLogo";
+import { AccessibleRouteDemo as A11yDemo } from "../components/landing/AccessibleRouteDemo";
 import { LavaLampBackground } from "../components/ui/HeroBackground";
 import { useScrollReveal } from "../hooks/useScrollReveal";
-import { eventService, type CampusAnnouncement, type CampusEvent } from "../services/eventService";
 
 // ═════════════════════════════════════════════════════════════════════════════
 // ── Floating decorative shapes (Hero) ────────────────────────────────────────
@@ -134,7 +134,7 @@ function FloatingParticles({ count = 20 }: { count?: number }) {
 // ── Animated route lines (hero background) ───────────────────────────────────
 // ═════════════════════════════════════════════════════════════════════════════
 
-function HeroRouteLines() {
+function HeroRouteLines({ reducedMotion = false }: { reducedMotion?: boolean }) {
   // Each line draws on a loop: draws in over ~4-6s, stays visible ~12-16s, then resets
   const LINES = [
     {
@@ -170,7 +170,7 @@ function HeroRouteLines() {
               stroke={line.color}
               strokeWidth={line.width}
               strokeDasharray={line.dash}
-              className="animate-route-draw-loop"
+              className={reducedMotion ? undefined : "animate-route-draw-loop"}
               style={{
                 animationDelay: line.delay,
                 animationDuration: line.total,
@@ -179,9 +179,9 @@ function HeroRouteLines() {
           </g>
         ))}
         {/* Route nodes (dots at intersections) */}
-        <circle cx="600" cy="300" r="2.5" fill="rgba(200,150,12,0.5)" className="animate-pulse-ring-soft" style={{ animationDelay: "1s" }} />
-        <circle cx="900" cy="500" r="2" fill="rgba(59,110,240,0.5)" className="animate-pulse-ring-soft" style={{ animationDelay: "2.5s" }} />
-        <circle cx="400" cy="700" r="2.5" fill="rgba(56,189,248,0.4)" className="animate-pulse-ring-soft" style={{ animationDelay: "4s" }} />
+        <circle cx="600" cy="300" r="2.5" fill="rgba(200,150,12,0.5)" className={reducedMotion ? undefined : "animate-pulse-ring-soft"} style={{ animationDelay: "1s" }} />
+        <circle cx="900" cy="500" r="2" fill="rgba(59,110,240,0.5)" className={reducedMotion ? undefined : "animate-pulse-ring-soft"} style={{ animationDelay: "2.5s" }} />
+        <circle cx="400" cy="700" r="2.5" fill="rgba(56,189,248,0.4)" className={reducedMotion ? undefined : "animate-pulse-ring-soft"} style={{ animationDelay: "4s" }} />
       </svg>
     </div>
   );
@@ -217,48 +217,6 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
 // ═════════════════════════════════════════════════════════════════════════════
 // ── PLATFORM HIGHLIGHTS — replaces the 8-card feature grid ───────────────────
 // ═════════════════════════════════════════════════════════════════════════════
-
-const HIGHLIGHTS = [
-  { icon: Map,         label: "Interactive Campus Map" },
-  { icon: Search,      label: "Smart Search & Wayfinding" },
-  { icon: Navigation,  label: "Indoor & Outdoor Navigation" },
-  { icon: Accessibility, label: "Accessibility Support" },
-  { icon: AlertTriangle, label: "Emergency Ready" },
-  { icon: Smartphone,  label: "Mobile Responsive PWA" },
-  { icon: Wifi,       label: "Offline Capable" },
-  { icon: Shield,     label: "Real-time Campus Alerts" },
-];
-
-function PlatformHighlights() {
-  return (
-    <section className="py-16 lg:py-20 bg-background relative z-10">
-      <div className="max-w-6xl mx-auto px-5 sm:px-7">
-        <Reveal className="text-center mb-10">
-          <SectionLabel>Platform Capabilities</SectionLabel>
-          <h2 className="text-2xl sm:text-3xl font-extrabold text-foreground mb-2">
-            Navigate PLV in Seconds
-          </h2>
-          <p className="text-muted-foreground text-sm max-w-md mx-auto">
-            Everything you need to move through campus with confidence.
-          </p>
-        </Reveal>
-
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-          {HIGHLIGHTS.map(({ icon: Icon, label }, i) => (
-            <Reveal key={label} delay={i * 40}>
-              <div className="group flex items-center gap-3 px-4 py-3.5 rounded-xl border border-border/60 bg-card/50 hover:bg-card hover:border-primary/15 transition-all duration-200 hover:shadow-sm">
-                <div className="w-9 h-9 rounded-lg bg-primary/8 text-primary flex items-center justify-center shrink-0 group-hover:bg-primary/12 transition-colors">
-                  <Icon className="h-4 w-4" />
-                </div>
-                <span className="text-[13px] font-bold text-foreground leading-snug">{label}</span>
-              </div>
-            </Reveal>
-          ))}
-        </div>
-      </div>
-    </section>
-  );
-}
 
 // ═════════════════════════════════════════════════════════════════════════════
 // ── HOW NAVISYNC HELPS YOU — interactive scenario demos ──────────────────────
@@ -327,159 +285,108 @@ function SearchDemo() {
 function RouteDemo() {
   const [drawn, setDrawn] = useState(false);
   const cycleRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const rAFRef = useRef<number | null>(null);
+  const redrawRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     // Initial draw after mount
     const initialDraw = setTimeout(() => setDrawn(true), 600);
 
-    // Cycle: hide → redraw every 5s
+    // Cycle: hide, redraw, then let the walking marker loop again.
     cycleRef.current = setInterval(() => {
       setDrawn(false);
-      rAFRef.current = requestAnimationFrame(() => {
-        rAFRef.current = requestAnimationFrame(() => {
-          setDrawn(true);
-          rAFRef.current = null;
-        });
-      });
+      redrawRef.current = setTimeout(() => setDrawn(true), 120);
     }, 5000);
 
     return () => {
       clearTimeout(initialDraw);
       if (cycleRef.current) clearInterval(cycleRef.current);
-      if (rAFRef.current != null) cancelAnimationFrame(rAFRef.current);
+      if (redrawRef.current) clearTimeout(redrawRef.current);
     };
   }, []);
 
   return (
-    <div className="relative rounded-xl overflow-hidden bg-[#0a1628] border border-white/10" style={{ minHeight: 160 }}>
+    <div
+      data-testid="route-demo"
+      data-route-style="straight-building-route"
+      aria-label="Walking route from Building A to Building B"
+      className="relative rounded-xl overflow-hidden bg-[#0a1628] border border-white/10"
+      style={{ minHeight: 160 }}
+    >
       {/* Mini map grid */}
       <div className="absolute inset-0 opacity-10" style={{
         backgroundImage: `linear-gradient(rgba(255,255,255,0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.05) 1px, transparent 1px)`,
         backgroundSize: "24px 24px",
       }} />
-      {/* Buildings (simple rects) */}
-      <div className="absolute" style={{ left: "18%", top: "25%", width: 40, height: 32, background: "rgba(59,110,240,0.25)", borderRadius: 4, border: "1px solid rgba(59,110,240,0.3)" }} />
-      <div className="absolute" style={{ left: "55%", top: "15%", width: 48, height: 36, background: "rgba(59,110,240,0.25)", borderRadius: 4, border: "1px solid rgba(59,110,240,0.3)" }} />
-      <div className="absolute animate-search-highlight" style={{ left: "65%", top: "55%", width: 36, height: 28, background: "rgba(200,150,12,0.2)", borderRadius: 4, border: "1px solid rgba(200,150,12,0.25)" }} />
-      {/* Start dot */}
-      <div className="absolute" style={{ left: "18%", top: "62%" }}>
-        <div className="w-3 h-3 rounded-full bg-green-400 shadow-lg shadow-green-400/30" />
+      {/* Two buildings with a direct outdoor walking route between them */}
+      <div className="absolute left-[10%] top-[34%] w-[22%] rounded-md border border-blue-300/30 bg-blue-500/20 px-2 py-2 text-center">
+        <span className="block text-[9px] font-extrabold uppercase tracking-wider text-blue-100">Building A</span>
+        <span className="mt-1 block text-[8px] text-white/50">Start</span>
       </div>
-      {/* End dot (destination) */}
-      <div className="absolute" style={{ left: "65%", top: "55%" }}>
-        <div className="w-3 h-3 rounded-full bg-red-400 shadow-lg shadow-red-400/30 animate-pulse-ring-soft" />
+      <div className="absolute right-[10%] top-[34%] w-[22%] rounded-md border border-accent/40 bg-accent/15 px-2 py-2 text-center">
+        <span className="block text-[9px] font-extrabold uppercase tracking-wider text-accent-foreground">Building B</span>
+        <span className="mt-1 block text-[8px] text-white/50">Destination</span>
       </div>
-      {/* Route line */}
-      <svg className="absolute inset-0 w-full h-full" viewBox="0 0 300 160" style={{ pointerEvents: "none" }}>
+
+      <svg className="absolute inset-0 h-full w-full" viewBox="0 0 300 160" style={{ pointerEvents: "none" }}>
+        <defs>
+          <filter id="route-demo-glow" x="-30%" y="-30%" width="160%" height="160%">
+            <feGaussianBlur stdDeviation="2.5" result="blur" />
+            <feMerge>
+              <feMergeNode in="blur" />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
+          </filter>
+        </defs>
         <path
-          d="M54 99 C 80 80, 120 70, 150 50 S 190 40, 195 88"
+          d="M96 80 L204 80"
           fill="none"
-          stroke="rgba(74,127,212,0.7)"
-          strokeWidth="2"
+          stroke="rgba(74,127,212,0.25)"
+          strokeWidth="7"
           strokeLinecap="round"
-          strokeDasharray="8 4"
+        />
+        <path
+          id="route-demo-path"
+          d="M96 80 L204 80"
+          pathLength="1"
+          fill="none"
+          stroke="rgba(111,168,255,0.95)"
+          strokeWidth="2.5"
+          strokeLinecap="round"
+          strokeDasharray="0.035 0.035"
           style={{
-            strokeDashoffset: drawn ? 0 : 400,
+            strokeDashoffset: drawn ? 0 : 1,
             transition: "stroke-dashoffset 2.5s ease-out",
           }}
+          filter="url(#route-demo-glow)"
         />
-        {drawn && (
-          <circle cx="195" cy="88" r="4" fill="rgba(74,127,212,0.8)">
-            <animate attributeName="r" values="2;5;2" dur="2s" repeatCount="indefinite" />
-          </circle>
-        )}
+
+        {/* Animated walking person moving from A to B */}
+        <g
+          data-testid="route-walking-marker"
+          data-animation="walking"
+          role="img"
+          aria-label="Walking from Building A to Building B"
+          transform="translate(96 80)"
+        >
+          <circle cx="0" cy="-6" r="2.5" fill="#f8fafc" />
+          <path d="M0 -3 L0 3 M0 -1 L-4 2 M0 -1 L4 2 M0 3 L-3 7 M0 3 L3 7" fill="none" stroke="#f8fafc" strokeWidth="1.8" strokeLinecap="round" />
+          <animateMotion dur="3.2s" repeatCount="indefinite" path="M0 0 L108 0" />
+        </g>
       </svg>
       {/* Labels */}
       <div className="absolute bottom-2 left-2 text-[10px] text-white/50 font-mono flex items-center gap-1">
-        <MapPin className="h-2.5 w-2.5" /> Start
+        <MapPin className="h-2.5 w-2.5" /> Building A
       </div>
       <div className="absolute bottom-2 right-2 text-[10px] text-white/50 font-mono flex items-center gap-1">
-        <Flag className="h-2.5 w-2.5" /> CCS Lab 2
+        <Flag className="h-2.5 w-2.5" /> Building B
+      </div>
+      <div className="absolute left-1/2 top-2 -translate-x-1/2 rounded-full border border-white/10 bg-white/5 px-2 py-1 text-[9px] font-bold uppercase tracking-wider text-white/55">
+        Walking route · 2 min
       </div>
     </div>
   );
 }
 
-/** Accessibility toggle demo */
-function A11yDemo() {
-  const [enabled, setEnabled] = useState(false);
-  const [interacted, setInteracted] = useState(false);
-
-  useEffect(() => {
-    // Auto-cycle only until user interacts
-    if (interacted) return;
-    const t = setInterval(() => {
-      setEnabled((p) => !p);
-    }, 3000);
-    return () => clearInterval(t);
-  }, [interacted]);
-
-  const handleToggle = () => {
-    setInteracted(true);
-    setEnabled((p) => !p);
-  };
-
-  return (
-    <div className="space-y-3">
-      {/* Toggle */}
-      <div className="flex items-center justify-between px-3.5 py-2.5 rounded-xl border bg-muted/50 border-border">
-        <div className="flex items-center gap-2.5">
-          <Accessibility className={`h-4 w-4 transition-colors ${enabled ? "text-green-500" : "text-muted-foreground"}`} />
-          <span className={`text-sm font-bold transition-colors ${enabled ? "text-foreground" : "text-muted-foreground"}`}>
-            Accessible Route
-          </span>
-        </div>
-        <button
-          onClick={handleToggle}
-          role="switch"
-          aria-checked={enabled}
-          aria-label="Toggle accessible route"
-          className={`relative w-10 h-5 rounded-full transition-colors ${enabled ? "bg-green-500" : "bg-muted-foreground/30"}`}
-        >
-          <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${enabled ? "translate-x-5" : "translate-x-0.5"}`} />
-        </button>
-      </div>
-      {/* Visual feedback */}
-      <div className="rounded-xl border border-border/50 bg-muted/30 p-3 overflow-hidden relative" style={{ minHeight: 70 }}>          {/* Mini path */}
-        <svg viewBox="0 0 260 50" className="w-full h-full">
-          {/* Regular path */}
-          <path
-            d="M10 25 L 60 25 L 100 15 L 140 25 L 180 15 L 220 25 L 250 25"
-            fill="none"
-            stroke="currentColor"
-            className="text-muted-foreground/25"
-            strokeWidth="1.5"
-            strokeDasharray="4 4"
-          />
-          {/* Accessible path */}
-          {enabled && (
-            <motion.path
-              initial={{ pathLength: 0, opacity: 0 }}
-              animate={{ pathLength: 1, opacity: 1 }}
-              transition={{ duration: 1, ease: "easeOut" }}
-              d="M10 35 L 40 35 L 60 40 L 90 35 L 120 40 L 150 35 L 180 40 L 210 35 L 250 35"
-              fill="none"
-              stroke="currentColor"
-              className="text-green-500/60"
-              strokeWidth="2"
-              strokeLinecap="round"
-            />
-          )}
-        </svg>
-        {enabled && (
-          <div className="absolute bottom-1.5 right-2 flex items-center gap-1.5 text-[10px] text-green-600 dark:text-green-400 font-medium animate-fade-in-up">
-            <CheckCircle2 className="h-2.5 w-2.5" />
-            Avoiding stairs — using ramps & elevators
-          </div>
-        )}
-        <div className="absolute bottom-1.5 left-2 text-[10px] text-muted-foreground font-mono flex items-center gap-1">
-          {enabled ? <><Accessibility className="h-2.5 w-2.5" /> Accessible route active</> : "Click toggle to see accessible route"}
-        </div>
-      </div>
-    </div>
-  );
-}
 
 /** Report demo */
 function ReportDemo() {
@@ -601,6 +508,8 @@ const SCENARIOS = [
 
 function HowHelpsYou() {
   const [activeScenario, setActiveScenario] = useState("search");
+  const reduceMotion = useReducedMotion();
+  const active = SCENARIOS.find((scenario) => scenario.id === activeScenario) ?? SCENARIOS[0];
 
   const renderDemo = (demo: string) => {
     switch (demo) {
@@ -613,7 +522,11 @@ function HowHelpsYou() {
   };
 
   return (
-    <section className="py-20 lg:py-28 bg-muted/30 relative overflow-hidden">
+    <section
+      aria-labelledby="landing-feature-tour-heading"
+      data-testid="landing-feature-tour"
+      className="py-16 lg:py-24 bg-muted/30 relative overflow-hidden"
+    >
       {/* Subtle background ornament */}
       <div className="absolute inset-0 pointer-events-none">
         <div className="absolute top-0 left-1/4 w-96 h-96 bg-primary/3 rounded-full blur-[100px]" />
@@ -621,67 +534,96 @@ function HowHelpsYou() {
       </div>
 
       <div className="max-w-6xl mx-auto px-5 sm:px-7 relative">
-        <Reveal className="text-center mb-14">
-          <SectionLabel>Interactive Demos</SectionLabel>
-          <h2 className="text-2xl sm:text-3xl font-extrabold text-foreground mb-2">
+        <Reveal className="text-center mb-10 lg:mb-12">
+          <SectionLabel>Choose a campus task</SectionLabel>
+          <h2 id="landing-feature-tour-heading" className="text-2xl sm:text-3xl font-extrabold text-foreground mb-2">
             How NaviSync Helps You
           </h2>
           <p className="text-muted-foreground text-sm max-w-lg mx-auto">
-            See the platform in action. Each scenario shows how NaviSync solves a real campus need.
+            Pick a real campus need and preview the path from finding a place to getting there.
           </p>
         </Reveal>
 
-        {/* Scenario selector tabs */}
-        <div className="flex flex-wrap justify-center gap-2 mb-10">
-          {SCENARIOS.map((s) => (
-            <button
-              key={s.id}
-              onClick={() => setActiveScenario(s.id)}
-              aria-current={activeScenario === s.id ? "true" : undefined}
-              className={`inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold transition-all duration-200 ${
-                activeScenario === s.id
-                  ? "bg-primary text-primary-foreground shadow-md"
-                  : "bg-card border border-border text-muted-foreground hover:text-foreground hover:border-primary/20"
-              }`}
-            >
-              <s.icon className="h-4 w-4" />
-              {s.title}
-            </button>
-          ))}
-        </div>
+        <div
+          className="grid md:grid-cols-[minmax(190px,0.34fr)_minmax(0,1fr)] gap-4 lg:gap-6 max-w-5xl mx-auto rounded-[2rem] border border-white/45 bg-card/75 p-3 sm:p-4 shadow-[0_24px_70px_rgba(7,20,64,0.12),inset_0_1px_0_rgba(255,255,255,0.65)] backdrop-blur-xl dark:border-white/10 dark:bg-white/[0.06]"
+          style={{ WebkitBackdropFilter: "blur(18px)" }}
+        >
+          <div className="flex flex-col gap-2" aria-label="NaviSync feature previews">
+            {SCENARIOS.map((scenario) => {
+              const Icon = scenario.icon;
+              const isActive = activeScenario === scenario.id;
 
-        {/* Active scenario card */}
-        {SCENARIOS.filter((s) => s.id === activeScenario).map((s) => (
-          <motion.div
-            key={s.id}
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
-            className="grid md:grid-cols-2 gap-6 md:gap-10 items-center max-w-4xl mx-auto"
+              return (
+                <button
+                  key={scenario.id}
+                  type="button"
+                  onClick={() => setActiveScenario(scenario.id)}
+                  aria-expanded={isActive}
+                  aria-controls="landing-feature-tour-panel"
+                  className={`group flex w-full items-center gap-3 rounded-2xl border px-4 py-3.5 text-left transition-all duration-200 ${
+                    isActive
+                      ? "border-primary/30 bg-primary text-primary-foreground shadow-lg"
+                      : "border-border/70 bg-background/65 text-muted-foreground hover:border-primary/25 hover:bg-background hover:text-foreground"
+                  }`}
+                >
+                  <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${isActive ? "bg-white/15" : "bg-primary/8 text-primary"}`}>
+                    <Icon className="h-4 w-4" />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-sm font-extrabold leading-tight">{scenario.title}</span>
+                    <span className={`mt-1 block text-[11px] leading-snug ${isActive ? "text-primary-foreground/70" : "text-muted-foreground"}`}>
+                      {scenario.id === "search" ? "Find rooms and offices" : scenario.id === "route" ? "Plan your next route" : scenario.id === "a11y" ? "Choose an easier path" : "Keep campus issues visible"}
+                    </span>
+                  </span>
+                  <ChevronDown className={`h-4 w-4 shrink-0 transition-transform duration-200 md:-rotate-90 ${isActive ? "rotate-180 md:rotate-0" : ""}`} />
+                </button>
+              );
+            })}
+          </div>
+
+          <div
+            id="landing-feature-tour-panel"
+            data-testid="landing-feature-tour-panel"
+            className="min-h-[280px] rounded-[1.6rem] border p-5 sm:p-7 bg-background/80 shadow-[inset_0_1px_0_rgba(255,255,255,0.55)] dark:bg-white/[0.08]"
+            style={{ borderColor: active.borderColor, WebkitBackdropFilter: "blur(14px)" }}
           >
-            {/* Description */}
-            <div className="order-2 md:order-1">
-              <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs font-bold mb-4" style={{ borderColor: s.borderColor, background: s.color, color: "var(--foreground)" }}>
-                <s.icon className="h-3.5 w-3.5" />
-                {s.title}
-              </div>
-              <p className="text-muted-foreground text-sm leading-relaxed mb-5">
-                {s.desc}
-              </p>
-              <Link
-                to="/map"
-                className="inline-flex items-center gap-1.5 text-sm font-bold text-primary hover:text-primary/80 transition-colors group"
+            <AnimatePresence initial={false} mode="sync">
+              <motion.div
+                key={active.id}
+                initial={reduceMotion ? false : { opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={reduceMotion ? undefined : { opacity: 0, y: -8 }}
+                transition={{ duration: reduceMotion ? 0 : 0.3, ease: [0.16, 1, 0.3, 1] }}
+                className="flex h-full flex-col"
               >
-                Try it on the map
-                <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
-              </Link>
-            </div>
-            {/* Interactive demo */}
-            <div className="order-1 md:order-2 rounded-2xl border p-4 md:p-5 bg-card/80 backdrop-blur-sm shadow-lg" style={{ borderColor: s.borderColor, minHeight: 220 }}>
-              {renderDemo(s.demo)}
-            </div>
-          </motion.div>
-        ))}
+                <div className="mb-4 flex items-center justify-between gap-3 text-[10px] font-extrabold uppercase tracking-[.16em] text-muted-foreground">
+                  <span aria-live="polite">Previewing {active.title}</span>
+                  <span className="inline-flex items-center gap-1.5 text-primary">
+                    <span className="h-1.5 w-1.5 rounded-full bg-primary" />
+                    Interactive demo
+                  </span>
+                </div>
+                <div className="inline-flex w-fit items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-bold" style={{ borderColor: active.borderColor, background: active.color }}>
+                  <active.icon className="h-3.5 w-3.5" />
+                  {active.title}
+                </div>
+                <p className="mt-4 max-w-xl text-sm leading-relaxed text-muted-foreground">
+                  {active.desc}
+                </p>
+                <div className="mt-5 flex-1 rounded-2xl border border-border/60 bg-card/70 p-4 shadow-sm">
+                  {renderDemo(active.demo)}
+                </div>
+                <Link
+                  to="/map"
+                  className="group mt-5 inline-flex w-fit items-center gap-1.5 text-sm font-bold text-primary transition-colors hover:text-primary/80"
+                >
+                  Try it on the map
+                  <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
+                </Link>
+              </motion.div>
+            </AnimatePresence>
+          </div>
+        </div>
       </div>
     </section>
   );
@@ -1137,23 +1079,124 @@ function DayWithNaviSync() {
 // ── HERO (enhanced) ─────────────────────────────────────────────────────────
 // ═════════════════════════════════════════════════════════════════════════════
 
+function LandingMapPreview() {
+  const reduceMotion = useReducedMotion();
+
+  return (
+    <motion.div
+      data-testid="landing-map-preview"
+      aria-label="Campus map preview showing a walking route between Building A and Building B"
+      className="relative overflow-hidden rounded-[2rem] border border-white/15 bg-[#0b1b45]/90 p-3 shadow-[0_28px_80px_rgba(1,8,30,0.35)]"
+      whileHover={reduceMotion ? undefined : { y: -4 }}
+      transition={{ type: "spring", stiffness: 220, damping: 24 }}
+    >
+      <div className="relative min-h-[250px] overflow-hidden rounded-[1.5rem] border border-white/10 bg-[#0b2357] sm:min-h-[350px]">
+        <div
+          className="absolute inset-0 opacity-30"
+          style={{
+            backgroundImage: "linear-gradient(rgba(255,255,255,.08) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.08) 1px, transparent 1px)",
+            backgroundSize: "32px 32px",
+          }}
+        />
+        <div className="absolute -left-12 bottom-8 h-36 w-36 rounded-full bg-cyan-400/10 blur-3xl" />
+        <div className="absolute -right-8 top-10 h-44 w-44 rounded-full bg-accent/10 blur-3xl" />
+
+        <svg
+          aria-hidden="true"
+          className="absolute inset-0 h-full w-full"
+          viewBox="0 0 520 340"
+          preserveAspectRatio="none"
+        >
+          <path
+            d="M38 250 C130 205 152 104 244 130 S360 255 470 88"
+            fill="none"
+            stroke="rgba(255,255,255,.08)"
+            strokeWidth="20"
+            strokeLinecap="round"
+          />
+          <path
+            d="M38 250 C130 205 152 104 244 130 S360 255 470 88"
+            fill="none"
+            stroke="#f4bd38"
+            strokeWidth="4"
+            strokeDasharray="9 9"
+            strokeLinecap="round"
+            className={reduceMotion ? undefined : "animate-route-draw"}
+          />
+          <path
+            d="M90 54 L440 286 M120 300 L394 42"
+            stroke="rgba(106,171,255,.22)"
+            strokeWidth="2"
+            strokeDasharray="5 10"
+          />
+          <circle cx="38" cy="250" r="10" fill="none" stroke="#6aaeff" strokeWidth="2" opacity=".35" />
+          <circle cx="38" cy="250" r="5.5" fill="#6aaeff" stroke="#0b2357" strokeWidth="3" opacity=".98" />
+          <circle cx="470" cy="88" r="10" fill="none" stroke="#f4bd38" strokeWidth="2" opacity=".35" />
+          <circle cx="470" cy="88" r="5.5" fill="#f4bd38" stroke="#0b2357" strokeWidth="3" opacity=".98" />
+        </svg>
+
+        <div className="absolute left-4 top-4 rounded-full border border-white/15 bg-black/15 px-3 py-1.5 text-[10px] font-extrabold uppercase tracking-[.16em] text-white/70">
+          Campus map, at a glance
+        </div>
+
+        <div
+          data-testid="map-start-callout"
+          data-callout-placement="above-start-marker"
+          className="absolute left-[7%] top-[45%] rounded-xl border border-blue-200/30 bg-blue-500/25 px-3 py-2 text-white shadow-lg backdrop-blur-sm"
+        >
+          <span className="block text-[10px] font-extrabold uppercase tracking-[.16em] text-blue-100">Building A</span>
+          <span className="mt-1 block text-[10px] text-white/60">Your starting point</span>
+        </div>
+        <div
+          data-testid="map-end-callout"
+          data-callout-placement="above-end-marker"
+          className="absolute right-[6%] top-[30%] rounded-xl border border-accent/50 bg-accent/20 px-3 py-2 text-white shadow-lg backdrop-blur-sm sm:top-[5%]"
+        >
+          <span className="block text-[10px] font-extrabold uppercase tracking-[.16em] text-accent-foreground">Building B</span>
+          <span className="mt-1 block text-[10px] text-white/60">Destination</span>
+        </div>
+
+        <div className="absolute bottom-4 left-4 flex items-center gap-2 rounded-lg border border-white/10 bg-[#071440]/70 px-3 py-2 text-[10px] font-semibold text-white/70 backdrop-blur-sm">
+          <Navigation className="h-3.5 w-3.5 text-accent" />
+          <span>Route ready to follow</span>
+        </div>
+      </div>
+
+      <div className="flex items-center justify-between gap-3 px-2 pb-1 pt-3 text-xs text-white/70">
+        <span className="inline-flex items-center gap-2">
+          <span className="h-2 w-2 rounded-full bg-emerald-400 shadow-[0_0_12px_rgba(52,211,153,.7)]" />
+          Walking route ready
+        </span>
+        <span className="font-mono text-white/50">2 min · 148 m</span>
+      </div>
+    </motion.div>
+  );
+}
+
 function HeroSection() {
+  const reduceMotion = useReducedMotion();
   const { scrollY } = useScroll();
   const smoothY = useSpring(scrollY, { stiffness: 60, damping: 35, mass: 0.6 });
 
-  const heroBgY      = useTransform(smoothY, [0, 600], [0, 80]);
-  const heroContentY = useTransform(smoothY, [0, 600], [0, -70]);
-  const heroLogoY    = useTransform(smoothY, [0, 600], [0, -40]);
-  const heroOpacity  = useTransform(smoothY, [0, 420], [1, 0]);
+  const heroBgY      = useTransform(smoothY, [0, 900], [0, 24]);
+  const heroContentY = useTransform(smoothY, [0, 900], [0, -28]);
+  const heroLogoY    = useTransform(smoothY, [0, 900], [0, -12]);
+  const heroOpacity  = useTransform(smoothY, [0, 900], [1, 0.9]);
 
   return (
-    <section className="relative overflow-hidden flex items-center justify-center" style={{ minHeight: "96vh" }}>
+    <section
+      data-testid="landing-hero"
+      data-scroll-behavior="subtle"
+      data-mobile-nav-aware="true"
+      className="relative isolate flex min-h-0 items-center justify-center overflow-hidden pb-[calc(6rem+env(safe-area-inset-bottom,0px))] pt-4 sm:py-12 lg:min-h-[820px] lg:py-28 lg:pb-28"
+      aria-labelledby="landing-hero-heading"
+    >
       {/* ── Animated gradient background — slow shift ── */}
       <motion.div
         className="absolute inset-0"
-        style={{ y: heroBgY }}
+        style={{ y: reduceMotion ? 0 : heroBgY }}
       >
-        <div className="absolute inset-0 animate-gradient-shift" style={{
+        <div className={`absolute inset-0 ${reduceMotion ? "" : "animate-gradient-shift"}`} style={{
           background: `
             radial-gradient(ellipse 90% 70% at 50% 35%, #0d2470 0%, #071440 50%, #020a1c 100%),
             linear-gradient(135deg, rgba(59,110,240,0.08) 0%, transparent 30%, rgba(200,150,12,0.05) 60%, transparent 100%)
@@ -1165,7 +1208,7 @@ function HeroSection() {
 
       {/* ── Grid overlay — pulsing subtly ── */}
       <div
-        className="absolute inset-0 pointer-events-none animate-grid-pulse"
+        className={`absolute inset-0 pointer-events-none ${reduceMotion ? "" : "animate-grid-pulse"}`}
         style={{
           backgroundImage: `
             linear-gradient(rgba(255,255,255,0.04) 1px, transparent 1px),
@@ -1176,13 +1219,13 @@ function HeroSection() {
       />
 
       {/* ── Cursor-interactive lava lamp blobs ── */}
-      <LavaLampBackground />
+      {!reduceMotion && <LavaLampBackground />}
 
       {/* ── Animated route lines ── */}
-      <HeroRouteLines />
+      <HeroRouteLines reducedMotion={Boolean(reduceMotion)} />
 
       {/* ── Floating particles ── */}
-      <FloatingParticles count={16} />
+      {!reduceMotion && <FloatingParticles count={16} />}
 
       {/* ── Floating decorative shapes ── */}
       {FLOATING_SHAPES.map(({ Icon, size, startX, startY, dur, delay, rotate, opacity }, i) => (
@@ -1195,7 +1238,7 @@ function HeroSection() {
             opacity,
           }}
         >
-          <div style={{ animation: `ag-float-${(i % 6) + 1} ${dur}s ease-in-out ${delay}s infinite` }}>
+          <div style={{ animation: reduceMotion ? undefined : `ag-float-${(i % 6) + 1} ${dur}s ease-in-out ${delay}s infinite` }}>
             <Icon
               size={size}
               strokeWidth={1.5}
@@ -1213,7 +1256,7 @@ function HeroSection() {
 
       {/* ── Aurora blobs ── */}
       <div
-        className="absolute pointer-events-none animate-aurora-1"
+        className={`absolute pointer-events-none ${reduceMotion ? "" : "animate-aurora-1"}`}
         style={{
           top: "10%", left: "52%",
           width: 620, height: 500,
@@ -1223,7 +1266,7 @@ function HeroSection() {
         }}
       />
       <div
-        className="absolute pointer-events-none animate-aurora-2"
+        className={`absolute pointer-events-none ${reduceMotion ? "" : "animate-aurora-2"}`}
         style={{
           bottom: "5%", left: "10%",
           width: 460, height: 400,
@@ -1232,7 +1275,7 @@ function HeroSection() {
         }}
       />
       <div
-        className="absolute pointer-events-none animate-aurora-3"
+        className={`absolute pointer-events-none ${reduceMotion ? "" : "animate-aurora-3"}`}
         style={{
           top: "45%", right: "8%",
           width: 380, height: 360,
@@ -1243,12 +1286,13 @@ function HeroSection() {
 
       {/* ── HERO CONTENT ── */}
       <motion.div
-        className="relative w-full max-w-3xl mx-auto px-5 sm:px-10 flex flex-col items-center text-center"
-        style={{ y: heroContentY, opacity: heroOpacity, paddingTop: "6vh", paddingBottom: "10vh" }}
+        className="relative z-10 mx-auto grid w-full max-w-7xl grid-cols-1 items-center gap-8 px-5 py-12 sm:gap-10 sm:px-10 sm:py-16 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] lg:gap-14 lg:px-12 lg:py-0"
+        style={{ y: reduceMotion ? 0 : heroContentY, opacity: reduceMotion ? 1 : heroOpacity }}
       >
+        <div className="min-w-0 text-left">
         {/* PLV badge */}
         <div
-          className="inline-flex items-center gap-2.5 px-4 py-2 rounded-full bg-white/8 border mb-10 animate-fade-in animate-border-glow"
+          className="inline-flex items-center gap-2.5 px-4 py-2 rounded-full bg-white/8 border mb-8 animate-fade-in animate-border-glow"
           style={{ borderColor: "rgba(200,150,12,0.45)" }}
         >
           <PLVLogo size={20} />
@@ -1259,27 +1303,30 @@ function HeroSection() {
 
         {/* PLV Seal — neon gold ring glow */}
         <motion.div
-          className="relative flex items-center justify-center mb-10 select-none"
-          style={{ y: heroLogoY }}
+          data-testid="hero-seal"
+          className="relative mt-2 mb-8 flex h-36 w-36 items-center justify-center select-none"
+          style={{ y: reduceMotion ? 0 : heroLogoY }}
         >
           <div
-            className="absolute w-44 h-44 rounded-full animate-neon-gold"
+            data-testid="hero-seal-halo"
+            className="absolute inset-0 rounded-full animate-neon-gold"
             style={{ background: "radial-gradient(circle, rgba(200,150,12,0.22) 0%, transparent 70%)", filter: "blur(18px)" }}
           />
-          <div className="absolute w-36 h-36 rounded-full border border-accent/30 animate-border-glow" />
-          <PLVLogo size={106} className="relative z-10 shadow-2xl animate-hero-breathe" />
+          <div data-testid="hero-seal-ring" className="absolute inset-2 rounded-full border border-accent/30 animate-border-glow" />
+          <PLVLogo size={78} className="relative z-10 shadow-2xl animate-hero-breathe" />
         </motion.div>
 
         {/* Headline */}
         <h1
-          className="font-extrabold text-white leading-[1.08] tracking-tight mb-3 animate-slide-up delay-100"
-          style={{ fontSize: "clamp(2.4rem, 6vw, 3.8rem)" }}
+          id="landing-hero-heading"
+          className="max-w-xl font-extrabold leading-[1.04] tracking-tight text-white animate-slide-up delay-100"
+          style={{ fontSize: "clamp(2.8rem, 6vw, 5.4rem)" }}
         >
-          Navigate PLV Smarter
+          Navigate PLV <span className="text-accent">Smarter</span>
         </h1>
 
         {/* NaviSync badge */}
-        <div className="flex items-center justify-center gap-2 mb-8 animate-slide-up delay-150">
+        <div className="mt-5 flex items-center justify-start gap-2 mb-6 animate-slide-up delay-150">
           <span className="text-white/30 text-sm font-medium">powered by</span>
           <span
             className="font-extrabold tracking-wider px-3 py-1 rounded-full border bg-accent/15 animate-neon-gold"
@@ -1294,12 +1341,12 @@ function HeroSection() {
         </div>
 
         {/* Tagline */}
-        <p className="text-base text-white/50 mb-10 animate-slide-up delay-200 max-w-xs">
-          Find any building, get directions, and stay updated.
+        <p className="max-w-lg text-base leading-relaxed text-white/60 mb-7 animate-slide-up delay-200 sm:text-lg">
+          Find any building, plan a walking route, and move through campus with more confidence.
         </p>
 
         {/* CTAs — enhanced hover effects */}
-        <div className="flex flex-wrap justify-center gap-3 animate-slide-up delay-300">
+        <div className="flex flex-wrap justify-start gap-3 animate-slide-up delay-300">
           <motion.div whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.96 }} transition={{ type: "spring", stiffness: 400, damping: 10 }}>
             <Link
               to="/map"
@@ -1313,14 +1360,41 @@ function HeroSection() {
             </Link>
           </motion.div>
           <motion.div whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.96 }} transition={{ type: "spring", stiffness: 400, damping: 10 }}>
-            <Link
-              to="/help"
+            <a
+              href="#landing-feature-tour"
               className="group inline-flex items-center gap-2.5 h-12 px-8 rounded-2xl bg-white/10 border border-white/20 text-white font-bold text-sm hover:bg-white/16 transition-all"
             >
               <span>Explore Features</span>
-              <ArrowRight className="h-4 w-4 transition-all duration-200 group-hover:translate-x-1 group-hover:-translate-y-0.5" />
-            </Link>
+              <ArrowDown className="h-4 w-4 transition-all duration-200 group-hover:translate-y-1" />
+            </a>
           </motion.div>
+        </div>
+
+        <div className="mt-10 grid max-w-xl grid-cols-3 gap-3 border-t border-white/10 pt-5 text-left">
+          <div>
+            <p className="text-sm font-extrabold text-white">Campus-wide</p>
+            <p className="mt-1 text-[11px] text-white/45">places to find</p>
+          </div>
+          <div>
+            <p className="text-sm font-extrabold text-white">Walking-first</p>
+            <p className="mt-1 text-[11px] text-white/45">routes to follow</p>
+          </div>
+          <div>
+            <p className="text-sm font-extrabold text-white">Access-aware</p>
+            <p className="mt-1 text-[11px] text-white/45">paths when needed</p>
+          </div>
+        </div>
+        </div>
+
+        <div className="min-w-0 lg:pt-8">
+          <LandingMapPreview />
+          <div className="mt-4 flex items-center justify-between gap-4 px-2 text-[11px] text-white/45">
+            <span className="inline-flex items-center gap-2">
+              <MapPin className="h-3.5 w-3.5 text-accent" />
+              From your starting point to the right destination.
+            </span>
+            <span className="hidden font-mono uppercase tracking-[.15em] text-white/35 sm:inline">NVS / 01</span>
+          </div>
         </div>
       </motion.div>
 
@@ -1334,130 +1408,73 @@ function HeroSection() {
   );
 }
 
-function AnnouncementPreview() {
-  const [announcements, setAnnouncements] = useState<CampusAnnouncement[]>([]);
-  const [events, setEvents] = useState<CampusEvent[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    let mounted = true;
-    Promise.all([
-      eventService.getPublishedAnnouncements(),
-      eventService.getUpcomingEvents(),
-    ]).then(([ancData, evtData]) => {
-      if (mounted) {
-        setAnnouncements(ancData);
-        setEvents(evtData);
-        setLoading(false);
-      }
-    });
-    return () => {
-      mounted = false;
-    };
-  }, []);
+function CampusCapabilities() {
+  const capabilities = [
+    {
+      icon: Search,
+      title: "Find buildings and offices",
+      description: "Search rooms, labs, and offices without guessing where to start.",
+    },
+    {
+      icon: Route,
+      title: "Get walking directions",
+      description: "Follow a clear route from one campus building to another.",
+    },
+    {
+      icon: Accessibility,
+      title: "Choose accessible routes",
+      description: "See route options that avoid stairs when accessibility matters.",
+    },
+  ];
 
   return (
-    <section className="py-20 bg-card/60 relative border-t border-border/50">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6">
-        <Reveal className="text-center max-w-2xl mx-auto mb-14">
-          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full border border-primary/20 bg-primary/5 text-primary text-[10px] font-extrabold uppercase tracking-widest mb-4">
-            <Megaphone className="h-3.5 w-3.5" />
-            Campus Updates & Events
-          </div>
-          <h2 className="text-2xl sm:text-4xl font-extrabold text-foreground tracking-tight mb-3">
-            Latest Announcements & Campus Events
+    <section className="relative overflow-hidden bg-background py-16 lg:py-24">
+      <svg aria-hidden="true" className="pointer-events-none absolute right-0 top-8 hidden h-56 w-[42%] text-primary/10 lg:block" viewBox="0 0 640 220" fill="none">
+        <path d="M0 176 C120 46 180 206 310 88 S500 42 640 120" stroke="currentColor" strokeWidth="2" strokeDasharray="7 10" />
+        <circle cx="310" cy="88" r="5" fill="currentColor" />
+        <circle cx="640" cy="120" r="5" fill="currentColor" />
+      </svg>
+      <div className="mx-auto max-w-6xl px-5 sm:px-7">
+        <Reveal className="mb-8 max-w-2xl">
+          <SectionLabel>What NaviSync does</SectionLabel>
+          <h2 className="mb-3 text-2xl font-extrabold tracking-tight text-foreground sm:text-3xl">
+            Everything useful, right when you need it.
           </h2>
-          <p className="text-muted-foreground text-sm leading-relaxed">
-            Stay updated with facility notices, event schedules, and navigation advisories across PLV.
+          <p className="text-sm leading-relaxed text-muted-foreground">
+            One focused campus tool for finding places, planning your walk, and moving with more confidence.
           </p>
         </Reveal>
 
-        {/* Live Announcements Row */}
-        {announcements.length > 0 && (
-          <div className="mb-10 space-y-3">
-            {announcements.slice(0, 2).map((anc) => (
-              <div
-                key={anc.id}
-                className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 p-4 rounded-2xl border border-primary/20 bg-primary/5 backdrop-blur-sm"
-              >
-                <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center shrink-0 text-primary">
-                    <Bell className="h-4 w-4" />
-                  </div>
-                  <div>
-                    <h4 className="text-sm font-extrabold text-foreground">{anc.title}</h4>
-                    <p className="text-xs text-muted-foreground">{anc.content}</p>
-                  </div>
-                </div>
-                <span className="text-[10px] font-extrabold uppercase tracking-wider px-2.5 py-1 rounded-full bg-primary/15 text-primary shrink-0">
-                  {anc.category}
-                </span>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Upcoming Events Grid */}
-        <div className="grid md:grid-cols-3 gap-6 mb-10">
-          {events.map((evt, i) => (
-            <Reveal key={evt.id} delay={i * 80}>
-              <motion.div
-                whileHover={{ y: -4 }}
-                transition={{ type: "spring", stiffness: 300, damping: 20 }}
-                className="group relative rounded-2xl border border-border/80 bg-card p-6 shadow-sm hover:shadow-md hover:border-primary/20 transition-all duration-200 flex flex-col h-full overflow-hidden"
-              >
-                {evt.coverImage && (
-                  <div className="h-32 -mx-6 -mt-6 mb-4 overflow-hidden bg-muted relative">
-                    <img src={evt.coverImage} alt={evt.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
-                    <div className="absolute inset-0 bg-gradient-to-t from-card via-transparent to-transparent" />
-                  </div>
-                )}
-                <div className="flex items-center justify-between gap-2 mb-3">
-                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold border border-primary/20 text-primary bg-primary/10">
-                    <Tag className="h-3 w-3" />
-                    {evt.category}
+        <div className="relative grid gap-4 md:grid-cols-12">
+          {capabilities.map((capability, index) => {
+            const Icon = capability.icon;
+            const featured = index === 0;
+            return (
+              <Reveal key={capability.title} delay={index * 80} className={featured ? "md:col-span-5 md:row-span-2" : "md:col-span-7"}>
+                <motion.article
+                  whileHover={{ y: -3 }}
+                  transition={{ type: "spring", stiffness: 300, damping: 22 }}
+                  className={`group h-full rounded-[1.5rem] border p-5 shadow-sm backdrop-blur-sm transition-shadow hover:shadow-lg ${featured
+                    ? "min-h-[250px] border-[#2f61d5]/40 bg-[#071440] p-6 text-white shadow-[0_20px_50px_rgba(7,20,64,0.2)]"
+                    : "border-border/70 bg-card/75"}`}
+                >
+                  <span className={`inline-flex h-10 w-10 items-center justify-center rounded-2xl transition-transform duration-200 group-hover:scale-105 ${featured ? "bg-white/10 text-accent" : "bg-primary/8 text-primary"}`}>
+                    <Icon className="h-5 w-5" />
                   </span>
-                  <div className="flex items-center gap-1 text-[11px] text-muted-foreground font-medium">
-                    <Calendar className="h-3 w-3" />
-                    {new Date(evt.startsAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
-                  </div>
-                </div>
-
-                <h3 className="text-base font-extrabold text-foreground mb-2 group-hover:text-primary transition-colors leading-snug">
-                  {evt.title}
-                </h3>
-
-                <p className="text-xs text-muted-foreground leading-relaxed mb-4 flex-1">
-                  {evt.description}
-                </p>
-
-                <div className="pt-3 border-t border-border/50 flex items-center justify-between text-xs text-muted-foreground">
-                  <span className="inline-flex items-center gap-1 font-semibold text-foreground/80 truncate max-w-[170px]">
-                    <MapPin className="h-3.5 w-3.5 text-primary shrink-0" />
-                    {evt.locationLabel || evt.buildingName}
-                  </span>
-                  <Link
-                    to={`/map?buildingId=${evt.buildingId || "b1"}`}
-                    className="inline-flex items-center gap-1 text-primary font-extrabold text-xs hover:underline shrink-0 ml-2"
-                  >
-                    View Map
-                    <ArrowRight className="h-3 w-3" />
-                  </Link>
-                </div>
-              </motion.div>
-            </Reveal>
-          ))}
-        </div>
-
-        <div className="text-center">
-          <Link
-            to="/help"
-            className="inline-flex items-center gap-2 px-6 py-3 rounded-xl border border-border bg-card hover:bg-muted font-bold text-xs text-foreground transition-all duration-200 shadow-sm"
-          >
-            <Bell className="h-4 w-4 text-primary" />
-            View All Advisories & Help
-            <ArrowRight className="h-3.5 w-3.5" />
-          </Link>
+                  <h3 className={`mt-6 font-extrabold leading-tight ${featured ? "max-w-[13rem] text-xl text-white" : "text-base text-foreground"}`}>
+                    {capability.title}
+                  </h3>
+                  <p className={`mt-3 text-xs leading-relaxed ${featured ? "max-w-[16rem] text-white/60" : "text-muted-foreground"}`}>{capability.description}</p>
+                  {featured && (
+                    <span className="mt-8 inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/5 px-3 py-1.5 text-[10px] font-extrabold uppercase tracking-[.14em] text-white/65">
+                      <Search className="h-3 w-3 text-accent" />
+                      Start with a destination
+                    </span>
+                  )}
+                </motion.article>
+              </Reveal>
+            );
+          })}
         </div>
       </div>
     </section>
@@ -1531,7 +1548,7 @@ function FinalCTA() {
             Open the interactive campus map and navigate every building, route, and facility.
           </p>
 
-          <div className="flex flex-wrap justify-center gap-3">
+          <div className="flex justify-center">
             <motion.div whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.96 }}>
               <Link
                 to="/map"
@@ -1539,15 +1556,6 @@ function FinalCTA() {
               >
                 <Map className="h-4 w-4 transition-transform duration-200 group-hover:-translate-y-0.5 group-hover:scale-110" />
                 Open Interactive Map
-              </Link>
-            </motion.div>
-            <motion.div whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.96 }}>
-              <Link
-                to="/help"
-                className="group inline-flex items-center gap-2.5 h-12 px-8 rounded-2xl bg-white/10 border border-white/20 text-white font-bold text-sm hover:bg-white/16 transition-all"
-              >
-                Learn More
-                <ArrowRight className="h-4 w-4 transition-all duration-200 group-hover:translate-x-1" />
               </Link>
             </motion.div>
           </div>
@@ -1565,13 +1573,8 @@ export function LandingPage() {
   return (
     <div className="min-h-screen w-full max-w-full overflow-x-hidden">
       <HeroSection />
-      <PlatformHighlights />
       <HowHelpsYou />
-      <HowItWorks />
-      <ProductShowcase />
-      <WhyNaviSync />
-      <DayWithNaviSync />
-      <AnnouncementPreview />
+      <CampusCapabilities />
       <FinalCTA />
     </div>
   );

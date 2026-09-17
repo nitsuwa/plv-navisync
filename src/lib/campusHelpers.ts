@@ -233,6 +233,13 @@ export function createCampusClone(
   (source.eventOverlays ?? []).forEach((eo) => eventMap.set(eo.id, gen("eo")));
   (source.assemblyPoints ?? []).forEach((ap) => assemMap.set(ap.id, gen("ap")));
 
+  const remapEventLocation = (locationRef: NonNullable<Campus["eventOverlays"]>[number]["locationRef"]) => locationRef ? {
+    ...structuredClone(locationRef),
+    buildingId: bldMap.get(locationRef.buildingId) ?? locationRef.buildingId,
+    floorId: locationRef.floorId ? floorMap.get(locationRef.floorId) ?? locationRef.floorId : undefined,
+    roomId: locationRef.roomId ? roomMap.get(locationRef.roomId) ?? locationRef.roomId : undefined,
+  } : undefined;
+
   const clone: Campus = {
     ...structuredClone(source),
     id: cloneId,
@@ -383,12 +390,11 @@ export function createCampusClone(
     eventOverlays: (source.eventOverlays ?? []).map((eo) => ({
       ...structuredClone(eo),
       id: eventMap.get(eo.id)!,
-      locationRef: eo.locationRef ? {
-        ...structuredClone(eo.locationRef),
-        buildingId: bldMap.get(eo.locationRef.buildingId) ?? eo.locationRef.buildingId,
-        floorId: eo.locationRef.floorId ? floorMap.get(eo.locationRef.floorId) ?? eo.locationRef.floorId : undefined,
-        roomId: eo.locationRef.roomId ? roomMap.get(eo.locationRef.roomId) ?? eo.locationRef.roomId : undefined,
-      } : undefined,
+      locationRef: remapEventLocation(eo.locationRef),
+      locations: eo.locations?.map((location) => ({
+        ...structuredClone(location),
+        locationRef: remapEventLocation(location.locationRef)!,
+      })),
     })),
     decorAssets: (source.decorAssets ?? []).map((d) => ({ ...structuredClone(d), id: decorMap.get(d.id)! })),
   };

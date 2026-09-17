@@ -55,3 +55,6 @@ lpt8
 LPT8
 lpt9
 LPT9
+
+# Local IDE/Agent Cache
+.freebuff/
