@@ -15,7 +15,8 @@
 import type { Campus, NavigationNode, NavigationEdge, CampusBuilding } from "../components/map-builder/types";
 import type { ValidationIssue, IssueTarget } from "../components/map-builder/ValidationErrorsDialog";
 import { doorDisplayName, doorHasIndoorNavigationConnection, doorNodeForEdge } from "./entranceTransitions";
-import { edgePolylinePoints, roomDisplayName, isDoorEligibleForRoom, roomAccessDoorIds, segmentBlockedByWall } from "./indoorNavigationGraph";
+import { edgePolylinePoints, roomDisplayName, isDoorEligibleForRoom, roomAccessDoorIds, segmentBlockedByWall, edgeCrossesBlockingFurniture } from "./indoorNavigationGraph";
+import { isDerivedExteriorApproachNode } from "./exteriorApproachNavigation";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -421,7 +422,14 @@ export function validateNavigationGraph(campus: Campus): NavGraphReadinessResult
     // outdoor infrastructure. They intentionally have no floorId, remain
     // connectable in the outdoor editor, and must not be reported as broken
     // indoor nodes merely because their type is `stair`.
-    if (node.type === "outdoor" || node.type === "entrance" || (node.exteriorEmergencyStairId && !node.floorId)) continue;
+    if (
+      node.type === "outdoor"
+      || node.type === "entrance"
+      || (node.exteriorEmergencyStairId && !node.floorId)
+      // The outer side of a derived Ramp/Steps/Veranda approach is expressed
+      // in campus coordinates by design, so it intentionally has no floorId.
+      || (isDerivedExteriorApproachNode(node) && node.derivedRole === "outer")
+    ) continue;
     // Indoor nodes should have a floorId
     if (!node.floorId) {
       issues.push({
@@ -747,24 +755,11 @@ export function validateNavigationGraph(campus: Campus): NavGraphReadinessResult
               segmentBlockedByWall(point, pts[index + 1], wall, doors) !== null
             )
           );
-          // Check blocking furniture (any visible furniture blocks)
-          const blockers = furniture.filter((f) => f.visible !== false);
-          if (!blocked && blockers.length > 0) {
-            for (let i = 0; i < pts.length - 1; i++) {
-              for (let t = 0.1; t <= 0.9; t += 0.2) {
-                const px = pts[i].x + (pts[i + 1].x - pts[i].x) * t;
-                const py = pts[i].y + (pts[i + 1].y - pts[i].y) * t;
-                for (const fb of blockers) {
-                  if (pointInBuildingRect({ x: fb.x, y: fb.y, width: fb.width, height: fb.height, rotation: fb.rotation }, px, py)) {
-                    blocked = true;
-                    break;
-                  }
-                }
-                if (blocked) break;
-              }
-              if (blocked) break;
-            }
-          }
+          // Keep the readiness validator on the same canonical footprint
+          // primitive used by Floor Editor routing.  The shared slab test
+          // catches narrow/rotated furniture that a sparse sample pass could
+          // miss, so the red edge and route eligibility never disagree.
+          if (!blocked && edgeCrossesBlockingFurniture(pts, furniture)) blocked = true;
           if (blocked) {
             issues.push({
               type: "nav_edge_blocked_by_obstacle",

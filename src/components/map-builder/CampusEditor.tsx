@@ -7,7 +7,7 @@ import {
   AlignVerticalJustifyCenter, AlignHorizontalDistributeCenter, AlignVerticalDistributeCenter,
   ZoomIn, Settings2,
   MousePointer2, Square, MapPin, GitBranch, Trash2, Hand, Keyboard,
-  Loader2, HelpCircle, ChevronLeft, Eye, EyeOff, Route, Waypoints, Star, BookOpen,
+  Loader2, HelpCircle, ChevronLeft, Eye, EyeOff, Route, Waypoints, BookOpen,
 } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { useCanvasControls, isSpacePressed } from "./useCanvasControls";
@@ -37,6 +37,7 @@ import type {
 } from "./types";
 import { BUILDING_TYPE_MAP, DECOR_ASSET_MAP, getRotatedAABB, groundTypeForDecorType, isDecorAreaType } from "./constants";
 import { ToolbarTooltip } from "./ToolbarTooltip";
+import { CampusStatusBadge } from "./CampusStatusTooltip";
 import { validateCampusData, computeBuildingOverlaps } from "../../lib/campusValidation";
 import { nextBuildingCopyIdentity, nextDefaultBuildingIdentity, type BuildingIdentity } from "../../lib/buildingDefaults";
 import { computeLiveValidationIssues, validationIssuesForCampusSelection, validationIssuesForBuilding } from "../../lib/liveValidation";
@@ -61,6 +62,7 @@ import { arrangeSelectedOutdoorObjects, selectedOutdoorCount, type OutdoorArrang
 import { alignEntranceAttachment, defaultEntrance, normalizeBuildingEntrances, promotePrimaryEntrance, updateBuildingEntrance, entranceWorldPosition, findEntranceAtPoint, entranceDisplayName } from "../../lib/buildingEntrances";
 import { createDefaultFloor, duplicateFloorForBuilding } from "../../lib/floorPlanNormalization";
 import { navEdgePolylineDistance, orthogonalBendsFor, translateOrthogonalSegment, translateStraightSegment, normalizeBendPoints, edgePolylinePoints, navAlignSnap } from "../../lib/indoorNavigationGraph";
+import { screenSpaceAlignmentThreshold } from "../../lib/roomOverlap";
 import {
   doorNodeForEdge,
   entranceOutdoorLinkStatus,
@@ -87,7 +89,7 @@ import {
   pruneOrphanedExteriorEmergencyStairNodes,
   syncExteriorEmergencyStairGraph,
 } from "../../lib/exteriorEmergencyStairs";
-import { convertPathwaysToNavigation, joinPathwayVerticesExplicitly, pathwayHasLegacyNavigationChain, pathwayHasOwnedNavigation, reconcilePathwayNavigation } from "../../lib/campusPathNavigation";
+import { cleanupDeletedPathwayNavigation, convertPathwaysToNavigation, joinPathwayVerticesExplicitly, pathwayHasLegacyNavigationChain, pathwayHasOwnedNavigation, reconcilePathwayNavigation } from "../../lib/campusPathNavigation";
 import {
   isPathwayGeneratedEdge,
   isPathwayGeneratedNode,
@@ -99,6 +101,9 @@ import { alignCampusGateAnchor, campusGateSize, isCampusGate, syncCampusGateNavi
 import { campusContentBounds, resizeCampusCanvasFromHandle, campusObjectSafeBounds, CAMPUS_OBJECT_SAFE_INSET, type CanvasResizeHandle } from "../../lib/campusCanvas";
 import { collectOutdoorClipboardSelection, isFreeOutdoorWaypoint, type OutdoorClipboardEntry } from "../../lib/outdoorClipboard";
 import { didOutdoorWaypointDragStart, moveOutdoorWaypointLocally, OUTDOOR_WAYPOINT_DRAG_THRESHOLD_PX } from "../../lib/outdoorNavigationEditing";
+import { isDerivedExteriorApproachNode, reconcileExteriorApproachNavigation } from "../../lib/exteriorApproachNavigation";
+import { exteriorZoneCoversEntrance } from "../../lib/exteriorFloorZones";
+import { campusHasUnpublishedChanges, campusHasUnsavedChanges } from "../../lib/campusDraftPersistence";
 
 // A locked physical campus object remains directly selectable, but a small
 // screen-space movement promotes the gesture to a marquee so locked geometry
@@ -584,9 +589,11 @@ interface CampusEditorProps {
    * changes would never enable the outer Save button.
    */
   savedSnapshot?: string;
+  /** Immutable live snapshot used to distinguish saved-unpublished from Live. */
+  publishedSnapshot?: string;
 }
 
-export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPreviewStudent, publishingEnabled = true, onOpenFloor, onAddBuilding, onOpenCanvasSettings, savedSnapshot }: CampusEditorProps) {
+export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPreviewStudent, publishingEnabled = true, onOpenFloor, onAddBuilding, onOpenCanvasSettings, savedSnapshot, publishedSnapshot }: CampusEditorProps) {
   const campusRef = useRef(campus);
   useEffect(() => { campusRef.current = campus; }, [campus]);
   // `save_campus_structure` retires removed Buildings as archived rows. Their
@@ -704,19 +711,28 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     console.warn("[CampusEditor] savedSnapshot prop missing — dirty baseline defaults to the current campus.");
   }
   const savedSnapshotRef = useRef<string>(savedSnapshot ?? JSON.stringify(campus));
-  const prevLastSavedAt = useRef<string | undefined>(campus.updatedAt);
+  const previousSavedSnapshotRef = useRef(savedSnapshot);
 
-  // Sync saved snapshot when lastSavedAt changes (indicating an external save)
   useEffect(() => {
-    if (campus.updatedAt !== prevLastSavedAt.current) {
-      savedSnapshotRef.current = JSON.stringify(campus);
-      prevLastSavedAt.current = campus.updatedAt;
+    // A structure save can change floors/navigation without changing the
+    // campus-row timestamp. Sync from the canonical snapshot itself, otherwise
+    // the Outdoor editor retains an older baseline after a Floor save.
+    if (savedSnapshot && savedSnapshot !== previousSavedSnapshotRef.current) {
+      savedSnapshotRef.current = savedSnapshot;
+      previousSavedSnapshotRef.current = savedSnapshot;
     }
-  }, [campus.updatedAt, campus]);
+  }, [savedSnapshot]);
 
-  const isDirty = JSON.stringify(campus) !== savedSnapshotRef.current;
+  // Prefer a newly supplied page baseline for this render, while retaining a
+  // locally updated ref for parents that do not echo the saved prop back.
+  const effectiveSavedSnapshot = savedSnapshot && savedSnapshot !== previousSavedSnapshotRef.current
+    ? savedSnapshot
+    : savedSnapshotRef.current;
+  const isDirty = campusHasUnsavedChanges(campus, effectiveSavedSnapshot);
   // ── Has draft changes that need publishing (saved but not yet published) ──
-  const hasDraftChanges = campus.publishStatus === "published" && !!campus.updatedAt && !!campus.publishedAt && campus.updatedAt > campus.publishedAt;
+  let savedCampusForLifecycle = campus;
+  try { savedCampusForLifecycle = JSON.parse(effectiveSavedSnapshot) as Campus; } catch { /* fallback below */ }
+  const hasDraftChanges = campusHasUnpublishedChanges(savedCampusForLifecycle, publishedSnapshot);
   // ── Publish confirmation dialog ──
   const [showPublishConfirm, setShowPublishConfirm] = useState(false);
   const outdoorTutorial = useEditorTutorial("outdoor", OUTDOOR_TUTORIAL_STEPS.length);
@@ -1081,24 +1097,12 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     useCanvasControls(cw, ch);
 
   const SNAP_DIST = 12;
+  // Physical-object alignment uses a small screen-space tolerance so guides
+  // feel consistent at different zoom levels. Navigation/pathway helpers keep
+  // their established thresholds and are intentionally not affected.
+  const physicalSnapDistance = screenSpaceAlignmentThreshold(zoom, 6, 4, 16);
   const snap = useCallback((v: number) => (snapGrid ? Math.round(v / 20) * 20 : Math.round(v)), [snapGrid]);
 
-  /** Edge-snap a building position to nearby buildings (visible AABB aware). */
-  const edgeSnapBuilding = useCallback(
-    (b: CampusBuilding, all: CampusBuilding[]): CampusBuilding => {
-      if (!edgeSnap) return b;
-      const refs = all
-        .filter((o) => o.id !== b.id)
-        .map((o) => ({ x: o.x, y: o.y, width: o.width, height: o.height, rotation: o.rotation ?? 0 }));
-      const snapped = snapRectToVisibleBounds(
-        { x: b.x, y: b.y, width: b.width, height: b.height, rotation: b.rotation ?? 0 },
-        refs,
-        SNAP_DIST,
-      );
-      return { ...b, x: snapped.x, y: snapped.y };
-    },
-    [edgeSnap]
-  );
   const dragging = useRef<{
     type: "building" | "marker" | "decorAsset" | "entrance" | "navNode" | "path" | "pathPoint" | "pathPointInsert" | "pathWidth" | "navEdgeBend" | "generatedPathPoint";
     id: string;
@@ -1206,7 +1210,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
   // a manual Door picker step.
   const entranceDoorSignature = useMemo(() => JSON.stringify((campus.buildings ?? []).map((building) => ({
     id: building.id,
-    entrances: (building.entrances ?? []).map((entrance) => ({ id: entrance.id, edge: entrance.edge, offset: entrance.offset, type: entrance.type, name: entrance.name, accessible: entrance.accessible })),
+    entrances: (building.entrances ?? []).map((entrance) => ({ id: entrance.id, edge: entrance.edge, offset: entrance.offset, type: entrance.type, direction: entrance.direction, name: entrance.name, accessible: entrance.accessible })),
     floors: (building.floors ?? []).map((floor) => ({ id: floor.id, canvasW: floor.canvasW, canvasH: floor.canvasH, doors: (floor.doors ?? []).map((door) => ({ id: door.id, buildingEntranceId: door.buildingEntranceId, x: door.x, y: door.y, label: door.label })) })),
   }))), [campus.buildings]);
   const entranceDoorSyncRef = useRef<string | null>(null);
@@ -1303,6 +1307,18 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
   // indoor graph is never dropped or rewritten by outdoor edits.
   const outdoorNodes = useMemo(() => outdoorNavNodes(navNodes), [navNodes]);
   const outdoorEdges = useMemo(() => outdoorNavEdges(navEdges, outdoorNodes), [navEdges, outdoorNodes]);
+  // Floor/Veranda approach anchors remain in the canonical graph for routing,
+  // but are not ordinary Outdoor Map Builder authoring objects. Keep the
+  // physical Entrance overlay visible while hiding helper nodes/edges only at
+  // this presentation boundary.
+  const outdoorDisplayNodes = useMemo(
+    () => outdoorNodes.filter((node) => !node.derivedOwnerType),
+    [outdoorNodes],
+  );
+  const outdoorDisplayEdges = useMemo(() => {
+    const ids = new Set(outdoorDisplayNodes.map((node) => node.id));
+    return outdoorEdges.filter((edge) => ids.has(edge.startNodeId) && ids.has(edge.endNodeId));
+  }, [outdoorDisplayNodes, outdoorEdges]);
   // Reuse one stable node-coordinate lookup for hit testing.  Connect hover
   // runs every animation frame; rebuilding this map per pointer event makes a
   // populated Outdoor canvas needlessly expensive.
@@ -1310,11 +1326,17 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     () => Object.fromEntries(outdoorNodes.map((node) => [node.id, { x: node.x, y: node.y }])),
     [outdoorNodes],
   );
-  // Outdoor route blockers are deliberately conservative: only physical
-  // Building footprints are structural obstacles. Decorative campus assets
-  // remain visible but do not silently become navigation barriers.
+  // Outdoor route blockers use the same canonical obstacle validation as the
+  // Issues panel and route builder.  Keep the Entrance-boundary exception
+  // here because a legitimate connector is allowed to terminate at the
+  // building aperture; everything else must share one blocked-edge truth.
   const outdoorBlockedEdgeIds = useMemo(() => {
     const blocked = new Set<string>();
+    const canonicalBlocked = new Set(
+      validationIssues
+        .filter((issue) => issue.type === "nav_edge_blocked_by_obstacle" && issue.edgeId)
+        .map((issue) => issue.edgeId as string),
+    );
     for (const e of outdoorEdges) {
       // The canonical Entrance connector is the one legitimate path through a
       // Building boundary. Its own geometry/bridge validation remains
@@ -1326,23 +1348,19 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
       if (e.type === "entrance_transition"
         || (!!a.entranceId && !a.floorId)
         || (!!b.entranceId && !b.floorId)) continue;
-      const pts = [
-        { x: a.x, y: a.y },
-        ...(isPathwayGeneratedEdge(e) ? [] : (e.bendPoints ?? []).map((p) => ({ x: p.x, y: p.y }))),
-        { x: b.x, y: b.y },
-      ];
-      if (polylineCrossesBuilding(pts, buildings)) blocked.add(e.id);
+      if (canonicalBlocked.has(e.id)) blocked.add(e.id);
     }
     return blocked;
-  }, [outdoorEdges, outdoorNodes, buildings]);
+  }, [outdoorEdges, outdoorNodes, validationIssues]);
 
   // Every pathway mutation passes through the same provenance-aware
   // reconciliation boundary. This keeps generated navigation aligned even
   // when the overlay is hidden, while manual/linked navigation remains intact.
   const upd = (c: Partial<Campus>) => {
-    const next = reconcilePathwayNavigation({ ...campus, ...c }, genId);
+    const requested = cleanupDeletedPathwayNavigation(campus, { ...campus, ...c });
+    const next = reconcileExteriorApproachNavigation(reconcilePathwayNavigation(requested, genId));
     pushHistory();
-    onUpdate(next);
+    onUpdate(reconcileExteriorApproachNavigation(next));
   };
   // B5 Phase 1.8: any building mutation re-syncs entrance-linked nav nodes so
   // they always match the resolved world position of their linked B3 entrance
@@ -2169,8 +2187,9 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
               const nextEdges = navEdges.filter((e) => e.id !== targetEdge.id);
               nextEdges.push(...splitResult.newEdges);
               const next = { ...campus, navNodes: [...navNodes, insertNode], navEdges: nextEdges };
-              onUpdate(next);
-              pushHistory(next);
+              const reconciled = reconcileExteriorApproachNavigation(next);
+              onUpdate(reconciled);
+              pushHistory(reconciled);
               setSelected({ type: "navNode", id: insertNode.id });
               setWaypointEdgeSnap(null);
               setTool("select");
@@ -2694,17 +2713,18 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
       ...withoutPreviousEntranceConnection,
       navEdges: [...(withoutPreviousEntranceConnection.navEdges ?? []), edge],
     };
-    const committedEdge = next.navEdges.find((candidate) => candidate.id === edge.id);
-    const committedStart = next.navNodes?.some((node) => node.id === edge.startNodeId);
-    const committedEnd = next.navNodes?.some((node) => node.id === edge.endNodeId);
+    const reconciled = reconcileExteriorApproachNavigation(next);
+    const committedEdge = reconciled.navEdges?.find((candidate) => candidate.id === edge.id);
+    const committedStart = reconciled.navNodes?.some((node) => node.id === edge.startNodeId);
+    const committedEnd = reconciled.navNodes?.some((node) => node.id === edge.endNodeId);
     if (!committedEdge || !committedStart || !committedEnd) {
       toast.warning("Connection could not be saved", "The Stair Exit and destination point are no longer available.");
       clearConnect();
       return false;
     }
-    campusRef.current = next;
-    onUpdate(next);
-    pushHistory(next);
+    campusRef.current = reconciled;
+    onUpdate(reconciled);
+    pushHistory(reconciled);
     setSelected({ type: "navEdge", id: edge.id });
     setPathMemberEditId(null);
     clearConnect();
@@ -2841,8 +2861,9 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     const nn = buildEntranceNode(buildingId, entranceId, x, y);
     if (!nn) return null;
     const next = { ...campus, navNodes: [...navNodes, nn] };
-    onUpdate(next);
-    pushHistory(next);
+    const reconciled = reconcileExteriorApproachNavigation(next);
+    onUpdate(reconciled);
+    pushHistory(reconciled);
     return nn.id;
   }, [buildEntranceNode, campus, navNodes, outdoorNodes, onUpdate]);
 
@@ -2890,20 +2911,21 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
       ...(bends.length > 0 ? { bendPoints: bends, distance: navEdgePolylineDistance(points) } : {}),
     };
     const next = { ...campus, navNodes: nextNodeSet, navEdges: [...navEdges, edge] };
+    const reconciled = reconcileExteriorApproachNavigation(next);
     // Never report success for a candidate that is not present in the exact
     // snapshot about to be published.  This guards the new Entrance-target
     // branch as well as generated Stair/Discharge sources from a stale or
     // failed edge insertion.
-    const committedEdge = next.navEdges.find((candidate) => candidate.id === edge.id);
+    const committedEdge = reconciled.navEdges?.find((candidate) => candidate.id === edge.id);
     const committedEndpoints = committedEdge
-      && next.navNodes.some((node) => node.id === committedEdge.startNodeId)
-      && next.navNodes.some((node) => node.id === committedEdge.endNodeId);
+      && reconciled.navNodes?.some((node) => node.id === committedEdge.startNodeId)
+      && reconciled.navNodes?.some((node) => node.id === committedEdge.endNodeId);
     if (!committedEdge || !committedEndpoints) {
       toast.warning("Connection could not be saved", "The destination endpoint is no longer available.");
       return;
     }
-    onUpdate(next);
-    pushHistory(next);
+    onUpdate(reconciled);
+    pushHistory(reconciled);
     setSelected({ type: "navEdge", id: edge.id });
     cancelConnectPreviewFrame();
     connectGuidanceShownRef.current = false;
@@ -3010,11 +3032,11 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     }
     const nodeSet = new Set(nodeIds.filter((id) => {
       const node = (campus.navNodes ?? []).find((candidate) => candidate.id === id);
-      return !isPathwayGeneratedNode(node) && !node?.pathJunction && !node?.gateId && !(node?.exteriorEmergencyStairId && !node.floorId);
+      return !isPathwayGeneratedNode(node) && !node?.pathJunction && !node?.gateId && !(node?.exteriorEmergencyStairId && !node.floorId) && !isDerivedExteriorApproachNode(node);
     }));
     const edgeSet = new Set(edgeIds.filter((id) => {
       const edge = (campus.navEdges ?? []).find((candidate) => candidate.id === id);
-      return !isPathwayGeneratedEdge(edge) && !isEntranceManagedNavEdge(edge);
+      return !isPathwayGeneratedEdge(edge) && !isEntranceManagedNavEdge(edge) && !edge?.derivedOwnerType;
     }));
     const managedCount = nodeIds.length + edgeIds.length - nodeSet.size - edgeSet.size;
     if (nodeSet.size === 0 && edgeSet.size === 0) {
@@ -3408,7 +3430,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
       const segDrag = navSegDragRef.current;
       const segEdge = navEdges.find((ed) => ed.id === segDrag.edgeId);
       if (!segEdge) { navSegDragRef.current = null; return; }
-      if (isPathwayGeneratedEdge(segEdge)) { navSegDragRef.current = null; return; }
+      if (isPathwayGeneratedEdge(segEdge) || segEdge.derivedOwnerType) { navSegDragRef.current = null; return; }
       let delta = segDrag.isHorizontal
         ? Math.round(pt.y) - segDrag.oy
         : Math.round(pt.x) - segDrag.ox;
@@ -3479,12 +3501,12 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
         return;
       }
       gestureHistoryPushed.current = false;
-      onUpdate({
+      onUpdate(reconcileExteriorApproachNavigation({
         ...campus,
         navEdges: navEdges.map((ed) => ed.id === segDrag.edgeId
           ? { ...ed, bendPoints: nextBends.length > 0 ? nextBends : undefined, distance: outdoorEdgeDistance(ed.startNodeId, ed.endNodeId, nextBends) }
           : ed),
-      });
+      }));
       return;
     }
 
@@ -3567,13 +3589,13 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
           : b
       );
       gestureChangedRef.current = true;
-      onUpdate({
+      onUpdate(reconcileExteriorApproachNavigation({
         ...campus,
         buildings: nextBuildings,
         // B5 Phase 1.8: repositioning an entrance moves its linked nav node
         // in the SAME gesture — the node follows the resolved entrance position.
         navNodes: syncEntranceNodePositions(nextBuildings, navNodes),
-      });
+      }));
       return;
     }
 
@@ -3605,12 +3627,13 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
         // inset is for ordinary physical members only. Mixed groups still use
         // the rigid inset required by their non-Gate members.
         boundsInset: group.some((member) => member.kind !== "path" && member.kind !== "marker") ? CAMPUS_OBJECT_SAFE_INSET : 0,
+        edgeThreshold: physicalSnapDistance,
       });
       // Decor-only groups use the same rigid edge snap as other physical
       // groups; additionally, scanner/decor rows get precise semantic axis
       // alignment by snapping the group center to a nearby physical center.
       // This is a rigid translation and never includes Pathways/navigation.
-      if (!groupUsesBuildingSnap && otherPhysicalObjects.length > 0) {
+      if (edgeSnap && !groupUsesBuildingSnap && otherPhysicalObjects.length > 0) {
         const movedBox = groupBBoxAfterTranslation(group, dx, dy);
         const centerX = movedBox.x + movedBox.width / 2;
         const centerY = movedBox.y + movedBox.height / 2;
@@ -3621,8 +3644,8 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
           const targetY = reference.y + reference.height / 2;
           const xDistance = Math.abs(targetX - centerX);
           const yDistance = Math.abs(targetY - centerY);
-          if (xDistance <= SNAP_DIST && (!bestX || xDistance < bestX.distance)) bestX = { distance: xDistance, target: targetX };
-          if (yDistance <= SNAP_DIST && (!bestY || yDistance < bestY.distance)) bestY = { distance: yDistance, target: targetY };
+          if (xDistance <= physicalSnapDistance && (!bestX || xDistance < bestX.distance)) bestX = { distance: xDistance, target: targetX };
+          if (yDistance <= physicalSnapDistance && (!bestY || yDistance < bestY.distance)) bestY = { distance: yDistance, target: targetY };
         }
         if (bestX) dx += bestX.target - centerX;
         if (bestY) dy += bestY.target - centerY;
@@ -3689,9 +3712,9 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
         ? syncCampusGateNavigation(groupedCampusBase)
         : groupedCampusBase;
       const nextCampus = groupTouchesGraphOwner
-        ? reconcilePathwayNavigation(syncExteriorEmergencyStairGraph({
+        ? reconcileExteriorApproachNavigation(reconcilePathwayNavigation(syncExteriorEmergencyStairGraph({
             ...groupedCampus,
-          }), genId, { preserveAuthoredGeometry: group.some((member) => member.kind === "path") })
+          }), genId, { preserveAuthoredGeometry: group.some((member) => member.kind === "path") }))
         : groupedCampus;
       // Keep the ref in lockstep with rapid pointer moves.  React may batch
       // parent updates until the next frame; the next gesture frame must still
@@ -3700,7 +3723,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
       onUpdate(nextCampus);
       const bbox = groupBBoxAfterTranslation(group, dx, dy);
       setOverlappingBuildings(computeOverlaps(nextBuildings));
-      setGuides(computeGroupAlignmentGuides(bbox.x, bbox.y, bbox.width, bbox.height, otherPhysicalObjects, SNAP_DIST));
+      setGuides(computeGroupAlignmentGuides(bbox.x, bbox.y, bbox.width, bbox.height, otherPhysicalObjects, physicalSnapDistance));
       return;
     }
 
@@ -3722,13 +3745,15 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
       const aligned = snapRectToVisibleBounds(
         { x: visible.x + rawDx, y: visible.y + rawDy, width: visible.width, height: visible.height },
         physicalAlignmentRefs(new Set([movingAsset.id])),
-        SNAP_DIST,
+        physicalSnapDistance,
       );
       setGuides(aligned.guides);
+      const alignmentDx = edgeSnap ? aligned.x - (visible.x + rawDx) : 0;
+      const alignmentDy = edgeSnap ? aligned.y - (visible.y + rawDy) : 0;
       const bounded = clampMemberTranslation(
         { kind: "decorAsset", id: movingAsset.id, x: movingAsset.x, y: movingAsset.y, width: size.width, height: size.height, rotation: movingAsset.rotation ?? 0 },
-        rawDx + (aligned.x - (visible.x + rawDx)),
-        rawDy + (aligned.y - (visible.y + rawDy)),
+        rawDx + alignmentDx,
+        rawDy + alignmentDy,
         cw,
         ch,
         CAMPUS_OBJECT_SAFE_INSET,
@@ -3946,7 +3971,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     if (drag.type === "navEdgeBend") {
       const edge = navEdges.find((ed) => ed.id === drag.id);
       if (!edge || drag.pointIndex === undefined) return;
-      if (isPathwayGeneratedEdge(edge)) return;
+      if (isPathwayGeneratedEdge(edge) || edge.derivedOwnerType) return;
       const bends = [...(edge.bendPoints ?? [])];
       if (!bends[drag.pointIndex]) return;
       // B5 Phase 6.9: Floor Editor parity — NO grid snap on bend drags. Shift
@@ -4002,7 +4027,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
       }
       bends[drag.pointIndex] = { x: nx, y: ny };
       gestureChangedRef.current = true;
-      onUpdate({
+      onUpdate(reconcileExteriorApproachNavigation({
         ...campus,
         navEdges: navEdges.map((ed) => ed.id === edge.id
           ? {
@@ -4011,7 +4036,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
               distance: outdoorEdgeDistance(ed.startNodeId, ed.endNodeId, bends),
             }
           : ed),
-      });
+      }));
       return;
     }
     if (drag.type === "navNode") {
@@ -4023,6 +4048,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
       if (node.entranceId) return;
       if (node.exteriorEmergencyStairId && !node.floorId) return;
       if (node.gateId) return;
+      if (isDerivedExteriorApproachNode(node)) return;
       if (node.generatedFromPathVertices?.length) return;
       // A waypoint pointer-down is only a candidate drag.  Do not align,
       // rebuild, or reconcile any incident connection until the pointer has
@@ -4151,9 +4177,13 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
       const snapResult = snapRectToVisibleBounds(
         { x: targetX, y: targetY, width: b.width, height: b.height, rotation: b.rotation ?? 0 },
         refsForSnap,
-        SNAP_DIST,
+        physicalSnapDistance,
       );
-      const snappedBuilding = edgeSnapBuilding({ ...b, x: snapResult.x, y: snapResult.y }, buildings);
+      // Do not run a second, building-only snap pass here. It could choose a
+      // different reference from the one that produced `snapResult.guides`,
+      // which made (notably bottom-edge) previews disagree with the committed
+      // building position. This is the single resolved transform for the drag.
+      const snappedBuilding = { ...b, x: edgeSnap ? snapResult.x : targetX, y: edgeSnap ? snapResult.y : targetY };
       const boundedBuildingDelta = clampMemberTranslation(
         { kind: "building", id: b.id, x: b.x, y: b.y, width: b.width, height: b.height, rotation: b.rotation ?? 0 },
         snappedBuilding.x - b.x,
@@ -4165,11 +4195,11 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
       const targetB = { ...snappedBuilding, x: b.x + boundedBuildingDelta.dx, y: b.y + boundedBuildingDelta.dy };
       gestureChangedRef.current = true;
       const nextBuildings = buildings.map((bld) => (bld.id === drag.id ? { ...bld, x: targetB.x, y: targetB.y } : bld));
-      onUpdate(syncExteriorEmergencyStairGraph({
+      onUpdate(reconcileExteriorApproachNavigation(syncExteriorEmergencyStairGraph({
         ...campus,
         buildings: nextBuildings,
         navNodes: syncEntranceNodePositions(nextBuildings, navNodes),
-      }));
+      })));
       // Alignment guides — same visible-bounds result that drove the snap.
       const guidesList: { type: "h" | "v"; pos: number }[] = snapResult.guides;
       // Check overlaps during drag
@@ -4648,13 +4678,13 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
           ? { ...bld, rotation: snapped, x: Math.round(bld.x + boundedRotation.dx), y: Math.round(bld.y + boundedRotation.dy) }
           : bld);
         gestureChangedRef.current = true;
-        onUpdate(syncExteriorEmergencyStairGraph({
+        onUpdate(reconcileExteriorApproachNavigation(syncExteriorEmergencyStairGraph({
           ...campus,
           buildings: nextBuildings,
           // B5 Phase 1.8: rotating a building moves its entrances → the linked
           // nav nodes follow in the same gesture.
           navNodes: syncEntranceNodePositions(nextBuildings, navNodes),
-        }));
+        })));
         setRotatingAngle(snapped);
       }
       return;
@@ -4847,27 +4877,32 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
        const aligned = snapRectToVisibleBounds(
          { x: boundedPosition.x, y: boundedPosition.y, width: sized.width, height: sized.height, rotation: sized.rotation ?? 0 },
          physicalAlignmentRefs(new Set([sized.id])),
-         SNAP_DIST,
+         physicalSnapDistance,
        );
        setGuides(aligned.guides);
-       const alignedDelta = clampMemberTranslation(
-         { kind: "building", id: sized.id, x: boundedPosition.x, y: boundedPosition.y, width: sized.width, height: sized.height, rotation: sized.rotation ?? 0 },
-         aligned.x - boundedPosition.x,
-         aligned.y - boundedPosition.y,
-         cw,
-         ch,
-         CAMPUS_OBJECT_SAFE_INSET,
-       );
+       // Guides are informative even when magnetic Edge Snap is disabled;
+       // only apply the candidate translation when the setting explicitly
+       // enables physical alignment snapping.
+       const alignedDelta = edgeSnap
+         ? clampMemberTranslation(
+           { kind: "building", id: sized.id, x: boundedPosition.x, y: boundedPosition.y, width: sized.width, height: sized.height, rotation: sized.rotation ?? 0 },
+           aligned.x - boundedPosition.x,
+           aligned.y - boundedPosition.y,
+           cw,
+           ch,
+           CAMPUS_OBJECT_SAFE_INSET,
+         )
+         : { dx: 0, dy: 0 };
        return { ...sized, x: Math.round(boundedPosition.x + alignedDelta.dx), y: Math.round(boundedPosition.y + alignedDelta.dy) };
     });
     beginGestureHistory();
-    onUpdate(syncExteriorEmergencyStairGraph({
+    onUpdate(reconcileExteriorApproachNavigation(syncExteriorEmergencyStairGraph({
       ...campus,
       buildings: nextBuildings,
       // B5 Phase 1.8: resizing a building moves its entrances → the linked nav
       // nodes follow in the same gesture.
       navNodes: syncEntranceNodePositions(nextBuildings, navNodes),
-    }));
+    })));
   };
 
   const handleSvgUpResize = () => {
@@ -5439,7 +5474,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
   // applies one total delta to these originals every frame — the group tracks
   // the cursor 1:1 and keeps its exact shape.
   const snapshotNavGroup = useCallback((ids: string[]) => {
-    const freeNodes = navNodes.filter((n) => ids.includes(n.id) && !n.entranceId && !n.gateId && !n.generatedFromPathVertices?.length && !(n.exteriorEmergencyStairId && !n.floorId));
+    const freeNodes = navNodes.filter((n) => ids.includes(n.id) && !n.entranceId && !n.gateId && !n.generatedFromPathVertices?.length && !(n.exteriorEmergencyStairId && !n.floorId) && !isDerivedExteriorApproachNode(n));
     navGroupOriginRef.current = freeNodes.length >= 2
       ? new globalThis.Map(freeNodes.map((n) => [n.id, { x: n.x, y: n.y }]))
       : null;
@@ -5681,6 +5716,10 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
           toast.info("Generated Stair Exit is locked", "Move or remove the Building-owned Exterior Emergency Stair instead.");
           return;
         }
+        if (isDerivedExteriorApproachNode(node)) {
+          toast.info("Managed approach anchor is locked", "Edit the owning Veranda, ramp, or steps instead.");
+          return;
+        }
         if (node.generatedFromPathVertices?.length) {
           onRemoveGeneratedPathwayPoint(id);
           return;
@@ -5796,6 +5835,10 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
         toast.info("Generated Stair Exit is locked", "Move the physical Exterior Emergency Stair to reposition its discharge anchor.");
         return;
       }
+      if (type === "navNode" && isDerivedExteriorApproachNode(navNodes.find((n) => n.id === id))) {
+        toast.info("Managed approach anchor is locked", "Move the owning Veranda, ramp, or steps to reposition it.");
+        return;
+      }
       if (type === "navNode" && navNodes.find((n) => n.id === id)?.entranceId) {
         toast.info("Entrance walking points follow their building entrance", "Move the building or its entrance to reposition it.");
         return;
@@ -5830,6 +5873,10 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
       toast.info("Generated Stair Exit is locked", "Move the physical Exterior Emergency Stair to reposition its discharge anchor.");
       return;
     }
+    if (type === "navNode" && isDerivedExteriorApproachNode(navNodes.find((n) => n.id === id))) {
+      toast.info("Managed approach anchor is locked", "Move the owning Veranda, ramp, or steps to reposition it.");
+      return;
+    }
     if (type === "navNode" && navNodes.find((n) => n.id === id)?.entranceId) {
       toast.info("Entrance waypoints follow their building entrance", "Move the building or its entrance to reposition it.");
       return;
@@ -5862,7 +5909,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     if (hasNavNodes) {
       const freeIds = multiSelected.filter((id) => {
         const n = navNodes.find((x) => x.id === id);
-        return Boolean(n && !n.entranceId && !n.generatedFromPathVertices?.length && !(n.exteriorEmergencyStairId && !n.floorId));
+        return Boolean(n && !n.entranceId && !n.generatedFromPathVertices?.length && !(n.exteriorEmergencyStairId && !n.floorId) && !isDerivedExteriorApproachNode(n));
       });
       if (freeIds.length < 2) return;
       const anchor = navNodes.find((n) => n.id === freeIds[0]);
@@ -6079,8 +6126,9 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     // hierarchy interaction or a visibility toggle is not a graph edit.
     const next = { ...campus, buildings: nextBuildings };
     campusRef.current = next;
-    onUpdate(next);
-    pushHistory(next);
+    const reconciled = reconcileExteriorApproachNavigation(next);
+    onUpdate(reconciled);
+    pushHistory(reconciled);
   };
 
   const onAddExteriorEmergencyStair = (buildingId: string) => {
@@ -6194,8 +6242,9 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
       buildings: currentBuildings.map((b) => b.id === buildingId ? { ...b, entrances: [...(b.entrances ?? []), entrance] } : b),
     }, genId);
     campusRef.current = next;
-    onUpdate(next);
-    pushHistory(next);
+    const reconciled = reconcileExteriorApproachNavigation(next);
+    onUpdate(reconciled);
+    pushHistory(reconciled);
     setSelected({ type: "entrance", id: entrance.id, buildingId });
     toast.success("Entrance added", "Drag it along the building perimeter to reposition it.");
   };
@@ -6221,6 +6270,30 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     const currentBuildings = currentCampus.buildings;
     const parent = currentBuildings.find((b) => b.id === buildingId);
     if (!parent || parent.locked) return;
+    const currentEntrance = parent.entrances?.find((entrance) => entrance.id === entranceId);
+    const candidateEntrance = currentEntrance ? { ...currentEntrance, ...changes } : undefined;
+    const detachesLinkedVeranda = !!candidateEntrance && parent.floors.some((floor) =>
+      (floor.exteriorZones ?? []).some((zone) => {
+        const linkedIds = new Set([
+          ...(zone.linkedEntranceIds ?? []),
+          ...(zone.linkedEntranceId ? [zone.linkedEntranceId] : []),
+          ...(floor.entranceSteps ?? [])
+            .filter((feature) => feature.parentZoneId === zone.id)
+            .map((feature) => feature.linkedEntranceId)
+            .filter((id): id is string => Boolean(id)),
+          ...(floor.entranceRamps ?? [])
+            .filter((feature) => feature.parentZoneId === zone.id)
+            .map((feature) => feature.linkedEntranceId)
+            .filter((id): id is string => Boolean(id)),
+        ]);
+        return linkedIds.has(entranceId)
+          && !exteriorZoneCoversEntrance(zone, candidateEntrance, floor.canvasW ?? 600, floor.canvasH ?? 450);
+      }),
+    );
+    if (detachesLinkedVeranda) {
+      toast.warning("Entrance must remain under Veranda", "Move or resize the Veranda first, or unlink this Entrance.");
+      return;
+    }
     let changed = false;
     const nextBuildings = currentBuildings.map((b) => {
       if (b.id !== buildingId) return b;
@@ -6236,7 +6309,10 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
       buildings: nextBuildings,
       navNodes: syncEntranceNodePositions(nextBuildings, currentCampus.navNodes ?? []),
     }), genId);
-    const reconciled = reconcileEntranceOutdoorConnections(next);
+    // Entrance movement/type edits must keep authored exterior geometry and
+    // edge identity intact. The canonical endpoint follows the Entrance; the
+    // admin's bends are not silently replaced by a newly generated shortcut.
+    const reconciled = reconcileExteriorApproachNavigation(reconcileEntranceOutdoorConnections(next, { preserveAuthoredGeometry: true }));
     campusRef.current = reconciled;
     onUpdate(reconciled);
     pushHistory(reconciled);
@@ -6258,14 +6334,15 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     const { nodes, edges } = pruneOrphanedEntranceNodes(
       reconciledBuildings.buildings, reconciledBuildings.navNodes ?? currentCampus.navNodes ?? [], reconciledBuildings.navEdges ?? currentCampus.navEdges ?? []
     );
-    const next: Campus = {
+    const next: Campus = reconcileExteriorApproachNavigation({
       ...reconciledBuildings,
       navNodes: nodes,
       navEdges: edges,
-    };
+    });
     campusRef.current = next;
-    onUpdate(next);
-    pushHistory(next);
+    const reconciled = reconcileExteriorApproachNavigation(next);
+    onUpdate(reconciled);
+    pushHistory(reconciled);
     setSelected({ type: "building", id: buildingId });
   // `pushHistory` is declared later in this component.  It is resolved when
   // the confirmed action runs, so do not evaluate the still-uninitialised
@@ -6313,7 +6390,8 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
 
   const onDeletePath = (id: string) => {
     const next: Campus = { ...campus, paths: paths.filter((p) => p.id !== id) };
-    const reconciled = reconcilePathwayNavigation(next, genId, { preserveAuthoredGeometry: true });
+    const cleaned = cleanupDeletedPathwayNavigation(campus, next);
+    const reconciled = reconcilePathwayNavigation(cleaned, genId, { preserveAuthoredGeometry: true });
     onUpdate(reconciled);
     pushHistory(reconciled);
     setSelected(null);
@@ -6346,9 +6424,10 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
       navNodes: stairPruned.nodes,
       navEdges: stairPruned.edges,
     };
-    campusRef.current = next;
-    pushHistory(next);
-    onUpdate(next);
+    const reconciled = reconcileExteriorApproachNavigation(next);
+    campusRef.current = reconciled;
+    pushHistory(reconciled);
+    onUpdate(reconciled);
     setSelected(null);
   };
   const onDeleteMarker = (id: string) => {
@@ -6784,14 +6863,12 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
       ...withoutPreviousEntranceConnection,
       navEdges: [...(withoutPreviousEntranceConnection.navEdges ?? []), edge],
     };
-    // `reconciled` is already the final physical-Pathway reconciliation.  Add
+    // `reconciled` is already the final physical-Pathway reconciliation. Add
     // the authored Stair connector only after the canonical junction has been
-    // resolved, then publish that exact snapshot.  Running a second Pathway
-    // reconciliation after adding the connector can re-canonicalize a shared
-    // generated junction while the connector still points at the prior ID;
-    // the resulting dangling edge is filtered from the outdoor render and
-    // readiness graph even though the midpoint mutation succeeded.
-    const committedCampus = next;
+    // resolved, then run the independent exterior-approach reconciliation.
+    // Never run a second Pathway pass here: it could re-canonicalize a shared
+    // generated junction while this connector still points at the prior ID.
+    const committedCampus = reconcileExteriorApproachNavigation(next);
     const committedEdge = committedCampus.navEdges?.find((candidate) =>
       (candidate.startNodeId === startNode.id && candidate.endNodeId === endNode.id)
       || (candidate.startNodeId === endNode.id && candidate.endNodeId === startNode.id),
@@ -6866,7 +6943,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
           && (!sourceBeforeSync?.buildingId || node.buildingId === sourceBeforeSync.buildingId))
         : undefined);
     const liveTargetEdge = graphCampus.navEdges?.find((edge) => edge.id === targetEdge.id) ?? targetEdge;
-    if (!startNode || isPathwayGeneratedEdge(liveTargetEdge)
+    if (!startNode || isPathwayGeneratedEdge(liveTargetEdge) || liveTargetEdge.derivedOwnerType
       || liveTargetEdge.type === "entrance_transition" || liveTargetEdge.type === "floor_transition") {
       clearConnect();
       return false;
@@ -6929,19 +7006,20 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
       navNodes: [...(withoutPreviousEntranceConnection.navNodes ?? []), insertNode],
       navEdges: [...retainedEdges, ...splitEdges, connectorEdge],
     };
-    const committedConnector = next.navEdges.find((edge) => edge.id === connectorEdge.id);
-    const committedInsert = next.navNodes?.some((node) => node.id === insertNode.id);
+    const reconciled = reconcileExteriorApproachNavigation(next);
+    const committedConnector = reconciled.navEdges?.find((edge) => edge.id === connectorEdge.id);
+    const committedInsert = reconciled.navNodes?.some((node) => node.id === insertNode.id);
     const connectorEndpointsLive = committedConnector
-      && next.navNodes?.some((node) => node.id === committedConnector.startNodeId)
-      && next.navNodes?.some((node) => node.id === committedConnector.endNodeId);
+      && reconciled.navNodes?.some((node) => node.id === committedConnector.startNodeId)
+      && reconciled.navNodes?.some((node) => node.id === committedConnector.endNodeId);
     if (!committedConnector || !committedInsert || !connectorEndpointsLive) {
       toast.warning("Connection could not be saved", "The Walking Network junction could not be reconciled.");
       clearConnect();
       return false;
     }
-    campusRef.current = next;
-    onUpdate(next);
-    pushHistory(next);
+    campusRef.current = reconciled;
+    onUpdate(reconciled);
+    pushHistory(reconciled);
     setSelected({ type: "navNode", id: insertNode.id });
     setSelectedPathPoint(null);
     cancelConnectPreviewFrame();
@@ -7138,8 +7216,9 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
       return;
     }
     const next: Campus = { ...campus, navNodes: ensured.nodes };
-    onUpdate(next);
-    pushHistory(next);
+    const reconciled = reconcileExteriorApproachNavigation(next);
+    onUpdate(reconciled);
+    pushHistory(reconciled);
     setSelected({ type: "navNode", id: ensured.node.id });
     setMultiSelected([]);
     toast.success("Walking Point added", "Snapped to the selected pathway point.");
@@ -7205,7 +7284,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     e.stopPropagation();
     const edge = navEdges.find((ed) => ed.id === id);
     const bend = edge?.bendPoints?.[bendIndex];
-    if (!edge || !bend || isPathwayGeneratedEdge(edge)) return;
+    if (!edge || !bend || isPathwayGeneratedEdge(edge) || edge.derivedOwnerType) return;
     gestureHistoryPushed.current = false;
     gestureChangedRef.current = false;
     dragging.current = { type: "navEdgeBend", id, pointIndex: bendIndex, sx: bend.x, sy: bend.y, ox: bend.x, oy: bend.y };
@@ -7225,7 +7304,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     const edge = navEdges.find((ed) => ed.id === id);
     const start = navNodes.find((n) => n.id === edge?.startNodeId);
     const end = navNodes.find((n) => n.id === edge?.endNodeId);
-    if (!edge || !start || !end || isPathwayGeneratedEdge(edge)) return;
+    if (!edge || !start || !end || isPathwayGeneratedEdge(edge) || edge.derivedOwnerType) return;
     const pts = [{ x: start.x, y: start.y }, ...(edge.bendPoints ?? []), { x: end.x, y: end.y }];
     const idx = Math.max(0, Math.min(bendIndex, pts.length - 2));
     const a = pts[idx];
@@ -7278,14 +7357,15 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
         ? { ...ed, bendPoints: allBends.length > 0 ? allBends : undefined, distance: outdoorEdgeDistance(ed.startNodeId, ed.endNodeId, allBends) }
         : ed),
     };
-    onUpdate(next);
-    pushHistory(next);
+    const reconciled = reconcileExteriorApproachNavigation(next);
+    onUpdate(reconciled);
+    pushHistory(reconciled);
     setSelected({ type: "navEdge", id });
   };
 
   const onNavEdgeRemoveBend = (id: string, bendIndex?: number) => {
     const edge = navEdges.find((ed) => ed.id === id);
-    if (!edge || isPathwayGeneratedEdge(edge) || !edge.bendPoints || edge.bendPoints.length === 0) return;
+    if (!edge || isPathwayGeneratedEdge(edge) || edge.derivedOwnerType || !edge.bendPoints || edge.bendPoints.length === 0) return;
     const index = bendIndex ?? edge.bendPoints.length - 1;
     if (index < 0 || index >= edge.bendPoints.length) return;
     // B5 Phase 6.8: normalize the survivor list against the full polyline — the
@@ -7306,8 +7386,9 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
           }
         : ed),
     };
-    onUpdate(next);
-    pushHistory(next);
+    const reconciled = reconcileExteriorApproachNavigation(next);
+    onUpdate(reconciled);
+    pushHistory(reconciled);
     setSelected({ type: "navEdge", id });
   };
 
@@ -7320,7 +7401,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     const edge = navEdges.find((ed) => ed.id === id);
     const a = navNodes.find((n) => n.id === edge?.startNodeId);
     const b = navNodes.find((n) => n.id === edge?.endNodeId);
-    if (!edge || !a || !b || isPathwayGeneratedEdge(edge)) return;
+    if (!edge || !a || !b || isPathwayGeneratedEdge(edge) || edge.derivedOwnerType) return;
     const direct = [{ x: a.x, y: a.y }, { x: b.x, y: b.y }];
     if (polylineCrossesObstacle(direct, buildings, decorAssets)) {
       toast.warning("Can't straighten", "The direct path crosses a building or obstacle — keep a bend.");
@@ -7332,8 +7413,9 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
         ? { ...ed, bendPoints: undefined, distance: Math.round(Math.hypot(b.x - a.x, b.y - a.y)) }
         : ed),
     };
-    onUpdate(next);
-    pushHistory(next);
+    const reconciled = reconcileExteriorApproachNavigation(next);
+    onUpdate(reconciled);
+    pushHistory(reconciled);
     setSelected({ type: "navEdge", id });
   };
 
@@ -7395,8 +7477,9 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     if (clips) return;
     const next = { ...campus, canvasW: proposal.width, canvasH: proposal.height };
     campusRef.current = next;
-    onUpdate(next);
-    pushHistory(next);
+    const committedCampus = reconcileExteriorApproachNavigation(next);
+    onUpdate(committedCampus);
+    pushHistory(committedCampus);
     setPendingCanvasResize(null);
     setCanvasResizePreview(null);
     canvasResizeOriginalRef.current = null;
@@ -8171,13 +8254,16 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
       // (inline editors).
       const el = document.activeElement as HTMLElement | null;
       if (el?.tagName === "INPUT" || el?.tagName === "TEXTAREA" || el?.tagName === "SELECT" || el?.isContentEditable) return;
+      // Normalize letter casing caused by Caps Lock/Shift while preserving
+      // explicit modifier meaning for combinations such as Ctrl+Shift+Z.
+      const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
       // B5 Phase 6.4/6.9: Connect-local undo/redo for temporary bends (before
       // global undo). B5 Phase 6.9 (Floor parity): Ctrl+Z removes the LAST
       // temporary CLICK GROUP (the whole corner+click a single click pinned), or
       // cancels the whole unfinished connection when no bends exist yet — never
       // a stray half-bend, and never global history while Connect is active.
       if ((e.ctrlKey || e.metaKey) && navConnectStart) {
-        if (e.key === "z" && !e.shiftKey) {
+        if (key === "z" && !e.shiftKey) {
           e.preventDefault();
           const group = navConnectBendGroupsRef.current.pop() ?? 0;
           if (group > 0) {
@@ -8195,7 +8281,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
           }
           return;
         }
-        if (e.key === "y" || (e.key === "z" && e.shiftKey)) {
+        if (key === "y" || (key === "z" && e.shiftKey)) {
           e.preventDefault();
           if (connectRedoStackRef.current.length > 0) {
             const restored = connectRedoStackRef.current[connectRedoStackRef.current.length - 1];
@@ -8206,8 +8292,8 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
           return;
         }
       }
-      if ((e.ctrlKey || e.metaKey) && e.key === "z" && !e.shiftKey) { e.preventDefault(); undoEdit(); return; }
-      if ((e.ctrlKey || e.metaKey) && (e.key === "y" || (e.key === "z" && e.shiftKey))) { e.preventDefault(); redoEdit(); return; }
+      if ((e.ctrlKey || e.metaKey) && key === "z" && !e.shiftKey) { e.preventDefault(); undoEdit(); return; }
+      if ((e.ctrlKey || e.metaKey) && (key === "y" || (key === "z" && e.shiftKey))) { e.preventDefault(); redoEdit(); return; }
       if ((e.key === "Enter") && tool === "path" && layer !== "navigation" && drawingPath.length >= 2) {
         e.preventDefault();
         handleDblClick();
@@ -8243,7 +8329,8 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
         const pathIds = paths.filter((p) => multiSelected.includes(p.id)).map((p) => p.id);
         if (pathIds.length > 0 && bIds.length === 0 && mIds.length === 0 && daIds.length === 0) {
           const next: Campus = { ...campus, paths: paths.filter((p) => !pathIds.includes(p.id)) };
-          const reconciled = reconcilePathwayNavigation(next, genId, { preserveAuthoredGeometry: true });
+          const cleaned = cleanupDeletedPathwayNavigation(campus, next);
+          const reconciled = reconcilePathwayNavigation(cleaned, genId, { preserveAuthoredGeometry: true });
           onUpdate(reconciled);
           pushHistory(reconciled);
           setMultiSelected([]);
@@ -8304,6 +8391,10 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
             removePathJunction(selected.id);
             return;
           }
+          if (isDerivedExteriorApproachNode(selectedNode)) {
+            toast.info("Managed approach anchor", "Edit or remove the owning Veranda, ramp, or steps instead.");
+            return;
+          }
           if (selectedNode?.roomId || selectedNode?.doorId || selectedNode?.entranceId || selectedNode?.stairId || selectedNode?.elevatorId || selectedNode?.rampId || selectedNode?.gateId) {
             toast.info("Navigation anchor", "Edit or remove navigation from the owning Room, Door, Entrance, or circulation object.");
             return;
@@ -8319,21 +8410,27 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
           pushHistory(nextCampus);
         }
         else if (selected.type === "navEdge") {
-          if (isPathwayGeneratedEdge(navEdges.find((edge) => edge.id === selected.id))) {
+          const selectedEdge = navEdges.find((edge) => edge.id === selected.id);
+          if (selectedEdge?.derivedOwnerType) {
+            toast.info("Managed approach connection", "Edit or remove the owning Veranda, ramp, or steps instead.");
+            return;
+          }
+          if (isPathwayGeneratedEdge(selectedEdge)) {
             toast.info("Pathway walking path is managed automatically", "Edit or delete the owning physical Pathway instead.");
             return;
           }
           // Single edge delete — never leaves a dangling reference.
           const nextCampus = { ...campus, navEdges: navEdges.filter((e2) => e2.id !== selected.id) };
-          onUpdate(nextCampus);
-          pushHistory(nextCampus);
+          const reconciled = reconcileExteriorApproachNavigation(nextCampus);
+          onUpdate(reconciled);
+          pushHistory(reconciled);
         }
         setSelected(null);
         setSelectedPathPoint(null);
         setPathMemberEditId(null);
       }
       // Ctrl+A: select all buildings
-      if ((e.ctrlKey || e.metaKey) && e.key === "a") {
+      if ((e.ctrlKey || e.metaKey) && key === "a") {
         e.preventDefault();
         const editableIds = buildings.filter((b) => !b.locked).map((b) => b.id);
         setMultiSelected(editableIds);
@@ -8400,7 +8497,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
         // active layer actually exposes (e.g. B does nothing in Navigation mode,
         // and the removed accessibility-layer R/L elevator tool is now inert).
         const canUseTool = (id: SimpleTool) => (LAYER_TOOLS[layer] ?? LAYER_TOOLS.campus).some((t) => t.id === id);
-        if (e.key === "v" || e.key === "V") switchTool("select");
+        if (key === "v") switchTool("select");
         if (e.code === "Space") {
           e.preventDefault();
           // Hold-to-pan: save previous tool, activate pan temporarily
@@ -8409,9 +8506,9 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
             setTool("pan");
           }
         }
-        if (e.key === "m" || e.key === "M") { if (canUseTool("marker")) switchTool("marker"); }
-        if (e.key === "b" || e.key === "B") { if (canUseTool("building")) switchTool("building"); }
-        if (e.key === "p" || e.key === "P") {
+        if (key === "m") { if (canUseTool("marker")) switchTool("marker"); }
+        if (key === "b") { if (canUseTool("building")) switchTool("building"); }
+        if (key === "p") {
           if (layer === "navigation") {
             switchTool("connect");
           } else if (canUseTool("path")) {
@@ -8419,9 +8516,9 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
             if (layer === "campus") setPathSettingsOpen(true);
           }
         }
-        if (e.key === "e" || e.key === "E") { if (canUseTool("erase")) switchTool("erase"); }
-        if (e.key === "x" || e.key === "X") { if (canUseTool("erase")) switchTool("erase"); }
-        if (e.key === "a" || e.key === "A") { if (canUseTool("building")) switchTool("building"); }
+        if (key === "e") { if (canUseTool("erase")) switchTool("erase"); }
+        if (key === "x") { if (canUseTool("erase")) switchTool("erase"); }
+        if (key === "a") { if (canUseTool("building")) switchTool("building"); }
         if (e.key === "0") resetView();
         // Layer switching: 1=Campus, 2=Navigation, 3=Events
         // (Accessibility and Emergency are routing properties of the
@@ -8530,7 +8627,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
               ? clampMemberTranslation({ kind: "building", id: currentBuilding.id, x: currentBuilding.x, y: currentBuilding.y, width: currentBuilding.width, height: currentBuilding.height, rotation: currentBuilding.rotation ?? 0 }, dx, dy, cw, ch, CAMPUS_OBJECT_SAFE_INSET)
               : { dx, dy };
             const nextBuildings = buildings.map((x) => x.id === selected.id ? { ...x, x: x.x + bounded.dx, y: x.y + bounded.dy } : x);
-            onUpdate(syncExteriorEmergencyStairGraph({ ...campus, buildings: nextBuildings, navNodes: syncEntranceNodePositions(nextBuildings, navNodes), navEdges }));
+            onUpdate(reconcileExteriorApproachNavigation(syncExteriorEmergencyStairGraph({ ...campus, buildings: nextBuildings, navNodes: syncEntranceNodePositions(nextBuildings, navNodes), navEdges })));
           } else if (selected.type === "marker" || selected.type === "gate") {
             const currentMarker = markers.find((m) => m.id === selected.id);
             const bounded = currentMarker && !isCampusGate(currentMarker)
@@ -8570,21 +8667,21 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
           }
         }
       }
-      if ((e.ctrlKey || e.metaKey) && e.key === "s") { e.preventDefault(); runSave(); }
-      if ((e.ctrlKey || e.metaKey) && e.key === "g") { e.preventDefault(); setSnapGrid((v) => !v); }
+      if ((e.ctrlKey || e.metaKey) && key === "s") { e.preventDefault(); runSave(); }
+      if ((e.ctrlKey || e.metaKey) && key === "g") { e.preventDefault(); setSnapGrid((v) => !v); }
       // B5 Phase 2.1: copy / paste / duplicate — fresh IDs + relationship remaps,
       // native text behavior preserved by the editable-target guard at the top.
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "c") {
+      if ((e.ctrlKey || e.metaKey) && key === "c") {
         e.preventDefault();
         if (layer === "navigation") copyOutdoorNavSelection(); else copyOutdoorSelection();
         return;
       }
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "v") {
+      if ((e.ctrlKey || e.metaKey) && key === "v") {
         e.preventDefault();
         if (layer === "navigation") pasteOutdoorNavSelection(); else pasteOutdoorSelection();
         return;
       }
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "d") {
+      if ((e.ctrlKey || e.metaKey) && key === "d") {
         e.preventDefault();
         // Navigation visibility is an overlay. Preserve the active physical
         // selection for Duplicate; only a graph selection should use the
@@ -8928,42 +9025,11 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
               )}
               {campus.name}
             </span>
-            <span className={cn("text-[8px] font-bold px-1.5 py-0.5 rounded-md border shrink-0 hidden sm:flex items-center gap-1",
-              campus.publishStatus === "published"
-                ? isDirty
-                  ? "bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800/30 text-amber-700 dark:text-amber-400"
-                  : "bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800/30 text-green-700 dark:text-green-400"
-                : campus.publishedAt
-                  ? "bg-muted border-border text-muted-foreground"
-                  : "bg-slate-50 dark:bg-slate-800/20 border-slate-200 dark:border-slate-700/30 text-slate-500 dark:text-slate-400"
-            )}>
-              <span className={cn("w-1 h-1 rounded-full shrink-0",
-                campus.publishStatus === "published"
-                  ? isDirty ? "bg-amber-500" : "bg-green-500"
-                  : campus.publishedAt ? "bg-muted-foreground" : "bg-slate-400"
-              )} />
-              {campus.publishStatus === "published"
-                ? isDirty ? "Changes" : "Live"
-                : campus.publishedAt ? "Draft" : "New"}
-            </span>
-
-            <ToolbarTooltip tool="events" label="Events" shortcut="" hint="Manage campus events and temporary restrictions.">
-              <button
-                type="button"
-                onClick={() => switchLayer(layer === "events" ? "campus" : "events")}
-                aria-label="Events"
-                aria-pressed={layer === "events"}
-                className={cn(
-                  "flex h-8 shrink-0 items-center gap-1 rounded-md border px-2 text-[10px] font-bold transition-colors duration-200",
-                  layer === "events"
-                    ? "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400"
-                    : "border-border/70 text-muted-foreground hover:bg-muted hover:text-foreground"
-                )}
-              >
-                <Star className="h-3.5 w-3.5" />
-                <span className="hidden sm:inline">Events</span>
-              </button>
-            </ToolbarTooltip>
+            {/* Keep the campus identity and lifecycle badge as one visual
+                group, with the same deliberate breathing room used by the
+                rest of the editor header.  The old 4px gap made `TEST` and
+                `[Changes]` read as a single cramped label. */}
+            <span className="ml-2 inline-flex"><CampusStatusBadge campus={campus} isDirty={isDirty} hasDraftChanges={hasDraftChanges} /></span>
 
             {/* Drawing path indicator */}
             {drawingPath.length > 0 && (
@@ -9571,8 +9637,8 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
           rubberBand={rubberBand}
           drawingPath={drawingPath}
           pathPaintPreview={pathPaintPreview}
-          navNodes={outdoorNodes}
-          navEdges={outdoorEdges}
+          navNodes={outdoorDisplayNodes}
+          navEdges={outdoorDisplayEdges}
           showNavigationOverlay={navigationVisible}
           navConnectStartId={navConnectStart}
           navPreview={navPreview}
@@ -10140,9 +10206,10 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
                 ? { decorAssets: (currentCampus.decorAssets ?? []).filter((d) => !ids.includes(d.id)) }
                 : {}),
             };
-            campusRef.current = next;
-            pushHistory(next);
-            onUpdate(next);
+            const reconciled = reconcileExteriorApproachNavigation(next);
+            campusRef.current = reconciled;
+            pushHistory(reconciled);
+            onUpdate(reconciled);
             setMultiSelected([]);
             setSelected(null);
           }}
@@ -10188,6 +10255,10 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
           onUpdateRoute={onUpdateRoute}
           onUpdateNavNode={(id, changes) => {
             const node = navNodes.find((candidate) => candidate.id === id);
+            if (isDerivedExteriorApproachNode(node)) {
+              toast.info("Managed approach anchor is locked", "Move the owning Veranda, ramp, or steps to reposition this anchor.");
+              return;
+            }
             if ((node?.exteriorEmergencyStairId && !node.floorId || node?.gateId) && (changes.x !== undefined || changes.y !== undefined)) {
               toast.info(node?.gateId ? "Campus Gate anchor is locked" : "Generated Stair Exit is locked", node?.gateId
                 ? "Move the physical Campus Gate to reposition its navigation anchor."
@@ -10203,6 +10274,10 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
           }}
           onDeleteNavNode={(id) => {
             const node = navNodes.find((candidate) => candidate.id === id);
+            if (isDerivedExteriorApproachNode(node)) {
+              toast.info("Managed approach anchor is locked", "Edit or remove the owning Veranda, ramp, or steps instead.");
+              return;
+            }
             if (node?.pathJunction) {
               removePathJunction(id);
               return;
@@ -10231,6 +10306,10 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
           }}
           onUpdateNavEdge={(id, changes) => {
             const edge = (campus.navEdges ?? []).find((candidate) => candidate.id === id);
+            if (edge?.derivedOwnerType) {
+              toast.info("Managed approach connection is locked", "Edit the owning Veranda, ramp, or steps instead.");
+              return;
+            }
             let safeChanges = changes;
             if (isEntranceManagedNavEdge(edge)) {
               // Entrance connectors remain managed topology (their canonical
@@ -10248,10 +10327,10 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
                 : routingChanges;
             }
             pushHistory();
-            onUpdate(reconcilePathwayNavigation({
+            onUpdate(reconcileExteriorApproachNavigation(reconcilePathwayNavigation({
               ...campus,
               navEdges: (campus.navEdges ?? []).map(e => e.id === id ? { ...e, ...safeChanges } : e),
-            }, genId));
+            }, genId)));
           }}
           onBatchUpdatePaths={(ids, changes) => {
             const next: Campus = { ...campus, paths: paths.map((path) => ids.includes(path.id) ? { ...path, ...changes } : path) };
@@ -10261,7 +10340,8 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
           }}
           onBatchDeletePaths={(ids) => {
             const next: Campus = { ...campus, paths: paths.filter((path) => !ids.includes(path.id)) };
-            const reconciled = reconcilePathwayNavigation(next, genId, { preserveAuthoredGeometry: true });
+            const cleaned = cleanupDeletedPathwayNavigation(campus, next);
+            const reconciled = reconcilePathwayNavigation(cleaned, genId, { preserveAuthoredGeometry: true });
             onUpdate(reconciled);
             pushHistory(reconciled);
             setMultiSelected([]);
@@ -10282,17 +10362,26 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
           onRemoveNavEdgeBend={(id) => onNavEdgeRemoveBend(id)}
           onStraightenNavEdge={(id) => onStraightenNavEdge(id)}
           onBatchUpdateNavEdges={(ids, action) => {
+            if (ids.some((id) => navEdges.some((edge) => edge.id === id && edge.derivedOwnerType))) {
+              toast.info("Managed approach connections are locked", "Edit the owning Veranda, ramp, or steps instead.");
+              return;
+            }
             // B5 final fix: bulk-routing buttons are SEMANTIC actions — a
             // positive/negative classification reopens the connections
             // (closed=false) instead of merging one field onto a stale state.
             // ONE history entry for the whole batch.
             const next = { ...campus, navEdges: applyBulkRoutingAction(campus.navEdges ?? [], ids, action) };
-            onUpdate(next);
-            pushHistory(next);
+            const reconciled = reconcileExteriorApproachNavigation(next);
+            onUpdate(reconciled);
+            pushHistory(reconciled);
           }}
           onDeleteNavSelection={(nodeIds, edgeIds) => deleteNavSelection(nodeIds, edgeIds)}
           onDeleteNavEdge={(id) => {
             const edge = navEdges.find((candidate) => candidate.id === id);
+            if (edge?.derivedOwnerType) {
+              toast.info("Managed approach connection is locked", "Edit or remove the owning Veranda, ramp, or steps instead.");
+              return;
+            }
             if (isEntranceManagedNavEdge(edge)) {
               toast.info("Entrance connector is managed automatically", "Use Disconnect in Entrance Properties instead.");
               return;
@@ -10302,7 +10391,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
               return;
             }
             pushHistory();
-            onUpdate({ ...campus, navEdges: (campus.navEdges ?? []).filter(e => e.id !== id) });
+            onUpdate(reconcileExteriorApproachNavigation({ ...campus, navEdges: (campus.navEdges ?? []).filter(e => e.id !== id) }));
             setSelected(null);
           }}
           onUpdateEventOverlay={(id, changes) => {

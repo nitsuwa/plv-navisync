@@ -607,12 +607,14 @@ export function findNavigationRoute(
 
   const nodeMap = new Map<string, typeof navNodes[number]>();
   for (const n of navNodes) nodeMap.set(n.id, n);
-  const transitionKindFor = (fromId: string, toId: string, edgeType?: string): "stair" | "elevator" | undefined => {
+  const transitionKindFor = (fromId: string, toId: string, edgeType?: string): "stair" | "elevator" | "ramp" | undefined => {
     const from = nodeMap.get(fromId);
     const to = nodeMap.get(toId);
     const normalizedType = edgeType?.toLowerCase() ?? "";
     if (normalizedType.includes("elevator")) return "elevator";
     if (normalizedType.includes("stair")) return "stair";
+    if (normalizedType.includes("step")) return "stair";
+    if (normalizedType.includes("ramp")) return "ramp";
     if (from?.elevatorId || to?.elevatorId || from?.type === "elevator" || to?.type === "elevator") return "elevator";
     if (from?.stairId || to?.stairId || from?.type === "stair" || to?.type === "stair") return "stair";
     const sharedId = from?.transitionSharedId && from.transitionSharedId === to?.transitionSharedId
@@ -636,7 +638,7 @@ export function findNavigationRoute(
     authoredDistance: number;
     accessible: boolean;
     emergencySafe: boolean;
-    transitionKind?: "stair" | "elevator";
+    transitionKind?: "stair" | "elevator" | "ramp";
     transitionSharedId?: string;
     crossesFloor: boolean;
     edge?: typeof navEdges[number];
@@ -659,10 +661,20 @@ export function findNavigationRoute(
     const crossesFloor = !!from?.floorId && !!to?.floorId && from.floorId !== to.floorId;
     const transitionKind = isTransition ? transitionKindFor(fromId, toId, edgeType) : undefined;
     const transitionSharedId = transitionKind === "elevator" ? transitionSharedIdFor(fromId, toId) : undefined;
-    const preferencePenalty = preferredTransitionKind
+    // Exterior entrance approaches use the same preference seam as indoor
+    // transitions. A request to prefer an Elevator, however, only applies to
+    // actual cross-floor elevator transitions. There is no exterior Elevator
+    // continuation in this graph, so penalising a valid Ramp/Steps approach
+    // here would make the compatibility direct-Entrance fallback win and
+    // strand the route at the threshold. Stairs preference still intentionally
+    // biases a valid exterior Steps transition over a Ramp.
+    const exteriorAccessTransition = transitionKind === "ramp"
+      || (transitionKind === "stair" && ((edgeType?.toLowerCase() ?? "").includes("entrance") || from?.floorId !== to?.floorId));
+    const appliesPreference = !(preferredTransitionKind === "elevator" && exteriorAccessTransition);
+    const preferencePenalty = appliesPreference && preferredTransitionKind
       && transitionKind
       && transitionKind !== preferredTransitionKind
-      ? 1_000_000
+      ? transitionKind === "ramp" && preferredTransitionKind === "stair" ? 100_000 : 1_000_000
       : 0;
     if (!adj.has(fromId)) adj.set(fromId, []);
     adj.get(fromId)!.push({
@@ -684,7 +696,11 @@ export function findNavigationRoute(
     // control for authored walking paths and floor transitions.
     if (edge.closed === true) continue;
     const safe = edge.emergencySafe !== false; // default to safe if not set
+    const normalizedEdgeType = edge.type?.toLowerCase() ?? "";
     const isTransition = edge.type === "floor_transition" || edge.type === "cross_floor"
+      || normalizedEdgeType.includes("entrance_ramp")
+      || normalizedEdgeType.includes("entrance_steps")
+      || normalizedEdgeType.includes("entrance_step")
       || (nodeMap.get(edge.startNodeId)?.floorId !== undefined
         && nodeMap.get(edge.endNodeId)?.floorId !== undefined
         && nodeMap.get(edge.startNodeId)?.floorId !== nodeMap.get(edge.endNodeId)?.floorId);
@@ -757,7 +773,7 @@ export function findNavigationRoute(
     edge?: typeof navEdges[number];
     reversed: boolean;
     distance: number;
-    transitionKind?: "stair" | "elevator";
+    transitionKind?: "stair" | "elevator" | "ramp";
     crossesFloor: boolean;
   };
 
@@ -821,11 +837,7 @@ export function findNavigationRoute(
         const distM = Math.round(arc.distance * M_PER_UNIT);
         const crossedDerivedArc = arcs.slice(0, i).some((prior) => !prior.edge);
         if (steps.length === 0 && !crossedDerivedArc) steps.push(`Start from ${fromLabel}`);
-        const isAuthoredTransition = Boolean(
-          arc.transitionKind
-          && (arc.crossesFloor || edge?.type === "floor_transition" || edge?.type === "cross_floor"),
-        );
-        if (isAuthoredTransition && arc.transitionKind) {
+        if (arc.crossesFloor && arc.transitionKind) {
           const transitionLabel = arc.transitionKind === "stair" ? "stairs" : "elevator";
           steps.push(`Take the ${transitionLabel} to ${toLabel}`);
         } else if (edge) {

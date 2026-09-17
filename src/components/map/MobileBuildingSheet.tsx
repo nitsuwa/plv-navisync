@@ -13,7 +13,7 @@ interface MobileBuildingSheetProps {
   onFloorPlan: (b: Building) => void;
   onSave: (id: string) => void;
   onReport: (b: Building) => void;
-  onSignInPrompt: (msg: string, returnTo?: string) => void;
+  onSignInPrompt: (msg: string) => void;
   saved: Set<string>;
   studentAuth: StudentAuthState;
   hasFloorPlans: boolean;
@@ -77,7 +77,7 @@ export function MobileBuildingSheet({
       exit={{ y: "100%" }}
       transition={{ type: "spring", stiffness: 400, damping: 30, mass: 0.9 }}
     >
-      <motion.div
+      <div
         className="bg-card/96 backdrop-blur-2xl border-t border-border overflow-hidden flex flex-col"
         style={{ borderRadius, maxHeight: `${SHEET_HEIGHT}vh`, boxShadow: "0 -8px 40px rgba(0,0,0,0.18), 0 -2px 12px rgba(0,0,0,0.12)" }}
       >
@@ -157,10 +157,7 @@ export function MobileBuildingSheet({
             );
           })() : (
             <button
-              onClick={() => onSignInPrompt(
-                "save locations",
-                `/map?buildingId=${encodeURIComponent(selected.id)}`,
-              )}
+              onClick={() => onSignInPrompt("save locations")}
               className="flex items-center gap-1 h-8 px-3 rounded-full bg-muted/60 text-muted-foreground/80 text-[11px] font-semibold border border-dashed border-border/60 shrink-0"
             >
               <Bookmark className="h-3 w-3" />
@@ -178,10 +175,7 @@ export function MobileBuildingSheet({
             </button>
           ) : (
             <button
-              onClick={() => onSignInPrompt(
-                "report issues",
-                `/map?buildingId=${encodeURIComponent(selected.id)}&report=1`,
-              )}
+              onClick={() => onSignInPrompt("report issues")}
               className="flex items-center gap-1 h-8 px-3 rounded-full bg-muted/60 text-muted-foreground/80 text-[11px] font-semibold border border-dashed border-border/60 shrink-0"
             >
               <Flag className="h-3 w-3" />
@@ -228,7 +222,7 @@ export function MobileBuildingSheet({
             )}
           </div>
         </div>
-      </motion.div>
+      </div>
     </motion.div>
   );
 }

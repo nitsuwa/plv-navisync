@@ -28,20 +28,21 @@ interface BuildingInfoPanelProps {
   studentAuth: StudentAuthState;
   onToggleSave: (id: string) => void;
   onReport: (b: Building) => void;
-  onSignInPrompt: (msg: string, returnTo?: string) => void;
+  onSignInPrompt: (msg: string) => void;
   showQR: boolean;
   onToggleQR: () => void;
   hasFloorPlans: boolean;
   floorPlanCount: number;
   facilities: string[];
   accessibility: string[];
+  route: { dist: number; mins: number } | null;
 }
 
 export function BuildingInfoPanel({
   selected, onClose, onDirections, onFloorPlan,
   isFloorMode, floorBuildingId, saved, studentAuth, onToggleSave, onReport,
   onSignInPrompt, showQR, onToggleQR, hasFloorPlans, floorPlanCount,
-  facilities, accessibility,
+  facilities, accessibility, route,
 }: BuildingInfoPanelProps) {
   const toast = useToast();
   useEscToClose(onClose);
@@ -139,10 +140,7 @@ export function BuildingInfoPanel({
           );
         })() : (
           <button
-            onClick={() => onSignInPrompt(
-              "save locations",
-              `/map?buildingId=${encodeURIComponent(selected.id)}`,
-            )}
+            onClick={() => onSignInPrompt("save locations")}
             className="flex items-center justify-center gap-0.5 h-8 px-1 rounded-xl bg-muted/60 text-muted-foreground/80 text-[10px] font-semibold border border-dashed border-border/60"
           >
             <Bookmark className="h-3 w-3 shrink-0" /> Save
@@ -157,10 +155,7 @@ export function BuildingInfoPanel({
           </button>
         ) : (
           <button
-            onClick={() => onSignInPrompt(
-              "report issues",
-              `/map?buildingId=${encodeURIComponent(selected.id)}&report=1`,
-            )}
+            onClick={() => onSignInPrompt("report issues")}
             className="flex items-center justify-center gap-0.5 h-8 px-1 rounded-xl bg-muted/60 text-muted-foreground/80 text-[10px] font-semibold border border-dashed border-border/60"
           >
             <Flag className="h-3 w-3 shrink-0" /> Report

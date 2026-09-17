@@ -16,7 +16,7 @@ export function Footer() {
 
           {/* Brand — wider on mobile */}
           <div className="sm:col-span-2 lg:col-span-1">
-            <Link to={isStudent ? "/home" : "/"} className="flex items-center gap-3 mb-4 group">
+            <Link to="/" className="flex items-center gap-3 mb-4 group">
               <PLVLogo size={36} />
               <div>
                 <p className="font-extrabold text-foreground text-sm leading-none group-hover:text-primary transition-colors">PLV NaviSync</p>
@@ -41,13 +41,13 @@ export function Footer() {
             <h4 className="font-extrabold text-foreground text-xs uppercase tracking-widest mb-5">Platform</h4>
             <ul className="space-y-3">
               {[
-                { label: isStudent ? "Student Home" : "Home", to: isStudent ? "/home" : "/" },
+                { label: "Home",        to: "/" },
                 { label: "Campus Map",  to: "/map" },
+                { label: "Login",       to: "/admin" },
                 ...(isStudent ? [
-                  { label: "My Day", to: "/my-day" },
                   { label: "Send Message", to: "/help#contact-form" },
                   { label: "FAQ",          to: "/help#faq" },
-                ] : [{ label: "Login", to: "/admin" }]),
+                ] : []),
               ].map(({ label, to }) => (
                 <li key={to}>                    <Link
                       to={to}

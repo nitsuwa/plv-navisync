@@ -28,11 +28,13 @@ import { ColorPicker } from "../ui/ColorPicker";
 import { CompactDropdown } from "./CompactDropdown";
 import {
   BUILDING_ENTRANCE_EDGE_LABELS,
-  BUILDING_ENTRANCE_TYPES,
+  BUILDING_ENTRANCE_AUTHORING_TYPES,
   entranceDisplayName,
   entrancePurposeMeta,
   entranceTypeLabel,
   normalizeEntranceType,
+  normalizeEntranceDirection,
+  BUILDING_ENTRANCE_DIRECTION_LABELS,
 } from "../../lib/buildingEntrances";
 import type {
   CampusBuilding, CampusMarker, CampusSelection, EditorLayer,
@@ -1254,6 +1256,20 @@ export function PropertiesPanel({
                     <p className="text-[9px] text-muted-foreground italic">No entrances yet.</p>
                   )}
                 </div>
+                {(() => {
+                  const routineEntrances = (selBldg.entrances ?? []).filter((entrance) => normalizeEntranceType(entrance.type) === "general");
+                  const hasRoutineOutbound = routineEntrances.some((entrance) => normalizeEntranceDirection(entrance) !== "entrance_only");
+                  if (routineEntrances.length === 0 || hasRoutineOutbound) return null;
+                  return (
+                    <p
+                      data-testid="routine-exit-compatibility-warning"
+                      className="mt-2 flex items-start gap-1.5 rounded-lg border border-amber-200/70 bg-amber-50/70 px-2 py-1.5 text-[9px] leading-snug font-semibold text-amber-700 dark:border-amber-800/50 dark:bg-amber-900/10 dark:text-amber-300"
+                    >
+                      <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
+                      <span>No routine exit configured. An entrance will be used for outbound routing.</span>
+                    </p>
+                  );
+                })()}
                 {/* ── Floor Management ── */}
                 <div className="pt-1">
                   <div className="flex items-center justify-between mb-2">
@@ -1554,7 +1570,13 @@ export function PropertiesPanel({
             {(() => {
               const entranceLocked = selEntranceParent.locked === true;
               const entranceType = normalizeEntranceType(selEntrance.type);
-              const canBePrimary = entranceType === "general";
+              const entranceDirection = normalizeEntranceDirection(selEntrance);
+              const isEmergencyExit = entranceType === "emergency_exit";
+              // Primary is a normal inbound preference, so an explicitly
+              // outbound-only General entrance cannot also be marked primary.
+              // Keep legacy values readable, but prevent the inspector from
+              // preserving or re-affirming the invalid combination.
+              const canBePrimary = entranceType === "general" && entranceDirection !== "exit_only";
               return (
           <>
             <div className="flex items-center gap-1.5 mb-2">
@@ -1584,7 +1606,7 @@ export function PropertiesPanel({
                 role="group"
                 className="grid grid-cols-1 gap-1.5"
               >
-                {BUILDING_ENTRANCE_TYPES.map((type) => (
+                {BUILDING_ENTRANCE_AUTHORING_TYPES.map((type) => (
                   <button
                     key={type}
                     type="button"
@@ -1602,6 +1624,20 @@ export function PropertiesPanel({
                   </button>
                 ))}
               </div>
+            </div>
+            <div>
+              <label id="entrance-direction-label" className={labelCls}>Direction</label>
+              <div data-testid="entrance-direction-control" aria-labelledby="entrance-direction-label" role="group" className="grid grid-cols-1 gap-1.5">
+                {(Object.keys(BUILDING_ENTRANCE_DIRECTION_LABELS) as Array<"both" | "entrance_only" | "exit_only">).map((direction) => (
+                  <button key={direction} type="button" disabled={entranceLocked || isEmergencyExit}
+                    onClick={() => onUpdateEntrance(selEntranceParent.id, selEntrance.id, { direction, ...(direction === "exit_only" ? { isPrimary: false } : {}) })}
+                    className={cn("flex items-center justify-between gap-2 min-h-8 px-2.5 py-1.5 rounded-lg border text-left text-[10px] font-bold transition-colors disabled:opacity-50", entranceDirection === direction ? "border-primary/40 bg-primary/8 text-primary" : "border-border/70 bg-muted/10 text-muted-foreground hover:bg-muted/30 hover:text-foreground")}>
+                    <span>{BUILDING_ENTRANCE_DIRECTION_LABELS[direction]}</span>
+                    {entranceDirection === direction && <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />}
+                  </button>
+                ))}
+              </div>
+              {isEmergencyExit && <p className="mt-1.5 rounded-lg border border-destructive/20 bg-destructive/5 px-2.5 py-1.5 text-[9px] leading-snug text-muted-foreground">Emergency exits are outbound only.</p>}
             </div>
             <div className="px-2.5 py-2 rounded-xl border border-border text-[10px] bg-muted/30 text-muted-foreground space-y-1">
               <div className="flex justify-between gap-2">
@@ -1666,7 +1702,7 @@ export function PropertiesPanel({
               </button>
               {entranceSettingsOpen && (
                 <div className="border-t border-border/60 px-2.5 py-2 space-y-2">
-                  <label className={cn("flex items-start gap-2 rounded-lg hover:bg-muted/30 transition-colors cursor-pointer", entranceLocked && "cursor-not-allowed opacity-60")}>
+                  <label className={cn("flex items-start gap-2 rounded-lg hover:bg-muted/30 transition-colors", entranceLocked || !canBePrimary ? "cursor-not-allowed opacity-60" : "cursor-pointer")}>
                     <input aria-label="Primary Entrance" type="checkbox" checked={canBePrimary && (selEntrance.isPrimary ?? false)} disabled={entranceLocked || !canBePrimary} onChange={(e) => onUpdateEntrance(selEntranceParent.id, selEntrance.id, { isPrimary: e.target.checked })} className="accent-primary h-3.5 w-3.5 mt-0.5 rounded shrink-0" />
                     <span><span className="block text-[10px] text-foreground font-medium">Primary Entrance</span><span className="block text-[9px] text-muted-foreground leading-snug">Preferred normal entry for this building</span></span>
                   </label>

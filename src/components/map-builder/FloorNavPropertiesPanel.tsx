@@ -141,6 +141,8 @@ interface FloorNavPropertiesPanelProps {
   straightenBlocked: boolean;
   /** B5 Phase 2.11: the edge currently crosses/overlaps a wall (presentation only). */
   edgeBlocked: boolean;
+  /** More specific copy for the live obstacle warning. */
+  edgeBlockedReason?: "wall" | "furniture" | "wall-and-furniture";
   /** B5 Phase 3: floors this node's cross-floor transitions connect to. */
   transitionFloors: Array<{ id: string; label: string }>;
   /** B5 Phase 3: sharedId match state for this linked circulation node. */
@@ -151,7 +153,7 @@ interface FloorNavPropertiesPanelProps {
 export function FloorNavPropertiesPanel({
   selected, nodes, edges,
   onUpdateNode, onUpdateEdge, onDelete, onClose,
-  onAddBend, onRemoveBend, onStraighten, straightenBlocked, edgeBlocked,
+  onAddBend, onRemoveBend, onStraighten, straightenBlocked, edgeBlocked, edgeBlockedReason,
   transitionFloors, transitionState, elevatorServedFloors = [],
   issueItems = [],
 }: FloorNavPropertiesPanelProps) {
@@ -364,7 +366,11 @@ export function FloorNavPropertiesPanel({
           <div data-testid="nav-edge-blocked-warning" className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-2.5 py-2">
             <AlertTriangle className="h-3.5 w-3.5 text-destructive shrink-0 mt-0.5" />
             <p className="text-[10px] font-bold text-destructive leading-snug">
-              Path blocked by wall. Move a segment, add/move a bend, or reposition a free walking point.
+              {edgeBlockedReason === "furniture"
+                ? "Path blocked by Furniture. Move the Furniture or adjust the walking path."
+                : edgeBlockedReason === "wall-and-furniture"
+                  ? "Path blocked by a wall and Furniture. Adjust the walking path or move the obstacle."
+                  : "Path blocked by wall. Move a segment, add/move a bend, or reposition a free walking point."}
             </p>
           </div>
         )}

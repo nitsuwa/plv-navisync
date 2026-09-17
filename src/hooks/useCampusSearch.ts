@@ -29,67 +29,6 @@ export interface UseCampusSearchResult {
   clearSearch: () => void;
 }
 
-/**
- * Search only the rooms on the floor the student is currently viewing.
- *
- * Campus-level search intentionally uses a small debounce so a large campus
- * index does not re-filter on every keystroke. That debounce is a poor fit for
- * an indoor search field, though: the old result can remain visible while a
- * student is typing and look like the field ignored the new query. The floor
- * is already a small, authored collection, so keep this lookup synchronous and
- * scoped to that floor.
- */
-export function searchFloorRooms(
-  floor: FloorPlan | undefined,
-  building: Pick<CampusBuilding, "id" | "name" | "code"> | undefined,
-  query: string,
-): SearchResult[] {
-  const normalizedQuery = query.trim().toLowerCase();
-  if (!floor || !building || !normalizedQuery) return [];
-
-  return (floor.rooms ?? [])
-    .filter((room) => room.visible !== false)
-    .map((room) => {
-      const roomRecord = room as typeof room & { code?: string };
-      const name = room.name || roomRecord.code || "Room";
-      const roomType = (room.type || "room").toLowerCase();
-      const kind: SearchResult["kind"] =
-        roomType === "office"
-          ? "office"
-          : roomType === "laboratory"
-            ? "laboratory"
-            : roomType === "restroom" || roomType === "canteen" || roomType === "clinic"
-              ? "facility"
-              : "room";
-      const keywords = [
-        name,
-        roomRecord.code || "",
-        room.description || "",
-        roomType,
-        building.name,
-        building.code,
-        floor.label,
-      ].map((value) => value.toLowerCase());
-
-      return {
-        id: room.id,
-        name,
-        code: roomRecord.code,
-        kind,
-        category: roomType,
-        buildingId: building.id,
-        buildingName: building.name,
-        floorId: floor.id,
-        floorNumber: floor.number,
-        floorLabel: floor.label,
-        description: room.description || `${floor.label} - ${building.name}`,
-        accessible: Boolean(room.accessibility),
-        keywords,
-      } satisfies SearchResult;
-    })
-    .filter((room) => room.keywords.some((keyword) => keyword.includes(normalizedQuery)));
-}
-
 export function useCampusSearch(campus: Campus | null, initialCategory: string = "all"): UseCampusSearchResult {
   const [query, setQuery] = useState<string>("");
   const [selectedCategory, setSelectedCategory] = useState<string>(initialCategory);

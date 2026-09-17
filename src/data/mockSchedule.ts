@@ -46,9 +46,9 @@ export const MOCK_SCHEDULE: ClassSchedule = {
       id: "c1",
       courseCode: "CPE 401",
       courseName: "Embedded Systems",
-      buildingId: "b_ceit",  // CEIT
-      roomName: "Lab 501",
-      roomId: "ceit_r2",
+      buildingId: "b4",  // ELB
+      roomName: "Computer Lab 1",
+      roomId: "e102",
       floor: 1,
       professor: "Prof. Reyes",
       dayOfWeek: 1,
@@ -60,10 +60,10 @@ export const MOCK_SCHEDULE: ClassSchedule = {
       id: "c2",
       courseCode: "MATH 301",
       courseName: "Engineering Mathematics",
-      buildingId: "b_coed",  // COED
+      buildingId: "b1",  // MAB
       roomName: "Room 301",
-      roomId: "coed_r2",
-      floor: 1,
+      roomId: "m301",
+      floor: 3,
       professor: "Prof. Santos",
       dayOfWeek: 1,
       startTime: "09:30",
@@ -74,10 +74,10 @@ export const MOCK_SCHEDULE: ClassSchedule = {
       id: "c3",
       courseCode: "CPE 403",
       courseName: "Digital Signal Processing",
-      buildingId: "b_ceit",  // CEIT
-      roomName: "Lab 502",
-      roomId: "ceit_r3",
-      floor: 1,
+      buildingId: "b4",  // ELB
+      roomName: "Electronics Lab",
+      roomId: "e201",
+      floor: 2,
       professor: "Prof. Cruz",
       dayOfWeek: 1,
       startTime: "13:00",
@@ -89,10 +89,10 @@ export const MOCK_SCHEDULE: ClassSchedule = {
       id: "c4",
       courseCode: "CS 201",
       courseName: "Data Structures & Algorithms",
-      buildingId: "b_coed",  // COED
-      roomName: "Room 302",
-      roomId: "coed_r3",
-      floor: 1,
+      buildingId: "b1",  // MAB
+      roomName: "Room 205",
+      roomId: "m207",
+      floor: 2,
       professor: "Prof. Villanueva",
       dayOfWeek: 2,
       startTime: "07:00",
@@ -103,10 +103,10 @@ export const MOCK_SCHEDULE: ClassSchedule = {
       id: "c5",
       courseCode: "ENGL 102",
       courseName: "Technical Writing",
-      buildingId: "b_scb",  // SCB
-      roomName: "Student Lounge",
-      roomId: "scb_r3",
-      floor: 1,
+      buildingId: "b3",  // LRC
+      roomName: "Silent Study Area",
+      roomId: "l305",
+      floor: 3,
       professor: "Prof. Garcia",
       dayOfWeek: 2,
       startTime: "09:30",
@@ -117,9 +117,9 @@ export const MOCK_SCHEDULE: ClassSchedule = {
       id: "c6",
       courseCode: "PE 2",
       courseName: "Physical Education",
-      buildingId: "b_caba",  // CABA
-      roomName: "CABA-101",
-      roomId: "caba_r101",
+      buildingId: "b5",  // GYM
+      roomName: "Main Court",
+      roomId: "g101",
       floor: 1,
       professor: "Coach Dimagiba",
       dayOfWeek: 2,
@@ -132,9 +132,9 @@ export const MOCK_SCHEDULE: ClassSchedule = {
       id: "c7",
       courseCode: "CPE 401",
       courseName: "Embedded Systems (Lab)",
-      buildingId: "b_ceit",  // CEIT
-      roomName: "Lab 501",
-      roomId: "ceit_r2",
+      buildingId: "b4",  // ELB
+      roomName: "Computer Lab 2",
+      roomId: "e103",
       floor: 1,
       professor: "Prof. Reyes",
       dayOfWeek: 3,
@@ -146,10 +146,10 @@ export const MOCK_SCHEDULE: ClassSchedule = {
       id: "c8",
       courseCode: "CPE 403",
       courseName: "Digital Signal Processing",
-      buildingId: "b_ceit",  // CEIT
-      roomName: "Lab 502",
-      roomId: "ceit_r3",
-      floor: 1,
+      buildingId: "b4",  // ELB
+      roomName: "Electronics Lab",
+      roomId: "e201",
+      floor: 2,
       professor: "Prof. Cruz",
       dayOfWeek: 3,
       startTime: "11:00",
@@ -161,10 +161,10 @@ export const MOCK_SCHEDULE: ClassSchedule = {
       id: "c9",
       courseCode: "CS 201",
       courseName: "Data Structures & Algorithms",
-      buildingId: "b_coed",  // COED
-      roomName: "Room 303",
-      roomId: "coed_r4",
-      floor: 1,
+      buildingId: "b1",  // MAB
+      roomName: "Room 205",
+      roomId: "m207",
+      floor: 2,
       professor: "Prof. Villanueva",
       dayOfWeek: 4,
       startTime: "07:00",
@@ -175,10 +175,10 @@ export const MOCK_SCHEDULE: ClassSchedule = {
       id: "c10",
       courseCode: "MATH 301",
       courseName: "Engineering Mathematics",
-      buildingId: "b_coed",  // COED
-      roomName: "Room 401",
-      roomId: "coed_r6",
-      floor: 2,
+      buildingId: "b1",  // MAB
+      roomName: "Room 303",
+      roomId: "m303",
+      floor: 3,
       professor: "Prof. Santos",
       dayOfWeek: 4,
       startTime: "09:30",
@@ -189,10 +189,10 @@ export const MOCK_SCHEDULE: ClassSchedule = {
       id: "c11",
       courseCode: "CPE 405",
       courseName: "Robotics Fundamentals",
-      buildingId: "b_ceit",  // CEIT
-      roomName: "Lab 601",
-      roomId: "ceit_r5",
-      floor: 2,
+      buildingId: "b4",  // ELB
+      roomName: "Research Laboratory",
+      roomId: "e401",
+      floor: 4,
       professor: "Prof. Santos",
       dayOfWeek: 4,
       startTime: "13:00",
@@ -204,10 +204,10 @@ export const MOCK_SCHEDULE: ClassSchedule = {
       id: "c12",
       courseCode: "GEC 101",
       courseName: "Understanding the Self",
-      buildingId: "b_scb",  // SCB
-      roomName: "Org Room 201",
-      roomId: "scb_r6",
-      floor: 2,
+      buildingId: "b6",  // SSC
+      roomName: "Training Room",
+      roomId: "s301",
+      floor: 3,
       professor: "Prof. Morales",
       dayOfWeek: 5,
       startTime: "09:00",
@@ -218,10 +218,10 @@ export const MOCK_SCHEDULE: ClassSchedule = {
       id: "c13",
       courseCode: "CPE 407",
       courseName: "Capstone Project 1",
-      buildingId: "b_caba",  // CABA
-      roomName: "CABA-102",
-      roomId: "caba_r102",
-      floor: 1,
+      buildingId: "b4",  // ELB
+      roomName: "Drawing Room",
+      roomId: "e304",
+      floor: 3,
       professor: "Prof. Reyes",
       dayOfWeek: 5,
       startTime: "13:00",
@@ -328,10 +328,10 @@ export function getTransitionStatus(
   const availableMinutes = nextStart - prevEnd;
 
   // Use pathfinding for accurate transition time
-  const neededMinutes =
+  const { minutes: neededMinutes } =
     prevClass.buildingId === nextClass.buildingId
-      ? Math.abs((nextClass.floor ?? 1) - (prevClass.floor ?? 1)) * 2 + 2
-      : calculateTransition(prevClass.buildingId, nextClass.buildingId, prevClass.floor, nextClass.floor).minutes;
+      ? { minutes: Math.abs((nextClass.floor ?? 1) - (prevClass.floor ?? 1)) * 2 + 2, seconds: 0 }
+      : calculateTransition(prevClass.buildingId, nextClass.buildingId, prevClass.floor, nextClass.floor);
 
   return {
     availableMinutes,

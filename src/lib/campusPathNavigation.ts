@@ -310,6 +310,137 @@ function collapseSharedGeneratedJunctions(
  */
 export interface PathwayReconciliationOptions extends EntranceOutdoorReconciliationOptions {}
 
+/**
+ * Remove only the graph objects that depended on physical Pathways which were
+ * actually deleted.  This is intentionally separate from ordinary Pathway
+ * reconciliation: a preserved Pathway edit may keep an authored connector
+ * aimed at the same generated vertex, while a delete must never leave that
+ * connector pointing at a vanished physical owner.
+ *
+ * Ownership is resolved exclusively from generatedFromPathVertices,
+ * generatedFromPathIds, and the explicit path-junction metadata.  Manual
+ * Walking Points and their authored edges are untouched unless they would
+ * otherwise reference a node that is being removed.
+ */
+export function cleanupDeletedPathwayNavigation(previous: Campus, next: Campus): Campus {
+  const currentPathIds = new Set((next.paths ?? []).map((path) => path.id));
+  const deletedPathIds = new Set(
+    (previous.paths ?? []).map((path) => path.id).filter((pathId) => !currentPathIds.has(pathId)),
+  );
+  if (deletedPathIds.size === 0) return next;
+
+  const sourceNodes = previous.navNodes ?? next.navNodes ?? [];
+  const sourceEdges = previous.navEdges ?? next.navEdges ?? [];
+  const deletedOnlyGeneratedNodeIds = new Set<string>();
+
+  for (const node of sourceNodes) {
+    const refs = node.generatedFromPathVertices ?? [];
+    if (refs.length === 0) continue;
+    const liveRefs = refs.filter((ref) => !deletedPathIds.has(ref.pathId));
+    if (liveRefs.length === 0) deletedOnlyGeneratedNodeIds.add(node.id);
+  }
+
+  // Any explicit path-junction metadata attached to an edge incident to a
+  // deleted generated vertex identifies a connector-owned helper.  It is a
+  // local ownership signal, not a coordinate/proximity guess.
+  const candidateJunctionIds = new Set<string>();
+  for (const edge of sourceEdges) {
+    const touchesDeletedGeneratedNode = deletedOnlyGeneratedNodeIds.has(edge.startNodeId)
+      || deletedOnlyGeneratedNodeIds.has(edge.endNodeId);
+    if (!touchesDeletedGeneratedNode) continue;
+    if (edge.pathJunctionId) candidateJunctionIds.add(edge.pathJunctionId);
+    for (const junctionId of edge.pathJunctionIds ?? []) candidateJunctionIds.add(junctionId);
+    for (const endpointId of [edge.startNodeId, edge.endNodeId]) {
+      const endpoint = sourceNodes.find((node) => node.id === endpointId);
+      if (endpoint?.pathJunction) candidateJunctionIds.add(endpoint.id);
+    }
+  }
+
+  const nextNodes = (next.navNodes ?? sourceNodes)
+    .map((node) => {
+      const refs = node.generatedFromPathVertices ?? [];
+      if (refs.length === 0) return node;
+      const liveRefs = refs.filter((ref) => !deletedPathIds.has(ref.pathId));
+      if (liveRefs.length === refs.length) return node;
+      if (liveRefs.length > 0) return { ...node, generatedFromPathVertices: liveRefs };
+      return null;
+    })
+    .filter((node): node is NavigationNode => Boolean(node));
+
+  const removedNodeIds = new Set(deletedOnlyGeneratedNodeIds);
+  const nextEdges = (next.navEdges ?? sourceEdges)
+    .map((edge) => {
+      const owners = edge.generatedFromPathIds ?? [];
+      if (owners.length === 0) return edge;
+      const liveOwners = owners.filter((pathId) => !deletedPathIds.has(pathId));
+      if (liveOwners.length === 0) {
+        return null;
+      }
+      return liveOwners.length === owners.length
+        ? edge
+        : { ...edge, generatedFromPathIds: liveOwners };
+    })
+    .filter((edge): edge is NavigationEdge => Boolean(edge))
+    .filter((edge) => {
+      const touchesRemovedNode = removedNodeIds.has(edge.startNodeId) || removedNodeIds.has(edge.endNodeId);
+      if (touchesRemovedNode) {
+        return false;
+      }
+      return true;
+    });
+
+  // A Pathway deletion can remove one leg of a connector-owned junction.  A
+  // surviving degree-2/shared junction remains useful; an explicitly marked
+  // helper with zero or one surviving incident edge does not.  Iterate so a
+  // short chain of helpers is cleaned up without touching ordinary authored
+  // Walking Points.
+  let edges = nextEdges;
+  let nodes = nextNodes;
+  let changed = true;
+  while (changed) {
+    changed = false;
+    const degree = new Map<string, number>();
+    for (const edge of edges) {
+      degree.set(edge.startNodeId, (degree.get(edge.startNodeId) ?? 0) + 1);
+      degree.set(edge.endNodeId, (degree.get(edge.endNodeId) ?? 0) + 1);
+    }
+    const orphanJunctionIds = new Set(
+      [...candidateJunctionIds].filter((id) => {
+        const node = nodes.find((candidate) => candidate.id === id);
+        // Older connector records may carry the explicit edge metadata but
+        // lack the node flag.  The metadata is still authoritative ownership
+        // for this local cleanup; ordinary Walking Points are not candidates.
+        return Boolean(node && (node.pathJunction || candidateJunctionIds.has(id)) && (degree.get(id) ?? 0) <= 1);
+      }),
+    );
+    if (orphanJunctionIds.size === 0) break;
+    changed = true;
+    for (const id of orphanJunctionIds) removedNodeIds.add(id);
+    nodes = nodes.filter((node) => !orphanJunctionIds.has(node.id));
+    edges = edges.filter((edge) => !orphanJunctionIds.has(edge.startNodeId) && !orphanJunctionIds.has(edge.endNodeId));
+  }
+
+  // Strip references to helpers that were removed while retaining all
+  // metadata for genuinely shared surviving junctions.
+  edges = edges.map((edge) => {
+    const junctionIds = (edge.pathJunctionIds ?? []).filter((id) => !removedNodeIds.has(id));
+    const clean = { ...edge };
+    if (clean.pathJunctionId && removedNodeIds.has(clean.pathJunctionId)) delete clean.pathJunctionId;
+    if (junctionIds.length > 0) clean.pathJunctionIds = junctionIds;
+    else delete clean.pathJunctionIds;
+    if (clean.pathJunctionId === undefined) delete clean.pathJunctionParent;
+    return clean;
+  });
+
+  const finalReferencedNodeIds = new Set(edges.flatMap((edge) => [edge.startNodeId, edge.endNodeId]));
+  nodes = nodes.filter((node) => !removedNodeIds.has(node.id) || finalReferencedNodeIds.has(node.id));
+  return {
+    ...next,
+    navNodes: nodes,
+    navEdges: edges,
+  };
+}
+
 export function reconcilePathwayNavigation(
   campus: Campus,
   makeId: PathwayIdFactory,

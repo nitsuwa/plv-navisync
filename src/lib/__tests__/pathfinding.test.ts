@@ -406,6 +406,54 @@ describe("findNavigationRoute across floors", () => {
       .toEqual(["start", "elevator-f1", "elevator-f2", "target"]);
   });
 
+  it("applies Prefer Stairs to exterior entrance approaches and keeps ramp fallback", () => {
+    const nodes = [
+      { id: "inside", name: "Inside", x: 0, y: 0, floorId: "f1", accessible: true },
+      { id: "steps-inner", name: "Steps inner", x: 10, y: 0, floorId: "f1", type: "transition", accessible: false },
+      { id: "steps-outer", name: "Steps outer", x: 10, y: 0, type: "transition", accessible: false },
+      { id: "ramp-inner", name: "Ramp inner", x: 20, y: 0, floorId: "f1", type: "ramp", accessible: true },
+      { id: "ramp-outer", name: "Ramp outer", x: 20, y: 0, type: "ramp", accessible: true },
+      { id: "outside", name: "Outside", x: 30, y: 0, accessible: true },
+    ];
+    const edges = [
+      { id: "inside-steps", startNodeId: "inside", endNodeId: "steps-inner", distance: 10, bidirectional: true, accessible: true, type: "walkway" },
+      { id: "steps-approach", startNodeId: "steps-inner", endNodeId: "steps-outer", distance: 2, bidirectional: true, accessible: false, type: "entrance_steps" },
+      { id: "steps-outside", startNodeId: "steps-outer", endNodeId: "outside", distance: 10, bidirectional: true, accessible: false, type: "exterior_approach" },
+      { id: "inside-ramp", startNodeId: "inside", endNodeId: "ramp-inner", distance: 1, bidirectional: true, accessible: true, type: "walkway" },
+      { id: "ramp-approach", startNodeId: "ramp-inner", endNodeId: "ramp-outer", distance: 2, bidirectional: true, accessible: true, type: "entrance_ramp" },
+      { id: "ramp-outside", startNodeId: "ramp-outer", endNodeId: "outside", distance: 1, bidirectional: true, accessible: true, type: "exterior_approach" },
+    ];
+
+    expect(findNavigationRoute(nodes, edges, "inside", "outside")?.nodeIds)
+      .toEqual(["inside", "ramp-inner", "ramp-outer", "outside"]);
+    expect(findNavigationRoute(nodes, edges, "inside", "outside", false, false, { transitionPreference: "stairs" })?.nodeIds)
+      .toEqual(["inside", "steps-inner", "steps-outer", "outside"]);
+    expect(findNavigationRoute(nodes, edges.filter((edge) => !edge.id.startsWith("steps-")), "inside", "outside", false, false, { transitionPreference: "stairs" })?.nodeIds)
+      .toEqual(["inside", "ramp-inner", "ramp-outer", "outside"]);
+    expect(findNavigationRoute(nodes, edges.map((edge) => edge.id === "steps-approach" ? { ...edge, closed: true } : edge), "inside", "outside", false, false, { transitionPreference: "stairs" })?.nodeIds)
+      .toEqual(["inside", "ramp-inner", "ramp-outer", "outside"]);
+  });
+
+  it("falls back to the best exterior approach when Prefer Elevator has no exterior elevator", () => {
+    const nodes = [
+      { id: "inside", name: "Inside", x: 0, y: 0, floorId: "f1", accessible: true },
+      { id: "ramp-inner", name: "Ramp inner", x: 20, y: 0, floorId: "f1", type: "ramp", accessible: true },
+      { id: "ramp-outer", name: "Ramp outer", x: 20, y: 0, type: "ramp", accessible: true },
+      { id: "outside", name: "Outside", x: 30, y: 0, accessible: true },
+    ];
+    const edges = [
+      { id: "inside-ramp", startNodeId: "inside", endNodeId: "ramp-inner", distance: 1, bidirectional: true, accessible: true, type: "walkway" },
+      { id: "ramp-approach", startNodeId: "ramp-inner", endNodeId: "ramp-outer", distance: 2, bidirectional: true, accessible: true, type: "entrance_ramp" },
+      { id: "ramp-outside", startNodeId: "ramp-outer", endNodeId: "outside", distance: 1, bidirectional: true, accessible: true, type: "exterior_approach" },
+      // Compatibility direct-Entrance fallback: shorter than the authored
+      // route only after an invalid preference penalty is applied.
+      { id: "direct-fallback", startNodeId: "inside", endNodeId: "outside", distance: 30, bidirectional: true, accessible: true, type: "manual" },
+    ];
+
+    expect(findNavigationRoute(nodes, edges, "inside", "outside", false, false, { transitionPreference: "elevator" })?.nodeIds)
+      .toEqual(["inside", "ramp-inner", "ramp-outer", "outside"]);
+  });
+
   it("routes through a shared elevator transition to reach another floor", () => {
     const nodes = [
       { id: "n1", name: "F1 Elevator", x: 0, y: 0, floorId: "f1", transitionSharedId: "elA" },

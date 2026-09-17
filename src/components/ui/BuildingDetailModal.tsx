@@ -1,6 +1,6 @@
 import { useEffect, useCallback } from "react";
 import {
-  X, Navigation, Bookmark, Layers, Clock, Building2,
+  X, Navigation, Bookmark, Layers, Clock, MapPin, Building2,
   ChevronRight, Accessibility, Share2, Flag,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
@@ -40,6 +40,8 @@ interface BuildingDetailModalProps {
   floorPlanCount?: number;
   /** Rooms list for this building */
   rooms?: string[];
+  /** Distance in meters and walk time in minutes */
+  route?: { dist: number; mins: number } | null;
 }
 
 export function BuildingDetailModal({
@@ -49,6 +51,7 @@ export function BuildingDetailModal({
   onToggleSave,
   floorPlanCount = 0,
   rooms = [],
+  route = null,
 }: BuildingDetailModalProps) {
   const navigate = useNavigate();
 
@@ -79,12 +82,12 @@ export function BuildingDetailModal({
 
   const handleNavigate = () => {
     onClose();
-    navigate(`/map?dest=${encodeURIComponent(building.id)}`);
+    navigate(`/map?dest=${building.id}`);
   };
 
   const handleFloorPlan = () => {
     onClose();
-    navigate(`/map?buildingId=${encodeURIComponent(building.id)}&floor=1`);
+    navigate(`/map?buildingId=${building.id}`);
   };
 
   const handleShare = async () => {
@@ -209,6 +212,18 @@ export function BuildingDetailModal({
                   {building.floor_count} {building.floor_count === 1 ? "floor" : "floors"}
                 </div>
 
+                {/* Distance / walk time */}
+                {route && (
+                  <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-primary/10 border border-primary/20 text-xs text-primary font-semibold">
+                    <MapPin className="h-3.5 w-3.5 shrink-0" />
+                    {route.dist < 1000
+                      ? `${Math.round(route.dist)}m`
+                      : `${(route.dist / 1000).toFixed(1)}km`}
+                    <span className="text-muted-foreground font-normal">·</span>
+                    ~{route.mins} min walk
+                  </div>
+                )}
+
                 {/* Category */}
                 <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-muted border border-border text-xs text-muted-foreground capitalize">
                   {building.category}
@@ -320,7 +335,7 @@ export function BuildingDetailModal({
                 <button
                   onClick={() => {
                     onClose();
-                    navigate(`/map?buildingId=${encodeURIComponent(building.id)}&report=1`);
+                    navigate(`/student/reports?building=${building.id}`);
                   }}
                   className="h-12 w-12 rounded-2xl bg-muted text-muted-foreground border border-border hover:bg-destructive/10 hover:text-destructive flex items-center justify-center shrink-0 active:scale-[0.97] transition-all"
                   title="Report an issue"

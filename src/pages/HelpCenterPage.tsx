@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import { format } from "date-fns";
-import { Link, useLocation } from "react-router";
+import { useLocation } from "react-router";
 import { motion, AnimatePresence } from "motion/react";
 import {
   Send, ChevronDown, CheckCircle2, Bot, User, Sparkles, HelpCircle, Mail, Phone, MapPin, Clock, ArrowRight,
@@ -96,18 +96,18 @@ function HeroFloatingElements() {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// ── AI knowledge base — keep answers aligned with the published campus ───────
+// ── AI knowledge base (unchanged, works well) ───────────────────────────────
 // ═════════════════════════════════════════════════════════════════════════════
 
 const AI_KB: Record<string, string> = {
-  registrar:  "The **Registrar's Office** is in the **Ground Floor of the Student Center Building (SCB)**. Hours: Monday–Friday, 8:00 AM–5:00 PM. Services include enrollment, transcript requests, and authentication.",
-  cashier:    "The **Cashier's Office** is in the **Ground Floor of the Student Center Building (SCB)**, near the main lobby. Accepts tuition and fee payments. Hours: 8:00 AM–4:30 PM, weekdays.",
-  library:    "The published map currently lists the **Student Center Building (SCB)** and its **Student Lounge** as the available study location. Use the map to check the latest published campus listing for library services.",
-  admissions: "The **Admissions Office** is in the **Ground Floor of the Student Center Building (SCB)**. Walk-ins are accepted during regular office hours.",
-  gymnasium:  "Sports activities use the **PLV campus sports venue** shown in the event details. Check the event listing for the current venue before heading out.",
+  registrar:  "The **Registrar's Office** is on the **Ground Floor of the ADM Building (b2)**. Hours: Monday–Friday, 8:00 AM–5:00 PM. Services include enrollment, transcript requests, and authentication.",
+  cashier:    "The **Cashier's Office** is on the **Ground Floor of the ADM Building (b2)**, near the main lobby. Accepts tuition and fee payments. Hours: 8:00 AM–4:30 PM, weekdays.",
+  library:    "The **Learning Resource Center (LRC, b3)** is PLV's main library. Open Monday–Saturday, 7:30 AM–6:00 PM. Features reading rooms, computer access, study booths, and a media section.",
+  admissions: "The **Admissions Office** is on the **Ground Floor of ADM Building (b2)**. Walk-ins are accepted during regular office hours.",
+  gymnasium:  "The **PLV Gymnasium (GYM, b5)** is at the south side of campus. It hosts sports events and is open to enrolled students during non-event days.",
   emergency:  "For emergencies: contact the Security Office at the Main Gate. **Emergency Mode** on the map shows exits, evacuation routes, assembly points, and clinic locations.",
   floorplan:  "**Double-click any building** on the campus map to open its interactive floor plan. Zoom, pan, and click stairways or elevators to navigate between floors.",
-  parking:    "Parking areas and access points are shown on the campus map. Faculty and staff parking requires a valid PLV parking pass.",
+  parking:    "Parking areas are marked on the campus map near the GYM and ADM Building. Faculty and staff parking requires a valid PLV parking pass.",
   wifi:       "PLV provides free Wi-Fi campus-wide. Connect to **PLV-Student** and log in with your student portal credentials.",
   events:     "Campus events appear as **colored star markers** on the interactive map. Click any marker to view details, venue, date, and navigation.",
   route:      "To get directions: select a building, click **Directions** in the info panel, choose your starting point, and an animated route will appear on the map.",
@@ -390,7 +390,7 @@ function AIChatSection({ studentAuth }: { studentAuth: ReturnType<typeof useStud
             <div className="flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border bg-muted text-xs text-muted-foreground">
               <Clock className="h-3.5 w-3.5 shrink-0 text-primary" />
               Daily limit reached.{' '}
-              <Link to="/admin" className="font-bold hover:underline text-primary">Log in for unlimited access.</Link>
+              <a href="/admin" className="font-bold hover:underline text-primary">Log in for unlimited access.</a>
             </div>
           ) : (
             <div className="flex items-end gap-2">
@@ -436,43 +436,43 @@ function AIChatSection({ studentAuth }: { studentAuth: ReturnType<typeof useStud
 const SERVICES = [
   {
     icon: Building2, name: "Registrar", desc: "Enrollment, transcripts, and student records",
-    hours: "Mon–Fri, 8AM–5PM", building: "Student Center Building (SCB) • Ground Floor",
-    mapTo: "/map?buildingId=b_scb", color: "text-blue-500",
+    hours: "Mon–Fri, 8AM–5PM", building: "ADM Building (b2) • Ground Floor",
+    mapTo: "/map?b=adm", color: "text-blue-500",
   },
   {
     icon: GraduationCap, name: "Admissions", desc: "Applications, walk-ins, and inquiries",
-    hours: "Mon–Fri, 8AM–5PM", building: "Student Center Building (SCB) • Ground Floor",
-    mapTo: "/map?buildingId=b_scb", color: "text-indigo-500",
+    hours: "Mon–Fri, 8AM–5PM", building: "ADM Building (b2) • Ground Floor",
+    mapTo: "/map?b=adm", color: "text-indigo-500",
   },
   {
     icon: CreditCard, name: "Cashier", desc: "Tuition and fee payments",
-    hours: "Mon–Fri, 8AM–4:30PM", building: "Student Center Building (SCB) • Near Lobby",
-    mapTo: "/map?buildingId=b_scb", color: "text-emerald-500",
+    hours: "Mon–Fri, 8AM–4:30PM", building: "ADM Building (b2) • Near Lobby",
+    mapTo: "/map?b=adm", color: "text-emerald-500",
   },
   {
     icon: BookOpen, name: "Library (LRC)", desc: "Reading rooms, computers, media section",
-    hours: "Mon–Sat, 7:30AM–6PM", building: "Student Center Building (SCB) • Student Lounge",
-    mapTo: "/map?buildingId=b_scb", color: "text-amber-500",
+    hours: "Mon–Sat, 7:30AM–6PM", building: "LRC Building (b3)",
+    mapTo: "/map?b=lrc", color: "text-amber-500",
   },
   {
     icon: HeartHandshake, name: "Guidance Office", desc: "Counseling, career advice, and support",
-    hours: "Mon–Fri, 8AM–5PM", building: "Student Center Building (SCB)",
-    mapTo: "/map?buildingId=b_scb", color: "text-rose-500",
+    hours: "Mon–Fri, 8AM–5PM", building: "ADM Building (b2)",
+    mapTo: "/map?b=adm", color: "text-rose-500",
   },
   {
     icon: Stethoscope, name: "Clinic", desc: "First aid, medical check-ups, emergencies",
-    hours: "Mon–Fri, 7:30AM–5PM", building: "Campus clinic location",
-    mapTo: "/map", color: "text-red-500",
+    hours: "Mon–Fri, 7:30AM–5PM", building: "ADM Building (b2)",
+    mapTo: "/map?b=adm", color: "text-red-500",
   },
   {
     icon: Shield, name: "Security Office", desc: "Campus safety, lost & found, emergency",
-    hours: "24/7", building: "Guard House • Main Gate",
-    mapTo: "/map?buildingId=b_guard", color: "text-slate-500",
+    hours: "24/7", building: "Main Gate",
+    mapTo: "/map", color: "text-slate-500",
   },
   {
     icon: Monitor, name: "IT Support", desc: "Wi-Fi, portal access, and tech assistance",
-    hours: "Mon–Fri, 8AM–5PM", building: "Student Center Building (SCB)",
-    mapTo: "/map?buildingId=b_scb", color: "text-cyan-500",
+    hours: "Mon–Fri, 8AM–5PM", building: "ADM Building (b2)",
+    mapTo: "/map?b=adm", color: "text-cyan-500",
   },
 ];
 
@@ -509,14 +509,14 @@ function CampusServices() {
 
             {/* Actions */}
             <div className="flex items-center gap-2 mt-auto pt-2 border-t border-border/50">
-              <Link
-                to={svc.mapTo}
+              <a
+                href={svc.mapTo}
                 className="inline-flex items-center gap-1 text-[11px] font-bold text-primary hover:text-primary/80 transition-colors group/btn"
               >
                 <Map className="h-3 w-3" />
                 Open in Map
                 <ChevronRight className="h-3 w-3 transition-transform group-hover/btn:translate-x-0.5" />
-              </Link>
+              </a>
               <a
                 href="mailto:info@plv.edu.ph"
                 className="inline-flex items-center gap-1 text-[11px] font-medium text-muted-foreground hover:text-primary transition-colors ml-auto group/contact"
@@ -1148,15 +1148,14 @@ function FinalCTA() {
           >
             <Mail className="h-4 w-4" /> Contact Support
           </motion.a>
-          <motion.div
+          <motion.a
             whileHover={{ scale: 1.03 }}
             whileTap={{ scale: 0.97 }}
+            href="/map"
             className="inline-flex items-center gap-2 h-11 px-6 rounded-xl border border-border text-foreground font-bold text-sm hover:bg-muted transition-all"
           >
-            <Link to="/map" className="inline-flex items-center gap-2">
-              <Map className="h-4 w-4" /> Open Campus Map
-            </Link>
-          </motion.div>
+            <Map className="h-4 w-4" /> Open Campus Map
+          </motion.a>
         </div>
       </Reveal>
     </section>
