@@ -22,7 +22,7 @@ export function RouteErrorState({ fromCode, toCode, mode, onSwitchMode }: RouteE
       ? "Accessibility routing is not available yet. Ask an administrator to author accessible paths, then try again."
     : mode === "emergency"
       ? "No emergency-safe stair route is available for this destination. Follow posted emergency signage and contact campus emergency services if you are in danger. Do not use Standard mode as an emergency route."
-      : `We couldn't find a path from ${fromCode} to ${toCode}.`;
+      : `No published path connects ${fromCode} to ${toCode}. Only paths connected by the map administrator can be used.`;
   return (
     <div
       className="mt-1 p-3 rounded-xl border border-destructive/20 bg-destructive/5 animate-fade-in"

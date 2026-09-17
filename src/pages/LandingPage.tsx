@@ -11,7 +11,8 @@ import { motion, useScroll, useTransform, useSpring } from "motion/react";
 import { PLVLogo } from "../components/ui/PLVLogo";
 import { LavaLampBackground } from "../components/ui/HeroBackground";
 import { useScrollReveal } from "../hooks/useScrollReveal";
-import { eventService, type CampusAnnouncement, type CampusEvent } from "../services/eventService";
+import { eventService, type CampusEvent } from "../services/eventService";
+import type { CampusAnnouncement } from "../services/announcementService";
 
 // ═════════════════════════════════════════════════════════════════════════════
 // ── Floating decorative shapes (Hero) ────────────────────────────────────────
@@ -1436,13 +1437,19 @@ function AnnouncementPreview() {
                     <MapPin className="h-3.5 w-3.5 text-primary shrink-0" />
                     {evt.locationLabel || evt.buildingName}
                   </span>
-                  <Link
-                    to={`/map?buildingId=${evt.buildingId || "b1"}`}
-                    className="inline-flex items-center gap-1 text-primary font-extrabold text-xs hover:underline shrink-0 ml-2"
-                  >
-                    View Map
-                    <ArrowRight className="h-3 w-3" />
-                  </Link>
+                  {evt.buildingId ? (
+                    <Link
+                      to={`/map?buildingId=${encodeURIComponent(evt.buildingId)}`}
+                      className="inline-flex items-center gap-1 text-primary font-extrabold text-xs hover:underline shrink-0 ml-2"
+                    >
+                      View Map
+                      <ArrowRight className="h-3 w-3" />
+                    </Link>
+                  ) : (
+                    <span className="text-[10px] font-semibold text-muted-foreground shrink-0 ml-2">
+                      Campus-wide event
+                    </span>
+                  )}
                 </div>
               </motion.div>
             </Reveal>

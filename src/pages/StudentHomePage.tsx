@@ -7,7 +7,7 @@ import {
 } from "lucide-react";
 import { motion } from "motion/react";
 import { useStudentAuth } from "../hooks/useStudentAuth";
-import { useCampusData } from "../contexts/CampusDataContext";
+import { usePublishedCampus } from "../hooks";
 import { buildingsFromCampus } from "../lib/mapDataAdapter";
 import {
   MOCK_SCHEDULE, getTodayClasses, getNextClass,
@@ -41,16 +41,13 @@ export function StudentHomePage() {
   const [loading, setLoading] = useState(true);
   const [selectedBuilding, setSelectedBuilding] = useState<Building | null>(null);
 
-  const campusData = useCampusData();
+  const { activeCampus, loading: campusLoading } = usePublishedCampus();
   const buildings = useMemo(() => {
-    const activeCampus = campusData.campuses.find(
-      (c) => c.publishStatus !== "draft" && c.status !== "archived"
-    );
     if (activeCampus) {
       return buildingsFromCampus(activeCampus) as Building[];
     }
     return [];
-  }, [campusData.campuses]);
+  }, [activeCampus]);
 
   useEffect(() => {
     const timer = setTimeout(() => setLoading(false), 400);
@@ -81,13 +78,13 @@ export function StudentHomePage() {
     const building = buildings.find((b) => b.id === cls.buildingId);
     if (building) {
       navigate(
-        `/map?dest=${building.id}&floor=${cls.floor}&room=${encodeURIComponent(cls.roomName)}`
+        `/map?dest=${encodeURIComponent(building.id)}&floor=${cls.floor}&room=${encodeURIComponent(cls.roomName)}`
       );
     }
   };
 
   // ── Loading skeleton ──
-  if (loading) {
+  if (loading || campusLoading) {
     return (
       <div className="min-h-screen bg-background">
         <div className="max-w-2xl mx-auto px-5 pt-8 pb-6 space-y-6">
@@ -167,9 +164,9 @@ export function StudentHomePage() {
         >
           {[
             { icon: Compass, label: "Navigate", path: "/map", color: "bg-primary/10 text-primary" },
-            { icon: CalendarDays, label: "Schedule", path: "/home#schedule", color: "bg-blue-500/10 text-blue-600 dark:text-blue-400" },
-            { icon: Building2, label: "Buildings", path: "/map", color: "bg-green-500/10 text-green-600 dark:text-green-400" },
-            { icon: Flag, label: "Report", path: "/map", color: "bg-amber-500/10 text-amber-600 dark:text-amber-400" },
+            { icon: CalendarDays, label: "Schedule", path: "/my-day", color: "bg-blue-500/10 text-blue-600 dark:text-blue-400" },
+            { icon: Building2, label: "Buildings", path: "/buildings", color: "bg-green-500/10 text-green-600 dark:text-green-400" },
+            { icon: Flag, label: "Report", path: "/student/reports", color: "bg-amber-500/10 text-amber-600 dark:text-amber-400" },
           ].map(action => (
             <Link
               key={action.label}

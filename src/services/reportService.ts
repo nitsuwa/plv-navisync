@@ -1,11 +1,16 @@
 import { getSupabase } from "../lib/supabase";
-import type { Tables, TablesInsert } from "../types/database.generated";
+import type { Tables, TablesInsert, TablesUpdate } from "../types/database.generated";
 import { logActivity, listActivityLogs, type ActivityLogRow } from "./activityLogService";
 
 export type ReportRow = Tables<"reports">;
 
 /** Report lifecycle statuses used by the admin workflow. */
 export type ReportStatus = "pending" | "under_review" | "in_progress" | "resolved" | "rejected";
+
+export interface ReportUpdate {
+  text: string;
+  date: string;
+}
 
 export interface IssueReport {
   id: string;
@@ -24,6 +29,7 @@ export interface IssueReport {
   imageUrl?: string | null;
   internalNotes?: string | null;
   resolutionNotes?: string | null;
+  updates?: ReportUpdate[];
   createdAt: string;
   updatedAt: string;
 }
@@ -89,9 +95,25 @@ export async function uploadReportImage(file: Blob): Promise<string | null> {
 
 // Submit a new issue report
 export async function submitReport(input: CreateReportInput): Promise<IssueReport> {
-  const supabase = getSupabase();
-  const { data: userData } = await supabase.auth.getUser();
-  const userId = userData?.user?.id || "guest-student-id";
+  // Keep the local/offline path usable when Supabase is not configured or the
+  // auth session is temporarily unavailable. The old eager getSupabase() call
+  // threw before a report could ever reach the local cache.
+  let supabaseClient: ReturnType<typeof getSupabase> | null = null;
+  try {
+    supabaseClient = getSupabase();
+  } catch {
+    // Local cache fallback below.
+  }
+
+  let userId = "guest-student-id";
+  if (supabaseClient) {
+    try {
+      const { data: userData } = await supabaseClient.auth.getUser();
+      userId = userData?.user?.id || userId;
+    } catch {
+      // Keep the local fallback identity when auth is unavailable.
+    }
+  }
 
   let imageUrl: string | null = null;
   if (input.imageFile) {
@@ -131,7 +153,8 @@ export async function submitReport(input: CreateReportInput): Promise<IssueRepor
       status: "pending",
     };
 
-    const { data, error } = await supabase.from("reports").insert(insertPayload).select("*").single();
+    if (!supabaseClient) throw new Error("Supabase is not connected");
+    const { data, error } = await supabaseClient.from("reports").insert(insertPayload).select("*").single();
 
     if (!error && data) {
       const reportFromDb = toIssueReport(data);
@@ -149,15 +172,28 @@ export async function submitReport(input: CreateReportInput): Promise<IssueRepor
 
 // Get submitted report history for student
 export async function getStudentReports(): Promise<IssueReport[]> {
-  const supabase = getSupabase();
-  const { data: userData } = await supabase.auth.getUser();
-  const userId = userData?.user?.id;
+  let supabaseClient: ReturnType<typeof getSupabase> | null = null;
+  try {
+    supabaseClient = getSupabase();
+  } catch {
+    // Read the local cache when Supabase is not configured.
+  }
+
+  let userId: string | undefined;
+  if (supabaseClient) {
+    try {
+      const { data: userData } = await supabaseClient.auth.getUser();
+      userId = userData?.user?.id;
+    } catch {
+      // Keep using the local cache.
+    }
+  }
 
   let dbReports: IssueReport[] = [];
 
-  if (userId) {
+  if (supabaseClient && userId) {
     try {
-      const { data, error } = await supabase
+      const { data, error } = await supabaseClient
         .from("reports")
         .select("*")
         .eq("reporter_id", userId)
@@ -171,7 +207,11 @@ export async function getStudentReports(): Promise<IssueReport[]> {
     }
   }
 
-  const localReports = getLocalCachedReports();
+  // Local reports are private to the active student. This prevents one
+  // browser's cached submissions from appearing for another signed-in user.
+  const localReports = getLocalCachedReports().filter((report) =>
+    userId ? report.reporterId === userId : report.reporterId === "guest-student-id"
+  );
   
   // Combine DB and local reports (unique by id)
   const map = new Map<string, IssueReport>();
@@ -232,7 +272,7 @@ export async function updateReportStatus(
   resolutionNotes?: string
 ): Promise<void> {
   const supabase = getSupabase();
-  const updates: TablesInsert<"reports"> = {
+  const updates: TablesUpdate<"reports"> = {
     status,
     updated_at: new Date().toISOString(),
   };

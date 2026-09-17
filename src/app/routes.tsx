@@ -2,6 +2,7 @@ import { createBrowserRouter, Link } from "react-router";
 import { lazy, Suspense, type ComponentType } from "react";
 import { PublicLayout }  from "../components/layout/PublicLayout";
 import { AdminLayout }   from "../components/layout/AdminLayout";
+import { StudentRouteGuard } from "../components/layout/StudentRouteGuard";
 import { isDynamicImportError, RouteErrorElement } from "../components/ui/ErrorBoundary";
 
 type LazyPageModule = { default: ComponentType<any> };
@@ -131,6 +132,14 @@ function SuspensePage({ children }: { children: React.ReactNode }) {
   return <Suspense fallback={<PageLoading />}>{children}</Suspense>;
 }
 
+function StudentSuspensePage({ children }: { children: React.ReactNode }) {
+  return (
+    <StudentRouteGuard>
+      <SuspensePage>{children}</SuspensePage>
+    </StudentRouteGuard>
+  );
+}
+
 const routeErrorElement = <RouteErrorElement />;
 
 function NotFound() {
@@ -202,12 +211,12 @@ export const router = createBrowserRouter([
       { path: "announcements", element: <SuspensePage><AnnouncementsPage /></SuspensePage> },
 
       // Student portal
-      { path: "home", element: <SuspensePage><StudentHomePage /></SuspensePage> },
-      { path: "my-day", element: <SuspensePage><StudentMyDayPage /></SuspensePage> },
-      { path: "student", element: <SuspensePage><StudentProfilePage /></SuspensePage> },
-      { path: "student/favorites", element: <SuspensePage><StudentFavoritesPage /></SuspensePage> },
-      { path: "student/reports", element: <SuspensePage><StudentReportsPage /></SuspensePage> },
-      { path: "student/settings", element: <SuspensePage><StudentSettingsPage /></SuspensePage> },
+      { path: "home", element: <StudentSuspensePage><StudentHomePage /></StudentSuspensePage> },
+      { path: "my-day", element: <StudentSuspensePage><StudentMyDayPage /></StudentSuspensePage> },
+      { path: "student", element: <StudentSuspensePage><StudentProfilePage /></StudentSuspensePage> },
+      { path: "student/favorites", element: <StudentSuspensePage><StudentFavoritesPage /></StudentSuspensePage> },
+      { path: "student/reports", element: <StudentSuspensePage><StudentReportsPage /></StudentSuspensePage> },
+      { path: "student/settings", element: <StudentSuspensePage><StudentSettingsPage /></StudentSuspensePage> },
 
       { path: "*", element: <NotFound /> },
     ],

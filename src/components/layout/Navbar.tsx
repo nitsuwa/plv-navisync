@@ -1,6 +1,6 @@
 import { Link, useLocation, useNavigate } from "react-router";
 import {
-  Map, Home, Compass, HelpCircle, LogIn, LogOut, User, Bookmark, Flag, Settings,
+  Map, Home, Compass, CalendarDays, HelpCircle, LogIn, LogOut, User, Bookmark, Flag, Settings,
   ChevronDown, Building2, Bell,
 } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
@@ -20,7 +20,9 @@ const ALL_NAV_LINKS = [
 ];
 
 const STUDENT_NAV_LINKS = [
+  { label: "Home", path: "/home", icon: Home },
   { label: "Map", path: "/map", icon: Compass },
+  { label: "My Day", path: "/my-day", icon: CalendarDays },
 ];
 
 export function Navbar() {
@@ -124,7 +126,7 @@ export function Navbar() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6">
         <div className="flex items-center justify-between gap-2" style={{ height: 56 }}>
           {/* ── Brand ── */}
-          <Link to={isStudent ? "/map" : "/"} className="flex items-center gap-2 shrink-0 group">
+          <Link to={isStudent ? "/home" : "/"} className="flex items-center gap-2 shrink-0 group">
             <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} transition={{ type: "spring", stiffness: 300, damping: 15 }}>
               <PLVLogo size={32} />
             </motion.div>
@@ -257,6 +259,12 @@ export function Navbar() {
                         </div>
                       </div>
                       <div className="py-1.5">
+                        <Link to="/home" className="flex items-center gap-3 px-4 py-2.5 text-sm font-semibold text-foreground hover:bg-muted transition-colors">
+                          <Home className="h-4 w-4 text-muted-foreground shrink-0" /> Home
+                        </Link>
+                        <Link to="/my-day" className="flex items-center gap-3 px-4 py-2.5 text-sm font-semibold text-foreground hover:bg-muted transition-colors">
+                          <CalendarDays className="h-4 w-4 text-muted-foreground shrink-0" /> My Day
+                        </Link>
                         <Link to="/student" className="flex items-center gap-3 px-4 py-2.5 text-sm font-semibold text-foreground hover:bg-muted transition-colors">
                           <User className="h-4 w-4 text-muted-foreground shrink-0" /> My Profile
                         </Link>

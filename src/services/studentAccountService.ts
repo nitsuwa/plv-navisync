@@ -30,16 +30,24 @@ export async function getSavedBuildings(allBuildings?: Building[]): Promise<Buil
   return savedBuildings;
 }
 
-// Toggle bookmark for a building
-export async function toggleSaveBuilding(buildingId: string): Promise<boolean> {
+// Toggle bookmark for a building. Published-campus data uses canonical ids,
+// while older cached records may contain the building code, so treat aliases
+// as the same saved location during both reads and writes.
+export async function toggleSaveBuilding(buildingId: string, aliases: string[] = []): Promise<boolean> {
   const currentIds = getLocalSavedBuildingIds();
-  const exists = currentIds.includes(buildingId);
+  const identityKeys = new Set(
+    [buildingId, ...aliases]
+      .map((value) => value.trim().toLowerCase())
+      .filter(Boolean),
+  );
+  const canonicalKey = buildingId.trim().toLowerCase();
+  const exists = currentIds.some((id) => identityKeys.has(id.trim().toLowerCase()));
   let updatedIds: string[];
 
   if (exists) {
-    updatedIds = currentIds.filter((id) => id !== buildingId);
+    updatedIds = currentIds.filter((id) => !identityKeys.has(id.trim().toLowerCase()));
   } else {
-    updatedIds = [buildingId, ...currentIds.filter((id) => id !== buildingId)];
+    updatedIds = [buildingId, ...currentIds.filter((id) => id.trim().toLowerCase() !== canonicalKey)];
   }
 
   try {

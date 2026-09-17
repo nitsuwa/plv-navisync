@@ -111,6 +111,19 @@ export function linkedObjectRef(node: NavigationNode): { kind: string; id: strin
 }
 
 /**
+ * Room nodes are semantic destination anchors, not walking geometry. The
+ * `roomId` check covers canonical nodes; the type-only fallback protects
+ * older saved maps whose room anchor was created before `roomId` was persisted.
+ * A Door node may retain the historical `room_access` type, so it is excluded
+ * from the fallback when it has a physical `doorId`.
+ */
+export function isRoomNavigationNode(
+  node: Pick<NavigationNode, "type" | "roomId" | "doorId"> | undefined,
+): boolean {
+  return Boolean(node?.roomId || (node?.type === "room_access" && !node?.doorId));
+}
+
+/**
  * Resolve a Stair's physical floor-entry anchor in its local frame, then carry
  * it through the object's rotation. The access point is intentionally neutral:
  * it is centred on the floor-facing edge, independent of Entry Side and

@@ -40,7 +40,7 @@ export function StudentMyDayPage() {
   const [loading, setLoading] = useState(true);
 
   // Derive buildings exclusively from the published campus
-  const { activeCampus } = usePublishedCampus();
+  const { activeCampus, loading: campusLoading } = usePublishedCampus();
   const buildings = useMemo(() => {
     if (activeCampus) {
       return buildingsFromCampus(activeCampus);
@@ -91,7 +91,7 @@ export function StudentMyDayPage() {
   const navigateToClass = (cls: ScheduledClass) => {
     const building = buildings.find(b => b.id === cls.buildingId);
     if (building) {
-      navigate(`/map?dest=${building.id}&floor=${cls.floor}&room=${encodeURIComponent(cls.roomName)}`);
+      navigate(`/map?dest=${encodeURIComponent(building.id)}&floor=${cls.floor}&room=${encodeURIComponent(cls.roomName)}`);
     }
   };
 
@@ -112,7 +112,7 @@ export function StudentMyDayPage() {
   const dateStr = today.toLocaleDateString("en-PH", { weekday: "long", month: "long", day: "numeric" });
 
   // ── Loading skeleton (all hooks must run before early return) ──
-  if (loading) {
+  if (loading || campusLoading) {
     return (
       <div className="min-h-screen bg-background">
         <div className="border-b border-border bg-gradient-to-br from-primary/5 via-background to-background">
