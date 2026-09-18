@@ -214,6 +214,93 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
   );
 }
 
+const LANDING_SECTION_LINKS = [
+  { id: "landing-hero", label: "Hero", description: "Start here" },
+  { id: "landing-feature-tour", label: "How NaviSync Helps You", description: "Explore campus tasks" },
+  { id: "landing-capabilities", label: "What NaviSync Does", description: "See core capabilities" },
+  { id: "landing-final-cta", label: "Final Call to Action", description: "Open the campus map" },
+] as const;
+
+function LandingSectionRail() {
+  const [activeSection, setActiveSection] = useState(LANDING_SECTION_LINKS[0].id);
+
+  useEffect(() => {
+    const sections = LANDING_SECTION_LINKS
+      .map(({ id }) => document.getElementById(id))
+      .filter((section): section is HTMLElement => Boolean(section));
+
+    if (!sections.length || typeof IntersectionObserver === "undefined") return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const visibleSection = entries
+          .filter((entry) => entry.isIntersecting)
+          .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0];
+
+        if (visibleSection?.target instanceof HTMLElement) {
+          setActiveSection(visibleSection.target.id);
+        }
+      },
+      { rootMargin: "-18% 0px -65% 0px", threshold: [0, 0.2, 0.5, 1] },
+    );
+
+    sections.forEach((section) => observer.observe(section));
+    return () => observer.disconnect();
+  }, []);
+
+  const handleSectionClick = (event: React.MouseEvent<HTMLAnchorElement>, id: string) => {
+    const target = document.getElementById(id);
+    if (!target) return;
+
+    event.preventDefault();
+    target.scrollIntoView({
+      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
+      block: "start",
+    });
+    window.history.replaceState(null, "", `#${id}`);
+    setActiveSection(id);
+  };
+
+  return (
+    <nav
+      aria-label="Landing page sections"
+      data-testid="landing-section-rail"
+      className="fixed right-5 top-1/2 z-40 hidden -translate-y-1/2 flex-col gap-2 lg:flex xl:right-8"
+    >
+      {LANDING_SECTION_LINKS.map((section) => {
+        const isActive = activeSection === section.id;
+
+        return (
+          <a
+            key={section.id}
+            href={`#${section.id}`}
+            aria-label={`${section.label} — ${section.description}`}
+            aria-current={isActive ? "location" : undefined}
+            onClick={(event) => handleSectionClick(event, section.id)}
+            className="group relative flex h-10 w-14 items-center justify-end rounded-full px-2 outline-none transition-colors hover:bg-primary/5 focus-visible:bg-primary/5 focus-visible:ring-2 focus-visible:ring-accent/80 focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+          >
+            <span
+              aria-hidden="true"
+              className={`h-px rounded-full transition-all duration-300 ${
+                isActive
+                  ? "w-11 bg-accent shadow-[0_0_12px_rgba(200,150,12,0.85)]"
+                  : "w-7 bg-primary/25 group-hover:w-11 group-hover:bg-primary/70"
+              }`}
+            />
+            <span
+              aria-hidden="true"
+              className="pointer-events-none absolute right-full mr-3 w-52 translate-x-2 rounded-xl border border-border/70 bg-card/95 px-3 py-2 text-right opacity-0 shadow-xl backdrop-blur-md transition-all duration-200 group-hover:translate-x-0 group-hover:opacity-100 group-focus-visible:translate-x-0 group-focus-visible:opacity-100"
+            >
+              <span className="block text-[11px] font-extrabold text-foreground">{section.label}</span>
+              <span className="mt-0.5 block text-[10px] font-medium text-muted-foreground">{section.description}</span>
+            </span>
+          </a>
+        );
+      })}
+    </nav>
+  );
+}
+
 // ═════════════════════════════════════════════════════════════════════════════
 // ── PLATFORM HIGHLIGHTS — replaces the 8-card feature grid ───────────────────
 // ═════════════════════════════════════════════════════════════════════════════
@@ -323,8 +410,8 @@ function RouteDemo() {
         <span className="mt-1 block text-[8px] text-white/50">Start</span>
       </div>
       <div className="absolute right-[10%] top-[34%] w-[22%] rounded-md border border-accent/40 bg-accent/15 px-2 py-2 text-center">
-        <span className="block text-[9px] font-extrabold uppercase tracking-wider text-accent-foreground">Building B</span>
-        <span className="mt-1 block text-[8px] text-white/50">Destination</span>
+        <span className="block text-[9px] font-extrabold uppercase tracking-wider text-amber-100">Building B</span>
+        <span className="mt-1 block text-[8px] text-white/80">Destination</span>
       </div>
 
       <svg className="absolute inset-0 h-full w-full" viewBox="0 0 300 160" style={{ pointerEvents: "none" }}>
@@ -523,6 +610,7 @@ function HowHelpsYou() {
 
   return (
     <section
+      id="landing-feature-tour"
       aria-labelledby="landing-feature-tour-heading"
       data-testid="landing-feature-tour"
       className="py-16 lg:py-24 bg-muted/30 relative overflow-hidden"
@@ -1152,8 +1240,8 @@ function LandingMapPreview() {
           data-callout-placement="above-end-marker"
           className="absolute right-[6%] top-[30%] rounded-xl border border-accent/50 bg-accent/20 px-3 py-2 text-white shadow-lg backdrop-blur-sm sm:top-[5%]"
         >
-          <span className="block text-[10px] font-extrabold uppercase tracking-[.16em] text-accent-foreground">Building B</span>
-          <span className="mt-1 block text-[10px] text-white/60">Destination</span>
+          <span className="block text-[10px] font-extrabold uppercase tracking-[.16em] text-amber-100">Building B</span>
+          <span className="mt-1 block text-[10px] text-white/80">Destination</span>
         </div>
 
         <div className="absolute bottom-4 left-4 flex items-center gap-2 rounded-lg border border-white/10 bg-[#071440]/70 px-3 py-2 text-[10px] font-semibold text-white/70 backdrop-blur-sm">
@@ -1185,6 +1273,7 @@ function HeroSection() {
 
   return (
     <section
+      id="landing-hero"
       data-testid="landing-hero"
       data-scroll-behavior="subtle"
       data-mobile-nav-aware="true"
@@ -1428,7 +1517,7 @@ function CampusCapabilities() {
   ];
 
   return (
-    <section className="relative overflow-hidden bg-background py-16 lg:py-24">
+    <section id="landing-capabilities" className="relative scroll-mt-8 overflow-hidden bg-background py-16 lg:py-24">
       <svg aria-hidden="true" className="pointer-events-none absolute right-0 top-8 hidden h-56 w-[42%] text-primary/10 lg:block" viewBox="0 0 640 220" fill="none">
         <path d="M0 176 C120 46 180 206 310 88 S500 42 640 120" stroke="currentColor" strokeWidth="2" strokeDasharray="7 10" />
         <circle cx="310" cy="88" r="5" fill="currentColor" />
@@ -1490,7 +1579,7 @@ function FinalCTA() {
     <>
       <WavyDivider fill="#071440" />
 
-      <section className="py-20 lg:py-24 relative overflow-hidden" style={{ marginTop: "-1px" }}>
+      <section id="landing-final-cta" className="scroll-mt-8 py-20 lg:py-24 relative overflow-hidden" style={{ marginTop: "-1px" }}>
         {/* Dark gradient */}
         <div className="absolute inset-0" style={{
           background: "linear-gradient(to bottom, #071440 0%, #071440 8%, transparent 35%), radial-gradient(ellipse 90% 70% at 50% 40%, #0d2470 0%, #071440 55%, #020a1c 100%)",
@@ -1572,6 +1661,7 @@ function FinalCTA() {
 export function LandingPage() {
   return (
     <div className="min-h-screen w-full max-w-full overflow-x-hidden">
+      <LandingSectionRail />
       <HeroSection />
       <HowHelpsYou />
       <CampusCapabilities />

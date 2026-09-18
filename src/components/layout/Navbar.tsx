@@ -23,7 +23,6 @@ function getStudentNavLinks(isStudentOrg: boolean) {
   return [
     { label: "Home", path: "/home", icon: Home },
     { label: "Map", path: "/map", icon: Compass },
-    { label: "My Day", path: "/my-day", icon: CalendarDays },
     ...(isStudentOrg ? [{ label: "My Events", path: "/student/events", icon: CalendarDays }] : []),
   ];
 }
@@ -264,9 +263,6 @@ export function Navbar() {
                       <div className="py-1.5">
                         <Link to="/home" className="flex items-center gap-3 px-4 py-2.5 text-sm font-semibold text-foreground hover:bg-muted transition-colors">
                           <Home className="h-4 w-4 text-muted-foreground shrink-0" /> Home
-                        </Link>
-                        <Link to="/my-day" className="flex items-center gap-3 px-4 py-2.5 text-sm font-semibold text-foreground hover:bg-muted transition-colors">
-                          <CalendarDays className="h-4 w-4 text-muted-foreground shrink-0" /> My Day
                         </Link>
                         <Link to="/student" className="flex items-center gap-3 px-4 py-2.5 text-sm font-semibold text-foreground hover:bg-muted transition-colors">
                           <User className="h-4 w-4 text-muted-foreground shrink-0" /> My Profile

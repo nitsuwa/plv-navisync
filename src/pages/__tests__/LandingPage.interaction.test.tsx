@@ -192,14 +192,32 @@ describe("LandingPage interactive tour", () => {
 
     const mapPreview = screen.getByTestId("landing-map-preview");
     expect(within(mapPreview).getByTestId("map-start-callout")).toHaveAttribute("data-callout-placement", "above-start-marker");
-    expect(within(mapPreview).getByTestId("map-end-callout")).toHaveAttribute("data-callout-placement", "above-end-marker");
+    const endCallout = within(mapPreview).getByTestId("map-end-callout");
+    expect(endCallout).toHaveAttribute("data-callout-placement", "above-end-marker");
+    expect(within(endCallout).getByText("Building B")).toHaveClass("text-amber-100");
+    expect(within(endCallout).getByText("Destination")).toHaveClass("text-white/80");
   });
 
   it("turns the existing hero feature CTA into an in-page scroll cue and keeps the final CTA focused", () => {
     renderLandingPage();
 
     expect(screen.getByRole("link", { name: "Explore Features" })).toHaveAttribute("href", "#landing-feature-tour");
+    expect(screen.getByTestId("landing-feature-tour")).toHaveAttribute("id", "landing-feature-tour");
     expect(screen.getByRole("link", { name: "Open Interactive Map" })).toBeInTheDocument();
     expect(screen.queryByText("Campus information")).not.toBeInTheDocument();
+  });
+
+  it("renders shortcut links for the visible landing-page sections", () => {
+    renderLandingPage();
+
+    const rail = screen.getByRole("navigation", { name: "Landing page sections" });
+    expect(within(rail).getAllByRole("link")).toHaveLength(4);
+    expect(within(rail).getByRole("link", { name: /Hero — Start here/i })).toHaveAttribute("href", "#landing-hero");
+    expect(within(rail).getByRole("link", { name: /How NaviSync Helps You — Explore campus tasks/i })).toHaveAttribute("href", "#landing-feature-tour");
+    expect(within(rail).getByRole("link", { name: /What NaviSync Does — See core capabilities/i })).toHaveAttribute("href", "#landing-capabilities");
+    expect(within(rail).getByRole("link", { name: /Final Call to Action — Open the campus map/i })).toHaveAttribute("href", "#landing-final-cta");
+    const heroLink = within(rail).getByRole("link", { name: /Hero — Start here/i });
+    expect(heroLink).toHaveAttribute("aria-current", "location");
+    expect(heroLink).toHaveClass("h-10", "w-14");
   });
 });

@@ -51,7 +51,6 @@ function safeReturnPath(state: unknown): string {
     // an external redirect.
     const parsed = new URL(from, window.location.origin);
     const isStudentPath = parsed.pathname === "/home"
-      || parsed.pathname === "/my-day"
       || parsed.pathname === "/student"
       || parsed.pathname.startsWith("/student/")
       || parsed.pathname === "/map"

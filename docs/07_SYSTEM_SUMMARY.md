@@ -12,7 +12,7 @@ Ang **PLV NaviSync** ay isang web-based **Smart Campus Navigator** para sa PLV M
 
 - **Pampublikong mapa** ng campus — interactive SVG map ng SCB, Canteen, CABA, COED, CEIT, at Guard House
 - **Route planning / navigation** — building-to-building, "You are here" (GPS + tap-on-map), walking-dot animation, step-by-step directions
-- **Student portal** — My Day, Favorites, Reports, Profile, Settings
+- **Student portal** — Favorites, Reports, Profile, Settings
 - **Admin portal** — Dashboard, Buildings, Users, Map Builder, Floor Plans, Routes, Reports, Accessibility, Events, Announcements, Activity Logs, Settings
 - **Supabase backend** — Auth, database, Storage, Edge Functions
 
@@ -59,7 +59,6 @@ src/
 ### Student portal (public layout, protected ng `useStudentAuth`)
 | Route | Page | Description |
 |---|---|---|
-| `/my-day` | `StudentMyDayPage` | Student daily schedule/agenda |
 | `/student` | `StudentProfilePage` | Profile overview |
 | `/student/favorites` | `StudentFavoritesPage` | Saved buildings + recent destinations |
 | `/student/reports` | `StudentReportsPage` | Submit report + report history (status timeline) |
@@ -277,7 +276,6 @@ Interactive SVG map (~2,000 lines) na may:
 
 | Feature | Where | Details |
 |---|---|---|
-| My Day | `/my-day` | Student schedule/agenda |
 | Favorites | `/student/favorites` | Saved buildings + recent destinations (localStorage) |
 | Reports | `/student/reports` | Submit (photo + description), history, status timeline (Submitted → Under Review → Resolved), search/filter |
 | Profile | `/student` | Profile info from Supabase `profiles` |

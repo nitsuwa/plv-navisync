@@ -1,6 +1,7 @@
 import { useState, useMemo } from "react";
+import { Link } from "react-router";
 import {
-  Building2, SlidersHorizontal, ArrowUpDown,
+  Building2, SlidersHorizontal, ArrowUpDown, ArrowLeft,
   Grid3X3, List, X,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
@@ -92,19 +93,28 @@ export function BuildingsPage() {
     <PageTransition>
       <div className="max-w-7xl mx-auto px-5 sm:px-7 py-10 lg:py-14">
         {/* ── Header ── */}
-        <Reveal>
-          <div className="flex items-center gap-3.5 mb-8">
-            <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center shadow-sm ring-1 ring-primary/5">
-              <Building2 className="h-6 w-6 text-primary" />
+        <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <Reveal>
+            <div className="flex items-center gap-3.5">
+              <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center shadow-sm ring-1 ring-primary/5">
+                <Building2 className="h-6 w-6 text-primary" />
+              </div>
+              <div>
+                <h1 className="text-3xl font-extrabold text-foreground tracking-tight">Buildings Directory</h1>
+                <p className="text-muted-foreground text-sm mt-0.5">
+                  Browse all {buildings.length} buildings, facilities, and services on PLV campus.
+                </p>
+              </div>
             </div>
-            <div>
-              <h1 className="text-3xl font-extrabold text-foreground tracking-tight">Buildings Directory</h1>
-              <p className="text-muted-foreground text-sm mt-0.5">
-                Browse all {buildings.length} buildings, facilities, and services on PLV campus.
-              </p>
-            </div>
-          </div>
-        </Reveal>
+          </Reveal>
+          <Link
+            to="/home"
+            className="inline-flex h-10 w-fit items-center gap-2 rounded-xl border border-border bg-card px-3.5 text-sm font-bold text-foreground shadow-sm transition-colors hover:border-primary/30 hover:bg-primary/5 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            Back to Home
+          </Link>
+        </div>
 
         {/* ── Search & Filters ── */}
         <Reveal delay={80}>

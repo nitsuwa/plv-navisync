@@ -90,7 +90,6 @@ const StudentProfilePage   = lazyPage(() => import("../pages/StudentProfilePage"
 const StudentFavoritesPage = lazyPage(() => import("../pages/StudentFavoritesPage").then(m => ({ default: m.StudentFavoritesPage })));
 const StudentReportsPage   = lazyPage(() => import("../pages/StudentReportsPage").then(m => ({ default: m.StudentReportsPage })));
 const StudentSettingsPage  = lazyPage(() => import("../pages/StudentSettingsPage").then(m => ({ default: m.StudentSettingsPage })));
-const StudentMyDayPage     = lazyPage(() => import("../pages/StudentMyDayPage").then(m => ({ default: m.StudentMyDayPage })));
 const StudentHomePage      = lazyPage(() => import("../pages/StudentHomePage").then(m => ({ default: m.StudentHomePage })));
 const StudentMyEventsPage  = lazyPage(() => import("../pages/StudentMyEventsPage").then(m => ({ default: m.StudentMyEventsPage })));
 const StudentEventEditPage = lazyPage(() => import("../pages/StudentEventEditPage").then(m => ({ default: m.StudentEventEditPage })));
@@ -182,7 +181,6 @@ function NotFound() {
       {/* Quick links */}
       <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-xs text-muted-foreground">
         <Link to="/buildings" className="hover:text-foreground transition-colors">Browse Buildings</Link>
-        <Link to="/my-day" className="hover:text-foreground transition-colors">My Day</Link>
         <Link to="/admin" className="hover:text-foreground transition-colors">Admin Login</Link>
       </div>
     </div>
@@ -207,7 +205,6 @@ export const router = createBrowserRouter([
 
       // Student portal
       { path: "home", element: <SuspensePage><StudentHomePage /></SuspensePage> },
-      { path: "my-day", element: <SuspensePage><StudentMyDayPage /></SuspensePage> },
       { path: "student", element: <SuspensePage><StudentProfilePage /></SuspensePage> },
       { path: "student/favorites", element: <SuspensePage><StudentFavoritesPage /></SuspensePage> },
       { path: "student/reports", element: <SuspensePage><StudentReportsPage /></SuspensePage> },
