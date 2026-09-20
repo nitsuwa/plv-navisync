@@ -373,6 +373,49 @@ describe("AdminMapBuilderPage — campus lifecycle", () => {
     }));
   });
 
+  it("CANVAS RESIZE: saves applied dimensions through the campus row and keeps the full structure payload", async () => {
+    const campus = makeCampus({ canvasConfigured: true });
+    const updatedMetadata = { ...campus, databaseUpdatedAt: "2026-01-02T00:00:00.000Z" };
+    (campusService.list as ReturnType<typeof vi.fn>).mockResolvedValue([campus]);
+    (campusStructureService.load as ReturnType<typeof vi.fn>).mockResolvedValue({ ...campus, previewBuildingsLoaded: true });
+    (campusService.update as ReturnType<typeof vi.fn>).mockResolvedValue(updatedMetadata);
+    (campusStructureService.save as ReturnType<typeof vi.fn>).mockImplementation(async (candidate: Campus) => candidate);
+
+    const { container } = renderPage();
+    await flush();
+    fireEvent.click(screen.getByRole("button", { name: /open editor/i }));
+    fireEvent.click(await screen.findByTestId("canvas-settings-trigger"));
+    fireEvent.click(await screen.findByRole("button", { name: "Resize on canvas" }));
+
+    const svg = Array.from(container.querySelectorAll("svg")).find((candidate) => candidate.getAttribute("viewBox") === "0 0 900 680");
+    expect(svg).toBeTruthy();
+    Object.defineProperty(svg, "getBoundingClientRect", {
+      configurable: true,
+      value: () => ({ left: 0, top: 0, right: 900, bottom: 680, width: 900, height: 680, x: 0, y: 0, toJSON: () => ({}) }),
+    });
+
+    fireEvent.mouseDown(screen.getByTestId("canvas-resize-handle-e"), { clientX: 900, clientY: 340, bubbles: true });
+    fireEvent.mouseMove(svg!, { clientX: 1200, clientY: 340, bubbles: true });
+    fireEvent.mouseUp(svg!, { clientX: 1200, clientY: 340, bubbles: true });
+    expect(screen.getByText(/1200 × 680px/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Apply resize" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Save" })).not.toBeDisabled());
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(campusService.update).toHaveBeenCalledWith(
+      campus.id,
+      { canvas_width: 1200, canvas_height: 680, canvas_configured: true },
+      campus.databaseUpdatedAt,
+    ));
+    await waitFor(() => expect(campusStructureService.save).toHaveBeenCalledWith(expect.objectContaining({
+      canvasW: 1200,
+      canvasH: 680,
+      buildings: campus.buildings,
+      paths: campus.paths,
+    })));
+  });
+
   it("HYDRATION: never mounts the editor from a lightweight card while the complete structure is loading", async () => {
     sessionStorage.clear();
     const lightweight = makeCampus({

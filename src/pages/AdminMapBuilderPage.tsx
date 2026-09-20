@@ -611,7 +611,50 @@ export function AdminMapBuilderPage() {
     if (!canPersistCampusStructure(campus, baseline, hydratedCampusIdsRef.current.has(campus.id))) {
       throw new Error("Map data is still loading. Refresh the map before saving.");
     }
-    const saved = await campusStructureService.save(campus);
+    // Canvas Resize commits canvasW/canvasH to the in-memory Campus draft,
+    // while the structure RPC persists authored map rows and does not own the
+    // campus-level dimensions. Keep the existing campus row fields as the
+    // single persistence source instead of introducing a second size store.
+    // CanvasSettingsModal may already have written the row before calling this
+    // function; a changed databaseUpdatedAt identifies that safe case and
+    // avoids a redundant optimistic update.
+    let structureCandidate = campus;
+    let baselineCampus: Campus | undefined;
+    try { baselineCampus = baseline ? JSON.parse(baseline) as Campus : undefined; } catch { /* baseline validation already ran */ }
+    const dimensionsChanged = Boolean(
+      baselineCampus && (
+        baselineCampus.canvasW !== campus.canvasW
+        || baselineCampus.canvasH !== campus.canvasH
+        || baselineCampus.canvasConfigured !== campus.canvasConfigured
+      ),
+    );
+    const campusRowAlreadyUpdated = Boolean(
+      dimensionsChanged
+      && baselineCampus?.databaseUpdatedAt
+      && campus.databaseUpdatedAt
+      && baselineCampus.databaseUpdatedAt !== campus.databaseUpdatedAt,
+    );
+    if (dimensionsChanged && !campusRowAlreadyUpdated) {
+      if (!campus.databaseUpdatedAt) throw new Error("Refresh the campus before saving canvas dimensions.");
+      const updatedMetadata = await campusService.update(campus.id, {
+        canvas_width: campus.canvasW,
+        canvas_height: campus.canvasH,
+        canvas_configured: true,
+      }, campus.databaseUpdatedAt);
+      // Only carry the row's fresh timestamps back into the complete draft.
+      // `campusService.update` returns a lightweight Campus-shaped record;
+      // spreading its preview collections here could otherwise replace the
+      // hydrated authored structure immediately before the structure save.
+      structureCandidate = {
+        ...campus,
+        databaseUpdatedAt: updatedMetadata.databaseUpdatedAt ?? campus.databaseUpdatedAt,
+        updatedAt: updatedMetadata.updatedAt ?? campus.updatedAt,
+        canvasW: campus.canvasW,
+        canvasH: campus.canvasH,
+        canvasConfigured: true,
+      };
+    }
+    const saved = await campusStructureService.save(structureCandidate);
     const savedWithPreviewCount = {
       ...saved,
       previewBuildingCount: saved.buildings.length,

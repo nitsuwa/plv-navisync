@@ -2,7 +2,7 @@ import { Fragment, useState, useRef, useCallback, useEffect, useMemo } from "rea
 import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "motion/react";
 import {
-  ArrowLeft, ChevronRight, ChevronDown, CheckCircle2, Save, X, ZoomIn, ZoomOut, Undo2, Redo2,
+  ArrowLeft, ArrowLeftRight, ChevronRight, ChevronDown, CheckCircle2, Save, X, ZoomIn, ZoomOut, Undo2, Redo2,
   ChevronLeft,
   Grid3X3, Layers, Sofa, SeparatorHorizontal, MoveVertical,
   DoorOpen, Binary, Text, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, LandPlot,
@@ -881,7 +881,7 @@ function WallOpeningSymbol({
   selected = false,
   locked = false,
 }: {
-  kind: "door" | "window";
+  kind: "door" | "open_passage" | "window";
   width: number;
   wallThickness: number;
   color: string;
@@ -897,11 +897,29 @@ function WallOpeningSymbol({
   // Clear the wall core and its small casing (the casing is wallThickness + 2
   // below). The generous interaction target remains transparent, so this
   // narrow aperture never paints a floor-sized rectangle over exterior zones.
-  const gapStroke = kind === "door"
+  const gapStroke = kind !== "window"
     ? Math.max(1, wallThickness + 2)
     : Math.max(wallThickness + 7, 12);
   const jamb = Math.max(wallThickness / 2 + 2, 4);
-  const hitId = kind === "door" ? "attached-door-opening" : "attached-window-opening";
+  const hitId = kind === "door"
+    ? "attached-door-opening"
+    : kind === "open_passage" ? "attached-open-passage-opening" : "attached-window-opening";
+  if (kind === "open_passage") {
+    return (
+      <>
+        <line data-testid="open-passage-wall-cut" x1={-half} y1={0} x2={half} y2={0}
+          stroke={background} strokeWidth={gapStroke} strokeLinecap="butt" />
+        <line x1={-half} y1={-jamb} x2={-half} y2={jamb} stroke={color} strokeWidth={1.8} strokeLinecap="round" />
+        <line x1={half} y1={-jamb} x2={half} y2={jamb} stroke={color} strokeWidth={1.8} strokeLinecap="round" />
+        <line x1={-half + 2} y1={-jamb - 1} x2={half - 2} y2={-jamb - 1} stroke={color} strokeWidth={1.2} strokeLinecap="round" opacity={0.72} />
+        <line data-testid={hitId} x1={-half} y1={0} x2={half} y2={0} stroke="transparent" strokeWidth={28} strokeLinecap="butt" />
+        {selected && <rect x={-half - 3} y={-jamb - 3} width={width + 6} height={jamb * 2 + 6} rx={1.5} fill="none" stroke="var(--accent)" strokeWidth={1.5} />}
+        {locked && (
+          <path d="M-2 -3 V-4.5 C-2 -6 -1 -7 0 -7 C1 -7 2 -6 2 -4.5 V-3 M-3 -3 H3 V2 H-3 Z" fill="#0f172a" stroke="white" strokeWidth={0.6} />
+        )}
+      </>
+    );
+  }
   if (kind === "door") {
     const sliding = direction === "sliding";
     const double = doorType === "double" || direction === "double";
@@ -2724,7 +2742,7 @@ function stairVisualDirection(
   return direction === "up" ? "up" : direction === "down" ? "down" : "both";
 }
 
-type OpeningKind = "door" | "window";
+type OpeningKind = "door" | "open_passage" | "window";
 
 /** Physical wall-aperture collision only.  Interaction padding, resize
  * handles, labels, and Door swing arcs are intentionally excluded. */
@@ -2740,13 +2758,19 @@ function wallOpeningCollisionReason(
   const wall = walls.find((item) => item.id === wallId);
   if (!wall) return undefined;
   const candidates: Array<{ kind: OpeningKind; item: FloorDoor | FloorWindow }> = [
-    ...doors.filter((item) => item.id !== ignoreId).map((item) => ({ kind: "door" as const, item })),
+    ...doors.filter((item) => item.id !== ignoreId).map((item) => ({ kind: item.openingType === "open_passage" ? "open_passage" as const : "door" as const, item })),
     ...windows.filter((item) => item.id !== ignoreId).map((item) => ({ kind: "window" as const, item })),
   ];
   const overlap = candidates.find(({ item }) => item.wallId === wallId && wallOpeningSpansOverlap(candidate, item, wall));
   if (!overlap) return undefined;
-  if ("direction" in candidate) return overlap.kind === "door" ? "Overlaps another Door" : "Overlaps a Window";
-  return overlap.kind === "door" ? "Overlaps a Door" : "Overlaps another Window";
+  if ("direction" in candidate) {
+    return overlap.kind === "window"
+      ? "Overlaps a Window"
+      : overlap.kind === "open_passage" ? "Overlaps another Open Passage" : "Overlaps another Door";
+  }
+  return overlap.kind === "window"
+    ? "Overlaps another Window"
+    : overlap.kind === "open_passage" ? "Overlaps an Open Passage" : "Overlaps a Door";
 }
 
 function stairArrowPath(direction: "up" | "down", size: number) {
@@ -4273,11 +4297,11 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
   const [contextMenu, setContextMenu] = useState<FloorContextMenuState | null>(null);
   // ── Wall endpoint dragging ──
   const wallEndpointDrag = useRef<{ wallId: string; endpoint: "x1" | "x2"; origin: FloorWall } | null>(null);
-  const openingDrag = useRef<{ type: "door" | "window"; id: string; wallId: string; origin: FloorDoor | FloorWindow } | null>(null);
-  const openingResize = useRef<{ type: "door" | "window"; id: string; wallId: string; origin: FloorDoor | FloorWindow; handleSign: -1 | 1 } | null>(null);
+  const openingDrag = useRef<{ type: "door" | "open_passage" | "window"; id: string; wallId: string; origin: FloorDoor | FloorWindow } | null>(null);
+  const openingResize = useRef<{ type: "door" | "open_passage" | "window"; id: string; wallId: string; origin: FloorDoor | FloorWindow; handleSign: -1 | 1 } | null>(null);
   const [wallPreview, setWallPreview] = useState<{ x: number; y: number } | null>(null);
   const [openingPreview, setOpeningPreview] = useState<{
-    type: "door" | "window";
+    type: "door" | "open_passage" | "window";
     wallId: string;
     x: number;
     y: number;
@@ -8078,8 +8102,8 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
     };
   }, [FP_W, FP_H, findWallSnapTarget, findAxisWallAttachment, findSnapIndicator, snapOn, floorGridSize]);
 
-  const openingWallTarget = useCallback((point: { x: number; y: number }, type: "door" | "window") => {
-    const width = type === "door" ? DOOR_DEFAULT_WIDTH : WINDOW_DEFAULT_WIDTH;
+  const openingWallTarget = useCallback((point: { x: number; y: number }, type: "door" | "open_passage" | "window") => {
+    const width = type === "window" ? WINDOW_DEFAULT_WIDTH : DOOR_DEFAULT_WIDTH;
     let best: { wall: FloorWall; x: number; y: number; offset: number; width: number; angle: number; d: number } | null = null;
     for (const wall of walls) {
       if (wall.visible === false) continue;
@@ -8087,7 +8111,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
       const len = Math.hypot(wall.x2 - wall.x1, wall.y2 - wall.y1);
       const hitTolerance = Math.max(OPENING_HIT_TOLERANCE / Math.max(zoom, 0.35), wall.thickness * 1.5 + 12);
       if (len < OPENING_MIN_WIDTH || nearest.d > hitTolerance) continue;
-      const maxWidth = type === "door" ? DOOR_MAX_WIDTH : WINDOW_MAX_WIDTH;
+      const maxWidth = type === "window" ? WINDOW_MAX_WIDTH : DOOR_MAX_WIDTH;
       const clampedWidth = clamp(width, Math.min(OPENING_MIN_WIDTH, len), maxOpeningWidthForWall(wall, maxWidth, OPENING_MIN_WIDTH));
       const offset = clampWallOpeningOffset(wall, clampedWidth, nearest.t);
       const x = wall.x1 + (wall.x2 - wall.x1) * offset;
@@ -11381,8 +11405,13 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
       }, doors, windows, walls);
       if (openingReason) {
         setOpeningPreview({
-          ...target,
           type: "door",
+          wallId: target.wall.id,
+          x: target.x,
+          y: target.y,
+          offset: target.offset,
+          width: target.width,
+          angle: target.angle,
           doorVisual: { direction: "left", doorType: "single", hinge: "left", swingSide: defaultSwingSideForWall(target.wall) },
           valid: false,
           reason: openingReason,
@@ -11410,6 +11439,59 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
       return;
     }
 
+    if (tool === "open-passage") {
+      const target = openingWallTarget(pt, "open_passage");
+      if (!target) {
+        toast.info("Place Open Passage on a wall", "Move near a wall until it highlights, then click to add the opening.");
+        return;
+      }
+      const openingReason = wallOpeningCollisionReason({
+        id: "preview-open-passage",
+        x: target.x,
+        y: target.y,
+        wallId: target.wall.id,
+        offset: target.offset,
+        width: target.width,
+        direction: "double",
+        openingType: "open_passage",
+        accessDirection: "both",
+        color: "#64748b",
+      }, doors, windows, walls);
+      if (openingReason) {
+        setOpeningPreview({
+          type: "open_passage",
+          wallId: target.wall.id,
+          x: target.x,
+          y: target.y,
+          offset: target.offset,
+          width: target.width,
+          angle: target.angle,
+          valid: false,
+          reason: openingReason,
+        });
+        toast.warning("Cannot place Open Passage", openingReason);
+        return;
+      }
+      const newOpening: FloorDoor = {
+        id: genId("op"),
+        x: Math.round(target.x),
+        y: Math.round(target.y),
+        wallId: target.wall.id,
+        offset: target.offset,
+        width: Math.round(target.width),
+        direction: "double",
+        openingType: "open_passage",
+        accessDirection: "both",
+        color: "#64748b",
+        label: "Open Passage",
+      };
+      updFloor(rooms, fpaths, walls, [...doors, newOpening]);
+      selectFloorItem({ type: "door", id: newOpening.id });
+      setOpeningPreview(null);
+      setTool("select");
+      return;
+    }
+
     if (tool === "window") {
       const target = openingWallTarget(pt, "window");
       if (!target) {
@@ -11427,7 +11509,17 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
         color: "#0284c7",
       }, doors, windows, walls);
       if (openingReason) {
-        setOpeningPreview({ ...target, type: "window", valid: false, reason: openingReason });
+        setOpeningPreview({
+          type: "window",
+          wallId: target.wall.id,
+          x: target.x,
+          y: target.y,
+          offset: target.offset,
+          width: target.width,
+          angle: target.angle,
+          valid: false,
+          reason: openingReason,
+        });
         toast.warning("Cannot place Window", openingReason);
         return;
       }
@@ -12399,8 +12491,9 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
 
     if (calibrationDraft.active || tool === "measure") return;
 
-    if (tool === "door" || tool === "window") {
-      const target = openingWallTarget(pt, tool);
+    if (tool === "door" || tool === "open-passage" || tool === "window") {
+      const openingType = tool === "open-passage" ? "open_passage" as const : tool;
+      const target = openingWallTarget(pt, openingType);
       if (!target) {
         setOpeningPreview(null);
       } else {
@@ -12416,6 +12509,19 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
               direction: "left" as const,
               color: "#b45309",
             }
+          : tool === "open-passage"
+          ? {
+              id: "preview-open-passage",
+              x: target.x,
+              y: target.y,
+              wallId: target.wall.id,
+              offset: target.offset,
+              width: target.width,
+              direction: "double" as const,
+              openingType: "open_passage" as const,
+              accessDirection: "both" as const,
+              color: "#64748b",
+            }
           : {
               id: "preview-window",
               x: target.x,
@@ -12428,7 +12534,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
             };
         const reason = wallOpeningCollisionReason(candidate, doors, windows, walls);
         setOpeningPreview({
-          type: tool,
+          type: openingType,
           wallId: target.wall.id,
           x: target.x,
           y: target.y,
@@ -12455,12 +12561,12 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
       // different wall to preview that candidate wall as well.  The committed
       // object remains on its last valid wall until release; the candidate
       // orientation therefore always follows the wall under the pointer.
-      const ownedEntranceDoor = state.type === "door" && doors.find((door) => door.id === state.id)?.buildingEntranceId;
+      const ownedEntranceDoor = state.type !== "window" && doors.find((door) => door.id === state.id)?.buildingEntranceId;
       const candidateWallTarget = ownedEntranceDoor ? null : openingWallTarget(pt, state.type);
       const wall = candidateWallTarget?.wall ?? wallById.get(state.wallId);
       if (!wall) return;
       const nearest = nearestPointOnWall(pt, wall);
-      const doorAlignment = state.type === "door"
+      const doorAlignment = state.type !== "window"
         ? alignDoorOnWallToConnectedPoint(state.id, wall, { x: nearest.x, y: nearest.y })
         : { point: { x: nearest.x, y: nearest.y }, guides: [] as { type: "h" | "v"; pos: number }[] };
       const alignedNearest = nearestPointOnWall(doorAlignment.point, wall);
@@ -12471,13 +12577,13 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
       setAlignGuides([]);
       const length = Math.hypot(wall.x2 - wall.x1, wall.y2 - wall.y1);
       if (length < OPENING_MIN_WIDTH) return;
-      const minWidth = state.type === "door" ? doorMinWidth(effectiveDoorType(state.origin as FloorDoor)) : OPENING_MIN_WIDTH;
-      const maxWidth = state.type === "door" ? doorMaxWidth(effectiveDoorType(state.origin as FloorDoor)) : WINDOW_MAX_WIDTH;
+      const minWidth = state.type !== "window" ? doorMinWidth(effectiveDoorType(state.origin as FloorDoor)) : OPENING_MIN_WIDTH;
+      const maxWidth = state.type !== "window" ? doorMaxWidth(effectiveDoorType(state.origin as FloorDoor)) : WINDOW_MAX_WIDTH;
       const width = clamp(state.origin.width, Math.min(minWidth, length), maxOpeningWidthForWall(wall, maxWidth, minWidth));
       const offset = clampWallOpeningOffset(wall, width, alignedNearest.t);
       const x = Math.round(wall.x1 + (wall.x2 - wall.x1) * offset);
       const y = Math.round(wall.y1 + (wall.y2 - wall.y1) * offset);
-      const candidate = state.type === "door"
+      const candidate = state.type !== "window"
         ? { ...state.origin as FloorDoor, x, y, wallId: wall.id, offset, width: Math.round(width) }
         : { ...state.origin as FloorWindow, x, y, wallId: wall.id, offset, width: Math.round(width) };
       const reason = wallOpeningCollisionReason(candidate, doors, windows, walls, state.id);
@@ -12505,7 +12611,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
       }
       setOpeningPreview(null);
       if (Math.abs((state.origin.offset ?? 0) - offset) > 0.001 || state.origin.x !== x || state.origin.y !== y) gestureMoved.current = true;
-      if (state.type === "door") {
+      if (state.type !== "window") {
         updFloor(rooms, fpaths, walls, doors.map((door) => door.id === state.id ? { ...door, x, y, offset, width: Math.round(width) } : door), windows);
       } else {
         updFloor(rooms, fpaths, walls, doors, windows.map((win) => win.id === state.id ? { ...win, x, y, offset, width: Math.round(width) } : win));
@@ -12525,15 +12631,15 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
       const originWidth = state.origin.width;
       const fixedEdgeOffset = clamp(originOffset - state.handleSign * (originWidth / 2 / length), 0, 1);
       const rawWidth = Math.abs(nearest.t - fixedEdgeOffset) * length;
-      const minWidth = state.type === "door" ? doorMinWidth(effectiveDoorType(state.origin as FloorDoor)) : OPENING_MIN_WIDTH;
-      const maxLimit = state.type === "door" ? doorMaxWidth(effectiveDoorType(state.origin as FloorDoor)) : WINDOW_MAX_WIDTH;
+      const minWidth = state.type !== "window" ? doorMinWidth(effectiveDoorType(state.origin as FloorDoor)) : OPENING_MIN_WIDTH;
+      const maxLimit = state.type !== "window" ? doorMaxWidth(effectiveDoorType(state.origin as FloorDoor)) : WINDOW_MAX_WIDTH;
       if (!wallCanFitOpening(wall, minWidth)) return;
       const width = clamp(rawWidth, minWidth, maxOpeningWidthForWall(wall, maxLimit, minWidth));
       const requestedCenter = fixedEdgeOffset + state.handleSign * (width / 2 / length);
       const offset = clampWallOpeningOffset(wall, width, requestedCenter);
       const x = Math.round(wall.x1 + (wall.x2 - wall.x1) * offset);
       const y = Math.round(wall.y1 + (wall.y2 - wall.y1) * offset);
-      const candidate = state.type === "door"
+      const candidate = state.type !== "window"
         ? { ...state.origin as FloorDoor, x, y, wallId: wall.id, offset, width: Math.round(width) }
         : { ...state.origin as FloorWindow, x, y, wallId: wall.id, offset, width: Math.round(width) };
       const reason = wallOpeningCollisionReason(candidate, doors, windows, walls, state.id);
@@ -12561,7 +12667,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
       }
       setOpeningPreview(null);
       if (Math.abs(state.origin.width - width) > 0.5 || Math.abs((state.origin.offset ?? 0.5) - offset) > 0.001) gestureMoved.current = true;
-      if (state.type === "door") {
+      if (state.type !== "window") {
         updFloor(rooms, fpaths, walls, doors.map((door) => door.id === state.id ? { ...door, x, y, offset, width: Math.round(width) } : door), windows);
       } else {
         updFloor(rooms, fpaths, walls, doors, windows.map((win) => win.id === state.id ? { ...win, x, y, offset, width: Math.round(width) } : win));
@@ -14087,7 +14193,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
         toast.info("Locked wall", "Unlock the parent wall before sliding this opening.");
         return;
       }
-      openingDrag.current = { type: type as "door" | "window", id, wallId: item.wallId, origin: structuredClone(item) };
+      openingDrag.current = { type: (item as FloorDoor).openingType === "open_passage" ? "open_passage" : type as "door" | "window", id, wallId: item.wallId, origin: structuredClone(item) };
       alignmentSnapLocksRef.current = { x: null, y: null };
       setNavAlignGuides([]);
       return;
@@ -14449,7 +14555,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
         // Navigation Connect/bend authoring is intentionally handled below and
         // is not included here.
         const placementTools: SimpleTool[] = [
-          "wall", "door", "window", "room", "stairs", "ramp", "elevator",
+          "wall", "door", "open-passage", "window", "room", "stairs", "ramp", "elevator",
           "furniture", "text", "exterior-zone", "entrance-steps", "entrance-ramp",
         ];
         if (placementTools.includes(tool)) {
@@ -14678,7 +14784,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
     : tool === "erase" ? "not-allowed"
     : tool === "pan" ? "grab"
     : panning.current ? "grabbing"
-    : calibrationDraft.active || tool === "measure" || (tool === "wall" || tool === "room" || tool === "path" || tool === "door" || tool === "window" || tool === "stairs" || tool === "ramp" || tool === "elevator" || tool === "furniture" || tool === "text" || tool === "exterior-zone" || tool === "entrance-steps" || tool === "entrance-ramp")
+    : calibrationDraft.active || tool === "measure" || (tool === "wall" || tool === "room" || tool === "path" || tool === "door" || tool === "open-passage" || tool === "window" || tool === "stairs" || tool === "ramp" || tool === "elevator" || tool === "furniture" || tool === "text" || tool === "exterior-zone" || tool === "entrance-steps" || tool === "entrance-ramp")
       ? "crosshair"
       : "default";
 
@@ -15653,6 +15759,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
                 {[
                   { id: "wall" as SimpleTool, label: "Wall", icon: SeparatorHorizontal },
                   { id: "door" as SimpleTool, label: "Door", icon: DoorOpen },
+                  { id: "open-passage" as SimpleTool, label: "Open Passage", icon: ArrowLeftRight },
                   { id: "window" as SimpleTool, label: "Window", icon: LandPlot },
                   { id: "room" as SimpleTool, label: "+ Room", icon: SquareIcon },
                 ].map((item) => {
@@ -15665,7 +15772,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
                       <Icon className="h-4 w-4 shrink-0" />
                       <span className="min-w-0">
                         <span className="text-[10px] font-bold block truncate">{item.label}</span>
-                        <span className="text-[9px] leading-snug text-muted-foreground block mt-0.5">{{ wall: "Create room/floor boundaries", door: "Add an opening/door", window: "Add wall window", room: "Create a room area" }[item.id]}</span>
+                        <span className="text-[9px] leading-snug text-muted-foreground block mt-0.5">{({ wall: "Create room/floor boundaries", door: "Add an opening/door", "open-passage": "Add an open architectural passage", window: "Add wall window", room: "Create a room area" } as Record<string, string>)[item.id] ?? ""}</span>
                       </span>
                     </button>
                   );
@@ -16034,7 +16141,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
                 // B7 Part G: wall-drawing mode makes wall SVG groups non-interactive
                 // so the completion click always reaches the SVG background handler
                 // and the snap resolution picks the correct endpoint.
-                const wallDrawingMode = tool === "wall" || tool === "door" || tool === "window";
+                const wallDrawingMode = tool === "wall" || tool === "door" || tool === "open-passage" || tool === "window";
                 return (
                   <g key={wall.id} clipPath={`url(#${floorClipId})`}
                     onMouseDown={wallDrawingMode ? undefined : (e) => onItemDown(e, "wall", wall.id, wall)}
@@ -16135,7 +16242,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
               {/* ═══ DOORS ═══ */}
               {openingPreview && (() => {
                 const wall = wallById.get(openingPreview.wallId);
-                const color = openingPreview.type === "door" ? "#b45309" : "#0284c7";
+                const color = openingPreview.type === "door" ? "#b45309" : openingPreview.type === "open_passage" ? "#64748b" : "#0284c7";
                 const wallThickness = wall?.thickness ?? 6;
                 const valid = openingPreview.valid !== false;
                 const previewColor = valid ? color : "#dc2626";
@@ -16205,12 +16312,15 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
                   ? building.entrances?.find((entrance) => entrance.id === door.buildingEntranceId)
                   : undefined;
                 const doorNavConnected = indoorNodes.some((node) => node.doorId === door.id);
-                const doorQuickInfo = `${door.label?.trim() || "Door"} · ${door.isEmergencyExit ? "Emergency Exit Door" : "Indoor door"}${doorNavConnected ? " · Connected to Walking Network" : ""}`;
+                const openingKind = door.openingType === "open_passage" ? "open_passage" as const : "door" as const;
+                const doorQuickInfo = openingKind === "open_passage"
+                  ? `${door.label?.trim() || "Open Passage"} · Open architectural passage${doorNavConnected ? " · Connected to Walking Network" : ""}`
+                  : `${door.label?.trim() || "Door"} · ${door.isEmergencyExit ? "Emergency Exit Door" : "Indoor door"}${doorNavConnected ? " · Connected to Walking Network" : ""}`;
                 if (geom) {
                   return (
                     <Fragment key={door.id}>
                     <g onMouseDown={(e) => { if (handleExteriorEntranceDoorDown(e, door)) return; onItemDown(e, "door", door.id, door); }}
-                      data-testid="attached-door-opening-symbol"
+                      data-testid={openingKind === "open_passage" ? "attached-open-passage-opening-symbol" : "attached-door-opening-symbol"}
                       data-floor-title={door.label ?? "Door"}
                       aria-label={doorQuickInfo}
                       tabIndex={0}
@@ -16220,7 +16330,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
                       opacity={visibleOpacity(door)}
                       transform={openingSymbolTransform(geom)}
                     style={{ cursor: tool === "select" ? "pointer" : cursor }}>
-                      <title>{doorQuickInfo}</title>
+                      <title>{openingKind === "open_passage" ? `${door.label?.trim() || "Open Passage"} · Open architectural passage` : doorQuickInfo}</title>
                       {/* Expanded physical hit area stays inside the Door group,
                           below its resize handles, so the linked nav cue cannot
                           steal body clicks while handles retain their own
@@ -16258,7 +16368,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
                       )}
                       {inspectorDoorHover && <rect data-testid="room-door-inspector-hover" x={-geom.width / 2 - 12} y={-(geom.wall.thickness / 2 + 13)} width={geom.width + 24} height={geom.wall.thickness + 26} rx={5} fill="rgba(139,92,246,0.08)" stroke="#8b5cf6" strokeWidth={1.4} className="pointer-events-none" />}
                       <WallOpeningSymbol
-                        kind="door"
+                        kind={openingKind}
                         width={geom.width}
                         wallThickness={geom.wall.thickness}
                         color={door.color}
@@ -16278,7 +16388,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
                             <rect
                               key={index}
                               data-testid="opening-resize-handle"
-                              data-kind="door"
+                              data-kind={openingKind}
                               x={x - 3}
                               y={-5}
                               width={6}
@@ -16301,7 +16411,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
                                 }
                                 suppressHistoryRef.current = true;
                                 gestureMoved.current = false;
-                                openingResize.current = { type: "door", id: door.id, wallId: geom.wall.id, origin: structuredClone(door), handleSign };
+                                openingResize.current = { type: openingKind, id: door.id, wallId: geom.wall.id, origin: structuredClone(door), handleSign };
                               }}
                             />
                             );
@@ -16319,7 +16429,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
                     onMouseLeave={() => { if (roomDoorHoverId === door.id) setRoomDoorHoverId(null); if (routePickHover) setTestRoutePickHover(null); }}
                     opacity={visibleOpacity(door)}
                     style={{ cursor: tool === "select" ? "pointer" : cursor }}>
-                    <title>{doorQuickInfo}</title>
+                    <title>{openingKind === "open_passage" ? `${door.label?.trim() || "Open Passage"} · Open architectural passage` : doorQuickInfo}</title>
                     <rect
                       x={door.x - door.width / 2 - 6}
                       y={door.y - 9}
@@ -16352,16 +16462,27 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
                         fill="rgba(34,197,94,0.08)" stroke="#22c55e" strokeWidth={1.2} strokeDasharray="3 3" opacity={0.8} className="pointer-events-none" />
                     )}
                     {inspectorDoorHover && <rect data-testid="room-door-inspector-hover" x={door.x - door.width / 2 - 12} y={door.y - 15} width={door.width + 24} height={30} rx={5} fill="rgba(139,92,246,0.08)" stroke="#8b5cf6" strokeWidth={1.4} className="pointer-events-none" />}
-                    {/* Door rectangle */}
-                    <rect x={door.x - door.width / 2} y={door.y - 2} width={door.width} height={4} rx={1}
-                      fill={isSel ? "var(--accent)" : door.color}
-                      stroke={door.color} strokeWidth={1} />
-                    {/* Swing arc indicator */}
-                    {door.direction !== "sliding" && (
-                      <path d={door.direction === "left"
-                        ? `M ${door.x} ${door.y} A ${door.width} ${door.width} 0 0 0 ${door.x - door.width} ${door.y}`
-                        : `M ${door.x} ${door.y} A ${door.width} ${door.width} 0 0 1 ${door.x + door.width} ${door.y}`}
-                        fill="none" stroke={door.color} strokeWidth={1} opacity={0.5} />
+                    {openingKind === "open_passage" ? (
+                      <>
+                        <rect x={door.x - door.width / 2} y={door.y - 3} width={door.width} height={6} rx={1}
+                          fill={isSel ? "var(--accent)" : "#e2e8f0"} stroke={door.color} strokeWidth={1} strokeDasharray="3 2" />
+                        <line x1={door.x - door.width / 2} y1={door.y - 6} x2={door.x - door.width / 2} y2={door.y + 6} stroke={door.color} strokeWidth={1.5} />
+                        <line x1={door.x + door.width / 2} y1={door.y - 6} x2={door.x + door.width / 2} y2={door.y + 6} stroke={door.color} strokeWidth={1.5} />
+                      </>
+                    ) : (
+                      <>
+                        {/* Door rectangle */}
+                        <rect x={door.x - door.width / 2} y={door.y - 2} width={door.width} height={4} rx={1}
+                          fill={isSel ? "var(--accent)" : door.color}
+                          stroke={door.color} strokeWidth={1} />
+                        {/* Swing arc indicator */}
+                        {door.direction !== "sliding" && (
+                          <path d={door.direction === "left"
+                            ? `M ${door.x} ${door.y} A ${door.width} ${door.width} 0 0 0 ${door.x - door.width} ${door.y}`
+                            : `M ${door.x} ${door.y} A ${door.width} ${door.width} 0 0 1 ${door.x + door.width} ${door.y}`}
+                            fill="none" stroke={door.color} strokeWidth={1} opacity={0.5} />
+                        )}
+                      </>
                     )}
                     {door.locked && (
                       <text x={door.x} y={door.y + 3} textAnchor="middle" fill="white" fontSize={5} fontWeight="bold">🔒</text>

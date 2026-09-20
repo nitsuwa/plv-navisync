@@ -76,6 +76,27 @@ describe("building entrance geometry", () => {
     expect(pointerToEntranceAttachment(b, rightMid)).toEqual({ edge: "right", offset: 0.5 });
   });
 
+  it("keeps rotated perimeter drags on the pointer-selected side and offset", () => {
+    for (const rotation of [0, 90, 180, 270]) {
+      const b = building({ rotation });
+      for (const edge of ["top", "right", "bottom", "left"] as const) {
+        for (const offset of [0.2, 0.8]) {
+          const pointer = entranceWorldPosition(b, { edge, offset });
+          const aligned = alignEntranceAttachment(b, pointer, [], 12);
+          expect(aligned.attachment.edge).toBe(edge);
+          expect(aligned.attachment.offset).toBeCloseTo(offset, 6);
+        }
+      }
+    }
+  });
+
+  it("does not collapse an off-center rotated Entrance to the side midpoint", () => {
+    const b = building({ rotation: 90 });
+    const pointer = entranceWorldPosition(b, { edge: "right", offset: 0.2 });
+    const aligned = alignEntranceAttachment(b, pointer, [], 12);
+    expect(aligned.attachment).toEqual({ edge: "right", offset: 0.2 });
+  });
+
   it("snaps entrance placement to the edge center and nearby anchors", () => {
     const b = building();
     const aligned = alignEntranceAttachment(b, { x: 161, y: 271 }, [{ x: 160, y: 280 }], 12);

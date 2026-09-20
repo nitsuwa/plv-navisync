@@ -333,6 +333,10 @@ export function createCampusClone(
       id: pathMap.get(p.id)!,
       navigationVertexIds: p.navigationVertexIds?.map((vertexId) => vertexMap.get(vertexId) ?? vertexId),
       pathNetworkId: p.pathNetworkId ? remapPathNetwork(p.pathNetworkId) : undefined,
+      visualAttachments: p.visualAttachments?.map((attachment) => ({
+        ...attachment,
+        targetPathId: pathMap.get(attachment.targetPathId) ?? attachment.targetPathId,
+      })),
     })),
     navNodes: (source.navNodes ?? []).map((nn) => ({
       ...structuredClone(nn),

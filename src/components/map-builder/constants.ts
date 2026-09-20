@@ -1,6 +1,6 @@
 import {
   MousePointer2, MapPin, Square, GitBranch, Trash2, Map,
-  Navigation, Star, Hand, DoorOpen,
+  Navigation, Star, Hand, DoorOpen, ArrowLeftRight,
   MoveVertical, SeparatorHorizontal, Binary, Text, Sofa,
   Container, Table, Monitor, Lamp, BookOpen,
   PanelRightOpen,
@@ -136,6 +136,7 @@ export const FLOOR_STRUCTURE_TOOLS: { id: SimpleTool; icon: React.ElementType; l
   { id: "wall",     icon: SeparatorHorizontal, label: "Wall",     key: "W" },
   { id: "room",     icon: Square,               label: "Room",     key: "R" },
   { id: "door",     icon: DoorOpen,             label: "Door",     key: "D" },
+  { id: "open-passage", icon: ArrowLeftRight,   label: "Open Passage", key: "O" },
   { id: "window",   icon: PanelRightOpen,       label: "Window",   key: "I" },
   { id: "stairs",   icon: MoveVertical,           label: "Stairs",   key: "S" },
   { id: "elevator", icon: Binary,               label: "Elevator", key: "L" },

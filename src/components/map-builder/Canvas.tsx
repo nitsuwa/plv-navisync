@@ -430,6 +430,9 @@ interface CanvasProps {
   onItemDown: (e: React.MouseEvent, type: "building" | "marker" | "gate" | "decorAsset" | "navNode", id: string, ox: number, oy: number) => void;
   onGroupSurfaceDown?: (e: React.MouseEvent) => void;
   onGroupResizeStart?: (e: React.MouseEvent, corner: "nw" | "ne" | "sw" | "se", bounds: { x: number; y: number; width: number; height: number }) => void;
+  onGroupRotateStart?: (e: React.MouseEvent, center: { x: number; y: number }) => void;
+  groupRotationEligible?: boolean;
+  groupRotationActive?: boolean;
   onPathGroupScaleStart?: (e: React.MouseEvent, corner: "nw" | "ne" | "sw" | "se", bounds: { x: number; y: number; width: number; height: number }) => void;
   onPathGroupRotateStart?: (e: React.MouseEvent, center: { x: number; y: number }) => void;
   /** True while a path-group/network rotation gesture is active (floating degree label). */
@@ -665,7 +668,7 @@ export function Canvas({
   zoom, pan, svgRef, containerRef, cursor,
   buildingDrag, buildingPlacementPreview, groundBrushPreview, groundErasePreview, groundPaintType = "grass", armedDecorAssetType, armedCampusGatePlacement = false, pathPaintPreview, guides, cursorPos, overlappingBuildings,
   onCanvasDown, onCanvasMove, onCanvasUp, onCanvasLeave, onCanvasDblClick,
-  onItemDown, onGroupSurfaceDown, onGroupResizeStart, onPathDown, onPathPointDown, onPathExtendStart, onPathAddPoint, onPathAddPointDragStart, onPathWidthDown, onEntranceDown, onExteriorEmergencyStairDown, exteriorEmergencyStairPreview, onItemContextMenu, onResizeStart, onMarkerResizeStart, onBuildingDoubleClick, onPathClick, onSelect,
+  onItemDown, onGroupSurfaceDown, onGroupResizeStart, onGroupRotateStart, groupRotationEligible = false, groupRotationActive = false, onPathDown, onPathPointDown, onPathExtendStart, onPathAddPoint, onPathAddPointDragStart, onPathWidthDown, onEntranceDown, onExteriorEmergencyStairDown, exteriorEmergencyStairPreview, onItemContextMenu, onResizeStart, onMarkerResizeStart, onBuildingDoubleClick, onPathClick, onSelect,
   onExteriorEmergencyStairFloorNavigate,
   onPathGroupScaleStart, onPathGroupRotateStart, pathGroupRotationActive = false, pathGroupRotationBounds = null, onPathDblClick, pathMemberEditId = null, hoveredPathId = null, onPathHover,
   onResetView, onZoomIn, onZoomOut, onSetTool, onToggleSnap,
@@ -1068,8 +1071,8 @@ export function Canvas({
         {p.points.map((point, index) => {
           const pointKey = `${Number(point.x.toFixed(3))}:${Number(point.y.toFixed(3))}`;
           const isJunctionPoint = (pathPointCounts.get(pointKey) ?? 0) > 1;
-          const isPrimaryJunctionVisual = !isJunctionPoint || pathJunctionVisualOwner.get(pointKey) === `${p.id}:${index}`;
           const isSelectedPoint = selectedPathPoint?.pathId === p.id && selectedPathPoint.pointIndex === index;
+          const isPrimaryJunctionVisual = !isJunctionPoint || pathJunctionVisualOwner.get(pointKey) === `${p.id}:${index}` || isSelectedPoint;
           return (
             <g key={`${p.id}-pt-${index}`}>
               <circle
@@ -1702,6 +1705,32 @@ export function Canvas({
             })}
           </g>
 
+          {/* Keep the active Visual Path above the other path strokes while it
+              is being edited. This is a temporary presentation layer only;
+              it never changes persisted z-order or path geometry. */}
+          {selected?.type === "path" && (() => {
+            const selectedPath = paths.find((path) => path.id === selected.id);
+            if (!selectedPath || selectedPath.points.length < 2) return null;
+            const kind = selectedPath.type === "road" || selectedPath.type === "driveway"
+              ? "road"
+              : selectedPath.type === "accessible" ? "accessible" : "walkway";
+            const width = Math.max(3, selectedPath.width ?? (kind === "road" ? 18 : 10));
+            return (
+              <polyline
+                data-testid="selected-visual-path-overlay"
+                data-path-id={selectedPath.id}
+                points={selectedPath.points.map((point) => `${point.x},${point.y}`).join(" ")}
+                fill="none"
+                stroke={selectedPath.color}
+                strokeWidth={width}
+                strokeLinecap={kind === "road" ? "butt" : "round"}
+                strokeLinejoin={kind === "road" ? "bevel" : "round"}
+                opacity={1}
+                className="pointer-events-none"
+              />
+            );
+          })()}
+
           {paths.map((p) => {
             const kind = p.type === "road" || p.type === "driveway" ? "road" : p.type === "accessible" ? "accessible" : "walkway";
             const baseWidth = Math.max(3, p.width ?? (kind === "road" ? 18 : 10));
@@ -1724,7 +1753,8 @@ export function Canvas({
                   if (tool === "select") {
                     e.stopPropagation();
                     onPathDown?.(e, p.id);
-                  } else if (!(layer === "navigation" && (tool === "marker" || tool === "connect" || tool === "path"))) {
+                  } else if (!(tool === "path" && layer !== "navigation")
+                    && !(layer === "navigation" && (tool === "marker" || tool === "connect" || tool === "path"))) {
                     e.stopPropagation();
                   }
                 }}
@@ -1741,7 +1771,9 @@ export function Canvas({
           {/* Style-transition junction covers — small corner fills only (no
               internal end outlines; same-style joins are one continuous chain). */}
           {renderPathJunctionLayer()}
-          {paths.map((p) => renderPathControls(p))}
+          {[...paths.filter((path) => !(selected?.type === "path" && path.id === selected.id)),
+            ...paths.filter((path) => selected?.type === "path" && path.id === selected.id)]
+            .map((p) => renderPathControls(p))}
           {pathVertexSnapTarget && (() => {
             const targetPath = paths.find((path) => path.id === pathVertexSnapTarget.pathId);
             const targetPoint = targetPath?.points[pathVertexSnapTarget.pointIndex];
@@ -1811,15 +1843,30 @@ export function Canvas({
                   })()}
                 </>
               ) : (
-                <circle
-                  cx={pathPaintPreview.points[0]?.x ?? 0}
-                  cy={pathPaintPreview.points[0]?.y ?? 0}
-                  r={pathPaintPreview.width / 2}
-                  fill={pathPaintPreview.color}
-                  stroke={pathPaintPreview.type === "road" ? "#64748b" : pathPaintPreview.type === "accessible" ? "#059669" : "#64748b"}
-                  strokeWidth={2}
-                  opacity={0.42}
-                />
+                <>
+                  <circle
+                    cx={pathPaintPreview.points[0]?.x ?? 0}
+                    cy={pathPaintPreview.points[0]?.y ?? 0}
+                    r={pathPaintPreview.width / 2}
+                    fill={pathPaintPreview.color}
+                    stroke={pathPaintPreview.type === "road" ? "#64748b" : pathPaintPreview.type === "accessible" ? "#059669" : "#64748b"}
+                    strokeWidth={2}
+                    opacity={0.42}
+                  />
+                  {pathPaintPreview.snapKind && (() => {
+                    const point = pathPaintPreview.points[0];
+                    if (!point) return null;
+                    const isSegment = pathPaintPreview.snapKind === "segment";
+                    return (
+                      <g data-testid={isSegment ? "path-segment-junction-target" : "path-endpoint-junction-target"}>
+                        <circle cx={point.x} cy={point.y} r={pathPaintPreview.width / 2 + 8} fill={isSegment ? "rgba(245,158,11,0.14)" : "rgba(34,197,94,0.14)"} stroke={isSegment ? "#f59e0b" : "#22c55e"} strokeWidth={2} strokeDasharray={isSegment ? "4 3" : undefined} />
+                        {isSegment && (
+                          <path d={`M${point.x - 6} ${point.y} H${point.x + 6} M${point.x} ${point.y - 6} V${point.y + 6}`} stroke="#f59e0b" strokeWidth={2} strokeLinecap="round" />
+                        )}
+                      </g>
+                    );
+                  })()}
+                </>
               )}
             </g>
           )}
@@ -1990,6 +2037,29 @@ export function Canvas({
                     />
                   );
                 })}
+                {groupRotationEligible && !isPathOnlyGroup && groupSelectionBounds && (
+                  <g>
+                    <line x1={x + w / 2} y1={y} x2={x + w / 2} y2={y - 30} stroke="var(--accent)" strokeWidth={1.5} strokeDasharray="3 2" opacity={0.5} />
+                    <circle
+                      data-testid="campus-group-rotate-handle"
+                      cx={x + w / 2}
+                      cy={y - 30}
+                      r={7}
+                      fill="var(--accent)"
+                      stroke="white"
+                      strokeWidth={2}
+                      style={{ cursor: "grab", pointerEvents: "all" }}
+                      onMouseDown={(e) => onGroupRotateStart?.(e, { x: groupSelectionBounds.x + groupSelectionBounds.width / 2, y: groupSelectionBounds.y + groupSelectionBounds.height / 2 })}
+                    />
+                    <path d={`M${x + w / 2 - 3} ${y - 32} Q${x + w / 2} ${y - 36} ${x + w / 2 + 3} ${y - 32}`} fill="none" stroke="white" strokeWidth={1.5} strokeLinecap="round" className="pointer-events-none" />
+                  </g>
+                )}
+                {groupRotationEligible && groupRotationActive && groupSelectionBounds && (
+                  <g className="pointer-events-none select-none">
+                    <rect x={x + w / 2 - 22} y={y - 52} width={44} height={18} rx={5} fill="var(--accent)" opacity={0.95} filter="url(#dropShadow)" />
+                    <text x={x + w / 2} y={y - 39} textAnchor="middle" fill="white" fontSize={10} fontWeight="900">{Math.round(rotatingAngle ?? 0)}°</text>
+                  </g>
+                )}
                 {isPathOnlyGroup && (
                   <g>
                     <line x1={x + w / 2} y1={y} x2={x + w / 2} y2={y - 30} stroke="var(--accent)" strokeWidth={1.5} strokeDasharray="3 2" opacity={0.5} />
