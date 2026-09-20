@@ -82,14 +82,17 @@ const AdminRoutesPage      = lazyPage(() => import("../pages/AdminRoutesPage").t
 const AdminReportsPage     = lazyPage(() => import("../pages/AdminReportsPage").then(m => ({ default: m.AdminReportsPage })));
 const AdminAccessibilityPage = lazyPage(() => import("../pages/AdminAccessibilityPage").then(m => ({ default: m.AdminAccessibilityPage })));
 const AdminEventsPage      = lazyPage(() => import("../pages/AdminEventsPage").then(m => ({ default: m.AdminEventsPage })));
+const AdminEventLayoutsPage = lazyPage(() => import("../pages/AdminEventLayoutsPage").then(m => ({ default: m.AdminEventLayoutsPage })));
+const AdminEventLayoutPreviewPage = lazyPage(() => import("../pages/AdminEventLayoutPreviewPage").then(m => ({ default: m.AdminEventLayoutPreviewPage })));
 const AdminAnnouncementsPage = lazyPage(() => import("../pages/AdminAnnouncementsPage").then(m => ({ default: m.AdminAnnouncementsPage })));
 const AdminActivityLogsPage = lazyPage(() => import("../pages/AdminActivityLogsPage").then(m => ({ default: m.AdminActivityLogsPage })));
 const StudentProfilePage   = lazyPage(() => import("../pages/StudentProfilePage").then(m => ({ default: m.StudentProfilePage })));
 const StudentFavoritesPage = lazyPage(() => import("../pages/StudentFavoritesPage").then(m => ({ default: m.StudentFavoritesPage })));
 const StudentReportsPage   = lazyPage(() => import("../pages/StudentReportsPage").then(m => ({ default: m.StudentReportsPage })));
 const StudentSettingsPage  = lazyPage(() => import("../pages/StudentSettingsPage").then(m => ({ default: m.StudentSettingsPage })));
-const StudentMyDayPage     = lazyPage(() => import("../pages/StudentMyDayPage").then(m => ({ default: m.StudentMyDayPage })));
 const StudentHomePage      = lazyPage(() => import("../pages/StudentHomePage").then(m => ({ default: m.StudentHomePage })));
+const StudentMyEventsPage  = lazyPage(() => import("../pages/StudentMyEventsPage").then(m => ({ default: m.StudentMyEventsPage })));
+const StudentEventEditPage = lazyPage(() => import("../pages/StudentEventEditPage").then(m => ({ default: m.StudentEventEditPage })));
 const VerificationPendingPage = lazyPage(() => import("../pages/AuthLifecyclePages").then(m => ({ default: m.VerificationPendingPage })));
 const AuthCallbackPage     = lazyPage(() => import("../pages/AuthLifecyclePages").then(m => ({ default: m.AuthCallbackPage })));
 const ForgotPasswordPage   = lazyPage(() => import("../pages/AuthLifecyclePages").then(m => ({ default: m.ForgotPasswordPage })));
@@ -178,7 +181,6 @@ function NotFound() {
       {/* Quick links */}
       <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-xs text-muted-foreground">
         <Link to="/buildings" className="hover:text-foreground transition-colors">Browse Buildings</Link>
-        <Link to="/my-day" className="hover:text-foreground transition-colors">My Day</Link>
         <Link to="/admin" className="hover:text-foreground transition-colors">Admin Login</Link>
       </div>
     </div>
@@ -203,11 +205,12 @@ export const router = createBrowserRouter([
 
       // Student portal
       { path: "home", element: <SuspensePage><StudentHomePage /></SuspensePage> },
-      { path: "my-day", element: <SuspensePage><StudentMyDayPage /></SuspensePage> },
       { path: "student", element: <SuspensePage><StudentProfilePage /></SuspensePage> },
       { path: "student/favorites", element: <SuspensePage><StudentFavoritesPage /></SuspensePage> },
       { path: "student/reports", element: <SuspensePage><StudentReportsPage /></SuspensePage> },
       { path: "student/settings", element: <SuspensePage><StudentSettingsPage /></SuspensePage> },
+      { path: "student/events", element: <SuspensePage><StudentMyEventsPage /></SuspensePage> },
+      { path: "student/events/:id/edit", element: <SuspensePage><StudentEventEditPage /></SuspensePage> },
 
       { path: "*", element: <NotFound /> },
     ],
@@ -238,6 +241,8 @@ export const router = createBrowserRouter([
       { path: "reports", element: <SuspensePage><AdminReportsPage /></SuspensePage> },
       { path: "accessibility", element: <SuspensePage><AdminAccessibilityPage /></SuspensePage> },
       { path: "events", element: <SuspensePage><AdminEventsPage /></SuspensePage> },
+      { path: "event-layouts", element: <SuspensePage><AdminEventLayoutsPage /></SuspensePage> },
+      { path: "event-layouts/:id/preview", element: <SuspensePage><AdminEventLayoutPreviewPage /></SuspensePage> },
       { path: "announcements", element: <SuspensePage><AdminAnnouncementsPage /></SuspensePage> },
       { path: "activity-logs", element: <SuspensePage><AdminActivityLogsPage /></SuspensePage> },
     ],

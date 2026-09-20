@@ -130,8 +130,6 @@ export function LayersTab({ campus, onUpdate }: LayersTabProps) {
       id: genId("evt"),
       title: "New Event",
       description: "",
-      dateStart: new Date().toISOString().slice(0, 10),
-      dateEnd: new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10),
       organizer: "",
       markers: [],
       restrictedAreas: [],
@@ -348,9 +346,7 @@ export function LayersTab({ campus, onUpdate }: LayersTabProps) {
                       <Star className="h-4 w-4 text-amber-500 shrink-0" />
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-bold text-foreground truncate">{event.title}</p>
-                        <p className="text-[10px] text-muted-foreground">
-                          {event.dateStart} → {event.dateEnd}
-                        </p>
+                        <p className="text-[10px] text-muted-foreground">Map overlay details</p>
                       </div>
                       <span className={cn(
                         "px-2 py-0.5 rounded-full text-[9px] font-bold",
@@ -371,7 +367,7 @@ export function LayersTab({ campus, onUpdate }: LayersTabProps) {
                           className="overflow-hidden"
                         >
                           <div className="px-4 pb-4 space-y-3 border-t border-border pt-3">
-                            <div className="grid grid-cols-2 gap-3">
+                            <div className="grid grid-cols-1 gap-3">
                               <div>
                                 <label className="text-[9px] font-bold text-muted-foreground uppercase tracking-wider">Event Name</label>
                                 <input type="text" value={event.title}
@@ -382,18 +378,6 @@ export function LayersTab({ campus, onUpdate }: LayersTabProps) {
                                 <label className="text-[9px] font-bold text-muted-foreground uppercase tracking-wider">Organizer</label>
                                 <input type="text" value={event.organizer}
                                   onChange={(e) => updateEvent(event.id, { organizer: e.target.value })}
-                                  className="w-full px-2.5 py-1.5 rounded-lg border border-border bg-background text-xs font-semibold mt-1 focus:outline-none focus:ring-2 focus:ring-primary/30" />
-                              </div>
-                              <div>
-                                <label className="text-[9px] font-bold text-muted-foreground uppercase tracking-wider">Start Date</label>
-                                <input type="date" value={event.dateStart}
-                                  onChange={(e) => updateEvent(event.id, { dateStart: e.target.value })}
-                                  className="w-full px-2.5 py-1.5 rounded-lg border border-border bg-background text-xs font-semibold mt-1 focus:outline-none focus:ring-2 focus:ring-primary/30" />
-                              </div>
-                              <div>
-                                <label className="text-[9px] font-bold text-muted-foreground uppercase tracking-wider">End Date</label>
-                                <input type="date" value={event.dateEnd}
-                                  onChange={(e) => updateEvent(event.id, { dateEnd: e.target.value })}
                                   className="w-full px-2.5 py-1.5 rounded-lg border border-border bg-background text-xs font-semibold mt-1 focus:outline-none focus:ring-2 focus:ring-primary/30" />
                               </div>
                             </div>

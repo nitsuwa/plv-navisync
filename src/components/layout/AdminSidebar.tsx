@@ -33,6 +33,7 @@ const NAV_ITEMS = [
     icon: Megaphone,
   },
   { label: "Events", path: "/admin-dashboard/events", icon: CalendarDays },
+  { label: "Event Layouts", path: "/admin-dashboard/event-layouts", icon: CalendarDays },
   { label: "Users", path: "/admin-dashboard/users", icon: Users },
   {
     label: "Activity Logs",

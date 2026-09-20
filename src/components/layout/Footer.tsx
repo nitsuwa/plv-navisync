@@ -1,4 +1,4 @@
-import { MapPin, Phone, Mail, Github, Globe, CheckCircle2 } from "lucide-react";
+import { MapPin, Mail, Github, Globe, CheckCircle2 } from "lucide-react";
 import { Link } from "react-router";
 import { PLVLogo } from "../ui/PLVLogo";
 import { useStudentAuth } from "../../hooks/useStudentAuth";
@@ -67,15 +67,20 @@ export function Footer() {
             <ul className="space-y-3.5 text-sm text-muted-foreground">
               <li className="flex items-start gap-2.5">
                 <MapPin className="h-4 w-4 shrink-0 mt-0.5 text-primary" />
-                <span className="leading-relaxed">Tongco Street, Karuhatan,<br />Valenzuela City, 1440</span>
-              </li>
-              <li className="flex items-center gap-2.5">
-                <Phone className="h-4 w-4 shrink-0 text-primary" />
-                <span>(02) 8293-0000</span>
+                <address className="not-italic leading-relaxed">
+                  Maysan Road corner Tongco Street, Barangay Maysan, Valenzuela City, 1440 Metro Manila
+                </address>
               </li>
               <li className="flex items-center gap-2.5">
                 <Mail className="h-4 w-4 shrink-0 text-primary" />
-                <span>info@plv.edu.ph</span>
+                <a href="mailto:registrarsoffice@plv.edu.ph" className="hover:text-primary transition-colors">
+                  registrarsoffice@plv.edu.ph
+                </a>
+              </li>
+              <li className="pl-6 text-xs leading-relaxed">
+                <span className="font-semibold text-foreground/80">Established 2002</span>
+                <br />
+                Main Maysan campus inaugurated January 19, 2018
               </li>
             </ul>
           </div>
@@ -84,12 +89,6 @@ export function Footer() {
           <div>
             <h4 className="font-extrabold text-foreground text-xs uppercase tracking-widest mb-5">Resources</h4>
             <ul className="space-y-3 text-sm">
-              <li>
-                <Link to="/announcements" className="text-muted-foreground hover:text-primary transition-colors flex items-center gap-1.5 group">
-                  <span className="w-1 h-1 rounded-full bg-muted-foreground/30 group-hover:bg-primary transition-colors shrink-0" />
-                  Announcements
-                </Link>
-              </li>
               <li>
                 <span className="text-muted-foreground flex items-center gap-1.5 cursor-default">
                   <span className="w-1 h-1 rounded-full bg-muted-foreground/30 shrink-0" />

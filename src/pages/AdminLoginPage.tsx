@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { useNavigate, Link } from "react-router";
+import { useLocation, useNavigate, Link } from "react-router";
 import { motion, AnimatePresence, useReducedMotion } from "motion/react";
 import { Eye, EyeOff, LogIn, AlertCircle, X, ChevronDown, Sparkles, ShieldCheck, GraduationCap } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { cn } from "../lib/utils";
 import { supabase, isConnected } from "../lib/supabase";
+import { getDemoOrgApplicantCredentials } from "../lib/demoAccountConfig";
 import { Button } from "../components/ui/Button";
 import { useToast } from "../hooks/useToast";
 import { useTheme } from "../hooks/useTheme";
@@ -36,6 +37,34 @@ function friendlyAuthError(rawMessage?: string): string {
   return "Unable to sign in. Please check your email and password.";
 }
 
+function safeReturnPath(state: unknown): string {
+  if (!state || typeof state !== "object" || !("from" in state)) return "/home";
+
+  const from = (state as { from?: unknown }).from;
+  if (typeof from !== "string" || !from.startsWith("/") || from.startsWith("//")) {
+    return "/home";
+  }
+
+  try {
+    // Parse the complete relative URL so query-string intents such as
+    // /map?buildingId=...&report=1 survive authentication without allowing
+    // an external redirect.
+    const parsed = new URL(from, window.location.origin);
+    const isStudentPath = parsed.pathname === "/home"
+      || parsed.pathname === "/student"
+      || parsed.pathname.startsWith("/student/")
+      || parsed.pathname === "/map"
+      || parsed.pathname === "/buildings"
+      || parsed.pathname.startsWith("/buildings/");
+    if (parsed.origin === window.location.origin && isStudentPath) {
+      return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+    }
+  } catch {
+    // Fall back to the student home page for malformed navigation state.
+  }
+  return "/home";
+}
+
 // ── Demo account dropdown configuration ──────────────────────────────────────
 // The dropdown is purely a form-filling convenience for demonstrations. It
 // NEVER signs in automatically and NEVER bypasses Supabase: the user must still
@@ -51,6 +80,8 @@ const DEMO_ADMIN_EMAIL = (import.meta.env.VITE_DEMO_ADMIN_EMAIL ?? "").trim();
 const DEMO_ADMIN_PASSWORD = import.meta.env.VITE_DEMO_ADMIN_PASSWORD ?? "";
 const DEMO_STUDENT_EMAIL = (import.meta.env.VITE_DEMO_STUDENT_EMAIL ?? "").trim();
 const DEMO_STUDENT_PASSWORD = import.meta.env.VITE_DEMO_STUDENT_PASSWORD ?? "";
+const DEMO_ORG_STUDENT_EMAIL = (import.meta.env.VITE_DEMO_ORG_STUDENT_EMAIL ?? "").trim();
+const DEMO_ORG_STUDENT_PASSWORD = import.meta.env.VITE_DEMO_ORG_STUDENT_PASSWORD ?? "";
 
 interface DemoAccountOption {
   id: string;
@@ -64,8 +95,8 @@ interface DemoAccountOption {
 
 // Add new demonstration accounts here — the dropdown renders them
 // automatically, so the UI needs no redesign later. Each option is only
-// included when its own credentials are configured (admin and student are
-// independent of each other; both still require demo mode enabled).
+// included when its own credentials are configured; all still require demo
+// mode enabled.
 const DEMO_ACCOUNTS: DemoAccountOption[] = [];
 if (DEMO_LOGIN_ENABLED && DEMO_ADMIN_EMAIL && DEMO_ADMIN_PASSWORD) {
   DEMO_ACCOUNTS.push({
@@ -85,6 +116,21 @@ if (DEMO_LOGIN_ENABLED && DEMO_STUDENT_EMAIL && DEMO_STUDENT_PASSWORD) {
     icon: GraduationCap,
     email: DEMO_STUDENT_EMAIL,
     password: DEMO_STUDENT_PASSWORD,
+  });
+}
+const demoOrgApplicant = getDemoOrgApplicantCredentials(
+  DEMO_LOGIN_ENABLED,
+  DEMO_ORG_STUDENT_EMAIL,
+  DEMO_ORG_STUDENT_PASSWORD,
+);
+if (demoOrgApplicant) {
+  DEMO_ACCOUNTS.push({
+    id: "demo-org-student",
+    label: "Demo Student Org",
+    description: "Opens the student organization experience",
+    icon: GraduationCap,
+    email: demoOrgApplicant.email,
+    password: demoOrgApplicant.password,
   });
 }
 
@@ -334,6 +380,7 @@ function LegacyCampusIllustration() {
 
 // ═════════════════════════════════════════════════════════════════════════════
 export function AdminLoginPage() {
+  const location = useLocation();
   const navigate = useNavigate();
   const { theme, toggleTheme } = useTheme();
   const [form, setForm]        = useState({ email: "", password: "" });
@@ -425,11 +472,19 @@ export function AdminLoginPage() {
         return;
       }
 
-      // Students land on the student campus map experience. Any other role
-      // (there are only student/admin in the schema) is rejected safely.
+      // Students land on the campus map; Student Orgs go to the home page
+      // where the My Events section is visible.
+      if (profile.role === "student_org") {
+        toast.success("Signed in", "Welcome to the student experience!");
+        navigate("/home", { replace: true });
+        return;
+      }
+      // Students return to the protected page that sent them here. This keeps
+      // deep links such as /student/reports useful after authentication while
+      // still falling back to the student home page for a normal login.
       if (profile.role === "student") {
         toast.success("Signed in", "Welcome to the student experience!");
-        navigate("/map", { replace: true });
+        navigate(safeReturnPath(location.state), { replace: true });
         return;
       }
 

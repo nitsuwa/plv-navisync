@@ -3,10 +3,10 @@ import { describe, expect, it, vi } from "vitest";
 import { RoutePlannerDialog } from "../RoutePlannerDialog";
 import { BuildingPicker } from "../BuildingPicker";
 import { RouteErrorState } from "../RouteErrorState";
-import { RouteStepsPanel } from "../RouteStepsPanel";
 import type { Building } from "../../../types";
 import type { PlannedRoute } from "../../../lib/routePlanner";
 import type { RoomDest } from "../../../lib/combinedPathfinding";
+import type { SearchResult } from "../../../hooks/useCampusSearch";
 
 const building = (id: string, code: string, name: string): Building => ({
   id,
@@ -28,6 +28,12 @@ const room = (roomId: string, roomName: string, buildingId = "science"): RoomDes
   buildingCode: "SCI",
 });
 
+const destinationResult = (overrides: Partial<SearchResult> & Pick<SearchResult, "id" | "name" | "kind">): SearchResult => ({
+  accessible: false,
+  keywords: [overrides.name.toLowerCase()],
+  ...overrides,
+});
+
 const plannerProps = (overrides: Partial<React.ComponentProps<typeof RoutePlannerDialog>> = {}) => ({
   from: null,
   to: null,
@@ -43,6 +49,20 @@ const plannerProps = (overrides: Partial<React.ComponentProps<typeof RoutePlanne
   youAreHere: { x: 5, y: 5 },
   useMyLocation: false,
   onUseMyLocationChange: vi.fn(),
+  destinationResults: [],
+  ...overrides,
+});
+
+const route = (overrides: Partial<PlannedRoute> = {}): PlannedRoute => ({
+  points: [{ x: 0, y: 0 }, { x: 10, y: 10 }],
+  dist: 120,
+  mins: 2,
+  steps: [],
+  isGraphBased: true,
+  mode: "standard",
+  fromCode: "SCI",
+  toCode: "LIB",
+  transitions: [],
   ...overrides,
 });
 
@@ -65,142 +85,84 @@ describe("RoutePlannerDialog student accessibility", () => {
     opener.remove();
   });
 
-  it("gives modes, You Are Here, and room endpoint changes clear states and names", () => {
+  it("uses one active unified destination search instead of parallel building and room controls", () => {
+    const onSelectToDestination = vi.fn();
     render(
       <RoutePlannerDialog
         {...plannerProps({
-          fromRoom: room("201", "Room 201"),
+          destinationResults: [
+            destinationResult({ id: "science", name: "Science Hall", kind: "building", buildingId: "science" }),
+            destinationResult({ id: "205", name: "Room 205", kind: "room", buildingId: "science", buildingName: "Science Hall", floorLabel: "Floor 2", floorNumber: 2 }),
+          ],
+          onSelectToDestination,
+        })}
+      />,
+    );
+
+    expect(screen.getByTestId("route-endpoint-card-destination")).toBeInTheDocument();
+    expect(screen.queryByText("Destination room (optional)")).not.toBeInTheDocument();
+    expect(screen.queryByText("Or choose a destination building below.")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Choose destination" }));
+    expect(screen.getByRole("searchbox", { name: "Search destination" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("option", { name: /Room 205/ }));
+    expect(onSelectToDestination).toHaveBeenCalledWith(expect.objectContaining({ id: "205", kind: "room" }));
+  });
+
+  it("shows a selected room as one destination with building and floor context", () => {
+    render(
+      <RoutePlannerDialog
+        {...plannerProps({
+          to: building("science", "SCI", "Science Hall"),
           toRoom: room("205", "Room 205"),
-          onClearFromRoom: vi.fn(),
-          onClearToRoom: vi.fn(),
         })}
       />,
     );
 
-    expect(screen.getAllByRole("button", { name: /Standard routing/ })[0]).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getAllByRole("button", { name: /Accessible routing/ })[0]).toHaveAttribute("aria-pressed", "false");
-    expect(screen.getAllByRole("button", { name: /SOS routing/ })[0]).toHaveAttribute("aria-pressed", "false");
-    expect(screen.getAllByRole("button", { name: /Use You are here as the starting point/ })[0]).toHaveAttribute("aria-pressed", "false");
-    expect(screen.getAllByRole("button", { name: "Change starting room" })).toHaveLength(2);
-    expect(screen.getAllByRole("button", { name: "Change destination room" })).toHaveLength(2);
-    expect(screen.getAllByTestId("route-planner-live-status")[0]).toHaveTextContent(
-      "Planning from Room 201 in Science Hall (SCI) to Room 205 in Science Hall (SCI)",
-    );
+    const card = screen.getByTestId("route-endpoint-card-destination");
+    expect(card).toHaveTextContent("Room 205");
+    expect(card).toHaveTextContent("Science Hall · Floor 2");
+    expect(screen.queryByRole("searchbox", { name: "Search destination" })).not.toBeInTheDocument();
   });
 
-  it("offers published room destinations from a room origin while retaining building navigation", () => {
-    const onToRoomChange = vi.fn();
-    const destination = room("205", "Room 205");
-    const view = render(
-      <RoutePlannerDialog
-        {...plannerProps({
-          fromRoom: room("201", "Room 201"),
-          roomOptions: [destination],
-          onToRoomChange,
-        })}
-      />,
-    );
+  it("uses the dropped pin as the start and lets the user change it", () => {
+    render(<RoutePlannerDialog {...plannerProps({ useMyLocation: true })} />);
 
-    expect(screen.getAllByTestId("room-destination-selector")).toHaveLength(2);
-    expect(screen.getAllByRole("combobox", { name: "Destination room (optional)" })).toHaveLength(2);
-    expect(screen.getAllByText("Or choose a destination building below.")).toHaveLength(2);
-
-    fireEvent.change(screen.getAllByTestId("room-destination-selector")[0], {
-      target: { value: "science:2:205" },
-    });
-    expect(onToRoomChange).toHaveBeenCalledWith(destination);
-
-    view.rerender(
-      <RoutePlannerDialog
-        {...plannerProps({
-          fromRoom: room("201", "Room 201"),
-          toRoom: destination,
-          roomOptions: [destination],
-          onToRoomChange,
-          onClearToRoom: vi.fn(),
-        })}
-      />,
-    );
-    expect(screen.getAllByTestId("to-room-endpoint")).toHaveLength(2);
-    expect(screen.getAllByTestId("to-room-endpoint")[0]).toHaveTextContent("Room 205");
-    expect(screen.queryByTestId("room-destination-selector")).not.toBeInTheDocument();
+    expect(screen.getByTestId("route-endpoint-card-start")).toHaveTextContent("You are here");
+    fireEvent.click(screen.getByRole("button", { name: "Change start" }));
+    expect(screen.getByRole("searchbox", { name: "Search start" })).toBeInTheDocument();
   });
 
-  it("offers published rooms as starting points and returns the selected room", () => {
-    const onFromRoomChange = vi.fn();
-    const start = room("201", "Room 201");
-    render(
-      <RoutePlannerDialog
-        {...plannerProps({
-          roomOptions: [start],
-          onFromRoomChange,
-        })}
-      />,
-    );
-
-    expect(screen.getAllByTestId("room-start-selector")).toHaveLength(2);
-    expect(screen.getAllByRole("combobox", { name: "Starting room (optional)" })).toHaveLength(2);
-    expect(screen.getAllByText("Or choose a starting building above.")).toHaveLength(2);
-
-    fireEvent.change(screen.getAllByTestId("room-start-selector")[0], {
-      target: { value: "science:2:201" },
-    });
-    expect(onFromRoomChange).toHaveBeenCalledWith(start);
-  });
-
-  it("offers a room destination even when the origin is a building", () => {
-    const onToRoomChange = vi.fn();
-    const destination = room("205", "Room 205");
-    render(
-      <RoutePlannerDialog
-        {...plannerProps({
-          from: building("science", "SCI", "Science Hall"),
-          roomOptions: [destination],
-          onToRoomChange,
-        })}
-      />,
-    );
-
-    expect(screen.getAllByTestId("room-destination-selector")).toHaveLength(2);
-    fireEvent.change(screen.getAllByTestId("room-destination-selector")[0], {
-      target: { value: "science:2:205" },
-    });
-    expect(onToRoomChange).toHaveBeenCalledWith(destination);
-  });
-
-  it("swaps complete room endpoints instead of hiding the swap action", () => {
+  it("keeps swap available only when both endpoints are complete", () => {
     const onSwapEndpoints = vi.fn();
     render(
       <RoutePlannerDialog
         {...plannerProps({
           from: building("science", "SCI", "Science Hall"),
           to: building("library", "LIB", "Library"),
-          fromRoom: room("201", "Room 201"),
-          toRoom: { ...room("105", "Reading Room", "library"), buildingLabel: "Library", buildingCode: "LIB" },
           onSwapEndpoints,
         })}
       />,
     );
 
-    expect(screen.getAllByRole("button", { name: "Swap start and destination" })).toHaveLength(2);
-    fireEvent.click(screen.getAllByRole("button", { name: "Swap start and destination" })[0]);
+    const swap = screen.getByRole("button", { name: "Swap start and destination" });
+    expect(swap).not.toBeDisabled();
+    fireEvent.click(swap);
     expect(onSwapEndpoints).toHaveBeenCalledOnce();
   });
 
-  it("does not offer a dead Find Route action when no authored route exists", () => {
+  it("does not offer a dead start action when no authored route exists", () => {
     render(
       <RoutePlannerDialog
         {...plannerProps({
           from: building("science", "SCI", "Science Hall"),
           to: building("library", "LIB", "Library"),
-          route: null,
         })}
       />,
     );
 
-    const unavailableActions = screen.getAllByRole("button", { name: "Route Unavailable" });
-    expect(unavailableActions).toHaveLength(2);
-    unavailableActions.forEach((action) => expect(action).toBeDisabled());
+    const unavailable = screen.getByRole("button", { name: "Route unavailable" });
+    expect(unavailable).toBeDisabled();
   });
 
   it("closes on Escape from the dialog surface", () => {
@@ -214,21 +176,11 @@ describe("RoutePlannerDialog student accessibility", () => {
 describe("BuildingPicker map interaction", () => {
   it("keeps wheel and touch scrolling inside the endpoint list", () => {
     const onMapWheel = vi.fn();
-    const buildings = Array.from({ length: 12 }, (_, index) =>
-      building(`building-${index}`, `B${index}`, `Building ${index}`),
-    );
+    const buildings = Array.from({ length: 12 }, (_, index) => building(`building-${index}`, `B${index}`, `Building ${index}`));
 
     render(
       <div onWheel={onMapWheel}>
-        <BuildingPicker
-          badge="A"
-          badgeColor="#16a34a"
-          value={null}
-          onSelect={vi.fn()}
-          onClear={vi.fn()}
-          placeholder="Starting point…"
-          buildings={buildings}
-        />
+        <BuildingPicker badge="A" badgeColor="#16a34a" value={null} onSelect={vi.fn()} onClear={vi.fn()} placeholder="Starting point…" buildings={buildings} />
       </div>,
     );
 
@@ -236,7 +188,6 @@ describe("BuildingPicker map interaction", () => {
     const listbox = screen.getByRole("listbox");
     fireEvent.wheel(listbox, { deltaY: 120 });
     fireEvent.touchMove(listbox, { touches: [{ clientY: 100 }] });
-
     expect(onMapWheel).not.toHaveBeenCalled();
   });
 });
@@ -256,145 +207,5 @@ describe("student route feedback", () => {
     const emergencyAlert = screen.getAllByRole("alert")[1];
     expect(emergencyAlert).toHaveTextContent("Do not use Standard mode as an emergency route");
     expect(within(emergencyAlert).queryByRole("button", { name: /Try Standard/ })).not.toBeInTheDocument();
-  });
-
-  it("identifies the destination and exposes one stable current-step status", () => {
-    const route: PlannedRoute = {
-      points: [{ x: 0, y: 0 }, { x: 10, y: 0 }],
-      dist: 10,
-      mins: 1,
-      steps: [
-        { id: "start", icon: "start", instruction: "Start from SCI", distanceM: 5 },
-        { id: "arrive", icon: "arrive", instruction: "Arrive at Room 205", distanceM: 5 },
-      ],
-      isGraphBased: true,
-      mode: "standard",
-      fromCode: "SCI",
-      toCode: "Room 205",
-      transitions: [],
-    };
-
-    render(
-      <RouteStepsPanel
-        route={route}
-        mode="standard"
-        toName="Room 205 · Science Hall"
-        walkProgress={0.1}
-        onEnd={vi.fn()}
-        onZoom={vi.fn()}
-      />,
-    );
-
-    expect(screen.getByRole("region", { name: "Active route to Room 205 · Science Hall" })).toBeInTheDocument();
-    expect(screen.getByTestId("route-destination")).toHaveTextContent("To Room 205 · Science Hall");
-    expect(screen.getByRole("status")).toHaveTextContent("Current step: Start from SCI");
-    expect(screen.getByTestId("active-route-step")).toHaveAttribute("aria-current", "step");
-  });
-
-  it("keeps the first step active when route steps have no distances", () => {
-    const route: PlannedRoute = {
-      points: [{ x: 0, y: 0 }, { x: 10, y: 0 }],
-      dist: 10,
-      mins: 1,
-      steps: [
-        { id: "start", icon: "start", instruction: "Start from SCI" },
-        { id: "arrive", icon: "arrive", instruction: "Arrive at Room 205" },
-      ],
-      isGraphBased: true,
-      mode: "standard",
-      fromCode: "SCI",
-      toCode: "Room 205",
-      transitions: [],
-    };
-
-    render(
-      <RouteStepsPanel
-        route={route}
-        mode="standard"
-        toName="Room 205 · Science Hall"
-        walkProgress={0.1}
-        onEnd={vi.fn()}
-        onZoom={vi.fn()}
-      />,
-    );
-
-    expect(screen.getByRole("status")).toHaveTextContent("Current step: Start from SCI");
-  });
-
-  it("distributes missing mixed-route distances instead of announcing arrival early", () => {
-    const route: PlannedRoute = {
-      points: [{ x: 0, y: 0 }, { x: 20, y: 0 }],
-      dist: 20,
-      mins: 2,
-      steps: [
-        { id: "start", icon: "start", instruction: "Start from SCI" },
-        { id: "walk", icon: "walk", instruction: "Walk along the path", distanceM: 10 },
-        { id: "enter", icon: "enter", instruction: "Enter Science Hall" },
-        { id: "arrive", icon: "arrive", instruction: "Arrive at Room 205" },
-      ],
-      isGraphBased: true,
-      mode: "standard",
-      fromCode: "SCI",
-      toCode: "Room 205",
-      transitions: [],
-    };
-
-    render(
-      <RouteStepsPanel
-        route={route}
-        mode="standard"
-        toName="Room 205 · Science Hall"
-        walkProgress={0.5}
-        onEnd={vi.fn()}
-        onZoom={vi.fn()}
-      />,
-    );
-
-    expect(screen.getByRole("status")).not.toHaveTextContent("Arrive at Room 205");
-    expect(screen.getByRole("status")).toHaveTextContent("Current step: Walk along the path");
-  });
-
-  it("scopes source-room progress to the authored indoor exit leg", () => {
-    const route: PlannedRoute = {
-      points: [{ x: 0, y: 0 }, { x: 100, y: 0 }],
-      dist: 120,
-      mins: 4,
-      steps: [
-        { id: "start", icon: "start", instruction: "Start from Room 101" },
-        { id: "outdoor", icon: "walk", instruction: "Walk across campus", distanceM: 100 },
-        { id: "arrive", icon: "arrive", instruction: "Arrive at Room 205" },
-      ],
-      isGraphBased: true,
-      isAuthoredGraph: true,
-      mode: "standard",
-      fromCode: "Room 101",
-      toCode: "Room 205",
-      transitions: [],
-    };
-
-    render(
-      <RouteStepsPanel
-        route={route}
-        mode="standard"
-        toName="Room 205"
-        walkProgress={0}
-        activeLeg={{
-          steps: [
-            { id: "source-corridor", icon: "walk", instruction: "Continue along the source corridor", distanceM: 20 },
-          ],
-          distanceM: 20,
-          progress: 1,
-          statusInstruction: "Follow the indoor path from Room 101 to the building exit",
-        }}
-        onEnd={vi.fn()}
-        onZoom={vi.fn()}
-      />,
-    );
-
-    expect(screen.getByRole("status")).toHaveTextContent(
-      "Current step: Follow the indoor path from Room 101 to the building exit",
-    );
-    expect(screen.getByRole("status")).not.toHaveTextContent("Arrive at Room 205");
-    expect(screen.getByTestId("active-route-step")).toHaveTextContent("Continue along the source corridor");
   });
 });

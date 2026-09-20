@@ -1,4 +1,4 @@
-import { Outlet, useLocation } from "react-router";
+import { Navigate, Outlet, useLocation } from "react-router";
 import { Toaster } from "../../app/components/ui/sonner";
 import { Navbar } from "./Navbar";
 import { EmergencyBanner } from "./EmergencyBanner";
@@ -12,9 +12,13 @@ import { useStudentAuth } from "../../hooks/useStudentAuth";
 
 export function PublicLayout() {
   const { pathname } = useLocation();
-  const { isStudent } = useStudentAuth();
+  const { isStudent, loading: authLoading } = useStudentAuth();
 
-  const showFooter    = pathname === "/" || isStudent;
+  if (!authLoading && isStudent && pathname === "/") {
+    return <Navigate to="/home" replace />;
+  }
+
+  const showFooter    = pathname === "/" || pathname === "/home";
   const isMapPage     = pathname === "/map";
   const showBottomNav = true;
 

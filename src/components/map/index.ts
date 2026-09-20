@@ -9,3 +9,6 @@ export { RoutePlannerDialog } from "./RoutePlannerDialog";
 export { RouteStepsPanel } from "./RouteStepsPanel";
 export { RouteMapOverlay } from "./RouteMapOverlay";
 export { RouteErrorState } from "./RouteErrorState";
+export { EventInfoPanel } from "./EventInfoPanel";
+export { ActiveEventsList } from "./ActiveEventsList";
+export { StudentMapControls, type StudentMapControlsProps } from "./StudentMapControls";

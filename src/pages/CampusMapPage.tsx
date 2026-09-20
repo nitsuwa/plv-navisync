@@ -1,11 +1,12 @@
 import { useState, useCallback, useMemo, useRef, useEffect } from "react";
+import { useNavigate } from "react-router";
 
 import {
-  Search, LocateFixed, Building2, X,
+  Search, Building2, X,
   Accessibility, AlertTriangle, Navigation, Bookmark, Flag,
   Clock, ChevronRight, ChevronLeft, ChevronDown,
   Share2, CalendarDays, MapPin, Compass,
-  Footprints, QrCode, Loader2, RefreshCw, AlertCircle, Crosshair,
+  Footprints, QrCode, Loader2, RefreshCw, AlertCircle, Crosshair, LocateFixed,
 } from "lucide-react";
 
 import { useDebounce, usePublishedCampus, useCampusSearch, useReducedMotion, type SearchResult } from "../hooks";
@@ -23,15 +24,21 @@ import {
 } from "../lib/indoorPathfinding";
 import { hasNavigableRoute, planBuildingRoute, planDestinationRoute, planPointToDestinationRoute, planRouteFromPoint, type PlannedRoute, type RouteIndoorSegment, type RouteStep } from "../lib/routePlanner";
 import type { RoomDest } from "../lib/combinedPathfinding";
-import { latLngToMapPoint, snapToNearest } from "../lib/geo";
+import { snapToNearest } from "../lib/geo";
 import { NODES as STATIC_NAV_NODES } from "../lib/pathfinding";
 import { projectReadonlyOutdoorCampus } from "../lib/readonlyOutdoorCampus";
+import { clampViewportPan, getBuildingFocusPan, getPanToKeepWorldPoint, getViewportPanBounds } from "../lib/mapViewport";
+import { campusGroundAppearance } from "../lib/campusCanvas";
+import { routeEndpointFromSearchResult } from "../lib/routeEndpoints";
+import { mapBackAction, publishMapSurface, type MapSurface } from "../lib/mapSurface";
 import {
   RoutePlannerDialog, RouteStepsPanel, RouteMapOverlay,
   ReportModal, SignInPrompt,
   BuildingInfoPanel, MobileBuildingSheet,
+  StudentMapControls,
 } from "../components/map";
 import { studentAccountService } from "../services/studentAccountService";
+import { eventOverlayService } from "../services/eventOverlayService";
 import { usageAnalyticsService } from "../services/usageAnalyticsService";
 import type {
   Campus as EditorCampus,
@@ -75,10 +82,11 @@ function loadLastViewed(): { buildingId: string; zoom: number } | null {
 // ── Map constants ──────────────────────────────────────────────────────────
 const SVG_W  = 900;
 const SVG_H  = 680;
-const SVG_CX = SVG_W / 2;
-const SVG_CY = SVG_H / 2;
 const FP_W   = 440;  // floor plan viewBox width
 const FP_H   = 290;  // floor plan viewBox height
+const DEFAULT_OUTDOOR_ZOOM = typeof window !== "undefined" && window.innerWidth < 768 ? 1.18 : 1;
+const MOBILE_OUTDOOR_VIEWER_INSETS = { top: 220, right: 8, bottom: 112, left: 8 };
+const MOBILE_FLOOR_VIEWER_INSETS = { top: 88, right: 8, bottom: 112, left: 8 };
 interface Pt { x: number; y: number; }
 
 /**
@@ -389,6 +397,7 @@ export interface CampusMapPageProps {
 }
 
 export function CampusMapPage({ previewCampus = null, fullScreen = false }: CampusMapPageProps = {}) {
+  const navigate = useNavigate();
   const studentAuth = useStudentAuth();
   const publishedCampusState = usePublishedCampus(previewCampus);
 
@@ -453,8 +462,8 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
   // Core map state
   const [selected,     setSelected]     = useState<Building|null>(null);
   const [mapMode,      setMapMode]      = useState<MapMode>("standard");
-  const [zoom,         setZoom]         = useState(1);
-  const zoomRef = useRef(1);
+  const [zoom,         setZoom]         = useState(DEFAULT_OUTDOOR_ZOOM);
+  const zoomRef = useRef(DEFAULT_OUTDOOR_ZOOM);
   const [displayZoom,  setDisplayZoom]  = useState(1);
   const [pan,          setPan]          = useState<Pt>({ x:0, y:0 });
   const [saved,        setSaved]        = useState<Set<string>>(new Set());
@@ -510,13 +519,10 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
   // When set, the destination is a specific room/floor inside toBuilding.
   const [roomDestination, setRoomDestination] = useState<RoomDest | null>(null);
 
-  // "You are here" (kiosk-style start) state
+  // Manual dropped-pin start state
   const [youAreHere,    setYouAreHere]    = useState<{ x: number; y: number } | null>(null);
-  const [locating,      setLocating]      = useState(false);
   const [pinning,       setPinning]       = useState(false);
   const [useMyLocation, setUseMyLocation] = useState(false);
-  const locationRequestRef = useRef(0);
-  const locationSafetyRef = useRef<number | null>(null);
   // Walk animation progress 0..1
   const [walkProgress,  setWalkProgress]  = useState(0);
   const [walkNonce,     setWalkNonce]     = useState(0);
@@ -547,12 +553,17 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
   const enteredRoomRef = useRef<string | null>(null);
   // ── Pinch-to-zoom ref ──
   const pinchRef       = useRef<{ dist: number; initZoom: number } | null>(null);
+  // Pointer Events are the primary gesture path on modern mobile browsers.
+  // Keep the touch handlers below as a fallback for older WebKit browsers.
+  const pointerPointsRef = useRef(new Map<number, { x: number; y: number }>());
+  const pointerPinchRef = useRef<{ dist: number; initZoom: number } | null>(null);
+  const pointerGestureActiveRef = useRef(false);
   // ── Cursor-anchored zoom refs ──
   // Last known pointer position over the map (anchors +/- and keyboard zoom
   // when there's no live cursor event to read).
   const zoomAnchorRef  = useRef<{ clientX: number; clientY: number } | null>(null);
   // Latest target zoom, so stable listeners (wheel / keyboard) can step from it.
-  const zoomStateRef   = useRef(1);
+  const zoomStateRef   = useRef(DEFAULT_OUTDOOR_ZOOM);
   // Latest applyZoomAt — stable listeners always anchor against fresh zoom/pan.
   const applyZoomAtRef = useRef<(clientX: number, clientY: number, nextZoom: number) => void>(() => {});
 
@@ -567,7 +578,7 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
       const r = el.getBoundingClientRect();
       applyZoomAtRef.current(r.left + r.width / 2, r.top + r.height / 2, nextZoom);
     } else {
-      setZoom(nextZoom);
+      setZoom(Math.max(1, Math.min(3.5, nextZoom)));
     }
   }, []);
 
@@ -628,6 +639,63 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
 
   // ── Computed floor plan values ─────────────────────────────────────────
   const isFloorMode       = floorView !== null;
+  const mapSurface: MapSurface = directionsMode
+    ? "route-planner"
+    : (navigationPhase !== "idle" || navigationTransitioning)
+      ? "route-active"
+      : isFloorMode
+        ? "floor-plan"
+        : selected
+          ? "building-details"
+          : "browse";
+
+  useEffect(() => {
+    publishMapSurface(mapSurface);
+    return () => {
+      if (mapSurface !== "browse") publishMapSurface("browse");
+    };
+  }, [mapSurface]);
+
+  useEffect(() => {
+    const onPopState = () => {
+      const action = mapBackAction(mapSurface, searchFocused);
+      if (action === "leave") {
+        if (window.location.pathname === "/" && studentAuth.isStudent) {
+          navigate("/home", { replace: true });
+        }
+        return;
+      }
+
+      // React Router processes the browser pop before this listener can react.
+      // Reconcile the route first so Back never leaves the map surface rendered
+      // at a different URL (for example, Home content at /map).
+      if (window.location.pathname !== "/map") {
+        navigate("/map", { replace: true });
+      }
+
+      if (action === "close-search") {
+        setSearchFocused(false);
+        return;
+      }
+
+      if (directionsMode) {
+        setDirectionsMode(false);
+        setNavigationPhase("idle");
+        setNavigationTransitioning(false);
+        return;
+      }
+      if (isFloorMode) {
+        setFloorView(null);
+        setHighlightedRoom(null);
+        setIndoorRoute(null);
+        return;
+      }
+      setSelected(null);
+    };
+
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, [directionsMode, isFloorMode, mapSurface, navigate, searchFocused, studentAuth.isStudent]);
   // Use the actual FloorPlan from the published campus (authored in Map Builder)
   const activeFloorPlan   = useMemo(() => {
     if (!floorView || !activeCampus) return null;
@@ -643,6 +711,36 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
   const floorCanvasW = activeFloorPlan?.canvasW || FP_W;
   const floorCanvasH = activeFloorPlan?.canvasH || FP_H;
 
+  // ── Event Overlays (approved events for current floor) ───────────────
+  // The demo floor plans are keyed by building id + floor number, so the
+  // canonical floor id used by event overlays is `${buildingId}-f${number}`
+  // (this must match the locationRef.floorId saved by the event editor).
+  const [activeOverlays, setActiveOverlays] = useState<CampusEventOverlay[]>([]);
+  const [activeCampusOverlays, setActiveCampusOverlays] = useState<CampusEventOverlay[]>([]);
+
+  const floorLookupId =
+    isFloorMode && floorView && currentFloor
+      ? `${floorView.building.id}-f${currentFloor.number}`
+      : null;
+
+  useEffect(() => {
+    eventOverlayService
+      .getApprovedOverlaysForCampus()
+      .then(setActiveCampusOverlays)
+      .catch(() => setActiveCampusOverlays([]));
+  }, []);
+
+  useEffect(() => {
+    if (!floorLookupId) {
+      setActiveOverlays([]);
+      return;
+    }
+    eventOverlayService
+      .getApprovedOverlaysForFloor(floorLookupId)
+      .then(setActiveOverlays)
+      .catch(() => setActiveOverlays([]));
+  }, [floorLookupId]);
+
   // SVG center shifts with mode (floor plan uses authored canvas, campus uses campus canvas)
   const outdoorCanvasW = activeCampus?.canvasW || SVG_W;
   const outdoorCanvasH = activeCampus?.canvasH || SVG_H;
@@ -651,11 +749,33 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
   const tx = viewCX * (1 - displayZoom) + pan.x;
   const ty = viewCY * (1 - displayZoom) + pan.y;
 
-  // Dynamic viewBox: expands with zoom so scaled content is never clipped.
-  const vbW = (isFloorMode ? floorCanvasW : outdoorCanvasW) / displayZoom;
-  const vbH = (isFloorMode ? floorCanvasH : outdoorCanvasH) / displayZoom;
-  const vbX = (isFloorMode ? floorCanvasW : outdoorCanvasW) / 2 - vbW / 2;
-  const vbY = (isFloorMode ? floorCanvasH : outdoorCanvasH) / 2 - vbH / 2;
+  // Keep one authored coordinate system for every zoom level. The group
+  // transform owns zoom and pan, which makes boundary clamping predictable
+  // and keeps pointer coordinates aligned with the rendered map.
+  const viewportCanvasW = isFloorMode ? floorCanvasW : outdoorCanvasW;
+  const viewportCanvasH = isFloorMode ? floorCanvasH : outdoorCanvasH;
+  const getMapPanBounds = useCallback((zoomValue = zoomRef.current) => {
+    const rect = mapContainerRef.current?.getBoundingClientRect();
+    const isMobileViewport = typeof window !== "undefined" && window.innerWidth < 768;
+    return getViewportPanBounds({
+      mapWidth: viewportCanvasW,
+      mapHeight: viewportCanvasH,
+      viewportWidth: rect?.width || viewportCanvasW,
+      viewportHeight: rect?.height || viewportCanvasH,
+      zoom: zoomValue,
+      zoomOrigin: "center",
+      insets: isMobileViewport
+        ? (isFloorMode ? MOBILE_FLOOR_VIEWER_INSETS : MOBILE_OUTDOOR_VIEWER_INSETS)
+        : undefined,
+    });
+  }, [isFloorMode, viewportCanvasH, viewportCanvasW]);
+  const clampMapPan = useCallback((candidate: Pt, zoomValue = zoomRef.current) =>
+    clampViewportPan(candidate, getMapPanBounds(zoomValue)), [getMapPanBounds]);
+  const viewportBackground = isFloorMode
+    ? activeFloorPlan?.backgroundColor || "var(--map-floor-corridor)"
+    : activeCampus
+      ? campusGroundAppearance(activeCampus).color
+      : "var(--map-bg)";
 
   // ── Smooth zoom lerp ───────────────────────────────────────────────────
   useEffect(() => { zoomRef.current = zoom; }, [zoom]);
@@ -698,6 +818,40 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
     return () => cancelAnimationFrame(animId);
   }, []);
 
+  // Reconcile the current camera whenever the authored surface, viewport, or
+  // zoom changes. This also catches a resize from desktop to mobile without
+  // letting the map remain stranded beyond its new edge.
+  useEffect(() => {
+    const current = panRef.current;
+    const clamped = clampMapPan(current, zoom);
+    if (clamped.x !== current.x || clamped.y !== current.y) {
+      panRef.current = clamped;
+      setPan(clamped);
+    }
+    const target = panTargetRef.current;
+    if (target) panTargetRef.current = clampMapPan(target, zoom);
+  }, [clampMapPan, zoom]);
+
+  useEffect(() => {
+    const element = mapContainerRef.current;
+    if (!element || typeof ResizeObserver === "undefined") return;
+
+    const reconcileViewport = () => {
+      const current = panRef.current;
+      const clamped = clampMapPan(current, zoomRef.current);
+      if (clamped.x !== current.x || clamped.y !== current.y) {
+        panRef.current = clamped;
+        setPan(clamped);
+      }
+      const target = panTargetRef.current;
+      if (target) panTargetRef.current = clampMapPan(target, zoomRef.current);
+    };
+
+    const observer = new ResizeObserver(reconcileViewport);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [clampMapPan]);
+
   // ── Wheel zoom ─────────────────────────────────────────────────────────
   useEffect(() => {
     const el = mapContainerRef.current;
@@ -725,14 +879,14 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
         if (floorViewRef.current) { setFloorView(null); setZoom(1); setPan({x:0,y:0}); }
       }
       const PAN = 30;
-      if (e.key === "ArrowRight") { panTargetRef.current = null; setPan(p => ({...p, x:p.x-PAN})); }
-      if (e.key === "ArrowLeft")  { panTargetRef.current = null; setPan(p => ({...p, x:p.x+PAN})); }
-      if (e.key === "ArrowDown")  { panTargetRef.current = null; setPan(p => ({...p, y:p.y-PAN})); }
-      if (e.key === "ArrowUp")    { panTargetRef.current = null; setPan(p => ({...p, y:p.y+PAN})); }
+      if (e.key === "ArrowRight") { panTargetRef.current = null; setPan(p => clampMapPan({...p, x:p.x-PAN})); }
+      if (e.key === "ArrowLeft")  { panTargetRef.current = null; setPan(p => clampMapPan({...p, x:p.x+PAN})); }
+      if (e.key === "ArrowDown")  { panTargetRef.current = null; setPan(p => clampMapPan({...p, y:p.y-PAN})); }
+      if (e.key === "ArrowUp")    { panTargetRef.current = null; setPan(p => clampMapPan({...p, y:p.y+PAN})); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [clampMapPan]);
 
   // ── Drag-to-pan ────────────────────────────────────────────────────────
   // ── Inertia decay ────────────────────────────────────────────────────
@@ -745,17 +899,24 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
       if (speed < minVelocity) { inertiaRef.current = 0; return; }
       vx *= friction;
       vy *= friction;
-      setPan(prev => ({ x: prev.x + vx, y: prev.y + vy }));
+      const current = panRef.current;
+      const next = clampMapPan({ x: current.x + vx, y: current.y + vy });
+      panRef.current = next;
+      setPan(next);
+      if (next.x === current.x && next.y === current.y) {
+        inertiaRef.current = 0;
+        return;
+      }
       inertiaRef.current = requestAnimationFrame(decay);
     };
     inertiaRef.current = requestAnimationFrame(decay);
-  }, []);
+  }, [clampMapPan]);
 
   // ── Shared pan logic ─────────────────────────────────────────────────
   const applyPanDelta = useCallback((dx: number, dy: number, drag: NonNullable<typeof dragRef.current>) => {
     const scale = getScale();
-    setPan({ x: drag.px + dx * scale, y: drag.py + dy * scale });
-  }, [getScale]);
+    setPan(clampMapPan({ x: drag.px + dx * scale, y: drag.py + dy * scale }));
+  }, [clampMapPan, getScale]);
 
   // ── Per-frame velocity tracking helper ───────────────────────────────
   const trackVelocity = useCallback((drag: NonNullable<typeof dragRef.current>, newDx: number, newDy: number, smoothing: number) => {
@@ -769,7 +930,7 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
   }, [getScale]);
 
   // ── Mouse drag-to-pan ────────────────────────────────────────────────
-  // ── "You are here" helpers ──────────────────────────────────────────────
+  // ── Dropped-pin helpers ─────────────────────────────────────────────────
 
   /** Snap an SVG point to the nearest walkway node (campus graph or static). */
   const snapPointToGraph = useCallback((pt: { x: number; y: number }): { x: number; y: number } => {
@@ -782,73 +943,8 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
   }, [activeCampus]);
 
   const startPinning = useCallback(() => {
-    setPinning(true);
-    setLocating(false);
+    setPinning((active) => !active);
   }, []);
-
-  /**
-   * "You are here" button: tries browser GPS; if unavailable or denied,
-   * switches to tap-on-map mode so the demo still works anywhere.
-   */
-  const handleLocate = useCallback(() => {
-    const requestId = locationRequestRef.current + 1;
-    locationRequestRef.current = requestId;
-    if (locationSafetyRef.current !== null) {
-      clearTimeout(locationSafetyRef.current);
-      locationSafetyRef.current = null;
-    }
-    if (pinning) { setPinning(false); return; }
-    if (!navigator.geolocation) { startPinning(); return; }
-    setLocating(true);
-    // Safety net: if the browser never answers (e.g. blocked in a demo
-    // environment), fall back to tap-on-map after a few seconds.
-    const safety = window.setTimeout(() => {
-      if (locationRequestRef.current !== requestId) return;
-      locationSafetyRef.current = null;
-      setLocating(false);
-      startPinning();
-    }, 6000);
-    locationSafetyRef.current = safety;
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        if (locationRequestRef.current !== requestId) return;
-        clearTimeout(safety);
-        locationSafetyRef.current = null;
-        setLocating(false);
-        // A successful callback may arrive after the timeout fallback has
-        // enabled tap-on-map pinning. GPS is authoritative, so clear that
-        // stale interaction mode before placing the marker.
-        setPinning(false);
-        const anchor = activeCampus?.coordinates ?? { lat: 14.7062, lng: 120.9813 };
-        const raw = latLngToMapPoint(
-          pos.coords.latitude,
-          pos.coords.longitude,
-          anchor,
-          activeCampus?.canvasW || SVG_W,
-          activeCampus?.canvasH || SVG_H,
-        );
-        const snapped = snapPointToGraph(raw);
-        setYouAreHere(snapped);
-        setUseMyLocation(true);
-        setFromBuilding(null);
-        setToBuilding(null);
-        setRoomOrigin(null);
-        setRoomDestination(null);
-        setNavigationPhase("idle");
-        // Deliberately do NOT auto-open the Route Planner: dropping a pin
-        // should just place the marker. The user taps "Plan route" on the
-        // "You are here" chip when they are ready (kiosk-style flow).
-      },
-      () => {
-        if (locationRequestRef.current !== requestId) return;
-        clearTimeout(safety);
-        locationSafetyRef.current = null;
-        setLocating(false);
-        startPinning();
-      },
-      { enableHighAccuracy: true, timeout: 6000 }
-    );
-  }, [activeCampus, pinning, snapPointToGraph, startPinning]);
 
   /** Convert a client-space point to SVG content coordinates (inverse of pan/zoom). */
   const svgPointFromClient = useCallback((clientX: number, clientY: number): { x: number; y: number } | null => {
@@ -863,15 +959,7 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
     return { x: (p.x - tx) / displayZoom, y: (p.y - ty) / displayZoom };
   }, [tx, ty, displayZoom]);
 
-  /**
-   * Cursor-anchored zoom: change the zoom level while keeping the world point
-   * under (clientX, clientY) pinned to the same screen position.
-   *
-   * With the center-based viewBox model the screen position of a world point is
-   *   screen_x ∝ (Wx·z + Cx·(1/z − z) + pan.x) · z     (Cx = canvasW/2)
-   * so the pan that keeps it fixed when z → z′ is
-   *   pan′.x = A/z′ − Wx·z′ − Cx·(1/z′ − z′),   A = (Wx·z + Cx·(1/z − z) + pan.x)·z
-   */
+  /** Cursor-anchored zoom with the same center-origin transform as the map. */
   const applyZoomAt = useCallback((clientX: number, clientY: number, nextZoom: number) => {
     const clamped = parseFloat(Math.max(0.35, Math.min(3.5, nextZoom)).toFixed(2));
     const pt = svgPointFromClient(clientX, clientY);
@@ -882,25 +970,26 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
     const canvasW = isFloorMode ? floorCanvasW : outdoorCanvasW;
     const canvasH = isFloorMode ? floorCanvasH : outdoorCanvasH;
     const z = displayZoom;
-    const Cx = canvasW / 2;
-    const Cy = canvasH / 2;
-    const ax = (pt.x * z + Cx * (1 / z - z) + pan.x) * z;
-    const ay = (pt.y * z + Cy * (1 / z - z) + pan.y) * z;
     // Don't let the auto-pan-to-selected-building animation fight the anchor.
     panTargetRef.current = null;
-    setPan({
-      x: ax / clamped - pt.x * clamped - Cx * (1 / clamped - clamped),
-      y: ay / clamped - pt.y * clamped - Cy * (1 / clamped - clamped),
-    });
+    setPan(clampMapPan(getPanToKeepWorldPoint({
+      mapWidth: canvasW,
+      mapHeight: canvasH,
+      worldPoint: pt,
+      pan,
+      zoom: z,
+      nextZoom: clamped,
+      zoomOrigin: "center",
+    }), clamped));
     setZoom(clamped);
-  }, [displayZoom, pan, svgPointFromClient, isFloorMode, floorCanvasW, floorCanvasH, outdoorCanvasW, outdoorCanvasH]);
+  }, [clampMapPan, displayZoom, getPanToKeepWorldPoint, pan, svgPointFromClient, isFloorMode, floorCanvasW, floorCanvasH, outdoorCanvasW, outdoorCanvasH]);
 
   // Keep stable listeners (wheel, keys, pinch) anchored against the latest zoom/pan.
   useEffect(() => {
     applyZoomAtRef.current = applyZoomAt;
   });
 
-  /** Tap-on-map handler while pinning — places the "You are here" marker. */
+  /** Tap-on-map handler while pinning — places the manual dropped pin. */
   const handleMapPinTap = useCallback((clientX: number, clientY: number) => {
     if (dragRef.current?.moved) return;
     const pt = svgPointFromClient(clientX, clientY);
@@ -914,7 +1003,7 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
     setRoomOrigin(null);
     setRoomDestination(null);
     setNavigationPhase("idle");
-    // No auto-open of the Route Planner here either — the "You are here"
+    // No auto-open of the Route Planner here either — the dropped pin
     // chip with its "Plan route" button is the single, clear next step.
   }, [svgPointFromClient, snapPointToGraph]);
 
@@ -928,6 +1017,14 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
     setRoomDestination(null);
     setNavigationPhase("idle");
   }, []);
+
+  const resetMapView = useCallback(() => {
+    setZoom(1);
+    setPan(clampMapPan({ x: 0, y: 0 }, 1));
+    setYouAreHere(null);
+    setUseMyLocation(false);
+    setPinning(false);
+  }, [clampMapPan]);
 
   /** Restart the walk animation from the start. */
   const replayWalk = useCallback(() => {
@@ -1037,7 +1134,7 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
         if (speed > 1) startInertia(drag.vx * 0.85, drag.vy * 0.85);
       } else if (!isFloorMode) {
         if (pinning && !(e.target as Element).closest("[data-bldg],[data-no-drag]")) {
-          // Tap-on-map: place the "You are here" marker on empty map / walkways.
+          // Tap-on-map: place the dropped pin on empty map / walkways.
           handleMapPinTap(e.clientX, e.clientY);
         } else {
           setSelected(null); setSearchFocused(false);
@@ -1048,6 +1145,7 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
 
   // ── Touch drag-to-pan with inertia ───────────────────────────────────
   const onTouchStart = useCallback((e: React.TouchEvent) => {
+    if (pointerGestureActiveRef.current) return;
     if ((e.target as Element).closest("[data-no-drag]")) return;
     // Two fingers → pinch-to-zoom
     if (e.touches.length === 2) {
@@ -1070,6 +1168,7 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
   }, [pan, zoom]);
 
   const onTouchMove = useCallback((e: React.TouchEvent) => {
+    if (pointerGestureActiveRef.current) return;
     // Pinch-to-zoom: 2 fingers
     if (e.touches.length === 2 && pinchRef.current) {
       e.preventDefault();
@@ -1097,6 +1196,7 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
   }, [applyPanDelta, trackVelocity]);
 
   const onTouchEnd = useCallback((e: React.TouchEvent) => {
+    if (pointerGestureActiveRef.current) return;
     pinchRef.current = null;
     const drag = dragRef.current;
     dragRef.current = null;
@@ -1111,6 +1211,105 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
       }
     }
   }, [startInertia, isFloorMode, pinning, handleMapPinTap]);
+
+  // ── Pointer gesture fallback/primary path for mobile pinch ─────────────
+  const onPointerDown = useCallback((e: React.PointerEvent) => {
+    if (e.pointerType === "mouse") return;
+    if ((e.target as Element).closest("[data-no-drag]")) return;
+
+    pointerGestureActiveRef.current = true;
+    pointerPointsRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      // Pointer capture is not available in a few embedded WebViews.
+    }
+
+    if (pointerPointsRef.current.size === 2) {
+      e.preventDefault();
+      const [first, second] = [...pointerPointsRef.current.values()];
+      pointerPinchRef.current = {
+        dist: Math.hypot(first.x - second.x, first.y - second.y),
+        initZoom: zoomRef.current,
+      };
+      dragRef.current = null;
+      panTargetRef.current = null;
+      cancelAnimationFrame(inertiaRef.current);
+      inertiaRef.current = 0;
+      return;
+    }
+
+    e.preventDefault();
+    panTargetRef.current = null;
+    cancelAnimationFrame(inertiaRef.current);
+    inertiaRef.current = 0;
+    dragRef.current = {
+      sx: e.clientX,
+      sy: e.clientY,
+      lx: e.clientX,
+      ly: e.clientY,
+      px: panRef.current.x,
+      py: panRef.current.y,
+      moved: false,
+      vx: 0,
+      vy: 0,
+      lastTime: performance.now(),
+    };
+  }, []);
+
+  const onPointerMove = useCallback((e: React.PointerEvent) => {
+    if (!pointerGestureActiveRef.current || e.pointerType === "mouse") return;
+    if (!pointerPointsRef.current.has(e.pointerId)) return;
+
+    pointerPointsRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pointerPointsRef.current.size === 2 && pointerPinchRef.current) {
+      e.preventDefault();
+      const [first, second] = [...pointerPointsRef.current.values()];
+      const distance = Math.hypot(first.x - second.x, first.y - second.y);
+      const ratio = distance / Math.max(1, pointerPinchRef.current.dist);
+      const next = parseFloat(Math.max(1, Math.min(3.5, pointerPinchRef.current.initZoom * ratio)).toFixed(2));
+      applyZoomAtRef.current((first.x + second.x) / 2, (first.y + second.y) / 2, next);
+      return;
+    }
+
+    if (pointerPointsRef.current.size !== 1) return;
+    const drag = dragRef.current;
+    if (!drag) return;
+    e.preventDefault();
+    const dx = e.clientX - drag.sx;
+    const dy = e.clientY - drag.sy;
+    if (!drag.moved && Math.hypot(dx, dy) < 4) return;
+    drag.moved = true;
+    applyPanDelta(dx, dy, drag);
+    trackVelocity(drag, e.clientX - drag.lx, e.clientY - drag.ly, 0.35);
+    drag.lx = e.clientX;
+    drag.ly = e.clientY;
+  }, [applyPanDelta, trackVelocity]);
+
+  const onPointerEnd = useCallback((e: React.PointerEvent) => {
+    if (!pointerGestureActiveRef.current || e.pointerType === "mouse") return;
+    pointerPointsRef.current.delete(e.pointerId);
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {
+      // Pointer capture may already have been released by the browser.
+    }
+
+    if (pointerPointsRef.current.size > 0) {
+      pointerPinchRef.current = null;
+      dragRef.current = null;
+      return;
+    }
+
+    pointerPinchRef.current = null;
+    pointerGestureActiveRef.current = false;
+    const drag = dragRef.current;
+    dragRef.current = null;
+    if (drag?.moved) {
+      const speed = Math.hypot(drag.vx, drag.vy);
+      if (speed > 1) startInertia(drag.vx * 0.85, drag.vy * 0.85);
+    }
+  }, [startInertia]);
 
   // ── Floor plan handlers ────────────────────────────────────────────────
   const openFloorPlan = useCallback((building: Building, floor: number = 1) => {
@@ -1261,11 +1460,6 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
     const nextCampusId = activeCampus?.id ?? null;
     if (previousCampusIdRef.current === nextCampusId) return;
     previousCampusIdRef.current = nextCampusId;
-    locationRequestRef.current += 1;
-    if (locationSafetyRef.current !== null) {
-      clearTimeout(locationSafetyRef.current);
-      locationSafetyRef.current = null;
-    }
     cancelAnimationFrame(walkAnimRef.current ?? 0);
     cancelAnimationFrame(navigationTransitionAnimRef.current ?? 0);
     walkAnimRef.current = null;
@@ -1284,14 +1478,13 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
     setYouAreHere(null);
     setUseMyLocation(false);
     setPinning(false);
-    setLocating(false);
     setMapMode("standard");
     setNavigationTransitioning(false);
     setNavigationPhase("idle");
     setWalkProgress(0);
     setIndoorWalkProgress(0);
     setShowArrival(false);
-    setZoom(1);
+    setZoom(DEFAULT_OUTDOOR_ZOOM);
     setPan({ x: 0, y: 0 });
     routeRef.current = null;
     enteredRoomRef.current = null;
@@ -1377,12 +1570,12 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
     const midY = (minY + maxY) / 2;
     // Animate the pan smoothly toward the route midpoint (the existing pan
     // lerp drives it; wheel/drag/pinch cancel it via panTargetRef = null).
-    panTargetRef.current = {
+    panTargetRef.current = clampMapPan({
       x: z * (outdoorCanvasW / 2 - midX),
       y: z * (outdoorCanvasH / 2 - midY),
-    };
+    }, z);
     setZoom(z);
-  }, [route, outdoorCanvasW, outdoorCanvasH]);
+  }, [clampMapPan, route, outdoorCanvasW, outdoorCanvasH]);
 
   // A room can be selected while its floor plan is still on screen. When the
   // user confirms a route whose origin is inside a building, zoom the floor
@@ -1468,23 +1661,21 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
       const isMobile = typeof window !== "undefined" && window.innerWidth < 768;
       const currentZoom = zoomRef.current;
       const targetZoom = isMobile && currentZoom < 1.4 ? 1.4 : currentZoom;
-      const sidePanelOffset = isMobile ? 0 : -80;
-      let mobileYOffset = 0;
-      if (isMobile) {
-        const vh = window.innerHeight;
-        const vw = window.innerWidth;
-        const svgRenderScale = Math.min(vw / SVG_W, vh / SVG_H);
-        mobileYOffset = -(vh * 0.18) / svgRenderScale;
-      }
-      panTargetRef.current = {
-        x: (SVG_CX - cx) * targetZoom + sidePanelOffset,
-        y: (SVG_CY - cy) * targetZoom + mobileYOffset,
-      };
+      const mapRect = mapContainerRef.current?.getBoundingClientRect();
+      panTargetRef.current = clampMapPan(getBuildingFocusPan({
+        buildingCenter: { x: cx, y: cy },
+        canvasW: outdoorCanvasW,
+        canvasH: outdoorCanvasH,
+        zoom: targetZoom,
+        mapWidth: mapRect?.width || window.innerWidth,
+        mapHeight: mapRect?.height || window.innerHeight,
+        isMobile,
+      }), targetZoom);
       if (isMobile && currentZoom < 1.4) {
         setZoom(1.4);
       }
     }
-  }, [selected?.id, B_POS, isFloorMode, route]);
+  }, [clampMapPan, selected?.id, B_POS, isFloorMode, outdoorCanvasH, outdoorCanvasW, route]);
 
   const selectBuilding = useCallback((b: Building|null) => {
     setSelected(b);
@@ -1503,6 +1694,17 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
       saveLastViewed({ buildingId: b.id, zoom });
     }
   }, [recentSearches, zoom]);
+
+  /** Open the route planner as the only active mobile map sheet. */
+  const openDirections = useCallback(() => {
+    setSelected(null);
+    setShowQR(false);
+    setSearch("");
+    setSearchFocused(false);
+    setShowCampusSelector(false);
+    setUseMyLocation(Boolean(youAreHere));
+    setDirectionsMode(true);
+  }, [youAreHere]);
 
   const handleSelectSearchResult = useCallback((item: SearchResult) => {
     usageAnalyticsService.track("search", item.name);
@@ -1535,9 +1737,8 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
     setRoomOrigin(null);
     setRoomDestination(null); // building directions, not room directions
     setNavigationPhase("idle");
-    setSelected(null); // Close building info panel to avoid overlap with route planner
-    setDirectionsMode(true);
-  }, []);
+    openDirections();
+  }, [openDirections]);
 
   // ── Save recent destination once a route is successfully computed ──
   const lastSavedDestRef = useRef<string | null>(null);
@@ -2035,17 +2236,25 @@ const buildingFill = (id: string) =>
   return (
     <div
       ref={mapContainerRef}
-      className="relative overflow-hidden animate-fade-in"
+      data-testid="student-map-surface"
+      role="region"
+      aria-label="Interactive campus map"
+      className={cn(
+        "student-map-surface relative h-[100dvh] overflow-hidden animate-fade-in",
+        !fullScreen && "md:h-[calc(100dvh-76px)]",
+      )}
       style={{
-        height: fullScreen ? "100dvh" : "calc(100dvh - 76px)",
-        background: isFloorMode ? "var(--map-floor-corridor)" : "var(--map-bg)",
+        height: fullScreen ? "100dvh" : undefined,
+        background: viewportBackground,
         cursor: isDragging ? "grabbing" : "grab",
         touchAction: "none"
       }}
       onMouseDown={onMouseDown} onMouseMove={onMouseMove}
       onMouseUp={onMouseUp} onMouseLeave={onMouseUp}
       onTouchStart={onTouchStart} onTouchMove={onTouchMove}
-      onTouchEnd={onTouchEnd}>
+      onTouchEnd={onTouchEnd}
+      onPointerDown={onPointerDown} onPointerMove={onPointerMove}
+      onPointerUp={onPointerEnd} onPointerCancel={onPointerEnd}>
 
       {/* Cached Offline Banner — small inline toast */}
       {isCampusCached && (
@@ -2062,29 +2271,29 @@ const buildingFill = (id: string) =>
       {pinning && !isFloorMode && (
         <div data-no-drag className="absolute top-14 left-1/2 -translate-x-1/2 z-40 flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-500/90 text-white text-xs font-bold shadow-xl border border-blue-400/30 animate-fade-in">
           <Crosshair className="h-3.5 w-3.5 animate-pulse shrink-0" />
-          <span>Tap anywhere on the map to set your location</span>
+          <span>Tap anywhere on the map to drop a pin</span>
           <button onClick={() => setPinning(false)} className="underline ml-1 hover:opacity-80">
             Cancel
           </button>
         </div>
       )}
 
-      {/* "You are here" chip — single clear action (Plan route / Clear) */}
+      {/* Dropped-pin chip — single clear action (Plan route / Clear) */}
       {youAreHere && !isFloorMode && !directionsMode && (
         <div data-no-drag className="absolute top-14 left-1/2 -translate-x-1/2 z-40 flex items-center gap-1.5 px-2.5 py-1.5 rounded-full bg-blue-500 text-white text-[11px] font-bold shadow-xl border border-blue-400/40">
           <Crosshair className="h-3 w-3 animate-pulse" />
-          <span>You are here</span>
+          <span>Dropped pin</span>
           <button
-            onClick={(e) => { e.stopPropagation(); setDirectionsMode(true); }}
+            onClick={(e) => { e.stopPropagation(); openDirections(); }}
             className="ml-1 px-2 py-0.5 rounded-full bg-white text-blue-700 text-[10px] font-extrabold hover:bg-blue-50 transition-colors"
-            aria-label="Plan a route from your location"
+            aria-label="Plan a route from the dropped pin"
           >
             Plan route
           </button>
           <button
             onClick={(e) => { e.stopPropagation(); clearYouAreHere(); }}
             className="ml-0.5 w-5 h-5 rounded-full bg-white/20 flex items-center justify-center hover:bg-white/30 transition-colors"
-            aria-label="Clear your location"
+            aria-label="Clear dropped pin"
           >
             <X className="h-3 w-3" />
           </button>
@@ -2151,7 +2360,7 @@ const buildingFill = (id: string) =>
                 if (isRoomOrigin) {
                   setToBuilding(null);
                   setRoomDestination(null);
-                  setDirectionsMode(true);
+                  openDirections();
                 } else {
                   startRoomDirections(room.id);
                 }
@@ -2182,7 +2391,7 @@ const buildingFill = (id: string) =>
 
       {/* ══════════════════════════ MAP SVG ══════════════════════════ */}
       <svg ref={svgRef}
-        viewBox={`${vbX} ${vbY} ${vbW} ${vbH}`}
+        viewBox={`0 0 ${viewportCanvasW} ${viewportCanvasH}`}
         className="absolute inset-0 w-full h-full select-none"
         preserveAspectRatio="xMidYMid meet"
         onDoubleClick={e => {
@@ -2241,9 +2450,112 @@ const buildingFill = (id: string) =>
           })() : (
           /* ════════ CAMPUS MAP mode ════════ */
           <>
-            <rect data-bg="true" width={outdoorCanvasW} height={outdoorCanvasH} fill="var(--map-bg)" style={{ cursor: pinning ? "crosshair" : undefined }}/>
+            <rect data-bg="true" width={outdoorCanvasW} height={outdoorCanvasH} fill={viewportBackground} style={{ cursor: pinning ? "crosshair" : undefined }}/>
             <rect x={6} y={6} width={Math.max(0, outdoorCanvasW - 12)} height={Math.max(0, outdoorCanvasH - 12)} fill="none" stroke="var(--map-boundary)" strokeWidth={3} rx={4} opacity={0.5} strokeDasharray="8 4"/>
 
+            {/* Legacy overlays remain only for the compatibility/demo map. */}
+            {!activeCampus && mapMode === "accessible" && <>
+              <path d="M 119,289 L 155,289 L 155,170" fill="none" stroke="#16a34a" strokeWidth={7} opacity={0.5} strokeDasharray="12,6" strokeLinecap="round"/>
+              <path d="M 414,289 L 540,289 L 540,373" fill="none" stroke="#16a34a" strokeWidth={7} opacity={0.5} strokeDasharray="12,6" strokeLinecap="round"/>
+              <path d="M 414,289 L 414,435 L 305,435" fill="none" stroke="#16a34a" strokeWidth={7} opacity={0.5} strokeDasharray="12,6" strokeLinecap="round"/>
+              {([[155,290,"#16a34a"],[414,373,"#16a34a"],[414,435,"#16a34a"]] as [number,number,string][]).map(([cx,cy,clr],i) => (
+                <g key={i}>
+                  <circle cx={cx} cy={cy} r={12} fill="white" stroke={clr} strokeWidth={2.5} style={{ animation:"scale-in 0.3s ease both" }}/>
+                  <svg x={cx-8} y={cy-8} width={16} height={16} viewBox="0 0 24 24" fill="none" stroke={clr} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="select-none">
+                    <circle cx="16" cy="4" r="1"/>
+                    <path d="m18 19 1-7-6 1"/>
+                    <path d="m5 8 3-3 5.5 3-2.36 3.5"/>
+                    <path d="M4.24 14.5a5 5 0 0 0 6.88 6"/>
+                    <path d="M13.76 17.5a5 5 0 0 0-6.88-6"/>
+                  </svg>
+                  {!reducedMotion && (
+                    <circle cx={cx} cy={cy} r={12} fill="none" stroke={clr} strokeWidth={2} opacity={0.3}>
+                      <animate attributeName="r" from="12" to="20" dur="1.5s" repeatCount="indefinite"/>
+                      <animate attributeName="opacity" from="0.3" to="0" dur="1.5s" repeatCount="indefinite"/>
+                    </circle>
+                  )}
+                </g>
+              ))}
+              {/* Building entrance accessibility markers */}
+              {([[155,170,"MAB - Ramp Access"],[395,115,"ADM - Elevator"],[540,295,"LRC - Ground"],[165,305,"ELB - Ramp"],[305,435,"GYM - Level"],[605,415,"SSC - Ground"]] as [number,number,string][]).map(([ex,ey,label],i) => (
+                <g key={`acc${i}`}>
+                  <rect x={ex-10} y={ey-10} width={20} height={10} rx={4} fill="#16a34a" fillOpacity={0.85} stroke="white" strokeWidth={1}/>
+                  <text x={ex} y={ey-3} textAnchor="middle" fill="white" fontSize={5.5} fontWeight="900" className="select-none pointer-events-none">{label}</text>
+                </g>
+              ))}
+            </>}
+            {/* Emergency overlay */}
+            {!activeCampus && mapMode === "emergency" && <>
+              <rect x={0} y={272} width={SVG_W} height={26} fill="rgba(220,38,38,0.15)"/>
+              {([[119,285,"EXIT"],[680,285,"EXIT"],[401,285,"RALLY"]] as [number,number,string][]).map(([cx,cy,lbl],i) => (
+                <g key={i}><circle cx={cx} cy={cy} r={16} fill="#dc2626" stroke="white" strokeWidth={2.5}/><text x={cx} y={cy+4} textAnchor="middle" fill="white" fontSize={7} fontWeight="900" className="select-none">{lbl}</text></g>
+              ))}
+            </>}
+
+            {/* ── Event Overlay (approved events for campus grounds) ── */}
+            {activeCampusOverlays.map((overlay) => (
+              <g
+                key={overlay.id}
+                className="cursor-pointer transition-opacity hover:opacity-80"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (!dragRef.current?.moved) setSelectedEvent(overlay);
+                }}
+              >
+                {/* Event furniture */}
+                {(overlay.eventFurniture ?? []).map((f) => (
+                  <g key={f.id} transform={`translate(${f.x},${f.y}) rotate(${f.rotation || 0},${f.width / 2},${f.height / 2})`}>
+                    <rect
+                      width={f.width}
+                      height={f.height}
+                      fill={f.color}
+                      fillOpacity={0.75}
+                      stroke="black"
+                      strokeWidth={1}
+                      rx={3}
+                    />
+                    <text
+                      x={f.width / 2}
+                      y={f.height / 2}
+                      textAnchor="middle"
+                      dominantBaseline="middle"
+                      fontSize={Math.min(f.width, f.height) * 0.3}
+                      fill="black"
+                      fontWeight="bold"
+                      className="pointer-events-none"
+                    >
+                      {f.name}
+                    </text>
+                  </g>
+                ))}
+
+                {/* Event labels */}
+                {(overlay.eventLabels ?? []).map((l) => (
+                  <text
+                    key={l.id}
+                    x={l.x}
+                    y={l.y}
+                    fontSize={l.size || 14}
+                    fill={l.color || "#000000"}
+                    fontWeight="bold"
+                    textAnchor="middle"
+                    className="pointer-events-none"
+                  >
+                    {l.text}
+                  </text>
+                ))}
+
+                {/* Event overlay indicator */}
+                {overlay.eventFurniture && overlay.eventFurniture.length > 0 && (
+                  <g transform={`translate(${overlay.eventFurniture[0].x}, ${overlay.eventFurniture[0].y - 20})`}>
+                    <rect x="-40" y="-12" width="80" height="18" fill="white" rx="9" opacity="0.9" filter="url(#drop-shadow)" />
+                    <text textAnchor="middle" fontSize="9" fontWeight="bold" fill="var(--primary)" y="0" className="pointer-events-none">
+                      🎪 {overlay.title}
+                    </text>
+                  </g>
+                )}
+              </g>
+            ))}
             {readonlyOutdoorCampus && (
               <ReadonlyOutdoorCampusScene
                 campus={readonlyOutdoorCampus}
@@ -2267,7 +2579,7 @@ const buildingFill = (id: string) =>
             {route && (
               <RouteMapOverlay points={route.points} mode={mapMode} fading={routeFading} walkProgress={walkProgress} />
             )}
-            {/* "You are here" marker (kiosk-style start) */}
+            {/* Manual dropped-pin marker */}
             {youAreHere && !isFloorMode && (
               <g data-you-are-here style={{ pointerEvents: "none" }}>
                 {!reducedMotion && (
@@ -2282,7 +2594,7 @@ const buildingFill = (id: string) =>
                 <g transform={`translate(${youAreHere.x},${youAreHere.y + 24})`}>
                   <rect x={-36} y={-11} width={72} height={20} rx={9} fill="rgba(15,23,42,0.88)" />
                   <text x={0} y={2} textAnchor="middle" fill="white" fontSize={8.5} fontWeight={800} className="select-none" letterSpacing="0.5">
-                    YOU ARE HERE
+                    DROPPED PIN
                   </text>
                 </g>
               </g>
@@ -2295,35 +2607,11 @@ const buildingFill = (id: string) =>
       </svg>
 
       {/* ══════════════ FLOATING SEARCH / DIRECTIONS — same for both modes ══════════════ */}
-      <div
-        data-no-drag
-        className={cn(
-          "absolute z-20",
-          directionsMode
-            ? // Mobile: dialog handles its own fixed positioning; desktop: floating panel
-              "md:inset-x-auto md:bottom-auto md:top-3 md:left-3 md:w-[350px]"
-            : "top-3 left-3 hidden md:block"
-        )}
-        style={directionsMode ? undefined : { width: 300, maxWidth: "min(300px, calc(50vw - 160px))" }}
-      >
-
-        {/* Breadcrumb strip (floor plan mode only) */}
-        {isFloorMode && (
-          <div className="flex items-center gap-1.5 mb-1.5">
-            <button onClick={closeFloorPlan}
-              className="flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-full border border-white/20 transition-all hover:bg-white/20"
-              style={{ background:"rgba(0,0,0,0.35)", color:"rgba(255,255,255,0.9)", backdropFilter:"blur(8px)" }}>
-              <ChevronLeft className="h-3 w-3"/> Main Campus
-            </button>
-            <span style={{ color:"rgba(255,255,255,0.35)" }}>›</span>
-            <span className="text-[11px] font-semibold truncate max-w-[110px]"
-              style={{ color:"rgba(255,255,255,0.75)" }}>
-              {floorView?.building.code}
-            </span>
-          </div>
-        )}
-
-        {directionsMode ? (
+      {directionsMode ? (
+        <div
+          data-no-drag
+          className="absolute z-30 md:inset-x-auto md:bottom-auto md:top-3 md:left-3 md:w-[350px]"
+        >
           <RoutePlannerDialog
               from={fromBuilding}
               to={toBuilding}
@@ -2372,6 +2660,37 @@ const buildingFill = (id: string) =>
               fromRoom={roomOrigin}
               toRoom={roomDestination}
               roomOptions={roomDestinationCatalog}
+              destinationResults={campusSearch.results}
+              onSelectFromDestination={(result) => {
+                const endpoint = routeEndpointFromSearchResult(result, MOCK_BUILDINGS, roomDestinationCatalog);
+                if (!endpoint) return;
+                setNavigationPhase("idle");
+                if (endpoint.kind === "building") {
+                  setRoomOrigin(null);
+                  setFromBuilding(endpoint.building);
+                  setUseMyLocation(false);
+                } else {
+                  setRoomOrigin(endpoint.room);
+                  setFromBuilding(endpoint.building);
+                  setUseMyLocation(false);
+                  setHighlightedRoom(endpoint.room.roomId);
+                  setActiveRouteRoom(endpoint.room.roomId);
+                }
+              }}
+              onSelectToDestination={(result) => {
+                const endpoint = routeEndpointFromSearchResult(result, MOCK_BUILDINGS, roomDestinationCatalog);
+                if (!endpoint) return;
+                setNavigationPhase("idle");
+                if (endpoint.kind === "building") {
+                  setRoomDestination(null);
+                  setToBuilding(endpoint.building);
+                } else {
+                  setRoomDestination(endpoint.room);
+                  setToBuilding(endpoint.building);
+                  setHighlightedRoom(endpoint.room.roomId);
+                  setActiveRouteRoom(endpoint.room.roomId);
+                }
+              }}
               onToRoomChange={(room) => {
                 if (!room) {
                   setNavigationPhase("idle");
@@ -2527,7 +2846,40 @@ const buildingFill = (id: string) =>
               setDirectionsMode(false);
               }}
           />
-        ) : (
+        </div>
+      ) : (
+        <>
+          <StudentMapControls
+            isFloorMode={isFloorMode}
+            floorLabel={floorView ? `${floorView.building.code} · ${currentFloor?.label ?? `Floor ${floorView.floor}`}` : undefined}
+            search={search}
+            searchFocused={searchFocused}
+            mapMode={mapMode}
+            directionsMode={directionsMode}
+            pinning={pinning}
+            youAreHere={Boolean(youAreHere)}
+            buildings={MOCK_BUILDINGS}
+            selectedBuildingId={selected?.id ?? null}
+            searchResults={campusSearch.results}
+            recentSearches={recentSearches}
+            onSearchChange={setSearch}
+            onSearchFocus={() => setSearchFocused(true)}
+            onSearchBlur={() => setTimeout(() => setSearchFocused(false), 150)}
+            onClearSearch={() => setSearch("")}
+            onSelectSearchResult={handleSelectSearchResult}
+            onClearRecentSearches={() => setRecentSearches([])}
+            onSelectRecentSearch={(name) => {
+              const building = MOCK_BUILDINGS.find((candidate) => candidate.name === name);
+              if (building) selectBuilding(building);
+            }}
+            onSelectBuilding={selectBuilding}
+            onMapModeChange={setMapMode}
+            onOpenDirections={openDirections}
+            onTogglePin={startPinning}
+            onResetView={resetMapView}
+            onBackToCampus={closeFloorPlan}
+          />
+          <div hidden aria-hidden="true">
           /* ── Search bar ── */
           <>
             <div className="flex items-center gap-2">
@@ -2544,7 +2896,7 @@ const buildingFill = (id: string) =>
                   style={{ fontFamily:"var(--font-body)", color:"var(--foreground)" }}/>
                 {search && <button onClick={() => setSearch("")} style={{ color:"var(--muted-foreground)" }} className="hover:opacity-70 shrink-0"><X className="h-3.5 w-3.5"/></button>}
               </div>
-              <button onClick={e => { e.stopPropagation(); setDirectionsMode(true); }} title="Directions"
+              <button onClick={e => { e.stopPropagation(); openDirections(); }} title="Directions"
                 className="w-11 h-11 rounded-2xl border border-border shadow-lg flex items-center justify-center transition-all hover:bg-primary hover:text-primary-foreground hover:border-primary"
                 style={{ background:"var(--card)", color:"var(--muted-foreground)" }}>
                 <Navigation className="h-4 w-4"/>
@@ -2647,12 +2999,13 @@ const buildingFill = (id: string) =>
               </div>
             )}
           </>
-        )}
-      </div>
+          </div>
+        </>
+      )}
 
       {/* Accessibility / SOS Legend (visible only in special modes) */}
       {mapMode !== "standard" && (
-        <div data-no-drag className="absolute top-14 left-1/2 -translate-x-1/2 z-20 animate-slide-up">
+        <div data-no-drag className="absolute top-[10.5rem] left-1/2 -translate-x-1/2 z-20 max-w-[calc(100vw-1.5rem)] animate-slide-up md:top-[9.5rem]">
           <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl border shadow-lg"
             style={{
               background: mapMode === "accessible" ? "rgba(22,163,74,0.12)" : "rgba(220,38,38,0.12)",
@@ -2749,7 +3102,7 @@ const buildingFill = (id: string) =>
       )}
 
       {/* ══════════════ DESKTOP BUILDING INFO PANEL ══════════════ */}
-      {selected && (
+      {selected && !directionsMode && (
         <BuildingInfoPanel
           selected={selected}
           onClose={() => selectBuilding(null)}
@@ -2972,7 +3325,7 @@ const buildingFill = (id: string) =>
       </div>
 
       {/* ══════════════ MOBILE: immersive floating UI ══════════════ */}
-      <div data-no-drag className="absolute top-2 left-2 right-2 z-20 md:hidden space-y-1.5">
+      <div data-no-drag className="hidden" aria-hidden="true">
         {/* Search bar — floating glass pill */}
         <div className="flex items-center gap-2 h-10 px-3.5 rounded-full border border-white/20 shadow-xl"
           style={{ background:"rgba(255,255,255,0.85)", backdropFilter:"blur(20px) saturate(180%)", WebkitBackdropFilter:"blur(20px) saturate(180%)" }}>
@@ -2995,7 +3348,7 @@ const buildingFill = (id: string) =>
             style={{ fontFamily:"var(--font-body)" }}/>
           {search && <button onClick={() => setSearch("")}><X className="h-4 w-4 text-muted-foreground"/></button>}
           <div className="w-px h-5 bg-border/60 shrink-0"/>
-          <button onClick={e => { e.stopPropagation(); setDirectionsMode(true); }}
+          <button onClick={e => { e.stopPropagation(); openDirections(); }}
             className="flex items-center gap-1 text-[11px] font-bold text-primary hover:text-primary/80 transition-colors shrink-0">
             <Navigation className="h-3.5 w-3.5"/>
             <span className="hidden sm:inline">Directions</span>
@@ -3056,7 +3409,7 @@ const buildingFill = (id: string) =>
       )}
 
       {/* ══════════════ MOBILE BUILDING SHEET ══════════════ */}
-      {selected && !isFloorMode && (
+      {selected && !isFloorMode && !directionsMode && (
         <MobileBuildingSheet
           selected={selected}
           onClose={() => selectBuilding(null)}

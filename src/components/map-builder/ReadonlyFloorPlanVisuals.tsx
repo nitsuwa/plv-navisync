@@ -12,6 +12,8 @@ import type { CampusEntrance } from "./types";
 import { FloorGroundSurface } from "./FloorGroundSurface";
 import { ROOM_COLORS, type RoomType } from "../../data/floorPlans";
 import { EntranceDirectionBadge } from "./EntranceDirectionBadge";
+import { CanvasAssetVisual } from "../canvas/CanvasAssetVisual";
+import { getCanvasAsset, resolveCanvasAssetKey } from "../canvas/canvasAssetCatalog";
 
 // ── Room rendering ──────────────────────────────────────────────────────────
 
@@ -342,12 +344,18 @@ function PathVisual({ path }: { path: FloorPath }) {
 
 function FurnitureVisual({ item }: { item: FloorFurniture }) {
   if (item.visible === false) return null;
+  const assetKey = resolveCanvasAssetKey(item);
+  const asset = assetKey ? getCanvasAsset(assetKey) : undefined;
   return (
     <g data-testid="readonly-furniture" data-furniture-id={item.id}
       transform={`translate(${item.x},${item.y}) rotate(${item.rotation || 0},${item.width / 2},${item.height / 2})`}>
-      <rect x={0} y={0} width={item.width} height={item.height} rx={1}
-        fill={item.color || "#e2e8f0"} stroke={item.color || "#94a3b8"}
-        strokeWidth={0.8} opacity={0.7} />
+      {asset?.surfaces.includes("map") ? (
+        <CanvasAssetVisual assetKey={asset.key} label={item.name} x={0} y={0} width={item.width} height={item.height} style={{ color: item.color }} />
+      ) : (
+        <rect x={0} y={0} width={item.width} height={item.height} rx={1}
+          fill={item.color || "#e2e8f0"} stroke={item.color || "#94a3b8"}
+          strokeWidth={0.8} opacity={0.7} />
+      )}
     </g>
   );
 }

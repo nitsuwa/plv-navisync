@@ -9,26 +9,26 @@ Status values: `READY`, `ACTIVE`, `BLOCKED`, `FOR REVIEW`, `DONE`.
 - [x] **C1 — Public/student shell, Home, and Help Center completion**
   - Status: `DONE`
   - Branch: `feature/public-shell-and-help`
-  - Verification Evidence: [DEVELOPER_3_C1_VERIFICATION.md](file:///c:/Users/Rj/Documents/GitHub/plv-navisync/docs/progress/DEVELOPER_3_C1_VERIFICATION.md)
+  - Verification Evidence: `docs/progress/DEVELOPER_3_C1_VERIFICATION.md`
   - Test result: `npm run build` PASSED. Verified Home presentation, announcement preview, Help Center FAQ, and contact form layout.
   - Pull Request: Merged (#1)
 - [x] **C2 — Published campus map loading and map states**
   - Status: `DONE`
   - Branch: `feature/published-campus-map`
-  - Verification Evidence: [DEVELOPER_3_C2_VERIFICATION.md](file:///c:/Users/Rj/Documents/GitHub/plv-navisync/docs/progress/DEVELOPER_3_C2_VERIFICATION.md)
+  - Verification Evidence: `docs/progress/DEVELOPER_3_C2_VERIFICATION.md`
   - Test result: `npm run build` PASSED. Created `usePublishedCampus` hook with loading, empty, error, and cached fallback states in `CampusMapPage.tsx`.
   - Pull Request: Merged (#1)
 - [x] **C3 — Unified search, directory, and location details**
   - Status: `DONE`
   - Branch: `feature/map-search-and-details`
-  - Verification Evidence: [DEVELOPER_3_C3_VERIFICATION.md](file:///c:/Users/Rj/Documents/GitHub/plv-navisync/docs/progress/DEVELOPER_3_C3_VERIFICATION.md)
+  - Verification Evidence: `docs/progress/DEVELOPER_3_C3_VERIFICATION.md`
   - Test result: `npm run build` PASSED. Created `useCampusSearch` hook and connected unified location search & category filters across buildings, rooms, offices, labs, and facilities.
   - Pull Request: Merged (#1)
 - [ ] **C4 — Student route planning and navigation presentation**
   - Status: `ACTIVE` (**Phase 1 ✅ implemented**; **Kiosk features ✅ implemented** (2026-08-10): "You are here" + walking-dot animation + published-graph bridge; **Real campus map + UX polish ✅ implemented** (2026-08-10): seeded campus matches the official PLV map (SCB/Canteen/CABA/COED/CEIT/Guard + Quadrangle), quadrangle diagonal paths removed (perimeter-only routing), Guard House moved to the main gate, pin-drop no longer auto-opens the planner (single "You are here · Plan route" chip); **Phase 2 remains `BLOCKED` on Gate G3** for the DB-persisted graph swap — the seeded PLV campus already routes on its `navNodes`/`navEdges`)
   - Branch: `feature/developer-3-c8-c4-c9-c10`
   - Depends on: Gate G3 (Phase 2 DB swap only; everything else builds on existing engines)
-  - Verification Evidence: [DEVELOPER_3_C4_VERIFICATION.md](file:///c:/Users/Rj/Documents/GitHub/plv-navisync/docs/progress/DEVELOPER_3_C4_VERIFICATION.md)
+  - Verification Evidence: `docs/progress/DEVELOPER_3_C4_VERIFICATION.md`
   - Test result: `pnpm build` PASSED; **408/408 Vitest tests PASS** (21 routePlanner + 11 geo + updated pathfinding)
   - C4 Phase 1 scope: `src/lib/routePlanner.ts` (typed wrapper — real graph distance/ETA in ALL modes, structured turn-by-turn, floor transitions, SVG fallback); new map components `RoutePlannerDialog` / `RouteStepsPanel` / `RouteMapOverlay` / `RouteErrorState`; `CampusMapPage.tsx` rewired (recent destination capture, mobile bottom-sheet steps); **fixed pre-existing A* reconstruction bug in `pathfinding.ts`** (`findPath` used `open.get(parentId)` which broke after nodes moved to closed — now uses persistent `parentMap`/`edgeMap`, same pattern as `findNavigationRoute`)
   - **C4 Kiosk features (2026-08-10):** `src/lib/geo.ts` (GPS lat/lng → SVG conversion + snap-to-nearest); `planRouteFromPoint` + campus `navNodes`/`navEdges` support in `routePlanner.ts` (**seeded PLV campus now produces real graph routes — MAB→GYM = 83 m · 1 min via MAB Entrance → Flagpole Plaza → South Junction → Gym Entrance**); "You are here" marker (GPS Locate button + tap-on-map fallback + smart snap to nearest walkway node) + RoutePlannerDialog "You are here" start option; walking-dot avatar + live step highlight + Replay in `RouteMapOverlay` / `RouteStepsPanel`; `BUILDING_ENTRANCE_MAP` extended with seed ids (`b_mab`…)
@@ -36,26 +36,26 @@ Status values: `READY`, `ACTIVE`, `BLOCKED`, `FOR REVIEW`, `DONE`.
 - [x] **C5 — Reports and report history**
   - Status: `DONE`
   - Branch: `feature/reports-workflow`
-  - Verification Evidence: [DEVELOPER_3_C5_VERIFICATION.md](file:///c:/Users/Rj/Documents/GitHub/plv-navisync/docs/progress/DEVELOPER_3_C5_VERIFICATION.md)
+  - Verification Evidence: `docs/progress/DEVELOPER_3_C5_VERIFICATION.md`
   - Test result: `npm run build` PASSED. Created `reportService.ts`, connected `ReportModal.tsx` for photo issue submissions, and built live student report history on `/student/reports`.
   - Pull Request: Merged (#1)
 - [x] **C6 — Events and announcements**
   - Status: `DONE`
   - Branch: `feature/events-and-announcements`
-  - Verification Evidence: [DEVELOPER_3_C6_VERIFICATION.md](file:///c:/Users/Rj/Documents/GitHub/plv-navisync/docs/progress/DEVELOPER_3_C6_VERIFICATION.md)
+  - Verification Evidence: `docs/progress/DEVELOPER_3_C6_VERIFICATION.md`
   - Test result: `npm run build` PASSED. Created `eventService.ts`, connected Home announcements/events feed, and added interactive map venue links.
   - Pull Request: Merged (#1)
 - [x] **C7 — Favorites, recent destinations, and minimal profile**
   - Status: `DONE`
   - Branch: `feature/student-favorites-profile`
-  - Verification Evidence: [DEVELOPER_3_C7_VERIFICATION.md](file:///c:/Users/Rj/Documents/GitHub/plv-navisync/docs/progress/DEVELOPER_3_C7_VERIFICATION.md)
+  - Verification Evidence: `docs/progress/DEVELOPER_3_C7_VERIFICATION.md`
   - Test result: `npm run build` PASSED. Created `studentAccountService.ts`, connected `/student/favorites` for saved places, and updated `/student/profile` live stats.
   - Pull Request: Merged (#1)
 - [ ] **C8 — Admin operations pages, settings, logs, and dashboard**
   - Status: `ACTIVE` (C8-A ✅ + C8-B ✅ implemented on `feature/developer-3-c8-c4-c9-c10`; **C8-C still `BLOCKED` on Dev 1 A6/A7** — publish controls, branding, remaining states)
   - Branch: `feature/developer-3-c8-c4-c9-c10`
   - Depends on: A3, A6, A7, C5, and C6 (only C8-C depends on A6/A7 now)
-  - Verification Evidence: [DEVELOPER_3_C8_VERIFICATION.md](file:///c:/Users/Rj/Documents/GitHub/plv-navisync/docs/progress/DEVELOPER_3_C8_VERIFICATION.md)
+  - Verification Evidence: `docs/progress/DEVELOPER_3_C8_VERIFICATION.md`
   - Test result: `pnpm build` PASSED; **103/103 Vitest tests PASS** (C8-B +11: dashboardService, settingsService, exporters; C4 Phase 1 +14: routePlanner)
   - C8-A scope: admin Reports/Events/Announcements pages wired to real services + activity-log audit trail + sidebar entries
   - C8-B scope: dashboard rewired to live `dashboardService` counts (no hardcoded numbers); settings persisted via `system_settings` upsert (fake SMTP/2FA tabs removed); new `/admin-dashboard/activity-logs` page; CSV/JSON exports on reports page

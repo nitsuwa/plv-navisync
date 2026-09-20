@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import {
   Bookmark, Flag, Navigation, MapPin, Camera, Shield, ChevronRight,
   LogOut, Settings, GraduationCap, CalendarDays, Award, Activity,
-  ArrowUpRight, Map, Heart, Pencil, Mail,
+  ArrowUpRight, Map, Pencil, Mail,
 } from "lucide-react";
 import { Link, useNavigate } from "react-router";
 import { motion } from "motion/react";
@@ -462,29 +462,10 @@ export function StudentProfilePage() {
             </Reveal>
           </section>
 
-          {/* ── My Day + Open Map CTA ── */}
+          {/* ── Open Map CTA ── */}
           <section aria-label="Quick actions">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3">
               <Reveal delay={120}>
-                <Link
-                  to="/my-day"
-                  className="group relative overflow-hidden rounded-2xl border border-primary/10 bg-gradient-to-br from-primary/[0.04] to-primary/[0.01] p-4 sm:p-5 block hover:shadow-md hover:border-primary/20 transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                >
-                  <div className="absolute -top-10 -right-10 w-24 h-24 bg-primary/8 rounded-full blur-[30px] group-hover:bg-primary/12 transition-all" aria-hidden="true" />
-                  <div className="relative flex items-center gap-4">
-                    <div className="w-11 h-11 rounded-2xl bg-primary/10 text-primary flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
-                      <Heart className="h-5 w-5" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-extrabold text-foreground">My Day</p>
-                      <p className="text-xs text-muted-foreground mt-0.5">View your schedule and daily activities</p>
-                    </div>
-                    <ArrowUpRight className="h-4 w-4 text-primary/60 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform shrink-0" />
-                  </div>
-                </Link>
-              </Reveal>
-
-              <Reveal delay={160}>
                 <Link
                   to="/map"
                   className="group relative overflow-hidden rounded-2xl bg-primary text-primary-foreground p-4 sm:p-5 block shadow-md hover:shadow-lg active:shadow-sm transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"

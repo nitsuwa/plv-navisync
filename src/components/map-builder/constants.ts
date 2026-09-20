@@ -1219,8 +1219,6 @@ export const SEED_CAMPUSES: Campus[] = [
         id: "ev_foundation",
         title: "PLV Foundation Week",
         description: "Booth activities along the quadrangle walkway",
-        dateStart: "2026-02-15",
-        dateEnd: "2026-02-21",
         organizer: "Office of Student Affairs",
         markers: [
           { x: 330, y: 265, color: "#d97706", label: "Booth 1 — Student Council" },

@@ -5,6 +5,7 @@ import type { Building } from "../../types";
 import { cn } from "../../lib/utils";
 import type { StudentAuthState } from "../../hooks/useStudentAuth";
 import { useEscToClose } from "../../hooks/useEscToClose";
+import { publishMapSurface } from "../../lib/mapSurface";
 
 interface MobileBuildingSheetProps {
   selected: Building;
@@ -31,8 +32,12 @@ export function MobileBuildingSheet({
 
   // Signal to MobileBottomNav to hide when sheet is open
   useEffect(() => {
+    publishMapSurface("building-details");
     window.dispatchEvent(new CustomEvent("building-sheet-toggle", { detail: { open: true } }));
-    return () => { window.dispatchEvent(new CustomEvent("building-sheet-toggle", { detail: { open: false } })); };
+    return () => {
+      publishMapSurface("browse");
+      window.dispatchEvent(new CustomEvent("building-sheet-toggle", { detail: { open: false } }));
+    };
   }, []);
   const dragY = useMotionValue(0);
   const sheetOpacity = useTransform(dragY, [0, SNAP_THRESHOLD * 2], [1, 0]);
@@ -59,6 +64,7 @@ export function MobileBuildingSheet({
   return (
     <motion.div
       data-no-drag
+      data-testid="mobile-building-sheet"
       className="md:hidden fixed inset-x-0 z-50 will-change-transform landscape-minimized"
       style={{
         bottom: 0,
