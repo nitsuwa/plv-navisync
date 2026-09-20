@@ -87,6 +87,31 @@ describe("CampusHome archived lifecycle controls", () => {
     expect(onOpen).not.toHaveBeenCalled();
   });
 
+  it("opens full Campus Details from the compact description without changing Open Editor", () => {
+    const onOpen = vi.fn();
+    const description = "A long PLV campus description that remains compact on the card but is fully readable in the details dialog.";
+    render(
+      <CampusHome
+        campuses={[{ ...activeCampus("campus-a", "Campus A"), description }]}
+        onOpen={onOpen}
+        onCreate={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /view full description for campus a/i }));
+    const descriptionPreview = screen.getByRole("button", { name: /view full description for campus a/i });
+    expect(descriptionPreview).toHaveClass("line-clamp-2");
+    expect(descriptionPreview).toHaveClass("font-normal", "overflow-hidden", "whitespace-normal");
+    expect(descriptionPreview).not.toHaveClass("block", "h-9", "max-h-9", "whitespace-nowrap");
+    expect(descriptionPreview.closest(".grid")).toHaveClass("items-stretch");
+    expect(screen.getByRole("dialog", { name: /campus details/i })).toBeInTheDocument();
+    expect(screen.getByTestId("campus-details-description")).toHaveTextContent(description);
+    expect(onOpen).not.toHaveBeenCalled();
+
+    fireEvent.click(within(screen.getByRole("dialog", { name: /campus details/i })).getByRole("button", { name: /open editor/i }));
+    expect(onOpen).toHaveBeenCalledWith("campus-a");
+  });
+
   it("selects only visible archived cards and bulk restores through the callback", async () => {
     const restore = renderHome([archivedCampus("campus-a", "Campus A"), archivedCampus("campus-b", "Campus B")]);
 

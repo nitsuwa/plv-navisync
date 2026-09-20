@@ -19,6 +19,7 @@ import type { ReadonlyOutdoorCampus, ReadonlyOutdoorEntrance } from "../../lib/r
 import { surfaceCellRuns } from "../../lib/campusSurface";
 import { campusGroundAppearance, campusGroundPatternId } from "../../lib/campusCanvas";
 import { EntranceDirectionBadge } from "./EntranceDirectionBadge";
+import { Tooltip } from "../ui/Tooltip";
 
 export interface OutdoorBuildingVisualProps {
   building: CampusBuilding;
@@ -34,6 +35,109 @@ export interface OutdoorBuildingVisualProps {
   showFloorCount?: boolean;
   labelLayout?: "student" | "editor";
   bodyOpacity?: number;
+}
+
+export interface FittedOutdoorBuildingLabel {
+  text: string;
+  truncated: boolean;
+}
+
+export interface FittedOutdoorBuildingLabelLines extends FittedOutdoorBuildingLabel {
+  lines: string[];
+}
+
+/**
+ * Estimate the rendered width of the small SVG label using the same world-unit
+ * font size that the visual uses.  This keeps fitting proportional to the
+ * actual Building width instead of imposing a fixed character limit.
+ */
+function outdoorBuildingGlyphWidth(character: string, fontSize: number) {
+  if (/\s/.test(character)) return fontSize * 0.28;
+  if (/[ilI.,:;!|'`]/.test(character)) return fontSize * 0.24;
+  if (/[MW@#%&]/.test(character)) return fontSize * 0.82;
+  if (/[A-Z0-9]/.test(character)) return fontSize * 0.62;
+  return fontSize * 0.54;
+}
+
+function outdoorBuildingTextWidth(value: string, fontSize: number) {
+  return Array.from(value).reduce((width, character) => width + outdoorBuildingGlyphWidth(character, fontSize), 0);
+}
+
+function outdoorBuildingLabelId(buildingId: string) {
+  return `building-label-clip-${buildingId.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+}
+
+const buildingLabelEllipsis = "\u2026";
+
+function fitOutdoorBuildingLabelSingleLine(value: string, maxWidth: number, fontSize: number): FittedOutdoorBuildingLabel {
+  const name = value.trim();
+  if (!name) return { text: "", truncated: false };
+  const safeWidth = Math.max(0, maxWidth);
+  if (outdoorBuildingTextWidth(name, fontSize) <= safeWidth) {
+    return { text: name, truncated: false };
+  }
+
+  const ellipsis = "…";
+  const ellipsisWidth = outdoorBuildingTextWidth(buildingLabelEllipsis, fontSize);
+  let fitted = "";
+  for (const character of Array.from(name)) {
+    const candidate = `${fitted}${character}`;
+    if (outdoorBuildingTextWidth(candidate, fontSize) + ellipsisWidth > safeWidth) break;
+    fitted = candidate;
+  }
+  return { text: `${fitted.trimEnd()}${buildingLabelEllipsis}`, truncated: true };
+}
+
+/** Fit a short code to the actual available Building width. */
+export function fitOutdoorBuildingLabel(value: string, maxWidth: number, fontSize: number): FittedOutdoorBuildingLabel {
+  return fitOutdoorBuildingLabelSingleLine(value, maxWidth, fontSize);
+}
+
+/** Fit a Building name into up to two readable lines without a character limit. */
+export function fitOutdoorBuildingLabelLines(value: string, maxWidth: number, fontSize: number, maxLines = 2): FittedOutdoorBuildingLabelLines {
+  const name = value.trim().replace(/\s+/g, " ");
+  if (!name) return { text: "", lines: [], truncated: false };
+  const safeWidth = Math.max(0, maxWidth);
+  if (outdoorBuildingTextWidth(name, fontSize) <= safeWidth) {
+    return { text: name, lines: [name], truncated: false };
+  }
+
+  const words = name.split(" ");
+  const lines: string[] = [];
+  let current = "";
+  let wordIndex = 0;
+  while (wordIndex < words.length && lines.length < maxLines) {
+    const word = words[wordIndex];
+    const candidate = current ? `${current} ${word}` : word;
+    if (outdoorBuildingTextWidth(candidate, fontSize) <= safeWidth || !current) {
+      current = candidate;
+      wordIndex += 1;
+      if (outdoorBuildingTextWidth(current, fontSize) > safeWidth) {
+        current = fitOutdoorBuildingLabelSingleLine(current, safeWidth, fontSize).text;
+      }
+    } else {
+      lines.push(current);
+      current = "";
+    }
+  }
+  if (current && lines.length < maxLines) lines.push(current);
+
+  const truncated = wordIndex < words.length || lines.some((line) => line.endsWith("…"));
+  const shouldTruncate = truncated || lines.some((line) => line.endsWith(buildingLabelEllipsis));
+  if (shouldTruncate && lines.length > 0) {
+    const lastIndex = Math.min(maxLines, lines.length) - 1;
+    const base = lines[lastIndex].replace(/…$/, "").trimEnd();
+    let candidate = `${base}…`;
+    const baseWithoutProperEllipsis = base.replace(new RegExp(`${buildingLabelEllipsis}$`), "").trimEnd();
+    candidate = `${baseWithoutProperEllipsis}${buildingLabelEllipsis}`;
+    while (candidate.length > 1 && outdoorBuildingTextWidth(candidate, fontSize) > safeWidth) {
+      candidate = `${candidate.slice(0, -2).trimEnd()}…`;
+    }
+    candidate = candidate.split(String.fromCharCode(0xE2, 0x20AC, 0xA6)).join(buildingLabelEllipsis);
+    lines[lastIndex] = candidate;
+  }
+  const normalizedLines = lines.filter(Boolean).slice(0, maxLines);
+  return { text: normalizedLines.join(" "), lines: normalizedLines, truncated: shouldTruncate };
 }
 
 /**
@@ -86,6 +190,27 @@ export function OutdoorBuildingVisual({
   const cy = building.y + building.height / 2;
   const rotation = building.rotation ?? 0;
   const opacity = building.opacity ?? 1;
+  const labelScale = Math.min(building.width, building.height);
+  const codeFontSize = Math.max(12, Math.min(15, labelScale * 0.18));
+  const floorFontSize = Math.max(8, Math.min(9, labelScale * 0.11));
+  const nameFontSize = labelLayout === "editor" ? 7 : 8;
+  // Fit labels in the Building's local coordinate space.  The editor wrapper
+  // (and the read-only root when applyTransform is enabled) owns rotation, so
+  // the usable width must never come from a rotated world-space bounding box.
+  const labelPaddingX = labelLayout === "editor"
+    ? Math.min(12, Math.max(6, building.width * 0.08))
+    : Math.min(8, Math.max(4, building.width * 0.06));
+  const labelPaddingY = labelLayout === "editor"
+    ? Math.min(8, Math.max(4, building.height * 0.08))
+    : 0;
+  const labelMaxWidth = Math.max(4, building.width - labelPaddingX * 2);
+  const fittedCode = fitOutdoorBuildingLabel(building.code ?? "", labelMaxWidth, codeFontSize);
+  const fittedName = showName && building.name && building.name !== "New Building"
+    ? fitOutdoorBuildingLabelLines(building.name, labelMaxWidth, nameFontSize, 2)
+    : null;
+  const labelClipId = outdoorBuildingLabelId(building.id);
+  const labelClip = labelLayout === "editor" ? `url(#${labelClipId})` : undefined;
+  const labelNameStartY = labelLayout === "editor" ? cy + 12 : building.y + building.height + 14;
   return (
     <g
       data-testid="readonly-building"
@@ -127,15 +252,32 @@ export function OutdoorBuildingVisual({
           <line x1={building.x + 10} y1={cy} x2={building.x + building.width - 10} y2={cy} stroke="rgba(255,255,255,0.3)" strokeWidth={1} />
         </g>
       )}
-      <text x={cx} y={labelLayout === "editor" ? cy - 8 : cy - 3} textAnchor="middle" fill="white" fontSize={11} fontWeight="800" className="pointer-events-none select-none">{building.code}</text>
-      {showFloorCount && (building.floors ?? []).length > 0 && <text x={cx} y={labelLayout === "editor" ? cy + 4 : cy + 11} textAnchor="middle" fill={labelLayout === "editor" ? "rgba(255,255,255,0.7)" : "rgba(255,255,255,0.78)"} fontSize={7} className="pointer-events-none select-none">{building.floors.length}F</text>}
-      {showName && building.name && building.name !== "New Building" && (
-        <text x={cx} y={labelLayout === "editor" ? cy + 14 : building.y + building.height + 14} textAnchor="middle" fill={labelLayout === "editor" ? "rgba(255,255,255,0.55)" : "var(--map-building-name, #475569)"} fontSize={labelLayout === "editor" ? 5.5 : 7} fontWeight="600" className="pointer-events-none select-none" stroke={labelLayout === "editor" ? "rgba(0,0,0,0.15)" : undefined} strokeWidth={labelLayout === "editor" ? 1.5 : undefined} paintOrder={labelLayout === "editor" ? "stroke" : undefined}>
-          {labelLayout === "editor"
-            ? (building.name.length > 16 ? `${building.name.slice(0, 14)}…` : building.name)
-            : (building.name.length > 22 ? `${building.name.slice(0, 20)}…` : building.name)}
-        </text>
+      {labelLayout === "editor" && (
+        <defs>
+          <clipPath id={labelClipId} clipPathUnits="userSpaceOnUse">
+            <rect
+              x={building.x + labelPaddingX}
+              y={building.y + labelPaddingY}
+              width={Math.max(0, building.width - labelPaddingX * 2)}
+              height={Math.max(0, building.height - labelPaddingY * 2)}
+            />
+          </clipPath>
+        </defs>
       )}
+      <g data-testid="building-label-group" clipPath={labelClip} pointerEvents="none" className="select-none">
+        <text x={cx} y={labelLayout === "editor" ? cy - 9 : cy - 3} textAnchor="middle" fill="white" fontSize={codeFontSize} fontWeight="900" stroke="rgba(0,0,0,0.38)" strokeWidth={2} paintOrder="stroke">{fittedCode.text}</text>
+        {showFloorCount && (building.floors ?? []).length > 0 && <text x={cx} y={labelLayout === "editor" ? cy + 4 : cy + 11} textAnchor="middle" fill="rgba(255,255,255,0.9)" fontSize={floorFontSize} fontWeight="700" stroke="rgba(0,0,0,0.28)" strokeWidth={1.2} paintOrder="stroke">{building.floors.length}F</text>}
+        {fittedName && (() => {
+          const nameLines = fittedName.lines.map((line, index) => (
+            <text key={`${building.id}-name-line-${index}`} x={cx} y={labelNameStartY + index * (nameFontSize + 1)} textAnchor="middle" fill={labelLayout === "editor" ? "rgba(255,255,255,0.82)" : "var(--map-building-name, #475569)"} fontSize={nameFontSize} fontWeight="600" pointerEvents={fittedName.truncated ? "all" : "none"} stroke={labelLayout === "editor" ? "rgba(0,0,0,0.28)" : undefined} strokeWidth={labelLayout === "editor" ? 1.2 : undefined} paintOrder={labelLayout === "editor" ? "stroke" : undefined}>
+              {line}
+            </text>
+          ));
+          return fittedName.truncated
+            ? <Tooltip element="g" content={building.name} className="pointer-events-auto">{nameLines}</Tooltip>
+            : nameLines;
+        })()}
+      </g>
     </g>
   );
 }

@@ -207,6 +207,22 @@ describe("Room Door access relationship", () => {
     expect(edges[0]).toMatchObject({ startNodeId: "room-node", endNodeId: "door-node", type: ROOM_DOOR_EDGE_TYPE });
     expect(reconcileRoomDoorEdges([roomNode, doorNode], edges, [room], [door], [wall])).toHaveLength(1);
   });
+
+  it("does not create an implicit through-building shortcut between ordinary Doors", () => {
+    const roomNode = createIndoorNavNode({ id: "room-node", x: 0, y: 0, buildingId: "b1", floorId: "f1", roomId: "r1", type: "room_access" });
+    const doorA = createIndoorNavNode({ id: "door-a-node", x: 80, y: 40, buildingId: "b1", floorId: "f1", doorId: "d1", type: "hallway" });
+    const doorB = createIndoorNavNode({ id: "door-b-node", x: 180, y: 40, buildingId: "b1", floorId: "f1", doorId: "d2", type: "hallway" });
+    const secondDoor: FloorDoor = { ...door, id: "d2", x: 180 };
+    const edges = reconcileRoomDoorEdges(
+      [roomNode, doorA, doorB],
+      [],
+      [room],
+      [door, secondDoor],
+      [wall],
+    );
+    expect(edges).toHaveLength(1);
+    expect(edges.some((edge) => new Set([edge.startNodeId, edge.endNodeId]).has("door-a-node") && new Set([edge.startNodeId, edge.endNodeId]).has("door-b-node"))).toBe(false);
+  });
 });
 
 describe("B5 Phase 2 — orphan pruning on physical-object deletion", () => {

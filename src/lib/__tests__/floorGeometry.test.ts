@@ -34,6 +34,28 @@ describe("floorGeometry", () => {
     expect(normalizeFloorCanvasSize(20, 30)).toEqual(DEFAULT_FLOOR_CANVAS);
   });
 
+  it("preserves an Open Passage discriminator and wall anchor through hydration", () => {
+    const wall: FloorWall = { id: "w-open", x1: 20, y1: 40, x2: 180, y2: 40, thickness: 6, color: "#334155" };
+    const opening: FloorDoor = {
+      id: "op-1",
+      x: 100,
+      y: 40,
+      width: 32,
+      wallId: wall.id,
+      offset: 0.5,
+      direction: "double",
+      openingType: "open_passage",
+      accessDirection: "both",
+      color: "#64748b",
+      label: "Open Passage",
+    };
+    const hydrated = normalizeFloor({ id: "f-open", buildingId: "b1", number: 1, walls: [wall], doors: [opening] });
+    expect(hydrated.doors[0]).toMatchObject({ id: "op-1", openingType: "open_passage", accessDirection: "both", wallId: "w-open" });
+    const synced = syncOpeningsToWalls(hydrated.doors, hydrated.windows, hydrated.walls);
+    expect(synced.doors[0]).toMatchObject({ openingType: "open_passage", accessDirection: "both", x: 100, y: 40, offset: 0.5 });
+    expect(resolveWallOpeningGeometry(synced.doors[0], wall)).toMatchObject({ x: 100, y: 40, width: 32 });
+  });
+
   it("constrains group movement so the whole selection remains inside the floor", () => {
     const delta = constrainDeltaForBounds([
       { x: 10, y: 10, w: 50, h: 30 },

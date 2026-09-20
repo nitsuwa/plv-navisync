@@ -5,6 +5,7 @@ import {
   ArrowLeft, Globe, Map as MapIcon, CheckCircle2, Undo2, Redo2, X,
   AlignLeft, AlignCenter, AlignRight, AlignStartVertical, AlignEndVertical,
   AlignVerticalJustifyCenter, AlignHorizontalDistributeCenter, AlignVerticalDistributeCenter,
+  RotateCcw, RotateCw,
   ZoomIn, Settings2,
   MousePointer2, Square, MapPin, GitBranch, Trash2, Hand, Keyboard,
   Loader2, HelpCircle, ChevronLeft, Eye, EyeOff, Route, Waypoints, BookOpen,
@@ -28,6 +29,7 @@ import { ShortcutCheatSheet } from "./ShortcutCheatSheet";
 import { EditorTutorial, OUTDOOR_TUTORIAL_STEPS, TutorialInvitation, useEditorTutorial, type TutorialStep } from "./EditorTutorial";
 import { UnsavedChangesDialog } from "./UnsavedChangesDialog";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
+import { Tooltip } from "../ui/Tooltip";
 import { useUnsavedChangesGuard } from "./useUnsavedChangesGuard";
 import { IssuesPopover } from "./IssuesPopover";
 import type {
@@ -45,7 +47,7 @@ import { validationIssuesToItems } from "./ObjectIssueSection";
 import { resolveIssueTarget, issueKey, floorSelectionForTarget, resolveIssueLocateTarget, polylineMidpoint } from "../../lib/issueLocate";
 import type { IssueTarget } from "./ValidationErrorsDialog";
 import { computeBuildingPlacement, resetTransientToolState, pointInBuilding, polylineCrossesBuilding, polylineCrossesObstacle, polylineCrossesObstacleAfterSourceDeparture, type OutdoorSourceDeparture } from "../../lib/editorPlacement";
-import { computeGroupTranslation, groupBBoxAfterTranslation, computeGroupAlignmentGuides, snapRectToVisibleBounds, computeGroupResizeBounds, resizeGroupMembers, clampMemberTranslation, memberVisibleBounds, type GroupResizeCorner, type GroupResizeBounds } from "../../lib/campusGroupMove";
+import { computeGroupTranslation, groupBBoxAfterTranslation, computeGroupAlignmentGuides, snapRectToVisibleBounds, snapRectToCanvasCenter, computeGroupResizeBounds, resizeGroupMembers, rotateGroupMembers, clampMemberTranslation, memberVisibleBounds, type GroupResizeCorner, type GroupResizeBounds } from "../../lib/campusGroupMove";
 import {
   createNavNode, createNavEdge, findDuplicateNavEdge, isSelfEdge, removeNavNode, findNavNodeAtPoint,
   findEntranceNavNode, navGraphSelectionIdsInRect, syncEntranceNodePositions, pruneOrphanedEntranceNodes,
@@ -104,11 +106,28 @@ import { didOutdoorWaypointDragStart, moveOutdoorWaypointLocally, OUTDOOR_WAYPOI
 import { isDerivedExteriorApproachNode, reconcileExteriorApproachNavigation } from "../../lib/exteriorApproachNavigation";
 import { exteriorZoneCoversEntrance } from "../../lib/exteriorFloorZones";
 import { campusHasUnpublishedChanges, campusHasUnsavedChanges } from "../../lib/campusDraftPersistence";
+import {
+  attachVisualPathEndpoint,
+  detachVisualPathEndpoint,
+  syncVisualPathAttachments,
+  visualPathAttachmentFromTarget,
+  visualPathAttachmentForPoint,
+  type VisualPathAttachmentTarget,
+} from "../../lib/visualPathAttachments";
 
 // A locked physical campus object remains directly selectable, but a small
 // screen-space movement promotes the gesture to a marquee so locked geometry
 // never blocks editable content underneath it.
 const LOCKED_MARQUEE_THRESHOLD_PX = 5;
+
+function compactAlignmentGuides(guides: { type: "h" | "v"; pos: number }[]) {
+  const seen = new Set<"h" | "v">();
+  return guides.filter((guide) => {
+    if (seen.has(guide.type)) return false;
+    seen.add(guide.type);
+    return true;
+  });
+}
 
 /** Uniformly reduce a rendered rectangle only when its transformed bounds
  * cannot fit inside the physical canvas safe frame. */
@@ -285,6 +304,7 @@ const PATH_PAINT_TYPES: { value: CampusPath["type"]; label: string; color: strin
 ];
 type PaintRect = { x: number; y: number; width: number; height: number };
 type PathStrokePreview = { points: { x: number; y: number }[]; width: number; type: CampusPath["type"]; color: string; snapKind?: PathSnapTarget["kind"] };
+type VisualPathStyle = { type: CampusPath["type"]; color: string; width: number };
 type GroundPatchRect = PaintRect & { asset: CampusDecorAsset };
 
 const pathPaintTypeConfig = (type: CampusPath["type"]) =>
@@ -568,6 +588,13 @@ type PathSnapTarget = {
   t?: number;
 };
 
+const visualAttachmentTargetForSnap = (target: PathSnapTarget): VisualPathAttachmentTarget => ({
+  pathId: target.pathId,
+  point: { ...target.point },
+  ...(target.pointIndex !== undefined ? { pointIndex: target.pointIndex } : {}),
+  ...(target.segmentIndex !== undefined ? { segmentIndex: target.segmentIndex, t: target.t } : {}),
+});
+
 interface CampusEditorProps {
   campus: Campus;
   onBack: () => void;
@@ -809,6 +836,18 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     members: GroupMoveMember[];
     decorScales: Record<string, number>;
   } | null>(null);
+  // Physical multi-select rotation uses the same gesture-history contract as
+  // group resize, but keeps an immutable member snapshot so every pointer
+  // frame rotates from the original arrangement rather than accumulating
+  // rounding drift.
+  const groupRotating = useRef<{
+    cx: number;
+    cy: number;
+    prevAngle: number;
+    rotation: number;
+    members: GroupMoveMember[];
+  } | null>(null);
+  const [groupRotationActive, setGroupRotationActive] = useState(false);
   // ── Rename dialog ──
   const [renameDialog, setRenameDialog] = useState<{ id: string; name: string } | null>(null);
   const [renameValue, setRenameValue] = useState("");
@@ -971,10 +1010,23 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
   const canvasResizeOriginalRef = useRef<{ width: number; height: number } | null>(null);
   const canvasResizeRef = useRef<{ handle: "n" | "s" | "e" | "w" | "ne" | "nw" | "se" | "sw"; startW: number; startH: number; clientX: number; clientY: number } | null>(null);
   const [pathPaintType, setPathPaintType] = useState<CampusPath["type"]>("walkway");
+  const [pathPaintColor, setPathPaintColor] = useState(pathPaintTypeConfig("walkway").color);
   const [pathPaintWidth, setPathPaintWidth] = useState(12);
   const [pathSettingsOpen, setPathSettingsOpen] = useState(false);
   const [pathPaintPreview, setPathPaintPreview] = useState<PathStrokePreview | null>(null);
-  const pathPaintStroke = useRef<{ points: { x: number; y: number }[]; moved: boolean } | null>(null);
+  const pathPaintStroke = useRef<{
+    points: { x: number; y: number }[];
+    moved: boolean;
+    startAttachment?: VisualPathAttachmentTarget;
+  } | null>(null);
+  const lastCompletedPathIdRef = useRef<string | null>(null);
+  const lastCompletedPathStyleRef = useRef<VisualPathStyle>({ type: "walkway", color: pathPaintTypeConfig("walkway").color, width: 12 });
+  const applyLastCompletedPathStyle = useCallback(() => {
+    const style = lastCompletedPathStyleRef.current;
+    setPathPaintType(style.type);
+    setPathPaintColor(style.color);
+    setPathPaintWidth(style.width);
+  }, []);
   const pathExtendRef = useRef<{ pathId: string; atStart: boolean } | null>(null);
   const [selectedPathPoint, setSelectedPathPoint] = useState<{ pathId: string; pointIndex: number } | null>(null);
   const [pathVertexSnapTarget, setPathVertexSnapTarget] = useState<{ pathId: string; pointIndex: number } | null>(null);
@@ -1445,6 +1497,15 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     return bestPoint ?? bestSegment;
   }, [pathPaintWidth, paths]);
 
+  // A newly authored Visual Path may attach to any visible CampusPath,
+  // including one that already participates in navigation. The relationship
+  // remains visual-only and never adds the new path to that navigation
+  // network. Existing generated Pathway endpoint edits retain their separate
+  // navigation-aware join path below.
+  const isVisualPathTarget = useCallback((target: PathSnapTarget | null) => Boolean(
+    target && paths.some((path) => path.id === target.pathId),
+  ), [paths]);
+
   /**
    * Explicit Pathway vertex-join candidates are resolved only during an
    * active physical-vertex drag.  This is deliberately separate from the
@@ -1684,7 +1745,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     let count = 0;
     for (const candidatePath of paths) {
       // A bend/vertex is not a junction merely because the same Pathway has a
-      // duplicate coordinate.  Junction status is reserved for a shared point
+      //  duplicate coordinate. Junction status is reserved for a shared point
       // owned by two distinct physical Pathways.
       if (candidatePath.id === pathId) continue;
       for (let index = 0; index < candidatePath.points.length; index += 1) {
@@ -1797,7 +1858,6 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     const start = stroke.points[0];
     const end = stroke.points[stroke.points.length - 1];
     if (!start || !end || (start.x === end.x && start.y === end.y)) return;
-    const cfg = pathPaintTypeConfig(pathPaintType);
     if (extension) {
       const targetPath = paths.find((path) => path.id === extension.pathId);
       if (!targetPath) return;
@@ -1834,26 +1894,45 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     const snapTarget = pathSnapTargetForPoint(end);
     const finalEnd = snapTarget?.point ?? end;
     if (start.x === finalEnd.x && start.y === finalEnd.y) return;
+    const startAttachment = stroke.startAttachment;
+    const endAttachment = isVisualPathTarget(snapTarget) && snapTarget
+      ? visualAttachmentTargetForSnap(snapTarget)
+      : undefined;
+    const hasVisualAttachment = Boolean(startAttachment || endAttachment);
     const newPath: CampusPath = {
       id: genId("p"),
       name: pathPaintType === "road" ? "Road" : pathPaintType === "accessible" ? "Accessible Path" : "Walkway",
       points: [start, finalEnd],
       type: pathPaintType,
-      color: cfg.color,
+      color: pathPaintColor,
       width: pathPaintWidth,
-      pathNetworkId: snapTarget?.pathId ? (paths.find((path) => path.id === snapTarget.pathId)?.pathNetworkId ?? genId("pnet")) : undefined,
+      // A visual attachment is deliberately not a Pathway network join. It
+      // synchronizes one endpoint only and never changes navigation topology.
+      ...(!hasVisualAttachment && snapTarget?.pathId
+        ? { pathNetworkId: paths.find((path) => path.id === snapTarget.pathId)?.pathNetworkId ?? genId("pnet") }
+        : {}),
+      ...(startAttachment || endAttachment
+        ? { visualAttachments: [
+            ...(startAttachment ? [visualPathAttachmentFromTarget(0, startAttachment)] : []),
+            ...(endAttachment ? [visualPathAttachmentFromTarget(1, endAttachment)] : []),
+          ] }
+        : {}),
       visible: true,
       locked: false,
     };
-    const withJunction = insertPathJunctionPoint(paths, snapTarget);
+    // Existing Pathway joins retain their old behavior. A new visual-only
+    // attachment does not insert a target vertex or create a Pathway junction.
+    const withJunction = hasVisualAttachment ? paths : insertPathJunctionPoint(paths, snapTarget);
     const withNewPath = [...withJunction, newPath];
     // B5 Phase 5.14: use mergePathNetworksForJunction for proper cross-network merging
-    const nextPaths = snapTarget?.pathId
+    const nextPaths = !hasVisualAttachment && snapTarget?.pathId
       ? mergePathNetworksForJunction(withNewPath, newPath.id, snapTarget.pathId)
       : withNewPath;
-    const next = { ...campus, paths: nextPaths };
+    const next = { ...campus, paths: syncVisualPathAttachments(nextPaths) };
     onUpdate(next);
     pushHistory(next);
+    lastCompletedPathIdRef.current = newPath.id;
+    lastCompletedPathStyleRef.current = { type: newPath.type, color: newPath.color, width: newPath.width };
     setSelected({ type: "path", id: newPath.id });
     setMultiSelected([]);
     setAnimatingPathId(newPath.id);
@@ -1864,7 +1943,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     setTestRoutePickHover(null);
     setTestRouteMapPick(null);
     toast.success("Pathway created", "2 editable points created.");
-  }, [assignPathNetwork, campus, insertPathJunctionPoint, onUpdate, pathPaintType, pathPaintWidth, pathSnapTargetForPoint, paths, toast]);
+  }, [assignPathNetwork, campus, insertPathJunctionPoint, isVisualPathTarget, onUpdate, pathPaintColor, pathPaintType, pathPaintWidth, pathSnapTargetForPoint, paths, toast]);
 
   // ── Overlap detection (handles rotated buildings via rotated AABB) ──────────
   const computeOverlaps = useCallback((bldgs: CampusBuilding[]): Set<string> => {
@@ -1972,6 +2051,26 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     [buildings, decorAssets, markers, multiSelected, paths]
   );
   const multiSelectedPaths = useMemo(() => paths.filter((path) => multiSelected.includes(path.id)), [multiSelected, paths]);
+  // Group rotation is intentionally limited to existing rotatable physical
+  // objects. Pathways keep their separate network rotation; gates and other
+  // marker types have no object rotation field and therefore stay out of this
+  // gesture. Locked members also disable the action rather than silently
+  // rotating only part of a selected arrangement.
+  const physicalGroupRotationMemberCount = multiSelected.filter((id) => {
+    const building = buildings.find((item) => item.id === id);
+    if (building) return !building.locked;
+    const asset = decorAssets.find((item) => item.id === id);
+    return Boolean(asset && !asset.locked && DECOR_ASSET_MAP[asset.type]);
+  }).length;
+  const physicalGroupRotationEligible = multiSelected.length >= 2
+    && physicalGroupRotationMemberCount >= 2
+    && multiSelected.every((id) => {
+      const building = buildings.find((item) => item.id === id);
+      if (building) return !building.locked;
+      const asset = decorAssets.find((item) => item.id === id);
+      if (asset) return !asset.locked && !!DECOR_ASSET_MAP[asset.type];
+      return false;
+    });
 
   const navAlignmentForPoint = useCallback((point: { x: number; y: number }, excludeId?: string, connectedIds?: Set<string>) => {
     const pathCandidates = paths.flatMap((path) => path.points.map((pathPoint) => ({ id: `${path.id}:${pathPoint.x}:${pathPoint.y}`, x: pathPoint.x, y: pathPoint.y })));
@@ -2400,10 +2499,23 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
         }
         return;
       }
-      const start = clampedPt;
-      const cfg = pathPaintTypeConfig(pathPaintType);
-      pathPaintStroke.current = { points: [start], moved: false };
-      setPathPaintPreview({ points: [start], width: pathPaintWidth, type: pathPaintType, color: cfg.color });
+      // A path surface is intentionally allowed to bubble to the SVG so the
+      // first click can attach a new stroke. Once a stroke is armed, however,
+      // a second mousedown on a target path must not restart it; the active
+      // stroke is completed by the existing pointer-move/up pipeline.
+      if (pathPaintStroke.current) {
+        e.preventDefault();
+        return;
+      }
+      const startSnap = pathSnapTargetForPoint(clampedPt);
+      const start = startSnap?.point ?? clampedPt;
+      const visualStartSnap = isVisualPathTarget(startSnap) ? startSnap : null;
+      pathPaintStroke.current = {
+        points: [start],
+        moved: false,
+        ...(visualStartSnap ? { startAttachment: visualAttachmentTargetForSnap(visualStartSnap) } : {}),
+      };
+      setPathPaintPreview({ points: [start], width: pathPaintWidth, type: pathPaintType, color: pathPaintColor, snapKind: startSnap?.kind });
       setSelected(null);
       setMultiSelected([]);
       e.preventDefault();
@@ -3130,16 +3242,21 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
         x: Math.max(0, Math.min(cw, Math.round(pt.x))),
         y: Math.max(0, Math.min(ch, Math.round(pt.y))),
       };
-      const cfg = pathPaintTypeConfig(pathPaintType);
       if (!stroke) {
-        setPathPaintPreview({ points: [rawPoint], width: pathPaintWidth, type: pathPaintType, color: cfg.color });
+        const hoverTarget = pathSnapTargetForPoint(rawPoint);
+        const previewPoint = hoverTarget?.point ?? rawPoint;
+        setGuides(hoverTarget ? [
+          { type: "v", pos: previewPoint.x },
+          { type: "h", pos: previewPoint.y },
+        ] : []);
+        setPathPaintPreview({ points: [previewPoint], width: pathPaintWidth, type: pathPaintType, color: pathPaintColor, snapKind: hoverTarget?.kind });
       } else {
         const start = stroke.points[0];
         const endpoint = segmentEndpointForPointer(start, rawPoint, pathExtendRef.current?.pathId, !!pathExtendRef.current, e.shiftKey);
         stroke.points = [start, endpoint.point];
         stroke.moved = stroke.moved || Math.hypot(endpoint.point.x - start.x, endpoint.point.y - start.y) >= 8;
         setGuides(endpoint.guides);
-        setPathPaintPreview({ points: stroke.points, width: pathPaintWidth, type: pathPaintType, color: cfg.color, snapKind: endpoint.target?.kind });
+        setPathPaintPreview({ points: stroke.points, width: pathPaintWidth, type: pathPaintType, color: pathPaintColor, snapKind: endpoint.target?.kind });
       }
       return;
     }
@@ -3607,6 +3724,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
       const groupIds = new Set(group.map((m) => m.id));
       const otherPhysicalObjects = physicalAlignmentRefs(groupIds);
       const groupUsesBuildingSnap = group.some((member) => member.kind === "building" || member.kind === "marker");
+      const groupAllowsCenterSnap = !group.some((member) => member.kind === "path");
       let { dx, dy } = computeGroupTranslation({
         members: group,
         draggedId: drag.id,
@@ -3623,6 +3741,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
         // Gate edge without independently moving its members. Pathway-only
         // groups never reach this generic branch.
         edgeSnap,
+        centerSnap: groupAllowsCenterSnap,
         // A lone Campus Gate is allowed to sit on the campus perimeter; the
         // inset is for ordinary physical members only. Mixed groups still use
         // the rigid inset required by their non-Gate members.
@@ -3649,6 +3768,14 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
         }
         if (bestX) dx += bestX.target - centerX;
         if (bestY) dy += bestY.target - centerY;
+      }
+      // The object-centre alignment above is intentionally preserved for
+      // decor groups. Re-apply the logical canvas midpoint afterwards so an
+      // outer group can still snap to the true campus centre on either axis.
+      if (edgeSnap && groupAllowsCenterSnap) {
+        const centered = snapRectToCanvasCenter(groupBBoxAfterTranslation(group, dx, dy), cw, ch, physicalSnapDistance);
+        dx += centered.x - (groupBBoxAfterTranslation(group, dx, dy).x);
+        dy += centered.y - (groupBBoxAfterTranslation(group, dx, dy).y);
       }
       if (dx === 0 && dy === 0) return;
       gestureChangedRef.current = true;
@@ -3723,7 +3850,16 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
       onUpdate(nextCampus);
       const bbox = groupBBoxAfterTranslation(group, dx, dy);
       setOverlappingBuildings(computeOverlaps(nextBuildings));
-      setGuides(computeGroupAlignmentGuides(bbox.x, bbox.y, bbox.width, bbox.height, otherPhysicalObjects, physicalSnapDistance));
+      setGuides(computeGroupAlignmentGuides(
+        bbox.x,
+        bbox.y,
+        bbox.width,
+        bbox.height,
+        otherPhysicalObjects,
+        physicalSnapDistance,
+        groupAllowsCenterSnap ? cw : undefined,
+        groupAllowsCenterSnap ? ch : undefined,
+      ));
       return;
     }
 
@@ -3747,9 +3883,17 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
         physicalAlignmentRefs(new Set([movingAsset.id])),
         physicalSnapDistance,
       );
-      setGuides(aligned.guides);
-      const alignmentDx = edgeSnap ? aligned.x - (visible.x + rawDx) : 0;
-      const alignmentDy = edgeSnap ? aligned.y - (visible.y + rawDy) : 0;
+      const centered = snapRectToCanvasCenter(
+        { x: edgeSnap ? aligned.x : visible.x + rawDx, y: edgeSnap ? aligned.y : visible.y + rawDy, width: visible.width, height: visible.height, rotation: movingAsset.rotation ?? 0 },
+        cw,
+        ch,
+        physicalSnapDistance,
+      );
+      setGuides(compactAlignmentGuides([...centered.guides, ...aligned.guides]));
+      const alignedX = edgeSnap ? centered.x : visible.x + rawDx;
+      const alignedY = edgeSnap ? centered.y : visible.y + rawDy;
+      const alignmentDx = edgeSnap ? alignedX - (visible.x + rawDx) : 0;
+      const alignmentDy = edgeSnap ? alignedY - (visible.y + rawDy) : 0;
       const bounded = clampMemberTranslation(
         { kind: "decorAsset", id: movingAsset.id, x: movingAsset.x, y: movingAsset.y, width: size.width, height: size.height, rotation: movingAsset.rotation ?? 0 },
         rawDx + alignmentDx,
@@ -3793,7 +3937,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
         drag.pathJoinSourcePointIndex = join?.sourcePointIndex;
         const nextCampus = reconcilePathwayNavigation({
           ...campus,
-          paths: movedPaths,
+          paths: syncVisualPathAttachments(movedPaths),
         }, genId, { preserveAuthoredGeometry: true });
         campusRef.current = nextCampus;
         onUpdate(nextCampus);
@@ -3832,7 +3976,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
       drag.pathJoinSourcePointIndex = join?.sourcePointIndex;
       const nextCampus = reconcilePathwayNavigation({
         ...campus,
-        paths: movedPaths.map((p) => p.id === drag.id
+        paths: syncVisualPathAttachments(movedPaths.map((p) => p.id === drag.id
           ? { ...p, points: p.points.map((point, index) => {
               const originalPoint = startPoints[index];
               // Preserve the historical separation for legacy coordinate-only
@@ -3843,7 +3987,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
                 ? { x: point.x + 0.001, y: point.y }
                 : point;
             }) }
-          : p),
+          : p)),
       }, genId, { preserveAuthoredGeometry: true });
       campusRef.current = nextCampus;
       onUpdate(nextCampus);
@@ -3884,10 +4028,24 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
         },
         { point: rawPoint, guides: [] as { type: "h" | "v"; pos: number }[], distance: Number.POSITIVE_INFINITY }
       );
+      const isEndpoint = drag.pointIndex === 0 || drag.pointIndex === path.points.length - 1;
+      const visualSnap = isEndpoint && drag.pointIndex !== undefined
+        ? pathSnapTargetForPoint(rawPoint, path.id, path.points[drag.pointIndex])
+        : null;
+      const existingVisualAttachment = isEndpoint && drag.pointIndex !== undefined
+        ? visualPathAttachmentForPoint(paths, path.id, drag.pointIndex)
+        : null;
+      // A detached/new visual path can reattach to any CampusPath. Existing
+      // generated Pathway endpoints retain the historical vertex-join route
+      // unless that endpoint already carries our visual-only attachment.
+      const sourceCanVisualAttach = !path.pathNetworkId && !path.navigationVertexIds?.length;
+      const visualTarget = (existingVisualAttachment || sourceCanVisualAttach) && isVisualPathTarget(visualSnap)
+        ? visualSnap
+        : null;
        // A deliberate drop on another owned physical vertex is the sole path
        // topology-joining gesture.  Connect's segment insertion remains on
        // its existing path and is not involved in this branch.
-       const topologyPoint = joinCandidate?.point ?? aligned.point;
+       const topologyPoint = visualTarget?.point ?? joinCandidate?.point ?? aligned.point;
       const generatedNode = drag.generatedNodeId ? outdoorNodes.find((node) => node.id === drag.generatedNodeId) : undefined;
       const connectedIds = generatedNode
         ? new Set(navEdges.flatMap((edge) => {
@@ -3897,20 +4055,27 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
           }))
         : undefined;
        const navAligned = navAlignSnap(topologyPoint, outdoorNodes.filter((node) => node.id !== drag.generatedNodeId), SNAP_DIST, connectedIds);
-       const nextPoint = joinCandidate
+       const nextPoint = visualTarget
+         ? { x: visualTarget.point.x, y: visualTarget.point.y }
+         : joinCandidate
          ? { x: joinCandidate.point.x, y: joinCandidate.point.y }
          : { x: navAligned.x, y: navAligned.y };
-       setGuides(navAligned.guides.length > 0 ? navAligned.guides : aligned.guides);
+      setGuides(navAligned.guides.length > 0 ? navAligned.guides : aligned.guides);
       gestureChangedRef.current = true;
       const oldPoint = drag.pointIndex !== undefined ? path.points[drag.pointIndex] : undefined;
       const oldKey = oldPoint ? pathPointKey(oldPoint) : "";
-      const moveLinkedJunction = drag.pointIndex !== undefined && pathPointIsJunction(path.id, drag.pointIndex);
+      const moveLinkedJunction = drag.pointIndex !== undefined
+        && !existingVisualAttachment
+        && pathPointIsJunction(path.id, drag.pointIndex);
       const explicitProxyRefs = drag.generatedVertexRefs;
       const proxyRefKeys = explicitProxyRefs
         ? new Set(explicitProxyRefs.map((ref) => `${ref.pathId}:${ref.pointIndex}`))
         : null;
-       const nextPaths = paths.map((p) => ({
-         ...p,
+      const basePaths = existingVisualAttachment && !visualTarget && drag.pointIndex !== undefined
+        ? detachVisualPathEndpoint(paths, path.id, drag.pointIndex)
+        : paths;
+      const nextPaths = syncVisualPathAttachments(basePaths.map((p) => ({
+        ...p,
         points: p.points.map((point, index) => {
           // Proxy drags carry explicit provenance refs for every physical
           // vertex represented by the canonical generated node. This is the
@@ -3920,8 +4085,11 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
           if (p.id === drag.id && index === drag.pointIndex) return nextPoint;
           return point;
         }),
-       }));
-       const reconciled = reconcilePathwayNavigation({ ...campus, paths: nextPaths }, genId, { preserveAuthoredGeometry: true });
+      })));
+      const attachedNextPaths = visualTarget && drag.pointIndex !== undefined
+        ? attachVisualPathEndpoint(nextPaths, path.id, drag.pointIndex, visualAttachmentTargetForSnap(visualTarget))
+        : nextPaths;
+      const reconciled = reconcilePathwayNavigation({ ...campus, paths: attachedNextPaths }, genId, { preserveAuthoredGeometry: true });
        // Reconciliation updates generated node/edge ownership. Refresh only
        // coordinate-derived costs below; authored connector bendPoints remain
        // untouched during a Pathway vertex gesture.
@@ -3962,9 +4130,12 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
       const nextWidth = Math.max(3, Math.min(32, Math.round(startWidth + (currentDistance - startDistance) * 2)));
       if (nextWidth === path.width) return;
       gestureChangedRef.current = true;
+      if (lastCompletedPathIdRef.current === path.id) {
+        lastCompletedPathStyleRef.current = { type: path.type, color: path.color, width: nextWidth };
+      }
       onUpdate(reconcilePathwayNavigation({
         ...campus,
-        paths: paths.map((p) => p.id === drag.id ? { ...p, width: nextWidth } : p),
+        paths: syncVisualPathAttachments(paths.map((p) => p.id === drag.id ? { ...p, width: nextWidth } : p)),
       }, genId));
       return;
     }
@@ -4179,11 +4350,17 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
         refsForSnap,
         physicalSnapDistance,
       );
+      const centeredResult = snapRectToCanvasCenter(
+        { x: snapResult.x, y: snapResult.y, width: b.width, height: b.height, rotation: b.rotation ?? 0 },
+        cw,
+        ch,
+        physicalSnapDistance,
+      );
       // Do not run a second, building-only snap pass here. It could choose a
       // different reference from the one that produced `snapResult.guides`,
       // which made (notably bottom-edge) previews disagree with the committed
       // building position. This is the single resolved transform for the drag.
-      const snappedBuilding = { ...b, x: edgeSnap ? snapResult.x : targetX, y: edgeSnap ? snapResult.y : targetY };
+      const snappedBuilding = { ...b, x: edgeSnap ? centeredResult.x : targetX, y: edgeSnap ? centeredResult.y : targetY };
       const boundedBuildingDelta = clampMemberTranslation(
         { kind: "building", id: b.id, x: b.x, y: b.y, width: b.width, height: b.height, rotation: b.rotation ?? 0 },
         snappedBuilding.x - b.x,
@@ -4201,7 +4378,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
         navNodes: syncEntranceNodePositions(nextBuildings, navNodes),
       })));
       // Alignment guides — same visible-bounds result that drove the snap.
-      const guidesList: { type: "h" | "v"; pos: number }[] = snapResult.guides;
+      const guidesList: { type: "h" | "v"; pos: number }[] = compactAlignmentGuides([...centeredResult.guides, ...snapResult.guides]);
       // Check overlaps during drag
       const movedBldgs = buildings.map((bld) => (bld.id === drag.id ? targetB : bld));
       const overlaps = computeOverlaps(movedBldgs);
@@ -4243,12 +4420,22 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
         setGuides(aligned.guides);
         rawMarker = { dx: aligned.point.x - movingMarker.x, dy: aligned.point.y - movingMarker.y };
       } else {
-        setGuides([]);
+        const proposedX = snap(drag.ox + (pt.x - drag.sx));
+        const proposedY = snap(drag.oy + (pt.y - drag.sy));
+        const centered = movingMarker && edgeSnap
+          ? snapRectToCanvasCenter(
+              { x: proposedX - markerSize.width / 2, y: proposedY - markerSize.height / 2, width: markerSize.width, height: markerSize.height },
+              cw,
+              ch,
+              physicalSnapDistance,
+            )
+          : null;
+        setGuides(centered?.guides ?? []);
         rawMarker = movingMarker
           ? clampMemberTranslation(
               { kind: "marker", id: movingMarker.id, x: movingMarker.x, y: movingMarker.y, width: markerSize.width, height: markerSize.height },
-              snap(drag.ox + (pt.x - drag.sx)) - movingMarker.x,
-              snap(drag.oy + (pt.y - drag.sy)) - movingMarker.y,
+              (centered ? centered.x + markerSize.width / 2 : proposedX) - movingMarker.x,
+              (centered ? centered.y + markerSize.height / 2 : proposedY) - movingMarker.y,
               cw,
               ch,
               CAMPUS_OBJECT_SAFE_INSET,
@@ -4435,6 +4622,29 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
       // B5 Phase 5.14: update the rotated frame's angle so Canvas renders
       // the selection outline with SVG transform.
       setPathGroupRotationBounds((prev) => prev ? { ...prev, angle } : null);
+      return;
+    }
+    if (groupRotating.current) {
+      const pt = getPoint(e, cw, ch);
+      const gesture = groupRotating.current;
+      const currentAngle = Math.atan2(pt.y - gesture.cy, pt.x - gesture.cx) * (180 / Math.PI);
+      let delta = currentAngle - gesture.prevAngle;
+      if (delta > 180) delta -= 360;
+      else if (delta < -180) delta += 360;
+      const accumulated = gesture.rotation + delta;
+      const angle = e.shiftKey ? Math.round(accumulated / 15) * 15 : accumulated;
+      groupRotating.current = { ...gesture, prevAngle: currentAngle, rotation: accumulated };
+      const next = rotatePhysicalCampus(
+        campusRef.current,
+        gesture.members,
+        { x: gesture.cx, y: gesture.cy },
+        angle,
+      );
+      gestureChangedRef.current = true;
+      beginGestureHistory();
+      campusRef.current = next;
+      onUpdate(next);
+      setRotatingAngle(angle);
       return;
     }
     if (groupResizing.current) {
@@ -4930,6 +5140,16 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
       setGuides([]);
       return;
     }
+    if (groupRotating.current) {
+      if (gestureChangedRef.current) pushHistory(campusRef.current);
+      groupRotating.current = null;
+      setGroupRotationActive(false);
+      setRotatingAngle(0);
+      setGuides([]);
+      gestureChangedRef.current = false;
+      gestureHistoryPushed.current = false;
+      return;
+    }
     if (groupResizing.current) {
       if (gestureChangedRef.current) pushHistory(campusRef.current);
       groupResizing.current = null;
@@ -5192,7 +5412,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     gestureChangedRef.current = false;
     gestureHistoryPushed.current = false;
   };
-  const handleSvgUp = () => { endPan(); dragging.current = null; generatedPointProxyRef.current = null; dragGroupStartRef.current = null; groupResizing.current = null; markerResizing.current = null; setMarkerResizingId(null); pathGroupOriginRef.current = null; navGroupOriginRef.current = null; navGroupEdgeOriginsRef.current = null; pathGroupRotating.current = null; setPathGroupRotationBounds(null); setPathGroupScale(null); setPathVertexSnapTarget(null); setRotatingAngle(0); setGuides([]); gestureHistoryPushed.current = false; };
+  const handleSvgUp = () => { endPan(); dragging.current = null; generatedPointProxyRef.current = null; dragGroupStartRef.current = null; groupResizing.current = null; groupRotating.current = null; setGroupRotationActive(false); markerResizing.current = null; setMarkerResizingId(null); pathGroupOriginRef.current = null; navGroupOriginRef.current = null; navGroupEdgeOriginsRef.current = null; pathGroupRotating.current = null; setPathGroupRotationBounds(null); setPathGroupScale(null); setPathVertexSnapTarget(null); setRotatingAngle(0); setGuides([]); gestureHistoryPushed.current = false; };
 
   // ── Mouse leaves the canvas mid-gesture: CANCEL placement/drawing instead of
   // finalizing it. (onMouseLeave previously ran the same handler as mouseup, so
@@ -5231,6 +5451,16 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
       setGuides([]);
       gestureChangedRef.current = false;
       gestureHistoryPushed.current = false;
+      return;
+    }
+    if (groupRotating.current) {
+      if (gestureChangedRef.current) pushHistory(campusRef.current);
+      groupRotating.current = null;
+      setGroupRotationActive(false);
+      gestureChangedRef.current = false;
+      gestureHistoryPushed.current = false;
+      setRotatingAngle(0);
+      setGuides([]);
       return;
     }
     if (groupResizing.current) {
@@ -5305,6 +5535,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     setPropertiesOpen(Boolean(selected || multiSelected.length > 0));
     const reset = resetTransientToolState();
     if (t !== "connect") connectGuidanceShownRef.current = false;
+    if (t === "path") applyLastCompletedPathStyle();
     setTool(t);
     setTestRoutePickKind(null);
     setTestRoutePickHover(null);
@@ -5324,6 +5555,9 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     navGroupEdgeOriginsRef.current = null;
     setPathVertexSnapTarget(null);
     pathGroupOriginRef.current = null;
+    groupRotating.current = null;
+    setGroupRotationActive(false);
+    setRotatingAngle(0);
     pathGroupRotating.current = null;
     setPathGroupRotationBounds(null);
     groundPaintGesture.current = null;
@@ -5339,7 +5573,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     if (t !== "decor") setArmedDecorAssetType(null);
     if (t !== "building") setSelectedBuildingType(null);
     if (t !== "select") { setPathMemberEditId(null); setSelectedPathPoint(null); }
-  }, [multiSelected.length, selected]);
+  }, [applyLastCompletedPathStyle, multiSelected.length, selected]);
 
   // ── Layer switching — clears ALL transient tool state and returns to the
   // select tool so an incompatible active tool can never leak between
@@ -5389,6 +5623,9 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     navGroupOriginRef.current = null;
     navGroupEdgeOriginsRef.current = null;
     pathGroupOriginRef.current = null;
+    groupRotating.current = null;
+    setGroupRotationActive(false);
+    setRotatingAngle(0);
     pathGroupRotating.current = null;
     setPathGroupRotationBounds(null);
     groundPaintGesture.current = null;
@@ -5434,37 +5671,49 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
 
   const handleDblClick = () => {
     if (tool === "path" && layer !== "navigation" && drawingPath.length >= 2) {
-      const cfg = LAYER_PATH_CONFIG[layer] ?? LAYER_PATH_CONFIG.campus;
-      const start = drawingPath[0];
-      const end = drawingPath[drawingPath.length - 1];
-      // Check both endpoints for snap targets to auto-inherit network membership
-      const endSnap = pathSnapTargetForPoint(end);
-      const startSnap = !endSnap ? pathSnapTargetForPoint(start) : null;
-      const snapTarget = endSnap ?? startSnap;
-      const networkId = snapTarget?.pathId ? (paths.find((p) => p.id === snapTarget.pathId)?.pathNetworkId ?? genId("pnet")) : undefined;
+      const startSnap = pathSnapTargetForPoint(drawingPath[0]);
+      const endSnap = pathSnapTargetForPoint(drawingPath[drawingPath.length - 1]);
+      const start = startSnap?.point ?? drawingPath[0];
+      const end = endSnap?.point ?? drawingPath[drawingPath.length - 1];
+      const startAttachment = isVisualPathTarget(startSnap) && startSnap ? visualAttachmentTargetForSnap(startSnap) : undefined;
+      const endAttachment = isVisualPathTarget(endSnap) && endSnap ? visualAttachmentTargetForSnap(endSnap) : undefined;
+      const hasVisualAttachment = Boolean(startAttachment || endAttachment);
+      const points = drawingPath.map((point, index) => index === 0 ? start : index === drawingPath.length - 1 ? end : point);
       const newPath: CampusPath = {
         id: genId("p"),
-        name: cfg.type === "road" ? "Road" : cfg.type === "accessible" ? "Accessible Path" : "Walkway",
-        points: drawingPath,
-        type: cfg.type,
-        color: cfg.color,
-        width: cfg.width,
-        pathNetworkId: networkId,
+        name: pathPaintType === "road" ? "Road" : pathPaintType === "accessible" ? "Accessible Path" : "Walkway",
+        points,
+        type: pathPaintType,
+        color: pathPaintColor,
+        width: pathPaintWidth,
+        ...(!hasVisualAttachment && (startSnap ?? endSnap)?.pathId
+          ? { pathNetworkId: paths.find((p) => p.id === (startSnap ?? endSnap)?.pathId)?.pathNetworkId ?? genId("pnet") }
+          : {}),
+        ...(startAttachment || endAttachment
+          ? { visualAttachments: [
+              ...(startAttachment ? [visualPathAttachmentFromTarget(0, startAttachment)] : []),
+              ...(endAttachment ? [visualPathAttachmentFromTarget(points.length - 1, endAttachment)] : []),
+            ] }
+          : {}),
         visible: true,
         locked: false,
       };
-      const withJunction = insertPathJunctionPoint(paths, snapTarget);
+      const snapTarget = endSnap ?? startSnap;
+      const withJunction = hasVisualAttachment ? paths : insertPathJunctionPoint(paths, snapTarget);
       const withNewPath = [...withJunction, newPath];
       // B5 Phase 5.14: use mergePathNetworksForJunction for proper cross-network merging
-      const nextPaths = snapTarget?.pathId
+      const mergedPaths = !hasVisualAttachment && snapTarget?.pathId
         ? mergePathNetworksForJunction(withNewPath, newPath.id, snapTarget.pathId)
         : withNewPath;
-      updPaths(nextPaths);
+      const completed = syncVisualPathAttachments(mergedPaths);
+      upd({ paths: completed });
+      lastCompletedPathIdRef.current = newPath.id;
+      lastCompletedPathStyleRef.current = { type: newPath.type, color: newPath.color, width: newPath.width };
       setDP([]); setTool("select"); setPathSettingsOpen(false);
       // Play the draw-in animation for the just-completed path
       setAnimatingPathId(newPath.id);
       setTimeout(() => setAnimatingPathId((cur) => (cur === newPath.id ? null : cur)), 900);
-      toast.success("Pathway created", `${drawingPath.length} point${drawingPath.length !== 1 ? "s" : ""} drawn.`);
+      toast.success("Pathway created", `${points.length} point${points.length !== 1 ? "s" : ""} drawn.`);
     }
   };
 
@@ -5959,6 +6208,78 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     navGroupEdgeOriginsRef.current = null;
   }, [buildings, cw, ch, decorAssets, getPoint, layer, markers, multiSelected, navEdges, navNodes, paths, selectionForId, snapshotNavGroup, tool]);
 
+  const rotatePhysicalCampus = useCallback((
+    baseCampus: Campus,
+    members: GroupMoveMember[],
+    center: { x: number; y: number },
+    angle: number,
+  ): Campus => {
+    const rotated = rotateGroupMembers(members, center, angle, cw, ch, CAMPUS_OBJECT_SAFE_INSET);
+    const byId = new globalThis.Map(rotated.map((member) => [member.id, member]));
+    const nextBuildings = baseCampus.buildings.map((building) => {
+      const member = byId.get(building.id);
+      return member?.kind === "building"
+        ? { ...building, x: Math.round(member.x), y: Math.round(member.y), rotation: normalizeDeg(member.rotation ?? building.rotation ?? 0) }
+        : building;
+    });
+    const nextDecorAssets = (baseCampus.decorAssets ?? []).map((asset) => {
+      const member = byId.get(asset.id);
+      return member?.kind === "decorAsset"
+        ? { ...asset, x: Math.round(member.x), y: Math.round(member.y), rotation: normalizeDeg(member.rotation ?? asset.rotation ?? 0) }
+        : asset;
+    });
+    const touchesBuilding = members.some((member) => member.kind === "building");
+    const nextBase: Campus = {
+      ...baseCampus,
+      buildings: nextBuildings,
+      decorAssets: nextDecorAssets,
+      // Building rotation already owns the established Entrance/nav-anchor
+      // synchronization. Pure decor rotation remains graph-neutral.
+      navNodes: touchesBuilding
+        ? syncEntranceNodePositions(nextBuildings, baseCampus.navNodes ?? [])
+        : baseCampus.navNodes,
+    };
+    return touchesBuilding
+      ? reconcileExteriorApproachNavigation(syncExteriorEmergencyStairGraph(nextBase))
+      : nextBase;
+  }, [ch, cw]);
+
+  const getPhysicalRotationMembers = useCallback(() => {
+    if (!physicalGroupRotationEligible || multiSelected.length < 2) return null;
+    const members = buildDragGroup({ type: "decorAsset", id: multiSelected[0] }, multiSelected)
+      ?.filter((member) => member.kind === "building" || member.kind === "decorAsset") ?? [];
+    return members.length >= 2 ? members : null;
+  }, [buildDragGroup, multiSelected, physicalGroupRotationEligible]);
+
+  const onGroupRotateStart = useCallback((e: React.MouseEvent, center: { x: number; y: number }) => {
+    if (tool !== "select") return;
+    const members = getPhysicalRotationMembers();
+    if (!members) return;
+    e.stopPropagation();
+    e.preventDefault();
+    const pt = getPoint(e, cw, ch);
+    gestureChangedRef.current = false;
+    gestureHistoryPushed.current = false;
+    groupRotating.current = {
+      cx: center.x,
+      cy: center.y,
+      prevAngle: Math.atan2(pt.y - center.y, pt.x - center.x) * (180 / Math.PI),
+      rotation: 0,
+      members,
+    };
+    setGroupRotationActive(true);
+    setRotatingAngle(0);
+  }, [ch, cw, getPhysicalRotationMembers, getPoint, tool]);
+
+  const groupBoundsForMembers = useCallback((members: GroupMoveMember[]) => {
+    const bounds = members.map(memberVisibleBounds);
+    const minX = Math.min(...bounds.map((bound) => bound.x));
+    const minY = Math.min(...bounds.map((bound) => bound.y));
+    const maxX = Math.max(...bounds.map((bound) => bound.x + bound.width));
+    const maxY = Math.max(...bounds.map((bound) => bound.y + bound.height));
+    return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+  }, []);
+
   const onPathGroupScaleStart = useCallback((e: React.MouseEvent, corner: "nw" | "ne" | "sw" | "se", bounds: { x: number; y: number; width: number; height: number }) => {
     if (tool !== "select" || multiSelectedPaths.length < 2) return;
     e.stopPropagation();
@@ -6379,9 +6700,14 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
         : changes.type === "walkway"
           ? { color: "#94a3b8", width: 10 }
           : {};
+    const updatedPaths = syncVisualPathAttachments(paths.map((p) => p.id === id ? { ...p, ...typeDefaults, ...changes } : p));
+    const updatedPath = updatedPaths.find((path) => path.id === id);
+    if (updatedPath && lastCompletedPathIdRef.current === id) {
+      lastCompletedPathStyleRef.current = { type: updatedPath.type, color: updatedPath.color, width: updatedPath.width };
+    }
     const next: Campus = {
       ...campus,
-      paths: paths.map((p) => p.id === id ? { ...p, ...typeDefaults, ...changes } : p),
+      paths: updatedPaths,
     };
     const reconciled = reconcilePathwayNavigation(next, genId, { preserveAuthoredGeometry: true });
     onUpdate(reconciled);
@@ -6389,7 +6715,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
   };
 
   const onDeletePath = (id: string) => {
-    const next: Campus = { ...campus, paths: paths.filter((p) => p.id !== id) };
+    const next: Campus = { ...campus, paths: syncVisualPathAttachments(paths.filter((p) => p.id !== id)) };
     const cleaned = cleanupDeletedPathwayNavigation(campus, next);
     const reconciled = reconcilePathwayNavigation(cleaned, genId, { preserveAuthoredGeometry: true });
     onUpdate(reconciled);
@@ -6661,8 +6987,9 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     pathExtendRef.current = { pathId: id, atStart: pointIndex === 0 };
     pathPaintStroke.current = { points: [start], moved: false };
     setPathPaintType(path.type);
+    setPathPaintColor(path.color || cfg.color);
     setPathPaintWidth(path.width);
-    setPathPaintPreview({ points: [start], width: path.width, type: path.type, color: cfg.color });
+    setPathPaintPreview({ points: [start], width: path.width, type: path.type, color: path.color || cfg.color });
     setSelected({ type: "path", id });
     setSelectedPathPoint({ pathId: id, pointIndex });
     setMultiSelected([]);
@@ -7187,6 +7514,24 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     setSelectedPathPoint(selectedPathPoint);
   };
 
+  const onDetachSelectedPathPoint = () => {
+    if (!selectedPathPoint) return;
+    const attachment = visualPathAttachmentForPoint(paths, selectedPathPoint.pathId, selectedPathPoint.pointIndex);
+    const path = paths.find((candidate) => candidate.id === selectedPathPoint.pathId);
+    if (!attachment || !path || path.locked) return;
+    const next: Campus = {
+      ...campus,
+      paths: detachVisualPathEndpoint(paths, selectedPathPoint.pathId, selectedPathPoint.pointIndex),
+    };
+    // Detaching a visual-only relationship must not invoke navigation
+    // reconciliation or alter any graph-owned arrays.
+    onUpdate(next);
+    pushHistory(next);
+    setSelected({ type: "path", id: path.id });
+    setSelectedPathPoint(selectedPathPoint);
+    toast.success("Path detached", "This endpoint can now be edited independently.");
+  };
+
   const ensureOutdoorNavNodeAt = useCallback((point: { x: number; y: number }, nodeSet: NavigationNode[]) => {
     const existing = nodeSet.find((node) =>
       (node.type === "outdoor" || node.type === "entrance") &&
@@ -7456,6 +7801,22 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     if (pruned.length > 30) pruned.shift();
     historyRef.current = { snapshots: pruned, idx: pruned.length - 1 };
   }, [campus]);
+
+  const rotateGroupBy = useCallback((angle: number) => {
+    if (tool !== "select") return;
+    const members = getPhysicalRotationMembers();
+    if (!members) return;
+    const bounds = groupBoundsForMembers(members);
+    const next = rotatePhysicalCampus(
+      campusRef.current,
+      members,
+      { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 },
+      angle,
+    );
+    campusRef.current = next;
+    onUpdate(next);
+    pushHistory(next);
+  }, [getPhysicalRotationMembers, groupBoundsForMembers, onUpdate, pushHistory, rotatePhysicalCampus, tool]);
 
   const cancelCanvasResize = useCallback(() => {
     canvasResizeRef.current = null;
@@ -8442,6 +8803,15 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
           cancelCanvasResize();
           return;
         }
+        if (groupRotating.current) {
+          groupRotating.current = null;
+          setGroupRotationActive(false);
+          setRotatingAngle(0);
+          setGuides([]);
+          gestureChangedRef.current = false;
+          gestureHistoryPushed.current = false;
+          return;
+        }
         if (groupResizing.current) {
           groupResizing.current = null;
           setGuides([]);
@@ -9019,12 +9389,14 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
                 <ArrowLeft className="h-3.5 w-3.5 group-hover:-translate-x-0.5 transition-transform" />
               </button>
             </ToolbarTooltip>
-            <span className="text-sm font-extrabold text-foreground truncate max-w-[100px] flex items-center gap-1" style={{ fontFamily: "var(--font-sans)" }}>
-              {campus.themeColor && (
-                <span className="w-3 h-3 rounded shrink-0 inline-block" style={{ backgroundColor: campus.themeColor }} />
-              )}
-              {campus.name}
-            </span>
+            <Tooltip content={campus.name || "Campus"} className="min-w-0 max-w-[260px] flex-1">
+              <span className="flex min-w-0 max-w-full items-center gap-1 text-sm font-extrabold text-foreground" style={{ fontFamily: "var(--font-sans)" }}>
+                {campus.themeColor && (
+                  <span className="inline-block h-3 w-3 shrink-0 rounded" style={{ backgroundColor: campus.themeColor }} />
+                )}
+                <span className="min-w-0 truncate">{campus.name}</span>
+              </span>
+            </Tooltip>
             {/* Keep the campus identity and lifecycle badge as one visual
                 group, with the same deliberate breathing room used by the
                 rest of the editor header.  The old 4px gap made `TEST` and
@@ -9120,6 +9492,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
                                         type="button"
                                         onClick={() => {
                                           setPathPaintType(type.value);
+                                          setPathPaintColor(type.color);
                                           setPathPaintWidth(type.defaultWidth);
                                         }}
                                         aria-pressed={pathPaintType === type.value}
@@ -9653,6 +10026,9 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
           edgeSnapPreview={waypointEdgeSnap}
           onGroupSurfaceDown={onGroupSurfaceDown}
           onGroupResizeStart={onGroupResizeStart}
+          onGroupRotateStart={onGroupRotateStart}
+          groupRotationEligible={physicalGroupRotationEligible}
+          groupRotationActive={groupRotationActive}
           onPathGroupScaleStart={onPathGroupScaleStart}
           onPathGroupRotateStart={onPathGroupRotateStart}
           pathGroupRotationActive={!!pathGroupRotating.current}
@@ -10105,6 +10481,31 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
                   ))}
                 </>
               )}
+              {physicalGroupRotationEligible && (
+                <>
+                  <div className="w-px h-5 bg-border" />
+                  <motion.button
+                    whileHover={{ scale: 1.04 }}
+                    whileTap={{ scale: 0.95 }}
+                    onClick={() => rotateGroupBy(-90)}
+                    className="w-7 h-7 rounded-lg flex items-center justify-center text-muted-foreground hover:bg-muted hover:text-foreground transition-all"
+                    title="Rotate group 90° left"
+                    aria-label="Rotate group 90° left"
+                  >
+                    <RotateCcw className="h-3.5 w-3.5" />
+                  </motion.button>
+                  <motion.button
+                    whileHover={{ scale: 1.04 }}
+                    whileTap={{ scale: 0.95 }}
+                    onClick={() => rotateGroupBy(90)}
+                    className="w-7 h-7 rounded-lg flex items-center justify-center text-muted-foreground hover:bg-muted hover:text-foreground transition-all"
+                    title="Rotate group 90° right"
+                    aria-label="Rotate group 90° right"
+                  >
+                    <RotateCw className="h-3.5 w-3.5" />
+                  </motion.button>
+                </>
+              )}
               <div className="w-px h-5 bg-border" />
               <button
                 onClick={() => setShowGroupOutline((value) => !value)}
@@ -10162,6 +10563,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
           pathNavigationLegacy={pathNavigationLegacy}
           allPaths={paths}
           selectedPathPoint={selectedPathPoint}
+          selectedPathPointIsAttached={!!selectedPathPoint && !!visualPathAttachmentForPoint(paths, selectedPathPoint.pathId, selectedPathPoint.pointIndex)}
           selectedPathPointIsJunction={!!selectedPathPoint && pathPointIsJunction(selectedPathPoint.pathId, selectedPathPoint.pointIndex)}
           selectedPathPointCanBeRemoved={selectedPathPointCanBeRemoved()}
           selRoute={selRoute}
@@ -10244,6 +10646,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
           onAddPathBend={onAddPathBend}
           onRemoveSelectedPathPoint={onRemoveSelectedPathPoint}
           onDisconnectSelectedPathPoint={onDisconnectSelectedPathPoint}
+          onDetachSelectedPathPoint={onDetachSelectedPathPoint}
           onAddWaypointAtSelectedPathPoint={onAddWaypointAtSelectedPathPoint}
           onAddPathToNavigation={onAddPathToNavigation}
           onAddPathNetworkToNavigation={onAddPathsToNavigation}

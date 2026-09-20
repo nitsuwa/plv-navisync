@@ -37,7 +37,7 @@ export interface GroupMoveMember {
   width: number;
   /** Full world-space height. */
   height: number;
-  /** Rotation in degrees (buildings only). When set, visible AABB is used. */
+  /** Rotation in degrees (buildings/decor assets). When set, visible AABB is used. */
   rotation?: number;
 }
 
@@ -71,6 +71,66 @@ export function memberVisibleBounds(m: GroupMoveMember): { x: number; y: number;
     return { x: b.x, y: b.y, width: b.w, height: b.h };
   }
   return { x: m.x, y: m.y, width: m.width, height: m.height };
+}
+
+/**
+ * Rotate a physical multi-selection around one captured group pivot.
+ *
+ * The returned members are derived from the gesture-start snapshot; callers
+ * should not feed the result back into this function for the next pointer
+ * frame.  Position and orientation therefore remain a rigid, drift-free
+ * transform, while the final translation keeps the visible selection inside
+ * the canvas frame.
+ */
+export function rotateGroupMembers(
+  members: GroupMoveMember[],
+  center: { x: number; y: number },
+  angle: number,
+  canvasW?: number,
+  canvasH?: number,
+  boundsInset = 0,
+): GroupMoveMember[] {
+  const radians = (angle * Math.PI) / 180;
+  const cos = Math.cos(radians);
+  const sin = Math.sin(radians);
+  const rotated = members.map((member) => {
+    const positionedAtCenter = member.kind === "decorAsset" || member.kind === "marker";
+    const memberCenter = positionedAtCenter
+      ? { x: member.x, y: member.y }
+      : { x: member.x + member.width / 2, y: member.y + member.height / 2 };
+    const nextCenter = {
+      x: center.x + (memberCenter.x - center.x) * cos - (memberCenter.y - center.y) * sin,
+      y: center.y + (memberCenter.x - center.x) * sin + (memberCenter.y - center.y) * cos,
+    };
+    const nextRotation = member.kind === "building" || member.kind === "decorAsset"
+      ? (member.rotation ?? 0) + angle
+      : member.rotation;
+    return {
+      ...member,
+      x: positionedAtCenter ? nextCenter.x : nextCenter.x - member.width / 2,
+      y: positionedAtCenter ? nextCenter.y : nextCenter.y - member.height / 2,
+      rotation: nextRotation,
+    };
+  });
+
+  if (!canvasW || !canvasH || rotated.length === 0) return rotated;
+  const bounds = rotated.map(memberVisibleBounds);
+  const minX = Math.min(...bounds.map((bound) => bound.x));
+  const minY = Math.min(...bounds.map((bound) => bound.y));
+  const maxX = Math.max(...bounds.map((bound) => bound.x + bound.width));
+  const maxY = Math.max(...bounds.map((bound) => bound.y + bound.height));
+  const dx = minX < boundsInset
+    ? boundsInset - minX
+    : maxX > canvasW - boundsInset
+      ? canvasW - boundsInset - maxX
+      : 0;
+  const dy = minY < boundsInset
+    ? boundsInset - minY
+    : maxY > canvasH - boundsInset
+      ? canvasH - boundsInset - maxY
+      : 0;
+  if (dx === 0 && dy === 0) return rotated;
+  return rotated.map((member) => ({ ...member, x: member.x + dx, y: member.y + dy }));
 }
 
 /** The visible AABB of a reference rect (other building). */
@@ -178,6 +238,30 @@ export function snapRectToVisibleBounds(
   };
 }
 
+/**
+ * Snap a visible rectangle's center to the logical campus/canvas midpoint.
+ * This deliberately works in world coordinates, not viewport coordinates, so
+ * camera zoom and pan never move the true alignment target.
+ */
+export function snapRectToCanvasCenter(
+  rect: RotatableRect,
+  canvasW: number,
+  canvasH: number,
+  threshold = 12,
+): { x: number; y: number; guides: { type: "h" | "v"; pos: number }[] } {
+  const bounds = rectVisibleBounds(rect);
+  const canvasCenterX = canvasW / 2;
+  const canvasCenterY = canvasH / 2;
+  const centerX = bounds.x + bounds.width / 2;
+  const centerY = bounds.y + bounds.height / 2;
+  const dx = Math.abs(centerX - canvasCenterX) <= threshold ? canvasCenterX - centerX : 0;
+  const dy = Math.abs(centerY - canvasCenterY) <= threshold ? canvasCenterY - centerY : 0;
+  const guides: { type: "h" | "v"; pos: number }[] = [];
+  if (Math.abs(centerX - canvasCenterX) <= threshold) guides.push({ type: "v", pos: canvasCenterX });
+  if (Math.abs(centerY - canvasCenterY) <= threshold) guides.push({ type: "h", pos: canvasCenterY });
+  return { x: rect.x + dx, y: rect.y + dy, guides };
+}
+
 export interface ComputeGroupTranslationParams {
   /** Every selected movable member of the group (buildings, decor, paths). */
   members: GroupMoveMember[];
@@ -196,6 +280,8 @@ export interface ComputeGroupTranslationParams {
   otherBuildings?: GroupEdgeRect[];
   /** When false, skips edge snapping (default true). */
   edgeSnap?: boolean;
+  /** When false, skips logical canvas-centre snapping (used for Pathways). */
+  centerSnap?: boolean;
   /** Edge-snap distance threshold in canvas units (default 12). */
   edgeThreshold?: number;
   /** Small physical-object inset from the canvas frame. */
@@ -354,6 +440,20 @@ export function computeGroupTranslation(p: ComputeGroupTranslationParams): Group
     dy += aligned.y - (minY + dy);
   }
 
+  // Canvas-centre alignment is a second, axis-independent physical snap. It
+  // uses the group's outer visible bounds, so a multi-selection remains one
+  // rigid transform and no member is moved independently.
+  if (p.edgeSnap !== false && p.centerSnap !== false) {
+    const centered = snapRectToCanvasCenter(
+      { x: minX + dx, y: minY + dy, width: bboxW, height: bboxH },
+      p.canvasW,
+      p.canvasH,
+      p.edgeThreshold ?? 12,
+    );
+    dx += centered.x - (minX + dx);
+    dy += centered.y - (minY + dy);
+  }
+
   // 3. Canvas-boundary clamp (rigid — shifts the entire group).
   const inset = Math.max(0, Math.min(Math.min(p.canvasW, p.canvasH) / 2, p.boundsInset ?? 0));
   const safeMinX = inset;
@@ -429,7 +529,9 @@ export function computeGroupAlignmentGuides(
   width: number,
   height: number,
   others: GroupEdgeRect[],
-  threshold = 6
+  threshold = 6,
+  canvasW?: number,
+  canvasH?: number,
 ): { type: "h" | "v"; pos: number }[] {
   const guides: { type: "h" | "v"; pos: number }[] = [];
   const groupX = [minX, minX + width / 2, minX + width];
@@ -451,5 +553,13 @@ export function computeGroupAlignmentGuides(
   }
   if (bestX) guides.push({ type: "v", pos: bestX.pos });
   if (bestY) guides.push({ type: "h", pos: bestY.pos });
+  if (canvasW != null) {
+    const centerX = minX + width / 2;
+    if (Math.abs(centerX - canvasW / 2) <= threshold) guides.unshift({ type: "v", pos: canvasW / 2 });
+  }
+  if (canvasH != null) {
+    const centerY = minY + height / 2;
+    if (Math.abs(centerY - canvasH / 2) <= threshold) guides.unshift({ type: "h", pos: canvasH / 2 });
+  }
   return guides;
 }

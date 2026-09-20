@@ -89,6 +89,7 @@ export interface CampusHomeProps {
   /** Kept for callers that have not applied the database delete migration yet. */
   permanentDeleteUnavailableReason?: string;
   onEditDetails?: (id: string) => void;
+  onViewDetails?: (id: string) => void;
 }
 
 export interface BulkDeleteProgress {
@@ -215,6 +216,118 @@ function CampusMiniMap({ campus, className }: { campus: Campus; className?: stri
   );
 }
 
+function CampusDetailsDialog({
+  campus,
+  onClose,
+  onOpen,
+  onEditDetails,
+  onDuplicate,
+  onArchive,
+}: {
+  campus: Campus;
+  onClose: () => void;
+  onOpen: (id: string) => void;
+  onEditDetails?: (id: string) => void;
+  onDuplicate?: (id: string) => void;
+  onArchive?: (id: string) => void;
+}) {
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [onClose]);
+  const buildings = campus.previewBuildingCount ?? campus.buildings?.length ?? 0;
+  const floors = campus.previewFloorCount ?? (campus.buildings ?? []).reduce((sum, building) => sum + (building.floors ?? []).length, 0);
+  const rooms = campus.previewRoomCount ?? (campus.buildings ?? []).reduce((sum, building) => sum + (building.floors ?? []).reduce((floorSum, floor) => floorSum + (floor.rooms ?? []).length, 0), 0);
+  const published = campus.publishStatus === "published";
+  const statusLabel = campus.status === "archived"
+    ? "Archived"
+    : published ? "Published" : campus.lifecycleStatus === "unpublished" || campus.publishedAt ? "Draft" : "Never Published";
+  const coverImage = campus.thumbnail || campus.overviewImagePath;
+  return createPortal(
+    <motion.div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Campus Details"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-[55] flex items-center justify-center bg-background/70 p-4 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <motion.div
+        initial={{ opacity: 0, y: 18, scale: 0.97 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        exit={{ opacity: 0, y: 10, scale: 0.98 }}
+        className="flex max-h-[min(760px,calc(100vh-32px))] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-2xl"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="relative h-44 shrink-0 overflow-hidden bg-gradient-to-br from-[#e8eaf0] to-[#f0eee8] sm:h-52">
+          {coverImage ? (
+            <img src={coverImage} alt={campus.name} className="h-full w-full object-cover" />
+          ) : (
+            <div className="absolute inset-0 flex items-center justify-center p-6">
+              <CampusMiniMap campus={campus} className="max-h-full max-w-xl" />
+            </div>
+          )}
+          <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/28 to-transparent" />
+          <div className="absolute inset-x-0 bottom-0 h-28 bg-gradient-to-r from-black/45 via-black/20 to-transparent" />
+          <button type="button" aria-label="Close Campus Details" onClick={onClose}
+            className="absolute right-3 top-3 flex h-8 w-8 items-center justify-center rounded-full bg-black/30 text-white backdrop-blur-sm transition-colors hover:bg-black/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white">
+            <X className="h-4 w-4" />
+          </button>
+          <div className="absolute bottom-4 left-5 right-5 text-white">
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="text-xl font-extrabold tracking-tight drop-shadow-[0_2px_4px_rgba(0,0,0,0.7)] sm:text-2xl">{campus.name}</h2>
+              <span className="rounded-md border border-white/20 bg-black/45 px-2 py-0.5 font-mono text-[10px] font-bold shadow-sm backdrop-blur-sm">{campus.code}</span>
+            </div>
+            <p className="mt-1 flex items-center gap-1.5 text-[10px] font-semibold text-white drop-shadow-[0_1px_3px_rgba(0,0,0,0.75)]"><MapPin className="h-3 w-3" /> Campus Details</p>
+          </div>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto p-5 sm:p-6">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className={cn("inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[10px] font-bold", published
+              ? "border-green-200 bg-green-50 text-green-700 dark:border-green-700/40 dark:bg-green-900/20 dark:text-green-300"
+              : "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-700/40 dark:bg-amber-900/20 dark:text-amber-300")}>
+              {published ? <Globe className="h-3 w-3" /> : <Clock className="h-3 w-3" />} {statusLabel}
+            </span>
+            {campus.visibleToStudents && published && <span className="inline-flex items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-[10px] font-bold text-blue-700 dark:border-blue-700/40 dark:bg-blue-900/20 dark:text-blue-300"><Eye className="h-3 w-3" /> Visible to students</span>}
+          </div>
+          <section className="mt-5" aria-labelledby="campus-details-description">
+            <h3 id="campus-details-description" className="text-[10px] font-extrabold uppercase tracking-widest text-muted-foreground">Description</h3>
+            <p data-testid="campus-details-description" className="mt-2 whitespace-pre-wrap text-sm leading-7 text-foreground">{campus.description?.trim() || "No campus description has been added yet."}</p>
+          </section>
+          <div className="mt-6 grid grid-cols-2 gap-2 sm:grid-cols-4">
+            {[[Building2, "Buildings", buildings], [Layers, "Floors", floors], [DoorOpen, "Rooms", rooms], [MapPin, "Markers", campus.markers?.length ?? 0]].map(([Icon, label, value]) => {
+              const StatIcon = Icon as typeof Building2;
+              return <div key={label as string} className="rounded-xl border border-border bg-muted/25 p-3"><StatIcon className="h-4 w-4 text-primary" /><p className="mt-2 text-lg font-extrabold tabular-nums text-foreground">{value as number}</p><p className="text-[10px] font-semibold text-muted-foreground">{label as string}</p></div>;
+            })}
+          </div>
+          <div className="mt-5 grid gap-2 text-[11px] text-muted-foreground sm:grid-cols-2">
+            <p><span className="font-bold text-foreground">Created:</span> {campus.createdAt || "Not available"}</p>
+            <p><span className="font-bold text-foreground">Updated:</span> {campus.updatedAt || "Not available"}</p>
+            <p><span className="font-bold text-foreground">Published:</span> {campus.publishedAt || "Never"}</p>
+            {campus.address && <p><span className="font-bold text-foreground">Location:</span> {[campus.address, campus.city, campus.province].filter(Boolean).join(", ")}</p>}
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border bg-muted/20 p-4 sm:p-5">
+          <div className="flex flex-wrap gap-2">
+            {onDuplicate && <button type="button" onClick={() => onDuplicate(campus.id)} className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-border px-3 text-xs font-bold text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"><Copy className="h-3.5 w-3.5" /> Duplicate</button>}
+            {onArchive && campus.status !== "archived" && <button type="button" onClick={() => onArchive(campus.id)} className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-amber-200 px-3 text-xs font-bold text-amber-700 transition-colors hover:bg-amber-50 dark:border-amber-700/40 dark:text-amber-300 dark:hover:bg-amber-900/20"><Archive className="h-3.5 w-3.5" /> Archive</button>}
+          </div>
+          <div className="flex flex-wrap justify-end gap-2">
+            {onEditDetails && <button type="button" onClick={() => { onClose(); onEditDetails(campus.id); }} className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-border px-3 text-xs font-bold text-foreground transition-colors hover:bg-muted"><Pencil className="h-3.5 w-3.5" /> Edit Details</button>}
+            <button type="button" onClick={() => { onClose(); onOpen(campus.id); }} className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-primary px-4 text-xs font-extrabold text-primary-foreground shadow-sm transition-colors hover:bg-primary/90"><ExternalLink className="h-3.5 w-3.5" /> Open Editor</button>
+          </div>
+        </div>
+      </motion.div>
+    </motion.div>,
+    document.body,
+  );
+}
+
 // ── Quick actions dropdown ──────────────────────────────────────────────────
 // ── Publish/Archive confirm dialog state ────────────────────────────────────
 
@@ -322,6 +435,7 @@ function QuickActions({
   onRestore,
   onPermanentDelete,
   onEditDetails,
+  onViewDetails,
 }: {
   campus: Campus;
   archived?: boolean;
@@ -333,6 +447,7 @@ function QuickActions({
   onRestore?: (id: string) => void | Promise<void>;
   onPermanentDelete?: (id: string) => void | Promise<void>;
   onEditDetails?: (id: string) => void;
+  onViewDetails?: (id: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [dropdownLayout, setDropdownLayout] = useState<{ left: number; top: number; transformOrigin: string }>({
@@ -535,6 +650,7 @@ function QuickActions({
 
   const actions = archived
     ? [
+      ...(onViewDetails ? [{ icon: Eye, label: "View Details", action: () => { setOpen(false); onViewDetails(campus.id); } }] : []),
       ...(onRestore ? [{ icon: Archive, label: "Restore Campus", action: () => { setOpen(false); setRestoreTarget(campus.id); } }] : []),
       ...(onPermanentDelete ? [{ icon: Trash2, label: "Delete Permanently", danger: true, action: () => {
         if (actionProgress?.state === "loading") return;
@@ -543,6 +659,7 @@ function QuickActions({
       } }] : []),
     ]
     : [
+      ...(onViewDetails ? [{ icon: Eye, label: "View Details", action: () => { setOpen(false); onViewDetails(campus.id); } }] : []),
       ...(onOpen ? [{ icon: ExternalLink, label: "Open Campus", action: () => { setOpen(false); onOpen(campus.id); } }] : []),
       ...(onEditDetails ? [{ icon: Pencil, label: "Edit Details", action: () => { setOpen(false); onEditDetails(campus.id); } }] : []),
       ...(onDuplicate ? [{ icon: Copy, label: "Duplicate Campus", action: () => { setOpen(false); setDuplicateTarget(campus.id); } }] : []),
@@ -859,8 +976,11 @@ export function CampusHome({
   onBulkPermanentDelete,
   permanentDeleteUnavailableReason,
   onEditDetails,
+  onViewDetails,
 }: CampusHomeProps) {
   const [showGuide, setShowGuide] = useState(false);
+  const [detailsCampusId, setDetailsCampusId] = useState<string | null>(null);
+  const [detailsAction, setDetailsAction] = useState<{ kind: "duplicate" | "archive"; campus: Campus } | null>(null);
   // Filter out archived campuses unless we want to show them
   const activeCampuses = campuses.filter((c) => c.status !== "archived");
   const archivedCampuses = campuses.filter((c) => c.status === "archived");
@@ -989,8 +1109,60 @@ export function CampusHome({
   const totalFloors = (campus: Campus) =>
     (campus.buildings ?? []).reduce((s, b) => s + (b.floors ?? []).length, 0);
 
+  const detailsCampus = detailsCampusId ? campuses.find((campus) => campus.id === detailsCampusId) : undefined;
+  const openCampusDetails = useCallback((id: string) => {
+    setDetailsCampusId(id);
+    onViewDetails?.(id);
+  }, [onViewDetails]);
+  const requestDetailsAction = useCallback((kind: "duplicate" | "archive", id: string) => {
+    const campus = campuses.find((candidate) => candidate.id === id);
+    if (!campus) return;
+    setDetailsCampusId(null);
+    setDetailsAction({ kind, campus });
+  }, [campuses]);
+  const confirmDetailsAction = useCallback(() => {
+    const action = detailsAction;
+    setDetailsAction(null);
+    if (!action) return;
+    if (action.kind === "duplicate") {
+      void onDuplicate?.(action.campus.id);
+      return;
+    }
+    if (action.campus.publishStatus === "published") {
+      void onUnpublish?.(action.campus.id);
+      return;
+    }
+    void onArchive?.(action.campus.id);
+  }, [detailsAction, onArchive, onDuplicate, onUnpublish]);
+
   return (
     <div className="flex-1 overflow-y-auto scrollbar-show-on-hover scroll-smooth p-6 lg:p-8">
+      {detailsCampus && (
+        <CampusDetailsDialog
+          campus={detailsCampus}
+          onClose={() => setDetailsCampusId(null)}
+          onOpen={onOpen}
+          onEditDetails={onEditDetails}
+          onDuplicate={onDuplicate ? (id) => requestDetailsAction("duplicate", id) : undefined}
+          onArchive={onArchive ? (id) => requestDetailsAction("archive", id) : undefined}
+        />
+      )}
+      {detailsAction && createPortal(
+        <ConfirmDialog
+          open
+          title={detailsAction.kind === "duplicate" ? "Duplicate Campus?" : detailsAction.campus.publishStatus === "published" ? "Unpublish before archiving?" : "Archive this campus?"}
+          message={detailsAction.kind === "duplicate"
+            ? `A copy of "${detailsAction.campus.name}" will be created as a draft. All buildings, floors, and room data will be duplicated.`
+            : detailsAction.campus.publishStatus === "published"
+              ? `"${detailsAction.campus.name}" is currently published. Unpublish it before archiving so it is no longer visible to students.`
+              : `"${detailsAction.campus.name}" will be removed from the active campus list. Its map data will be preserved.`}
+          confirmLabel={detailsAction.kind === "duplicate" ? "Duplicate" : detailsAction.campus.publishStatus === "published" ? "Unpublish Campus" : "Archive Campus"}
+          cancelLabel="Cancel"
+          variant={detailsAction.kind === "duplicate" ? "info" : "warning"}
+          onConfirm={confirmDetailsAction}
+          onCancel={() => setDetailsAction(null)}
+        />, document.body,
+      )}
       {/* Campus Creation Guide */}
       <CreateCampusGuide
         open={showGuide}
@@ -1141,7 +1313,7 @@ export function CampusHome({
           ) : (
             <>
               {/* Campus cards grid */}
-              <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
+              <div className="grid items-stretch gap-5 sm:grid-cols-2 lg:grid-cols-3">
                 {activeVisible.map((campus, index) => {
               const hydratedBuildingCount = (campus.buildings ?? []).length;
               const hydratedFloors = totalFloors(campus);
@@ -1172,7 +1344,7 @@ export function CampusHome({
                       onOpen(campus.id);
                     }
                   }}
-                  className="group bg-card rounded-2xl border border-border shadow-sm overflow-hidden hover:shadow-lg transition-shadow duration-300 flex flex-col cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+                  className="group h-full bg-card rounded-2xl border border-border shadow-sm overflow-hidden hover:shadow-lg transition-shadow duration-300 flex flex-col cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
                   style={campus.themeColor ? { borderTopColor: campus.themeColor, borderTopWidth: '3px', willChange: 'transform, opacity', transform: 'translateZ(0)' } as React.CSSProperties : { willChange: 'transform, opacity', transform: 'translateZ(0)' } as React.CSSProperties}
                 >
                   {/* Preview area */}
@@ -1243,6 +1415,7 @@ export function CampusHome({
                         onUnpublish={onUnpublish}
                         onArchive={onArchive}
                         onEditDetails={onEditDetails}
+                        onViewDetails={openCampusDetails}
                       />
                     </div>
 
@@ -1278,11 +1451,13 @@ export function CampusHome({
                       </div>
 
                       {/* Description — conditional; cards with and without it stay aligned */}
-                      {campus.description && (
-                        <p className="text-[11px] text-muted-foreground mt-2 line-clamp-2 leading-relaxed" style={{ fontFamily: "var(--font-body)" }}>
-                          {campus.description}
-                        </p>
-                      )}
+                      <div className="mt-2 h-9 min-h-9 max-h-9 overflow-hidden">
+                        {campus.description && (
+                          <button type="button" onClick={(event) => { event.stopPropagation(); openCampusDetails(campus.id); }} className="w-full overflow-hidden whitespace-normal rounded text-left text-[11px] font-normal leading-4 text-muted-foreground line-clamp-2 transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40" style={{ fontFamily: "var(--font-body)" }} aria-label={`View full description for ${campus.name}`}>
+                            {campus.description}
+                          </button>
+                        )}
+                      </div>
                     </div>
 
                     {/* ── Bottom section: stats + Open Editor — pushed down by mt-auto ── */}
@@ -1441,7 +1616,7 @@ export function CampusHome({
                       </div>
                     </div>
                     <div className="absolute top-2.5 right-2.5">
-                      <QuickActions campus={campus} archived onRestore={onRestore} onPermanentDelete={onPermanentDelete} />
+                      <QuickActions campus={campus} archived onRestore={onRestore} onPermanentDelete={onPermanentDelete} onViewDetails={openCampusDetails} />
                     </div>
                   </div>
                 ))}

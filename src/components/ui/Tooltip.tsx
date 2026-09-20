@@ -4,9 +4,11 @@ interface TooltipProps {
   content: string;
   children: ReactNode;
   className?: string;
+  /** Render the trigger inside SVG without introducing an invalid HTML span. */
+  element?: "span" | "g";
 }
 
-export function Tooltip({ content, children, className }: TooltipProps) {
+export function Tooltip({ content, children, className, element = "span" }: TooltipProps) {
   const [show, setShow] = useState(false);
   const [pos, setPos] = useState({ x: 0, y: 0 });
   const timerRef = useRef<number | null>(null);
@@ -14,7 +16,7 @@ export function Tooltip({ content, children, className }: TooltipProps) {
     if (timerRef.current !== null && typeof window !== "undefined") window.clearTimeout(timerRef.current);
     timerRef.current = null;
   };
-  const showAt = (target: HTMLElement) => {
+  const showAt = (target: Element) => {
     clearTimer();
     const rect = target.getBoundingClientRect();
     // Keep the compact hint inside the viewport even when a palette item sits
@@ -42,10 +44,11 @@ export function Tooltip({ content, children, className }: TooltipProps) {
   const hide = () => { clearTimer(); setShow(false); };
   useEffect(() => () => clearTimer(), []);
 
+  const Trigger = element === "g" ? "g" : "span";
   return (
     <>
-      <span
-        className={`inline-flex ${className ?? ""}`}
+      <Trigger
+        className={element === "g" ? className : `inline-flex ${className ?? ""}`}
         tabIndex={0}
         aria-label={content}
         onFocus={(e) => showAt(e.currentTarget)}
@@ -54,7 +57,7 @@ export function Tooltip({ content, children, className }: TooltipProps) {
         onMouseLeave={hide}
       >
         {children}
-      </span>
+      </Trigger>
       {show && (
         <div
           role="tooltip"

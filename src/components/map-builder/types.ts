@@ -5,7 +5,7 @@ export type CampusStatus = "active" | "hidden" | "archived";
 export type PublishStatus = "draft" | "published";
 
 /** Tools available on the campus canvas */
-export type SimpleTool = "select" | "marker" | "gate" | "decor" | "building" | "path" | "connect" | "erase" | "room" | "pan" | "wall" | "door" | "window" | "stairs" | "elevator" | "ramp" | "furniture" | "text" | "measure" | "exterior-zone" | "entrance-steps" | "entrance-ramp";
+export type SimpleTool = "select" | "marker" | "gate" | "decor" | "building" | "path" | "connect" | "erase" | "room" | "pan" | "wall" | "door" | "open-passage" | "window" | "stairs" | "elevator" | "ramp" | "furniture" | "text" | "measure" | "exterior-zone" | "entrance-steps" | "entrance-ramp";
 
 /** Layer modes for the editor */
 export type EditorLayer = "campus" | "navigation" | "accessibility" | "emergency" | "events";
@@ -87,6 +87,12 @@ export interface FloorDoor {
   /** Building-owned Entrance relationship for an automatically generated
    * Ground-floor entrance Door. Manual Doors leave this unset. */
   buildingEntranceId?: string;
+  /** Explicit physical opening discriminator. Legacy records omit this and
+   * therefore remain ordinary hinged/sliding Doors. */
+  openingType?: "door" | "open_passage";
+  /** Authoring direction for an Open Passage. Building Entrance direction
+   * remains canonical whenever this opening is associated with one. */
+  accessDirection?: "both" | "entrance_only" | "exit_only";
 }
 
 // ── Indoor Window ───────────────────────────────────────────────────────────
@@ -677,9 +683,26 @@ export interface CampusPath {
   pathNetworkId?: string;
   /** Shared-coordinate junction keys intentionally disconnected for this path. */
   disconnectedJunctionKeys?: string[];
+  /**
+   * Visual-only endpoint attachments. These never participate in navigation
+   * graph reconciliation; they only keep a newly authored visual path joined
+   * to a point on another visual path.
+   */
+  visualAttachments?: CampusPathAttachment[];
   name?: string;
   visible?: boolean;
   locked?: boolean;
+}
+
+export interface CampusPathAttachment {
+  /** Point on the owning path that follows the target geometry. */
+  pointIndex: number;
+  targetPathId: string;
+  /** Exact target vertex, when the attachment was made to an endpoint/bend. */
+  targetPointIndex?: number;
+  /** Target segment and normalized position, when attached to a segment. */
+  targetSegmentIndex?: number;
+  targetT?: number;
 }
 
 // ── Navigation Node (Waypoint) ──────────────────────────────────────────────

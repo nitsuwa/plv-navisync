@@ -326,6 +326,7 @@ function effectiveDoorType(door: FloorDoor): "single" | "double" {
   const selWindow = selected.type === "window" ? windows.find((w) => w.id === selected.id) : undefined;
   const selDoorWall = selDoor?.wallId ? walls.find((w) => w.id === selDoor.wallId) : undefined;
   const selWindowWall = selWindow?.wallId ? walls.find((w) => w.id === selWindow.wallId) : undefined;
+  const isOpenPassage = selDoor?.openingType === "open_passage";
   const selFurniture = selected.type === "furniture" ? furniture.find((f) => f.id === selected.id) : undefined;
   const selStairs = selected.type === "stairs" ? stairs.find((s) => s.id === selected.id) : undefined;
   const selRamp = selected.type === "ramp" ? ramps.find((r) => r.id === selected.id) : undefined;
@@ -341,8 +342,8 @@ function effectiveDoorType(door: FloorDoor): "single" | "double" {
 
   const contentType = selRoom ? "Room" : selWall ? "Wall" : selDoor ? "Door" : selWindow ? "Window"
     : selFurniture ? "Furniture" : selStairs ? "Stairs" : selRamp ? "Ramp" : selElevator ? "Elevator" : selLabel ? "Label" : "Item";
-  const contentTitle = selDoor ? doorDisplayName(selDoor, { doors }) : contentType;
-  const contentSubtitle = selDoor ? "Door" : undefined;
+  const contentTitle = selDoor ? (isOpenPassage ? (selDoor.label?.trim() || "Open Passage") : doorDisplayName(selDoor, { doors })) : contentType;
+  const contentSubtitle = selDoor ? (isOpenPassage ? "Open architectural passage" : "Door") : undefined;
 
   const circulationSelection = selStairs
     ? { type: "stairs" as const, id: selStairs.id }
@@ -1645,14 +1646,23 @@ function effectiveDoorType(door: FloorDoor): "single" | "double" {
                   <input type="number" min={effectiveDoorType(selDoor) === "double" ? 28 : 10} max={effectiveDoorType(selDoor) === "double" ? 72 : 48} value={selDoor.width} onChange={(e) => onUpdateDoor(selDoor.id, { width: parseInt(e.target.value) || (effectiveDoorType(selDoor) === "double" ? 36 : 18) })}
                     className={`${inputCls} font-mono`} />
                 </Field>
-                <Field label="Door Type">
+                {isOpenPassage && (
+                  <Field label="Direction">
+                    <SegmentControl
+                      value={selDoor.accessDirection ?? "both"}
+                      options={[{ value: "both", label: "Both" }, { value: "entrance_only", label: "Entrance only" }, { value: "exit_only", label: "Exit only" }]}
+                      onChange={(accessDirection) => onUpdateDoor(selDoor.id, { accessDirection })}
+                    />
+                  </Field>
+                )}
+                {!isOpenPassage && <Field label="Door Type">
                   <SegmentControl
                     value={effectiveDoorType(selDoor)}
                     options={[{ value: "single", label: "Single" }, { value: "double", label: "Double" }]}
                     onChange={(doorType) => onUpdateDoor(selDoor.id, { doorType, direction: doorType === "double" ? "double" : (selDoor.hinge ?? "left") })}
                   />
-                </Field>
-                {effectiveDoorType(selDoor) === "single" && (
+                </Field>}
+                {!isOpenPassage && effectiveDoorType(selDoor) === "single" && (
                   <Field label="Hinge">
                     <SegmentControl
                       value={(selDoor.hinge ?? (selDoor.direction === "right" ? "right" : "left")) as "left" | "right"}
@@ -1661,14 +1671,14 @@ function effectiveDoorType(door: FloorDoor): "single" | "double" {
                     />
                   </Field>
                 )}
-                <Field label="Swing Side">
+                {!isOpenPassage && <Field label="Swing Side">
                   <SegmentControl
                     value={(selDoor.swingSide ?? "a") as "a" | "b"}
                     options={[{ value: "a", label: "Side A" }, { value: "b", label: "Side B" }]}
                     onChange={(swingSide) => onUpdateDoor(selDoor.id, { swingSide })}
                   />
-                </Field>
-                <div className="grid grid-cols-2 gap-1">
+                </Field>}
+                {!isOpenPassage && <div className="grid grid-cols-2 gap-1">
                   {effectiveDoorType(selDoor) === "single" && <button type="button" onClick={() => {
                     const current = (selDoor.hinge ?? (selDoor.direction === "right" ? "right" : "left")) as "left" | "right";
                     const hinge = current === "left" ? "right" : "left";
@@ -1681,7 +1691,7 @@ function effectiveDoorType(door: FloorDoor): "single" | "double" {
                     className={cn("h-9 rounded-xl border border-border text-xs font-bold text-foreground hover:bg-muted transition-colors", effectiveDoorType(selDoor) === "double" && "col-span-2")}>
                     Flip Swing
                   </button>
-                </div>
+                </div>}
                 <Field label="Color">
                   <ColorPicker value={selDoor.color} onChange={(c) => onUpdateDoor(selDoor.id, { color: c })} />
                 </Field>
@@ -1702,11 +1712,11 @@ function effectiveDoorType(door: FloorDoor): "single" | "double" {
                 <div className="pt-3 border-t border-border grid grid-cols-2 gap-1">
                   <button onClick={onDuplicateSelected}
                     className="h-9 rounded-xl border border-border text-xs font-bold text-foreground hover:bg-muted transition-colors">
-                    Copy Door
+                    {isOpenPassage ? "Copy Open Passage" : "Copy Door"}
                   </button>
                   <button onClick={onDeleteSelected}
                     className="h-9 rounded-xl border border-destructive/30 text-xs font-bold text-destructive hover:bg-destructive/10 transition-colors">
-                    Delete Door
+                    {isOpenPassage ? "Delete Open Passage" : "Delete Door"}
                   </button>
                 </div>
               </>

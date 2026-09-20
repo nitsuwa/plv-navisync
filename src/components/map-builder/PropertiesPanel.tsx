@@ -85,6 +85,7 @@ interface PropertiesPanelProps {
   allPaths?: CampusPath[];
   selectedPathPoint?: { pathId: string; pointIndex: number } | null;
   selectedPathPointIsJunction?: boolean;
+  selectedPathPointIsAttached?: boolean;
   selectedPathPointCanBeRemoved?: boolean;
   selDecorAsset?: CampusDecorAsset | undefined;
   /** All decorative assets — used to detect reorderable multi-selections. */
@@ -145,6 +146,7 @@ interface PropertiesPanelProps {
   onAddPathBend?: (id: string) => void;
   onRemoveSelectedPathPoint?: () => void;
   onDisconnectSelectedPathPoint?: () => void;
+  onDetachSelectedPathPoint?: () => void;
   onAddWaypointAtSelectedPathPoint?: () => void;
   onAddPathToNavigation?: (id: string) => void;
   /** Conservative warning for old conversions that have no persisted provenance. */
@@ -551,7 +553,7 @@ export function PropertiesPanel({
   open,
   selected, selBldg, selEntrance, selEntranceParent, selMkr, selPath, selRoute, allPaths = [],
   issueItems = [],
-  selectedPathPoint, selectedPathPointIsJunction, selectedPathPointCanBeRemoved,
+  selectedPathPoint, selectedPathPointIsJunction, selectedPathPointIsAttached = false, selectedPathPointCanBeRemoved,
   selDecorAsset, allDecorAssets,
   selNavNode, selNavEdge, navEdgeBlocked, selEventOverlay, allNavNodes, allNavEdges, entranceLinkStatus, entranceOutdoorLinkStatus, entranceDoorOptions,
   allBuildings,
@@ -562,7 +564,7 @@ export function PropertiesPanel({
   onAddEntrance, onSelectEntrance, onUpdateEntrance, onDeleteEntrance,
   onConnectEntranceToDoor, onConnectEntranceToWalkingNetwork, onDisconnectEntranceFromWalkingNetwork, onSelectEntranceWalkingConnection, onRemoveEntranceConnection, onViewEntranceIndoorDoor,
   onUpdateMarker, onUpdatePath, onSelectPath, hoveredPathId = null, onPathHover, onAddPathBend, onRemoveSelectedPathPoint,
-  onDisconnectSelectedPathPoint, onAddWaypointAtSelectedPathPoint, onAddPathToNavigation, pathNavigationLegacy,
+  onDisconnectSelectedPathPoint, onDetachSelectedPathPoint, onAddWaypointAtSelectedPathPoint, onAddPathToNavigation, pathNavigationLegacy,
   onDeletePath, onUpdateRoute,
   onUpdateEventOverlay,
   onDeleteBuilding, onDeleteMarker, onDeleteRoute,
@@ -589,7 +591,9 @@ export function PropertiesPanel({
   const selectedPathPointIsEndpoint = !!selPath && !!selectedPathPointForPath
     && (selectedPathPointForPath.pointIndex === 0 || selectedPathPointForPath.pointIndex === selPath.points.length - 1);
   const selectedPathPointContextLabel = selectedPathPointForPath
-    ? selectedPathPointIsJunction
+    ? selectedPathPointIsAttached
+      ? "Attached Endpoint"
+      : selectedPathPointIsJunction
       ? "Junction"
       : selectedPathPointIsEndpoint
         ? "Selected Endpoint"
@@ -1200,11 +1204,11 @@ export function PropertiesPanel({
                 </div>
                 <div>
                   <label htmlFor="bldg-name" className={labelCls}>Name</label>
-                  <input id="bldg-name" value={selBldg.name} onChange={(e) => onUpdateBuilding(selBldg.id, { name: e.target.value })} className={inputCls} placeholder="e.g. Main Academic Building" />
+                  <textarea id="bldg-name" value={selBldg.name} rows={2} onChange={(e) => onUpdateBuilding(selBldg.id, { name: e.target.value })} className="w-full resize-none rounded-xl border border-border bg-input-background px-3 py-2 text-sm leading-5 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition-all duration-200" placeholder="e.g. Main Academic Building" />
                 </div>
                 <div>
                   <label htmlFor="bldg-code" className={labelCls}>Code</label>
-                  <input id="bldg-code" value={selBldg.code} onChange={(e) => onUpdateBuilding(selBldg.id, { code: e.target.value.toUpperCase().slice(0, 5) })} className={inputCls} placeholder="e.g. MAB" />
+                  <input id="bldg-code" maxLength={32} value={selBldg.code} onChange={(e) => onUpdateBuilding(selBldg.id, { code: e.target.value.toUpperCase() })} className={cn(inputCls, "font-mono tracking-wide")} placeholder="e.g. MAB" />
                 </div>
                 {/* Building Type is intentionally NOT editable in the sidebar:
                     an outdoor building object is simply a Building here. The
@@ -2120,7 +2124,7 @@ export function PropertiesPanel({
                 </span>
                 {selectedPathPointForPath && (
                   <span className="text-[10px] font-semibold text-muted-foreground">
-                    {selectedPathPointIsJunction ? "Connected Pathways: 2+" : `Point ${selectedPathPointForPath.pointIndex + 1}`}
+                    {selectedPathPointIsAttached ? "Attached to Path" : selectedPathPointIsJunction ? "Connected Pathways: 2+" : `Point ${selectedPathPointForPath.pointIndex + 1}`}
                   </span>
                 )}
               </div>
@@ -2137,7 +2141,22 @@ export function PropertiesPanel({
                 </button>
               </div>
               )}
-              {selectedPathPointForPath && !selectedPathPointIsJunction && !selectedPathPointIsEndpoint && (
+              {selectedPathPointForPath && selectedPathPointIsAttached && (
+              <div className="grid grid-cols-1 gap-2">
+                <p className="text-[9px] leading-snug text-muted-foreground">
+                  This endpoint follows a point on another Visual Path. Detach it to edit this endpoint independently.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => onDetachSelectedPathPoint?.()}
+                  className="h-9 rounded-xl border border-border text-xs font-bold hover:bg-muted transition-colors flex items-center justify-center gap-1.5"
+                >
+                  <ArrowRightLeft className="h-3 w-3" />
+                  Detach from Path
+                </button>
+              </div>
+              )}
+              {selectedPathPointForPath && !selectedPathPointIsAttached && !selectedPathPointIsJunction && !selectedPathPointIsEndpoint && (
               <div className="grid grid-cols-1 gap-2">
                 <button
                   type="button"
@@ -2164,7 +2183,7 @@ export function PropertiesPanel({
                 )}
               </div>
               )}
-              {selectedPathPointForPath && selectedPathPointIsEndpoint && !selectedPathPointIsJunction && (
+              {selectedPathPointForPath && selectedPathPointIsEndpoint && !selectedPathPointIsAttached && !selectedPathPointIsJunction && (
               <div className="grid grid-cols-1 gap-2">
                 {selectedPathPointHasWaypoint && (
                   <button
@@ -2180,7 +2199,7 @@ export function PropertiesPanel({
                 <p className="text-[9px] leading-snug text-muted-foreground">Use the endpoint handle on the canvas to extend this path.</p>
               </div>
               )}
-              {selectedPathPointForPath && selectedPathPointIsJunction && (
+              {selectedPathPointForPath && selectedPathPointIsJunction && !selectedPathPointIsAttached && (
               <div className="grid grid-cols-1 gap-2">
                 {selectedPathPointHasWaypoint && (
                   <button

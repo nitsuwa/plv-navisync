@@ -243,9 +243,11 @@ export function alignEntranceAttachment(
   ];
   const centerPoint = entranceWorldPosition(building, { edge: base.edge, offset: centerOffset });
   const tangentLength = base.edge === "top" || base.edge === "bottom" ? building.width : building.height;
-  const centerTangent = base.edge === "top" || base.edge === "bottom" ? current.x : current.y;
-  const centerTarget = base.edge === "top" || base.edge === "bottom" ? centerPoint.x : centerPoint.y;
-  candidates[0].distance = Math.abs(centerTangent - centerTarget);
+  // Compare the pointer to the actual world-space midpoint.  The previous
+  // axis-only comparison was valid for axis-aligned Buildings but projected a
+  // rotated wall onto global X/Y, making many pointer positions look close to
+  // the side midpoint and pulling Entrances toward offset 0.5.
+  candidates[0].distance = Math.hypot(centerPoint.x - pointer.x, centerPoint.y - pointer.y);
 
   const center = { x: building.x + building.width / 2, y: building.y + building.height / 2 };
   const rotation = building.rotation ?? 0;

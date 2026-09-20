@@ -4,11 +4,13 @@ import {
   groupBBoxAfterTranslation,
   computeGroupAlignmentGuides,
   snapRectToVisibleBounds,
+  snapRectToCanvasCenter,
   rectVisibleBounds,
   computeGroupResizeBounds,
   resizeGroupMembers,
   clampMemberTranslation,
   memberVisibleBounds,
+  rotateGroupMembers,
 } from "../campusGroupMove";
 import type { GroupMoveMember } from "../campusGroupMove";
 
@@ -28,6 +30,30 @@ function pathMember(id: string, x: number, y: number, width = 160, height = 40):
 const CANVAS = { canvasW: 900, canvasH: 680 };
 
 describe("computeGroupTranslation — rigid multi-object movement", () => {
+  it("snaps a single visible object to the logical canvas center", () => {
+    const result = snapRectToCanvasCenter({ x: 392, y: 100, width: 120, height: 80 }, CANVAS.canvasW, CANVAS.canvasH, 10);
+    expect(result.x).toBe(390);
+    expect(result.y).toBe(100);
+    expect(result.guides).toEqual([{ type: "v", pos: 450 }]);
+  });
+
+  it("activates both center guides for a group outer bounding box", () => {
+    const result = snapRectToCanvasCenter({ x: 390, y: 310, width: 120, height: 80 }, CANVAS.canvasW, CANVAS.canvasH, 10);
+    expect(result.x).toBe(390);
+    expect(result.y).toBe(300);
+    expect(result.guides).toEqual([{ type: "v", pos: 450 }, { type: "h", pos: 340 }]);
+  });
+
+  it("uses the outer group bounds rather than a member center", () => {
+    const members = [bld("b1", 200, 280, 100, 60), bld("b2", 580, 320, 100, 60)];
+    const outer = groupBBoxAfterTranslation(members, 0, 0);
+    const result = snapRectToCanvasCenter(outer, CANVAS.canvasW, CANVAS.canvasH, 10);
+    expect(outer.x + outer.width / 2).toBe(440);
+    expect(result.x).toBe(210);
+    expect(result.y).toBe(290);
+    expect(result.guides).toEqual([{ type: "v", pos: 450 }, { type: "h", pos: 340 }]);
+  });
+
   it("moves multiple selected buildings by the same grid-snapped delta", () => {
     const members = [bld("b1", 100, 100), bld("b2", 260, 100)];
     const { dx, dy } = computeGroupTranslation({
@@ -377,5 +403,39 @@ describe("snapRectToVisibleBounds — rotated building alignment (Issue 2B)", ()
     expect(box.y).toBeCloseTo(-20, 5);
     expect(box.width).toBeCloseTo(280, 5);
     expect(box.height).toBeCloseTo(420, 5);
+  });
+});
+
+describe("rotateGroupMembers", () => {
+  it("orbits members around the group center and preserves their relative layout", () => {
+    const members = [
+      { ...decor("a", 100, 100, 20, 20), rotation: 10 },
+      { ...decor("b", 200, 100, 20, 20), rotation: 45 },
+    ];
+    const rotated = rotateGroupMembers(members, { x: 150, y: 100 }, 90);
+    expect(rotated[0]?.x).toBeCloseTo(150);
+    expect(rotated[0]?.y).toBeCloseTo(50);
+    expect(rotated[1]?.x).toBeCloseTo(150);
+    expect(rotated[1]?.y).toBeCloseTo(150);
+    expect(rotated[0]?.rotation).toBeCloseTo(100);
+    expect(rotated[1]?.rotation).toBeCloseTo(135);
+    expect(rotated[0]?.width).toBe(20);
+    expect(rotated[1]?.height).toBe(20);
+  });
+
+  it("keeps a rotated group within the canvas without changing its shape", () => {
+    const rotated = rotateGroupMembers(
+      [decor("a", 25, 25, 20, 20), decor("b", 65, 25, 20, 20)],
+      { x: 45, y: 25 },
+      90,
+      100,
+      100,
+      4,
+    );
+    const bounds = rotated.map(memberVisibleBounds);
+    expect(Math.min(...bounds.map((bound) => bound.x))).toBeGreaterThanOrEqual(4);
+    expect(Math.min(...bounds.map((bound) => bound.y))).toBeGreaterThanOrEqual(4);
+    expect(Math.max(...bounds.map((bound) => bound.x + bound.width))).toBeLessThanOrEqual(96);
+    expect(Math.max(...bounds.map((bound) => bound.y + bound.height))).toBeLessThanOrEqual(96);
   });
 });
