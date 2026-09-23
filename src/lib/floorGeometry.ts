@@ -49,6 +49,25 @@ export function rotatePoint(point: { x: number; y: number }, cx: number, cy: num
   return { x: cx + dx * cos - dy * sin, y: cy + dx * sin + dy * cos };
 }
 
+/**
+ * Resolve a point authored in an object's local top-left coordinate frame
+ * into world coordinates. Transform controls and small status badges use
+ * this instead of independently guessing positions for cardinal rotations.
+ */
+export function rotateObjectLocalPoint(
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  localX: number,
+  localY: number,
+  rotationDeg = 0,
+) {
+  const cx = x + width / 2;
+  const cy = y + height / 2;
+  return rotatePoint({ x: x + localX, y: y + localY }, cx, cy, rotationDeg);
+}
+
 function nearestPointOnLineSegment(point: { x: number; y: number }, segment: { x1: number; y1: number; x2: number; y2: number }) {
   const dx = segment.x2 - segment.x1;
   const dy = segment.y2 - segment.y1;
@@ -122,6 +141,73 @@ export function roomAnchorAtPoint(room: FloorRoom, point: { x: number; y: number
 
 export function wallLength(wall: FloorWall) {
   return Math.hypot(wall.x2 - wall.x1, wall.y2 - wall.y1);
+}
+
+export function formatWallLength(value: number) {
+  const rounded = Math.round(value * 100) / 100;
+  return String(rounded);
+}
+
+export type WallLengthAnchor = "start" | "center" | "end";
+
+/**
+ * Resize a Wall to an exact authored length while preserving its direction.
+ * The caller is responsible for validating Floor bounds and attached
+ * openings; this helper intentionally performs no grid quantization.
+ */
+export function resizeWallToLength(
+  wall: FloorWall,
+  requestedLength: number,
+  keepFixed: WallLengthAnchor = "start",
+): FloorWall {
+  const length = Math.max(0, Number(requestedLength));
+  const currentLength = wallLength(wall);
+  const unitX = currentLength > 0.000001 ? (wall.x2 - wall.x1) / currentLength : 1;
+  const unitY = currentLength > 0.000001 ? (wall.y2 - wall.y1) / currentLength : 0;
+  const centerX = (wall.x1 + wall.x2) / 2;
+  const centerY = (wall.y1 + wall.y2) / 2;
+
+  if (keepFixed === "end") {
+    return {
+      ...wall,
+      x1: wall.x2 - unitX * length,
+      y1: wall.y2 - unitY * length,
+    };
+  }
+  if (keepFixed === "center") {
+    const half = length / 2;
+    return {
+      ...wall,
+      x1: centerX - unitX * half,
+      y1: centerY - unitY * half,
+      x2: centerX + unitX * half,
+      y2: centerY + unitY * half,
+    };
+  }
+  return {
+    ...wall,
+    x2: wall.x1 + unitX * length,
+    y2: wall.y1 + unitY * length,
+  };
+}
+
+export function nearestEqualWallLength(
+  walls: FloorWall[],
+  candidateLength: number,
+  excludedWallId: string,
+  tolerance = 1.5,
+) {
+  let best: { wallId: string; length: number; distance: number } | null = null;
+  for (const candidate of walls) {
+    if (candidate.id === excludedWallId || candidate.managedKind === "perimeter") continue;
+    const targetLength = wallLength(candidate);
+    const distance = Math.abs(targetLength - candidateLength);
+    if (distance > tolerance) continue;
+    if (!best || distance < best.distance || (distance === best.distance && targetLength < best.length)) {
+      best = { wallId: candidate.id, length: targetLength, distance };
+    }
+  }
+  return best;
 }
 
 export function nearestPointOnWall(point: { x: number; y: number }, wall: FloorWall) {
@@ -373,6 +459,24 @@ export function worldDeltaToLocal(dx: number, dy: number, rotationDeg: number) {
   const cos = Math.cos(rad);
   const sin = Math.sin(rad);
   return { dx: dx * cos + dy * sin, dy: -dx * sin + dy * cos };
+}
+
+/**
+ * CSS only exposes four resize-cursor families. Map a local transform handle
+ * into the closest screen-space family so the cursor follows rotated
+ * circulation objects while the resize math continues to operate in local
+ * coordinates.
+ */
+export function rotationAwareResizeCursor(handle: string, rotationDeg = 0) {
+  const normalized = ((Number(rotationDeg) || 0) % 180 + 180) % 180;
+  if (handle === "n" || handle === "s" || handle === "e" || handle === "w") {
+    const localAngle = handle === "n" || handle === "s" ? 90 : 0;
+    const angle = (localAngle + normalized) % 180;
+    return angle >= 45 && angle < 135 ? "ns-resize" : "ew-resize";
+  }
+  const localAngle = handle === "nw" || handle === "se" ? 45 : 135;
+  const angle = (localAngle + normalized) % 180;
+  return angle < 90 ? "nwse-resize" : "nesw-resize";
 }
 
 /** Approximate rendered width of a label at its current font size. */

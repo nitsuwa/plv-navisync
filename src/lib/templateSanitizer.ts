@@ -8,6 +8,7 @@ import type {
 } from "../components/map-builder/types";
 import { normalizeFloorAppearance } from "./floorAppearance";
 import { nearestPointOnWall } from "./floorGeometry";
+import { furnitureFullyContainedInRoom, wallBelongsToRoom } from "./roomSetup";
 import type {
   FloorTemplateDefinition,
   FloorTemplateDoorObject,
@@ -56,22 +57,6 @@ export function normalizeTemplateDescription(description: string | undefined): s
   return (description ?? "").trim().slice(0, 500);
 }
 
-function withinRoom(item: { x: number; y: number; width: number; height: number }, room: FloorRoom) {
-  return item.x >= room.x
-    && item.y >= room.y
-    && item.x + item.width <= room.x + room.w
-    && item.y + item.height <= room.y + room.h;
-}
-
-function wallBelongsToRoom(wall: FloorWall, room: FloorRoom) {
-  const anchored = wall.startAnchor?.roomId === room.id || wall.endAnchor?.roomId === room.id;
-  if (anchored) return true;
-  return wall.x1 >= room.x && wall.x1 <= room.x + room.w
-    && wall.y1 >= room.y && wall.y1 <= room.y + room.h
-    && wall.x2 >= room.x && wall.x2 <= room.x + room.w
-    && wall.y2 >= room.y && wall.y2 <= room.y + room.h;
-}
-
 function roomDefinitionFromPhysical(
   room: FloorRoom,
   walls: FloorWall[],
@@ -98,7 +83,7 @@ function roomDefinitionFromPhysical(
       wallKey: wallKeyForId?.(wall.id) ?? `room-wall-${index}`,
     });
   });
-  furniture.filter((item) => withinRoom(item, room)).forEach((item) => {
+  furniture.filter((item) => furnitureFullyContainedInRoom(item, room)).forEach((item) => {
     objects.push({
       kind: "furniture",
       x: item.x - room.x,
@@ -229,7 +214,7 @@ export function sanitizeFloorForTemplate(
     return { room, nested, instance };
   });
   const roomWallIds = new Set((floor.walls ?? []).filter((wall) => nestedRooms.some(({ room }) => wallBelongsToRoom(wall, room))).map((wall) => wall.id));
-  const roomFurnitureIds = new Set((floor.furniture ?? []).filter((item) => nestedRooms.some(({ room }) => withinRoom(item, room))).map((item) => item.id));
+  const roomFurnitureIds = new Set((floor.furniture ?? []).filter((item) => nestedRooms.some(({ room }) => furnitureFullyContainedInRoom(item, room))).map((item) => item.id));
   const objects: FloorTemplateObject[] = nestedRooms.map(({ instance }) => instance);
   (floor.walls ?? []).filter((wall) => !roomWallIds.has(wall.id) && wall.managedKind !== "perimeter").forEach((wall) => {
     objects.push({

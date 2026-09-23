@@ -1319,7 +1319,17 @@ export function emergencyDestinationCandidatePools(
       });
     }
   }
-  return { emergency: expandToCampusGates(emergency), general: expandToCampusGates(general) };
+  const namedEmergency = expandToCampusGates(emergency).map((candidate) => {
+    if (candidate.kind !== "exterior_stair" || !candidate.stairId) return candidate;
+    const ownerBuilding = (campus.buildings ?? []).find((building) => building.id === candidate.stairBuildingId);
+    const ownerIndex = ownerBuilding
+      ? canonicalExteriorEmergencyStairsForBuilding(ownerBuilding).findIndex((stair) => stair.id === candidate.stairId)
+      : -1;
+    const owner = ownerBuilding && ownerIndex >= 0 ? canonicalExteriorEmergencyStairsForBuilding(ownerBuilding)[ownerIndex] : undefined;
+    const displayName = owner?.label?.trim() || `Exterior Stair ${ownerIndex + 1}`;
+    return { ...candidate, label: `${candidate.label} · ${displayName}` };
+  });
+  return { emergency: namedEmergency, general: expandToCampusGates(general) };
 }
 
 /** An ordinary Elevator may be the person's starting location, but it is not
@@ -1577,6 +1587,16 @@ export function chooseEmergencyDestinationCandidate(
   const nodes = campus.navNodes ?? [];
   const searchNodes = emergencySearchNodes(nodes, startNodeId);
   const pools = emergencyDestinationCandidatePools(campus, routeEdges);
+  const transitionCount = (path: GraphPath) => path.nodeIds.reduce((count, nodeId, index) => {
+    if (index === 0) return count;
+    const previous = nodes.find((node) => node.id === path.nodeIds[index - 1]);
+    const current = nodes.find((node) => node.id === nodeId);
+    if (!previous || !current) return count;
+    const floorChange = previous.floorId !== current.floorId;
+    const connector = Boolean(current.entranceId || current.exteriorEmergencyStairId || current.gateId || current.type === "stair" || current.type === "elevator");
+    return count + (floorChange || connector ? 1 : 0);
+  }, 0);
+  const stableCandidateKey = (candidate: EmergencyDestinationCandidate) => `${candidate.stairBuildingId ?? ""}:${candidate.stairId ?? candidate.entranceNodeId ?? candidate.nodeId}`;
   const reachableCandidates = (pool: EmergencyDestinationCandidate[]) => pool
     .map((candidate) => ({
       candidate,
@@ -1587,7 +1607,9 @@ export function chooseEmergencyDestinationCandidate(
     .filter((entry): entry is { candidate: EmergencyDestinationCandidate; path: GraphPath } => !!entry.path)
     .sort((left, right) => left.candidate.priority - right.candidate.priority
       || (left.candidate.campusGatePurpose === "emergency_exit" ? 0 : 1) - (right.candidate.campusGatePurpose === "emergency_exit" ? 0 : 1)
-      || left.path.distanceM - right.path.distanceM);
+      || left.path.distanceM - right.path.distanceM
+      || transitionCount(left.path) - transitionCount(right.path)
+      || stableCandidateKey(left.candidate).localeCompare(stableCandidateKey(right.candidate)));
   return reachableCandidates(pools.emergency)[0] ?? reachableCandidates(pools.general)[0] ?? null;
 }
 
@@ -2717,9 +2739,7 @@ function exteriorEmergencyStairInstruction(
   const building = (campus.buildings ?? []).find((candidate) => candidate.id === stairNode.buildingId);
   const stair = building?.exteriorEmergencyStairs?.find((candidate) => candidate.id === stairNode.exteriorEmergencyStairId);
   const authoredLabel = stair?.label?.trim();
-  const label = authoredLabel && /emergency\s+stair/i.test(authoredLabel)
-    ? authoredLabel
-    : "Exterior Emergency Stair";
+  const label = authoredLabel || "Exterior Emergency Stair";
   const ground = building?.floors?.find((floor) => floor.number === 1 || /ground/i.test(floor.label ?? ""));
   const destination = targetContext.kind === "outdoor" ? (ground?.label || "Ground") : routeContextDisplayLabel(campus, targetContext);
   return `Use ${label} to ${destination}`;
@@ -3661,6 +3681,13 @@ export function TestNavigationPanel({
       const startCandidates = startBuildingCandidateIds.length > 0 ? startBuildingCandidateIds : [fromId];
       const destinationCandidates = destinationBuildingCandidateIds.length > 0 ? destinationBuildingCandidateIds : [toId];
       let selectedCandidate: { fromId: string; toId: string; path: GraphPath; preferredExterior: boolean } | null = null;
+      const candidateTransitionCount = (candidatePath: GraphPath) => candidatePath.nodeIds.reduce((count, nodeId, index) => {
+        if (index === 0) return count;
+        const previous = activeNodes.find((node) => node.id === candidatePath.nodeIds[index - 1]);
+        const current = activeNodes.find((node) => node.id === nodeId);
+        if (!previous || !current) return count;
+        return count + (previous.floorId !== current.floorId || Boolean(current.entranceId || current.type === "stair" || current.type === "elevator") ? 1 : 0);
+      }, 0);
       for (const candidateFromId of startCandidates) {
         for (const candidateToId of destinationCandidates) {
           if (candidateFromId === candidateToId) continue;
@@ -3674,7 +3701,13 @@ export function TestNavigationPanel({
             });
           if (!selectedCandidate
             || Number(preferredExterior) > Number(selectedCandidate.preferredExterior)
-            || (preferredExterior === selectedCandidate.preferredExterior && candidatePath.distanceM < selectedCandidate.path.distanceM)) {
+            || (preferredExterior === selectedCandidate.preferredExterior && (
+              candidatePath.distanceM < selectedCandidate.path.distanceM
+              || (candidatePath.distanceM === selectedCandidate.path.distanceM
+                && (candidateTransitionCount(candidatePath) < candidateTransitionCount(selectedCandidate.path)
+                  || (candidateTransitionCount(candidatePath) === candidateTransitionCount(selectedCandidate.path)
+                    && `${candidateFromId}:${candidateToId}`.localeCompare(`${selectedCandidate.fromId}:${selectedCandidate.toId}`) < 0)))
+            ))) {
             selectedCandidate = { fromId: candidateFromId, toId: candidateToId, path: candidatePath, preferredExterior };
           }
         }

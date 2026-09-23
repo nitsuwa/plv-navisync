@@ -86,6 +86,36 @@ describe("FloorEditor render (regression: LandPlot runtime crash)", () => {
     ).not.toThrow();
   });
 
+  it("keeps perimeter Room selection and name overlays visible above physical content", () => {
+    const campus = makeCampus();
+    const floor = campus.buildings[0].floors[0];
+    floor.rooms = [{ id: "edge-room", name: "Perimeter Study Room", type: "classroom", x: 0, y: 0, w: 180, h: 120, floorId: "f1", buildingId: "b1" }];
+    floor.walls = [{ id: "room-wall", x1: 0, y1: 120, x2: 180, y2: 120, thickness: 5, color: "#475569", material: "concrete" }];
+    floor.furniture = [{ id: "room-desk", type: "desk", name: "Desk", category: "tables", x: 52, y: 24, width: 48, height: 28, rotation: 0, color: "#9a7048" }];
+
+    const { container } = render(
+      <FloorEditor
+        campus={campus}
+        buildingId="b1"
+        floorId="f1"
+        initialSelection={{ type: "room", id: "edge-room" }}
+        onBack={() => {}}
+        onSwitchFloor={() => {}}
+        onUpdate={() => {}}
+      />,
+    );
+
+    const label = container.querySelector('[data-testid="room-label-overlay"][data-room-id="edge-room"]');
+    const outline = container.querySelector('[data-testid="room-selection-overlay"][data-room-id="edge-room"]');
+    const physicalFurniture = container.querySelector('[data-layer-key="furniture:room-desk"]');
+    const overlayLayer = container.querySelector('[data-testid="room-name-overlay-layer"]');
+    expect(label).toBeTruthy();
+    expect(label?.classList.contains("pointer-events-none")).toBe(true);
+    expect(Number(outline?.getAttribute("x"))).toBeGreaterThan(0);
+    expect(Number(outline?.getAttribute("y"))).toBeGreaterThan(0);
+    expect(physicalFurniture && overlayLayer && Boolean(physicalFurniture.compareDocumentPosition(overlayLayer) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+  });
+
   it("shows the unified floor object library including the Window (LandPlot) button", () => {
     render(
       <FloorEditor
@@ -134,6 +164,24 @@ describe("FloorEditor render (regression: LandPlot runtime crash)", () => {
     const tableTennis = screen.getByRole("button", { name: "Table Tennis" });
     expect(tableTennis).toHaveAttribute("aria-label", "Table Tennis");
     expect(tableTennis).not.toHaveAttribute("title");
+  });
+
+  it("searches the object library globally and clears back to the normal browser", () => {
+    render(<FloorEditor campus={makeCampus()} buildingId="b1" floorId="f1" onBack={() => {}} onSwitchFloor={() => {}} onUpdate={() => {}} />);
+    const search = screen.getByRole("textbox", { name: "Search objects" });
+    expect(search).toBeInTheDocument();
+    fireEvent.change(search, { target: { value: "counter" } });
+    expect(screen.getByRole("button", { name: "Service Counter" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reception / Service Counter" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Food / Service" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Clear object search" }));
+    expect(search).toHaveValue("");
+    fireEvent.change(search, { target: { value: "umbrella" } });
+    expect(screen.getByRole("button", { name: "Garden Shade Umbrella" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Clear object search" }));
+    fireEvent.change(search, { target: { value: "study" } });
+    expect(screen.getByRole("button", { name: "Study Carrel" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Long Study Table + Chairs" })).toBeInTheDocument();
   });
 
   it("shows a recoverable message instead of creating fake data when the floor is missing", () => {

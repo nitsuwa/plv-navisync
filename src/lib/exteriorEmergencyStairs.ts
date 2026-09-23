@@ -166,19 +166,26 @@ export function exteriorEmergencyStairRouteReadiness(
 }
 
 /**
- * A Building owns one physical exterior emergency stair.  Keep this boundary
- * in the synchronizer so hydrated/legacy records cannot re-expand into several
- * independent owners during occurrence or graph reconciliation.  The first
- * authored record is the stable canonical choice; malformed records without
- * an id are ignored when a valid record exists.
+ * Return the complete canonical collection of Building-owned exterior
+ * emergency stairs.  Older code used this helper as a single-owner boundary;
+ * retaining the helper name keeps all existing callers on the same canonical
+ * path while allowing every independently identified stair to reconcile.
+ * Records with duplicate IDs are collapsed defensively so a malformed payload
+ * cannot generate duplicate occurrences or graph anchors.
  */
 export function canonicalExteriorEmergencyStairsForBuilding(
   building: Pick<CampusBuilding, "exteriorEmergencyStairs">,
 ): ExteriorEmergencyStair[] {
   const authored = building.exteriorEmergencyStairs ?? [];
   if (authored.length === 0) return [];
-  const canonical = authored.find((stair) => typeof stair?.id === "string" && stair.id.trim()) ?? authored[0];
-  return canonical ? [canonical] : [];
+  const valid = authored.filter((stair) => typeof stair?.id === "string" && stair.id.trim());
+  const source = valid.length > 0 ? valid : authored.slice(0, 1);
+  const seen = new Set<string>();
+  return source.filter((stair) => {
+    if (seen.has(stair.id)) return false;
+    seen.add(stair.id);
+    return true;
+  });
 }
 
 /**
@@ -333,31 +340,60 @@ export function defaultExteriorEmergencyStairAttachment(
       : exteriorEmergencyStairVisualSpan(height, options.visualSize)) + 12;
     for (const rawOffset of offsets) {
       const offset = Math.round(Math.max(range.min, Math.min(range.max, rawOffset)) * 1000) / 1000;
-      const entranceBlocked = (building.entrances ?? []).some((entrance) => entrance.edge === edge
-        && exteriorEmergencyStairWallSpansOverlap(offset, candidateSpan, Number.isFinite(Number(entrance.offset)) ? Number(entrance.offset) : 0.5, 24, wallSpan, 4));
-      const floorDoorBlocked = (building.floors ?? []).some((floor) => (floor.doors ?? []).some((door) => {
-        const canvasW = Math.max(1, floor.canvasW ?? building.width);
-        const canvasH = Math.max(1, floor.canvasH ?? building.height);
-        const wall = door.wallId ? (floor.walls ?? []).find((candidate) => candidate.id === door.wallId) : undefined;
-        const wallEdge = wall
-          ? Math.abs(wall.x1 - wall.x2) < 1
-            ? (wall.x1 <= 8 ? "left" : wall.x1 >= canvasW - 8 ? "right" : null)
-            : (wall.y1 <= 8 ? "top" : wall.y1 >= canvasH - 8 ? "bottom" : null)
-          : door.x <= 8 ? "left" : door.x >= canvasW - 8 ? "right" : door.y <= 8 ? "top" : door.y >= canvasH - 8 ? "bottom" : null;
-        if (wallEdge !== edge) return false;
-        const doorOffset = edge === "top" || edge === "bottom" ? door.x / canvasW : door.y / canvasH;
-        const floorSpan = edge === "top" || edge === "bottom" ? canvasW : canvasH;
-        return exteriorEmergencyStairWallSpansOverlap(offset, candidateSpan, doorOffset, Math.max(12, door.width ?? 12), floorSpan, 4);
-      }));
-      const stairBlocked = canonicalExteriorEmergencyStairsForBuilding(building).some((stair) => stair.attachment.edge === edge
-        && exteriorEmergencyStairWallSpansOverlap(offset, candidateSpan, Number.isFinite(Number(stair.attachment.offset)) ? Number(stair.attachment.offset) : 0.5,
-          (edge === "top" || edge === "bottom"
-            ? exteriorEmergencyStairVisualSpan(Math.max(18, stair.width || 28), stair.visualSize)
-            : exteriorEmergencyStairVisualSpan(Math.max(24, stair.height || 42), stair.visualSize)) + 12, wallSpan, 4));
-      if (!entranceBlocked && !floorDoorBlocked && !stairBlocked) return { edge, offset };
+      if (exteriorEmergencyStairAttachmentIsAvailable(building, { edge, offset }, options)) return { edge, offset };
     }
   }
   return null;
+}
+
+/**
+ * Check a proposed perimeter attachment against the existing Building
+ * geometry. This is an editor-placement rule, not a fire-code calculation.
+ * `excludeStairId` lets an existing stair validate its own drag/resize without
+ * colliding with itself.
+ */
+export function exteriorEmergencyStairAttachmentIsAvailable(
+  building: Pick<CampusBuilding, "width" | "height" | "entrances" | "exteriorEmergencyStairs" | "floors">,
+  attachment: { edge: BuildingEntranceEdge; offset: number },
+  options: { width?: number; height?: number; visualSize?: ExteriorEmergencyStair["visualSize"] } = {},
+  excludeStairId?: string,
+): boolean {
+  const edge = attachment.edge;
+  const wallSpan = edge === "top" || edge === "bottom" ? building.width : building.height;
+  const baseWidth = Math.max(18, options.width ?? 28);
+  const baseHeight = Math.max(24, options.height ?? 42);
+  const visualAlong = edge === "top" || edge === "bottom"
+    ? exteriorEmergencyStairVisualSpan(baseWidth, options.visualSize)
+    : exteriorEmergencyStairVisualSpan(baseHeight, options.visualSize);
+  const candidateSpan = visualAlong + 12;
+  const offset = Number.isFinite(Number(attachment.offset)) ? Number(attachment.offset) : 0.5;
+
+  const entranceBlocked = (building.entrances ?? []).some((entrance) => entrance.edge === edge
+    && exteriorEmergencyStairWallSpansOverlap(offset, candidateSpan, Number.isFinite(Number(entrance.offset)) ? Number(entrance.offset) : 0.5, 24, wallSpan, 4));
+  if (entranceBlocked) return false;
+
+  const floorDoorBlocked = (building.floors ?? []).some((floor) => (floor.doors ?? []).some((door) => {
+    const canvasW = Math.max(1, floor.canvasW ?? building.width);
+    const canvasH = Math.max(1, floor.canvasH ?? building.height);
+    const wall = door.wallId ? (floor.walls ?? []).find((candidate) => candidate.id === door.wallId) : undefined;
+    const wallEdge = wall
+      ? Math.abs(wall.x1 - wall.x2) < 1
+        ? (wall.x1 <= 8 ? "left" : wall.x1 >= canvasW - 8 ? "right" : null)
+        : (wall.y1 <= 8 ? "top" : wall.y1 >= canvasH - 8 ? "bottom" : null)
+      : door.x <= 8 ? "left" : door.x >= canvasW - 8 ? "right" : door.y <= 8 ? "top" : door.y >= canvasH - 8 ? "bottom" : null;
+    if (wallEdge !== edge) return false;
+    const doorOffset = edge === "top" || edge === "bottom" ? door.x / canvasW : door.y / canvasH;
+    const floorSpan = edge === "top" || edge === "bottom" ? canvasW : canvasH;
+    return exteriorEmergencyStairWallSpansOverlap(offset, candidateSpan, doorOffset, Math.max(12, door.width ?? 12), floorSpan, 4);
+  }));
+  if (floorDoorBlocked) return false;
+
+  return !canonicalExteriorEmergencyStairsForBuilding(building).some((stair) => stair.id !== excludeStairId
+    && stair.attachment.edge === edge
+    && exteriorEmergencyStairWallSpansOverlap(offset, candidateSpan, Number.isFinite(Number(stair.attachment.offset)) ? Number(stair.attachment.offset) : 0.5,
+      (edge === "top" || edge === "bottom"
+        ? exteriorEmergencyStairVisualSpan(Math.max(18, stair.width || 28), stair.visualSize)
+        : exteriorEmergencyStairVisualSpan(Math.max(24, stair.height || 42), stair.visualSize)) + 12, wallSpan, 4));
 }
 
 function exteriorEmergencyStairVisualSpan(base: number, visualSize?: ExteriorEmergencyStair["visualSize"]): number {

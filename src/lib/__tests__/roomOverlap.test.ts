@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { roomsOverlap, findOverlappingRoom, snapRoomToNearbyEdges, computeRoomAlignmentGuides, computeAlignmentGuides, computeResizeAlignmentGuides, computeResizeLimits, snapResizeEdges, resolveStableAlignmentAxis, screenSpaceAlignmentThreshold } from "../roomOverlap";
+import { roomsOverlap, findOverlappingRoom, snapRoomToNearbyEdges, computeRoomAlignmentGuides, computeAlignmentGuides, computeResizeAlignmentGuides, computeResizeLimits, snapResizeEdges, resolveStableAlignmentAxis, screenSpaceAlignmentThreshold, computeRoomCenterAlignment, relevantRoomForBounds } from "../roomOverlap";
 import type { FloorRoom } from "../../components/map-builder/types";
 
 function makeRoom(overrides: Partial<FloorRoom> = {}): FloorRoom {
@@ -242,6 +242,26 @@ describe("computeRoomAlignmentGuides", () => {
     const result = computeRoomAlignmentGuides(candidate, [refRoom], false);
     expect(result.snappedW).toBeUndefined();
     expect(result.snappedH).toBeUndefined();
+  });
+});
+
+describe("contextual Room center alignment", () => {
+  it("snaps an object to the exact horizontal and vertical Room axes", () => {
+    const room = makeRoom({ id: "study", x: 100, y: 80, w: 300, h: 220 });
+    const candidate = { x: 242, y: 182, w: 20, h: 16 };
+    const result = computeRoomCenterAlignment(candidate, room, 8);
+    expect(result.snappedX).toBe(240);
+    expect(result.snappedY).toBe(182);
+    expect(result.xGuide?.pos).toBe(250);
+    expect(result.yGuide?.pos).toBe(190);
+  });
+
+  it("chooses the containing or immediately approached Room only", () => {
+    const room = makeRoom({ id: "r1", x: 100, y: 100, w: 200, h: 160 });
+    const other = makeRoom({ id: "r2", x: 500, y: 100, w: 200, h: 160 });
+    expect(relevantRoomForBounds({ x: 150, y: 140, w: 20, h: 20 }, [room, other])?.id).toBe("r1");
+    expect(relevantRoomForBounds({ x: 476, y: 140, w: 20, h: 20 }, [room, other], undefined, 8)?.id).toBe("r2");
+    expect(relevantRoomForBounds({ x: 340, y: 140, w: 20, h: 20 }, [room, other], undefined, 8)).toBeNull();
   });
 });
 
