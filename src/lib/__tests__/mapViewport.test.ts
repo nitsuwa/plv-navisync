@@ -121,6 +121,19 @@ describe("bounded map viewport", () => {
     expect(safeArea.maxY).toBeGreaterThan(unrestricted.maxY);
   });
 
+  it("expands the editor pan range when a right inspector reserves canvas space", () => {
+    const normal = getViewportPanBounds({ ...campus, zoom: 2, padding: 160 });
+    const inspectorOpen = getViewportPanBounds({
+      ...campus,
+      zoom: 2,
+      padding: 160,
+      insets: { right: 256 },
+    });
+
+    expect(inspectorOpen.minX).toBeLessThan(normal.minX);
+    expect(inspectorOpen.maxX).toBe(normal.maxX);
+  });
+
   it("keeps the cursor world point fixed when zooming from either transform origin", () => {
     expect(getPanToKeepWorldPoint({
       mapWidth: 1000,

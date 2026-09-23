@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canonicalExteriorEmergencyStairsForBuilding, defaultExteriorEmergencyStairAttachment, syncExteriorEmergencyStairGraph, syncExteriorEmergencyStairOccurrences, exteriorEmergencyStairWorldPosition, exteriorEmergencyStairEdgeForPointer, exteriorEmergencyStairOffsetForPointer, exteriorEmergencyStairWallSpansOverlap, exteriorEmergencyStairRouteReadiness, pruneOrphanedExteriorEmergencyStairNodes } from "../exteriorEmergencyStairs";
+import { canonicalExteriorEmergencyStairsForBuilding, defaultExteriorEmergencyStairAttachment, exteriorEmergencyStairAttachmentIsAvailable, syncExteriorEmergencyStairGraph, syncExteriorEmergencyStairOccurrences, exteriorEmergencyStairWorldPosition, exteriorEmergencyStairEdgeForPointer, exteriorEmergencyStairOffsetForPointer, exteriorEmergencyStairWallSpansOverlap, exteriorEmergencyStairRouteReadiness, pruneOrphanedExteriorEmergencyStairNodes } from "../exteriorEmergencyStairs";
 import { findNavigationRoute } from "../pathfinding";
 import type { Campus, CampusBuilding, FloorPlan, ExteriorEmergencyStair } from "../../components/map-builder/types";
 
@@ -108,11 +108,21 @@ describe("Exterior Emergency Stair authoring", () => {
     expect(findNavigationRoute(result.navNodes ?? [], result.navEdges ?? [], upper.id, outdoor.id, false, true)).toBeNull();
   });
 
-  it("canonicalizes legacy duplicate exterior stairs to one physical owner", () => {
-    const result = syncExteriorEmergencyStairGraph(campus(building([stair("east"), stair("west")] )));
-    expect(canonicalExteriorEmergencyStairsForBuilding(result.buildings[0]).map((item) => item.id)).toEqual(["east"]);
-    expect(result.buildings[0].exteriorEmergencyStairs).toHaveLength(1);
-    expect((result.navNodes ?? []).every((node) => node.exteriorEmergencyStairId !== "west")).toBe(true);
+  it("preserves multiple independent exterior stair owners and occurrences", () => {
+    const result = syncExteriorEmergencyStairGraph(campus(building([
+      stair("east"),
+      { ...stair("west"), attachment: { edge: "left", offset: 0.5 } },
+    ])));
+    expect(canonicalExteriorEmergencyStairsForBuilding(result.buildings[0]).map((item) => item.id)).toEqual(["east", "west"]);
+    expect(result.buildings[0].exteriorEmergencyStairs).toHaveLength(2);
+    expect((result.navNodes ?? []).filter((node) => node.exteriorEmergencyStairId === "east")).toHaveLength(4);
+    expect((result.navNodes ?? []).filter((node) => node.exteriorEmergencyStairId === "west")).toHaveLength(4);
+    const transitionOwners = (result.navEdges ?? [])
+      .filter((edge) => edge.type === "floor_transition")
+      .map((edge) => edge.startNodeId)
+      .map((id) => result.navNodes?.find((node) => node.id === id)?.exteriorEmergencyStairId)
+      .filter(Boolean);
+    expect(new Set(transitionOwners)).toEqual(new Set(["east", "west"]));
   });
 
   it("keeps generated discharge anchors isolated per Building", () => {
@@ -169,6 +179,20 @@ describe("Exterior Emergency Stair authoring", () => {
     const candidate = defaultExteriorEmergencyStairAttachment({ ...building(), entrances: [preferredEntrance] });
     expect(candidate).not.toBeNull();
     expect(candidate).not.toMatchObject({ edge: "right", offset: 0.5 });
+  });
+
+  it("rejects a proposed stair attachment that overlaps a perimeter door or another stair", () => {
+    const withDoor = building([], [
+      { ...floor("f1", 1), doors: [{ id: "door-1", x: 10, y: 340, width: 20, height: 12, wallId: "wall-1" } as any] },
+      floor("f2", 2),
+      floor("f3", 3),
+    ]);
+    withDoor.floors[0].walls = [{ id: "wall-1", x1: 0, y1: 0, x2: 0, y2: 680 } as any];
+    expect(exteriorEmergencyStairAttachmentIsAvailable(withDoor, { edge: "left", offset: 0.5 })).toBe(false);
+    expect(exteriorEmergencyStairAttachmentIsAvailable(withDoor, { edge: "left", offset: 0.9 }, {}, "none")).toBe(true);
+    const occupied = { ...withDoor, exteriorEmergencyStairs: [stair("left", ["f1"])] };
+    expect(exteriorEmergencyStairAttachmentIsAvailable(occupied, { edge: "right", offset: 0.5 })).toBe(false);
+    expect(exteriorEmergencyStairAttachmentIsAvailable(occupied, { edge: "right", offset: 0.5 }, {}, "left")).toBe(true);
   });
 
   it("removes derived landings and nodes when the authored stair is removed", () => {

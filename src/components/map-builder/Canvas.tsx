@@ -456,6 +456,8 @@ interface CanvasProps {
   onPathWidthDown?: (e: React.MouseEvent, id: string, segmentIndex: number, handlePoint: { x: number; y: number }) => void;
   onEntranceDown?: (e: React.MouseEvent, buildingId: string, entranceId: string, ox: number, oy: number) => void;
   onExteriorEmergencyStairDown?: (e: React.MouseEvent, buildingId: string, stairId: string) => void;
+  /** Focused Building-owned stair; undefined preserves legacy all-stairs selection styling for isolated Canvas callers. */
+  focusedExteriorEmergencyStairId?: string | null;
   exteriorEmergencyStairPreview?: { buildingId: string; stairId: string; edge: "top" | "right" | "bottom" | "left"; offset: number; valid: boolean } | null;
   onExteriorEmergencyStairFloorNavigate?: (buildingId: string, floorId: string, stairId: string) => void;
   onItemContextMenu?: (e: React.MouseEvent, type: "building" | "marker" | "path" | "decorAsset", id: string) => void;
@@ -668,7 +670,7 @@ export function Canvas({
   zoom, pan, svgRef, containerRef, cursor,
   buildingDrag, buildingPlacementPreview, groundBrushPreview, groundErasePreview, groundPaintType = "grass", armedDecorAssetType, armedCampusGatePlacement = false, pathPaintPreview, guides, cursorPos, overlappingBuildings,
   onCanvasDown, onCanvasMove, onCanvasUp, onCanvasLeave, onCanvasDblClick,
-  onItemDown, onGroupSurfaceDown, onGroupResizeStart, onGroupRotateStart, groupRotationEligible = false, groupRotationActive = false, onPathDown, onPathPointDown, onPathExtendStart, onPathAddPoint, onPathAddPointDragStart, onPathWidthDown, onEntranceDown, onExteriorEmergencyStairDown, exteriorEmergencyStairPreview, onItemContextMenu, onResizeStart, onMarkerResizeStart, onBuildingDoubleClick, onPathClick, onSelect,
+  onItemDown, onGroupSurfaceDown, onGroupResizeStart, onGroupRotateStart, groupRotationEligible = false, groupRotationActive = false, onPathDown, onPathPointDown, onPathExtendStart, onPathAddPoint, onPathAddPointDragStart, onPathWidthDown, onEntranceDown, onExteriorEmergencyStairDown, focusedExteriorEmergencyStairId, exteriorEmergencyStairPreview, onItemContextMenu, onResizeStart, onMarkerResizeStart, onBuildingDoubleClick, onPathClick, onSelect,
   onExteriorEmergencyStairFloorNavigate,
   onPathGroupScaleStart, onPathGroupRotateStart, pathGroupRotationActive = false, pathGroupRotationBounds = null, onPathDblClick, pathMemberEditId = null, hoveredPathId = null, onPathHover,
   onResetView, onZoomIn, onZoomOut, onSetTool, onToggleSnap,
@@ -766,15 +768,6 @@ export function Canvas({
   }, [paths]);
   const pathOnlyMultiSelect = multiSelected.length >= 2
     && multiSelected.every((id) => paths.some((path) => path.id === id));
-  // A physical Pathway owns the overlay hit surface only while that member is
-  // explicitly being edited.  Normal Navigation Select must still be able to
-  // select generated nodes/edges after a Pathway or network was inspected.
-  const selectedPhysicalPathIds = new Set(
-    pathMemberEditId && paths.some((path) => path.id === pathMemberEditId)
-      ? [pathMemberEditId]
-      : [],
-  );
-
   // Normalized canvas dimensions: prefer the explicit props (CampusEditor
   // passes its safe/normalized dims) so a transiently-unset campus can never
   // render a degenerate viewBox or collapse pointer conversion toward (0,0).
@@ -2479,7 +2472,8 @@ export function Canvas({
               ? { ...stair, attachment: { ...stair.attachment, edge: preview.edge, offset: preview.offset } }
               : stair;
             const pos = exteriorEmergencyStairWorldPosition(building, displayStair);
-            const isSel = selected?.type === "building" && selected.id === building.id;
+            const isSel = selected?.type === "building" && selected.id === building.id
+              && (focusedExteriorEmergencyStairId === undefined || focusedExteriorEmergencyStairId === stair.id);
             const { width: visualWidth, height: visualHeight } = exteriorEmergencyStairVisualDimensions(displayStair);
             return (
               <g key={`exterior-emergency-stair-${stair.id}`} data-testid="exterior-emergency-stair" transform={`translate(${pos.x},${pos.y}) rotate(${pos.angle})`} onMouseDown={(e) => { e.stopPropagation(); onExteriorEmergencyStairDown?.(e, building.id, stair.id); }} style={{ cursor: tool === "select" ? (preview ? ((preview.edge === "top" || preview.edge === "bottom") ? "ew-resize" : "ns-resize") : "grab") : cursor }}>
@@ -2626,10 +2620,6 @@ export function Canvas({
                 const entranceManaged = e.type !== "entrance_transition" && Boolean(
                   (a.entranceId && !a.floorId) || (b.entranceId && !b.floorId),
                 );
-                const selectedPhysicalPathOwnsEdge = Boolean(
-                  pathwayGenerated
-                  && e.generatedFromPathIds?.some((pathId) => selectedPhysicalPathIds.has(pathId)),
-                );
                 const oneWay = e.bidirectional === false;
                 const isClosed = e.closed === true;
                 const edgePoints = [{ x: a.x, y: a.y }, ...(pathwayGenerated ? [] : (e.bendPoints ?? [])), { x: b.x, y: b.y }];
@@ -2672,12 +2662,13 @@ export function Canvas({
                     }}
                     style={{
                       cursor: navGraphInteractive ? (tool === "select" ? "pointer" : tool === "marker" ? "crosshair" : "crosshair") : "default",
-                      // A selected physical Pathway owns its generated edge
-                      // for ordinary selection/editing, but Connect still
-                      // needs to receive the edge hit so an admin can target
-                      // that existing network without falling through to an
-                      // empty-canvas bend.
-                      pointerEvents: selectedPhysicalPathOwnsEdge && tool === "select" ? "none" : undefined,
+                      // Keep generated edge hits live even while a physical
+                      // Pathway is in member-edit mode.  CampusEditor routes
+                      // the hit to the owning Pathway vertex/edge handler;
+                      // making it transparent here lets the broad Pathway
+                      // body receive the drag instead, which moves the whole
+                      // path when the user intended to move one waypoint.
+                      pointerEvents: undefined,
                     }}
                   >
                     {/* Invisible generous hit target so thin edges are clickable */}
@@ -2831,10 +2822,6 @@ export function Canvas({
                   : isPathJunction
                   ? (isSel || isMultiSel || navConnectStartId ? 7.5 : 5.5)
                   : pathwayGenerated && !isSel && !isMultiSel ? 5.5 : 7.5;
-                const selectedPhysicalPathOwnsNode = Boolean(
-                  pathwayGenerated
-                  && n.generatedFromPathVertices?.some((ref) => selectedPhysicalPathIds.has(ref.pathId)),
-                );
                 // B5 Phase 1.8: an entrance-linked node is DERIVED geometry of
                 // the physical door — the door symbol is the primary visual, so
                 // the node renders ONLY a small subtle connected badge + one
@@ -2893,11 +2880,13 @@ export function Canvas({
                       // receive the click; Connect/marker modes still need
                       // the internal node as a routing target.
                       // Keep generated Pathway vertices available as real
-                      // Connect targets.  They are hidden only while the
-                      // physical Pathway is selected in ordinary Select mode;
-                      // disabling them during Connect made target clicks fall
-                      // through and pin stray waypoints on the canvas.
-                      pointerEvents: (selectedPhysicalPathOwnsNode && tool === "select") || (isEntranceLinked && tool === "select") ? "none" : undefined,
+                      // Connect targets and as editable waypoint proxies.
+                      // CampusEditor already resolves an overlapping generated
+                      // node to the selected Pathway vertex when appropriate.
+                      // Making the node transparent here lets the broad
+                      // Pathway hit surface steal the drag and move the whole
+                      // path instead of the waypoint.
+                      pointerEvents: (isEntranceLinked && tool === "select") ? "none" : undefined,
                       ...(deEmphasizeForRoute ? { opacity: 0.24 } : pathwayGenerated && !isSel && !isMultiSel ? { opacity: 0.9 } : {}),
                     }}
                   >
