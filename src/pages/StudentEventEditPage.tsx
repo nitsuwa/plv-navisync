@@ -1,8 +1,8 @@
 /** Focused multi-location event map editor for active Student Org accounts. */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertCircle, ArrowLeft, Loader2 } from "lucide-react";
 import { Link, Navigate, useNavigate, useParams } from "react-router";
-import { EventFloorEditor } from "../components/events/EventFloorEditor";
+import { EventFloorEditor, type EventEditorDraftSnapshot } from "../components/events/EventFloorEditor";
 import { EventLocationSwitcher } from "../components/events/EventLocationSwitcher";
 import { useStudentAuth } from "../hooks/useStudentAuth";
 import { useToast } from "../hooks/useToast";
@@ -10,7 +10,7 @@ import { usePublishedCampus } from "../hooks/usePublishedCampus";
 import { eventOverlayService } from "../services/eventOverlayService";
 import { normalizeEventOverlayLocations, replaceEventOverlayLocation } from "../lib/eventOverlayModel";
 import { CAMPUS_GROUNDS_ID, resolveFloorPlanForEvent } from "../lib/eventLocationData";
-import type { CampusEventOverlay, FloorFurniture, FloorLabel } from "../components/map-builder/types";
+import type { CampusEventOverlay, EventOverlayLocation, FloorFurniture, FloorLabel } from "../components/map-builder/types";
 
 function LoadingState() {
   return <div className="min-h-screen bg-background flex items-center justify-center"><div className="flex flex-col items-center gap-3"><Loader2 className="h-8 w-8 text-primary animate-spin" /><p className="text-sm text-muted-foreground">Loading event map...</p></div></div>;
@@ -26,11 +26,13 @@ export function StudentEventEditPage() {
   const { isStudentOrg, loading: authLoading } = useStudentAuth();
   const { activeCampus, loading: campusLoading } = usePublishedCampus();
   const [overlay, setOverlay] = useState<CampusEventOverlay | null>(null);
+  const [draftLocations, setDraftLocations] = useState<EventOverlayLocation[] | null>(null);
   const [activeLocationId, setActiveLocationId] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const interactionCommitRef = useRef<(() => EventEditorDraftSnapshot) | null>(null);
 
   useEffect(() => {
     if (!id) {
@@ -44,15 +46,28 @@ export function StudentEventEditPage() {
           setError("The event does not exist or is no longer available.");
           return;
         }
+        const normalizedLocations = normalizeEventOverlayLocations(data);
         setOverlay(data);
-        setActiveLocationId(normalizeEventOverlayLocations(data)[0]?.id || "");
+        setDraftLocations(normalizedLocations);
+        setActiveLocationId(normalizedLocations[0]?.id || "");
       })
       .catch((err) => setError(err instanceof Error ? err.message : "Failed to load event."))
       .finally(() => setLoading(false));
   }, [id]);
 
-  const locations = useMemo(() => overlay ? normalizeEventOverlayLocations(overlay) : [], [overlay]);
+  const persistedLocations = useMemo(() => overlay ? normalizeEventOverlayLocations(overlay) : [], [overlay]);
+  const locations = draftLocations ?? persistedLocations;
   const activeLocation = locations.find((location) => location.id === activeLocationId) || locations[0];
+  const activeLocationRef = activeLocation?.locationRef;
+  const activeFloorNumber = activeLocationRef?.floorId ? Number(activeLocationRef.floorId.split("-f").pop()) : undefined;
+  const floorPlan = useMemo(() => {
+    if (!activeLocationRef) return null;
+    return activeLocationRef.type === "campus"
+      ? resolveFloorPlanForEvent(CAMPUS_GROUNDS_ID, undefined, activeCampus)
+      : activeLocationRef.buildingId
+        ? resolveFloorPlanForEvent(activeLocationRef.buildingId, activeFloorNumber, activeCampus)
+        : null;
+  }, [activeCampus, activeFloorNumber, activeLocationRef?.buildingId, activeLocationRef?.type]);
 
   const updateOverlay = useCallback((nextLocations: typeof locations) => {
     setOverlay((previous) => previous ? {
@@ -62,33 +77,62 @@ export function StudentEventEditPage() {
       eventFurniture: nextLocations[0]?.eventFurniture || [],
       eventLabels: nextLocations[0]?.eventLabels || [],
     } : previous);
+    setDraftLocations(nextLocations);
   }, []);
 
+  const handleDraftChange = useCallback((furniture: FloorFurniture[], labels: FloorLabel[]) => {
+    if (!activeLocation) return;
+    setDraftLocations((previous) => replaceEventOverlayLocation(
+      previous ?? persistedLocations,
+      activeLocation.id,
+      furniture,
+      labels,
+    ));
+  }, [activeLocation, persistedLocations]);
+
+  const handleLocationChange = useCallback((nextLocationId: string) => {
+    if (nextLocationId === activeLocation?.id) return;
+    const snapshot = interactionCommitRef.current?.();
+    if (snapshot && activeLocation) {
+      setDraftLocations((previous) => replaceEventOverlayLocation(
+        previous ?? persistedLocations,
+        activeLocation.id,
+        snapshot.eventFurniture,
+        snapshot.eventLabels,
+      ));
+    }
+    setActiveLocationId(nextLocationId);
+  }, [activeLocation, persistedLocations]);
+
   const handleSave = useCallback(async (furniture: FloorFurniture[], labels: FloorLabel[]) => {
-    if (!overlay || !activeLocation) return;
+    if (!overlay || !activeLocation) return false;
     const nextLocations = replaceEventOverlayLocation(locations, activeLocation.id, furniture, labels);
     setSaving(true);
     try {
       await eventOverlayService.updateEventOverlayLayout(overlay.id, nextLocations);
       updateOverlay(nextLocations);
       toast.success("Draft saved", `${activeLocation.locationRef.label} map changes were saved.`);
+      return true;
     } catch (err) {
       toast.error("Save failed", err instanceof Error ? err.message : "Something went wrong.");
+      return false;
     } finally {
       setSaving(false);
     }
   }, [activeLocation, locations, overlay, toast, updateOverlay]);
 
   const handleSubmit = useCallback(async (furniture: FloorFurniture[], labels: FloorLabel[]) => {
-    if (!overlay || !activeLocation) return;
+    if (!overlay || !activeLocation) return false;
     const nextLocations = replaceEventOverlayLocation(locations, activeLocation.id, furniture, labels);
     setSubmitting(true);
     try {
       await eventOverlayService.submitEventOverlayLayout(overlay.id, nextLocations);
       toast.success("Submitted to GSO", "All requested locations and maps are now pending one combined review.");
       navigate("/student/events");
+      return true;
     } catch (err) {
       toast.error("Submit failed", err instanceof Error ? err.message : "Something went wrong.");
+      return false;
     } finally {
       setSubmitting(false);
     }
@@ -100,10 +144,6 @@ export function StudentEventEditPage() {
   if (!activeLocation) return <ErrorState message="This event has no requested locations. Return to My Events and add a location before designing the map." />;
 
   const locationRef = activeLocation.locationRef;
-  const floorNumber = locationRef.floorId ? Number(locationRef.floorId.split("-f").pop()) : undefined;
-  const floorPlan = locationRef.type === "campus"
-    ? resolveFloorPlanForEvent(CAMPUS_GROUNDS_ID, undefined, activeCampus)
-    : locationRef.buildingId ? resolveFloorPlanForEvent(locationRef.buildingId, floorNumber, activeCampus) : null;
   if (!floorPlan) return <ErrorState message={`There is no published map for ${locationRef.label}. Please contact your administrator.`} />;
 
   const focusedOverlay: CampusEventOverlay = {
@@ -113,5 +153,5 @@ export function StudentEventEditPage() {
     eventLabels: activeLocation.eventLabels,
   };
 
-  return <div className="h-screen flex flex-col bg-background"><div className="flex-1 min-h-0 flex flex-col lg:flex-row"><EventLocationSwitcher locations={locations} activeLocationId={activeLocation.id} onChange={setActiveLocationId} /><div className="flex-1 min-w-0 min-h-0"><EventFloorEditor key={activeLocation.id} floorPlan={floorPlan} overlay={focusedOverlay} activeCampus={activeCampus} onSave={handleSave} onSubmit={handleSubmit} onBack={() => navigate("/student/events")} isSaving={saving} isSubmitting={submitting} /></div></div></div>;
+  return <div className="h-screen flex flex-col bg-background"><div className="flex-1 min-h-0 flex flex-col lg:flex-row"><EventLocationSwitcher locations={locations} activeLocationId={activeLocation.id} onChange={handleLocationChange} /><div className="flex-1 min-w-0 min-h-0"><EventFloorEditor key={activeLocation.id} floorPlan={floorPlan} overlay={focusedOverlay} activeCampus={activeCampus} onSave={handleSave} onSubmit={handleSubmit} onDraftChange={handleDraftChange} interactionCommitRef={interactionCommitRef} onBack={() => navigate("/student/events")} isSaving={saving} isSubmitting={submitting} /></div></div></div>;
 }

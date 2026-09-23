@@ -8,6 +8,7 @@ import { useNavigate } from "react-router";
 import type { Building } from "../../types";
 import { getOpenStatus } from "../../lib/buildingHours";
 import { cn } from "../../lib/utils";
+import { useToast } from "../../hooks/useToast";
 
 // ── Status helpers ──────────────────────────────────────────────────────────
 const STATUS_COLOR = {
@@ -35,7 +36,9 @@ interface BuildingDetailModalProps {
   /** Whether the building is saved in favorites */
   isSaved?: boolean;
   /** Toggle save/favorite */
-  onToggleSave?: (buildingId: string) => void;
+  onToggleSave?: (buildingId: string, campusId?: string) => void | Promise<void>;
+  /** Published campus that owns this building */
+  campusId?: string;
   /** Floor plan count (0 = no floor plans) */
   floorPlanCount?: number;
   /** Rooms list for this building */
@@ -49,11 +52,13 @@ export function BuildingDetailModal({
   onClose,
   isSaved = false,
   onToggleSave,
+  campusId,
   floorPlanCount = 0,
   rooms = [],
   route = null,
 }: BuildingDetailModalProps) {
   const navigate = useNavigate();
+  const { success, error: showError } = useToast();
 
   // Close on Escape
   const handleKeyDown = useCallback(
@@ -82,7 +87,7 @@ export function BuildingDetailModal({
 
   const handleNavigate = () => {
     onClose();
-    navigate(`/map?dest=${building.id}`);
+    navigate(`/map?buildingId=${encodeURIComponent(building.id)}`);
   };
 
   const handleFloorPlan = () => {
@@ -92,11 +97,15 @@ export function BuildingDetailModal({
 
   const handleShare = async () => {
     try {
-      await navigator.clipboard?.writeText(
-        `${building.name} (${building.code}) — PLV NaviSync`
-      );
+      const shareText = `${building.name} (${building.code}) — PLV NaviSync`;
+      if (navigator.share) {
+        await navigator.share({ title: building.name, text: shareText, url: `${window.location.origin}/buildings/${building.id}` });
+      } else {
+        await navigator.clipboard?.writeText(shareText);
+      }
+      success("Building link ready", "You can share this location with your classmates.");
     } catch {
-      // silent
+      showError("Building link could not be shared");
     }
   };
 
@@ -157,6 +166,7 @@ export function BuildingDetailModal({
 
               {/* Close button */}
               <button
+                type="button"
                 onClick={onClose}
                 aria-label="Close details"
                 className="absolute top-3 right-3 w-8 h-8 rounded-full bg-black/40 text-white flex items-center justify-center hover:bg-black/60 active:scale-90 transition-all backdrop-blur-sm"
@@ -297,6 +307,7 @@ export function BuildingDetailModal({
               <div className="flex gap-2">
                 {/* Navigate — primary */}
                 <button
+                  type="button"
                   onClick={handleNavigate}
                   className="flex-1 h-12 rounded-2xl bg-primary text-primary-foreground font-extrabold text-sm hover:bg-primary/90 active:scale-[0.97] transition-all flex items-center justify-center gap-2 shadow-sm"
                 >
@@ -307,7 +318,9 @@ export function BuildingDetailModal({
                 {/* Save — toggle */}
                 {onToggleSave && (
                   <button
-                    onClick={() => onToggleSave(building.id)}
+                    type="button"
+                    onClick={() => void onToggleSave(building.id, campusId)}
+                    aria-label={`${isSaved ? "Remove" : "Save"} ${building.name}`}
                     className={cn(
                       "h-12 w-12 rounded-2xl border flex items-center justify-center shrink-0 active:scale-[0.97] transition-all",
                       isSaved
@@ -324,7 +337,9 @@ export function BuildingDetailModal({
 
                 {/* Share */}
                 <button
+                  type="button"
                   onClick={handleShare}
+                  aria-label={`Share ${building.name}`}
                   className="h-12 w-12 rounded-2xl bg-muted text-muted-foreground border border-border hover:bg-secondary flex items-center justify-center shrink-0 active:scale-[0.97] transition-all"
                   title="Copy building info"
                 >
@@ -333,10 +348,12 @@ export function BuildingDetailModal({
 
                 {/* Report */}
                 <button
+                  type="button"
                   onClick={() => {
                     onClose();
                     navigate(`/student/reports?building=${building.id}`);
                   }}
+                  aria-label={`Report an issue in ${building.name}`}
                   className="h-12 w-12 rounded-2xl bg-muted text-muted-foreground border border-border hover:bg-destructive/10 hover:text-destructive flex items-center justify-center shrink-0 active:scale-[0.97] transition-all"
                   title="Report an issue"
                 >

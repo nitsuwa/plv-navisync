@@ -9,12 +9,55 @@ export interface LayoutWarning {
 
 interface Rect { x: number; y: number; width: number; height: number }
 
-function rectOf(item: Rect): Rect {
-  return { x: item.x, y: item.y, width: item.width, height: item.height };
+interface Point { x: number; y: number }
+
+function rotatedRectPoints(item: Rect & { rotation?: number }): Point[] {
+  const center = { x: item.x + item.width / 2, y: item.y + item.height / 2 };
+  const radians = ((item.rotation || 0) * Math.PI) / 180;
+  const cosine = Math.cos(radians);
+  const sine = Math.sin(radians);
+  return [
+    { x: -item.width / 2, y: -item.height / 2 },
+    { x: item.width / 2, y: -item.height / 2 },
+    { x: item.width / 2, y: item.height / 2 },
+    { x: -item.width / 2, y: item.height / 2 },
+  ].map((point) => ({
+    x: center.x + point.x * cosine - point.y * sine,
+    y: center.y + point.x * sine + point.y * cosine,
+  }));
 }
 
-function intersects(a: Rect, b: Rect): boolean {
-  return a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;
+function polygonBounds(points: readonly Point[]): Rect {
+  const xs = points.map((point) => point.x);
+  const ys = points.map((point) => point.y);
+  return {
+    x: Math.min(...xs),
+    y: Math.min(...ys),
+    width: Math.max(...xs) - Math.min(...xs),
+    height: Math.max(...ys) - Math.min(...ys),
+  };
+}
+
+function polygonAxes(points: readonly Point[]): Point[] {
+  return points.map((point, index) => {
+    const next = points[(index + 1) % points.length];
+    const edge = { x: next.x - point.x, y: next.y - point.y };
+    const length = Math.hypot(edge.x, edge.y) || 1;
+    return { x: -edge.y / length, y: edge.x / length };
+  });
+}
+
+function projectPolygon(points: readonly Point[], axis: Point) {
+  const projections = points.map((point) => point.x * axis.x + point.y * axis.y);
+  return { min: Math.min(...projections), max: Math.max(...projections) };
+}
+
+function polygonsOverlap(a: readonly Point[], b: readonly Point[]): boolean {
+  return [...polygonAxes(a), ...polygonAxes(b)].every((axis) => {
+    const first = projectPolygon(a, axis);
+    const second = projectPolygon(b, axis);
+    return first.min < second.max && second.min < first.max;
+  });
 }
 
 function projectionsOverlap(aStart: number, aEnd: number, bStart: number, bEnd: number): boolean {
@@ -31,7 +74,8 @@ export function validateEventLayout(input: {
   const furniture = input.furniture;
 
   for (const item of furniture) {
-    const outside = item.x < 0 || item.y < 0 || item.x + item.width > input.canvasWidth || item.y + item.height > input.canvasHeight;
+    const points = rotatedRectPoints(item);
+    const outside = points.some((point) => point.x < 0 || point.y < 0 || point.x > input.canvasWidth || point.y > input.canvasHeight);
     if (outside) {
       warnings.push({
         code: "outside-boundary",
@@ -41,7 +85,13 @@ export function validateEventLayout(input: {
       });
     }
     for (const region of input.blockedRegions ?? []) {
-      if (intersects(rectOf(item), region)) {
+      const blockedPoints = [
+        { x: region.x, y: region.y },
+        { x: region.x + region.width, y: region.y },
+        { x: region.x + region.width, y: region.y + region.height },
+        { x: region.x, y: region.y + region.height },
+      ];
+      if (polygonsOverlap(points, blockedPoints)) {
         warnings.push({
           code: "blocked-access",
           severity: "critical",
@@ -54,12 +104,12 @@ export function validateEventLayout(input: {
 
   for (let first = 0; first < furniture.length; first += 1) {
     const a = furniture[first];
-    const aRect = rectOf(a);
     for (let second = first + 1; second < furniture.length; second += 1) {
       const b = furniture[second];
-      const bRect = rectOf(b);
       const itemIds = [a.id, b.id];
-      if (intersects(aRect, bRect)) {
+      const aPoints = rotatedRectPoints(a);
+      const bPoints = rotatedRectPoints(b);
+      if (polygonsOverlap(aPoints, bPoints)) {
         warnings.push({
           code: "overlap",
           severity: "warning",
@@ -69,10 +119,12 @@ export function validateEventLayout(input: {
         continue;
       }
 
-      const horizontalGap = Math.max(a.x - (b.x + b.width), b.x - (a.x + a.width));
-      const verticalGap = Math.max(a.y - (b.y + b.height), b.y - (a.y + a.height));
-      const sideBySide = horizontalGap >= 0 && horizontalGap < 12 && projectionsOverlap(a.y, a.y + a.height, b.y, b.y + b.height);
-      const stacked = verticalGap >= 0 && verticalGap < 12 && projectionsOverlap(a.x, a.x + a.width, b.x, b.x + b.width);
+      const aBounds = polygonBounds(aPoints);
+      const bBounds = polygonBounds(bPoints);
+      const horizontalGap = Math.max(aBounds.x - (bBounds.x + bBounds.width), bBounds.x - (aBounds.x + aBounds.width));
+      const verticalGap = Math.max(aBounds.y - (bBounds.y + bBounds.height), bBounds.y - (aBounds.y + aBounds.height));
+      const sideBySide = horizontalGap >= 0 && horizontalGap < 12 && projectionsOverlap(aBounds.y, aBounds.y + aBounds.height, bBounds.y, bBounds.y + bBounds.height);
+      const stacked = verticalGap >= 0 && verticalGap < 12 && projectionsOverlap(aBounds.x, aBounds.x + aBounds.width, bBounds.x, bBounds.x + bBounds.width);
       if (sideBySide || stacked) {
         warnings.push({
           code: "narrow-aisle",

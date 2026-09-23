@@ -111,14 +111,18 @@ function WallVisual({ wall }: { wall: FloorWall }) {
 
 // ── Door rendering ──────────────────────────────────────────────────────────
 
-function DoorVisual({ door, entrance, onClick }: { door: FloorDoor; entrance?: CampusEntrance; onClick?: (doorId: string) => void }) {
+function wallRotation(wall?: FloorWall) {
+  if (!wall) return 0;
+  return Math.atan2(wall.y2 - wall.y1, wall.x2 - wall.x1) * (180 / Math.PI);
+}
+
+function DoorVisual({ door, wall, entrance, onClick }: { door: FloorDoor; wall?: FloorWall; entrance?: CampusEntrance; onClick?: (doorId: string) => void }) {
   if (door.visible === false) return null;
   const { x, y, width, color, direction } = door;
   const half = width / 2;
   const leaf = width * 0.85;
 
-  // Determine rotation from wall angle (default to horizontal)
-  const rot = door.wallId ? 0 : 0; // simplified — walls handle orientation
+  const rot = wallRotation(wall);
 
   return (
     <g data-testid="readonly-door" data-door-id={door.id}
@@ -171,12 +175,12 @@ function DoorVisual({ door, entrance, onClick }: { door: FloorDoor; entrance?: C
 
 // ── Window rendering ────────────────────────────────────────────────────────
 
-function WindowVisual({ window: win }: { window: FloorWindow }) {
+function WindowVisual({ window: win, wall }: { window: FloorWindow; wall?: FloorWall }) {
   if (win.visible === false) return null;
   const half = win.width / 2;
   return (
     <g data-testid="readonly-window" data-window-id={win.id}
-      transform={`translate(${win.x},${win.y})`}>
+      transform={`translate(${win.x},${win.y}) rotate(${wallRotation(wall)})`}>
       <line x1={-half} y1={0} x2={half} y2={0}
         stroke={win.color || "#93c5fd"} strokeWidth={2} strokeLinecap="round" />
       <line x1={-half} y1={-2} x2={half} y2={-2}
@@ -410,6 +414,7 @@ export function ReadonlyFloorPlanScene({
   const visibleFurniture = (floor.furniture || []).filter((f) => f.visible !== false);
   const visiblePaths = floor.paths || [];
   const entranceById = new Map(entrances.map((entrance) => [entrance.id, entrance]));
+  const wallById = new Map(visibleWalls.map((wall) => [wall.id, wall]));
 
   return (
     <g data-testid="readonly-floor-plan-scene">
@@ -437,11 +442,6 @@ export function ReadonlyFloorPlanScene({
         <PathVisual key={path.id} path={path} />
       ))}
 
-      {/* Walls (rendered below rooms for depth) */}
-      {visibleWalls.map((wall) => (
-        <WallVisual key={wall.id} wall={wall} />
-      ))}
-
       {/* Rooms */}
       {sortedRooms.map((room) => (
         <RoomVisual
@@ -456,9 +456,14 @@ export function ReadonlyFloorPlanScene({
         />
       ))}
 
+      {/* Architectural boundaries sit above room fills, matching the authored plan. */}
+      {visibleWalls.map((wall) => (
+        <WallVisual key={wall.id} wall={wall} />
+      ))}
+
       {/* Windows */}
       {visibleWindows.map((win) => (
-        <WindowVisual key={win.id} window={win} />
+        <WindowVisual key={win.id} window={win} wall={win.wallId ? wallById.get(win.wallId) : undefined} />
       ))}
 
       {/* Doors */}
@@ -466,6 +471,7 @@ export function ReadonlyFloorPlanScene({
         <DoorVisual
           key={door.id}
           door={door}
+          wall={door.wallId ? wallById.get(door.wallId) : undefined}
           entrance={door.buildingEntranceId ? entranceById.get(door.buildingEntranceId) : undefined}
           onClick={onDoorClick}
         />

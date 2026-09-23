@@ -1,7 +1,7 @@
 import { Link, useLocation, useNavigate } from "react-router";
 import {
-  Map, Home, Compass, CalendarDays, HelpCircle, LogIn, LogOut, User, Bookmark, Flag, Settings,
-  ChevronDown, Building2, Bell,
+  Map, Home, Compass, CalendarDays, LogIn, LogOut, User, Bookmark, Flag, Settings,
+  ChevronDown,
 } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
@@ -181,33 +181,17 @@ export function Navbar() {
           <div className="flex items-center gap-1.5 shrink-0">
             {!isStudent && <ThemeToggle theme={theme} onToggle={toggleTheme} />}
 
-            {!authLoading && isStudent && (
-              <motion.div whileTap={{ scale: 0.9 }}>
-                <Link
-                  to="/announcements"
-                  aria-label="Announcements"
-                  aria-current={isActive("/announcements") ? "page" : undefined}
-                  title="Announcements"
-                  className={cn(
-                    "flex h-9 w-9 items-center justify-center rounded-xl border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
-                    showWhiteText
-                      ? isActive("/announcements")
-                        ? "border-white/40 bg-white/20 text-white"
-                        : "border-white/20 text-white/90 hover:bg-white/10 hover:text-white"
-                      : isActive("/announcements")
-                        ? "border-primary/30 bg-primary/10 text-primary"
-                        : "border-border text-muted-foreground hover:bg-muted hover:text-foreground"
-                  )}
-                >
-                  <Bell className="h-4 w-4" aria-hidden="true" />
-                </Link>
-              </motion.div>
-            )}
-
             {authLoading ? (
-              /* Session still resolving — placeholder sized like the controls it
-                 replaces so there is no layout shift on resolve */
-              <div className="w-[86px] sm:w-[96px] h-9 rounded-xl border border-border bg-muted/40 animate-pulse" aria-hidden="true" />
+              /* Keep the control useful and visible while the session resolves.
+                 A blank pulse looked like a broken account button on public pages. */
+              <div
+                role="status"
+                aria-label="Checking account"
+                className="inline-flex items-center justify-center sm:justify-start gap-2 h-9 w-9 sm:min-w-[112px] sm:w-auto sm:px-2.5 rounded-xl border border-border bg-muted/40 text-muted-foreground"
+              >
+                <span className="h-2.5 w-2.5 rounded-full bg-primary animate-pulse shrink-0" aria-hidden="true" />
+                <span className="hidden sm:inline text-[11px] font-bold whitespace-nowrap">Checking account</span>
+              </div>
             ) : isStudent ? (
               /* Student avatar dropdown */
               <div className="relative" ref={dropdownRef}>

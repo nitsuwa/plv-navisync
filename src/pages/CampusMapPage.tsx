@@ -14,6 +14,7 @@ import { type RoomType } from "../data/floorPlans";
 import type { Building } from "../types";
 import { cn } from "../lib/utils";
 import { useStudentAuth } from "../hooks/useStudentAuth";
+import { useToast } from "../hooks/useToast";
 
 import { buildingPositionsFromCampus, floorPlansFromCampus, buildingsFromCampus, facilitiesFromCampus, accessibilityFromCampus } from "../lib/mapDataAdapter";
 import {
@@ -399,6 +400,7 @@ export interface CampusMapPageProps {
 export function CampusMapPage({ previewCampus = null, fullScreen = false }: CampusMapPageProps = {}) {
   const navigate = useNavigate();
   const studentAuth = useStudentAuth();
+  const { error: showError } = useToast();
   const publishedCampusState = usePublishedCampus(previewCampus);
 
   const {
@@ -482,7 +484,7 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
       });
       setSaved(idSet);
     });
-  }, []);
+  }, [MOCK_BUILDINGS]);
 
   // Floor plan state (replaces buildingView — floor plans now render in the main SVG)
   const [floorView,       setFloorView]       = useState<{ building: Building; floor: number }|null>(null);
@@ -1759,36 +1761,18 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
 
   const toggleSave = useCallback((id: string) => {
     const b = selected?.id === id ? selected : MOCK_BUILDINGS.find((item) => item.id === id || item.code.toLowerCase() === id.toLowerCase());
-    const targetCode = b?.code;
-
-    setSaved((prev) => {
-      const next = new Set(prev);
-      const isSaved = next.has(id) || (targetCode ? next.has(targetCode) || next.has(targetCode.toLowerCase()) : false);
-
-      if (isSaved) {
-        next.delete(id);
-        if (targetCode) {
-          next.delete(targetCode);
-          next.delete(targetCode.toLowerCase());
-        }
-        studentAccountService.toggleSaveBuilding(id);
-        if (targetCode && targetCode !== id) {
-          studentAccountService.toggleSaveBuilding(targetCode);
-        }
-      } else {
-        next.add(id);
-        if (targetCode) {
-          next.add(targetCode);
-          next.add(targetCode.toLowerCase());
-        }
-        studentAccountService.toggleSaveBuilding(id);
-        if (targetCode && targetCode !== id) {
-          studentAccountService.toggleSaveBuilding(targetCode);
-        }
-      }
-      return next;
+    const canonicalId = b?.id ?? id;
+    const aliases = [canonicalId, b?.code, b?.code?.toLowerCase()].filter((value): value is string => Boolean(value));
+    const wasSaved = aliases.some((alias) => saved.has(alias));
+    const previous = saved;
+    const next = new Set(saved);
+    aliases.forEach((alias) => (wasSaved ? next.delete(alias) : next.add(alias)));
+    setSaved(next);
+    void studentAccountService.toggleSaveBuilding(canonicalId, activeCampus?.id).catch(() => {
+      setSaved(previous);
+      showError("Favorite could not be updated");
     });
-  }, [selected]);
+  }, [activeCampus?.id, MOCK_BUILDINGS, saved, selected, showError]);
 
   // ── Search results (buildings on campus, rooms on floor plan) ──────────
   const buildingResults = !isFloorMode && debouncedSearch
@@ -3482,7 +3466,7 @@ const buildingFill = (id: string) =>
           </div>
         </div>
       )}      {/* ══════════════ MODALS ══════════════ */}
-      {reportModal   && <ReportModal building={reportModal} onClose={() => setReportModal(null)}/>}
+      {reportModal   && <ReportModal building={reportModal} campusId={activeCampus?.id} onClose={() => setReportModal(null)}/>}
       {signInPrompt  && <SignInPrompt message={signInPrompt} onClose={() => setSignInPrompt(null)}/>}
 
       {/* Campus switching loading overlay */}

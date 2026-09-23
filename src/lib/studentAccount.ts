@@ -134,6 +134,25 @@ export async function updateRecoveredPassword(
   return client.auth.updateUser({ password });
 }
 
+export async function updateStudentPassword(
+  currentPassword: string,
+  nextPassword: string,
+  client: SupabaseClient<Database> = getSupabase(),
+) {
+  const { data, error: userError } = await client.auth.getUser();
+  if (userError || !data.user?.email) throw userError ?? new Error("student_auth_required");
+
+  const { error: verificationError } = await client.auth.signInWithPassword({
+    email: data.user.email,
+    password: currentPassword,
+  });
+  if (verificationError) throw verificationError;
+
+  const { data: updated, error } = await client.auth.updateUser({ password: nextPassword });
+  if (error) throw error;
+  return updated;
+}
+
 export async function loadActiveStudentProfile(
   userId: string,
   client: SupabaseClient<Database> = getSupabase(),

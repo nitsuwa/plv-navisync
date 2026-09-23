@@ -1,4 +1,4 @@
-import { useParams, Link } from "react-router";
+import { useParams, Link, useNavigate } from "react-router";
 import { useState, useEffect, useMemo } from "react";
 import {
   ArrowLeft, MapPin, Clock, Phone, Building2, Navigation, Layers, Users,
@@ -19,6 +19,9 @@ import { cn } from "../lib/utils";
 import { Reveal } from "../components/ui/Reveal";
 import { getOpenStatus } from "../lib/buildingHours";
 import type { Building } from "../types";
+import { studentAccountService } from "../services/studentAccountService";
+import { ReportModal } from "../components/map/ReportModal";
+import { useToast } from "../hooks/useToast";
 
 type Tab = "about" | "departments" | "facilities" | "accessibility";
 
@@ -31,9 +34,13 @@ const TABS: { key: Tab; label: string; icon: React.ElementType }[] = [
 
 export function BuildingDetailsPage() {
   const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
+  const { success, error: showError } = useToast();
   const [activeTab, setActiveTab] = useState<Tab>("about");
   const [isLoading, setIsLoading] = useState(true);
   const [isSaved, setIsSaved] = useState(false);
+  const [showReport, setShowReport] = useState(false);
+  const [saving, setSaving] = useState(false);
   // Use the published campus (same source as the map + directory) so the
   // detail page resolves seeded building ids like b_scb consistently.
   const { activeCampus } = usePublishedCampus();
@@ -72,6 +79,52 @@ export function BuildingDetailsPage() {
     (b) => b.id !== id && b.category === building?.category
   ).slice(0, 3);
   const bHours = building ? getOpenStatus(building) : null;
+
+  useEffect(() => {
+    if (!building) return;
+    let mounted = true;
+    void studentAccountService.getSavedBuildings([building])
+      .then((saved) => {
+        if (mounted) setIsSaved(saved.length > 0);
+      })
+      .catch(() => {
+        if (mounted) setIsSaved(false);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, [building, activeCampus?.id]);
+
+  const handleToggleSave = async () => {
+    if (!building || saving) return;
+    const next = !isSaved;
+    setIsSaved(next);
+    setSaving(true);
+    try {
+      await studentAccountService.toggleSaveBuilding(building.id, activeCampus?.id);
+      success(next ? "Saved to favorites" : "Removed from favorites");
+    } catch {
+      setIsSaved(!next);
+      showError("Favorite could not be updated");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleShare = async () => {
+    if (!building) return;
+    const shareText = `${building.name} (${building.code}) — PLV NaviSync`;
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: building.name, text: shareText, url: `${window.location.origin}/buildings/${building.id}` });
+      } else {
+        await navigator.clipboard?.writeText(shareText);
+      }
+      success("Building link ready");
+    } catch {
+      showError("Building link could not be shared");
+    }
+  };
 
 
   if (!isLoading && !building) {
@@ -213,10 +266,10 @@ export function BuildingDetailsPage() {
         <Reveal delay={80}>
           <div className="flex flex-wrap gap-2 mb-6"
         >
-          <Button variant="primary" size="md">
+          <Button variant="primary" size="md" onClick={() => navigate(`/map?buildingId=${encodeURIComponent(building!.id)}`)}>
             <Navigation className="h-4 w-4" /> Get Directions
           </Button>
-          <Link to="/map">
+          <Link to={`/map?buildingId=${encodeURIComponent(building!.id)}`}>
             <Button variant="outline" size="md">
               <MapPin className="h-4 w-4" /> View on Map
             </Button>
@@ -224,13 +277,14 @@ export function BuildingDetailsPage() {
           <Button
             variant="outline"
             size="md"
-            onClick={() => setIsSaved(!isSaved)}
+            onClick={() => void handleToggleSave()}
+            disabled={saving}
             className={cn(isSaved && "border-accent/50 text-accent bg-accent/5")}
           >
             <Bookmark className={cn("h-4 w-4", isSaved && "fill-current")} />
             {isSaved ? "Saved" : "Save"}
           </Button>
-          <Button variant="outline" size="md">
+          <Button variant="outline" size="md" onClick={() => void handleShare()}>
             <Share2 className="h-4 w-4" /> Share
           </Button>
         </div>
@@ -242,10 +296,14 @@ export function BuildingDetailsPage() {
           {/* Left: Tabs */}
           <div className="lg:col-span-2 space-y-5">
             {/* Tab navigation */}
-            <div className="flex gap-1 p-1 rounded-2xl bg-muted/60 border border-border">
+            <div role="tablist" aria-label="Building information" className="flex gap-1 p-1 rounded-2xl bg-muted/60 border border-border">
               {TABS.map(({ key, label, icon: TabIcon }) => (
                 <button
                   key={key}
+                  type="button"
+                  role="tab"
+                  aria-selected={activeTab === key}
+                  tabIndex={activeTab === key ? 0 : -1}
                   onClick={() => setActiveTab(key)}
                   className={cn(
                     "flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex-1 justify-center",
@@ -383,18 +441,18 @@ export function BuildingDetailsPage() {
             {/* Quick actions */}
             <div className="surface-card p-4 space-y-2">
               <Link
-                to="/map"
+                to={`/map?buildingId=${encodeURIComponent(building!.id)}`}
                 className="flex items-center justify-center gap-2 py-3 rounded-xl bg-primary text-primary-foreground text-sm font-bold hover:bg-primary/90 transition-all active:scale-[0.98]"
               >
                 <Navigation className="h-4 w-4" /> Get Directions
               </Link>
               <Link
-                to="/map"
+                to={`/map?buildingId=${encodeURIComponent(building!.id)}`}
                 className="flex items-center justify-center gap-2 py-3 rounded-xl border border-border text-sm font-bold text-foreground hover:bg-muted transition-all"
               >
                 <MapPin className="h-4 w-4" /> View on Map
               </Link>
-              <button className="w-full flex items-center justify-center gap-2 py-3 rounded-xl border border-border text-sm font-bold text-muted-foreground hover:bg-destructive/5 hover:text-destructive hover:border-destructive/20 transition-all">
+              <button type="button" onClick={() => setShowReport(true)} className="w-full flex items-center justify-center gap-2 py-3 rounded-xl border border-border text-sm font-bold text-muted-foreground hover:bg-destructive/5 hover:text-destructive hover:border-destructive/20 transition-all">
                 <Flag className="h-4 w-4" /> Report Issue
               </button>
             </div>
@@ -428,6 +486,7 @@ export function BuildingDetailsPage() {
           </div>
         </Reveal>
         )}
+        {showReport && building && <ReportModal building={building} campusId={activeCampus?.id} onClose={() => setShowReport(false)} />}
       </div>
     </PageTransition>
   );

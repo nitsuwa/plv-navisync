@@ -10,6 +10,7 @@ import {
 import { useScrollReveal } from "../hooks/useScrollReveal";
 import { useStudentAuth } from "../hooks/useStudentAuth";
 import { cn } from "../lib/utils";
+import { buildSupportMailto } from "../lib/support";
 
 // ═════════════════════════════════════════════════════════════════════════════
 // ── Scroll-reveal wrapper ───────────────────────────────────────────────────
@@ -176,8 +177,8 @@ function MD({ text }: { text: string }) {
 // ═════════════════════════════════════════════════════════════════════════════
 
 const AI_STATS = [
-  { label: "Available", value: "24/7", icon: Clock },
-  { label: "Avg. Response", value: "~1 sec", icon: Loader2 },
+  { label: "Availability", value: "Offline-ready", icon: Clock },
+  { label: "Response", value: "Instant", icon: Loader2 },
   { label: "Knowledge Base", value: "11 topics", icon: BookOpen },
 ];
 
@@ -265,7 +266,7 @@ function TypingIndicator() {
 
 function AIChatSection({ studentAuth }: { studentAuth: ReturnType<typeof useStudentAuth> }) {
   const [messages, setMessages] = useState<ChatMessage[]>([
-    { role: "ai", text: "Hi! I'm your PLV Campus Assistant. Ask me anything about buildings, navigation, offices, or campus facilities.", time: new Date() },
+    { role: "ai", text: "Hi! I'm your PLV Campus Guide. I answer from NaviSync's campus knowledge base. Ask me about buildings, navigation, offices, or campus facilities.", time: new Date() },
   ]);
   const [input, setInput] = useState("");
   const [typing, setTyping] = useState(false);
@@ -328,19 +329,15 @@ function AIChatSection({ studentAuth }: { studentAuth: ReturnType<typeof useStud
             </div>
           </div>
           <div className="min-w-0">
-            <p className="text-sm font-extrabold text-foreground">PLV Campus Assistant</p>
+            <p className="text-sm font-extrabold text-foreground">PLV Campus Guide</p>
             <p className="text-[11px] text-muted-foreground">
               {studentAuth.isStudent
-                ? `Unlimited access · ${studentAuth.role}`
-                : `${GUEST_LIMIT - guestUsed} of ${GUEST_LIMIT} questions remaining today`}
+                ? `Campus knowledge base · ${studentAuth.role}`
+                : `${GUEST_LIMIT - guestUsed} of ${GUEST_LIMIT} guide questions remaining today`}
             </p>
           </div>
           <div className="ml-auto flex items-center gap-1.5">
-            <span className="relative flex w-2 h-2">
-              <span className="absolute inset-0 rounded-full bg-green-500 animate-ping opacity-50" />
-              <span className="relative rounded-full w-2 h-2 bg-green-500" />
-            </span>
-            <span className="text-[11px] font-semibold text-muted-foreground hidden sm:inline">Online</span>
+            <span className="text-[11px] font-semibold text-muted-foreground hidden sm:inline">Local guide</span>
           </div>
         </div>
 
@@ -433,36 +430,36 @@ function AIChatSection({ studentAuth }: { studentAuth: ReturnType<typeof useStud
 // ── POPULAR CAMPUS SERVICES — replaces Quick Contacts ───────────────────────
 // ═════════════════════════════════════════════════════════════════════════════
 
-const SERVICES = [
+export const SERVICES = [
   {
     icon: Building2, name: "Registrar", desc: "Enrollment, transcripts, and student records",
     hours: "Mon–Fri, 8AM–5PM", building: "ADM Building (b2) • Ground Floor",
-    mapTo: "/map?b=adm", color: "text-blue-500",
+    mapTo: "/map?buildingId=b2", color: "text-blue-500",
   },
   {
     icon: GraduationCap, name: "Admissions", desc: "Applications, walk-ins, and inquiries",
     hours: "Mon–Fri, 8AM–5PM", building: "ADM Building (b2) • Ground Floor",
-    mapTo: "/map?b=adm", color: "text-indigo-500",
+    mapTo: "/map?buildingId=b2", color: "text-indigo-500",
   },
   {
     icon: CreditCard, name: "Cashier", desc: "Tuition and fee payments",
     hours: "Mon–Fri, 8AM–4:30PM", building: "ADM Building (b2) • Near Lobby",
-    mapTo: "/map?b=adm", color: "text-emerald-500",
+    mapTo: "/map?buildingId=b2", color: "text-emerald-500",
   },
   {
     icon: BookOpen, name: "Library (LRC)", desc: "Reading rooms, computers, media section",
     hours: "Mon–Sat, 7:30AM–6PM", building: "LRC Building (b3)",
-    mapTo: "/map?b=lrc", color: "text-amber-500",
+    mapTo: "/map?buildingId=b3", color: "text-amber-500",
   },
   {
     icon: HeartHandshake, name: "Guidance Office", desc: "Counseling, career advice, and support",
     hours: "Mon–Fri, 8AM–5PM", building: "ADM Building (b2)",
-    mapTo: "/map?b=adm", color: "text-rose-500",
+    mapTo: "/map?buildingId=b2", color: "text-rose-500",
   },
   {
     icon: Stethoscope, name: "Clinic", desc: "First aid, medical check-ups, emergencies",
     hours: "Mon–Fri, 7:30AM–5PM", building: "ADM Building (b2)",
-    mapTo: "/map?b=adm", color: "text-red-500",
+    mapTo: "/map?buildingId=b2", color: "text-red-500",
   },
   {
     icon: Shield, name: "Security Office", desc: "Campus safety, lost & found, emergency",
@@ -472,7 +469,7 @@ const SERVICES = [
   {
     icon: Monitor, name: "IT Support", desc: "Wi-Fi, portal access, and tech assistance",
     hours: "Mon–Fri, 8AM–5PM", building: "ADM Building (b2)",
-    mapTo: "/map?b=adm", color: "text-cyan-500",
+    mapTo: "/map?buildingId=b2", color: "text-cyan-500",
   },
 ];
 
@@ -726,7 +723,7 @@ function FloatingSelect({ id, label, value, onChange, options, placeholder, requ
 
 function InquiryForm() {
   const [form, setForm] = useState({ name: "", email: "", category: "", subject: "", message: "" });
-  const [submitted, setSubmitted] = useState(false);
+  const [supportDraft, setSupportDraft] = useState<string | null>(null);
   const [attachment, setAttachment] = useState<File | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -739,10 +736,12 @@ function InquiryForm() {
   const canSubmit = form.name.trim() && form.email.trim() && validEmail && form.category && form.subject.trim() && form.message.trim();
 
   const handleSubmit = () => {
-    if (canSubmit) setSubmitted(true);
+    if (canSubmit) {
+      setSupportDraft(buildSupportMailto({ ...form, attachmentName: attachment?.name }));
+    }
   };
 
-  if (submitted) return (
+  if (supportDraft) return (
     <motion.div
       initial={{ opacity: 0, scale: 0.95 }}
       animate={{ opacity: 1, scale: 1 }}
@@ -762,17 +761,29 @@ function InquiryForm() {
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.2 }}
       >
-        <h3 className="font-extrabold text-foreground text-lg mb-2">Inquiry Submitted</h3>
+        <h3 className="font-extrabold text-foreground text-lg mb-2">Email draft ready</h3>
         <p className="text-sm text-muted-foreground mb-2">
-          We received your message and will reply to <strong className="text-foreground">{form.email}</strong> within 1–2 business days.
+          Your email app is ready to send this inquiry to <strong className="text-foreground">info@plv.edu.ph</strong>.
         </p>
+        {attachment && (
+          <p className="text-xs text-muted-foreground mb-2">Please attach <strong className="text-foreground">{attachment.name}</strong> in the email before sending.</p>
+        )}
         <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground mb-6">
           <Clock className="h-3 w-3" />
           Typical response time: 1–2 business days
-        </div>          <button onClick={() => { setForm({ name: "", email: "", category: "", subject: "", message: "" }); setSubmitted(false); setAttachment(null); if (fileInputRef.current) fileInputRef.current.value = ''; }}
-          className="text-sm font-bold text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-lg px-2 py-1">
-          Send another inquiry
-        </button>
+        </div>
+        <div className="flex flex-wrap items-center justify-center gap-3">
+          <a
+            href={supportDraft}
+            className="inline-flex items-center gap-2 h-10 px-5 rounded-xl bg-primary text-primary-foreground text-sm font-bold hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <Mail className="h-4 w-4" /> Open email app
+          </a>
+          <button onClick={() => { setForm({ name: "", email: "", category: "", subject: "", message: "" }); setSupportDraft(null); setAttachment(null); if (fileInputRef.current) fileInputRef.current.value = ''; }}
+            className="text-sm font-bold text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-lg px-2 py-1">
+            Send another inquiry
+          </button>
+        </div>
       </motion.div>
     </motion.div>
   );
@@ -1135,10 +1146,10 @@ function FinalCTA() {
           <motion.a
             whileHover={{ scale: 1.03 }}
             whileTap={{ scale: 0.97 }}
-            href="#ai-assistant"
+            href="#campus-assistant"
             className="inline-flex items-center gap-2 h-11 px-6 rounded-xl bg-primary text-primary-foreground font-extrabold text-sm hover:bg-primary/90 transition-all shadow-md"
           >
-            <Bot className="h-4 w-4" /> Chat with AI
+            <Bot className="h-4 w-4" /> Ask Campus Guide
           </motion.a>
           <motion.a
             whileHover={{ scale: 1.03 }}
@@ -1168,6 +1179,7 @@ function FinalCTA() {
 
 export function HelpCenterPage() {
   const { hash } = useLocation();
+  const studentAuth = useStudentAuth();
 
   const showContact = hash === "#contact-form";
   const showFAQ = hash === "#faq";
@@ -1187,6 +1199,32 @@ export function HelpCenterPage() {
   return (
     <div className="min-h-screen bg-background">
       <div className="max-w-4xl mx-auto px-6 py-16 space-y-24">
+        <section id="campus-assistant">
+          <Reveal>
+            <div className="text-center mb-8">
+              <SectionLabel>Campus Guide</SectionLabel>
+              <h1 className="text-3xl sm:text-4xl font-extrabold text-foreground mb-3">Find your way around PLV</h1>
+              <p className="text-sm text-muted-foreground max-w-xl mx-auto">
+                Get quick answers from NaviSync&apos;s built-in campus knowledge base, then open the map for the exact location.
+              </p>
+            </div>
+          </Reveal>
+          <Reveal delay={80}>
+            <AIChatSection studentAuth={studentAuth} />
+          </Reveal>
+        </section>
+
+        <section id="campus-services">
+          <Reveal>
+            <div className="text-center mb-8">
+              <SectionLabel>Campus Services</SectionLabel>
+              <h2 className="text-2xl font-extrabold text-foreground mb-2">Popular offices and facilities</h2>
+              <p className="text-sm text-muted-foreground">Open a service in the map or contact PLV support for help.</p>
+            </div>
+          </Reveal>
+          <CampusServices />
+        </section>
+
         {/* Footer links open one support component at a time. */}
         {(!showFAQ || showContact) && (
         <section id="contact-form">
@@ -1226,6 +1264,8 @@ export function HelpCenterPage() {
           </div>
         </section>
         )}
+
+        <FinalCTA />
       </div>
 
     </div>

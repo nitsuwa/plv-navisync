@@ -9,7 +9,7 @@
  * - Event labels can be placed and edited
  * - Saves ONLY to the CampusEventOverlay document, not the base map
  */
-import { useState, useCallback, useRef, useEffect, useMemo } from "react";
+import { useState, useCallback, useRef, useEffect, useLayoutEffect, useMemo, type CSSProperties, type MutableRefObject } from "react";
 import {
   ArrowLeft,
   Save,
@@ -55,6 +55,7 @@ import { clampViewportPan, getPanToKeepWorldPoint, getViewportFitZoom, getViewpo
 import { fitEventViewport, getContentPanBounds, getFloorPlanContentBounds, getSmoothZoomTarget, normalizeWheelDelta } from "../../lib/eventViewport";
 import { clearEventLayoutDraft, eventLayoutDraftStorageKey, readEventLayoutDraft, writeEventLayoutDraft } from "../../lib/eventDraftPersistence";
 import { ReadonlyOutdoorCampusScene } from "../map-builder/ReadonlyOutdoorVisuals";
+import { ReadonlyFloorPlanScene } from "../map-builder/ReadonlyFloorPlanVisuals";
 import type { EventOverlayStatus } from "../../services/eventOverlayService";
 import { isCanvasTextEditingTarget, useSpacePan } from "../canvas/useSpacePan";
 import { CanvasAssetPalette, EVENT_ASSET_DRAG_TYPE } from "../canvas/CanvasAssetPalette";
@@ -65,10 +66,14 @@ import {
   getEventFurnitureTemplate,
 } from "./eventAssets";
 import { resolveCanvasAssetKey } from "../canvas/canvasAssetCatalog";
-import { applyLayoutAction, nudgeItems, selectionBounds, snapLayoutPosition, type LayoutAction, type LayoutSnapGuide } from "../../lib/eventLayoutGeometry";
-import { resizeFurnitureWithinFloor } from "../../lib/floorGeometry";
+import { applyLayoutAction, nudgeItems, resolveLayoutMoveFromSnapshot, selectionBounds, type LayoutAction, type LayoutSnapGuide } from "../../lib/eventLayoutGeometry";
+import { constrainFurnitureToFloor, resizeFurnitureWithinFloor } from "../../lib/floorGeometry";
+import { transformControlMetrics } from "../../lib/campusSelection";
 import { EVENT_LAYOUT_PRESETS, getEventLayoutPreset, type EventLayoutPresetId } from "../../lib/eventLayoutPresets";
 import { validateEventLayout } from "../../lib/eventLayoutValidation";
+import { useEventViewportMotion } from "./useEventViewportMotion";
+import { EventLayoutIssues } from "./EventLayoutIssues";
+import { clientToEventWorld, type GestureFrame } from "../../lib/eventGestureCoordinates";
 
 // ── Tool types ────────────────────────────────────────────────────────────
 
@@ -103,15 +108,83 @@ const EVENT_LAYOUT_ACTIONS: Array<{ action: LayoutAction; label: string; descrip
 type ResizeHandleDirection = "nw" | "n" | "ne" | "e" | "se" | "s" | "sw" | "w";
 const RESIZE_HANDLE_DIRECTIONS: ResizeHandleDirection[] = ["nw", "n", "ne", "e", "se", "s", "sw", "w"];
 const RESIZE_HANDLE_POSITION: Record<ResizeHandleDirection, string> = {
-  nw: "-left-1.5 -top-1.5 cursor-nwse-resize",
-  n: "left-1/2 -top-1.5 -translate-x-1/2 cursor-ns-resize",
-  ne: "-right-1.5 -top-1.5 cursor-nesw-resize",
-  e: "-right-1.5 top-1/2 -translate-y-1/2 cursor-ew-resize",
-  se: "-bottom-1.5 -right-1.5 cursor-nwse-resize",
-  s: "-bottom-1.5 left-1/2 -translate-x-1/2 cursor-ns-resize",
-  sw: "-bottom-1.5 -left-1.5 cursor-nesw-resize",
-  w: "-left-1.5 top-1/2 -translate-y-1/2 cursor-ew-resize",
+  nw: "cursor-nwse-resize",
+  n: "cursor-ns-resize",
+  ne: "cursor-nesw-resize",
+  e: "cursor-ew-resize",
+  se: "cursor-nwse-resize",
+  s: "cursor-ns-resize",
+  sw: "cursor-nesw-resize",
+  w: "cursor-ew-resize",
 };
+
+function getEventResizeHandleStyle(handle: ResizeHandleDirection, hitSize: number): CSSProperties {
+  const halfHitSize = hitSize / 2;
+  const base: CSSProperties = {
+    width: hitSize,
+    height: hitSize,
+    minWidth: 0,
+    minHeight: 0,
+    padding: 0,
+  };
+  switch (handle) {
+    case "nw": return { ...base, left: -halfHitSize, top: -halfHitSize };
+    case "n": return { ...base, left: "50%", top: -halfHitSize, transform: "translateX(-50%)" };
+    case "ne": return { ...base, right: -halfHitSize, top: -halfHitSize };
+    case "e": return { ...base, right: -halfHitSize, top: "50%", transform: "translateY(-50%)" };
+    case "se": return { ...base, right: -halfHitSize, bottom: -halfHitSize };
+    case "s": return { ...base, left: "50%", bottom: -halfHitSize, transform: "translateX(-50%)" };
+    case "sw": return { ...base, left: -halfHitSize, bottom: -halfHitSize };
+    case "w": return { ...base, left: -halfHitSize, top: "50%", transform: "translateY(-50%)" };
+  }
+}
+
+type EventPointerGesture = "pan" | "drag" | "resize" | "rotate" | "pinch";
+
+interface EventResizeGesture {
+  id: string;
+  handle: ResizeHandleDirection;
+  startMouseX: number;
+  startMouseY: number;
+  origin: FloorFurniture;
+}
+
+interface EventMoveGesture {
+  anchorId: string;
+  anchorType: "furniture" | "label";
+  ids: string[];
+  startPointer: { x: number; y: number };
+  furnitureOrigins: FloorFurniture[];
+  labelOrigins: FloorLabel[];
+  allFurnitureAtStart: FloorFurniture[];
+  frame: GestureFrame;
+}
+
+interface EventRotateGesture {
+  id: string;
+  centerX: number;
+  centerY: number;
+  startAngle: number;
+  startRotation: number;
+}
+
+interface PointerSample {
+  clientX: number;
+  clientY: number;
+  shiftKey: boolean;
+}
+
+type FinishReason = "pointerup" | "cancel" | "lostcapture" | "blur" | "hidden" | "escape" | "resize" | "pinch-transfer" | "save" | "switch";
+type PointerPressOrigin = "none" | "blank" | "item" | "handle" | "chrome" | "pan";
+
+interface PinchGesture {
+  ids: [number, number];
+  frame: GestureFrame;
+  startDistance: number;
+  startZoom: number;
+  worldAnchor: { x: number; y: number };
+  points: Map<number, { x: number; y: number }>;
+}
 
 // ── Undo/Redo types ───────────────────────────────────────────────────────
 
@@ -154,12 +227,16 @@ export interface EventFloorEditorProps {
   onSave: (
     furniture: FloorFurniture[],
     labels: FloorLabel[]
-  ) => Promise<void>;
+  ) => Promise<void | boolean>;
   /** Called when the user submits for approval */
   onSubmit: (
     furniture: FloorFurniture[],
     labels: FloorLabel[]
-  ) => Promise<void>;
+  ) => Promise<void | boolean>;
+  /** Reports the current unsaved location draft to the page coordinator. */
+  onDraftChange?: (furniture: FloorFurniture[], labels: FloorLabel[]) => void;
+  /** Synchronously completes an active gesture before a page boundary changes location. */
+  interactionCommitRef?: MutableRefObject<(() => EventEditorDraftSnapshot) | null>;
   /** Called when the user clicks back */
   onBack: () => void;
   /** Whether the overlay is currently being saved */
@@ -172,11 +249,18 @@ export interface EventFloorEditorProps {
   readOnly?: boolean;
 }
 
+export interface EventEditorDraftSnapshot {
+  eventFurniture: FloorFurniture[];
+  eventLabels: FloorLabel[];
+}
+
 export function EventFloorEditor({
   floorPlan,
   overlay,
   onSave,
   onSubmit,
+  onDraftChange,
+  interactionCommitRef,
   onBack,
   isSaving = false,
   isSubmitting = false,
@@ -230,21 +314,77 @@ export function EventFloorEditor({
   const [snapEnabled, setSnapEnabled] = useState(true);
   const [snapGuides, setSnapGuides] = useState<LayoutSnapGuide[]>([]);
   const [inspectorOpen, setInspectorOpen] = useState(false);
+  const [isPanning, setIsPanning] = useState(false);
+  const [pinchActive, setPinchActive] = useState(false);
+  const [transforming, setTransforming] = useState(false);
+  const panMovedRef = useRef(false);
+  const itemGestureActive = Boolean(dragging || resizing || rotating);
+  const [validatedFurniture, setValidatedFurniture] = useState(eventFurniture);
 
   const canvasRef = useRef<HTMLDivElement>(null);
-  const [zoom, setZoom] = useState(1);
-  const [pan, setPan] = useState({ x: 0, y: 0 });
   const panRef = useRef<{ sx: number; sy: number; px: number; py: number } | null>(null);
-  const pinchRef = useRef<{ distance: number; zoom: number } | null>(null);
+  const pointerGestureRef = useRef<EventPointerGesture | null>(null);
+  const moveGestureRef = useRef<EventMoveGesture | null>(null);
+  const gestureFrameRef = useRef<GestureFrame | null>(null);
+  const gestureStartClientRef = useRef<{ x: number; y: number } | null>(null);
+  const gestureMovedRef = useRef(false);
+  const suppressCanvasClickRef = useRef(false);
+  const lastPointerRef = useRef<{ x: number; y: number } | null>(null);
+  const activePointerIdRef = useRef<number | null>(null);
+  const activePointerIdsRef = useRef<Set<number>>(new Set());
+  const resizeGestureRef = useRef<EventResizeGesture | null>(null);
+  const rotateGestureRef = useRef<EventRotateGesture | null>(null);
+  const pointerCaptureTargetRef = useRef<HTMLElement | null>(null);
+  const intentionalCaptureReleaseIdsRef = useRef<Set<number>>(new Set());
+  const pointerPressOriginRef = useRef<PointerPressOrigin>("none");
+  const interactionFinishingRef = useRef(false);
+  const finishInteractionRef = useRef<(reason: FinishReason, finalSample?: PointerSample) => void>(() => {});
+  const pointerMoveRef = useRef<(event: PointerEvent) => void>(() => {});
+  const activePointerTypeRef = useRef<string | null>(null);
+  const pointerPositionsRef = useRef(new Map<number, { x: number; y: number }>());
+  const pendingPreviewRef = useRef<PointerSample | null>(null);
+  const previewFrameRef = useRef<number | null>(null);
+  const pinchRef = useRef<PinchGesture | null>(null);
+  const startPinchRef = useRef<(event: React.PointerEvent<HTMLDivElement>) => void>(() => {});
   const draftLocation = overlay.locationRef;
   const draftStorageKey = draftLocation ? eventLayoutDraftStorageKey(overlay.id, draftLocation) : null;
   const draftStateRef = useRef({ eventFurniture, eventLabels });
   const draftDirtyRef = useRef(false);
   const draftHydratedRef = useRef(false);
+  const onDraftChangeRef = useRef(onDraftChange);
+  const latestFurnitureRef = useRef(eventFurniture);
+  const latestLabelsRef = useRef(eventLabels);
+  const flushPendingPreviewRef = useRef<() => void>(() => {});
+
+  const setFurniturePreview = useCallback((next: FloorFurniture[]) => {
+    latestFurnitureRef.current = next;
+    draftDirtyRef.current = true;
+    setEventFurniture(next);
+  }, []);
+
+  const setLabelsPreview = useCallback((next: FloorLabel[]) => {
+    latestLabelsRef.current = next;
+    draftDirtyRef.current = true;
+    setEventLabels(next);
+  }, []);
+
+  useEffect(() => {
+    onDraftChangeRef.current = onDraftChange;
+  }, [onDraftChange]);
 
   useEffect(() => {
     draftStateRef.current = { eventFurniture, eventLabels };
+    latestFurnitureRef.current = eventFurniture;
+    latestLabelsRef.current = eventLabels;
   }, [eventFurniture, eventLabels]);
+
+  useEffect(() => {
+    if (!itemGestureActive) setValidatedFurniture(eventFurniture);
+  }, [eventFurniture, itemGestureActive]);
+
+  useEffect(() => {
+    if (!readOnly && !itemGestureActive) onDraftChangeRef.current?.(eventFurniture, eventLabels);
+  }, [eventFurniture, eventLabels, itemGestureActive, readOnly]);
 
   useEffect(() => {
     if (!draftStorageKey) return;
@@ -255,6 +395,7 @@ export function EventFloorEditor({
     if (readOnly) return;
 
     draftDirtyRef.current = true;
+    if (itemGestureActive) return;
     const timer = window.setTimeout(() => {
       if (!draftDirtyRef.current || !draftLocation) return;
       writeEventLayoutDraft(
@@ -266,22 +407,26 @@ export function EventFloorEditor({
       draftDirtyRef.current = false;
     }, 250);
     return () => window.clearTimeout(timer);
-  }, [draftLocation, draftStorageKey, eventFurniture, eventLabels, overlay.id, readOnly]);
+  }, [draftLocation, draftStorageKey, eventFurniture, eventLabels, itemGestureActive, overlay.id, readOnly]);
 
   useEffect(() => {
     if (!draftStorageKey || !draftLocation || readOnly) return;
     const flushDraft = () => {
+      flushPendingPreviewRef.current();
       if (!draftDirtyRef.current) return;
       writeEventLayoutDraft(
         overlay.id,
         draftLocation,
-        draftStateRef.current.eventFurniture,
-        draftStateRef.current.eventLabels,
+        latestFurnitureRef.current,
+        latestLabelsRef.current,
       );
       draftDirtyRef.current = false;
     };
     const handleVisibilityChange = () => {
-      if (document.visibilityState === "hidden") flushDraft();
+      if (document.visibilityState === "hidden") {
+        finishInteractionRef.current("hidden");
+        flushDraft();
+      }
     };
     window.addEventListener("pagehide", flushDraft);
     window.addEventListener("beforeunload", flushDraft);
@@ -312,6 +457,12 @@ export function EventFloorEditor({
       : null,
     [eventFurniture, selectedFurnitureIds],
   );
+  const selectedLabel = useMemo(
+    () => selectedIds.length === 1
+      ? eventLabels.find((item) => item.id === selectedIds[0]) ?? null
+      : null,
+    [eventLabels, selectedIds],
+  );
   const selectionIsOneGroup = useMemo(() => {
     if (selectedFurnitureIds.length < 2) return false;
     const selectedItems = eventFurniture.filter((item) => selectedFurnitureIds.includes(item.id));
@@ -323,13 +474,18 @@ export function EventFloorEditor({
     [eventFurniture, selectedFurnitureIds],
   );
   const layoutWarnings = useMemo(() => validateEventLayout({
-    furniture: eventFurniture,
+    furniture: validatedFurniture,
     canvasWidth: canvasW,
     canvasHeight: canvasH,
-  }), [canvasH, canvasW, eventFurniture]);
+  }), [canvasH, canvasW, validatedFurniture]);
   const viewportBackground = floorPlan.id === "campus" && activeCampus
     ? campusGroundAppearance(activeCampus).color
     : floorPlan.backgroundColor || "var(--map-floor-corridor, #f3f4f6)";
+  const baseMapScene = useMemo(() => (
+    floorPlan.id === "campus" && activeCampus
+      ? <ReadonlyOutdoorCampusScene campus={projectReadonlyOutdoorCampus(activeCampus)} showBuildings />
+      : <ReadonlyFloorPlanScene floor={floorPlan} />
+  ), [activeCampus, floorPlan]);
 
   const getEventPanBounds = useCallback((zoomValue: number) => {
     const rect = canvasRef.current?.getBoundingClientRect();
@@ -365,6 +521,47 @@ export function EventFloorEditor({
   const clampEventPan = useCallback((point: { x: number; y: number }, zoomValue: number) =>
     clampViewportPan(point, getEventPanBounds(zoomValue)), [getEventPanBounds]);
 
+  const {
+    zoom,
+    pan,
+    currentRef: viewportCurrentRef,
+    targetRef: viewportTargetRef,
+    animateTo: animateViewportTo,
+    setImmediateTransform: setImmediateViewport,
+    cancelMotion: cancelViewportMotion,
+  } = useEventViewportMotion({
+    initialZoom: 1,
+    initialPan: { x: 0, y: 0 },
+    clampPan: clampEventPan,
+  });
+
+  const effectiveTool: EventTool = isPanning || pinchActive || (spaceHeld && !itemGestureActive) ? "pan" : activeTool;
+  const panStatus = isPanning || pinchActive
+    ? "Panning"
+    : effectiveTool === "pan"
+      ? spaceHeld ? "Pan · Space held" : "Pan"
+      : "";
+
+  const beginTransformGesture = useCallback((clientX?: number, clientY?: number) => {
+    cancelViewportMotion();
+    const rect = canvasRef.current?.getBoundingClientRect();
+    if (!rect) return null;
+    const displayed = viewportCurrentRef.current;
+    setImmediateViewport(displayed);
+    const frame: GestureFrame = {
+      left: rect.left,
+      top: rect.top,
+      zoom: displayed.zoom,
+      pan: { ...displayed.pan },
+    };
+    gestureFrameRef.current = frame;
+    gestureStartClientRef.current = Number.isFinite(clientX) && Number.isFinite(clientY)
+      ? { x: clientX as number, y: clientY as number }
+      : null;
+    gestureMovedRef.current = false;
+    return frame;
+  }, [cancelViewportMotion, setImmediateViewport, viewportCurrentRef]);
+
   const getEventMinZoom = useCallback(() => {
     if (!readOnly) return EVENT_EDITOR_MIN_ZOOM;
     const rect = canvasRef.current?.getBoundingClientRect();
@@ -376,7 +573,7 @@ export function EventFloorEditor({
     });
   }, [canvasH, canvasW, readOnly]);
 
-  const fitViewportToContent = useCallback(() => {
+  const fitViewportToContent = useCallback((animated = false) => {
     const rect = canvasRef.current?.getBoundingClientRect();
     if (!rect || rect.width <= 0 || rect.height <= 0) return false;
 
@@ -390,11 +587,12 @@ export function EventFloorEditor({
       minZoom: getEventMinZoom(),
       maxZoom: EVENT_MAX_ZOOM,
     });
-    setZoom(next.zoom);
-    setPan(clampEventPan(next.pan, next.zoom));
+    const transform = { zoom: next.zoom, pan: clampEventPan(next.pan, next.zoom) };
+    if (animated) animateViewportTo(transform, 180);
+    else setImmediateViewport(transform);
     fittedViewportKeyRef.current = viewportLocationKey;
     return true;
-  }, [canvasH, canvasW, clampEventPan, eventContentBounds, getEventMinZoom, viewportLocationKey]);
+  }, [animateViewportTo, canvasH, canvasW, clampEventPan, eventContentBounds, getEventMinZoom, setImmediateViewport, viewportLocationKey]);
 
   useEffect(() => {
     if (fittedViewportKeyRef.current === viewportLocationKey) return;
@@ -448,7 +646,11 @@ export function EventFloorEditor({
   const placeFurniture = useCallback(
     (template: (typeof EVENT_FURNITURE_TEMPLATES)[number], x: number, y: number) => {
       if (readOnly) return;
-      const newFurniture = eventFurnitureFromTemplate(template, x, y, genId());
+      const newFurniture = constrainFurnitureToFloor(
+        eventFurnitureFromTemplate(template, x, y, genId()),
+        canvasW,
+        canvasH,
+      );
       const updated = [...eventFurniture, newFurniture];
       setEventFurniture(updated);
       pushHistory(updated, eventLabels);
@@ -456,7 +658,7 @@ export function EventFloorEditor({
       setSelectedType("furniture");
       setSelectedIds([newFurniture.id]);
     },
-    [eventFurniture, eventLabels, pushHistory, readOnly]
+    [canvasH, canvasW, eventFurniture, eventLabels, pushHistory, readOnly]
   );
 
   // ── Label placement ────────────────────────────────────────────────────
@@ -509,22 +711,31 @@ export function EventFloorEditor({
   const handleCanvasClick = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
       if (readOnly) return;
+      const pressOrigin = pointerPressOriginRef.current;
+      pointerPressOriginRef.current = "none";
+      if (pressOrigin !== "none" && pressOrigin !== "blank") return;
       if (activeTool === "pan" || spaceHeld) return;
       if (dragging || resizing || rotating) return;
+      if (suppressCanvasClickRef.current) {
+        suppressCanvasClickRef.current = false;
+        return;
+      }
+      const target = e.target instanceof Element ? e.target : null;
+      if (target?.closest("[data-event-editor-chrome]")) return;
 
       const rect = e.currentTarget.getBoundingClientRect();
       const x = (e.clientX - rect.left) / zoom - pan.x / zoom;
       const y = (e.clientY - rect.top) / zoom - pan.y / zoom;
 
       if (activeTool === "furniture") {
-        if ((e.target as HTMLElement).closest("[data-event-item]")) return;
+        if (target?.closest("[data-event-item]")) return;
         // Place the currently selected event template centered on the click
         placeFurniture(activeTemplate, x - activeTemplate.width / 2, y - activeTemplate.height / 2);
       } else if (activeTool === "text") {
+        if (target?.closest("[data-event-item]")) return;
         placeLabel(x, y);
       } else if (activeTool === "select") {
-        const target = e.target as HTMLElement;
-        if (!target.closest("[data-event-item]")) {
+        if (!target?.closest("[data-event-item]")) {
           setSelectedId(null);
           setSelectedType(null);
           setSelectedIds([]);
@@ -563,6 +774,8 @@ export function EventFloorEditor({
   const getCanvasWorldPoint = useCallback((clientX: number, clientY: number) => {
     const rect = canvasRef.current?.getBoundingClientRect();
     if (!rect) return null;
+    const gestureFrame = gestureFrameRef.current;
+    if (gestureFrame) return clientToEventWorld({ x: clientX, y: clientY }, gestureFrame);
     const safeZoom = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
     return {
       x: (clientX - rect.left - pan.x) / safeZoom,
@@ -570,17 +783,46 @@ export function EventFloorEditor({
     };
   }, [pan, zoom]);
 
+  const hasPassedGestureThreshold = useCallback((clientX: number, clientY: number) => {
+    const start = gestureStartClientRef.current;
+    return !start || Math.hypot(clientX - start.x, clientY - start.y) >= 3;
+  }, []);
+
   // ── Mouse drag for moving items ────────────────────────────────────────
   const handleItemMouseDown = useCallback(
-    (e: React.MouseEvent, id: string, type: "furniture" | "label") => {
+    (e: React.PointerEvent, id: string, type: "furniture" | "label") => {
       e.stopPropagation();
       if (readOnly) return;
-      if (spaceHeld) {
+      if (e.button === 2) return;
+      if (e.button === 1) {
         e.preventDefault();
-        panRef.current = { sx: e.clientX, sy: e.clientY, px: pan.x, py: pan.y };
+        cancelViewportMotion();
+        const currentPan = viewportCurrentRef.current.pan;
+        panRef.current = { sx: e.clientX, sy: e.clientY, px: currentPan.x, py: currentPan.y };
+        gestureStartClientRef.current = { x: e.clientX, y: e.clientY };
+        gestureMovedRef.current = false;
+        pointerGestureRef.current = "pan";
+        pointerPressOriginRef.current = "pan";
+        panMovedRef.current = false;
+        setIsPanning(false);
         return;
       }
-      if (activeTool !== "select" && activeTool !== "furniture") return;
+      if (activeTool === "pan" || spaceHeld) {
+        e.preventDefault();
+        cancelViewportMotion();
+        gestureFrameRef.current = null;
+        const currentPan = viewportCurrentRef.current.pan;
+        panRef.current = { sx: e.clientX, sy: e.clientY, px: currentPan.x, py: currentPan.y };
+        gestureStartClientRef.current = { x: e.clientX, y: e.clientY };
+        gestureMovedRef.current = false;
+        panMovedRef.current = false;
+        pointerPressOriginRef.current = "pan";
+        pointerGestureRef.current = "pan";
+        setIsPanning(false);
+        return;
+      }
+      if (activeTool !== "select" && activeTool !== "furniture" && !(activeTool === "text" && type === "label")) return;
+      e.preventDefault();
 
       if (e.shiftKey) {
         const nextIds = selectedIds.includes(id)
@@ -606,11 +848,13 @@ export function EventFloorEditor({
         return;
       }
 
-      const rect = canvasRef.current?.getBoundingClientRect();
-      if (!rect) return;
+      const frame = beginTransformGesture(e.clientX, e.clientY);
+      if (!frame) return;
 
-      const mouseX = (e.clientX - rect.left) / zoom - pan.x / zoom;
-      const mouseY = (e.clientY - rect.top) / zoom - pan.y / zoom;
+      lastPointerRef.current = { x: e.clientX, y: e.clientY };
+      const pointer = clientToEventWorld({ x: e.clientX, y: e.clientY }, frame);
+      const mouseX = pointer.x;
+      const mouseY = pointer.y;
 
       const groupId = type === "furniture" ? (item as FloorFurniture).groupId : undefined;
       const unlockedSelectedIds = selectedIds.filter((selected) => {
@@ -622,6 +866,7 @@ export function EventFloorEditor({
         ? eventFurniture.filter((candidate) => candidate.groupId === groupId && !candidate.locked).map((candidate) => candidate.id)
         : selectedIds.includes(id) ? unlockedSelectedIds : [id];
 
+      let furnitureAtStart = eventFurniture;
       if (e.altKey && type === "furniture") {
         const sourceItems = eventFurniture.filter((candidate) => dragIds.includes(candidate.id) && !candidate.locked);
         if (sourceItems.length === 0) return;
@@ -633,11 +878,24 @@ export function EventFloorEditor({
           groupId: undefined,
         }));
         const nextFurniture = [...eventFurniture, ...duplicates];
+        latestFurnitureRef.current = nextFurniture;
         setEventFurniture(nextFurniture);
         pushHistory(nextFurniture, eventLabels);
+        furnitureAtStart = nextFurniture;
         dragIds = duplicates.map((duplicate) => duplicate.id);
         item = duplicates[sourceItems.findIndex((source) => source.id === id)] ?? duplicates[0];
       }
+
+      moveGestureRef.current = {
+        anchorId: item.id,
+        anchorType: type,
+        ids: dragIds,
+        startPointer: { x: mouseX, y: mouseY },
+        furnitureOrigins: furnitureAtStart.filter((candidate) => dragIds.includes(candidate.id)).map((candidate) => ({ ...candidate })),
+        labelOrigins: eventLabels.filter((candidate) => dragIds.includes(candidate.id)).map((candidate) => ({ ...candidate })),
+        allFurnitureAtStart: furnitureAtStart.map((candidate) => ({ ...candidate })),
+        frame,
+      };
 
       setDragging({
         id,
@@ -651,137 +909,237 @@ export function EventFloorEditor({
       setSelectedIds(dragIds);
       setInspectorOpen(false);
       setSnapGuides([]);
+      pointerGestureRef.current = "drag";
     },
-    [activeTool, zoom, pan, eventFurniture, eventLabels, pushHistory, readOnly, spaceHeld, selectedIds]
+    [activeTool, beginTransformGesture, cancelViewportMotion, eventFurniture, eventLabels, pushHistory, readOnly, spaceHeld, selectedIds, viewportCurrentRef]
   );
 
-  const handleMouseMove = useCallback(
-    (e: Pick<React.MouseEvent, "clientX" | "clientY" | "shiftKey">) => {
+  const applyItemPreview = useCallback(
+    (e: PointerSample) => {
       if (readOnly) return;
       if (panRef.current) return;
 
-      const point = getCanvasWorldPoint(e.clientX, e.clientY);
+      const point = gestureFrameRef.current
+        ? clientToEventWorld({ x: e.clientX, y: e.clientY }, gestureFrameRef.current)
+        : getCanvasWorldPoint(e.clientX, e.clientY);
       if (!point) return;
+      lastPointerRef.current = { x: e.clientX, y: e.clientY };
       const { x: mouseX, y: mouseY } = point;
-      if (rotating) {
+      const pastThreshold = hasPassedGestureThreshold(e.clientX, e.clientY);
+      const rotateGesture = rotateGestureRef.current;
+      if (rotateGesture) {
+        if (!pastThreshold) return;
+        setTransforming(true);
+        gestureMovedRef.current = true;
+        suppressCanvasClickRef.current = true;
         setSnapGuides([]);
-        const currentAngle = Math.atan2(mouseY - rotating.centerY, mouseX - rotating.centerX);
-        let deltaDegrees = (currentAngle - rotating.startAngle) * (180 / Math.PI);
+        const currentAngle = Math.atan2(mouseY - rotateGesture.centerY, mouseX - rotateGesture.centerX);
+        let deltaDegrees = (currentAngle - rotateGesture.startAngle) * (180 / Math.PI);
         if (deltaDegrees > 180) deltaDegrees -= 360;
         if (deltaDegrees < -180) deltaDegrees += 360;
-        const rawRotation = rotating.startRotation + deltaDegrees;
+        const rawRotation = rotateGesture.startRotation + deltaDegrees;
         const normalizedRotation = ((rawRotation % 360) + 360) % 360;
         const nextRotation = e.shiftKey
           ? Math.round(normalizedRotation / 15) * 15
           : Math.round(normalizedRotation * 100) / 100;
-        setEventFurniture((prev) => prev.map((item) => item.id === rotating.id
+        const nextFurniture = latestFurnitureRef.current.map((item) => item.id === rotateGesture.id
           ? { ...item, rotation: nextRotation % 360 }
-          : item));
+          : item);
+        setFurniturePreview(nextFurniture);
         return;
       }
-      if (resizing) {
+      const resizeGesture = resizeGestureRef.current;
+      if (resizeGesture) {
+        if (!pastThreshold) return;
+        setTransforming(true);
+        gestureMovedRef.current = true;
+        suppressCanvasClickRef.current = true;
         setSnapGuides([]);
-        setEventFurniture((prev) => prev.map((item) => item.id === resizing.id
+        const nextFurniture = latestFurnitureRef.current.map((item) => item.id === resizeGesture.id
           ? resizeFurnitureWithinFloor(
-            item,
-            resizing.handle,
-            mouseX - resizing.startMouseX,
-            mouseY - resizing.startMouseY,
+            resizeGesture.origin,
+            resizeGesture.handle,
+            mouseX - resizeGesture.startMouseX,
+            mouseY - resizeGesture.startMouseY,
             canvasW,
             canvasH,
             e.shiftKey,
           )
-          : item));
+          : item);
+        setFurniturePreview(nextFurniture);
         return;
       }
-      if (!dragging) return;
-      const requestedX = mouseX - dragging.offsetX;
-      const requestedY = mouseY - dragging.offsetY;
-      const draggedItem = dragging.type === "furniture"
-        ? eventFurniture.find((item) => item.id === dragging.id)
-        : null;
-      const snappedPosition = draggedItem && dragging.ids.length === 1
-        ? snapLayoutPosition({
-          item: draggedItem,
-          x: requestedX,
-          y: requestedY,
-          items: eventFurniture,
-          selectedIds: dragging.ids,
-          grid: floorPlan.gridSize || 0,
-          threshold: Math.max(5, 8 / Math.max(0.25, zoom)),
-          snapToGrid: snapEnabled,
-        })
-        : { x: requestedX, y: requestedY, guides: [] };
-      const newX = snappedPosition.x;
-      const newY = snappedPosition.y;
-      setSnapGuides(snappedPosition.guides);
-      const selectedFurniture = eventFurniture.filter((item) => dragging.ids.includes(item.id));
-      const selectedLabels = eventLabels.filter((item) => dragging.ids.includes(item.id));
+      const gesture = moveGestureRef.current;
+      if (!gesture) return;
+      if (!pastThreshold) return;
+      setTransforming(true);
+      const anchorFurniture = gesture.furnitureOrigins.find((item) => item.id === gesture.anchorId);
+      const anchorLabel = gesture.labelOrigins.find((item) => item.id === gesture.anchorId);
+      const anchor = anchorFurniture ?? (anchorLabel ? {
+        id: anchorLabel.id,
+        x: anchorLabel.x,
+        y: anchorLabel.y,
+        width: 0,
+        height: anchorLabel.fontSize || 14,
+      } : null);
+      if (!anchor) return;
       const movingItems = [
-        ...selectedFurniture.map((item) => ({ x: item.x, y: item.y, width: item.width, height: item.height })),
-        ...selectedLabels.map((item) => ({ x: item.x, y: item.y, width: 0, height: item.fontSize || 14 })),
+        ...gesture.furnitureOrigins,
+        ...gesture.labelOrigins.map((item) => ({
+          id: item.id,
+          x: item.x,
+          y: item.y,
+          width: 0,
+          height: item.fontSize || 14,
+        })),
       ];
-      if (movingItems.length === 0) return;
-
-      const currentX = dragging.type === "furniture"
-        ? eventFurniture.find((item) => item.id === dragging.id)?.x ?? newX
-        : eventLabels.find((item) => item.id === dragging.id)?.x ?? newX;
-      const currentY = dragging.type === "furniture"
-        ? eventFurniture.find((item) => item.id === dragging.id)?.y ?? newY
-        : eventLabels.find((item) => item.id === dragging.id)?.y ?? newY;
-      const minDeltaX = Math.max(...movingItems.map((item) => -item.x));
-      const maxDeltaX = Math.min(...movingItems.map((item) => canvasW - item.width - item.x));
-      const minDeltaY = Math.max(...movingItems.map((item) => -item.y));
-      const maxDeltaY = Math.min(...movingItems.map((item) => canvasH - item.height - item.y));
-      const deltaX = Math.min(maxDeltaX, Math.max(minDeltaX, newX - currentX));
-      const deltaY = Math.min(maxDeltaY, Math.max(minDeltaY, newY - currentY));
-      setEventFurniture((prev) => prev.map((item) => dragging.ids.includes(item.id)
-        ? { ...item, x: item.x + deltaX, y: item.y + deltaY }
-        : item));
-      setEventLabels((prev) => prev.map((item) => dragging.ids.includes(item.id)
-        ? { ...item, x: item.x + deltaX, y: item.y + deltaY }
-        : item));
+      const movement = resolveLayoutMoveFromSnapshot({
+        anchor,
+        movingItems,
+        furnitureItems: gesture.anchorType === "furniture" ? gesture.allFurnitureAtStart : [anchor],
+        selectedIds: gesture.ids,
+        startPointer: gesture.startPointer,
+        bounds: { width: canvasW, height: canvasH },
+        grid: floorPlan.gridSize || 0,
+        threshold: gesture.anchorType === "furniture"
+          ? 6 / Math.max(0.25, gesture.frame.zoom)
+          : 0,
+        snapToGrid: gesture.anchorType === "furniture" && snapEnabled,
+        snapEnabled,
+      }, { x: mouseX, y: mouseY });
+      gestureMovedRef.current = true;
+      suppressCanvasClickRef.current = true;
+      setSnapGuides(movement.guides);
+      const nextFurniture = latestFurnitureRef.current.map((item) => {
+        const origin = gesture.furnitureOrigins.find((candidate) => candidate.id === item.id);
+        return origin ? { ...item, x: origin.x + movement.delta.x, y: origin.y + movement.delta.y } : item;
+      });
+      const nextLabels = latestLabelsRef.current.map((item) => {
+        const origin = gesture.labelOrigins.find((candidate) => candidate.id === item.id);
+        return origin ? { ...item, x: origin.x + movement.delta.x, y: origin.y + movement.delta.y } : item;
+      });
+      setFurniturePreview(nextFurniture);
+      setLabelsPreview(nextLabels);
     },
-    [dragging, floorPlan.gridSize, getCanvasWorldPoint, readOnly, eventFurniture, eventLabels, canvasW, canvasH, resizing, rotating, snapEnabled, zoom]
+    [floorPlan.gridSize, getCanvasWorldPoint, hasPassedGestureThreshold, readOnly, canvasW, canvasH, setFurniturePreview, setLabelsPreview, snapEnabled]
   );
 
-  const handleMouseUp = useCallback(() => {
-    if (!readOnly && (dragging || resizing || rotating)) {
-      pushHistory(eventFurniture, eventLabels);
+  const cancelPendingPreview = useCallback(() => {
+    if (previewFrameRef.current !== null) {
+      if (typeof window !== "undefined" && typeof window.cancelAnimationFrame === "function") {
+        window.cancelAnimationFrame(previewFrameRef.current);
+      } else if (typeof window !== "undefined") {
+        window.clearTimeout(previewFrameRef.current);
+      }
+      previewFrameRef.current = null;
     }
+    pendingPreviewRef.current = null;
+  }, []);
+
+  const flushPendingPreview = useCallback(() => {
+    const pending = pendingPreviewRef.current;
+    cancelPendingPreview();
+    if (pending) applyItemPreview(pending);
+  }, [applyItemPreview, cancelPendingPreview]);
+
+  const handlePointerPreview = useCallback((e: PointerSample) => {
+    const sample: PointerSample = {
+      clientX: e.clientX,
+      clientY: e.clientY,
+      shiftKey: Boolean(e.shiftKey),
+    };
+    lastPointerRef.current = { x: sample.clientX, y: sample.clientY };
+    pendingPreviewRef.current = sample;
+    if (previewFrameRef.current !== null) return;
+
+    // Apply the leading sample immediately so the grabbed item never feels
+    // delayed. Coalesce any additional pointer samples until the next frame.
+    pendingPreviewRef.current = null;
+    applyItemPreview(sample);
+    if (typeof window === "undefined") return;
+    const flush = () => {
+      previewFrameRef.current = null;
+      const latest = pendingPreviewRef.current;
+      pendingPreviewRef.current = null;
+      if (latest) applyItemPreview(latest);
+    };
+    previewFrameRef.current = typeof window.requestAnimationFrame === "function"
+      ? window.requestAnimationFrame(flush)
+      : window.setTimeout(flush, 16);
+  }, [applyItemPreview]);
+
+  const handleMouseUp = useCallback(() => {
+    flushPendingPreview();
+    const activeGesture = pointerGestureRef.current;
+    const currentFurniture = latestFurnitureRef.current;
+    const currentLabels = latestLabelsRef.current;
+    let geometryChanged = false;
+    const moveGesture = moveGestureRef.current;
+    if (activeGesture === "drag" && moveGesture) {
+      geometryChanged = moveGesture.furnitureOrigins.some((origin) => {
+        const current = currentFurniture.find((item) => item.id === origin.id);
+        return Boolean(current && (current.x !== origin.x || current.y !== origin.y));
+      }) || moveGesture.labelOrigins.some((origin) => {
+        const current = currentLabels.find((label) => label.id === origin.id);
+        return Boolean(current && (current.x !== origin.x || current.y !== origin.y));
+      });
+    } else if (activeGesture === "resize" && resizeGestureRef.current) {
+      const origin = resizeGestureRef.current.origin;
+      const current = currentFurniture.find((item) => item.id === origin.id);
+      geometryChanged = Boolean(current && (
+        current.x !== origin.x
+        || current.y !== origin.y
+        || current.width !== origin.width
+        || current.height !== origin.height
+      ));
+    } else if (activeGesture === "rotate" && rotateGestureRef.current) {
+      const current = currentFurniture.find((item) => item.id === rotateGestureRef.current?.id);
+      geometryChanged = Boolean(current && current.rotation !== rotateGestureRef.current.startRotation);
+    }
+    if (!readOnly && gestureMovedRef.current && geometryChanged) {
+      pushHistory(currentFurniture, currentLabels);
+    }
+    resizeGestureRef.current = null;
+    rotateGestureRef.current = null;
+    moveGestureRef.current = null;
+    pointerGestureRef.current = null;
+    gestureFrameRef.current = null;
+    gestureStartClientRef.current = null;
+    gestureMovedRef.current = false;
+    lastPointerRef.current = null;
     setDragging(null);
     setResizing(null);
     setRotating(null);
+    setTransforming(false);
     setSnapGuides([]);
-  }, [dragging, resizing, rotating, eventFurniture, eventLabels, pushHistory, readOnly]);
+  }, [flushPendingPreview, pushHistory, readOnly]);
+
+  useEffect(() => cancelPendingPreview, [cancelPendingPreview]);
 
   useEffect(() => {
-    const isInsideCanvas = (target: EventTarget | null) => {
-      if (!(target instanceof Node)) return false;
-      return Boolean(canvasRef.current?.contains(target));
-    };
-    const handleWindowMouseMove = (e: MouseEvent) => {
-      if ((!dragging && !resizing && !rotating) || isInsideCanvas(e.target)) return;
-      handleMouseMove(e);
-    };
-    const handleWindowMouseUp = (e: MouseEvent) => {
-      if ((!dragging && !resizing && !rotating) || isInsideCanvas(e.target)) return;
-      handleMouseUp();
-    };
-    window.addEventListener("mousemove", handleWindowMouseMove);
-    window.addEventListener("mouseup", handleWindowMouseUp);
+    flushPendingPreviewRef.current = flushPendingPreview;
     return () => {
-      window.removeEventListener("mousemove", handleWindowMouseMove);
-      window.removeEventListener("mouseup", handleWindowMouseUp);
+      flushPendingPreviewRef.current = () => {};
     };
-  }, [dragging, handleMouseMove, handleMouseUp, resizing, rotating]);
+  }, [flushPendingPreview]);
 
-  const handleResizeStart = useCallback((e: React.MouseEvent, item: FloorFurniture, handle: ResizeHandleDirection) => {
+  const handleResizeStart = useCallback((e: React.PointerEvent, item: FloorFurniture, handle: ResizeHandleDirection) => {
+    if (e.button !== 0) return;
     e.preventDefault();
     e.stopPropagation();
     if (readOnly || item.locked || (activeTool !== "select" && activeTool !== "furniture") || spaceHeld) return;
+    const frame = beginTransformGesture(e.clientX, e.clientY);
+    if (!frame) return;
+    lastPointerRef.current = { x: e.clientX, y: e.clientY };
     const point = getCanvasWorldPoint(e.clientX, e.clientY);
     if (!point) return;
+    const gesture: EventResizeGesture = {
+      id: item.id,
+      handle,
+      startMouseX: point.x,
+      startMouseY: point.y,
+      origin: { ...item },
+    };
     setSelectedId(item.id);
     setSelectedType("furniture");
     setSelectedIds([item.id]);
@@ -791,12 +1149,18 @@ export function EventFloorEditor({
       startMouseX: point.x,
       startMouseY: point.y,
     });
-  }, [activeTool, getCanvasWorldPoint, readOnly, spaceHeld]);
+    resizeGestureRef.current = gesture;
+    pointerGestureRef.current = "resize";
+  }, [activeTool, beginTransformGesture, getCanvasWorldPoint, readOnly, spaceHeld]);
 
-  const handleRotateStart = useCallback((e: React.MouseEvent, item: FloorFurniture) => {
+  const handleRotateStart = useCallback((e: React.PointerEvent, item: FloorFurniture) => {
+    if (e.button !== 0) return;
     e.preventDefault();
     e.stopPropagation();
     if (readOnly || item.locked || (activeTool !== "select" && activeTool !== "furniture") || spaceHeld) return;
+    const frame = beginTransformGesture(e.clientX, e.clientY);
+    if (!frame) return;
+    lastPointerRef.current = { x: e.clientX, y: e.clientY };
     const point = getCanvasWorldPoint(e.clientX, e.clientY);
     if (!point) return;
     const centerX = item.x + item.width / 2;
@@ -804,14 +1168,17 @@ export function EventFloorEditor({
     setSelectedId(item.id);
     setSelectedType("furniture");
     setSelectedIds([item.id]);
-    setRotating({
+    const gesture: EventRotateGesture = {
       id: item.id,
       centerX,
       centerY,
       startAngle: Math.atan2(point.y - centerY, point.x - centerX),
       startRotation: item.rotation || 0,
-    });
-  }, [activeTool, getCanvasWorldPoint, readOnly, spaceHeld]);
+    };
+    rotateGestureRef.current = gesture;
+    setRotating(gesture);
+    pointerGestureRef.current = "rotate";
+  }, [activeTool, beginTransformGesture, getCanvasWorldPoint, readOnly, spaceHeld]);
 
   const nudgeSelection = useCallback((dx: number, dy: number) => {
     if (readOnly || selectedIds.length === 0) return;
@@ -849,10 +1216,23 @@ export function EventFloorEditor({
     pushHistory(nextFurniture, eventLabels);
   }, [eventFurniture, eventLabels, pushHistory, readOnly, selectedFurniture, selectedFurnitureIds]);
 
+  const updateSelectedLabel = useCallback((changes: Partial<FloorLabel>, options?: { allowLocked?: boolean }) => {
+    if (readOnly || !selectedLabel) return;
+    if (selectedLabel.locked && !options?.allowLocked) return;
+    const nextLabels = eventLabels.map((item) => item.id === selectedLabel.id ? { ...item, ...changes } : item);
+    setEventLabels(nextLabels);
+    pushHistory(eventFurniture, nextLabels);
+  }, [eventFurniture, eventLabels, pushHistory, readOnly, selectedLabel]);
+
   const toggleSelectedLock = useCallback(() => {
     if (!selectedFurniture) return;
     updateSelectedFurniture({ locked: !selectedFurniture.locked }, { allowLocked: true });
   }, [selectedFurniture, updateSelectedFurniture]);
+
+  const toggleSelectedLabelLock = useCallback(() => {
+    if (!selectedLabel) return;
+    updateSelectedLabel({ locked: !selectedLabel.locked }, { allowLocked: true });
+  }, [selectedLabel, updateSelectedLabel]);
 
   const toggleSelectedVisibility = useCallback(() => {
     if (!selectedFurniture) return;
@@ -943,50 +1323,281 @@ export function EventFloorEditor({
 
   // ── Pan (middle mouse or pan tool) ─────────────────────────────────────
   const handlePanStart = useCallback(
-    (e: React.MouseEvent) => {
-      if (activeTool === "pan" || spaceHeld || e.button === 1) {
+    (e: React.PointerEvent, forceTouch = false) => {
+      if (activeTool === "pan" || spaceHeld || e.button === 1 || forceTouch) {
         e.preventDefault();
-        panRef.current = { sx: e.clientX, sy: e.clientY, px: pan.x, py: pan.y };
+        cancelViewportMotion();
+        const currentPan = viewportCurrentRef.current.pan;
+        panRef.current = { sx: e.clientX, sy: e.clientY, px: currentPan.x, py: currentPan.y };
+        gestureStartClientRef.current = { x: e.clientX, y: e.clientY };
+        gestureMovedRef.current = false;
+        panMovedRef.current = false;
+        pointerGestureRef.current = "pan";
+        setIsPanning(false);
       }
     },
-    [activeTool, pan, spaceHeld]
+    [activeTool, cancelViewportMotion, spaceHeld, viewportCurrentRef]
   );
 
   const handlePanMove = useCallback(
-    (e: React.MouseEvent) => {
+    (e: Pick<PointerEvent, "clientX" | "clientY">) => {
       if (!panRef.current) return;
-      setPan(clampEventPan({
+      if (gestureStartClientRef.current && Math.hypot(
+        e.clientX - gestureStartClientRef.current.x,
+        e.clientY - gestureStartClientRef.current.y,
+      ) >= 3) {
+        gestureMovedRef.current = true;
+        panMovedRef.current = true;
+        setIsPanning(true);
+        suppressCanvasClickRef.current = true;
+        pointerPressOriginRef.current = "pan";
+      }
+      setImmediateViewport({ zoom, pan: clampEventPan({
         x: panRef.current.px + (e.clientX - panRef.current.sx),
         y: panRef.current.py + (e.clientY - panRef.current.sy),
-      }, zoom));
+      }, zoom) });
     },
-    [clampEventPan, zoom]
+    [clampEventPan, setImmediateViewport, zoom]
   );
 
   const handlePanEnd = useCallback(() => {
     panRef.current = null;
+    if (pointerGestureRef.current === "pan") pointerGestureRef.current = null;
+    panMovedRef.current = false;
+    setIsPanning(false);
   }, []);
 
-  const handleZoomAt = useCallback((clientX: number, clientY: number, nextZoom: number) => {
+  const capturePointer = useCallback((pointerId: number) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return false;
+    canvas.setPointerCapture?.(pointerId);
+    pointerCaptureTargetRef.current = canvas;
+    activePointerIdsRef.current.add(pointerId);
+    if (activePointerIdRef.current === null) activePointerIdRef.current = pointerId;
+    return true;
+  }, []);
+
+  const finishInteraction = useCallback((reason: FinishReason, finalSample?: PointerSample) => {
+    if (interactionFinishingRef.current) return;
+    interactionFinishingRef.current = true;
+    try {
+      if (reason === "pinch-transfer") {
+        const firstId = activePointerIdRef.current;
+        const gesture = pointerGestureRef.current;
+        if (gesture && gesture !== "pan" && gesture !== "pinch" && firstId !== null) {
+          const point = pointerPositionsRef.current.get(firstId);
+          if (point) handlePointerPreview({ clientX: point.x, clientY: point.y, shiftKey: false });
+          flushPendingPreview();
+          handleMouseUp();
+        } else if (gesture === "pan") {
+          handlePanEnd();
+        }
+        panRef.current = null;
+        pointerGestureRef.current = null;
+        cancelViewportMotion();
+        return;
+      }
+
+      const gesture = pointerGestureRef.current;
+      if (finalSample && gesture === "pan") handlePanMove(finalSample);
+      else if (finalSample && gesture && gesture !== "pinch") handlePointerPreview(finalSample);
+      if (reason === "escape") {
+        const moveGesture = moveGestureRef.current;
+        if (moveGesture) {
+          setFurniturePreview(latestFurnitureRef.current.map((item) => moveGesture.furnitureOrigins.find((origin) => origin.id === item.id) ?? item));
+          setLabelsPreview(latestLabelsRef.current.map((label) => moveGesture.labelOrigins.find((origin) => origin.id === label.id) ?? label));
+        }
+        const resizeGesture = resizeGestureRef.current;
+        if (resizeGesture) setFurniturePreview(latestFurnitureRef.current.map((item) => item.id === resizeGesture.id ? resizeGesture.origin : item));
+        const rotateGesture = rotateGestureRef.current;
+        if (rotateGesture) setFurniturePreview(latestFurnitureRef.current.map((item) => item.id === rotateGesture.id ? { ...item, rotation: rotateGesture.startRotation } : item));
+        cancelPendingPreview();
+      } else if (reason === "resize" || reason === "cancel" || reason === "lostcapture" || reason === "blur" || reason === "hidden") {
+        cancelPendingPreview();
+      } else if (gesture && gesture !== "pan" && gesture !== "pinch") {
+        flushPendingPreview();
+      }
+
+      if (gesture === "pan" || gesture === "pinch") handlePanEnd();
+      else if (gesture) handleMouseUp();
+      pinchRef.current = null;
+      pointerGestureRef.current = null;
+      panRef.current = null;
+      activePointerTypeRef.current = null;
+      pointerPositionsRef.current.clear();
+      const pointerIds = [...activePointerIdsRef.current];
+      const captureTarget = pointerCaptureTargetRef.current;
+      activePointerIdsRef.current.clear();
+      activePointerIdRef.current = null;
+      pointerCaptureTargetRef.current = null;
+      for (const pointerId of pointerIds) {
+        if (!captureTarget?.hasPointerCapture?.(pointerId)) continue;
+        intentionalCaptureReleaseIdsRef.current.add(pointerId);
+        try {
+          captureTarget.releasePointerCapture?.(pointerId);
+        } catch {
+          // Browsers may already have ended capture between the check and release.
+        }
+      }
+      gestureFrameRef.current = null;
+      gestureStartClientRef.current = null;
+      setIsPanning(false);
+      setPinchActive(false);
+      panMovedRef.current = false;
+      if (reason === "escape" || reason === "cancel" || reason === "lostcapture" || reason === "blur" || reason === "hidden" || reason === "resize") {
+        pointerPressOriginRef.current = "none";
+        suppressCanvasClickRef.current = false;
+      }
+    } finally {
+      interactionFinishingRef.current = false;
+    }
+  }, [cancelPendingPreview, cancelViewportMotion, flushPendingPreview, handleMouseUp, handlePanEnd, handlePanMove, handlePointerPreview, setFurniturePreview, setLabelsPreview]);
+
+  useLayoutEffect(() => {
+    finishInteractionRef.current = finishInteraction;
+    return () => {
+      finishInteractionRef.current = () => {};
+    };
+  }, [finishInteraction]);
+
+  useEffect(() => {
+    if (!interactionCommitRef) return;
+    interactionCommitRef.current = () => {
+      finishInteractionRef.current("switch");
+      return {
+        eventFurniture: latestFurnitureRef.current,
+        eventLabels: latestLabelsRef.current,
+      };
+    };
+    return () => {
+      if (interactionCommitRef.current) interactionCommitRef.current = null;
+    };
+  }, [interactionCommitRef]);
+
+  const beginPointerGesture = useCallback((e: React.PointerEvent<HTMLElement>, start: () => void, origin: PointerPressOrigin) => {
+    if (origin === "chrome" || (e.pointerType !== "touch" && e.button !== 0 && e.button !== 1)) return;
+    if (activePointerIdsRef.current.has(e.pointerId)) return;
+    if (activePointerIdsRef.current.size > 0 && activePointerTypeRef.current !== "touch") return;
+    if (e.pointerType !== "touch" && activePointerIdsRef.current.size > 0) return;
+    if (e.pointerType === "touch" && activePointerIdsRef.current.size >= 2) return;
+    suppressCanvasClickRef.current = false;
+    pointerPressOriginRef.current = origin;
+    pointerPositionsRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+    if (e.pointerType === "touch" && activePointerIdsRef.current.size === 1) {
+      capturePointer(e.pointerId);
+      startPinchRef.current(e as React.PointerEvent<HTMLDivElement>);
+      return;
+    }
+
+    start();
+    if (pointerGestureRef.current && capturePointer(e.pointerId)) {
+      activePointerTypeRef.current = e.pointerType;
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
+    pointerPositionsRef.current.delete(e.pointerId);
+    pointerPressOriginRef.current = origin === "blank" ? "blank" : "none";
+  }, [capturePointer]);
+
+  const handleCanvasPointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    const target = e.target as HTMLElement;
+    const origin: PointerPressOrigin = target.closest("[data-event-editor-chrome]")
+      ? "chrome"
+      : target.closest("[data-event-item]") ? "item" : "blank";
+    beginPointerGesture(e, () => {
+      handlePanStart(e, e.pointerType === "touch");
+      if (e.button === 1 || effectiveTool === "pan") return;
+      if (effectiveTool === "select" && !dragging && origin === "blank") {
+        setSelectedId(null);
+        setSelectedType(null);
+        setSelectedIds([]);
+      }
+    }, origin);
+  }, [beginPointerGesture, dragging, effectiveTool, handlePanStart]);
+
+  useLayoutEffect(() => {
+    pointerMoveRef.current = (e: PointerEvent) => {
+      if (!activePointerIdsRef.current.has(e.pointerId)) return;
+      e.preventDefault();
+      pointerPositionsRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pinchRef.current) {
+        pinchRef.current.points.set(e.pointerId, pointerPositionsRef.current.get(e.pointerId)!);
+        applyPinchViewport();
+        return;
+      }
+      if (pointerGestureRef.current === "pan") handlePanMove(e);
+      else if (pointerGestureRef.current) handlePointerPreview({ clientX: e.clientX, clientY: e.clientY, shiftKey: e.shiftKey });
+    };
+  });
+
+  useEffect(() => {
+    const handleWindowPointerMove = (e: PointerEvent) => pointerMoveRef.current(e);
+    const handleWindowPointerUp = (e: PointerEvent) => {
+      if (!activePointerIdsRef.current.has(e.pointerId)) return;
+      if (pinchRef.current) {
+        finishInteractionRef.current("pointerup");
+        return;
+      }
+      finishInteractionRef.current("pointerup", { clientX: e.clientX, clientY: e.clientY, shiftKey: e.shiftKey });
+    };
+    const handleWindowPointerCancel = (e: PointerEvent) => {
+      if (activePointerIdsRef.current.has(e.pointerId)) finishInteractionRef.current("cancel");
+    };
+    const handleWindowBlur = () => finishInteractionRef.current("blur");
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "hidden") finishInteractionRef.current("hidden");
+    };
+    window.addEventListener("pointermove", handleWindowPointerMove, true);
+    window.addEventListener("pointerup", handleWindowPointerUp, true);
+    window.addEventListener("pointercancel", handleWindowPointerCancel, true);
+    window.addEventListener("blur", handleWindowBlur);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      window.removeEventListener("pointermove", handleWindowPointerMove, true);
+      window.removeEventListener("pointerup", handleWindowPointerUp, true);
+      window.removeEventListener("pointercancel", handleWindowPointerCancel, true);
+      window.removeEventListener("blur", handleWindowBlur);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, []);
+
+  const handleCanvasLostPointerCapture = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if (intentionalCaptureReleaseIdsRef.current.delete(e.pointerId)) return;
+    // Some browsers can deliver a stale lostpointercapture notification after
+    // a pinch handoff has already recaptured the same pointer on the stable
+    // canvas surface. The active capture is authoritative in that case.
+    if (pointerCaptureTargetRef.current?.hasPointerCapture?.(e.pointerId)) return;
+    if (activePointerIdsRef.current.has(e.pointerId)) finishInteractionRef.current("lostcapture");
+  }, []);
+
+  const handleZoomAt = useCallback((clientX: number, clientY: number, nextZoom: number, animated = true) => {
     const rect = canvasRef.current?.getBoundingClientRect();
     if (!rect) return;
     const clampedZoom = Math.min(EVENT_MAX_ZOOM, Math.max(getEventMinZoom(), nextZoom));
-    const safeZoom = Math.max(0.01, zoom);
-    const worldX = (clientX - rect.left - pan.x) / safeZoom;
-    const worldY = (clientY - rect.top - pan.y) / safeZoom;
-    setPan(clampEventPan(getPanToKeepWorldPoint({
+    const base = viewportTargetRef.current;
+    const safeZoom = Math.max(0.01, base.zoom);
+    const worldX = (clientX - rect.left - base.pan.x) / safeZoom;
+    const worldY = (clientY - rect.top - base.pan.y) / safeZoom;
+    const next = { zoom: clampedZoom, pan: clampEventPan(getPanToKeepWorldPoint({
       mapWidth: canvasW,
       mapHeight: canvasH,
       worldPoint: { x: worldX, y: worldY },
-      pan,
+      pan: base.pan,
       zoom: safeZoom,
       nextZoom: clampedZoom,
       zoomOrigin: "top-left",
-    }), clampedZoom));
-    setZoom(clampedZoom);
-  }, [canvasH, canvasW, clampEventPan, getEventMinZoom, pan, zoom]);
+    }), clampedZoom) };
+    if (animated) animateViewportTo(next, 160);
+    else setImmediateViewport(next);
+  }, [animateViewportTo, canvasH, canvasW, clampEventPan, getEventMinZoom, setImmediateViewport, viewportTargetRef]);
 
   const handleCanvasWheel = useCallback((e: React.WheelEvent<HTMLDivElement>) => {
+    if (itemGestureActive) {
+      e.preventDefault();
+      return;
+    }
     const delta = normalizeWheelDelta({
       deltaX: e.deltaX,
       deltaY: e.deltaY,
@@ -1000,77 +1611,117 @@ export function EventFloorEditor({
       handleZoomAt(
         e.clientX,
         e.clientY,
-        getSmoothZoomTarget(zoom, e.deltaY, getEventMinZoom(), EVENT_MAX_ZOOM, e.deltaMode, canvasRef.current?.clientHeight),
+        getSmoothZoomTarget(viewportTargetRef.current.zoom, e.deltaY, getEventMinZoom(), EVENT_MAX_ZOOM, e.deltaMode, canvasRef.current?.clientHeight),
       );
       return;
     }
     if (delta.x === 0 && delta.y === 0) return;
     e.preventDefault();
-    setPan((current) => clampEventPan({ x: current.x + delta.x, y: current.y + delta.y }, zoom));
-  }, [clampEventPan, getEventMinZoom, handleZoomAt, zoom]);
+    const target = viewportTargetRef.current;
+    animateViewportTo({
+      zoom: target.zoom,
+      pan: clampEventPan({ x: target.pan.x + delta.x, y: target.pan.y + delta.y }, target.zoom),
+    }, 120);
+  }, [animateViewportTo, clampEventPan, getEventMinZoom, handleZoomAt, itemGestureActive, viewportTargetRef]);
 
-  const handleTouchStart = useCallback((e: React.TouchEvent<HTMLDivElement>) => {
-    if (e.touches.length === 2) {
-      e.preventDefault();
-      const first = e.touches[0];
-      const second = e.touches[1];
-      pinchRef.current = {
-        distance: Math.hypot(first.clientX - second.clientX, first.clientY - second.clientY),
-        zoom,
-      };
-      panRef.current = null;
-      return;
+  const applyPinchViewport = useCallback(() => {
+    const pinch = pinchRef.current;
+    if (!pinch) return;
+    const first = pinch.points.get(pinch.ids[0]);
+    const second = pinch.points.get(pinch.ids[1]);
+    if (!first || !second) return;
+    const distance = Math.hypot(first.x - second.x, first.y - second.y);
+    const midpoint = { x: (first.x + second.x) / 2, y: (first.y + second.y) / 2 };
+    if (pinch.startDistance < 1) {
+      if (distance < 1) return;
+      pinch.startDistance = distance;
+      pinch.worldAnchor = clientToEventWorld(midpoint, pinch.frame);
     }
-    if (e.touches.length !== 1 || (!readOnly && activeTool !== "pan")) return;
-    e.preventDefault();
-    const touch = e.touches[0];
-    panRef.current = { sx: touch.clientX, sy: touch.clientY, px: pan.x, py: pan.y };
-  }, [activeTool, pan, readOnly, zoom]);
+    const nextZoom = Math.min(EVENT_MAX_ZOOM, Math.max(getEventMinZoom(), pinch.startZoom * distance / pinch.startDistance));
+    const nextPan = {
+      x: midpoint.x - pinch.frame.left - pinch.worldAnchor.x * nextZoom,
+      y: midpoint.y - pinch.frame.top - pinch.worldAnchor.y * nextZoom,
+    };
+    setImmediateViewport({ zoom: nextZoom, pan: clampEventPan(nextPan, nextZoom) });
+  }, [clampEventPan, getEventMinZoom, setImmediateViewport]);
 
-  const handleTouchMove = useCallback((e: React.TouchEvent<HTMLDivElement>) => {
-    if (e.touches.length === 2 && pinchRef.current) {
-      e.preventDefault();
-      const first = e.touches[0];
-      const second = e.touches[1];
-      const distance = Math.hypot(first.clientX - second.clientX, first.clientY - second.clientY);
-      const midpointX = (first.clientX + second.clientX) / 2;
-      const midpointY = (first.clientY + second.clientY) / 2;
-      handleZoomAt(midpointX, midpointY, pinchRef.current.zoom * (distance / Math.max(1, pinchRef.current.distance)));
-      return;
+  const startPinchGesture = useCallback((second: React.PointerEvent<HTMLDivElement>) => {
+    const firstId = activePointerIdRef.current;
+    if (firstId === null) return;
+    const firstPoint = pointerPositionsRef.current.get(firstId);
+    const secondPoint = pointerPositionsRef.current.get(second.pointerId);
+    if (!firstPoint || !secondPoint) return;
+    finishInteractionRef.current("pinch-transfer");
+    const captureTarget = canvasRef.current;
+    if (captureTarget) {
+      // Re-establish ownership for both pointers after committing the item
+      // gesture. This prevents a delayed loss event from ending the new pinch.
+      for (const pointerId of [firstId, second.pointerId]) {
+        if (!captureTarget.hasPointerCapture?.(pointerId)) continue;
+        intentionalCaptureReleaseIdsRef.current.add(pointerId);
+        try {
+          captureTarget.releasePointerCapture?.(pointerId);
+        } catch {
+          // The browser may have already released this pointer during handoff.
+        }
+      }
+      pointerCaptureTargetRef.current = null;
+      capturePointer(firstId);
+      capturePointer(second.pointerId);
     }
-    if (e.touches.length !== 1 || !panRef.current) return;
-    e.preventDefault();
-    const touch = e.touches[0];
-    setPan(clampEventPan({
-      x: panRef.current.px + touch.clientX - panRef.current.sx,
-      y: panRef.current.py + touch.clientY - panRef.current.sy,
-    }, zoom));
-  }, [clampEventPan, handleZoomAt, zoom]);
+    cancelViewportMotion();
+    const rect = canvasRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const displayed = viewportCurrentRef.current;
+    setImmediateViewport(displayed);
+    const frame: GestureFrame = { left: rect.left, top: rect.top, zoom: displayed.zoom, pan: { ...displayed.pan } };
+    const midpoint = { x: (firstPoint.x + secondPoint.x) / 2, y: (firstPoint.y + secondPoint.y) / 2 };
+    pinchRef.current = {
+      ids: [firstId, second.pointerId],
+      frame,
+      startDistance: Math.hypot(firstPoint.x - secondPoint.x, firstPoint.y - secondPoint.y),
+      startZoom: displayed.zoom,
+      worldAnchor: clientToEventWorld(midpoint, frame),
+      points: new Map([[firstId, firstPoint], [second.pointerId, secondPoint]]),
+    };
+    pointerGestureRef.current = "pinch";
+    setIsPanning(true);
+    setPinchActive(true);
+    setTransforming(false);
+    // A second touch turns a blank press into navigation. Consume the
+    // browser's synthesized click so Furniture/Label tools cannot place an
+    // asset after the pinch ends.
+    suppressCanvasClickRef.current = true;
+  }, [cancelViewportMotion, capturePointer, setImmediateViewport, viewportCurrentRef]);
 
-  const handleTouchEnd = useCallback(() => {
-    pinchRef.current = null;
-    handlePanEnd();
-  }, [handlePanEnd]);
+  useEffect(() => {
+    startPinchRef.current = startPinchGesture;
+    return () => {
+      startPinchRef.current = () => {};
+    };
+  }, [startPinchGesture]);
 
   const resetViewport = useCallback(() => {
-    fitViewportToContent();
+    fitViewportToContent(true);
   }, [fitViewportToContent]);
 
   const zoomViewportCenter = useCallback((direction: "in" | "out") => {
     const rect = canvasRef.current?.getBoundingClientRect();
     if (!rect || rect.width <= 0 || rect.height <= 0) return;
-    const nextZoom = direction === "in" ? zoom * 1.2 : zoom / 1.2;
+    const targetZoom = viewportTargetRef.current.zoom;
+    const nextZoom = direction === "in" ? targetZoom * 1.2 : targetZoom / 1.2;
     handleZoomAt(rect.left + rect.width / 2, rect.top + rect.height / 2, nextZoom);
-  }, [handleZoomAt, zoom]);
+  }, [handleZoomAt, viewportTargetRef]);
 
   useEffect(() => {
     const onResize = () => {
-      panRef.current = null;
+      finishInteractionRef.current("resize");
+      cancelViewportMotion();
       fitViewportToContent();
     };
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
-  }, [fitViewportToContent]);
+  }, [cancelViewportMotion, fitViewportToContent]);
 
   // ── Keyboard shortcuts ─────────────────────────────────────────────────
   useEffect(() => {
@@ -1125,16 +1776,12 @@ export function EventFloorEditor({
         redo();
       }
       if (e.key === "Escape") {
-        panRef.current = null;
-        setDragging(null);
-        setRotating(null);
+        finishInteractionRef.current("escape");
         setPresetMenuOpen(false);
         setSelectionArrangeOpen(false);
         setSelectedId(null);
         setSelectedType(null);
         setSelectedIds([]);
-        setResizing(null);
-        setSnapGuides([]);
       }
       // Tool shortcuts
       if (!readOnly) {
@@ -1152,10 +1799,13 @@ export function EventFloorEditor({
   const busy = saving || submittingLocal || isSaving || isSubmitting;
 
   const handleSave = async () => {
+    finishInteractionRef.current("save");
+    const currentFurniture = latestFurnitureRef.current;
+    const currentLabels = latestLabelsRef.current;
     setSaving(true);
     try {
-      await onSave(eventFurniture, eventLabels);
-      if (draftLocation) {
+      const saved = await onSave(currentFurniture, currentLabels);
+      if (saved !== false && draftLocation) {
         draftDirtyRef.current = false;
         clearEventLayoutDraft(overlay.id, draftLocation);
         setDraftRecovered(false);
@@ -1166,10 +1816,13 @@ export function EventFloorEditor({
   };
 
   const handleSubmit = async () => {
+    finishInteractionRef.current("save");
+    const currentFurniture = latestFurnitureRef.current;
+    const currentLabels = latestLabelsRef.current;
     setSubmittingLocal(true);
     try {
-      await onSubmit(eventFurniture, eventLabels);
-      if (draftLocation) {
+      const submitted = await onSubmit(currentFurniture, currentLabels);
+      if (submitted !== false && draftLocation) {
         draftDirtyRef.current = false;
         clearEventLayoutDraft(overlay.id, draftLocation);
         setDraftRecovered(false);
@@ -1186,7 +1839,10 @@ export function EventFloorEditor({
       <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 sm:px-4 sm:py-3 border-b border-border bg-card shrink-0">
         <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3">
           <button
-            onClick={onBack}
+            onClick={() => {
+              finishInteractionRef.current("switch");
+              onBack();
+            }}
             className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-muted transition-colors text-muted-foreground"
           >
             <ArrowLeft className="h-4 w-4" />
@@ -1199,6 +1855,7 @@ export function EventFloorEditor({
               <MapPin className="h-3 w-3" />
               <span className="truncate">{overlay.locationRef?.label || "No location"}</span>
               {readOnly && <span className="ml-1 rounded-full bg-muted px-2 py-0.5 font-bold">Read-only review</span>}
+              {!readOnly && <span className="ml-1 rounded-full bg-primary/10 px-2 py-0.5 font-bold text-primary">Event map</span>}
               {draftRecovered && !readOnly && <span className="ml-1 shrink-0 rounded-full bg-amber-100 px-2 py-0.5 font-bold text-amber-800">Recovered unsaved changes</span>}
             </div>
           </div>
@@ -1260,9 +1917,11 @@ export function EventFloorEditor({
             <button
               key={tool.id}
               onClick={() => selectTool(tool.id)}
+              aria-pressed={effectiveTool === tool.id}
+              title={`${tool.label}${tool.id === "pan" ? " (Space or middle mouse also pans)" : ""}`}
               className={cn(
                 "flex items-center gap-1.5 h-8 px-3 rounded-lg text-xs font-bold transition-all",
-                activeTool === tool.id
+                effectiveTool === tool.id
                   ? "bg-primary text-primary-foreground"
                   : "text-muted-foreground hover:bg-muted"
               )}
@@ -1275,27 +1934,19 @@ export function EventFloorEditor({
 
         </div>}
 
-      {!readOnly && layoutWarnings.length > 0 && (
-        <div data-testid="event-layout-warnings" className="flex shrink-0 items-center gap-2 overflow-x-auto border-b border-amber-200 bg-amber-50 px-3 py-1.5 text-[10px] text-amber-900 sm:px-4">
-          <span className="shrink-0 font-extrabold">{layoutWarnings.length} layout note{layoutWarnings.length === 1 ? "" : "s"}</span>
-          {layoutWarnings.slice(0, 3).map((warning, index) => (
-            <button
-              key={`${warning.code}-${warning.itemIds.join("-")}-${index}`}
-              type="button"
-              className="min-h-8 shrink-0 rounded-full border border-amber-300 bg-white/70 px-2.5 font-semibold transition-colors hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-600"
-              onClick={() => {
-                const id = warning.itemIds[0];
-                const item = eventFurniture.find((candidate) => candidate.id === id);
-                if (!item) return;
-                setSelectedId(id);
-                setSelectedType("furniture");
-                setSelectedIds([id]);
-              }}
-            >
-              Focus: {warning.message}
-            </button>
-          ))}
-        </div>
+      {!readOnly && (
+        <EventLayoutIssues
+          warnings={layoutWarnings}
+          onFocusItems={(ids) => {
+            const furnitureIds = ids.filter((id) => eventFurniture.some((item) => item.id === id));
+            if (furnitureIds.length === 0) return;
+            setSelectedId(furnitureIds.at(-1) ?? null);
+            setSelectedType("furniture");
+            setSelectedIds(furnitureIds);
+            setInspectorOpen(false);
+          }}
+          disabled={itemGestureActive}
+        />
       )}
 
       {/* Canvas */}
@@ -1303,58 +1954,37 @@ export function EventFloorEditor({
         ref={canvasRef}
         tabIndex={0}
         aria-label="Event layout canvas"
-        className="min-h-0 flex-1 overflow-hidden relative cursor-crosshair outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/40"
+        className="min-h-0 flex-1 overflow-hidden relative select-none cursor-crosshair outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/40"
         style={{
           background: viewportBackground,
           touchAction: "none",
           cursor:
-            activeTool === "pan" || spaceHeld
+             isPanning || pinchActive
+               ? "grabbing"
+               : effectiveTool === "pan"
               ? "grab"
               : activeTool === "select"
               ? "default"
               : "crosshair",
         }}
         onClick={handleCanvasClick}
-        onMouseDown={(e) => {
-          handlePanStart(e);
-          if (spaceHeld) return;
-          if (activeTool === "select" && !dragging) {
-            // Check if we clicked on an item
-            const target = e.target as HTMLElement;
-            if (!target.closest("[data-event-item]")) {
-              setSelectedId(null);
-              setSelectedType(null);
-              setSelectedIds([]);
-            }
-          }
-        }}
-        onMouseMove={(e) => {
-          handlePanMove(e);
-          handleMouseMove(e);
-        }}
-        onMouseUp={() => {
-          handlePanEnd();
-          handleMouseUp();
-        }}
-        onMouseLeave={() => {
-          handlePanEnd();
-        }}
+        onPointerDown={handleCanvasPointerDown}
+        onLostPointerCapture={handleCanvasLostPointerCapture}
         onWheelCapture={(e) => {
           // Capture browser pinch/page-zoom gestures even when the pointer is over the asset picker.
           if (e.ctrlKey || e.metaKey) e.preventDefault();
         }}
         onWheel={handleCanvasWheel}
-        onTouchStart={handleTouchStart}
-        onTouchMove={handleTouchMove}
-        onTouchEnd={handleTouchEnd}
         onDragOver={handleCanvasDragOver}
         onDrop={handleCanvasDrop}
       >
         {!readOnly && activeTool === "furniture" && (
           <div
             data-testid="event-asset-dock"
+            data-event-editor-chrome
             className="event-asset-dock absolute left-3 top-3 z-40 max-w-[calc(100%-1.5rem)]"
             onClick={(event) => event.stopPropagation()}
+            onPointerDown={(event) => event.stopPropagation()}
             onMouseDown={(event) => event.stopPropagation()}
           >
             <CanvasAssetPalette
@@ -1409,9 +2039,10 @@ export function EventFloorEditor({
           </div>
         )}
 
-        {!readOnly && eventSelectionBounds && selectedFurnitureIds.length > 1 && (
+        {!readOnly && !transforming && !isPanning && !pinchActive && eventSelectionBounds && selectedFurnitureIds.length > 1 && (
           <div
             data-testid="event-layout-actions"
+            data-event-editor-chrome
             aria-label="Multiple event items selected"
             className="pointer-events-none absolute z-50 max-w-[calc(100%-1.5rem)]"
             style={{
@@ -1502,12 +2133,16 @@ export function EventFloorEditor({
           </div>
         )}
 
-        <div className="absolute right-3 top-3 z-30 flex items-center gap-0.5 rounded-xl border border-border/70 bg-card/90 p-1 shadow-lg backdrop-blur-sm">
+        <div
+          data-event-editor-chrome
+          className="absolute right-3 top-3 z-30 flex items-center gap-0.5 rounded-xl border border-border/70 bg-card/90 p-1 shadow-lg backdrop-blur-sm"
+        >
           {!readOnly && (
             <button
               type="button"
               aria-label="Toggle snapping"
               aria-pressed={snapEnabled}
+              disabled={itemGestureActive}
               title={snapEnabled ? "Snap: On — align items to the grid and nearby items" : "Snap: Off — place items freely"}
               onClick={() => {
                 setSnapEnabled((current) => !current);
@@ -1524,11 +2159,11 @@ export function EventFloorEditor({
               <span className="hidden sm:inline">Snap</span>
             </button>
           )}
-          <button
-            type="button"
-            aria-label="Zoom out"
-            title="Zoom out"
-            disabled={zoom <= getEventMinZoom()}
+            <button
+              type="button"
+              aria-label="Zoom out"
+              title="Zoom out"
+              disabled={itemGestureActive || zoom <= getEventMinZoom()}
             onClick={() => zoomViewportCenter("out")}
             className="flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
           >
@@ -1541,20 +2176,21 @@ export function EventFloorEditor({
           >
             {Math.round(zoom * 100)}%
           </span>
-          <button
-            type="button"
-            aria-label="Zoom in"
-            title="Zoom in"
-            disabled={zoom >= EVENT_MAX_ZOOM}
+            <button
+              type="button"
+              aria-label="Zoom in"
+              title="Zoom in"
+              disabled={itemGestureActive || zoom >= EVENT_MAX_ZOOM}
             onClick={() => zoomViewportCenter("in")}
             className="flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
           >
             <ZoomIn className="h-4 w-4" />
           </button>
-          <button
-            type="button"
-            aria-label="Reset map view"
-            title="Fit map to content"
+            <button
+              type="button"
+              aria-label="Reset map view — Fit map to content"
+              title="Fit map to content"
+              disabled={itemGestureActive}
             onClick={resetViewport}
             className="flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
           >
@@ -1565,6 +2201,7 @@ export function EventFloorEditor({
         {/* Zoom + Pan container */}
         <div
           data-testid="event-canvas-content"
+          data-event-placement-surface
           style={{
             transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
             transformOrigin: "0 0",
@@ -1585,130 +2222,7 @@ export function EventFloorEditor({
               rx={4}
             />
 
-            {floorPlan.id === "campus" && activeCampus ? (
-              <ReadonlyOutdoorCampusScene
-                campus={projectReadonlyOutdoorCampus(activeCampus)}
-                showBuildings={true}
-              />
-            ) : (
-              <>
-
-            {/* Grid */}
-            {floorPlan.showGrid !== false && (
-              <g opacity={0.15}>
-                {Array.from(
-                  { length: Math.ceil(canvasW / (floorPlan.gridSize || 20)) + 1 },
-                  (_, i) => i * (floorPlan.gridSize || 20)
-                ).map((x) => (
-                  <line
-                    key={`gv-${x}`}
-                    x1={x}
-                    y1={0}
-                    x2={x}
-                    y2={canvasH}
-                    stroke="#9ca3af"
-                    strokeWidth={0.5}
-                  />
-                ))}
-                {Array.from(
-                  { length: Math.ceil(canvasH / (floorPlan.gridSize || 20)) + 1 },
-                  (_, i) => i * (floorPlan.gridSize || 20)
-                ).map((y) => (
-                  <line
-                    key={`gh-${y}`}
-                    x1={0}
-                    y1={y}
-                    x2={canvasW}
-                    y2={y}
-                    stroke="#9ca3af"
-                    strokeWidth={0.5}
-                  />
-                ))}
-              </g>
-            )}
-
-            {/* Rooms (read-only) */}
-            {floorPlan.rooms.map((room) => (
-              <g key={room.id}>
-                <rect
-                  x={room.x}
-                  y={room.y}
-                  width={room.w}
-                  height={room.h}
-                  fill={room.color || "#e5e7eb"}
-                  stroke="#9ca3af"
-                  strokeWidth={1}
-                  opacity={0.6}
-                />
-                <text
-                  x={room.x + room.w / 2}
-                  y={room.y + room.h / 2}
-                  textAnchor="middle"
-                  dominantBaseline="middle"
-                  fontSize={10}
-                  fill="#6b7280"
-                  pointerEvents="none"
-                >
-                  {room.name}
-                </text>
-              </g>
-            ))}
-
-            {/* Walls (read-only) */}
-            {floorPlan.walls.map((wall) => (
-              <line
-                key={wall.id}
-                x1={wall.x1}
-                y1={wall.y1}
-                x2={wall.x2}
-                y2={wall.y2}
-                stroke={wall.color || "#374151"}
-                strokeWidth={wall.thickness || 4}
-                opacity={0.5}
-              />
-            ))}
-
-            {/* Doors (read-only) */}
-            {floorPlan.doors.map((door) => (
-              <rect
-                key={door.id}
-                x={door.x}
-                y={door.y}
-                width={door.width}
-                height={4}
-                fill={door.color || "#92400e"}
-                opacity={0.5}
-              />
-            ))}
-
-            {/* Windows (read-only) */}
-            {floorPlan.windows.map((win) => (
-              <rect
-                key={win.id}
-                x={win.x}
-                y={win.y}
-                width={win.width}
-                height={win.height || 3}
-                fill={win.color || "#60a5fa"}
-                opacity={0.4}
-              />
-            ))}
-
-            {/* Permanent Furniture (read-only) */}
-            {floorPlan.furniture.map((f) => (
-              <rect
-                key={f.id}
-                x={f.x}
-                y={f.y}
-                width={f.width}
-                height={f.height}
-                fill={f.color || "#9ca3af"}
-                opacity={0.3}
-                rx={2}
-              />
-            ))}
-            </>
-            )}
+            {baseMapScene}
           </svg>
 
           {snapGuides.map((guide) => (
@@ -1727,14 +2241,19 @@ export function EventFloorEditor({
           ))}
 
           {/* Event Furniture (editable) */}
-          {eventFurniture.map((f, index) => (
-            <div
+          {eventFurniture.map((f, index) => {
+            const resizeMetrics = transformControlMetrics(f.width, f.height, zoom);
+            return (
+              <div
               key={f.id}
               data-event-item
+              draggable={false}
               data-testid={`event-furniture-${f.id}`}
               className={cn(
                 "absolute border-2 rounded transition-shadow",
-                !readOnly && (f.locked ? "cursor-default" : "cursor-move"),
+                !readOnly && (effectiveTool === "pan"
+                  ? isPanning || pinchActive ? "cursor-grabbing" : "cursor-grab"
+                  : f.locked ? "cursor-default" : "cursor-move"),
                 selectedIds.includes(f.id)
                   ? "border-primary shadow-lg z-20"
                   : "border-transparent hover:shadow-md z-10"
@@ -1750,7 +2269,11 @@ export function EventFloorEditor({
                 zIndex: (f.zOrder ?? index) + 10 + (selectedIds.includes(f.id) ? 100 : 0),
               }}
               title={`${f.name} — ${f.locked ? "locked" : "drag to move"}`}
-              onMouseDown={(e) => handleItemMouseDown(e, f.id, "furniture")}
+              onDragStart={(event) => event.preventDefault()}
+              onPointerDown={(e) => beginPointerGesture(e, () => {
+                if (effectiveTool === "pan" || e.button === 1) handlePanStart(e);
+                else handleItemMouseDown(e, f.id, "furniture");
+              }, "item")}
             >
               <EventAssetVisual type={resolveCanvasAssetKey(f) ?? f.type} label={f.name} className="absolute inset-1 w-[calc(100%-0.5rem)] h-[calc(100%-0.5rem)]" />
               {!readOnly && selectedIds.length === 1 && selectedIds.includes(f.id) && !f.locked && (
@@ -1764,8 +2287,14 @@ export function EventFloorEditor({
                     data-testid="event-furniture-rotate-handle"
                     aria-label={`Rotate ${f.name}`}
                     title={`Rotate ${f.name}. Hold Shift to snap to 15°.`}
-                    className="absolute left-1/2 -top-12 z-40 flex h-8 w-8 -translate-x-1/2 items-center justify-center rounded-full border-2 border-primary bg-card text-primary shadow-md transition-transform hover:scale-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-                    onMouseDown={(e) => handleRotateStart(e, f)}
+                    className={cn(
+                      "absolute left-1/2 -top-12 z-40 flex h-8 w-8 -translate-x-1/2 items-center justify-center rounded-full border-2 border-primary bg-card text-primary shadow-md transition-transform hover:scale-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary",
+                      effectiveTool === "pan" && (isPanning || pinchActive ? "cursor-grabbing" : "cursor-grab"),
+                    )}
+                    onPointerDown={(e) => beginPointerGesture(e, () => {
+                      if (effectiveTool === "pan" || e.button === 1) handlePanStart(e);
+                      else handleRotateStart(e, f);
+                    }, "handle")}
                   >
                     <RotateCw className="h-4 w-4" aria-hidden="true" />
                   </button>
@@ -1777,16 +2306,28 @@ export function EventFloorEditor({
                       aria-label={`Resize ${f.name} from ${handle}`}
                       title={`Resize ${f.name}`}
                       className={cn(
-                        "absolute z-30 h-3.5 w-3.5 rounded-full border-2 border-primary bg-card shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary",
+                        "absolute z-30 flex items-center justify-center rounded-full bg-transparent p-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary",
                         RESIZE_HANDLE_POSITION[handle],
+                        effectiveTool === "pan" && (isPanning || pinchActive ? "cursor-grabbing" : "cursor-grab"),
                       )}
-                      onMouseDown={(e) => handleResizeStart(e, f, handle)}
-                    />
+                      style={getEventResizeHandleStyle(handle, resizeMetrics.hitSize)}
+                      onPointerDown={(e) => beginPointerGesture(e, () => {
+                        if (effectiveTool === "pan" || e.button === 1) handlePanStart(e);
+                        else handleResizeStart(e, f, handle);
+                      }, "handle")}
+                    >
+                      <span
+                        aria-hidden="true"
+                        className="pointer-events-none block rounded-full border-2 border-primary bg-card shadow-sm"
+                        style={{ width: resizeMetrics.handleSize, height: resizeMetrics.handleSize }}
+                      />
+                    </button>
                   ))}
                 </>
               )}
-            </div>
-          ))}
+              </div>
+            );
+          })}
 
           {eventSelectionBounds && selectedFurnitureIds.length > 1 && !readOnly && (
             <div
@@ -1802,10 +2343,13 @@ export function EventFloorEditor({
             <div
               key={l.id}
               data-event-item
+              draggable={false}
               data-testid={`event-label-${l.id}`}
               className={cn(
                 "absolute select-none",
-                !readOnly && "cursor-move",
+                !readOnly && (effectiveTool === "pan"
+                  ? isPanning || pinchActive ? "cursor-grabbing" : "cursor-grab"
+                  : "cursor-move"),
                 selectedIds.includes(l.id)
                   ? "ring-2 ring-primary ring-offset-1 z-20"
                   : "z-10"
@@ -1819,23 +2363,68 @@ export function EventFloorEditor({
                 transform: `rotate(${l.rotation || 0}deg)`,
                 whiteSpace: "nowrap",
               }}
-              onMouseDown={(e) => handleItemMouseDown(e, l.id, "label")}
+              onDragStart={(event) => event.preventDefault()}
+              onPointerDown={(e) => beginPointerGesture(e, () => {
+                if (effectiveTool === "pan" || e.button === 1) handlePanStart(e);
+                else handleItemMouseDown(e, l.id, "label");
+              }, "item")}
             >
               {l.text}
             </div>
           ))}
         </div>
 
-        {!readOnly && eventSelectionBounds && selectedFurnitureIds.length === 1 && (
+        {!readOnly && !transforming && !isPanning && !pinchActive && selectedLabel && selectedIds.length === 1 && (
+          <div
+            data-testid="event-label-actions"
+            data-event-editor-chrome
+            aria-label="Selected event label actions"
+            className="pointer-events-none absolute z-50 max-w-[calc(100%-1.5rem)]"
+            style={{
+              left: Math.max(12, Math.min(selectedLabel.x * zoom + pan.x, (canvasRef.current?.clientWidth || Infinity) - 280)),
+              top: Math.max(12, Math.min((selectedLabel.y + (selectedLabel.fontSize || 14)) * zoom + pan.y + 12, (canvasRef.current?.clientHeight || Infinity) - 76)),
+            }}
+            onClick={(event) => event.stopPropagation()}
+            onPointerDown={(event) => event.stopPropagation()}
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div className="pointer-events-auto flex max-w-full items-center gap-1.5 rounded-2xl border border-primary/25 bg-card/95 p-2 shadow-xl backdrop-blur-sm">
+              <span className="max-w-28 truncate px-1 text-[10px] font-extrabold text-foreground">Label selected</span>
+              <button
+                type="button"
+                aria-label="Open label details"
+                title="Open label details"
+                onClick={() => setInspectorOpen((current) => !current)}
+                className="flex min-h-10 shrink-0 items-center gap-1.5 rounded-xl border border-border/70 px-3 text-[10px] font-bold text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              >
+                Details
+              </button>
+              <button
+                type="button"
+                aria-label={selectedLabel.locked ? "Unlock selected label" : "Lock selected label"}
+                title={selectedLabel.locked ? "Unlock selected label" : "Lock selected label"}
+                onClick={toggleSelectedLabelLock}
+                className="flex min-h-10 shrink-0 items-center gap-1.5 rounded-xl border border-border/70 px-3 text-[10px] font-bold text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              >
+                {selectedLabel.locked ? <Unlock className="h-3.5 w-3.5" aria-hidden="true" /> : <Lock className="h-3.5 w-3.5" aria-hidden="true" />}
+                {selectedLabel.locked ? "Unlock" : "Lock"}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {!readOnly && !transforming && !isPanning && !pinchActive && eventSelectionBounds && selectedFurnitureIds.length === 1 && (
           <div
             data-testid="event-single-item-actions"
+            data-event-editor-chrome
             aria-label="Selected event item actions"
             className="pointer-events-none absolute z-50 max-w-[calc(100%-1.5rem)]"
             style={{
-              left: Math.max(12, eventSelectionBounds.x * zoom + pan.x),
-              top: Math.max(12, eventSelectionBounds.y * zoom + pan.y - 56),
+              left: Math.max(12, Math.min(eventSelectionBounds.x * zoom + pan.x, (canvasRef.current?.clientWidth || Infinity) - 360)),
+              top: Math.max(12, Math.min((eventSelectionBounds.y + eventSelectionBounds.height) * zoom + pan.y + 12, (canvasRef.current?.clientHeight || Infinity) - 76)),
             }}
             onClick={(event) => event.stopPropagation()}
+            onPointerDown={(event) => event.stopPropagation()}
             onMouseDown={(event) => event.stopPropagation()}
           >
             <div className="pointer-events-auto flex max-w-full items-center gap-1.5 rounded-2xl border border-primary/25 bg-card/95 p-2 shadow-xl backdrop-blur-sm">
@@ -1880,8 +2469,10 @@ export function EventFloorEditor({
             role="dialog"
             aria-label="Item details"
             data-testid="event-item-inspector"
+            data-event-editor-chrome
             className="absolute right-3 top-16 z-50 max-h-[calc(100%-5rem)] w-[min(21rem,calc(100%-1.5rem))] overflow-y-auto rounded-2xl border border-border/80 bg-card/95 p-3 shadow-2xl backdrop-blur-sm"
             onClick={(event) => event.stopPropagation()}
+            onPointerDown={(event) => event.stopPropagation()}
             onMouseDown={(event) => event.stopPropagation()}
             onWheel={(event) => event.stopPropagation()}
           >
@@ -1979,6 +2570,40 @@ export function EventFloorEditor({
           </div>
         )}
 
+        {!readOnly && inspectorOpen && selectedLabel && (
+          <div
+            role="dialog"
+            aria-label="Label details"
+            data-testid="event-label-inspector"
+            data-event-editor-chrome
+            className="absolute right-3 top-16 z-50 max-h-[calc(100%-5rem)] w-[min(21rem,calc(100%-1.5rem))] overflow-y-auto rounded-2xl border border-border/80 bg-card/95 p-3 shadow-2xl backdrop-blur-sm"
+            onClick={(event) => event.stopPropagation()}
+            onPointerDown={(event) => event.stopPropagation()}
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0"><p className="text-[10px] font-extrabold uppercase tracking-[0.1em] text-muted-foreground">Label details</p><p className="truncate text-sm font-extrabold text-foreground">{selectedLabel.text || "Untitled label"}</p></div>
+              <button type="button" aria-label="Close label details" title="Close label details" onClick={() => setInspectorOpen(false)} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">×</button>
+            </div>
+            <label className="mt-3 flex flex-col gap-1 text-[10px] font-bold text-muted-foreground">Label text
+              <input aria-label="Label text" value={selectedLabel.text} disabled={selectedLabel.locked} onChange={(event) => updateSelectedLabel({ text: event.currentTarget.value })} className="h-9 rounded-lg border border-border bg-background px-2 text-xs font-bold text-foreground outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-primary/20" />
+            </label>
+            <div className="mt-3 grid grid-cols-3 gap-2">
+              {([
+                ["Font size", selectedLabel.fontSize, (value: number) => updateSelectedLabel({ fontSize: Math.max(8, Math.min(96, value)) })],
+                ["Rotation", Math.round(selectedLabel.rotation || 0), (value: number) => updateSelectedLabel({ rotation: ((value % 360) + 360) % 360 })],
+              ] as Array<[string, number, (value: number) => void]>).map(([label, value, update]) => (
+                <label key={label} className="flex min-w-0 flex-col gap-1 text-[10px] font-bold text-muted-foreground">{label}
+                  <input aria-label={label} type="number" value={value} disabled={selectedLabel.locked} onChange={(event) => update(Number(event.currentTarget.value) || 0)} className="h-9 min-w-0 rounded-lg border border-border bg-background px-2 text-xs font-bold text-foreground outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-primary/20" />
+                </label>
+              ))}
+              <label className="flex min-w-0 flex-col gap-1 text-[10px] font-bold text-muted-foreground">Color
+                <input aria-label="Label color" type="color" value={selectedLabel.color || "#1f2937"} disabled={selectedLabel.locked} onChange={(event) => updateSelectedLabel({ color: event.currentTarget.value })} className="h-9 w-full rounded-lg border border-border bg-background p-1" />
+              </label>
+            </div>
+          </div>
+        )}
+
         {/* Instructions overlay */}
         {eventFurniture.length === 0 && eventLabels.length === 0 && (
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
@@ -2002,7 +2627,7 @@ export function EventFloorEditor({
           <span>
             {eventFurniture.length} furniture · {eventLabels.length} labels
           </span>
-          <span className="capitalize">Tool: {activeTool}</span>
+          <span className="capitalize">Tool: {effectiveTool}</span>
         </div>
         <div className="flex items-center gap-2">
           {overlay.status && (
@@ -2019,7 +2644,17 @@ export function EventFloorEditor({
               {overlay.status}
             </span>
           )}
-          <span>
+          <span className="flex min-w-0 items-center gap-x-2 gap-y-1">
+            <span
+              role="status"
+              aria-live="polite"
+              aria-atomic="true"
+              data-testid="event-pan-status"
+              className="min-w-[7rem] max-w-[11rem] truncate rounded-full bg-primary/10 px-2 py-0.5 font-bold text-primary"
+            >
+              {panStatus}
+            </span>
+            {readOnly && <span className="rounded-full bg-muted px-2 py-0.5 font-bold text-foreground">Published map locked</span>}
             {readOnly
               ? "Published base map and submitted additions"
               : "Drag to move · Del to delete · Wheel to pan · Ctrl/Cmd + wheel to zoom · Space + drag"}

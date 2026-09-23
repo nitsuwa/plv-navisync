@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getSupabase } from "../../lib/supabase";
-import { listAllReports, toIssueReport, updateReportStatus } from "../reportService";
+import { listAllReports, normalizeReportStatus, submitReport, toIssueReport, updateReportStatus } from "../reportService";
 
 vi.mock("../../lib/supabase", () => ({ getSupabase: vi.fn() }));
 
@@ -34,6 +34,47 @@ describe("report service (admin workflow)", () => {
       resolutionNotes: null,
     });
     expect(report.createdAt).toBe("2026-08-07T00:00:00Z");
+  });
+
+  it("normalizes legacy student-facing status labels", () => {
+    expect(normalizeReportStatus("investigating")).toBe("under_review");
+    expect(normalizeReportStatus("dismissed")).toBe("rejected");
+    expect(normalizeReportStatus("in_progress")).toBe("in_progress");
+  });
+
+  it("creates the report before uploading and records its private image metadata", async () => {
+    const upload = vi.fn().mockResolvedValue({ error: null });
+    const createSignedUrl = vi.fn().mockResolvedValue({ data: { signedUrl: "https://signed/report-image" }, error: null });
+    const reportImagesInsert = vi.fn().mockResolvedValue({ error: null });
+    const insertReport = vi.fn(() => ({
+      select: vi.fn(() => ({ single: vi.fn().mockResolvedValue({ data: row, error: null }) })),
+    }));
+    const client = {
+      auth: { getUser: vi.fn().mockResolvedValue({ data: { user: { id: "student-1" } }, error: null }) },
+      from: vi.fn((table: string) => table === "reports"
+        ? { insert: insertReport }
+        : { insert: reportImagesInsert }),
+      storage: { from: vi.fn(() => ({ upload, createSignedUrl })) },
+    };
+    vi.mocked(getSupabase).mockReturnValue(client as never);
+
+    const result = await submitReport({
+      campusId: "c1",
+      buildingId: "b1",
+      buildingName: "Student Center",
+      category: "maintenance",
+      title: "Broken light",
+      description: "The light is out.",
+      imageFile: new Blob(["image"], { type: "image/png" }),
+    });
+
+    expect(upload).toHaveBeenCalledWith(expect.stringMatching(/^r1\/[0-9a-f-]+\.png$/), expect.any(Blob), expect.objectContaining({ contentType: "image/png" }));
+    expect(reportImagesInsert).toHaveBeenCalledWith({
+      report_id: "r1",
+      storage_path: expect.stringMatching(/^r1\/[0-9a-f-]+\.png$/),
+      uploaded_by: "student-1",
+    });
+    expect(result.imageUrl).toBe("https://signed/report-image");
   });
 
   it("lists all reports with status + category filters and case-insensitive search", async () => {

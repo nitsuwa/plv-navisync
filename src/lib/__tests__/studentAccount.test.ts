@@ -8,6 +8,7 @@ import {
   registerStudent,
   requestStudentPasswordReset,
   splitStudentName,
+  updateStudentPassword,
   validateStudentRegistration,
 } from "../studentAccount";
 
@@ -16,6 +17,9 @@ function authClient(overrides: Record<string, unknown> = {}) {
     auth: {
       signUp: vi.fn().mockResolvedValue({ data: { user: null, session: null }, error: null }),
       resetPasswordForEmail: vi.fn().mockResolvedValue({ data: {}, error: null }),
+      getUser: vi.fn().mockResolvedValue({ data: { user: { email: "student@example.com" } }, error: null }),
+      signInWithPassword: vi.fn().mockResolvedValue({ data: { user: { id: "user-1" } }, error: null }),
+      updateUser: vi.fn().mockResolvedValue({ data: { user: { id: "user-1" } }, error: null }),
       ...overrides,
     },
   } as unknown as SupabaseClient<Database>;
@@ -80,6 +84,16 @@ describe("student account helpers", () => {
     expect(client.auth.resetPasswordForEmail).toHaveBeenCalledWith("student@example.com", {
       redirectTo: "https://navisync.example/auth/reset-password?flow=recovery",
     });
+  });
+
+  it("verifies the current password before updating it", async () => {
+    const client = authClient();
+    await updateStudentPassword("old-password", "new-password", client);
+    expect(client.auth.signInWithPassword).toHaveBeenCalledWith({
+      email: "student@example.com",
+      password: "old-password",
+    });
+    expect(client.auth.updateUser).toHaveBeenCalledWith({ password: "new-password" });
   });
 
   it("enforces an active student profile after Auth succeeds", async () => {
