@@ -1489,8 +1489,8 @@ function HeroSection() {
 
       {/* Wave divider */}
       <div className="absolute bottom-0 left-0 right-0 pointer-events-none">
-        <svg viewBox="0 0 1440 60" fill="none" className="w-full block">
-          <path d="M0 60L1440 60L1440 20C1280 52 1040 4 720 20C400 36 160 0 0 20L0 60Z" className="fill-background" />
+        <svg viewBox="0 0 1440 60" fill="none" stroke="none" className="w-full block" style={{ border: 0, outline: "none" }}>
+          <path d="M0 60L1440 60L1440 20C1280 52 1040 4 720 20C400 36 160 0 0 20L0 60Z" className="fill-muted/30" stroke="none" />
         </svg>
       </div>
     </section>

@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { screenToWorld, panToKeepWorldPoint } from "../../lib/editorPlacement";
-import { clampViewportPan, getViewportPanBounds, type MapViewportPanBounds } from "../../lib/mapViewport";
+import { clampViewportPan, getViewportFitZoom, getViewportPanBounds, type MapViewportInsets, type MapViewportPanBounds } from "../../lib/mapViewport";
 
 // ── Animation constants ─────────────────────────────────────────────────────
 const ZOOM_MIN = 0.25;
@@ -37,6 +37,8 @@ function clamp(v: number, min: number, max: number): number {
 export interface CanvasViewportOptions {
   mode?: "editor" | "viewer";
   editorPadding?: number;
+  /** Screen-space areas reserved by fixed editor UI over the canvas. */
+  insets?: MapViewportInsets;
 }
 
 export function useCanvasControls(canvasW: number, canvasH: number, options: CanvasViewportOptions = {}) {
@@ -44,6 +46,10 @@ export function useCanvasControls(canvasW: number, canvasH: number, options: Can
   const workspacePadding = mode === "editor"
     ? Math.max(0, options.editorPadding ?? EDITOR_WORKSPACE_PADDING)
     : 0;
+  const insetTop = Math.max(0, options.insets?.top ?? 0);
+  const insetRight = Math.max(0, options.insets?.right ?? 0);
+  const insetBottom = Math.max(0, options.insets?.bottom ?? 0);
+  const insetLeft = Math.max(0, options.insets?.left ?? 0);
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
 
@@ -74,9 +80,10 @@ export function useCanvasControls(canvasW: number, canvasH: number, options: Can
       viewportHeight: rect?.height || canvasH,
       zoom: zoomValue,
       padding: workspacePadding,
+      insets: { top: insetTop, right: insetRight, bottom: insetBottom, left: insetLeft },
       zoomOrigin: "top-left",
     });
-  }, [canvasH, canvasW, workspacePadding]);
+  }, [canvasH, canvasW, insetBottom, insetLeft, insetRight, insetTop, workspacePadding]);
 
   const clampPan = useCallback((point: { x: number; y: number }, zoomValue = targetZoom.current) =>
     clampViewportPan(point, getPanBounds(zoomValue)), [getPanBounds]);
@@ -424,22 +431,33 @@ export function useCanvasControls(canvasW: number, canvasH: number, options: Can
         w <= 0 ||
         h <= 0
       ) return;
-      const pxPerUnit = containerRect.width / svg.viewBox.baseVal.width;
-      const fitZoomX = ((containerRect.width - padding * 2) / w) / pxPerUnit;
-      const fitZoomY = ((containerRect.height - padding * 2) / h) / pxPerUnit;
+      const fitScale = getViewportFitZoom({
+        mapWidth: svg.viewBox.baseVal.width,
+        mapHeight: svg.viewBox.baseVal.height,
+        viewportWidth: containerRect.width,
+        viewportHeight: containerRect.height,
+      });
+      const letterboxX = Math.max(0, (containerRect.width - svg.viewBox.baseVal.width * fitScale) / 2);
+      const letterboxY = Math.max(0, (containerRect.height - svg.viewBox.baseVal.height * fitScale) / 2);
+      const availableWidth = Math.max(1, containerRect.width - insetLeft - insetRight - padding * 2);
+      const availableHeight = Math.max(1, containerRect.height - insetTop - insetBottom - padding * 2);
+      const fitZoomX = (availableWidth / w) / fitScale;
+      const fitZoomY = (availableHeight / h) / fitScale;
       const fitZoom = Math.min(fitZoomX, fitZoomY, 3);
       const clampedZoom = clamp(fitZoom, ZOOM_MIN, 3);
       const centerX = x + w / 2;
       const centerY = y + h / 2;
+      const visibleCenterX = (insetLeft + padding + containerRect.width - insetRight - padding) / 2;
+      const visibleCenterY = (insetTop + padding + containerRect.height - insetBottom - padding) / 2;
 
       targetZoom.current = clampedZoom;
       targetPan.current = clampPan({
-        x: canvasW / 2 - centerX * clampedZoom,
-        y: canvasH / 2 - centerY * clampedZoom,
+        x: (visibleCenterX - letterboxX) / fitScale - centerX * clampedZoom,
+        y: (visibleCenterY - letterboxY) / fitScale - centerY * clampedZoom,
       }, clampedZoom);
       startAnimation(ZOOM_DURATION_MS);
     },
-    [canvasW, canvasH, clampPan, startAnimation]
+    [clampPan, insetBottom, insetLeft, insetRight, insetTop, startAnimation]
   );
 
   /** Zoom to show a specific building (animated) */

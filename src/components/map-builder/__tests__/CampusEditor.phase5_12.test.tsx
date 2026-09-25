@@ -246,6 +246,25 @@ describe("B5 Phase 5.12 — continuous path-network visuals (no internal seams)"
     });
     expect(container.querySelector("[data-testid='campus-path-controls']")).toBeNull();
   });
+
+  it("keeps generated waypoint and edge hit targets active during pathway member editing", () => {
+    const { container } = renderCanvas({
+      campus: generatedCornerCampus(),
+      layer: "navigation",
+      selected: { type: "path", id: "p-a" },
+      pathMemberEditId: "p-a",
+      navNodes: generatedCornerCampus().navNodes,
+      navEdges: generatedCornerCampus().navEdges,
+      showNavigationOverlay: true,
+    });
+
+    const generatedNode = container.querySelector("[data-testid='nav-node'][data-node-id='na0']") as SVGGElement | null;
+    const generatedEdge = container.querySelector("[data-testid='nav-edge'][data-edge-id='ea']") as SVGGElement | null;
+    expect(generatedNode).toBeTruthy();
+    expect(generatedEdge).toBeTruthy();
+    expect(generatedNode?.style.pointerEvents).not.toBe("none");
+    expect(generatedEdge?.style.pointerEvents).not.toBe("none");
+  });
 });
 
 // ── CampusEditor-level interaction tests ────────────────────────────────────
@@ -426,6 +445,26 @@ describe("B5 Phase 5.12 — Canva-style group/member editing", () => {
     expect(a.points[0]).toEqual({ x: 100, y: 100 });
     expect(b.points[1]).toEqual({ x: 200, y: 180 });
     expect(latest.navNodes?.filter((navNode) => navNode.generatedFromPathVertices?.some((ref) => ref.vertexId === "a1" || ref.vertexId === "b0"))).toHaveLength(1);
+  });
+
+  it("does not let a generated waypoint drag fall through to whole-path movement in member edit mode", () => {
+    const onCampusChange = vi.fn();
+    const { container } = render(<Harness onCampusChange={onCampusChange} initialCampus={generatedCornerCampus()} />);
+    const svg = canvasSvg(container);
+    fireEvent.click(screen.getByRole("button", { name: /Show and edit the walking network/i }));
+    fireEvent.doubleClick(pathGroup(container, "p-a"));
+    expect(screen.getByText("Edit Pathway")).toBeTruthy();
+
+    const node = container.querySelector("[data-testid='nav-node'][data-node-id='na0']")!;
+    fireEvent.mouseDown(node, { clientX: 100, clientY: 100 });
+    fireEvent.mouseMove(svg, { clientX: 140, clientY: 120 });
+    fireEvent.mouseUp(svg, { clientX: 140, clientY: 120 });
+
+    const latest = onCampusChange.mock.calls[onCampusChange.mock.calls.length - 1]?.[0] as Campus;
+    const a = latest.paths.find((path) => path.id === "p-a")!;
+    const b = latest.paths.find((path) => path.id === "p-b")!;
+    expect(a.points).toEqual([{ x: 140, y: 120 }, { x: 200, y: 100 }]);
+    expect(b.points).toEqual([{ x: 200, y: 100 }, { x: 200, y: 180 }]);
   });
 
   it("dragging empty space inside a selected Path Network bounds uses the rigid group pipeline", () => {

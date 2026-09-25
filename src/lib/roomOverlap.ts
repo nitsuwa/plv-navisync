@@ -6,7 +6,7 @@
  * tolerance prevents floating-point snap artifacts from false positives.
  */
 
-import type { FloorRoom } from "../components/map-builder/types";
+import type { FloorRoom, FloorWall } from "../components/map-builder/types";
 import { clamp } from "./floorGeometry";
 
 /** Tolerance in units. Rooms whose overlap is entirely within this margin are
@@ -221,6 +221,58 @@ export function snapRoomToNearbyEdges(
   return {
     x: bestDx <= threshold ? Math.round(sx) : candidate.x,
     y: bestDy <= threshold ? Math.round(sy) : candidate.y,
+  };
+}
+
+/**
+ * Snap a new Room to a nearby authored Wall centerline or endpoint. This is a
+ * placement aid only; it never edits the Wall or changes its hit/snap
+ * geometry. Perimeter-managed walls are intentionally excluded because the
+ * Floor bounds already provide their authoritative placement.
+ */
+export function snapRoomToNearbyWalls(
+  candidate: { x: number; y: number; w: number; h: number },
+  walls: FloorWall[],
+  threshold = ROOM_EDGE_SNAP_THRESHOLD,
+): { x: number; y: number } {
+  let sx = candidate.x;
+  let sy = candidate.y;
+  let bestX = threshold + 1;
+  let bestY = threshold + 1;
+  const considerX = (target: number) => {
+    const leftDistance = Math.abs(candidate.x - target);
+    if (leftDistance < bestX) { bestX = leftDistance; sx = target; }
+    const rightDistance = Math.abs(candidate.x + candidate.w - target);
+    if (rightDistance < bestX) { bestX = rightDistance; sx = target - candidate.w; }
+  };
+  const considerY = (target: number) => {
+    const topDistance = Math.abs(candidate.y - target);
+    if (topDistance < bestY) { bestY = topDistance; sy = target; }
+    const bottomDistance = Math.abs(candidate.y + candidate.h - target);
+    if (bottomDistance < bestY) { bestY = bottomDistance; sy = target - candidate.h; }
+  };
+  const xNearCandidate = (value: number) => value >= candidate.x - threshold && value <= candidate.x + candidate.w + threshold;
+  const yNearCandidate = (value: number) => value >= candidate.y - threshold && value <= candidate.y + candidate.h + threshold;
+  for (const wall of walls) {
+    if (wall.managedKind === "perimeter") continue;
+    const dx = wall.x2 - wall.x1;
+    const dy = wall.y2 - wall.y1;
+    const wallMinX = Math.min(wall.x1, wall.x2);
+    const wallMaxX = Math.max(wall.x1, wall.x2);
+    const wallMinY = Math.min(wall.y1, wall.y2);
+    const wallMaxY = Math.max(wall.y1, wall.y2);
+    const xRangesOverlap = wallMaxX >= candidate.x - threshold && wallMinX <= candidate.x + candidate.w + threshold;
+    const yRangesOverlap = wallMaxY >= candidate.y - threshold && wallMinY <= candidate.y + candidate.h + threshold;
+    if (Math.abs(dx) >= Math.abs(dy) && xRangesOverlap) considerY((wall.y1 + wall.y2) / 2);
+    if (Math.abs(dy) > Math.abs(dx) && yRangesOverlap) considerX((wall.x1 + wall.x2) / 2);
+    if (yNearCandidate(wall.y1)) considerX(wall.x1);
+    if (yNearCandidate(wall.y2)) considerX(wall.x2);
+    if (xNearCandidate(wall.x1)) considerY(wall.y1);
+    if (xNearCandidate(wall.x2)) considerY(wall.y2);
+  }
+  return {
+    x: bestX <= threshold ? Math.round(sx) : candidate.x,
+    y: bestY <= threshold ? Math.round(sy) : candidate.y,
   };
 }
 
@@ -762,6 +814,92 @@ export interface AlignResult {
   guides: RoomAlignGuide[];
 }
 
+export interface RoomCenterSnapResult {
+  roomId: string;
+  snappedX?: number;
+  snappedY?: number;
+  xGuide?: RoomAlignGuide;
+  yGuide?: RoomAlignGuide;
+}
+
+/**
+ * Pick the one Room that is relevant to a moving visual object.  Room-center
+ * guides are intentionally contextual: an object already inside a Room wins,
+ * otherwise a Room whose boundary is immediately nearby can become the
+ * candidate as the object is carried into it.  This keeps a large Floor from
+ * producing center guides for every unrelated Room.
+ */
+export function relevantRoomForBounds(
+  bounds: { x: number; y: number; w: number; h: number },
+  rooms: FloorRoom[],
+  excludeId?: string,
+  threshold = ALIGN_GUIDE_THRESHOLD,
+) {
+  const centerX = bounds.x + bounds.w / 2;
+  const centerY = bounds.y + bounds.h / 2;
+  let best: { room: FloorRoom; score: number } | null = null;
+  for (const room of rooms) {
+    if (room.id === excludeId || room.visible === false) continue;
+    const left = Math.max(bounds.x, room.x);
+    const top = Math.max(bounds.y, room.y);
+    const right = Math.min(bounds.x + bounds.w, room.x + room.w);
+    const bottom = Math.min(bounds.y + bounds.h, room.y + room.h);
+    const overlap = Math.max(0, right - left) * Math.max(0, bottom - top);
+    const centerInside = centerX >= room.x && centerX <= room.x + room.w
+      && centerY >= room.y && centerY <= room.y + room.h;
+    const gapX = centerX < room.x ? room.x - centerX : centerX > room.x + room.w ? centerX - (room.x + room.w) : 0;
+    const gapY = centerY < room.y ? room.y - centerY : centerY > room.y + room.h ? centerY - (room.y + room.h) : 0;
+    const near = Math.hypot(gapX, gapY) <= threshold * 2;
+    if (!centerInside && overlap <= 0 && !near) continue;
+    const score = (centerInside ? 1_000_000 : 0) + overlap - Math.hypot(gapX, gapY);
+    if (!best || score > best.score || (score === best.score && room.id < best.room.id)) {
+      best = { room, score };
+    }
+  }
+  return best?.room ?? null;
+}
+
+/**
+ * Return exact local-axis positions for centering a visual rectangle in one
+ * Room.  The returned position is deliberately not rounded: a half-unit Room
+ * center is a valid authoring coordinate and must be the same coordinate used
+ * by both the guide and the committed transform.
+ */
+export function computeRoomCenterAlignment(
+  candidate: { x: number; y: number; w: number; h: number },
+  room: FloorRoom,
+  threshold = ALIGN_GUIDE_THRESHOLD,
+): RoomCenterSnapResult {
+  const roomCenterX = room.x + room.w / 2;
+  const roomCenterY = room.y + room.h / 2;
+  const candidateCenterX = candidate.x + candidate.w / 2;
+  const candidateCenterY = candidate.y + candidate.h / 2;
+  const result: RoomCenterSnapResult = { roomId: room.id };
+  if (Math.abs(candidateCenterX - roomCenterX) <= threshold) {
+    result.snappedX = roomCenterX - candidate.w / 2;
+    result.xGuide = {
+      type: "v",
+      pos: roomCenterX,
+      x1: roomCenterX,
+      y1: room.y,
+      x2: roomCenterX,
+      y2: room.y + room.h,
+    };
+  }
+  if (Math.abs(candidateCenterY - roomCenterY) <= threshold) {
+    result.snappedY = roomCenterY - candidate.h / 2;
+    result.yGuide = {
+      type: "h",
+      pos: roomCenterY,
+      x1: room.x,
+      y1: roomCenterY,
+      x2: room.x + room.w,
+      y2: roomCenterY,
+    };
+  }
+  return result;
+}
+
 /**
  * Compute Canva/Figma-style alignment guides and snapping for a candidate
  * rectangle against a set of reference rectangles.
@@ -852,10 +990,178 @@ export function computeAlignmentGuides(
   }
 
   return {
-    snappedX: bestDx <= threshold ? Math.round(snappedX) : candidate.x,
-    snappedY: bestDy <= threshold ? Math.round(snappedY) : candidate.y,
+    // Preserve the exact target coordinate. Rounding here can put the final
+    // object on the wrong side of a fractional Wall/Room center even though
+    // the visible guide is drawn at the unrounded target.
+    snappedX: bestDx <= threshold ? snappedX : candidate.x,
+    snappedY: bestDy <= threshold ? snappedY : candidate.y,
     guides,
   };
+}
+
+export interface RoomAssemblyAlignmentTarget {
+  axis: "x" | "y";
+  /** The Room position after applying this target to the current candidate. */
+  candidatePosition: number;
+  guide: RoomAlignGuide;
+  priority: number;
+}
+
+function dominantWallAxis(wall: FloorWall): "horizontal" | "vertical" {
+  return Math.abs(wall.x2 - wall.x1) >= Math.abs(wall.y2 - wall.y1) ? "horizontal" : "vertical";
+}
+
+function rangesTouch(a1: number, a2: number, b1: number, b2: number, threshold: number) {
+  return Math.min(Math.max(a1, a2), Math.max(b1, b2))
+    - Math.max(Math.min(a1, a2), Math.min(b1, b2)) >= -threshold;
+}
+
+/**
+ * Resolve alignment candidates for a moving Room Setup. The returned targets
+ * are expressed as one Room translation target, so callers can apply the
+ * resulting delta to every setup member. Wall centerlines deliberately have
+ * higher priority than generic rectangle alignment. Perimeter walls are valid
+ * visual references, but never become part of the moving setup.
+ */
+export function computeRoomAssemblyAlignmentTargets(
+  candidateRoom: { x: number; y: number; w: number; h: number },
+  movedWalls: FloorWall[],
+  stationaryWalls: FloorWall[],
+  stationaryRooms: FloorRoom[],
+  referenceRects: { x: number; y: number; w: number; h: number; id?: string }[] = [],
+  canvasW = 0,
+  canvasH = 0,
+  threshold = ALIGN_GUIDE_THRESHOLD,
+  gridSize = 0,
+  gridEnabled = false,
+): { x?: RoomAssemblyAlignmentTarget; y?: RoomAssemblyAlignmentTarget } {
+  const xTargets: RoomAssemblyAlignmentTarget[] = [];
+  const yTargets: RoomAssemblyAlignmentTarget[] = [];
+  const add = (target: RoomAssemblyAlignmentTarget) => {
+    (target.axis === "x" ? xTargets : yTargets).push(target);
+  };
+
+  // 1. Authored wall centerline → wall centerline. Managed perimeter walls
+  // remain stationary references only and receive the lower perimeter priority.
+  for (const movingWall of movedWalls) {
+    const movingAxis = dominantWallAxis(movingWall);
+    for (const targetWall of stationaryWalls) {
+      if (dominantWallAxis(targetWall) !== movingAxis) continue;
+      if (movingAxis === "horizontal") {
+        if (!rangesTouch(movingWall.x1, movingWall.x2, targetWall.x1, targetWall.x2, threshold)) continue;
+        const delta = ((targetWall.y1 + targetWall.y2) / 2) - ((movingWall.y1 + movingWall.y2) / 2);
+        if (Math.abs(delta) > threshold) continue;
+        const pos = candidateRoom.y + delta;
+        add({
+          axis: "y",
+          candidatePosition: pos,
+          priority: targetWall.managedKind === "perimeter" ? 3 : 1,
+          guide: { type: "h", pos: (targetWall.y1 + targetWall.y2) / 2, x1: 0, y1: (targetWall.y1 + targetWall.y2) / 2, x2: canvasW, y2: (targetWall.y1 + targetWall.y2) / 2 },
+        });
+      } else {
+        if (!rangesTouch(movingWall.y1, movingWall.y2, targetWall.y1, targetWall.y2, threshold)) continue;
+        const delta = ((targetWall.x1 + targetWall.x2) / 2) - ((movingWall.x1 + movingWall.x2) / 2);
+        if (Math.abs(delta) > threshold) continue;
+        const pos = candidateRoom.x + delta;
+        add({
+          axis: "x",
+          candidatePosition: pos,
+          priority: targetWall.managedKind === "perimeter" ? 3 : 1,
+          guide: { type: "v", pos: (targetWall.x1 + targetWall.x2) / 2, x1: (targetWall.x1 + targetWall.x2) / 2, y1: 0, x2: (targetWall.x1 + targetWall.x2) / 2, y2: canvasH },
+        });
+      }
+    }
+  }
+
+  // 2. Room edge → neighboring Room edge. Orthogonal overlap keeps a distant
+  // room from becoming a surprising magnetic reference.
+  for (const target of [0, canvasW]) {
+    for (const from of [candidateRoom.x, candidateRoom.x + candidateRoom.w]) {
+      const delta = target - from;
+      if (Math.abs(delta) <= threshold) add({ axis: "x", candidatePosition: candidateRoom.x + delta, priority: 2, guide: { type: "v", pos: target, x1: target, y1: 0, x2: target, y2: canvasH } });
+    }
+  }
+  for (const target of [0, canvasH]) {
+    for (const from of [candidateRoom.y, candidateRoom.y + candidateRoom.h]) {
+      const delta = target - from;
+      if (Math.abs(delta) <= threshold) add({ axis: "y", candidatePosition: candidateRoom.y + delta, priority: 2, guide: { type: "h", pos: target, x1: 0, y1: target, x2: canvasW, y2: target } });
+    }
+  }
+
+  for (const room of stationaryRooms) {
+    const verticalOverlap = rangesTouch(candidateRoom.y, candidateRoom.y + candidateRoom.h, room.y, room.y + room.h, threshold);
+    const horizontalOverlap = rangesTouch(candidateRoom.x, candidateRoom.x + candidateRoom.w, room.x, room.x + room.w, threshold);
+    if (verticalOverlap) {
+      for (const target of [room.x, room.x + room.w]) {
+        for (const from of [candidateRoom.x, candidateRoom.x + candidateRoom.w]) {
+          const delta = target - from;
+          if (Math.abs(delta) <= threshold) {
+            add({ axis: "x", candidatePosition: candidateRoom.x + delta, priority: 3, guide: { type: "v", pos: target, x1: target, y1: 0, x2: target, y2: canvasH } });
+          }
+        }
+      }
+    }
+    if (horizontalOverlap) {
+      for (const target of [room.y, room.y + room.h]) {
+        for (const from of [candidateRoom.y, candidateRoom.y + candidateRoom.h]) {
+          const delta = target - from;
+          if (Math.abs(delta) <= threshold) {
+            add({ axis: "y", candidatePosition: candidateRoom.y + delta, priority: 3, guide: { type: "h", pos: target, x1: 0, y1: target, x2: canvasW, y2: target } });
+          }
+        }
+      }
+    }
+  }
+
+  // 3. Room edge → Floor perimeter. This uses the Room rectangle itself as
+  // the authority, allowing exact x=0/y=0/right/bottom placement regardless
+  // of wall stroke width, opening padding, or selection handles.
+  for (const targetWall of stationaryWalls) {
+    if (targetWall.managedKind === "perimeter") continue;
+    if (dominantWallAxis(targetWall) === "vertical") {
+      if (!rangesTouch(candidateRoom.y, candidateRoom.y + candidateRoom.h, targetWall.y1, targetWall.y2, threshold)) continue;
+      const target = (targetWall.x1 + targetWall.x2) / 2;
+      for (const from of [candidateRoom.x, candidateRoom.x + candidateRoom.w]) {
+        const delta = target - from;
+        if (Math.abs(delta) <= threshold) add({ axis: "x", candidatePosition: candidateRoom.x + delta, priority: 4, guide: { type: "v", pos: target, x1: target, y1: 0, x2: target, y2: canvasH } });
+      }
+    } else {
+      if (!rangesTouch(candidateRoom.x, candidateRoom.x + candidateRoom.w, targetWall.x1, targetWall.x2, threshold)) continue;
+      const target = (targetWall.y1 + targetWall.y2) / 2;
+      for (const from of [candidateRoom.y, candidateRoom.y + candidateRoom.h]) {
+        const delta = target - from;
+        if (Math.abs(delta) <= threshold) add({ axis: "y", candidatePosition: candidateRoom.y + delta, priority: 4, guide: { type: "h", pos: target, x1: 0, y1: target, x2: canvasW, y2: target } });
+      }
+    }
+  }
+
+  // 5. Keep the existing generic object alignment as the final fallback.
+  // This preserves the broader editor behavior without outranking a real wall
+  // centerline or Room/perimeter relationship.
+  if (referenceRects.length > 0) {
+    const generic = computeAlignmentGuides(candidateRoom, referenceRects, threshold);
+    const xGuide = generic.guides.find((guide) => guide.type === "v");
+    const yGuide = generic.guides.find((guide) => guide.type === "h");
+    // Keep an exact alignment guide visible even when the candidate is already
+    // on the reference coordinate. The guide is still a real snap target, and
+    // the release commit will preserve that exact coordinate.
+    if (xGuide) add({ axis: "x", candidatePosition: generic.snappedX, priority: 5, guide: xGuide });
+    if (yGuide) add({ axis: "y", candidatePosition: generic.snappedY, priority: 5, guide: yGuide });
+  }
+
+  if (gridEnabled && gridSize > 0) {
+    const gridX = Math.round(candidateRoom.x / gridSize) * gridSize;
+    const gridY = Math.round(candidateRoom.y / gridSize) * gridSize;
+    if (Math.abs(gridX - candidateRoom.x) <= threshold) add({ axis: "x", candidatePosition: gridX, priority: 6, guide: { type: "v", pos: gridX, x1: gridX, y1: 0, x2: gridX, y2: canvasH } });
+    if (Math.abs(gridY - candidateRoom.y) <= threshold) add({ axis: "y", candidatePosition: gridY, priority: 6, guide: { type: "h", pos: gridY, x1: 0, y1: gridY, x2: canvasW, y2: gridY } });
+  }
+
+  const choose = (targets: RoomAssemblyAlignmentTarget[], currentPosition: number) => targets.sort((a, b) => (
+    a.priority - b.priority
+    || Math.abs(a.candidatePosition - currentPosition) - Math.abs(b.candidatePosition - currentPosition)
+    || a.candidatePosition - b.candidatePosition
+  ))[0];
+  return { x: choose(xTargets, candidateRoom.x), y: choose(yTargets, candidateRoom.y) };
 }
 
 // ── Universal same-size matching ────────────────────────────────────────────

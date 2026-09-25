@@ -62,6 +62,7 @@ import { decorRenderScale, decorWorldSize } from "../../lib/decorVisual";
 import { outdoorGroupSelectionBounds, outdoorSelectionIdsInRect, pathSelectionBounds, selectionRectFromPoints, snapRotationAngle } from "../../lib/campusSelection";
 import { arrangeSelectedOutdoorObjects, selectedOutdoorCount, type OutdoorArrangementAction } from "../../lib/campusArrangement";
 import { alignEntranceAttachment, defaultEntrance, normalizeBuildingEntrances, promotePrimaryEntrance, updateBuildingEntrance, entranceWorldPosition, findEntranceAtPoint, entranceDisplayName } from "../../lib/buildingEntrances";
+import { clampNormalizedOffset, entranceAttachmentArrowDelta } from "../../lib/wallAttachmentControls";
 import { createDefaultFloor, duplicateFloorForBuilding } from "../../lib/floorPlanNormalization";
 import { navEdgePolylineDistance, orthogonalBendsFor, translateOrthogonalSegment, translateStraightSegment, normalizeBendPoints, edgePolylinePoints, navAlignSnap } from "../../lib/indoorNavigationGraph";
 import { screenSpaceAlignmentThreshold } from "../../lib/roomOverlap";
@@ -84,6 +85,7 @@ import { entranceConnectorDistance, entranceConnectorGeometry } from "../../lib/
 import {
   canonicalExteriorEmergencyStairsForBuilding,
   defaultExteriorEmergencyStairAttachment,
+  exteriorEmergencyStairAttachmentIsAvailable,
   exteriorEmergencyStairEdgeForPointer,
   exteriorEmergencyStairOffsetForPointer,
   exteriorEmergencyStairWallSpansOverlap,
@@ -836,6 +838,10 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     members: GroupMoveMember[];
     decorScales: Record<string, number>;
   } | null>(null);
+  // A building remains the canonical selection for its building-owned stair,
+  // while this focused id keeps the Properties panel progressive when several
+  // independent exterior stairs are present.
+  const [focusedExteriorEmergencyStairId, setFocusedExteriorEmergencyStairId] = useState<string | null>(null);
   // Physical multi-select rotation uses the same gesture-history contract as
   // group resize, but keeps an immutable member snapshot so every pointer
   // frame rotates from the original arrangement rather than accumulating
@@ -4921,8 +4927,6 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
       gesture.previewEdge = edge;
       const rawOffset = exteriorEmergencyStairOffsetForPointer(localPoint, { width: building.width, height: building.height }, edge);
       const wallSpan = edge === "top" || edge === "bottom" ? building.width : building.height;
-      const visual = exteriorEmergencyStairVisualDimensions(owner);
-      const candidateSpan = (edge === "top" || edge === "bottom" ? visual.width : visual.height) + 12;
       const range = exteriorEmergencyStairSafeOffsetRange(edge, wallSpan, owner.width, owner.height, owner.visualSize);
       const sameEdgeEntrances = (building.entrances ?? []).filter((entrance) => entrance.edge === edge);
       const sameEdgeStairs = canonicalExteriorEmergencyStairsForBuilding(building).filter((stair) => stair.id !== owner.id && stair.attachment.edge === edge);
@@ -4972,16 +4976,12 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
         .sort((a, b) => a.distance - b.distance)[0];
       if (!navOffsetSnap && nearest && nearest.distance <= SNAP_DIST) offset = nearest.target;
       offset = Math.round(offset * 1000) / 1000;
-      const collidesWithEntrance = sameEdgeEntrances.some((entrance) => {
-        const entranceSpan = 24;
-        return exteriorEmergencyStairWallSpansOverlap(offset, candidateSpan, Number.isFinite(Number(entrance.offset)) ? Number(entrance.offset) : 0.5, entranceSpan, wallSpan, 4);
-      });
-      const collidesWithStair = sameEdgeStairs.some((stair) => {
-        const otherVisual = exteriorEmergencyStairVisualDimensions(stair);
-        const otherSpan = (edge === "top" || edge === "bottom" ? otherVisual.width : otherVisual.height) + 12;
-        return exteriorEmergencyStairWallSpansOverlap(offset, candidateSpan, Number.isFinite(Number(stair.attachment.offset)) ? Number(stair.attachment.offset) : 0.5, otherSpan, wallSpan, 4);
-      });
-      const valid = !collidesWithEntrance && !collidesWithStair;
+      const valid = exteriorEmergencyStairAttachmentIsAvailable(
+        building,
+        { edge, offset },
+        { width: owner.width, height: owner.height, visualSize: owner.visualSize },
+        owner.id,
+      );
       const guideTarget = nearest && nearest.distance <= SNAP_DIST ? nearest.target : null;
       if (navOffsetSnap) {
         setGuides([navOffsetSnap.guide]);
@@ -6457,10 +6457,6 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     const building = current.buildings.find((candidate) => candidate.id === buildingId);
     if (!building || building.locked) return;
     const existing = canonicalExteriorEmergencyStairsForBuilding(building);
-    if (existing.length > 0 || (building.exteriorEmergencyStairs?.length ?? 0) > 0) {
-      toast.warning("Exterior Emergency Stair already configured", "A Building can have only one Exterior Emergency Stair.");
-      return;
-    }
     const attachment = defaultExteriorEmergencyStairAttachment(building);
     if (!attachment) {
       toast.warning("Exterior Emergency Stair could not be placed", "Every Building side has occupied wall space for the required stair landing.");
@@ -6470,7 +6466,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     const stair = {
       id,
       buildingId,
-      label: "Emergency Stair 1",
+      label: `Exterior Stair ${existing.length + 1}`,
       state: "open" as const,
       width: 28,
       height: 42,
@@ -6492,6 +6488,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     pushHistory(next);
     onUpdate(next);
     setSelected({ type: "building", id: buildingId });
+    setFocusedExteriorEmergencyStairId(id);
     toast.success("Exterior Emergency Stair added", "Configure served Floors in the building properties.");
   };
 
@@ -6508,15 +6505,12 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
         const rawOffset = Number(next.attachment.offset);
         const normalizedOffset = Number.isFinite(rawOffset) ? rawOffset : 0.5;
         const offset = Math.max(range.min, Math.min(range.max, normalizedOffset));
-        const visual = exteriorEmergencyStairVisualDimensions(next);
-        const candidateSpan = (next.attachment.edge === "top" || next.attachment.edge === "bottom" ? visual.width : visual.height) + 12;
-        const blocked = (building.entrances ?? []).some((entrance) => entrance.edge === next.attachment.edge
-          && exteriorEmergencyStairWallSpansOverlap(offset, candidateSpan, Number.isFinite(Number(entrance.offset)) ? Number(entrance.offset) : 0.5, 24, span, 4))
-          || canonicalExteriorEmergencyStairsForBuilding(building).some((other) => other.id !== stairId && other.attachment.edge === next.attachment.edge
-            && exteriorEmergencyStairWallSpansOverlap(offset, candidateSpan, Number.isFinite(Number(other.attachment.offset)) ? Number(other.attachment.offset) : 0.5,
-              (next.attachment.edge === "top" || next.attachment.edge === "bottom"
-                ? exteriorEmergencyStairVisualDimensions(other).width
-                : exteriorEmergencyStairVisualDimensions(other).height) + 12, span, 4));
+        const blocked = !exteriorEmergencyStairAttachmentIsAvailable(
+          building,
+          { edge: next.attachment.edge, offset },
+          { width: next.width, height: next.height, visualSize: next.visualSize },
+          stairId,
+        );
         if (blocked && (changes.attachment || changes.width !== undefined || changes.height !== undefined || changes.visualSize !== undefined)) placementBlocked = true;
         return { ...next, attachment: { ...next.attachment, offset } };
       }),
@@ -6549,6 +6543,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     });
     pushHistory(next);
     onUpdate(next);
+    if (focusedExteriorEmergencyStairId === stairId) setFocusedExteriorEmergencyStairId(null);
     toast.info("Exterior Emergency Stair removed", "Its generated floor landings and transition anchors were removed.");
   };
 
@@ -8985,6 +8980,21 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
             if (sel.type === "path") return Boolean(paths.find((x) => x.id === sel.id)?.locked);
             return false;
           };
+          if (selected.type === "entrance") {
+            const parent = buildings.find((building) => building.id === selected.buildingId);
+            const entrance = parent?.entrances?.find((item) => item.id === selected.id);
+            if (!parent || !entrance || parent.locked) return;
+            const delta = entranceAttachmentArrowDelta(entrance.edge, e.key, e.shiftKey ? 10 : 1);
+            e.preventDefault();
+            if (delta === null) return;
+            const offset = clampNormalizedOffset(Number(entrance.offset) + delta / 100);
+            if (offset === entrance.offset) return;
+            // Entrances follow the building edge: Left/Right on top/bottom,
+            // Up/Down on the side edges. onUpdateEntrance also keeps linked
+            // navigation nodes and outdoor approach geometry in sync.
+            onUpdateEntrance(parent.id, entrance.id, { offset });
+            return;
+          }
           if (isLocked(selected)) return;
           e.preventDefault();
           const now = Date.now();
@@ -10174,11 +10184,13 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
           onNavEdgeAddBend={onNavEdgeAddBend}
           onEntranceDown={onEntranceDown}
           exteriorEmergencyStairPreview={exteriorStairPreview}
+          focusedExteriorEmergencyStairId={focusedExteriorEmergencyStairId}
           onExteriorEmergencyStairDown={(e, buildingId, stairId) => {
             e.stopPropagation();
             if (tool !== "select") return;
             setMultiSelected([]);
             setSelected({ type: "building", id: buildingId });
+            setFocusedExteriorEmergencyStairId(stairId);
             setPropertiesDismissed(false);
             setPropertiesOpen(true);
       const ownerBuilding = campusRef.current.buildings.find((candidate) => candidate.id === buildingId);
@@ -10619,6 +10631,8 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
           onLayerOrder={handleLayerOrder}
           onUpdateBuilding={onUpdateBuilding}
           onAddExteriorEmergencyStair={onAddExteriorEmergencyStair}
+          focusedExteriorEmergencyStairId={focusedExteriorEmergencyStairId}
+          onFocusExteriorEmergencyStair={setFocusedExteriorEmergencyStairId}
           onUpdateExteriorEmergencyStair={onUpdateExteriorEmergencyStair}
           onDeleteExteriorEmergencyStair={onDeleteExteriorEmergencyStair}
           onAddEntrance={onAddEntrance}

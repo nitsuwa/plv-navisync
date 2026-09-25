@@ -21,11 +21,13 @@ import { canonicalExteriorEmergencyStairsForBuilding, exteriorEmergencyStairOutd
 import { ObjectIssueSection, type ObjectIssueItem } from "./ObjectIssueSection";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
 import { cn } from "../../lib/utils";
+import { clampNormalizedOffset, entranceAttachmentArrowDelta } from "../../lib/wallAttachmentControls";
 import { MARKER_STYLES } from "../../data/mapData";
 import { LAYERS, LAYER_TOOLS, DECOR_ASSET_MAP, genId, isDecorAreaType } from "./constants";
 import { Combobox } from "../ui/Combobox";
 import { ColorPicker } from "../ui/ColorPicker";
 import { CompactDropdown } from "./CompactDropdown";
+import { CommittedNumberInput } from "./CommittedNumberInput";
 import {
   BUILDING_ENTRANCE_EDGE_LABELS,
   BUILDING_ENTRANCE_AUTHORING_TYPES,
@@ -125,6 +127,8 @@ interface PropertiesPanelProps {
   // Individual item callbacks
   onUpdateBuilding: (id: string, changes: Partial<CampusBuilding>) => void;
   onAddExteriorEmergencyStair?: (buildingId: string) => void;
+  focusedExteriorEmergencyStairId?: string | null;
+  onFocusExteriorEmergencyStair?: (stairId: string | null) => void;
   onUpdateExteriorEmergencyStair?: (buildingId: string, stairId: string, changes: Partial<ExteriorEmergencyStair>) => void;
   onDeleteExteriorEmergencyStair?: (buildingId: string, stairId: string) => void;
   onAddEntrance: (buildingId: string) => void;
@@ -496,15 +500,21 @@ function NavNodeAdvancedRouting({ node, buildingName, onUpdateNode, allNavEdges,
             <div className="grid grid-cols-2 gap-2">
               <div>
                 <label className={labelCls}>X</label>
-                <input type="number" value={node.x} disabled={!!node.entranceId || gateManaged || pathwayGenerated}
-                  onChange={(e) => onUpdateNode?.(node.id, { x: parseInt(e.target.value) || 0 })}
-                  className={`${inputCls} font-mono ${node.entranceId || gateManaged || pathwayGenerated ? "opacity-60 cursor-not-allowed" : ""}`} />
+                <CommittedNumberInput
+                  value={node.x}
+                  disabled={!!node.entranceId || gateManaged || pathwayGenerated}
+                  onCommit={(value) => onUpdateNode?.(node.id, { x: value })}
+                  className={`${inputCls} font-mono ${node.entranceId || gateManaged || pathwayGenerated ? "opacity-60 cursor-not-allowed" : ""}`}
+                />
               </div>
               <div>
                 <label className={labelCls}>Y</label>
-                <input type="number" value={node.y} disabled={!!node.entranceId || gateManaged || pathwayGenerated}
-                  onChange={(e) => onUpdateNode?.(node.id, { y: parseInt(e.target.value) || 0 })}
-                  className={`${inputCls} font-mono ${node.entranceId || gateManaged || pathwayGenerated ? "opacity-60 cursor-not-allowed" : ""}`} />
+                <CommittedNumberInput
+                  value={node.y}
+                  disabled={!!node.entranceId || gateManaged || pathwayGenerated}
+                  onCommit={(value) => onUpdateNode?.(node.id, { y: value })}
+                  className={`${inputCls} font-mono ${node.entranceId || gateManaged || pathwayGenerated ? "opacity-60 cursor-not-allowed" : ""}`}
+                />
               </div>
             </div>
             {node.entranceId && (
@@ -560,7 +570,7 @@ export function PropertiesPanel({
   layer,
   multiSelected, multiSelectedBuildings, selectedOutdoorCount,
   onBatchUpdateBuildings, onBatchDeleteBuildings, onBatchUpdatePaths, onBatchDeletePaths, onGroupPaths, onUngroupPaths, onAddPathNetworkToNavigation, pathMemberEditing = false, onExitPathMemberEdit, onClearMultiSelect, onLayerOrder,
-  onUpdateBuilding, onAddExteriorEmergencyStair, onUpdateExteriorEmergencyStair, onDeleteExteriorEmergencyStair,
+  onUpdateBuilding, onAddExteriorEmergencyStair, focusedExteriorEmergencyStairId, onFocusExteriorEmergencyStair, onUpdateExteriorEmergencyStair, onDeleteExteriorEmergencyStair,
   onAddEntrance, onSelectEntrance, onUpdateEntrance, onDeleteEntrance,
   onConnectEntranceToDoor, onConnectEntranceToWalkingNetwork, onDisconnectEntranceFromWalkingNetwork, onSelectEntranceWalkingConnection, onRemoveEntranceConnection, onViewEntranceIndoorDoor,
   onUpdateMarker, onUpdatePath, onSelectPath, hoveredPathId = null, onPathHover, onAddPathBend, onRemoveSelectedPathPoint,
@@ -1342,41 +1352,57 @@ export function PropertiesPanel({
                     <p className="text-[8px] text-muted-foreground mt-1 italic">At least 1 floor is required. Click "Add" to add more floors.</p>
                   )}
                 </div>
-                {onAddExteriorEmergencyStair && (
-                  <div className="pt-2 border-t border-border" data-testid="exterior-emergency-stairs-properties">
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="flex items-center gap-1.5"><AlertTriangle className="h-3 w-3 text-red-600" /><span className="text-[9px] font-extrabold uppercase tracking-widest text-muted-foreground">Exterior Emergency Stair</span></div>
-                      {(selBldg.exteriorEmergencyStairs?.length ?? 0) === 0 && <button type="button" onClick={() => onAddExteriorEmergencyStair(selBldg.id)} disabled={selBldg.locked} className="flex items-center gap-1 h-6 px-2 rounded-lg border border-red-300/60 text-[9px] font-bold text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-all disabled:opacity-40"><Plus className="h-3 w-3" /> Add</button>}
-                    </div>
-                    {(selBldg.exteriorEmergencyStairs?.length ?? 0) > 1 && <p className="mb-2 rounded-lg border border-amber-300/60 bg-amber-50/70 px-2 py-1 text-[9px] text-amber-700 dark:border-amber-800/50 dark:bg-amber-950/20 dark:text-amber-300">Only one exterior emergency stair is supported; legacy duplicates are ignored.</p>}
-                    {canonicalExteriorEmergencyStairsForBuilding(selBldg).length === 0 ? <p className="text-[9px] text-muted-foreground italic">No exterior emergency stair configured.</p> : (
-                      <div className="space-y-2 max-h-[280px] overflow-y-auto scrollbar-show-on-hover">
-                        {canonicalExteriorEmergencyStairsForBuilding(selBldg).map((stair) => {
-                          const readiness = exteriorEmergencyStairRouteReadiness(selBldg, stair, allNavNodes ?? [], allNavEdges ?? []);
-                          return <div key={stair.id} className="rounded-xl border border-red-200/60 dark:border-red-800/40 bg-red-50/35 dark:bg-red-950/10 p-2.5 space-y-2">
-                            <div className="flex items-center justify-between gap-2"><div className="min-w-0"><p className="text-[10px] font-extrabold uppercase tracking-wide text-foreground truncate">Exterior Emergency Stair</p><p className="text-[8px] text-muted-foreground">Building-owned evacuation infrastructure</p></div><button type="button" title="Delete Exterior Emergency Stair" aria-label="Delete Exterior Emergency Stair" onClick={() => setDeleteConfirm({ type: "exteriorEmergencyStair", id: stair.id, stairId: stair.id, buildingId: selBldg.id, label: "Exterior Emergency Stair" })} className="w-7 h-7 rounded-lg text-destructive hover:bg-destructive/10 flex items-center justify-center shrink-0"><Trash2 className="h-3 w-3" /></button></div>
-                            <div className="grid grid-cols-2 gap-2">
-                              <label className="text-[9px] text-muted-foreground">Attached side<CompactDropdown ariaLabel="Attached side" value={stair.attachment.edge} options={Object.entries(BUILDING_ENTRANCE_EDGE_LABELS).map(([edge, label]) => ({ value: edge as BuildingEntranceEdge, label }))} onChange={(nextEdge) => onUpdateExteriorEmergencyStair?.(selBldg.id, stair.id, { attachment: { ...stair.attachment, edge: nextEdge } })} className="mt-1" /></label>
-                              {(() => {
-                                const span = stair.attachment.edge === "top" || stair.attachment.edge === "bottom" ? selBldg.width : selBldg.height;
-                                const range = exteriorEmergencyStairSafeOffsetRange(stair.attachment.edge, span, stair.width, stair.height, stair.visualSize);
-                                const rawOffset = Number(stair.attachment.offset);
-                                const normalizedOffset = Number.isFinite(rawOffset) ? rawOffset : 0.5;
-                                const value = Math.max(range.min, Math.min(range.max, normalizedOffset));
-                                return <label className="text-[9px] text-muted-foreground">Position <span className="float-right tabular-nums text-foreground">{Math.round(value * 100)}%</span><input aria-label="Position along side" type="range" min={range.min} max={range.max} step={0.01} value={value} onChange={(e) => onUpdateExteriorEmergencyStair?.(selBldg.id, stair.id, { attachment: { ...stair.attachment, offset: Number(e.target.value) } })} className="mt-2 w-full h-1.5 accent-red-600" /></label>;
-                              })()}
-                            </div>
-                            <label className="block text-[9px] text-muted-foreground">Visual size<CompactDropdown ariaLabel="Exterior stair visual size" value={stair.visualSize ?? "medium"} options={[{ value: "small", label: "Small" }, { value: "medium", label: "Medium" }, { value: "large", label: "Large" }]} onChange={(nextSize) => onUpdateExteriorEmergencyStair?.(selBldg.id, stair.id, { visualSize: nextSize as ExteriorEmergencyStairVisualSize })} className="mt-1" /></label>
-                            <div className="flex items-center justify-between rounded-lg border border-border/60 bg-background/45 px-2 py-1.5"><span className="text-[9px] text-muted-foreground">State</span><button type="button" onClick={() => onUpdateExteriorEmergencyStair?.(selBldg.id, stair.id, { state: stair.state === "open" ? "closed" : "open" })} className={cn("px-2 py-1 rounded-md border text-[9px] font-bold", stair.state === "open" ? "border-emerald-300 text-emerald-700 dark:text-emerald-300" : "border-amber-300 text-amber-700 dark:text-amber-300")}>{stair.state === "open" ? "Open" : "Closed"}</button></div>
-                            <div><div className="flex items-center justify-between mb-1"><span className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground">Served Floors</span><span className="text-[9px] tabular-nums text-muted-foreground">{selBldg.floors.filter((floor) => stair.servedFloorIds.includes(floor.id)).length} {selBldg.floors.filter((floor) => stair.servedFloorIds.includes(floor.id)).length === 1 ? "floor" : "floors"} served</span></div><p className="mb-1.5 text-[8px] leading-snug text-muted-foreground">Choose the Floors that have access to this stair.</p><div className="grid grid-cols-2 gap-1 rounded-lg border border-border/50 bg-background/35 p-1.5">{selBldg.floors.map((floor) => { const checked = stair.servedFloorIds.includes(floor.id); return <label key={floor.id} className={cn("flex min-w-0 items-center gap-1.5 rounded-md px-1.5 py-1 text-[9px] text-foreground transition-colors", checked ? "bg-red-100/70 dark:bg-red-900/20" : "hover:bg-muted/60")}><input type="checkbox" checked={checked} onChange={() => { const servedFloorIds = checked ? stair.servedFloorIds.filter((id) => id !== floor.id) : [...stair.servedFloorIds, floor.id]; onUpdateExteriorEmergencyStair?.(selBldg.id, stair.id, { servedFloorIds }); }} className="accent-red-600 shrink-0" /><span className="truncate">{floor.label}</span></label>; })}</div></div>
-                            <div className="flex items-center justify-between text-[9px] border-t border-red-200/50 dark:border-red-800/30 pt-1.5"><span data-testid="exterior-stair-readiness-status" className={cn("font-semibold", stair.state === "closed" ? "text-amber-700 dark:text-amber-300" : readiness.ready ? "text-emerald-700 dark:text-emerald-300" : "text-amber-700 dark:text-amber-300")}>{stair.state === "closed" ? "Closed" : readiness.ready ? "Ready" : "Needs attention"}</span><span className="text-muted-foreground">Emergency evacuation</span></div>
-                            {!readiness.ready && <div data-testid="exterior-stair-readiness-issue" className="flex items-start gap-1.5 rounded-lg border border-amber-300/60 bg-amber-50/70 px-2 py-1.5 text-[8px] leading-snug text-amber-800 dark:border-amber-800/50 dark:bg-amber-950/20 dark:text-amber-200"><AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" /><span>{stair.state === "closed" ? "Open the stair when it is available for evacuation." : readiness.issue ?? "Connect the stair to the required local and outdoor walking networks."}</span></div>}
-                          </div>;
-                        })}
+                {onAddExteriorEmergencyStair && (() => {
+                  const stairs = canonicalExteriorEmergencyStairsForBuilding(selBldg);
+                  const focused = stairs.some((stair) => stair.id === focusedExteriorEmergencyStairId)
+                    ? focusedExteriorEmergencyStairId
+                    : stairs.length === 1 ? stairs[0].id : null;
+                  return (
+                    <div className="pt-2 border-t border-border" data-testid="exterior-emergency-stairs-properties">
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-1.5"><AlertTriangle className="h-3 w-3 text-red-600" /><span className="text-[9px] font-extrabold uppercase tracking-widest text-muted-foreground">Exterior Emergency Stairs ({stairs.length})</span></div>
+                        <button type="button" onClick={() => onAddExteriorEmergencyStair(selBldg.id)} disabled={selBldg.locked} className="flex items-center gap-1 h-6 px-2 rounded-lg border border-red-300/60 text-[9px] font-bold text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-all disabled:opacity-40"><Plus className="h-3 w-3" /> Add</button>
                       </div>
-                    )}
-                  </div>
-                )}
+                      {stairs.length === 0 ? <p className="text-[9px] text-muted-foreground italic">No exterior emergency stair configured.</p> : (
+                        <div className="space-y-2 max-h-[300px] overflow-y-auto scrollbar-show-on-hover">
+                          {stairs.map((stair, index) => {
+                            const readiness = exteriorEmergencyStairRouteReadiness(selBldg, stair, allNavNodes ?? [], allNavEdges ?? []);
+                            const displayName = stair.label?.trim() || `Exterior Stair ${index + 1}`;
+                            const detailOpen = focused === stair.id;
+                            const servedCount = selBldg.floors.filter((floor) => stair.servedFloorIds.includes(floor.id)).length;
+                            return <div key={stair.id} className="rounded-xl border border-red-200/60 dark:border-red-800/40 bg-red-50/35 dark:bg-red-950/10 p-2.5 space-y-2">
+                              <div className="flex items-center gap-2">
+                                <button type="button" onClick={() => onFocusExteriorEmergencyStair?.(detailOpen && stairs.length > 1 ? null : stair.id)} className="min-w-0 flex-1 text-left rounded-lg px-1 py-0.5 hover:bg-red-100/60 dark:hover:bg-red-900/20">
+                                  <p className="text-[10px] font-extrabold uppercase tracking-wide text-foreground truncate">{displayName}</p>
+                                  <p className="text-[8px] text-muted-foreground">{BUILDING_ENTRANCE_EDGE_LABELS[stair.attachment.edge]} side · {servedCount} {servedCount === 1 ? "floor" : "floors"} served</p>
+                                </button>
+                                <button type="button" title={`Delete ${displayName}`} aria-label={stairs.length > 1 ? `Delete ${displayName}` : "Delete Exterior Emergency Stair"} onClick={() => setDeleteConfirm({ type: "exteriorEmergencyStair", id: stair.id, stairId: stair.id, buildingId: selBldg.id, label: displayName })} className="w-7 h-7 rounded-lg text-destructive hover:bg-destructive/10 flex items-center justify-center shrink-0"><Trash2 className="h-3 w-3" /></button>
+                              </div>
+                              {detailOpen && <>
+                                <div className="grid grid-cols-2 gap-2">
+                                  <label className="text-[9px] text-muted-foreground">Attached side<CompactDropdown ariaLabel={`${displayName} attached side`} value={stair.attachment.edge} options={Object.entries(BUILDING_ENTRANCE_EDGE_LABELS).map(([edge, label]) => ({ value: edge as BuildingEntranceEdge, label }))} onChange={(nextEdge) => onUpdateExteriorEmergencyStair?.(selBldg.id, stair.id, { attachment: { ...stair.attachment, edge: nextEdge } })} className="mt-1" /></label>
+                                  {(() => {
+                                    const span = stair.attachment.edge === "top" || stair.attachment.edge === "bottom" ? selBldg.width : selBldg.height;
+                                    const range = exteriorEmergencyStairSafeOffsetRange(stair.attachment.edge, span, stair.width, stair.height, stair.visualSize);
+                                    const rawOffset = Number(stair.attachment.offset);
+                                    const normalizedOffset = Number.isFinite(rawOffset) ? rawOffset : 0.5;
+                                    const value = Math.max(range.min, Math.min(range.max, normalizedOffset));
+                                    return <label className="text-[9px] text-muted-foreground">Position <span className="float-right tabular-nums text-foreground">{Math.round(value * 100)}%</span><input aria-label={`${displayName} position along side`} type="range" min={range.min} max={range.max} step={0.01} value={value} onChange={(e) => onUpdateExteriorEmergencyStair?.(selBldg.id, stair.id, { attachment: { ...stair.attachment, offset: Number(e.target.value) } })} className="mt-2 w-full h-1.5 accent-red-600" /></label>;
+                                  })()}
+                                </div>
+                                <label className="block text-[9px] text-muted-foreground">Visual size<CompactDropdown ariaLabel={`${displayName} visual size`} value={stair.visualSize ?? "medium"} options={[{ value: "small", label: "Small" }, { value: "medium", label: "Medium" }, { value: "large", label: "Large" }]} onChange={(nextSize) => onUpdateExteriorEmergencyStair?.(selBldg.id, stair.id, { visualSize: nextSize as ExteriorEmergencyStairVisualSize })} className="mt-1" /></label>
+                                <div className="flex items-center justify-between rounded-lg border border-border/60 bg-background/45 px-2 py-1.5"><span className="text-[9px] text-muted-foreground">State</span><button type="button" onClick={() => onUpdateExteriorEmergencyStair?.(selBldg.id, stair.id, { state: stair.state === "open" ? "closed" : "open" })} className={cn("px-2 py-1 rounded-md border text-[9px] font-bold", stair.state === "open" ? "border-emerald-300 text-emerald-700 dark:text-emerald-300" : "border-amber-300 text-amber-700 dark:text-amber-300")}>{stair.state === "open" ? "Open" : "Closed"}</button></div>
+                                <div><div className="flex items-center justify-between mb-1"><span className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground">Served Floors</span><span className="text-[9px] tabular-nums text-muted-foreground">{servedCount} {servedCount === 1 ? "floor" : "floors"} served</span></div><p className="mb-1.5 text-[8px] leading-snug text-muted-foreground">Choose the Floors that have access to this stair.</p><div className="grid grid-cols-2 gap-1 rounded-lg border border-border/50 bg-background/35 p-1.5">{selBldg.floors.map((floor) => { const checked = stair.servedFloorIds.includes(floor.id); return <label key={floor.id} className={cn("flex min-w-0 items-center gap-1.5 rounded-md px-1.5 py-1 text-[9px] text-foreground transition-colors", checked ? "bg-red-100/70 dark:bg-red-900/20" : "hover:bg-muted/60")}><input type="checkbox" checked={checked} onChange={() => { const servedFloorIds = checked ? stair.servedFloorIds.filter((id) => id !== floor.id) : [...stair.servedFloorIds, floor.id]; onUpdateExteriorEmergencyStair?.(selBldg.id, stair.id, { servedFloorIds }); }} className="accent-red-600 shrink-0" /><span className="truncate">{floor.label}</span></label>; })}</div></div>
+                                <div className="flex items-center justify-between text-[9px] border-t border-red-200/50 dark:border-red-800/30 pt-1.5"><span data-testid="exterior-stair-readiness-status" className={cn("font-semibold", stair.state === "closed" ? "text-amber-700 dark:text-amber-300" : readiness.ready ? "text-emerald-700 dark:text-emerald-300" : "text-amber-700 dark:text-amber-300")}>{stair.state === "closed" ? "Closed" : readiness.ready ? "Ready" : "Needs attention"}</span><span className="text-muted-foreground">Emergency evacuation</span></div>
+                                {!readiness.ready && <div data-testid="exterior-stair-readiness-issue" className="flex items-start gap-1.5 rounded-lg border border-amber-300/60 bg-amber-50/70 px-2 py-1.5 text-[8px] leading-snug text-amber-800 dark:border-amber-800/50 dark:bg-amber-950/20 dark:text-amber-200"><AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" /><span>{stair.state === "closed" ? "Open the stair when it is available for evacuation." : readiness.issue ?? "Connect the stair to the required local and outdoor walking networks."}</span></div>}
+                              </>}
+                            </div>;
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
                 {/* ── Room Navigation Status ── */}
                 <div className="pt-2 border-t border-border">
                   <span className={labelCls}>Rooms & Navigation</span>
@@ -1484,7 +1510,12 @@ export function PropertiesPanel({
                   {[["x", "X"], ["y", "Y"]].map(([k, l]) => (
                     <div key={k}>
                       <label htmlFor={`bldg-${k}`} className={labelCls}>{l}</label>
-                      <input id={`bldg-${k}`} type="number" value={(selBldg as any)[k]} onChange={(e) => onUpdateBuilding(selBldg.id, { [k]: parseInt(e.target.value) || 0 })} className={`${inputCls} font-mono`} />
+                      <CommittedNumberInput
+                        id={`bldg-${k}`}
+                        value={(selBldg as any)[k]}
+                        onCommit={(value) => onUpdateBuilding(selBldg.id, { [k]: value })}
+                        className={`${inputCls} font-mono`}
+                      />
                     </div>
                   ))}
                 </div>
@@ -1492,7 +1523,13 @@ export function PropertiesPanel({
                   {[["width", "Width"], ["height", "Height"]].map(([k, l]) => (
                     <div key={k}>
                       <label htmlFor={`bldg-${k}`} className={labelCls}>{l}</label>
-                      <input id={`bldg-${k}`} type="number" min={20} value={(selBldg as any)[k]} onChange={(e) => onUpdateBuilding(selBldg.id, { [k]: Math.max(20, parseInt(e.target.value) || 40) })} className={`${inputCls} font-mono`} />
+                      <CommittedNumberInput
+                        id={`bldg-${k}`}
+                        value={(selBldg as any)[k]}
+                        min={20}
+                        onCommit={(value) => onUpdateBuilding(selBldg.id, { [k]: Math.max(20, value) })}
+                        className={`${inputCls} font-mono`}
+                      />
                     </div>
                   ))}
                 </div>
@@ -1686,9 +1723,18 @@ export function PropertiesPanel({
                   value={selEntrance.offset}
                   min={0}
                   max={1}
-                  step={0.05}
+                  step={0.01}
                   disabled={entranceLocked}
                   onCommit={(offset) => onUpdateEntrance(selEntranceParent.id, selEntrance.id, { offset })}
+                  onKeyDown={(event) => {
+                    if (!event.key.startsWith("Arrow")) return;
+                    event.preventDefault();
+                    const delta = entranceAttachmentArrowDelta(selEntrance.edge, event.key, event.shiftKey ? 10 : 1);
+                    if (delta === null) return;
+                    const current = Number(event.currentTarget.value);
+                    const offset = clampNormalizedOffset((Number.isFinite(current) ? current : selEntrance.offset) + delta / 100);
+                    onUpdateEntrance(selEntranceParent.id, selEntrance.id, { offset });
+                  }}
                   format={(v) => `${Math.round(v * 100)}%`}
                   className="flex-1"
                 />
@@ -1910,7 +1956,12 @@ export function PropertiesPanel({
                 {[["x", "X"], ["y", "Y"]].map(([k, l]) => (
                   <div key={k}>
                     <label htmlFor={`mkr-${k}`} className={labelCls}>{l}</label>
-                    <input id={`mkr-${k}`} type="number" value={(selMkr as any)[k]} onChange={(e) => onUpdateMarker(selMkr.id, { [k]: parseInt(e.target.value) || 0 })} className={inputCls} />
+                    <CommittedNumberInput
+                      id={`mkr-${k}`}
+                      value={(selMkr as any)[k]}
+                      onCommit={(value) => onUpdateMarker(selMkr.id, { [k]: value })}
+                      className={inputCls}
+                    />
                   </div>
                 ))}
               </div>
@@ -3192,45 +3243,6 @@ export function PropertiesPanel({
 // Local draft + commit on blur/Enter/pointer-release, so each meaningful change
 // produces exactly ONE undoable history state instead of one per keystroke/tick.
 
-function CommittedNumberInput({ id, value, min, max, step, onCommit, className, placeholder }: {
-  id: string;
-  value: number;
-  min?: number;
-  max?: number;
-  step?: number;
-  onCommit: (v: number) => void;
-  className?: string;
-  placeholder?: string;
-}) {
-  const [draft, setDraft] = useState<string | null>(null);
-  const commit = () => {
-    const raw = draft;
-    setDraft(null);
-    if (raw === null) return;
-    const num = parseFloat(raw);
-    if (Number.isNaN(num)) return;
-    let v = num;
-    if (min !== undefined) v = Math.max(min, v);
-    if (max !== undefined) v = Math.min(max, v);
-    if (v !== value) onCommit(v);
-  };
-  return (
-    <input
-      id={id}
-      type="number"
-      min={min}
-      max={max}
-      step={step}
-      value={draft ?? String(value)}
-      onChange={(e) => setDraft(e.target.value)}
-      onBlur={commit}
-      onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
-      className={className}
-      placeholder={placeholder}
-    />
-  );
-}
-
 function CommittedTextInput({ id, value, onCommit, className, placeholder, disabled }: {
   id: string;
   value: string;
@@ -3268,13 +3280,14 @@ function CommittedTextInput({ id, value, onCommit, className, placeholder, disab
   );
 }
 
-function CommittedSlider({ id, value, min, max, step, onCommit, format, className, disabled }: {
+function CommittedSlider({ id, value, min, max, step, onCommit, onKeyDown, format, className, disabled }: {
   id: string;
   value: number;
   min: number;
   max: number;
   step: number;
   onCommit: (v: number) => void;
+  onKeyDown?: (event: React.KeyboardEvent<HTMLInputElement>) => void;
   format: (v: number) => string;
   className?: string;
   disabled?: boolean;
@@ -3298,6 +3311,7 @@ function CommittedSlider({ id, value, min, max, step, onCommit, format, classNam
         onChange={(e) => setDraft(parseFloat(e.target.value))}
         onBlur={commit}
         onPointerUp={commit}
+        onKeyDown={onKeyDown}
         className={cn("h-1.5 accent-primary", className)}
         disabled={disabled}
       />

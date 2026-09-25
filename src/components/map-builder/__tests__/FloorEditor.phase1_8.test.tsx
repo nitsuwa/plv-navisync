@@ -1786,6 +1786,101 @@ describe("Phase 1.8 — multi-selection persists through drag and right-click", 
     await waitFor(() => expect(latestCampus!.buildings[0].floors[0].rooms).toHaveLength(2));
   });
 
+  it("duplicates a selected Room with its visual setup while preserving navigation arrays", async () => {
+    const campus = makeFloorManagementCampus();
+    const floor = campus.buildings[0].floors[0];
+    floor.canvasW = 220;
+    floor.canvasH = 160;
+    floor.rooms[0] = { ...floor.rooms[0], x: 20, y: 20, w: 50, h: 40 };
+    floor.walls[0] = { ...floor.walls[0], x1: 20, y1: 20, x2: 70, y2: 20 };
+    floor.doors[0] = { ...floor.doors[0], x: 45, y: 20 };
+    floor.windows[0] = { ...floor.windows[0], x: 58, y: 20 };
+    floor.furniture = [
+      { id: "inside-furniture", type: "desk", name: "Inside Desk", category: "tables", x: 30, y: 30, width: 18, height: 10, rotation: 25, color: "#7a5c3a", groupId: "source-group" },
+      { id: "outside-furniture", type: "desk", name: "Outside Desk", category: "tables", x: 100, y: 85, width: 24, height: 14, rotation: 0, color: "#7a5c3a" },
+    ];
+    floor.walls[0].endAnchor = { targetType: "room", roomId: "neighbor-room", edge: "left", offset: 0.5 };
+    campus.navNodes = [{ id: "nav-1", name: "Room access", type: "room", x: 70, y: 70, accessible: true, color: "#2563eb", roomId: "r1", buildingId: "b1", floorId: "f1" }];
+    campus.navEdges = [{ id: "edge-1", type: "hallway", startNodeId: "nav-1", endNodeId: "nav-1", distance: 0, bidirectional: true }];
+    const originalNavNodes = structuredClone(campus.navNodes);
+    const originalNavEdges = structuredClone(campus.navEdges);
+    let latestCampus: Campus | null = null;
+    const { container } = render(<Harness initialCampus={campus} onCampusChange={(value) => { latestCampus = value; }} />);
+    const svg = stubSvgRect(container);
+    const room = roomGroup(container);
+    fireEvent.mouseDown(room, { clientX: 45, clientY: 40, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+
+    expect(screen.getByTestId("room-setup-section")).toHaveTextContent("1 Wall");
+    fireEvent.click(screen.getByTestId("duplicate-room-with-contents"));
+    await waitFor(() => expect(latestCampus?.buildings[0].floors[0].rooms).toHaveLength(2));
+
+    const nextFloor = latestCampus!.buildings[0].floors[0];
+    const copiedRoom = nextFloor.rooms.find((candidate) => candidate.id !== "r1")!;
+    const copiedWall = nextFloor.walls.find((candidate) => candidate.id !== "w1")!;
+    expect(copiedRoom).toBeTruthy();
+    expect(copiedWall).toBeTruthy();
+    expect(copiedWall.id).not.toBe("w1");
+    expect(copiedWall.startAnchor?.roomId).toBe(copiedRoom.id);
+    expect(copiedWall.endAnchor).toBeUndefined();
+    expect(nextFloor.doors).toHaveLength(2);
+    expect(nextFloor.windows).toHaveLength(2);
+    expect(nextFloor.furniture).toHaveLength(3);
+    expect(nextFloor.furniture.some((item) => item.id !== "inside-furniture" && item.groupId && item.groupId !== "source-group")).toBe(true);
+    expect(latestCampus!.navNodes).toEqual(originalNavNodes);
+    expect(latestCampus!.navEdges).toEqual(originalNavEdges);
+
+    fireEvent.keyDown(window, { key: "z", ctrlKey: true });
+    await waitFor(() => expect(latestCampus!.buildings[0].floors[0].rooms).toHaveLength(1));
+    expect(latestCampus!.buildings[0].floors[0].walls).toHaveLength(1);
+    expect(latestCampus!.navNodes).toEqual(originalNavNodes);
+    fireEvent.keyDown(window, { key: "y", ctrlKey: true });
+    await waitFor(() => expect(latestCampus!.buildings[0].floors[0].rooms).toHaveLength(2));
+  });
+
+  it("moves a selected Room Setup by one exact rigid delta and allows Room-to-perimeter contact", async () => {
+    const campus = makeFloorManagementCampus();
+    const floor = campus.buildings[0].floors[0];
+    floor.canvasW = 220;
+    floor.canvasH = 160;
+    floor.rooms[0] = { ...floor.rooms[0], x: 20, y: 20, w: 50, h: 40 };
+    floor.walls[0] = { ...floor.walls[0], x1: 20, y1: 20, x2: 70, y2: 20, startAnchor: { targetType: "room", roomId: "r1", edge: "top", offset: 0.5 } };
+    floor.doors[0] = { ...floor.doors[0], x: 45, y: 20, wallId: "w1" };
+    floor.windows[0] = { ...floor.windows[0], x: 58, y: 20, wallId: "w1" };
+    floor.furniture = [{ id: "inside-furniture", type: "desk", name: "Inside Desk", category: "tables", x: 30, y: 30, width: 18, height: 10, rotation: 25, color: "#7a5c3a" }];
+    campus.navNodes = [{ id: "nav-1", name: "Room access", type: "room", x: 70, y: 70, accessible: true, color: "#2563eb", roomId: "r1", buildingId: "b1", floorId: "f1" }];
+    campus.navEdges = [{ id: "edge-1", type: "hallway", startNodeId: "nav-1", endNodeId: "nav-1", distance: 0, bidirectional: true }];
+    const sourceFloor = structuredClone(floor);
+    const originalNavNodes = structuredClone(campus.navNodes);
+    const originalNavEdges = structuredClone(campus.navEdges);
+    let latestCampus: Campus | null = null;
+    const { container } = render(<Harness initialCampus={campus} onCampusChange={(value) => { latestCampus = value; }} />);
+    const svg = stubSvgRect(container);
+    const room = roomGroup(container);
+    fireEvent.mouseDown(room, { clientX: 45, clientY: 40, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    fireEvent.click(screen.getByTestId("select-room-setup"));
+    expect(screen.getByText("5 selected")).toBeInTheDocument();
+
+    fireEvent.mouseDown(roomGroup(container), { clientX: 45, clientY: 40, bubbles: true });
+    fireEvent.mouseMove(svg, { clientX: 25, clientY: 20, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+
+    await waitFor(() => expect(latestCampus!.buildings[0].floors[0].rooms[0].x).toBe(0));
+    const nextFloor = latestCampus!.buildings[0].floors[0];
+    expect(nextFloor.rooms[0].y).toBe(0);
+    expect(nextFloor.walls[0].x1).toBe(0);
+    expect(nextFloor.walls[0].y1).toBe(0);
+    expect(nextFloor.doors[0].x - sourceFloor.doors[0].x).toBe(-20);
+    expect(nextFloor.doors[0].y).toBe(0);
+    expect(nextFloor.windows[0].x - sourceFloor.windows[0].x).toBe(-20);
+    expect(nextFloor.windows[0].y).toBe(0);
+    expect(nextFloor.furniture[0].x - sourceFloor.furniture[0].x).toBe(-20);
+    expect(nextFloor.furniture[0].y - sourceFloor.furniture[0].y).toBe(-20);
+    expect(latestCampus!.navNodes).toEqual(originalNavNodes);
+    expect(latestCampus!.navEdges).toEqual(originalNavEdges);
+  });
+
   it("duplicates multi-selections with Ctrl+D and does not hijack focused inputs", () => {
     const { container } = render(<Harness onCampusChange={(c) => { latestCampus = c; }} />);
 
@@ -2888,6 +2983,11 @@ describe("B7 Final — Outdoor-style alignment guides + keyboard collision", () 
 
     // After pointer-up, guides must be gone.
     fireEvent.mouseUp(svg, { bubbles: true });
+    await waitFor(() => {
+      const released = latestCampus!.buildings[0].floors[0].rooms.find((r) => r.id === "r1")!;
+      expect(released.x).toBe(30);
+      expect(released.x + released.w).toBe(80);
+    });
     expect(container.querySelectorAll("[data-testid='room-align-guide']").length).toBe(0);
   });
 

@@ -644,6 +644,9 @@ export interface FloorUndoEntry {
    */
   campusNavNodes?: NavigationNode[];
   campusNavEdges?: NavigationEdge[];
+  /** Editor-only marker for visual Floor edits that must restore without
+   * invoking navigation reconciliation. Never persisted to Campus data. */
+  visualOnly?: boolean;
 }
 
 /** B5 Phase 2: floor-scoped indoor nav graph state (reused by undo entries). */
@@ -1069,6 +1072,8 @@ export interface FurnitureCategory {
   id: string;
   label: string;
   icon: string;
+  /** Optional search aliases that describe every item in the category. */
+  keywords?: readonly string[];
   items: FurnitureItemTemplate[];
 }
 
@@ -1086,6 +1091,8 @@ export interface FurnitureItemTemplate {
   palette?: "primary" | "advanced";
   /** Optional short description shown in the editor's rich asset tooltip. */
   description?: string;
+  /** Optional search aliases without changing the persisted furniture type. */
+  keywords?: readonly string[];
 }
 
 // ── Room type descriptor ────────────────────────────────────────────────────

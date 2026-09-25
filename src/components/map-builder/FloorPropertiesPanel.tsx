@@ -14,6 +14,10 @@ import type {
 import { elevatorSystemNumberOf } from "./types";
 import { doorDisplayName, type EntranceIndoorLinkStatus } from "../../lib/entranceTransitions";
 import { rotationDisplayAngle } from "../../lib/campusSelection";
+import { clampNormalizedOffset, wallAttachmentArrowDelta } from "../../lib/wallAttachmentControls";
+import { formatWallLength, wallLength, type WallLengthAnchor } from "../../lib/floorGeometry";
+import { roomVisualSetup } from "../../lib/roomSetup";
+import { CommittedNumberInput } from "./CommittedNumberInput";
 
 type TabId = "basic" | "style" | "advanced";
 
@@ -33,6 +37,12 @@ interface FloorPropertiesPanelProps {
   labels: FloorLabel[];
   onUpdateRoom: (id: string, changes: Partial<FloorRoom>) => void;
   onUpdateWall: (id: string, changes: Partial<FloorWall>) => void;
+  onUpdateWallLength?: (id: string, length: number) => void;
+  wallLengthAnchor?: WallLengthAnchor;
+  wallLengthAnchorRequiresChoice?: boolean;
+  onWallLengthAnchorChange?: (anchor: WallLengthAnchor) => void;
+  onBeginWallLengthMatch?: () => void;
+  wallLengthMatchActive?: boolean;
   onApplyWallStyleToFloor?: (style: { color: string; thickness: number; material: string }) => void;
   /** @deprecated compatibility for existing embedders; style action is preferred. */
   onApplyWallColorToFloor?: (color: string) => void;
@@ -103,6 +113,9 @@ interface FloorPropertiesPanelProps {
   onGoToFloor?: (floorId: string) => void;
   onDeleteSelected: () => void;
   onDuplicateSelected: () => void;
+  onDuplicateRoomWithContents?: () => void;
+  onDuplicateRoomOnly?: () => void;
+  onSelectRoomSetup?: () => void;
   onSetSelectedState: (changes: { visible?: boolean; locked?: boolean }) => void;
   onLayerAction: (action: "bring-forward" | "send-backward" | "bring-front" | "send-back") => void;
   onClose: () => void;
@@ -264,17 +277,82 @@ function SegmentControl<T extends string>({ value, options, onChange }: {
 
 function effectiveDoorType(door: FloorDoor): "single" | "double" {
   return door.doorType ?? (door.direction === "double" ? "double" : "single");
-}export function FloorPropertiesPanel({
+}
+
+function WallOffsetInput({ value, wall, className, onCommit }: {
+  value: number;
+  wall: Pick<FloorWall, "x1" | "y1" | "x2" | "y2">;
+  className?: string;
+  onCommit: (offset: number) => void;
+}) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const currentPercent = Math.round(clampNormalizedOffset(Number.isFinite(value) ? value : 0.5) * 100);
+  const displayValue = draft ?? String(currentPercent);
+
+  const commit = () => {
+    if (draft === null) return;
+    const raw = draft.trim();
+    setDraft(null);
+    if (raw === "") return;
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed)) return;
+    const nextPercent = Math.max(0, Math.min(100, parsed));
+    if (nextPercent !== currentPercent) onCommit(nextPercent / 100);
+  };
+
+  return (
+    <input
+      type="text"
+      inputMode="numeric"
+      min={0}
+      max={100}
+      value={displayValue}
+      onChange={(event) => setDraft(event.target.value)}
+      onBlur={commit}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          event.currentTarget.blur();
+          return;
+        }
+        if (event.key === "Escape") {
+          event.preventDefault();
+          setDraft(null);
+          event.currentTarget.blur();
+          return;
+        }
+        if (!event.key.startsWith("Arrow")) return;
+        const delta = wallAttachmentArrowDelta(wall, event.key, event.shiftKey ? 10 : 1);
+        // Keep the value field from moving the page when an arrow on the
+        // wrong axis is pressed. Side walls intentionally use Up/Down.
+        event.preventDefault();
+        if (delta === null) return;
+        const typed = draft === null ? NaN : Number(draft.trim());
+        const base = Number.isFinite(typed) ? typed / 100 : currentPercent / 100;
+        const next = clampNormalizedOffset(base + delta / 100);
+        setDraft(String(Math.round(next * 100)));
+        onCommit(next);
+      }}
+      className={className}
+      aria-label="Position along wall percent"
+    />
+  );
+}
+
+export function FloorPropertiesPanel({
   selected,
   mode,
   issueItems = [],
   rooms, walls, doors, windows, furniture, stairs, ramps, elevators, labels,
-  onUpdateRoom, onUpdateWall, onUpdateDoor, onUpdateWindow,
+  onUpdateRoom, onUpdateWall, onUpdateWallLength, wallLengthAnchor = "start", wallLengthAnchorRequiresChoice = false,
+  onWallLengthAnchorChange, onBeginWallLengthMatch, wallLengthMatchActive = false,
+  onUpdateDoor, onUpdateWindow,
   onApplyWallStyleToFloor,
   onApplyWallColorToFloor,
   onUpdateFurniture,  onUpdateStairs, onUpdateRamp, onUpdateElevator, onUpdateLabel,
   onToggleNavConnection,
-  onDeleteSelected, onDuplicateSelected, onSetSelectedState, onLayerAction, onClose,
+  onDeleteSelected, onDuplicateSelected, onDuplicateRoomWithContents, onDuplicateRoomOnly, onSelectRoomSetup,
+  onSetSelectedState, onLayerAction, onClose,
   floorId, buildingFloors, circulationGroups, circulationNavStatus, physicalNavStatus,
   entranceConnectionStatus,
   roomDoorStatus,
@@ -321,6 +399,7 @@ function effectiveDoorType(door: FloorDoor): "single" | "double" {
   if (!selected) return null;
 
   const selRoom = selected.type === "room" ? rooms.find((r) => r.id === selected.id) : undefined;
+  const selectedRoomSetup = selRoom ? roomVisualSetup(selRoom, walls, doors, windows, furniture) : undefined;
   const selWall = selected.type === "wall" ? walls.find((w) => w.id === selected.id) : undefined;
   const selDoor = selected.type === "door" ? doors.find((d) => d.id === selected.id) : undefined;
   const selWindow = selected.type === "window" ? windows.find((w) => w.id === selected.id) : undefined;
@@ -1366,7 +1445,11 @@ function effectiveDoorType(door: FloorDoor): "single" | "double" {
     <div className="grid grid-cols-2 gap-2">
       {[["x", "X"], ["y", "Y"]].map(([k, l]) => (
         <Field key={k} label={l}>
-          <input type="number" value={(k === "x" ? x : y)} onChange={(e) => onChange(k, parseInt(e.target.value) || 0)} className={`${inputCls} font-mono`} />
+          <CommittedNumberInput
+            value={k === "x" ? x : y}
+            onCommit={(value) => onChange(k, value)}
+            className={`${inputCls} font-mono`}
+          />
         </Field>
       ))}
     </div>
@@ -1375,10 +1458,10 @@ function effectiveDoorType(door: FloorDoor): "single" | "double" {
   const SizeFields = ({ w, h }: { w: number; h: number }) => (
     <div className="grid grid-cols-2 gap-2">
       <Field label="Width">
-        <input type="number" value={w} className={`${inputCls} font-mono`} disabled />
+        <CommittedNumberInput value={w} className={`${inputCls} font-mono`} disabled onCommit={() => {}} />
       </Field>
       <Field label="Height">
-        <input type="number" value={h} className={`${inputCls} font-mono`} disabled />
+        <CommittedNumberInput value={h} className={`${inputCls} font-mono`} disabled onCommit={() => {}} />
       </Field>
     </div>
   );
@@ -1483,10 +1566,10 @@ function effectiveDoorType(door: FloorDoor): "single" | "double" {
                 <PositionFields x={selRoom.x} y={selRoom.y} onChange={(k, v) => onUpdateRoom(selRoom.id, { [k]: v })} />
                 <div className="grid grid-cols-2 gap-2">
                   <Field label="Width">
-                    <input type="number" min={20} value={selRoom.w} onChange={(e) => onUpdateRoom(selRoom.id, { w: Math.max(20, parseInt(e.target.value) || 20) })} className={`${inputCls} font-mono`} />
+                    <CommittedNumberInput value={selRoom.w} min={20} onCommit={(value) => onUpdateRoom(selRoom.id, { w: Math.max(20, value) })} className={`${inputCls} font-mono`} />
                   </Field>
                   <Field label="Height">
-                    <input type="number" min={15} value={selRoom.h} onChange={(e) => onUpdateRoom(selRoom.id, { h: Math.max(15, parseInt(e.target.value) || 15) })} className={`${inputCls} font-mono`} />
+                    <CommittedNumberInput value={selRoom.h} min={15} onCommit={(value) => onUpdateRoom(selRoom.id, { h: Math.max(15, value) })} className={`${inputCls} font-mono`} />
                   </Field>
                 </div>
                 <Field label="Rotation">
@@ -1498,6 +1581,46 @@ function effectiveDoorType(door: FloorDoor): "single" | "double" {
                   </div>
                 </Field>
             </div>
+            {selectedRoomSetup && (
+              <div className="pt-3 border-t border-border space-y-2.5" data-testid="room-setup-section">
+                <div className="flex items-center justify-between gap-2">
+                  <p className={labelCls}>Room Setup</p>
+                  <span className="text-[9px] font-semibold text-muted-foreground">
+                    {selectedRoomSetup.wallIds.length} {selectedRoomSetup.wallIds.length === 1 ? "Wall" : "Walls"}
+                    {" • "}
+                    {selectedRoomSetup.doorIds.length + selectedRoomSetup.windowIds.length} {selectedRoomSetup.doorIds.length + selectedRoomSetup.windowIds.length === 1 ? "Opening" : "Openings"}
+                    {" • "}
+                    {selectedRoomSetup.furnitureIds.length} {selectedRoomSetup.furnitureIds.length === 1 ? "Furniture" : "Furniture"}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  data-testid="duplicate-room-with-contents"
+                  onClick={onDuplicateRoomWithContents ?? onDuplicateSelected}
+                  className="w-full h-8 rounded-lg bg-primary px-2 text-[10px] font-extrabold text-primary-foreground hover:bg-primary/90 transition-colors"
+                >
+                  <span className="flex items-center justify-center gap-1.5"><Copy className="h-3 w-3" /> Duplicate Room + Contents</span>
+                </button>
+                <div className="grid grid-cols-2 gap-1.5">
+                  <button
+                    type="button"
+                    data-testid="duplicate-room-only"
+                    onClick={onDuplicateRoomOnly ?? onDuplicateSelected}
+                    className="h-7 rounded-lg border border-border bg-background/70 px-2 text-[9px] font-bold text-foreground hover:bg-muted transition-colors"
+                  >
+                    Duplicate Room Only
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="select-room-setup"
+                    onClick={onSelectRoomSetup}
+                    className="h-7 rounded-lg border border-border bg-background/70 px-2 text-[9px] font-bold text-foreground hover:bg-muted transition-colors"
+                  >
+                    Select Room Setup
+                  </button>
+                </div>
+              </div>
+            )}
             <RoomNavigationCard />
             <button onClick={onDeleteSelected}
               className="w-full h-9 rounded-xl border border-destructive/30 text-xs font-bold text-destructive hover:bg-destructive/10 transition-colors">
@@ -1578,9 +1701,72 @@ function effectiveDoorType(door: FloorDoor): "single" | "double" {
                     </Field>
                   </div>
                 </details>
-                <div className="px-2.5 py-2 rounded-xl border border-border text-[10px] bg-muted/30 text-muted-foreground space-y-1">
-                  <div className="flex justify-between"><span>Length</span><span className="font-mono font-bold">{Math.round(Math.sqrt((selWall.x2 - selWall.x1) ** 2 + (selWall.y2 - selWall.y1) ** 2))}</span></div>
-                  <div className="flex justify-between"><span>Angle</span><span className="font-mono font-bold">{Math.round((Math.atan2(selWall.y2 - selWall.y1, selWall.x2 - selWall.x1) * 180) / Math.PI)}°</span></div>
+                <div className="rounded-xl border border-border bg-muted/10 p-2.5 space-y-2" data-testid="wall-geometry-controls">
+                  <Field label="Length">
+                    {selWall.managedKind === "perimeter" ? (
+                      <div className="flex h-9 items-center justify-between rounded-xl border border-border bg-muted/30 px-3 text-xs text-muted-foreground" data-testid="wall-length-managed">
+                        <span className="font-mono font-bold text-foreground">{formatWallLength(wallLength(selWall))}</span>
+                        <span className="text-[9px] font-bold">Floor size</span>
+                      </div>
+                    ) : (
+                      <CommittedNumberInput
+                        value={wallLength(selWall)}
+                        min={0.1}
+                        step={0.1}
+                        onCommit={(value) => onUpdateWallLength?.(selWall.id, value)}
+                        onStep={(delta, baseValue) => onUpdateWallLength?.(selWall.id, baseValue + delta)}
+                        className={inputCls}
+                        aria-label="Wall Length"
+                        data-testid="wall-length-input"
+                      />
+                    )}
+                  </Field>
+                  {selWall.managedKind === "perimeter" ? (
+                    <p className="text-[9px] leading-snug text-muted-foreground">Managed by Floor dimensions.</p>
+                  ) : (
+                    <>
+                      <Field label="Keep Fixed">
+                        <SegmentControl
+                          value={wallLengthAnchor}
+                          options={[
+                            { value: "start" as const, label: "Start" },
+                            { value: "center" as const, label: "Center" },
+                            { value: "end" as const, label: "End" },
+                          ]}
+                          onChange={(value) => onWallLengthAnchorChange?.(value)}
+                        />
+                      </Field>
+                      {wallLengthAnchorRequiresChoice && (
+                        <p className="rounded-lg border border-amber-300/60 bg-amber-50/70 px-2 py-1.5 text-[9px] leading-snug text-amber-800 dark:border-amber-700/50 dark:bg-amber-950/20 dark:text-amber-200">
+                          Both Wall ends are connected. Choose which end to keep fixed before editing its length.
+                        </p>
+                      )}
+                      {onBeginWallLengthMatch && (
+                        <button
+                          type="button"
+                          data-testid="match-wall-length"
+                          onClick={onBeginWallLengthMatch}
+                          className={cn(
+                            "w-full h-8 rounded-lg border px-2 text-[10px] font-extrabold transition-colors",
+                            wallLengthMatchActive
+                              ? "border-primary bg-primary/10 text-primary"
+                              : "border-border bg-background/70 text-foreground hover:bg-muted",
+                          )}
+                        >
+                          {wallLengthMatchActive ? "Cancel Match" : "Match another Wall"}
+                        </button>
+                      )}
+                      {wallLengthMatchActive && (
+                        <p className="rounded-lg border border-primary/25 bg-primary/5 px-2 py-1.5 text-[9px] leading-snug text-primary" data-testid="wall-length-match-instruction">
+                          Select another authored Wall to copy its exact length. Press Escape to cancel.
+                        </p>
+                      )}
+                    </>
+                  )}
+                  <div className="flex justify-between border-t border-border/70 pt-2 text-[10px] text-muted-foreground">
+                    <span>Angle</span>
+                    <span className="font-mono font-bold text-foreground">{Math.round((Math.atan2(selWall.y2 - selWall.y1, selWall.x2 - selWall.x1) * 180) / Math.PI)}°</span>
+                  </div>
                 </div>
                 <div className="pt-3 border-t border-border space-y-2">
                   <button onClick={onDuplicateSelected}
@@ -1604,7 +1790,7 @@ function effectiveDoorType(door: FloorDoor): "single" | "double" {
                 <div className="px-2.5 py-2 rounded-xl border border-border text-[10px] bg-muted/30 text-muted-foreground space-y-1">
                   <div className="flex justify-between"><span>Start</span><span className="font-mono font-bold">({selWall.x1}, {selWall.y1})</span></div>
                   <div className="flex justify-between"><span>End</span><span className="font-mono font-bold">({selWall.x2}, {selWall.y2})</span></div>
-                  <div className="flex justify-between"><span>Length</span><span className="font-mono font-bold">{Math.round(Math.sqrt((selWall.x2 - selWall.x1) ** 2 + (selWall.y2 - selWall.y1) ** 2))}</span></div>
+                  <div className="flex justify-between"><span>Length</span><span className="font-mono font-bold">{formatWallLength(wallLength(selWall))}</span></div>
                 </div>
                 <div className="pt-3 border-t border-border">
                   <button onClick={onDeleteSelected}
@@ -1634,17 +1820,25 @@ function effectiveDoorType(door: FloorDoor): "single" | "double" {
                       </div>
                     </Field>
                     <Field label="Position Along Wall">
-                      <input type="number" min={0} max={100} value={Math.round((selDoor.offset ?? 0.5) * 100)}
-                        onChange={(e) => onUpdateDoor(selDoor.id, { offset: Math.max(0, Math.min(1, (parseInt(e.target.value) || 0) / 100)) })}
-                        className={`${inputCls} font-mono`} />
+                      <WallOffsetInput
+                        value={selDoor.offset ?? 0.5}
+                        wall={selDoorWall ?? { x1: 0, y1: 0, x2: 1, y2: 0, thickness: 1, color: "#000000" }}
+                        onCommit={(offset) => onUpdateDoor(selDoor.id, { offset })}
+                        className={`${inputCls} font-mono`}
+                      />
                     </Field>
                   </>
                 ) : (
                   <PositionFields x={selDoor.x} y={selDoor.y} onChange={(k, v) => onUpdateDoor(selDoor.id, { [k]: v })} />
                 )}
                 <Field label="Width">
-                  <input type="number" min={effectiveDoorType(selDoor) === "double" ? 28 : 10} max={effectiveDoorType(selDoor) === "double" ? 72 : 48} value={selDoor.width} onChange={(e) => onUpdateDoor(selDoor.id, { width: parseInt(e.target.value) || (effectiveDoorType(selDoor) === "double" ? 36 : 18) })}
-                    className={`${inputCls} font-mono`} />
+                  <CommittedNumberInput
+                    min={effectiveDoorType(selDoor) === "double" ? 28 : 10}
+                    max={effectiveDoorType(selDoor) === "double" ? 72 : 48}
+                    value={selDoor.width}
+                    onCommit={(value) => onUpdateDoor(selDoor.id, { width: value })}
+                    className={`${inputCls} font-mono`}
+                  />
                 </Field>
                 {isOpenPassage && (
                   <Field label="Direction">
@@ -1737,17 +1931,25 @@ function effectiveDoorType(door: FloorDoor): "single" | "double" {
                       </div>
                     </Field>
                     <Field label="Position Along Wall">
-                      <input type="number" min={0} max={100} value={Math.round((selWindow.offset ?? 0.5) * 100)}
-                        onChange={(e) => onUpdateWindow(selWindow.id, { offset: Math.max(0, Math.min(1, (parseInt(e.target.value) || 0) / 100)) })}
-                        className={`${inputCls} font-mono`} />
+                      <WallOffsetInput
+                        value={selWindow.offset ?? 0.5}
+                        wall={selWindowWall ?? { x1: 0, y1: 0, x2: 1, y2: 0, thickness: 1, color: "#000000" }}
+                        onCommit={(offset) => onUpdateWindow(selWindow.id, { offset })}
+                        className={`${inputCls} font-mono`}
+                      />
                     </Field>
                   </>
                 ) : (
                   <PositionFields x={selWindow.x} y={selWindow.y} onChange={(k, v) => onUpdateWindow(selWindow.id, { [k]: v })} />
                 )}
                 <Field label="Width">
-                  <input type="number" min={10} max={72} value={selWindow.width} onChange={(e) => onUpdateWindow(selWindow.id, { width: parseInt(e.target.value) || 28 })}
-                    className={`${inputCls} font-mono`} />
+                  <CommittedNumberInput
+                    min={10}
+                    max={72}
+                    value={selWindow.width}
+                    onCommit={(value) => onUpdateWindow(selWindow.id, { width: value })}
+                    className={`${inputCls} font-mono`}
+                  />
                 </Field>
                 <Field label="Color">
                   <ColorPicker value={selWindow.color} onChange={(c) => onUpdateWindow(selWindow.id, { color: c })} />
@@ -1793,20 +1995,18 @@ function effectiveDoorType(door: FloorDoor): "single" | "double" {
             </Field>
             <div className="grid grid-cols-2 gap-2">
               <Field label="Width">
-                <input
-                  type="number"
+                <CommittedNumberInput
                   min={8}
                   value={selFurniture.width}
-                  onChange={(e) => onUpdateFurniture(selFurniture.id, { width: Math.max(8, parseInt(e.target.value) || 8) })}
+                  onCommit={(value) => onUpdateFurniture(selFurniture.id, { width: Math.max(8, value) })}
                   className={`${inputCls} font-mono`}
                 />
               </Field>
               <Field label="Height">
-                <input
-                  type="number"
+                <CommittedNumberInput
                   min={8}
                   value={selFurniture.height}
-                  onChange={(e) => onUpdateFurniture(selFurniture.id, { height: Math.max(8, parseInt(e.target.value) || 8) })}
+                  onCommit={(value) => onUpdateFurniture(selFurniture.id, { height: Math.max(8, value) })}
                   className={`${inputCls} font-mono`}
                 />
               </Field>
@@ -1935,10 +2135,10 @@ function effectiveDoorType(door: FloorDoor): "single" | "double" {
                     <PositionFields x={selStairs.x} y={selStairs.y} onChange={(k, v) => onUpdateStairs(selStairs.id, { [k]: v })} />
                 <div className="grid grid-cols-2 gap-2">
                   <Field label="Width">
-                    <input type="number" min={16} value={selStairs.width} onChange={(e) => onUpdateStairs(selStairs.id, { width: Math.max(16, parseInt(e.target.value) || 16) })} className={`${inputCls} font-mono`} />
+                    <CommittedNumberInput min={16} value={selStairs.width} onCommit={(value) => onUpdateStairs(selStairs.id, { width: Math.max(16, value) })} className={`${inputCls} font-mono`} />
                   </Field>
                   <Field label="Height">
-                    <input type="number" min={12} value={selStairs.height} onChange={(e) => onUpdateStairs(selStairs.id, { height: Math.max(12, parseInt(e.target.value) || 12) })} className={`${inputCls} font-mono`} />
+                    <CommittedNumberInput min={12} value={selStairs.height} onCommit={(value) => onUpdateStairs(selStairs.id, { height: Math.max(12, value) })} className={`${inputCls} font-mono`} />
                   </Field>
                 </div>
                 <Field label="Rotation">
@@ -1993,10 +2193,10 @@ function effectiveDoorType(door: FloorDoor): "single" | "double" {
                 <PositionFields x={selRamp.x} y={selRamp.y} onChange={(k, v) => onUpdateRamp(selRamp.id, { [k]: v })} />
                 <div className="grid grid-cols-2 gap-2">
                   <Field label="Width">
-                    <input type="number" min={16} value={selRamp.width} onChange={(e) => onUpdateRamp(selRamp.id, { width: Math.max(16, parseInt(e.target.value) || 16) })} className={`${inputCls} font-mono`} />
+                    <CommittedNumberInput min={16} value={selRamp.width} onCommit={(value) => onUpdateRamp(selRamp.id, { width: Math.max(16, value) })} className={`${inputCls} font-mono`} />
                   </Field>
                   <Field label="Height">
-                    <input type="number" min={12} value={selRamp.height} onChange={(e) => onUpdateRamp(selRamp.id, { height: Math.max(12, parseInt(e.target.value) || 12) })} className={`${inputCls} font-mono`} />
+                    <CommittedNumberInput min={12} value={selRamp.height} onCommit={(value) => onUpdateRamp(selRamp.id, { height: Math.max(12, value) })} className={`${inputCls} font-mono`} />
                   </Field>
                 </div>
                 <Field label="Rotation">
@@ -2055,8 +2255,13 @@ function effectiveDoorType(door: FloorDoor): "single" | "double" {
                     : "Local occurrence · connect it on other floors"}</p>
                 </div>
                 <Field label="Door Width">
-                  <input type="number" min={4} max={12} value={selElevator.doorWidth} onChange={(e) => onUpdateElevator(selElevator.id, { doorWidth: parseInt(e.target.value) || 6 })}
-                    className={inputCls} />
+                  <CommittedNumberInput
+                    min={4}
+                    max={12}
+                    value={selElevator.doorWidth}
+                    onCommit={(value) => onUpdateElevator(selElevator.id, { doorWidth: value })}
+                    className={inputCls}
+                  />
                 </Field>
                 {/* ── Shared ID (for linking the same elevator across floors) ── */}
                 <CirculationGroupControl type="elevator" objectId={selElevator.id} sharedId={selElevator.sharedId} />
@@ -2065,10 +2270,10 @@ function effectiveDoorType(door: FloorDoor): "single" | "double" {
                 <PositionFields x={selElevator.x} y={selElevator.y} onChange={(k, v) => onUpdateElevator(selElevator.id, { [k]: v })} />
                 <div className="grid grid-cols-2 gap-2">
                   <Field label="Width">
-                    <input type="number" min={14} value={selElevator.width} onChange={(e) => onUpdateElevator(selElevator.id, { width: Math.max(14, parseInt(e.target.value) || 14) })} className={`${inputCls} font-mono`} />
+                    <CommittedNumberInput min={14} value={selElevator.width} onCommit={(value) => onUpdateElevator(selElevator.id, { width: Math.max(14, value) })} className={`${inputCls} font-mono`} />
                   </Field>
                   <Field label="Height">
-                    <input type="number" min={14} value={selElevator.height} onChange={(e) => onUpdateElevator(selElevator.id, { height: Math.max(14, parseInt(e.target.value) || 14) })} className={`${inputCls} font-mono`} />
+                    <CommittedNumberInput min={14} value={selElevator.height} onCommit={(value) => onUpdateElevator(selElevator.id, { height: Math.max(14, value) })} className={`${inputCls} font-mono`} />
                   </Field>
                 </div>
                 <Field label="Rotation">
@@ -2127,13 +2332,12 @@ function effectiveDoorType(door: FloorDoor): "single" | "double" {
                 <input aria-label="Label font size" type="range" min={6} max={24} step={1} value={selLabel.fontSize}
                   onChange={(e) => onUpdateLabel(selLabel.id, { fontSize: parseInt(e.target.value) })}
                   className="flex-1 h-1.5 accent-primary" />
-                <input
+                <CommittedNumberInput
                   aria-label="Exact label font size"
-                  type="number"
                   min={6}
                   max={24}
                   value={selLabel.fontSize}
-                  onChange={(e) => onUpdateLabel(selLabel.id, { fontSize: Math.max(6, Math.min(24, parseInt(e.target.value) || 12)) })}
+                  onCommit={(value) => onUpdateLabel(selLabel.id, { fontSize: value })}
                   className="h-8 w-12 rounded-lg border border-border bg-input-background px-1.5 text-center text-xs font-mono text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
                 />
                 <button
