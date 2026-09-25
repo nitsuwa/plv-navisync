@@ -29,13 +29,8 @@ import {
   Magnet,
   Lock,
   Unlock,
-  BringToFront,
-  SendToBack,
-  Eye,
-  EyeOff,
   Group,
   Ungroup,
-  X,
   ChevronDown,
   ChevronUp,
 } from "lucide-react";
@@ -73,6 +68,8 @@ import { EVENT_LAYOUT_PRESETS, getEventLayoutPreset, type EventLayoutPresetId } 
 import { validateEventLayout } from "../../lib/eventLayoutValidation";
 import { useEventViewportMotion } from "./useEventViewportMotion";
 import { EventLayoutIssues } from "./EventLayoutIssues";
+import { EventItemInspector } from "./EventItemInspector";
+import * as Dialog from "@radix-ui/react-dialog";
 import { clientToEventWorld, type GestureFrame } from "../../lib/eventGestureCoordinates";
 
 // ── Tool types ────────────────────────────────────────────────────────────
@@ -314,6 +311,9 @@ export function EventFloorEditor({
   const [snapEnabled, setSnapEnabled] = useState(true);
   const [snapGuides, setSnapGuides] = useState<LayoutSnapGuide[]>([]);
   const [inspectorOpen, setInspectorOpen] = useState(false);
+  const [inspectorViewportCompact, setInspectorViewportCompact] = useState(() => (
+    typeof window !== "undefined" && (window.matchMedia?.("(max-width: 1279px)").matches ?? window.innerWidth < 1280)
+  ));
   const [isPanning, setIsPanning] = useState(false);
   const [pinchActive, setPinchActive] = useState(false);
   const [transforming, setTransforming] = useState(false);
@@ -322,6 +322,7 @@ export function EventFloorEditor({
   const [validatedFurniture, setValidatedFurniture] = useState(eventFurniture);
 
   const canvasRef = useRef<HTMLDivElement>(null);
+  const inspectorTriggerRef = useRef<HTMLElement | null>(null);
   const panRef = useRef<{ sx: number; sy: number; px: number; py: number } | null>(null);
   const pointerGestureRef = useRef<EventPointerGesture | null>(null);
   const moveGestureRef = useRef<EventMoveGesture | null>(null);
@@ -463,6 +464,21 @@ export function EventFloorEditor({
       : null,
     [eventLabels, selectedIds],
   );
+  const hasInspectorSelection = Boolean(selectedFurniture || selectedLabel);
+  const mobileInspectorOpen = !readOnly && inspectorViewportCompact && inspectorOpen && hasInspectorSelection;
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return;
+    const media = window.matchMedia("(max-width: 1279px)");
+    const update = () => setInspectorViewportCompact(media.matches);
+    update();
+    media.addEventListener?.("change", update);
+    return () => media.removeEventListener?.("change", update);
+  }, []);
+
+  useEffect(() => {
+    if (!hasInspectorSelection) setInspectorOpen(false);
+  }, [hasInspectorSelection]);
   const selectionIsOneGroup = useMemo(() => {
     if (selectedFurnitureIds.length < 2) return false;
     const selectedItems = eventFurniture.filter((item) => selectedFurnitureIds.includes(item.id));
@@ -1832,8 +1848,48 @@ export function EventFloorEditor({
     }
   };
 
+  const openInspectorFrom = (trigger: HTMLElement) => {
+    inspectorTriggerRef.current = trigger;
+    setInspectorOpen(true);
+  };
+  const closeInspector = () => setInspectorOpen(false);
+  const inspectorProps = {
+    isOpen: inspectorOpen,
+    furniture: selectedFurniture,
+    label: selectedLabel,
+    canvasWidth: canvasW,
+    canvasHeight: canvasH,
+    onClose: closeInspector,
+    onUpdateFurniture: (changes: Partial<FloorFurniture>) => updateSelectedFurniture(changes),
+    onUpdateLabel: (changes: Partial<FloorLabel>) => updateSelectedLabel(changes),
+    onToggleFurnitureLock: toggleSelectedLock,
+    onToggleLabelLock: toggleSelectedLabelLock,
+    onToggleVisibility: toggleSelectedVisibility,
+    onRotate: rotateSelection,
+    onUpdateLayer: updateSelectedLayer,
+    onUngroup: ungroupSelection,
+  };
+  const inspectorPanel = <EventItemInspector {...inspectorProps} />;
+  const getSelectedActionsPosition = (
+    worldX: number,
+    worldTop: number,
+    worldBottom: number,
+    estimatedWidth: number,
+  ): CSSProperties => {
+    const viewportWidth = canvasRef.current?.clientWidth || Number.POSITIVE_INFINITY;
+    const viewportHeight = canvasRef.current?.clientHeight || Number.POSITIVE_INFINITY;
+    const left = Math.max(12, Math.min(worldX * zoom + pan.x, viewportWidth - estimatedWidth - 12));
+    const below = worldBottom * zoom + pan.y + 12;
+    const above = worldTop * zoom + pan.y - 68;
+    return {
+      left,
+      top: below + 56 <= viewportHeight - 12 ? below : Math.max(12, above),
+    };
+  };
+
   // ── Render ─────────────────────────────────────────────────────────────
   return (
+    <Dialog.Root open={mobileInspectorOpen} onOpenChange={(open) => { if (!open) setInspectorOpen(false); }}>
     <div className="flex min-w-0 flex-col h-full bg-background">
       {/* Top Bar */}
       <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 sm:px-4 sm:py-3 border-b border-border bg-card shrink-0">
@@ -1931,7 +1987,34 @@ export function EventFloorEditor({
             </button>
           );
         })}
-
+        {inspectorViewportCompact && selectedFurnitureIds.length === 1 && selectedFurniture && (
+          <>
+            {!selectedFurniture.locked && <button type="button" aria-label="Rotate selected item" onClick={rotateSelection} className="h-8 shrink-0 rounded-lg border border-border px-3 text-xs font-bold text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">Rotate</button>}
+            <button type="button" aria-label="Open item details" aria-haspopup="dialog" onClick={(event) => openInspectorFrom(event.currentTarget)} className="h-8 shrink-0 rounded-lg border border-border px-3 text-xs font-bold text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">Details</button>
+            <button type="button" aria-label={selectedFurniture.locked ? "Unlock selected item" : "Lock selected item"} onClick={toggleSelectedLock} className="h-8 shrink-0 rounded-lg border border-border px-3 text-xs font-bold text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">{selectedFurniture.locked ? "Unlock" : "Lock"}</button>
+          </>
+        )}
+        {inspectorViewportCompact && selectedLabel && selectedIds.length === 1 && (
+          <>
+            <button type="button" aria-label="Open label details" aria-haspopup="dialog" onClick={(event) => openInspectorFrom(event.currentTarget)} className="h-8 shrink-0 rounded-lg border border-border px-3 text-xs font-bold text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">Details</button>
+            <button type="button" aria-label={selectedLabel.locked ? "Unlock selected label" : "Lock selected label"} onClick={toggleSelectedLabelLock} className="h-8 shrink-0 rounded-lg border border-border px-3 text-xs font-bold text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">{selectedLabel.locked ? "Unlock" : "Lock"}</button>
+          </>
+        )}
+        {inspectorViewportCompact && selectedFurnitureIds.length > 1 && (
+          <>
+            <span className="shrink-0 px-1 text-[10px] font-extrabold text-muted-foreground">{selectedFurnitureIds.length} selected</span>
+            <button type="button" aria-label="Rotate selected items" onClick={rotateSelection} className="h-8 shrink-0 rounded-lg border border-border px-3 text-xs font-bold text-foreground hover:bg-muted">Rotate</button>
+            <button type="button" aria-label={selectionIsOneGroup ? "Ungroup selected items" : "Group selected items"} onClick={selectionIsOneGroup ? ungroupSelection : groupSelection} className="h-8 shrink-0 rounded-lg border border-border px-3 text-xs font-bold text-foreground hover:bg-muted">{selectionIsOneGroup ? "Ungroup" : "Group"}</button>
+            <div className="relative shrink-0">
+              <button type="button" aria-label="Arrange selected items" aria-expanded={selectionArrangeOpen} onClick={() => setSelectionArrangeOpen((current) => !current)} className="h-8 shrink-0 rounded-lg border border-border px-3 text-xs font-bold text-foreground hover:bg-muted">Arrange</button>
+              {selectionArrangeOpen && <div role="menu" aria-label="Arrange selected items" className="absolute left-0 top-[calc(100%+0.5rem)] z-50 grid w-[min(22rem,calc(100vw-1.5rem))] grid-cols-1 gap-1 rounded-2xl border border-border bg-card p-2 shadow-2xl sm:grid-cols-2">
+                {EVENT_LAYOUT_ACTIONS.map(({ action, label, description }) => <button key={action} type="button" role="menuitem" aria-label={label} title={description} onClick={() => { applyFurnitureLayout(action); setSelectionArrangeOpen(false); }} className="flex min-h-11 flex-col items-start rounded-xl px-3 py-2 text-left hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"><span className="text-xs font-bold text-foreground">{label}</span><span className="text-[10px] text-muted-foreground">{description}</span></button>)}
+              </div>}
+            </div>
+            <button type="button" aria-label="Duplicate selected items" onClick={duplicateSelection} className="h-8 shrink-0 rounded-lg border border-border px-3 text-xs font-bold text-foreground hover:bg-muted">Duplicate</button>
+            <button type="button" aria-label="Delete selected items" onClick={deleteSelected} className="h-8 shrink-0 rounded-lg border border-destructive/30 px-3 text-xs font-bold text-destructive hover:bg-destructive/10">Delete</button>
+          </>
+        )}
         </div>}
 
       {!readOnly && (
@@ -1950,11 +2033,12 @@ export function EventFloorEditor({
       )}
 
       {/* Canvas */}
+      <div data-testid="event-editor-workspace" className="flex min-h-0 min-w-0 flex-1">
       <div
         ref={canvasRef}
         tabIndex={0}
         aria-label="Event layout canvas"
-        className="min-h-0 flex-1 overflow-hidden relative select-none cursor-crosshair outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/40"
+        className="min-h-0 min-w-0 flex-1 overflow-hidden relative select-none cursor-crosshair outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/40"
         style={{
           background: viewportBackground,
           touchAction: "none",
@@ -1991,6 +2075,7 @@ export function EventFloorEditor({
               surface="event"
               activeKey={activeTemplate.assetKey ?? activeTemplate.type}
               onSelect={(asset) => setActiveTemplate(getEventFurnitureTemplate(asset.key))}
+              compact
               floating
             />
             <div className="relative mt-2 max-w-full">
@@ -2039,7 +2124,7 @@ export function EventFloorEditor({
           </div>
         )}
 
-        {!readOnly && !transforming && !isPanning && !pinchActive && eventSelectionBounds && selectedFurnitureIds.length > 1 && (
+        {!readOnly && !inspectorViewportCompact && !transforming && !isPanning && !pinchActive && eventSelectionBounds && selectedFurnitureIds.length > 1 && (
           <div
             data-testid="event-layout-actions"
             data-event-editor-chrome
@@ -2374,16 +2459,13 @@ export function EventFloorEditor({
           ))}
         </div>
 
-        {!readOnly && !transforming && !isPanning && !pinchActive && selectedLabel && selectedIds.length === 1 && (
+        {!readOnly && !inspectorViewportCompact && !transforming && !isPanning && !pinchActive && selectedLabel && selectedIds.length === 1 && (
           <div
             data-testid="event-label-actions"
             data-event-editor-chrome
             aria-label="Selected event label actions"
             className="pointer-events-none absolute z-50 max-w-[calc(100%-1.5rem)]"
-            style={{
-              left: Math.max(12, Math.min(selectedLabel.x * zoom + pan.x, (canvasRef.current?.clientWidth || Infinity) - 280)),
-              top: Math.max(12, Math.min((selectedLabel.y + (selectedLabel.fontSize || 14)) * zoom + pan.y + 12, (canvasRef.current?.clientHeight || Infinity) - 76)),
-            }}
+            style={getSelectedActionsPosition(selectedLabel.x, selectedLabel.y, selectedLabel.y + (selectedLabel.fontSize || 14), 280)}
             onClick={(event) => event.stopPropagation()}
             onPointerDown={(event) => event.stopPropagation()}
             onMouseDown={(event) => event.stopPropagation()}
@@ -2394,7 +2476,7 @@ export function EventFloorEditor({
                 type="button"
                 aria-label="Open label details"
                 title="Open label details"
-                onClick={() => setInspectorOpen((current) => !current)}
+                onClick={(event) => openInspectorFrom(event.currentTarget)}
                 className="flex min-h-10 shrink-0 items-center gap-1.5 rounded-xl border border-border/70 px-3 text-[10px] font-bold text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
               >
                 Details
@@ -2413,16 +2495,13 @@ export function EventFloorEditor({
           </div>
         )}
 
-        {!readOnly && !transforming && !isPanning && !pinchActive && eventSelectionBounds && selectedFurnitureIds.length === 1 && (
+        {!readOnly && !inspectorViewportCompact && !transforming && !isPanning && !pinchActive && eventSelectionBounds && selectedFurnitureIds.length === 1 && (
           <div
             data-testid="event-single-item-actions"
             data-event-editor-chrome
             aria-label="Selected event item actions"
             className="pointer-events-none absolute z-50 max-w-[calc(100%-1.5rem)]"
-            style={{
-              left: Math.max(12, Math.min(eventSelectionBounds.x * zoom + pan.x, (canvasRef.current?.clientWidth || Infinity) - 360)),
-              top: Math.max(12, Math.min((eventSelectionBounds.y + eventSelectionBounds.height) * zoom + pan.y + 12, (canvasRef.current?.clientHeight || Infinity) - 76)),
-            }}
+            style={getSelectedActionsPosition(eventSelectionBounds.x, eventSelectionBounds.y, eventSelectionBounds.y + eventSelectionBounds.height, 360)}
             onClick={(event) => event.stopPropagation()}
             onPointerDown={(event) => event.stopPropagation()}
             onMouseDown={(event) => event.stopPropagation()}
@@ -2445,7 +2524,7 @@ export function EventFloorEditor({
                 type="button"
                 aria-label="Open item details"
                 title="Open item details"
-                onClick={() => setInspectorOpen((current) => !current)}
+                onClick={(event) => openInspectorFrom(event.currentTarget)}
                 className="flex min-h-10 shrink-0 items-center gap-1.5 rounded-xl border border-border/70 px-3 text-[10px] font-bold text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
               >
                 Details
@@ -2460,146 +2539,6 @@ export function EventFloorEditor({
                 {selectedFurniture?.locked ? <Unlock className="h-3.5 w-3.5" aria-hidden="true" /> : <Lock className="h-3.5 w-3.5" aria-hidden="true" />}
                 {selectedFurniture?.locked ? "Unlock" : "Lock"}
               </button>
-            </div>
-          </div>
-        )}
-
-        {!readOnly && inspectorOpen && selectedFurniture && (
-          <div
-            role="dialog"
-            aria-label="Item details"
-            data-testid="event-item-inspector"
-            data-event-editor-chrome
-            className="absolute right-3 top-16 z-50 max-h-[calc(100%-5rem)] w-[min(21rem,calc(100%-1.5rem))] overflow-y-auto rounded-2xl border border-border/80 bg-card/95 p-3 shadow-2xl backdrop-blur-sm"
-            onClick={(event) => event.stopPropagation()}
-            onPointerDown={(event) => event.stopPropagation()}
-            onMouseDown={(event) => event.stopPropagation()}
-            onWheel={(event) => event.stopPropagation()}
-          >
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <p className="text-[10px] font-extrabold uppercase tracking-[0.1em] text-muted-foreground">Item details</p>
-                <p className="truncate text-sm font-extrabold text-foreground">{selectedFurniture.name}</p>
-              </div>
-              <button
-                type="button"
-                aria-label="Close item details"
-                title="Close item details"
-                onClick={() => setInspectorOpen(false)}
-                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-              >
-                <X className="h-4 w-4" aria-hidden="true" />
-              </button>
-            </div>
-            <p className="mt-1 text-[10px] leading-4 text-muted-foreground">Adjust exact placement, size, and order without dragging.</p>
-
-            <div className="mt-3 grid grid-cols-2 gap-2">
-              {([
-                ["X", selectedFurniture.x, (value: number) => updateSelectedFurniture({ x: Math.max(0, Math.min(canvasW - selectedFurniture.width, value)) })],
-                ["Y", selectedFurniture.y, (value: number) => updateSelectedFurniture({ y: Math.max(0, Math.min(canvasH - selectedFurniture.height, value)) })],
-                ["Width", selectedFurniture.width, (value: number) => updateSelectedFurniture({ width: Math.max(4, Math.min(canvasW, value)) })],
-                ["Height", selectedFurniture.height, (value: number) => updateSelectedFurniture({ height: Math.max(4, Math.min(canvasH, value)) })],
-                ["Rotation", Math.round(selectedFurniture.rotation || 0), (value: number) => updateSelectedFurniture({ rotation: ((value % 360) + 360) % 360 })],
-              ] as Array<[string, number, (value: number) => void]>).map(([label, value, update]) => (
-                <label key={label} className="flex min-w-0 flex-col gap-1 text-[10px] font-bold text-muted-foreground">
-                  {label}
-                  <input
-                    type="number"
-                    aria-label={label}
-                    min={label === "Rotation" ? -360 : 0}
-                    value={value}
-                    onChange={(event) => update(Number(event.currentTarget.value) || 0)}
-                    disabled={selectedFurniture.locked}
-                    title={selectedFurniture.locked ? "Unlock this item to edit its geometry" : undefined}
-                    className="h-9 w-full rounded-lg border border-border bg-background px-2 text-xs font-bold text-foreground outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-primary/20"
-                  />
-                </label>
-              ))}
-            </div>
-
-            <div className="mt-3 grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                aria-label={selectedFurniture.locked ? "Unlock selected item" : "Lock selected item"}
-                onClick={toggleSelectedLock}
-                className="flex min-h-10 items-center justify-center gap-1.5 rounded-xl border border-border/70 px-2 text-[10px] font-bold text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-              >
-                {selectedFurniture.locked ? <Unlock className="h-3.5 w-3.5" aria-hidden="true" /> : <Lock className="h-3.5 w-3.5" aria-hidden="true" />}
-                {selectedFurniture.locked ? "Unlock" : "Lock"}
-              </button>
-              <button
-                type="button"
-                aria-label={selectedFurniture.visible === false ? "Show selected item" : "Hide selected item"}
-                onClick={toggleSelectedVisibility}
-                className="flex min-h-10 items-center justify-center gap-1.5 rounded-xl border border-border/70 px-2 text-[10px] font-bold text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-              >
-                {selectedFurniture.visible === false ? <Eye className="h-3.5 w-3.5" aria-hidden="true" /> : <EyeOff className="h-3.5 w-3.5" aria-hidden="true" />}
-                {selectedFurniture.visible === false ? "Show" : "Hide"}
-              </button>
-              <button
-                type="button"
-                aria-label="Bring selected item to front"
-                onClick={() => updateSelectedLayer("front")}
-                className="flex min-h-10 items-center justify-center gap-1.5 rounded-xl border border-border/70 px-2 text-[10px] font-bold text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-              >
-                <BringToFront className="h-3.5 w-3.5" aria-hidden="true" />
-                Front
-              </button>
-              <button
-                type="button"
-                aria-label="Send selected item to back"
-                onClick={() => updateSelectedLayer("back")}
-                className="flex min-h-10 items-center justify-center gap-1.5 rounded-xl border border-border/70 px-2 text-[10px] font-bold text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-              >
-                <SendToBack className="h-3.5 w-3.5" aria-hidden="true" />
-                Back
-              </button>
-            </div>
-
-            {selectedFurniture.groupId && (
-              <button
-                type="button"
-                aria-label="Ungroup selected item"
-                onClick={ungroupSelection}
-                className="mt-2 flex min-h-10 w-full items-center justify-center gap-1.5 rounded-xl border border-border/70 px-2 text-[10px] font-bold text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-              >
-                <Ungroup className="h-3.5 w-3.5" aria-hidden="true" />
-                Ungroup item
-              </button>
-            )}
-          </div>
-        )}
-
-        {!readOnly && inspectorOpen && selectedLabel && (
-          <div
-            role="dialog"
-            aria-label="Label details"
-            data-testid="event-label-inspector"
-            data-event-editor-chrome
-            className="absolute right-3 top-16 z-50 max-h-[calc(100%-5rem)] w-[min(21rem,calc(100%-1.5rem))] overflow-y-auto rounded-2xl border border-border/80 bg-card/95 p-3 shadow-2xl backdrop-blur-sm"
-            onClick={(event) => event.stopPropagation()}
-            onPointerDown={(event) => event.stopPropagation()}
-            onMouseDown={(event) => event.stopPropagation()}
-          >
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0"><p className="text-[10px] font-extrabold uppercase tracking-[0.1em] text-muted-foreground">Label details</p><p className="truncate text-sm font-extrabold text-foreground">{selectedLabel.text || "Untitled label"}</p></div>
-              <button type="button" aria-label="Close label details" title="Close label details" onClick={() => setInspectorOpen(false)} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">×</button>
-            </div>
-            <label className="mt-3 flex flex-col gap-1 text-[10px] font-bold text-muted-foreground">Label text
-              <input aria-label="Label text" value={selectedLabel.text} disabled={selectedLabel.locked} onChange={(event) => updateSelectedLabel({ text: event.currentTarget.value })} className="h-9 rounded-lg border border-border bg-background px-2 text-xs font-bold text-foreground outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-primary/20" />
-            </label>
-            <div className="mt-3 grid grid-cols-3 gap-2">
-              {([
-                ["Font size", selectedLabel.fontSize, (value: number) => updateSelectedLabel({ fontSize: Math.max(8, Math.min(96, value)) })],
-                ["Rotation", Math.round(selectedLabel.rotation || 0), (value: number) => updateSelectedLabel({ rotation: ((value % 360) + 360) % 360 })],
-              ] as Array<[string, number, (value: number) => void]>).map(([label, value, update]) => (
-                <label key={label} className="flex min-w-0 flex-col gap-1 text-[10px] font-bold text-muted-foreground">{label}
-                  <input aria-label={label} type="number" value={value} disabled={selectedLabel.locked} onChange={(event) => update(Number(event.currentTarget.value) || 0)} className="h-9 min-w-0 rounded-lg border border-border bg-background px-2 text-xs font-bold text-foreground outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-primary/20" />
-                </label>
-              ))}
-              <label className="flex min-w-0 flex-col gap-1 text-[10px] font-bold text-muted-foreground">Color
-                <input aria-label="Label color" type="color" value={selectedLabel.color || "#1f2937"} disabled={selectedLabel.locked} onChange={(event) => updateSelectedLabel({ color: event.currentTarget.value })} className="h-9 w-full rounded-lg border border-border bg-background p-1" />
-              </label>
             </div>
           </div>
         )}
@@ -2619,6 +2558,12 @@ export function EventFloorEditor({
             </div>
           </div>
         )}
+      </div>
+      {!readOnly && !inspectorViewportCompact && (
+        <aside data-testid="event-item-inspector-rail" aria-label="Event item inspector rail" className="flex w-[22rem] shrink-0 flex-col overflow-y-auto border-l border-border bg-card p-4">
+          {inspectorPanel}
+        </aside>
+      )}
       </div>
 
       {/* Bottom Status Bar */}
@@ -2662,5 +2607,30 @@ export function EventFloorEditor({
         </div>
       </div>
     </div>
+    {mobileInspectorOpen && (
+      <Dialog.Portal>
+        <Dialog.Overlay className="fixed inset-0 z-[79] bg-background/55 backdrop-blur-[2px]" />
+        <Dialog.Content
+          data-testid="event-item-inspector-sheet"
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            inspectorTriggerRef.current?.focus();
+          }}
+          className="fixed inset-x-0 bottom-0 z-[80] flex max-h-[min(82dvh,42rem)] min-h-[min(22rem,70dvh)] flex-col overflow-hidden rounded-t-2xl border border-border bg-card text-foreground shadow-2xl outline-none"
+        >
+          <div className="shrink-0 border-b border-border px-4 py-4">
+            <Dialog.Title className="text-base font-extrabold">Item details</Dialog.Title>
+            <Dialog.Description className="mt-1 truncate text-xs text-muted-foreground">{selectedFurniture?.name ?? selectedLabel?.text ?? "Selected item"}. Edit properties without covering the map.</Dialog.Description>
+          </div>
+          <div data-testid="event-item-inspector-sheet-body" className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4">
+            <EventItemInspector {...inspectorProps} showHeader={false} />
+          </div>
+          <div className="shrink-0 border-t border-border px-4 py-3" style={{ paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))" }}>
+            <button type="button" aria-label="Close item details" onClick={closeInspector} className="h-11 w-full rounded-xl border border-border text-sm font-bold text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">Done</button>
+          </div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    )}
+    </Dialog.Root>
   );
 }
