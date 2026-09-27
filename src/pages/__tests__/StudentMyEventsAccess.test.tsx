@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter, Route, Routes } from "react-router";
+import { MemoryRouter, Route, Routes, createMemoryRouter, RouterProvider } from "react-router";
 import { describe, expect, it, vi } from "vitest";
 import { StudentEventEditPage } from "../StudentEventEditPage";
 import { StudentMyEventsPage } from "../StudentMyEventsPage";
@@ -74,14 +74,11 @@ describe("StudentMyEventsPage access", () => {
   it("redirects regular students away from a direct event-map URL", async () => {
     authState.isStudent = true;
     authState.isStudentOrg = false;
-    render(
-      <MemoryRouter initialEntries={["/student/events/event-1/edit"]}>
-        <Routes>
-          <Route path="/student/events/:id/edit" element={<StudentEventEditPage />} />
-          <Route path="/home" element={<div>Student Home</div>} />
-        </Routes>
-      </MemoryRouter>,
-    );
+    const router = createMemoryRouter([
+      { path: "/student/events/:id/edit", element: <StudentEventEditPage /> },
+      { path: "/home", element: <div>Student Home</div> },
+    ], { initialEntries: ["/student/events/event-1/edit"] });
+    render(<RouterProvider router={router} />);
 
     await waitFor(() => expect(screen.getByText("Student Home")).toBeInTheDocument());
     expect(screen.queryByText("Event map unavailable")).not.toBeInTheDocument();

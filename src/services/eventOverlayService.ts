@@ -26,7 +26,7 @@ import { floorLookupId, publishedEventBuildingOptions } from "../lib/eventLocati
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
-export type EventOverlayStatus = "pending" | "approved" | "disapproved";
+export type EventOverlayStatus = "draft" | "pending" | "approved" | "disapproved";
 
 export type EventOverlayLocationInput =
   | EventLocationRef
@@ -110,6 +110,7 @@ function overlayFromMetadata(
       (metadata.restrictedAreas as CampusEventOverlay["restrictedAreas"]) || [],
     isActive: (metadata.isActive as boolean) ?? true,
     status: (metadata.status as EventOverlayStatus) || "pending",
+    submittedAt: typeof metadata.submittedAt === "string" ? metadata.submittedAt : undefined,
     adminComment: metadata.adminComment as string | undefined,
     eventFurniture: (metadata.eventFurniture as FloorFurniture[]) || [],
     eventLabels: (metadata.eventLabels as FloorLabel[]) || [],
@@ -228,7 +229,7 @@ export async function createEventOverlay(
     locations,
     restrictedAreas: [],
     isActive: true,
-    status: "pending",
+    status: "draft",
     campusId,
     eventFurniture: locations[0].eventFurniture,
     eventLabels: locations[0].eventLabels,
@@ -327,6 +328,8 @@ export async function updateEventOverlayDetails(
     title: input.title,
     description: input.description,
     organizer: input.organizer,
+    status: "draft",
+    submittedAt: null,
   };
 
   if (input.posterUrl !== undefined) {
@@ -372,7 +375,11 @@ export async function updateEventOverlayLayout(
   if (fetchError || !existing) throw new Error("Event overlay not found.");
 
   const metadata = existing.metadata as Record<string, unknown>;
-  const updatedMetadata = applyLocationCompatibilityFields(metadata, locations);
+  const updatedMetadata = {
+    ...applyLocationCompatibilityFields(metadata, locations),
+    status: "draft",
+    submittedAt: null,
+  };
 
   const { error } = await supabase
     .from("map_elements")
@@ -414,6 +421,7 @@ export async function submitEventOverlayLayout(
   const updatedMetadata = {
     ...applyLocationCompatibilityFields(metadata, locations),
     status: "pending",
+    submittedAt: new Date().toISOString(),
     adminComment: null,
   };
 
@@ -544,6 +552,9 @@ export async function reviewEventOverlay(
   if (fetchError || !existing) throw new Error("Event overlay not found.");
 
   const metadata = existing.metadata as Record<string, unknown>;
+  if ((metadata.status || "pending") !== "pending") {
+    throw new Error("Only submitted event layouts can be reviewed.");
+  }
   const updatedMetadata = {
     ...metadata,
     status: decision,

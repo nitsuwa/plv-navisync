@@ -924,8 +924,10 @@ export interface CampusEventOverlay {
   isActive: boolean;
 
   // ── Event Map Layout & Approval fields ──────────────────────────────────
-  /** Approval status: pending → approved or disapproved */
-  status?: "pending" | "approved" | "disapproved";
+  /** Approval status: draft → pending → approved or disapproved */
+  status?: "draft" | "pending" | "approved" | "disapproved";
+  /** ISO timestamp of the latest explicit submission to GSO. */
+  submittedAt?: string;
   /** Admin feedback when disapproving */
   adminComment?: string;
   /** Event-specific furniture items (booths, tents, stages, etc.) */

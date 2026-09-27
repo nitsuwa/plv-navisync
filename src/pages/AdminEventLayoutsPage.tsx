@@ -29,6 +29,7 @@ import {
 } from "../services/eventOverlayService";
 import type { CampusEventOverlay } from "../components/map-builder/types";
 import { countEventOverlayItems, normalizeEventOverlayLocations } from "../lib/eventOverlayModel";
+import { formatEventSubmissionTime } from "../lib/eventSubmissionTime";
 
 // ── Status configuration ──────────────────────────────────────────────────
 
@@ -38,6 +39,12 @@ const STATUS_CONFIG: Record<
 > = {
   all: {
     label: "All",
+    color: "text-muted-foreground",
+    bg: "bg-muted border-border",
+    icon: CalendarDays,
+  },
+  draft: {
+    label: "Draft",
     color: "text-muted-foreground",
     bg: "bg-muted border-border",
     icon: CalendarDays,
@@ -149,6 +156,7 @@ function ReviewModal({
               <MapPin className="h-3.5 w-3.5 mt-0.5 shrink-0" />
               <span>{locations.map((location) => location.locationRef.label).join(" · ") || "No location set"}</span>
             </div>
+            <p className="text-xs text-muted-foreground">Submitted to GSO: {formatEventSubmissionTime(overlay.submittedAt)}</p>
 
             {/* Layout Summary */}
             <div className="p-3 rounded-xl bg-muted/30 border border-border text-xs space-y-1">
@@ -264,7 +272,7 @@ export function AdminEventLayoutsPage() {
         search,
       });
       if (requestId !== requestRef.current) return;
-      setOverlays(data);
+      setOverlays(data.filter((item) => item.status !== "draft"));
       setError(null);
     } catch (err) {
       if (requestId !== requestRef.current) return;
@@ -456,6 +464,7 @@ export function AdminEventLayoutsPage() {
                   <p className="text-[11px] text-muted-foreground mt-1 line-clamp-2">
                     {locations.map((location) => location.locationRef.label).join(" · ") || "No location set"}
                   </p>
+                  <p className="text-[11px] text-muted-foreground mt-1">Submitted to GSO: {formatEventSubmissionTime(overlay.submittedAt)}</p>
                   {/* Layout stats */}
                   <div className="flex items-center gap-3 mt-2">
                     <span className="text-[10px] font-bold text-muted-foreground px-2 py-0.5 rounded-full bg-muted">

@@ -234,6 +234,8 @@ export interface EventFloorEditorProps {
   onDraftChange?: (furniture: FloorFurniture[], labels: FloorLabel[]) => void;
   /** Synchronously completes an active gesture before a page boundary changes location. */
   interactionCommitRef?: MutableRefObject<(() => EventEditorDraftSnapshot) | null>;
+  /** Clears the active browser recovery copy after a page-level save or discard. */
+  finalizeDraftRef?: MutableRefObject<(() => void) | null>;
   /** Called when the user clicks back */
   onBack: () => void;
   /** Whether the overlay is currently being saved */
@@ -258,6 +260,7 @@ export function EventFloorEditor({
   onSubmit,
   onDraftChange,
   interactionCommitRef,
+  finalizeDraftRef,
   onBack,
   isSaving = false,
   isSubmitting = false,
@@ -351,6 +354,7 @@ export function EventFloorEditor({
   const draftStorageKey = draftLocation ? eventLayoutDraftStorageKey(overlay.id, draftLocation) : null;
   const draftStateRef = useRef({ eventFurniture, eventLabels });
   const draftDirtyRef = useRef(false);
+  const skipDraftFlushRef = useRef(false);
   const draftHydratedRef = useRef(false);
   const onDraftChangeRef = useRef(onDraftChange);
   const latestFurnitureRef = useRef(eventFurniture);
@@ -358,12 +362,14 @@ export function EventFloorEditor({
   const flushPendingPreviewRef = useRef<() => void>(() => {});
 
   const setFurniturePreview = useCallback((next: FloorFurniture[]) => {
+    skipDraftFlushRef.current = false;
     latestFurnitureRef.current = next;
     draftDirtyRef.current = true;
     setEventFurniture(next);
   }, []);
 
   const setLabelsPreview = useCallback((next: FloorLabel[]) => {
+    skipDraftFlushRef.current = false;
     latestLabelsRef.current = next;
     draftDirtyRef.current = true;
     setEventLabels(next);
@@ -395,6 +401,7 @@ export function EventFloorEditor({
     }
     if (readOnly) return;
 
+    skipDraftFlushRef.current = false;
     draftDirtyRef.current = true;
     if (itemGestureActive) return;
     const timer = window.setTimeout(() => {
@@ -413,6 +420,7 @@ export function EventFloorEditor({
   useEffect(() => {
     if (!draftStorageKey || !draftLocation || readOnly) return;
     const flushDraft = () => {
+      if (skipDraftFlushRef.current) return;
       flushPendingPreviewRef.current();
       if (!draftDirtyRef.current) return;
       writeEventLayoutDraft(
@@ -439,6 +447,17 @@ export function EventFloorEditor({
       flushDraft();
     };
   }, [draftLocation, draftStorageKey, overlay.id, readOnly]);
+
+  useEffect(() => {
+    if (!finalizeDraftRef) return;
+    finalizeDraftRef.current = () => {
+      skipDraftFlushRef.current = true;
+      draftDirtyRef.current = false;
+      if (draftLocation) clearEventLayoutDraft(overlay.id, draftLocation);
+      setDraftRecovered(false);
+    };
+    return () => { finalizeDraftRef.current = null; };
+  }, [draftLocation, finalizeDraftRef, overlay.id]);
   const fittedViewportKeyRef = useRef<string | null>(null);
   // ── Canvas dimensions ──────────────────────────────────────────────────
   const canvasW = floorPlan.canvasW || 800;
@@ -1895,6 +1914,7 @@ export function EventFloorEditor({
       <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 sm:px-4 sm:py-3 border-b border-border bg-card shrink-0">
         <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3">
           <button
+            aria-label={readOnly ? "Back to event approvals" : "Back to My Events"}
             onClick={() => {
               finishInteractionRef.current("switch");
               onBack();

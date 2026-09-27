@@ -1,5 +1,5 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter, Route, Routes } from "react-router";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { createMemoryRouter, RouterProvider } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { StudentEventEditPage } from "../StudentEventEditPage";
 import { eventLayoutDraftStorageKey, readEventLayoutDraft } from "../../lib/eventDraftPersistence";
@@ -128,13 +128,11 @@ const overlay: CampusEventOverlay = {
 };
 
 function renderPage() {
-  return render(
-    <MemoryRouter initialEntries={["/student/events/event-1/edit"]}>
-      <Routes>
-        <Route path="/student/events/:id/edit" element={<StudentEventEditPage />} />
-      </Routes>
-    </MemoryRouter>,
-  );
+  const router = createMemoryRouter([
+    { path: "/student/events/:id/edit", element: <StudentEventEditPage /> },
+    { path: "/student/events", element: <div>My Events landing</div> },
+  ], { initialEntries: ["/student/events/event-1/edit"] });
+  return render(<RouterProvider router={router} />);
 }
 
 function startPendingChairMove() {
@@ -214,13 +212,13 @@ describe("StudentEventEditPage pending interaction boundaries", () => {
 
     startPendingChairMove();
     fireEvent.click(screen.getByRole("button", { name: /administration building/i }));
+    expect(await screen.findByRole("dialog", { name: "Unsaved Changes" })).toBeInTheDocument();
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Unsaved Changes" })).getByRole("button", { name: "Save Draft" }));
     await waitFor(() => expect(screen.getByTestId("event-furniture-b-table")).toBeInTheDocument());
     expect(screen.getByTestId("event-furniture-b-table")).toHaveStyle({ left: "12px", top: "16px" });
 
     fireEvent.click(screen.getByRole("button", { name: /main academic building/i }));
     await waitFor(() => expect(screen.getByTestId("event-furniture-a-chair")).toHaveStyle({ left: "84px", top: "24px" }));
-    fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
-
     await waitFor(() => expect(fixture.service.updateEventOverlayLayout).toHaveBeenCalledTimes(1));
     const [, savedLocations] = fixture.service.updateEventOverlayLayout.mock.calls[0];
     expect(savedLocations).toEqual(expect.arrayContaining([
@@ -236,6 +234,7 @@ describe("StudentEventEditPage pending interaction boundaries", () => {
 
     startPendingChairMove();
     fireEvent.click(screen.getByRole("button", { name: /administration building/i }));
+    fireEvent.click(within(await screen.findByRole("dialog", { name: "Unsaved Changes" })).getByRole("button", { name: "Save Draft" }));
     await waitFor(() => expect(screen.getByTestId("event-furniture-b-table")).toBeInTheDocument());
     fireEvent.click(screen.getByRole("button", { name: /main academic building/i }));
 
@@ -258,5 +257,52 @@ describe("StudentEventEditPage pending interaction boundaries", () => {
     expect(localStorage.getItem(key)).not.toBeNull();
     expect(fixture.toast.error).toHaveBeenCalledWith("Save failed", "save denied");
     expect(screen.getByRole("button", { name: "Save Draft" })).toBeEnabled();
+  });
+
+  it("asks before leaving, lets the student keep editing, then discards on explicit choice", async () => {
+    renderPage();
+    await waitFor(() => expect(screen.getByTestId("event-furniture-a-chair")).toBeInTheDocument());
+    startPendingChairMove();
+    fireEvent.click(screen.getByRole("button", { name: "Back to My Events" }));
+    expect(await screen.findByRole("dialog", { name: "Unsaved Changes" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Continue Editing" }));
+    expect(screen.queryByText("My Events landing")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Back to My Events" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Don't Save" }));
+    expect(await screen.findByText("My Events landing")).toBeInTheDocument();
+    expect(fixture.service.updateEventOverlayLayout).not.toHaveBeenCalled();
+    expect(readEventLayoutDraft("event-1", overlay.locations![0].locationRef)).toBeNull();
+  });
+
+  it("uses the browser confirmation when a tab closes with unsaved changes", async () => {
+    renderPage();
+    await waitFor(() => expect(screen.getByTestId("event-furniture-a-chair")).toBeInTheDocument());
+    startPendingChairMove();
+    const unload = new Event("beforeunload", { cancelable: true });
+    fireEvent(window, unload);
+    expect(unload.defaultPrevented).toBe(true);
+  });
+
+  it("keeps the leave prompt open when Save Draft fails", async () => {
+    fixture.service.updateEventOverlayLayout.mockRejectedValue(new Error("save denied"));
+    renderPage();
+    await waitFor(() => expect(screen.getByTestId("event-furniture-a-chair")).toBeInTheDocument());
+    startPendingChairMove();
+    fireEvent.click(screen.getByRole("button", { name: "Back to My Events" }));
+    const dialog = await screen.findByRole("dialog", { name: "Unsaved Changes" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save Draft" }));
+    await waitFor(() => expect(within(dialog).getByText(/save failed/i)).toBeInTheDocument());
+    expect(screen.queryByText("My Events landing")).not.toBeInTheDocument();
+  });
+
+  it("saves the active map before continuing back to My Events", async () => {
+    renderPage();
+    await waitFor(() => expect(screen.getByTestId("event-furniture-a-chair")).toBeInTheDocument());
+    startPendingChairMove();
+    fireEvent.click(screen.getByRole("button", { name: "Back to My Events" }));
+    const dialog = await screen.findByRole("dialog", { name: "Unsaved Changes" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save Draft" }));
+    await waitFor(() => expect(fixture.service.updateEventOverlayLayout).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText("My Events landing")).toBeInTheDocument();
   });
 });

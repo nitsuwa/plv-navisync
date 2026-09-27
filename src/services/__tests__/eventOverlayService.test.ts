@@ -30,10 +30,11 @@ function makeClient(rows: unknown[] = []) {
     single: vi.fn().mockResolvedValue({ data: rows[0] ?? null, error: null }),
   };
   const mapElements = {
-    insert: vi.fn(() => ({
+    insert: vi.fn((_payload: unknown) => ({
       select: vi.fn(() => ({ single: vi.fn().mockResolvedValue({ data: inserted, error: null }) })),
     })),
     select: vi.fn(() => query),
+    update: vi.fn((_payload: unknown) => query),
   };
   const activityLogs = { insert: vi.fn().mockResolvedValue({ data: null, error: null }) };
   return {
@@ -90,6 +91,36 @@ describe("event overlay service", () => {
     ]);
     expect(payload.metadata).not.toHaveProperty("dateStart");
     expect(payload.metadata).not.toHaveProperty("dateEnd");
+    expect(payload.metadata.status).toBe("draft");
+    expect(payload.metadata).not.toHaveProperty("submittedAt");
+  });
+
+  it("marks a proposal pending only on submit and records the submission time", async () => {
+    const existing = { id: "event-1", metadata: { title: "Student Fair", status: "draft", locations: [] } };
+    const { client, mapElements } = makeClient([existing]);
+    vi.mocked(getSupabase).mockReturnValue(client as never);
+    await eventOverlayService.submitEventOverlayLayout("event-1", []);
+    const updated = mapElements.update.mock.calls[0][0] as { metadata: Record<string, unknown> };
+    expect(updated.metadata.status).toBe("pending");
+    expect(new Date(updated.metadata.submittedAt as string).getTime()).toBeGreaterThan(0);
+  });
+
+  it("takes an edited pending layout back to draft until it is submitted again", async () => {
+    const existing = { id: "event-1", metadata: { title: "Student Fair", status: "pending", submittedAt: "2026-09-01T00:00:00.000Z", locations: [] } };
+    const { client, mapElements } = makeClient([existing]);
+    vi.mocked(getSupabase).mockReturnValue(client as never);
+    await eventOverlayService.updateEventOverlayLayout("event-1", []);
+    const updated = mapElements.update.mock.calls[0][0] as { metadata: Record<string, unknown> };
+    expect(updated.metadata.status).toBe("draft");
+    expect(updated.metadata.submittedAt).toBeNull();
+  });
+
+  it("refuses to approve a draft before GSO submission", async () => {
+    const existing = { id: "event-1", metadata: { title: "Student Fair", status: "draft", locations: [] } };
+    const { client, mapElements } = makeClient([existing]);
+    vi.mocked(getSupabase).mockReturnValue(client as never);
+    await expect(eventOverlayService.reviewEventOverlay("event-1", "approved")).rejects.toThrow(/only submitted/i);
+    expect(mapElements.update).not.toHaveBeenCalled();
   });
 
   it("creates and lists proposals against the exact published campus chosen by the student", async () => {

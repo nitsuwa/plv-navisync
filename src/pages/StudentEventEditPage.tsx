@@ -1,9 +1,11 @@
 /** Focused multi-location event map editor for active Student Org accounts. */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertCircle, ArrowLeft, Loader2 } from "lucide-react";
-import { Link, Navigate, useNavigate, useParams } from "react-router";
+import { Link, Navigate, useBlocker, useNavigate, useParams } from "react-router";
 import { EventFloorEditor, type EventEditorDraftSnapshot } from "../components/events/EventFloorEditor";
 import { EventLocationSwitcher } from "../components/events/EventLocationSwitcher";
+import { UnsavedChangesDialog } from "../components/map-builder/UnsavedChangesDialog";
+import { clearEventLayoutDraft } from "../lib/eventDraftPersistence";
 import { useStudentAuth } from "../hooks/useStudentAuth";
 import { useToast } from "../hooks/useToast";
 import { usePublishedCampus } from "../hooks/usePublishedCampus";
@@ -30,6 +32,11 @@ function resolveLocationBaseMap(locationRef: EventLocationRef, campus: Campus | 
   return resolveFloorPlanForEvent(locationRef.buildingId, floorNumber, campus);
 }
 
+function layoutsMatch(a: EventOverlayLocation[], b: EventOverlayLocation[]): boolean {
+  return JSON.stringify(a.map(({ id, eventFurniture, eventLabels }) => ({ id, eventFurniture, eventLabels })))
+    === JSON.stringify(b.map(({ id, eventFurniture, eventLabels }) => ({ id, eventFurniture, eventLabels })));
+}
+
 export function StudentEventEditPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -43,7 +50,12 @@ export function StudentEventEditPage() {
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [pendingLocationId, setPendingLocationId] = useState<string | null>(null);
+  const [dialogError, setDialogError] = useState<string | null>(null);
   const interactionCommitRef = useRef<(() => EventEditorDraftSnapshot) | null>(null);
+  const finalizeDraftRef = useRef<(() => void) | null>(null);
+  const allowNavigationRef = useRef(false);
+  const latestLocationsRef = useRef<EventOverlayLocation[]>([]);
 
   useEffect(() => {
     if (!id) {
@@ -68,7 +80,32 @@ export function StudentEventEditPage() {
 
   const persistedLocations = useMemo(() => overlay ? normalizeEventOverlayLocations(overlay) : [], [overlay]);
   const locations = draftLocations ?? persistedLocations;
+  latestLocationsRef.current = locations;
   const activeLocation = locations.find((location) => location.id === activeLocationId) || locations[0];
+  const captureLocations = useCallback(() => {
+    const snapshot = interactionCommitRef.current?.();
+    if (!snapshot || !activeLocation) return latestLocationsRef.current;
+    const next = replaceEventOverlayLocation(latestLocationsRef.current, activeLocation.id, snapshot.eventFurniture, snapshot.eventLabels);
+    if (layoutsMatch(next, latestLocationsRef.current)) return latestLocationsRef.current;
+    latestLocationsRef.current = next;
+    setDraftLocations(next);
+    return next;
+  }, [activeLocation]);
+  const isDirty = !layoutsMatch(locations, persistedLocations);
+  const blocker = useBlocker(() => {
+    if (allowNavigationRef.current || !overlay) return false;
+    return !layoutsMatch(captureLocations(), persistedLocations);
+  });
+
+  useEffect(() => {
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (allowNavigationRef.current || !overlay || layoutsMatch(captureLocations(), persistedLocations)) return;
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [captureLocations, overlay, persistedLocations]);
   const activeLocationRef = activeLocation?.locationRef;
   const eventCampus = useMemo(() => {
     if (!overlay?.campusId) return activeCampus;
@@ -85,8 +122,11 @@ export function StudentEventEditPage() {
   }, [activeLocationRef, allLocationsResolvable, eventCampus]);
 
   const updateOverlay = useCallback((nextLocations: typeof locations) => {
+    latestLocationsRef.current = nextLocations;
     setOverlay((previous) => previous ? {
       ...previous,
+      status: "draft",
+      submittedAt: undefined,
       locations: nextLocations,
       locationRef: nextLocations[0]?.locationRef,
       eventFurniture: nextLocations[0]?.eventFurniture || [],
@@ -97,35 +137,40 @@ export function StudentEventEditPage() {
 
   const handleDraftChange = useCallback((furniture: FloorFurniture[], labels: FloorLabel[]) => {
     if (!activeLocation) return;
-    setDraftLocations((previous) => replaceEventOverlayLocation(
-      previous ?? persistedLocations,
+    const next = replaceEventOverlayLocation(
+      latestLocationsRef.current,
       activeLocation.id,
       furniture,
       labels,
-    ));
-  }, [activeLocation, persistedLocations]);
+    );
+    latestLocationsRef.current = next;
+    setDraftLocations(next);
+  }, [activeLocation]);
 
   const handleLocationChange = useCallback((nextLocationId: string) => {
     if (nextLocationId === activeLocation?.id) return;
-    const snapshot = interactionCommitRef.current?.();
-    if (snapshot && activeLocation) {
-      setDraftLocations((previous) => replaceEventOverlayLocation(
-        previous ?? persistedLocations,
-        activeLocation.id,
-        snapshot.eventFurniture,
-        snapshot.eventLabels,
-      ));
+    const next = captureLocations();
+    if (!layoutsMatch(next, persistedLocations)) {
+      setPendingLocationId(nextLocationId);
+      setDialogError(null);
+      return;
     }
     setActiveLocationId(nextLocationId);
-  }, [activeLocation, persistedLocations]);
+  }, [activeLocation, captureLocations, persistedLocations]);
 
-  const handleSave = useCallback(async (furniture: FloorFurniture[], labels: FloorLabel[]) => {
+  const clearRecoveryDrafts = useCallback(() => {
+    finalizeDraftRef.current?.();
+    if (!overlay) return;
+    for (const location of persistedLocations) clearEventLayoutDraft(overlay.id, location.locationRef);
+  }, [overlay, persistedLocations]);
+
+  const saveLocations = useCallback(async (nextLocations: EventOverlayLocation[]) => {
     if (!overlay || !activeLocation) return false;
-    const nextLocations = replaceEventOverlayLocation(locations, activeLocation.id, furniture, labels);
     setSaving(true);
     try {
       await eventOverlayService.updateEventOverlayLayout(overlay.id, nextLocations);
       updateOverlay(nextLocations);
+      clearRecoveryDrafts();
       toast.success("Draft saved", `${activeLocation.locationRef.label} map changes were saved.`);
       return true;
     } catch (err) {
@@ -134,14 +179,23 @@ export function StudentEventEditPage() {
     } finally {
       setSaving(false);
     }
-  }, [activeLocation, locations, overlay, toast, updateOverlay]);
+  }, [activeLocation, clearRecoveryDrafts, overlay, toast, updateOverlay]);
+
+  const handleSave = useCallback(async (furniture: FloorFurniture[], labels: FloorLabel[]) => {
+    if (!activeLocation) return false;
+    const nextLocations = replaceEventOverlayLocation(latestLocationsRef.current, activeLocation.id, furniture, labels);
+    latestLocationsRef.current = nextLocations;
+    return saveLocations(nextLocations);
+  }, [activeLocation, saveLocations]);
 
   const handleSubmit = useCallback(async (furniture: FloorFurniture[], labels: FloorLabel[]) => {
     if (!overlay || !activeLocation) return false;
-    const nextLocations = replaceEventOverlayLocation(locations, activeLocation.id, furniture, labels);
+    const nextLocations = replaceEventOverlayLocation(latestLocationsRef.current, activeLocation.id, furniture, labels);
     setSubmitting(true);
     try {
       await eventOverlayService.submitEventOverlayLayout(overlay.id, nextLocations);
+      clearRecoveryDrafts();
+      allowNavigationRef.current = true;
       toast.success("Submitted to GSO", "All requested locations and maps are now pending one combined review.");
       navigate("/student/events");
       return true;
@@ -151,7 +205,35 @@ export function StudentEventEditPage() {
     } finally {
       setSubmitting(false);
     }
-  }, [activeLocation, locations, navigate, overlay, toast]);
+  }, [activeLocation, clearRecoveryDrafts, navigate, overlay, toast]);
+
+  const closePrompt = useCallback(() => {
+    setPendingLocationId(null);
+    setDialogError(null);
+    if (blocker.state === "blocked") blocker.reset();
+  }, [blocker]);
+
+  const continuePendingAction = useCallback(() => {
+    const nextLocationId = pendingLocationId;
+    setPendingLocationId(null);
+    setDialogError(null);
+    if (nextLocationId) setActiveLocationId(nextLocationId);
+    else if (blocker.state === "blocked") blocker.proceed();
+  }, [blocker, pendingLocationId]);
+
+  const discardAndContinue = useCallback(() => {
+    clearRecoveryDrafts();
+    latestLocationsRef.current = persistedLocations;
+    setDraftLocations(persistedLocations);
+    continuePendingAction();
+  }, [clearRecoveryDrafts, continuePendingAction, persistedLocations]);
+
+  const saveAndContinue = useCallback(async () => {
+    const nextLocations = captureLocations();
+    const saved = await saveLocations(nextLocations);
+    if (saved) continuePendingAction();
+    else setDialogError("Save failed. Your changes are still in the editor.");
+  }, [captureLocations, continuePendingAction, saveLocations]);
 
   if (authLoading || loading || campusLoading) return <LoadingState />;
   if (!isStudentOrg) return <Navigate to="/home" replace />;
@@ -173,5 +255,5 @@ export function StudentEventEditPage() {
     eventLabels: activeLocation.eventLabels,
   };
 
-  return <div className="h-screen flex flex-col bg-background"><div className="flex-1 min-h-0 flex flex-col lg:flex-row"><EventLocationSwitcher locations={locations} activeLocationId={activeLocation.id} onChange={handleLocationChange} /><div className="flex-1 min-w-0 min-h-0"><EventFloorEditor key={activeLocation.id} floorPlan={floorPlan} overlay={focusedOverlay} activeCampus={eventCampus} onSave={handleSave} onSubmit={handleSubmit} onDraftChange={handleDraftChange} interactionCommitRef={interactionCommitRef} onBack={() => navigate("/student/events")} isSaving={saving} isSubmitting={submitting} /></div></div></div>;
+  return <div className="h-screen flex flex-col bg-background"><div className="flex-1 min-h-0 flex flex-col lg:flex-row"><EventLocationSwitcher locations={locations} activeLocationId={activeLocation.id} onChange={handleLocationChange} /><div className="flex-1 min-w-0 min-h-0"><EventFloorEditor key={activeLocation.id} floorPlan={floorPlan} overlay={focusedOverlay} activeCampus={eventCampus} onSave={handleSave} onSubmit={handleSubmit} onDraftChange={handleDraftChange} interactionCommitRef={interactionCommitRef} finalizeDraftRef={finalizeDraftRef} onBack={() => navigate("/student/events")} isSaving={saving} isSubmitting={submitting} /></div></div><UnsavedChangesDialog open={Boolean(pendingLocationId) || blocker.state === "blocked"} isDirty={isDirty || blocker.state === "blocked"} saving={saving} error={dialogError} description="Save your event map changes before leaving, or discard them." discardLabel="Don't Save" onCancel={closePrompt} onSave={() => void saveAndContinue()} onDiscard={discardAndContinue} /></div>;
 }

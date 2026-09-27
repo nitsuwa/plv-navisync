@@ -1,6 +1,6 @@
 /** Student Org event proposals and map submission dashboard. */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AlertCircle, ArrowLeft, CalendarDays, CheckCircle2, Clock, Edit2, Loader2, MapPin, MessageSquare, Pencil, Plus, RefreshCw, Trash2, X, XCircle } from "lucide-react";
+import { AlertCircle, ArrowLeft, CalendarDays, CheckCircle2, Clock, Edit2, Loader2, MapPin, MessageSquare, Pencil, Plus, RefreshCw, Save, Trash2, X, XCircle } from "lucide-react";
 import { Link, Navigate, useNavigate } from "react-router";
 import { motion } from "motion/react";
 import { cn } from "../lib/utils";
@@ -15,6 +15,7 @@ import { EventDetailsModal, EventProposalModal } from "../components/events/Even
 import type { CampusEventOverlay, EventLocationRef } from "../components/map-builder/types";
 
 const STATUS_CONFIG: Record<EventOverlayStatus, { label: string; color: string; bg: string; icon: React.ElementType }> = {
+  draft: { label: "Draft", color: "text-sky-600 dark:text-sky-400", bg: "bg-sky-50 dark:bg-sky-900/20 border-sky-200 dark:border-sky-800/30", icon: Save },
   pending: { label: "Pending Review", color: "text-amber-600 dark:text-amber-400", bg: "bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800/30", icon: Clock },
   approved: { label: "Approved", color: "text-green-600 dark:text-green-400", bg: "bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800/30", icon: CheckCircle2 },
   disapproved: { label: "Needs Revision", color: "text-red-600 dark:text-red-400", bg: "bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800/30", icon: XCircle },
@@ -90,7 +91,7 @@ export function StudentMyEventsPage() {
   const handleEdit = async (data: { title: string; description: string; organizer: string; locations: EventLocationRef[]; posterUrl?: string }) => {
     if (!editTarget) return;
     await eventOverlayService.updateEventOverlayDetails(editTarget.id, data);
-    toast.success("Event updated", `"${data.title}" has been updated.`);
+    toast.success("Draft saved", `"${data.title}" is a draft. Submit to GSO when it is ready for review.`);
     setEditTarget(null);
     await loadOverlays();
   };
@@ -213,7 +214,7 @@ export function StudentMyEventsPage() {
                   )}
                   <div className="flex flex-wrap items-center gap-2 px-5 py-3 border-t border-border bg-muted/20">
                     <button type="button" onClick={() => setEditTarget(overlay)} className="flex items-center gap-1.5 h-8 px-3 rounded-xl border border-primary/30 text-xs font-bold text-primary hover:bg-primary/10"><Pencil className="h-3.5 w-3.5" /> Edit details</button>
-                    <Link to={`/student/events/${overlay.id}/edit`} className="flex items-center gap-1.5 h-8 px-3 rounded-xl border border-border text-xs font-bold text-foreground hover:bg-muted"><Edit2 className="h-3.5 w-3.5" /> {status === "disapproved" ? "Revise maps" : "Edit maps"}</Link>
+                    <Link to={`/student/events/${overlay.id}/edit`} className="flex items-center gap-1.5 h-8 px-3 rounded-xl border border-border text-xs font-bold text-foreground hover:bg-muted"><Edit2 className="h-3.5 w-3.5" /> {status === "draft" ? "Continue draft" : status === "disapproved" ? "Revise maps" : "Edit maps"}</Link>
                     <button type="button" onClick={() => setDeleteTarget(overlay)} className="flex items-center gap-1.5 h-8 px-3 rounded-xl border border-destructive/30 text-xs font-bold text-destructive hover:bg-destructive/10"><Trash2 className="h-3.5 w-3.5" /> Delete</button>
                   </div>
                 </motion.article>

@@ -278,7 +278,7 @@ export function EventProposalModal({
         <>
           {step === 2 && (
             <p id="event-create-help" role={error ? "alert" : "status"} aria-live="polite" className={cn("text-xs", error ? "text-destructive" : "text-muted-foreground")}>
-              {error || (locations.length === 0 ? "Select at least one requested location to continue." : "Your selected locations will be sent to the administrator for review.")}
+              {error || (locations.length === 0 ? "Select at least one requested location to continue." : "This creates a draft. The administrator will see it only after you select Submit to GSO.")}
             </p>
           )}
           <div className="flex w-full flex-col-reverse gap-2 sm:flex-row">
