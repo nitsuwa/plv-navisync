@@ -124,6 +124,18 @@ describe("RoutePlannerDialog student accessibility", () => {
     opener.remove();
   });
 
+  it("keeps the mobile planner compact with a dedicated scroll region and persistent actions", () => {
+    render(<RoutePlannerDialog {...plannerProps()} />);
+
+    const dialog = screen.getByRole("dialog", { name: "Route planner" });
+    const scrollRegion = screen.getByTestId("route-planner-scroll-region");
+
+    expect(dialog).toHaveClass("overflow-hidden", "flex");
+    expect(scrollRegion).toHaveClass("min-h-0", "flex-1", "overflow-y-auto", "overscroll-contain");
+    expect(screen.getByRole("button", { name: "Close directions" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Choose a destination" })).toBeDisabled();
+  });
+
   it("uses one active unified destination search instead of parallel building and room controls", () => {
     const onSelectToDestination = vi.fn();
     render(

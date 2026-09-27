@@ -1277,7 +1277,7 @@ function HeroSection() {
       data-testid="landing-hero"
       data-scroll-behavior="subtle"
       data-mobile-nav-aware="true"
-      className="relative isolate flex min-h-0 items-center justify-center overflow-hidden pb-[calc(6rem+env(safe-area-inset-bottom,0px))] pt-4 sm:py-12 lg:min-h-[820px] lg:py-28 lg:pb-28"
+      className="relative isolate flex min-h-0 items-center justify-center overflow-hidden pb-[calc(1rem+env(safe-area-inset-bottom,0px))] pt-4 sm:py-12 lg:min-h-[820px] lg:py-28 lg:pb-28"
       aria-labelledby="landing-hero-heading"
     >
       {/* ── Animated gradient background — slow shift ── */}

@@ -324,6 +324,44 @@ describe("authored destination endpoint combinations", () => {
     expect(emergencyRoute!.steps.some((step) => step.icon === "stairs")).toBe(true);
   });
 
+  it("keeps a same-building exterior-stair detour in source → campus → destination order", () => {
+    const detourGraph: CampusNavGraph = {
+      buildings: [{ id: "sc", x: 0, y: 0, width: 300, height: 200, floors: [
+        { id: "ground", number: 1 }, { id: "second", number: 3 }, { id: "third", number: 4 },
+      ] }],
+      navNodes: [
+        { id: "copy-door", x: 10, y: 10, buildingId: "sc", floorId: "ground", doorId: "copy" },
+        { id: "exit-hall", x: 20, y: 10, buildingId: "sc", floorId: "ground" },
+        { id: "exit", x: 30, y: 10, buildingId: "sc", type: "entrance" },
+        { id: "stair-entry", x: 200, y: 10, buildingId: "sc", type: "entrance" },
+        { id: "stair-ground", x: 210, y: 10, buildingId: "sc", floorId: "ground", type: "stair", stairId: "stair-ground" },
+        { id: "stair-second", x: 210, y: 10, buildingId: "sc", floorId: "second", type: "stair", stairId: "stair-second" },
+        { id: "stair-third", x: 210, y: 10, buildingId: "sc", floorId: "third", type: "stair", stairId: "stair-third" },
+        { id: "lecture-door", x: 250, y: 10, buildingId: "sc", floorId: "third", doorId: "lecture" },
+      ],
+      navEdges: [
+        ["copy-door", "exit-hall"], ["exit-hall", "exit"], ["exit", "stair-entry"],
+        ["stair-entry", "stair-ground"], ["stair-ground", "stair-second"],
+        ["stair-second", "stair-third"], ["stair-third", "lecture-door"],
+      ].map(([startNodeId, endNodeId], index) => ({
+        id: `detour-${index}`, startNodeId, endNodeId, distance: 10,
+        bidirectional: true, accessible: true,
+        type: index === 4 || index === 5 ? "floor_transition" : "walkway",
+      })),
+    };
+    const route = planDestinationRoute(
+      { type: "room", buildingId: "sc", floorNumber: 1, roomId: "copy-room", roomName: "Copy Shop", buildingLabel: "Student Center", buildingCode: "SC", accessDoorId: "copy" },
+      { type: "room", buildingId: "sc", floorNumber: 4, roomId: "lecture-room", roomName: "Lecture Room", buildingLabel: "Student Center", buildingCode: "SC", accessDoorId: "lecture" },
+      "standard", detourGraph,
+    );
+    expect(route?.points.length).toBeGreaterThanOrEqual(2);
+    expect(route?.indoorSegments?.map((segment) => [segment.floorNumber, segment.afterOutdoor])).toEqual([
+      [1, false], [1, true], [3, true], [4, true],
+    ]);
+    expect(route?.transitionDetails).toHaveLength(2);
+    expect(route?.indoorSegments?.at(-1)?.waypoints.at(-1)).toEqual({ x: 250, y: 10 });
+  });
+
   it("chooses the shortest connected physical Door and ignores room-center shortcuts", () => {
     const multiDoorGraph: CampusNavGraph = {
       navNodes: [

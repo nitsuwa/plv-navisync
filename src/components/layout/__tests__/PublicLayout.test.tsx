@@ -21,7 +21,7 @@ vi.mock("../Navbar", () => ({ Navbar: () => null }));
 vi.mock("../EmergencyBanner", () => ({ EmergencyBanner: () => null }));
 vi.mock("../Footer", () => ({ Footer: () => <footer data-testid="site-footer">Footer</footer> }));
 vi.mock("../ScrollToTop", () => ({ ScrollToTop: () => null }));
-vi.mock("../MobileBottomNav", () => ({ MobileBottomNav: () => null }));
+vi.mock("../MobileBottomNav", () => ({ MobileBottomNav: () => <nav data-testid="mobile-bottom-nav">Map</nav> }));
 vi.mock("../../ui/NavigationProgress", () => ({ NavigationProgress: () => null }));
 vi.mock("../../../app/components/ui/sonner", () => ({ Toaster: () => null }));
 
@@ -57,6 +57,7 @@ describe("PublicLayout student entry", () => {
 
     expect(screen.getByText("Student Home")).toBeInTheDocument();
     expect(screen.getByTestId("site-footer")).toBeInTheDocument();
+    expect(screen.getByTestId("mobile-bottom-nav")).toBeInTheDocument();
   });
 
   it("hides the site footer on full-screen student event editing routes", () => {

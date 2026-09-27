@@ -10,11 +10,11 @@ function query(data: unknown[] = [], error: unknown = null) {
   for (const method of ["select", "insert", "update", "upsert", "eq", "in", "is", "order"]) q[method] = vi.fn(() => q);
   return q;
 }
-function client(rows: unknown[] = [row]) {
+function client(rows: unknown[] = [row], imageRows: unknown[] = [{ report_id: "r1", storage_path: "r1/photo.png" }]) {
   const queries: Record<string, ReturnType<typeof query>> = {
     reports: query(rows), buildings: query([{ id: "b1", name: "Student Center" }]), floors: query([{ id: "f1", name: "Second Floor" }]),
     map_elements: query([{ id: "room1", name: "Copy Shop" }]), report_admin_notes: query([{ report_id: "r1", notes: "Private staff note" }]),
-    report_images: query([{ report_id: "r1", storage_path: "r1/photo.png" }]), report_history: query([{ id: "h1", report_id: "r1", action: "report.resolved", new_status: "resolved", note: "Fixed", created_at: row.created_at }]), activity_logs: query([]),
+    report_images: query(imageRows), report_history: query([{ id: "h1", report_id: "r1", action: "report.resolved", new_status: "resolved", note: "Fixed", created_at: row.created_at }]), activity_logs: query([]),
   };
   const mock = {
     auth: { getUser: vi.fn(async () => ({ data: { user: { id: "student-a" } }, error: null })) },
@@ -59,6 +59,36 @@ describe("report reliability and privacy", () => {
     expect(reports[0]).toMatchObject({ buildingName: "Student Center", floorLabel: "Second Floor", roomName: "Copy Shop", imageUrl: "https://signed/photo", internalNotes: "Private staff note" });
     expect(queries.reports.is).toHaveBeenCalledWith("archived_at", null);
   });
+  it("keeps reports visible when the optional admin-notes table is not deployed", async () => {
+    const { queries } = client();
+    queries.report_admin_notes.then = (resolve: any) => Promise.resolve({
+      data: null,
+      error: { code: "PGRST205", message: "Could not find the table 'public.report_admin_notes' in the schema cache" },
+    }).then(resolve);
+
+    const reports = await listAllReports();
+
+    expect(reports).toHaveLength(1);
+    expect(reports[0].id).toBe("r1");
+    expect(reports[0].internalNotes).toBeNull();
+  });
+  it("does not hide non-missing-table admin-notes errors", async () => {
+    const { queries } = client();
+    queries.report_admin_notes.then = (resolve: any) => Promise.resolve({
+      data: null,
+      error: { code: "42501", message: "permission denied for table report_admin_notes" },
+    }).then(resolve);
+
+    await expect(listAllReports()).rejects.toThrow("Admin notes could not be loaded");
+  });
+  it("does not request signed URLs for legacy fixture image placeholders", async () => {
+    const { mock } = client([row], [{ report_id: "r1", storage_path: "r1/fixture.png" }]);
+
+    const reports = await listAllReports();
+
+    expect(mock.storage.from).not.toHaveBeenCalled();
+    expect(reports[0].imageUrl).toBeNull();
+  });
   it("excludes archived reports from student history and pending badge", async () => {
     const { queries } = client();
     await getStudentReports(); await countPendingReports();
@@ -88,6 +118,16 @@ describe("report reliability and privacy", () => {
     await updateReportInternalNotes("r1", " New note ");
     expect(queries.report_admin_notes.upsert).toHaveBeenCalledWith(expect.objectContaining({ report_id: "r1", notes: "New note" }), { onConflict: "report_id" });
     expect(queries.reports.update).not.toHaveBeenCalled();
+  });
+  it("explains that private admin notes need the reporting migration", async () => {
+    const { queries } = client();
+    queries.report_admin_notes.single.mockResolvedValue({
+      data: null,
+      error: { code: "PGRST205", message: "Could not find the table 'public.report_admin_notes' in the schema cache" },
+    });
+
+    await expect(updateReportInternalNotes("r1", "Staff-only note"))
+      .rejects.toThrow("unavailable until the reporting migration is applied");
   });
   it("warns about failed photo attachment without treating the saved report as failed", async () => {
     const { queries } = client();

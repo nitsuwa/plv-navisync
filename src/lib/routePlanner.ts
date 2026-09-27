@@ -180,6 +180,8 @@ export interface RouteIndoorSegment {
   buildingId: string;
   floorId?: string;
   floorNumber?: number;
+  /** True once the authored path has entered the campus coordinate space. */
+  afterOutdoor?: boolean;
   waypoints: Pt[];
   distanceM: number;
   seconds: number;
@@ -981,8 +983,10 @@ function authoredRouteContexts(
     : undefined;
   const campusPoints: Pt[] = [];
   const indoorSegments: RouteIndoorSegment[] = [];
+  let afterOutdoor = false;
   for (const context of contexts) {
     if (context.kind === "campus") {
+      afterOutdoor = true;
       context.waypoints.forEach((point) => appendPoint(campusPoints, point));
       continue;
     }
@@ -997,6 +1001,7 @@ function authoredRouteContexts(
       buildingId: context.buildingId ?? (to.type === "room" ? to.buildingId : from.buildingId),
       floorId: context.floorId,
       floorNumber: context.floorNumber ?? (isTargetFloor && to.type === "room" ? to.floorNumber : undefined),
+      afterOutdoor,
       waypoints: context.waypoints,
       distanceM,
       seconds: Math.max(0, Math.round((distanceM / Math.max(0.1, path.distanceM)) * path.minutes * 60)),

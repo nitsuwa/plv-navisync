@@ -109,7 +109,7 @@ export function StudentHomePage() {
 
   return (
     <div className="min-h-screen bg-background">
-      <div className="max-w-2xl mx-auto px-5 pt-8 pb-24 space-y-6">
+      <div className="max-w-2xl mx-auto px-5 pt-8 pb-8 space-y-6">
 
         {/* ══ GREETING ══ */}
         <motion.div

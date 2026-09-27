@@ -1,6 +1,5 @@
 import {
   ChevronLeft,
-  Compass,
   MapPin,
   Navigation,
   RotateCcw,
@@ -19,6 +18,7 @@ export interface StudentMapControlsProps {
   directionsMode: boolean;
   pinning: boolean;
   youAreHere: boolean;
+  hasSelectedRoom?: boolean;
   searchResults: readonly SearchResult[];
   onSearchChange: (value: string) => void;
   onSearchFocus: () => void;
@@ -27,7 +27,7 @@ export interface StudentMapControlsProps {
   onSelectSearchResult: (result: SearchResult) => void;
   onOpenDirections: () => void;
   onTogglePin: () => void;
-  onResetView: () => void;
+  onResetView?: () => void;
   onBackToCampus?: () => void;
 }
 
@@ -39,6 +39,7 @@ export function StudentMapControls({
   directionsMode,
   pinning,
   youAreHere,
+  hasSelectedRoom = false,
   searchResults,
   onSearchChange,
   onSearchFocus,
@@ -59,6 +60,7 @@ export function StudentMapControls({
     : youAreHere
       ? "Move dropped pin"
       : "Drop pin";
+  const utilityControlsVisible = !directionsMode && !searchFocused && (!isFloorMode || !hasSelectedRoom);
 
   const handleClearSearch = () => {
     setDestinationFilter("all");
@@ -76,7 +78,10 @@ export function StudentMapControls({
         <div
           data-testid="student-map-search-panel"
           data-no-drag
-          className="absolute left-2 right-2 top-2 md:left-3 md:right-auto md:top-3 w-auto md:w-[min(420px,calc(100vw-24px))] pointer-events-auto"
+          className={cn(
+            "absolute left-2 top-2 w-auto pointer-events-auto md:left-3 md:right-auto md:top-3 md:w-[min(420px,calc(100vw-24px))]",
+            "right-20",
+          )}
           style={{ top: "max(0.5rem, env(safe-area-inset-top, 0.5rem))" }}
         >
           <CampusDestinationSearch
@@ -94,38 +99,39 @@ export function StudentMapControls({
             onSelect={onSelectSearchResult}
             onClear={handleClearSearch}
             listId="student-map-search-results"
+            groupByBuilding
             leading={isFloorMode && onBackToCampus ? (
-              <button type="button" onClick={onBackToCampus} className="flex min-h-11 max-w-[118px] shrink-0 items-center gap-1 rounded-2xl px-2 text-left text-primary transition-colors hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50" aria-label="Back to campus map">
+              <button type="button" onClick={onBackToCampus} className="flex h-11 w-10 shrink-0 items-center justify-center gap-1 rounded-2xl px-1 text-left text-primary transition-colors hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 md:h-auto md:w-auto md:max-w-[118px] md:justify-start md:px-2" aria-label={`Back to campus map${floorLabel ? ` from ${floorLabel}` : ""}`} title={floorLabel ? `Back to campus map from ${floorLabel}` : "Back to campus map"}>
                 <ChevronLeft className="h-4 w-4 shrink-0" />
-                <span className="truncate text-[10px] font-extrabold leading-tight">{floorLabel ?? "Campus map"}</span>
+                <span className="sr-only md:not-sr-only md:truncate md:text-[10px] md:font-extrabold md:leading-tight">{floorLabel ?? "Campus map"}</span>
               </button>
-            ) : (
-              <div className="flex h-11 w-10 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-primary" aria-hidden="true">
-                <Compass className="h-5 w-5" strokeWidth={2.4} />
-              </div>
-            )}
+            ) : undefined}
           />
         </div>
       )}
 
-      {!directionsMode && !searchFocused && (
+      {utilityControlsVisible && (
         <div data-testid="student-map-utility-controls" data-no-drag className="absolute right-3 top-20 flex flex-col items-end gap-1.5 pointer-events-auto">
           <div className="overflow-hidden rounded-2xl border border-white/45 bg-card/95 shadow-[0_8px_24px_rgba(15,23,42,0.14)] backdrop-blur-xl dark:border-white/10">
             <button type="button" onClick={onOpenDirections} aria-label="Open directions" title="Open directions" className="flex h-12 w-12 items-center justify-center text-primary transition-colors hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/50">
               <Navigation className="h-5 w-5" />
             </button>
-            <div className="h-px bg-border/60" />
+            {!isFloorMode && <div className="h-px bg-border/60" />}
             {!isFloorMode && (
               <>
                 <button type="button" onClick={onTogglePin} aria-label={pinLabel} aria-pressed={pinning} title={pinLabel} className={cn("flex h-12 w-12 items-center justify-center text-primary transition-colors hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/50", pinning && "bg-primary/10")}>
                   <MapPin className="h-5 w-5" />
                 </button>
-                <div className="h-px bg-border/60" />
               </>
             )}
-            <button type="button" onClick={onResetView} aria-label="Reset map view" title="Reset map view" className="flex h-12 w-12 items-center justify-center text-muted-foreground transition-colors hover:bg-muted hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/50">
-              <RotateCcw className="h-5 w-5" />
-            </button>
+            {onResetView && (
+              <>
+                <div className="h-px bg-border/60" />
+                <button type="button" onClick={onResetView} aria-label="Reset map view" title="Reset map view" className="flex h-12 w-12 items-center justify-center text-muted-foreground transition-colors hover:bg-muted hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/50">
+                  <RotateCcw className="h-5 w-5" />
+                </button>
+              </>
+            )}
           </div>
         </div>
       )}

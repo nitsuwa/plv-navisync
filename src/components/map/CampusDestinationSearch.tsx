@@ -110,8 +110,10 @@ export function CampusDestinationSearch({
           )}>
             <Search className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
             <input
-              type="search"
+              type="text"
               role="searchbox"
+              inputMode="search"
+              enterKeyHint="search"
               aria-label={ariaLabel}
               aria-controls={focused ? listId : undefined}
               aria-expanded={focused}
@@ -122,6 +124,16 @@ export function CampusDestinationSearch({
               onFocus={onFocus}
               onKeyDown={(event) => {
                 if (event.key === "Escape") onBlur();
+                if (event.key === "Enter" && query.trim()) {
+                  const exact = filteredResults.find((result) =>
+                    result.name.trim().toLowerCase() === query.trim().toLowerCase()
+                    || result.code?.trim().toLowerCase() === query.trim().toLowerCase());
+                  const result = exact ?? filteredResults[0];
+                  if (result) {
+                    event.preventDefault();
+                    onSelect(result);
+                  }
+                }
               }}
               onBlur={(event) => {
                 if (event.relatedTarget instanceof Node && panelRef.current?.contains(event.relatedTarget)) return;

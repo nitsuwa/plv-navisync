@@ -18,6 +18,7 @@ interface MobileBuildingSheetProps {
   saved: Set<string>;
   studentAuth: StudentAuthState;
   hasFloorPlans: boolean;
+  onHeightChange?: (height: number) => void;
 }
 
 const SHEET_HEIGHT = 72;
@@ -26,9 +27,11 @@ const SNAP_THRESHOLD = 80;
 export function MobileBuildingSheet({
   selected, onClose, onDirections, onFloorPlan, onSave, onReport,
   onSignInPrompt, saved, studentAuth, hasFloorPlans,
+  onHeightChange,
 }: MobileBuildingSheetProps) {
   useEscToClose(onClose);
   const controls = useDragControls();
+  const sheetRef = useRef<HTMLDivElement>(null);
 
   // Signal to MobileBottomNav to hide when sheet is open
   useEffect(() => {
@@ -39,6 +42,28 @@ export function MobileBuildingSheet({
       window.dispatchEvent(new CustomEvent("building-sheet-toggle", { detail: { open: false } }));
     };
   }, []);
+
+  // Let map controls sit immediately above the actual details card rather
+  // than guessing its height (which varies with content and screen size).
+  useEffect(() => {
+    const element = sheetRef.current;
+    if (!element || !onHeightChange) return;
+    const publishHeight = () => {
+      const height = element.offsetHeight;
+      const bottom = Number.parseFloat(window.getComputedStyle(element).bottom) || 0;
+      onHeightChange(Math.ceil(height + bottom));
+    };
+    publishHeight();
+    if (typeof ResizeObserver === "undefined") {
+      return () => onHeightChange(0);
+    }
+    const observer = new ResizeObserver(publishHeight);
+    observer.observe(element);
+    return () => {
+      observer.disconnect();
+      onHeightChange(0);
+    };
+  }, [onHeightChange]);
   const dragY = useMotionValue(0);
   const sheetOpacity = useTransform(dragY, [0, SNAP_THRESHOLD * 2], [1, 0]);
   const sheetScale = useTransform(dragY, [0, SNAP_THRESHOLD * 2], [1, 0.92]);
@@ -65,9 +90,10 @@ export function MobileBuildingSheet({
     <motion.div
       data-no-drag
       data-testid="mobile-building-sheet"
-      className="md:hidden fixed inset-x-0 z-50 will-change-transform landscape-minimized"
+      ref={sheetRef}
+      className="md:hidden fixed inset-x-3 z-50 will-change-transform landscape-minimized"
       style={{
-        bottom: 0,
+        bottom: "max(0.75rem, env(safe-area-inset-bottom, 0px))",
         y: dragY,
         opacity: sheetOpacity,
         scale: sheetScale,
@@ -84,8 +110,8 @@ export function MobileBuildingSheet({
       transition={{ type: "spring", stiffness: 400, damping: 30, mass: 0.9 }}
     >
       <div
-        className="bg-card/96 backdrop-blur-2xl border-t border-border overflow-hidden flex flex-col"
-        style={{ borderRadius, maxHeight: `${SHEET_HEIGHT}vh`, boxShadow: "0 -8px 40px rgba(0,0,0,0.18), 0 -2px 12px rgba(0,0,0,0.12)" }}
+        className="bg-card/96 backdrop-blur-2xl rounded-3xl border border-border overflow-hidden flex flex-col"
+        style={{ borderRadius, maxHeight: `${SHEET_HEIGHT}vh`, boxShadow: "0 8px 36px rgba(0,0,0,0.2), 0 2px 12px rgba(0,0,0,0.12)" }}
       >
         {/* Building image header */}
         {selected.image_url && (

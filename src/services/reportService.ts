@@ -179,6 +179,27 @@ function humanizeHistoryAction(action: string): string {
     .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
+function isMissingAdminNotesTable(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const candidate = error as { code?: unknown; message?: unknown; details?: unknown };
+  const message = [candidate.message, candidate.details]
+    .filter((part): part is string => typeof part === "string")
+    .join(" ")
+    .toLowerCase();
+  return message.includes("report_admin_notes") && (
+    candidate.code === "PGRST205" ||
+    candidate.code === "42P01" ||
+    message.includes("could not find the table") ||
+    message.includes("does not exist")
+  );
+}
+
+function isPlaceholderReportImage(path: string | null | undefined): boolean {
+  // Real uploads use a generated UUID filename; fixture.png is legacy seed metadata,
+  // not an uploaded object, and requesting a signed URL only produces a 400.
+  return path?.split("/").at(-1)?.toLowerCase() === "fixture.png";
+}
+
 async function hydrateStudentReports(
   reports: IssueReport[],
   client: SupabaseClient<Database>,
@@ -212,7 +233,7 @@ async function hydrateStudentReports(
   const floorNames = new Map(floorRows.map((row) => [row.id, row.name]));
   const roomNames = new Map(roomRows.map((row) => [row.id, row.name]));
   const imageByReport = new Map<string, string>();
-  await Promise.all(imageRows.map(async (image) => {
+  await Promise.all(imageRows.filter(image => !isPlaceholderReportImage(image.storage_path)).map(async (image) => {
     try {
       const { data } = await client.storage.from("report-images").createSignedUrl(image.storage_path, 60 * 60);
       if (data?.signedUrl && !imageByReport.has(image.report_id)) imageByReport.set(image.report_id, data.signedUrl);
@@ -289,7 +310,11 @@ export async function listAllReports(filters: ReportFilters = {}): Promise<Issue
   if (reports.length) {
     const { data: notes, error: notesError } = await supabase.from("report_admin_notes")
       .select("report_id,notes").in("report_id", reports.map(report => report.id));
-    if (notesError) throw new Error("Admin notes could not be loaded. Apply the reporting migration and try again.");
+    // Notes are optional for reviewing reports. Older deployments without the
+    // notes migration should not make the entire admin queue disappear.
+    if (notesError && !isMissingAdminNotesTable(notesError)) {
+      throw new Error("Admin notes could not be loaded. Apply the reporting migration and try again.");
+    }
     reports = reports.map(report => ({ ...report, internalNotes: notes?.find(note => note.report_id === report.id)?.notes ?? null }));
   }
   const q = filters.search?.trim().toLocaleLowerCase();
@@ -333,6 +358,9 @@ export async function updateReportInternalNotes(id: string, notes: string): Prom
   const { data, error } = await supabase.from("report_admin_notes")
     .upsert({ report_id: id, notes: notes.trim() || null, updated_at: new Date().toISOString() }, { onConflict: "report_id" })
     .select("report_id").single();
+  if (error && isMissingAdminNotesTable(error)) {
+    throw new Error("Private admin notes are unavailable until the reporting migration is applied.");
+  }
   if (error || !data) throw new Error(error?.message || "Admin notes could not be saved.");
 
   await logActivity({ action: "report.notes", entityType: "report", entityId: id });

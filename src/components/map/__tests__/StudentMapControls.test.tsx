@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { StudentMapControls, type StudentMapControlsProps } from "../StudentMapControls";
 import type { SearchResult } from "../../../hooks";
@@ -95,6 +95,27 @@ describe("StudentMapControls", () => {
     expect(screen.getByRole("button", { name: "All destinations" })).toBeInTheDocument();
     expect(screen.getByText("Building")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("option", { name: /Science Hall/i }));
+    expect(onSelectSearchResult).toHaveBeenCalledWith(result);
+  });
+
+  it("groups rooms under their buildings and shows only the app clear button", () => {
+    const room = { ...result, id: "copy", name: "Copy Shop", kind: "room" as const, buildingName: "Science Hall", floorLabel: "Ground Floor" };
+    const secondBuilding = { ...result, id: "arts", buildingId: "arts", name: "Arts Hall", code: "ART" };
+    const secondRoom = { ...room, id: "studio", buildingId: "arts", buildingName: "Arts Hall", name: "Studio" };
+    render(<StudentMapControls {...props({ searchFocused: true, search: "room", searchResults: [result, room, secondBuilding, secondRoom] })} />);
+
+    const groups = screen.getAllByRole("group").filter((group) => group.getAttribute("aria-label")?.includes("Hall ("));
+    expect(groups).toHaveLength(2);
+    expect(within(groups[0]).getByRole("option", { name: /Studio/i })).toBeInTheDocument();
+    expect(within(groups[1]).getByRole("option", { name: /Copy Shop/i })).toBeInTheDocument();
+    expect(screen.getByRole("searchbox", { name: "Search campus map" })).toHaveAttribute("type", "text");
+    expect(screen.getAllByRole("button", { name: "Clear map search" })).toHaveLength(1);
+  });
+
+  it("locates an exact building name or code when Enter is pressed", () => {
+    const onSelectSearchResult = vi.fn();
+    render(<StudentMapControls {...props({ searchFocused: true, search: "SCI", searchResults: [result], onSelectSearchResult })} />);
+    fireEvent.keyDown(screen.getByRole("searchbox", { name: "Search campus map" }), { key: "Enter" });
     expect(onSelectSearchResult).toHaveBeenCalledWith(result);
   });
 
