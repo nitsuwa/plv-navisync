@@ -3,7 +3,8 @@ import { createPortal } from "react-dom";
 import { CheckCircle2, Flag, X, MapPin, Camera, Loader2 } from "lucide-react";
 import type { Building } from "../../types";
 import { cn } from "../../lib/utils";
-import { reportService } from "../../services/reportService";
+import { reportService, validateReportImage } from "../../services/reportService";
+import type { FloorPlan } from "../map-builder/types";
 import { useToast } from "../../hooks/useToast";
 import { useEscToClose } from "../../hooks/useEscToClose";
 
@@ -20,42 +21,67 @@ const ISSUE_TYPES = [
 interface ReportModalProps {
   building: Building;
   campusId?: string;
+  floors?: FloorPlan[];
+  initialFloorId?: string;
+  initialRoomId?: string;
   onClose: () => void;
 }
 
-export function ReportModal({ building, campusId, onClose }: ReportModalProps) {
+export function ReportModal({ building, campusId, floors = [], initialFloorId, initialRoomId, onClose }: ReportModalProps) {
   useEscToClose(onClose);
   const [issueType, setIssueType] = useState("");
   const [description, setDescription] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [imageFile, setImageFile] = useState<File | null>(null);
+  const [floorId, setFloorId] = useState(() => floors.some(floor => floor.id === initialFloorId) ? initialFloorId! : "");
+  const [roomId, setRoomId] = useState(() => floors.find(floor => floor.id === initialFloorId)?.rooms.some(room => room.id === initialRoomId) ? initialRoomId! : "");
+  const [error, setError] = useState<string | null>(null);
+  const [warning, setWarning] = useState<string | null>(null);
+  const selectedFloor = floors.find(floor => floor.id === floorId);
+  const selectedRoom = selectedFloor?.rooms.find(room => room.id === roomId);
+  const locationLabel = [building.name, selectedFloor?.label, selectedRoom?.name].filter(Boolean).join(" · ");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { showToast } = useToast();
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
-      setImageFile(e.target.files[0]);
+      try {
+        validateReportImage(e.target.files[0]);
+        setImageFile(e.target.files[0]);
+        setError(null);
+      } catch (err) {
+        setImageFile(null);
+        e.target.value = "";
+        setError(err instanceof Error ? err.message : "Invalid photo.");
+      }
     }
   };
 
   const handleSubmit = async () => {
     if (!issueType) return;
     setIsSubmitting(true);
+    setError(null);
     try {
-      await reportService.submitReport({
+      const report = await reportService.submitReport({
         buildingId: building.id,
         campusId,
         buildingName: building.name,
-        category: issueType.toLowerCase().includes("hazard") || issueType.toLowerCase().includes("safety") ? "hazard" : issueType.toLowerCase().includes("blocked") ? "accessibility" : "maintenance",
-        title: `${issueType} at ${building.name}`,
-        description: description || `${issueType} reported at ${building.name}.`,
+        floorId: selectedFloor?.id,
+        floorLabel: selectedFloor?.label,
+        roomId: selectedRoom?.id,
+        roomName: selectedRoom?.name,
+        category: ({ "Broken Light": "electrical_issue", "Flooded Area": "water_leak", "Damaged Property": "damaged_facility", "Blocked Walkway": "accessibility_concern", "Safety Hazard": "safety_concern", "Facility Problem": "broken_equipment", "Other": "other" } as Record<string, string>)[issueType],
+        title: `${issueType} at ${locationLabel}`,
+        description: description.trim() || `${issueType} reported at ${locationLabel}.`,
         imageFile,
       });
 
       setSubmitted(true);
+      setWarning(report.submissionWarning ?? null);
       showToast("Report submitted successfully!", "success");
-    } catch {
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to submit report. Please try again.");
       showToast("Failed to submit report. Please try again.", "error");
     } finally {
       setIsSubmitting(false);
@@ -84,9 +110,10 @@ export function ReportModal({ building, campusId, onClose }: ReportModalProps) {
           <h3 className="font-extrabold text-foreground text-lg mb-2">
             Report Submitted
           </h3>
-          <p className="text-sm text-muted-foreground mb-1">Campus maintenance has been notified.</p>
+          <p className="text-sm text-muted-foreground mb-1">Your report is saved and available for admin review.</p>
+          {warning && <p role="alert" className="text-sm text-amber-600 mb-2">{warning}</p>}
           <p className="text-xs text-muted-foreground mb-6">
-            Location: <span className="font-semibold text-foreground">{building.name}</span>
+            Location: <span className="font-semibold text-foreground">{locationLabel}</span>
           </p>
           <button
             onClick={onClose}
@@ -111,7 +138,7 @@ export function ReportModal({ building, campusId, onClose }: ReportModalProps) {
       onClick={onClose}
     >
       <div
-        className="bg-card border border-border rounded-t-2xl sm:rounded-2xl shadow-2xl w-full sm:max-w-md mx-0 sm:mx-4 animate-slide-up"
+        className="bg-card border border-border rounded-t-2xl sm:rounded-2xl shadow-2xl w-full sm:max-w-md mx-0 sm:mx-4 animate-slide-up max-h-[90vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-5 pt-5 pb-4 border-b border-border">
@@ -135,6 +162,21 @@ export function ReportModal({ building, campusId, onClose }: ReportModalProps) {
           </button>
         </div>
         <div className="p-5 space-y-4">
+          {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+          {floors.length > 0 && <div className="space-y-2">
+            <label htmlFor="report-floor" className="block text-xs font-bold">Floor (optional)</label>
+            <select id="report-floor" value={floorId} onChange={e => { setFloorId(e.target.value); setRoomId(""); }} className="w-full rounded-xl border border-border bg-background p-2 text-sm">
+              <option value="">Whole building</option>
+              {floors.map(floor => <option key={floor.id} value={floor.id}>{floor.label}</option>)}
+            </select>
+            {selectedFloor && <>
+              <label htmlFor="report-room" className="block text-xs font-bold">Room (optional)</label>
+              <select id="report-room" value={roomId} onChange={e => setRoomId(e.target.value)} className="w-full rounded-xl border border-border bg-background p-2 text-sm">
+                <option value="">Whole floor / common area</option>
+                {selectedFloor.rooms.map(room => <option key={room.id} value={room.id}>{room.name}</option>)}
+              </select>
+            </>}
+          </div>}
           <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-muted/60 border border-border">
             <MapPin className="h-3.5 w-3.5 text-primary shrink-0" />
             <span className="text-xs text-foreground font-semibold flex-1">{building.name}</span>
@@ -182,7 +224,8 @@ export function ReportModal({ building, campusId, onClose }: ReportModalProps) {
               type="file"
               ref={fileInputRef}
               onChange={handleFileChange}
-              accept="image/*"
+              accept="image/jpeg,image/png,image/webp"
+              aria-label="Attach report photo"
               className="hidden"
             />
             <button

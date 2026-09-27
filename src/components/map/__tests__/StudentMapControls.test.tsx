@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { StudentMapControls, type StudentMapControlsProps } from "../StudentMapControls";
 import type { SearchResult } from "../../../hooks";
@@ -30,21 +30,15 @@ const props = (overrides: Partial<StudentMapControlsProps> = {}): StudentMapCont
   isFloorMode: false,
   search: "",
   searchFocused: false,
-  mapMode: "standard",
   directionsMode: false,
   pinning: false,
   youAreHere: false,
-  buildings: [building],
   searchResults: [],
-  recentSearches: [],
   onSearchChange: vi.fn(),
   onSearchFocus: vi.fn(),
   onSearchBlur: vi.fn(),
   onClearSearch: vi.fn(),
   onSelectSearchResult: vi.fn(),
-  onClearRecentSearches: vi.fn(),
-  onSelectBuilding: vi.fn(),
-  onMapModeChange: vi.fn(),
   onOpenDirections: vi.fn(),
   onTogglePin: vi.fn(),
   onResetView: vi.fn(),
@@ -82,11 +76,12 @@ describe("StudentMapControls", () => {
     expect(onTogglePin).toHaveBeenCalledOnce();
   });
 
-  it("exposes map modes as a single pressed filter group", () => {
-    render(<StudentMapControls {...props({ mapMode: "accessible" })} />);
+  it("keeps route modes and building shortcuts out of the search area", () => {
+    render(<StudentMapControls {...props()} />);
 
-    expect(screen.getByRole("button", { name: /Accessible routes/i })).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByRole("button", { name: /All buildings/i })).toHaveAttribute("aria-pressed", "false");
+    expect(screen.queryByTestId("student-map-quick-filters")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Accessible routes|Emergency routes|All buildings/i })).not.toBeInTheDocument();
+    expect(screen.getByTestId("student-map-utility-controls").contains(screen.getByRole("button", { name: "Open directions" }))).toBe(true);
   });
 
   it("selects a search result without submitting a form", () => {
@@ -103,6 +98,27 @@ describe("StudentMapControls", () => {
     expect(onSelectSearchResult).toHaveBeenCalledWith(result);
   });
 
+  it("groups rooms under their buildings and shows only the app clear button", () => {
+    const room = { ...result, id: "copy", name: "Copy Shop", kind: "room" as const, buildingName: "Science Hall", floorLabel: "Ground Floor" };
+    const secondBuilding = { ...result, id: "arts", buildingId: "arts", name: "Arts Hall", code: "ART" };
+    const secondRoom = { ...room, id: "studio", buildingId: "arts", buildingName: "Arts Hall", name: "Studio" };
+    render(<StudentMapControls {...props({ searchFocused: true, search: "room", searchResults: [result, room, secondBuilding, secondRoom] })} />);
+
+    const groups = screen.getAllByRole("group").filter((group) => group.getAttribute("aria-label")?.includes("Hall ("));
+    expect(groups).toHaveLength(2);
+    expect(within(groups[0]).getByRole("option", { name: /Studio/i })).toBeInTheDocument();
+    expect(within(groups[1]).getByRole("option", { name: /Copy Shop/i })).toBeInTheDocument();
+    expect(screen.getByRole("searchbox", { name: "Search campus map" })).toHaveAttribute("type", "text");
+    expect(screen.getAllByRole("button", { name: "Clear map search" })).toHaveLength(1);
+  });
+
+  it("locates an exact building name or code when Enter is pressed", () => {
+    const onSelectSearchResult = vi.fn();
+    render(<StudentMapControls {...props({ searchFocused: true, search: "SCI", searchResults: [result], onSelectSearchResult })} />);
+    fireEvent.keyDown(screen.getByRole("searchbox", { name: "Search campus map" }), { key: "Enter" });
+    expect(onSelectSearchResult).toHaveBeenCalledWith(result);
+  });
+
   it("keeps search results open when focus moves within the search panel", () => {
     const onSearchBlur = vi.fn();
     render(
@@ -116,5 +132,19 @@ describe("StudentMapControls", () => {
     fireEvent.blur(searchbox, { relatedTarget: clearButton });
 
     expect(onSearchBlur).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("student-map-utility-controls")).not.toBeInTheDocument();
+  });
+
+  it("shows the full index on focus and clears a stale type filter when typing", () => {
+    const room = { ...result, id: "copy", name: "Copy Shop", kind: "room" as const };
+    render(<StudentMapControls {...props({ searchFocused: true, searchResults: [result, room] })} />);
+    expect(screen.getByRole("option", { name: /^Science Hall, Building/i })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: /Copy Shop/i })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Offices" }));
+    expect(screen.queryByRole("option", { name: /Copy Shop/i })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search campus map" }), { target: { value: "copy" } });
+    expect(screen.getByRole("button", { name: "All destinations" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("option", { name: /Copy Shop/i })).toBeInTheDocument();
   });
 });

@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -30,6 +30,7 @@ vi.mock("../../services/reportService", () => {
     updatedAt: "2026-08-07T00:00:00Z",
   };
   return {
+    REPORT_CATEGORIES: ["damaged_facility", "accessibility_concern", "safety_concern", "navigation_error", "other"],
     reportService: {
       listAllReports: vi.fn().mockResolvedValue([report]),
       updateReportStatus: vi.fn().mockResolvedValue(undefined),
@@ -97,6 +98,7 @@ vi.mock("../../services/announcementService", () => {
 import { AdminAnnouncementsPage } from "../AdminAnnouncementsPage";
 import { AdminEventsPage } from "../AdminEventsPage";
 import { AdminReportsPage } from "../AdminReportsPage";
+import { reportService } from "../../services/reportService";
 
 describe("admin operational pages (C8-A)", () => {
   beforeAll(() => {
@@ -125,6 +127,22 @@ describe("admin operational pages (C8-A)", () => {
     );
     await waitFor(() => expect(screen.getByRole("heading", { name: "Student Reports" })).toBeInTheDocument());
     expect(await screen.findByText("Broken hallway light")).toBeInTheDocument();
+  });
+
+  it("refreshes the open report and lifecycle history after changing status", async () => {
+    const list = vi.mocked(reportService.listAllReports);
+    const [pending] = await list();
+    list.mockClear();
+    list.mockResolvedValueOnce([pending]).mockResolvedValueOnce([{ ...pending, status: "under_review", updatedAt: "2026-09-26T01:00:00Z" }]);
+    render(<MemoryRouter><AdminReportsPage /></MemoryRouter>);
+    fireEvent.click(await screen.findByRole("button", { name: "View" }));
+    await waitFor(() => expect(reportService.getReportHistory).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole("button", { name: "Change Status" }));
+    fireEvent.click(screen.getByRole("button", { name: "Under Review" }));
+    await waitFor(() => expect(reportService.updateReportStatus).toHaveBeenCalledWith("r1", "under_review", undefined));
+    await waitFor(() => expect(reportService.getReportHistory).toHaveBeenCalledTimes(2));
+    expect(screen.getByRole("button", { name: "Change Status" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Under Review" })).not.toBeInTheDocument();
   });
 
   it("renders the events list from eventService", async () => {

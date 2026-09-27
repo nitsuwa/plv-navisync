@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { createElement } from "react";
+import { planStudentEmergencyRoute } from "../../../lib/studentEmergencyNavigation";
 import {
   buildDestinationOptions,
   buildPhysicalRoutePolyline,
@@ -2227,6 +2228,31 @@ describe("Emergency screenshot-scenario: Exterior Emergency Stair is Tier 1 and 
     expect(selected?.path.nodeIds).toContain(groundLanding.id);
     expect(selected?.path.nodeIds[selected!.path.nodeIds.length - 1]).toBe(outdoorDischarge.id);
     expect(selected?.path.nodeIds).not.toContain("general-entrance-node");
+  });
+
+  it("student SOS uses the same designated stair and preserves upper-to-ground floor order", () => {
+    const campus = makeScreenshotCampus();
+    const student = planStudentEmergencyRoute(campus, {
+      type: "room", buildingId: "b1", floorNumber: 2, roomId: "room-a", roomName: "Room A",
+      buildingLabel: "Building", buildingCode: "B1", accessDoorId: "door-a",
+    });
+    const admin = chooseEmergencyDestinationCandidate(campus, buildTestRouteEdges(campus), "door-node-a");
+    expect(student).not.toBeNull();
+    expect(student?.emergencyDestinationLabel).toBe(admin?.candidate.label);
+    expect(student?.indoorSegments?.map((segment) => segment.floorId)).toEqual(["f2", "f1"]);
+    expect(student?.indoorSegments?.[0].waypoints[0]).toEqual({ x: 80, y: 40 });
+    expect(student?.destinationRoom).toBeUndefined();
+    const discharge = campus.navNodes.find((node) => node.exteriorEmergencyStairId === "ext-stair" && !node.floorId)!;
+    expect(student?.points.at(-1)).toEqual({ x: discharge.x, y: discharge.y });
+  });
+
+  it("student SOS reports no route when all evacuation paths are closed", () => {
+    const campus = makeScreenshotCampus();
+    const closed = { ...campus, navEdges: campus.navEdges.map((edge) => ({ ...edge, closed: true })) };
+    expect(planStudentEmergencyRoute(closed, {
+      type: "room", buildingId: "b1", floorNumber: 2, roomId: "room-a", roomName: "Room A",
+      buildingLabel: "Building", buildingCode: "B1", accessDoorId: "door-a",
+    })).toBeNull();
   });
 
   it("5a. reaches a Ground-only Exterior Emergency Stair from an upper Floor through ordinary Stairs", () => {

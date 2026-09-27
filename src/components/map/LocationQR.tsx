@@ -18,10 +18,6 @@ export function LocationQR({
   const toast = useToast();
 
   const url = useMemo(() => {
-    const base =
-      typeof window !== "undefined"
-        ? `${window.location.origin}${window.location.pathname === "/map" ? "" : ""}`
-        : "";
     // Always point to the map route regardless of the current page.
     const origin = typeof window !== "undefined" ? window.location.origin : "";
     return `${origin}/map?buildingId=${encodeURIComponent(buildingId)}`;
@@ -29,10 +25,11 @@ export function LocationQR({
 
   const copyLink = async () => {
     try {
-      await navigator.clipboard?.writeText(url);
-      toast.success("Link copied", "Share this link to open the location.");
+      if (!navigator.clipboard?.writeText) throw new Error("Clipboard unavailable");
+      await navigator.clipboard.writeText(url);
+      toast.success("Link copied", { description: "Share this link to open the location." });
     } catch {
-      toast.error("Could not copy", "Clipboard access denied.");
+      toast.error("Could not copy", { description: "Clipboard access denied." });
     }
   };
 

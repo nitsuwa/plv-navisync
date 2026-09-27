@@ -486,7 +486,7 @@ export function BuildingDetailsPage() {
           </div>
         </Reveal>
         )}
-        {showReport && building && <ReportModal building={building} campusId={activeCampus?.id} onClose={() => setShowReport(false)} />}
+        {showReport && building && <ReportModal building={building} campusId={activeCampus?.id} floors={activeCampus?.buildings.find(item => item.id === building.id)?.floors} onClose={() => setShowReport(false)} />}
       </div>
     </PageTransition>
   );

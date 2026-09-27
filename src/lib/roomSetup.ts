@@ -14,7 +14,6 @@ export interface RoomVisualSetup {
   windowIds: string[];
   furnitureIds: string[];
 }
-
 function rectContains(outer: { x: number; y: number; w: number; h: number }, inner: { x: number; y: number; w: number; h: number }, epsilon = 0.5) {
   return inner.x >= outer.x - epsilon
     && inner.y >= outer.y - epsilon
@@ -80,4 +79,3 @@ export function roomVisualSetup(
     furnitureIds: furniture.filter((item) => furnitureFullyContainedInRoom(item, room)).map((item) => item.id),
   };
 }
-

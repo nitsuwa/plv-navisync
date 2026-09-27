@@ -641,7 +641,11 @@ export function validateNavigationGraph(campus: Campus): NavGraphReadinessResult
   const hasOutdoorIndoorBridge = components.some((component) =>
     componentHasOutdoorNode(component) && componentHasIndoorFloorNode(component),
   );
-  if (hasOutdoorNetwork && !hasOutdoorIndoorBridge) {
+  const hasGeneratedOutdoorPathOnlyNetwork = hasOutdoorNetwork
+    && !components.some(componentHasIndoorFloorNode)
+    && components.some((component) => componentHasOutdoorNode(component)
+      && [...component].some((id) => (nodeMap.get(id)?.generatedFromPathVertices?.length ?? 0) > 0));
+  if (hasOutdoorNetwork && !hasOutdoorIndoorBridge && !hasGeneratedOutdoorPathOnlyNetwork) {
     issues.push({
       type: "nav_disconnected_component",
       severity: "warning",

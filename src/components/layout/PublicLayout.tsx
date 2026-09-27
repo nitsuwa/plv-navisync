@@ -4,8 +4,8 @@ import { Toaster } from "../../app/components/ui/sonner";
 import { Navbar } from "./Navbar";
 import { EmergencyBanner } from "./EmergencyBanner";
 import { Footer } from "./Footer";
-import { ScrollToTop } from "./ScrollToTop";
 import { MobileBottomNav } from "./MobileBottomNav";
+import { ScrollToTop } from "./ScrollToTop";
 import { NavigationProgress } from "../ui/NavigationProgress";
 import { cn } from "../../lib/utils";
 import { motion } from "motion/react";
@@ -30,7 +30,6 @@ export function PublicLayout() {
 
   const showFooter    = pathname === "/" || pathname === "/home";
   const isMapPage     = pathname === "/map";
-  const showBottomNav = true;
 
   return (
     <div className={cn("min-h-screen flex flex-col w-full max-w-full overflow-x-hidden", !isMapPage && "app-page-bg")}>
@@ -71,7 +70,7 @@ export function PublicLayout() {
         className={cn(
           "relative z-[1] w-full max-w-full",
           isMapPage ? "overflow-hidden flex-1" : "overflow-x-hidden",
-          showBottomNav && !isMapPage && "pb-[calc(88px+env(safe-area-inset-bottom,0px))] md:pb-0"
+          !isMapPage && "pb-[calc(76px+env(safe-area-inset-bottom,0px))] md:pb-0",
         )}
       >
         <motion.div
@@ -86,7 +85,7 @@ export function PublicLayout() {
       </main>
 
       {showFooter && <div className="hidden md:block"><Footer /></div>}
-      {showBottomNav && <MobileBottomNav />}
+      <MobileBottomNav />
     </div>
   );
 }

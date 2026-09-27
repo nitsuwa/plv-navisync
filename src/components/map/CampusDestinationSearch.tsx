@@ -37,6 +37,7 @@ export interface CampusDestinationSearchProps {
   autoFocus?: boolean;
   compact?: boolean;
   listId?: string;
+  groupByBuilding?: boolean;
 }
 
 function destinationIcon(result: SearchResult) {
@@ -67,12 +68,33 @@ export function CampusDestinationSearch({
   autoFocus = false,
   compact = false,
   listId = "campus-destination-results",
+  groupByBuilding = false,
 }: CampusDestinationSearchProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   const filteredResults = useMemo(
     () => filterDestinationResults(results, filter),
     [filter, results],
   );
+  const resultGroups = useMemo(() => {
+    if (!groupByBuilding) return [{ id: "all", label: "", entries: filteredResults }];
+    const groups = new Map<string, { id: string; label: string; entries: SearchResult[] }>();
+    for (const result of filteredResults) {
+      const id = result.buildingId ?? (result.kind === "building" ? result.id : "campus");
+      const building = results.find((entry) => entry.kind === "building" && (entry.buildingId ?? entry.id) === id);
+      const name = building?.name ?? result.buildingName ?? (result.kind === "building" ? result.name : "Campus places");
+      const label = building?.code ? `${name} (${building.code})` : name;
+      const group = groups.get(id) ?? { id, label, entries: [] };
+      group.entries.push(result);
+      groups.set(id, group);
+    }
+    return [...groups.values()].sort((a, b) => a.label.localeCompare(b.label)).map((group) => ({
+      ...group,
+      entries: [...group.entries].sort((a, b) =>
+        Number(b.kind === "building") - Number(a.kind === "building")
+        || (a.floorNumber ?? 0) - (b.floorNumber ?? 0)
+        || a.name.localeCompare(b.name, undefined, { numeric: true })),
+    }));
+  }, [filteredResults, groupByBuilding, results]);
 
   return (
     <div ref={panelRef} className="min-w-0">
@@ -88,8 +110,10 @@ export function CampusDestinationSearch({
           )}>
             <Search className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
             <input
-              type="search"
+              type="text"
               role="searchbox"
+              inputMode="search"
+              enterKeyHint="search"
               aria-label={ariaLabel}
               aria-controls={focused ? listId : undefined}
               aria-expanded={focused}
@@ -100,6 +124,16 @@ export function CampusDestinationSearch({
               onFocus={onFocus}
               onKeyDown={(event) => {
                 if (event.key === "Escape") onBlur();
+                if (event.key === "Enter" && query.trim()) {
+                  const exact = filteredResults.find((result) =>
+                    result.name.trim().toLowerCase() === query.trim().toLowerCase()
+                    || result.code?.trim().toLowerCase() === query.trim().toLowerCase());
+                  const result = exact ?? filteredResults[0];
+                  if (result) {
+                    event.preventDefault();
+                    onSelect(result);
+                  }
+                }
               }}
               onBlur={(event) => {
                 if (event.relatedTarget instanceof Node && panelRef.current?.contains(event.relatedTarget)) return;
@@ -159,7 +193,14 @@ export function CampusDestinationSearch({
               {!query && browseContent ? (
                 browseContent
               ) : filteredResults.length > 0 ? (
-                filteredResults.map((result) => (
+                resultGroups.map((group) => (
+                  <div key={group.id} role={groupByBuilding ? "group" : undefined} aria-label={groupByBuilding ? group.label : undefined}>
+                    {groupByBuilding && (
+                      <p className="sticky top-0 z-10 border-b border-border/60 bg-muted px-3.5 py-2 text-xs font-extrabold text-foreground">
+                        {group.label} <span className="font-normal text-muted-foreground">· {group.entries.length} places</span>
+                      </p>
+                    )}
+                    {group.entries.map((result) => (
                   <button
                     key={destinationResultKey(result)}
                     type="button"
@@ -186,6 +227,8 @@ export function CampusDestinationSearch({
                       <span className="shrink-0 rounded-md bg-green-500/10 px-2 py-1 text-[10px] font-extrabold text-green-700 dark:text-green-300">Accessible</span>
                     )}
                   </button>
+                    ))}
+                  </div>
                 ))
               ) : (
                 <div className="flex flex-col items-center px-5 py-8 text-center">

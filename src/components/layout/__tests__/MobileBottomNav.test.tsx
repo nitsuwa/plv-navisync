@@ -1,25 +1,7 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { MobileBottomNav } from "../MobileBottomNav";
-
-const authState = vi.hoisted(() => ({
-  isStudent: true,
-  isStudentOrg: true,
-  loading: false,
-  username: "Test Student",
-  role: "student_org" as const,
-  profile: null,
-  signOut: vi.fn(),
-}));
-
-vi.mock("../../../hooks/useStudentAuth", () => ({
-  useStudentAuth: () => authState,
-}));
-
-vi.mock("../../ui/MoreSheet", () => ({
-  MoreSheet: () => null,
-}));
 
 function renderNav(pathname = "/map") {
   return render(
@@ -30,33 +12,31 @@ function renderNav(pathname = "/map") {
 }
 
 describe("MobileBottomNav", () => {
-  it("gives Student Org users direct Home, Map, My Events, and Profile navigation", () => {
-    authState.isStudent = true;
-    authState.isStudentOrg = true;
-    renderNav();
+  it("provides only a Map shortcut on mobile, including from Home and Profile", () => {
+    for (const pathname of ["/map", "/home", "/student"]) {
+      const { unmount } = renderNav(pathname);
+      const nav = screen.getByRole("navigation", { name: "Mobile navigation" });
+      const links = within(nav).getAllByRole("link");
 
-    expect(screen.getByRole("link", { name: "Home" })).toHaveAttribute("href", "/home");
-    expect(screen.getByRole("link", { name: "Map" })).toHaveAttribute("href", "/map");
-    expect(screen.getByRole("link", { name: "My Events" })).toHaveAttribute("href", "/student/events");
-    expect(screen.getByRole("link", { name: "Profile" })).toHaveAttribute("href", "/student");
-    expect(screen.queryByRole("button", { name: /more/i })).not.toBeInTheDocument();
+      expect(links).toHaveLength(1);
+      expect(links[0]).toHaveAccessibleName("Map");
+      expect(links[0]).toHaveAttribute("href", "/map");
+      expect(within(nav).queryByRole("link", { name: "Home" })).not.toBeInTheDocument();
+      expect(within(nav).queryByRole("link", { name: "Profile" })).not.toBeInTheDocument();
+      unmount();
+    }
   });
 
-  it("does not expose My Events to regular students", () => {
-    authState.isStudent = true;
-    authState.isStudentOrg = false;
-    renderNav();
+  it("marks Map as the active page only on the map route", () => {
+    const { unmount } = renderNav("/home");
+    expect(screen.getByRole("link", { name: "Map" })).not.toHaveAttribute("aria-current");
+    unmount();
 
-    expect(screen.getByRole("link", { name: "Home" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Map" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Profile" })).toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "My Events" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /more/i })).not.toBeInTheDocument();
+    renderNav("/map");
+    expect(screen.getByRole("link", { name: "Map" })).toHaveAttribute("aria-current", "page");
   });
 
-  it("hides for every focused map surface and restores during browsing", () => {
-    authState.isStudent = true;
-    authState.isStudentOrg = true;
+  it("hides while a focused map surface is open and restores during browsing", () => {
     renderNav();
 
     expect(screen.getByRole("link", { name: "Map" })).toBeInTheDocument();

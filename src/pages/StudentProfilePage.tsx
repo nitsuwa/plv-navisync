@@ -584,8 +584,6 @@ export function StudentProfilePage() {
             </div>
           </Reveal>
 
-          {/* Safe area spacer for bottom nav */}
-          <div className="h-6" style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" }} />
         </div>
       </div>
     </PageTransition>

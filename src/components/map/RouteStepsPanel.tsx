@@ -29,6 +29,8 @@ interface RouteStepsPanelProps {
     progress: number;
     statusInstruction?: string;
   };
+  /** Condensed layout for the small floating mobile navigation card. */
+  compact?: boolean;
 }
 
 /** Index of the step currently being walked, based on cumulative distance. */
@@ -98,7 +100,7 @@ function stepDot(isFirst: boolean, isLast: boolean) {
  * (desktop bottom-left card, mobile sheet).
  */
 export function RouteStepsPanel({
-  route, mode, toName, onEnd, onZoom, walkProgress, onReplay, activeLeg,
+  route, mode, toName, onEnd, onZoom, walkProgress, onReplay, activeLeg, compact = false,
 }: RouteStepsPanelProps) {
   const hasActiveLegSteps = Boolean(activeLeg?.steps.length);
   const steps = hasActiveLegSteps ? activeLeg!.steps : route.steps;
@@ -115,38 +117,41 @@ export function RouteStepsPanel({
 
   return (
     <div
-      className="rounded-2xl border border-border/60 shadow-xl overflow-hidden animate-slide-up"
+      className={cn(
+        "rounded-2xl border border-border/60 shadow-xl overflow-hidden animate-slide-up",
+        compact && "rounded-xl",
+      )}
       role="region"
       aria-label={`Active route to ${toName}`}
       data-testid="route-steps-panel"
       style={{ background: "var(--card)", backdropFilter: "blur(16px)", WebkitBackdropFilter: "blur(16px)" }}>
       {/* Header — destination name + live indicator */}
-      <div className="flex items-center gap-2 px-3 py-2" style={{ background: modeColor }}>
+      <div className={cn("flex items-center gap-2 px-3 py-2", compact && "gap-1.5 px-2.5 py-1.5")} style={{ background: modeColor }}>
         <Navigation className="h-3.5 w-3.5 text-white shrink-0" />
-        <span data-testid="route-destination" className="text-[11px] font-extrabold text-white truncate flex-1">To {toName}</span>
+        <span data-testid="route-destination" className={cn("text-[11px] font-extrabold text-white truncate flex-1", compact && "text-[10px]")}>To {toName}</span>
         <span className="w-1.5 h-1.5 rounded-full bg-green-300 animate-pulse shrink-0" />
       </div>
 
       {/* Stats row: distance, time, mode */}
-      <div className="flex gap-2 px-3 pt-2.5 pb-2 border-b border-border">
-        <div className="flex-1 px-2 py-1.5 rounded-lg bg-primary/8 text-center">
+      <div className={cn("flex gap-2 px-3 pt-2.5 pb-2 border-b border-border", compact && "gap-1 px-2 pt-2 pb-1.5")}>
+        <div className={cn("flex-1 px-2 py-1.5 rounded-lg bg-primary/8 text-center", compact && "px-1.5 py-1")}>
           <p className="text-[10px] text-muted-foreground font-bold uppercase tracking-wider">Dist</p>
-          <p className="text-sm font-extrabold text-foreground">{formatDistance(route.dist)}</p>
+          <p className={cn("text-sm font-extrabold text-foreground", compact && "text-xs")}>{formatDistance(route.dist)}</p>
         </div>
-        <div className="flex-1 px-2 py-1.5 rounded-lg bg-primary/8 text-center">
+        <div className={cn("flex-1 px-2 py-1.5 rounded-lg bg-primary/8 text-center", compact && "px-1.5 py-1")}>
           <p className="text-[10px] text-muted-foreground font-bold uppercase tracking-wider">Time</p>
-          <p className="text-sm font-extrabold text-foreground">{formatMinutes(route.mins)}</p>
+          <p className={cn("text-sm font-extrabold text-foreground", compact && "text-xs")}>{formatMinutes(route.mins)}</p>
         </div>
-        <div className="flex-1 px-2 py-1.5 rounded-lg bg-primary/8 text-center">
+        <div className={cn("flex-1 px-2 py-1.5 rounded-lg bg-primary/8 text-center", compact && "px-1.5 py-1")}>
           <p className="text-[10px] text-muted-foreground font-bold uppercase tracking-wider">Via</p>
-          <p className="text-sm font-extrabold text-foreground">
+          <p className={cn("text-sm font-extrabold text-foreground", compact && "text-xs")}>
             {mode === "accessible" ? <Accessibility className="h-4 w-4 inline-block align-middle" /> :
              mode === "emergency" ? "SOS" : "Walk"}
           </p>
         </div>
       </div>
 
-      <p data-testid="active-route-source" className="px-3 pt-2 text-[9px] font-semibold text-muted-foreground">
+      <p data-testid="active-route-source" className={cn("px-3 pt-2 text-[9px] font-semibold text-muted-foreground", compact && "px-2 pt-1.5 text-[8px]")}>
         {route.isAuthoredGraph
           ? "Following the admin-authored map paths"
           : route.isGraphBased
@@ -168,7 +173,7 @@ export function RouteStepsPanel({
 
       {/* Floor-transition badges */}
       {route.transitions.length > 0 && (
-        <div className="px-3 pt-2 flex flex-col gap-1">
+        <div className={cn("px-3 pt-2 flex flex-col gap-1", compact && "px-2 pt-1.5")}>
           {route.transitions.map((t, i) => (
             <div key={`tr-${i}`} className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-purple-500/10 border border-purple-500/20 text-purple-700 dark:text-purple-400">
               <MoveVertical className="h-3 w-3 shrink-0" />
@@ -179,7 +184,7 @@ export function RouteStepsPanel({
       )}
 
       {/* Step-by-step directions */}
-      <div className="px-3 pt-2 pb-1 max-h-32 overflow-y-auto scrollbar-show-on-hover">
+      <div className={cn("px-3 pt-2 pb-1 max-h-32 overflow-y-auto scrollbar-show-on-hover", compact && "px-2 pt-1.5 max-h-24")}>
         <div className="relative pl-4 border-l-2 border-primary/30 space-y-1.5">
           {steps.map((step, i) => {
             const isFirst = i === 0;
@@ -222,17 +227,17 @@ export function RouteStepsPanel({
       </div>
 
       {/* Actions */}
-      <div className="flex items-center gap-1.5 px-3 pb-2.5">
+      <div className={cn("flex items-center gap-1.5 px-3 pb-2.5", compact && "gap-1 px-2 pb-2")}>
         <button
           onClick={onEnd}
-          className="flex-1 h-7 rounded-lg border border-destructive/30 text-destructive text-[10px] font-bold hover:bg-destructive/10 transition-colors"
+          className={cn("flex-1 h-7 rounded-lg border border-destructive/30 text-destructive text-[10px] font-bold hover:bg-destructive/10 transition-colors", compact && "h-8")}
         >
           End
         </button>
         {onReplay && (
           <button
             onClick={onReplay}
-            className="h-7 px-2 rounded-lg border border-border text-muted-foreground flex items-center gap-1 hover:bg-muted transition-colors"
+            className={cn("h-7 px-2 rounded-lg border border-border text-muted-foreground flex items-center gap-1 hover:bg-muted transition-colors", compact && "h-8 px-1.5")}
             title="Replay walk animation"
             aria-label="Replay walk animation"
           >
@@ -242,7 +247,7 @@ export function RouteStepsPanel({
         )}
         <button
           onClick={onZoom}
-          className="w-7 h-7 rounded-lg border border-border text-muted-foreground flex items-center justify-center hover:bg-muted transition-colors"
+          className={cn("w-7 h-7 rounded-lg border border-border text-muted-foreground flex items-center justify-center hover:bg-muted transition-colors", compact && "h-8 w-8")}
           title="Zoom to route"
           aria-label="Zoom to route"
         >

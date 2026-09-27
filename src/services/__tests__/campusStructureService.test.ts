@@ -169,6 +169,65 @@ describe("campus structure mapping", () => {
     expect(hydrated.navEdges?.[0]).toMatchObject({ id: ids.edge, emergencySafe: true });
   });
 
+  it("prunes stale linked indoor nodes and their edges during hydration", () => {
+    const staleNodeId = "10000000-0000-4000-8000-000000000008";
+    const staleEdgeId = "10000000-0000-4000-8000-000000000009";
+    const payload = serializeCampusStructure(campus);
+    const staleNode = {
+      id: staleNodeId,
+      campus_id: ids.campus,
+      building_id: ids.building,
+      floor_id: ids.floor,
+      map_element_id: null,
+      node_type: "destination",
+      name: "Deleted Room",
+      x: 40,
+      y: 40,
+      is_accessible: true,
+      is_emergency_safe: true,
+      is_active: true,
+      metadata: {
+        ui: {
+          id: staleNodeId,
+          name: "Deleted Room",
+          type: "room_access",
+          roomId: "10000000-0000-4000-8000-000000000099",
+          buildingId: ids.building,
+          floorId: ids.floor,
+          accessible: true,
+          color: "#2563eb",
+        },
+      },
+    };
+    const staleEdge = {
+      id: staleEdgeId,
+      campus_id: ids.campus,
+      from_node_id: staleNodeId,
+      to_node_id: ids.nodeA,
+      distance_m: 10,
+      weight: 10,
+      edge_type: "walkway",
+      is_bidirectional: true,
+      is_accessible: true,
+      is_emergency_safe: true,
+      is_temporarily_closed: false,
+      metadata: { ui: { id: staleEdgeId, type: "walkway", distance: 10, bidirectional: true } },
+    };
+
+    const hydrated = hydrateCampusStructure(campus, {
+      buildings: payload.buildings.map((value) => ({ ...value, campus_id: ids.campus }) as never),
+      floors: payload.floors.map((value) => value as never),
+      mapElements: payload.map_elements.map((value) => value as never),
+      navigationNodes: [...payload.navigation_nodes, staleNode] as never,
+      navigationEdges: [...payload.navigation_edges, staleEdge] as never,
+    });
+
+    expect(hydrated.navNodes?.some((node) => node.id === staleNodeId)).toBe(false);
+    expect(hydrated.navEdges?.some((edge) => edge.id === staleEdgeId)).toBe(false);
+    expect(hydrated.navNodes?.some((node) => node.id === ids.nodeA)).toBe(true);
+    expect(hydrated.navEdges?.some((edge) => edge.id === ids.edge)).toBe(true);
+  });
+
   it("serializes and hydrates floor-plan background metadata and calibrated scale", () => {
     const withBackground = {
       ...campus,

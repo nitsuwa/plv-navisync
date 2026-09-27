@@ -40,6 +40,18 @@ describe("ReadonlyOutdoorCampusScene", () => {
     expect(screen.queryByTestId("nav-graph-layer")).not.toBeInTheDocument();
   });
 
+  it("keeps regular outdoor assets at the Admin canvas display scale", () => {
+    render(<svg><ReadonlyOutdoorCampusScene campus={projectReadonlyOutdoorCampus(campus)} /></svg>);
+
+    const tree = screen.getAllByTestId("readonly-decor").find((node) => node.getAttribute("data-asset-id") === "d1");
+    const treeArtwork = tree?.querySelector("svg");
+
+    // The Admin Canvas renders the tree descriptor (24 × 28) at the shared
+    // 3× decor scale. Student Preview must preserve that authored footprint.
+    expect(treeArtwork).toHaveAttribute("width", "72");
+    expect(treeArtwork).toHaveAttribute("height", "84");
+  });
+
   it("keeps the shared building visual pointer-transparent for an admin hit surface", () => {
     const onAdminHit = vi.fn();
     render(

@@ -100,11 +100,12 @@ export function BuildingInfoPanel({
         </div>
       </div>
 
-      {/* Action buttons — compact grid for 280px panel */}
-      <div className="grid grid-cols-4 gap-1 px-2 py-2.5 border-b border-border shrink-0">
+      {/* Action buttons — give Directions a little more room while keeping every
+          action inside the fixed-width desktop panel. */}
+      <div className="grid grid-cols-[minmax(0,1.55fr)_repeat(3,minmax(0,1fr))] gap-1 px-2 py-2.5 border-b border-border shrink-0">
         <button
           onClick={() => onDirections(selected)}
-          className="flex items-center justify-center gap-1 h-9 px-2 rounded-xl bg-primary text-primary-foreground text-[10px] font-extrabold hover:bg-primary/90 active:scale-[0.97] transition-all"
+          className="min-w-0 flex items-center justify-center gap-1 h-9 px-1.5 rounded-xl bg-primary text-primary-foreground text-[10px] font-extrabold whitespace-nowrap hover:bg-primary/90 active:scale-[0.97] transition-all"
         >
           <Navigation className="h-3 w-3 shrink-0" /> Directions
         </button>
@@ -117,7 +118,7 @@ export function BuildingInfoPanel({
               toast.error("Could not copy", "Clipboard access denied.");
             }
           }}
-          className="flex items-center justify-center gap-0.5 h-8 px-1 rounded-xl bg-muted text-muted-foreground text-[10px] font-extrabold border border-border hover:bg-secondary active:scale-[0.97] transition-all"
+          className="min-w-0 flex items-center justify-center gap-0.5 h-8 px-0.5 rounded-xl bg-muted text-muted-foreground text-[10px] font-extrabold whitespace-nowrap border border-border hover:bg-secondary active:scale-[0.97] transition-all"
         >
           <Share2 className="h-3 w-3 shrink-0" /> Share
         </button>
@@ -128,7 +129,7 @@ export function BuildingInfoPanel({
               onClick={() => onToggleSave(selected.id)}
               aria-label={isSaved ? `Remove ${selected.name} from saved` : `Save ${selected.name}`}
               className={cn(
-                "flex items-center justify-center gap-0.5 h-8 px-1 rounded-xl text-[10px] font-extrabold border active:scale-[0.97] transition-all",
+                "min-w-0 flex items-center justify-center gap-0.5 h-8 px-0.5 rounded-xl text-[10px] font-extrabold whitespace-nowrap border active:scale-[0.97] transition-all",
                 isSaved
                   ? "bg-accent/15 text-accent border-accent/30"
                   : "bg-muted text-muted-foreground border-border hover:bg-secondary",
@@ -141,7 +142,7 @@ export function BuildingInfoPanel({
         })() : (
           <button
             onClick={() => onSignInPrompt("save locations")}
-            className="flex items-center justify-center gap-0.5 h-8 px-1 rounded-xl bg-muted/60 text-muted-foreground/80 text-[10px] font-semibold border border-dashed border-border/60"
+            className="min-w-0 flex items-center justify-center gap-0.5 h-8 px-0.5 rounded-xl bg-muted/60 text-muted-foreground/80 text-[10px] font-semibold whitespace-nowrap border border-dashed border-border/60"
           >
             <Bookmark className="h-3 w-3 shrink-0" /> Save
           </button>
@@ -149,14 +150,14 @@ export function BuildingInfoPanel({
         {studentAuth.isStudent ? (
           <button
             onClick={() => onReport(selected)}
-            className="flex items-center justify-center gap-0.5 h-8 px-1 rounded-xl bg-muted text-muted-foreground text-[10px] font-extrabold border border-border hover:bg-destructive/10 hover:text-destructive active:scale-[0.97] transition-all"
+            className="min-w-0 flex items-center justify-center gap-0.5 h-8 px-0.5 rounded-xl bg-muted text-muted-foreground text-[10px] font-extrabold whitespace-nowrap border border-border hover:bg-destructive/10 hover:text-destructive active:scale-[0.97] transition-all"
           >
             <Flag className="h-3 w-3 shrink-0" /> Report
           </button>
         ) : (
           <button
             onClick={() => onSignInPrompt("report issues")}
-            className="flex items-center justify-center gap-0.5 h-8 px-1 rounded-xl bg-muted/60 text-muted-foreground/80 text-[10px] font-semibold border border-dashed border-border/60"
+            className="min-w-0 flex items-center justify-center gap-0.5 h-8 px-0.5 rounded-xl bg-muted/60 text-muted-foreground/80 text-[10px] font-semibold whitespace-nowrap border border-dashed border-border/60"
           >
             <Flag className="h-3 w-3 shrink-0" /> Report
           </button>
