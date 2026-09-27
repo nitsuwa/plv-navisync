@@ -30,9 +30,9 @@ export interface FloorTemplateReplacementResult {
   preservedExteriorStairs: FloorStairs[];
   /** Furniture hosted by a preserved Exterior Zone. */
   preservedExteriorFurniture: FloorFurniture[];
-  /** Existing floor nav nodes safe to retain (entrance/emergency anchors). */
+  /** Read-only snapshot retained for compatibility; every existing node survives unchanged. */
   retainedNavNodes: NavigationNode[];
-  /** Existing edges whose endpoints remain live after replacement. */
+  /** Read-only snapshot retained for compatibility; every existing edge survives unchanged. */
   retainedNavEdges: NavigationEdge[];
   summary: FloorReplacementSummary;
 }
@@ -80,8 +80,8 @@ export function summarizeFloorForTemplateReplacement(
  * Assemble a replacement without mutating either source.  This is deliberately
  * a positive physical allow-list: template content is taken from the already
  * instantiated Floor, while only explicitly exterior/Entrance-owned records
- * from the previous Floor are carried forward.  Navigation nodes/edges are
- * filtered by ownership identity, never by proximity.
+ * from the previous Floor are carried forward. Navigation arrays are read-only
+ * snapshots; this helper never prunes, reorders, or rewrites graph data.
  */
 export function prepareFloorTemplateReplacement(
   current: FloorPlan,
@@ -102,8 +102,6 @@ export function prepareFloorTemplateReplacement(
   const preservedExteriorFurniture = (current.furniture ?? [])
     .filter((item) => !!item.exteriorZoneId && preservedZoneIds.has(item.exteriorZoneId))
     .map((item) => ({ ...item }));
-  const preservedDoorIds = new Set(preservedDoors.map((door) => door.id));
-  const preservedStairIds = new Set(preservedExteriorStairs.map((stair) => stair.id));
   const nextFloor: FloorPlan = {
     ...instantiated,
     // Keep the source canvas dimensions until the caller runs the canonical
@@ -112,6 +110,10 @@ export function prepareFloorTemplateReplacement(
     // template's new boundary instead of treating the new size as unchanged.
     canvasW: current.canvasW ?? instantiated.canvasW,
     canvasH: current.canvasH ?? instantiated.canvasH,
+    // Floor Templates do not claim the editor's separately-authored visual
+    // Path strokes. Applying one replaces the explicit indoor layout types,
+    // while these unlisted overlays remain with the target Floor.
+    paths: (current.paths ?? []).map((path) => ({ ...path, points: path.points.map((point) => ({ ...point })) })),
     // Entrances and their generated physical Door are exterior-owned. Keep
     // their identity so the canonical Entrance -> Door bridge can reproject it.
     // Template Doors/Windows are physical starter content and were created
@@ -125,23 +127,8 @@ export function prepareFloorTemplateReplacement(
     entranceRamps: (current.entranceRamps ?? []).map((item) => ({ ...item })),
     stairs: preservedExteriorStairs,
   };
-  const oldFloorNodes = navNodes.filter((node) => node.floorId === current.id && node.buildingId === current.buildingId);
-  const retainedNavNodes = oldFloorNodes
-    .filter((node) => (
-      (node.doorId ? preservedDoorIds.has(node.doorId) : false)
-      || (node.stairId ? preservedStairIds.has(node.stairId) : false)
-      || !!node.exteriorEmergencyStairId
-      || !!node.buildingEntranceId
-    ))
-    .map((node) => ({ ...node }));
-  const retainedIds = new Set(retainedNavNodes.map((node) => node.id));
-  const retainedNavEdges = navEdges
-    // `buildFloorUpdates` merges the returned edges into the current floor
-    // slice; unrelated outdoor edges remain in the campus arrays untouched.
-    .filter((edge) => (retainedIds.has(edge.startNodeId) || retainedIds.has(edge.endNodeId))
-      && !oldFloorNodes.some((node) => node.id === edge.startNodeId && !retainedIds.has(node.id))
-      && !oldFloorNodes.some((node) => node.id === edge.endNodeId && !retainedIds.has(node.id)))
-    .map((edge) => ({ ...edge, bendPoints: edge.bendPoints?.map((point) => ({ ...point })) }));
+  const retainedNavNodes = navNodes.map((node) => ({ ...node }));
+  const retainedNavEdges = navEdges.map((edge) => ({ ...edge, ...(edge.bendPoints ? { bendPoints: edge.bendPoints.map((point) => ({ ...point })) } : {}) }));
   return {
     floor: nextFloor,
     preservedDoors,

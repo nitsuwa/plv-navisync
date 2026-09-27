@@ -258,16 +258,15 @@ describe("B5 Phase 2.3 — Indoor Navigation Multi-Select + Placement Rules + Ci
 
   // ── PURE PLACEMENT RULES ──
 
-  it("pure helper: free placement is blocked on Door / Stairs / Elevator / Ramp and the Room center zone", () => {
+  it("pure helper: free placement is blocked on Doors and circulation, but not by Room fill", () => {
     const campus = withCirculation(withWallAndDoor(withRoom(makeBaseCampus())));
     const { rooms, doors, stairs, elevators, ramps } = campus.buildings[0].floors[0];
     expect(linkedPlacementBlockAt({ x: 90, y: 70 }, rooms, doors, stairs, elevators, ramps)).toBe("door");
     expect(linkedPlacementBlockAt({ x: 20, y: 128 }, rooms, doors, stairs, elevators, ramps)).toBe("stairs");
     expect(linkedPlacementBlockAt({ x: 128, y: 128 }, rooms, doors, stairs, elevators, ramps)).toBe("elevator");
     expect(linkedPlacementBlockAt({ x: 182, y: 26 }, rooms, doors, stairs, elevators, ramps)).toBe("ramp");
-    // Room center (semantic target / label zone) blocks free placement…
-    expect(linkedPlacementBlockAt({ x: 45, y: 40 }, rooms, doors, stairs, elevators, ramps)).toBe("room");
-    // …but the interior of a large room away from the label zone stays free space.
+    // Room center/label zone and other Room interior remain walkable space.
+    expect(linkedPlacementBlockAt({ x: 45, y: 40 }, rooms, doors, stairs, elevators, ramps)).toBeNull();
     expect(linkedPlacementBlockAt({ x: 60, y: 30 }, rooms, doors, stairs, elevators, ramps)).toBeNull();
     expect(linkedPlacementBlockAt({ x: 150, y: 130 }, rooms, doors, stairs, elevators, ramps)).toBeNull();
   });
@@ -297,43 +296,15 @@ describe("B5 Phase 2.3 — Indoor Navigation Multi-Select + Placement Rules + Ci
     expect(navLinkedNodes(container)).toHaveLength(0);
   });
 
-  it("Add Waypoint on the Room semantic target is rejected; open interior is allowed", () => {
+  it("Add Waypoint at the Room center creates a free point at the cursor", () => {
     cleanup();
     const rendered = render(<Harness onCampusChange={onCampusChange} initialCampus={withRoom(makeBaseCampus())} />);
     container = rendered.container;
-    enterNavigationMode();
-    stubSvgRect(container);
-    // Room center → blocked.
-    fireEvent.click(screen.getByTestId("nav-library-waypoint"));
+    // The current compact toolbar arms point placement directly.
+    fireEvent.click(screen.getByRole("button", { name: "Walking Point" }));
     clickCanvas(container, 45, 40);
-    expectInfoToast("Use Link Location for this object");
-    expect(navNodes(container)).toHaveLength(0);
-    // Open interior of the same large room (away from the label zone) → allowed.
-    fireEvent.click(screen.getByTestId("nav-library-waypoint"));
-    clickCanvas(container, 60, 30);
     expect(navNodes(container)).toHaveLength(1);
-    expect(latestCampus(onCampusChange).navNodes.find((n) => n.x === 60 && n.y === 30)).toBeTruthy();
-  });
-
-  it("Destination tool on a Room semantic target is blocked with guidance; drag-drop drop rejects too", () => {
-    cleanup();
-    const rendered = render(<Harness onCampusChange={onCampusChange} initialCampus={withRoom(makeBaseCampus())} />);
-    container = rendered.container;
-    enterNavigationMode();
-    stubSvgRect(container);
-    // Click-armed Destination tool.
-    fireEvent.click(screen.getByTestId("nav-library-destination"));
-    clickCanvas(container, 45, 40);
-    expectInfoToast("Use Link Location for this object");
-    expect(navNodes(container)).toHaveLength(0);
-    // Drag-and-drop Waypoint onto the room center → rejected (no node).
-    const dt = dragDataTransfer();
-    fireDrag("dragstart", screen.getByTestId("nav-library-waypoint"), 0, 0, dt);
-    const svg = stubSvgRect(container);
-    fireDrag("dragover", svg, 45, 40, dt);
-    fireDrag("drop", svg, 45, 40, dt);
-    expect(navNodes(container)).toHaveLength(0);
-    expect(navLinkedNodes(container)).toHaveLength(0);
+    expect(latestCampus(onCampusChange).navNodes.find((n) => n.x === 45 && n.y === 40 && !n.roomId)).toBeTruthy();
   });
 
   // ── MULTI-SELECTION PRESERVATION ──

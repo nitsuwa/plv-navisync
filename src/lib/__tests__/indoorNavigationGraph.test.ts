@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { floorShapeContainsPolyline } from "../floorShape";
 import {
   indoorNavNodes,
   indoorNavEdges,
@@ -20,6 +21,8 @@ import {
   wallObstacleRadius,
   translateOrthogonalSegment,
   navAlignSnap,
+  alignConnectTargetToSource,
+  resolveConnectPathTargetPoint,
   navGroupAlignSnap,
   remapIndoorNavForFloorCopy,
   replaceBuildingFloorsAndReconcileTransitions,
@@ -30,15 +33,17 @@ import {
   reconcileCrossFloorTransitions,
   roomDisplayName,
   roomDoorIsValid,
+  isDoorEligibleForRoom,
   reconcileRoomDoorEdges,
   roomAccessDoorIds,
+  nestedRoomDoorNetworkPointIsValid,
   normalizeNavigationEdges,
   ROOM_DOOR_EDGE_TYPE,
 } from "../indoorNavigationGraph";
 import { createNavEdge, normalizeNavGraph } from "../navigationGraph";
 import { findNavigationRoute } from "../pathfinding";
 import type {
-  FloorPlan, FloorWall, FloorDoor, NavigationNode, NavigationEdge,
+  FloorPlan, FloorWall, FloorDoor, FloorRoom, NavigationNode, NavigationEdge,
 } from "../../components/map-builder/types";
 
 function makeFloor(): Pick<FloorPlan, "rooms" | "doors" | "stairs" | "ramps" | "elevators"> {
@@ -196,7 +201,155 @@ describe("Room Door access relationship", () => {
     expect(roomDoorIsValid(room, door, [wall])).toBe(true);
     expect(roomDoorIsValid(room, { ...door, x: 160 }, [wall])).toBe(true); // wall anchor is authoritative
     expect(roomDoorIsValid(room, { ...door, wallId: "other" }, [wall])).toBe(false);
-    expect(roomDoorIsValid(room, door, [{ ...wall, startAnchor: { ...wall.startAnchor!, roomId: "other-room" } }])).toBe(false);
+    const wallAnchoredElsewhere = [{ ...wall, startAnchor: { ...wall.startAnchor!, roomId: "other-room" } }];
+    expect(roomDoorIsValid({ ...room, accessDoorId: undefined }, door, wallAnchoredElsewhere)).toBe(false);
+    // A saved Room↔Door association has priority over stale wall anchors.
+    expect(roomDoorIsValid(room, door, wallAnchoredElsewhere)).toBe(true);
+  });
+
+  it("continues to recognize unanchored horizontal and vertical Room Doors", () => {
+    const legacyRoom = { ...room, accessDoorId: undefined };
+    const verticalWall: FloorWall = { id: "w-vertical", x1: 80, y1: 20, x2: 80, y2: 60, thickness: 4, color: "#64748b" };
+    const horizontalWall: FloorWall = { id: "w-horizontal", x1: 20, y1: 20, x2: 80, y2: 20, thickness: 4, color: "#64748b" };
+    const verticalDoor = { ...door, id: "d-vertical", wallId: verticalWall.id, x: 80, y: 40, width: 8 };
+    const horizontalDoor = { ...door, id: "d-horizontal", wallId: horizontalWall.id, x: 50, y: 20, width: 8 };
+    expect(roomDoorIsValid(legacyRoom, verticalDoor, [verticalWall])).toBe(true);
+    expect(roomDoorIsValid(legacyRoom, horizontalDoor, [horizontalWall])).toBe(true);
+  });
+
+  it("recognizes a Door on a custom slanted boundary and rejects the neighboring Room Door", () => {
+    const customRoom = {
+      ...room,
+      x: 100,
+      y: 250,
+      w: 220,
+      h: 150,
+      shapePoints: [
+        { x: 100, y: 300 },
+        { x: 300, y: 250 },
+        { x: 320, y: 400 },
+        { x: 100, y: 400 },
+      ],
+    };
+    const slantedWall: FloorWall = {
+      id: "w-slanted",
+      x1: 100,
+      y1: 300,
+      x2: 300,
+      y2: 250,
+      thickness: 4,
+      color: "#64748b",
+    };
+    const slantedDoor: FloorDoor = {
+      ...door,
+      id: "d-slanted",
+      wallId: slantedWall.id,
+      x: 200,
+      y: 275,
+      width: 20,
+    };
+    const slantedDoorNode = createIndoorNavNode({
+      id: "node-slanted-door",
+      x: slantedDoor.x,
+      y: slantedDoor.y,
+      buildingId: "b1",
+      floorId: "f1",
+      campusId: "c1",
+      name: "Slanted Door",
+      type: "hallway",
+      doorId: slantedDoor.id,
+    });
+    expect(roomDoorIsValid(customRoom, slantedDoor, [slantedWall])).toBe(true);
+    expect(isDoorEligibleForRoom(customRoom, slantedDoor, [slantedWall], [slantedDoorNode], { rooms: [customRoom] })).toBe(true);
+
+    const adjacentRoom = {
+      ...customRoom,
+      id: "r-neighbor",
+      x: 300,
+      shapePoints: [
+        { x: 300, y: 250 },
+        { x: 380, y: 250 },
+        { x: 380, y: 400 },
+        { x: 320, y: 400 },
+      ],
+    };
+    const neighborWall: FloorWall = {
+      id: "w-neighbor",
+      x1: 300,
+      y1: 250,
+      x2: 340,
+      y2: 250,
+      thickness: 4,
+      color: "#64748b",
+      startAnchor: { targetType: "room", roomId: adjacentRoom.id, edge: "top", offset: 0 },
+    };
+    const neighborDoor: FloorDoor = { ...slantedDoor, id: "d-neighbor", wallId: neighborWall.id, x: 320, y: 250 };
+    const neighborDoorNode = createIndoorNavNode({
+      id: "node-neighbor-door",
+      x: neighborDoor.x,
+      y: neighborDoor.y,
+      buildingId: "b1",
+      floorId: "f1",
+      campusId: "c1",
+      name: "Neighbor Door",
+      type: "hallway",
+      doorId: neighborDoor.id,
+    });
+    expect(isDoorEligibleForRoom(customRoom, neighborDoor, [slantedWall, neighborWall], [neighborDoorNode], {
+      rooms: [customRoom, adjacentRoom],
+    })).toBe(false);
+  });
+
+  it("uses a custom Room polygon for point targeting instead of its bounding rectangle", () => {
+    const customRoom = {
+      ...room,
+      x: 100,
+      y: 250,
+      w: 220,
+      h: 150,
+      shapePoints: [
+        { x: 100, y: 300 },
+        { x: 300, y: 250 },
+        { x: 320, y: 400 },
+        { x: 100, y: 400 },
+      ],
+    };
+    expect(findRoomAtPoint([customRoom], { x: 200, y: 275 })).toBe(customRoom); // slanted edge
+    expect(findRoomAtPoint([customRoom], { x: 310, y: 260 })).toBeNull(); // bbox only, outside polygon
+    expect(findRoomAtPoint([customRoom], { x: 180, y: 350 })).toBe(customRoom);
+  });
+
+  it("prefers the innermost Room when Rooms are geometrically nested", () => {
+    const outer = { ...room, id: "library", x: 10, y: 10, w: 300, h: 220 };
+    const inner = { ...room, id: "journal", x: 80, y: 80, w: 90, h: 60 };
+    expect(findRoomAtPoint([outer, inner], { x: 100, y: 100 })).toBe(inner);
+    expect(findRoomAtPoint([inner, outer], { x: 200, y: 100 })).toBe(outer);
+  });
+
+  it("limits a nested Room Door to the open space in its closest containing Room", () => {
+    const outer = { ...room, id: "library", x: 10, y: 10, w: 300, h: 220 };
+    const inner = { ...room, id: "collab", x: 80, y: 80, w: 90, h: 60, accessDoorId: "collab-door" };
+    const unrelated = { ...room, id: "other", x: 350, y: 10, w: 100, h: 100, accessDoorId: "other-door" };
+    expect(nestedRoomDoorNetworkPointIsValid("collab-door", { x: 100, y: 50 }, [outer, inner, unrelated])).toBe(true);
+    expect(nestedRoomDoorNetworkPointIsValid("collab-door", { x: 100, y: 100 }, [outer, inner, unrelated])).toBe(false);
+    expect(nestedRoomDoorNetworkPointIsValid("collab-door", { x: 330, y: 50 }, [outer, inner, unrelated])).toBe(false);
+    // A non-nested Room Door keeps normal corridor-target behavior.
+    expect(nestedRoomDoorNetworkPointIsValid("other-door", { x: 500, y: 50 }, [outer, inner, unrelated])).toBe(true);
+  });
+
+  it("re-derives nested context from serialized Room data without touching navigation", () => {
+    const outer = { ...room, id: "library", x: 10, y: 10, w: 300, h: 220 };
+    const inner = { ...room, id: "collab", x: 80, y: 80, w: 90, h: 60, accessDoorIds: ["collab-door"] };
+    const navNodes = [freeNode("door-node", 110, 80), freeNode("walk-node", 110, 50)];
+    const navEdges = [{ id: "existing", startNodeId: "door-node", endNodeId: "walk-node", distance: 30, bidirectional: true, accessible: true, type: "hallway", color: "#000", width: 2 }];
+    const before = structuredClone({ navNodes, navEdges });
+    const reloaded = JSON.parse(JSON.stringify({ rooms: [outer, inner], navNodes, navEdges })) as {
+      rooms: FloorRoom[];
+      navNodes: NavigationNode[];
+      navEdges: NavigationEdge[];
+    };
+    expect(nestedRoomDoorNetworkPointIsValid("collab-door", { x: 110, y: 50 }, reloaded.rooms)).toBe(true);
+    expect({ navNodes: reloaded.navNodes, navEdges: reloaded.navEdges }).toEqual(before);
   });
 
   it("derives one semantic Room-to-Door edge without merging identities", () => {
@@ -308,24 +461,28 @@ describe("B5 Phase 2 — floor duplication graph remap", () => {
       elevators: new Map<string, string>(),
       ramps: new Map<string, string>(),
     };
-    const { navNodes, navEdges } = remapIndoorNavForFloorCopy(nodes, edges, "f1", "f1-copy", idMaps);
-    expect(navNodes).toHaveLength(2);
-    expect(navNodes.every((n) => n.id !== "n1" && n.id !== "n2")).toBe(true);
-    expect(navNodes.every((n) => n.floorId === "f1-copy")).toBe(true);
-    expect(navNodes.find((n) => n.roomId)?.roomId).toBe("r1-copy");
-    expect(navEdges).toHaveLength(1);
-    expect(navEdges[0].id).not.toBe("e1");
-    expect(navEdges[0].startNodeId).toBe(navNodes[0].id);
-    expect(navEdges[0].endNodeId).toBe(navNodes[1].id);
+    const beforeNodes = structuredClone(nodes);
+    const beforeEdges = structuredClone(edges);
+    const { copiedNodes, copiedEdges } = remapIndoorNavForFloorCopy(nodes, edges, "f1", "f1-copy", idMaps);
+    expect(copiedNodes).toHaveLength(2);
+    expect(copiedNodes.every((n) => n.id !== "n1" && n.id !== "n2")).toBe(true);
+    expect(copiedNodes.every((n) => n.floorId === "f1-copy")).toBe(true);
+    expect(copiedNodes.find((n) => n.roomId)?.roomId).toBe("r1-copy");
+    expect(copiedEdges).toHaveLength(1);
+    expect(copiedEdges[0].id).not.toBe("e1");
+    expect(copiedEdges[0].startNodeId).toBe(copiedNodes[0].id);
+    expect(copiedEdges[0].endNodeId).toBe(copiedNodes[1].id);
+    expect(nodes).toEqual(beforeNodes);
+    expect(edges).toEqual(beforeEdges);
   });
 
   it("leaves other floors untouched", () => {
     const otherFloor = freeNode("n9", 1, 1);
     const other = { ...otherFloor, floorId: "f2" };
-    const { navNodes } = remapIndoorNavForFloorCopy([other], [], "f1", "f1-copy", {
+    const { copiedNodes } = remapIndoorNavForFloorCopy([other], [], "f1", "f1-copy", {
       rooms: new Map(), doors: new Map(), stairs: new Map(), elevators: new Map(), ramps: new Map(),
     });
-    expect(navNodes).toHaveLength(0);
+    expect(copiedNodes).toHaveLength(0);
   });
 });
 
@@ -384,6 +541,29 @@ describe("B5 Phase 2.8 — wall-aware orthogonal connector", () => {
     const longWall: FloorWall = { id: "w2", x1: 40, y1: 70, x2: 260, y2: 70, thickness: 6, color: "#64748b" };
     const verticalWall: FloorWall = { id: "w3", x1: 100, y1: 20, x2: 100, y2: 160, thickness: 6, color: "#64748b" };
     expect(orthogonalBendsFor({ x: 60, y: 30 }, { x: 140, y: 130 }, [longWall, verticalWall], [])).toEqual([]);
+  });
+});
+
+describe("Indoor connection geometry on combined Floor shapes", () => {
+  const regions = [
+    { x: 0, y: 0, width: 220, height: 160 },
+    { x: 220, y: 40, width: 80, height: 80 },
+  ];
+
+  it("allows an authored path to cross the base/Extension seam", () => {
+    const a = { x: 180, y: 80 };
+    const b = { x: 260, y: 80 };
+    const bends = orthogonalBendsFor(a, b, [], [], { width: 220, height: 160 }, regions);
+    expect(bends).toEqual([]);
+    expect(floorShapeContainsPolyline(regions, [a, b])).toBe(true);
+  });
+
+  it("chooses a union-contained orthogonal path instead of routing through a gray notch", () => {
+    const a = { x: 180, y: 20 };
+    const b = { x: 260, y: 80 };
+    const bends = orthogonalBendsFor(a, b, [], [], { width: 220, height: 160 }, regions);
+    expect(bends).toEqual([{ x: 180, y: 80 }]);
+    expect(floorShapeContainsPolyline(regions, [a, ...bends, b])).toBe(true);
   });
 });
 
@@ -597,6 +777,34 @@ describe("B5 Phase 2.8 — always-on alignment guides (no Shift)", () => {
     expect(snap.guides).toEqual([]);
   });
 
+  it("snaps near-horizontal and near-vertical Connect targets exactly to the source axes", () => {
+    expect(alignConnectTargetToSource({ x: 100, y: 200 }, { x: 300, y: 200.8 })).toEqual({ x: 300, y: 200 });
+    expect(alignConnectTargetToSource({ x: 200, y: 100 }, { x: 199.5, y: 300 })).toEqual({ x: 200, y: 300 });
+  });
+
+  it("preserves deliberate diagonal Connect targets and their precision", () => {
+    expect(alignConnectTargetToSource({ x: 100, y: 100 }, { x: 200.123456, y: 150.654321 }))
+      .toEqual({ x: 200.123456, y: 150.654321 });
+  });
+
+  it("resolves projected path junctions with exact H/V alignment while preserving diagonals", () => {
+    expect(resolveConnectPathTargetPoint(
+      { x: 100, y: 200 }, { x: 300, y: 200.8 }, { x: 250, y: 200.8 }, { x: 350, y: 200.8 },
+    )).toEqual({ x: 300, y: 200 });
+    expect(resolveConnectPathTargetPoint(
+      { x: 200, y: 100 }, { x: 199.5, y: 300 }, { x: 199.5, y: 250 }, { x: 199.5, y: 350 },
+    )).toEqual({ x: 200, y: 300 });
+    expect(resolveConnectPathTargetPoint(
+      { x: 100, y: 100 }, { x: 200.123456, y: 150.654321 }, { x: 150, y: 125 }, { x: 250, y: 175 },
+    )).toEqual({ x: 200.123456, y: 150.654321 });
+  });
+
+  it("keeps an axis snap off the target segment when alignment would shift it too far", () => {
+    expect(resolveConnectPathTargetPoint(
+      { x: 100, y: 200 }, { x: 300, y: 200.8 }, { x: 250, y: 204 }, { x: 350, y: 204 },
+    )).toEqual({ x: 300, y: 200.8 });
+  });
+
   it("group drag aligns bbox edges/centers to another node's X or Y", () => {
     const snap = navGroupAlignSnap(
       { minX: 40, minY: 40, width: 20, height: 10 },
@@ -716,6 +924,131 @@ describe("B5 Phase 3 — cross-floor navigation transitions", () => {
       linked("n2-left", "f2", { stairId: "s2-left" }),
     ];
     expect(reconcileCrossFloorTransitions(nodes, [], duplicateFloors, "b1")).toHaveLength(0);
+  });
+
+  it("keeps Left and Right Stair shafts independent across three Floors", () => {
+    const parallelFloors = [1, 2, 3].map((number) => ({
+      id: `f${number}`,
+      number,
+      label: number === 1 ? "Ground Floor" : `Floor ${number}`,
+      stairs: [
+        stair(`left-${number}`, "left-shaft"),
+        stair(`right-${number}`, "right-shaft"),
+      ],
+      ramps: [],
+      elevators: [],
+    }));
+    const parallelNodes = parallelFloors.flatMap((floor, index) => [
+      linked(`n-left-${index + 1}`, floor.id, { stairId: `left-${index + 1}` }),
+      linked(`n-right-${index + 1}`, floor.id, { stairId: `right-${index + 1}` }),
+    ]);
+
+    const edges = reconcileCrossFloorTransitions(parallelNodes, [], parallelFloors, "b1");
+    const pairs = edges.map((edge) => [edge.startNodeId, edge.endNodeId].sort().join("|"));
+    expect(pairs).toHaveLength(4);
+    expect(pairs).toEqual(expect.arrayContaining([
+      "n-left-1|n-left-2",
+      "n-left-2|n-left-3",
+      "n-right-1|n-right-2",
+      "n-right-2|n-right-3",
+    ]));
+    expect(pairs).not.toContain("n-left-2|n-right-3");
+    expect(pairs).not.toContain("n-right-2|n-left-1");
+  });
+
+  it("removes a legacy indoor-to-exterior Stair transition while preserving the exterior emergency chain", () => {
+    const sharedId = "legacy-collided-shared-id";
+    const exteriorId = "canonical-exterior-stair";
+    const mixedFloors = [
+      {
+        ...floors[0],
+        stairs: [
+          stair("indoor-f1", sharedId),
+          { ...stair("exterior-f1", sharedId), exteriorEmergencyStairId: exteriorId },
+        ],
+      },
+      {
+        ...floors[1],
+        stairs: [{ ...stair("exterior-f2", sharedId), exteriorEmergencyStairId: exteriorId }],
+      },
+    ];
+    const nodes = [
+      linked("indoor-node-f1", "f1", { stairId: "indoor-f1" }),
+      linked("exterior-node-f1", "f1", { stairId: "exterior-f1", exteriorEmergencyStairId: exteriorId, emergencyStair: true }),
+      linked("exterior-node-f2", "f2", { stairId: "exterior-f2", exteriorEmergencyStairId: exteriorId, emergencyStair: true }),
+    ];
+    const invalidMixedTransition: NavigationEdge = {
+      id: "legacy-indoor-to-exterior", startNodeId: "indoor-node-f1", endNodeId: "exterior-node-f2",
+      distance: 1, bidirectional: true, accessible: false, type: CROSS_FLOOR_EDGE_TYPE, color: "#475569", width: 1,
+    };
+    const exteriorTransition: NavigationEdge = {
+      id: "valid-exterior-transition", startNodeId: "exterior-node-f1", endNodeId: "exterior-node-f2",
+      distance: 0.5, bidirectional: true, accessible: false, emergencySafe: true, type: CROSS_FLOOR_EDGE_TYPE, color: "#475569", width: 1,
+    };
+    const localEdge: NavigationEdge = {
+      id: "unrelated-local-edge", startNodeId: "indoor-node-f1", endNodeId: "exterior-node-f1",
+      distance: 20, bidirectional: true, accessible: true, type: "walkway", color: "#16a34a", width: 4,
+    };
+
+    const reconciled = reconcileCrossFloorTransitions(nodes, [invalidMixedTransition, exteriorTransition, localEdge], mixedFloors, "b1");
+
+    expect(reconciled.map((edge) => edge.id)).toContain("valid-exterior-transition");
+    expect(reconciled).not.toContainEqual(invalidMixedTransition);
+    expect(reconciled).toContainEqual(localEdge);
+    expect(reconciled.filter((edge) => edge.type === CROSS_FLOOR_EDGE_TYPE).map((edge) => [edge.startNodeId, edge.endNodeId].sort().join("|")))
+      .toEqual(["exterior-node-f1|exterior-node-f2"]);
+  });
+
+  it("does not generate any transition from a legacy sharedId duplicated on adjacent Floors", () => {
+    const legacyFloors = [1, 2, 3].map((number) => ({
+      id: `f${number}`,
+      number,
+      label: number === 1 ? "Ground Floor" : `Floor ${number}`,
+      stairs: [
+        stair(`left-${number}`, "legacy-main"),
+        stair(`right-${number}`, "legacy-main"),
+      ],
+      ramps: [],
+      elevators: [],
+    }));
+    // Even when only one of the duplicate physical occurrences has a linked
+    // node, the physical Floor data is sufficient to mark this identity bad.
+    const nodes = [
+      linked("right-ground", "f1", { stairId: "right-1" }),
+      linked("right-f2", "f2", { stairId: "right-2" }),
+      linked("right-f3", "f3", { stairId: "right-3" }),
+    ];
+    expect(reconcileCrossFloorTransitions(nodes, [], legacyFloors, "b1")).toHaveLength(0);
+  });
+
+  it("retains exact Stair shaft identities and edges after a save/reload round trip", () => {
+    const parallelFloors = [1, 2, 3].map((number) => ({
+      id: `f${number}`,
+      number,
+      label: number === 1 ? "Ground Floor" : `Floor ${number}`,
+      stairs: [
+        stair(`left-${number}`, "left-shaft"),
+        stair(`right-${number}`, "right-shaft"),
+      ],
+      ramps: [],
+      elevators: [],
+    }));
+    const nodes = parallelFloors.flatMap((floor, index) => [
+      linked(`n-left-${index + 1}`, floor.id, { stairId: `left-${index + 1}` }),
+      linked(`n-right-${index + 1}`, floor.id, { stairId: `right-${index + 1}` }),
+    ]);
+    const serializedFloors = structuredClone(parallelFloors);
+    const serializedNodes = structuredClone(nodes);
+    const edges = reconcileCrossFloorTransitions(serializedNodes, [], serializedFloors, "b1");
+    expect(serializedFloors.flatMap((floor) => floor.stairs.map((item) => item.sharedId))).toEqual([
+      "left-shaft", "right-shaft", "left-shaft", "right-shaft", "left-shaft", "right-shaft",
+    ]);
+    expect(edges.map((edge) => [edge.startNodeId, edge.endNodeId].sort().join("|")).sort()).toEqual([
+      "n-left-1|n-left-2",
+      "n-left-2|n-left-3",
+      "n-right-1|n-right-2",
+      "n-right-2|n-right-3",
+    ]);
   });
 
   it("unrelated sharedIds do not connect", () => {

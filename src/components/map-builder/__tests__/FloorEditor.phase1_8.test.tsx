@@ -1,10 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useState } from "react";
-import { FloorEditor } from "../FloorEditor";
+import { FloorEditor, buildFloorResizeCandidate, floorResizeCommitMismatchFields } from "../FloorEditor";
 import { FURNITURE_CATEGORIES } from "../constants";
 import { resizeCirculationWithinFloor, rotatedRectBounds } from "../../../lib/floorGeometry";
-import type { Campus, FloorWall } from "../types";
+import { createFloorPerimeterWalls } from "../../../lib/floorShape";
+import { reconcileEntranceDoors } from "../../../lib/entranceTransitions";
+import { normalizeFloor } from "../../../lib/floorPlanNormalization";
+import type { Campus, FloorSelection, FloorWall } from "../types";
 
 // ── Shared fixtures ─────────────────────────────────────────────────────────
 
@@ -180,10 +183,12 @@ function Harness({
   onCampusChange,
   initialCampus = makeRichCampus(),
   onSave,
+  initialSelection,
 }: {
   onCampusChange?: (c: Campus) => void;
   initialCampus?: Campus;
   onSave?: (c: Campus) => Promise<Campus>;
+  initialSelection?: FloorSelection;
 }) {
   const [campus, setCampus] = useState<Campus>(initialCampus);
   return (
@@ -195,6 +200,7 @@ function Harness({
       onSwitchFloor={() => {}}
       onUpdate={(c) => { onCampusChange?.(c); setCampus(c); }}
       onSave={onSave}
+      initialSelection={initialSelection}
     />
   );
 }
@@ -264,7 +270,10 @@ function stubSvgRect(container: HTMLElement, w = 220, h = 160): SVGSVGElement {
   });
   Object.defineProperty(svg.viewBox, "baseVal", {
     configurable: true,
-    value: { width: w, height: h, x: 0, y: 0 },
+    get: () => {
+      const [x, y, width, height] = (svg.getAttribute("viewBox") ?? `0 0 ${w} ${h}`).split(/\s+/).map(Number);
+      return { x, y, width, height };
+    },
   });
   Object.defineProperty(svg.parentElement, "getBoundingClientRect", {
     configurable: true,
@@ -734,6 +743,25 @@ describe("B4 floor management UX consistency", () => {
 });
 
 describe("Phase 2.1 - room layering, state, and structural snapping", () => {
+  it("resizes a Room inside a Floor Extension without clamping it to the base canvas", () => {
+    const campus = makeRichCampus();
+    const floor = campus.buildings[0].floors[0];
+    floor.extensions = [{ id: "right-extension", side: "right", offset: 30, width: 100, depth: 100 }];
+    floor.rooms[0] = { ...floor.rooms[0], x: 230, y: 50 };
+    const { container } = render(<Harness initialCampus={campus} onCampusChange={(c) => { latestCampus = c; }} />);
+    const svg = stubSvgRect(container, 320, 160);
+
+    fireEvent.mouseDown(roomGroup(container), { clientX: 250, clientY: 70, bubbles: true });
+    fireEvent.mouseUp(svg, { clientX: 250, clientY: 70, bubbles: true });
+    const eastHandle = screen.getAllByTestId("room-resize-handle").find((handle) => handle.getAttribute("data-corner") === "e");
+    expect(eastHandle).toBeTruthy();
+    fireEvent.mouseDown(eastHandle!, { clientX: 280, clientY: 70, bubbles: true });
+    fireEvent.mouseMove(svg, { clientX: 305, clientY: 70, bubbles: true });
+    fireEvent.mouseUp(svg, { clientX: 305, clientY: 70, bubbles: true });
+
+    expect(latestCampus!.buildings[0].floors[0].rooms[0]).toMatchObject({ x: 230, y: 50, w: 75, h: 40 });
+  });
+
   it("renders rotated room selection handles as first-class transform controls", () => {
     const campus = makeRichCampus();
     campus.buildings[0].floors[0].rooms[0].rotation = 30;
@@ -760,80 +788,90 @@ describe("Phase 2.1 - room layering, state, and structural snapping", () => {
     expect(latestCampus!.buildings[0].floors[0].rooms[0].locked).toBe(false);
   });
 
-  it("persists visibility and z-order from the properties panel", () => {
+  it("hides the selected object without deleting it and restores it from the properties panel", () => {
     const { container } = render(<Harness onCampusChange={(c) => { latestCampus = c; }} />);
 
     fireEvent.mouseDown(roomGroup(container), { clientX: 45, clientY: 40, bubbles: true });
     fireEvent.click(screen.getByRole("button", { name: /^Hide$/i }));
     expect(latestCampus!.buildings[0].floors[0].rooms[0].visible).toBe(false);
+    expect(container.querySelector('[data-layer-key="room:r1"]')?.getAttribute("opacity")).toBe("0");
 
-    fireEvent.click(screen.getByRole("button", { name: /^Front$/i }));
-    expect(latestCampus!.buildings[0].floors[0].rooms[0].zOrder).toBeGreaterThanOrEqual(0);
+    fireEvent.click(screen.getByRole("button", { name: /^Show$/i }));
+    expect(latestCampus!.buildings[0].floors[0].rooms[0].visible).toBe(true);
+    expect(container.querySelector('[data-layer-key="room:r1"]')?.getAttribute("opacity")).toBe("1");
   });
 
-  it("orders floor layers from the properties panel across object types and supports undo/redo", async () => {
+  it("reorders only Furniture in its local layer and supports undo/redo", async () => {
     const campus = makeRichCampus();
     const floor = campus.buildings[0].floors[0];
-    floor.furniture[0].x = 30;
-    floor.furniture[0].y = 30;
-    floor.stairs[0].x = 34;
-    floor.stairs[0].y = 34;
+    floor.furniture = [
+      { ...floor.furniture[0], x: 30, y: 30, zOrder: 0 },
+      { ...floor.furniture[0], id: "fur2", name: "Second Desk", x: 32, y: 32, zOrder: 1 },
+    ];
+    floor.stairs[0].zOrder = 200;
     floor.rooms[0].zOrder = 0;
-    floor.furniture[0].zOrder = 1;
-    floor.stairs[0].zOrder = 2;
-    const { container } = render(<Harness initialCampus={campus} onCampusChange={(c) => { latestCampus = c; }} />);
-    const svg = stubSvgRect(container);
+    floor.walls[0].zOrder = -500;
+    floor.doors[0].zOrder = 500;
+    floor.windows[0].zOrder = -200;
+    const { container } = render(<Harness initialCampus={campus} initialSelection={{ type: "furniture", id: "fur1" }} onCampusChange={(c) => { latestCampus = c; }} />);
 
     expect(layerKeys(container)).toEqual(expect.arrayContaining(["room:r1", "furniture:fur1", "stairs:st1"]));
     expect(layerKeys(container).indexOf("room:r1")).toBeLessThan(layerKeys(container).indexOf("furniture:fur1"));
-    expect(layerKeys(container).indexOf("furniture:fur1")).toBeLessThan(layerKeys(container).indexOf("stairs:st1"));
+    expect(layerKeys(container).indexOf("furniture:fur1")).toBeLessThan(layerKeys(container).indexOf("wall:w1"));
+    expect(layerKeys(container).indexOf("wall:w1")).toBeLessThan(layerKeys(container).indexOf("door:d1"));
+    expect(layerKeys(container).indexOf("door:d1")).toBeLessThan(layerKeys(container).indexOf("window:wn1"));
 
-    fireEvent.mouseDown(roomGroup(container), { clientX: 45, clientY: 40, bubbles: true });
-    fireEvent.mouseUp(svg, { bubbles: true });
-    fireEvent.click(screen.getByRole("button", { name: /^Front$/i }));
+    const originalOtherOrders = { room: floor.rooms[0].zOrder, wall: floor.walls[0].zOrder, door: floor.doors[0].zOrder, window: floor.windows[0].zOrder, stairs: floor.stairs[0].zOrder };
+
+    fireEvent.click(screen.getByRole("button", { name: "Bring to front of layer" }));
     let changed = latestCampus!.buildings[0].floors[0];
-    expect(changed.rooms[0].zOrder).toBeGreaterThan(changed.furniture[0].zOrder ?? -1);
-    expect(layerKeys(container).indexOf("room:r1")).toBeGreaterThan(layerKeys(container).indexOf("stairs:st1"));
+    expect(changed.furniture.find((item) => item.id === "fur1")?.zOrder).toBeGreaterThan(changed.furniture.find((item) => item.id === "fur2")?.zOrder ?? -1);
+    expect({ room: changed.rooms[0].zOrder, wall: changed.walls[0].zOrder, door: changed.doors[0].zOrder, window: changed.windows[0].zOrder, stairs: changed.stairs[0].zOrder }).toEqual(originalOtherOrders);
+    expect(layerKeys(container).indexOf("furniture:fur1")).toBeGreaterThan(layerKeys(container).indexOf("furniture:fur2"));
+    expect(layerKeys(container).indexOf("furniture:fur1")).toBeLessThan(layerKeys(container).indexOf("wall:w1"));
 
-    await waitFor(() => expect(screen.getByTitle("Undo (Ctrl+Z)")).not.toBeDisabled());
-    fireEvent.click(screen.getByTitle("Undo (Ctrl+Z)"));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Undo" })).not.toBeDisabled());
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
     await waitFor(() => {
       changed = latestCampus!.buildings[0].floors[0];
-      expect(changed.rooms[0].zOrder).toBeLessThan(changed.furniture[0].zOrder ?? 999);
-      expect(layerKeys(container).indexOf("room:r1")).toBeLessThan(layerKeys(container).indexOf("furniture:fur1"));
+      expect(changed.furniture.find((item) => item.id === "fur1")?.zOrder).toBeLessThan(changed.furniture.find((item) => item.id === "fur2")?.zOrder ?? 999);
+      expect(layerKeys(container).indexOf("furniture:fur1")).toBeLessThan(layerKeys(container).indexOf("furniture:fur2"));
     });
 
-    await waitFor(() => expect(screen.getByTitle("Redo (Ctrl+Y)")).not.toBeDisabled());
-    fireEvent.click(screen.getByTitle("Redo (Ctrl+Y)"));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Redo" })).not.toBeDisabled());
+    fireEvent.click(screen.getByRole("button", { name: "Redo" }));
     await waitFor(() => {
       changed = latestCampus!.buildings[0].floors[0];
-      expect(changed.rooms[0].zOrder).toBeGreaterThan(changed.furniture[0].zOrder ?? -1);
-      expect(layerKeys(container).indexOf("room:r1")).toBeGreaterThan(layerKeys(container).indexOf("stairs:st1"));
+      expect(changed.furniture.find((item) => item.id === "fur1")?.zOrder).toBeGreaterThan(changed.furniture.find((item) => item.id === "fur2")?.zOrder ?? -1);
+      expect(layerKeys(container).indexOf("furniture:fur1")).toBeGreaterThan(layerKeys(container).indexOf("furniture:fur2"));
     });
   });
 
-  it("orders floor layers from the context menu using the same cross-type stack", () => {
+  it("keeps context-menu layer actions inside the selected object type", () => {
     const campus = makeRichCampus();
     const floor = campus.buildings[0].floors[0];
-    floor.furniture[0].x = 30;
-    floor.furniture[0].y = 30;
-    floor.stairs[0].x = 34;
-    floor.stairs[0].y = 34;
-    floor.rooms[0].zOrder = 4;
-    floor.furniture[0].zOrder = 0;
-    floor.stairs[0].zOrder = 2;
+    floor.furniture = [
+      { ...floor.furniture[0], zOrder: 0 },
+      { ...floor.furniture[0], id: "fur2", name: "Second Desk", zOrder: 1 },
+    ];
+    floor.rooms[0].zOrder = 0;
+    floor.walls[0].zOrder = 10;
+    floor.doors[0].zOrder = 20;
+    floor.windows[0].zOrder = 30;
+    floor.stairs[0].zOrder = 40;
     const { container } = render(<Harness initialCampus={campus} onCampusChange={(c) => { latestCampus = c; }} />);
-    const svg = stubSvgRect(container);
 
-    expect(layerKeys(container).indexOf("room:r1")).toBeGreaterThan(layerKeys(container).indexOf("stairs:st1"));
-    fireEvent.contextMenu(roomGroup(container), { clientX: 45, clientY: 40, bubbles: true });
-    fireEvent.mouseUp(svg, { bubbles: true });
-    fireEvent.click(screen.getByRole("button", { name: /Send to Back/i }));
+    fireEvent.contextMenu(furnitureGroup(container, "Second Desk"), { clientX: 45, clientY: 40, bubbles: true });
+    fireEvent.click(screen.getAllByRole("button", { name: /Send to Back/i })[1]);
 
     const changed = latestCampus!.buildings[0].floors[0];
-    expect(changed.rooms[0].zOrder).toBeLessThan(changed.furniture[0].zOrder ?? 999);
-    expect(changed.rooms[0].zOrder).toBeLessThan(changed.stairs[0].zOrder ?? 999);
-    expect(layerKeys(container).indexOf("room:r1")).toBeLessThan(layerKeys(container).indexOf("furniture:fur1"));
+    expect(changed.furniture.find((item) => item.id === "fur2")?.zOrder).toBeLessThan(changed.furniture.find((item) => item.id === "fur1")?.zOrder ?? 999);
+    expect(changed.rooms[0].zOrder).toBe(0);
+    expect(changed.walls[0].zOrder).toBe(10);
+    expect(changed.doors[0].zOrder).toBe(20);
+    expect(changed.windows[0].zOrder).toBe(30);
+    expect(changed.stairs[0].zOrder).toBe(40);
+    expect(layerKeys(container).indexOf("furniture:fur1")).toBeLessThan(layerKeys(container).indexOf("wall:w1"));
   });
 
   it("snaps wall drawing to visible room edges after wall endpoints and segments", () => {
@@ -1775,12 +1813,12 @@ describe("Phase 1.8 — multi-selection persists through drag and right-click", 
     await waitFor(() => expect(latestCampus!.buildings[0].floors[0].rooms).toHaveLength(2));
     expect(latestCampus!.buildings[0].floors[0].rooms[1].name).toBe("Room Copy");
 
-    const undoButton = screen.getByTitle("Undo (Ctrl+Z)") as HTMLButtonElement;
+    const undoButton = screen.getByRole("button", { name: "Undo" }) as HTMLButtonElement;
     await waitFor(() => expect(undoButton.disabled).toBe(false));
     fireEvent.click(undoButton);
     await waitFor(() => expect(latestCampus!.buildings[0].floors[0].rooms).toHaveLength(1));
 
-    const redoButton = screen.getByTitle("Redo (Ctrl+Y)") as HTMLButtonElement;
+    const redoButton = screen.getByRole("button", { name: "Redo" }) as HTMLButtonElement;
     await waitFor(() => expect(redoButton.disabled).toBe(false));
     fireEvent.click(redoButton);
     await waitFor(() => expect(latestCampus!.buildings[0].floors[0].rooms).toHaveLength(2));
@@ -1791,9 +1829,9 @@ describe("Phase 1.8 — multi-selection persists through drag and right-click", 
     const floor = campus.buildings[0].floors[0];
     floor.canvasW = 220;
     floor.canvasH = 160;
-    floor.rooms[0] = { ...floor.rooms[0], x: 20, y: 20, w: 50, h: 40 };
+    floor.rooms[0] = { ...floor.rooms[0], x: 20, y: 20, w: 50, h: 40, accessDoorId: "d1", accessDoorIds: ["d1"], accessNodeId: "source-room-node", accessType: "door" };
     floor.walls[0] = { ...floor.walls[0], x1: 20, y1: 20, x2: 70, y2: 20 };
-    floor.doors[0] = { ...floor.doors[0], x: 45, y: 20 };
+    floor.doors[0] = { ...floor.doors[0], x: 45, y: 20, buildingEntranceId: "source-entrance" };
     floor.windows[0] = { ...floor.windows[0], x: 58, y: 20 };
     floor.furniture = [
       { id: "inside-furniture", type: "desk", name: "Inside Desk", category: "tables", x: 30, y: 30, width: 18, height: 10, rotation: 25, color: "#7a5c3a", groupId: "source-group" },
@@ -1819,6 +1857,8 @@ describe("Phase 1.8 — multi-selection persists through drag and right-click", 
     const copiedRoom = nextFloor.rooms.find((candidate) => candidate.id !== "r1")!;
     const copiedWall = nextFloor.walls.find((candidate) => candidate.id !== "w1")!;
     expect(copiedRoom).toBeTruthy();
+    expect(copiedRoom.x).toBe(20);
+    expect(copiedRoom.y).toBe(60);
     expect(copiedWall).toBeTruthy();
     expect(copiedWall.id).not.toBe("w1");
     expect(copiedWall.startAnchor?.roomId).toBe(copiedRoom.id);
@@ -1826,16 +1866,48 @@ describe("Phase 1.8 — multi-selection persists through drag and right-click", 
     expect(nextFloor.doors).toHaveLength(2);
     expect(nextFloor.windows).toHaveLength(2);
     expect(nextFloor.furniture).toHaveLength(3);
+    const copiedDoor = nextFloor.doors.find((door) => door.id !== "d1")!;
+    expect(copiedDoor.wallId).toBe(copiedWall.id);
+    expect(copiedDoor.buildingEntranceId).toBeUndefined();
+    expect(copiedRoom.accessDoorId).toBe(copiedDoor.id);
+    expect(copiedRoom.accessDoorIds).toEqual([copiedDoor.id]);
+    expect(copiedRoom.accessNodeId).toBeUndefined();
+    expect(copiedRoom.accessType).toBeUndefined();
     expect(nextFloor.furniture.some((item) => item.id !== "inside-furniture" && item.groupId && item.groupId !== "source-group")).toBe(true);
     expect(latestCampus!.navNodes).toEqual(originalNavNodes);
     expect(latestCampus!.navEdges).toEqual(originalNavEdges);
 
+    const copiedFurniture = nextFloor.furniture.find((item) => item.id !== "inside-furniture" && item.id !== "outside-furniture")!;
+    expect(copiedFurniture.x).toBe(30);
+    expect(copiedFurniture.y).toBe(70);
+    const copiedRoomGroup = container.querySelector(`[data-layer-key="room:${copiedRoom.id}"]`);
+    expect(copiedRoomGroup).toBeTruthy();
+    fireEvent.mouseDown(copiedRoomGroup!, { clientX: 45, clientY: 80, bubbles: true });
+    fireEvent.mouseMove(svg, { clientX: 95, clientY: 80, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    await waitFor(() => expect(latestCampus!.buildings[0].floors[0].rooms.find((room) => room.id === copiedRoom.id)?.x).toBe(70));
+    expect(latestCampus!.buildings[0].floors[0].rooms.find((room) => room.id === copiedRoom.id)?.y).toBe(60);
+    const movedSetup = latestCampus!.buildings[0].floors[0];
+    expect(movedSetup.rooms.find((room) => room.id === "r1")?.x).toBe(20);
+    expect(movedSetup.furniture.find((item) => item.id === "inside-furniture")?.x).toBe(30);
+    expect(movedSetup.furniture.find((item) => item.id === copiedFurniture.id)?.x).toBe(80);
+    expect(movedSetup.furniture.find((item) => item.id === copiedFurniture.id)?.y).toBe(70);
+    expect(latestCampus!.navNodes).toEqual(originalNavNodes);
+    expect(latestCampus!.navEdges).toEqual(originalNavEdges);
+
+    fireEvent.keyDown(window, { key: "z", ctrlKey: true });
+    await waitFor(() => expect(latestCampus!.buildings[0].floors[0].rooms.find((room) => room.id === copiedRoom.id)?.x).toBe(20));
+    expect(latestCampus!.buildings[0].floors[0].rooms.find((room) => room.id === copiedRoom.id)?.y).toBe(60);
+    expect(latestCampus!.buildings[0].floors[0].furniture.find((item) => item.id === copiedFurniture.id)?.x).toBe(30);
+    expect(latestCampus!.buildings[0].floors[0].furniture.find((item) => item.id === copiedFurniture.id)?.y).toBe(70);
     fireEvent.keyDown(window, { key: "z", ctrlKey: true });
     await waitFor(() => expect(latestCampus!.buildings[0].floors[0].rooms).toHaveLength(1));
     expect(latestCampus!.buildings[0].floors[0].walls).toHaveLength(1);
     expect(latestCampus!.navNodes).toEqual(originalNavNodes);
     fireEvent.keyDown(window, { key: "y", ctrlKey: true });
     await waitFor(() => expect(latestCampus!.buildings[0].floors[0].rooms).toHaveLength(2));
+    expect(latestCampus!.buildings[0].floors[0].rooms.find((room) => room.id === copiedRoom.id)?.x).toBe(20);
+    expect(latestCampus!.buildings[0].floors[0].rooms.find((room) => room.id === copiedRoom.id)?.y).toBe(60);
   });
 
   it("moves a selected Room Setup by one exact rigid delta and allows Room-to-perimeter contact", async () => {
@@ -2017,8 +2089,8 @@ describe("Phase 1.8 — wall connection quality", () => {
 
     fireEvent.keyDown(window, { key: "w" });
     fireEvent.mouseDown(svg, { clientX: 30, clientY: 120, bubbles: true }); // start (30,120)
-    fireEvent.mouseMove(svg, { clientX: 95, clientY: 71, shiftKey: true, bubbles: true }); // near segment (94.8,71.4)
-    fireEvent.mouseDown(svg, { clientX: 95, clientY: 71, shiftKey: true, bubbles: true });
+    fireEvent.mouseMove(svg, { clientX: 95, clientY: 71, bubbles: true }); // near segment (94.8,71.4)
+    fireEvent.mouseDown(svg, { clientX: 95, clientY: 71, bubbles: true });
 
     const walls = latestCampus!.buildings[0].floors[0].walls as FloorWall[];
     expect(walls).toHaveLength(2);
@@ -2072,6 +2144,48 @@ describe("Phase 1.8 — wall connection quality", () => {
     expect(wall).toMatchObject({ x1: 30, y1: 90, x2: 300, y2: 220 });
   });
 
+  it("hard-locks a slightly diagonal existing Wall to vertical with Shift", () => {
+    const campus = makeSnapCampus();
+    campus.buildings[0].floors[0].walls = [
+      { id: "near-vertical", x1: 500, y1: 80, x2: 492, y2: 340, thickness: 4, color: "#64748b", material: "concrete" },
+    ];
+    const { container } = render(<Harness initialCampus={campus} onCampusChange={(c) => { latestCampus = c; }} />);
+    const svg = stubSvgRect(container, 580, 380);
+    fireEvent.mouseDown(wallGroupByX1(container, 500), { clientX: 496, clientY: 210, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    const endpoint = Array.from(screen.getAllByTestId("wall-endpoint-handle"))
+      .find((handle) => Number(handle.getAttribute("cx")) === 492)!;
+    fireEvent.mouseDown(endpoint, { clientX: 492, clientY: 340, bubbles: true });
+    fireEvent.mouseMove(svg, { clientX: 496, clientY: 340, shiftKey: true, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+
+    const edited = latestCampus!.buildings[0].floors[0].walls[0];
+    expect(edited.x1).toBe(500);
+    expect(edited.x2).toBe(500);
+    expect(edited.y2).toBe(340);
+  });
+
+  it("connects a Shift-locked Wall at the exact compatible Wall intersection", () => {
+    const campus = makeSnapCampus();
+    campus.buildings[0].floors[0].walls = [
+      { id: "target-horizontal", x1: 440, y1: 200, x2: 550, y2: 200, thickness: 4, color: "#64748b", material: "concrete" },
+      { id: "source", x1: 500, y1: 80, x2: 496, y2: 195, thickness: 4, color: "#64748b", material: "concrete" },
+    ];
+    const { container } = render(<Harness initialCampus={campus} onCampusChange={(c) => { latestCampus = c; }} />);
+    const svg = stubSvgRect(container, 580, 380);
+    fireEvent.mouseDown(wallGroupByX1(container, 500), { clientX: 500, clientY: 120, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    const endpoint = Array.from(screen.getAllByTestId("wall-endpoint-handle"))
+      .find((handle) => Number(handle.getAttribute("cx")) === 496)!;
+    fireEvent.mouseDown(endpoint, { clientX: 496, clientY: 195, bubbles: true });
+    fireEvent.mouseMove(svg, { clientX: 496, clientY: 198, shiftKey: true, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+
+    const edited = latestCampus!.buildings[0].floors[0].walls.find((wall) => wall.id === "source")!;
+    expect(edited.x2).toBe(500);
+    expect(edited.y2).toBe(200);
+  });
+
   it("lets a wall that was snapped to a segment become diagonal", () => {
     const { container } = render(<Harness initialCampus={makeSnapCampus()} onCampusChange={(c) => { latestCampus = c; }} />);
     const svg = stubSvgRect(container, 580, 380);
@@ -2079,8 +2193,8 @@ describe("Phase 1.8 — wall connection quality", () => {
     // Draw a wall whose end snaps to the w1 segment at (100,57)
     fireEvent.keyDown(window, { key: "w" });
     fireEvent.mouseDown(svg, { clientX: 30, clientY: 90, bubbles: true });
-    fireEvent.mouseMove(svg, { clientX: 100, clientY: 60, shiftKey: true, bubbles: true });
-    fireEvent.mouseDown(svg, { clientX: 100, clientY: 60, shiftKey: true, bubbles: true });
+    fireEvent.mouseMove(svg, { clientX: 100, clientY: 60, bubbles: true });
+    fireEvent.mouseDown(svg, { clientX: 100, clientY: 60, bubbles: true });
     const walls = latestCampus!.buildings[0].floors[0].walls;
     expect(walls[2]).toMatchObject({ x1: 30, y1: 90, x2: 100, y2: 57 });
 
@@ -2881,6 +2995,360 @@ describe("Phase 1.8 — Floor Settings dialog", () => {
     expect((screen.getByRole("button", { name: "Toggle properties panel" }) as HTMLButtonElement).disabled).toBe(false);
   });
 
+  it("highlights only the base rectangle for Floor Resize while keeping the extension visible", async () => {
+    const campus = makeRichCampus();
+    campus.buildings[0].floors[0] = normalizeFloor({
+      ...campus.buildings[0].floors[0],
+      extensions: [{ id: "right-extension", side: "right", offset: 20, width: 60, depth: 40 }],
+    }, { buildingId: "b1" });
+    const { container } = render(<Harness initialCampus={campus} />);
+    fireEvent.click(screen.getByTestId("floor-settings-trigger"));
+    fireEvent.click(screen.getByRole("button", { name: "Resize on canvas" }));
+    await waitFor(() => expect(screen.getByTestId("floor-resize-overlay")).toBeInTheDocument());
+
+    expect(screen.getByTestId("floor-resize-outline")).toHaveAttribute("d", "M 0 0 H 220 V 160 H 0 Z");
+    expect(screen.getByTestId("floor-canvas-boundary").getAttribute("d")).toContain("260");
+    expect(container.querySelectorAll('[data-testid^="floor-resize-handle-"]')).toHaveLength(8);
+    expect(container.querySelector('[data-testid^="floor-extension-handle-"]')).toBeNull();
+  });
+
+  it("treats a click without pointer movement as a no-op for Floor Resize", async () => {
+    const { container } = render(<Harness />);
+    const svg = stubSvgRect(container);
+    fireEvent.click(screen.getByTestId("floor-settings-trigger"));
+    fireEvent.click(screen.getByRole("button", { name: "Resize on canvas" }));
+    await waitFor(() => expect(screen.getByTestId("floor-resize-panel")).toBeInTheDocument());
+
+    const clientAtWorld = (x: number, y: number) => {
+      const box = svg.viewBox.baseVal;
+      const rect = svg.getBoundingClientRect();
+      const scale = Math.min(rect.width / box.width, rect.height / box.height);
+      const offsetX = (rect.width - box.width * scale) / 2;
+      const offsetY = (rect.height - box.height * scale) / 2;
+      return { clientX: rect.left + offsetX + (x - box.x) * scale, clientY: rect.top + offsetY + (y - box.y) * scale };
+    };
+
+    const before = screen.getByTestId("floor-resize-size").textContent;
+    fireEvent.pointerDown(screen.getByTestId("floor-resize-handle-w"), { button: 0, pointerId: 1, clientX: 0, clientY: 80 });
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: 0, clientY: 80 });
+
+    expect(screen.getByTestId("floor-resize-size")).toHaveTextContent(before!);
+    expect(screen.getByText("All content fits")).toBeInTheDocument();
+
+    fireEvent.pointerDown(screen.getByTestId("floor-resize-handle-e"), { button: 0, pointerId: 2, ...clientAtWorld(220, 80) });
+    fireEvent.pointerMove(window, { pointerId: 2, ...clientAtWorld(260, 80) });
+    fireEvent.pointerUp(window, { pointerId: 2 });
+    expect(screen.getByTestId("floor-resize-size")).toHaveTextContent("260 × 160px");
+
+    const northStart = clientAtWorld(130, 0);
+    const box = svg.viewBox.baseVal;
+    const rect = svg.getBoundingClientRect();
+    const scale = Math.min(rect.width / box.width, rect.height / box.height);
+    fireEvent.pointerDown(screen.getByTestId("floor-resize-handle-n"), { button: 0, pointerId: 3, ...northStart });
+    fireEvent.pointerMove(window, { pointerId: 3, clientX: northStart.clientX, clientY: northStart.clientY - 20 * scale });
+    fireEvent.pointerUp(window, { pointerId: 3 });
+    expect(screen.getByTestId("floor-resize-size")).toHaveTextContent("260 × 180px");
+  });
+
+  it("commits the valid resized custom-Floor preview and closes resize mode", async () => {
+    const campus = makeRichCampus();
+    const sourceFloor = campus.buildings[0].floors[0];
+    campus.buildings[0].floors[0] = normalizeFloor({
+      ...sourceFloor,
+      extensions: [{ id: "right-extension", side: "right", offset: 20, width: 120, depth: 100 }],
+      furniture: [...sourceFloor.furniture, { id: "extension-desk", type: "desk", name: "Extension desk", category: "tables", x: 225, y: 40, width: 20, height: 20, color: "#987654" }],
+    }, { buildingId: "b1" });
+    let updatedCampus = campus;
+    let persistedCampus: Campus | null = null;
+    const onSave = vi.fn(async (next: Campus) => {
+      persistedCampus = structuredClone(next);
+      return structuredClone(next);
+    });
+    const { container } = render(<Harness initialCampus={campus} onCampusChange={(next) => { updatedCampus = next; }} onSave={onSave} />);
+    stubSvgRect(container, 320, 160);
+
+    fireEvent.click(screen.getByTestId("floor-settings-trigger"));
+    fireEvent.click(screen.getByRole("button", { name: "Resize on canvas" }));
+    await waitFor(() => expect(screen.getByTestId("floor-resize-panel")).toBeInTheDocument());
+    fireEvent.pointerDown(screen.getByTestId("floor-resize-handle-se"), { button: 0, pointerId: 1, clientX: 220, clientY: 160 });
+    fireEvent.pointerMove(window, { pointerId: 1, clientX: 200, clientY: 160 });
+    fireEvent.pointerUp(window, { pointerId: 1 });
+
+    expect(screen.getByText("All content fits")).toBeInTheDocument();
+    expect(screen.getByTestId("floor-resize-size")).toHaveTextContent("200 × 160px");
+    fireEvent.click(screen.getByRole("button", { name: "Apply resize" }));
+
+    await waitFor(() => expect(screen.queryByTestId("floor-resize-panel")).toBeNull());
+    expect(updatedCampus.buildings[0].floors[0]).toMatchObject({
+      canvasW: 200,
+      canvasH: 160,
+      extensions: [{ id: "right-extension", side: "right", offset: 20, width: 120, depth: 100 }],
+    });
+    expect(updatedCampus.buildings[0].floors[0].furniture.find((item) => item.id === "extension-desk")).toMatchObject({ x: 225, y: 40 });
+
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+    await waitFor(() => expect(updatedCampus.buildings[0].floors[0]).toMatchObject({
+      canvasW: 220,
+      canvasH: 160,
+      extensions: [{ id: "right-extension", side: "right", offset: 20, width: 120, depth: 100 }],
+    }));
+    expect(screen.getByRole("button", { name: "Undo" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Redo" }));
+    await waitFor(() => expect(updatedCampus.buildings[0].floors[0]).toMatchObject({
+      canvasW: 200,
+      canvasH: 160,
+      extensions: [{ id: "right-extension", side: "right", offset: 20, width: 120, depth: 100 }],
+    }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(onSave).toHaveBeenCalledOnce());
+    expect(persistedCampus!.buildings[0].floors[0].extensions).toEqual([
+      { id: "right-extension", side: "right", offset: 20, width: 120, depth: 100 },
+    ]);
+    cleanup();
+    const reloaded = render(<Harness initialCampus={persistedCampus!} />);
+    expect(canvasSvg(reloaded.container, 300, 160)).toBeInTheDocument();
+  });
+
+  it("applies a rectangular resize with perimeter openings after normalization", async () => {
+    const campus = makePerimeterOpeningCampus();
+    campus.buildings[0].entrances = [{
+      id: "top-entrance",
+      buildingId: "b1",
+      edge: "top",
+      offset: 0.5,
+      type: "general",
+    }];
+    campus.buildings[0].floors[0].doors[0] = {
+      ...campus.buildings[0].floors[0].doors[0],
+      buildingEntranceId: "top-entrance",
+    };
+    let updatedCampus = campus;
+    let persistedCampus: Campus | null = null;
+    const onSave = vi.fn(async (next: Campus) => {
+      persistedCampus = structuredClone(next);
+      return structuredClone(next);
+    });
+    const { container } = render(<Harness initialCampus={campus} onCampusChange={(next) => { updatedCampus = next; }} onSave={onSave} />);
+    stubSvgRect(container, 220, 160);
+
+    fireEvent.click(screen.getByTestId("floor-settings-trigger"));
+    fireEvent.click(screen.getByRole("button", { name: "Resize on canvas" }));
+    await waitFor(() => expect(screen.getByTestId("floor-resize-panel")).toBeInTheDocument());
+    fireEvent.pointerDown(screen.getByTestId("floor-resize-handle-se"), { button: 0, pointerId: 1, clientX: 220, clientY: 160 });
+    fireEvent.pointerMove(window, { pointerId: 1, clientX: 200, clientY: 140 });
+    fireEvent.pointerUp(window, { pointerId: 1 });
+
+    expect(screen.getByText("All content fits")).toBeInTheDocument();
+    expect(screen.getByTestId("floor-resize-size")).toHaveTextContent("200 × 140px");
+    fireEvent.click(screen.getByRole("button", { name: "Apply resize" }));
+
+    await waitFor(() => expect(screen.queryByTestId("floor-resize-panel")).toBeNull());
+    const resized = updatedCampus.buildings[0].floors[0];
+    expect(resized).toMatchObject({ canvasW: 200, canvasH: 140 });
+    expect(resized.walls.filter((wall) => wall.managedKind === "perimeter")).toEqual(expect.arrayContaining([
+      expect.objectContaining({ x1: 200, x2: 200 }),
+      expect.objectContaining({ y1: 140, y2: 140 }),
+    ]));
+    expect(resized.doors.find((door) => door.id === "door-perim")).toMatchObject({ x: 100, y: 0, buildingEntranceId: "top-entrance" });
+    const resizedWindow = resized.windows.find((window) => window.id === "window-perim");
+    expect(resizedWindow).toMatchObject({ x: 200, y: 70 });
+    expect(resized.walls.some((wall) => wall.id === resizedWindow?.wallId && wall.perimeterSide === "right")).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+    await waitFor(() => expect(updatedCampus.buildings[0].floors[0]).toMatchObject({ canvasW: 220, canvasH: 160 }));
+    fireEvent.click(screen.getByRole("button", { name: "Redo" }));
+    await waitFor(() => expect(updatedCampus.buildings[0].floors[0]).toMatchObject({ canvasW: 200, canvasH: 140 }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(onSave).toHaveBeenCalledOnce());
+    const savedFloor = persistedCampus!.buildings[0].floors[0];
+    expect(savedFloor).toMatchObject({ canvasW: 200, canvasH: 140 });
+    expect(savedFloor.extensions).toEqual([]);
+    cleanup();
+    const reloaded = render(<Harness initialCampus={persistedCampus!} />);
+    expect(canvasSvg(reloaded.container, 200, 140)).toBeInTheDocument();
+  });
+
+  it("keeps an Entrance Door on its matching split custom-perimeter segment through preview and Apply", async () => {
+    let campus = makeRichCampus();
+    const building = campus.buildings[0];
+    const entrance = { id: "bottom-entrance", buildingId: building.id, edge: "bottom" as const, offset: 0.1, type: "general" as const };
+    building.entrances = [entrance];
+    const source = normalizeFloor({
+      ...building.floors[0],
+      canvasW: 220,
+      canvasH: 160,
+      extensions: [{ id: "lobby-extension", side: "bottom", offset: 60, width: 80, depth: 40 }],
+      walls: createFloorPerimeterWalls("f1", 220, 160, [{ id: "lobby-extension", side: "bottom", offset: 60, width: 80, depth: 40 }], {
+        perimeterThickness: 6,
+        perimeterMaterial: "concrete",
+        perimeterColor: "#64748b",
+      }),
+      doors: [],
+      windows: [],
+      rooms: [],
+      furniture: [],
+    }, { buildingId: building.id });
+    building.floors[0] = source;
+    campus = reconcileEntranceDoors(campus);
+    const sourceWithDoor = campus.buildings[0].floors[0];
+    const expected = buildFloorResizeCandidate(sourceWithDoor, 240, 180, [], [entrance]).candidate;
+    const expectedCampus = reconcileEntranceDoors({
+      ...campus,
+      buildings: campus.buildings.map((item) => item.id !== building.id ? item : {
+        ...item,
+        floors: item.floors.map((itemFloor) => itemFloor.id === sourceWithDoor.id ? expected : itemFloor),
+      }),
+    });
+    const expectedPreviewFloor = expectedCampus.buildings[0].floors[0];
+    const expectedDoor = expectedCampus.buildings[0].floors[0].doors.find((door) => door.buildingEntranceId === entrance.id)!;
+    let updatedCampus = campus;
+    const { container } = render(<Harness initialCampus={campus} onCampusChange={(next) => { updatedCampus = next; }} />);
+    stubSvgRect(container, 220, 200);
+    fireEvent.click(screen.getByTestId("floor-settings-trigger"));
+    fireEvent.click(screen.getByRole("button", { name: "Resize on canvas" }));
+    await waitFor(() => expect(screen.getByTestId("floor-resize-panel")).toBeInTheDocument());
+    fireEvent.pointerDown(screen.getByTestId("floor-resize-handle-se"), { button: 0, pointerId: 1, clientX: 220, clientY: 160 });
+    fireEvent.pointerMove(window, { pointerId: 1, clientX: 240, clientY: 180 });
+    fireEvent.pointerUp(window, { pointerId: 1 });
+    expect(screen.getByText("All content fits")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Apply resize" }));
+    await waitFor(() => expect(screen.queryByTestId("floor-resize-panel")).toBeNull());
+
+    const committed = updatedCampus.buildings[0].floors[0];
+    expect(floorResizeCommitMismatchFields(expectedPreviewFloor, committed)).toEqual([]);
+    expect(updatedCampus.buildings[0].entrances?.find((item) => item.id === entrance.id)?.offset).toBe(entrance.offset);
+    expect(committed.doors.find((door) => door.id === expectedDoor.id)).toMatchObject({
+      id: expectedDoor.id,
+      wallId: expectedDoor.wallId,
+      buildingEntranceId: entrance.id,
+      x: expectedDoor.x,
+      y: expectedDoor.y,
+      offset: expectedDoor.offset,
+      width: expectedDoor.width,
+    });
+  });
+
+  it("makes Floor Shape extension gestures no-op on click and direct on span/depth drags", async () => {
+    const campus = makeRichCampus();
+    const floor = campus.buildings[0].floors[0];
+    floor.canvasW = 220;
+    floor.canvasH = 160;
+    floor.extensions = [{ id: "lobby-extension", side: "bottom", offset: 60, width: 80, depth: 40 }];
+    floor.walls = createFloorPerimeterWalls(floor.id, 220, 160, floor.extensions, {
+      perimeterThickness: 6,
+      perimeterMaterial: "concrete",
+      perimeterColor: "#64748b",
+    }, floor.walls);
+    let updatedCampus = campus;
+    const { container } = render(<Harness initialCampus={campus} onCampusChange={(next) => { updatedCampus = next; }} />);
+    const svg = stubSvgRect(container, 220, 200);
+    const worldToClient = (x: number, y: number) => {
+      const box = svg.viewBox.baseVal;
+      const rect = svg.getBoundingClientRect();
+      const scale = Math.min(rect.width / box.width, rect.height / box.height);
+      const offsetX = (rect.width - box.width * scale) / 2;
+      const offsetY = (rect.height - box.height * scale) / 2;
+      return { clientX: rect.left + offsetX + (x - box.x) * scale, clientY: rect.top + offsetY + (y - box.y) * scale };
+    };
+    fireEvent.click(screen.getByRole("button", { name: "Toggle properties panel" }));
+    fireEvent.click(screen.getByTestId("edit-floor-shape"));
+    await waitFor(() => expect(screen.getByTestId("floor-shape-panel")).toBeInTheDocument());
+
+    const body = container.querySelector('[data-floor-shape-action="body"][data-floor-shape-id="lobby-extension"]')!;
+    fireEvent.pointerDown(body, { button: 0, pointerId: 1, ...worldToClient(100, 180) });
+    fireEvent.pointerUp(window, { pointerId: 1 });
+    const spanEnd = container.querySelector('[data-floor-shape-action="span-end"][data-floor-shape-id="lobby-extension"]')!;
+    fireEvent.pointerDown(spanEnd, { button: 0, pointerId: 1, ...worldToClient(140, 180) });
+    fireEvent.pointerUp(window, { pointerId: 1 });
+    expect(screen.getByTestId("floor-shape-panel")).toHaveTextContent("Bottom · 80 × 40");
+    expect(updatedCampus.buildings[0].floors[0].extensions).toEqual(floor.extensions);
+
+    fireEvent.pointerDown(container.querySelector('[data-floor-shape-action="span-end"][data-floor-shape-id="lobby-extension"]')!, {
+      button: 0, pointerId: 1, ...worldToClient(140, 180),
+    });
+    fireEvent.pointerMove(window, { pointerId: 1, ...worldToClient(170, 180) });
+    fireEvent.pointerUp(window, { pointerId: 1 });
+    expect(screen.getByTestId("floor-shape-panel")).toHaveTextContent("Bottom · 110 × 40");
+
+    const depthPoint = worldToClient(115, 200);
+    fireEvent.pointerDown(container.querySelector('[data-floor-shape-action="depth"][data-floor-shape-id="lobby-extension"]')!, { button: 0, pointerId: 2, ...depthPoint });
+    fireEvent.pointerMove(window, { pointerId: 2, clientX: depthPoint.clientX, clientY: depthPoint.clientY + 16 });
+    fireEvent.pointerUp(window, { pointerId: 2 });
+    expect(screen.getByTestId("floor-shape-panel")).toHaveTextContent("Bottom · 110 × 56");
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+    await waitFor(() => expect(screen.queryByTestId("floor-shape-panel")).toBeNull());
+    expect(updatedCampus.buildings[0].floors[0].extensions).toEqual([
+      { id: "lobby-extension", side: "bottom", offset: 60, width: 110, depth: 56 },
+    ]);
+  });
+
+  it("allows live Extension resizing with perimeter Door and exterior Stair present", async () => {
+    const campus = makeRichCampus();
+    const floor = campus.buildings[0].floors[0];
+    campus.buildings[0].entrances = [{
+      id: "entrance-preserved", buildingId: "b1", edge: "right", offset: 0.5, name: "Lobby Entrance", isPrimary: true,
+    }];
+    floor.canvasW = 220;
+    floor.canvasH = 160;
+    floor.extensions = [{ id: "right-extension", side: "right", offset: 40, width: 80, depth: 40 }];
+    floor.walls = createFloorPerimeterWalls(floor.id, 220, 160, floor.extensions, {
+      perimeterThickness: 6, perimeterMaterial: "concrete", perimeterColor: "#64748b",
+    }, floor.walls);
+    const extensionWall = floor.walls.find((wall) => wall.managedKind === "perimeter"
+      && wall.perimeterSide === "right" && wall.x1 === 260 && wall.x2 === 260)!;
+    floor.doors = [{
+      id: "extension-door", x: 260, y: 80, width: 24, wallId: extensionWall.id, offset: 0.5,
+      direction: "left", color: "#b45309", label: "Lobby Door", buildingEntranceId: "entrance-preserved",
+    }];
+    floor.stairs = [{
+      id: "exterior-occurrence", x: 255, y: 60, width: 48, height: 40, direction: "up",
+      label: "Exterior Emergency Stair", exteriorEmergencyStairId: "exterior-stair-owner",
+    }];
+    campus.navNodes = [{
+      id: "door-nav-node", name: "Lobby Door", type: "entrance", x: 260, y: 80, buildingId: "b1", floorId: "f1",
+      doorId: "extension-door", buildingEntranceId: "entrance-preserved", accessible: true, color: "#2563eb",
+    }];
+    let updatedCampus = campus;
+    const { container } = render(<Harness initialCampus={campus} onCampusChange={(next) => { updatedCampus = next; }} />);
+    const svg = stubSvgRect(container, 260, 160);
+    const worldToClient = (x: number, y: number) => {
+      const box = svg.viewBox.baseVal;
+      const rect = svg.getBoundingClientRect();
+      const scale = Math.min(rect.width / box.width, rect.height / box.height);
+      const offsetX = (rect.width - box.width * scale) / 2;
+      const offsetY = (rect.height - box.height * scale) / 2;
+      return { clientX: rect.left + offsetX + (x - box.x) * scale, clientY: rect.top + offsetY + (y - box.y) * scale };
+    };
+    fireEvent.click(screen.getByRole("button", { name: "Toggle properties panel" }));
+    fireEvent.click(screen.getByTestId("edit-floor-shape"));
+    await waitFor(() => expect(screen.getByTestId("floor-shape-panel")).toBeInTheDocument());
+
+    expect(screen.getByTestId("floor-shape-panel")).toHaveTextContent("All content fits");
+    expect(screen.queryByTestId("floor-shape-fit-issue")).toBeNull();
+    const extensionBody = container.querySelector('[data-floor-shape-action="body"][data-floor-shape-id="right-extension"]')!;
+    fireEvent.pointerDown(extensionBody, { button: 0, pointerId: 1, ...worldToClient(240, 80) });
+    fireEvent.pointerUp(window, { pointerId: 1 });
+    const depthHandle = container.querySelector('[data-floor-shape-action="depth"][data-floor-shape-id="right-extension"]')!;
+    const pointer = worldToClient(260, 80);
+    fireEvent.pointerDown(depthHandle, { button: 0, pointerId: 2, ...pointer });
+    fireEvent.pointerMove(window, { pointerId: 2, clientX: pointer.clientX + 16, clientY: pointer.clientY });
+    fireEvent.pointerUp(window, { pointerId: 2 });
+    expect(screen.getByTestId("floor-shape-panel")).toHaveTextContent("All content fits");
+    expect(screen.getByRole("button", { name: "Apply" })).toBeEnabled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+    await waitFor(() => expect(screen.queryByTestId("floor-shape-panel")).toBeNull());
+    const committed = updatedCampus.buildings[0].floors[0];
+    expect(committed.extensions?.[0]).toMatchObject({ id: "right-extension", depth: 56 });
+    expect(committed.doors[0]).toMatchObject({
+      id: "extension-door", x: 276, y: 80, buildingEntranceId: "entrance-preserved", width: 24,
+    });
+    expect(updatedCampus.navNodes?.find((node) => node.id === "door-nav-node")).toMatchObject({ doorId: "extension-door", x: 276, y: 80 });
+  });
+
+
   it("does not leak Floor Settings controls into multi-selection or single-object properties", () => {
     const { container } = render(<Harness />);
     marqueeSelect(container);
@@ -2932,6 +3400,41 @@ describe("Phase 1.8 — Save UX transitions", () => {
 
     await waitFor(() => expect(screen.queryByTestId("floor-save-status")).toBeNull());
     // Edits remain, dirty remains → Save is enabled again
+    expect(latestCampus!.buildings[0].floors[0].rooms[0]).toMatchObject({ x: 35, y: 30 });
+    expect((screen.getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("submits the rendered physical Floor and refuses a smaller hydrated response", async () => {
+    let latestCampus: Campus | null = null;
+    const onSave = vi.fn(async (candidate: Campus) => {
+      const corrupted = structuredClone(candidate);
+      const active = corrupted.buildings[0].floors[0];
+      active.rooms = [];
+      active.walls = [];
+      active.furniture = [];
+      return corrupted;
+    });
+    const { container } = render(<Harness onCampusChange={(campus) => { latestCampus = campus; }} onSave={onSave} />);
+    const svg = stubSvgRect(container);
+
+    fireEvent.mouseDown(roomGroup(container), { clientX: 45, clientY: 40, bubbles: true });
+    fireEvent.mouseMove(svg, { clientX: 60, clientY: 50, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledOnce());
+    const submittedFloor = onSave.mock.calls[0][0].buildings[0].floors[0];
+    expect(submittedFloor.rooms).toHaveLength(1);
+    expect(submittedFloor.walls).toHaveLength(1);
+    expect(submittedFloor.furniture).toHaveLength(1);
+    expect(submittedFloor.rooms[0]).toMatchObject({ x: 35, y: 30 });
+
+    await waitFor(() => expect(screen.queryByTestId("floor-save-status")).toBeNull());
+    // The smaller returned Floor is rejected before onUpdate can replace the
+    // good editor draft; its newest edit and full physical collections stay.
+    expect(latestCampus!.buildings[0].floors[0].rooms).toHaveLength(1);
+    expect(latestCampus!.buildings[0].floors[0].walls).toHaveLength(1);
+    expect(latestCampus!.buildings[0].floors[0].furniture).toHaveLength(1);
     expect(latestCampus!.buildings[0].floors[0].rooms[0]).toMatchObject({ x: 35, y: 30 });
     expect((screen.getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(false);
   });
@@ -3130,5 +3633,149 @@ describe("B7 Final — Outdoor-style alignment guides + keyboard collision", () 
     const room = latestCampus!.buildings[0].floors[0].rooms[0];
     expect(room.x + room.w).toBeLessThanOrEqual(220);
     expect(room.x).toBeGreaterThanOrEqual(0);
+  });
+});
+
+function makeBatchDoorCampus(): Campus {
+  const campus = makeRichCampus();
+  const floor = campus.buildings[0].floors[0];
+  floor.rooms = [{ id: "room-batch", name: "Office", type: "office", x: 20, y: 15, w: 50, h: 40, floorId: "f1", buildingId: "b1", accessDoorId: "batch-door-a", accessDoorIds: ["batch-door-a", "batch-door-b"] }];
+  floor.walls = [{ id: "wall-batch", x1: 40, y1: 70, x2: 160, y2: 70, thickness: 4, color: "#64748b", material: "concrete" }];
+  floor.doors = [
+    { id: "batch-door-a", x: 70, y: 70, width: 16, wallId: "wall-batch", offset: 0.25, direction: "left", hinge: "left", swingSide: "a", color: "#b45309" },
+    { id: "batch-door-b", x: 124, y: 70, width: 16, wallId: "wall-batch", offset: 0.7, direction: "right", hinge: "right", swingSide: "b", color: "#b45309", buildingEntranceId: "entrance-1" },
+    { id: "batch-open-passage", x: 148, y: 70, width: 12, wallId: "wall-batch", offset: 0.9, direction: "left", hinge: "left", swingSide: "a", openingType: "open_passage", color: "#b45309" },
+  ];
+  floor.windows = [];
+  floor.furniture = [{ id: "batch-furniture", type: "desk", name: "Desk", category: "tables", x: 90, y: 95, width: 18, height: 12, rotation: 0, color: "#7a5c3a" }];
+  floor.stairs = [];
+  floor.ramps = [];
+  floor.elevators = [];
+  floor.labels = [];
+  floor.paths = [];
+  campus.navNodes = [
+    { id: "batch-room-node", name: "Office", type: "room_access", campusId: "c1", buildingId: "b1", floorId: "f1", roomId: "room-batch", x: 45, y: 35, accessible: true, color: "#2563eb" },
+    { id: "batch-door-node", name: "Door", type: "hallway", campusId: "c1", buildingId: "b1", floorId: "f1", doorId: "batch-door-a", x: 70, y: 70, accessible: true, color: "#2563eb" },
+  ];
+  campus.navEdges = [{ id: "batch-room-door-edge", startNodeId: "batch-room-node", endNodeId: "batch-door-node", distance: 35, bidirectional: true, accessible: true }];
+  return campus;
+}
+
+describe("Batch Door orientation in multi-selection Properties", () => {
+  it("toggles each eligible Door independently and leaves mixed objects, attachments, and navigation untouched", () => {
+    const campus = makeBatchDoorCampus();
+    const original = structuredClone(campus);
+    const { container } = render(<Harness initialCampus={campus} onCampusChange={(next) => { latestCampus = next; }} />);
+    marqueeSelect(container, 220, 160);
+
+    const panel = screen.getByTestId("floor-multi-properties-panel");
+    const orientation = screen.getByTestId("floor-multi-door-orientation");
+    expect(orientation).toHaveTextContent("3 selected");
+    fireEvent.click(within(orientation).getByRole("button", { name: "Flip Hinges" }));
+    fireEvent.click(within(orientation).getByRole("button", { name: "Flip Swings" }));
+
+    const result = latestCampus!.buildings[0].floors[0];
+    expect(result.doors.find((door) => door.id === "batch-door-a")).toMatchObject({ hinge: "right", direction: "right", swingSide: "b", wallId: "wall-batch", offset: 0.25 });
+    expect(result.doors.find((door) => door.id === "batch-door-b")).toMatchObject({ hinge: "left", direction: "left", swingSide: "a", wallId: "wall-batch", offset: 0.7, buildingEntranceId: "entrance-1" });
+    expect(result.doors.find((door) => door.id === "batch-open-passage")).toMatchObject({ openingType: "open_passage", hinge: "left", swingSide: "a" });
+    expect(result.rooms[0].accessDoorId).toBe("batch-door-a");
+    expect(result.rooms[0].accessDoorIds).toEqual(["batch-door-a", "batch-door-b"]);
+    expect(result.furniture).toMatchObject(original.buildings[0].floors[0].furniture);
+    expect(latestCampus!.navNodes).toEqual(original.navNodes);
+    expect(latestCampus!.navEdges).toEqual(original.navEdges);
+    expect(panel).toBeInTheDocument();
+  });
+
+  it("undoes a batch hinge flip in one history step", () => {
+    const campus = makeBatchDoorCampus();
+    const { container } = render(<Harness initialCampus={campus} onCampusChange={(next) => { latestCampus = next; }} />);
+    marqueeSelect(container, 220, 160);
+    fireEvent.click(within(screen.getByTestId("floor-multi-door-orientation")).getByRole("button", { name: "Flip Hinges" }));
+
+    expect(latestCampus!.buildings[0].floors[0].doors.slice(0, 2).map((door) => door.hinge)).toEqual(["right", "left"]);
+    fireEvent.keyDown(window, { key: "z", ctrlKey: true });
+    expect(latestCampus!.buildings[0].floors[0].doors.slice(0, 2).map((door) => door.hinge)).toEqual(["left", "right"]);
+  });
+});
+
+function makeBatchNavigationCampus(): Campus {
+  const campus = makeBatchDoorCampus();
+  campus.buildings[0].floors[0].rooms.push({
+    id: "room-batch-unlinked", name: "Second Office", type: "office", x: 145, y: 15, w: 50, h: 40, floorId: "f1", buildingId: "b1",
+  });
+  campus.navNodes!.push({
+    id: "outdoor-batch-node", name: "Campus Walkway", type: "outdoor", x: 400, y: 250, accessible: true, color: "#2563eb",
+  });
+  campus.navEdges!.push({
+    id: "outdoor-batch-edge", startNodeId: "outdoor-batch-node", endNodeId: "outdoor-batch-node", distance: 0, bidirectional: true, accessible: true,
+  });
+  return campus;
+}
+
+describe("Batch Room and Door navigation linking", () => {
+  it("adds only unlinked selected Rooms and Doors, ignores other types, and preserves existing graph rows", () => {
+    const campus = makeBatchNavigationCampus();
+    const originalNodes = structuredClone(campus.navNodes);
+    const originalEdges = structuredClone(campus.navEdges);
+    const originalRooms = structuredClone(campus.buildings[0].floors[0].rooms);
+    const { container } = render(<Harness initialCampus={campus} onCampusChange={(next) => { latestCampus = next; }} />);
+    marqueeSelect(container, 220, 160);
+
+    const panel = screen.getByTestId("floor-multi-navigation-actions");
+    expect(panel).toHaveTextContent("2 Rooms · 3 Doors");
+    expect(panel).toHaveTextContent("3 not linked · 2 already linked");
+    fireEvent.click(within(panel).getByRole("button", { name: "Add 3 to Navigation" }));
+
+    const nodes = latestCampus!.navNodes!;
+    expect(nodes).toHaveLength(originalNodes!.length + 3);
+    for (const original of originalNodes!) {
+      expect(nodes.find((node) => node.id === original.id)).toEqual(original);
+    }
+    expect(latestCampus!.navEdges).toEqual(originalEdges);
+    expect(nodes.filter((node) => node.roomId === "room-batch-unlinked")).toHaveLength(1);
+    expect(nodes.filter((node) => node.doorId === "batch-door-b")).toHaveLength(1);
+    expect(nodes.filter((node) => node.doorId === "batch-open-passage")).toHaveLength(1);
+    expect(latestCampus!.buildings[0].floors[0].rooms.map((room) => ({ id: room.id, accessDoorId: room.accessDoorId, accessDoorIds: room.accessDoorIds })))
+      .toEqual(originalRooms!.map((room) => ({ id: room.id, accessDoorId: room.accessDoorId, accessDoorIds: room.accessDoorIds })));
+    expect(screen.getByTestId("floor-multi-properties-panel")).toBeInTheDocument();
+    expect(panel).toHaveTextContent("All selected Rooms/Doors are already in Navigation.");
+  });
+
+  it("undoes a batch append in one step without removing pre-existing nodes or edges", () => {
+    const campus = makeBatchNavigationCampus();
+    const originalNodes = structuredClone(campus.navNodes);
+    const originalEdges = structuredClone(campus.navEdges);
+    const { container } = render(<Harness initialCampus={campus} onCampusChange={(next) => { latestCampus = next; }} />);
+    marqueeSelect(container, 220, 160);
+    fireEvent.click(within(screen.getByTestId("floor-multi-navigation-actions")).getByRole("button", { name: "Add 3 to Navigation" }));
+    expect(latestCampus!.navNodes).toHaveLength(originalNodes!.length + 3);
+
+    fireEvent.keyDown(window, { key: "z", ctrlKey: true });
+    expect(latestCampus!.navNodes).toEqual(originalNodes);
+    expect(latestCampus!.navEdges).toEqual(originalEdges);
+  });
+
+  it("keeps batch-added entries through Save and reload", async () => {
+    const campus = makeBatchNavigationCampus();
+    let savedCampus: Campus | null = null;
+    const onSave = vi.fn(async (next: Campus) => {
+      savedCampus = structuredClone(next);
+      return next;
+    });
+    const { container } = render(<Harness initialCampus={campus} onSave={onSave} onCampusChange={(next) => { latestCampus = next; }} />);
+    marqueeSelect(container, 220, 160);
+    fireEvent.click(within(screen.getByTestId("floor-multi-navigation-actions")).getByRole("button", { name: "Add 3 to Navigation" }));
+    const saveButton = container.querySelector('[data-tutorial="floor-save"]') as HTMLButtonElement;
+    await waitFor(() => expect(saveButton).toBeEnabled());
+    fireEvent.click(saveButton);
+    await waitFor(() => expect(onSave).toHaveBeenCalledOnce());
+
+    expect(savedCampus!.navNodes?.filter((node) => ["room-batch-unlinked", "batch-door-b", "batch-open-passage"].some((id) => node.roomId === id || node.doorId === id))).toHaveLength(3);
+    cleanup();
+    const reloaded = render(<Harness initialCampus={savedCampus!} />);
+    marqueeSelect(reloaded.container, 220, 160);
+    expect(screen.getByTestId("floor-multi-navigation-actions")).toBeInTheDocument();
+    expect(screen.getByTestId("floor-multi-navigation-actions")).toHaveTextContent("0 not linked · 5 already linked");
+    expect(reloaded.container.querySelector('[data-tutorial="floor-save"]')).toBeDisabled();
   });
 });

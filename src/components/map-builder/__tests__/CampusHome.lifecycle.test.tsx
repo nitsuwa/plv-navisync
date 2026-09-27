@@ -69,6 +69,15 @@ function renderHome(campuses: Campus[], onBulkRestore = vi.fn(), options: {
 }
 
 describe("CampusHome archived lifecycle controls", () => {
+  it("shows placeholders rather than false zeros while lightweight counts are unavailable", () => {
+    const campus = { ...activeCampus("campus-a", "Campus A"), previewBuildingsLoaded: true };
+    renderHome([campus]);
+
+    expect(screen.getAllByText("—")).toHaveLength(3);
+    expect(screen.getByText("Campus summary loading")).toBeInTheDocument();
+    expect(screen.queryByText("No buildings yet")).not.toBeInTheDocument();
+  });
+
   it("dismisses the campus overflow menu without opening the card", async () => {
     const onOpen = vi.fn();
     render(
@@ -106,6 +115,8 @@ describe("CampusHome archived lifecycle controls", () => {
     expect(descriptionPreview.closest(".grid")).toHaveClass("items-stretch");
     expect(screen.getByRole("dialog", { name: /campus details/i })).toBeInTheDocument();
     expect(screen.getByTestId("campus-details-description")).toHaveTextContent(description);
+    expect(within(screen.getByRole("dialog", { name: /campus details/i })).queryByText("Markers")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/Markers:/)).not.toBeInTheDocument();
     expect(onOpen).not.toHaveBeenCalled();
 
     fireEvent.click(within(screen.getByRole("dialog", { name: /campus details/i })).getByRole("button", { name: /open editor/i }));

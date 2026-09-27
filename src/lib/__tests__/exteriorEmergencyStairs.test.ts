@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canonicalExteriorEmergencyStairsForBuilding, defaultExteriorEmergencyStairAttachment, exteriorEmergencyStairAttachmentIsAvailable, syncExteriorEmergencyStairGraph, syncExteriorEmergencyStairOccurrences, exteriorEmergencyStairWorldPosition, exteriorEmergencyStairEdgeForPointer, exteriorEmergencyStairOffsetForPointer, exteriorEmergencyStairWallSpansOverlap, exteriorEmergencyStairRouteReadiness, pruneOrphanedExteriorEmergencyStairNodes } from "../exteriorEmergencyStairs";
+import { canonicalExteriorEmergencyStairsForBuilding, defaultExteriorEmergencyStairAttachment, exteriorEmergencyStairAttachmentIsAvailable, syncExteriorEmergencyStairGraph, syncExteriorEmergencyStairOccurrences, exteriorEmergencyStairWorldPosition, exteriorEmergencyStairEdgeForPointer, exteriorEmergencyStairOffsetForPointer, exteriorEmergencyStairWallSpansOverlap, exteriorEmergencyStairRouteReadiness, pruneOrphanedExteriorEmergencyStairNodes, removeExteriorEmergencyStairConnectionSnapshots } from "../exteriorEmergencyStairs";
 import { findNavigationRoute } from "../pathfinding";
 import type { Campus, CampusBuilding, FloorPlan, ExteriorEmergencyStair } from "../../components/map-builder/types";
 
@@ -35,6 +35,30 @@ describe("Exterior Emergency Stair authoring", () => {
     const first = syncExteriorEmergencyStairOccurrences(building([stair("east") ]));
     const second = syncExteriorEmergencyStairOccurrences(first);
     expect(second.floors.flatMap((f) => f.stairs).map((s) => s.id)).toEqual(first.floors.flatMap((f) => f.stairs).map((s) => s.id));
+  });
+
+  it("removes stale unserved occurrences and canonicalizes only generated directions", () => {
+    const base = building([{
+      ...stair("east", ["f1"]),
+      occurrenceIds: { f1: "served-occurrence", f2: "stale-occurrence" },
+    }]);
+    base.floors[0].stairs = [{
+      id: "served-occurrence", x: 0, y: 0, width: 28, height: 42, direction: "up", label: "Exterior", sharedId: "shared-east",
+      exteriorEmergencyStairId: "east",
+    }];
+    base.floors[1].stairs = [{
+      id: "stale-occurrence", x: 0, y: 0, width: 28, height: 42, direction: "up", label: "Legacy copy", sharedId: "shared-east",
+      exteriorEmergencyStairId: "east",
+    }];
+    const normalStair = { id: "normal-up", x: 20, y: 20, width: 20, height: 30, direction: "up" as const, label: "Ordinary Stair" };
+    base.floors[0].stairs.push(normalStair);
+
+    const result = syncExteriorEmergencyStairOccurrences(base);
+
+    expect(result.floors[0].stairs.find((item) => item.id === "served-occurrence")?.direction).toBe("both");
+    expect(result.floors[0].stairs.find((item) => item.id === "normal-up")?.direction).toBe("up");
+    expect(result.floors[1].stairs.some((item) => item.exteriorEmergencyStairId === "east")).toBe(false);
+    expect(result.exteriorEmergencyStairs?.[0].occurrenceIds).toEqual({ f1: "served-occurrence" });
   });
 
   it("derives every served occurrence from one canonical owner attachment", () => {
@@ -276,6 +300,7 @@ describe("Exterior Emergency Stair authoring", () => {
       })),
     });
     expect(restored.navEdges?.some((edge) => edge.id === "local-f2")).toBe(true);
+    expect(restored.buildings[0].exteriorEmergencyStairs![0].floorConnectionSnapshots?.f2).toBeUndefined();
   });
 
   it("does not restore a snapshot whose target node was deleted while unserved", () => {
@@ -298,6 +323,49 @@ describe("Exterior Emergency Stair authoring", () => {
     });
     expect(restored.navEdges?.some((edge) => edge.id === "local-f2")).toBe(false);
     expect(restored.buildings[0].exteriorEmergencyStairs![0].floorConnectionSnapshots?.f2).toBeUndefined();
+  });
+
+  it("does not restore a manually deleted Emergency Stair Walking Path from a stale snapshot", () => {
+    const initial = syncExteriorEmergencyStairGraph(campus(building([stair("east")] )));
+    const owner = initial.buildings[0].exteriorEmergencyStairs![0];
+    const occurrence = initial.navNodes!.find((node) => node.exteriorEmergencyStairId === owner.id && node.floorId === "f1")!;
+    const walkingPoint = { id: "wp-f1", name: "Walking Point", type: "hallway" as const, x: occurrence.x - 24, y: occurrence.y, buildingId: "b1", floorId: "f1", accessible: true, color: "#2563eb" };
+    const manualPath = { id: "manual-emergency-exit-path", startNodeId: occurrence.id, endNodeId: walkingPoint.id, distance: 24, bidirectional: true, accessible: true, emergencySafe: true, type: "hallway", color: "#2563eb", width: 3 };
+    const withStaleSnapshot: Campus = {
+      ...initial,
+      buildings: initial.buildings.map((item) => item.id !== "b1" ? item : {
+        ...item,
+        exteriorEmergencyStairs: item.exteriorEmergencyStairs!.map((candidate) => candidate.id !== owner.id ? candidate : {
+          ...candidate,
+          floorConnectionSnapshots: { f1: [structuredClone(manualPath)] },
+        }),
+      }),
+      navNodes: [...initial.navNodes!, walkingPoint],
+      navEdges: [...initial.navEdges!, manualPath],
+    };
+
+    // This is the Floor Editor's exact edge-delete result: retain both nodes,
+    // remove just the selected manual edge, and retire its Emergency Stair
+    // backup before the normal reconciliation/save cycle runs.
+    const afterDelete = removeExteriorEmergencyStairConnectionSnapshots(
+      { ...withStaleSnapshot, navEdges: withStaleSnapshot.navEdges!.filter((edge) => edge.id !== manualPath.id) },
+      "b1",
+      "f1",
+      new Set([manualPath.id]),
+    );
+    expect(afterDelete.navNodes?.some((node) => node.id === occurrence.id)).toBe(true);
+    expect(afterDelete.navNodes?.some((node) => node.id === walkingPoint.id)).toBe(true);
+    expect(afterDelete.navEdges?.some((edge) => edge.id === manualPath.id)).toBe(false);
+    expect(afterDelete.buildings[0].exteriorEmergencyStairs![0].floorConnectionSnapshots?.f1).toBeUndefined();
+
+    // Match the JSON campus persistence boundary before reload reconciliation.
+    const reloaded = JSON.parse(JSON.stringify(afterDelete)) as Campus;
+    expect(reloaded.navEdges?.some((edge) => edge.id === manualPath.id)).toBe(false);
+    const afterReconciliation = syncExteriorEmergencyStairGraph(reloaded);
+    expect(afterReconciliation.navEdges?.some((edge) => edge.id === manualPath.id)).toBe(false);
+    expect(afterReconciliation.navEdges?.filter((edge) => edge.id !== manualPath.id)).toEqual(
+      afterDelete.navEdges?.filter((edge) => edge.id !== manualPath.id),
+    );
   });
 
   it("requires a connected Ground discharge into the outdoor Walking Network", () => {

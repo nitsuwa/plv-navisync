@@ -3,15 +3,21 @@ import type { Campus, CampusEventOverlay } from "../../components/map-builder/ty
 import { getSupabase } from "../../lib/supabase";
 import {
   campusStructureService,
+  assertActiveBuildingCodesAvailable,
+  canonicalizeCampusStructureForPersistence,
   hydrateCampusStructure,
   navigationEdgePairConflictIds,
   planFloorNumberWrites,
   rekeyNavigationEdgePayloadPairs,
+  roomService,
   serializeCampusStructure,
+  validateCampusStructurePayload,
   type FloorNumberRow,
 } from "../campusStructureService";
 import { ENTRANCE_TRANSITION_EDGE_TYPE, linkEntranceToIndoorDoor, removeEntranceIndoorConnection } from "../../lib/entranceTransitions";
 import { createIndoorNavNode } from "../../lib/indoorNavigationGraph";
+import { duplicateFloorInBuilding } from "../../lib/floorManagement";
+import { prepareFloorTemplateReplacement } from "../../lib/floorTemplateReplacement";
 
 vi.mock("../../lib/supabase", () => ({ getSupabase: vi.fn() }));
 
@@ -216,6 +222,73 @@ describe("B5 Phase 3.1.2 — floor unique-constraint persistence (write order)",
     expect(() => serializeCampusStructure(dupCampus)).toThrow(/duplicate floor id/);
   });
 
+  it("validates persisted object UUIDs, uniqueness, and exact Floor ownership before the RPC", () => {
+    const campus = makeCampus([{ id: IDs.floorA, number: 1 }]);
+    campus.buildings[0].floors[0].rooms = [{
+      id: "not-a-uuid", name: "Room", type: "office", x: 10, y: 10, w: 80, h: 60,
+    } as never];
+    const payload = serializeCampusStructure(campus);
+    expect(() => validateCampusStructurePayload(payload)).toThrow(/Map element identity must be a valid UUID/);
+
+    campus.buildings[0].floors[0].rooms[0].id = IDs.roomNode;
+    const validPayload = serializeCampusStructure(campus);
+    expect(() => validateCampusStructurePayload(validPayload)).not.toThrow();
+    const duplicate = structuredClone(validPayload);
+    duplicate.map_elements.push(structuredClone(duplicate.map_elements[0]));
+    expect(() => validateCampusStructurePayload(duplicate)).toThrow(/duplicate map element ID/);
+    const wrongFloor = structuredClone(validPayload);
+    wrongFloor.map_elements[0].floor_id = IDs.floorB;
+    expect(() => validateCampusStructurePayload(wrongFloor)).toThrow(/missing Floor|inconsistent Building\/Floor ownership/);
+  });
+
+  it("blocks a Floor save with a dangling Room wall anchor before any persistence call", async () => {
+    const rpc = vi.fn();
+    const from = vi.fn();
+    vi.mocked(getSupabase).mockReturnValue({ from, rpc } as never);
+    const campus = makeCampus([{ id: IDs.floorA, number: 1 }]) as Campus;
+    const floor = campus.buildings[0].floors[0];
+    floor.rooms = [{ id: "new-room-id", name: "Room A", type: "office", x: 0, y: 0, w: 100, h: 100 } as never];
+    floor.walls = [{
+      id: "wall-with-stale-room-anchor", x1: 0, y1: 0, x2: 100, y2: 0, thickness: 4, color: "#000", material: "drywall",
+      startAnchor: { targetType: "room", roomId: "old-template-room-id", edge: "top", offset: 0 },
+    } as never];
+    const before = structuredClone(campus);
+
+    await expect(campusStructureService.save(campus)).rejects.toThrow(/Wall anchor refers to missing Room "old-template-room-id" on Wall "wall-with-stale-room-anchor" \(start endpoint\)/);
+    expect(rpc).not.toHaveBeenCalled();
+    expect(from).not.toHaveBeenCalled();
+    expect(campus).toEqual(before);
+  });
+
+  it("blocks a map element primary-key collision owned by another Campus before the RPC", async () => {
+    const rpc = vi.fn();
+    const collisionRoomId = "20000000-0000-4000-8000-000000000001";
+    const from = vi.fn((tableName: string) => {
+      let requestedIds: string[] = [];
+      const builder = {
+        select: vi.fn().mockReturnThis(),
+        eq: vi.fn().mockReturnThis(),
+        is: vi.fn().mockReturnThis(),
+        in: vi.fn(function (this: unknown, _column: string, ids: string[]) { requestedIds = ids; return this; }),
+        then(resolve: (value: { data: unknown[]; error: null }) => unknown) {
+          const data = tableName === "map_elements" && requestedIds.includes(collisionRoomId)
+            ? [{ id: collisionRoomId, campus_id: "20000000-0000-4000-8000-000000000099", building_id: IDs.building, floor_id: IDs.floorA, archived_at: null }]
+            : [];
+          return Promise.resolve(resolve({ data, error: null }));
+        },
+      };
+      return builder;
+    });
+    vi.mocked(getSupabase).mockReturnValue({ from, rpc } as never);
+    const campus = makeCampus([{ id: IDs.floorA, number: 1 }]);
+    campus.buildings[0].floors[0].rooms = [{
+      id: collisionRoomId, name: "Template Room", type: "office", x: 20, y: 30, w: 120, h: 80,
+    } as never];
+
+    await expect(campusStructureService.save(campus)).rejects.toThrow(/Map element ID collision: .*belongs to another Campus/);
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
   it("serializer keeps final floor numbers unique per building while preserving own numbers", () => {
     const campus = makeCampus([
       { id: IDs.floorA, number: 1 },
@@ -226,27 +299,80 @@ describe("B5 Phase 3.1.2 — floor unique-constraint persistence (write order)",
     expect(new Set(payload.floors.map((f) => f.floor_number)).size).toBe(2);
   });
 
-  it("serializer repairs duplicate or blank building codes before persistence", () => {
+  it("preserves normalized authored Building codes and only generates defaults for blank codes", () => {
     const campus = makeCampus([{ id: IDs.floorA, number: 1 }]) as Campus;
+    campus.buildings[0].code = "  ceit  ";
     campus.buildings.push({
       ...structuredClone(campus.buildings[0]),
       id: "10000000-0000-4000-8000-000000000017",
       name: "Engineering Copy",
-      code: "ENG",
+      code: "",
       floors: [],
     });
     campus.buildings.push({
       ...structuredClone(campus.buildings[0]),
       id: "10000000-0000-4000-8000-000000000018",
-      name: "Unassigned",
-      code: "",
+      name: "Explicit default code",
+      code: "BLDG-01",
       floors: [],
     });
 
+    const before = structuredClone(campus);
     const payload = serializeCampusStructure(campus);
-    expect(payload.buildings.map((building) => building.code)).toEqual(["ENG", "BLDG-01", "BLDG-02"]);
+    expect(payload.buildings.map((building) => building.code)).toEqual(["CEIT", "BLDG-02", "BLDG-01"]);
     expect(new Set(payload.buildings.map((building) => String(building.code).toUpperCase())).size)
       .toBe(payload.buildings.length);
+    expect(payload.buildings[0].id).toBe(IDs.building);
+    expect(campus).toEqual(before);
+    const reloaded = roundTripHydrate(campus);
+    expect(reloaded.buildings.map((building) => [building.id, building.code])).toEqual([
+      [IDs.building, "CEIT"],
+      ["10000000-0000-4000-8000-000000000017", "BLDG-02"],
+      ["10000000-0000-4000-8000-000000000018", "BLDG-01"],
+    ]);
+  });
+
+  it("rejects duplicate active Building codes instead of silently renaming either Building", () => {
+    const campus = makeCampus([{ id: IDs.floorA, number: 1 }]) as Campus;
+    campus.buildings[0].code = "CEIT";
+    campus.buildings.push({
+      ...structuredClone(campus.buildings[0]),
+      id: "10000000-0000-4000-8000-000000000017",
+      name: "Engineering Copy",
+      code: " ceit ",
+      floors: [],
+    });
+
+    expect(() => serializeCampusStructure(campus)).toThrow("Building code 'CEIT' is already in use.");
+    expect(campus.buildings[0].id).toBe(IDs.building);
+    expect(campus.buildings[0].code).toBe("CEIT");
+  });
+
+  it("allows an archived Building code to be reused but rejects another active Building's code", () => {
+    const payloadBuildings = [{ id: "new-building", code: " CEIT " }];
+    expect(() => assertActiveBuildingCodesAvailable(payloadBuildings, [
+      { id: "archived-building", code: "ceit", archived_at: "2026-01-01T00:00:00Z" },
+    ], new Set())).not.toThrow();
+    expect(() => assertActiveBuildingCodesAvailable(payloadBuildings, [
+      { id: "active-building", code: "ceit", archived_at: null },
+    ], new Set())).toThrow("Building code 'CEIT' is already in use.");
+  });
+
+  it("blocks an active database code conflict before calling the save RPC", async () => {
+    const rpc = vi.fn();
+    const buildingQuery = {
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      is: vi.fn().mockResolvedValue({ data: [{ id: "20000000-0000-4000-8000-000000000020", code: "ceit", archived_at: null }], error: null }),
+    };
+    const from = vi.fn(() => buildingQuery);
+    vi.mocked(getSupabase).mockReturnValue({ from, rpc } as never);
+    const campus = makeCampus([{ id: IDs.floorA, number: 1 }]);
+    campus.buildings[0].code = "CEIT";
+
+    await expect(campusStructureService.save(campus)).rejects.toThrow("Building code 'CEIT' is already in use.");
+    expect(rpc).not.toHaveBeenCalled();
+    expect(campus.buildings[0].code).toBe("CEIT");
   });
 
   it("floor IDs referenced by nav nodes and transition edges survive the save payload", () => {
@@ -277,7 +403,12 @@ describe("B5 Phase 3.1.2 — floor unique-constraint persistence (write order)",
     });
     const from = vi.fn(() => ({
       select: vi.fn().mockReturnThis(),
-      eq: vi.fn().mockResolvedValue({ data: [], error: null }),
+      eq: vi.fn().mockReturnThis(),
+      is: vi.fn().mockReturnThis(),
+      in: vi.fn().mockResolvedValue({ data: [], error: null }),
+      then(resolve: (value: { data: unknown[]; error: null }) => unknown) {
+        return Promise.resolve(resolve({ data: [], error: null }));
+      },
     }));
     vi.mocked(getSupabase).mockReturnValue({ from, rpc } as never);
     const campus = makeCampus([{ id: IDs.floorA, number: 1 }]);
@@ -293,7 +424,8 @@ describe("B5 Phase 3.1.2 — floor unique-constraint persistence (write order)",
         return this;
       }),
       order: vi.fn().mockReturnThis(),
-      is: vi.fn().mockResolvedValue({ data, error: null }),
+      is: vi.fn().mockReturnThis(),
+      range: vi.fn().mockReturnThis(),
       then(resolve: (value: { data: unknown[]; error: null }) => unknown) {
         return Promise.resolve(resolve({ data, error: null }));
       },
@@ -323,7 +455,8 @@ describe("B5 Phase 3.1.2 — floor unique-constraint persistence (write order)",
         return this;
       }),
       order: vi.fn().mockReturnThis(),
-      is: vi.fn().mockResolvedValue({ data, error: null }),
+      is: vi.fn().mockReturnThis(),
+      range: vi.fn().mockReturnThis(),
       then(resolve: (value: { data: unknown[]; error: null }) => unknown) {
         return Promise.resolve(resolve({ data, error: null }));
       },
@@ -577,6 +710,234 @@ const roundTripHydrate = (campus: Campus) => {
   });
 };
 
+describe("floor duplication graph persistence protection", () => {
+  it("canonicalizes generated Exterior Stair direction before serialization and round-trip while preserving ordinary Stair direction", () => {
+    const campus = makeCampus([{ id: IDs.floorA, number: 1, label: "Ground Floor" }]);
+    const floor = campus.buildings[0].floors[0];
+    const ownerId = "10000000-0000-4000-8000-000000000017";
+    floor.stairs = [
+      { id: "10000000-0000-4000-8000-000000000018", x: 40, y: 40, width: 24, height: 32, direction: "up", label: "Ordinary Stair" },
+      { id: "10000000-0000-4000-8000-000000000019", x: 80, y: 40, width: 24, height: 32, direction: "up", label: "Exterior", sharedId: "exterior-shared", exteriorEmergencyStairId: ownerId },
+    ] as never;
+    campus.buildings[0].exteriorEmergencyStairs = [{
+      id: ownerId, buildingId: IDs.building, label: "Exterior Emergency Stair", state: "open", width: 24, height: 32,
+      attachment: { edge: "right", offset: 0.5 }, servedFloorIds: [IDs.floorA], sharedId: "exterior-shared",
+    }] as never;
+
+    const canonical = canonicalizeCampusStructureForPersistence(campus);
+    const canonicalAgain = canonicalizeCampusStructureForPersistence(canonical);
+    const stairs = canonical.buildings[0].floors[0].stairs;
+    const savedStairs = serializeCampusStructure(campus).map_elements
+      .filter((row) => row.element_type === "stairs")
+      .map((row) => (row.metadata as Record<string, unknown>).ui as Record<string, unknown>);
+    const hydrated = roundTripHydrate(campus);
+
+    expect(stairs.find((stair) => stair.exteriorEmergencyStairId === ownerId)?.direction).toBe("both");
+    expect(stairs.find((stair) => stair.id === "10000000-0000-4000-8000-000000000018")?.direction).toBe("up");
+    expect(savedStairs.find((stair) => stair.exteriorEmergencyStairId === ownerId)?.direction).toBe("both");
+    expect(hydrated.buildings[0].floors[0].stairs.find((stair) => stair.exteriorEmergencyStairId === ownerId)?.direction).toBe("both");
+    expect(hydrated.buildings[0].floors[0].stairs.find((stair) => stair.id === "10000000-0000-4000-8000-000000000018")?.direction).toBe("up");
+    expect(canonicalAgain.buildings[0].floors[0].stairs.filter((stair) => stair.exteriorEmergencyStairId === ownerId)).toHaveLength(1);
+    expect(canonicalAgain.navNodes?.filter((node) => node.exteriorEmergencyStairId === ownerId).map((node) => node.id))
+      .toEqual(canonical.navNodes?.filter((node) => node.exteriorEmergencyStairId === ownerId).map((node) => node.id));
+    expect(canonicalAgain.navEdges?.filter((edge) => edge.derivedOwnerId === ownerId).map((edge) => edge.id))
+      .toEqual(canonical.navEdges?.filter((edge) => edge.derivedOwnerId === ownerId).map((edge) => edge.id));
+  });
+
+  it("preserves a duplicated custom Floor and its extension contents through save/reload", () => {
+    const campus = makeCampus([{ id: IDs.floorA, number: 1, label: "Ground Floor" }]);
+    const source = campus.buildings[0].floors[0];
+    source.extensions = [{ id: "10000000-0000-4000-8000-000000000017", side: "right", offset: 40, width: 100, depth: 80 }];
+    source.rooms = [{
+      id: "10000000-0000-4000-8000-000000000018", name: "Extension Room", type: "office", x: 590, y: 30, w: 60, h: 40,
+      buildingId: IDs.building, floorId: IDs.floorA,
+    }];
+    source.walls = [{ id: "10000000-0000-4000-8000-000000000019", x1: 590, y1: 30, x2: 650, y2: 30, thickness: 4, color: "#64748b" }];
+    source.doors = [{
+      id: "10000000-0000-4000-8000-000000000020", x: 620, y: 30, width: 16, direction: "right", color: "#b45309",
+      wallId: "10000000-0000-4000-8000-000000000019",
+    }];
+    source.furniture = [{
+      id: "10000000-0000-4000-8000-000000000021", type: "desk", name: "Desk", category: "tables", x: 610, y: 45,
+      width: 24, height: 18, rotation: 0, color: "#987654",
+    }];
+    const beforeSource = structuredClone(source);
+    const duplicate = duplicateFloorInBuilding([source], IDs.building, IDs.floorA, [], []);
+    const copy = duplicate.copy!;
+    const copiedCampus = {
+      ...campus,
+      buildings: campus.buildings.map((building) => ({ ...building, floors: [...duplicate.floors] })),
+    } as Campus;
+
+    expect(source).toEqual(beforeSource);
+    expect(copy.id).not.toBe(source.id);
+    expect(copy.extensions?.[0]).toMatchObject({ side: "right", offset: 40, width: 100, depth: 80 });
+    expect(copy.extensions?.[0].id).not.toBe(source.extensions?.[0].id);
+    expect(copy.rooms[0].id).not.toBe(source.rooms[0].id);
+    expect(copy.walls[0].id).not.toBe(source.walls[0].id);
+    expect(copy.doors[0].id).not.toBe(source.doors[0].id);
+    expect(copy.furniture[0].id).not.toBe(source.furniture[0].id);
+    expect(copy.extensions).not.toBe(source.extensions);
+    expect(copy.extensions?.[0]).not.toBe(source.extensions?.[0]);
+
+    const firstReload = roundTripHydrate(copiedCampus);
+    const secondReload = roundTripHydrate(firstReload);
+    const reloadedCopy = firstReload.buildings[0].floors.find((floor) => floor.id === copy.id)!;
+    const reloadedAgain = secondReload.buildings[0].floors.find((floor) => floor.id === copy.id)!;
+    expect(reloadedCopy.extensions).toEqual(copy.extensions);
+    expect(reloadedAgain.extensions).toEqual(copy.extensions);
+    expect(reloadedCopy.rooms).toEqual(copy.rooms);
+    expect(reloadedCopy.walls).toEqual(copy.walls);
+    expect(reloadedCopy.doors).toEqual(copy.doors);
+    expect(reloadedCopy.furniture).toEqual(copy.furniture);
+    const reloadedSource = firstReload.buildings[0].floors.find((floor) => floor.id === source.id)!;
+    expect(reloadedSource.extensions).toEqual(source.extensions);
+    expect(reloadedSource.rooms).toEqual(expect.arrayContaining([expect.objectContaining({ id: source.rooms[0].id, x: 590, y: 30, w: 60, h: 40 })]));
+    expect(reloadedSource.furniture).toEqual(expect.arrayContaining([expect.objectContaining({ id: source.furniture[0].id, x: 610, y: 45, width: 24, height: 18 })]));
+  });
+
+  it("keeps the complete graph unchanged through Floor-template replacement and repeated reload", () => {
+    const campus = makeCampus([{ id: IDs.floorA, number: 1, label: "Ground Floor" }]);
+    const floor = campus.buildings[0].floors[0];
+    floor.rooms = [{ id: "template-source-room", name: "Old Room", type: "office", x: 10, y: 10, w: 80, h: 60, buildingId: IDs.building, floorId: IDs.floorA }];
+    floor.walls = [{ id: "template-source-wall", x1: 10, y1: 10, x2: 90, y2: 10, thickness: 4, color: "#64748b" }];
+    floor.doors = [{ id: "template-source-door", x: 50, y: 10, width: 12, direction: "left", color: "#b45309", wallId: "template-source-wall" }];
+
+    const outdoorA = { id: IDs.nodeA, name: "Outdoor A", type: "outdoor" as const, x: 400, y: 250, accessible: true, color: "#1d4ed8", custom: { retained: true } };
+    const outdoorB = { ...outdoorA, id: IDs.nodeB, name: "Outdoor B", x: 460, y: 280 };
+    const roomNode = createIndoorNavNode({ id: IDs.roomNode, campusId: IDs.campus, buildingId: IDs.building, floorId: IDs.floorA, roomId: "template-source-room", name: "Old Room", type: "room_access", x: 50, y: 40 });
+    const doorNode = createIndoorNavNode({ id: IDs.doorNodeA, campusId: IDs.campus, buildingId: IDs.building, floorId: IDs.floorA, doorId: "template-source-door", name: "Old Door", type: "hallway", x: 50, y: 10 });
+    const waypoint = createIndoorNavNode({ id: IDs.doorNodeB, campusId: IDs.campus, buildingId: IDs.building, floorId: IDs.floorA, name: "Hall", type: "hallway", x: 120, y: 40 });
+    campus.navNodes = [outdoorA, outdoorB, roomNode, doorNode, waypoint] as never;
+    campus.navEdges = [
+      { id: IDs.edge, startNodeId: outdoorA.id, endNodeId: outdoorB.id, distance: 64, bidirectional: true, accessible: true, type: "walkway", color: "#334155", width: 2, bendPoints: [{ x: 430, y: 260 }], custom: { untouched: true } },
+      { id: IDs.edgeB, startNodeId: roomNode.id, endNodeId: doorNode.id, distance: 30, bidirectional: true, accessible: true, type: "room_door_transition", color: "#334155", width: 2 },
+      { id: IDs.entranceNode, startNodeId: doorNode.id, endNodeId: waypoint.id, distance: 70, bidirectional: true, accessible: true, type: "hallway", color: "#334155", width: 2 },
+    ] as never;
+    const expectedNodes = structuredClone(campus.navNodes);
+    const expectedEdges = structuredClone(campus.navEdges);
+    const templateFloor = {
+      ...floor,
+      rooms: [{ id: "template-copy-room", name: "New Room", type: "office", x: 200, y: 100, w: 100, h: 80, buildingId: IDs.building, floorId: IDs.floorA }],
+      walls: [{ id: "template-copy-wall", x1: 200, y1: 100, x2: 300, y2: 100, thickness: 4, color: "#64748b" }],
+      doors: [{ id: "template-copy-door", x: 250, y: 100, width: 18, direction: "right" as const, color: "#b45309", wallId: "template-copy-wall" }],
+      furniture: [], windows: [], labels: [], stairs: [], ramps: [], elevators: [],
+    };
+    const prepared = prepareFloorTemplateReplacement(floor, templateFloor, campus.navNodes, campus.navEdges);
+    campus.buildings[0].floors[0] = prepared.floor;
+
+    const afterFirstReload = roundTripHydrate(campus);
+    const afterSecondReload = roundTripHydrate(afterFirstReload);
+    expect(afterFirstReload.navNodes).toEqual(expectedNodes);
+    expect(afterFirstReload.navEdges).toEqual(expectedEdges);
+    expect(afterSecondReload.navNodes).toEqual(expectedNodes);
+    expect(afterSecondReload.navEdges).toEqual(expectedEdges);
+  });
+
+  it("retains Outdoor, source-Floor, other-Floor, and copied-Floor graph through repeated save/reload round-trips", () => {
+    const campus = makeCampus([
+      { id: IDs.floorA, number: 1, label: "Ground Floor" },
+      { id: IDs.floorB, number: 2, label: "Second Floor" },
+    ]);
+    const source = campus.buildings[0].floors[0];
+    source.rooms = [{
+      id: "room-source", name: "Clinic", type: "clinic", x: 10, y: 10, w: 40, h: 30,
+      buildingId: IDs.building, floorId: IDs.floorA,
+      accessDoorId: "door-source", accessDoorIds: ["door-source"], accessNodeId: IDs.roomNode,
+    }];
+    source.walls = [{ id: "wall-source", x1: 10, y1: 10, x2: 50, y2: 10, thickness: 4, color: "#64748b" }];
+    source.doors = [{ id: "door-source", x: 30, y: 10, width: 12, direction: "left", color: "#b45309", wallId: "wall-source" }];
+
+    const outdoor1 = {
+      id: IDs.nodeA, name: "Outdoor West", type: "outdoor" as const, x: 400, y: 250,
+      campusId: IDs.campus, accessible: true, emergencySafe: true, color: "#1d4ed8",
+      outdoorMetadata: { zone: "quad", authoredValues: [1, 2, 3] },
+    };
+    const outdoor2 = { ...outdoor1, id: IDs.nodeB, name: "Outdoor East", x: 450, y: 260 };
+    const sourceRoomNode = createIndoorNavNode({
+      id: IDs.roomNode, campusId: IDs.campus, buildingId: IDs.building, floorId: IDs.floorA,
+      roomId: "room-source", name: "Clinic", type: "room_access", x: 30, y: 15,
+    });
+    const sourceDoorNode = createIndoorNavNode({
+      id: IDs.doorNodeA, campusId: IDs.campus, buildingId: IDs.building, floorId: IDs.floorA,
+      doorId: "door-source", name: "Clinic Door", type: "hallway", x: 30, y: 10,
+    });
+    const sourceWaypoint = createIndoorNavNode({
+      id: IDs.doorNodeB, campusId: IDs.campus, buildingId: IDs.building, floorId: IDs.floorA,
+      name: "Clinic Hall", type: "hallway", x: 70, y: 30,
+    });
+    const otherFloorWaypoint = createIndoorNavNode({
+      id: IDs.nodeC, campusId: IDs.campus, buildingId: IDs.building, floorId: IDs.floorB,
+      name: "Second Floor Hall", type: "hallway", x: 90, y: 60,
+    });
+    const otherFloorWaypoint2 = createIndoorNavNode({
+      id: "other-floor-waypoint-2", campusId: IDs.campus, buildingId: IDs.building, floorId: IDs.floorB,
+      name: "Second Floor Hall 2", type: "hallway", x: 120, y: 60,
+    });
+    campus.navNodes = [outdoor1, outdoor2, sourceRoomNode, sourceDoorNode, sourceWaypoint, otherFloorWaypoint, otherFloorWaypoint2];
+    campus.navEdges = [
+      { id: IDs.edge, startNodeId: outdoor1.id, endNodeId: outdoor2.id, distance: 51, bidirectional: true, accessible: true, type: "walkway", color: "#334155", width: 2, bendPoints: [{ x: 423, y: 255 }], outdoorEdgeMetadata: { authored: true } } as never,
+      { id: IDs.edgeB, startNodeId: sourceRoomNode.id, endNodeId: sourceDoorNode.id, distance: 15, bidirectional: true, accessible: true, type: "room_door_transition", color: "#334155", width: 2 },
+      { id: IDs.entranceNode, startNodeId: sourceDoorNode.id, endNodeId: sourceWaypoint.id, distance: 44, bidirectional: true, accessible: true, type: "hallway", color: "#334155", width: 2, bendPoints: [{ x: 50, y: 20 }] },
+      { id: "other-floor-edge", startNodeId: otherFloorWaypoint.id, endNodeId: otherFloorWaypoint2.id, distance: 30, bidirectional: true, accessible: true, type: "hallway", color: "#334155", width: 2 },
+    ];
+    const beforeNodes = structuredClone(campus.navNodes);
+    const beforeEdges = structuredClone(campus.navEdges);
+    const beforeSourceFloor = structuredClone(source);
+
+    const duplicate = duplicateFloorInBuilding(
+      campus.buildings[0].floors, IDs.building, IDs.floorA, campus.navNodes, campus.navEdges
+    );
+    expect(source).toEqual(beforeSourceFloor);
+    expect(campus.navNodes).toEqual(beforeNodes);
+    expect(campus.navEdges).toEqual(beforeEdges);
+    const copiedCampus: Campus = {
+      ...campus,
+      buildings: campus.buildings.map((building) => building.id === IDs.building
+        ? { ...building, floors: duplicate.floors }
+        : building),
+      navNodes: [...campus.navNodes, ...(duplicate.copiedNavNodes ?? [])],
+      navEdges: [...campus.navEdges, ...(duplicate.copiedNavEdges ?? [])],
+    };
+
+    const firstReload = roundTripHydrate(copiedCampus);
+    const secondReload = roundTripHydrate(firstReload);
+    const copy = duplicate.copy!;
+    const copiedNodeIds = new Set(duplicate.copiedNavNodes?.map((node) => node.id));
+    const copiedEdgeIds = new Set(duplicate.copiedNavEdges?.map((edge) => edge.id));
+    for (const protectedNode of beforeNodes) {
+      expect(firstReload.navNodes.find((node) => node.id === protectedNode.id)).toMatchObject(protectedNode);
+      expect(secondReload.navNodes.find((node) => node.id === protectedNode.id)).toMatchObject(protectedNode);
+    }
+    for (const protectedEdge of beforeEdges) {
+      expect(firstReload.navEdges.find((edge) => edge.id === protectedEdge.id)).toMatchObject(protectedEdge);
+      expect(secondReload.navEdges.find((edge) => edge.id === protectedEdge.id)).toMatchObject(protectedEdge);
+    }
+    for (const id of copiedNodeIds) {
+      expect(firstReload.navNodes.find((node) => node.id === id)).toBeDefined();
+      expect(secondReload.navNodes.find((node) => node.id === id)).toBeDefined();
+    }
+    for (const id of copiedEdgeIds) {
+      expect(firstReload.navEdges.find((edge) => edge.id === id)).toBeDefined();
+      expect(secondReload.navEdges.find((edge) => edge.id === id)).toBeDefined();
+    }
+    expect(firstReload.navNodes).toHaveLength(copiedCampus.navNodes.length);
+    expect(secondReload.navNodes).toHaveLength(copiedCampus.navNodes.length);
+    expect(firstReload.navEdges).toHaveLength(copiedCampus.navEdges.length);
+    expect(secondReload.navEdges).toHaveLength(copiedCampus.navEdges.length);
+    expect(new Set(firstReload.navNodes.map((node) => node.id)).size).toBe(firstReload.navNodes.length);
+    expect(new Set(firstReload.navEdges.map((edge) => edge.id)).size).toBe(firstReload.navEdges.length);
+
+    const firstOutdoor = firstReload.navNodes.find((node) => node.id === outdoor1.id)!;
+    expect(firstOutdoor).toMatchObject({ x: outdoor1.x, y: outdoor1.y, outdoorMetadata: outdoor1.outdoorMetadata });
+    expect(firstReload.navEdges.find((edge) => edge.id === IDs.edge)).toMatchObject(beforeEdges[0]);
+    const copiedRoom = firstReload.buildings[0].floors.find((floor) => floor.id === copy.id)!.rooms[0];
+    expect(copiedRoom.accessDoorId).toBe(copy.doors[0].id);
+    expect(copiedRoom.accessDoorIds).toEqual([copy.doors[0].id]);
+    expect(copiedRoom.accessNodeId).toBe(duplicate.copiedNavNodes?.find((node) => node.roomId === copiedRoom.id)?.id);
+  });
+});
+
 /**
  * A realistically authored campus covering the B2–B5 authoring model: two
  * buildings, non-trivial floor order, full floor interiors, outdoor assets,
@@ -738,7 +1099,11 @@ describe("B6 Phase 2 — deterministic round-trip + save/reload integrity", () =
       select: vi.fn().mockReturnThis(),
       eq: vi.fn().mockReturnThis(),
       order: vi.fn(function (this: unknown, column: string) { orderCalls.push([name, column]); return this; }),
-      is: vi.fn().mockResolvedValue({ data: [], error: null }),
+      is: vi.fn().mockReturnThis(),
+      range: vi.fn().mockReturnThis(),
+      then(resolve: (value: { data: unknown[]; error: null }) => unknown) {
+        return Promise.resolve(resolve({ data: [], error: null }));
+      },
     });
     const from = vi.fn((name: string) => table(name));
     vi.mocked(getSupabase).mockReturnValue({ from } as never);
@@ -754,6 +1119,44 @@ describe("B6 Phase 2 — deterministic round-trip + save/reload integrity", () =
     expect(byTable.get("map_elements")).toEqual(["created_at", "id"]);
     expect(byTable.get("navigation_nodes")).toEqual(["created_at", "id"]);
     expect(byTable.get("navigation_edges")).toEqual(["created_at", "id"]);
+  });
+
+  it("loads every map element beyond the PostgREST 1,000-row cap", async () => {
+    const rows = Array.from({ length: 1_072 }, (_, index) => ({
+      id: `30000000-0000-4000-8000-${index.toString(16).padStart(12, "0")}`,
+      campus_id: IDs.campus,
+      building_id: IDs.building,
+      floor_id: IDs.floorA,
+      element_type: "classroom",
+      archived_at: null,
+      created_at: "2026-01-01T00:00:00Z",
+    }));
+    const mapRanges: Array<[number, number]> = [];
+    const table = (name: string) => {
+      let range: [number, number] = [0, 499];
+      const builder = {
+        select: vi.fn().mockReturnThis(),
+        eq: vi.fn().mockReturnThis(),
+        order: vi.fn().mockReturnThis(),
+        is: vi.fn().mockReturnThis(),
+        range: vi.fn(function (this: unknown, from: number, to: number) {
+          range = [from, to];
+          if (name === "map_elements") mapRanges.push(range);
+          return this;
+        }),
+        then(resolve: (value: { data: unknown[]; error: null }) => unknown) {
+          const source = name === "map_elements" ? rows : [];
+          return Promise.resolve(resolve({ data: source.slice(range[0], range[1] + 1), error: null }));
+        },
+      };
+      return builder;
+    };
+    const from = vi.fn((name: string) => table(name));
+    vi.mocked(getSupabase).mockReturnValue({ from } as never);
+
+    const loadedRooms = await roomService.list(IDs.campus);
+    expect(loadedRooms).toHaveLength(1_072);
+    expect(mapRanges).toEqual([[0, 499], [500, 999], [1000, 1499]]);
   });
 
   it("maximal authored campus round-trips with all entities and metadata", () => {

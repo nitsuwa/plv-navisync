@@ -249,6 +249,68 @@ describe("B5 Phase 2 — Floor Editor indoor Navigation mode", () => {
     expect(screen.getByText("Navigation Path")).toBeTruthy();
   });
 
+  it("connects existing Walking Points inside a large Room", () => {
+    const withLibrary = makeBaseCampus();
+    withLibrary.buildings[0].floors[0].rooms = [
+      { id: "library", name: "CABA Library", type: "library", x: 20, y: 20, w: 180, h: 120, floorId: "f1", buildingId: "b1" },
+    ];
+    withLibrary.navNodes = [
+      { id: "library-walk-a", name: "Aisle A", type: "hallway", x: 45, y: 55, buildingId: "b1", floorId: "f1", accessible: true, color: "#16a34a" },
+      { id: "library-walk-b", name: "Aisle B", type: "hallway", x: 160, y: 55, buildingId: "b1", floorId: "f1", accessible: true, color: "#16a34a" },
+    ];
+    cleanup();
+    const rendered = render(<Harness onCampusChange={onCampusChange} initialCampus={withLibrary} />);
+    container = rendered.container;
+    fireEvent.click(screen.getByRole("button", { name: "Show Navigation" }));
+    const svg = stubSvgRect(container);
+    fireEvent.click(within(screen.getByTestId("floor-nav-toolbar")).getByRole("button", { name: "Connect" }));
+    const [first, second] = navNodes(container);
+    fireEvent.mouseDown(first, { clientX: 45, clientY: 55, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    fireEvent.mouseDown(second, { clientX: 160, clientY: 55, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    expect(navEdges(container)).toHaveLength(1);
+    const latest = onCampusChange.mock.calls[onCampusChange.mock.calls.length - 1]?.[0] as Campus;
+    expect(latest.navEdges?.some((edge) => new Set([edge.startNodeId, edge.endNodeId]).has("library-walk-a")
+      && new Set([edge.startNodeId, edge.endNodeId]).has("library-walk-b"))).toBe(true);
+    expect(screen.queryByText("Use the Room Door")).toBeNull();
+  });
+
+  it("connects a nested Room Door to a manual Walking Path in its containing Room", () => {
+    const nested = makeBaseCampus();
+    nested.buildings[0].floors[0].rooms = [
+      { id: "library", name: "CABA Library", type: "library", x: 10, y: 10, w: 200, h: 140, floorId: "f1", buildingId: "b1" },
+      { id: "collab", name: "Collab Room 3A", type: "classroom", x: 70, y: 55, w: 80, h: 60, floorId: "f1", buildingId: "b1", accessDoorId: "collab-door" },
+    ];
+    nested.buildings[0].floors[0].doors = [
+      { id: "collab-door", x: 110, y: 55, width: 20, direction: "right", color: "#b45309", wallId: "collab-wall", offset: 0.5 },
+    ];
+    nested.navNodes = [
+      { id: "collab-door-node", name: "Collab Door", type: "hallway", x: 110, y: 55, buildingId: "b1", floorId: "f1", doorId: "collab-door", accessible: true, color: "#16a34a" },
+      { id: "library-path-a", name: "Library Path A", type: "hallway", x: 40, y: 35, buildingId: "b1", floorId: "f1", accessible: true, color: "#16a34a" },
+      { id: "library-path-b", name: "Library Path B", type: "hallway", x: 180, y: 35, buildingId: "b1", floorId: "f1", accessible: true, color: "#16a34a" },
+    ];
+    nested.navEdges = [{ id: "library-path", startNodeId: "library-path-a", endNodeId: "library-path-b", distance: 140, bidirectional: true, accessible: true, emergencySafe: true, type: "hallway", color: "#16a34a", width: 4 }];
+    cleanup();
+    const rendered = render(<Harness onCampusChange={onCampusChange} initialCampus={nested} />);
+    container = rendered.container;
+    fireEvent.click(screen.getByRole("button", { name: "Show Navigation" }));
+    const svg = stubSvgRect(container);
+    fireEvent.click(within(screen.getByTestId("floor-nav-toolbar")).getByRole("button", { name: "Connect" }));
+    const doorNode = container.querySelector('[data-testid="nav-linked-node"]');
+    const pathHit = container.querySelector('[data-testid="nav-edge-hit"]');
+    expect(doorNode).toBeTruthy();
+    expect(pathHit).toBeTruthy();
+    fireEvent.mouseDown(doorNode!, { clientX: 110, clientY: 55, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    fireEvent.mouseDown(pathHit!, { clientX: 110, clientY: 35, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    const latest = onCampusChange.mock.calls[onCampusChange.mock.calls.length - 1]?.[0] as Campus;
+    expect(latest.navNodes?.some((node) => node.pathJunction && node.x === 110 && node.y === 35)).toBe(true);
+    expect(latest.navEdges?.filter((edge) => edge.id !== "library-path")).toHaveLength(3);
+    expect(screen.queryByText("Connect to the containing Room network")).toBeNull();
+  });
+
   it("Connect Path splits an existing manual path and terminates at one canonical junction", () => {
     const withPath = makeBaseCampus();
     withPath.navNodes = [
@@ -327,6 +389,42 @@ describe("B5 Phase 2 — Floor Editor indoor Navigation mode", () => {
     expect(junction?.y).toBe(80);
     expect(floorEdges.some((edge) => edge.startNodeId === "nav-a" && edge.endNodeId === "nav-b")).toBe(false);
     expect(floorEdges).toHaveLength(3);
+  });
+
+  it("previews and commits a near-horizontal path junction at the same snapped point", () => {
+    const withPath = makeBaseCampus();
+    withPath.navNodes = [
+      { id: "nav-a", name: "A", type: "hallway", x: 40, y: 80.8, buildingId: "b1", floorId: "f1", accessible: true, color: "#16a34a" },
+      { id: "nav-b", name: "B", type: "hallway", x: 180, y: 80.8, buildingId: "b1", floorId: "f1", accessible: true, color: "#16a34a" },
+      { id: "nav-source", name: "Source", type: "hallway", x: 100, y: 81.5, buildingId: "b1", floorId: "f1", accessible: true, color: "#16a34a" },
+    ];
+    withPath.navEdges = [{ id: "edge-ab", startNodeId: "nav-a", endNodeId: "nav-b", distance: 140, type: "hallway", bidirectional: true, accessible: true, emergencySafe: true }];
+    cleanup();
+    const rendered = render(<Harness onCampusChange={onCampusChange} initialCampus={withPath} />);
+    container = rendered.container;
+    fireEvent.click(screen.getByRole("button", { name: "Show Navigation" }));
+    const svg = stubSvgRect(container);
+    fireEvent.click(within(screen.getByTestId("floor-nav-toolbar")).getByRole("button", { name: "Connect" }));
+    const source = navNodes(container).find((node) => node.querySelector('circle[cx="100"][cy="81.5"]'))!;
+    fireEvent.mouseDown(source, { clientX: 100, clientY: 81.5, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+
+    const pathHit = container.querySelector('[data-testid="nav-edge-hit"]')!;
+    fireEvent.mouseMove(pathHit, { clientX: 120, clientY: 81, bubbles: true });
+    const preview = container.querySelector('[data-testid="floor-nav-connect-preview"] polyline')!;
+    const previewPoints = (preview.getAttribute("points") ?? "").split(/\s+/).map((point) => point.split(",").map(Number));
+    expect(previewPoints[0]).toEqual([100, 81.5]);
+    expect(previewPoints[previewPoints.length - 1]).toEqual([120, 81.5]);
+
+    fireEvent.mouseDown(pathHit, { clientX: 120, clientY: 81, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    const latest = onCampusChange.mock.calls[onCampusChange.mock.calls.length - 1]?.[0] as Campus;
+    const junction = latest.navNodes.find((node) => node.pathJunction)!;
+    expect(junction).toMatchObject({ x: previewPoints.at(-1)![0], y: previewPoints.at(-1)![1] });
+    const incidentEdges = latest.navEdges.filter((edge) => edge.startNodeId === junction.id || edge.endNodeId === junction.id);
+    expect(incidentEdges).toHaveLength(3);
+    const sourceEdge = incidentEdges.find((edge) => edge.startNodeId === "nav-source" || edge.endNodeId === "nav-source")!;
+    expect(sourceEdge.bendPoints ?? []).toEqual([]);
   });
 
   it("splits the exact hovered segment of a bent Walking Path", () => {
@@ -414,6 +512,101 @@ describe("B5 Phase 2 — Floor Editor indoor Navigation mode", () => {
     expect(Math.abs(cross)).toBeLessThan(0.0001);
     expect(junction!.x).not.toBe(180);
     expect(junction!.y).not.toBe(140);
+  });
+
+  it("starts Connect from a Door on a slanted Room boundary without the Room Door warning", () => {
+    const withSlantedDoor = makeBaseCampus();
+    withSlantedDoor.buildings[0].floors[0].rooms = [{
+      id: "r-slanted",
+      name: "Slanted Room",
+      type: "classroom",
+      x: 20,
+      y: 60,
+      w: 170,
+      h: 80,
+      shapePoints: [
+        { x: 20, y: 100 },
+        { x: 180, y: 60 },
+        { x: 190, y: 140 },
+        { x: 20, y: 140 },
+      ],
+      floorId: "f1",
+      buildingId: "b1",
+      accessDoorId: "d-slanted",
+    }];
+    withSlantedDoor.buildings[0].floors[0].walls = [{
+      id: "w-slanted",
+      x1: 20,
+      y1: 100,
+      x2: 180,
+      y2: 60,
+      thickness: 4,
+      color: "#64748b",
+    }];
+    withSlantedDoor.buildings[0].floors[0].doors = [{
+      id: "d-slanted",
+      x: 100,
+      y: 80,
+      width: 18,
+      direction: "left",
+      color: "#b45309",
+      wallId: "w-slanted",
+      offset: 0.5,
+    }];
+    withSlantedDoor.navNodes = [
+      {
+        id: "node-slanted-door",
+        name: "Slanted Door",
+        type: "hallway",
+        x: 100,
+        y: 80,
+        buildingId: "b1",
+        floorId: "f1",
+        doorId: "d-slanted",
+        accessible: true,
+        color: "#16a34a",
+      },
+      { id: "nav-a", name: "A", type: "hallway", x: 70, y: 55, buildingId: "b1", floorId: "f1", accessible: true, color: "#16a34a" },
+      { id: "nav-b", name: "B", type: "hallway", x: 130, y: 70, buildingId: "b1", floorId: "f1", accessible: true, color: "#16a34a" },
+    ];
+    withSlantedDoor.navEdges = [{
+      id: "edge-diagonal",
+      startNodeId: "nav-a",
+      endNodeId: "nav-b",
+      distance: 62,
+      bidirectional: true,
+      accessible: true,
+      emergencySafe: true,
+      type: "hallway",
+      color: "#16a34a",
+      width: 4,
+    }];
+    cleanup();
+    const rendered = render(<Harness onCampusChange={onCampusChange} initialCampus={withSlantedDoor} />);
+    container = rendered.container;
+    fireEvent.click(screen.getByRole("button", { name: "Show Navigation" }));
+    const svg = stubSvgRect(container);
+    fireEvent.click(within(screen.getByTestId("floor-nav-toolbar")).getByRole("button", { name: "Connect" }));
+    const doorNode = container.querySelector('[data-testid="nav-linked-node"]');
+    expect(doorNode).toBeTruthy();
+    fireEvent.mouseDown(doorNode!, { clientX: 100, clientY: 80, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    expect(screen.queryByText("Use the Room Door")).toBeNull();
+    expect(container.querySelectorAll('[data-testid="nav-linked-node"]')).toHaveLength(1);
+    expect(navNodes(container)).toHaveLength(2);
+    expect(navEdges(container)).toHaveLength(1);
+    const diagonalPath = container.querySelector('[data-testid="nav-edge-hit"]');
+    expect(diagonalPath).toBeTruthy();
+    fireEvent.mouseMove(diagonalPath!, { clientX: 100, clientY: 62.5, bubbles: true });
+    fireEvent.mouseDown(diagonalPath!, { clientX: 100, clientY: 62.5, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    expect(screen.queryByText("Use the Room Door")).toBeNull();
+    const latest = onCampusChange.mock.calls[onCampusChange.mock.calls.length - 1]?.[0] as Campus;
+    const junction = latest.navNodes.find((node) => node.pathJunction);
+    expect(junction).toBeTruthy();
+    const diagonalCross = (junction!.x - 70) * (70 - 55) - (junction!.y - 55) * (130 - 70);
+    expect(Math.abs(diagonalCross)).toBeLessThan(0.0001);
+    expect(latest.navEdges).toHaveLength(3);
   });
 
   it("allows an isolated internal junction to be deleted after its paths are gone", () => {
@@ -791,5 +984,52 @@ describe("B5 Phase 2 — Floor Editor indoor Navigation mode", () => {
     expect(navLinkedNodes(container)).toHaveLength(0);
     const latest = onCampusChange.mock.calls[onCampusChange.mock.calls.length - 1][0] as Campus;
     expect(latest.navNodes.every((n) => n.doorId !== "d1")).toBe(true);
+  });
+
+  it("keeps a nearby Door and waypoint draggable when a navigation edge overlaps them", () => {
+    const campus = makeBaseCampus();
+    campus.buildings[0].floors[0].walls = [
+      { id: "w1", x1: 40, y1: 70, x2: 140, y2: 70, thickness: 6, color: "#64748b" },
+    ];
+    campus.buildings[0].floors[0].doors = [
+      { id: "d1", x: 90, y: 70, width: 18, direction: "left", color: "#b45309", wallId: "w1", offset: 0.5 },
+    ];
+    campus.navNodes = [
+      { id: "a", name: "A", type: "hallway", x: 40, y: 70, buildingId: "b1", floorId: "f1", accessible: true, color: "#16a34a" },
+      { id: "b", name: "B", type: "hallway", x: 140, y: 70, buildingId: "b1", floorId: "f1", accessible: true, color: "#16a34a" },
+      { id: "near-door", name: "Waypoint", type: "hallway", x: 94, y: 74, buildingId: "b1", floorId: "f1", accessible: true, color: "#16a34a" },
+    ];
+    campus.navEdges = [{
+      id: "edge-ab", startNodeId: "a", endNodeId: "b", distance: 100, bidirectional: true,
+      accessible: true, emergencySafe: true, type: "hallway", color: "#16a34a", width: 3,
+    }];
+    cleanup();
+    const rendered = render(<Harness onCampusChange={onCampusChange} initialCampus={campus} />);
+    container = rendered.container;
+    fireEvent.click(screen.getByRole("button", { name: "Show Navigation" }));
+    const svg = stubSvgRect(container);
+
+    const nodeHit = Array.from(container.querySelectorAll('[data-testid="nav-node-hit"]'))
+      .find((hit) => Number(hit.getAttribute("cx")) === 94) as SVGCircleElement;
+    expect(nodeHit).toBeTruthy();
+    fireEvent.mouseDown(nodeHit, { clientX: 94, clientY: 74, bubbles: true });
+    fireEvent.mouseMove(svg, { clientX: 110, clientY: 90, bubbles: true });
+    fireEvent.mouseUp(svg, { clientX: 110, clientY: 90, bubbles: true });
+
+    let latest = onCampusChange.mock.calls[onCampusChange.mock.calls.length - 1][0] as Campus;
+    expect(latest.navNodes.find((node) => node.id === "near-door")).toMatchObject({ x: 110, y: 90 });
+    expect(latest.buildings[0].floors[0].doors?.[0].x).toBe(90);
+
+    const edgeHit = container.querySelector('[data-testid="nav-edge-hit"]') as SVGLineElement;
+    expect(edgeHit).toBeTruthy();
+    fireEvent.mouseDown(edgeHit, { clientX: 90, clientY: 70, bubbles: true });
+    fireEvent.mouseMove(svg, { clientX: 110, clientY: 70, bubbles: true });
+    fireEvent.mouseUp(svg, { clientX: 110, clientY: 70, bubbles: true });
+
+    latest = onCampusChange.mock.calls[onCampusChange.mock.calls.length - 1][0] as Campus;
+    expect(latest.buildings[0].floors[0].doors?.[0].x).toBe(110);
+    expect(latest.navNodes.map((node) => node.id)).toEqual(["a", "b", "near-door"]);
+    expect(latest.navEdges.map((edge) => edge.id)).toEqual(["edge-ab"]);
+    expect(latest.navEdges[0]).toMatchObject({ startNodeId: "a", endNodeId: "b" });
   });
 });

@@ -8,10 +8,64 @@
 
 import type { FloorRoom, FloorWall } from "../components/map-builder/types";
 import { clamp } from "./floorGeometry";
+import { pointInRoomShapeInclusive, roomContainsRoom, roomFootprintsNearlyIdentical, roomOutlinePoints, roomShapeBounds, roomShapesOverlap, translateRoomShape } from "./roomShape";
+import { floorShapeContainsPolygon, type FloorShapeRect } from "./floorShape";
 
 /** Tolerance in units. Rooms whose overlap is entirely within this margin are
  *  treated as edge-touching (allowed). */
 const OVERLAP_TOLERANCE = 2;
+
+export type RoomOverlapClassification =
+  | "NO_OVERLAP"
+  | "VALID_CONTAINMENT"
+  | "INVALID_PARTIAL_OVERLAP"
+  | "INVALID_DUPLICATE_OVERLAP";
+
+/** Classify Room relationships so a strict, meaningfully smaller child can
+ * sit inside a parent while partial intersections and duplicate footprints
+ * remain invalid. */
+export function classifyRoomOverlap(a: FloorRoom, b: FloorRoom, tolerance = OVERLAP_TOLERANCE): RoomOverlapClassification {
+  if (a.id === b.id) return "NO_OVERLAP";
+  if (roomFootprintsNearlyIdentical(a, b)) return "INVALID_DUPLICATE_OVERLAP";
+  if (roomContainsRoom(a, b) || roomContainsRoom(b, a)) return "VALID_CONTAINMENT";
+  if (roomShapesOverlap(a, b, tolerance)) return "INVALID_PARTIAL_OVERLAP";
+  return "NO_OVERLAP";
+}
+
+/** Resolve a pointer hit to the most specific visible Room under it. Genuine
+ * containment depth wins over z-order; peers and partial overlaps keep normal
+ * selected-item / frontmost z-order behavior. */
+export function resolveRoomAtPoint(
+  rooms: FloorRoom[],
+  point: { x: number; y: number },
+  selectedRoomId?: string,
+): FloorRoom | null {
+  const matches = rooms.flatMap((room, index) => {
+    if (room.visible === false) return [];
+    const outline = roomOutlinePoints(room);
+    return pointInRoomShapeInclusive(point, outline)
+      ? [{ room, index }]
+      : [];
+  });
+  if (matches.length === 0) return null;
+
+  const depth = (candidate: typeof matches[number]) => matches.reduce((value, possibleParent) => (
+    roomContainsRoom(possibleParent.room, candidate.room) ? value + 1 : value
+  ), 0);
+  const depths = new Map(matches.map((match) => [match.room.id, depth(match)]));
+  const maxDepth = Math.max(...depths.values());
+  const mostSpecific = matches.filter((match) => depths.get(match.room.id) === maxDepth);
+  const selected = mostSpecific.find((match) => match.room.id === selectedRoomId);
+  if (selected) return selected.room;
+
+  return mostSpecific.reduce((frontmost, candidate) => {
+    const frontZ = frontmost.room.zOrder ?? 0;
+    const candidateZ = candidate.room.zOrder ?? 0;
+    return candidateZ > frontZ || (candidateZ === frontZ && candidate.index > frontmost.index)
+      ? candidate
+      : frontmost;
+  }).room;
+}
 
 /**
  * Room-to-room edge snap threshold in units. When a candidate room's edge is
@@ -22,42 +76,103 @@ const OVERLAP_TOLERANCE = 2;
 // movable Floor object feel magnetically locked to distant room edges.
 const ROOM_EDGE_SNAP_THRESHOLD = 8;
 
-/**
- * Axis-aligned bounding-box test (rooms are axis-aligned in the floor model).
- * Returns true when `a` and `b` share interior area beyond the tolerance.
- */
+/** Returns true when the Rooms have an invalid partial or duplicate overlap.
+ * Valid full containment and boundary-only contact return false. */
 export function roomsOverlap(a: FloorRoom, b: FloorRoom): boolean {
-  if (a.id === b.id) return false;
+  const classification = classifyRoomOverlap(a, b);
+  return classification === "INVALID_PARTIAL_OVERLAP" || classification === "INVALID_DUPLICATE_OVERLAP";
+}
 
-  // Rooms use (x, y, w, h) in world coordinates.
-  const overlapX = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x);
-  const overlapY = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y);
+type RoomOverlapCandidate = Pick<FloorRoom, "x" | "y" | "w" | "h"> & Partial<Pick<FloorRoom, "id" | "rotation" | "shapePoints">>;
 
-  // No overlap at all — clearly fine.
-  if (overlapX <= 0 || overlapY <= 0) return false;
-
-  // Edge-touching: the overlap area is smaller than the tolerance on at least
-  // one axis — two rooms that share a boundary (adjacent rooms separated by a
-  // wall) should be allowed.
-  if (overlapX <= OVERLAP_TOLERANCE || overlapY <= OVERLAP_TOLERANCE) return false;
-
-  // Meaningful interior overlap.
-  return true;
+function candidateRoom(candidate: RoomOverlapCandidate): FloorRoom {
+  return {
+    id: candidate.id ?? "__room-overlap-candidate__",
+    name: "",
+    type: "",
+    x: candidate.x,
+    y: candidate.y,
+    w: candidate.w,
+    h: candidate.h,
+    rotation: candidate.rotation,
+    shapePoints: candidate.shapePoints,
+    floorId: "",
+    buildingId: "",
+  };
 }
 
 /**
- * Check whether a proposed room rectangle overlaps any existing room on the
- * floor. Returns the first overlapping room (or null if clear).
+ * Check whether a proposed Room footprint overlaps any existing Room on the
+ * floor. Returns the first invalid overlap (or null if clear/contained).
  */
 export function findOverlappingRoom(
-  candidate: { x: number; y: number; w: number; h: number; id?: string },
+  candidate: RoomOverlapCandidate,
   rooms: FloorRoom[],
 ): FloorRoom | null {
+  const geometry = candidateRoom(candidate);
   for (const room of rooms) {
     if (candidate.id && room.id === candidate.id) continue;
-    const overlapX = Math.min(candidate.x + candidate.w, room.x + room.w) - Math.max(candidate.x, room.x);
-    const overlapY = Math.min(candidate.y + candidate.h, room.y + room.h) - Math.max(candidate.y, room.y);
-    if (overlapX > OVERLAP_TOLERANCE && overlapY > OVERLAP_TOLERANCE) return room;
+    const classification = classifyRoomOverlap(geometry, room);
+    if (classification === "INVALID_PARTIAL_OVERLAP" || classification === "INVALID_DUPLICATE_OVERLAP") return room;
+  }
+  return null;
+}
+
+/** Find an existing child that would no longer be contained if its parent
+ * were resized. Parent resizing must not strand or silently reclassify it. */
+export function findContainedRoomOutsideResizedParent(
+  originalParent: FloorRoom,
+  resizedParent: FloorRoom,
+  otherRooms: FloorRoom[],
+): FloorRoom | null {
+  return otherRooms.find((room) => roomContainsRoom(originalParent, room)
+    && !roomContainsRoom(resizedParent, room)) ?? null;
+}
+
+/** Find a deterministic nearby copy position for a Room while respecting its
+ * actual custom/rotated polygon. Search only a short set of offsets around the
+ * source; callers can retain their normal visible offset if this area is full. */
+export function findNearbyRoomDuplicateOffset(
+  source: FloorRoom,
+  otherRooms: FloorRoom[],
+  canvasW: number,
+  canvasH: number,
+  maxGap = 72,
+  shapeRegions?: FloorShapeRect[],
+): { dx: number; dy: number } | null {
+  const sourceBounds = roomShapeBounds(roomOutlinePoints(source));
+  const gaps: number[] = [];
+  for (let gap = 0; gap <= maxGap; gap += 12) gaps.push(gap);
+  const candidates: Array<{ dx: number; dy: number; order: number }> = [];
+  let order = 0;
+  for (const gap of gaps) {
+    const dx = sourceBounds.w + gap;
+    const dy = sourceBounds.h + gap;
+    candidates.push(
+      { dx, dy: 0, order: order++ },
+      { dx: 0, dy, order: order++ },
+      { dx: -dx, dy: 0, order: order++ },
+      { dx: 0, dy: -dy, order: order++ },
+      { dx, dy, order: order++ },
+      { dx: -dx, dy, order: order++ },
+      { dx, dy: -dy, order: order++ },
+      { dx: -dx, dy: -dy, order: order++ },
+    );
+  }
+
+  candidates.sort((a, b) => Math.hypot(a.dx, a.dy) - Math.hypot(b.dx, b.dy) || a.order - b.order);
+  for (const { dx, dy } of candidates) {
+    const candidate = translateRoomShape(source, dx, dy);
+    const points = roomOutlinePoints(candidate);
+    const bounds = roomShapeBounds(points);
+    if (shapeRegions
+      ? !floorShapeContainsPolygon(shapeRegions, points)
+      : bounds.x < 0 || bounds.y < 0 || bounds.x + bounds.w > canvasW || bounds.y + bounds.h > canvasH) continue;
+    if (otherRooms.some((other) => {
+      const classification = classifyRoomOverlap(candidate, other);
+      return classification === "INVALID_PARTIAL_OVERLAP" || classification === "INVALID_DUPLICATE_OVERLAP";
+    })) continue;
+    return { dx, dy };
   }
   return null;
 }
@@ -67,14 +182,14 @@ export function findOverlappingRoom(
  * where even 1 unit of overlap must be prevented.
  */
 export function findOverlappingRoomStrict(
-  candidate: { x: number; y: number; w: number; h: number; id?: string },
+  candidate: RoomOverlapCandidate,
   rooms: FloorRoom[],
 ): FloorRoom | null {
+  const geometry = candidateRoom(candidate);
   for (const room of rooms) {
     if (candidate.id && room.id === candidate.id) continue;
-    const overlapX = Math.min(candidate.x + candidate.w, room.x + room.w) - Math.max(candidate.x, room.x);
-    const overlapY = Math.min(candidate.y + candidate.h, room.y + room.h) - Math.max(candidate.y, room.y);
-    if (overlapX > 0 && overlapY > 0) return room;
+    const classification = classifyRoomOverlap(geometry, room, 0);
+    if (classification === "INVALID_PARTIAL_OVERLAP" || classification === "INVALID_DUPLICATE_OVERLAP") return room;
   }
   return null;
 }
@@ -91,7 +206,26 @@ export function clampNudgeToEdge(
   otherRooms: FloorRoom[],
   FP_W: number,
   FP_H: number,
+  floorRegions?: FloorShapeRect[],
 ): { dx: number; dy: number } {
+  if (floorRegions) {
+    const movedRoom = (fraction: number) => translateRoomShape(room, dx * fraction, dy * fraction);
+    const fits = (fraction: number) => {
+      const candidate = movedRoom(fraction);
+      return floorShapeContainsPolygon(floorRegions, roomOutlinePoints(candidate))
+        && !findOverlappingRoomStrict(candidate, otherRooms);
+    };
+    if (fits(1)) return { dx, dy };
+    if (!fits(0)) return { dx: 0, dy: 0 };
+    let low = 0;
+    let high = 1;
+    for (let index = 0; index < 24; index += 1) {
+      const mid = (low + high) / 2;
+      if (fits(mid)) low = mid;
+      else high = mid;
+    }
+    return { dx: dx * low, dy: dy * low };
+  }
   // Floor-bounds clamp first.
   let clampedDx = dx;
   let clampedDy = dy;
@@ -565,17 +699,20 @@ export function computeResizeLimits(
   otherRooms: FloorRoom[],
   canvasW: number,
   canvasH: number,
+  floorBounds?: { x: number; y: number; width: number; height: number },
 ): ResizeLimits {
-  let minX = 0;
-  let maxX = canvasW;
-  let minY = 0;
-  let maxY = canvasH;
+  // Exact union containment remains the caller's responsibility; these
+  // bounds define only the broad extent used by Room resize and neighbor stops.
+  let minX = floorBounds?.x ?? 0;
+  let maxX = floorBounds ? floorBounds.x + floorBounds.width : canvasW;
+  let minY = floorBounds?.y ?? 0;
+  let maxY = floorBounds ? floorBounds.y + floorBounds.height : canvasH;
 
   // ── Horizontal ──
   if (corner.includes("e")) {
     // East handle: LEFT edge fixed at origin.x, RIGHT edge moves rightward.
     minX = origin.x;
-    maxX = canvasW;
+    maxX = floorBounds ? floorBounds.x + floorBounds.width : canvasW;
     for (const other of otherRooms) {
       const otherLeft = other.x;
       // Only rooms ENTIRELY to the right of our current right edge block expansion.
@@ -587,7 +724,7 @@ export function computeResizeLimits(
   } else if (corner.includes("w")) {
     // West handle: RIGHT edge fixed, LEFT edge moves leftward.
     const rightEdge = origin.x + origin.w;
-    minX = 0;
+    minX = floorBounds?.x ?? 0;
     maxX = rightEdge;
     for (const other of otherRooms) {
       const otherRight = other.x + other.w;
@@ -603,7 +740,7 @@ export function computeResizeLimits(
   if (corner.includes("s")) {
     // South handle: TOP edge fixed, BOTTOM edge moves downward.
     minY = origin.y;
-    maxY = canvasH;
+    maxY = floorBounds ? floorBounds.y + floorBounds.height : canvasH;
     for (const other of otherRooms) {
       const otherTop = other.y;
       if (otherTop >= origin.y + origin.h && otherTop < maxY) {
@@ -614,7 +751,7 @@ export function computeResizeLimits(
   } else if (corner.includes("n")) {
     // North handle: BOTTOM edge fixed, TOP edge moves upward.
     const bottomEdge = origin.y + origin.h;
-    minY = 0;
+    minY = floorBounds?.y ?? 0;
     maxY = bottomEdge;
     for (const other of otherRooms) {
       const otherBottom = other.y + other.h;

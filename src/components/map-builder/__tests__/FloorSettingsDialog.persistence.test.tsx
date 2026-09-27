@@ -145,6 +145,18 @@ describe("Floor Settings persistence baseline", () => {
     expect(screen.getByRole("button", { name: "Concrete" })).toHaveClass("border-primary");
     expect(screen.getByTestId("floor-grid-disabled-help")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Grid size 20" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Show wall junction blocks" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("persists the visual wall-junction visibility preference", () => {
+    const onApply = vi.fn(() => true);
+    renderDialog(makeFloor(), onApply);
+
+    fireEvent.click(screen.getByRole("button", { name: "Show wall junction blocks" }));
+    expect(screen.getByRole("button", { name: "Show wall junction blocks" })).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(screen.getByRole("button", { name: "Save Changes" }));
+
+    expect(onApply).toHaveBeenCalledWith(expect.objectContaining<Partial<FloorSettingsDraft>>({ showWallJunctions: false }));
   });
 
   it("re-enables grid controls for the eligible Neutral + None appearance", () => {

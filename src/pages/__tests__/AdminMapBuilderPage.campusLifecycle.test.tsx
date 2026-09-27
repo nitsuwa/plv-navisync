@@ -196,16 +196,14 @@ describe("AdminMapBuilderPage — campus lifecycle", () => {
     await flush();
 
     expect(screen.getByText("Mapped Campus")).toBeInTheDocument();
-    expect((await screen.findAllByTestId("campus-mini-map")).length).toBeGreaterThanOrEqual(2);
+    await waitFor(() => expect(screen.getAllByTestId("campus-mini-map").length).toBeGreaterThanOrEqual(2));
     expect(screen.getByLabelText("Buildings: 2")).toBeInTheDocument();
     expect(screen.getByLabelText("Floors: 5")).toBeInTheDocument();
     expect(screen.getByLabelText("Rooms: 14")).toBeInTheDocument();
     expect(screen.getByLabelText("Buildings: 1")).toBeInTheDocument();
     expect(screen.getByLabelText("Floors: 2")).toBeInTheDocument();
     expect(screen.getByLabelText("Rooms: 3")).toBeInTheDocument();
-    expect(screen.getAllByLabelText("Markers: 0").length).toBeGreaterThan(0);
-    fireEvent.mouseEnter(screen.getByLabelText("Buildings: 2"));
-    expect(screen.getAllByText("Buildings: 2").length).toBeGreaterThan(0);
+    expect(screen.queryByLabelText(/Markers:/)).not.toBeInTheDocument();
     expect(campusStructureService.load).not.toHaveBeenCalled();
     expect(screen.getByText("No buildings yet")).toBeInTheDocument();
   });

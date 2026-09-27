@@ -20,9 +20,10 @@ export function syncEntrancesFromFloorDoors(campus: Campus, buildingId: string, 
       const wall = door && floor.walls.find((item) => item.id === door.wallId);
       if (!door || !wall) return entrance;
       const horizontal = entrance.edge === "top" || entrance.edge === "bottom";
-      const start = horizontal ? Math.min(wall.x1, wall.x2) : Math.min(wall.y1, wall.y2);
-      const length = horizontal ? Math.abs(wall.x2 - wall.x1) : Math.abs(wall.y2 - wall.y1);
-      const offset = Math.max(0, Math.min(1, ((horizontal ? door.x : door.y) - start) / Math.max(1, length)));
+      // Building Entrance offsets are measured over the base Floor edge, not
+      // relative to whichever split perimeter segment currently owns the Door.
+      const edgeLength = horizontal ? Number(floor.canvasW) || DEFAULT_FLOOR_CANVAS.w : Number(floor.canvasH) || DEFAULT_FLOOR_CANVAS.h;
+      const offset = Math.max(0, Math.min(1, (horizontal ? door.x : door.y) / Math.max(1, edgeLength)));
       return { ...entrance, offset };
     });
     return { ...building, entrances };
@@ -313,35 +314,13 @@ export function entranceDoorPosition(
   floor: Pick<FloorPlan, "canvasW" | "canvasH" | "walls">,
   entrance: Pick<CampusEntrance, "edge" | "offset">,
 ): { x: number; y: number } {
-  const perimeterWall = (floor.walls ?? []).find((wall) => wall.perimeterSide === entrance.edge)
-    ?? (floor.walls ?? []).find((wall) => wall.managedKind === "perimeter" && (
-      (entrance.edge === "top" && wall.y1 === 0 && wall.y2 === 0)
-      || (entrance.edge === "bottom" && wall.y1 === floor.canvasH && wall.y2 === floor.canvasH)
-      || (entrance.edge === "left" && wall.x1 === 0 && wall.x2 === 0)
-      || (entrance.edge === "right" && wall.x1 === floor.canvasW && wall.x2 === floor.canvasW)
-    ));
+  const perimeterWall = entrancePerimeterWall(floor, entrance);
   if (perimeterWall) {
-    const length = wallLength(perimeterWall);
-    if (length > 0) {
-      const offset = Math.max(0, Math.min(1, Number.isFinite(Number(entrance.offset)) ? Number(entrance.offset) : 0.5));
-      // Entrance offsets are measured in the canonical perimeter direction:
-      // left→right on horizontal sides and top→bottom on vertical sides.
-      // Managed floor walls intentionally use a clockwise winding, so the
-      // bottom and left wall endpoints run in the opposite direction. Using
-      // side semantics here prevents a physical outside move from mirroring
-      // the generated Door inside the floor editor.
-      const minX = Math.min(perimeterWall.x1, perimeterWall.x2);
-      const maxX = Math.max(perimeterWall.x1, perimeterWall.x2);
-      const minY = Math.min(perimeterWall.y1, perimeterWall.y2);
-      const maxY = Math.max(perimeterWall.y1, perimeterWall.y2);
-      switch (entrance.edge) {
-        case "top": return { x: Math.round(minX + (maxX - minX) * offset), y: Math.round((perimeterWall.y1 + perimeterWall.y2) / 2) };
-        case "right": return { x: Math.round((perimeterWall.x1 + perimeterWall.x2) / 2), y: Math.round(minY + (maxY - minY) * offset) };
-        case "left": return { x: Math.round((perimeterWall.x1 + perimeterWall.x2) / 2), y: Math.round(minY + (maxY - minY) * offset) };
-        case "bottom":
-        default: return { x: Math.round(minX + (maxX - minX) * offset), y: Math.round((perimeterWall.y1 + perimeterWall.y2) / 2) };
-      }
-    }
+    const offset = entranceDoorWallOffset(floor, perimeterWall, entrance);
+    return {
+      x: Math.round(perimeterWall.x1 + (perimeterWall.x2 - perimeterWall.x1) * offset),
+      y: Math.round(perimeterWall.y1 + (perimeterWall.y2 - perimeterWall.y1) * offset),
+    };
   }
   const width = floor.canvasW ?? DEFAULT_FLOOR_CANVAS.w;
   const height = floor.canvasH ?? DEFAULT_FLOOR_CANVAS.h;
@@ -355,28 +334,53 @@ export function entranceDoorPosition(
   }
 }
 
-function entrancePerimeterWall(
+export function entrancePerimeterWall(
   floor: Pick<FloorPlan, "canvasW" | "canvasH" | "walls">,
-  edge: Pick<CampusEntrance, "edge">["edge"],
+  entrance: Pick<CampusEntrance, "edge" | "offset">,
 ) {
-  return (floor.walls ?? []).find((wall) => wall.perimeterSide === edge)
-    ?? (floor.walls ?? []).find((wall) => wall.managedKind === "perimeter" && (
-      (edge === "top" && wall.y1 === 0 && wall.y2 === 0)
-      || (edge === "bottom" && wall.y1 === floor.canvasH && wall.y2 === floor.canvasH)
-      || (edge === "left" && wall.x1 === 0 && wall.x2 === 0)
-      || (edge === "right" && wall.x1 === floor.canvasW && wall.x2 === floor.canvasW)
-    ));
+  const horizontal = entrance.edge === "top" || entrance.edge === "bottom";
+  const edgeLength = horizontal ? Number(floor.canvasW) || DEFAULT_FLOOR_CANVAS.w : Number(floor.canvasH) || DEFAULT_FLOOR_CANVAS.h;
+  const target = normalizedEntranceOffset(entrance) * edgeLength;
+  const candidates = (floor.walls ?? []).filter((wall) => wall.managedKind === "perimeter" && wall.perimeterSide === entrance.edge);
+  return candidates.sort((first, second) => {
+    const intervalDistance = (wall: typeof first) => {
+      const low = horizontal ? Math.min(wall.x1, wall.x2) : Math.min(wall.y1, wall.y2);
+      const high = horizontal ? Math.max(wall.x1, wall.x2) : Math.max(wall.y1, wall.y2);
+      return target < low ? low - target : target > high ? target - high : 0;
+    };
+    return intervalDistance(first) - intervalDistance(second) || first.id.localeCompare(second.id);
+  })[0] ?? (floor.walls ?? []).find((wall) => wall.managedKind === "perimeter" && (
+    (entrance.edge === "top" && wall.y1 === 0 && wall.y2 === 0)
+    || (entrance.edge === "bottom" && wall.y1 === floor.canvasH && wall.y2 === floor.canvasH)
+    || (entrance.edge === "left" && wall.x1 === 0 && wall.x2 === 0)
+    || (entrance.edge === "right" && wall.x1 === floor.canvasW && wall.x2 === floor.canvasW)
+  ));
 }
 
-function entranceDoorWallOffset(
+export function entranceDoorWallOffset(
+  floor: Pick<FloorPlan, "canvasW" | "canvasH" | "walls">,
   wall: NonNullable<ReturnType<typeof entrancePerimeterWall>>,
   entrance: Pick<CampusEntrance, "edge" | "offset">,
 ): number {
   const requested = normalizedEntranceOffset(entrance);
+  // Resolve the global edge offset onto the chosen segment. The selected
+  // segment is the one nearest this coordinate, including custom-shaped
+  // Floors whose outline splits a cardinal side into several walls.
+  const globalLength = entrance.edge === "top" || entrance.edge === "bottom"
+    ? Number(floor.canvasW) || DEFAULT_FLOOR_CANVAS.w
+    : Number(floor.canvasH) || DEFAULT_FLOOR_CANVAS.h;
+  const target = requested * globalLength;
+  const horizontal = entrance.edge === "top" || entrance.edge === "bottom";
+  const first = horizontal ? wall.x1 : wall.y1;
+  const second = horizontal ? wall.x2 : wall.y2;
+  const low = Math.min(first, second);
+  const high = Math.max(first, second);
+  const coordinate = Math.max(low, Math.min(high, target));
+  const localFromLow = (coordinate - low) / Math.max(1, high - low);
   const ascending = entrance.edge === "top" || entrance.edge === "bottom"
     ? wall.x2 >= wall.x1
     : wall.y2 >= wall.y1;
-  return ascending ? requested : 1 - requested;
+  return ascending ? localFromLow : 1 - localFromLow;
 }
 
 function entranceDoorWidth(wall: ReturnType<typeof entrancePerimeterWall> | undefined): number {
@@ -384,14 +388,8 @@ function entranceDoorWidth(wall: ReturnType<typeof entrancePerimeterWall> | unde
   return Math.round(maxOpeningWidthForWall(wall, 32, 28));
 }
 
-function entranceDoorWallId(floor: Pick<FloorPlan, "canvasW" | "canvasH" | "walls">, entrance: Pick<CampusEntrance, "edge">): string | undefined {
-  return (floor.walls ?? []).find((wall) => wall.perimeterSide === entrance.edge)?.id
-    ?? (floor.walls ?? []).find((wall) => wall.managedKind === "perimeter" && (
-      (entrance.edge === "top" && wall.y1 === 0 && wall.y2 === 0)
-      || (entrance.edge === "bottom" && wall.y1 === floor.canvasH && wall.y2 === floor.canvasH)
-      || (entrance.edge === "left" && wall.x1 === 0 && wall.x2 === 0)
-      || (entrance.edge === "right" && wall.x1 === floor.canvasW && wall.x2 === floor.canvasW)
-    ))?.id;
+function entranceDoorWallId(floor: Pick<FloorPlan, "canvasW" | "canvasH" | "walls">, entrance: Pick<CampusEntrance, "edge" | "offset">): string | undefined {
+  return entrancePerimeterWall(floor, entrance)?.id;
 }
 
 function normalizedEntranceOffset(entrance: Pick<CampusEntrance, "offset">): number {
@@ -462,16 +460,18 @@ export function reconcileEntranceDoors(
         // generated Door is identified explicitly and is safe to update.
         let generated = entryDoors.find((door) => door.buildingEntranceId === entrance.id);
         if (!generated && linkedDoor) continue;
-        const perimeterWall = entrancePerimeterWall(entryFloor, entrance.edge);
+        const perimeterWall = entrancePerimeterWall(entryFloor, entrance);
         const width = perimeterWall ? maxOpeningWidthForWall(perimeterWall, generated?.width ?? 32, 28) : (generated?.width ?? 32);
         const requestedOffset = normalizedEntranceOffset(entrance);
         const wallOffset = perimeterWall
-          ? clampWallOpeningOffset(perimeterWall, width, entranceDoorWallOffset(perimeterWall, entrance))
+          ? clampWallOpeningOffset(perimeterWall, width, entranceDoorWallOffset(entryFloor, perimeterWall, entrance))
           : requestedOffset;
-        const canonicalOffset = perimeterWall
-          ? (entranceDoorWallOffset(perimeterWall, entrance) === requestedOffset ? wallOffset : 1 - wallOffset)
-          : requestedOffset;
-        const position = entranceDoorPosition(entryFloor, { ...entrance, offset: canonicalOffset });
+        const position = perimeterWall
+          ? {
+              x: Math.round(perimeterWall.x1 + (perimeterWall.x2 - perimeterWall.x1) * wallOffset),
+              y: Math.round(perimeterWall.y1 + (perimeterWall.y2 - perimeterWall.y1) * wallOffset),
+            }
+          : entranceDoorPosition(entryFloor, { ...entrance, offset: requestedOffset });
         const wallId = entranceDoorWallId(entryFloor, entrance);
         const offset = wallOffset;
         const baseDoorLabel = generatedEntranceDoorLabel(entrance, entrances.indexOf(entrance));
@@ -587,16 +587,18 @@ export function reconcileEntranceDoors(
         if (!entrance) continue;
         const existing = nextNodes.find((node) => node.buildingId === building.id && node.floorId === entryFloor.id && node.doorId === door.id);
         if (existing) {
-          const perimeterWall = entrancePerimeterWall(entryFloor, entrance.edge);
+          const perimeterWall = entrancePerimeterWall(entryFloor, entrance);
           const width = door.width;
           const requestedOffset = normalizedEntranceOffset(entrance);
           const wallOffset = perimeterWall
-            ? clampWallOpeningOffset(perimeterWall, width, entranceDoorWallOffset(perimeterWall, entrance))
+            ? clampWallOpeningOffset(perimeterWall, width, entranceDoorWallOffset(entryFloor, perimeterWall, entrance))
             : requestedOffset;
-          const canonicalOffset = perimeterWall
-            ? (entranceDoorWallOffset(perimeterWall, entrance) === requestedOffset ? wallOffset : 1 - wallOffset)
-            : requestedOffset;
-          const position = entranceDoorPosition(entryFloor, { ...entrance, offset: canonicalOffset });
+          const position = perimeterWall
+            ? {
+                x: Math.round(perimeterWall.x1 + (perimeterWall.x2 - perimeterWall.x1) * wallOffset),
+                y: Math.round(perimeterWall.y1 + (perimeterWall.y2 - perimeterWall.y1) * wallOffset),
+              }
+            : entranceDoorPosition(entryFloor, { ...entrance, offset: requestedOffset });
           if (existing.x !== position.x || existing.y !== position.y || existing.buildingEntranceId !== entrance.id || existing.name !== door.label) {
             const index = nextNodes.indexOf(existing);
             nextNodes[index] = { ...existing, x: position.x, y: position.y, buildingEntranceId: entrance.id, name: door.label || "Entrance" };

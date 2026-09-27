@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { nearestEqualWallLength, resizeWallToLength, wallLength } from "../floorGeometry";
+import { nearestEqualWallLength, resizeWallToLength, straightenWall, wallLength } from "../floorGeometry";
 import type { FloorWall } from "../../components/map-builder/types";
 
 const wall = (x1: number, y1: number, x2: number, y2: number): FloorWall => ({
@@ -54,5 +54,33 @@ describe("exact Wall length editing", () => {
     const selected = { ...wall(100, 300, 240, 300), id: "selected" };
     const match = nearestEqualWallLength([distant, selected], 94.5, selected.id);
     expect(match).toMatchObject({ wallId: "distant", length: 95 });
+  });
+
+  it("straightens horizontally without changing length", () => {
+    const source = wall(100, 100, 180, 104);
+    const result = straightenWall(source, "horizontal", "start");
+    expect(result.x1).toBe(100);
+    expect(result.y1).toBe(100);
+    expect(result.x2).toBeCloseTo(180.0999, 3);
+    expect(result.y2).toBe(100);
+    expect(wallLength(result)).toBeCloseTo(wallLength(source), 10);
+  });
+
+  it("straightens vertically while preserving the chosen fixed end", () => {
+    const source = wall(500, 100, 492, 500);
+    const result = straightenWall(source, "vertical", "start");
+    expect(result.x1).toBe(500);
+    expect(result.x2).toBe(500);
+    expect(result.y1).toBe(100);
+    expect(result.y2 - result.y1).toBeCloseTo(wallLength(source), 10);
+  });
+
+  it("supports nearest-axis straightening and center anchoring", () => {
+    const source = wall(100, 100, 104, 200);
+    const result = straightenWall(source, "nearest", "center");
+    expect(result.x1).toBe(102);
+    expect(result.x2).toBe(102);
+    expect((result.y1 + result.y2) / 2).toBe(150);
+    expect(wallLength(result)).toBeCloseTo(wallLength(source), 10);
   });
 });

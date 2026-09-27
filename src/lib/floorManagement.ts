@@ -1,7 +1,38 @@
 import { genId } from "../components/map-builder/constants";
-import { createDefaultFloor, duplicateFloorForBuilding, type FloorDuplicateIdMaps } from "./floorPlanNormalization";
+import { assertFloorPhysicalReferences, createDefaultFloor, createFloorDuplicateIdMaps, duplicateFloorForBuilding } from "./floorPlanNormalization";
 import { remapIndoorNavForFloorCopy } from "./indoorNavigationGraph";
-import type { FloorPlan, NavigationEdge, NavigationNode, StairDirection } from "../components/map-builder/types";
+import type { ExteriorEmergencyStair, FloorPlan, FloorStairs, NavigationEdge, NavigationNode, StairDirection } from "../components/map-builder/types";
+
+/** Exterior emergency-stair landings are projected into Floor.stairs for
+ * display, but they are owned by the building emergency-stair system and are
+ * never ordinary indoor Stair-connection candidates. */
+export function isExteriorEmergencyStairOccurrence(
+  stair: Pick<FloorStairs, "id" | "exteriorEmergencyStairId"> | undefined,
+  floorId: string,
+  navNodes: NavigationNode[] | undefined,
+  exteriorStairs: ExteriorEmergencyStair[] | undefined,
+): boolean {
+  if (!stair) return false;
+  if (stair.exteriorEmergencyStairId) return true;
+  if ((exteriorStairs ?? []).some((owner) => owner.occurrenceIds?.[floorId] === stair.id)) return true;
+  const occurrenceNode = (navNodes ?? []).find((node) => node.floorId === floorId && node.stairId === stair.id);
+  if (occurrenceNode?.exteriorEmergencyStairId) return true;
+  return !!occurrenceNode && (exteriorStairs ?? []).some((owner) => owner.occurrenceNodeIds?.[floorId] === occurrenceNode.id);
+}
+
+/** Shared guard used by normal indoor Stair UI and mutation callbacks. */
+export function isOrdinaryFloorStairConnectionEligible(
+  source: Pick<FloorStairs, "id" | "exteriorEmergencyStairId"> | undefined,
+  sourceFloorId: string,
+  target: Pick<FloorStairs, "id" | "exteriorEmergencyStairId"> | undefined,
+  targetFloorId: string,
+  navNodes: NavigationNode[] | undefined,
+  exteriorStairs: ExteriorEmergencyStair[] | undefined,
+): boolean {
+  return !!source && !!target
+    && !isExteriorEmergencyStairOccurrence(source, sourceFloorId, navNodes, exteriorStairs)
+    && !isExteriorEmergencyStairOccurrence(target, targetFloorId, navNodes, exteriorStairs);
+}
 
 /**
  * Shared, pure floor-management helpers used by BOTH the Floor Editor and the
@@ -216,6 +247,19 @@ export function reconcileStairDirectionsForFloorOrder(floors: FloorPlan[]): {
     let changed = false;
     const nextStairs = (floor.stairs ?? []).map((stair) => {
       const direction = stair.direction;
+      if (stair.exteriorEmergencyStairId) {
+        if (direction === "both") return stair;
+        changed = true;
+        adjustments.push({
+          floorId: floor.id,
+          floorLabel: floor.label,
+          stairId: stair.id,
+          stairLabel: stair.label?.trim() || "Exterior Emergency Stair",
+          from: direction,
+          to: "both",
+        });
+        return { ...stair, direction: "both" as const };
+      }
       const isValid = floors.length > 1 && allowed.includes(direction);
       if (isValid) return stair;
       const nextDirection = defaultStairDirectionForFloorInOrder(floor.id, floors);
@@ -285,9 +329,69 @@ export function renameFloorInBuilding(floors: FloorPlan[], floorId: string, labe
 export interface DuplicateFloorResult {
   floors: FloorPlan[];
   copy: FloorPlan | null;
-  /** Remapped campus-level indoor nav graph for the copied floor (B5 Phase 2). */
-  navNodes?: NavigationNode[];
-  navEdges?: NavigationEdge[];
+  /** Copy-only graph fragments. Callers append these to the existing campus graph. */
+  copiedNavNodes?: NavigationNode[];
+  copiedNavEdges?: NavigationEdge[];
+}
+
+function assertIndependentFloorNavigationCopy(
+  sourceFloorId: string,
+  copy: FloorPlan,
+  copiedNodes: NavigationNode[],
+  copiedEdges: NavigationEdge[],
+  originalNodes: NavigationNode[],
+  originalEdges: NavigationEdge[],
+  originalSharedIds: Set<string>,
+) {
+  const sourceNodeIds = new Set(originalNodes.map((node) => node.id));
+  const sourceEdgeIds = new Set(originalEdges.map((edge) => edge.id));
+  const copyNodeIds = new Set(copiedNodes.map((node) => node.id));
+  const copyEdgeIds = new Set(copiedEdges.map((edge) => edge.id));
+  const roomIds = new Set(copy.rooms.map((room) => room.id));
+  const doorIds = new Set(copy.doors.map((door) => door.id));
+  const stairsById = new Map(copy.stairs.map((stair) => [stair.id, stair]));
+  const elevatorsById = new Map(copy.elevators.map((elevator) => [elevator.id, elevator]));
+  const stairIds = new Set(stairsById.keys());
+  const elevatorIds = new Set(elevatorsById.keys());
+  const rampIds = new Set(copy.ramps.map((ramp) => ramp.id));
+  const zoneIds = new Set((copy.exteriorZones ?? []).map((zone) => zone.id));
+  const stepIds = new Set((copy.entranceSteps ?? []).map((step) => step.id));
+  const entranceRampIds = new Set((copy.entranceRamps ?? []).map((ramp) => ramp.id));
+  if (copyNodeIds.size !== copiedNodes.length) throw new Error(`Copied Floor "${copy.label}" has duplicate navigation node IDs.`);
+  if (copyEdgeIds.size !== copiedEdges.length) throw new Error(`Copied Floor "${copy.label}" has duplicate navigation edge IDs.`);
+  for (const node of copiedNodes) {
+    if (sourceNodeIds.has(node.id)) throw new Error(`Copied Floor navigation node "${node.id}" reused a source node ID.`);
+    if (node.floorId !== copy.id || node.buildingId !== copy.buildingId) throw new Error(`Copied Floor navigation node "${node.id}" has the wrong owner.`);
+    if (node.roomId && !roomIds.has(node.roomId)) throw new Error(`Copied Floor navigation node "${node.id}" points outside the copied Rooms.`);
+    if (node.doorId && !doorIds.has(node.doorId)) throw new Error(`Copied Floor navigation node "${node.id}" points outside the copied Doors.`);
+    if (node.stairId && !stairIds.has(node.stairId)) throw new Error(`Copied Floor navigation node "${node.id}" points outside the copied Stairs.`);
+    if (node.elevatorId && !elevatorIds.has(node.elevatorId)) throw new Error(`Copied Floor navigation node "${node.id}" points outside the copied Elevators.`);
+    if (node.stairId && stairsById.get(node.stairId)?.sharedId && node.transitionSharedId !== stairsById.get(node.stairId)?.sharedId) throw new Error(`Copied Floor Stair node "${node.id}" has a different circulation identity from its copied Stair.`);
+    if (node.elevatorId && elevatorsById.get(node.elevatorId)?.sharedId && node.transitionSharedId !== elevatorsById.get(node.elevatorId)?.sharedId) throw new Error(`Copied Floor Elevator node "${node.id}" has a different circulation identity from its copied Elevator.`);
+    if (node.rampId && !rampIds.has(node.rampId)) throw new Error(`Copied Floor navigation node "${node.id}" points outside the copied Ramps.`);
+    if (node.exteriorZoneId && !zoneIds.has(node.exteriorZoneId)) throw new Error(`Copied Floor navigation node "${node.id}" points outside the copied Exterior Zones.`);
+    if (node.derivedOwnerType === "exterior_zone" && !zoneIds.has(node.derivedOwnerId ?? "")) throw new Error(`Copied Floor navigation node "${node.id}" retained a source Exterior Zone owner.`);
+    if (node.derivedOwnerType === "entrance_steps" && !stepIds.has(node.derivedOwnerId ?? "")) throw new Error(`Copied Floor navigation node "${node.id}" retained a source Entrance Steps owner.`);
+    if (node.derivedOwnerType === "entrance_ramp" && !entranceRampIds.has(node.derivedOwnerId ?? "")) throw new Error(`Copied Floor navigation node "${node.id}" retained a source Entrance Ramp owner.`);
+    if (node.entranceId || node.buildingEntranceId || node.exteriorEmergencyStairId || node.gateId || node.generatedFromPathVertices?.length) {
+      throw new Error(`Copied Floor navigation node "${node.id}" retained an external/source identity.`);
+    }
+    if (node.transitionSharedId && originalSharedIds.has(node.transitionSharedId)) throw new Error(`Copied Floor navigation node "${node.id}" reused a source circulation identity.`);
+  }
+  for (const edge of copiedEdges) {
+    if (sourceEdgeIds.has(edge.id)) throw new Error(`Copied Floor navigation edge "${edge.id}" reused a source edge ID.`);
+    if (!copyNodeIds.has(edge.startNodeId) || !copyNodeIds.has(edge.endNodeId)) throw new Error(`Copied Floor navigation edge "${edge.id}" points outside the copied graph.`);
+    if (edge.type === "floor_transition" || edge.type === "cross_floor") throw new Error(`Copied Floor navigation edge "${edge.id}" retained a cross-Floor transition.`);
+    if (edge.pathJunctionId && !copyNodeIds.has(edge.pathJunctionId)) throw new Error(`Copied Floor navigation edge "${edge.id}" retained a source junction ID.`);
+    if ((edge.pathJunctionIds ?? []).some((id) => !copyNodeIds.has(id))) throw new Error(`Copied Floor navigation edge "${edge.id}" retained a source junction ID.`);
+    if ((edge.generatedFromPathIds ?? []).some((id) => !copy.paths.some((path) => path.id === id))) throw new Error(`Copied Floor navigation edge "${edge.id}" retained a source Floor Path ID.`);
+    if (edge.derivedOwnerType === "exterior_zone" && !zoneIds.has(edge.derivedOwnerId ?? "")) throw new Error(`Copied Floor navigation edge "${edge.id}" retained a source Exterior Zone owner.`);
+    if (edge.derivedOwnerType === "entrance_steps" && !stepIds.has(edge.derivedOwnerId ?? "")) throw new Error(`Copied Floor navigation edge "${edge.id}" retained a source Entrance Steps owner.`);
+    if (edge.derivedOwnerType === "entrance_ramp" && !entranceRampIds.has(edge.derivedOwnerId ?? "")) throw new Error(`Copied Floor navigation edge "${edge.id}" retained a source Entrance Ramp owner.`);
+    if (edge.exteriorApproachSuspendedZoneId && !zoneIds.has(edge.exteriorApproachSuspendedZoneId)) throw new Error(`Copied Floor navigation edge "${edge.id}" retained a source Exterior Zone suspension identity.`);
+    if (edge.exteriorApproachFallbackEntranceId || edge.exteriorApproachAutoHandoffTargetId) throw new Error(`Copied Floor navigation edge "${edge.id}" retained a Building/outdoor handoff identity.`);
+  }
+  if (copiedNodes.some((node) => node.floorId === sourceFloorId)) throw new Error(`Copied Floor navigation graph still belongs to its source Floor.`);
 }
 
 /**
@@ -296,7 +400,8 @@ export interface DuplicateFloorResult {
  * When `navNodes`/`navEdges` (campus-level) are provided, the source floor's
  * indoor nav graph is cloned with new node/edge IDs, floorId pointing at the
  * copy, and linked room/door/stair/elevator/ramp refs remapped to the copy's
- * objects — the duplicate graph is fully independent of the original.
+ * objects. The returned graph fragments contain ONLY the copy; existing
+ * campus nodes and edges are never edited or returned as replacement arrays.
  */
 export function duplicateFloorInBuilding(
   floors: FloorPlan[],
@@ -308,11 +413,16 @@ export function duplicateFloorInBuilding(
   const source = floors.find((f) => f.id === floorId);
   if (!source) return { floors: [...floors], copy: null };
   const nextNumber = nextFloorNumberForBuilding(floors);
-  const idMaps: FloorDuplicateIdMaps = {
-    rooms: new Map(), walls: new Map(), doors: new Map(), windows: new Map(),
-    stairs: new Map(), ramps: new Map(), elevators: new Map(),
-  };
-  const copy = duplicateFloorForBuilding(source, {
+  const idMaps = createFloorDuplicateIdMaps(source);
+  const originalSharedIds = new Set<string>([
+    ...(navNodes ?? []).map((node) => node.transitionSharedId),
+    ...floors.flatMap((floor) => [
+      ...floor.stairs.map((item) => item.sharedId),
+      ...floor.ramps.map((item) => item.sharedId),
+      ...floor.elevators.map((item) => item.sharedId),
+    ]),
+  ].filter((id): id is string => !!id));
+  let copy = duplicateFloorForBuilding(source, {
     id: genId("fl"),
     buildingId,
     number: nextNumber,
@@ -321,9 +431,32 @@ export function duplicateFloorInBuilding(
   const result: DuplicateFloorResult = { floors: [...floors, copy], copy };
   if (navNodes && navEdges) {
     const remapped = remapIndoorNavForFloorCopy(navNodes, navEdges, source.id, copy.id, idMaps);
-    result.navNodes = remapped.navNodes;
-    result.navEdges = remapped.navEdges;
+    const copiedNavNodes = remapped.copiedNodes.map((node) => ({ ...node, buildingId }));
+    const sourceRoomByCopiedId = new Map(source.rooms.map((room) => [idMaps.rooms.get(room.id), room]));
+    copy = {
+      ...copy,
+      rooms: copy.rooms.map((room) => {
+        const sourceRoom = sourceRoomByCopiedId.get(room.id);
+        if (!sourceRoom?.accessNodeId) return room;
+        return { ...room, accessNodeId: remapped.sourceToCopiedNodeIds.get(sourceRoom.accessNodeId) };
+      }),
+    };
+    assertIndependentFloorNavigationCopy(source.id, copy, copiedNavNodes, remapped.copiedEdges, navNodes, navEdges, originalSharedIds);
+    result.floors = [...floors, copy];
+    result.copy = copy;
+    result.copiedNavNodes = copiedNavNodes;
+    result.copiedNavEdges = remapped.copiedEdges;
+  } else {
+    // A duplicate without the campus graph cannot safely retain a Room link to
+    // a source-floor waypoint. The physical Door links were already remapped.
+    copy = {
+      ...copy,
+      rooms: copy.rooms.map((room) => room.accessNodeId ? { ...room, accessNodeId: undefined } : room),
+    };
+    result.floors = [...floors, copy];
+    result.copy = copy;
   }
+  assertFloorPhysicalReferences(copy);
   return result;
 }
 

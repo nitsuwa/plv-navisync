@@ -5,7 +5,8 @@ import type {
   FloorWall,
   FloorWindow,
 } from "../components/map-builder/types";
-import { itemBounds } from "./floorGeometry";
+import { itemBounds, rotatePoint } from "./floorGeometry";
+import { pointInRoomShape, roomOutlinePoints } from "./roomShape";
 
 export interface RoomVisualSetup {
   wallIds: string[];
@@ -44,6 +45,18 @@ export function wallBelongsToRoom(wall: FloorWall, room: FloorRoom) {
 /** Furniture must be fully inside the Room's visible bounds, including its
  * rotated world-space footprint. Partial overlaps stay independent. */
 export function furnitureFullyContainedInRoom(furniture: FloorFurniture, room: FloorRoom) {
+  if (Array.isArray(room.shapePoints) && room.shapePoints.length >= 3) {
+    const points = roomOutlinePoints(room);
+    const cx = furniture.x + furniture.width / 2;
+    const cy = furniture.y + furniture.height / 2;
+    const corners = [
+      { x: furniture.x, y: furniture.y },
+      { x: furniture.x + furniture.width, y: furniture.y },
+      { x: furniture.x + furniture.width, y: furniture.y + furniture.height },
+      { x: furniture.x, y: furniture.y + furniture.height },
+    ].map((point) => rotatePoint(point, cx, cy, furniture.rotation ?? 0));
+    return corners.every((corner) => pointInRoomShape(corner, points));
+  }
   const roomBounds = itemBounds("room", room);
   const furnitureBounds = itemBounds("furniture", furniture);
   return !!roomBounds && !!furnitureBounds && rectContains(roomBounds, furnitureBounds);

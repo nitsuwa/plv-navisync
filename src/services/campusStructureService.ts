@@ -1,12 +1,13 @@
 import { getSupabase } from "../lib/supabase";
-import { normalizeFloor } from "../lib/floorPlanNormalization";
+import { assertFloorPhysicalReferences, normalizeFloor } from "../lib/floorPlanNormalization";
 import { nextFloorNumberForBuilding } from "../lib/floorManagement";
 import { syncEntranceNodePositions } from "../lib/navigationGraph";
 import { syncIndoorLinkedNodePositions } from "../lib/indoorNavigationGraph";
 import { ENTRANCE_TRANSITION_EDGE_TYPE, reconcileEntranceTransitions } from "../lib/entranceTransitions";
-import { syncExteriorEmergencyStairGraph } from "../lib/exteriorEmergencyStairs";
+import { canonicalExteriorEmergencyStairsForBuilding, syncExteriorEmergencyStairGraph } from "../lib/exteriorEmergencyStairs";
 import { syncCampusGateNavigation } from "../lib/campusGates";
 import { reconcileExteriorApproachNavigation } from "../lib/exteriorApproachNavigation";
+import { physicalFloorMismatch } from "../lib/physicalFloorIntegrity";
 import type { Database, Json, Tables, TablesInsert, TablesUpdate } from "../types/database.generated";
 import type {
   AccessibilityFeature, AssemblyPoint, Campus, CampusBuilding, CampusDecorAsset,
@@ -38,6 +39,248 @@ export interface CampusStructureRows {
   mapElements: MapElementRow[];
   navigationNodes: NavigationNodeRow[];
   navigationEdges: NavigationEdgeRow[];
+}
+
+const DATABASE_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+/** Validate persistence identities/ownership before the replacement RPC runs. */
+export function validateCampusStructurePayload(payload: CampusStructurePayload): void {
+  const requireUuid = (value: unknown, context: string) => {
+    if (typeof value !== "string" || !DATABASE_UUID.test(value)) throw new Error(`${context} must be a valid UUID before saving.`);
+  };
+  const buildingIds = new Set<string>();
+  const buildingCodes = new Set<string>();
+  for (const building of payload.buildings) {
+    requireUuid(building.id, "Building identity");
+    const id = String(building.id);
+    if (buildingIds.has(id)) throw new Error(`Campus save payload contains duplicate Building ID "${id}".`);
+    buildingIds.add(id);
+    const code = typeof building.code === "string" ? building.code : "";
+    const normalizedCode = code.trim().toUpperCase();
+    if (!normalizedCode || code !== normalizedCode) throw new Error(`Building "${id}" must have a nonblank uppercase, trimmed code before saving.`);
+    if (buildingCodes.has(normalizedCode)) throw new Error(`Building code '${normalizedCode}' is already in use.`);
+    buildingCodes.add(normalizedCode);
+  }
+  const floorsById = new Map<string, string>();
+  for (const floor of payload.floors) {
+    requireUuid(floor.id, "Floor identity");
+    requireUuid(floor.building_id, `Floor "${String(floor.id)}" Building identity`);
+    const id = String(floor.id);
+    const buildingId = String(floor.building_id);
+    if (!buildingIds.has(buildingId)) throw new Error(`Floor "${id}" refers to missing Building "${buildingId}" in the save payload.`);
+    if (floorsById.has(id)) throw new Error(`Campus save payload contains duplicate Floor ID "${id}".`);
+    floorsById.set(id, buildingId);
+  }
+  const seenElementIds = new Set<string>();
+  for (const elementRow of payload.map_elements) {
+    requireUuid(elementRow.id, "Map element identity");
+    const id = String(elementRow.id);
+    if (seenElementIds.has(id)) throw new Error(`Campus save payload contains duplicate map element ID "${id}".`);
+    seenElementIds.add(id);
+    const buildingId = typeof elementRow.building_id === "string" ? elementRow.building_id : undefined;
+    const floorId = typeof elementRow.floor_id === "string" ? elementRow.floor_id : undefined;
+    if (buildingId) {
+      requireUuid(buildingId, `Map element "${id}" Building identity`);
+      if (!buildingIds.has(buildingId)) throw new Error(`Map element "${id}" refers to missing Building "${buildingId}" in the save payload.`);
+    }
+    if (floorId) {
+      requireUuid(floorId, `Map element "${id}" Floor identity`);
+      const owner = floorsById.get(floorId);
+      if (!owner) throw new Error(`Map element "${id}" refers to missing Floor "${floorId}" in the save payload.`);
+      if (!buildingId || owner !== buildingId) throw new Error(`Map element "${id}" has inconsistent Building/Floor ownership in the save payload.`);
+    }
+  }
+}
+
+function payloadElementCollection(kind: string): string {
+  const collections: Record<string, string> = {
+    room: "room", floor_path: "floor_path", wall: "wall", door: "door", window: "window",
+    furniture: "furniture", stairs: "stairs", ramp: "ramp", elevator: "elevator", label: "label",
+  };
+  return collections[kind] ?? `unknown (${kind || "missing kind"})`;
+}
+
+function payloadElementDiagnostic(row: JsonObject) {
+  const metadata = row.metadata && typeof row.metadata === "object" && !Array.isArray(row.metadata)
+    ? row.metadata as Record<string, Json | undefined>
+    : {};
+  const kind = typeof metadata.kind === "string" ? metadata.kind : "";
+  return {
+    id: String(row.id),
+    kind: kind || undefined,
+    element_type: row.element_type,
+    name: row.name,
+    building_id: row.building_id,
+    floor_id: row.floor_id,
+    sourceCollection: payloadElementCollection(kind),
+  };
+}
+
+async function verifyPayloadMapElementsPersisted(campusId: string, payload: CampusStructurePayload, rows: CampusStructureRows): Promise<void> {
+  const persisted = new Map(rows.mapElements.map((row) => [row.id, row]));
+  const expectedIds = new Set(payload.map_elements.map((row) => String(row.id)));
+  const missing: ReturnType<typeof payloadElementDiagnostic>[] = [];
+  const unexpected = rows.mapElements
+    .filter((row) => !expectedIds.has(row.id))
+    .map((row) => ({ id: row.id, kind: structureKindForRow(row), element_type: row.element_type, name: row.name, building_id: row.building_id, floor_id: row.floor_id }));
+  const wrongOwnership: Array<ReturnType<typeof payloadElementDiagnostic> & { actualBuildingId?: string | null; actualFloorId?: string | null }> = [];
+  for (const expected of payload.map_elements) {
+    const id = String(expected.id);
+    const actual = persisted.get(id);
+    if (!actual) {
+      missing.push(payloadElementDiagnostic(expected));
+      continue;
+    }
+    if ((actual.building_id ?? undefined) !== (expected.building_id as string | undefined)
+      || (actual.floor_id ?? undefined) !== (expected.floor_id as string | undefined)) {
+      wrongOwnership.push({
+        ...payloadElementDiagnostic(expected),
+        actualBuildingId: actual.building_id,
+        actualFloorId: actual.floor_id,
+      });
+    }
+  }
+  if (missing.length > 0 || unexpected.length > 0 || wrongOwnership.length > 0) {
+    const databaseRows: unknown[] = [];
+    const diagnosticErrors: string[] = [];
+    for (let offset = 0; offset < missing.length; offset += 500) {
+      const ids = missing.slice(offset, offset + 500).map((item) => item.id);
+      try {
+        const { data, error } = await getSupabase().from("map_elements")
+          .select("id,campus_id,building_id,floor_id,archived_at,element_type,name,metadata")
+          .in("id", ids);
+        if (error) throw error;
+        databaseRows.push(...(data ?? []));
+      } catch (error) {
+        diagnosticErrors.push(error instanceof Error ? error.message : String(error));
+      }
+    }
+    console.error("[CampusStructure] T5 persistence verification details", {
+      campusId, missing, unexpected, wrongOwnership, databaseRows, diagnosticErrors,
+    });
+    const summary = [
+      missing.length ? `${missing.length} map element${missing.length === 1 ? " was" : "s were"} not returned` : "",
+      unexpected.length ? `${unexpected.length} unexpected active map element${unexpected.length === 1 ? " was" : "s were"} returned` : "",
+      wrongOwnership.length ? `${wrongOwnership.length} map element${wrongOwnership.length === 1 ? " has" : "s have"} wrong Building/Floor ownership` : "",
+    ].filter(Boolean).join("; ");
+    throw new Error(`T5 persistence verification failed: ${summary} after save.`);
+  }
+  for (const floor of payload.floors) {
+    const floorId = String(floor.id);
+    const expectedIds = payload.map_elements.filter((row) => row.floor_id === floorId).map((row) => String(row.id)).sort();
+    const actualIds = rows.mapElements.filter((row) => row.floor_id === floorId).map((row) => String(row.id)).sort();
+    const expectedSet = new Set(expectedIds);
+    const actualSet = new Set(actualIds);
+    const missing = expectedIds.filter((id) => !actualSet.has(id));
+    const unexpected = actualIds.filter((id) => !expectedSet.has(id));
+    const expected = expectedIds.length;
+    const actual = actualIds.length;
+    if (actual !== expected || missing.length > 0 || unexpected.length > 0) {
+      throw new Error(`T5 persistence verification failed for Floor "${floorId}": ${actual} map_elements rows returned; payload contains ${expected}; missing IDs [${missing.join(", ")}], unexpected IDs [${unexpected.join(", ")}].`);
+    }
+  }
+}
+
+async function findRowsByIds<T>(
+  ids: string[],
+  query: (batch: string[]) => PromiseLike<{ data: T[] | null; error: { message?: string } | null }>,
+): Promise<T[]> {
+  const rows: T[] = [];
+  for (let offset = 0; offset < ids.length; offset += 500) {
+    const { data, error } = await query(ids.slice(offset, offset + 500));
+    if (error) throw error;
+    rows.push(...(data ?? []));
+  }
+  return rows;
+}
+
+/**
+ * Check persisted primary-key ownership before the replacement RPC. Include
+ * archived rows: their IDs are still globally unique and cannot be reused by
+ * a new copy. SQL repeats these guards transactionally as the authoritative
+ * protection against races and cross-campus conflicts.
+ */
+async function assertPayloadIdsCampusSafe(campusId: string, payload: CampusStructurePayload): Promise<void> {
+  const db = getSupabase();
+  const buildings = await findRowsByIds(
+    payload.buildings.map((row) => String(row.id)),
+    (ids) => db.from("buildings").select("id,campus_id,archived_at").in("id", ids),
+  );
+  for (const existing of buildings as Array<{ id: string; campus_id: string }>) {
+    if (existing.campus_id !== campusId) throw new Error(`Building ID collision: "${existing.id}" belongs to another Campus.`);
+  }
+
+  const floors = await findRowsByIds(
+    payload.floors.map((row) => String(row.id)),
+    (ids) => db.from("floors").select("id,building_id,archived_at").in("id", ids),
+  );
+  const expectedFloors = new Map(payload.floors.map((row) => [String(row.id), String(row.building_id)]));
+  for (const existing of floors as Array<{ id: string; building_id: string }>) {
+    if (expectedFloors.get(existing.id) !== existing.building_id) {
+      throw new Error(`Floor ID collision: "${existing.id}" belongs to a different Building.`);
+    }
+  }
+
+  const elements = await findRowsByIds(
+    payload.map_elements.map((row) => String(row.id)),
+    (ids) => db.from("map_elements").select("id,campus_id,building_id,floor_id,archived_at").in("id", ids),
+  );
+  const expectedElements = new Map(payload.map_elements.map((row) => [String(row.id), {
+    buildingId: typeof row.building_id === "string" ? row.building_id : null,
+    floorId: typeof row.floor_id === "string" ? row.floor_id : null,
+  }]));
+  for (const existing of elements as Array<{ id: string; campus_id: string; building_id: string | null; floor_id: string | null }>) {
+    const expected = expectedElements.get(existing.id)!;
+    if (existing.campus_id !== campusId) throw new Error(`Map element ID collision: "${existing.id}" belongs to another Campus.`);
+    if (existing.building_id !== expected.buildingId || existing.floor_id !== expected.floorId) {
+      throw new Error(`Map element ID collision: "${existing.id}" belongs to a different Building or Floor.`);
+    }
+  }
+
+  const nodeRows = await findRowsByIds(
+    payload.navigation_nodes.map((row) => String(row.id)),
+    (ids) => db.from("navigation_nodes").select("id,campus_id,building_id,floor_id").in("id", ids),
+  );
+  for (const existing of nodeRows as Array<{ id: string; campus_id: string }>) {
+    if (existing.campus_id !== campusId) throw new Error(`Navigation node ID collision: "${existing.id}" belongs to another Campus.`);
+  }
+  const edgeRows = await findRowsByIds(
+    payload.navigation_edges.map((row) => String(row.id)),
+    (ids) => db.from("navigation_edges").select("id,campus_id").in("id", ids),
+  );
+  for (const existing of edgeRows as Array<{ id: string; campus_id: string }>) {
+    if (existing.campus_id !== campusId) throw new Error(`Navigation edge ID collision: "${existing.id}" belongs to another Campus.`);
+  }
+}
+
+function verifyHydratedFloorsMatch(candidate: Campus, hydrated: Campus): void {
+  for (const building of candidate.buildings ?? []) {
+    const savedBuilding = hydrated.buildings.find((item) => item.id === building.id);
+    for (const floor of building.floors ?? []) {
+      const savedFloor = savedBuilding?.floors.find((item) => item.id === floor.id);
+      if (!savedFloor) throw new Error(`T6 hydration verification failed: Floor "${floor.id}" was not recovered under Building "${building.id}".`);
+      // The hydrated Floor is located by both parent Building ID and Floor ID;
+      // labels/numbers/order are deliberately not identity keys because a
+      // duplicate can share all of those presentation values temporarily.
+      const buildingLabel = `${building.name ?? building.id}${building.code ? ` (${building.code})` : ""}`;
+      const mismatch = physicalFloorMismatch(
+        normalizeFloor(floor, { buildingId: building.id }),
+        normalizeFloor(savedFloor, { buildingId: building.id }),
+        `T6 hydrated Floor in Building "${buildingLabel}"`,
+      );
+      if (mismatch) {
+        console.error("[T6] Hydrated physical Floor mismatch", {
+          buildingId: building.id,
+          buildingName: building.name,
+          buildingCode: building.code,
+          floorId: floor.id,
+          floorLabel: floor.label,
+          mismatch,
+        });
+        throw new Error(mismatch);
+      }
+    }
+  }
 }
 
 export interface PublishedDirectoryEntry {
@@ -365,19 +608,8 @@ export function canvasAppearanceRecordId(campusId: string): string {
   }).join("-");
 }
 
-/**
- * Building codes are a table-wide campus key in the persistence schema. Keep
- * the payload valid even when a legacy/editor draft contains two buildings
- * with the same (or blank) code. The first authored code wins; later
- * collisions receive the same short, human-readable default identity used by
- * the editor's create/duplicate actions.
- */
-function nextPayloadBuildingCode(candidate: unknown, usedCodes: Set<string>): string {
-  const authored = typeof candidate === "string" ? candidate.trim() : "";
-  if (authored && !usedCodes.has(authored.toUpperCase())) {
-    usedCodes.add(authored.toUpperCase());
-    return authored;
-  }
+/** Generate a default code only for an identity whose authored code is blank. */
+function nextPayloadBuildingCode(usedCodes: Set<string>): string {
   let index = 1;
   let generated = `BLDG-${String(index).padStart(2, "0")}`;
   while (usedCodes.has(generated)) {
@@ -389,79 +621,118 @@ function nextPayloadBuildingCode(candidate: unknown, usedCodes: Set<string>): st
 }
 
 /**
- * The database keeps removed Buildings as archived rows and the historical
- * `(campus_id, code)` constraint still covers them. A fresh draft Building can
- * therefore collide with a code that is no longer visible in the editor. Read
- * the campus code ledger before the RPC and move only new/conflicting payload
- * rows to the next short default code. Existing row IDs retain their authored
- * code; the loaded RPC result becomes the new canonical editor state.
+ * Check the active campus code namespace before the save RPC. Archived rows do
+ * not reserve codes. Existing Building IDs are excluded so changing a code
+ * updates that same row rather than treating it as a second Building.
  */
-async function avoidArchivedBuildingCodeConflicts(
+async function validateBuildingCodeAvailability(
   campusId: string,
   payload: CampusStructurePayload,
 ): Promise<CampusStructurePayload> {
-  try {
-    const { data, error } = await getSupabase()
-      .from("buildings")
-      .select("id,code")
-      .eq("campus_id", campusId);
-    if (error || !Array.isArray(data)) return payload;
+  const { data, error } = await getSupabase()
+    .from("buildings")
+    .select("id,code,archived_at")
+    .eq("campus_id", campusId)
+    .is("archived_at", null);
+  if (error) throw new Error(`Building codes could not be verified before saving: ${error.message}`);
 
-    const payloadIds = new Set(payload.buildings.map((building) => String(building.id)));
-    const occupiedCodes = new Set(
-      data
-        .filter((row) => !payloadIds.has(String(row.id)))
-        .map((row) => String(row.code ?? "").trim().toUpperCase())
-        .filter(Boolean),
-    );
-    const authoredCodes = new Set(
-      payload.buildings
-        .map((building) => String(building.code ?? "").trim().toUpperCase())
-        .filter(Boolean),
-    );
-    const claimedCodes = new Set<string>();
-    let changed = false;
-    const buildings = payload.buildings.map((building) => {
-      const authored = String(building.code ?? "").trim();
-      const normalized = authored.toUpperCase();
-      if (authored && !occupiedCodes.has(normalized) && !claimedCodes.has(normalized)) {
-        claimedCodes.add(normalized);
-        return building;
-      }
+  const payloadIds = new Set(payload.buildings.map((building) => String(building.id)));
+  assertActiveBuildingCodesAvailable(payload.buildings, data ?? [], payloadIds);
+  return payload;
+}
 
-      let index = 1;
-      let replacement = `BLDG-${String(index).padStart(2, "0")}`;
-      while (occupiedCodes.has(replacement) || authoredCodes.has(replacement) || claimedCodes.has(replacement)) {
-        index += 1;
-        replacement = `BLDG-${String(index).padStart(2, "0")}`;
-      }
-      claimedCodes.add(replacement);
-      changed = true;
-      return { ...building, code: replacement };
-    });
-    return changed ? { ...payload, buildings } : payload;
-  } catch {
-    // This is a defensive ledger read. The authoritative RPC remains the
-    // source of truth if a transient read is unavailable.
-    return payload;
+export function assertActiveBuildingCodesAvailable(
+  payloadBuildings: ReadonlyArray<{ id: unknown; code: unknown }>,
+  existingRows: ReadonlyArray<{ id: unknown; code: unknown; archived_at?: unknown }>,
+  ignoreExistingIds: ReadonlySet<string> = new Set(payloadBuildings.map((building) => String(building.id))),
+): void {
+  const occupiedCodes = new Set<string>();
+  for (const row of existingRows) {
+    if (row.archived_at != null || ignoreExistingIds.has(String(row.id))) continue;
+    const code = typeof row.code === "string" ? row.code.trim().toUpperCase() : "";
+    if (code) occupiedCodes.add(code);
+  }
+  for (const building of payloadBuildings) {
+    const code = typeof building.code === "string" ? building.code.trim().toUpperCase() : "";
+    if (code && occupiedCodes.has(code)) throw new Error(`Building code '${code}' is already in use.`);
   }
 }
 
-export function serializeCampusStructure(campus: Campus): CampusStructurePayload {
-  // Persist the canonical Campus Gate anchor alongside the physical marker.
-  // Hydrated/editor state normally already contains it, but reconciling here
-  // also makes legacy/partially-authored campuses safe to save and prevents a
-  // gate from silently round-tripping without its routable navigation node.
-  const canonicalCampus = reconcileExteriorApproachNavigation(
-    syncCampusGateNavigation(reconcileEntranceTransitions(campus)),
+function verifyPayloadBuildingCodesPersisted(payload: CampusStructurePayload, rows: CampusStructureRows): void {
+  const persistedById = new Map(rows.buildings.map((row) => [row.id, row]));
+  for (const expected of payload.buildings) {
+    const id = String(expected.id);
+    const expectedCode = String(expected.code ?? "");
+    const persisted = persistedById.get(id);
+    if (!persisted) throw new Error(`Building code save verification failed: Building "${id}" was not returned after save.`);
+    if (persisted.code !== expectedCode) {
+      throw new Error(`Building code save verification failed for "${id}": expected "${expectedCode}", persisted "${persisted.code}".`);
+    }
+  }
+}
+
+function verifyHydratedBuildingCodes(payload: CampusStructurePayload, hydrated: Campus): void {
+  const expectedById = new Map(payload.buildings.map((building) => [String(building.id), String(building.code ?? "")]));
+  for (const [id, expectedCode] of expectedById) {
+    const building = hydrated.buildings.find((candidate) => candidate.id === id);
+    if (!building || building.code !== expectedCode) {
+      throw new Error(`Building code hydration verification failed for "${id}": expected "${expectedCode}", received "${building?.code ?? "missing"}".`);
+    }
+  }
+}
+
+/**
+ * Canonicalize derived Building-owned navigation/physical records before
+ * persistence. This is also the exact Floor snapshot used by T6 so hydration
+ * is compared with the same generated Stair direction/occurrences that were
+ * serialized.
+ */
+export function canonicalizeCampusStructureForPersistence(campus: Campus): Campus {
+  return reconcileExteriorApproachNavigation(
+    syncCampusGateNavigation(
+      syncExteriorEmergencyStairGraph(reconcileEntranceTransitions(campus), { reconcileOrdinaryFloorTransitions: false }),
+    ),
   );
+}
+
+export function serializeCampusStructure(campus: Campus): CampusStructurePayload {
+  const canonicalCampus = canonicalizeCampusStructureForPersistence(campus);
+  // Validate the canonicalized editor snapshot before row generation or any
+  // persistence call, so stale generated occurrences are pruned while genuine
+  // dangling physical references still cannot produce a partial Floor.
+  (canonicalCampus.buildings ?? []).forEach((building) => {
+    const entranceIds = new Set((building.entrances ?? []).map((entrance) => entrance.id));
+    const exteriorEmergencyStairIds = new Set(canonicalExteriorEmergencyStairsForBuilding(building).map((stair) => stair.id));
+    (building.floors ?? []).forEach((floor) => assertFloorPhysicalReferences(floor, { entranceIds, exteriorEmergencyStairIds }));
+  });
+  // The canonicalizer above also syncs the Campus Gate anchor alongside its
+  // physical marker and reconstructs derived Building-owned Stair landings.
   const buildings: JsonObject[] = [];
   const usedBuildingCodes = new Set<string>();
+  const authoredBuildingCodes = new Set<string>();
+  for (const building of canonicalCampus.buildings ?? []) {
+    const code = typeof building.code === "string" ? building.code.trim().toUpperCase() : "";
+    if (!code) continue;
+    if (authoredBuildingCodes.has(code)) throw new Error(`Building code '${code}' is already in use.`);
+    authoredBuildingCodes.add(code);
+  }
+  // Reserve every authored code before generating defaults for genuinely blank
+  // new identities, so a blank earlier Building cannot claim a later authored
+  // BLDG-NN code.
+  for (const code of authoredBuildingCodes) usedBuildingCodes.add(code);
+  const payloadBuildingCodes = new Map<string, string>();
+  for (const building of canonicalCampus.buildings ?? []) {
+    const authored = typeof building.code === "string" ? building.code.trim().toUpperCase() : "";
+    if (authored) payloadBuildingCodes.set(building.id, authored);
+    else payloadBuildingCodes.set(building.id, nextPayloadBuildingCode(usedBuildingCodes));
+  }
   const floors: JsonObject[] = [];
   const map_elements: JsonObject[] = [];
+  const expectedPhysicalRowsByFloor = new Map<string, number>();
+  const expectedPhysicalIdsByFloor = new Map<string, string[]>();
   (canonicalCampus.buildings ?? []).forEach((building, buildingOrder) => {
     const { floors: buildingFloors, accessibleApproach: _removedApproach, ...buildingUi } = building as CampusBuilding & { accessibleApproach?: unknown };
-    const code = nextPayloadBuildingCode(building.code, usedBuildingCodes);
+    const code = payloadBuildingCodes.get(building.id)!;
     buildings.push({
       id: building.id, name: building.name, code, description: building.description,
       category: normalizedBuildingCategory(building.category),
@@ -481,8 +752,19 @@ export function serializeCampusStructure(campus: Campus): CampusStructurePayload
     // the next free number (max used + 1).
     const usedFloorNumbers = new Set<number>();
     const seenFloorIds = new Set<string>();
+    const entranceIds = new Set((building.entrances ?? []).map((entrance) => entrance.id));
+    const exteriorEmergencyStairIds = new Set(canonicalExteriorEmergencyStairsForBuilding(building).map((stair) => stair.id));
     (buildingFloors ?? []).forEach((rawFloor, floorOrder) => {
       const normalizedFloor = normalizeFloor(rawFloor, { buildingId: building.id, number: floorOrder + 1 });
+      assertFloorPhysicalReferences(normalizedFloor, { entranceIds, exteriorEmergencyStairIds });
+      if (normalizedFloor.buildingId !== building.id) {
+        throw new Error(`Floor "${normalizedFloor.label}" (${normalizedFloor.id}) belongs to Building "${normalizedFloor.buildingId}", not "${building.id}".`);
+      }
+      for (const room of normalizedFloor.rooms) {
+        if (room.floorId !== normalizedFloor.id || room.buildingId !== building.id) {
+          throw new Error(`Room "${room.name}" (${room.id}) has a stale Floor or Building identity and cannot be saved safely.`);
+        }
+      }
       // B5 Phase 3.1.2: a duplicated local floor object (same id appended
       // twice) would be persisted as a duplicate row — fail early with a
       // clear developer-facing error instead of sending invalid rows.
@@ -500,6 +782,11 @@ export function serializeCampusStructure(campus: Campus): CampusStructurePayload
         rooms = [], paths = [], walls = [], doors = [], windows = [], furniture = [],
         stairs = [], ramps = [], elevators = [], labels = [], ...floorUi
       } = floor;
+      expectedPhysicalRowsByFloor.set(floor.id, rooms.length + paths.length + walls.length + doors.length + windows.length
+        + furniture.length + stairs.length + ramps.length + elevators.length + labels.length);
+      expectedPhysicalIdsByFloor.set(floor.id, [
+        ...rooms, ...paths, ...walls, ...doors, ...windows, ...furniture, ...stairs, ...ramps, ...elevators, ...labels,
+      ].map((item) => String(item.id ?? "")));
       floors.push({ id: floor.id, building_id: building.id, name: floor.label, floor_number: floor.number,
         display_order: floorOrder, floor_plan_path: floor.backgroundImage?.storagePath,
         canvas_width: floor.canvasW ?? campus.canvasW, canvas_height: floor.canvasH ?? campus.canvasH,
@@ -541,6 +828,30 @@ export function serializeCampusStructure(campus: Campus): CampusStructurePayload
       canvasGroundTexture: campus.canvasGroundTexture,
       canvasColor: campus.canvasColor,
     }));
+  }
+  // The database stores physical records as map_elements, while Floor-only
+  // settings and exterior features live in the Floor metadata row. Verify that
+  // every collection represented in map_elements was emitted exactly once
+  // before the transactional persistence RPC can replace the campus snapshot.
+  const seenElementIds = new Set<string>();
+  const actualPhysicalRowsByFloor = new Map<string, number>();
+  for (const item of map_elements) {
+    const id = String(item.id ?? "");
+    if (!id || seenElementIds.has(id)) throw new Error(`Campus save payload contains a missing or duplicate map element ID "${id}".`);
+    seenElementIds.add(id);
+    const floorId = typeof item.floor_id === "string" ? item.floor_id : undefined;
+    if (floorId) actualPhysicalRowsByFloor.set(floorId, (actualPhysicalRowsByFloor.get(floorId) ?? 0) + 1);
+  }
+  for (const [floorId, expected] of expectedPhysicalRowsByFloor) {
+    const actualRows = map_elements.filter((item) => item.floor_id === floorId);
+    const actual = actualPhysicalRowsByFloor.get(floorId) ?? 0;
+    const expectedIds = new Set(expectedPhysicalIdsByFloor.get(floorId) ?? []);
+    const actualIds = new Set(actualRows.map((item) => String(item.id ?? "")));
+    const missingIds = [...expectedIds].filter((id) => !actualIds.has(id));
+    const unexpectedIds = [...actualIds].filter((id) => !expectedIds.has(id));
+    if (actual !== expected || missingIds.length > 0 || unexpectedIds.length > 0) {
+      throw new Error(`T3/T4 serializer verification failed for Floor "${floorId}": ${actual} map_elements rows for ${expected} editor physical objects; missing IDs [${missingIds.join(", ")}], unexpected IDs [${unexpectedIds.join(", ")}].`);
+    }
   }
   return {
     buildings, floors, map_elements,
@@ -666,6 +977,23 @@ export function hydrateCampusStructure(campus: Campus, rows: CampusStructureRows
 
 async function selectStructure(campusId: string): Promise<CampusStructureRows> {
   const db = getSupabase();
+  // PostgREST applies a server-side row cap (usually 1,000). Every structure
+  // collection must be paged or T5 can mistake valid rows beyond that cap for
+  // rows the RPC failed to persist.
+  const pageSize = 500;
+  const fetchAllPages = async <T,>(makeQuery: (from: number, to: number) => PromiseLike<{
+    data: T[] | null;
+    error: { message?: string } | null;
+  }>): Promise<T[]> => {
+    const all: T[] = [];
+    for (let offset = 0; ; offset += pageSize) {
+      const { data, error } = await makeQuery(offset, offset + pageSize - 1);
+      if (error) throw error;
+      const page = data ?? [];
+      all.push(...page);
+      if (page.length < pageSize) return all;
+    }
+  };
   // B6 Phase 2: deterministic load order. Postgres returns rows in arbitrary
   // order without ORDER BY, which made repeated loads of identical persisted
   // data produce different collection orders and therefore false dirty-state
@@ -674,25 +1002,19 @@ async function selectStructure(campusId: string): Promise<CampusStructureRows> {
   // explicit order in metadata.display_order and the hydrator re-sorts by it),
   // and every collection gets a stable created_at → id tie-break so two loads
   // of the same rows always hydrate to the same JSON.
-  const [buildings, floors, mapElements, navigationNodes, navigationEdges] = await Promise.all([
-    db.from("buildings").select("*").eq("campus_id", campusId)
-      .order("created_at", { ascending: true }).order("id", { ascending: true })
-      .is("archived_at", null),
-    db.from("floors").select("*, buildings!inner(campus_id)").eq("buildings.campus_id", campusId)
-      .order("display_order", { ascending: true }).order("floor_number", { ascending: true }).order("id", { ascending: true })
-      .is("archived_at", null),
-    db.from("map_elements").select("*").eq("campus_id", campusId)
-      .order("created_at", { ascending: true }).order("id", { ascending: true })
-      .is("archived_at", null),
-    db.from("navigation_nodes").select("*").eq("campus_id", campusId).eq("is_active", true)
-      .order("created_at", { ascending: true }).order("id", { ascending: true }),
-    db.from("navigation_edges").select("*").eq("campus_id", campusId).eq("is_temporarily_closed", false)
-      .order("created_at", { ascending: true }).order("id", { ascending: true }),
+  const [buildings, joinedFloors, mapElements, navigationNodes, navigationEdges] = await Promise.all([
+    fetchAllPages<BuildingRow>((from, to) => db.from("buildings").select("*").eq("campus_id", campusId)
+      .order("created_at", { ascending: true }).order("id", { ascending: true }).is("archived_at", null).range(from, to)),
+    fetchAllPages<FloorRow & { buildings?: unknown }>((from, to) => db.from("floors").select("*, buildings!inner(campus_id)").eq("buildings.campus_id", campusId)
+      .order("display_order", { ascending: true }).order("floor_number", { ascending: true }).order("id", { ascending: true }).is("archived_at", null).range(from, to)),
+    fetchAllPages<MapElementRow>((from, to) => db.from("map_elements").select("*").eq("campus_id", campusId)
+      .order("created_at", { ascending: true }).order("id", { ascending: true }).is("archived_at", null).range(from, to)),
+    fetchAllPages<NavigationNodeRow>((from, to) => db.from("navigation_nodes").select("*").eq("campus_id", campusId).eq("is_active", true)
+      .order("created_at", { ascending: true }).order("id", { ascending: true }).range(from, to)),
+    fetchAllPages<NavigationEdgeRow>((from, to) => db.from("navigation_edges").select("*").eq("campus_id", campusId).eq("is_temporarily_closed", false)
+      .order("created_at", { ascending: true }).order("id", { ascending: true }).range(from, to)),
   ]);
-  const failure = [buildings, floors, mapElements, navigationNodes, navigationEdges].find((result) => result.error)?.error;
-  if (failure) throw failure;
-  return { buildings: buildings.data ?? [], floors: (floors.data ?? []).map(({ buildings: _, ...row }) => row) as FloorRow[],
-    mapElements: mapElements.data ?? [], navigationNodes: navigationNodes.data ?? [], navigationEdges: navigationEdges.data ?? [] };
+  return { buildings, floors: joinedFloors.map(({ buildings: _, ...row }) => row) as FloorRow[], mapElements, navigationNodes, navigationEdges };
 }
 
 function repository<TName extends "buildings" | "floors" | "map_elements" | "navigation_nodes" | "navigation_edges">(table: TName) {
@@ -714,16 +1036,41 @@ export const entranceService = { ...mapElementService, list: async (campusId: st
 export const campusStructureService = {
   async load(campus: Campus): Promise<Campus> { return hydrateCampusStructure(campus, await selectStructure(campus.id)); },
   async save(campus: Campus): Promise<Campus> {
-    const payload = await avoidArchivedBuildingCodeConflicts(campus.id, serializeCampusStructure(campus));
+    const canonicalCandidate = canonicalizeCampusStructureForPersistence(campus);
+    const initialPayload = serializeCampusStructure(canonicalCandidate);
+    validateCampusStructurePayload(initialPayload);
+    const payload = await validateBuildingCodeAvailability(campus.id, initialPayload);
+    validateCampusStructurePayload(payload);
     validateNavigationEdgePayload(payload);
     const payloadWithStableEdgeRows = await reuseExistingNavigationEdgePairRows(campus.id, payload);
     validateNavigationEdgePayload(payloadWithStableEdgeRows);
+    await assertPayloadIdsCampusSafe(campus.id, payloadWithStableEdgeRows);
     const { error } = await getSupabase().rpc("save_campus_structure", { p_campus_id: campus.id, p_payload: payloadWithStableEdgeRows as unknown as Json });
     if (error) {
       await logCampusStructureSaveDiagnostics(campus.id, payloadWithStableEdgeRows, error);
+      const dbError = error as { code?: string; message?: string; details?: string; hint?: string };
+      const uniqueViolationText = `${dbError.message ?? ""} ${dbError.details ?? ""} ${dbError.hint ?? ""}`;
+      if (dbError.code === "23505" && /buildings_campus_(?:active_)?code_uq|buildings_code_canonical/i.test(uniqueViolationText)) {
+        const reportedCode = uniqueViolationText.match(/,\s*([^)]+)\)\s+already exists/i)?.[1]?.trim();
+        const payloadCode = payloadWithStableEdgeRows.buildings.find((building) => String(building.code ?? "").toUpperCase() === reportedCode)?.code
+          ?? payloadWithStableEdgeRows.buildings[0]?.code;
+        if (payloadCode) throw new Error(`Building code '${String(payloadCode).trim().toUpperCase()}' is already in use.`);
+      }
       throw new Error(`Campus structure was not saved: ${error.message}`);
     }
-    return this.load(campus);
+    // T5: read the exact persisted rows before accepting the RPC as a
+    // successful replacement. The SQL RPC runs transactionally; its guarded
+    // verification wrapper raises (rolling back) if any upsert was skipped.
+    const persistedRows = await selectStructure(campus.id);
+    verifyPayloadBuildingCodesPersisted(payloadWithStableEdgeRows, persistedRows);
+    await verifyPayloadMapElementsPersisted(campus.id, payloadWithStableEdgeRows, persistedRows);
+    // T6: hydration is separately checked against the submitted Floor
+    // signatures so a valid database payload cannot be mistaken for a saved
+    // Floor if metadata.kind/grouping regresses.
+    const hydrated = hydrateCampusStructure(canonicalCandidate, persistedRows);
+    verifyHydratedBuildingCodes(payloadWithStableEdgeRows, hydrated);
+    verifyHydratedFloorsMatch(canonicalCandidate, hydrated);
+    return hydrated;
   },
   async publishedDirectory(campusId?: string): Promise<PublishedDirectoryEntry[]> {
     let query = getSupabase().from("campus_versions").select("campus_id,snapshot").eq("state", "published");

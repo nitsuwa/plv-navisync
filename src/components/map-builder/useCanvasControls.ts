@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from "react";
-import { screenToWorld, panToKeepWorldPoint } from "../../lib/editorPlacement";
+import { screenToWorld, panToKeepWorldPoint, type ScreenRect } from "../../lib/editorPlacement";
 import { clampViewportPan, getViewportFitZoom, getViewportPanBounds, type MapViewportInsets, type MapViewportPanBounds } from "../../lib/mapViewport";
 
 // ── Animation constants ─────────────────────────────────────────────────────
@@ -39,6 +39,14 @@ export interface CanvasViewportOptions {
   editorPadding?: number;
   /** Screen-space areas reserved by fixed editor UI over the canvas. */
   insets?: MapViewportInsets;
+  /** Optional world-space area rendered by the SVG viewBox, including content
+   * that extends beyond the base canvas. */
+  worldBounds?: { x: number; y: number; width: number; height: number };
+  /** Update one SVG camera group directly during gestures, then publish React
+   * state when the gesture/animation settles. Kept opt-in for the Floor Editor. */
+  imperativeCamera?: boolean;
+  /** Receives transient camera frames for small DOM-only viewport readouts. */
+  onCameraFrame?: (zoom: number, pan: { x: number; y: number }) => void;
 }
 
 export function useCanvasControls(canvasW: number, canvasH: number, options: CanvasViewportOptions = {}) {
@@ -50,6 +58,10 @@ export function useCanvasControls(canvasW: number, canvasH: number, options: Can
   const insetRight = Math.max(0, options.insets?.right ?? 0);
   const insetBottom = Math.max(0, options.insets?.bottom ?? 0);
   const insetLeft = Math.max(0, options.insets?.left ?? 0);
+  const worldBounds = options.worldBounds;
+  const imperativeCamera = options.imperativeCamera ?? false;
+  const cameraFrameCallbackRef = useRef(options.onCameraFrame);
+  cameraFrameCallbackRef.current = options.onCameraFrame;
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
 
@@ -69,21 +81,67 @@ export function useCanvasControls(canvasW: number, canvasH: number, options: Can
   const panning = useRef<{ sx: number; sy: number; ox: number; oy: number } | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const cameraTransformRef = useRef<SVGGElement>(null);
+  const viewportRectsRef = useRef<{ container: ScreenRect; svg: ScreenRect } | null>(null);
   const clampPanRef = useRef<(point: { x: number; y: number }, zoomValue: number) => { x: number; y: number }>((point) => point);
+  const panFrameRef = useRef<number | null>(null);
+  const latestPanPointerRef = useRef<{ x: number; y: number } | null>(null);
+  const panCursorBeforeRef = useRef<string | null>(null);
+
+  const measureViewport = useCallback(() => {
+    const container = containerRef.current?.getBoundingClientRect();
+    const svg = svgRef.current?.getBoundingClientRect();
+    if (!container || !svg) return;
+    viewportRectsRef.current = {
+      container: { left: container.left, top: container.top, width: container.width, height: container.height },
+      svg: { left: svg.left, top: svg.top, width: svg.width, height: svg.height },
+    };
+  }, []);
+
+  useEffect(() => {
+    measureViewport();
+    const container = containerRef.current;
+    const svg = svgRef.current;
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measureViewport);
+    if (container) observer?.observe(container);
+    if (svg) observer?.observe(svg);
+    window.addEventListener("resize", measureViewport);
+    // A scroll can move the editor without changing its observed dimensions.
+    window.addEventListener("scroll", measureViewport, true);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", measureViewport);
+      window.removeEventListener("scroll", measureViewport, true);
+    };
+  }, [measureViewport]);
+
+  const getSvgRect = useCallback((): ScreenRect | null => {
+    if (viewportRectsRef.current) return viewportRectsRef.current.svg;
+    const rect = svgRef.current?.getBoundingClientRect();
+    return rect ? { left: rect.left, top: rect.top, width: rect.width, height: rect.height } : null;
+  }, []);
+
+  const applyCameraTransform = useCallback((nextPan: { x: number; y: number }, nextZoom: number) => {
+    if (imperativeCamera) {
+      cameraTransformRef.current?.setAttribute("transform", `translate(${nextPan.x},${nextPan.y}) scale(${nextZoom})`);
+    }
+    cameraFrameCallbackRef.current?.(nextZoom, nextPan);
+  }, [imperativeCamera]);
 
   const getPanBounds = useCallback((zoomValue: number): MapViewportPanBounds => {
-    const rect = containerRef.current?.getBoundingClientRect();
+    const rect = viewportRectsRef.current?.container ?? containerRef.current?.getBoundingClientRect();
     return getViewportPanBounds({
-      mapWidth: canvasW,
-      mapHeight: canvasH,
+      mapWidth: Math.max(1, worldBounds?.width ?? canvasW),
+      mapHeight: Math.max(1, worldBounds?.height ?? canvasH),
       viewportWidth: rect?.width || canvasW,
       viewportHeight: rect?.height || canvasH,
       zoom: zoomValue,
       padding: workspacePadding,
       insets: { top: insetTop, right: insetRight, bottom: insetBottom, left: insetLeft },
       zoomOrigin: "top-left",
+      worldOrigin: worldBounds ? { x: worldBounds.x, y: worldBounds.y } : undefined,
     });
-  }, [canvasH, canvasW, insetBottom, insetLeft, insetRight, insetTop, workspacePadding]);
+  }, [canvasH, canvasW, insetBottom, insetLeft, insetRight, insetTop, worldBounds?.height, worldBounds?.width, worldBounds?.x, worldBounds?.y, workspacePadding]);
 
   const clampPan = useCallback((point: { x: number; y: number }, zoomValue = targetZoom.current) =>
     clampViewportPan(point, getPanBounds(zoomValue)), [getPanBounds]);
@@ -94,9 +152,10 @@ export function useCanvasControls(canvasW: number, canvasH: number, options: Can
     if (next.x !== currentPan.current.x || next.y !== currentPan.current.y) {
       currentPan.current = next;
       targetPan.current = next;
+      applyCameraTransform(next, currentZoom.current);
       setPan(next);
     }
-  }, [clampPan, zoom]);
+  }, [applyCameraTransform, clampPan, zoom]);
 
   // ── Start or continue the animation loop ────────────────────────────────
   const startAnimation = useCallback((duration?: number) => {
@@ -141,14 +200,20 @@ export function useCanvasControls(canvasW: number, canvasH: number, options: Can
       currentZoom.current = newZoom;
       currentPan.current = { x: newPanX, y: newPanY };
 
-      // Update React state for rendering (triggers re-render for zoom % display)
-      setZoom(newZoom);
-      setPan({ x: newPanX, y: newPanY });
+      // The Floor Editor has one camera group containing the full authored
+      // scene. Move that group directly while a camera animation is active so
+      // pan/zoom frames do not rebuild the large React tree.
+      applyCameraTransform(currentPan.current, newZoom);
+      if (!imperativeCamera) {
+        setZoom(newZoom);
+        setPan({ x: newPanX, y: newPanY });
+      }
 
       if (progress >= 1) {
         // Snap to exact target values
         currentZoom.current = targetZoom.current;
         currentPan.current = clampPanRef.current({ ...targetPan.current }, targetZoom.current);
+        applyCameraTransform(currentPan.current, targetZoom.current);
         setZoom(targetZoom.current);
         setPan({ ...currentPan.current });
         animFrame.current = null;
@@ -160,13 +225,16 @@ export function useCanvasControls(canvasW: number, canvasH: number, options: Can
     };
 
     animFrame.current = requestAnimationFrame(tick);
-  }, []);
+  }, [applyCameraTransform, imperativeCamera]);
 
   // ── Cancel animation loop on unmount ────────────────────────────────────
   useEffect(() => {
     return () => {
       if (animFrame.current !== null) {
         cancelAnimationFrame(animFrame.current);
+      }
+      if (panFrameRef.current !== null) {
+        cancelAnimationFrame(panFrameRef.current);
       }
     };
   }, []);
@@ -182,10 +250,15 @@ export function useCanvasControls(canvasW: number, canvasH: number, options: Can
     (e: React.MouseEvent | MouseEvent, cw: number, ch: number): { x: number; y: number } => {
       const svg = svgRef.current;
       if (!svg) return { x: 0, y: 0 };
-      const rect = svg.getBoundingClientRect();
-      return screenToWorld(e.clientX, e.clientY, rect, cw, ch, currentPan.current, currentZoom.current);
+      const rect = getSvgRect();
+      if (!rect) return { x: 0, y: 0 };
+      const viewBox = svg.viewBox.baseVal;
+      const mapWidth = viewBox.width > 0 ? viewBox.width : cw;
+      const mapHeight = viewBox.height > 0 ? viewBox.height : ch;
+      const origin = viewBox.width > 0 && viewBox.height > 0 ? { x: viewBox.x, y: viewBox.y } : { x: 0, y: 0 };
+      return screenToWorld(e.clientX, e.clientY, rect, mapWidth, mapHeight, currentPan.current, currentZoom.current, origin);
     },
-    []
+    [getSvgRect]
   );
 
   // ── Convert screen coords to SVG world coords (helper for zoom-to-cursor) ─
@@ -195,10 +268,15 @@ export function useCanvasControls(canvasW: number, canvasH: number, options: Can
     (clientX: number, clientY: number): { x: number; y: number } | null => {
       const svg = svgRef.current;
       if (!svg) return null;
-      const rect = svg.getBoundingClientRect();
-      return screenToWorld(clientX, clientY, rect, canvasW, canvasH, currentPan.current, currentZoom.current);
+      const rect = getSvgRect();
+      if (!rect) return null;
+      const viewBox = svg.viewBox.baseVal;
+      const mapWidth = viewBox.width > 0 ? viewBox.width : canvasW;
+      const mapHeight = viewBox.height > 0 ? viewBox.height : canvasH;
+      const origin = viewBox.width > 0 && viewBox.height > 0 ? { x: viewBox.x, y: viewBox.y } : { x: 0, y: 0 };
+      return screenToWorld(clientX, clientY, rect, mapWidth, mapHeight, currentPan.current, currentZoom.current, origin);
     },
-    [canvasW, canvasH]
+    [canvasW, canvasH, getSvgRect]
   );
 
   /**
@@ -225,8 +303,13 @@ export function useCanvasControls(canvasW: number, canvasH: number, options: Can
         if (world) {
           const svg = svgRef.current;
           if (svg) {
-            const rect = svg.getBoundingClientRect();
-            const p = panToKeepWorldPoint(clientX, clientY, rect, canvasW, canvasH, world.x, world.y, clampedZoom);
+            const rect = getSvgRect();
+            if (!rect) return;
+            const viewBox = svg.viewBox.baseVal;
+            const mapWidth = viewBox.width > 0 ? viewBox.width : canvasW;
+            const mapHeight = viewBox.height > 0 ? viewBox.height : canvasH;
+            const origin = viewBox.width > 0 && viewBox.height > 0 ? { x: viewBox.x, y: viewBox.y } : { x: 0, y: 0 };
+            const p = panToKeepWorldPoint(clientX, clientY, rect, mapWidth, mapHeight, world.x, world.y, clampedZoom, origin);
             newPanX = p.x;
             newPanY = p.y;
           } else {
@@ -237,8 +320,11 @@ export function useCanvasControls(canvasW: number, canvasH: number, options: Can
       } else {
         // No cursor point: zoom from center, adjust pan to keep center fixed
         const zoomRatio = clampedZoom / oldZoom;
-        newPanX = currentPan.current.x * zoomRatio + (canvasW / 2) * (1 - zoomRatio);
-        newPanY = currentPan.current.y * zoomRatio + (canvasH / 2) * (1 - zoomRatio);
+        const viewBox = svgRef.current?.viewBox.baseVal;
+        const centerX = viewBox && viewBox.width > 0 ? viewBox.x + viewBox.width / 2 : canvasW / 2;
+        const centerY = viewBox && viewBox.height > 0 ? viewBox.y + viewBox.height / 2 : canvasH / 2;
+        newPanX = currentPan.current.x * zoomRatio + centerX * (1 - zoomRatio);
+        newPanY = currentPan.current.y * zoomRatio + centerY * (1 - zoomRatio);
       }
 
       targetZoom.current = clampedZoom;
@@ -246,7 +332,7 @@ export function useCanvasControls(canvasW: number, canvasH: number, options: Can
 
       startAnimation(duration);
     },
-    [canvasW, canvasH, screenToWorldPt, startAnimation]
+    [canvasW, canvasH, getSvgRect, screenToWorldPt, startAnimation]
   );
 
   // ── Global keyboard listener for spacebar pan ──────────────────────────
@@ -276,27 +362,71 @@ export function useCanvasControls(canvasW: number, canvasH: number, options: Can
   }, []);
 
   // ── Panning ─────────────────────────────────────────────────────────────
-  const startPan = useCallback((e: React.MouseEvent) => {
+  const startPan = useCallback((e: Pick<MouseEvent, "clientX" | "clientY">) => {
+    if (imperativeCamera && !panning.current && svgRef.current) {
+      panCursorBeforeRef.current = svgRef.current.style.cursor;
+      svgRef.current.style.cursor = "grabbing";
+    }
     panning.current = { sx: e.clientX, sy: e.clientY, ox: currentPan.current.x, oy: currentPan.current.y };
-  }, []);
+    latestPanPointerRef.current = { x: e.clientX, y: e.clientY };
+  }, [imperativeCamera]);
 
   const isMiddleClick = (e: React.MouseEvent | MouseEvent) => e.button === 1;
 
-  const movePan = useCallback((e: React.MouseEvent) => {
+  const flushPendingPan = useCallback(() => {
+    const gesture = panning.current;
+    const pointer = latestPanPointerRef.current;
+    if (!gesture || !pointer) return;
+    const nextPan = clampPan({
+      x: gesture.ox + pointer.x - gesture.sx,
+      y: gesture.oy + pointer.y - gesture.sy,
+    });
+    currentPan.current = nextPan;
+    targetPan.current = { ...nextPan };
+    applyCameraTransform(nextPan, currentZoom.current);
+  }, [applyCameraTransform, clampPan]);
+
+  const movePan = useCallback((e: Pick<MouseEvent, "clientX" | "clientY">) => {
     if (!panning.current) return;
-    const newPan = clampPan({
+    if (imperativeCamera) {
+      latestPanPointerRef.current = { x: e.clientX, y: e.clientY };
+      if (panFrameRef.current === null) {
+        panFrameRef.current = requestAnimationFrame(() => {
+          panFrameRef.current = null;
+          flushPendingPan();
+        });
+      }
+      return;
+    }
+    const nextPan = clampPan({
       x: panning.current.ox + e.clientX - panning.current.sx,
       y: panning.current.oy + e.clientY - panning.current.sy,
     });
-    // Update both ref and state immediately for responsive panning
-    currentPan.current = newPan;
-    targetPan.current = { ...newPan };
-    setPan(newPan);
-  }, [clampPan]);
+    currentPan.current = nextPan;
+    targetPan.current = { ...nextPan };
+    setPan(nextPan);
+  }, [clampPan, flushPendingPan, imperativeCamera]);
 
   const endPan = useCallback(() => {
+    if (imperativeCamera && panning.current) {
+      if (panFrameRef.current !== null) {
+        cancelAnimationFrame(panFrameRef.current);
+        panFrameRef.current = null;
+      }
+      flushPendingPan();
+      latestPanPointerRef.current = null;
+      panning.current = null;
+      if (svgRef.current && panCursorBeforeRef.current !== null) {
+        svgRef.current.style.cursor = panCursorBeforeRef.current;
+      }
+      panCursorBeforeRef.current = null;
+      // Publish only the final pan so camera-dependent editor UI catches up
+      // once, after the direct SVG camera movement has finished.
+      setPan({ ...currentPan.current });
+      return;
+    }
     panning.current = null;
-  }, []);
+  }, [flushPendingPan, imperativeCamera]);
 
   const handleMiddleMouseDown = useCallback(
     (e: React.MouseEvent) => {
@@ -364,10 +494,10 @@ export function useCanvasControls(canvasW: number, canvasH: number, options: Can
     if (newZoom === currentZ) return;
 
     // Update zoom display immediately while canvas animates smoothly
-    setZoom(newZoom);
+    if (!imperativeCamera) setZoom(newZoom);
 
     smoothZoomTo(newZoom, e.clientX, e.clientY, WHEEL_ZOOM_DURATION_MS);
-  }, [smoothZoomTo]);
+  }, [imperativeCamera, smoothZoomTo]);
 
   // ── Zoom in/out buttons ─────────────────────────────────────────────────
   const zoomIn = useCallback(() => {
@@ -381,9 +511,9 @@ export function useCanvasControls(canvasW: number, canvasH: number, options: Can
 
     targetZoom.current = newZoom;
     targetPan.current = nextPan;
-    setZoom(newZoom);
+    if (!imperativeCamera) setZoom(newZoom);
     startAnimation();
-  }, [canvasW, canvasH, clampPan, startAnimation]);
+  }, [canvasW, canvasH, clampPan, imperativeCamera, startAnimation]);
 
   const zoomOut = useCallback(() => {
     const newZoom = clamp(targetZoom.current - ZOOM_BUTTON_STEP, ZOOM_MIN, ZOOM_MAX);
@@ -395,9 +525,9 @@ export function useCanvasControls(canvasW: number, canvasH: number, options: Can
 
     targetZoom.current = newZoom;
     targetPan.current = nextPan;
-    setZoom(newZoom);
+    if (!imperativeCamera) setZoom(newZoom);
     startAnimation();
-  }, [canvasW, canvasH, clampPan, startAnimation]);
+  }, [canvasW, canvasH, clampPan, imperativeCamera, startAnimation]);
 
   // ── Reset view (animated) ───────────────────────────────────────────────
   const resetView = useCallback(() => {
@@ -422,23 +552,24 @@ export function useCanvasControls(canvasW: number, canvasH: number, options: Can
       const container = containerRef.current;
       if (!svg || !container) return;
 
-      const containerRect = container.getBoundingClientRect();
+      const containerRect = viewportRectsRef.current?.container ?? container.getBoundingClientRect();
+      const viewBox = svg.viewBox.baseVal;
       if (
         containerRect.width <= padding * 2 ||
         containerRect.height <= padding * 2 ||
-        svg.viewBox.baseVal.width <= 0 ||
-        svg.viewBox.baseVal.height <= 0 ||
+        viewBox.width <= 0 ||
+        viewBox.height <= 0 ||
         w <= 0 ||
         h <= 0
       ) return;
       const fitScale = getViewportFitZoom({
-        mapWidth: svg.viewBox.baseVal.width,
-        mapHeight: svg.viewBox.baseVal.height,
+        mapWidth: viewBox.width,
+        mapHeight: viewBox.height,
         viewportWidth: containerRect.width,
         viewportHeight: containerRect.height,
       });
-      const letterboxX = Math.max(0, (containerRect.width - svg.viewBox.baseVal.width * fitScale) / 2);
-      const letterboxY = Math.max(0, (containerRect.height - svg.viewBox.baseVal.height * fitScale) / 2);
+      const letterboxX = Math.max(0, (containerRect.width - viewBox.width * fitScale) / 2);
+      const letterboxY = Math.max(0, (containerRect.height - viewBox.height * fitScale) / 2);
       const availableWidth = Math.max(1, containerRect.width - insetLeft - insetRight - padding * 2);
       const availableHeight = Math.max(1, containerRect.height - insetTop - insetBottom - padding * 2);
       const fitZoomX = (availableWidth / w) / fitScale;
@@ -452,8 +583,8 @@ export function useCanvasControls(canvasW: number, canvasH: number, options: Can
 
       targetZoom.current = clampedZoom;
       targetPan.current = clampPan({
-        x: (visibleCenterX - letterboxX) / fitScale - centerX * clampedZoom,
-        y: (visibleCenterY - letterboxY) / fitScale - centerY * clampedZoom,
+        x: viewBox.x + (visibleCenterX - letterboxX) / fitScale - centerX * clampedZoom,
+        y: viewBox.y + (visibleCenterY - letterboxY) / fitScale - centerY * clampedZoom,
       }, clampedZoom);
       startAnimation(ZOOM_DURATION_MS);
     },
@@ -474,6 +605,7 @@ export function useCanvasControls(canvasW: number, canvasH: number, options: Can
     panning,
     svgRef,
     containerRef,
+    cameraTransformRef,
     getPoint,
     startPan,
     movePan,

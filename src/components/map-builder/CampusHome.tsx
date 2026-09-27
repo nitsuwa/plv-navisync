@@ -238,9 +238,10 @@ function CampusDetailsDialog({
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [onClose]);
-  const buildings = campus.previewBuildingCount ?? campus.buildings?.length ?? 0;
-  const floors = campus.previewFloorCount ?? (campus.buildings ?? []).reduce((sum, building) => sum + (building.floors ?? []).length, 0);
-  const rooms = campus.previewRoomCount ?? (campus.buildings ?? []).reduce((sum, building) => sum + (building.floors ?? []).reduce((floorSum, floor) => floorSum + (floor.rooms ?? []).length, 0), 0);
+  const hasLightweightPreview = campus.previewBuildingsLoaded === true;
+  const buildings = campus.previewBuildingCount ?? (hasLightweightPreview ? undefined : campus.buildings?.length ?? 0);
+  const floors = campus.previewFloorCount ?? (hasLightweightPreview ? undefined : (campus.buildings ?? []).reduce((sum, building) => sum + (building.floors ?? []).length, 0));
+  const rooms = campus.previewRoomCount ?? (hasLightweightPreview ? undefined : (campus.buildings ?? []).reduce((sum, building) => sum + (building.floors ?? []).reduce((floorSum, floor) => floorSum + (floor.rooms ?? []).length, 0), 0));
   const published = campus.publishStatus === "published";
   const statusLabel = campus.status === "archived"
     ? "Archived"
@@ -299,10 +300,10 @@ function CampusDetailsDialog({
             <h3 id="campus-details-description" className="text-[10px] font-extrabold uppercase tracking-widest text-muted-foreground">Description</h3>
             <p data-testid="campus-details-description" className="mt-2 whitespace-pre-wrap text-sm leading-7 text-foreground">{campus.description?.trim() || "No campus description has been added yet."}</p>
           </section>
-          <div className="mt-6 grid grid-cols-2 gap-2 sm:grid-cols-4">
-            {[[Building2, "Buildings", buildings], [Layers, "Floors", floors], [DoorOpen, "Rooms", rooms], [MapPin, "Markers", campus.markers?.length ?? 0]].map(([Icon, label, value]) => {
+          <div className="mt-6 grid grid-cols-3 gap-2">
+            {[[Building2, "Buildings", buildings], [Layers, "Floors", floors], [DoorOpen, "Rooms", rooms]].map(([Icon, label, value]) => {
               const StatIcon = Icon as typeof Building2;
-              return <div key={label as string} className="rounded-xl border border-border bg-muted/25 p-3"><StatIcon className="h-4 w-4 text-primary" /><p className="mt-2 text-lg font-extrabold tabular-nums text-foreground">{value as number}</p><p className="text-[10px] font-semibold text-muted-foreground">{label as string}</p></div>;
+              return <div key={label as string} className="rounded-xl border border-border bg-muted/25 p-3"><StatIcon className="h-4 w-4 text-primary" /><p className="mt-2 text-lg font-extrabold tabular-nums text-foreground">{typeof value === "number" ? value : "—"}</p><p className="text-[10px] font-semibold text-muted-foreground">{label as string}</p></div>;
             })}
           </div>
           <div className="mt-5 grid gap-2 text-[11px] text-muted-foreground sm:grid-cols-2">
@@ -1318,16 +1319,15 @@ export function CampusHome({
               const hydratedBuildingCount = (campus.buildings ?? []).length;
               const hydratedFloors = totalFloors(campus);
               const hydratedRooms = totalRooms(campus);
-              const previewBuildingCount = campus.previewBuildingCount ?? hydratedBuildingCount;
+              const previewBuildingCount = campus.previewBuildingCount ?? (campus.previewBuildingsLoaded ? undefined : hydratedBuildingCount);
               // `preview_*_count` is the authoritative lightweight summary
               // returned by campusService.list(). Prefer it even when the
               // hydrated editor shape currently contains zero items; using a
               // stale non-zero hydrated/fallback value made Room counts lag
               // until the Map Builder was opened again.
-              const floors = campus.previewFloorCount ?? hydratedFloors;
-              const rooms = campus.previewRoomCount ?? hydratedRooms;
+              const floors = campus.previewFloorCount ?? (campus.previewBuildingsLoaded ? undefined : hydratedFloors);
+              const rooms = campus.previewRoomCount ?? (campus.previewBuildingsLoaded ? undefined : hydratedRooms);
               const hasHydratedPreview = hydratedBuildingCount > 0;
-              const markerCount = campus.markers.length;
               return (
                 <motion.div
                   key={campus.id}
@@ -1359,12 +1359,17 @@ export function CampusHome({
                       <div className="absolute inset-0 flex items-center justify-center p-3">
                         {hasHydratedPreview ? (
                           <CampusMiniMap campus={campus} className="max-h-full max-w-full" />
-                        ) : previewBuildingCount > 0 ? (
+                        ) : previewBuildingCount !== undefined && previewBuildingCount > 0 ? (
                           <div className="flex flex-col items-center gap-1 text-muted-foreground/60">
                             <Map className="h-8 w-8" />
                             <span className="text-[9px] font-medium">
                               {previewBuildingCount} building{previewBuildingCount !== 1 ? "s" : ""} mapped
                             </span>
+                          </div>
+                        ) : previewBuildingCount === undefined ? (
+                          <div className="flex flex-col items-center gap-1 text-muted-foreground/40">
+                            <Map className="h-8 w-8" />
+                            <span className="text-[9px] font-medium">Campus summary loading</span>
                           </div>
                         ) : (
                           <div className="flex flex-col items-center gap-1 text-muted-foreground/40">
@@ -1464,28 +1469,22 @@ export function CampusHome({
                     <div className="mt-auto">
                       {/* Stats bar */}
                       <div className="flex items-center gap-3 mt-3 pt-3 border-t border-border">
-                        <Tooltip content={`Buildings: ${previewBuildingCount}`}>
-                          <span className="flex items-center gap-1 text-[10px] text-muted-foreground cursor-help" title={`Buildings: ${previewBuildingCount}`}>
+                        <Tooltip content={`Buildings: ${previewBuildingCount ?? "—"}`}>
+                          <span className="flex items-center gap-1 text-[10px] text-muted-foreground cursor-help" title={`Buildings: ${previewBuildingCount ?? "—"}`}>
                             <Building2 className="h-3 w-3 shrink-0" />
-                            <span className="font-semibold tabular-nums">{previewBuildingCount}</span>
+                            <span className="font-semibold tabular-nums">{previewBuildingCount ?? "—"}</span>
                           </span>
                         </Tooltip>
-                        <Tooltip content={`Floors: ${floors}`}>
-                          <span className="flex items-center gap-1 text-[10px] text-muted-foreground cursor-help" title={`Floors: ${floors}`}>
+                        <Tooltip content={`Floors: ${floors ?? "—"}`}>
+                          <span className="flex items-center gap-1 text-[10px] text-muted-foreground cursor-help" title={`Floors: ${floors ?? "—"}`}>
                             <Layers className="h-3 w-3 shrink-0" />
-                            <span className="font-semibold tabular-nums">{floors}</span>
+                            <span className="font-semibold tabular-nums">{floors ?? "—"}</span>
                           </span>
                         </Tooltip>
-                        <Tooltip content={`Rooms: ${rooms}`}>
-                          <span className="flex items-center gap-1 text-[10px] text-muted-foreground cursor-help" title={`Rooms: ${rooms}`}>
+                        <Tooltip content={`Rooms: ${rooms ?? "—"}`}>
+                          <span className="flex items-center gap-1 text-[10px] text-muted-foreground cursor-help" title={`Rooms: ${rooms ?? "—"}`}>
                             <DoorOpen className="h-3 w-3 shrink-0" />
-                            <span className="font-semibold tabular-nums">{rooms}</span>
-                          </span>
-                        </Tooltip>
-                        <Tooltip content={`Markers: ${markerCount}`}>
-                          <span className="flex items-center gap-1 text-[10px] text-muted-foreground cursor-help" title={`Markers: ${markerCount}`}>
-                            <MapPin className="h-3 w-3 shrink-0" />
-                            <span className="font-semibold tabular-nums">{markerCount}</span>
+                            <span className="font-semibold tabular-nums">{rooms ?? "—"}</span>
                           </span>
                         </Tooltip>
                         <div className="flex-1" />

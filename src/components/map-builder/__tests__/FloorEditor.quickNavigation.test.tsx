@@ -120,6 +120,186 @@ describe("FloorEditor circulation quick navigation", () => {
     expect(within(screen.getByTestId("stair-picker-floor-f3")).getByTestId("stair-picker-connected")).toHaveTextContent("Left Stair");
   });
 
+  it("repairs a legacy mixed-shaft identity using only the explicitly selected Stair pair", () => {
+    const campus = makeQuickNavCampus();
+    const makeFloor = (id: string, number: number, leftId: string, rightId: string): FloorPlan => ({
+      ...campus.buildings[0].floors[0],
+      id,
+      number,
+      label: number === 1 ? "Ground Floor" : `Floor ${number}`,
+      stairs: [
+        { id: leftId, x: 40, y: 60, width: 24, height: 32, label: "Left Stair", direction: "both", sharedId: "legacy-main" },
+        { id: rightId, x: 120, y: 60, width: 24, height: 32, label: "Right Stair", direction: "both", sharedId: "legacy-main" },
+      ],
+    });
+    campus.buildings[0].floors = [
+      makeFloor("f1", 1, "left-1", "right-1"),
+      makeFloor("f2", 2, "left-2", "right-2"),
+      makeFloor("f3", 3, "left-3", "right-3"),
+    ];
+    campus.navNodes = campus.buildings[0].floors.flatMap((floor) => floor.stairs.map((stair) => ({
+      id: `node-${stair.id}`,
+      name: stair.label!,
+      type: "stair" as const,
+      x: stair.x + stair.width / 2,
+      y: stair.y + stair.height / 2,
+      buildingId: "b1",
+      floorId: floor.id,
+      stairId: stair.id,
+      accessible: false,
+      color: "#475569",
+    })));
+    campus.navNodes.push({
+      id: "free-walk-point",
+      name: "Walking Point",
+      type: "waypoint",
+      x: 260,
+      y: 210,
+      buildingId: "b1",
+      floorId: "f2",
+      accessible: true,
+      color: "#f97316",
+    });
+    campus.navEdges = [{
+      id: "local-walk-edge",
+      startNodeId: "node-right-2",
+      endNodeId: "free-walk-point",
+      distance: 170,
+      bidirectional: true,
+      accessible: true,
+    }];
+    const beforeNodes = structuredClone(campus.navNodes);
+    const beforeEdges = structuredClone(campus.navEdges);
+    let latestCampus = campus;
+
+    function Harness() {
+      const [value, setValue] = useState(campus);
+      return (
+        <FloorEditor
+          campus={value}
+          buildingId="b1"
+          floorId="f2"
+          initialSelection={{ type: "stairs", id: "right-2" }}
+          onBack={() => {}}
+          onSwitchFloor={() => {}}
+          onUpdate={(next) => { latestCampus = next; setValue(next); }}
+        />
+      );
+    }
+
+    render(<Harness />);
+    fireEvent.click(screen.getByTestId("circulation-group-trigger-stairs"));
+    const above = screen.getByTestId("stair-picker-floor-f3");
+    expect(within(above).queryByTestId("stair-picker-connected")).toBeNull();
+    expect(within(above).getByTestId("stair-connection-conflict-f3")).toBeInTheDocument();
+    fireEvent.click(within(above).getByRole("button", { name: /Right Stair/ }));
+    const confirmation = screen.getByTestId("stair-cross-pair-confirmation");
+    expect(confirmation).toHaveTextContent("only these two selected Stairs");
+    fireEvent.click(within(confirmation).getByRole("button", { name: "Connect" }));
+
+    const below = screen.getByTestId("stair-picker-floor-f1");
+    fireEvent.click(within(below).getByRole("button", { name: /Right Stair/ }));
+    const belowConfirmation = screen.getByTestId("stair-cross-pair-confirmation");
+    fireEvent.click(within(belowConfirmation).getByRole("button", { name: "Connect" }));
+
+    const floors = latestCampus.buildings[0].floors;
+    const selectedChain = floors[1].stairs.find((stair) => stair.id === "right-2")?.sharedId;
+    expect(selectedChain).toBeTruthy();
+    expect(selectedChain).not.toBe("legacy-main");
+    expect(floors[0].stairs.find((stair) => stair.id === "right-1")?.sharedId).toBe(selectedChain);
+    expect(floors[2].stairs.find((stair) => stair.id === "right-3")?.sharedId).toBe(selectedChain);
+    expect(floors[2].stairs.find((stair) => stair.id === "left-3")?.sharedId).toBe("legacy-main");
+    expect(floors[0].stairs.find((stair) => stair.id === "left-1")?.sharedId).toBe("legacy-main");
+    expect(floors[1].stairs.find((stair) => stair.id === "left-2")?.sharedId).toBe("legacy-main");
+    expect(within(screen.getByTestId("stair-picker-floor-f3")).getByTestId("stair-picker-connected")).toHaveTextContent("Right Stair");
+    expect(within(screen.getByTestId("stair-picker-floor-f3")).getByTestId("stair-picker-connected")).not.toHaveTextContent("Left Stair");
+    expect(within(screen.getByTestId("stair-picker-floor-f1")).getByTestId("stair-picker-connected")).toHaveTextContent("Right Stair");
+    expect(within(screen.getByTestId("stair-picker-floor-f1")).getByTestId("stair-picker-connected")).not.toHaveTextContent("Left Stair");
+    const beforeNodeById = new Map(beforeNodes.map((node) => [node.id, node]));
+    const afterNodeById = new Map(latestCampus.navNodes.map((node) => [node.id, node]));
+    for (const untouchedId of ["node-left-1", "node-left-2", "node-left-3", "free-walk-point"]) {
+      expect(afterNodeById.get(untouchedId)).toEqual(beforeNodeById.get(untouchedId));
+    }
+    for (const movedIdentityId of ["node-right-1", "node-right-2", "node-right-3"]) {
+      expect(afterNodeById.get(movedIdentityId)?.x).toBe(beforeNodeById.get(movedIdentityId)?.x);
+      expect(afterNodeById.get(movedIdentityId)?.y).toBe(beforeNodeById.get(movedIdentityId)?.y);
+      expect(afterNodeById.get(movedIdentityId)?.transitionSharedId).toBe(selectedChain);
+    }
+    const transitionPairs = latestCampus.navEdges.filter((edge) => edge.type === "floor_transition")
+      .map((edge) => [edge.startNodeId, edge.endNodeId].sort().join("|"));
+    expect(transitionPairs).toContain("node-right-1|node-right-2");
+    expect(transitionPairs).toContain("node-right-2|node-right-3");
+    expect(transitionPairs).not.toContain("node-right-2|node-left-3");
+    expect(latestCampus.navEdges.filter((edge) => edge.type !== "floor_transition")).toEqual(beforeEdges);
+  });
+
+  it("changes only the chosen Above continuation and preserves the Below Stair chain", () => {
+    const campus = makeQuickNavCampus();
+    const makeFloor = (id: string, number: number): FloorPlan => ({
+      ...campus.buildings[0].floors[0],
+      id,
+      number,
+      label: number === 1 ? "Ground Floor" : `Floor ${number}`,
+      stairs: [
+        { id: `left-${number}`, x: 40, y: 60, width: 24, height: 32, label: "Left Stair", direction: "both", sharedId: "left-chain" },
+        { id: `right-${number}`, x: 120, y: 60, width: 24, height: 32, label: "Right Stair", direction: "both", sharedId: "right-chain" },
+      ],
+    });
+    campus.buildings[0].floors = [makeFloor("f1", 1), makeFloor("f2", 2), makeFloor("f3", 3)];
+    campus.navNodes = campus.buildings[0].floors.flatMap((floor) => floor.stairs.map((stair) => ({
+      id: `node-${stair.id}`,
+      name: stair.label!,
+      type: "stair" as const,
+      x: stair.x + stair.width / 2,
+      y: stair.y + stair.height / 2,
+      buildingId: "b1",
+      floorId: floor.id,
+      stairId: stair.id,
+      accessible: false,
+      color: "#475569",
+    })));
+    campus.navEdges = [];
+    let latestCampus = campus;
+
+    function Harness() {
+      const [value, setValue] = useState(campus);
+      return (
+        <FloorEditor
+          campus={value}
+          buildingId="b1"
+          floorId="f2"
+          initialSelection={{ type: "stairs", id: "right-2" }}
+          onBack={() => {}}
+          onSwitchFloor={() => {}}
+          onUpdate={(next) => { latestCampus = next; setValue(next); }}
+        />
+      );
+    }
+
+    render(<Harness />);
+    fireEvent.click(screen.getByTestId("circulation-group-trigger-stairs"));
+    const above = screen.getByTestId("stair-picker-floor-f3");
+    expect(within(above).getByTestId("stair-picker-connected")).toHaveTextContent("Right Stair");
+    fireEvent.click(within(above).getByRole("button", { name: /Left Stair/ }));
+    const confirmation = screen.getByTestId("stair-cross-pair-confirmation");
+    fireEvent.click(within(confirmation).getByRole("button", { name: "Connect" }));
+
+    const floors = latestCampus.buildings[0].floors;
+    const rightId = floors[1].stairs.find((stair) => stair.id === "right-2")?.sharedId;
+    expect(floors[0].stairs.find((stair) => stair.id === "right-1")?.sharedId).toBe(rightId);
+    expect(floors[2].stairs.find((stair) => stair.id === "left-3")?.sharedId).toBe(rightId);
+    expect(floors[2].stairs.find((stair) => stair.id === "right-3")?.sharedId).not.toBe(rightId);
+    expect(floors[0].stairs.find((stair) => stair.id === "left-1")?.sharedId)
+      .toBe(floors[1].stairs.find((stair) => stair.id === "left-2")?.sharedId);
+    const transitionPairs = latestCampus.navEdges.filter((edge) => edge.type === "floor_transition")
+      .map((edge) => [edge.startNodeId, edge.endNodeId].sort().join("|"));
+    expect(transitionPairs.sort()).toEqual([
+      "node-left-1|node-left-2",
+      "node-left-3|node-right-2",
+      "node-right-1|node-right-2",
+    ]);
+  });
+
   it("connects both unambiguous matching Stair sides in one explicit action", () => {
     const campus = makeQuickNavCampus();
     const [floorOne, floorTwo] = campus.buildings[0].floors;

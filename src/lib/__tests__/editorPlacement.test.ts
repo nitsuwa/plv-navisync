@@ -87,6 +87,19 @@ describe("screenToWorld — single shared pointer→world conversion", () => {
     expect(pt.y).toBeCloseTo(300, 4);
   });
 
+  it("round-trips authored coordinates when a Floor-shape viewBox starts outside the base canvas", () => {
+    const r = rect(0, 0, 900, 600);
+    const pan = { x: 12, y: -8 };
+    const zoom = 1.5;
+    const origin = { x: -120, y: 30 };
+    const world = { x: -20, y: 170 };
+    const sx = (zoom * world.x + pan.x - origin.x) * 1.5;
+    const sy = (zoom * world.y + pan.y - origin.y) * 1.5;
+    const point = screenToWorld(sx, sy, r, 600, 400, pan, zoom, origin);
+    expect(point.x).toBeCloseTo(world.x, 4);
+    expect(point.y).toBeCloseTo(world.y, 4);
+  });
+
   it("vertical letterbox round-trips too", () => {
     const r = rect(0, 0, 900, 900); // 110px top/bottom margins
     const pt = screenToWorld(450, 110 + 340, r, 900, 680, { x: 0, y: 0 }, 1);
@@ -114,6 +127,16 @@ describe("panToKeepWorldPoint — zoom-to-cursor keeps the cursor point fixed", 
     const pan = panToKeepWorldPoint(600, 400, r, 900, 680, world.x, world.y, zoom);
     // Re-run the forward conversion and verify it lands on the world point.
     const back = screenToWorld(600, 400, r, 900, 680, pan, zoom);
+    expect(back.x).toBeCloseTo(world.x, 4);
+    expect(back.y).toBeCloseTo(world.y, 4);
+  });
+
+  it("keeps the cursor point fixed when a Floor-shape viewBox has an offset origin", () => {
+    const r = rect(0, 0, 900, 600);
+    const world = { x: -20, y: 170 };
+    const origin = { x: -120, y: 30 };
+    const pan = panToKeepWorldPoint(450, 300, r, 600, 400, world.x, world.y, 1.5, origin);
+    const back = screenToWorld(450, 300, r, 600, 400, pan, 1.5, origin);
     expect(back.x).toBeCloseTo(world.x, 4);
     expect(back.y).toBeCloseTo(world.y, 4);
   });

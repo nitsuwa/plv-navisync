@@ -532,14 +532,18 @@ export function syncExteriorEmergencyStairOccurrences(building: CampusBuilding):
     }
     return { ...floor, stairs: nextStairs };
   });
-  const nextExterior = exterior.map((stair) => ({
-    ...stair,
-    occurrenceIds: { ...(stair.occurrenceIds ?? {}), ...Object.fromEntries(
+  const nextExterior = exterior.map((stair) => {
+    const servedFloorIds = new Set(stair.servedFloorIds);
+    const retainedOccurrenceIds = Object.fromEntries(
+      Object.entries(stair.occurrenceIds ?? {}).filter(([floorId]) => servedFloorIds.has(floorId)),
+    );
+    const canonicalOccurrenceIds = Object.fromEntries(
       Object.entries(occurrenceIds)
         .filter(([key]) => key.startsWith(`${stair.id}:`))
         .map(([key, id]) => [key.slice(stair.id.length + 1), id]),
-    ) },
-  }));
+    );
+    return { ...stair, occurrenceIds: { ...retainedOccurrenceIds, ...canonicalOccurrenceIds } };
+  });
   return { ...building, floors, exteriorEmergencyStairs: nextExterior };
 }
 
@@ -548,8 +552,48 @@ export function syncExteriorEmergencyStairs(campus: Campus): Campus {
   return { ...campus, buildings: campus.buildings.map(syncExteriorEmergencyStairOccurrences) };
 }
 
+/**
+ * Forget restored local-path snapshots after an explicit Floor-editor delete.
+ * Snapshots are a temporary backup for unserved Floor occurrences, not a
+ * second source of truth once a Floor is active again.
+ */
+export function removeExteriorEmergencyStairConnectionSnapshots(
+  campus: Campus,
+  buildingId: string,
+  floorId: string,
+  edgeIds: ReadonlySet<string>,
+): Campus {
+  if (edgeIds.size === 0) return campus;
+  let changed = false;
+  const buildings = campus.buildings.map((building) => {
+    if (building.id !== buildingId) return building;
+    let stairChanged = false;
+    const exteriorEmergencyStairs = (building.exteriorEmergencyStairs ?? []).map((stair) => {
+      const snapshot = stair.floorConnectionSnapshots?.[floorId];
+      if (!snapshot?.some((edge) => edgeIds.has(edge.id))) return stair;
+      const floorConnectionSnapshots = { ...stair.floorConnectionSnapshots };
+      const retained = snapshot.filter((edge) => !edgeIds.has(edge.id));
+      if (retained.length > 0) floorConnectionSnapshots[floorId] = retained;
+      else delete floorConnectionSnapshots[floorId];
+      stairChanged = true;
+      changed = true;
+      return {
+        ...stair,
+        floorConnectionSnapshots: Object.keys(floorConnectionSnapshots).length > 0
+          ? floorConnectionSnapshots
+          : undefined,
+      };
+    });
+    return stairChanged ? { ...building, exteriorEmergencyStairs } : building;
+  });
+  return changed ? { ...campus, buildings } : campus;
+}
+
 /** Ensure canonical local nodes and one outdoor discharge bridge for each stair. */
-export function syncExteriorEmergencyStairGraph(campus: Campus): Campus {
+export function syncExteriorEmergencyStairGraph(
+  campus: Campus,
+  options: { reconcileOrdinaryFloorTransitions?: boolean } = {},
+): Campus {
   const synced = syncExteriorEmergencyStairs(campus);
   // Before removing an unserved generated landing, retain its authored local
   // Walking Network edges on the canonical Building owner.  The snapshots are
@@ -812,14 +856,22 @@ export function syncExteriorEmergencyStairGraph(campus: Campus): Campus {
           edgeIds.add(snapshot.id);
           edgePairs.add(pair);
         }
+        // A served Floor's live graph is authoritative. Consuming its backup
+        // prevents a later manual path deletion from being undone by another
+        // reconciliation pass. If the Floor is unserved again, its current
+        // authored connections are snapshotted afresh above.
+        delete snapshots[floor.id];
+        changed = true;
       }
       if (!changed) return stair;
       return Object.keys(snapshots).length > 0 ? { ...stair, floorConnectionSnapshots: snapshots } : { ...stair, floorConnectionSnapshots: undefined };
     });
     return { ...building, exteriorEmergencyStairs };
   });
-  for (const building of synced.buildings) {
-    edges = reconcileCrossFloorTransitions(nodes, edges, building.floors, building.id);
+  if (options.reconcileOrdinaryFloorTransitions !== false) {
+    for (const building of synced.buildings) {
+      edges = reconcileCrossFloorTransitions(nodes, edges, building.floors, building.id);
+    }
   }
   return { ...synced, navNodes: nodes, navEdges: edges };
 }
