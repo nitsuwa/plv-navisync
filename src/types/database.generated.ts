@@ -1082,6 +1082,12 @@ export type Database = {
         }
         Relationships: []
       }
+      report_admin_notes: {
+        Row: { report_id: string; notes: string | null; updated_at: string }
+        Insert: { report_id: string; notes?: string | null; updated_at?: string }
+        Update: { report_id?: string; notes?: string | null; updated_at?: string }
+        Relationships: [{ foreignKeyName: "report_admin_notes_report_id_fkey"; columns: ["report_id"]; isOneToOne: true; referencedRelation: "reports"; referencedColumns: ["id"] }]
+      }
       report_history: {
         Row: {
           action: string

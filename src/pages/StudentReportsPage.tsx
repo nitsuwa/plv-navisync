@@ -71,7 +71,7 @@ const REPORT_STATUS: Record<string, {
 const STEPS = ["Submitted", "Under Review", "Resolved"];
 
 export function StudentReportsPage() {
-  const { loading: authLoading, isStudent } = useStudentAuth();
+  const { loading: authLoading, isStudent, profile } = useStudentAuth();
   const { activeCampus } = usePublishedCampus();
   const location = useLocation();
   const navigate = useNavigate();
@@ -89,6 +89,10 @@ export function StudentReportsPage() {
   }, [activeCampus, location.search]);
 
   useEffect(() => {
+    if (authLoading) return;
+    if (!isStudent) { setReports([]); setLoading(false); return; }
+    setReports([]);
+    setLoading(true);
     window.scrollTo({ top: 0, behavior: "instant" });
     let mounted = true;
     reportService.getStudentReports()
@@ -107,7 +111,7 @@ export function StudentReportsPage() {
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [authLoading, isStudent, profile?.id]);
 
   const refreshReports = useCallback(async () => {
     setIsRefreshing(true);
@@ -123,6 +127,7 @@ export function StudentReportsPage() {
   }, []);
 
   const closeReportModal = () => {
+    void refreshReports();
     const params = new URLSearchParams(location.search);
     params.delete("building");
     const search = params.toString();
@@ -344,7 +349,7 @@ export function StudentReportsPage() {
                               </div>
                               <div className="flex items-center gap-1.5 mt-1 text-xs text-muted-foreground">
                                 <MapPin className="h-3 w-3 text-primary shrink-0" />
-                                {r.buildingName || "Campus Location"} {r.floorLabel ? `· ${r.floorLabel}` : ""}
+                                {[r.buildingName || "Campus Location", r.floorLabel, r.roomName].filter(Boolean).join(" · ")}
                               </div>
                               <p className="text-[10px] text-muted-foreground mt-0.5">{dateStr}</p>
                             </div>
@@ -456,6 +461,7 @@ export function StudentReportsPage() {
           <ReportModal
             building={reportBuilding}
             campusId={activeCampus?.id}
+            floors={activeCampus?.buildings?.find(building => building.id === reportBuilding.id)?.floors}
             onClose={closeReportModal}
           />
         )}

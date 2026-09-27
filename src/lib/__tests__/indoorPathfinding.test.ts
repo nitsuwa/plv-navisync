@@ -126,17 +126,19 @@ describe("findIndoorRouteFromNavigationGraph", () => {
     const nodes = [
       node("entry-door", "Main Door", 20, 100, { doorId: "door-main" }),
       node("hall-a", "Hallway", 80, 100),
-      node("room-access", "Room 101 access", 140, 40, { type: "room_access", roomId: "room-101" }),
+      node("room-door", "Room 101 Door", 140, 40, { type: "hallway", doorId: "door-room-101" }),
+      node("room-access", "Room 101 center", 160, 40, { type: "room_access", roomId: "room-101" }),
     ];
     const edges = [
       edge("door-hall", "entry-door", "hall-a", 60, { bendPoints: [{ x: 50, y: 100 }] }),
-      edge("hall-room", "hall-a", "room-access", 90, { bendPoints: [{ x: 80, y: 40 }] }),
+      edge("hall-room-door", "hall-a", "room-door", 90, { bendPoints: [{ x: 80, y: 40 }] }),
+      edge("room-door-semantic", "room-access", "room-door", 20, { type: "room_door_transition" }),
     ];
 
     const route = findIndoorRouteFromNavigationGraph(
       nodes,
       edges,
-      { buildingId: "b1", floorId: "f1", roomId: "room-101", roomName: "Room 101" },
+      { buildingId: "b1", floorId: "f1", roomId: "room-101", roomName: "Room 101", accessDoorIds: ["door-room-101"] },
       "entry-door",
     );
 
@@ -157,24 +159,27 @@ describe("findIndoorRouteFromNavigationGraph", () => {
       node("entry-door", "Main Door", 20, 100, { doorId: "door-main" }),
       node("stair-ground", "Stairwell", 80, 100, { type: "stair", stairId: "stair-g", accessible: false }),
       node("stair-upper", "Stairwell", 80, 100, { floorId: "f2", type: "stair", stairId: "stair-2", accessible: false }),
-      node("room-upper", "Room 201 access", 140, 40, { floorId: "f2", type: "room_access", roomId: "room-201" }),
+      node("room-upper-door", "Room 201 Door", 140, 40, { floorId: "f2", type: "hallway", doorId: "door-room-201" }),
+      node("room-upper", "Room 201 center", 160, 40, { floorId: "f2", type: "room_access", roomId: "room-201" }),
     ];
     const edges = [
       edge("door-stair", "entry-door", "stair-ground", 60),
       edge("floor-transition", "stair-ground", "stair-upper", 5, { type: "floor_transition", accessible: false }),
-      edge("stair-room", "stair-upper", "room-upper", 90, { floorId: "f2" }),
+      edge("stair-room-door", "stair-upper", "room-upper-door", 90, { floorId: "f2" }),
+      edge("room-upper-semantic", "room-upper", "room-upper-door", 20, { type: "room_door_transition" }),
     ];
 
     const route = findIndoorRouteFromNavigationGraph(
       nodes,
       edges,
-      { buildingId: "b1", floorId: "f2", roomId: "room-201", roomName: "Room 201" },
+      { buildingId: "b1", floorId: "f2", roomId: "room-201", roomName: "Room 201", accessDoorIds: ["door-room-201"] },
       "entry-door",
     );
 
     expect(route).not.toBeNull();
     expect(route!.waypoints[0]).toMatchObject({ x: 80, y: 100 });
     expect(route!.waypoints.at(-1)).toMatchObject({ x: 140, y: 40 });
+    expect(route!.waypoints).not.toContainEqual({ x: 160, y: 40 });
     expect(route!.waypoints).not.toContainEqual({ x: 20, y: 100 });
   });
 });

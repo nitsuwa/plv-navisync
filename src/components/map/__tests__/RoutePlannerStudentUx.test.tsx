@@ -67,6 +67,45 @@ const route = (overrides: Partial<PlannedRoute> = {}): PlannedRoute => ({
 });
 
 describe("RoutePlannerDialog student accessibility", () => {
+  it("SOS chooses an evacuation destination automatically from only a start", () => {
+    const onFindRoute = vi.fn();
+    render(<RoutePlannerDialog {...plannerProps({
+      from: building("science", "SCI", "Science Hall"), mode: "emergency",
+      route: route({ mode: "emergency", emergencyDestinationLabel: "Emergency Stair → Campus Gate" }), onFindRoute,
+    })} />);
+    expect(screen.getByTestId("emergency-destination")).toHaveTextContent("Emergency Stair → Campus Gate");
+    expect(screen.queryByRole("button", { name: "Choose destination" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Swap start and destination" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Start navigation" }));
+    expect(onFindRoute).toHaveBeenCalledOnce();
+  });
+  it("lists all campus destinations beyond the first building and groups both endpoint pickers", () => {
+    const destinations = [
+      destinationResult({ id: "science", name: "Science Hall", code: "SCI", kind: "building", buildingId: "science" }),
+      ...Array.from({ length: 35 }, (_, index) => destinationResult({
+        id: `room-${index}`, name: `Science Room ${index}`, kind: "room", buildingId: "science", buildingName: "Science Hall", floorNumber: 2,
+      })),
+      destinationResult({ id: "library", name: "Library", code: "LIB", kind: "building", buildingId: "library" }),
+      destinationResult({ id: "copy", name: "Copy Shop", kind: "room", buildingId: "library", buildingName: "Library", floorNumber: 1 }),
+    ];
+    const onSelectToDestination = vi.fn();
+    render(<RoutePlannerDialog {...plannerProps({ destinationResults: destinations, onSelectToDestination })} />);
+    fireEvent.click(screen.getByRole("button", { name: "Choose start" }));
+    const startList = screen.getByRole("listbox", { name: "Campus destination results" });
+    expect(within(startList).getAllByRole("option")).toHaveLength(38);
+    expect(within(startList).getByRole("group", { name: "Science Hall (SCI)" })).toBeInTheDocument();
+    expect(within(startList).getByRole("group", { name: "Library (LIB)" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Choose destination" }));
+    const destinationList = screen.getByRole("listbox", { name: "Campus destination results" });
+    expect(within(destinationList).getAllByRole("option")).toHaveLength(38);
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search destination" }), { target: { value: "Science" } });
+    expect(within(destinationList).getAllByRole("option")).toHaveLength(36);
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search destination" }), { target: { value: "Copy" } });
+    fireEvent.click(within(destinationList).getByRole("option", { name: /Copy Shop, Room, Library · Floor 1/ }));
+    expect(onSelectToDestination).toHaveBeenCalledWith(expect.objectContaining({ id: "copy", buildingId: "library" }));
+  });
+
   it("exposes a named non-modal dialog and restores focus when it unmounts", () => {
     const opener = document.createElement("button");
     opener.textContent = "Open directions";

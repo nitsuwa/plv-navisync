@@ -2,7 +2,7 @@ import { getSupabase } from "../lib/supabase";
 import { normalizeFloor } from "../lib/floorPlanNormalization";
 import { nextFloorNumberForBuilding } from "../lib/floorManagement";
 import { syncEntranceNodePositions } from "../lib/navigationGraph";
-import { syncIndoorLinkedNodePositions } from "../lib/indoorNavigationGraph";
+import { pruneOrphanedIndoorNodes, syncIndoorLinkedNodePositions } from "../lib/indoorNavigationGraph";
 import { ENTRANCE_TRANSITION_EDGE_TYPE, reconcileEntranceTransitions } from "../lib/entranceTransitions";
 import { syncExteriorEmergencyStairGraph } from "../lib/exteriorEmergencyStairs";
 import { syncCampusGateNavigation } from "../lib/campusGates";
@@ -634,14 +634,31 @@ export function hydrateCampusStructure(campus: Campus, rows: CampusStructureRows
     )
   );
   const byId = new Map(syncedIndoorNodes.map((n) => [n.id, n]));
-  const finalNodes = navNodes.map((n) => (indoorLinkedIds.has(n.id) ? byId.get(n.id) ?? n : n));
+  let finalNodes = navNodes.map((n) => (indoorLinkedIds.has(n.id) ? byId.get(n.id) ?? n : n));
   // Only drop dangling edges (missing endpoints); cross-side indoor↔outdoor
   // links (entrance → room access) are a legitimate future graph pattern.
-  const finalEdges = hydratedNavEdges.filter((e) => {
+  let finalEdges = hydratedNavEdges.filter((e) => {
     const a = finalNodes.find((n) => n.id === e.startNodeId);
     const b = finalNodes.find((n) => n.id === e.endNodeId);
     return Boolean(a && b);
   });
+  // Legacy saves can retain linked indoor nodes after their physical Room or
+  // Door was deleted/recreated. Those nodes are not usable route endpoints and
+  // make publish validation fail with stale-reference errors. Prune only the
+  // invalid linked nodes (and their incident edges); free Walking Points,
+  // outdoor nodes, and all valid authored connections remain authoritative.
+  for (const building of buildings) {
+    for (const floor of building.floors ?? []) {
+      const scopedNodes = finalNodes.filter((node) => node.buildingId === building.id && node.floorId === floor.id);
+      if (scopedNodes.length === 0) continue;
+      const pruned = pruneOrphanedIndoorNodes(scopedNodes, finalEdges, floor);
+      const keptIds = new Set(pruned.nodes.map((node) => node.id));
+      const removedIds = new Set(scopedNodes.filter((node) => !keptIds.has(node.id)).map((node) => node.id));
+      if (removedIds.size === 0) continue;
+      finalNodes = finalNodes.filter((node) => !removedIds.has(node.id));
+      finalEdges = pruned.edges;
+    }
+  }
   const reconciledGraph = reconcileEntranceTransitions({ ...campus, buildings, navNodes: finalNodes, navEdges: finalEdges });
   const withExteriorEmergencyStairs = syncExteriorEmergencyStairGraph({ ...campus, buildings, markers: [...top<CampusMarker>("marker"), ...top<CampusMarker>("gate")], navNodes: finalNodes, navEdges: reconciledGraph.navEdges ?? [] });
   const withCampusGates = syncCampusGateNavigation({ ...withExteriorEmergencyStairs, markers: [...top<CampusMarker>("marker"), ...top<CampusMarker>("gate")] });

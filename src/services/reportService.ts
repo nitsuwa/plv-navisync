@@ -1,7 +1,7 @@
 import { getSupabase } from "../lib/supabase";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database, Tables, TablesInsert, TablesUpdate } from "../types/database.generated";
-import { logActivity, listActivityLogs, type ActivityLogRow } from "./activityLogService";
+import { logActivity } from "./activityLogService";
 
 export type ReportRow = Tables<"reports">;
 
@@ -16,6 +16,9 @@ export interface IssueReport {
   buildingName?: string;
   floorId?: string | null;
   floorLabel?: string;
+  roomId?: string | null;
+  roomName?: string;
+  submissionWarning?: string;
   reporterId: string;
   category: "accessibility" | "maintenance" | "map_error" | "hazard" | string;
   priority: "low" | "medium" | "high" | "urgent" | string;
@@ -41,6 +44,8 @@ export interface CreateReportInput {
   buildingName?: string;
   floorId?: string | null;
   floorLabel?: string;
+  roomId?: string | null;
+  roomName?: string;
   category: string;
   priority?: string;
   title: string;
@@ -48,7 +53,20 @@ export interface CreateReportInput {
   imageFile?: File | Blob | null;
 }
 
-const LOCAL_STORAGE_REPORTS_KEY = "plv_student_submitted_reports_v1";
+export const REPORT_CATEGORIES = ["broken_equipment", "damaged_facility", "electrical_issue", "water_leak", "cleanliness", "accessibility_concern", "safety_concern", "navigation_error", "other"];
+const REPORT_COLUMNS = "id,campus_id,building_id,floor_id,map_element_id,reporter_id,category,priority,title,description,status,resolution_notes,created_at,updated_at";
+
+export function normalizeReportCategory(category: string): string {
+  const legacy: Record<string, string> = { maintenance: "damaged_facility", accessibility: "accessibility_concern", hazard: "safety_concern", map_error: "navigation_error" };
+  const value = legacy[category] ?? category;
+  if (!REPORT_CATEGORIES.includes(value)) throw new Error("Choose a valid issue category.");
+  return value;
+}
+
+export function validateReportImage(file: Blob): void {
+  if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) throw new Error("Use a JPG, PNG, or WebP photo.");
+  if (file.size > 5 * 1024 * 1024) throw new Error("The photo must be 5 MB or smaller.");
+}
 
 export function normalizeReportStatus(status: string): ReportStatus {
   switch (status) {
@@ -76,13 +94,13 @@ export function toIssueReport(row: ReportRow): IssueReport {
     campusId: row.campus_id,
     buildingId: row.building_id,
     floorId: row.floor_id,
+    roomId: row.map_element_id,
     reporterId: row.reporter_id,
     category: row.category,
     priority: row.priority,
     title: row.title,
     description: row.description,
     status: normalizeReportStatus(row.status),
-    internalNotes: row.internal_notes,
     resolutionNotes: row.resolution_notes,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -111,111 +129,47 @@ export async function uploadReportImage(
   }
 }
 
-async function blobToDataUrl(file: Blob): Promise<string | null> {
-  if (typeof FileReader === "undefined") return null;
-  return new Promise((resolve) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : null);
-    reader.onerror = () => resolve(null);
-    reader.readAsDataURL(file);
-  });
-}
-
-// Submit a new issue report
+// Submission succeeds only after the database confirms persistence. No local-only
+// report may masquerade as a report delivered to campus staff.
 export async function submitReport(input: CreateReportInput): Promise<IssueReport> {
-  const reportId = crypto.randomUUID();
-
-  let client: SupabaseClient<Database>;
-  try {
-    client = getSupabase();
-  } catch {
-    const imageUrl = input.imageFile ? await blobToDataUrl(input.imageFile) : null;
-    const localReport: IssueReport = {
-      id: reportId,
-      campusId: input.campusId ?? null,
-      buildingId: input.buildingId || null,
-      buildingName: input.buildingName,
-      floorId: input.floorId || null,
-      floorLabel: input.floorLabel,
-      reporterId: "guest-student-id",
-      category: input.category || "maintenance",
-      priority: input.priority || "medium",
-      title: input.title,
-      description: input.description,
-      status: "pending",
-      imageUrl,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-    saveToLocalCache(localReport);
-    return localReport;
-  }
-
-  const { data: userData } = await client.auth.getUser();
-  const userId = userData?.user?.id || "guest-student-id";
-  const newReport: IssueReport = {
-    id: reportId,
-    campusId: input.campusId ?? null,
-    buildingId: input.buildingId || null,
-    buildingName: input.buildingName,
-    floorId: input.floorId || null,
-    floorLabel: input.floorLabel,
-    reporterId: userId,
-    category: input.category || "maintenance",
-    priority: input.priority || "medium",
-    title: input.title,
-    description: input.description,
-    status: "pending",
-    imageUrl: null,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
+  const client = getSupabase();
+  const { data: userData, error: authError } = await client.auth.getUser();
+  if (authError || !userData.user) throw new Error("Sign in to submit a report.");
+  if (!input.campusId || !input.buildingId) throw new Error("Choose a published building before reporting.");
+  if (!input.title.trim() || !input.description.trim()) throw new Error("Describe the issue before submitting.");
+  if (input.imageFile) validateReportImage(input.imageFile);
+  const payload: TablesInsert<"reports"> = {
+    id: crypto.randomUUID(), campus_id: input.campusId, building_id: input.buildingId,
+    floor_id: input.floorId || null, map_element_id: input.roomId || null,
+    reporter_id: userData.user.id, category: normalizeReportCategory(input.category),
+    priority: "normal", title: input.title.trim(), description: input.description.trim(), status: "pending",
   };
-
-  // Try inserting into Supabase reports table
-  try {
-    const insertPayload: TablesInsert<"reports"> = {
-      id: newReport.id,
-      campus_id: newReport.campusId,
-      building_id: newReport.buildingId,
-      floor_id: newReport.floorId,
-      reporter_id: userId !== "guest-student-id" ? userId : "00000000-0000-0000-0000-000000000000",
-      category: newReport.category,
-      priority: newReport.priority,
-      title: newReport.title,
-      description: newReport.description,
-      status: "pending",
-    };
-
-    const { data, error } = await client.from("reports").insert(insertPayload).select("*").single();
-
-    if (!error && data) {
-      const reportFromDb = toIssueReport(data);
-      let imageUrl: string | null = null;
-      if (input.imageFile) {
-        const uploaded = await uploadReportImage(input.imageFile, reportFromDb.id, client);
-        if (uploaded) {
-          imageUrl = uploaded.url;
-          const { error: imageRowError } = await client.from("report_images").insert({
-            report_id: reportFromDb.id,
-            storage_path: uploaded.path,
-            uploaded_by: userId,
-          } satisfies TablesInsert<"report_images">);
-          if (imageRowError) console.warn("Report image metadata insert warning:", imageRowError.message);
+  const { data, error } = await client.from("reports").insert(payload).select(REPORT_COLUMNS).single();
+  if (error || !data) throw new Error(error?.message || "The report was not saved. Please try again.");
+  const report = toIssueReport(data as ReportRow);
+  report.buildingName = input.buildingName;
+  report.floorLabel = input.floorLabel;
+  report.roomName = input.roomName;
+  if (input.imageFile) {
+    try {
+      const uploaded = await uploadReportImage(input.imageFile, report.id, client);
+      if (uploaded) {
+        const { error: imageError } = await client.from("report_images").insert({
+          report_id: report.id, storage_path: uploaded.path, uploaded_by: userData.user.id,
+        });
+        if (!imageError) report.imageUrl = uploaded.url;
+        else {
+          await client.storage.from("report-images").remove([uploaded.path]).catch(() => undefined);
+          report.submissionWarning = "Your report was saved, but the photo could not be attached.";
         }
-      }
-      const result = { ...reportFromDb, buildingName: input.buildingName, floorLabel: input.floorLabel, imageUrl };
-      saveToLocalCache(result);
-      return result;
+      } else report.submissionWarning = "Your report was saved, but the photo could not be uploaded.";
+    } catch {
+      // The report is already persisted. Do not invite a duplicate submission
+      // when only the optional attachment request failed.
+      report.submissionWarning = "Your report was saved, but the photo could not be attached.";
     }
-  } catch (err) {
-    console.warn("Supabase report insert fallback:", err);
   }
-
-  // Save to local storage for offline / demo mode
-  const imageUrl = input.imageFile ? await blobToDataUrl(input.imageFile) : null;
-  const localReport = { ...newReport, imageUrl };
-  saveToLocalCache(localReport);
-  return localReport;
+  return report;
 }
 
 function humanizeHistoryAction(action: string): string {
@@ -234,6 +188,7 @@ async function hydrateStudentReports(
   const buildingIds = [...new Set(reports.map((report) => report.buildingId).filter(Boolean))] as string[];
   const floorIds = [...new Set(reports.map((report) => report.floorId).filter(Boolean))] as string[];
   const reportIds = reports.map((report) => report.id);
+  const roomIds = reports.map(report => report.roomId).filter(Boolean) as string[];
 
   const read = async (query: any): Promise<any[]> => {
     try {
@@ -245,15 +200,17 @@ async function hydrateStudentReports(
     }
   };
 
-  const [buildingRows, floorRows, imageRows, historyRows] = await Promise.all([
+  const [buildingRows, floorRows, imageRows, historyRows, roomRows] = await Promise.all([
     buildingIds.length ? read(from("buildings").select("id,name").in("id", buildingIds)) : Promise.resolve([]),
     floorIds.length ? read(from("floors").select("id,name").in("id", floorIds)) : Promise.resolve([]),
     read(from("report_images").select("report_id,storage_path,created_at").in("report_id", reportIds)),
     read(from("report_history").select("report_id,action,new_status,note,created_at").in("report_id", reportIds).order("created_at", { ascending: true })),
+    roomIds.length ? read(from("map_elements").select("id,name").in("id", roomIds)) : Promise.resolve([]),
   ]);
 
   const buildingNames = new Map(buildingRows.map((row) => [row.id, row.name]));
   const floorNames = new Map(floorRows.map((row) => [row.id, row.name]));
+  const roomNames = new Map(roomRows.map((row) => [row.id, row.name]));
   const imageByReport = new Map<string, string>();
   await Promise.all(imageRows.map(async (image) => {
     try {
@@ -278,69 +235,23 @@ async function hydrateStudentReports(
     ...report,
     buildingName: report.buildingName ?? (report.buildingId ? buildingNames.get(report.buildingId) : undefined),
     floorLabel: report.floorLabel ?? (report.floorId ? floorNames.get(report.floorId) : undefined),
+    roomName: report.roomName ?? (report.roomId ? roomNames.get(report.roomId) : undefined),
     imageUrl: report.imageUrl ?? imageByReport.get(report.id) ?? null,
     updates: updatesByReport.get(report.id) ?? [{ text: "Report submitted", date: report.createdAt }],
   }));
 }
 
-// Get submitted report history for student
+// Read only the signed-in student's persisted reports. Legacy shared-browser
+// caches are intentionally neither read nor deleted: they may contain unsent drafts.
 export async function getStudentReports(): Promise<IssueReport[]> {
-  let client: SupabaseClient<Database> | null = null;
-  try {
-    client = getSupabase();
-  } catch {
-    const localReports = getLocalCachedReports();
-    return localReports.map((report) => ({
-      ...report,
-      status: normalizeReportStatus(report.status),
-      updates: report.updates ?? [{ text: "Report submitted", date: report.createdAt }],
-    }));
-  }
-
-  let userData: Awaited<ReturnType<typeof client.auth.getUser>>["data"] | null = null;
-  try {
-    ({ data: userData } = await client.auth.getUser());
-  } catch {
-    // Treat an expired or unavailable session as an offline/local-read case.
-  }
-  const userId = userData?.user?.id;
-  let dbReports: IssueReport[] = [];
-
-  if (userId) {
-    try {
-      const { data, error } = await client
-        .from("reports")
-        .select("*")
-        .eq("reporter_id", userId)
-        .order("created_at", { ascending: false });
-
-      if (!error && data) {
-        dbReports = data.map(toIssueReport);
-      }
-    } catch {
-      // Ignore DB read errors
-    }
-  }
-
-  const localReports = getLocalCachedReports();
-  
-  // Combine DB and local reports (unique by id)
-  const map = new Map<string, IssueReport>();
-  localReports.forEach((r) => map.set(r.id, {
-    ...r,
-    status: normalizeReportStatus(r.status),
-    updates: r.updates ?? [{ text: "Report submitted", date: r.createdAt }],
-  }));
-  dbReports.forEach((r) => {
-    const local = map.get(r.id);
-    map.set(r.id, { ...local, ...r, buildingName: r.buildingName ?? local?.buildingName, floorLabel: r.floorLabel ?? local?.floorLabel, imageUrl: r.imageUrl ?? local?.imageUrl });
-  });
-
-  const combined = Array.from(map.values()).sort(
-    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-  );
-
-  return client ? hydrateStudentReports(combined, client) : combined;
+  const client = getSupabase();
+  const { data: userData, error: authError } = await client.auth.getUser();
+  if (authError || !userData.user) throw new Error("Sign in to view your reports.");
+  const { data, error } = await client.from("reports").select(REPORT_COLUMNS)
+    .eq("reporter_id", userData.user.id).is("archived_at", null)
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+  return hydrateStudentReports((data ?? []).map(row => toIssueReport(row as ReportRow)), client);
 }
 
 // ── Admin workflow ─────────────────────────────────────────────────────────
@@ -357,6 +268,7 @@ export async function countPendingReports(): Promise<number> {
   const { count, error } = await supabase
     .from("reports")
     .select("id", { count: "exact", head: true })
+    .is("archived_at", null)
     .eq("status", "pending");
   if (error) throw error;
   return count ?? 0;
@@ -365,7 +277,7 @@ export async function countPendingReports(): Promise<number> {
 /** List every report for the admin review queue, newest first. */
 export async function listAllReports(filters: ReportFilters = {}): Promise<IssueReport[]> {
   const supabase = getSupabase();
-  let query = supabase.from("reports").select("*").order("created_at", { ascending: false });
+  let query = supabase.from("reports").select(REPORT_COLUMNS).is("archived_at", null).order("created_at", { ascending: false });
 
   if (filters.status && filters.status !== "all") query = query.eq("status", filters.status);
   if (filters.category && filters.category !== "all") query = query.eq("category", filters.category);
@@ -373,11 +285,17 @@ export async function listAllReports(filters: ReportFilters = {}): Promise<Issue
   const { data, error } = await query;
   if (error) throw error;
 
-  let reports = (data ?? []).map(toIssueReport);
+  let reports = await hydrateStudentReports((data ?? []).map(row => toIssueReport(row as ReportRow)), supabase);
+  if (reports.length) {
+    const { data: notes, error: notesError } = await supabase.from("report_admin_notes")
+      .select("report_id,notes").in("report_id", reports.map(report => report.id));
+    if (notesError) throw new Error("Admin notes could not be loaded. Apply the reporting migration and try again.");
+    reports = reports.map(report => ({ ...report, internalNotes: notes?.find(note => note.report_id === report.id)?.notes ?? null }));
+  }
   const q = filters.search?.trim().toLocaleLowerCase();
   if (q) {
     reports = reports.filter((r) =>
-      [r.title, r.buildingName, r.category, r.description].filter(Boolean).join(" ").toLocaleLowerCase().includes(q)
+      [r.title, r.buildingName, r.floorLabel, r.roomName, r.category, r.description].filter(Boolean).join(" ").toLocaleLowerCase().includes(q)
     );
   }
   return reports;
@@ -390,15 +308,16 @@ export async function updateReportStatus(
   resolutionNotes?: string
 ): Promise<void> {
   const supabase = getSupabase();
+  if (status === "resolved" && !resolutionNotes?.trim()) throw new Error("Resolution notes are required.");
   const updates: TablesUpdate<"reports"> = {
     status,
     updated_at: new Date().toISOString(),
   };
-  if (status === "resolved") updates.resolved_at = new Date().toISOString();
+  updates.resolved_at = status === "resolved" ? new Date().toISOString() : null;
   if (resolutionNotes !== undefined) updates.resolution_notes = resolutionNotes || null;
 
-  const { error } = await supabase.from("reports").update(updates).eq("id", id);
-  if (error) throw error;
+  const { data, error } = await supabase.from("reports").update(updates).eq("id", id).select("id").single();
+  if (error || !data) throw new Error(error?.message || "Report not found or update not permitted.");
 
   await logActivity({
     action: `report.${status}`,
@@ -411,11 +330,10 @@ export async function updateReportStatus(
 /** Save private admin notes on a report. */
 export async function updateReportInternalNotes(id: string, notes: string): Promise<void> {
   const supabase = getSupabase();
-  const { error } = await supabase
-    .from("reports")
-    .update({ internal_notes: notes || null, updated_at: new Date().toISOString() })
-    .eq("id", id);
-  if (error) throw error;
+  const { data, error } = await supabase.from("report_admin_notes")
+    .upsert({ report_id: id, notes: notes.trim() || null, updated_at: new Date().toISOString() }, { onConflict: "report_id" })
+    .select("report_id").single();
+  if (error || !data) throw new Error(error?.message || "Admin notes could not be saved.");
 
   await logActivity({ action: "report.notes", entityType: "report", entityId: id });
 }
@@ -423,43 +341,23 @@ export async function updateReportInternalNotes(id: string, notes: string): Prom
 /** Soft-delete a report by archiving it; the workflow status is left untouched. */
 export async function archiveReport(id: string): Promise<void> {
   const supabase = getSupabase();
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from("reports")
     .update({ archived_at: new Date().toISOString(), updated_at: new Date().toISOString() })
-    .eq("id", id);
-  if (error) throw error;
+    .eq("id", id).select("id").single();
+  if (error || !data) throw new Error(error?.message || "Report not found or archive not permitted.");
 
   await logActivity({ action: "report.archive", entityType: "report", entityId: id });
 }
 
 /** Full audit history for one report. */
-export async function getReportHistory(id: string): Promise<ActivityLogRow[]> {
-  return listActivityLogs({ entityType: "report", entityId: id });
+export async function getReportHistory(id: string): Promise<Tables<"report_history">[]> {
+  const { data, error } = await getSupabase().from("report_history").select("*")
+    .eq("report_id", id).order("created_at", { ascending: false });
+  if (error) throw error;
+  return data ?? [];
 }
 
-// Local Storage Cache Helpers
-function getLocalCachedReports(): IssueReport[] {
-  try {
-    const raw = localStorage.getItem(LOCAL_STORAGE_REPORTS_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) return parsed;
-    }
-  } catch {
-    // Ignore parse errors
-  }
-  return [];
-}
-
-function saveToLocalCache(report: IssueReport): void {
-  try {
-    const existing = getLocalCachedReports();
-    const updated = [report, ...existing.filter((r) => r.id !== report.id)];
-    localStorage.setItem(LOCAL_STORAGE_REPORTS_KEY, JSON.stringify(updated));
-  } catch {
-    // Ignore storage write errors
-  }
-}
 
 export const reportService = {
   submitReport,

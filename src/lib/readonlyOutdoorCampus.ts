@@ -26,6 +26,8 @@ export interface ReadonlyOutdoorCampus {
   id: string;
   canvasW: number;
   canvasH: number;
+  /** Outdoor surface-cell spacing used by the Admin canvas. */
+  gridSize?: number;
   backgroundColor?: string;
   backgroundImage?: string;
   backgroundOpacity?: number;
@@ -80,6 +82,7 @@ export function projectReadonlyOutdoorCampus(campus: Campus): ReadonlyOutdoorCam
     id: campus.id,
     canvasW: campus.canvasW || 900,
     canvasH: campus.canvasH || 680,
+    gridSize: campus.gridSize,
     backgroundColor: campus.backgroundColor,
     backgroundImage: campus.backgroundImage,
     backgroundOpacity: campus.backgroundOpacity,

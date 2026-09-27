@@ -14,10 +14,11 @@ import { EmptyState } from "../components/ui/EmptyState";
 import { Button } from "../components/ui/Button";
 import {
   reportService,
+  REPORT_CATEGORIES,
   type IssueReport,
   type ReportStatus,
 } from "../services/reportService";
-import type { ActivityLogRow } from "../services/activityLogService";
+import type { Tables } from "../types/database.generated";
 import { downloadCsv, downloadJson } from "../lib/exporters";
 
 // ── Report workflow ────────────────────────────────────────────────────────
@@ -31,7 +32,7 @@ const STATUS_CONFIG: Record<ReportStatus, { label: string; color: string; bg: st
   rejected:     { label: "Rejected",      color: "text-destructive",                      bg: "bg-destructive/8 border-destructive/20",                                         icon: XCircle      },
 };
 
-const CATEGORIES = ["All Categories", "maintenance", "accessibility", "hazard", "map_error"];
+const CATEGORIES = ["All Categories", ...REPORT_CATEGORIES];
 
 function formatDate(iso: string): string {
   try {
@@ -75,7 +76,7 @@ function ReportDetailModal({ report, onClose, onChanged }: {
   const Icon = cfg.icon;
   const toast = useToast();
 
-  const [history, setHistory] = useState<ActivityLogRow[]>([]);
+  const [history, setHistory] = useState<Tables<"report_history">[]>([]);
   const [internalNotes, setInternalNotes] = useState(report.internalNotes ?? "");
   const [resolutionNotes, setResolutionNotes] = useState(report.resolutionNotes ?? "");
   const [savingNotes, setSavingNotes] = useState(false);
@@ -84,7 +85,7 @@ function ReportDetailModal({ report, onClose, onChanged }: {
 
   useEffect(() => {
     reportService.getReportHistory(report.id).then(setHistory).catch(() => setHistory([]));
-  }, [report.id]);
+  }, [report.id, report.updatedAt]);
 
   const saveInternalNotes = async () => {
     setSavingNotes(true);
@@ -170,6 +171,7 @@ function ReportDetailModal({ report, onClose, onChanged }: {
             <MapPin className="h-4 w-4 text-primary mt-0.5 shrink-0" />
             <div>
               <p className="text-xs font-bold text-foreground">{report.buildingName ?? report.buildingId ?? "Campus"}</p>
+              {(report.floorLabel || report.roomName) && <p className="text-xs text-muted-foreground">{[report.floorLabel, report.roomName].filter(Boolean).join(" · ")}</p>}
               <p className="text-xs text-muted-foreground">{report.category} · {report.priority} priority</p>
             </div>
           </div>
@@ -312,6 +314,7 @@ export function AdminReportsPage() {
       const data = await reportService.listAllReports({ status: statusFilter, category: categoryFilter === "All Categories" ? undefined : categoryFilter, search });
       if (requestId !== requestRef.current) return;
       setReports(data);
+      setSelected(current => current ? data.find(report => report.id === current.id) ?? null : null);
       setError(null);
     } catch (err) {
       if (requestId !== requestRef.current) return;

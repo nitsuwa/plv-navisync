@@ -18,6 +18,7 @@ import { isCampusGate } from "../../lib/campusGates";
 import type { ReadonlyOutdoorCampus, ReadonlyOutdoorEntrance } from "../../lib/readonlyOutdoorCampus";
 import { surfaceCellRuns } from "../../lib/campusSurface";
 import { campusGroundAppearance, campusGroundPatternId } from "../../lib/campusCanvas";
+import { decorRenderScale, decorWorldSize } from "../../lib/decorVisual";
 import { EntranceDirectionBadge } from "./EntranceDirectionBadge";
 import { Tooltip } from "../ui/Tooltip";
 
@@ -317,10 +318,10 @@ function groundAreaStyle(kind: CampusDecorAsset["groundType"] = "grass") {
 }
 
 /** Shared read-only surface treatment for authored campus ground patches. */
-export function OutdoorGroundAreaVisual({ asset }: { asset: CampusDecorAsset }) {
+export function OutdoorGroundAreaVisual({ asset, gridSize = 20 }: { asset: CampusDecorAsset; gridSize?: number }) {
   const kind = asset.groundType ?? groundTypeForDecorType(asset.type) ?? "grass";
   if (asset.surfaceCells?.length) {
-    const size = Math.max(4, asset.surfaceCellSize ?? 20);
+    const size = Math.max(4, asset.surfaceCellSize ?? gridSize);
     const style = groundAreaStyle(kind);
     return (
       <g data-testid="readonly-ground-area" data-ground-type={kind} data-surface-material={kind} opacity={asset.visible === false ? 0 : 1}>
@@ -331,8 +332,11 @@ export function OutdoorGroundAreaVisual({ asset }: { asset: CampusDecorAsset }) 
     );
   }
   const descriptor = DECOR_ASSET_MAP[asset.type];
-  const width = Math.max(30, asset.width ?? descriptor?.defaultWidth ?? 150);
-  const height = Math.max(24, asset.height ?? descriptor?.defaultHeight ?? 95);
+  // Keep the legacy fallback in lock-step with the Admin canvas.  Explicit
+  // width/height values are authored geometry and therefore remain untouched;
+  // only older records without those values use the shared decor scale.
+  const width = Math.max(30, asset.width ?? (descriptor?.defaultWidth ?? 150) * decorRenderScale(asset.scale));
+  const height = Math.max(24, asset.height ?? (descriptor?.defaultHeight ?? 95) * decorRenderScale(asset.scale));
   const areaAsset = asset.type !== "ground-area";
   const style = groundAreaStyle(kind);
   const x = asset.x - width / 2;
@@ -447,13 +451,15 @@ export function OutdoorEmergencyStairVisual({
   );
 }
 
-export function OutdoorDecorVisual({ asset }: { asset: CampusDecorAsset }) {
-  if (isDecorAreaType(asset.type)) return <OutdoorGroundAreaVisual asset={asset} />;
+export function OutdoorDecorVisual({ asset, gridSize }: { asset: CampusDecorAsset; gridSize?: number }) {
+  if (isDecorAreaType(asset.type)) return <OutdoorGroundAreaVisual asset={asset} gridSize={gridSize} />;
   const descriptor = DECOR_ASSET_MAP[asset.type];
   if (!descriptor) return null;
-  const scale = asset.scale ?? 1;
-  const width = Math.max(1, asset.width ?? descriptor.defaultWidth * scale);
-  const height = Math.max(1, asset.height ?? descriptor.defaultHeight * scale);
+  // Admin's Canvas uses decorWorldSize/decorRenderScale for every regular
+  // outdoor asset.  Reusing that calculation here preserves the published
+  // authored footprint exactly; the previous native-size fallback made the
+  // Student map render these assets three times smaller.
+  const { width, height } = decorWorldSize(descriptor, asset.scale);
   return (
     <g data-testid="readonly-decor" data-asset-id={asset.id} transform={`translate(${asset.x - width / 2},${asset.y - height / 2}) rotate(${asset.rotation ?? 0},${width / 2},${height / 2})`} opacity={asset.visible === false ? 0 : 1}>
       <svg x={0} y={0} width={width} height={height} viewBox={`0 0 ${descriptor.defaultWidth} ${descriptor.defaultHeight}`} preserveAspectRatio="xMidYMid meet">
@@ -510,7 +516,7 @@ export function ReadonlyOutdoorCampusScene({ campus, showBuildings = true, selec
     // grass, plazas, and parking even when a legacy zOrder is present.
     zOrder: isDecorAreaType(asset.type) ? -2000 + index : effectiveStackKey("decorAsset", asset.zOrder, index),
     order: index,
-    node: <OutdoorDecorVisual key={`decor-${asset.id}`} asset={asset} />,
+    node: <OutdoorDecorVisual key={`decor-${asset.id}`} asset={asset} gridSize={campus.gridSize} />,
   }));
   stack.sort((a, b) => a.zOrder - b.zOrder || a.order - b.order);
   return (

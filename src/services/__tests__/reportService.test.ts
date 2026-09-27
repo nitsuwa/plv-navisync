@@ -24,16 +24,16 @@ const row = {
 describe("report service (admin workflow)", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("maps database rows to the domain including admin notes", () => {
+  it("maps database rows without exposing private admin notes", () => {
     const report = toIssueReport(row as never);
     expect(report).toMatchObject({
       id: "r1",
       buildingId: "b1",
       status: "pending",
-      internalNotes: null,
       resolutionNotes: null,
     });
     expect(report.createdAt).toBe("2026-08-07T00:00:00Z");
+    expect(report).not.toHaveProperty("internalNotes");
   });
 
   it("normalizes legacy student-facing status labels", () => {
@@ -81,10 +81,13 @@ describe("report service (admin workflow)", () => {
     const query: Record<string, unknown> = {};
     query.order = vi.fn(() => query);
     query.eq = vi.fn(() => query);
+    query.is = vi.fn(() => query);
+    query.in = vi.fn(() => query);
     query.then = (resolve: (value: unknown) => unknown) =>
       Promise.resolve({ data: [row], error: null }).then(resolve);
 
-    vi.mocked(getSupabase).mockReturnValue({ from: vi.fn(() => ({ select: vi.fn(() => query) })) } as never);
+    const empty: any = { select: () => empty, in: () => empty, order: () => empty, then: (resolve: any) => Promise.resolve({ data: [], error: null }).then(resolve) };
+    vi.mocked(getSupabase).mockReturnValue({ from: vi.fn(table => table === "reports" ? { select: vi.fn(() => query) } : empty) } as never);
 
     const reports = await listAllReports({ status: "pending", category: "maintenance", search: "BROKEN" });
 
@@ -94,8 +97,8 @@ describe("report service (admin workflow)", () => {
   });
 
   it("resolves a report with notes and writes an audit entry", async () => {
-    const eq = vi.fn().mockResolvedValue({ error: null });
-    const update = vi.fn(() => ({ eq }));
+    const eq = vi.fn(() => ({ select: () => ({ single: async () => ({ data: { id: "r1" }, error: null }) }) }));
+    const update = vi.fn((_payload: unknown) => ({ eq }));
     const insert = vi.fn().mockResolvedValue({ error: null });
     const auth = { getUser: vi.fn().mockResolvedValue({ data: { user: { id: "admin-1" } } }) };
     const from = vi.fn((table: string) => {

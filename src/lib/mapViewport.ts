@@ -1,4 +1,5 @@
-export const STUDENT_MAP_MIN_ZOOM = 0.75;
+// SVG viewers already fit the complete authored map at zoom 1.
+export const STUDENT_MAP_MIN_ZOOM = 1;
 export const STUDENT_MAP_MAX_ZOOM = 3.5;
 export const STUDENT_MAP_ZOOM_STEP = 0.2;
 

@@ -7,13 +7,127 @@
  * simplified legacy room-only format.
  */
 
-import type { FloorPlan, FloorRoom, FloorWall, FloorDoor, FloorWindow, FloorStairs, FloorRamp, FloorElevatorItem, FloorLabel, FloorFurniture, FloorPath } from "./types";
-import type { CampusEntrance } from "./types";
+import type {
+  FloorPlan,
+  FloorRoom,
+  FloorWall,
+  FloorDoor,
+  FloorWindow,
+  FloorStairs,
+  FloorRamp,
+  FloorElevatorItem,
+  FloorLabel,
+  FloorFurniture,
+  FloorPath,
+  FloorExteriorZone,
+  FloorEntranceSteps,
+  FloorEntranceRamp,
+  BuildingEntranceEdge,
+  CampusEntrance,
+} from "./types";
 import { FloorGroundSurface } from "./FloorGroundSurface";
 import { ROOM_COLORS, type RoomType } from "../../data/floorPlans";
 import { EntranceDirectionBadge } from "./EntranceDirectionBadge";
-import { CanvasAssetVisual } from "../canvas/CanvasAssetVisual";
-import { getCanvasAsset, resolveCanvasAssetKey } from "../canvas/canvasAssetCatalog";
+import { FloorFurnitureSymbol } from "./FloorFurnitureSymbol";
+import {
+  exteriorZoneAccessFeatureGeometry,
+  exteriorZoneGeometry,
+  exteriorZoneTypeLabel,
+} from "../../lib/exteriorFloorZones";
+
+const DEFAULT_FLOOR_CANVAS_W = 440;
+const DEFAULT_FLOOR_CANVAS_H = 290;
+const FLOOR_VIEWPORT_PADDING = 8;
+
+export interface ReadonlyFloorPlanViewport {
+  /** Width/height used by the student SVG viewBox. */
+  width: number;
+  height: number;
+  /** Translation that places authored floor coordinates inside that viewBox. */
+  offsetX: number;
+  offsetY: number;
+}
+
+/**
+ * Return a viewBox that includes authored semi-outdoor floor content.
+ * Exterior zones intentionally live outside the indoor canvas, so a
+ * student-facing SVG using only `0 0 canvasW canvasH` would clip verandas and
+ * their entrance steps/ramp even though the Admin editor shows them.
+ */
+export function readonlyFloorPlanViewport(floor?: FloorPlan | null): ReadonlyFloorPlanViewport {
+  const canvasW = Math.max(1, floor?.canvasW || DEFAULT_FLOOR_CANVAS_W);
+  const canvasH = Math.max(1, floor?.canvasH || DEFAULT_FLOOR_CANVAS_H);
+  let minX = 0;
+  let minY = 0;
+  let maxX = canvasW;
+  let maxY = canvasH;
+
+  const includeRect = (x: number, y: number, width: number, height: number) => {
+    if (![x, y, width, height].every(Number.isFinite)) return;
+    minX = Math.min(minX, x);
+    minY = Math.min(minY, y);
+    maxX = Math.max(maxX, x + Math.max(0, width));
+    maxY = Math.max(maxY, y + Math.max(0, height));
+  };
+
+  const includeRotatedRect = (x: number, y: number, width: number, height: number, rotation = 0) => {
+    const angle = (rotation * Math.PI) / 180;
+    const cx = x + width / 2;
+    const cy = y + height / 2;
+    const corners = [
+      { x, y },
+      { x: x + width, y },
+      { x: x + width, y: y + height },
+      { x, y: y + height },
+    ].map((point) => ({
+      x: cx + (point.x - cx) * Math.cos(angle) - (point.y - cy) * Math.sin(angle),
+      y: cy + (point.x - cx) * Math.sin(angle) + (point.y - cy) * Math.cos(angle),
+    }));
+    includeRect(
+      Math.min(...corners.map((point) => point.x)),
+      Math.min(...corners.map((point) => point.y)),
+      Math.max(...corners.map((point) => point.x)) - Math.min(...corners.map((point) => point.x)),
+      Math.max(...corners.map((point) => point.y)) - Math.min(...corners.map((point) => point.y)),
+    );
+  };
+
+  const zones = floor?.exteriorZones ?? [];
+  const zoneById = new Map(zones.map((zone) => [zone.id, zone]));
+  zones.forEach((zone) => {
+    const geometry = exteriorZoneGeometry(zone, canvasW, canvasH);
+    includeRect(geometry.x, geometry.y, geometry.width, geometry.height);
+  });
+
+  const includeAccessFeature = (feature: FloorEntranceSteps | FloorEntranceRamp) => {
+    const parent = feature.parentZoneId ? zoneById.get(feature.parentZoneId) : undefined;
+    const geometry = parent
+      ? exteriorZoneAccessFeatureGeometry(parent, feature, canvasW, canvasH)
+      : { x: feature.x, y: feature.y, width: feature.width, height: feature.height };
+    if (!geometry) return;
+    includeRect(geometry.x, geometry.y, geometry.width, geometry.height);
+  };
+  (floor?.entranceSteps ?? []).forEach(includeAccessFeature);
+  (floor?.entranceRamps ?? []).forEach(includeAccessFeature);
+
+  // Legacy floors can contain a free-standing item beyond the indoor canvas.
+  // Include those authored bounds too, while preserving the normal viewBox for
+  // the common case where every object is inside the floor.
+  (floor?.furniture ?? []).forEach((item) => includeRotatedRect(item.x, item.y, item.width, item.height, item.rotation));
+  (floor?.stairs ?? []).forEach((item) => includeRotatedRect(item.x, item.y, item.width, item.height, item.rotation));
+  (floor?.ramps ?? []).forEach((item) => includeRotatedRect(item.x, item.y, item.width, item.height, item.rotation));
+  (floor?.elevators ?? []).forEach((item) => includeRotatedRect(item.x, item.y, item.width, item.height, item.rotation));
+
+  const viewMinX = minX < 0 ? minX - FLOOR_VIEWPORT_PADDING : 0;
+  const viewMinY = minY < 0 ? minY - FLOOR_VIEWPORT_PADDING : 0;
+  const viewMaxX = maxX > canvasW ? maxX + FLOOR_VIEWPORT_PADDING : canvasW;
+  const viewMaxY = maxY > canvasH ? maxY + FLOOR_VIEWPORT_PADDING : canvasH;
+  return {
+    width: viewMaxX - viewMinX,
+    height: viewMaxY - viewMinY,
+    offsetX: viewMinX === 0 ? 0 : -viewMinX,
+    offsetY: viewMinY === 0 ? 0 : -viewMinY,
+  };
+}
 
 // ── Room rendering ──────────────────────────────────────────────────────────
 
@@ -344,22 +458,209 @@ function PathVisual({ path }: { path: FloorPath }) {
   );
 }
 
+// ── Semi-outdoor floor rendering ───────────────────────────────────────────
+
+function exteriorZoneFill(type: FloorExteriorZone["type"]) {
+  return type === "veranda"
+    ? "#d9c5a1"
+    : type === "entrance_landing"
+      ? "#cbd5e1"
+      : type === "covered_walkway"
+        ? "#b8c8d8"
+        : "#d1d5db";
+}
+
+function ExteriorZoneVisual({ zone, canvasW, canvasH }: { zone: FloorExteriorZone; canvasW: number; canvasH: number }) {
+  const geometry = exteriorZoneGeometry(zone, canvasW, canvasH);
+  return (
+    <g
+      data-testid="readonly-exterior-zone"
+      data-exterior-zone-id={zone.id}
+      data-floor-title={zone.label ?? exteriorZoneTypeLabel(zone.type)}
+      aria-label={zone.label ?? exteriorZoneTypeLabel(zone.type)}
+      opacity={zone.visible === false ? 0.35 : 1}
+    >
+      <rect
+        x={geometry.x}
+        y={geometry.y}
+        width={geometry.width}
+        height={geometry.height}
+        rx={4}
+        fill={exteriorZoneFill(zone.type)}
+        fillOpacity={0.78}
+        stroke="#64748b"
+        strokeWidth={1.5}
+        strokeDasharray={zone.type === "covered_walkway" ? "6 3" : undefined}
+      />
+      <line
+        x1={geometry.x + 8}
+        y1={geometry.y + 8}
+        x2={geometry.x + geometry.width - 8}
+        y2={geometry.y + 8}
+        stroke="rgba(255,255,255,0.6)"
+        strokeWidth={1}
+      />
+      {zone.labelVisible !== false && (
+        <text
+          x={geometry.x + geometry.width / 2 + (zone.labelOffsetX ?? 0)}
+          y={geometry.y + geometry.height / 2 + 3 + (zone.labelOffsetY ?? 0)}
+          textAnchor="middle"
+          fontSize={9}
+          fontWeight={800}
+          fill="#334155"
+          pointerEvents="none"
+          className="pointer-events-none select-none"
+        >
+          {zone.label ?? exteriorZoneTypeLabel(zone.type)}
+        </text>
+      )}
+    </g>
+  );
+}
+
+type ExteriorVisualBounds = { x: number; y: number; width: number; height: number };
+
+function ExteriorEntranceStepsVisual({
+  bounds,
+  side,
+  direction = "forward",
+  flipHorizontal = false,
+  flipVertical = false,
+}: {
+  bounds: ExteriorVisualBounds;
+  side: BuildingEntranceEdge;
+  direction?: "forward" | "reverse";
+  flipHorizontal?: boolean;
+  flipVertical?: boolean;
+}) {
+  const horizontalEdge = side === "top" || side === "bottom";
+  const inset = Math.max(2.5, Math.min(6, Math.min(bounds.width, bounds.height) * 0.18));
+  const run = horizontalEdge ? bounds.height : bounds.width;
+  const treadCount = Math.max(3, Math.min(6, Math.round(run / 8)));
+  const rails = horizontalEdge
+    ? [bounds.x + inset, bounds.x + bounds.width - inset].map((x) => (
+        <line key={x} x1={x} y1={bounds.y + inset} x2={x} y2={bounds.y + bounds.height - inset} stroke="#8b6d47" strokeWidth={0.8} opacity={0.78} />
+      ))
+    : [bounds.y + inset, bounds.y + bounds.height - inset].map((y) => (
+        <line key={y} x1={bounds.x + inset} y1={y} x2={bounds.x + bounds.width - inset} y2={y} stroke="#8b6d47" strokeWidth={0.8} opacity={0.78} />
+      ));
+  const towardParent = side === "top" ? { x: 0, y: 1 } : side === "bottom" ? { x: 0, y: -1 } : side === "left" ? { x: 1, y: 0 } : { x: -1, y: 0 };
+  const cueDirection = direction === "reverse" ? { x: -towardParent.x, y: -towardParent.y } : towardParent;
+  const cueLength = Math.max(5, Math.min(12, run * 0.24));
+  const cueStart = { x: bounds.x + bounds.width / 2 - cueDirection.x * cueLength / 2, y: bounds.y + bounds.height / 2 - cueDirection.y * cueLength / 2 };
+  const cueEnd = { x: bounds.x + bounds.width / 2 + cueDirection.x * cueLength / 2, y: bounds.y + bounds.height / 2 + cueDirection.y * cueLength / 2 };
+  const cueTangent = { x: -cueDirection.y, y: cueDirection.x };
+  const mirrorTransform = `translate(${bounds.x + bounds.width / 2} ${bounds.y + bounds.height / 2}) scale(${flipHorizontal ? -1 : 1} ${flipVertical ? -1 : 1}) translate(${-bounds.x - bounds.width / 2} ${-bounds.y - bounds.height / 2})`;
+  return (
+    <g data-testid="readonly-entrance-steps-symbol" transform={mirrorTransform}>
+      <rect x={bounds.x} y={bounds.y} width={bounds.width} height={bounds.height} rx={2.5} fill="#e8d6b7" stroke="#8b6d47" strokeWidth={1.35} />
+      <rect x={bounds.x + 1.5} y={bounds.y + 1.5} width={Math.max(0, bounds.width - 3)} height={Math.max(0, bounds.height - 3)} rx={1.5} fill="#f6ead6" opacity={0.68} />
+      {Array.from({ length: treadCount }, (_, index) => {
+        const ratio = (index + 1) / (treadCount + 1);
+        return horizontalEdge
+          ? <line key={index} x1={bounds.x + inset} y1={bounds.y + ratio * (bounds.height - inset * 2)} x2={bounds.x + bounds.width - inset} y2={bounds.y + ratio * (bounds.height - inset * 2)} stroke="#745b3c" strokeWidth={1.05} />
+          : <line key={index} x1={bounds.x + ratio * (bounds.width - inset * 2)} y1={bounds.y + inset} x2={bounds.x + ratio * (bounds.width - inset * 2)} y2={bounds.y + bounds.height - inset} stroke="#745b3c" strokeWidth={1.05} />;
+      })}
+      {rails}
+      <path
+        data-testid="readonly-steps-direction-cue"
+        d={`M ${cueStart.x} ${cueStart.y} L ${cueEnd.x} ${cueEnd.y} M ${cueEnd.x} ${cueEnd.y} L ${cueEnd.x - cueDirection.x * 3 + cueTangent.x * 2.2} ${cueEnd.y - cueDirection.y * 3 + cueTangent.y * 2.2} M ${cueEnd.x} ${cueEnd.y} L ${cueEnd.x - cueDirection.x * 3 - cueTangent.x * 2.2} ${cueEnd.y - cueDirection.y * 3 - cueTangent.y * 2.2}`}
+        fill="none"
+        stroke="#5f4630"
+        strokeWidth={1.15}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        opacity={0.92}
+      />
+    </g>
+  );
+}
+
+function ExteriorAccessibleRampVisual({
+  bounds,
+  side,
+  direction = "forward",
+  layout = "straight",
+  flipHorizontal = false,
+  flipVertical = false,
+}: {
+  bounds: ExteriorVisualBounds;
+  side: BuildingEntranceEdge;
+  direction?: "forward" | "reverse";
+  layout?: "straight" | "l_turn_left" | "l_turn_right";
+  flipHorizontal?: boolean;
+  flipVertical?: boolean;
+}) {
+  const horizontalRun = side === "top" || side === "bottom";
+  const cx = bounds.x + bounds.width / 2;
+  const cy = bounds.y + bounds.height / 2;
+  const runLength = horizontalRun ? bounds.height : bounds.width;
+  const crossLength = horizontalRun ? bounds.width : bounds.height;
+  const runInset = Math.max(3, Math.min(9, runLength * 0.09));
+  const crossInset = Math.max(3, Math.min(9, crossLength * 0.12));
+  const runStart = side === "top" || side === "left"
+    ? (horizontalRun ? bounds.y + runInset : bounds.x + runInset)
+    : (horizontalRun ? bounds.y + bounds.height - runInset : bounds.x + bounds.width - runInset);
+  const runEnd = side === "top" || side === "left"
+    ? (horizontalRun ? bounds.y + bounds.height - runInset : bounds.x + bounds.width - runInset)
+    : (horizontalRun ? bounds.y + runInset : bounds.x + runInset);
+  const turnSign = layout === "l_turn_left" ? -1 : 1;
+  const turnLeg = Math.max(2, Math.min(crossLength * 0.34, crossLength / 2 - crossInset));
+  const railOffset = Math.max(3, Math.min(crossLength * 0.28, crossLength / 2 - crossInset));
+  const showRails = layout === "straight" && runLength >= 24 && crossLength >= 24 && railOffset > 2.5;
+  const baseRunPoints = layout === "straight"
+    ? horizontalRun
+      ? [{ x: cx, y: runStart }, { x: cx, y: runEnd }]
+      : [{ x: runStart, y: cy }, { x: runEnd, y: cy }]
+    : horizontalRun
+      ? [{ x: cx + turnSign * turnLeg, y: runStart }, { x: cx, y: runStart }, { x: cx, y: runEnd }]
+      : [{ x: runStart, y: cy + turnSign * turnLeg }, { x: runStart, y: cy }, { x: runEnd, y: cy }];
+  const runPoints = direction === "reverse" ? [...baseRunPoints].reverse() : baseRunPoints;
+  const toPath = (points: { x: number; y: number }[]) => points.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`).join(" ");
+  const travelPath = toPath(runPoints);
+  const arrowTip = runPoints[runPoints.length - 1];
+  const arrowBase = runPoints[runPoints.length - 2] ?? arrowTip;
+  const arrowVector = { x: arrowTip.x - arrowBase.x, y: arrowTip.y - arrowBase.y };
+  const arrowLength = Math.max(1, Math.hypot(arrowVector.x, arrowVector.y));
+  const arrowUnit = { x: arrowVector.x / arrowLength, y: arrowVector.y / arrowLength };
+  const arrowNormal = { x: -arrowUnit.y, y: arrowUnit.x };
+  const arrowHead = Math.max(2.2, Math.min(5, crossLength * 0.11, arrowLength * 0.22));
+  const arrowCue = [
+    `M ${arrowTip.x} ${arrowTip.y} L ${arrowTip.x - arrowUnit.x * arrowHead + arrowNormal.x * arrowHead} ${arrowTip.y - arrowUnit.y * arrowHead + arrowNormal.y * arrowHead}`,
+    `M ${arrowTip.x} ${arrowTip.y} L ${arrowTip.x - arrowUnit.x * arrowHead - arrowNormal.x * arrowHead} ${arrowTip.y - arrowUnit.y * arrowHead - arrowNormal.y * arrowHead}`,
+  ].join(" ");
+  const mirrorTransform = `translate(${cx} ${cy}) scale(${flipHorizontal ? -1 : 1} ${flipVertical ? -1 : 1}) translate(${-cx} ${-cy})`;
+  return (
+    <g data-testid="readonly-entrance-ramp-symbol" transform={mirrorTransform}>
+      <rect x={bounds.x} y={bounds.y} width={bounds.width} height={bounds.height} rx={2.5} fill="#dff2e8" stroke="#27765c" strokeWidth={1.35} />
+      {showRails && (horizontalRun
+        ? [cx - railOffset, cx + railOffset].map((x) => <line key={x} data-testid="readonly-ramp-rail" x1={x} y1={runStart} x2={x} y2={runEnd} fill="none" stroke="#39866a" strokeWidth={0.8} opacity={0.7} strokeLinecap="round" />)
+        : [cy - railOffset, cy + railOffset].map((y) => <line key={y} data-testid="readonly-ramp-rail" x1={runStart} y1={y} x2={runEnd} y2={y} fill="none" stroke="#39866a" strokeWidth={0.8} opacity={0.7} strokeLinecap="round" />))}
+      <path data-testid="readonly-ramp-layout-path" data-layout={layout} d={travelPath} fill="none" stroke="#27765c" strokeWidth={1.05} strokeLinecap="round" strokeLinejoin="round" opacity={0.82} />
+      <path data-testid="readonly-ramp-direction-cue" d={arrowCue} fill="none" stroke="#27765c" strokeWidth={1.05} strokeLinecap="round" strokeLinejoin="round" opacity={0.82} />
+    </g>
+  );
+}
+
 // ── Furniture rendering ─────────────────────────────────────────────────────
 
 function FurnitureVisual({ item }: { item: FloorFurniture }) {
   if (item.visible === false) return null;
-  const assetKey = resolveCanvasAssetKey(item);
-  const asset = assetKey ? getCanvasAsset(assetKey) : undefined;
+  const rotation = item.rotation ?? 0;
+  const centerX = item.x + item.width / 2;
+  const centerY = item.y + item.height / 2;
   return (
     <g data-testid="readonly-furniture" data-furniture-id={item.id}
-      transform={`translate(${item.x},${item.y}) rotate(${item.rotation || 0},${item.width / 2},${item.height / 2})`}>
-      {asset?.surfaces.includes("map") ? (
-        <CanvasAssetVisual assetKey={asset.key} label={item.name} x={0} y={0} width={item.width} height={item.height} style={{ color: item.color }} />
-      ) : (
-        <rect x={0} y={0} width={item.width} height={item.height} rx={1}
-          fill={item.color || "#e2e8f0"} stroke={item.color || "#94a3b8"}
-          strokeWidth={0.8} opacity={0.7} />
-      )}
+      transform={`rotate(${rotation}, ${centerX}, ${centerY})`}>
+      <FloorFurnitureSymbol
+        type={item.type}
+        assetKey={item.assetKey}
+        x={item.x}
+        y={item.y}
+        width={item.width}
+        height={item.height}
+        color={item.color || "#e2e8f0"}
+      />
     </g>
   );
 }
@@ -413,6 +714,16 @@ export function ReadonlyFloorPlanScene({
   const visibleLabels = floor.labels || [];
   const visibleFurniture = (floor.furniture || []).filter((f) => f.visible !== false);
   const visiblePaths = floor.paths || [];
+  const exteriorZones = [...(floor.exteriorZones || [])].sort(
+    (a, b) => (a.zOrder ?? 0) - (b.zOrder ?? 0),
+  );
+  const entranceSteps = [...(floor.entranceSteps || [])].sort(
+    (a, b) => (a.zOrder ?? 0) - (b.zOrder ?? 0),
+  );
+  const entranceRamps = [...(floor.entranceRamps || [])].sort(
+    (a, b) => (a.zOrder ?? 0) - (b.zOrder ?? 0),
+  );
+  const exteriorZoneById = new Map(exteriorZones.map((zone) => [zone.id, zone]));
   const entranceById = new Map(entrances.map((entrance) => [entrance.id, entrance]));
   const wallById = new Map(visibleWalls.map((wall) => [wall.id, wall]));
 
@@ -436,6 +747,64 @@ export function ReadonlyFloorPlanScene({
       {mapMode === "accessible" && (
         <rect width={canvasW} height={canvasH} fill="var(--map-route-start, #16a34a)" opacity={0.05} />
       )}
+
+      {/* Semi-outdoor authored spaces are part of the published floor scene.
+          They are drawn before paths/furniture so a veranda remains a surface
+          beneath its chairs, tables, and walking connections. */}
+      {exteriorZones.map((zone) => (
+        <ExteriorZoneVisual key={zone.id} zone={zone} canvasW={canvasW} canvasH={canvasH} />
+      ))}
+      {entranceSteps.map((item) => {
+        const parent = item.parentZoneId ? exteriorZoneById.get(item.parentZoneId) : undefined;
+        const geometry = parent
+          ? exteriorZoneAccessFeatureGeometry(parent, item, canvasW, canvasH)
+          : { x: item.x, y: item.y, width: item.width, height: item.height };
+        if (!geometry) return null;
+        const featureSide: BuildingEntranceEdge = parent && "side" in geometry ? geometry.side : "bottom";
+        return (
+          <g
+            key={item.id}
+            data-testid="readonly-entrance-steps"
+            data-entrance-steps-id={item.id}
+            data-edge={featureSide}
+            opacity={item.visible === false ? 0.35 : 1}
+          >
+            <ExteriorEntranceStepsVisual
+              bounds={geometry}
+              side={featureSide}
+              direction={item.direction}
+              flipHorizontal={item.flipHorizontal}
+              flipVertical={item.flipVertical}
+            />
+          </g>
+        );
+      })}
+      {entranceRamps.map((item) => {
+        const parent = item.parentZoneId ? exteriorZoneById.get(item.parentZoneId) : undefined;
+        const geometry = parent
+          ? exteriorZoneAccessFeatureGeometry(parent, item, canvasW, canvasH)
+          : { x: item.x, y: item.y, width: item.width, height: item.height };
+        if (!geometry) return null;
+        const featureSide: BuildingEntranceEdge = parent && "side" in geometry ? geometry.side : "bottom";
+        return (
+          <g
+            key={item.id}
+            data-testid="readonly-entrance-ramp"
+            data-entrance-ramp-id={item.id}
+            data-edge={featureSide}
+            opacity={item.visible === false ? 0.35 : 1}
+          >
+            <ExteriorAccessibleRampVisual
+              bounds={geometry}
+              side={featureSide}
+              direction={item.direction}
+              layout={item.layout}
+              flipHorizontal={item.flipHorizontal}
+              flipVertical={item.flipVertical}
+            />
+          </g>
+        );
+      })}
 
       {/* Walking paths */}
       {visiblePaths.map((path) => (

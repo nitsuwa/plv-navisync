@@ -11,6 +11,7 @@
 import { FLOOR_PLANS, type Room } from "../data/floorPlans";
 import type { NavigationEdge, NavigationNode } from "../components/map-builder/types";
 import { findNavigationRoute } from "./pathfinding";
+import { ROOM_DOOR_EDGE_TYPE } from "./indoorNavigationGraph";
 
 export interface IndoorWaypoint {
   x: number;
@@ -42,6 +43,7 @@ export interface PublishedIndoorRouteTarget {
   roomId: string;
   roomName?: string;
   accessNodeId?: string;
+  accessDoorId?: string;
   accessDoorIds?: string[];
 }
 
@@ -52,7 +54,8 @@ export interface PublishedIndoorRouteTarget {
  * over Campus.navNodes/navEdges.  For a multi-floor route, only the contiguous
  * run on the destination floor is returned for the floor-plan view; the full
  * graph route still determines which stair/elevator and which room access path
- * is fastest.  Authored edge bend points are preserved so the student path
+ * is fastest.  The terminal is the room's linked physical Door, never the
+ * room center. Authored edge bend points are preserved so the student path
  * follows the admin's corridor geometry instead of cutting diagonally through
  * rooms and walls.
  */
@@ -69,33 +72,59 @@ export function findIndoorRouteFromNavigationGraph(
   const edges = navEdges ?? [];
   if (!entryNodeId || nodes.length === 0 || edges.length === 0) return null;
 
+  const roomNode = nodes.find((node) =>
+    node.buildingId === target.buildingId
+    && node.floorId === target.floorId
+    && node.roomId === target.roomId,
+  );
+  const linkedDoorIds = new Set([
+    ...(target.accessDoorId ? [target.accessDoorId] : []),
+    ...(target.accessDoorIds ?? []),
+  ]);
+  const semanticDoorIds = roomNode
+    ? edges
+      .filter((edge) => edge.type === ROOM_DOOR_EDGE_TYPE)
+      .flatMap((edge) => {
+        if (edge.startNodeId === roomNode.id) return [edge.endNodeId];
+        if (edge.endNodeId === roomNode.id && edge.bidirectional) return [edge.startNodeId];
+        return [];
+      })
+    : [];
   const targetNode = target.accessNodeId
     ? nodes.find((node) =>
         node.id === target.accessNodeId
         && node.buildingId === target.buildingId
         && node.floorId === target.floorId
+        && !!node.doorId
       )
     : undefined;
-  const roomNode = targetNode
-    ?? nodes.find((node) =>
-      node.buildingId === target.buildingId
-      && node.floorId === target.floorId
-      && node.roomId === target.roomId
-    )
-    ?? (target.accessDoorIds ?? [])
+  const physicalDoorNode = targetNode
+    ?? [...linkedDoorIds]
       .map((doorId) => nodes.find((node) =>
         node.buildingId === target.buildingId
         && node.floorId === target.floorId
         && node.doorId === doorId
       ))
+      .concat(semanticDoorIds.map((nodeId) => nodes.find((node) => node.id === nodeId)))
       .find((node): node is NavigationNode => Boolean(node));
-  if (!roomNode) return null;
+  if (!physicalDoorNode) return null;
+
+  // Match Admin Test Route: semantic Room nodes may explain a room↔Door
+  // relationship, but ordinary edges touching a room center are not part of
+  // the walkable route.  The route must reach the linked Door itself.
+  const roomNodeIds = new Set(nodes
+    .filter((node) => Boolean(node.roomId) || node.type === "room_access")
+    .map((node) => node.id));
+  const routeEdges = edges.filter((edge) =>
+    edge.type === ROOM_DOOR_EDGE_TYPE
+    || (!roomNodeIds.has(edge.startNodeId) && !roomNodeIds.has(edge.endNodeId)),
+  );
 
   const graphRoute = findNavigationRoute(
     nodes,
-    edges,
+    routeEdges,
     entryNodeId,
-    roomNode.id,
+    physicalDoorNode.id,
     accessibleOnly,
     emergencyOnly,
     { useDerivedTransitions: false },
@@ -103,10 +132,10 @@ export function findIndoorRouteFromNavigationGraph(
   if (!graphRoute || graphRoute.nodeIds.length < 2) return null;
 
   const nodeById = new Map(nodes.map((node) => [node.id, node]));
-  const targetIndex = graphRoute.nodeIds.lastIndexOf(roomNode.id);
+  const targetIndex = graphRoute.nodeIds.lastIndexOf(physicalDoorNode.id);
   if (targetIndex < 0) return null;
 
-  // Select the contiguous destination-floor run ending at the room. This
+  // Select the contiguous destination-floor run ending at the linked Door. This
   // deliberately omits the cross-floor transition itself so no diagonal line
   // is drawn between two different floor coordinate systems.
   let runStart = targetIndex;
@@ -120,13 +149,13 @@ export function findIndoorRouteFromNavigationGraph(
   if (localNodeIds.length < 2) return null;
 
   const edgeFor = (fromId: string, toId: string): { edge: NavigationEdge | undefined; reversed: boolean } => {
-    const direct = edges.find((edge) =>
+    const direct = routeEdges.find((edge) =>
       !edge.closed
       && edge.startNodeId === fromId
       && edge.endNodeId === toId
     );
     if (direct) return { edge: direct, reversed: false };
-    const reverse = edges.find((edge) =>
+    const reverse = routeEdges.find((edge) =>
       !edge.closed
       &&
       edge.bidirectional
@@ -170,7 +199,7 @@ export function findIndoorRouteFromNavigationGraph(
     : SVG_TO_METERS;
   const distanceMeters = Number((distanceUnits * scale).toFixed(1));
   const startNode = nodeById.get(localNodeIds[0]);
-  const targetName = target.roomName || roomNode.name || "the destination room";
+  const targetName = target.roomName || physicalDoorNode.name || "the destination room";
   const steps = [`Start at ${startNode?.name || "the building entrance"}`];
   for (let index = 1; index < localNodeIds.length; index += 1) {
     const fromId = localNodeIds[index - 1];

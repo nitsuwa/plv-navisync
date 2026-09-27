@@ -1,6 +1,7 @@
 import { useState, useMemo, useCallback } from "react";
 import type { Campus, CampusBuilding, CampusEventOverlay, FloorPlan } from "../components/map-builder/types";
 import { useDebounce } from "./useDebounce";
+import { ROOM_DOOR_EDGE_TYPE } from "../lib/indoorNavigationGraph";
 
 export interface SearchResult {
   id: string;
@@ -24,9 +25,56 @@ export interface UseCampusSearchResult {
   selectedCategory: string;
   setSelectedCategory: (category: string) => void;
   results: SearchResult[];
+  /** Complete connected index, independent of the map search query/category. */
+  destinations: SearchResult[];
   popularSearches: { label: string; buildingId: string; floorId?: string; name?: string }[];
   isSearching: boolean;
   clearSearch: () => void;
+}
+
+/** The public search index should advertise only destinations with a usable
+ * published connection. A room center or its semantic Room→Door edge alone
+ * is not a walkable route; the physical Door needs a path edge as well. */
+export function connectedCampusDestinations(campus: Campus): {
+  buildingIds: Set<string>;
+  roomKeys: Set<string>;
+} {
+  const nodes = campus.navNodes ?? [];
+  const edges = (campus.navEdges ?? []).filter((edge) => !edge.closed);
+  const walkableNodeIds = new Set(edges
+    .filter((edge) => edge.type !== ROOM_DOOR_EDGE_TYPE)
+    .flatMap((edge) => [edge.startNodeId, edge.endNodeId]));
+  const buildingIds = new Set<string>();
+  const roomKeys = new Set<string>();
+
+  for (const building of campus.buildings ?? []) {
+    const entranceIds = new Set((building.entrances ?? []).map((entrance) => entrance.id));
+    const hasEntrance = nodes.some((node) => node.buildingId === building.id
+      && !node.floorId
+      && walkableNodeIds.has(node.id)
+      && (node.id === building.entranceNodeId
+        || (node.entranceId && (entranceIds.size === 0 || entranceIds.has(node.entranceId)))
+        || (entranceIds.size === 0 && (node.type === "entrance" || node.type === "emergency_exit"))));
+    if (hasEntrance) buildingIds.add(building.id);
+
+    for (const floor of building.floors ?? []) {
+      for (const room of floor.rooms ?? []) {
+        const doorIds = new Set([room.accessDoorId, ...(room.accessDoorIds ?? [])].filter((id): id is string => !!id));
+        const roomNodeIds = new Set(nodes.filter((node) => node.buildingId === building.id
+          && node.floorId === floor.id && node.roomId === room.id).map((node) => node.id));
+        const semanticDoorNodeIds = new Set(edges.filter((edge) => edge.type === ROOM_DOOR_EDGE_TYPE)
+          .flatMap((edge) => roomNodeIds.has(edge.startNodeId) ? [edge.endNodeId]
+            : roomNodeIds.has(edge.endNodeId) ? [edge.startNodeId] : []));
+        const connectedDoor = nodes.some((node) => node.buildingId === building.id
+          && node.floorId === floor.id
+          && !!node.doorId
+          && walkableNodeIds.has(node.id)
+          && (node.id === room.accessNodeId || doorIds.has(node.doorId) || semanticDoorNodeIds.has(node.id)));
+        if (connectedDoor) roomKeys.add(`${building.id}:${floor.id}:${room.id}`);
+      }
+    }
+  }
+  return { buildingIds, roomKeys };
 }
 
 /**
@@ -105,6 +153,8 @@ export function useCampusSearch(
     if (!campus) return [];
 
     const entries: SearchResult[] = [];
+    const hasPublishedGraph = Boolean((campus.navNodes?.length ?? 0) || (campus.navEdges?.length ?? 0));
+    const connected = hasPublishedGraph ? connectedCampusDestinations(campus) : null;
 
     // 1. Index Buildings
     (campus.buildings ?? []).forEach((b: CampusBuilding) => {
@@ -117,7 +167,7 @@ export function useCampusSearch(
         ...(b.description ? [b.description.toLowerCase()] : []),
       ];
 
-      entries.push({
+      if (!connected || connected.buildingIds.has(b.id)) entries.push({
         id: b.id,
         name: b.name,
         code: b.code,
@@ -134,14 +184,16 @@ export function useCampusSearch(
       (b.floors ?? []).forEach((floor: FloorPlan) => {
         (floor.rooms ?? []).forEach((room) => {
           if (room.visible === false) return;
+          if (connected && !connected.roomKeys.has(`${b.id}:${floor.id}:${room.id}`)) return;
 
-          const rName = room.name || room.code || "Room";
-          const rType = room.type || "room";
+          const roomCode = (room as typeof room & { code?: string }).code;
+          const rName = room.name || roomCode || "Room";
+          const rType = (room.type || "room").toLowerCase();
           const rKind = rType === "office" ? "office" : rType === "laboratory" ? "laboratory" : rType === "restroom" || rType === "canteen" || rType === "clinic" ? "facility" : "room";
 
           const roomKeywords = [
             rName.toLowerCase(),
-            (room.code || "").toLowerCase(),
+            (roomCode || "").toLowerCase(),
             (room.description || "").toLowerCase(),
             b.name.toLowerCase(),
             (b.code || "").toLowerCase(),
@@ -151,7 +203,7 @@ export function useCampusSearch(
           entries.push({
             id: room.id,
             name: rName,
-            code: room.code,
+            code: roomCode,
             kind: rKind,
             category: rType,
             buildingId: b.id,
@@ -160,7 +212,7 @@ export function useCampusSearch(
             floorNumber: floor.number,
             floorLabel: floor.label,
             description: room.description || `${floor.label} - ${b.name}`,
-            accessible: Boolean(room.accessible || room.accessibility),
+            accessible: Boolean(room.accessibility),
             keywords: roomKeywords,
           });
         });
@@ -169,15 +221,15 @@ export function useCampusSearch(
 
     // 3. Index Markers & Facilities
     (campus.markers ?? []).forEach((m) => {
-      const mName = m.name || m.label || "Landmark";
+      const mName = m.name || "Landmark";
       entries.push({
         id: m.id,
         name: mName,
         kind: "marker",
         category: "facility",
-        description: m.description || "Campus Landmark",
+        description: "Campus Landmark",
         accessible: true,
-        keywords: [mName.toLowerCase(), (m.description || "").toLowerCase(), "landmark"],
+        keywords: [mName.toLowerCase(), "landmark"],
       });
     });
 
@@ -258,6 +310,7 @@ export function useCampusSearch(
     selectedCategory,
     setSelectedCategory,
     results,
+    destinations: allSearchableEntries,
     popularSearches,
     isSearching: Boolean(debouncedQuery),
     clearSearch,
