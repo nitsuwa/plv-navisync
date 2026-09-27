@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -2279,6 +2279,48 @@ describe("B5 Phase 1.9 — entrance navigation visual cleanup", () => {
     fireEvent.mouseDown(svg, { clientX: 353, clientY: 349, bubbles: true });
     fireEvent.mouseUp(svg, { bubbles: true });
     expect(latest!.navNodes![1]).toMatchObject({ x: 350, y: 350 });
+  });
+
+  it.each([
+    { name: "near-horizontal", source: { x: 100, y: 200 }, path: [{ x: 300, y: 200.8 }, { x: 500, y: 200.8 }], click: { x: 400, y: 201 }, expected: { x: 400, y: 200 } },
+    { name: "near-vertical", source: { x: 200, y: 100 }, path: [{ x: 200.8, y: 300 }, { x: 200.8, y: 500 }], click: { x: 201, y: 400 }, expected: { x: 200, y: 400 } },
+    { name: "true diagonal", source: { x: 100, y: 100 }, path: [{ x: 300, y: 250 }, { x: 500, y: 350 }], click: { x: 400, y: 300 }, expected: { x: 400, y: 300 } },
+  ])("Connect preview and commit stay identical for $name Pathway joins", async ({ name, source, path, click, expected }) => {
+    let latest: Campus | undefined;
+    const campus = makeCampus();
+    campus.buildings = [];
+    campus.navNodes = [{ id: "connect-source", name: "Source", type: "outdoor", ...source, campusId: campus.id, accessible: true, color: "#16a34a" }];
+    campus.paths = [{ id: "target-path", points: path, type: "walkway", color: "#16a34a", width: 10 }];
+    const { container } = render(<Harness initialCampus={campus} onCampusChange={(next) => { latest = next; }} />);
+    const svg = openNavigationLayer(container);
+    fireEvent.click(screen.getByRole("button", { name: "Connect", exact: true }));
+    fireEvent.mouseDown(navNodeAt(container, source.x, source.y), { clientX: source.x, clientY: source.y, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+
+    const targetPath = container.querySelector("[data-testid='campus-path'][data-path-id='target-path']")!;
+    fireEvent.mouseMove(targetPath, { clientX: click.x, clientY: click.y, bubbles: true });
+    await waitFor(() => {
+      const preview = container.querySelector("[data-testid='nav-path-preview'] polyline");
+      expect(preview).toBeTruthy();
+      expect(preview?.getAttribute("points")?.split(" ").at(-1)).toBe(`${expected.x},${expected.y}`);
+      if (name !== "true diagonal") {
+        expect(preview?.getAttribute("points")).toBe(`${source.x},${source.y} ${expected.x},${expected.y}`);
+      }
+    });
+
+    fireEvent.mouseDown(targetPath, { clientX: click.x, clientY: click.y, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    const updatedPath = latest!.paths.find((candidate) => candidate.id === "target-path")!;
+    expect(updatedPath.points).toContainEqual(expected);
+    const junction = latest!.navNodes!.find((node) => node.x === expected.x && node.y === expected.y && node.generatedFromPathVertices?.some((ref) => ref.pathId === "target-path"));
+    expect(junction).toBeTruthy();
+    const incidentEdges = latest!.navEdges!.filter((edge) => edge.startNodeId === junction!.id || edge.endNodeId === junction!.id);
+    expect(incidentEdges).toHaveLength(3);
+    expect(incidentEdges.some((edge) => edge.startNodeId === "connect-source" && edge.endNodeId === junction!.id
+      || edge.endNodeId === "connect-source" && edge.startNodeId === junction!.id)).toBe(true);
+    const physicalEdges = incidentEdges.filter((edge) => edge.generatedFromPathIds?.includes("target-path"));
+    expect(physicalEdges).toHaveLength(2);
+    expect(physicalEdges.every((edge) => edge.startNodeId === junction!.id || edge.endNodeId === junction!.id)).toBe(true);
   });
 
   it("Phase 5.6 Navigation sidebar is Hierarchy only and Design restores Assets", () => {

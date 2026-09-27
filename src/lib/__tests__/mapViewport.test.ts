@@ -134,6 +134,38 @@ describe("bounded map viewport", () => {
     expect(inspectorOpen.maxX).toBe(normal.maxX);
   });
 
+  it("bases pan limits on the complete Floor bounds, including negative extension origins", () => {
+    const base = getViewportPanBounds({
+      mapWidth: 600,
+      mapHeight: 450,
+      viewportWidth: 1_200,
+      viewportHeight: 800,
+      zoom: 2,
+      padding: 0,
+    });
+    const withRightExtension = getViewportPanBounds({
+      mapWidth: 800,
+      mapHeight: 450,
+      viewportWidth: 1_200,
+      viewportHeight: 800,
+      zoom: 2,
+      padding: 0,
+    });
+    const withLeftExtension = getViewportPanBounds({
+      mapWidth: 700,
+      mapHeight: 450,
+      viewportWidth: 1_200,
+      viewportHeight: 800,
+      zoom: 2,
+      padding: 0,
+      worldOrigin: { x: -100, y: 0 },
+    });
+
+    expect(withRightExtension.minX).toBeLessThan(base.minX);
+    expect(withLeftExtension.minX).toBeCloseTo(-600);
+    expect(withLeftExtension.maxX).toBeCloseTo(100);
+  });
+
   it("keeps the cursor world point fixed when zooming from either transform origin", () => {
     expect(getPanToKeepWorldPoint({
       mapWidth: 1000,

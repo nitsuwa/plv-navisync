@@ -86,13 +86,14 @@ export function screenToWorld(
   canvasW: number,
   canvasH: number,
   pan: { x: number; y: number },
-  zoom: number
+  zoom: number,
+  viewBoxOrigin: { x: number; y: number } = { x: 0, y: 0 }
 ): { x: number; y: number } {
   const box = getSvgContentBox(rect, canvasW, canvasH);
   const z = zoom > 0 ? zoom : 1;
   return {
-    x: ((clientX - rect.left - box.offsetX) / box.scale - pan.x) / z,
-    y: ((clientY - rect.top - box.offsetY) / box.scale - pan.y) / z,
+    x: (viewBoxOrigin.x + (clientX - rect.left - box.offsetX) / box.scale - pan.x) / z,
+    y: (viewBoxOrigin.y + (clientY - rect.top - box.offsetY) / box.scale - pan.y) / z,
   };
 }
 
@@ -110,13 +111,14 @@ export function panToKeepWorldPoint(
   canvasH: number,
   worldX: number,
   worldY: number,
-  zoom: number
+  zoom: number,
+  viewBoxOrigin: { x: number; y: number } = { x: 0, y: 0 }
 ): { x: number; y: number } {
   const box = getSvgContentBox(rect, canvasW, canvasH);
   const z = zoom > 0 ? zoom : 1;
   return {
-    x: (clientX - rect.left - box.offsetX) / box.scale - worldX * z,
-    y: (clientY - rect.top - box.offsetY) / box.scale - worldY * z,
+    x: viewBoxOrigin.x + (clientX - rect.left - box.offsetX) / box.scale - worldX * z,
+    y: viewBoxOrigin.y + (clientY - rect.top - box.offsetY) / box.scale - worldY * z,
   };
 }
 

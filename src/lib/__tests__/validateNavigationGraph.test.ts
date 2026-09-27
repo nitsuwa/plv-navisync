@@ -288,6 +288,80 @@ describe("validateNavigationGraph", () => {
     expect(result.issues.some((i) => i.type === "nav_disconnected_component")).toBe(true);
   });
 
+  it("does not warn that no indoor connection exists when another outdoor component is isolated", () => {
+    const campus = baseCampus({
+      navNodes: [
+        node({ id: "gate-path", type: "outdoor" }),
+        node({ id: "entrance", type: "entrance", buildingId: "b1", entranceId: "e1" }),
+        node({ id: "door", type: "room_access", buildingId: "b1", floorId: "f1", doorId: "d1" }),
+        node({ id: "hallway", type: "hallway", buildingId: "b1", floorId: "f1" }),
+        node({ id: "other-outdoor-a", type: "outdoor" }),
+        node({ id: "other-entrance", type: "entrance", buildingId: "b2", entranceId: "e2" }),
+      ],
+      navEdges: [
+        edge({ id: "gate", startNodeId: "gate-path", endNodeId: "entrance" }),
+        edge({ id: "entrance-door", startNodeId: "entrance", endNodeId: "door", type: "entrance_transition" }),
+        edge({ id: "door-hallway", startNodeId: "door", endNodeId: "hallway" }),
+        edge({ id: "unfinished-building-path", startNodeId: "other-outdoor-a", endNodeId: "other-entrance" }),
+      ],
+    });
+
+    const result = validateNavigationGraph(campus);
+    expect(result.issues.some((issue) => issue.message === "Outdoor navigation network has no connection to any indoor floor.")).toBe(false);
+    expect(result.issues.some((issue) => issue.message === "Navigation graph has 2 disconnected components. Consider connecting them for end-to-end routing.")).toBe(true);
+  });
+
+  it("emits the global warning once when an outdoor network has no active indoor bridge", () => {
+    const campus = baseCampus({
+      navNodes: [
+        node({ id: "outdoor", type: "outdoor" }),
+        node({ id: "entrance", type: "entrance", buildingId: "b1", entranceId: "e1" }),
+        node({ id: "indoor-without-floor", type: "hallway", buildingId: "b1" }),
+      ],
+      navEdges: [
+        edge({ id: "outside", startNodeId: "outdoor", endNodeId: "entrance" }),
+        edge({ id: "non-floor-node", startNodeId: "entrance", endNodeId: "indoor-without-floor", type: "entrance_transition" }),
+      ],
+    });
+
+    const warnings = validateNavigationGraph(campus).issues.filter(
+      (issue) => issue.message === "Outdoor navigation network has no connection to any indoor floor.",
+    );
+    expect(warnings).toHaveLength(1);
+  });
+
+  it("warns when the only significant component is an outdoor-only network", () => {
+    const campus = baseCampus({
+      navNodes: [
+        node({ id: "outdoor-a", type: "outdoor" }),
+        node({ id: "outdoor-b", type: "outdoor" }),
+      ],
+      navEdges: [edge({ id: "outside", startNodeId: "outdoor-a", endNodeId: "outdoor-b" })],
+    });
+
+    expect(validateNavigationGraph(campus).issues.some(
+      (issue) => issue.message === "Outdoor navigation network has no connection to any indoor floor.",
+    )).toBe(true);
+  });
+
+  it("does not count a closed entrance transition as an active Outdoor-to-Floor bridge", () => {
+    const campus = baseCampus({
+      navNodes: [
+        node({ id: "outdoor", type: "outdoor" }),
+        node({ id: "entrance", type: "entrance", buildingId: "b1", entranceId: "e1" }),
+        node({ id: "door", type: "room_access", buildingId: "b1", floorId: "f1", doorId: "d1" }),
+      ],
+      navEdges: [
+        edge({ id: "outside", startNodeId: "outdoor", endNodeId: "entrance" }),
+        edge({ id: "closed-transition", startNodeId: "entrance", endNodeId: "door", type: "entrance_transition", closed: true }),
+      ],
+    });
+
+    expect(validateNavigationGraph(campus).issues.some(
+      (issue) => issue.message === "Outdoor navigation network has no connection to any indoor floor.",
+    )).toBe(true);
+  });
+
   it("complete outdoor→entrance→indoor→floor-transition chain has no errors", () => {
     const campus = baseCampus({
       buildings: [building({ id: "b1", floors: [
@@ -493,6 +567,52 @@ describe("validateNavigationGraph", () => {
       selectionType: "navEdge",
       id: "e1",
     });
+  });
+
+  it("does not treat furniture on a semantic Room-to-Door link as a blocked walking path", () => {
+    const campus = baseCampus({
+      buildings: [building({
+        id: "b1",
+        floors: [{
+          id: "f1",
+          doors: [], rooms: [], walls: [], windows: [],
+          furniture: [{ id: "desk-1", x: 140, y: 90, width: 20, height: 20, type: "desk" }],
+          stairs: [], ramps: [], elevators: [], labels: [],
+        } as any],
+      })],
+      navNodes: [
+        node({ id: "room-node", type: "room_access", buildingId: "b1", floorId: "f1", roomId: "r1", x: 100, y: 100 }),
+        node({ id: "door-node", type: "room_access", buildingId: "b1", floorId: "f1", doorId: "d1", x: 200, y: 100 }),
+      ],
+      navEdges: [edge({ id: "room-door", startNodeId: "room-node", endNodeId: "door-node", type: "room_door_transition" })],
+    });
+
+    expect(validateNavigationGraph(campus).issues.some(
+      (issue) => issue.type === "nav_edge_blocked_by_obstacle" && issue.edgeId === "room-door",
+    )).toBe(false);
+  });
+
+  it("keeps the Furniture warning for a walkable path that crosses its footprint", () => {
+    const campus = baseCampus({
+      buildings: [building({
+        id: "b1",
+        floors: [{
+          id: "f1",
+          doors: [], rooms: [], walls: [], windows: [],
+          furniture: [{ id: "desk-1", x: 140, y: 90, width: 20, height: 20, type: "desk" }],
+          stairs: [], ramps: [], elevators: [], labels: [],
+        } as any],
+      })],
+      navNodes: [
+        node({ id: "walk-a", type: "hallway", buildingId: "b1", floorId: "f1", x: 100, y: 100 }),
+        node({ id: "walk-b", type: "hallway", buildingId: "b1", floorId: "f1", x: 200, y: 100 }),
+      ],
+      navEdges: [edge({ id: "walk-edge", startNodeId: "walk-a", endNodeId: "walk-b", type: "hallway" })],
+    });
+
+    expect(validateNavigationGraph(campus).issues.some(
+      (issue) => issue.type === "nav_edge_blocked_by_obstacle" && issue.edgeId === "walk-edge",
+    )).toBe(true);
   });
 
   it("allows an indoor edge to cross its Door aperture", () => {

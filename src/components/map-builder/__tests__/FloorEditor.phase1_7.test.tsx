@@ -353,7 +353,7 @@ describe("Phase 1.7 — wall connection snapping", () => {
     expect(walls[2]).toMatchObject({ x1: 53, y1: 57, x2: 253, y2: 57 });
   });
 
-  it("snaps an endpoint to a nearby wall segment (Shift held disables angle snap)", () => {
+  it("uses the shared 15° Shift angle rule when a segment is off-axis", () => {
     const { container } = render(<Harness initialCampus={makeSnapCampus()} onCampusChange={(c) => { latestCampus = c; }} />);
     const svg = stubSvgRect(container, 580, 380);
 
@@ -363,7 +363,10 @@ describe("Phase 1.7 — wall connection snapping", () => {
     fireEvent.mouseDown(svg, { clientX: 100, clientY: 60, shiftKey: true, bubbles: true });
 
     const walls = latestCampus!.buildings[0].floors[0].walls;
-    expect(walls[2]).toMatchObject({ x1: 30, y1: 90, x2: 100, y2: 57 });
+    expect(walls[2].x1).toBe(30);
+    expect(walls[2].y1).toBe(90);
+    expect(walls[2].x2).toBeCloseTo(95.9545, 3);
+    expect(walls[2].y2).toBeCloseTo(51.9211, 3);
   });
 
   it("snaps a wall endpoint to the floor boundary", () => {
@@ -376,7 +379,7 @@ describe("Phase 1.7 — wall connection snapping", () => {
     fireEvent.mouseDown(svg, { clientX: 577, clientY: 100, shiftKey: true, bubbles: true });
 
     const walls = latestCampus!.buildings[0].floors[0].walls;
-    expect(walls[2]).toMatchObject({ x1: 30, y1: 90, x2: 580, y2: 100 });
+    expect(walls[2]).toMatchObject({ x1: 30, y1: 90, x2: 580, y2: 90 });
   });
 
   it("snaps while editing an existing wall endpoint (Shift holds angle assistance)", () => {
@@ -746,9 +749,7 @@ describe("Phase 1.7 — curated furniture library and shared renderer", () => {
     const { container } = render(<Harness initialCampus={campus} />);
     stubSvgRect(container, 220, 160);
 
-    const furnitureGs = Array.from(container.querySelectorAll("g")).filter(
-      (el) => !el.hasAttribute("transform") && el.querySelector("title")
-    );
+    const furnitureGs = Array.from(container.querySelectorAll("[data-layer-key^='furniture:']"));
     expect(furnitureGs.length).toBe(2);
 
     // A chair renders a seat + backrest silhouette (≥2 rects), and no visible
@@ -770,15 +771,12 @@ describe("Phase 1.7 — curated furniture library and shared renderer", () => {
     const seatingHeader = Array.from(container.querySelectorAll("button")).find((b) => b.textContent?.includes("Seating"));
     fireEvent.click(seatingHeader!);
     const paletteChair = Array.from(container.querySelectorAll("svg")).find(
-      (s) => s.getAttribute("viewBox") === "0 0 28 20" && s.closest("button")?.textContent?.includes("Chair")
+      (s) => s.getAttribute("viewBox") === "0 0 28 20" && s.closest("button")?.getAttribute("aria-label") === "Chair"
     );
     expect(paletteChair).toBeTruthy();
 
     // Choose the Chair template and place it on the canvas
-    const chairButton = Array.from(container.querySelectorAll("button")).find(
-      (b) => b.textContent?.includes("Chair") && !b.textContent?.includes("Student")
-    );
-    fireEvent.click(chairButton!);
+    fireEvent.click(screen.getByRole("button", { name: "Chair", exact: true }));
     fireEvent.mouseDown(svg, { clientX: 100, clientY: 100, bubbles: true });
     fireEvent.mouseUp(svg, { bubbles: true });
 

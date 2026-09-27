@@ -4,6 +4,14 @@ import type {
 } from "../components/map-builder/types";
 import { createNavNode, createNavEdge, findNavNodeAtPoint } from "./navigationGraph";
 import { genId } from "../components/map-builder/constants";
+import { floorShapeContainsPolyline, type FloorShapeRect } from "./floorShape";
+import {
+  pointInRoomShape,
+  pointInRoomShapeInclusive,
+  roomContainsRoom,
+  roomOutlinePoints,
+  roomShapeArea,
+} from "./roomShape";
 
 // ── B5 Phase 2 — Indoor Navigation Authoring Foundation ─────────────────────
 // Pure, testable helpers for SINGLE-FLOOR indoor routing authoring inside the
@@ -279,12 +287,52 @@ export function pruneOrphanedIndoorNodes(
  *  entrance target affordance. */
 
 export function findRoomAtPoint(rooms: FloorRoom[] | undefined, point: { x: number; y: number }): FloorRoom | null {
+  const matches: FloorRoom[] = [];
   for (const r of rooms ?? []) {
     if (r.visible === false) continue;
-    const inside = point.x >= r.x && point.x <= r.x + r.w && point.y >= r.y && point.y <= r.y + r.h;
-    if (inside) return r;
+    const outline = roomOutlinePoints(r);
+    const inside = pointInRoomShape(point, outline);
+    const onBoundary = outline.some((start, index) => {
+      const end = outline[(index + 1) % outline.length];
+      return projectPointOntoSegment(point, start, end).distance <= 0.01;
+    });
+    if (inside || onBoundary) matches.push(r);
   }
-  return null;
+  // In nested layouts the smallest containing Room is the actual local context;
+  // returning the large parent first would mask the inner Room beneath it.
+  return matches.sort((left, right) => roomShapeArea(roomOutlinePoints(left)) - roomShapeArea(roomOutlinePoints(right)))[0] ?? null;
+}
+
+/** True when a Walking Network point is in the open space immediately outside
+ * a linked Room Door. For nested Rooms this is the closest containing Room's
+ * walkable area; ordinary corridor Doors retain their existing unrestricted
+ * target behavior. This is editor connection validation only and adds no graph
+ * relationship of its own. */
+export function nestedRoomDoorNetworkPointIsValid(
+  doorId: string | undefined,
+  point: { x: number; y: number },
+  rooms: FloorRoom[] | undefined,
+): boolean {
+  if (!doorId) return true;
+  const allRooms = rooms ?? [];
+  const contexts = allRooms.flatMap((innerRoom) => {
+    if (!roomAccessDoorIds(innerRoom).includes(doorId)) return [];
+    const innerArea = roomShapeArea(roomOutlinePoints(innerRoom));
+    const containers = allRooms
+      .filter((candidate) => candidate.id !== innerRoom.id && roomContainsRoom(candidate, innerRoom))
+      .sort((left, right) => roomShapeArea(roomOutlinePoints(left)) - roomShapeArea(roomOutlinePoints(right)));
+    const parent = containers[0];
+    return parent ? [{ innerRoom, parent, innerArea }] : [];
+  });
+  if (contexts.length === 0) return true;
+  return contexts.some(({ innerRoom, parent, innerArea }) => {
+    // Keep the area read here as an explicit invariant for deterministic
+    // closest-container selection above; it also guards malformed zero-area
+    // custom Room shapes from becoming a routing context.
+    if (innerArea <= 0) return false;
+    return pointInRoomShapeInclusive(point, roomOutlinePoints(parent))
+      && !pointInRoomShapeInclusive(point, roomOutlinePoints(innerRoom));
+  });
 }
 
 export function findDoorAtPoint(doors: FloorDoor[] | undefined, point: { x: number; y: number }, threshold = 14): FloorDoor | null {
@@ -325,35 +373,21 @@ export function findCirculationAtPoint(
 
 /**
  * B5 Phase 2.3 placement rule: does a FREE Waypoint / Destination placement
- * at `point` land directly on a semantic linked-location object? Those objects
- * have their own Link Location workflow, so free placement there would create
- * duplicate/overlapping concepts. Returns the blocking kind or null.
- *
- * Room rule (deliberately NOT a blanket ban): only the room's semantic target
- * (the center label/link-cue zone) blocks free placement — the interior of a
- * large room remains walkable floor space, so waypoints placed away from the
- * center are allowed. Doors and circulation objects have precise positions and
- * always block.
+ * at `point` land directly on a physical Door or circulation object? Those
+ * objects have their own Link Location workflow. Room polygons are walkable
+ * floor area, including their center/label region, and never block free points.
  */
 export function linkedPlacementBlockAt(
   point: { x: number; y: number },
-  rooms: FloorRoom[] | undefined,
+  _rooms: FloorRoom[] | undefined,
   doors: FloorDoor[] | undefined,
   stairs: FloorStairs[] | undefined,
   elevators: FloorElevatorItem[] | undefined,
   ramps: FloorRamp[] | undefined
-): "room" | "door" | "stairs" | "elevator" | "ramp" | null {
+): "door" | "stairs" | "elevator" | "ramp" | null {
   if (findDoorAtPoint(doors, point)) return "door";
   const circ = findCirculationAtPoint(stairs, elevators, ramps, point);
   if (circ) return circ.kind;
-  for (const r of rooms ?? []) {
-    if (r.visible === false) continue;
-    if (point.x < r.x || point.x > r.x + r.w || point.y < r.y || point.y > r.y + r.h) continue;
-    const cx = r.x + r.w / 2;
-    const cy = r.y + r.h / 2;
-    const zone = Math.max(8, Math.min(r.w, r.h) * 0.25);
-    if (Math.hypot(point.x - cx, point.y - cy) <= zone) return "room";
-  }
   return null;
 }
 
@@ -399,33 +433,84 @@ export function roomDoorIsValid(
   if (!room || !door || door.visible === false || !door.wallId) return false;
   const wall = (walls ?? []).find((candidate) => candidate.id === door.wallId);
   if (!wall || wall.visible === false) return false;
+  // A persisted Room↔Door relationship is the strongest signal and remains
+  // authoritative for legacy layouts whose wall geometry was later edited.
+  if (roomAccessDoorIds(room).includes(door.id)) return true;
   // Explicit endpoint anchors are authoritative for the low-level relationship
   // helper. Shared-boundary handling belongs to the higher-level eligibility
   // helper, which has the complete Room set available to prove the boundary is
   // genuinely shared rather than merely nearby.
   if (wall.startAnchor || wall.endAnchor) return wall.startAnchor?.roomId === room.id || wall.endAnchor?.roomId === room.id;
 
-  return roomDoorBoundaryContains(room, door);
+  return roomDoorBoundaryContains(room, door, wall);
 }
 
-function roomDoorBoundaryContains(room: FloorRoom, door: FloorDoor): boolean {
+function roomDoorBoundaryContains(room: FloorRoom, door: FloorDoor, wall: FloorWall): boolean {
+  // Legacy fallback: the Door and its parent Wall must overlap an actual Room
+  // polygon edge. This handles custom/slanted Rooms without treating a nearby
+  // Door inside the Room's bounding box as a boundary Door.
+  const tolerance = 4;
+  const wallStart = { x: wall.x1, y: wall.y1 };
+  const wallEnd = { x: wall.x2, y: wall.y2 };
+  const wallDx = wallEnd.x - wallStart.x;
+  const wallDy = wallEnd.y - wallStart.y;
+  const wallLength = Math.hypot(wallDx, wallDy);
+  if (wallLength < 0.001) return false;
 
-  // Legacy fallback: compare the Door's world position with the rotated Room
-  // boundary.  This remains deliberately local; a Door elsewhere on the floor
-  // cannot be linked merely because it shares a floor/building.
-  const cx = room.x + room.w / 2;
-  const cy = room.y + room.h / 2;
-  const angle = -((room.rotation ?? 0) * Math.PI) / 180;
-  const dx = door.x - cx;
-  const dy = door.y - cy;
-  const localX = dx * Math.cos(angle) - dy * Math.sin(angle);
-  const localY = dx * Math.sin(angle) + dy * Math.cos(angle);
-  const halfW = room.w / 2;
-  const halfH = room.h / 2;
-  const tolerance = Math.max(8, Math.min(door.width / 2 + 6, 18));
-  const onVerticalEdge = Math.abs(Math.abs(localX) - halfW) <= tolerance && Math.abs(localY) <= halfH + tolerance;
-  const onHorizontalEdge = Math.abs(Math.abs(localY) - halfH) <= tolerance && Math.abs(localX) <= halfW + tolerance;
-  return onVerticalEdge || onHorizontalEdge;
+  const doorCenter = { x: door.x, y: door.y };
+  const onWall = projectPointOntoSegment(doorCenter, wallStart, wallEnd);
+  if (onWall.rawT < -tolerance / wallLength || onWall.rawT > 1 + tolerance / wallLength || onWall.distance > tolerance) {
+    return false;
+  }
+
+  const outline = roomOutlinePoints(room);
+  for (let index = 0; index < outline.length; index += 1) {
+    const edgeStart = outline[index];
+    const edgeEnd = outline[(index + 1) % outline.length];
+    const edgeDx = edgeEnd.x - edgeStart.x;
+    const edgeDy = edgeEnd.y - edgeStart.y;
+    const edgeLength = Math.hypot(edgeDx, edgeDy);
+    if (edgeLength < 0.001) continue;
+
+    const alignment = Math.abs((wallDx * edgeDx + wallDy * edgeDy) / (wallLength * edgeLength));
+    if (alignment < 0.995) continue;
+
+    const onBoundary = projectPointOntoSegment(doorCenter, edgeStart, edgeEnd);
+    if (onBoundary.distance > tolerance) continue;
+    const alongBoundary = onBoundary.rawT * edgeLength;
+    const halfDoor = Math.max(0, door.width) / 2;
+    if (alongBoundary < halfDoor - tolerance || alongBoundary > edgeLength - halfDoor + tolerance) continue;
+
+    // The parent Wall must overlap this exact polygon edge at the Door. A
+    // parallel wall that merely passes nearby is not enough.
+    const edgeUnitX = edgeDx / edgeLength;
+    const edgeUnitY = edgeDy / edgeLength;
+    const wallStartAlong = (wallStart.x - edgeStart.x) * edgeUnitX + (wallStart.y - edgeStart.y) * edgeUnitY;
+    const wallEndAlong = (wallEnd.x - edgeStart.x) * edgeUnitX + (wallEnd.y - edgeStart.y) * edgeUnitY;
+    const overlapStart = Math.max(0, Math.min(wallStartAlong, wallEndAlong));
+    const overlapEnd = Math.min(edgeLength, Math.max(wallStartAlong, wallEndAlong));
+    if (overlapStart > overlapEnd + tolerance) continue;
+    if (alongBoundary < overlapStart - tolerance || alongBoundary > overlapEnd + tolerance) continue;
+    return true;
+  }
+  return false;
+}
+
+function projectPointOntoSegment(
+  point: { x: number; y: number },
+  start: { x: number; y: number },
+  end: { x: number; y: number },
+): { x: number; y: number; rawT: number; distance: number } {
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const lengthSquared = dx * dx + dy * dy;
+  const rawT = lengthSquared > 0
+    ? ((point.x - start.x) * dx + (point.y - start.y) * dy) / lengthSquared
+    : 0;
+  const t = Math.max(0, Math.min(1, rawT));
+  const x = start.x + t * dx;
+  const y = start.y + t * dy;
+  return { x, y, rawT, distance: Math.hypot(point.x - x, point.y - y) };
 }
 
 /**
@@ -446,7 +531,7 @@ export function isDoorEligibleForRoom(
   const physicallyValid = roomDoorIsValid(room, door, walls) || Boolean(
     wall && (wall.startAnchor || wall.endAnchor)
       && (options?.rooms ?? []).some((candidate) => candidate.id !== room.id && roomDoorIsValid(candidate, door, walls))
-      && roomDoorBoundaryContains(room, door),
+      && roomDoorBoundaryContains(room, door, wall),
   );
   if (!physicallyValid) return false;
   const excluded = options?.excludeDoorIds ? new Set(options.excludeDoorIds) : undefined;
@@ -485,19 +570,26 @@ export function reconcileRoomDoorEdges(
   const safeNodes = nodes ?? [];
   const retained = (edges ?? []).filter((edge) => edge.type !== ROOM_DOOR_EDGE_TYPE);
   const next = [...retained];
+  const roomNodeByRoomId = new Map<string, NavigationNode>();
+  const doorNodeByDoorId = new Map<string, NavigationNode>();
+  for (const node of safeNodes) {
+    if (node.roomId && !roomNodeByRoomId.has(node.roomId)) roomNodeByRoomId.set(node.roomId, node);
+    if (node.doorId && !doorNodeByDoorId.has(node.doorId)) doorNodeByDoorId.set(node.doorId, node);
+  }
+  const doorById = new Map<string, FloorDoor>();
+  for (const door of doors ?? []) if (!doorById.has(door.id)) doorById.set(door.id, door);
+  const pairKey = (left: string, right: string) => left < right ? `${left}\u0000${right}` : `${right}\u0000${left}`;
+  const existingRoomDoorPairs = new Set(retained.map((edge) => pairKey(edge.startNodeId, edge.endNodeId)));
   for (const room of rooms ?? []) {
-    const roomNode = safeNodes.find((node) => node.roomId === room.id);
+    const roomNode = roomNodeByRoomId.get(room.id);
     if (!roomNode) continue;
     for (const doorId of roomAccessDoorIds(room)) {
-      const door = (doors ?? []).find((candidate) => candidate.id === doorId);
+      const door = doorById.get(doorId);
       if (!isDoorEligibleForRoom(room, door, walls, safeNodes, { rooms: rooms ?? [] })) continue;
-      const doorNode = safeNodes.find((node) => node.doorId === doorId);
+      const doorNode = doorNodeByDoorId.get(doorId);
       if (!doorNode || roomNode.id === doorNode.id) continue;
-      const exists = next.some((edge) =>
-        (edge.startNodeId === roomNode.id && edge.endNodeId === doorNode.id)
-        || (edge.startNodeId === doorNode.id && edge.endNodeId === roomNode.id),
-      );
-      if (exists) continue;
+      const key = pairKey(roomNode.id, doorNode.id);
+      if (existingRoomDoorPairs.has(key)) continue;
       next.push(createNavEdge({
         id: genId("ne"),
         startNodeId: roomNode.id,
@@ -505,6 +597,7 @@ export function reconcileRoomDoorEdges(
         nodes: safeNodes,
         type: ROOM_DOOR_EDGE_TYPE,
       }));
+      existingRoomDoorPairs.add(key);
     }
   }
   return next;
@@ -1018,12 +1111,17 @@ export function orthogonalBendsFor(
   b: NavPoint,
   walls: FloorWall[] | undefined,
   doors: FloorDoor[] | undefined,
-  bounds?: { width: number; height: number }
+  bounds?: { width: number; height: number },
+  floorRegions?: FloorShapeRect[],
 ): NavPoint[] {
   if (a.x === b.x || a.y === b.y) return [];
   const cornerH = { x: b.x, y: a.y }; // A ────┐ → B
   const cornerV = { x: a.x, y: b.y }; // A ─┐ then down to B
-  const safe = (c: NavPoint) => !edgePolylineCrossesWallWithoutDoor([a, c, b], walls, doors);
+  const safe = (c: NavPoint) => {
+    const points = [a, c, b];
+    return !edgePolylineCrossesWallWithoutDoor(points, walls, doors)
+      && (!floorRegions || floorShapeContainsPolyline(floorRegions, points));
+  };
   const hSafe = safe(cornerH);
   const vSafe = safe(cornerV);
   if (hSafe && vSafe) {
@@ -1039,8 +1137,9 @@ export function orthogonalBendsFor(
   if (vSafe) return [cornerV];
   // Both L candidates blocked — deterministic orthogonal detour around the wall.
   const offset = Math.max(16, Math.round((Math.abs(b.x - a.x) + Math.abs(b.y - a.y)) / 2));
-  const inBounds = (p: NavPoint) =>
-    !bounds || (p.x >= 0 && p.x <= bounds.width && p.y >= 0 && p.y <= bounds.height);
+  const inBounds = (points: NavPoint[]) => floorRegions
+    ? floorShapeContainsPolyline(floorRegions, [a, ...points, b])
+    : !bounds || points.every((p) => p.x >= 0 && p.x <= bounds.width && p.y >= 0 && p.y <= bounds.height);
   const detours: NavPoint[][] = [
     [{ x: a.x + offset, y: a.y }, { x: a.x + offset, y: b.y }],
     [{ x: a.x - offset, y: a.y }, { x: a.x - offset, y: b.y }],
@@ -1048,7 +1147,7 @@ export function orthogonalBendsFor(
     [{ x: a.x, y: a.y - offset }, { x: b.x, y: a.y - offset }],
   ];
   for (const detour of detours) {
-    if (!detour.every(inBounds)) continue;
+    if (!inBounds(detour)) continue;
     if (!edgePolylineCrossesWallWithoutDoor([a, ...detour, b], walls, doors)) return detour;
   }
   return [];
@@ -1309,6 +1408,39 @@ export function navAlignSnap(
   return { x, y, guides };
 }
 
+/** Resolve a Connect path-junction point against its source node's axes. Only
+ * coordinates already within the normal 8-unit alignment tolerance move; the
+ * other coordinate retains its projected precision, so deliberate diagonals
+ * remain unchanged. */
+export function alignConnectTargetToSource(
+  source: NavPoint,
+  target: NavPoint,
+  threshold = 8,
+): NavPoint {
+  const aligned = navAlignSnap(target, [{ x: source.x, y: source.y }], threshold);
+  return { x: aligned.x, y: aligned.y };
+}
+
+/** Resolve a projected Connect junction using the same near-axis rule in
+ * indoor and outdoor editors. Accept the axis snap only if it stays within one
+ * world unit of the target segment; otherwise preserve the true projection. */
+export function resolveConnectPathTargetPoint(
+  source: NavPoint,
+  projected: NavPoint,
+  segmentStart: NavPoint,
+  segmentEnd: NavPoint,
+): NavPoint {
+  const aligned = alignConnectTargetToSource(source, projected, 8);
+  const dx = segmentEnd.x - segmentStart.x;
+  const dy = segmentEnd.y - segmentStart.y;
+  const lengthSquared = dx * dx + dy * dy;
+  const t = lengthSquared === 0
+    ? 0
+    : Math.max(0, Math.min(1, ((aligned.x - segmentStart.x) * dx + (aligned.y - segmentStart.y) * dy) / lengthSquared));
+  const distance = Math.hypot(aligned.x - (segmentStart.x + dx * t), aligned.y - (segmentStart.y + dy * t));
+  return distance <= 1 ? aligned : { x: projected.x, y: projected.y };
+}
+
 /**
  * B5 Phase 2.8: group-drag alignment — snap a rigid group of free nodes so its
  * bbox edges/center align with another routing node's X or Y. Returns the
@@ -1371,10 +1503,11 @@ export function rampLinkedCuePosition(ramp: Pick<FloorRamp, "x" | "y" | "width" 
 }
 
 /**
- * Remap an indoor nav graph for a duplicated floor. Every node/edge gets a new
- * ID, floorId points at the copy, and linked physical-object refs are remapped
- * through the old→new id maps produced by the floor duplication (room/door/
- * stair/elevator/ramp). Returns the remapped campus-level graph.
+ * Remap an indoor nav graph for a duplicated floor. Every copied node/edge
+ * gets a new ID, floorId points at the copy, and linked physical-object refs
+ * are remapped through the old→new id maps produced by floor duplication.
+ * Returns copy-only fragments plus the node-ID map; it never returns or
+ * mutates a replacement campus graph.
  */
 export function remapIndoorNavForFloorCopy(
   nodes: NavigationNode[] | undefined,
@@ -1385,38 +1518,105 @@ export function remapIndoorNavForFloorCopy(
     rooms: Map<string, string>;
     doors: Map<string, string>;
     stairs: Map<string, string>;
-    elevators: Map<string, string>;
-    ramps: Map<string, string>;
+      elevators: Map<string, string>;
+      ramps: Map<string, string>;
+      sharedIds?: Map<string, string>;
+      paths?: Map<string, string>;
+      exteriorZones?: Map<string, string>;
+      entranceSteps?: Map<string, string>;
+      entranceRamps?: Map<string, string>;
   }
-): { navNodes: NavigationNode[]; navEdges: NavigationEdge[] } {
-  const sourceNodes = (nodes ?? []).filter((n) => n.floorId === sourceFloorId);
-  const idMap = new Map<string, string>();
-  const remappedNodes: NavigationNode[] = [];
-  for (const n of sourceNodes) {
-    const newId = genId("nn");
-    idMap.set(n.id, newId);
-    const remapped: NavigationNode = {
-      ...n,
-      id: newId,
-      floorId: copyFloorId,
+): {
+  copiedNodes: NavigationNode[];
+  copiedEdges: NavigationEdge[];
+  sourceToCopiedNodeIds: Map<string, string>;
+  } {
+    const sourceNodes = (nodes ?? []).filter((n) => n.floorId === sourceFloorId
+      // Exterior Emergency Stair landings are generated from a Building-owned
+      // occurrence and are intentionally absent from a Floor-only duplicate.
+      && !n.exteriorEmergencyStairId
+      && !idMaps.excludedExteriorEmergencyStairIds?.has(n.stairId ?? ""));
+    const sourceToCopiedNodeIds = new Map<string, string>();
+    const copiedNodes: NavigationNode[] = [];
+    const sharedIdMap = idMaps.sharedIds ?? new Map<string, string>();
+    const remapSharedId = (sharedId: string | undefined) => {
+      if (!sharedId) return undefined;
+      if (!sharedIdMap.has(sharedId)) sharedIdMap.set(sharedId, genId("shaft"));
+      return sharedIdMap.get(sharedId);
+    };
+    const remapDerivedOwner = (type: NavigationNode["derivedOwnerType"] | NavigationEdge["derivedOwnerType"], ownerId: string | undefined) => {
+      if (!type || !ownerId) return undefined;
+      if (type === "exterior_zone") return idMaps.exteriorZones?.get(ownerId);
+      if (type === "entrance_steps") return idMaps.entranceSteps?.get(ownerId);
+      if (type === "entrance_ramp") return idMaps.entranceRamps?.get(ownerId);
+      // Entrance thresholds are Building-owned and are not part of a Floor copy.
+      return undefined;
+    };
+    for (const n of sourceNodes) {
+      const newId = genId("nn");
+      sourceToCopiedNodeIds.set(n.id, newId);
+      const derivedOwnerId = remapDerivedOwner(n.derivedOwnerType, n.derivedOwnerId);
+      const remapped: NavigationNode = {
+        ...structuredClone(n),
+        id: newId,
+        floorId: copyFloorId,
       roomId: n.roomId ? idMaps.rooms.get(n.roomId) : undefined,
       doorId: n.doorId ? idMaps.doors.get(n.doorId) : undefined,
-      stairId: n.stairId ? idMaps.stairs.get(n.stairId) : undefined,
-      elevatorId: n.elevatorId ? idMaps.elevators.get(n.elevatorId) : undefined,
-      rampId: n.rampId ? idMaps.ramps.get(n.rampId) : undefined,
-    };
-    remappedNodes.push(remapped);
+        stairId: n.stairId ? idMaps.stairs.get(n.stairId) : undefined,
+        elevatorId: n.elevatorId ? idMaps.elevators.get(n.elevatorId) : undefined,
+        rampId: n.rampId ? idMaps.ramps.get(n.rampId) : undefined,
+        transitionSharedId: remapSharedId(n.transitionSharedId),
+        // Building / campus identities are outside a duplicated Floor's copy
+        // boundary. Their connected graph can be authored again explicitly.
+        entranceId: undefined,
+        buildingEntranceId: undefined,
+        exteriorEmergencyStairId: undefined,
+        gateId: undefined,
+        exteriorZoneId: n.exteriorZoneId ? idMaps.exteriorZones?.get(n.exteriorZoneId) : undefined,
+        derivedOwnerType: derivedOwnerId ? n.derivedOwnerType : undefined,
+        derivedOwnerId,
+        derivedRole: derivedOwnerId ? n.derivedRole : undefined,
+        // FloorPath does not own the campus navigation vertex IDs referenced
+        // here, so copied points become independent authored waypoints.
+        generatedFromPathVertices: undefined,
+      };
+      copiedNodes.push(remapped);
+    }
+  const copiedEdges = (edges ?? [])
+    .filter((e) => sourceToCopiedNodeIds.has(e.startNodeId)
+      && sourceToCopiedNodeIds.has(e.endNodeId)
+      && e.type !== CROSS_FLOOR_EDGE_TYPE
+      && e.type !== "cross_floor")
+      .map((e) => {
+        const derivedOwnerId = remapDerivedOwner(e.derivedOwnerType, e.derivedOwnerId);
+        const generatedFromPathIds = e.generatedFromPathIds
+          ?.map((pathId) => idMaps.paths?.get(pathId))
+          .filter((pathId): pathId is string => !!pathId);
+        const copiedJunctionIds = e.pathJunctionIds
+          ?.map((nodeId) => sourceToCopiedNodeIds.get(nodeId))
+          .filter((nodeId): nodeId is string => !!nodeId);
+        return {
+          ...structuredClone(e),
+          id: genId("ne"),
+          startNodeId: sourceToCopiedNodeIds.get(e.startNodeId)!,
+          endNodeId: sourceToCopiedNodeIds.get(e.endNodeId)!,
+          generatedFromPathIds: generatedFromPathIds?.length ? generatedFromPathIds : undefined,
+          derivedOwnerType: derivedOwnerId ? e.derivedOwnerType : undefined,
+          derivedOwnerId,
+          derivedRole: derivedOwnerId ? e.derivedRole : undefined,
+          exteriorApproachFallbackEntranceId: undefined,
+          exteriorApproachFallbackOriginalClosed: undefined,
+          exteriorApproachFallbackOriginalDistance: undefined,
+          exteriorApproachSuspendedZoneId: e.exteriorApproachSuspendedZoneId
+            ? idMaps.exteriorZones?.get(e.exteriorApproachSuspendedZoneId)
+            : undefined,
+          exteriorApproachAutoHandoffTargetId: undefined,
+          pathJunctionId: e.pathJunctionId ? sourceToCopiedNodeIds.get(e.pathJunctionId) : undefined,
+          pathJunctionIds: copiedJunctionIds?.length ? copiedJunctionIds : undefined,
+        };
+      });
+    return { copiedNodes, copiedEdges, sourceToCopiedNodeIds };
   }
-  const remappedEdges = (edges ?? [])
-    .filter((e) => idMap.has(e.startNodeId) && idMap.has(e.endNodeId))
-    .map((e) => ({
-      ...e,
-      id: genId("ne"),
-      startNodeId: idMap.get(e.startNodeId)!,
-      endNodeId: idMap.get(e.endNodeId)!,
-    }));
-  return { navNodes: remappedNodes, navEdges: remappedEdges };
-}
 
 // ── B5 Phase 3 — Cross-floor navigation transitions ────────────────────────
 // Stairs and Elevators share a physical identity across floors via the
@@ -1445,6 +1645,9 @@ export interface CrossFloorOwnerInfo {
   kind: CrossFloorKind;
   ownerId: string;
   sharedId: string;
+  /** Exterior emergency Stair occurrences have a separate canonical owner
+   * identity and must never join an ordinary indoor Stair chain. */
+  exteriorEmergencyStairId?: string;
   floorId: string;
   floorOrder: number;
   floorNumber: number;
@@ -1478,6 +1681,9 @@ export function findCrossFloorOwnerInfo(
     if (!owner?.sharedId) return null;
     return {
       kind: "stair", ownerId: node.stairId, sharedId: owner.sharedId,
+      ...(owner.exteriorEmergencyStairId || node.exteriorEmergencyStairId
+        ? { exteriorEmergencyStairId: owner.exteriorEmergencyStairId ?? node.exteriorEmergencyStairId }
+        : {}),
       floorId: floor.id, floorOrder, floorNumber: floor.number ?? 0,
       floorLabel: floor.label, direction: owner.direction,
     };
@@ -1521,12 +1727,35 @@ export function reconcileCrossFloorTransitions(
 ): NavigationEdge[] {
   const safeNodes = nodes ?? [];
   const safeEdges = edges ?? [];
+  const conflictedStairIdentityKeys = new Set<string>();
+  const exteriorOwnerByStairOccurrence = new Map<string, string>();
+  for (const node of safeNodes) {
+    if (node.stairId && node.floorId && node.exteriorEmergencyStairId) {
+      exteriorOwnerByStairOccurrence.set(`${node.floorId}:${node.stairId}`, node.exteriorEmergencyStairId);
+    }
+  }
+  for (const floor of floors ?? []) {
+    const countsByIdentity = new Map<string, number>();
+    for (const stair of floor.stairs ?? []) {
+      if (!stair.sharedId) continue;
+      const exteriorOwnerId = stair.exteriorEmergencyStairId
+        ?? exteriorOwnerByStairOccurrence.get(`${floor.id}:${stair.id}`);
+      const identityKey = exteriorOwnerId
+        ? `stair:exterior:${exteriorOwnerId}`
+        : `stair:indoor:${stair.sharedId}`;
+      const count = (countsByIdentity.get(identityKey) ?? 0) + 1;
+      countsByIdentity.set(identityKey, count);
+      if (count > 1) conflictedStairIdentityKeys.add(identityKey);
+    }
+  }
   // 1) Group linked circulation nodes by (kind, sharedId).
   const groups = new Map<string, { node: NavigationNode; info: CrossFloorOwnerInfo }[]>();
   for (const node of safeNodes) {
     const info = findCrossFloorOwnerInfo(node, floors, buildingId);
     if (!info) continue;
-    const key = `${info.kind}:${info.sharedId}`;
+    const key = info.kind === "stair" && info.exteriorEmergencyStairId
+      ? `stair:exterior:${info.exteriorEmergencyStairId}`
+      : `${info.kind}:indoor:${info.sharedId}`;
     const list = groups.get(key) ?? [];
     list.push({ node, info });
     groups.set(key, list);
@@ -1537,13 +1766,20 @@ export function reconcileCrossFloorTransitions(
   for (const group of groups.values()) {
     if (group.length < 2) continue;
     const kind = group[0].info.kind;
+    // The canonical exterior owner ID, rather than the sharedId alone,
+    // isolates generated landings from ordinary Floor Stairs even in legacy
+    // data where both systems accidentally reused a sharedId.
     const exteriorEmergencyGroup = kind === "stair"
-      && group.some((entry) => !!entry.node.exteriorEmergencyStairId);
+      && group.every((entry) => !!entry.info.exteriorEmergencyStairId);
     // A Stair identity may have at most one occurrence on a Floor.  Legacy
     // label/count-based IDs could put two same-floor Stairs in one group; do
     // not let the sorted list pair one of them with the next Floor by accident.
     // The authoring UI can then surface the conflict for an explicit repair.
-    if (kind === "stair" && new Set(group.map((entry) => entry.info.floorId)).size !== group.length) continue;
+    const stairIdentityKey = kind === "stair" && group[0].info.exteriorEmergencyStairId
+      ? `stair:exterior:${group[0].info.exteriorEmergencyStairId}`
+      : `stair:indoor:${group[0].info.sharedId}`;
+    if (kind === "stair" && (conflictedStairIdentityKeys.has(stairIdentityKey)
+      || new Set(group.map((entry) => entry.info.floorId)).size !== group.length)) continue;
     // Elevator served floors: as soon as ANY member of the chain declares a
     // served-floor list, the list set is authoritative — a node whose floor is
     // in NO member's served list never participates (no invented stops), while

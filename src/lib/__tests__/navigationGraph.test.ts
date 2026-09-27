@@ -8,6 +8,7 @@ import {
   findDuplicateNavEdge,
   removeNavNode,
   findNavNodeAtPoint,
+  findNavEdgeAtPoint,
   normalizeNavGraph,
   validateNavGraphBasics,
   segmentIntersectsRect,
@@ -35,6 +36,17 @@ function node(id: string, x: number, y: number): NavigationNode {
 }
 
 describe("B5 Phase 1 — navigation graph helpers", () => {
+  it("projects a Connect target onto the midpoint of a diagonal navigation edge", () => {
+    const edge = { id: "diagonal", startNodeId: "a", endNodeId: "b" } as NavigationEdge;
+    const hit = findNavEdgeAtPoint(
+      [edge],
+      { a: { x: 100, y: 100 }, b: { x: 200, y: 150 } },
+      { x: 150, y: 125 },
+    );
+    expect(hit?.edge.id).toBe("diagonal");
+    expect(hit?.nearest).toMatchObject({ x: 150, y: 125, segIndex: 0, t: 0.5, dist: 0 });
+  });
+
   describe("createNavNode", () => {
     it("creates a canonical node with sensible defaults", () => {
       const n = createNavNode({ id: "nn1", x: 12.4, y: 33.6, campusId: "c1" });

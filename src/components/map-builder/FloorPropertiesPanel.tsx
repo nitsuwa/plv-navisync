@@ -1,10 +1,10 @@
 import { useState, useEffect, useRef } from "react";
-import { X, Info, Palette, Settings2, AlertTriangle, Navigation, Copy, Eye, EyeOff, Lock, Unlock, Layers, FlipHorizontal } from "lucide-react";
+import { X, Info, Palette, Settings2, AlertTriangle, Navigation, Copy, Eye, EyeOff, Lock, Unlock, Layers, FlipHorizontal, FlipVertical } from "lucide-react";
 import { NavigationRelationshipCard } from "./NavigationRelationshipCard";
 import { ObjectIssueSection, type ObjectIssueItem } from "./ObjectIssueSection";
 import { cn } from "../../lib/utils";
 import { ColorPicker } from "../ui/ColorPicker";
-import { ROOM_MAP, WALL_THICKNESSES } from "./constants";
+import { ROOM_MAP, WALL_THICKNESSES, furnitureTypeSupportsColor } from "./constants";
 import { stairContinuationDirectionAllows, stairDirectionsForFloorInOrder } from "../../lib/floorManagement";
 import type {
   FloorRoom, FloorWall, FloorDoor, FloorWindow,
@@ -18,6 +18,7 @@ import { clampNormalizedOffset, wallAttachmentArrowDelta } from "../../lib/wallA
 import { formatWallLength, wallLength, type WallLengthAnchor } from "../../lib/floorGeometry";
 import { roomVisualSetup } from "../../lib/roomSetup";
 import { CommittedNumberInput } from "./CommittedNumberInput";
+import type { FloorLayerActionAvailability } from "../../lib/floorRenderLayers";
 
 type TabId = "basic" | "style" | "advanced";
 
@@ -36,6 +37,11 @@ interface FloorPropertiesPanelProps {
   elevators: FloorElevatorItem[];
   labels: FloorLabel[];
   onUpdateRoom: (id: string, changes: Partial<FloorRoom>) => void;
+  onEditRoomShape?: (roomId: string) => void;
+  onResetRoomShape?: (roomId: string) => void;
+  onFlipRoomShape?: (roomId: string, axis: "horizontal" | "vertical") => void;
+  onFlipRoomSetup?: (roomId: string, axis: "horizontal" | "vertical") => void;
+  roomShapeEditActive?: boolean;
   onUpdateWall: (id: string, changes: Partial<FloorWall>) => void;
   onUpdateWallLength?: (id: string, length: number) => void;
   wallLengthAnchor?: WallLengthAnchor;
@@ -43,12 +49,15 @@ interface FloorPropertiesPanelProps {
   onWallLengthAnchorChange?: (anchor: WallLengthAnchor) => void;
   onBeginWallLengthMatch?: () => void;
   wallLengthMatchActive?: boolean;
+  onStraightenWall?: (id: string, axis: "horizontal" | "vertical" | "nearest") => void;
   onApplyWallStyleToFloor?: (style: { color: string; thickness: number; material: string }) => void;
   /** @deprecated compatibility for existing embedders; style action is preferred. */
   onApplyWallColorToFloor?: (color: string) => void;
   onUpdateDoor: (id: string, changes: Partial<FloorDoor>) => void;
   onUpdateWindow: (id: string, changes: Partial<FloorWindow>) => void;
   onUpdateFurniture: (id: string, changes: Partial<FloorFurniture>) => void;
+  onApplyFurnitureColorToGroup?: (groupId: string, color: string) => void;
+  onApplyFurnitureColorToSameType?: (type: string, color: string) => void;
   onUpdateStairs: (id: string, changes: Partial<FloorStairs>) => void;
   onUpdateRamp: (id: string, changes: Partial<FloorRamp>) => void;
   onUpdateElevator: (id: string, changes: Partial<FloorElevatorItem>) => void;
@@ -116,21 +125,26 @@ interface FloorPropertiesPanelProps {
   onDuplicateRoomWithContents?: () => void;
   onDuplicateRoomOnly?: () => void;
   onSelectRoomSetup?: () => void;
+  onSaveRoomSetupAsTemplate?: (roomId: string) => void;
   onSetSelectedState: (changes: { visible?: boolean; locked?: boolean }) => void;
   onLayerAction: (action: "bring-forward" | "send-backward" | "bring-front" | "send-back") => void;
+  layerActionAvailability?: Partial<FloorLayerActionAvailability>;
   onClose: () => void;
 }
 
 export interface CirculationGroupOption {
   id: string;
   name: string;
-  usedFloors: { id: string; label: string; objectId: string; objectLabel?: string; systemNumber?: number }[];
+  usedFloors: { id: string; label: string; objectId: string; objectLabel?: string; systemNumber?: number; exteriorEmergencyStairId?: string }[];
 }
 
 type StairConnectionCandidate = CirculationGroupOption["usedFloors"][number] & {
   groupId: string;
   identityMatch: boolean;
   labelMatch: boolean;
+  /** This identity contains multiple Stair occurrences on at least one Floor. */
+  identityConflict?: boolean;
+  identityConflictLabel?: string;
   /** This occurrence is already part of a different multi-floor identity. */
   ownedByOther?: boolean;
   /** The destination shaft already has another occurrence on the current floor. */
@@ -344,15 +358,16 @@ export function FloorPropertiesPanel({
   mode,
   issueItems = [],
   rooms, walls, doors, windows, furniture, stairs, ramps, elevators, labels,
-  onUpdateRoom, onUpdateWall, onUpdateWallLength, wallLengthAnchor = "start", wallLengthAnchorRequiresChoice = false,
-  onWallLengthAnchorChange, onBeginWallLengthMatch, wallLengthMatchActive = false,
+  onUpdateRoom, onEditRoomShape, onResetRoomShape, onFlipRoomShape, onFlipRoomSetup, roomShapeEditActive = false,
+  onUpdateWall, onUpdateWallLength, wallLengthAnchor = "start", wallLengthAnchorRequiresChoice = false,
+  onWallLengthAnchorChange, onBeginWallLengthMatch, wallLengthMatchActive = false, onStraightenWall,
   onUpdateDoor, onUpdateWindow,
   onApplyWallStyleToFloor,
   onApplyWallColorToFloor,
-  onUpdateFurniture,  onUpdateStairs, onUpdateRamp, onUpdateElevator, onUpdateLabel,
+  onUpdateFurniture, onApplyFurnitureColorToGroup, onApplyFurnitureColorToSameType, onUpdateStairs, onUpdateRamp, onUpdateElevator, onUpdateLabel,
   onToggleNavConnection,
-  onDeleteSelected, onDuplicateSelected, onDuplicateRoomWithContents, onDuplicateRoomOnly, onSelectRoomSetup,
-  onSetSelectedState, onLayerAction, onClose,
+  onDeleteSelected, onDuplicateSelected, onDuplicateRoomWithContents, onDuplicateRoomOnly, onSelectRoomSetup, onSaveRoomSetupAsTemplate,
+  onSetSelectedState, onLayerAction, layerActionAvailability, onClose,
   floorId, buildingFloors, circulationGroups, circulationNavStatus, physicalNavStatus,
   entranceConnectionStatus,
   roomDoorStatus,
@@ -400,6 +415,12 @@ export function FloorPropertiesPanel({
 
   const selRoom = selected.type === "room" ? rooms.find((r) => r.id === selected.id) : undefined;
   const selectedRoomSetup = selRoom ? roomVisualSetup(selRoom, walls, doors, windows, furniture) : undefined;
+  const roomSetupHasVisualContents = !!selectedRoomSetup && (
+    selectedRoomSetup.wallIds.length > 0
+    || selectedRoomSetup.doorIds.length > 0
+    || selectedRoomSetup.windowIds.length > 0
+    || selectedRoomSetup.furnitureIds.length > 0
+  );
   const selWall = selected.type === "wall" ? walls.find((w) => w.id === selected.id) : undefined;
   const selDoor = selected.type === "door" ? doors.find((d) => d.id === selected.id) : undefined;
   const selWindow = selected.type === "window" ? windows.find((w) => w.id === selected.id) : undefined;
@@ -407,6 +428,13 @@ export function FloorPropertiesPanel({
   const selWindowWall = selWindow?.wallId ? walls.find((w) => w.id === selWindow.wallId) : undefined;
   const isOpenPassage = selDoor?.openingType === "open_passage";
   const selFurniture = selected.type === "furniture" ? furniture.find((f) => f.id === selected.id) : undefined;
+  const furnitureColorEditable = selFurniture ? furnitureTypeSupportsColor(selFurniture.type) : false;
+  const furnitureGroupColorCount = selFurniture?.groupId
+    ? furniture.filter((item) => item.groupId === selFurniture.groupId && furnitureTypeSupportsColor(item.type)).length
+    : 0;
+  const sameTypeFurnitureColorCount = selFurniture && furnitureColorEditable
+    ? furniture.filter((item) => item.type === selFurniture.type && furnitureTypeSupportsColor(item.type)).length
+    : 0;
   const selStairs = selected.type === "stairs" ? stairs.find((s) => s.id === selected.id) : undefined;
   const selRamp = selected.type === "ramp" ? ramps.find((r) => r.id === selected.id) : undefined;
   const selElevator = selected.type === "elevator" ? elevators.find((e) => e.id === selected.id) : undefined;
@@ -650,7 +678,16 @@ export function FloorPropertiesPanel({
     objectId: string;
     sharedId?: string;
   }) => {
-    const groups = type === "stairs" ? (circulationGroups?.stairs ?? []) : (circulationGroups?.elevators ?? []);
+    const rawGroups = type === "stairs" ? (circulationGroups?.stairs ?? []) : (circulationGroups?.elevators ?? []);
+    // Defensively filter here as well as when FloorEditor builds these groups:
+    // stale or legacy group data must not leak an exterior occurrence into
+    // Connected, Other Stairs, Direction Blocked, or Change lists.
+    const groups = type === "stairs"
+      ? rawGroups.map((group) => ({
+          ...group,
+          usedFloors: group.usedFloors.filter((usage) => !usage.exteriorEmergencyStairId),
+        }))
+      : rawGroups;
     const current = sharedId ? groups.find((g) => g.id === sharedId) : undefined;
     const [creating, setCreating] = useState(false);
     const [newName, setNewName] = useState("");
@@ -682,7 +719,7 @@ export function FloorPropertiesPanel({
           (buildingFloors ?? []).findIndex((floor) => floor.id === candidateFloorId),
         ));
     const continuationRows = type === "stairs"
-      ? (current?.usedFloors ?? []).filter((usage) => usage.id !== floorId && usage.objectId !== objectId)
+      ? (current?.usedFloors ?? []).filter((usage) => !usage.exteriorEmergencyStairId && usage.id !== floorId && usage.objectId !== objectId)
       : [];
     const validContinuationRows = continuationRows.filter((usage) => canContinueToFloor(usage.id));
     const invalidContinuationRows = continuationRows.filter((usage) => !canContinueToFloor(usage.id));
@@ -701,12 +738,19 @@ export function FloorPropertiesPanel({
         .filter((floor) => floor.id !== floorId)
         .map((floor) => {
           const rawCandidates = [...new Map(groups.flatMap((group) => group.usedFloors
-            .filter((usage) => usage.id === floor.id && usage.objectId !== objectId)
+            .filter((usage) => !usage.exteriorEmergencyStairId && usage.id === floor.id && usage.objectId !== objectId)
             .map((usage) => ({ ...usage, groupId: group.id })))
             .map((candidate) => [candidate.objectId, candidate])).values()];
           const adjacent = currentFloorIndex < 0 || isAdjacentFloor(floor.id);
           const eligible = canContinueToFloor(floor.id);
           const sourceGroup = sharedId ? groups.find((group) => group.id === sharedId) : undefined;
+          const duplicateFloorLabel = (group?: CirculationGroupOption) => {
+            if (!group) return undefined;
+            const duplicate = group.usedFloors.find((usage, index, usages) =>
+              usages.findIndex((peer) => peer.id === usage.id) !== index);
+            return duplicate?.label;
+          };
+          const sourceConflictLabel = duplicateFloorLabel(sourceGroup);
           const hasIdentityCandidate = !!sharedId && rawCandidates.some((candidate) => candidate.groupId === sharedId);
           // A newly placed Stair has a provisional one-occurrence sharedId.
           // Treat that as unestablished for recommendation purposes so an
@@ -715,19 +759,29 @@ export function FloorPropertiesPanel({
           const establishedIdentity = hasIdentityCandidate || (!!sharedId && (sourceGroup?.usedFloors.length ?? 0) > 1);
           const matchingLabelCount = rawCandidates.filter((candidate) => stairLabelsMatch(selectedStairLabel, candidate.objectLabel)).length;
           const ranked = rawCandidates.map((candidate) => {
-            const identityMatch = !!sharedId && candidate.groupId === sharedId;
+            const candidateGroup = groups.find((group) => group.id === candidate.groupId);
+            const candidateConflictLabel = duplicateFloorLabel(candidateGroup);
+            const identityConflict = !!candidateConflictLabel || (!!sharedId && candidate.groupId === sharedId && !!sourceConflictLabel);
+            const identityMatch = !!sharedId && candidate.groupId === sharedId && !identityConflict;
             // A label is deliberately only a recommendation when there is no
             // established shared identity.  It never changes the persisted
             // relationship without the admin selecting the candidate.
             const labelMatch = !establishedIdentity
               && matchingLabelCount === 1
               && stairLabelsMatch(selectedStairLabel, candidate.objectLabel);
-            return { ...candidate, identityMatch, labelMatch };
+            return {
+              ...candidate,
+              identityMatch,
+              labelMatch: !identityConflict && labelMatch,
+              identityConflict,
+              identityConflictLabel: candidateConflictLabel || sourceConflictLabel,
+            };
           });
           return {
             floor,
             adjacent,
             eligible,
+            sourceConflictLabel,
             candidates: ranked,
             recommended: ranked.filter((candidate) => candidate.identityMatch || candidate.labelMatch),
             other: ranked.filter((candidate) => !candidate.identityMatch && !candidate.labelMatch),
@@ -888,6 +942,7 @@ export function FloorPropertiesPanel({
         const connected = section.candidates.some((candidate) => candidate.identityMatch);
         if (connected) return [];
         const matching = section.candidates.filter((candidate) => {
+          if (candidate.identityConflict) return false;
           if (!stairLabelsMatch(selectedStairLabel, candidate.objectLabel)) return false;
           const group = groups.find((entry) => entry.id === candidate.groupId);
           if (!group || duplicateMessage(group)) return false;
@@ -931,7 +986,10 @@ export function FloorPropertiesPanel({
       candidate: StairConnectionCandidate,
     ) => {
       const group = groups.find((entry) => entry.id === candidate.groupId);
-      if (group && duplicateMessage(group)) return;
+      const targetSection = stairTargetSections.find((section) => section.floor.id === floorId);
+      const explicitlyChangingStairSide = type === "stairs"
+        && (changingFloorId === floorId || !!targetSection?.recommended.some((entry) => entry.identityMatch));
+      if (!candidate.identityConflict && !explicitlyChangingStairSide && group && duplicateMessage(group)) return;
       setStairMatchingDraft(null);
       // A label match is only a recommendation, never an implicit identity
       // assignment. Every non-established candidate therefore gets the same
@@ -1212,7 +1270,7 @@ export function FloorPropertiesPanel({
                     </div>
                   )}
                   {stairDialogSections.length > 0 ? stairDialogSections.map((section) => {
-                    const { floor, candidates, recommended, other, isCurrent, eligible, adjacent } = section;
+                    const { floor, candidates, recommended, other, isCurrent, eligible, adjacent, sourceConflictLabel } = section;
                     if (isCurrent) {
                       return (
                         <div key={floor.id} className="rounded-xl border border-primary/30 bg-primary/5 px-3 py-3" data-testid="stair-picker-current-floor">
@@ -1235,7 +1293,10 @@ export function FloorPropertiesPanel({
                     }
                     const connected = recommended.filter((candidate) => candidate.identityMatch);
                     const availableRecommended = recommended.filter((candidate) => !candidate.identityMatch);
-                    const showAlternatives = eligible && (connected.length === 0 || changingFloorId === floor.id);
+                    // Keep valid alternatives visible below the current exact
+                    // continuation. Selecting one is itself an explicit
+                    // Change action and receives a confirmation when needed.
+                    const showAlternatives = eligible;
                     const relationLabel = adjacent
                       ? ((buildingFloors ?? []).findIndex((candidate) => candidate.id === floor.id) > currentFloorIndex ? "Above" : "Below")
                       : "Other Floor";
@@ -1250,6 +1311,11 @@ export function FloorPropertiesPanel({
                             {eligible ? (adjacent ? "Adjacent" : "Available") : "Direction blocked"}
                           </span>
                         </div>
+                        {(sourceConflictLabel || candidates.some((candidate) => candidate.identityConflict)) && (
+                          <div className="rounded-lg border border-amber-200/70 bg-amber-50/60 px-3 py-2 text-[10px] leading-snug text-amber-800 dark:border-amber-800/40 dark:bg-amber-900/10 dark:text-amber-300" data-testid={`stair-connection-conflict-${floor.id}`} role="status">
+                            Multiple Stairs on {candidates.find((candidate) => candidate.identityConflict)?.identityConflictLabel || sourceConflictLabel || floor.label} are assigned to this Stair connection. Choose the correct continuation explicitly.
+                          </div>
+                        )}
                         {connected.length > 0 && (
                           <div className="space-y-1" data-testid="stair-picker-connected">
                             <p className="text-[9px] font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-400">Connected</p>
@@ -1286,7 +1352,7 @@ export function FloorPropertiesPanel({
                                 <p className="text-[9px] font-bold uppercase tracking-wider text-primary">{connected.length > 0 ? "Choose another Stair" : "Recommended"}</p>
                                 {availableRecommended.map((candidate) => {
                                   const group = groups.find((entry) => entry.id === candidate.groupId);
-                                  const duplicate = group ? duplicateMessage(group) : null;
+                                  const duplicate = !candidate.identityConflict && connected.length === 0 && changingFloorId !== floor.id && group ? duplicateMessage(group) : null;
                                   return (
                                     <button key={`${floor.id}:${candidate.objectId}`} type="button" disabled={!!duplicate} title={duplicate ?? undefined} onClick={() => requestStairCandidate(floor.id, floor.label, candidate)} className={cn("w-full min-w-0 rounded-lg border border-primary/20 bg-primary/5 px-3 py-2 text-left transition-colors hover:bg-primary/10", duplicate && "cursor-not-allowed opacity-50 hover:bg-primary/5")}>
                                       <div className="break-words text-[11px] font-extrabold leading-snug text-foreground">{stairUsageLabel(candidate, candidates)}</div>
@@ -1302,7 +1368,7 @@ export function FloorPropertiesPanel({
                                 <p className="pt-1 text-[9px] font-bold uppercase tracking-wider text-muted-foreground">Other Stairs</p>
                                 {other.map((candidate) => {
                                   const group = groups.find((entry) => entry.id === candidate.groupId);
-                                  const duplicate = group ? duplicateMessage(group) : null;
+                                  const duplicate = !candidate.identityConflict && connected.length === 0 && changingFloorId !== floor.id && group ? duplicateMessage(group) : null;
                                   return (
                                     <button key={`${floor.id}:${candidate.objectId}`} type="button" disabled={!!duplicate} title={duplicate ?? undefined} onClick={() => requestStairCandidate(floor.id, floor.label, candidate)} className={cn("w-full min-w-0 rounded-lg border border-border bg-background/50 px-3 py-2 text-left transition-colors hover:bg-muted", duplicate && "cursor-not-allowed opacity-50 hover:bg-background/50")}>
                                       <div className="break-words text-[11px] font-extrabold leading-snug text-foreground">{stairUsageLabel(candidate, candidates)}</div>
@@ -1333,7 +1399,11 @@ export function FloorPropertiesPanel({
                       <p className="text-[11px] font-semibold leading-snug text-amber-900 dark:text-amber-200">
                         Connect {selectedStairLabel?.trim() || "this Stair"} to {stairUsageLabel(pendingStairCandidate.candidate, [pendingStairCandidate.candidate])} on {pendingStairCandidate.floorLabel}?
                       </p>
-                      <p className="text-[10px] leading-snug text-amber-800/80 dark:text-amber-300/80">This is an explicit continuation between these two Stairs.</p>
+                      <p className="text-[10px] leading-snug text-amber-800/80 dark:text-amber-300/80">
+                        {pendingStairCandidate.candidate.identityConflict
+                          ? "The saved Stair identity is conflicting. This will link only these two selected Stairs; other occurrences must be chosen individually."
+                          : "This is an explicit continuation between these two Stairs."}
+                      </p>
                       <div className="grid grid-cols-2 gap-2">
                         <button type="button" onClick={() => setStairConnectionDraft((draft) => draft?.objectId === objectId ? { ...draft, pending: null } : draft)} className="min-h-8 rounded-lg border border-border px-2 text-[10px] font-bold text-foreground hover:bg-background">Cancel</button>
                         <button type="button" onClick={() => commitStairCandidate(pendingStairCandidate.candidate, pendingStairCandidate.floorId)} className="min-h-8 rounded-lg bg-primary px-2 text-[10px] font-bold text-primary-foreground hover:bg-primary/90">Connect</button>
@@ -1467,35 +1537,41 @@ export function FloorPropertiesPanel({
   );
 
   const StateLayerControls = selItem ? (
-    <div className="pt-3 border-t border-border space-y-2">
+    <div data-testid="state-layer-controls" className="pt-3 border-t border-border space-y-2">
       <span className={labelCls}>State & Layer</span>
       <div className="grid grid-cols-2 gap-1">
         <button type="button" onClick={() => onSetSelectedState({ visible: (selItem as any).visible === false })}
-          className="h-8 rounded-lg border border-border text-[10px] font-bold text-foreground hover:bg-muted transition-colors flex items-center justify-center gap-1">
+          aria-pressed={(selItem as any).visible === false}
+          className={cn("h-8 rounded-lg border border-border text-[10px] font-bold text-foreground hover:bg-muted transition-colors flex items-center justify-center gap-1", (selItem as any).visible === false && "bg-muted text-muted-foreground")}>
           {(selItem as any).visible === false ? <Eye className="h-3 w-3" /> : <EyeOff className="h-3 w-3" />}
           {(selItem as any).visible === false ? "Show" : "Hide"}
         </button>
         <button type="button" onClick={() => onSetSelectedState({ locked: !(selItem as any).locked })}
-          className="h-8 rounded-lg border border-border text-[10px] font-bold text-foreground hover:bg-muted transition-colors flex items-center justify-center gap-1">
+          aria-pressed={Boolean((selItem as any).locked)}
+          className={cn("h-8 rounded-lg border border-border text-[10px] font-bold text-foreground hover:bg-muted transition-colors flex items-center justify-center gap-1", (selItem as any).locked && "bg-muted text-muted-foreground")}>
           {(selItem as any).locked ? <Unlock className="h-3 w-3" /> : <Lock className="h-3 w-3" />}
           {(selItem as any).locked ? "Unlock" : "Lock"}
         </button>
       </div>
       <div className="grid grid-cols-2 gap-1">
-        <button type="button" onClick={() => onLayerAction("send-back")}
-          className="h-8 rounded-lg border border-border text-[10px] font-bold text-foreground hover:bg-muted transition-colors flex items-center justify-center gap-1">
+        <button type="button" onClick={() => onLayerAction("send-back")} disabled={layerActionAvailability?.["send-back"] === false}
+          aria-label="Send to back of layer" title="Send to back of this object layer"
+          className="h-8 rounded-lg border border-border text-[10px] font-bold text-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-1">
           <Layers className="h-3 w-3" /> Back
         </button>
-        <button type="button" onClick={() => onLayerAction("bring-front")}
-          className="h-8 rounded-lg border border-border text-[10px] font-bold text-foreground hover:bg-muted transition-colors flex items-center justify-center gap-1">
+        <button type="button" onClick={() => onLayerAction("bring-front")} disabled={layerActionAvailability?.["bring-front"] === false}
+          aria-label="Bring to front of layer" title="Bring to front of this object layer"
+          className="h-8 rounded-lg border border-border text-[10px] font-bold text-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-1">
           <Layers className="h-3 w-3" /> Front
         </button>
-        <button type="button" onClick={() => onLayerAction("send-backward")}
-          className="h-8 rounded-lg border border-border text-[10px] font-bold text-foreground hover:bg-muted transition-colors flex items-center justify-center gap-1">
+        <button type="button" onClick={() => onLayerAction("send-backward")} disabled={layerActionAvailability?.["send-backward"] === false}
+          aria-label="Move one step back in layer" title="Move one step back in this object layer"
+          className="h-8 rounded-lg border border-border text-[10px] font-bold text-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-1">
           <Layers className="h-3 w-3" /> Down
         </button>
-        <button type="button" onClick={() => onLayerAction("bring-forward")}
-          className="h-8 rounded-lg border border-border text-[10px] font-bold text-foreground hover:bg-muted transition-colors flex items-center justify-center gap-1">
+        <button type="button" onClick={() => onLayerAction("bring-forward")} disabled={layerActionAvailability?.["bring-forward"] === false}
+          aria-label="Move one step forward in layer" title="Move one step forward in this object layer"
+          className="h-8 rounded-lg border border-border text-[10px] font-bold text-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-1">
           <Layers className="h-3 w-3" /> Up
         </button>
       </div>
@@ -1505,7 +1581,7 @@ export function FloorPropertiesPanel({
   return (
     <div
       data-testid="floor-properties-panel"
-      className="w-64 shrink-0 flex flex-col border-l border-border overflow-hidden bg-card"
+      className="@container w-64 shrink-0 flex flex-col border-l border-border overflow-hidden bg-card"
     >
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
@@ -1581,6 +1657,54 @@ export function FloorPropertiesPanel({
                   </div>
                 </Field>
             </div>
+            <div className="pt-3 border-t border-border space-y-2.5" data-testid="room-shape-section">
+              <div className="flex items-center justify-between gap-2">
+                <p className={labelCls}>Room Shape</p>
+                <span className="text-[9px] font-semibold text-muted-foreground">
+                  {selRoom.shapePoints && selRoom.shapePoints.length >= 3 ? `${selRoom.shapePoints.length} vertices` : "Rectangle"}
+                </span>
+              </div>
+              <div className="space-y-1.5">
+                <button
+                  type="button"
+                  data-testid="edit-room-shape"
+                  onClick={() => onEditRoomShape?.(selRoom.id)}
+                  className={cn("w-full h-8 rounded-lg border px-3 text-[10px] font-bold transition-colors", roomShapeEditActive ? "border-primary bg-primary/10 text-primary" : "border-border bg-background/70 text-foreground hover:bg-muted")}
+                >
+                  {roomShapeEditActive ? "Finish Shape Edit" : "Edit Room Shape"}
+                </button>
+              </div>
+              {selRoom.shapePoints && selRoom.shapePoints.length >= 3 && (
+                <>
+                  <button
+                    type="button"
+                    data-testid="reset-room-shape"
+                    onClick={() => onResetRoomShape?.(selRoom.id)}
+                    className="w-full h-8 rounded-lg border border-border bg-background/70 px-3 text-[10px] font-bold text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+                  >
+                    Reset to Rectangle
+                  </button>
+                  <div className="pt-2 space-y-1.5" data-testid="room-shape-transform">
+                    <p className="text-[9px] font-extrabold uppercase tracking-wider text-muted-foreground">Transform</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button type="button" title="Flip custom Room shape horizontally" aria-label="Flip custom Room shape horizontally"
+                        onClick={() => onFlipRoomShape?.(selRoom.id, "horizontal")}
+                        className="min-h-9 w-full rounded-lg border border-border bg-background/70 px-2 text-[10px] font-bold text-foreground hover:bg-muted transition-colors">
+                        <span className="flex items-center justify-center gap-1"><FlipHorizontal className="h-3 w-3" /> Flip H</span>
+                      </button>
+                      <button type="button" title="Flip custom Room shape vertically" aria-label="Flip custom Room shape vertically"
+                        onClick={() => onFlipRoomShape?.(selRoom.id, "vertical")}
+                        className="min-h-9 w-full rounded-lg border border-border bg-background/70 px-2 text-[10px] font-bold text-foreground hover:bg-muted transition-colors">
+                        <span className="flex items-center justify-center gap-1"><FlipVertical className="h-3 w-3" /> Flip V</span>
+                      </button>
+                    </div>
+                  </div>
+                </>
+              )}
+              <p className="text-[9px] leading-relaxed text-muted-foreground">
+                Custom shapes are visual Room boundaries. Walls and openings remain independent physical objects.
+              </p>
+            </div>
             {selectedRoomSetup && (
               <div className="pt-3 border-t border-border space-y-2.5" data-testid="room-setup-section">
                 <div className="flex items-center justify-between gap-2">
@@ -1595,18 +1719,26 @@ export function FloorPropertiesPanel({
                 </div>
                 <button
                   type="button"
+                  data-testid="save-room-as-template"
+                  onClick={() => onSaveRoomSetupAsTemplate?.(selRoom.id)}
+                  className="inline-flex h-8 w-full items-center justify-center gap-1.5 rounded-lg border border-primary/30 bg-primary/5 px-2 text-[10px] font-extrabold text-primary transition-colors hover:bg-primary/10"
+                >
+                  <Copy className="h-3 w-3" /> Save Room as Template
+                </button>
+                <button
+                  type="button"
                   data-testid="duplicate-room-with-contents"
                   onClick={onDuplicateRoomWithContents ?? onDuplicateSelected}
                   className="w-full h-8 rounded-lg bg-primary px-2 text-[10px] font-extrabold text-primary-foreground hover:bg-primary/90 transition-colors"
                 >
                   <span className="flex items-center justify-center gap-1.5"><Copy className="h-3 w-3" /> Duplicate Room + Contents</span>
                 </button>
-                <div className="grid grid-cols-2 gap-1.5">
+                <div className="grid grid-cols-1 gap-2 @[360px]:grid-cols-2">
                   <button
                     type="button"
                     data-testid="duplicate-room-only"
                     onClick={onDuplicateRoomOnly ?? onDuplicateSelected}
-                    className="h-7 rounded-lg border border-border bg-background/70 px-2 text-[9px] font-bold text-foreground hover:bg-muted transition-colors"
+                    className="min-h-9 w-full rounded-lg border border-border bg-background/70 px-3 text-[10px] font-bold leading-tight text-center text-foreground hover:bg-muted transition-colors"
                   >
                     Duplicate Room Only
                   </button>
@@ -1614,11 +1746,28 @@ export function FloorPropertiesPanel({
                     type="button"
                     data-testid="select-room-setup"
                     onClick={onSelectRoomSetup}
-                    className="h-7 rounded-lg border border-border bg-background/70 px-2 text-[9px] font-bold text-foreground hover:bg-muted transition-colors"
+                    className="min-h-9 w-full rounded-lg border border-border bg-background/70 px-3 text-[10px] font-bold leading-tight text-center text-foreground hover:bg-muted transition-colors"
                   >
                     Select Room Setup
                   </button>
                 </div>
+                {roomSetupHasVisualContents && (
+                  <div className="pt-2 space-y-1.5" data-testid="room-setup-transform">
+                    <p className="text-[9px] font-extrabold uppercase tracking-wider text-muted-foreground">Transform Setup</p>
+                    <div className="grid grid-cols-1 gap-2 @[360px]:grid-cols-2">
+                      <button type="button" title="Flip Room and visual contents horizontally" aria-label="Flip Room and visual contents horizontally"
+                        onClick={() => onFlipRoomSetup?.(selRoom.id, "horizontal")}
+                        className="min-h-9 w-full rounded-lg border border-border bg-background/70 px-2 text-[10px] font-bold text-foreground hover:bg-muted transition-colors">
+                        <span className="flex items-center justify-center gap-1"><FlipHorizontal className="h-3 w-3" /> Flip Setup H</span>
+                      </button>
+                      <button type="button" title="Flip Room and visual contents vertically" aria-label="Flip Room and visual contents vertically"
+                        onClick={() => onFlipRoomSetup?.(selRoom.id, "vertical")}
+                        className="min-h-9 w-full rounded-lg border border-border bg-background/70 px-2 text-[10px] font-bold text-foreground hover:bg-muted transition-colors">
+                        <span className="flex items-center justify-center gap-1"><FlipVertical className="h-3 w-3" /> Flip Setup V</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
             <RoomNavigationCard />
@@ -1699,6 +1848,19 @@ export function FloorPropertiesPanel({
                         ))}
                       </div>
                     </Field>
+                    {selWall.managedKind !== "perimeter" && (
+                      <Field label="Junction Blocks">
+                        <SegmentControl
+                          value={selWall.junctionBlocks ?? "auto"}
+                          options={[
+                            { value: "auto" as const, label: "Auto" },
+                            { value: "show" as const, label: "Show" },
+                            { value: "hide" as const, label: "Hide" },
+                          ]}
+                          onChange={(value) => onUpdateWall(selWall.id, { junctionBlocks: value })}
+                        />
+                      </Field>
+                    )}
                   </div>
                 </details>
                 <div className="rounded-xl border border-border bg-muted/10 p-2.5 space-y-2" data-testid="wall-geometry-controls">
@@ -1761,6 +1923,27 @@ export function FloorPropertiesPanel({
                           Select another authored Wall to copy its exact length. Press Escape to cancel.
                         </p>
                       )}
+                      {onStraightenWall && (
+                        <Field label="Straighten">
+                          <div className="grid grid-cols-3 gap-1">
+                            <button type="button" data-testid="straighten-wall-horizontal"
+                              onClick={() => onStraightenWall(selWall.id, "horizontal")}
+                              className="h-8 rounded-lg border border-border bg-background/70 px-1 text-[9px] font-extrabold text-foreground hover:bg-muted">
+                              Horizontal
+                            </button>
+                            <button type="button" data-testid="straighten-wall-vertical"
+                              onClick={() => onStraightenWall(selWall.id, "vertical")}
+                              className="h-8 rounded-lg border border-border bg-background/70 px-1 text-[9px] font-extrabold text-foreground hover:bg-muted">
+                              Vertical
+                            </button>
+                            <button type="button" data-testid="straighten-wall-nearest"
+                              onClick={() => onStraightenWall(selWall.id, "nearest")}
+                              className="h-8 rounded-lg border border-border bg-background/70 px-1 text-[9px] font-extrabold text-foreground hover:bg-muted">
+                              Nearest axis
+                            </button>
+                          </div>
+                        </Field>
+                      )}
                     </>
                   )}
                   <div className="flex justify-between border-t border-border/70 pt-2 text-[10px] text-muted-foreground">
@@ -1812,6 +1995,18 @@ export function FloorPropertiesPanel({
                   <input value={selDoor.label ?? ""} onChange={(e) => onUpdateDoor(selDoor.id, { label: e.target.value })}
                     className={inputCls} placeholder="e.g. Main Entrance" />
                 </Field>
+                {selDoor.buildingEntranceId && (
+                  <div data-testid="entrance-opening-style-control">
+                    <Field label="Opening Style">
+                      <SegmentControl
+                        value={isOpenPassage ? "open_passage" : "door"}
+                        options={[{ value: "door", label: "Door" }, { value: "open_passage", label: "Open Passage" }]}
+                        onChange={(openingType) => onUpdateDoor(selDoor.id, { openingType })}
+                      />
+                    </Field>
+                    <p className="mt-1 text-[9px] leading-snug text-muted-foreground">The linked Outdoor Entrance and its direction sign stay unchanged.</p>
+                  </div>
+                )}
                 {selDoor.wallId ? (
                   <>
                     <Field label="Attached Wall">
@@ -2022,6 +2217,53 @@ export function FloorPropertiesPanel({
             <Field label="Color">
               <ColorPicker value={selFurniture.color} onChange={(c) => onUpdateFurniture(selFurniture.id, { color: c })} />
             </Field>
+            <div className="-mt-1 space-y-1.5" data-testid="furniture-color-actions">
+              <p className="text-[9px] font-extrabold uppercase tracking-wider text-muted-foreground">Apply Color</p>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  disabled={!furnitureColorEditable || furnitureGroupColorCount < 2 || !onApplyFurnitureColorToGroup}
+                  title={!furnitureColorEditable
+                    ? "This Furniture uses a fixed icon color."
+                    : furnitureGroupColorCount < 2
+                      ? "Group this Furniture with other recolorable items first."
+                      : "Apply this color to recolorable members of the selected Furniture group."}
+                  onClick={() => selFurniture.groupId && onApplyFurnitureColorToGroup?.(selFurniture.groupId, selFurniture.color)}
+                  className="min-h-8 rounded-lg border border-border bg-background/70 px-2 text-[9px] font-bold text-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Apply to Group ({furnitureGroupColorCount})
+                </button>
+                <button
+                  type="button"
+                  disabled={!furnitureColorEditable || sameTypeFurnitureColorCount < 2 || !onApplyFurnitureColorToSameType}
+                  title={!furnitureColorEditable
+                    ? "This Furniture uses a fixed icon color."
+                    : sameTypeFurnitureColorCount < 2
+                      ? "No other matching Furniture on this floor."
+                      : "Apply this color to matching Furniture on this floor only."}
+                  onClick={() => onApplyFurnitureColorToSameType?.(selFurniture.type, selFurniture.color)}
+                  className="min-h-8 rounded-lg border border-border bg-background/70 px-2 text-[9px] font-bold text-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Apply to Same Type ({sameTypeFurnitureColorCount})
+                </button>
+              </div>
+              <p className="text-[9px] text-muted-foreground">Same-type color changes affect this floor only.</p>
+            </div>
+            <div className="pt-3 border-t border-border space-y-1.5" data-testid="furniture-transform">
+              <p className="text-[9px] font-extrabold uppercase tracking-wider text-muted-foreground">Transform</p>
+              <div className="grid grid-cols-2 gap-2">
+                <button type="button" title="Flip Furniture horizontally" aria-label="Flip Furniture horizontally"
+                  onClick={() => onUpdateFurniture(selFurniture.id, { flipX: !selFurniture.flipX })}
+                  className="min-h-9 w-full rounded-lg border border-border bg-background/70 px-2 text-[10px] font-bold text-foreground hover:bg-muted transition-colors">
+                  <span className="flex items-center justify-center gap-1"><FlipHorizontal className="h-3 w-3" /> Flip H</span>
+                </button>
+                <button type="button" title="Flip Furniture vertically" aria-label="Flip Furniture vertically"
+                  onClick={() => onUpdateFurniture(selFurniture.id, { flipY: !selFurniture.flipY })}
+                  className="min-h-9 w-full rounded-lg border border-border bg-background/70 px-2 text-[10px] font-bold text-foreground hover:bg-muted transition-colors">
+                  <span className="flex items-center justify-center gap-1"><FlipVertical className="h-3 w-3" /> Flip V</span>
+                </button>
+              </div>
+            </div>
             <div className="pt-3 border-t border-border space-y-2">
               <button onClick={onDuplicateSelected}
                 className="w-full h-9 rounded-xl border border-border text-xs font-bold text-foreground hover:bg-muted transition-colors">
@@ -2125,7 +2367,7 @@ export function FloorPropertiesPanel({
                     </button>
                   </div>
                 </div>
-                <CirculationGroupControl type="stairs" objectId={selStairs.id} sharedId={selStairs.sharedId} />
+                {!selStairs.exteriorEmergencyStairId && <CirculationGroupControl type="stairs" objectId={selStairs.id} sharedId={selStairs.sharedId} />}
                 <CirculationNavigationStatus />
                 <details className="rounded-xl border border-border bg-muted/20">
                   <summary className="cursor-pointer select-none px-3 py-2 text-[10px] font-extrabold uppercase tracking-wider text-muted-foreground hover:text-foreground">

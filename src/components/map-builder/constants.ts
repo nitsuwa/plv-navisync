@@ -7,7 +7,7 @@ import {
 } from "lucide-react";
 import type {
   SimpleTool, EditorLayer, RoomTypeDescriptor, CanvasSizeOption,
-  Campus, CampusBuilding, FloorPlan, FurnitureCategory,
+  Campus, CampusBuilding, FloorPlan, FurnitureCategory, FurnitureItemTemplate,
   CampusDecorAsset,
 } from "./types";
 import { INITIAL_MARKERS, INITIAL_PATHS, MARKER_STYLES } from "../../data/mapData";
@@ -176,6 +176,15 @@ export const INDOOR_LAYERS = [
  * can all instantiate the same ordinary FloorFurniture records without coupling
  * furniture to the navigation graph.
  */
+const firstAidCabinet: FurnitureItemTemplate = {
+  type: "first-aid-cabinet",
+  name: "First Aid Cabinet",
+  width: 12,
+  height: 14,
+  color: "#ef4444",
+  placementCategoryId: "safety",
+};
+
 export const FURNITURE_CATEGORIES: FurnitureCategory[] = [
   {
     id: "seating",
@@ -183,8 +192,9 @@ export const FURNITURE_CATEGORIES: FurnitureCategory[] = [
     icon: "Armchair",
     items: [
       { type: "chair", name: "Chair", width: 12, height: 12, color: "#4b5563", description: "Classroom chair" },
+      { type: "arm-chair", name: "Arm Chair", width: 16, height: 16, color: "#475569", description: "Top-down office/lounge chair with a backrest and side armrests", keywords: ["office", "lounge", "arms", "armchair"] },
       { type: "bench", name: "Bench", width: 30, height: 10, color: "#6b5b45", description: "Simple fixed seating bench" },
-      { type: "sofa", name: "Sofa", width: 34, height: 16, color: "#3f3f46", description: "Lounge seating with back and arms" },
+      { type: "sofa", name: "Sofa", width: 34, height: 16, color: "#3f3f46", description: "Two-seat lounge sofa with a backrest, arms, and separate cushions", keywords: ["two seat sofa", "two-seat sofa", "couch", "lounge"] },
       { type: "lounge-chair", name: "Lounge Chair", width: 18, height: 18, color: "#64748b", description: "Rounded lounge chair with a curved back" },
       { type: "lounge-chair-cluster", name: "Lounge Chair Cluster", width: 42, height: 38, color: "#64748b", description: "Three lounge chairs arranged for conversation" },
       { type: "lounge-sofa", name: "Lounge Sofa", width: 42, height: 18, color: "#475569", description: "Elongated cushioned lounge sofa" },
@@ -209,6 +219,8 @@ export const FURNITURE_CATEGORIES: FurnitureCategory[] = [
       { type: "workstation", name: "Workstation", width: 34, height: 26, color: "#7a5c3a", description: "Desk with an office chair" },
       { type: "l-shaped-workstation", name: "L-Shaped Workstation", width: 48, height: 34, color: "#7a5c3a", description: "Connected L-shaped desk with chair" },
       { type: "coffee-table", name: "Coffee Table", width: 30, height: 16, color: "#8b6f4e", description: "Low rectangular lounge table" },
+      { type: "round-coffee-table", name: "Round Coffee Table", width: 18, height: 18, color: "#8b6f4e", description: "Compact round table for lounge and waiting areas", keywords: ["round table", "round coffee table", "lounge table", "coffee table"] },
+      { type: "square-coffee-table", name: "Square Coffee Table", width: 18, height: 18, color: "#8b6f4e", description: "Compact square table for lounge and waiting areas", keywords: ["square table", "square coffee table", "lounge table", "coffee table"] },
       { type: "dining-table-4-seats", name: "Dining Table - 4 Seats", width: 38, height: 30, color: "#8b6f4e", description: "Compact four-seat dining table" },
       { type: "dining-table-6-seats", name: "Dining Table - 6 Seats", width: 52, height: 30, color: "#8b6f4e", description: "Long six-seat dining table" },
       { type: "long-table", name: "Long Table", width: 70, height: 18, color: "#8b6f4e", description: "Long rectangular meeting, support, or study table", keywords: ["meeting", "support", "reading", "study"] },
@@ -305,6 +317,7 @@ export const FURNITURE_CATEGORIES: FurnitureCategory[] = [
     icon: "HeartPulse",
     items: [
       { type: "clinic-bed", name: "Clinic Bed", width: 18, height: 42, color: "#dbe4ea", description: "Examination bed with pillow and head section" },
+      firstAidCabinet,
     ],
   },
   {
@@ -318,8 +331,8 @@ export const FURNITURE_CATEGORIES: FurnitureCategory[] = [
       { type: "sink", name: "Sink / Wash Basin", width: 16, height: 10, color: "#cbd5e1", description: "Single wash basin with faucet" },
       { type: "double-sink", name: "Double Sink", width: 26, height: 10, color: "#cbd5e1", description: "Two-basin wash station" },
       { type: "faucet", name: "Faucet", width: 7, height: 7, color: "#64748b", palette: "advanced", description: "Wall or counter-mounted tap" },
-      { type: "toilet-stall", name: "Toilet Stall", width: 26, height: 28, color: "#e2e8f0", description: "Prebuilt restroom cubicle" },
-      { type: "pwd-toilet-stall", name: "Accessible / PWD Stall", width: 34, height: 34, color: "#dbeafe", description: "Accessible restroom stall" },
+      { type: "toilet-stall", name: "Toilet Stall", width: 26, height: 28, color: "#e2e8f0", colorEditable: false, description: "Prebuilt restroom cubicle" },
+      { type: "pwd-toilet-stall", name: "Accessible / PWD Stall", width: 34, height: 34, color: "#dbeafe", colorEditable: false, description: "Accessible restroom stall" },
       { type: "stall-partition", name: "Stall Partition", width: 28, height: 4, color: "#cbd5e1", palette: "advanced", description: "Thin restroom divider panel" },
       { type: "mirror", name: "Mirror", width: 22, height: 5, color: "#93c5fd", description: "Wall-mounted restroom mirror" },
       { type: "soap-dispenser", name: "Soap Dispenser", width: 7, height: 9, color: "#94a3b8", palette: "advanced" },
@@ -334,10 +347,10 @@ export const FURNITURE_CATEGORIES: FurnitureCategory[] = [
     label: "Safety / Facilities",
     icon: "ShieldAlert",
     items: [
-      { type: "fire-extinguisher", name: "Wall Fire Extinguisher", width: 8, height: 14, color: "#dc2626" },
-      { type: "exit-sign", name: "Exit Sign", width: 20, height: 6, color: "#16a34a" },
+      { type: "fire-extinguisher", name: "Wall Fire Extinguisher", width: 8, height: 14, color: "#dc2626", colorEditable: false },
+      { type: "exit-sign", name: "Exit Sign", width: 20, height: 6, color: "#16a34a", colorEditable: false },
       { type: "emergency-light", name: "Emergency Light", width: 10, height: 8, color: "#f59e0b" },
-      { type: "first-aid-cabinet", name: "First Aid Cabinet", width: 12, height: 14, color: "#ef4444" },
+      firstAidCabinet,
     ],
   },
   {
@@ -371,12 +384,13 @@ export const FURNITURE_CATEGORIES: FurnitureCategory[] = [
  */
 export function getFurniturePaletteCategories(query = "", includeAdvanced = false): FurnitureCategory[] {
   const normalized = query.trim().toLowerCase();
+  // Category browsing retains aliases; global search shows each canonical type once.
+  const seenTypes = new Set<string>();
   return FURNITURE_CATEGORIES
     .map((category) => ({
       ...category,
       items: category.items.filter((item) => {
-        if (!normalized) return includeAdvanced || item.palette !== "advanced";
-        return [
+        const matchesQuery = !normalized || [
           category.label,
           ...(category.keywords ?? []),
           item.name,
@@ -384,9 +398,28 @@ export function getFurniturePaletteCategories(query = "", includeAdvanced = fals
           item.description ?? "",
           ...(item.keywords ?? []),
         ].join(" ").toLowerCase().includes(normalized);
+        if (!matchesQuery || (!normalized && !includeAdvanced && item.palette === "advanced")) return false;
+        if (!normalized) return true;
+        if (seenTypes.has(item.type)) return false;
+        seenTypes.add(item.type);
+        return true;
       }),
     }))
     .filter((category) => category.items.length > 0);
+}
+
+/** Furniture symbols use their own SVG colors when the catalog marks color as fixed. */
+export function furnitureTypeSupportsColor(type: string): boolean {
+  const item = FURNITURE_CATEGORIES.flatMap((category) => category.items).find((candidate) => candidate.type === type);
+  return item?.colorEditable !== false;
+}
+
+export const RECENT_FURNITURE_LIMIT = 8;
+
+/** Session-only MRU behavior for the Object Library. */
+export function addRecentFurnitureType(current: readonly string[], type: string, limit = RECENT_FURNITURE_LIMIT) {
+  const safeLimit = Math.max(1, Math.floor(limit));
+  return [type, ...current.filter((candidate) => candidate !== type)].slice(0, safeLimit);
 }
 
 // ── Wall material colors ────────────────────────────────────────────────────

@@ -79,6 +79,22 @@ describe("Room authoring properties", () => {
     expect(onApply).toHaveBeenCalledWith("#64748b");
   });
 
+  it("exposes explicit Wall straightening actions for authored Walls", () => {
+    const onStraighten = vi.fn();
+    render(<FloorPropertiesPanel {...props({
+      selected: { type: "wall", id: "w1" },
+      rooms: [],
+      walls: [wall],
+      onStraightenWall: onStraighten,
+    })} />);
+    fireEvent.click(screen.getByTestId("straighten-wall-horizontal"));
+    fireEvent.click(screen.getByTestId("straighten-wall-vertical"));
+    fireEvent.click(screen.getByTestId("straighten-wall-nearest"));
+    expect(onStraighten).toHaveBeenNthCalledWith(1, "w1", "horizontal");
+    expect(onStraighten).toHaveBeenNthCalledWith(2, "w1", "vertical");
+    expect(onStraighten).toHaveBeenNthCalledWith(3, "w1", "nearest");
+  });
+
   it("filters Stair continuation candidates by the selected direction", () => {
     const current = { id: "s-current", x: 20, y: 20, width: 24, height: 30, rotation: 0, flip: false, direction: "up", label: "Left Stair", sharedId: "stair-core" };
     const groups = {
@@ -377,6 +393,48 @@ describe("Room authoring properties", () => {
     expect(onChange).not.toHaveBeenCalled();
   });
 
+  it("shows legacy same-floor Stair identity conflicts instead of listing every member as connected", () => {
+    const onChange = vi.fn();
+    const current = { id: "s-right-2", x: 20, y: 20, width: 24, height: 30, rotation: 0, flip: false, direction: "both", label: "Right Stair", sharedId: "legacy-main" };
+    const groups = {
+      stairs: [{
+        id: "legacy-main",
+        name: "Stair connection",
+        usedFloors: [
+          { id: "f1", label: "Ground Floor", objectId: "s-left-1", objectLabel: "Left Stair" },
+          { id: "f1", label: "Ground Floor", objectId: "s-right-1", objectLabel: "Right Stair" },
+          { id: "f2", label: "Floor 2", objectId: "s-left-2", objectLabel: "Left Stair" },
+          { id: "f2", label: "Floor 2", objectId: "s-right-2", objectLabel: "Right Stair" },
+          { id: "f3", label: "Floor 3", objectId: "s-left-3", objectLabel: "Left Stair" },
+          { id: "f3", label: "Floor 3", objectId: "s-right-3", objectLabel: "Right Stair" },
+        ],
+      }],
+      elevators: [],
+    };
+    render(<FloorPropertiesPanel {...props({
+      selected: { type: "stairs", id: current.id },
+      stairs: [current],
+      floorId: "f2",
+      buildingFloors: [
+        { id: "f1", label: "Ground Floor", number: 1 },
+        { id: "f2", label: "Floor 2", number: 2 },
+        { id: "f3", label: "Floor 3", number: 3 },
+      ],
+      circulationGroups: groups,
+      onStairConnectionChange: onChange,
+    })} />);
+
+    fireEvent.click(screen.getByTestId("circulation-group-trigger-stairs"));
+    const above = screen.getByTestId("stair-picker-floor-f3");
+    expect(within(above).queryByTestId("stair-picker-connected")).toBeNull();
+    expect(within(above).getByTestId("stair-connection-conflict-f3")).toHaveTextContent("Multiple Stairs on Ground Floor");
+    fireEvent.click(within(above).getByRole("button", { name: /Right Stair/ }));
+    const confirmation = screen.getByTestId("stair-cross-pair-confirmation");
+    expect(confirmation).toHaveTextContent("only these two selected Stairs");
+    fireEvent.click(within(confirmation).getByRole("button", { name: "Connect" }));
+    expect(onChange).toHaveBeenCalledWith("s-right-2", "f3", "s-right-3");
+  });
+
   it("keeps the Stair connection manager open for panel clicks and closes on Escape", () => {
     const current = { id: "s-current", x: 20, y: 20, width: 24, height: 30, rotation: 0, flip: false, direction: "both", label: "Left Stair" };
     render(<FloorPropertiesPanel {...props({
@@ -464,5 +522,103 @@ describe("Room authoring properties", () => {
     })} />);
     fireEvent.click(screen.getByTestId("circulation-group-trigger-stairs"));
     expect(screen.queryByRole("button", { name: "Connect Matching Stairs" })).toBeNull();
+  });
+});
+
+describe("Entrance-linked Opening Style", () => {
+  const entranceDoor = {
+    id: "entrance-door",
+    x: 40,
+    y: 20,
+    width: 30,
+    direction: "left",
+    color: "#b45309",
+    label: "Main Entrance",
+    buildingEntranceId: "entrance-1",
+  };
+
+  it("defaults legacy Entrance-linked Doors to Door and changes only their appearance field", () => {
+    const onUpdateDoor = vi.fn();
+    render(<FloorPropertiesPanel {...props({
+      selected: { type: "door", id: entranceDoor.id },
+      doors: [entranceDoor],
+      onUpdateDoor,
+      entranceConnectionStatus: { state: "linked", entranceName: "Main Entrance", doorId: entranceDoor.id },
+    })} />);
+
+    const styleControl = screen.getByTestId("entrance-opening-style-control");
+    expect(within(styleControl).getByRole("button", { name: "Door" })).toBeTruthy();
+    fireEvent.click(within(styleControl).getByRole("button", { name: "Open Passage" }));
+    expect(onUpdateDoor).toHaveBeenCalledWith(entranceDoor.id, { openingType: "open_passage" });
+  });
+
+  it("hides Door-only controls for Open Passage while keeping its direction control", () => {
+    render(<FloorPropertiesPanel {...props({
+      selected: { type: "door", id: entranceDoor.id },
+      doors: [{ ...entranceDoor, openingType: "open_passage" }],
+      entranceConnectionStatus: { state: "linked", entranceName: "Main Entrance", doorId: entranceDoor.id },
+    })} />);
+
+    expect(screen.getByTestId("entrance-opening-style-control")).toBeTruthy();
+    expect(screen.queryByText("Door Type")).toBeNull();
+    expect(screen.queryByText("Hinge")).toBeNull();
+    expect(screen.queryByText("Swing Side")).toBeNull();
+    expect(screen.getByText("Direction")).toBeTruthy();
+  });
+
+  it("leaves the ordinary manual Open Passage tool's properties unchanged", () => {
+    render(<FloorPropertiesPanel {...props({
+      selected: { type: "door", id: "manual-passage" },
+      doors: [{ ...entranceDoor, id: "manual-passage", buildingEntranceId: undefined, openingType: "open_passage" }],
+    })} />);
+    expect(screen.queryByTestId("entrance-opening-style-control")).toBeNull();
+    expect(screen.getByText("Direction")).toBeTruthy();
+  });
+
+  it("filters system-owned exterior Stair occurrences from every normal Stair candidate section", () => {
+    const current = { id: "s-current", x: 20, y: 20, width: 24, height: 30, direction: "up", label: "Left Stair", sharedId: "left-shaft" };
+    const groups = {
+      stairs: [{
+        id: "left-shaft",
+        name: "Left Stair",
+        usedFloors: [
+          { id: "f2", label: "Floor 2", objectId: "s-current", objectLabel: "Left Stair" },
+          { id: "f3", label: "Floor 3", objectId: "s-left-3", objectLabel: "Left Stair" },
+          { id: "f3", label: "Floor 3", objectId: "ext-3", objectLabel: "Renamed exterior landing", exteriorEmergencyStairId: "canonical-ext" },
+          { id: "f1", label: "Ground Floor", objectId: "ext-1", objectLabel: "Emergency Stair 1", exteriorEmergencyStairId: "canonical-ext" },
+        ],
+      }, {
+        id: "right-shaft",
+        name: "Right Stair",
+        usedFloors: [
+          { id: "f1", label: "Ground Floor", objectId: "s-right-1", objectLabel: "Right Stair" },
+          { id: "f3", label: "Floor 3", objectId: "s-right-3", objectLabel: "Right Stair" },
+        ],
+      }],
+      elevators: [],
+    };
+    render(<FloorPropertiesPanel {...props({
+      selected: { type: "stairs", id: current.id },
+      stairs: [current],
+      floorId: "f2",
+      buildingFloors: [
+        { id: "f1", label: "Ground Floor", number: 1 },
+        { id: "f2", label: "Floor 2", number: 2 },
+        { id: "f3", label: "Floor 3", number: 3 },
+      ],
+      circulationGroups: groups,
+      onStairConnectionChange: vi.fn(),
+    })} />);
+
+    fireEvent.click(screen.getByTestId("circulation-group-trigger-stairs"));
+    const picker = screen.getByTestId("circulation-group-picker");
+    const above = screen.getByTestId("stair-picker-floor-f3");
+    expect(within(above).getByTestId("stair-picker-connected")).toHaveTextContent("Left Stair");
+    expect(within(above).queryByTestId("stair-connection-conflict-f3")).toBeNull();
+    fireEvent.click(within(above).getByTestId("stair-change-floor-f3"));
+    expect(picker).toHaveTextContent("Right Stair");
+    expect(picker).not.toHaveTextContent("Renamed exterior landing");
+    expect(picker).not.toHaveTextContent("Emergency Stair 1");
+    expect(screen.getByTestId("stair-picker-direction-blocked")).toHaveTextContent("Direction is Up");
   });
 });

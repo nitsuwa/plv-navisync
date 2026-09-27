@@ -131,7 +131,7 @@ function stubSvgRect(container: HTMLElement, w = 220, h = 160): SVGSVGElement {
 }
 
 function enterNavigationMode() {
-  fireEvent.click(screen.getByRole("tab", { name: "Navigation" }));
+  fireEvent.click(screen.getByRole("button", { name: "Show Navigation" }));
 }
 
 function clickCanvas(container: HTMLElement, x: number, y: number) {
@@ -156,7 +156,7 @@ function latestCampus(onCampusChange: ReturnType<typeof vi.fn>): Campus {
 }
 
 function placeWaypoint(container: HTMLElement, x: number, y: number) {
-  fireEvent.click(screen.getByTestId("nav-library-waypoint"));
+  fireEvent.click(container.querySelector('[data-tutorial="floor-walking-point-tool"]') as HTMLButtonElement);
   clickCanvas(container, x, y);
 }
 
@@ -235,6 +235,30 @@ describe("B5 Phase 2.6 — Connect Feedback + Path Bend UX + Overlay Semantics +
     expect(post.getAttribute("r")).toBe("12");
     expect(post.getAttribute("stroke-width")).toBe("2");
     expect(post.getAttribute("stroke-dasharray")).toBeNull();
+  });
+
+  it("temporarily hides unrelated canvas overlays in Connect and restores them on Escape without updating the Floor", () => {
+    enterNavigationMode();
+    placeWaypoint(container, 60, 60);
+    const node = navNodes(container)[0];
+    const svg = stubSvgRect(container);
+    onCampusChange.mockClear();
+
+    fireEvent.click(container.querySelector('[data-tutorial="floor-connect-tool"]') as HTMLButtonElement);
+    expect(svg.getAttribute("data-connect-tool-active")).toBe("true");
+    const suppressionRules = screen.getByTestId("connect-tool-overlay-suppression-style").textContent ?? "";
+    expect(suppressionRules).toContain('[data-testid="issue-marker-layer"]');
+    expect(suppressionRules).toContain('[data-testid*="resize-handle"]');
+    expect(suppressionRules).toContain('[data-testid="wall-endpoint-handle"]');
+
+    fireEvent.mouseDown(node, { clientX: 60, clientY: 60, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    expect(screen.getByTestId("nav-connect-start")).toBeTruthy();
+    expect(screen.getByTestId("nav-node")).toBeTruthy();
+
+    fireEvent.keyDown(window, { key: "Escape", bubbles: true });
+    expect(svg.hasAttribute("data-connect-tool-active")).toBe(false);
+    expect(onCampusChange).not.toHaveBeenCalled();
   });
 
   it("Shift-constrained bend drag keeps the bend axis-aligned", () => {

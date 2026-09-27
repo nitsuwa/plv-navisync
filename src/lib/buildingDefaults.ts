@@ -56,11 +56,10 @@ export function nextDefaultBuildingIdentity(
 /**
  * Return a persistence-safe identity for a building copy.
  *
- * Building codes are unique per campus in the database (including rows that
- * have been archived by the structure-save RPC). Copying a building must
- * therefore never carry the source code forward. Use the same short,
- * human-readable BLDG-NN sequence as new buildings instead of exposing an
- * implementation/id token in the code shown to administrators.
+ * Active Building codes are unique per campus. Copying a building must never
+ * carry the source code forward. Use the same short, human-readable BLDG-NN
+ * sequence as new buildings instead of exposing an implementation/id token
+ * in the code shown to administrators.
  */
 export function nextBuildingCopyIdentity(
   source: Partial<BuildingIdentity>,

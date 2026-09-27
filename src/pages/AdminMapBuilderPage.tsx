@@ -140,6 +140,7 @@ export function AdminMapBuilderPage() {
   // One canonical save operation per campus. Both toolbar/modal callers share
   // this map, so rapid clicks cannot race two full-campus persistence writes.
   const savePromisesRef = useRef<Map<string, Promise<Campus>>>(new Map());
+  const saveRevisionRef = useRef<Map<string, number>>(new Map());
   // Campus cards are lightweight until the structure load completes. Never
   // allow a structure write against that pre-hydration state.
   const hydratedCampusIdsRef = useRef<Set<string>>(new Set());
@@ -603,10 +604,16 @@ export function AdminMapBuilderPage() {
   }, [canonicalCampuses, campuses, setCampusHydrationState, updateCampus]);
 
   const saveCampusStructure = useCallback(async (campus: Campus) => {
-    const inFlight = savePromisesRef.current.get(campus.id);
-    if (inFlight) return inFlight;
+    // Serialize writes per Campus, but never satisfy a newer save request with
+    // an older candidate's response. A stale response used to be returned as
+    // success and could replace a complete editor draft with an earlier,
+    // smaller Floor snapshot.
+    const previous = savePromisesRef.current.get(campus.id);
+    const revision = (saveRevisionRef.current.get(campus.id) ?? 0) + 1;
+    saveRevisionRef.current.set(campus.id, revision);
 
     const operation = (async (): Promise<Campus> => {
+    if (previous) await previous.catch(() => undefined);
     const baseline = savedSnapshotsRef.current[campus.id];
     if (!canPersistCampusStructure(campus, baseline, hydratedCampusIdsRef.current.has(campus.id))) {
       throw new Error("Map data is still loading. Refresh the map before saving.");
@@ -663,9 +670,11 @@ export function AdminMapBuilderPage() {
       previewBuildingsLoaded: true,
     };
     // A successful save is the canonical baseline for the outer dirty check.
-    savedSnapshotsRef.current = { ...savedSnapshotsRef.current, [saved.id]: JSON.stringify(savedWithPreviewCount) };
-    updateCampus(savedWithPreviewCount);
-    clearDraft(saved.id);
+    if (saveRevisionRef.current.get(campus.id) === revision) {
+      savedSnapshotsRef.current = { ...savedSnapshotsRef.current, [saved.id]: JSON.stringify(savedWithPreviewCount) };
+      updateCampus(savedWithPreviewCount);
+      clearDraft(saved.id);
+    }
     return savedWithPreviewCount;
     })();
     savePromisesRef.current.set(campus.id, operation);

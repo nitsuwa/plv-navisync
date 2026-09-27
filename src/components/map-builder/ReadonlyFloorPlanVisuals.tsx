@@ -10,10 +10,14 @@
 import type { FloorPlan, FloorRoom, FloorWall, FloorDoor, FloorWindow, FloorStairs, FloorRamp, FloorElevatorItem, FloorLabel, FloorFurniture, FloorPath } from "./types";
 import type { CampusEntrance } from "./types";
 import { FloorGroundSurface } from "./FloorGroundSurface";
+import { getFloorShapeBounds, getFloorShapeRegions } from "../../lib/floorShape";
 import { ROOM_COLORS, type RoomType } from "../../data/floorPlans";
 import { EntranceDirectionBadge } from "./EntranceDirectionBadge";
 import { CanvasAssetVisual } from "../canvas/CanvasAssetVisual";
 import { getCanvasAsset, resolveCanvasAssetKey } from "../canvas/canvasAssetCatalog";
+import { roomOutlinePoints, roomShapeBounds, roomShapeHorizontalSpan, roomShapeLabelPoint, roomShapePath } from "../../lib/roomShape";
+import { layoutRoomLabel, roomLabelLineCenterY } from "../../lib/roomLabel";
+import { sortFloorItemsByLocalZ } from "../../lib/floorRenderLayers";
 
 // ── Room rendering ──────────────────────────────────────────────────────────
 
@@ -34,6 +38,8 @@ export function RoomVisual({ room, hovered, highlighted, mapMode, onClick, onMou
   const stroke = highlighted ? "#0e2a6e" : hovered ? colors.stroke : colors.stroke;
   const strokeWidth = highlighted ? 2.5 : hovered ? 2 : 1;
   const opacity = highlighted ? 0.3 : 1;
+  const customPoints = Array.isArray(room.shapePoints) && room.shapePoints.length >= 3 ? roomOutlinePoints(room) : null;
+  const customPath = customPoints ? roomShapePath(customPoints) : "";
 
   return (
     <g
@@ -44,31 +50,36 @@ export function RoomVisual({ room, hovered, highlighted, mapMode, onClick, onMou
       onMouseEnter={onMouseEnter ? () => onMouseEnter(room.id) : undefined}
       onMouseLeave={onMouseLeave}
     >
-      {highlighted && (
+      {highlighted && (customPoints ? (
+        <path d={roomShapePath(customPoints)} transform="translate(0 0)" fill="none" stroke="#0e2a6e" strokeWidth={2.5}
+          style={{ animation: "border-glow 2s ease-in-out infinite" }} />
+      ) : (
         <rect x={room.x - 3} y={room.y - 3} width={room.w + 6} height={room.h + 6} rx={2}
           fill="none" stroke="#0e2a6e" strokeWidth={2.5}
           style={{ animation: "border-glow 2s ease-in-out infinite" }} />
+      ))}
+      {customPoints ? (
+        <path d={customPath} fill={fill} fillOpacity={opacity} stroke={stroke} strokeWidth={strokeWidth} />
+      ) : (
+        <rect x={room.x} y={room.y} width={room.w} height={room.h} rx={1}
+          fill={fill} fillOpacity={opacity}
+          stroke={stroke} strokeWidth={strokeWidth} />
       )}
-      <rect x={room.x} y={room.y} width={room.w} height={room.h} rx={1}
-        fill={fill} fillOpacity={opacity}
-        stroke={stroke} strokeWidth={strokeWidth} />
       {/* Interior depth shadows */}
       {!highlighted && (
         <>
-          <line x1={room.x + 1} y1={room.y + 1} x2={room.x + room.w - 1} y2={room.y + 1}
-            stroke={colors.text} strokeWidth={1.5} opacity={0.08} />
-          <line x1={room.x + 1} y1={room.y + 1} x2={room.x + 1} y2={room.y + room.h - 1}
-            stroke={colors.text} strokeWidth={1.5} opacity={0.08} />
+          {customPoints ? (
+            <line x1={customPoints[0].x} y1={customPoints[0].y} x2={customPoints[1].x} y2={customPoints[1].y}
+              stroke={colors.text} strokeWidth={1.5} opacity={0.08} />
+          ) : (
+            <>
+              <line x1={room.x + 1} y1={room.y + 1} x2={room.x + room.w - 1} y2={room.y + 1}
+                stroke={colors.text} strokeWidth={1.5} opacity={0.08} />
+              <line x1={room.x + 1} y1={room.y + 1} x2={room.x + 1} y2={room.y + room.h - 1}
+                stroke={colors.text} strokeWidth={1.5} opacity={0.08} />
+            </>
+          )}
         </>
-      )}
-      {/* Room label */}
-      {room.w >= 40 && room.h >= 20 && (
-        <text x={room.x + room.w / 2} y={room.y + room.h / 2 - 3}
-          textAnchor="middle" fill={colors.text}
-          fontSize={room.w > 80 ? 7 : 5.5} fontWeight="600"
-          className="pointer-events-none select-none">
-          {room.name.length > 14 ? room.name.slice(0, 12) + "…" : room.name}
-        </text>
       )}
       {/* Type label */}
       {room.w >= 60 && room.h >= 30 && (
@@ -116,6 +127,8 @@ function DoorVisual({ door, entrance, onClick }: { door: FloorDoor; entrance?: C
   const { x, y, width, color, direction } = door;
   const half = width / 2;
   const leaf = width * 0.85;
+  const wallThickness = (door as Record<string, unknown>).thickness as number ?? 4;
+  const jamb = Math.max(wallThickness / 2 + 2, 4);
 
   // Determine rotation from wall angle (default to horizontal)
   const rot = door.wallId ? 0 : 0; // simplified — walls handle orientation
@@ -128,25 +141,34 @@ function DoorVisual({ door, entrance, onClick }: { door: FloorDoor; entrance?: C
       {/* Wall cut (clear opening) */}
       <line x1={-half} y1={0} x2={half} y2={0}
         stroke="var(--map-floor-bg, #f5f3ef)" strokeWidth={(door as Record<string, unknown>).thickness as number ?? 4} />
-      {direction === "double" ? (
+      {door.openingType === "open_passage" ? (
+        <g data-testid="readonly-open-passage-symbol">
+          <line data-testid="readonly-open-passage-wall-cut" x1={-half} y1={0} x2={half} y2={0}
+            stroke="var(--map-floor-bg, #f5f3ef)" strokeWidth={wallThickness + 2} strokeLinecap="butt" />
+          <line x1={-half} y1={-jamb} x2={-half} y2={jamb} stroke={color} strokeWidth={1.8} strokeLinecap="round" />
+          <line x1={half} y1={-jamb} x2={half} y2={jamb} stroke={color} strokeWidth={1.8} strokeLinecap="round" />
+          <line x1={-half + 2} y1={-jamb - 1} x2={half - 2} y2={-jamb - 1}
+            stroke={color} strokeWidth={1.2} strokeLinecap="round" opacity={0.72} />
+        </g>
+      ) : direction === "double" ? (
         <>
           {/* Double door — two leaves */}
-          <line x1={-half} y1={-5.5} x2={half} y2={-5.5}
+          <line data-testid="readonly-door-leaf" x1={-half} y1={-5.5} x2={half} y2={-5.5}
             stroke={color} strokeWidth={2.4} strokeLinecap="round" />
-          <circle cx={-half} cy={0} r={2.3} fill={color} />
-          <circle cx={half} cy={0} r={2.3} fill={color} />
+          <circle data-testid="readonly-door-hinge" cx={-half} cy={0} r={2.3} fill={color} />
+          <circle data-testid="readonly-door-hinge" cx={half} cy={0} r={2.3} fill={color} />
         </>
       ) : direction === "sliding" ? (
-        <line x1={-half} y1={0} x2={half} y2={0}
+        <line data-testid="readonly-door-leaf" x1={-half} y1={0} x2={half} y2={0}
           stroke={color} strokeWidth={2.5} strokeLinecap="round"
           strokeDasharray="3 2" />
       ) : (
         <>
           {/* Single door — hinge + leaf + swing arc */}
-          <circle cx={-half} cy={0} r={2.4} fill={color} />
-          <line x1={-half} y1={0} x2={-half} y2={-leaf}
+          <circle data-testid="readonly-door-hinge" cx={-half} cy={0} r={2.4} fill={color} />
+          <line data-testid="readonly-door-leaf" x1={-half} y1={0} x2={-half} y2={-leaf}
             stroke={color} strokeWidth={2.7} strokeLinecap="round" />
-          <path d={`M ${-half} ${-leaf} A ${leaf} ${leaf} 0 0 0 ${half} 0`}
+          <path data-testid="readonly-door-swing-arc" d={`M ${-half} ${-leaf} A ${leaf} ${leaf} 0 0 0 ${half} 0`}
             fill="none" stroke={color} strokeWidth={1} opacity={0.4}
             strokeDasharray="2 2" />
         </>
@@ -346,16 +368,88 @@ function FurnitureVisual({ item }: { item: FloorFurniture }) {
   if (item.visible === false) return null;
   const assetKey = resolveCanvasAssetKey(item);
   const asset = assetKey ? getCanvasAsset(assetKey) : undefined;
+  const cx = item.width / 2;
+  const cy = item.height / 2;
+  const mirrorTransform = item.flipX || item.flipY
+    ? `translate(${cx} ${cy}) scale(${item.flipX ? -1 : 1} ${item.flipY ? -1 : 1}) translate(${-cx} ${-cy})`
+    : undefined;
   return (
     <g data-testid="readonly-furniture" data-furniture-id={item.id}
       transform={`translate(${item.x},${item.y}) rotate(${item.rotation || 0},${item.width / 2},${item.height / 2})`}>
-      {asset?.surfaces.includes("map") ? (
-        <CanvasAssetVisual assetKey={asset.key} label={item.name} x={0} y={0} width={item.width} height={item.height} style={{ color: item.color }} />
-      ) : (
-        <rect x={0} y={0} width={item.width} height={item.height} rx={1}
-          fill={item.color || "#e2e8f0"} stroke={item.color || "#94a3b8"}
-          strokeWidth={0.8} opacity={0.7} />
-      )}
+      <g transform={mirrorTransform}>
+        {asset?.surfaces.includes("map") ? (
+          <CanvasAssetVisual assetKey={asset.key} label={item.name} x={0} y={0} width={item.width} height={item.height} style={{ color: item.color }} />
+        ) : (
+          <rect x={0} y={0} width={item.width} height={item.height} rx={1}
+            fill={item.color || "#e2e8f0"} stroke={item.color || "#94a3b8"}
+            strokeWidth={0.8} opacity={0.7} />
+        )}
+      </g>
+    </g>
+  );
+}
+
+function RoomLabelVisual({ room, hovered, highlighted }: Pick<RoomVisualProps, "room" | "hovered" | "highlighted">) {
+  const typeKey = room.type as RoomType;
+  const colors = ROOM_COLORS[typeKey] ?? ROOM_COLORS.classroom;
+  const points = roomOutlinePoints(room);
+  const custom = Array.isArray(room.shapePoints) && room.shapePoints.length >= 3;
+  const bounds = roomShapeBounds(points);
+  const center = custom ? roomShapeLabelPoint(points) : { x: room.x + room.w / 2, y: room.y + room.h / 2 };
+  const fontSize = Math.min(12.5, Math.max(7.2, Math.min(bounds.w, bounds.h * 2.4) / 29));
+  const shapeSpan = roomShapeHorizontalSpan(points, center.y);
+  const labelSpan = shapeSpan >= Math.max(1, bounds.w * 0.1) ? shapeSpan : bounds.w;
+  const maxWidth = Math.max(1, Math.min(labelSpan * 0.86, labelSpan - 8));
+  const layout = layoutRoomLabel({
+    text: room.name,
+    maxWidth,
+    fontSize,
+    minFontSize: Math.max(6, fontSize * 0.82),
+    paddingX: 5,
+    paddingY: 3.5,
+  });
+  const emphasized = hovered || highlighted;
+  const labelY = center.y - layout.height / 2;
+  return (
+    <g
+      data-testid="readonly-room-label-overlay"
+      data-room-id={room.id}
+      className="pointer-events-none select-none"
+      pointerEvents="none"
+      opacity={highlighted ? 1 : hovered ? 0.95 : 0.78}
+    >
+      <rect
+        x={center.x - layout.width / 2}
+        y={labelY}
+        width={layout.width}
+        height={layout.height}
+        rx={3}
+        fill="#ffffff"
+        fillOpacity={emphasized ? 0.96 : 0.88}
+        stroke={colors.stroke}
+        strokeOpacity={emphasized ? 0.72 : 0.42}
+        strokeWidth={0.8}
+      />
+      <text
+        x={center.x}
+        y={labelY + layout.height / 2}
+        textAnchor="middle"
+        dominantBaseline="middle"
+        fill={colors.text}
+        fontSize={layout.fontSize}
+        fontWeight="600"
+        fontFamily="var(--font-sans)"
+      >
+        {layout.lines.map((line, index) => (
+          <tspan
+            key={`${room.id}-readonly-label-${index}`}
+            x={center.x}
+            y={roomLabelLineCenterY(labelY + layout.height / 2, index, layout.lines.length, layout.lineHeight)}
+          >
+            {line}
+          </tspan>
+        ))}
+      </text>
     </g>
   );
 }
@@ -393,43 +487,48 @@ export function ReadonlyFloorPlanScene({
 }: ReadonlyFloorPlanSceneProps) {
   const canvasW = floor.canvasW || 440;
   const canvasH = floor.canvasH || 290;
+  const floorShapeRegions = getFloorShapeRegions(floor);
+  const floorShapeBounds = getFloorShapeBounds(floorShapeRegions);
+  const floorShapeClipId = `readonly-floor-shape-${floor.id}`.replace(/[^A-Za-z0-9_-]/g, "-");
 
-  // Sort rooms by zOrder for proper layering
-  const sortedRooms = [...(floor.rooms || [])].sort(
-    (a, b) => (a.zOrder ?? 0) - (b.zOrder ?? 0),
-  );
+  const sortedRooms = sortFloorItemsByLocalZ(floor.rooms || []);
 
   // Filter visible elements
-  const visibleWalls = (floor.walls || []).filter((w) => w.visible !== false);
-  const visibleDoors = (floor.doors || []).filter((d) => d.visible !== false);
-  const visibleWindows = (floor.windows || []).filter((w) => w.visible !== false);
-  const visibleStairs = (floor.stairs || []).filter((s) => s.visible !== false);
-  const visibleRamps = (floor.ramps || []).filter((r) => r.visible !== false);
-  const visibleElevators = (floor.elevators || []).filter((e) => e.visible !== false);
-  const visibleLabels = floor.labels || [];
-  const visibleFurniture = (floor.furniture || []).filter((f) => f.visible !== false);
+  const visibleWalls = sortFloorItemsByLocalZ((floor.walls || []).filter((w) => w.visible !== false));
+  const visibleDoors = sortFloorItemsByLocalZ((floor.doors || []).filter((d) => d.visible !== false));
+  const visibleWindows = sortFloorItemsByLocalZ((floor.windows || []).filter((w) => w.visible !== false));
+  const visibleStairs = sortFloorItemsByLocalZ((floor.stairs || []).filter((s) => s.visible !== false));
+  const visibleRamps = sortFloorItemsByLocalZ((floor.ramps || []).filter((r) => r.visible !== false));
+  const visibleElevators = sortFloorItemsByLocalZ((floor.elevators || []).filter((e) => e.visible !== false));
+  const visibleLabels = sortFloorItemsByLocalZ(floor.labels || []);
+  const visibleFurniture = sortFloorItemsByLocalZ((floor.furniture || []).filter((f) => f.visible !== false));
   const visiblePaths = floor.paths || [];
   const entranceById = new Map(entrances.map((entrance) => [entrance.id, entrance]));
 
   return (
     <g data-testid="readonly-floor-plan-scene">
+      <defs><clipPath id={floorShapeClipId}><path d={floorShapeRegions.map((region) => `M ${region.x} ${region.y} h ${region.width} v ${region.height} h ${-region.width} Z`).join(" ")} /></clipPath></defs>
       {/* Published/read-only view shows the authored surface only; the
           authoring grid intentionally never leaks into the student map. */}
-      <FloorGroundSurface
-        width={canvasW}
-        height={canvasH}
-        appearance={floor.appearance}
-        legacyColor={floor.backgroundColor}
-        idPrefix={`readonly-floor-${floor.id}`}
-        dataTestId="readonly-floor-surface"
-      />
+      <g clipPath={`url(#${floorShapeClipId})`}>
+        <FloorGroundSurface
+          x={floorShapeBounds.x}
+          y={floorShapeBounds.y}
+          width={floorShapeBounds.width}
+          height={floorShapeBounds.height}
+          appearance={floor.appearance}
+          legacyColor={floor.backgroundColor}
+          idPrefix={`readonly-floor-${floor.id}`}
+          dataTestId="readonly-floor-surface"
+        />
+      </g>
 
       {/* Mode tints */}
       {mapMode === "emergency" && (
-        <rect width={canvasW} height={canvasH} fill="var(--map-route, #dc2626)" opacity={0.05} />
+        <rect x={floorShapeBounds.x} y={floorShapeBounds.y} width={floorShapeBounds.width} height={floorShapeBounds.height} fill="var(--map-route, #dc2626)" opacity={0.05} clipPath={`url(#${floorShapeClipId})`} />
       )}
       {mapMode === "accessible" && (
-        <rect width={canvasW} height={canvasH} fill="var(--map-route-start, #16a34a)" opacity={0.05} />
+        <rect x={floorShapeBounds.x} y={floorShapeBounds.y} width={floorShapeBounds.width} height={floorShapeBounds.height} fill="var(--map-route-start, #16a34a)" opacity={0.05} clipPath={`url(#${floorShapeClipId})`} />
       )}
 
       {/* Walking paths */}
@@ -437,39 +536,49 @@ export function ReadonlyFloorPlanScene({
         <PathVisual key={path.id} path={path} />
       ))}
 
-      {/* Walls (rendered below rooms for depth) */}
-      {visibleWalls.map((wall) => (
-        <WallVisual key={wall.id} wall={wall} />
-      ))}
+      {/* Room fills form the back physical band. */}
+      <g data-semantic-layer="room-fills">
+        {sortedRooms.map((room) => (
+          <RoomVisual
+            key={room.id}
+            room={room}
+            hovered={hoveredRoomId === room.id}
+            highlighted={highlightedRoomId === room.id}
+            mapMode={mapMode}
+            onClick={onRoomClick}
+            onMouseEnter={onRoomHover}
+            onMouseLeave={onRoomHoverEnd}
+          />
+        ))}
+      </g>
 
-      {/* Rooms */}
-      {sortedRooms.map((room) => (
-        <RoomVisual
-          key={room.id}
-          room={room}
-          hovered={hoveredRoomId === room.id}
-          highlighted={highlightedRoomId === room.id}
-          mapMode={mapMode}
-          onClick={onRoomClick}
-          onMouseEnter={onRoomHover}
-          onMouseLeave={onRoomHoverEnd}
-        />
-      ))}
+      {/* Furniture remains in its own local ordering band below architecture. */}
+      <g data-semantic-layer="furniture">
+        {visibleFurniture.map((item) => (
+          <FurnitureVisual key={item.id} item={item} />
+        ))}
+      </g>
 
-      {/* Windows */}
-      {visibleWindows.map((win) => (
-        <WindowVisual key={win.id} window={win} />
-      ))}
+      {/* Walls cover Furniture, then attached openings cover the Wall strokes. */}
+      <g data-semantic-layer="walls">
+        {visibleWalls.map((wall) => (
+          <WallVisual key={wall.id} wall={wall} />
+        ))}
+      </g>
 
-      {/* Doors */}
-      {visibleDoors.map((door) => (
-        <DoorVisual
-          key={door.id}
-          door={door}
-          entrance={door.buildingEntranceId ? entranceById.get(door.buildingEntranceId) : undefined}
-          onClick={onDoorClick}
-        />
-      ))}
+      <g data-semantic-layer="openings">
+        {visibleWindows.map((win) => (
+          <WindowVisual key={win.id} window={win} />
+        ))}
+        {visibleDoors.map((door) => (
+          <DoorVisual
+            key={door.id}
+            door={door}
+            entrance={door.buildingEntranceId ? entranceById.get(door.buildingEntranceId) : undefined}
+            onClick={onDoorClick}
+          />
+        ))}
+      </g>
 
       {/* Stairs */}
       {visibleStairs.map((stair) => (
@@ -486,9 +595,14 @@ export function ReadonlyFloorPlanScene({
         <ElevatorVisual key={elevator.id} elevator={elevator} />
       ))}
 
-      {/* Furniture */}
-      {visibleFurniture.map((item) => (
-        <FurnitureVisual key={item.id} item={item} />
+      {/* Room names are an overlay, so physical content cannot obscure them. */}
+      {sortedRooms.map((room) => (
+        <RoomLabelVisual
+          key={`readonly-room-label-${room.id}`}
+          room={room}
+          hovered={hoveredRoomId === room.id}
+          highlighted={highlightedRoomId === room.id}
+        />
       ))}
 
       {/* Labels (rendered last, on top) */}

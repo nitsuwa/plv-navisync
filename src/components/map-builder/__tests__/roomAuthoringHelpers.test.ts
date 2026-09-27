@@ -43,4 +43,37 @@ describe("Room authoring names", () => {
     expect(roomDoorLinkTargetIsValid(roomA, door, [wall], [doorNode], "b1", "f1", [], [roomA, roomB])).toBe(true);
     expect(roomDoorLinkTargetIsValid(roomB, door, [wall], [doorNode], "b1", "f1", [], [roomA, roomB])).toBe(true);
   });
+
+  it("rejects a nearby Door whose parent Wall is on the neighboring Room boundary", () => {
+    const roomA = { id: "room-a", name: "Room A", type: "classroom", x: 20, y: 20, w: 60, h: 40, floorId: "f1", buildingId: "b1" } as FloorRoom;
+    const roomB = { id: "room-b", name: "Room B", type: "classroom", x: 80, y: 20, w: 60, h: 40, floorId: "f1", buildingId: "b1" } as FloorRoom;
+    const wallA = { id: "wall-a", x1: 20, y1: 60, x2: 80, y2: 60, thickness: 4, color: "#64748b" } as FloorWall;
+    const wallB = { id: "wall-b", x1: 80, y1: 60, x2: 140, y2: 60, thickness: 4, color: "#64748b" } as FloorWall;
+    const doorA = { id: "door-a", x: 50, y: 60, width: 12, direction: "left", color: "#d97706", wallId: wallA.id } as FloorDoor;
+    const doorB = { id: "door-b", x: 95, y: 60, width: 12, direction: "left", color: "#d97706", wallId: wallB.id } as FloorDoor;
+    const nodes = [doorA, doorB].map((door) => ({
+      id: `${door.id}-node`, doorId: door.id, buildingId: "b1", floorId: "f1", x: door.x, y: door.y,
+    } as NavigationNode));
+
+    expect(roomDoorLinkTargetIsValid(roomA, doorA, [wallA, wallB], nodes, "b1", "f1", [], [roomA, roomB])).toBe(true);
+    expect(roomDoorLinkTargetIsValid(roomA, doorB, [wallA, wallB], nodes, "b1", "f1", [], [roomA, roomB])).toBe(false);
+  });
+
+  it("uses a custom Room polygon boundary instead of its bounding rectangle", () => {
+    const room = {
+      id: "custom-room", name: "Custom", type: "classroom", x: 20, y: 20, w: 80, h: 80,
+      shapePoints: [{ x: 20, y: 20 }, { x: 100, y: 20 }, { x: 60, y: 60 }, { x: 20, y: 100 }],
+      floorId: "f1", buildingId: "b1",
+    } as FloorRoom;
+    const outsideWall = { id: "outside-wall", x1: 100, y1: 60, x2: 100, y2: 100, thickness: 4, color: "#64748b" } as FloorWall;
+    const outsideDoor = { id: "outside-door", x: 100, y: 80, width: 12, direction: "left", color: "#d97706", wallId: outsideWall.id } as FloorDoor;
+    const boundaryWall = { id: "boundary-wall", x1: 100, y1: 20, x2: 60, y2: 60, thickness: 4, color: "#64748b" } as FloorWall;
+    const boundaryDoor = { id: "boundary-door", x: 80, y: 40, width: 12, direction: "left", color: "#d97706", wallId: boundaryWall.id } as FloorDoor;
+    const nodes = [outsideDoor, boundaryDoor].map((door) => ({
+      id: `${door.id}-node`, doorId: door.id, buildingId: "b1", floorId: "f1", x: door.x, y: door.y,
+    } as NavigationNode));
+
+    expect(roomDoorLinkTargetIsValid(room, outsideDoor, [outsideWall], nodes, "b1", "f1")).toBe(false);
+    expect(roomDoorLinkTargetIsValid(room, boundaryDoor, [boundaryWall], nodes, "b1", "f1")).toBe(true);
+  });
 });

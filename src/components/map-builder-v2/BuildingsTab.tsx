@@ -12,7 +12,8 @@ import { genId, BUILDING_COLORS } from "../map-builder/constants";
 import { useToast } from "../../hooks/useToast";
 import type { Campus, CampusBuilding, SimpleTool } from "../map-builder/types";
 import { nextBuildingCopyIdentity } from "../../lib/buildingDefaults";
-import { duplicateFloorForBuilding } from "../../lib/floorPlanNormalization";
+import { duplicateBuildingForCampus } from "../../lib/buildingDuplication";
+import { collectIdentityIds } from "../../lib/physicalFloorIntegrity";
 
 // ── Props ────────────────────────────────────────────────────────────────────
 
@@ -427,21 +428,19 @@ export function BuildingsTab({ campus, onUpdate, onOpenFloorPlan }: BuildingsTab
     if (!source) return;
     const copyId = genId("bld");
     const identity = nextBuildingCopyIdentity(source, buildings, [], copyId);
-    const clone: CampusBuilding = {
-      ...structuredClone(source),
-      id: copyId,
-      name: identity.name,
-      code: identity.code,
-      x: source.x + 30,
-      y: source.y + 30,
-      floors: (source.floors ?? []).map((floor) => duplicateFloorForBuilding(floor, {
-        id: genId("fl"), buildingId: copyId, number: floor.number, label: floor.label,
-      })),
-    };
-    pushHistory();
-    onUpdate({ ...campus, buildings: [...buildings, clone] });
-    setSelectedId(clone.id);
-    toast.success("Building duplicated");
+    try {
+      const clone = duplicateBuildingForCampus(source, {
+        id: copyId, name: identity.name, code: identity.code,
+        x: source.x + 30, y: source.y + 30, idFactory: genId,
+        reservedIds: collectIdentityIds(buildings),
+      });
+      pushHistory();
+      onUpdate({ ...campus, buildings: [...buildings, clone] });
+      setSelectedId(clone.id);
+      toast.success("Building duplicated");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "The copied Building failed its integrity check.");
+    }
   }, [buildings, campus, onUpdate, toast, pushHistory]);
 
   // ── Context menu action handler ────────────────────────────────────────────

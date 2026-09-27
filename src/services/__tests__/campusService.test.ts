@@ -248,17 +248,32 @@ describe("updateCampus (versioned update boundary)", () => {
 describe("listCampuses (campus preview summary boundary)", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("queries persisted lightweight building footprints and maps them without full structure hydration", async () => {
+  it("loads active campus counts across every page and counts Room metadata/types before hydration", async () => {
+    const buildingRows = [
+      ...Array.from({ length: 500 }, (_, index) => ({ id: `building-${index}`, campus_id: "c2", archived_at: null })),
+      { id: "building-c3", campus_id: "c3", archived_at: null },
+      { id: "building-archived", campus_id: "c2", archived_at: "2026-01-01T00:00:00Z" },
+    ];
     const floorRows = [
-      { id: "f1", archived_at: null, buildings: { campus_id: "c2" } },
-      { id: "f2", archived_at: null, buildings: { campus_id: "c2" } },
-      { id: "f3", archived_at: null, buildings: { campus_id: "c3" } },
+      ...Array.from({ length: 500 }, (_, index) => ({ id: `floor-${index}`, building_id: `building-${index}`, archived_at: null })),
+      { id: "floor-c3", building_id: "building-c3", archived_at: null },
+      { id: "floor-archived", building_id: "building-0", archived_at: "2026-01-01T00:00:00Z" },
     ];
     const roomRows = [
-      { id: "r1", campus_id: "c2", element_type: "room", archived_at: null },
-      { id: "r2", campus_id: "c2", element_type: "room", archived_at: null },
-      { id: "r3", campus_id: "c3", element_type: "room", archived_at: null },
+      ...Array.from({ length: 1000 }, (_, index) => ({
+        id: `room-c2-${index}`, campus_id: "c2", building_id: `building-${index % 500}`,
+        floor_id: `floor-${index % 500}`, element_type: ["classroom", "laboratory", "office", "room"][index % 4],
+        metadata: { kind: "room", ui: {} }, archived_at: null,
+      })),
+      ...Array.from({ length: 201 }, (_, index) => ({
+        id: `room-c3-${index}`, campus_id: "c3", building_id: "building-c3", floor_id: "floor-c3",
+        element_type: "laboratory", metadata: { kind: "room", ui: {} }, archived_at: null,
+      })),
+      { id: "room-archived", campus_id: "c2", building_id: "building-0", floor_id: "floor-0", element_type: "room", metadata: { kind: "room" }, archived_at: "2026-01-01T00:00:00Z" },
+      { id: "not-a-room", campus_id: "c2", building_id: "building-0", floor_id: "floor-0", element_type: "door", metadata: { kind: "door" }, archived_at: null },
     ];
+    const rowsByTable: Record<string, unknown[]> = { buildings: buildingRows, floors: floorRows, map_elements: roomRows };
+    const pagesByTable: Record<string, number[][]> = { buildings: [], floors: [], map_elements: [] };
     const orderByName = vi.fn().mockResolvedValue({
       data: [
         { ...campusRow, id: "c1", name: "Empty Campus", preview_buildings: [] },
@@ -295,17 +310,21 @@ describe("listCampuses (campus preview summary boundary)", () => {
     });
     const orderByDefault = vi.fn(() => ({ order: orderByName }));
     const select = vi.fn(() => ({ order: orderByDefault }));
-    const floorIs = vi.fn().mockResolvedValue({ data: floorRows, error: null });
-    const floorIn = vi.fn(() => ({ is: floorIs }));
-    const floorSelect = vi.fn(() => ({ in: floorIn }));
-    const roomIs = vi.fn().mockResolvedValue({ data: roomRows, error: null });
-    const roomEq = vi.fn(() => ({ is: roomIs }));
-    const roomIn = vi.fn(() => ({ eq: roomEq }));
-    const roomSelect = vi.fn(() => ({ in: roomIn }));
+    const pageQuery = (table: string) => {
+      const query: Record<string, ReturnType<typeof vi.fn>> = {};
+      query.select = vi.fn(() => query);
+      query.in = vi.fn(() => query);
+      query.is = vi.fn(() => query);
+      query.or = vi.fn(() => query);
+      query.range = vi.fn((from: number, to: number) => {
+        pagesByTable[table].push([from, to]);
+        return Promise.resolve({ data: rowsByTable[table].slice(from, to + 1), error: null });
+      });
+      return query;
+    };
     const from = vi.fn((table: string) => {
       if (table === "campuses") return { select };
-      if (table === "floors") return { select: floorSelect };
-      if (table === "map_elements") return { select: roomSelect };
+      if (table === "buildings" || table === "floors" || table === "map_elements") return pageQuery(table);
       throw new Error(`unexpected table ${table}`);
     });
     vi.mocked(getSupabase).mockReturnValue({ from } as never);
@@ -313,11 +332,9 @@ describe("listCampuses (campus preview summary boundary)", () => {
     const campuses = await listCampuses();
 
     expect(select).toHaveBeenCalledWith("*, preview_buildings:buildings(id,name,code,category,description,x,y,width,height,rotation,is_visible,metadata,archived_at)");
-    expect(floorSelect).toHaveBeenCalledWith("id,archived_at,buildings!inner(campus_id)");
-    expect(floorIn).toHaveBeenCalledWith("buildings.campus_id", ["c1", "c2", "c3"]);
-    expect(roomSelect).toHaveBeenCalledWith("id,campus_id,element_type,archived_at");
-    expect(roomIn).toHaveBeenCalledWith("campus_id", ["c1", "c2", "c3"]);
-    expect(roomEq).toHaveBeenCalledWith("element_type", "room");
+    expect(pagesByTable.buildings).toEqual([[0, 499], [500, 999]]);
+    expect(pagesByTable.floors).toEqual([[0, 499], [500, 999]]);
+    expect(pagesByTable.map_elements).toEqual([[0, 499], [500, 999], [1000, 1499]]);
     expect(campuses.map((campus) => ({
       id: campus.id,
       count: campus.previewBuildingCount,
@@ -327,8 +344,8 @@ describe("listCampuses (campus preview summary boundary)", () => {
       buildings: campus.buildings.length,
     }))).toEqual([
       { id: "c1", count: 0, floors: 0, rooms: 0, previewLoaded: true, buildings: 0 },
-      { id: "c2", count: 1, floors: 2, rooms: 2, previewLoaded: true, buildings: 1 },
-      { id: "c3", count: 0, floors: 1, rooms: 1, previewLoaded: true, buildings: 0 },
+      { id: "c2", count: 500, floors: 500, rooms: 1000, previewLoaded: true, buildings: 1 },
+      { id: "c3", count: 1, floors: 1, rooms: 201, previewLoaded: true, buildings: 0 },
     ]);
     expect(campuses[1].buildings[0]).toMatchObject({
       id: "b1",

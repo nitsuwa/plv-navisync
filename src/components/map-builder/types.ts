@@ -53,6 +53,8 @@ export interface FloorWall {
   zOrder?: number;
   visible?: boolean;
   locked?: boolean;
+  /** Presentation-only junction-cap override. */
+  junctionBlocks?: "auto" | "show" | "hide";
 }
 
 export type FloorRoomAnchorEdge = "top" | "right" | "bottom" | "left";
@@ -123,6 +125,9 @@ export interface FloorFurniture {
   width: number;
   height: number;
   rotation: number;
+  /** Optional visual mirror state. Legacy furniture defaults to unflipped. */
+  flipX?: boolean;
+  flipY?: boolean;
   color: string;
   /** Optional visual asset identity. Legacy records continue to use `type`. */
   assetKey?: string;
@@ -411,6 +416,9 @@ export interface FloorRoom {
   /** Optional custom Room fill color; absent values continue using room type palette. */
   color?: string;
   rotation?: number;
+  /** Optional world-space polygon used only for intentionally non-rectangular
+   * visual Room authoring. Legacy Rooms omit this field and remain rectangles. */
+  shapePoints?: Array<{ x: number; y: number }>;
   zOrder?: number;
   visible?: boolean;
   locked?: boolean;
@@ -447,6 +455,8 @@ export interface FloorPlan {
   /** Editable floor-canvas dimensions in authoring units. */
   canvasW?: number;
   canvasH?: number;
+  /** Rectangular additions to the usable Floor outline, attached directly to the base canvas edge. */
+  extensions?: FloorExtension[];
   /** Floor surface background color (appearance). Defaults to the warm canvas tone. */
   backgroundColor?: string;
   /** Optional canonical indoor ground appearance. Legacy floors use the
@@ -454,6 +464,8 @@ export interface FloorPlan {
   appearance?: FloorAppearance;
   /** Whether the canvas grid lines are visible (persistent appearance preference). */
   showGrid?: boolean;
+  /** Whether visual wall-junction blocks are shown by default on this Floor. */
+  showWallJunctions?: boolean;
   /** Visual and snap grid spacing in floor authoring units. */
   gridSize?: 10 | 20 | 40;
   backgroundImage?: FloorPlanBackground;
@@ -472,6 +484,19 @@ export interface FloorPlan {
   exteriorZones?: FloorExteriorZone[];
   entranceSteps?: FloorEntranceSteps[];
   entranceRamps?: FloorEntranceRamp[];
+}
+
+export type FloorExtensionSide = "top" | "bottom" | "left" | "right";
+
+export interface FloorExtension {
+  id: string;
+  side: FloorExtensionSide;
+  /** Distance from the start of the selected base edge. */
+  offset: number;
+  /** Span along the selected edge (vertical span for left/right). */
+  width: number;
+  /** Distance extending out from the selected base edge. */
+  depth: number;
 }
 
 export interface FloorPath {
@@ -603,9 +628,11 @@ export interface RoomResizeState {
 export interface FloorUndoEntry {
   canvasW?: number;
   canvasH?: number;
+  extensions?: FloorExtension[];
   backgroundColor?: string;
   appearance?: FloorAppearance;
   showGrid?: boolean;
+  showWallJunctions?: boolean;
   gridSize?: 10 | 20 | 40;
   backgroundImage?: FloorPlanBackground;
   calibration?: FloorScaleCalibration;
@@ -1083,6 +1110,10 @@ export interface FurnitureItemTemplate {
   width: number;
   height: number;
   color: string;
+  /** False for fixed-color symbols whose SVG intentionally ignores `color`. */
+  colorEditable?: boolean;
+  /** Registry-only placement classification for a cross-listed canonical item. */
+  placementCategoryId?: string;
   /**
    * Controls prominence in the placement palette only.  This is registry
    * metadata, not part of a persisted FloorFurniture record: advanced items

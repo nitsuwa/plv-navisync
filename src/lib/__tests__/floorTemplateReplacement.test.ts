@@ -34,8 +34,10 @@ describe("Floor template replacement safety", () => {
     expect(result.floor.exteriorZones?.map((zone) => zone.id)).toEqual(["veranda-1"]);
     expect(result.floor.furniture.map((item) => item.id)).toEqual(["veranda-chair"]);
     expect(result.floor.stairs.map((stair) => stair.id)).toEqual(["stair-occurrence"]);
-    expect(result.retainedNavNodes.map((node) => node.id)).toEqual(["entry-node"]);
-    expect(result.retainedNavEdges.map((edge) => edge.id)).toEqual(["bridge"]);
+    expect(result.retainedNavNodes).toEqual(nodes);
+    expect(result.retainedNavEdges).toEqual(edges);
+    expect(nodes.map((node) => node.id)).toEqual(["entry-node", "free-node", "outdoor"]);
+    expect(edges.map((edge) => edge.id)).toEqual(["bridge", "stale"]);
   });
 
   it("counts only indoor content in the replacement summary", () => {

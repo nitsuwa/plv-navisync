@@ -12,7 +12,8 @@ import { CampusGateVisual } from "./CampusGateVisual";
 import { ContextMenu } from "./ContextMenu";
 import { FloorActionsMenu } from "./FloorActionsMenu";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
-import { duplicateFloorForBuilding, normalizeFloor } from "../../lib/floorPlanNormalization";
+import { duplicateBuildingForCampus } from "../../lib/buildingDuplication";
+import { collectIdentityIds } from "../../lib/physicalFloorIntegrity";
 import { nextBuildingCopyIdentity, type BuildingIdentity } from "../../lib/buildingDefaults";
 import { replaceBuildingFloorsAndReconcileTransitions } from "../../lib/indoorNavigationGraph";
 import {
@@ -181,10 +182,21 @@ export function HierarchyPanel({
   const duplicateFloor = (buildingId: string, floorId: string) => {
     const b = buildings.find((x) => x.id === buildingId);
     if (!b) return;
-    pushHistory();
-    const { floors, copy } = duplicateFloorInBuilding(b.floors, buildingId, floorId);
+    const { floors, copy, copiedNavNodes = [], copiedNavEdges = [] } = duplicateFloorInBuilding(
+      b.floors, buildingId, floorId, campus.navNodes ?? [], campus.navEdges ?? []
+    );
     if (!copy) return;
-    replaceBuildingFloors(buildingId, floors);
+    pushHistory();
+    // As in the Floor Editor, floor duplication is an append-only graph change.
+    // Skip stair/cross-floor reconciliation here so every preexisting node and
+    // edge remains byte-for-byte unchanged.
+    onUpdate({
+      buildings: campus.buildings.map((building) => building.id === buildingId
+        ? { ...building, floors }
+        : building),
+      navNodes: [...(campus.navNodes ?? []), ...copiedNavNodes],
+      navEdges: [...(campus.navEdges ?? []), ...copiedNavEdges],
+    });
     toast.success("Floor Duplicated", `"${copy.label}" has been copied.`);
   };
 
@@ -253,30 +265,28 @@ export function HierarchyPanel({
   const duplicateBuilding = (id: string) => {
     const b = buildings.find((x) => x.id === id);
     if (!b) return;
-    pushHistory();
     const nbId = genId("bld");
     const identity = nextBuildingCopyIdentity(b, buildings, buildingIdentityReservations, nbId);
-    onReserveBuildingIdentity?.(identity);
-    const nb: CampusBuilding = {
-      ...structuredClone(b),
-      id: nbId,
-      name: identity.name,
-      code: identity.code,
-      x: b.x + 25,
-      y: b.y + 25,
-      floors: b.floors.map((f) => duplicateFloorForBuilding(f, {
-        id: genId("fl"),
-        buildingId: nbId,
-        number: f.number,
-        label: f.label,
-      })),
-    };
-    // Keep a final normalization pass for older building data that predates
-    // complete floor collections.
-    nb.floors = nb.floors.map((f) => normalizeFloor(f, { buildingId: nb.id }));
-    updBuildings([...buildings, nb]);
-    onSelect({ type: "building", id: nb.id });
-    toast.success("Building Duplicated", `${b.code} has been copied.`);
+    try {
+      const nb: CampusBuilding = duplicateBuildingForCampus(b, {
+        id: nbId,
+        name: identity.name,
+        code: identity.code,
+        x: b.x + 25,
+        y: b.y + 25,
+        idFactory: genId,
+        reservedIds: collectIdentityIds(buildings),
+      });
+      // Construct and validate the full copy before recording history or
+      // reserving its identity, so failure cannot leave a half-Building.
+      pushHistory();
+      onReserveBuildingIdentity?.(identity);
+      updBuildings([...buildings, nb]);
+      onSelect({ type: "building", id: nb.id });
+      toast.success("Building Duplicated", `${b.code} has been copied.`);
+    } catch (error) {
+      toast.error("Building Not Duplicated", error instanceof Error ? error.message : "The copied Building failed its integrity check.");
+    }
   };
 
   const confirmDeleteBuilding = (id: string) => {

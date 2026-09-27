@@ -2,8 +2,8 @@
  * Tests for FloorOverviewSidebar — Part D: Perimeter Wall exposure.
  */
 
-import { describe, it, expect } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { describe, it, expect, vi } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { FloorOverviewSidebar } from "../FloorOverviewSidebar";
 import type { FloorPlan } from "../types";
 
@@ -88,5 +88,22 @@ describe("Part D — FloorOverviewSidebar Perimeter Wall section", () => {
     render(<FloorOverviewSidebar floor={makeFloor({ appearance: { material: "neutral", texture: "none", color: "#e8e1d7" } })} {...baseProps} />);
     expect(screen.getByRole("button", { name: "Show Grid" })).not.toBeDisabled();
     expect(screen.getByRole("button", { name: "Floor grid 10" })).not.toBeDisabled();
+  });
+
+  it("exposes the visual wall-junction toggle without changing wall geometry", () => {
+    const onShowWallJunctions = vi.fn();
+    render(<FloorOverviewSidebar floor={makeFloor()} {...baseProps} onShowWallJunctions={onShowWallJunctions} />);
+
+    const toggle = screen.getByRole("button", { name: "Show wall junction blocks" });
+    expect(toggle).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(toggle);
+    expect(onShowWallJunctions).toHaveBeenCalledWith(false);
+  });
+
+  it("exposes Edit Floor Shape from the Floor Overview", () => {
+    const onEditFloorShape = vi.fn();
+    render(<FloorOverviewSidebar floor={makeFloor()} {...baseProps} onEditFloorShape={onEditFloorShape} />);
+    fireEvent.click(screen.getByRole("button", { name: "Edit Floor Shape" }));
+    expect(onEditFloorShape).toHaveBeenCalledOnce();
   });
 });

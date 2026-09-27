@@ -2,7 +2,7 @@ import { getSupabase } from "../lib/supabase";
 import type { Json, Tables, TablesInsert } from "../types/database.generated";
 import type { FloorPlan } from "../components/map-builder/types";
 import type { FloorTemplateDefinition } from "../lib/floorTemplates";
-import type { RoomTemplateDefinition, RoomTemplateCategory, TemplateSource } from "../lib/roomTemplates";
+import { roomFurnitureOnlyTemplate, type RoomTemplateDefinition, type TemplateSource } from "../lib/roomTemplates";
 import { sanitizeFloorForTemplate, sanitizeRoomForTemplate, templatePayloadContainsNavigation, validateTemplateName, type TemplateMetadataInput } from "../lib/templateSanitizer";
 
 export type MapTemplateRow = Tables<"map_templates">;
@@ -24,12 +24,11 @@ export interface CustomTemplateRecord {
   updatedAt: string;
 }
 
-/** Legacy Room-template adapter retained for reading old records only. The
- * active catalogue requests scope="floor" and never exposes this path. */
+/** Adapter for persisted Room Templates stored alongside Floor Templates. */
 export function customRoomTemplateDefinition(record: CustomTemplateRecord): RoomTemplateDefinition | null {
   if (record.scope !== "room" || record.templateData.scope !== "room") return null;
   return {
-    ...record.templateData,
+    ...roomFurnitureOnlyTemplate(record.templateData as RoomTemplateDefinition),
     id: `custom-room-${record.id}`,
     source: record.source,
     persistedId: record.id,
@@ -37,8 +36,8 @@ export function customRoomTemplateDefinition(record: CustomTemplateRecord): Room
     createdBy: record.createdBy,
     name: record.name,
     description: record.description,
-    category: record.category as RoomTemplateCategory,
-  } as RoomTemplateDefinition;
+    category: "Other",
+  };
 }
 
 export function customFloorTemplateDefinition(record: CustomTemplateRecord): FloorTemplateDefinition | null {
@@ -65,7 +64,9 @@ function rowToRecord(row: MapTemplateRow): CustomTemplateRecord | null {
   const data = asRecord(row.template_data);
   if (row.scope !== "room" && row.scope !== "floor") return null;
   if (typeof data.id !== "string" || data.scope !== row.scope) return null;
-  if (templatePayloadContainsNavigation(data)) return null;
+  // Legacy Room Template rows are allow-listed on adaptation so historical
+  // opening/navigation fields are ignored. Floor templates still reject nav.
+  if (row.scope === "floor" && templatePayloadContainsNavigation(data)) return null;
   return {
     id: row.id,
     name: row.name,
@@ -136,12 +137,10 @@ async function insertTemplate(input: {
   return record;
 }
 
-/** Legacy write adapter retained for backwards compatibility; the Floor Editor
- * no longer calls it after the Room Template UX was removed. */
 export async function saveRoomTemplate(params: {
   campusId: string;
   room: FloorPlan["rooms"][number];
-  floor: Pick<FloorPlan, "walls" | "furniture">;
+  floor: Pick<FloorPlan, "walls" | "furniture" | "doors" | "windows">;
   metadata: TemplateMetadataInput;
 }): Promise<CustomTemplateRecord> {
   const definition = sanitizeRoomForTemplate(params.room, params.floor, params.metadata, params.campusId);

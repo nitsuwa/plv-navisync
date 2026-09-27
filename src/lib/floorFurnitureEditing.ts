@@ -1,9 +1,10 @@
 import type { FloorFurniture } from "../components/map-builder/types";
 import { rotatedRectBounds } from "./floorGeometry";
+import { reorderFloorLayerItems, type FloorLayerAction } from "./floorRenderLayers";
 
 export type FurnitureAlignment = "left" | "center-x" | "right" | "top" | "center-y" | "bottom";
 export type FurnitureDistributionAxis = "horizontal" | "vertical";
-export type FurnitureLayerAction = "send-back" | "send-backward" | "bring-forward" | "bring-front";
+export type FurnitureLayerAction = FloorLayerAction;
 
 export interface FurnitureBounds {
   x: number;
@@ -18,6 +19,13 @@ export interface EqualSpacingCandidate {
   gap: number;
   position: number;
   referenceIds: [string, string];
+}
+
+export const FURNITURE_DUPLICATE_OFFSET = 16;
+
+export interface FurnitureDuplicateOffset {
+  dx: number;
+  dy: number;
 }
 
 /** Visible, rotation-aware bounds used by all furniture-only editor commands. */
@@ -121,6 +129,83 @@ export function furnitureGroupId(items: FloorFurniture[]): string | null {
   return ids.length === 1 && items.every((item) => item.groupId === ids[0]) ? ids[0] : null;
 }
 
+/**
+ * Pick a nearby canvas-unit offset for a Furniture duplicate. Candidate order
+ * is deliberate and stable so repeated Ctrl+D never depends on randomness,
+ * screen zoom, or a Floor-wide empty-space search.
+ */
+export function findNearbyDuplicatePosition(
+  sourceItems: readonly FloorFurniture[],
+  existingItems: readonly FloorFurniture[],
+  canvasW: number,
+  canvasH: number,
+  canPlace?: (candidate: FloorFurniture, source: FloorFurniture) => boolean,
+): FurnitureDuplicateOffset | null {
+  if (sourceItems.length === 0) return null;
+  const offset = FURNITURE_DUPLICATE_OFFSET;
+  const candidates: FurnitureDuplicateOffset[] = [
+    { dx: offset, dy: offset },
+    { dx: offset, dy: -offset },
+    { dx: -offset, dy: offset },
+    { dx: -offset, dy: -offset },
+    { dx: offset, dy: 0 },
+    { dx: 0, dy: offset },
+    { dx: -offset, dy: 0 },
+    { dx: 0, dy: -offset },
+  ];
+  const sourceIds = new Set(sourceItems.map((item) => item.id));
+  const occupied = existingItems.filter((item) => !sourceIds.has(item.id) && item.visible !== false);
+  const overlaps = (a: FurnitureBounds, b: FurnitureBounds) =>
+    a.x < b.x + b.w - 0.01 && a.x + a.w > b.x + 0.01
+      && a.y < b.y + b.h - 0.01 && a.y + a.h > b.y + 0.01;
+
+  return candidates.find(({ dx, dy }) => sourceItems.every((source) => {
+    const candidate = { ...source, x: source.x + dx, y: source.y + dy };
+    const bounds = furnitureVisibleBounds(candidate);
+    const validPlacement = canPlace
+      ? canPlace(candidate, source)
+      : bounds.x >= -0.5 && bounds.y >= -0.5
+        && bounds.x + bounds.w <= canvasW + 0.5
+        && bounds.y + bounds.h <= canvasH + 0.5;
+    return validPlacement && occupied.every((item) => !overlaps(bounds, furnitureVisibleBounds(item)));
+  })) ?? null;
+}
+
+/** Reindex copies directly above their sources while preserving the other local order. */
+export function placeFurnitureCopiesAboveSources(
+  items: readonly FloorFurniture[],
+  copies: readonly { sourceId: string; copyId: string }[],
+): FloorFurniture[] {
+  if (copies.length === 0) return items as FloorFurniture[];
+  const copyIdsBySource = new Map<string, string[]>();
+  for (const { sourceId, copyId } of copies) {
+    const ids = copyIdsBySource.get(sourceId) ?? [];
+    ids.push(copyId);
+    copyIdsBySource.set(sourceId, ids);
+  }
+  const itemById = new Map(items.map((item) => [item.id, item]));
+  const ordered = items
+    .map((item, index) => ({ item, index }))
+    .sort((a, b) => (a.item.zOrder ?? 0) - (b.item.zOrder ?? 0) || a.index - b.index)
+    .map(({ item }) => item);
+  const result: FloorFurniture[] = [];
+  const included = new Set<string>();
+  for (const item of ordered) {
+    if (included.has(item.id)) continue;
+    result.push(item);
+    included.add(item.id);
+    for (const copyId of copyIdsBySource.get(item.id) ?? []) {
+      const copy = itemById.get(copyId);
+      if (copy && !included.has(copyId)) {
+        result.push(copy);
+        included.add(copyId);
+      }
+    }
+  }
+  for (const item of ordered) if (!included.has(item.id)) result.push(item);
+  return result.map((item, index) => item.zOrder === index ? item : { ...item, zOrder: index });
+}
+
 export function canGroupFurniture(items: FloorFurniture[]): boolean {
   return items.length >= 2 && items.every((item) => !item.locked);
 }
@@ -144,32 +229,5 @@ export function reorderFurnitureItems(
   selectedIds: Iterable<string>,
   action: FurnitureLayerAction,
 ): FloorFurniture[] {
-  if (items.length < 2) return items;
-  const selected = new Set(selectedIds);
-  if (selected.size === 0) return items;
-  const ordered = [...items].sort((a, b) => (a.zOrder ?? 0) - (b.zOrder ?? 0) || a.id.localeCompare(b.id));
-  const isSelected = (item: FloorFurniture) => selected.has(item.id);
-  let next: FloorFurniture[];
-  if (action === "send-back" || action === "bring-front") {
-    const chosen = ordered.filter(isSelected);
-    const rest = ordered.filter((item) => !isSelected(item));
-    next = action === "send-back" ? [...chosen, ...rest] : [...rest, ...chosen];
-  } else {
-    next = [...ordered];
-    if (action === "bring-forward") {
-      for (let i = next.length - 2; i >= 0; i -= 1) {
-        if (isSelected(next[i]) && !isSelected(next[i + 1])) [next[i], next[i + 1]] = [next[i + 1], next[i]];
-      }
-    } else {
-      for (let i = 1; i < next.length; i += 1) {
-        if (isSelected(next[i]) && !isSelected(next[i - 1])) [next[i], next[i - 1]] = [next[i - 1], next[i]];
-      }
-    }
-  }
-  const slots = ordered.map((item, index) => item.zOrder ?? index);
-  const zById = new Map(next.map((item, index) => [item.id, slots[index]]));
-  return items.map((item) => {
-    const zOrder = zById.get(item.id);
-    return zOrder === undefined || zOrder === item.zOrder ? item : { ...item, zOrder };
-  });
+  return reorderFloorLayerItems(items, selectedIds, action);
 }
