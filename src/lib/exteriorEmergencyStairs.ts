@@ -166,19 +166,26 @@ export function exteriorEmergencyStairRouteReadiness(
 }
 
 /**
- * A Building owns one physical exterior emergency stair.  Keep this boundary
- * in the synchronizer so hydrated/legacy records cannot re-expand into several
- * independent owners during occurrence or graph reconciliation.  The first
- * authored record is the stable canonical choice; malformed records without
- * an id are ignored when a valid record exists.
+ * Return the complete canonical collection of Building-owned exterior
+ * emergency stairs.  Older code used this helper as a single-owner boundary;
+ * retaining the helper name keeps all existing callers on the same canonical
+ * path while allowing every independently identified stair to reconcile.
+ * Records with duplicate IDs are collapsed defensively so a malformed payload
+ * cannot generate duplicate occurrences or graph anchors.
  */
 export function canonicalExteriorEmergencyStairsForBuilding(
   building: Pick<CampusBuilding, "exteriorEmergencyStairs">,
 ): ExteriorEmergencyStair[] {
   const authored = building.exteriorEmergencyStairs ?? [];
   if (authored.length === 0) return [];
-  const canonical = authored.find((stair) => typeof stair?.id === "string" && stair.id.trim()) ?? authored[0];
-  return canonical ? [canonical] : [];
+  const valid = authored.filter((stair) => typeof stair?.id === "string" && stair.id.trim());
+  const source = valid.length > 0 ? valid : authored.slice(0, 1);
+  const seen = new Set<string>();
+  return source.filter((stair) => {
+    if (seen.has(stair.id)) return false;
+    seen.add(stair.id);
+    return true;
+  });
 }
 
 /**
@@ -333,31 +340,60 @@ export function defaultExteriorEmergencyStairAttachment(
       : exteriorEmergencyStairVisualSpan(height, options.visualSize)) + 12;
     for (const rawOffset of offsets) {
       const offset = Math.round(Math.max(range.min, Math.min(range.max, rawOffset)) * 1000) / 1000;
-      const entranceBlocked = (building.entrances ?? []).some((entrance) => entrance.edge === edge
-        && exteriorEmergencyStairWallSpansOverlap(offset, candidateSpan, Number.isFinite(Number(entrance.offset)) ? Number(entrance.offset) : 0.5, 24, wallSpan, 4));
-      const floorDoorBlocked = (building.floors ?? []).some((floor) => (floor.doors ?? []).some((door) => {
-        const canvasW = Math.max(1, floor.canvasW ?? building.width);
-        const canvasH = Math.max(1, floor.canvasH ?? building.height);
-        const wall = door.wallId ? (floor.walls ?? []).find((candidate) => candidate.id === door.wallId) : undefined;
-        const wallEdge = wall
-          ? Math.abs(wall.x1 - wall.x2) < 1
-            ? (wall.x1 <= 8 ? "left" : wall.x1 >= canvasW - 8 ? "right" : null)
-            : (wall.y1 <= 8 ? "top" : wall.y1 >= canvasH - 8 ? "bottom" : null)
-          : door.x <= 8 ? "left" : door.x >= canvasW - 8 ? "right" : door.y <= 8 ? "top" : door.y >= canvasH - 8 ? "bottom" : null;
-        if (wallEdge !== edge) return false;
-        const doorOffset = edge === "top" || edge === "bottom" ? door.x / canvasW : door.y / canvasH;
-        const floorSpan = edge === "top" || edge === "bottom" ? canvasW : canvasH;
-        return exteriorEmergencyStairWallSpansOverlap(offset, candidateSpan, doorOffset, Math.max(12, door.width ?? 12), floorSpan, 4);
-      }));
-      const stairBlocked = canonicalExteriorEmergencyStairsForBuilding(building).some((stair) => stair.attachment.edge === edge
-        && exteriorEmergencyStairWallSpansOverlap(offset, candidateSpan, Number.isFinite(Number(stair.attachment.offset)) ? Number(stair.attachment.offset) : 0.5,
-          (edge === "top" || edge === "bottom"
-            ? exteriorEmergencyStairVisualSpan(Math.max(18, stair.width || 28), stair.visualSize)
-            : exteriorEmergencyStairVisualSpan(Math.max(24, stair.height || 42), stair.visualSize)) + 12, wallSpan, 4));
-      if (!entranceBlocked && !floorDoorBlocked && !stairBlocked) return { edge, offset };
+      if (exteriorEmergencyStairAttachmentIsAvailable(building, { edge, offset }, options)) return { edge, offset };
     }
   }
   return null;
+}
+
+/**
+ * Check a proposed perimeter attachment against the existing Building
+ * geometry. This is an editor-placement rule, not a fire-code calculation.
+ * `excludeStairId` lets an existing stair validate its own drag/resize without
+ * colliding with itself.
+ */
+export function exteriorEmergencyStairAttachmentIsAvailable(
+  building: Pick<CampusBuilding, "width" | "height" | "entrances" | "exteriorEmergencyStairs" | "floors">,
+  attachment: { edge: BuildingEntranceEdge; offset: number },
+  options: { width?: number; height?: number; visualSize?: ExteriorEmergencyStair["visualSize"] } = {},
+  excludeStairId?: string,
+): boolean {
+  const edge = attachment.edge;
+  const wallSpan = edge === "top" || edge === "bottom" ? building.width : building.height;
+  const baseWidth = Math.max(18, options.width ?? 28);
+  const baseHeight = Math.max(24, options.height ?? 42);
+  const visualAlong = edge === "top" || edge === "bottom"
+    ? exteriorEmergencyStairVisualSpan(baseWidth, options.visualSize)
+    : exteriorEmergencyStairVisualSpan(baseHeight, options.visualSize);
+  const candidateSpan = visualAlong + 12;
+  const offset = Number.isFinite(Number(attachment.offset)) ? Number(attachment.offset) : 0.5;
+
+  const entranceBlocked = (building.entrances ?? []).some((entrance) => entrance.edge === edge
+    && exteriorEmergencyStairWallSpansOverlap(offset, candidateSpan, Number.isFinite(Number(entrance.offset)) ? Number(entrance.offset) : 0.5, 24, wallSpan, 4));
+  if (entranceBlocked) return false;
+
+  const floorDoorBlocked = (building.floors ?? []).some((floor) => (floor.doors ?? []).some((door) => {
+    const canvasW = Math.max(1, floor.canvasW ?? building.width);
+    const canvasH = Math.max(1, floor.canvasH ?? building.height);
+    const wall = door.wallId ? (floor.walls ?? []).find((candidate) => candidate.id === door.wallId) : undefined;
+    const wallEdge = wall
+      ? Math.abs(wall.x1 - wall.x2) < 1
+        ? (wall.x1 <= 8 ? "left" : wall.x1 >= canvasW - 8 ? "right" : null)
+        : (wall.y1 <= 8 ? "top" : wall.y1 >= canvasH - 8 ? "bottom" : null)
+      : door.x <= 8 ? "left" : door.x >= canvasW - 8 ? "right" : door.y <= 8 ? "top" : door.y >= canvasH - 8 ? "bottom" : null;
+    if (wallEdge !== edge) return false;
+    const doorOffset = edge === "top" || edge === "bottom" ? door.x / canvasW : door.y / canvasH;
+    const floorSpan = edge === "top" || edge === "bottom" ? canvasW : canvasH;
+    return exteriorEmergencyStairWallSpansOverlap(offset, candidateSpan, doorOffset, Math.max(12, door.width ?? 12), floorSpan, 4);
+  }));
+  if (floorDoorBlocked) return false;
+
+  return !canonicalExteriorEmergencyStairsForBuilding(building).some((stair) => stair.id !== excludeStairId
+    && stair.attachment.edge === edge
+    && exteriorEmergencyStairWallSpansOverlap(offset, candidateSpan, Number.isFinite(Number(stair.attachment.offset)) ? Number(stair.attachment.offset) : 0.5,
+      (edge === "top" || edge === "bottom"
+        ? exteriorEmergencyStairVisualSpan(Math.max(18, stair.width || 28), stair.visualSize)
+        : exteriorEmergencyStairVisualSpan(Math.max(24, stair.height || 42), stair.visualSize)) + 12, wallSpan, 4));
 }
 
 function exteriorEmergencyStairVisualSpan(base: number, visualSize?: ExteriorEmergencyStair["visualSize"]): number {
@@ -496,14 +532,18 @@ export function syncExteriorEmergencyStairOccurrences(building: CampusBuilding):
     }
     return { ...floor, stairs: nextStairs };
   });
-  const nextExterior = exterior.map((stair) => ({
-    ...stair,
-    occurrenceIds: { ...(stair.occurrenceIds ?? {}), ...Object.fromEntries(
+  const nextExterior = exterior.map((stair) => {
+    const servedFloorIds = new Set(stair.servedFloorIds);
+    const retainedOccurrenceIds = Object.fromEntries(
+      Object.entries(stair.occurrenceIds ?? {}).filter(([floorId]) => servedFloorIds.has(floorId)),
+    );
+    const canonicalOccurrenceIds = Object.fromEntries(
       Object.entries(occurrenceIds)
         .filter(([key]) => key.startsWith(`${stair.id}:`))
         .map(([key, id]) => [key.slice(stair.id.length + 1), id]),
-    ) },
-  }));
+    );
+    return { ...stair, occurrenceIds: { ...retainedOccurrenceIds, ...canonicalOccurrenceIds } };
+  });
   return { ...building, floors, exteriorEmergencyStairs: nextExterior };
 }
 
@@ -512,8 +552,48 @@ export function syncExteriorEmergencyStairs(campus: Campus): Campus {
   return { ...campus, buildings: campus.buildings.map(syncExteriorEmergencyStairOccurrences) };
 }
 
+/**
+ * Forget restored local-path snapshots after an explicit Floor-editor delete.
+ * Snapshots are a temporary backup for unserved Floor occurrences, not a
+ * second source of truth once a Floor is active again.
+ */
+export function removeExteriorEmergencyStairConnectionSnapshots(
+  campus: Campus,
+  buildingId: string,
+  floorId: string,
+  edgeIds: ReadonlySet<string>,
+): Campus {
+  if (edgeIds.size === 0) return campus;
+  let changed = false;
+  const buildings = campus.buildings.map((building) => {
+    if (building.id !== buildingId) return building;
+    let stairChanged = false;
+    const exteriorEmergencyStairs = (building.exteriorEmergencyStairs ?? []).map((stair) => {
+      const snapshot = stair.floorConnectionSnapshots?.[floorId];
+      if (!snapshot?.some((edge) => edgeIds.has(edge.id))) return stair;
+      const floorConnectionSnapshots = { ...stair.floorConnectionSnapshots };
+      const retained = snapshot.filter((edge) => !edgeIds.has(edge.id));
+      if (retained.length > 0) floorConnectionSnapshots[floorId] = retained;
+      else delete floorConnectionSnapshots[floorId];
+      stairChanged = true;
+      changed = true;
+      return {
+        ...stair,
+        floorConnectionSnapshots: Object.keys(floorConnectionSnapshots).length > 0
+          ? floorConnectionSnapshots
+          : undefined,
+      };
+    });
+    return stairChanged ? { ...building, exteriorEmergencyStairs } : building;
+  });
+  return changed ? { ...campus, buildings } : campus;
+}
+
 /** Ensure canonical local nodes and one outdoor discharge bridge for each stair. */
-export function syncExteriorEmergencyStairGraph(campus: Campus): Campus {
+export function syncExteriorEmergencyStairGraph(
+  campus: Campus,
+  options: { reconcileOrdinaryFloorTransitions?: boolean } = {},
+): Campus {
   const synced = syncExteriorEmergencyStairs(campus);
   // Before removing an unserved generated landing, retain its authored local
   // Walking Network edges on the canonical Building owner.  The snapshots are
@@ -776,14 +856,22 @@ export function syncExteriorEmergencyStairGraph(campus: Campus): Campus {
           edgeIds.add(snapshot.id);
           edgePairs.add(pair);
         }
+        // A served Floor's live graph is authoritative. Consuming its backup
+        // prevents a later manual path deletion from being undone by another
+        // reconciliation pass. If the Floor is unserved again, its current
+        // authored connections are snapshotted afresh above.
+        delete snapshots[floor.id];
+        changed = true;
       }
       if (!changed) return stair;
       return Object.keys(snapshots).length > 0 ? { ...stair, floorConnectionSnapshots: snapshots } : { ...stair, floorConnectionSnapshots: undefined };
     });
     return { ...building, exteriorEmergencyStairs };
   });
-  for (const building of synced.buildings) {
-    edges = reconcileCrossFloorTransitions(nodes, edges, building.floors, building.id);
+  if (options.reconcileOrdinaryFloorTransitions !== false) {
+    for (const building of synced.buildings) {
+      edges = reconcileCrossFloorTransitions(nodes, edges, building.floors, building.id);
+    }
   }
   return { ...synced, navNodes: nodes, navEdges: edges };
 }

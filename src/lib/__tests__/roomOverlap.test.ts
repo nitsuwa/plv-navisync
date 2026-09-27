@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { roomsOverlap, findOverlappingRoom, snapRoomToNearbyEdges, computeRoomAlignmentGuides, computeAlignmentGuides, computeResizeAlignmentGuides, computeResizeLimits, snapResizeEdges, resolveStableAlignmentAxis, screenSpaceAlignmentThreshold } from "../roomOverlap";
+import { classifyRoomOverlap, findContainedRoomOutsideResizedParent, findNearbyRoomDuplicateOffset, resolveRoomAtPoint, roomsOverlap, findOverlappingRoom, snapRoomToNearbyEdges, computeRoomAlignmentGuides, computeAlignmentGuides, computeResizeAlignmentGuides, computeResizeLimits, snapResizeEdges, resolveStableAlignmentAxis, screenSpaceAlignmentThreshold, computeRoomCenterAlignment, relevantRoomForBounds } from "../roomOverlap";
 import type { FloorRoom } from "../../components/map-builder/types";
 
 function makeRoom(overrides: Partial<FloorRoom> = {}): FloorRoom {
@@ -57,10 +57,166 @@ describe("roomsOverlap", () => {
     expect(roomsOverlap(a, b)).toBe(true);
   });
 
+  it("detects a partial strip overlap when parallel Room edges share the same y span", () => {
+    const a = makeRoom({ id: "a", x: 80, y: 80, w: 240, h: 70 });
+    const b = makeRoom({ id: "b", x: 300, y: 80, w: 100, h: 70 });
+    expect(roomsOverlap(a, b)).toBe(true);
+  });
+
   it("returns false for rooms overlapping within tolerance (1 unit)", () => {
     const a = makeRoom({ x: 10, y: 10, w: 100, h: 80 });
     const b = makeRoom({ id: "r2", x: 109, y: 10, w: 100, h: 80 });
     expect(roomsOverlap(a, b)).toBe(false);
+  });
+
+  it("treats a coincident duplicate footprint as overlap rather than nested containment", () => {
+    const source = makeRoom({ id: "source", x: 100, y: 80, w: 120, h: 90 });
+    const copy = makeRoom({ id: "copy", x: 100, y: 80, w: 120, h: 90 });
+    expect(roomsOverlap(source, copy)).toBe(true);
+  });
+
+  it("allows a fully contained Room while keeping partial overlap invalid", () => {
+    const outer = makeRoom({ id: "library", x: 20, y: 20, w: 300, h: 200 });
+    const inner = makeRoom({ id: "journal", x: 80, y: 70, w: 90, h: 60 });
+    const partial = makeRoom({ id: "partial", x: 280, y: 70, w: 80, h: 70 });
+    expect(roomsOverlap(outer, inner)).toBe(false);
+    expect(findOverlappingRoom(inner, [outer])).toBeNull();
+    expect(roomsOverlap(outer, partial)).toBe(true);
+    expect(findOverlappingRoom(partial, [outer])).toBe(outer);
+  });
+
+  it("classifies containment, partial overlap, and clear space distinctly", () => {
+    const outer = makeRoom({ id: "library", x: 0, y: 0, w: 300, h: 300 });
+    const inner = makeRoom({ id: "collab", x: 80, y: 60, w: 80, h: 80 });
+    const partial = makeRoom({ id: "crossing", x: 290, y: 100, w: 60, h: 60 });
+    const separate = makeRoom({ id: "separate", x: 400, y: 400, w: 40, h: 40 });
+    expect(classifyRoomOverlap(outer, inner)).toBe("VALID_CONTAINMENT");
+    expect(classifyRoomOverlap(outer, partial)).toBe("INVALID_PARTIAL_OVERLAP");
+    expect(classifyRoomOverlap(outer, separate)).toBe("NO_OVERLAP");
+  });
+
+  it("allows a contained Room to share one or two parent walls", () => {
+    const outer = makeRoom({ id: "parent", x: 0, y: 0, w: 300, h: 300 });
+    const oneWall = makeRoom({ id: "one-wall", x: 220, y: 50, w: 80, h: 100 });
+    const twoWalls = makeRoom({ id: "two-walls", x: 220, y: 220, w: 80, h: 80 });
+    expect(classifyRoomOverlap(outer, oneWall)).toBe("VALID_CONTAINMENT");
+    expect(classifyRoomOverlap(outer, twoWalls)).toBe("VALID_CONTAINMENT");
+  });
+
+  it("treats same and near-identical footprints as duplicate overlap, not containment", () => {
+    const outer = makeRoom({ id: "source", x: 100, y: 80, w: 300, h: 300 });
+    const exact = makeRoom({ id: "exact", x: 100, y: 80, w: 300, h: 300 });
+    const near = makeRoom({ id: "near", x: 101, y: 80, w: 298, h: 299 });
+    expect(classifyRoomOverlap(outer, exact)).toBe("INVALID_DUPLICATE_OVERLAP");
+    expect(classifyRoomOverlap(outer, near)).toBe("INVALID_DUPLICATE_OVERLAP");
+    expect(roomsOverlap(outer, near)).toBe(true);
+  });
+
+  it("allows multiple independent children but rejects overlap between children", () => {
+    const parent = makeRoom({ id: "parent", x: 0, y: 0, w: 300, h: 300 });
+    const childA = makeRoom({ id: "child-a", x: 30, y: 40, w: 80, h: 80 });
+    const childB = makeRoom({ id: "child-b", x: 160, y: 40, w: 80, h: 80 });
+    const overlappingChild = makeRoom({ id: "child-c", x: 90, y: 70, w: 80, h: 80 });
+    expect(classifyRoomOverlap(parent, childA)).toBe("VALID_CONTAINMENT");
+    expect(classifyRoomOverlap(parent, childB)).toBe("VALID_CONTAINMENT");
+    expect(classifyRoomOverlap(childA, childB)).toBe("NO_OVERLAP");
+    expect(classifyRoomOverlap(childA, overlappingChild)).toBe("INVALID_PARTIAL_OVERLAP");
+  });
+
+  it("uses custom polygon boundaries for containment and partial overlap", () => {
+    const outer = makeRoom({
+      id: "custom-library", x: 20, y: 20, w: 300, h: 220,
+      shapePoints: [{ x: 20, y: 60 }, { x: 240, y: 20 }, { x: 320, y: 240 }, { x: 20, y: 240 }],
+    });
+    const inner = makeRoom({ id: "inside", x: 80, y: 90, w: 70, h: 55 });
+    const outsideInBounds = makeRoom({ id: "outside-polygon", x: 260, y: 25, w: 25, h: 20 });
+    const crossing = makeRoom({ id: "crossing", x: 210, y: 75, w: 80, h: 60 });
+    expect(roomsOverlap(outer, inner)).toBe(false);
+    expect(roomsOverlap(outer, outsideInBounds)).toBe(false);
+    expect(roomsOverlap(outer, crossing)).toBe(true);
+    expect(classifyRoomOverlap(outer, inner)).toBe("VALID_CONTAINMENT");
+    expect(classifyRoomOverlap(outer, crossing)).toBe("INVALID_PARTIAL_OVERLAP");
+  });
+});
+
+describe("findContainedRoomOutsideResizedParent", () => {
+  it("blocks shrinking a parent so an existing child would be left outside", () => {
+    const original = makeRoom({ id: "parent", x: 0, y: 0, w: 300, h: 300 });
+    const child = makeRoom({ id: "child", x: 220, y: 80, w: 60, h: 60 });
+    const resized = { ...original, w: 250 };
+    expect(findContainedRoomOutsideResizedParent(original, resized, [child])).toBe(child);
+  });
+
+  it("does not block parent resizing while all children remain contained", () => {
+    const original = makeRoom({ id: "parent", x: 0, y: 0, w: 300, h: 300 });
+    const child = makeRoom({ id: "child", x: 80, y: 80, w: 60, h: 60 });
+    const resized = { ...original, w: 250 };
+    expect(findContainedRoomOutsideResizedParent(original, resized, [child])).toBeNull();
+  });
+});
+
+describe("resolveRoomAtPoint", () => {
+  it("chooses the deepest nested Room regardless of parent z-order, while preserving parent-only clicks", () => {
+    const parent = makeRoom({ id: "library", x: 0, y: 0, w: 300, h: 300, zOrder: 100 });
+    const childA = makeRoom({ id: "a", x: 30, y: 30, w: 100, h: 100, zOrder: 0 });
+    const childB = makeRoom({ id: "b", x: 170, y: 30, w: 100, h: 100, zOrder: 0 });
+    const grandchild = makeRoom({ id: "a-inner", x: 55, y: 55, w: 25, h: 25, zOrder: -5 });
+    const rooms = [parent, childA, childB, grandchild];
+    expect(resolveRoomAtPoint(rooms, { x: 60, y: 60 })?.id).toBe("a-inner");
+    expect(resolveRoomAtPoint(rooms, { x: 40, y: 40 })?.id).toBe("a");
+    expect(resolveRoomAtPoint(rooms, { x: 190, y: 50 })?.id).toBe("b");
+    expect(resolveRoomAtPoint(rooms, { x: 10, y: 10 })?.id).toBe("library");
+  });
+
+  it("uses selected then frontmost z-order for coincident duplicates and partial-overlap peers", () => {
+    const parent = makeRoom({ id: "parent", x: 0, y: 0, w: 300, h: 300 });
+    const low = makeRoom({ id: "low", x: 50, y: 50, w: 100, h: 80, zOrder: 1 });
+    const high = makeRoom({ id: "high", x: 50, y: 50, w: 100, h: 80, zOrder: 2 });
+    const exactRooms = [parent, low, high];
+    expect(resolveRoomAtPoint(exactRooms, { x: 70, y: 70 }, "low")?.id).toBe("low");
+    expect(resolveRoomAtPoint(exactRooms, { x: 70, y: 70 })?.id).toBe("high");
+
+    const overlapA = makeRoom({ id: "overlap-a", x: 20, y: 20, w: 100, h: 80, zOrder: 1 });
+    const overlapB = makeRoom({ id: "overlap-b", x: 80, y: 20, w: 100, h: 80, zOrder: 3 });
+    expect(resolveRoomAtPoint([overlapA, overlapB], { x: 90, y: 30 })?.id).toBe("overlap-b");
+    expect(resolveRoomAtPoint([overlapA, overlapB], { x: 90, y: 30 }, "overlap-a")?.id).toBe("overlap-a");
+  });
+
+  it("ignores hidden Rooms and tests actual rotated and custom polygon outlines", () => {
+    const parent = makeRoom({ id: "parent", x: 0, y: 0, w: 300, h: 300 });
+    const hidden = makeRoom({ id: "hidden", x: 40, y: 40, w: 100, h: 100, visible: false });
+    expect(resolveRoomAtPoint([parent, hidden], { x: 60, y: 60 })?.id).toBe("parent");
+
+    const rotated = makeRoom({ id: "rotated", x: 100, y: 100, w: 100, h: 40, rotation: 45 });
+    expect(resolveRoomAtPoint([parent, rotated], { x: 150, y: 120 })?.id).toBe("rotated");
+    expect(resolveRoomAtPoint([parent, rotated], { x: 100, y: 120 })?.id).toBe("parent");
+
+    const custom = makeRoom({
+      id: "custom",
+      x: 100,
+      y: 100,
+      w: 100,
+      h: 100,
+      shapePoints: [{ x: 100, y: 100 }, { x: 200, y: 100 }, { x: 100, y: 200 }],
+    });
+    expect(resolveRoomAtPoint([parent, custom], { x: 120, y: 120 })?.id).toBe("custom");
+    expect(resolveRoomAtPoint([parent, custom], { x: 180, y: 180 })?.id).toBe("parent");
+  });
+});
+
+describe("findNearbyRoomDuplicateOffset", () => {
+  it("chooses a deterministic nearby edge-adjacent position when available", () => {
+    const source = makeRoom({ id: "source", x: 20, y: 20, w: 100, h: 80 });
+    expect(findNearbyRoomDuplicateOffset(source, [], 500, 400)).toEqual({ dx: 0, dy: 80 });
+    expect(findNearbyRoomDuplicateOffset(source, [], 500, 400)).toEqual({ dx: 0, dy: 80 });
+  });
+
+  it("uses the custom polygon footprint when choosing a copy position", () => {
+    const source = makeRoom({
+      id: "custom-source", x: 20, y: 20, w: 100, h: 80,
+      shapePoints: [{ x: 20, y: 35 }, { x: 100, y: 20 }, { x: 120, y: 90 }, { x: 35, y: 100 }],
+    });
+    expect(findNearbyRoomDuplicateOffset(source, [], 500, 400)).toEqual({ dx: 0, dy: 80 });
   });
 });
 
@@ -242,6 +398,26 @@ describe("computeRoomAlignmentGuides", () => {
     const result = computeRoomAlignmentGuides(candidate, [refRoom], false);
     expect(result.snappedW).toBeUndefined();
     expect(result.snappedH).toBeUndefined();
+  });
+});
+
+describe("contextual Room center alignment", () => {
+  it("snaps an object to the exact horizontal and vertical Room axes", () => {
+    const room = makeRoom({ id: "study", x: 100, y: 80, w: 300, h: 220 });
+    const candidate = { x: 242, y: 182, w: 20, h: 16 };
+    const result = computeRoomCenterAlignment(candidate, room, 8);
+    expect(result.snappedX).toBe(240);
+    expect(result.snappedY).toBe(182);
+    expect(result.xGuide?.pos).toBe(250);
+    expect(result.yGuide?.pos).toBe(190);
+  });
+
+  it("chooses the containing or immediately approached Room only", () => {
+    const room = makeRoom({ id: "r1", x: 100, y: 100, w: 200, h: 160 });
+    const other = makeRoom({ id: "r2", x: 500, y: 100, w: 200, h: 160 });
+    expect(relevantRoomForBounds({ x: 150, y: 140, w: 20, h: 20 }, [room, other])?.id).toBe("r1");
+    expect(relevantRoomForBounds({ x: 476, y: 140, w: 20, h: 20 }, [room, other], undefined, 8)?.id).toBe("r2");
+    expect(relevantRoomForBounds({ x: 340, y: 140, w: 20, h: 20 }, [room, other], undefined, 8)).toBeNull();
   });
 });
 

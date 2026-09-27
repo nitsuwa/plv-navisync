@@ -14,9 +14,9 @@ import {
   linkEntranceToIndoorDoor,
   removeEntranceOutdoorConnection,
   reconcileEntranceTransitions,
+  reconcileEntranceDoors,
   removeEntranceIndoorConnection,
   reconcileEntranceOutdoorConnections,
-  reconcileEntranceDoors,
   entranceDoorPosition,
 } from "../entranceTransitions";
 
@@ -104,6 +104,42 @@ describe("B5 Phase 4 - entrance transition graph", () => {
     const twice = reconcileEntranceDoors(reconciled, idsForTest);
     expect(twice.buildings[0].floors[0].doors.filter((door) => door.buildingEntranceId === "ent-main")).toHaveLength(1);
     expect(entranceDoorPosition(floor, campus.buildings[0].entrances![0])).toEqual({ x: 300, y: 450 });
+  });
+
+  it("defaults generated Entrance openings to Door and preserves Open Passage style across reload reconciliation", () => {
+    const campus = makeCampus();
+    campus.buildings[0].entrances![0].direction = "exit_only";
+    const reconciled = reconcileEntranceDoors(campus, (prefix) => `${prefix}-stable`);
+    const originalDoor = reconciled.buildings[0].floors[0].doors.find((candidate) => candidate.buildingEntranceId === "ent-main")!;
+    expect(originalDoor.openingType).toBeUndefined(); // Legacy/omitted style is Door.
+
+    const styledCampus: Campus = {
+      ...reconciled,
+      buildings: reconciled.buildings.map((building) => building.id !== "b1" ? building : {
+        ...building,
+        floors: building.floors.map((floor) => floor.id !== "f1" ? floor : {
+          ...floor,
+          doors: floor.doors.map((candidate) => candidate.id === originalDoor.id
+            ? { ...candidate, openingType: "open_passage" as const, accessDirection: "exit_only" as const }
+            : candidate),
+        }),
+      }),
+    };
+    const beforeNodes = structuredClone(styledCampus.navNodes);
+    const beforeEdges = structuredClone(styledCampus.navEdges);
+    const savedAndReloaded = JSON.parse(JSON.stringify(styledCampus)) as Campus;
+    const afterReload = reconcileEntranceDoors(savedAndReloaded, (prefix) => `${prefix}-reload`);
+    const restoredDoor = afterReload.buildings[0].floors[0].doors.find((candidate) => candidate.buildingEntranceId === "ent-main")!;
+
+    expect(restoredDoor).toMatchObject({
+      id: originalDoor.id,
+      buildingEntranceId: "ent-main",
+      openingType: "open_passage",
+      accessDirection: "exit_only",
+    });
+    expect(afterReload.buildings[0].entrances![0].direction).toBe("exit_only");
+    expect(afterReload.navNodes).toEqual(beforeNodes);
+    expect(afterReload.navEdges).toEqual(beforeEdges);
   });
 
   it("gives multiple generated entrance doors distinct identifiable labels", () => {

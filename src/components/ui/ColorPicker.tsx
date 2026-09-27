@@ -4,7 +4,7 @@ import { cn } from "../../lib/utils";
 
 // ── Color utility functions ─────────────────────────────────────────────────
 
-function hexToHsl(hex: string): { h: number; s: number; l: number } {
+function hexToHsv(hex: string): { h: number; s: number; v: number } {
   let r = 0, g = 0, b = 0;
   const h = hex.replace("#", "");
   if (h.length === 3) {
@@ -18,28 +18,36 @@ function hexToHsl(hex: string): { h: number; s: number; l: number } {
   }
   r /= 255; g /= 255; b /= 255;
   const max = Math.max(r, g, b), min = Math.min(r, g, b);
-  let hVal = 0, s = 0, l = (max + min) / 2;
+  let hVal = 0, s = max === 0 ? 0 : (max - min) / max;
   if (max !== min) {
     const d = max - min;
-    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
     switch (max) {
       case r: hVal = ((g - b) / d + (g < b ? 6 : 0)) / 6; break;
       case g: hVal = ((b - r) / d + 2) / 6; break;
       case b: hVal = ((r - g) / d + 4) / 6; break;
     }
   }
-  return { h: Math.round(hVal * 360), s: Math.round(s * 100), l: Math.round(l * 100) };
+  return { h: Math.round(hVal * 360), s: Math.round(s * 100), v: Math.round(max * 100) };
 }
 
-function hslToHex(h: number, s: number, l: number): string {
-  s /= 100; l /= 100;
-  const a = s * Math.min(l, 1 - l);
-  const f = (n: number) => {
-    const k = (n + h / 30) % 12;
-    const color = l - a * Math.max(Math.min(k - 3, 9 - k, 1), -1);
-    return Math.round(255 * color).toString(16).padStart(2, "0");
-  };
-  return `#${f(0)}${f(8)}${f(4)}`;
+function hsvToHex(h: number, s: number, v: number): string {
+  const saturation = Math.max(0, Math.min(100, s)) / 100;
+  const value = Math.max(0, Math.min(100, v)) / 100;
+  const chroma = value * saturation;
+  const hueSector = (((h % 360) + 360) % 360) / 60;
+  const x = chroma * (1 - Math.abs((hueSector % 2) - 1));
+  const match = value - chroma;
+
+  let red = 0, green = 0, blue = 0;
+  if (hueSector < 1) [red, green, blue] = [chroma, x, 0];
+  else if (hueSector < 2) [red, green, blue] = [x, chroma, 0];
+  else if (hueSector < 3) [red, green, blue] = [0, chroma, x];
+  else if (hueSector < 4) [red, green, blue] = [0, x, chroma];
+  else if (hueSector < 5) [red, green, blue] = [x, 0, chroma];
+  else [red, green, blue] = [chroma, 0, x];
+
+  const toHex = (channel: number) => Math.round((channel + match) * 255).toString(16).padStart(2, "0");
+  return `#${toHex(red)}${toHex(green)}${toHex(blue)}`;
 }
 
 function hexIsValid(hex: string): boolean {
@@ -79,54 +87,86 @@ interface PopoverPosition {
 
 // ── Saturation-Lightness square ─────────────────────────────────────────────
 
-function SatLightSquare({
+function SatValueSquare({
   hue,
   sat,
-  light,
+  brightness,
   onChange,
 }: {
   hue: number;
   sat: number;
-  light: number;
-  onChange: (s: number, l: number) => void;
+  brightness: number;
+  onChange: (s: number, v: number) => void;
 }) {
   const squareRef = useRef<HTMLDivElement>(null);
-  const dragging = useRef(false);
+  const dragging = useRef<number | null>(null);
 
-  const updateFromMouse = useCallback((e: MouseEvent | React.MouseEvent) => {
+  const updateFromPointer = useCallback((e: PointerEvent | React.PointerEvent) => {
     const el = squareRef.current;
     if (!el) return;
     const rect = el.getBoundingClientRect();
+    if (
+      e.clientX < rect.left || e.clientX > rect.right ||
+      e.clientY < rect.top || e.clientY > rect.bottom
+    ) return;
     const x = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
     const y = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
     onChange(Math.round(x * 100), Math.round((1 - y) * 100));
   }, [onChange]);
 
-  useEffect(() => {
-    const handleMove = (e: MouseEvent) => {
-      if (!dragging.current) return;
-      updateFromMouse(e);
-    };
-    const handleUp = () => { dragging.current = false; };
-    window.addEventListener("mousemove", handleMove);
-    window.addEventListener("mouseup", handleUp);
-    return () => {
-      window.removeEventListener("mousemove", handleMove);
-      window.removeEventListener("mouseup", handleUp);
-    };
-  }, [updateFromMouse]);
+  const stopDragging = useCallback((pointerId?: number) => {
+    const activePointerId = dragging.current;
+    if (activePointerId === null || (pointerId !== undefined && pointerId !== activePointerId)) return;
 
-  const handleMouseDown = (e: React.MouseEvent) => {
-    dragging.current = true;
-    updateFromMouse(e);
+    dragging.current = null;
+    const el = squareRef.current;
+    if (el && typeof el.hasPointerCapture === "function" && el.hasPointerCapture(activePointerId)) {
+      el.releasePointerCapture(activePointerId);
+    }
+  }, []);
+
+  useEffect(() => {
+    const handleMove = (e: PointerEvent) => {
+      if (dragging.current !== e.pointerId) return;
+      updateFromPointer(e);
+    };
+
+    const handleUp = (e: PointerEvent) => stopDragging(e.pointerId);
+    const handleBlur = () => stopDragging();
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "hidden") stopDragging();
+    };
+
+    window.addEventListener("pointermove", handleMove);
+    window.addEventListener("pointerup", handleUp);
+    window.addEventListener("pointercancel", handleUp);
+    window.addEventListener("blur", handleBlur);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleUp);
+      window.removeEventListener("pointercancel", handleUp);
+      window.removeEventListener("blur", handleBlur);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [stopDragging, updateFromPointer]);
+
+  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.pointerType === "mouse" && e.button !== 0) return;
+    e.preventDefault();
+    dragging.current = e.pointerId;
+    if (typeof e.currentTarget.setPointerCapture === "function") {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    }
+    updateFromPointer(e);
   };
 
   // Marker position
   const mx = `${sat}%`;
-  const my = `${100 - light}%`;
+  const my = `${100 - brightness}%`;
 
   return (
-    <div className="relative w-full h-40 rounded-lg overflow-hidden cursor-crosshair select-none" ref={squareRef} onMouseDown={handleMouseDown}>
+    <div data-testid="color-picker-sat-light-square" className="relative w-full h-40 rounded-lg overflow-hidden cursor-crosshair select-none touch-none" ref={squareRef} onPointerDown={handlePointerDown}>
       {/* Base hue color */}
       <div className="absolute inset-0" style={{ backgroundColor: `hsl(${hue},100%,50%)` }} />
       {/* White gradient (left to right — desaturation) */}
@@ -152,39 +192,71 @@ function HueBar({
   onChange: (h: number) => void;
 }) {
   const barRef = useRef<HTMLDivElement>(null);
-  const dragging = useRef(false);
+  const dragging = useRef<number | null>(null);
 
-  const updateFromMouse = useCallback((e: MouseEvent | React.MouseEvent) => {
+  const updateFromPointer = useCallback((e: PointerEvent | React.PointerEvent) => {
     const el = barRef.current;
     if (!el) return;
     const rect = el.getBoundingClientRect();
+    if (
+      e.clientX < rect.left || e.clientX > rect.right ||
+      e.clientY < rect.top || e.clientY > rect.bottom
+    ) return;
     const x = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
     onChange(Math.round(x * 360));
   }, [onChange]);
 
-  useEffect(() => {
-    const handleMove = (e: MouseEvent) => {
-      if (!dragging.current) return;
-      updateFromMouse(e);
-    };
-    const handleUp = () => { dragging.current = false; };
-    window.addEventListener("mousemove", handleMove);
-    window.addEventListener("mouseup", handleUp);
-    return () => {
-      window.removeEventListener("mousemove", handleMove);
-      window.removeEventListener("mouseup", handleUp);
-    };
-  }, [updateFromMouse]);
+  const stopDragging = useCallback((pointerId?: number) => {
+    const activePointerId = dragging.current;
+    if (activePointerId === null || (pointerId !== undefined && pointerId !== activePointerId)) return;
 
-  const handleMouseDown = (e: React.MouseEvent) => {
-    dragging.current = true;
-    updateFromMouse(e);
+    dragging.current = null;
+    const el = barRef.current;
+    if (el && typeof el.hasPointerCapture === "function" && el.hasPointerCapture(activePointerId)) {
+      el.releasePointerCapture(activePointerId);
+    }
+  }, []);
+
+  useEffect(() => {
+    const handleMove = (e: PointerEvent) => {
+      if (dragging.current !== e.pointerId) return;
+      updateFromPointer(e);
+    };
+
+    const handleUp = (e: PointerEvent) => stopDragging(e.pointerId);
+    const handleBlur = () => stopDragging();
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "hidden") stopDragging();
+    };
+
+    window.addEventListener("pointermove", handleMove);
+    window.addEventListener("pointerup", handleUp);
+    window.addEventListener("pointercancel", handleUp);
+    window.addEventListener("blur", handleBlur);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleUp);
+      window.removeEventListener("pointercancel", handleUp);
+      window.removeEventListener("blur", handleBlur);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [stopDragging, updateFromPointer]);
+
+  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.pointerType === "mouse" && e.button !== 0) return;
+    e.preventDefault();
+    dragging.current = e.pointerId;
+    if (typeof e.currentTarget.setPointerCapture === "function") {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    }
+    updateFromPointer(e);
   };
 
   const thumbLeft = `${(hue / 360) * 100}%`;
 
   return (
-    <div className="relative w-full h-6 rounded-lg overflow-hidden cursor-ew-resize select-none" ref={barRef} onMouseDown={handleMouseDown}>
+    <div data-testid="color-picker-hue-bar" className="relative w-full h-6 rounded-lg overflow-hidden cursor-ew-resize select-none touch-none" ref={barRef} onPointerDown={handlePointerDown}>
       <div className="absolute inset-0 rounded-lg" style={{ background: `linear-gradient(to right, ${HUE_STOPS.join(", ")})` }} />
       {/* Stripe overlay for depth */}
       <div className="absolute inset-0 rounded-lg bg-gradient-to-b from-white/15 to-black/10" />
@@ -203,10 +275,10 @@ interface ColorPickerPanelProps {
   panelRef: React.RefObject<HTMLDivElement | null>;
   hue: number;
   sat: number;
-  light: number;
+  brightness: number;
   hexInput: string;
   value: string;
-  onSatLightChange: (s: number, l: number) => void;
+  onSatValueChange: (s: number, v: number) => void;
   onHueChange: (h: number) => void;
   onHexInputChange: (v: string) => void;
   onHexSubmit: () => void;
@@ -217,9 +289,9 @@ interface ColorPickerPanelProps {
 
 const ColorPickerPanel = memo(function ColorPickerPanel({
   panelRef,
-  hue, sat, light,
+  hue, sat, brightness,
   hexInput, value,
-  onSatLightChange, onHueChange,
+  onSatValueChange, onHueChange,
   onHexInputChange, onHexSubmit, onHexKeyDown,
   onQuickColor,
   style,
@@ -240,7 +312,7 @@ const ColorPickerPanel = memo(function ColorPickerPanel({
       <div className="flex gap-4">
         {/* Saturation-Lightness square — narrower square on the left */}
         <div className="w-[185px] shrink-0 h-full">
-          <SatLightSquare hue={hue} sat={sat} light={light} onChange={onSatLightChange} />
+          <SatValueSquare hue={hue} sat={sat} brightness={brightness} onChange={onSatValueChange} />
         </div>
 
         {/* Controls on the right */}
@@ -273,7 +345,7 @@ const ColorPickerPanel = memo(function ColorPickerPanel({
               <p className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground/50 mb-1">Preview</p>
               <div
                 className="w-10 h-9 rounded-lg ring-1 ring-black/10"
-                style={{ backgroundColor: `hsl(${hue},${sat}%,${light}%)` }}
+                style={{ backgroundColor: hsvToHex(hue, sat, brightness) }}
               />
             </div>
           </div>
@@ -319,17 +391,35 @@ export function ColorPicker({ value, onChange }: ColorPickerProps) {
   const [popoverPos, setPopoverPos] = useState<PopoverPosition | null>(null);
 
   // Derive HSL from current value
-  const { h: initH, s: initS, l: initL } = hexToHsl(value);
+  const { h: initH, s: initS, v: initV } = hexToHsv(value);
   const [hue, setHue] = useState(initH);
   const [sat, setSat] = useState(initS);
-  const [light, setLight] = useState(initL);
+  const [brightness, setBrightness] = useState(initV);
+  const hsvRef = useRef({ h: initH, s: initS, v: initV });
+  const lastCommittedColorRef = useRef<{ raw: string; canonical: string } | null>(null);
 
   // Sync external value changes to internal state
   useEffect(() => {
-    const { h, s, l } = hexToHsl(value);
+    // Parent state usually echoes the exact color emitted by this picker. Do
+    // not re-derive HSL from that echo: grayscale colors have no meaningful
+    // hue, so doing so would reset the active hue to red while the user is
+    // still dragging the saturation/lightness square.
+    const committedColor = lastCommittedColorRef.current;
+    const normalizedValue = value.trim().toLowerCase();
+    if (committedColor && (
+      normalizedValue === committedColor.raw ||
+      normalizedValue === committedColor.canonical
+    )) {
+      lastCommittedColorRef.current = null;
+      setHexInput(value);
+      return;
+    }
+
+    const { h, s, v } = hexToHsv(value);
+    hsvRef.current = { h, s, v };
     setHue(h);
     setSat(s);
-    setLight(l);
+    setBrightness(v);
     setHexInput(value);
   }, [value]);
 
@@ -408,28 +498,36 @@ export function ColorPicker({ value, onChange }: ColorPickerProps) {
     return () => document.removeEventListener("keydown", handleKey);
   }, [open]);
 
-  const commitColor = useCallback((h: number, s: number, l: number) => {
-    const hex = hslToHex(h, s, l);
+  const commitColor = useCallback((h: number, s: number, v: number) => {
+    const hex = hsvToHex(h, s, v);
+    lastCommittedColorRef.current = { raw: hex.toLowerCase(), canonical: hex.toLowerCase() };
     setHexInput(hex);
     onChange(hex);
   }, [onChange]);
 
   const handleHueChange = useCallback((h: number) => {
+    hsvRef.current = { ...hsvRef.current, h };
     setHue(h);
-    commitColor(h, sat, light);
-  }, [sat, light, commitColor]);
+    commitColor(h, hsvRef.current.s, hsvRef.current.v);
+  }, [commitColor]);
 
-  const handleSatLightChange = useCallback((s: number, l: number) => {
+  const handleSatValueChange = useCallback((s: number, v: number) => {
+    hsvRef.current = { ...hsvRef.current, s, v };
     setSat(s);
-    setLight(l);
-    commitColor(hue, s, l);
-  }, [hue, commitColor]);
+    setBrightness(v);
+    commitColor(hsvRef.current.h, s, v);
+  }, [commitColor]);
 
   const handleHexSubmit = useCallback(() => {
     const input = hexInput.trim();
     if (hexIsValid(input)) {
-      const { h, s, l } = hexToHsl(input);
-      setHue(h); setSat(s); setLight(l);
+      const { h, s, v } = hexToHsv(input);
+      hsvRef.current = { h, s, v };
+      lastCommittedColorRef.current = {
+        raw: input.toLowerCase(),
+        canonical: hsvToHex(h, s, v).toLowerCase(),
+      };
+      setHue(h); setSat(s); setBrightness(v);
       onChange(input);
     } else {
       setHexInput(value);
@@ -444,8 +542,13 @@ export function ColorPicker({ value, onChange }: ColorPickerProps) {
   };
 
   const handleQuickColor = useCallback((c: string) => {
-    const { h, s, l } = hexToHsl(c);
-    setHue(h); setSat(s); setLight(l);
+    const { h, s, v } = hexToHsv(c);
+    hsvRef.current = { h, s, v };
+    lastCommittedColorRef.current = {
+      raw: c.toLowerCase(),
+      canonical: hsvToHex(h, s, v).toLowerCase(),
+    };
+    setHue(h); setSat(s); setBrightness(v);
     setHexInput(c);
     onChange(c);
   }, [onChange]);
@@ -499,10 +602,10 @@ export function ColorPicker({ value, onChange }: ColorPickerProps) {
           panelRef={panelRef}
           hue={hue}
           sat={sat}
-          light={light}
+          brightness={brightness}
           hexInput={hexInput}
           value={value}
-          onSatLightChange={handleSatLightChange}
+          onSatValueChange={handleSatValueChange}
           onHueChange={handleHueChange}
           onHexInputChange={setHexInput}
           onHexSubmit={handleHexSubmit}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveFloorPlanForEvent } from "../eventLocationData";
+import { publishedEventBuildingOptions, resolveFloorPlanForEvent } from "../eventLocationData";
 import type { Campus } from "../../components/map-builder/types";
 
 describe("resolveFloorPlanForEvent", () => {
@@ -48,6 +48,43 @@ describe("resolveFloorPlanForEvent", () => {
       canvasH: 260,
       rooms: [{ id: "caba_r_stairs_r", x: 558, w: 34 }],
     });
+  });
+
+  it("does not substitute another published floor when the requested floor is missing", () => {
+    const campus = {
+      id: "campus-a",
+      buildings: [{
+        id: "b_caba",
+        name: "CABA",
+        visible: true,
+        floors: [{ id: "f1", buildingId: "b_caba", number: 1, label: "Ground Floor", rooms: [] }],
+      }],
+    } as unknown as Campus;
+
+    expect(resolveFloorPlanForEvent("b_caba", 7, campus)).toBeNull();
+  });
+
+  it("lists only visible published buildings with numeric floors that resolve to authored plans", () => {
+    const campus = {
+      id: "campus-a",
+      buildings: [
+        {
+          id: "valid",
+          name: "Valid Building",
+          visible: true,
+          floors: [
+            { id: "valid-f1", buildingId: "valid", number: 1, label: "Ground Floor", rooms: [] },
+            { id: "valid-fbad", buildingId: "valid", number: Number.NaN, label: "Invalid", rooms: [] },
+          ],
+        },
+        { id: "hidden", name: "Hidden Building", visible: false, floors: [{ id: "hidden-f1", buildingId: "hidden", number: 1, label: "Ground Floor", rooms: [] }] },
+        { id: "empty", name: "No Floors", visible: true, floors: [] },
+      ],
+    } as unknown as Campus;
+
+    expect(publishedEventBuildingOptions(campus)).toEqual([
+      { buildingId: "valid", buildingName: "Valid Building", floors: [{ number: 1, label: "Ground Floor" }] },
+    ]);
   });
 
   it("preserves every authored layer from the published live floor", () => {

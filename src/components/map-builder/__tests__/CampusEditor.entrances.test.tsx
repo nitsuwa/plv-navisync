@@ -4,6 +4,7 @@ import { useState } from "react";
 import { CampusEditor } from "../CampusEditor";
 import type { Campus, NavigationNode } from "../types";
 import { syncExteriorEmergencyStairGraph } from "../../../lib/exteriorEmergencyStairs";
+import { reconcileEntranceDoors } from "../../../lib/entranceTransitions";
 
 function makeCampus(): Campus {
   return {
@@ -861,6 +862,10 @@ describe("CampusEditor building entrances", () => {
       isPrimary: false,
       accessible: true,
     }];
+    let generatedId = 0;
+    const canonicalBeforeDuplicate = reconcileEntranceDoors(initialCampus, (prefix = "id") => `${prefix}-${generatedId++}`);
+    Object.assign(initialCampus, canonicalBeforeDuplicate);
+    const graphBefore = { nodes: structuredClone(initialCampus.navNodes ?? []), edges: structuredClone(initialCampus.navEdges ?? []) };
     const { container } = render(<Harness initialCampus={initialCampus} onCampusChange={(c) => { latestCampus = c; }} />);
 
     fireEvent.mouseDown(buildingGroup(container), { clientX: 120, clientY: 120, bubbles: true });
@@ -881,6 +886,9 @@ describe("CampusEditor building entrances", () => {
       buildingId: duplicateBuilding.id,
     });
     expect(duplicateEntrance.id).not.toBe(original.id);
+    for (const node of graphBefore.nodes) expect(latestCampus!.navNodes).toContainEqual(node);
+    for (const edge of graphBefore.edges) expect(latestCampus!.navEdges).toContainEqual(edge);
+    expect(duplicateBuilding.floors[0].doors.find((door) => door.buildingEntranceId)?.buildingEntranceId).toBe(duplicateEntrance.id);
   });
 
   it("promotes a remaining General entrance when deleting the current primary", () => {

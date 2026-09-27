@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, createEvent, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useState } from "react";
 import { FloorEditor } from "../FloorEditor";
-import type { Campus, FloorRoom } from "../types";
+import type { Campus, FloorRoom, NavigationEdge, NavigationNode } from "../types";
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -85,6 +85,13 @@ function withWallAndDoor(campus: Campus): Campus {
   return next;
 }
 
+function withNavigation(campus: Campus, nodes: NavigationNode[], edges: NavigationEdge[] = []): Campus {
+  const next = structuredClone(campus);
+  next.navNodes = nodes;
+  next.navEdges = edges;
+  return next;
+}
+
 // ── Harness ──────────────────────────────────────────────────────────────────
 
 function Harness({ onCampusChange, initialCampus = makeBaseCampus() }: {
@@ -145,7 +152,9 @@ function parseCamera(transform: string): { x: number; y: number; z: number } {
 }
 
 function enterNavigationMode() {
-  fireEvent.click(screen.getByRole("tab", { name: "Navigation" }));
+  const tab = screen.queryByRole("tab", { name: "Navigation" });
+  if (tab) fireEvent.click(tab);
+  else fireEvent.click(screen.getByRole("button", { name: "Show Navigation" }));
 }
 
 function clickCanvas(container: HTMLElement, x: number, y: number) {
@@ -156,7 +165,7 @@ function clickCanvas(container: HTMLElement, x: number, y: number) {
 }
 
 function navNodes(container: HTMLElement): SVGGElement[] {
-  return Array.from(container.querySelectorAll('[data-testid="nav-node"]')) as SVGGElement[];
+  return Array.from(container.querySelectorAll('[data-testid="nav-node"], [data-testid="nav-path-junction"]')) as SVGGElement[];
 }
 
 function navNodeHits(container: HTMLElement): SVGCircleElement[] {
@@ -452,6 +461,55 @@ describe("B5 Phase 2.2 — Indoor Navigation UX Simplification + Interaction Fix
     expect(screen.getByText("Paths")).toBeTruthy();
   });
 
+  it("bulk-deletes isolated selected Walking Points in one undoable action", () => {
+    cleanup();
+    const nodes: NavigationNode[] = [40, 90, 140].map((x, index) => ({
+      id: `isolated-${index + 1}`, name: "Walking Point", type: "hallway", x, y: 100,
+      buildingId: "b1", floorId: "f1", accessible: true, color: "#2563eb",
+      ...(index < 2 ? { pathJunction: true } : {}),
+    }));
+    const rendered = render(<Harness onCampusChange={onCampusChange} initialCampus={withNavigation(makeBaseCampus(), nodes)} />);
+    container = rendered.container;
+    enterNavigationMode();
+    const svg = stubSvgRect(container);
+    nodes.forEach((node, index) => {
+      fireEvent.mouseDown(nodeAt(container, node.x, node.y), { clientX: node.x, clientY: node.y, shiftKey: index > 0, bubbles: true });
+      fireEvent.mouseUp(svg, { bubbles: true });
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Delete Selected" }));
+    expect(latestCampus(onCampusChange).navNodes).toEqual([]);
+    expect(latestCampus(onCampusChange).navEdges).toEqual([]);
+
+    fireEvent.keyDown(window, { key: "z", ctrlKey: true });
+    expect(latestCampus(onCampusChange).navNodes.map((node) => node.id)).toEqual(nodes.map((node) => node.id));
+    expect(latestCampus(onCampusChange).navEdges).toEqual([]);
+  });
+
+  it("blocks a mixed isolated/connected Walking Point bulk delete without partial removal", () => {
+    cleanup();
+    const nodes: NavigationNode[] = [
+      { id: "isolated", name: "Walking Point", type: "hallway", x: 40, y: 100, buildingId: "b1", floorId: "f1", accessible: true, color: "#2563eb" },
+      { id: "connected", name: "Path Junction", type: "hallway", x: 100, y: 100, buildingId: "b1", floorId: "f1", accessible: true, color: "#2563eb", pathJunction: true },
+      { id: "outside-end", name: "Outdoor Walking Point", type: "outdoor", x: 160, y: 100, accessible: true, color: "#16a34a" },
+    ];
+    // This edge has an endpoint outside the currently-open Floor, so it is not
+    // in `indoorEdges`; the bulk-delete guard must still inspect the full graph.
+    const edges: NavigationEdge[] = [{ id: "connected-path", startNodeId: "connected", endNodeId: "outside-end", distance: 60, bidirectional: true, accessible: true, emergencySafe: true, type: "walkway", color: "#3f6212", width: 3 }];
+    const initial = withNavigation(makeBaseCampus(), nodes, edges);
+    const rendered = render(<Harness onCampusChange={onCampusChange} initialCampus={initial} />);
+    container = rendered.container;
+    enterNavigationMode();
+    const svg = stubSvgRect(container);
+    fireEvent.mouseDown(nodeAt(container, 40, 100), { clientX: 40, clientY: 100, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    fireEvent.mouseDown(nodeAt(container, 100, 100), { clientX: 100, clientY: 100, shiftKey: true, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    fireEvent.click(screen.getByRole("button", { name: "Delete Selected" }));
+    expect(onCampusChange).not.toHaveBeenCalled();
+    expect(initial.navNodes?.map((node) => node.id)).toEqual(nodes.map((node) => node.id));
+    expect(initial.navEdges).toEqual(edges);
+  });
+
   it("group-drags free waypoints while linked nodes stay attached (one toast)", () => {
     cleanup();
     const rendered = render(<Harness onCampusChange={onCampusChange} initialCampus={withRoom(makeBaseCampus())} />);
@@ -515,6 +573,35 @@ describe("B5 Phase 2.2 — Indoor Navigation UX Simplification + Interaction Fix
     fireEvent.mouseUp(svg, { bubbles: true });
     expect(latestCampus(onCampusChange).navEdges).toHaveLength(0);
     expect(latestCampus(onCampusChange).navNodes).toHaveLength(2); // nodes survive
+  });
+
+  it("deletes the selected manual Walking Path attached to an Emergency Exit Door by exact edge ID", () => {
+    cleanup();
+    const physicalCampus = withWallAndDoor(makeBaseCampus());
+    physicalCampus.buildings[0].floors[0].doors[0].isEmergencyExit = true;
+    const nodes: NavigationNode[] = [
+      { id: "emergency-door-node", name: "Emergency Exit Door", type: "hallway", x: 90, y: 70, buildingId: "b1", floorId: "f1", doorId: "d1", accessible: true, color: "#dc2626" },
+      { id: "walk-1", name: "Walking Point", type: "hallway", x: 150, y: 110, buildingId: "b1", floorId: "f1", accessible: true, color: "#2563eb" },
+      { id: "walk-2", name: "Walking Point", type: "hallway", x: 40, y: 130, buildingId: "b1", floorId: "f1", accessible: true, color: "#2563eb" },
+    ];
+    const manualEmergencyPath: NavigationEdge = { id: "manual-emergency-path", startNodeId: "emergency-door-node", endNodeId: "walk-1", distance: 72, bidirectional: true, accessible: true, emergencySafe: true, type: "hallway", color: "#3f6212", width: 3 };
+    const unrelatedEmergencyPath: NavigationEdge = { id: "unrelated-emergency-path", startNodeId: "emergency-door-node", endNodeId: "walk-2", distance: 78, bidirectional: true, accessible: true, emergencySafe: true, type: "hallway", color: "#3f6212", width: 3, bendPoints: [] };
+    const initial = withNavigation(physicalCampus, nodes, [manualEmergencyPath, unrelatedEmergencyPath]);
+    const rendered = render(<Harness onCampusChange={onCampusChange} initialCampus={initial} />);
+    container = rendered.container;
+    enterNavigationMode();
+    const svg = stubSvgRect(container);
+    const hitLine = container.querySelector('[data-testid="nav-edge-hit"]') as SVGLineElement;
+    expect(hitLine).toBeTruthy();
+    fireEvent.mouseDown(hitLine, { clientX: 120, clientY: 90, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    fireEvent.click(screen.getByRole("button", { name: "Delete Walking Path" }));
+
+    const after = latestCampus(onCampusChange);
+    expect(after.navEdges?.some((edge) => edge.id === manualEmergencyPath.id)).toBe(false);
+    expect(after.navEdges?.find((edge) => edge.id === unrelatedEmergencyPath.id)).toEqual(unrelatedEmergencyPath);
+    expect(after.navNodes?.map((node) => node.id)).toEqual(nodes.map((node) => node.id));
+    expect(after.buildings[0].floors[0].doors).toHaveLength(1);
   });
 
   it("Remove tool shows destructive hover and a not-allowed cursor on nodes", () => {

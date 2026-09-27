@@ -14,9 +14,34 @@ type CampusPreviewBuildingRow = Pick<
 type CampusListRow = CampusRow & {
   preview_buildings?: CampusPreviewBuildingRow[] | null;
 };
-type CampusPreviewFloorRow = Pick<Tables<"floors">, "id" | "archived_at"> & { buildings?: { campus_id: string } | null };
-type CampusPreviewRoomRow = Pick<Tables<"map_elements">, "id" | "campus_id" | "element_type" | "archived_at">;
-type CampusPreviewSummary = { floors: number; rooms: number };
+type CampusPreviewBuildingSummaryRow = Pick<Tables<"buildings">, "id" | "campus_id" | "archived_at">;
+type CampusPreviewFloorRow = Pick<Tables<"floors">, "id" | "building_id" | "archived_at">;
+type CampusPreviewRoomRow = Pick<Tables<"map_elements">, "id" | "campus_id" | "building_id" | "floor_id" | "element_type" | "metadata" | "archived_at">;
+type CampusPreviewSummary = { buildings: number; floors: number; rooms: number };
+
+const CAMPUS_PREVIEW_PAGE_SIZE = 500;
+const ROOM_ELEMENT_TYPES = new Set(["room", "classroom", "laboratory", "office", "restroom", "clinic", "library", "canteen"]);
+
+async function fetchAllPreviewPages<T>(
+  queryPage: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: SupabaseErrorLike | null }>,
+): Promise<T[]> {
+  const rows: T[] = [];
+  for (let from = 0; ; from += CAMPUS_PREVIEW_PAGE_SIZE) {
+    const { data, error } = await queryPage(from, from + CAMPUS_PREVIEW_PAGE_SIZE - 1);
+    assertOk(error, "load campus preview counts");
+    const page = data ?? [];
+    rows.push(...page);
+    if (page.length < CAMPUS_PREVIEW_PAGE_SIZE) return rows;
+  }
+}
+
+function rowHasRoomKind(row: CampusPreviewRoomRow): boolean {
+  const metadata = row.metadata && typeof row.metadata === "object" && !Array.isArray(row.metadata)
+    ? row.metadata as Record<string, unknown>
+    : null;
+  if (typeof metadata?.kind === "string") return metadata.kind === "room";
+  return ROOM_ELEMENT_TYPES.has(row.element_type);
+}
 
 export type CampusCreateInput = Pick<
   TablesInsert<"campuses">,
@@ -264,7 +289,7 @@ export async function toEditorCampus(row: CampusListRow, previewSummary?: Campus
     canvasConfigured: row.canvas_configured,
     settings: { accessibility: true, emergency: true, eventLayer: true, gps: true },
     buildings, markers: [], paths: [], navNodes: [], navEdges: [], routes: [],
-    previewBuildingCount: hasPreviewBuildings ? buildings.length : undefined,
+    previewBuildingCount: previewSummary?.buildings ?? (hasPreviewBuildings ? buildings.length : undefined),
     previewFloorCount: previewSummary?.floors,
     previewRoomCount: previewSummary?.rooms,
     previewBuildingsLoaded: hasPreviewBuildings,
@@ -282,32 +307,49 @@ export async function toEditorCampus(row: CampusListRow, previewSummary?: Campus
 }
 
 async function previewStructureSummaries(campusIds: string[]): Promise<Map<string, CampusPreviewSummary>> {
-  const summaries = new Map(campusIds.map((id) => [id, { floors: 0, rooms: 0 }]));
+  const summaries = new Map(campusIds.map((id) => [id, { buildings: 0, floors: 0, rooms: 0 }]));
   if (campusIds.length === 0) return summaries;
   const db = getSupabase();
-  const [floors, rooms] = await Promise.all([
-    db
-      .from("floors")
-      .select("id,archived_at,buildings!inner(campus_id)")
-      .in("buildings.campus_id", campusIds)
-      .is("archived_at", null),
-    db
-      .from("map_elements")
-      .select("id,campus_id,element_type,archived_at")
-      .in("campus_id", campusIds)
-      .eq("element_type", "room")
-      .is("archived_at", null),
-  ]);
-  assertOk(floors.error);
-  assertOk(rooms.error);
-  for (const floor of (floors.data ?? []) as CampusPreviewFloorRow[]) {
-    const campusId = floor.buildings?.campus_id;
-    if (!campusId || floor.archived_at) continue;
-    const summary = summaries.get(campusId);
-    if (summary) summary.floors += 1;
+  const buildings = await fetchAllPreviewPages<CampusPreviewBuildingSummaryRow>((from, to) => db
+    .from("buildings")
+    .select("id,campus_id,archived_at")
+    .in("campus_id", campusIds)
+    .is("archived_at", null)
+    .range(from, to));
+  const buildingCampusIds = new Map<string, string>();
+  for (const building of buildings) {
+    if (building.archived_at || !summaries.has(building.campus_id)) continue;
+    buildingCampusIds.set(building.id, building.campus_id);
+    summaries.get(building.campus_id)!.buildings += 1;
   }
-  for (const room of (rooms.data ?? []) as CampusPreviewRoomRow[]) {
-    if (room.archived_at || room.element_type !== "room") continue;
+
+  const buildingIds = [...buildingCampusIds.keys()];
+  if (buildingIds.length === 0) return summaries;
+  const floors = await fetchAllPreviewPages<CampusPreviewFloorRow>((from, to) => db
+    .from("floors")
+    .select("id,building_id,archived_at")
+    .in("building_id", buildingIds)
+    .is("archived_at", null)
+    .range(from, to));
+  const floorBuildingIds = new Map<string, string>();
+  for (const floor of floors) {
+    if (floor.archived_at || !buildingCampusIds.has(floor.building_id)) continue;
+    floorBuildingIds.set(floor.id, floor.building_id);
+    const campusId = buildingCampusIds.get(floor.building_id)!;
+    summaries.get(campusId)!.floors += 1;
+  }
+
+  const rooms = await fetchAllPreviewPages<CampusPreviewRoomRow>((from, to) => db
+    .from("map_elements")
+    .select("id,campus_id,building_id,floor_id,element_type,metadata,archived_at")
+    .in("campus_id", campusIds)
+    .or("metadata->>kind.eq.room,element_type.in.(room,classroom,laboratory,office,restroom,clinic,library,canteen)")
+    .is("archived_at", null)
+    .range(from, to));
+  for (const room of rooms) {
+    if (room.archived_at || !rowHasRoomKind(room) || !room.building_id || !room.floor_id) continue;
+    const owningCampusId = buildingCampusIds.get(room.building_id);
+    if (owningCampusId !== room.campus_id || floorBuildingIds.get(room.floor_id) !== room.building_id) continue;
     const summary = summaries.get(room.campus_id);
     if (summary) summary.rooms += 1;
   }

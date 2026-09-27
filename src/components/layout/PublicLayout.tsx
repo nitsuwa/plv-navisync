@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { Navigate, Outlet, useLocation } from "react-router";
 import { Toaster } from "../../app/components/ui/sonner";
 import { Navbar } from "./Navbar";
@@ -13,6 +14,15 @@ import { useStudentAuth } from "../../hooks/useStudentAuth";
 export function PublicLayout() {
   const { pathname } = useLocation();
   const { isStudent, loading: authLoading } = useStudentAuth();
+
+  useEffect(() => {
+    const isHomePage = pathname === "/" || pathname === "/home";
+    document.documentElement.classList.toggle("home-page-scrollbar", isHomePage);
+
+    return () => {
+      document.documentElement.classList.remove("home-page-scrollbar");
+    };
+  }, [pathname]);
 
   if (!authLoading && isStudent && pathname === "/") {
     return <Navigate to="/home" replace />;

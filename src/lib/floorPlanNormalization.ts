@@ -1,7 +1,9 @@
-import type { FloorPlan, FloorUndoEntry, FloorWall, FloorWallEndpointAnchor } from "../components/map-builder/types";
+import type { FloorPlan, FloorUndoEntry, FloorWall, FloorWallEndpointAnchor, FloorRoom, FloorDoor } from "../components/map-builder/types";
 import { normalizeFloorPlanBackground } from "./floorPlanBackground";
 import { DEFAULT_FLOOR_CANVAS, normalizeFloorCanvasSize } from "./floorGeometry";
 import { normalizeFloorAppearance } from "./floorAppearance";
+import { normalizeFloorExtensions } from "./floorShape";
+import { roomDoorIsValid, roomAccessDoorIds } from "./indoorNavigationGraph";
 
 const FLOOR_COLLECTION_KEYS = [
   "rooms",
@@ -17,6 +19,7 @@ const FLOOR_COLLECTION_KEYS = [
   "exteriorZones",
   "entranceSteps",
   "entranceRamps",
+  "extensions",
 ] as const;
 
 type FloorCollectionKey = typeof FLOOR_COLLECTION_KEYS[number];
@@ -80,13 +83,12 @@ function inferredManagedPerimeterSide(wall: Partial<FloorWall>, walls: FloorWall
 
 function normalizeManagedPerimeterWallIds(walls: FloorWall[]) {
   const remap = new Map<string, string>();
-  const idsBySide = new Map<NonNullable<FloorWall["perimeterSide"]>, string>();
+  const usedIds = new Set<string>();
   const nextWalls = walls.map((wall) => {
     const side = inferredManagedPerimeterSide(wall, walls);
     if (!side && wall.managedKind !== "perimeter") return wall;
-    const existingForSide = side ? idsBySide.get(side) : undefined;
-    const nextId = validUuid(wall.id) ? wall.id : existingForSide ?? generateEntityId();
-    if (side) idsBySide.set(side, nextId);
+    const nextId = validUuid(wall.id) && !usedIds.has(wall.id) ? wall.id : generateEntityId();
+    usedIds.add(nextId);
     if (wall.id !== nextId) remap.set(wall.id, nextId);
     return { ...wall, id: nextId, managedKind: "perimeter" as const, perimeterSide: side ?? wall.perimeterSide };
   });
@@ -119,6 +121,40 @@ function normalizeWallAttachment(item: { wallId?: unknown; offset?: unknown }) {
     wallId: typeof item.wallId === "string" && item.wallId ? item.wallId : undefined,
     offset: item.wallId ? Math.max(0, Math.min(1, normalizedNumber(item.offset, 0.5))) : undefined,
   };
+}
+
+/**
+ * Canonicalize Room → Door links against the destination Floor's actual Door
+ * set. An optional old→new map is applied before validation so clone/template
+ * callers can retain links to copied Doors. Missing external/stale IDs are
+ * removed without touching Rooms or any other physical data.
+ */
+export function normalizeRoomAccessDoors(
+  rooms: FloorRoom[],
+  doors: FloorDoor[],
+  walls: FloorWall[],
+  doorIdRemap?: ReadonlyMap<string, string>,
+): FloorRoom[] {
+  const doorsById = new Map(doors.map((door) => [door.id, door]));
+  return rooms.map((room) => {
+    const orderedIds = roomAccessDoorIds(room);
+    const mappedIds = Array.from(new Set(orderedIds.flatMap((doorId) => {
+      const nextId = doorIdRemap?.get(doorId) ?? (doorsById.has(doorId) ? doorId : undefined);
+      return nextId && doorsById.has(nextId) ? [nextId] : [];
+    })));
+    const candidateRoom = {
+      ...room,
+      accessDoorId: mappedIds[0],
+      accessDoorIds: mappedIds.length > 0 ? mappedIds : undefined,
+    };
+    const validIds = mappedIds.filter((doorId) => roomDoorIsValid(candidateRoom, doorsById.get(doorId), walls));
+    return {
+      ...candidateRoom,
+      accessDoorId: validIds[0],
+      accessDoorIds: validIds.length > 0 ? validIds : undefined,
+      ...(validIds.length === 0 && candidateRoom.accessType === "door" ? { accessType: undefined } : {}),
+    };
+  });
 }
 
 function normalizeCalibration(value: unknown): FloorPlan["calibration"] {
@@ -165,6 +201,7 @@ export function normalizeFloor(input: Partial<FloorPlan> | null | undefined, def
     zOrder: normalizedNumber(item.zOrder, index),
     visible: item.visible !== false,
     locked: item.locked === true,
+    ...(item.junctionBlocks === "show" || item.junctionBlocks === "hide" ? { junctionBlocks: item.junctionBlocks } : {}),
   }));
   const normalizedWalls = normalizeManagedPerimeterWallIds(rawWalls);
   const remapWallAttachment = (item: { wallId?: unknown; offset?: unknown }) => {
@@ -182,6 +219,7 @@ export function normalizeFloor(input: Partial<FloorPlan> | null | undefined, def
     label: String(source.label ?? defaults.label ?? defaultFloorLabel(number)),
     canvasW: canvas.w,
     canvasH: canvas.h,
+    extensions: normalizeFloorExtensions(source.extensions, canvas.w, canvas.h),
     backgroundColor: typeof source.backgroundColor === "string" && source.backgroundColor ? source.backgroundColor : DEFAULT_FLOOR_BACKGROUND,
     appearance: normalizeFloorAppearance(source.appearance, typeof source.backgroundColor === "string" ? source.backgroundColor : DEFAULT_FLOOR_BACKGROUND),
     showGrid: source.showGrid !== false,
@@ -286,7 +324,96 @@ export function normalizeFloor(input: Partial<FloorPlan> | null | undefined, def
       locked: item.locked === true,
     })),
   };
-  return normalized as FloorPlan;
+  const normalizedFloor = normalized as FloorPlan;
+  return {
+    ...normalizedFloor,
+    rooms: normalizeRoomAccessDoors(normalizedFloor.rooms, normalizedFloor.doors, normalizedFloor.walls),
+  };
+}
+
+/**
+ * Refuse to persist a Floor whose physical relationships point outside that
+ * Floor. Normalization deliberately preserves editor geometry and therefore
+ * does not repair dangling references by dropping objects.
+ */
+export function assertFloorPhysicalReferences(
+  floor: FloorPlan,
+  options: { entranceIds?: ReadonlySet<string>; exteriorEmergencyStairIds?: ReadonlySet<string> } = {},
+): void {
+  const floorLabel = `Floor "${floor.label}" (${floor.id})`;
+  const roomIds = new Set((floor.rooms ?? []).map((room) => room.id));
+  const wallIds = new Set((floor.walls ?? []).map((wall) => wall.id));
+  const doorIds = new Set((floor.doors ?? []).map((door) => door.id));
+  const zoneIds = new Set((floor.exteriorZones ?? []).map((zone) => zone.id));
+  const physicalIds = [
+    ...(floor.rooms ?? []), ...(floor.paths ?? []), ...(floor.walls ?? []), ...(floor.doors ?? []),
+    ...(floor.windows ?? []), ...(floor.furniture ?? []), ...(floor.stairs ?? []), ...(floor.ramps ?? []),
+    ...(floor.elevators ?? []), ...(floor.labels ?? []), ...(floor.exteriorZones ?? []),
+    ...(floor.entranceSteps ?? []), ...(floor.entranceRamps ?? []), ...(floor.extensions ?? []),
+  ].map((item) => item.id);
+  if (physicalIds.some((id) => typeof id !== "string" || !id.trim())) {
+    throw new Error(`${floorLabel} contains a physical object with a missing ID.`);
+  }
+  if (new Set(physicalIds).size !== physicalIds.length) {
+    throw new Error(`${floorLabel} contains duplicate physical object IDs.`);
+  }
+  for (const wall of floor.walls ?? []) {
+    for (const [endpoint, anchor] of [["start", wall.startAnchor], ["end", wall.endAnchor]] as const) {
+      if (anchor?.targetType === "room" && !roomIds.has(anchor.roomId)) {
+        throw new Error(`${floorLabel} Wall anchor refers to missing Room "${anchor.roomId}" on Wall "${wall.id}" (${endpoint} endpoint).`);
+      }
+    }
+  }
+  for (const door of floor.doors ?? []) {
+    if (door.wallId && !wallIds.has(door.wallId)) {
+      throw new Error(`${floorLabel} Door refers to missing Wall "${door.wallId}" (Door "${door.id}").`);
+    }
+    if (door.buildingEntranceId && options.entranceIds && !options.entranceIds.has(door.buildingEntranceId)) {
+      throw new Error(`${floorLabel} Door refers to missing Building Entrance "${door.buildingEntranceId}" (Door "${door.id}").`);
+    }
+  }
+  for (const window of floor.windows ?? []) {
+    if (window.wallId && !wallIds.has(window.wallId)) {
+      throw new Error(`${floorLabel} Window refers to missing Wall "${window.wallId}" (Window "${window.id}").`);
+    }
+  }
+  for (const room of floor.rooms ?? []) {
+    if (room.accessDoorId && !doorIds.has(room.accessDoorId)) {
+      throw new Error(`${floorLabel} Room "${room.name}" accessDoorId refers to missing same-Floor Door "${room.accessDoorId}".`);
+    }
+    for (const doorId of new Set(room.accessDoorIds ?? [])) {
+      if (!doorIds.has(doorId)) {
+        throw new Error(`${floorLabel} Room "${room.name}" accessDoorIds[] refers to missing same-Floor Door "${doorId}".`);
+      }
+    }
+  }
+  for (const item of floor.furniture ?? []) {
+    if (item.exteriorZoneId && !zoneIds.has(item.exteriorZoneId)) {
+      throw new Error(`${floorLabel} Furniture "${item.id}" refers to missing Exterior Zone "${item.exteriorZoneId}".`);
+    }
+  }
+  for (const zone of floor.exteriorZones ?? []) {
+    for (const entranceId of new Set([...(zone.linkedEntranceId ? [zone.linkedEntranceId] : []), ...(zone.linkedEntranceIds ?? [])])) {
+      if (options.entranceIds && !options.entranceIds.has(entranceId)) {
+        throw new Error(`${floorLabel} Exterior Zone "${zone.id}" refers to missing Building Entrance "${entranceId}".`);
+      }
+    }
+  }
+  for (const feature of [...(floor.entranceSteps ?? []), ...(floor.entranceRamps ?? [])]) {
+    if (feature.parentZoneId && !zoneIds.has(feature.parentZoneId)) {
+      throw new Error(`${floorLabel} Entrance feature "${feature.id}" refers to missing Exterior Zone "${feature.parentZoneId}".`);
+    }
+    if (feature.linkedEntranceId && options.entranceIds && !options.entranceIds.has(feature.linkedEntranceId)) {
+      throw new Error(`${floorLabel} Entrance feature "${feature.id}" refers to missing Building Entrance "${feature.linkedEntranceId}".`);
+    }
+  }
+  if (options.exteriorEmergencyStairIds) {
+    for (const stair of floor.stairs ?? []) {
+      if (stair.exteriorEmergencyStairId && !options.exteriorEmergencyStairIds.has(stair.exteriorEmergencyStairId)) {
+        throw new Error(`${floorLabel} Stair "${stair.id}" refers to missing Exterior Emergency Stair "${stair.exteriorEmergencyStairId}".`);
+      }
+    }
+  }
 }
 
 export function createDefaultFloor(defaults: FloorDefaults = {}): FloorPlan {
@@ -321,6 +448,73 @@ export interface FloorDuplicateIdMaps {
   stairs: Map<string, string>;
   ramps: Map<string, string>;
   elevators: Map<string, string>;
+  furniture?: Map<string, string>;
+  exteriorZones?: Map<string, string>;
+  furnitureGroups?: Map<string, string>;
+  paths?: Map<string, string>;
+  labels?: Map<string, string>;
+  entranceSteps?: Map<string, string>;
+  entranceRamps?: Map<string, string>;
+  extensions?: Map<string, string>;
+  /** Fresh local identities for cloned cross-floor circulation references. */
+  sharedIds?: Map<string, string>;
+  /** System-owned Exterior Stair occurrences deliberately omitted by a Floor-only copy. */
+  excludedExteriorEmergencyStairIds?: ReadonlySet<string>;
+}
+
+export interface FloorDuplicateOptions {
+  /** Building duplication copies the owner and its explicitly served occurrences together. */
+  includeExteriorEmergencyStairOccurrences?: boolean;
+}
+
+/** Building-scoped relationship maps shared while duplicating all its Floors. */
+export interface FloorDuplicateRelationshipMaps {
+  sharedIds: Map<string, string>;
+  entranceIds: Map<string, string>;
+  exteriorEmergencyStairs: Map<string, string>;
+  furnitureGroups: Map<string, string>;
+}
+
+function buildEntityIdMap<T extends { id: string }>(items: T[], supplied?: Map<string, string>, idFactory: () => string = generateEntityId) {
+  const map = supplied ?? new Map<string, string>();
+  items.forEach((item) => {
+    if (!map.has(item.id)) map.set(item.id, idFactory());
+  });
+  return map;
+}
+
+/** Allocate a Floor's identity map before cloning any objects or references. */
+export function createFloorDuplicateIdMaps(
+  floor: FloorPlan,
+  idFactory: () => string = generateEntityId,
+  options: FloorDuplicateOptions = {},
+): FloorDuplicateIdMaps {
+  const copiedStairs = options.includeExteriorEmergencyStairOccurrences
+    ? floor.stairs
+    : floor.stairs.filter((stair) => !stair.exteriorEmergencyStairId);
+  return {
+    rooms: buildEntityIdMap(floor.rooms, undefined, idFactory),
+    walls: buildEntityIdMap(floor.walls, undefined, idFactory),
+    doors: buildEntityIdMap(floor.doors, undefined, idFactory),
+    windows: buildEntityIdMap(floor.windows, undefined, idFactory),
+    stairs: buildEntityIdMap(copiedStairs, undefined, idFactory),
+    ramps: buildEntityIdMap(floor.ramps, undefined, idFactory),
+    elevators: buildEntityIdMap(floor.elevators, undefined, idFactory),
+    furniture: buildEntityIdMap(floor.furniture, undefined, idFactory),
+    exteriorZones: buildEntityIdMap(floor.exteriorZones ?? [], undefined, idFactory),
+    furnitureGroups: new Map(),
+    paths: buildEntityIdMap(floor.paths, undefined, idFactory),
+    labels: buildEntityIdMap(floor.labels, undefined, idFactory),
+    entranceSteps: buildEntityIdMap(floor.entranceSteps ?? [], undefined, idFactory),
+    entranceRamps: buildEntityIdMap(floor.entranceRamps ?? [], undefined, idFactory),
+    extensions: buildEntityIdMap(floor.extensions ?? [], undefined, idFactory),
+    sharedIds: new Map(),
+    excludedExteriorEmergencyStairIds: new Set(
+      options.includeExteriorEmergencyStairOccurrences
+        ? []
+        : floor.stairs.filter((stair) => !!stair.exteriorEmergencyStairId).map((stair) => stair.id),
+    ),
+  };
 }
 
 /**
@@ -331,19 +525,48 @@ export interface FloorDuplicateIdMaps {
 export function duplicateFloorForBuilding(
   source: Partial<FloorPlan>,
   defaults: FloorDefaults & { buildingId: string },
-  outIdMaps?: FloorDuplicateIdMaps
+  outIdMaps?: FloorDuplicateIdMaps,
+  relationshipMaps?: FloorDuplicateRelationshipMaps,
+  idFactory: () => string = generateEntityId,
+  options: FloorDuplicateOptions = {},
 ): FloorPlan {
-  const floor = normalizeFloor(source, defaults);
+  // Work from a detached snapshot so nested arrays/metadata in the duplicate
+  // cannot remain mutable aliases of the source Floor.
+  const floor = structuredClone(normalizeFloor(source, defaults));
   const id = defaults.id ?? generateFloorId();
   const buildingId = defaults.buildingId;
-  const roomIdMap = new Map(floor.rooms.map((room) => [room.id, generateFloorId()]));
-  const wallIdMap = new Map(floor.walls.map((wall) => [wall.id, generateFloorId()]));
-  const doorIdMap = new Map(floor.doors.map((door) => [door.id, generateFloorId()]));
-  const windowIdMap = new Map(floor.windows.map((win) => [win.id, generateFloorId()]));
-  const stairIdMap = new Map(floor.stairs.map((s) => [s.id, generateFloorId()]));
-  const rampIdMap = new Map(floor.ramps.map((r) => [r.id, generateFloorId()]));
-  const elevatorIdMap = new Map(floor.elevators.map((e) => [e.id, generateFloorId()]));
-  const exteriorZoneIdMap = new Map((floor.exteriorZones ?? []).map((zone) => [zone.id, generateFloorId()]));
+  const roomIdMap = buildEntityIdMap(floor.rooms, outIdMaps?.rooms, idFactory);
+  const wallIdMap = buildEntityIdMap(floor.walls, outIdMaps?.walls, idFactory);
+  const doorIdMap = buildEntityIdMap(floor.doors, outIdMaps?.doors, idFactory);
+  const windowIdMap = buildEntityIdMap(floor.windows, outIdMaps?.windows, idFactory);
+  const copiedStairs = options.includeExteriorEmergencyStairOccurrences
+    ? floor.stairs
+    : floor.stairs.filter((stair) => !stair.exteriorEmergencyStairId);
+  const excludedExteriorEmergencyStairIds = new Set(
+    options.includeExteriorEmergencyStairOccurrences
+      ? []
+      : floor.stairs.filter((stair) => !!stair.exteriorEmergencyStairId).map((stair) => stair.id),
+  );
+  const stairIdMap = buildEntityIdMap(copiedStairs, outIdMaps?.stairs, idFactory);
+  const rampIdMap = buildEntityIdMap(floor.ramps, outIdMaps?.ramps, idFactory);
+  const elevatorIdMap = buildEntityIdMap(floor.elevators, outIdMaps?.elevators, idFactory);
+  const exteriorZoneIdMap = buildEntityIdMap(floor.exteriorZones ?? [], outIdMaps?.exteriorZones, idFactory);
+  const pathIdMap = buildEntityIdMap(floor.paths, outIdMaps?.paths, idFactory);
+  const labelIdMap = buildEntityIdMap(floor.labels, outIdMaps?.labels, idFactory);
+  const entranceStepsIdMap = buildEntityIdMap(floor.entranceSteps ?? [], outIdMaps?.entranceSteps, idFactory);
+  const entranceRampsIdMap = buildEntityIdMap(floor.entranceRamps ?? [], outIdMaps?.entranceRamps, idFactory);
+  const extensionIdMap = buildEntityIdMap(floor.extensions ?? [], outIdMaps?.extensions, idFactory);
+  const furnitureGroupIdMap = relationshipMaps?.furnitureGroups ?? outIdMaps?.furnitureGroups ?? new Map<string, string>();
+  const sharedIdMap = relationshipMaps?.sharedIds ?? outIdMaps?.sharedIds ?? new Map<string, string>();
+  const furnitureIdMap = buildEntityIdMap(floor.furniture, outIdMaps?.furniture, idFactory);
+  floor.furniture.forEach((item) => {
+    if (item.groupId && !furnitureGroupIdMap.has(item.groupId)) furnitureGroupIdMap.set(item.groupId, idFactory());
+  });
+  const remapSharedId = (sharedId: string | undefined) => {
+    if (!sharedId) return undefined;
+    if (!sharedIdMap.has(sharedId)) sharedIdMap.set(sharedId, idFactory());
+    return sharedIdMap.get(sharedId);
+  };
   if (outIdMaps) {
     outIdMaps.rooms = roomIdMap;
     outIdMaps.walls = wallIdMap;
@@ -352,10 +575,33 @@ export function duplicateFloorForBuilding(
     outIdMaps.stairs = stairIdMap;
     outIdMaps.ramps = rampIdMap;
     outIdMaps.elevators = elevatorIdMap;
+    outIdMaps.furniture = furnitureIdMap;
+    outIdMaps.exteriorZones = exteriorZoneIdMap;
+    outIdMaps.furnitureGroups = furnitureGroupIdMap;
+    outIdMaps.paths = pathIdMap;
+    outIdMaps.labels = labelIdMap;
+    outIdMaps.entranceSteps = entranceStepsIdMap;
+    outIdMaps.entranceRamps = entranceRampsIdMap;
+    outIdMaps.extensions = extensionIdMap;
+    outIdMaps.sharedIds = sharedIdMap;
+    outIdMaps.excludedExteriorEmergencyStairIds = excludedExteriorEmergencyStairIds;
   }
+  const requireMapped = (map: Map<string, string>, sourceId: string, relation: string) => {
+    const targetId = map.get(sourceId);
+    if (!targetId) throw new Error(`Cannot duplicate Floor "${floor.label}": ${relation} refers to unmapped identity "${sourceId}".`);
+    return targetId;
+  };
+  const remapEntranceId = (entranceId: string | undefined) => {
+    if (!entranceId) return undefined;
+    if (!relationshipMaps) return entranceId;
+    // A legacy Door may retain a Building Entrance UUID after the Entrance
+    // itself was removed. That optional attachment cannot be reconstructed
+    // safely, but the physical Door is still valid and must survive cloning.
+    // Never preserve a dangling/source Entrance identity in the destination.
+    return relationshipMaps.entranceIds.get(entranceId);
+  };
   const remapAnchor = (anchor: FloorWallEndpointAnchor | undefined) => {
-    const nextRoomId = anchor ? roomIdMap.get(anchor.roomId) : undefined;
-    return anchor && nextRoomId ? { ...anchor, roomId: nextRoomId } : undefined;
+    return anchor ? { ...anchor, roomId: requireMapped(roomIdMap, anchor.roomId, "Wall Room anchor") } : undefined;
   };
   return normalizeFloor({
     ...floor,
@@ -363,19 +609,74 @@ export function duplicateFloorForBuilding(
     buildingId,
     number: defaults.number ?? floor.number,
     label: defaults.label ?? `${floor.label} (copy)`,
-    rooms: floor.rooms.map((room) => ({ ...room, id: roomIdMap.get(room.id) ?? generateFloorId(), buildingId, floorId: id })),
-    paths: floor.paths.map((item) => ({ ...item, id: generateFloorId() })),
-    walls: floor.walls.map((item) => ({ ...item, id: wallIdMap.get(item.id) ?? generateFloorId(), startAnchor: remapAnchor(item.startAnchor), endAnchor: remapAnchor(item.endAnchor) })),
-    doors: floor.doors.map((item) => ({ ...item, id: doorIdMap.get(item.id) ?? generateFloorId(), wallId: item.wallId ? wallIdMap.get(item.wallId) : undefined })),
-    windows: floor.windows.map((item) => ({ ...item, id: windowIdMap.get(item.id) ?? generateFloorId(), wallId: item.wallId ? wallIdMap.get(item.wallId) : undefined })),
-    furniture: floor.furniture.map((item) => ({ ...item, id: generateFloorId() })),
-    stairs: floor.stairs.map((item) => ({ ...item, id: stairIdMap.get(item.id) ?? generateFloorId() })),
-    ramps: floor.ramps.map((item) => ({ ...item, id: rampIdMap.get(item.id) ?? generateFloorId() })),
-    exteriorZones: (floor.exteriorZones ?? []).map((item) => ({ ...item, id: exteriorZoneIdMap.get(item.id) ?? generateFloorId() })),
-    entranceSteps: (floor.entranceSteps ?? []).map((item) => ({ ...item, id: generateFloorId(), parentZoneId: item.parentZoneId ? exteriorZoneIdMap.get(item.parentZoneId) : undefined })),
-    entranceRamps: (floor.entranceRamps ?? []).map((item) => ({ ...item, id: generateFloorId(), parentZoneId: item.parentZoneId ? exteriorZoneIdMap.get(item.parentZoneId) : undefined })),
-    elevators: floor.elevators.map((item) => ({ ...item, id: elevatorIdMap.get(item.id) ?? generateFloorId() })),
-    labels: floor.labels.map((item) => ({ ...item, id: generateFloorId() })),
+    rooms: floor.rooms.map((room) => ({
+      ...room,
+      id: requireMapped(roomIdMap, room.id, "Room identity"),
+      buildingId,
+      floorId: id,
+      accessDoorId: room.accessDoorId ? requireMapped(doorIdMap, room.accessDoorId, "Room Door link") : undefined,
+      accessDoorIds: Array.isArray(room.accessDoorIds)
+        ? room.accessDoorIds.map((doorId) => requireMapped(doorIdMap, doorId, "Room Door link"))
+        : undefined,
+      // Navigation nodes are copied separately by duplicateFloorInBuilding.
+      // Never return a physical Floor clone carrying a source graph identity.
+      accessNodeId: undefined,
+      ...(relationshipMaps ? { navConnection: undefined } : {}),
+      accessType: undefined,
+    })),
+    paths: floor.paths.map((item) => ({ ...item, id: requireMapped(pathIdMap, item.id, "Floor Path identity") })),
+    walls: floor.walls.map((item) => ({ ...item, id: requireMapped(wallIdMap, item.id, "Wall identity"), startAnchor: remapAnchor(item.startAnchor), endAnchor: remapAnchor(item.endAnchor) })),
+    doors: floor.doors.map((item) => ({
+      ...item,
+      id: requireMapped(doorIdMap, item.id, "Door identity"),
+      wallId: item.wallId ? requireMapped(wallIdMap, item.wallId, "Door Wall link") : undefined,
+      buildingEntranceId: relationshipMaps ? remapEntranceId(item.buildingEntranceId) : undefined,
+    })),
+    windows: floor.windows.map((item) => ({ ...item, id: requireMapped(windowIdMap, item.id, "Window identity"), wallId: item.wallId ? requireMapped(wallIdMap, item.wallId, "Window Wall link") : undefined })),
+    furniture: floor.furniture.map((item) => ({
+      ...item,
+      id: requireMapped(furnitureIdMap, item.id, "Furniture identity"),
+      ...(item.groupId ? { groupId: furnitureGroupIdMap.get(item.groupId) } : {}),
+      ...(item.exteriorZoneId ? { exteriorZoneId: requireMapped(exteriorZoneIdMap, item.exteriorZoneId, "Furniture Exterior Zone link") } : {}),
+    })),
+    stairs: copiedStairs.map((item) => ({
+      ...item,
+      id: requireMapped(stairIdMap, item.id, "Stair identity"),
+      ...(relationshipMaps ? {
+        sharedId: remapSharedId(item.sharedId),
+        exteriorEmergencyStairId: item.exteriorEmergencyStairId
+          ? relationshipMaps.exteriorEmergencyStairs.get(item.exteriorEmergencyStairId)
+          : undefined,
+      } : { sharedId: remapSharedId(item.sharedId), exteriorEmergencyStairId: undefined }),
+    })),
+    ramps: floor.ramps.map((item) => ({ ...item, id: requireMapped(rampIdMap, item.id, "Ramp identity"), sharedId: remapSharedId(item.sharedId) })),
+    exteriorZones: (floor.exteriorZones ?? []).map((item) => ({
+      ...item,
+      id: requireMapped(exteriorZoneIdMap, item.id, "Exterior Zone identity"),
+      ...(relationshipMaps ? {
+        linkedEntranceId: remapEntranceId(item.linkedEntranceId),
+        linkedEntranceIds: item.linkedEntranceIds?.map((entranceId) => remapEntranceId(entranceId)).filter((entranceId): entranceId is string => Boolean(entranceId)),
+      } : { linkedEntranceId: undefined, linkedEntranceIds: undefined }),
+    })),
+    entranceSteps: (floor.entranceSteps ?? []).map((item) => ({
+      ...item,
+      id: requireMapped(entranceStepsIdMap, item.id, "Entrance steps identity"),
+      parentZoneId: item.parentZoneId ? requireMapped(exteriorZoneIdMap, item.parentZoneId, "Entrance feature Exterior Zone link") : undefined,
+      ...(relationshipMaps && item.linkedEntranceId ? { linkedEntranceId: relationshipMaps.entranceIds.get(item.linkedEntranceId) } : { linkedEntranceId: undefined }),
+    })),
+    entranceRamps: (floor.entranceRamps ?? []).map((item) => ({
+      ...item,
+      id: requireMapped(entranceRampsIdMap, item.id, "Entrance ramp identity"),
+      parentZoneId: item.parentZoneId ? requireMapped(exteriorZoneIdMap, item.parentZoneId, "Entrance feature Exterior Zone link") : undefined,
+      ...(relationshipMaps && item.linkedEntranceId ? { linkedEntranceId: relationshipMaps.entranceIds.get(item.linkedEntranceId) } : { linkedEntranceId: undefined }),
+    })),
+    extensions: (floor.extensions ?? []).map((item) => ({ ...item, id: requireMapped(extensionIdMap, item.id, "Floor extension identity") })),
+    elevators: floor.elevators.map((item) => ({ item, id: requireMapped(elevatorIdMap, item.id, "Elevator identity") })).map(({ item, id }) => ({
+      ...item,
+      id,
+      sharedId: remapSharedId(item.sharedId),
+    })),
+    labels: floor.labels.map((item) => ({ ...item, id: requireMapped(labelIdMap, item.id, "Label identity") })),
   }, { ...defaults, id, buildingId });
 }
 
@@ -394,6 +695,7 @@ export function floorUndoEntryFromFloor(floor: Partial<FloorPlan>): FloorUndoEnt
       ["backgroundColor", normalized.backgroundColor],
       ["appearance", normalized.appearance],
       ["showGrid", normalized.showGrid],
+      ["showWallJunctions", normalized.showWallJunctions],
       ["gridSize", normalized.gridSize],
       ["backgroundImage", normalized.backgroundImage],
       ["calibration", normalized.calibration],

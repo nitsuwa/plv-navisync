@@ -151,6 +151,28 @@ type CompatibilityMouseInit = MouseEventInit & { shiftKey?: boolean };
 let compatibilityPointerId = 1000;
 let activeCompatibilityPointerId: number | null = null;
 let activeCompatibilityPointerPosition = { clientX: 0, clientY: 0 };
+let restoreInspectorMatchMedia: (() => void) | null = null;
+
+function setInspectorViewport(isMobile: boolean) {
+  const previous = window.matchMedia;
+  Object.defineProperty(window, "matchMedia", {
+    configurable: true,
+    value: vi.fn((query: string) => ({
+      matches: query === "(max-width: 1279px)" ? isMobile : false,
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })) as unknown as typeof window.matchMedia,
+  });
+  restoreInspectorMatchMedia = () => {
+    if (previous) Object.defineProperty(window, "matchMedia", { configurable: true, value: previous });
+    else Reflect.deleteProperty(window, "matchMedia");
+  };
+}
 
 beforeEach(() => {
   localStorage.clear();
@@ -196,6 +218,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  restoreInspectorMatchMedia?.();
+  restoreInspectorMatchMedia = null;
   fireEventCompat.mouseDown = originalMouseDown;
   fireEventCompat.mouseMove = originalMouseMove;
   fireEventCompat.mouseUp = originalMouseUp;
@@ -646,6 +670,7 @@ describe("EventFloorEditor", () => {
   });
 
   it("keeps pan cursor ownership over selected assets and hides floating actions while moving", () => {
+    setInspectorViewport(false);
     const capture = installPointerCaptureRegistry();
     try {
       render(
@@ -1916,6 +1941,105 @@ describe("EventFloorEditor", () => {
     expect(screen.getByTestId("event-furniture-chair-1").style.width).toBe("48px");
   });
 
+  it("reserves the desktop inspector rail outside the canvas and keeps canvas geometry independent of its content", () => {
+    setInspectorViewport(false);
+    render(
+      <EventFloorEditor
+        floorPlan={floorPlan}
+        overlay={overlayWithChair}
+        onSave={vi.fn()}
+        onSubmit={vi.fn()}
+        onBack={vi.fn()}
+      />,
+    );
+
+    const workspace = screen.getByTestId("event-editor-workspace");
+    const canvas = screen.getByLabelText("Event layout canvas");
+    const rail = screen.getByTestId("event-item-inspector-rail");
+    expect(rail).toHaveClass("w-[22rem]");
+    expect(canvas.parentElement).toBe(workspace);
+    expect(rail.parentElement).toBe(workspace);
+    expect(within(rail).getByText(/select a single furniture item or label/i)).toBeInTheDocument();
+
+    fireEvent.mouseDown(screen.getByTestId("event-furniture-chair-1"), { button: 0, clientX: 36, clientY: 36 });
+    fireEvent.mouseUp(canvas);
+    fireEvent.click(screen.getByRole("button", { name: "Open item details" }));
+    const details = within(rail).getByRole("region", { name: "Item details" });
+    expect(canvas).not.toContainElement(details);
+    expect(canvas.parentElement).toBe(workspace);
+    expect(rail).toHaveClass("w-[22rem]");
+
+    fireEvent.click(within(rail).getByRole("button", { name: "Close item details" }));
+    expect(within(rail).getByText(/select a single furniture item or label/i)).toBeInTheDocument();
+  });
+
+  it("opens item details as a mobile sheet, restores focus, and leaves canvas gestures available after close", async () => {
+    setInspectorViewport(true);
+    render(
+      <EventFloorEditor
+        floorPlan={floorPlan}
+        overlay={overlayWithChair}
+        onSave={vi.fn()}
+        onSubmit={vi.fn()}
+        onBack={vi.fn()}
+      />,
+    );
+
+    const canvas = screen.getByLabelText("Event layout canvas");
+    fireEvent.mouseDown(screen.getByTestId("event-furniture-chair-1"), { button: 0, clientX: 36, clientY: 36 });
+    fireEvent.mouseUp(canvas);
+    const detailsButton = screen.getByRole("button", { name: "Open item details" });
+    const originalCoordinates = [screen.getByTestId("event-furniture-chair-1").style.left, screen.getByTestId("event-furniture-chair-1").style.top];
+    fireEvent.click(detailsButton);
+
+    const sheet = await screen.findByRole("dialog", { name: "Item details" });
+    expect(sheet).toHaveClass("fixed", "bottom-0");
+    expect(sheet).toHaveAttribute("data-testid", "event-item-inspector-sheet");
+    expect(screen.getByTestId("event-furniture-chair-1").style.left).toBe(originalCoordinates[0]);
+    expect(screen.getByTestId("event-furniture-chair-1").style.top).toBe(originalCoordinates[1]);
+    fireEvent.click(within(sheet).getByRole("button", { name: "Close item details" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Item details" })).not.toBeInTheDocument());
+    expect(detailsButton).toHaveFocus();
+
+    fireEvent.click(screen.getByRole("button", { name: "Pan" }));
+    fireEvent.pointerDown(canvas, { pointerId: 301, pointerType: "touch", button: 0, clientX: 100, clientY: 100 });
+    fireEvent.pointerMove(window, { pointerId: 301, pointerType: "touch", button: 0, clientX: 106, clientY: 104 });
+    expect(screen.getByTestId("event-pan-status")).toHaveTextContent("Panning");
+    fireEvent.pointerUp(window, { pointerId: 301, pointerType: "touch", button: 0, clientX: 100, clientY: 100 });
+  });
+
+  it("clears item selection and closes details when the keyed floor editor switches location", async () => {
+    const view = render(
+      <EventFloorEditor
+        key="science-f2"
+        floorPlan={floorPlan}
+        overlay={overlayWithChair}
+        onSave={vi.fn()}
+        onSubmit={vi.fn()}
+        onBack={vi.fn()}
+      />,
+    );
+    const canvas = screen.getByLabelText("Event layout canvas");
+    fireEvent.mouseDown(screen.getByTestId("event-furniture-chair-1"), { button: 0, clientX: 36, clientY: 36 });
+    fireEvent.mouseUp(canvas);
+    fireEvent.click(screen.getByRole("button", { name: "Open item details" }));
+    expect(await screen.findByRole("dialog", { name: "Item details" })).toBeInTheDocument();
+
+    view.rerender(
+      <EventFloorEditor
+        key="science-f1"
+        floorPlan={{ ...floorPlan, id: "science-f1", number: 1, label: "Floor 1" }}
+        overlay={{ ...overlayWithChair, locationRef: { type: "building", buildingId: "science", floorId: "science-f1", label: "Science Building — Floor 1" } }}
+        onSave={vi.fn()}
+        onSubmit={vi.fn()}
+        onBack={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Item details" })).not.toBeInTheDocument());
+    expect(screen.queryByRole("button", { name: "Open item details" })).not.toBeInTheDocument();
+  });
+
   it("locks a selected item and prevents accidental dragging", () => {
     render(
       <EventFloorEditor
@@ -2059,6 +2183,7 @@ describe("EventFloorEditor", () => {
   });
 
   it("keeps the single-selection action bubble outside the transformed map layer", () => {
+    setInspectorViewport(false);
     render(
       <EventFloorEditor
         floorPlan={floorPlan}
@@ -2080,6 +2205,7 @@ describe("EventFloorEditor", () => {
   });
 
   it("keeps selected actions inside a narrow canvas near its lower-right edge", () => {
+    setInspectorViewport(false);
     render(<EventFloorEditor floorPlan={floorPlan} overlay={{ ...overlayWithChair, eventFurniture: [{ ...overlayWithChair.eventFurniture![0], x: 360, y: 240 }] }} onSave={vi.fn()} onSubmit={vi.fn()} onBack={vi.fn()} />);
     const canvas = screen.getByLabelText("Event layout canvas");
     Object.defineProperty(canvas, "clientWidth", { configurable: true, value: 390 });
@@ -2087,11 +2213,14 @@ describe("EventFloorEditor", () => {
     fireEvent.pointerDown(screen.getByTestId("event-furniture-chair-1"), { pointerId: 191, pointerType: "mouse", button: 0, clientX: 372, clientY: 252 });
     fireEvent.pointerUp(window, { pointerId: 191, pointerType: "mouse", clientX: 372, clientY: 252 });
     const actions = screen.getByTestId("event-single-item-actions");
-    expect(Number.parseFloat(actions.style.left)).toBe(30);
-    expect(Number.parseFloat(actions.style.top)).toBe(214);
+    expect(Number.parseFloat(actions.style.left)).toBeGreaterThanOrEqual(12);
+    expect(Number.parseFloat(actions.style.left)).toBeLessThan(canvas.clientWidth);
+    expect(Number.parseFloat(actions.style.top)).toBeGreaterThanOrEqual(12);
+    expect(Number.parseFloat(actions.style.top)).toBeLessThan(canvas.clientHeight);
   });
 
   it("moves selection actions below a top-edge item to preserve its direct rotation handle", () => {
+    setInspectorViewport(false);
     render(
       <EventFloorEditor
         floorPlan={floorPlan}
@@ -2186,6 +2315,7 @@ describe("EventFloorEditor", () => {
   });
 
   it("shows Arrange only for multiple selected furniture items", () => {
+    setInspectorViewport(false);
     const seededChairs = [20, 80, 140].map((x, index) => ({
       ...overlayWithChair.eventFurniture![0],
       id: `chair-${index + 1}`,

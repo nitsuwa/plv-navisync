@@ -52,6 +52,36 @@ function straightEdgeCampus(): Campus {
   return campus;
 }
 
+function pathwayGeneratedWaypointCampus(): Campus {
+  const campus = makeCampus();
+  campus.paths = [{
+    id: "entrance-approach-path",
+    points: [{ x: 250, y: 250 }, { x: 500, y: 250 }],
+    navigationVertexIds: ["approach-start", "approach-end"],
+    type: "walkway",
+    color: "#16a34a",
+    width: 10,
+  }];
+  campus.navNodes = [
+    { id: "path-node-a", name: "Walking Point", type: "outdoor", x: 250, y: 250, campusId: "c1", accessible: true, color: "#16a34a", generatedFromPathVertices: [{ pathId: "entrance-approach-path", vertexId: "approach-start" }] },
+    { id: "path-node-b", name: "Walking Point", type: "outdoor", x: 500, y: 250, campusId: "c1", accessible: true, color: "#16a34a", generatedFromPathVertices: [{ pathId: "entrance-approach-path", vertexId: "approach-end" }] },
+  ];
+  campus.navEdges = [{
+    id: "approach-nav-edge",
+    startNodeId: "path-node-a",
+    endNodeId: "path-node-b",
+    distance: 250,
+    bidirectional: true,
+    accessible: true,
+    emergencySafe: true,
+    type: "walkway",
+    color: "#16a34a",
+    width: 3,
+    generatedFromPathIds: ["entrance-approach-path"],
+  }];
+  return campus;
+}
+
 function bentEdgeCampus(): Campus {
   const campus = makeCampus();
   campus.navNodes = [
@@ -96,7 +126,7 @@ function canvasSvg(container: HTMLElement): SVGSVGElement {
 }
 
 function openNavigationLayer(container: HTMLElement): SVGSVGElement {
-  fireEvent.click(screen.getByText("Navigation"));
+  fireEvent.click(screen.getByRole("button", { name: /Show and edit the walking network|Hide the walking network/ }));
   return canvasSvg(container);
 }
 
@@ -160,7 +190,7 @@ describe("B5 Phase 6.9 — Connect clicks fall through the edge hit polyline (di
     let latest: Campus | undefined;
     const { container } = render(<Harness initialCampus={diagonalCampus()} onCampusChange={(c) => { latest = c; }} />);
     const svg = openNavigationLayer(container);
-    fireEvent.keyDown(window, { key: "p" });
+    fireEvent.click(screen.getByRole("button", { name: "Connect", exact: true }));
     fireEvent.mouseDown(navNodeAt(container, 200, 200), { clientX: 200, clientY: 200, bubbles: true });
     fireEvent.mouseUp(svg, { bubbles: true });
     // Click the diagonal edge well away from any node.
@@ -244,6 +274,25 @@ describe("B5 Phase 6.9 — Floor-parity node dragging (no grid snap, edges can b
     fireEvent.mouseUp(svg, { bubbles: true });
     const moved = latest!.navNodes!.find((n) => n.id === "nnB");
     expect(moved).toMatchObject({ x: 317, y: 200 });
+  });
+
+  it("does not let a generated nav waypoint drag transform its Visual Pathway", () => {
+    const campus = pathwayGeneratedWaypointCampus();
+    const before = structuredClone(campus);
+    const onCampusChange = vi.fn();
+    const { container } = render(<Harness initialCampus={campus} onCampusChange={onCampusChange} />);
+    const svg = openNavigationLayer(container);
+    const node = navNodeAt(container, 250, 250);
+
+    fireEvent.mouseDown(node, { clientX: 250, clientY: 250, bubbles: true });
+    fireEvent.mouseMove(svg, { clientX: 290, clientY: 270, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+
+    expect(onCampusChange).not.toHaveBeenCalled();
+    expect(campus.paths).toEqual(before.paths);
+    expect(campus.buildings).toEqual(before.buildings);
+    expect(campus.navNodes).toEqual(before.navNodes);
+    expect(campus.navEdges).toEqual(before.navEdges);
   });
 
   it("alignment guides still snap a dragged node to another node's axis (guides set)", () => {

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { render } from "@testing-library/react";
 import { createElement } from "react";
-import { FURNITURE_CATEGORIES, getFurniturePaletteCategories } from "../constants";
+import { addRecentFurnitureType, FURNITURE_CATEGORIES, furnitureTypeSupportsColor, getFurniturePaletteCategories, RECENT_FURNITURE_LIMIT } from "../constants";
 import { FloorFurnitureSymbol, furnitureTooltipContent } from "../FloorEditor";
 
 describe("Floor Editor furniture library", () => {
@@ -27,6 +27,126 @@ describe("Floor Editor furniture library", () => {
     expect(new Set(restroom.items.map((item) => item.type)).size).toBe(restroom.items.length);
   });
 
+  it("adds the Arm Chair as a readable Seating asset", () => {
+    const seating = FURNITURE_CATEGORIES.find((category) => category.id === "seating")!;
+    const armChair = seating.items.find((item) => item.type === "arm-chair");
+    expect(armChair).toMatchObject({ name: "Arm Chair", width: 16, height: 16 });
+    const symbol = render(createElement("svg", null, createElement(FloorFurnitureSymbol, {
+      type: "arm-chair", x: 0, y: 0, width: 16, height: 16, color: "#475569",
+    }))).container;
+    expect(symbol.querySelector("[data-testid='arm-chair-symbol']")).not.toBeNull();
+    for (const part of ["backrest", "left-arm", "right-arm"]) {
+      expect(symbol.querySelector(`[data-testid='arm-chair-${part}']`)?.tagName.toLowerCase()).toBe("path");
+    }
+    const seat = symbol.querySelector("[data-testid='arm-chair-seat']");
+    expect(seat?.tagName.toLowerCase()).toBe("rect");
+    expect(Number(seat?.getAttribute("rx"))).toBeGreaterThan(0);
+    expect(symbol.querySelector("[data-testid='arm-chair-body']")).toBeNull();
+  });
+
+  it("improves the existing Sofa asset with a two-seat top-down symbol", () => {
+    const seating = FURNITURE_CATEGORIES.find((category) => category.id === "seating")!;
+    const sofa = seating.items.find((item) => item.type === "sofa")!;
+    expect(sofa).toMatchObject({ name: "Sofa", width: 34, height: 16 });
+    expect(seating.items.filter((item) => item.type === "sofa")).toHaveLength(1);
+    expect(seating.items.some((item) => item.type === "two-seat-sofa")).toBe(false);
+    expect(getFurniturePaletteCategories("two-seat sofa").flatMap((category) => category.items.map((item) => item.type))).toContain("sofa");
+    expect(addRecentFurnitureType([], sofa.type)).toEqual(["sofa"]);
+
+    for (const [width, height] of [[34, 16], [16, 8]]) {
+      const symbol = render(createElement("svg", null, createElement(FloorFurnitureSymbol, {
+        type: sofa.type, x: 0, y: 0, width, height, color: sofa.color,
+      }))).container;
+      expect(symbol.querySelector("[data-testid='sofa-symbol']")).not.toBeNull();
+      expect(symbol.querySelector("[data-testid='sofa-backrest']")).not.toBeNull();
+      expect(symbol.querySelector("[data-testid='sofa-left-armrest']")).not.toBeNull();
+      expect(symbol.querySelector("[data-testid='sofa-right-armrest']")).not.toBeNull();
+      expect(symbol.querySelectorAll("[data-testid='sofa-seat-cushion']")).toHaveLength(2);
+    }
+  });
+
+  it("keeps fixed-color catalog symbols out of bulk color editing", () => {
+    expect(furnitureTypeSupportsColor("sofa")).toBe(true);
+    expect(furnitureTypeSupportsColor("exit-sign")).toBe(false);
+    expect(furnitureTypeSupportsColor("fire-extinguisher")).toBe(false);
+    expect(furnitureTypeSupportsColor("toilet-stall")).toBe(false);
+  });
+
+  it("draws Faculty Desk + Chair with a rectangular top and one compact chair", () => {
+    const renderSymbol = (width: number, height: number) => render(createElement("svg", null, createElement(FloorFurnitureSymbol, {
+      type: "faculty-desk-chair", x: 0, y: 0, width, height, color: "#7a5c3a",
+    }))).container;
+    for (const [width, height] of [[34, 26], [14, 11]]) {
+      const symbol = renderSymbol(width, height).querySelector("[data-testid='faculty-desk-chair-symbol']");
+      const desk = symbol?.querySelector("[data-testid='faculty-desk-surface']");
+      expect(desk?.tagName.toLowerCase()).toBe("rect");
+      expect(symbol?.querySelector("[data-testid='faculty-desk-drawer']")).not.toBeNull();
+      expect(symbol?.querySelectorAll("[data-testid='furniture-seat']")).toHaveLength(1);
+      expect(symbol?.querySelector("path")).toBeNull();
+    }
+  });
+
+  it("keeps Recently Used as a capped, deduplicated MRU list", () => {
+    const current = ["table", "chair", "shelf"];
+    expect(addRecentFurnitureType(current, "chair")).toEqual(["chair", "table", "shelf"]);
+    expect(addRecentFurnitureType(current, "new-item", 3)).toEqual(["new-item", "table", "chair"]);
+    expect(addRecentFurnitureType(Array.from({ length: RECENT_FURNITURE_LIMIT }, (_, index) => `item-${index}`), "new-item")).toHaveLength(RECENT_FURNITURE_LIMIT);
+  });
+
+  it("adds compact round and square lounge tables with searchable canonical types", () => {
+    const tables = FURNITURE_CATEGORIES.find((category) => category.id === "tables")!;
+    const round = tables.items.find((item) => item.type === "round-coffee-table")!;
+    const square = tables.items.find((item) => item.type === "square-coffee-table")!;
+    expect(round).toMatchObject({ name: "Round Coffee Table", width: 18, height: 18 });
+    expect(square).toMatchObject({ name: "Square Coffee Table", width: 18, height: 18 });
+    expect(tables.items.filter((item) => item.type.endsWith("coffee-table"))).toHaveLength(3);
+    const roundSearch = getFurniturePaletteCategories("Round Table").flatMap((category) => category.items.map((item) => item.type));
+    const squareSearch = getFurniturePaletteCategories("Square Table").flatMap((category) => category.items.map((item) => item.type));
+    expect(roundSearch).toContain("round-coffee-table");
+    expect(roundSearch.filter((type) => type === "round-coffee-table")).toHaveLength(1);
+    expect(squareSearch).toContain("square-coffee-table");
+    expect(squareSearch.filter((type) => type === "square-coffee-table")).toHaveLength(1);
+
+    const roundSymbol = render(createElement("svg", null, createElement(FloorFurnitureSymbol, {
+      type: round.type, x: 0, y: 0, width: round.width, height: round.height, color: round.color,
+    }))).container;
+    const squareSymbol = render(createElement("svg", null, createElement(FloorFurnitureSymbol, {
+      type: square.type, x: 0, y: 0, width: square.width, height: square.height, color: square.color,
+    }))).container;
+    expect(roundSymbol.querySelector("[data-testid='round-coffee-table-symbol'] circle")).not.toBeNull();
+    expect(squareSymbol.querySelector("[data-testid='square-coffee-table-symbol'] rect")).not.toBeNull();
+    expect(addRecentFurnitureType(addRecentFurnitureType([], round.type), round.type)).toEqual([round.type]);
+  });
+
+  it("cross-lists one canonical First Aid Cabinet in Medical and Safety", () => {
+    const medical = FURNITURE_CATEGORIES.find((category) => category.id === "medical")!;
+    const safety = FURNITURE_CATEGORIES.find((category) => category.id === "safety")!;
+    const medicalCabinet = medical.items.find((item) => item.type === "first-aid-cabinet")!;
+    const safetyCabinet = safety.items.find((item) => item.type === "first-aid-cabinet")!;
+
+    expect(medical.items.map((item) => item.type)).toEqual(["clinic-bed", "first-aid-cabinet"]);
+    expect(safety.items.map((item) => item.type)).toEqual([
+      "fire-extinguisher", "exit-sign", "emergency-light", "first-aid-cabinet",
+    ]);
+    expect(medical.items).toHaveLength(2);
+    expect(safety.items).toHaveLength(4);
+    expect(medicalCabinet).toBe(safetyCabinet);
+    expect(medicalCabinet.placementCategoryId).toBe("safety");
+
+    const searchResults = getFurniturePaletteCategories("First Aid").flatMap((category) => category.items);
+    expect(searchResults).toEqual([medicalCabinet]);
+
+    const recentTypes = addRecentFurnitureType(
+      addRecentFurnitureType([], medicalCabinet.type),
+      safetyCabinet.type,
+    );
+    expect(recentTypes).toEqual([medicalCabinet.type]);
+    const canonicalItemsByType = new Map(FURNITURE_CATEGORIES.flatMap((category) =>
+      category.items.map((item) => [item.type, item] as const),
+    ));
+    expect(recentTypes.map((type) => canonicalItemsByType.get(type))).toEqual([medicalCabinet]);
+  });
+
   it("curates the default palette around PLV classroom, lab, library, and facilities work", () => {
     const primary = new Set(getFurniturePaletteCategories().flatMap((category) => category.items.map((item) => item.type)));
     expect([...primary]).toEqual(expect.arrayContaining([
@@ -48,6 +168,17 @@ describe("Floor Editor furniture library", () => {
     expect(getFurniturePaletteCategories("server").flatMap((category) => category.items.map((item) => item.type))).toContain("server-rack");
     expect(getFurniturePaletteCategories("faucet").flatMap((category) => category.items.map((item) => item.type))).toContain("faucet");
     expect(getFurniturePaletteCategories("shelf").flatMap((category) => category.items.map((item) => item.type))).toEqual(expect.arrayContaining(["bookshelf", "library-bookshelf"]));
+  });
+
+  it("matches useful object aliases without opening categories first", () => {
+    const typesFor = (query: string) => getFurniturePaletteCategories(query)
+      .flatMap((category) => category.items.map((item) => item.type));
+    expect(typesFor("counter")).toEqual(expect.arrayContaining(["service-counter", "reception-counter"]));
+    expect(typesFor("bathroom")).toEqual(expect.arrayContaining(["toilet", "urinal", "sink"]));
+    expect(typesFor("computer")).toEqual(expect.arrayContaining(["computer-workstation-chair", "computer-lab-table-4", "computer-lab-table-6"]));
+    expect(typesFor("umbrella")).toContain("garden-shade-umbrella");
+    expect(typesFor("study")).toEqual(expect.arrayContaining(["student-desk-chair", "long-table", "study-carrel", "communal-study-table"]));
+    expect(typesFor("library")).toEqual(expect.arrayContaining(["rack-bookshelf", "library-counter", "study-carrel"]));
   });
 
   it("keeps composite defaults in sensible scale order", () => {
@@ -90,6 +221,67 @@ describe("Floor Editor furniture library", () => {
         expect(container.querySelector("svg")).not.toBeNull();
       }, item.type).not.toThrow();
     }
+  });
+
+  it("exposes the PLV floor-plan library and keeps grouped assets as one visual symbol", () => {
+    const types = new Set(FURNITURE_CATEGORIES.flatMap((category) => category.items.map((item) => item.type)));
+    expect([...types]).toEqual(expect.arrayContaining([
+      "round-table-chairs", "workstation", "computer-workstation", "clinic-bed", "rectangular-table",
+      "dining-table-4-seats", "dining-table-6-seats", "service-stall", "printer-copier", "service-counter",
+      "rack-bookshelf", "l-shaped-workstation", "drinking-fountain", "toilet", "urinal", "sink",
+      "lounge-chair", "lounge-chair-cluster", "lounge-sofa", "bench", "coffee-table",
+      "conference-table-large", "audience-chair", "audience-seating-4x4", "lecture-chair-writing-arm",
+      "boardroom-table-chairs", "long-table", "computer-station", "speech-lab-row", "collaborative-hub-table",
+      "library-counter", "wall-counter", "garden-shade-umbrella", "communal-study-table", "double-sided-study-table",
+      "study-carrel", "study-carrel-row",
+    ]));
+
+    const renderSymbol = (type: string) => render(createElement("svg", null, createElement(FloorFurnitureSymbol, {
+      type, x: 0, y: 0, width: 100, height: 70, color: "#64748b",
+    }))).container;
+    expect(renderSymbol("round-table-chairs").querySelectorAll("[data-testid='furniture-seat']")).toHaveLength(6);
+    expect(renderSymbol("dining-table-4-seats").querySelectorAll("[data-testid='furniture-seat']")).toHaveLength(4);
+    expect(renderSymbol("dining-table-6-seats").querySelectorAll("[data-testid='furniture-seat']")).toHaveLength(6);
+    expect(renderSymbol("lounge-chair-cluster").querySelectorAll("path").length).toBeGreaterThanOrEqual(3);
+    expect(renderSymbol("clinic-bed").querySelector("[data-testid='clinic-bed-pillow']")).not.toBeNull();
+    expect(renderSymbol("rack-bookshelf").querySelectorAll("line").length).toBeGreaterThan(2);
+    expect(renderSymbol("l-shaped-workstation").querySelector("[data-testid='l-shaped-workstation-symbol']")).not.toBeNull();
+    expect(renderSymbol("service-stall").querySelector("[data-testid='service-stall-symbol']")).not.toBeNull();
+    expect(renderSymbol("service-stall").querySelector("[data-testid='service-stall-serving-opening']")).not.toBeNull();
+    expect(renderSymbol("service-stall").querySelector("[data-testid='service-stall-floor-pattern']")).not.toBeNull();
+    expect(renderSymbol("service-stall").querySelector("[data-testid='service-stall-queue-marker']")).not.toBeNull();
+    expect(renderSymbol("service-counter").querySelector("[data-testid='service-counter-customer-edge']")).not.toBeNull();
+    expect(renderSymbol("conference-table-large").querySelector("[data-testid='conference-table-large-surface']")).not.toBeNull();
+    expect(renderSymbol("conference-table-large").querySelectorAll("[data-testid='furniture-seat']")).toHaveLength(16);
+    expect(renderSymbol("audience-chair").querySelector("[data-testid='audience-chair-symbol']")).not.toBeNull();
+    expect(renderSymbol("audience-seating-4x4").querySelectorAll("[data-testid='furniture-seat']")).toHaveLength(16);
+    expect(renderSymbol("garden-shade-umbrella").querySelector("[data-testid='garden-shade-canopy']")).not.toBeNull();
+    expect(renderSymbol("garden-shade-umbrella").querySelectorAll("[data-testid='garden-shade-rib']")).toHaveLength(8);
+    expect(renderSymbol("communal-study-table").querySelector("[data-testid='communal-study-table-surface']")).not.toBeNull();
+    expect(renderSymbol("communal-study-table").querySelectorAll("[data-testid='furniture-seat']")).toHaveLength(16);
+    expect(renderSymbol("double-sided-study-table").querySelectorAll("[data-testid='double-sided-study-table-bench']")).toHaveLength(2);
+    expect(renderSymbol("study-carrel").querySelectorAll("[data-testid='study-carrel-partition']")).toHaveLength(2);
+    expect(renderSymbol("study-carrel-row").querySelectorAll("[data-testid='study-carrel-unit']")).toHaveLength(4);
+  });
+
+  it("renders the upper-floor lecture, library, computer, and collaboration symbols distinctly", () => {
+    const renderSymbol = (type: string) => render(createElement("svg", null, createElement(FloorFurnitureSymbol, {
+      type, x: 0, y: 0, width: 100, height: 50, color: "#64748b",
+    }))).container;
+
+    expect(renderSymbol("lecture-chair-writing-arm").querySelector("[data-testid='lecture-chair-writing-arm-symbol']")).not.toBeNull();
+    expect(renderSymbol("lecture-chair-writing-arm").querySelector("[data-testid='lecture-chair-writing-arm']")).not.toBeNull();
+    expect(renderSymbol("lecture-row-6").querySelectorAll("[data-testid='lecture-chair-writing-arm']")).toHaveLength(6);
+    expect(renderSymbol("boardroom-table-chairs").querySelector("[data-testid='boardroom-table-surface']")).not.toBeNull();
+    expect(renderSymbol("boardroom-table-chairs").querySelectorAll("[data-testid='furniture-seat']")).toHaveLength(14);
+    expect(renderSymbol("long-table").querySelector("[data-testid='long-table-surface']")).not.toBeNull();
+    expect(renderSymbol("computer-station").querySelector("[data-testid='computer-station-monitor']")).not.toBeNull();
+    expect(renderSymbol("rack-bookshelf").querySelectorAll("line").length).toBeGreaterThan(2);
+    expect(renderSymbol("library-counter").querySelector("[data-testid='library-counter-public-side']")).not.toBeNull();
+    expect(renderSymbol("wall-counter").querySelector("[data-testid='wall-counter-surface']")).not.toBeNull();
+    expect(renderSymbol("speech-lab-row").querySelectorAll("[data-testid='speech-lab-station']").length).toBeGreaterThanOrEqual(4);
+    expect(renderSymbol("collaborative-hub-table").querySelectorAll("[data-testid='collaborative-hub-arm']")).toHaveLength(3);
+    expect(renderSymbol("collaborative-hub-table").querySelectorAll("[data-testid='furniture-seat']")).toHaveLength(6);
   });
 
   it("keeps the remaining PLV plan symbols structurally recognizable", () => {

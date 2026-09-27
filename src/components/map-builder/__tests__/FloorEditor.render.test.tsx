@@ -1,8 +1,11 @@
-import { describe, it, expect } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { describe, it, expect, vi } from "vitest";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { useState } from "react";
 import { FloorEditor, exteriorEmergencyStairSafeOffsetRange } from "../FloorEditor";
+import { ReadonlyFloorPlanScene } from "../ReadonlyFloorPlanVisuals";
 import type { Campus, FloorStairs } from "../types";
 import { syncExteriorEmergencyStairGraph } from "../../../lib/exteriorEmergencyStairs";
+import { createFloorPerimeterWalls } from "../../../lib/floorShape";
 
 /**
  * Minimal campus fixture — just enough for the Floor Editor to mount.
@@ -86,6 +89,329 @@ describe("FloorEditor render (regression: LandPlot runtime crash)", () => {
     ).not.toThrow();
   });
 
+  it("keeps perimeter Room selection and name overlays visible above physical content", () => {
+    const campus = makeCampus();
+    const floor = campus.buildings[0].floors[0];
+    floor.rooms = [{ id: "edge-room", name: "Perimeter Study Room", type: "classroom", x: 0, y: 0, w: 180, h: 120, floorId: "f1", buildingId: "b1" }];
+    floor.walls = [{ id: "room-wall", x1: 0, y1: 120, x2: 180, y2: 120, thickness: 5, color: "#475569", material: "concrete" }];
+    floor.furniture = [{ id: "room-desk", type: "desk", name: "Desk", category: "tables", x: 52, y: 24, width: 48, height: 28, rotation: 0, color: "#9a7048" }];
+
+    const { container } = render(
+      <FloorEditor
+        campus={campus}
+        buildingId="b1"
+        floorId="f1"
+        initialSelection={{ type: "room", id: "edge-room" }}
+        onBack={() => {}}
+        onSwitchFloor={() => {}}
+        onUpdate={() => {}}
+      />,
+    );
+
+    const label = container.querySelector('[data-testid="room-label-overlay"][data-room-id="edge-room"]');
+    const outline = container.querySelector('[data-testid="room-selection-overlay"][data-room-id="edge-room"]');
+    const physicalFurniture = container.querySelector('[data-layer-key="furniture:room-desk"]');
+    const overlayLayer = container.querySelector('[data-testid="room-name-overlay-layer"]');
+    expect(label).toBeTruthy();
+    expect(label?.classList.contains("pointer-events-none")).toBe(true);
+    expect(Number(outline?.getAttribute("x"))).toBeGreaterThan(0);
+    expect(Number(outline?.getAttribute("y"))).toBeGreaterThan(0);
+    expect(physicalFurniture && overlayLayer && Boolean(physicalFurniture.compareDocumentPosition(overlayLayer) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+  });
+
+  it("renders the complete long Room name with a dynamically tall Editor label", () => {
+    const campus = makeCampus();
+    const floor = campus.buildings[0].floors[0];
+    const name = "VP FOR STUDENT SERVICES, RESEARCH AND EXTENSION, PLANNING AND DEVELOPMENT";
+    floor.rooms = [{ id: "long-room", name, type: "classroom", x: 80, y: 70, w: 150, h: 110, floorId: "f1", buildingId: "b1" }];
+
+    const { container } = render(
+      <FloorEditor campus={campus} buildingId="b1" floorId="f1" onBack={() => {}} onSwitchFloor={() => {}} onUpdate={() => {}} />,
+    );
+
+    const label = container.querySelector('[data-testid="room-label-overlay"][data-room-id="long-room"]')!;
+    const lines = Array.from(label.querySelectorAll("tspan"), (line) => line.textContent ?? "");
+    expect(lines.join(" ")).toBe(name);
+    expect(lines.length).toBeGreaterThan(2);
+    expect(Number(label.querySelector("rect")?.getAttribute("width"))).toBeLessThanOrEqual(150 * 0.86 + 0.1);
+    expect(floor.rooms[0].name).toBe(name);
+  });
+
+  it("keeps a named Room label visible and rewraps it live while resizing", async () => {
+    const campus = makeCampus();
+    const floor = campus.buildings[0].floors[0];
+    const name = "VP FOR STUDENT SERVICES, RESEARCH AND EXTENSION, PLANNING AND DEVELOPMENT";
+    floor.rooms = [{ id: "resized-long-room", name, type: "classroom", x: 80, y: 70, w: 260, h: 140, floorId: "f1", buildingId: "b1" }];
+    campus.navNodes = [{ id: "protected-nav-node", name: "Protected", type: "outdoor", x: 420, y: 310, accessible: true, color: "#2563eb" }];
+    campus.navEdges = [];
+    const beforeNavNodes = structuredClone(campus.navNodes);
+    const beforeNavEdges = structuredClone(campus.navEdges);
+    let latestCampus = campus;
+
+    function StatefulFloorEditor() {
+      const [currentCampus, setCurrentCampus] = useState(campus);
+      return <FloorEditor campus={currentCampus} buildingId="b1" floorId="f1" initialSelection={{ type: "room", id: "resized-long-room" }} onBack={() => {}} onSwitchFloor={() => {}} onUpdate={(next) => { latestCampus = next; setCurrentCampus(next); }} />;
+    }
+
+    const { container } = render(<StatefulFloorEditor />);
+    const svg = Array.from(container.querySelectorAll("svg")).find((candidate) => candidate.getAttribute("viewBox") === "0 0 600 450");
+    expect(svg).toBeTruthy();
+    mockFloorSvgViewport(svg!);
+    const readLines = () => {
+      const label = container.querySelector('[data-testid="room-label-overlay"][data-room-id="resized-long-room"]')!;
+      return {
+        label,
+        lines: Array.from(label.querySelectorAll("tspan"), (line) => line.textContent ?? ""),
+      };
+    };
+    const initial = readLines();
+    const eastHandle = Array.from(container.querySelectorAll('[data-testid="room-resize-handle"]'))
+      .find((handle) => handle.getAttribute("data-corner") === "e");
+    expect(eastHandle).toBeTruthy();
+
+    fireEvent.mouseDown(eastHandle!, { clientX: 340, clientY: 140, bubbles: true });
+    fireEvent.mouseMove(svg!, { clientX: 180, clientY: 140, bubbles: true });
+    const narrow = readLines();
+    expect(narrow.label).toBeTruthy();
+    expect(narrow.lines.join(" ")).toBe(name);
+    expect(narrow.lines.length).toBeGreaterThan(initial.lines.length);
+
+    fireEvent.mouseMove(svg!, { clientX: 400, clientY: 140, bubbles: true });
+    const wide = readLines();
+    expect(wide.lines.join(" ")).toBe(name);
+    expect(wide.lines.length).toBeLessThan(narrow.lines.length);
+    expect(latestCampus.buildings[0].floors[0].rooms[0].name).toBe(name);
+    expect(latestCampus.navNodes).toEqual(beforeNavNodes);
+    expect(latestCampus.navEdges).toEqual(beforeNavEdges);
+    fireEvent.mouseUp(svg!, { bubbles: true });
+
+    const resizedWidth = latestCampus.buildings[0].floors[0].rooms[0].w;
+    fireEvent.click(screen.getByRole("button", { name: /^Undo/i }));
+    await waitFor(() => expect(latestCampus.buildings[0].floors[0].rooms[0].w).toBe(260));
+    expect(latestCampus.buildings[0].floors[0].rooms[0].name).toBe(name);
+    expect(readLines().lines.join(" ")).toBe(name);
+    fireEvent.click(screen.getByRole("button", { name: /^Redo/i }));
+    await waitFor(() => expect(latestCampus.buildings[0].floors[0].rooms[0].w).toBe(resizedWidth));
+    expect(latestCampus.buildings[0].floors[0].rooms[0].name).toBe(name);
+    expect(readLines().lines.join(" ")).toBe(name);
+  });
+
+  it("preserves a custom Room polygon and full name through a live resize", () => {
+    const campus = makeCampus();
+    const floor = campus.buildings[0].floors[0];
+    const name = "MEDICAL AND DENTAL CLINIC";
+    floor.rooms = [{
+      id: "resized-custom-room", name, type: "clinic", x: 80, y: 70, w: 260, h: 140,
+      shapePoints: [{ x: 80, y: 70 }, { x: 340, y: 70 }, { x: 340, y: 210 }, { x: 80, y: 210 }],
+      floorId: "f1", buildingId: "b1",
+    }];
+    let latestCampus = campus;
+    function StatefulFloorEditor() {
+      const [currentCampus, setCurrentCampus] = useState(campus);
+      return <FloorEditor campus={currentCampus} buildingId="b1" floorId="f1" initialSelection={{ type: "room", id: "resized-custom-room" }} onBack={() => {}} onSwitchFloor={() => {}} onUpdate={(next) => { latestCampus = next; setCurrentCampus(next); }} />;
+    }
+
+    const { container } = render(<StatefulFloorEditor />);
+    const svg = Array.from(container.querySelectorAll("svg")).find((candidate) => candidate.getAttribute("viewBox") === "0 0 600 450");
+    expect(svg).toBeTruthy();
+    mockFloorSvgViewport(svg!);
+    const eastHandle = Array.from(container.querySelectorAll('[data-testid="room-resize-handle"]'))
+      .find((handle) => handle.getAttribute("data-corner") === "e");
+    fireEvent.mouseDown(eastHandle!, { clientX: 340, clientY: 140, bubbles: true });
+    fireEvent.mouseMove(svg!, { clientX: 190, clientY: 140, bubbles: true });
+
+    const resizedRoom = latestCampus.buildings[0].floors[0].rooms[0];
+    expect(resizedRoom.name).toBe(name);
+    expect(resizedRoom.shapePoints).toHaveLength(4);
+    expect(Math.max(...resizedRoom.shapePoints!.map((point) => point.x)) - Math.min(...resizedRoom.shapePoints!.map((point) => point.x))).toBe(resizedRoom.w);
+    const label = container.querySelector('[data-testid="room-label-overlay"][data-room-id="resized-custom-room"]')!;
+    expect(Array.from(label.querySelectorAll("tspan"), (line) => line.textContent ?? "").join(" ")).toBe(name);
+    fireEvent.mouseUp(svg!, { bubbles: true });
+  });
+
+  it("uses the shared full-name layout in the Readonly Floor view", () => {
+    const campus = makeCampus();
+    const floor = campus.buildings[0].floors[0];
+    const name = "VP FOR ADMINISTRATION AND FINANCE";
+    floor.rooms = [{ id: "readonly-long-room", name, type: "office", x: 60, y: 50, w: 130, h: 90, floorId: "f1", buildingId: "b1" }];
+
+    const { container } = render(<svg><ReadonlyFloorPlanScene floor={floor} /></svg>);
+
+    const label = container.querySelector('[data-testid="readonly-room-label-overlay"][data-room-id="readonly-long-room"]')!;
+    const lines = Array.from(label.querySelectorAll("tspan"), (line) => line.textContent ?? "");
+    expect(lines.join(" ")).toBe(name);
+    expect(lines.join(" ")).toContain("FINANCE");
+    expect(Number(label.querySelector("rect")?.getAttribute("width"))).toBeLessThanOrEqual(130 * 0.86 + 0.1);
+    expect(floor.rooms[0].name).toBe(name);
+  });
+
+  it("renders an Entrance-linked Open Passage with the same Entrance direction badge", () => {
+    const campus = makeCampus();
+    const floor = campus.buildings[0].floors[0];
+    campus.buildings[0].entrances = [{
+      id: "entrance-main",
+      buildingId: "b1",
+      edge: "bottom",
+      offset: 0.5,
+      type: "general",
+      direction: "exit_only",
+    }];
+    floor.walls = [{ id: "wall-entry", x1: 20, y1: 100, x2: 180, y2: 100, thickness: 6, color: "#475569", material: "concrete" }];
+    floor.doors = [{
+      id: "canonical-entry-door",
+      x: 100,
+      y: 100,
+      width: 32,
+      wallId: "wall-entry",
+      offset: 0.5,
+      direction: "left",
+      color: "#b45309",
+      buildingEntranceId: "entrance-main",
+      openingType: "open_passage",
+    }];
+
+    const { container } = render(
+      <FloorEditor campus={campus} buildingId="b1" floorId="f1" onBack={() => {}} onSwitchFloor={() => {}} onUpdate={() => {}} />,
+    );
+    const opening = container.querySelector('[data-testid="attached-open-passage-opening-symbol"]');
+    const badge = container.querySelector('[data-testid="entrance-direction-badge"]');
+
+    expect(opening?.querySelector('[data-testid="open-passage-wall-cut"]')).toBeTruthy();
+    expect(container.querySelector('[data-testid="attached-door-opening-symbol"]')).toBeNull();
+    expect(badge?.getAttribute("data-entrance-direction")).toBe("exit_only");
+  });
+
+  it("keeps Furniture below Walls and Openings when local zOrder is extreme", () => {
+    const campus = makeCampus();
+    const floor = campus.buildings[0].floors[0];
+    floor.furniture = [{ id: "high-order-chair", type: "chair", name: "Chair", category: "Seating", x: 80, y: 80, width: 40, height: 32, rotation: 0, color: "#4b5563", zOrder: 999_999 }];
+    floor.walls = [{ id: "layer-wall", x1: 40, y1: 96, x2: 200, y2: 96, thickness: 6, color: "#475569", zOrder: -100 }];
+    floor.doors = [{ id: "layer-door", x: 100, y: 96, width: 30, wallId: "layer-wall", offset: 0.375, direction: "left", color: "#795548", zOrder: 900_000 }];
+    floor.windows = [{ id: "layer-window", x: 160, y: 96, width: 24, height: 6, wallId: "layer-wall", offset: 0.75, color: "#38bdf8", zOrder: -900_000 }];
+
+    const { container } = render(
+      <FloorEditor campus={campus} buildingId="b1" floorId="f1" onBack={() => {}} onSwitchFloor={() => {}} onUpdate={() => {}} />,
+    );
+    const furniture = container.querySelector('[data-layer-key="furniture:high-order-chair"]');
+    const wall = container.querySelector('[data-layer-key="wall:layer-wall"]');
+    const door = container.querySelector('[data-layer-key="door:layer-door"]');
+    const window = container.querySelector('[data-layer-key="window:layer-window"]');
+    expect(furniture && wall && Boolean(furniture.compareDocumentPosition(wall) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+    expect(wall && door && Boolean(wall.compareDocumentPosition(door) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+    expect(door && window && Boolean(door.compareDocumentPosition(window) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+  });
+
+  it("moves selected Furniture within its local layer and disables actions at its front edge", async () => {
+    const campus = makeCampus();
+    campus.buildings[0].floors[0].furniture = [
+      { id: "chair", type: "chair", name: "Chair", category: "Seating", x: 40, y: 50, width: 24, height: 20, rotation: 0, color: "#4b5563", zOrder: 0 },
+      { id: "desk", type: "desk", name: "Desk", category: "Tables / Work", x: 55, y: 55, width: 32, height: 24, rotation: 0, color: "#7a5c3a", zOrder: 1 },
+    ];
+    function Harness() {
+      const [liveCampus, setLiveCampus] = useState(campus);
+      return <FloorEditor campus={liveCampus} buildingId="b1" floorId="f1" initialSelection={{ type: "furniture", id: "chair" }} onBack={() => {}} onSwitchFloor={() => {}} onUpdate={setLiveCampus} />;
+    }
+    const { container } = render(<Harness />);
+    const physicalOrder = () => Array.from(container.querySelectorAll('[data-semantic-layer="furniture"] [data-layer-key^="furniture:"]'))
+      .map((item) => item.getAttribute("data-layer-key"));
+    expect(physicalOrder()).toEqual(["furniture:chair", "furniture:desk"]);
+
+    const front = screen.getByRole("button", { name: "Bring to front of layer" });
+    expect(front).toBeEnabled();
+    fireEvent.click(front);
+    await waitFor(() => expect(physicalOrder()).toEqual(["furniture:desk", "furniture:chair"]));
+    expect(screen.getByRole("button", { name: "Bring to front of layer" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Move one step forward in layer" })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Move one step back in layer" }));
+    await waitFor(() => expect(physicalOrder()).toEqual(["furniture:chair", "furniture:desk"]));
+  });
+
+  it("reorders, hides, restores, and locks attached Windows without losing their Wall attachment", async () => {
+    const campus = makeCampus();
+    const floor = campus.buildings[0].floors[0];
+    floor.walls = [{ id: "window-wall", x1: 40, y1: 90, x2: 200, y2: 90, thickness: 6, color: "#475569" }];
+    floor.furniture = [{ id: "window-overlap-furniture", type: "desk", name: "Desk", category: "Tables / Work", x: 88, y: 74, width: 44, height: 32, rotation: 0, color: "#7a5c3a", zOrder: 999_999 }];
+    floor.windows = [
+      { id: "window-a", x: 100, y: 90, width: 20, height: 6, wallId: "window-wall", offset: 0.375, color: "#38bdf8", zOrder: 0 },
+      { id: "window-b", x: 160, y: 90, width: 20, height: 6, wallId: "window-wall", offset: 0.75, color: "#38bdf8", zOrder: 1 },
+    ];
+    let latestCampus = campus;
+    function Harness() {
+      const [liveCampus, setLiveCampus] = useState(campus);
+      return <FloorEditor campus={liveCampus} buildingId="b1" floorId="f1" initialSelection={{ type: "window", id: "window-a" }} onBack={() => {}} onSwitchFloor={() => {}} onUpdate={(next) => { latestCampus = next; setLiveCampus(next); }} />;
+    }
+    const { container } = render(<Harness />);
+    const physicalOrder = () => Array.from(container.querySelectorAll('[data-semantic-layer="opening"][data-layer-key^="window:"]'))
+      .map((item) => item.getAttribute("data-layer-key"));
+    expect(physicalOrder()).toEqual(["window:window-a", "window:window-b"]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Move one step forward in layer" }));
+    await waitFor(() => expect(physicalOrder()).toEqual(["window:window-b", "window:window-a"]));
+    let changedWindow = latestCampus.buildings[0].floors[0].windows.find((item) => item.id === "window-a")!;
+    expect(changedWindow.zOrder).toBeGreaterThan(0);
+    expect(changedWindow.wallId).toBe("window-wall");
+    const furniture = container.querySelector('[data-layer-key="furniture:window-overlap-furniture"]')!;
+    const opening = container.querySelector('[data-layer-key="window:window-a"]')!;
+    expect(Boolean(furniture.compareDocumentPosition(opening) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+
+    fireEvent.click(within(container.querySelector('[data-testid="state-layer-controls"]')!).getByRole("button", { name: /^Hide$/i }));
+    await waitFor(() => expect(latestCampus.buildings[0].floors[0].windows.find((item) => item.id === "window-a")?.visible).toBe(false));
+    expect(container.querySelector('[data-layer-key="window:window-a"]')?.getAttribute("opacity")).toBe("0");
+    expect(latestCampus.buildings[0].floors[0].windows).toHaveLength(2);
+    expect(latestCampus.buildings[0].floors[0].windows.find((item) => item.id === "window-a")?.wallId).toBe("window-wall");
+
+    fireEvent.click(within(container.querySelector('[data-testid="state-layer-controls"]')!).getByRole("button", { name: /^Show$/i }));
+    await waitFor(() => expect(container.querySelector('[data-layer-key="window:window-a"]')?.getAttribute("opacity")).toBe("1"));
+    fireEvent.click(within(container.querySelector('[data-testid="state-layer-controls"]')!).getByRole("button", { name: /^Lock$/i }));
+    await waitFor(() => expect(latestCampus.buildings[0].floors[0].windows.find((item) => item.id === "window-a")?.locked).toBe(true));
+    expect(screen.queryByTestId("opening-resize-handle")).toBeNull();
+    fireEvent.keyDown(window, { key: "Delete" });
+    expect(latestCampus.buildings[0].floors[0].windows).toHaveLength(2);
+    changedWindow = latestCampus.buildings[0].floors[0].windows.find((item) => item.id === "window-a")!;
+    expect(changedWindow).toMatchObject({ wallId: "window-wall", locked: true, visible: true });
+  });
+
+  it("restores normal resize and rotation controls for a selected custom Room", () => {
+    const campus = makeCampus();
+    const floor = campus.buildings[0].floors[0];
+    floor.rooms = [{
+      id: "custom-room",
+      name: "Slanted Study Room",
+      type: "classroom",
+      x: 90,
+      y: 40,
+      w: 220,
+      h: 150,
+      rotation: 30,
+      shapePoints: [
+        { x: 90, y: 40 },
+        { x: 310, y: 40 },
+        { x: 310, y: 190 },
+        { x: 90, y: 170 },
+      ],
+      floorId: "f1",
+      buildingId: "b1",
+    }];
+
+    const { container } = render(
+      <FloorEditor
+        campus={campus}
+        buildingId="b1"
+        floorId="f1"
+        initialSelection={{ type: "room", id: "custom-room" }}
+        onBack={() => {}}
+        onSwitchFloor={() => {}}
+        onUpdate={() => {}}
+      />,
+    );
+
+    expect(container.querySelector('[data-testid="room-custom-shape"]')).toBeTruthy();
+    expect(container.querySelector('[data-testid="room-rotate-handle"]')).toBeTruthy();
+    expect(container.querySelectorAll('[data-testid="room-resize-handle"]')).toHaveLength(8);
+    expect(container.querySelector('[data-testid="room-shape-edit-handles"]')).toBeNull();
+  });
+
   it("shows the unified floor object library including the Window (LandPlot) button", () => {
     render(
       <FloorEditor
@@ -129,11 +455,38 @@ describe("FloorEditor render (regression: LandPlot runtime crash)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Safety / Facilities" }));
     expect(screen.getByText("Wall Fire Extinguisher")).toBeInTheDocument();
     expect(screen.getByText("Emergency Light")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Medical" }));
+    const medicalCategory = screen.getByRole("button", { name: "Medical" }).parentElement;
+    expect(medicalCategory).toHaveTextContent("Clinic Bed");
+    expect(medicalCategory).toHaveTextContent("First Aid Cabinet");
+    expect(screen.getByRole("button", { name: "Medical" }).textContent).toContain("2");
+    expect(screen.getByRole("button", { name: "Safety / Facilities" }).textContent).toContain("4");
+    expect(screen.getAllByRole("button", { name: "First Aid Cabinet" })).toHaveLength(2);
     fireEvent.click(screen.getByRole("button", { name: "Facilities / Amenities" }));
 
     const tableTennis = screen.getByRole("button", { name: "Table Tennis" });
     expect(tableTennis).toHaveAttribute("aria-label", "Table Tennis");
     expect(tableTennis).not.toHaveAttribute("title");
+  });
+
+  it("searches the object library globally and clears back to the normal browser", () => {
+    render(<FloorEditor campus={makeCampus()} buildingId="b1" floorId="f1" onBack={() => {}} onSwitchFloor={() => {}} onUpdate={() => {}} />);
+    const search = screen.getByRole("textbox", { name: "Search objects" });
+    expect(search).toBeInTheDocument();
+    fireEvent.change(search, { target: { value: "counter" } });
+    expect(screen.getByRole("button", { name: "Service Counter" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reception / Service Counter" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Food / Service" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Clear object search" }));
+    expect(search).toHaveValue("");
+    fireEvent.change(search, { target: { value: "umbrella" } });
+    expect(screen.getByRole("button", { name: "Garden Shade Umbrella" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Clear object search" }));
+    fireEvent.change(search, { target: { value: "study" } });
+    expect(screen.getByRole("button", { name: "Study Carrel" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Long Study Table + Chairs" })).toBeInTheDocument();
+    fireEvent.change(search, { target: { value: "First Aid" } });
+    expect(screen.getAllByRole("button", { name: "First Aid Cabinet" })).toHaveLength(1);
   });
 
   it("shows a recoverable message instead of creating fake data when the floor is missing", () => {
@@ -268,6 +621,170 @@ describe("FloorEditor render (regression: LandPlot runtime crash)", () => {
     fireEvent.mouseMove(svg!, { clientX: 100, clientY: 200, bubbles: true });
     expect(container.querySelector('[data-testid="room-invalid-preview"]')).toBeNull();
     fireEvent.mouseUp(svg!, { bubbles: true });
+  });
+
+  it("lets a coincident selected Room copy preview through overlap and commit once clear", () => {
+    const campus = makeCampus();
+    const floor = campus.buildings[0].floors[0];
+    floor.rooms = [
+      { id: "room-source", name: "Room A", type: "classroom", x: 80, y: 80, w: 100, h: 70, floorId: "f1", buildingId: "b1" },
+      { id: "room-copy", name: "Room A Copy", type: "classroom", x: 80, y: 80, w: 100, h: 70, floorId: "f1", buildingId: "b1" },
+    ];
+    campus.navNodes = [{ id: "protected-node", name: "Protected", type: "outdoor", x: 500, y: 300, accessible: true, color: "#2563eb" }];
+    campus.navEdges = [{ id: "protected-edge", type: "hallway", startNodeId: "protected-node", endNodeId: "protected-node", distance: 0, bidirectional: true }];
+    const beforeNavNodes = structuredClone(campus.navNodes);
+    const beforeNavEdges = structuredClone(campus.navEdges);
+    const updates: Campus[] = [];
+    const { container } = render(
+      <FloorEditor campus={campus} buildingId="b1" floorId="f1" initialSelection={{ type: "room", id: "room-copy" }} onBack={() => {}} onSwitchFloor={() => {}} onUpdate={(next) => updates.push(next)} />,
+    );
+    const svg = Array.from(container.querySelectorAll("svg")).find((candidate) => candidate.querySelector('[data-testid="floor-canvas-boundary"]'));
+    expect(svg).toBeTruthy();
+    mockFloorSvgViewport(svg!);
+    const copy = container.querySelector('[data-layer-key="room:room-copy"]');
+    expect(copy).toBeTruthy();
+    expect(Boolean(container.querySelector('[data-layer-key="room:room-source"]')?.compareDocumentPosition(copy!) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+
+    // A release while still invalid keeps the original geometry and leaves
+    // the copy selected so another drag can recover it.
+    fireEvent.mouseDown(copy!, { clientX: 90, clientY: 90, bubbles: true });
+    fireEvent.mouseMove(svg!, { clientX: 120, clientY: 90, bubbles: true });
+    expect(container.querySelector('[data-testid="room-invalid-preview"]')).toBeTruthy();
+    expect(Number(container.querySelector('[data-testid="room-invalid-preview"] rect')?.getAttribute("x"))).toBe(110);
+    fireEvent.mouseUp(svg!, { bubbles: true });
+    expect(updates).toHaveLength(0);
+    expect(container.querySelector('[data-layer-key="room:room-copy"] rect')?.getAttribute("x")).toBe("80");
+
+    // The next drag begins from the invalid overlap as well. It follows the
+    // pointer until the footprints clear, then commits the new location.
+    const retryCopy = container.querySelector('[data-layer-key="room:room-copy"]');
+    fireEvent.mouseDown(retryCopy!, { clientX: 90, clientY: 90, bubbles: true });
+    fireEvent.mouseMove(svg!, { clientX: 190, clientY: 90, bubbles: true });
+    expect(container.querySelector('[data-testid="room-invalid-preview"]')).toBeNull();
+    fireEvent.mouseUp(svg!, { bubbles: true });
+
+    const movedFloor = updates.at(-1)?.buildings[0].floors[0];
+    expect(movedFloor?.rooms.find((room) => room.id === "room-source")?.x).toBe(80);
+    expect(movedFloor?.rooms.find((room) => room.id === "room-copy")?.x).toBe(180);
+    expect(updates.at(-1)?.navNodes).toEqual(beforeNavNodes);
+    expect(updates.at(-1)?.navEdges).toEqual(beforeNavEdges);
+  });
+
+  it("keeps authored Room z-order while valid nested Rooms have no overlap warning", () => {
+    const campus = makeCampus();
+    const floor = campus.buildings[0].floors[0];
+    floor.rooms = [
+      { id: "library", name: "CABA LIBRARY", type: "classroom", x: 60, y: 50, w: 340, h: 280, zOrder: 10, floorId: "f1", buildingId: "b1" },
+      { id: "collab", name: "COLLAB ROOM 3A", type: "classroom", x: 170, y: 130, w: 100, h: 80, zOrder: 0, floorId: "f1", buildingId: "b1" },
+    ];
+
+    const { container } = render(
+      <FloorEditor campus={campus} buildingId="b1" floorId="f1" onBack={() => {}} onSwitchFloor={() => {}} onUpdate={() => {}} />,
+    );
+    const parent = container.querySelector('[data-layer-key="room:library"]')!;
+    const child = container.querySelector('[data-layer-key="room:collab"]')!;
+    expect(Boolean(child.compareDocumentPosition(parent) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+    expect(parent.querySelector("rect")?.getAttribute("stroke")).not.toBe("#dc2626");
+    expect(child.querySelector("rect")?.getAttribute("stroke")).not.toBe("#dc2626");
+    expect(container.querySelector('[data-testid="room-invalid-preview"]')).toBeNull();
+  });
+
+  it("shows invalid feedback while a nested Room crosses its parent, then lets it move completely outside", () => {
+    const campus = makeCampus();
+    const floor = campus.buildings[0].floors[0];
+    floor.rooms = [
+      { id: "library", name: "CABA LIBRARY", type: "classroom", x: 80, y: 80, w: 300, h: 200, zOrder: 10, floorId: "f1", buildingId: "b1" },
+      { id: "collab", name: "COLLAB ROOM 3A", type: "classroom", x: 180, y: 120, w: 80, h: 60, zOrder: 0, floorId: "f1", buildingId: "b1" },
+    ];
+    campus.navNodes = [{ id: "protected-node", name: "Outdoor point", type: "outdoor", x: 500, y: 300, accessible: true, color: "#2563eb" }];
+    campus.navEdges = [{ id: "protected-edge", type: "hallway", startNodeId: "protected-node", endNodeId: "protected-node", distance: 0, bidirectional: true }];
+    const beforeNavNodes = structuredClone(campus.navNodes);
+    const beforeNavEdges = structuredClone(campus.navEdges);
+    const updates: Campus[] = [];
+    const { container } = render(
+      <FloorEditor campus={campus} buildingId="b1" floorId="f1" onBack={() => {}} onSwitchFloor={() => {}} onUpdate={(next) => updates.push(next)} />,
+    );
+    const svg = Array.from(container.querySelectorAll("svg")).find((candidate) => candidate.querySelector('[data-testid="floor-canvas-boundary"]'));
+    expect(svg).toBeTruthy();
+    mockFloorSvgViewport(svg!);
+    const parent = container.querySelector('[data-layer-key="room:library"]')!;
+    // Simulate the browser targeting the frontmost parent fill. The Room hit
+    // resolver must redirect both selection and drag to the contained child.
+    fireEvent.mouseDown(parent, { clientX: 190, clientY: 130, bubbles: true });
+    expect(container.querySelector('[data-testid="room-selection-overlay"][data-room-id="collab"]')).toBeTruthy();
+    expect(container.querySelector('[data-testid="room-resize-handle"]')).toBeTruthy();
+    fireEvent.mouseMove(svg!, { clientX: 350, clientY: 130, bubbles: true });
+    expect(container.querySelector('[data-testid="room-invalid-preview"]')).toBeTruthy();
+    expect(container.querySelector('[data-testid="placement-warning-badge"]')?.textContent).toMatch(/Overlaps.*Room/);
+
+    fireEvent.mouseMove(svg!, { clientX: 490, clientY: 130, bubbles: true });
+    expect(container.querySelector('[data-testid="room-invalid-preview"]')).toBeNull();
+    fireEvent.mouseUp(svg!, { bubbles: true });
+    const movedFloor = updates.at(-1)?.buildings[0].floors[0];
+    expect(movedFloor?.rooms.find((room) => room.id === "collab")?.x).toBe(480);
+    expect(movedFloor?.rooms.find((room) => room.id === "library")?.x).toBe(80);
+    expect(updates.at(-1)?.navNodes).toEqual(beforeNavNodes);
+    expect(updates.at(-1)?.navEdges).toEqual(beforeNavEdges);
+
+    // An uncovered part of the same parent remains independently selectable.
+    const movedParent = container.querySelector('[data-layer-key="room:library"]')!;
+    fireEvent.mouseDown(movedParent, { clientX: 100, clientY: 100, bubbles: true });
+    fireEvent.mouseUp(svg!, { bubbles: true });
+    expect(container.querySelector('[data-testid="room-selection-overlay"][data-room-id="library"]')).toBeTruthy();
+  });
+
+  it("resolves nested Room context menus and Shift multi-selection to the child Rooms", () => {
+    const campus = makeCampus();
+    const floor = campus.buildings[0].floors[0];
+    floor.rooms = [
+      { id: "library", name: "CABA LIBRARY", type: "classroom", x: 60, y: 50, w: 340, h: 280, zOrder: 10, floorId: "f1", buildingId: "b1" },
+      { id: "room-a", name: "Room A", type: "classroom", x: 120, y: 120, w: 90, h: 70, zOrder: 0, floorId: "f1", buildingId: "b1" },
+      { id: "room-b", name: "Room B", type: "classroom", x: 250, y: 120, w: 90, h: 70, zOrder: 0, floorId: "f1", buildingId: "b1" },
+    ];
+    const { container } = render(
+      <FloorEditor campus={campus} buildingId="b1" floorId="f1" onBack={() => {}} onSwitchFloor={() => {}} onUpdate={() => {}} />,
+    );
+    const parent = container.querySelector('[data-layer-key="room:library"]')!;
+    const svg = Array.from(container.querySelectorAll("svg")).find((candidate) => candidate.getAttribute("viewBox") === "0 0 600 450");
+    expect(svg).toBeTruthy();
+    mockFloorSvgViewport(svg!);
+    fireEvent.contextMenu(parent, { clientX: 150, clientY: 145, bubbles: true });
+    expect(container.querySelector('[data-testid="room-selection-overlay"][data-room-id="room-a"]')).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Bring to Front" })).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: "Escape" });
+    fireEvent.mouseDown(parent, { clientX: 150, clientY: 145, shiftKey: true, bubbles: true });
+    fireEvent.mouseDown(parent, { clientX: 280, clientY: 145, shiftKey: true, bubbles: true });
+    fireEvent.mouseUp(svg!, { bubbles: true });
+    expect(container.querySelector('[data-testid="room-selection-overlay"][data-room-id="room-a"]')).toBeTruthy();
+    expect(container.querySelector('[data-testid="room-selection-overlay"][data-room-id="room-b"]')).toBeTruthy();
+    expect(container.querySelector('[data-testid="room-selection-overlay"][data-room-id="library"]')).toBeNull();
+  });
+
+  it("blocks shrinking a parent Room when that would leave its existing child outside", () => {
+    const campus = makeCampus();
+    const floor = campus.buildings[0].floors[0];
+    floor.rooms = [
+      { id: "library", name: "CABA LIBRARY", type: "classroom", x: 80, y: 80, w: 300, h: 200, floorId: "f1", buildingId: "b1" },
+      { id: "collab", name: "COLLAB ROOM 3A", type: "classroom", x: 350, y: 120, w: 25, h: 60, floorId: "f1", buildingId: "b1" },
+    ];
+    const updates: Campus[] = [];
+    const { container } = render(
+      <FloorEditor campus={campus} buildingId="b1" floorId="f1" initialSelection={{ type: "room", id: "library" }} onBack={() => {}} onSwitchFloor={() => {}} onUpdate={(next) => updates.push(next)} />,
+    );
+    const svg = Array.from(container.querySelectorAll("svg")).find((candidate) => candidate.querySelector('[data-testid="floor-canvas-boundary"]'));
+    expect(svg).toBeTruthy();
+    mockFloorSvgViewport(svg!);
+    const eastHandle = Array.from(container.querySelectorAll('[data-testid="room-resize-handle"]'))
+      .find((handle) => handle.getAttribute("data-corner") === "e");
+    expect(eastHandle).toBeTruthy();
+    fireEvent.mouseDown(eastHandle!, { clientX: 380, clientY: 180, bubbles: true });
+    fireEvent.mouseMove(svg!, { clientX: 340, clientY: 180, bubbles: true });
+    expect(container.querySelector('[data-testid="room-invalid-preview"]')?.getAttribute("data-preview-kind")).toBe("resize");
+    expect(container.querySelector('[data-testid="placement-warning-badge"]')?.getAttribute("aria-label"))
+      .toBe("Resize would leave a contained Room outside");
+    fireEvent.mouseUp(svg!, { bubbles: true });
+    expect(updates).toHaveLength(0);
   });
 
   it("shows a red Room ghost for an invalid resize and commits no blocked geometry", () => {
@@ -584,6 +1101,57 @@ describe("FloorEditor render (regression: LandPlot runtime crash)", () => {
     expect(screen.getByTestId("entrance-ramp")).toHaveAttribute("data-edge", "bottom");
   });
 
+  it("renders Entrance Ramp as a sharp architectural symbol with adaptive segment marks", () => {
+    const campus = makeCampus();
+    const floor = campus.buildings[0].floors[0];
+    floor.exteriorZones = [{ id: "zone-1", type: "veranda", side: "bottom", offset: 0.5, width: 220, depth: 120, label: "Veranda 1" }];
+    floor.entranceRamps = [{ id: "ramp-1", x: 0, y: 0, width: 96, height: 72, rotation: 90, label: "Ramp", parentZoneId: "zone-1", attachmentEdge: "outer", attachmentOffset: 0.5, accessible: true, layout: "straight" }];
+    const { container } = render(<FloorEditor campus={campus} buildingId="b1" floorId="f1" initialSelection={{ type: "entranceRamp", id: "ramp-1" }} onBack={() => {}} onSwitchFloor={() => {}} onUpdate={() => {}} />);
+
+    const symbol = container.querySelector('[data-testid="entrance-ramp"] [data-testid="ramp-symbol"]');
+    expect(symbol).toBeTruthy();
+    expect(symbol?.getAttribute("transform")).toContain("rotate(90");
+    expect(symbol?.querySelector("rect")?.getAttribute("rx")).toBe("0");
+    expect(symbol?.querySelectorAll('[data-testid="ramp-segment-line"]').length).toBeGreaterThanOrEqual(3);
+  });
+
+  it("hides visual junction caps by Floor preference or an authored Wall override", () => {
+    const renderJunctionFixture = (showWallJunctions: boolean | undefined, junctionBlocks?: "auto" | "show" | "hide") => {
+      const campus = makeCampus();
+      const floor = campus.buildings[0].floors[0];
+      floor.showWallJunctions = showWallJunctions;
+      floor.walls = [
+        { id: "horizontal", x1: 100, y1: 120, x2: 300, y2: 120, thickness: 5, color: "#475569", material: "concrete", junctionBlocks },
+        { id: "vertical", x1: 200, y1: 50, x2: 200, y2: 120, thickness: 5, color: "#475569", material: "concrete" },
+      ];
+      return render(<FloorEditor campus={campus} buildingId="b1" floorId="f1" onBack={() => {}} onSwitchFloor={() => {}} onUpdate={() => {}} />);
+    };
+    const hasSharedJunction = (container: HTMLElement) => Array.from(container.querySelectorAll('[data-testid="wall-joint-cap"]')).some((group) => {
+      const rect = group.querySelector("rect");
+      const x = Number(rect?.getAttribute("x"));
+      const y = Number(rect?.getAttribute("y"));
+      const width = Number(rect?.getAttribute("width"));
+      const height = Number(rect?.getAttribute("height"));
+      return Math.abs(x + width / 2 - 200) < 0.01 && Math.abs(y + height / 2 - 120) < 0.01;
+    });
+
+    const visible = renderJunctionFixture(undefined);
+    expect(hasSharedJunction(visible.container)).toBe(true);
+    visible.unmount();
+
+    const floorHidden = renderJunctionFixture(false);
+    expect(floorHidden.container.querySelectorAll('[data-testid="wall-joint-cap"]')).toHaveLength(0);
+    floorHidden.unmount();
+
+    const wallForcedHidden = renderJunctionFixture(undefined, "hide");
+    expect(hasSharedJunction(wallForcedHidden.container)).toBe(false);
+    wallForcedHidden.unmount();
+
+    const wallForcedShown = renderJunctionFixture(false, "show");
+    expect(hasSharedJunction(wallForcedShown.container)).toBe(true);
+    wallForcedShown.unmount();
+  });
+
   it.each([
     ["Exterior ZoneAdd semi-outdoor space", "zone"],
     ["Entrance StepsAdd local stair approach", "steps"],
@@ -872,5 +1440,202 @@ describe("FloorEditor top toolbar (B6 manual-QA: deterministic responsive groupi
     expect(screen.getByTestId("issues-toolbar")).toBeTruthy();
     expect(screen.getByRole("button", { name: /^Save$/i })).toBeTruthy();
     expect(screen.getByRole("button", { name: /^Publish$/i })).toBeTruthy();
+  });
+});
+
+describe("FloorEditor Furniture duplication and color actions", () => {
+  it("keeps the existing Sofa on normal rotation and resize controls", () => {
+    const campus = makeCampus();
+    campus.buildings[0].floors[0].furniture = [{
+      id: "sofa-transform", type: "sofa", name: "Sofa", category: "Seating",
+      x: 20, y: 20, width: 34, height: 16, rotation: 0, color: "#8b6f4e",
+    }];
+    let latestCampus = campus;
+    const selection = { type: "furniture" as const, id: "sofa-transform" };
+    function Harness() {
+      const [liveCampus, setLiveCampus] = useState(campus);
+      return <FloorEditor campus={liveCampus} buildingId="b1" floorId="f1" initialSelection={selection} onBack={() => {}} onSwitchFloor={() => {}} onUpdate={(next) => { latestCampus = next; setLiveCampus(next); }} />;
+    }
+    const { container } = render(<Harness />);
+
+    fireEvent.change(screen.getByRole("slider"), { target: { value: "90" } });
+    fireEvent.change(screen.getByDisplayValue("34"), { target: { value: "40" } });
+    fireEvent.blur(screen.getByDisplayValue("40"));
+
+    expect(latestCampus.buildings[0].floors[0].furniture[0]).toMatchObject({ width: 40, height: 16, rotation: 90 });
+    expect(container.querySelector('[data-layer-key="furniture:sofa-transform"] [data-testid="sofa-symbol"]')).toBeTruthy();
+    expect(container.querySelector('[data-layer-key="furniture:sofa-transform"] > g')?.getAttribute("transform")).toBe("rotate(90, 40, 28)");
+  });
+
+  it("duplicates Furniture by a predictable nearby offset, selects it, preserves its style, and undoes once", async () => {
+    const campus = makeCampus();
+    const floor = campus.buildings[0].floors[0];
+    floor.furniture = [{
+      id: "source-sofa", type: "sofa", name: "Sofa", category: "Seating",
+      x: 100, y: 100, width: 12, height: 12, rotation: 30, color: "#654321",
+      flipX: true, flipY: true, zOrder: 5,
+    }];
+    campus.navNodes = [{ id: "nav-preserved", name: "Floor point", type: "room", x: 24, y: 28, buildingId: "b1", floorId: "f1", accessible: true, color: "#2563eb" }];
+    campus.navEdges = [{ id: "edge-preserved", startNodeId: "nav-preserved", endNodeId: "nav-preserved", distance: 0, bidirectional: true, accessible: true, type: "hallway", color: "#2563eb", width: 2 }];
+    const originalNavNodes = structuredClone(campus.navNodes);
+    const originalNavEdges = structuredClone(campus.navEdges);
+    let latestCampus = campus;
+    const sourceSelection = { type: "furniture" as const, id: "source-sofa" };
+    function Harness() {
+      const [liveCampus, setLiveCampus] = useState(campus);
+      return <FloorEditor campus={liveCampus} buildingId="b1" floorId="f1" initialSelection={sourceSelection} onBack={() => {}} onSwitchFloor={() => {}} onUpdate={(next) => { latestCampus = next; setLiveCampus(next); }} />;
+    }
+    const { container } = render(<Harness />);
+    const floorFurniture = () => latestCampus.buildings[0].floors[0].furniture;
+    const duplicate = () => fireEvent.keyDown(window, { key: "d", ctrlKey: true });
+
+    duplicate();
+    await waitFor(() => expect(floorFurniture()).toHaveLength(2));
+    const firstCopy = floorFurniture().find((item) => item.id !== "source-sofa")!;
+    expect(firstCopy).toMatchObject({
+      type: "sofa", x: 116, y: 116, width: 12, height: 12, rotation: 30,
+      color: "#654321", flipX: true, flipY: true, zOrder: 1,
+    });
+    expect(firstCopy.id).not.toBe("source-sofa");
+    expect(floorFurniture().find((item) => item.id === "source-sofa")?.zOrder).toBe(0);
+    expect(latestCampus.navNodes).toEqual(originalNavNodes);
+    expect(latestCampus.navEdges).toEqual(originalNavEdges);
+    expect(screen.getByDisplayValue("Sofa Copy")).toBeInTheDocument();
+
+    duplicate();
+    await waitFor(() => expect(floorFurniture()).toHaveLength(3));
+    const secondCopy = floorFurniture().find((item) => item.id !== "source-sofa" && item.id !== firstCopy.id)!;
+    expect(secondCopy).toMatchObject({ x: 132, y: 132, width: 12, height: 12, color: "#654321", flipX: true, flipY: true, zOrder: 2 });
+    expect(secondCopy.id).not.toBe(firstCopy.id);
+    expect(screen.getByDisplayValue("Sofa Copy Copy")).toBeInTheDocument();
+    expect(latestCampus.navNodes).toEqual(originalNavNodes);
+    expect(latestCampus.navEdges).toEqual(originalNavEdges);
+
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+    await waitFor(() => expect(floorFurniture()).toHaveLength(2));
+    expect(floorFurniture().some((item) => item.id === secondCopy.id)).toBe(false);
+    expect(container.querySelector('[data-layer-key^="furniture:"]')).toBeTruthy();
+  });
+
+  it("applies color to recolorable members of the selected group as one undoable action", async () => {
+    const campus = makeCampus();
+    const floor = campus.buildings[0].floors[0];
+    floor.furniture = [
+      { id: "group-sofa", type: "sofa", name: "Sofa", category: "Seating", x: 20, y: 20, width: 34, height: 16, rotation: 0, color: "#654321", groupId: "lounge-group" },
+      { id: "group-table", type: "square-coffee-table", name: "Table", category: "Tables / Work", x: 80, y: 20, width: 18, height: 18, rotation: 0, color: "#aabbcc", groupId: "lounge-group" },
+      { id: "group-chair", type: "arm-chair", name: "Arm Chair", category: "Seating", x: 120, y: 20, width: 16, height: 16, rotation: 0, color: "#ccaa88", groupId: "lounge-group" },
+      { id: "fixed-exit", type: "exit-sign", name: "Exit Sign", category: "Safety / Facilities", x: 160, y: 20, width: 18, height: 10, rotation: 0, color: "#16a34a", groupId: "lounge-group" },
+    ];
+    let latestCampus = campus;
+    function Harness() {
+      const [liveCampus, setLiveCampus] = useState(campus);
+      return <FloorEditor campus={liveCampus} buildingId="b1" floorId="f1" initialSelection={{ type: "furniture", id: "group-sofa" }} onBack={() => {}} onSwitchFloor={() => {}} onUpdate={(next) => { latestCampus = next; setLiveCampus(next); }} />;
+    }
+    render(<Harness />);
+    expect(screen.getByText("Same-type color changes affect this floor only.")).toBeInTheDocument();
+    const applyGroup = screen.getByRole("button", { name: "Apply to Group (3)" });
+    expect(applyGroup).toBeEnabled();
+
+    fireEvent.click(applyGroup);
+    await waitFor(() => expect(latestCampus.buildings[0].floors[0].furniture.find((item) => item.id === "group-table")?.color).toBe("#654321"));
+    const afterApply = latestCampus.buildings[0].floors[0].furniture;
+    expect(afterApply.find((item) => item.id === "group-chair")?.color).toBe("#654321");
+    expect(afterApply.find((item) => item.id === "fixed-exit")?.color).toBe("#16a34a");
+    expect(afterApply.filter((item) => item.groupId === "lounge-group").map((item) => item.id)).toEqual(["group-sofa", "group-table", "group-chair", "fixed-exit"]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+    await waitFor(() => expect(latestCampus.buildings[0].floors[0].furniture.find((item) => item.id === "group-table")?.color).toBe("#aabbcc"));
+    expect(latestCampus.buildings[0].floors[0].furniture.find((item) => item.id === "group-chair")?.color).toBe("#ccaa88");
+    fireEvent.click(screen.getByRole("button", { name: "Redo" }));
+    await waitFor(() => expect(latestCampus.buildings[0].floors[0].furniture.find((item) => item.id === "group-table")?.color).toBe("#654321"));
+  });
+
+  it("limits same-type color changes to editable matches on the current Floor", async () => {
+    const campus = makeCampus();
+    const floor = campus.buildings[0].floors[0];
+    floor.furniture = [
+      { id: "selected-sofa", type: "sofa", name: "Sofa", category: "Seating", x: 20, y: 20, width: 34, height: 16, rotation: 0, color: "#654321" },
+      { id: "matching-sofa", type: "sofa", name: "Sofa", category: "Seating", x: 70, y: 20, width: 34, height: 16, rotation: 0, color: "#aabbcc" },
+      { id: "other-style", type: "arm-chair", name: "Arm Chair", category: "Seating", x: 120, y: 20, width: 16, height: 16, rotation: 0, color: "#ccaa88" },
+    ];
+    const secondFloor = structuredClone(floor);
+    secondFloor.id = "f2";
+    secondFloor.number = 2;
+    secondFloor.label = "Second Floor";
+    secondFloor.furniture = [{ id: "other-floor-sofa", type: "sofa", name: "Sofa", category: "Seating", x: 20, y: 20, width: 34, height: 16, rotation: 0, color: "#bbbbbb" }];
+    campus.buildings[0].floors.push(secondFloor);
+    const otherBuilding = structuredClone(campus.buildings[0]);
+    otherBuilding.id = "b2";
+    otherBuilding.name = "Other Building";
+    otherBuilding.floors = [{ ...structuredClone(floor), id: "b2-f1", buildingId: "b2", furniture: [{ id: "other-building-sofa", type: "sofa", name: "Sofa", category: "Seating", x: 20, y: 20, width: 34, height: 16, rotation: 0, color: "#cccccc" }] }];
+    campus.buildings.push(otherBuilding);
+    let latestCampus = campus;
+    function Harness() {
+      const [liveCampus, setLiveCampus] = useState(campus);
+      return <FloorEditor campus={liveCampus} buildingId="b1" floorId="f1" initialSelection={{ type: "furniture", id: "selected-sofa" }} onBack={() => {}} onSwitchFloor={() => {}} onUpdate={(next) => { latestCampus = next; setLiveCampus(next); }} />;
+    }
+    render(<Harness />);
+    expect(screen.getByRole("button", { name: "Apply to Same Type (2)" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Apply to Group (0)" })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Apply to Same Type (2)" }));
+    await waitFor(() => expect(latestCampus.buildings[0].floors[0].furniture.find((item) => item.id === "matching-sofa")?.color).toBe("#654321"));
+    expect(latestCampus.buildings[0].floors[0].furniture.find((item) => item.id === "other-style")?.color).toBe("#ccaa88");
+    expect(latestCampus.buildings[0].floors[1].furniture[0].color).toBe("#bbbbbb");
+    expect(latestCampus.buildings[1].floors[0].furniture[0].color).toBe("#cccccc");
+  });
+
+  it("keeps Floor Shape editing active while Space-drag pans the camera", async () => {
+    const campus = makeCampus();
+    const floor = campus.buildings[0].floors[0];
+    floor.extensions = [{ id: "east-lobby", side: "right", offset: 80, width: 180, depth: 200 }];
+    floor.walls = createFloorPerimeterWalls(floor.id, 600, 450, floor.extensions, {
+      perimeterThickness: 6,
+      perimeterMaterial: "concrete",
+      perimeterColor: "#64748b",
+    });
+    const onUpdate = vi.fn();
+    const { container } = render(<FloorEditor campus={campus} buildingId="b1" floorId="f1" onBack={() => {}} onSwitchFloor={() => {}} onUpdate={onUpdate} />);
+    const svg = Array.from(container.querySelectorAll("svg")).find((candidate) => candidate.querySelector('[data-testid="floor-canvas-boundary"]'))!;
+    mockFloorSvgViewport(svg, 600, 450);
+    expect(svg.querySelector('[data-testid="floor-managed-perimeter-core"]')?.getAttribute("d"))
+      .toBe(svg.querySelector('[data-testid="floor-canvas-boundary"]')?.getAttribute("d"));
+    const canvas = container.querySelector('[data-tutorial="floor-canvas"]') as HTMLElement;
+    Object.defineProperty(canvas, "getBoundingClientRect", {
+      configurable: true,
+      value: () => ({ left: 0, top: 0, width: 1200, height: 800, right: 1200, bottom: 800 }),
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Toggle properties panel" }));
+    fireEvent.click(screen.getByTestId("edit-floor-shape"));
+    expect(screen.getByTestId("floor-shape-panel")).toBeInTheDocument();
+    fireEvent.pointerDown(svg.querySelector('[data-floor-shape-action="body"]')!, { button: 0, pointerId: 1, clientX: 300, clientY: 300 });
+    fireEvent.pointerUp(window, { pointerId: 1 });
+    expect(screen.getByRole("button", { name: "Delete" })).toBeInTheDocument();
+
+    // Zoom enough that there is room to pan within the viewport's safe area.
+    const content = svg.querySelector("g[transform^='translate('")!;
+    const beforeZoom = content.getAttribute("transform");
+    fireEvent.click(screen.getByRole("button", { name: "Zoom In" }));
+    fireEvent.click(screen.getByRole("button", { name: "Zoom In" }));
+    await new Promise((resolve) => window.setTimeout(resolve, 240));
+    expect(content.getAttribute("transform")).not.toBe(beforeZoom);
+    const beforePan = content.getAttribute("transform");
+    fireEvent.keyDown(window, { code: "Space", key: " " });
+    fireEvent.mouseDown(screen.getByTestId("floor-shape-panel"), { button: 0, clientX: 320, clientY: 300 });
+    fireEvent.pointerMove(window, { pointerId: 2, clientX: 390, clientY: 350 });
+    fireEvent.pointerUp(window, { pointerId: 2 });
+    fireEvent.keyUp(window, { code: "Space", key: " " });
+
+    expect(content.getAttribute("transform")).not.toBe(beforePan);
+    const afterSpacePan = content.getAttribute("transform");
+    fireEvent.mouseDown(svg, { button: 1, clientX: 400, clientY: 340 });
+    fireEvent.pointerMove(window, { pointerId: 3, clientX: 450, clientY: 380 });
+    fireEvent.pointerUp(window, { pointerId: 3 });
+    expect(content.getAttribute("transform")).not.toBe(afterSpacePan);
+    expect(screen.getByTestId("floor-shape-panel")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Delete" })).toBeInTheDocument();
+    expect(floor.extensions).toEqual([{ id: "east-lobby", side: "right", offset: 80, width: 180, depth: 200 }]);
+    expect(onUpdate).not.toHaveBeenCalled();
   });
 });

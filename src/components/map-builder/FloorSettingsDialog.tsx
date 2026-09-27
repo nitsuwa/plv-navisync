@@ -19,6 +19,7 @@ export interface FloorSettingsDraft {
   texture: FloorTexture;
   color: string;
   showGrid: boolean;
+  showWallJunctions?: boolean;
   gridSize: 10 | 20 | 40;
   perimeterEnabled: boolean;
   perimeterThickness: number;
@@ -102,6 +103,7 @@ export function normalizeFloorSettings(floor: FloorPlan): FloorSettingsDraft {
     texture: appearance.texture,
     color: appearance.color,
     showGrid: authoringGridEligible && floor.showGrid !== false,
+    showWallJunctions: floor.showWallJunctions !== false,
     gridSize: normalizeSettingsGridSize(floor.gridSize),
     ...perimeterDraftFromFloor(floor),
   };
@@ -123,6 +125,7 @@ function normalizeFloorSettingsDraft(value: FloorSettingsDraft): FloorSettingsDr
     backgroundColor,
     color,
     showGrid: isFloorAuthoringGridEligible(value.material, value.texture) && value.showGrid,
+    showWallJunctions: value.showWallJunctions !== false,
     gridSize: normalizeSettingsGridSize(value.gridSize),
   };
 }
@@ -136,6 +139,7 @@ export function floorSettingsEqual(a: FloorSettingsDraft, b: FloorSettingsDraft)
     && a.texture === b.texture
     && a.color === b.color
     && a.showGrid === b.showGrid
+    && a.showWallJunctions === b.showWallJunctions
     && a.gridSize === b.gridSize
     && a.perimeterEnabled === b.perimeterEnabled
     && a.perimeterThickness === b.perimeterThickness
@@ -454,6 +458,23 @@ export function FloorSettingsDialog({
                     ))}
                   </div>
                 </div>
+
+                <button
+                  type="button"
+                  aria-pressed={draft.showWallJunctions !== false}
+                  aria-label="Show wall junction blocks"
+                  onClick={() => setDraft((d) => ({ ...d, showWallJunctions: d.showWallJunctions === false }))}
+                  className={cn(
+                    "w-full h-10 px-3 rounded-xl border flex items-center gap-2 text-xs font-bold transition-all",
+                    draft.showWallJunctions !== false
+                      ? "border-primary/40 bg-primary/5 text-primary"
+                      : "border-border text-muted-foreground hover:bg-muted/60",
+                  )}
+                >
+                  {draft.showWallJunctions !== false ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
+                  Show wall junction blocks
+                  <span className="ml-auto text-[9px] opacity-70">{draft.showWallJunctions !== false ? "Visible" : "Hidden"}</span>
+                </button>
 
                 <p className="text-[10px] text-muted-foreground leading-relaxed">
                   The floor surface stays readable — presets are light tones so walls, rooms, furniture, and selection outlines remain clearly visible.

@@ -1122,6 +1122,31 @@
     scrollbar-color: transparent transparent;
   }
 
+  /* ── Home page document scrollbar ── */
+  html.home-page-scrollbar {
+    scrollbar-gutter: stable;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(14,42,110,0.34) transparent;
+  }
+  html.home-page-scrollbar::-webkit-scrollbar {
+    width: 9px;
+  }
+  html.home-page-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  html.home-page-scrollbar::-webkit-scrollbar-thumb {
+    background: rgba(14,42,110,0.34);
+    border: 2px solid transparent;
+    border-radius: 99px;
+    background-clip: content-box;
+  }
+  html.dark.home-page-scrollbar {
+    scrollbar-color: rgba(224,168,32,0.62) transparent;
+  }
+  html.dark.home-page-scrollbar::-webkit-scrollbar-thumb {
+    background: rgba(224,168,32,0.62);
+  }
+
   /* ── scrollbar-show-on-hover: default (subtle hint) ── */
   .scrollbar-show-on-hover {
     scrollbar-width: thin;
@@ -1180,5 +1205,30 @@
   }
   .dark .scrollbar-show-on-hover:hover {
     scrollbar-color: rgba(255,255,255,0.13) transparent;
+  }
+
+  /* The Floor Editor object library is a primary workspace, so its scroll
+     thumb stays subtly visible even before the pointer enters the sidebar. */
+  .floor-object-library-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(14,42,110,0.18) transparent;
+  }
+  .floor-object-library-scroll::-webkit-scrollbar {
+    width: 6px;
+  }
+  .floor-object-library-scroll::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .floor-object-library-scroll::-webkit-scrollbar-thumb {
+    background: rgba(14,42,110,0.18);
+    border-radius: 99px;
+    border: 1px solid transparent;
+    background-clip: content-box;
+  }
+  .dark .floor-object-library-scroll {
+    scrollbar-color: rgba(255,255,255,0.16) transparent;
+  }
+  .dark .floor-object-library-scroll::-webkit-scrollbar-thumb {
+    background: rgba(255,255,255,0.16);
   }
 }

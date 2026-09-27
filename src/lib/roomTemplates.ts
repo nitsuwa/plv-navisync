@@ -1,19 +1,22 @@
-import type { FloorFurniture, FloorRoom, FloorWall } from "../components/map-builder/types";
+import type { FloorDoor, FloorFurniture, FloorRoom, FloorWall, FloorWindow } from "../components/map-builder/types";
+import { nearestPointOnWall, syncOpeningsToWalls } from "./floorGeometry";
+import { roomOutlinePoints } from "./roomShape";
 
 /**
- * Legacy room-scale definitions retained for persisted-data compatibility and
- * for composing built-in Floor Template archetypes. The Room Template feature
- * is no longer exposed by the Floor Editor: admins use Floor Templates only.
- * Definitions intentionally contain no live object IDs or navigation data.
+ * Legacy room-scale definitions are retained only as private building blocks
+ * for existing Floor Template snapshots. They are not Room library presets.
+ * User-created Room Templates are visual Room + Furniture snapshots.
  */
 export type RoomTemplateCategory = "Academic" | "Laboratory" | "Office" | "Study / Library" | "Facilities" | "Other";
 export type TemplateScope = "room" | "floor";
 export type TemplateSource = "builtin" | "campus" | "shared";
 
 export type RoomTemplateObject =
-  | { kind: "room"; x: number; y: number; width: number; height: number; type: string; name?: string }
-  | { kind: "wall"; x1: number; y1: number; x2: number; y2: number; thickness?: number; color?: string; material?: string; wallKey?: string }
-  | { kind: "furniture"; x: number; y: number; width: number; height: number; type: string; name: string; category: string; color: string; rotation?: number };
+  | { kind: "room"; x: number; y: number; width: number; height: number; type: string; name?: string; color?: string; rotation?: number; zOrder?: number; description?: string; accessibility?: boolean; shapePoints?: Array<{ x: number; y: number }> }
+  | { kind: "wall"; x1: number; y1: number; x2: number; y2: number; thickness?: number; color?: string; material?: string; wallKey?: string; perimeterProvided?: boolean; zOrder?: number }
+  | { kind: "door"; x: number; y: number; width: number; direction: FloorDoor["direction"]; color: string; doorType?: FloorDoor["doorType"]; hinge?: FloorDoor["hinge"]; swingSide?: FloorDoor["swingSide"]; openingType?: FloorDoor["openingType"]; accessDirection?: FloorDoor["accessDirection"]; wallKey?: string; offset?: number; zOrder?: number }
+  | { kind: "window"; x: number; y: number; width: number; height: number; color: string; wallKey?: string; offset?: number; zOrder?: number }
+  | { kind: "furniture"; x: number; y: number; width: number; height: number; type: string; name: string; category: string; color: string; rotation?: number; flipX?: boolean; flipY?: boolean; zOrder?: number; assetKey?: string; assetVariant?: string; assetConfig?: Record<string, string | number | boolean>; groupKey?: string };
 
 export interface TemplateDefinitionBase<Category extends string = string> {
   id: string;
@@ -35,6 +38,8 @@ export interface TemplateDefinitionBase<Category extends string = string> {
 export interface RoomTemplateDefinition extends TemplateDefinitionBase<RoomTemplateCategory> {
   scope: "room";
   objects: RoomTemplateObject[];
+  /** Full local boundary blueprint, including segments supplied by the source Floor perimeter. */
+  boundary?: Array<{ x1: number; y1: number; x2: number; y2: number; perimeterProvided?: boolean; wallKey: string; thickness?: number; color?: string; material?: string }>;
 }
 
 const wallObjects = (width: number, height: number): RoomTemplateObject[] => [
@@ -81,7 +86,7 @@ const makeTemplate = (
   tags: string[],
 ): RoomTemplateDefinition => ({ id, scope: "room", source: "builtin", name, category, description, width, height, objects, tags });
 
-export const ROOM_TEMPLATES: RoomTemplateDefinition[] = [
+export const FLOOR_TEMPLATE_ROOM_ARCHETYPES: RoomTemplateDefinition[] = [
   makeTemplate(
     "classroom-40",
     "Classroom — 40 Seats",
@@ -515,21 +520,108 @@ export const ROOM_TEMPLATES: RoomTemplateDefinition[] = [
   ),
 ];
 
+/** Room Templates are now admin-authored only. Keep this compatibility export
+ * empty so existing consumers cannot accidentally expose built-in presets. */
+export const ROOM_TEMPLATES: RoomTemplateDefinition[] = [];
+
 export const ROOM_TEMPLATE_CATEGORIES: Array<RoomTemplateCategory | "All"> = [
   "All", "Academic", "Laboratory", "Office", "Study / Library", "Facilities", "Other",
 ];
 
 export function getRoomTemplates(query = "", category: RoomTemplateCategory | "All" = "All"): RoomTemplateDefinition[] {
-  const normalized = query.trim().toLowerCase();
-  return ROOM_TEMPLATES.filter((template) => {
-    if (category !== "All" && template.category !== category) return false;
-    if (!normalized) return true;
-    return `${template.name} ${template.category} ${template.description} ${template.tags.join(" ")}`.toLowerCase().includes(normalized);
+  void query;
+  void category;
+  return [];
+}
+
+/** Allow-list a persisted or legacy Room Template before displaying or placing
+ * it. Old records may still contain Walls, openings, boundary blueprints, or
+ * navigation metadata; only Room geometry and Furniture survive this step. */
+export function roomFurnitureOnlyTemplate(template: RoomTemplateDefinition): RoomTemplateDefinition {
+  const sourceObjects = Array.isArray(template.objects) ? template.objects : [];
+  const sourceRoom = sourceObjects.find((object) => object?.kind === "room") as Extract<RoomTemplateObject, { kind: "room" }> | undefined;
+  const room: RoomTemplateObject = {
+    kind: "room",
+    x: Number.isFinite(sourceRoom?.x) ? sourceRoom!.x : 0,
+    y: Number.isFinite(sourceRoom?.y) ? sourceRoom!.y : 0,
+    width: Number.isFinite(sourceRoom?.width) && sourceRoom!.width > 0 ? sourceRoom!.width : template.width,
+    height: Number.isFinite(sourceRoom?.height) && sourceRoom!.height > 0 ? sourceRoom!.height : template.height,
+    type: typeof sourceRoom?.type === "string" ? sourceRoom.type : "classroom",
+    ...(typeof sourceRoom?.name === "string" ? { name: sourceRoom.name } : {}),
+    ...(typeof sourceRoom?.color === "string" ? { color: sourceRoom.color } : {}),
+    ...(Number.isFinite(sourceRoom?.rotation) ? { rotation: sourceRoom!.rotation } : {}),
+    ...(Number.isFinite(sourceRoom?.zOrder) ? { zOrder: sourceRoom!.zOrder } : {}),
+    ...(Array.isArray(sourceRoom?.shapePoints) && sourceRoom!.shapePoints.length >= 3
+      ? { shapePoints: sourceRoom!.shapePoints.map((point) => ({ x: point.x, y: point.y })) }
+      : {}),
+  };
+  const furnitureObjects: RoomTemplateObject[] = sourceObjects.flatMap((object) => {
+    if (object?.kind !== "furniture") return [];
+    const item = object as Extract<RoomTemplateObject, { kind: "furniture" }>;
+    if (![item.x, item.y, item.width, item.height].every(Number.isFinite) || item.width <= 0 || item.height <= 0) return [];
+    return [{
+      kind: "furniture",
+      x: item.x,
+      y: item.y,
+      width: item.width,
+      height: item.height,
+      type: item.type,
+      name: item.name,
+      category: item.category,
+      color: item.color,
+      ...(Number.isFinite(item.rotation) ? { rotation: item.rotation } : {}),
+      ...(item.flipX ? { flipX: true } : {}),
+      ...(item.flipY ? { flipY: true } : {}),
+      ...(Number.isFinite(item.zOrder) ? { zOrder: item.zOrder } : {}),
+      ...(item.assetKey ? { assetKey: item.assetKey } : {}),
+      ...(item.assetVariant ? { assetVariant: item.assetVariant } : {}),
+      ...(item.assetConfig ? { assetConfig: { ...item.assetConfig } } : {}),
+      ...(item.groupKey ? { groupKey: item.groupKey } : {}),
+    }];
   });
+  const roomDefinition = room as Extract<RoomTemplateObject, { kind: "room" }>;
+  return {
+    id: template.id,
+    scope: "room",
+    name: template.name,
+    category: template.category ?? "Other",
+    description: template.description ?? "",
+    width: roomDefinition.width,
+    height: roomDefinition.height,
+    tags: Array.isArray(template.tags) ? [...template.tags] : [],
+    ...(template.source ? { source: template.source } : {}),
+    ...(template.persistedId ? { persistedId: template.persistedId } : {}),
+    ...(template.campusId !== undefined ? { campusId: template.campusId } : {}),
+    ...(template.createdBy ? { createdBy: template.createdBy } : {}),
+    objects: [room, ...furnitureObjects],
+  };
 }
 
 export function roomTemplateBounds(template: RoomTemplateDefinition, origin: { x: number; y: number }) {
-  return { x: origin.x, y: origin.y, w: template.width, h: template.height };
+  const room = template.objects.find((object): object is Extract<RoomTemplateObject, { kind: "room" }> => object.kind === "room");
+  const x = room?.x ?? 0;
+  const y = room?.y ?? 0;
+  const width = room?.width ?? template.width;
+  const height = room?.height ?? template.height;
+  const points = room?.shapePoints && room.shapePoints.length >= 3
+    ? room.shapePoints
+    : [{ x, y }, { x: x + width, y }, { x: x + width, y: y + height }, { x, y: y + height }];
+  const minX = Math.min(...points.map((point) => point.x));
+  const maxX = Math.max(...points.map((point) => point.x));
+  const minY = Math.min(...points.map((point) => point.y));
+  const maxY = Math.max(...points.map((point) => point.y));
+  const cx = minX + (maxX - minX) / 2;
+  const cy = minY + (maxY - minY) / 2;
+  const radians = ((room?.rotation ?? 0) * Math.PI) / 180;
+  const cos = Math.cos(radians);
+  const sin = Math.sin(radians);
+  const transformed = points.map((point) => ({
+    x: origin.x + cx + (point.x - cx) * cos - (point.y - cy) * sin,
+    y: origin.y + cy + (point.x - cx) * sin + (point.y - cy) * cos,
+  }));
+  const xs = transformed.map((point) => point.x);
+  const ys = transformed.map((point) => point.y);
+  return { x: Math.min(...xs), y: Math.min(...ys), w: Math.max(...xs) - Math.min(...xs), h: Math.max(...ys) - Math.min(...ys) };
 }
 
 export function validateRoomTemplatePlacement(
@@ -537,18 +629,37 @@ export function validateRoomTemplatePlacement(
   origin: { x: number; y: number },
   floorWidth: number,
   floorHeight: number,
-  existingRooms: Pick<FloorRoom, "x" | "y" | "w" | "h">[] = [],
+  existingRooms: Array<Pick<FloorRoom, "x" | "y" | "w" | "h"> & Partial<Pick<FloorRoom, "rotation" | "shapePoints">>> = [],
 ): { valid: boolean; reason?: string } {
   const bounds = roomTemplateBounds(template, origin);
   if (bounds.x < 0 || bounds.y < 0 || bounds.x + bounds.w > floorWidth || bounds.y + bounds.h > floorHeight) {
     return { valid: false, reason: "Template footprint exceeds the Floor bounds." };
   }
-  const overlaps = existingRooms.some((candidate) => (
-    bounds.x < candidate.x + candidate.w
-    && bounds.x + bounds.w > candidate.x
-    && bounds.y < candidate.y + candidate.h
-    && bounds.y + bounds.h > candidate.y
-  ));
+  const overlaps = existingRooms.some((candidate) => {
+    const points = candidate.shapePoints && candidate.shapePoints.length >= 3
+      ? candidate.shapePoints
+      : [{ x: candidate.x, y: candidate.y }, { x: candidate.x + candidate.w, y: candidate.y }, { x: candidate.x + candidate.w, y: candidate.y + candidate.h }, { x: candidate.x, y: candidate.y + candidate.h }];
+    const minX = Math.min(...points.map((point) => point.x));
+    const maxX = Math.max(...points.map((point) => point.x));
+    const minY = Math.min(...points.map((point) => point.y));
+    const maxY = Math.max(...points.map((point) => point.y));
+    const cx = minX + (maxX - minX) / 2;
+    const cy = minY + (maxY - minY) / 2;
+    const radians = ((candidate.rotation ?? 0) * Math.PI) / 180;
+    const cos = Math.cos(radians);
+    const sin = Math.sin(radians);
+    const rotated = points.map((point) => ({
+      x: cx + (point.x - cx) * cos - (point.y - cy) * sin,
+      y: cy + (point.x - cx) * sin + (point.y - cy) * cos,
+    }));
+    const xs = rotated.map((point) => point.x);
+    const ys = rotated.map((point) => point.y);
+    const existing = { x: Math.min(...xs), y: Math.min(...ys), w: Math.max(...xs) - Math.min(...xs), h: Math.max(...ys) - Math.min(...ys) };
+    return bounds.x < existing.x + existing.w
+      && bounds.x + bounds.w > existing.x
+      && bounds.y < existing.y + existing.h
+      && bounds.y + bounds.h > existing.y;
+  });
   if (overlaps) return { valid: false, reason: "Template Room overlaps an existing Room." };
   return { valid: true };
 }
@@ -557,12 +668,21 @@ export interface InstantiatedRoomTemplate {
   room: FloorRoom;
   walls: FloorWall[];
   furniture: FloorFurniture[];
+  doors: FloorDoor[];
+  windows: FloorWindow[];
+}
+
+export interface InstantiatedRoomFurnitureTemplate {
+  room: FloorRoom;
+  furniture: FloorFurniture[];
 }
 
 export interface RoomTemplateInstantiationContext {
   floorId: string;
   buildingId: string;
   existingFurnitureCount?: number;
+  existingWalls?: FloorWall[];
+  groupIdMap?: Map<string, string>;
   idFactory?: (prefix: string) => string;
 }
 
@@ -601,28 +721,82 @@ export function instantiateRoomTemplate(
     y: Math.round(origin.y + (roomDefinition?.y ?? 0)),
     w: roomDefinition?.width ?? template.width,
     h: roomDefinition?.height ?? template.height,
+    ...(roomDefinition?.color ? { color: roomDefinition.color } : {}),
+    ...(roomDefinition?.rotation ? { rotation: roomDefinition.rotation } : {}),
+    ...(roomDefinition?.description ? { description: roomDefinition.description } : {}),
+    ...(roomDefinition?.accessibility !== undefined ? { accessibility: roomDefinition.accessibility } : {}),
+    ...(roomDefinition?.shapePoints ? { shapePoints: roomDefinition.shapePoints.map((point) => ({ x: origin.x + point.x, y: origin.y + point.y })) } : {}),
     floorId: context.floorId,
     buildingId: context.buildingId,
   };
-  const walls: FloorWall[] = template.objects
-    .filter((object): object is Extract<RoomTemplateObject, { kind: "wall" }> => object.kind === "wall")
-    .map((object, index) => ({
+  const walls: FloorWall[] = [];
+  const wallIdsByKey = new Map<string, string>();
+  const wallDefinitions = template.objects.filter((object): object is Extract<RoomTemplateObject, { kind: "wall" }> => object.kind === "wall");
+  const boundary = template.boundary ?? wallDefinitions.map((wall, index) => ({
+    ...wall,
+    wallKey: wall.wallKey ?? `room-wall-${index}`,
+  }));
+  const managedPerimeterWalls = (context.existingWalls ?? []).filter((wall) => wall.managedKind === "perimeter");
+  const matchesPerimeter = (segment: { x1: number; y1: number; x2: number; y2: number }, wall: FloorWall) => {
+    const endpoints = [
+      nearestPointOnWall({ x: segment.x1, y: segment.y1 }, wall),
+      nearestPointOnWall({ x: segment.x2, y: segment.y2 }, wall),
+    ];
+    const length = Math.hypot(segment.x2 - segment.x1, segment.y2 - segment.y1);
+    return length > 1 && endpoints.every((point) => point.d <= 3)
+      && endpoints[0].t >= -0.01 && endpoints[0].t <= 1.01
+      && endpoints[1].t >= -0.01 && endpoints[1].t <= 1.01;
+  };
+  const definitionByKey = new Map(wallDefinitions.map((wall, index) => [wall.wallKey ?? `room-wall-${index}`, wall]));
+  boundary.forEach((segment, index) => {
+    const wallKey = segment.wallKey ?? `room-boundary-${index}`;
+    const sourceDefinition = definitionByKey.get(wallKey);
+    const absolute = { x1: origin.x + segment.x1, y1: origin.y + segment.y1, x2: origin.x + segment.x2, y2: origin.y + segment.y2 };
+    const matchedPerimeter = segment.perimeterProvided
+      ? managedPerimeterWalls.find((wall) => matchesPerimeter(absolute, wall))
+      : undefined;
+    if (matchedPerimeter) {
+      wallIdsByKey.set(wallKey, matchedPerimeter.id);
+      return;
+    }
+    // Authored wall definitions preserve their original endpoint geometry.
+    // Perimeter-provided segments become authored walls when placed in the
+    // interior so the Room remains visually enclosed.
+    const authored = sourceDefinition ?? segment;
+    const wall: FloorWall & { wallKey?: string } = {
       id: makeId("wl"),
-      x1: Math.round(origin.x + object.x1),
-      y1: Math.round(origin.y + object.y1),
-      x2: Math.round(origin.x + object.x2),
-      y2: Math.round(origin.y + object.y2),
-      thickness: object.thickness ?? 4,
-      color: object.color ?? "#64748b",
-      material: object.material ?? "drywall",
+      x1: Math.round(origin.x + authored.x1),
+      y1: Math.round(origin.y + authored.y1),
+      x2: Math.round(origin.x + authored.x2),
+      y2: Math.round(origin.y + authored.y2),
+      thickness: authored.thickness ?? 4,
+      color: authored.color ?? "#64748b",
+      material: authored.material ?? "drywall",
       layer: "structure",
+      ...(authored.zOrder !== undefined ? { zOrder: authored.zOrder } : {}),
       visible: true,
       locked: false,
-      // This is only used while a containing Floor Template remaps physical
-      // openings. It is not persisted as a live wall identity.
-      wallKey: object.wallKey ?? `room-wall-${index}`,
-    }));
+      wallKey,
+    };
+    walls.push(wall);
+    wallIdsByKey.set(wallKey, wall.id);
+  });
+  // Interior partition Walls may be associated with a Room without forming
+  // one of its outer polygon segments. Preserve those definitions too.
+  wallDefinitions.forEach((definition, index) => {
+    const key = definition.wallKey ?? `room-wall-${index}`;
+    if (wallIdsByKey.has(key)) return;
+    const wall: FloorWall & { wallKey?: string } = {
+      id: makeId("wl"), x1: Math.round(origin.x + definition.x1), y1: Math.round(origin.y + definition.y1),
+      x2: Math.round(origin.x + definition.x2), y2: Math.round(origin.y + definition.y2),
+      thickness: definition.thickness ?? 4, color: definition.color ?? "#64748b", material: definition.material ?? "drywall",
+      layer: "structure", ...(definition.zOrder !== undefined ? { zOrder: definition.zOrder } : {}), visible: true, locked: false, wallKey: key,
+    };
+    walls.push(wall);
+    wallIdsByKey.set(key, wall.id);
+  });
   const zBase = context.existingFurnitureCount ?? 0;
+  const groupIds = context.groupIdMap ?? new Map<string, string>();
   const furnitureItems: FloorFurniture[] = template.objects
     .filter((object): object is Extract<RoomTemplateObject, { kind: "furniture" }> => object.kind === "furniture")
     .map((object, index) => ({
@@ -636,9 +810,125 @@ export function instantiateRoomTemplate(
       height: object.height,
       rotation: object.rotation ?? 0,
       color: object.color,
-      zOrder: zBase + index,
+      zOrder: object.zOrder ?? zBase + index,
+      ...(object.flipX ? { flipX: true } : {}),
+      ...(object.flipY ? { flipY: true } : {}),
+      ...(object.assetKey ? { assetKey: object.assetKey } : {}),
+      ...(object.assetVariant ? { assetVariant: object.assetVariant } : {}),
+      ...(object.assetConfig ? { assetConfig: { ...object.assetConfig } } : {}),
+      ...(object.groupKey ? { groupId: groupIds.get(object.groupKey) ?? (() => { const id = makeId("fg"); groupIds.set(object.groupKey!, id); return id; })() } : {}),
       visible: true,
       locked: false,
     }));
-  return { room, walls, furniture: furnitureItems };
+  const resolveOpeningWall = (wallKey: string | undefined, point: { x: number; y: number }) => {
+    const preferredId = wallKey ? wallIdsByKey.get(wallKey) : undefined;
+    return (context.existingWalls ?? []).concat(walls).find((wall) => wall.id === preferredId)
+      ?? (context.existingWalls ?? []).concat(walls)
+        .filter((wall) => Math.hypot(wall.x2 - wall.x1, wall.y2 - wall.y1) > 1)
+        .map((wall) => ({ wall, distance: nearestPointOnWall(point, wall).d }))
+        .sort((a, b) => a.distance - b.distance)[0]?.wall;
+  };
+  const doors: FloorDoor[] = template.objects.filter((object): object is Extract<RoomTemplateObject, { kind: "door" }> => object.kind === "door").flatMap((object) => {
+    const point = { x: origin.x + object.x, y: origin.y + object.y };
+    const wall = resolveOpeningWall(object.wallKey, point);
+    if (!wall) return [];
+    const projection = nearestPointOnWall(point, wall);
+    const door: FloorDoor = {
+      id: makeId("dr"), x: projection.x, y: projection.y, width: object.width, direction: object.direction, color: object.color,
+      // A reused Floor perimeter may be longer than the Room side. Preserve
+      // the projected physical position on that full Wall instead of applying
+      // the template-local fraction to the Floor-wide segment.
+      wallId: wall.id, offset: wall.managedKind === "perimeter" ? projection.t : object.offset ?? projection.t, visible: true, locked: false,
+      ...(object.doorType ? { doorType: object.doorType } : {}), ...(object.hinge ? { hinge: object.hinge } : {}),
+      ...(object.swingSide ? { swingSide: object.swingSide } : {}), ...(object.openingType ? { openingType: object.openingType } : {}),
+      ...(object.accessDirection ? { accessDirection: object.accessDirection } : {}),
+      ...(object.zOrder !== undefined ? { zOrder: object.zOrder } : {}),
+    };
+    const synced = syncOpeningsToWalls([door], [], [...(context.existingWalls ?? []), ...walls]).doors[0];
+    return synced ? [synced] : [];
+  });
+  const windows: FloorWindow[] = template.objects.filter((object): object is Extract<RoomTemplateObject, { kind: "window" }> => object.kind === "window").flatMap((object) => {
+    const point = { x: origin.x + object.x, y: origin.y + object.y };
+    const wall = resolveOpeningWall(object.wallKey, point);
+    if (!wall) return [];
+    const projection = nearestPointOnWall(point, wall);
+    const window: FloorWindow = {
+      id: makeId("win"), x: projection.x, y: projection.y, width: object.width, height: object.height, color: object.color,
+      wallId: wall.id, offset: wall.managedKind === "perimeter" ? projection.t : object.offset ?? projection.t, visible: true, locked: false,
+      ...(object.zOrder !== undefined ? { zOrder: object.zOrder } : {}),
+    };
+    const synced = syncOpeningsToWalls([], [window], [...(context.existingWalls ?? []), ...walls]).windows[0];
+    return synced ? [synced] : [];
+  });
+  return { room, walls, furniture: furnitureItems, doors, windows };
+}
+
+/** Instantiate a user-created Room Template as a Room and Furniture only.
+ * Legacy walls/openings/boundary/navigation payloads are discarded before IDs
+ * or physical objects are created. */
+export function instantiateRoomFurnitureTemplate(
+  sourceTemplate: RoomTemplateDefinition,
+  origin: { x: number; y: number },
+  context: Pick<RoomTemplateInstantiationContext, "floorId" | "buildingId" | "idFactory">,
+): InstantiatedRoomFurnitureTemplate {
+  const template = roomFurnitureOnlyTemplate(sourceTemplate);
+  const usedIds = new Set<string>(UUID_RE.test(context.floorId) ? [context.floorId] : []);
+  const makeId = (prefix: string) => {
+    const candidate = context.idFactory?.(prefix);
+    let id = candidate && UUID_RE.test(candidate) && !usedIds.has(candidate) ? candidate : newUuid();
+    while (usedIds.has(id)) id = newUuid();
+    usedIds.add(id);
+    return id;
+  };
+  const roomDefinition = template.objects.find((object): object is Extract<RoomTemplateObject, { kind: "room" }> => object.kind === "room")!;
+  const room: FloorRoom = {
+    id: makeId("rm"),
+    name: roomDefinition.name ?? template.name,
+    type: roomDefinition.type,
+    x: Math.round(origin.x + roomDefinition.x),
+    y: Math.round(origin.y + roomDefinition.y),
+    w: roomDefinition.width,
+    h: roomDefinition.height,
+    ...(roomDefinition.color ? { color: roomDefinition.color } : {}),
+    ...(roomDefinition.rotation !== undefined ? { rotation: roomDefinition.rotation } : {}),
+    ...(roomDefinition.zOrder !== undefined ? { zOrder: roomDefinition.zOrder } : {}),
+    ...(roomDefinition.shapePoints ? { shapePoints: roomDefinition.shapePoints.map((point) => ({ x: origin.x + point.x, y: origin.y + point.y })) } : {}),
+    floorId: context.floorId,
+    buildingId: context.buildingId,
+  };
+  const groupIds = new Map<string, string>();
+  const furniture = template.objects
+    .filter((object): object is Extract<RoomTemplateObject, { kind: "furniture" }> => object.kind === "furniture")
+    .map((item) => {
+      let groupId: string | undefined;
+      if (item.groupKey) {
+        groupId = groupIds.get(item.groupKey);
+        if (!groupId) {
+          groupId = makeId("fg");
+          groupIds.set(item.groupKey, groupId);
+        }
+      }
+      return {
+        id: makeId("fn"),
+        type: item.type,
+        name: item.name,
+        category: item.category,
+        x: Math.round(origin.x + item.x),
+        y: Math.round(origin.y + item.y),
+        width: item.width,
+        height: item.height,
+        rotation: item.rotation ?? 0,
+        color: item.color,
+        ...(item.flipX ? { flipX: true } : {}),
+        ...(item.flipY ? { flipY: true } : {}),
+        ...(item.zOrder !== undefined ? { zOrder: item.zOrder } : {}),
+        ...(item.assetKey ? { assetKey: item.assetKey } : {}),
+        ...(item.assetVariant ? { assetVariant: item.assetVariant } : {}),
+        ...(item.assetConfig ? { assetConfig: { ...item.assetConfig } } : {}),
+        ...(groupId ? { groupId } : {}),
+        visible: true,
+        locked: false,
+      } satisfies FloorFurniture;
+    });
+  return { room, furniture };
 }

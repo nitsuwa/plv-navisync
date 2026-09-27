@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import type { Campus } from "../../components/map-builder/types";
 import { buildSharedCampus, campusMatchesQuery, campusStatusOf, createCampusClone, resolvePublishTarget, sanitizeCampus } from "../campusHelpers";
+import { syncExteriorEmergencyStairs } from "../exteriorEmergencyStairs";
+import { hydrateCampusStructure, serializeCampusStructure } from "../../services/campusStructureService";
 
 // ── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -108,6 +110,9 @@ function allIds(c: Campus): string[] {
   const ids: string[] = [c.id];
   for (const b of c.buildings) {
     ids.push(b.id);
+    for (const entrance of b.entrances ?? []) ids.push(entrance.id);
+    for (const group of b.circulationGroups ?? []) ids.push(group.id);
+    for (const stair of b.exteriorEmergencyStairs ?? []) ids.push(stair.id);
     for (const f of b.floors) {
       ids.push(f.id);
       for (const r of f.rooms) ids.push(r.id);
@@ -120,6 +125,10 @@ function allIds(c: Campus): string[] {
       for (const r of f.ramps ?? []) ids.push(r.id);
       for (const e of f.elevators ?? []) ids.push(e.id);
       for (const l of f.labels ?? []) ids.push(l.id);
+      for (const zone of f.exteriorZones ?? []) ids.push(zone.id);
+      for (const item of f.entranceSteps ?? []) ids.push(item.id);
+      for (const item of f.entranceRamps ?? []) ids.push(item.id);
+      for (const item of f.extensions ?? []) ids.push(item.id);
     }
   }
   for (const m of c.markers) ids.push(m.id);
@@ -402,6 +411,100 @@ describe("createCampusClone", () => {
     expect(clonedPath.navigationVertexIds).not.toEqual(src.paths[0].navigationVertexIds);
     expect(clonedNode.generatedFromPathVertices?.[0].pathId).toBe(clonedPath.id);
     expect(clonedNode.generatedFromPathVertices?.[0].vertexId).toBe(clonedPath.navigationVertexIds?.[0]);
+  });
+
+  it("remaps Entrance-owned Floor Doors and clones all newer Floor physical identities", () => {
+    const src = makeSourceCampus();
+    const building = src.buildings[0];
+    const floor = building.floors[0];
+    building.entrances = [{ id: "entrance-source", buildingId: building.id, edge: "bottom", offset: 0.5, type: "general" }];
+    floor.doors[0] = { ...floor.doors[0], wallId: "w1", buildingEntranceId: "entrance-source" };
+    floor.furniture[0] = { ...floor.furniture[0], groupId: "group-source" };
+    floor.exteriorZones = [{ id: "zone-source", type: "veranda", side: "bottom", offset: 0.5, width: 20, depth: 8, linkedEntranceId: "entrance-source" }];
+    floor.entranceSteps = [{ id: "steps-source", x: 5, y: 5, width: 6, height: 4, label: "Steps", parentZoneId: "zone-source", linkedEntranceId: "entrance-source" }];
+    floor.entranceRamps = [{ id: "ramp-source", x: 5, y: 5, width: 6, height: 4, label: "Ramp", parentZoneId: "zone-source", linkedEntranceId: "entrance-source" }];
+    floor.extensions = [{ id: "extension-source", side: "bottom", offset: 40, width: 70, depth: 30 }];
+
+    const copy = createCampusClone(src, new Set(), new Set(), seqGen());
+    const copyBuilding = copy.buildings[0];
+    const copyFloor = copyBuilding.floors[0];
+    const copyEntrance = copyBuilding.entrances![0];
+
+    expect(copyEntrance.id).not.toBe("entrance-source");
+    expect(copyFloor.doors[0].buildingEntranceId).toBe(copyEntrance.id);
+    expect(copyFloor.doors[0].wallId).toBe(copyFloor.walls[0].id);
+    expect(copyFloor.exteriorZones?.[0].linkedEntranceId).toBe(copyEntrance.id);
+    expect(copyFloor.entranceSteps?.[0]).toMatchObject({ parentZoneId: copyFloor.exteriorZones?.[0].id, linkedEntranceId: copyEntrance.id });
+    expect(copyFloor.entranceRamps?.[0]).toMatchObject({ parentZoneId: copyFloor.exteriorZones?.[0].id, linkedEntranceId: copyEntrance.id });
+    expect(copyFloor.extensions?.[0].id).not.toBe("extension-source");
+    expect(copyFloor.furniture[0].groupId).not.toBe("group-source");
+    expect(new Set(allIds(copy)).size).toBe(allIds(copy).length);
+    expect(allIds(copy).some((id) => allIds(src).includes(id))).toBe(false);
+  });
+
+  it("clears an irrecoverable legacy Entrance attachment while keeping the Door", () => {
+    const src = makeSourceCampus();
+    src.buildings[0].floors[0].doors[0] = { ...src.buildings[0].floors[0].doors[0], buildingEntranceId: "deleted-entrance" };
+
+    const copy = createCampusClone(src, new Set(), new Set(), seqGen());
+
+    expect(copy.buildings[0].floors[0].doors).toHaveLength(1);
+    expect(copy.buildings[0].floors[0].doors[0].buildingEntranceId).toBeUndefined();
+    expect(copy.buildings[0].floors[0].doors[0]).toMatchObject({ x: 5, y: 5, width: 4 });
+  });
+
+  it("keeps a physical Stair when its legacy Exterior Stair owner is missing through Save/Reload", () => {
+    const src = makeSourceCampus();
+    src.buildings[0].floors[0].stairs.push({
+      id: "orphan-stair-source", x: 100, y: 120, width: 28, height: 44,
+      direction: "up", label: "Legacy Exterior Stair", exteriorEmergencyStairId: "deleted-exterior-owner",
+    });
+
+    const copy = createCampusClone(src, new Set(), new Set(), seqGen());
+    const copiedFloor = copy.buildings[0].floors[0];
+    expect(copiedFloor.stairs).toHaveLength(2);
+    expect(copiedFloor.stairs[1]).toMatchObject({ x: 100, y: 120, width: 28, label: "Legacy Exterior Stair" });
+    expect(copiedFloor.stairs[1].exteriorEmergencyStairId).toBeUndefined();
+
+    const payload = serializeCampusStructure(copy);
+    const reloaded = hydrateCampusStructure(copy, {
+      buildings: payload.buildings.map((row) => row as never),
+      floors: payload.floors.map((row) => row as never),
+      mapElements: payload.map_elements.map((row) => row as never),
+      navigationNodes: payload.navigation_nodes.map((row) => row as never),
+      navigationEdges: payload.navigation_edges.map((row) => row as never),
+    });
+    expect(reloaded.buildings[0].floors[0].stairs).toHaveLength(2);
+    expect(reloaded.buildings[0].floors[0].stairs[1]).toMatchObject({ x: 100, y: 120, width: 28, label: "Legacy Exterior Stair" });
+  });
+
+  it("remaps Exterior Stair served Floors before save-time synchronization", () => {
+    const src = makeSourceCampus();
+    const sourceBuilding = src.buildings[0];
+    const sourceFloor = sourceBuilding.floors[0];
+    const sourceStairId = "source-exterior-stair-occurrence";
+    const sourceOwnerId = "source-exterior-stair-owner";
+    sourceFloor.stairs.push({
+      id: sourceStairId, x: 40, y: 60, width: 28, height: 44,
+      direction: "both", label: "Exterior Emergency Stair", exteriorEmergencyStairId: sourceOwnerId,
+    });
+    sourceBuilding.exteriorEmergencyStairs = [{
+      id: sourceOwnerId, buildingId: sourceBuilding.id, label: "Exterior Emergency Stair", state: "open",
+      width: 28, height: 44, attachment: { edge: "right", offset: 0.5 }, servedFloorIds: [sourceFloor.id],
+      occurrenceIds: { [sourceFloor.id]: sourceStairId }, emergencySafe: true,
+    }];
+
+    const copy = createCampusClone(src, new Set(), new Set(), seqGen());
+    const copiedBuilding = syncExteriorEmergencyStairs(copy).buildings[0];
+    const copiedFloor = copiedBuilding.floors[0];
+    const copiedOwner = copiedBuilding.exteriorEmergencyStairs![0];
+
+    expect(copiedOwner.servedFloorIds).toEqual([copiedFloor.id]);
+    expect(copiedOwner.occurrenceIds).toEqual({ [copiedFloor.id]: copiedFloor.stairs.find((stair) => stair.exteriorEmergencyStairId === copiedOwner.id)?.id });
+    expect(copiedFloor.stairs.some((stair) => stair.id === sourceStairId)).toBe(false);
+    expect(copiedFloor.stairs.some((stair) => stair.exteriorEmergencyStairId === copiedOwner.id)).toBe(true);
+    expect(copiedFloor.stairs.filter((stair) => stair.exteriorEmergencyStairId === copiedOwner.id)).toHaveLength(1);
+    expect(copiedFloor.stairs).toHaveLength(sourceFloor.stairs.length);
   });
 });
 

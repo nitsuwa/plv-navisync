@@ -1,17 +1,67 @@
 import { describe, expect, it } from "vitest";
 import {
   createDefaultFloor,
+  assertFloorPhysicalReferences,
   defaultFloorLabel,
   duplicateFloorForBuilding,
   floorUndoEntryFromFloor,
   normalizeFloor,
   normalizeFloors,
+  normalizeRoomAccessDoors,
 } from "../floorPlanNormalization";
 import type { FloorPlan } from "../../components/map-builder/types";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 describe("floorPlanNormalization", () => {
+  it("drops stale Room Door IDs and canonicalizes the surviving same-Floor link", () => {
+    const sourceRoom = {
+      id: "r-lab", name: "Fluid Mechanics Laboratory", type: "laboratory", x: 0, y: 0, w: 100, h: 80,
+      buildingId: "b1", floorId: "f1", accessDoorId: "missing-door", accessDoorIds: ["missing-door", "door-b", "door-b"],
+      accessNodeId: "room-node",
+    };
+    const wall = { id: "wall-top", x1: 0, y1: 0, x2: 100, y2: 0, thickness: 4, color: "#64748b" };
+    const survivingDoor = { id: "door-b", x: 60, y: 0, width: 16, direction: "left" as const, color: "#8b5e34", wallId: "wall-top" };
+    const floor = normalizeFloor({ id: "f1", buildingId: "b1", rooms: [sourceRoom], walls: [wall], doors: [survivingDoor] });
+
+    expect(floor.rooms[0]).toMatchObject({ accessDoorId: "door-b", accessDoorIds: ["door-b"], accessNodeId: "room-node" });
+    expect(() => assertFloorPhysicalReferences(floor)).not.toThrow();
+  });
+
+  it("promotes the remaining Room Door after deletion and clears only Door metadata when none remain", () => {
+    const room = {
+      id: "r1", name: "Room A", type: "classroom", x: 0, y: 0, w: 100, h: 80,
+      buildingId: "b1", floorId: "f1", accessDoorId: "door-a", accessDoorIds: ["door-a", "door-b"], accessType: "door" as const,
+      accessNodeId: "room-node",
+    };
+    const walls = [
+      { id: "wall-a", x1: 0, y1: 0, x2: 50, y2: 0, thickness: 4, color: "#64748b" },
+      { id: "wall-b", x1: 50, y1: 0, x2: 100, y2: 0, thickness: 4, color: "#64748b" },
+    ];
+    const doorB = { id: "door-b", x: 75, y: 0, width: 16, direction: "left" as const, color: "#8b5e34", wallId: "wall-b" };
+
+    const afterDeletingA = normalizeRoomAccessDoors([room], [doorB], walls)[0];
+    expect(afterDeletingA).toMatchObject({ accessDoorId: "door-b", accessDoorIds: ["door-b"], accessNodeId: "room-node" });
+
+    const afterDeletingBoth = normalizeRoomAccessDoors([room], [], walls)[0];
+    expect(afterDeletingBoth).toMatchObject({ x: 0, y: 0, w: 100, h: 80, accessNodeId: "room-node" });
+    expect(afterDeletingBoth.accessDoorId).toBeUndefined();
+    expect(afterDeletingBoth.accessDoorIds).toBeUndefined();
+    expect(afterDeletingBoth.accessType).toBeUndefined();
+  });
+
+  it("remaps Room Door links through an explicit copied Door identity map", () => {
+    const room = {
+      id: "r1", name: "Room A", type: "classroom", x: 0, y: 0, w: 100, h: 80,
+      buildingId: "b1", floorId: "f1", accessDoorId: "old-door", accessDoorIds: ["old-door"],
+    };
+    const wall = { id: "new-wall", x1: 0, y1: 0, x2: 100, y2: 0, thickness: 4, color: "#64748b" };
+    const copiedDoor = { id: "new-door", x: 50, y: 0, width: 16, direction: "left" as const, color: "#8b5e34", wallId: "new-wall" };
+    const copiedRoom = normalizeRoomAccessDoors([room], [copiedDoor], [wall], new Map([["old-door", "new-door"]]))[0];
+
+    expect(copiedRoom).toMatchObject({ accessDoorId: "new-door", accessDoorIds: ["new-door"] });
+  });
+
   it("normalizes older or incomplete floor data into the full floor shape", () => {
     const source = {
       id: "f-old",
@@ -134,6 +184,53 @@ describe("floorPlanNormalization", () => {
     expect(copy.labels[0].id).not.toBe("l1");
   });
 
+  it("does not copy Building-owned Exterior Emergency Stair occurrences when duplicating one Floor", () => {
+    const source = normalizeFloor({
+      id: "f-source", buildingId: "b1", number: 1,
+      stairs: [
+        { id: "normal-left", x: 10, y: 20, width: 20, height: 30, direction: "up", label: "Left Stair", sharedId: "left-shaft" },
+        { id: "normal-right", x: 50, y: 20, width: 20, height: 30, direction: "down", label: "Right Stair", sharedId: "right-shaft" },
+        { id: "generated-exterior", x: 90, y: 20, width: 20, height: 30, direction: "both", label: "Emergency", sharedId: "exterior-shaft", exteriorEmergencyStairId: "building-exterior" },
+      ],
+    });
+
+    const copy = duplicateFloorForBuilding(source, { id: "f-copy", buildingId: "b1", number: 2 });
+
+    expect(copy.stairs.map((stair) => stair.label)).toEqual(["Left Stair", "Right Stair"]);
+    expect(copy.stairs.map((stair) => stair.id)).not.toContain("normal-left");
+    expect(copy.stairs.map((stair) => stair.id)).not.toContain("normal-right");
+    expect(copy.stairs.some((stair) => stair.exteriorEmergencyStairId)).toBe(false);
+  });
+
+  it("preserves a Room authored in a Floor Extension through repeated normalization", () => {
+    const source = normalizeFloor({
+      id: "f-extension",
+      buildingId: "b-extension",
+      canvasW: 220,
+      canvasH: 160,
+      extensions: [{ id: "right", side: "right", offset: 30, width: 100, depth: 100 }],
+      rooms: [{ id: "r-extension", name: "Extension Room", type: "classroom", x: 245, y: 50, w: 50, h: 40 }],
+    });
+
+    const afterReload = normalizeFloor(structuredClone(source));
+    expect(afterReload.rooms[0]).toMatchObject({ x: 245, y: 50, w: 50, h: 40 });
+    expect(afterReload.extensions).toEqual(source.extensions);
+  });
+
+  it("remaps copied Room access links to the copied Door", () => {
+    const source = normalizeFloor({
+      id: "f1", buildingId: "b1", number: 1,
+      rooms: [{ id: "r1", name: "Lab", type: "laboratory", x: 0, y: 0, w: 100, h: 80, buildingId: "b1", floorId: "f1", accessDoorId: "d1", accessDoorIds: ["d1"] }],
+      walls: [{ id: "w1", x1: 0, y1: 0, x2: 100, y2: 0, thickness: 4, color: "#64748b" }],
+      doors: [{ id: "d1", x: 50, y: 0, width: 16, direction: "left", color: "#8b5e34", wallId: "w1" }],
+    });
+    const copy = duplicateFloorForBuilding(source, { id: "f2", buildingId: "b2", number: 1 });
+
+    expect(copy.rooms[0].accessDoorId).toBe(copy.doors[0].id);
+    expect(copy.rooms[0].accessDoorIds).toEqual([copy.doors[0].id]);
+    expect(copy.rooms[0].accessDoorId).not.toBe(source.doors[0].id);
+  });
+
   it("produces undo entries with every editable floor collection initialized", () => {
     const entry = floorUndoEntryFromFloor({ id: "f1", buildingId: "b1", number: 1, label: "Ground Floor" });
 
@@ -145,6 +242,7 @@ describe("floorPlanNormalization", () => {
       appearance: { material: "neutral", texture: "subtle", color: "#e8e1d7" },
       showGrid: true,
       gridSize: 20,
+      extensions: [],
       backgroundImage: undefined,
       calibration: undefined,
       label: "Ground Floor",

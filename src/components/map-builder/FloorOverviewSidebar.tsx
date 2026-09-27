@@ -19,8 +19,10 @@ interface FloorOverviewSidebarProps {
   /** Apply a new canvas size (validated/clamped by the caller). */
   onCanvasSize: (width: number, height: number) => void;
   onShowGrid: (visible: boolean) => void;
+  onShowWallJunctions?: (visible: boolean) => void;
   onGridSize: (size: 10 | 20 | 40) => void;
   onOpenSettings: () => void;
+  onEditFloorShape?: () => void;
   onSaveAsTemplate?: () => void;
   onDuplicate: () => void;
   onMoveUp: () => void;
@@ -80,8 +82,8 @@ function CommitInput({ ariaLabel, value, onCommit, min = 1 }: {
  */
 export function FloorOverviewSidebar({
   floor, canvasW, canvasH, isFirst, isLast, isOnly,
-  onClose, onRename, onCanvasSize, onShowGrid, onGridSize,
-  onOpenSettings, onSaveAsTemplate, onDuplicate, onMoveUp, onMoveDown, onDelete,
+  onClose, onRename, onCanvasSize, onShowGrid, onShowWallJunctions, onGridSize,
+  onOpenSettings, onEditFloorShape, onSaveAsTemplate, onDuplicate, onMoveUp, onMoveDown, onDelete,
   perimeterEnabled = false,
 }: FloorOverviewSidebarProps) {
   const showGrid = floor.showGrid !== false;
@@ -89,6 +91,7 @@ export function FloorOverviewSidebar({
   const appearance = normalizeFloorAppearance(floor.appearance, floor.backgroundColor ?? "#e8e1d7");
   const authoringGridEligible = isFloorAuthoringGridEligible(appearance.material, appearance.texture);
   const visualGridVisible = showGrid && authoringGridEligible;
+  const showWallJunctions = floor.showWallJunctions !== false;
 
   return (
     <div className="w-64 shrink-0 flex flex-col border-l border-border overflow-hidden bg-card">
@@ -186,6 +189,17 @@ export function FloorOverviewSidebar({
               ))}
             </div>
           </div>
+          <button
+            type="button"
+            aria-label="Show wall junction blocks"
+            aria-pressed={showWallJunctions}
+            onClick={() => onShowWallJunctions?.(!showWallJunctions)}
+            className={cn("mt-2 w-full h-8 px-2.5 rounded-lg border border-border bg-muted/20 flex items-center gap-2 text-left transition-all hover:bg-muted/40", showWallJunctions ? "text-primary" : "text-muted-foreground")}
+          >
+            {showWallJunctions ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
+            <span className="text-[11px] font-bold flex-1">Junction blocks</span>
+            <span className="text-[9px] opacity-70">{showWallJunctions ? "Visible" : "Hidden"}</span>
+          </button>
         </section>
 
         {/* ── PERIMETER WALL ── */}
@@ -216,6 +230,7 @@ export function FloorOverviewSidebar({
         <section>
           <SectionLabel>Actions</SectionLabel>
           <div className="space-y-1">
+            {onEditFloorShape && <button type="button" data-testid="edit-floor-shape" onClick={onEditFloorShape} className={`${actionBtnCls} bg-primary/10 text-primary hover:bg-primary/15`}><Square className="h-3.5 w-3.5" /> Edit Floor Shape</button>}
             <button type="button" onClick={onOpenSettings} className={`${actionBtnCls} bg-primary/10 text-primary hover:bg-primary/15`}>
               <Settings2 className="h-3.5 w-3.5" /> Open Floor Settings
             </button>

@@ -1,9 +1,11 @@
 import type {
   FloorDoor,
   FloorElevatorItem,
+  FloorExtension,
   FloorFurniture,
   FloorLabel,
   FloorPlan,
+  FloorPath,
   FloorRamp,
   FloorRoom,
   FloorSelection,
@@ -11,8 +13,11 @@ import type {
   FloorWindow,
   FloorWall,
   FloorWallEndpointAnchor,
+  NavigationNode,
 } from "../components/map-builder/types";
 import { exteriorZoneGeometry } from "./exteriorFloorZones";
+import { roomOutlinePoints, roomShapeBounds, type RoomShapePoint } from "./roomShape";
+import { constrainRectToFloorShape, floorShapeContainsPoint, floorShapeContainsPolygon, floorShapeContainsRect, floorShapeContainsSegment, getFloorExtensionRect, getFloorShapeBounds, getFloorShapeRegions, type FloorShapeRect } from "./floorShape";
 
 export const DEFAULT_FLOOR_CANVAS = { w: 600, h: 450 };
 export const MIN_FLOOR_CANVAS = { w: 120, h: 100 };
@@ -47,6 +52,25 @@ export function rotatePoint(point: { x: number; y: number }, cx: number, cy: num
   const dx = point.x - cx;
   const dy = point.y - cy;
   return { x: cx + dx * cos - dy * sin, y: cy + dx * sin + dy * cos };
+}
+
+/**
+ * Resolve a point authored in an object's local top-left coordinate frame
+ * into world coordinates. Transform controls and small status badges use
+ * this instead of independently guessing positions for cardinal rotations.
+ */
+export function rotateObjectLocalPoint(
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  localX: number,
+  localY: number,
+  rotationDeg = 0,
+) {
+  const cx = x + width / 2;
+  const cy = y + height / 2;
+  return rotatePoint({ x: x + localX, y: y + localY }, cx, cy, rotationDeg);
 }
 
 function nearestPointOnLineSegment(point: { x: number; y: number }, segment: { x1: number; y1: number; x2: number; y2: number }) {
@@ -122,6 +146,124 @@ export function roomAnchorAtPoint(room: FloorRoom, point: { x: number; y: number
 
 export function wallLength(wall: FloorWall) {
   return Math.hypot(wall.x2 - wall.x1, wall.y2 - wall.y1);
+}
+
+export function formatWallLength(value: number) {
+  const rounded = Math.round(value * 100) / 100;
+  return String(rounded);
+}
+
+export type WallLengthAnchor = "start" | "center" | "end";
+
+export type WallStraightenAxis = "horizontal" | "vertical" | "nearest";
+
+/**
+ * Make an authored Wall exactly horizontal or vertical while preserving its
+ * current length.  This is deliberately a geometry-only helper: callers own
+ * Floor bounds, opening, and anchor validation, just as they do for
+ * resizeWallToLength.
+ */
+export function straightenWall(
+  wall: FloorWall,
+  axis: WallStraightenAxis,
+  keepFixed: WallLengthAnchor = "start",
+): FloorWall {
+  const length = wallLength(wall);
+  const dx = wall.x2 - wall.x1;
+  const dy = wall.y2 - wall.y1;
+  const resolvedAxis = axis === "nearest"
+    ? Math.abs(dx) >= Math.abs(dy) ? "horizontal" : "vertical"
+    : axis;
+  const direction = resolvedAxis === "horizontal"
+    ? (Math.sign(dx) || Math.sign(dy) || 1)
+    : (Math.sign(dy) || Math.sign(dx) || 1);
+  const ux = resolvedAxis === "horizontal" ? direction : 0;
+  const uy = resolvedAxis === "vertical" ? direction : 0;
+  const centerX = (wall.x1 + wall.x2) / 2;
+  const centerY = (wall.y1 + wall.y2) / 2;
+
+  if (keepFixed === "end") {
+    return {
+      ...wall,
+      x1: wall.x2 - ux * length,
+      y1: wall.y2 - uy * length,
+    };
+  }
+  if (keepFixed === "center") {
+    const half = length / 2;
+    return {
+      ...wall,
+      x1: centerX - ux * half,
+      y1: centerY - uy * half,
+      x2: centerX + ux * half,
+      y2: centerY + uy * half,
+    };
+  }
+  return {
+    ...wall,
+    x2: wall.x1 + ux * length,
+    y2: wall.y1 + uy * length,
+  };
+}
+
+/**
+ * Resize a Wall to an exact authored length while preserving its direction.
+ * The caller is responsible for validating Floor bounds and attached
+ * openings; this helper intentionally performs no grid quantization.
+ */
+export function resizeWallToLength(
+  wall: FloorWall,
+  requestedLength: number,
+  keepFixed: WallLengthAnchor = "start",
+): FloorWall {
+  const length = Math.max(0, Number(requestedLength));
+  const currentLength = wallLength(wall);
+  const unitX = currentLength > 0.000001 ? (wall.x2 - wall.x1) / currentLength : 1;
+  const unitY = currentLength > 0.000001 ? (wall.y2 - wall.y1) / currentLength : 0;
+  const centerX = (wall.x1 + wall.x2) / 2;
+  const centerY = (wall.y1 + wall.y2) / 2;
+
+  if (keepFixed === "end") {
+    return {
+      ...wall,
+      x1: wall.x2 - unitX * length,
+      y1: wall.y2 - unitY * length,
+    };
+  }
+  if (keepFixed === "center") {
+    const half = length / 2;
+    return {
+      ...wall,
+      x1: centerX - unitX * half,
+      y1: centerY - unitY * half,
+      x2: centerX + unitX * half,
+      y2: centerY + unitY * half,
+    };
+  }
+  return {
+    ...wall,
+    x2: wall.x1 + unitX * length,
+    y2: wall.y1 + unitY * length,
+  };
+}
+
+export function nearestEqualWallLength(
+  walls: FloorWall[],
+  candidateLength: number,
+  excludedWallId: string,
+  tolerance = 1.5,
+) {
+  let best: { wallId: string; length: number; distance: number } | null = null;
+  for (const candidate of walls) {
+    if (candidate.id === excludedWallId || candidate.managedKind === "perimeter") continue;
+    const targetLength = wallLength(candidate);
+    const distance = Math.abs(targetLength - candidateLength);
+    if (distance > tolerance) continue;
+    if (!best || distance < best.distance || (distance === best.distance && targetLength < best.length)) {
+      best = { wallId: candidate.id, length: targetLength, distance };
+    }
+  }
+  return best;
 }
 
 export function nearestPointOnWall(point: { x: number; y: number }, wall: FloorWall) {
@@ -284,6 +426,175 @@ export function syncOpeningsToWalls(doors: FloorDoor[], windows: FloorWindow[], 
   };
 }
 
+export interface PerimeterOpeningProjection<T extends FloorDoor | FloorWindow> {
+  openings: T[];
+  /** Openings whose old perimeter host no longer has a deterministic physical continuation. */
+  unresolved: Array<{ id: string; type: "door" | "window"; reason: string }>;
+}
+
+type PerimeterEdge = "top" | "right" | "bottom" | "left";
+type PerimeterHostFeature =
+  | { kind: "extension"; extensionId: string; edge: PerimeterEdge; position: number }
+  | { kind: "base"; edge: PerimeterEdge; position: number }
+  | { kind: "side"; edge: PerimeterEdge; position: number };
+
+function perimeterFeatureSegment(
+  edge: PerimeterEdge,
+  rect: { x: number; y: number; width: number; height: number },
+) {
+  if (edge === "top") return { x1: rect.x, y1: rect.y, x2: rect.x + rect.width, y2: rect.y };
+  if (edge === "right") return { x1: rect.x + rect.width, y1: rect.y, x2: rect.x + rect.width, y2: rect.y + rect.height };
+  if (edge === "bottom") return { x1: rect.x, y1: rect.y + rect.height, x2: rect.x + rect.width, y2: rect.y + rect.height };
+  return { x1: rect.x, y1: rect.y, x2: rect.x, y2: rect.y + rect.height };
+}
+
+function segmentAxisOverlap(wall: FloorWall, segment: { x1: number; y1: number; x2: number; y2: number }, epsilon = 0.1) {
+  const wallHorizontal = Math.abs(wall.y2 - wall.y1) <= epsilon;
+  const segmentHorizontal = Math.abs(segment.y2 - segment.y1) <= epsilon;
+  if (wallHorizontal !== segmentHorizontal) return 0;
+  const lineDelta = wallHorizontal ? Math.abs(wall.y1 - segment.y1) : Math.abs(wall.x1 - segment.x1);
+  if (lineDelta > epsilon) return 0;
+  const wallLow = wallHorizontal ? Math.min(wall.x1, wall.x2) : Math.min(wall.y1, wall.y2);
+  const wallHigh = wallHorizontal ? Math.max(wall.x1, wall.x2) : Math.max(wall.y1, wall.y2);
+  const segmentLow = wallHorizontal ? Math.min(segment.x1, segment.x2) : Math.min(segment.y1, segment.y2);
+  const segmentHigh = wallHorizontal ? Math.max(segment.x1, segment.x2) : Math.max(segment.y1, segment.y2);
+  return Math.max(0, Math.min(wallHigh, segmentHigh) - Math.max(wallLow, segmentLow));
+}
+
+function openingCenterOnWall(opening: FloorDoor | FloorWindow, wall: FloorWall) {
+  const t = Number.isFinite(opening.offset) ? clamp(opening.offset!, 0, 1) : nearestPointOnWall({ x: opening.x, y: opening.y }, wall).t;
+  return { x: wall.x1 + (wall.x2 - wall.x1) * t, y: wall.y1 + (wall.y2 - wall.y1) * t };
+}
+
+function perimeterHostFeature(
+  wall: FloorWall,
+  center: { x: number; y: number },
+  extensions: FloorExtension[],
+  canvasW: number,
+  canvasH: number,
+): PerimeterHostFeature {
+  const extensionMatches = extensions.flatMap((extension) => {
+    const rect = getFloorExtensionRect(extension, canvasW, canvasH);
+    return (["top", "right", "bottom", "left"] as const).map((edge) => ({
+      extension,
+      edge,
+      overlap: segmentAxisOverlap(wall, perimeterFeatureSegment(edge, rect)),
+    })).filter((match) => match.overlap > 0.1);
+  }).sort((a, b) => b.overlap - a.overlap || a.extension.id.localeCompare(b.extension.id));
+  const horizontal = Math.abs(wall.y2 - wall.y1) <= 0.1;
+  const position = horizontal ? center.x : center.y;
+  const extensionMatch = extensionMatches[0];
+  if (extensionMatch) return { kind: "extension", extensionId: extensionMatch.extension.id, edge: extensionMatch.edge, position };
+
+  const baseEdges: Array<{ edge: PerimeterEdge; line: number; delta: number }> = horizontal
+    ? [{ edge: "top", line: 0, delta: Math.abs(wall.y1) }, { edge: "bottom", line: canvasH, delta: Math.abs(wall.y1 - canvasH) }]
+    : [{ edge: "left", line: 0, delta: Math.abs(wall.x1) }, { edge: "right", line: canvasW, delta: Math.abs(wall.x1 - canvasW) }];
+  const base = baseEdges.find((candidate) => candidate.delta <= 0.1);
+  if (base) return { kind: "base", edge: base.edge, position };
+  return { kind: "side", edge: (wall.perimeterSide as PerimeterEdge | undefined) ?? (horizontal ? "top" : "left"), position };
+}
+
+function pointAtAxisPosition(wall: FloorWall, position: number) {
+  if (Math.abs(wall.y2 - wall.y1) <= 0.1) return { x: position, y: (wall.y1 + wall.y2) / 2 };
+  return { x: (wall.x1 + wall.x2) / 2, y: position };
+}
+
+/**
+ * Reprojects existing Door/Window records from their current managed
+ * perimeter host onto the matching edge of a draft outline. It keeps the
+ * opening identity and all non-geometric fields. If the physical host edge
+ * vanished, the opening is retained and returned as a specific blocker.
+ */
+export function reprojectManagedPerimeterOpenings<T extends FloorDoor | FloorWindow>(
+  openings: T[],
+  previousWalls: FloorWall[],
+  nextWalls: FloorWall[],
+  previousExtensions: FloorExtension[] | undefined,
+  nextExtensions: FloorExtension[] | undefined,
+  canvasW: number,
+  canvasH: number,
+): PerimeterOpeningProjection<T> {
+  const previousExtensionList = previousExtensions ?? [];
+  const nextExtensionList = nextExtensions ?? [];
+  const previousWallById = new Map(previousWalls.map((wall) => [wall.id, wall]));
+  const nextPerimeter = nextWalls.filter((wall) => wall.managedKind === "perimeter");
+  const unresolved: PerimeterOpeningProjection<T>["unresolved"] = [];
+  const projected = openings.map((opening) => {
+    const oldHost = opening.wallId ? previousWallById.get(opening.wallId) : undefined;
+    if (!oldHost || oldHost.managedKind !== "perimeter") return opening;
+
+    const sourceCenter = openingCenterOnWall(opening, oldHost);
+    const feature = perimeterHostFeature(oldHost, sourceCenter, previousExtensionList, canvasW, canvasH);
+    let candidateWalls: FloorWall[] = [];
+    let desired = sourceCenter;
+    if (feature.kind === "extension") {
+      const nextExtension = nextExtensionList.find((extension) => extension.id === feature.extensionId);
+      if (nextExtension) {
+        const segment = perimeterFeatureSegment(feature.edge, getFloorExtensionRect(nextExtension, canvasW, canvasH));
+        const horizontal = Math.abs(segment.y2 - segment.y1) <= 0.1;
+        const start = horizontal ? segment.x1 : segment.y1;
+        const end = horizontal ? segment.x2 : segment.y2;
+        const oldRect = getFloorExtensionRect(previousExtensionList.find((extension) => extension.id === feature.extensionId)!, canvasW, canvasH);
+        const oldSegment = perimeterFeatureSegment(feature.edge, oldRect);
+        const oldStart = horizontal ? oldSegment.x1 : oldSegment.y1;
+        const oldEnd = horizontal ? oldSegment.x2 : oldSegment.y2;
+        const oldPosition = horizontal ? sourceCenter.x : sourceCenter.y;
+        const ratio = Math.max(0, Math.min(1, (oldPosition - oldStart) / Math.max(1, oldEnd - oldStart)));
+        const targetPosition = start + (end - start) * ratio;
+        desired = pointAtAxisPosition(segment as FloorWall, targetPosition);
+        candidateWalls = nextPerimeter.filter((wall) => segmentAxisOverlap(wall, segment) > 0.1);
+      }
+    } else if (feature.kind === "base") {
+      const baseRect = { x: 0, y: 0, width: canvasW, height: canvasH };
+      const segment = perimeterFeatureSegment(feature.edge, baseRect);
+      const horizontal = Math.abs(segment.y2 - segment.y1) <= 0.1;
+      const targetPosition = horizontal ? sourceCenter.x : sourceCenter.y;
+      desired = pointAtAxisPosition(segment as FloorWall, targetPosition);
+      candidateWalls = nextPerimeter.filter((wall) => segmentAxisOverlap(wall, oldHost) > 0.1
+        && segmentAxisOverlap(wall, segment) > 0.1);
+    } else {
+      candidateWalls = nextPerimeter.filter((wall) => wall.perimeterSide === feature.edge
+        && segmentAxisOverlap(wall, oldHost) > 0.1);
+    }
+
+    const candidate = candidateWalls
+      .map((wall) => ({ wall, projection: nearestPointOnWall(desired, wall) }))
+      .sort((a, b) => a.projection.d - b.projection.d
+        || Number(b.wall.id === opening.wallId) - Number(a.wall.id === opening.wallId)
+        || a.wall.id.localeCompare(b.wall.id))[0]?.wall;
+    if (!candidate) {
+      unresolved.push({
+        id: opening.id,
+        type: "direction" in opening ? "door" : "window",
+        reason: `${"direction" in opening ? "Door" : "Window"} “${"label" in opening && opening.label ? opening.label : opening.id}” needs to be reattached to the new Floor perimeter.`,
+      });
+      return opening;
+    }
+
+    const length = wallLength(candidate);
+    const width = Math.max(0, Number(opening.width) || 0);
+    const safety = wallOpeningSafetyUnits(width, candidate.thickness);
+    if (length + 0.01 < width + safety * 2) {
+      unresolved.push({
+        id: opening.id,
+        type: "direction" in opening ? "door" : "window",
+        reason: `${"direction" in opening ? "Door" : "Window"} “${"label" in opening && opening.label ? opening.label : opening.id}” no longer fits its perimeter segment.`,
+      });
+      return opening;
+    }
+    const nearest = nearestPointOnWall(desired, candidate);
+    const offset = clampWallOpeningOffset(candidate, width, nearest.t);
+    return {
+      ...opening,
+      wallId: candidate.id,
+      x: Math.round(candidate.x1 + (candidate.x2 - candidate.x1) * offset),
+      y: Math.round(candidate.y1 + (candidate.y2 - candidate.y1) * offset),
+      offset,
+    } as T;
+  });
+  return { openings: projected, unresolved };
+}
+
 export function floorResizeIssues(floor: FloorPlan, canvasW: number, canvasH: number) {
   const synced = syncOpeningsToWalls(floor.doors, floor.windows, floor.walls);
   const candidate = { ...floor, canvasW, canvasH, doors: synced.doors, windows: synced.windows };
@@ -375,6 +686,24 @@ export function worldDeltaToLocal(dx: number, dy: number, rotationDeg: number) {
   return { dx: dx * cos + dy * sin, dy: -dx * sin + dy * cos };
 }
 
+/**
+ * CSS only exposes four resize-cursor families. Map a local transform handle
+ * into the closest screen-space family so the cursor follows rotated
+ * circulation objects while the resize math continues to operate in local
+ * coordinates.
+ */
+export function rotationAwareResizeCursor(handle: string, rotationDeg = 0) {
+  const normalized = ((Number(rotationDeg) || 0) % 180 + 180) % 180;
+  if (handle === "n" || handle === "s" || handle === "e" || handle === "w") {
+    const localAngle = handle === "n" || handle === "s" ? 90 : 0;
+    const angle = (localAngle + normalized) % 180;
+    return angle >= 45 && angle < 135 ? "ns-resize" : "ew-resize";
+  }
+  const localAngle = handle === "nw" || handle === "se" ? 45 : 135;
+  const angle = (localAngle + normalized) % 180;
+  return angle < 90 ? "nwse-resize" : "nesw-resize";
+}
+
 /** Approximate rendered width of a label at its current font size. */
 export function labelWidth(label: FloorLabel) {
   return Math.max(10, label.text.length * label.fontSize * 0.6);
@@ -389,8 +718,16 @@ export function labelBounds(label: FloorLabel) {
 }
 
 /** Keep a label fully inside the floor canvas after text/font-size changes. */
-export function constrainLabelToFloor(label: FloorLabel, canvasW: number, canvasH: number): FloorLabel {
+export function constrainLabelToFloor(label: FloorLabel, canvasW: number, canvasH: number, shapeRegions?: FloorShapeRect[]): FloorLabel {
   const bounds = labelBounds(label);
+  if (shapeRegions) {
+    if (floorShapeContainsRect(shapeRegions, { x: bounds.x, y: bounds.y, width: bounds.w, height: bounds.h })) return label;
+    const position = constrainRectToFloorShape(shapeRegions, { x: bounds.x, y: bounds.y, width: bounds.w, height: bounds.h });
+    const dx = position.x - bounds.x;
+    const dy = position.y - bounds.y;
+    const candidate = { ...label, x: Math.round(label.x + dx), y: Math.round(label.y + dy) };
+    return floorItemFitsFloorShape("label", candidate, shapeRegions) ? candidate : label;
+  }
   let x = label.x;
   let y = label.y;
   if (bounds.x < 0) x += -bounds.x;
@@ -471,6 +808,183 @@ export function itemBounds(type: FloorSelection["type"], item: unknown): Rect | 
   return null;
 }
 
+function rectanglePolygon(x: number, y: number, width: number, height: number, rotation = 0) {
+  const cx = x + width / 2;
+  const cy = y + height / 2;
+  return [
+    { x, y }, { x: x + width, y }, { x: x + width, y: y + height }, { x, y: y + height },
+  ].map((point) => rotatePoint(point, cx, cy, rotation));
+}
+
+/** Returns true when an item's actual footprint lies in the combined Floor
+ * shape. Rotated rectangular objects and custom Rooms use their real polygon,
+ * rather than the larger axis-aligned box around them. */
+export function floorItemFitsFloorShape(type: FloorSelection["type"], item: any, regions: FloorShapeRect[]) {
+  if (!item || type === "exteriorZone" || type === "entranceSteps" || type === "entranceRamp") return true;
+  if (type === "wall") {
+    return floorShapeContainsSegment(regions, { x: item.x1, y: item.y1 }, { x: item.x2, y: item.y2 });
+  }
+  if (type === "path") {
+    const points = (item as FloorPath).points ?? [];
+    return points.every((point) => floorShapeContainsPoint(regions, point.x, point.y))
+      && points.slice(1).every((point, index) => floorShapeContainsSegment(regions, points[index], point));
+  }
+  if (type === "door") return floorShapeContainsPoint(regions, Number(item.x), Number(item.y));
+  if (type === "window" && item.wallId) return floorShapeContainsPoint(regions, Number(item.x), Number(item.y));
+  if (type === "room") return floorShapeContainsPolygon(regions, roomOutlinePoints(item as FloorRoom));
+  if (["furniture", "stairs", "ramp", "elevator", "entranceSteps", "entranceRamp"].includes(type)) {
+    return floorShapeContainsPolygon(regions, rectanglePolygon(
+      Number(item.x), Number(item.y), Number(item.width), Number(item.height), Number(item.rotation ?? 0),
+    ));
+  }
+  const bounds = itemBounds(type, item);
+  return !bounds || floorShapeContainsRect(regions, { x: bounds.x, y: bounds.y, width: bounds.w, height: bounds.h });
+}
+
+export interface FloorShapeFitIssueDetail {
+  id: string;
+  type: FloorSelection["type"] | "navigation";
+  label: string;
+  name: string;
+  position: { x: number; y: number };
+  reason: string;
+}
+
+function floorShapeItemPosition(type: FloorSelection["type"], item: any): { x: number; y: number } {
+  if (type === "wall") return { x: (Number(item.x1) + Number(item.x2)) / 2, y: (Number(item.y1) + Number(item.y2)) / 2 };
+  if (type === "path") {
+    const points = item.points ?? [];
+    return points.length ? { x: points[0].x, y: points[0].y } : { x: 0, y: 0 };
+  }
+  const bounds = itemBounds(type, item);
+  return bounds ? { x: bounds.x + bounds.w / 2, y: bounds.y + bounds.h / 2 } : { x: Number(item.x) || 0, y: Number(item.y) || 0 };
+}
+
+function openingFitsWall(opening: FloorDoor | FloorWindow, wall: FloorWall) {
+  return wallLength(wall) + 0.01 >= Math.max(0, Number(opening.width) || 0)
+    + wallOpeningSafetyUnits(Math.max(0, Number(opening.width) || 0), wall.thickness) * 2;
+}
+
+/**
+ * Classifies only authored physical Floor data and independent indoor
+ * navigation points. Hosted Door/Window graphics and generated physical
+ * navigation anchors are validated through their hosts rather than through
+ * rendered bounds that intentionally straddle the perimeter.
+ */
+export function collectFloorShapeFitIssues(
+  floor: FloorPlan,
+  regions: FloorShapeRect[],
+  options: {
+    exteriorEmergencyStairIds?: ReadonlySet<string>;
+    navNodes?: NavigationNode[];
+    unresolvedOpenings?: Array<{ id: string; type: "door" | "window"; reason: string }>;
+  } = {},
+): FloorShapeFitIssueDetail[] {
+  const invalid: FloorShapeFitIssueDetail[] = [];
+  const wallById = new Map(floor.walls.map((wall) => [wall.id, wall]));
+  const unresolvedById = new Map((options.unresolvedOpenings ?? []).map((opening) => [opening.id, opening]));
+  const addIssue = (type: FloorShapeFitIssueDetail["type"], item: any, label: string, reason: string) => {
+    const position = type === "navigation" ? { x: Number(item.x) || 0, y: Number(item.y) || 0 } : floorShapeItemPosition(type, item);
+    invalid.push({
+      id: String(item.id),
+      type,
+      label,
+      name: String(item.name ?? item.label ?? item.text ?? item.id),
+      position,
+      reason,
+    });
+  };
+  const check = (type: FloorSelection["type"], items: any[], label: string) => {
+    for (const item of items ?? []) {
+      if (!item?.id || (type === "wall" && item.managedKind === "perimeter")) continue;
+      if (type === "furniture" && item.exteriorZoneId) continue;
+      if (type === "stairs" && options.exteriorEmergencyStairIds?.has(item.id)) continue;
+      if (type === "door" || type === "window") {
+        const unresolved = unresolvedById.get(item.id);
+        if (unresolved) {
+          addIssue(type, item, label, unresolved.reason);
+          continue;
+        }
+        const host = item.wallId ? wallById.get(item.wallId) : undefined;
+        if (item.wallId && !host) {
+          addIssue(type, item, label, `${label} “${item.label || item.id}” refers to a missing host Wall.`);
+          continue;
+        }
+        if (host && !openingFitsWall(item, host)) {
+          addIssue(type, item, label, `${label} “${item.label || item.id}” does not fit its host Wall.`);
+          continue;
+        }
+        if (!floorShapeContainsPoint(regions, Number(item.x), Number(item.y), 0.01)) {
+          addIssue(type, item, label, `${label} center is outside the draft Floor perimeter.`);
+        }
+        continue;
+      }
+      if (!floorItemFitsFloorShape(type, item, regions)) {
+        const reason = type === "wall" ? "Wall segment crosses outside the draft Floor perimeter."
+          : type === "path" ? "Path geometry crosses outside the draft Floor perimeter."
+            : `${label} footprint is not contained by the draft Floor union.`;
+        addIssue(type, item, label, reason);
+      }
+    }
+  };
+
+  check("room", floor.rooms, "Room");
+  check("wall", floor.walls, "Wall");
+  check("door", floor.doors, "Door");
+  check("window", floor.windows, "Window");
+  check("furniture", floor.furniture, "Furniture");
+  check("stairs", floor.stairs, "Stair");
+  check("ramp", floor.ramps, "Ramp");
+  check("elevator", floor.elevators, "Elevator");
+  check("label", floor.labels, "Label");
+  check("path", floor.paths, "Path");
+
+  (options.navNodes ?? []).filter((node) => node.buildingId === floor.buildingId && node.floorId === floor.id).forEach((node) => {
+    // A node already hosted by an authored object, Entrance, exterior feature,
+    // or generated path vertex follows that owner's validation above.
+    const hasPhysicalHost = Boolean(node.roomId || node.doorId || node.stairId || node.elevatorId || node.rampId
+      || node.buildingEntranceId || node.entranceId || node.exteriorEmergencyStairId || node.exteriorZoneId
+      || node.derivedOwnerType || node.derivedOwnerId || node.generatedFromPathVertices?.length);
+    if (hasPhysicalHost) return;
+    if (!floorShapeContainsPoint(regions, node.x, node.y, 0.01)) {
+      addIssue("navigation", node, "Navigation point", "Authored indoor navigation point is outside the draft Floor perimeter.");
+    }
+  });
+  return invalid;
+}
+
+function translateFloorItemRaw(type: FloorSelection["type"], item: any, dx: number, dy: number) {
+  if (type === "wall") return { ...item, x1: item.x1 + dx, y1: item.y1 + dy, x2: item.x2 + dx, y2: item.y2 + dy };
+  if (type === "path") return { ...item, points: (item as FloorPath).points.map((point) => ({ x: point.x + dx, y: point.y + dy })) };
+  if (type === "room" && Array.isArray(item.shapePoints)) {
+    return { ...item, x: item.x + dx, y: item.y + dy, shapePoints: item.shapePoints.map((point: RoomShapePoint) => ({ x: point.x + dx, y: point.y + dy })) };
+  }
+  return { ...item, x: item.x + dx, y: item.y + dy };
+}
+
+/** Constrains a rigid translation to the combined Floor union. The source
+ * geometry is kept intact and the requested delta is reduced only when the
+ * final physical footprints would leave the usable shape. */
+export function constrainFloorItemsDelta(
+  entries: Array<{ type: FloorSelection["type"]; item: any }>,
+  dx: number,
+  dy: number,
+  regions: FloorShapeRect[],
+) {
+  const fits = (fraction: number) => entries.every(({ type, item }) =>
+    floorItemFitsFloorShape(type, translateFloorItemRaw(type, item, dx * fraction, dy * fraction), regions));
+  if (fits(1)) return { dx, dy };
+  if (!fits(0)) return { dx: 0, dy: 0 };
+  let low = 0;
+  let high = 1;
+  for (let index = 0; index < 24; index += 1) {
+    const mid = (low + high) / 2;
+    if (fits(mid)) low = mid;
+    else high = mid;
+  }
+  return { dx: dx * low, dy: dy * low };
+}
+
 export function constrainDeltaForBounds(bounds: Rect[], dx: number, dy: number, canvasW: number, canvasH: number) {
   let nextDx = dx;
   let nextDy = dy;
@@ -481,37 +995,80 @@ export function constrainDeltaForBounds(bounds: Rect[], dx: number, dy: number, 
   return { dx: nextDx, dy: nextDy };
 }
 
-export function translateFloorItem(type: FloorSelection["type"], item: any, dx: number, dy: number, canvasW: number, canvasH: number) {
+export function translateFloorItem(type: FloorSelection["type"], item: any, dx: number, dy: number, canvasW: number, canvasH: number, shapeRegions?: FloorShapeRect[]) {
+  if (shapeRegions) {
+    const delta = constrainFloorItemsDelta([{ type, item }], dx, dy, shapeRegions);
+    return translateFloorItemRaw(type, item, delta.dx, delta.dy);
+  }
   const bounds = itemBounds(type, item);
   const delta = bounds ? constrainDeltaForBounds([bounds], dx, dy, canvasW, canvasH) : { dx, dy };
   if (type === "wall") return { ...item, x1: item.x1 + delta.dx, y1: item.y1 + delta.dy, x2: item.x2 + delta.dx, y2: item.y2 + delta.dy };
+  if (type === "room" && Array.isArray(item.shapePoints)) {
+    return {
+      ...item,
+      x: item.x + delta.dx,
+      y: item.y + delta.dy,
+      shapePoints: item.shapePoints.map((point: RoomShapePoint) => ({ x: point.x + delta.dx, y: point.y + delta.dy })),
+    };
+  }
   return { ...item, x: item.x + delta.dx, y: item.y + delta.dy };
 }
 
-export function resizeRoomWithinFloor(room: FloorRoom, corner: string, dx: number, dy: number, canvasW: number, canvasH: number): FloorRoom {
+export function resizeRoomWithinFloor(room: FloorRoom, corner: string, dx: number, dy: number, canvasW: number, canvasH: number, shapeRegions?: FloorShapeRect[]): FloorRoom {
+  const baseShapePoints = Array.isArray(room.shapePoints) && room.shapePoints.length >= 3
+    ? room.shapePoints.map((point) => ({ x: point.x, y: point.y }))
+    : null;
+  const resizeShapeWithBounds = (next: FloorRoom) => {
+    if (!baseShapePoints) return next;
+    const oldBounds = roomShapeBounds(baseShapePoints);
+    if (oldBounds.w < 0.001 || oldBounds.h < 0.001) return next;
+    const sx = next.w / oldBounds.w;
+    const sy = next.h / oldBounds.h;
+    return {
+      ...next,
+      shapePoints: baseShapePoints.map((point) => ({
+        x: next.x + (point.x - oldBounds.x) * sx,
+        y: next.y + (point.y - oldBounds.y) * sy,
+      })),
+    };
+  };
+  const buildCandidate = (scale: number) => {
   if ((room.rotation ?? 0) % 360 === 0) {
     let x = room.x;
     let y = room.y;
     let w = room.w;
     let h = room.h;
-    if (corner.includes("e")) w = clamp(room.w + dx, 20, canvasW - room.x);
-    if (corner.includes("s")) h = clamp(room.h + dy, 15, canvasH - room.y);
+    if (corner.includes("e")) w = shapeRegions ? Math.max(20, room.w + dx * scale) : clamp(room.w + dx * scale, 20, canvasW - room.x);
+    if (corner.includes("s")) h = shapeRegions ? Math.max(15, room.h + dy * scale) : clamp(room.h + dy * scale, 15, canvasH - room.y);
     if (corner.includes("w")) {
-      const nextX = clamp(room.x + dx, 0, room.x + room.w - 20);
+      const nextX = shapeRegions ? Math.min(room.x + room.w - 20, room.x + dx * scale) : clamp(room.x + dx * scale, 0, room.x + room.w - 20);
       w = room.w + (room.x - nextX);
       x = nextX;
     }
     if (corner.includes("n")) {
-      const nextY = clamp(room.y + dy, 0, room.y + room.h - 15);
+      const nextY = shapeRegions ? Math.min(room.y + room.h - 15, room.y + dy * scale) : clamp(room.y + dy * scale, 0, room.y + room.h - 15);
       h = room.h + (room.y - nextY);
       y = nextY;
     }
-    return { ...room, x: Math.round(x), y: Math.round(y), w: Math.round(w), h: Math.round(h) };
+    return resizeShapeWithBounds({ ...room, x: Math.round(x), y: Math.round(y), w: Math.round(w), h: Math.round(h) });
   }
   const base = { ...room, width: room.w, height: room.h, rotation: room.rotation ?? 0 };
-  const resized = resizeRectLocal(base, corner, dx, dy, canvasW, canvasH, 20, 15, canvasW, canvasH);
+  const maxBounds = shapeRegions ? getFloorShapeBounds(shapeRegions) : undefined;
+  const resized = resizeRectLocal(base, corner, dx * scale, dy * scale, canvasW, canvasH, 20, 15, maxBounds?.width ?? canvasW, maxBounds?.height ?? canvasH, false, !shapeRegions);
   const { width, height, ...rest } = resized;
-  return { ...rest, x: Math.round(resized.x), y: Math.round(resized.y), w: Math.round(width), h: Math.round(height) };
+  return resizeShapeWithBounds({ ...rest, x: Math.round(resized.x), y: Math.round(resized.y), w: Math.round(width), h: Math.round(height) });
+  };
+  const candidate = buildCandidate(1);
+  if (!shapeRegions || floorItemFitsFloorShape("room", candidate, shapeRegions)) return candidate;
+  if (!floorItemFitsFloorShape("room", room, shapeRegions)) return room;
+  let low = 0;
+  let high = 1;
+  for (let index = 0; index < 24; index += 1) {
+    const mid = (low + high) / 2;
+    if (floorItemFitsFloorShape("room", buildCandidate(mid), shapeRegions)) low = mid;
+    else high = mid;
+  }
+  return buildCandidate(low);
 }
 
 export function snapToFloorBoundary(value: number, max: number, threshold = 8) {
@@ -570,7 +1127,8 @@ function resizeRectLocal<T extends { x: number; y: number; width: number; height
   minHeight: number,
   maxWidth: number,
   maxHeight: number,
-  preserveAspect = false
+  preserveAspect = false,
+  constrainToCanvas = true,
 ): T {
   const rotation = item.rotation ?? 0;
   const local = worldDeltaToLocal(dx, dy, rotation);
@@ -596,7 +1154,8 @@ function resizeRectLocal<T extends { x: number; y: number; width: number; height
   const localCx = handle.includes("w") ? item.width - width / 2 : handle.includes("e") ? width / 2 : item.width / 2;
   const localCy = handle.includes("n") ? item.height - height / 2 : handle.includes("s") ? height / 2 : item.height / 2;
   const worldCenter = rotatePoint({ x: item.x + localCx, y: item.y + localCy }, startCx, startCy, rotation);
-  return clampRotatedRectPosition({ ...item, x: worldCenter.x - width / 2, y: worldCenter.y - height / 2, width, height }, canvasW, canvasH);
+  const resized = { ...item, x: worldCenter.x - width / 2, y: worldCenter.y - height / 2, width, height };
+  return constrainToCanvas ? clampRotatedRectPosition(resized, canvasW, canvasH) : resized;
 }
 
 /**
@@ -615,24 +1174,49 @@ export function resizeFurnitureWithinFloor(
   dy: number,
   canvasW: number,
   canvasH: number,
-  preserveAspect = false
+  preserveAspect = false,
+  shapeRegions?: FloorShapeRect[],
 ): FloorFurniture {
   // Keep a sensible minimum, but do not cap furniture by type. The old
   // ceilings made single-object resize disagree with group scaling and could
   // shrink a previously-large legacy item on its next edit. The practical
   // maximum is the available floor side from the opposite fixed handle.
-  const maxWidth = corner.includes("w")
+  const shapeBounds = shapeRegions ? getFloorShapeBounds(shapeRegions) : undefined;
+  const maxWidth = shapeRegions ? Math.max(item.width, shapeBounds!.width)
+    : corner.includes("w")
     ? Math.max(item.width, item.x + item.width)
     : Math.max(item.width, canvasW - item.x);
-  const maxHeight = corner.includes("n")
+  const maxHeight = shapeRegions ? Math.max(item.height, shapeBounds!.height)
+    : corner.includes("n")
     ? Math.max(item.height, item.y + item.height)
     : Math.max(item.height, canvasH - item.y);
-  const resized = resizeRectLocal(item, corner, dx, dy, canvasW, canvasH, 8, 8, maxWidth, maxHeight, preserveAspect);
+  const buildCandidate = (scale: number) => resizeRectLocal(item, corner, dx * scale, dy * scale, canvasW, canvasH, 8, 8, maxWidth, maxHeight, preserveAspect, !shapeRegions);
+  const resized = buildCandidate(1);
+  if (shapeRegions) {
+    if (floorItemFitsFloorShape("furniture", resized, shapeRegions)) return { ...resized, width: Math.round(resized.width), height: Math.round(resized.height) };
+    if (!floorItemFitsFloorShape("furniture", item, shapeRegions)) return item;
+    let low = 0;
+    let high = 1;
+    for (let index = 0; index < 24; index += 1) {
+      const mid = (low + high) / 2;
+      if (floorItemFitsFloorShape("furniture", buildCandidate(mid), shapeRegions)) low = mid;
+      else high = mid;
+    }
+    const bounded = buildCandidate(low);
+    return { ...bounded, width: Math.round(bounded.width), height: Math.round(bounded.height) };
+  }
   return constrainFurnitureToFloor({ ...resized, width: Math.round(resized.width), height: Math.round(resized.height) }, canvasW, canvasH);
 }
 
 /** Keep an explicit furniture resize candidate inside the visible floor. */
-export function constrainFurnitureToFloor(item: FloorFurniture, canvasW: number, canvasH: number): FloorFurniture {
+export function constrainFurnitureToFloor(item: FloorFurniture, canvasW: number, canvasH: number, shapeRegions?: FloorShapeRect[]): FloorFurniture {
+  if (shapeRegions) {
+    if (floorItemFitsFloorShape("furniture", item, shapeRegions)) return item;
+    const bounds = rotatedRectBounds(item.x, item.y, item.width, item.height, item.rotation ?? 0);
+    const position = constrainRectToFloorShape(shapeRegions, { x: bounds.x, y: bounds.y, width: bounds.w, height: bounds.h });
+    const candidate = { ...item, x: Math.round(item.x + position.x - bounds.x), y: Math.round(item.y + position.y - bounds.y) };
+    return floorItemFitsFloorShape("furniture", candidate, shapeRegions) ? candidate : item;
+  }
   const minSize = 8;
   let width = Math.max(minSize, Number.isFinite(item.width) ? item.width : minSize);
   let height = Math.max(minSize, Number.isFinite(item.height) ? item.height : minSize);
@@ -670,13 +1254,30 @@ export function resizeCirculationWithinFloor<T extends ResizableCirculationItem>
   dy: number,
   canvasW: number,
   canvasH: number,
-  preserveAspect = false
+  preserveAspect = false,
+  shapeRegions?: FloorShapeRect[],
+  type: "stairs" | "ramp" | "elevator" = "stairs",
 ): T {
   const minWidth = "doorWidth" in item ? 14 : 16;
   const minHeight = "doorWidth" in item ? 14 : 12;
-  const maxWidth = canvasW;
-  const maxHeight = canvasH;
-  const resized = resizeRectLocal(item, corner, dx, dy, canvasW, canvasH, minWidth, minHeight, maxWidth, maxHeight, preserveAspect);
+  const shapeBounds = shapeRegions ? getFloorShapeBounds(shapeRegions) : undefined;
+  const maxWidth = shapeBounds ? Math.max(item.width, shapeBounds.width) : canvasW;
+  const maxHeight = shapeBounds ? Math.max(item.height, shapeBounds.height) : canvasH;
+  const buildCandidate = (scale: number) => resizeRectLocal(item, corner, dx * scale, dy * scale, canvasW, canvasH, minWidth, minHeight, maxWidth, maxHeight, preserveAspect, !shapeRegions);
+  const resized = buildCandidate(1);
+  if (shapeRegions) {
+    if (floorItemFitsFloorShape(type, resized, shapeRegions)) return { ...resized, width: Math.round(resized.width), height: Math.round(resized.height) } as T;
+    if (!floorItemFitsFloorShape(type, item, shapeRegions)) return item;
+    let low = 0;
+    let high = 1;
+    for (let index = 0; index < 24; index += 1) {
+      const mid = (low + high) / 2;
+      if (floorItemFitsFloorShape(type, buildCandidate(mid), shapeRegions)) low = mid;
+      else high = mid;
+    }
+    const bounded = buildCandidate(low);
+    return { ...bounded, width: Math.round(bounded.width), height: Math.round(bounded.height) } as T;
+  }
   return { ...resized, width: Math.round(resized.width), height: Math.round(resized.height) } as T;
   let x = item.x;
   let y = item.y;
@@ -729,7 +1330,8 @@ export function scaleFloorItemFromBounds(
   originBounds: Rect,
   nextBounds: Rect,
   canvasW: number,
-  canvasH: number
+  canvasH: number,
+  shapeRegions?: FloorShapeRect[],
 ) {
   const sx = originBounds.w === 0 ? 1 : nextBounds.w / originBounds.w;
   const sy = originBounds.h === 0 ? 1 : nextBounds.h / originBounds.h;
@@ -740,7 +1342,16 @@ export function scaleFloorItemFromBounds(
   }
   if (type === "room") {
     const next = { ...item, x: Math.round(mapX(item.x)), y: Math.round(mapY(item.y)), w: Math.max(20, Math.round(item.w * sx)), h: Math.max(15, Math.round(item.h * sy)) };
-    const clamped = clampRotatedRectPosition({ ...next, width: next.w, height: next.h, rotation: next.rotation ?? 0 }, canvasW, canvasH);
+    if (Array.isArray(item.shapePoints) && item.shapePoints.length >= 3) {
+      return {
+        ...next,
+        shapePoints: item.shapePoints.map((point: RoomShapePoint) => ({
+          x: mapX(point.x),
+          y: mapY(point.y),
+        })),
+      };
+    }
+    const clamped = shapeRegions ? { ...next, x: next.x, y: next.y } : clampRotatedRectPosition({ ...next, width: next.w, height: next.h, rotation: next.rotation ?? 0 }, canvasW, canvasH);
     return { ...next, x: clamped.x, y: clamped.y };
   }
   if (type === "door") {
@@ -751,7 +1362,7 @@ export function scaleFloorItemFromBounds(
   }
   if (type === "label") {
     const scaled = { ...item, x: Math.round(mapX(item.x)), y: Math.round(mapY(item.y)), fontSize: Math.max(8, Math.round(item.fontSize * Math.max(0.6, Math.min(2.4, (Math.abs(sx) + Math.abs(sy)) / 2)))) };
-    return constrainLabelToFloor(scaled, canvasW, canvasH);
+    return shapeRegions ? scaled : constrainLabelToFloor(scaled, canvasW, canvasH);
   }
   if (type === "furniture" || type === "stairs" || type === "ramp" || type === "elevator") {
     const next = {
@@ -761,8 +1372,8 @@ export function scaleFloorItemFromBounds(
       width: Math.max(type === "elevator" ? 14 : type === "furniture" ? 8 : 16, Math.round(item.width * sx)),
       height: Math.max(type === "elevator" ? 14 : type === "furniture" ? 8 : 12, Math.round(item.height * sy)),
     };
-    if (type === "furniture") return constrainFurnitureToFloor(next as FloorFurniture, canvasW, canvasH);
-    return clampRotatedRectPosition(next, canvasW, canvasH);
+    if (type === "furniture") return constrainFurnitureToFloor(next as FloorFurniture, canvasW, canvasH, shapeRegions);
+    return shapeRegions ? next : clampRotatedRectPosition(next, canvasW, canvasH);
   }
   if (type === "entranceSteps" || type === "entranceRamp") {
     const next = {
@@ -772,7 +1383,7 @@ export function scaleFloorItemFromBounds(
       width: Math.max(8, Math.round(item.width * sx)),
       height: Math.max(8, Math.round(item.height * sy)),
     };
-    return clampRotatedRectPosition(next, canvasW, canvasH);
+    return shapeRegions ? next : clampRotatedRectPosition(next, canvasW, canvasH);
   }
   return item;
 }
@@ -784,7 +1395,8 @@ export function rotateFloorItem(
   cy: number,
   deltaDeg: number,
   canvasW: number,
-  canvasH: number
+  canvasH: number,
+  shapeRegions?: FloorShapeRect[],
 ) {
   if (type === "wall") {
     const p1 = rotatePoint({ x: item.x1, y: item.y1 }, cx, cy, deltaDeg);
@@ -802,25 +1414,48 @@ export function rotateFloorItem(
           : { x: item.x + item.width / 2, y: item.y + item.height / 2 };
   const nextCenter = rotatePoint(center, cx, cy, deltaDeg);
   if (type === "room") {
+    const nextRotation = normalizeRotation((item.rotation ?? 0) + deltaDeg);
+    if (Array.isArray(item.shapePoints) && item.shapePoints.length >= 3) {
+      // Custom Room points are local/base coordinates; the Room's rotation
+      // property is the single visual rotation authority. When a Room is
+      // rotated as part of a multi-selection, move its local frame with the
+      // Room center and update rotation, rather than rotating the persisted
+      // points and then rotating them again during render.
+      const deltaX = nextCenter.x - center.x;
+      const deltaY = nextCenter.y - center.y;
+      return {
+        ...item,
+        x: Math.round(nextCenter.x - item.w / 2),
+        y: Math.round(nextCenter.y - item.h / 2),
+        w: item.w,
+        h: item.h,
+        rotation: nextRotation,
+        shapePoints: item.shapePoints.map((point: RoomShapePoint) => ({ x: point.x + deltaX, y: point.y + deltaY })),
+      };
+    }
     const next = {
       ...item,
       x: Math.round(nextCenter.x - item.w / 2),
       y: Math.round(nextCenter.y - item.h / 2),
-      rotation: normalizeRotation((item.rotation ?? 0) + deltaDeg),
+      rotation: nextRotation,
     };
-    const clamped = clampRotatedRectPosition({ ...next, width: next.w, height: next.h }, canvasW, canvasH);
+    const clamped = shapeRegions ? next : clampRotatedRectPosition({ ...next, width: next.w, height: next.h }, canvasW, canvasH);
     return { ...next, x: clamped.x, y: clamped.y };
   }
   if (type === "door") return { ...item, x: Math.round(nextCenter.x), y: Math.round(nextCenter.y) };
   if (type === "window") return { ...item, x: Math.round(nextCenter.x - item.width / 2), y: Math.round(nextCenter.y - item.height / 2) };
-  if (type === "label") return constrainLabelToFloor({ ...item, x: Math.round(nextCenter.x), y: Math.round(nextCenter.y), rotation: normalizeRotation((item.rotation ?? 0) + deltaDeg) }, canvasW, canvasH);
+  if (type === "label") {
+    const next = { ...item, x: Math.round(nextCenter.x), y: Math.round(nextCenter.y), rotation: normalizeRotation((item.rotation ?? 0) + deltaDeg) };
+    return shapeRegions ? next : constrainLabelToFloor(next, canvasW, canvasH);
+  }
   if (type === "furniture" || type === "stairs" || type === "ramp" || type === "elevator") {
-    return clampRotatedRectPosition({
+    const next = {
       ...item,
       x: Math.round(nextCenter.x - item.width / 2),
       y: Math.round(nextCenter.y - item.height / 2),
       rotation: normalizeRotation((item.rotation ?? 0) + deltaDeg),
-    }, canvasW, canvasH);
+    };
+    return shapeRegions ? next : clampRotatedRectPosition(next, canvasW, canvasH);
   }
   return item;
 }
@@ -855,6 +1490,7 @@ export function validateFloorGeometry(floor: FloorPlan): FloorIssue[] {
   const canvasW = floor.canvasW ?? DEFAULT_FLOOR_CANVAS.w;
   const canvasH = floor.canvasH ?? DEFAULT_FLOOR_CANVAS.h;
   const issues: FloorIssue[] = [];
+  const shapeRegions = getFloorShapeRegions(floor);
   const wallById = new Map(floor.walls.map((wall) => [wall.id, wall]));
   const furnitureIsInsideExteriorZone = (item: FloorFurniture) => {
     const bounds = itemBounds("furniture", item);
@@ -911,7 +1547,8 @@ export function validateFloorGeometry(floor: FloorPlan): FloorIssue[] {
         continue;
       }
       const bounds = itemBounds(type, item);
-      if (bounds && !isRectInsideFloor(bounds, canvasW, canvasH)) {
+      const insideShape = bounds && floorItemFitsFloorShape(type, item, shapeRegions);
+      if (bounds && !insideShape) {
         issues.push({
           id: `${type}-${item.id}-bounds`,
           severity: "error",

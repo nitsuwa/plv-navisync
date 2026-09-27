@@ -62,8 +62,11 @@ import { decorRenderScale, decorWorldSize } from "../../lib/decorVisual";
 import { outdoorGroupSelectionBounds, outdoorSelectionIdsInRect, pathSelectionBounds, selectionRectFromPoints, snapRotationAngle } from "../../lib/campusSelection";
 import { arrangeSelectedOutdoorObjects, selectedOutdoorCount, type OutdoorArrangementAction } from "../../lib/campusArrangement";
 import { alignEntranceAttachment, defaultEntrance, normalizeBuildingEntrances, promotePrimaryEntrance, updateBuildingEntrance, entranceWorldPosition, findEntranceAtPoint, entranceDisplayName } from "../../lib/buildingEntrances";
-import { createDefaultFloor, duplicateFloorForBuilding } from "../../lib/floorPlanNormalization";
-import { navEdgePolylineDistance, orthogonalBendsFor, translateOrthogonalSegment, translateStraightSegment, normalizeBendPoints, edgePolylinePoints, navAlignSnap } from "../../lib/indoorNavigationGraph";
+import { clampNormalizedOffset, entranceAttachmentArrowDelta } from "../../lib/wallAttachmentControls";
+import { createDefaultFloor } from "../../lib/floorPlanNormalization";
+import { duplicateBuildingForCampus } from "../../lib/buildingDuplication";
+import { collectIdentityIds, physicalSaveErrorMessage } from "../../lib/physicalFloorIntegrity";
+import { navEdgePolylineDistance, orthogonalBendsFor, translateOrthogonalSegment, translateStraightSegment, normalizeBendPoints, edgePolylinePoints, navAlignSnap, resolveConnectPathTargetPoint } from "../../lib/indoorNavigationGraph";
 import { screenSpaceAlignmentThreshold } from "../../lib/roomOverlap";
 import {
   doorNodeForEdge,
@@ -84,6 +87,7 @@ import { entranceConnectorDistance, entranceConnectorGeometry } from "../../lib/
 import {
   canonicalExteriorEmergencyStairsForBuilding,
   defaultExteriorEmergencyStairAttachment,
+  exteriorEmergencyStairAttachmentIsAvailable,
   exteriorEmergencyStairEdgeForPointer,
   exteriorEmergencyStairOffsetForPointer,
   exteriorEmergencyStairWallSpansOverlap,
@@ -712,6 +716,11 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     segmentIndex: number;
     point: { x: number; y: number };
   } | null>(null);
+  const connectPathTargetHoverRef = useRef<{
+    pathId: string;
+    pointer: { x: number; y: number };
+    target: PathSnapTarget;
+  } | null>(null);
   // ── B5 Phase 6.2: outdoor Connect blocked preview ──
   const [connectBlocked, setConnectBlocked] = useState(false);
   // ── B5 Phase 1.6: entrance target the Add Waypoint / Connect Path tools are
@@ -725,6 +734,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
   useEffect(() => {
     if (tool !== "connect" || layer !== "navigation" || !navConnectStart) {
       setNavPathTargetHover(null);
+      connectPathTargetHoverRef.current = null;
     }
   }, [layer, navConnectStart, tool]);
   // ── Dirty state: snapshot of last-saved campus ──
@@ -836,6 +846,10 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     members: GroupMoveMember[];
     decorScales: Record<string, number>;
   } | null>(null);
+  // A building remains the canonical selection for its building-owned stair,
+  // while this focused id keeps the Properties panel progressive when several
+  // independent exterior stairs are present.
+  const [focusedExteriorEmergencyStairId, setFocusedExteriorEmergencyStairId] = useState<string | null>(null);
   // Physical multi-select rotation uses the same gesture-history contract as
   // group resize, but keeps an immutable member snapshot so every pointer
   // frame rotates from the original arrangement rather than accumulating
@@ -1156,7 +1170,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
   const snap = useCallback((v: number) => (snapGrid ? Math.round(v / 20) * 20 : Math.round(v)), [snapGrid]);
 
   const dragging = useRef<{
-    type: "building" | "marker" | "decorAsset" | "entrance" | "navNode" | "path" | "pathPoint" | "pathPointInsert" | "pathWidth" | "navEdgeBend" | "generatedPathPoint";
+    type: "building" | "marker" | "decorAsset" | "entrance" | "navNode" | "path" | "pathPoint" | "pathPointInsert" | "pathWidth" | "navEdgeBend";
     id: string;
     buildingId?: string;
     pointIndex?: number;
@@ -1179,15 +1193,6 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     pathJoinTarget?: { pathId: string; pointIndex: number };
     /** Source vertex index for an explicit whole-Path drop join. */
     pathJoinSourcePointIndex?: number;
-  } | null>(null);
-  // A generated Walking Point remains selected as a nav object for a click,
-  // but becomes a physical-vertex gesture only after the normal drag threshold
-  // is crossed. This keeps inspection clicks from mutating the Pathway.
-  const generatedPointProxyRef = useRef<{
-    nodeId: string;
-    sx: number;
-    sy: number;
-    refs: { pathId: string; pointIndex: number }[];
   } | null>(null);
   const dragGroupStartRef = useRef<GroupMoveMember[] | null>(null);
   const pathGroupOriginRef = useRef<Map<string, { x: number; y: number }[]> | null>(null);
@@ -1496,6 +1501,18 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     if (bestPoint && bestSegment) return (bestSegment as PathSnapTarget).distance <= (bestPoint as PathSnapTarget).distance ? bestSegment : bestPoint;
     return bestPoint ?? bestSegment;
   }, [pathPaintWidth, paths]);
+
+  const resolveConnectPathSnapTarget = useCallback((target: PathSnapTarget | null, source: NavigationNode | undefined) => {
+    if (!target || target.kind !== "segment" || target.segmentIndex === undefined || !source) return target;
+    const path = paths.find((candidate) => candidate.id === target.pathId);
+    const segmentStart = path?.points[target.segmentIndex];
+    const segmentEnd = path?.points[target.segmentIndex + 1];
+    if (!segmentStart || !segmentEnd) return target;
+    return {
+      ...target,
+      point: resolveConnectPathTargetPoint(source, target.point, segmentStart, segmentEnd),
+    };
+  }, [paths]);
 
   // A newly authored Visual Path may attach to any visible CampusPath,
   // including one that already participates in navigation. The relationship
@@ -2384,7 +2401,16 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
         if (physicalPathId) {
           const physicalPath = paths.find((path) => path.id === physicalPathId);
           if (physicalPath) {
-            const pathTarget = pathSnapTargetForPoint(clampedPt, undefined, undefined, physicalPath.id);
+            const captured = connectPathTargetHoverRef.current;
+            const pointerMatchesPreview = captured
+              && captured.pathId === physicalPath.id
+              && captured.pointer.x === clampedPt.x
+              && captured.pointer.y === clampedPt.y;
+            const rawPathTarget = pathSnapTargetForPoint(clampedPt, undefined, undefined, physicalPath.id);
+            const sourceNode = navConnectStart ? outdoorNodes.find((node) => node.id === navConnectStart) : undefined;
+            const pathTarget = pointerMatchesPreview
+              ? captured.target
+              : resolveConnectPathSnapTarget(rawPathTarget, sourceNode);
             if (navConnectStart && pathTarget?.pathId === physicalPath.id && pathTarget.kind === "segment") {
               connectPathwaySegment(pathTarget);
             } else if (navConnectStart) {
@@ -2629,8 +2655,11 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     startNode: NavigationNode,
     targetPoint: { x: number; y: number },
     targetNode?: NavigationNode,
+    preserveTargetPrecision = false,
   ) => {
-    const target = { x: Math.round(targetPoint.x), y: Math.round(targetPoint.y) };
+    const target = preserveTargetPrecision
+      ? { x: targetPoint.x, y: targetPoint.y }
+      : { x: Math.round(targetPoint.x), y: Math.round(targetPoint.y) };
     const entranceGeometry = entranceConnectorForNodes(
       startNode,
       targetNode ?? {
@@ -3286,12 +3315,25 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
       if (tool === "connect") {
         const rawPoint = { x: Math.max(0, Math.min(cw, Math.round(pt.x))), y: Math.max(0, Math.min(ch, Math.round(pt.y))) };
         const hit = findNavNodeAtPoint(outdoorNodes, rawPoint);
+        const startNode = navConnectStart
+          ? outdoorNodes.find((node) => node.id === navConnectStart)
+          : undefined;
         const targetElement = e.target as SVGElement;
         const hoveredPathElement = targetElement.closest?.("[data-testid='campus-path']");
         const hoveredPathId = hoveredPathElement?.getAttribute("data-path-id");
-        const hoveredPathTarget = !hit && hoveredPathId
+        const rawHoveredPathTarget = !hit && hoveredPathId
           ? pathSnapTargetForPoint(rawPoint, undefined, undefined, hoveredPathId)
           : null;
+        const hoveredPathTarget = resolveConnectPathSnapTarget(rawHoveredPathTarget, startNode);
+        if (navConnectStart && hoveredPathTarget?.kind === "segment") {
+          connectPathTargetHoverRef.current = {
+            pathId: hoveredPathTarget.pathId,
+            pointer: { ...rawPoint },
+            target: hoveredPathTarget,
+          };
+        } else {
+          connectPathTargetHoverRef.current = null;
+        }
         // A manual Walking Network edge has its own transparent hit surface.
         // Resolve only that hovered edge (rather than scanning the entire graph)
         // so the preview snaps to the exact point that a line click will split.
@@ -3302,12 +3344,28 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
         const hoveredEdge = hoveredEdgeId
           ? outdoorEdges.find((edge) => edge.id === hoveredEdgeId)
           : undefined;
-        const hoveredEdgeTarget = !hit && !hoveredPathTarget && hoveredEdge
+        const rawHoveredEdgeTarget = !hit && !hoveredPathTarget && hoveredEdge
           ? nearestPointOnEdgePolyline(
               hoveredEdge,
               outdoorNodeMap,
               rawPoint,
             )
+          : null;
+        const hoveredEdgePoints = rawHoveredEdgeTarget && hoveredEdge
+          ? edgePolylinePoints(hoveredEdge, outdoorNodes)
+          : null;
+        const hoveredEdgeSegmentStart = rawHoveredEdgeTarget ? hoveredEdgePoints?.[rawHoveredEdgeTarget.segIndex] : undefined;
+        const hoveredEdgeSegmentEnd = rawHoveredEdgeTarget ? hoveredEdgePoints?.[rawHoveredEdgeTarget.segIndex + 1] : undefined;
+        const resolvedHoveredEdgePoint = rawHoveredEdgeTarget && startNode && hoveredEdgeSegmentStart && hoveredEdgeSegmentEnd
+          ? resolveConnectPathTargetPoint(
+              startNode,
+              { x: rawHoveredEdgeTarget.x, y: rawHoveredEdgeTarget.y },
+              hoveredEdgeSegmentStart,
+              hoveredEdgeSegmentEnd,
+            )
+          : rawHoveredEdgeTarget ? { x: rawHoveredEdgeTarget.x, y: rawHoveredEdgeTarget.y } : null;
+        const hoveredEdgeTarget = rawHoveredEdgeTarget && resolvedHoveredEdgePoint
+          ? { ...rawHoveredEdgeTarget, x: resolvedHoveredEdgePoint.x, y: resolvedHoveredEdgePoint.y }
           : null;
         if (navConnectStart && hoveredEdgeTarget && hoveredEdge) {
           setNavPathTargetHover({
@@ -3348,9 +3406,6 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
             : entranceHit
               ? { x: entranceHit.x, y: entranceHit.y }
               : null;
-        const startNode = navConnectStart
-          ? outdoorNodes.find((node) => node.id === navConnectStart)
-          : undefined;
         const previewTarget = targetPoint ?? rawPoint;
         // Keep Entrance-as-destination previews on the same canonical
         // connector branch as commitNavEdgeWithEntrance. The physical hit
@@ -3391,6 +3446,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
               startNode,
               previewTarget,
               hit ?? entrancePreviewNode,
+              !hit && !entrancePreviewNode && (hoveredPathTarget?.kind === "segment" || Boolean(hoveredEdgeTarget)),
             )
           : null;
         const previewPins = previewCandidate?.bends ?? [];
@@ -3635,44 +3691,6 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
       const pending = dragging.current;
       if (Math.hypot(pt.x - pending.sx, pt.y - pending.sy) < 3) return;
       dragging.current = { ...pending, type: "pathPoint" };
-    }
-
-    // Generated Walking Points are physical-vertex proxies. Keep the initial
-    // pointer-down as an inspection selection, then enter the existing
-    // Pathway vertex pipeline only after a real drag threshold is crossed.
-    const pendingGeneratedPoint = generatedPointProxyRef.current;
-    if (pendingGeneratedPoint && dragging.current?.type === "generatedPathPoint") {
-      const moved = didOutdoorWaypointDragStart(
-        { x: pendingGeneratedPoint.sx, y: pendingGeneratedPoint.sy },
-        { x: pt.x, y: pt.y },
-        zoom,
-        OUTDOOR_WAYPOINT_DRAG_THRESHOLD_PX,
-      );
-      if (!moved) return;
-      const primary = pendingGeneratedPoint.refs[0];
-      const owner = primary ? paths.find((path) => path.id === primary.pathId) : undefined;
-      if (!primary || !owner || owner.locked) {
-        generatedPointProxyRef.current = null;
-        dragging.current = null;
-        return;
-      }
-      // Reuse the physical point-drag branch below. The explicit refs preserve
-      // shared-junction ownership without coordinate-based adoption.
-      dragging.current = {
-        type: "pathPoint",
-        id: primary.pathId,
-        pointIndex: primary.pointIndex,
-        sx: pendingGeneratedPoint.sx,
-        sy: pendingGeneratedPoint.sy,
-        ox: owner.points[primary.pointIndex]?.x ?? owner.points[0]?.x ?? 0,
-        oy: owner.points[primary.pointIndex]?.y ?? owner.points[0]?.y ?? 0,
-        generatedVertexRefs: pendingGeneratedPoint.refs,
-        generatedNodeId: pendingGeneratedPoint.nodeId,
-        dragStarted: true,
-      };
-      generatedPointProxyRef.current = null;
-      setSelected({ type: "path", id: primary.pathId });
-      setSelectedPathPoint({ pathId: primary.pathId, pointIndex: primary.pointIndex });
     }
 
     const drag = dragging.current;
@@ -4921,8 +4939,6 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
       gesture.previewEdge = edge;
       const rawOffset = exteriorEmergencyStairOffsetForPointer(localPoint, { width: building.width, height: building.height }, edge);
       const wallSpan = edge === "top" || edge === "bottom" ? building.width : building.height;
-      const visual = exteriorEmergencyStairVisualDimensions(owner);
-      const candidateSpan = (edge === "top" || edge === "bottom" ? visual.width : visual.height) + 12;
       const range = exteriorEmergencyStairSafeOffsetRange(edge, wallSpan, owner.width, owner.height, owner.visualSize);
       const sameEdgeEntrances = (building.entrances ?? []).filter((entrance) => entrance.edge === edge);
       const sameEdgeStairs = canonicalExteriorEmergencyStairsForBuilding(building).filter((stair) => stair.id !== owner.id && stair.attachment.edge === edge);
@@ -4972,16 +4988,12 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
         .sort((a, b) => a.distance - b.distance)[0];
       if (!navOffsetSnap && nearest && nearest.distance <= SNAP_DIST) offset = nearest.target;
       offset = Math.round(offset * 1000) / 1000;
-      const collidesWithEntrance = sameEdgeEntrances.some((entrance) => {
-        const entranceSpan = 24;
-        return exteriorEmergencyStairWallSpansOverlap(offset, candidateSpan, Number.isFinite(Number(entrance.offset)) ? Number(entrance.offset) : 0.5, entranceSpan, wallSpan, 4);
-      });
-      const collidesWithStair = sameEdgeStairs.some((stair) => {
-        const otherVisual = exteriorEmergencyStairVisualDimensions(stair);
-        const otherSpan = (edge === "top" || edge === "bottom" ? otherVisual.width : otherVisual.height) + 12;
-        return exteriorEmergencyStairWallSpansOverlap(offset, candidateSpan, Number.isFinite(Number(stair.attachment.offset)) ? Number(stair.attachment.offset) : 0.5, otherSpan, wallSpan, 4);
-      });
-      const valid = !collidesWithEntrance && !collidesWithStair;
+      const valid = exteriorEmergencyStairAttachmentIsAvailable(
+        building,
+        { edge, offset },
+        { width: owner.width, height: owner.height, visualSize: owner.visualSize },
+        owner.id,
+      );
       const guideTarget = nearest && nearest.distance <= SNAP_DIST ? nearest.target : null;
       if (navOffsetSnap) {
         setGuides([navOffsetSnap.guide]);
@@ -5276,7 +5288,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
       completedDragHistoryState = merged;
     }
     const draggedPathId = dragging.current?.type === "path" ? dragging.current.id : null;
-    const consumedNavigationDrag = dragCommitted && (dragging.current?.type === "navNode" || dragging.current?.type === "generatedPathPoint" || dragging.current?.type === "pathPoint");
+    const consumedNavigationDrag = dragCommitted && (dragging.current?.type === "navNode" || dragging.current?.type === "pathPoint");
     if (consumedNavigationDrag) {
       suppressNextPathClickRef.current = true;
       window.setTimeout(() => { suppressNextPathClickRef.current = false; }, 0);
@@ -5289,7 +5301,6 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     }
     endPan();
     dragging.current = null;
-    generatedPointProxyRef.current = null;
     dragGroupStartRef.current = null;
     pathGroupOriginRef.current = null;
     navGroupOriginRef.current = null;
@@ -5412,7 +5423,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     gestureChangedRef.current = false;
     gestureHistoryPushed.current = false;
   };
-  const handleSvgUp = () => { endPan(); dragging.current = null; generatedPointProxyRef.current = null; dragGroupStartRef.current = null; groupResizing.current = null; groupRotating.current = null; setGroupRotationActive(false); markerResizing.current = null; setMarkerResizingId(null); pathGroupOriginRef.current = null; navGroupOriginRef.current = null; navGroupEdgeOriginsRef.current = null; pathGroupRotating.current = null; setPathGroupRotationBounds(null); setPathGroupScale(null); setPathVertexSnapTarget(null); setRotatingAngle(0); setGuides([]); gestureHistoryPushed.current = false; };
+  const handleSvgUp = () => { endPan(); dragging.current = null; dragGroupStartRef.current = null; groupResizing.current = null; groupRotating.current = null; setGroupRotationActive(false); markerResizing.current = null; setMarkerResizingId(null); pathGroupOriginRef.current = null; navGroupOriginRef.current = null; navGroupEdgeOriginsRef.current = null; pathGroupRotating.current = null; setPathGroupRotationBounds(null); setPathGroupScale(null); setPathVertexSnapTarget(null); setRotatingAngle(0); setGuides([]); gestureHistoryPushed.current = false; };
 
   // ── Mouse leaves the canvas mid-gesture: CANCEL placement/drawing instead of
   // finalizing it. (onMouseLeave previously ran the same handler as mouseup, so
@@ -5480,7 +5491,6 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     gestureChangedRef.current = false;
     endPan();
     dragging.current = null;
-    generatedPointProxyRef.current = null;
     dragGroupStartRef.current = null;
     pathGroupOriginRef.current = null;
     navGroupOriginRef.current = null;
@@ -5914,28 +5924,11 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
         return;
       }
       if (node?.generatedFromPathVertices?.length) {
-        const refs = node.generatedFromPathVertices
-          .map((ref) => {
-            const owner = paths.find((path) => path.id === ref.pathId);
-            const pointIndex = owner?.navigationVertexIds?.indexOf(ref.vertexId) ?? -1;
-            return owner && pointIndex >= 0 ? { pathId: owner.id, pointIndex, locked: !!owner.locked } : null;
-          })
-          .filter(Boolean) as { pathId: string; pointIndex: number; locked: boolean }[];
-        const proxyRefs = refs.map(({ pathId, pointIndex }) => ({ pathId, pointIndex }));
-        const pt = getPoint(e, cw, ch);
         setSelected({ type: "navNode", id });
         setMultiSelected([]);
         setShowAlignTools(false);
         setSelectedPathPoint(null);
-        gestureHistoryPushed.current = false;
-        gestureChangedRef.current = false;
-        const canProxyDrag = proxyRefs.length > 0
-          && proxyRefs.length === node.generatedFromPathVertices.length
-          && refs.every((ref) => !ref.locked);
-        generatedPointProxyRef.current = canProxyDrag
-          ? { nodeId: id, sx: pt.x, sy: pt.y, refs: proxyRefs }
-          : null;
-        dragging.current = { type: "generatedPathPoint", id, sx: pt.x, sy: pt.y, ox: node.x, oy: node.y };
+        toast.info("Pathway walking point is managed automatically", "Select the physical Pathway to edit its geometry. This generated waypoint cannot move the Pathway.");
         return;
       }
     }
@@ -6457,10 +6450,6 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     const building = current.buildings.find((candidate) => candidate.id === buildingId);
     if (!building || building.locked) return;
     const existing = canonicalExteriorEmergencyStairsForBuilding(building);
-    if (existing.length > 0 || (building.exteriorEmergencyStairs?.length ?? 0) > 0) {
-      toast.warning("Exterior Emergency Stair already configured", "A Building can have only one Exterior Emergency Stair.");
-      return;
-    }
     const attachment = defaultExteriorEmergencyStairAttachment(building);
     if (!attachment) {
       toast.warning("Exterior Emergency Stair could not be placed", "Every Building side has occupied wall space for the required stair landing.");
@@ -6470,7 +6459,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     const stair = {
       id,
       buildingId,
-      label: "Emergency Stair 1",
+      label: `Exterior Stair ${existing.length + 1}`,
       state: "open" as const,
       width: 28,
       height: 42,
@@ -6492,6 +6481,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     pushHistory(next);
     onUpdate(next);
     setSelected({ type: "building", id: buildingId });
+    setFocusedExteriorEmergencyStairId(id);
     toast.success("Exterior Emergency Stair added", "Configure served Floors in the building properties.");
   };
 
@@ -6508,15 +6498,12 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
         const rawOffset = Number(next.attachment.offset);
         const normalizedOffset = Number.isFinite(rawOffset) ? rawOffset : 0.5;
         const offset = Math.max(range.min, Math.min(range.max, normalizedOffset));
-        const visual = exteriorEmergencyStairVisualDimensions(next);
-        const candidateSpan = (next.attachment.edge === "top" || next.attachment.edge === "bottom" ? visual.width : visual.height) + 12;
-        const blocked = (building.entrances ?? []).some((entrance) => entrance.edge === next.attachment.edge
-          && exteriorEmergencyStairWallSpansOverlap(offset, candidateSpan, Number.isFinite(Number(entrance.offset)) ? Number(entrance.offset) : 0.5, 24, span, 4))
-          || canonicalExteriorEmergencyStairsForBuilding(building).some((other) => other.id !== stairId && other.attachment.edge === next.attachment.edge
-            && exteriorEmergencyStairWallSpansOverlap(offset, candidateSpan, Number.isFinite(Number(other.attachment.offset)) ? Number(other.attachment.offset) : 0.5,
-              (next.attachment.edge === "top" || next.attachment.edge === "bottom"
-                ? exteriorEmergencyStairVisualDimensions(other).width
-                : exteriorEmergencyStairVisualDimensions(other).height) + 12, span, 4));
+        const blocked = !exteriorEmergencyStairAttachmentIsAvailable(
+          building,
+          { edge: next.attachment.edge, offset },
+          { width: next.width, height: next.height, visualSize: next.visualSize },
+          stairId,
+        );
         if (blocked && (changes.attachment || changes.width !== undefined || changes.height !== undefined || changes.visualSize !== undefined)) placementBlocked = true;
         return { ...next, attachment: { ...next.attachment, offset } };
       }),
@@ -6549,6 +6536,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     });
     pushHistory(next);
     onUpdate(next);
+    if (focusedExteriorEmergencyStairId === stairId) setFocusedExteriorEmergencyStairId(null);
     toast.info("Exterior Emergency Stair removed", "Its generated floor landings and transition anchors were removed.");
   };
 
@@ -7102,12 +7090,17 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     const path = (currentCampus.paths ?? []).find((candidate) => candidate.id === target.pathId);
     if (!path || path.locked) return false;
     const pointIndex = target.segmentIndex + 1;
-    // The preview rounds the prospective junction once. Reuse that exact
-    // coordinate for the physical Pathway insertion so commit cannot jump by
-    // a pixel (or re-project a diagonal segment differently).
+    const connectSource = (currentCampus.navNodes ?? []).find((node) => node.id === navConnectStart);
+    const segmentStart = path.points[target.segmentIndex];
+    const segmentEnd = path.points[target.segmentIndex + 1];
+    const resolvedPoint = connectSource && segmentStart && segmentEnd
+      ? resolveConnectPathTargetPoint(connectSource, target.point, segmentStart, segmentEnd)
+      : target.point;
+    // The preview's resolved coordinate is the one inserted into the physical
+    // Pathway. Keep its fractional projection and any accepted H/V snap intact.
     const committedTarget: PathSnapTarget = {
       ...target,
-      point: { x: Math.round(target.point.x), y: Math.round(target.point.y) },
+      point: { x: resolvedPoint.x, y: resolvedPoint.y },
     };
     // A generated Stair Exit node can be present in a legacy/hydrated campus
     // before the post-mount graph reconciliation has persisted its canonical
@@ -7158,6 +7151,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
       setNavEntranceHover(null);
       setWaypointEdgeSnap(null);
       setConnectBlocked(false);
+      connectPathTargetHoverRef.current = null;
     };
 
     if (findDuplicateNavEdge(reconciled.navEdges ?? [], startNode.id, endNode.id)) {
@@ -7166,7 +7160,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
       return false;
     }
 
-    const candidate = outdoorConnectCandidateFor(startNode, { x: endNode.x, y: endNode.y }, endNode);
+    const candidate = outdoorConnectCandidateFor(startNode, { x: endNode.x, y: endNode.y }, endNode, true);
     if (candidate.blocked) {
       toast.warning("Connection blocked", "The connection crosses a building or obstacle.");
       return false;
@@ -7248,6 +7242,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
       setNavEntranceHover(null);
       setWaypointEdgeSnap(null);
       setConnectBlocked(false);
+      connectPathTargetHoverRef.current = null;
     };
     if (!navConnectStart) return false;
     // Commit from the latest canonical campus snapshot.  A generated Stair
@@ -7277,7 +7272,12 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     }
     // The hover projection is authoritative. Preserve it for diagonal and
     // bent segments instead of rounding back toward an endpoint on commit.
-    const clickPoint = { x: nearest.x, y: nearest.y };
+    const manualEdgePoints = edgePolylinePoints(liveTargetEdge, graphNodes);
+    const segmentStart = preferredSegmentIndex !== undefined ? manualEdgePoints?.[preferredSegmentIndex] : undefined;
+    const segmentEnd = preferredSegmentIndex !== undefined ? manualEdgePoints?.[preferredSegmentIndex + 1] : undefined;
+    const clickPoint = segmentStart && segmentEnd
+      ? resolveConnectPathTargetPoint(startNode, nearest, segmentStart, segmentEnd)
+      : { x: nearest.x, y: nearest.y };
     const edgeStart = graphNodes.find((node) => node.id === liveTargetEdge.startNodeId);
     const edgeEnd = graphNodes.find((node) => node.id === liveTargetEdge.endNodeId);
     if (!edgeStart || !edgeEnd) return false;
@@ -7303,7 +7303,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     // Resolve the connector from the same candidate used by the live preview.
     // This keeps Stair/Discharge and ordinary manual sources on one commit
     // path and prevents a second orthogonalization from changing the line.
-    const candidate = outdoorConnectCandidateFor(startNode, clickPoint, insertNode);
+    const candidate = outdoorConnectCandidateFor(startNode, clickPoint, insertNode, true);
     if (candidate.blocked) {
       toast.warning("Connection blocked", "The connection crosses a building or obstacle.");
       return false;
@@ -8010,32 +8010,25 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
           break;
         }
         case "duplicate": {
-          pushHistory();
           const nbId = genId("bld");
           const identity = nextBuildingCopyIdentity(b, buildings, defaultBuildingReservationsRef.current?.values, nbId);
-          defaultBuildingReservationsRef.current?.values.push(identity);
-          const entranceIdMap = new Map((b.entrances ?? []).map((entrance) => [entrance.id, genId("ent")]));
-          const clonedFloors = (b.floors ?? []).map((floor) => duplicateFloorForBuilding(floor, {
-            id: genId("fl"), buildingId: nbId, number: floor.number, label: floor.label,
-          }));
-          const clonedEntrances = normalizeBuildingEntrances(b).map((entrance) => ({
-            ...entrance,
-            id: entranceIdMap.get(entrance.id) ?? genId("ent"),
-            buildingId: nbId,
-          }));
-          const nb: CampusBuilding = {
-            ...b,
-            id: nbId,
-            name: identity.name,
-            code: identity.code,
-            x: b.x + 20,
-            y: b.y + 20,
-            entrances: clonedEntrances,
-            floors: clonedFloors,
-          };
-          updBuildings([...buildings, nb]);
-          setSelected({ type: "building", id: nb.id });
-          toast.success("Building Duplicated", `${b.code} has been copied.`);
+          try {
+            const nb = duplicateBuildingForCampus(b, {
+              id: nbId, name: identity.name, code: identity.code,
+              x: b.x + 20, y: b.y + 20, idFactory: genId,
+              reservedIds: collectIdentityIds(campus),
+            });
+            pushHistory();
+            defaultBuildingReservationsRef.current?.values.push(identity);
+            // A whole-Building physical copy does not clone the campus graph.
+            // Preserve existing nodes/edges; the normal Entrance reconciliation
+            // may still create fresh canonical anchors for copied Entrances.
+            onUpdate({ ...campus, buildings: [...buildings, nb] });
+            setSelected({ type: "building", id: nb.id });
+            toast.success("Building Duplicated", `${b.code} has been copied.`);
+          } catch (error) {
+            toast.error("Building Not Duplicated", error instanceof Error ? error.message : "The copied Building failed its integrity check.");
+          }
           break;
         }
         case "delete":
@@ -8276,7 +8269,8 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
       setIsProcessing(false);
       return true;
     } catch (error) {
-      const message = error instanceof Error ? error.message : "The database rejected the save.";
+      console.error("[CampusEditor] Campus save failed", error);
+      const message = physicalSaveErrorMessage(error);
       setSaveScreen({ open: true, state: "error" });
       saveErrorRef.current = message;
       toast.error("Could not save map", message);
@@ -8434,28 +8428,22 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
         if (!b) continue;
         const nbId = genId("bld");
         const identity = nextBuildingCopyIdentity(b, buildings, defaultBuildingReservationsRef.current?.values, nbId);
-        defaultBuildingReservationsRef.current?.values.push(identity);
-        const entranceIdMap = new Map((b.entrances ?? []).map((entrance) => [entrance.id, genId("ent")]));
-        const clonedFloors = (b.floors ?? []).map((floor) => duplicateFloorForBuilding(floor, {
-          id: genId("fl"), buildingId: nbId, number: floor.number, label: floor.label,
-        }));
-        const clonedEntrances = normalizeBuildingEntrances(b).map((entrance) => ({
-          ...entrance,
-          id: entranceIdMap.get(entrance.id) ?? genId("ent"),
-          buildingId: nbId,
-        }));
-        const nb: CampusBuilding = {
-          ...b,
-          id: nbId,
-          name: identity.name,
-          code: identity.code,
-          x: Math.round(Math.max(0, Math.min(cw - b.width, b.x + offset))),
-          y: Math.round(Math.max(0, Math.min(ch - b.height, b.y + offset))),
-          entrances: clonedEntrances,
-          floors: clonedFloors,
-        };
-        nextBuildings.push(nb);
-        newIds.push(nbId);
+        try {
+          const nb = duplicateBuildingForCampus(b, {
+            id: nbId,
+            name: identity.name,
+            code: identity.code,
+            x: Math.round(Math.max(0, Math.min(cw - b.width, b.x + offset))),
+            y: Math.round(Math.max(0, Math.min(ch - b.height, b.y + offset))),
+            idFactory: genId,
+            reservedIds: collectIdentityIds(campus),
+          });
+          defaultBuildingReservationsRef.current?.values.push(identity);
+          nextBuildings.push(nb);
+          newIds.push(nbId);
+        } catch (error) {
+          toast.error("Building Not Pasted", error instanceof Error ? error.message : "The copied Building failed its integrity check.");
+        }
       } else if (sel.type === "marker") {
         const m = markers.find((x) => x.id === sel.id);
         if (!m) continue;
@@ -8485,32 +8473,22 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     if (selected?.type === "building") {
       const b = buildings.find((x) => x.id === selected.id);
       if (!b) return;
-      pushHistory();
       const nbId = genId("bld");
       const identity = nextBuildingCopyIdentity(b, buildings, defaultBuildingReservationsRef.current?.values, nbId);
-      defaultBuildingReservationsRef.current?.values.push(identity);
-      const entranceIdMap = new Map((b.entrances ?? []).map((entrance) => [entrance.id, genId("ent")]));
-      const clonedFloors = (b.floors ?? []).map((floor) => duplicateFloorForBuilding(floor, {
-        id: genId("fl"), buildingId: nbId, number: floor.number, label: floor.label,
-      }));
-      const clonedEntrances = normalizeBuildingEntrances(b).map((entrance) => ({
-        ...entrance,
-        id: entranceIdMap.get(entrance.id) ?? genId("ent"),
-        buildingId: nbId,
-      }));
-      const nb: CampusBuilding = {
-        ...b,
-        id: nbId,
-        name: identity.name,
-        code: identity.code,
-        x: b.x + 25,
-        y: b.y + 25,
-        entrances: clonedEntrances,
-        floors: clonedFloors,
-      };
-      updBuildings([...buildings, nb]);
-      setSelected({ type: "building", id: nb.id });
-      toast.success("Building Duplicated", `${b.code} has been copied.`);
+      try {
+        const nb = duplicateBuildingForCampus(b, {
+          id: nbId, name: identity.name, code: identity.code,
+          x: b.x + 25, y: b.y + 25, idFactory: genId,
+          reservedIds: collectIdentityIds(campus),
+        });
+        pushHistory();
+        defaultBuildingReservationsRef.current?.values.push(identity);
+        onUpdate({ ...campus, buildings: [...buildings, nb] });
+        setSelected({ type: "building", id: nb.id });
+        toast.success("Building Duplicated", `${b.code} has been copied.`);
+      } catch (error) {
+        toast.error("Building Not Duplicated", error instanceof Error ? error.message : "The copied Building failed its integrity check.");
+      }
       return;
     }
     const { entries, excluded } = collectOutdoorClipboardSelection(multiSelected, selected, buildings, markers, decorAssets);
@@ -8985,6 +8963,21 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
             if (sel.type === "path") return Boolean(paths.find((x) => x.id === sel.id)?.locked);
             return false;
           };
+          if (selected.type === "entrance") {
+            const parent = buildings.find((building) => building.id === selected.buildingId);
+            const entrance = parent?.entrances?.find((item) => item.id === selected.id);
+            if (!parent || !entrance || parent.locked) return;
+            const delta = entranceAttachmentArrowDelta(entrance.edge, e.key, e.shiftKey ? 10 : 1);
+            e.preventDefault();
+            if (delta === null) return;
+            const offset = clampNormalizedOffset(Number(entrance.offset) + delta / 100);
+            if (offset === entrance.offset) return;
+            // Entrances follow the building edge: Left/Right on top/bottom,
+            // Up/Down on the side edges. onUpdateEntrance also keeps linked
+            // navigation nodes and outdoor approach geometry in sync.
+            onUpdateEntrance(parent.id, entrance.id, { offset });
+            return;
+          }
           if (isLocked(selected)) return;
           e.preventDefault();
           const now = Date.now();
@@ -10174,11 +10167,13 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
           onNavEdgeAddBend={onNavEdgeAddBend}
           onEntranceDown={onEntranceDown}
           exteriorEmergencyStairPreview={exteriorStairPreview}
+          focusedExteriorEmergencyStairId={focusedExteriorEmergencyStairId}
           onExteriorEmergencyStairDown={(e, buildingId, stairId) => {
             e.stopPropagation();
             if (tool !== "select") return;
             setMultiSelected([]);
             setSelected({ type: "building", id: buildingId });
+            setFocusedExteriorEmergencyStairId(stairId);
             setPropertiesDismissed(false);
             setPropertiesOpen(true);
       const ownerBuilding = campusRef.current.buildings.find((candidate) => candidate.id === buildingId);
@@ -10619,6 +10614,8 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
           onLayerOrder={handleLayerOrder}
           onUpdateBuilding={onUpdateBuilding}
           onAddExteriorEmergencyStair={onAddExteriorEmergencyStair}
+          focusedExteriorEmergencyStairId={focusedExteriorEmergencyStairId}
+          onFocusExteriorEmergencyStair={setFocusedExteriorEmergencyStairId}
           onUpdateExteriorEmergencyStair={onUpdateExteriorEmergencyStair}
           onDeleteExteriorEmergencyStair={onDeleteExteriorEmergencyStair}
           onAddEntrance={onAddEntrance}

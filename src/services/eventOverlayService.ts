@@ -9,7 +9,7 @@
  * (map_element kind "event_overlay") — no new DB tables required.
  */
 import { getSupabase } from "../lib/supabase";
-import { resolveActiveCampusId } from "./campusService";
+import { campusService, resolveActiveCampusId } from "./campusService";
 import { logActivity } from "./activityLogService";
 import type {
   CampusEventOverlay,
@@ -22,6 +22,7 @@ import {
   eventLocationKey,
   normalizeEventOverlayLocations,
 } from "../lib/eventOverlayModel";
+import { floorLookupId, publishedEventBuildingOptions } from "../lib/eventLocationData";
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -48,6 +49,7 @@ export interface EventOverlayFilters {
   status?: EventOverlayStatus | "all";
   search?: string;
   createdByUserId?: string;
+  campusId?: string;
 }
 
 // ── Mock fallback data ──────────────────────────────────────────────────────
@@ -90,10 +92,12 @@ function generateId(): string {
  */
 function overlayFromMetadata(
   metadata: Record<string, unknown>,
-  id: string
+  id: string,
+  campusId?: string | null
 ): CampusEventOverlay {
   const overlay: CampusEventOverlay = {
     id,
+    campusId: campusId || undefined,
     title: (metadata.title as string) || "Untitled Event",
     description: (metadata.description as string) || "",
     dateStart: metadata.dateStart as string | undefined,
@@ -184,14 +188,34 @@ function overlayForLocation(
  */
 export async function createEventOverlay(
   input: EventOverlayInput,
-  createdByUserId: string
+  createdByUserId: string,
+  campusId: string
 ): Promise<CampusEventOverlay> {
   const supabase = getSupabase();
-  const campusId = await resolveActiveCampusId();
-  if (!campusId) throw new Error("No active campus found.");
+  if (!campusId.trim()) throw new Error("A published campus must be selected.");
 
   const locations = createLocationEntries(input.locations);
   if (locations.length === 0) throw new Error("At least one event location is required.");
+
+  // Revalidate against a fresh published snapshot so an outdated modal cannot
+  // create a proposal for a campus or floor that has since been unpublished.
+  const publishedCampus = (await campusService.listPublishedSnapshots())
+    .find((campus) => campus.id === campusId);
+  if (!publishedCampus) {
+    throw new Error("The selected published campus is no longer available. Refresh the campus map and try again.");
+  }
+
+  const availableBuildings = publishedEventBuildingOptions(publishedCampus);
+  for (const { locationRef } of locations) {
+    if (locationRef.type === "campus") continue;
+    const building = availableBuildings.find((option) => option.buildingId === locationRef.buildingId);
+    const floor = building?.floors.find((option) =>
+      floorLookupId(building.buildingId, option.number) === locationRef.floorId
+    );
+    if (!building || !floor) {
+      throw new Error(`The requested event location “${locationRef.label}” is no longer available on the published campus. Refresh locations and try again.`);
+    }
+  }
 
   const id = generateId();
   const overlay: CampusEventOverlay = {
@@ -205,6 +229,7 @@ export async function createEventOverlay(
     restrictedAreas: [],
     isActive: true,
     status: "pending",
+    campusId,
     eventFurniture: locations[0].eventFurniture,
     eventLabels: locations[0].eventLabels,
     posterUrl: input.posterUrl,
@@ -415,13 +440,13 @@ export async function listEventOverlays(
   filters: EventOverlayFilters = {}
 ): Promise<CampusEventOverlay[]> {
   const supabase = getSupabase();
-  const campusId = await resolveActiveCampusId();
+  const campusId = filters.campusId ?? await resolveActiveCampusId();
   if (!campusId) return [];
 
   try {
     let query = supabase
       .from("map_elements")
-      .select("id, metadata, name")
+      .select("id, campus_id, metadata, name")
       .eq("element_type", "event_overlay")
       .eq("campus_id", campusId)
       .order("created_at", { ascending: false });
@@ -432,7 +457,8 @@ export async function listEventOverlays(
     let overlays = (data ?? []).map((row) =>
       overlayFromMetadata(
         (row.metadata as Record<string, unknown>) || {},
-        row.id
+        row.id,
+        row.campus_id
       )
     );
 
@@ -457,6 +483,7 @@ export async function listEventOverlays(
 
     return overlays;
   } catch {
+    if (filters.campusId) return [];
     // Fallback to mock data when not connected
     let overlays = [...MOCK_OVERLAYS];
     if (filters.status && filters.status !== "all") {
@@ -482,7 +509,7 @@ export async function getEventOverlay(
   try {
     const { data, error } = await supabase
       .from("map_elements")
-      .select("id, metadata")
+      .select("id, campus_id, metadata")
       .eq("id", overlayId)
       .eq("element_type", "event_overlay")
       .single();
@@ -490,7 +517,8 @@ export async function getEventOverlay(
     if (error || !data) return null;
     return overlayFromMetadata(
       (data.metadata as Record<string, unknown>) || {},
-      data.id
+      data.id,
+      data.campus_id
     );
   } catch {
     return MOCK_OVERLAYS.find((o) => o.id === overlayId) || null;

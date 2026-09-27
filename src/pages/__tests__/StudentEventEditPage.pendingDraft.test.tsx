@@ -12,6 +12,7 @@ const fixture = vi.hoisted(() => ({
     submitEventOverlayLayout: vi.fn(),
   },
   toast: { success: vi.fn(), error: vi.fn() },
+  floorResolver: vi.fn((_buildingId?: string, _floorNumber?: number, _campus?: unknown) => fixture.floorPlan),
   floorPlan: {
     id: "fixture-floor",
     buildingId: "b1",
@@ -35,6 +36,13 @@ const fixture = vi.hoisted(() => ({
   },
 }));
 
+const publishedCampusState = vi.hoisted(() => ({
+  activeCampus: null as { id: string } | null,
+  campuses: [] as Array<{ id: string }>,
+  loading: false,
+  error: null as string | null,
+}));
+
 const authState = vi.hoisted(() => ({
   isStudent: true,
   isStudentOrg: true,
@@ -46,12 +54,12 @@ const authState = vi.hoisted(() => ({
 }));
 
 vi.mock("../../hooks/useStudentAuth", () => ({ useStudentAuth: () => authState }));
-vi.mock("../../hooks/usePublishedCampus", () => ({ usePublishedCampus: () => ({ activeCampus: null, loading: false }) }));
+vi.mock("../../hooks/usePublishedCampus", () => ({ usePublishedCampus: () => publishedCampusState }));
 vi.mock("../../hooks/useToast", () => ({ useToast: () => fixture.toast }));
 vi.mock("../../services/eventOverlayService", () => ({ eventOverlayService: fixture.service }));
 vi.mock("../../lib/eventLocationData", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../lib/eventLocationData")>();
-  return { ...actual, resolveFloorPlanForEvent: () => fixture.floorPlan };
+  return { ...actual, resolveFloorPlanForEvent: fixture.floorResolver };
 });
 
 const floorPlan = fixture.floorPlan as FloorPlan;
@@ -140,6 +148,11 @@ function startPendingChairMove() {
 beforeEach(() => {
   localStorage.clear();
   vi.clearAllMocks();
+  fixture.floorResolver.mockImplementation(() => fixture.floorPlan);
+  publishedCampusState.activeCampus = null;
+  publishedCampusState.campuses = [];
+  publishedCampusState.loading = false;
+  publishedCampusState.error = null;
   fixture.service.getEventOverlay.mockResolvedValue(overlay);
   fixture.service.updateEventOverlayLayout.mockResolvedValue(undefined);
   fixture.service.submitEventOverlayLayout.mockResolvedValue(undefined);
@@ -148,6 +161,53 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 
 describe("StudentEventEditPage pending interaction boundaries", () => {
+  it("resolves a stored event against its own published campus instead of the hook default", async () => {
+    const campusA = { id: "campus-a" };
+    const campusB = { id: "campus-b" };
+    publishedCampusState.activeCampus = campusA;
+    publishedCampusState.campuses = [campusA, campusB];
+    fixture.service.getEventOverlay.mockResolvedValue({
+      ...overlay,
+      campusId: "campus-b",
+      locations: [overlay.locations![1]],
+    });
+
+    renderPage();
+    await waitFor(() => expect(screen.getByTestId("event-furniture-b-table")).toBeInTheDocument());
+
+    expect(fixture.floorResolver).toHaveBeenCalledWith("b2", 1, campusB);
+  });
+
+  it("shows unavailable when an event campus is no longer in published snapshots", async () => {
+    const campusA = { id: "campus-a" };
+    publishedCampusState.activeCampus = campusA;
+    publishedCampusState.campuses = [campusA];
+    fixture.service.getEventOverlay.mockResolvedValue({ ...overlay, campusId: "campus-removed" });
+
+    renderPage();
+
+    expect(await screen.findByText(/published campus for this event is no longer available/i)).toBeInTheDocument();
+    expect(screen.queryByTestId("event-furniture-a-chair")).not.toBeInTheDocument();
+    expect(fixture.floorResolver).not.toHaveBeenCalled();
+  });
+
+  it("shows an unavailable state when the saved floor was removed from its published campus", async () => {
+    const campusB = { id: "campus-b" };
+    publishedCampusState.activeCampus = { id: "campus-a" };
+    publishedCampusState.campuses = [publishedCampusState.activeCampus, campusB];
+    fixture.service.getEventOverlay.mockResolvedValue({
+      ...overlay,
+      campusId: "campus-b",
+      locations: [overlay.locations![1]],
+    });
+    fixture.floorResolver.mockImplementation(() => null as never);
+
+    renderPage();
+
+    expect(await screen.findByText(/there is no published map for/i)).toBeInTheDocument();
+    expect(screen.queryByTestId("event-furniture-b-table")).not.toBeInTheDocument();
+  });
+
   it("commits the outgoing pending preview before switching and saves all locations", async () => {
     renderPage();
     await waitFor(() => expect(screen.getByTestId("event-furniture-a-chair")).toBeInTheDocument());

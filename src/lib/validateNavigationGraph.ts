@@ -15,7 +15,7 @@
 import type { Campus, NavigationNode, NavigationEdge, CampusBuilding } from "../components/map-builder/types";
 import type { ValidationIssue, IssueTarget } from "../components/map-builder/ValidationErrorsDialog";
 import { doorDisplayName, doorHasIndoorNavigationConnection, doorNodeForEdge } from "./entranceTransitions";
-import { edgePolylinePoints, roomDisplayName, isDoorEligibleForRoom, roomAccessDoorIds, segmentBlockedByWall, edgeCrossesBlockingFurniture } from "./indoorNavigationGraph";
+import { edgePolylinePoints, roomDisplayName, isDoorEligibleForRoom, roomAccessDoorIds, segmentBlockedByWall, edgeCrossesBlockingFurniture, ROOM_DOOR_EDGE_TYPE } from "./indoorNavigationGraph";
 import { isDerivedExteriorApproachNode } from "./exteriorApproachNavigation";
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -625,41 +625,44 @@ export function validateNavigationGraph(campus: Campus): NavGraphReadinessResult
 
   // If there are 2+ components with2+ nodes each, flag disconnected
   const significantComponents = components.filter((c) => c.size >= 2);
+  const componentHasOutdoorNode = (component: Set<string>) => [...component].some((id) => {
+    const n = nodeMap.get(id);
+    return n?.type === "entrance" || n?.type === "outdoor";
+  });
+  const componentHasIndoorFloorNode = (component: Set<string>) => [...component].some((id) => {
+    const n = nodeMap.get(id);
+    return Boolean(n?.floorId) && n?.type !== "outdoor" && n?.type !== "entrance";
+  });
+
+  // This is a campus-wide statement, so evaluate it once across all active-edge
+  // components. An unrelated outdoor-only subnet does not invalidate a real
+  // Outdoor → Entrance → Floor bridge elsewhere in the Campus.
+  const hasOutdoorNetwork = significantComponents.some(componentHasOutdoorNode);
+  const hasOutdoorIndoorBridge = components.some((component) =>
+    componentHasOutdoorNode(component) && componentHasIndoorFloorNode(component),
+  );
+  const hasGeneratedOutdoorPathOnlyNetwork = hasOutdoorNetwork
+    && !components.some(componentHasIndoorFloorNode)
+    && components.some((component) => componentHasOutdoorNode(component)
+      && [...component].some((id) => (nodeMap.get(id)?.generatedFromPathVertices?.length ?? 0) > 0));
+  if (hasOutdoorNetwork && !hasOutdoorIndoorBridge && !hasGeneratedOutdoorPathOnlyNetwork) {
+    issues.push({
+      type: "nav_disconnected_component",
+      severity: "warning",
+      message: `Outdoor navigation network has no connection to any indoor floor.`,
+    });
+  }
+
   if (significantComponents.length >= 2) {
-    // Check if any component contains an entrance node (outdoor) and another contains indoor nodes
-    for (const comp of significantComponents) {
-      const hasEntrance = [...comp].some((id) => {
-        const n = nodeMap.get(id);
-        return n?.type === "entrance" || n?.type === "outdoor";
+    const totalNodes = significantComponents.reduce((sum, c) => sum + c.size, 0);
+    if (totalNodes >= 3) {
+      // This is a campus/network-level summary, not an issue owned by one
+      // arbitrarily selected node.
+      issues.push({
+        type: "nav_disconnected_component",
+        severity: "info",
+        message: `Navigation graph has ${significantComponents.length} disconnected components. Consider connecting them for end-to-end routing.`,
       });
-      const hasIndoor = [...comp].some((id) => {
-        const n = nodeMap.get(id);
-        return n && n.type !== "outdoor" && n.type !== "entrance";
-      });
-      if (hasEntrance && hasIndoor) {
-        // This component bridges outdoor and indoor — good
-      } else if (hasEntrance && !hasIndoor) {
-        // This is a campus/network-level readiness finding. It intentionally
-        // has no object target: no individual generated node is defective.
-        issues.push({
-          type: "nav_disconnected_component",
-          severity: "warning",
-          message: `Outdoor navigation network has no connection to any indoor floor.`,
-        });
-      }
-    }
-    // If there are 2+ significant components, flag it
-    if (significantComponents.length >= 2) {
-      const totalNodes = significantComponents.reduce((sum, c) => sum + c.size, 0);
-      if (totalNodes >= 3) {
-        // This is a campus/network-level summary, not an issue owned by one
-        // arbitrarily selected node.
-        issues.push({
-          type: "nav_disconnected_component",
-          severity: "info",
-          message: `Navigation graph has ${significantComponents.length} disconnected components. Consider connecting them for end-to-end routing.`,
-        });
-      }
     }
   }
 
@@ -735,7 +738,9 @@ export function validateNavigationGraph(campus: Campus): NavGraphReadinessResult
         const furniture = floor.furniture ?? [];
         const floorNodes = nodes.filter((n) => n.buildingId === building.id && n.floorId === floor.id);
         for (const edge of activeEdges) {
-          if (edge.type === "floor_transition") continue;
+          // Room↔Door edges record semantic access, not a path through occupied
+          // floor space. Only walkable connections can be blocked by Furniture.
+          if (edge.type === "floor_transition" || edge.type === ROOM_DOOR_EDGE_TYPE) continue;
           const pts = edgePolylinePoints(edge, floorNodes);
           if (!pts) continue;
           const blockedTarget: IssueTarget = {

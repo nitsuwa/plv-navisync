@@ -47,6 +47,8 @@ export interface MapViewportPanOptions extends MapViewportSize {
   zoomOrigin?: "top-left" | "center";
   /** Optional screen pixels per authored unit at zoom 1. */
   baseScale?: number;
+  /** World-space origin corresponding to the local top-left of mapWidth/mapHeight. */
+  worldOrigin?: MapPoint;
 }
 
 export interface MapViewportZoomPanOptions {
@@ -119,6 +121,7 @@ export function getViewportPanBounds({
   insets,
   zoomOrigin = "top-left",
   baseScale,
+  worldOrigin,
 }: MapViewportPanOptions): MapViewportPanBounds {
   const safeMapWidth = Math.max(1, mapWidth);
   const safeMapHeight = Math.max(1, mapHeight);
@@ -163,7 +166,14 @@ export function getViewportPanBounds({
 
   const x = axisBounds(safeMapWidth, safeViewportWidth, letterboxX, safeInsets.left, safeInsets.right);
   const y = axisBounds(safeMapHeight, safeViewportHeight, letterboxY, safeInsets.top, safeInsets.bottom);
-  return { minX: x.min, maxX: x.max, minY: y.min, maxY: y.max };
+  const originShiftX = (worldOrigin?.x ?? 0) * (safeZoom - 1);
+  const originShiftY = (worldOrigin?.y ?? 0) * (safeZoom - 1);
+  return {
+    minX: x.min - originShiftX,
+    maxX: x.max - originShiftX,
+    minY: y.min - originShiftY,
+    maxY: y.max - originShiftY,
+  };
 }
 
 export function clampViewportPan(point: MapPoint, bounds: MapViewportPanBounds): MapPoint {

@@ -51,6 +51,26 @@ function buildingHasFloors(building: CampusBuilding): boolean {
 }
 
 /**
+ * List only locations backed by authored floors in a published campus snapshot.
+ * Unlike eventBuildingOptions, this helper never falls back to demo buildings.
+ */
+export function publishedEventBuildingOptions(campus: Campus): EventBuildingOption[] {
+  if (!campus.id || !Array.isArray(campus.buildings)) return [];
+
+  return campus.buildings
+    .filter((building) => building.visible !== false && buildingHasFloors(building))
+    .map((building) => ({
+      buildingId: building.id,
+      buildingName: building.name,
+      floors: building.floors
+        .filter((floor) => Number.isFinite(floor.number))
+        .filter((floor) => resolveFloorPlanForEvent(building.id, floor.number, campus) !== null)
+        .map((floor) => ({ number: floor.number, label: floor.label })),
+    }))
+    .filter((building) => building.floors.length > 0);
+}
+
+/**
  * List the buildings/floor options for the create-event location picker.
  * Mirrors CampusMapPage's source: active campus buildings when available,
  * otherwise the legacy demo dataset.
@@ -96,9 +116,9 @@ function resolveLegacyFloorPlan(
 ): FloorPlan | null {
   const building = LEGACY_FLOOR_PLANS[buildingId];
   if (!building) return null;
-  const demoFloor =
-    building.floors.find((f) => f.number === floorNumber) ??
-    building.floors[0];
+  const demoFloor = floorNumber === undefined
+    ? building.floors[0]
+    : building.floors.find((floor) => floor.number === floorNumber);
   if (!demoFloor) return null;
 
   const floorId = floorLookupId(building.buildingId, demoFloor.number);
@@ -195,8 +215,9 @@ export function resolveFloorPlanForEvent(
     const building = activeCampus.buildings.find(
       (b) => b.id === buildingId && b.visible !== false
     );
-    const sourceFloor = building?.floors.find((f) => f.number === floorNumber);
-    const floor = sourceFloor ?? building?.floors[0];
+    const floor = floorNumber === undefined
+      ? building?.floors[0]
+      : building?.floors.find((candidate) => candidate.number === floorNumber);
     if (building && floor) {
       const floorId = floorLookupId(building.id, floor.number);
       const rooms: FloorRoom[] = (floor.rooms ?? []).map((room) => ({

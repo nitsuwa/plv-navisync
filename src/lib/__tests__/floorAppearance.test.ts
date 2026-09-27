@@ -76,6 +76,23 @@ describe("floor appearance", () => {
     expect(container.querySelector('line[stroke="var(--map-boundary, #cbd5e1)"]')).toBeNull();
   });
 
+  it("uses the architectural layer order in the read-only floor scene", () => {
+    const floor = {
+      id: "floor-layer-order", canvasW: 240, canvasH: 120, backgroundColor: "#e8e1d7",
+      rooms: [{ id: "room", name: "Room", type: "classroom", x: 10, y: 10, w: 100, h: 80 }],
+      paths: [],
+      walls: [{ id: "wall", x1: 10, y1: 50, x2: 180, y2: 50, thickness: 6, color: "#475569", zOrder: -500 }],
+      doors: [{ id: "door", x: 80, y: 50, width: 24, direction: "left", color: "#795548", zOrder: -900 }],
+      windows: [{ id: "window", x: 130, y: 50, width: 20, height: 6, color: "#38bdf8", zOrder: -900 }],
+      furniture: [{ id: "high-furniture", type: "desk", name: "Desk", category: "Tables / Work", x: 90, y: 30, width: 44, height: 34, rotation: 0, color: "#7a5c3a", zOrder: 999_999 }],
+      stairs: [], ramps: [], elevators: [], labels: [],
+    } as never;
+    const { container } = render(createElement("svg", null, createElement(ReadonlyFloorPlanScene, { floor })));
+    const layers = Array.from(container.querySelectorAll("[data-semantic-layer]"))
+      .map((element) => element.getAttribute("data-semantic-layer"));
+    expect(layers).toEqual(["room-fills", "furniture", "walls", "openings"]);
+  });
+
   it("rejects unsupported persisted values without dropping the safe color", () => {
     expect(normalizeFloorAppearance({ material: "bogus" as never, texture: "bogus" as never, color: "#123456" })).toEqual({
       material: "neutral", texture: "subtle", color: "#123456",
