@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { EventOverlayLocation } from "../../map-builder/types";
 import { EventLocationSwitcher } from "../EventLocationSwitcher";
@@ -16,5 +16,16 @@ describe("EventLocationSwitcher", () => {
     expect(screen.getByText("Science Building — Floor 2")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /science building/i }));
     expect(onChange).toHaveBeenCalledWith("science-f2");
+  });
+
+  it("presents an admin-style location rail with context and switch affordances", () => {
+    render(<EventLocationSwitcher locations={locations} activeLocationId="science-f2" onChange={vi.fn()} />);
+
+    const rail = screen.getByRole("complementary", { name: /event locations/i });
+    expect(rail).toBeInTheDocument();
+    expect(within(rail).getByText("Building · Floor 2")).toBeInTheDocument();
+    expect(within(rail).getByText("1 furniture · 0 labels")).toBeInTheDocument();
+    expect(within(rail).getByRole("button", { name: /edit science building/i })).toHaveAttribute("aria-current", "page");
+    expect(within(rail).getByText("Switch map")).toBeInTheDocument();
   });
 });

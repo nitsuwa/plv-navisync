@@ -43,6 +43,26 @@ export interface SnapLayoutPositionResult {
   guides: LayoutSnapGuide[];
 }
 
+export interface LayoutMoveSnapshot {
+  anchor: LayoutItem;
+  movingItems: readonly LayoutItem[];
+  furnitureItems: readonly LayoutItem[];
+  selectedIds: readonly string[];
+  startPointer: { x: number; y: number };
+  bounds: { width: number; height: number };
+  grid?: number;
+  threshold?: number;
+  snapToGrid?: boolean;
+  /** Disable both grid and sibling attraction while preserving free movement. */
+  snapEnabled?: boolean;
+}
+
+export interface LayoutMoveResult {
+  anchor: { x: number; y: number };
+  delta: { x: number; y: number };
+  guides: LayoutSnapGuide[];
+}
+
 /**
  * Finds nearby alignment targets for a moving item without ever mutating the
  * layout. Sibling edges/centers are considered before the grid so an explicit
@@ -111,13 +131,35 @@ export function snapLayoutPosition({
     requested: number,
     candidates: Array<{ position: number; guide: LayoutSnapGuide }>,
   ) => {
+    const compareCodePoint = (left: string, right: string) => left < right ? -1 : left > right ? 1 : 0;
+    const compareCandidates = (
+      left: { position: number; guide: LayoutSnapGuide },
+      right: { position: number; guide: LayoutSnapGuide },
+    ) => {
+      const distanceDelta = Math.abs(left.position - requested) - Math.abs(right.position - requested);
+      if (distanceDelta !== 0) return distanceDelta;
+
+      // Sibling relationships are more intentional than grid attraction.
+      const leftKindRank = left.guide.kind === "grid" ? 1 : 0;
+      const rightKindRank = right.guide.kind === "grid" ? 1 : 0;
+      if (leftKindRank !== rightKindRank) return leftKindRank - rightKindRank;
+
+      const itemIdDelta = compareCodePoint(left.guide.itemId ?? "", right.guide.itemId ?? "");
+      if (itemIdDelta !== 0) return itemIdDelta;
+
+      const leftEdgeRank = left.guide.kind === "edge" ? 0 : 1;
+      const rightEdgeRank = right.guide.kind === "edge" ? 0 : 1;
+      if (leftEdgeRank !== rightEdgeRank) return leftEdgeRank - rightEdgeRank;
+
+      if (left.position !== right.position) return left.position - right.position;
+      return left.guide.value - right.guide.value;
+    };
+
     return candidates
       .filter((candidate) => Math.abs(candidate.position - requested) <= safeThreshold)
       .reduce<{ position: number; guide: LayoutSnapGuide } | null>((closest, candidate) => {
-        if (!closest) return candidate;
-        return Math.abs(candidate.position - requested) < Math.abs(closest.position - requested)
-          ? candidate
-          : closest;
+        if (!closest || compareCandidates(candidate, closest) < 0) return candidate;
+        return closest;
       }, null);
   };
   const xMatch = choose(x, xCandidates);
@@ -127,6 +169,75 @@ export function snapLayoutPosition({
     x: xMatch?.position ?? x,
     y: yMatch?.position ?? y,
     guides: [xMatch?.guide, yMatch?.guide].filter((guide): guide is LayoutSnapGuide => Boolean(guide)),
+  };
+}
+
+/**
+ * Resolve an absolute pointer sample against immutable gesture-start geometry.
+ * This prevents drag movement from accumulating rounding and render-lag errors
+ * when snapping or React rendering occurs between pointer samples.
+ */
+export function resolveLayoutMoveFromSnapshot(
+  snapshot: LayoutMoveSnapshot,
+  pointer: { x: number; y: number },
+): LayoutMoveResult {
+  const requestedX = snapshot.anchor.x + pointer.x - snapshot.startPointer.x;
+  const requestedY = snapshot.anchor.y + pointer.y - snapshot.startPointer.y;
+  const snapped = snapshot.snapEnabled !== false && snapshot.movingItems.length === 1
+    ? snapLayoutPosition({
+      item: snapshot.anchor,
+      x: requestedX,
+      y: requestedY,
+      items: snapshot.furnitureItems,
+      selectedIds: snapshot.selectedIds,
+      grid: snapshot.grid,
+      threshold: snapshot.threshold,
+      snapToGrid: snapshot.snapToGrid,
+    })
+    : { x: requestedX, y: requestedY, guides: [] };
+
+  const movingItems = snapshot.movingItems;
+  if (movingItems.length === 0) {
+    return { anchor: { x: snapshot.anchor.x, y: snapshot.anchor.y }, delta: { x: 0, y: 0 }, guides: [] };
+  }
+
+  const requestedDeltaX = snapped.x - snapshot.anchor.x;
+  const requestedDeltaY = snapped.y - snapshot.anchor.y;
+  // Include the gesture origin in the legal interval. This preserves an
+  // existing malformed placement for the first frame instead of repairing it
+  // by teleporting it to the boundary as soon as the pointer moves.
+  const axisLimits = (items: readonly LayoutItem[], axis: "x" | "y", limit: number) => {
+    const limits = items.map((item) => {
+      const position = axis === "x" ? item.x : item.y;
+      const size = axis === "x" ? item.width : item.height;
+      const lower = -position;
+      const upper = limit - size - position;
+      if (size > limit) {
+        // An oversized legacy item cannot be fully contained. Keep the origin
+        // reachable while allowing it to move far enough to recover visibility.
+        return { min: Math.min(0, lower, upper), max: Math.max(0, lower, upper) };
+      }
+      return {
+        min: position < 0 ? 0 : lower,
+        max: position + size > limit ? 0 : upper,
+      };
+    });
+    const min = Math.max(...limits.map((value) => value.min));
+    const max = Math.min(...limits.map((value) => value.max));
+    return { min: Math.min(min, 0), max: Math.max(max, 0) };
+  };
+  const xLimits = axisLimits(movingItems, "x", snapshot.bounds.width);
+  const yLimits = axisLimits(movingItems, "y", snapshot.bounds.height);
+  const deltaX = Math.min(xLimits.max, Math.max(xLimits.min, requestedDeltaX));
+  const deltaY = Math.min(yLimits.max, Math.max(yLimits.min, requestedDeltaY));
+
+  return {
+    anchor: { x: snapshot.anchor.x + deltaX, y: snapshot.anchor.y + deltaY },
+    delta: { x: deltaX, y: deltaY },
+    guides: snapped.guides.filter((guide) => {
+      if (guide.axis === "x") return Math.abs(deltaX - requestedDeltaX) < 0.0001;
+      return Math.abs(deltaY - requestedDeltaY) < 0.0001;
+    }),
   };
 }
 

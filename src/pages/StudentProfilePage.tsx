@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import {
   Bookmark, Flag, Navigation, MapPin, Camera, Shield, ChevronRight,
-  LogOut, Settings, GraduationCap, CalendarDays, Award, Activity,
+  LogOut, Settings, GraduationCap, Award, Activity,
   ArrowUpRight, Map, Pencil, Mail,
 } from "lucide-react";
 import { Link, useNavigate } from "react-router";
@@ -10,6 +10,13 @@ import { useStudentAuth } from "../hooks/useStudentAuth";
 import { useScrollReveal } from "../hooks/useScrollReveal";
 import { PageTransition } from "../components/ui/PageTransition";
 import { Skeleton } from "../components/ui/Skeleton";
+import { useToast } from "../hooks/useToast";
+import { splitStudentName } from "../lib/studentAccount";
+import {
+  getStudentAvatarUrl,
+  updateStudentProfile,
+  uploadStudentAvatar,
+} from "../services/studentProfileService";
 
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -49,7 +56,7 @@ function SectionHeading({ children }: { children: React.ReactNode }) {
 // ── Data ────────────────────────────────────────────────────────────────────
 // ═════════════════════════════════════════════════════════════════════════════
 
-const RECENT_ACTIVITY: { icon: typeof MapPin; text: string; time: string; color: string }[] = [];
+type RecentActivityItem = { icon: typeof MapPin; text: string; time: string; color: string };
 
 // ═════════════════════════════════════════════════════════════════════════════
 // ── MAIN COMPONENT ──────────────────────────────────────────────────────────
@@ -60,32 +67,62 @@ import { reportService } from "../services/reportService";
 
 export function StudentProfilePage() {
   const navigate = useNavigate();
-  const { loading: authLoading, isStudent, profile, username, role, signOut } = useStudentAuth();
+  const { loading: authLoading, isStudent, profile, username, role, signOut, refreshProfile } = useStudentAuth();
+  const { success, error: showError } = useToast();
   const [loading, setLoading] = useState(true);
 
   const [displayName, setDisplayName] = useState(username || "");
   const [editingName, setEditingName] = useState(false);
   const [nameInput, setNameInput] = useState(displayName);
   const nameInputRef = useRef<HTMLInputElement>(null);
+  const avatarInputRef = useRef<HTMLInputElement>(null);
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const [avatarUploading, setAvatarUploading] = useState(false);
   const [savedCount, setSavedCount] = useState(0);
   const [reportsCount, setReportsCount] = useState(0);
+  const [recentActivity, setRecentActivity] = useState<RecentActivityItem[]>([]);
 
   useEffect(() => {
     let mounted = true;
     Promise.all([
-      Promise.resolve(studentAccountService.getSavedBuildingIds()),
+      studentAccountService.getSavedBuildingIdsAsync(),
       reportService.getStudentReports(),
-    ]).then(([saved, rpts]) => {
-      if (mounted) {
+    ])
+      .then(([saved, rpts]) => {
+        if (!mounted) return;
         setSavedCount(saved.length);
         setReportsCount(rpts.length);
-        setLoading(false);
-      }
-    });
+        setRecentActivity(rpts.slice(0, 5).map((report) => ({
+          icon: Flag,
+          text: `Reported ${report.title}`,
+          time: new Date(report.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+          color: "text-amber-500",
+        })));
+      })
+      .catch(() => {
+        if (mounted) showError("Profile activity could not be loaded");
+      })
+      .finally(() => {
+        if (mounted) setLoading(false);
+      });
     return () => {
       mounted = false;
     };
   }, []);
+
+  useEffect(() => {
+    let mounted = true;
+    if (!profile?.avatar_path) {
+      setAvatarUrl(null);
+      return;
+    }
+    void getStudentAvatarUrl(profile.avatar_path).then((url) => {
+      if (mounted) setAvatarUrl(url);
+    });
+    return () => {
+      mounted = false;
+    };
+  }, [profile?.avatar_path]);
 
   // Once the real profile loads, use its display name as the default.
   useEffect(() => {
@@ -178,13 +215,48 @@ export function StudentProfilePage() {
 
   const initials = displayName.slice(0, 2).toUpperCase();
 
-  const saveDisplayName = () => {
-    if (nameInput.trim()) {
-      setDisplayName(nameInput.trim());
-      setEditingName(false);
-    } else {
+  const saveDisplayName = async () => {
+    const nextName = nameInput.trim();
+    if (!nextName) {
       setNameInput(displayName);
       setEditingName(false);
+      return;
+    }
+    const { firstName, lastName } = splitStudentName(nextName);
+    if (!firstName || !lastName) {
+      showError("Enter your first and last name");
+      return;
+    }
+    try {
+      await updateStudentProfile({ firstName, lastName });
+      await refreshProfile();
+      setDisplayName(`${firstName} ${lastName}`);
+      setEditingName(false);
+      success("Profile name updated");
+    } catch {
+      showError("Profile name could not be updated");
+    }
+  };
+
+  const handleAvatarChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    setAvatarUploading(true);
+    try {
+      const uploaded = await uploadStudentAvatar(file);
+      await updateStudentProfile({
+        firstName: profile?.first_name ?? splitStudentName(displayName).firstName,
+        lastName: profile?.last_name ?? splitStudentName(displayName).lastName,
+        avatarPath: uploaded.path,
+      });
+      setAvatarUrl(uploaded.url);
+      await refreshProfile();
+      success("Profile photo updated");
+    } catch {
+      showError("Profile photo could not be uploaded");
+    } finally {
+      setAvatarUploading(false);
     }
   };
 
@@ -258,14 +330,27 @@ export function StudentProfilePage() {
                   className="w-24 h-24 sm:w-28 sm:h-28 rounded-[28px] flex items-center justify-center text-3xl font-extrabold text-primary-foreground shadow-xl ring-4 ring-background/80"
                   style={{ background: "linear-gradient(135deg, var(--primary) 0%, color-mix(in srgb, var(--primary) 70%, var(--accent)) 100%)" }}
                 >
-                  {initials}
+                  {avatarUrl ? (
+                    <img src={avatarUrl} alt={`${displayName} profile`} className="w-full h-full rounded-[28px] object-cover" />
+                  ) : initials}
                 </motion.div>
                 <button
-                  className="absolute -bottom-1.5 -right-1.5 w-9 h-9 rounded-xl flex items-center justify-center border bg-card text-muted-foreground shadow-sm hover:bg-muted active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  type="button"
+                  onClick={() => avatarInputRef.current?.click()}
+                  disabled={avatarUploading}
+                  className="absolute -bottom-1.5 -right-1.5 w-9 h-9 rounded-xl flex items-center justify-center border bg-card text-muted-foreground shadow-sm hover:bg-muted active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
                   aria-label="Change profile photo"
                 >
                   <Camera className="h-4 w-4" />
                 </button>
+                <input
+                  ref={avatarInputRef}
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  className="sr-only"
+                  aria-label="Upload profile photo"
+                  onChange={(event) => void handleAvatarChange(event)}
+                />
               </div>
 
               {/* Identity info */}
@@ -329,9 +414,8 @@ export function StudentProfilePage() {
                 {/* Academic info chips */}
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 justify-center sm:justify-start text-xs">
                   {[
-                    profile?.student_id ? { label: "Student ID", value: profile.student_id, icon: Award } : null,
-                    profile?.school_year ? { label: "School Year", value: profile.school_year, icon: CalendarDays } : null,
-                    profile?.program ? { label: "Program", value: profile.program, icon: Activity } : null,
+                    profile?.student_number ? { label: "Student ID", value: profile.student_number, icon: Award } : null,
+                    profile?.department ? { label: "Department", value: profile.department, icon: Activity } : null,
                   ].filter(Boolean).map(f => f && (
                     <div key={f.label} className="flex items-center gap-1.5">
                       <f.icon className="h-3 w-3 text-muted-foreground shrink-0" />
@@ -391,15 +475,15 @@ export function StudentProfilePage() {
               <h2 id="activity-heading" className="sr-only">Recent Activity</h2>
 
               <div className="relative">
-                {RECENT_ACTIVITY.length > 0 && (
+                {recentActivity.length > 0 && (
                   <div className="absolute left-[18px] top-2 bottom-2 w-px bg-gradient-to-b from-primary/30 via-primary/15 to-transparent" aria-hidden="true" />
                 )}
 
                 <div className="space-y-0.5">
-                  {RECENT_ACTIVITY.length === 0 && (
+                  {recentActivity.length === 0 && (
                     <p className="text-sm text-muted-foreground text-center py-6">No recent activity yet.</p>
                   )}
-                  {RECENT_ACTIVITY.map((item, i) => (
+                  {recentActivity.map((item, i) => (
                     <motion.div
                       key={i}
                       initial={{ opacity: 0, x: -8 }}

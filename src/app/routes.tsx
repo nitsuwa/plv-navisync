@@ -68,7 +68,6 @@ const CampusMapPage        = lazyPage(() => import("../pages/CampusMapPage").the
 const BuildingsPage        = lazyPage(() => import("../pages/BuildingsPage").then(m => ({ default: m.BuildingsPage })));
 const BuildingDetailsPage  = lazyPage(() => import("../pages/BuildingDetailsPage").then(m => ({ default: m.BuildingDetailsPage })));
 const HelpCenterPage       = lazyPage(() => import("../pages/HelpCenterPage").then(m => ({ default: m.HelpCenterPage })));
-const AnnouncementsPage    = lazyPage(() => import("../pages/AnnouncementsPage").then(m => ({ default: m.AnnouncementsPage })));
 const AdminLoginPage       = lazyPage(() => import("../pages/AdminLoginPage").then(m => ({ default: m.AdminLoginPage })));
 const AdminDashboardPage   = lazyPage(() => import("../pages/AdminDashboardPage").then(m => ({ default: m.AdminDashboardPage })));
 const AdminBuildingsPage   = lazyPage(() => import("../pages/AdminBuildingsPage").then(m => ({ default: m.AdminBuildingsPage })));
@@ -201,7 +200,6 @@ export const router = createBrowserRouter([
       { path: "buildings", element: <SuspensePage><BuildingsPage /></SuspensePage> },
       { path: "buildings/:id", element: <SuspensePage><BuildingDetailsPage /></SuspensePage> },
       { path: "help", element: <SuspensePage><HelpCenterPage /></SuspensePage> },
-      { path: "announcements", element: <SuspensePage><AnnouncementsPage /></SuspensePage> },
 
       // Student portal
       { path: "home", element: <SuspensePage><StudentHomePage /></SuspensePage> },

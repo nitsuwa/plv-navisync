@@ -174,7 +174,7 @@ export function CanvasAssetPalette({
             {open ? <ChevronUp className="h-4 w-4 shrink-0" aria-hidden="true" /> : <ChevronDown className="h-4 w-4 shrink-0" aria-hidden="true" />}
           </button>
 
-          <div className="mt-1.5 min-w-0" aria-label="Recently used">
+          <div className={cn("mt-1.5 min-w-0", compact && "hidden sm:block")} aria-label="Recently used">
             <p className="px-2 text-[9px] font-extrabold uppercase tracking-[0.12em] text-muted-foreground">Recently used</p>
             <div className="mt-1 flex max-w-full gap-1 overflow-x-auto no-scrollbar">
               {recentAssets.map((asset) => {
@@ -206,7 +206,7 @@ export function CanvasAssetPalette({
             </div>
           </div>
 
-          <p className="mt-1.5 px-2 text-[10px] text-muted-foreground">Choose an item, then click the canvas. Drag to place it.</p>
+          <p className={cn("mt-1.5 px-2 text-[10px] text-muted-foreground", compact && "hidden sm:block")}>Choose an item, then click the canvas. Drag to place it.</p>
         </div>
 
         {open && (

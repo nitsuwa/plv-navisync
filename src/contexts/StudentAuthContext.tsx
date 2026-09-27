@@ -15,6 +15,7 @@ interface StudentAuthState {
   isStudentOrg: boolean;
   username: string;
   role: "student" | "student_org" | "faculty";
+  refreshProfile: () => Promise<void>;
   signOut: () => Promise<void>;
 }
 
@@ -23,6 +24,23 @@ const StudentAuthContext = createContext<StudentAuthState | null>(null);
 export function StudentAuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
+
+  const refreshProfile = useCallback(async () => {
+    if (!supabase) return;
+    const { data: authData, error: authError } = await supabase.auth.getUser();
+    if (authError || !authData.user) {
+      setProfile(null);
+      setLoading(false);
+      return;
+    }
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("*")
+      .eq("id", authData.user.id)
+      .maybeSingle();
+    setProfile(!error && data ? (data as Profile) : null);
+    setLoading(false);
+  }, []);
 
   useEffect(() => {
     if (!isConnected || !supabase) {
@@ -87,7 +105,7 @@ export function StudentAuthProvider({ children }: { children: ReactNode }) {
   const role = profile?.role === "student" ? "student" : profile?.role === "student_org" ? "student_org" : "faculty";
 
   return (
-    <StudentAuthContext.Provider value={{ profile, loading, isStudent, isStudentOrg, username, role, signOut }}>
+    <StudentAuthContext.Provider value={{ profile, loading, isStudent, isStudentOrg, username, role, refreshProfile, signOut }}>
       {children}
     </StudentAuthContext.Provider>
   );
@@ -109,6 +127,7 @@ export function useStudentAuth(): StudentAuthState {
       isStudentOrg: false,
       username: "",
       role: "faculty",
+      refreshProfile: async () => {},
       signOut: async () => {},
     };
   }

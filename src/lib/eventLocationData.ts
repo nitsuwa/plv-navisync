@@ -51,6 +51,26 @@ function buildingHasFloors(building: CampusBuilding): boolean {
 }
 
 /**
+ * List only locations backed by authored floors in a published campus snapshot.
+ * Unlike eventBuildingOptions, this helper never falls back to demo buildings.
+ */
+export function publishedEventBuildingOptions(campus: Campus): EventBuildingOption[] {
+  if (!campus.id || !Array.isArray(campus.buildings)) return [];
+
+  return campus.buildings
+    .filter((building) => building.visible !== false && buildingHasFloors(building))
+    .map((building) => ({
+      buildingId: building.id,
+      buildingName: building.name,
+      floors: building.floors
+        .filter((floor) => Number.isFinite(floor.number))
+        .filter((floor) => resolveFloorPlanForEvent(building.id, floor.number, campus) !== null)
+        .map((floor) => ({ number: floor.number, label: floor.label })),
+    }))
+    .filter((building) => building.floors.length > 0);
+}
+
+/**
  * List the buildings/floor options for the create-event location picker.
  * Mirrors CampusMapPage's source: active campus buildings when available,
  * otherwise the legacy demo dataset.
@@ -96,9 +116,9 @@ function resolveLegacyFloorPlan(
 ): FloorPlan | null {
   const building = LEGACY_FLOOR_PLANS[buildingId];
   if (!building) return null;
-  const demoFloor =
-    building.floors.find((f) => f.number === floorNumber) ??
-    building.floors[0];
+  const demoFloor = floorNumber === undefined
+    ? building.floors[0]
+    : building.floors.find((floor) => floor.number === floorNumber);
   if (!demoFloor) return null;
 
   const floorId = floorLookupId(building.buildingId, demoFloor.number);
@@ -151,18 +171,19 @@ export function resolveFloorPlanForEvent(
   if (buildingId === CAMPUS_GROUNDS_ID) {
     const campusW = activeCampus?.canvasW || 1200;
     const campusH = activeCampus?.canvasH || 900;
-    const rooms: FloorRoom[] = (activeCampus?.buildings || LEGACY_BUILDINGS).map((b) => ({
+    const campusBuildings = activeCampus?.buildings ?? [];
+    const rooms: FloorRoom[] = campusBuildings.map((b) => ({
       id: b.id,
       name: b.name,
       type: "building",
       x: b.x,
       y: b.y,
-      w: (b as any).width || (b as any).w || 100,
-      h: (b as any).height || (b as any).h || 100,
+      w: b.width,
+      h: b.height,
       color: b.color || "#cccccc",
       floorId: "campus",
       buildingId: "campus",
-      rotation: (b as any).rotation || 0,
+      rotation: b.rotation || 0,
     }));
 
     return {
@@ -194,29 +215,24 @@ export function resolveFloorPlanForEvent(
     const building = activeCampus.buildings.find(
       (b) => b.id === buildingId && b.visible !== false
     );
-    const sourceFloor = building?.floors.find((f) => f.number === floorNumber);
-    const floor = sourceFloor ?? building?.floors[0];
+    const floor = floorNumber === undefined
+      ? building?.floors[0]
+      : building?.floors.find((candidate) => candidate.number === floorNumber);
     if (building && floor) {
       const floorId = floorLookupId(building.id, floor.number);
-      const rooms: FloorRoom[] = (floor.rooms ?? []).map((r) => ({
-        id: r.id,
-        name: r.name,
-        type: r.type,
-        x: r.x,
-        y: r.y,
-        w: r.w,
-        h: r.h,
-        color: r.color || typeFill(r.type, undefined),
+      const rooms: FloorRoom[] = (floor.rooms ?? []).map((room) => ({
+        ...room,
+        color: room.color || typeFill(room.type, undefined),
         floorId,
         buildingId: building.id,
       }));
 
-      // Rooms only — the student map renders the same room rectangles (via
-      // floorPlansFromCampus) inside the published floor canvas, so the org
-      // editor is WYSIWYG with what students will see. Other base structure
-      // (walls/doors/furniture) is deliberately excluded: it is read-only and
-      // the campus map's own floor view shows only rooms.
+      // Preserve the complete administrator-authored floor snapshot. The
+      // event editor keeps every base layer read-only, then composes event
+      // furniture and labels above it. This makes the planning canvas truly
+      // WYSIWYG with the published map instead of reducing it to room boxes.
       return {
+        ...floor,
         id: floorId,
         buildingId: building.id,
         number: floor.number,
@@ -224,18 +240,21 @@ export function resolveFloorPlanForEvent(
         canvasW: floor.canvasW ?? EVENT_CANVAS_W,
         canvasH: floor.canvasH ?? EVENT_CANVAS_H,
         backgroundColor: floor.backgroundColor || "#f8f9fa",
-        showGrid: true,
-        gridSize: 20,
+        showGrid: floor.showGrid !== false,
+        gridSize: floor.gridSize ?? 20,
         rooms,
-        paths: [],
-        walls: [],
-        doors: [],
-        windows: [],
-        furniture: [],
-        stairs: [],
-        ramps: [],
-        elevators: [],
-        labels: [],
+        paths: [...(floor.paths ?? [])],
+        walls: [...(floor.walls ?? [])],
+        doors: [...(floor.doors ?? [])],
+        windows: [...(floor.windows ?? [])],
+        furniture: [...(floor.furniture ?? [])],
+        stairs: [...(floor.stairs ?? [])],
+        ramps: [...(floor.ramps ?? [])],
+        elevators: [...(floor.elevators ?? [])],
+        labels: [...(floor.labels ?? [])],
+        exteriorZones: [...(floor.exteriorZones ?? [])],
+        entranceSteps: [...(floor.entranceSteps ?? [])],
+        entranceRamps: [...(floor.entranceRamps ?? [])],
       };
     }
     // Building/floor not found in the live campus — do not silently fall back

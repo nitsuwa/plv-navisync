@@ -907,6 +907,8 @@ export interface EventOverlayLocation {
 
 export interface CampusEventOverlay {
   id: string;
+  /** Campus whose published map snapshot anchors this event proposal. */
+  campusId?: string;
   title: string;
   description: string;
   /** Legacy date fields are optional so new proposals remain date-free. */

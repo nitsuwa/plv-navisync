@@ -7,11 +7,19 @@ import { motion, AnimatePresence } from "motion/react";
 import { Link, useNavigate } from "react-router";
 import { useStudentAuth } from "../hooks/useStudentAuth";
 import { useTheme } from "../hooks/useTheme";
+import { useToast } from "../hooks/useToast";
 import { StudentPageHeader } from "../components/ui/StudentPageHeader";
 import { PageTransition } from "../components/ui/PageTransition";
 import { Skeleton } from "../components/ui/Skeleton";
 import { useScrollReveal } from "../hooks/useScrollReveal";
 import { cn } from "../lib/utils";
+import { updateStudentPassword } from "../lib/studentAccount";
+import {
+  DEFAULT_STUDENT_PREFERENCES,
+  loadStudentPreferences,
+  saveStudentPreferences,
+  type StudentNotificationPreferences,
+} from "../services/studentPreferencesService";
 
 // ═════════════════════════════════════════════════════════════════════════════
 // ── Scroll-reveal wrapper ───────────────────────────────────────────────────
@@ -53,20 +61,48 @@ export function StudentSettingsPage() {
   const navigate = useNavigate();
   const { loading: authLoading, isStudent, username, role, signOut } = useStudentAuth();
   const { theme, toggleTheme } = useTheme();
+  const { success, error: showError } = useToast();
   const [loading, setLoading] = useState(true);
   const [activeSection, setActiveSection] = useState<SettingsSection>("appearance");
 
   const [notifMap, setNotifMap] = useState(true);
   const [notifReports, setNotifReports] = useState(true);
-  const [notifEvents, setNotifEvents] = useState(false);
+  const [notifEvents, setNotifEvents] = useState(DEFAULT_STUDENT_PREFERENCES.campusEvents);
+  const [preferences, setPreferences] = useState<StudentNotificationPreferences>(DEFAULT_STUDENT_PREFERENCES);
+  const [preferencesLoading, setPreferencesLoading] = useState(true);
+  const [preferencesError, setPreferencesError] = useState<string | null>(null);
+  const [savingPreferences, setSavingPreferences] = useState(false);
   const [changingPw, setChangingPw] = useState(false);
   const [pwForm, setPwForm] = useState({ current: "", next: "", confirm: "" });
   const [pwSaved, setPwSaved] = useState(false);
+  const [pwError, setPwError] = useState<string | null>(null);
+  const [pwSaving, setPwSaving] = useState(false);
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: "instant" });
     const timer = setTimeout(() => setLoading(false), 500);
     return () => clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    let mounted = true;
+    void loadStudentPreferences()
+      .then((loaded) => {
+        if (!mounted) return;
+        setPreferences(loaded);
+        setNotifMap(loaded.mapUpdates);
+        setNotifReports(loaded.reportStatus);
+        setNotifEvents(loaded.campusEvents);
+      })
+      .catch(() => {
+        if (mounted) setPreferencesError("Notification preferences could not be loaded.");
+      })
+      .finally(() => {
+        if (mounted) setPreferencesLoading(false);
+      });
+    return () => {
+      mounted = false;
+    };
   }, []);
 
 
@@ -104,13 +140,56 @@ export function StudentSettingsPage() {
     return null;
   }
 
-  const handlePwSave = () => {
-    setPwSaved(true);
-    setTimeout(() => {
-      setChangingPw(false);
-      setPwSaved(false);
-      setPwForm({ current: "", next: "", confirm: "" });
-    }, 1800);
+  const handlePreferenceChange = async (key: keyof StudentNotificationPreferences, value: boolean) => {
+    const previous = preferences;
+    const next = { ...preferences, [key]: value };
+    setPreferences(next);
+    setNotifMap(next.mapUpdates);
+    setNotifReports(next.reportStatus);
+    setNotifEvents(next.campusEvents);
+    setSavingPreferences(true);
+    setPreferencesError(null);
+    try {
+      await saveStudentPreferences(next);
+      success("Preferences saved");
+    } catch {
+      setPreferences(previous);
+      setNotifMap(previous.mapUpdates);
+      setNotifReports(previous.reportStatus);
+      setNotifEvents(previous.campusEvents);
+      setPreferencesError("Could not save this preference. Please try again.");
+      showError("Preference not saved");
+    } finally {
+      setSavingPreferences(false);
+    }
+  };
+
+  const handlePwSave = async () => {
+    setPwError(null);
+    if (pwForm.next.length < 8) {
+      setPwError("Your new password must be at least 8 characters.");
+      return;
+    }
+    if (pwForm.next !== pwForm.confirm) {
+      setPwError("The new passwords do not match.");
+      return;
+    }
+    setPwSaving(true);
+    try {
+      await updateStudentPassword(pwForm.current, pwForm.next);
+      setPwSaved(true);
+      success("Password updated", "Your new password is active.");
+      setTimeout(() => {
+        setChangingPw(false);
+        setPwSaved(false);
+        setPwForm({ current: "", next: "", confirm: "" });
+      }, 1800);
+    } catch {
+      setPwError("Current password is incorrect or the update could not be completed.");
+      showError("Password not updated");
+    } finally {
+      setPwSaving(false);
+    }
   };
 
   const SECTIONS: { key: SettingsSection; label: string; icon: React.ElementType }[] = [
@@ -120,11 +199,12 @@ export function StudentSettingsPage() {
     { key: "support", label: "Support", icon: HelpCircle },
   ];
 
-  function Toggle({ on, onToggle }: { on: boolean; onToggle: () => void }) {
+  function Toggle({ on, onToggle, label }: { on: boolean; onToggle: () => void; label: string }) {
     return (
       <button
         type="button"
         role="switch"
+        aria-label={label}
         aria-checked={on}
         onClick={onToggle}
         className={cn(
@@ -176,6 +256,9 @@ export function StudentSettingsPage() {
             {SECTIONS.map(({ key, label, icon: SecIcon }) => (
               <button
                 key={key}
+                type="button"
+                role="tab"
+                aria-selected={activeSection === key}
                 onClick={() => setActiveSection(key)}
                 className={cn(
                   "flex flex-col items-center gap-1 px-2 py-2.5 rounded-xl text-xs font-bold transition-all flex-1 justify-center relative",
@@ -195,7 +278,7 @@ export function StudentSettingsPage() {
         </StudentPageHeader>
 
         <div className="max-w-2xl mx-auto px-5 py-6 space-y-6">
-          <AnimatePresence mode="wait">
+          <AnimatePresence>
             <motion.div
               key={activeSection}
               initial={{ opacity: 0, y: 10 }}
@@ -223,7 +306,7 @@ export function StudentSettingsPage() {
                               <p className="text-xs text-muted-foreground">Switch appearance theme</p>
                             </div>
                           </div>
-                          <Toggle on={theme === "dark"} onToggle={toggleTheme} />
+                          <Toggle on={theme === "dark"} onToggle={toggleTheme} label="Dark mode" />
                         </div>
                       </div>
                       <div className="px-5 py-3 border-t border-border/50 bg-muted/20 flex items-center gap-3">
@@ -240,9 +323,11 @@ export function StudentSettingsPage() {
                   <div>
                     <SectionLabel>Notifications</SectionLabel>
                     <div className="rounded-2xl border border-border/60 bg-card shadow-sm overflow-hidden">
-                      <SettingRow icon={MapPin} label="Map updates" desc="When published maps are updated" action={<Toggle on={notifMap} onToggle={() => setNotifMap(v => !v)} />} />
-                      <SettingRow icon={Bell} label="Report status" desc="Updates when your reports change status" action={<Toggle on={notifReports} onToggle={() => setNotifReports(v => !v)} />} />
-                      <SettingRow icon={Smartphone} label="Campus events" desc="Alerts for event maps and activities" action={<Toggle on={notifEvents} onToggle={() => setNotifEvents(v => !v)} />} />
+                      <SettingRow icon={MapPin} label="Map updates" desc="When published maps are updated" action={<Toggle on={notifMap} onToggle={() => void handlePreferenceChange("mapUpdates", !notifMap)} label="Map updates" />} />
+                      <SettingRow icon={Bell} label="Report status" desc="Updates when your reports change status" action={<Toggle on={notifReports} onToggle={() => void handlePreferenceChange("reportStatus", !notifReports)} label="Report status" />} />
+                      <SettingRow icon={Smartphone} label="Campus events" desc="Alerts for event maps and activities" action={<Toggle on={notifEvents} onToggle={() => void handlePreferenceChange("campusEvents", !notifEvents)} label="Campus events" />} />
+                      {(preferencesLoading || savingPreferences) && <p className="px-5 py-2 text-xs text-muted-foreground">Saving preferences…</p>}
+                      {preferencesError && <p role="alert" className="px-5 py-2 text-xs font-semibold text-destructive">{preferencesError}</p>}
                     </div>
                   </div>
                 </Reveal>
@@ -283,8 +368,9 @@ export function StudentSettingsPage() {
                                 { key: "confirm" as const, label: "Confirm New Password", placeholder: "Repeat new password", type: "password" },
                               ]).map(f => (
                                 <div key={f.key}>
-                                  <label className="block text-xs font-bold uppercase tracking-wide mb-1.5 text-foreground">{f.label}</label>
+                                  <label htmlFor={`student-${f.key}-password`} className="block text-xs font-bold uppercase tracking-wide mb-1.5 text-foreground">{f.label}</label>
                                   <input
+                                    id={`student-${f.key}-password`}
                                     type={f.type}
                                     value={pwForm[f.key]}
                                     onChange={e => setPwForm(p => ({ ...p, [f.key]: e.target.value }))}
@@ -302,15 +388,16 @@ export function StudentSettingsPage() {
                                   <CheckCircle2 className="h-3 w-3" /> Password updated successfully.
                                 </motion.p>
                               )}
+                              {pwError && <p role="alert" className="text-xs font-semibold text-destructive">{pwError}</p>}
                               <div className="flex gap-2 pt-1">
                                 <button onClick={() => { setChangingPw(false); setPwForm({ current: "", next: "", confirm: "" }); }}
                                   className="flex-1 h-10 rounded-xl border border-border/60 text-xs font-bold hover:bg-muted/60 transition-colors text-muted-foreground">
                                   Cancel
                                 </button>
-                                <button onClick={handlePwSave}
-                                  disabled={!pwForm.current || !pwForm.next || pwForm.next !== pwForm.confirm}
+                                <button onClick={() => void handlePwSave()}
+                                  disabled={pwSaving || !pwForm.current || !pwForm.next || pwForm.next !== pwForm.confirm}
                                   className="flex-1 h-10 rounded-xl text-xs font-bold transition-all disabled:opacity-40 bg-primary text-primary-foreground hover:brightness-110 active:scale-[0.97]">
-                                  {pwSaved ? "Saved!" : "Update Password"}
+                                  {pwSaving ? "Updating…" : pwSaved ? "Saved!" : "Update Password"}
                                 </button>
                               </div>
                             </div>

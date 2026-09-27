@@ -1,12 +1,15 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import {
   Flag, MapPin, Clock, CheckCircle2, AlertCircle, X, ChevronRight,
   Search, Filter, MessageCircle, Sparkles, Plus, RefreshCw,
 } from "lucide-react";
 import { SearchBar } from "../components/ui/SearchBar";
 import { motion, AnimatePresence } from "motion/react";
-import { Link, useNavigate } from "react-router";
+import { Link, useLocation, useNavigate } from "react-router";
 import { useStudentAuth } from "../hooks/useStudentAuth";
+import { usePublishedCampus } from "../hooks";
+import { buildingsFromCampus } from "../lib/mapDataAdapter";
+import type { Building } from "../types";
 import { StudentPageHeader } from "../components/ui/StudentPageHeader";
 import { PageTransition } from "../components/ui/PageTransition";
 import { EmptyState } from "../components/ui/EmptyState";
@@ -14,6 +17,7 @@ import { Skeleton } from "../components/ui/Skeleton";
 import { useScrollReveal } from "../hooks/useScrollReveal";
 import { cn } from "../lib/utils";
 import { reportService, type IssueReport } from "../services/reportService";
+import { ReportModal } from "../components/map/ReportModal";
 
 // ═════════════════════════════════════════════════════════════════════════════
 // ── Scroll-reveal wrapper ───────────────────────────────────────────────────
@@ -49,7 +53,7 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
   );
 }
 
-type ReportStatus = "pending" | "investigating" | "under_review" | "resolved" | "rejected" | "dismissed";
+type ReportStatus = "pending" | "investigating" | "under_review" | "in_progress" | "resolved" | "rejected" | "dismissed";
 type FilterStatus = "all" | ReportStatus;
 
 const REPORT_STATUS: Record<string, {
@@ -58,6 +62,7 @@ const REPORT_STATUS: Record<string, {
   pending:       { label: "Pending",       color: "text-amber-600 dark:text-amber-400",  bg: "bg-amber-50/80 dark:bg-amber-900/20 border-amber-200/60 dark:border-amber-800/30",  icon: Clock,        step: 1 },
   investigating: { label: "Under Review",  color: "text-blue-600 dark:text-blue-400",    bg: "bg-blue-50/80 dark:bg-blue-900/20 border-blue-200/60 dark:border-blue-800/30",      icon: AlertCircle,  step: 2 },
   under_review:  { label: "Under Review",  color: "text-blue-600 dark:text-blue-400",    bg: "bg-blue-50/80 dark:bg-blue-900/20 border-blue-200/60 dark:border-blue-800/30",      icon: AlertCircle,  step: 2 },
+  in_progress:   { label: "In Progress",   color: "text-indigo-600 dark:text-indigo-400", bg: "bg-indigo-50/80 dark:bg-indigo-900/20 border-indigo-200/60 dark:border-indigo-800/30", icon: AlertCircle, step: 2 },
   resolved:      { label: "Resolved",      color: "text-green-600 dark:text-green-400",  bg: "bg-green-50/80 dark:bg-green-900/20 border-green-200/60 dark:border-green-800/30",  icon: CheckCircle2, step: 3 },
   rejected:      { label: "Dismissed",     color: "text-destructive",                    bg: "bg-destructive/5 border-destructive/20",                                       icon: X,            step: 3 },
   dismissed:     { label: "Dismissed",     color: "text-destructive",                    bg: "bg-destructive/5 border-destructive/20",                                       icon: X,            step: 3 },
@@ -67,22 +72,38 @@ const STEPS = ["Submitted", "Under Review", "Resolved"];
 
 export function StudentReportsPage() {
   const { loading: authLoading, isStudent } = useStudentAuth();
+  const { activeCampus } = usePublishedCampus();
+  const location = useLocation();
   const navigate = useNavigate();
   const [reports, setReports] = useState<IssueReport[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [filter, setFilter] = useState<FilterStatus>("all");
   const [search, setSearch] = useState("");
 
+  const reportBuilding = useMemo<Building | null>(() => {
+    const buildingId = new URLSearchParams(location.search).get("building");
+    if (!buildingId || !activeCampus) return null;
+    return (buildingsFromCampus(activeCampus).find((building) => building.id === buildingId) as Building | undefined) ?? null;
+  }, [activeCampus, location.search]);
+
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: "instant" });
     let mounted = true;
-    reportService.getStudentReports().then((res) => {
-      if (mounted) {
-        setReports(res);
-        setLoading(false);
-      }
-    });
+    reportService.getStudentReports()
+      .then((res) => {
+        if (mounted) {
+          setReports(res);
+          setLoadError(null);
+        }
+      })
+      .catch(() => {
+        if (mounted) setLoadError("Reports are temporarily unavailable.");
+      })
+      .finally(() => {
+        if (mounted) setLoading(false);
+      });
     return () => {
       mounted = false;
     };
@@ -90,12 +111,23 @@ export function StudentReportsPage() {
 
   const refreshReports = useCallback(async () => {
     setIsRefreshing(true);
-    const res = await reportService.getStudentReports();
-    setReports(res);
-    setTimeout(() => {
-      setIsRefreshing(false);
-    }, 600);
+    try {
+      const res = await reportService.getStudentReports();
+      setReports(res);
+      setLoadError(null);
+    } catch {
+      setLoadError("Reports are temporarily unavailable.");
+    } finally {
+      setTimeout(() => setIsRefreshing(false), 600);
+    }
   }, []);
+
+  const closeReportModal = () => {
+    const params = new URLSearchParams(location.search);
+    params.delete("building");
+    const search = params.toString();
+    navigate(`${location.pathname}${search ? `?${search}` : ""}`, { replace: true });
+  };
 
   // Wait for the Supabase session/profile check before deciding. Reuse the
   // branded skeleton so there is no blank flash while the session resolves.
@@ -213,10 +245,12 @@ export function StudentReportsPage() {
 
                 <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar">
                   <Filter className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                  {(["all", "pending", "under_review", "resolved", "dismissed"] as FilterStatus[]).map((s) => (
+                  {(["all", "pending", "under_review", "in_progress", "resolved", "dismissed"] as FilterStatus[]).map((s) => (
                     <button
                       key={s}
+                      type="button"
                       onClick={() => setFilter(s)}
+                      aria-pressed={filter === s}
                       className={cn(
                         "shrink-0 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer",
                         filter === s
@@ -232,7 +266,24 @@ export function StudentReportsPage() {
             </Reveal>
           )}
 
-          {filtered.length === 0 && reports.length === 0 ? (
+          {loadError && reports.length === 0 ? (
+            <Reveal>
+              <div role="alert" className="flex flex-col items-center justify-center py-16 text-center">
+                <div className="w-14 h-14 rounded-2xl bg-destructive/10 flex items-center justify-center mb-4">
+                  <AlertCircle className="h-6 w-6 text-destructive" />
+                </div>
+                <p className="text-sm font-bold text-foreground mb-1">Could not load your reports</p>
+                <p className="text-sm text-muted-foreground max-w-sm mb-5">{loadError}</p>
+                <button
+                  type="button"
+                  onClick={() => void refreshReports()}
+                  className="inline-flex items-center gap-2 h-10 px-5 rounded-xl text-sm font-bold bg-primary text-primary-foreground hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <RefreshCw className="h-3.5 w-3.5" /> Try again
+                </button>
+              </div>
+            </Reveal>
+          ) : filtered.length === 0 && reports.length === 0 ? (
             <EmptyState
               icon={Flag}
               title="No reports submitted yet"
@@ -305,7 +356,7 @@ export function StudentReportsPage() {
                           <p className="text-xs text-muted-foreground leading-relaxed">{r.description}</p>
                           {r.imageUrl && (
                             <div className="mt-2.5 overflow-hidden rounded-xl border border-border max-w-xs">
-                              <img src={r.imageUrl} alt="Attached photo" className="w-full h-32 object-cover" />
+                              <img src={r.imageUrl} alt={`Photo attached to ${r.title}`} className="w-full h-32 object-cover" />
                             </div>
                           )}
                         </div>
@@ -384,7 +435,7 @@ export function StudentReportsPage() {
 
                         {/* Footer */}
                         <div className="px-5 py-3 flex items-center justify-between bg-muted/10">
-                          <Link to="/map" className="flex items-center gap-1.5 text-xs font-bold text-primary hover:underline group">
+                          <Link to={r.buildingId ? `/map?buildingId=${encodeURIComponent(r.buildingId)}` : "/map"} className="flex items-center gap-1.5 text-xs font-bold text-primary hover:underline group">
                             View on map <ChevronRight className="h-3 w-3 transition-transform group-hover:translate-x-0.5" />
                           </Link>
                           {r.status === "resolved" && (
@@ -401,6 +452,13 @@ export function StudentReportsPage() {
             </AnimatePresence>
           )}
         </div>
+        {reportBuilding && (
+          <ReportModal
+            building={reportBuilding}
+            campusId={activeCampus?.id}
+            onClose={closeReportModal}
+          />
+        )}
         {/* Safe area spacer */}
         <div className="h-6 md:hidden" />
       </div>

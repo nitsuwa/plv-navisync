@@ -19,10 +19,11 @@ const ISSUE_TYPES = [
 
 interface ReportModalProps {
   building: Building;
+  campusId?: string;
   onClose: () => void;
 }
 
-export function ReportModal({ building, onClose }: ReportModalProps) {
+export function ReportModal({ building, campusId, onClose }: ReportModalProps) {
   useEscToClose(onClose);
   const [issueType, setIssueType] = useState("");
   const [description, setDescription] = useState("");
@@ -44,6 +45,7 @@ export function ReportModal({ building, onClose }: ReportModalProps) {
     try {
       await reportService.submitReport({
         buildingId: building.id,
+        campusId,
         buildingName: building.name,
         category: issueType.toLowerCase().includes("hazard") || issueType.toLowerCase().includes("safety") ? "hazard" : issueType.toLowerCase().includes("blocked") ? "accessibility" : "maintenance",
         title: `${issueType} at ${building.name}`,

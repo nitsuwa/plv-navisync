@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
-import { Building2, Navigation, MapPin, Search, Bookmark, Trash2, Sparkles } from "lucide-react";
+import { Building2, Navigation, MapPin, Search, Bookmark, Trash2, Sparkles, AlertCircle, RefreshCw } from "lucide-react";
 import { SearchBar } from "../components/ui/SearchBar";
 import { motion, AnimatePresence } from "motion/react";
 import { Link, useNavigate } from "react-router";
@@ -53,6 +53,7 @@ import { studentAccountService } from "../services/studentAccountService";
 
 export function StudentFavoritesPage() {
   const { loading: authLoading, isStudent } = useStudentAuth();
+  const toast = useToast();
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const { activeCampus } = usePublishedCampus();
@@ -60,7 +61,10 @@ export function StudentFavoritesPage() {
     if (activeCampus) return buildingsFromCampus(activeCampus) as Building[];
     return [];
   }, [activeCampus]);
+  const buildingScope = campusBuildings.map((building) => building.id).join("|");
   const [savedBuildings, setSavedBuildings] = useState<Building[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [retryNonce, setRetryNonce] = useState(0);
   const [search, setSearch] = useState("");
   const [removingId, setRemovingId] = useState<string | null>(null);
   const [selectedBuilding, setSelectedBuilding] = useState<Building | null>(null);
@@ -68,16 +72,26 @@ export function StudentFavoritesPage() {
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: "instant" });
     let mounted = true;
-    studentAccountService.getSavedBuildings(campusBuildings).then((res) => {
-      if (mounted) {
-        setSavedBuildings(res);
-        setLoading(false);
-      }
-    });
+    studentAccountService.getSavedBuildings(campusBuildings)
+      .then((res) => {
+        if (mounted) {
+          setSavedBuildings(res);
+          setLoadError(null);
+        }
+      })
+      .catch(() => {
+        if (mounted) {
+          setLoadError("Favorites are temporarily unavailable.");
+          toast.error("Favorites could not be loaded");
+        }
+      })
+      .finally(() => {
+        if (mounted) setLoading(false);
+      });
     return () => {
       mounted = false;
     };
-  }, [campusBuildings]);
+  }, [buildingScope, retryNonce]);
 
   if (authLoading || loading) return (
     <PageTransition>
@@ -99,17 +113,20 @@ export function StudentFavoritesPage() {
       )
     : savedBuildings;
 
-  const toast = useToast();
-
   const remove = async (id: string) => {
     const building = savedBuildings.find((b) => b.id === id);
     setRemovingId(id);
-    await studentAccountService.toggleSaveBuilding(id);
-    setTimeout(() => {
-      setSavedBuildings((prev) => prev.filter((x) => x.id !== id));
+    try {
+      await studentAccountService.toggleSaveBuilding(id, activeCampus?.id);
+      setTimeout(() => {
+        setSavedBuildings((prev) => prev.filter((x) => x.id !== id));
+        setRemovingId(null);
+        toast.success(`${building?.name || "Location"} removed from favorites`);
+      }, 300);
+    } catch {
       setRemovingId(null);
-      toast.success(`${building?.name || "Location"} removed from favorites`);
-    }, 300);
+      toast.error("Favorite could not be removed");
+    }
   };
 
   return (
@@ -142,7 +159,28 @@ export function StudentFavoritesPage() {
             </Reveal>
           )}
 
-          {filtered.length === 0 && savedBuildings.length === 0 ? (
+          {loadError && savedBuildings.length === 0 ? (
+            <Reveal>
+              <div role="alert" className="flex flex-col items-center justify-center py-16 text-center">
+                <div className="w-14 h-14 rounded-2xl bg-destructive/10 flex items-center justify-center mb-4">
+                  <AlertCircle className="h-6 w-6 text-destructive" />
+                </div>
+                <p className="text-sm font-bold text-foreground mb-1">Could not load favorites</p>
+                <p className="text-sm text-muted-foreground max-w-sm mb-5">{loadError}</p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLoadError(null);
+                    setLoading(true);
+                    setRetryNonce((value) => value + 1);
+                  }}
+                  className="inline-flex items-center gap-2 h-10 px-5 rounded-xl text-sm font-bold bg-primary text-primary-foreground hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <RefreshCw className="h-3.5 w-3.5" /> Try again
+                </button>
+              </div>
+            </Reveal>
+          ) : filtered.length === 0 && savedBuildings.length === 0 ? (
             <EmptyState
               icon={Bookmark}
               title="No favorite locations yet"
@@ -164,7 +202,7 @@ export function StudentFavoritesPage() {
                   <Search className="h-6 w-6 text-muted-foreground" />
                 </div>
                 <p className="text-sm font-bold text-foreground mb-1">No results for &ldquo;{search}&rdquo;</p>
-                <button onClick={() => setSearch("")} className="text-xs font-bold text-primary hover:underline mt-1">
+                <button type="button" onClick={() => setSearch("")} className="text-xs font-bold text-primary hover:underline mt-1">
                   Clear search
                 </button>
               </div>
@@ -184,11 +222,24 @@ export function StudentFavoritesPage() {
                       }}
                       exit={{ opacity: 0, x: 100 }}
                       transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
-                      onClick={() => setSelectedBuilding(b)}
-                      className="group flex items-center gap-4 px-4 py-4 rounded-2xl border border-border/60 bg-card/50 hover:bg-card hover:border-primary/15 hover:shadow-sm transition-all duration-200 cursor-pointer"
+                      onClick={(event) => {
+                        if ((event.target as HTMLElement).closest("a,button")) return;
+                        setSelectedBuilding(b);
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.target !== event.currentTarget) return;
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          setSelectedBuilding(b);
+                        }
+                      }}
+                      role="button"
+                      tabIndex={0}
+                      aria-label={`Open details for ${b.name}`}
+                      className="group flex items-center gap-4 px-4 py-4 rounded-2xl border border-border/60 bg-card/50 hover:bg-card hover:border-primary/15 hover:shadow-sm transition-all duration-200 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
                     >
                       {b.image_url ? (
-                        <img src={b.image_url} alt="" className="w-14 h-14 rounded-xl object-cover shrink-0 ring-1 ring-border" />
+                        <img src={b.image_url} alt={`${b.name} thumbnail`} className="w-14 h-14 rounded-xl object-cover shrink-0 ring-1 ring-border" />
                       ) : (
                         <div className="w-14 h-14 rounded-xl flex items-center justify-center shrink-0 bg-primary/10 group-hover:scale-105 transition-transform">
                           <Building2 className="h-7 w-7 text-primary" />
@@ -241,6 +292,7 @@ export function StudentFavoritesPage() {
           onClose={() => setSelectedBuilding(null)}
           isSaved={true}
           onToggleSave={remove}
+          campusId={activeCampus?.id}
         />
 
         {/* Safe area spacer */}

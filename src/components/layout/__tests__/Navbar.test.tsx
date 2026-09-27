@@ -59,6 +59,7 @@ describe("Navbar student navigation", () => {
     expect(screen.getByRole("link", { name: /Map/ })).toHaveAttribute("href", "/map");
     expect(screen.getByRole("link", { name: /My Events/ })).toHaveAttribute("href", "/student/events");
     expect(screen.queryByRole("link", { name: /My Day/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Announcements/ })).not.toBeInTheDocument();
   });
 
   it("does not expose My Events to regular students", () => {
@@ -70,5 +71,16 @@ describe("Navbar student navigation", () => {
     expect(screen.getByRole("link", { name: /Map/ })).toHaveAttribute("href", "/map");
     expect(screen.queryByRole("link", { name: /My Events/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /My Day/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Announcements/ })).not.toBeInTheDocument();
+  });
+
+  it("shows an accessible account status while authentication is resolving", () => {
+    authState.isStudent = false;
+    authState.isStudentOrg = false;
+    authState.loading = true;
+    renderNavbar();
+
+    expect(screen.getByRole("status", { name: /checking account/i })).toBeInTheDocument();
+    expect(screen.getByText("Checking account")).toBeInTheDocument();
   });
 });
