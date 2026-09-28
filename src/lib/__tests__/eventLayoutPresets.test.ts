@@ -1,7 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { EVENT_LAYOUT_PRESETS } from "../eventLayoutPresets";
+import { EVENT_LAYOUT_PRESETS, buildEventPreset } from "../eventLayoutPresets";
 
 describe("event layout presets", () => {
+  it("centers an adjustable chair row and rotates it around the placement point", () => {
+    let next = 0;
+    const items = buildEventPreset("chair-row", { x: 150, y: 120 }, { count: 3, spacing: 40, rotation: 90 }, () => `chair-${++next}`);
+    expect(items).toHaveLength(3);
+    expect(items.map((item) => item.id)).toEqual(["chair-1", "chair-2", "chair-3"]);
+    expect(items.every((item) => item.rotation === 90)).toBe(true);
+    expect(items[1].x).toBeCloseTo(150 - items[1].width / 2);
+    expect(items[1].y).toBeCloseTo(120 - items[1].height / 2);
+    expect(items[2].y - items[1].y).toBeCloseTo(40);
+  });
   it("creates deterministic ordinary furniture records with unique ids", () => {
     for (const preset of EVENT_LAYOUT_PRESETS) {
       let next = 0;

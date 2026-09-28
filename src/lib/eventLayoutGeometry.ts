@@ -7,6 +7,24 @@ export interface LayoutItem {
   rotation?: number;
 }
 
+export interface LayoutRect { x: number; y: number; width: number; height: number }
+
+/** Returns items touched by a drag rectangle, including rotated item extents. */
+export function itemsIntersectingRect(items: readonly LayoutItem[], rect: LayoutRect): string[] {
+  const left = Math.min(rect.x, rect.x + rect.width);
+  const right = Math.max(rect.x, rect.x + rect.width);
+  const top = Math.min(rect.y, rect.y + rect.height);
+  const bottom = Math.max(rect.y, rect.y + rect.height);
+  return items.filter((item) => {
+    const radians = (item.rotation ?? 0) * Math.PI / 180;
+    const halfW = (Math.abs(Math.cos(radians)) * item.width + Math.abs(Math.sin(radians)) * item.height) / 2;
+    const halfH = (Math.abs(Math.sin(radians)) * item.width + Math.abs(Math.cos(radians)) * item.height) / 2;
+    const centerX = item.x + item.width / 2;
+    const centerY = item.y + item.height / 2;
+    return centerX + halfW >= left && centerX - halfW <= right && centerY + halfH >= top && centerY - halfH <= bottom;
+  }).map((item) => item.id);
+}
+
 export type LayoutAction =
   | "align-left"
   | "align-center"

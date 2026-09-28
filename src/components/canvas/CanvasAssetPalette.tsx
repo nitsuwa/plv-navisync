@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronUp, Search, Sparkles, X } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { CanvasAssetVisual } from "./CanvasAssetVisual";
@@ -88,6 +88,8 @@ export function CanvasAssetPalette({
 }: CanvasAssetPaletteProps) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(!compact && !floating);
+  const catalogRef = useRef<HTMLDivElement>(null);
+  const [catalogHeight, setCatalogHeight] = useState<number | null>(null);
   const [recentKeys, setRecentKeys] = useState<string[]>(() => (
     surface === "event"
       ? EVENT_RECENT_ASSET_KEYS
@@ -141,6 +143,21 @@ export function CanvasAssetPalette({
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [closePicker, floating, open]);
+
+  useLayoutEffect(() => {
+    if (!floating || !open) return;
+    const fitCatalog = () => {
+      const panel = catalogRef.current;
+      const canvas = panel?.closest('[aria-label="Event layout canvas"]');
+      if (!panel || !canvas) return;
+      const panelTop = panel.getBoundingClientRect().top;
+      const canvasBottom = canvas.getBoundingClientRect().bottom;
+      if (canvasBottom > panelTop) setCatalogHeight(Math.max(0, Math.min(544, Math.floor(canvasBottom - panelTop - 12))));
+    };
+    fitCatalog();
+    window.addEventListener("resize", fitCatalog);
+    return () => window.removeEventListener("resize", fitCatalog);
+  }, [floating, open]);
 
   if (floating) {
     return (
@@ -217,13 +234,16 @@ export function CanvasAssetPalette({
               onClick={closePicker}
             />
             <div
+              ref={catalogRef}
               id={`${surface}-asset-palette-panel`}
               data-testid="canvas-asset-catalog"
               data-mobile-sheet="true"
               role="dialog"
               aria-label="Choose an event item"
-              className="event-asset-catalog-panel absolute left-0 top-[calc(100%+0.5rem)] z-[70] w-[min(34rem,calc(100vw-2rem))] max-h-[min(70vh,34rem)] overflow-y-auto rounded-2xl border border-border/80 bg-card p-3 shadow-2xl"
+              className="event-asset-catalog-panel absolute left-0 top-[calc(100%+0.5rem)] z-[70] w-[min(34rem,calc(100vw-2rem))] max-h-[min(70vh,34rem)] touch-pan-y overflow-y-auto overscroll-contain rounded-2xl border border-border/80 bg-card p-3 shadow-2xl"
+              style={catalogHeight === null ? undefined : { maxHeight: catalogHeight }}
               onWheel={(event) => event.stopPropagation()}
+              onPointerDown={(event) => event.stopPropagation()}
             >
               <div className="mb-2 flex items-center justify-between gap-2">
                 <div>

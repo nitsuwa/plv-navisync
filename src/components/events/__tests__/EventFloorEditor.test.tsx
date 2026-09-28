@@ -230,6 +230,116 @@ afterEach(() => {
 });
 
 describe("EventFloorEditor", () => {
+  it("marquee-selects event items from blank canvas and exposes shared bulk actions", () => {
+    setInspectorViewport(false);
+    const chairs = [20, 80, 200].map((x, index) => ({
+      ...overlayWithChair.eventFurniture![0], id: `chair-${index + 1}`, x,
+    }));
+    render(<EventFloorEditor floorPlan={floorPlan} overlay={{ ...overlay, eventFurniture: chairs }} onSave={vi.fn()} onSubmit={vi.fn()} onBack={vi.fn()} />);
+
+    const canvas = screen.getByLabelText("Event layout canvas");
+    fireEvent.pointerDown(canvas, { pointerId: 501, pointerType: "mouse", button: 0, clientX: 10, clientY: 10 });
+    fireEvent.pointerMove(window, { pointerId: 501, pointerType: "mouse", clientX: 115, clientY: 65 });
+    expect(screen.getByTestId("event-selection-marquee")).toBeInTheDocument();
+    fireEvent.pointerUp(window, { pointerId: 501, pointerType: "mouse", clientX: 115, clientY: 65 });
+
+    expect(screen.getByText("2 items selected")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Arrange selected items" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Duplicate selected items" })).toBeInTheDocument();
+    expect(screen.getByTestId("event-furniture-chair-3")).not.toHaveClass("border-primary");
+  });
+
+  it("toggles already selected items with a Shift marquee", () => {
+    const chairs = [20, 80].map((x, index) => ({ ...overlayWithChair.eventFurniture![0], id: `chair-${index + 1}`, x }));
+    render(<EventFloorEditor floorPlan={floorPlan} overlay={{ ...overlay, eventFurniture: chairs }} onSave={vi.fn()} onSubmit={vi.fn()} onBack={vi.fn()} />);
+    const canvas = screen.getByLabelText("Event layout canvas");
+    fireEvent.pointerDown(canvas, { pointerId: 510, pointerType: "mouse", button: 0, clientX: 10, clientY: 10 });
+    fireEvent.pointerMove(window, { pointerId: 510, pointerType: "mouse", clientX: 115, clientY: 65 });
+    fireEvent.pointerUp(window, { pointerId: 510, pointerType: "mouse", clientX: 115, clientY: 65 });
+    fireEvent.pointerDown(canvas, { pointerId: 511, pointerType: "mouse", button: 0, shiftKey: true, clientX: 10, clientY: 10 });
+    fireEvent.pointerMove(window, { pointerId: 511, pointerType: "mouse", shiftKey: true, clientX: 52, clientY: 65 });
+    fireEvent.pointerUp(window, { pointerId: 511, pointerType: "mouse", shiftKey: true, clientX: 52, clientY: 65 });
+    expect(screen.getByTestId("event-furniture-chair-1")).not.toHaveClass("border-primary");
+    expect(screen.getByTestId("event-furniture-chair-2")).toHaveClass("border-primary");
+  });
+
+  it("offers shared bulk actions when a marquee includes furniture and a label", () => {
+    setInspectorViewport(false);
+    render(<EventFloorEditor floorPlan={floorPlan} overlay={{ ...overlayWithChair, eventLabels: overlayWithLabel.eventLabels }} onSave={vi.fn()} onSubmit={vi.fn()} onBack={vi.fn()} />);
+    const canvas = screen.getByLabelText("Event layout canvas");
+    fireEvent.pointerDown(canvas, { pointerId: 502, pointerType: "mouse", button: 0, clientX: 10, clientY: 10 });
+    fireEvent.pointerMove(window, { pointerId: 502, pointerType: "mouse", clientX: 160, clientY: 100 });
+    fireEvent.pointerUp(window, { pointerId: 502, pointerType: "mouse", clientX: 160, clientY: 100 });
+    expect(screen.getByText("2 items selected")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Duplicate selected items" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Arrange selected items" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Rotate selected items" })).not.toBeInTheDocument();
+    expect(within(screen.getByTestId("event-item-inspector-rail")).getByText("Bulk selection")).toBeInTheDocument();
+  });
+
+  it("arms a preset preview before creating its furniture", () => {
+    render(<EventFloorEditor floorPlan={floorPlan} overlay={overlay} onSave={vi.fn()} onSubmit={vi.fn()} onBack={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /Furniture$/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Arrange event layout" }));
+    fireEvent.click(screen.getByRole("button", { name: /Chair Row/i }));
+
+    expect(screen.getByTestId("event-preset-preview")).toBeInTheDocument();
+    expect(screen.getByLabelText("Event layout canvas").querySelectorAll("[data-event-item]")).toHaveLength(0);
+    expect(screen.getByRole("spinbutton", { name: "Preset item count" })).toBeInTheDocument();
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Preset item count" }), { target: { value: "4" } });
+    fireEvent.click(screen.getByLabelText("Event layout canvas"), { clientX: 125, clientY: 110 });
+    expect(screen.queryByTestId("event-preset-preview")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Event layout canvas").querySelectorAll("[data-event-item]")).toHaveLength(4);
+  });
+
+  it("places an edge preset exactly where its ghost was shown", () => {
+    render(<EventFloorEditor floorPlan={floorPlan} overlay={overlay} onSave={vi.fn()} onSubmit={vi.fn()} onBack={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /Furniture$/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Arrange event layout" }));
+    fireEvent.click(screen.getByRole("button", { name: /Booth Area/i }));
+    const canvas = screen.getByLabelText("Event layout canvas");
+    fireEvent.pointerMove(canvas, { pointerId: 520, pointerType: "mouse", clientX: 5, clientY: 5 });
+    const ghost = screen.getByTestId("event-preset-preview").firstElementChild as HTMLElement;
+    const ghostLeft = ghost.style.left;
+    const ghostTop = ghost.style.top;
+    fireEvent.click(canvas, { clientX: 5, clientY: 5 });
+    const placed = canvas.querySelector("[data-event-item]") as HTMLElement;
+    expect(placed.style.left).toBe(ghostLeft);
+    expect(placed.style.top).toBe(ghostTop);
+  });
+
+  it("cancels a preset preview with Escape while a placement control is focused", () => {
+    render(<EventFloorEditor floorPlan={floorPlan} overlay={overlay} onSave={vi.fn()} onSubmit={vi.fn()} onBack={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /Furniture$/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Arrange event layout" }));
+    fireEvent.click(screen.getByRole("button", { name: /Booth Area/i }));
+    const spacing = screen.getByRole("spinbutton", { name: "Preset spacing" });
+    spacing.focus();
+    fireEvent.keyDown(spacing, { key: "Escape" });
+    expect(screen.queryByTestId("event-preset-preview")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Event layout canvas").querySelectorAll("[data-event-item]")).toHaveLength(0);
+  });
+
+  it("finds placed items in the object list and selects one", () => {
+    render(<EventFloorEditor floorPlan={floorPlan} overlay={overlayWithChair} onSave={vi.fn()} onSubmit={vi.fn()} onBack={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Show event objects" }));
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search event objects" }), { target: { value: "chair" } });
+    fireEvent.click(screen.getByRole("button", { name: /select chair/i }));
+    expect(screen.getByTestId("event-furniture-chair-1")).toHaveClass("border-primary");
+  });
+
+  it("fits the floating asset catalog inside the visible canvas so the Safety section can be scrolled to", () => {
+    render(<EventFloorEditor floorPlan={floorPlan} overlay={overlay} onSave={vi.fn()} onSubmit={vi.fn()} onBack={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /Furniture$/ }));
+    fireEvent.click(screen.getByRole("button", { name: /More assets/i }));
+    const canvas = screen.getByLabelText("Event layout canvas");
+    const catalog = screen.getByTestId("canvas-asset-catalog");
+    vi.spyOn(canvas, "getBoundingClientRect").mockReturnValue({ top: 100, bottom: 450, left: 0, right: 800, width: 800, height: 350, x: 0, y: 100, toJSON: () => ({}) });
+    vi.spyOn(catalog, "getBoundingClientRect").mockReturnValue({ top: 200, bottom: 700, left: 0, right: 500, width: 500, height: 500, x: 0, y: 200, toJSON: () => ({}) });
+    fireEvent(window, new Event("resize"));
+    expect(catalog.getAttribute("style")).toContain("238px");
+    expect(within(catalog).getByText("Safety")).toBeInTheDocument();
+  });
   it("does not republish an unchanged draft when the parent callback identity changes", async () => {
     const onDraftChange = vi.fn();
 

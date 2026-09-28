@@ -33,6 +33,12 @@ import {
   Ungroup,
   ChevronDown,
   ChevronUp,
+  List,
+  Pencil,
+  Check,
+  X,
+  RotateCcw,
+  SlidersHorizontal,
 } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { genId } from "../map-builder/constants";
@@ -61,10 +67,10 @@ import {
   getEventFurnitureTemplate,
 } from "./eventAssets";
 import { resolveCanvasAssetKey } from "../canvas/canvasAssetCatalog";
-import { applyLayoutAction, nudgeItems, resolveLayoutMoveFromSnapshot, selectionBounds, type LayoutAction, type LayoutSnapGuide } from "../../lib/eventLayoutGeometry";
+import { applyLayoutAction, itemsIntersectingRect, nudgeItems, resolveLayoutMoveFromSnapshot, selectionBounds, type LayoutAction, type LayoutRect, type LayoutSnapGuide } from "../../lib/eventLayoutGeometry";
 import { constrainFurnitureToFloor, resizeFurnitureWithinFloor } from "../../lib/floorGeometry";
 import { transformControlMetrics } from "../../lib/campusSelection";
-import { EVENT_LAYOUT_PRESETS, getEventLayoutPreset, type EventLayoutPresetId } from "../../lib/eventLayoutPresets";
+import { EVENT_LAYOUT_PRESETS, buildEventPreset, fitEventPresetToCanvas, type EventLayoutPresetId } from "../../lib/eventLayoutPresets";
 import { validateEventLayout } from "../../lib/eventLayoutValidation";
 import { useEventViewportMotion } from "./useEventViewportMotion";
 import { EventLayoutIssues } from "./EventLayoutIssues";
@@ -79,6 +85,40 @@ const EVENT_EDITOR_WORKSPACE_PADDING = 64;
 const EVENT_EDITOR_MIN_ZOOM = 0.25;
 const EVENT_MAX_ZOOM = 4;
 const MOBILE_EVENT_VIEWER_INSETS = { top: 12, right: 12, bottom: 12, left: 12 };
+
+function getUniqueEventObjectName(baseName: string, usedNames: string[]): string {
+  const candidate = baseName.trim() || "Item";
+  const numberedCandidate = candidate.match(/^(.*)\s+(\d+)$/);
+  const stem = numberedCandidate?.[1]?.trim() || candidate;
+  const stemKey = stem.toLowerCase();
+  const candidateKey = candidate.toLowerCase();
+  const usedKeys = usedNames.map((name) => name.trim().toLowerCase()).filter(Boolean);
+
+  const getSiblingSuffix = (name: string): number | null => {
+    const key = name.trim().toLowerCase();
+    if (key === stemKey) return 0;
+    const prefix = `${stemKey} `;
+    if (!key.startsWith(prefix)) return null;
+    const suffix = key.slice(prefix.length);
+    return /^\d+$/.test(suffix) ? Number(suffix) : null;
+  };
+
+  const siblingSuffixes = usedKeys
+    .map(getSiblingSuffix)
+    .filter((suffix): suffix is number => suffix !== null);
+  const candidateSuffix = numberedCandidate ? Number(numberedCandidate[2]) : null;
+  const hasCandidateCollision = usedKeys.includes(candidateKey);
+
+  if (!hasCandidateCollision && (candidateSuffix !== null || siblingSuffixes.length === 0)) return candidate;
+
+  let suffix = Math.max(candidateSuffix ?? 0, ...siblingSuffixes, 0) + 1;
+  let uniqueName = `${stem} ${suffix}`;
+  while (usedKeys.includes(uniqueName.toLowerCase())) {
+    suffix += 1;
+    uniqueName = `${stem} ${suffix}`;
+  }
+  return uniqueName;
+}
 
 interface EventToolDef {
   id: EventTool;
@@ -136,7 +176,7 @@ function getEventResizeHandleStyle(handle: ResizeHandleDirection, hitSize: numbe
   }
 }
 
-type EventPointerGesture = "pan" | "drag" | "resize" | "rotate" | "pinch";
+type EventPointerGesture = "pan" | "drag" | "resize" | "rotate" | "pinch" | "marquee";
 
 interface EventResizeGesture {
   id: string;
@@ -280,13 +320,26 @@ export function EventFloorEditor({
     initialEventLayout.eventLabels
   );
   const [draftRecovered, setDraftRecovered] = useState(initialEventLayout.recovered);
+  const temporarySelectRef = useRef<{ previous: EventTool; startedAt: number } | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedType, setSelectedType] = useState<"furniture" | "label" | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [history, setHistory] = useState<EditorHistoryEntry[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [presetMenuOpen, setPresetMenuOpen] = useState(false);
+  const [objectListOpen, setObjectListOpen] = useState(false);
+  const [objectQuery, setObjectQuery] = useState("");
+  const [objectFilter, setObjectFilter] = useState<"all" | "furniture" | "labels">("all");
+  const [editingObject, setEditingObject] = useState<{ id: string; value: string; kind: "furniture" | "labels" } | null>(null);
+  const [presetPreview, setPresetPreview] = useState<{
+    id: EventLayoutPresetId;
+    count: number;
+    spacing: number;
+    rotation: number;
+    point: { x: number; y: number };
+  } | null>(null);
   const [selectionArrangeOpen, setSelectionArrangeOpen] = useState(false);
+  const [marquee, setMarquee] = useState<LayoutRect | null>(null);
   const [dragging, setDragging] = useState<{
     id: string;
     ids: string[];
@@ -297,7 +350,6 @@ export function EventFloorEditor({
   const [saving, setSaving] = useState(false);
   const [submittingLocal, setSubmittingLocal] = useState(false);
   const { spaceHeld } = useSpacePan(!readOnly);
-  const [presetId, setPresetId] = useState<EventLayoutPresetId>("chair-row");
   const [resizing, setResizing] = useState<{
     id: string;
     handle: ResizeHandleDirection;
@@ -328,6 +380,7 @@ export function EventFloorEditor({
   const inspectorTriggerRef = useRef<HTMLElement | null>(null);
   const panRef = useRef<{ sx: number; sy: number; px: number; py: number } | null>(null);
   const pointerGestureRef = useRef<EventPointerGesture | null>(null);
+  const marqueeRef = useRef<{ start: { x: number; y: number }; current: { x: number; y: number }; baseIds: string[]; toggle: boolean } | null>(null);
   const moveGestureRef = useRef<EventMoveGesture | null>(null);
   const gestureFrameRef = useRef<GestureFrame | null>(null);
   const gestureStartClientRef = useRef<{ x: number; y: number } | null>(null);
@@ -471,11 +524,12 @@ export function EventFloorEditor({
     () => eventFurniture.filter((item) => selectedIds.includes(item.id)).map((item) => item.id),
     [eventFurniture, selectedIds],
   );
+  const selectionAllFurniture = selectedIds.length > 0 && selectedFurnitureIds.length === selectedIds.length;
   const selectedFurniture = useMemo(
-    () => selectedFurnitureIds.length === 1
+    () => selectedIds.length === 1 && selectedFurnitureIds.length === 1
       ? eventFurniture.find((item) => item.id === selectedFurnitureIds[0]) ?? null
       : null,
-    [eventFurniture, selectedFurnitureIds],
+    [eventFurniture, selectedFurnitureIds, selectedIds.length],
   );
   const selectedLabel = useMemo(
     () => selectedIds.length === 1
@@ -508,6 +562,20 @@ export function EventFloorEditor({
     () => selectionBounds(eventFurniture, selectedFurnitureIds),
     [eventFurniture, selectedFurnitureIds],
   );
+  const previewItems = useMemo(() => {
+    if (!presetPreview) return [];
+    let index = 0;
+    const items = buildEventPreset(presetPreview.id, presetPreview.point, presetPreview, () => `preview-${++index}`);
+    return fitEventPresetToCanvas(items, canvasW, canvasH);
+  }, [canvasH, canvasW, presetPreview]);
+  const visibleObjectList = useMemo(() => {
+    const query = objectQuery.trim().toLowerCase();
+    const items = [
+      ...eventFurniture.map((item) => ({ id: item.id, name: item.name, kind: "furniture" as const, locked: Boolean(item.locked), x: item.x, y: item.y, width: item.width, height: item.height })),
+      ...eventLabels.map((item) => ({ id: item.id, name: item.text, kind: "labels" as const, locked: Boolean(item.locked), x: item.x, y: item.y, width: Math.max(10, item.text.length * (item.fontSize || 14) * 0.6), height: (item.fontSize || 14) * 1.2 })),
+    ];
+    return items.filter((item) => (objectFilter === "all" || item.kind === objectFilter) && (!query || item.name.toLowerCase().includes(query)));
+  }, [eventFurniture, eventLabels, objectFilter, objectQuery]);
   const layoutWarnings = useMemo(() => validateEventLayout({
     furniture: validatedFurniture,
     canvasWidth: canvasW,
@@ -686,6 +754,7 @@ export function EventFloorEditor({
         canvasW,
         canvasH,
       );
+      newFurniture.name = getUniqueEventObjectName(newFurniture.name, eventFurniture.map((item) => item.name));
       const updated = [...eventFurniture, newFurniture];
       setEventFurniture(updated);
       pushHistory(updated, eventLabels);
@@ -695,6 +764,26 @@ export function EventFloorEditor({
     },
     [canvasH, canvasW, eventFurniture, eventLabels, pushHistory, readOnly]
   );
+
+  const placePreset = useCallback((preview: NonNullable<typeof presetPreview>, point: { x: number; y: number }) => {
+    if (readOnly) return;
+    const fitted = fitEventPresetToCanvas(buildEventPreset(preview.id, point, preview, () => genId("event-item")), canvasW, canvasH);
+    const usedNames = eventFurniture.map((item) => item.name);
+    const placed = fitted.map((item) => {
+      const name = getUniqueEventObjectName(item.name, usedNames);
+      usedNames.push(name);
+      return { ...item, name };
+    });
+    if (placed.length === 0) return;
+    const nextFurniture = [...eventFurniture, ...placed];
+    setEventFurniture(nextFurniture);
+    pushHistory(nextFurniture, eventLabels);
+    const ids = placed.map((item) => item.id);
+    setSelectedIds(ids);
+    setSelectedId(ids.at(-1) ?? null);
+    setSelectedType("furniture");
+    setPresetPreview(null);
+  }, [canvasH, canvasW, eventFurniture, eventLabels, pushHistory, readOnly]);
 
   // ── Label placement ────────────────────────────────────────────────────
   const placeLabel = useCallback(
@@ -764,6 +853,10 @@ export function EventFloorEditor({
 
       if (activeTool === "furniture") {
         if (target?.closest("[data-event-item]")) return;
+        if (presetPreview) {
+          placePreset(presetPreview, { x, y });
+          return;
+        }
         // Place the currently selected event template centered on the click
         placeFurniture(activeTemplate, x - activeTemplate.width / 2, y - activeTemplate.height / 2);
       } else if (activeTool === "text") {
@@ -777,7 +870,7 @@ export function EventFloorEditor({
         }
       }
     },
-    [activeTool, zoom, pan, placeFurniture, placeLabel, dragging, resizing, rotating, activeTemplate, readOnly, spaceHeld]
+    [activeTool, zoom, pan, placeFurniture, placeLabel, placePreset, presetPreview, dragging, resizing, rotating, activeTemplate, readOnly, spaceHeld]
   );
 
   const handleCanvasDragOver = useCallback((e: React.DragEvent<HTMLDivElement>) => {
@@ -822,6 +915,18 @@ export function EventFloorEditor({
     const start = gestureStartClientRef.current;
     return !start || Math.hypot(clientX - start.x, clientY - start.y) >= 3;
   }, []);
+
+  const handleMarqueeMove = useCallback((sample: Pick<PointerSample, "clientX" | "clientY">) => {
+    const drag = marqueeRef.current;
+    if (!drag) return;
+    const point = getCanvasWorldPoint(sample.clientX, sample.clientY);
+    if (!point) return;
+    drag.current = point;
+    if (!hasPassedGestureThreshold(sample.clientX, sample.clientY)) return;
+    gestureMovedRef.current = true;
+    suppressCanvasClickRef.current = true;
+    setMarquee({ x: drag.start.x, y: drag.start.y, width: point.x - drag.start.x, height: point.y - drag.start.y });
+  }, [getCanvasWorldPoint, hasPassedGestureThreshold]);
 
   // ── Mouse drag for moving items ────────────────────────────────────────
   const handleItemMouseDown = useCallback(
@@ -1229,16 +1334,18 @@ export function EventFloorEditor({
     pushHistory(nextFurniture, nextLabels);
   }, [canvasH, canvasW, eventFurniture, eventLabels, pushHistory, readOnly, selectedFurnitureIds, selectedIds]);
 
-  const rotateSelection = useCallback(() => {
+  const rotateSelection = useCallback((direction: "clockwise" | "counterclockwise" = "clockwise") => {
     if (readOnly || selectedFurnitureIds.length === 0) return;
     const selected = new Set(selectedFurnitureIds);
+    const rotationDelta = direction === "clockwise" ? 15 : -15;
     const nextFurniture = eventFurniture.map((item) => selected.has(item.id)
-      ? item.locked ? item : { ...item, rotation: ((item.rotation || 0) + 15) % 360 }
+      ? item.locked ? item : { ...item, rotation: ((item.rotation || 0) + rotationDelta + 360) % 360 }
       : item);
     if (nextFurniture.every((item, index) => item === eventFurniture[index])) return;
     setEventFurniture(nextFurniture);
     pushHistory(nextFurniture, eventLabels);
   }, [eventFurniture, eventLabels, pushHistory, readOnly, selectedFurnitureIds]);
+  const rotateClockwise = useCallback(() => rotateSelection("clockwise"), [rotateSelection]);
 
   const updateSelectedFurniture = useCallback((changes: Partial<FloorFurniture>, options?: { allowLocked?: boolean }) => {
     if (readOnly || selectedFurnitureIds.length !== 1) return;
@@ -1258,6 +1365,36 @@ export function EventFloorEditor({
     setEventLabels(nextLabels);
     pushHistory(eventFurniture, nextLabels);
   }, [eventFurniture, eventLabels, pushHistory, readOnly, selectedLabel]);
+
+  const renameEventObject = useCallback((id: string, kind: "furniture" | "labels", proposedName: string) => {
+    if (readOnly) return;
+    const name = proposedName.trim();
+    if (!name) return;
+
+    if (kind === "furniture") {
+      const current = eventFurniture.find((item) => item.id === id);
+      if (!current || current.locked) return;
+      const usedNames = eventFurniture.filter((item) => item.id !== id).map((item) => item.name);
+      const uniqueName = getUniqueEventObjectName(name, usedNames);
+      if (uniqueName === current.name) return;
+      const nextFurniture = eventFurniture.map((item) => item.id === id ? { ...item, name: uniqueName } : item);
+      setEventFurniture(nextFurniture);
+      pushHistory(nextFurniture, eventLabels);
+      return;
+    }
+
+    const current = eventLabels.find((item) => item.id === id);
+    if (!current || current.locked || current.text === name) return;
+    const nextLabels = eventLabels.map((item) => item.id === id ? { ...item, text: name } : item);
+    setEventLabels(nextLabels);
+    pushHistory(eventFurniture, nextLabels);
+  }, [eventFurniture, eventLabels, pushHistory, readOnly]);
+
+  const commitObjectRename = useCallback(() => {
+    if (!editingObject) return;
+    renameEventObject(editingObject.id, editingObject.kind, editingObject.value);
+    setEditingObject(null);
+  }, [editingObject, renameEventObject]);
 
   const toggleSelectedLock = useCallback(() => {
     if (!selectedFurniture) return;
@@ -1310,9 +1447,12 @@ export function EventFloorEditor({
   const duplicateSelection = useCallback(() => {
     if (readOnly || selectedIds.length === 0) return;
     const selected = new Set(selectedIds);
-    const duplicates = [
-      ...eventFurniture.filter((item) => selected.has(item.id)).map((item) => ({ ...item, id: genId("event-item"), x: item.x + 24, y: item.y + 24, groupId: undefined })),
-    ];
+    const usedNames = eventFurniture.map((item) => item.name);
+    const duplicates = eventFurniture.filter((item) => selected.has(item.id)).map((item) => {
+      const name = getUniqueEventObjectName(item.name, usedNames);
+      usedNames.push(name);
+      return { ...item, id: genId("event-item"), name, x: item.x + 24, y: item.y + 24, groupId: undefined };
+    });
     const labelDuplicates = eventLabels.filter((label) => selected.has(label.id)).map((label) => ({ ...label, id: genId("event-label"), x: label.x + 24, y: label.y + 24 }));
     if (duplicates.length === 0 && labelDuplicates.length === 0) return;
     const nextFurniture = [...eventFurniture, ...duplicates];
@@ -1333,28 +1473,17 @@ export function EventFloorEditor({
     pushHistory(nextFurniture, eventLabels);
   }, [eventFurniture, eventLabels, pushHistory, readOnly, selectedFurnitureIds]);
 
-  const addPreset = useCallback((requestedPresetId: EventLayoutPresetId = presetId) => {
-    if (readOnly) return;
-    const preset = getEventLayoutPreset(requestedPresetId);
-    const created = preset.create({ x: Math.max(20, (canvasW - 180) / 2), y: Math.max(20, (canvasH - 150) / 2) }, () => genId("event-item"));
-    const nextFurniture = [...eventFurniture, ...created];
-    setEventFurniture(nextFurniture);
-    pushHistory(nextFurniture, eventLabels);
-    const ids = created.map((item) => item.id);
-    setSelectedIds(ids);
-    setSelectedId(ids[0] ?? null);
-    setSelectedType("furniture");
-  }, [canvasH, canvasW, eventFurniture, eventLabels, presetId, pushHistory, readOnly]);
-
   const selectTool = useCallback((tool: EventTool) => {
+    temporarySelectRef.current = null;
     setActiveTool(tool);
     setPresetMenuOpen(false);
+    setPresetPreview(null);
     setSelectionArrangeOpen(false);
   }, []);
 
   useEffect(() => {
-    if (selectedFurnitureIds.length < 2) setSelectionArrangeOpen(false);
-  }, [selectedFurnitureIds.length]);
+    if (!selectionAllFurniture || selectedFurnitureIds.length < 2) setSelectionArrangeOpen(false);
+  }, [selectedFurnitureIds.length, selectionAllFurniture]);
 
   // ── Pan (middle mouse or pan tool) ─────────────────────────────────────
   const handlePanStart = useCallback(
@@ -1419,7 +1548,7 @@ export function EventFloorEditor({
       if (reason === "pinch-transfer") {
         const firstId = activePointerIdRef.current;
         const gesture = pointerGestureRef.current;
-        if (gesture && gesture !== "pan" && gesture !== "pinch" && firstId !== null) {
+        if (gesture && gesture !== "pan" && gesture !== "pinch" && gesture !== "marquee" && firstId !== null) {
           const point = pointerPositionsRef.current.get(firstId);
           if (point) handlePointerPreview({ clientX: point.x, clientY: point.y, shiftKey: false });
           flushPendingPreview();
@@ -1435,7 +1564,32 @@ export function EventFloorEditor({
 
       const gesture = pointerGestureRef.current;
       if (finalSample && gesture === "pan") handlePanMove(finalSample);
+      else if (finalSample && gesture === "marquee") handleMarqueeMove(finalSample);
       else if (finalSample && gesture && gesture !== "pinch") handlePointerPreview(finalSample);
+      if (gesture === "marquee") {
+        const drag = marqueeRef.current;
+        if (reason === "pointerup" && drag && gestureMovedRef.current) {
+          const rect = { x: drag.start.x, y: drag.start.y, width: drag.current.x - drag.start.x, height: drag.current.y - drag.start.y };
+          const candidates = [
+            ...eventFurniture.filter((item) => item.visible !== false),
+            ...eventLabels.map((label) => ({
+              ...label,
+              width: Math.max(10, label.text.length * (label.fontSize || 14) * 0.6),
+              height: (label.fontSize || 14) * 1.2,
+            })),
+          ];
+          const hits = itemsIntersectingRect(candidates, rect);
+          const ids = drag.toggle
+            ? [...drag.baseIds.filter((id) => !hits.includes(id)), ...hits.filter((id) => !drag.baseIds.includes(id))]
+            : hits;
+          setSelectedIds(ids);
+          setSelectedId(ids.at(-1) ?? null);
+          setSelectedType(ids.some((id) => eventFurniture.some((item) => item.id === id)) ? "furniture" : ids.length ? "label" : null);
+          pointerPressOriginRef.current = "pan";
+        }
+        marqueeRef.current = null;
+        setMarquee(null);
+      }
       if (reason === "escape") {
         const moveGesture = moveGestureRef.current;
         if (moveGesture) {
@@ -1449,12 +1603,12 @@ export function EventFloorEditor({
         cancelPendingPreview();
       } else if (reason === "resize" || reason === "cancel" || reason === "lostcapture" || reason === "blur" || reason === "hidden") {
         cancelPendingPreview();
-      } else if (gesture && gesture !== "pan" && gesture !== "pinch") {
+      } else if (gesture && gesture !== "pan" && gesture !== "pinch" && gesture !== "marquee") {
         flushPendingPreview();
       }
 
       if (gesture === "pan" || gesture === "pinch") handlePanEnd();
-      else if (gesture) handleMouseUp();
+      else if (gesture && gesture !== "marquee") handleMouseUp();
       pinchRef.current = null;
       pointerGestureRef.current = null;
       panRef.current = null;
@@ -1486,7 +1640,7 @@ export function EventFloorEditor({
     } finally {
       interactionFinishingRef.current = false;
     }
-  }, [cancelPendingPreview, cancelViewportMotion, flushPendingPreview, handleMouseUp, handlePanEnd, handlePanMove, handlePointerPreview, setFurniturePreview, setLabelsPreview]);
+  }, [cancelPendingPreview, cancelViewportMotion, eventFurniture, eventLabels, flushPendingPreview, handleMouseUp, handleMarqueeMove, handlePanEnd, handlePanMove, handlePointerPreview, setFurniturePreview, setLabelsPreview]);
 
   useLayoutEffect(() => {
     finishInteractionRef.current = finishInteraction;
@@ -1544,13 +1698,20 @@ export function EventFloorEditor({
     beginPointerGesture(e, () => {
       handlePanStart(e, e.pointerType === "touch");
       if (e.button === 1 || effectiveTool === "pan") return;
-      if (effectiveTool === "select" && !dragging && origin === "blank") {
-        setSelectedId(null);
-        setSelectedType(null);
-        setSelectedIds([]);
+      if (effectiveTool === "select" && !dragging && origin === "blank" && e.pointerType !== "touch") {
+        beginTransformGesture(e.clientX, e.clientY);
+        const start = getCanvasWorldPoint(e.clientX, e.clientY);
+        if (!start) return;
+        marqueeRef.current = { start, current: start, baseIds: e.shiftKey ? selectedIds : [], toggle: e.shiftKey };
+        pointerGestureRef.current = "marquee";
+        if (!e.shiftKey) {
+          setSelectedId(null);
+          setSelectedType(null);
+          setSelectedIds([]);
+        }
       }
     }, origin);
-  }, [beginPointerGesture, dragging, effectiveTool, handlePanStart]);
+  }, [beginPointerGesture, beginTransformGesture, dragging, effectiveTool, getCanvasWorldPoint, handlePanStart, selectedIds]);
 
   useLayoutEffect(() => {
     pointerMoveRef.current = (e: PointerEvent) => {
@@ -1563,6 +1724,7 @@ export function EventFloorEditor({
         return;
       }
       if (pointerGestureRef.current === "pan") handlePanMove(e);
+      else if (pointerGestureRef.current === "marquee") handleMarqueeMove(e);
       else if (pointerGestureRef.current) handlePointerPreview({ clientX: e.clientX, clientY: e.clientY, shiftKey: e.shiftKey });
     };
   });
@@ -1813,22 +1975,48 @@ export function EventFloorEditor({
       if (e.key === "Escape") {
         finishInteractionRef.current("escape");
         setPresetMenuOpen(false);
+        setPresetPreview(null);
         setSelectionArrangeOpen(false);
         setSelectedId(null);
         setSelectedType(null);
         setSelectedIds([]);
       }
       // Tool shortcuts
-      if (!readOnly) {
-        if (e.key === "v" || e.key === "1") selectTool("select");
-        if (e.key === "f" || e.key === "2") selectTool("furniture");
-        if (e.key === "t" || e.key === "3") selectTool("text");
-        if (e.key === "h" || e.key === "4") selectTool("pan");
+      if (!readOnly && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        if (e.key.toLowerCase() === "v" && !e.repeat) {
+          const previous = activeTool;
+          selectTool("select");
+          temporarySelectRef.current = { previous, startedAt: performance.now() };
+        } else if (e.key === "1") selectTool("select");
+        else if (e.key === "f" || e.key === "F" || e.key === "2") selectTool("furniture");
+        else if (e.key === "t" || e.key === "T" || e.key === "3") selectTool("text");
+        else if (e.key === "h" || e.key === "H" || e.key === "4") selectTool("pan");
+      }
+    };
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.key.toLowerCase() !== "v") return;
+      const temporary = temporarySelectRef.current;
+      temporarySelectRef.current = null;
+      if (temporary && performance.now() - temporary.startedAt >= 180 && activeTool === "select") {
+        selectTool(temporary.previous);
+      }
+    };
+    const onBlur = () => {
+      const temporary = temporarySelectRef.current;
+      temporarySelectRef.current = null;
+      if (temporary && performance.now() - temporary.startedAt >= 180 && activeTool === "select") {
+        selectTool(temporary.previous);
       }
     };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [deleteSelected, undo, redo, readOnly, duplicateSelection, nudgeSelection, resetViewport, rotateSelection, selectTool, selectedIds.length, selectedFurnitureIds.length]);
+    window.addEventListener("keyup", onKeyUp);
+    window.addEventListener("blur", onBlur);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("keyup", onKeyUp);
+      window.removeEventListener("blur", onBlur);
+    };
+  }, [activeTool, deleteSelected, undo, redo, readOnly, duplicateSelection, nudgeSelection, resetViewport, rotateSelection, selectTool, selectedIds.length, selectedFurnitureIds.length]);
 
   // ── Save / Submit handlers ─────────────────────────────────────────────
   const busy = saving || submittingLocal || isSaving || isSubmitting;
@@ -1884,7 +2072,7 @@ export function EventFloorEditor({
     onToggleFurnitureLock: toggleSelectedLock,
     onToggleLabelLock: toggleSelectedLabelLock,
     onToggleVisibility: toggleSelectedVisibility,
-    onRotate: rotateSelection,
+    onRotate: rotateClockwise,
     onUpdateLayer: updateSelectedLayer,
     onUngroup: ungroupSelection,
   };
@@ -1956,6 +2144,8 @@ export function EventFloorEditor({
           <button
             onClick={deleteSelected}
             disabled={!selectedId}
+            aria-label="Delete selected items"
+            title="Delete selected items (Del)"
             className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-destructive/10 transition-colors text-muted-foreground disabled:opacity-30"
           >
             <Trash2 className="h-3.5 w-3.5" />
@@ -1986,7 +2176,7 @@ export function EventFloorEditor({
       </div>
 
       {/* Toolbar */}
-      {!readOnly && <div className="flex min-w-0 items-center gap-1 overflow-x-auto no-scrollbar px-3 py-2 sm:px-4 border-b border-border bg-card/50 shrink-0">
+      {!readOnly && <div className="flex min-w-0 flex-wrap items-center gap-1 px-3 py-2 sm:px-4 border-b border-border bg-card/50 shrink-0">
         {EVENT_TOOLS.map((tool) => {
           const Icon = tool.icon;
           return (
@@ -1994,7 +2184,7 @@ export function EventFloorEditor({
               key={tool.id}
               onClick={() => selectTool(tool.id)}
               aria-pressed={effectiveTool === tool.id}
-              title={`${tool.label}${tool.id === "pan" ? " (Space or middle mouse also pans)" : ""}`}
+              title={tool.id === "select" ? "Select (V to switch; hold V for temporary Select)" : tool.id === "text" ? "Label (T)" : `${tool.label}${tool.id === "pan" ? " (Space or middle mouse also pans)" : ""}`}
               className={cn(
                 "flex items-center gap-1.5 h-8 px-3 rounded-lg text-xs font-bold transition-all",
                 effectiveTool === tool.id
@@ -2007,30 +2197,41 @@ export function EventFloorEditor({
             </button>
           );
         })}
-        {inspectorViewportCompact && selectedFurnitureIds.length === 1 && selectedFurniture && (
+        <button
+          type="button"
+          aria-label={objectListOpen ? "Hide event objects" : "Show event objects"}
+          aria-expanded={objectListOpen}
+          onClick={() => setObjectListOpen((current) => !current)}
+          className={cn("ml-auto flex h-8 shrink-0 items-center gap-1.5 rounded-lg px-3 text-xs font-bold", objectListOpen ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted")}
+        >
+          <List className="h-3.5 w-3.5" /> Objects ({eventFurniture.length + eventLabels.length})
+        </button>
+        {inspectorViewportCompact && selectedIds.length === 1 && selectedFurniture && (
           <>
-            {!selectedFurniture.locked && <button type="button" aria-label="Rotate selected item" onClick={rotateSelection} className="h-8 shrink-0 rounded-lg border border-border px-3 text-xs font-bold text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">Rotate</button>}
+            {!selectedFurniture.locked && <button type="button" aria-label="Rotate selected item" onClick={rotateClockwise} className="h-8 shrink-0 rounded-lg border border-border px-3 text-xs font-bold text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">Rotate</button>}
             <button type="button" aria-label="Open item details" aria-haspopup="dialog" onClick={(event) => openInspectorFrom(event.currentTarget)} className="h-8 shrink-0 rounded-lg border border-border px-3 text-xs font-bold text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">Details</button>
             <button type="button" aria-label={selectedFurniture.locked ? "Unlock selected item" : "Lock selected item"} onClick={toggleSelectedLock} className="h-8 shrink-0 rounded-lg border border-border px-3 text-xs font-bold text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">{selectedFurniture.locked ? "Unlock" : "Lock"}</button>
+            <button type="button" aria-label="Delete selected item" title="Delete selected item (Del)" disabled={selectedFurniture.locked} onClick={deleteSelected} className="h-8 shrink-0 rounded-lg border border-destructive/30 px-3 text-xs font-bold text-destructive hover:bg-destructive/10 disabled:opacity-40">Delete</button>
           </>
         )}
         {inspectorViewportCompact && selectedLabel && selectedIds.length === 1 && (
           <>
             <button type="button" aria-label="Open label details" aria-haspopup="dialog" onClick={(event) => openInspectorFrom(event.currentTarget)} className="h-8 shrink-0 rounded-lg border border-border px-3 text-xs font-bold text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">Details</button>
             <button type="button" aria-label={selectedLabel.locked ? "Unlock selected label" : "Lock selected label"} onClick={toggleSelectedLabelLock} className="h-8 shrink-0 rounded-lg border border-border px-3 text-xs font-bold text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">{selectedLabel.locked ? "Unlock" : "Lock"}</button>
+            <button type="button" aria-label="Delete selected label" title="Delete selected label (Del)" disabled={selectedLabel.locked} onClick={deleteSelected} className="h-8 shrink-0 rounded-lg border border-destructive/30 px-3 text-xs font-bold text-destructive hover:bg-destructive/10 disabled:opacity-40">Delete</button>
           </>
         )}
-        {inspectorViewportCompact && selectedFurnitureIds.length > 1 && (
+        {inspectorViewportCompact && selectedIds.length > 1 && (
           <>
-            <span className="shrink-0 px-1 text-[10px] font-extrabold text-muted-foreground">{selectedFurnitureIds.length} selected</span>
-            <button type="button" aria-label="Rotate selected items" onClick={rotateSelection} className="h-8 shrink-0 rounded-lg border border-border px-3 text-xs font-bold text-foreground hover:bg-muted">Rotate</button>
-            <button type="button" aria-label={selectionIsOneGroup ? "Ungroup selected items" : "Group selected items"} onClick={selectionIsOneGroup ? ungroupSelection : groupSelection} className="h-8 shrink-0 rounded-lg border border-border px-3 text-xs font-bold text-foreground hover:bg-muted">{selectionIsOneGroup ? "Ungroup" : "Group"}</button>
-            <div className="relative shrink-0">
+            <span className="shrink-0 px-1 text-[10px] font-extrabold text-muted-foreground">{selectedIds.length} selected</span>
+            {selectionAllFurniture && <button type="button" aria-label="Rotate selected items" onClick={rotateClockwise} className="h-8 shrink-0 rounded-lg border border-border px-3 text-xs font-bold text-foreground hover:bg-muted">Rotate</button>}
+            {selectionAllFurniture && selectedFurnitureIds.length > 1 && <button type="button" aria-label={selectionIsOneGroup ? "Ungroup selected items" : "Group selected items"} onClick={selectionIsOneGroup ? ungroupSelection : groupSelection} className="h-8 shrink-0 rounded-lg border border-border px-3 text-xs font-bold text-foreground hover:bg-muted">{selectionIsOneGroup ? "Ungroup" : "Group"}</button>}
+            {selectionAllFurniture && selectedFurnitureIds.length > 1 && <div className="relative shrink-0">
               <button type="button" aria-label="Arrange selected items" aria-expanded={selectionArrangeOpen} onClick={() => setSelectionArrangeOpen((current) => !current)} className="h-8 shrink-0 rounded-lg border border-border px-3 text-xs font-bold text-foreground hover:bg-muted">Arrange</button>
               {selectionArrangeOpen && <div role="menu" aria-label="Arrange selected items" className="absolute left-0 top-[calc(100%+0.5rem)] z-50 grid w-[min(22rem,calc(100vw-1.5rem))] grid-cols-1 gap-1 rounded-2xl border border-border bg-card p-2 shadow-2xl sm:grid-cols-2">
                 {EVENT_LAYOUT_ACTIONS.map(({ action, label, description }) => <button key={action} type="button" role="menuitem" aria-label={label} title={description} onClick={() => { applyFurnitureLayout(action); setSelectionArrangeOpen(false); }} className="flex min-h-11 flex-col items-start rounded-xl px-3 py-2 text-left hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"><span className="text-xs font-bold text-foreground">{label}</span><span className="text-[10px] text-muted-foreground">{description}</span></button>)}
               </div>}
-            </div>
+            </div>}
             <button type="button" aria-label="Duplicate selected items" onClick={duplicateSelection} className="h-8 shrink-0 rounded-lg border border-border px-3 text-xs font-bold text-foreground hover:bg-muted">Duplicate</button>
             <button type="button" aria-label="Delete selected items" onClick={deleteSelected} className="h-8 shrink-0 rounded-lg border border-destructive/30 px-3 text-xs font-bold text-destructive hover:bg-destructive/10">Delete</button>
           </>
@@ -2073,6 +2274,11 @@ export function EventFloorEditor({
         }}
         onClick={handleCanvasClick}
         onPointerDown={handleCanvasPointerDown}
+        onPointerMove={(event) => {
+          if (!presetPreview || activePointerIdsRef.current.size > 0 || (event.target as Element).closest("[data-event-editor-chrome]")) return;
+          const point = getCanvasWorldPoint(event.clientX, event.clientY);
+          if (point) setPresetPreview((current) => current ? { ...current, point } : null);
+        }}
         onLostPointerCapture={handleCanvasLostPointerCapture}
         onWheelCapture={(e) => {
           // Capture browser pinch/page-zoom gestures even when the pointer is over the asset picker.
@@ -2094,7 +2300,10 @@ export function EventFloorEditor({
             <CanvasAssetPalette
               surface="event"
               activeKey={activeTemplate.assetKey ?? activeTemplate.type}
-              onSelect={(asset) => setActiveTemplate(getEventFurnitureTemplate(asset.key))}
+              onSelect={(asset) => {
+                setActiveTemplate(getEventFurnitureTemplate(asset.key));
+                setPresetPreview(null);
+              }}
               compact
               floating
             />
@@ -2127,8 +2336,17 @@ export function EventFloorEditor({
                         type="button"
                         onClick={(event) => {
                           event.stopPropagation();
-                          setPresetId(preset.id);
-                          addPreset(preset.id);
+                          const rect = canvasRef.current?.getBoundingClientRect();
+                          const point = rect && rect.width > 0 && rect.height > 0
+                            ? getCanvasWorldPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)
+                            : { x: canvasW / 2, y: canvasH / 2 };
+                          setPresetPreview({
+                            id: preset.id,
+                            count: preset.id === "chair-row" ? 6 : 1,
+                            spacing: preset.id === "chair-row" ? 34 : 180,
+                            rotation: 0,
+                            point: point ?? { x: canvasW / 2, y: canvasH / 2 },
+                          });
                           setPresetMenuOpen(false);
                         }}
                         className="flex min-h-12 flex-col items-start rounded-xl px-3 py-2 text-left transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
@@ -2141,34 +2359,169 @@ export function EventFloorEditor({
                 </div>
               )}
             </div>
+            {presetPreview && (
+              <div
+                data-testid="event-preset-controls"
+                className="mt-2 w-[min(25rem,calc(100vw-2rem))] max-w-full rounded-2xl border border-primary/30 bg-card/95 p-3 shadow-xl backdrop-blur-sm"
+                onKeyDown={(event) => {
+                  if (event.key === "Escape") {
+                    event.stopPropagation();
+                    setPresetPreview(null);
+                  }
+                }}
+              >
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <div>
+                    <p className="text-xs font-bold text-foreground">{EVENT_LAYOUT_PRESETS.find((preset) => preset.id === presetPreview.id)?.name} preview</p>
+                    <p className="text-[10px] text-muted-foreground">Move over the map, then click to place. Esc cancels.</p>
+                  </div>
+                  <button type="button" onClick={() => setPresetPreview(null)} aria-label="Cancel preset preview" className="rounded-lg px-2 py-1 text-xs font-bold text-muted-foreground hover:bg-muted">Cancel</button>
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  <label className="text-[10px] font-bold text-muted-foreground">
+                    {presetPreview.id === "chair-row" ? "Chairs" : "Copies"}
+                    <input type="number" aria-label="Preset item count" min="1" max="30" value={presetPreview.count} onChange={(event) => setPresetPreview((current) => current ? { ...current, count: Math.max(1, Math.min(30, Number(event.target.value) || 1)) } : null)} className="mt-1 h-9 w-full rounded-lg border border-border bg-background px-2 text-xs text-foreground" />
+                  </label>
+                  <label className="text-[10px] font-bold text-muted-foreground">
+                    Spacing
+                    <input type="number" aria-label="Preset spacing" min="20" max="240" step="5" value={presetPreview.spacing} onChange={(event) => setPresetPreview((current) => current ? { ...current, spacing: Math.max(20, Math.min(240, Number(event.target.value) || 20)) } : null)} className="mt-1 h-9 w-full rounded-lg border border-border bg-background px-2 text-xs text-foreground" />
+                  </label>
+                  <label className="text-[10px] font-bold text-muted-foreground">
+                    Rotation
+                    <input type="number" aria-label="Preset rotation" min="0" max="345" step="15" value={presetPreview.rotation} onChange={(event) => setPresetPreview((current) => current ? { ...current, rotation: ((Number(event.target.value) || 0) % 360 + 360) % 360 } : null)} className="mt-1 h-9 w-full rounded-lg border border-border bg-background px-2 text-xs text-foreground" />
+                  </label>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
-        {!readOnly && !inspectorViewportCompact && !transforming && !isPanning && !pinchActive && eventSelectionBounds && selectedFurnitureIds.length > 1 && (
+        {!readOnly && objectListOpen && (
+          <section
+            data-event-editor-chrome
+            aria-label="Event objects"
+            className="absolute right-3 top-[4.5rem] z-50 flex max-h-[calc(100%-5.25rem)] w-[min(19rem,calc(100%-1.5rem))] flex-col rounded-2xl border border-border/80 bg-card/95 p-3 shadow-2xl backdrop-blur-sm"
+            onClick={(event) => event.stopPropagation()}
+            onPointerDown={(event) => event.stopPropagation()}
+            onWheel={(event) => event.stopPropagation()}
+          >
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <h3 className="text-xs font-extrabold text-foreground">Event objects</h3>
+              <button type="button" aria-label="Close event objects" onClick={() => setObjectListOpen(false)} className="rounded-lg px-2 py-1 text-xs font-bold text-muted-foreground hover:bg-muted">Close</button>
+            </div>
+            <input type="search" aria-label="Search event objects" placeholder="Search placed items" value={objectQuery} onChange={(event) => setObjectQuery(event.target.value)} className="h-9 w-full rounded-lg border border-border bg-background px-3 text-xs text-foreground outline-none focus-visible:ring-2 focus-visible:ring-primary" />
+            <div className="my-2 flex gap-1" aria-label="Filter event objects">
+              {(["all", "furniture", "labels"] as const).map((filter) => (
+                <button key={filter} type="button" aria-pressed={objectFilter === filter} onClick={() => setObjectFilter(filter)} className={cn("rounded-lg px-2 py-1 text-[10px] font-bold capitalize", objectFilter === filter ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:text-foreground")}>{filter}</button>
+              ))}
+            </div>
+            <div className="min-h-0 flex-1 space-y-1 overflow-y-auto overscroll-contain">
+              {visibleObjectList.map((item) => (
+                <div
+                  key={item.id}
+                  className={cn(
+                    "flex min-h-10 items-center gap-1 rounded-xl border px-1.5 transition-colors focus-within:border-primary focus-within:ring-2 focus-within:ring-primary/20",
+                    editingObject?.id === item.id
+                      ? "border-primary bg-primary/5"
+                      : selectedIds.includes(item.id)
+                        ? "border-primary/70 bg-primary/5"
+                        : "border-transparent hover:border-border/70 hover:bg-muted/70",
+                  )}
+                >
+                  {editingObject?.id === item.id ? (
+                    <>
+                      <input
+                        autoFocus
+                        aria-label={`Rename ${item.kind === "labels" ? "label" : "item"}`}
+                        value={editingObject.value}
+                        onChange={(event) => setEditingObject((current) => current?.id === item.id ? { ...current, value: event.target.value } : current)}
+                        onKeyDown={(event) => {
+                          event.stopPropagation();
+                          if (event.key === "Enter") {
+                            event.preventDefault();
+                            commitObjectRename();
+                          } else if (event.key === "Escape") {
+                            event.preventDefault();
+                            setEditingObject(null);
+                          }
+                        }}
+                        className="h-8 min-w-0 flex-1 bg-transparent px-2 text-xs font-semibold text-foreground outline-none"
+                      />
+                      <button type="button" aria-label={`Save name for ${item.name}`} title="Save name" onClick={commitObjectRename} disabled={!editingObject.value.trim()} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-40">
+                        <Check aria-hidden="true" className="h-3.5 w-3.5" />
+                      </button>
+                      <button type="button" aria-label={`Cancel renaming ${item.name}`} title="Cancel" onClick={() => setEditingObject(null)} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted">
+                        <X aria-hidden="true" className="h-3.5 w-3.5" />
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        aria-label={`Select ${item.name}`}
+                        onClick={() => {
+                          setSelectedIds([item.id]);
+                          setSelectedId(item.id);
+                          setSelectedType(item.kind === "labels" ? "label" : "furniture");
+                          selectTool("select");
+                          const rect = canvasRef.current?.getBoundingClientRect();
+                          if (rect?.width && rect.height) setImmediateViewport({ zoom, pan: clampEventPan({
+                            x: rect.width / 2 - (item.x + item.width / 2) * zoom,
+                            y: rect.height / 2 - (item.y + item.height / 2) * zoom,
+                          }, zoom) });
+                        }}
+                        className="flex min-h-9 min-w-0 flex-1 items-center justify-between py-1.5 pl-1 text-left text-xs"
+                      >
+                        <span className="min-w-0 truncate font-bold text-foreground">{item.name}</span>
+                        <span className="ml-2 shrink-0 text-[9px] capitalize text-muted-foreground">{item.kind === "labels" ? "Label" : "Item"}</span>
+                      </button>
+                      <button
+                        type="button"
+                        aria-label={`Rename ${item.name}`}
+                        title={item.locked ? "Unlock this item to rename it" : `Rename ${item.name}`}
+                        disabled={item.locked}
+                        onClick={() => setEditingObject({ id: item.id, value: item.name, kind: item.kind })}
+                        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-background hover:text-foreground disabled:cursor-not-allowed disabled:opacity-35"
+                      >
+                        <Pencil aria-hidden="true" className="h-3.5 w-3.5" />
+                      </button>
+                    </>
+                  )}
+                </div>
+              ))}
+              {visibleObjectList.length === 0 && <p className="p-2 text-xs text-muted-foreground">No matching items</p>}
+            </div>
+          </section>
+        )}
+
+        {!readOnly && !inspectorViewportCompact && !transforming && !isPanning && !pinchActive && selectedIds.length > 1 && (
           <div
             data-testid="event-layout-actions"
             data-event-editor-chrome
             aria-label="Multiple event items selected"
             className="pointer-events-none absolute z-50 max-w-[calc(100%-1.5rem)]"
             style={{
-              left: Math.max(12, eventSelectionBounds.x * zoom + pan.x),
-              top: Math.max(12, eventSelectionBounds.y * zoom + pan.y - 56),
+              left: Math.max(12, (eventSelectionBounds?.x ?? 12) * zoom + pan.x),
+              top: Math.max(12, (eventSelectionBounds?.y ?? 68) * zoom + pan.y - 56),
             }}
             onClick={(event) => event.stopPropagation()}
             onMouseDown={(event) => event.stopPropagation()}
           >
             <div className="relative pointer-events-auto flex max-w-full flex-wrap items-center gap-1.5 rounded-2xl border border-primary/25 bg-card/95 p-2 shadow-xl backdrop-blur-sm">
-              <span className="shrink-0 px-1 text-[10px] font-extrabold text-foreground">{selectedFurnitureIds.length} items selected</span>
+              <span className="shrink-0 px-1 text-[10px] font-extrabold text-foreground">{selectedIds.length} items selected</span>
+              {selectionAllFurniture && (
               <button
                 type="button"
                 aria-label="Rotate selected items"
                 title="Rotate selected items 15°"
-                onClick={rotateSelection}
+                onClick={rotateClockwise}
                 className="flex min-h-10 shrink-0 items-center gap-1.5 rounded-xl border border-border/70 px-3 text-[10px] font-bold text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
               >
                 <RotateCw className="h-3.5 w-3.5" aria-hidden="true" />
                 Rotate
               </button>
+              )}
+              {selectionAllFurniture && selectedFurnitureIds.length > 1 && (
               <button
                 type="button"
                 aria-label={selectionIsOneGroup ? "Ungroup selected items" : "Group selected items"}
@@ -2179,6 +2532,8 @@ export function EventFloorEditor({
                 {selectionIsOneGroup ? <Ungroup className="h-3.5 w-3.5" aria-hidden="true" /> : <Group className="h-3.5 w-3.5" aria-hidden="true" />}
                 {selectionIsOneGroup ? "Ungroup" : "Group"}
               </button>
+              )}
+              {selectionAllFurniture && selectedFurnitureIds.length > 1 && (
               <button
                 type="button"
                 aria-label="Arrange selected items"
@@ -2192,6 +2547,7 @@ export function EventFloorEditor({
                 Arrange
                 {selectionArrangeOpen ? <ChevronUp className="h-3.5 w-3.5" aria-hidden="true" /> : <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />}
               </button>
+              )}
               <button
                 type="button"
                 aria-label="Duplicate selected items"
@@ -2345,6 +2701,20 @@ export function EventFloorEditor({
             />
           ))}
 
+          {marquee && (
+            <div
+              data-testid="event-selection-marquee"
+              aria-hidden="true"
+              className="pointer-events-none absolute z-40 border border-primary bg-primary/15"
+              style={{
+                left: Math.min(marquee.x, marquee.x + marquee.width),
+                top: Math.min(marquee.y, marquee.y + marquee.height),
+                width: Math.abs(marquee.width),
+                height: Math.abs(marquee.height),
+              }}
+            />
+          )}
+
           {/* Event Furniture (editable) */}
           {eventFurniture.map((f, index) => {
             const resizeMetrics = transformControlMetrics(f.width, f.height, zoom);
@@ -2477,6 +2847,15 @@ export function EventFloorEditor({
               {l.text}
             </div>
           ))}
+          {presetPreview && (
+            <div data-testid="event-preset-preview" aria-label="Preset placement preview" className="pointer-events-none absolute inset-0 z-40">
+              {previewItems.map((item) => (
+                <div key={item.id} className="absolute rounded border-2 border-dashed border-primary bg-card/45 opacity-65" style={{ left: item.x, top: item.y, width: item.width, height: item.height, transform: `rotate(${item.rotation || 0}deg)` }}>
+                  <EventAssetVisual type={resolveCanvasAssetKey(item) ?? item.type} label={item.name} className="absolute inset-1 h-[calc(100%-0.5rem)] w-[calc(100%-0.5rem)]" />
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         {!readOnly && !inspectorViewportCompact && !transforming && !isPanning && !pinchActive && selectedLabel && selectedIds.length === 1 && (
@@ -2485,7 +2864,7 @@ export function EventFloorEditor({
             data-event-editor-chrome
             aria-label="Selected event label actions"
             className="pointer-events-none absolute z-50 max-w-[calc(100%-1.5rem)]"
-            style={getSelectedActionsPosition(selectedLabel.x, selectedLabel.y, selectedLabel.y + (selectedLabel.fontSize || 14), 280)}
+            style={getSelectedActionsPosition(selectedLabel.x, selectedLabel.y, selectedLabel.y + (selectedLabel.fontSize || 14), 360)}
             onClick={(event) => event.stopPropagation()}
             onPointerDown={(event) => event.stopPropagation()}
             onMouseDown={(event) => event.stopPropagation()}
@@ -2511,17 +2890,28 @@ export function EventFloorEditor({
                 {selectedLabel.locked ? <Unlock className="h-3.5 w-3.5" aria-hidden="true" /> : <Lock className="h-3.5 w-3.5" aria-hidden="true" />}
                 {selectedLabel.locked ? "Unlock" : "Lock"}
               </button>
+              <button
+                type="button"
+                aria-label="Delete selected label"
+                title="Delete selected label (Del)"
+                disabled={selectedLabel.locked}
+                onClick={deleteSelected}
+                className="flex min-h-10 shrink-0 items-center gap-1.5 rounded-xl border border-destructive/30 px-3 text-[10px] font-bold text-destructive transition-colors hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                Delete
+              </button>
             </div>
           </div>
         )}
 
-        {!readOnly && !inspectorViewportCompact && !transforming && !isPanning && !pinchActive && eventSelectionBounds && selectedFurnitureIds.length === 1 && (
+        {!readOnly && !inspectorViewportCompact && !transforming && !isPanning && !pinchActive && eventSelectionBounds && selectedIds.length === 1 && (
           <div
             data-testid="event-single-item-actions"
             data-event-editor-chrome
             aria-label="Selected event item actions"
             className="pointer-events-none absolute z-50 max-w-[calc(100%-1.5rem)]"
-            style={getSelectedActionsPosition(eventSelectionBounds.x, eventSelectionBounds.y, eventSelectionBounds.y + eventSelectionBounds.height, 360)}
+            style={getSelectedActionsPosition(eventSelectionBounds.x, eventSelectionBounds.y, eventSelectionBounds.y + eventSelectionBounds.height, 340)}
             onClick={(event) => event.stopPropagation()}
             onPointerDown={(event) => event.stopPropagation()}
             onMouseDown={(event) => event.stopPropagation()}
@@ -2529,35 +2919,55 @@ export function EventFloorEditor({
             <div className="pointer-events-auto flex max-w-full items-center gap-1.5 rounded-2xl border border-primary/25 bg-card/95 p-2 shadow-xl backdrop-blur-sm">
               <span className="shrink-0 px-1 text-[10px] font-extrabold text-foreground">1 item selected</span>
               {!selectedFurniture?.locked && (
-                <button
-                  type="button"
-                  aria-label="Rotate selected item"
-                  title="Rotate selected item 15°"
-                  onClick={rotateSelection}
-                  className="flex min-h-10 shrink-0 items-center gap-1.5 rounded-xl border border-border/70 px-3 text-[10px] font-bold text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-                >
-                  <RotateCw className="h-3.5 w-3.5" aria-hidden="true" />
-                  Rotate
-                </button>
+                <>
+                  <button
+                    type="button"
+                    aria-label="Rotate selected item counterclockwise"
+                    title="Rotate counterclockwise by 15°"
+                    onClick={() => rotateSelection("counterclockwise")}
+                    className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-border/70 text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                  >
+                    <RotateCcw className="h-4 w-4" aria-hidden="true" />
+                  </button>
+                  <button
+                    type="button"
+                    aria-label="Rotate selected item"
+                    aria-description="Rotate clockwise by 15 degrees"
+                    title="Rotate clockwise by 15°"
+                    onClick={rotateClockwise}
+                    className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-border/70 text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                  >
+                    <RotateCw className="h-4 w-4" aria-hidden="true" />
+                  </button>
+                </>
               )}
               <button
                 type="button"
                 aria-label="Open item details"
                 title="Open item details"
                 onClick={(event) => openInspectorFrom(event.currentTarget)}
-                className="flex min-h-10 shrink-0 items-center gap-1.5 rounded-xl border border-border/70 px-3 text-[10px] font-bold text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-border/70 text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
               >
-                Details
+                <SlidersHorizontal className="h-4 w-4" aria-hidden="true" />
               </button>
               <button
                 type="button"
                 aria-label={selectedFurniture?.locked ? "Unlock selected item" : "Lock selected item"}
                 title={selectedFurniture?.locked ? "Unlock selected item" : "Lock selected item"}
                 onClick={toggleSelectedLock}
-                className="flex min-h-10 shrink-0 items-center gap-1.5 rounded-xl border border-border/70 px-3 text-[10px] font-bold text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-border/70 text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
               >
-                {selectedFurniture?.locked ? <Unlock className="h-3.5 w-3.5" aria-hidden="true" /> : <Lock className="h-3.5 w-3.5" aria-hidden="true" />}
-                {selectedFurniture?.locked ? "Unlock" : "Lock"}
+                {selectedFurniture?.locked ? <Unlock className="h-4 w-4" aria-hidden="true" /> : <Lock className="h-4 w-4" aria-hidden="true" />}
+              </button>
+              <button
+                type="button"
+                aria-label="Delete selected item"
+                title="Delete selected item (Del)"
+                disabled={selectedFurniture?.locked}
+                onClick={deleteSelected}
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-destructive/30 text-destructive transition-colors hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <Trash2 className="h-4 w-4" aria-hidden="true" />
               </button>
             </div>
           </div>
@@ -2581,7 +2991,12 @@ export function EventFloorEditor({
       </div>
       {!readOnly && !inspectorViewportCompact && (
         <aside data-testid="event-item-inspector-rail" aria-label="Event item inspector rail" className="flex w-[22rem] shrink-0 flex-col overflow-y-auto border-l border-border bg-card p-4">
-          {inspectorPanel}
+          {selectedIds.length > 1 ? (
+            <div className="rounded-2xl border border-primary/20 bg-primary/5 p-4">
+              <h3 className="text-sm font-extrabold text-foreground">Bulk selection</h3>
+              <p className="mt-1 text-xs text-muted-foreground">{selectedIds.length} event objects selected. Drag a selected item to move them together, or use the selection actions on the map.</p>
+            </div>
+          ) : inspectorPanel}
         </aside>
       )}
       </div>
@@ -2622,7 +3037,7 @@ export function EventFloorEditor({
             {readOnly && <span className="rounded-full bg-muted px-2 py-0.5 font-bold text-foreground">Published map locked</span>}
             {readOnly
               ? "Published base map and submitted additions"
-              : "Drag to move · Del to delete · Wheel to pan · Ctrl/Cmd + wheel to zoom · Space + drag"}
+              : "Hold V: Select · T: Label · Drag empty map: select · Del: delete · Space + drag: pan"}
           </span>
         </div>
       </div>
