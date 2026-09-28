@@ -58,7 +58,8 @@ export function EventLayoutIssues({ warnings, onFocusItems, disabled = false }: 
     <div
       data-testid="event-layout-warnings"
       data-event-editor-chrome
-      className="relative z-40 h-9 shrink-0 border-b border-border/70 bg-card/95 px-3 sm:px-4"
+      data-event-layout-issues={panelId}
+      className="relative z-50 h-9 shrink-0 border-b border-border/70 bg-card/95 px-3 sm:px-4"
       onClick={(event) => event.stopPropagation()}
       onPointerDown={(event) => event.stopPropagation()}
     >
@@ -80,7 +81,7 @@ export function EventLayoutIssues({ warnings, onFocusItems, disabled = false }: 
           onClick={() => setOpen((current) => !current)}
           className={cn("flex h-7 shrink-0 items-center gap-1 rounded-lg px-2 font-extrabold text-primary transition-colors hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-50", open && "bg-primary/10")}
         >
-          {count > 0 ? "Review" : "Details"}
+          {count > 0 ? "Review" : "View checks"}
           <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", open && "rotate-180")} aria-hidden="true" />
         </button>
       </div>
@@ -91,12 +92,21 @@ export function EventLayoutIssues({ warnings, onFocusItems, disabled = false }: 
           role="region"
           aria-label="Layout checks"
           data-event-layout-issues={panelId}
-          className="absolute left-3 right-3 top-[calc(100%+0.5rem)] max-h-64 overflow-y-auto rounded-2xl border border-border/80 bg-card p-2 shadow-2xl sm:left-4 sm:right-auto sm:w-[min(34rem,calc(100vw-2rem))]"
+          className="absolute left-3 right-3 top-[calc(100%+0.5rem)] max-h-64 overflow-y-auto rounded-2xl border border-border/80 bg-card p-3 shadow-2xl sm:left-auto sm:right-4 sm:w-[min(24rem,calc(100vw-2rem))]"
           onPointerDown={(event) => event.stopPropagation()}
           onWheel={(event) => event.stopPropagation()}
         >
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <p className="text-xs font-extrabold text-foreground">Layout checks</p>
+            <button type="button" aria-label="Close layout checks" onClick={() => { setOpen(false); buttonRef.current?.focus(); }} className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
+              <X className="h-3.5 w-3.5" aria-hidden="true" />
+            </button>
+          </div>
           {count === 0 ? (
-            <p className="px-2 py-2 text-[11px] text-muted-foreground">No placement checks need attention on this map.</p>
+            <div className="flex items-start gap-2 rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-3 py-2.5 text-emerald-700">
+              <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+              <p className="text-[11px] leading-4">No placement checks need attention on this map.</p>
+            </div>
           ) : (
             <div className="space-y-1.5">
               {warnings.map((warning, index) => (
@@ -123,9 +133,6 @@ export function EventLayoutIssues({ warnings, onFocusItems, disabled = false }: 
               ))}
             </div>
           )}
-          <button type="button" aria-label="Close layout checks" onClick={() => { setOpen(false); buttonRef.current?.focus(); }} className="absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
-            <X className="h-3.5 w-3.5" aria-hidden="true" />
-          </button>
         </div>
       )}
     </div>
