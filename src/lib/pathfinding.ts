@@ -40,6 +40,17 @@ export interface GraphPath {
   waypoints: { x: number; y: number }[];
   /** Human-readable step-by-step directions */
   steps: string[];
+  /** Exact authored edge chosen for each routed hop. This is presentation and
+   * diagnostics metadata; it does not alter routing cost or node order. */
+  edgeTraversals?: GraphPathEdgeTraversal[];
+}
+
+export interface GraphPathEdgeTraversal {
+  edgeId?: string;
+  fromNodeId: string;
+  toNodeId: string;
+  reversed: boolean;
+  bendPoints?: { x: number; y: number }[];
 }
 
 /**
@@ -77,6 +88,7 @@ export function truncateGraphPathAtNode(
   return {
     ...path,
     nodeIds,
+    edgeTraversals: path.edgeTraversals?.slice(0, terminalIndex),
     waypoints,
     distanceM,
     minutes: distanceM > 0 ? Math.max(1, Math.round(distanceM / 80)) : 0,
@@ -971,7 +983,14 @@ function runPreparedNavigationRoute(
       }
       const distanceM = Math.round(totalUnits * M_PER_UNIT);
       const minutes = Math.max(1, Math.round(distanceM / 80));
-      return { nodeIds: pathIds, distanceM, minutes, waypoints, steps };
+      const edgeTraversals = arcs.map((arc, index) => ({
+        ...(arc.edge ? { edgeId: arc.edge.id } : {}),
+        fromNodeId: pathIds[index],
+        toNodeId: pathIds[index + 1],
+        reversed: arc.reversed,
+        ...(arc.edge?.bendPoints ? { bendPoints: arc.reversed ? [...arc.edge.bendPoints].reverse() : [...arc.edge.bendPoints] } : {}),
+      }));
+      return { nodeIds: pathIds, distanceM, minutes, waypoints, steps, edgeTraversals };
     }
 
     open.delete(current.id);

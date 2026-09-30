@@ -20,7 +20,9 @@ function listQuery(rows: unknown[]) {
   const q: Record<string, unknown> = {};
   q.order = vi.fn(() => q);
   q.eq = vi.fn(() => q);
+  q.in = vi.fn(() => q);
   q.gte = vi.fn(() => q);
+  q.gt = vi.fn(() => q);
   q.lte = vi.fn(() => q);
   q.limit = vi.fn(() => q);
   q.then = (resolve: (value: unknown) => unknown) =>
@@ -110,6 +112,9 @@ describe("dashboard service", () => {
 
   it("resolves actor display names for recent activity", async () => {
     const from = vi.fn((table: string) => {
+      if (table === "admin_activity_preferences") {
+        return { select: vi.fn(() => ({ eq: vi.fn(() => ({ maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }) })) })) };
+      }
       if (table === "activity_logs") {
         return {
           select: vi.fn(() =>
@@ -134,12 +139,16 @@ describe("dashboard service", () => {
         ),
       };
     });
-    vi.mocked(getSupabase).mockReturnValue({ from } as never);
+    vi.mocked(getSupabase).mockReturnValue({
+      from,
+      auth: { getUser: vi.fn().mockResolvedValue({ data: { user: { id: "admin-1" } }, error: null }) },
+    } as never);
 
     const items = await getRecentActivity(1);
 
     expect(items).toHaveLength(1);
     expect(items[0].actorName).toBe("Maria Santos");
     expect(items[0].action).toBe("report.resolved");
+    expect(items[0].formatted.title).toBe("Report resolved");
   });
 });

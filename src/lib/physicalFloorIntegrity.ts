@@ -31,6 +31,247 @@ export function physicalSaveErrorMessage(error: unknown): string {
   return detail;
 }
 
+const PERSISTED_FLOOR_ELEMENT_COLLECTIONS = [
+  "rooms", "paths", "walls", "doors", "windows", "furniture", "stairs", "ramps", "elevators", "labels",
+] as const;
+
+type PersistedFloorElementCollection = typeof PERSISTED_FLOOR_ELEMENT_COLLECTIONS[number] | "eventOverlays";
+
+export interface RepairedFloorElementIdentity {
+  collection: PersistedFloorElementCollection;
+  scope: "Floor" | "Campus";
+  oldId: string;
+  newId: string;
+  name?: string;
+  buildingId: string;
+  buildingName: string;
+  floorId: string;
+  floorLabel: string;
+}
+
+const PERSISTED_ELEMENT_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+/**
+ * Repair malformed legacy map-element IDs once, before serialization. Floor
+ * physical IDs are changed together with known Room/Door/Wall/path and
+ * navigation references. Legacy Event Organizer IDs are also repaired while
+ * retaining the complete event payload. Navigation node and edge IDs are kept.
+ */
+export function repairInvalidFloorMapElementIds(campus: Campus): {
+  campus: Campus;
+  repairs: RepairedFloorElementIdentity[];
+} {
+  type ElementRecord = {
+    collection: PersistedFloorElementCollection;
+    scope: "Floor" | "Campus";
+    item: Record<string, unknown>;
+    oldId: string;
+    buildingId: string;
+    buildingName: string;
+    floorId: string;
+    floorLabel: string;
+  };
+
+  const records: ElementRecord[] = [];
+  for (const building of campus.buildings ?? []) {
+    for (const floor of building.floors ?? []) {
+      for (const collection of PERSISTED_FLOOR_ELEMENT_COLLECTIONS) {
+        const items = (floor as unknown as Record<string, unknown>)[collection];
+        if (!Array.isArray(items)) continue;
+        for (const rawItem of items) {
+          if (!rawItem || typeof rawItem !== "object") continue;
+          const item = rawItem as Record<string, unknown>;
+          const oldId = typeof item.id === "string" ? item.id : "";
+          if (PERSISTED_ELEMENT_UUID.test(oldId)) continue;
+          records.push({
+            collection,
+            scope: "Floor",
+            item,
+            oldId,
+            buildingId: building.id,
+            buildingName: building.name || building.code || building.id,
+            floorId: floor.id,
+            floorLabel: floor.label || floor.id,
+          });
+        }
+      }
+    }
+  }
+  const buildingsById = new Map((campus.buildings ?? []).map((building) => [building.id, building]));
+  for (const overlay of campus.eventOverlays ?? []) {
+    const oldId = typeof overlay.id === "string" ? overlay.id : "";
+    if (PERSISTED_ELEMENT_UUID.test(oldId)) continue;
+    const building = overlay.locationRef?.buildingId
+      ? buildingsById.get(overlay.locationRef.buildingId)
+      : undefined;
+    records.push({
+      collection: "eventOverlays",
+      scope: "Campus",
+      item: overlay as unknown as Record<string, unknown>,
+      oldId,
+      buildingId: building?.id ?? "",
+      buildingName: building?.name || building?.code || building?.id || "Campus",
+      floorId: "",
+      floorLabel: "",
+    });
+  }
+  if (records.length === 0) return { campus, repairs: [] };
+
+  const byInvalidId = new Map<string, ElementRecord[]>();
+  for (const record of records) {
+    if (!record.oldId) continue;
+    const matches = byInvalidId.get(record.oldId) ?? [];
+    matches.push(record);
+    byInvalidId.set(record.oldId, matches);
+  }
+  const ambiguous = [...byInvalidId.entries()].filter(([, matches]) => matches.length > 1);
+  if (ambiguous.length > 0) {
+    const details = ambiguous.flatMap(([id, matches]) => matches.map((record) => {
+      const itemName = [record.item.name, record.item.title, record.item.label, record.item.text]
+        .find((value): value is string => typeof value === "string" && value.trim().length > 0);
+      const name = itemName ? ` '${itemName.trim()}'` : "";
+      return `${record.collection.replace(/s$/, "")}${name} on ${record.floorLabel} in ${record.buildingName} (ID '${id}')`;
+    }));
+    throw new Error(`Map element IDs cannot be repaired safely because an invalid ID is shared by multiple objects: ${details.join("; ")}.`);
+  }
+
+  const reservedIds = new Set<string>();
+  const reserveItems = (items: unknown) => {
+    if (!Array.isArray(items)) return;
+    for (const item of items) {
+      if (item && typeof item === "object" && typeof (item as Record<string, unknown>).id === "string") {
+        reservedIds.add((item as Record<string, string>).id);
+      }
+    }
+  };
+  for (const building of campus.buildings ?? []) {
+    reservedIds.add(building.id);
+    for (const floor of building.floors ?? []) {
+      reservedIds.add(floor.id);
+      for (const collection of PERSISTED_FLOOR_ELEMENT_COLLECTIONS) {
+        reserveItems((floor as unknown as Record<string, unknown>)[collection]);
+      }
+    }
+  }
+  for (const collection of ["markers", "paths", "routes", "accessibilityFeatures", "assemblyPoints", "decorAssets", "eventOverlays"] as const) {
+    reserveItems((campus as unknown as Record<string, unknown>)[collection]);
+  }
+  const idRemap = new Map<string, string>();
+  const repairedIdsByItem = new Map<ElementRecord["item"], string>();
+  const repairs: RepairedFloorElementIdentity[] = records.map((record) => {
+    let newId = "";
+    do {
+      if (typeof globalThis.crypto?.randomUUID !== "function") {
+        throw new Error("A secure UUID generator is unavailable; Floor object identity repair was not applied.");
+      }
+      newId = globalThis.crypto.randomUUID();
+    } while (reservedIds.has(newId));
+    reservedIds.add(newId);
+    if (record.oldId) idRemap.set(record.oldId, newId);
+    repairedIdsByItem.set(record.item, newId);
+    const itemName = [record.item.name, record.item.title, record.item.label, record.item.text]
+      .find((value): value is string => typeof value === "string" && value.trim().length > 0);
+    return {
+      collection: record.collection,
+      scope: record.scope,
+      oldId: record.oldId,
+      newId,
+      name: itemName?.trim(),
+      buildingId: record.buildingId,
+      buildingName: record.buildingName,
+      floorId: record.floorId,
+      floorLabel: record.floorLabel,
+    };
+  });
+  const remap = (value: unknown) => typeof value === "string" ? idRemap.get(value) ?? value : value;
+
+  const buildings = (campus.buildings ?? []).map((building) => ({
+    ...building,
+    floors: (building.floors ?? []).map((floor) => {
+      const updated = { ...floor } as typeof floor;
+      for (const collection of PERSISTED_FLOOR_ELEMENT_COLLECTIONS) {
+        const items = (floor as unknown as Record<string, unknown>)[collection];
+        if (!Array.isArray(items)) continue;
+        const mapped = items.map((rawItem) => {
+          if (!rawItem || typeof rawItem !== "object") return rawItem;
+          const item = rawItem as Record<string, unknown>;
+          const repairedId = repairedIdsByItem.get(item);
+          const next = { ...item, ...(repairedId ? { id: repairedId } : {}) };
+          if (collection === "rooms") {
+            if (typeof item.accessDoorId === "string" && idRemap.has(item.accessDoorId)) next.accessDoorId = remap(item.accessDoorId);
+            if (Array.isArray(item.accessDoorIds) && item.accessDoorIds.some((id) => typeof id === "string" && idRemap.has(id))) {
+              next.accessDoorIds = item.accessDoorIds.map(remap);
+            }
+          }
+          if ((collection === "doors" || collection === "windows") && typeof item.wallId === "string" && idRemap.has(item.wallId)) {
+            next.wallId = remap(item.wallId);
+          }
+          if (collection === "walls") {
+            for (const key of ["startAnchor", "endAnchor"] as const) {
+              const anchor = item[key];
+              if (anchor && typeof anchor === "object") {
+                const value = anchor as Record<string, unknown>;
+                if (typeof value.roomId === "string" && idRemap.has(value.roomId)) next[key] = { ...value, roomId: remap(value.roomId) };
+              }
+            }
+          }
+          return next;
+        });
+        (updated as unknown as Record<string, unknown>)[collection] = mapped;
+      }
+      return updated;
+    }),
+  }));
+
+  const remapNodeReference = (node: Campus["navNodes"] extends (infer T)[] | undefined ? T : never) => {
+    const updated = { ...node } as typeof node;
+    let changed = false;
+    for (const field of ["roomId", "doorId", "stairId", "rampId", "elevatorId"] as const) {
+      const value = node[field];
+      if (typeof value === "string" && idRemap.has(value)) {
+        (updated as Record<string, unknown>)[field] = remap(value);
+        changed = true;
+      }
+    }
+    if (node.generatedFromPathVertices?.some((vertex) => idRemap.has(vertex.pathId))) {
+      updated.generatedFromPathVertices = node.generatedFromPathVertices.map((vertex) => ({ ...vertex, pathId: remap(vertex.pathId) as string }));
+      changed = true;
+    }
+    return changed ? updated : node;
+  };
+  const navNodes = campus.navNodes?.map(remapNodeReference);
+  const navEdges = campus.navEdges?.map((edge) => edge.generatedFromPathIds?.some((id) => idRemap.has(id))
+    ? { ...edge, generatedFromPathIds: edge.generatedFromPathIds.map((id) => remap(id) as string) }
+    : edge);
+  const eventOverlays = campus.eventOverlays?.map((overlay) => {
+    const normalizedId = repairedIdsByItem.get(overlay as unknown as Record<string, unknown>);
+    let changed = Boolean(normalizedId);
+    const locationRef = overlay.locationRef?.roomId && idRemap.has(overlay.locationRef.roomId)
+      ? { ...overlay.locationRef, roomId: remap(overlay.locationRef.roomId) as string }
+      : overlay.locationRef;
+    if (locationRef !== overlay.locationRef) changed = true;
+    const locations = overlay.locations?.map((location) => {
+      const nextRef = location.locationRef.roomId && idRemap.has(location.locationRef.roomId)
+        ? { ...location.locationRef, roomId: remap(location.locationRef.roomId) as string }
+        : location.locationRef;
+      if (nextRef === location.locationRef) return location;
+      changed = true;
+      return { ...location, locationRef: nextRef };
+    });
+    return changed ? {
+      ...overlay,
+      ...(normalizedId ? { id: normalizedId } : {}),
+      ...(locationRef ? { locationRef } : {}),
+      ...(locations ? { locations } : {}),
+    } : overlay;
+  });
+
+  return {
+    campus: { ...campus, buildings, ...(navNodes ? { navNodes } : {}), ...(navEdges ? { navEdges } : {}), ...(eventOverlays ? { eventOverlays } : {}) },
+    repairs,
+  };
+}
+
 export const PHYSICAL_FLOOR_COLLECTIONS = [
   "rooms", "paths", "walls", "doors", "windows", "furniture", "stairs", "ramps", "elevators", "labels",
   "exteriorZones", "entranceSteps", "entranceRamps", "extensions",

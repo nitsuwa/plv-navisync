@@ -24,7 +24,7 @@ describe("StudentPreview", () => {
   it("renders the read-only student surface and publish controls", () => {
     render(<StudentPreview campus={campus} validationIssues={[]} onBack={vi.fn()} onPublish={vi.fn().mockResolvedValue(undefined)} />);
     expect(screen.getByTestId("student-map")).toHaveTextContent("Preview Campus");
-    expect(screen.getByText("Student Preview")).toBeInTheDocument();
+    expect(screen.getByText("Draft Preview")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Publish" })).toBeInTheDocument();
   });
 

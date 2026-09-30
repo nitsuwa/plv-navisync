@@ -80,6 +80,7 @@ export interface ValidationIssue {
     | "no_routes"
     | "duplicate_code"
     | "canvas_not_configured"
+    | "publish_readiness"
     | "room_out_of_bounds"
     | "missing_room_name"
     | "building_entrance_disconnected"
@@ -230,6 +231,7 @@ const ISSUE_CATEGORY: Record<string, string> = {
   no_routes: "navigation",
   duplicate_code: "missing",
   canvas_not_configured: "missing",
+  publish_readiness: "missing",
   room_out_of_bounds: "rooms",
   missing_room_name: "rooms",
   room_no_type: "rooms",

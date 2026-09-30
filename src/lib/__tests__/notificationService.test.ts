@@ -57,4 +57,11 @@ describe("notificationService — admin logs", () => {
     markLogsSeen();
     expect(countUnseenLogs([old, fresh])).toBe(0);
   });
+
+  it("keeps the Admin unread marker separate between administrator accounts", () => {
+    const row = { created_at: new Date(Date.now() - 60_000).toISOString() };
+    markLogsSeen("admin-a");
+    expect(countUnseenLogs([row], "admin-a")).toBe(0);
+    expect(countUnseenLogs([row], "admin-b")).toBe(1);
+  });
 });

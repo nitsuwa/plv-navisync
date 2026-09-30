@@ -3,10 +3,21 @@ import { DEFAULT_FEATURES } from "../components/map-builder/constants";
 import type { Campus, CampusBuilding } from "../components/map-builder/types";
 import type { Json, Tables, TablesInsert, TablesUpdate } from "../types/database.generated";
 import { serializeCampusStructure } from "./campusStructureService";
+import { validateCampusForPublish } from "../lib/campusPublication";
 
 export type CampusRow = Tables<"campuses">;
 export type CampusVersionRow = Tables<"campus_versions">;
-export type CampusLifecycleStatus = "draft" | "published" | "unpublished" | "archived";
+export type CampusLifecycleStatus = "draft" | "coming_soon" | "published" | "unpublished" | "archived";
+export interface ComingSoonCampusSummary {
+  id: string;
+  name: string;
+  code: string;
+  description: string | null;
+  address: string | null;
+  city: string | null;
+  province: string | null;
+  theme_color: string;
+}
 type CampusPreviewBuildingRow = Pick<
   Tables<"buildings">,
   "id" | "name" | "code" | "category" | "description" | "x" | "y" | "width" | "height" | "rotation" | "is_visible" | "metadata" | "archived_at"
@@ -114,7 +125,43 @@ export function normalizeCampusCode(raw: string): string {
 export function deriveCampusLifecycleStatus(row: CampusRow): CampusLifecycleStatus {
   if (row.status === "archived") return "archived";
   if (row.status === "published") return "published";
+  if (row.status === "coming_soon") return "coming_soon";
   return row.latest_published_version_id ? "unpublished" : "draft";
+}
+
+/** Build a student-safe campus shell from the allowlisted Coming Soon RPC fields. */
+export function comingSoonCampusFromSummary(row: ComingSoonCampusSummary): Campus {
+  return {
+    id: row.id,
+    name: row.name,
+    code: row.code,
+    description: row.description ?? "",
+    address: row.address ?? "",
+    city: row.city ?? "",
+    province: row.province ?? "",
+    postalCode: "",
+    themeColor: row.theme_color,
+    status: "active",
+    publishStatus: "draft",
+    visibleToStudents: true,
+    features: { ...DEFAULT_FEATURES },
+    canvasW: 900,
+    canvasH: 680,
+    settings: { accessibility: false, emergency: false, eventLayer: false, gps: false },
+    buildings: [],
+    markers: [],
+    paths: [],
+    navNodes: [],
+    navEdges: [],
+    routes: [],
+    accessibilityFeatures: [],
+    assemblyPoints: [],
+    eventOverlays: [],
+    decorAssets: [],
+    createdAt: "",
+    updatedAt: "",
+    lifecycleStatus: "coming_soon",
+  };
 }
 
 /**
@@ -282,7 +329,7 @@ export async function toEditorCampus(row: CampusListRow, previewSummary?: Campus
     themeColor: row.theme_color,
     status: row.status === "archived" ? "archived" : "active",
     publishStatus: row.status === "published" ? "published" : "draft",
-    visibleToStudents: row.status === "published",
+    visibleToStudents: row.status === "published" || row.status === "coming_soon",
     features: { ...DEFAULT_FEATURES },
     canvasW: row.canvas_width,
     canvasH: row.canvas_height,
@@ -449,6 +496,13 @@ export async function listPublishedCampusSnapshots(): Promise<Campus[]> {
   return result;
 }
 
+/** Return only allowlisted announcement metadata for student-visible upcoming campuses. */
+export async function listComingSoonCampuses(): Promise<Campus[]> {
+  const { data, error } = await getSupabase().rpc("list_coming_soon_campuses");
+  assertOk(error, "list coming soon campuses");
+  return (data ?? []).map((row) => comingSoonCampusFromSummary(row as ComingSoonCampusSummary));
+}
+
 /** Choose a usable campus without assuming the database contains one. */
 export function selectActiveCampus(campuses: Campus[], preferredId?: string): Campus | null {
   const available = campuses.filter((campus) => campus.status !== "archived");
@@ -507,11 +561,11 @@ export async function getCampusById(id: string): Promise<Campus | null> {
   return data ? toEditorCampus(data) : null;
 }
 
-export async function createCampus(input: CampusCreateInput): Promise<Campus> {
+export async function createCampus(input: CampusCreateInput, initialStatus: "draft" | "coming_soon" = "draft"): Promise<Campus> {
   const userId = await requireCurrentUserId();
   const code = normalizeCampusCode(input.code);
   const { data, error } = await getSupabase().from("campuses").insert({
-    ...input, code, status: "draft", created_by: userId, updated_by: userId,
+    ...input, code, status: initialStatus, created_by: userId, updated_by: userId,
   }).select("*").single();
   assertOk(error, "create campus");
   return toEditorCampus(data!);
@@ -550,6 +604,10 @@ export function restoreCampus(id: string, expectedUpdatedAt: string): Promise<Ca
 }
 
 export function unpublishCampus(id: string, expectedUpdatedAt: string): Promise<Campus> {
+  return updateWithVersion(id, expectedUpdatedAt, { status: "draft", archived_at: null });
+}
+
+export function hideComingSoonCampus(id: string, expectedUpdatedAt: string): Promise<Campus> {
   return updateWithVersion(id, expectedUpdatedAt, { status: "draft", archived_at: null });
 }
 
@@ -816,8 +874,12 @@ export async function publishCampusVersion(
   campus: Campus,
   validation: { errors: number; warnings: number; passed: number; total: number },
 ): Promise<Campus> {
-  if (validation.errors > 0) {
-    throw new Error("Fix the blocking validation issues before publishing this campus.");
+  const readiness = validateCampusForPublish(campus);
+  if (!readiness.valid || validation.errors > 0) {
+    const reasons = readiness.errors.map((issue) => issue.message);
+    throw new Error(reasons.length
+      ? `Campus isn't ready to publish yet. ${reasons.join(" ")}`
+      : "Fix the blocking validation issues before publishing this campus.");
   }
   const userId = await requireCurrentUserId();
   const existingVersions = await listCampusVersions(campus.id);
@@ -827,8 +889,10 @@ export async function publishCampusVersion(
     campus: JSON.parse(JSON.stringify(campus)) as Campus,
     structure: serializeCampusStructure(campus),
   } as unknown as Json;
+  const warnings = Math.max(validation.warnings, readiness.warnings.length);
+  const passed = validation.passed;
   const score = validation.total > 0
-    ? Math.round((validation.passed / validation.total) * 100)
+    ? Math.round((passed / validation.total) * 100)
     : 100;
   const { data: version, error: versionError } = await getSupabase()
     .from("campus_versions")
@@ -846,7 +910,7 @@ export async function publishCampusVersion(
   assertOk(versionError, "create campus publish version");
   if (!version?.id) throw new Error("The publish version was not created.");
 
-  const status = validation.warnings > 0 ? "warning" : "passed";
+  const status = warnings > 0 ? "warning" : "passed";
   const { error: validationError } = await getSupabase()
     .from("validation_runs")
     .insert({
@@ -855,8 +919,8 @@ export async function publishCampusVersion(
       status,
       score,
       errors_count: validation.errors,
-      warnings_count: validation.warnings,
-      passed_count: validation.passed,
+      warnings_count: warnings,
+      passed_count: passed,
       run_by: userId,
     });
   assertOk(validationError, "record campus publish validation");
@@ -880,7 +944,8 @@ export async function publishCampusVersion(
 export const campusService = {
   list: listCampuses, getById: getCampusById, create: createCampus, update: updateCampus,
   archive: archiveCampus, restore: restoreCampus, unpublish: unpublishCampus, selectActive: selectActiveCampus,
-  listVersions: listCampusVersions, listPublishedSnapshots: listPublishedCampusSnapshots, permanentlyDelete: permanentlyDeleteCampus,
+  listVersions: listCampusVersions, listPublishedSnapshots: listPublishedCampusSnapshots, listComingSoon: listComingSoonCampuses, permanentlyDelete: permanentlyDeleteCampus,
+  hideComingSoon: hideComingSoonCampus,
   validateImage: validateCampusImage, uploadImage: uploadCampusImage,
   publishVersion: publishCampusVersion,
 };

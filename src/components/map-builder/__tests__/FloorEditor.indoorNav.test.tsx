@@ -200,6 +200,38 @@ describe("B5 Phase 2 — Floor Editor indoor Navigation mode", () => {
     expect(onCampusChange.mock.calls.length).toBeGreaterThan(0);
   });
 
+  it("places a waypoint at the immediate click position even when the last hover was elsewhere", () => {
+    const withLeftPath = makeBaseCampus();
+    withLeftPath.navNodes = [
+      { id: "left-a", name: "Left A", type: "hallway", x: 35, y: 40, buildingId: "b1", floorId: "f1", accessible: true, color: "#16a34a" },
+      { id: "left-b", name: "Left B", type: "hallway", x: 65, y: 40, buildingId: "b1", floorId: "f1", accessible: true, color: "#16a34a" },
+    ];
+    withLeftPath.navEdges = [{
+      id: "left-path", startNodeId: "left-a", endNodeId: "left-b", distance: 30,
+      bidirectional: true, accessible: true, type: "walkway", color: "#16a34a", width: 4,
+    }];
+    cleanup();
+    const rendered = render(<Harness onCampusChange={onCampusChange as any} initialCampus={withLeftPath} />);
+    container = rendered.container;
+    fireEvent.click(screen.getByRole("button", { name: "Walking Point" }));
+    const svg = stubSvgRect(container);
+    const cameraGroup = svg.querySelector("g") as SVGGElement;
+    const cameraMatrix = { a: 2.5, b: 0, c: 0, d: 2.5, e: 450, f: 106 };
+    Object.defineProperty(cameraGroup, "getScreenCTM", { value: () => cameraMatrix });
+    const screenAtWorld = (x: number, y: number) => ({ clientX: 450 + x * 2.5, clientY: 106 + y * 2.5 });
+    // Simulate a slow/stale hover sample, then click elsewhere immediately.
+    fireEvent.mouseMove(svg, screenAtWorld(40, 40));
+    fireEvent.mouseDown(svg, { ...screenAtWorld(180, 120), bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+
+    expect(navNodes(container)).toHaveLength(3);
+    const positions = navNodes(container).map((item) => {
+      const circle = item.querySelector("circle");
+      return [Number(circle?.getAttribute("cx")), Number(circle?.getAttribute("cy"))];
+    });
+    expect(positions).toContainEqual([180, 120]);
+  });
+
   it("does not mark the draft dirty just for switching modes", () => {
     enterNavigationMode();
     const callsBefore = onCampusChange.mock.calls.length;
@@ -311,7 +343,7 @@ describe("B5 Phase 2 — Floor Editor indoor Navigation mode", () => {
     expect(screen.queryByText("Connect to the containing Room network")).toBeNull();
   });
 
-  it("Connect Path splits an existing manual path and terminates at one canonical junction", () => {
+  it("Connect Path uses the current click point instead of a prior same-edge hover projection", async () => {
     const withPath = makeBaseCampus();
     withPath.navNodes = [
       { id: "nav-a", name: "A", type: "hallway", x: 40, y: 80, buildingId: "b1", floorId: "f1", accessible: true, color: "#16a34a" },
@@ -322,14 +354,22 @@ describe("B5 Phase 2 — Floor Editor indoor Navigation mode", () => {
     cleanup();
     const rendered = render(<Harness onCampusChange={onCampusChange} initialCampus={withPath} />);
     container = rendered.container;
-    fireEvent.click(screen.getByRole("button", { name: "Show Navigation" }));
     const svg = stubSvgRect(container);
+    const cameraGroup = svg.querySelector("g") as SVGGElement;
+    const cameraMatrix = { a: 2.5, b: 0, c: 0, d: 2.5, e: 450, f: 106 };
+    Object.defineProperty(cameraGroup, "getScreenCTM", { value: () => cameraMatrix });
+    const screenAtWorld = (x: number, y: number) => ({ clientX: 450 + x * 2.5, clientY: 106 + y * 2.5 });
     fireEvent.click(within(screen.getByTestId("floor-nav-toolbar")).getByRole("button", { name: "Connect" }));
-    fireEvent.mouseDown(navNodes(container).find((node) => node.getAttribute("data-node-id") === "nav-source") ?? navNodes(container)[2], { clientX: 110, clientY: 130, bubbles: true });
+    fireEvent.mouseDown(navNodes(container).find((node) => node.getAttribute("data-node-id") === "nav-source") ?? navNodes(container)[2], { ...screenAtWorld(110, 130), bubbles: true });
     fireEvent.mouseUp(svg, { bubbles: true });
-    const pathHit = container.querySelector('[data-testid="nav-edge-hit"]');
+    let pathHit = container.querySelector('[data-testid="nav-edge-hit"]');
     expect(pathHit).toBeTruthy();
-    fireEvent.mouseDown(pathHit!, { clientX: 110, clientY: 80, bubbles: true });
+    // Put the hover projection on the left part of the same edge, wait for
+    // that preview, then click the right part of the same edge.
+    fireEvent.mouseMove(pathHit!, screenAtWorld(65, 80));
+    await screen.findByTestId("nav-connect-path-target");
+    pathHit = container.querySelector('[data-testid="nav-edge-hit"]');
+    fireEvent.mouseDown(pathHit!, { ...screenAtWorld(150, 80), bubbles: true });
     fireEvent.mouseUp(svg, { bubbles: true });
 
     const latest = onCampusChange.mock.calls[onCampusChange.mock.calls.length - 1]?.[0] as Campus;
@@ -340,7 +380,7 @@ describe("B5 Phase 2 — Floor Editor indoor Navigation mode", () => {
     });
     const junction = floorNodes.find((node) => node.pathJunction);
     expect(junction).toBeTruthy();
-    expect(junction?.x).toBe(110);
+    expect(junction?.x).toBe(150);
     expect(junction?.y).toBe(80);
     expect(floorNodes).toHaveLength(4);
     expect(floorEdges).toHaveLength(3);
@@ -348,7 +388,7 @@ describe("B5 Phase 2 — Floor Editor indoor Navigation mode", () => {
     expect(floorEdges.some((edge) => new Set([edge.startNodeId, edge.endNodeId]).has("nav-source") && new Set([edge.startNodeId, edge.endNodeId]).has(junction!.id))).toBe(true);
   });
 
-  it("shows the hovered manual path as a projected Connect target", () => {
+  it("shows the hovered manual path as a projected Connect target", async () => {
     const withPath = makeBaseCampus();
     withPath.navNodes = [
       { id: "nav-a", name: "A", type: "hallway", x: 40, y: 80, buildingId: "b1", floorId: "f1", accessible: true, color: "#16a34a" },
@@ -359,7 +399,6 @@ describe("B5 Phase 2 — Floor Editor indoor Navigation mode", () => {
     cleanup();
     const rendered = render(<Harness onCampusChange={onCampusChange} initialCampus={withPath} />);
     container = rendered.container;
-    fireEvent.click(screen.getByRole("button", { name: "Show Navigation" }));
     const svg = stubSvgRect(container);
     fireEvent.click(within(screen.getByTestId("floor-nav-toolbar")).getByRole("button", { name: "Connect" }));
     const source = navNodes(container)[2];
@@ -369,12 +408,11 @@ describe("B5 Phase 2 — Floor Editor indoor Navigation mode", () => {
     const pathHit = container.querySelector('[data-testid="nav-edge-hit"]');
     expect(pathHit).toBeTruthy();
     fireEvent.mouseMove(pathHit!, { clientX: 110, clientY: 80, bubbles: true });
-    expect(screen.getByTestId("nav-connect-path-target")).toBeTruthy();
+    expect(await screen.findByTestId("nav-connect-path-target")).toBeTruthy();
     expect(screen.getByTestId("nav-connect-path-hint")).toHaveTextContent("Click to connect to path");
 
-    // The commit must consume the exact hovered edge/segment projection rather
-    // than re-running generic nearest-node hit testing on mouse-up.  A midpoint
-    // click therefore creates a canonical split at the preview marker.
+    // The actual pointer-down coordinate is projected onto the path at commit;
+    // the frame-coalesced preview remains a visual aid only.
     fireEvent.mouseDown(pathHit!, { clientX: 110, clientY: 80, bubbles: true });
     fireEvent.mouseUp(svg, { bubbles: true });
     const latest = onCampusChange.mock.calls[onCampusChange.mock.calls.length - 1]?.[0] as Campus;

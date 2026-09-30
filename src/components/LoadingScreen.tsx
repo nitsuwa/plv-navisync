@@ -1,124 +1,75 @@
-import { useEffect, useState } from "react";
 import { PLVLogo } from "./ui/PLVLogo";
 
 interface LoadingScreenProps {
-  minDuration?: number;
-  onComplete?: () => void;
+  exiting?: boolean;
+  error?: string | null;
+  onRetry?: () => void;
 }
 
-export function LoadingScreen({ minDuration = 1200, onComplete }: LoadingScreenProps) {
-  const [phase, setPhase] = useState<"entering" | "visible" | "exiting">("entering");
-
-  useEffect(() => {
-    const enterTimer = setTimeout(() => setPhase("visible"), 50);
-    const exitTimer = setTimeout(() => setPhase("exiting"), minDuration);
-
-    if (onComplete) {
-      const completeTimer = setTimeout(onComplete, minDuration + 400);
-      return () => {
-        clearTimeout(enterTimer);
-        clearTimeout(exitTimer);
-        clearTimeout(completeTimer);
-      };
-    }
-
-    return () => {
-      clearTimeout(enterTimer);
-      clearTimeout(exitTimer);
-    };
-  }, [minDuration, onComplete]);
-
-  if (phase === "exiting") {
-    return (
-      <div
-        className="fixed inset-0 z-[100] flex items-center justify-center bg-background"
-        style={{
-          animation: "fadeOut 0.4s ease both",
-        }}
-      >
-        <div className="flex flex-col items-center gap-4">
-          <PLVLogo size={72} />
-          <div className="flex gap-1.5">
-            {[0, 1, 2].map((i) => (
-              <div
-                key={i}
-                className="w-2 h-2 rounded-full bg-primary"
-                style={{
-                  animation: `loading-bounce 0.8s ease-in-out ${i * 0.15}s infinite`,
-                }}
-              />
-            ))}
-          </div>
-        </div>
-      </div>
-    );
-  }
-
+/** Full-window brand bootstrap shown on each fresh application runtime. */
+export function LoadingScreen({ exiting = false, error, onRetry }: LoadingScreenProps) {
   return (
-    <div
-      className="fixed inset-0 z-[100] flex items-center justify-center"
-      style={{
-        background: "radial-gradient(ellipse 80% 60% at 50% 40%, #0d2470 0%, #071440 55%, #020a1c 100%)",
-        opacity: phase === "entering" ? 0 : 1,
-        transition: "opacity 0.4s ease",
-      }}
+    <main
+      role="status"
+      aria-live="polite"
+      aria-label={error ? "NaviSync could not restore your account" : "Starting PLV NaviSync"}
+      className={`ns-startup fixed inset-0 z-[100] flex min-h-[100dvh] items-center justify-center overflow-hidden p-6 ${exiting ? "ns-startup-exit" : ""}`}
     >
-      <div className="flex flex-col items-center gap-6">
-        {/* Animated logo */}
-        <div
-          style={{
-            animation: phase === "visible" ? "hero-breathe 2s ease-in-out infinite" : "none",
-            opacity: phase === "entering" ? 0 : 1,
-            transform: phase === "entering" ? "scale(0.8)" : "scale(1)",
-            transition: "opacity 0.5s ease, transform 0.5s cubic-bezier(0.16, 1, 0.3, 1)",
-          }}
-        >
-          <PLVLogo size={80} />
+      <div className="ns-startup-glow pointer-events-none absolute inset-0" />
+      <section className="relative flex w-full max-w-sm flex-col items-center text-center">
+        <div className="ns-startup-logo mb-6 rounded-[1.6rem] p-3">
+          <PLVLogo size={68} />
+        </div>
+        <p className="text-[1.35rem] font-extrabold tracking-tight text-white sm:text-2xl">
+          PLV <span className="text-[#e5b83f]">NaviSync</span>
+        </p>
+        <p className="mt-1 text-[10px] font-semibold uppercase tracking-[0.24em] text-white/50 sm:text-xs">
+          Smart Campus Navigator
+        </p>
+
+        <div className="mt-10 h-8 w-40" aria-hidden="true">
+          <svg viewBox="0 0 160 32" className="h-full w-full overflow-visible">
+            <path d="M8 22H55C70 22 70 10 85 10H152" fill="none" stroke="rgba(255,255,255,.18)" strokeWidth="2" strokeLinecap="round" />
+            <path className="ns-startup-route" d="M8 22H55C70 22 70 10 85 10H152" fill="none" stroke="#e5b83f" strokeWidth="2.5" strokeLinecap="round" />
+            <circle className="ns-startup-beacon" r="4" fill="#fff" stroke="#e5b83f" strokeWidth="2">
+              <animateMotion dur="2.8s" repeatCount="indefinite" path="M8 22H55C70 22 70 10 85 10H152" />
+            </circle>
+          </svg>
         </div>
 
-        {/* Brand name */}
-        <div
-          className="text-center"
-          style={{
-            opacity: phase === "entering" ? 0 : 1,
-            transform: phase === "entering" ? "translateY(12px)" : "translateY(0)",
-            transition: "opacity 0.5s ease 0.2s, transform 0.5s cubic-bezier(0.16, 1, 0.3, 1) 0.2s",
-          }}
-        >
-          <h1 className="text-2xl font-extrabold text-white tracking-tight">
-            PLV <span className="text-accent">NaviSync</span>
-          </h1>
-          <p className="text-white/40 text-xs font-semibold tracking-widest uppercase mt-1">
-            Smart Campus Navigator
-          </p>
-        </div>
-
-        {/* Loading dots */}
-        <div
-          className="flex gap-2 mt-2"
-          style={{
-            opacity: phase === "entering" ? 0 : 1,
-            transition: "opacity 0.4s ease 0.4s",
-          }}
-        >
-          {[0, 1, 2].map((i) => (
-            <div
-              key={i}
-              className="w-2.5 h-2.5 rounded-full bg-accent/80"
-              style={{
-                animation: `loading-bounce 1s ease-in-out ${i * 0.2}s infinite`,
-              }}
-            />
-          ))}
-        </div>
-      </div>
-
+        <p className="mt-4 min-h-5 text-xs font-medium text-white/65" aria-live="polite">
+          {error ? "Account verification needs a connection" : "Restoring your NaviSync session…"}
+        </p>
+        {error && (
+          <div className="mt-4 max-w-xs">
+            <p className="text-xs leading-relaxed text-white/55">{error}</p>
+            <button
+              type="button"
+              onClick={onRetry}
+              className="mt-5 inline-flex min-h-11 items-center justify-center rounded-xl border border-white/20 bg-white/10 px-5 text-sm font-semibold text-white transition-colors hover:bg-white/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#e5b83f]"
+            >
+              Retry connection
+            </button>
+          </div>
+        )}
+      </section>
       <style>{`
-        @keyframes fadeOut {
-          from { opacity: 1; transform: scale(1); }
-          to { opacity: 0; transform: scale(1.05); }
+        .ns-startup { box-sizing: border-box; padding: max(1.5rem, env(safe-area-inset-top, 0px)) max(1.5rem, env(safe-area-inset-right, 0px)) max(1.5rem, env(safe-area-inset-bottom, 0px)) max(1.5rem, env(safe-area-inset-left, 0px)); background: radial-gradient(ellipse 82% 64% at 50% 40%, #102b78 0%, #081943 58%, #040c20 100%); opacity: 1; transition: opacity 250ms ease; }
+        .ns-startup-glow { background: radial-gradient(ellipse at 50% 42%, rgba(50,96,195,.14), transparent 62%); }
+        .ns-startup-logo { animation: nsStartupEnter 650ms cubic-bezier(.2,.8,.2,1) both, nsStartupBreathe 3.2s ease-in-out 700ms infinite; }
+        .ns-startup-route { stroke-dasharray: 36 160; stroke-dashoffset: 196; animation: nsStartupRoute 2.8s linear infinite; }
+        .ns-startup-beacon { filter: drop-shadow(0 0 5px rgba(229,184,63,.6)); }
+        .ns-startup-exit { opacity: 0; pointer-events: none; }
+        @keyframes nsStartupEnter { from { opacity: 0; transform: translateY(8px) scale(.94); } to { opacity: 1; transform: translateY(0) scale(1); } }
+        @keyframes nsStartupBreathe { 0%,100% { transform: translateY(0) scale(1); } 50% { transform: translateY(-2px) scale(1.015); } }
+        @keyframes nsStartupRoute { to { stroke-dashoffset: 0; } }
+        @media (prefers-reduced-motion: reduce) {
+          .ns-startup, .ns-startup * { animation: none !important; transition: none !important; }
+          .ns-startup-beacon { display: none; }
+          .ns-startup { opacity: 1; }
+          .ns-startup-exit { opacity: 0; }
         }
       `}</style>
-    </div>
+    </main>
   );
 }

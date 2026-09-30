@@ -38,4 +38,15 @@ describe("RouteMapOverlay direction arrows", () => {
     expect(arrows).toHaveLength(1);
     expect(arrows[0]).not.toHaveAttribute("transform", expect.stringContaining("NaN"));
   });
+
+  it("keeps the route and directional arrows visible without route animation", () => {
+    const { container } = render(
+      <svg>
+        <RouteMapOverlay points={[{ x: 0, y: 0 }, { x: 0, y: 10 }]} mode="standard" animated={false} />
+      </svg>,
+    );
+    expect(screen.getByTestId("route-direction-arrow")).toBeInTheDocument();
+    expect(container.querySelector("polyline[stroke-dasharray='none']")).toBeInTheDocument();
+    expect(container.querySelector("[style*='animation']")).toBeNull();
+  });
 });

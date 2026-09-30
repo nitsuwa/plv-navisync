@@ -1,7 +1,13 @@
-import { act, render, screen, within } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MobileBottomNav } from "../MobileBottomNav";
+
+const auth = vi.hoisted(() => ({ isStudent: false, isStudentOrg: false }));
+
+vi.mock("../../../hooks/useStudentAuth", () => ({
+  useStudentAuth: () => ({ ...auth, loading: false }),
+}));
 
 function renderNav(pathname = "/map") {
   return render(
@@ -12,42 +18,43 @@ function renderNav(pathname = "/map") {
 }
 
 describe("MobileBottomNav", () => {
-  it("provides only a Map shortcut on mobile, including from Home and Profile", () => {
-    for (const pathname of ["/map", "/home", "/student"]) {
-      const { unmount } = renderNav(pathname);
-      const nav = screen.getByRole("navigation", { name: "Mobile navigation" });
-      const links = within(nav).getAllByRole("link");
-
-      expect(links).toHaveLength(1);
-      expect(links[0]).toHaveAccessibleName("Map");
-      expect(links[0]).toHaveAttribute("href", "/map");
-      expect(within(nav).queryByRole("link", { name: "Home" })).not.toBeInTheDocument();
-      expect(within(nav).queryByRole("link", { name: "Profile" })).not.toBeInTheDocument();
-      unmount();
-    }
+  beforeEach(() => {
+    auth.isStudent = false;
+    auth.isStudentOrg = false;
   });
 
-  it("marks Map as the active page only on the map route", () => {
-    const { unmount } = renderNav("/home");
-    expect(screen.getByRole("link", { name: "Map" })).not.toHaveAttribute("aria-current");
-    unmount();
-
+  it("shows the configured Home and Map routes for public visitors", () => {
     renderNav("/map");
-    expect(screen.getByRole("link", { name: "Map" })).toHaveAttribute("aria-current", "page");
+    const nav = screen.getByRole("navigation", { name: "Mobile navigation" });
+    expect(within(nav).getByRole("link", { name: "Home" })).toHaveAttribute("href", "/");
+    expect(within(nav).getByRole("link", { name: "Map" })).toHaveAttribute("href", "/map");
+    expect(within(nav).getByRole("link", { name: "Map" })).toHaveAttribute("aria-current", "page");
   });
 
-  it("hides while a focused map surface is open and restores during browsing", () => {
+  it("shows Home and Map for regular students", () => {
+    auth.isStudent = true;
+    renderNav("/home");
+    const nav = screen.getByRole("navigation", { name: "Mobile navigation" });
+    expect(within(nav).getByRole("link", { name: "Home" })).toHaveAttribute("href", "/home");
+    expect(within(nav).getByRole("link", { name: "Home" })).toHaveAttribute("aria-current", "page");
+    expect(within(nav).getByRole("link", { name: "Map" })).toHaveAttribute("href", "/map");
+    expect(within(nav).queryByRole("link", { name: "Events" })).not.toBeInTheDocument();
+  });
+
+  it("adds Events for Student Organization users and keeps the active route visible", () => {
+    auth.isStudent = true;
+    auth.isStudentOrg = true;
+    renderNav("/student/events");
+    const nav = screen.getByRole("navigation", { name: "Mobile navigation" });
+    expect(within(nav).getAllByRole("link")).toHaveLength(3);
+    expect(within(nav).getByRole("link", { name: "Events" })).toHaveAttribute("href", "/student/events");
+    expect(within(nav).getByRole("link", { name: "Events" })).toHaveAttribute("aria-current", "page");
+    expect(nav.firstElementChild).toHaveClass("grid-cols-3");
+  });
+
+  it("stays visible while a building or route sheet is open", () => {
     renderNav();
-
-    expect(screen.getByRole("link", { name: "Map" })).toBeInTheDocument();
-    act(() => {
-      window.dispatchEvent(new CustomEvent("map-surface-toggle", { detail: { surface: "route-planner", open: true } }));
-    });
-    expect(screen.queryByRole("link", { name: "Map" })).not.toBeInTheDocument();
-
-    act(() => {
-      window.dispatchEvent(new CustomEvent("map-surface-toggle", { detail: { surface: "browse", open: false } }));
-    });
-    expect(screen.getByRole("link", { name: "Map" })).toBeInTheDocument();
+    window.dispatchEvent(new CustomEvent("map-surface-toggle", { detail: { surface: "route-planner", open: true } }));
+    expect(screen.getByRole("navigation", { name: "Mobile navigation" })).toBeInTheDocument();
   });
 });

@@ -26,13 +26,14 @@ import {
   presentationRouteTransitionMarkers,
   semanticDoorDisplayName,
   routeColorForMode,
+  routeEdgeTrace,
   routeContinuationMarkers,
   selectedExteriorAccessFeatureNode,
   trimRouteFragmentAtMarkerBoundary,
   TestNavigationPanel,
 } from "../TestNavigationPanel";
 import { RouteContinuationMarker, RouteTransitionMarker, transitionLabelLayout } from "../RouteTransitionMarker";
-import { findNavigationRoute } from "../../../lib/pathfinding";
+import { createNavigationRouteSearchCache, findNavigationRoute, prepareNavigationGraph } from "../../../lib/pathfinding";
 import { ROOM_DOOR_EDGE_TYPE } from "../../../lib/indoorNavigationGraph";
 import { syncExteriorEmergencyStairGraph } from "../../../lib/exteriorEmergencyStairs";
 import { reconcileEntranceDoors, findEntranceTransitionForEntrance } from "../../../lib/entranceTransitions";
@@ -746,6 +747,23 @@ describe("Admin Test Route Room → Door → Walking Network resolution", () => 
     expect(forward?.nodeIds.every((id) => nodes.find((candidate) => candidate.id === id)?.floorId === "f1")).toBe(true);
   });
 
+  it("keeps route results identical when searches reuse prepared graph data", () => {
+    const campus = makeCampus();
+    const edges = buildTestRouteEdges(campus);
+    const nodes = campus.navNodes ?? [];
+    const preparedGraph = prepareNavigationGraph(nodes, edges);
+    const searchCache = createNavigationRouteSearchCache(preparedGraph);
+
+    for (const [accessibleOnly, emergencySafeOnly] of [[false, false], [true, false], [false, true]] as const) {
+      const expected = findNavigationRoute(nodes, edges, "room-node-a", "room-node-b", accessibleOnly, emergencySafeOnly);
+      const actual = findNavigationRoute(nodes, edges, "room-node-a", "room-node-b", accessibleOnly, emergencySafeOnly, {
+        preparedGraph,
+        searchCache,
+      });
+      expect(actual).toEqual(expected);
+    }
+  });
+
   it("routes Room endpoints across Floors through the canonical Stair transition", () => {
     const floor = (floorId: string, roomId: string, doorId: string, wallId: string, stairId: string, number: number, label: string): FloorPlan => ({
       id: floorId,
@@ -945,6 +963,36 @@ describe("Admin Test Route Room → Door → Walking Network resolution", () => 
     expect(buildRoutePolyline(["b", "a"], [routeEdge], nodes)).toEqual([
       { x: 40, y: 40 }, { x: 40, y: 20 }, { x: 0, y: 20 }, { x: 0, y: 0 },
     ]);
+  });
+
+  it("renders the exact parallel edge selected by pathfinding in canonical route order", () => {
+    const nodes = [node("a", 580, 610), node("b", 580, 500), node("c", 580, 320)];
+    const selected = edge("selected-a-b", "a", "b", {
+      distance: 10,
+      bendPoints: [{ x: 620, y: 570 }, { x: 620, y: 530 }],
+    });
+    const presentationOnlyParallel = edge("other-a-b", "a", "b", {
+      distance: 50,
+      bendPoints: [{ x: 580, y: 550 }, { x: 580, y: 570 }],
+    });
+    const next = edge("b-c", "b", "c", { distance: 10 });
+    const edges = [selected, presentationOnlyParallel, next];
+
+    const forward = findNavigationRoute(nodes, edges, "a", "c")!;
+    expect(forward.nodeIds).toEqual(["a", "b", "c"]);
+    expect(routeEdgeTrace(forward, edges).map((traversal) => traversal.edgeId)).toEqual(["selected-a-b", "b-c"]);
+    expect(buildRoutePolylineFragments(forward.nodeIds, edges, nodes, forward.edgeTraversals)).toEqual([[
+      { x: 580, y: 610 }, { x: 620, y: 570 }, { x: 620, y: 530 }, { x: 580, y: 500 }, { x: 580, y: 320 },
+    ]]);
+
+    const reverse = findNavigationRoute(nodes, edges, "c", "a")!;
+    expect(reverse.nodeIds).toEqual(["c", "b", "a"]);
+    expect(routeEdgeTrace(reverse, edges).map((traversal) => [traversal.edgeId, traversal.reversed])).toEqual([
+      ["b-c", true], ["selected-a-b", true],
+    ]);
+    expect(buildRoutePolylineFragments(reverse.nodeIds, edges, nodes, reverse.edgeTraversals)).toEqual([[
+      { x: 580, y: 320 }, { x: 580, y: 500 }, { x: 620, y: 530 }, { x: 620, y: 570 }, { x: 580, y: 610 },
+    ]]);
   });
 
   it("keeps missing-edge route runs separate instead of drawing a bridge", () => {

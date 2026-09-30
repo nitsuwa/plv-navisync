@@ -7,6 +7,8 @@ interface RouteMapOverlayProps {
   points: Pt[];
   mode: RouteMode;
   fading?: boolean;
+  /** Controls presentation motion only; route geometry and selection are unchanged. */
+  animated?: boolean;
   /** 0..1 walk progress — when provided, renders the moving "you" avatar */
   walkProgress?: number;
 }
@@ -26,7 +28,7 @@ export function segmentBearing(from: Pt, to: Pt): number {
  * waypoints, start/destination markers and the moving walk avatar. Rendered
  * inside the campus map <svg> (the parent applies the viewBox transform).
  */
-export function RouteMapOverlay({ points, mode, fading = false, walkProgress }: RouteMapOverlayProps) {
+export function RouteMapOverlay({ points, mode, fading = false, walkProgress, animated = true }: RouteMapOverlayProps) {
   const reducedMotion = useReducedMotion();
   if (points.length < 2) return null;
 
@@ -37,8 +39,9 @@ export function RouteMapOverlay({ points, mode, fading = false, walkProgress }: 
   const pathId = "plv-route-path";
   // When the user prefers reduced motion: skip the draw/dash/scale animations
   // and the SVG <animate> pulse rings (CSS alone cannot stop <animate>).
-  const drawAnim = reducedMotion ? undefined : { animation: "draw-route 1.4s cubic-bezier(0.4,0,0.2,1) forwards" };
-  const antsAnim = reducedMotion ? undefined : { animation: "draw-route 1.4s 0.4s ease forwards, dash-flow 1.2s 1.8s linear infinite" };
+  const motionEnabled = animated && !reducedMotion;
+  const drawAnim = motionEnabled ? { animation: "draw-route 1.4s cubic-bezier(0.4,0,0.2,1) forwards" } : undefined;
+  const antsAnim = motionEnabled ? { animation: "draw-route 1.4s 0.4s ease forwards, dash-flow 1.2s 1.8s linear infinite" } : undefined;
 
   return (
     <g data-route-group className={cn("transition-opacity duration-300", fading && "opacity-0")}>
@@ -53,17 +56,17 @@ export function RouteMapOverlay({ points, mode, fading = false, walkProgress }: 
       <polyline
         points={pathStr} fill="none" stroke={color} strokeWidth={8} strokeLinecap="round" strokeLinejoin="round"
         opacity={0.25} filter={glowFilter}
-        strokeDasharray="900" strokeDashoffset={reducedMotion ? 0 : 900}
+        strokeDasharray={motionEnabled ? "900" : "none"} strokeDashoffset={motionEnabled ? 900 : 0}
         style={drawAnim}
       />
       {/* Main animated route line */}
       <polyline
         points={pathStr} fill="none" stroke={color} strokeWidth={5} strokeLinecap="round" strokeLinejoin="round"
-        strokeDasharray="900" strokeDashoffset={reducedMotion ? 0 : 900}
+        strokeDasharray={motionEnabled ? "900" : "none"} strokeDashoffset={motionEnabled ? 900 : 0}
         style={drawAnim}
       />
       {/* Marching ants overlay */}
-      {!reducedMotion && (
+      {motionEnabled && (
         <polyline
           points={pathStr} fill="none" stroke="rgba(255,255,255,0.6)" strokeWidth={2}
           strokeLinecap="round" strokeLinejoin="round" strokeDasharray="8 14"
@@ -86,14 +89,14 @@ export function RouteMapOverlay({ points, mode, fading = false, walkProgress }: 
             fill={color} opacity={0.5}
             transform={`rotate(${bearing} ${mx} ${my})`}
             data-testid="route-direction-arrow"
-            style={reducedMotion ? undefined : { animation: `fade-in 1.4s ${0.6 + i * 0.1}s ease both` }}
+            style={motionEnabled ? { animation: `fade-in 1.4s ${0.6 + i * 0.1}s ease both` } : undefined}
           />
         );
       })}
 
       {/* Waypoint checkpoints at each junction */}
       {points.slice(1, -1).map((p, i) => (
-        <g key={`wp${i}`} style={{ animation: `scale-in 0.3s ${0.8 + i * 0.12}s ease both` }}>
+        <g key={`wp${i}`} style={motionEnabled ? { animation: `scale-in 0.3s ${0.8 + i * 0.12}s ease both` } : undefined}>
           <circle cx={p.x} cy={p.y} r={5} fill="white" stroke={color} strokeWidth={2} opacity={0.85} />
           <circle cx={p.x} cy={p.y} r={2} fill={color} />
         </g>
@@ -117,13 +120,13 @@ export function RouteMapOverlay({ points, mode, fading = false, walkProgress }: 
       })()}
 
       {/* Start marker — green with flag */}
-      <g style={reducedMotion ? undefined : { animation: "scale-in 0.4s 0.3s ease both" }}>
+      <g style={motionEnabled ? { animation: "scale-in 0.4s 0.3s ease both" } : undefined}>
         <circle cx={points[0].x} cy={points[0].y} r={14} fill="#16a34a" stroke="white" strokeWidth={3}
           style={{ filter: "drop-shadow(0 2px 6px rgba(22,163,74,0.4))" }} />
         <circle cx={points[0].x} cy={points[0].y} r={10} fill="none" stroke="rgba(255,255,255,0.5)" strokeWidth={1.5} />
         <text x={points[0].x} y={points[0].y + 4} textAnchor="middle" fill="white" fontSize={11} fontWeight="900" className="select-none">A</text>
         {/* Pulse ring — disabled when reduced motion */}
-        {!reducedMotion && (
+        {motionEnabled && (
           <circle cx={points[0].x} cy={points[0].y} r={14} fill="none" stroke="#16a34a" strokeWidth={2} opacity={0.4}>
             <animate attributeName="r" from="14" to="24" dur="2s" repeatCount="indefinite" />
             <animate attributeName="opacity" from="0.4" to="0" dur="2s" repeatCount="indefinite" />
@@ -132,13 +135,13 @@ export function RouteMapOverlay({ points, mode, fading = false, walkProgress }: 
       </g>
 
       {/* Destination marker — red pin with expanded pulse */}
-      <g style={reducedMotion ? undefined : { animation: "scale-in 0.4s 0.5s ease both" }}>
+      <g style={motionEnabled ? { animation: "scale-in 0.4s 0.5s ease both" } : undefined}>
         <circle cx={points[points.length - 1].x} cy={points[points.length - 1].y} r={14} fill="#dc2626" stroke="white" strokeWidth={3}
           style={{ filter: "drop-shadow(0 2px 8px rgba(220,38,38,0.5))" }} />
         <circle cx={points[points.length - 1].x} cy={points[points.length - 1].y} r={10} fill="none" stroke="rgba(255,255,255,0.5)" strokeWidth={1.5} />
         <text x={points[points.length - 1].x} y={points[points.length - 1].y + 4} textAnchor="middle" fill="white" fontSize={11} fontWeight="900" className="select-none">B</text>
         {/* Outer pulse ring — disabled when reduced motion */}
-        {!reducedMotion && (
+        {motionEnabled && (
           <circle cx={points[points.length - 1].x} cy={points[points.length - 1].y} r={14} fill="none" stroke="#dc2626" strokeWidth={2.5} opacity={0.5}>
             <animate attributeName="r" from="14" to="32" dur="2.2s" repeatCount="indefinite" />
             <animate attributeName="opacity" from="0.5" to="0" dur="2.2s" repeatCount="indefinite" />

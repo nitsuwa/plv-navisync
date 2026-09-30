@@ -1,343 +1,420 @@
-import { useState, useEffect, useCallback } from "react";
-import { Settings, Palette, Save, Check, AlertTriangle, RefreshCw, ShieldAlert } from "lucide-react";
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { Bell, Check, GraduationCap, Map, Save } from "lucide-react";
 import { Button } from "../components/ui/Button";
-import { cn } from "../lib/utils";
 import { SettingsSkeleton } from "../components/ui/PageSkeleton";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../app/components/ui/select";
 import { useToast } from "../hooks/useToast";
-import { settingsService, DEFAULT_SETTINGS } from "../services/settingsService";
+import { cn } from "../lib/utils";
+import { campusService } from "../services/campusService";
+import {
+  DEFAULT_PUBLIC_PLATFORM_SETTINGS,
+  logPlatformSettingsActivity,
+  normalizePublicPlatformSettings,
+  settingsService,
+  type PublicPlatformSettings,
+  type SettingsEntry,
+} from "../services/settingsService";
+import {
+  adminNotificationPreferencesService,
+  DEFAULT_ADMIN_NOTIFICATION_PREFERENCES,
+  type AdminNotificationPreferences,
+} from "../services/adminNotificationPreferencesService";
 
 const TABS = [
-  { id: "general", label: "General", icon: Settings },
-  { id: "appearance", label: "Appearance", icon: Palette },
-  { id: "emergency", label: "Emergency", icon: ShieldAlert },
-];
+  { id: "student", label: "Student Experience", icon: GraduationCap },
+  { id: "map", label: "Map & Navigation", icon: Map },
+  { id: "notifications", label: "Notifications", icon: Bell },
+] as const;
 
-interface SettingsForm {
-  siteName: string;
-  siteTagline: string;
-  contactEmail: string;
-  campusAddress: string;
-  defaultLatitude: string;
-  defaultLongitude: string;
-  defaultZoom: string;
-  defaultTheme: "light" | "dark" | "system";
-  emergencyActive: boolean;
-  emergencyMessage: string;
-  emergencyLevel: "info" | "warning" | "critical";
+const PLATFORM_SETTING_KEYS: Record<keyof PublicPlatformSettings, string> = {
+  defaultCampusId: "default_campus_id",
+  defaultLandingPage: "default_student_landing_page",
+  rememberLastCampus: "remember_last_campus",
+  showApprovedEventOverlays: "show_approved_event_overlays",
+  defaultRouteMode: "default_route_mode",
+  animatedRouteArrows: "animated_route_arrows",
+  autoFocusRoute: "auto_focus_route",
+  autoFollowFloors: "auto_follow_floors",
+  showMapLabels: "show_map_labels",
+};
+
+interface CampusOption {
+  id: string;
+  name: string;
+  code: string;
+  isDefault: boolean;
 }
 
-function SectionCard({ title, description, children }: { title: string; description?: string; children: React.ReactNode }) {
+function Section({ title, description, children }: { title: string; description?: string; children: ReactNode }) {
   return (
-    <div className="bg-card rounded-2xl border border-border shadow-sm overflow-hidden">
-      <div className="px-6 py-4 border-b border-border bg-muted/30">
-        <h3 className="font-bold text-foreground">{title}</h3>
-        {description && <p className="text-xs text-muted-foreground mt-0.5">{description}</p>}
+    <section className="overflow-hidden rounded-2xl border border-border/80 bg-card">
+      <div className="border-b border-border/70 px-4 py-3.5 sm:px-5">
+        <h2 className="text-sm font-extrabold text-foreground">{title}</h2>
+        {description && <p className="mt-1 text-xs text-muted-foreground">{description}</p>}
       </div>
-      <div className="p-6">{children}</div>
+      <div className="divide-y divide-border/60 px-4 sm:px-5">{children}</div>
+    </section>
+  );
+}
+
+function SettingRow({ title, description, children }: { title: string; description: string; children: ReactNode }) {
+  return (
+    <div className="grid grid-cols-1 items-center gap-3 py-4 sm:grid-cols-[minmax(0,1fr)_300px] sm:gap-6">
+      <div className="min-w-0">
+        <p className="text-sm font-bold text-foreground">{title}</p>
+        <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">{description}</p>
+      </div>
+      <div className="flex w-full items-center sm:justify-end">{children}</div>
     </div>
   );
 }
 
-const inputCls =
-  "w-full h-10 px-4 rounded-xl border border-border bg-input-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary text-sm transition-all";
+function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (value: boolean) => void; label: string }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      onClick={() => onChange(!checked)}
+      className={cn("relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 focus-visible:ring-offset-2", checked ? "bg-primary" : "bg-muted-foreground/30")}
+    >
+      <span className={cn("inline-block h-[18px] w-[18px] rounded-full bg-white shadow-sm transition-transform duration-150", checked ? "translate-x-[22px]" : "translate-x-[3px]")} />
+    </button>
+  );
+}
+
+interface SettingsSelectOption {
+  value: string;
+  label: string;
+}
+
+function SettingsSelect({
+  value,
+  onChange,
+  options,
+  label,
+  placeholder,
+  disabled = false,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  options: SettingsSelectOption[];
+  label: string;
+  placeholder: string;
+  disabled?: boolean;
+}) {
+  const selectedLabel = options.find((option) => option.value === value)?.label;
+  return (
+    <Select value={value || undefined} onValueChange={onChange} disabled={disabled}>
+      <SelectTrigger
+        size="lg"
+        aria-label={label}
+        title={selectedLabel}
+        className="w-full min-w-0 rounded-xl border-border bg-card px-3 text-sm font-medium text-foreground shadow-sm transition-colors hover:border-primary/35 focus-visible:border-primary/50 focus-visible:ring-2 focus-visible:ring-primary/30 focus-visible:ring-offset-1 data-[state=open]:border-primary/50 disabled:cursor-not-allowed disabled:bg-muted/50 disabled:text-muted-foreground sm:w-[300px]"
+      >
+        <SelectValue placeholder={placeholder} className="min-w-0 truncate" />
+      </SelectTrigger>
+      <SelectContent
+        position="popper"
+        sideOffset={6}
+        style={{ maxHeight: "min(20rem, var(--radix-select-content-available-height))" }}
+        className="max-h-[min(20rem,var(--radix-select-content-available-height))] rounded-xl border-border/90 bg-popover p-1.5 shadow-lg [&[data-state=open]]:duration-150 [&[data-state=closed]]:duration-100 motion-reduce:animate-none motion-reduce:transition-none"
+      >
+        {options.map((option) => (
+          <SelectItem
+            key={option.value}
+            value={option.value}
+            title={option.label}
+            className="min-h-10 rounded-lg px-3 py-2 text-sm focus:bg-primary/10 focus:text-foreground data-[highlighted]:bg-primary/10 data-[highlighted]:text-foreground"
+          >
+            <span className="block min-w-0 truncate">{option.label}</span>
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
+function publishedCampusOptions(campuses: Awaited<ReturnType<typeof campusService.list>>): CampusOption[] {
+  return campuses
+    .filter((campus) => campus.lifecycleStatus === "published" || campus.publishStatus === "published")
+    .map((campus) => ({ id: campus.id, name: campus.name, code: campus.code ?? "", isDefault: Boolean(campus.isDefault) }));
+}
 
 export function AdminSettingsPage() {
+  const toast = useToast();
+  const toastRef = useRef(toast);
+  toastRef.current = toast;
+  const prefersReducedMotion = useReducedMotion();
+  const saveLock = useRef(false);
+  const savedTimer = useRef<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [activeTab, setActiveTab] = useState("general");
   const [saved, setSaved] = useState(false);
-  const [errors, setErrors] = useState<Record<string, string>>({});
-  const toast = useToast();
-
-  const [form, setForm] = useState<SettingsForm>({
-    siteName: DEFAULT_SETTINGS.site_name,
-    siteTagline: DEFAULT_SETTINGS.site_tagline,
-    contactEmail: DEFAULT_SETTINGS.contact_email,
-    campusAddress: DEFAULT_SETTINGS.campus_address,
-    defaultLatitude: DEFAULT_SETTINGS.default_latitude,
-    defaultLongitude: DEFAULT_SETTINGS.default_longitude,
-    defaultZoom: DEFAULT_SETTINGS.default_zoom,
-    defaultTheme: "dark",
-    emergencyActive: false,
-    emergencyMessage: "",
-    emergencyLevel: "warning",
-  });
+  const [activeTab, setActiveTab] = useState<(typeof TABS)[number]["id"]>("student");
+  const [campuses, setCampuses] = useState<CampusOption[]>([]);
+  const [campusesLoadFailed, setCampusesLoadFailed] = useState(false);
+  const [platform, setPlatform] = useState<PublicPlatformSettings>(DEFAULT_PUBLIC_PLATFORM_SETTINGS);
+  const [notifications, setNotifications] = useState<AdminNotificationPreferences>(DEFAULT_ADMIN_NOTIFICATION_PREFERENCES);
+  const initialPlatform = useRef<PublicPlatformSettings>(DEFAULT_PUBLIC_PLATFORM_SETTINGS);
+  const initialNotifications = useRef<AdminNotificationPreferences>(DEFAULT_ADMIN_NOTIFICATION_PREFERENCES);
 
   const load = useCallback(async () => {
-    try {
-      const settings = await settingsService.getSettings();
-      setForm({
-        siteName: String(settings.site_name ?? DEFAULT_SETTINGS.site_name),
-        siteTagline: String(settings.site_tagline ?? DEFAULT_SETTINGS.site_tagline),
-        contactEmail: String(settings.contact_email ?? DEFAULT_SETTINGS.contact_email),
-        campusAddress: String(settings.campus_address ?? DEFAULT_SETTINGS.campus_address),
-        defaultLatitude: String(settings.default_latitude ?? DEFAULT_SETTINGS.default_latitude),
-        defaultLongitude: String(settings.default_longitude ?? DEFAULT_SETTINGS.default_longitude),
-        defaultZoom: String(settings.default_zoom ?? DEFAULT_SETTINGS.default_zoom),
-        defaultTheme: (settings.default_theme as SettingsForm["defaultTheme"]) ?? "dark",
-        emergencyActive: String(settings.emergency_active ?? "false") === "true",
-        emergencyMessage: String(settings.emergency_message ?? ""),
-        emergencyLevel: (settings.emergency_level as SettingsForm["emergencyLevel"]) ?? "warning",
-      });
-    } catch (err) {
-      toast.error("Load failed", err instanceof Error ? err.message : "Could not load settings.");
-    } finally {
+    setLoading(true);
+    const [settingsResult, campusesResult, notificationResult] = await Promise.allSettled([
+      settingsService.getSettings(),
+      campusService.list(),
+      adminNotificationPreferencesService.get(),
+    ]);
+
+    if (settingsResult.status === "rejected") {
+      toastRef.current.error("Settings could not be loaded", settingsResult.reason instanceof Error ? settingsResult.reason.message : "Try again in a moment.");
       setLoading(false);
+      return;
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+
+    const available = campusesResult.status === "fulfilled" ? publishedCampusOptions(campusesResult.value) : [];
+    setCampuses(available);
+    setCampusesLoadFailed(campusesResult.status === "rejected");
+    if (campusesResult.status === "rejected") {
+      toastRef.current.error("Campus list could not be loaded", "The other settings are available, but Default Campus cannot be changed right now.");
+    }
+
+    const normalized = normalizePublicPlatformSettings(settingsResult.value);
+    const fallbackCampus = available.find((campus) => campus.isDefault) ?? available[0];
+    const campusValue = available.some((campus) => campus.id === normalized.defaultCampusId)
+      ? normalized.defaultCampusId
+      : fallbackCampus?.id ?? "";
+    const nextPlatform = { ...normalized, defaultCampusId: campusValue };
+    const nextNotifications = notificationResult.status === "fulfilled"
+      ? notificationResult.value
+      : DEFAULT_ADMIN_NOTIFICATION_PREFERENCES;
+
+    setPlatform(nextPlatform);
+    setNotifications(nextNotifications);
+    initialPlatform.current = nextPlatform;
+    initialNotifications.current = nextNotifications;
+    if (notificationResult.status === "rejected") {
+      toastRef.current.error("Notification preferences could not be loaded", "Default notification choices are shown.");
+    }
+    setLoading(false);
   }, []);
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  useEffect(() => { void load(); }, [load]);
 
-  const update = (key: keyof SettingsForm, value: string) => {
-    setForm((f) => ({ ...f, [key]: value }));
-    if (errors[key]) setErrors((prev) => { const n = { ...prev }; delete n[key]; return n; });
+  useEffect(() => () => {
+    if (savedTimer.current !== null) window.clearTimeout(savedTimer.current);
+  }, []);
+
+  const dirty = JSON.stringify(platform) !== JSON.stringify(initialPlatform.current)
+    || JSON.stringify(notifications) !== JSON.stringify(initialNotifications.current);
+
+  const updatePlatform = <K extends keyof PublicPlatformSettings>(key: K, value: PublicPlatformSettings[K]) => {
+    setPlatform((current) => ({ ...current, [key]: value }));
+    setSaved(false);
+  };
+
+  const updateNotification = <K extends keyof AdminNotificationPreferences>(key: K, value: boolean) => {
+    setNotifications((current) => ({ ...current, [key]: value }));
+    setSaved(false);
   };
 
   const handleSave = async () => {
-    const errs: Record<string, string> = {};
-    if (!form.siteName.trim()) errs.siteName = "Site name is required";
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.contactEmail.trim())) errs.contactEmail = "Enter a valid email address";
-    setErrors(errs);
-    if (Object.keys(errs).length > 0) return;
+    if (saveLock.current) return;
+    const entries: SettingsEntry[] = (Object.keys(PLATFORM_SETTING_KEYS) as (keyof PublicPlatformSettings)[])
+      .filter((key) => platform[key] !== initialPlatform.current[key])
+      .map((key) => ({ key: PLATFORM_SETTING_KEYS[key], value: platform[key], isPublic: true }));
+    const notificationChanged = JSON.stringify(notifications) !== JSON.stringify(initialNotifications.current);
+    if (entries.length === 0 && !notificationChanged) return;
 
+    saveLock.current = true;
     setSaving(true);
+    setSaved(false);
     try {
-      await settingsService.upsertSettings([
-        { key: "site_name", value: form.siteName.trim(), isPublic: true },
-        { key: "site_tagline", value: form.siteTagline.trim(), isPublic: true },
-        { key: "contact_email", value: form.contactEmail.trim(), isPublic: true },
-        { key: "campus_address", value: form.campusAddress.trim(), isPublic: true },
-        { key: "default_latitude", value: form.defaultLatitude.trim() || DEFAULT_SETTINGS.default_latitude },
-        { key: "default_longitude", value: form.defaultLongitude.trim() || DEFAULT_SETTINGS.default_longitude },
-        { key: "default_zoom", value: form.defaultZoom.trim() || DEFAULT_SETTINGS.default_zoom },
-        { key: "default_theme", value: form.defaultTheme, isPublic: true },
-        { key: "emergency_active", value: form.emergencyActive, isPublic: true },
-        { key: "emergency_message", value: form.emergencyMessage.trim(), isPublic: true },
-        { key: "emergency_level", value: form.emergencyLevel, isPublic: true },
-        { key: "emergency_updated_at", value: Date.now(), isPublic: true },
+      await settingsService.upsertSettings(entries, false);
+      if (notificationChanged) await adminNotificationPreferencesService.save(notifications);
+      await logPlatformSettingsActivity([
+        ...entries.map((entry) => entry.key),
+        ...(notificationChanged ? ["admin_notification_preferences"] : []),
       ]);
+      initialPlatform.current = { ...platform };
+      initialNotifications.current = { ...notifications };
       setSaved(true);
-      toast.success("Settings saved", "Your configuration has been updated.");
-      setTimeout(() => setSaved(false), 2500);
-    } catch (err) {
-      toast.error("Save failed", err instanceof Error ? err.message : "Could not save settings.");
+      toastRef.current.success("Settings saved", "Your changes are updated.");
+      if (savedTimer.current !== null) window.clearTimeout(savedTimer.current);
+      savedTimer.current = window.setTimeout(() => setSaved(false), 2200);
+    } catch (error) {
+      toastRef.current.error("Settings could not be saved", error instanceof Error ? error.message : "Try again. Your changes are still here.");
     } finally {
+      saveLock.current = false;
       setSaving(false);
     }
   };
 
-  const handleReset = async () => {
-    setSaving(true);
-    try {
-      await settingsService.upsertSettings(Object.entries(DEFAULT_SETTINGS).map(([key, value]) => ({ key, value })));
-      setForm({
-        siteName: DEFAULT_SETTINGS.site_name,
-        siteTagline: DEFAULT_SETTINGS.site_tagline,
-        contactEmail: DEFAULT_SETTINGS.contact_email,
-        campusAddress: DEFAULT_SETTINGS.campus_address,
-        defaultLatitude: DEFAULT_SETTINGS.default_latitude,
-        defaultLongitude: DEFAULT_SETTINGS.default_longitude,
-        defaultZoom: DEFAULT_SETTINGS.default_zoom,
-        defaultTheme: "dark",
-        emergencyActive: false,
-        emergencyMessage: "",
-        emergencyLevel: "warning",
-      });
-      toast.success("Settings reset", "Restored default values.");
-    } catch (err) {
-      toast.error("Reset failed", err instanceof Error ? err.message : "Could not reset settings.");
-    } finally {
-      setSaving(false);
+  const handleTabKeyDown = (event: KeyboardEvent<HTMLButtonElement>, currentIndex: number) => {
+    let nextIndex: number | undefined;
+    if (event.key === "ArrowRight") nextIndex = (currentIndex + 1) % TABS.length;
+    else if (event.key === "ArrowLeft") nextIndex = (currentIndex - 1 + TABS.length) % TABS.length;
+    else if (event.key === "Home") nextIndex = 0;
+    else if (event.key === "End") nextIndex = TABS.length - 1;
+    if (nextIndex !== undefined) {
+      event.preventDefault();
+      const nextTab = TABS[nextIndex];
+      setActiveTab(nextTab.id);
+      document.getElementById(`settings-tab-${nextTab.id}`)?.focus();
     }
   };
 
   if (loading) return <SettingsSkeleton />;
 
   return (
-    <div className="space-y-6 animate-fade-in max-w-4xl">
-      <div className="flex items-start justify-between gap-4">
+    <div className="mx-auto w-full max-w-4xl space-y-5 animate-fade-in">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-extrabold text-foreground">Settings</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">Platform settings are persisted to the database.</p>
+          <p className="mt-1 text-sm text-muted-foreground">Practical controls for the student experience and admin notifications.</p>
         </div>
-        <Button variant="primary" onClick={handleSave} disabled={saving}>
-          {saved ? <><Check className="h-4 w-4" /> Saved!</> : <><Save className="h-4 w-4" /> {saving ? "Saving…" : "Save Changes"}</>}
+        <div className="flex flex-col items-stretch gap-2 sm:items-end">
+          {dirty && <p className="text-right text-[11px] font-medium text-muted-foreground" aria-live="polite">Unsaved changes</p>}
+        <Button variant="primary" onClick={handleSave} disabled={saving || !dirty} isLoading={saving} className={cn("w-full sm:w-auto", !dirty && !saved && "bg-muted text-muted-foreground shadow-none hover:bg-muted hover:shadow-none")}>
+          {saved ? <><Check className="h-4 w-4" /> Saved</> : saving ? "Saving..." : <><Save className="h-4 w-4" /> Save Changes</>}
         </Button>
+        </div>
       </div>
 
-      {/* Tabs */}
-      <div className="flex gap-1 overflow-x-auto no-scrollbar bg-muted/50 rounded-2xl p-1.5 w-fit">
-        {TABS.map(({ id, label, icon: Icon }) => (
-          <button key={id} onClick={() => setActiveTab(id)}
-            className={cn(
-              "flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold transition-all whitespace-nowrap active:scale-[0.97]",
-              activeTab === id ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
-            )}>
-            <Icon className="h-3.5 w-3.5" /> {label}
+      <div role="tablist" aria-label="Settings sections" className="grid w-full grid-cols-3 gap-1 rounded-2xl border border-border/70 bg-muted/45 p-1 sm:p-1.5">
+        {TABS.map(({ id, label, icon: Icon }, index) => (
+          <button
+            key={id}
+            id={`settings-tab-${id}`}
+            type="button"
+            role="tab"
+            aria-controls={`settings-panel-${id}`}
+            aria-selected={activeTab === id}
+            tabIndex={activeTab === id ? 0 : -1}
+            onClick={() => setActiveTab(id)}
+            onKeyDown={(event) => handleTabKeyDown(event, index)}
+            className={cn("flex min-h-14 min-w-0 flex-col items-center justify-center gap-1 rounded-xl px-1.5 py-2 text-center text-[10px] font-bold leading-tight transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 sm:min-h-10 sm:flex-row sm:gap-2 sm:px-3 sm:text-sm", activeTab === id ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:bg-card/50 hover:text-foreground")}
+          >
+            <Icon className="h-4 w-4 shrink-0" aria-hidden="true" /><span>{label}</span>
           </button>
         ))}
       </div>
 
-      {/* General */}
-      {activeTab === "general" && (
-        <div className="space-y-5">
-          <SectionCard title="Site Identity" description="Customize how PLV NaviSync appears to users.">
-            <div className="space-y-4">
-              <div>
-                <label htmlFor="site-name" className="block text-xs font-bold text-foreground mb-1.5 uppercase tracking-wide">Site Name *</label>
-                <input id="site-name" type="text" value={form.siteName} onChange={(e) => update("siteName", e.target.value)}
-                  placeholder="e.g. PLV NaviSync"
-                  className={cn(inputCls, errors.siteName && "border-destructive focus:ring-destructive/30")} />
-                {errors.siteName && <p className="text-[10px] text-destructive mt-1 font-medium">{errors.siteName}</p>}
-              </div>
-              <div>
-                <label htmlFor="site-tagline" className="block text-xs font-bold text-foreground mb-1.5 uppercase tracking-wide">Tagline</label>
-                <input id="site-tagline" type="text" value={form.siteTagline} onChange={(e) => update("siteTagline", e.target.value)}
-                  placeholder="e.g. Smart Campus Navigator" className={inputCls} />
-              </div>
-              <div>
-                <label htmlFor="contact-email" className="block text-xs font-bold text-foreground mb-1.5 uppercase tracking-wide">Contact Email</label>
-                <input id="contact-email" type="email" value={form.contactEmail} onChange={(e) => update("contactEmail", e.target.value)}
-                  placeholder="navisync@plv.edu.ph"
-                  className={cn(inputCls, errors.contactEmail && "border-destructive focus:ring-destructive/30")} />
-                {errors.contactEmail && <p className="text-[10px] text-destructive mt-1 font-medium">{errors.contactEmail}</p>}
-              </div>
-              <div>
-                <label htmlFor="campus-address" className="block text-xs font-bold text-foreground mb-1.5 uppercase tracking-wide">Campus Address</label>
-                <input id="campus-address" type="text" value={form.campusAddress} onChange={(e) => update("campusAddress", e.target.value)}
-                  placeholder="Street, Building, Barangay" className={inputCls} />
-              </div>
-            </div>
-          </SectionCard>
-
-          <SectionCard title="Map Configuration" description="Configure the campus map display.">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label htmlFor="default-latitude" className="block text-xs font-bold text-foreground mb-1.5 uppercase tracking-wide">Default Latitude</label>
-                <input id="default-latitude" type="number" value={form.defaultLatitude} onChange={(e) => update("defaultLatitude", e.target.value)}
-                  step="0.0001" placeholder="14.7116" className={cn(inputCls, "font-mono")} />
-              </div>
-              <div>
-                <label htmlFor="default-longitude" className="block text-xs font-bold text-foreground mb-1.5 uppercase tracking-wide">Default Longitude</label>
-                <input id="default-longitude" type="number" value={form.defaultLongitude} onChange={(e) => update("defaultLongitude", e.target.value)}
-                  step="0.0001" placeholder="120.9660" className={cn(inputCls, "font-mono")} />
-              </div>
-              <div>
-                <label htmlFor="default-zoom" className="block text-xs font-bold text-foreground mb-1.5 uppercase tracking-wide">Default Zoom</label>
-                <input id="default-zoom" type="number" min={10} max={20} value={form.defaultZoom} onChange={(e) => update("defaultZoom", e.target.value)}
-                  placeholder="16" className={cn(inputCls, "font-mono")} />
-                <p className="text-[10px] text-muted-foreground mt-1">Zoom level used when the campus map first opens.</p>
-              </div>
-            </div>
-          </SectionCard>
+      <AnimatePresence mode="wait" initial={false}>
+      <motion.div
+        key={activeTab}
+        id={`settings-panel-${activeTab}`}
+        role="tabpanel"
+        aria-labelledby={`settings-tab-${activeTab}`}
+        initial={prefersReducedMotion ? false : { opacity: 0, y: 4 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={prefersReducedMotion ? undefined : { opacity: 0, y: -2 }}
+        transition={{ duration: prefersReducedMotion ? 0 : 0.18, ease: "easeOut" }}
+        className="focus:outline-none"
+      >
+      {activeTab === "student" && <div className="space-y-4">
+        <div>
+          <h2 className="text-lg font-extrabold text-foreground">Student Experience</h2>
+          <p className="mt-0.5 text-sm text-muted-foreground">Choose the defaults students see when opening NaviSync.</p>
         </div>
-      )}
-
-      {/* Appearance */}
-      {activeTab === "appearance" && (
-        <div className="space-y-5">
-          <SectionCard title="Display Preferences" description="Default theme for the site.">
-            <div className="space-y-4">
-              <div>
-                <label htmlFor="appearance-theme" className="block text-xs font-bold text-foreground mb-1.5 uppercase tracking-wide">Default Theme</label>
-                <select id="appearance-theme" value={form.defaultTheme} onChange={(e) => update("defaultTheme", e.target.value)}
-                  className="custom-select w-full h-10 px-4 rounded-xl border border-border bg-input-background text-foreground text-sm sm:max-w-xs">
-                  <option value="light">Light</option>
-                  <option value="dark">Dark</option>
-                  <option value="system">System</option>
-                </select>
-                <p className="text-[10px] text-muted-foreground mt-1">Initial theme for new visitors. Users can still switch themes themselves.</p>
-              </div>
+        <Section title="Getting started">
+          <SettingRow title="Default Campus" description="Campus shown when no previous choice exists.">
+            <SettingsSelect
+              label="Default Campus"
+              value={platform.defaultCampusId}
+              disabled={!campuses.length || campusesLoadFailed}
+              placeholder={campusesLoadFailed ? "Campus list unavailable" : "No published campuses"}
+              options={campuses.map((campus) => ({
+                value: campus.id,
+                label: campus.code ? `${campus.name} — ${campus.code}` : campus.name,
+              }))}
+              onChange={(value) => updatePlatform("defaultCampusId", value)}
+            />
+          </SettingRow>
+          <SettingRow title="Default Landing Page" description="Page students see when NaviSync opens.">
+            <div className="grid h-[42px] w-full grid-cols-2 rounded-xl border border-border bg-muted/45 p-1 sm:w-[300px]">
+              {(["home", "map"] as const).map((value) => (
+                <button key={value} type="button" aria-pressed={platform.defaultLandingPage === value} onClick={() => updatePlatform("defaultLandingPage", value)}
+                  className={cn("rounded-lg px-3 text-sm font-bold capitalize transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50", platform.defaultLandingPage === value ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}>{value}</button>
+              ))}
             </div>
-          </SectionCard>
+          </SettingRow>
+        </Section>
+        <Section title="Student map">
+          <SettingRow title="Remember Last Campus" description="Return students to the campus they last viewed.">
+            <Toggle label="Remember Last Campus" checked={platform.rememberLastCampus} onChange={(value) => updatePlatform("rememberLastCampus", value)} />
+          </SettingRow>
+          <SettingRow title="Show Approved Event Overlays" description="Show approved event layouts on student maps.">
+            <Toggle label="Show Approved Event Overlays" checked={platform.showApprovedEventOverlays} onChange={(value) => updatePlatform("showApprovedEventOverlays", value)} />
+          </SettingRow>
+        </Section>
+      </div>}
 
-          <SectionCard title="Danger Zone" description="Restore all settings to factory defaults.">
-            <div className="flex items-center justify-between gap-4">
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-xl bg-amber-100 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0">
-                  <AlertTriangle className="h-4 w-4" />
-                </div>
-                <div>
-                  <p className="text-sm font-bold text-foreground">Reset All Settings</p>
-                  <p className="text-xs text-muted-foreground mt-0.5">Overwrites saved values with the built-in defaults.</p>
-                </div>
-              </div>
-              <Button variant="danger" size="sm" onClick={handleReset} disabled={saving}>
-                <RefreshCw className="h-3.5 w-3.5" /> Reset
-              </Button>
-            </div>
-          </SectionCard>
+      {activeTab === "map" && <div className="space-y-4">
+        <div>
+          <h2 className="text-lg font-extrabold text-foreground">Map &amp; Navigation</h2>
+          <p className="mt-0.5 text-sm text-muted-foreground">Set the default map and route experience.</p>
         </div>
-      )}
+        <Section title="Map behavior">
+          <SettingRow title="Default Route Mode" description="Mode selected when a new route starts.">
+            <SettingsSelect
+              label="Default Route Mode"
+              value={platform.defaultRouteMode}
+              placeholder="Choose a route mode"
+              options={[
+                { value: "standard", label: "Standard" },
+                { value: "accessible", label: "Accessible" },
+              ]}
+              onChange={(value) => updatePlatform("defaultRouteMode", value as PublicPlatformSettings["defaultRouteMode"])}
+            />
+          </SettingRow>
+          <SettingRow title="Animated Route Arrows" description="Animate direction arrows along active routes.">
+            <Toggle label="Animated Route Arrows" checked={platform.animatedRouteArrows} onChange={(value) => updatePlatform("animatedRouteArrows", value)} />
+          </SettingRow>
+          <SettingRow title="Focus New Routes" description="Fit a newly created route into view.">
+            <Toggle label="Focus New Routes" checked={platform.autoFocusRoute} onChange={(value) => updatePlatform("autoFocusRoute", value)} />
+          </SettingRow>
+          <SettingRow title="Follow Multi-floor Routes" description="Move to the next floor when the route continues.">
+            <Toggle label="Follow Multi-floor Routes" checked={platform.autoFollowFloors} onChange={(value) => updatePlatform("autoFollowFloors", value)} />
+          </SettingRow>
+          <SettingRow title="Show Map Labels" description="Show campus, building, room, and floor labels.">
+            <Toggle label="Show Map Labels" checked={platform.showMapLabels} onChange={(value) => updatePlatform("showMapLabels", value)} />
+          </SettingRow>
+        </Section>
+      </div>}
 
-      {/* Emergency */}
-      {activeTab === "emergency" && (
-        <div className="space-y-5">
-          <SectionCard title="Emergency Broadcast" description="Post an alert that appears as a banner on all public pages. Ideal for typhoons, campus closures, or urgent notices.">
-            <div className="space-y-4">
-              <div className="flex items-center justify-between gap-4 rounded-xl border border-border bg-muted/40 p-4">
-                <div className="flex items-center gap-3">
-                  <div className={cn(
-                    "w-9 h-9 rounded-xl flex items-center justify-center shrink-0",
-                    form.emergencyActive
-                      ? "bg-red-100 dark:bg-red-900/20 text-red-600 dark:text-red-400"
-                      : "bg-muted text-muted-foreground"
-                  )}>
-                    <ShieldAlert className="h-4 w-4" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-bold text-foreground">Alert active</p>
-                    <p className="text-xs text-muted-foreground mt-0.5">
-                      {form.emergencyActive ? "The banner is currently visible to visitors." : "No banner is shown right now."}
-                    </p>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={form.emergencyActive}
-                  onClick={() => setForm((f) => ({ ...f, emergencyActive: !f.emergencyActive }))}
-                  className={cn(
-                    "relative w-11 h-6 rounded-full transition-colors shrink-0",
-                    form.emergencyActive ? "bg-red-500" : "bg-muted-foreground/30"
-                  )}
-                >
-                  <span className={cn(
-                    "absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform",
-                    form.emergencyActive ? "translate-x-[22px]" : "translate-x-0.5"
-                  )} />
-                </button>
-              </div>
-
-              <div>
-                <label htmlFor="emergency-message" className="block text-xs font-bold text-foreground mb-1.5 uppercase tracking-wide">Alert Message</label>
-                <textarea
-                  id="emergency-message"
-                  rows={3}
-                  value={form.emergencyMessage}
-                  onChange={(e) => update("emergencyMessage", e.target.value)}
-                  placeholder="e.g. Class suspension due to Typhoon — all offices closed today."
-                  className={cn(inputCls, "h-auto py-3 resize-none")}
-                />
-                <p className="text-[10px] text-muted-foreground mt-1">The message is shown on the banner only when the alert is active.</p>
-              </div>
-
-              <div>
-                <label htmlFor="emergency-level" className="block text-xs font-bold text-foreground mb-1.5 uppercase tracking-wide">Severity Level</label>
-                <select id="emergency-level" value={form.emergencyLevel} onChange={(e) => update("emergencyLevel", e.target.value)}
-                  className="custom-select w-full h-10 px-4 rounded-xl border border-border bg-input-background text-foreground text-sm sm:max-w-xs">
-                  <option value="info">Info (blue)</option>
-                  <option value="warning">Warning (amber)</option>
-                  <option value="critical">Critical (red)</option>
-                </select>
-              </div>
-            </div>
-          </SectionCard>
+      {activeTab === "notifications" && <div className="space-y-4">
+        <div>
+          <h2 className="text-lg font-extrabold text-foreground">Notifications</h2>
+          <p className="mt-0.5 text-sm text-muted-foreground">Choose which admin activity appears in your notification bell.</p>
         </div>
-      )}
+        <Section title="Notify me about" description="Applies only to your administrator account.">
+          <SettingRow title="Reports" description="New reports and important updates.">
+            <Toggle label="Reports notifications" checked={notifications.reports} onChange={(value) => updateNotification("reports", value)} />
+          </SettingRow>
+          <SettingRow title="Events" description="Event and event-layout activity.">
+            <Toggle label="Events notifications" checked={notifications.events} onChange={(value) => updateNotification("events", value)} />
+          </SettingRow>
+          <SettingRow title="Campus & Publishing" description="Campus and publication activity.">
+            <Toggle label="Campus and publishing notifications" checked={notifications.campus} onChange={(value) => updateNotification("campus", value)} />
+          </SettingRow>
+          <SettingRow title="Announcements" description="Announcement activity.">
+            <Toggle label="Announcement notifications" checked={notifications.announcements} onChange={(value) => updateNotification("announcements", value)} />
+          </SettingRow>
+          <SettingRow title="User Management" description="Account and role changes.">
+            <Toggle label="User management notifications" checked={notifications.users} onChange={(value) => updateNotification("users", value)} />
+          </SettingRow>
+          <p className="flex items-center gap-1.5 py-3 text-[11px] text-muted-foreground" role="note">
+            <Bell className="h-3.5 w-3.5 shrink-0" aria-hidden="true" /> Activity Logs continue recording all administrative activity.
+          </p>
+        </Section>
+      </div>}
+
+      </motion.div>
+      </AnimatePresence>
     </div>
   );
 }

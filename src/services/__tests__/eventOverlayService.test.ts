@@ -19,7 +19,6 @@ const floorLocation = {
 };
 
 function makeClient(rows: unknown[] = []) {
-  const inserted = { id: "persisted-event-1" };
   const filters: Array<{ column: string; value: unknown }> = [];
   const query = {
     eq: vi.fn((column: string, value: unknown) => {
@@ -30,8 +29,8 @@ function makeClient(rows: unknown[] = []) {
     single: vi.fn().mockResolvedValue({ data: rows[0] ?? null, error: null }),
   };
   const mapElements = {
-    insert: vi.fn((_payload: unknown) => ({
-      select: vi.fn(() => ({ single: vi.fn().mockResolvedValue({ data: inserted, error: null }) })),
+    insert: vi.fn((payload: unknown) => ({
+      select: vi.fn(() => ({ single: vi.fn().mockResolvedValue({ data: { id: (payload as { id?: string }).id ?? "10000000-0000-4000-8000-000000000099" }, error: null }) })),
     })),
     select: vi.fn(() => query),
     update: vi.fn((_payload: unknown) => query),
@@ -70,7 +69,7 @@ describe("event overlay service", () => {
     const { client, mapElements } = makeClient();
     vi.mocked(getSupabase).mockReturnValue(client as never);
 
-    await eventOverlayService.createEventOverlay(
+    const created = await eventOverlayService.createEventOverlay(
       {
         title: "Student Fair",
         description: "Two-part event",
@@ -85,6 +84,11 @@ describe("event overlay service", () => {
     );
 
     const payload = mapElements.insert.mock.calls[0][0] as { metadata: Record<string, unknown> };
+    const metadata = payload.metadata;
+    expect((mapElements.insert.mock.calls[0][0] as { id: string }).id)
+      .toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+    expect(metadata.id).toBe((mapElements.insert.mock.calls[0][0] as { id: string }).id);
+    expect(created.id).toBe(metadata.id);
     expect(payload.metadata.locations).toEqual([
       expect.objectContaining({ locationRef: campusLocation }),
       expect.objectContaining({ locationRef: floorLocation }),

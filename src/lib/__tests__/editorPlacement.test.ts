@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { screenToWorld, panToKeepWorldPoint, getSvgContentBox, computeBuildingPlacement, pointInBuilding, polylineCrossesObstacleAfterSourceDeparture } from "../editorPlacement";
+import { screenToWorld, screenPointToLocalCoordinates, screenPixelsToWorldDistance, panToKeepWorldPoint, getSvgContentBox, computeBuildingPlacement, pointInBuilding, polylineCrossesObstacleAfterSourceDeparture } from "../editorPlacement";
 
 const CANVAS = { canvasW: 900, canvasH: 680 };
 
@@ -116,6 +116,51 @@ describe("screenToWorld — single shared pointer→world conversion", () => {
   it("zero/negative zoom is guarded (defaults to 1)", () => {
     const pt = screenToWorld(450, 340, rect(0, 0, 900, 680), 900, 680, { x: 0, y: 0 }, 0);
     expect(pt.x).toBeCloseTo(450, 6);
+  });
+});
+
+describe("screenPointToLocalCoordinates — live SVG camera transform", () => {
+  it("accounts for the canvas screen origin without subtracting panel widths", () => {
+    const matrix = { a: 1, b: 0, c: 0, d: 1, e: 400, f: 100 };
+    expect(screenPointToLocalCoordinates(550, 310, matrix)).toEqual({ x: 150, y: 210 });
+  });
+
+  it.each([1, 1.5, 2, 2.5, 3])("inverts zoom %sx and non-zero pan exactly once", (zoom) => {
+    const pan = { x: 20, y: -12 };
+    const matrix = { a: zoom, b: 0, c: 0, d: zoom, e: 400 + pan.x, f: 100 + pan.y };
+    const client = { x: 400 + pan.x + zoom * 100, y: 100 + pan.y + zoom * 80 };
+    expect(screenPointToLocalCoordinates(client.x, client.y, matrix)).toEqual({ x: 100, y: 80 });
+  });
+
+  it("follows a position-only canvas shift while preserving the same world point", () => {
+    const world = { x: 180, y: 90 };
+    const leftOrigins = [400, 800];
+    for (const left of leftOrigins) {
+      const matrix = { a: 2, b: 0, c: 0, d: 2, e: left + 24, f: 70 };
+      expect(screenPointToLocalCoordinates(left + 24 + world.x * 2, 70 + world.y * 2, matrix)).toEqual(world);
+    }
+  });
+
+  it("returns null for a singular camera transform", () => {
+    expect(screenPointToLocalCoordinates(100, 100, { a: 0, b: 0, c: 0, d: 0, e: 0, f: 0 })).toBeNull();
+  });
+});
+
+describe("screenPixelsToWorldDistance — zoom-stable hit radii", () => {
+  it("keeps a 12px navigation target radius constant as zoom changes", () => {
+    const canvas = rect(0, 0, 900, 680);
+    expect(screenPixelsToWorldDistance(12, canvas, 900, 680, 1)).toBeCloseTo(12);
+    expect(screenPixelsToWorldDistance(12, canvas, 900, 680, 4)).toBeCloseTo(3);
+    expect(screenPixelsToWorldDistance(12, canvas, 900, 680, 0.25)).toBeCloseTo(48);
+  });
+
+  it("accounts for SVG letterboxing and scaled layout dimensions", () => {
+    const wide = rect(0, 0, 1200, 680);
+    // The 900x680 viewBox is rendered at 1 CSS pixel per world unit despite
+    // the extra 150px side gutters, then camera zoom scales the hit radius.
+    expect(screenPixelsToWorldDistance(12, wide, 900, 680, 2)).toBeCloseTo(6);
+    const halfScale = rect(0, 0, 450, 340);
+    expect(screenPixelsToWorldDistance(12, halfScale, 900, 680, 1)).toBeCloseTo(24);
   });
 });
 

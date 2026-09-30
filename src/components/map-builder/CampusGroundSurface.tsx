@@ -11,6 +11,8 @@ interface CampusGroundSurfaceProps {
   patternIdOverride?: string;
   /** Preserve the canvas hit-test marker when used inside the live editor. */
   baseIsBackground?: boolean;
+  backgroundTestId?: string;
+  backgroundOpacity?: number;
   textureTestId?: string;
 }
 
@@ -28,6 +30,8 @@ export function CampusGroundSurface({
   height,
   patternIdOverride,
   baseIsBackground = false,
+  backgroundTestId,
+  backgroundOpacity = 1,
   textureTestId,
 }: CampusGroundSurfaceProps) {
   const safeWidth = Math.max(1, width);
@@ -39,10 +43,12 @@ export function CampusGroundSurface({
     <>
       <rect
         {...(baseIsBackground ? { "data-bg": "true" } : {})}
+        data-testid={backgroundTestId}
         data-ground-material={material}
         width={safeWidth}
         height={safeHeight}
         fill={fill}
+        opacity={backgroundOpacity}
       />
       {pattern && (
         <rect

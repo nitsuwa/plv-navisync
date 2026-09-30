@@ -1,37 +1,53 @@
-import { useState, useCallback } from "react";
+import { useEffect, useState } from "react";
 import { RouterProvider } from "react-router";
 import { router } from "./routes";
 import { LoadingScreen } from "../components/LoadingScreen";
 import { CampusDataProvider } from "../contexts/CampusDataContext";
-import { StudentAuthProvider } from "../contexts/StudentAuthContext";
+import { AuthProvider, useAuth } from "../contexts/StudentAuthContext";
 import { Toaster } from "./components/ui/sonner";
 import { ErrorBoundary } from "../components/ui/ErrorBoundary";
 
-export default function App() {
-  const [loading, setLoading] = useState(true);
-  const handleLoadComplete = useCallback(() => setLoading(false), []);
+function AppRuntime() {
+  const auth = useAuth();
+  const authReady = auth.status === "authenticated" || auth.status === "unauthenticated";
+  const [minimumElapsed, setMinimumElapsed] = useState(false);
+  const [exiting, setExiting] = useState(false);
+  const [started, setStarted] = useState(false);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setMinimumElapsed(true), 500);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    if (!authReady || !minimumElapsed || started) return;
+    setExiting(true);
+    const timer = window.setTimeout(() => setStarted(true), 260);
+    return () => window.clearTimeout(timer);
+  }, [authReady, minimumElapsed, started]);
+
+  if (!started) {
+    return <LoadingScreen exiting={exiting} error={auth.status === "error" ? auth.error : null} onRetry={() => void auth.retryBootstrap()} />;
+  }
 
   return (
     <CampusDataProvider>
-      <StudentAuthProvider>
-        {loading && <LoadingScreen onComplete={handleLoadComplete} />}
-        {/* Router mounts immediately behind the loading screen so pages preload */}
-        <div style={{ visibility: loading ? "hidden" : "visible" }}>
-          <ErrorBoundary>
-            <RouterProvider router={router} />
-          </ErrorBoundary>
-        </div>
-        {/* Toast notifications via sonner */}
-        <Toaster
-          closeButton
-          position="top-right"
-          toastOptions={{
-            style: {
-              fontFamily: "var(--font-body)",
-            },
-          }}
-        />
-      </StudentAuthProvider>
+      <ErrorBoundary>
+        <RouterProvider router={router} />
+      </ErrorBoundary>
+      <Toaster
+        closeButton
+        position="top-right"
+        toastOptions={{ style: { fontFamily: "var(--font-body)" } }}
+      />
     </CampusDataProvider>
+  );
+}
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <AppRuntime />
+    </AuthProvider>
   );
 }

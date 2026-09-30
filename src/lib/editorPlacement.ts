@@ -69,6 +69,43 @@ export function getSvgContentBox(
   };
 }
 
+export interface AffineTransform2D {
+  a: number;
+  b: number;
+  c: number;
+  d: number;
+  e: number;
+  f: number;
+}
+
+/** Convert a client point through the inverse screen transform of an SVG group. */
+export function screenPointToLocalCoordinates(
+  clientX: number,
+  clientY: number,
+  transform: AffineTransform2D,
+): { x: number; y: number } | null {
+  const determinant = transform.a * transform.d - transform.b * transform.c;
+  if (!Number.isFinite(determinant) || Math.abs(determinant) < Number.EPSILON) return null;
+  const screenX = clientX - transform.e;
+  const screenY = clientY - transform.f;
+  const x = (transform.d * screenX - transform.c * screenY) / determinant;
+  const y = (-transform.b * screenX + transform.a * screenY) / determinant;
+  return Number.isFinite(x) && Number.isFinite(y) ? { x, y } : null;
+}
+
+/** Convert a fixed screen-space hit radius to the corresponding world radius. */
+export function screenPixelsToWorldDistance(
+  screenPixels: number,
+  rect: ScreenRect,
+  canvasW: number,
+  canvasH: number,
+  zoom: number,
+): number {
+  const box = getSvgContentBox(rect, canvasW, canvasH);
+  const effectiveScale = box.scale * (zoom > 0 ? zoom : 1);
+  return Math.abs(screenPixels) / Math.max(effectiveScale, Number.EPSILON);
+}
+
 /**
  * Convert a client (screen) point into canvas/world coordinates.
  *

@@ -12,10 +12,12 @@ import {
   roomService,
   serializeCampusStructure,
   validateCampusStructurePayload,
+  type CampusStructurePayload,
   type FloorNumberRow,
 } from "../campusStructureService";
 import { ENTRANCE_TRANSITION_EDGE_TYPE, linkEntranceToIndoorDoor, removeEntranceIndoorConnection } from "../../lib/entranceTransitions";
 import { createIndoorNavNode } from "../../lib/indoorNavigationGraph";
+import { repairInvalidFloorMapElementIds } from "../../lib/physicalFloorIntegrity";
 import { duplicateFloorInBuilding } from "../../lib/floorManagement";
 import { prepareFloorTemplateReplacement } from "../../lib/floorTemplateReplacement";
 
@@ -227,8 +229,24 @@ describe("B5 Phase 3.1.2 — floor unique-constraint persistence (write order)",
     campus.buildings[0].floors[0].rooms = [{
       id: "not-a-uuid", name: "Room", type: "office", x: 10, y: 10, w: 80, h: 60,
     } as never];
-    const payload = serializeCampusStructure(campus);
-    expect(() => validateCampusStructurePayload(payload)).toThrow(/Map element identity must be a valid UUID/);
+    const malformedPayload = serializeCampusStructure(campus);
+    expect(() => validateCampusStructurePayload(malformedPayload)).toThrow(
+      /Room 'Room' on Floor "Floor 1" \(ID "10000000-0000-4000-8000-000000000003"\) in Building "Engineering \(ENG\)" \(ID "10000000-0000-4000-8000-000000000002"\) has invalid map element ID 'not-a-uuid'/,
+    );
+    const repairedCandidate = repairInvalidFloorMapElementIds(campus).campus;
+    const repairedPayload = serializeCampusStructure(repairedCandidate);
+    const isRoom = (row: Record<string, unknown>) => (row.metadata as { kind?: string } | undefined)?.kind === "room";
+    const repairedRoom = repairedPayload.map_elements.find(isRoom);
+    expect(repairedRoom?.id).toMatch(/^[0-9a-f]{8}-[0-9a-f-]{27}$/i);
+    expect(() => validateCampusStructurePayload(repairedPayload)).not.toThrow();
+    expect(serializeCampusStructure(repairedCandidate).map_elements.find(isRoom)?.id).toBe(repairedRoom?.id);
+
+    const malformedPayloadWithDiagnostic = structuredClone(repairedPayload);
+    const malformedRoom = malformedPayloadWithDiagnostic.map_elements.find(isRoom)!;
+    malformedRoom.id = "room-copy-123";
+    expect(() => validateCampusStructurePayload(malformedPayloadWithDiagnostic)).toThrow(
+      /Room 'Room' on Floor "Floor 1" \(ID "10000000-0000-4000-8000-000000000003"\) in Building "Engineering \(ENG\)" \(ID "10000000-0000-4000-8000-000000000002"\) has invalid map element ID 'room-copy-123'/,
+    );
 
     campus.buildings[0].floors[0].rooms[0].id = IDs.roomNode;
     const validPayload = serializeCampusStructure(campus);
@@ -254,7 +272,7 @@ describe("B5 Phase 3.1.2 — floor unique-constraint persistence (write order)",
     } as never];
     const before = structuredClone(campus);
 
-    await expect(campusStructureService.save(campus)).rejects.toThrow(/Wall anchor refers to missing Room "old-template-room-id" on Wall "wall-with-stale-room-anchor" \(start endpoint\)/);
+    await expect(campusStructureService.save(campus)).rejects.toThrow(/Wall anchor refers to missing Room "old-template-room-id" on Wall ".+" \(start endpoint\)/);
     expect(rpc).not.toHaveBeenCalled();
     expect(from).not.toHaveBeenCalled();
     expect(campus).toEqual(before);
@@ -693,6 +711,111 @@ describe("B6 Phase 1 — event overlay persistence", () => {
     expect(hydrated.navNodes).toHaveLength(2);
     expect(hydrated.eventOverlays).toHaveLength(2);
     expect(hydrated.eventOverlays?.[1].id).toBe("eo-2");
+  });
+
+  it("repairs a legacy Event Organizer ID before Floor-save payload validation", () => {
+    const campus = makeCampus([{ id: IDs.floorA, number: 1 }]);
+    campus.eventOverlays = [makeEventOverlay({
+      id: "eo-1790650205083-pe84vm",
+      title: "TEST: College Week 2026",
+      locationRef: { type: "room", buildingId: IDs.building, floorId: IDs.floorA, roomId: "room-101", label: "Engineering — Floor 1 — Room 101" },
+    })];
+
+    const candidate = repairInvalidFloorMapElementIds(campus).campus;
+    const payload = serializeCampusStructure(candidate);
+    const eventRow = payload.map_elements.find((row) => (row.metadata as { kind?: string })?.kind === "event_overlay")!;
+
+    expect(eventRow.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+    expect(() => validateCampusStructurePayload(payload)).not.toThrow();
+    expect((eventRow.metadata as { ui: { title: string; locationRef: { roomId: string } } }).ui)
+      .toMatchObject({ title: "TEST: College Week 2026", locationRef: { roomId: "room-101" } });
+
+    const secondCandidate = repairInvalidFloorMapElementIds(candidate);
+    expect(secondCandidate.repairs).toEqual([]);
+    expect(serializeCampusStructure(secondCandidate.campus).map_elements.find((row) => (row.metadata as { kind?: string })?.kind === "event_overlay")?.id)
+      .toBe(eventRow.id);
+  });
+
+  it("saves an unrelated Floor with a legacy Student Org event and retains the event", async () => {
+    const stored: Record<string, unknown[]> = {
+      buildings: [], floors: [], map_elements: [], navigation_nodes: [], navigation_edges: [],
+    };
+    const rpc = vi.fn(async (_name: string, args: { p_payload: CampusStructurePayload }) => {
+      const payload = args.p_payload;
+      stored.buildings = payload.buildings.map((row) => ({ ...row, campus_id: IDs.campus, archived_at: null }));
+      stored.floors = payload.floors.map((row) => ({ ...row, archived_at: null }));
+      stored.map_elements = payload.map_elements.map((row) => ({ ...row, archived_at: null, created_at: "2026-01-01T00:00:00.000Z" }));
+      stored.navigation_nodes = payload.navigation_nodes.map((row) => ({ ...row, campus_id: IDs.campus }));
+      stored.navigation_edges = payload.navigation_edges.map((row) => ({ ...row, campus_id: IDs.campus }));
+      return { error: null };
+    });
+    const from = vi.fn((tableName: string) => {
+      let range: [number, number] = [0, 499];
+      const builder = {
+        select: vi.fn().mockReturnThis(),
+        eq: vi.fn().mockReturnThis(),
+        is: vi.fn().mockReturnThis(),
+        in: vi.fn().mockReturnThis(),
+        order: vi.fn().mockReturnThis(),
+        range: vi.fn(function (this: unknown, start: number, end: number) { range = [start, end]; return this; }),
+        then(resolve: (value: { data: unknown[]; error: null }) => unknown, reject?: (reason: unknown) => unknown) {
+          return Promise.resolve({ data: (stored[tableName] ?? []).slice(range[0], range[1] + 1), error: null }).then(resolve, reject);
+        },
+      };
+      return builder;
+    });
+    vi.mocked(getSupabase).mockReturnValue({ from, rpc } as never);
+    const campus = makeCampus([{ id: IDs.floorA, number: 1, label: "Ground Floor" }]);
+    const legacyId = "eo-1790650205083-pe84vm";
+    campus.eventOverlays = [makeEventOverlay({ id: legacyId, title: "TEST: College Week 2026" })];
+
+    const saved = await campusStructureService.save(campus);
+    const savePayload = rpc.mock.calls[0][1].p_payload;
+    const eventRow = savePayload.map_elements.find((row) => (row.metadata as { kind?: string })?.kind === "event_overlay")!;
+
+    expect(rpc).toHaveBeenCalledTimes(1);
+    expect(eventRow.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+    expect(saved.eventOverlays?.[0]).toMatchObject({ id: eventRow.id, title: "TEST: College Week 2026" });
+    expect(campus.eventOverlays?.[0].id).toBe(legacyId);
+  });
+
+  it("hydrates a legacy metadata event ID using its stable canonical map element row ID", () => {
+    const campus = makeCampus([{ id: IDs.floorA, number: 1 }]);
+    const legacyId = "eo-1790650205083-pe84vm";
+    campus.eventOverlays = [makeEventOverlay({
+      id: legacyId,
+      title: "TEST: College Week 2026",
+      locationRef: { type: "room", buildingId: IDs.building, floorId: IDs.floorA, roomId: "room-101", label: "Room 101" },
+    })];
+    const serialized = serializeCampusStructure(campus);
+    const canonicalRowId = "10000000-0000-4000-8000-000000000099";
+    const mapElements = serialized.map_elements.map((row) => {
+      if ((row.metadata as { kind?: string })?.kind !== "event_overlay") return row;
+      const metadata = row.metadata as { ui: Record<string, unknown> };
+      return { ...row, id: canonicalRowId, metadata: { ...metadata, ui: { ...metadata.ui, id: legacyId } } };
+    });
+    const hydrated = hydrateCampusStructure(campus, {
+      buildings: serialized.buildings as never,
+      floors: serialized.floors.map((row) => ({ ...row, display_order: Number(row.display_order ?? 0), floor_number: Number(row.floor_number ?? 1) })) as never,
+      mapElements: mapElements as never,
+      navigationNodes: serialized.navigation_nodes as never,
+      navigationEdges: serialized.navigation_edges as never,
+    });
+
+    expect(hydrated.eventOverlays?.[0]).toMatchObject({
+      id: canonicalRowId,
+      title: "TEST: College Week 2026",
+      locationRef: { roomId: "room-101" },
+      markers: [{ label: "Stage" }],
+    });
+  });
+
+  it("reports legacy event identity failures with the event name and UUID requirement", () => {
+    const campus = makeCampus([]);
+    campus.eventOverlays = [makeEventOverlay({ id: "eo-1790650205083-pe84vm", title: "TEST: College Week 2026" })];
+    expect(() => validateCampusStructurePayload(serializeCampusStructure(campus))).toThrow(
+      /Student event 'TEST: College Week 2026' on the Campus has invalid map element ID 'eo-1790650205083-pe84vm' \(expected UUID format\)/,
+    );
   });
 });
 

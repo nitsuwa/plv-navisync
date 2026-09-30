@@ -10,14 +10,14 @@ import { getDecorParts } from "../../lib/decorVisual";
  * the property-panel preview and the hierarchy palette always show the exact
  * same artwork.
  */
-export function DecorAssetArt({ descriptor }: { descriptor: DecorAssetDescriptor }) {
+export function DecorAssetArt({ descriptor, primaryFillOverride }: { descriptor: DecorAssetDescriptor; primaryFillOverride?: string }) {
   return (
     <>
       {getDecorParts(descriptor).map((p, i) => (
         <path
           key={i}
           d={p.d}
-          fill={p.fill}
+          fill={i === 0 && primaryFillOverride !== undefined ? primaryFillOverride : p.fill}
           stroke={p.stroke}
           strokeWidth={p.strokeWidth}
           fillOpacity={p.fillOpacity}

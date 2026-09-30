@@ -19,7 +19,11 @@ import { SearchBar } from "../components/ui/SearchBar";
 import { cn, formatDate } from "../lib/utils";
 
 const CATEGORIES: AnnouncementCategory[] = ["general", "academic", "event", "emergency", "maintenance"];
-const PRIORITIES: AnnouncementPriority[] = ["low", "normal", "high", "urgent"];
+const SEVERITIES: { value: Exclude<AnnouncementPriority, "low">; label: string }[] = [
+  { value: "normal", label: "Normal" },
+  { value: "high", label: "Important" },
+  { value: "urgent", label: "Emergency" },
+];
 
 const STATUS_CONFIG: Record<AnnouncementStatus, { label: string; cls: string }> = {
   draft:     { label: "Draft",     cls: "bg-muted text-muted-foreground" },
@@ -124,7 +128,7 @@ export function AdminAnnouncementsPage() {
 
   const openEdit = (a: ManagedAnnouncement) => {
     setForm({
-      title: a.title, content: a.content, category: a.category, priority: a.priority,
+      title: a.title, content: a.content, category: a.category, priority: a.priority === "low" ? "normal" : a.priority,
       status: a.status, expires_at: toLocalInput(a.expiresAt),
     });
     setFormErrors({});
@@ -401,13 +405,14 @@ export function AdminAnnouncementsPage() {
                     </select>
                   </div>
                   <div>
-                    <label htmlFor="announcement-priority" className="block text-xs font-bold text-foreground mb-1.5 uppercase tracking-wide">Priority</label>
-                    <select id="announcement-priority" value={form.priority} onChange={(e) => setForm({ ...form, priority: e.target.value as AnnouncementPriority })}
+                    <label htmlFor="announcement-priority" className="block text-xs font-bold text-foreground mb-1.5 uppercase tracking-wide">Severity</label>
+                    <select id="announcement-priority" value={form.priority === "low" ? "normal" : form.priority} onChange={(e) => setForm({ ...form, priority: e.target.value as AnnouncementPriority })}
                       className="custom-select w-full h-10 px-4 rounded-xl border border-border bg-input-background text-foreground text-sm">
-                      {PRIORITIES.map((p) => (
-                        <option key={p} value={p} className="capitalize">{p}</option>
+                      {SEVERITIES.map((severity) => (
+                        <option key={severity.value} value={severity.value}>{severity.label}</option>
                       ))}
                     </select>
+                    <p className="mt-1 text-[10px] text-muted-foreground">Published Emergency announcements appear in the public alert banner while active.</p>
                   </div>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

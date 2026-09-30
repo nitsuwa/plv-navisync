@@ -1,135 +1,296 @@
 /**
- * StudentAuthContext — single-source-of-truth for student auth state.
+ * Application-wide Supabase session and profile bootstrap.
  *
- * Instead of every useStudentAuth() call independently fetching the profile
- * from Supabase (causing 15+ redundant requests per navigation), this
- * provider fetches the profile once and shares it via React Context.
+ * Supabase owns persistent credentials and cross-tab session synchronization.
+ * This provider owns the in-memory role/profile state used by both Admin and
+ * Student routes so each side does not race a separate session restoration.
  */
-import { createContext, useContext, useCallback, useEffect, useState, type ReactNode } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
+import type { Session } from "@supabase/supabase-js";
 import { supabase, isConnected, type Profile } from "../lib/supabase";
 
-interface StudentAuthState {
+export type AuthStatus = "initializing" | "authenticated" | "unauthenticated" | "error";
+
+export interface AuthState {
+  session: Session | null;
   profile: Profile | null;
+  status: AuthStatus;
   loading: boolean;
+  error: string | null;
+  isAdmin: boolean;
   isStudent: boolean;
   isStudentOrg: boolean;
   username: string;
+  /** Existing student-facing role fallback retained for compatibility. */
   role: "student" | "student_org" | "faculty";
   refreshProfile: () => Promise<void>;
+  retryBootstrap: () => Promise<void>;
   signOut: () => Promise<void>;
 }
 
-const StudentAuthContext = createContext<StudentAuthState | null>(null);
+const AuthContext = createContext<AuthState | null>(null);
+const PROFILE_RETRY_MESSAGE = "NaviSync could not verify your login/profile right now. Check your connection and retry; the saved login has not been cleared.";
 
-export function StudentAuthProvider({ children }: { children: ReactNode }) {
+export function AuthProvider({ children }: { children: ReactNode }) {
+  const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [status, setStatus] = useState<AuthStatus>("initializing");
+  const [error, setError] = useState<string | null>(null);
+  const sessionRef = useRef<Session | null>(null);
+  const profileRef = useRef<Profile | null>(null);
+  const statusRef = useRef<AuthStatus>("initializing");
+  const generationRef = useRef(0);
+  const mountedRef = useRef(false);
+  const pendingProfileRef = useRef<{ userId: string; generation: number; promise: Promise<void> } | null>(null);
+  const retryRef = useRef<() => Promise<void>>(async () => {});
+
+  const updateSession = useCallback((next: Session | null) => {
+    sessionRef.current = next;
+    setSession(next);
+  }, []);
+  const updateProfile = useCallback((next: Profile | null) => {
+    profileRef.current = next;
+    setProfile(next);
+  }, []);
+  const updateStatus = useCallback((next: AuthStatus) => {
+    statusRef.current = next;
+    setStatus(next);
+  }, []);
+
+  const loadProfile = useCallback((userId: string, generation: number): Promise<void> => {
+    if (!supabase) return Promise.resolve();
+    const pending = pendingProfileRef.current;
+    if (pending?.userId === userId && pending.generation === generation) return pending.promise;
+
+    const promise = (async () => {
+      try {
+        const { data, error: profileError } = await supabase
+          .from("profiles")
+          .select("*")
+          .eq("id", userId)
+          .maybeSingle();
+        if (!mountedRef.current || generation !== generationRef.current) return;
+
+        if (profileError) {
+          setError(PROFILE_RETRY_MESSAGE);
+          // A transient profile request must not evict a role already verified
+          // in this runtime. On a cold/offline start, keep the startup gate up.
+          updateStatus(profileRef.current?.id === userId ? "authenticated" : "error");
+          return;
+        }
+
+        updateProfile(data ? (data as Profile) : null);
+        setError(null);
+        // A missing/inactive/unknown profile still has a Supabase session, but
+        // receives no role privileges; existing route checks remain decisive.
+        updateStatus("authenticated");
+      } catch {
+        if (!mountedRef.current || generation !== generationRef.current) return;
+        setError(PROFILE_RETRY_MESSAGE);
+        updateStatus(profileRef.current?.id === userId ? "authenticated" : "error");
+      }
+    })();
+
+    pendingProfileRef.current = { userId, generation, promise };
+    void promise.finally(() => {
+      if (pendingProfileRef.current?.promise === promise) pendingProfileRef.current = null;
+    });
+    return promise;
+  }, [updateProfile, updateStatus]);
+
+  const adoptSession = useCallback(async (next: Session, forceProfileCheck = false) => {
+    const previousUserId = sessionRef.current?.user.id;
+    const userId = next.user.id;
+    const changedUser = previousUserId !== userId;
+    if (changedUser) {
+      generationRef.current += 1;
+      if (profileRef.current?.id !== userId) updateProfile(null);
+      updateStatus("initializing");
+    } else if (profileRef.current?.id === userId) {
+      updateStatus("authenticated");
+    } else {
+      updateStatus("initializing");
+    }
+    updateSession(next);
+    setError(null);
+
+    if (changedUser || forceProfileCheck || profileRef.current?.id !== userId) {
+      await loadProfile(userId, generationRef.current);
+    }
+  }, [loadProfile, updateProfile, updateSession, updateStatus]);
+
+  const clearSession = useCallback(() => {
+    generationRef.current += 1;
+    pendingProfileRef.current = null;
+    updateSession(null);
+    updateProfile(null);
+    setError(null);
+    updateStatus("unauthenticated");
+  }, [updateProfile, updateSession, updateStatus]);
+
+  const restoreSession = useCallback(async () => {
+    if (!isConnected || !supabase) {
+      clearSession();
+      return;
+    }
+
+    const startingGeneration = generationRef.current;
+    if (!profileRef.current) updateStatus("initializing");
+    setError(null);
+    try {
+      const { data, error: sessionError } = await supabase.auth.getSession();
+      // An auth event (especially a sign-out in another tab) that arrived
+      // while this read was pending takes precedence over its older result.
+      if (!mountedRef.current || startingGeneration !== generationRef.current) return;
+      if (sessionError) {
+        setError(PROFILE_RETRY_MESSAGE);
+        updateStatus(profileRef.current ? "authenticated" : "error");
+        return;
+      }
+      if (!data.session) {
+        clearSession();
+        return;
+      }
+      await adoptSession(data.session);
+    } catch {
+      if (!mountedRef.current || startingGeneration !== generationRef.current) return;
+      setError(PROFILE_RETRY_MESSAGE);
+      updateStatus(profileRef.current ? "authenticated" : "error");
+    }
+  }, [adoptSession, clearSession, updateStatus]);
+
+  retryRef.current = restoreSession;
+
+  useEffect(() => {
+    mountedRef.current = true;
+    if (!isConnected || !supabase) {
+      clearSession();
+      return () => { mountedRef.current = false; };
+    }
+
+    // Subscribe before getSession so sign-in/sign-out cannot fall into a gap.
+    // INITIAL_SESSION is deliberately ignored here: getSession is the single
+    // authoritative initial restore read, avoiding transient-null event races.
+    const { data: listener } = supabase.auth.onAuthStateChange((event, nextSession) => {
+      if (!mountedRef.current || event === "INITIAL_SESSION") return;
+      if (event === "SIGNED_OUT") {
+        clearSession();
+        return;
+      }
+      if (!nextSession) return;
+
+      // Supabase auth callbacks must stay synchronous. Profile work is queued
+      // after the SDK finishes notifying its listeners.
+      queueMicrotask(() => {
+        if (!mountedRef.current) return;
+        void adoptSession(nextSession, event === "SIGNED_IN" || event === "USER_UPDATED");
+      });
+    });
+
+    void restoreSession();
+
+    const revalidate = async () => {
+      if (!mountedRef.current || !sessionRef.current || !supabase) return;
+      const generation = generationRef.current;
+      try {
+        const { data, error: userError } = await supabase.auth.getUser();
+        if (!mountedRef.current || generation !== generationRef.current || userError || !data.user) return;
+        if (data.user.id !== sessionRef.current?.user.id) return;
+        await loadProfile(data.user.id, generation);
+      } catch {
+        // A temporary network failure never clears a verified in-memory role.
+      }
+    };
+    const interval = window.setInterval(() => {
+      if (document.visibilityState === "visible") void revalidate();
+    }, 15_000);
+    const onFocus = () => { if (document.visibilityState === "visible") void revalidate(); };
+    const onVisibility = () => { if (document.visibilityState === "visible") void revalidate(); };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisibility);
+
+    return () => {
+      mountedRef.current = false;
+      window.clearInterval(interval);
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibility);
+      listener.subscription.unsubscribe();
+    };
+  }, [adoptSession, clearSession, loadProfile, restoreSession]);
 
   const refreshProfile = useCallback(async () => {
     if (!supabase) return;
-    const { data: authData, error: authError } = await supabase.auth.getUser();
-    if (authError || !authData.user) {
-      setProfile(null);
-      setLoading(false);
+    const current = sessionRef.current;
+    if (!current) {
+      await restoreSession();
       return;
     }
-    const { data, error } = await supabase
-      .from("profiles")
-      .select("*")
-      .eq("id", authData.user.id)
-      .maybeSingle();
-    setProfile(!error && data ? (data as Profile) : null);
-    setLoading(false);
-  }, []);
+    await loadProfile(current.user.id, generationRef.current);
+  }, [loadProfile, restoreSession]);
 
-  useEffect(() => {
-    if (!isConnected || !supabase) {
-      setLoading(false);
-      return;
-    }
-
-    let mounted = true;
-
-    const loadProfile = async (userId: string) => {
-      if (!supabase) return;
-      const { data, error } = await supabase
-        .from("profiles")
-        .select("*")
-        .eq("id", userId)
-        .maybeSingle();
-      if (!mounted) return;
-      setProfile(!error && data ? (data as Profile) : null);
-      setLoading(false);
-    };
-
-    supabase.auth.getSession().then(({ data }) => {
-      if (!mounted) return;
-      if (data.session) {
-        void loadProfile(data.session.user.id);
-      } else {
-        setProfile(null);
-        setLoading(false);
-      }
-    });
-
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, nextSession) => {
-      if (!mounted) return;
-      if (nextSession) {
-        void loadProfile(nextSession.user.id);
-      } else {
-        setProfile(null);
-        setLoading(false);
-      }
-    });
-
-    return () => {
-      mounted = false;
-      listener.subscription.unsubscribe();
-    };
-  }, []);
+  const retryBootstrap = useCallback(() => retryRef.current(), []);
 
   const signOut = useCallback(async () => {
-    if (supabase) await supabase.auth.signOut();
-    setProfile(null);
-    setLoading(false);
-  }, []);
+    if (supabase) {
+      const { error: signOutError } = await supabase.auth.signOut();
+      if (signOutError) throw signOutError;
+    }
+    clearSession();
+  }, [clearSession]);
 
-  // Both student and student_org get full student experience access
   const isStudent = !!profile && (profile.role === "student" || profile.role === "student_org") && profile.is_active;
   const isStudentOrg = !!profile && profile.role === "student_org" && profile.is_active;
+  const isAdmin = !!profile && profile.role === "admin" && profile.is_active;
   const username = profile
-    ? [profile.first_name, profile.last_name].filter(Boolean).join(" ") ||
-      profile.email.split("@")[0] ||
-      "Student"
+    ? [profile.first_name, profile.last_name].filter(Boolean).join(" ") || profile.email.split("@")[0] || "Student"
     : "";
   const role = profile?.role === "student" ? "student" : profile?.role === "student_org" ? "student_org" : "faculty";
 
-  return (
-    <StudentAuthContext.Provider value={{ profile, loading, isStudent, isStudentOrg, username, role, refreshProfile, signOut }}>
-      {children}
-    </StudentAuthContext.Provider>
-  );
+  const value = useMemo<AuthState>(() => ({
+    session, profile, status, loading: status === "initializing" || status === "error", error,
+    isAdmin, isStudent, isStudentOrg, username, role, refreshProfile, retryBootstrap, signOut,
+  }), [session, profile, status, error, isAdmin, isStudent, isStudentOrg, username, role, refreshProfile, retryBootstrap, signOut]);
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
-/**
- * Drop-in replacement for the old useStudentAuth hook.
- * Reads from context instead of fetching independently.
- */
+/** Backwards-compatible provider name used by older tests and integrations. */
+export function StudentAuthProvider({ children }: { children: ReactNode }) {
+  return <AuthProvider>{children}</AuthProvider>;
+}
+
+const EMPTY_AUTH_STATE: AuthState = {
+  session: null,
+  profile: null,
+  status: "initializing",
+  loading: true,
+  error: null,
+  isAdmin: false,
+  isStudent: false,
+  isStudentOrg: false,
+  username: "",
+  role: "faculty",
+  refreshProfile: async () => {},
+  retryBootstrap: async () => {},
+  signOut: async () => {},
+};
+
+export function useAuth(): AuthState {
+  return useContext(AuthContext) ?? EMPTY_AUTH_STATE;
+}
+
+/** Drop-in compatibility hook for existing student UI. */
+export type StudentAuthState = Pick<AuthState, "profile" | "loading" | "isStudent" | "isStudentOrg" | "username" | "role" | "refreshProfile" | "signOut">;
 export function useStudentAuth(): StudentAuthState {
-  const ctx = useContext(StudentAuthContext);
-  if (!ctx) {
-    // Fallback for components rendered outside the provider (shouldn't happen
-    // in normal app flow, but guards against edge cases during testing).
-    return {
-      profile: null,
-      loading: true,
-      isStudent: false,
-      isStudentOrg: false,
-      username: "",
-      role: "faculty",
-      refreshProfile: async () => {},
-      signOut: async () => {},
-    };
-  }
-  return ctx;
+  const { profile, loading, isStudent, isStudentOrg, username, role, refreshProfile, signOut } = useAuth();
+  return { profile, loading, isStudent, isStudentOrg, username, role, refreshProfile, signOut };
 }

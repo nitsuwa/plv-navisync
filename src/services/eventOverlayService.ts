@@ -9,6 +9,7 @@
  * (map_element kind "event_overlay") — no new DB tables required.
  */
 import { getSupabase } from "../lib/supabase";
+import { genId } from "../components/map-builder/constants";
 import { campusService, resolveActiveCampusId } from "./campusService";
 import { logActivity } from "./activityLogService";
 import type {
@@ -79,10 +80,6 @@ const MOCK_OVERLAYS: CampusEventOverlay[] = [
 ];
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
-
-function generateId(): string {
-  return `eo-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-}
 
 /**
  * Convert a Supabase campus event_overlay map_element row
@@ -218,7 +215,8 @@ export async function createEventOverlay(
     }
   }
 
-  const id = generateId();
+  // Use the shared Map Builder UUID identity source for the event and its row.
+  const id = genId("event-overlay");
   const overlay: CampusEventOverlay = {
     id,
     title: input.title,
@@ -237,12 +235,12 @@ export async function createEventOverlay(
     createdByUserId,
   };
 
-  // Save as a map_element with kind "event_overlay". The database generates
-  // the authoritative row id — we must return it (not the temp client id)
-  // so the editor route /student/events/:id/edit can find the overlay.
+  // Older records generated an `eo-...` metadata ID while PostgreSQL
+  // generated a separate UUID row ID. Persist one canonical ID in both places.
   const { data: inserted, error } = await supabase
     .from("map_elements")
     .insert({
+      id,
       campus_id: campusId,
       element_type: "event_overlay",
       name: input.title,
@@ -368,7 +366,7 @@ export async function updateEventOverlayLayout(
 
   const { data: existing, error: fetchError } = await supabase
     .from("map_elements")
-    .select("id, metadata")
+    .select("id, campus_id, name, metadata")
     .eq("id", overlayId)
     .single();
 
@@ -391,8 +389,10 @@ export async function updateEventOverlayLayout(
 
   await logActivity({
     action: "event_overlay.update_layout",
+    campusId: existing.campus_id,
     entityType: "event_overlay",
     entityId: overlayId,
+    metadata: { title: typeof metadata.title === "string" ? metadata.title : existing.name },
   });
 }
 
@@ -410,7 +410,7 @@ export async function submitEventOverlayLayout(
 
   const { data: existing, error: fetchError } = await supabase
     .from("map_elements")
-    .select("id, metadata")
+    .select("id, campus_id, name, metadata")
     .eq("id", overlayId)
     .eq("element_type", "event_overlay")
     .single();
@@ -435,8 +435,10 @@ export async function submitEventOverlayLayout(
 
   await logActivity({
     action: "event_overlay.submit",
+    campusId: existing.campus_id,
     entityType: "event_overlay",
     entityId: overlayId,
+    metadata: { title: typeof metadata.title === "string" ? metadata.title : existing.name },
   });
 }
 
@@ -545,7 +547,7 @@ export async function reviewEventOverlay(
 
   const { data: existing, error: fetchError } = await supabase
     .from("map_elements")
-    .select("id, metadata")
+    .select("id, campus_id, name, metadata")
     .eq("id", overlayId)
     .single();
 
@@ -571,9 +573,14 @@ export async function reviewEventOverlay(
 
   await logActivity({
     action: `event_overlay.${decision}`,
+    campusId: existing.campus_id,
     entityType: "event_overlay",
     entityId: overlayId,
-    metadata: { status: decision, adminComment },
+    metadata: {
+      status: decision,
+      adminComment,
+      title: typeof metadata.title === "string" ? metadata.title : existing.name,
+    },
   });
 }
 
@@ -582,6 +589,14 @@ export async function reviewEventOverlay(
  */
 export async function deleteEventOverlay(overlayId: string): Promise<void> {
   const supabase = getSupabase();
+
+  const { data: existing, error: fetchError } = await supabase
+    .from("map_elements")
+    .select("id, campus_id, name, metadata")
+    .eq("id", overlayId)
+    .eq("element_type", "event_overlay")
+    .maybeSingle();
+  if (fetchError) throw fetchError;
 
   const { error } = await supabase
     .from("map_elements")
@@ -593,8 +608,14 @@ export async function deleteEventOverlay(overlayId: string): Promise<void> {
 
   await logActivity({
     action: "event_overlay.delete",
+    campusId: existing?.campus_id,
     entityType: "event_overlay",
     entityId: overlayId,
+    metadata: existing ? {
+      title: typeof (existing.metadata as Record<string, unknown> | null)?.title === "string"
+        ? (existing.metadata as Record<string, unknown>).title
+        : existing.name,
+    } : undefined,
   });
 }
 

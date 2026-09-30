@@ -5,8 +5,10 @@ import {
   CampusDeletionError,
   CampusServiceError,
   cleanupCampusStorage,
+  comingSoonCampusFromSummary,
   createCampus,
   listCampuses,
+  listComingSoonCampuses,
   listPublishedCampusSnapshots,
   mergePublishedCampusAppearance,
   normalizeCampusCode,
@@ -179,6 +181,20 @@ describe("createCampus (create/INSERT boundary)", () => {
     expect(created).toMatchObject({ id: "c1", code: "TST", canvasW: 900, canvasH: 680 });
   });
 
+  it("creates a Coming Soon row without marking it published", async () => {
+    const insert = okInsert({ ...campusRow, status: "coming_soon" });
+    makeClient(insert);
+    const created = await createCampus({ name: "Annex", code: "ANNEX" }, "coming_soon");
+
+    expect(insert).toHaveBeenCalledWith(expect.objectContaining({ status: "coming_soon" }));
+    expect(created).toMatchObject({
+      lifecycleStatus: "coming_soon",
+      publishStatus: "draft",
+      visibleToStudents: true,
+      buildings: [],
+    });
+  });
+
   it("fails fast on an empty code — the Supabase INSERT is never attempted", async () => {
     const insert = vi.fn();
     makeClient(insert);
@@ -224,6 +240,33 @@ describe("createCampus (create/INSERT boundary)", () => {
       expect.objectContaining({ code: "23514", details: expect.stringContaining("Failing row") })
     );
     consoleError.mockRestore();
+  });
+});
+
+describe("Coming Soon student metadata", () => {
+  it("maps only announcement fields into an empty campus shell", () => {
+    const campus = comingSoonCampusFromSummary({
+      id: "soon-1", name: "PLV Annex", code: "ANNEX", description: "Opening soon",
+      address: "Lingayen", city: "Lingayen", province: "Pangasinan", theme_color: "#123456",
+    });
+    expect(campus).toMatchObject({
+      id: "soon-1", name: "PLV Annex", city: "Lingayen", themeColor: "#123456",
+      lifecycleStatus: "coming_soon", publishStatus: "draft", visibleToStudents: true,
+      buildings: [], navNodes: [], navEdges: [],
+    });
+    expect(campus).not.toHaveProperty("logoPath");
+  });
+
+  it("loads Coming Soon metadata through the dedicated allowlisted RPC", async () => {
+    const rpc = vi.fn().mockResolvedValue({
+      data: [{ id: "soon-1", name: "PLV Annex", code: "ANNEX", description: null, address: null, city: null, province: null, theme_color: "#1e3a5f" }],
+      error: null,
+    });
+    vi.mocked(getSupabase).mockReturnValue({ rpc } as never);
+    const campuses = await listComingSoonCampuses();
+    expect(rpc).toHaveBeenCalledWith("list_coming_soon_campuses");
+    expect(campuses).toHaveLength(1);
+    expect(campuses[0].buildings).toEqual([]);
   });
 });
 

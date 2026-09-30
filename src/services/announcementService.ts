@@ -121,7 +121,8 @@ export async function getPublishedAnnouncements(): Promise<CampusAnnouncement[]>
       // Filter expiry client-side to avoid brittle PostgREST `or()` filters.
       const now = Date.now();
       const visible = data.filter(
-        (row) => !row.expires_at || new Date(row.expires_at).getTime() >= now
+        (row) => (!row.starts_at || new Date(row.starts_at).getTime() <= now)
+          && (!row.expires_at || new Date(row.expires_at).getTime() >= now)
       );
       if (visible.length > 0) return visible.map(toCampusAnnouncement);
     }
@@ -129,6 +130,21 @@ export async function getPublishedAnnouncements(): Promise<CampusAnnouncement[]>
     console.warn("Using mock announcements fallback:", err);
   }
   return MOCK_ANNOUNCEMENTS;
+}
+
+/** The latest currently published Emergency-severity announcement for the public banner. */
+export async function getActiveEmergencyAnnouncement(): Promise<CampusAnnouncement | null> {
+  const { data, error } = await getSupabase()
+    .from("announcements")
+    .select("*")
+    .eq("status", "published")
+    .eq("priority", "urgent")
+    .is("archived_at", null)
+    .order("created_at", { ascending: false })
+    .limit(1);
+  if (error) throw error;
+  const row = data?.[0];
+  return row ? toCampusAnnouncement(row) : null;
 }
 
 // ── Admin announcement management ─────────────────────────────────────────
@@ -232,6 +248,7 @@ export async function archiveAnnouncement(id: string): Promise<void> {
 
 export const announcementService = {
   getPublishedAnnouncements,
+  getActiveEmergencyAnnouncement,
   listAnnouncements,
   createAnnouncement,
   updateAnnouncement,

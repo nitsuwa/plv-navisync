@@ -1,5 +1,6 @@
 import { getSupabase } from "../lib/supabase";
 import { assertFloorPhysicalReferences, normalizeFloor } from "../lib/floorPlanNormalization";
+import { repairInvalidFloorMapElementIds } from "../lib/physicalFloorIntegrity";
 import { nextFloorNumberForBuilding } from "../lib/floorManagement";
 import { syncEntranceNodePositions } from "../lib/navigationGraph";
 import { pruneOrphanedIndoorNodes, syncIndoorLinkedNodePositions } from "../lib/indoorNavigationGraph";
@@ -61,7 +62,13 @@ export function validateCampusStructurePayload(payload: CampusStructurePayload):
     if (buildingCodes.has(normalizedCode)) throw new Error(`Building code '${normalizedCode}' is already in use.`);
     buildingCodes.add(normalizedCode);
   }
-  const floorsById = new Map<string, string>();
+  const floorsById = new Map<string, { buildingId: string; label: string }>();
+  const buildingsById = new Map(payload.buildings.map((building) => {
+    const name = typeof building.name === "string" ? building.name.trim() : "";
+    const code = typeof building.code === "string" ? building.code.trim() : "";
+    const label = name && code ? `${name} (${code})` : name || code || String(building.id);
+    return [String(building.id), { label, id: String(building.id) }];
+  }));
   for (const floor of payload.floors) {
     requireUuid(floor.id, "Floor identity");
     requireUuid(floor.building_id, `Floor "${String(floor.id)}" Building identity`);
@@ -69,7 +76,31 @@ export function validateCampusStructurePayload(payload: CampusStructurePayload):
     const buildingId = String(floor.building_id);
     if (!buildingIds.has(buildingId)) throw new Error(`Floor "${id}" refers to missing Building "${buildingId}" in the save payload.`);
     if (floorsById.has(id)) throw new Error(`Campus save payload contains duplicate Floor ID "${id}".`);
-    floorsById.set(id, buildingId);
+    floorsById.set(id, { buildingId, label: typeof floor.name === "string" ? floor.name : id });
+  }
+  const invalidElements = payload.map_elements.filter((elementRow) =>
+    typeof elementRow.id !== "string" || !DATABASE_UUID.test(elementRow.id),
+  );
+  if (invalidElements.length > 0) {
+    const details = invalidElements.map((elementRow) => {
+      const diagnostic = payloadElementDiagnostic(elementRow);
+      const buildingId = typeof elementRow.building_id === "string" ? elementRow.building_id : undefined;
+      const floorId = typeof elementRow.floor_id === "string" ? elementRow.floor_id : undefined;
+      const floor = floorId ? floorsById.get(floorId) : undefined;
+      const owningBuildingId = floor?.buildingId ?? buildingId;
+      const building = owningBuildingId ? buildingsById.get(owningBuildingId) : undefined;
+      const floorLabel = floor
+        ? `Floor "${floor.label}" (ID "${floorId}")`
+        : floorId ? `Floor ID "${floorId}"` : undefined;
+      const buildingLabel = building
+        ? `Building "${building.label}" (ID "${building.id}")`
+        : buildingId ? `Building ID "${buildingId}"` : undefined;
+      const ownerLabel = [floorLabel, buildingLabel].filter(Boolean).join(" in ");
+      const readableType = mapElementHumanType(elementRow, diagnostic.sourceCollection);
+      const name = typeof diagnostic.name === "string" && diagnostic.name.trim() ? ` '${diagnostic.name.trim()}'` : "";
+      return `${readableType}${name} on ${ownerLabel || "the Campus"} has invalid map element ID '${diagnostic.id}' (expected UUID format).`;
+    });
+    throw new Error(`Map element identity validation failed: ${details.join(" ")}`);
   }
   const seenElementIds = new Set<string>();
   for (const elementRow of payload.map_elements) {
@@ -85,7 +116,7 @@ export function validateCampusStructurePayload(payload: CampusStructurePayload):
     }
     if (floorId) {
       requireUuid(floorId, `Map element "${id}" Floor identity`);
-      const owner = floorsById.get(floorId);
+      const owner = floorsById.get(floorId)?.buildingId;
       if (!owner) throw new Error(`Map element "${id}" refers to missing Floor "${floorId}" in the save payload.`);
       if (!buildingId || owner !== buildingId) throw new Error(`Map element "${id}" has inconsistent Building/Floor ownership in the save payload.`);
     }
@@ -94,8 +125,9 @@ export function validateCampusStructurePayload(payload: CampusStructurePayload):
 
 function payloadElementCollection(kind: string): string {
   const collections: Record<string, string> = {
-    room: "room", floor_path: "floor_path", wall: "wall", door: "door", window: "window",
-    furniture: "furniture", stairs: "stairs", ramp: "ramp", elevator: "elevator", label: "label",
+    room: "rooms", floor_path: "paths", hallway: "paths", wall: "walls", door: "doors", window: "windows",
+    furniture: "furniture", stairs: "stairs", ramp: "ramps", elevator: "elevators", label: "labels",
+    event_overlay: "eventOverlays",
   };
   return collections[kind] ?? `unknown (${kind || "missing kind"})`;
 }
@@ -104,16 +136,43 @@ function payloadElementDiagnostic(row: JsonObject) {
   const metadata = row.metadata && typeof row.metadata === "object" && !Array.isArray(row.metadata)
     ? row.metadata as Record<string, Json | undefined>
     : {};
-  const kind = typeof metadata.kind === "string" ? metadata.kind : "";
+  const ui = metadata.ui && typeof metadata.ui === "object" && !Array.isArray(metadata.ui)
+    ? metadata.ui as Record<string, Json | undefined>
+    : {};
+  const kind = typeof metadata.kind === "string" ? metadata.kind : typeof row.element_type === "string" ? row.element_type : "";
   return {
-    id: String(row.id),
+    id: typeof row.id === "string" ? row.id : String(row.id ?? "<missing>"),
     kind: kind || undefined,
     element_type: row.element_type,
-    name: row.name,
+    name: [row.name, ui.name, ui.label, ui.text].find((value): value is string => typeof value === "string" && value.trim().length > 0),
     building_id: row.building_id,
     floor_id: row.floor_id,
     sourceCollection: payloadElementCollection(kind),
   };
+}
+
+function mapElementHumanType(row: JsonObject, collection: string): string {
+  const labels: Record<string, string> = {
+    room: "Room", floor_path: "Floor path", hallway: "Floor path", wall: "Wall", door: "Door", window: "Window",
+    furniture: "Furniture", stairs: "Stair", ramp: "Ramp", elevator: "Elevator", label: "Label",
+    event_overlay: "Student event",
+  };
+  const elementType = typeof row.element_type === "string" ? row.element_type : "";
+  const metadata = row.metadata && typeof row.metadata === "object" && !Array.isArray(row.metadata)
+    ? row.metadata as Record<string, Json | undefined>
+    : {};
+  const kind = typeof metadata.kind === "string" ? metadata.kind : "";
+  if (kind === "event_overlay") return "Student event";
+  if (elementType === "hallway") {
+    const metadata = row.metadata && typeof row.metadata === "object" && !Array.isArray(row.metadata)
+      ? row.metadata as Record<string, Json | undefined>
+      : {};
+    const ui = metadata.ui && typeof metadata.ui === "object" && !Array.isArray(metadata.ui)
+      ? metadata.ui as Record<string, Json | undefined>
+      : {};
+    return Array.isArray(ui.points) ? "Floor path" : "Map element";
+  }
+  return labels[elementType] ?? (collection.startsWith("unknown") ? "Map element" : collection.replace(/s$/, "").replace(/^./, (letter) => letter.toUpperCase()));
 }
 
 async function verifyPayloadMapElementsPersisted(campusId: string, payload: CampusStructurePayload, rows: CampusStructureRows): Promise<void> {
@@ -915,7 +974,14 @@ export function hydrateCampusStructure(campus: Campus, rows: CampusStructureRows
   }) as CampusBuilding[];
   const top = <T>(kind: StructureKind) => rows.mapElements
     .filter((item) => !item.floor_id && structureKindForRow(item) === kind)
-    .map((item) => uiFrom<T>(item.metadata))
+    .map((item) => {
+      const value = uiFrom<T>(item.metadata);
+      if (!value || kind !== "event_overlay") return value;
+      // Legacy event rows stored an `eo-...` ID in their UI metadata even
+      // though map_elements.id is the canonical UUID. The persisted row ID is
+      // stable and authoritative, so use it while preserving event data.
+      return { ...value, id: item.id } as T;
+    })
     .filter((v): v is T => Boolean(v));
   const canvasAppearance = top<Pick<Campus, "canvasGroundMaterial" | "canvasGroundColor" | "canvasGroundTexture" | "canvasColor">>("canvas_appearance")[0];
   const hydratedNavNodes = rows.navigationNodes
@@ -1053,7 +1119,11 @@ export const entranceService = { ...mapElementService, list: async (campusId: st
 export const campusStructureService = {
   async load(campus: Campus): Promise<Campus> { return hydrateCampusStructure(campus, await selectStructure(campus.id)); },
   async save(campus: Campus): Promise<Campus> {
-    const canonicalCandidate = canonicalizeCampusStructureForPersistence(campus);
+    const identityRepair = repairInvalidFloorMapElementIds(campus);
+    if (identityRepair.repairs.length > 0 && import.meta.env.DEV) {
+      console.warn("[CampusStructure] Repaired malformed map element IDs before saving", identityRepair.repairs);
+    }
+    const canonicalCandidate = canonicalizeCampusStructureForPersistence(identityRepair.campus);
     const initialPayload = serializeCampusStructure(canonicalCandidate);
     validateCampusStructurePayload(initialPayload);
     const payload = await validateBuildingCodeAvailability(campus.id, initialPayload);

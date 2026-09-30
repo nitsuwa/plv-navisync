@@ -33,6 +33,9 @@ export function StudentPreview({ campus, validationIssues, onBack, onPublish, on
 
   const blockers = useMemo(() => validationIssues.filter((issue) => issue.severity === "error"), [validationIssues]);
   const warnings = useMemo(() => validationIssues.filter((issue) => issue.severity === "warning"), [validationIssues]);
+  const previewLabel = campus.lifecycleStatus === "coming_soon"
+    ? "Coming Soon Preview"
+    : campus.publishStatus === "published" ? "Published Map Preview" : "Draft Preview";
 
   const submitPublish = async () => {
     setPublishing(true);
@@ -63,7 +66,7 @@ export function StudentPreview({ campus, validationIssues, onBack, onPublish, on
         <div className="pointer-events-auto flex max-w-full items-center gap-1.5 rounded-xl border border-primary/25 bg-card/95 px-2 py-2 shadow-lg backdrop-blur-xl sm:gap-2 sm:px-2.5">
           <div className="flex min-w-0 items-center gap-1.5 pr-0.5">
             <Globe2 className="h-3.5 w-3.5 shrink-0 text-primary" />
-            <p className="truncate text-[10px] font-extrabold uppercase tracking-[0.14em] text-primary">Student Preview</p>
+            <p className="truncate text-[10px] font-extrabold uppercase tracking-[0.14em] text-primary">{previewLabel}</p>
           </div>
           <button onClick={onBack} className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-border px-2.5 text-[11px] font-bold text-foreground hover:bg-muted" aria-label="Back to editor">
             <ArrowLeft className="h-3.5 w-3.5" /> <span className="hidden sm:inline">Back to Editor</span><span className="sm:hidden">Back</span>
@@ -126,12 +129,12 @@ export function StudentPreview({ campus, validationIssues, onBack, onPublish, on
                 <div className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-xl", blockers.length ? "bg-red-100 text-red-600" : warnings.length ? "bg-amber-100 text-amber-600" : "bg-emerald-100 text-emerald-600")}>
                   {blockers.length ? <AlertTriangle className="h-4 w-4" /> : <Globe2 className="h-4 w-4" />}
                 </div>
-                <div className="min-w-0 flex-1"><h2 className="text-base font-extrabold text-foreground">Publish Campus?</h2><p className="mt-0.5 text-xs text-muted-foreground">Students will see this saved version of {campus.name}.</p></div>
+                <div className="min-w-0 flex-1"><h2 className="text-base font-extrabold text-foreground">{blockers.length ? "Campus isn’t ready to publish yet" : "Publish Campus?"}</h2><p className="mt-0.5 text-xs text-muted-foreground">Students will see this saved version of {campus.name}.</p></div>
                 <button onClick={() => setConfirmOpen(false)} disabled={publishing} className="rounded-lg p-1 text-muted-foreground hover:bg-muted" aria-label="Close publish dialog"><X className="h-4 w-4" /></button>
               </div>
               {(blockers.length > 0 || warnings.length > 0) && (
                 <div className="mt-4 space-y-2 rounded-xl border border-border/70 bg-muted/20 p-3">
-                  {blockers.length > 0 && <div><p className="text-[10px] font-extrabold uppercase tracking-wider text-red-600">Blocking issues ({blockers.length})</p><p className="mt-1 text-xs text-muted-foreground">Fix these issues before publishing.</p></div>}
+                  {blockers.length > 0 && <div><p className="text-[10px] font-extrabold uppercase tracking-wider text-red-600">What needs attention ({blockers.length})</p><ul className="mt-1.5 list-disc space-y-1 pl-4 text-xs text-muted-foreground">{blockers.slice(0, 6).map((issue, index) => <li key={`${issue.type}-${index}`}>{issue.message}</li>)}</ul>{blockers.length > 6 && <p className="mt-1 text-[10px] text-muted-foreground">And {blockers.length - 6} more blocking issues.</p>}</div>}
                   {warnings.length > 0 && <div><p className="text-[10px] font-extrabold uppercase tracking-wider text-amber-600">Warnings ({warnings.length})</p><p className="mt-1 text-xs text-muted-foreground">Warnings do not prevent publishing.</p></div>}
                 </div>
               )}

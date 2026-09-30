@@ -6,9 +6,31 @@ export const STUDENT_MAP_ZOOM_STEP = 0.2;
 /** Keep every student-map zoom input inside one predictable, readable range. */
 export function clampStudentMapZoom(value: number): number {
   if (!Number.isFinite(value)) return 1;
-  return Number(
-    Math.max(STUDENT_MAP_MIN_ZOOM, Math.min(STUDENT_MAP_MAX_ZOOM, value)).toFixed(2),
-  );
+  return Math.max(STUDENT_MAP_MIN_ZOOM, Math.min(STUDENT_MAP_MAX_ZOOM, value));
+}
+
+/** Time-based exponential camera damping, independent of display refresh rate. */
+export function getCameraSmoothingFactor(deltaMs: number, timeConstantMs = 56): number {
+  if (!Number.isFinite(deltaMs) || deltaMs <= 0) return 0;
+  const safeTimeConstant = Math.max(1, timeConstantMs);
+  return 1 - Math.exp(-Math.min(deltaMs, 64) / safeTimeConstant);
+}
+
+/**
+ * Convert wheel deltas to a bounded logarithmic zoom input. Preserve fine
+ * trackpad movement while normalizing line/page-mode wheels and capping spikes.
+ */
+export function normalizeStudentMapWheelDelta(
+  deltaY: number,
+  deltaMode: number,
+  viewportHeight = 800,
+): number {
+  const pixels = deltaMode === 1
+    ? deltaY * 16
+    : deltaMode === 2
+      ? deltaY * Math.max(1, viewportHeight)
+      : deltaY;
+  return Math.max(-0.2, Math.min(0.2, pixels * 0.0011));
 }
 export interface MapPoint {
   x: number;

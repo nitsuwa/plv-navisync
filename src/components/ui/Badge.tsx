@@ -34,10 +34,10 @@ export function PriorityBadge({ priority }: { priority: string }) {
     urgent: "urgent",
   };
   const labels: Record<string, string> = {
-    low: "Low",
+    low: "Normal",
     normal: "Normal",
-    high: "High",
-    urgent: "Urgent",
+    high: "Important",
+    urgent: "Emergency",
   };
   return <Badge variant={map[priority] ?? "default"}>{labels[priority] ?? priority}</Badge>;
 }

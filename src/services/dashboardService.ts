@@ -1,5 +1,6 @@
 import { getSupabase } from "../lib/supabase";
-import { listActivityLogs } from "./activityLogService";
+import { listActivityLogs, listVisibleActivityHistory, resolveActivityPresentationContexts } from "./activityLogService";
+import { formatAdminActivity, type FormattedAdminActivity } from "./adminActivityPresentation";
 import type { Tables } from "../types/database.generated";
 
 /**
@@ -27,6 +28,7 @@ export interface RecentActivityItem {
   actorName: string | null;
   createdAt: string;
   metadata: Record<string, unknown> | null;
+  formatted: FormattedAdminActivity;
 }
 
 /** Element types that represent usable rooms on a floor plan. */
@@ -98,29 +100,16 @@ export async function getDashboardStats(): Promise<DashboardStats> {
 
 /** Latest activity-log entries with actor display names resolved. */
 export async function getRecentActivity(limit = 6): Promise<RecentActivityItem[]> {
-  const logs = await listActivityLogs({ limit });
-
-  const actorIds = [...new Set(logs.map((l) => l.actor_id).filter(Boolean))] as string[];
-  const names = new Map<string, string>();
-  if (actorIds.length > 0) {
-    const supabase = getSupabase();
-    const { data } = await supabase
-      .from("profiles")
-      .select("id, first_name, last_name")
-      .in("id", actorIds);
-    (data ?? []).forEach((p) => {
-      const full = [p.first_name, p.last_name].filter(Boolean).join(" ");
-      names.set(p.id, full || "Administrator");
-    });
-  }
-
+  const { rows: logs } = await listVisibleActivityHistory({ limit });
+  const contexts = await resolveActivityPresentationContexts(logs);
   return logs.map((l) => ({
     id: l.id,
     action: l.action,
     entityType: l.entity_type,
-    actorName: l.actor_id ? (names.get(l.actor_id) ?? null) : null,
+    actorName: contexts.get(l.id)?.actorName ?? null,
     createdAt: l.created_at,
     metadata: l.metadata as Record<string, unknown> | null,
+    formatted: formatAdminActivity(l, contexts.get(l.id)),
   }));
 }
 
