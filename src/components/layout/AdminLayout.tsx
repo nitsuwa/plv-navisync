@@ -1,5 +1,5 @@
 import { Outlet, useNavigate, useLocation } from "react-router";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { NavigationProgress } from "../ui/NavigationProgress";
 import { UnsavedChangesProvider } from "../map-builder/UnsavedChangesContext";
 import { AdminSidebar } from "./AdminSidebar";
@@ -10,10 +10,16 @@ import { cn } from "../../lib/utils";
 import { PanelLeftClose, PanelLeft, Menu, Bell, User, History, CheckCheck } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import {
+  activityLogErrorMessage,
   activityLogService,
   type ActivityLogRow,
 } from "../../services/activityLogService";
+import { formatAdminActivity } from "../../services/adminActivityPresentation";
+import type { ActivityPresentationContext } from "../../services/activityLogService";
 import { notificationService } from "../../lib/notificationService";
+import {
+  adminNotificationPreferencesService,
+} from "../../services/adminNotificationPreferencesService";
 import { Link } from "react-router";
 
 /** Branded full-screen loader shown while the session/profile is checked. */
@@ -52,39 +58,63 @@ export function AdminLayout() {
     () => typeof window !== "undefined" && window.matchMedia("(max-width: 767.98px)").matches
   );
   const [bellOpen, setBellOpen] = useState(false);
+  const bellOpenRef = useRef(bellOpen);
+  bellOpenRef.current = bellOpen;
   const [logs, setLogs] = useState<ActivityLogRow[]>([]);
+  const [activityContexts, setActivityContexts] = useState<Map<string, ActivityPresentationContext>>(new Map());
+  const [activityFeedLoading, setActivityFeedLoading] = useState(true);
+  const [activityFeedError, setActivityFeedError] = useState<string | null>(null);
   const [unread, setUnread] = useState(0);
   const navigate = useNavigate();
   const location = useLocation();
   const { loading, isAdmin, profile } = useAdminAuth();
 
-  // Load the latest activity logs once the session is confirmed and refresh
-  // whenever the bell is reopened.
+  const loadActivityNotifications = useCallback(async () => {
+    if (loading || !isAdmin) return;
+    setActivityFeedLoading(true);
+    setActivityFeedError(null);
+    try {
+      const [allRows, preferences] = await Promise.all([
+        activityLogService.listVisibleActivityLogs({ limit: 40 }),
+        adminNotificationPreferencesService.get(),
+      ]);
+      const rows = allRows.filter((row) => adminNotificationPreferencesService.isEnabled(row, preferences)).slice(0, 6);
+      const contextMap = await activityLogService.resolveActivityPresentationContexts(rows);
+      setLogs(rows);
+      setActivityContexts(contextMap);
+      setUnread(bellOpenRef.current ? 0 : notificationService.countUnseenLogs(rows, profile?.id));
+    } catch (error) {
+      setActivityFeedError(activityLogErrorMessage(error));
+    } finally {
+      setActivityFeedLoading(false);
+    }
+  }, [isAdmin, loading, profile?.id]);
+
   useEffect(() => {
     if (loading || !isAdmin) return;
-    let mounted = true;
-    const loadLogs = async () => {
-      try {
-        const rows = await activityLogService.listActivityLogs({ limit: 6 });
-        if (!mounted) return;
-        setLogs(rows);
-        setUnread(notificationService.countUnseenLogs(rows));
-      } catch {
-        // Bell stays empty when logs are unavailable.
-      }
+    void loadActivityNotifications();
+    const onActivityCleared = () => void loadActivityNotifications();
+    const onPreferencesUpdated = () => void loadActivityNotifications();
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === "plv-admin-activity-clear-sync") void loadActivityNotifications();
     };
-    loadLogs();
+    window.addEventListener("plv-admin-activity-cleared", onActivityCleared);
+    window.addEventListener("plv-admin-notification-preferences-updated", onPreferencesUpdated);
+    window.addEventListener("storage", onStorage);
     return () => {
-      mounted = false;
+      window.removeEventListener("plv-admin-activity-cleared", onActivityCleared);
+      window.removeEventListener("plv-admin-notification-preferences-updated", onPreferencesUpdated);
+      window.removeEventListener("storage", onStorage);
     };
-  }, [loading, isAdmin]);
+  }, [isAdmin, loadActivityNotifications, loading]);
 
   useEffect(() => {
     if (bellOpen) {
-      notificationService.markLogsSeen();
+      notificationService.markLogsSeen(profile?.id);
       setUnread(0);
+      void loadActivityNotifications();
     }
-  }, [bellOpen]);
+  }, [bellOpen, loadActivityNotifications, profile?.id]);
 
   // Keep the mobile drawer closed when navigating between pages.
   useEffect(() => {
@@ -102,8 +132,11 @@ export function AdminLayout() {
   useEffect(() => {
     if (loading) return;
     // Unauthenticated users AND non-admin accounts are sent to the login page.
-    if (!isAdmin) navigate("/admin", { replace: true });
-  }, [loading, isAdmin, navigate]);
+    if (!isAdmin) {
+      const from = `${location.pathname}${location.search}${location.hash}`;
+      navigate("/admin", { replace: true, state: { from } });
+    }
+  }, [loading, isAdmin, navigate, location.pathname, location.search, location.hash]);
 
   // Show a loader while the session/profile is being checked, and keep showing
   // it for the brief moment after the redirect above is triggered.
@@ -215,12 +248,27 @@ export function AdminLayout() {
                             <History className="h-3 w-3" />
                           </div>
                           <div className="flex-1 min-w-0">
-                            <p className="text-[11px] font-bold text-foreground truncate">{activityLogService.readableActionLabel(l.action)}</p>
-                            <p className="text-[10px] text-muted-foreground truncate">{l.entity_type ?? "system"}</p>
+                            {(() => {
+                              const formatted = formatAdminActivity(l, activityContexts.get(l.id));
+                              return (
+                                <>
+                                  <p className="truncate text-[11px] font-bold text-foreground">{formatted.title}</p>
+                                  <p className="truncate text-[10px] text-muted-foreground">{formatted.notificationText}</p>
+                                  <p className="truncate text-[9px] text-muted-foreground/80">{formatted.category} · {formatted.actorLabel}</p>
+                                </>
+                              );
+                            })()}
                           </div>
-                          <span className="text-[9px] text-muted-foreground font-mono shrink-0">{activityLogService.timeAgoLabel(l.created_at)}</span>
+                          <span className="shrink-0 text-[9px] text-muted-foreground">{formatAdminActivity(l, activityContexts.get(l.id)).relativeTime}</span>
                         </div>
                       ))
+                    ) : activityFeedLoading ? (
+                      <p className="px-4 py-6 text-center text-xs text-muted-foreground">Loading activity…</p>
+                    ) : activityFeedError ? (
+                      <div className="space-y-2 px-4 py-5 text-center">
+                        <p role="alert" className="text-xs font-semibold text-muted-foreground">Couldn’t load activity.</p>
+                        <button onClick={() => void loadActivityNotifications()} className="text-[11px] font-bold text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">Try again</button>
+                      </div>
                     ) : (
                       <p className="px-4 py-6 text-center text-xs text-muted-foreground">No activity yet.</p>
                     )}

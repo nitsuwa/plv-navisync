@@ -103,4 +103,24 @@ describe("useCanvasControls imperative Floor camera", () => {
     expect(result.current.pan).toEqual({ x: -65, y: -65 });
     expect(transform.getAttribute("transform")).toBe("translate(-65,-65) scale(0.9)");
   });
+
+  it("converts pointerdown through the live camera matrix, independent of SVG child target and layout shift", () => {
+    const transform = document.createElementNS("http://www.w3.org/2000/svg", "g");
+    let matrix = { a: 2.5, b: 0, c: 0, d: 2.5, e: 400 + 20, f: 120 - 12 };
+    Object.defineProperty(transform, "getScreenCTM", { value: () => matrix });
+    const { result } = renderHook(() => useCanvasControls(500, 500, { imperativeCamera: true }));
+    attachCanvasRefs(result, transform);
+
+    const screenPoint = { clientX: 400 + 20 + 100 * 2.5, clientY: 120 - 12 + 80 * 2.5 };
+    const emptySvgClick = { ...screenPoint, target: document.createElementNS("http://www.w3.org/2000/svg", "svg") } as unknown as MouseEvent;
+    const childPathClick = { ...screenPoint, target: document.createElementNS("http://www.w3.org/2000/svg", "path") } as unknown as MouseEvent;
+    expect(result.current.getPoint(emptySvgClick, 500, 500)).toEqual({ x: 100, y: 80 });
+    expect(result.current.getPoint(childPathClick, 500, 500)).toEqual({ x: 100, y: 80 });
+
+    // A sidebar can translate the SVG without changing its mocked dimensions.
+    // The old cached-rect path would miss this origin shift.
+    matrix = { ...matrix, e: 760 + 20 };
+    const shiftedClick = { clientX: 760 + 20 + 100 * 2.5, clientY: screenPoint.clientY } as MouseEvent;
+    expect(result.current.getPoint(shiftedClick, 500, 500)).toEqual({ x: 100, y: 80 });
+  });
 });

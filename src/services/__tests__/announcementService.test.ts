@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getSupabase } from "../../lib/supabase";
-import { createAnnouncement, getPublishedAnnouncements, listAnnouncements } from "../announcementService";
+import { createAnnouncement, getActiveEmergencyAnnouncement, getPublishedAnnouncements, listAnnouncements } from "../announcementService";
 
 vi.mock("../../lib/supabase", () => ({ getSupabase: vi.fn() }));
 
@@ -26,6 +26,7 @@ function chainedQuery(data: unknown, error: unknown = null) {
   query.eq = vi.fn(() => query);
   query.is = vi.fn(() => query);
   query.or = vi.fn(() => query);
+  query.limit = vi.fn(() => query);
   query.then = (resolve: (value: unknown) => unknown) => Promise.resolve({ data, error }).then(resolve);
   return query;
 }
@@ -41,6 +42,20 @@ describe("announcement service", () => {
 
     expect(items).toHaveLength(1);
     expect(items[0]).toMatchObject({ id: "a1", title: "Enrollment Open", category: "academic", status: "published" });
+  });
+
+  it("reads only the latest published Emergency-severity announcement for the banner", async () => {
+    const emergency = { ...row, priority: "urgent", title: "Campus Closure", content: "Leave the grounds now." };
+    const query = chainedQuery([emergency]);
+    vi.mocked(getSupabase).mockReturnValue({ from: vi.fn(() => ({ select: vi.fn(() => query) })) } as never);
+
+    const item = await getActiveEmergencyAnnouncement();
+
+    expect(item).toMatchObject({ id: "a1", priority: "urgent", status: "published", title: "Campus Closure" });
+    expect(query.eq).toHaveBeenCalledWith("status", "published");
+    expect(query.eq).toHaveBeenCalledWith("priority", "urgent");
+    expect(query.is).toHaveBeenCalledWith("archived_at", null);
+    expect(query.limit).toHaveBeenCalledWith(1);
   });
 
   it("falls back to curated mocks when the database returns an error", async () => {

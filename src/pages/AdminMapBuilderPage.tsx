@@ -22,7 +22,7 @@ import {
   TestRouteSessionProvider,
   StudentPreview,
 } from "../components/map-builder";
-import { computeLiveValidationIssues } from "../lib/liveValidation";
+import { validateCampusForPublish } from "../lib/campusPublication";
 import type { BulkDeleteFailure, BulkDeleteProgress, BulkDeleteResult } from "../components/map-builder";
 import type { Campus, View, BuildingWizardData, FloorSelection } from "../components/map-builder/types";
 
@@ -416,6 +416,22 @@ export function AdminMapBuilderPage() {
     }
   }, [campuses, refreshCampuses, updateCampusMetadata]);
 
+  const hideComingSoonCampus = useCallback(async (id: string) => {
+    const campus = campuses.find((item) => item.id === id);
+    if (!campus) throw new Error("Campus not found.");
+    if (campus.lifecycleStatus !== "coming_soon" || !campus.databaseUpdatedAt) {
+      throw new Error("Refresh before changing this campus visibility.");
+    }
+    try {
+      const updated = await campusService.hideComingSoon(id, campus.databaseUpdatedAt);
+      updateCampusMetadata(updated);
+      await refreshCampuses();
+      toast.success("Campus Hidden", { description: `Students can no longer see "${campus.name}".` });
+    } catch (error) {
+      toast.error("Could not hide campus", { description: userFacingCampusMessage(error) });
+    }
+  }, [campuses, refreshCampuses, updateCampusMetadata]);
+
   const bulkRestoreCampuses = useCallback(async (ids: string[]) => {
     const selected = ids
       .map((id) => campuses.find((campus) => campus.id === id))
@@ -710,11 +726,13 @@ export function AdminMapBuilderPage() {
   const publishStudentPreview = useCallback(async () => {
     const candidate = studentPreviewCampus;
     if (!candidate) return;
-    const issues = computeLiveValidationIssues(candidate);
-    const errors = issues.filter((issue) => issue.severity === "error").length;
-    const warnings = issues.filter((issue) => issue.severity === "warning").length;
-    if (errors > 0) throw new Error("Fix the blocking validation issues before publishing this campus.");
-    const total = Math.max(1, issues.length);
+    const publicationValidation = validateCampusForPublish(candidate);
+    const errors = publicationValidation.errors.length;
+    const warnings = publicationValidation.warnings.length;
+    if (!publicationValidation.valid) {
+      throw new Error(`Campus isn't ready to publish yet. ${publicationValidation.errors.map((issue) => issue.message).join(" ")}`);
+    }
+    const total = Math.max(1, publicationValidation.issues.length);
     const published = await campusService.publishVersion(candidate, {
       errors,
       warnings,
@@ -902,7 +920,8 @@ export function AdminMapBuilderPage() {
         throw new Error(`A campus with code "${normalizedCode}" already exists. Choose a different code.`);
       }
       if (shouldLogCampusDiagnostics) console.debug("[AdminMapBuilderPage] campusService.create start", { code: normalizedCode });
-      let created = await campusService.create({ ...campusInput(campus), logo_path: null, overview_image_path: null });
+      const initialStatus = campus.lifecycleStatus === "coming_soon" ? "coming_soon" : "draft";
+      let created = await campusService.create({ ...campusInput(campus), logo_path: null, overview_image_path: null }, initialStatus);
       if (requestedLogo || requestedOverview) {
         const [logoPath, overviewPath] = await Promise.all([
           requestedLogo ? campusService.uploadImage(created.id, "logo", requestedLogo) : Promise.resolve(undefined),
@@ -911,7 +930,11 @@ export function AdminMapBuilderPage() {
         created = await campusService.update(created.id, { logo_path: logoPath ?? null, overview_image_path: overviewPath ?? null }, created.databaseUpdatedAt!);
       }
       setCampuses((items) => [...items, created]);
-      toast.success("Campus Created", { description: `"${created.name}" was saved as a private draft.` });
+      toast.success("Campus Created", {
+        description: initialStatus === "coming_soon"
+          ? `"${created.name}" is listed for students as Coming Soon. Its map remains private until it is published.`
+          : `"${created.name}" was saved as a private draft.`,
+      });
       goToSuccess(created.id);
       return true;
     } catch (error) {
@@ -1031,6 +1054,7 @@ export function AdminMapBuilderPage() {
                 onCreate={() => setView({ type: "wizard", step: 1, draft: {} })}
                 onDuplicate={duplicateCampus}
                 onUnpublish={unpublishCampus}
+                onHideComingSoon={hideComingSoonCampus}
                 onArchive={archiveCampus}
                 onRestore={restoreCampus}
                 onBulkRestore={bulkRestoreCampuses}
@@ -1156,7 +1180,6 @@ export function AdminMapBuilderPage() {
           onFinish={(campus) => finishWizard(campus, view.draft.id)}
           onClose={goHome}
           onJumpToStep={jumpToStep}
-          publishingEnabled={false}
         />
       )}
 
@@ -1199,7 +1222,7 @@ export function AdminMapBuilderPage() {
       {studentPreviewCampus && (
         <StudentPreview
           campus={studentPreviewCampus}
-          validationIssues={computeLiveValidationIssues(studentPreviewCampus)}
+          validationIssues={validateCampusForPublish(studentPreviewCampus).issues}
           onBack={closeStudentPreview}
           onPublish={publishStudentPreview}
           onViewPublished={() => { setStudentPreviewCampus(null); window.location.assign("/map"); }}

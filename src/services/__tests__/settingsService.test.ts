@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getSupabase } from "../../lib/supabase";
-import { getSettings, upsertSettings, DEFAULT_SETTINGS } from "../settingsService";
+import { getSettings, upsertSettings, DEFAULT_SETTINGS, normalizePublicPlatformSettings } from "../settingsService";
 
 vi.mock("../../lib/supabase", () => ({ getSupabase: vi.fn() }));
 
@@ -26,6 +26,27 @@ describe("settings service (system_settings persistence)", () => {
     expect(settings.site_name).toBe("PLV NaviSync Test");
     // Untouched keys fall back to defaults.
     expect(settings.contact_email).toBe(DEFAULT_SETTINGS.contact_email);
+  });
+
+  it("normalizes saved student experience and map controls with safe defaults", () => {
+    expect(normalizePublicPlatformSettings({
+      default_campus_id: "campus-2",
+      default_student_landing_page: "map",
+      remember_last_campus: false,
+      default_route_mode: "accessible",
+      animated_route_arrows: false,
+      show_map_labels: false,
+    })).toEqual(expect.objectContaining({
+      defaultCampusId: "campus-2",
+      defaultLandingPage: "map",
+      rememberLastCampus: false,
+      defaultRouteMode: "accessible",
+      animatedRouteArrows: false,
+      showMapLabels: false,
+      showApprovedEventOverlays: true,
+      autoFocusRoute: true,
+      autoFollowFloors: true,
+    }));
   });
 
   it("creates new rows for missing keys and writes an audit entry", async () => {

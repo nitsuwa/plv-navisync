@@ -13,6 +13,10 @@
 const REPORT_SEEN_KEY = "plv-report-status-seen";
 const LOGS_SEEN_KEY = "plv-admin-logs-seen";
 
+function logsSeenStorageKey(adminId?: string | null): string {
+  return adminId ? `${LOGS_SEEN_KEY}:${adminId}` : LOGS_SEEN_KEY;
+}
+
 interface SeenReport {
   id: string;
   status: string;
@@ -107,14 +111,14 @@ export function markReportStatusSeen(
 // ── Admin activity-log unread count ────────────────────────────────────────
 
 /** Number of log rows newer than the last time the bell was opened. */
-export function countUnseenLogs(logs: { created_at: string }[]): number {
-  const lastSeen = readJSON<number>(LOGS_SEEN_KEY, 0);
+export function countUnseenLogs(logs: { created_at: string }[], adminId?: string | null): number {
+  const lastSeen = readJSON<number>(logsSeenStorageKey(adminId), 0);
   return logs.filter((l) => new Date(l.created_at).getTime() > lastSeen).length;
 }
 
 /** Record that the bell was opened (now). */
-export function markLogsSeen(): void {
-  writeJSON(LOGS_SEEN_KEY, Date.now());
+export function markLogsSeen(adminId?: string | null): void {
+  writeJSON(logsSeenStorageKey(adminId), Date.now());
 }
 
 export const notificationService = {

@@ -4,22 +4,26 @@ import type {
   CampusDecorAsset,
   CampusMarker,
   CampusPath,
+  CampusEntrance,
   ExteriorEmergencyStair,
   ExteriorEmergencyStairVisualSize,
 } from "./types";
+import { MARKER_STYLES } from "../../data/mapData";
 import { DECOR_ASSET_MAP, groundTypeForDecorType, isDecorAreaType } from "./constants";
 import { DecorAssetArt } from "./DecorAssetVisual";
 import { CampusGateVisual } from "./CampusGateVisual";
 import { effectiveStackKey } from "../../lib/campusStack";
-import { entranceDisplayName, entranceWorldPosition } from "../../lib/buildingEntrances";
+import { BUILDING_ENTRANCE_TYPE_COLORS, entranceDisplayName, entranceWorldPosition, normalizeEntranceType } from "../../lib/buildingEntrances";
 import { exteriorEmergencyStairWorldPosition } from "../../lib/exteriorEmergencyStairs";
-import { pathRenderStyle } from "../../lib/outdoorPathVisual";
+import { OutdoorPathNetworkArtwork } from "./OutdoorPathNetworkVisuals";
 import { isCampusGate } from "../../lib/campusGates";
 import type { ReadonlyOutdoorCampus, ReadonlyOutdoorEntrance } from "../../lib/readonlyOutdoorCampus";
 import { surfaceCellRuns } from "../../lib/campusSurface";
-import { campusGroundAppearance, campusGroundPatternId } from "../../lib/campusCanvas";
+import { campusAreaGroundAppearance, campusGroundAppearance } from "../../lib/campusCanvas";
 import { decorRenderScale, decorWorldSize } from "../../lib/decorVisual";
 import { EntranceDirectionBadge } from "./EntranceDirectionBadge";
+import { CampusGroundPatternDefs } from "./CampusGroundPatternDefs";
+import { CampusGroundSurface } from "./CampusGroundSurface";
 import { Tooltip } from "../ui/Tooltip";
 
 export interface OutdoorBuildingVisualProps {
@@ -34,6 +38,7 @@ export interface OutdoorBuildingVisualProps {
   applyOpacity?: boolean;
   showName?: boolean;
   showFloorCount?: boolean;
+  showLabels?: boolean;
   labelLayout?: "student" | "editor";
   bodyOpacity?: number;
 }
@@ -184,6 +189,7 @@ export function OutdoorBuildingVisual({
   applyOpacity = true,
   showName = true,
   showFloorCount = true,
+  showLabels = true,
   labelLayout = "student",
   bodyOpacity = 0.88,
 }: OutdoorBuildingVisualProps) {
@@ -265,7 +271,7 @@ export function OutdoorBuildingVisual({
           </clipPath>
         </defs>
       )}
-      <g data-testid="building-label-group" clipPath={labelClip} pointerEvents="none" className="select-none">
+      {(showLabels || selected) && <g data-testid="building-label-group" clipPath={labelClip} pointerEvents="none" className="select-none">
         <text x={cx} y={labelLayout === "editor" ? cy - 9 : cy - 3} textAnchor="middle" fill="white" fontSize={codeFontSize} fontWeight="900" stroke="rgba(0,0,0,0.38)" strokeWidth={2} paintOrder="stroke">{fittedCode.text}</text>
         {showFloorCount && (building.floors ?? []).length > 0 && <text x={cx} y={labelLayout === "editor" ? cy + 4 : cy + 11} textAnchor="middle" fill="rgba(255,255,255,0.9)" fontSize={floorFontSize} fontWeight="700" stroke="rgba(0,0,0,0.28)" strokeWidth={1.2} paintOrder="stroke">{building.floors.length}F</text>}
         {fittedName && (() => {
@@ -278,106 +284,126 @@ export function OutdoorBuildingVisual({
             ? <Tooltip element="g" content={building.name} className="pointer-events-auto">{nameLines}</Tooltip>
             : nameLines;
         })()}
-      </g>
+      </g>}
     </g>
   );
 }
 
 export function OutdoorPathVisual({ path }: { path: CampusPath }) {
   if (!path.points || path.points.length < 2) return null;
-  const points = path.points.map((point) => `${point.x},${point.y}`).join(" ");
-  const closed = path.points.length >= 4 && Math.hypot(
-    path.points[0].x - path.points[path.points.length - 1].x,
-    path.points[0].y - path.points[path.points.length - 1].y,
-  ) < 1;
-  const style = pathRenderStyle(path);
-  const join = style.kind === "road" ? "bevel" : "round";
-  return closed ? (
-    <g data-testid="readonly-campus-path" data-path-id={path.id}>
-      <path d={`M${points.replaceAll(" ", " L")} Z`} fill="none" stroke={style.edge} strokeWidth={style.baseWidth + 2} strokeLinecap="butt" strokeLinejoin={join} />
-      <polygon points={points} fill="none" stroke={style.surface} strokeWidth={style.baseWidth} strokeLinejoin={join} />
-      {style.kind === "road" && <polygon points={points} fill="none" stroke="#f8fafc" strokeWidth={1.2} strokeLinejoin="bevel" strokeDasharray="10 10" opacity={0.72} />}
-    </g>
-  ) : (
-    <g data-testid="readonly-campus-path" data-path-id={path.id}>
-      <polyline points={points} fill="none" stroke={style.edge} strokeWidth={style.baseWidth + 2} strokeLinecap="butt" strokeLinejoin={join} />
-      <polyline points={points} fill="none" stroke={style.surface} strokeWidth={style.baseWidth} strokeLinecap="butt" strokeLinejoin={join} />
-      {style.kind === "road" && <polyline points={points} fill="none" stroke="#f8fafc" strokeWidth={1.2} strokeLinecap="butt" strokeLinejoin="bevel" strokeDasharray="10 10" opacity={0.72} />}
-    </g>
-  );
+  return <OutdoorPathNetworkArtwork paths={[path]} />;
 }
 
-function groundAreaStyle(kind: CampusDecorAsset["groundType"] = "grass") {
-  switch (kind) {
-    case "planted": return { fill: "#b8cfab", stroke: "#739b69", accent: "#8daf7a", pattern: "campus-garden-pattern" };
-    case "plaza": return { fill: "#d8d5ce", stroke: "#a8a29a", accent: "#b8b2a8", pattern: "campus-plaza-pattern" };
-    case "field": return { fill: "#dbe8c2", stroke: "#9db76d", accent: "#b6ca86", pattern: "campus-garden-pattern" };
-    case "parking": return { fill: "#8a9296", stroke: "#626b70", accent: "#f8fafc", pattern: undefined };
-    default: return { fill: "#bfd4b8", stroke: "#7fa876", accent: "#9fbe91", pattern: "campus-lawn-pattern" };
-  }
-}
+const groundAreaAccent = {
+  planted: "#8daf7a",
+  plaza: "#b8b2a8",
+  field: "#9db76d",
+  parking: "#f8fafc",
+  grass: "#9fbe91",
+} as const;
 
-/** Shared read-only surface treatment for authored campus ground patches. */
-export function OutdoorGroundAreaVisual({ asset, gridSize = 20 }: { asset: CampusDecorAsset; gridSize?: number }) {
+/** Shared physical Ground Area artwork used by both Admin Canvas and viewer. */
+export function OutdoorGroundAreaArtwork({ asset, x = asset.x, y = asset.y, width, height, gridSize = 20, selected = false }: {
+  asset: CampusDecorAsset;
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
+  gridSize?: number;
+  selected?: boolean;
+}) {
   const kind = asset.groundType ?? groundTypeForDecorType(asset.type) ?? "grass";
+  const appearance = campusAreaGroundAppearance(asset);
+  const accent = groundAreaAccent[kind as keyof typeof groundAreaAccent] ?? groundAreaAccent.grass;
   if (asset.surfaceCells?.length) {
     const size = Math.max(4, asset.surfaceCellSize ?? gridSize);
-    const style = groundAreaStyle(kind);
     return (
-      <g data-testid="readonly-ground-area" data-ground-type={kind} data-surface-material={kind} opacity={asset.visible === false ? 0 : 1}>
+      <g data-testid="campus-surface-artwork" data-surface-material={kind}>
         {surfaceCellRuns(asset.surfaceCells).map((run) => (
-          <rect key={`${asset.id}-${run.x}-${run.y}`} x={run.x * size} y={run.y * size} width={run.width * size + 0.5} height={size + 0.5} fill={style.fill} />
+          <g key={`${asset.id}-${run.x}-${run.y}`}>
+            <rect x={run.x * size} y={run.y * size} width={run.width * size + 0.5} height={size + 0.5} fill={appearance.color} />
+            {appearance.pattern && <rect x={run.x * size} y={run.y * size} width={run.width * size + 0.5} height={size + 0.5} fill={`url(#${appearance.pattern})`} opacity={0.75} />}
+          </g>
         ))}
       </g>
     );
   }
   const descriptor = DECOR_ASSET_MAP[asset.type];
-  // Keep the legacy fallback in lock-step with the Admin canvas.  Explicit
-  // width/height values are authored geometry and therefore remain untouched;
-  // only older records without those values use the shared decor scale.
-  const width = Math.max(30, asset.width ?? (descriptor?.defaultWidth ?? 150) * decorRenderScale(asset.scale));
-  const height = Math.max(24, asset.height ?? (descriptor?.defaultHeight ?? 95) * decorRenderScale(asset.scale));
+  const drawWidth = Math.max(30, width ?? asset.width ?? (descriptor?.defaultWidth ?? 150) * decorRenderScale(asset.scale));
+  const drawHeight = Math.max(24, height ?? asset.height ?? (descriptor?.defaultHeight ?? 95) * decorRenderScale(asset.scale));
   const areaAsset = asset.type !== "ground-area";
-  const style = groundAreaStyle(kind);
-  const x = asset.x - width / 2;
-  const y = asset.y - height / 2;
+  const left = x - drawWidth / 2;
+  const top = y - drawHeight / 2;
+  const horizontal = drawWidth >= drawHeight;
+  const span = horizontal ? drawWidth : drawHeight;
+  const depth = horizontal ? drawHeight : drawWidth;
+  const aisle = Math.max(14, Math.min(24, depth * 0.28));
+  const stallDepth = Math.max(8, (depth - aisle) / 2);
+  const count = Math.max(2, Math.min(14, Math.floor(span / 22)));
   return (
-    <g data-testid="readonly-ground-area" data-ground-type={kind} transform={`translate(${x},${y}) rotate(${asset.rotation ?? 0},${width / 2},${height / 2})`} opacity={asset.visible === false ? 0 : 1}>
-      <rect width={width} height={height} rx={areaAsset ? 0 : kind === "plaza" || kind === "parking" ? 6 : 12} fill={style.fill} stroke={areaAsset ? "none" : style.stroke} strokeWidth={areaAsset ? 0 : 1.2} />
-      {style.pattern && <rect width={width} height={height} fill={`url(#${style.pattern})`} opacity={0.75} pointerEvents="none" />}
-      {kind === "parking" && <g opacity={0.8}>
-        {(() => {
-          const horizontal = width >= height;
-          const span = horizontal ? width : height;
-          const depth = horizontal ? height : width;
-          const aisle = Math.max(10, Math.min(18, depth * 0.25));
-          const count = Math.max(2, Math.floor(span / Math.max(14, Math.min(28, span / 7))));
-          if (horizontal) {
-            const aisleTop = height / 2 - aisle / 2;
-            const aisleBottom = height / 2 + aisle / 2;
+    <g data-testid="campus-ground-area-artwork" data-ground-type={kind}>
+      <rect x={left} y={top} width={drawWidth} height={drawHeight}
+        rx={areaAsset ? 0 : kind === "plaza" ? 5 : 10} fill={appearance.color}
+        stroke={selected ? "var(--accent)" : areaAsset ? "transparent" : kind === "parking" ? "#626b70" : "transparent"}
+        strokeWidth={selected ? 2 : areaAsset ? 0 : kind === "parking" ? 0.8 : 0} />
+      {appearance.pattern && <rect x={left} y={top} width={drawWidth} height={drawHeight}
+        fill={`url(#${appearance.pattern})`} opacity={0.75} pointerEvents="none" />}
+      {kind === "parking" && (
+        <g data-testid="parking-stalls" pointerEvents="none" opacity={selected ? 0.86 : 0.68}>
+          {asset.type === "parking-lot" && descriptor ? (
+            <svg x={left} y={top} width={drawWidth} height={drawHeight}
+              viewBox={`0 0 ${descriptor.defaultWidth} ${descriptor.defaultHeight}`}
+              preserveAspectRatio="none" overflow="hidden">
+              {/* Keep the canonical Admin Parking Lot surface as well as its
+                  markings and vehicles across editor, preview, and Student. */}
+              <DecorAssetArt descriptor={descriptor} />
+            </svg>
+          ) : (
+          <g>{horizontal ? (() => {
+            const aisleTop = y - aisle / 2;
+            const aisleBottom = y + aisle / 2;
             return <>
-              <line x1={3} y1={height / 2} x2={width - 3} y2={height / 2} stroke="#8b949b" strokeWidth={1.1} opacity={0.6} />
+              <line x1={left + 3} y1={y} x2={left + drawWidth - 3} y2={y} stroke="#8b949b" strokeWidth={1.1} opacity={0.6} />
               {Array.from({ length: count + 1 }, (_, index) => {
-                const x = (index * width) / count;
-                return <g key={`parking-v-${index}`}><line x1={x} y1={3} x2={x} y2={aisleTop - 2} stroke={style.accent} strokeWidth={1.1} /><line x1={x} y1={aisleBottom + 2} x2={x} y2={height - 3} stroke={style.accent} strokeWidth={1.1} /></g>;
+                const px = left + index * drawWidth / count;
+                return <g key={`parking-v-${index}`}><line x1={px} y1={top + 3} x2={px} y2={aisleTop - 2} stroke={accent} strokeWidth={1.1} /><line x1={px} y1={aisleBottom + 2} x2={px} y2={top + drawHeight - 3} stroke={accent} strokeWidth={1.1} /></g>;
               })}
+              <line x1={left + 3} y1={top + stallDepth} x2={left + drawWidth - 3} y2={top + stallDepth} stroke="#f8fafc" strokeWidth={0.8} opacity={0.45} />
+              <line x1={left + 3} y1={top + drawHeight - stallDepth} x2={left + drawWidth - 3} y2={top + drawHeight - stallDepth} stroke="#f8fafc" strokeWidth={0.8} opacity={0.45} />
             </>;
-          }
-          const aisleLeft = width / 2 - aisle / 2;
-          const aisleRight = width / 2 + aisle / 2;
-          return <>
-            <line x1={width / 2} y1={3} x2={width / 2} y2={height - 3} stroke="#8b949b" strokeWidth={1.1} opacity={0.6} />
-            {Array.from({ length: count + 1 }, (_, index) => {
-              const y = (index * height) / count;
-              return <g key={`parking-h-${index}`}><line x1={3} y1={y} x2={aisleLeft - 2} y2={y} stroke={style.accent} strokeWidth={1.1} /><line x1={aisleRight + 2} y1={y} x2={width - 3} y2={y} stroke={style.accent} strokeWidth={1.1} /></g>;
-            })}
-          </>;
-        })()}
-      </g>}
+          })() : (() => {
+            const aisleLeft = x - aisle / 2;
+            const aisleRight = x + aisle / 2;
+            return <>
+              <line x1={x} y1={top + 3} x2={x} y2={top + drawHeight - 3} stroke="#8b949b" strokeWidth={1.1} opacity={0.6} />
+              {Array.from({ length: count + 1 }, (_, index) => {
+                const py = top + index * drawHeight / count;
+                return <g key={`parking-h-${index}`}><line x1={left + 3} y1={py} x2={aisleLeft - 2} y2={py} stroke={accent} strokeWidth={1.1} /><line x1={aisleRight + 2} y1={py} x2={left + drawWidth - 3} y2={py} stroke={accent} strokeWidth={1.1} /></g>;
+              })}
+              <line x1={left + stallDepth} y1={top + 3} x2={left + stallDepth} y2={top + drawHeight - 3} stroke="#f8fafc" strokeWidth={0.8} opacity={0.45} />
+              <line x1={left + drawWidth - stallDepth} y1={top + 3} x2={left + drawWidth - stallDepth} y2={top + drawHeight - 3} stroke="#f8fafc" strokeWidth={0.8} opacity={0.45} />
+            </>;
+          })()}</g>
+          )}
+        </g>
+      )}
     </g>
   );
 }
 
+/** Read-only wrapper; physical artwork is the same component used in Canvas. */
+export function OutdoorGroundAreaVisual({ asset, gridSize = 20 }: { asset: CampusDecorAsset; gridSize?: number }) {
+  if (isDecorAreaType(asset.type)) {
+    const descriptor = DECOR_ASSET_MAP[asset.type];
+    const width = Math.max(30, asset.width ?? (descriptor?.defaultWidth ?? 150) * decorRenderScale(asset.scale));
+    const height = Math.max(24, asset.height ?? (descriptor?.defaultHeight ?? 95) * decorRenderScale(asset.scale));
+    return <g data-testid="readonly-ground-area" data-ground-type={asset.groundType ?? groundTypeForDecorType(asset.type) ?? "grass"} opacity={asset.visible === false ? 0 : 1}
+      transform={`rotate(${asset.rotation ?? 0},${asset.x},${asset.y})`}>
+      <OutdoorGroundAreaArtwork asset={asset} width={width} height={height} gridSize={gridSize} />
+    </g>;
+  }
+  return <OutdoorGroundAreaArtwork asset={asset} gridSize={gridSize} />;
+}
 export function OutdoorEntranceVisual({
   building,
   entrance,
@@ -392,15 +418,12 @@ export function OutdoorEntranceVisual({
     ? { ...entrance.legacyPosition, angle: 0 }
     : entranceWorldPosition(building, entrance);
   const label = entranceDisplayName(entrance, (building.entrances ?? []).findIndex((item) => item.id === entrance.id));
-  const color = entrance.type === "emergency_exit" || entrance.type === "emergency" ? "#dc2626" : entrance.type === "service" ? "#7c3aed" : "#0f766e";
+  const color = BUILDING_ENTRANCE_TYPE_COLORS[normalizeEntranceType(entrance.type)];
   return (
     <g data-testid="readonly-entrance" data-entrance-id={entrance.id} style={{ cursor: onClick ? "pointer" : undefined }} onClick={onClick ? (e) => { e.stopPropagation(); onClick(building.id); } : undefined}>
       <title>{label}{entrance.accessible ? " · Accessible" : ""}</title>
       <g transform={`translate(${position.x},${position.y}) rotate(${position.angle ?? 0})`}>
-        <path d="M-9,-6 H9 V6 H-9 Z" fill="var(--card, #fff)" stroke={color} strokeWidth={1.8} />
-        <path d="M-3,6 V-2 H3 V6" fill={color} opacity={0.9} />
-        <path d="M0,12 L-4,6 H4 Z" fill={color} />
-        {entrance.accessible && <circle cx={-7} cy={-7} r={2.5} fill="#2563eb" stroke="white" strokeWidth={0.8} />}
+        <OutdoorEntranceArtwork entrance={entrance} color={color} />
       </g>
       <EntranceDirectionBadge
         x={position.x}
@@ -410,6 +433,26 @@ export function OutdoorEntranceVisual({
         type={entrance.type}
         rotation={entrance.legacyPosition ? 0 : building.rotation ?? 0}
       />
+    </g>
+  );
+}
+
+/** Canonical physical entrance glyph used in both Admin Canvas and viewer. */
+export function OutdoorEntranceArtwork({ entrance, color, outlineColor = color, outlineWidth = 1.8, showPrimary = true, showAccessible = true }: {
+  entrance: Pick<CampusEntrance, "isPrimary" | "accessible">;
+  color: string;
+  outlineColor?: string;
+  outlineWidth?: number;
+  showPrimary?: boolean;
+  showAccessible?: boolean;
+}) {
+  return (
+    <g data-testid="campus-entrance-artwork" pointerEvents="none">
+      <path d="M-10,-7 L10,-7 L10,7 L-10,7 Z" fill="var(--card)" stroke={outlineColor} strokeWidth={outlineWidth} />
+      <path d="M-4,7 L-4,-3 L4,-3 L4,7" fill={color} opacity={0.92} />
+      <path d="M0,13 L-5,6 H5 Z" fill={outlineColor} />
+      {showPrimary && entrance.isPrimary && <circle cx={8} cy={-8} r={3} fill="#f59e0b" stroke="white" strokeWidth={1} />}
+      {showAccessible && entrance.accessible && <circle cx={-8} cy={-8} r={3} fill="#2563eb" stroke="white" strokeWidth={1} />}
     </g>
   );
 }
@@ -469,33 +512,46 @@ export function OutdoorDecorVisual({ asset, gridSize }: { asset: CampusDecorAsse
   );
 }
 
-function OutdoorMarkerVisual({ marker }: { marker: CampusMarker }) {
+export function OutdoorMarkerArtwork({ marker, selected = false, zoom = 1, showName = true }: { marker: CampusMarker; selected?: boolean; zoom?: number; showName?: boolean }) {
+  const style = MARKER_STYLES[marker.type] ?? MARKER_STYLES.custom;
+  const color = marker.color || style.color;
   return (
-    <g data-testid="readonly-campus-marker" data-marker-id={marker.id}>
-      <title>{marker.name}</title>
-      <circle cx={marker.x} cy={marker.y} r={9} fill={marker.color || "#475569"} stroke="white" strokeWidth={1.5} />
-      <circle cx={marker.x} cy={marker.y} r={2.5} fill="white" />
-      {marker.name && <text x={marker.x} y={marker.y + 17} textAnchor="middle" fill="var(--map-building-name, #475569)" fontSize={6.5} fontWeight="600" className="pointer-events-none select-none">{marker.name}</text>}
+    <g data-testid="campus-marker-artwork" data-marker-id={marker.id}>
+      <ellipse cx={marker.x} cy={marker.y + 1} rx={10} ry={5} fill="rgba(0,0,0,0.18)" />
+      <circle cx={marker.x} cy={marker.y} r={13} fill={color} stroke={selected ? "var(--accent)" : "white"} strokeWidth={selected ? 2.5 : 2} />
+      <text x={marker.x} y={marker.y + 4} textAnchor="middle" fill="white" fontSize={10} fontWeight={900} className="pointer-events-none select-none">{style.symbol}</text>
+      {showName && zoom > 0.6 && marker.name && <text x={marker.x} y={marker.y + 25} textAnchor="middle" fill={color} fontSize={9} fontWeight={700} stroke="rgba(240,238,234,0.95)" strokeWidth={3} paintOrder="stroke" className="pointer-events-none select-none">{marker.name}</text>}
     </g>
   );
 }
 
-function OutdoorCampusGateVisual({ marker }: { marker: CampusMarker }) {
+function OutdoorMarkerVisual({ marker, zoom, showLabel }: { marker: CampusMarker; zoom: number; showLabel: boolean }) {
+  return (
+    <g data-testid="readonly-campus-marker" data-marker-id={marker.id}>
+      <title>{marker.name}</title>
+      <OutdoorMarkerArtwork marker={marker} zoom={zoom} showName={showLabel} />
+    </g>
+  );
+}
+
+function OutdoorCampusGateVisual({ marker, showLabel }: { marker: CampusMarker; showLabel: boolean }) {
   const emergency = marker.purpose === "emergency_exit";
   const color = emergency ? "#dc2626" : "#2563eb";
   return (
     <g data-testid="readonly-campus-gate" data-marker-id={marker.id}>
       <title>{marker.name || (emergency ? "Emergency Exit Gate" : "Campus Gate")}</title>
       <CampusGateVisual x={marker.x - 18} y={marker.y - 15} width={36} height={30} color={color} />
-      {marker.name && <text x={marker.x} y={marker.y + 18} textAnchor="middle" fill="var(--map-building-name, #475569)" fontSize={6.5} fontWeight="700" className="pointer-events-none select-none">{marker.name}</text>}
+      {showLabel && marker.name && <text x={marker.x} y={marker.y + 18} textAnchor="middle" fill="var(--map-building-name, #475569)" fontSize={6.5} fontWeight="700" className="pointer-events-none select-none">{marker.name}</text>}
     </g>
   );
 }
 
 export interface ReadonlyOutdoorCampusSceneProps {
   campus: ReadonlyOutdoorCampus;
+  zoom?: number;
   /** Keep physical layers independently visible; layer toggles should not hide authored paths. */
   showBuildings?: boolean;
+  showLabels?: boolean;
   selectedBuildingId?: string | null;
   onSelectBuilding?: (buildingId: string) => void;
   onDoubleClickBuilding?: (buildingId: string) => void;
@@ -503,12 +559,12 @@ export interface ReadonlyOutdoorCampusSceneProps {
 }
 
 /** Read-only scene composition shared by Preview and the public campus map. */
-export function ReadonlyOutdoorCampusScene({ campus, showBuildings = true, selectedBuildingId, onSelectBuilding, onDoubleClickBuilding, onClickEntrance }: ReadonlyOutdoorCampusSceneProps) {
+export function ReadonlyOutdoorCampusScene({ campus, zoom = 1, showBuildings = true, showLabels = true, selectedBuildingId, onSelectBuilding, onDoubleClickBuilding, onClickEntrance }: ReadonlyOutdoorCampusSceneProps) {
   const buildingById = new Map(campus.buildings.map((building) => [building.id, building]));
   const stack: { zOrder: number; order: number; node: ReactNode }[] = [];
-  campus.paths.forEach((path, index) => stack.push({ zOrder: -1000, order: index, node: <OutdoorPathVisual key={`path-${path.id}`} path={path} /> }));
+  if (campus.paths.length) stack.push({ zOrder: -1000, order: 0, node: <OutdoorPathNetworkArtwork key="campus-path-network" paths={campus.paths} /> });
   if (showBuildings) {
-    campus.buildings.forEach((building, index) => stack.push({ zOrder: effectiveStackKey("building", building.zOrder, index), order: index, node: <OutdoorBuildingVisual key={`building-${building.id}`} building={building} selected={selectedBuildingId === building.id} onSelect={onSelectBuilding} onDoubleClick={onDoubleClickBuilding} /> }));
+    campus.buildings.forEach((building, index) => stack.push({ zOrder: effectiveStackKey("building", building.zOrder, index), order: index, node: <OutdoorBuildingVisual key={`building-${building.id}`} building={building} selected={selectedBuildingId === building.id} onSelect={onSelectBuilding} onDoubleClick={onDoubleClickBuilding} showName={zoom > 0.7 && building.name !== "New Building"} showFloorCount labelLayout="editor" showLabels={showLabels} bodyOpacity={0.82} /> }));
   }
   campus.decorAssets.forEach((asset, index) => stack.push({
     // Ground surfaces are the back-most authored layer in both Admin and
@@ -521,56 +577,13 @@ export function ReadonlyOutdoorCampusScene({ campus, showBuildings = true, selec
   stack.sort((a, b) => a.zOrder - b.zOrder || a.order - b.order);
   return (
     <g data-testid="readonly-outdoor-scene">
-      <defs>
-        <pattern id="campus-lawn-pattern" width="28" height="28" patternUnits="userSpaceOnUse">
-          <path d="M5 17 l2 -4 M8 18 l2 -3 M20 7 l2 -4 M22 8 l2 -3" stroke="#6f9f68" strokeWidth="1" strokeLinecap="round" opacity="0.22" />
-          <circle cx="14" cy="23" r="1" fill="#6f9f68" opacity="0.16" />
-        </pattern>
-        <pattern id="campus-garden-pattern" width="30" height="30" patternUnits="userSpaceOnUse">
-          <circle cx="8" cy="9" r="2.2" fill="#6b9860" opacity="0.24" />
-          <circle cx="11" cy="7" r="1.7" fill="#7eaa6a" opacity="0.22" />
-          <circle cx="23" cy="20" r="2" fill="#6b9860" opacity="0.2" />
-          <path d="M5 23 q3 -4 6 0 M20 11 q3 -4 6 0" fill="none" stroke="#6b9860" strokeWidth="1" strokeLinecap="round" opacity="0.18" />
-        </pattern>
-        <pattern id="campus-plaza-pattern" width="36" height="36" patternUnits="userSpaceOnUse">
-          <path d="M0 0H36M0 18H36M12 0V18M30 18V36" fill="none" stroke="#aaa59d" strokeWidth="0.8" opacity="0.16" />
-        </pattern>
-        <pattern id="campus-ground-grass-pattern" width="32" height="32" patternUnits="userSpaceOnUse">
-          <path d="M6 20l2-4m2 5 2-3m14-9 2-4m2 5 2-3" stroke="#4f7d53" strokeWidth="1" strokeLinecap="round" opacity="0.22" />
-          <circle cx="17" cy="27" r="0.9" fill="#4f7d53" opacity="0.12" />
-        </pattern>
-        <pattern id="campus-ground-concrete-pattern" width="72" height="64" patternUnits="userSpaceOnUse">
-          <path d="M0 32H72" fill="none" stroke="#b2aea7" strokeWidth="0.8" opacity="0.18" />
-          <path d="M36 0V32M18 32V64" fill="none" stroke="#b2aea7" strokeWidth="0.8" opacity="0.12" />
-        </pattern>
-        <pattern id="campus-ground-pavers-pattern" width="64" height="40" patternUnits="userSpaceOnUse">
-          <path d="M0 0H64M0 20H64" fill="none" stroke="#a59d91" strokeWidth="1" opacity="0.2" />
-          <path d="M16 0V20M48 0V20M0 20V40M32 20V40" fill="none" stroke="#a59d91" strokeWidth="1" opacity="0.16" />
-        </pattern>
-        <pattern id="campus-ground-asphalt-pattern" width="34" height="34" patternUnits="userSpaceOnUse">
-          <circle cx="7" cy="9" r="0.8" fill="#d8dde0" opacity="0.16" />
-          <circle cx="24" cy="19" r="0.7" fill="#d8dde0" opacity="0.13" />
-          <circle cx="14" cy="29" r="0.6" fill="#d8dde0" opacity="0.12" />
-        </pattern>
-        <pattern id="campus-ground-custom-pattern" width="48" height="48" patternUnits="userSpaceOnUse">
-          <circle cx="11" cy="16" r="0.7" fill="#64748b" opacity="0.1" />
-          <circle cx="35" cy="31" r="0.6" fill="#64748b" opacity="0.08" />
-        </pattern>
-      </defs>
+      <defs><CampusGroundPatternDefs /></defs>
       {(() => {
         const appearance = campusGroundAppearance(campus);
-        const pattern = campusGroundPatternId(appearance.material, appearance.texture);
         return <>
-      <rect
-        data-testid="readonly-campus-background"
-        data-ground-material={appearance.material}
-        width={campus.canvasW}
-        height={campus.canvasH}
-        fill={appearance.color || "var(--map-bg, #f3f1ec)"}
-        opacity={campus.backgroundOpacity ?? 1}
-        pointerEvents="none"
-      />
-      {pattern && <rect data-testid="readonly-campus-ground-texture" width={campus.canvasW} height={campus.canvasH} fill={`url(#${pattern})`} opacity={0.82} pointerEvents="none" />}
+          <CampusGroundSurface material={appearance.material} texture={appearance.texture} color={appearance.color}
+            width={campus.canvasW} height={campus.canvasH} backgroundTestId="readonly-campus-background"
+            backgroundOpacity={campus.backgroundOpacity ?? 1} textureTestId="readonly-campus-ground-texture" />
         </>;
       })()}
       {campus.backgroundImage && (
@@ -596,8 +609,8 @@ export function ReadonlyOutdoorCampusScene({ campus, showBuildings = true, selec
         return building ? <OutdoorEmergencyStairVisual key={`stair-${stair.id}`} building={building} stair={stair} /> : null;
       })}
       {campus.markers.map((marker) => isCampusGate(marker)
-        ? <OutdoorCampusGateVisual key={`marker-${marker.id}`} marker={marker} />
-        : <OutdoorMarkerVisual key={`marker-${marker.id}`} marker={marker} />)}
+        ? <OutdoorCampusGateVisual key={`marker-${marker.id}`} marker={marker} showLabel={showLabels} />
+        : <OutdoorMarkerVisual key={`marker-${marker.id}`} marker={marker} zoom={zoom} showLabel={showLabels} />)}
     </g>
   );
 }

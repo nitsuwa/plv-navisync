@@ -5,6 +5,7 @@ import { Eye, EyeOff, LogIn, AlertCircle, X, ChevronDown, Sparkles, ShieldCheck,
 import type { LucideIcon } from "lucide-react";
 import { cn } from "../lib/utils";
 import { supabase, isConnected } from "../lib/supabase";
+import { useAuth } from "../contexts/StudentAuthContext";
 import { getDemoOrgApplicantCredentials } from "../lib/demoAccountConfig";
 import { Button } from "../components/ui/Button";
 import { useToast } from "../hooks/useToast";
@@ -63,6 +64,22 @@ function safeReturnPath(state: unknown): string {
     // Fall back to the student home page for malformed navigation state.
   }
   return "/home";
+}
+
+function safeAdminReturnPath(state: unknown): string {
+  if (!state || typeof state !== "object" || !("from" in state)) return "/admin-dashboard";
+  const from = (state as { from?: unknown }).from;
+  if (typeof from !== "string" || !from.startsWith("/") || from.startsWith("//")) return "/admin-dashboard";
+  try {
+    const parsed = new URL(from, window.location.origin);
+    if (parsed.origin === window.location.origin
+      && (parsed.pathname === "/admin-dashboard" || parsed.pathname.startsWith("/admin-dashboard/"))) {
+      return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+    }
+  } catch {
+    // Use the dashboard for malformed or external return paths.
+  }
+  return "/admin-dashboard";
 }
 
 // ── Demo account dropdown configuration ──────────────────────────────────────
@@ -382,6 +399,7 @@ function LegacyCampusIllustration() {
 export function AdminLoginPage() {
   const location = useLocation();
   const navigate = useNavigate();
+  const auth = useAuth();
   const { theme, toggleTheme } = useTheme();
   const [form, setForm]        = useState({ email: "", password: "" });
   const [showPw, setShowPw]    = useState(false);
@@ -392,6 +410,19 @@ export function AdminLoginPage() {
   const demoRef = useRef<HTMLDivElement>(null);
   const shouldReduceMotion = useReducedMotion();
   const toast = useToast();
+
+  // A valid restored session should leave the login route without asking for
+  // credentials again. Destination still comes from the verified DB role.
+  useEffect(() => {
+    if (auth.status !== "authenticated" || !auth.profile?.is_active) return;
+    if (auth.profile.role === "admin") {
+      navigate(safeAdminReturnPath(location.state), { replace: true });
+    } else if (auth.profile.role === "student") {
+      navigate(safeReturnPath(location.state), { replace: true });
+    } else if (auth.profile.role === "student_org") {
+      navigate("/home", { replace: true });
+    }
+  }, [auth.status, auth.profile, location.state, navigate]);
 
   // Close the demo dropdown on outside click or Escape.
   useEffect(() => {
@@ -468,7 +499,7 @@ export function AdminLoginPage() {
 
       if (profile.role === "admin") {
         toast.success("Welcome back", "Redirecting to admin dashboard...");
-        navigate("/admin-dashboard", { replace: true });
+        navigate(safeAdminReturnPath(location.state), { replace: true });
         return;
       }
 

@@ -62,6 +62,32 @@ export type Database = {
           },
         ]
       }
+      admin_activity_preferences: {
+        Row: {
+          admin_id: string
+          activity_cleared_before: string
+          updated_at: string
+        }
+        Insert: {
+          admin_id: string
+          activity_cleared_before: string
+          updated_at?: string
+        }
+        Update: {
+          admin_id?: string
+          activity_cleared_before?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "admin_activity_preferences_admin_id_fkey"
+            columns: ["admin_id"]
+            isOneToOne: true
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       announcement_locations: {
         Row: {
           announcement_id: string
@@ -1471,7 +1497,21 @@ export type Database = {
         }
       }
       campus_is_published: { Args: { p_campus_id: string }; Returns: boolean }
+      clear_admin_activity_history: { Args: never; Returns: string }
       is_admin: { Args: never; Returns: boolean }
+      list_coming_soon_campuses: {
+        Args: never
+        Returns: {
+          address: string | null
+          city: string | null
+          code: string
+          description: string | null
+          id: string
+          name: string
+          province: string | null
+          theme_color: string
+        }[]
+      }
       is_published_floor_plan: { Args: { p_path: string }; Returns: boolean }
       publish_campus_version: {
         Args: { p_version_id: string }

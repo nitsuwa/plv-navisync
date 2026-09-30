@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from "react";
-import { screenToWorld, panToKeepWorldPoint, type ScreenRect } from "../../lib/editorPlacement";
+import { screenToWorld, screenPointToLocalCoordinates, screenPixelsToWorldDistance, panToKeepWorldPoint, type ScreenRect } from "../../lib/editorPlacement";
 import { clampViewportPan, getViewportFitZoom, getViewportPanBounds, type MapViewportInsets, type MapViewportPanBounds } from "../../lib/mapViewport";
 
 // ── Animation constants ─────────────────────────────────────────────────────
@@ -82,7 +82,7 @@ export function useCanvasControls(canvasW: number, canvasH: number, options: Can
   const svgRef = useRef<SVGSVGElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const cameraTransformRef = useRef<SVGGElement>(null);
-  const viewportRectsRef = useRef<{ container: ScreenRect; svg: ScreenRect } | null>(null);
+  const viewportRectsRef = useRef<{ container: ScreenRect } | null>(null);
   const clampPanRef = useRef<(point: { x: number; y: number }, zoomValue: number) => { x: number; y: number }>((point) => point);
   const panFrameRef = useRef<number | null>(null);
   const latestPanPointerRef = useRef<{ x: number; y: number } | null>(null);
@@ -90,11 +90,9 @@ export function useCanvasControls(canvasW: number, canvasH: number, options: Can
 
   const measureViewport = useCallback(() => {
     const container = containerRef.current?.getBoundingClientRect();
-    const svg = svgRef.current?.getBoundingClientRect();
-    if (!container || !svg) return;
+    if (!container) return;
     viewportRectsRef.current = {
       container: { left: container.left, top: container.top, width: container.width, height: container.height },
-      svg: { left: svg.left, top: svg.top, width: svg.width, height: svg.height },
     };
   }, []);
 
@@ -116,7 +114,6 @@ export function useCanvasControls(canvasW: number, canvasH: number, options: Can
   }, [measureViewport]);
 
   const getSvgRect = useCallback((): ScreenRect | null => {
-    if (viewportRectsRef.current) return viewportRectsRef.current.svg;
     const rect = svgRef.current?.getBoundingClientRect();
     return rect ? { left: rect.left, top: rect.top, width: rect.width, height: rect.height } : null;
   }, []);
@@ -246,38 +243,61 @@ export function useCanvasControls(canvasW: number, canvasH: number, options: Can
   // guards against degenerate rects, so the visible cursor and the world
   // point always agree regardless of container aspect, zoom, pan, or a
   // freshly-created canvas that has not laid out yet.
-  const getPoint = useCallback(
-    (e: React.MouseEvent | MouseEvent, cw: number, ch: number): { x: number; y: number } => {
+  const clientToWorld = useCallback(
+    (clientX: number, clientY: number, cw = canvasW, ch = canvasH): { x: number; y: number } => {
       const svg = svgRef.current;
       if (!svg) return { x: 0, y: 0 };
-      const rect = getSvgRect();
-      if (!rect) return { x: 0, y: 0 };
+      const cameraMatrix = cameraTransformRef.current?.getScreenCTM?.();
+      if (cameraMatrix) {
+        const worldPoint = screenPointToLocalCoordinates(clientX, clientY, cameraMatrix);
+        if (worldPoint) return worldPoint;
+      }
+      // Fallback for test/non-browser environments. Use the current rect so a
+      // position-only sidebar shift cannot leave pointer conversion stale.
+      const domRect = svg.getBoundingClientRect();
+      const rect = { left: domRect.left, top: domRect.top, width: domRect.width, height: domRect.height };
       const viewBox = svg.viewBox.baseVal;
       const mapWidth = viewBox.width > 0 ? viewBox.width : cw;
       const mapHeight = viewBox.height > 0 ? viewBox.height : ch;
       const origin = viewBox.width > 0 && viewBox.height > 0 ? { x: viewBox.x, y: viewBox.y } : { x: 0, y: 0 };
-      return screenToWorld(e.clientX, e.clientY, rect, mapWidth, mapHeight, currentPan.current, currentZoom.current, origin);
+      return screenToWorld(clientX, clientY, rect, mapWidth, mapHeight, currentPan.current, currentZoom.current, origin);
     },
-    [getSvgRect]
+    [canvasW, canvasH]
+  );
+
+  const getPoint = useCallback(
+    (e: Pick<MouseEvent, "clientX" | "clientY">, cw: number, ch: number): { x: number; y: number } =>
+      clientToWorld(e.clientX, e.clientY, cw, ch),
+    [clientToWorld],
   );
 
   // ── Convert screen coords to SVG world coords (helper for zoom-to-cursor) ─
   // Same shared, letterbox-aware conversion as getPoint — never a second,
   // independent formula that could drift from pointer coordinates.
   const screenToWorldPt = useCallback(
-    (clientX: number, clientY: number): { x: number; y: number } | null => {
-      const svg = svgRef.current;
-      if (!svg) return null;
-      const rect = getSvgRect();
-      if (!rect) return null;
-      const viewBox = svg.viewBox.baseVal;
-      const mapWidth = viewBox.width > 0 ? viewBox.width : canvasW;
-      const mapHeight = viewBox.height > 0 ? viewBox.height : canvasH;
-      const origin = viewBox.width > 0 && viewBox.height > 0 ? { x: viewBox.x, y: viewBox.y } : { x: 0, y: 0 };
-      return screenToWorld(clientX, clientY, rect, mapWidth, mapHeight, currentPan.current, currentZoom.current, origin);
-    },
-    [canvasW, canvasH, getSvgRect]
+    (clientX: number, clientY: number): { x: number; y: number } | null =>
+      svgRef.current ? clientToWorld(clientX, clientY) : null,
+    [clientToWorld]
   );
+
+  // Hit testing stays visually consistent at every zoom. The SVG viewBox can
+  // be letterboxed inside its CSS box, so use the same content-box scale as
+  // screenToWorld instead of dividing only by the camera zoom.
+  const getWorldUnitsForScreenPixels = useCallback((pixels: number): number => {
+    const cameraMatrix = cameraTransformRef.current?.getScreenCTM?.();
+    if (cameraMatrix) {
+      const effectiveScale = Math.hypot(cameraMatrix.a, cameraMatrix.b);
+      if (Number.isFinite(effectiveScale) && effectiveScale > 0) return Math.abs(pixels) / effectiveScale;
+    }
+    const svg = svgRef.current;
+    const domRect = svg?.getBoundingClientRect();
+    if (!svg || !domRect) return Math.abs(pixels) / Math.max(currentZoom.current, Number.EPSILON);
+    const rect = { left: domRect.left, top: domRect.top, width: domRect.width, height: domRect.height };
+    const viewBox = svg.viewBox.baseVal;
+    const mapWidth = viewBox.width > 0 ? viewBox.width : canvasW;
+    const mapHeight = viewBox.height > 0 ? viewBox.height : canvasH;
+    return screenPixelsToWorldDistance(pixels, rect, mapWidth, mapHeight, currentZoom.current);
+  }, [canvasW, canvasH]);
 
   /**
    * Smoothly set target zoom/pan and start animation.
@@ -607,6 +627,7 @@ export function useCanvasControls(canvasW: number, canvasH: number, options: Can
     containerRef,
     cameraTransformRef,
     getPoint,
+    getWorldUnitsForScreenPixels,
     startPan,
     movePan,
     endPan,

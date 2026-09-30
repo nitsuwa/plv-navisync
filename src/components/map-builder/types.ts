@@ -1024,7 +1024,7 @@ export interface Campus {
   logoPath?: string;
   overviewImagePath?: string;
   isDefault?: boolean;
-  lifecycleStatus?: "draft" | "published" | "unpublished" | "archived";
+  lifecycleStatus?: "draft" | "coming_soon" | "published" | "unpublished" | "archived";
 }
 
 // ── Keep CampusSettings for backward compatibility with editor ──────────────

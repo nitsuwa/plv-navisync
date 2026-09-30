@@ -144,7 +144,7 @@ describe("CampusMapPage event overlays", () => {
     fireEvent.change(search, { target: { value: "Copy Shop" } });
     fireEvent.click(await screen.findByRole("option", { name: /Copy Shop, Room/i }));
     expect(await screen.findByTestId("readonly-room")).toBeInTheDocument();
-    await waitFor(() => expect(screen.getByText("180%")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("180%")).toBeInTheDocument(), { timeout: 3000 });
 
     fireEvent.focus(search);
     fireEvent.change(search, { target: { value: "Science Hall" } });
@@ -184,11 +184,11 @@ describe("CampusMapPage event overlays", () => {
     const zoomOut = screen.getByRole("button", { name: "Zoom out" });
     expect(zoomOut).toBeDisabled();
     fireEvent.click(zoomIn);
-    expect(zoomOut).not.toBeDisabled();
+    await waitFor(() => expect(zoomOut).not.toBeDisabled());
     fireEvent.click(zoomOut);
-    expect(zoomOut).toBeDisabled();
+    await waitFor(() => expect(zoomOut).toBeDisabled());
     for (let index = 0; index < 30; index += 1) fireEvent.click(zoomIn);
-    expect(zoomIn).toBeDisabled();
+    await waitFor(() => expect(zoomIn).toBeDisabled());
     expect(screen.getByText("350%")).toBeInTheDocument();
   });
 
@@ -198,9 +198,26 @@ describe("CampusMapPage event overlays", () => {
     fireEvent.wheel(search, { deltaY: -1000 });
     expect(screen.getByRole("button", { name: "Zoom out" })).toBeDisabled();
     fireEvent.wheel(screen.getByTestId("student-map-surface"), { deltaY: -1000 });
-    expect(screen.getByRole("button", { name: "Zoom out" })).not.toBeDisabled();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Zoom out" })).not.toBeDisabled());
     fireEvent.wheel(screen.getByTestId("student-map-surface"), { deltaY: 10000 });
-    expect(screen.getByRole("button", { name: "Zoom out" })).toBeDisabled();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Zoom out" })).toBeDisabled());
+  });
+
+  it("renders intermediate wheel-zoom scales without rebuilding the map scene", async () => {
+    renderCampusMap({ previewCampus });
+    const surface = await screen.findByTestId("student-map-surface");
+    const camera = surface.querySelector("svg > g[transform]");
+    const building = screen.getByTestId("readonly-building");
+    const readScale = () => Number(camera?.getAttribute("transform")?.match(/scale\(([^)]+)\)/)?.[1]);
+
+    fireEvent.wheel(surface, { deltaY: -100, clientX: 300, clientY: 220 });
+
+    await waitFor(() => expect(readScale()).toBeGreaterThan(1));
+    const intermediateScale = readScale();
+    expect(intermediateScale).toBeLessThan(Math.exp(0.11));
+    expect(screen.getByTestId("readonly-building")).toBe(building);
+
+    await waitFor(() => expect(readScale()).toBeCloseTo(Math.exp(0.11), 2), { timeout: 1_200 });
   });
 
   it("shows only journey instructions for a room-to-building navigation", async () => {
@@ -346,12 +363,52 @@ describe("CampusMapPage event overlays", () => {
     await waitFor(() => expect(transform()).not.toBe(before));
   });
 
-  it("fills the mobile viewport behind the floating bottom navigation", async () => {
+  it("renders published Parking Lot artwork and authored geometry in the student viewer path", async () => {
+    const parkingCampus: EditorCampus = {
+      ...previewCampus,
+      decorAssets: [{
+        id: "published-parking",
+        type: "parking-lot",
+        x: 430,
+        y: 340,
+        width: 360,
+        height: 180,
+        rotation: 27,
+        scale: 1,
+        groundType: "parking",
+      }],
+    };
+    renderCampusMap({ previewCampus: parkingCampus });
+
+    const lot = await screen.findByTestId("readonly-ground-area");
+    expect(lot).toHaveAttribute("transform", "rotate(27,430,340)");
+    expect(screen.getByTestId("parking-stalls").querySelector("svg path")).toHaveAttribute("fill", "#cbd5e1");
+  });
+
+  it("updates the existing SVG viewport transform during mouse pan without rebuilding the scene", async () => {
+    renderCampusMap({ previewCampus });
+    const surface = await screen.findByTestId("student-map-surface");
+    const svg = surface.querySelector("svg");
+    const camera = svg?.querySelector(":scope > g[transform]");
+    expect(camera).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Zoom out" })).not.toBeDisabled());
+    const before = camera?.getAttribute("transform");
+    const building = screen.getByTestId("readonly-building");
+
+    fireEvent.mouseDown(surface, { clientX: 100, clientY: 120, button: 0 });
+    fireEvent.mouseMove(surface, { clientX: 50, clientY: 145 });
+    await waitFor(() => expect(camera).not.toHaveAttribute("transform", before));
+    expect(screen.getByTestId("readonly-building")).toBe(building);
+    fireEvent.mouseUp(surface, { clientX: 50, clientY: 145 });
+  });
+
+  it("reserves the mobile bottom navigation and safe area from the map viewport", async () => {
     renderCampusMap({ previewCampus });
 
     const surface = await screen.findByTestId("student-map-surface");
 
-    expect(surface).toHaveClass("h-[100dvh]");
+    expect(surface).toHaveClass("h-[calc(100dvh-4rem-env(safe-area-inset-bottom,0px))]");
     expect(surface).toHaveClass("md:h-[calc(100dvh-76px)]");
   });
 

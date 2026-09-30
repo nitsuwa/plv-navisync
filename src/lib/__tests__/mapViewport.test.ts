@@ -4,10 +4,12 @@ import {
   STUDENT_MAP_MIN_ZOOM,
   clampStudentMapZoom,
   clampViewportPan,
+  getCameraSmoothingFactor,
   getBuildingFocusPan,
   getPanToKeepWorldPoint,
   getViewportFitZoom,
   getViewportPanBounds,
+  normalizeStudentMapWheelDelta,
 } from "../mapViewport";
 
 describe("student map viewport", () => {
@@ -21,8 +23,24 @@ describe("student map viewport", () => {
     expect(clampStudentMapZoom(Number.NaN)).toBe(1);
   });
 
-  it("rounds valid zoom levels consistently", () => {
-    expect(clampStudentMapZoom(1.236)).toBe(1.24);
+  it("preserves continuous floating-point zoom values", () => {
+    expect(clampStudentMapZoom(1.236)).toBe(1.236);
+    expect(clampStudentMapZoom(1.823)).toBe(1.823);
+  });
+
+  it("uses refresh-rate-independent time-based camera damping", () => {
+    const one60HzFrame = getCameraSmoothingFactor(1000 / 60);
+    const two120HzFrames = 1 - (1 - getCameraSmoothingFactor(1000 / 120)) ** 2;
+    expect(one60HzFrame).toBeCloseTo(two120HzFrames, 10);
+    expect(getCameraSmoothingFactor(0)).toBe(0);
+  });
+
+  it("normalizes mouse wheel, trackpad, line, and page deltas into smooth zoom increments", () => {
+    expect(normalizeStudentMapWheelDelta(100, 0)).toBeCloseTo(0.11);
+    expect(normalizeStudentMapWheelDelta(3, 0)).toBeCloseTo(0.0033);
+    expect(normalizeStudentMapWheelDelta(3, 1)).toBeCloseTo(0.0528);
+    expect(normalizeStudentMapWheelDelta(1, 2, 600)).toBeCloseTo(0.2);
+    expect(normalizeStudentMapWheelDelta(-10_000, 0)).toBe(-0.2);
   });
 });
 describe("getBuildingFocusPan", () => {

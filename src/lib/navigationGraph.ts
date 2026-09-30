@@ -454,6 +454,164 @@ export function findNavEdgeAtPoint(
   return best;
 }
 
+type IndexedNode = { item: NavigationNode; index: number };
+type IndexedEdge = {
+  item: NavigationEdge;
+  points: { x: number; y: number }[];
+};
+
+/** Stable floor-local hit-test data. Rebuild this only when authored graph geometry changes. */
+export interface NavigationHitTestIndex {
+  cellSize: number;
+  nodes: IndexedNode[];
+  edges: IndexedEdge[];
+  nodeCells: Map<string, number[]>;
+  edgeCells: Map<string, number[]>;
+}
+
+const hitCellKey = (x: number, y: number) => `${x}:${y}`;
+
+function addIndexToCells(
+  cells: Map<string, number[]>,
+  index: number,
+  bounds: { minX: number; minY: number; maxX: number; maxY: number },
+  cellSize: number,
+) {
+  const minCellX = Math.floor(bounds.minX / cellSize);
+  const minCellY = Math.floor(bounds.minY / cellSize);
+  const maxCellX = Math.floor(bounds.maxX / cellSize);
+  const maxCellY = Math.floor(bounds.maxY / cellSize);
+  for (let x = minCellX; x <= maxCellX; x++) {
+    for (let y = minCellY; y <= maxCellY; y++) {
+      const key = hitCellKey(x, y);
+      const entries = cells.get(key);
+      if (entries) entries.push(index);
+      else cells.set(key, [index]);
+    }
+  }
+}
+
+/**
+ * Build a lightweight spatial index for authoring hit tests. Cell membership
+ * is only a broad phase; callers still use the same exact distance math and
+ * source-array ordering as the linear helpers above.
+ */
+export function createNavigationHitTestIndex(
+  nodes: NavigationNode[],
+  edges: NavigationEdge[],
+  nodeMap: Record<string, { x: number; y: number }>,
+  cellSize = 128,
+): NavigationHitTestIndex {
+  const safeCellSize = Math.max(1, cellSize);
+  const indexedNodes = nodes.map((item, index) => ({ item, index }));
+  const indexedEdges: IndexedEdge[] = [];
+  const nodeCells = new Map<string, number[]>();
+  const edgeCells = new Map<string, number[]>();
+
+  indexedNodes.forEach(({ item }, index) => {
+    addIndexToCells(nodeCells, index, { minX: item.x, minY: item.y, maxX: item.x, maxY: item.y }, safeCellSize);
+  });
+  edges.forEach((item, index) => {
+    if (item.startNodeId === item.endNodeId) return;
+    const start = nodeMap[item.startNodeId];
+    const end = nodeMap[item.endNodeId];
+    if (!start || !end) return;
+    const points = [start, ...(item.bendPoints ?? []), end];
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (const point of points) {
+      minX = Math.min(minX, point.x);
+      minY = Math.min(minY, point.y);
+      maxX = Math.max(maxX, point.x);
+      maxY = Math.max(maxY, point.y);
+    }
+    const indexedIndex = indexedEdges.length;
+    indexedEdges.push({ item, points });
+    addIndexToCells(edgeCells, indexedIndex, { minX, minY, maxX, maxY }, safeCellSize);
+  });
+  return { cellSize: safeCellSize, nodes: indexedNodes, edges: indexedEdges, nodeCells, edgeCells };
+}
+
+function candidateIndexes(
+  cells: Map<string, number[]>,
+  point: { x: number; y: number },
+  radius: number,
+  cellSize: number,
+): number[] {
+  const minCellX = Math.floor((point.x - radius) / cellSize);
+  const minCellY = Math.floor((point.y - radius) / cellSize);
+  const maxCellX = Math.floor((point.x + radius) / cellSize);
+  const maxCellY = Math.floor((point.y + radius) / cellSize);
+  const found = new Set<number>();
+  for (let x = minCellX; x <= maxCellX; x++) {
+    for (let y = minCellY; y <= maxCellY; y++) {
+      for (const index of cells.get(hitCellKey(x, y)) ?? []) found.add(index);
+    }
+  }
+  return [...found].sort((a, b) => a - b);
+}
+
+export function findIndexedNavNodeAtPoint(
+  index: NavigationHitTestIndex,
+  point: { x: number; y: number },
+  threshold = NAV_NODE_HIT_THRESHOLD,
+): NavigationNode | undefined {
+  let best: NavigationNode | undefined;
+  let bestDistance = threshold;
+  for (const candidateIndex of candidateIndexes(index.nodeCells, point, threshold, index.cellSize)) {
+    const node = index.nodes[candidateIndex]?.item;
+    if (!node) continue;
+    const distance = Math.hypot(point.x - node.x, point.y - node.y);
+    if (distance <= bestDistance) {
+      best = node;
+      bestDistance = distance;
+    }
+  }
+  return best;
+}
+
+function nearestPointOnPolyline(
+  points: { x: number; y: number }[],
+  point: { x: number; y: number },
+): { x: number; y: number; dist: number; segIndex: number; t: number } | null {
+  let best: { x: number; y: number; dist: number; segIndex: number; t: number } | null = null;
+  for (let i = 0; i < points.length - 1; i++) {
+    const a = points[i];
+    const b = points[i + 1];
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const lengthSquared = dx * dx + dy * dy;
+    let t = lengthSquared === 0 ? 0 : ((point.x - a.x) * dx + (point.y - a.y) * dy) / lengthSquared;
+    t = Math.max(0, Math.min(1, t));
+    const x = a.x + t * dx;
+    const y = a.y + t * dy;
+    const distance = Math.hypot(point.x - x, point.y - y);
+    if (!best || distance < best.dist) best = { x, y, dist: distance, segIndex: i, t };
+  }
+  return best;
+}
+
+export function findIndexedNavEdgeAtPoint(
+  index: NavigationHitTestIndex,
+  point: { x: number; y: number },
+  threshold = NAV_EDGE_SNAP_THRESHOLD,
+): { edge: NavigationEdge; nearest: { x: number; y: number; dist: number; segIndex: number; t: number } } | null {
+  let best: { edge: NavigationEdge; nearest: { x: number; y: number; dist: number; segIndex: number; t: number } } | null = null;
+  const candidateIds = candidateIndexes(index.edgeCells, point, threshold, index.cellSize);
+  for (const candidateId of candidateIds) {
+    const candidate = index.edges[candidateId];
+    if (!candidate) continue;
+    const nearest = nearestPointOnPolyline(candidate.points, point);
+    if (!nearest || nearest.dist > threshold) continue;
+    if (!best || nearest.dist < best.nearest.dist) {
+      best = { edge: candidate.item, nearest };
+    }
+  }
+  return best ? { edge: best.edge, nearest: best.nearest } : null;
+}
+
 // ── B5 Final correction — shared nav graph GROUP translation ──────────────
 //
 // Both editors (outdoor CampusEditor + Floor Editor) must move a multi-selected

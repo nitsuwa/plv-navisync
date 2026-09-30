@@ -9,6 +9,9 @@ import {
   removeNavNode,
   findNavNodeAtPoint,
   findNavEdgeAtPoint,
+  createNavigationHitTestIndex,
+  findIndexedNavNodeAtPoint,
+  findIndexedNavEdgeAtPoint,
   normalizeNavGraph,
   validateNavGraphBasics,
   segmentIntersectsRect,
@@ -36,6 +39,30 @@ function node(id: string, x: number, y: number): NavigationNode {
 }
 
 describe("B5 Phase 1 — navigation graph helpers", () => {
+  it("keeps indexed authoring hit tests equivalent to linear hit tests", () => {
+    const nodes = [node("far", 20, 20), node("near-a", 200, 200), node("near-b", 205, 202)];
+    const edges: NavigationEdge[] = [
+      { id: "first", startNodeId: "far", endNodeId: "near-a", bendPoints: [{ x: 70, y: 80 }] } as NavigationEdge,
+      { id: "second", startNodeId: "near-a", endNodeId: "near-b", bendPoints: [{ x: 280, y: 202 }] } as NavigationEdge,
+    ];
+    const points = Object.fromEntries(nodes.map((entry) => [entry.id, { x: entry.x, y: entry.y }]));
+    const index = createNavigationHitTestIndex(nodes, edges, points);
+    const point = { x: 145, y: 145 };
+    expect(findIndexedNavNodeAtPoint(index, point, 12)).toEqual(findNavNodeAtPoint(nodes, point, 12));
+    expect(findIndexedNavEdgeAtPoint(index, point, 20)).toEqual(findNavEdgeAtPoint(edges, points, point, 20));
+  });
+
+  it("does not select nodes or paths outside the requested screen-derived radius", () => {
+    const nodes = [node("left", 100, 100)];
+    const edges: NavigationEdge[] = [{ id: "left-path", startNodeId: "left", endNodeId: "right" } as NavigationEdge];
+    const points = { left: { x: 100, y: 100 }, right: { x: 100, y: 300 } };
+    const index = createNavigationHitTestIndex(nodes, edges, points);
+    // At 4x zoom a 12px tolerance is 3 world units. A point 15 world units
+    // away must not be pulled onto the existing node/path.
+    expect(findIndexedNavNodeAtPoint(index, { x: 115, y: 100 }, 3)).toBeUndefined();
+    expect(findIndexedNavEdgeAtPoint(index, { x: 115, y: 200 }, 3)).toBeNull();
+  });
+
   it("projects a Connect target onto the midpoint of a diagonal navigation edge", () => {
     const edge = { id: "diagonal", startNodeId: "a", endNodeId: "b" } as NavigationEdge;
     const hit = findNavEdgeAtPoint(

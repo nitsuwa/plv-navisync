@@ -23,8 +23,9 @@ import {
 import { FloorPropertiesPanel, FLOOR_PROPERTY_LABEL_CLASS } from "./FloorPropertiesPanel";
 import { FloorNavPropertiesPanel } from "./FloorNavPropertiesPanel";
 import { exteriorEmergencyStairVisualDimensions, exteriorEmergencyStairSafeOffsetRange as sharedExteriorEmergencyStairSafeOffsetRange } from "./ReadonlyOutdoorVisuals";
-import { TestNavigationPanel, trimRouteFragmentAtMarkerBoundary, useTestRouteSession, type TestRouteContinuationMarker, type TestRouteHighlight, type TestRouteTransitionMarker } from "./TestNavigationPanel";
+import { TestNavigationPanel, trimRouteFragmentAtMarkerBoundary, useTestRouteSessionActions, useTestRouteSessionSelector, type TestRouteContinuationMarker, type TestRouteHighlight, type TestRouteTransitionMarker } from "./TestNavigationPanel";
 import { RouteContinuationMarker, RouteEndpointMarker, RouteTransitionMarker } from "./RouteTransitionMarker";
+import { FloorTestRouteOverlay } from "./FloorTestRouteOverlay";
 import { NavigationRelationshipCard } from "./NavigationRelationshipCard";
 import { FloorOverviewSidebar } from "./FloorOverviewSidebar";
 import { FloorActionsMenu } from "./FloorActionsMenu";
@@ -38,13 +39,14 @@ import { EntranceDirectionBadge } from "./EntranceDirectionBadge";
 import { UnsavedChangesDialog } from "./UnsavedChangesDialog";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
 import { useUnsavedChangesGuard } from "./useUnsavedChangesGuard";
-import { CanvasAssetVisual } from "../canvas/CanvasAssetVisual";
-import { getCanvasAsset, resolveCanvasAssetKey } from "../canvas/canvasAssetCatalog";
 import { useToast } from "../../hooks/useToast";
 import { assertFloorPhysicalReferences, floorUndoEntryFromFloor, normalizeFloor, normalizeRoomAccessDoors } from "../../lib/floorPlanNormalization";
 import { collectIdentityIds, physicalFloorMismatch, physicalSaveErrorMessage, replaceFloorInCampus } from "../../lib/physicalFloorIntegrity";
 import { closestPointInFloorShape, constrainFloorShapePointsDelta, createFloorPerimeterWalls, floorShapeBoundaryPath, floorShapeContainsPoint, floorShapeContainsPolygon, floorShapeContainsPolyline, floorShapeContainsRect, floorShapeContainsSegment, getFloorExtensionRect, getFloorShapeBounds, getFloorShapeBoundarySegments, getFloorShapeRegions, normalizeFloorExtensions, resizeFloorExtensions, snapPointToFloorShapeBoundary } from "../../lib/floorShape";
 import { FloorGroundSurface } from "./FloorGroundSurface";
+import { FloorFurnitureSymbol as SharedFloorFurnitureSymbol } from "./FloorFurnitureSymbol";
+import { FloorAccessibleRampArtwork, FloorEntranceStepsArtwork, FloorExteriorZoneArtwork, type ExteriorVisualBounds } from "./FloorExteriorVisuals";
+import { ElevatorSymbol, ExteriorEmergencyFloorStairSymbol, FloorLabelArtwork, FloorPathArtwork, FloorRoomArtwork, FloorRoomLabelArtwork, FloorWallArtwork, RampSymbol, StairsSymbol, WallOpeningSymbol, wallMaterialStyle } from "./FloorMapVisuals";
 import { isFloorAuthoringGridEligible, normalizeFloorAppearance } from "../../lib/floorAppearance";
 import { formatManagedPerimeterDependencies, getManagedPerimeterDependencies, type ManagedPerimeterDependencies } from "../../lib/floorPerimeterDependencies";
 import { type CanvasResizeHandle } from "../../lib/campusCanvas";
@@ -93,7 +95,16 @@ import {
   replaceBuildingFloorsAndReconcileTransitions,
   type NavPoint,
 } from "../../lib/indoorNavigationGraph";
-import { findNavEdgeAtPoint, NAV_EDGE_SNAP_THRESHOLD, NAV_NODE_HIT_THRESHOLD, translateSelectedNavGraph, navGroupSelectionBounds } from "../../lib/navigationGraph";
+import {
+  createNavigationHitTestIndex,
+  findIndexedNavEdgeAtPoint,
+  findIndexedNavNodeAtPoint,
+  findNavEdgeAtPoint,
+  NAV_EDGE_SNAP_THRESHOLD,
+  NAV_NODE_HIT_THRESHOLD,
+  translateSelectedNavGraph,
+  navGroupSelectionBounds,
+} from "../../lib/navigationGraph";
 import {
   addFloorToBuilding,
   countFloorAuthoredItems,
@@ -244,6 +255,9 @@ import { clampExteriorZone, exteriorZoneCoversEntrance, exteriorZoneGeometry, ex
 import { alignFurnitureItems, canGroupFurniture, distributeFurnitureItems, findEqualSpacingCandidate, findNearbyDuplicatePosition, FURNITURE_DUPLICATE_OFFSET, furnitureGroupId, placeFurnitureCopiesAboveSources } from "../../lib/floorFurnitureEditing";
 import { floorLayerActionAvailability, reorderFloorLayerItems, sortFloorItemsByLocalZ, sortFloorRenderEntries } from "../../lib/floorRenderLayers";
 
+const FloorFurnitureSymbol = SharedFloorFurnitureSymbol;
+export { FloorFurnitureSymbol };
+
 type FloorClipboardEntry = { type: Exclude<FloorSelection["type"], "navNode" | "navEdge">; id: string; item: any };
 type FloorClipboard = { campusId: string; sourceFloorId: string; entries: FloorClipboardEntry[] };
 // Clipboard contents intentionally live outside an individual FloorEditor
@@ -355,7 +369,7 @@ function PlacementWarningBadge({
   );
 }
 
-type ExteriorApproachBounds = { x: number; y: number; width: number; height: number };
+type ExteriorApproachBounds = ExteriorVisualBounds;
 
 /** Furniture remains a normal Floor object, but when authored over a
  * semi-outdoor zone its footprint must stay inside that zone. */
@@ -614,108 +628,6 @@ function exteriorApproachResizeHandles(bounds: ExteriorApproachBounds, side: Bui
         { id: "span-end" as const, x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height + handleOffset, cursor: "ns-resize" },
         { id: "depth" as const, x: side === "left" ? bounds.x - handleOffset : bounds.x + bounds.width + handleOffset, y: bounds.y + bounds.height / 2, cursor: "ew-resize" },
       ];
-}
-
-function ExteriorEntranceStepsSymbol({ bounds, side, selected, routeActive = false, routeColor = "#3b82f6", direction = "forward", flipHorizontal = false, flipVertical = false }: { bounds: ExteriorApproachBounds; side: BuildingEntranceEdge; selected: boolean; routeActive?: boolean; routeColor?: string; direction?: "forward" | "reverse"; flipHorizontal?: boolean; flipVertical?: boolean }) {
-  const horizontalEdge = side === "top" || side === "bottom";
-  const inset = Math.max(2.5, Math.min(6, Math.min(bounds.width, bounds.height) * 0.18));
-  const run = horizontalEdge ? bounds.height : bounds.width;
-  const treadCount = Math.max(3, Math.min(6, Math.round(run / 8)));
-  const rails = horizontalEdge
-    ? [bounds.x + inset, bounds.x + bounds.width - inset].map((x) => <line key={x} x1={x} y1={bounds.y + inset} x2={x} y2={bounds.y + bounds.height - inset} stroke="#8b6d47" strokeWidth={0.8} opacity={0.78} />)
-    : [bounds.y + inset, bounds.y + bounds.height - inset].map((y) => <line key={y} x1={bounds.x + inset} y1={y} x2={bounds.x + bounds.width - inset} y2={y} stroke="#8b6d47" strokeWidth={0.8} opacity={0.78} />);
-  const towardParent = side === "top" ? { x: 0, y: 1 } : side === "bottom" ? { x: 0, y: -1 } : side === "left" ? { x: 1, y: 0 } : { x: -1, y: 0 };
-  const cueDirection = direction === "reverse" ? { x: -towardParent.x, y: -towardParent.y } : towardParent;
-  const cueLength = Math.max(5, Math.min(12, run * 0.24));
-  const cueStart = { x: bounds.x + bounds.width / 2 - cueDirection.x * cueLength / 2, y: bounds.y + bounds.height / 2 - cueDirection.y * cueLength / 2 };
-  const cueEnd = { x: bounds.x + bounds.width / 2 + cueDirection.x * cueLength / 2, y: bounds.y + bounds.height / 2 + cueDirection.y * cueLength / 2 };
-  const cueTangent = { x: -cueDirection.y, y: cueDirection.x };
-  const mirrorTransform = `translate(${bounds.x + bounds.width / 2} ${bounds.y + bounds.height / 2}) scale(${flipHorizontal ? -1 : 1} ${flipVertical ? -1 : 1}) translate(${-bounds.x - bounds.width / 2} ${-bounds.y - bounds.height / 2})`;
-  return (
-    <g data-testid="steps-symbol" data-route-active={routeActive ? "true" : undefined} transform={mirrorTransform}>
-      <rect x={bounds.x} y={bounds.y} width={bounds.width} height={bounds.height} rx={2.5} fill="#e8d6b7" stroke={routeActive ? routeColor : selected ? "var(--accent)" : "#8b6d47"} strokeWidth={routeActive ? 2.5 : selected ? 2.3 : 1.35} />
-      {routeActive && <rect x={bounds.x - 3} y={bounds.y - 3} width={bounds.width + 6} height={bounds.height + 6} rx={4} fill="none" stroke={routeColor} strokeWidth={1.5} strokeDasharray="5 3" opacity={0.9} pointerEvents="none" />}
-      <rect x={bounds.x + 1.5} y={bounds.y + 1.5} width={Math.max(0, bounds.width - 3)} height={Math.max(0, bounds.height - 3)} rx={1.5} fill="#f6ead6" opacity={0.68} />
-      {Array.from({ length: treadCount }, (_, index) => {
-        const ratio = (index + 1) / (treadCount + 1);
-        return horizontalEdge
-          ? <line key={index} x1={bounds.x + inset} y1={bounds.y + ratio * (bounds.height - inset * 2)} x2={bounds.x + bounds.width - inset} y2={bounds.y + ratio * (bounds.height - inset * 2)} stroke="#745b3c" strokeWidth={1.05} />
-          : <line key={index} x1={bounds.x + ratio * (bounds.width - inset * 2)} y1={bounds.y + inset} x2={bounds.x + ratio * (bounds.width - inset * 2)} y2={bounds.y + bounds.height - inset} stroke="#745b3c" strokeWidth={1.05} />;
-      })}
-      {rails}
-      <path data-testid="steps-direction-cue" d={`M ${cueStart.x} ${cueStart.y} L ${cueEnd.x} ${cueEnd.y} M ${cueEnd.x} ${cueEnd.y} L ${cueEnd.x - cueDirection.x * 3 + cueTangent.x * 2.2} ${cueEnd.y - cueDirection.y * 3 + cueTangent.y * 2.2} M ${cueEnd.x} ${cueEnd.y} L ${cueEnd.x - cueDirection.x * 3 - cueTangent.x * 2.2} ${cueEnd.y - cueDirection.y * 3 - cueTangent.y * 2.2}`} fill="none" stroke="#5f4630" strokeWidth={1.15} strokeLinecap="round" strokeLinejoin="round" opacity={0.92} />
-    </g>
-  );
-}
-
-function ExteriorAccessibleRampSymbol({ bounds, side, selected, routeActive = false, routeColor = "#3b82f6", direction = "forward", layout = "straight", flipHorizontal = false, flipVertical = false, rotation = 0 }: { bounds: ExteriorApproachBounds; side: BuildingEntranceEdge; selected: boolean; routeActive?: boolean; routeColor?: string; direction?: "forward" | "reverse"; layout?: "straight" | "l_turn_left" | "l_turn_right"; flipHorizontal?: boolean; flipVertical?: boolean; rotation?: number }) {
-  const horizontalRun = side === "top" || side === "bottom";
-  const cx = bounds.x + bounds.width / 2;
-  const cy = bounds.y + bounds.height / 2;
-  const runLength = horizontalRun ? bounds.height : bounds.width;
-  const crossLength = horizontalRun ? bounds.width : bounds.height;
-  const runInset = Math.max(3, Math.min(9, runLength * 0.09));
-  const crossInset = Math.max(3, Math.min(9, crossLength * 0.12));
-  const routeStroke = 1.05;
-  const railStroke = 0.8;
-  const baseRouteColor = "#27765c";
-  const railColor = "#39866a";
-  const surfaceColor = "#dff2e8";
-  const runStart = side === "top" || side === "left"
-    ? (horizontalRun ? bounds.y + runInset : bounds.x + runInset)
-    : (horizontalRun ? bounds.y + bounds.height - runInset : bounds.x + bounds.width - runInset);
-  const runEnd = side === "top" || side === "left"
-    ? (horizontalRun ? bounds.y + bounds.height - runInset : bounds.x + bounds.width - runInset)
-    : (horizontalRun ? bounds.y + runInset : bounds.x + runInset);
-  const turnSign = layout === "l_turn_left" ? -1 : 1;
-  const turnLeg = Math.max(2, Math.min(crossLength * 0.34, crossLength / 2 - crossInset));
-  const railOffset = Math.max(3, Math.min(crossLength * 0.28, crossLength / 2 - crossInset));
-  const showRails = layout === "straight" && runLength >= 24 && crossLength >= 24 && railOffset > 2.5;
-  // A ramp is a physical floor-plan symbol, so its repeated construction
-  // marks are perpendicular to travel rather than decorative card stripes.
-  const segmentCount = layout === "straight"
-    ? runLength < 24 ? 2 : Math.max(3, Math.min(12, Math.round(runLength / 10)))
-    : 0;
-  const baseRunPoints = layout === "straight"
-    ? horizontalRun
-      ? [{ x: cx, y: runStart }, { x: cx, y: runEnd }]
-      : [{ x: runStart, y: cy }, { x: runEnd, y: cy }]
-    : horizontalRun
-      ? [{ x: cx + turnSign * turnLeg, y: runStart }, { x: cx, y: runStart }, { x: cx, y: runEnd }]
-      : [{ x: runStart, y: cy + turnSign * turnLeg }, { x: runStart, y: cy }, { x: runEnd, y: cy }];
-  const runPoints = direction === "reverse" ? [...baseRunPoints].reverse() : baseRunPoints;
-  const toPath = (points: { x: number; y: number }[]) => points.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`).join(" ");
-  const travelPath = toPath(runPoints);
-  const arrowTip = runPoints[runPoints.length - 1];
-  const arrowBase = runPoints[runPoints.length - 2] ?? arrowTip;
-  const arrowVector = { x: arrowTip.x - arrowBase.x, y: arrowTip.y - arrowBase.y };
-  const arrowLength = Math.max(1, Math.hypot(arrowVector.x, arrowVector.y));
-  const arrowUnit = { x: arrowVector.x / arrowLength, y: arrowVector.y / arrowLength };
-  const arrowNormal = { x: -arrowUnit.y, y: arrowUnit.x };
-  const arrowHead = Math.max(2.2, Math.min(5, crossLength * 0.11, arrowLength * 0.22));
-  const arrowCue = [
-    `M ${arrowTip.x} ${arrowTip.y} L ${arrowTip.x - arrowUnit.x * arrowHead + arrowNormal.x * arrowHead} ${arrowTip.y - arrowUnit.y * arrowHead + arrowNormal.y * arrowHead}`,
-    `M ${arrowTip.x} ${arrowTip.y} L ${arrowTip.x - arrowUnit.x * arrowHead - arrowNormal.x * arrowHead} ${arrowTip.y - arrowUnit.y * arrowHead - arrowNormal.y * arrowHead}`,
-  ].join(" ");
-  const mirrorTransform = `translate(${cx} ${cy}) scale(${flipHorizontal ? -1 : 1} ${flipVertical ? -1 : 1}) translate(${-cx} ${-cy})`;
-  return (
-    <g data-testid="ramp-symbol" data-route-active={routeActive ? "true" : undefined} transform={`rotate(${rotation} ${cx} ${cy}) ${mirrorTransform}`}>
-      <rect x={bounds.x} y={bounds.y} width={bounds.width} height={bounds.height} rx={0} fill={surfaceColor} stroke={routeActive ? routeColor : selected ? "var(--accent)" : baseRouteColor} strokeWidth={routeActive ? 2.5 : selected ? 2.3 : 1.35} />
-      {routeActive && <rect x={bounds.x - 3} y={bounds.y - 3} width={bounds.width + 6} height={bounds.height + 6} rx={0} fill="none" stroke={routeColor} strokeWidth={1.5} strokeDasharray="5 3" opacity={0.9} pointerEvents="none" />}
-      {segmentCount > 0 && Array.from({ length: segmentCount }, (_, index) => {
-        const ratio = (index + 1) / (segmentCount + 1);
-        const position = runStart + ratio * (runEnd - runStart);
-        return horizontalRun
-          ? <line key={`ramp-segment-${index}`} data-testid="ramp-segment-line" x1={bounds.x + crossInset} y1={position} x2={bounds.x + bounds.width - crossInset} y2={position} stroke="#82a899" strokeWidth={0.7} opacity={0.72} />
-          : <line key={`ramp-segment-${index}`} data-testid="ramp-segment-line" x1={position} y1={bounds.y + crossInset} x2={position} y2={bounds.y + bounds.height - crossInset} stroke="#82a899" strokeWidth={0.7} opacity={0.72} />;
-      })}
-      {showRails && layout === "straight" && (horizontalRun
-        ? [cx - railOffset, cx + railOffset].map((x) => <line key={x} data-testid="ramp-rail" x1={x} y1={runStart} x2={x} y2={runEnd} fill="none" stroke={railColor} strokeWidth={railStroke} opacity={0.7} strokeLinecap="round" />)
-        : [cy - railOffset, cy + railOffset].map((y) => <line key={y} data-testid="ramp-rail" x1={runStart} y1={y} x2={runEnd} y2={y} fill="none" stroke={railColor} strokeWidth={railStroke} opacity={0.7} strokeLinecap="round" />))}
-      <path data-testid="ramp-layout-path" data-layout={layout} d={travelPath} fill="none" stroke={baseRouteColor} strokeWidth={routeStroke} strokeLinecap="round" strokeLinejoin="round" opacity={0.82} />
-      <path data-testid="ramp-direction-cue" d={arrowCue} fill="none" stroke={baseRouteColor} strokeWidth={routeStroke} strokeLinecap="round" strokeLinejoin="round" opacity={0.82} />
-    </g>
-  );
 }
 
 /**
@@ -1012,145 +924,6 @@ function readImageSize(file: File): Promise<{ width?: number; height?: number }>
     img.src = url;
   });
 }
-function wallMaterialStyle(material?: string) {
-  if (material === "glass") return { coreOpacity: 0.62, casingOpacity: 0.72, dash: "6 3", casing: "#60a5fa" };
-  if (material === "brick") return { coreOpacity: 1, casingOpacity: 0.86, dash: "2 2", casing: "#991b1b" };
-  if (material === "wood") return { coreOpacity: 0.98, casingOpacity: 0.78, dash: "9 2 1.5 2", casing: "#92400e" };
-  if (material === "drywall") return { coreOpacity: 0.92, casingOpacity: 0.58, dash: "12 4", casing: "#64748b" };
-  return { coreOpacity: 1, casingOpacity: 0.85, dash: undefined, casing: "#2f3a46" };
-}
-
-function WallOpeningSymbol({
-  kind,
-  width,
-  wallThickness,
-  color,
-  background,
-  direction = "left",
-  doorType = "single",
-  hinge,
-  swingSide = "a",
-  selected = false,
-  locked = false,
-}: {
-  kind: "door" | "open_passage" | "window";
-  width: number;
-  wallThickness: number;
-  color: string;
-  background: string;
-  direction?: string;
-  doorType?: "single" | "double";
-  hinge?: "left" | "right";
-  swingSide?: "a" | "b";
-  selected?: boolean;
-  locked?: boolean;
-}) {
-  const half = width / 2;
-  // Clear the wall core and its small casing (the casing is wallThickness + 2
-  // below). The generous interaction target remains transparent, so this
-  // narrow aperture never paints a floor-sized rectangle over exterior zones.
-  const gapStroke = kind !== "window"
-    ? Math.max(1, wallThickness + 2)
-    : Math.max(wallThickness + 7, 12);
-  const jamb = Math.max(wallThickness / 2 + 2, 4);
-  const hitId = kind === "door"
-    ? "attached-door-opening"
-    : kind === "open_passage" ? "attached-open-passage-opening" : "attached-window-opening";
-  if (kind === "open_passage") {
-    return (
-      <>
-        <line data-testid="open-passage-wall-cut" x1={-half} y1={0} x2={half} y2={0}
-          stroke={background} strokeWidth={gapStroke} strokeLinecap="butt" />
-        <line x1={-half} y1={-jamb} x2={-half} y2={jamb} stroke={color} strokeWidth={1.8} strokeLinecap="round" />
-        <line x1={half} y1={-jamb} x2={half} y2={jamb} stroke={color} strokeWidth={1.8} strokeLinecap="round" />
-        <line x1={-half + 2} y1={-jamb - 1} x2={half - 2} y2={-jamb - 1} stroke={color} strokeWidth={1.2} strokeLinecap="round" opacity={0.72} />
-        <line data-testid={hitId} x1={-half} y1={0} x2={half} y2={0} stroke="transparent" strokeWidth={28} strokeLinecap="butt" />
-        {selected && <rect data-testid="opening-selection-outline" x={-half - 3} y={-jamb - 3} width={width + 6} height={jamb * 2 + 6} rx={1.5} fill="none" stroke="var(--accent)" strokeWidth={1.5} />}
-        {locked && (
-          <path d="M-2 -3 V-4.5 C-2 -6 -1 -7 0 -7 C1 -7 2 -6 2 -4.5 V-3 M-3 -3 H3 V2 H-3 Z" fill="#0f172a" stroke="white" strokeWidth={0.6} />
-        )}
-      </>
-    );
-  }
-  if (kind === "door") {
-    const sliding = direction === "sliding";
-    const double = doorType === "double" || direction === "double";
-    const singleLeaf = width;
-    const doubleLeaf = width / 2;
-    const leaf = double ? doubleLeaf : singleLeaf;
-    const hingeValue = hinge ?? (direction === "right" ? "right" : "left");
-    const sideSign = swingSide === "b" ? 1 : -1;
-    const hingeX = hingeValue === "right" ? half : -half;
-    const closedX = hingeValue === "right" ? -half : half;
-    const arcSweep = hingeValue === "right"
-      ? (swingSide === "b" ? 1 : 0)
-      : (swingSide === "b" ? 0 : 1);
-    return (
-      <>
-        <line data-testid="door-wall-cut" x1={-half} y1={0} x2={half} y2={0}
-          stroke={background} strokeWidth={gapStroke} strokeLinecap="butt" />
-        <line x1={-half} y1={-jamb} x2={-half} y2={jamb} stroke={color} strokeWidth={1.8} strokeLinecap="round" />
-        <line x1={half} y1={-jamb} x2={half} y2={jamb} stroke={color} strokeWidth={1.8} strokeLinecap="round" />
-        <line x1={-half} y1={0} x2={half} y2={0} data-testid={hitId} stroke="transparent" strokeWidth={28} strokeLinecap="butt" />
-        {sliding ? (
-          <>
-            <line data-testid="door-leaf" x1={-half} y1={-5.5} x2={half} y2={-5.5} stroke={color} strokeWidth={2.4} strokeLinecap="round" />
-            <line x1={-half * 0.55} y1={4.5} x2={half} y2={4.5} stroke={color} strokeWidth={1.6} strokeLinecap="round" opacity={0.65} />
-          </>
-        ) : double ? (
-          (() => {
-            const leftOpenX = -half;
-            const rightOpenX = half;
-            const openY = sideSign * doubleLeaf;
-            return (
-          <>
-            <circle data-testid="door-hinge" cx={-half} cy={0} r={2.3} fill={color} />
-            <circle data-testid="door-hinge" cx={half} cy={0} r={2.3} fill={color} />
-            <line data-testid="door-leaf" x1={-half} y1={0} x2={leftOpenX} y2={openY} stroke={color} strokeWidth={2.5} strokeLinecap="round" />
-            <line data-testid="door-leaf" x1={half} y1={0} x2={rightOpenX} y2={openY} stroke={color} strokeWidth={2.5} strokeLinecap="round" />
-            <path data-testid="door-swing-arc" d={`M 0 0 A ${doubleLeaf} ${doubleLeaf} 0 0 ${swingSide === "b" ? 0 : 1} ${leftOpenX} ${openY}`}
-              fill="none" stroke={color} strokeWidth={1.5} opacity={0.82} />
-            <path data-testid="door-swing-arc" d={`M 0 0 A ${doubleLeaf} ${doubleLeaf} 0 0 ${swingSide === "b" ? 1 : 0} ${rightOpenX} ${openY}`}
-              fill="none" stroke={color} strokeWidth={1.5} opacity={0.82} />
-          </>
-            );
-          })()
-        ) : (
-          <>
-            <circle data-testid="door-hinge" cx={hingeX} cy={0} r={2.4} fill={color} />
-            <line data-testid="door-leaf" x1={hingeX} y1={0} x2={hingeX} y2={sideSign * leaf} stroke={color} strokeWidth={2.7} strokeLinecap="round" />
-            <path data-testid="door-swing-arc" d={`M ${closedX} 0 A ${leaf} ${leaf} 0 0 ${arcSweep} ${hingeX} ${sideSign * leaf}`}
-              fill="none" stroke={color} strokeWidth={1.6} opacity={0.84} />
-          </>
-        )}
-        {selected && <rect data-testid="opening-selection-outline" x={-half - 3} y={(sideSign < 0 ? -leaf - 4 : -6)} width={width + 6} height={leaf + 10} rx={1.5} fill="none" stroke="var(--accent)" strokeWidth={1.5} />}
-        {locked && (
-          <path d="M-2 -3 V-4.5 C-2 -6 -1 -7 0 -7 C1 -7 2 -6 2 -4.5 V-3 M-3 -3 H3 V2 H-3 Z" fill="#0f172a" stroke="white" strokeWidth={0.6} />
-        )}
-      </>
-    );
-  }
-  const rail = Math.max(wallThickness / 2 + 2, 4.5);
-  return (
-    <>
-      <line data-testid="window-wall-cut" x1={-half} y1={0} x2={half} y2={0}
-        stroke={background} strokeWidth={gapStroke} strokeLinecap="butt" />
-      <rect x={-half} y={-rail} width={width} height={rail * 2} fill="rgba(125, 211, 252, 0.16)" stroke="none" />
-      <line x1={-half} y1={-jamb} x2={-half} y2={jamb} stroke={color} strokeWidth={1.8} strokeLinecap="round" />
-      <line x1={half} y1={-jamb} x2={half} y2={jamb} stroke={color} strokeWidth={1.8} strokeLinecap="round" />
-      <line data-testid={hitId} x1={-half} y1={0} x2={half} y2={0} stroke="transparent" strokeWidth={28} strokeLinecap="butt" />
-      <line data-testid="window-glazing" x1={-half} y1={-rail} x2={half} y2={-rail} stroke={color} strokeWidth={2.2} strokeLinecap="round" />
-      <line x1={-half} y1={rail} x2={half} y2={rail} stroke={color} strokeWidth={2.2} strokeLinecap="round" />
-      <line x1={0} y1={-rail - 2} x2={0} y2={rail + 2} stroke={color} strokeWidth={1.4} opacity={0.8} />
-      <line x1={-half + 3} y1={0} x2={half - 3} y2={0} stroke="#e0f2fe" strokeWidth={1.1} opacity={0.9} />
-      {selected && <rect data-testid="opening-selection-outline" x={-half - 3} y={-rail - 3} width={width + 6} height={rail * 2 + 6} rx={1.5} fill="none" stroke="var(--accent)" strokeWidth={1.5} />}
-      {locked && (
-        <path d="M-2 -3 V-4.5 C-2 -6 -1 -7 0 -7 C1 -7 2 -6 2 -4.5 V-3 M-3 -3 H3 V2 H-3 Z" fill="#0f172a" stroke="white" strokeWidth={0.6} />
-      )}
-    </>
-  );
-}
-
 function isManagedPerimeterWall(wall: FloorWall) {
   return wall.managedKind === "perimeter";
 }
@@ -1487,1341 +1260,6 @@ type FloorContextMenuState =
   | { x: number; y: number; type: FloorSelection["type"]; id: string }
   | { x: number; y: number; type: "group"; id?: undefined }
   | { x: number; y: number; type: "canvas"; id?: undefined };
-
-function FurnitureArtwork({ type, x, y, width, height, color, selected = false, assetKey }: {
-  type: string;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  color: string;
-  selected?: boolean;
-  assetKey?: string;
-}) {
-  // Furniture is deliberately rendered as compact architectural-plan artwork
-  // only.  It has no navigation meaning; all transforms continue to flow
-  // through the existing FloorFurniture gesture/persistence lifecycle.
-  const stroke = selected ? "var(--accent)" : "rgba(38,32,25,0.38)";
-  const inset = Math.max(1, Math.min(width, height) * 0.1);
-  const cx = x + width / 2;
-  const cy = y + height / 2;
-  const selStroke = selected ? 1.4 : 0.8;
-  const sharedAssetKey = resolveCanvasAssetKey({ type, assetKey });
-  const sharedAsset = sharedAssetKey ? getCanvasAsset(sharedAssetKey) : undefined;
-  if (sharedAsset?.surfaces.includes("map")) {
-    return (
-      <>
-        <CanvasAssetVisual
-          assetKey={sharedAsset.key}
-          label={sharedAsset.name}
-          x={x}
-          y={y}
-          width={width}
-          height={height}
-          style={{ color }}
-        />
-        {selected && <rect x={x - 2} y={y - 2} width={width + 4} height={height + 4} rx={1.5} fill="none" stroke="var(--accent)" strokeWidth={1.5} />}
-      </>
-    );
-  }
-  const seatMark = (sx: number, sy: number, sw: number, sh = sw, key?: string) => (
-    <g key={key} data-testid="furniture-seat">
-      <rect x={sx - sw / 2} y={sy - sh / 2} width={sw} height={sh} rx={Math.min(sw, sh) * 0.22}
-        fill={color} stroke={stroke} strokeWidth={selStroke * 0.8} />
-      {/* A short backrest line keeps classroom and conference seating legible
-          at plan scale without turning the symbol into a pictogram. */}
-      <line x1={sx - sw * 0.28} y1={sy - sh * 0.28} x2={sx + sw * 0.28} y2={sy - sh * 0.28}
-        stroke="rgba(255,255,255,0.7)" strokeWidth={Math.max(0.55, selStroke * 0.45)} strokeLinecap="round" />
-    </g>
-  );
-  // Reusable plan-view chair primitive for the grouped seating symbols below.
-  // Rotation is local to the chair so each seat can face the shared table
-  // while the containing FloorFurniture record remains one transformable item.
-  const facingChair = (sx: number, sy: number, sw: number, sh: number, rotation: number, key: string) => (
-    <g key={key} data-testid="furniture-seat" transform={`rotate(${rotation}, ${sx}, ${sy})`}>
-      <rect x={sx - sw / 2} y={sy - sh / 2} width={sw} height={sh} rx={Math.min(sw, sh) * 0.24}
-        fill={color} stroke={stroke} strokeWidth={selStroke * 0.8} />
-      <path d={`M ${sx - sw * 0.34} ${sy - sh * 0.28} Q ${sx} ${sy - sh * 0.48} ${sx + sw * 0.34} ${sy - sh * 0.28}`}
-        fill="none" stroke="rgba(255,255,255,0.72)" strokeWidth={Math.max(0.55, selStroke * 0.45)} strokeLinecap="round" />
-    </g>
-  );
-  const lectureChair = (sx: number, sy: number, sw: number, sh: number, rotation: number, key: string) => (
-    <g key={key} data-testid="furniture-seat" transform={`rotate(${rotation}, ${sx}, ${sy})`}>
-      <rect x={sx - sw / 2} y={sy - sh / 2} width={sw} height={sh} rx={Math.min(sw, sh) * 0.2}
-        fill={color} stroke={stroke} strokeWidth={selStroke * 0.8} />
-      <path d={`M ${sx - sw * 0.34} ${sy - sh * 0.28} Q ${sx} ${sy - sh * 0.48} ${sx + sw * 0.34} ${sy - sh * 0.28}`}
-        fill="none" stroke="rgba(255,255,255,0.72)" strokeWidth={Math.max(0.55, selStroke * 0.45)} strokeLinecap="round" />
-      <g data-testid="lecture-chair-writing-arm">
-        <rect x={sx + sw * 0.28} y={sy - sh * 0.22} width={sw * 0.52} height={sh * 0.44} rx={Math.min(sw, sh) * 0.08}
-          fill={color} stroke={stroke} strokeWidth={selStroke * 0.65} />
-        <line x1={sx + sw * 0.36} y1={sy} x2={sx + sw * 0.7} y2={sy} stroke="rgba(255,255,255,0.46)" strokeWidth={0.55} />
-      </g>
-    </g>
-  );
-  const roundSeat = (sx: number, sy: number, radius: number, key: string) => (
-    <g key={key} data-testid="furniture-seat">
-      <circle cx={sx} cy={sy} r={radius} fill={color} stroke={stroke} strokeWidth={selStroke * 0.8} />
-      <path d={`M ${sx - radius * 0.42} ${sy - radius * 0.28} Q ${sx} ${sy - radius * 0.62} ${sx + radius * 0.42} ${sy - radius * 0.28}`}
-        fill="none" stroke="rgba(255,255,255,0.7)" strokeWidth={Math.max(0.5, selStroke * 0.4)} strokeLinecap="round" />
-    </g>
-  );
-  const studyCarrelUnit = (unitX: number, unitY: number, unitW: number, unitH: number, key: string) => {
-    const surfaceY = unitY + unitH * 0.2;
-    const surfaceH = unitH * 0.3;
-    return (
-      <g key={key} data-testid="study-carrel-unit">
-        <rect data-testid="study-carrel-surface" x={unitX + unitW * 0.12} y={surfaceY} width={unitW * 0.76} height={surfaceH}
-          rx={1} fill={color} stroke={stroke} strokeWidth={selStroke} />
-        <line data-testid="study-carrel-partition" x1={unitX + unitW * 0.08} y1={unitY + unitH * 0.08} x2={unitX + unitW * 0.08} y2={unitY + unitH * 0.72}
-          stroke={stroke} strokeWidth={Math.max(1, selStroke)} />
-        <line data-testid="study-carrel-partition" x1={unitX + unitW * 0.92} y1={unitY + unitH * 0.08} x2={unitX + unitW * 0.92} y2={unitY + unitH * 0.72}
-          stroke={stroke} strokeWidth={Math.max(1, selStroke)} />
-        <line x1={unitX + unitW * 0.08} y1={unitY + unitH * 0.08} x2={unitX + unitW * 0.92} y2={unitY + unitH * 0.08}
-          stroke={stroke} strokeWidth={Math.max(0.8, selStroke * 0.8)} />
-        {facingChair(unitX + unitW * 0.5, unitY + unitH * 0.84, unitW * 0.34, unitH * 0.2, 180, `${key}-chair`)}
-      </g>
-    );
-  };
-
-  if (type === "audience-chair") {
-    return (
-      <g data-testid="audience-chair-symbol">
-        {facingChair(cx, cy, Math.max(4, width * 0.62), Math.max(4, height * 0.62), 0, "audience-chair")}
-        <path d={`M ${x + width * 0.22} ${y + height * 0.2} Q ${cx} ${y - height * 0.02} ${x + width * 0.78} ${y + height * 0.2}`} fill="none" stroke={color} strokeWidth={0.8} strokeLinecap="round" />
-      </g>
-    );
-  }
-  if (type === "garden-shade-umbrella") {
-    const radius = Math.min(width, height) * 0.42;
-    const points = Array.from({ length: 8 }, (_, index) => {
-      const angle = -Math.PI / 8 + index * Math.PI / 4;
-      return `${cx + Math.cos(angle) * radius},${cy + Math.sin(angle) * radius}`;
-    }).join(" ");
-    return (
-      <g data-testid="garden-shade-umbrella-symbol">
-        <polygon data-testid="garden-shade-canopy" points={points} fill={color} fillOpacity={0.66} stroke={stroke} strokeWidth={selStroke} strokeLinejoin="round" />
-        {Array.from({ length: 8 }, (_, index) => {
-          const angle = -Math.PI / 8 + index * Math.PI / 4;
-          return <line key={`umbrella-rib-${index}`} data-testid="garden-shade-rib" x1={cx} y1={cy}
-            x2={cx + Math.cos(angle) * radius * 0.9} y2={cy + Math.sin(angle) * radius * 0.9}
-            stroke="rgba(255,255,255,0.7)" strokeWidth={0.85} />;
-        })}
-        <circle data-testid="garden-shade-hub" cx={cx} cy={cy} r={Math.min(width, height) * 0.075} fill="#f8fafc" stroke={stroke} strokeWidth={selStroke} />
-        <circle cx={cx} cy={cy} r={Math.min(width, height) * 0.03} fill={color} stroke={stroke} strokeWidth={0.55} />
-      </g>
-    );
-  }
-  if (type === "lecture-chair-writing-arm") {
-    return (
-      <g data-testid="lecture-chair-writing-arm-symbol">
-        {lectureChair(cx, cy, Math.max(5, width * 0.62), Math.max(5, height * 0.66), 0, "lecture-chair")}
-      </g>
-    );
-  }
-  if (type === "audience-seating-4x4") {
-    const columns = 4;
-    const rows = 4;
-    const cellW = width / columns;
-    const cellH = height / rows;
-    const chairW = Math.max(4, Math.min(cellW * 0.6, 10));
-    const chairH = Math.max(4, Math.min(cellH * 0.62, 10));
-    return (
-      <g data-testid="audience-seating-4x4-symbol">
-        <rect x={x + width * 0.05} y={y + height * 0.04} width={width * 0.9} height={height * 0.92} rx={2}
-          fill="rgba(148,163,184,0.12)" stroke={stroke} strokeWidth={selStroke * 0.8} strokeDasharray="2 1.5" />
-        {Array.from({ length: rows }, (_, row) => Array.from({ length: columns }, (_, column) => {
-          const sx = x + cellW * (column + 0.5);
-          const sy = y + cellH * (row + 0.5);
-          return facingChair(sx, sy, chairW, chairH, 0, `audience-seat-${row}-${column}`);
-        }))}
-        <line x1={x + width * 0.1} y1={y + height * 0.03} x2={x + width * 0.9} y2={y + height * 0.03}
-          stroke={color} strokeWidth={1.2} />
-      </g>
-    );
-  }
-  if (type === "round-table-chairs") {
-    const tableRadius = Math.min(width, height) * 0.22;
-    const chairRadius = Math.min(width, height) * 0.34;
-    const chairW = Math.max(4, Math.min(width * 0.18, 10));
-    const chairH = Math.max(4, Math.min(height * 0.15, 8));
-    const angles = [-90, -30, 30, 90, 150, 210];
-    return (
-      <g data-testid="round-table-chairs-symbol">
-        <circle data-testid="round-table" cx={cx} cy={cy} r={tableRadius} fill={color} stroke={stroke} strokeWidth={selStroke} />
-        <circle cx={cx} cy={cy} r={tableRadius * 0.72} fill="none" stroke="rgba(255,255,255,0.38)" strokeWidth={0.8} />
-        {angles.map((angle) => {
-          const radians = angle * Math.PI / 180;
-          const sx = cx + Math.cos(radians) * chairRadius;
-          const sy = cy + Math.sin(radians) * chairRadius;
-          return facingChair(sx, sy, chairW, chairH, angle + 90, `round-chair-${angle}`);
-        })}
-      </g>
-    );
-  }
-  if (type === "dining-table-4-seats") {
-    const tableX = x + width * 0.27;
-    const tableY = y + height * 0.25;
-    const tableW = width * 0.46;
-    const tableH = height * 0.5;
-    const chairW = Math.max(4, width * 0.16);
-    const chairH = Math.max(4, height * 0.17);
-    return (
-      <g data-testid="dining-table-4-symbol">
-        <rect x={tableX} y={tableY} width={tableW} height={tableH} rx={Math.min(tableW, tableH) * 0.14} fill={color} stroke={stroke} strokeWidth={selStroke} />
-        <rect x={tableX + tableW * 0.12} y={tableY + tableH * 0.12} width={tableW * 0.76} height={tableH * 0.76} rx={2} fill="none" stroke="rgba(255,255,255,0.34)" strokeWidth={0.75} />
-        {facingChair(cx, y + height * 0.1, chairW, chairH, 0, "dining-4-top")}
-        {facingChair(cx, y + height * 0.9, chairW, chairH, 180, "dining-4-bottom")}
-        {facingChair(x + width * 0.11, cy, chairH, chairW, -90, "dining-4-left")}
-        {facingChair(x + width * 0.89, cy, chairH, chairW, 90, "dining-4-right")}
-      </g>
-    );
-  }
-  if (type === "dining-table-6-seats") {
-    const tableX = x + width * 0.12;
-    const tableY = y + height * 0.31;
-    const tableW = width * 0.76;
-    const tableH = height * 0.38;
-    const chairW = Math.max(4, width * 0.13);
-    const chairH = Math.max(4, height * 0.18);
-    return (
-      <g data-testid="dining-table-6-symbol">
-        <rect x={tableX} y={tableY} width={tableW} height={tableH} rx={Math.min(tableW, tableH) * 0.16} fill={color} stroke={stroke} strokeWidth={selStroke} />
-        <line x1={tableX + tableW * 0.08} y1={cy} x2={tableX + tableW * 0.92} y2={cy} stroke="rgba(255,255,255,0.34)" strokeWidth={0.75} />
-        {[0.22, 0.5, 0.78].map((position) => <g key={position}>
-          {facingChair(tableX + tableW * position, y + height * 0.1, chairW, chairH, 0, `dining-6-top-${position}`)}
-          {facingChair(tableX + tableW * position, y + height * 0.9, chairW, chairH, 180, `dining-6-bottom-${position}`)}
-        </g>)}
-      </g>
-    );
-  }
-  if (type === "conference-table-large") {
-    const tableX = x + width * 0.17;
-    const tableY = y + height * 0.25;
-    const tableW = width * 0.66;
-    const tableH = height * 0.5;
-    const bevelX = tableW * 0.16;
-    const bevelY = tableH * 0.28;
-    const tablePoints = [
-      [tableX + bevelX, tableY],
-      [tableX + tableW - bevelX, tableY],
-      [tableX + tableW, tableY + bevelY],
-      [tableX + tableW, tableY + tableH - bevelY],
-      [tableX + tableW - bevelX, tableY + tableH],
-      [tableX + bevelX, tableY + tableH],
-      [tableX, tableY + tableH - bevelY],
-      [tableX, tableY + bevelY],
-    ].map(([px, py]) => `${px},${py}`).join(" ");
-    const innerPoints = [
-      [tableX + bevelX * 1.3, tableY + tableH * 0.22],
-      [tableX + tableW - bevelX * 1.3, tableY + tableH * 0.22],
-      [tableX + tableW - bevelX * 1.5, tableY + tableH * 0.78],
-      [tableX + bevelX * 1.5, tableY + tableH * 0.78],
-    ].map(([px, py]) => `${px},${py}`).join(" ");
-    const chairW = Math.max(4, Math.min(width * 0.1, 8));
-    const chairH = Math.max(4, Math.min(height * 0.12, 8));
-    const topBottomPositions = [0.27, 0.385, 0.5, 0.615, 0.73];
-    const sidePositions = [0.36, 0.5, 0.64];
-    return (
-      <g data-testid="conference-table-large-symbol">
-        <polygon data-testid="conference-table-large-surface" points={tablePoints} fill={color} stroke={stroke} strokeWidth={selStroke} strokeLinejoin="round" />
-        <polygon data-testid="conference-table-large-inner" points={innerPoints} fill="none" stroke="rgba(255,255,255,0.36)" strokeWidth={0.9} strokeLinejoin="round" />
-        <line x1={cx} y1={tableY + tableH * 0.24} x2={cx} y2={tableY + tableH * 0.76} stroke="rgba(255,255,255,0.26)" strokeWidth={0.8} strokeDasharray="2 1.5" />
-        {topBottomPositions.map((position) => <g key={position}>
-          {facingChair(tableX + tableW * position, tableY - height * 0.09, chairW, chairH, 0, `large-top-${position}`)}
-          {facingChair(tableX + tableW * position, tableY + tableH + height * 0.09, chairW, chairH, 180, `large-bottom-${position}`)}
-        </g>)}
-        {sidePositions.map((position) => <g key={position}>
-          {facingChair(tableX - width * 0.08, tableY + tableH * position, chairH, chairW, -90, `large-left-${position}`)}
-          {facingChair(tableX + tableW + width * 0.08, tableY + tableH * position, chairH, chairW, 90, `large-right-${position}`)}
-        </g>)}
-      </g>
-    );
-  }
-  if (type === "boardroom-table-chairs") {
-    const tableX = x + width * 0.1;
-    const tableY = y + height * 0.25;
-    const tableW = width * 0.8;
-    const tableH = height * 0.5;
-    const chairW = Math.max(4, Math.min(width * 0.085, 8));
-    const chairH = Math.max(4, Math.min(height * 0.14, 8));
-    const sidePositions = [0.14, 0.286, 0.429, 0.571, 0.714, 0.86];
-    return (
-      <g data-testid="boardroom-table-chairs-symbol">
-        <rect data-testid="boardroom-table-surface" x={tableX} y={tableY} width={tableW} height={tableH}
-          rx={Math.min(tableW, tableH) * 0.12} fill={color} stroke={stroke} strokeWidth={selStroke} />
-        <rect x={tableX + tableW * 0.06} y={tableY + tableH * 0.18} width={tableW * 0.88} height={tableH * 0.64}
-          rx={2} fill="none" stroke="rgba(255,255,255,0.36)" strokeWidth={0.8} />
-        <line x1={cx} y1={tableY + tableH * 0.2} x2={cx} y2={tableY + tableH * 0.8}
-          stroke="rgba(255,255,255,0.28)" strokeWidth={0.7} strokeDasharray="2 1.5" />
-        {sidePositions.map((position) => <g key={position}>
-          {facingChair(tableX + tableW * position, tableY - height * 0.095, chairW, chairH, 0, `boardroom-top-${position}`)}
-          {facingChair(tableX + tableW * position, tableY + tableH + height * 0.095, chairW, chairH, 180, `boardroom-bottom-${position}`)}
-        </g>)}
-        {facingChair(tableX - width * 0.055, cy, chairH, chairW, -90, "boardroom-left")}
-        {facingChair(tableX + tableW + width * 0.055, cy, chairH, chairW, 90, "boardroom-right")}
-      </g>
-    );
-  }
-  if (type === "collaborative-hub-table") {
-    const armLength = Math.min(width, height) * 0.36;
-    const armWidth = Math.min(width, height) * 0.26;
-    const seatRadius = Math.min(width, height) * 0.075;
-    const armAngles = [-90, 30, 150];
-    return (
-      <g data-testid="collaborative-hub-table-symbol">
-        {armAngles.map((angle) => (
-          <g key={angle} transform={`rotate(${angle}, ${cx}, ${cy})`}>
-            <rect data-testid="collaborative-hub-arm" x={cx - armWidth / 2} y={cy - armLength * 0.72}
-              width={armWidth} height={armLength} rx={armWidth * 0.34}
-              fill={color} stroke={stroke} strokeWidth={selStroke} />
-            <line x1={cx - armWidth * 0.25} y1={cy - armLength * 0.58} x2={cx + armWidth * 0.25} y2={cy - armLength * 0.58}
-              stroke="rgba(255,255,255,0.42)" strokeWidth={0.7} />
-          </g>
-        ))}
-        <circle data-testid="collaborative-hub-center" cx={cx} cy={cy} r={Math.min(width, height) * 0.16}
-          fill={color} stroke={stroke} strokeWidth={selStroke} />
-        <circle cx={cx} cy={cy} r={Math.min(width, height) * 0.075} fill="none" stroke="rgba(255,255,255,0.5)" strokeWidth={0.8} />
-        {armAngles.map((angle) => {
-          const radians = angle * Math.PI / 180;
-          const sx = cx + Math.cos(radians) * armLength * 0.82;
-          const sy = cy + Math.sin(radians) * armLength * 0.82;
-          return (
-            <g key={`hub-seat-${angle}`} transform={`rotate(${angle + 90}, ${sx}, ${sy})`}>
-              {roundSeat(sx - seatRadius * 1.3, sy, seatRadius, `hub-seat-a-${angle}`)}
-              {roundSeat(sx + seatRadius * 1.3, sy, seatRadius, `hub-seat-b-${angle}`)}
-            </g>
-          );
-        })}
-      </g>
-    );
-  }
-  if (type === "long-table") {
-    const tableX = x + width * 0.03;
-    const tableY = y + height * 0.18;
-    const tableW = width * 0.94;
-    const tableH = height * 0.64;
-    return (
-      <g data-testid="long-table-symbol">
-        <rect data-testid="long-table-surface" x={tableX} y={tableY} width={tableW} height={tableH}
-          rx={Math.min(tableW, tableH) * 0.16} fill={color} stroke={stroke} strokeWidth={selStroke} />
-        <line x1={tableX + tableW * 0.08} y1={cy} x2={tableX + tableW * 0.92} y2={cy}
-          stroke="rgba(255,255,255,0.38)" strokeWidth={0.8} />
-        <line x1={cx} y1={tableY + tableH * 0.18} x2={cx} y2={tableY + tableH * 0.82}
-          stroke="rgba(31,41,55,0.22)" strokeWidth={0.7} />
-        <circle cx={tableX + tableW * 0.08} cy={cy} r={Math.min(width, height) * 0.055} fill="none" stroke="rgba(255,255,255,0.34)" strokeWidth={0.7} />
-        <circle cx={tableX + tableW * 0.92} cy={cy} r={Math.min(width, height) * 0.055} fill="none" stroke="rgba(255,255,255,0.34)" strokeWidth={0.7} />
-      </g>
-    );
-  }
-  if (type === "communal-study-table") {
-    const tableX = x + width * 0.08;
-    const tableY = y + height * 0.29;
-    const tableW = width * 0.84;
-    const tableH = height * 0.42;
-    const chairW = Math.max(4, Math.min(width * 0.075, 8));
-    const chairH = Math.max(4, Math.min(height * 0.16, 8));
-    const positions = [0.07, 0.19, 0.31, 0.43, 0.57, 0.69, 0.81, 0.93];
-    return (
-      <g data-testid="communal-study-table-symbol">
-        <rect data-testid="communal-study-table-surface" x={tableX} y={tableY} width={tableW} height={tableH}
-          rx={Math.min(tableW, tableH) * 0.1} fill={color} stroke={stroke} strokeWidth={selStroke} />
-        <rect x={tableX + tableW * 0.025} y={tableY + tableH * 0.18} width={tableW * 0.95} height={tableH * 0.64}
-          rx={1.5} fill="none" stroke="rgba(255,255,255,0.35)" strokeWidth={0.75} />
-        <line x1={cx} y1={tableY + tableH * 0.18} x2={cx} y2={tableY + tableH * 0.82}
-          stroke="rgba(31,41,55,0.22)" strokeWidth={0.7} />
-        {positions.map((position) => <g key={position}>
-          {facingChair(tableX + tableW * position, tableY - height * 0.1, chairW, chairH, 0, `communal-top-${position}`)}
-          {facingChair(tableX + tableW * position, tableY + tableH + height * 0.1, chairW, chairH, 180, `communal-bottom-${position}`)}
-        </g>)}
-      </g>
-    );
-  }
-  if (type === "double-sided-study-table") {
-    const tableX = x + width * 0.1;
-    const tableY = y + height * 0.28;
-    const tableW = width * 0.8;
-    const tableH = height * 0.34;
-    const benchY = y + height * 0.1;
-    const benchH = height * 0.16;
-    return (
-      <g data-testid="double-sided-study-table-symbol">
-        <rect data-testid="double-sided-study-table-bench" x={x + width * 0.08} y={benchY} width={width * 0.84} height={benchH}
-          rx={Math.min(width, height) * 0.08} fill={color} fillOpacity={0.78} stroke={stroke} strokeWidth={selStroke} />
-        <rect data-testid="double-sided-study-table-surface" x={tableX} y={tableY} width={tableW} height={tableH}
-          rx={Math.min(tableW, tableH) * 0.12} fill={color} stroke={stroke} strokeWidth={selStroke} />
-        <rect data-testid="double-sided-study-table-bench" x={x + width * 0.08} y={y + height * 0.74} width={width * 0.84} height={benchH}
-          rx={Math.min(width, height) * 0.08} fill={color} fillOpacity={0.78} stroke={stroke} strokeWidth={selStroke} />
-        <line x1={tableX + tableW * 0.08} y1={cy} x2={tableX + tableW * 0.92} y2={cy}
-          stroke="rgba(255,255,255,0.4)" strokeWidth={0.8} />
-        {Array.from({ length: 4 }, (_, index) => {
-          const dividerX = x + width * (0.18 + index * 0.21);
-          return <line key={`double-study-divider-${index}`} x1={dividerX} y1={benchY + benchH * 0.16} x2={dividerX} y2={benchY + benchH * 0.84}
-            stroke="rgba(255,255,255,0.42)" strokeWidth={0.65} />;
-        })}
-        {Array.from({ length: 4 }, (_, index) => {
-          const dividerX = x + width * (0.18 + index * 0.21);
-          return <line key={`double-study-divider-bottom-${index}`} x1={dividerX} y1={y + height * 0.74 + benchH * 0.16} x2={dividerX} y2={y + height * 0.74 + benchH * 0.84}
-            stroke="rgba(255,255,255,0.42)" strokeWidth={0.65} />;
-        })}
-      </g>
-    );
-  }
-  if (type === "rectangular-table" || type === "coffee-table") {
-    const low = type === "coffee-table";
-    const tableX = x + width * (low ? 0.04 : 0.02);
-    const tableY = y + height * (low ? 0.14 : 0.08);
-    const tableW = width * (low ? 0.92 : 0.96);
-    const tableH = height * (low ? 0.72 : 0.84);
-    return (
-      <g data-testid={low ? "coffee-table-symbol" : "rectangular-table-symbol"}>
-        <rect x={tableX} y={tableY} width={tableW} height={tableH} rx={Math.min(tableW, tableH) * (low ? 0.18 : 0.1)} fill={color} stroke={stroke} strokeWidth={selStroke} />
-        <rect x={tableX + tableW * 0.08} y={tableY + tableH * 0.14} width={tableW * 0.84} height={tableH * 0.72} rx={2} fill="none" stroke="rgba(255,255,255,0.34)" strokeWidth={0.75} />
-        <line x1={cx} y1={tableY + tableH * 0.14} x2={cx} y2={tableY + tableH * 0.86} stroke="rgba(255,255,255,0.22)" strokeWidth={0.7} />
-      </g>
-    );
-  }
-  if (type === "round-coffee-table") {
-    return (
-      <g data-testid="round-coffee-table-symbol">
-        <circle cx={cx} cy={cy} r={Math.min(width, height) * 0.44} fill={color} fillOpacity={0.88} stroke={stroke} strokeWidth={selStroke} />
-      </g>
-    );
-  }
-  if (type === "square-coffee-table") {
-    const insetX = width * 0.06;
-    const insetY = height * 0.06;
-    return (
-      <g data-testid="square-coffee-table-symbol">
-        <rect x={x + insetX} y={y + insetY} width={width - insetX * 2} height={height - insetY * 2}
-          fill={color} fillOpacity={0.88} stroke={stroke} strokeWidth={selStroke} />
-      </g>
-    );
-  }
-  if (type === "workstation" || type === "computer-workstation" || type === "computer-workstation-chair") {
-    const computer = type !== "workstation";
-    const deskX = x + width * 0.08;
-    const deskY = y + height * 0.08;
-    const deskW = width * 0.84;
-    const deskH = height * 0.5;
-    return (
-      <g data-testid={computer ? "computer-workstation-symbol" : "workstation-symbol"}>
-        <rect x={deskX} y={deskY} width={deskW} height={deskH} rx={1.6} fill={color} stroke={stroke} strokeWidth={selStroke} />
-        {computer && <>
-          <rect data-testid="computer-workstation-monitor" x={cx - width * 0.18} y={deskY + height * 0.08} width={width * 0.36} height={height * 0.2} rx={1} fill="#1f2937" stroke={stroke} strokeWidth={0.55} />
-          <line x1={cx} y1={deskY + height * 0.28} x2={cx} y2={deskY + height * 0.35} stroke="#1f2937" strokeWidth={0.8} />
-          <rect data-testid="computer-workstation-keyboard" x={cx - width * 0.2} y={deskY + height * 0.35} width={width * 0.4} height={height * 0.08} rx={0.7} fill="#e2e8f0" stroke="#475569" strokeWidth={0.45} />
-        </>}
-        {!computer && <line x1={deskX + deskW * 0.12} y1={deskY + deskH * 0.7} x2={deskX + deskW * 0.88} y2={deskY + deskH * 0.7} stroke="rgba(255,255,255,0.32)" strokeWidth={0.8} />}
-        {facingChair(cx, y + height * 0.8, width * 0.34, height * 0.2, 180, "workstation-chair")}
-      </g>
-    );
-  }
-  if (type === "computer-station") {
-    const counterX = x + width * 0.04;
-    const counterY = y + height * 0.24;
-    const counterW = width * 0.92;
-    const counterH = height * 0.34;
-    return (
-      <g data-testid="computer-station-symbol">
-        <rect data-testid="computer-station-counter" x={counterX} y={counterY} width={counterW} height={counterH}
-          rx={1.4} fill={color} stroke={stroke} strokeWidth={selStroke} />
-        <line x1={counterX + counterW * 0.06} y1={counterY + counterH * 0.22} x2={counterX + counterW * 0.94} y2={counterY + counterH * 0.22}
-          stroke="rgba(255,255,255,0.45)" strokeWidth={0.7} />
-        <rect data-testid="computer-station-monitor" x={cx - width * 0.14} y={y + height * 0.1} width={width * 0.28} height={height * 0.18}
-          rx={0.9} fill="#1f2937" stroke={stroke} strokeWidth={0.55} />
-        <line x1={cx} y1={y + height * 0.28} x2={cx} y2={counterY + counterH * 0.2} stroke="#1f2937" strokeWidth={0.75} />
-        <rect data-testid="computer-station-keyboard" x={cx - width * 0.16} y={counterY + counterH * 0.42} width={width * 0.32} height={height * 0.08}
-          rx={0.7} fill="#e2e8f0" stroke="#475569" strokeWidth={0.45} />
-        {facingChair(cx, y + height * 0.82, width * 0.34, height * 0.2, 180, "computer-station-seat")}
-      </g>
-    );
-  }
-  if (type === "l-shaped-workstation") {
-    const horizontal = { x: x + width * 0.08, y: y + height * 0.1, w: width * 0.74, h: height * 0.25 };
-    const vertical = { x: x + width * 0.57, y: y + height * 0.1, w: width * 0.3, h: height * 0.78 };
-    return (
-      <g data-testid="l-shaped-workstation-symbol">
-        <rect x={horizontal.x} y={horizontal.y} width={horizontal.w} height={horizontal.h} rx={1.5} fill={color} stroke={stroke} strokeWidth={selStroke} />
-        <rect x={vertical.x} y={vertical.y} width={vertical.w} height={vertical.h} rx={1.5} fill={color} stroke={stroke} strokeWidth={selStroke} />
-        <rect data-testid="l-shaped-workstation-monitor" x={x + width * 0.24} y={y + height * 0.16} width={width * 0.2} height={height * 0.12} rx={0.8} fill="#1f2937" />
-        <rect x={x + width * 0.2} y={y + height * 0.3} width={width * 0.28} height={height * 0.06} rx={0.6} fill="#e2e8f0" />
-        <rect x={x + width * 0.64} y={y + height * 0.5} width={width * 0.13} height={height * 0.14} rx={1} fill="rgba(31,41,55,0.35)" />
-        {facingChair(x + width * 0.42, y + height * 0.58, width * 0.25, height * 0.18, 0, "l-shaped-chair")}
-      </g>
-    );
-  }
-  if (type === "clinic-bed") {
-    const bedX = x + width * 0.12;
-    const bedY = y + height * 0.04;
-    const bedW = width * 0.76;
-    const bedH = height * 0.92;
-    return (
-      <g data-testid="clinic-bed-symbol">
-        <rect x={bedX} y={bedY} width={bedW} height={bedH} rx={2} fill={color} stroke={stroke} strokeWidth={selStroke} />
-        <rect data-testid="clinic-bed-pillow" x={bedX + bedW * 0.12} y={bedY + bedH * 0.07} width={bedW * 0.76} height={bedH * 0.16} rx={1.5} fill="#f8fafc" stroke="#94a3b8" strokeWidth={0.65} />
-        <line x1={bedX + bedW * 0.08} y1={bedY + bedH * 0.3} x2={bedX + bedW * 0.92} y2={bedY + bedH * 0.3} stroke="#94a3b8" strokeWidth={0.7} />
-        <line x1={bedX + bedW * 0.08} y1={bedY + bedH * 0.78} x2={bedX + bedW * 0.92} y2={bedY + bedH * 0.78} stroke="#94a3b8" strokeWidth={0.7} />
-        <circle cx={bedX + bedW * 0.18} cy={bedY + bedH * 0.9} r={1.1} fill="#64748b" />
-        <circle cx={bedX + bedW * 0.82} cy={bedY + bedH * 0.9} r={1.1} fill="#64748b" />
-      </g>
-    );
-  }
-  if (type === "service-stall") {
-    const padX = x + width * 0.025;
-    const padY = y + height * 0.035;
-    const padW = width * 0.95;
-    const padH = height * 0.93;
-    const bodyX = x + width * 0.1;
-    const bodyY = y + height * 0.1;
-    const bodyW = width * 0.8;
-    const bodyH = height * 0.59;
-    const serviceY = y + height * 0.73;
-    const serviceH = height * 0.14;
-    return (
-      <g data-testid="service-stall-symbol">
-        {/* A quiet tiled pad gives the kiosk a clear footprint without making
-            the asset look like a solid brown rectangle. */}
-        <rect data-testid="service-stall-footprint" x={padX} y={padY} width={padW} height={padH} rx={3}
-          fill="#d7c5a8" fillOpacity={0.34} stroke={stroke} strokeWidth={selStroke} />
-        <path data-testid="service-stall-floor-pattern"
-          d={`M ${padX + padW * 0.12} ${padY + padH * 0.9} H ${padX + padW * 0.88} M ${padX + padW * 0.23} ${padY + padH * 0.78} H ${padX + padW * 0.77}`}
-          fill="none" stroke="rgba(120,85,48,0.28)" strokeWidth={0.65} strokeDasharray="2 2" />
-
-        {/* Rear preparation kiosk: a darker body, light worktop and two
-            simple equipment cues make the worker/customer sides legible. */}
-        <rect data-testid="service-stall-rear-work-zone" x={bodyX} y={bodyY} width={bodyW} height={bodyH} rx={2.5}
-          fill={color} fillOpacity={0.72} stroke={stroke} strokeWidth={selStroke} />
-        <rect data-testid="service-stall-prep-counter" x={bodyX + bodyW * 0.1} y={bodyY + bodyH * 0.13}
-          width={bodyW * 0.8} height={bodyH * 0.2} rx={1.2} fill="rgba(248,250,252,0.38)" stroke={stroke} strokeWidth={0.75} />
-        <line x1={bodyX + bodyW * 0.1} y1={bodyY + bodyH * 0.42} x2={bodyX + bodyW * 0.9} y2={bodyY + bodyH * 0.42}
-          stroke="rgba(31,41,55,0.3)" strokeWidth={0.8} />
-        <rect x={bodyX + bodyW * 0.2} y={bodyY + bodyH * 0.52} width={bodyW * 0.18} height={bodyH * 0.16} rx={0.8} fill="rgba(31,41,55,0.34)" />
-        <rect x={bodyX + bodyW * 0.62} y={bodyY + bodyH * 0.52} width={bodyW * 0.18} height={bodyH * 0.16} rx={0.8} fill="rgba(31,41,55,0.34)" />
-
-        {/* Full-width customer-facing counter with a deliberately open
-            service window in the middle. */}
-        <rect data-testid="service-stall-serving-counter" x={x + width * 0.1} y={serviceY}
-          width={width * 0.8} height={serviceH} rx={1.2} fill={color} stroke={stroke} strokeWidth={selStroke} />
-        <rect data-testid="service-stall-serving-window" x={x + width * 0.28} y={serviceY - serviceH * 0.08}
-          width={width * 0.44} height={serviceH * 0.9} rx={0.6} fill="rgba(248,250,252,0.32)" stroke={stroke} strokeWidth={0.65} />
-        <path data-testid="service-stall-serving-opening"
-          d={`M ${x + width * 0.3} ${serviceY + serviceH * 0.5} H ${x + width * 0.7}`}
-          fill="none" stroke="#f8fafc" strokeWidth={1.3} strokeDasharray="2 1.5" strokeLinecap="round" />
-        <line x1={x + width * 0.1} y1={serviceY + serviceH} x2={x + width * 0.9} y2={serviceY + serviceH}
-          stroke="rgba(31,41,55,0.48)" strokeWidth={1.1} />
-        <line data-testid="service-stall-side-post-left" x1={x + width * 0.1} y1={bodyY + bodyH * 0.9} x2={x + width * 0.1} y2={serviceY + serviceH * 1.1}
-          stroke={stroke} strokeWidth={1.4} />
-        <line data-testid="service-stall-side-post-right" x1={x + width * 0.9} y1={bodyY + bodyH * 0.9} x2={x + width * 0.9} y2={serviceY + serviceH * 1.1}
-          stroke={stroke} strokeWidth={1.4} />
-        <circle data-testid="service-stall-queue-marker" cx={cx} cy={y + height * 0.9}
-          r={Math.min(width, height) * 0.04} fill="#f8fafc" stroke={stroke} strokeWidth={0.55} />
-      </g>
-    );
-  }
-  if (type === "service-counter") {
-    return (
-      <g data-testid="service-counter-symbol">
-        <rect data-testid="service-counter-work-surface" x={x + width * 0.04} y={y + height * 0.11}
-          width={width * 0.92} height={height * 0.78} rx={2} fill={color} fillOpacity={0.3} stroke={stroke} strokeWidth={selStroke} />
-        <rect x={x + width * 0.12} y={y + height * 0.2} width={width * 0.76} height={height * 0.36}
-          rx={1.2} fill="rgba(248,250,252,0.24)" stroke={stroke} strokeWidth={0.75} />
-        <line x1={x + width * 0.12} y1={y + height * 0.61} x2={x + width * 0.88} y2={y + height * 0.61}
-          stroke="rgba(31,41,55,0.32)" strokeWidth={0.8} />
-        <rect data-testid="service-counter-customer-edge" x={x + width * 0.04} y={y + height * 0.66}
-          width={width * 0.92} height={height * 0.19} rx={1} fill={color} stroke={stroke} strokeWidth={selStroke} />
-        <rect data-testid="service-counter-pos" x={x + width * 0.7} y={y + height * 0.28}
-          width={width * 0.11} height={height * 0.15} rx={0.8} fill="#1f2937" stroke={stroke} strokeWidth={0.5} />
-        <path d={`M ${x + width * 0.2} ${y + height * 0.38} h${width * 0.32}`} stroke="#f8fafc" strokeWidth={0.8} strokeLinecap="round" />
-      </g>
-    );
-  }
-  if (type === "study-carrel") {
-    return (
-      <g data-testid="study-carrel-symbol">
-        {studyCarrelUnit(x, y, width, height, "study-carrel")}
-      </g>
-    );
-  }
-  if (type === "study-carrel-row") {
-    const stationCount = 4;
-    const unitW = width / stationCount;
-    return (
-      <g data-testid="study-carrel-row-symbol">
-        <rect data-testid="study-carrel-row-outline" x={x + 1} y={y + height * 0.04} width={width - 2} height={height * 0.92}
-          rx={1.5} fill="rgba(122,92,58,0.08)" stroke={stroke} strokeWidth={selStroke * 0.7} strokeDasharray="2 1.5" />
-        {Array.from({ length: stationCount }, (_, index) => studyCarrelUnit(x + unitW * index, y, unitW, height, `study-carrel-row-${index}`))}
-      </g>
-    );
-  }
-  if (type === "library-counter") {
-    return (
-      <g data-testid="library-counter-symbol">
-        <path data-testid="library-counter-body"
-          d={`M ${x + width * 0.05} ${y + height * 0.2} Q ${x + width * 0.05} ${y + height * 0.1} ${x + width * 0.13} ${y + height * 0.1} H ${x + width * 0.87} Q ${x + width * 0.95} ${y + height * 0.1} ${x + width * 0.95} ${y + height * 0.2} V ${y + height * 0.78} H ${x + width * 0.76} V ${y + height * 0.48} H ${x + width * 0.24} V ${y + height * 0.78} H ${x + width * 0.05} Z`}
-          fill={color} stroke={stroke} strokeWidth={selStroke} strokeLinejoin="round" />
-        <rect data-testid="library-counter-work-surface" x={x + width * 0.27} y={y + height * 0.22} width={width * 0.46} height={height * 0.18}
-          rx={1} fill="rgba(248,250,252,0.3)" stroke={stroke} strokeWidth={0.7} />
-        <rect data-testid="library-counter-computer" x={x + width * 0.57} y={y + height * 0.25} width={width * 0.12} height={height * 0.13}
-          rx={0.8} fill="#1f2937" stroke={stroke} strokeWidth={0.5} />
-        <rect x={x + width * 0.32} y={y + height * 0.27} width={width * 0.15} height={height * 0.08}
-          rx={0.5} fill="rgba(248,250,252,0.56)" stroke={stroke} strokeWidth={0.45} />
-        <path data-testid="library-counter-public-side" d={`M ${x + width * 0.31} ${y + height * 0.72} H ${x + width * 0.69}`}
-          fill="none" stroke="rgba(248,250,252,0.86)" strokeWidth={1.15} strokeLinecap="round" strokeDasharray="2 1.5" />
-      </g>
-    );
-  }
-  if (type === "wall-counter") {
-    const counterX = x + width * 0.03;
-    const counterY = y + height * 0.2;
-    const counterW = width * 0.94;
-    const counterH = height * 0.62;
-    const stationCount = Math.max(2, Math.min(6, Math.round(width / 16)));
-    return (
-      <g data-testid="wall-counter-symbol">
-        <rect data-testid="wall-counter-back-rail" x={counterX} y={y + height * 0.06} width={counterW} height={height * 0.16}
-          rx={0.8} fill={color} stroke={stroke} strokeWidth={selStroke} />
-        <rect data-testid="wall-counter-surface" x={counterX} y={counterY} width={counterW} height={counterH}
-          rx={1.2} fill={color} fillOpacity={0.55} stroke={stroke} strokeWidth={selStroke} />
-        {Array.from({ length: stationCount - 1 }, (_, index) => {
-          const dividerX = counterX + counterW * ((index + 1) / stationCount);
-          return <line key={`wall-counter-divider-${index}`} x1={dividerX} y1={counterY + counterH * 0.14} x2={dividerX} y2={counterY + counterH * 0.86}
-            stroke="rgba(255,255,255,0.44)" strokeWidth={0.7} />;
-        })}
-        <line x1={counterX + counterW * 0.04} y1={counterY + counterH * 0.2} x2={counterX + counterW * 0.96} y2={counterY + counterH * 0.2}
-          stroke="rgba(255,255,255,0.5)" strokeWidth={0.8} />
-      </g>
-    );
-  }
-  if (type === "rack-bookshelf") {
-    const shelfCount = Math.max(2, Math.min(5, Math.floor(width / 9)));
-    return (
-      <g data-testid="rack-bookshelf-symbol">
-        <rect x={x + 0.5} y={y + height * 0.08} width={width - 1} height={height * 0.84} rx={1} fill={color} stroke={stroke} strokeWidth={selStroke} />
-        {Array.from({ length: shelfCount - 1 }, (_, index) => <line key={`rack-shelf-${index}`} x1={x + width * 0.06} y1={y + height * ((index + 1) / shelfCount)} x2={x + width * 0.94} y2={y + height * ((index + 1) / shelfCount)} stroke="rgba(255,255,255,0.48)" strokeWidth={0.8} />)}
-        {Array.from({ length: shelfCount }, (_, index) => <line key={`rack-divider-${index}`} x1={x + width * ((index + 0.5) / shelfCount)} y1={y + height * 0.16} x2={x + width * ((index + 0.5) / shelfCount)} y2={y + height * 0.84} stroke="rgba(31,41,55,0.25)" strokeWidth={0.55} />)}
-      </g>
-    );
-  }
-  if (type === "drinking-fountain") {
-    return (
-      <g data-testid="drinking-fountain-symbol">
-        <rect x={x + width * 0.08} y={y + height * 0.16} width={width * 0.84} height={height * 0.68} rx={1.5} fill={color} fillOpacity={0.35} stroke={stroke} strokeWidth={selStroke} />
-        <ellipse data-testid="drinking-fountain-basin" cx={cx} cy={y + height * 0.57} rx={width * 0.28} ry={height * 0.2} fill="#f8fafc" stroke="#64748b" strokeWidth={0.8} />
-        <path data-testid="drinking-fountain-spout" d={`M ${cx} ${y + height * 0.46} v-${height * 0.2} q0 -${height * 0.12} ${width * 0.2} -${height * 0.12}`} fill="none" stroke="#475569" strokeWidth={0.8} strokeLinecap="round" />
-      </g>
-    );
-  }
-  if (type === "lounge-chair") {
-    return (
-      <g data-testid="lounge-chair-symbol">
-        <path d={`M ${x + width * 0.19} ${y + height * 0.28} Q ${cx} ${y - height * 0.02} ${x + width * 0.81} ${y + height * 0.28} L ${x + width * 0.88} ${y + height * 0.76} Q ${cx} ${y + height * 0.98} ${x + width * 0.12} ${y + height * 0.76} Z`} fill={color} stroke={stroke} strokeWidth={selStroke} strokeLinejoin="round" />
-        <path d={`M ${x + width * 0.24} ${y + height * 0.4} Q ${cx} ${y + height * 0.22} ${x + width * 0.76} ${y + height * 0.4}`} fill="none" stroke="rgba(255,255,255,0.48)" strokeWidth={1} />
-        <path d={`M ${x + width * 0.3} ${y + height * 0.68} Q ${cx} ${y + height * 0.84} ${x + width * 0.7} ${y + height * 0.68}`} fill="none" stroke="rgba(31,41,55,0.22)" strokeWidth={0.8} />
-      </g>
-    );
-  }
-  if (type === "lounge-chair-cluster") {
-    return (
-      <g data-testid="lounge-chair-cluster-symbol">
-        {[
-          { x: cx, y: y + height * 0.19, r: 0 },
-          { x: x + width * 0.25, y: y + height * 0.7, r: -35 },
-          { x: x + width * 0.75, y: y + height * 0.7, r: 35 },
-        ].map((chair, index) => <g key={index} transform={`rotate(${chair.r}, ${chair.x}, ${chair.y})`}>
-          <path d={`M ${chair.x - width * 0.13} ${chair.y - height * 0.14} Q ${chair.x} ${chair.y - height * 0.25} ${chair.x + width * 0.13} ${chair.y - height * 0.14} L ${chair.x + width * 0.15} ${chair.y + height * 0.13} Q ${chair.x} ${chair.y + height * 0.24} ${chair.x - width * 0.15} ${chair.y + height * 0.13} Z`} fill={color} stroke={stroke} strokeWidth={selStroke * 0.8} />
-          <path d={`M ${chair.x - width * 0.1} ${chair.y - height * 0.05} Q ${chair.x} ${chair.y - height * 0.13} ${chair.x + width * 0.1} ${chair.y - height * 0.05}`} fill="none" stroke="rgba(255,255,255,0.5)" strokeWidth={0.7} />
-        </g>)}
-      </g>
-    );
-  }
-  if (type === "sofa") {
-    const sideInset = width * 0.14;
-    const seatWidth = width * 0.34;
-    const cushionY = y + height * 0.38;
-    const cushionHeight = height * 0.48;
-    return (
-      <g data-testid="sofa-symbol">
-        <rect data-testid="sofa-footprint" x={x + width * 0.02} y={y + height * 0.05} width={width * 0.96} height={height * 0.9}
-          fill="rgba(15,23,42,0.06)" stroke={stroke} strokeWidth={selStroke} />
-        <rect data-testid="sofa-backrest" x={x + sideInset} y={y + height * 0.08} width={width * 0.72} height={height * 0.23}
-          fill={color} fillOpacity={0.78} stroke={stroke} strokeWidth={selStroke * 0.8} />
-        <rect data-testid="sofa-seat-cushion" data-seat="1" x={x + sideInset} y={cushionY} width={seatWidth} height={cushionHeight}
-          fill={color} fillOpacity={0.32} stroke={stroke} strokeWidth={selStroke * 0.65} />
-        <rect data-testid="sofa-seat-cushion" data-seat="2" x={x + width * 0.52} y={cushionY} width={seatWidth} height={cushionHeight}
-          fill={color} fillOpacity={0.32} stroke={stroke} strokeWidth={selStroke * 0.65} />
-        <rect data-testid="sofa-left-armrest" x={x + width * 0.025} y={y + height * 0.28} width={width * 0.105} height={height * 0.64}
-          fill={color} fillOpacity={0.88} stroke={stroke} strokeWidth={selStroke * 0.8} />
-        <rect data-testid="sofa-right-armrest" x={x + width * 0.87} y={y + height * 0.28} width={width * 0.105} height={height * 0.64}
-          fill={color} fillOpacity={0.88} stroke={stroke} strokeWidth={selStroke * 0.8} />
-      </g>
-    );
-  }
-  if (type === "lounge-sofa") {
-    return (
-      <g data-testid="lounge-sofa-symbol">
-        <rect x={x + width * 0.02} y={y + height * 0.08} width={width * 0.96} height={height * 0.84} rx={Math.min(width, height) * 0.22} fill={color} stroke={stroke} strokeWidth={selStroke} />
-        <rect x={x + width * 0.1} y={y + height * 0.32} width={width * 0.8} height={height * 0.48} rx={2} fill="rgba(255,255,255,0.2)" />
-        <line x1={x + width * 0.1} y1={y + height * 0.32} x2={x + width * 0.9} y2={y + height * 0.32} stroke="rgba(255,255,255,0.5)" strokeWidth={0.8} />
-        <line x1={cx} y1={y + height * 0.38} x2={cx} y2={y + height * 0.75} stroke="rgba(31,41,55,0.22)" strokeWidth={0.8} />
-      </g>
-    );
-  }
-  if (type === "speech-lab-row") {
-    const stationCount = Math.max(4, Math.min(8, Math.round(width / 12)));
-    const stationGap = width / stationCount;
-    const deskY = y + height * 0.2;
-    const deskH = height * 0.38;
-    return (
-      <g data-testid="speech-lab-row-symbol">
-        <rect data-testid="speech-lab-row-surface" x={x + 1} y={deskY} width={width - 2} height={deskH}
-          rx={1.3} fill={color} stroke={stroke} strokeWidth={selStroke} />
-        <line x1={x + 2} y1={deskY + deskH * 0.25} x2={x + width - 2} y2={deskY + deskH * 0.25}
-          stroke="rgba(255,255,255,0.45)" strokeWidth={0.7} />
-        {Array.from({ length: stationCount }, (_, index) => {
-          const sx = x + stationGap * (index + 0.5);
-          return (
-            <g key={`speech-station-${index}`}>
-              <rect data-testid="speech-lab-station" x={sx - Math.min(3.2, stationGap * 0.18)} y={deskY + deskH * 0.42}
-                width={Math.min(6.4, stationGap * 0.36)} height={Math.min(4, deskH * 0.34)} rx={0.6}
-                fill="#1f2937" stroke={stroke} strokeWidth={0.45} />
-              <line x1={sx} y1={deskY + deskH * 0.76} x2={sx} y2={deskY + deskH * 0.98}
-                stroke="rgba(71,85,105,0.32)" strokeWidth={0.65} />
-              {seatMark(sx, y + height * 0.82, Math.max(4, stationGap * 0.48), Math.max(4, height * 0.18), `speech-seat-${index}`)}
-            </g>
-          );
-        })}
-        <line x1={x + 2} y1={y + height * 0.16} x2={x + width - 2} y2={y + height * 0.16}
-          stroke={color} strokeWidth={1.15} />
-      </g>
-    );
-  }
-  const rowMatch = type.match(/(?:lecture-row|workstation-row)-(4|6|8)$/);
-  if (rowMatch) {
-    const count = Number(rowMatch[1]);
-    const gap = width / count;
-    const workstationRow = type.includes("workstation-row");
-    return (
-      <>
-        <rect x={x + 1} y={y + height * 0.27} width={width - 2} height={height * 0.42} rx={1.5}
-          /* Placed lecture/workstation rows are intentionally opaque.  A
-             translucent placement ghost is supplied by the outer editor
-             preview; the committed symbol must remain readable over rooms. */
-          fill={workstationRow ? "#e2e8f0" : "#dbe4ea"} stroke={stroke} strokeWidth={selStroke} />
-        <rect data-testid="furniture-row-writing-rail" x={x + 2} y={y + height * 0.22} width={width - 4} height={Math.max(1.5, height * 0.09)}
-          rx={0.7} fill={workstationRow ? "#cbd5e1" : "#c9d5dc"} stroke={stroke} strokeWidth={selStroke * 0.7} />
-        {Array.from({ length: count }, (_, i) => {
-          const px = x + gap * (i + 0.5);
-          return <g key={`row-unit-${i}`}>
-            {workstationRow && <rect x={px - Math.min(3.5, gap * 0.22)} y={y + height * 0.31} width={Math.min(7, gap * 0.44)} height={Math.min(3.5, height * 0.16)} rx={0.6} fill="#1f2937" />}
-            {workstationRow
-              ? seatMark(px, y + height * 0.83, Math.max(4, gap * 0.52), height * 0.22, `row-seat-${i}`)
-              : lectureChair(px, y + height * 0.83, Math.max(4, gap * 0.52), Math.max(4, height * 0.22), 0, `lecture-row-seat-${i}`)}
-            <line x1={px} y1={y + height * 0.26} x2={px} y2={y + height * 0.66}
-              stroke="rgba(71,85,105,0.25)" strokeWidth={0.65} />
-          </g>;
-        })}
-        <line x1={x + 2} y1={y + height * 0.24} x2={x + width - 2} y2={y + height * 0.24} stroke={color} strokeWidth={1.2} />
-      </>
-    );
-  }
-  if (type === "drafting-table-stool") {
-    // A single, compact technical-studio symbol: drawing surface, parallel
-    // drafting rail and one stool at the working edge.
-    const railY = y + height * 0.28;
-    return (
-      <>
-        <rect x={x + width * 0.08} y={y + height * 0.12} width={width * 0.84} height={height * 0.62}
-          rx={Math.min(width, height) * 0.06} fill={color} stroke={stroke} strokeWidth={selStroke} />
-        <line x1={x + width * 0.14} y1={railY} x2={x + width * 0.86} y2={railY}
-          stroke="rgba(255,255,255,0.58)" strokeWidth={1.1} />
-        <line x1={x + width * 0.2} y1={y + height * 0.2} x2={x + width * 0.2} y2={y + height * 0.66}
-          stroke="rgba(31,41,55,0.28)" strokeWidth={0.8} />
-        {seatMark(cx, y + height * 0.88, Math.min(width * 0.22, 10), Math.min(height * 0.16, 7), "drafting-stool")}
-      </>
-    );
-  }
-  if (type === "computer-lab-table-4" || type === "computer-lab-table-6") {
-    // Shared lab bench with aligned monitor/workstation cues and chairs.  The
-    // composite intentionally remains one FloorFurniture record.
-    const count = type.endsWith("-4") ? 4 : 6;
-    const left = x + width * 0.08;
-    const usable = width * 0.84;
-    const step = usable / count;
-    return (
-      <>
-        <rect data-testid="computer-lab-table" x={left} y={y + height * 0.27} width={usable} height={height * 0.38}
-          rx={Math.min(width, height) * 0.06} fill={color} stroke={stroke} strokeWidth={selStroke} />
-        {Array.from({ length: count }, (_, i) => {
-          const px = left + step * (i + 0.5);
-          return <g key={`computer-lab-${i}`}>
-            <rect data-testid="computer-lab-monitor" x={px - Math.min(step * 0.26, 5)} y={y + height * 0.14} width={Math.min(step * 0.52, 10)} height={height * 0.15}
-              rx={0.8} fill="#1f2937" stroke={stroke} strokeWidth={0.55} />
-            <line x1={px} y1={y + height * 0.29} x2={px} y2={y + height * 0.35}
-              stroke="#1f2937" strokeWidth={0.8} />
-            <rect data-testid="computer-lab-keyboard" x={px - Math.min(step * 0.24, 4.5)} y={y + height * 0.42}
-              width={Math.min(step * 0.48, 9)} height={Math.max(1, height * 0.07)} rx={0.5} fill="rgba(248,250,252,0.55)" />
-            {seatMark(px, y + height * 0.84, Math.min(step * 0.52, 10), Math.min(height * 0.18, 8), `computer-lab-chair-${i}`)}
-          </g>;
-        })}
-        <line x1={left + usable * 0.05} y1={y + height * 0.59} x2={left + usable * 0.95} y2={y + height * 0.59}
-          stroke="rgba(255,255,255,0.35)" strokeWidth={0.8} />
-      </>
-    );
-  }
-  if (type === "table-tennis") {
-    // Keep the default asset muted and distinct from selection/navigation blue,
-    // while still honoring an administrator's explicit recolor. Older saved
-    // records used the saturated #2563eb default, so normalize that legacy
-    // default at render time without changing their persisted data.
-    const tableColor = color.toLowerCase() === "#2563eb" ? "#3f7f73" : color;
-    const tableX = x + width * 0.04;
-    const tableY = y + height * 0.12;
-    const tableW = width * 0.92;
-    const tableH = height * 0.76;
-    const tableRight = tableX + tableW;
-    const tableBottom = tableY + tableH;
-    const postRadius = Math.max(1.1, Math.min(width, height) * 0.055);
-    return (
-      <g data-testid="table-tennis-symbol">
-        <rect data-testid="table-tennis-table" x={tableX} y={tableY} width={tableW} height={tableH}
-          rx={Math.min(width, height) * 0.045} fill={tableColor} stroke={stroke} strokeWidth={selStroke} />
-        <rect data-testid="table-tennis-boundary" x={tableX + width * 0.025} y={tableY + height * 0.045}
-          width={tableW - width * 0.05} height={tableH - height * 0.09} rx={Math.min(width, height) * 0.025}
-          fill="none" stroke="rgba(248,250,252,0.82)" strokeWidth={0.8} />
-        {/* Service/doubles marking is intentionally light; the centre net is
-            darker and thicker so it reads as a physical net, not a painted
-            selection line. */}
-        <line data-testid="table-tennis-service-line" x1={tableX + width * 0.055} y1={cy}
-          x2={tableRight - width * 0.055} y2={cy}
-          stroke="rgba(248,250,252,0.52)" strokeWidth={0.7} strokeDasharray="2 1.4" />
-        <line data-testid="table-tennis-net" x1={cx} y1={tableY - height * 0.015} x2={cx} y2={tableBottom + height * 0.015}
-          stroke="#263238" strokeWidth={Math.max(1.4, selStroke * 1.25)} />
-        <line x1={cx} y1={tableY} x2={cx} y2={tableBottom}
-          stroke="rgba(248,250,252,0.76)" strokeWidth={0.65} strokeDasharray="1.2 1" />
-        <circle data-testid="table-tennis-net-post" cx={cx} cy={tableY - height * 0.005} r={postRadius} fill="#263238" />
-        <circle data-testid="table-tennis-net-post" cx={cx} cy={tableBottom + height * 0.005} r={postRadius} fill="#263238" />
-      </g>
-    );
-  }
-  if (type === "student-desk-chair" || type === "faculty-desk-chair") {
-    const faculty = type === "faculty-desk-chair";
-    const deskX = x + width * 0.08;
-    const deskY = y + height * 0.06;
-    const deskW = width * 0.84;
-    const deskH = height * 0.52;
-    return (
-      <g data-testid={faculty ? "faculty-desk-chair-symbol" : undefined}>
-        <rect data-testid={faculty ? "faculty-desk-surface" : "student-desk-surface"} x={deskX} y={deskY} width={deskW} height={deskH}
-          rx={1.5} fill={color} stroke={stroke} strokeWidth={selStroke} />
-        {faculty
-          ? <g data-testid="faculty-desk-drawer">
-              <rect x={deskX + deskW * 0.3} y={deskY + deskH * 0.68} width={deskW * 0.4} height={deskH * 0.16}
-                rx={0.6} fill="rgba(31,41,55,0.12)" stroke="rgba(31,41,55,0.24)" strokeWidth={0.55} />
-              <circle cx={cx} cy={deskY + deskH * 0.76} r={Math.max(0.35, Math.min(width, height) * 0.018)}
-                fill="rgba(31,41,55,0.45)" />
-            </g>
-          : <rect x={cx - width * 0.16} y={y + height * 0.17} width={width * 0.32} height={height * 0.18} rx={1}
-            fill="rgba(31,41,55,0.28)" />}
-        {!faculty && <line x1={deskX + deskW * 0.1} y1={deskY + deskH * 0.78} x2={deskX + deskW * 0.9} y2={deskY + deskH * 0.78}
-          stroke="rgba(255,255,255,0.36)" strokeWidth={0.75} />}
-        {seatMark(cx, y + height * 0.83, faculty ? width * 0.32 : width * 0.36, faculty ? height * 0.24 : height * 0.22, faculty ? "faculty-desk-chair" : "desk-chair")}
-      </g>
-    );
-  }
-  if (type.startsWith("study-table-") || type.startsWith("conference-table-") || type === "conference-table" || type === "library-study-table") {
-    const isConference = type.startsWith("conference");
-    const count = type.endsWith("-4") ? 4 : type.endsWith("-6") ? 6 : type.endsWith("-8") ? 8 : 6;
-    const tableX = x + width * 0.18;
-    const tableY = y + height * 0.25;
-    const tableW = width * 0.64;
-    const tableH = height * 0.5;
-    const sideCount = Math.ceil(count / 2);
-    return (
-      <>
-        <rect data-testid={isConference ? "conference-table" : "study-table"} x={tableX} y={tableY} width={tableW} height={tableH} rx={Math.min(tableW, tableH) * 0.12} fill={color} stroke={stroke} strokeWidth={selStroke} />
-        <line x1={tableX + tableW * 0.08} y1={tableY + tableH * 0.25} x2={tableX + tableW * 0.92} y2={tableY + tableH * 0.25} stroke="rgba(255,255,255,0.3)" strokeWidth={0.8} />
-        <line x1={tableX + tableW * 0.08} y1={tableY + tableH * 0.75} x2={tableX + tableW * 0.92} y2={tableY + tableH * 0.75} stroke="rgba(255,255,255,0.3)" strokeWidth={0.8} />
-        {isConference && <line data-testid="conference-table-centerline" x1={cx} y1={tableY + tableH * 0.12} x2={cx} y2={tableY + tableH * 0.88}
-          stroke="rgba(255,255,255,0.28)" strokeWidth={0.7} strokeDasharray="2 1.5" />}
-        {type === "library-study-table" && <line data-testid="library-table-centerline" x1={tableX + tableW * 0.16} y1={cy} x2={tableX + tableW * 0.84} y2={cy}
-          stroke="rgba(255,255,255,0.4)" strokeWidth={0.75} />}
-        {Array.from({ length: sideCount }, (_, i) => {
-          const px = tableX + tableW * ((i + 0.5) / sideCount);
-          return <g key={`table-seat-${i}`}>
-            {seatMark(px, tableY - height * 0.09, Math.min(width * 0.14, 8), Math.min(height * 0.14, 7), `top-${i}`)}
-            {seatMark(px, tableY + tableH + height * 0.09, Math.min(width * 0.14, 8), Math.min(height * 0.14, 7), `bottom-${i}`)}
-          </g>;
-        })}
-        {!isConference && count === 4 && <circle cx={cx} cy={cy} r={Math.min(width, height) * 0.08} fill="none" stroke="rgba(255,255,255,0.35)" strokeWidth={0.8} />}
-      </>
-    );
-  }
-  if (type === "lab-workbench" || type === "lab-workbench-stools") {
-    const stools = type.endsWith("stools");
-    const stoolCount = stools ? 4 : 0;
-    return (
-      <>
-        <rect x={x + width * 0.05} y={y + height * 0.22} width={width * 0.9} height={height * 0.56} rx={1.5} fill={color} stroke={stroke} strokeWidth={selStroke} />
-        <line x1={x + width * 0.12} y1={cy} x2={x + width * 0.88} y2={cy} stroke="rgba(255,255,255,0.4)" strokeWidth={0.9} />
-        <circle cx={x + width * 0.28} cy={cy} r={Math.min(width, height) * 0.12} fill="none" stroke="rgba(255,255,255,0.4)" strokeWidth={0.8} />
-        <circle cx={x + width * 0.72} cy={cy} r={Math.min(width, height) * 0.12} fill="none" stroke="rgba(255,255,255,0.4)" strokeWidth={0.8} />
-        {Array.from({ length: 3 }, (_, i) => <rect key={`workbench-drawer-${i}`} x={x + width * (0.38 + i * 0.12)} y={y + height * 0.34}
-          width={width * 0.08} height={height * 0.3} rx={0.6} fill="rgba(31,41,55,0.18)" stroke="rgba(255,255,255,0.4)" strokeWidth={0.55} />)}
-        {Array.from({ length: stoolCount }, (_, i) => seatMark(x + width * (0.2 + (i % 2) * 0.6), y + (i < 2 ? height * 0.08 : height * 0.92), Math.min(width * 0.13, 7), Math.min(height * 0.13, 7), `stool-${i}`))}
-      </>
-    );
-  }
-  if (type === "office-desk-visitors") {
-    return (
-      <>
-        <rect x={x + width * 0.16} y={y + height * 0.06} width={width * 0.68} height={height * 0.36} rx={1.5} fill={color} stroke={stroke} strokeWidth={selStroke} />
-        <rect x={x + width * 0.25} y={y + height * 0.16} width={width * 0.5} height={height * 0.12} rx={1} fill="rgba(31,41,55,0.25)" />
-        {seatMark(x + width * 0.32, y + height * 0.78, width * 0.2, height * 0.22, "visitor-1")}
-        {seatMark(x + width * 0.68, y + height * 0.78, width * 0.2, height * 0.22, "visitor-2")}
-      </>
-    );
-  }
-  if (type === "whiteboard") {
-    // Wall-oriented teaching board: a slim plan symbol with a small tray line.
-    return (
-      <>
-        <rect x={x + 1} y={y + 1} width={Math.max(1, width - 2)} height={Math.max(1, height - 2)} rx={1}
-          fill={color} stroke={stroke} strokeWidth={selStroke} />
-        <line x1={x + width * 0.08} y1={y + height * 0.68} x2={x + width * 0.92} y2={y + height * 0.68}
-          stroke="#94a3b8" strokeWidth={0.8} />
-        <line x1={x + width * 0.16} y1={y + height * 0.86} x2={x + width * 0.84} y2={y + height * 0.86}
-          stroke="#64748b" strokeWidth={0.7} />
-      </>
-    );
-  }
-  if (type === "lectern") {
-    // Compact top-down podium: broad reading surface over a tapered stand.
-    return (
-      <>
-        <path d={`M ${x + width * 0.16} ${y + height * 0.14} h${width * 0.68} l-${width * 0.1} ${height * 0.28} h-${width * 0.48} z`}
-          fill={color} stroke={stroke} strokeWidth={selStroke} strokeLinejoin="round" />
-        <path d={`M ${x + width * 0.3} ${y + height * 0.42} h${width * 0.4} l${width * 0.1} ${height * 0.4} h-${width * 0.6} z`}
-          fill="rgba(0,0,0,0.12)" stroke={stroke} strokeWidth={0.8} strokeLinejoin="round" />
-        <circle cx={cx} cy={y + height * 0.68} r={Math.min(width, height) * 0.07} fill="#475569" />
-      </>
-    );
-  }
-  if (type === "printer-copier") {
-    return (
-      <>
-        <rect data-testid="printer-body" x={x + 1} y={y + height * 0.12} width={width - 2} height={height * 0.76} rx={1.5}
-          fill={color} stroke={stroke} strokeWidth={selStroke} />
-        <rect data-testid="printer-output" x={x + width * 0.16} y={y + height * 0.2} width={width * 0.68} height={height * 0.2} rx={0.8}
-          fill="#e2e8f0" stroke="#475569" strokeWidth={0.7} />
-        <path d={`M ${x + width * 0.26} ${y + height * 0.46} q${width * 0.24} -${height * 0.1} ${width * 0.48} 0`}
-          fill="none" stroke="#f8fafc" strokeWidth={0.9} strokeLinecap="round" />
-        <line x1={x + width * 0.2} y1={y + height * 0.62} x2={x + width * 0.8} y2={y + height * 0.62}
-          stroke="#cbd5e1" strokeWidth={1} />
-        <circle data-testid="printer-control" cx={x + width * 0.78} cy={y + height * 0.74} r={Math.min(width, height) * 0.06} fill="#22c55e" />
-      </>
-    );
-  }
-  if (type === "server-rack") {
-    return (
-      <>
-        <rect data-testid="server-rack-body" x={x + 1} y={y + 1} width={Math.max(1, width - 2)} height={Math.max(1, height - 2)} rx={1.2}
-          fill={color} stroke={stroke} strokeWidth={selStroke} />
-        {[0.25, 0.5, 0.75].map((t) => (
-          <line key={t} x1={x + width * 0.12} y1={y + height * t} x2={x + width * 0.88} y2={y + height * t}
-            stroke="#94a3b8" strokeWidth={0.8} />
-        ))}
-        <circle cx={x + width * 0.2} cy={y + height * 0.14} r={Math.min(width, height) * 0.045} fill="#22c55e" />
-        <circle cx={x + width * 0.8} cy={y + height * 0.14} r={Math.min(width, height) * 0.045} fill="#f59e0b" />
-      </>
-    );
-  }
-  if (type === "locker") {
-    const bays = Math.max(2, Math.min(6, Math.round(width / 7)));
-    return (
-      <>
-        <rect data-testid="locker-body" x={x + 1} y={y + 1} width={Math.max(1, width - 2)} height={Math.max(1, height - 2)} rx={1.2}
-          fill={color} stroke={stroke} strokeWidth={selStroke} />
-        {Array.from({ length: bays - 1 }, (_, i) => (
-          <line key={`locker-${i}`} x1={x + width * ((i + 1) / bays)} y1={y + height * 0.1}
-            x2={x + width * ((i + 1) / bays)} y2={y + height * 0.9} stroke="#cbd5e1" strokeWidth={0.8} />
-        ))}
-        {Array.from({ length: bays }, (_, i) => (
-          <circle key={`locker-handle-${i}`} cx={x + width * ((i + 0.78) / bays)} cy={cy}
-            r={Math.min(width, height) * 0.035} fill="#e2e8f0" />
-        ))}
-      </>
-    );
-  }
-  if (type === "double-sided-library-shelf") {
-    return (
-      <g data-testid="double-sided-library-shelf-symbol">
-        <rect x={x} y={y + height * 0.08} width={width} height={height * 0.84} rx={1} fill={color} stroke={stroke} strokeWidth={selStroke} />
-        <line x1={x + width * 0.04} y1={cy} x2={x + width * 0.96} y2={cy} stroke="rgba(255,255,255,0.55)" strokeWidth={1} />
-        {Array.from({ length: Math.max(2, Math.floor(width / 16)) - 1 }, (_, i) => <line key={`shelf-${i}`} x1={x + width * ((i + 1) / Math.max(2, Math.floor(width / 16)))} y1={y + height * 0.14} x2={x + width * ((i + 1) / Math.max(2, Math.floor(width / 16)))} y2={y + height * 0.86} stroke="rgba(255,255,255,0.35)" strokeWidth={0.7} />)}
-      </g>
-    );
-  }
-  if (type === "equipment-cabinet") {
-    return (
-      <g data-testid="equipment-cabinet-symbol">
-        <rect data-testid="equipment-cabinet-body" x={x} y={y} width={width} height={height} rx={1.3} fill={color} stroke={stroke} strokeWidth={selStroke} />
-        {[0.25, 0.5, 0.75].map((t) => <line key={t} x1={x + width * 0.1} y1={y + height * t} x2={x + width * 0.9} y2={y + height * t}
-          stroke="rgba(248,250,252,0.52)" strokeWidth={0.8} />)}
-        <circle cx={x + width * 0.18} cy={y + height * 0.12} r={Math.max(0.7, Math.min(width, height) * 0.045)} fill="#22c55e" />
-        <circle cx={x + width * 0.3} cy={y + height * 0.12} r={Math.max(0.7, Math.min(width, height) * 0.045)} fill="#f59e0b" />
-      </g>
-    );
-  }
-  if (type === "tall-storage-cabinet") {
-    return (
-      <>
-        <rect x={x} y={y} width={width} height={height} rx={1.3} fill={color} stroke={stroke} strokeWidth={selStroke} />
-        <line x1={x + width * 0.08} y1={cy} x2={x + width * 0.92} y2={cy} stroke="rgba(255,255,255,0.4)" strokeWidth={0.8} />
-        <line x1={cx} y1={y + height * 0.08} x2={cx} y2={y + height * 0.92} stroke="rgba(255,255,255,0.34)" strokeWidth={0.8} />
-      </>
-    );
-  }
-  if (type === "vending-machine") {
-    return (
-      <>
-        <rect data-testid="vending-machine-body" x={x + width * 0.08} y={y + height * 0.04} width={width * 0.84} height={height * 0.92}
-          rx={Math.min(width, height) * 0.08} fill={color} stroke={stroke} strokeWidth={selStroke} />
-        <rect x={x + width * 0.2} y={y + height * 0.14} width={width * 0.6} height={height * 0.45}
-          rx={0.8} fill="#cbd5e1" stroke="#334155" strokeWidth={0.7} />
-        <line x1={x + width * 0.24} y1={y + height * 0.27} x2={x + width * 0.76} y2={y + height * 0.27} stroke="#94a3b8" strokeWidth={0.65} />
-        <line x1={x + width * 0.24} y1={y + height * 0.41} x2={x + width * 0.76} y2={y + height * 0.41} stroke="#94a3b8" strokeWidth={0.65} />
-        <circle cx={x + width * 0.72} cy={y + height * 0.76} r={Math.min(width, height) * 0.07} fill="#22c55e" />
-        <line x1={x + width * 0.24} y1={y + height * 0.78} x2={x + width * 0.58} y2={y + height * 0.78} stroke="#e2e8f0" strokeWidth={1} strokeLinecap="round" />
-      </>
-    );
-  }
-  if (type === "drinking-fountain") {
-    return (
-      <>
-        <rect data-testid="drinking-fountain-body" x={x + width * 0.08} y={y + height * 0.2} width={width * 0.84} height={height * 0.62}
-          rx={Math.min(width, height) * 0.12} fill={color} stroke={stroke} strokeWidth={selStroke} />
-        <ellipse data-testid="drinking-fountain-basin" cx={cx} cy={y + height * 0.56} rx={width * 0.28} ry={height * 0.2} fill="#e0f2fe" stroke="#2563eb" strokeWidth={0.75} />
-        <path d={`M ${cx - width * 0.14} ${y + height * 0.29} q${width * 0.14} -${height * 0.16} ${width * 0.28} 0`} fill="none" stroke="#2563eb" strokeWidth={0.8} strokeLinecap="round" />
-        <circle cx={cx} cy={y + height * 0.35} r={Math.min(width, height) * 0.045} fill="#2563eb" />
-        <path data-testid="drinking-fountain-spout" d={`M ${cx - width * 0.06} ${y + height * 0.4} h${width * 0.12} v${height * 0.08}`}
-          fill="none" stroke="#2563eb" strokeWidth={0.7} strokeLinecap="round" strokeLinejoin="round" />
-      </>
-    );
-  }
-  if (type === "reception-counter") {
-    return (
-      <>
-        <path data-testid="reception-counter-body"
-          d={`M ${x + width * 0.05} ${y + height * 0.18} Q ${x + width * 0.05} ${y + height * 0.1} ${x + width * 0.13} ${y + height * 0.1} H ${x + width * 0.87} Q ${x + width * 0.95} ${y + height * 0.1} ${x + width * 0.95} ${y + height * 0.18} V ${y + height * 0.78} H ${x + width * 0.76} V ${y + height * 0.47} H ${x + width * 0.24} V ${y + height * 0.78} H ${x + width * 0.05} Z`}
-          fill={color} stroke={stroke} strokeWidth={selStroke} strokeLinejoin="round" />
-        <rect data-testid="reception-work-surface" x={x + width * 0.25} y={y + height * 0.22} width={width * 0.5} height={height * 0.18}
-          rx={1} fill="rgba(248,250,252,0.26)" stroke={stroke} strokeWidth={0.7} />
-        <rect data-testid="reception-workstation" x={x + width * 0.58} y={y + height * 0.25} width={width * 0.13} height={height * 0.12}
-          rx={0.8} fill="#1f2937" stroke={stroke} strokeWidth={0.55} />
-        <path data-testid="reception-service-side" d={`M ${x + width * 0.31} ${y + height * 0.72} H ${x + width * 0.69}`}
-          fill="none" stroke="rgba(248,250,252,0.85)" strokeWidth={1.2} strokeLinecap="round" strokeDasharray="2 1.5" />
-        <circle cx={x + width * 0.39} cy={y + height * 0.3} r={Math.min(width, height) * 0.05} fill="#e2e8f0" />
-      </>
-    );
-  }
-  if (type === "computer-workstation-chair") {
-    return (
-      <>
-        <rect data-testid="computer-workstation-desk" x={x + width * 0.08} y={y + height * 0.05} width={width * 0.84} height={height * 0.54} rx={1.3} fill={color} stroke={stroke} strokeWidth={selStroke} />
-        <rect data-testid="computer-workstation-monitor" x={cx - width * 0.18} y={y + height * 0.12} width={width * 0.36} height={height * 0.2} rx={1} fill="#1f2937" />
-        <line x1={cx} y1={y + height * 0.32} x2={cx} y2={y + height * 0.39} stroke="#1f2937" strokeWidth={0.8} />
-        <rect data-testid="computer-workstation-keyboard" x={cx - width * 0.22} y={y + height * 0.43} width={width * 0.44} height={Math.max(1, height * 0.08)} rx={0.5} fill="rgba(248,250,252,0.58)" />
-        {seatMark(cx, y + height * 0.83, width * 0.34, height * 0.22, "computer-chair")}
-      </>
-    );
-  }
-  if (type === "projector") {
-    return <g data-testid="projector-symbol">
-      <rect data-testid="projector-body" x={x + width * 0.12} y={y + height * 0.2} width={width * 0.76} height={height * 0.6} rx={1.5} fill={color} stroke={stroke} strokeWidth={selStroke} />
-      <circle data-testid="projector-lens" cx={x + width * 0.7} cy={cy} r={Math.min(width, height) * 0.12} fill="#e2e8f0" stroke="#334155" strokeWidth={0.7} />
-      <line x1={x + width * 0.22} y1={y + height * 0.38} x2={x + width * 0.42} y2={y + height * 0.38} stroke="rgba(248,250,252,0.65)" strokeWidth={0.7} />
-      <line x1={x + width * 0.22} y1={y + height * 0.62} x2={x + width * 0.42} y2={y + height * 0.62} stroke="rgba(248,250,252,0.65)" strokeWidth={0.7} />
-    </g>;
-  }
-  if (type === "wall-display") {
-    return <g data-testid="wall-display-symbol">
-      <rect data-testid="wall-display-bezel" x={x} y={y + height * 0.16} width={width} height={height * 0.68} rx={1} fill={color} stroke={stroke} strokeWidth={selStroke} />
-      <rect data-testid="wall-display-screen" x={x + width * 0.08} y={y + height * 0.25} width={width * 0.84} height={height * 0.5} rx={0.6} fill="#0f172a" stroke="rgba(248,250,252,0.55)" strokeWidth={0.65} />
-      <line x1={cx} y1={y} x2={cx} y2={y + height * 0.16} stroke={stroke} strokeWidth={0.8} />
-      <line x1={cx} y1={y + height * 0.84} x2={cx} y2={y + height} stroke={stroke} strokeWidth={0.8} />
-    </g>;
-  }
-  if (type === "toilet" || type === "urinal") {
-    const urinal = type === "urinal";
-    return <>
-      <rect x={x + width * 0.18} y={y + height * 0.06} width={width * 0.64} height={height * 0.22} rx={1} fill="#94a3b8" stroke={stroke} strokeWidth={0.7} />
-      <ellipse data-testid={urinal ? "urinal-basin" : "toilet-bowl"} cx={cx} cy={y + height * 0.62}
-        rx={width * (urinal ? 0.32 : 0.34)} ry={height * (urinal ? 0.28 : 0.32)} fill={color} stroke={stroke} strokeWidth={selStroke} />
-      {!urinal && <>
-        <ellipse cx={cx} cy={y + height * 0.62} rx={width * 0.2} ry={height * 0.18} fill="none" stroke="#94a3b8" strokeWidth={0.7} />
-        <path d={`M ${x + width * 0.3} ${y + height * 0.58} Q ${cx} ${y + height * 0.9} ${x + width * 0.7} ${y + height * 0.58}`}
-          fill="none" stroke="#94a3b8" strokeWidth={0.8} />
-      </>}
-      {urinal && <path d={`M ${cx - width * 0.16} ${y + height * 0.42} q${width * 0.16} -${height * 0.08} ${width * 0.32} 0`}
-        fill="none" stroke="#64748b" strokeWidth={0.8} strokeLinecap="round" />}
-    </>;
-  }
-  if (type === "laboratory-sink") {
-    return (
-      <>
-        <rect x={x + 1} y={y + height * 0.12} width={Math.max(1, width - 2)} height={height * 0.76} rx={1.2}
-          fill="#94a3b8" stroke={stroke} strokeWidth={selStroke} />
-        <ellipse cx={cx} cy={cy + height * 0.06} rx={width * 0.28} ry={height * 0.26}
-          fill={color} stroke="#475569" strokeWidth={0.8} />
-        <circle cx={cx} cy={y + height * 0.23} r={Math.min(width, height) * 0.06} fill="#475569" />
-        <path d={`M ${cx} ${y + height * 0.23} q${width * 0.14} 0 ${width * 0.14} ${height * 0.12}`}
-          fill="none" stroke="#475569" strokeWidth={0.8} strokeLinecap="round" />
-      </>
-    );
-  }
-  if (type === "sink" || type === "double-sink") {
-    const count = type === "double-sink" ? 2 : 1;
-    return <g data-testid={count === 2 ? "double-sink-symbol" : "sink-symbol"}>{Array.from({ length: count }, (_, i) => { const sx = x + width * ((i + 0.5) / count); return <g key={`sink-${i}`}><ellipse data-testid="sink-basin" cx={sx} cy={cy} rx={width * (count === 1 ? 0.3 : 0.18)} ry={height * 0.34} fill={color} stroke={stroke} strokeWidth={selStroke} /><circle data-testid="sink-faucet" cx={sx} cy={cy - height * 0.23} r={Math.min(width, height) * 0.06} fill="#64748b" /><path d={`M ${sx} ${cy - height * 0.18} q${width * 0.08} -${height * 0.18} ${width * 0.16} 0`} fill="none" stroke="#475569" strokeWidth={0.7} strokeLinecap="round" /></g>; })}</g>;
-  }
-  if (type === "faucet") {
-    return <>
-      <circle cx={cx} cy={cy + height * 0.15} r={Math.min(width, height) * 0.22} fill={color} stroke={stroke} strokeWidth={selStroke} />
-      <path d={`M ${cx} ${cy + height * 0.05} v-${height * 0.36} q0 -${height * 0.18} ${width * 0.24} -${height * 0.18} h${width * 0.2}`} fill="none" stroke="#475569" strokeWidth={Math.max(0.7, selStroke * 0.8)} strokeLinecap="round" />
-    </>;
-  }
-  if (type === "toilet-stall" || type === "pwd-toilet-stall") {
-    const pwd = type === "pwd-toilet-stall";
-    const partition = "#64748b";
-    const openingStart = x + width * 0.56;
-    const openingEnd = x + width * 0.9;
-    const toiletX = x + width * (pwd ? 0.62 : 0.58);
-    const toiletY = y + height * 0.36;
-    return <g data-testid={pwd ? "pwd-toilet-stall-symbol" : "toilet-stall-symbol"}>
-      <rect x={x + 1} y={y + 1} width={width - 2} height={height - 2} rx={1}
-        fill={pwd ? "rgba(219,234,254,0.36)" : "rgba(226,232,240,0.34)"}
-        stroke={partition} strokeWidth={Math.max(0.9, selStroke * 0.85)} />
-      <line x1={x + 1} y1={y + 1} x2={x + width - 1} y2={y + 1} stroke={partition} strokeWidth={1.2} />
-      <line x1={x + 1} y1={y + 1} x2={x + 1} y2={y + height - 1} stroke={partition} strokeWidth={1.1} />
-      <line x1={x + width - 1} y1={y + 1} x2={x + width - 1} y2={y + height - 1} stroke={partition} strokeWidth={1.1} />
-      <line x1={x + 1} y1={y + height - 1} x2={openingStart} y2={y + height - 1} stroke={partition} strokeWidth={1.1} />
-      <line x1={openingEnd} y1={y + height - 1} x2={x + width - 1} y2={y + height - 1} stroke={partition} strokeWidth={1.1} />
-      <line x1={openingEnd} y1={y + height - 1} x2={openingEnd} y2={y + height * 0.62} stroke="#94a3b8" strokeWidth={0.9} />
-      <path d={`M ${openingEnd} ${y + height * 0.62} A ${height * 0.34} ${height * 0.34} 0 0 0 ${openingStart} ${y + height - 1}`} fill="none" stroke="#94a3b8" strokeWidth={0.75} strokeDasharray="1.5 1.5" />
-      <rect x={toiletX - width * 0.12} y={y + height * 0.12} width={width * 0.24} height={height * 0.12} rx={0.7} fill="#cbd5e1" stroke={partition} strokeWidth={0.7} />
-      <ellipse cx={toiletX} cy={toiletY} rx={width * (pwd ? 0.15 : 0.13)} ry={height * (pwd ? 0.12 : 0.105)} fill="#f8fafc" stroke={partition} strokeWidth={0.8} />
-      {pwd && <>
-        <circle cx={x + width * 0.31} cy={y + height * 0.58} r={Math.min(width, height) * 0.16} fill="none" stroke="#2563eb" strokeWidth={0.8} strokeDasharray="1.5 1.5" />
-        <line x1={x + width * 0.2} y1={y + height * 0.16} x2={x + width * 0.36} y2={y + height * 0.16} stroke="#2563eb" strokeWidth={0.8} />
-        <line data-testid="pwd-grab-bar" x1={x + width * 0.2} y1={y + height * 0.72} x2={x + width * 0.37} y2={y + height * 0.72} stroke="#2563eb" strokeWidth={1} strokeLinecap="round" />
-      </>}
-    </g>;
-  }
-  if (type === "stall-partition") {
-    return <>
-      <rect x={x + 0.5} y={y + height * 0.2} width={width - 1} height={Math.max(1, height * 0.6)} rx={0.7} fill={color} fillOpacity={0.55} stroke={stroke} strokeWidth={selStroke} />
-      <line x1={x + width * 0.12} y1={cy} x2={x + width * 0.88} y2={cy} stroke="#94a3b8" strokeWidth={0.6} strokeDasharray="1 1" />
-    </>;
-  }
-  if (type === "mirror") {
-    return <g data-testid="mirror-symbol"><rect x={x + width * 0.04} y={y + height * 0.2} width={width * 0.92} height={height * 0.6} rx={1} fill={color} fillOpacity={0.55} stroke="#2563eb" strokeWidth={selStroke} /><line x1={x + width * 0.18} y1={y + height * 0.32} x2={x + width * 0.82} y2={y + height * 0.68} stroke="rgba(255,255,255,0.7)" strokeWidth={0.7} /><line x1={x + width * 0.26} y1={y + height * 0.68} x2={x + width * 0.74} y2={y + height * 0.32} stroke="rgba(255,255,255,0.35)" strokeWidth={0.55} /></g>;
-  }
-  if (type === "soap-dispenser" || type === "tissue-dispenser" || type === "hand-dryer") {
-    const dryer = type === "hand-dryer";
-    const tissue = type === "tissue-dispenser";
-    return <>
-      <rect data-testid={dryer ? "hand-dryer-body" : tissue ? "tissue-dispenser-body" : "soap-dispenser-body"} x={x + width * 0.14} y={y + height * 0.12} width={width * 0.72} height={height * 0.76} rx={1.1} fill={color} stroke={stroke} strokeWidth={selStroke} />
-      {dryer
-        ? <><path d={`M ${x + width * 0.3} ${cy} h${width * 0.4}`} stroke="#e2e8f0" strokeWidth={1} strokeLinecap="round" /><path d={`M ${x + width * 0.34} ${cy - height * 0.18} q${width * 0.14} ${height * 0.18} 0 ${height * 0.36}`} fill="none" stroke="#e2e8f0" strokeWidth={0.7} /><line x1={x + width * 0.28} y1={y + height * 0.7} x2={x + width * 0.72} y2={y + height * 0.7} stroke="#cbd5e1" strokeWidth={0.55} strokeDasharray="1 1" /></>
-        : <line x1={x + width * 0.3} y1={tissue ? cy : y + height * 0.3} x2={x + width * 0.7} y2={tissue ? cy : y + height * 0.7} stroke="#e2e8f0" strokeWidth={0.9} />}
-    </>;
-  }
-  if (type === "floor-drain") {
-    return <g data-testid="floor-drain-symbol"><rect x={x + width * 0.14} y={y + height * 0.14} width={width * 0.72} height={height * 0.72} rx={0.7} fill={color} stroke={stroke} strokeWidth={selStroke} /><line x1={x + width * 0.28} y1={cy} x2={x + width * 0.72} y2={cy} stroke="#475569" strokeWidth={0.65} /><line x1={cx} y1={y + height * 0.28} x2={cx} y2={y + height * 0.72} stroke="#475569" strokeWidth={0.65} /></g>;
-  }
-  if (type === "fire-extinguisher") {
-    return <><rect x={x + width * 0.2} y={y + height * 0.2} width={width * 0.6} height={height * 0.7} rx={Math.min(width, height) * 0.18} fill="#dc2626" stroke={stroke} strokeWidth={selStroke} /><path d={`M ${cx} ${y + height * 0.2} v-${height * 0.12} h${width * 0.28}`} fill="none" stroke="#991b1b" strokeWidth={1} strokeLinecap="round" /><line x1={x + width * 0.28} y1={y + height * 0.48} x2={x + width * 0.72} y2={y + height * 0.48} stroke="rgba(255,255,255,0.7)" strokeWidth={0.8} /></>;
-  }
-  if (type === "exit-sign") {
-    return <><rect x={x + 1} y={y + height * 0.16} width={width - 2} height={height * 0.68} rx={1} fill="#16a34a" stroke={stroke} strokeWidth={selStroke} /><path d={`M ${x + width * 0.22} ${cy} h${width * 0.44} m-${width * 0.12} -${height * 0.18} l${width * 0.12} ${height * 0.18} l-${width * 0.12} ${height * 0.18}`} fill="none" stroke="white" strokeWidth={1} strokeLinecap="round" strokeLinejoin="round" /></>;
-  }
-  if (type === "emergency-light") {
-    return <><rect x={x + width * 0.08} y={y + height * 0.2} width={width * 0.84} height={height * 0.6} rx={1} fill={color} stroke={stroke} strokeWidth={selStroke} /><circle cx={x + width * 0.33} cy={cy} r={Math.min(width, height) * 0.12} fill="#fff7ed" /><circle cx={x + width * 0.67} cy={cy} r={Math.min(width, height) * 0.12} fill="#fff7ed" /></>;
-  }
-  if (type === "first-aid-cabinet") {
-    return <><rect x={x + 1} y={y + 1} width={width - 2} height={height - 2} rx={1} fill={color} stroke={stroke} strokeWidth={selStroke} /><path d={`M ${cx - width * 0.28} ${cy} h${width * 0.56} M ${cx} ${cy - height * 0.28} v${height * 0.56}`} stroke="white" strokeWidth={1.2} strokeLinecap="round" /></>;
-  }
-  if (type === "restroom-trash-bin" || type === "indoor-trash-bin") {
-    return <><path d={`M ${x + width * 0.2} ${y + height * 0.24} h${width * 0.6} l-${width * 0.08} ${height * 0.64} h-${width * 0.44} z`} fill={color} stroke={stroke} strokeWidth={selStroke} /><line x1={x + width * 0.27} y1={y + height * 0.16} x2={x + width * 0.73} y2={y + height * 0.16} stroke={stroke} strokeWidth={1} /></>;
-  }
-  if (type === "arm-chair") {
-    const armTop = y + height * 0.25;
-    const armBottom = y + height * 0.78;
-    const leftArm = `M ${x + width * 0.25} ${armTop} Q ${x + width * 0.12} ${armTop} ${x + width * 0.12} ${armTop + height * 0.1} V ${armBottom - height * 0.1} Q ${x + width * 0.12} ${armBottom} ${x + width * 0.25} ${armBottom} L ${x + width * 0.29} ${armBottom} L ${x + width * 0.29} ${armTop + height * 0.1} Q ${x + width * 0.29} ${armTop} ${x + width * 0.25} ${armTop} Z`;
-    const rightArm = `M ${x + width * 0.75} ${armTop} Q ${x + width * 0.88} ${armTop} ${x + width * 0.88} ${armTop + height * 0.1} V ${armBottom - height * 0.1} Q ${x + width * 0.88} ${armBottom} ${x + width * 0.75} ${armBottom} L ${x + width * 0.71} ${armBottom} L ${x + width * 0.71} ${armTop + height * 0.1} Q ${x + width * 0.71} ${armTop} ${x + width * 0.75} ${armTop} Z`;
-    const backrest = `M ${x + width * 0.22} ${y + height * 0.26} Q ${x + width * 0.12} ${y + height * 0.18} ${x + width * 0.22} ${y + height * 0.1} Q ${cx} ${y + height * 0.015} ${x + width * 0.78} ${y + height * 0.1} Q ${x + width * 0.88} ${y + height * 0.18} ${x + width * 0.78} ${y + height * 0.26} Q ${cx} ${y + height * 0.2} ${x + width * 0.22} ${y + height * 0.26} Z`;
-    return (
-      <g data-testid="arm-chair-symbol">
-        <path data-testid="arm-chair-left-arm" d={leftArm} fill={color} fillOpacity={0.42} stroke={stroke} strokeWidth={selStroke} strokeLinejoin="round" />
-        <path data-testid="arm-chair-right-arm" d={rightArm} fill={color} fillOpacity={0.42} stroke={stroke} strokeWidth={selStroke} strokeLinejoin="round" />
-        <path data-testid="arm-chair-backrest" d={backrest} fill={color} stroke={stroke} strokeWidth={selStroke} strokeLinejoin="round" />
-        <rect data-testid="arm-chair-seat" x={x + width * 0.29} y={y + height * 0.35} width={width * 0.42} height={height * 0.39}
-          rx={Math.min(width, height) * 0.14} fill={color} fillOpacity={0.78} stroke={stroke} strokeWidth={selStroke * 0.85} />
-      </g>
-    );
-  }
-  if (type.includes("chair")) {
-    // Chair: rounded seat + a clear backrest band on the "top" side.
-    return (
-      <>
-        <rect x={x + width * 0.18} y={y + height * 0.34} width={width * 0.64} height={height * 0.54} rx={Math.min(width, height) * 0.18} fill={color} stroke={stroke} strokeWidth={selStroke} />
-        <rect x={x + width * 0.16} y={y + height * 0.12} width={width * 0.68} height={height * 0.24} rx={1.5} fill="rgba(255,255,255,0.3)" stroke={color} strokeWidth={0.8} />
-      </>
-    );
-  }
-  if (type.includes("sofa")) {
-    // Sofa: rounded body with two armrest blocks and a seat-cushion divider.
-    return (
-      <>
-        <rect x={x} y={y} width={width} height={height} rx={Math.min(width, height) * 0.16} fill={color} stroke={stroke} strokeWidth={selStroke} />
-        <rect x={x + width * 0.1} y={y + height * 0.16} width={width * 0.8} height={height * 0.66} rx={2} fill="rgba(255,255,255,0.18)" />
-        <rect x={x + width * 0.03} y={y + height * 0.12} width={width * 0.09} height={height * 0.72} rx={1.5} fill="rgba(0,0,0,0.14)" />
-        <rect x={x + width * 0.88} y={y + height * 0.12} width={width * 0.09} height={height * 0.72} rx={1.5} fill="rgba(0,0,0,0.14)" />
-        <line x1={cx} y1={y + height * 0.18} x2={cx} y2={y + height * 0.78} stroke="rgba(255,255,255,0.32)" strokeWidth={1} />
-      </>
-    );
-  }
-  if (type === "waiting-bench") {
-    const slats = Math.max(2, Math.min(4, Math.floor(width / 12)));
-    return (
-      <g data-testid="waiting-bench-symbol">
-        <rect x={x} y={y + height * 0.22} width={width} height={height * 0.62} rx={height * 0.2} fill={color} stroke={stroke} strokeWidth={selStroke} />
-        <rect data-testid="waiting-bench-back" x={x + width * 0.04} y={y + height * 0.08} width={width * 0.92} height={height * 0.18}
-          rx={height * 0.08} fill="rgba(255,255,255,0.23)" stroke={stroke} strokeWidth={selStroke * 0.7} />
-        {Array.from({ length: slats - 1 }, (_, i) => <line key={i} x1={x + (width / slats) * (i + 1)} y1={y + height * 0.28}
-          x2={x + (width / slats) * (i + 1)} y2={y + height * 0.78} stroke="rgba(255,255,255,0.35)" strokeWidth={0.75} />)}
-      </g>
-    );
-  }
-  if (type.includes("bench")) {
-    // Bench: long rounded seating structure with visible slats.
-    const slats = Math.max(1, Math.min(4, Math.floor(width / 12)));
-    return (
-      <>
-        <rect x={x} y={y + height * 0.16} width={width} height={height * 0.68} rx={height * 0.22} fill={color} stroke={stroke} strokeWidth={selStroke} />
-        {slats > 1 && Array.from({ length: slats - 1 }, (_, i) => (
-          <line key={i} x1={x + (width / slats) * (i + 1)} y1={y + height * 0.18} x2={x + (width / slats) * (i + 1)} y2={y + height * 0.82} stroke="rgba(255,255,255,0.35)" strokeWidth={0.8} />
-        ))}
-      </>
-    );
-  }
-  if (type.includes("computer")) {
-    // Computer workstation: desk surface + monitor + keyboard.
-    return (
-      <>
-        <rect x={x} y={y} width={width} height={height} rx={1.5} fill={color} stroke={stroke} strokeWidth={selStroke} />
-        <rect x={x + width * 0.3} y={y + height * 0.1} width={width * 0.4} height={height * 0.3} rx={1} fill="#1f2937" />
-        <rect x={x + width * 0.26} y={y + height * 0.5} width={width * 0.48} height={height * 0.14} rx={1} fill="#374151" />
-        <line x1={cx} y1={y + height * 0.4} x2={cx} y2={y + height * 0.5} stroke="#1f2937" strokeWidth={1} />
-      </>
-    );
-  }
-  if (type.includes("table")) {
-    // Table: rounded tabletop with a centre-leaf hint.
-    return (
-      <>
-        <rect x={x} y={y} width={width} height={height} rx={Math.min(width, height) * 0.14} fill={color} stroke={stroke} strokeWidth={selStroke} />
-        <rect x={x + inset} y={y + inset} width={Math.max(1, width - inset * 2)} height={Math.max(1, height - inset * 2)} rx={Math.min(width, height) * 0.1} fill="rgba(255,255,255,0.14)" />
-        <line x1={cx} y1={y + inset} x2={cx} y2={y + height - inset} stroke="rgba(255,255,255,0.24)" strokeWidth={0.8} />
-      </>
-    );
-  }
-  if (type.includes("desk")) {
-    // Desk: flat work surface with a darker back work-zone and keyboard band.
-    return (
-      <>
-        <rect x={x} y={y} width={width} height={height} rx={1.5} fill={color} stroke={stroke} strokeWidth={selStroke} />
-        <rect x={x + width * 0.06} y={y + height * 0.1} width={width * 0.88} height={height * 0.24} rx={1} fill="rgba(0,0,0,0.12)" />
-        <rect x={x + width * 0.1} y={y + height * 0.46} width={width * 0.8} height={height * 0.12} rx={0.8} fill="rgba(255,255,255,0.26)" />
-      </>
-    );
-  }
-  if (type.includes("cabinet")) {
-    // Cabinet: body with a door division and handle dots.
-    const handleR = Math.max(0.7, Math.min(width, height) * 0.05);
-    return (
-      <>
-        <rect x={x} y={y} width={width} height={height} rx={1.5} fill={color} stroke={stroke} strokeWidth={selStroke} />
-        <line x1={cx} y1={y + inset} x2={cx} y2={y + height - inset} stroke="rgba(255,255,255,0.45)" strokeWidth={0.9} />
-        <circle cx={cx - Math.min(width, height) * 0.16} cy={cy} r={handleR} fill="rgba(0,0,0,0.3)" />
-        <circle cx={cx + Math.min(width, height) * 0.16} cy={cy} r={handleR} fill="rgba(0,0,0,0.3)" />
-      </>
-    );
-  }
-  if (type.includes("shelf") || type.includes("bookshelf")) {
-    // Shelf: body with visible horizontal shelf divisions.
-    return (
-      <>
-        <rect x={x} y={y} width={width} height={height} rx={1.5} fill={color} stroke={stroke} strokeWidth={selStroke} />
-        {[0.32, 0.58, 0.82].map((t) => (
-          <line key={t} x1={x + inset * 0.7} y1={y + height * t} x2={x + width - inset * 0.7} y2={y + height * t} stroke="rgba(255,255,255,0.38)" strokeWidth={0.8} />
-        ))}
-        {Array.from({ length: Math.max(2, Math.min(6, Math.floor(width / 7))) }, (_, i) => <line key={`book-divider-${i}`}
-          x1={x + width * ((i + 1) / (Math.max(2, Math.min(6, Math.floor(width / 7))) + 1))} y1={y + height * 0.12}
-          x2={x + width * ((i + 1) / (Math.max(2, Math.min(6, Math.floor(width / 7))) + 1))} y2={y + height * 0.88}
-          stroke="rgba(31,41,55,0.22)" strokeWidth={0.55} />)}
-      </>
-    );
-  }
-  if (type.includes("plant")) {
-    // Plant: planter pot + organic leaf clusters.
-    const r = Math.min(width, height);
-    const leafR = Math.max(0.8, r * 0.17);
-    return (
-      <>
-        <rect x={x + width * 0.16} y={y + height * 0.54} width={width * 0.68} height={height * 0.4} rx={r * 0.12} fill="#c2620a" stroke={stroke} strokeWidth={selStroke} />
-        <circle cx={cx - width * 0.16} cy={cy - height * 0.05} r={leafR} fill={color} opacity={0.94} />
-        <circle cx={cx + width * 0.14} cy={cy - height * 0.17} r={leafR * 0.94} fill="#2f6f3e" opacity={0.94} />
-        <circle cx={cx + width * 0.02} cy={cy - height * 0.31} r={leafR * 0.88} fill="#5f9360" opacity={0.94} />
-      </>
-    );
-  }
-  // Fallback — structured generic storage (never a bare rect, never a text box).
-  return (
-    <>
-      <rect x={x} y={y} width={width} height={height} rx={1.5} fill={color} stroke={stroke} strokeWidth={selStroke} />
-      <line x1={x + inset} y1={y + inset} x2={x + width - inset} y2={y + height - inset} stroke="rgba(255,255,255,0.28)" strokeWidth={0.8} />
-      <line x1={x + width - inset} y1={y + inset} x2={x + inset} y2={y + height - inset} stroke="rgba(255,255,255,0.28)" strokeWidth={0.8} />
-    </>
-  );
-}
-
-/** Shared Furniture artwork container. Rotation is applied by the caller so
- * it remains the item's Floor orientation; these optional mirrors are local
- * artwork transforms around the item's own center. Selection controls remain
- * outside this group and therefore are never mirrored. */
-export function FloorFurnitureSymbol({ type, x, y, width, height, color, selected = false, assetKey, flipX = false, flipY = false }: {
-  type: string;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  color: string;
-  selected?: boolean;
-  assetKey?: string;
-  flipX?: boolean;
-  flipY?: boolean;
-}) {
-  const cx = x + width / 2;
-  const cy = y + height / 2;
-  const mirrorTransform = flipX || flipY
-    ? `translate(${cx} ${cy}) scale(${flipX ? -1 : 1} ${flipY ? -1 : 1}) translate(${-cx} ${-cy})`
-    : undefined;
-  return (
-    <g data-testid={flipX || flipY ? "furniture-mirrored" : undefined} transform={mirrorTransform}>
-      <FurnitureArtwork type={type} x={x} y={y} width={width} height={height} color={color} selected={selected} assetKey={assetKey} />
-    </g>
-  );
-}
 
 function FurniturePreview({ type, color, width, height }: { type: string; color: string; width: number; height: number }) {
   const sourceAspect = Math.max(0.1, width / Math.max(0.1, height));
@@ -4112,29 +2550,6 @@ function CirculationSelectionHandles({
   );
 }
 
-type StairVisualDirection = "up" | "down" | "both" | "none";
-
-/**
- * Resolve the direction cue shown inside a Stair from the current, ordered
- * building floors.  The persisted Stair direction still controls routing on
- * middle floors; the boundary floors are clamped visually because they cannot
- * lead beyond the building. A one-floor building keeps a neutral cue for the
- * default Both direction; legacy explicit one-way values remain legible.
- */
-function stairVisualDirection(
-  direction: FloorStairs["direction"],
-  floorIndex?: number,
-  floorCount?: number,
-): StairVisualDirection {
-  if (floorIndex == null || floorCount == null || floorIndex < 0) return "none";
-  // A single-floor building has no cross-floor implication, so keep the symbol
-  // neutral regardless of any persisted direction value.
-  if (floorCount <= 1) return "none";
-  if (floorIndex === 0) return "up";
-  if (floorIndex === floorCount - 1) return "down";
-  return direction === "up" ? "up" : direction === "down" ? "down" : "both";
-}
-
 type OpeningKind = "door" | "open_passage" | "window";
 
 /** Physical wall-aperture collision only.  Interaction padding, resize
@@ -4164,19 +2579,6 @@ function wallOpeningCollisionReason(
   return overlap.kind === "window"
     ? "Overlaps another Window"
     : overlap.kind === "open_passage" ? "Overlaps an Open Passage" : "Overlaps a Door";
-}
-
-function stairArrowPath(direction: "up" | "down", size: number) {
-  const y1 = direction === "up" ? size * 0.72 : -size * 0.72;
-  const y2 = direction === "up" ? -size * 0.52 : size * 0.52;
-  return `M 0 ${y1} L 0 ${y2}`;
-}
-
-function stairArrowHeadPath(direction: "up" | "down", size: number) {
-  const tipY = direction === "up" ? -size * 0.86 : size * 0.86;
-  const baseY = direction === "up" ? -size * 0.5 : size * 0.5;
-  const halfWidth = size * 0.4;
-  return `M 0 ${tipY} L ${-halfWidth} ${baseY} L ${halfWidth} ${baseY} Z`;
 }
 
 /**
@@ -4214,288 +2616,6 @@ function indoorLinkedAnchorFor(
   return null;
 }
 
-function LegacyStairsSymbol({
-  item,
-  selected,
-  floorIndex,
-  floorCount,
-}: {
-  item: FloorStairs;
-  selected: boolean;
-  floorIndex?: number;
-  floorCount?: number;
-}) {
-  const stroke = selected ? "var(--accent)" : "#475569";
-  const cx = item.x + item.width / 2;
-  const cy = item.y + item.height / 2;
-  const inset = Math.max(2, Math.min(item.width, item.height) * 0.08);
-  const wellX = item.x + inset;
-  const wellY = item.y + inset;
-  const wellWidth = Math.max(4, item.width - inset * 2);
-  const wellHeight = Math.max(4, item.height - inset * 2);
-  const landingHeight = Math.max(2.5, Math.min(6, wellHeight * 0.16));
-  // B5 Phase 2.3: recognizable top-down straight stair — repeated tread lines
-  // across the run plus a centered directional arrow. Everything is in the
-  // object's local frame, so the parent rotate() keeps it aligned; the arrow
-  // clearly communicates ascent (up) / descent (down) / transition (both).
-  const treadCount = Math.max(3, Math.min(10, Math.floor(wellHeight / 5)));
-  const dir = stairVisualDirection(item.direction, floorIndex, floorCount);
-  return (
-    <>
-      <rect data-testid="stairs-footprint" x={item.x} y={item.y} width={item.width} height={item.height} rx={0}
-        fill={selected ? "rgba(30,64,175,0.14)" : "#e8eef7"} stroke={stroke} strokeWidth={selected ? 1.8 : 1.15} />
-      <rect data-testid="stairs-well" x={wellX} y={wellY} width={wellWidth} height={wellHeight} rx={0}
-        fill={selected ? "rgba(255,255,255,0.72)" : "#f8fafc"} stroke="#94a3b8" strokeWidth={0.8} />
-      <rect data-testid="stairs-landing" x={wellX + 0.8} y={wellY + 0.8} width={wellWidth - 1.6} height={landingHeight}
-        rx={0} fill={selected ? "#dbeafe" : "#e2e8f0"} />
-      <rect data-testid="stairs-landing" x={wellX + 0.8} y={wellY + wellHeight - landingHeight - 0.8} width={wellWidth - 1.6} height={landingHeight}
-        rx={0} fill={selected ? "#dbeafe" : "#e2e8f0"} />
-      {/* B5 Phase 2.4: subtle boundary guard rails inside the footprint edges —
-          they follow the run axis and rotate with the object (local frame). */}
-      <line data-testid="stairs-rail" x1={wellX + 1.2} y1={wellY + landingHeight + 1} x2={wellX + 1.2} y2={wellY + wellHeight - landingHeight - 1} stroke="#94a3b8" strokeWidth={0.8} opacity={0.8} />
-      <line data-testid="stairs-rail" x1={wellX + wellWidth - 1.2} y1={wellY + landingHeight + 1} x2={wellX + wellWidth - 1.2} y2={wellY + wellHeight - landingHeight - 1} stroke="#94a3b8" strokeWidth={0.8} opacity={0.8} />
-      {Array.from({ length: treadCount }, (_, i) => {
-        const ty = wellY + (wellHeight / (treadCount + 1)) * (i + 1);
-        return <line key={i} data-testid="stairs-tread" x1={wellX + 2} y1={ty} x2={wellX + wellWidth - 2} y2={ty} stroke="#64748b" strokeWidth={0.85} />;
-      })}
-      {/* Center dashed run line + directional arrow, both centered on the object. */}
-      <line data-testid="stairs-center-line" x1={cx} y1={wellY + landingHeight + 2} x2={cx} y2={wellY + wellHeight - landingHeight - 2} stroke="#94a3b8" strokeWidth={0.8} strokeDasharray="2 2" />
-      <g data-testid="stairs-arrow" transform={`translate(${cx} ${cy})`}>
-        {dir === "up" && (
-          <path d="M 0 6 L 0 -6 M 0 -6 L -3.2 -1.6 M 0 -6 L 3.2 -1.6" fill="none" stroke="#334155" strokeWidth={1.3} strokeLinecap="round" strokeLinejoin="round" />
-        )}
-        {dir === "down" && (
-          <path d="M 0 -6 L 0 6 M 0 6 L -3.2 1.6 M 0 6 L 3.2 1.6" fill="none" stroke="#334155" strokeWidth={1.3} strokeLinecap="round" strokeLinejoin="round" />
-        )}
-        {dir === "both" && (
-          <path d="M 0 6 L 0 -6 M 0 -6 L -3.2 -1.6 M 0 -6 L 3.2 -1.6 M 0 6 L -3.2 1.6 M 0 6 L 3.2 1.6" fill="none" stroke="#334155" strokeWidth={1.3} strokeLinecap="round" strokeLinejoin="round" />
-        )}
-        {dir === "none" && (
-          <path d="M -3.5 0 L 3.5 0" fill="none" stroke="#64748b" strokeWidth={1.15} strokeLinecap="round" />
-        )}
-      </g>
-    </>
-  );
-}
-
-function StairsSymbol({
-  item,
-  selected,
-  floorIndex,
-  floorCount,
-}: {
-  item: FloorStairs;
-  selected: boolean;
-  floorIndex?: number;
-  floorCount?: number;
-}) {
-  const stroke = selected ? "var(--accent)" : "#475569";
-  const cx = item.x + item.width / 2;
-  const cy = item.y + item.height / 2;
-  const inset = Math.max(2, Math.min(item.width, item.height) * 0.08);
-  const wellX = item.x + inset;
-  const wellY = item.y + inset;
-  const wellWidth = Math.max(4, item.width - inset * 2);
-  const wellHeight = Math.max(4, item.height - inset * 2);
-  // A conventional half-landing/U-shaped plan symbol. All geometry is in the
-  // Stair's local frame; the existing parent rotate() carries it with the object.
-  const landingHeight = Math.max(4, Math.min(12, wellHeight * 0.2));
-  const flightGap = Math.max(2.5, Math.min(8, wellWidth * 0.1));
-  const flightWidth = Math.max(4, (wellWidth - flightGap) / 2);
-  const leftFlightX = wellX;
-  const rightFlightX = wellX + flightWidth + flightGap;
-  // Entry-side orientation is a horizontal mirror only.  The landing remains
-  // at the same end of the local stairwell so Entry Right never reverses the
-  // semantic Up/Down travel cue.
-  const landingAtTop = true;
-  const flightY = landingAtTop ? wellY + landingHeight : wellY;
-  const flightHeight = Math.max(4, wellHeight - landingHeight);
-  const landingY = landingAtTop ? wellY : wellY + wellHeight - landingHeight;
-  const treadCount = Math.max(3, Math.min(10, Math.floor(flightHeight / 5)));
-  const dir = stairVisualDirection(item.direction, floorIndex, floorCount);
-  const entryFlightX = item.flip ? rightFlightX : leftFlightX;
-  const continuationFlightX = item.flip ? leftFlightX : rightFlightX;
-  const visualUp = "up" as const;
-  const visualDown = "down" as const;
-  // Keep the cue readable on the small default Stair while leaving the tread
-  // pattern legible.  The shaft nearly spans the flight and terminates just
-  // inside each landing/entry edge.
-  const arrowLimit = Math.max(3.2, flightHeight / 2 - 1.1);
-  const arrowSize = Math.min(9, Math.max(4, flightHeight * 0.28), arrowLimit);
-  const arrowStrokeWidth = Math.max(1.05, Math.min(1.65, Math.min(flightWidth, flightHeight) * 0.1));
-  const arrowY = flightY + flightHeight * 0.5;
-  // A subtle continuous travel line follows the complete U-turn: it starts at
-  // the floor-facing entry, crosses the landing, and returns along the second
-  // flight.  The line is intentionally separate from the directional
-  // arrowheads so the symbol reads as one stair path without changing the
-  // semantic Up/Down state or the canonical navigation anchor.
-  const travelEntryInset = Math.min(2.2, Math.max(0.8, flightHeight * 0.1));
-  const travelEntryY = landingAtTop ? flightY + flightHeight - travelEntryInset : flightY + travelEntryInset;
-  const travelTurnY = landingY + landingHeight / 2;
-  const entryFlightCenterX = entryFlightX + flightWidth / 2;
-  const continuationFlightCenterX = continuationFlightX + flightWidth / 2;
-  const travelPathUpD = [
-    `M ${entryFlightCenterX - cx} ${travelEntryY - cy}`,
-    `L ${entryFlightCenterX - cx} ${travelTurnY - cy}`,
-    `L ${continuationFlightCenterX - cx} ${travelTurnY - cy}`,
-    `L ${continuationFlightCenterX - cx} ${travelEntryY - cy}`,
-  ].join(" ");
-  const travelPathDownD = [
-    `M ${continuationFlightCenterX - cx} ${travelEntryY - cy}`,
-    `L ${continuationFlightCenterX - cx} ${travelTurnY - cy}`,
-    `L ${entryFlightCenterX - cx} ${travelTurnY - cy}`,
-    `L ${entryFlightCenterX - cx} ${travelEntryY - cy}`,
-  ].join(" ");
-  const travelPathD = dir === "down" ? travelPathDownD : travelPathUpD;
-  const renderArrow = (flightX: number, arrowDirection: "up" | "down") => (
-    <g
-      data-testid="stairs-arrow-flight"
-      transform={`translate(${flightX + flightWidth / 2 - cx} ${arrowY - cy})`}
-    >
-      {/* A restrained light underlay keeps the cue legible over treads without
-          making the arrow look like a heavy icon. */}
-      <path
-        d={stairArrowPath(arrowDirection, arrowSize)}
-        fill="none"
-        stroke="#f8fafc"
-        strokeWidth={arrowStrokeWidth + 1.2}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        opacity={0.86}
-        className="pointer-events-none"
-      />
-      <path
-        data-testid="stairs-arrow-path"
-        d={stairArrowPath(arrowDirection, arrowSize)}
-        fill="none"
-        stroke="#0f172a"
-        strokeWidth={arrowStrokeWidth}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        className="pointer-events-none"
-      />
-      <path
-        data-testid="stairs-arrow-head"
-        d={stairArrowHeadPath(arrowDirection, arrowSize)}
-        fill="#0f172a"
-        stroke="#0f172a"
-        strokeWidth={0.3}
-        strokeLinejoin="round"
-        className="pointer-events-none"
-      />
-    </g>
-  );
-  return (
-    <>
-      <rect data-testid="stairs-footprint" x={item.x} y={item.y} width={item.width} height={item.height} rx={0}
-        fill={selected ? "rgba(30,64,175,0.14)" : "#e8eef7"} stroke={stroke} strokeWidth={selected ? 1.8 : 1.15} />
-      <rect data-testid="stairs-well" x={wellX} y={wellY} width={wellWidth} height={wellHeight} rx={0}
-        fill={selected ? "rgba(255,255,255,0.72)" : "#f8fafc"} stroke="#94a3b8" strokeWidth={0.8} />
-      <rect data-testid="stairs-landing" x={wellX + 0.8} y={landingY + 0.8} width={wellWidth - 1.6} height={Math.max(2, landingHeight - 1.6)}
-        rx={0} fill={selected ? "#dbeafe" : "#e2e8f0"} />
-      {[leftFlightX, rightFlightX].map((flightX) => (
-        <g key={flightX} data-testid="stairs-flight">
-          {/* Keep both stringers on the inner edges of the two flights.  Entry
-              side mirrors the composition, but must not swap these rails to
-              the outer edges and create a visually heavier Left variant. */}
-          <line data-testid="stairs-rail" x1={flightX === leftFlightX ? flightX + flightWidth - 1 : flightX + 1} y1={flightY} x2={flightX === leftFlightX ? flightX + flightWidth - 1 : flightX + 1} y2={flightY + flightHeight} stroke="#64748b" strokeWidth={0.8} opacity={0.8} />
-          {Array.from({ length: treadCount }, (_, i) => {
-            const ty = flightY + (flightHeight / (treadCount + 1)) * (i + 1);
-            return <line key={i} data-testid="stairs-tread" x1={flightX + 2} y1={ty} x2={flightX + flightWidth - 2} y2={ty} stroke="#64748b" strokeWidth={0.85} />;
-          })}
-        </g>
-      ))}
-      {/* The central opening/stringer gap makes the U-turn legible without a grate-like fill. */}
-      <rect x={wellX + flightWidth} y={flightY} width={flightGap} height={flightHeight} fill={selected ? "rgba(226,232,240,0.65)" : "#eef2f7"} stroke="#cbd5e1" strokeWidth={0.55} />
-      <line data-testid="stairs-center-line" x1={wellX + flightWidth + flightGap / 2} y1={flightY + 1} x2={wellX + flightWidth + flightGap / 2} y2={flightY + flightHeight - 1} stroke="#94a3b8" strokeWidth={0.65} strokeDasharray="2 2" />
-      <g data-testid="stairs-arrow" transform={`translate(${cx} ${cy})`}>
-        {dir !== "none" && (
-          <>
-            <path
-              d={travelPathD}
-              fill="none"
-              stroke="#f8fafc"
-              strokeWidth={arrowStrokeWidth + 2.1}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              opacity={0.9}
-              className="pointer-events-none"
-            />
-            <path
-              data-testid="stairs-travel-path"
-              d={travelPathD}
-              fill="none"
-              stroke="#0f172a"
-              strokeWidth={Math.max(0.9, arrowStrokeWidth * 0.72)}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              opacity={0.72}
-              className="pointer-events-none"
-            />
-          </>
-        )}
-        {dir === "up" && renderArrow(entryFlightX, visualUp)}
-        {dir === "down" && renderArrow(continuationFlightX, visualDown)}
-        {dir === "both" && <>{renderArrow(entryFlightX, visualUp)}{renderArrow(continuationFlightX, visualDown)}</>}
-        {dir === "none" && (
-          <path d="M -3.5 0 L 3.5 0" fill="none" stroke="#64748b" strokeWidth={1.15} strokeLinecap="round" />
-        )}
-      </g>
-    </>
-  );
-}
-
-/** Presentation-only symbol for a generated Exterior Emergency Stair landing.
- * The occurrence remains locked and its canonical x/y are untouched; this
- * variant adds a wall-side landing and rail cues so the landing reads as an
- * outside attachment rather than an ordinary interior stair. */
-function ExteriorEmergencyFloorStairSymbol({ item, selected }: { item: FloorStairs; selected: boolean }) {
-  const edge = item.attachment?.edge ?? "right";
-  const stroke = selected ? "var(--accent)" : "#b91c1c";
-  const fill = selected ? "rgba(239,246,255,0.94)" : "rgba(255,247,237,0.96)";
-  const x = item.x;
-  const y = item.y;
-  const w = item.width;
-  const h = item.height;
-  const landing = Math.max(5, Math.min(10, Math.min(w, h) * 0.22));
-  const vertical = edge === "left" || edge === "right";
-  return (
-    <g data-testid="exterior-emergency-stair-floor-symbol" className="pointer-events-none">
-      <rect x={x - 2} y={y - 2} width={w + 4} height={h + 4} rx={3} fill="rgba(148,163,184,0.18)" stroke="rgba(71,85,105,0.35)" strokeDasharray="3 2" strokeWidth={0.9} />
-      <rect x={x} y={y} width={w} height={h} rx={0} fill={fill} stroke={stroke} strokeWidth={selected ? 1.8 : 1.2} />
-      {vertical ? (
-        <>
-          <rect x={edge === "left" ? x + w - landing : x} y={y + 1} width={landing} height={h - 2} rx={1} fill="#e2e8f0" stroke={stroke} strokeWidth={0.8} />
-          <line x1={x + 3} y1={y + 3} x2={x + 3} y2={y + h - 3} stroke={stroke} strokeWidth={1} opacity={0.72} />
-          <line x1={x + w - 3} y1={y + 3} x2={x + w - 3} y2={y + h - 3} stroke={stroke} strokeWidth={1} opacity={0.72} />
-          {Array.from({ length: Math.max(4, Math.min(8, Math.round(h / 7))) }, (_, index) => {
-            const ty = y + 4 + index * ((h - 8) / (Math.max(4, Math.min(8, Math.round(h / 7))) - 1));
-            return <line key={index} x1={x + 4} y1={ty} x2={x + w - 4} y2={ty} stroke={stroke} strokeWidth={0.9} opacity={0.78} />;
-          })}
-          <line x1={edge === "left" ? x + w + 2 : x - 2} y1={y + h / 2} x2={edge === "left" ? x + w + 7 : x - 7} y2={y + h / 2} stroke={stroke} strokeWidth={1.5} strokeDasharray="2 2" />
-        </>
-      ) : (
-        <>
-          <rect x={x + 1} y={edge === "top" ? y + h - landing : y} width={w - 2} height={landing} rx={1} fill="#e2e8f0" stroke={stroke} strokeWidth={0.8} />
-          <line x1={x + 3} y1={y + 3} x2={x + w - 3} y2={y + 3} stroke={stroke} strokeWidth={1} opacity={0.72} />
-          <line x1={x + 3} y1={y + h - 3} x2={x + w - 3} y2={y + h - 3} stroke={stroke} strokeWidth={1} opacity={0.72} />
-          {Array.from({ length: Math.max(4, Math.min(8, Math.round(w / 7))) }, (_, index) => {
-            const tx = x + 4 + index * ((w - 8) / (Math.max(4, Math.min(8, Math.round(w / 7))) - 1));
-            return <line key={index} x1={tx} y1={y + 4} x2={tx} y2={y + h - 4} stroke={stroke} strokeWidth={0.9} opacity={0.78} />;
-          })}
-          <line x1={x + w / 2} y1={edge === "top" ? y + h + 2 : y - 2} x2={x + w / 2} y2={edge === "top" ? y + h + 7 : y - 7} stroke={stroke} strokeWidth={1.5} strokeDasharray="2 2" />
-        </>
-      )}
-      <title>Exterior Emergency Stair landing</title>
-    </g>
-  );
-}
-
-type ExteriorStairPresentationBounds = { x: number; y: number; width: number; height: number };
-
-/** Build a presentation-only visual item outside the floor boundary.  The
- * generated FloorStairs record remains at its canonical wall anchor for
- * navigation and persistence; only this copy is displaced for rendering. */
 function exteriorStairVisualItem(item: FloorStairs, canvasW: number, canvasH: number, visualSize?: ExteriorEmergencyStair["visualSize"]) {
   const edge = item.attachment?.edge ?? "right";
   const { width, height } = exteriorEmergencyStairVisualDimensions({ width: item.width, height: item.height, visualSize });
@@ -4837,75 +2957,6 @@ function LegacyLocalApproachInspector({ kind, item, parent, onUpdate, onDelete, 
   const offset = item.attachmentOffset ?? 0.5;
   const edgeLabel = item.attachmentEdge === "start" ? "Start edge" : item.attachmentEdge === "end" ? "End edge" : "Outer edge";
   return <div data-testid={`${kind === "ramp" ? "entrance-ramp" : "entrance-steps"}-inspector`} className="w-64 shrink-0 border-l border-border bg-card flex flex-col"><div className="flex items-center justify-between px-3 h-10 border-b border-border"><div><p className="text-[10px] font-extrabold uppercase tracking-[0.12em]">{isRamp ? "Accessible Ramp" : "Entrance Steps"}</p><p className="text-[9px] text-muted-foreground">Local architectural approach</p></div><button aria-label="Close properties" onClick={onClose} className="w-7 h-7 rounded-lg hover:bg-muted"><X className="h-4 w-4 mx-auto" /></button></div><div className="p-2.5 space-y-2 text-[10px] overflow-y-auto"><div className="rounded-md border border-primary/20 bg-primary/5 px-2.5 py-1.5 text-[9px] leading-snug text-primary">{isRamp ? "Accessible local transition" : "Steps are not accessible"}</div>{parent ? <div className="rounded-md border border-border/80 bg-muted/15 px-2.5 py-2"><p className="text-[9px] uppercase tracking-wider text-muted-foreground">Parent zone</p><p className="font-semibold text-foreground">{parent.label ?? exteriorZoneTypeLabel(parent.type)}</p><p className="text-[9px] text-muted-foreground">{edgeLabel} · {Math.round(offset * 100)}%</p></div> : <p className="rounded-md border border-amber-300/40 bg-amber-50/60 px-2.5 py-2 text-[9px] text-amber-800">Select a Veranda or Entrance Landing to attach this feature.</p>}<label className="block text-muted-foreground">Width <span className="float-right tabular-nums text-foreground">{Math.round(item.width)}</span><input aria-label={`${isRamp ? "Entrance Ramp" : "Entrance Steps"} width`} type="range" min="32" max="280" step="4" value={item.width} onChange={(e) => onUpdate({ width: Number(e.target.value) })} className="mt-1 w-full accent-primary" /></label><label className="block text-muted-foreground">Depth <span className="float-right tabular-nums text-foreground">{Math.round(item.height)}</span><input aria-label={`${isRamp ? "Entrance Ramp" : "Entrance Steps"} depth`} type="range" min="20" max="140" step="4" value={item.height} onChange={(e) => onUpdate({ height: Number(e.target.value) })} className="mt-1 w-full accent-primary" /></label><button onClick={onDelete} className="w-full h-7 rounded-md border border-destructive/30 text-destructive text-[10px] font-bold hover:bg-destructive/10">Delete</button></div></div>;
-}
-
-function RampSymbol({ item, selected }: { item: FloorRamp; selected: boolean }) {
-  const cx = item.x + item.width / 2;
-  const cy = item.y + item.height / 2;
-  // B5 Phase 2.6: accessibility-sign style — a deep-blue footprint with a LARGE
-  // centered white wheelchair icon as the dominant visual, a clean border, and
-  // only a tiny secondary direction cue tucked into the corner. Everything is
-  // local-frame geometry, so rotation/resize keep the symbol centered.
-  const dir = item.direction === "down" ? "down" : item.direction === "up" ? "up" : "both";
-  const iconSize = Math.max(10, Math.min(item.width, item.height) * 0.68);
-  const showCue = item.height >= 12 && item.width >= 12;
-  return (
-    <>
-      <rect x={item.x} y={item.y} width={item.width} height={item.height} rx={2}
-        fill={selected ? "#1e40af" : "#2563eb"} stroke={selected ? "var(--accent)" : "#1e40af"}
-        strokeWidth={selected ? 1.8 : 1.2} data-testid="ramp-blue-base" />
-      {/* Large centered white accessibility icon — the ramp's primary visual. */}
-      <g data-testid="ramp-accessibility-icon" transform={`translate(${cx} ${cy})`} className="pointer-events-none">
-        <AccessibilityIcon size={iconSize} strokeWidth={1.6} color="#ffffff" x={-iconSize / 2} y={-iconSize / 2} />
-      </g>
-      {/* Tiny corner direction cue (up / down / both) — never competes with the
-          dominant accessibility symbol. */}
-      {showCue && (
-        <g data-testid="ramp-direction-cue" transform={`translate(${item.x + item.width - 4} ${item.y + item.height - 4})`} opacity={0.95} className="pointer-events-none">
-          {dir === "up" && (
-            <path d="M 0 2.5 L 0 -2.5 M 0 -2.5 L -1.6 0 M 0 -2.5 L 1.6 0" fill="none" stroke="#dbeafe" strokeWidth={1} strokeLinecap="round" strokeLinejoin="round" />
-          )}
-          {dir === "down" && (
-            <path d="M 0 -2.5 L 0 2.5 M 0 2.5 L -1.6 0 M 0 2.5 L 1.6 0" fill="none" stroke="#dbeafe" strokeWidth={1} strokeLinecap="round" strokeLinejoin="round" />
-          )}
-          {dir === "both" && (
-            <path d="M 0 2.5 L 0 -2.5 M 0 -2.5 L -1.6 0 M 0 -2.5 L 1.6 0 M 0 2.5 L -1.6 0 M 0 2.5 L 1.6 0" fill="none" stroke="#dbeafe" strokeWidth={1} strokeLinecap="round" strokeLinejoin="round" />
-          )}
-        </g>
-      )}
-    </>
-  );
-}
-
-function ElevatorSymbol({ item, selected }: { item: FloorElevatorItem; selected: boolean }) {
-  const stroke = selected ? "var(--accent)" : "#15803d";
-  const cx = item.x + item.width / 2;
-  const cy = item.y + item.height / 2;
-  // B5 Phase 2.3: recognizable top-down elevator — outer shaft frame, inner cab
-  // rectangle, centered door opening, and SYMMETRIC up/down chevrons centered in
-  // the cab. Everything is local-frame (rotates/resizes with the object); the
-  // old chevron path was asymmetric and drifted off-center after resize.
-  const cabW = Math.max(4, item.width - 8);
-  const cabH = Math.max(4, item.height - 8);
-  const doorW = Math.min(Math.max(4, item.doorWidth), cabW - 2);
-  return (
-    <>
-      {/* Outer shaft / frame */}
-      <rect x={item.x} y={item.y} width={item.width} height={item.height} rx={0}
-        fill={selected ? "rgba(22,163,74,0.14)" : "#f0fdf4"} stroke={stroke} strokeWidth={selected ? 1.8 : 1.1} data-testid="elevator-shaft" />
-      {/* Inner cab */}
-      <rect x={cx - cabW / 2} y={cy - cabH / 2} width={cabW} height={cabH} rx={0}
-        fill="none" stroke="#86efac" strokeWidth={0.9} data-testid="elevator-cab" />
-      {/* Centered door opening */}
-      <rect x={cx - doorW / 2} y={item.y + item.height - 3.2} width={doorW} height={2.4} rx={0.5} fill="#22c55e" data-testid="elevator-door" />
-      {/* B5 Phase 2.4: stacked vertical up/down chevrons (▲ over ▼) centered
-          symmetrically inside the cab — scaled to the cab and rotation-safe. */}
-      <g data-testid="elevator-chevrons" transform={`translate(${cx} ${cy})`}>
-        <path d={`M ${-cabW * 0.2} ${-cabH * 0.12} L 0 ${-cabH * 0.3} L ${cabW * 0.2} ${-cabH * 0.12} M ${-cabW * 0.2} ${cabH * 0.12} L 0 ${cabH * 0.3} L ${cabW * 0.2} ${cabH * 0.12}`}
-          fill="none" stroke="#14532d" strokeWidth={1} strokeLinecap="round" strokeLinejoin="round" />
-      </g>
-    </>
-  );
 }
 
 function FloorContextMenu({
@@ -5332,24 +3383,6 @@ function PhysicalNavPropertiesPanel({
   );
 }
 
-function floorRouteArrowPoints(points: { x: number; y: number }[]) {
-  const markers: { x: number; y: number; angle: number }[] = [];
-  for (let i = 0; i < points.length - 1; i += 1) {
-    const a = points[i];
-    const b = points[i + 1];
-    const dx = b.x - a.x;
-    const dy = b.y - a.y;
-    const length = Math.hypot(dx, dy);
-    if (length < 18) continue;
-    const count = Math.max(1, Math.floor(length / 72));
-    for (let j = 1; j <= count; j += 1) {
-      const t = j / (count + 1);
-      markers.push({ x: a.x + dx * t, y: a.y + dy * t, angle: Math.atan2(dy, dx) * 180 / Math.PI });
-    }
-  }
-  return markers;
-}
-
 const FLOOR_PROPERTIES_PANEL_WIDTH = 256;
 
 export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, onSwitchFloor, onUpdate, onSave, onPublish, onPreviewStudent, publishingEnabled = false, savedSnapshot, initialSelection }: FloorEditorProps) {
@@ -5432,14 +3465,19 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
   }, [building, campus, exteriorStairGraphSignature, onUpdate]);
 
   // ── Core state ──
-  const testRouteSessionContext = useTestRouteSession();
-  const routePreview = Boolean(testRouteSessionContext.session?.previewRoute && testRouteSessionContext.session?.result);
-  const { navigationEnabled, setNavigationEnabled } = testRouteSessionContext;
+  const testRouteSessionActions = useTestRouteSessionActions();
+  const setNavigationEnabled = testRouteSessionActions.setNavigationEnabled;
+  const routePreview = useTestRouteSessionSelector(({ session }) => Boolean(session?.previewRoute && session?.result));
+  const navigationEnabled = useTestRouteSessionSelector((snapshot) => snapshot.navigationEnabled);
+  const routePanelOpen = useTestRouteSessionSelector((snapshot) => snapshot.open);
+  const hasTestRouteResult = useTestRouteSessionSelector(({ session }) => Boolean(session?.result));
+  const pendingRouteFocus = useTestRouteSessionSelector(({ session }) => session?.pendingFocus);
+  const testRouteContext = useMemo(() => ({ kind: "floor" as const, buildingId, floorId }), [buildingId, floorId]);
   // B8 Phase 1: navMode is now true when the nav overlay is active AND a nav
   // tool is selected (or a nav object is selected). Physical tools always work.
   // Preview keeps the Navigation session enabled for routing, but presents the
   // editor as non-authoring: graph visuals and graph hit targets are suppressed.
-  const [testNavOpen, setLocalTestNavOpen] = useState(testRouteSessionContext.open);
+  const [testNavOpen, setLocalTestNavOpen] = useState(routePanelOpen);
   const [localNavigationEnabled, setLocalNavigationEnabled] = useState(navigationEnabled || testNavOpen);
   const showNavOverlay = localNavigationEnabled || navigationEnabled || testNavOpen || routePreview;
   const setShowNavOverlay = useCallback((enabled: boolean) => {
@@ -5459,17 +3497,19 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
   // B8: Test route panel toggle — explicit action, NOT auto-opened.
   const setTestNavOpen = useCallback((open: boolean) => {
     setLocalTestNavOpen(open);
-    testRouteSessionContext.setOpen(open);
-  }, [testRouteSessionContext.setOpen]);
+    testRouteSessionActions.setOpen(open);
+  }, [testRouteSessionActions]);
   useEffect(() => {
-    setLocalTestNavOpen(testRouteSessionContext.open);
-  }, [testRouteSessionContext.open]);
+    setLocalTestNavOpen(routePanelOpen);
+  }, [routePanelOpen]);
   // Test Route reports its compact live-monitor presentation separately from
   // the inspector visibility.  Keeping this in the editor host lets the
   // floating panel animate its width without changing canvas coordinates.
   const [testRouteCompact, setTestRouteCompact] = useState(() => Boolean(
-    testRouteSessionContext.session?.manualCollapsed
-      || (testRouteSessionContext.session?.hasCalculatedRoute && !testRouteSessionContext.session.manualExpanded),
+    (() => {
+      const session = testRouteSessionActions.getSession();
+      return Boolean(session?.manualCollapsed || (session?.hasCalculatedRoute && !session.manualExpanded));
+    })(),
   ));
   // Elevator transitions switch floors directly.  The route marker itself is
   // the lightweight, hover/focus-readable cue; no blocking loading card is
@@ -5535,8 +3575,8 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
   // derived overlay immediately when the session/result disappears so a
   // responsive host cannot leave a stale stroke behind after Clear or Close.
   useEffect(() => {
-    if (!testNavOpen || !testRouteSessionContext.session?.result) setHighlightedRoute(null);
-  }, [testNavOpen, testRouteSessionContext.session?.result]);
+    if (!testNavOpen || !hasTestRouteResult) setHighlightedRoute(null);
+  }, [hasTestRouteResult, testNavOpen]);
   useEffect(() => {
     if (testNavOpen) return;
     // Closing Navigation also closes every transient Test Route interaction;
@@ -5590,6 +3630,14 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
   // Shift) — temporary h/v lines shown while a free node / bend drags near
   // another routing node's X or Y center. Cleared on release/cancel/tool-switch.
   const [navAlignGuides, setNavAlignGuides] = useState<{ type: "h" | "v"; pos: number }[]>([]);
+  const setNavPreviewIfChanged = (next: { x: number; y: number } | null) => setNavPreview((previous) =>
+    previous?.x === next?.x && previous?.y === next?.y ? previous : next,
+  );
+  const setNavAlignGuidesIfChanged = (next: { type: "h" | "v"; pos: number }[]) => setNavAlignGuides((previous) =>
+    previous.length === next.length && previous.every((guide, index) => guide.type === next[index]?.type && guide.pos === next[index]?.pos)
+      ? previous
+      : next,
+  );
   // B5 Phase 2.8: one-time wall warning per drag gesture (avoid toast spam).
   const navDragWallWarnedRef = useRef(false);
   // B7 Authoring: one-time room overlap warning per move gesture (avoid toast spam).
@@ -5858,7 +3906,29 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
   // ── Saving ──
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const cursorReadoutRef = useRef<HTMLDivElement | null>(null);
+  const cursorReadoutFrameRef = useRef<number | null>(null);
+  const latestCursorReadoutRef = useRef<{ x: number; y: number } | null>(null);
+  const navHoverMoveFrameRef = useRef<number | null>(null);
+  const latestNavHoverPointerRef = useRef<{ clientX: number; clientY: number; shiftKey: boolean } | null>(null);
+  const navEdgeHoverFrameRef = useRef<number | null>(null);
+  const latestNavEdgeHoverRef = useRef<{ edgeId: string; clientX: number; clientY: number; shiftKey: boolean } | null>(null);
   const [cursorPos, setCursorPos] = useState<{ x: number; y: number } | null>(null);
+  const queueCursorReadout = (point: { x: number; y: number }) => {
+    latestCursorReadoutRef.current = { x: Math.round(point.x), y: Math.round(point.y) };
+    if (cursorReadoutFrameRef.current !== null) return;
+    cursorReadoutFrameRef.current = requestAnimationFrame(() => {
+      cursorReadoutFrameRef.current = null;
+      const latest = latestCursorReadoutRef.current;
+      const element = cursorReadoutRef.current;
+      if (latest && element) element.textContent = `X:${latest.x} Y:${latest.y}`;
+    });
+  };
+  useEffect(() => () => {
+    if (cursorReadoutFrameRef.current !== null) cancelAnimationFrame(cursorReadoutFrameRef.current);
+    if (navHoverMoveFrameRef.current !== null) cancelAnimationFrame(navHoverMoveFrameRef.current);
+    if (navEdgeHoverFrameRef.current !== null) cancelAnimationFrame(navEdgeHoverFrameRef.current);
+  }, []);
   // B5 Phase 3.1: Add Floor / floor switching with unsaved changes first asks
   // Save/Discard (SHARED unsaved-changes guard — see the useUnsavedChangesGuard
   // hook below) so the CURRENT floor's changes are persisted exactly once
@@ -6339,7 +4409,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
       if (element && element.textContent !== label) element.textContent = label;
     }
   }, []);
-  const { zoom, pan, panning, svgRef, containerRef, cameraTransformRef, getPoint, startPan, movePan, endPan, zoomIn, zoomOut, zoomToFit, handleWheel } =
+  const { zoom, pan, panning, svgRef, containerRef, cameraTransformRef, getPoint, getWorldUnitsForScreenPixels, startPan, movePan, endPan, zoomIn, zoomOut, zoomToFit, handleWheel } =
     useCanvasControls(FP_W, FP_H, {
       insets: floorViewportInsets,
       worldBounds: renderFloorShapeBounds,
@@ -6594,6 +4664,12 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
     () => indoorNavEdges(campus.navEdges, indoorNodes, buildingId, floorId),
     [campus.navEdges, indoorNodes, buildingId, floorId]
   );
+  const indoorNodeById = useMemo(() => new Map(indoorNodes.map((node) => [node.id, node])), [indoorNodes]);
+  const freeIndoorNodes = useMemo(() => indoorNodes.filter((node) => !node.roomId), [indoorNodes]);
+  const indoorNodePointMap = useMemo<Record<string, { x: number; y: number }>>(
+    () => Object.fromEntries(indoorNodes.map((node) => [node.id, { x: node.x, y: node.y }])),
+    [indoorNodes],
+  );
   // Exterior Veranda paths are still ordinary authored navigation edges, but
   // their walkable area lives beyond the Floor perimeter.  Keep the indoor
   // wall rule everywhere else; this narrowly exempts only a polyline whose
@@ -6652,6 +4728,14 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
   const editableIndoorEdges = useMemo(
     () => marqueeIndoorEdges.filter((edge) => !edge.derivedOwnerType),
     [marqueeIndoorEdges]
+  );
+  const waypointHitIndex = useMemo(
+    () => createNavigationHitTestIndex(freeIndoorNodes, walkableIndoorEdges, indoorNodePointMap),
+    [freeIndoorNodes, indoorNodePointMap, walkableIndoorEdges],
+  );
+  const editableWaypointHitIndex = useMemo(
+    () => createNavigationHitTestIndex(freeIndoorNodes, editableIndoorEdges, indoorNodePointMap),
+    [freeIndoorNodes, indoorNodePointMap, editableIndoorEdges],
   );
   // Shared Canva/Figma-style alignment references for indoor navigation drags.
   // The graph nodes remain the connectivity authority; these physical anchors
@@ -8307,7 +6391,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
       return;
     }
     if (!publishingEnabled || !onPublish) {
-      toast.info("Publishing is implemented in A6.", "Save this floor draft now; campus-level publishing will use the existing Map Builder publish workflow.");
+      toast.info("Review from the Campus Map", "Save this floor, then use Review & Publish from the campus map to publish the complete campus.");
       return;
     }
     onPublish(campus);
@@ -8337,7 +6421,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
   // has mounted and its canvas controls are ready; otherwise the previous
   // editor can consume the request and the new floor opens at its default view.
   useEffect(() => {
-    const request = testRouteSessionContext.session?.pendingFocus;
+    const request = pendingRouteFocus;
     if (!request || request.context.kind !== "floor"
       || request.context.buildingId !== buildingId
       || request.context.floorId !== floorId) return;
@@ -8348,15 +6432,15 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
       // to a Stair/Room. A moderate context window lets the admin orient on
       // the surrounding floor plan immediately.
       zoomToFit(Math.max(0, node.x - 140), Math.max(0, node.y - 110), 280, 220, 72);
-      const current = testRouteSessionContext.session;
+      const current = testRouteSessionActions.getSession();
       if (current?.pendingFocus?.nodeId === request.nodeId
         && current.pendingFocus.context.kind === "floor"
         && current.pendingFocus.context.floorId === floorId) {
-        testRouteSessionContext.setSession({ ...current, pendingFocus: undefined });
+        testRouteSessionActions.setSession({ ...current, pendingFocus: undefined });
       }
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [buildingId, floorId, indoorNodes, testRouteSessionContext.session, testRouteSessionContext.setSession, zoomToFit]);
+  }, [buildingId, floorId, indoorNodes, pendingRouteFocus, testRouteSessionActions, zoomToFit]);
 
   const handleTestRouteTransition = useCallback((marker: TestRouteTransitionMarker) => {
     if (marker.kind === "elevator" && marker.targetContext.kind === "floor" && marker.targetContext.floorId) {
@@ -8374,9 +6458,9 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
       return;
     }
     if (marker.targetContext.kind === "outdoor") {
-      const current = testRouteSessionContext.session;
+      const current = testRouteSessionActions.getSession();
       if (current && marker.targetNodeId) {
-        testRouteSessionContext.setSession({
+        testRouteSessionActions.setSession({
           ...current,
           pendingFocus: { nodeId: marker.targetNodeId, context: marker.targetContext },
         });
@@ -8397,7 +6481,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
             : undefined;
       requestFloorSwitch(marker.targetContext.floorId, initialSelection);
     }
-  }, [buildingId, campus.navNodes, handleBack, requestFloorSwitch, testRouteSessionContext]);
+  }, [buildingId, campus.navNodes, handleBack, requestFloorSwitch, testRouteSessionActions]);
 
   // The active exterior cue is the Floor-side presentation of the same
   // canonical context boundary used by Stair/Elevator markers. Keep the
@@ -11991,13 +10075,28 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
   // Graph-only pointer handling when the editor is in Navigation mode. Rooms,
   // walls, doors, furniture and circulation stay visible as CONTEXT only — the
   // nav branch below never mutates them.
-  const navPointFromEvent = (e: React.MouseEvent): { x: number; y: number } => {
+  const navPointFromEvent = (e: React.MouseEvent | MouseEvent): { x: number; y: number } => {
     const pt = getPoint(e as any, FP_W, FP_H);
     return {
       x: Math.max(renderFloorShapeBounds.x - EXTERIOR_ZONE_WORKSPACE_MARGIN, Math.min(renderFloorShapeBounds.x + renderFloorShapeBounds.width + EXTERIOR_ZONE_WORKSPACE_MARGIN, Math.round(pt.x))),
       y: Math.max(renderFloorShapeBounds.y - EXTERIOR_ZONE_WORKSPACE_MARGIN, Math.min(renderFloorShapeBounds.y + renderFloorShapeBounds.height + EXTERIOR_ZONE_WORKSPACE_MARGIN, Math.round(pt.y))),
     };
   };
+  // Navigation targets look the same size on screen at every camera zoom.
+  // Convert the intended 12px interaction radius with the live camera refs so
+  // an in-flight zoom cannot temporarily enlarge the snap radius.
+  const navHitRadiusWorld = () => getWorldUnitsForScreenPixels(12);
+  const cancelPendingNavHoverMove = useCallback(() => {
+    if (navHoverMoveFrameRef.current !== null) cancelAnimationFrame(navHoverMoveFrameRef.current);
+    navHoverMoveFrameRef.current = null;
+    latestNavHoverPointerRef.current = null;
+  }, []);
+  const cancelPendingNavEdgeHover = useCallback((edgeId?: string) => {
+    if (edgeId && latestNavEdgeHoverRef.current?.edgeId !== edgeId) return;
+    if (navEdgeHoverFrameRef.current !== null) cancelAnimationFrame(navEdgeHoverFrameRef.current);
+    navEdgeHoverFrameRef.current = null;
+    latestNavEdgeHoverRef.current = null;
+  }, []);
 
   // Authoring target under the pointer (rooms, doors, stairs/elevator/ramp) —
   // the indoor equivalent of the outdoor building-entrance target affordance.
@@ -12400,6 +10499,8 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
   };
 
   const handleNavNodeDown = (e: React.MouseEvent, node: NavigationNode) => {
+    cancelPendingNavHoverMove();
+    cancelPendingNavEdgeHover();
     e.stopPropagation();
     if (isSpacePressed()) { startPan(e); return; }
     // Approach anchors are derived from the owning Veranda/Entrance
@@ -12449,7 +10550,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
       toast.info("Already added to navigation", "This location already has a navigation point.");
       return;
     }
-    if (navTool === "connect") { navConnectAtPoint(pt); return; }
+    if (navTool === "connect") { navConnectAtPoint(pt, undefined, navHitRadiusWorld()); return; }
     const multiBase = navMultiSelected.length > 0 ? navMultiSelected
       : navSelected?.type === "node" ? [navSelected.id] : [];
     if (e.shiftKey) {
@@ -12549,6 +10650,8 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
     // B5 Phase 6.7: Add Waypoint tool should not be intercepted by edge selection
     // — let the click fall through to handleNavSvgDown for edge insertion
     if (navTool === "waypoint" || navTool === "destination") return;
+    cancelPendingNavHoverMove();
+    cancelPendingNavEdgeHover();
     e.stopPropagation();
     if (isSpacePressed()) { startPan(e); return; }
     if (edge.derivedOwnerType && (navTool === "erase" || navTool === "select")) {
@@ -12586,10 +10689,10 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
           return;
         }
       }
-      const hoveredTarget = navPathTargetHover?.edgeId === edge.id
-        ? navPathTargetHover
-        : undefined;
-      navConnectAtPoint(point, edge, hoveredTarget);
+      // Hover projections are frame-coalesced preview state. Resolve the
+      // pointer-down position synchronously so an older projection on this
+      // same edge cannot redirect the committed junction.
+      navConnectAtPoint(point, edge, navHitRadiusWorld());
       return;
     }
     if (navTool === "select") {
@@ -12656,7 +10759,9 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
 
   // B5 Phase 2.6: hovering the SELECTED path's hit line remembers which segment
   // the pointer is nearest — Add Bend then splits that exact segment.
-  const handleNavEdgeMove = (e: React.MouseEvent, edge: NavigationEdge) => {
+  const processNavEdgeMove = (e: React.MouseEvent | MouseEvent, edgeId: string) => {
+    const edge = indoorEdges.find((candidate) => candidate.id === edgeId);
+    if (!edge) return;
     if (navTool === "connect") {
       // Connect uses the edge only as a lightweight hit target; the actual
       // split/junction mutation occurs on click.  Keep the nearest segment and
@@ -12668,10 +10773,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
         return;
       }
       const point = navPointFromEvent(e);
-      const nodeMap: Record<string, { x: number; y: number }> = Object.fromEntries(
-        indoorNodes.map((node) => [node.id, { x: node.x, y: node.y }]),
-      );
-      const hit = findNavEdgeAtPoint([edge], nodeMap, point);
+      const hit = findNavEdgeAtPoint([edge], indoorNodePointMap, point, navHitRadiusWorld());
       if (!hit) {
         setNavPathTargetHover(null);
         setNavSegmentHover(null);
@@ -12681,22 +10783,30 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
       // the preview marker and the committed junction remain on the same
       // segment (including diagonal segments).
       const nearest = { x: hit.nearest.x, y: hit.nearest.y };
-      const source = indoorNodes.find((node) => node.id === navConnectStart);
-      const edgePoints = edgePolylinePoints(edge, indoorNodes);
+      const source = indoorNodeById.get(navConnectStart);
+      const edgeEndpoints = [indoorNodeById.get(edge.startNodeId), indoorNodeById.get(edge.endNodeId)].filter((node): node is NavigationNode => !!node);
+      const edgePoints = edgePolylinePoints(edge, edgeEndpoints);
       const segmentStart = edgePoints?.[hit.nearest.segIndex];
       const segmentEnd = edgePoints?.[hit.nearest.segIndex + 1];
       const resolvedPoint = source && segmentStart && segmentEnd
         ? resolveConnectPathTargetPoint(source, nearest, segmentStart, segmentEnd)
         : nearest;
       // This exact resolved point drives both the preview and the click commit.
-      setNavPathTargetHover({ edgeId: edge.id, index: hit.nearest.segIndex, point: resolvedPoint });
-      setNavPreview(resolvedPoint);
+      setNavPathTargetHover((previous) => previous?.edgeId === edge.id
+        && previous.index === hit.nearest.segIndex
+        && Math.abs(previous.point.x - resolvedPoint.x) < 0.25
+        && Math.abs(previous.point.y - resolvedPoint.y) < 0.25
+        ? previous
+        : { edgeId: edge.id, index: hit.nearest.segIndex, point: resolvedPoint });
+      setNavPreview((previous) => previous && Math.abs(previous.x - resolvedPoint.x) < 0.25 && Math.abs(previous.y - resolvedPoint.y) < 0.25
+        ? previous : resolvedPoint);
       setNavSegmentHover(null);
       return;
     }
     if (navTool !== "select" || !(navSelected?.type === "edge" && navSelected.id === edge.id)) return;
     const pt = navPointFromEvent(e);
-    const pts = edgePolylinePoints(edge, indoorNodes);
+    const edgeEndpoints = [indoorNodeById.get(edge.startNodeId), indoorNodeById.get(edge.endNodeId)].filter((node): node is NavigationNode => !!node);
+    const pts = edgePolylinePoints(edge, edgeEndpoints);
     if (!pts || pts.length < 2) return;
     let best = 0;
     let bestD = Infinity;
@@ -12705,6 +10815,19 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
       if (d < bestD) { bestD = d; best = i; }
     }
     setNavSegmentHover({ edgeId: edge.id, index: best });
+  };
+
+  const processNavEdgeMoveRef = useRef(processNavEdgeMove);
+  processNavEdgeMoveRef.current = processNavEdgeMove;
+  const handleNavEdgeMove = (e: React.MouseEvent, edge: NavigationEdge) => {
+    latestNavEdgeHoverRef.current = { edgeId: edge.id, clientX: e.clientX, clientY: e.clientY, shiftKey: e.shiftKey };
+    if (navEdgeHoverFrameRef.current !== null) return;
+    navEdgeHoverFrameRef.current = requestAnimationFrame(() => {
+      navEdgeHoverFrameRef.current = null;
+      const latest = latestNavEdgeHoverRef.current;
+      latestNavEdgeHoverRef.current = null;
+      if (latest) processNavEdgeMoveRef.current(latest as MouseEvent, latest.edgeId);
+    });
   };
 
   // B5 Phase 2.5: grab a bend handle on a segmented path — the path reshapes
@@ -12738,8 +10861,8 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
       setLocalNavigationEnabled(false);
       setNavigationEnabled(false);
       setLocalTestNavOpen(false);
-      testRouteSessionContext.setOpen(false);
-      testRouteSessionContext.setSession(null);
+      testRouteSessionActions.setOpen(false);
+      testRouteSessionActions.setSession(null);
     }
     setShowNavOverlay(next);
     if (!next) {
@@ -12770,7 +10893,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
       alignmentSnapLocksRef.current = { x: null, y: null };
       setTool("select");
     }
-  }, [cancelElevatorTransition, setNavigationEnabled, showNavOverlay, testRouteSessionContext.setOpen, testRouteSessionContext.setSession]);
+  }, [cancelElevatorTransition, setNavigationEnabled, showNavOverlay, testRouteSessionActions]);
   // Keep backward compat for any remaining callers.
   const switchFloorEditorMode = useCallback((nextMode: FloorEditorMode) => {
     if (nextMode === "navigation" && !showNavOverlay) toggleNavigation();
@@ -12778,6 +10901,8 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
   }, [showNavOverlay, toggleNavigation]);
 
   const selectNavTool = useCallback((id: "select" | "pan" | "waypoint" | "destination" | "connect" | "link" | "erase") => {
+    cancelPendingNavHoverMove();
+    cancelPendingNavEdgeHover();
     setRoomTemplatePlacement(null);
     clearRoomDoorLinkState();
     setRoomDrag(null);
@@ -12792,7 +10917,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
     setNavSegmentHover(null);
     setNavPathTargetHover(null);
     exteriorZoneSelectionCandidateRef.current = null;
-  }, [clearRoomDoorLinkState]);
+  }, [cancelPendingNavEdgeHover, cancelPendingNavHoverMove, clearRoomDoorLinkState]);
 
   const commitNavEdgeBetween = useCallback((
     startId: string,
@@ -12937,10 +11062,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
     nodes: NavigationNode[] = indoorNodes,
     edges: NavigationEdge[] = indoorEdges,
     pinnedBends: { x: number; y: number }[] = [],
-    /** Exact target captured by the Connect hover.  When present, the commit
-     * must use this edge segment/projected point rather than resolving a new
-     * generic nearest-node target on mouse-up. */
-    pathTarget?: { edgeId: string; segmentIndex: number; projectedPoint: { x: number; y: number } },
+    pathHitThreshold = NAV_EDGE_SNAP_THRESHOLD,
   ): boolean => {
     const edge = edges.find((candidate) => candidate.id === targetEdge.id);
     if (!edge || !isManualIndoorWalkingEdge(edge, nodes)) {
@@ -12950,51 +11072,10 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
     const nodeMap: Record<string, { x: number; y: number }> = Object.fromEntries(
       nodes.map((node) => [node.id, { x: node.x, y: node.y }]),
     );
-    const targetSegment = pathTarget?.edgeId === edge.id
-      ? pathTarget.segmentIndex
-      : undefined;
     const edgePoints = edgePolylinePoints(edge, nodes);
-    let hit: ReturnType<typeof findNavEdgeAtPoint> = null;
-    // The hover state already projected the pointer onto a specific segment.
-    // Preserve that exact segment through commit; only reject it if the graph
-    // changed underneath the pointer and the captured projection is no longer
-    // on that segment.  The fallback is used for direct edge clicks where no
-    // prior mousemove was delivered (e.g. keyboard/synthetic events).
-    if (
-      Number.isInteger(targetSegment)
-      && edgePoints
-      && targetSegment! >= 0
-      && targetSegment! < edgePoints.length - 1
-      && pathTarget
-    ) {
-      const a = edgePoints[targetSegment!];
-      const b = edgePoints[targetSegment! + 1];
-      const dx = b.x - a.x;
-      const dy = b.y - a.y;
-      const lenSq = dx * dx + dy * dy;
-      if (lenSq > 0) {
-        let t = ((pathTarget.projectedPoint.x - a.x) * dx + (pathTarget.projectedPoint.y - a.y) * dy) / lenSq;
-        t = Math.max(0, Math.min(1, t));
-        const projected = { x: a.x + dx * t, y: a.y + dy * t };
-        const dist = Math.hypot(pathTarget.projectedPoint.x - projected.x, pathTarget.projectedPoint.y - projected.y);
-        if (dist <= NAV_EDGE_SNAP_THRESHOLD) {
-          hit = {
-            edge,
-            nearest: {
-              // Keep the captured projected point (rather than the nearest
-              // node) as the authoritative join location. It remains exact so
-              // persisted diagonal junctions stay mathematically on-segment.
-              x: pathTarget.projectedPoint.x,
-              y: pathTarget.projectedPoint.y,
-              dist,
-              segIndex: targetSegment!,
-              t,
-            },
-          };
-        }
-      }
-    }
-    if (!hit) hit = findNavEdgeAtPoint([edge], nodeMap, point);
+    // Always project the actual pointer-down position. Preview hover state may
+    // be one frame behind during fast movement and is never authoritative.
+    let hit = findNavEdgeAtPoint([edge], nodeMap, point, pathHitThreshold);
     if (!hit) return false;
     const source = nodes.find((node) => node.id === startId);
     const segmentStart = edgePoints?.[hit.nearest.segIndex];
@@ -13016,9 +11097,9 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
     const endpointDistance = (node: NavigationNode | undefined) => node
       ? Math.hypot(hit!.nearest.x - node.x, hit!.nearest.y - node.y)
       : Infinity;
-    const endpoint = endpointDistance(startNode) <= NAV_NODE_HIT_THRESHOLD
+    const endpoint = endpointDistance(startNode) <= pathHitThreshold
       ? startNode
-      : endpointDistance(endNode) <= NAV_NODE_HIT_THRESHOLD
+      : endpointDistance(endNode) <= pathHitThreshold
         ? endNode
         : undefined;
     if (endpoint) {
@@ -13037,7 +11118,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
       const existingJunction = nodes
         .filter((node) => node.id !== startId)
         .map((node) => ({ node, distance: Math.hypot(node.x - hit!.nearest.x, node.y - hit!.nearest.y), onSegment: distanceToSegment(node, a, b) }))
-        .filter(({ distance, onSegment }) => distance <= NAV_NODE_HIT_THRESHOLD && onSegment <= NAV_NODE_HIT_THRESHOLD)
+        .filter(({ distance, onSegment }) => distance <= pathHitThreshold && onSegment <= pathHitThreshold)
         .sort((left, right) => left.distance - right.distance)[0]?.node;
       if (existingJunction) {
         return commitNavEdgeBetween(startId, existingJunction.id, nodes, edges, pinnedBends);
@@ -13236,7 +11317,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
     });
   }, [buildingId, campus.id, doors, floorId, rooms]);
 
-  const navWaypointAt = useCallback((pt: { x: number; y: number }, options: { includeRoomTarget?: boolean } = {}) => {
+  const navWaypointAt = useCallback((pt: { x: number; y: number }, options: { includeRoomTarget?: boolean; nodeHitThreshold?: number } = {}) => {
     // 1. Resolve a physical Door before nearby free nodes or Room fills. This
     // lets a Door on a slanted/custom Room edge remain an explicit Connect
     // source/target even when the Room polygon contains its hit point.
@@ -13252,7 +11333,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
       return { kind: "node" as const, node };
     }
     // 2. Existing node → select it (or use as connect target).
-    const hit = findNavNodeAtPoint(indoorNodes.filter((node) => !node.roomId), pt);
+    const hit = findIndexedNavNodeAtPoint(waypointHitIndex, pt, options.nodeHitThreshold ?? NAV_NODE_HIT_THRESHOLD);
     if (hit) return { kind: "node" as const, node: hit };
     // 3. Room target → create/reuse its canonical room destination node.
     const room = options.includeRoomTarget === false ? null : findRoomAtPoint(rooms, pt);
@@ -13317,7 +11398,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
     }
     // 5. Free outdoor-style indoor waypoint.
     return { kind: "free" as const, x: pt.x, y: pt.y };
-  }, [buildingId, campus.id, commitNavGraph, createRoomOrDoorNavigationNode, doors, elevators, floorId, indoorEdges, indoorNodes, ramps, rooms, stairs, toast, walls]);
+  }, [buildingId, campus.id, commitNavGraph, createRoomOrDoorNavigationNode, doors, elevators, floorId, indoorEdges, indoorNodes, ramps, rooms, stairs, toast, walls, waypointHitIndex]);
 
   const ensureLinkedNavigationNode = useCallback((kind: "room" | "door" | "stairs" | "elevator" | "ramp", id: string) => {
     const existing = linkedNodeForPhysical(kind, id);
@@ -13572,11 +11653,14 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
   }, [buildingId, campus, floorId, selected]);
 
   const handleNavSvgDown = (e: React.MouseEvent<SVGSVGElement>) => {
+    cancelPendingNavHoverMove();
+    cancelPendingNavEdgeHover();
     if (e.button === 1) { e.preventDefault(); startPan(e); return; }
     if (isSpacePressed()) { e.preventDefault(); startPan(e); return; }
     const target = e.target as SVGElement;
     const isBg = target === svgRef.current || target.dataset.bg === "true" || target.closest?.('[data-bg="true"]') != null;
     const pt = navPointFromEvent(e);
+    const hitRadius = navHitRadiusWorld();
 
     if (navTool === "pan") { if (isBg) startPan(e); return; }
 
@@ -13602,7 +11686,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
         toast.info("Place points on walkable space", "A Veranda or landing must be marked Walkable before it can receive Walking Points.");
         return;
       }
-      const existing = findNavNodeAtPoint(indoorNodes.filter((node) => !node.roomId), pt);
+      const existing = findIndexedNavNodeAtPoint(waypointHitIndex, pt, hitRadius);
       if (existing) {
         selectDuplicateNavNode(existing);
         setNavTool("select");
@@ -13617,13 +11701,12 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
         return;
       }
       // B5 Phase 6.3: check if click is near an existing nav edge for insertion
-      const edgeNodeMap = Object.fromEntries(indoorNodes.map((n) => [n.id, { x: n.x, y: n.y }]));
-      const managedEdgeHit = findNavEdgeAtPoint(walkableIndoorEdges, edgeNodeMap, pt);
+      const managedEdgeHit = findIndexedNavEdgeAtPoint(waypointHitIndex, pt, hitRadius);
       if (managedEdgeHit && !editableIndoorEdges.some((edge) => edge.id === managedEdgeHit.edge.id)) {
         toast.info("This connection is managed", "Entrance, Room, and generated pathway connections cannot be split.");
         return;
       }
-      const edgeHit = findNavEdgeAtPoint(editableIndoorEdges, edgeNodeMap, pt);
+      const edgeHit = findIndexedNavEdgeAtPoint(editableWaypointHitIndex, pt, hitRadius);
       if (edgeHit) {
         // Insert waypoint into existing edge — split it
         const insertNodeBase = createIndoorNavNode({
@@ -13687,7 +11770,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
     }
 
     if (navTool === "connect") {
-      navConnectAtPoint(pt);
+      navConnectAtPoint(pt, undefined, hitRadius);
       return;
     }
   };
@@ -13697,10 +11780,10 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
   const navConnectAtPoint = (
     pt: { x: number; y: number },
     targetEdge?: NavigationEdge,
-    pathTarget?: { edgeId: string; index: number; point: { x: number; y: number } },
+    nodeHitThreshold = NAV_NODE_HIT_THRESHOLD,
   ) => {
     if (!navConnectStart) {
-      const result = navWaypointAt(pt, { includeRoomTarget: false });
+      const result = navWaypointAt(pt, { includeRoomTarget: false, nodeHitThreshold });
       // B5 Phase 2.8: a connection MUST begin by clicking an existing valid
       // routing node (or a linked-location target that becomes one). Clicking
       // EMPTY floor space before a start does NOTHING — no waypoint, no node,
@@ -13718,9 +11801,9 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
     // canonical split semantics as the Walking Point tool, then terminate the
     // new connector at that junction.  Managed/generated paths remain read-only
     // and never become independent manual graph data.
-    // The hovered edge + projected point are the explicit target. Resolve it
-    // before generic waypoint/room hit testing so a nearby endpoint cannot
-    // steal a midpoint click on the path.
+    // An edge hit is an explicit target. Resolve the pointer-down coordinate
+    // before generic waypoint/room hit testing so preview hover state cannot
+    // redirect a fast click to an earlier segment.
     if (targetEdge) {
       const committed = commitNavEdgeToExistingPath(
         navConnectStart,
@@ -13729,14 +11812,12 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
         indoorNodes,
         indoorEdges,
         navConnectBends,
-        pathTarget?.edgeId === targetEdge.id
-          ? { edgeId: targetEdge.id, segmentIndex: pathTarget.index, projectedPoint: pathTarget.point }
-          : undefined,
+        nodeHitThreshold,
       );
       if (committed) setNavTool("select");
       return;
     }
-    const result = navWaypointAt(pt, { includeRoomTarget: false });
+    const result = navWaypointAt(pt, { includeRoomTarget: false, nodeHitThreshold });
     const endId = result.kind === "node" ? result.node.id : null;
     if (endId) {
       // Finish: commit ONE edge carrying every pinned bend (one history action).
@@ -14844,7 +12925,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
     }
   };
 
-  const handleSvgMove = (e: React.MouseEvent<SVGSVGElement>) => {
+  const processSvgMove = (e: React.MouseEvent<SVGSVGElement> | MouseEvent) => {
     if (floorShapeMode) return;
     // A camera pan is view-only. Handle it before coordinate conversion,
     // cursor state, snapping, hit resolution, and any physical/navigation work.
@@ -14855,7 +12936,13 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
       return;
     }
     const pt = getPoint(e, FP_W, FP_H);
-    setCursorPos({ x: Math.round(pt.x), y: Math.round(pt.y) });
+    queueCursorReadout(pt);
+    // These interactions render pointer-following authored geometry. Ordinary
+    // cursor movement only updates the tiny readout above and must not rerender
+    // the full Floor scene.
+    if (calibrationDraft.active || tool === "measure" || roomTemplatePlacement) {
+      setCursorPos({ x: Math.round(pt.x), y: Math.round(pt.y) });
+    }
     const boundedPt = clampFloorShapePoint({ x: Math.round(pt.x), y: Math.round(pt.y) });
 
     if (roomShapeDrag.current) {
@@ -15362,14 +13449,15 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
       // Connect preview follows the pointer; authoring targets highlight live.
       if (navTool === "waypoint" || navTool === "destination" || navTool === "connect" || navTool === "link") {
         const resolvedTarget = resolveNavTargetAt(navWorkspacePt, { includeRoom: navTool === "link" });
-        setNavTargetHover(resolvedTarget);
+        setNavTargetHover((previous) => previous?.kind === resolvedTarget?.kind && previous?.id === resolvedTarget?.id
+          && previous?.x === resolvedTarget?.x && previous?.y === resolvedTarget?.y
+          ? previous : resolvedTarget);
       } else {
         setNavTargetHover(null);
       }
       // B5 Phase 6.4: detect edge snap for waypoint insertion in Floor Editor
       if (navTool === "waypoint" || navTool === "destination") {
-        const edgeNodeMap = Object.fromEntries(indoorNodes.map((n) => [n.id, { x: n.x, y: n.y }]));
-        const edgeHit = findNavEdgeAtPoint(editableIndoorEdges, edgeNodeMap, pt);
+        const edgeHit = findIndexedNavEdgeAtPoint(editableWaypointHitIndex, pt, navHitRadiusWorld());
         setFloorEdgeSnap(edgeHit ? { edgeId: edgeHit.edge.id, nearest: edgeHit.nearest } : null);
       } else {
         setFloorEdgeSnap(null);
@@ -15381,7 +13469,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
         // tests/trackpads may dispatch move events on the SVG rather than the
         // node group), so the guide must not depend on a stale hover id.
         const hoveredNode = (navNodeHover ? indoorNodes.find((node) => node.id === navNodeHover && !node.roomId) : undefined)
-          ?? findNavNodeAtPoint(indoorNodes.filter((node) => !node.roomId), navWorkspacePt);
+          ?? findIndexedNavNodeAtPoint(waypointHitIndex, navWorkspacePt, navHitRadiusWorld());
         const livePhysicalTarget = resolveNavTargetAt(navWorkspacePt, { includeRoom: false })
           ?? (navTargetHover?.kind === "room" ? null : navTargetHover);
         const hoveredLinkedNode = !hoveredNode && livePhysicalTarget
@@ -15398,8 +13486,8 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
             8,
             new Set([startNode.id]),
           );
-          setNavPreview({ x: targetNode.x, y: targetNode.y });
-          setNavAlignGuides(aligned.guides);
+          setNavPreviewIfChanged({ x: targetNode.x, y: targetNode.y });
+          setNavAlignGuidesIfChanged(aligned.guides);
         } else if (startNode) {
           // Empty-space Connect uses the same pin helper as click/commit, so
           // hover guides and the eventual bend geometry stay identical.
@@ -15416,11 +13504,11 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
             hostedZone ? undefined : renderFloorShapeRegions,
           );
           const previewPoint = geo.pins[geo.pins.length - 1] ?? candidate;
-          setNavPreview(previewPoint);
-          setNavAlignGuides(geo.snapped ? geo.guides : []);
+          setNavPreviewIfChanged(previewPoint);
+          setNavAlignGuidesIfChanged(geo.snapped ? geo.guides : []);
         } else {
-          setNavPreview(navWorkspacePt);
-          setNavAlignGuides([]);
+          setNavPreviewIfChanged(navWorkspacePt);
+          setNavAlignGuidesIfChanged([]);
         }
       }
       // Nav marquee (rubber band over graph elements).
@@ -17185,7 +15273,32 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
     );
   };
 
+  const processSvgMoveRef = useRef(processSvgMove);
+  processSvgMoveRef.current = processSvgMove;
+  const handleSvgMove = (e: React.MouseEvent<SVGSVGElement>) => {
+    // Hover previews are display-only. Process them at most once per browser
+    // frame, always using the newest pointer sample. Authoring clicks and all
+    // active object drags still consume their own immediate pointer events.
+    const frameCoalescedNavHover = navMode
+      && (navTool === "waypoint" || navTool === "destination" || navTool === "connect" || navTool === "link")
+      && !panning.current;
+    if (!frameCoalescedNavHover) {
+      processSvgMove(e);
+      return;
+    }
+    latestNavHoverPointerRef.current = { clientX: e.clientX, clientY: e.clientY, shiftKey: e.shiftKey };
+    if (navHoverMoveFrameRef.current !== null) return;
+    navHoverMoveFrameRef.current = requestAnimationFrame(() => {
+      navHoverMoveFrameRef.current = null;
+      const latest = latestNavHoverPointerRef.current;
+      latestNavHoverPointerRef.current = null;
+      if (latest) processSvgMoveRef.current(latest as MouseEvent);
+    });
+  };
+
   const handleSvgUp = () => {
+    cancelPendingNavHoverMove();
+    cancelPendingNavEdgeHover();
     if (floorShapeMode) return;
     if (floorResizeGestureRef.current) {
       floorResizeGestureRef.current = null;
@@ -19002,7 +17115,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
   // overlay so later-painted Rooms/status layers cannot cover it and canvas
   // zoom never scales the content.
   const quickNavOverlay = (() => {
-    if (!quickNavOpenKey || routePreview || highlightedRoute || testRouteSessionContext.session?.result) return null;
+    if (!quickNavOpenKey || routePreview || highlightedRoute || hasTestRouteResult) return null;
     const separator = quickNavOpenKey.indexOf(":");
     if (separator < 0) return null;
     const quickKind = quickNavOpenKey.slice(0, separator) as "stairs" | "elevator";
@@ -19320,7 +17433,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
                   if (testNavOpen) {
                     cancelElevatorTransition();
                     setTestNavOpen(false);
-                    testRouteSessionContext.setSession(null);
+                    testRouteSessionActions.setSession(null);
                     setTestRouteCompact(false);
                     setHighlightedRoute(null);
                     setTestRoutePickKind(null);
@@ -19404,7 +17517,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
                   if (testNavOpen) {
                     cancelElevatorTransition();
                     setTestNavOpen(false);
-                    testRouteSessionContext.setSession(null);
+                    testRouteSessionActions.setSession(null);
                     setTestRouteCompact(false);
                     setHighlightedRoute(null);
                     setTestRoutePickKind(null);
@@ -20120,13 +18233,8 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
               {orderedExteriorZones.map((zone) => {
                 const g = exteriorZoneGeometry(zone, renderFloorW, renderFloorH);
                 const isSel = selected?.type === "exteriorZone" && selected.id === zone.id;
-                const fill = zone.type === "veranda" ? "#d9c5a1" : zone.type === "entrance_landing" ? "#cbd5e1" : zone.type === "covered_walkway" ? "#b8c8d8" : "#d1d5db";
                 return <g key={zone.id} data-testid="exterior-zone" data-floor-title={zone.label ?? exteriorZoneTypeLabel(zone.type)} aria-label={zone.label ?? exteriorZoneTypeLabel(zone.type)} onMouseDown={(e) => onItemDown(e, "exteriorZone", zone.id, zone)} onContextMenu={(e) => onItemContextMenu(e, "exteriorZone", zone.id)} style={{ cursor: tool === "select" ? "move" : cursor }} opacity={zone.visible === false ? 0.35 : 1}>
-                  <rect x={g.x} y={g.y} width={g.width} height={g.height} rx={4} fill={fill} fillOpacity={0.78} stroke={isSel && !connectToolActive ? "var(--accent)" : "#64748b"} strokeWidth={isSel && !connectToolActive ? 2.5 : 1.5} strokeDasharray={zone.type === "covered_walkway" ? "6 3" : undefined} />
-                  <line x1={g.x + 8} y1={g.y + 8} x2={g.x + g.width - 8} y2={g.y + 8} stroke="rgba(255,255,255,0.6)" strokeWidth={1} />
-                  {zone.labelVisible !== false && (
-                    <text x={g.x + g.width / 2 + (zone.labelOffsetX ?? 0)} y={g.y + g.height / 2 + 3 + (zone.labelOffsetY ?? 0)} textAnchor="middle" fontSize={9} fontWeight={800} fill="#334155" pointerEvents="none">{zone.label ?? exteriorZoneTypeLabel(zone.type)}</text>
-                  )}
+                  <FloorExteriorZoneArtwork zone={zone} bounds={g} selected={isSel && !connectToolActive} />
                 </g>;
               })}
               {orderedEntranceSteps.map((item) => {
@@ -20135,7 +18243,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
                 const geometry = parent ? exteriorZoneAccessFeatureGeometry(parent, item, renderFloorW, renderFloorH) : { x: item.x, y: item.y, width: item.width, height: item.height };
                 const featureEdge = parent ? geometry.side : "bottom";
                 return <g key={item.id} data-testid="entrance-steps" data-edge={featureEdge} onMouseDown={(e) => onItemDown(e, "entranceSteps", item.id, item)} opacity={item.visible === false ? 0.35 : 1}>
-                  <ExteriorEntranceStepsSymbol bounds={geometry} side={featureEdge} selected={isSel && !connectToolActive} routeActive={activeExteriorFeatureIds.has(item.id)} routeColor={highlightedRoute?.color} direction={item.direction} flipHorizontal={item.flipHorizontal} flipVertical={item.flipVertical} />
+                  <FloorEntranceStepsArtwork bounds={geometry} side={featureEdge} selected={isSel && !connectToolActive} routeActive={activeExteriorFeatureIds.has(item.id)} routeColor={highlightedRoute?.color} direction={item.direction} flipHorizontal={item.flipHorizontal} flipVertical={item.flipVertical} />
                 </g>;
               })}
               {orderedEntranceRamps.map((item) => {
@@ -20144,7 +18252,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
                 const geometry = parent ? exteriorZoneAccessFeatureGeometry(parent, item, renderFloorW, renderFloorH) : { x: item.x, y: item.y, width: item.width, height: item.height };
                 const featureEdge = parent ? geometry.side : "bottom";
                 return <g key={item.id} data-testid="entrance-ramp" data-edge={featureEdge} onMouseDown={(e) => onItemDown(e, "entranceRamp", item.id, item)} opacity={item.visible === false ? 0.35 : 1}>
-                  <ExteriorAccessibleRampSymbol bounds={geometry} side={featureEdge} selected={isSel && !connectToolActive} routeActive={activeExteriorFeatureIds.has(item.id)} routeColor={highlightedRoute?.color} direction={item.direction} layout={item.layout} flipHorizontal={item.flipHorizontal} flipVertical={item.flipVertical} rotation={item.rotation ?? 0} />
+                  <FloorAccessibleRampArtwork bounds={geometry} side={featureEdge} selected={isSel && !connectToolActive} routeActive={activeExteriorFeatureIds.has(item.id)} routeColor={highlightedRoute?.color} direction={item.direction} layout={item.layout} flipHorizontal={item.flipHorizontal} flipVertical={item.flipVertical} rotation={item.rotation ?? 0} />
                 </g>;
               })}
 
@@ -20197,9 +18305,6 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
 
               {/* ═══ WALLS ═══ */}
               {orderedRooms.map((room) => {
-                const rt = ROOM_MAP[room.type] ?? ROOM_MAP.classroom;
-                const roomFill = room.color ?? rt.fill;
-                const roomStroke = room.color ?? rt.stroke;
                 const isSel = (selected?.type === "room" && selected.id === room.id) || multiSelected.includes(room.id);
                 const roomAccessDoors = roomAccessDoorIds(room).map((id) => doors.find((door) => door.id === id)).filter((door): door is NonNullable<typeof door> => !!door);
                 const roomPickReady = !!testRoutePickKind && roomAccessDoors.some((roomDoor) => {
@@ -20224,22 +18329,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
                     style={{ cursor: tool === "select" ? room.locked ? "default" : "move" : cursor }}>
                     <g transform={customPoints ? undefined : `rotate(${rotation}, ${cx}, ${cy})`} clipPath={`url(#${floorClipId})`}>
                       {roomPickReady && (customPoints ? <path d={customPath} fill={roomPickHover ? "rgba(139,92,246,0.14)" : "none"} stroke="#8b5cf6" strokeWidth={roomPickHover ? 3 : 1.5} strokeDasharray={roomPickHover ? undefined : "5 4"} className="pointer-events-none" /> : <rect x={room.x - 5} y={room.y - 5} width={room.w + 10} height={room.h + 10} rx={3} fill={roomPickHover ? "rgba(139,92,246,0.14)" : "none"} stroke="#8b5cf6" strokeWidth={roomPickHover ? 3 : 1.5} strokeDasharray={roomPickHover ? undefined : "5 4"} className="pointer-events-none" />)}
-                      {customPoints ? (
-                        <path data-testid="room-custom-shape" d={customPath}
-                          fill={roomFill}
-                          fillOpacity={isSel ? 0.72 : 0.58}
-                          stroke={isOverlap ? "#dc2626" : isSel ? "var(--accent)" : roomStroke}
-                          strokeWidth={isOverlap ? 2.5 : isSel ? 2 : 1}
-                          strokeDasharray={isOverlap ? "4 2" : undefined} />
-                      ) : (
-                        <rect x={room.x} y={room.y} width={room.w} height={room.h} rx={1}
-                           fill={roomFill}
-                          fillOpacity={isSel ? 0.72 : 0.58}
-                          stroke={isOverlap ? "#dc2626" : isSel ? "var(--accent)" : roomStroke}
-                          strokeWidth={isOverlap ? 2.5 : isSel ? 2 : 1}
-                          strokeDasharray={isOverlap ? "4 2" : undefined} />
-                      )}
-                      {customPoints ? <line x1={customPoints[0].x} y1={customPoints[0].y} x2={customPoints[1].x} y2={customPoints[1].y} stroke="rgba(0,0,0,0.06)" strokeWidth={1.5} /> : <line x1={room.x + 1} y1={room.y + 1} x2={room.x + room.w - 1} y2={room.y + 1} stroke="rgba(0,0,0,0.06)" strokeWidth={1.5} />}
+                      <FloorRoomArtwork room={room} selected={isSel} overlap={isOverlap} />
                     </g>
                     {room.locked && (
                       <g transform={`translate(${room.x + room.w - 10}, ${room.y + 4}) rotate(${rotation}, 4, 4)`} className="pointer-events-none">
@@ -20293,7 +18383,6 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
                 const isSel = selectableWall && ((selected?.type === "wall" && selected.id === wall.id) || multiSelected.includes(wall.id));
                 const isWallLengthMatchTarget = Boolean(wallLengthMatchMode && wall.id !== wallLengthMatchMode.sourceWallId && selectableWall);
                 const isWallLengthMatchHover = isWallLengthMatchTarget && wallLengthMatchHoverId === wall.id;
-                const materialStyle = wallMaterialStyle(wall.material);
                 const label = wallLengthLabelPosition(wall);
                 // B7 Part G: wall-drawing mode makes wall SVG groups non-interactive
                 // so the completion click always reaches the SVG background handler
@@ -20323,14 +18412,8 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
                         stroke="var(--accent)" strokeWidth={wall.thickness + 6} opacity={0.3}
                         strokeLinecap="round" />
                     )}
-                    {/* Wall body */}
-                    <line x1={wall.x1} y1={wall.y1} x2={wall.x2} y2={wall.y2}
-                      stroke={canRenderManagedPerimeterAsPath && !selectableWall ? "none" : materialStyle.casing} strokeWidth={wall.thickness + 2}
-                      strokeLinecap="butt" strokeLinejoin="round" opacity={materialStyle.casingOpacity}
-                      strokeDasharray={materialStyle.dash} />
-                    <line x1={wall.x1} y1={wall.y1} x2={wall.x2} y2={wall.y2}
-                      stroke={canRenderManagedPerimeterAsPath && !selectableWall ? "none" : wall.color} strokeWidth={wall.thickness}
-                      strokeLinecap="butt" strokeLinejoin="round" opacity={materialStyle.coreOpacity} />
+                    {/* Shared physical Wall artwork; selection and edit handles stay in the editor layer. */}
+                    <FloorWallArtwork wall={wall} suppressPerimeter={canRenderManagedPerimeterAsPath && !selectableWall} />
                     {/* Selection handles */}
                     {isSel && editableMultiCount <= 1 && !wall.locked && !isManagedPerimeterWall(wall) && (
                       <>
@@ -21102,7 +19185,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
                           : quickTargets.length > 0)
                           && !routePreview
                           && !highlightedRoute
-                          && !testRouteSessionContext.session?.result;
+                          && !hasTestRouteResult;
                         if (!quickNavVisible) return null;
                         const quickOpen = quickNavOpenKey === quickKey;
                         const indicator = exteriorVisualBounds
@@ -21379,7 +19462,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
                     onContextMenu={(e) => onItemContextMenu(e, "path", p.id)}
                     style={{ cursor: tool === "erase" ? "not-allowed" : "pointer" }}>
                     {isSel && <polyline points={pts} fill="none" stroke="var(--accent)" strokeWidth={p.width + 4} strokeLinecap="round" opacity={0.4} />}
-                    <polyline points={pts} fill="none" stroke={p.color} strokeWidth={p.width} strokeLinecap="round" opacity={0.8} />
+                    <FloorPathArtwork path={p} />
                   </g>
                 );
               })}
@@ -21437,7 +19520,6 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
                 const bounds = labelBounds(lb);
                 const editorValue = isEditingLabel ? inlineLabelEdit.value : lb.text;
                 const editorBounds = inlineLabelEditorBounds(lb, editorValue, FP_W, FP_H);
-                const anchor = lb.align === "center" ? "middle" : lb.align === "right" ? "end" : "start";
                 const hitPad = Math.max(4, Math.min(8, 7 / zoom));
                 const handleSize = Math.max(4, Math.min(7, 6 / zoom));
                 const rotateOffset = Math.max(14, Math.min(24, (bounds.h + 18) / zoom));
@@ -21513,12 +19595,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
                           className="pointer-events-none"
                         />
                       )}
-                      {!isEditingLabel && (
-                        <text x={lb.x} y={lb.y} textAnchor={anchor} fill={lb.color} fontSize={lb.fontSize} fontWeight="600"
-                          className="pointer-events-none select-none">
-                          {lb.text}
-                        </text>
-                      )}
+                      {!isEditingLabel && <FloorLabelArtwork label={lb} />}
                       {isSingleLabelSelection && !isEditingLabel && (
                         <>
                           <line
@@ -21625,7 +19702,6 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
                   const cy = room.y + room.h / 2;
                   const customPoints = Array.isArray(room.shapePoints) && room.shapePoints.length >= 3 ? roomOutlinePoints(room) : null;
                   const customPath = customPoints ? roomShapePath(customPoints) : "";
-                  const label = roomHeaderLabelLayout(room);
                   const isSelected = (selected?.type === "room" && selected.id === room.id) || multiSelected.includes(room.id);
                   const isHovered = roomHoverId === room.id || (testRoutePickHover?.type === "room" && testRoutePickHover.id === room.id);
                   const showBoundaryCue = isSelected || isHovered;
@@ -21640,45 +19716,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
                   const outlineH = Math.max(1, room.h - topInset - bottomInset);
                   return (
                     <g key={`room-ui-${room.id}`} opacity={visibleOpacity(room)}>
-                      <g
-                        data-testid="room-label-overlay"
-                        data-room-id={room.id}
-                        className="pointer-events-none select-none"
-                        style={{ opacity: isSelected ? 1 : isHovered ? 0.95 : 0.78, transition: "opacity 150ms ease, fill-opacity 150ms ease" }}
-                      >
-                          <rect
-                            x={label.labelX - label.labelWidth / 2}
-                            y={label.labelY}
-                            width={label.labelWidth}
-                            height={label.labelHeight}
-                            rx={3}
-                            fill="#ffffff"
-                            fillOpacity={isSelected || isHovered ? 0.96 : 0.88}
-                            stroke={rt.stroke}
-                            strokeOpacity={isSelected || isHovered ? 0.72 : 0.42}
-                            strokeWidth={0.8}
-                          />
-                          <text
-                            x={label.labelX}
-                            y={label.labelY + label.labelHeight / 2}
-                            textAnchor="middle"
-                            dominantBaseline="middle"
-                            fill={rt.text}
-                            fontSize={label.fontSize}
-                            fontWeight="600"
-                            fontFamily="var(--font-sans)"
-                          >
-                            {label.labelLines.map((line, index) => (
-                              <tspan
-                                key={`${room.id}-label-line-${index}`}
-                                x={label.labelX}
-                                y={roomLabelLineCenterY(label.labelY + label.labelHeight / 2, index, label.labelLines.length, label.lineHeight)}
-                              >
-                                {line}
-                              </tspan>
-                            ))}
-                          </text>
-                      </g>
+                      <FloorRoomLabelArtwork room={room} emphasized={isSelected || isHovered} opacity={isSelected ? 1 : isHovered ? 0.95 : 0.78} />
                       {showBoundaryCue && (
                         <g transform={customPoints ? undefined : `rotate(${rotation}, ${cx}, ${cy})`}>
                           {customPoints ? (
@@ -22142,6 +20180,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
                             onMouseMove={(e) => handleNavEdgeMove(e, edge)}
                             onMouseEnter={() => { if (navTool === "erase") setNavEraseHover({ type: "edge", id: edge.id }); }}
                             onMouseLeave={() => {
+                              cancelPendingNavEdgeHover(edge.id);
                               setNavEraseHover((h) => h?.type === "edge" && h.id === edge.id ? null : h);
                               setNavSegmentHover((h) => (h?.edgeId === edge.id ? null : h));
                               setNavPathTargetHover((h) => (h?.edgeId === edge.id ? null : h));
@@ -22153,6 +20192,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
                             onMouseMove={(e) => handleNavEdgeMove(e, edge)}
                             onMouseEnter={() => { if (navTool === "erase") setNavEraseHover({ type: "edge", id: edge.id }); }}
                             onMouseLeave={() => {
+                              cancelPendingNavEdgeHover(edge.id);
                               setNavEraseHover((h) => h?.type === "edge" && h.id === edge.id ? null : h);
                               setNavSegmentHover((h) => (h?.edgeId === edge.id ? null : h));
                               setNavPathTargetHover((h) => (h?.edgeId === edge.id ? null : h));
@@ -22768,33 +20808,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
               {highlightedRoute && (
                 <>
                   {!!highlightedRoute.routeNodeIds?.length && (highlightedRoute.waypointFragments ?? [highlightedRoute.waypoints]).some((fragment) => fragment.length > 0) && (
-                    <g data-testid="floor-test-route-active-overlay" className="pointer-events-none">
-                      {(highlightedRoute.waypointFragments ?? [highlightedRoute.waypoints]).map((fragment, fragmentIndex) => {
-                        const clippedFragment = trimRouteFragmentAtMarkerBoundary(fragment, highlightedRouteMarkerPoints, zoom);
-                        if (clippedFragment.length === 0) return null;
-                        return (
-                        <g key={`floor-active-route-fragment-${fragmentIndex}`}>
-                          <polyline
-                            points={clippedFragment.map((point) => `${point.x},${point.y}`).join(" ")}
-                            fill="none" stroke={highlightedRoute.color} strokeWidth={8}
-                            strokeLinecap="round" strokeLinejoin="round" opacity={0.28}
-                          />
-                          <polyline
-                            points={clippedFragment.map((point) => `${point.x},${point.y}`).join(" ")}
-                            fill="none" stroke={highlightedRoute.color} strokeWidth={4}
-                            strokeLinecap="round" strokeLinejoin="round" strokeDasharray="12 8" opacity={1}
-                          >
-                            <animate attributeName="stroke-dashoffset" from="0" to="-40" dur="1.2s" repeatCount="indefinite" />
-                          </polyline>
-                          {floorRouteArrowPoints(clippedFragment).map((marker, index) => (
-                            <path key={`floor-active-route-arrow-${fragmentIndex}-${index}`} d="M -5 -4 L 5 0 L -5 4 Z"
-                              transform={`translate(${marker.x} ${marker.y}) rotate(${marker.angle})`}
-                              fill={highlightedRoute.color} stroke="white" strokeWidth={1} />
-                          ))}
-                        </g>
-                        );
-                      })}
-                    </g>
+                    <FloorTestRouteOverlay route={highlightedRoute} />
                   )}
                   {(highlightedRoute.endpointMarkers ?? []).map((marker) => (
                     <RouteEndpointMarker key={`floor-route-endpoint-${marker.kind}`} {...marker} color={highlightedRoute.color} />
@@ -23369,12 +21383,13 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
                   {multiSelected.length} selected
                 </div>
               )}
-              {cursorPos && (
-                <div className="flex items-center gap-1 px-2 py-0.5 rounded-full border border-border/60 text-[9px] font-mono"
-                  style={{ background: "color-mix(in srgb,var(--card) 85%,transparent)", backdropFilter: "blur(8px)" }}>
-                  X:{cursorPos.x} Y:{cursorPos.y}
-                </div>
-              )}
+              <div
+                ref={cursorReadoutRef}
+                data-testid="floor-cursor-coordinates"
+                aria-label="Floor cursor coordinates"
+                className="flex items-center gap-1 px-2 py-0.5 rounded-full border border-border/60 text-[9px] font-mono"
+                style={{ background: "color-mix(in srgb,var(--card) 85%,transparent)", backdropFilter: "blur(8px)" }}
+              />
             </div>
             <div className="flex items-center gap-2">
               <span ref={(element) => { zoomReadoutRefs.current[0] = element; }} className="text-[10px] font-mono text-muted-foreground/70 tabular-nums">{Math.round(zoom * 100)}%</span>
@@ -23497,8 +21512,8 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
                     handleBack();
                   }}
                   onRouteTransitionCancel={cancelElevatorTransition}
-                  onClose={() => { cancelElevatorTransition(); setTestNavOpen(false); testRouteSessionContext.setSession(null); setTestRouteCompact(false); setHighlightedRoute(null); setTestRoutePickKind(null); setTestRouteMapPick(null); setTestRoutePickHover(null); }}
-                  currentContext={{ kind: "floor", buildingId, floorId }}
+                  onClose={() => { cancelElevatorTransition(); setTestNavOpen(false); testRouteSessionActions.setSession(null); setTestRouteCompact(false); setHighlightedRoute(null); setTestRoutePickKind(null); setTestRouteMapPick(null); setTestRoutePickHover(null); }}
+                  currentContext={testRouteContext}
                 />
               </motion.div>
             )}

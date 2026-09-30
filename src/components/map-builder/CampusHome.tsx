@@ -78,6 +78,7 @@ export interface CampusHomeProps {
   onDuplicate?: (id: string) => void | Promise<void>;
   onTogglePublish?: (id: string, force?: "publish" | "unpublish") => void | Promise<void>;
   onUnpublish?: (id: string) => void | Promise<void>;
+  onHideComingSoon?: (id: string) => void | Promise<void>;
   onArchive?: (id: string) => void | Promise<void>;
   onRestore?: (id: string) => void | Promise<void>;
   onBulkRestore?: (ids: string[]) => void | Promise<void>;
@@ -120,6 +121,7 @@ export interface BulkDeleteResult {
 const STATUS_FILTERS: { id: CampusStatusFilter; label: string }[] = [
   { id: "all", label: "All" },
   { id: "published", label: "Published" },
+  { id: "coming_soon", label: "Coming Soon" },
   { id: "draft", label: "Draft" },
   { id: "never", label: "Never Published" },
   { id: "archived", label: "Archived" },
@@ -245,7 +247,7 @@ function CampusDetailsDialog({
   const published = campus.publishStatus === "published";
   const statusLabel = campus.status === "archived"
     ? "Archived"
-    : published ? "Published" : campus.lifecycleStatus === "unpublished" || campus.publishedAt ? "Draft" : "Never Published";
+    : published ? "Published" : campus.lifecycleStatus === "coming_soon" ? "Coming Soon" : campus.lifecycleStatus === "unpublished" || campus.publishedAt ? "Draft" : "Draft";
   const coverImage = campus.thumbnail || campus.overviewImagePath;
   return createPortal(
     <motion.div
@@ -432,6 +434,7 @@ function QuickActions({
   onDuplicate,
   onTogglePublish,
   onUnpublish,
+  onHideComingSoon,
   onArchive,
   onRestore,
   onPermanentDelete,
@@ -444,6 +447,7 @@ function QuickActions({
   onDuplicate?: (id: string) => void | Promise<void>;
   onTogglePublish?: (id: string, force?: "publish" | "unpublish") => void | Promise<void>;
   onUnpublish?: (id: string) => void | Promise<void>;
+  onHideComingSoon?: (id: string) => void | Promise<void>;
   onArchive?: (id: string) => void | Promise<void>;
   onRestore?: (id: string) => void | Promise<void>;
   onPermanentDelete?: (id: string) => void | Promise<void>;
@@ -671,6 +675,14 @@ function QuickActions({
         action: () => {
           setOpen(false);
           setPublishConfirm({ id: campus.id, action: isPublished ? "unpublish" : "publish", name: campus.name });
+        },
+      }] : []),
+      ...(campus.lifecycleStatus === "coming_soon" && onHideComingSoon ? [{
+        icon: EyeOff,
+        label: "Hide from Students",
+        action: () => {
+          setOpen(false);
+          void onHideComingSoon(campus.id);
         },
       }] : []),
       ...(onArchive && campus.status !== "archived" ? [{
@@ -970,6 +982,7 @@ export function CampusHome({
   onDuplicate,
   onTogglePublish,
   onUnpublish,
+  onHideComingSoon,
   onArchive,
   onRestore,
   onBulkRestore,
@@ -1099,7 +1112,7 @@ export function CampusHome({
   const selectedArchived = [...selectedArchivedIds];
   const allArchivedSelected = archivedVisible.length > 0 && archivedVisible.every((campus) => selectedArchivedIds.has(campus.id));
   const statusCounts: Record<CampusStatusFilter, number> = {
-    all: campuses.length, published: 0, draft: 0, never: 0, archived: 0,
+    all: campuses.length, published: 0, coming_soon: 0, draft: 0, never: 0, archived: 0,
   };
   for (const c of campuses) statusCounts[campusStatusOf(c)]++;
   const isFiltering = q.length > 0 || statusFilter !== "all";
@@ -1390,6 +1403,8 @@ export function CampusHome({
                           "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold border shadow-sm backdrop-blur-sm",
                           campus.publishStatus === "published"
                             ? "bg-green-50/90 dark:bg-green-900/25 border-green-200 dark:border-green-700/30 text-green-700 dark:text-green-400"
+                            : campus.lifecycleStatus === "coming_soon"
+                              ? "bg-sky-50/90 dark:bg-sky-900/25 border-sky-200 dark:border-sky-700/30 text-sky-700 dark:text-sky-300"
                             : campus.lifecycleStatus === "unpublished" || campus.publishedAt
                               ? "bg-amber-50/90 dark:bg-amber-900/20 border-amber-200 dark:border-amber-700/30 text-amber-700 dark:text-amber-400"
                               : "bg-slate-50/90 dark:bg-slate-800/20 border-slate-200 dark:border-slate-700/30 text-slate-500 dark:text-slate-400"
@@ -1397,10 +1412,12 @@ export function CampusHome({
                       >
                         {campus.publishStatus === "published" ? (
                           <><Globe className="h-2.5 w-2.5" /> Published</>
+                        ) : campus.lifecycleStatus === "coming_soon" ? (
+                          <><Clock className="h-2.5 w-2.5" /> Coming Soon</>
                         ) : campus.lifecycleStatus === "unpublished" || campus.publishedAt ? (
                           <><Clock className="h-2.5 w-2.5" /> Draft</>
                         ) : (
-                          <><Clock className="h-2.5 w-2.5" /> Never Published</>
+                          <><Clock className="h-2.5 w-2.5" /> Draft</>
                         )}
                       </span>
                       {campus.visibleToStudents && campus.publishStatus === "published" && (
@@ -1418,6 +1435,7 @@ export function CampusHome({
                         onDuplicate={onDuplicate}
                         onTogglePublish={onTogglePublish}
                         onUnpublish={onUnpublish}
+                        onHideComingSoon={onHideComingSoon}
                         onArchive={onArchive}
                         onEditDetails={onEditDetails}
                         onViewDetails={openCampusDetails}

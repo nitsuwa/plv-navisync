@@ -34,17 +34,17 @@ const STYLES: Record<
  */
 export function EmergencyBanner() {
   const alert = useEmergencyAlert();
-  const [dismissed, setDismissed] = useState(() => {
-    try { return sessionStorage.getItem("emergency-dismissed") === "1"; } catch { return false; }
+  const [dismissedId, setDismissedId] = useState(() => {
+    try { return sessionStorage.getItem("emergency-dismissed-id") ?? ""; } catch { return ""; }
   });
 
   useEffect(() => {
-    if (dismissed) {
-      try { sessionStorage.setItem("emergency-dismissed", "1"); } catch {}
+    if (dismissedId) {
+      try { sessionStorage.setItem("emergency-dismissed-id", dismissedId); } catch {}
     }
-  }, [dismissed]);
+  }, [dismissedId]);
 
-  const show = alert.active && !dismissed;
+  const show = alert.active && Boolean(alert.id) && alert.id !== dismissedId;
   const style = STYLES[alert.level];
   const Icon = style.icon;
 
@@ -66,7 +66,7 @@ export function EmergencyBanner() {
               {alert.message}
             </p>
             <button
-              onClick={() => setDismissed(true)}
+              onClick={() => alert.id && setDismissedId(alert.id)}
               aria-label="Dismiss emergency alert"
               className={cn(
                 "shrink-0 w-6 h-6 rounded-full flex items-center justify-center opacity-80 hover:opacity-100 active:scale-90 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60",

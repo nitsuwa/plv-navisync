@@ -19,7 +19,7 @@ import {
 } from "../services/dashboardService";
 import { reportService } from "../services/reportService";
 import { campusService } from "../services/campusService";
-import { readableActionLabel, timeAgoLabel } from "../services/activityLogService";
+import { timeAgoLabel } from "../services/activityLogService";
 
 // ── Quick actions (all links valid) ───────────────────────────────────────
 
@@ -263,12 +263,12 @@ export function AdminDashboardPage() {
                     <Clock className="h-3.5 w-3.5" />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-xs font-bold text-foreground">{readableActionLabel(item.action)}</p>
+                    <p className="text-xs font-bold text-foreground">{item.formatted.title}</p>
                     <p className="text-[10px] text-muted-foreground truncate mt-0.5">
-                      {item.actorName ?? "System"} · {item.entityType ?? "system"}
+                      {item.formatted.description}
                     </p>
                   </div>
-                  <span className="text-[10px] text-muted-foreground font-mono shrink-0">{timeAgoLabel(item.createdAt)}</span>
+                  <span className="shrink-0 text-[10px] text-muted-foreground">{item.formatted.relativeTime}</span>
                 </div>
               ))
             ) : (

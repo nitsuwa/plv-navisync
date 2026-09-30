@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect, useId, type ChangeEvent } from "react";
 import { createPortal } from "react-dom";
-import { X, MapPin, Eye, EyeOff, CheckCircle2, ChevronRight, ChevronLeft, Palette, Image, Building2, Shield, Pencil, Loader2, AlertCircle, TriangleAlert, ChevronDown, Save, AlertTriangle } from "lucide-react";
+import { X, MapPin, EyeOff, Clock, CheckCircle2, ChevronRight, ChevronLeft, Palette, Image, Building2, Shield, Pencil, Loader2, AlertCircle, TriangleAlert, ChevronDown, Save, AlertTriangle } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { genId, THEME_COLORS } from "./constants";
 import { MapPicker } from "../ui/MapPicker";
@@ -240,7 +240,6 @@ interface CampusWizardProps {
   onFinish: (campus: Campus) => boolean | Promise<boolean>;
   onClose: () => void;
   onJumpToStep?: (step: 1 | 2 | 3 | 4) => void;
-  publishingEnabled?: boolean;
 }
 
 // ── Saving overlay (mimics LoadingScreen style) ──────────────────────────────
@@ -352,7 +351,7 @@ function SaveConfirmDialog({ open, campusName, onConfirm, onCancel }: {
   );
 }
 
-export function CampusWizard({ draft, step, onNext, onBack, onFinish, onClose, onJumpToStep, publishingEnabled = true }: CampusWizardProps) {
+export function CampusWizard({ draft, step, onNext, onBack, onFinish, onClose, onJumpToStep }: CampusWizardProps) {
   const uid = useId();
 
   // ── Step 1: Identity ──────────────────────────────────────────────────────
@@ -376,8 +375,9 @@ export function CampusWizard({ draft, step, onNext, onBack, onFinish, onClose, o
   const logoInputRef = useRef<HTMLInputElement>(null);
 
   // ── Visibility (shown on Review page) ────────────────────────────────────
-  const [publishStatus, setPublishStatus] = useState<"draft" | "published">(draft.publishStatus ?? "draft");
-  const [visibleToStudents, setVisibleToStudents] = useState(draft.visibleToStudents ?? false);
+  const [lifecycleStatus, setLifecycleStatus] = useState<"draft" | "coming_soon">(
+    draft.lifecycleStatus === "coming_soon" ? "coming_soon" : "draft",
+  );
 
   // ── Track which steps have actually been completed (user clicked Continue) ──
   const [completedSteps, setCompletedSteps] = useState<Set<number>>(new Set());
@@ -407,7 +407,7 @@ export function CampusWizard({ draft, step, onNext, onBack, onFinish, onClose, o
     postalCode !== (base.postalCode ?? "") || latStr !== draftLat || lngStr !== draftLng ||
     thumbnail !== (base.thumbnail ?? null) || logo !== (base.logo ?? null) ||
     themeColor !== (base.themeColor ?? "#1e3a5f") ||
-    publishStatus !== (base.publishStatus ?? "draft") || visibleToStudents !== (base.visibleToStudents ?? false);
+    lifecycleStatus !== (base.lifecycleStatus === "coming_soon" ? "coming_soon" : "draft");
 
   const handleClose = useCallback(() => {
     if (hasChanges) {
@@ -593,8 +593,9 @@ export function CampusWizard({ draft, step, onNext, onBack, onFinish, onClose, o
       logo: logo ?? undefined,
       themeColor: themeColor ?? undefined,
       status: "active",
-      publishStatus: publishStatus,
-      visibleToStudents: visibleToStudents,
+      publishStatus: "draft",
+      lifecycleStatus,
+      visibleToStudents: lifecycleStatus === "coming_soon",
       features: draft.features ?? { indoorNavigation: false, accessibilityNavigation: false, emergencyRoutes: false, issueReporting: false },
       canvasW: isEditing ? (draft.canvasW ?? 900) : 900,
       canvasH: isEditing ? (draft.canvasH ?? 680) : 680,
@@ -1235,47 +1236,47 @@ export function CampusWizard({ draft, step, onNext, onBack, onFinish, onClose, o
                     </p>
                   </div>
                   <div>
-                    <p className="text-[10px] text-muted-foreground mb-2">Publication Status</p>
-                    <div className="grid grid-cols-2 gap-2">
+                    <p className="text-[10px] text-muted-foreground mb-2">Student Visibility</p>
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                       <button
                         type="button"
-                        onClick={() => { setPublishStatus("draft"); setVisibleToStudents(false); }}
+                        aria-pressed={lifecycleStatus === "draft"}
+                        onClick={() => setLifecycleStatus("draft")}
                         className={cn(
                           "flex items-center gap-2 px-3 py-2.5 rounded-xl border text-left transition-all text-sm",
-                          publishStatus === "draft"
-                            ? "border-amber-400 bg-amber-50 dark:bg-amber-900/15 ring-1 ring-amber-400/30"
-                            : "border-border hover:border-amber-400/30"
+                          lifecycleStatus === "draft"
+                            ? "border-slate-400 bg-slate-50 dark:bg-slate-900/25 ring-1 ring-slate-400/25"
+                            : "border-border hover:border-slate-400/40"
                         )}
                       >
-                        <EyeOff className={cn("h-4 w-4", publishStatus === "draft" ? "text-amber-600" : "text-muted-foreground")} />
+                        <EyeOff className={cn("h-4 w-4", lifecycleStatus === "draft" ? "text-slate-600 dark:text-slate-300" : "text-muted-foreground")} />
                         <div>
-                          <p className={cn("text-xs font-extrabold", publishStatus === "draft" ? "text-amber-700 dark:text-amber-400" : "text-foreground")}>Draft</p>
-                          <p className="text-[9px] text-muted-foreground leading-tight">Hidden from students</p>
+                          <p className={cn("text-xs font-extrabold", lifecycleStatus === "draft" ? "text-slate-800 dark:text-slate-200" : "text-foreground")}>Draft</p>
+                          <p className="text-[9px] text-muted-foreground leading-tight">Only administrators can see this campus.</p>
                         </div>
                       </button>
                       <button
                         type="button"
-                        disabled={!publishingEnabled}
-                        onClick={() => { setPublishStatus("published"); setVisibleToStudents(true); }}
+                        aria-pressed={lifecycleStatus === "coming_soon"}
+                        onClick={() => setLifecycleStatus("coming_soon")}
                         className={cn(
                           "flex items-center gap-2 px-3 py-2.5 rounded-xl border text-left transition-all text-sm",
-                          !publishingEnabled && "opacity-50 cursor-not-allowed",
-                          publishStatus === "published"
-                            ? "border-green-400 bg-green-50 dark:bg-green-900/15 ring-1 ring-green-400/30"
-                            : "border-border hover:border-green-400/30"
+                          lifecycleStatus === "coming_soon"
+                            ? "border-primary/50 bg-primary/5 ring-1 ring-primary/20"
+                            : "border-border hover:border-primary/30"
                         )}
                       >
-                        <Eye className={cn("h-4 w-4", publishStatus === "published" ? "text-green-600" : "text-muted-foreground")} />
+                        <Clock className={cn("h-4 w-4", lifecycleStatus === "coming_soon" ? "text-primary" : "text-muted-foreground")} />
                         <div>
-                          <p className={cn("text-xs font-extrabold", publishStatus === "published" ? "text-green-700 dark:text-green-400" : "text-foreground")}>Published</p>
-                          <p className="text-[9px] text-muted-foreground leading-tight">Available in A6</p>
+                          <p className={cn("text-xs font-extrabold", lifecycleStatus === "coming_soon" ? "text-primary" : "text-foreground")}>Coming Soon</p>
+                          <p className="text-[9px] text-muted-foreground leading-tight">Students can see the campus listing, but its map remains unavailable.</p>
                         </div>
                       </button>
                     </div>
                     <p className="text-[9px] text-muted-foreground/50 mt-2">
-                      {publishStatus === "published"
-                        ? "Published campuses are visible to all students on the map."
-                        : "Draft campuses are hidden from students until published."}
+                      {lifecycleStatus === "coming_soon"
+                        ? "The map stays private until you publish it from Map Builder."
+                        : "You can make this campus visible to students later."}
                     </p>
                   </div>
                 </div>

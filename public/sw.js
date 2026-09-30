@@ -4,7 +4,7 @@
 
 // Bump this whenever the worker's caching policy changes so existing clients
 // do not remain controlled by an older policy.
-const VERSION = "v1.2";
+const VERSION = "v1.3";
 const CACHE_PREFIX = "plv-navisync";
 const CACHE = `${CACHE_PREFIX}-${VERSION}`;
 
@@ -103,6 +103,17 @@ const isSameOrigin = (r) => {
     return false;
   }
 };
+const isSupabaseApiRequest = (r) => {
+  try {
+    const url = new URL(r.url);
+    const isSupabaseHost = /(^|\.)supabase\.(co|in|com)$/i.test(url.hostname);
+    return isSupabaseHost && /^\/(auth|rest|storage|functions|realtime)\/v1\//i.test(url.pathname);
+  } catch {
+    return false;
+  }
+};
+const mustBypassCache = (r) =>
+  r.headers.has("authorization") || r.headers.has("cookie") || isSupabaseApiRequest(r);
 
 // ── Cache strategies ──────────────────────────────────────────────────────
 
@@ -165,6 +176,8 @@ async function networkFirst(request, cacheName) {
 /** Fetch and optionally cache the response */
 async function fetchAndCache(request, cache) {
   const response = await fetch(request);
+  // Authenticated/account-scoped API responses must never enter CacheStorage.
+  if (mustBypassCache(request)) return response;
   // Cache same-origin (basic) and CORS (cors) responses.
   // Opaque responses (type: "opaque") are intentionally skipped since
   // they carry no usable response body for the cache.
@@ -191,6 +204,14 @@ async function fetchAndCache(request, cache) {
 self.addEventListener("fetch", (event) => {
   const { request } = event;
   if (!isGET(request)) return;
+
+  // Supabase profile/data and any request carrying credentials are always
+  // network-only. In particular, never cache a response that could contain
+  // another signed-in account's protected data.
+  if (mustBypassCache(request)) {
+    event.respondWith(fetch(request));
+    return;
+  }
 
   const url = new URL(request.url);
 

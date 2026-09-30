@@ -15,6 +15,7 @@ vi.mock("../../lib/supabase", () => ({
     auth: {
       getUser: mocks.getUser,
       getSession: mocks.getSession,
+      signOut: vi.fn().mockResolvedValue({ error: null }),
       onAuthStateChange: mocks.onAuthStateChange,
     },
     from: vi.fn(() => ({
@@ -25,17 +26,21 @@ vi.mock("../../lib/supabase", () => ({
   },
 }));
 
+import { AuthProvider, useAuth, useStudentAuth } from "../../contexts/StudentAuthContext";
 import { useAdminAuth } from "../useAdminAuth";
 
-const session = { user: { id: "admin-1" } };
+const session = { access_token: "access", refresh_token: "refresh", user: { id: "admin-1" } };
 const profile = {
   id: "admin-1",
   role: "admin",
   is_active: true,
   email: "admin@example.test",
+  first_name: "Campus",
+  last_name: "Admin",
 };
+const wrapper = ({ children }: { children: React.ReactNode }) => <AuthProvider>{children}</AuthProvider>;
 
-describe("useAdminAuth lifecycle stability", () => {
+describe("central authentication bootstrap", () => {
   let authListener: ((event: string, nextSession: typeof session | null) => void) | undefined;
 
   beforeEach(() => {
@@ -50,146 +55,94 @@ describe("useAdminAuth lifecycle stability", () => {
     mocks.maybeSingle.mockResolvedValue({ data: profile, error: null });
   });
 
-  it("restores the persisted session through getSession without an initial getUser race", async () => {
-    mocks.getUser.mockRejectedValue(new Error("Auth session missing!"));
+  it("restores one persisted session and shares the database role with Student and Admin hooks", async () => {
+    const { result } = renderHook(() => ({ admin: useAdminAuth(), student: useStudentAuth(), auth: useAuth() }), { wrapper });
 
-    const { result } = renderHook(() => useAdminAuth());
-
-    await waitFor(() => expect(result.current.isAdmin).toBe(true));
-    expect(mocks.getSession).toHaveBeenCalled();
-    expect(result.current.profile).toEqual(profile);
+    expect(result.current.admin.loading).toBe(true);
+    await waitFor(() => expect(result.current.admin.isAdmin).toBe(true));
+    expect(result.current.auth.status).toBe("authenticated");
+    expect(result.current.student.isStudent).toBe(false);
+    expect(mocks.getSession).toHaveBeenCalledTimes(1);
+    expect(mocks.onAuthStateChange).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps auth initializing when INITIAL_SESSION is null before a delayed session restore", async () => {
-    let resolveSession: ((value: { data: { session: typeof session } | { session: null }; error: null }) => void) | undefined;
-    mocks.getSession.mockImplementationOnce(() => new Promise((resolve) => {
-      resolveSession = resolve;
-    }));
-
-    const { result } = renderHook(() => useAdminAuth());
+  it("does not treat an early null INITIAL_SESSION event as a completed restore", async () => {
+    let resolveSession: ((value: { data: { session: typeof session }; error: null }) => void) | undefined;
+    mocks.getSession.mockImplementationOnce(() => new Promise((resolve) => { resolveSession = resolve; }));
+    const { result } = renderHook(() => useAdminAuth(), { wrapper });
 
     await act(async () => {
       authListener?.("INITIAL_SESSION", null);
       window.dispatchEvent(new Event("focus"));
-      document.dispatchEvent(new Event("visibilitychange"));
     });
-
-    expect(result.current.loading).toBe(true);
     expect(result.current.status).toBe("initializing");
+
+    await act(async () => resolveSession?.({ data: { session }, error: null }));
+    await waitFor(() => expect(result.current.isAdmin).toBe(true));
+  });
+
+  it("does not grant Admin access to a Student role", async () => {
+    mocks.maybeSingle.mockResolvedValueOnce({ data: { ...profile, role: "student" }, error: null });
+    const { result } = renderHook(() => ({ admin: useAdminAuth(), student: useStudentAuth() }), { wrapper });
+
+    await waitFor(() => expect(result.current.admin.loading).toBe(false));
+    expect(result.current.admin.isAdmin).toBe(false);
+    expect(result.current.student.isStudent).toBe(true);
+  });
+
+  it("restores the Student Organization role from the profile row", async () => {
+    mocks.maybeSingle.mockResolvedValueOnce({ data: { ...profile, role: "student_org" }, error: null });
+    const { result } = renderHook(() => ({ admin: useAdminAuth(), student: useStudentAuth() }), { wrapper });
+
+    await waitFor(() => expect(result.current.student.isStudentOrg).toBe(true));
+    expect(result.current.admin.isAdmin).toBe(false);
+    expect(result.current.student.role).toBe("student_org");
+  });
+
+  it("accepts a login in another tab and clears the profile after cross-tab sign-out", async () => {
+    mocks.getSession.mockResolvedValueOnce({ data: { session: null }, error: null });
+    const { result } = renderHook(() => useAdminAuth(), { wrapper });
+    await waitFor(() => expect(result.current.status).toBe("unauthenticated"));
+
+    await act(async () => {
+      authListener?.("SIGNED_IN", session);
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(result.current.isAdmin).toBe(true));
+
+    await act(async () => authListener?.("SIGNED_OUT", null));
     expect(result.current.profile).toBeNull();
-    expect(mocks.getUser).not.toHaveBeenCalled();
+    expect(result.current.status).toBe("unauthenticated");
+  });
 
-    await act(async () => {
-      resolveSession?.({ data: { session }, error: null });
-    });
-
+  it("keeps a previously verified role during a temporary profile/network failure", async () => {
+    const { result } = renderHook(() => useAdminAuth(), { wrapper });
     await waitFor(() => expect(result.current.isAdmin).toBe(true));
-    expect(result.current.status).toBe("authenticated");
+    mocks.maybeSingle.mockResolvedValueOnce({ data: null, error: new Error("temporary network failure") });
+
+    await act(async () => window.dispatchEvent(new Event("focus")));
+    await waitFor(() => expect(mocks.getUser).toHaveBeenCalled());
+    expect(result.current.isAdmin).toBe(true);
     expect(result.current.profile).toEqual(profile);
   });
 
-  it("does not let focus revalidation race the initial administrator profile check", async () => {
+  it("ignores a stale profile response that finishes after explicit sign-out", async () => {
     let resolveProfile: ((value: { data: typeof profile; error: null }) => void) | undefined;
-    mocks.maybeSingle.mockImplementationOnce(() => new Promise((resolve) => {
-      resolveProfile = resolve;
-    }));
+    mocks.maybeSingle.mockImplementationOnce(() => new Promise((resolve) => { resolveProfile = resolve; }));
+    mocks.getSession.mockResolvedValueOnce({ data: { session: null }, error: null });
+    const { result, unmount } = renderHook(() => useAdminAuth(), { wrapper });
 
-    const { result } = renderHook(() => useAdminAuth());
-    await waitFor(() => expect(mocks.getSession).toHaveBeenCalled());
-
+    await waitFor(() => expect(result.current.status).toBe("unauthenticated"));
     await act(async () => {
-      window.dispatchEvent(new Event("focus"));
-      document.dispatchEvent(new Event("visibilitychange"));
+      authListener?.("SIGNED_IN", session);
+      await Promise.resolve();
     });
+    await act(async () => authListener?.("SIGNED_OUT", null));
+    await act(async () => resolveProfile?.({ data: profile, error: null }));
 
-    expect(result.current.loading).toBe(true);
-    expect(result.current.status).toBe("initializing");
-    expect(mocks.getUser).not.toHaveBeenCalled();
-
-    await act(async () => {
-      resolveProfile?.({ data: profile, error: null });
-    });
-    await waitFor(() => expect(result.current.status).toBe("authenticated"));
-  });
-
-  it("keeps a valid admin mounted when focus/visibility revalidation has a transient error", async () => {
-    const { result } = renderHook(() => useAdminAuth());
-    await waitFor(() => expect(result.current.isAdmin).toBe(true));
-
-    mocks.getUser.mockResolvedValue({ data: { user: session.user }, error: new Error("network briefly unavailable") });
-    await act(async () => {
-      window.dispatchEvent(new Event("focus"));
-      document.dispatchEvent(new Event("visibilitychange"));
-    });
-
-    expect(result.current.isAdmin).toBe(true);
-    expect(result.current.profile).toEqual(profile);
-    expect(result.current.loading).toBe(false);
-  });
-
-  it("keeps the current admin during a token refresh profile-query failure", async () => {
-    const { result } = renderHook(() => useAdminAuth());
-    await waitFor(() => expect(result.current.isAdmin).toBe(true));
-
-    mocks.maybeSingle.mockResolvedValue({ data: null, error: new Error("temporary profile timeout") });
-    await act(async () => {
-      authListener?.("TOKEN_REFRESHED", session);
-    });
-
-    expect(result.current.isAdmin).toBe(true);
-    expect(result.current.profile).toEqual(profile);
-  });
-
-  it("keeps the current admin for a non-authoritative null-session notification", async () => {
-    const { result } = renderHook(() => useAdminAuth());
-    await waitFor(() => expect(result.current.isAdmin).toBe(true));
-
-    await act(async () => {
-      authListener?.("TOKEN_REFRESHED", null);
-    });
-
-    expect(result.current.isAdmin).toBe(true);
-    expect(result.current.profile).toEqual(profile);
-    expect(result.current.loading).toBe(false);
-  });
-
-  it("still clears the editor gate on an explicit sign-out", async () => {
-    const { result } = renderHook(() => useAdminAuth());
-    await waitFor(() => expect(result.current.isAdmin).toBe(true));
-    expect(mocks.onAuthStateChange).toHaveBeenCalled();
-    expect(authListener).toBeTypeOf("function");
-
-    await act(async () => {
-      authListener?.("SIGNED_OUT", null);
-    });
-
-    await waitFor(() => {
-      expect(result.current.isAdmin).toBe(false);
-      expect(result.current.profile).toBeNull();
-      expect(result.current.status).toBe("unauthenticated");
-    });
-  });
-
-  it("does not restore a stale profile from a request that finishes after sign-out", async () => {
-    const { result } = renderHook(() => useAdminAuth());
-    await waitFor(() => expect(result.current.isAdmin).toBe(true));
-
-    let resolveLateProfile: ((value: { data: typeof profile | null; error: Error | null }) => void) | undefined;
-    mocks.maybeSingle.mockImplementationOnce(() => new Promise((resolve) => {
-      resolveLateProfile = resolve;
-    }));
-
-    await act(async () => {
-      authListener?.("TOKEN_REFRESHED", session);
-    });
-    await act(async () => {
-      authListener?.("SIGNED_OUT", null);
-    });
-    resolveLateProfile?.({ data: profile, error: null });
-
-    await waitFor(() => {
-      expect(result.current.isAdmin).toBe(false);
-      expect(result.current.profile).toBeNull();
-    });
+    expect(result.current.isAdmin).toBe(false);
+    expect(result.current.profile).toBeNull();
+    unmount();
+    expect(mocks.unsubscribe).toHaveBeenCalled();
   });
 });

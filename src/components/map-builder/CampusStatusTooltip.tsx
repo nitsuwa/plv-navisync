@@ -2,11 +2,11 @@ import type { Campus } from "./types";
 import { cn } from "../../lib/utils";
 import { ToolbarTooltip } from "./ToolbarTooltip";
 
-export type CampusStatusKind = "live" | "unsaved" | "saved-unpublished" | "draft";
+export type CampusStatusKind = "live" | "unsaved" | "saved-unpublished" | "coming-soon" | "draft";
 
 export interface CampusStatusDetails {
   kind: CampusStatusKind;
-  badgeLabel: "Live" | "Changes" | "Ready to Publish" | "Draft" | "New";
+  badgeLabel: "Live" | "Changes" | "Ready to Publish" | "Coming Soon" | "Draft" | "New";
   title: string;
   description: string;
   studentsSee: string;
@@ -32,6 +32,21 @@ export function getCampusStatusDetails(
   hasDraftChanges = false,
 ): CampusStatusDetails {
   const hasPublishedVersion = Boolean(campus.publishedAt) || campus.lifecycleStatus === "unpublished";
+
+  if (campus.lifecycleStatus === "coming_soon") {
+    return {
+      kind: "coming-soon",
+      badgeLabel: "Coming Soon",
+      title: "Coming Soon",
+      description: "Students can see this campus listing, but its map is not available yet.",
+      studentsSee: "The Coming Soon announcement only.",
+      nextStep: "Publish a validated map when it is ready.",
+      badgeClassName: "bg-sky-50 dark:bg-sky-900/20 border-sky-200 dark:border-sky-800/30 text-sky-700 dark:text-sky-300",
+      dotClassName: "bg-sky-500",
+      tooltipClassName: "w-[240px] border-sky-200/80 dark:border-sky-800/50 bg-sky-50/95 dark:bg-sky-950/90",
+      titleClassName: "text-sky-800 dark:text-sky-300",
+    };
+  }
 
   if (campus.publishStatus === "published") {
     if (isDirty) {

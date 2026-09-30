@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { physicalFloorCounts, physicalFloorMismatch, physicalFloorSignature, replaceFloorInCampus } from "../physicalFloorIntegrity";
+import { physicalFloorCounts, physicalFloorMismatch, physicalFloorSignature, replaceFloorInCampus, repairInvalidFloorMapElementIds } from "../physicalFloorIntegrity";
 import type { Campus, FloorPlan } from "../../components/map-builder/types";
 
 const floor = (id: string): FloorPlan => ({
@@ -11,6 +11,120 @@ const floor = (id: string): FloorPlan => ({
 });
 
 describe("physical Floor save signatures", () => {
+  it("repairs legacy physical IDs once and remaps their authored references", () => {
+    const source = floor("10000000-0000-4000-8000-000000000001");
+    source.rooms[0] = {
+      ...source.rooms[0],
+      id: "room-copy-1",
+      accessDoorId: "door-copy-1",
+      accessDoorIds: ["door-copy-1", "door-copy-2"],
+    } as never;
+    source.walls[0] = {
+      ...source.walls[0],
+      id: "wall-copy-1",
+      startAnchor: { targetType: "room", roomId: "room-copy-1", edge: "top", offset: 10 },
+    } as never;
+    source.doors = [{
+      id: "door-copy-1", x: 40, y: 10, width: 20, direction: "right", color: "#b45309", wallId: "wall-copy-1",
+    }] as never;
+    const campus = {
+      buildings: [{ id: "10000000-0000-4000-8000-000000000002", name: "Building", floors: [source] }],
+      navNodes: [{
+        id: "10000000-0000-4000-8000-000000000003", doorId: "door-copy-1", roomId: "room-copy-1",
+        generatedFromPathVertices: [{ pathId: "path", vertexId: "vertex-a" }],
+      }],
+      navEdges: [{ id: "10000000-0000-4000-8000-000000000004", generatedFromPathIds: ["path"] }],
+    } as unknown as Campus;
+
+    const { campus: repaired, repairs } = repairInvalidFloorMapElementIds(campus);
+    const updatedFloor = repaired.buildings[0].floors[0];
+    const roomRepair = repairs.find((repair) => repair.collection === "rooms")!;
+    const wallRepair = repairs.find((repair) => repair.collection === "walls")!;
+    const doorRepair = repairs.find((repair) => repair.collection === "doors")!;
+
+    const pathRepair = repairs.find((repair) => repair.collection === "paths")!;
+    expect(repairs.map((repair) => repair.oldId).sort()).toEqual(["door-copy-1", "path", "room-copy-1", "wall-copy-1"]);
+    expect(updatedFloor.rooms[0].id).toBe(roomRepair.newId);
+    expect(updatedFloor.rooms[0].accessDoorId).toBe(doorRepair.newId);
+    expect(updatedFloor.rooms[0].accessDoorIds).toEqual([doorRepair.newId, "door-copy-2"]);
+    expect(updatedFloor.walls[0].id).toBe(wallRepair.newId);
+    expect(updatedFloor.walls[0].startAnchor?.roomId).toBe(roomRepair.newId);
+    expect(updatedFloor.doors[0].id).toBe(doorRepair.newId);
+    expect(updatedFloor.doors[0].wallId).toBe(wallRepair.newId);
+    expect(updatedFloor.paths[0].id).toBe(pathRepair.newId);
+    expect(repaired.navNodes?.[0]).toMatchObject({
+      id: "10000000-0000-4000-8000-000000000003",
+      doorId: doorRepair.newId,
+      roomId: roomRepair.newId,
+      generatedFromPathVertices: [{ pathId: pathRepair.newId, vertexId: "vertex-a" }],
+    });
+    expect(repaired.navEdges?.[0].generatedFromPathIds).toEqual([pathRepair.newId]);
+    expect(campus.buildings[0].floors[0].rooms[0].id).toBe("room-copy-1");
+
+    const secondPass = repairInvalidFloorMapElementIds(repaired);
+    expect(secondPass.repairs).toEqual([]);
+    expect(secondPass.campus).toBe(repaired);
+    expect(secondPass.campus.buildings[0].floors[0]).toEqual(updatedFloor);
+  });
+
+  it("repairs a legacy Event Organizer ID once while preserving event data and location references", () => {
+    const legacy = {
+      id: "eo-1790650205083-pe84vm",
+      title: "TEST: College Week 2026",
+      description: "Student organization event",
+      organizer: "Student Council",
+      markers: [{ x: 45, y: 70, color: "#f59e0b", label: "Main booth" }],
+      restrictedAreas: [{ points: [{ x: 1, y: 2 }, { x: 3, y: 4 }] }],
+      isActive: true,
+      status: "approved",
+      locationRef: { type: "room", buildingId: "building", floorId: "floor", roomId: "room", label: "Room 101" },
+      locations: [{ id: "location-room", locationRef: { type: "room", buildingId: "building", floorId: "floor", roomId: "room", label: "Room 101" }, eventFurniture: [], eventLabels: [] }],
+    };
+    const campus = {
+      buildings: [{ id: "building", name: "Science Building", floors: [floor("floor")] }],
+      eventOverlays: [legacy],
+    } as unknown as Campus;
+    const { campus: repaired, repairs } = repairInvalidFloorMapElementIds(campus);
+    const event = repaired.eventOverlays![0];
+
+    expect(event.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+    expect(event.id).not.toBe(legacy.id);
+    expect(event).toMatchObject({
+      ...legacy,
+      id: event.id,
+      locationRef: { ...legacy.locationRef, roomId: repaired.buildings[0].floors[0].rooms[0].id },
+      locations: [{
+        ...legacy.locations[0],
+        locationRef: { ...legacy.locations[0].locationRef, roomId: repaired.buildings[0].floors[0].rooms[0].id },
+      }],
+    });
+    expect(repairs).toContainEqual(expect.objectContaining({
+      collection: "eventOverlays",
+      scope: "Campus",
+      oldId: legacy.id,
+      newId: event.id,
+      name: legacy.title,
+    }));
+    expect(campus.eventOverlays![0].id).toBe(legacy.id);
+
+    const secondPass = repairInvalidFloorMapElementIds(repaired);
+    expect(secondPass.repairs).toEqual([]);
+    expect(secondPass.campus.eventOverlays![0].id).toBe(event.id);
+    expect(secondPass.campus.eventOverlays![0].locationRef?.roomId).toBe(repaired.buildings[0].floors[0].rooms[0].id);
+  });
+
+  it("leaves an already-valid event overlay ID unchanged", () => {
+    const validId = "10000000-0000-4000-8000-000000000099";
+    const campus = {
+      buildings: [],
+      eventOverlays: [{ id: validId, title: "Existing event", organizer: "Org" }],
+    } as unknown as Campus;
+    const result = repairInvalidFloorMapElementIds(campus);
+    expect(result.repairs).toEqual([]);
+    expect(result.campus).toBe(campus);
+    expect(result.campus.eventOverlays![0].id).toBe(validId);
+  });
+
   it("counts every physical collection and compares geometry independent of object key order", () => {
     const current = floor("floor-a");
     const reloaded = structuredClone(current);

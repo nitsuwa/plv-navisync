@@ -1,4 +1,4 @@
-import { createContext, useState, useCallback, useMemo, useEffect, useRef, useContext } from "react";
+import { createContext, useState, useCallback, useMemo, useEffect, useRef, useContext, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { Route, ArrowRight, ArrowRightLeft, AlertTriangle, CheckCircle2, Loader2, X, Search, MapPin, Minimize2, Maximize2, Footprints, Accessibility, ShieldAlert, Eye, EyeOff, ChevronDown } from "lucide-react";
 import { cn } from "../../lib/utils";
@@ -29,7 +29,7 @@ import { canonicalExteriorEmergencyStairsForBuilding, exteriorEmergencyStairRout
 import { campusWorldPointToExteriorFloor, exteriorApproachEntranceReadiness, exteriorApproachNodeId, exteriorFloorPointToCampusWorld, reconcileExteriorApproachNavigation } from "../../lib/exteriorApproachNavigation";
 import { campusGates, campusGateNodeIds, outdoorNetworkReachesCampusGate } from "../../lib/campusGates";
 import { validateNavigationGraph } from "../../lib/validateNavigationGraph";
-import type { GraphPath, NavigationRouteSearchCache, PreparedNavigationGraph } from "../../lib/pathfinding";
+import type { GraphPath, GraphPathEdgeTraversal, NavigationRouteSearchCache, PreparedNavigationGraph } from "../../lib/pathfinding";
 import type { Campus, CampusEntrance, FloorDoor, FloorPlan, FloorRoom, FloorWall, NavigationEdge, NavigationNode } from "./types";
 
 export type RouteMode = "standard" | "accessible" | "emergency";
@@ -220,17 +220,70 @@ export type TestRouteSession = {
 
 type TestRouteSessionContextValue = {
   session: TestRouteSession | null;
-  setSession: (session: TestRouteSession | null) => void;
+  setSession: (session: TestRouteSession | null | ((current: TestRouteSession | null) => TestRouteSession | null)) => void;
   open: boolean;
-  setOpen: (open: boolean) => void;
+  setOpen: (open: boolean | ((current: boolean) => boolean)) => void;
   /** User's transient Map Builder navigation preference.  This lives beside
    * the campus-scoped route session so Outdoor/Floor editor remounts do not
    * reset it, but it is never persisted as campus data. */
   navigationEnabled: boolean;
-  setNavigationEnabled: (enabled: boolean) => void;
+  setNavigationEnabled: (enabled: boolean | ((current: boolean) => boolean)) => void;
 };
 
-const defaultTestRouteSessionContext: TestRouteSessionContextValue = {
+type TestRouteSessionStore = {
+  getSnapshot: () => TestRouteSessionContextValue;
+  subscribe: (listener: () => void) => () => void;
+  getSession: () => TestRouteSession | null;
+  setSession: TestRouteSessionContextValue["setSession"];
+  setOpen: TestRouteSessionContextValue["setOpen"];
+  setNavigationEnabled: TestRouteSessionContextValue["setNavigationEnabled"];
+};
+
+function createTestRouteSessionStore(): TestRouteSessionStore {
+  let snapshot: TestRouteSessionContextValue = {
+    session: null,
+    setSession: () => undefined,
+    open: false,
+    setOpen: () => undefined,
+    navigationEnabled: false,
+    setNavigationEnabled: () => undefined,
+  };
+  const listeners = new Set<() => void>();
+  const publish = (changes: Partial<TestRouteSessionContextValue>) => {
+    const next = { ...snapshot, ...changes };
+    if (next.session === snapshot.session && next.open === snapshot.open && next.navigationEnabled === snapshot.navigationEnabled) return;
+    snapshot = next;
+    listeners.forEach((listener) => listener());
+  };
+  const setSession: TestRouteSessionStore["setSession"] = (update) => {
+    const session = typeof update === "function" ? update(snapshot.session) : update;
+    publish({ session });
+  };
+  const setOpen: TestRouteSessionStore["setOpen"] = (update) => {
+    const open = typeof update === "function" ? update(snapshot.open) : update;
+    publish({ open });
+  };
+  const setNavigationEnabled: TestRouteSessionStore["setNavigationEnabled"] = (update) => {
+    const navigationEnabled = typeof update === "function" ? update(snapshot.navigationEnabled) : update;
+    publish({ navigationEnabled });
+  };
+  // Store actions remain stable while each subscriber selects only the fields
+  // it needs. Updating picker state therefore does not repaint FloorEditor.
+  snapshot = { ...snapshot, setSession, setOpen, setNavigationEnabled };
+  return {
+    getSnapshot: () => snapshot,
+    subscribe: (listener) => { listeners.add(listener); return () => listeners.delete(listener); },
+    getSession: () => snapshot.session,
+    setSession,
+    setOpen,
+    setNavigationEnabled,
+  };
+}
+
+// Match the previous context's inert fallback for isolated panel mounts. A
+// mutable module singleton here would leak route selection between editors or
+// tests that render without the application-level provider.
+const defaultTestRouteSessionSnapshot: TestRouteSessionContextValue = {
   session: null,
   setSession: () => undefined,
   open: false,
@@ -238,26 +291,52 @@ const defaultTestRouteSessionContext: TestRouteSessionContextValue = {
   navigationEnabled: false,
   setNavigationEnabled: () => undefined,
 };
-
-const TestRouteSessionContext = createContext<TestRouteSessionContextValue>(defaultTestRouteSessionContext);
+const defaultTestRouteSessionStore: TestRouteSessionStore = {
+  getSnapshot: () => defaultTestRouteSessionSnapshot,
+  subscribe: () => () => undefined,
+  getSession: () => null,
+  setSession: () => undefined,
+  setOpen: () => undefined,
+  setNavigationEnabled: () => undefined,
+};
+const TestRouteSessionContext = createContext<TestRouteSessionStore>(defaultTestRouteSessionStore);
 
 export function TestRouteSessionProvider({ children }: { children: React.ReactNode }) {
-  const [session, setSession] = useState<TestRouteSession | null>(null);
-  const [open, setOpen] = useState(false);
-  const [navigationEnabled, setNavigationEnabled] = useState(false);
-  const value = useMemo(() => ({
-    session,
-    setSession,
-    open,
-    setOpen,
-    navigationEnabled,
-    setNavigationEnabled,
-  }), [navigationEnabled, open, session]);
-  return <TestRouteSessionContext.Provider value={value}>{children}</TestRouteSessionContext.Provider>;
+  const storeRef = useRef<TestRouteSessionStore | null>(null);
+  if (!storeRef.current) storeRef.current = createTestRouteSessionStore();
+  return <TestRouteSessionContext.Provider value={storeRef.current}>{children}</TestRouteSessionContext.Provider>;
 }
 
 export function useTestRouteSession() {
-  return useContext(TestRouteSessionContext);
+  const store = useContext(TestRouteSessionContext);
+  const snapshot = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
+  return useMemo(() => snapshot, [snapshot]);
+}
+
+export function useTestRouteSessionSelector<T>(
+  selector: (snapshot: TestRouteSessionContextValue) => T,
+  isEqual: (left: T, right: T) => boolean = Object.is,
+): T {
+  const store = useContext(TestRouteSessionContext);
+  const selectedRef = useRef<{ snapshot: TestRouteSessionContextValue; selector: typeof selector; value: T } | null>(null);
+  const getSelection = useCallback(() => {
+    const snapshot = store.getSnapshot();
+    const previous = selectedRef.current;
+    if (previous?.snapshot === snapshot && previous.selector === selector) return previous.value;
+    const selected = selector(snapshot);
+    if (previous && isEqual(previous.value, selected)) {
+      selectedRef.current = { snapshot, selector, value: previous.value };
+      return previous.value;
+    }
+    selectedRef.current = { snapshot, selector, value: selected };
+    return selected;
+  }, [isEqual, selector, store]);
+  return useSyncExternalStore(store.subscribe, getSelection, getSelection);
+}
+
+export function useTestRouteSessionActions() {
+  const store = useContext(TestRouteSessionContext);
+  return store;
 }
 
 interface TestNavigationPanelProps {
@@ -1428,7 +1507,30 @@ function combineEmergencyRouteLegs(legs: GraphPath[]): GraphPath | null {
     distanceM,
     minutes: Math.max(1, Math.round(distanceM / 80)),
     steps: legs[0].steps,
+    edgeTraversals: legs.flatMap((leg) => leg.edgeTraversals ?? []),
   };
+}
+
+/** Trace the exact edge and traversal direction selected for every route hop. */
+export function routeEdgeTrace(
+  path: GraphPath,
+  edges: Pick<NavigationEdge, "id" | "startNodeId" | "endNodeId" | "bidirectional" | "bendPoints">[],
+): Array<GraphPathEdgeTraversal & { edgeId?: string }> {
+  return path.nodeIds.slice(0, -1).map((fromNodeId, index) => {
+    const toNodeId = path.nodeIds[index + 1];
+    const recorded = path.edgeTraversals?.[index];
+    if (recorded?.fromNodeId === fromNodeId && recorded.toNodeId === toNodeId) return recorded;
+    const edge = edges.find((candidate) => candidate.startNodeId === fromNodeId && candidate.endNodeId === toNodeId)
+      ?? edges.find((candidate) => candidate.bidirectional && candidate.startNodeId === toNodeId && candidate.endNodeId === fromNodeId);
+    const reversed = !!edge && (edge.startNodeId !== fromNodeId || edge.endNodeId !== toNodeId);
+    return {
+      ...(edge ? { edgeId: edge.id } : {}),
+      fromNodeId,
+      toNodeId,
+      reversed,
+      ...(edge?.bendPoints ? { bendPoints: reversed ? [...edge.bendPoints].reverse() : [...edge.bendPoints] } : {}),
+    };
+  });
 }
 
 /** Return the outdoor-side node for a complete Entrance bridge. */
@@ -2358,6 +2460,7 @@ function buildRoutePolylineContinuous(
   nodeIds: string[],
   edges: { id: string; startNodeId: string; endNodeId: string; bidirectional: boolean; bendPoints?: { x: number; y: number }[] }[],
   nodes: { id: string; x: number; y: number }[],
+  selectedEdgeByPair?: ReadonlyMap<string, string>,
 ): { x: number; y: number }[] {
   if (nodeIds.length < 2) {
     // Single node — return just its position
@@ -2422,9 +2525,13 @@ function buildRoutePolylineContinuous(
       continue;
     }
 
-    const edge = candidates
-      .map((candidate) => ({ candidate, geometry: routeEdgePoints(candidate, fromId, toId, fromPos, toPos) }))
-      .sort((a, b) => navEdgePolylineDistance(a.geometry) - navEdgePolylineDistance(b.geometry))[0];
+    const selectedEdgeId = selectedEdgeByPair?.get(`${fromId}>${toId}`);
+    const selectedCandidate = selectedEdgeId ? candidates.find((candidate) => candidate.id === selectedEdgeId) : undefined;
+    const edge = selectedCandidate
+      ? { candidate: selectedCandidate, geometry: routeEdgePoints(selectedCandidate, fromId, toId, fromPos, toPos) }
+      : candidates
+        .map((candidate) => ({ candidate, geometry: routeEdgePoints(candidate, fromId, toId, fromPos, toPos) }))
+        .sort((a, b) => navEdgePolylineDistance(a.geometry) - navEdgePolylineDistance(b.geometry))[0];
     const geometry = edge.geometry;
 
     // Add start node (avoid duplicate if last point already matches)
@@ -2468,6 +2575,7 @@ export function buildRoutePolylineFragments(
   nodeIds: string[],
   edges: { id: string; startNodeId: string; endNodeId: string; bidirectional: boolean; bendPoints?: { x: number; y: number }[] }[],
   nodes: { id: string; x: number; y: number }[],
+  selectedTraversals?: GraphPathEdgeTraversal[],
 ): { x: number; y: number }[][] {
   if (nodeIds.length === 0) return [];
   const hasEdge = (fromId: string, toId: string) => edges.some((edge) =>
@@ -2487,8 +2595,11 @@ export function buildRoutePolylineFragments(
     }
   }
   idFragments.push(current);
+  const selectedEdgeByPair = new Map((selectedTraversals ?? [])
+    .filter((traversal): traversal is GraphPathEdgeTraversal & { edgeId: string } => !!traversal.edgeId)
+    .map((traversal) => [`${traversal.fromNodeId}>${traversal.toNodeId}`, traversal.edgeId]));
   return idFragments
-    .map((fragment) => buildRoutePolylineContinuous(fragment, edges, nodes))
+    .map((fragment) => buildRoutePolylineContinuous(fragment, edges, nodes, selectedEdgeByPair))
     .filter((fragment) => fragment.length > 0);
 }
 
@@ -3273,6 +3384,7 @@ export function routeTransitionMarkers(
 function routeEndpointMarkers(
   nodeIds: string[],
   campus: Campus,
+  routeEdges: NavigationEdge[],
   currentContext?: TestRouteContext,
   destinationValue?: string,
   routeMode: RouteMode = "standard",
@@ -3293,7 +3405,7 @@ function routeEndpointMarkers(
       const startNode = nodes.find((node) => node.id === physicalIds[0]);
       const directionRole: EntranceDirectionRole = startNode?.floorId ? "outbound" : "inbound";
       return building
-        ? resolveBuildingRouteTerminalNodeId(campus, building, nodeIds, buildTestRouteEdges(campus), routeMode === "accessible", directionRole)
+        ? resolveBuildingRouteTerminalNodeId(campus, building, nodeIds, routeEdges, routeMode === "accessible", directionRole)
         : null;
     })()
     : null;
@@ -3785,6 +3897,13 @@ export function TestNavigationPanel({
   const nodes = routeCampus.navNodes ?? [];
   const edges = useMemo(() => buildTestRouteEdges(routeCampus, { exteriorApproachReconciled: true }), [routeCampus]);
   const routineGraph = useMemo(() => routineRouteGraph(routeCampus, nodes, edges, routeMode, true), [routeCampus, edges, nodes, routeMode]);
+  // Route queries for different endpoints/modes reuse the same prepared graph
+  // until the routine graph itself changes. The A* implementation remains
+  // unchanged; only its immutable adjacency/index preparation is cached.
+  const preparedRoutineGraph = useMemo(
+    () => prepareNavigationGraph(routineGraph.nodes, routineGraph.edges),
+    [routineGraph],
+  );
   const graphRevision = useMemo(() => JSON.stringify({
     nodes: nodes.map((node) => [node.id, node.x, node.y, node.floorId, node.buildingId, node.doorId, node.roomId]),
     edges: edges.map((edge) => [edge.id, edge.startNodeId, edge.endNodeId, edge.bidirectional, edge.closed, edge.accessible, edge.emergencySafe, edge.bendPoints ?? []]),
@@ -4071,7 +4190,6 @@ export function TestNavigationPanel({
       return;
     }
 
-    const routeColor = routeColorForMode(activeRouteMode);
     const fromNode = routeNodeById.get(fromId);
     const toNode = routeNodeById.get(toId);
     // A selected Elevator remains the authoritative cross-floor endpoint. If
@@ -4088,10 +4206,19 @@ export function TestNavigationPanel({
       ...(selectedElevatorSharedIds.length > 0 ? { preferredElevatorSharedIds: [...new Set(selectedElevatorSharedIds)] } : {}),
     };
     const routeSearchNodes = emergencyMode ? emergencySearchNodes(nodes, fromId) : activeNodes;
-    const preparedRouteGraph = emergencyMode ? undefined : prepareNavigationGraph(routeSearchNodes, activeEdges);
+    const preparedRouteGraph = emergencyMode ? undefined : preparedRoutineGraph;
     const preparedRouteOptions = preparedRouteGraph
       ? { ...routeOptions, preparedGraph: preparedRouteGraph, searchCache: createNavigationRouteSearchCache(preparedRouteGraph) }
       : routeOptions;
+    let emergencyFallbackGraph: PreparedNavigationGraph | undefined;
+    let emergencyFallbackSearchCache: NavigationRouteSearchCache | undefined;
+    const getEmergencyFallbackSearch = () => {
+      if (!emergencyFallbackGraph) {
+        emergencyFallbackGraph = prepareNavigationGraph(routeSearchNodes, activeEdges);
+        emergencyFallbackSearchCache = createNavigationRouteSearchCache(emergencyFallbackGraph);
+      }
+      return { graph: emergencyFallbackGraph, cache: emergencyFallbackSearchCache! };
+    };
     let path = emergencyPath;
     if (!emergencyPath) {
       const startCandidates = startBuildingCandidateIds.length > 0
@@ -4162,9 +4289,11 @@ export function TestNavigationPanel({
       fallbackCandidates.sort((left, right) => left.priority - right.priority);
       for (const { candidate } of fallbackCandidates) {
         if (candidate.id === toId) continue;
-        const fallbackPath = preparedRouteGraph
-          ? findNavigationRoute(routeSearchNodes, activeEdges, fromId, candidate.id, accessibleOnly, emergencyMode, { preparedGraph: preparedRouteGraph })
-          : findNavigationRoute(routeSearchNodes, activeEdges, fromId, candidate.id, accessibleOnly, emergencyMode);
+        const fallbackSearch = getEmergencyFallbackSearch();
+        const fallbackPath = findNavigationRoute(routeSearchNodes, activeEdges, fromId, candidate.id, accessibleOnly, emergencyMode, {
+          preparedGraph: fallbackSearch.graph,
+          searchCache: fallbackSearch.cache,
+        });
         if (!fallbackPath) continue;
         toId = candidate.id;
         path = fallbackPath;
@@ -4239,43 +4368,14 @@ export function TestNavigationPanel({
       return;
     }
 
-    // PART 4: Reconstruct the display polyline using actual edge geometry
-    // (bendPoints) so the highlight follows the authored walking network
-    // instead of drawing a misleading diagonal between node positions.
-    const displayEdges = activeEdges.filter((edge) =>
-      !edge.closed
-      && (!accessibleOnly || edge.accessible)
-      && (!emergencyMode || edge.emergencySafe !== false)
-    );
-    const projectedDisplayEdges = emergencyMode
-      ? displayEdges
-      : outdoorRouteProjectionEdges(routeCampus, displayEdges, path.nodeIds, currentContext);
-    const displayNodeFragments = collapseOutdoorHandoffFragments(
-      visibleContextRouteNodeFragments(path.nodeIds, routeCampus, currentContext),
-      routeCampus,
-      projectedDisplayEdges,
-      currentContext,
-      path.nodeIds,
-    );
-    const displayNodeIds = displayNodeFragments.flat();
-    const displayGeometry = exteriorRouteDisplayGeometry(routeCampus, displayNodeIds, projectedDisplayEdges, nodes, currentContext);
-    const displayWaypointFragments = displayNodeFragments
-      .flatMap((fragment) => buildRoutePolylineFragments(fragment, displayGeometry.edges, displayGeometry.nodes));
-    const displayWaypoints = displayWaypointFragments.flat();
     // Keep the existing focus behavior on the physical Door connector. The
-    // display polyline itself includes the semantic Room endpoint, so focus
-    // and geometry can serve their distinct purposes without a jump.
+    // cached display effect below builds route presentation geometry once from
+    // the committed path, so calculation and rendering do not duplicate work.
     const physicalStartId = physicalRouteNodeIds(path.nodeIds, routeCampus)[0] ?? fromId;
     const physicalStart = nodes.find((node) => node.id === physicalStartId);
     const focusRequest = !isLiveRecalculation && physicalStart && (modeOverride === undefined || focusStartOnSuccess)
       ? { nodeId: physicalStart.id, context: contextForNode(physicalStart) }
       : pendingFocus;
-    const semanticEndpoints = currentContext?.floorId
-      ? ([
-        { kind: "start" as const, room: roomSemanticEndpoint(campus, activeStartValue, currentContext.floorId) },
-        { kind: "destination" as const, room: roomSemanticEndpoint(campus, activeDestValue, currentContext.floorId) },
-      ].filter((endpoint) => endpoint.room).map((endpoint) => ({ ...endpoint.room!, kind: endpoint.kind })))
-      : undefined;
     setResult(path);
     setHasCalculatedRoute(true);
     // Live recalculation begins only after a successful explicit Calculate.
@@ -4303,23 +4403,6 @@ export function TestNavigationPanel({
       previewRoute,
       pendingFocus: focusRequest,
     });
-    const continuationMarkers = routeContinuationMarkers(routeCampus, path.nodeIds, activeRouteMode, currentContext, activeDestValue, activeStartValue);
-    onHighlightRoute({
-      waypoints: displayWaypoints,
-      waypointFragments: displayWaypointFragments,
-      color: routeColor,
-      routeNodeIds: displayNodeIds,
-      semanticEndpoints,
-      endpointMarkers: routeEndpointMarkers(path.nodeIds, routeCampus, currentContext, activeDestValue, activeRouteMode),
-      transitionMarkers: presentationRouteTransitionMarkers(
-        routeTransitionMarkers(path.nodeIds, routeCampus, currentContext, activeDestValue, activeRouteMode, activeStartValue),
-        routeCampus,
-        currentContext,
-        continuationMarkers,
-        activeDestValue,
-      ),
-      continuationMarkers,
-    });
     if (!isLiveRecalculation && (modeOverride === undefined || focusStartOnSuccess)) {
       if (physicalStart) {
         const focus = () => {
@@ -4332,7 +4415,7 @@ export function TestNavigationPanel({
       }
     }
     setLoading(false);
-  }, [startValue, destValue, emergencyDestinationLabel, emergencyDestinationValue, routeMode, routePreference, nodes, edges, routineGraph, campus, routeCampus, currentContext, manualCollapsed, manualExpanded, markSessionInteraction, onHighlightRoute, onFocusNode, onRouteStartFocus, onRouteTransitionCancel, pendingFocus, previewRoute, setRouteSession]);
+  }, [startValue, destValue, emergencyDestinationLabel, emergencyDestinationValue, routeMode, routePreference, nodes, edges, routineGraph, preparedRoutineGraph, campus, routeCampus, currentContext, manualCollapsed, manualExpanded, markSessionInteraction, onHighlightRoute, onFocusNode, onRouteStartFocus, onRouteTransitionCancel, pendingFocus, previewRoute, setRouteSession]);
 
   calculateRouteRef.current = handleCalculate;
     useEffect(() => {
@@ -4381,7 +4464,7 @@ export function TestNavigationPanel({
       ].filter((endpoint) => endpoint.room).map((endpoint) => ({ ...endpoint.room!, kind: endpoint.kind })))
       : undefined;
       const displayWaypointFragments = displayNodeFragments
-        .flatMap((fragment) => buildRoutePolylineFragments(fragment, displayGeometry.edges, displayGeometry.nodes));
+        .flatMap((fragment) => buildRoutePolylineFragments(fragment, displayGeometry.edges, displayGeometry.nodes, highlightResult.edgeTraversals));
        const continuationMarkers = routeContinuationMarkers(routeCampus, highlightResult.nodeIds, routeMode, currentContext, destValue, startValue);
       onHighlightRoute({
       waypoints: displayWaypointFragments.flat(),
@@ -4389,7 +4472,7 @@ export function TestNavigationPanel({
       color: routeColor,
       routeNodeIds: displayNodeIds,
        semanticEndpoints,
-       endpointMarkers: routeEndpointMarkers(highlightResult.nodeIds, routeCampus, currentContext, routeMode === "emergency" ? emergencyDestinationValue : destValue, routeMode),
+       endpointMarkers: routeEndpointMarkers(highlightResult.nodeIds, routeCampus, edges, currentContext, routeMode === "emergency" ? emergencyDestinationValue : destValue, routeMode),
        transitionMarkers: presentationRouteTransitionMarkers(
          routeTransitionMarkers(highlightResult.nodeIds, routeCampus, currentContext, routeMode === "emergency" ? emergencyDestinationValue : destValue, routeMode, startValue),
          routeCampus,

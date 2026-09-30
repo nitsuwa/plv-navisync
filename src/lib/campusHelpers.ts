@@ -49,16 +49,17 @@ export function resolvePublishTarget(wasPublished: boolean, force?: "publish" | 
 // ── Campus list search & filter ─────────────────────────────────────────────
 
 /** Status buckets used by the campus management list filter (mirrors card badges). */
-export type CampusStatusFilter = "all" | "published" | "draft" | "never" | "archived";
+export type CampusStatusFilter = "all" | "published" | "coming_soon" | "draft" | "never" | "archived";
 
 /**
  * Classify a campus into a status bucket. Mirrors the card badge logic:
  * published / draft (was published, now draft) / never published.
  */
-export function campusStatusOf(c: Campus): "published" | "draft" | "never" | "archived" {
+export function campusStatusOf(c: Campus): "published" | "coming_soon" | "draft" | "never" | "archived" {
   if (c.status === "archived" || c.lifecycleStatus === "archived") return "archived";
   if (c.publishStatus === "published" || c.lifecycleStatus === "published") return "published";
-  return c.lifecycleStatus === "unpublished" || !!c.publishedAt ? "draft" : "never";
+  if (c.lifecycleStatus === "coming_soon") return "coming_soon";
+  return c.lifecycleStatus === "draft" || c.lifecycleStatus === "unpublished" || !!c.publishedAt ? "draft" : "never";
 }
 
 /**

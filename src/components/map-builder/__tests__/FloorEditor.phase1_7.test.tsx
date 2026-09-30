@@ -659,13 +659,13 @@ describe("Phase 1.7 — Save control", () => {
 });
 
 describe("Phase 1.7 — Publish control", () => {
-  it("shows Publish gated/disabled when campus publishing is unavailable, with no independent floor state", () => {
+  it("keeps full campus publishing behind the campus map workflow", () => {
     const { container } = render(<Harness />);
     stubSvgRect(container, 220, 160);
 
     const publishBtn = screen.getByRole("button", { name: "Publish" }) as HTMLButtonElement;
     expect(publishBtn.disabled).toBe(true);
-    expect(publishBtn.title).toContain("A6");
+    expect(document.body.textContent).not.toContain("A6");
   });
 
   it("delegates to the campus publish callback only after floor validation passes", () => {

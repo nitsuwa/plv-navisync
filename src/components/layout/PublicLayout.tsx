@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { Navigate, Outlet, useLocation } from "react-router";
+import { Outlet, useLocation, useNavigate } from "react-router";
 import { Toaster } from "../../app/components/ui/sonner";
 import { Navbar } from "./Navbar";
 import { EmergencyBanner } from "./EmergencyBanner";
@@ -10,10 +10,21 @@ import { NavigationProgress } from "../ui/NavigationProgress";
 import { cn } from "../../lib/utils";
 import { motion } from "motion/react";
 import { useStudentAuth } from "../../hooks/useStudentAuth";
+import { settingsService } from "../../services/settingsService";
 
 export function PublicLayout() {
   const { pathname } = useLocation();
+  const navigate = useNavigate();
   const { isStudent, loading: authLoading } = useStudentAuth();
+
+  useEffect(() => {
+    if (authLoading || !isStudent || pathname !== "/") return;
+    let active = true;
+    void settingsService.getPublicPlatformSettings().then((settings) => {
+      if (active) navigate(settings.defaultLandingPage === "map" ? "/map" : "/home", { replace: true });
+    });
+    return () => { active = false; };
+  }, [authLoading, isStudent, navigate, pathname]);
 
   useEffect(() => {
     const isHomePage = pathname === "/" || pathname === "/home";
@@ -25,7 +36,7 @@ export function PublicLayout() {
   }, [pathname]);
 
   if (!authLoading && isStudent && pathname === "/") {
-    return <Navigate to="/home" replace />;
+    return <div className="min-h-[50vh] bg-background" aria-busy="true" aria-label="Opening NaviSync" />;
   }
 
   const showFooter    = pathname === "/" || pathname === "/home";
