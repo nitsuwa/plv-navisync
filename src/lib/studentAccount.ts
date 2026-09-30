@@ -15,6 +15,27 @@ export interface StudentRegistrationInput {
 export type StudentRegistrationErrors = Partial<Record<keyof StudentRegistrationInput, string>>;
 export type StudentProfile = Tables<"profiles">;
 
+/** Supabase intentionally returns an obfuscated empty-identity user for an
+ * existing email when confirmation is enabled. Use only that response shape;
+ * never query auth.users or expose profile/account details to the browser. */
+export function isObfuscatedDuplicateEmail(user: { identities?: readonly unknown[] | null } | null | undefined): boolean {
+  return !!user && Array.isArray(user.identities) && user.identities.length === 0;
+}
+
+/** Minimal registration preflight; the database unique index remains authoritative. */
+export async function checkStudentIdAvailability(
+  studentNumber: string,
+  client: SupabaseClient<Database> = getSupabase(),
+): Promise<boolean> {
+  const normalized = normalizeStudentNumber(studentNumber);
+  if (!/^\d{2}-\d{4}$/.test(normalized)) throw new Error("student_id_format_invalid");
+  const { data, error } = await client.rpc("check_student_id_availability", {
+    p_student_number: normalized,
+  });
+  if (error) throw error;
+  return data === true;
+}
+
 export function splitStudentName(fullName: string): { firstName: string; lastName: string } {
   const parts = fullName.trim().split(/\s+/).filter(Boolean);
   if (parts.length < 2) return { firstName: parts[0] ?? "", lastName: "" };
@@ -24,8 +45,17 @@ export function splitStudentName(fullName: string): { firstName: string; lastNam
   };
 }
 
+/** Format the numeric Student ID input as NN-NNNN while the user types. */
+export function formatStudentNumberInput(value: string): string {
+  const digits = value.replace(/\D/g, "").slice(0, 6);
+  return digits.length > 2 ? `${digits.slice(0, 2)}-${digits.slice(2)}` : digits;
+}
+
+/** Normalize an already formatted ID, or a six-digit unformatted paste. */
 export function normalizeStudentNumber(studentNumber: string): string {
-  return studentNumber.trim().replace(/\s+/g, " ").toUpperCase();
+  const value = studentNumber.trim();
+  if (/^\d{6}$/.test(value)) return `${value.slice(0, 2)}-${value.slice(2)}`;
+  return value;
 }
 
 export function validateStudentRegistration(input: StudentRegistrationInput): StudentRegistrationErrors {
@@ -44,8 +74,10 @@ export function validateStudentRegistration(input: StudentRegistrationInput): St
     errors.email = "Enter a valid email address.";
   }
 
-  if (!/^[A-Z0-9]+(?:[ -][A-Z0-9]+)*$/.test(studentNumber) || studentNumber.length < 4 || studentNumber.length > 32) {
-    errors.studentNumber = "Use 4-32 letters, numbers, spaces, or hyphens.";
+  if (!/^\d{2}-\d{4}$/.test(studentNumber)) {
+    const idDigits = input.studentNumber.replace(/\D/g, "");
+    const isIncomplete = idDigits.length < 6 && /^[\d -]*$/.test(input.studentNumber);
+    errors.studentNumber = isIncomplete ? "Enter your complete Student ID." : "Use the format 23-3314.";
   }
 
   if (input.password.length < MIN_ACCOUNT_PASSWORD_LENGTH) {
@@ -60,22 +92,39 @@ export function validateStudentRegistration(input: StudentRegistrationInput): St
 }
 
 export function authRedirectUrl(path: string, origin?: string): string {
-  const base = origin ?? (typeof window !== "undefined" ? window.location.origin : "http://localhost");
+  const base = origin ?? (typeof window !== "undefined" ? window.location.origin : null);
+  if (!base) throw new Error("auth_redirect_origin_unavailable");
   return new URL(path, base).toString();
 }
 
 export function friendlyAccountError(message: string): string {
   const normalized = message.toLowerCase();
   if (normalized.includes("email not confirmed")) return "Verify your email before signing in.";
+  if (normalized.includes("profiles_student_number_uq") || normalized.includes("student id is already registered") || normalized.includes("student number is already registered")) {
+    return "This Student ID is already registered.";
+  }
+  if (normalized.includes("email_exists") || normalized.includes("user_already_exists") || normalized.includes("user already registered") || normalized.includes("email already registered") || normalized.includes("email already exists")) {
+    return "An account already uses this email.";
+  }
   if (normalized.includes("already registered") || normalized.includes("already exists")) {
-    return "An account may already use those details. Try signing in or resetting your password.";
+    return "An account already uses this email.";
+  }
+  if (normalized.includes("email rate limit")) {
+    return "Please wait before requesting another email.";
   }
   if (normalized.includes("rate limit") || normalized.includes("too many")) {
-    return "Too many requests. Wait a moment and try again.";
+    return "Too many attempts. Please wait and try again.";
+  }
+  if (normalized.includes("failed to fetch") || normalized.includes("network") || normalized.includes("fetch error")) {
+    return "We couldn't complete the request. Check your connection and try again.";
   }
   if (normalized.includes("password")) return "The password does not meet the security requirements.";
-  if (normalized.includes("student number") || normalized.includes("database error")) {
-    return "Those student details could not be registered. Check them or contact support.";
+  if (normalized.includes("invalid login credentials")) return "Email or password is incorrect.";
+  if (normalized.includes("student number") || normalized.includes("student id")) {
+    return "Check your Student ID and try again.";
+  }
+  if (normalized.includes("database error saving new user")) {
+    return "We couldn't create this account. Check your details and try again.";
   }
   return "The account request could not be completed. Please try again.";
 }
@@ -95,7 +144,7 @@ export async function registerStudent(
     email: input.email.trim().toLowerCase(),
     password: input.password,
     options: {
-      emailRedirectTo: authRedirectUrl("/auth/callback?flow=signup", origin),
+      emailRedirectTo: authRedirectUrl("/auth/callback", origin),
       data: {
         first_name: firstName,
         last_name: lastName,
@@ -113,7 +162,7 @@ export async function resendStudentVerification(
   return client.auth.resend({
     type: "signup",
     email: email.trim().toLowerCase(),
-    options: { emailRedirectTo: authRedirectUrl("/auth/callback?flow=signup", origin) },
+    options: { emailRedirectTo: authRedirectUrl("/auth/callback", origin) },
   });
 }
 
@@ -123,7 +172,7 @@ export async function requestStudentPasswordReset(
   origin?: string,
 ) {
   return client.auth.resetPasswordForEmail(email.trim().toLowerCase(), {
-    redirectTo: authRedirectUrl("/auth/reset-password?flow=recovery", origin),
+    redirectTo: authRedirectUrl("/auth/reset-password", origin),
   });
 }
 
@@ -164,7 +213,7 @@ export async function loadActiveStudentProfile(
     .maybeSingle();
 
   if (error || !data) throw new Error("profile_missing");
-  if (data.role !== "student") throw new Error("profile_role");
+  if (data.role !== "student" && data.role !== "student_org") throw new Error("profile_role");
   if (!data.is_active) throw new Error("profile_inactive");
   return data;
 }

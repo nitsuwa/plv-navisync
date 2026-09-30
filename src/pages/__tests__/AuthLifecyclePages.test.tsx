@@ -2,10 +2,17 @@ import { render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("../../lib/supabase", () => ({
-  isConnected: false,
-  supabase: null,
+const authMocks = vi.hoisted(() => ({
+  connected: false,
+  client: null as any,
+  value: null as any,
 }));
+
+vi.mock("../../lib/supabase", () => ({
+  get isConnected() { return authMocks.connected; },
+  get supabase() { return authMocks.client; },
+}));
+vi.mock("../../contexts/StudentAuthContext", () => ({ useAuth: () => authMocks.value }));
 
 import {
   AuthCallbackPage,
@@ -39,7 +46,15 @@ describe("student Auth lifecycle states", () => {
     });
   });
 
-  beforeEach(() => window.history.replaceState({}, "", "/"));
+  beforeEach(() => {
+    window.history.replaceState({}, "", "/");
+    authMocks.connected = false;
+    authMocks.client = null;
+    authMocks.value = {
+      status: "initializing", recoveryState: "idle", session: null, profile: null,
+      isStudent: false, retryBootstrap: vi.fn(),
+    };
+  });
 
   it("shows verification pending details and preserves the registration email", () => {
     renderAt(<VerificationPendingPage />, "/auth/verify", { email: "student@example.com" });
@@ -64,5 +79,28 @@ describe("student Auth lifecycle states", () => {
     renderAt(<ResetPasswordPage />, "/auth/reset-password");
     await waitFor(() => expect(screen.getByRole("heading", { name: "Invalid reset link" })).toBeInTheDocument());
     expect(screen.getByRole("link", { name: "Request New Link" })).toHaveAttribute("href", "/auth/forgot-password");
+  });
+
+  it("waits while the central provider processes a fresh recovery URL, then shows the form", async () => {
+    authMocks.connected = true;
+    authMocks.client = { auth: { updateUser: vi.fn(), signOut: vi.fn() } };
+    authMocks.value = {
+      status: "unauthenticated", recoveryState: "processing", session: null, profile: null,
+      isStudent: false, retryBootstrap: vi.fn(),
+    };
+    const view = renderAt(<ResetPasswordPage />, "/auth/reset-password?code=redacted-test-value");
+    expect(screen.getByRole("heading", { name: "Verifying reset link…" })).toBeInTheDocument();
+    expect(screen.queryByLabelText("New Password")).not.toBeInTheDocument();
+
+    authMocks.value = {
+      status: "authenticated", recoveryState: "ready", session: { user: { id: "user-1" } }, profile: null,
+      isStudent: false, retryBootstrap: vi.fn(),
+    };
+    view.rerender(
+      <MemoryRouter initialEntries={["/auth/reset-password?code=redacted-test-value"]}>
+        <ResetPasswordPage />
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(screen.getByLabelText("New Password")).toBeInTheDocument());
   });
 });

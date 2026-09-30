@@ -2,12 +2,13 @@ import { getSupabase } from "../lib/supabase";
 import { DEFAULT_FEATURES } from "../components/map-builder/constants";
 import type { Campus, CampusBuilding } from "../components/map-builder/types";
 import type { Json, Tables, TablesInsert, TablesUpdate } from "../types/database.generated";
+import type { CampusCreationVisibility, CampusLifecycleStatus } from "../types/campusLifecycle";
+export type { CampusCreationVisibility, CampusLifecycleStatus } from "../types/campusLifecycle";
 import { serializeCampusStructure } from "./campusStructureService";
 import { validateCampusForPublish } from "../lib/campusPublication";
 
 export type CampusRow = Tables<"campuses">;
 export type CampusVersionRow = Tables<"campus_versions">;
-export type CampusLifecycleStatus = "draft" | "coming_soon" | "published" | "unpublished" | "archived";
 export interface ComingSoonCampusSummary {
   id: string;
   name: string;
@@ -217,7 +218,22 @@ export function userFacingCampusMessage(error: unknown): string {
       case "23505": // unique_violation
         return "A campus with this code already exists. Choose a different code.";
       case "23514": // check_violation
-        return "Some campus details don't meet the required format. Check the code, name, and coordinates.";
+        {
+          const diagnostic = `${error.message} ${error.dbDetails ?? ""} ${error.dbHint ?? ""}`.toLowerCase();
+          if (/campuses_status_check|coming.?soon|lifecycle|visibility|status|new campuses must begin|private drafts?/.test(diagnostic)) {
+            return "Could not save the campus visibility setting. Please try again.";
+          }
+          if (/campuses_code_format_check|code.*format/.test(diagnostic)) {
+            return "Enter a valid campus code using letters, numbers, hyphens, or underscores.";
+          }
+          if (/latitude|longitude|coordinate/.test(diagnostic)) {
+            return "Enter valid campus coordinates.";
+          }
+          if (/campus.*name|name.*campus/.test(diagnostic)) {
+            return "Enter a valid campus name.";
+          }
+          return "Campus could not be saved. Please check the campus details.";
+        }
       case "23502": // not_null_violation
         return "Some required campus details are missing.";
       case "23503": // foreign_key_violation
@@ -561,7 +577,7 @@ export async function getCampusById(id: string): Promise<Campus | null> {
   return data ? toEditorCampus(data) : null;
 }
 
-export async function createCampus(input: CampusCreateInput, initialStatus: "draft" | "coming_soon" = "draft"): Promise<Campus> {
+export async function createCampus(input: CampusCreateInput, initialStatus: CampusCreationVisibility = "draft"): Promise<Campus> {
   const userId = await requireCurrentUserId();
   const code = normalizeCampusCode(input.code);
   const { data, error } = await getSupabase().from("campuses").insert({

@@ -141,3 +141,5 @@ grant execute on function public.list_coming_soon_campuses() to anon, authentica
 
 comment on function public.list_coming_soon_campuses() is
   'Returns safe announcement metadata only; does not expose campus rows, map content, or draft structure.';
+
+notify pgrst, 'reload schema';

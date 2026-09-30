@@ -7,6 +7,7 @@ import { MapPicker } from "../ui/MapPicker";
 import { PLVLogo } from "../ui/PLVLogo";
 import { ColorPicker } from "../ui/ColorPicker";
 import type { Campus } from "./types";
+import type { CampusCreationVisibility } from "../../types/campusLifecycle";
 
 const shouldLogWizardDiagnostics = import.meta.env.DEV && import.meta.env.MODE !== "test";
 
@@ -375,7 +376,7 @@ export function CampusWizard({ draft, step, onNext, onBack, onFinish, onClose, o
   const logoInputRef = useRef<HTMLInputElement>(null);
 
   // ── Visibility (shown on Review page) ────────────────────────────────────
-  const [lifecycleStatus, setLifecycleStatus] = useState<"draft" | "coming_soon">(
+  const [lifecycleStatus, setLifecycleStatus] = useState<CampusCreationVisibility>(
     draft.lifecycleStatus === "coming_soon" ? "coming_soon" : "draft",
   );
 
@@ -384,6 +385,7 @@ export function CampusWizard({ draft, step, onNext, onBack, onFinish, onClose, o
 
   // ── Edit mode detection ────────────────────────────────────────────────────
   const isEditing = !!draft.id;
+  const canChangeVisibility = !isEditing || ["draft", "coming_soon", "unpublished"].includes(draft.lifecycleStatus ?? "");
 
   // The wizard draft is MERGED with step values on every navigation step
   // (nextWizardStep spreads the previous draft), so comparing against the live
@@ -1229,7 +1231,7 @@ export function CampusWizard({ draft, step, onNext, onBack, onFinish, onClose, o
                 </SummaryCard>
 
                 {/* Visibility section — inline on review page */}
-                <div className="rounded-xl border border-border bg-muted/20 p-4">
+                {canChangeVisibility && <div className="rounded-xl border border-border bg-muted/20 p-4">
                   <div className="flex items-center justify-between mb-3">
                     <p className="text-[9px] font-extrabold uppercase tracking-widest text-primary flex items-center gap-1.5">
                       <Shield className="h-3 w-3" /> Visibility
@@ -1237,49 +1239,57 @@ export function CampusWizard({ draft, step, onNext, onBack, onFinish, onClose, o
                   </div>
                   <div>
                     <p className="text-[10px] text-muted-foreground mb-2">Student Visibility</p>
-                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    <div className="grid grid-cols-1 items-stretch gap-2 sm:grid-cols-2">
                       <button
                         type="button"
                         aria-pressed={lifecycleStatus === "draft"}
                         onClick={() => setLifecycleStatus("draft")}
                         className={cn(
-                          "flex items-center gap-2 px-3 py-2.5 rounded-xl border text-left transition-all text-sm",
+                          "relative flex h-full min-h-[104px] items-start gap-3 rounded-xl border px-3.5 py-3 text-left text-sm transition-colors duration-150 motion-reduce:transition-none",
                           lifecycleStatus === "draft"
-                            ? "border-slate-400 bg-slate-50 dark:bg-slate-900/25 ring-1 ring-slate-400/25"
-                            : "border-border hover:border-slate-400/40"
+                            ? "border-primary/60 bg-primary/[0.035] ring-1 ring-primary/15"
+                            : "border-border bg-card hover:border-primary/30 hover:bg-muted/20"
                         )}
                       >
-                        <EyeOff className={cn("h-4 w-4", lifecycleStatus === "draft" ? "text-slate-600 dark:text-slate-300" : "text-muted-foreground")} />
-                        <div>
-                          <p className={cn("text-xs font-extrabold", lifecycleStatus === "draft" ? "text-slate-800 dark:text-slate-200" : "text-foreground")}>Draft</p>
-                          <p className="text-[9px] text-muted-foreground leading-tight">Only administrators can see this campus.</p>
+                        <span className={cn("mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl", lifecycleStatus === "draft" ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground")}>
+                          <EyeOff className="h-4 w-4" aria-hidden="true" />
+                        </span>
+                        <div className="min-w-0 flex-1 pr-5">
+                          <p className="text-xs font-extrabold text-foreground">Draft</p>
+                          <p className="mt-1 text-[10px] leading-snug text-muted-foreground">Only administrators can see this campus.</p>
+                          <p className="mt-1 text-[9px] leading-snug text-muted-foreground/75">Build privately and publish later.</p>
                         </div>
+                        {lifecycleStatus === "draft" && <CheckCircle2 className="absolute right-3 top-3.5 h-4 w-4 text-primary" aria-hidden="true" />}
                       </button>
                       <button
                         type="button"
                         aria-pressed={lifecycleStatus === "coming_soon"}
                         onClick={() => setLifecycleStatus("coming_soon")}
                         className={cn(
-                          "flex items-center gap-2 px-3 py-2.5 rounded-xl border text-left transition-all text-sm",
+                          "relative flex h-full min-h-[104px] items-start gap-3 rounded-xl border px-3.5 py-3 text-left text-sm transition-colors duration-150 motion-reduce:transition-none",
                           lifecycleStatus === "coming_soon"
-                            ? "border-primary/50 bg-primary/5 ring-1 ring-primary/20"
-                            : "border-border hover:border-primary/30"
+                            ? "border-primary/60 bg-primary/[0.035] ring-1 ring-primary/15"
+                            : "border-border bg-card hover:border-primary/30 hover:bg-muted/20"
                         )}
                       >
-                        <Clock className={cn("h-4 w-4", lifecycleStatus === "coming_soon" ? "text-primary" : "text-muted-foreground")} />
-                        <div>
-                          <p className={cn("text-xs font-extrabold", lifecycleStatus === "coming_soon" ? "text-primary" : "text-foreground")}>Coming Soon</p>
-                          <p className="text-[9px] text-muted-foreground leading-tight">Students can see the campus listing, but its map remains unavailable.</p>
+                        <span className={cn("mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl", lifecycleStatus === "coming_soon" ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground")}>
+                          <Clock className="h-4 w-4" aria-hidden="true" />
+                        </span>
+                        <div className="min-w-0 flex-1 pr-5">
+                          <p className="text-xs font-extrabold text-foreground">Coming Soon</p>
+                          <p className="mt-1 text-[10px] leading-snug text-muted-foreground">Students can see the campus listing while its map is being prepared.</p>
+                          <p className="mt-1 text-[9px] leading-snug text-muted-foreground/75">The draft map stays private.</p>
                         </div>
+                        {lifecycleStatus === "coming_soon" && <CheckCircle2 className="absolute right-3 top-3.5 h-4 w-4 text-primary" aria-hidden="true" />}
                       </button>
                     </div>
-                    <p className="text-[9px] text-muted-foreground/50 mt-2">
+                    <p className="mt-2 text-[9px] text-muted-foreground/60">
                       {lifecycleStatus === "coming_soon"
-                        ? "The map stays private until you publish it from Map Builder."
+                        ? "The map remains private until you publish it from Map Builder."
                         : "You can make this campus visible to students later."}
                     </p>
                   </div>
-                </div>
+                </div>}
               </div>
             </>
           )}

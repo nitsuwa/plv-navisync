@@ -3,7 +3,7 @@ import { Link, useNavigate } from "react-router";
 import { motion, AnimatePresence } from "motion/react";
 import {
   Eye, EyeOff, ArrowLeft, CheckCircle2, User, Mail, IdCard, Lock,
-  GraduationCap, ChevronRight, Sparkles, Shield, AlertCircle,
+  GraduationCap, ChevronRight, Sparkles, Shield, AlertCircle, LoaderCircle,
 } from "lucide-react";
 import { Button } from "../components/ui/Button";
 import { useTheme } from "../hooks/useTheme";
@@ -13,6 +13,9 @@ import { StarField, LavaLampBackground } from "../components/ui/HeroBackground";
 import { isConnected, supabase } from "../lib/supabase";
 import {
   friendlyAccountError,
+  checkStudentIdAvailability,
+  formatStudentNumberInput,
+  isObfuscatedDuplicateEmail,
   MIN_ACCOUNT_PASSWORD_LENGTH,
   registerStudent,
   validateStudentRegistration,
@@ -59,7 +62,9 @@ export function RegistrationPage() {
   const { theme, toggleTheme } = useTheme();
   const [step, setStep] = useState<1 | 2>(1);
   const [loading, setLoading] = useState(false);
+  const [checkingStudentId, setCheckingStudentId] = useState(false);
   const [submitError, setSubmitError] = useState("");
+  const [duplicateEmail, setDuplicateEmail] = useState(false);
   const [showPw, setShowPw] = useState(false);
   const [showCfm, setShowCfm] = useState(false);
   const [errs, setErrs] = useState<Record<string, string>>({});
@@ -76,6 +81,7 @@ export function RegistrationPage() {
     setForm(p => ({ ...p, [k]: v }));
     setErrs(p => ({ ...p, [k]: "" }));
     setSubmitError("");
+    setDuplicateEmail(false);
   };
 
   const validateStep1 = () => {
@@ -112,7 +118,28 @@ export function RegistrationPage() {
     return !Object.keys(e).length;
   };
 
-  const handleNext = () => { if (validateStep1()) setStep(2); };
+  const handleNext = async () => {
+    if (duplicateEmail) return;
+    if (!validateStep1()) return;
+    if (!isConnected || !supabase) {
+      setSubmitError("Registration is not configured. Try again later.");
+      return;
+    }
+    setCheckingStudentId(true);
+    setSubmitError("");
+    try {
+      const available = await checkStudentIdAvailability(form.studentId, supabase);
+      if (!available) {
+        setErrs((previous) => ({ ...previous, studentId: "This Student ID is already registered." }));
+        return;
+      }
+      setStep(2);
+    } catch {
+      setSubmitError("We couldn't check this Student ID right now. Check your connection and try again.");
+    } finally {
+      setCheckingStudentId(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -132,11 +159,47 @@ export function RegistrationPage() {
         confirmPassword: form.confirm,
       }, supabase);
       if (error) {
+        if (/email_exists|user_already_exists|user already registered|email already registered/i.test(error.message)) {
+          setErrs((previous) => ({ ...previous, email: "An account already uses this email." }));
+          setDuplicateEmail(true);
+          setSubmitError("");
+          setStep(1);
+          return;
+        }
+        if (/profiles_student_number_uq|student id is already registered|student number is already registered/i.test(error.message)) {
+          setErrs((previous) => ({ ...previous, studentId: "This Student ID is already registered." }));
+          setStep(1);
+          return;
+        }
+        // Auth may mask a profile-trigger uniqueness error. Recheck the
+        // non-sensitive availability boolean so a race gets the right field error.
+        if (/database error saving new user|unique|student number|student id/i.test(error.message)) {
+          try {
+            if (!(await checkStudentIdAvailability(form.studentId, supabase))) {
+              setErrs((previous) => ({ ...previous, studentId: "This Student ID is already registered." }));
+              setStep(1);
+              return;
+            }
+          } catch {
+            // Preserve the original signup error when the optional recheck fails.
+          }
+        }
         setSubmitError(friendlyAccountError(error.message));
+        setDuplicateEmail(/email_exists|user_already_exists|user already registered|email already registered/i.test(error.message));
+        return;
+      }
+      if (isObfuscatedDuplicateEmail(data.user)) {
+        setErrs((previous) => ({ ...previous, email: "An account already uses this email." }));
+        setDuplicateEmail(true);
+        setStep(1);
+        return;
+      }
+      if (!data.user) {
+        setSubmitError("We couldn't start your account. Check your details and try again.");
         return;
       }
       if (data.session) {
-        navigate("/auth/callback?flow=signup", { replace: true });
+        navigate("/auth/callback", { replace: true });
       } else {
         navigate("/auth/verify", { replace: true, state: { email: form.email.trim().toLowerCase() } });
       }
@@ -187,14 +250,14 @@ export function RegistrationPage() {
 
       {/* ══════════ RIGHT — form ══════════ */}
       <div className="flex-1 lg:max-w-[460px] flex flex-col bg-background">
-        <div className="flex items-center justify-between px-8 pt-6 pb-2">
+        <div className="flex items-center justify-between px-5 sm:px-8 pt-6 pb-2">
           <Link to="/admin" className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors">
             <ArrowLeft className="h-4 w-4" /> Back to Sign In
           </Link>
           <ThemeToggle theme={theme} onToggle={toggleTheme} />
         </div>
 
-        <div className="flex-1 flex items-center justify-center px-8 py-6">
+        <div className="flex-1 flex items-center justify-center px-5 sm:px-8 py-6">
           <div className="w-full max-w-sm">
             {/* PLV logo + heading */}
             <motion.div
@@ -211,7 +274,7 @@ export function RegistrationPage() {
                 {step === 1 ? "Create Your Account" : "Set Your Password"}
               </h1>
               <p className="text-sm text-muted-foreground text-center mt-1">
-                {step === 1 ? "Enter your PLV student details below." : "Choose a strong password to protect your account."}
+                {step === 1 ? "Enter your student details below." : "Choose a strong password to protect your account."}
               </p>
             </motion.div>
 
@@ -252,38 +315,45 @@ export function RegistrationPage() {
                   </div>
 
                   <div>
-                    <label htmlFor="reg-email" className="block text-xs font-bold text-foreground mb-1.5 uppercase tracking-widest">PLV Email</label>
+                    <label htmlFor="reg-email" className="block text-xs font-bold text-foreground mb-1.5 uppercase tracking-widest">Email</label>
                     <div className="relative">
                       <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                       <input id="reg-email" type="email" value={form.email} onChange={e => set("email", e.target.value)} autoComplete="email"
-                        placeholder="yourname@plv.edu.ph"
+                        placeholder="you@example.com"
                         aria-invalid={!!errs.email}
                         aria-describedby={errs.email ? "reg-email-error" : undefined}
                         className={"w-full h-11 pl-9 pr-4 rounded-xl border bg-input-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 text-sm transition-all " + (errs.email ? "border-destructive focus:ring-destructive/30" : "border-border focus:ring-primary/30 focus:border-primary")} />
                     </div>
                     {errs.email && <p id="reg-email-error" role="alert" className="text-xs text-destructive mt-1 flex items-center gap-1"><span className="w-1 h-1 rounded-full bg-destructive" />{errs.email}</p>}
+                    {duplicateEmail && <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs font-bold text-primary">
+                      <Link to="/admin" className="underline underline-offset-2">Sign In</Link>
+                      <Link to="/auth/forgot-password" className="underline underline-offset-2">Forgot Password</Link>
+                    </div>}
                   </div>
 
                   <div>
                     <label htmlFor="reg-studentid" className="block text-xs font-bold text-foreground mb-1.5 uppercase tracking-widest">Student ID</label>
                     <div className="relative">
                       <IdCard className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                      <input id="reg-studentid" type="text" value={form.studentId} onChange={e => set("studentId", e.target.value)} autoComplete="off"
-                        placeholder="e.g. 2024-00001"
+                      <input id="reg-studentid" type="text" inputMode="numeric" value={form.studentId} onChange={e => set("studentId", formatStudentNumberInput(e.target.value))} autoComplete="off"
+                        placeholder="23-3314"
                         aria-invalid={!!errs.studentId}
                         aria-describedby={errs.studentId ? "reg-studentid-error" : undefined}
                         className={"w-full h-11 pl-9 pr-4 rounded-xl border bg-input-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 text-sm font-mono transition-all " + (errs.studentId ? "border-destructive focus:ring-destructive/30" : "border-border focus:ring-primary/30 focus:border-primary")} />
                     </div>
-                    {errs.studentId && <p id="reg-studentid-error" role="alert" className="text-xs text-destructive mt-1 flex items-center gap-1"><span className="w-1 h-1 rounded-full bg-destructive" />{errs.studentId}</p>}
+                  {errs.studentId && <p id="reg-studentid-error" role="alert" className="text-xs text-destructive mt-1 flex items-center gap-1"><span className="w-1 h-1 rounded-full bg-destructive" />{errs.studentId}</p>}
                   </div>
+
+                  {submitError && <p role="alert" className="text-sm text-destructive">{submitError}</p>}
 
                   <motion.button
                     type="button"
                     onClick={handleNext}
-                    className="w-full h-11 rounded-xl bg-primary text-primary-foreground text-sm font-extrabold hover:brightness-110 active:scale-[0.98] transition-all flex items-center justify-center gap-2"
+                    disabled={checkingStudentId}
+                    className="w-full h-11 rounded-xl bg-primary text-primary-foreground text-sm font-extrabold hover:brightness-110 active:scale-[0.98] transition-all flex items-center justify-center gap-2 disabled:cursor-wait disabled:opacity-75"
                     whileTap={{ scale: 0.98 }}
                   >
-                    Continue <ChevronRight className="h-4 w-4" />
+                    {checkingStudentId ? <><LoaderCircle className="h-4 w-4 animate-spin" /> Checking Student ID…</> : <>Continue <ChevronRight className="h-4 w-4" /></>}
                   </motion.button>
                 </motion.div>
               )}
@@ -361,7 +431,13 @@ export function RegistrationPage() {
                     {submitError && (
                       <div role="alert" className="flex items-start gap-2 rounded-xl border border-destructive/20 bg-destructive/8 p-3 text-sm text-destructive">
                         <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-                        <span>{submitError}</span>
+                        <div className="min-w-0">
+                          <span>{submitError}</span>
+                          {duplicateEmail && <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs font-bold">
+                            <Link to="/admin" className="underline underline-offset-2">Sign In</Link>
+                            <Link to="/auth/forgot-password" className="underline underline-offset-2">Forgot Password</Link>
+                          </div>}
+                        </div>
                       </div>
                     )}
 
@@ -371,7 +447,7 @@ export function RegistrationPage() {
                         ← Back
                       </button>
                       <Button type="submit" variant="primary" size="lg" isLoading={loading} className="flex-1 h-11">
-                        Create Account
+                        {loading ? "Creating account…" : "Create Account"}
                       </Button>
                     </div>
                   </form>

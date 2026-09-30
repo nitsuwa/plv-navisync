@@ -896,7 +896,13 @@ export function AdminMapBuilderPage() {
       if (existingId) {
         const existing = campuses.find((item) => item.id === existingId);
         if (!existing?.databaseUpdatedAt) throw new Error("Refresh before editing this campus.");
-        const input = campusInput({ ...existing, ...campus }) as CampusUpdateInput;
+        const requestedVisibility = campus.lifecycleStatus === "coming_soon" ? "coming_soon" : "draft";
+        const canChangeVisibility = ["draft", "coming_soon", "unpublished"].includes(existing.lifecycleStatus ?? "");
+        const currentVisibility = existing.lifecycleStatus === "coming_soon" ? "coming_soon" : "draft";
+        const visibilityChange = canChangeVisibility && requestedVisibility !== currentVisibility
+          ? { status: requestedVisibility }
+          : {};
+        const input = { ...campusInput({ ...existing, ...campus }), ...visibilityChange } as CampusUpdateInput;
         if (shouldLogCampusDiagnostics) console.debug("[AdminMapBuilderPage] campusService.update start", { id: existingId });
         let updated = await campusService.update(existingId, input, existing.databaseUpdatedAt);
         if (requestedLogo || requestedOverview) {

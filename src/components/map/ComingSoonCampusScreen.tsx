@@ -23,7 +23,12 @@ export function ComingSoonCampusScreen({ campus, campuses, onSelectCampus, fullS
   return (
     <section
       aria-label={`${campus.name} Coming Soon`}
-      className={cn("relative isolate flex w-full flex-col overflow-hidden bg-[#f5f8fc] text-slate-900", fullScreen ? "min-h-[100dvh]" : "min-h-[calc(100dvh-56px)]")}
+      className={cn(
+        "relative isolate flex w-full flex-col overflow-hidden bg-[#f5f8fc] text-slate-900",
+        fullScreen
+          ? "min-h-[100dvh]"
+          : "min-h-[calc(100dvh-4rem-env(safe-area-inset-bottom,0px))] md:min-h-[calc(100dvh-76px)]",
+      )}
       style={{ "--campus-accent": accent } as CSSProperties}
     >
       <div aria-hidden="true" className="pointer-events-none absolute inset-0 -z-10 overflow-hidden">
@@ -86,7 +91,7 @@ export function ComingSoonCampusScreen({ campus, campuses, onSelectCampus, fullS
         </div>
       </header>
 
-      <div className="mx-auto flex w-full max-w-5xl flex-1 items-center justify-center px-4 py-8 sm:px-8 sm:py-12">
+      <div className="mx-auto flex w-full max-w-5xl flex-1 items-center justify-center px-4 py-5 sm:px-8 sm:py-12">
         <div className="animate-in fade-in slide-in-from-bottom-2 duration-500 motion-reduce:animate-none motion-reduce:slide-in-from-bottom-0 relative w-full max-w-2xl overflow-hidden rounded-[2rem] border border-white/90 bg-white/85 px-6 py-9 text-center shadow-[0_24px_80px_-42px_rgba(15,35,65,0.35)] backdrop-blur-xl sm:px-12 sm:py-14">
           <div aria-hidden="true" className="absolute inset-x-0 top-0 h-1" style={{ background: `linear-gradient(90deg, transparent, ${accent}, #68b9e8, transparent)` }} />
           <div className="relative mx-auto mb-7 flex h-24 w-24 items-center justify-center rounded-[1.8rem] bg-slate-50 ring-1 ring-slate-200/80 sm:h-28 sm:w-28" style={{ color: accent }}>
@@ -104,7 +109,7 @@ export function ComingSoonCampusScreen({ campus, campuses, onSelectCampus, fullS
             <span className="h-1.5 w-1.5 rounded-full bg-sky-500" /> Coming Soon
           </div>
           <p className="mx-auto mt-5 max-w-md text-sm leading-6 text-slate-600 sm:text-base sm:leading-7">
-            We’re preparing the interactive campus map. Navigation and facility information will be available here once the map is published.
+            Campus navigation is being prepared. The interactive map and facility information will be available once it is published.
           </p>
           <div className="mx-auto mt-6 inline-flex max-w-full items-center gap-2 rounded-full bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-600 ring-1 ring-slate-200/80">
             <MapPin className="h-3.5 w-3.5 shrink-0" style={{ color: accent }} aria-hidden="true" />
@@ -115,19 +120,19 @@ export function ComingSoonCampusScreen({ campus, campuses, onSelectCampus, fullS
             <Route className="h-4 w-4" />
             <span className="h-px flex-1 bg-gradient-to-l from-transparent to-slate-300" />
           </div>
-          {mainCampus && mainCampus.id !== campus.id && (
-            <button
-              type="button"
-              onClick={() => onSelectCampus(mainCampus.id)}
-              className="mt-7 inline-flex min-h-11 items-center justify-center gap-2 rounded-xl px-5 text-sm font-extrabold text-white shadow-sm transition hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2"
-              style={{ background: accent }}
-            >
-              <Building2 className="h-4 w-4" aria-hidden="true" /> Back to {mainCampus.name}
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={() => mainCampus && mainCampus.id !== campus.id ? onSelectCampus(mainCampus.id) : setSelectorOpen(true)}
+            className="mt-7 inline-flex min-h-11 max-w-full items-center justify-center gap-2 rounded-xl px-5 text-sm font-extrabold text-white shadow-sm transition hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2"
+            style={{ background: accent }}
+          >
+            <Building2 className="h-4 w-4" aria-hidden="true" />
+            <span className="truncate">
+              {mainCampus && mainCampus.id !== campus.id ? `Back to ${mainCampus.name}` : "View another campus"}
+            </span>
+          </button>
         </div>
       </div>
-      <div className="h-[max(0.75rem,env(safe-area-inset-bottom))]" aria-hidden="true" />
     </section>
   );
 }
