@@ -24,14 +24,16 @@ import type {
   FloorEntranceRamp,
   BuildingEntranceEdge,
   CampusEntrance,
+  ExteriorEmergencyStair,
 } from "./types";
 import { FloorGroundSurface } from "./FloorGroundSurface";
 import { FloorAccessibleRampArtwork, FloorEntranceStepsArtwork, FloorExteriorZoneArtwork } from "./FloorExteriorVisuals";
 import { getFloorShapeBounds, getFloorShapeRegions } from "../../lib/floorShape";
 import { FloorFurnitureSymbol } from "./FloorFurnitureSymbol";
-import { ElevatorSymbol, ExteriorEmergencyFloorStairSymbol, FloorLabelArtwork, FloorPathArtwork, FloorRoomArtwork, FloorRoomLabelArtwork, FloorWallArtwork, RampSymbol, StairsSymbol, WallOpeningSymbol } from "./FloorMapVisuals";
+import { ElevatorSymbol, FloorLabelArtwork, FloorPathArtwork, FloorRoomArtwork, FloorRoomLabelArtwork, FloorWallArtwork, RampSymbol, StairsSymbol, WallOpeningSymbol } from "./FloorMapVisuals";
 import { resolveWallOpeningGeometry } from "../../lib/floorGeometry";
 import { EntranceDirectionBadge, entranceDirectionBadgePlacement } from "./EntranceDirectionBadge";
+import { ExteriorEmergencyFloorModule, exteriorStairPresentationBounds } from "./ExteriorEmergencyFloorModule";
 import {
   exteriorZoneAccessFeatureGeometry,
   exteriorZoneGeometry,
@@ -57,7 +59,10 @@ export interface ReadonlyFloorPlanViewport {
  * student-facing SVG using only `0 0 canvasW canvasH` would clip verandas and
  * their entrance steps/ramp even though the Admin editor shows them.
  */
-export function readonlyFloorPlanViewport(floor?: FloorPlan | null): ReadonlyFloorPlanViewport {
+export function readonlyFloorPlanViewport(
+  floor?: FloorPlan | null,
+  exteriorEmergencyStairs: readonly ExteriorEmergencyStair[] = [],
+): ReadonlyFloorPlanViewport {
   const canvasW = Math.max(1, floor?.canvasW || DEFAULT_FLOOR_CANVAS_W);
   const canvasH = Math.max(1, floor?.canvasH || DEFAULT_FLOOR_CANVAS_H);
   let minX = 0;
@@ -116,7 +121,15 @@ export function readonlyFloorPlanViewport(floor?: FloorPlan | null): ReadonlyFlo
   // Include those authored bounds too, while preserving the normal viewBox for
   // the common case where every object is inside the floor.
   (floor?.furniture ?? []).forEach((item) => includeRotatedRect(item.x, item.y, item.width, item.height, item.rotation));
-  (floor?.stairs ?? []).forEach((item) => includeRotatedRect(item.x, item.y, item.width, item.height, item.rotation));
+  (floor?.stairs ?? []).forEach((item) => {
+    if (item.exteriorEmergencyStairId) {
+      const owner = exteriorEmergencyStairs.find((stair) => stair.id === item.exteriorEmergencyStairId);
+      const bounds = exteriorStairPresentationBounds(item, canvasW, canvasH, owner?.visualSize);
+      includeRect(bounds.x, bounds.y, bounds.width, bounds.height);
+      return;
+    }
+    includeRotatedRect(item.x, item.y, item.width, item.height, item.rotation);
+  });
   (floor?.ramps ?? []).forEach((item) => includeRotatedRect(item.x, item.y, item.width, item.height, item.rotation));
   (floor?.elevators ?? []).forEach((item) => includeRotatedRect(item.x, item.y, item.width, item.height, item.rotation));
 
@@ -269,15 +282,25 @@ function WindowVisual({ window: win, wall, background }: { window: FloorWindow; 
 }
 // ── Stairs rendering ────────────────────────────────────────────────────────
 
-function StairsVisual({ stairs, floorIndex, floorCount }: { stairs: FloorStairs; floorIndex: number; floorCount: number }) {
+function StairsVisual({ stairs, floorIndex, floorCount, canvasW, canvasH, exteriorEmergencyStairs }: {
+  stairs: FloorStairs;
+  floorIndex: number;
+  floorCount: number;
+  canvasW: number;
+  canvasH: number;
+  exteriorEmergencyStairs: readonly ExteriorEmergencyStair[];
+}) {
   const cx = stairs.x + stairs.width / 2;
   const cy = stairs.y + stairs.height / 2;
   const generatedExteriorStair = Boolean(stairs.exteriorEmergencyStairId);
+  const owner = generatedExteriorStair
+    ? exteriorEmergencyStairs.find((stair) => stair.id === stairs.exteriorEmergencyStairId)
+    : undefined;
   return (
     <g data-testid="readonly-stairs" data-stairs-id={stairs.id} data-floor-title={stairs.label}
       transform={generatedExteriorStair ? undefined : `rotate(${stairs.rotation ?? 0},${cx},${cy})`}>
       {generatedExteriorStair
-        ? <ExteriorEmergencyFloorStairSymbol item={stairs} selected={false} />
+        ? <ExteriorEmergencyFloorModule item={stairs} canvasW={canvasW} canvasH={canvasH} visualSize={owner?.visualSize} selected={false} interactive={false} />
         : <StairsSymbol item={stairs} floorIndex={floorIndex} floorCount={floorCount} />}
     </g>
   );
@@ -343,6 +366,7 @@ function RoomLabelVisual({ room, hovered, highlighted }: Pick<RoomVisualProps, "
 }
 export interface ReadonlyFloorPlanSceneProps {
   floor: FloorPlan;
+  exteriorEmergencyStairs?: readonly ExteriorEmergencyStair[];
   floorIndex?: number;
   floorCount?: number;
   /** Building entrances are supplied separately because FloorPlan stores only
@@ -365,6 +389,7 @@ export interface ReadonlyFloorPlanSceneProps {
  */
 export function ReadonlyFloorPlanScene({
   floor,
+  exteriorEmergencyStairs = [],
   floorIndex = 0,
   floorCount = 1,
   entrances = [],
@@ -549,7 +574,8 @@ export function ReadonlyFloorPlanScene({
 
       {/* Stairs */}
       {visibleStairs.map((stair) => (
-        <StairsVisual key={stair.id} stairs={stair} floorIndex={floorIndex} floorCount={floorCount} />
+        <StairsVisual key={stair.id} stairs={stair} floorIndex={floorIndex} floorCount={floorCount}
+          canvasW={canvasW} canvasH={canvasH} exteriorEmergencyStairs={exteriorEmergencyStairs} />
       ))}
 
       {/* Ramps */}

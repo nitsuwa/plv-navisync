@@ -12,7 +12,7 @@ import { MARKER_STYLES } from "../../data/mapData";
 import { DECOR_ASSET_MAP, groundTypeForDecorType, isDecorAreaType } from "./constants";
 import { DecorAssetArt } from "./DecorAssetVisual";
 import { CampusGateVisual } from "./CampusGateVisual";
-import { effectiveStackKey } from "../../lib/campusStack";
+import { effectiveStackKey, sortOutdoorGroundAssets } from "../../lib/campusStack";
 import { BUILDING_ENTRANCE_TYPE_COLORS, entranceDisplayName, entranceWorldPosition, normalizeEntranceType } from "../../lib/buildingEntrances";
 import { exteriorEmergencyStairWorldPosition } from "../../lib/exteriorEmergencyStairs";
 import { OutdoorPathNetworkArtwork } from "./OutdoorPathNetworkVisuals";
@@ -315,7 +315,7 @@ export function OutdoorGroundAreaArtwork({ asset, x = asset.x, y = asset.y, widt
   const kind = asset.groundType ?? groundTypeForDecorType(asset.type) ?? "grass";
   const appearance = campusAreaGroundAppearance(asset);
   const accent = groundAreaAccent[kind as keyof typeof groundAreaAccent] ?? groundAreaAccent.grass;
-  if (asset.surfaceCells?.length) {
+  if (asset.surfaceCells?.length && asset.type !== "parking-lot") {
     const size = Math.max(4, asset.surfaceCellSize ?? gridSize);
     return (
       <g data-testid="campus-surface-artwork" data-surface-material={kind}>
@@ -329,11 +329,18 @@ export function OutdoorGroundAreaArtwork({ asset, x = asset.x, y = asset.y, widt
     );
   }
   const descriptor = DECOR_ASSET_MAP[asset.type];
+  // Older persisted Parking Lots can arrive as the generic Ground Area type
+  // with groundType=parking. Keep their original geometry, but recover the
+  // canonical Parking Lot artwork instead of drawing the generic stall sketch.
+  const parkingLotDescriptor = kind === "parking" ? DECOR_ASSET_MAP["parking-lot"] : undefined;
   const drawWidth = Math.max(30, width ?? asset.width ?? (descriptor?.defaultWidth ?? 150) * decorRenderScale(asset.scale));
   const drawHeight = Math.max(24, height ?? asset.height ?? (descriptor?.defaultHeight ?? 95) * decorRenderScale(asset.scale));
   const areaAsset = asset.type !== "ground-area";
   const left = x - drawWidth / 2;
   const top = y - drawHeight / 2;
+  // Parking artwork must remain identical in the Student map while its Admin
+  // object is selected; Canvas already draws separate selection handles.
+  const selectedArtwork = selected && kind !== "parking";
   const horizontal = drawWidth >= drawHeight;
   const span = horizontal ? drawWidth : drawHeight;
   const depth = horizontal ? drawHeight : drawWidth;
@@ -344,19 +351,19 @@ export function OutdoorGroundAreaArtwork({ asset, x = asset.x, y = asset.y, widt
     <g data-testid="campus-ground-area-artwork" data-ground-type={kind}>
       <rect x={left} y={top} width={drawWidth} height={drawHeight}
         rx={areaAsset ? 0 : kind === "plaza" ? 5 : 10} fill={appearance.color}
-        stroke={selected ? "var(--accent)" : areaAsset ? "transparent" : kind === "parking" ? "#626b70" : "transparent"}
-        strokeWidth={selected ? 2 : areaAsset ? 0 : kind === "parking" ? 0.8 : 0} />
+        stroke={selectedArtwork ? "var(--accent)" : areaAsset ? "transparent" : kind === "parking" ? "#626b70" : "transparent"}
+        strokeWidth={selectedArtwork ? 2 : areaAsset ? 0 : kind === "parking" ? 0.8 : 0} />
       {appearance.pattern && <rect x={left} y={top} width={drawWidth} height={drawHeight}
         fill={`url(#${appearance.pattern})`} opacity={0.75} pointerEvents="none" />}
       {kind === "parking" && (
-        <g data-testid="parking-stalls" pointerEvents="none" opacity={selected ? 0.86 : 0.68}>
-          {asset.type === "parking-lot" && descriptor ? (
+        <g data-testid="parking-stalls" pointerEvents="none" opacity={0.68}>
+          {parkingLotDescriptor ? (
             <svg x={left} y={top} width={drawWidth} height={drawHeight}
-              viewBox={`0 0 ${descriptor.defaultWidth} ${descriptor.defaultHeight}`}
+              viewBox={`0 0 ${parkingLotDescriptor.defaultWidth} ${parkingLotDescriptor.defaultHeight}`}
               preserveAspectRatio="none" overflow="hidden">
               {/* Keep the canonical Admin Parking Lot surface as well as its
                   markings and vehicles across editor, preview, and Student. */}
-              <DecorAssetArt descriptor={descriptor} />
+              <DecorAssetArt descriptor={parkingLotDescriptor} />
             </svg>
           ) : (
           <g>{horizontal ? (() => {
@@ -562,18 +569,28 @@ export interface ReadonlyOutdoorCampusSceneProps {
 export function ReadonlyOutdoorCampusScene({ campus, zoom = 1, showBuildings = true, showLabels = true, selectedBuildingId, onSelectBuilding, onDoubleClickBuilding, onClickEntrance }: ReadonlyOutdoorCampusSceneProps) {
   const buildingById = new Map(campus.buildings.map((building) => [building.id, building]));
   const stack: { zOrder: number; order: number; node: ReactNode }[] = [];
+  const groundAreaAssets = sortOutdoorGroundAssets([...campus.decorAssets]);
   if (campus.paths.length) stack.push({ zOrder: -1000, order: 0, node: <OutdoorPathNetworkArtwork key="campus-path-network" paths={campus.paths} /> });
   if (showBuildings) {
     campus.buildings.forEach((building, index) => stack.push({ zOrder: effectiveStackKey("building", building.zOrder, index), order: index, node: <OutdoorBuildingVisual key={`building-${building.id}`} building={building} selected={selectedBuildingId === building.id} onSelect={onSelectBuilding} onDoubleClick={onDoubleClickBuilding} showName={zoom > 0.7 && building.name !== "New Building"} showFloorCount labelLayout="editor" showLabels={showLabels} bodyOpacity={0.82} /> }));
   }
-  campus.decorAssets.forEach((asset, index) => stack.push({
-    // Ground surfaces are the back-most authored layer in both Admin and
-    // read-only scenes, so paths and physical objects remain legible above
-    // grass, plazas, and parking even when a legacy zOrder is present.
-    zOrder: isDecorAreaType(asset.type) ? -2000 + index : effectiveStackKey("decorAsset", asset.zOrder, index),
+  // Keep the semantic ground layer behind paths and physical objects while
+  // honoring its authored order exactly as Admin Canvas does. Overlapping
+  // areas such as a parking lot and plaza rely on this order for their artwork
+  // to remain visible in the read-only map.
+  groundAreaAssets.forEach((asset, index) => stack.push({
+    zOrder: -2000 + index,
     order: index,
     node: <OutdoorDecorVisual key={`decor-${asset.id}`} asset={asset} gridSize={campus.gridSize} />,
   }));
+  campus.decorAssets.forEach((asset, index) => {
+    if (isDecorAreaType(asset.type)) return;
+    stack.push({
+      zOrder: effectiveStackKey("decorAsset", asset.zOrder, index),
+      order: index,
+      node: <OutdoorDecorVisual key={`decor-${asset.id}`} asset={asset} gridSize={campus.gridSize} />,
+    });
+  });
   stack.sort((a, b) => a.zOrder - b.zOrder || a.order - b.order);
   return (
     <g data-testid="readonly-outdoor-scene">

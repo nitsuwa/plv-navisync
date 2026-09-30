@@ -115,6 +115,24 @@ describe("central authentication bootstrap", () => {
     expect(result.current.status).toBe("unauthenticated");
   });
 
+  it("ignores a queued sign-in event when a newer sign-out arrives first", async () => {
+    mocks.getSession.mockResolvedValueOnce({ data: { session: null }, error: null });
+    const { result } = renderHook(() => useAuth(), { wrapper });
+    await waitFor(() => expect(result.current.status).toBe("unauthenticated"));
+
+    await act(async () => {
+      authListener?.("SIGNED_IN", session);
+      authListener?.("SIGNED_OUT", null);
+      await Promise.resolve();
+    });
+
+    expect(result.current.session).toBeNull();
+    expect(result.current.profile).toBeNull();
+    expect(result.current.isAdmin).toBe(false);
+    expect(result.current.username).toBe("");
+    expect(mocks.maybeSingle).not.toHaveBeenCalled();
+  });
+
   it("keeps a previously verified role during a temporary profile/network failure", async () => {
     const { result } = renderHook(() => useAdminAuth(), { wrapper });
     await waitFor(() => expect(result.current.isAdmin).toBe(true));

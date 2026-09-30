@@ -33,7 +33,8 @@ export async function checkStudentIdAvailability(
     p_student_number: normalized,
   });
   if (error) throw error;
-  return data === true;
+  if (typeof data !== "boolean") throw new Error("student_id_availability_invalid_response");
+  return data;
 }
 
 export function splitStudentName(fullName: string): { firstName: string; lastName: string } {
