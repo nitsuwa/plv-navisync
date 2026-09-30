@@ -1496,6 +1496,10 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      check_student_id_availability: {
+        Args: { p_student_number: string }
+        Returns: boolean
+      }
       campus_is_published: { Args: { p_campus_id: string }; Returns: boolean }
       clear_admin_activity_history: { Args: never; Returns: string }
       is_admin: { Args: never; Returns: boolean }

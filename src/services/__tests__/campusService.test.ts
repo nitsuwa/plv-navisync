@@ -85,7 +85,7 @@ describe("normalizeCampusCode (DB contract: ^[A-Z0-9][A-Z0-9_-]{0,29}$)", () => 
 describe("userFacingCampusMessage (concise, no DB internals leaked)", () => {
   it("maps known PostgREST codes to friendly one-liners", () => {
     expect(userFacingCampusMessage(new CampusServiceError({ operation: "create campus", message: "raw constraint text", code: "23514" }))).toBe(
-      "Some campus details don't meet the required format. Check the code, name, and coordinates."
+      "Campus could not be saved. Please check the campus details."
     );
     expect(userFacingCampusMessage(new CampusServiceError({ operation: "create campus", message: "raw", code: "23505" }))).toBe(
       "A campus with this code already exists. Choose a different code."
@@ -179,6 +179,23 @@ describe("createCampus (create/INSERT boundary)", () => {
       })
     );
     expect(created).toMatchObject({ id: "c1", code: "TST", canvasW: 900, canvasH: 680 });
+  });
+
+  it("maps Coming Soon status constraint errors to a visibility-specific message", () => {
+    expect(userFacingCampusMessage(new CampusServiceError({
+      operation: "create campus",
+      message: 'new row for relation "campuses" violates check constraint "campuses_status_check"',
+      code: "23514",
+      details: "Failing row contains (..., coming_soon, ...).",
+    }))).toBe("Could not save the campus visibility setting. Please try again.");
+  });
+
+  it("maps the legacy private-draft lifecycle trigger error to a visibility-specific message", () => {
+    expect(userFacingCampusMessage(new CampusServiceError({
+      operation: "create campus",
+      message: "new campuses must begin as private drafts",
+      code: "23514",
+    }))).toBe("Could not save the campus visibility setting. Please try again.");
   });
 
   it("creates a Coming Soon row without marking it published", async () => {

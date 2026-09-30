@@ -19,11 +19,50 @@ import type { Session } from "@supabase/supabase-js";
 import { supabase, isConnected, type Profile } from "../lib/supabase";
 
 export type AuthStatus = "initializing" | "authenticated" | "unauthenticated" | "error";
+export type PasswordRecoveryState = "idle" | "processing" | "ready" | "invalid" | "complete";
+
+const RECOVERY_SESSION_KEY = "plv-navisync:password-recovery-pending";
+
+function isPasswordResetRoute(): boolean {
+  return typeof window !== "undefined" && window.location.pathname === "/auth/reset-password";
+}
+
+function hasAuthRedirectPayload(): boolean {
+  if (typeof window === "undefined") return false;
+  const query = new URLSearchParams(window.location.search);
+  const hash = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+  return [query, hash].some((params) =>
+    params.has("code") || params.has("type") || params.has("token_hash") || params.has("access_token") ||
+    params.has("error") || params.has("error_code") || params.has("error_description"));
+}
+
+function hasAuthRedirectError(): boolean {
+  if (typeof window === "undefined") return false;
+  const query = new URLSearchParams(window.location.search);
+  const hash = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+  return [query, hash].some((params) => params.has("error") || params.has("error_code") || params.has("error_description"));
+}
+
+function hasRecoveryMarker(): boolean {
+  try { return window.sessionStorage.getItem(RECOVERY_SESSION_KEY) === "1"; }
+  catch { return false; }
+}
+
+function setRecoveryMarker(active: boolean): void {
+  try {
+    if (active) window.sessionStorage.setItem(RECOVERY_SESSION_KEY, "1");
+    else window.sessionStorage.removeItem(RECOVERY_SESSION_KEY);
+  } catch {
+    // Recovery still works for the current page if storage is unavailable.
+  }
+}
 
 export interface AuthState {
   session: Session | null;
   profile: Profile | null;
   status: AuthStatus;
+  /** Central Supabase recovery-link lifecycle; no page owns another auth listener. */
+  recoveryState: PasswordRecoveryState;
   loading: boolean;
   error: string | null;
   isAdmin: boolean;
@@ -44,6 +83,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [status, setStatus] = useState<AuthStatus>("initializing");
+  const [recoveryState, setRecoveryState] = useState<PasswordRecoveryState>(() =>
+    isPasswordResetRoute() ? "processing" : "idle");
+  const recoveryStateRef = useRef(recoveryState);
   const [error, setError] = useState<string | null>(null);
   const sessionRef = useRef<Session | null>(null);
   const profileRef = useRef<Profile | null>(null);
@@ -52,6 +94,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const mountedRef = useRef(false);
   const pendingProfileRef = useRef<{ userId: string; generation: number; promise: Promise<void> } | null>(null);
   const retryRef = useRef<() => Promise<void>>(async () => {});
+  // Capture before Supabase consumes/cleans the callback URL.
+  const recoveryUrlRef = useRef(isPasswordResetRoute() && hasAuthRedirectPayload());
+  const recoveryUrlErrorRef = useRef(isPasswordResetRoute() && hasAuthRedirectError());
+
+  const updateRecoveryState = useCallback((next: PasswordRecoveryState) => {
+    recoveryStateRef.current = next;
+    setRecoveryState(next);
+  }, []);
 
   const updateSession = useCallback((next: Session | null) => {
     sessionRef.current = next;
@@ -83,8 +133,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (profileError) {
           setError(PROFILE_RETRY_MESSAGE);
           // A transient profile request must not evict a role already verified
-          // in this runtime. On a cold/offline start, keep the startup gate up.
-          updateStatus(profileRef.current?.id === userId ? "authenticated" : "error");
+          // in this runtime. A password-recovery route needs only the recovery
+          // session, so don't block its password form on an unrelated profile read.
+          updateStatus(recoveryStateRef.current === "ready" || profileRef.current?.id === userId ? "authenticated" : "error");
           return;
         }
 
@@ -96,7 +147,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } catch {
         if (!mountedRef.current || generation !== generationRef.current) return;
         setError(PROFILE_RETRY_MESSAGE);
-        updateStatus(profileRef.current?.id === userId ? "authenticated" : "error");
+        updateStatus(recoveryStateRef.current === "ready" || profileRef.current?.id === userId ? "authenticated" : "error");
       }
     })();
 
@@ -158,7 +209,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       if (!data.session) {
         clearSession();
+        if (isPasswordResetRoute() && recoveryStateRef.current !== "ready") {
+          if (recoveryUrlRef.current && !recoveryUrlErrorRef.current) {
+            // A callback URL can still emit PASSWORD_RECOVERY just after the
+            // initial session read. Keep the page in its verifying state briefly.
+            updateRecoveryState("processing");
+            window.setTimeout(() => {
+              if (recoveryStateRef.current !== "processing") return;
+              setRecoveryMarker(false);
+              updateRecoveryState("invalid");
+            }, 1500);
+          } else {
+            setRecoveryMarker(false);
+            updateRecoveryState("invalid");
+          }
+        }
         return;
+      }
+      if (isPasswordResetRoute()) {
+        if (recoveryUrlRef.current || hasRecoveryMarker()) {
+          setRecoveryMarker(true);
+          updateRecoveryState("ready");
+        } else {
+          // A normal signed-in session is not evidence that a recovery link was used.
+          updateRecoveryState("invalid");
+        }
       }
       await adoptSession(data.session);
     } catch {
@@ -166,7 +241,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setError(PROFILE_RETRY_MESSAGE);
       updateStatus(profileRef.current ? "authenticated" : "error");
     }
-  }, [adoptSession, clearSession, updateStatus]);
+  }, [adoptSession, clearSession, updateRecoveryState, updateStatus]);
 
   retryRef.current = restoreSession;
 
@@ -181,8 +256,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // INITIAL_SESSION is deliberately ignored here: getSession is the single
     // authoritative initial restore read, avoiding transient-null event races.
     const { data: listener } = supabase.auth.onAuthStateChange((event, nextSession) => {
-      if (!mountedRef.current || event === "INITIAL_SESSION") return;
+      if (!mountedRef.current) return;
+      if (event === "PASSWORD_RECOVERY") {
+        setRecoveryMarker(true);
+        updateRecoveryState("ready");
+      }
+      if (event === "USER_UPDATED" && hasRecoveryMarker()) {
+        updateRecoveryState("complete");
+      }
+      if (event === "INITIAL_SESSION") return;
       if (event === "SIGNED_OUT") {
+        setRecoveryMarker(false);
+        updateRecoveryState("idle");
         clearSession();
         return;
       }
@@ -225,7 +310,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       document.removeEventListener("visibilitychange", onVisibility);
       listener.subscription.unsubscribe();
     };
-  }, [adoptSession, clearSession, loadProfile, restoreSession]);
+  }, [adoptSession, clearSession, loadProfile, restoreSession, updateRecoveryState]);
 
   const refreshProfile = useCallback(async () => {
     if (!supabase) return;
@@ -256,9 +341,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const role = profile?.role === "student" ? "student" : profile?.role === "student_org" ? "student_org" : "faculty";
 
   const value = useMemo<AuthState>(() => ({
-    session, profile, status, loading: status === "initializing" || status === "error", error,
+    session, profile, status, recoveryState, loading: status === "initializing" || status === "error", error,
     isAdmin, isStudent, isStudentOrg, username, role, refreshProfile, retryBootstrap, signOut,
-  }), [session, profile, status, error, isAdmin, isStudent, isStudentOrg, username, role, refreshProfile, retryBootstrap, signOut]);
+  }), [session, profile, status, recoveryState, error, isAdmin, isStudent, isStudentOrg, username, role, refreshProfile, retryBootstrap, signOut]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
@@ -272,6 +357,7 @@ const EMPTY_AUTH_STATE: AuthState = {
   session: null,
   profile: null,
   status: "initializing",
+  recoveryState: "idle",
   loading: true,
   error: null,
   isAdmin: false,

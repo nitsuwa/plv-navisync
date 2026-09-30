@@ -1,3 +1,5 @@
+import type { CampusLifecycleStatus } from "../../types/campusLifecycle";
+
 /** Campus status */
 export type CampusStatus = "active" | "hidden" | "archived";
 
@@ -1024,7 +1026,7 @@ export interface Campus {
   logoPath?: string;
   overviewImagePath?: string;
   isDefault?: boolean;
-  lifecycleStatus?: "draft" | "coming_soon" | "published" | "unpublished" | "archived";
+  lifecycleStatus?: CampusLifecycleStatus;
 }
 
 // ── Keep CampusSettings for backward compatibility with editor ──────────────

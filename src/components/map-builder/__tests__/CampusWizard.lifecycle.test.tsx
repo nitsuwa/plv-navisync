@@ -31,4 +31,23 @@ describe("CampusWizard student visibility", () => {
       visibleToStudents: true,
     });
   });
+
+  it("offers visibility changes for draft campuses but not published campuses", () => {
+    const props = {
+      step: 4 as const,
+      onNext: vi.fn(),
+      onBack: vi.fn(),
+      onFinish: vi.fn().mockResolvedValue(true),
+      onClose: vi.fn(),
+    };
+    const { rerender } = render(
+      <CampusWizard {...props} draft={{ id: "draft-1", name: "Draft Campus", code: "DRAFT", lifecycleStatus: "draft" }} />,
+    );
+    expect(screen.getByText("Student Visibility")).toBeInTheDocument();
+
+    rerender(
+      <CampusWizard {...props} draft={{ id: "published-1", name: "Published Campus", code: "LIVE", lifecycleStatus: "published" }} />,
+    );
+    expect(screen.queryByText("Student Visibility")).not.toBeInTheDocument();
+  });
 });

@@ -19,7 +19,7 @@ describe("ComingSoonCampusScreen", () => {
     render(<ComingSoonCampusScreen campus={campus({})} campuses={[campus({})]} onSelectCampus={vi.fn()} />);
     expect(screen.getByRole("heading", { name: "PLV Annex" })).toBeInTheDocument();
     expect(screen.getByText("Coming Soon")).toBeInTheDocument();
-    expect(screen.getByText(/interactive campus map/i)).toBeInTheDocument();
+    expect(screen.getByText(/Campus navigation is being prepared/i)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /plan route|search rooms|navigate/i })).not.toBeInTheDocument();
   });
 
