@@ -209,4 +209,37 @@ describe("ReadonlyFloorPlanScene", () => {
     const indoorOnly = readonlyFloorPlanViewport({ ...floor, exteriorZones: [], entranceSteps: [], entranceRamps: [] });
     expect(indoorOnly).toEqual({ width: 440, height: 290, offsetX: 0, offsetY: 0 });
   });
+
+  it("places generated emergency stairs outside the floor like the Admin module and includes them in the viewBox", () => {
+    const exteriorStair = {
+      id: "stair-landing-1",
+      x: 412,
+      y: 124,
+      width: 28,
+      height: 42,
+      direction: "both" as const,
+      label: "Exterior Stair",
+      attachment: { edge: "right" as const, offset: 0.5 },
+      exteriorEmergencyStairId: "stair-owner-1",
+    };
+    const owner = {
+      id: "stair-owner-1",
+      visualSize: "medium" as const,
+      width: 28,
+      height: 42,
+      attachment: { edge: "right" as const, offset: 0.5 },
+    };
+    const exteriorFloor = { ...floor, stairs: [exteriorStair] } as FloorPlan;
+    const viewport = readonlyFloorPlanViewport(exteriorFloor, [owner] as never);
+    expect(viewport.width).toBeGreaterThan(440);
+
+    render(<svg><ReadonlyFloorPlanScene floor={exteriorFloor} exteriorEmergencyStairs={[owner] as never} /></svg>);
+    const module = screen.getByTestId("floor-exterior-emergency-module");
+    const stairBody = module.querySelector('[data-testid="exterior-emergency-stair-floor-symbol"] rect:nth-of-type(2)');
+    expect(module).toHaveAttribute("data-edge", "right");
+    expect(Number(stairBody?.getAttribute("x"))).toBeGreaterThan(440);
+    expect(screen.getByTestId("exterior-emergency-exit-badge")).toBeInTheDocument();
+    expect(module.textContent).toContain("STAIR EXIT");
+    expect(screen.queryByTestId("floor-exterior-emergency-hit-target")).not.toBeInTheDocument();
+  });
 });

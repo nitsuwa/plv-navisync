@@ -792,12 +792,19 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
   const currentFloorData  = floorView ? FLOOR_PLANS[floorView.building.id] : null;
   const currentFloor      = currentFloorData?.floors.find(f => f.number === floorView?.floor) ?? currentFloorData?.floors[0];
   const floorNums         = currentFloorData?.floors.map(f => f.number) ?? [];
+  const activeFloorBuilding = useMemo(
+    () => floorView && activeCampus
+      ? activeCampus.buildings.find((building) => building.id === floorView.building.id)
+      : undefined,
+    [activeCampus, floorView],
+  );
+  const activeFloorExteriorStairs = activeFloorBuilding?.exteriorEmergencyStairs ?? [];
   // The authored floor canvas can have semi-outdoor content (for example a
   // veranda) outside its 0..canvasW/H rectangle. Keep that content in the
   // student viewBox without changing any published object coordinates.
   const floorViewport = useMemo(
-    () => readonlyFloorPlanViewport(activeFloorPlan),
-    [activeFloorPlan],
+    () => readonlyFloorPlanViewport(activeFloorPlan, activeFloorExteriorStairs),
+    [activeFloorPlan, activeFloorExteriorStairs],
   );
 
   // ── Event Overlays (approved events for current floor) ───────────────
@@ -2956,7 +2963,8 @@ const buildingFill = (id: string) =>
                   floor={activeFloorPlan}
                   floorIndex={activeFloorOrdinal.index}
                   floorCount={activeFloorOrdinal.count}
-                  entrances={activeCampus?.buildings.find((building) => building.id === floorView.building.id)?.entrances ?? []}
+                  entrances={activeFloorBuilding?.entrances ?? []}
+                  exteriorEmergencyStairs={activeFloorExteriorStairs}
                   interactiveExitDoorIds={interactiveExitDoorIds}
                   mapMode={mapMode}
                   showLabels={platformSettings.showMapLabels}

@@ -26,6 +26,22 @@ vi.mock("../../ui/NavigationProgress", () => ({ NavigationProgress: () => null }
 vi.mock("../../../app/components/ui/sonner", () => ({ Toaster: () => null }));
 
 describe("PublicLayout student entry", () => {
+  it("keeps the existing public Home for a guest", () => {
+    authState.isStudent = false;
+    authState.loading = false;
+    render(
+      <MemoryRouter initialEntries={["/"]}>
+        <Routes>
+          <Route element={<PublicLayout />}>
+            <Route path="/" element={<div>Welcome to NaviSync</div>} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText("Welcome to NaviSync")).toBeInTheDocument();
+  });
+
   it("redirects an authenticated student from the public root to Home", async () => {
     authState.isStudent = true;
     render(

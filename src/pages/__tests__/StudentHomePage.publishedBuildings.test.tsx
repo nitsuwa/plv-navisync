@@ -16,7 +16,7 @@ const publishedCampusState = vi.hoisted(() => ({
 }));
 
 vi.mock("../../hooks/useStudentAuth", () => ({
-  useStudentAuth: () => ({ username: "Test Student", isStudentOrg: false }),
+  useStudentAuth: () => ({ username: "Test Student", isStudent: true, isStudentOrg: false, loading: false }),
 }));
 
 vi.mock("../../hooks/usePublishedCampus", () => ({

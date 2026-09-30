@@ -1,10 +1,12 @@
 import { act, render, screen } from "@testing-library/react";
-import { MemoryRouter } from "react-router";
+import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const authState = vi.hoisted(() => ({
   username: "Test Student",
+  isStudent: true,
   isStudentOrg: false,
+  loading: false,
 }));
 
 vi.mock("../../hooks/useStudentAuth", () => ({
@@ -27,6 +29,8 @@ import { StudentHomePage } from "../StudentHomePage";
 
 describe("StudentHomePage in-scope content", () => {
   beforeEach(() => {
+    authState.isStudent = true;
+    authState.loading = false;
     vi.useFakeTimers();
   });
 
@@ -52,5 +56,20 @@ describe("StudentHomePage in-scope content", () => {
     expect(screen.queryByText("All classes done!")).not.toBeInTheDocument();
     expect(screen.queryByText("Announcements")).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Schedule" })).not.toBeInTheDocument();
+  });
+
+  it("returns a confirmed guest to the existing public Home", () => {
+    authState.isStudent = false;
+    render(
+      <MemoryRouter initialEntries={["/home"]}>
+        <Routes>
+          <Route path="/home" element={<StudentHomePage />} />
+          <Route path="/" element={<div>Existing guest Home</div>} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText("Existing guest Home")).toBeInTheDocument();
+    expect(screen.queryByText(/Good morning/)).not.toBeInTheDocument();
   });
 });

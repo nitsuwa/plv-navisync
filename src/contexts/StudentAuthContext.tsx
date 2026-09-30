@@ -91,6 +91,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const profileRef = useRef<Profile | null>(null);
   const statusRef = useRef<AuthStatus>("initializing");
   const generationRef = useRef(0);
+  const authEventVersionRef = useRef(0);
   const mountedRef = useRef(false);
   const pendingProfileRef = useRef<{ userId: string; generation: number; promise: Promise<void> } | null>(null);
   const retryRef = useRef<() => Promise<void>>(async () => {});
@@ -195,13 +196,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     const startingGeneration = generationRef.current;
+    const startingAuthEventVersion = authEventVersionRef.current;
     if (!profileRef.current) updateStatus("initializing");
     setError(null);
     try {
       const { data, error: sessionError } = await supabase.auth.getSession();
       // An auth event (especially a sign-out in another tab) that arrived
       // while this read was pending takes precedence over its older result.
-      if (!mountedRef.current || startingGeneration !== generationRef.current) return;
+      if (!mountedRef.current || startingGeneration !== generationRef.current
+        || startingAuthEventVersion !== authEventVersionRef.current) return;
       if (sessionError) {
         setError(PROFILE_RETRY_MESSAGE);
         updateStatus(profileRef.current ? "authenticated" : "error");
@@ -266,6 +269,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       if (event === "INITIAL_SESSION") return;
       if (event === "SIGNED_OUT") {
+        authEventVersionRef.current += 1;
         setRecoveryMarker(false);
         updateRecoveryState("idle");
         clearSession();
@@ -275,8 +279,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       // Supabase auth callbacks must stay synchronous. Profile work is queued
       // after the SDK finishes notifying its listeners.
+      const eventVersion = ++authEventVersionRef.current;
       queueMicrotask(() => {
-        if (!mountedRef.current) return;
+        // A newer event (especially SIGNED_OUT in this tab or another tab)
+        // wins over session adoption that has not started yet.
+        if (!mountedRef.current || eventVersion !== authEventVersionRef.current) return;
         void adoptSession(nextSession, event === "SIGNED_IN" || event === "USER_UPDATED");
       });
     });
@@ -332,18 +339,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     clearSession();
   }, [clearSession]);
 
-  const isStudent = !!profile && (profile.role === "student" || profile.role === "student_org") && profile.is_active;
-  const isStudentOrg = !!profile && profile.role === "student_org" && profile.is_active;
-  const isAdmin = !!profile && profile.role === "admin" && profile.is_active;
-  const username = profile
-    ? [profile.first_name, profile.last_name].filter(Boolean).join(" ") || profile.email.split("@")[0] || "Student"
+  // A cached/in-flight profile is never authentication by itself. Only expose
+  // a profile when its id matches the currently adopted Supabase session.
+  const activeProfile = session?.user.id && profile?.id === session.user.id ? profile : null;
+  const isStudent = !!activeProfile && (activeProfile.role === "student" || activeProfile.role === "student_org") && activeProfile.is_active;
+  const isStudentOrg = !!activeProfile && activeProfile.role === "student_org" && activeProfile.is_active;
+  const isAdmin = !!activeProfile && activeProfile.role === "admin" && activeProfile.is_active;
+  const username = activeProfile
+    ? [activeProfile.first_name, activeProfile.last_name].filter(Boolean).join(" ") || activeProfile.email.split("@")[0] || "Student"
     : "";
-  const role = profile?.role === "student" ? "student" : profile?.role === "student_org" ? "student_org" : "faculty";
+  const role = activeProfile?.role === "student" ? "student" : activeProfile?.role === "student_org" ? "student_org" : "faculty";
 
   const value = useMemo<AuthState>(() => ({
-    session, profile, status, recoveryState, loading: status === "initializing" || status === "error", error,
+    session, profile: activeProfile, status, recoveryState, loading: status === "initializing" || status === "error", error,
     isAdmin, isStudent, isStudentOrg, username, role, refreshProfile, retryBootstrap, signOut,
-  }), [session, profile, status, recoveryState, error, isAdmin, isStudent, isStudentOrg, username, role, refreshProfile, retryBootstrap, signOut]);
+  }), [session, activeProfile, status, recoveryState, error, isAdmin, isStudent, isStudentOrg, username, role, refreshProfile, retryBootstrap, signOut]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

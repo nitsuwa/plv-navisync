@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import type { Campus } from "../types";
 import { projectReadonlyOutdoorCampus } from "../../../lib/readonlyOutdoorCampus";
-import { ReadonlyOutdoorCampusScene, exteriorEmergencyStairVisualDimensions } from "../ReadonlyOutdoorVisuals";
+import { OutdoorGroundAreaArtwork, ReadonlyOutdoorCampusScene, exteriorEmergencyStairVisualDimensions } from "../ReadonlyOutdoorVisuals";
 
 const campus = {
   id: "c1",
@@ -53,6 +53,19 @@ describe("ReadonlyOutdoorCampusScene", () => {
     // 3× decor scale. Student Preview must preserve that authored footprint.
     expect(treeArtwork).toHaveAttribute("width", "72");
     expect(treeArtwork).toHaveAttribute("height", "84");
+  });
+
+  it("honors Admin ground-area stacking order in the read-only scene", () => {
+    const parking = { id: "parking", type: "parking-lot" as const, groundType: "parking" as const, x: 200, y: 100, width: 220, height: 90, zOrder: 20 };
+    const plaza = { id: "plaza", type: "plaza-area" as const, groundType: "plaza" as const, x: 200, y: 100, width: 220, height: 90, zOrder: 10 };
+    const projected = projectReadonlyOutdoorCampus({ ...campus, decorAssets: [parking, plaza] });
+    render(<svg><ReadonlyOutdoorCampusScene campus={projected} /></svg>);
+
+    // Admin draws lower zOrder first. The later Parking Lot remains visible
+    // over the overlapping Plaza exactly as it does in the editor.
+    expect(screen.getAllByTestId("readonly-ground-area").map((node) => node.getAttribute("data-ground-type")))
+      .toEqual(["plaza", "parking"]);
+    expect(screen.getByTestId("parking-stalls").querySelector("svg path[fill=\"#cbd5e1\"]")).toBeInTheDocument();
   });
 
   it("keeps the shared building visual pointer-transparent for an admin hit surface", () => {
@@ -141,6 +154,34 @@ describe("ReadonlyOutdoorCampusScene", () => {
     expect(markings.querySelector("svg path")).toHaveAttribute("fill", "#cbd5e1");
     expect(projected.decorAssets[0]).toBe(parkingCampus.decorAssets?.[0]);
     expect(lot.textContent).not.toContain("P");
+  });
+
+  it("recovers canonical Parking Lot artwork for legacy ground-area parking records", () => {
+    const legacyLot = {
+      id: "legacy-parking",
+      type: "ground-area" as const,
+      groundType: "parking" as const,
+      x: 420,
+      y: 360,
+      width: 300,
+      height: 160,
+    };
+    const projected = projectReadonlyOutdoorCampus({ ...campus, decorAssets: [legacyLot] });
+    render(<svg><ReadonlyOutdoorCampusScene campus={projected} /></svg>);
+
+    const artwork = screen.getByTestId("parking-stalls").querySelector("svg");
+    expect(artwork).toHaveAttribute("viewBox", "0 0 120 72");
+    expect(artwork?.querySelector('path[fill="#cbd5e1"]')).toBeInTheDocument();
+    expect(artwork?.querySelectorAll("path")).toHaveLength(4);
+  });
+
+  it("keeps Admin selection styling off the canonical Parking Lot artwork", () => {
+    const asset = { id: "parking", type: "parking-lot" as const, x: 90, y: 60, width: 220, height: 120, groundType: "parking" as const };
+    const { container } = render(<svg><OutdoorGroundAreaArtwork asset={asset} selected /></svg>);
+    const area = container.querySelector('[data-testid="campus-ground-area-artwork"]');
+    expect(area?.querySelector(":scope > rect")).toHaveAttribute("stroke", "transparent");
+    expect(area?.querySelector(":scope > rect")).toHaveAttribute("stroke-width", "0");
+    expect(screen.getByTestId("parking-stalls")).toHaveAttribute("opacity", "0.68");
   });
 
   it("uses a medium legacy default with constrained visual size options", () => {
