@@ -13,3 +13,5 @@ export { RouteErrorState } from "./RouteErrorState";
 export { EventInfoPanel } from "./EventInfoPanel";
 export { ActiveEventsList } from "./ActiveEventsList";
 export { StudentMapControls, type StudentMapControlsProps } from "./StudentMapControls";
+export { StudentFloorPicker, type StudentFloorOption } from "./StudentFloorPicker";
+export { StudentSelectedPlaceCard } from "./StudentSelectedPlaceCard";

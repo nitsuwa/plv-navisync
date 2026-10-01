@@ -36,6 +36,7 @@ export interface RoomDest {
   roomName: string;
   buildingLabel: string;
   buildingCode: string;
+  floorLabel?: string;
   accessNodeId?: string;
   accessDoorId?: string;
   accessDoorIds?: string[];

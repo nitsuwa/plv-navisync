@@ -37,11 +37,11 @@ export function RouteMapOverlay({ points, mode, fading = false, walkProgress, an
   const color = mode === "accessible" ? "#16a34a" : mode === "emergency" ? "#dc2626" : "#1e40af";
   const glowFilter = mode === "standard" ? "url(#route-glow)" : undefined;
   const pathId = "plv-route-path";
-  // When the user prefers reduced motion: skip the draw/dash/scale animations
-  // and the SVG <animate> pulse rings (CSS alone cannot stop <animate>).
-  const motionEnabled = animated && !reducedMotion;
-  const drawAnim = motionEnabled ? { animation: "draw-route 1.4s cubic-bezier(0.4,0,0.2,1) forwards" } : undefined;
-  const antsAnim = motionEnabled ? { animation: "draw-route 1.4s 0.4s ease forwards, dash-flow 1.2s 1.8s linear infinite" } : undefined;
+  // Reveal the route once when it appears. The saved preference controls only
+  // directional-arrow motion, while reduced motion suppresses both effects.
+  const revealEnabled = !reducedMotion;
+  const arrowsMotionEnabled = animated && !reducedMotion;
+  const drawAnim = revealEnabled ? { animation: "draw-route 420ms cubic-bezier(0.22,1,0.36,1) forwards" } : undefined;
 
   return (
     <g data-route-group className={cn("transition-opacity duration-300", fading && "opacity-0")}>
@@ -49,31 +49,24 @@ export function RouteMapOverlay({ points, mode, fading = false, walkProgress, an
         <path id={pathId} d={pathD} />
       </defs>
       {/* Outer shadow trail */}
-      <polyline points={pathStr} fill="none" stroke="rgba(0,0,0,0.12)" strokeWidth={14} strokeLinecap="round" strokeLinejoin="round" />
+      <polyline points={pathStr} fill="none" stroke="rgba(0,0,0,0.12)" strokeWidth={14} strokeLinecap="round" strokeLinejoin="round"
+        pathLength={1} strokeDasharray={revealEnabled ? "1" : "none"} strokeDashoffset={revealEnabled ? 1 : 0} style={drawAnim} />
       {/* White backing */}
-      <polyline points={pathStr} fill="none" stroke="white" strokeWidth={9} strokeLinecap="round" strokeLinejoin="round" />
+      <polyline points={pathStr} fill="none" stroke="white" strokeWidth={9} strokeLinecap="round" strokeLinejoin="round"
+        pathLength={1} strokeDasharray={revealEnabled ? "1" : "none"} strokeDashoffset={revealEnabled ? 1 : 0} style={drawAnim} />
       {/* Glow layer */}
       <polyline
         points={pathStr} fill="none" stroke={color} strokeWidth={8} strokeLinecap="round" strokeLinejoin="round"
         opacity={0.25} filter={glowFilter}
-        strokeDasharray={motionEnabled ? "900" : "none"} strokeDashoffset={motionEnabled ? 900 : 0}
+        pathLength={1} strokeDasharray={revealEnabled ? "1" : "none"} strokeDashoffset={revealEnabled ? 1 : 0}
         style={drawAnim}
       />
       {/* Main animated route line */}
       <polyline
         points={pathStr} fill="none" stroke={color} strokeWidth={5} strokeLinecap="round" strokeLinejoin="round"
-        strokeDasharray={motionEnabled ? "900" : "none"} strokeDashoffset={motionEnabled ? 900 : 0}
+        pathLength={1} strokeDasharray={revealEnabled ? "1" : "none"} strokeDashoffset={revealEnabled ? 1 : 0}
         style={drawAnim}
       />
-      {/* Marching ants overlay */}
-      {motionEnabled && (
-        <polyline
-          points={pathStr} fill="none" stroke="rgba(255,255,255,0.6)" strokeWidth={2}
-          strokeLinecap="round" strokeLinejoin="round" strokeDasharray="8 14"
-          style={antsAnim}
-        />
-      )}
-
       {/* Directional arrows along the route */}
       {points.slice(0, -1).map((p, i) => {
         const next = points[i + 1];
@@ -89,14 +82,14 @@ export function RouteMapOverlay({ points, mode, fading = false, walkProgress, an
             fill={color} opacity={0.5}
             transform={`rotate(${bearing} ${mx} ${my})`}
             data-testid="route-direction-arrow"
-            style={motionEnabled ? { animation: `fade-in 1.4s ${0.6 + i * 0.1}s ease both` } : undefined}
+            style={arrowsMotionEnabled ? { animation: `fade-in 320ms ${Math.min(i * 25, 125)}ms ease both` } : undefined}
           />
         );
       })}
 
       {/* Waypoint checkpoints at each junction */}
       {points.slice(1, -1).map((p, i) => (
-        <g key={`wp${i}`} style={motionEnabled ? { animation: `scale-in 0.3s ${0.8 + i * 0.12}s ease both` } : undefined}>
+        <g key={`wp${i}`} style={revealEnabled ? { animation: `scale-in 260ms ${Math.min(i * 25, 125)}ms ease both` } : undefined}>
           <circle cx={p.x} cy={p.y} r={5} fill="white" stroke={color} strokeWidth={2} opacity={0.85} />
           <circle cx={p.x} cy={p.y} r={2} fill={color} />
         </g>
@@ -120,33 +113,19 @@ export function RouteMapOverlay({ points, mode, fading = false, walkProgress, an
       })()}
 
       {/* Start marker — green with flag */}
-      <g style={motionEnabled ? { animation: "scale-in 0.4s 0.3s ease both" } : undefined}>
+      <g style={revealEnabled ? { animation: "scale-in 300ms 80ms ease both" } : undefined}>
         <circle cx={points[0].x} cy={points[0].y} r={14} fill="#16a34a" stroke="white" strokeWidth={3}
           style={{ filter: "drop-shadow(0 2px 6px rgba(22,163,74,0.4))" }} />
         <circle cx={points[0].x} cy={points[0].y} r={10} fill="none" stroke="rgba(255,255,255,0.5)" strokeWidth={1.5} />
         <text x={points[0].x} y={points[0].y + 4} textAnchor="middle" fill="white" fontSize={11} fontWeight="900" className="select-none">A</text>
-        {/* Pulse ring — disabled when reduced motion */}
-        {motionEnabled && (
-          <circle cx={points[0].x} cy={points[0].y} r={14} fill="none" stroke="#16a34a" strokeWidth={2} opacity={0.4}>
-            <animate attributeName="r" from="14" to="24" dur="2s" repeatCount="indefinite" />
-            <animate attributeName="opacity" from="0.4" to="0" dur="2s" repeatCount="indefinite" />
-          </circle>
-        )}
       </g>
 
       {/* Destination marker — red pin with expanded pulse */}
-      <g style={motionEnabled ? { animation: "scale-in 0.4s 0.5s ease both" } : undefined}>
+      <g style={revealEnabled ? { animation: "scale-in 300ms 140ms ease both" } : undefined}>
         <circle cx={points[points.length - 1].x} cy={points[points.length - 1].y} r={14} fill="#dc2626" stroke="white" strokeWidth={3}
           style={{ filter: "drop-shadow(0 2px 8px rgba(220,38,38,0.5))" }} />
         <circle cx={points[points.length - 1].x} cy={points[points.length - 1].y} r={10} fill="none" stroke="rgba(255,255,255,0.5)" strokeWidth={1.5} />
         <text x={points[points.length - 1].x} y={points[points.length - 1].y + 4} textAnchor="middle" fill="white" fontSize={11} fontWeight="900" className="select-none">B</text>
-        {/* Outer pulse ring — disabled when reduced motion */}
-        {motionEnabled && (
-          <circle cx={points[points.length - 1].x} cy={points[points.length - 1].y} r={14} fill="none" stroke="#dc2626" strokeWidth={2.5} opacity={0.5}>
-            <animate attributeName="r" from="14" to="32" dur="2.2s" repeatCount="indefinite" />
-            <animate attributeName="opacity" from="0.5" to="0" dur="2.2s" repeatCount="indefinite" />
-          </circle>
-        )}
       </g>
     </g>
   );

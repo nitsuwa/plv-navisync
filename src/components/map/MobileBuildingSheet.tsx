@@ -1,11 +1,10 @@
-import { useRef, useCallback, useEffect } from "react";
+import { useRef, useCallback, useEffect, useState } from "react";
 import { X, Navigation, Bookmark, Layers, Flag } from "lucide-react";
-import { motion, useMotionValue, useTransform, animate, useDragControls } from "motion/react";
+import { motion, useMotionValue, useTransform, animate, useDragControls, useReducedMotion } from "motion/react";
 import type { Building } from "../../types";
 import { cn } from "../../lib/utils";
 import type { StudentAuthState } from "../../hooks/useStudentAuth";
 import { useEscToClose } from "../../hooks/useEscToClose";
-import { publishMapSurface } from "../../lib/mapSurface";
 
 interface MobileBuildingSheetProps {
   selected: Building;
@@ -18,71 +17,62 @@ interface MobileBuildingSheetProps {
   saved: Set<string>;
   studentAuth: StudentAuthState;
   hasFloorPlans: boolean;
-  onHeightChange?: (height: number) => void;
+  onExpandedChange?: (expanded: boolean) => void;
 }
 
-const SHEET_HEIGHT = 72;
-const SNAP_THRESHOLD = 80;
+const SNAP_THRESHOLD = 72;
 
 export function MobileBuildingSheet({
   selected, onClose, onDirections, onFloorPlan, onSave, onReport,
   onSignInPrompt, saved, studentAuth, hasFloorPlans,
-  onHeightChange,
+  onExpandedChange,
 }: MobileBuildingSheetProps) {
   useEscToClose(onClose);
   const controls = useDragControls();
   const sheetRef = useRef<HTMLDivElement>(null);
+  const handlePointerStartRef = useRef<{ x: number; y: number } | null>(null);
+  const reducedMotion = useReducedMotion();
+  const [expanded, setExpanded] = useState(false);
 
-  // Signal to MobileBottomNav to hide when sheet is open
-  useEffect(() => {
-    publishMapSurface("building-details");
-    window.dispatchEvent(new CustomEvent("building-sheet-toggle", { detail: { open: true } }));
-    return () => {
-      publishMapSurface("browse");
-      window.dispatchEvent(new CustomEvent("building-sheet-toggle", { detail: { open: false } }));
-    };
-  }, []);
-
-  // Let map controls sit immediately above the actual details card rather
-  // than guessing its height (which varies with content and screen size).
-  useEffect(() => {
-    const element = sheetRef.current;
-    if (!element || !onHeightChange) return;
-    const publishHeight = () => {
-      const height = element.offsetHeight;
-      const bottom = Number.parseFloat(window.getComputedStyle(element).bottom) || 0;
-      onHeightChange(Math.ceil(height + bottom));
-    };
-    publishHeight();
-    if (typeof ResizeObserver === "undefined") {
-      return () => onHeightChange(0);
-    }
-    const observer = new ResizeObserver(publishHeight);
-    observer.observe(element);
-    return () => {
-      observer.disconnect();
-      onHeightChange(0);
-    };
-  }, [onHeightChange]);
+  const setSheetExpanded = useCallback((value: boolean) => {
+    setExpanded(value);
+    onExpandedChange?.(value);
+  }, [onExpandedChange]);
   const dragY = useMotionValue(0);
-  const sheetOpacity = useTransform(dragY, [0, SNAP_THRESHOLD * 2], [1, 0]);
-  const sheetScale = useTransform(dragY, [0, SNAP_THRESHOLD * 2], [1, 0.92]);
+  const sheetOpacity = useTransform(dragY, [0, SNAP_THRESHOLD * 2], [1, 0.9]);
+  const sheetScale = useTransform(dragY, [0, SNAP_THRESHOLD * 2], [1, 0.985]);
   const borderRadius = useTransform(dragY, [0, SNAP_THRESHOLD * 2], [20, 24]);
 
   const handleDragEnd = useCallback((_: any, info: any) => {
     const offset = info.offset.y;
     const velocity = info.velocity.y;
-    if (offset > SNAP_THRESHOLD || velocity > 400) {
-      animate(dragY, SHEET_HEIGHT * window.innerHeight / 100 * 0.6, {
-        type: "spring", stiffness: 300, damping: 25,
-        onComplete: onClose,
-      });
-    } else {
-      animate(dragY, 0, { type: "spring", stiffness: 400, damping: 30 });
-    }
-  }, [onClose, dragY]);
+    const settle = (target: number, onComplete?: () => void) => {
+      if (reducedMotion) {
+        dragY.set(target);
+        onComplete?.();
+        return;
+      }
+      animate(dragY, target, { type: "spring", stiffness: 380, damping: 32, onComplete });
+    };
 
-  useEffect(() => { dragY.set(0); }, [selected.id, dragY]);
+    if (offset < -SNAP_THRESHOLD || velocity < -480) {
+      setSheetExpanded(true);
+      settle(0);
+    } else if (offset > SNAP_THRESHOLD || velocity > 480) {
+      if (expanded) {
+        setSheetExpanded(false);
+        settle(0);
+      } else if (offset > SNAP_THRESHOLD * 1.5 || velocity > 700) {
+        settle(window.innerHeight, onClose);
+      } else {
+        settle(0);
+      }
+    } else {
+      settle(0);
+    }
+  }, [expanded, onClose, dragY, reducedMotion, setSheetExpanded]);
+
+  useEffect(() => { dragY.set(0); setSheetExpanded(false); }, [selected.id, dragY, setSheetExpanded]);
 
   const facilities = ["Lecture Rooms"];
 
@@ -91,9 +81,11 @@ export function MobileBuildingSheet({
       data-no-drag
       data-testid="mobile-building-sheet"
       ref={sheetRef}
-      className="md:hidden fixed inset-x-3 z-50 will-change-transform landscape-minimized"
+      className="md:hidden fixed inset-x-3 z-[60] will-change-transform transition-[height] duration-[220ms] ease-out motion-reduce:transition-none landscape-minimized"
       style={{
-        bottom: "max(0.75rem, env(safe-area-inset-bottom, 0px))",
+        bottom: "calc(4.75rem + env(safe-area-inset-bottom, 0px))",
+        height: expanded ? "84dvh" : "58dvh",
+        maxHeight: "calc(100dvh - 5.25rem - env(safe-area-inset-bottom, 0px))",
         y: dragY,
         opacity: sheetOpacity,
         scale: sheetScale,
@@ -101,33 +93,47 @@ export function MobileBuildingSheet({
       drag="y"
       dragControls={controls}
       dragListener={false}
-      dragConstraints={{ top: 0, bottom: 200 }}
+      dragConstraints={{ top: -100, bottom: 260 }}
       dragElastic={0.2}
       onDragEnd={handleDragEnd}
-      initial={{ y: "100%" }}
-      animate={{ y: 0 }}
-      exit={{ y: "100%" }}
-      transition={{ type: "spring", stiffness: 400, damping: 30, mass: 0.9 }}
+      initial={reducedMotion ? false : { y: "100%", opacity: 0.98 }}
+      animate={{ y: 0, opacity: 1 }}
+      exit={reducedMotion ? { opacity: 0 } : { y: "100%", opacity: 0 }}
+      transition={reducedMotion ? { duration: 0.01 } : { duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
     >
-      <div
-        className="bg-card/96 backdrop-blur-2xl rounded-3xl border border-border overflow-hidden flex flex-col"
-        style={{ borderRadius, maxHeight: `${SHEET_HEIGHT}vh`, boxShadow: "0 8px 36px rgba(0,0,0,0.2), 0 2px 12px rgba(0,0,0,0.12)" }}
+      <motion.div
+        className="flex h-full min-h-0 flex-col overflow-hidden rounded-3xl border border-border bg-card/96 backdrop-blur-2xl"
+        style={{ borderRadius, boxShadow: "0 8px 36px rgba(0,0,0,0.2), 0 2px 12px rgba(0,0,0,0.12)" }}
       >
         {/* Building image header */}
         {selected.image_url && (
-          <div className="relative h-32 shrink-0 overflow-hidden">
+          <div data-building-sheet-image className="relative h-14 shrink-0 overflow-hidden">
             <img src={selected.image_url} alt={selected.name} className="w-full h-full object-cover" />
             <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
           </div>
         )}
 
         {/* Drag handle */}
-        <div
-          className="flex items-center justify-center pt-2.5 pb-1.5 shrink-0 cursor-grab active:cursor-grabbing touch-none"
-          onPointerDown={(e) => controls.start(e)}
+        <button
+          type="button"
+          aria-expanded={expanded}
+          aria-label={expanded ? "Collapse building details" : "Expand building details"}
+          className="flex h-8 shrink-0 touch-none cursor-grab items-center justify-center active:cursor-grabbing focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/50"
+          onPointerDown={(e) => {
+            handlePointerStartRef.current = { x: e.clientX, y: e.clientY };
+            controls.start(e);
+          }}
+          onPointerCancel={() => { handlePointerStartRef.current = null; }}
+          onClick={(e) => {
+            const start = handlePointerStartRef.current;
+            handlePointerStartRef.current = null;
+            // A swipe snaps the sheet; it should not also be treated as a tap.
+            if (start && Math.hypot(e.clientX - start.x, e.clientY - start.y) > 8) return;
+            setSheetExpanded(!expanded);
+          }}
         >
           <div className="w-9 h-1 rounded-full bg-muted-foreground/20" />
-        </div>
+        </button>
 
         {/* Header — building code + name + close */}
         <div className="flex items-start justify-between px-4 pb-3 shrink-0">
@@ -152,21 +158,21 @@ export function MobileBuildingSheet({
         </div>
 
         {/* Horizontal action buttons — Google Maps style */}
-        <div className="flex items-center gap-1.5 px-4 pb-3 shrink-0 overflow-x-auto no-scrollbar">
+        <div className="grid shrink-0 grid-cols-4 gap-1.5 px-3 pb-2">
           <button
             onClick={() => onDirections(selected)}
-            className="flex items-center gap-1 h-8 px-3 rounded-full bg-primary text-primary-foreground text-[11px] font-bold hover:bg-primary/90 active:scale-95 transition-all shrink-0"
+            className="flex min-h-12 min-w-0 flex-col items-center justify-center gap-1 rounded-xl bg-primary px-1 text-[10px] font-bold text-primary-foreground shadow-sm transition-[transform,background-color] duration-150 hover:bg-primary/90 active:scale-[0.98]"
           >
-            <Navigation className="h-3 w-3" />
+            <Navigation className="h-4 w-4" />
             Directions
           </button>
 
           {hasFloorPlans && (
             <button
               onClick={() => onFloorPlan(selected)}
-              className="flex items-center gap-1 h-8 px-3 rounded-full bg-muted text-muted-foreground text-[11px] font-bold border border-border hover:bg-secondary active:scale-95 transition-all shrink-0"
+              className="flex min-h-12 min-w-0 flex-col items-center justify-center gap-1 rounded-xl border border-border bg-muted px-1 text-[10px] font-bold text-muted-foreground transition-[transform,background-color] duration-150 hover:bg-secondary active:scale-[0.98]"
             >
-              <Layers className="h-3 w-3" />
+              <Layers className="h-4 w-4" />
               Floor Plan
             </button>
           )}
@@ -177,22 +183,22 @@ export function MobileBuildingSheet({
               <button
                 onClick={() => onSave(selected.id)}
                 className={cn(
-                  "flex items-center gap-1 h-8 px-3 rounded-full text-[11px] font-bold border active:scale-95 transition-all shrink-0",
+                  "flex min-h-12 min-w-0 flex-col items-center justify-center gap-1 rounded-xl border px-1 text-[10px] font-bold transition-[transform,background-color] duration-150 active:scale-[0.98]",
                   isSaved
                     ? "bg-accent/15 text-accent border-accent/30"
                     : "bg-muted text-muted-foreground border-border hover:bg-secondary"
                 )}
               >
-                <Bookmark className={cn("h-3 w-3", isSaved && "fill-current")} />
+                <Bookmark className={cn("h-4 w-4", isSaved && "fill-current")} />
                 {isSaved ? "Saved" : "Save"}
               </button>
             );
           })() : (
             <button
               onClick={() => onSignInPrompt("save locations")}
-              className="flex items-center gap-1 h-8 px-3 rounded-full bg-muted/60 text-muted-foreground/80 text-[11px] font-semibold border border-dashed border-border/60 shrink-0"
+                className="flex min-h-12 min-w-0 flex-col items-center justify-center gap-1 rounded-xl border border-dashed border-border/60 bg-muted/60 px-1 text-[10px] font-semibold text-muted-foreground/80"
             >
-              <Bookmark className="h-3 w-3" />
+              <Bookmark className="h-4 w-4" />
               Save
             </button>
           )}
@@ -200,24 +206,35 @@ export function MobileBuildingSheet({
           {studentAuth.isStudent ? (
             <button
               onClick={() => onReport(selected)}
-              className="flex items-center gap-1 h-8 px-3 rounded-full bg-muted text-muted-foreground text-[11px] font-bold border border-border hover:bg-destructive/10 hover:text-destructive active:scale-95 transition-all shrink-0"
+              className="flex min-h-12 min-w-0 flex-col items-center justify-center gap-1 rounded-xl border border-border bg-muted px-1 text-[10px] font-bold text-muted-foreground transition-[transform,background-color,color] duration-150 hover:bg-destructive/10 hover:text-destructive active:scale-[0.98]"
             >
-              <Flag className="h-3 w-3" />
+              <Flag className="h-4 w-4" />
               Report
             </button>
           ) : (
             <button
               onClick={() => onSignInPrompt("report issues")}
-              className="flex items-center gap-1 h-8 px-3 rounded-full bg-muted/60 text-muted-foreground/80 text-[11px] font-semibold border border-dashed border-border/60 shrink-0"
+              className="flex min-h-12 min-w-0 flex-col items-center justify-center gap-1 rounded-xl border border-dashed border-border/60 bg-muted/60 px-1 text-[10px] font-semibold text-muted-foreground/80"
             >
-              <Flag className="h-3 w-3" />
+              <Flag className="h-4 w-4" />
               Report
             </button>
           )}
         </div>
 
+        {hasFloorPlans && (
+          <button
+            type="button"
+            onClick={() => onFloorPlan(selected)}
+            className="mx-3 mb-2 flex min-h-10 shrink-0 items-center justify-between rounded-xl border border-primary/15 bg-primary/5 px-3 text-left transition-colors hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+          >
+            <span className="flex items-center gap-2 text-xs font-bold text-primary"><Layers className="h-4 w-4" />View Floor Plan</span>
+            <span className="text-[10px] text-muted-foreground">Tap to explore</span>
+          </button>
+        )}
+
         {/* Scrollable content — description, hours, facilities */}
-        <div className="overflow-y-auto flex-1 px-4 pb-5 scrollbar-show-on-hover space-y-3" style={{ overscrollBehavior: "contain" }}>
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-5 scrollbar-show-on-hover space-y-3" style={{ overscrollBehavior: "contain" }}>
           <p className="text-sm text-muted-foreground leading-relaxed">
             {selected.description}
           </p>
@@ -227,20 +244,6 @@ export function MobileBuildingSheet({
               <p className="text-[10px] font-extrabold uppercase tracking-widest text-muted-foreground mb-1">Hours</p>
               <p className="text-sm text-foreground font-semibold">{selected.operating_hours}</p>
             </div>
-          )}
-
-          {/* Floor plans shortcut */}
-          {hasFloorPlans && (
-            <button
-              onClick={() => onFloorPlan(selected)}
-              className="w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl bg-primary/5 border border-primary/15 hover:bg-primary/10 transition-colors"
-            >
-              <div className="flex items-center gap-2.5">
-                <Layers className="h-4 w-4 text-primary shrink-0" />
-                <span className="text-xs font-bold text-primary">View Floor Plan</span>
-              </div>
-              <span className="text-xs text-muted-foreground">Tap to explore</span>
-            </button>
           )}
 
           {/* Divider for cleaner look */}
@@ -254,7 +257,7 @@ export function MobileBuildingSheet({
             )}
           </div>
         </div>
-      </div>
+      </motion.div>
     </motion.div>
   );
 }

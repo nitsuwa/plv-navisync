@@ -1,4 +1,5 @@
 import { Building2, BriefcaseBusiness, FlaskConical, Landmark, MapPin, Search, X } from "lucide-react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useMemo, useRef, type ReactNode } from "react";
 import type { SearchResult } from "../../hooks/useCampusSearch";
 import {
@@ -71,6 +72,7 @@ export function CampusDestinationSearch({
   groupByBuilding = false,
 }: CampusDestinationSearchProps) {
   const panelRef = useRef<HTMLDivElement>(null);
+  const reducedMotion = useReducedMotion();
   const filteredResults = useMemo(
     () => filterDestinationResults(results, filter),
     [filter, results],
@@ -99,7 +101,8 @@ export function CampusDestinationSearch({
   return (
     <div ref={panelRef} className="min-w-0">
       <div className={cn(
-        "rounded-[20px] border border-white/50 bg-card/95 shadow-[0_10px_30px_rgba(15,23,42,0.14)] backdrop-blur-xl dark:border-white/10",
+        "rounded-[18px] border border-white/50 bg-card/95 backdrop-blur-xl dark:border-white/10",
+        compact ? "shadow-[0_6px_18px_rgba(15,23,42,0.14)]" : "rounded-[20px] shadow-[0_10px_30px_rgba(15,23,42,0.14)]",
         compact ? "p-1" : "p-1.5",
       )}>
         <div className="flex items-center gap-1.5">
@@ -141,7 +144,8 @@ export function CampusDestinationSearch({
               }}
               placeholder={placeholder}
               className={cn(
-                "min-h-11 min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground",
+                "min-w-0 min-h-11 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground",
+                compact && "min-h-10",
                 compact && "text-[13px]",
               )}
             />
@@ -159,8 +163,16 @@ export function CampusDestinationSearch({
           {trailing}
         </div>
 
-        {focused && (
-          <>
+        <AnimatePresence initial={false}>
+          {focused && (
+            <motion.div
+              key="destination-search-results"
+              initial={reducedMotion ? false : { opacity: 0, height: 0, y: -4 }}
+              animate={{ opacity: 1, height: "auto", y: 0 }}
+              exit={reducedMotion ? { opacity: 0 } : { opacity: 0, height: 0, y: -3 }}
+              transition={{ duration: reducedMotion ? 0.01 : 0.17, ease: "easeOut" }}
+              className="overflow-hidden"
+            >
             <div className="mt-1.5 flex gap-1 overflow-x-auto px-0.5 pb-0.5 no-scrollbar" role="group" aria-label="Destination type filters">
               {FILTERS.map((item) => (
                 <button
@@ -186,7 +198,8 @@ export function CampusDestinationSearch({
               id={listId}
               role="listbox"
               aria-label="Campus destination results"
-              className="mt-1.5 max-h-[min(22rem,55vh)] overflow-y-auto rounded-2xl border border-border/60 bg-card shadow-xl"
+              className="mt-1.5 max-h-[min(22rem,55dvh)] overflow-y-auto rounded-2xl border border-border/60 bg-card shadow-xl"
+              style={compact ? { maxHeight: "min(22rem, calc(100dvh - 14rem - env(safe-area-inset-bottom, 0px)))" } : undefined}
               onWheelCapture={(event) => event.stopPropagation()}
               onTouchMoveCapture={(event) => event.stopPropagation()}
             >
@@ -243,8 +256,9 @@ export function CampusDestinationSearch({
                 </div>
               )}
             </div>
-          </>
-        )}
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
     </div>
   );

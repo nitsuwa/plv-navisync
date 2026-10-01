@@ -12,7 +12,10 @@ import { useToast } from "../hooks/useToast";
 import { useTheme } from "../hooks/useTheme";
 import { ThemeToggle } from "../components/ui/ThemeToggle";
 import { PLVLogo } from "../components/ui/PLVLogo";
-import { StarField, LavaLampBackground } from "../components/ui/HeroBackground";
+import { AuthVisualBackdrop, StarField, LavaLampBackground } from "../components/ui/HeroBackground";
+import { CampusAuthIllustration } from "../components/ui/CampusAuthIllustration";
+import { settingsService } from "../services/settingsService";
+import { requestedStudentPath, studentEntryPath } from "../lib/studentEntry";
 
 /**
  * Map raw Supabase auth errors to concise, user-friendly messages.
@@ -38,32 +41,16 @@ function friendlyAuthError(rawMessage?: string): string {
   return "Unable to sign in. Please check your email and password.";
 }
 
-function safeReturnPath(state: unknown): string {
-  if (!state || typeof state !== "object" || !("from" in state)) return "/home";
-
-  const from = (state as { from?: unknown }).from;
-  if (typeof from !== "string" || !from.startsWith("/") || from.startsWith("//")) {
+async function studentReturnPath(state: unknown): Promise<string> {
+  // A valid guarded deep link always wins over the default entry preference.
+  const requestedPath = requestedStudentPath(state);
+  if (requestedPath) return requestedPath;
+  try {
+    const settings = await settingsService.getPublicPlatformSettings();
+    return studentEntryPath(null, settings.defaultLandingPage);
+  } catch {
     return "/home";
   }
-
-  try {
-    // Parse the complete relative URL so query-string intents such as
-    // /map?buildingId=...&report=1 survive authentication without allowing
-    // an external redirect.
-    const parsed = new URL(from, window.location.origin);
-    const isStudentPath = parsed.pathname === "/home"
-      || parsed.pathname === "/student"
-      || parsed.pathname.startsWith("/student/")
-      || parsed.pathname === "/map"
-      || parsed.pathname === "/buildings"
-      || parsed.pathname.startsWith("/buildings/");
-    if (parsed.origin === window.location.origin && isStudentPath) {
-      return `${parsed.pathname}${parsed.search}${parsed.hash}`;
-    }
-  } catch {
-    // Fall back to the student home page for malformed navigation state.
-  }
-  return "/home";
 }
 
 function safeAdminReturnPath(state: unknown): string {
@@ -415,13 +402,17 @@ export function AdminLoginPage() {
   // credentials again. Destination still comes from the verified DB role.
   useEffect(() => {
     if (auth.status !== "authenticated" || !auth.profile?.is_active) return;
+    let active = true;
     if (auth.profile.role === "admin") {
       navigate(safeAdminReturnPath(location.state), { replace: true });
     } else if (auth.profile.role === "student") {
-      navigate(safeReturnPath(location.state), { replace: true });
+      void studentReturnPath(location.state).then((path) => {
+        if (active) navigate(path, { replace: true });
+      });
     } else if (auth.profile.role === "student_org") {
       navigate("/home", { replace: true });
     }
+    return () => { active = false; };
   }, [auth.status, auth.profile, location.state, navigate]);
 
   // Close the demo dropdown on outside click or Escape.
@@ -515,7 +506,7 @@ export function AdminLoginPage() {
       // still falling back to the student home page for a normal login.
       if (profile.role === "student") {
         toast.success("Signed in", "Welcome to the student experience!");
-        navigate(safeReturnPath(location.state), { replace: true });
+        navigate(await studentReturnPath(location.state), { replace: true });
         return;
       }
 
@@ -530,7 +521,8 @@ export function AdminLoginPage() {
   };
 
   return (
-    <div className="min-h-screen min-h-[100dvh] flex" style={{ fontFamily: "var(--font-body)" }}>
+    <div className="relative isolate flex min-h-screen min-h-[100dvh] overflow-x-hidden" style={{ fontFamily: "var(--font-body)" }}>
+      <AuthVisualBackdrop />
 
       {/* ══════════ LEFT — full-bleed campus visual (desktop only) ══════════ */}
       <div className="hidden lg:flex lg:flex-1 relative overflow-hidden flex-col justify-between p-10 xl:p-14">
@@ -561,7 +553,7 @@ export function AdminLoginPage() {
 
         {/* Campus illustration — opaque, clearly visible */}
         <div className="relative z-10 flex-1 flex items-center">
-          <CampusIllustration/>
+          <CampusAuthIllustration idPrefix="desktop-auth-campus" animated={!shouldReduceMotion} />
         </div>
 
         {/* Bottom tagline */}
@@ -576,10 +568,10 @@ export function AdminLoginPage() {
       </div>
 
       {/* ══════════ RIGHT — shared login form for phone, tablet, and desktop ══════════ */}
-      <div className="flex min-h-[100dvh] flex-1 lg:max-w-[460px] flex-col bg-background">
+      <div className="relative z-10 flex min-h-[100dvh] flex-1 flex-col overflow-y-auto bg-transparent lg:max-w-[460px] lg:bg-background">
         {/* Top bar */}
         <div className="flex items-center justify-between px-5 sm:px-8 pt-5 sm:pt-6 pb-2">
-          <Link to="/" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors">
+          <Link to="/" className="inline-flex items-center gap-1 text-sm text-white/80 transition-colors hover:text-white lg:text-muted-foreground lg:hover:text-foreground">
             <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
             Back
           </Link>
@@ -587,7 +579,7 @@ export function AdminLoginPage() {
         </div>
 
         <div className="flex-1 flex items-center justify-center px-5 sm:px-10 py-8 sm:py-10">
-          <div className="w-full max-w-[340px]">
+          <div className="w-full max-w-[340px] rounded-3xl border border-white/70 bg-card/95 p-5 shadow-2xl backdrop-blur-sm sm:p-8 lg:rounded-none lg:border-0 lg:bg-transparent lg:p-0 lg:shadow-none lg:backdrop-blur-none">
 
             {/* PLV Logo — prominently at top */}
             <div className="flex flex-col items-center mb-9">

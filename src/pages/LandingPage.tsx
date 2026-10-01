@@ -193,9 +193,12 @@ function HeroRouteLines({ reducedMotion = false }: { reducedMotion?: boolean }) 
 
 function WavyDivider({ fill = "#071440" }: { fill?: string }) {
   return (
-    <div className="relative w-full pointer-events-none select-none" style={{ height: 90, marginBottom: 0 }}>
-      <svg viewBox="0 0 1440 90" preserveAspectRatio="none" className="absolute inset-0 w-full h-full" aria-hidden="true">
+    <div className="pointer-events-none relative h-[54px] w-full select-none md:h-[90px]" style={{ marginBottom: 0 }}>
+      <svg viewBox="0 0 1440 90" preserveAspectRatio="none" className="absolute inset-0 hidden h-full w-full md:block" aria-hidden="true">
         <path d="M0,55 C80,25 160,72 260,44 C360,16 440,68 540,40 C640,12 730,62 840,36 C950,10 1040,60 1140,34 C1240,8 1340,52 1390,36 L1440,30 L1440,90 L0,90 Z" fill={fill} />
+      </svg>
+      <svg viewBox="0 0 360 56" preserveAspectRatio="none" className="absolute inset-0 h-full w-full md:hidden" aria-hidden="true">
+        <path d="M0 34 C58 19 112 43 176 34 C242 25 300 23 360 31 L360 56 L0 56 Z" fill={fill} />
       </svg>
     </div>
   );
@@ -1378,10 +1381,10 @@ function HeroSection() {
         className="relative z-10 mx-auto grid w-full max-w-7xl grid-cols-1 items-center gap-8 px-5 py-12 sm:gap-10 sm:px-10 sm:py-16 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] lg:gap-14 lg:px-12 lg:py-0"
         style={{ y: reduceMotion ? 0 : heroContentY, opacity: reduceMotion ? 1 : heroOpacity }}
       >
-        <div className="min-w-0 text-left">
+        <div className="min-w-0 text-center lg:text-left">
         {/* PLV badge */}
         <div
-          className="inline-flex items-center gap-2.5 px-4 py-2 rounded-full bg-white/8 border mb-8 animate-fade-in animate-border-glow"
+          className="mx-auto mb-6 inline-flex items-center justify-center gap-2.5 rounded-full border bg-white/8 px-3.5 py-2 text-center animate-fade-in animate-border-glow sm:mb-8 sm:px-4 lg:mx-0 lg:justify-start"
           style={{ borderColor: "rgba(200,150,12,0.45)" }}
         >
           <PLVLogo size={20} />
@@ -1393,7 +1396,7 @@ function HeroSection() {
         {/* PLV Seal — neon gold ring glow */}
         <motion.div
           data-testid="hero-seal"
-          className="relative mt-2 mb-8 flex h-36 w-36 items-center justify-center select-none"
+          className="relative mx-auto mt-2 mb-6 flex h-32 w-32 items-center justify-center select-none sm:mb-8 sm:h-36 sm:w-36 lg:mx-0"
           style={{ y: reduceMotion ? 0 : heroLogoY }}
         >
           <div
@@ -1408,14 +1411,14 @@ function HeroSection() {
         {/* Headline */}
         <h1
           id="landing-hero-heading"
-          className="max-w-xl font-extrabold leading-[1.04] tracking-tight text-white animate-slide-up delay-100"
+          className="mx-auto max-w-xl font-extrabold leading-[1.04] tracking-tight text-white animate-slide-up delay-100 lg:mx-0"
           style={{ fontSize: "clamp(2.8rem, 6vw, 5.4rem)" }}
         >
           Navigate PLV <span className="text-accent">Smarter</span>
         </h1>
 
         {/* NaviSync badge */}
-        <div className="mt-5 flex items-center justify-start gap-2 mb-6 animate-slide-up delay-150">
+        <div className="mt-5 mb-6 flex items-center justify-center gap-2 animate-slide-up delay-150 lg:justify-start">
           <span className="text-white/30 text-sm font-medium">powered by</span>
           <span
             className="font-extrabold tracking-wider px-3 py-1 rounded-full border bg-accent/15 animate-neon-gold"
@@ -1430,12 +1433,12 @@ function HeroSection() {
         </div>
 
         {/* Tagline */}
-        <p className="max-w-lg text-base leading-relaxed text-white/60 mb-7 animate-slide-up delay-200 sm:text-lg">
+        <p className="mx-auto mb-7 max-w-lg text-base leading-relaxed text-white/60 animate-slide-up delay-200 sm:text-lg lg:mx-0">
           Find any building, plan a walking route, and move through campus with more confidence.
         </p>
 
         {/* CTAs — enhanced hover effects */}
-        <div className="flex flex-wrap justify-start gap-3 animate-slide-up delay-300">
+        <div className="flex flex-wrap justify-center gap-3 animate-slide-up delay-300 lg:justify-start">
           <motion.div whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.96 }} transition={{ type: "spring", stiffness: 400, damping: 10 }}>
             <Link
               to="/map"
@@ -1459,7 +1462,7 @@ function HeroSection() {
           </motion.div>
         </div>
 
-        <div className="mt-10 grid max-w-xl grid-cols-3 gap-3 border-t border-white/10 pt-5 text-left">
+        <div className="mx-auto mt-8 grid max-w-xl grid-cols-3 gap-2 border-t border-white/10 pt-5 text-center lg:mx-0 lg:mt-10 lg:gap-3 lg:text-left">
           <div>
             <p className="text-sm font-extrabold text-white">Campus-wide</p>
             <p className="mt-1 text-[11px] text-white/45">places to find</p>
@@ -1579,7 +1582,7 @@ function FinalCTA() {
     <>
       <WavyDivider fill="#071440" />
 
-      <section id="landing-final-cta" className="scroll-mt-8 py-20 lg:py-24 relative overflow-hidden" style={{ marginTop: "-1px" }}>
+      <section id="landing-final-cta" data-mobile-nav-aware="true" className="relative scroll-mt-8 overflow-hidden px-0 py-12 sm:py-16 lg:py-24" style={{ marginTop: "-1px" }}>
         {/* Dark gradient */}
         <div className="absolute inset-0" style={{
           background: "linear-gradient(to bottom, #071440 0%, #071440 8%, transparent 35%), radial-gradient(ellipse 90% 70% at 50% 40%, #0d2470 0%, #071440 55%, #020a1c 100%)",
@@ -1628,16 +1631,16 @@ function FinalCTA() {
           }}
         />
 
-        <Reveal className="relative max-w-2xl mx-auto px-5 sm:px-7 text-center">
-          <PLVLogo size={60} className="mx-auto mb-7 shadow-2xl animate-hero-breathe" />
-          <h2 className="text-2xl sm:text-3xl font-extrabold text-white mb-4 leading-tight">
+        <Reveal className="relative mx-auto flex max-w-2xl flex-col items-center px-5 text-center sm:px-7">
+          <PLVLogo size={60} className="mx-auto mb-5 shadow-2xl animate-hero-breathe sm:mb-7" />
+          <h2 className="mb-3 text-2xl font-extrabold leading-tight text-white sm:mb-4 sm:text-3xl">
             Ready to explore PLV?
           </h2>
-          <p className="text-white/45 text-sm mb-8 max-w-sm mx-auto">
+          <p className="mx-auto mb-6 max-w-sm text-sm leading-relaxed text-white/55 sm:mb-8">
             Open the interactive campus map and navigate every building, route, and facility.
           </p>
 
-          <div className="flex justify-center">
+          <div className="flex w-full justify-center">
             <motion.div whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.96 }}>
               <Link
                 to="/map"
