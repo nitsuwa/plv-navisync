@@ -9,7 +9,7 @@ import { Button } from "../components/ui/Button";
 import { useTheme } from "../hooks/useTheme";
 import { ThemeToggle } from "../components/ui/ThemeToggle";
 import { PLVLogo } from "../components/ui/PLVLogo";
-import { StarField, LavaLampBackground } from "../components/ui/HeroBackground";
+import { AuthVisualBackdrop, StarField, LavaLampBackground } from "../components/ui/HeroBackground";
 import { isConnected, supabase } from "../lib/supabase";
 import {
   friendlyAccountError,
@@ -217,7 +217,8 @@ export function RegistrationPage() {
   };
 
   return (
-    <div className="min-h-screen flex">
+    <div className="relative isolate flex min-h-screen min-h-[100dvh] overflow-x-hidden">
+      <AuthVisualBackdrop />
       {/* ══════════ LEFT PANEL ══════════ */}
       <div className="hidden lg:flex lg:flex-1 relative overflow-hidden flex-col justify-between p-10 xl:p-14">
         <div className="absolute inset-0" style={{
@@ -255,16 +256,16 @@ export function RegistrationPage() {
       </div>
 
       {/* ══════════ RIGHT — form ══════════ */}
-      <div className="flex-1 lg:max-w-[460px] flex flex-col bg-background">
+      <div className="relative z-10 flex min-h-[100dvh] flex-1 flex-col overflow-y-auto bg-transparent lg:max-w-[460px] lg:bg-background">
         <div className="flex items-center justify-between px-5 sm:px-8 pt-6 pb-2">
-          <Link to="/admin" className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors">
+          <Link to="/admin" className="flex items-center gap-1.5 text-sm text-white/80 transition-colors hover:text-white lg:text-muted-foreground lg:hover:text-foreground">
             <ArrowLeft className="h-4 w-4" /> Back to Sign In
           </Link>
           <ThemeToggle theme={theme} onToggle={toggleTheme} />
         </div>
 
         <div className="flex-1 flex items-center justify-center px-5 sm:px-8 py-6">
-          <div className="w-full max-w-sm">
+          <div className="w-full max-w-sm rounded-3xl border border-white/70 bg-card/95 p-5 shadow-2xl backdrop-blur-sm sm:p-8 lg:rounded-none lg:border-0 lg:bg-transparent lg:p-0 lg:shadow-none lg:backdrop-blur-none">
             {/* PLV logo + heading */}
             <motion.div
               initial={{ opacity: 0, y: -10 }}

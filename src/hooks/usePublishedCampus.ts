@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { campusService } from "../services/campusService";
 import { campusStructureService } from "../services/campusStructureService";
 import type { Campus } from "../components/map-builder/types";
@@ -8,6 +8,7 @@ import { DEFAULT_PUBLIC_PLATFORM_SETTINGS, settingsService, type PublicPlatformS
 
 const SESSION_CACHE_KEY = "plv_published_campuses_cache_v1";
 const LAST_CAMPUS_KEY = "plv_student_last_campus_v1";
+const RESUME_REFRESH_INTERVAL_MS = 15_000;
 
 function isPublished(campus: Campus): boolean {
   return campus.lifecycleStatus === "published" || campus.publishStatus === "published";
@@ -15,6 +16,21 @@ function isPublished(campus: Campus): boolean {
 
 export function lastCampusStorageKey(userId: string): string {
   return `${LAST_CAMPUS_KEY}:${userId || "guest"}`;
+}
+
+function readCachedCampuses(): Campus[] {
+  try {
+    const raw = sessionStorage.getItem(SESSION_CACHE_KEY);
+    if (!raw) return [];
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((campus): campus is Campus =>
+      campus && typeof campus.id === "string" &&
+      (campus.lifecycleStatus === "published" || campus.publishStatus === "published" || campus.lifecycleStatus === "coming_soon"),
+    );
+  } catch {
+    return [];
+  }
 }
 
 function readRememberedCampus(userId: string): string | null {
@@ -52,99 +68,101 @@ interface UsePublishedCampusResult {
 export function usePublishedCampus(previewCampus?: Campus | null): UsePublishedCampusResult {
   const auth = useAuth();
   const userId = auth.session?.user.id ?? auth.profile?.id ?? "guest";
-  const [campuses, setCampuses] = useState<Campus[]>([]);
+  const [campuses, setCampuses] = useState<Campus[]>(readCachedCampuses);
   const [selectedCampusId, setSelectedCampusId] = useState<string | null>(null);
   const [platformSettings, setPlatformSettings] = useState<PublicPlatformSettings>(DEFAULT_PUBLIC_PLATFORM_SETTINGS);
-  const [loading, setLoading] = useState<boolean>(true);
+  const [loading, setLoading] = useState<boolean>(() => campuses.length === 0);
   const [error, setError] = useState<string | null>(null);
-  const [isCached, setIsCached] = useState<boolean>(false);
+  // A session cache can render immediately while the live list revalidates.
+  // Show the offline warning only if that revalidation actually fails.
+  const [isCached, setIsCached] = useState(false);
+  const hasCampusDataRef = useRef(campuses.length > 0);
+  const fetchInFlightRef = useRef<Promise<void> | null>(null);
+  const userIdRef = useRef(userId);
+  const previousUserIdRef = useRef(userId);
+  userIdRef.current = userId;
 
-  // Try reading cached campuses from sessionStorage on mount
-  const getCachedCampuses = useCallback((): Campus[] => {
-    try {
-      const raw = sessionStorage.getItem(SESSION_CACHE_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed.filter((campus): campus is Campus =>
-            campus && typeof campus.id === "string" &&
-            (campus.lifecycleStatus === "published" || campus.publishStatus === "published" || campus.lifecycleStatus === "coming_soon"),
-          );
-        }
-      }
-    } catch {
-      // Ignore sessionStorage read errors
-    }
-    return [];
-  }, []);
-
-  const fetchPublishedCampuses = useCallback(async () => {
-    setLoading(true);
+  const fetchPublishedCampuses = useCallback((): Promise<void> => {
+    if (fetchInFlightRef.current) return fetchInFlightRef.current;
+    // Keep a usable map on screen during background revalidation. The full
+    // loading state is reserved for the initial load or an empty map retry.
+    if (!hasCampusDataRef.current) setLoading(true);
     setError(null);
-    try {
-      const studentSettings = await settingsService.getPublicPlatformSettings();
-      setPlatformSettings(studentSettings);
-      // Prefer immutable published snapshots. This keeps draft/editor edits
-      // out of the public map until the database publication RPC succeeds.
-      let published: Campus[] = [];
+    const request = (async () => {
       try {
-        published = await campusService.listPublishedSnapshots();
-        // Published snapshots carry the full campus object including buildings,
-        // floors, rooms, walls, and navigation data from the serialized
-        // structure payload — no additional hydration needed.
-      } catch {
-        // Compatibility fallback for environments that predate the version
-        // table; the live list still contains the legacy published marker.
-      }
-      if (published.length === 0) {
-        const allCampuses = await campusService.list();
-        published = allCampuses.filter((campus) => campus.publishStatus === "published");
-        // The list() path returns lightweight campus rows with empty floors.
-        // Hydrate each campus so buildings carry their authored floor plans,
-        // rooms, and walls — required by the public CampusMapPage.
-        if (published.length > 0) {
-          const hydrated = await Promise.allSettled(
-            published.map(async (campus) => {
-              try { return await campusStructureService.load(campus); }
-              catch { return campus; }
-            }),
-          );
-          published = hydrated.map((r, i) => r.status === "fulfilled" ? r.value : published[i]);
-        }
-      }
-
-      // Coming Soon campuses are loaded through a database RPC that returns
-      // announcement metadata only. Their authored map structure remains
-      // protected by the existing published-only RLS policies.
-      const comingSoon = await campusService.listComingSoon().catch(() => []);
-      published = studentCampusListing(published, comingSoon);
-
-      setCampuses(published);
-      setSelectedCampusId(chooseInitialCampus(published, studentSettings, userId)?.id ?? null);
-      setIsCached(false);
-
-      // Save to sessionStorage cache for offline / fallback
-      if (published.length > 0) {
+        const studentSettings = await settingsService.getPublicPlatformSettings();
+        setPlatformSettings(studentSettings);
+        // Prefer immutable published snapshots. This keeps draft/editor edits
+        // out of the public map until the database publication RPC succeeds.
+        let published: Campus[] = [];
         try {
-          sessionStorage.setItem(SESSION_CACHE_KEY, JSON.stringify(published));
+          published = await campusService.listPublishedSnapshots();
+          // Published snapshots carry the full campus object including buildings,
+          // floors, rooms, walls, and navigation data from the serialized
+          // structure payload — no additional hydration needed.
         } catch {
-          // Ignore sessionStorage write errors
+          // Compatibility fallback for environments that predate the version
+          // table; the live list still contains the legacy published marker.
         }
+        if (published.length === 0) {
+          const allCampuses = await campusService.list();
+          published = allCampuses.filter((campus) => campus.publishStatus === "published");
+          // The list() path returns lightweight campus rows with empty floors.
+          // Hydrate each campus so buildings carry their authored floor plans,
+          // rooms, and walls — required by the public CampusMapPage.
+          if (published.length > 0) {
+            const hydrated = await Promise.allSettled(
+              published.map(async (campus) => {
+                try { return await campusStructureService.load(campus); }
+                catch { return campus; }
+              }),
+            );
+            published = hydrated.map((r, i) => r.status === "fulfilled" ? r.value : published[i]);
+          }
+        }
+
+        // Coming Soon campuses are loaded through a database RPC that returns
+        // announcement metadata only. Their authored map structure remains
+        // protected by the existing published-only RLS policies.
+        const comingSoon = await campusService.listComingSoon().catch(() => []);
+        published = studentCampusListing(published, comingSoon);
+
+        setCampuses(published);
+        hasCampusDataRef.current = published.length > 0;
+        setSelectedCampusId((currentId) => currentId && published.some((campus) => campus.id === currentId)
+          ? currentId
+          : chooseInitialCampus(published, studentSettings, userIdRef.current)?.id ?? null);
+        setIsCached(false);
+
+        // Save to sessionStorage cache for offline / fallback
+        if (published.length > 0) {
+          try {
+            sessionStorage.setItem(SESSION_CACHE_KEY, JSON.stringify(published));
+          } catch {
+            // Ignore sessionStorage write errors
+          }
+        }
+      } catch (err: unknown) {
+        // Fallback: Try sessionStorage cache first
+        const cached = readCachedCampuses();
+        if (cached.length > 0) {
+          setCampuses(cached);
+          hasCampusDataRef.current = true;
+          setIsCached(true);
+        } else {
+          const msg = err instanceof Error ? err.message : "Failed to load published campus map.";
+          setError(msg);
+        }
+      } finally {
+        setLoading(false);
       }
-    } catch (err: unknown) {
-      // Fallback: Try sessionStorage cache first
-      const cached = getCachedCampuses();
-      if (cached.length > 0) {
-        setCampuses(cached);
-        setIsCached(true);
-      } else {
-        const msg = err instanceof Error ? err.message : "Failed to load published campus map.";
-        setError(msg);
-      }
-    } finally {
-      setLoading(false);
-    }
-  }, [getCachedCampuses, userId]);
+    })();
+    fetchInFlightRef.current = request;
+    void request.finally(() => {
+      if (fetchInFlightRef.current === request) fetchInFlightRef.current = null;
+    });
+    return request;
+  }, []);
 
   useEffect(() => {
     if (previewCampus) {
@@ -152,6 +170,7 @@ export function usePublishedCampus(previewCampus?: Campus | null): UsePublishedC
       // published directory. It renders exactly the saved candidate passed by
       // the Admin Map Builder.
       setCampuses([previewCampus]);
+      hasCampusDataRef.current = true;
       setSelectedCampusId(previewCampus.id);
       setLoading(false);
       setError(null);
@@ -161,15 +180,30 @@ export function usePublishedCampus(previewCampus?: Campus | null): UsePublishedC
     fetchPublishedCampuses();
   }, [fetchPublishedCampuses, previewCampus]);
 
+  // Auth bootstrap may resolve after the public campus list is already visible.
+  // Apply the signed-in student's own remembered/default campus without
+  // restarting the map fetch or showing another loading state.
+  useEffect(() => {
+    if (previousUserIdRef.current === userId) return;
+    previousUserIdRef.current = userId;
+    if (previewCampus || campuses.length === 0) return;
+    setSelectedCampusId(chooseInitialCampus(campuses, platformSettings, userId)?.id ?? null);
+  }, [userId, previewCampus, campuses, platformSettings]);
+
   // ── Real-time publishing: refetch when the user returns to this tab ──
   // When an admin publishes a new campus version, student tabs that were
   // backgrounded will pick it up on refocus without requiring a manual
   // page reload.
   useEffect(() => {
     if (previewCampus) return;
+    let hiddenAt = 0;
     const onVisibility = () => {
       if (document.visibilityState === "visible") {
-        fetchPublishedCampuses();
+        const wasHiddenLongEnough = hiddenAt > 0 && Date.now() - hiddenAt >= RESUME_REFRESH_INTERVAL_MS;
+        hiddenAt = 0;
+        if (wasHiddenLongEnough) void fetchPublishedCampuses();
+      } else {
+        hiddenAt = Date.now();
       }
     };
     document.addEventListener("visibilitychange", onVisibility);

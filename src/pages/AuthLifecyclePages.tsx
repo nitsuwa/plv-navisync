@@ -4,6 +4,7 @@ import { motion, useReducedMotion } from "motion/react";
 import { AlertCircle, ArrowLeft, Check, CheckCircle2, Eye, EyeOff, LoaderCircle, Mail, RefreshCw, X } from "lucide-react";
 import { Button } from "../components/ui/Button";
 import { PLVLogo } from "../components/ui/PLVLogo";
+import { AuthVisualBackdrop } from "../components/ui/HeroBackground";
 import { ThemeToggle } from "../components/ui/ThemeToggle";
 import { useTheme } from "../hooks/useTheme";
 import { useAuth } from "../contexts/StudentAuthContext";
@@ -20,15 +21,16 @@ import {
 function AuthShell({ children }: { children: React.ReactNode }) {
   const { theme, toggleTheme } = useTheme();
   return (
-    <div className="min-h-screen bg-background px-5 py-6 sm:px-8">
-      <div className="mx-auto flex max-w-5xl items-center justify-between">
+    <div className="relative isolate min-h-screen min-h-[100dvh] overflow-x-hidden bg-transparent px-5 py-6 sm:px-8 lg:bg-background">
+      <AuthVisualBackdrop />
+      <div className="relative z-10 mx-auto flex max-w-5xl items-center justify-between">
         <Link to="/admin" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
           <ArrowLeft className="h-4 w-4" /> Back to Sign In
         </Link>
         <ThemeToggle theme={theme} onToggle={toggleTheme} />
       </div>
-      <main className="mx-auto flex min-h-[calc(100vh-88px)] max-w-md items-center justify-center py-10">
-        <section className="w-full rounded-3xl border border-border bg-card p-6 text-center shadow-lg sm:p-9">
+      <main className="relative z-10 mx-auto flex min-h-[calc(100dvh-88px)] max-w-md items-center justify-center py-6 sm:py-10">
+        <section className="w-full rounded-3xl border border-border/80 bg-card/95 p-6 text-center shadow-2xl backdrop-blur-sm sm:p-9 lg:bg-card lg:shadow-lg">
           <PLVLogo size={52} className="mx-auto mb-5 shadow-md" />
           {children}
         </section>

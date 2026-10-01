@@ -223,6 +223,9 @@ export function OutdoorBuildingVisual({
       data-testid="readonly-building"
       data-building-id={building.id}
       data-bldg="true"
+      className={onSelect ? "student-map-building" : undefined}
+      data-selected={selected ? "true" : "false"}
+      data-interactive={onSelect ? "true" : "false"}
       pointerEvents={interactive ? undefined : "none"}
       transform={applyTransform && rotation ? `rotate(${rotation}, ${cx}, ${cy})` : undefined}
       opacity={applyOpacity ? opacity : undefined}
@@ -238,8 +241,9 @@ export function OutdoorBuildingVisual({
         }
       } : undefined}
     >
-      {selected && <rect x={building.x - 6} y={building.y - 6} width={building.width + 12} height={building.height + 12} rx={10} fill="none" stroke="#2563eb" strokeWidth={2.5} pointerEvents={interactive ? undefined : "none"} />}
-      <rect x={building.x} y={building.y} width={building.width} height={building.height} rx={8} fill={building.color || "#64748b"} stroke={selected ? "#2563eb" : "rgba(255,255,255,0.68)"} strokeWidth={selected ? 2.5 : 1.5} opacity={bodyOpacity} pointerEvents={interactive ? undefined : "none"} />
+      {selected && <rect className="student-map-building__selection-halo" x={building.x - 7} y={building.y - 7} width={building.width + 14} height={building.height + 14} rx={11} fill="rgba(37,99,235,0.045)" stroke="rgba(37,99,235,0.38)" strokeWidth={7} pointerEvents="none" />}
+      {selected && <rect className="student-map-building__selection-outline" x={building.x - 3} y={building.y - 3} width={building.width + 6} height={building.height + 6} rx={9} fill="none" stroke="#2563eb" strokeWidth={2.5} pointerEvents={interactive ? undefined : "none"} />}
+      <rect className="student-map-building__body" x={building.x} y={building.y} width={building.width} height={building.height} rx={8} fill={building.color || "#64748b"} stroke={selected ? "#2563eb" : "rgba(255,255,255,0.68)"} strokeWidth={selected ? 2.5 : 1.5} opacity={bodyOpacity} pointerEvents={interactive ? undefined : "none"} />
       {/* A restrained architectural treatment keeps the authored footprint and
           color authoritative while giving the building a little depth at map
           scale.  These marks are presentation-only and remain pointer

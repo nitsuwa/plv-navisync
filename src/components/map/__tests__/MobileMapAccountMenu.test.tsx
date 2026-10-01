@@ -14,7 +14,7 @@ vi.mock("../../../hooks/useStudentAuth", () => ({
 }));
 
 describe("MobileMapAccountMenu", () => {
-  it("matches the mobile search field height and keeps the avatar legible", () => {
+  it("reserves a compact 48px profile target beside the full-width responsive search", () => {
     render(
       <MemoryRouter>
         <MobileMapAccountMenu />
@@ -22,7 +22,7 @@ describe("MobileMapAccountMenu", () => {
     );
 
     const menuButton = screen.getByRole("button", { name: /user menu/i });
-    expect(menuButton).toHaveClass("h-[58px]", "min-w-[70px]");
-    expect(screen.getByText("DE")).toHaveClass("h-9", "w-9");
+    expect(menuButton).toHaveClass("h-12", "w-12", "min-w-12", "shrink-0");
+    expect(screen.getByText("DE")).toHaveClass("h-8", "w-8");
   });
 });

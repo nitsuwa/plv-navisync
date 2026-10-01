@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router";
 import { AnimatePresence, motion } from "motion/react";
+import { useReducedMotion } from "../../hooks/useReducedMotion";
 import { Bookmark, ChevronDown, Flag, Home, LogIn, LogOut, Settings, UserRound } from "lucide-react";
 import { useStudentAuth } from "../../hooks/useStudentAuth";
 import { cn } from "../../lib/utils";
@@ -10,6 +11,7 @@ const menuItemClass = "flex min-h-11 w-full items-center gap-3 px-4 py-2.5 text-
 export function MobileMapAccountMenu() {
   const { isStudent, loading, username, role, signOut } = useStudentAuth();
   const [open, setOpen] = useState(false);
+  const reducedMotion = useReducedMotion();
   const menuRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
   const location = useLocation();
@@ -50,14 +52,14 @@ export function MobileMapAccountMenu() {
         aria-haspopup="menu"
         disabled={loading}
         className={cn(
-          "flex h-[58px] min-w-[70px] items-center justify-center gap-1.5 rounded-2xl border border-border/70 bg-card/95 px-1.5 text-foreground shadow-lg backdrop-blur-xl transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 disabled:opacity-70",
+          "relative flex h-12 w-12 min-w-12 shrink-0 items-center justify-center rounded-2xl border border-border/70 bg-card/95 p-0 text-foreground shadow-[0_6px_18px_rgba(15,23,42,0.14)] backdrop-blur-xl transition-[transform,background-color,border-color] duration-150 hover:bg-muted active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 disabled:opacity-70",
           open && "border-primary/40",
         )}
       >
-        <span className="flex h-9 w-9 items-center justify-center rounded-full bg-primary text-[11px] font-extrabold text-primary-foreground" aria-hidden="true">
+        <span className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-[10px] font-extrabold text-primary-foreground" aria-hidden="true">
           {loading ? <span className="h-3 w-3 animate-pulse rounded-full bg-white/80" /> : initials}
         </span>
-        <ChevronDown className={cn("h-3.5 w-3.5 text-muted-foreground transition-transform", open && "rotate-180")} aria-hidden="true" />
+        <ChevronDown className={cn("absolute bottom-1 right-1 h-3 w-3 rounded-full bg-card text-muted-foreground transition-transform", open && "rotate-180")} aria-hidden="true" />
       </button>
 
       <AnimatePresence>
@@ -68,7 +70,7 @@ export function MobileMapAccountMenu() {
             initial={{ opacity: 0, scale: 0.96, y: -5 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.96, y: -5 }}
-            transition={{ duration: 0.14 }}
+            transition={reducedMotion ? { duration: 0.01 } : { duration: 0.14 }}
             className="absolute right-0 top-full z-[70] mt-2 max-h-[calc(100dvh-5rem)] w-[min(17.5rem,calc(100vw-1.5rem))] origin-top-right overflow-y-auto rounded-2xl border border-border bg-card text-foreground shadow-2xl"
           >
             <div className="flex items-center gap-3 border-b border-border px-4 py-3.5">

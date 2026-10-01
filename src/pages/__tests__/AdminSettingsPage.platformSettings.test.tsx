@@ -141,6 +141,8 @@ describe("Admin Settings platform controls", () => {
       { key: "show_map_labels", value: false, isPublic: true },
     ]), false));
     expect(mocks.saveNotificationPreferences).toHaveBeenCalledWith(expect.objectContaining({ reports: false }));
+    expect(mocks.getSettings).toHaveBeenCalledTimes(1);
+    expect(mocks.getNotificationPreferences).toHaveBeenCalledTimes(1);
   });
 
   it("supports arrow-key navigation between accessible tabs", async () => {
@@ -177,5 +179,67 @@ describe("Admin Settings platform controls", () => {
     expect(mocks.upsertSettings).toHaveBeenCalledWith([], false);
     expect(mocks.logActivity).toHaveBeenCalledTimes(1);
     expect(mocks.logActivity).toHaveBeenCalledWith(["admin_notification_preferences"]);
+  });
+
+  it("persists every setting category and restores the saved values after remount", async () => {
+    const stored: Record<string, unknown> = { default_campus_id: "campus-main" };
+    let storedNotifications = { reports: true, events: true, campus: true, announcements: true, users: true };
+    mocks.getSettings.mockImplementation(async () => ({ ...stored }));
+    mocks.upsertSettings.mockImplementation(async (entries) => {
+      entries.forEach((entry) => { stored[entry.key] = entry.value; });
+    });
+    mocks.getNotificationPreferences.mockImplementation(async () => ({ ...storedNotifications }));
+    mocks.saveNotificationPreferences.mockImplementation(async (value) => { storedNotifications = { ...value }; });
+
+    const firstRender = render(<AdminSettingsPage />);
+    const campusSelect = await screen.findByRole("combobox", { name: "Default Campus" });
+    fireEvent.keyDown(campusSelect, { key: "ArrowDown" });
+    fireEvent.click(await screen.findByRole("option", { name: /North Campus/ }));
+    fireEvent.click(screen.getByRole("button", { name: "map", pressed: false }));
+    fireEvent.click(screen.getByRole("switch", { name: "Remember Last Campus" }));
+    fireEvent.click(screen.getByRole("switch", { name: "Show Approved Event Overlays" }));
+
+    fireEvent.click(screen.getByRole("tab", { name: "Map & Navigation" }));
+    const routeMode = await screen.findByRole("combobox", { name: "Default Route Mode" });
+    fireEvent.keyDown(routeMode, { key: "ArrowDown" });
+    fireEvent.click(await screen.findByRole("option", { name: "Accessible" }));
+    fireEvent.click(screen.getByRole("switch", { name: "Animated Route Arrows" }));
+    fireEvent.click(screen.getByRole("switch", { name: "Focus New Routes" }));
+    fireEvent.click(screen.getByRole("switch", { name: "Follow Multi-floor Routes" }));
+    fireEvent.click(screen.getByRole("switch", { name: "Show Map Labels" }));
+
+    fireEvent.click(screen.getByRole("tab", { name: "Notifications" }));
+    for (const label of ["Reports notifications", "Events notifications", "Campus and publishing notifications", "Announcement notifications", "User management notifications"]) {
+      fireEvent.click(await screen.findByRole("switch", { name: label }));
+    }
+    fireEvent.click(screen.getByRole("button", { name: "Save Changes" }));
+
+    await waitFor(() => expect(stored).toEqual(expect.objectContaining({
+      default_campus_id: "campus-north",
+      default_student_landing_page: "map",
+      remember_last_campus: false,
+      show_approved_event_overlays: false,
+      default_route_mode: "accessible",
+      animated_route_arrows: false,
+      auto_focus_route: false,
+      auto_follow_floors: false,
+      show_map_labels: false,
+    })));
+    expect(storedNotifications).toEqual({ reports: false, events: false, campus: false, announcements: false, users: false });
+
+    firstRender.unmount();
+    render(<AdminSettingsPage />);
+    expect(await screen.findByRole("combobox", { name: "Default Campus" })).toHaveTextContent("North Campus");
+    expect(screen.getByRole("button", { name: "map", pressed: true })).toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: "Remember Last Campus" })).toHaveAttribute("aria-checked", "false");
+    fireEvent.click(screen.getByRole("tab", { name: "Map & Navigation" }));
+    expect(await screen.findByRole("combobox", { name: "Default Route Mode" })).toHaveTextContent("Accessible");
+    for (const label of ["Animated Route Arrows", "Focus New Routes", "Follow Multi-floor Routes", "Show Map Labels"]) {
+      expect(screen.getByRole("switch", { name: label })).toHaveAttribute("aria-checked", "false");
+    }
+    fireEvent.click(screen.getByRole("tab", { name: "Notifications" }));
+    for (const label of ["Reports notifications", "Events notifications", "Campus and publishing notifications", "Announcement notifications", "User management notifications"]) {
+      expect(await screen.findByRole("switch", { name: label })).toHaveAttribute("aria-checked", "false");
+    }
   });
 });

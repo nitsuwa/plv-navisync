@@ -1,9 +1,10 @@
 import { useState, useCallback, useMemo, useRef, useEffect, type CSSProperties } from "react";
 import { useNavigate } from "react-router";
+import { AnimatePresence, motion } from "motion/react";
 
 import {
   Search, Building2, X, Plus, Minus,
-  Accessibility, AlertTriangle, Navigation, Bookmark, Flag,
+  Accessibility, AlertTriangle, Navigation, Bookmark,
   Clock, ChevronRight, ChevronLeft, ChevronDown,
   Share2, CalendarDays, MapPin, Compass,
   Footprints, QrCode, Loader2, RefreshCw, AlertCircle, Crosshair, LocateFixed,
@@ -39,7 +40,7 @@ import { mapBackAction, publishMapSurface, type MapSurface } from "../lib/mapSur
 import {
   RoutePlannerDialog, RouteStepsPanel, RouteMapOverlay,
   ReportModal, SignInPrompt,
-  BuildingInfoPanel, MobileBuildingSheet, MobileMapAccountMenu,
+  BuildingInfoPanel, MobileBuildingSheet, MobileMapAccountMenu, StudentFloorPicker, StudentSelectedPlaceCard,
   StudentMapControls,
 } from "../components/map";
 import { studentAccountService } from "../services/studentAccountService";
@@ -94,6 +95,10 @@ const FP_H   = 290;  // floor plan viewBox height
 const DEFAULT_OUTDOOR_ZOOM = typeof window !== "undefined" && window.innerWidth < 768 ? 1.18 : 1;
 const MOBILE_OUTDOOR_VIEWER_INSETS = { top: 220, right: 8, bottom: 112, left: 8 };
 const MOBILE_FLOOR_VIEWER_INSETS = { top: 88, right: 8, bottom: 112, left: 8 };
+const getInitialFloorZoom = () => typeof window !== "undefined"
+  && window.innerWidth < 768
+  && typeof window.matchMedia === "function"
+  && window.matchMedia("(orientation: portrait)").matches ? 1.28 : 1;
 interface Pt { x: number; y: number; }
 
 /**
@@ -421,7 +426,7 @@ export interface CampusMapPageProps {
 export function CampusMapPage({ previewCampus = null, fullScreen = false }: CampusMapPageProps = {}) {
   const navigate = useNavigate();
   const studentAuth = useStudentAuth();
-  const { error: showError } = useToast();
+  const { error: showError, warning: showWarning } = useToast();
   const publishedCampusState = usePublishedCampus(previewCampus);
 
   const {
@@ -484,7 +489,7 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
 
   // Core map state
   const [selected,     setSelected]     = useState<Building|null>(null);
-  const [mobileBuildingSheetReservedHeight, setMobileBuildingSheetReservedHeight] = useState(0);
+  const [mobileBuildingSheetExpanded, setMobileBuildingSheetExpanded] = useState(false);
   const [mapMode,      setMapMode]      = useState<MapMode>("standard");
   const [platformSettings, setPlatformSettings] = useState<PublicPlatformSettings>(DEFAULT_PUBLIC_PLATFORM_SETTINGS);
   const [platformSettingsReady, setPlatformSettingsReady] = useState(false);
@@ -515,6 +520,8 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
   const [floorView,       setFloorView]       = useState<{ building: Building; floor: number }|null>(null);
   const [hoveredRoom,     setHoveredRoom]     = useState<string|null>(null);
   const [highlightedRoom, setHighlightedRoom] = useState<string|null>(null);
+  const [selectedRoomContext, setSelectedRoomContext] = useState<RoomDest | null>(null);
+  const [routePlannerEndpoint, setRoutePlannerEndpoint] = useState<"start" | "destination" | null>(null);
   const [stairLoading,    setStairLoading]    = useState<{ dir:"up"|"down"; label:string }|null>(null);
   const [stairChoice,     setStairChoice]     = useState<{
     roomType: RoomType; upFloor: number|null; dnFloor: number|null; upLabel: string; dnLabel: string;
@@ -523,6 +530,7 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
   const [campusTransitioning, setCampusTransitioning] = useState(false);
   const transitioningRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const initialSelectionRef = useRef(false);
+  const previousCampusSelectionRef = useRef<string | null>(null);
   const [indoorRoute, setIndoorRoute] = useState<IndoorRoute | null>(null);
   // Destination-room routes can contain several floor-local legs in one
   // building. Keep the active leg explicit so a floor-2 destination starts
@@ -598,6 +606,20 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
   const [reportModal,   setReportModal]   = useState<Building|null>(null);
   const [reportRoomContext, setReportRoomContext] = useState<{ floorId: string; roomId: string } | null>(null);
   const [signInPrompt,  setSignInPrompt]  = useState<string|null>(null);
+  const wasCampusCachedRef = useRef(false);
+
+  useEffect(() => {
+    if (isCampusCached && !wasCampusCachedRef.current) {
+      showWarning("Offline map", {
+        description: "Showing the last saved campus map.",
+        duration: 6000,
+        action: { label: "Refresh", onClick: () => { void refetchCampus(); } },
+      });
+    }
+    wasCampusCachedRef.current = isCampusCached;
+  }, [isCampusCached, refetchCampus, showWarning]);
+
+  useEffect(() => { setMobileBuildingSheetExpanded(false); }, [selected?.id]);
 
   // Refs
   const mapContainerRef = useRef<HTMLDivElement>(null);
@@ -662,16 +684,19 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
     if (!element) return;
     const rect = element.getBoundingClientRect();
     const mobile = typeof window !== "undefined" && window.innerWidth < 768;
-    const detailsOpen = Boolean(selected && !directionsMode);
+    const detailsOpen = Boolean(selected && !directionsMode && !searchFocused && !floorView);
     const rightInset = detailsOpen && !mobile ? 280 : 0;
-    const bottomInset = detailsOpen && mobile ? mobileBuildingSheetReservedHeight + 12 : 0;
+    const sheetHeight = detailsOpen && mobile
+      ? Math.min(window.innerHeight * (mobileBuildingSheetExpanded ? 0.84 : 0.58), mobileBuildingSheetExpanded ? 680 : 480, window.innerHeight - 84)
+      : 0;
+    const bottomInset = sheetHeight > 0 ? sheetHeight + 24 : 0;
     const visibleHeight = Math.max(1, rect.height - bottomInset);
     animateZoomAtRef.current(
       rect.left + (rect.width - rightInset) / 2,
       rect.top + visibleHeight / 2,
       zoomStateRef.current + delta,
     );
-  }, [mobileBuildingSheetReservedHeight, selected, directionsMode]);
+  }, [mobileBuildingSheetExpanded, selected, directionsMode, searchFocused, floorView]);
 
   const resetMapCamera = useCallback(() => {
     const origin = { x: 0, y: 0 };
@@ -791,13 +816,17 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
   // Legacy floor data for stair navigation UI
   const currentFloorData  = floorView ? FLOOR_PLANS[floorView.building.id] : null;
   const currentFloor      = currentFloorData?.floors.find(f => f.number === floorView?.floor) ?? currentFloorData?.floors[0];
-  const floorNums         = currentFloorData?.floors.map(f => f.number) ?? [];
   const activeFloorBuilding = useMemo(
     () => floorView && activeCampus
       ? activeCampus.buildings.find((building) => building.id === floorView.building.id)
       : undefined,
     [activeCampus, floorView],
   );
+  const availableFloorOptions = useMemo(() => {
+    const publishedFloors = activeFloorBuilding?.floors ?? [];
+    if (publishedFloors.length > 0) return publishedFloors.map((floor) => ({ number: floor.number, label: floor.label }));
+    return currentFloorData?.floors.map((floor) => ({ number: floor.number, label: floor.label })) ?? [];
+  }, [activeFloorBuilding, currentFloorData]);
   const activeFloorExteriorStairs = activeFloorBuilding?.exteriorEmergencyStairs ?? [];
   // The authored floor canvas can have semi-outdoor content (for example a
   // veranda) outside its 0..canvasW/H rectangle. Keep that content in the
@@ -919,11 +948,12 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
   writeCameraTransformRef.current = writeCameraTransform;
 
   /** One retargetable, time-based RAF loop for every animated camera move. */
-  const animateCameraTo = useCallback((targetPan: Pt, targetZoom = zoomStateRef.current, allowPanPastBounds = false) => {
+  const animateCameraTo = useCallback((targetPan: Pt, targetZoom = zoomStateRef.current) => {
     const toZoom = clampStudentMapZoom(targetZoom);
-    // Cursor-anchored zoom must preserve the world point exactly throughout
-    // interpolation. Other camera moves remain inside the authored pan bounds.
-    const toPan = allowPanPastBounds ? targetPan : clampMapPan(targetPan, toZoom);
+    // Every camera source must settle inside the same pan bounds. Previously
+    // cursor zoom bypassed these bounds, then the React-state reconciliation
+    // effect clamped the committed pan and produced a small second movement.
+    const toPan = clampMapPan(targetPan, toZoom);
     targetCameraRef.current = { pan: toPan, zoom: toZoom };
     zoomStateRef.current = toZoom;
 
@@ -1177,10 +1207,6 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
     return snapped ? snapped.point : pt;
   }, [activeCampus]);
 
-  const startPinning = useCallback(() => {
-    setPinning((active) => !active);
-  }, []);
-
   /** Convert a client-space point to SVG content coordinates (inverse of pan/zoom). */
   const svgPointFromClient = useCallback((clientX: number, clientY: number): { x: number; y: number } | null => {
     const svg = svgRef.current;
@@ -1216,7 +1242,7 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
       nextZoom: clamped,
       zoomOrigin: "center",
     });
-    animateCameraTo(nextPan, clamped, true);
+    animateCameraTo(clampMapPan(nextPan, clamped), clamped);
   }, [animateCameraTo, clampMapPan, svgPointFromClient, viewportCanvasH, viewportCanvasW]);
 
   useEffect(() => { animateZoomAtRef.current = animateZoomAt; }, [animateZoomAt]);
@@ -1667,14 +1693,26 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
 
   // ── Floor plan handlers ────────────────────────────────────────────────
   const openFloorPlan = useCallback((building: Building, floor?: number) => {
-    const initialFloor = floor ?? FLOOR_PLANS[building.id]?.floors[0]?.number ?? 1;
+    const publishedFloors = activeCampus?.buildings.find((candidate) => candidate.id === building.id)?.floors;
+    const initialFloor = floor ?? publishedFloors?.[0]?.number ?? FLOOR_PLANS[building.id]?.floors[0]?.number ?? 1;
     setFloorView({ building, floor: initialFloor });
     // The details sheet otherwise covers the floor picker on the right.
     setSelected(null);
-    setZoom(1); setPan({ x:0, y:0 });
+    setZoom(getInitialFloorZoom()); setPan({ x:0, y:0 });
     setSearch(""); setSearchFocused(false);
     setHighlightedRoom(null); setHoveredRoom(null);
-  }, [FLOOR_PLANS]);
+    setSelectedRoomContext(null);
+  }, [FLOOR_PLANS, activeCampus]);
+
+  const changeStudentFloor = useCallback((floorNumber: number) => {
+    setFloorView((view) => view ? { ...view, floor: floorNumber } : view);
+    setZoom(getInitialFloorZoom());
+    setPan({ x: 0, y: 0 });
+    setHighlightedRoom(null);
+    setHoveredRoom(null);
+    setActiveRouteRoom(null);
+    setSelectedRoomContext(null);
+  }, []);
 
   const closeFloorPlan = useCallback(() => {
     cancelAnimationFrame(navigationTransitionAnimRef.current ?? 0);
@@ -1693,6 +1731,8 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
     setFloorView(null);
     setZoom(1); setPan({ x:0, y:0 });
     setHighlightedRoom(null); setHoveredRoom(null); setStairLoading(null);
+    setSelectedRoomContext(null);
+    setRoutePlannerEndpoint(null);
     setIndoorRoute(null);
     setDestinationIndoorSegments([]);
     setDestinationIndoorSegmentIndex(-1);
@@ -1852,6 +1892,8 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
     navigationTransitionAnimRef.current = null;
     setSelected(null);
     setDirectionsMode(false);
+    setRoutePlannerEndpoint(null);
+    setSelectedRoomContext(null);
     setFromBuilding(null);
     setToBuilding(null);
     setRoomOrigin(null);
@@ -2121,6 +2163,7 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
 
   const selectBuilding = useCallback((b: Building|null) => {
     cancelCameraAnimation();
+    setMobileBuildingSheetExpanded(false);
     setSelected(b);
     setSearchFocused(false); setSearch(""); setShowQR(false);
     // Close route planner when selecting a building
@@ -2145,6 +2188,7 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
     setSearch("");
     setSearchFocused(false);
     setShowCampusSelector(false);
+    setRoutePlannerEndpoint(null);
     setUseMyLocation(Boolean(youAreHere));
     setDirectionsMode(true);
   }, [youAreHere]);
@@ -2237,29 +2281,27 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
 const buildingFill = (id: string) =>
   mapMode === "emergency" ? "#991b1b" : mapMode === "accessible" ? "#14532d" : B_POS[id]?.color ?? "var(--map-route)";
 
-  // Campus switching transition — shows a loading overlay when switching between campuses
+  // Only show a transition when the active campus selection actually changes.
+  // Background snapshot refreshes used to toggle isCampusLoading and trigger
+  // this overlay even when the student stayed on the same campus.
   useEffect(() => {
-    // Skip on initial load (first auto-selection) to avoid double loading screens
-    if (!availableCampuses.length || isCampusLoading || !initialSelectionRef.current) return;
+    if (!selectedCampusId) {
+      previousCampusSelectionRef.current = null;
+      return;
+    }
+    const previousCampusId = previousCampusSelectionRef.current;
+    previousCampusSelectionRef.current = selectedCampusId;
+    // Initial selection is data resolution, not a user-visible campus switch.
+    if (!previousCampusId || previousCampusId === selectedCampusId) return;
     setCampusTransitioning(true);
     clearTimeout(transitioningRef.current);
-    transitioningRef.current = setTimeout(() => setCampusTransitioning(false), 450);
+    transitioningRef.current = setTimeout(() => setCampusTransitioning(false), reducedMotion ? 120 : 360);
     return () => clearTimeout(transitioningRef.current);
-  }, [selectedCampusId, isCampusLoading]);
+  }, [selectedCampusId, reducedMotion]);
 
   // ── Indoor room selection ───────────────────────────────────────────
   // Selecting a room is passive. It only highlights the room and exposes the
   // Directions action; route computation starts from startRoomDirections.
-  const selectIndoorRoom = useCallback((roomId: string) => {
-    // Keep the active navigation journey stable while its destination floor is
-    // being shown. A new room can be selected after the journey is ended.
-    if (route?.destinationRoom) return;
-    setActiveRouteRoom(roomId);
-    setHighlightedRoom(roomId);
-    setIndoorRoute(null);
-    setIndoorWalkProgress(0);
-  }, [route]);
-
   const clearIndoorRoute = useCallback(() => {
     setIndoorRoute(null);
     setActiveRouteRoom(null);
@@ -2443,8 +2485,8 @@ const buildingFill = (id: string) =>
     const fv = floorViewRef.current;
     if (!fv) return null;
     const room =
-      currentFloor?.rooms.find((candidate) => candidate.id === roomId) ??
-      activeFloorPlan?.rooms.find((candidate) => candidate.id === roomId);
+      activeFloorPlan?.rooms.find((candidate) => candidate.id === roomId) ??
+      currentFloor?.rooms.find((candidate) => candidate.id === roomId);
     if (!room) return null;
 
     const publishedFloor = activeCampus?.buildings
@@ -2459,6 +2501,7 @@ const buildingFill = (id: string) =>
       roomName: room.name,
       buildingLabel: fv.building.name,
       buildingCode: fv.building.code,
+      floorLabel: publishedFloor?.label ?? currentFloor?.label ?? `Floor ${fv.floor}`,
       accessNodeId: publishedRoom?.accessNodeId,
       accessDoorId: publishedRoom?.accessDoorId,
       accessDoorIds: publishedRoom?.accessDoorIds,
@@ -2492,6 +2535,7 @@ const buildingFill = (id: string) =>
           roomName: room.name,
           buildingLabel: building.name,
           buildingCode: building.code,
+          floorLabel: floor.label,
           accessNodeId: room.accessNodeId,
           accessDoorId: room.accessDoorId,
           accessDoorIds: room.accessDoorIds,
@@ -2506,6 +2550,7 @@ const buildingFill = (id: string) =>
     if (!target) {
       setRoomDestination(null);
       setToBuilding(null);
+      setSelectedRoomContext(null);
       return;
     }
     const building = MOCK_BUILDINGS.find((candidate) => candidate.id === target.buildingId);
@@ -2516,11 +2561,10 @@ const buildingFill = (id: string) =>
     setToBuilding(building);
     setActiveRouteRoom(target.roomId);
     setHighlightedRoom(target.roomId);
+    setSelectedRoomContext(null);
   }, [MOCK_BUILDINGS, roomDestinationCatalog]);
 
-  const startRoomFromHere = useCallback((roomId: string) => {
-    const origin = roomEndpointFromFloor(roomId);
-    if (!origin) return;
+  const useRoomAsStart = useCallback((origin: RoomDest) => {
     const building = MOCK_BUILDINGS.find((candidate) => candidate.id === origin.buildingId);
     if (!building) return;
 
@@ -2529,45 +2573,65 @@ const buildingFill = (id: string) =>
     setFromBuilding(building);
     setToBuilding(null);
     setUseMyLocation(false);
-    setDirectionsMode(false);
+    setDirectionsMode(true);
+    setRoutePlannerEndpoint(null);
+    setSelectedRoomContext(null);
     setNavigationTransitioning(false);
     setNavigationPhase("idle");
-    setSelected(null);
     setSearch("");
     setSearchFocused(false);
-    setHighlightedRoom(roomId);
-    setActiveRouteRoom(roomId);
+    setHighlightedRoom(origin.roomId);
+    setActiveRouteRoom(origin.roomId);
     setIndoorRoute(null);
     setIndoorWalkProgress(0);
     setWalkProgress(0);
-  }, [MOCK_BUILDINGS, roomEndpointFromFloor]);
+  }, [MOCK_BUILDINGS]);
+
+  const useRoomAsDestination = useCallback((target: RoomDest) => {
+    const building = MOCK_BUILDINGS.find((candidate) => candidate.id === target.buildingId);
+    if (!building) return;
+    setRoomDestination(target);
+    setToBuilding(building);
+    setDirectionsMode(true);
+    setRoutePlannerEndpoint(null);
+    setSelectedRoomContext(null);
+    setNavigationPhase("idle");
+    setNavigationTransitioning(false);
+    setSearch("");
+    setSearchFocused(false);
+    setHighlightedRoom(target.roomId);
+    setActiveRouteRoom(target.roomId);
+    setIndoorRoute(null);
+    setIndoorWalkProgress(0);
+    setWalkProgress(0);
+  }, [MOCK_BUILDINGS]);
 
   const startRoomDirections = useCallback((roomId: string) => {
     const target = roomEndpointFromFloor(roomId);
     if (!target) return;
-    const building = MOCK_BUILDINGS.find((candidate) => candidate.id === target.buildingId);
-    if (!building) return;
+    useRoomAsDestination(target);
+  }, [roomEndpointFromFloor, useRoomAsDestination]);
 
-    setRoomDestination(target);
-    setToBuilding(building);
-    setNavigationPhase("idle");
-    setNavigationTransitioning(false);
-    // Open the same planner used by outdoor navigation. The destination is
-    // preselected, but the student must choose a starting point and confirm
-    // Find Route/Navigate before any animation begins.
-    if (!roomOrigin) setFromBuilding(null);
-    // Keep the start choice explicit even when a previous "You are here"
-    // marker exists. The planner still offers that marker as an option.
-    setUseMyLocation(false);
-    setDirectionsMode(true);
-    setSelected(null);
-    setSearch("");
-    setSearchFocused(false);
-    setHighlightedRoom(roomId);
+  // A map-tapped room either fills the active planner endpoint, or becomes
+  // the compact selected-place context used by the planner when no field is active.
+  const selectIndoorRoom = useCallback((roomId: string) => {
+    if (route?.destinationRoom) return;
+    const room = roomEndpointFromFloor(roomId);
+    if (!room) return;
+    if (directionsMode && routePlannerEndpoint === "start") {
+      useRoomAsStart(room);
+      return;
+    }
+    if (directionsMode && routePlannerEndpoint === "destination") {
+      useRoomAsDestination(room);
+      return;
+    }
     setActiveRouteRoom(roomId);
+    setHighlightedRoom(roomId);
+    setSelectedRoomContext(room);
     setIndoorRoute(null);
     setIndoorWalkProgress(0);
-  }, [MOCK_BUILDINGS, roomEndpointFromFloor, roomOrigin]);
+  }, [directionsMode, route, routePlannerEndpoint, roomEndpointFromFloor, useRoomAsDestination, useRoomAsStart]);
 
   // ── Walk arrival → enter the destination building's floor plan ────────
   // When the walking dot reaches the end of an outdoor route that targets a
@@ -2787,17 +2851,6 @@ const buildingFill = (id: string) =>
       onPointerDown={onPointerDown} onPointerMove={onPointerMove}
       onPointerUp={onPointerEnd} onPointerCancel={onPointerEnd}>
 
-      {/* Cached Offline Banner — small inline toast */}
-      {isCampusCached && (
-        <div data-no-drag className="absolute top-2 left-2 right-2 z-40 flex items-center gap-2 px-3 py-1.5 rounded-lg bg-amber-500/90 text-white text-[10px] font-bold shadow-md backdrop-blur-md border border-amber-400/20 md:top-4 md:left-auto md:right-auto md:left-1/2 md:-translate-x-1/2 md:w-auto md:px-4 md:py-2 md:rounded-xl md:text-xs">
-          <AlertTriangle className="h-3 w-3 md:h-4 md:w-4 shrink-0" />
-          <span>Offline — cached map</span>
-          <button onClick={() => refetchCampus()} className="underline ml-1 hover:opacity-80">
-            Refresh
-          </button>
-        </div>
-      )}
-
       {/* Pinning hint (tap-on-map mode) */}
       {pinning && !isFloorMode && (
         <div data-no-drag className="absolute left-2 top-[calc(env(safe-area-inset-top,0px)_+_4.5rem)] z-40 flex max-w-[calc(100vw-1rem)] items-center gap-1.5 rounded-2xl border border-blue-400/30 bg-blue-500/95 px-3 py-2 text-[11px] font-bold text-white shadow-xl animate-fade-in md:left-1/2 md:top-14 md:max-w-none md:-translate-x-1/2 md:gap-2 md:rounded-xl md:px-4 md:text-xs">
@@ -2832,85 +2885,26 @@ const buildingFill = (id: string) =>
         </div>
       )}
 
-      {/* Selected-room actions. Suppress duplicate directions during an
-          indoor preview, but always keep reporting available while idle. */}
-      {isFloorMode && !directionsMode && !stairLoading && navigationPhase === "idle" && (() => {
-        const activeRoomId = activeRouteRoom ?? highlightedRoom;
-        if (!activeRoomId) return null;
-        const room =
-          currentFloor?.rooms.find((r) => r.id === activeRoomId) ??
-          activeFloorPlan?.rooms.find((r) => r.id === activeRoomId);
-        if (!room) return null;
-        const alreadyTargeted =
-          !!route?.destinationRoom &&
-          route.destinationRoom.buildingId === floorView?.building.id &&
-          route.destinationRoom.floorNumber === floorView?.floor &&
-          route.destinationRoom.roomId === activeRoomId;
-        const isRoomOrigin =
-          !!roomOrigin &&
-          roomOrigin.buildingId === floorView?.building.id &&
-          roomOrigin.floorNumber === floorView?.floor &&
-          roomOrigin.roomId === activeRoomId;
-        // The indoor panel already offers directions; avoid a duplicate chip.
-        const indoorPanelOpen = !!indoorRoute && !route?.destinationRoom;
-        return (
-          <div
-            data-no-drag
-            className="absolute left-3 right-3 top-[calc(env(safe-area-inset-top,0px)+4.5rem)] z-40 flex flex-col gap-2 rounded-2xl border border-border p-2 shadow-xl animate-fade-in md:top-24 md:left-1/2 md:right-auto md:w-fit md:max-w-[calc(100%_-_24px)] md:-translate-x-1/2 md:flex-row md:items-center md:gap-2 md:px-3 md:py-1.5"
-            style={{ background: "var(--card)", backdropFilter: "blur(16px)", WebkitBackdropFilter: "blur(16px)" }}
-          >
-            <div className="flex min-w-0 items-center gap-2 md:max-w-[170px]">
-              <Navigation className="h-3.5 w-3.5 shrink-0" style={{ color: "var(--primary)" }} />
-              <span className="min-w-0 truncate text-[11px] font-bold md:max-w-[170px]" style={{ color: "var(--foreground)" }}>
-              {isRoomOrigin ? `Start: ${room.name}` : room.name}
-              </span>
-            </div>
-            <div className="grid grid-cols-[repeat(auto-fit,minmax(5.5rem,1fr))] gap-1.5 md:contents">
-              {!(alreadyTargeted || indoorPanelOpen || walkProgress >= 1) && <>
-                {(!roomOrigin || !isRoomOrigin) && (
-                  <button
-                    onClick={(e) => { e.stopPropagation(); startRoomFromHere(room.id); }}
-                    className="inline-flex min-h-10 w-full items-center justify-center whitespace-nowrap rounded-full border border-primary/30 px-2 py-1 text-[10px] font-extrabold transition-all hover:bg-primary/10 active:scale-95 md:min-h-7 md:w-auto md:py-0.5"
-                    style={{ color: "var(--primary)" }}
-                    aria-label={`${roomOrigin ? "Change start room to" : "Start navigation from"} ${room.name}`}
-                  >
-                    Start here
-                  </button>
-                )}
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (isRoomOrigin) {
-                      setToBuilding(null);
-                      setRoomDestination(null);
-                      openDirections();
-                    } else {
-                      startRoomDirections(room.id);
-                    }
-                  }}
-                  className="inline-flex min-h-10 w-full items-center justify-center whitespace-nowrap rounded-full px-2.5 py-1 text-[10px] font-extrabold transition-all hover:brightness-110 active:scale-95 md:min-h-7 md:w-auto md:py-0.5"
-                  style={{ background: "var(--primary)", color: "var(--primary-foreground)" }}
-                  aria-label={isRoomOrigin ? "Choose a destination" : `Get directions to ${room.name}`}
-                >
-                  {isRoomOrigin ? "Choose destination" : "Directions"}
-                </button>
-              </>}
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (!floorView || !activeFloorPlan) return;
-                  setReportRoomContext({ floorId: activeFloorPlan.id, roomId: room.id });
-                  setReportModal(floorView.building);
-                }}
-                aria-label={`Report issue in ${room.name}`}
-                className="inline-flex min-h-10 w-full items-center justify-center gap-1 whitespace-nowrap rounded-full border border-destructive/30 px-2 py-1 text-[10px] font-extrabold text-destructive hover:bg-destructive/10 md:min-h-7 md:w-auto md:px-2.5 md:py-0.5"
-              >
-                <Flag className="h-3 w-3" /> Report room
-              </button>
-            </div>
-          </div>
-        );
-      })()}
+      <AnimatePresence initial={false}>
+      {isFloorMode && selectedRoomContext && !directionsMode && !stairLoading && navigationPhase === "idle" && (
+        <StudentSelectedPlaceCard
+          key={`${selectedRoomContext.buildingId}:${selectedRoomContext.floorNumber}:${selectedRoomContext.roomId}`}
+          room={selectedRoomContext}
+          onDirections={() => useRoomAsDestination(selectedRoomContext)}
+          onStartHere={() => useRoomAsStart(selectedRoomContext)}
+          onReport={() => {
+            if (!floorView || !activeFloorPlan) return;
+            setReportRoomContext({ floorId: activeFloorPlan.id, roomId: selectedRoomContext.roomId });
+            setReportModal(floorView.building);
+          }}
+          onClose={() => {
+            setSelectedRoomContext(null);
+            setActiveRouteRoom(null);
+            setHighlightedRoom(null);
+          }}
+        />
+      )}
+      </AnimatePresence>
 
       {navigationPhase === "origin-indoor" && isFloorMode && roomOrigin && !navigationTransitioning && (
         <div data-no-drag className="absolute top-14 left-1/2 -translate-x-1/2 z-40 flex items-center gap-2 px-3 py-1.5 rounded-full bg-foreground/90 text-background text-[11px] font-bold shadow-xl animate-fade-in">
@@ -2959,6 +2953,11 @@ const buildingFill = (id: string) =>
             if (!activeFloorPlan) return null;
             return (
               <g transform={`translate(${floorViewport.offsetX},${floorViewport.offsetY})`}>
+                <g
+                  key={activeFloorPlan.id}
+                  className="student-floor-scene-transition"
+                  style={reducedMotion ? undefined : { animation: "student-floor-scene-enter 200ms ease-out both", transformBox: "fill-box", transformOrigin: "center" }}
+                >
                 <ReadonlyFloorPlanScene
                   floor={activeFloorPlan}
                   floorIndex={activeFloorOrdinal.index}
@@ -2988,6 +2987,7 @@ const buildingFill = (id: string) =>
                     </g>
                   );
                 })()}
+                </g>
               </g>
             );
           })() : (
@@ -3152,10 +3152,16 @@ const buildingFill = (id: string) =>
       </svg>
 
       {/* ══════════════ FLOATING SEARCH / DIRECTIONS — same for both modes ══════════════ */}
+      <AnimatePresence initial={false} mode="sync">
       {directionsMode ? (
-        <div
+        <motion.div
+          key="route-planner-container"
           data-no-drag
-          className="absolute z-30 md:inset-x-auto md:bottom-auto md:top-3 md:left-3 md:w-[350px]"
+          className="pointer-events-none absolute inset-0 z-30 md:inset-x-auto md:bottom-3 md:left-3 md:top-3 md:w-[380px]"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={reducedMotion ? { duration: 0.01 } : { duration: 0.16, ease: "easeOut" }}
         >
           <RoutePlannerDialog
               from={fromBuilding}
@@ -3164,6 +3170,7 @@ const buildingFill = (id: string) =>
                 setNavigationPhase("idle");
                 setRoomOrigin(null);
                 setFromBuilding(building);
+                setSelectedRoomContext(null);
               }}
               onFromRoomChange={(room) => {
                 if (!room) {
@@ -3187,6 +3194,7 @@ const buildingFill = (id: string) =>
                 setNavigationPhase("idle");
                 setRoomDestination(null);
                 setToBuilding(building);
+                setSelectedRoomContext(null);
               }}
               buildings={MOCK_BUILDINGS}
               mode={mapMode}
@@ -3206,10 +3214,16 @@ const buildingFill = (id: string) =>
               toRoom={roomDestination}
               roomOptions={roomDestinationCatalog}
               destinationResults={campusSearch.destinations}
+              activeEndpoint={routePlannerEndpoint}
+              onActiveEndpointChange={setRoutePlannerEndpoint}
+              selectedRoomForPlanner={selectedRoomContext}
+              onUseSelectedRoomAsStart={useRoomAsStart}
+              onUseSelectedRoomAsDestination={useRoomAsDestination}
               onSelectFromDestination={(result) => {
                 const endpoint = routeEndpointFromSearchResult(result, MOCK_BUILDINGS, roomDestinationCatalog);
                 if (!endpoint) return;
                 setNavigationPhase("idle");
+                setSelectedRoomContext(null);
                 if (endpoint.kind === "building") {
                   setRoomOrigin(null);
                   setFromBuilding(endpoint.building);
@@ -3226,6 +3240,7 @@ const buildingFill = (id: string) =>
                 const endpoint = routeEndpointFromSearchResult(result, MOCK_BUILDINGS, roomDestinationCatalog);
                 if (!endpoint) return;
                 setNavigationPhase("idle");
+                setSelectedRoomContext(null);
                 if (endpoint.kind === "building") {
                   setRoomDestination(null);
                   setToBuilding(endpoint.building);
@@ -3264,8 +3279,8 @@ const buildingFill = (id: string) =>
                   ? MOCK_BUILDINGS.find((building) => building.id === previousFromRoom.buildingId) ?? null
                   : previousFromBuilding);
               }}
-              onClose={() => { setNavigationPhase("idle"); setNavigationTransitioning(false); setDirectionsMode(false); setFromBuilding(null); setToBuilding(null); setRoomOrigin(null); setRoomDestination(null); }}
-              onClear={() => { setNavigationPhase("idle"); setNavigationTransitioning(false); setFromBuilding(null); setToBuilding(null); setRoomOrigin(null); setRoomDestination(null); }}
+              onClose={() => { setNavigationPhase("idle"); setNavigationTransitioning(false); setDirectionsMode(false); setRoutePlannerEndpoint(null); setSelectedRoomContext(null); setFromBuilding(null); setToBuilding(null); setRoomOrigin(null); setRoomDestination(null); }}
+              onClear={() => { setNavigationPhase("idle"); setNavigationTransitioning(false); setRoutePlannerEndpoint(null); setSelectedRoomContext(null); setFromBuilding(null); setToBuilding(null); setRoomOrigin(null); setRoomDestination(null); }}
               onFindRoute={() => {
               const endpointsSet = Boolean(
                 (mapMode === "emergency" && (roomOrigin || fromBuilding || (useMyLocation && youAreHere)))
@@ -3412,8 +3427,16 @@ const buildingFill = (id: string) =>
               setDirectionsMode(false);
               }}
           />
-        </div>
+        </motion.div>
       ) : (
+        <motion.div
+          key="map-controls-container"
+          className="absolute inset-0 z-20 pointer-events-none"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={reducedMotion ? { duration: 0.01 } : { duration: 0.16, ease: "easeOut" }}
+        >
         <>
           <StudentMapControls
             isFloorMode={isFloorMode}
@@ -3422,8 +3445,6 @@ const buildingFill = (id: string) =>
             search={search}
             searchFocused={searchFocused}
             directionsMode={directionsMode}
-            pinning={pinning}
-            youAreHere={Boolean(youAreHere)}
             searchResults={campusSearch.results}
             onSearchChange={setSearch}
             onSearchFocus={() => setSearchFocused(true)}
@@ -3431,7 +3452,6 @@ const buildingFill = (id: string) =>
             onClearSearch={() => setSearch("")}
             onSelectSearchResult={handleSelectSearchResult}
             onOpenDirections={openDirections}
-            onTogglePin={startPinning}
             onBackToCampus={closeFloorPlan}
           />
           <div hidden aria-hidden="true">
@@ -3556,7 +3576,9 @@ const buildingFill = (id: string) =>
           </>
           </div>
         </>
+        </motion.div>
       )}
+      </AnimatePresence>
 
       <div
         data-no-drag
@@ -3566,80 +3588,39 @@ const buildingFill = (id: string) =>
         <MobileMapAccountMenu />
       </div>
 
-      {/* Accessibility / SOS Legend (visible only in special modes) */}
-      {mapMode !== "standard" && (
-        <div data-no-drag className="absolute top-[10.5rem] left-1/2 -translate-x-1/2 z-20 max-w-[calc(100vw-1.5rem)] animate-slide-up md:top-[9.5rem]">
-          <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl border shadow-lg"
-            style={{
-              background: mapMode === "accessible" ? "rgba(22,163,74,0.12)" : "rgba(220,38,38,0.12)",
-              backdropFilter: "blur(12px)",
-              WebkitBackdropFilter: "blur(12px)",
-              borderColor: mapMode === "accessible" ? "rgba(22,163,74,0.25)" : "rgba(220,38,38,0.25)",
-            }}>
-            {mapMode === "accessible" ? (
-              <>
-                <span className="flex items-center gap-1 text-[10px] font-bold text-green-700 dark:text-green-400">
-                  <Accessibility className="h-3 w-3" /> Accessible Route
-                </span>
-                <span className="w-px h-3 bg-green-500/20"/>
-                <span className="flex items-center gap-1 text-[10px] font-semibold text-green-600/70 dark:text-green-500/70">■ Ramp</span>
-                <span className="text-[10px] font-semibold text-green-600/70 dark:text-green-500/70">■ Elevator</span>
-                <span className="text-[10px] font-semibold text-green-600/70 dark:text-green-500/70">— Wide Paths</span>
-              </>
-            ) : (
-              <>
-                <span className="flex items-center gap-1 text-[10px] font-bold text-red-600 dark:text-red-400">
-                  <AlertTriangle className="h-3 w-3"/> Emergency Mode
-                </span>
-                <span className="w-px h-3 bg-red-500/20"/>
-                <span className="text-[10px] font-semibold text-red-500/80">■ EXIT Points</span>
-                <span className="text-[10px] font-semibold text-red-500/80">■ Assembly Area</span>
-              </>
-            )}
-          </div>
-        </div>
-      )}
-
       {/* ══════════════ FLOOR SELECTOR (floor plan mode — always visible when in floor view) ══════════════ */}
-      {isFloorMode && currentFloorData && (
-        <div data-no-drag role="group" aria-label="Select floor" className="absolute right-14 top-1/2 -translate-y-1/2 z-20 hidden md:flex flex-col gap-1 p-1.5 rounded-2xl border border-border/60 shadow-xl"
-          style={{ background:"var(--card)", backdropFilter:"blur(16px)", WebkitBackdropFilter:"blur(16px)" }}>
-          <p className="text-[9px] font-extrabold text-muted-foreground uppercase tracking-widest text-center px-1 pb-0.5">Floor</p>
-          {[...currentFloorData.floors].reverse().map(f => (
-            <button key={f.number}
-              onClick={e => { e.stopPropagation(); setFloorView(v => v ? {...v, floor:f.number} : v); setZoom(1); setPan({x:0,y:0}); setHighlightedRoom(null); }}
-              aria-label={`View ${f.label} of ${floorView?.building.name}`}
-              aria-pressed={floorView?.floor === f.number}
-              title={f.label}
-              className={cn("w-9 h-9 rounded-xl text-[11px] font-extrabold transition-all",
-                floorView?.floor === f.number
-                  ? "bg-primary text-primary-foreground shadow-sm"
-                  : "bg-muted text-muted-foreground hover:bg-secondary")}>
-              {/ground/i.test(f.label) ? "G" : f.label.match(/\d+/)?.[0] ?? `${f.number}`}
-            </button>
-          ))}
-        </div>
-      )}
 
       {/* ══════════════ MAP ZOOM / RESET CONTROLS ══════════════ */}
-      <div data-no-drag className={cn(
+      {isFloorMode && availableFloorOptions.length > 1 && !directionsMode && !stairLoading && !navigationTransitioning && navigationPhase === "idle" && (
+        <StudentFloorPicker
+          buildingName={activeFloorBuilding?.name ?? floorView?.building.name ?? "Building"}
+          floors={availableFloorOptions}
+          activeFloor={floorView?.floor ?? availableFloorOptions[0].number}
+          onSelect={changeStudentFloor}
+        />
+      )}
+
+      <div data-testid="student-map-zoom-controls" data-no-drag data-sheet-open={Boolean(selected && !directionsMode && !searchFocused && !isFloorMode)} data-sheet-expanded={mobileBuildingSheetExpanded} className={cn(
+        "student-map-zoom-controls transition-[bottom,transform] duration-200 ease-out motion-reduce:transition-none",
         "absolute z-20 flex flex-col gap-1 right-3",
-        selected && !directionsMode ? "bottom-[var(--mobile-zoom-bottom)] md:bottom-5 md:right-[292px]" : "bottom-24 md:bottom-5",
-      )} style={{
-        "--mobile-zoom-bottom": `calc(${mobileBuildingSheetReservedHeight}px + 0.75rem)`,
-      } as CSSProperties}>
-        <button type="button" aria-label="Zoom in" disabled={zoom >= STUDENT_MAP_MAX_ZOOM} onClick={() => zoomFromControls(STUDENT_MAP_ZOOM_STEP)} className="h-11 w-11 md:h-10 md:w-10 rounded-xl bg-card border border-border/60 shadow-md flex items-center justify-center text-foreground disabled:opacity-40">
-          <Plus className="h-4 w-4" />
-        </button>
-        <button type="button" aria-label="Zoom out" disabled={zoom <= STUDENT_MAP_MIN_ZOOM} onClick={() => zoomFromControls(-STUDENT_MAP_ZOOM_STEP)} className="h-11 w-11 md:h-10 md:w-10 rounded-xl bg-card border border-border/60 shadow-md flex items-center justify-center text-foreground disabled:opacity-40">
-          <Minus className="h-4 w-4" />
-        </button>
-        <button onClick={e => { e.stopPropagation(); resetMapCamera(); }} title="Reset view"
-          className="h-11 w-11 md:h-9 md:w-9 rounded-xl bg-card border border-border/60 shadow-md flex items-center justify-center text-muted-foreground hover:text-primary hover:border-primary/30 active:scale-95 transition-all" aria-label="Reset view">
-          <LocateFixed className="h-4 w-4"/>
-        </button>
+        selected && !directionsMode && !searchFocused && !isFloorMode ? "bottom-[var(--mobile-zoom-bottom)] md:bottom-5 md:right-[292px]" : "bottom-24 md:bottom-5",
+      )}>
+        <div data-testid="student-map-zoom-stack" className="overflow-hidden rounded-2xl border border-white/45 bg-card/95 shadow-[0_8px_24px_rgba(15,23,42,0.14)] backdrop-blur-xl dark:border-white/10">
+          <button type="button" aria-label="Zoom in" disabled={zoom >= STUDENT_MAP_MAX_ZOOM} onClick={() => zoomFromControls(STUDENT_MAP_ZOOM_STEP)} className="flex h-11 w-11 items-center justify-center text-foreground transition-[background-color,transform] duration-150 hover:bg-muted active:scale-95 disabled:cursor-not-allowed disabled:opacity-40 md:h-10 md:w-10">
+            <Plus className="h-4 w-4" />
+          </button>
+          <div className="h-px bg-border/60" />
+          <button type="button" aria-label="Zoom out" disabled={zoom <= STUDENT_MAP_MIN_ZOOM} onClick={() => zoomFromControls(-STUDENT_MAP_ZOOM_STEP)} className="flex h-11 w-11 items-center justify-center text-foreground transition-[background-color,transform] duration-150 hover:bg-muted active:scale-95 disabled:cursor-not-allowed disabled:opacity-40 md:h-10 md:w-10">
+            <Minus className="h-4 w-4" />
+          </button>
+          <div className="h-px bg-border/60" />
+          <button type="button" onClick={(e) => { e.stopPropagation(); resetMapCamera(); }} title="Reset map view"
+            className="flex h-11 w-11 items-center justify-center text-muted-foreground transition-[background-color,color,transform] duration-150 hover:bg-primary/10 hover:text-primary active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/50 md:h-10 md:w-10" aria-label="Reset map view">
+            <LocateFixed className="h-4 w-4" />
+          </button>
+        </div>
         {/* Zoom level indicator */}
-        <div ref={zoomPercentRef} className="text-center text-[9px] font-semibold text-muted-foreground/60 select-none mt-0.5">
+        <div data-testid="student-map-zoom-percentage" ref={zoomPercentRef} className="text-center text-[9px] font-semibold text-muted-foreground/60 select-none mt-0.5">
           {Math.round(displayZoom * 100)}%
         </div>
       </div>
@@ -3848,7 +3829,7 @@ const buildingFill = (id: string) =>
       )}
 
       {/* ══════════════ CAMPUS SELECTOR / MAP LABEL ══════════════ */}
-      <div data-no-drag className={cn("absolute bottom-[76px] md:bottom-6 left-1/2 -translate-x-1/2 z-20 hidden md:block", (route || directionsMode) && "hidden")}>
+      <div data-no-drag className={cn("absolute bottom-[76px] md:bottom-6 left-1/2 -translate-x-1/2 z-20 hidden md:block", (route || directionsMode || isFloorMode) && "hidden")}>
         {isFloorMode ? (
           /* Floor plan: breadcrumb label */
           <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-border shadow-sm"
@@ -3863,10 +3844,11 @@ const buildingFill = (id: string) =>
           <div className="relative">
             <button
               onClick={() => setShowCampusSelector(v => !v)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-border shadow-sm hover:shadow-md transition-all"
-              style={{ background:"var(--card)", color:"var(--foreground)", fontSize:"11px", fontFamily:"var(--font-body)" }}>
-              <MapPin className="h-3 w-3 shrink-0" style={{ color:"var(--primary)" }}/>
-              <span className="font-semibold">{activeCampus?.name ?? 'Select Campus'}</span>
+              aria-expanded={showCampusSelector}
+              className="flex min-h-11 max-w-[min(360px,calc(100vw-1.5rem))] items-center gap-2 rounded-2xl border border-white/45 bg-card/95 px-4 text-xs font-semibold text-foreground shadow-[0_6px_18px_rgba(15,23,42,0.14)] backdrop-blur-xl transition-[transform,background-color,box-shadow] duration-150 hover:bg-muted hover:shadow-lg active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 dark:border-white/10"
+              style={{ fontFamily:"var(--font-body)" }}>
+              <MapPin className="h-4 w-4 shrink-0 text-primary" />
+              <span className="max-w-[260px] truncate">{activeCampus?.name ?? 'Select Campus'}</span>
               <ChevronDown className="h-3 w-3 shrink-0" style={{ color:"var(--muted-foreground)", transform: showCampusSelector ? "rotate(180deg)" : "none", transition:"transform 0.2s" }}/>
             </button>
             {showCampusSelector && availableCampuses.length > 0 && (
@@ -3976,39 +3958,26 @@ const buildingFill = (id: string) =>
       </div>
 
       {/* ══════════════ MOBILE: floor selector ══════════════ */}
-      {isFloorMode && currentFloorData && (
-        <div data-no-drag role="group" aria-label="Select floor" className="absolute left-3 bottom-24 z-20 md:hidden flex gap-1 p-1.5 rounded-2xl border border-border/60 shadow-lg"
-          style={{ background:"var(--card)" }}>
-          {currentFloorData.floors.map(f => (
-            <button key={f.number}
-              onClick={e => { e.stopPropagation(); setFloorView(v => v ? {...v, floor:f.number} : v); setZoom(1); setPan({x:0,y:0}); setHighlightedRoom(null); }}
-              aria-label={`View ${f.label} of ${floorView?.building.name}`}
-              aria-pressed={floorView?.floor === f.number}
-              title={f.label}
-              className={cn("h-9 px-2.5 rounded-xl text-[11px] font-extrabold transition-all",
-                floorView?.floor === f.number ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground")}>
-              {/ground/i.test(f.label) ? "G/F" : `${f.label.match(/\d+/)?.[0] ?? f.number}F`}
-            </button>
-          ))}
-        </div>
-      )}
 
       {/* ══════════════ MOBILE BUILDING SHEET ══════════════ */}
-      {selected && !isFloorMode && !directionsMode && (
-        <MobileBuildingSheet
-          selected={selected}
-          onClose={() => selectBuilding(null)}
-          onDirections={startDirectionsTo}
-          onFloorPlan={(b) => openFloorPlan(b)}
-          onSave={toggleSave}
-          onReport={building => { setReportRoomContext(null); setReportModal(building); }}
-          onSignInPrompt={setSignInPrompt}
-          saved={saved}
-          studentAuth={studentAuth}
-          hasFloorPlans={Boolean(FLOOR_PLANS[selected.id])}
-          onHeightChange={setMobileBuildingSheetReservedHeight}
-        />
-      )}
+      <AnimatePresence initial={false}>
+        {selected && !isFloorMode && !directionsMode && !searchFocused && (
+          <MobileBuildingSheet
+            key={selected.id}
+            selected={selected}
+            onClose={() => selectBuilding(null)}
+            onDirections={startDirectionsTo}
+            onFloorPlan={(b) => openFloorPlan(b)}
+            onSave={toggleSave}
+            onReport={building => { setReportRoomContext(null); setReportModal(building); }}
+            onSignInPrompt={setSignInPrompt}
+            saved={saved}
+            studentAuth={studentAuth}
+            hasFloorPlans={Boolean(FLOOR_PLANS[selected.id])}
+            onExpandedChange={setMobileBuildingSheetExpanded}
+          />
+        )}
+      </AnimatePresence>
 
       {/* ══════════════ STAIR UP/DOWN CHOICE ══════════════ */}
       {stairChoice && (
@@ -4076,7 +4045,7 @@ const buildingFill = (id: string) =>
         <div className="absolute inset-0 z-30 flex items-center justify-center bg-background/60 backdrop-blur-sm" style={{ animation:"fadeIn 0.15s ease-out both" }}>
           <div className="flex flex-col items-center gap-3 px-6 py-5 rounded-2xl bg-card/90 backdrop-blur-xl shadow-xl border border-border/50" style={{ animation:"scaleIn 0.25s cubic-bezier(0.16,1,0.3,1) both" }}>
             <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
-              <svg className="animate-spin h-5 w-5 text-primary" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+              <svg className={cn("h-5 w-5 text-primary", !reducedMotion && "animate-spin")} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
               </svg>
@@ -4084,7 +4053,7 @@ const buildingFill = (id: string) =>
             <p className="text-sm font-bold text-foreground">Loading campus…</p>
             <div className="flex gap-1">
               {[0,1,2].map(i => (
-                <div key={i} className="w-1.5 h-1.5 rounded-full bg-primary/60" style={{ animation:`loading-bounce 0.8s ease-in-out ${i * 0.18}s infinite` }} />
+                <div key={i} className="w-1.5 h-1.5 rounded-full bg-primary/60" style={reducedMotion ? undefined : { animation:`loading-bounce 0.8s ease-in-out ${i * 0.18}s infinite` }} />
               ))}
             </div>
           </div>
