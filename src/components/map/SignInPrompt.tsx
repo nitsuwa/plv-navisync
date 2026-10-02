@@ -17,7 +17,8 @@ export function SignInPrompt({ message, onClose }: SignInPromptProps) {
       role="dialog"
       aria-modal="true"
       aria-label="Sign in required"
-      className="fixed inset-0 z-[60] flex items-center justify-center bg-background/70 backdrop-blur-sm animate-fade-in"
+      data-map-layer="modal"
+      className="map-layer-modal fixed inset-0 flex items-center justify-center bg-background/70 backdrop-blur-sm animate-fade-in"
       onClick={onClose}
     >
       <div

@@ -202,7 +202,7 @@ export function UnifiedRoutePlannerDialog({
           <motion.div
             key={`search-${activeEndpoint}`}
             data-testid="route-planner-search-subview"
-            className="flex min-h-0 flex-1 flex-col overflow-hidden p-3.5 md:p-4"
+            className="flex min-h-0 flex-1 flex-col overflow-hidden p-3 md:p-4"
             initial={reducedMotion ? false : { opacity: 0, x: 12 }}
             animate={{ opacity: 1, x: 0 }}
             exit={reducedMotion ? { opacity: 0 } : { opacity: 0, x: -10 }}
@@ -223,6 +223,7 @@ export function UnifiedRoutePlannerDialog({
               onClear={() => setQuery("")}
               autoFocus
               compact
+              fillResults
               listId={activeEndpoint === "start" ? "route-start-destination-results" : "route-destination-results"}
               groupByBuilding
             />

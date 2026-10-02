@@ -133,6 +133,38 @@ describe("LandingPage interactive tour", () => {
     expect(hero).toHaveClass("min-h-0");
   });
 
+  it("keeps a stable navy backing under a small responsive set of animated hero layers", () => {
+    renderLandingPage();
+
+    const hero = screen.getByTestId("landing-hero");
+    expect(hero).toHaveAttribute("data-hero-background", "stable-navy");
+    expect(hero).toHaveAttribute("data-document-hidden", "false");
+    expect(hero).toHaveClass("bg-[#071440]");
+    expect(hero.querySelector(".landing-hero__base")).toBeInTheDocument();
+    expect(hero.querySelectorAll(".landing-hero__ambient")).toHaveLength(2);
+    expect(hero.querySelectorAll(".landing-hero__route-primary, .landing-hero__route-secondary")).toHaveLength(2);
+    expect(hero.querySelectorAll(".landing-hero__particle")).toHaveLength(8);
+  });
+
+  it("pauses the hero's CSS motion while the document is hidden without a render loop", () => {
+    const visibilityDescriptor = Object.getOwnPropertyDescriptor(document, "visibilityState");
+    try {
+      renderLandingPage();
+      const hero = screen.getByTestId("landing-hero");
+
+      Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" });
+      act(() => document.dispatchEvent(new Event("visibilitychange")));
+      expect(hero).toHaveAttribute("data-document-hidden", "true");
+
+      Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
+      act(() => document.dispatchEvent(new Event("visibilitychange")));
+      expect(hero).toHaveAttribute("data-document-hidden", "false");
+    } finally {
+      if (visibilityDescriptor) Object.defineProperty(document, "visibilityState", visibilityDescriptor);
+      else Reflect.deleteProperty(document, "visibilityState");
+    }
+  });
+
   it("shows stairs when off and separate ramp and elevator scenes when on", () => {
     vi.useFakeTimers();
     try {
@@ -182,7 +214,7 @@ describe("LandingPage interactive tour", () => {
     renderLandingPage();
 
     const seal = screen.getByTestId("hero-seal");
-    expect(seal).toHaveClass("mt-2", "h-36", "w-36", "items-center", "justify-center");
+    expect(seal).toHaveClass("mt-2", "h-32", "w-32", "items-center", "justify-center", "sm:h-36", "sm:w-36");
     expect(screen.getByTestId("hero-seal-halo")).toHaveClass("inset-0");
     expect(screen.getByTestId("hero-seal-ring")).toHaveClass("inset-2");
   });

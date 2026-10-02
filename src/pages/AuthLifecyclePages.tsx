@@ -120,6 +120,98 @@ function AuthCompletionScreen({
   );
 }
 
+function invitationDestination(role: string | undefined): string {
+  if (role === "admin" || role === "super_admin") return "/admin-dashboard";
+  if (role === "student_org") return "/home";
+  return "/map";
+}
+
+export function InviteAccountPage() {
+  const auth = useAuth();
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
+  const [completedRole, setCompletedRole] = useState<string | null>(null);
+
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (password.length < MIN_ACCOUNT_PASSWORD_LENGTH) {
+      setError(`Password must be at least ${MIN_ACCOUNT_PASSWORD_LENGTH} characters.`);
+      return;
+    }
+    if (password !== confirm) {
+      setError("Passwords do not match.");
+      return;
+    }
+    if (!supabase || !auth.session) {
+      setError("This invitation is no longer valid. Ask an administrator to send a new one.");
+      return;
+    }
+
+    setSubmitting(true);
+    setError("");
+    try {
+      const { error: passwordError } = await supabase.auth.updateUser({ password });
+      if (passwordError) {
+        setError(friendlyAccountError(passwordError.message));
+        return;
+      }
+      const { data, error: completionError } = await supabase.rpc("complete_user_invitation");
+      if (completionError || !data) {
+        const message = completionError?.message.toLowerCase() ?? "";
+        setError(/no longer valid|not found|invitation session/i.test(message)
+          ? "This invitation is no longer valid. Ask an administrator to send a new one."
+          : "We couldn't complete account setup. Check your connection and try again.");
+        return;
+      }
+      await auth.refreshProfile();
+      publishAuthLifecycleSignal("USER_INVITATION_COMPLETE");
+      setCompletedRole(data.role);
+    } catch (setupError) {
+      setError(friendlyAccountError(setupError instanceof Error ? setupError.message : "network"));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  if (completedRole) {
+    return <AuthCompletionScreen title="Account ready" description="Your PLV NaviSync account is ready." openPath={invitationDestination(completedRole)} closeMessage="Your account is ready. You can safely close this tab." />;
+  }
+
+  if (auth.status === "initializing" || (auth.session && auth.status === "error" && !auth.profile)) {
+    return <AuthShell><StatusIcon state="loading" /><h1 className="text-2xl font-extrabold text-foreground">Preparing your account…</h1><p className="mt-3 text-sm text-muted-foreground">Supabase is verifying the secure invitation link.</p>{auth.status === "error" && <Button onClick={() => void auth.retryBootstrap()} variant="outline" size="lg" className="mt-6 w-full">Try Again</Button>}</AuthShell>;
+  }
+
+  if (!auth.session) {
+    const isNetworkError = auth.status === "error";
+    return <AuthShell><StatusIcon state="error" /><h1 className="text-2xl font-extrabold text-foreground">{isNetworkError ? "Could not verify invitation" : "Invitation no longer valid"}</h1><p className="mt-3 text-sm text-muted-foreground">{isNetworkError ? "Check your connection and try again." : "This invitation is no longer valid. Ask an administrator to send a new one."}</p>{isNetworkError && <Button onClick={() => void auth.retryBootstrap()} variant="outline" size="lg" className="mt-6 w-full">Try Again</Button>}<Link to="/admin" className="mt-4 inline-flex h-11 w-full items-center justify-center rounded-xl bg-primary text-sm font-bold text-primary-foreground">Return to Sign In</Link></AuthShell>;
+  }
+
+  if (!auth.profile) {
+    return <AuthShell><StatusIcon state="error" /><h1 className="text-2xl font-extrabold text-foreground">Invitation no longer valid</h1><p className="mt-3 text-sm text-muted-foreground">This invitation is no longer valid. Ask an administrator to send a new one.</p><Link to="/admin" className="mt-7 inline-flex h-11 w-full items-center justify-center rounded-xl bg-primary text-sm font-bold text-primary-foreground">Return to Sign In</Link></AuthShell>;
+  }
+
+  const invitedRole = auth.profile?.role;
+  return (
+    <AuthShell>
+      <h1 className="text-2xl font-extrabold text-foreground">Welcome to PLV NaviSync</h1>
+      <p className="mt-2 text-sm text-muted-foreground">You’ve been invited as <span className="font-bold text-foreground">{invitedRole === "super_admin" ? "Super Admin" : invitedRole === "admin" ? "Administrator" : invitedRole === "student_org" ? "Student Org" : "Student"}</span>. Create a password to finish setup.</p>
+      <form onSubmit={(event) => void submit(event)} className="mt-7 space-y-4 text-left">
+        <div>
+          <label htmlFor="invite-password" className="text-xs font-bold uppercase tracking-widest text-foreground">Create Password</label>
+          <div className="relative mt-2"><input id="invite-password" type={showPassword ? "text" : "password"} value={password} onChange={(event) => { setPassword(event.target.value); setError(""); }} autoComplete="new-password" className="h-11 w-full rounded-xl border border-border bg-input-background px-4 pr-11 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/30" /><button type="button" onClick={() => setShowPassword((shown) => !shown)} aria-label={showPassword ? "Hide password" : "Show password"} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-muted-foreground">{showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</button></div>
+        </div>
+        <div><label htmlFor="invite-confirm-password" className="text-xs font-bold uppercase tracking-widest text-foreground">Confirm Password</label><input id="invite-confirm-password" type={showPassword ? "text" : "password"} value={confirm} onChange={(event) => { setConfirm(event.target.value); setError(""); }} autoComplete="new-password" className="mt-2 h-11 w-full rounded-xl border border-border bg-input-background px-4 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/30" /></div>
+        {error && <p role="alert" className="rounded-xl bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>}
+        <Button type="submit" isLoading={submitting} size="lg" className="w-full">Complete Setup</Button>
+        <p className="text-center text-xs text-muted-foreground">Use at least {MIN_ACCOUNT_PASSWORD_LENGTH} characters.</p>
+      </form>
+    </AuthShell>
+  );
+}
+
 export function VerificationPendingPage() {
   const location = useLocation();
   const initialEmail = (location.state as { email?: string } | null)?.email ?? "";

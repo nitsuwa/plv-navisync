@@ -58,7 +58,7 @@ export function StudentMapControls({
   };
 
   return (
-    <div data-testid="student-map-controls" className="absolute inset-0 z-20 pointer-events-none">
+    <div data-testid="student-map-controls" className="map-layer-controls absolute inset-0 pointer-events-none">
       {!directionsMode && (
         <div
           data-testid="student-map-search-panel"
@@ -86,6 +86,7 @@ export function StudentMapControls({
             listId="student-map-search-results"
             groupByBuilding
             compact
+            mapHeaderSafeZone
             leading={isFloorMode && onBackToCampus ? (
               <button type="button" onClick={onBackToCampus} className="flex h-11 w-10 shrink-0 items-center justify-center gap-1 rounded-2xl px-1 text-left text-primary transition-colors hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 md:h-auto md:w-auto md:max-w-[118px] md:justify-start md:px-2" aria-label={`Back to campus map${floorLabel ? ` from ${floorLabel}` : ""}`} title={floorLabel ? `Back to campus map from ${floorLabel}` : "Back to campus map"}>
                 <ChevronLeft className="h-4 w-4 shrink-0" />

@@ -6,6 +6,13 @@ export interface Building {
   category: "academic" | "admin" | "facility" | "sports" | "dormitory";
   floor_count: number;
   image_url?: string;
+  facilities?: string[];
+  accessibility?: {
+    wheelchairAccessible?: boolean;
+    hasElevator?: boolean;
+    hasRamp?: boolean;
+    accessibleEntrance?: boolean;
+  } | string[];
   latitude?: number;
   longitude?: number;
   departments?: string[];

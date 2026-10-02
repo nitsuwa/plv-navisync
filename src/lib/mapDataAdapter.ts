@@ -7,6 +7,7 @@
 
 import type { Campus, CampusBuilding, FloorPlan, FloorRoom } from "../components/map-builder/types";
 import { entranceDescription, entranceDisplayName } from "./buildingEntrances";
+import { buildingCoverPublicUrl } from "../services/buildingImageService";
 
 type CampusWithOptionalBuildings = Campus & { buildings: CampusBuilding[] };
 
@@ -80,8 +81,12 @@ export function buildingsFromCampus(campus: CampusWithOptionalBuildings): Legacy
     description: b.description || "",
     category: b.category.toLowerCase() as Building["category"],
     floor_count: b.floors.length,
-    image_url: undefined,
-    operating_hours: undefined,
+    image_url: b.coverImagePath
+      ? buildingCoverPublicUrl(b.coverImagePath)
+      : (b as CampusBuilding & { image_url?: string }).image_url,
+    facilities: b.facilities ?? [],
+    accessibility: b.accessibility,
+    operating_hours: b.operatingHours ?? (b as CampusBuilding & { operating_hours?: string }).operating_hours,
     contact: undefined,
     departments: [],
     created_at: new Date().toISOString(),
@@ -97,7 +102,35 @@ export const STATUS_DOT = { Open: "bg-green-500", Busy: "bg-amber-500", Closed: 
 export function facilitiesFromCampus(campus: CampusWithOptionalBuildings): Record<string, string[]> {
   const result: Record<string, string[]> = {};
   for (const b of visibleBuildings(campus)) {
-    result[b.id] = [];
+    const facilities = new Map<string, string>();
+    const add = (value: string | undefined) => {
+      const normalized = value?.trim().toLocaleLowerCase();
+      if (!normalized) return;
+      const labels: Record<string, string> = {
+        restroom: "Restroom",
+        clinic: "Clinic",
+        canteen: "Canteen",
+        library: "Library",
+        study_area: "Study Area",
+        "study area": "Study Area",
+        student_lounge: "Student Lounge",
+        "student lounge": "Student Lounge",
+        service_counter: "Service Counter",
+        "service counter": "Service Counter",
+        wifi: "Wi-Fi",
+        "wi-fi": "Wi-Fi",
+        elevator: "Elevator",
+      };
+      const label = labels[normalized];
+      if (label) facilities.set(label.toLocaleLowerCase(), label);
+    };
+
+    (b.facilities ?? []).forEach(add);
+    for (const floor of b.floors ?? []) {
+      for (const room of floor.rooms ?? []) add(room.type);
+      if ((floor.elevators ?? []).some((elevator) => elevator.visible !== false)) add("elevator");
+    }
+    result[b.id] = [...facilities.values()];
   }
   return result;
 }
@@ -106,16 +139,25 @@ export function accessibilityFromCampus(campus: CampusWithOptionalBuildings): Re
   const result: Record<string, string[]> = {};
   for (const b of visibleBuildings(campus)) {
     const acc = b.accessibility;
+    const items = new Set<string>();
     if (acc && typeof acc === "object") {
-      const items: string[] = [];
-      if (acc.wheelchairAccessible) items.push("Wheelchair Accessible");
-      if (acc.hasElevator) items.push("Elevator Available");
-      if (acc.hasRamp) items.push("Ramp Access");
-      if (acc.accessibleEntrance) items.push("Accessible Entrance");
-      result[b.id] = items;
-    } else {
-      result[b.id] = [];
+      if (Array.isArray(acc)) {
+        for (const value of acc) {
+          const normalized = value.trim().toLocaleLowerCase();
+          if (normalized === "ramp" || normalized === "ramp access" || normalized === "hasramp") items.add("Ramp access");
+          if (normalized === "elevator" || normalized === "elevator available" || normalized === "haselevator") items.add("Elevator available");
+          if (normalized === "accessible entrance" || normalized === "accessibleentrance") items.add("Accessible entrance");
+        }
+      } else {
+        if (acc.hasRamp) items.add("Ramp access");
+        if (acc.hasElevator) items.add("Elevator available");
+        if (acc.accessibleEntrance) items.add("Accessible entrance");
+      }
     }
+    if ((b.entrances ?? []).some((entrance) => entrance.accessible)) items.add("Accessible entrance");
+    if ((b.floors ?? []).some((floor) => (floor.ramps ?? []).some((ramp) => ramp.accessible !== false && ramp.visible !== false))) items.add("Ramp access");
+    if ((b.floors ?? []).some((floor) => (floor.elevators ?? []).some((elevator) => elevator.visible !== false))) items.add("Elevator available");
+    result[b.id] = [...items];
   }
   return result;
 }

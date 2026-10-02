@@ -44,6 +44,24 @@ describe("Admin activity presentation", () => {
     expect(formatted.category).toBe("Campus");
   });
 
+  it("formats invitation and privileged role changes for the Users notification category", () => {
+    const invited = formatAdminActivity(row({
+      action: "admin.user_invited",
+      entity_type: "profile",
+      metadata: { target_name: "Juan Dela Cruz", role: "admin" },
+    }), { actorName: "Maria Santos" });
+    expect(invited.category).toBe("Users");
+    expect(invited.description).toContain("Juan Dela Cruz was invited as Administrator");
+    expect(invited.description).toContain("Maria Santos");
+
+    const changed = formatAdminActivity(row({
+      action: "admin.user_role_changed",
+      entity_type: "profile",
+      metadata: { target_name: "Alex Reyes", from_role: "admin", to_role: "super_admin" },
+    }));
+    expect(changed.description).toContain("Alex Reyes changed access from Administrator to Super Admin");
+  });
+
   it("humanizes unknown dotted and underscored actions instead of exposing the code", () => {
     const formatted = formatAdminActivity(row({ action: "room_access.updated" }));
     expect(formatted.title).toBe("Room access updated");

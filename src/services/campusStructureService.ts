@@ -790,11 +790,19 @@ export function serializeCampusStructure(campus: Campus): CampusStructurePayload
   const expectedPhysicalRowsByFloor = new Map<string, number>();
   const expectedPhysicalIdsByFloor = new Map<string, string[]>();
   (canonicalCampus.buildings ?? []).forEach((building, buildingOrder) => {
-    const { floors: buildingFloors, accessibleApproach: _removedApproach, ...buildingUi } = building as CampusBuilding & { accessibleApproach?: unknown };
+    const {
+      floors: buildingFloors,
+      accessibleApproach: _removedApproach,
+      coverImagePath,
+      operatingHours,
+      ...buildingUi
+    } = building as CampusBuilding & { accessibleApproach?: unknown };
     const code = payloadBuildingCodes.get(building.id)!;
     buildings.push({
       id: building.id, name: building.name, code, description: building.description,
       category: normalizedBuildingCategory(building.category),
+      image_path: coverImagePath ?? null,
+      operating_hours: operatingHours?.trim() || null,
       x: finiteNumber(building.x, "building", building.id, "x"),
       y: finiteNumber(building.y, "building", building.id, "y"),
       width: building.width, height: building.height,
@@ -969,7 +977,10 @@ export function hydrateCampusStructure(campus: Campus, rows: CampusStructureRows
     return ({
     ...buildingUi, id: row.id, name: row.name, code: row.code,
     category: row.category, description: row.description ?? "", x: row.x, y: row.y, width: row.width,
-    height: row.height, rotation: row.rotation, visible: row.is_visible, floors: floorsByBuilding.get(row.id) ?? [],
+    height: row.height, rotation: row.rotation, visible: row.is_visible,
+    coverImagePath: row.image_path ?? undefined,
+    operatingHours: row.operating_hours ?? undefined,
+    floors: floorsByBuilding.get(row.id) ?? [],
   });
   }) as CampusBuilding[];
   const top = <T>(kind: StructureKind) => rows.mapElements

@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo, useRef, useEffect, type CSSProperties } from "react";
+import { useState, useCallback, useMemo, useRef, useEffect, useLayoutEffect, type CSSProperties } from "react";
 import { useNavigate } from "react-router";
 import { AnimatePresence, motion } from "motion/react";
 
@@ -36,11 +36,14 @@ import { outdoorWalkingDistance, walkingAnimationDuration } from "../lib/walking
 import { planStudentEmergencyRoute } from "../lib/studentEmergencyNavigation";
 import { doorEntranceLinkStatus } from "../lib/entranceTransitions";
 import { normalizeEntranceDirection } from "../lib/buildingEntrances";
+import { entryFloorForBuilding } from "../lib/entranceTransitions";
 import { mapBackAction, publishMapSurface, type MapSurface } from "../lib/mapSurface";
+import { getStudentInitialFloorZoom } from "../lib/studentFloorCamera";
 import {
   RoutePlannerDialog, RouteStepsPanel, RouteMapOverlay,
   ReportModal, SignInPrompt,
   BuildingInfoPanel, MobileBuildingSheet, MobileMapAccountMenu, StudentFloorPicker, StudentSelectedPlaceCard,
+  type MobileBuildingSheetState,
   StudentMapControls,
 } from "../components/map";
 import { studentAccountService } from "../services/studentAccountService";
@@ -95,10 +98,10 @@ const FP_H   = 290;  // floor plan viewBox height
 const DEFAULT_OUTDOOR_ZOOM = typeof window !== "undefined" && window.innerWidth < 768 ? 1.18 : 1;
 const MOBILE_OUTDOOR_VIEWER_INSETS = { top: 220, right: 8, bottom: 112, left: 8 };
 const MOBILE_FLOOR_VIEWER_INSETS = { top: 88, right: 8, bottom: 112, left: 8 };
-const getInitialFloorZoom = () => typeof window !== "undefined"
+const getInitialFloorZoom = () => getStudentInitialFloorZoom(typeof window !== "undefined"
   && window.innerWidth < 768
   && typeof window.matchMedia === "function"
-  && window.matchMedia("(orientation: portrait)").matches ? 1.28 : 1;
+  && window.matchMedia("(orientation: portrait)").matches);
 interface Pt { x: number; y: number; }
 
 /**
@@ -489,7 +492,7 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
 
   // Core map state
   const [selected,     setSelected]     = useState<Building|null>(null);
-  const [mobileBuildingSheetExpanded, setMobileBuildingSheetExpanded] = useState(false);
+  const [mobileBuildingSheetState, setMobileBuildingSheetState] = useState<MobileBuildingSheetState>("default");
   const [mapMode,      setMapMode]      = useState<MapMode>("standard");
   const [platformSettings, setPlatformSettings] = useState<PublicPlatformSettings>(DEFAULT_PUBLIC_PLATFORM_SETTINGS);
   const [platformSettingsReady, setPlatformSettingsReady] = useState(false);
@@ -554,6 +557,7 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
   const [search,         setSearch]         = useState("");
   const debouncedSearch = useDebounce(search, 150);
   const [searchFocused,  setSearchFocused]  = useState(false);
+  const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [directionsMode, setDirectionsMode] = useState(false);
   const directionsWasOpenRef = useRef(false);
   const routeModeTouchedRef = useRef(false);
@@ -619,10 +623,11 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
     wasCampusCachedRef.current = isCampusCached;
   }, [isCampusCached, refetchCampus, showWarning]);
 
-  useEffect(() => { setMobileBuildingSheetExpanded(false); }, [selected?.id]);
+  useEffect(() => { setMobileBuildingSheetState("default"); }, [selected?.id]);
 
   // Refs
   const mapContainerRef = useRef<HTMLDivElement>(null);
+  const mapZoomControlsRef = useRef<HTMLDivElement>(null);
   const svgRef          = useRef<SVGSVGElement>(null);
   const cameraGroupRef  = useRef<SVGGElement>(null);
   const zoomPercentRef  = useRef<HTMLDivElement>(null);
@@ -685,9 +690,15 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
     const rect = element.getBoundingClientRect();
     const mobile = typeof window !== "undefined" && window.innerWidth < 768;
     const detailsOpen = Boolean(selected && !directionsMode && !searchFocused && !floorView);
-    const rightInset = detailsOpen && !mobile ? 280 : 0;
+    const rightInset = detailsOpen && !mobile
+      ? Math.min(390, Math.max(340, window.innerWidth * 0.32))
+      : 0;
     const sheetHeight = detailsOpen && mobile
-      ? Math.min(window.innerHeight * (mobileBuildingSheetExpanded ? 0.84 : 0.58), mobileBuildingSheetExpanded ? 680 : 480, window.innerHeight - 84)
+      ? mobileBuildingSheetState === "peek"
+        ? Math.min(window.innerHeight * 0.35, 270, window.innerHeight - 84)
+        : mobileBuildingSheetState === "expanded"
+        ? Math.min(window.innerHeight * 0.7, 620, window.innerHeight - 84)
+          : Math.min(window.innerHeight * 0.56, 410, window.innerHeight - 84)
       : 0;
     const bottomInset = sheetHeight > 0 ? sheetHeight + 24 : 0;
     const visibleHeight = Math.max(1, rect.height - bottomInset);
@@ -696,7 +707,7 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
       rect.top + visibleHeight / 2,
       zoomStateRef.current + delta,
     );
-  }, [mobileBuildingSheetExpanded, selected, directionsMode, searchFocused, floorView]);
+  }, [mobileBuildingSheetState, selected, directionsMode, searchFocused, floorView]);
 
   const resetMapCamera = useCallback(() => {
     const origin = { x: 0, y: 0 };
@@ -729,6 +740,61 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
 
   // ── Computed floor plan values ─────────────────────────────────────────
   const isFloorMode       = floorView !== null;
+
+  const handleProfileMenuOpenChange = useCallback((open: boolean) => {
+    setProfileMenuOpen(open);
+    if (open) setSearchFocused(false);
+  }, []);
+
+  useLayoutEffect(() => {
+    const surface = mapContainerRef.current;
+    const controls = mapZoomControlsRef.current;
+    if (!surface || !controls) return;
+
+    const updateOverlayLayout = () => {
+      const surfaceRect = surface.getBoundingClientRect();
+      const searchHeader = surface.querySelector<HTMLElement>("[data-map-search-header='true']");
+      const searchHeaderRect = searchHeader?.getBoundingClientRect();
+      const headerBottom = searchHeaderRect
+        ? Math.max(0, searchHeaderRect.bottom - surfaceRect.top)
+        : Math.max(52, (window.visualViewport?.offsetTop ?? 0) + 52 - surfaceRect.top);
+      const safeTop = headerBottom + 16;
+      surface.style.setProperty("--student-map-search-safe-top", `${Math.max(0, searchHeaderRect?.bottom ?? surfaceRect.top + headerBottom)}px`);
+      surface.style.setProperty("--student-map-controls-safe-top", `${Math.max(0, surfaceRect.top + safeTop)}px`);
+
+      if (window.innerWidth >= 768) {
+        controls.style.setProperty("--map-controls-shift-x", "0px");
+        controls.style.setProperty("--map-controls-shift-y", "0px");
+        return;
+      }
+
+      const width = controls.offsetWidth || (profileMenuOpen ? 132 : 44);
+      const height = controls.offsetHeight || (profileMenuOpen ? 44 : 132);
+      const surfaceWidth = surface.clientWidth || surfaceRect.width;
+      const surfaceHeight = surface.clientHeight || surfaceRect.height;
+      const normalLeft = surfaceWidth - 12 - width;
+      const normalTop = surfaceHeight - 96 - height;
+      const dockOpen = controls.dataset.dockOpen === "true";
+      controls.style.setProperty("--map-controls-shift-x", dockOpen ? `${12 - normalLeft}px` : "0px");
+      controls.style.setProperty("--map-controls-shift-y", dockOpen ? `${safeTop - normalTop}px` : "0px");
+    };
+
+    updateOverlayLayout();
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(updateOverlayLayout);
+    observer?.observe(surface);
+    observer?.observe(controls);
+    const searchHeader = surface.querySelector<HTMLElement>("[data-map-search-header='true']");
+    if (searchHeader) observer?.observe(searchHeader);
+    window.addEventListener("resize", updateOverlayLayout);
+    window.visualViewport?.addEventListener("resize", updateOverlayLayout);
+    window.visualViewport?.addEventListener("scroll", updateOverlayLayout);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", updateOverlayLayout);
+      window.visualViewport?.removeEventListener("resize", updateOverlayLayout);
+      window.visualViewport?.removeEventListener("scroll", updateOverlayLayout);
+    };
+  }, [directionsMode, isFloorMode, mobileBuildingSheetState, profileMenuOpen, searchFocused, selected?.id]);
   const mapSurface: MapSurface = directionsMode
     ? "route-planner"
     : (navigationPhase !== "idle" || navigationTransitioning)
@@ -1090,7 +1156,10 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
   // ── Keyboard shortcuts ─────────────────────────────────────────────────
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (document.activeElement?.matches("input, textarea, select, [contenteditable='true']") || document.querySelector("[role='dialog']")) return;
+      if (
+        document.activeElement?.matches("input, textarea, select, [contenteditable='true']")
+        || document.querySelector("[role='dialog'], [role='menu'], [role='listbox']")
+      ) return;
       if (e.key === "+"||e.key === "=") { e.preventDefault(); zoomAtCursor(zoomStateRef.current + STUDENT_MAP_ZOOM_STEP); }
       if (e.key === "-")                { e.preventDefault(); zoomAtCursor(zoomStateRef.current - STUDENT_MAP_ZOOM_STEP); }
       if (e.key === "0")                { e.preventDefault(); resetMapCamera(); }
@@ -1693,8 +1762,9 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
 
   // ── Floor plan handlers ────────────────────────────────────────────────
   const openFloorPlan = useCallback((building: Building, floor?: number) => {
-    const publishedFloors = activeCampus?.buildings.find((candidate) => candidate.id === building.id)?.floors;
-    const initialFloor = floor ?? publishedFloors?.[0]?.number ?? FLOOR_PLANS[building.id]?.floors[0]?.number ?? 1;
+    const publishedBuilding = activeCampus?.buildings.find((candidate) => candidate.id === building.id);
+    const entryFloor = entryFloorForBuilding(publishedBuilding);
+    const initialFloor = floor ?? entryFloor?.number ?? FLOOR_PLANS[building.id]?.floors[0]?.number ?? 1;
     setFloorView({ building, floor: initialFloor });
     // The details sheet otherwise covers the floor picker on the right.
     setSelected(null);
@@ -1929,11 +1999,17 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
     if (isCampusLoading || initialSelectionRef.current || availableCampuses.length === 0) return;
     const params = new URLSearchParams(window.location.search);
     const targetId = params.get("buildingId") || params.get("select");
+    const requestedCampusId = params.get("campusId") || params.get("campus");
     if (!targetId) {
       initialSelectionRef.current = true;
       return;
     }
-    const targetCampus = availableCampuses.find((campus) => campus.buildings.some((building) =>
+    const requestedCampus = requestedCampusId
+      ? availableCampuses.find((campus) => campus.id === requestedCampusId && campus.buildings.some((building) =>
+        building.id === targetId || building.code.toLowerCase() === targetId.toLowerCase(),
+      ))
+      : undefined;
+    const targetCampus = requestedCampus ?? availableCampuses.find((campus) => campus.buildings.some((building) =>
       building.id === targetId || building.code.toLowerCase() === targetId.toLowerCase(),
     ));
     if (!targetCampus) {
@@ -2128,12 +2204,15 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
         ? clampStudentMapZoom(Math.max(currentZoom, 1.65))
         : isMobile && currentZoom < 1.4 ? 1.4 : currentZoom;
       const mapRect = mapContainerRef.current?.getBoundingClientRect();
+      const detailsPanelWidth = !isMobile && !isSearchFocus
+        ? Math.min(390, Math.max(340, window.innerWidth * 0.32))
+        : 0;
       const targetPan = clampMapPan(getBuildingFocusPan({
         buildingCenter: { x: cx, y: cy },
         canvasW: outdoorCanvasW,
         canvasH: outdoorCanvasH,
         zoom: targetZoom,
-        mapWidth: mapRect?.width || window.innerWidth,
+        mapWidth: Math.max(320, (mapRect?.width || window.innerWidth) - detailsPanelWidth),
         mapHeight: mapRect?.height || window.innerHeight,
         isMobile,
       }), targetZoom);
@@ -2163,7 +2242,7 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
 
   const selectBuilding = useCallback((b: Building|null) => {
     cancelCameraAnimation();
-    setMobileBuildingSheetExpanded(false);
+    setMobileBuildingSheetState("default");
     setSelected(b);
     setSearchFocused(false); setSearch(""); setShowQR(false);
     // Close route planner when selecting a building
@@ -3431,7 +3510,8 @@ const buildingFill = (id: string) =>
       ) : (
         <motion.div
           key="map-controls-container"
-          className="absolute inset-0 z-20 pointer-events-none"
+          className={cn("absolute inset-0 map-layer-controls pointer-events-none", searchFocused && "map-layer-transient")}
+          data-map-layer={searchFocused ? "transient" : "controls"}
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
@@ -3582,10 +3662,11 @@ const buildingFill = (id: string) =>
 
       <div
         data-no-drag
-        className="absolute right-2 z-[60] pointer-events-auto md:hidden"
+        data-map-layer="account-trigger"
+        className={cn("absolute right-2 map-layer-controls pointer-events-auto md:hidden", profileMenuOpen && "map-layer-transient")}
         style={{ top: "max(0.5rem, env(safe-area-inset-top, 0.5rem))" }}
       >
-        <MobileMapAccountMenu />
+        <MobileMapAccountMenu onOpenChange={handleProfileMenuOpenChange} />
       </div>
 
       {/* ══════════════ FLOOR SELECTOR (floor plan mode — always visible when in floor view) ══════════════ */}
@@ -3600,11 +3681,18 @@ const buildingFill = (id: string) =>
         />
       )}
 
-      <div data-testid="student-map-zoom-controls" data-no-drag data-sheet-open={Boolean(selected && !directionsMode && !searchFocused && !isFloorMode)} data-sheet-expanded={mobileBuildingSheetExpanded} className={cn(
-        "student-map-zoom-controls transition-[bottom,transform] duration-200 ease-out motion-reduce:transition-none",
-        "absolute z-20 flex flex-col gap-1 right-3",
-        selected && !directionsMode && !searchFocused && !isFloorMode ? "bottom-[var(--mobile-zoom-bottom)] md:bottom-5 md:right-[292px]" : "bottom-24 md:bottom-5",
-      )}>
+      <div
+        ref={mapZoomControlsRef}
+        data-testid="student-map-zoom-controls"
+        data-map-layer="map-controls"
+        data-no-drag
+        data-sheet-open={Boolean(selected && !directionsMode && !isFloorMode)}
+        data-dock-open={Boolean((selected && !directionsMode && !isFloorMode) || profileMenuOpen)}
+        data-profile-open={profileMenuOpen}
+        data-sheet-state={selected && !directionsMode && !isFloorMode ? mobileBuildingSheetState : "closed"}
+        data-sheet-expanded={mobileBuildingSheetState === "expanded"}
+        className={cn("student-map-zoom-controls map-layer-controls absolute z-20 flex flex-col gap-1 right-3 bottom-24 will-change-transform md:bottom-5 md:right-[402px]", (selected && !directionsMode && !isFloorMode) && "md:bottom-5")}
+      >
         <div data-testid="student-map-zoom-stack" className="overflow-hidden rounded-2xl border border-white/45 bg-card/95 shadow-[0_8px_24px_rgba(15,23,42,0.14)] backdrop-blur-xl dark:border-white/10">
           <button type="button" aria-label="Zoom in" disabled={zoom >= STUDENT_MAP_MAX_ZOOM} onClick={() => zoomFromControls(STUDENT_MAP_ZOOM_STEP)} className="flex h-11 w-11 items-center justify-center text-foreground transition-[background-color,transform] duration-150 hover:bg-muted active:scale-95 disabled:cursor-not-allowed disabled:opacity-40 md:h-10 md:w-10">
             <Plus className="h-4 w-4" />
@@ -3614,8 +3702,8 @@ const buildingFill = (id: string) =>
             <Minus className="h-4 w-4" />
           </button>
           <div className="h-px bg-border/60" />
-          <button type="button" onClick={(e) => { e.stopPropagation(); resetMapCamera(); }} title="Reset map view"
-            className="flex h-11 w-11 items-center justify-center text-muted-foreground transition-[background-color,color,transform] duration-150 hover:bg-primary/10 hover:text-primary active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/50 md:h-10 md:w-10" aria-label="Reset map view">
+          <button type="button" onClick={(e) => { e.stopPropagation(); resetMapCamera(); }} title={isFloorMode ? "Fit full floor" : "Reset map view"}
+            className="flex h-11 w-11 items-center justify-center text-muted-foreground transition-[background-color,color,transform] duration-150 hover:bg-primary/10 hover:text-primary active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/50 md:h-10 md:w-10" aria-label={isFloorMode ? "Fit full floor" : "Reset map view"}>
             <LocateFixed className="h-4 w-4" />
           </button>
         </div>
@@ -3661,28 +3749,29 @@ const buildingFill = (id: string) =>
       )}
 
       {/* ══════════════ DESKTOP BUILDING INFO PANEL ══════════════ */}
-      {selected && !directionsMode && (
-        <BuildingInfoPanel
-          selected={selected}
-          onClose={() => selectBuilding(null)}
-          onDirections={startDirectionsTo}
-          onFloorPlan={(b) => openFloorPlan(b)}
-          isFloorMode={isFloorMode}
-          floorBuildingId={floorView?.building?.id}
-          saved={saved}
-          studentAuth={studentAuth}
-          onToggleSave={toggleSave}
-          onReport={building => { setReportRoomContext(null); setReportModal(building); }}
-          onSignInPrompt={setSignInPrompt}
-          showQR={showQR}
-          onToggleQR={() => setShowQR(v => !v)}
-          hasFloorPlans={Boolean(FLOOR_PLANS[selected.id])}
-          floorPlanCount={FLOOR_PLANS[selected.id]?.floors?.length ?? 0}
-          facilities={BUILDING_FACILITIES[selected.id] ?? []}
-          accessibility={BUILDING_ACCESSIBILITY[selected.id] ?? []}
-          route={route ? { dist: route.dist, mins: route.mins } : null}
-        />
-      )}
+      <AnimatePresence initial={false}>
+        {selected && !directionsMode && (
+          <BuildingInfoPanel
+            key={selected.id}
+            selected={selected}
+            campusId={activeCampus?.id}
+            onClose={() => selectBuilding(null)}
+            onDirections={startDirectionsTo}
+            onEnterBuilding={(building) => openFloorPlan(building)}
+            saved={saved}
+            studentAuth={studentAuth}
+            onToggleSave={toggleSave}
+            onReport={building => { setReportRoomContext(null); setReportModal(building); }}
+            onSignInPrompt={setSignInPrompt}
+            showQR={showQR}
+            onToggleQR={() => setShowQR(v => !v)}
+            hasFloorPlans={Boolean(FLOOR_PLANS[selected.id])}
+            floorPlanCount={FLOOR_PLANS[selected.id]?.floors?.length ?? 0}
+            facilities={BUILDING_FACILITIES[selected.id] ?? []}
+            accessibility={BUILDING_ACCESSIBILITY[selected.id] ?? []}
+          />
+        )}
+      </AnimatePresence>
 
       {/* ══════════════ ARRIVAL OVERLAY ══════════════ */}
       {showArrival && (
@@ -3961,20 +4050,27 @@ const buildingFill = (id: string) =>
 
       {/* ══════════════ MOBILE BUILDING SHEET ══════════════ */}
       <AnimatePresence initial={false}>
-        {selected && !isFloorMode && !directionsMode && !searchFocused && (
+        {selected && !isFloorMode && !directionsMode && (
           <MobileBuildingSheet
             key={selected.id}
             selected={selected}
+            campusId={activeCampus?.id}
             onClose={() => selectBuilding(null)}
             onDirections={startDirectionsTo}
-            onFloorPlan={(b) => openFloorPlan(b)}
+            onEnterBuilding={(building) => openFloorPlan(building)}
             onSave={toggleSave}
             onReport={building => { setReportRoomContext(null); setReportModal(building); }}
             onSignInPrompt={setSignInPrompt}
             saved={saved}
             studentAuth={studentAuth}
             hasFloorPlans={Boolean(FLOOR_PLANS[selected.id])}
-            onExpandedChange={setMobileBuildingSheetExpanded}
+            floorPlanCount={FLOOR_PLANS[selected.id]?.floors?.length ?? 0}
+            facilities={BUILDING_FACILITIES[selected.id] ?? []}
+            accessibility={BUILDING_ACCESSIBILITY[selected.id] ?? []}
+            showQR={showQR}
+            onToggleQR={() => setShowQR(v => !v)}
+            interactionPaused={searchFocused || profileMenuOpen || Boolean(reportModal) || Boolean(signInPrompt)}
+            onStateChange={setMobileBuildingSheetState}
           />
         )}
       </AnimatePresence>

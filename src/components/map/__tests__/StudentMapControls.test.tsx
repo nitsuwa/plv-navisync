@@ -46,6 +46,8 @@ describe("StudentMapControls", () => {
     render(<StudentMapControls {...props()} />);
 
     expect(screen.getByRole("searchbox", { name: "Search campus map" })).toBeInTheDocument();
+    expect(screen.getByTestId("student-map-controls")).toHaveClass("map-layer-controls");
+    expect(screen.getByTestId("student-map-search-panel").querySelector("[data-map-search-header='true']")).toBeInTheDocument();
     expect(screen.getByTestId("student-map-search-panel")).toHaveClass("right-16");
     expect(screen.getByRole("button", { name: "Open directions" })).toBeInTheDocument();
     expect(within(screen.getByTestId("student-map-utility-controls")).getAllByRole("button")).toHaveLength(1);
@@ -73,6 +75,7 @@ describe("StudentMapControls", () => {
     );
 
     expect(screen.getByRole("button", { name: "All destinations" })).toBeInTheDocument();
+    expect(screen.getByRole("listbox", { name: "Campus destination results" })).toHaveAttribute("data-map-layer", "transient");
     expect(screen.getByText("Building")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("option", { name: /Science Hall/i }));
     expect(onSelectSearchResult).toHaveBeenCalledWith(result);

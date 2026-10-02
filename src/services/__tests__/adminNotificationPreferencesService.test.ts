@@ -15,5 +15,8 @@ describe("per-admin activity notification preferences", () => {
     const preferences = { ...DEFAULT_ADMIN_NOTIFICATION_PREFERENCES, users: false };
     expect(isAdminActivityNotificationEnabled({ action: "settings.update", entity_type: "settings" }, preferences)).toBe(true);
     expect(isAdminActivityNotificationEnabled({ action: "admin.profile_updated", entity_type: "profile" }, preferences)).toBe(false);
+    expect(isAdminActivityNotificationEnabled({ action: "admin.user_invited", entity_type: "profile" }, preferences)).toBe(false);
+    expect(isAdminActivityNotificationEnabled({ action: "admin.user_role_changed", entity_type: "profile" }, preferences)).toBe(false);
+    expect(isAdminActivityNotificationEnabled({ action: "admin.user_deactivated", entity_type: "profile" }, preferences)).toBe(false);
   });
 });

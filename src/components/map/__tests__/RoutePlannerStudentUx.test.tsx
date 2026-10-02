@@ -115,6 +115,8 @@ describe("RoutePlannerDialog student accessibility", () => {
     fireEvent.click(screen.getByRole("button", { name: "Choose start" }));
     await screen.findByTestId("route-planner-search-subview");
     const startList = screen.getByRole("listbox", { name: "Campus destination results" });
+    expect(screen.getByTestId("route-planner-search-subview")).toHaveClass("min-h-0", "flex-1", "overflow-hidden");
+    expect(startList).toHaveClass("min-h-0", "max-h-none", "flex-1", "overflow-y-auto");
     expect(within(startList).getAllByRole("option")).toHaveLength(38);
     expect(within(startList).getByRole("group", { name: "Science Hall (SCI)" })).toBeInTheDocument();
     expect(within(startList).getByRole("group", { name: "Library (LIB)" })).toBeInTheDocument();

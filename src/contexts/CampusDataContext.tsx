@@ -29,11 +29,18 @@ export interface SharedBuilding {
   id: string; name: string; code: string;
   category: string;
   description: string;
+  coverImagePath?: string;
+  operating_hours?: string;
   x: number; y: number; width: number; height: number;
   color: string;
   floors: SharedFloorPlan[];
   facilities?: string[];
-  accessibility?: string[];
+  accessibility?: string[] | {
+    wheelchairAccessible?: boolean;
+    hasElevator?: boolean;
+    hasRamp?: boolean;
+    accessibleEntrance?: boolean;
+  };
   operating_hours?: string;
   contact?: string;
   image_url?: string;

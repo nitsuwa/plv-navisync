@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { Link2 } from "lucide-react";
 import { useToast } from "../../hooks/useToast";
+import { buildingMapDeepLink } from "../../lib/buildingShare";
 
 /**
  * Real, scannable QR code that encodes a deep link to a campus location:
@@ -9,19 +10,23 @@ import { useToast } from "../../hooks/useToast";
  * Scanning it on another phone opens the interactive map at that building.
  */
 export function LocationQR({
+  campusId,
   buildingId,
   buildingName,
 }: {
   buildingId: string;
   buildingName: string;
+  campusId?: string;
 }) {
   const toast = useToast();
 
   const url = useMemo(() => {
     // Always point to the map route regardless of the current page.
-    const origin = typeof window !== "undefined" ? window.location.origin : "";
-    return `${origin}/map?buildingId=${encodeURIComponent(buildingId)}`;
-  }, [buildingId]);
+    const origin = typeof window !== "undefined" ? window.location.origin : "https://plvnavisync.vercel.app";
+    return campusId
+      ? buildingMapDeepLink(campusId, buildingId, origin)
+      : `${origin}/map?buildingId=${encodeURIComponent(buildingId)}`;
+  }, [buildingId, campusId]);
 
   const copyLink = async () => {
     try {

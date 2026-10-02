@@ -6,7 +6,7 @@ import {
   Layers, Copy,
   ChevronUp, ChevronDown, ChevronsUp, ChevronsDown,
   DoorOpen, ArrowRightLeft, ArrowLeft, Navigation as NavigationIcon,
-  Search as SearchIcon,
+  Search as SearchIcon, ImagePlus, Upload,
 } from "lucide-react";
 import type { LayerOrderAction } from "../../lib/campusLayerOrder";
 import { polylineCrossesObstacle } from "../../lib/editorPlacement";
@@ -58,6 +58,7 @@ import {
 } from "../../lib/campusPathNetwork";
 import { isCampusGate } from "../../lib/campusGates";
 import { CAMPUS_GROUND_MATERIALS, campusAreaGroundAppearance } from "../../lib/campusCanvas";
+import { buildingCoverPublicUrl, uploadBuildingCoverImage } from "../../services/buildingImageService";
 
 type TabId = "basic" | "style" | "advanced";
 
@@ -72,6 +73,22 @@ const TABS: TabDef[] = [
   { id: "style",    label: "Style",    icon: Palette },
   { id: "advanced", label: "Advanced", icon: Settings2 },
 ];
+
+const FACILITY_ROOM_TYPES: Record<string, string[]> = {
+  Restroom: ["restroom"],
+  Clinic: ["clinic"],
+  "Study Area": ["study_area", "study area"],
+  "Student Lounge": ["student_lounge", "student lounge"],
+  "Service Counter": ["service_counter", "service counter"],
+  "Wi-Fi": ["wifi", "wi-fi"],
+  Library: ["library"],
+};
+
+function facilityIsOnAuthoredMap(building: CampusBuilding, label: string): boolean {
+  if (label === "Elevator") return (building.floors ?? []).some((floor) => (floor.elevators ?? []).some((item) => item.visible !== false));
+  const roomTypes = FACILITY_ROOM_TYPES[label] ?? [];
+  return (building.floors ?? []).some((floor) => (floor.rooms ?? []).some((room) => roomTypes.includes(String(room.type ?? "").trim().toLocaleLowerCase())));
+}
 
 interface PropertiesPanelProps {
   /** Explicit inspector visibility, separate from object selection. */
@@ -591,6 +608,10 @@ export function PropertiesPanel({
   const [entranceDoorSearch, setEntranceDoorSearch] = useState("");
   const [expandedEntranceFloors, setExpandedEntranceFloors] = useState<Set<string>>(new Set());
   const [entranceSettingsOpen, setEntranceSettingsOpen] = useState(false);
+  const [buildingCoverUploading, setBuildingCoverUploading] = useState(false);
+  const [buildingCoverError, setBuildingCoverError] = useState<string | null>(null);
+  const buildingCoverInputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => { setBuildingCoverError(null); }, [selBldg?.id]);
   const visible = open ?? (!!selected || multiSelected.length > 0);
   const selectedPathPointForPath = selPath && selectedPathPoint?.pathId === selPath.id ? selectedPathPoint : null;
   const selectedPathPointCoord = selectedPathPointForPath ? selPath?.points[selectedPathPointForPath.pointIndex] : undefined;
@@ -1220,13 +1241,101 @@ export function PropertiesPanel({
                   <label htmlFor="bldg-code" className={labelCls}>Code</label>
                   <input id="bldg-code" maxLength={32} value={selBldg.code} onChange={(e) => onUpdateBuilding(selBldg.id, { code: e.target.value.toUpperCase() })} className={cn(inputCls, "font-mono tracking-wide")} placeholder="e.g. MAB" />
                 </div>
-                {/* Building Type is intentionally NOT editable in the sidebar:
-                    an outdoor building object is simply a Building here. The
-                    legacy `category` field is preserved in the data model for
-                    backward compatibility but provides no editor functionality. */}
                 <div>
-                  <label htmlFor="bldg-description" className={labelCls}>Description</label>
-                  <textarea id="bldg-description" value={selBldg.description ?? ""} rows={2} onChange={(e) => onUpdateBuilding(selBldg.id, { description: e.target.value })} placeholder="Optional description..." className="w-full px-3 py-2 rounded-xl border border-border bg-input-background text-foreground text-xs resize-none focus:outline-none focus:ring-2 focus:ring-primary/30 transition-all duration-200" />
+                  <div className="mb-2 mt-3 flex items-center gap-1.5 border-t border-border/70 pt-3">
+                    <Info className="h-3 w-3 text-primary" />
+                    <span className="text-[9px] font-extrabold uppercase tracking-widest text-muted-foreground">Building Information</span>
+                  </div>
+                  <label htmlFor="bldg-description" className={labelCls}>Student description</label>
+                  <textarea id="bldg-description" maxLength={360} value={selBldg.description ?? ""} rows={3} onChange={(e) => onUpdateBuilding(selBldg.id, { description: e.target.value })} placeholder="A short description for students (1–3 sentences)." className="w-full px-3 py-2 rounded-xl border border-border bg-input-background text-foreground text-xs resize-none focus:outline-none focus:ring-2 focus:ring-primary/30 transition-all duration-200" />
+                  <p className="mt-1 text-[9px] text-muted-foreground">{(selBldg.description ?? "").length}/360 characters</p>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className={labelCls}>Building type</label>
+                  <CompactDropdown
+                    ariaLabel="Building type"
+                    value={selBldg.category || "Academic"}
+                    options={[...new Set([selBldg.category || "Academic", "Academic", "Administration", "Library", "Laboratory", "Sports", "Parking", "Facility", "Dormitory", "Other"])].map((value) => ({ value, label: value.replace(/[_-]+/g, " ") }))}
+                    onChange={(category) => onUpdateBuilding(selBldg.id, { category })}
+                    className="h-8 rounded-lg text-xs"
+                    testId="building-details-category"
+                    disabled={selBldg.locked}
+                  />
+                </div>
+
+                <div className="space-y-2 rounded-xl border border-border/70 bg-muted/20 p-2.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <div>
+                      <p className="text-[10px] font-bold text-foreground">Cover photo</p>
+                      <p className="text-[9px] text-muted-foreground">JPEG, PNG or WebP · up to 5 MB</p>
+                    </div>
+                    {selBldg.coverImagePath && (
+                      <img src={buildingCoverPublicUrl(selBldg.coverImagePath)} alt="Building cover preview" className="h-10 w-16 rounded-lg object-cover ring-1 ring-border" />
+                    )}
+                  </div>
+                  <input
+                    ref={buildingCoverInputRef}
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    className="hidden"
+                    aria-label="Upload building cover photo"
+                    onChange={async (event) => {
+                      const file = event.currentTarget.files?.[0];
+                      event.currentTarget.value = "";
+                      if (!file) return;
+                      setBuildingCoverError(null);
+                      setBuildingCoverUploading(true);
+                      try {
+                        const path = await uploadBuildingCoverImage(selBldg.id, file);
+                        onUpdateBuilding(selBldg.id, { coverImagePath: path });
+                      } catch (error) {
+                        setBuildingCoverError(error instanceof Error && /JPEG|PNG|WebP|5 MB/.test(error.message)
+                          ? error.message
+                          : "The cover photo could not be uploaded. Try again.");
+                      } finally {
+                        setBuildingCoverUploading(false);
+                      }
+                    }}
+                  />
+                  <div className="flex gap-2">
+                    <button type="button" onClick={() => buildingCoverInputRef.current?.click()} disabled={buildingCoverUploading || selBldg.locked} className="inline-flex h-8 flex-1 items-center justify-center gap-1.5 rounded-lg border border-primary/20 bg-card px-2 text-[10px] font-bold text-primary transition-colors hover:bg-primary/5 disabled:opacity-50">
+                      {selBldg.coverImagePath ? <Upload className="h-3 w-3" /> : <ImagePlus className="h-3 w-3" />}
+                      {buildingCoverUploading ? "Uploading…" : selBldg.coverImagePath ? "Replace photo" : "Upload photo"}
+                    </button>
+                    {selBldg.coverImagePath && <button type="button" disabled={buildingCoverUploading || selBldg.locked} onClick={() => onUpdateBuilding(selBldg.id, { coverImagePath: undefined })} className="h-8 rounded-lg border border-border px-2 text-[10px] font-bold text-muted-foreground transition-colors hover:bg-muted disabled:opacity-50">Remove</button>}
+                  </div>
+                  {buildingCoverError && <p role="alert" className="text-[10px] font-medium text-destructive">{buildingCoverError}</p>}
+                </div>
+
+                <div>
+                  <label htmlFor="bldg-hours" className={labelCls}>Operating hours <span className="font-normal normal-case tracking-normal">(optional)</span></label>
+                  <input id="bldg-hours" maxLength={120} value={selBldg.operatingHours ?? ""} onChange={(e) => onUpdateBuilding(selBldg.id, { operatingHours: e.target.value || undefined })} placeholder="e.g. Mon–Fri, 8:00 AM–5:00 PM" className={inputCls} />
+                </div>
+
+                <div className="space-y-1.5">
+                  <span className={labelCls}>Facilities</span>
+                  <div className="grid grid-cols-2 gap-x-2 gap-y-1.5">
+                    {[
+                      ["Restroom", "Restroom"], ["Clinic", "Clinic"], ["Study Area", "Study Area"],
+                      ["Student Lounge", "Student Lounge"], ["Service Counter", "Service Counter"], ["Wi-Fi", "Wi-Fi"], ["Library", "Library"], ["Elevator", "Elevator"],
+                    ].map(([value, label]) => {
+                      const derived = facilityIsOnAuthoredMap(selBldg, value);
+                      const checked = derived || (selBldg.facilities ?? []).includes(value);
+                      return (
+                        <label key={value} className="flex min-w-0 items-center gap-1.5 text-[10px] text-foreground/85" title={derived ? "Shown from authored floor-map data" : undefined}>
+                          <input type="checkbox" checked={checked} disabled={selBldg.locked || derived} onChange={(event) => {
+                            const next = new Set(selBldg.facilities ?? []);
+                            if (event.target.checked) next.add(value); else next.delete(value);
+                            onUpdateBuilding(selBldg.id, { facilities: [...next] });
+                          }} className="h-3.5 w-3.5 shrink-0 accent-primary" />
+                          <span className="min-w-0 flex-1 truncate">{label}</span>
+                          {derived && <span className="shrink-0 text-[8px] text-muted-foreground">Map</span>}
+                        </label>
+                      );
+                    })}
+                  </div>
+                  <p className="text-[9px] leading-relaxed text-muted-foreground">Only checked amenities and facilities present in the authored floor map appear to students.</p>
                 </div>
                 <div className="pt-1">
                   <div className="flex items-center justify-between mb-2">

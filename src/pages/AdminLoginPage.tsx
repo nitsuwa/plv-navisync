@@ -6,6 +6,7 @@ import type { LucideIcon } from "lucide-react";
 import { cn } from "../lib/utils";
 import { supabase, isConnected } from "../lib/supabase";
 import { useAuth } from "../contexts/StudentAuthContext";
+import { isAdminRole } from "../lib/roles";
 import { getDemoOrgApplicantCredentials } from "../lib/demoAccountConfig";
 import { Button } from "../components/ui/Button";
 import { useToast } from "../hooks/useToast";
@@ -403,7 +404,7 @@ export function AdminLoginPage() {
   useEffect(() => {
     if (auth.status !== "authenticated" || !auth.profile?.is_active) return;
     let active = true;
-    if (auth.profile.role === "admin") {
+    if (isAdminRole(auth.profile.role)) {
       navigate(safeAdminReturnPath(location.state), { replace: true });
     } else if (auth.profile.role === "student") {
       void studentReturnPath(location.state).then((path) => {
@@ -488,7 +489,7 @@ export function AdminLoginPage() {
         return;
       }
 
-      if (profile.role === "admin") {
+      if (isAdminRole(profile.role)) {
         toast.success("Welcome back", "Redirecting to admin dashboard...");
         navigate(safeAdminReturnPath(location.state), { replace: true });
         return;

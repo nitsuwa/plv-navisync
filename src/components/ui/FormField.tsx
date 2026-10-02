@@ -1,5 +1,6 @@
 import { cn } from "../../lib/utils";
 import type { LucideIcon } from "lucide-react";
+import type { InputHTMLAttributes } from "react";
 
 interface FormFieldProps {
   label: string;
@@ -16,6 +17,7 @@ interface FormFieldProps {
   step?: string | number;
   rows?: number;
   disabled?: boolean;
+  inputMode?: InputHTMLAttributes<HTMLInputElement>["inputMode"];
   className?: string;
   icon?: LucideIcon;
   /** Show character count in format `{length}/{maxLength}` */
@@ -33,7 +35,7 @@ const normalBorder = "border-border focus:border-primary";
 export function FormField({
   label, id, value, onChange, error, helper, placeholder,
   required, maxLength, minLength, type = "text", step,
-  rows, disabled, className, icon: Icon, showCharCount, mono,
+  rows, disabled, inputMode, className, icon: Icon, showCharCount, mono,
 }: FormFieldProps) {
   const hasError = !!error;
   const inputCls = cn(
@@ -70,6 +72,7 @@ export function FormField({
             placeholder={placeholder}
             rows={rows}
             disabled={disabled}
+            inputMode={inputMode}
             aria-invalid={hasError}
             aria-describedby={hasError ? `${id}-error` : undefined}
             className={inputCls}
