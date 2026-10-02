@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import type {
   CampusBuilding,
   CampusDecorAsset,
@@ -12,8 +12,8 @@ import { MARKER_STYLES } from "../../data/mapData";
 import { DECOR_ASSET_MAP, groundTypeForDecorType, isDecorAreaType } from "./constants";
 import { DecorAssetArt } from "./DecorAssetVisual";
 import { CampusGateVisual } from "./CampusGateVisual";
-import { effectiveStackKey } from "../../lib/campusStack";
-import { BUILDING_ENTRANCE_TYPE_COLORS, entranceDisplayName, entranceWorldPosition, normalizeEntranceType } from "../../lib/buildingEntrances";
+import { effectiveStackKey, sortOutdoorGroundAssets } from "../../lib/campusStack";
+import { BUILDING_ENTRANCE_TYPE_COLORS, entranceDisplayName, entranceWorldPosition, normalizeEntranceDirection, normalizeEntranceType } from "../../lib/buildingEntrances";
 import { exteriorEmergencyStairWorldPosition } from "../../lib/exteriorEmergencyStairs";
 import { OutdoorPathNetworkArtwork } from "./OutdoorPathNetworkVisuals";
 import { isCampusGate } from "../../lib/campusGates";
@@ -21,7 +21,7 @@ import type { ReadonlyOutdoorCampus, ReadonlyOutdoorEntrance } from "../../lib/r
 import { surfaceCellRuns } from "../../lib/campusSurface";
 import { campusAreaGroundAppearance, campusGroundAppearance } from "../../lib/campusCanvas";
 import { decorRenderScale, decorWorldSize } from "../../lib/decorVisual";
-import { EntranceDirectionBadge } from "./EntranceDirectionBadge";
+import { EntranceDirectionBadge, entranceDirectionBadgePlacement } from "./EntranceDirectionBadge";
 import { CampusGroundPatternDefs } from "./CampusGroundPatternDefs";
 import { CampusGroundSurface } from "./CampusGroundSurface";
 import { Tooltip } from "../ui/Tooltip";
@@ -223,6 +223,9 @@ export function OutdoorBuildingVisual({
       data-testid="readonly-building"
       data-building-id={building.id}
       data-bldg="true"
+      className={onSelect ? "student-map-building" : undefined}
+      data-selected={selected ? "true" : "false"}
+      data-interactive={onSelect ? "true" : "false"}
       pointerEvents={interactive ? undefined : "none"}
       transform={applyTransform && rotation ? `rotate(${rotation}, ${cx}, ${cy})` : undefined}
       opacity={applyOpacity ? opacity : undefined}
@@ -238,8 +241,9 @@ export function OutdoorBuildingVisual({
         }
       } : undefined}
     >
-      {selected && <rect x={building.x - 6} y={building.y - 6} width={building.width + 12} height={building.height + 12} rx={10} fill="none" stroke="#2563eb" strokeWidth={2.5} pointerEvents={interactive ? undefined : "none"} />}
-      <rect x={building.x} y={building.y} width={building.width} height={building.height} rx={8} fill={building.color || "#64748b"} stroke={selected ? "#2563eb" : "rgba(255,255,255,0.68)"} strokeWidth={selected ? 2.5 : 1.5} opacity={bodyOpacity} pointerEvents={interactive ? undefined : "none"} />
+      {selected && <rect className="student-map-building__selection-halo" x={building.x - 7} y={building.y - 7} width={building.width + 14} height={building.height + 14} rx={11} fill="rgba(37,99,235,0.045)" stroke="rgba(37,99,235,0.38)" strokeWidth={7} pointerEvents="none" />}
+      {selected && <rect className="student-map-building__selection-outline" x={building.x - 3} y={building.y - 3} width={building.width + 6} height={building.height + 6} rx={9} fill="none" stroke="#2563eb" strokeWidth={2.5} pointerEvents={interactive ? undefined : "none"} />}
+      <rect className="student-map-building__body" x={building.x} y={building.y} width={building.width} height={building.height} rx={8} fill={building.color || "#64748b"} stroke={selected ? "#2563eb" : "rgba(255,255,255,0.68)"} strokeWidth={selected ? 2.5 : 1.5} opacity={bodyOpacity} pointerEvents={interactive ? undefined : "none"} />
       {/* A restrained architectural treatment keeps the authored footprint and
           color authoritative while giving the building a little depth at map
           scale.  These marks are presentation-only and remain pointer
@@ -315,7 +319,7 @@ export function OutdoorGroundAreaArtwork({ asset, x = asset.x, y = asset.y, widt
   const kind = asset.groundType ?? groundTypeForDecorType(asset.type) ?? "grass";
   const appearance = campusAreaGroundAppearance(asset);
   const accent = groundAreaAccent[kind as keyof typeof groundAreaAccent] ?? groundAreaAccent.grass;
-  if (asset.surfaceCells?.length) {
+  if (asset.surfaceCells?.length && asset.type !== "parking-lot") {
     const size = Math.max(4, asset.surfaceCellSize ?? gridSize);
     return (
       <g data-testid="campus-surface-artwork" data-surface-material={kind}>
@@ -329,11 +333,18 @@ export function OutdoorGroundAreaArtwork({ asset, x = asset.x, y = asset.y, widt
     );
   }
   const descriptor = DECOR_ASSET_MAP[asset.type];
+  // Older persisted Parking Lots can arrive as the generic Ground Area type
+  // with groundType=parking. Keep their original geometry, but recover the
+  // canonical Parking Lot artwork instead of drawing the generic stall sketch.
+  const parkingLotDescriptor = kind === "parking" ? DECOR_ASSET_MAP["parking-lot"] : undefined;
   const drawWidth = Math.max(30, width ?? asset.width ?? (descriptor?.defaultWidth ?? 150) * decorRenderScale(asset.scale));
   const drawHeight = Math.max(24, height ?? asset.height ?? (descriptor?.defaultHeight ?? 95) * decorRenderScale(asset.scale));
   const areaAsset = asset.type !== "ground-area";
   const left = x - drawWidth / 2;
   const top = y - drawHeight / 2;
+  // Parking artwork must remain identical in the Student map while its Admin
+  // object is selected; Canvas already draws separate selection handles.
+  const selectedArtwork = selected && kind !== "parking";
   const horizontal = drawWidth >= drawHeight;
   const span = horizontal ? drawWidth : drawHeight;
   const depth = horizontal ? drawHeight : drawWidth;
@@ -344,19 +355,19 @@ export function OutdoorGroundAreaArtwork({ asset, x = asset.x, y = asset.y, widt
     <g data-testid="campus-ground-area-artwork" data-ground-type={kind}>
       <rect x={left} y={top} width={drawWidth} height={drawHeight}
         rx={areaAsset ? 0 : kind === "plaza" ? 5 : 10} fill={appearance.color}
-        stroke={selected ? "var(--accent)" : areaAsset ? "transparent" : kind === "parking" ? "#626b70" : "transparent"}
-        strokeWidth={selected ? 2 : areaAsset ? 0 : kind === "parking" ? 0.8 : 0} />
+        stroke={selectedArtwork ? "var(--accent)" : areaAsset ? "transparent" : kind === "parking" ? "#626b70" : "transparent"}
+        strokeWidth={selectedArtwork ? 2 : areaAsset ? 0 : kind === "parking" ? 0.8 : 0} />
       {appearance.pattern && <rect x={left} y={top} width={drawWidth} height={drawHeight}
         fill={`url(#${appearance.pattern})`} opacity={0.75} pointerEvents="none" />}
       {kind === "parking" && (
-        <g data-testid="parking-stalls" pointerEvents="none" opacity={selected ? 0.86 : 0.68}>
-          {asset.type === "parking-lot" && descriptor ? (
+        <g data-testid="parking-stalls" pointerEvents="none" opacity={0.68}>
+          {parkingLotDescriptor ? (
             <svg x={left} y={top} width={drawWidth} height={drawHeight}
-              viewBox={`0 0 ${descriptor.defaultWidth} ${descriptor.defaultHeight}`}
+              viewBox={`0 0 ${parkingLotDescriptor.defaultWidth} ${parkingLotDescriptor.defaultHeight}`}
               preserveAspectRatio="none" overflow="hidden">
               {/* Keep the canonical Admin Parking Lot surface as well as its
                   markings and vehicles across editor, preview, and Student. */}
-              <DecorAssetArt descriptor={descriptor} />
+              <DecorAssetArt descriptor={parkingLotDescriptor} />
             </svg>
           ) : (
           <g>{horizontal ? (() => {
@@ -404,25 +415,127 @@ export function OutdoorGroundAreaVisual({ asset, gridSize = 20 }: { asset: Campu
   }
   return <OutdoorGroundAreaArtwork asset={asset} gridSize={gridSize} />;
 }
+
+function outdoorEntrancePosition(building: CampusBuilding, entrance: ReadonlyOutdoorEntrance) {
+  return entrance.legacyPosition
+    ? { ...entrance.legacyPosition, angle: 0 }
+    : entranceWorldPosition(building, entrance);
+}
+
+function canEnterOutdoorBuilding(entrance: ReadonlyOutdoorEntrance) {
+  return normalizeEntranceType(entrance.type) !== "emergency_exit"
+    && normalizeEntranceDirection(entrance) !== "exit_only";
+}
+
+function outdoorEntryLabelOrigin(badgePoint: { x: number; y: number; angle: number }) {
+  const radians = (badgePoint.angle * Math.PI) / 180;
+  const outwardX = Math.sin(radians);
+  const outwardY = -Math.cos(radians);
+
+  // Put the pill beyond the direction badge so door and badge symbols cannot
+  // sit on top of its text. Choose the dominant outward axis for rotated walls.
+  if (Math.abs(outwardX) > Math.abs(outwardY)) {
+    return {
+      x: badgePoint.x + (outwardX < 0 ? -96 : 10),
+      y: badgePoint.y - 9,
+    };
+  }
+
+  return {
+    x: badgePoint.x + 9,
+    y: badgePoint.y + (outwardY < 0 ? -28 : 10),
+  };
+}
+
+function outdoorEntryLabelBounds(building: CampusBuilding, entrance: ReadonlyOutdoorEntrance) {
+  const position = outdoorEntrancePosition(building, entrance);
+  const badgePoint = entranceDirectionBadgePlacement(
+    position.x,
+    position.y,
+    entrance.edge,
+    entrance.legacyPosition ? 0 : building.rotation ?? 0,
+  );
+  const origin = outdoorEntryLabelOrigin(badgePoint);
+  // A little breathing room keeps adjacent pills from appearing to touch.
+  return { left: origin.x - 4, right: origin.x + 86 + 4, top: origin.y - 4, bottom: origin.y + 18 + 4 };
+}
+
+function defaultOutdoorEntryLabelIds(campus: ReadonlyOutdoorCampus) {
+  const visibleIds = new Set<string>();
+  const placedLabels: ReturnType<typeof outdoorEntryLabelBounds>[] = [];
+
+  for (const building of campus.buildings) {
+    const candidates = campus.entrances
+      .filter((entrance) => entrance.buildingId === building.id && canEnterOutdoorBuilding(entrance))
+      .sort((a, b) => Number(Boolean(b.isPrimary)) - Number(Boolean(a.isPrimary)));
+    const entrance = candidates.find((candidate) => {
+      const bounds = outdoorEntryLabelBounds(building, candidate);
+      return !placedLabels.some((placed) =>
+        bounds.left < placed.right
+        && bounds.right > placed.left
+        && bounds.top < placed.bottom
+        && bounds.bottom > placed.top,
+      );
+    });
+    if (!entrance) continue;
+
+    visibleIds.add(entrance.id);
+    placedLabels.push(outdoorEntryLabelBounds(building, entrance));
+  }
+
+  return visibleIds;
+}
+
 export function OutdoorEntranceVisual({
   building,
   entrance,
   onClick,
+  showEntryLabelByDefault = true,
 }: {
   building: CampusBuilding;
   entrance: ReadonlyOutdoorEntrance;
   /** Optional read-only map callback for selecting the entrance's building. */
   onClick?: (buildingId: string) => void;
+  /** Keep default labels sparse; secondary doors reveal their label on focus or hover. */
+  showEntryLabelByDefault?: boolean;
 }) {
-  const position = entrance.legacyPosition
-    ? { ...entrance.legacyPosition, angle: 0 }
-    : entranceWorldPosition(building, entrance);
+  const [emphasized, setEmphasized] = useState(false);
+  const position = outdoorEntrancePosition(building, entrance);
   const label = entranceDisplayName(entrance, (building.entrances ?? []).findIndex((item) => item.id === entrance.id));
   const color = BUILDING_ENTRANCE_TYPE_COLORS[normalizeEntranceType(entrance.type)];
+  const canEnterBuilding = Boolean(
+    onClick
+      && canEnterOutdoorBuilding(entrance),
+  );
+  const badgePoint = entranceDirectionBadgePlacement(
+    position.x,
+    position.y,
+    entrance.edge,
+    entrance.legacyPosition ? 0 : building.rotation ?? 0,
+  );
+  const labelOrigin = outdoorEntryLabelOrigin(badgePoint);
+  const showEntryIndicator = canEnterBuilding && (showEntryLabelByDefault || emphasized);
   return (
-    <g data-testid="readonly-entrance" data-entrance-id={entrance.id} style={{ cursor: onClick ? "pointer" : undefined }} onClick={onClick ? (e) => { e.stopPropagation(); onClick(building.id); } : undefined}>
-      <title>{label}{entrance.accessible ? " · Accessible" : ""}</title>
+    <g data-testid="readonly-entrance" data-entrance-id={entrance.id}
+      role={canEnterBuilding ? "button" : undefined}
+      tabIndex={canEnterBuilding ? 0 : undefined}
+      aria-label={canEnterBuilding ? `Enter ${building.name}` : undefined}
+      style={{ cursor: canEnterBuilding ? "pointer" : undefined }}
+      onKeyDown={canEnterBuilding ? (event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        event.stopPropagation();
+        onClick?.(building.id);
+      } : undefined}
+      onFocus={canEnterBuilding ? () => setEmphasized(true) : undefined}
+      onBlur={canEnterBuilding ? () => setEmphasized(false) : undefined}
+      onMouseEnter={canEnterBuilding ? () => setEmphasized(true) : undefined}
+      onMouseLeave={canEnterBuilding ? () => setEmphasized(false) : undefined}
+      onClick={canEnterBuilding ? (event) => { event.stopPropagation(); onClick?.(building.id); } : undefined}>
+      <title>{label}{canEnterBuilding ? " · Enter Building" : ""}{entrance.accessible ? " · Accessible" : ""}</title>
       <g transform={`translate(${position.x},${position.y}) rotate(${position.angle ?? 0})`}>
+        {canEnterBuilding && <rect data-testid="readonly-enter-building-door-hit-target" x={-20} y={-18}
+          width={40} height={36} fill="transparent" pointerEvents="all" />}
         <OutdoorEntranceArtwork entrance={entrance} color={color} />
       </g>
       <EntranceDirectionBadge
@@ -433,6 +546,22 @@ export function OutdoorEntranceVisual({
         type={entrance.type}
         rotation={entrance.legacyPosition ? 0 : building.rotation ?? 0}
       />
+      {showEntryIndicator && (
+        <g data-testid="student-enter-building-indicator" pointerEvents="all">
+          {emphasized && <circle cx={badgePoint.x} cy={badgePoint.y} r={10.5} fill="#60a5fa" opacity={0.32} />}
+          <g transform={`translate(${labelOrigin.x},${labelOrigin.y})`}>
+            <rect data-testid="readonly-enter-building-indicator-hit-target" x={-3} y={-13} width={92} height={44}
+              rx={12} fill="transparent" pointerEvents="all" />
+            <rect data-testid="student-enter-building-pill" width={86} height={18} rx={9}
+              fill={emphasized ? "#dbeafe" : "#eff6ff"}
+              stroke={emphasized ? "#1d4ed8" : "#3b82f6"} strokeWidth={emphasized ? 1.4 : 1} />
+            <path d="M5.5 5.5 12 12m-5.5 0H12V6.5" fill="none" stroke="#1e40af" strokeWidth={1.3}
+              strokeLinecap="round" strokeLinejoin="round" />
+            <text x={16} y={11.8} fill="#1e3a8a" fontSize={7.2} fontWeight={700} fontFamily="inherit">Enter Building</text>
+          </g>
+          <title>Enter Building — open {building.name}</title>
+        </g>
+      )}
     </g>
   );
 }
@@ -561,19 +690,30 @@ export interface ReadonlyOutdoorCampusSceneProps {
 /** Read-only scene composition shared by Preview and the public campus map. */
 export function ReadonlyOutdoorCampusScene({ campus, zoom = 1, showBuildings = true, showLabels = true, selectedBuildingId, onSelectBuilding, onDoubleClickBuilding, onClickEntrance }: ReadonlyOutdoorCampusSceneProps) {
   const buildingById = new Map(campus.buildings.map((building) => [building.id, building]));
+  const defaultEntryLabelIds = defaultOutdoorEntryLabelIds(campus);
   const stack: { zOrder: number; order: number; node: ReactNode }[] = [];
+  const groundAreaAssets = sortOutdoorGroundAssets([...campus.decorAssets]);
   if (campus.paths.length) stack.push({ zOrder: -1000, order: 0, node: <OutdoorPathNetworkArtwork key="campus-path-network" paths={campus.paths} /> });
   if (showBuildings) {
     campus.buildings.forEach((building, index) => stack.push({ zOrder: effectiveStackKey("building", building.zOrder, index), order: index, node: <OutdoorBuildingVisual key={`building-${building.id}`} building={building} selected={selectedBuildingId === building.id} onSelect={onSelectBuilding} onDoubleClick={onDoubleClickBuilding} showName={zoom > 0.7 && building.name !== "New Building"} showFloorCount labelLayout="editor" showLabels={showLabels} bodyOpacity={0.82} /> }));
   }
-  campus.decorAssets.forEach((asset, index) => stack.push({
-    // Ground surfaces are the back-most authored layer in both Admin and
-    // read-only scenes, so paths and physical objects remain legible above
-    // grass, plazas, and parking even when a legacy zOrder is present.
-    zOrder: isDecorAreaType(asset.type) ? -2000 + index : effectiveStackKey("decorAsset", asset.zOrder, index),
+  // Keep the semantic ground layer behind paths and physical objects while
+  // honoring its authored order exactly as Admin Canvas does. Overlapping
+  // areas such as a parking lot and plaza rely on this order for their artwork
+  // to remain visible in the read-only map.
+  groundAreaAssets.forEach((asset, index) => stack.push({
+    zOrder: -2000 + index,
     order: index,
     node: <OutdoorDecorVisual key={`decor-${asset.id}`} asset={asset} gridSize={campus.gridSize} />,
   }));
+  campus.decorAssets.forEach((asset, index) => {
+    if (isDecorAreaType(asset.type)) return;
+    stack.push({
+      zOrder: effectiveStackKey("decorAsset", asset.zOrder, index),
+      order: index,
+      node: <OutdoorDecorVisual key={`decor-${asset.id}`} asset={asset} gridSize={campus.gridSize} />,
+    });
+  });
   stack.sort((a, b) => a.zOrder - b.zOrder || a.order - b.order);
   return (
     <g data-testid="readonly-outdoor-scene">
@@ -602,7 +742,8 @@ export function ReadonlyOutdoorCampusScene({ campus, zoom = 1, showBuildings = t
       {stack.map((entry) => entry.node)}
       {showBuildings && campus.entrances.map((entrance) => {
         const building = buildingById.get(entrance.buildingId);
-        return building ? <OutdoorEntranceVisual key={`entrance-${entrance.id}`} building={building} entrance={entrance} onClick={onClickEntrance} /> : null;
+        return building ? <OutdoorEntranceVisual key={`entrance-${entrance.id}`} building={building} entrance={entrance}
+          onClick={onClickEntrance} showEntryLabelByDefault={defaultEntryLabelIds.has(entrance.id)} /> : null;
       })}
       {showBuildings && campus.exteriorEmergencyStairs.map((stair) => {
         const building = buildingById.get(stair.buildingId);

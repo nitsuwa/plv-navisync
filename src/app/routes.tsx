@@ -96,6 +96,7 @@ const VerificationPendingPage = lazyPage(() => import("../pages/AuthLifecyclePag
 const AuthCallbackPage     = lazyPage(() => import("../pages/AuthLifecyclePages").then(m => ({ default: m.AuthCallbackPage })));
 const ForgotPasswordPage   = lazyPage(() => import("../pages/AuthLifecyclePages").then(m => ({ default: m.ForgotPasswordPage })));
 const ResetPasswordPage    = lazyPage(() => import("../pages/AuthLifecyclePages").then(m => ({ default: m.ResetPasswordPage })));
+const InviteAccountPage    = lazyPage(() => import("../pages/AuthLifecyclePages").then(m => ({ default: m.InviteAccountPage })));
 
 // ── Suspense fallback — branded shimmer skeleton ─────────────────────────
 function PageLoading() {
@@ -221,6 +222,7 @@ export const router = createBrowserRouter([
   { path: "/auth/callback", element: <SuspensePage><AuthCallbackPage /></SuspensePage>, errorElement: routeErrorElement },
   { path: "/auth/forgot-password", element: <SuspensePage><ForgotPasswordPage /></SuspensePage>, errorElement: routeErrorElement },
   { path: "/auth/reset-password", element: <SuspensePage><ResetPasswordPage /></SuspensePage>, errorElement: routeErrorElement },
+  { path: "/auth/invite", element: <SuspensePage><InviteAccountPage /></SuspensePage>, errorElement: routeErrorElement },
 
   // ── Admin portal (protected by AdminLayout's auth check)
   {

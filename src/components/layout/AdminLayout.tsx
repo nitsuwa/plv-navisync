@@ -21,6 +21,7 @@ import {
   adminNotificationPreferencesService,
 } from "../../services/adminNotificationPreferencesService";
 import { Link } from "react-router";
+import { isSuperAdminRole } from "../../lib/roles";
 
 /** Branded full-screen loader shown while the session/profile is checked. */
 function AuthGateLoader() {
@@ -296,7 +297,7 @@ export function AdminLayout() {
                   ? [profile.first_name, profile.last_name].filter(Boolean).join(" ") || profile.email
                   : "Administrator"}
               </p>
-              <p className="text-[10px] text-muted-foreground">Administrator · PLV NaviSync</p>
+              <p className="text-[10px] text-muted-foreground">{isSuperAdminRole(profile?.role ?? "") ? "Super Administrator" : "Administrator"} · PLV NaviSync</p>
             </div>
           </div>
         </header>

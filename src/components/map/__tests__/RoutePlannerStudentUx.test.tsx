@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { RoutePlannerDialog } from "../RoutePlannerDialog";
 import { BuildingPicker } from "../BuildingPicker";
@@ -67,19 +67,41 @@ const route = (overrides: Partial<PlannedRoute> = {}): PlannedRoute => ({
 });
 
 describe("RoutePlannerDialog student accessibility", () => {
+  it("collapses a ready route into a compact summary and keeps endpoint editing available", () => {
+    render(<RoutePlannerDialog {...plannerProps({
+      from: building("ceit", "CEIT", "CEIT Building"),
+      to: building("gate", "GATE", "Main Gate"),
+      mode: "accessible",
+      route: route({ mode: "accessible", mins: 4 }),
+    })} />);
+
+    const summary = screen.getByTestId("route-summary");
+    expect(summary).toHaveTextContent("CEIT Building");
+    expect(summary).toHaveTextContent("Main Gate");
+    expect(summary).toHaveTextContent("Accessible");
+    expect(summary).toHaveTextContent("4 min");
+    expect(screen.queryByTestId("route-endpoint-card-start")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Change route" }));
+    expect(screen.getByTestId("route-endpoint-card-start")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Done editing route" }));
+    expect(screen.queryByTestId("route-endpoint-card-start")).not.toBeInTheDocument();
+  });
+
   it("SOS chooses an evacuation destination automatically from only a start", () => {
     const onFindRoute = vi.fn();
     render(<RoutePlannerDialog {...plannerProps({
       from: building("science", "SCI", "Science Hall"), mode: "emergency",
       route: route({ mode: "emergency", emergencyDestinationLabel: "Emergency Stair → Campus Gate" }), onFindRoute,
     })} />);
-    expect(screen.getByTestId("emergency-destination")).toHaveTextContent("Emergency Stair → Campus Gate");
+    expect(screen.getByTestId("route-summary")).toHaveTextContent("Emergency Stair → Campus Gate");
+    expect(screen.getByTestId("route-summary")).toHaveTextContent("Uses valid emergency exits");
     expect(screen.queryByRole("button", { name: "Choose destination" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Swap start and destination" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Start navigation" }));
     expect(onFindRoute).toHaveBeenCalledOnce();
   });
-  it("lists all campus destinations beyond the first building and groups both endpoint pickers", () => {
+  it("replaces the compact planner with a dedicated, grouped destination search", async () => {
     const destinations = [
       destinationResult({ id: "science", name: "Science Hall", code: "SCI", kind: "building", buildingId: "science" }),
       ...Array.from({ length: 35 }, (_, index) => destinationResult({
@@ -91,12 +113,19 @@ describe("RoutePlannerDialog student accessibility", () => {
     const onSelectToDestination = vi.fn();
     render(<RoutePlannerDialog {...plannerProps({ destinationResults: destinations, onSelectToDestination })} />);
     fireEvent.click(screen.getByRole("button", { name: "Choose start" }));
+    await screen.findByTestId("route-planner-search-subview");
     const startList = screen.getByRole("listbox", { name: "Campus destination results" });
+    expect(screen.getByTestId("route-planner-search-subview")).toHaveClass("min-h-0", "flex-1", "overflow-hidden");
+    expect(startList).toHaveClass("min-h-0", "max-h-none", "flex-1", "overflow-y-auto");
     expect(within(startList).getAllByRole("option")).toHaveLength(38);
     expect(within(startList).getByRole("group", { name: "Science Hall (SCI)" })).toBeInTheDocument();
     expect(within(startList).getByRole("group", { name: "Library (LIB)" })).toBeInTheDocument();
 
+    expect(screen.queryByTestId("route-planner-scroll-region")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Back to route planner" }));
+    await waitFor(() => expect(screen.getByTestId("route-planner-scroll-region")).toBeInTheDocument());
     fireEvent.click(screen.getByRole("button", { name: "Choose destination" }));
+    await screen.findByTestId("route-planner-search-subview");
     const destinationList = screen.getByRole("listbox", { name: "Campus destination results" });
     expect(within(destinationList).getAllByRole("option")).toHaveLength(38);
     fireEvent.change(screen.getByRole("searchbox", { name: "Search destination" }), { target: { value: "Science" } });
@@ -104,6 +133,7 @@ describe("RoutePlannerDialog student accessibility", () => {
     fireEvent.change(screen.getByRole("searchbox", { name: "Search destination" }), { target: { value: "Copy" } });
     fireEvent.click(within(destinationList).getByRole("option", { name: /Copy Shop, Room, Library · Floor 1/ }));
     expect(onSelectToDestination).toHaveBeenCalledWith(expect.objectContaining({ id: "copy", buildingId: "library" }));
+    await waitFor(() => expect(screen.queryByTestId("route-planner-search-subview")).not.toBeInTheDocument());
   });
 
   it("exposes a named non-modal dialog and restores focus when it unmounts", () => {
@@ -133,10 +163,10 @@ describe("RoutePlannerDialog student accessibility", () => {
     expect(dialog).toHaveClass("overflow-hidden", "flex");
     expect(scrollRegion).toHaveClass("min-h-0", "flex-1", "overflow-y-auto", "overscroll-contain");
     expect(screen.getByRole("button", { name: "Close directions" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Choose a destination" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Choose starting point" })).toBeDisabled();
   });
 
-  it("uses one active unified destination search instead of parallel building and room controls", () => {
+  it("uses one active unified destination search instead of parallel building and room controls", async () => {
     const onSelectToDestination = vi.fn();
     render(
       <RoutePlannerDialog
@@ -155,9 +185,10 @@ describe("RoutePlannerDialog student accessibility", () => {
     expect(screen.queryByText("Or choose a destination building below.")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Choose destination" }));
-    expect(screen.getByRole("searchbox", { name: "Search destination" })).toBeInTheDocument();
+    await screen.findByRole("searchbox", { name: "Search destination" });
     fireEvent.click(screen.getByRole("option", { name: /Room 205/ }));
     expect(onSelectToDestination).toHaveBeenCalledWith(expect.objectContaining({ id: "205", kind: "room" }));
+    await waitFor(() => expect(screen.queryByRole("searchbox", { name: "Search destination" })).not.toBeInTheDocument());
   });
 
   it("shows a selected room as one destination with building and floor context", () => {
@@ -176,12 +207,33 @@ describe("RoutePlannerDialog student accessibility", () => {
     expect(screen.queryByRole("searchbox", { name: "Search destination" })).not.toBeInTheDocument();
   });
 
-  it("uses the dropped pin as the start and lets the user change it", () => {
+  it("keeps a map-selected room in planner context with direct Start/Destination actions", () => {
+    const onUseSelectedRoomAsStart = vi.fn();
+    const onUseSelectedRoomAsDestination = vi.fn();
+    render(
+      <RoutePlannerDialog
+        {...plannerProps({
+          selectedRoomForPlanner: room("admin-office", "Administration Office"),
+          onUseSelectedRoomAsStart,
+          onUseSelectedRoomAsDestination,
+        })}
+      />,
+    );
+
+    const context = screen.getByTestId("selected-room-planner-context");
+    expect(context).toHaveTextContent("Administration Office");
+    fireEvent.click(screen.getByRole("button", { name: "Use as Start" }));
+    fireEvent.click(screen.getByRole("button", { name: "Use as Destination" }));
+    expect(onUseSelectedRoomAsStart).toHaveBeenCalledWith(expect.objectContaining({ roomId: "admin-office" }));
+    expect(onUseSelectedRoomAsDestination).toHaveBeenCalledWith(expect.objectContaining({ roomId: "admin-office" }));
+  });
+
+  it("uses the dropped pin as the start and lets the user change it", async () => {
     render(<RoutePlannerDialog {...plannerProps({ useMyLocation: true })} />);
 
     expect(screen.getByTestId("route-endpoint-card-start")).toHaveTextContent("You are here");
     fireEvent.click(screen.getByRole("button", { name: "Change start" }));
-    expect(screen.getByRole("searchbox", { name: "Search start" })).toBeInTheDocument();
+    expect(await screen.findByRole("searchbox", { name: "Search start" })).toBeInTheDocument();
   });
 
   it("keeps swap available only when both endpoints are complete", () => {

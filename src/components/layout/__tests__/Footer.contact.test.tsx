@@ -8,7 +8,7 @@ vi.mock("../../../hooks/useStudentAuth", () => ({
 }));
 
 describe("Footer contact information", () => {
-  it("uses the official campus details and omits retired public announcement contact links", () => {
+  it("keeps useful public navigation and contact details without project or history trivia", () => {
     render(
       <MemoryRouter>
         <Footer />
@@ -20,8 +20,17 @@ describe("Footer contact information", () => {
       "href",
       "mailto:registrarsoffice@plv.edu.ph",
     );
-    expect(screen.getByText("Established 2002")).toBeInTheDocument();
-    expect(screen.getByText("Main Maysan campus inaugurated January 19, 2018")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Home" })).toHaveAttribute("href", "/");
+    expect(screen.getByRole("link", { name: "Campus Map" })).toHaveAttribute("href", "/map");
+    expect(screen.getByRole("link", { name: "Help / FAQ" })).toHaveAttribute("href", "/help#faq");
+    expect(screen.getByRole("link", { name: "Sign In" })).toHaveAttribute("href", "/admin");
+    expect(screen.getByText("Navigate buildings, rooms, facilities, and walking routes across PLV.")).toBeInTheDocument();
+    expect(screen.getByText(/NaviSync v1\.0\.3/)).toBeInTheDocument();
+
+    expect(screen.queryByText(/Established 2002/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/campus inaugurated January 19, 2018/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/GitHub/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/System Online/i)).not.toBeInTheDocument();
 
     expect(screen.queryByText(/Tongco Street, Karuhatan/i)).not.toBeInTheDocument();
     expect(screen.queryByText("(02) 8293-0000")).not.toBeInTheDocument();

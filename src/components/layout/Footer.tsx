@@ -1,132 +1,65 @@
-import { MapPin, Mail, Github, Globe, CheckCircle2 } from "lucide-react";
+import { Mail, MapPin } from "lucide-react";
 import { Link } from "react-router";
 import { PLVLogo } from "../ui/PLVLogo";
 import { useStudentAuth } from "../../hooks/useStudentAuth";
 
 const CURRENT_VERSION = "v1.0.3";
-const LAST_UPDATED = "July 2026";
 
 export function Footer() {
   const { isStudent } = useStudentAuth();
+  const quickLinks = [
+    { label: "Home", to: "/" },
+    { label: "Campus Map", to: "/map" },
+    { label: "Help / FAQ", to: "/help#faq" },
+    { label: isStudent ? "Student Portal" : "Sign In", to: isStudent ? "/home" : "/admin" },
+  ];
+
   return (
     <footer className="border-t border-border bg-card">
-      <div className="max-w-7xl mx-auto px-5 sm:px-7 py-12 lg:py-16">
-        {/* Main grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8 sm:gap-10 lg:gap-8">
-
-          {/* Brand — wider on mobile */}
-          <div className="sm:col-span-2 lg:col-span-1">
-            <Link to="/" className="flex items-center gap-3 mb-4 group">
+      <div className="mx-auto max-w-7xl px-5 py-9 sm:px-7 sm:py-11">
+        <div className="grid grid-cols-1 gap-8 sm:grid-cols-2 sm:gap-10 lg:grid-cols-[1.4fr_0.7fr_1fr]">
+          <div>
+            <Link to="/" className="mb-3 inline-flex items-center gap-3 group">
               <PLVLogo size={36} />
-              <div>
-                <p className="font-extrabold text-foreground text-sm leading-none group-hover:text-primary transition-colors">PLV NaviSync</p>
-                <p className="text-[10px] font-bold text-accent tracking-wider uppercase mt-0.5">Smart Campus Navigator</p>
-              </div>
+              <span>
+                <span className="block text-sm font-extrabold leading-none text-foreground transition-colors group-hover:text-primary">PLV NaviSync</span>
+                <span className="mt-1 block text-[10px] font-bold uppercase tracking-wider text-accent">Smart Campus Navigator</span>
+              </span>
             </Link>
-            <p className="text-sm text-muted-foreground leading-relaxed max-w-xs mb-5">
-              The intelligent campus navigation platform of Pamantasan ng Lungsod ng Valenzuela.
+            <p className="max-w-sm text-sm leading-relaxed text-muted-foreground">
+              Navigate buildings, rooms, facilities, and walking routes across PLV.
             </p>
-            {/* System Status */}
-            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-green-500/10 border border-green-500/20">
-              <div className="relative w-2 h-2">
-                <div className="absolute inset-0 rounded-full bg-green-500 animate-ping opacity-50" />
-                <div className="absolute inset-0 rounded-full bg-green-500" />
-              </div>
-              <span className="text-[10px] font-bold text-green-600 dark:text-green-400 uppercase tracking-wider">System Online</span>
-            </div>
           </div>
 
-          {/* Platform Links */}
-          <div>
-            <h4 className="font-extrabold text-foreground text-xs uppercase tracking-widest mb-5">Platform</h4>
-            <ul className="space-y-3">
-              {[
-                { label: "Home",        to: "/" },
-                { label: "Campus Map",  to: "/map" },
-                { label: "Login",       to: "/admin" },
-                ...(isStudent ? [
-                  { label: "Send Message", to: "/help#contact-form" },
-                  { label: "FAQ",          to: "/help#faq" },
-                ] : []),
-              ].map(({ label, to }) => (
-                <li key={to}>                    <Link
-                      to={to}
-                      className="text-sm text-muted-foreground hover:text-primary transition-all duration-200 flex items-center gap-1.5 group active:scale-[0.97]"
-                  >
-                    <span className="w-1 h-1 rounded-full bg-muted-foreground/30 group-hover:bg-primary transition-colors shrink-0" />
-                    {label}
-                  </Link>
+          <nav aria-label="Quick links">
+            <h2 className="mb-3 text-[11px] font-extrabold uppercase tracking-[0.14em] text-foreground">Quick Links</h2>
+            <ul className="space-y-2.5">
+              {quickLinks.map(({ label, to }) => (
+                <li key={to}>
+                  <Link to={to} className="text-sm text-muted-foreground transition-colors hover:text-primary">{label}</Link>
                 </li>
               ))}
             </ul>
-          </div>
+          </nav>
 
-          {/* Contact */}
           <div>
-            <h4 className="font-extrabold text-foreground text-xs uppercase tracking-widest mb-5">Contact</h4>
-            <ul className="space-y-3.5 text-sm text-muted-foreground">
+            <h2 className="mb-3 text-[11px] font-extrabold uppercase tracking-[0.14em] text-foreground">Contact</h2>
+            <ul className="space-y-3 text-sm text-muted-foreground">
               <li className="flex items-start gap-2.5">
-                <MapPin className="h-4 w-4 shrink-0 mt-0.5 text-primary" />
-                <address className="not-italic leading-relaxed">
-                  Maysan Road corner Tongco Street, Barangay Maysan, Valenzuela City, 1440 Metro Manila
-                </address>
+                <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+                <address className="not-italic leading-relaxed">Maysan Road corner Tongco Street, Barangay Maysan, Valenzuela City, 1440 Metro Manila</address>
               </li>
               <li className="flex items-center gap-2.5">
                 <Mail className="h-4 w-4 shrink-0 text-primary" />
-                <a href="mailto:registrarsoffice@plv.edu.ph" className="hover:text-primary transition-colors">
-                  registrarsoffice@plv.edu.ph
-                </a>
-              </li>
-              <li className="pl-6 text-xs leading-relaxed">
-                <span className="font-semibold text-foreground/80">Established 2002</span>
-                <br />
-                Main Maysan campus inaugurated January 19, 2018
-              </li>
-            </ul>
-          </div>
-
-          {/* Resources / Meta */}
-          <div>
-            <h4 className="font-extrabold text-foreground text-xs uppercase tracking-widest mb-5">Resources</h4>
-            <ul className="space-y-3 text-sm">
-              <li>
-                <span className="text-muted-foreground flex items-center gap-1.5 cursor-default">
-                  <span className="w-1 h-1 rounded-full bg-muted-foreground/30 shrink-0" />
-                  <Github className="h-3 w-3" />
-                  GitHub
-                </span>
-              </li>
-              <li className="pt-2">
-                <div className="flex items-center gap-2 text-[10px] text-muted-foreground font-mono">
-                  <CheckCircle2 className="h-3 w-3 text-accent" />
-                  Version {CURRENT_VERSION}
-                </div>
-                <div className="flex items-center gap-2 text-[10px] text-muted-foreground font-mono mt-1">
-                  <Globe className="h-3 w-3 text-muted-foreground" />
-                  Updated {LAST_UPDATED}
-                </div>
+                <a href="mailto:registrarsoffice@plv.edu.ph" className="transition-colors hover:text-primary">registrarsoffice@plv.edu.ph</a>
               </li>
             </ul>
           </div>
         </div>
 
-        {/* Bottom bar */}
-        <div className="border-t border-border mt-10 pt-7 flex flex-col sm:flex-row items-center justify-between gap-4">
-          <div className="flex items-center gap-2.5">
-            <PLVLogo size={16} />
-            <span className="text-[11px] text-muted-foreground">
-              &copy; {new Date().getFullYear()} Pamantasan ng Lungsod ng Valenzuela. All rights reserved.
-            </span>
-          </div>
-          <div className="flex items-center gap-4">
-            <span className="text-[11px] font-mono text-muted-foreground/60">
-              PLV NaviSync {CURRENT_VERSION}
-            </span>
-            <span className="text-muted-foreground/20">|</span>
-            <span className="text-[11px] text-muted-foreground/60">
-              Built with &hearts; for PLV
-            </span>
-          </div>
+        <div className="mt-8 flex flex-col items-center justify-between gap-3 border-t border-border pt-5 text-center sm:flex-row sm:text-left">
+          <p className="text-[11px] text-muted-foreground">© {new Date().getFullYear()} Pamantasan ng Lungsod ng Valenzuela</p>
+          <p className="text-[11px] font-mono text-muted-foreground/70">NaviSync {CURRENT_VERSION}</p>
         </div>
       </div>
     </footer>

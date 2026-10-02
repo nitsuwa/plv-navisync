@@ -66,6 +66,15 @@ describe("central authentication bootstrap", () => {
     expect(mocks.onAuthStateChange).toHaveBeenCalledTimes(1);
   });
 
+  it("recognizes Super Admin through the same centralized profile", async () => {
+    mocks.maybeSingle.mockResolvedValueOnce({ data: { ...profile, role: "super_admin" }, error: null });
+    const { result } = renderHook(() => useAdminAuth(), { wrapper });
+
+    await waitFor(() => expect(result.current.isAdmin).toBe(true));
+    expect(result.current.profile?.role).toBe("super_admin");
+    expect(result.current.refreshProfile).toBeTypeOf("function");
+  });
+
   it("does not treat an early null INITIAL_SESSION event as a completed restore", async () => {
     let resolveSession: ((value: { data: { session: typeof session }; error: null }) => void) | undefined;
     mocks.getSession.mockImplementationOnce(() => new Promise((resolve) => { resolveSession = resolve; }));
@@ -113,6 +122,24 @@ describe("central authentication bootstrap", () => {
     await act(async () => authListener?.("SIGNED_OUT", null));
     expect(result.current.profile).toBeNull();
     expect(result.current.status).toBe("unauthenticated");
+  });
+
+  it("ignores a queued sign-in event when a newer sign-out arrives first", async () => {
+    mocks.getSession.mockResolvedValueOnce({ data: { session: null }, error: null });
+    const { result } = renderHook(() => useAuth(), { wrapper });
+    await waitFor(() => expect(result.current.status).toBe("unauthenticated"));
+
+    await act(async () => {
+      authListener?.("SIGNED_IN", session);
+      authListener?.("SIGNED_OUT", null);
+      await Promise.resolve();
+    });
+
+    expect(result.current.session).toBeNull();
+    expect(result.current.profile).toBeNull();
+    expect(result.current.isAdmin).toBe(false);
+    expect(result.current.username).toBe("");
+    expect(mocks.maybeSingle).not.toHaveBeenCalled();
   });
 
   it("keeps a previously verified role during a temporary profile/network failure", async () => {

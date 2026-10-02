@@ -31,8 +31,6 @@ const props = (overrides: Partial<StudentMapControlsProps> = {}): StudentMapCont
   search: "",
   searchFocused: false,
   directionsMode: false,
-  pinning: false,
-  youAreHere: false,
   searchResults: [],
   onSearchChange: vi.fn(),
   onSearchFocus: vi.fn(),
@@ -40,40 +38,24 @@ const props = (overrides: Partial<StudentMapControlsProps> = {}): StudentMapCont
   onClearSearch: vi.fn(),
   onSelectSearchResult: vi.fn(),
   onOpenDirections: vi.fn(),
-  onTogglePin: vi.fn(),
-  onResetView: vi.fn(),
   ...overrides,
 });
 
 describe("StudentMapControls", () => {
-  it("keeps the primary search, directions, and map actions named", () => {
+  it("keeps search and the single useful route action in the floating controls", () => {
     render(<StudentMapControls {...props()} />);
 
     expect(screen.getByRole("searchbox", { name: "Search campus map" })).toBeInTheDocument();
+    expect(screen.getByTestId("student-map-controls")).toHaveClass("map-layer-controls");
+    expect(screen.getByTestId("student-map-search-panel").querySelector("[data-map-search-header='true']")).toBeInTheDocument();
+    expect(screen.getByTestId("student-map-search-panel")).toHaveClass("right-16");
     expect(screen.getByRole("button", { name: "Open directions" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Drop pin" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Reset map view" })).toBeInTheDocument();
+    expect(within(screen.getByTestId("student-map-utility-controls")).getAllByRole("button")).toHaveLength(1);
+    expect(screen.queryByRole("button", { name: /Drop pin|Move dropped pin|Cancel drop pin/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Use my location" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Reset map view" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Zoom in" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Zoom out" })).not.toBeInTheDocument();
-  });
-
-  it("starts manual pin mode when Drop pin is pressed", () => {
-    const onTogglePin = vi.fn();
-    render(<StudentMapControls {...props({ onTogglePin })} />);
-
-    fireEvent.click(screen.getByRole("button", { name: "Drop pin" }));
-
-    expect(onTogglePin).toHaveBeenCalledOnce();
-  });
-
-  it("lets users move an existing pin", () => {
-    const onTogglePin = vi.fn();
-    render(<StudentMapControls {...props({ youAreHere: true, onTogglePin })} />);
-
-    fireEvent.click(screen.getByRole("button", { name: "Move dropped pin" }));
-
-    expect(onTogglePin).toHaveBeenCalledOnce();
   });
 
   it("keeps route modes and building shortcuts out of the search area", () => {
@@ -93,6 +75,7 @@ describe("StudentMapControls", () => {
     );
 
     expect(screen.getByRole("button", { name: "All destinations" })).toBeInTheDocument();
+    expect(screen.getByRole("listbox", { name: "Campus destination results" })).toHaveAttribute("data-map-layer", "transient");
     expect(screen.getByText("Building")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("option", { name: /Science Hall/i }));
     expect(onSelectSearchResult).toHaveBeenCalledWith(result);

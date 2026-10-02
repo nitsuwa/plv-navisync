@@ -6,6 +6,7 @@ export interface AdminAuthState {
   profile: Profile | null;
   loading: boolean;
   isAdmin: boolean;
+  refreshProfile: () => Promise<void>;
   status: "initializing" | "authenticated" | "unauthenticated";
 }
 
@@ -20,6 +21,7 @@ export function useAdminAuth(): AdminAuthState {
     profile: auth.profile,
     loading: auth.loading,
     isAdmin: auth.isAdmin,
+    refreshProfile: auth.refreshProfile,
     status,
   };
 }

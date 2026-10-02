@@ -144,9 +144,9 @@
   - Building search, directions (from → to), route rendering, animated route dot
   - Floor selector per building, indoor room rendering from `FLOOR_PLANS`
   - Stair/elevator choice dialog when navigating between floors
-  - Building info panel, event popup, report modal, sign-in prompt, QR placeholder, mobile bottom sheet
+  - Building info panel, event popup, report modal, sign-in prompt, location QR, camera QR scanner, mobile bottom sheet
   - "Find route" from current building, walking time/distance display
-- `src/components/map/` — `BuildingInfoPanel.tsx`, `BuildingPicker.tsx`, `EventPopup.tsx`, `MobileBuildingSheet.tsx`, `QRPlaceholder.tsx`, `ReportModal.tsx`, `SignInPrompt.tsx`, `index.ts`
+- `src/components/map/` — `BuildingInfoPanel.tsx`, `BuildingPicker.tsx`, `EventPopup.tsx`, `LocationQR.tsx`, `LocationQRScanner.tsx`, `MobileBuildingSheet.tsx`, `ReportModal.tsx`, `SignInPrompt.tsx`, `index.ts`
 
 **Current Services:** None directly. Reads `useCampusData()` (published Map Builder campuses) and falls back to legacy `MOCK_BUILDINGS`/`B_POS`/`FLOOR_PLANS` constants via `buildSharedCampus` + `mapDataAdapter`.
 
@@ -156,7 +156,7 @@
 - Single very large file (~1,800 lines)
 - Dual data source: legacy hardcoded `B_POS`/`FLOOR_PLANS` vs. Map Builder-generated campuses (adapter bridges them; IDs `b1`–`b6` hardcoded in pathfinding graphs)
 - No real GPS geolocation (GPS mode toggles exist but are simulated)
-- QR code feature is a placeholder (`QRPlaceholder`)
+- QR location scanning supports published outdoor navigation points and building entrances; indoor QR origins need indoor point-to-route support
 - Events shown are static/mock; Map Builder-authored events do not flow to this page
 - Pathfinding failures silently return "no route" in some cases
 

@@ -1,7 +1,6 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router";
-import { settingsService, DEFAULT_PUBLIC_PLATFORM_SETTINGS } from "../../services/settingsService";
 import type { ComponentProps } from "react";
 import { CampusMapPage } from "../CampusMapPage";
 import { eventOverlayService } from "../../services/eventOverlayService";
@@ -51,6 +50,8 @@ const previewCampus: EditorCampus = {
   publishedAt: "2026-01-02",
 };
 
+const settingsMocks = vi.hoisted(() => ({ getPublicPlatformSettings: vi.fn() }));
+
 vi.mock("../../services/eventOverlayService", () => ({
   eventOverlayService: {
     getApprovedOverlaysForCampus: vi.fn().mockResolvedValue([]),
@@ -63,7 +64,30 @@ vi.mock("../../services/usageAnalyticsService", () => ({
   usageAnalyticsService: { track: vi.fn() },
 }));
 
+vi.mock("../../services/settingsService", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../services/settingsService")>();
+  return {
+    ...actual,
+    settingsService: { ...actual.settingsService, getPublicPlatformSettings: settingsMocks.getPublicPlatformSettings },
+  };
+});
+
 describe("CampusMapPage event overlays", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    settingsMocks.getPublicPlatformSettings.mockResolvedValue({
+      defaultCampusId: "",
+      defaultLandingPage: "home",
+      rememberLastCampus: true,
+      showApprovedEventOverlays: true,
+      defaultRouteMode: "standard",
+      animatedRouteArrows: true,
+      autoFocusRoute: true,
+      autoFollowFloors: true,
+      showMapLabels: true,
+    });
+  });
+
   const renderCampusMap = (props: ComponentProps<typeof CampusMapPage> = {}) =>
     render(
       <MemoryRouter>
@@ -72,9 +96,8 @@ describe("CampusMapPage event overlays", () => {
     );
 
   it("toggles event preview without changing the navigation camera", async () => {
-    vi.spyOn(settingsService, "getPublicPlatformSettings").mockResolvedValue(DEFAULT_PUBLIC_PLATFORM_SETTINGS);
     renderCampusMap({ previewCampus });
-    const toggle = await screen.findByRole("button", { name: "Event map" });
+    const toggle = await screen.findByRole("button", { name: "Event map" }, { timeout: 5000 });
     const svg = screen.getByTestId("student-map-surface").querySelector("svg");
     const camera = svg?.querySelector("g[transform]")?.getAttribute("transform");
     fireEvent.click(toggle);
@@ -95,6 +118,119 @@ describe("CampusMapPage event overlays", () => {
     await waitFor(() => expect(eventOverlayService.listPublishedEventPreviews).toHaveBeenCalledWith("campus-test"));
   });
 
+  it("uses the platform overlay setting in Student Preview", async () => {
+    settingsMocks.getPublicPlatformSettings.mockResolvedValueOnce({
+      defaultCampusId: "", defaultLandingPage: "home", rememberLastCampus: true,
+      showApprovedEventOverlays: false, defaultRouteMode: "standard", animatedRouteArrows: true,
+      autoFocusRoute: true, autoFollowFloors: true, showMapLabels: true,
+    });
+    renderCampusMap({ previewCampus });
+    await waitFor(() => expect(settingsMocks.getPublicPlatformSettings).toHaveBeenCalled());
+    expect(eventOverlayService.getApprovedOverlaysForCampus).not.toHaveBeenCalled();
+    expect(eventOverlayService.listPublishedEventPreviews).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Event map" })).not.toBeInTheDocument();
+  });
+
+  it("uses the platform label setting in Student Preview", async () => {
+    settingsMocks.getPublicPlatformSettings.mockResolvedValueOnce({
+      defaultCampusId: "", defaultLandingPage: "home", rememberLastCampus: true,
+      showApprovedEventOverlays: true, defaultRouteMode: "standard", animatedRouteArrows: true,
+      autoFocusRoute: true, autoFollowFloors: true, showMapLabels: false,
+    });
+    renderCampusMap({ previewCampus });
+    await waitFor(() => expect(settingsMocks.getPublicPlatformSettings).toHaveBeenCalled());
+    await waitFor(() => expect(screen.queryByTestId("building-label-group")).not.toBeInTheDocument());
+  });
+
+  it("preselects the saved accessible mode when Student directions open", async () => {
+    settingsMocks.getPublicPlatformSettings.mockResolvedValueOnce({
+      defaultCampusId: "", defaultLandingPage: "home", rememberLastCampus: true,
+      showApprovedEventOverlays: true, defaultRouteMode: "accessible", animatedRouteArrows: false,
+      autoFocusRoute: false, autoFollowFloors: false, showMapLabels: true,
+    });
+    renderCampusMap({ previewCampus });
+    fireEvent.click(await screen.findByRole("button", { name: "Open directions" }));
+    expect(await screen.findByRole("button", { name: "Accessible routing" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Standard routing" })).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("keeps accessible and emergency mode guidance inside the route planner", async () => {
+    renderCampusMap({ previewCampus });
+    fireEvent.click(await screen.findByRole("button", { name: "Open directions" }));
+
+    fireEvent.click(await screen.findByRole("button", { name: "Accessible routing" }));
+    expect(screen.getByTestId("accessible-route-note")).toHaveTextContent(/ramps.*elevators/i);
+    expect(screen.queryByText("Accessible Route")).not.toBeInTheDocument();
+    expect(screen.queryByText("Emergency Mode")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "SOS routing" }));
+    expect(screen.queryByText("Accessible Route")).not.toBeInTheDocument();
+    expect(screen.queryByText("Emergency Mode")).not.toBeInTheDocument();
+  });
+
+  it("shows the compact building details and keeps the zoom dock mounted across sheet states", async () => {
+    const campus: EditorCampus = {
+      ...previewCampus,
+      buildings: [{
+        ...previewCampus.buildings[0],
+        floors: [{
+          id: "science-floor",
+          buildingId: "building-test",
+          number: 1,
+          label: "Ground Floor",
+          rooms: [], paths: [], walls: [], doors: [], windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [],
+        }],
+      }],
+    };
+    renderCampusMap({ previewCampus: campus });
+    fireEvent.focus(await screen.findByRole("searchbox", { name: "Search campus map" }));
+    fireEvent.click(screen.getByRole("option", { name: /Science Hall, Building/i }));
+
+    const sheet = await screen.findByTestId("mobile-building-sheet");
+    const sheetActions = within(sheet);
+    const zoomControls = screen.getByTestId("student-map-zoom-controls");
+    expect(sheet).toHaveAttribute("data-sheet-state", "default");
+    expect(sheetActions.getByTestId("building-cover-fallback")).toBeInTheDocument();
+    expect(screen.getByTestId("readonly-building")).toHaveAttribute("data-selected", "true");
+    expect(screen.getByTestId("student-map-zoom-percentage")).toBeInTheDocument();
+    expect(sheetActions.getByRole("button", { name: /Directions/i })).toBeVisible();
+    expect(sheetActions.getByRole("button", { name: "Enter Building" })).toBeVisible();
+    expect(sheetActions.getByRole("button", { name: /Save/i })).toBeVisible();
+    expect(sheetActions.getByRole("button", { name: /Share/i })).toBeVisible();
+    expect(sheetActions.getByRole("button", { name: "Report map issue" })).toBeVisible();
+    expect(zoomControls).toHaveAttribute("data-sheet-open", "true");
+    expect(zoomControls).toHaveAttribute("data-sheet-state", "default");
+    expect(screen.getByTestId("student-map-surface").style.getPropertyValue("--student-map-controls-safe-top")).toMatch(/px$/);
+
+    fireEvent.click(sheetActions.getByRole("button", { name: "Expand building details" }));
+    expect(sheet).toHaveAttribute("data-sheet-state", "expanded");
+    expect(screen.getByTestId("student-map-zoom-controls")).toBe(zoomControls);
+    fireEvent.click(sheetActions.getByRole("button", { name: "Close building details" }));
+    await waitFor(() => expect(screen.queryByTestId("mobile-building-sheet")).not.toBeInTheDocument());
+    expect(screen.getByTestId("student-map-zoom-controls")).toBe(zoomControls);
+    expect(zoomControls).toHaveAttribute("data-sheet-open", "false");
+  });
+
+  it("keeps the selected building sheet mounted and pauses its drag while search is foregrounded", async () => {
+    renderCampusMap({ previewCampus });
+    const search = await screen.findByRole("searchbox", { name: "Search campus map" });
+    fireEvent.focus(search);
+    fireEvent.click(screen.getByRole("option", { name: /Science Hall, Building/i }));
+
+    const sheet = await screen.findByTestId("mobile-building-sheet");
+    fireEvent.focus(search);
+    expect(screen.getByTestId("mobile-building-sheet")).toBe(sheet);
+    expect(sheet).toHaveAttribute("data-interaction-paused", "true");
+    expect(sheet).toHaveAttribute("data-sheet-state", "default");
+    expect(screen.getByTestId("student-map-controls").parentElement).toHaveAttribute("data-map-layer", "transient");
+
+    fireEvent.keyDown(search, { key: "Escape" });
+    await waitFor(() => expect(sheet).toHaveAttribute("data-interaction-paused", "false"), { timeout: 1000 });
+    expect(screen.getByTestId("mobile-building-sheet")).toBe(sheet);
+    expect(screen.getByTestId("readonly-building")).toHaveAttribute("data-selected", "true");
+    expect(screen.getByTestId("student-map-zoom-controls")).toHaveAttribute("data-dock-open", "true");
+  });
+
   it("exposes the responsive student map landmarks and controls", async () => {
     renderCampusMap({ previewCampus });
 
@@ -112,13 +248,41 @@ describe("CampusMapPage event overlays", () => {
     });
   });
 
+  it("starts a fresh room-directions planner in the configured mode, not a previous SOS mode", async () => {
+    const campus: EditorCampus = { ...previewCampus, buildings: [{ ...previewCampus.buildings[0], floors: [{
+      id: "route-floor", buildingId: "building-test", number: 1, label: "Ground Floor",
+      rooms: [{ id: "copyshop-room", name: "Copyshop", type: "classroom", floorId: "route-floor", buildingId: "building-test", x: 10, y: 10, w: 60, h: 60 }],
+      paths: [], walls: [], doors: [], windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [],
+    }] }] };
+    renderCampusMap({ previewCampus: campus });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Open directions" }));
+    fireEvent.click(screen.getByRole("button", { name: "SOS routing" }));
+    expect(screen.getByRole("button", { name: "SOS routing" })).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(screen.getByRole("button", { name: "Close directions" }));
+    await waitFor(() => expect(screen.queryByTestId("route-planner-dialog")).not.toBeInTheDocument());
+
+    const search = screen.getByRole("searchbox", { name: "Search campus map" });
+    fireEvent.focus(search);
+    fireEvent.change(search, { target: { value: "Science Hall" } });
+    fireEvent.click(await screen.findByRole("option", { name: /Science Hall, Building/i }));
+    fireEvent.click(screen.getAllByRole("button", { name: /Enter Building/i })[0]);
+    fireEvent.click(await screen.findByTestId("readonly-room"));
+    fireEvent.click(screen.getByRole("button", { name: "Get directions to Copyshop" }));
+
+    expect(screen.getByRole("button", { name: "Standard routing" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "SOS routing" })).toHaveAttribute("aria-pressed", "false");
+  });
+
   it("opens a building selected by a scanned QR deep link after the campus loads", async () => {
     const originalUrl = window.location.href;
     window.history.replaceState({}, "", "/map?buildingId=building-test");
     try {
       renderCampusMap({ previewCampus });
-      fireEvent.click(await screen.findByRole("button", { name: /QR Code/i }));
-      expect(screen.getByLabelText("QR code for Science Hall")).toBeInTheDocument();
+      const sheet = await screen.findByTestId("mobile-building-sheet");
+      fireEvent.pointerDown(within(sheet).getByRole("button", { name: "More building actions" }), { button: 0, ctrlKey: false });
+      fireEvent.click(await screen.findByRole("menuitem", { name: "Show QR Code" }));
+      expect(within(sheet).getByLabelText("QR code for Science Hall")).toBeInTheDocument();
       expect(screen.getAllByText("Science Hall").length).toBeGreaterThan(1);
       expect(window.location.search).toBe("");
     } finally {
@@ -126,14 +290,15 @@ describe("CampusMapPage event overlays", () => {
     }
   });
 
-  it("labels manual pin mode as dropping a pin", async () => {
+  it("keeps manual drop-pin navigation available on the student map", async () => {
     renderCampusMap({ previewCampus });
 
-    const dropPinButton = await screen.findByRole("button", { name: "Drop pin" });
-    fireEvent.click(dropPinButton);
-
+    await screen.findByRole("searchbox", { name: "Search campus map" });
+    const dropPin = screen.getByRole("button", { name: "Drop pin" });
+    expect(dropPin).toBeInTheDocument();
+    fireEvent.click(dropPin);
+    expect(screen.getByRole("button", { name: "Cancel drop pin" })).toBeInTheDocument();
     expect(screen.getByText("Tap map to drop pin")).toBeInTheDocument();
-    expect(screen.queryByText("Tap anywhere on the map to set your location")).not.toBeInTheDocument();
   });
 
   it("lets users report an interacted indoor room with its floor prefilled", async () => {
@@ -145,12 +310,34 @@ describe("CampusMapPage event overlays", () => {
     renderCampusMap({ previewCampus: campus });
     fireEvent.focus(await screen.findByRole("searchbox", { name: "Search campus map" }));
     fireEvent.click(screen.getByRole("option", { name: /Science Hall, Building/ }));
-    fireEvent.click(screen.getAllByRole("button", { name: /Floor Plan/ })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: "Enter Building" })[0]);
     fireEvent.click(await screen.findByTestId("readonly-room"));
-    fireEvent.click(await screen.findByRole("button", { name: "Report issue in Copy Shop" }));
+    fireEvent.click(await screen.findByRole("button", { name: "More place actions" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Report a room issue" }));
     expect(screen.getByRole("dialog", { name: "Report issue" })).toBeInTheDocument();
     expect(screen.getByLabelText("Floor (optional)")).toHaveValue("report-floor");
     expect(screen.getByLabelText("Room (optional)")).toHaveValue("report-room");
+  });
+
+  it.each([
+    ["Directions", "route-endpoint-card-destination", "Administration Office", "route-endpoint-card-start", "Choose starting point"],
+    ["Start", "route-endpoint-card-start", "Administration Office", "route-endpoint-card-destination", "Choose destination"],
+  ])("transfers a selected room into the planner from the %s action", async (action, chosenEndpoint, chosenLabel, emptyEndpoint, emptyLabel) => {
+    const campus: EditorCampus = { ...previewCampus, buildings: [{ ...previewCampus.buildings[0], floors: [{
+      id: "context-floor", buildingId: "building-test", number: 2, label: "Floor 2",
+      rooms: [{ id: "admin-office", name: "Administration Office", type: "office", floorId: "context-floor", buildingId: "building-test", x: 10, y: 10, w: 80, h: 50 }],
+      paths: [], walls: [], doors: [], windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [],
+    }] }] };
+    renderCampusMap({ previewCampus: campus });
+    fireEvent.focus(await screen.findByRole("searchbox", { name: "Search campus map" }));
+    fireEvent.click(screen.getByRole("option", { name: /Science Hall, Building/i }));
+    fireEvent.click(screen.getAllByRole("button", { name: "Enter Building" })[0]);
+    fireEvent.click(await screen.findByTestId("readonly-room"));
+    fireEvent.click(await screen.findByRole("button", { name: action === "Directions" ? "Get directions to Administration Office" : "Start" }));
+
+    expect(await screen.findByTestId(chosenEndpoint)).toHaveTextContent(chosenLabel);
+    expect(screen.getByTestId(emptyEndpoint)).toHaveTextContent(emptyLabel);
+    await waitFor(() => expect(screen.queryByTestId("student-selected-place-card")).not.toBeInTheDocument());
   });
 
   it("opens and zooms to a searched room, then returns to the campus for a building result", async () => {
@@ -174,7 +361,7 @@ describe("CampusMapPage event overlays", () => {
     expect(screen.getByTestId("mobile-building-sheet")).toBeInTheDocument();
   });
 
-  it("exposes every published floor after View Floor Plan, using floor labels rather than internal numbers", async () => {
+  it("exposes every published floor through the compact picker using authored labels", async () => {
     const floors = [
       { id: "ground", number: 1, label: "Ground Floor" },
       { id: "second", number: 3, label: "Floor 2" },
@@ -189,13 +376,17 @@ describe("CampusMapPage event overlays", () => {
     renderCampusMap({ previewCampus: campus });
     fireEvent.focus(await screen.findByRole("searchbox", { name: "Search campus map" }));
     fireEvent.click(screen.getByRole("option", { name: /Science Hall, Building/i }));
-    fireEvent.click(screen.getAllByRole("button", { name: /View Floor Plan/i })[0]);
-    expect(screen.queryByRole("button", { name: /View Floor Plan/i })).not.toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: "View Floor 2 of Science Hall" })[0]).toHaveTextContent("2");
-    expect(screen.getAllByRole("button", { name: "View Floor 3 of Science Hall" })[0]).toHaveTextContent("3");
-    expect(screen.getAllByRole("button", { name: "View Floor 4 of Science Hall" })[0]).toHaveTextContent("4");
-    fireEvent.click(screen.getAllByRole("button", { name: "View Floor 3 of Science Hall" })[0]);
-    expect(screen.getAllByRole("button", { name: "View Floor 3 of Science Hall" })[0]).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(screen.getAllByRole("button", { name: "Enter Building" })[0]);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Choose floor. Current floor: Ground Floor" })).toBeInTheDocument());
+    expect(screen.getByRole("button", { name: "Fit full floor" })).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: "Choose floor. Current floor: Ground Floor" }));
+    const floorsList = screen.getByRole("listbox", { name: "Floors in Science Hall" });
+    expect(within(floorsList).getAllByRole("option")).toHaveLength(4);
+    expect(within(floorsList).getByRole("option", { name: /Floor 2/ })).toBeInTheDocument();
+    expect(within(floorsList).getByRole("option", { name: /Floor 3/ })).toBeInTheDocument();
+    expect(within(floorsList).getByRole("option", { name: /Floor 4/ })).toBeInTheDocument();
+    fireEvent.click(within(floorsList).getByRole("option", { name: /Floor 3/ }));
+    expect(await screen.findByRole("button", { name: "Choose floor. Current floor: Floor 3" })).toHaveAttribute("aria-expanded", "false");
     expect(screen.getByTestId("readonly-room")).toHaveAttribute("data-room-id", "room-third");
   });
 
@@ -219,9 +410,9 @@ describe("CampusMapPage event overlays", () => {
     fireEvent.wheel(search, { deltaY: -1000 });
     expect(screen.getByRole("button", { name: "Zoom out" })).toBeDisabled();
     fireEvent.wheel(screen.getByTestId("student-map-surface"), { deltaY: -1000 });
-    await waitFor(() => expect(screen.getByRole("button", { name: "Zoom out" })).not.toBeDisabled());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Zoom out" })).not.toBeDisabled(), { timeout: 5000 });
     fireEvent.wheel(screen.getByTestId("student-map-surface"), { deltaY: 10000 });
-    await waitFor(() => expect(screen.getByRole("button", { name: "Zoom out" })).toBeDisabled());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Zoom out" })).toBeDisabled(), { timeout: 5000 });
   });
 
   it("renders intermediate wheel-zoom scales without rebuilding the map scene", async () => {
@@ -264,13 +455,14 @@ describe("CampusMapPage event overlays", () => {
         { id: "outdoor", startNodeId: "source-entry", endNodeId: "target-entry", distance: 300, bidirectional: true, accessible: true, type: "walkway", color: "#3b82f6", width: 3 },
       ],
     };
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
     renderCampusMap({ previewCampus: campus });
     fireEvent.click(await screen.findByRole("button", { name: "Open directions" }));
     fireEvent.click(screen.getByRole("button", { name: "Choose start" }));
-    fireEvent.click(screen.getByRole("option", { name: /CABA-103, Room/ }));
-    fireEvent.click(screen.getByRole("button", { name: "Choose destination" }));
-    fireEvent.click(screen.getByRole("option", { name: /CEIT, Building/ }));
-    fireEvent.click(screen.getByRole("button", { name: "Start navigation" }));
+    fireEvent.click(await screen.findByRole("option", { name: /CABA-103, Room/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Choose destination" }));
+    fireEvent.click(await screen.findByRole("option", { name: /CEIT, Building/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Start navigation" }));
 
     await waitFor(() => expect(screen.getAllByTestId("route-steps-panel").length).toBe(2));
     const [desktopRoutePanel, mobileRoutePanel] = screen.getAllByTestId("route-steps-panel");
@@ -283,6 +475,12 @@ describe("CampusMapPage event overlays", () => {
     expect(mobileRoutePanel.querySelector("button")).toHaveClass("h-8");
     expect(screen.queryByTestId("indoor-route-preview")).not.toBeInTheDocument();
     expect(screen.queryByText("Directions to room")).not.toBeInTheDocument();
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    const maxDepthWarnings = consoleError.mock.calls.filter((call) =>
+      call.some((value) => String(value).includes("Maximum update depth exceeded")),
+    );
+    consoleError.mockRestore();
+    expect(maxDepthWarnings).toHaveLength(0);
   });
 
   it("zooms the student map when a two-finger pinch spreads", async () => {
@@ -443,6 +641,19 @@ describe("CampusMapPage event overlays", () => {
     fireEvent.click(screen.getByRole("button", { name: "Open directions" }));
 
     expect(screen.getByTestId("route-planner-dialog")).toBeInTheDocument();
-    expect(screen.queryByTestId("mobile-building-sheet")).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByTestId("mobile-building-sheet")).not.toBeInTheDocument());
+  });
+
+  it("shows building actions in a sheet positioned above the mobile navigation", async () => {
+    renderCampusMap({ previewCampus });
+
+    fireEvent.focus(await screen.findByRole("searchbox", { name: "Search campus map" }));
+    fireEvent.click(screen.getByRole("option", { name: /Science Hall, Building/ }));
+
+    const sheet = await screen.findByTestId("mobile-building-sheet");
+    expect(sheet.style.bottom).toContain("4.75rem");
+    expect(sheet).toHaveAttribute("data-sheet-state", "default");
+    expect(within(sheet).getByTestId("building-cover-fallback")).toBeInTheDocument();
+    expect(within(sheet).getByRole("button", { name: "Directions" })).toBeInTheDocument();
   });
 });

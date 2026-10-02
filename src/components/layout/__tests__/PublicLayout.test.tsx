@@ -16,6 +16,11 @@ const authState = vi.hoisted(() => ({
 vi.mock("../../../hooks/useStudentAuth", () => ({
   useStudentAuth: () => authState,
 }));
+vi.mock("../../../services/settingsService", () => ({
+  settingsService: {
+    getPublicPlatformSettings: vi.fn().mockResolvedValue({ defaultLandingPage: "home" }),
+  },
+}));
 
 vi.mock("../Navbar", () => ({ Navbar: () => null }));
 vi.mock("../EmergencyBanner", () => ({ EmergencyBanner: () => null }));
@@ -24,11 +29,24 @@ vi.mock("../ScrollToTop", () => ({ ScrollToTop: () => null }));
 vi.mock("../MobileBottomNav", () => ({ MobileBottomNav: () => <nav data-testid="mobile-bottom-nav">Map</nav> }));
 vi.mock("../../ui/NavigationProgress", () => ({ NavigationProgress: () => null }));
 vi.mock("../../../app/components/ui/sonner", () => ({ Toaster: () => null }));
-vi.mock("../../../services/settingsService", () => ({ settingsService: {
-  getPublicPlatformSettings: vi.fn().mockResolvedValue({ defaultLandingPage: "home" }),
-} }));
 
 describe("PublicLayout student entry", () => {
+  it("keeps the existing public Home for a guest", () => {
+    authState.isStudent = false;
+    authState.loading = false;
+    render(
+      <MemoryRouter initialEntries={["/"]}>
+        <Routes>
+          <Route element={<PublicLayout />}>
+            <Route path="/" element={<div>Welcome to NaviSync</div>} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText("Welcome to NaviSync")).toBeInTheDocument();
+  });
+
   it("redirects an authenticated student from the public root to Home", async () => {
     authState.isStudent = true;
     render(

@@ -1,10 +1,11 @@
 export { BuildingPicker } from "./BuildingPicker";
 export { LocationQR } from "./LocationQR";
+export { LocationQRScanner } from "./LocationQRScanner";
 export { ReportModal } from "./ReportModal";
 export { EventPopup } from "./EventPopup";
 export { SignInPrompt } from "./SignInPrompt";
 export { BuildingInfoPanel, type PanelTab } from "./BuildingInfoPanel";
-export { MobileBuildingSheet } from "./MobileBuildingSheet";
+export { MobileBuildingSheet, type MobileBuildingSheetState } from "./MobileBuildingSheet";
 export { MobileMapAccountMenu } from "./MobileMapAccountMenu";
 export { RoutePlannerDialog } from "./RoutePlannerDialog";
 export { RouteStepsPanel } from "./RouteStepsPanel";
@@ -13,3 +14,5 @@ export { RouteErrorState } from "./RouteErrorState";
 export { EventInfoPanel } from "./EventInfoPanel";
 export { ActiveEventsList } from "./ActiveEventsList";
 export { StudentMapControls, type StudentMapControlsProps } from "./StudentMapControls";
+export { StudentFloorPicker, type StudentFloorOption } from "./StudentFloorPicker";
+export { StudentSelectedPlaceCard } from "./StudentSelectedPlaceCard";

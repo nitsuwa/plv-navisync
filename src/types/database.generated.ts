@@ -62,6 +62,42 @@ export type Database = {
           },
         ]
       }
+      admin_user_invitations: {
+        Row: {
+          accepted_at: string | null
+          email: string
+          invited_at: string
+          invited_by: string | null
+          invited_role: "student" | "student_org" | "admin" | "super_admin"
+          last_sent_at: string
+          profile_id: string
+          revoked_at: string | null
+        }
+        Insert: {
+          accepted_at?: string | null
+          email: string
+          invited_at?: string
+          invited_by?: string | null
+          invited_role: "student" | "student_org" | "admin" | "super_admin"
+          last_sent_at?: string
+          profile_id: string
+          revoked_at?: string | null
+        }
+        Update: {
+          accepted_at?: string | null
+          email?: string
+          invited_at?: string
+          invited_by?: string | null
+          invited_role?: "student" | "student_org" | "admin" | "super_admin"
+          last_sent_at?: string
+          profile_id?: string
+          revoked_at?: string | null
+        }
+        Relationships: [
+          { foreignKeyName: "admin_user_invitations_invited_by_fkey"; columns: ["invited_by"]; isOneToOne: false; referencedRelation: "profiles"; referencedColumns: ["id"] },
+          { foreignKeyName: "admin_user_invitations_profile_id_fkey"; columns: ["profile_id"]; isOneToOne: true; referencedRelation: "profiles"; referencedColumns: ["id"] },
+        ]
+      }
       admin_activity_preferences: {
         Row: {
           admin_id: string
@@ -1074,7 +1110,7 @@ export type Database = {
           is_active: boolean
           last_login_at: string | null
           last_name: string
-          role: string
+          role: "student" | "student_org" | "admin" | "super_admin"
           student_number: string | null
           updated_at: string
         }
@@ -1088,7 +1124,7 @@ export type Database = {
           is_active?: boolean
           last_login_at?: string | null
           last_name?: string
-          role?: string
+          role?: "student" | "student_org" | "admin" | "super_admin"
           student_number?: string | null
           updated_at?: string
         }
@@ -1102,7 +1138,7 @@ export type Database = {
           is_active?: boolean
           last_login_at?: string | null
           last_name?: string
-          role?: string
+          role?: "student" | "student_org" | "admin" | "super_admin"
           student_number?: string | null
           updated_at?: string
         }
@@ -1502,8 +1538,8 @@ export type Database = {
           p_first_name: string
           p_is_active: boolean
           p_last_name: string
-          p_role: string
-          p_student_number: string
+          p_role: "student" | "student_org" | "admin" | "super_admin"
+          p_student_number: string | null
           p_target_id: string
         }
         Returns: {
@@ -1516,7 +1552,7 @@ export type Database = {
           is_active: boolean
           last_login_at: string | null
           last_name: string
-          role: string
+          role: "student" | "student_org" | "admin" | "super_admin"
           student_number: string | null
           updated_at: string
         }
@@ -1531,9 +1567,27 @@ export type Database = {
         Args: { p_student_number: string }
         Returns: boolean
       }
+      complete_user_invitation: {
+        Args: never
+        Returns: {
+          avatar_path: string | null
+          created_at: string
+          department: string | null
+          email: string
+          first_name: string
+          id: string
+          is_active: boolean
+          last_login_at: string | null
+          last_name: string
+          role: "student" | "student_org" | "admin" | "super_admin"
+          student_number: string | null
+          updated_at: string
+        }
+      }
       campus_is_published: { Args: { p_campus_id: string }; Returns: boolean }
       clear_admin_activity_history: { Args: never; Returns: string }
       is_admin: { Args: never; Returns: boolean }
+      is_super_admin: { Args: never; Returns: boolean }
       list_coming_soon_campuses: {
         Args: never
         Returns: {

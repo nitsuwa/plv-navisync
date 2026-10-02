@@ -316,12 +316,15 @@ describe("Admin Test Route Room → Door → Walking Network resolution", () => 
         ...(makeCampus().navEdges ?? []),
         edge("shortcut-in", "wp-a", "emergency-stair-shortcut", { distance: 1 }),
         edge("shortcut-out", "emergency-stair-shortcut", "wp-b", { distance: 1 }),
+        edge("emergency-layer-shortcut", "wp-a", "wp-b", { type: "emergency", distance: 0.1 }),
       ],
     });
     const graph = routineRouteGraph(campus);
     expect(graph.nodes.some((candidate) => candidate.id === "emergency-stair-shortcut")).toBe(false);
+    expect(graph.edges.some((candidate) => candidate.id === "emergency-layer-shortcut")).toBe(false);
     const route = findNavigationRoute(graph.nodes, graph.edges, "wp-a", "wp-b");
     expect(route?.nodeIds).toEqual(["wp-a", "wp-b"]);
+    expect(route?.edgeTraversals?.some((traversal) => traversal.edgeId === "emergency-layer-shortcut")).toBe(false);
   });
 
   it("filters emergency-only Entrance and Door nodes from routine route graphs", () => {

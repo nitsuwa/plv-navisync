@@ -9,7 +9,7 @@ import { Button } from "../components/ui/Button";
 import { useTheme } from "../hooks/useTheme";
 import { ThemeToggle } from "../components/ui/ThemeToggle";
 import { PLVLogo } from "../components/ui/PLVLogo";
-import { StarField, LavaLampBackground } from "../components/ui/HeroBackground";
+import { AuthVisualBackdrop, StarField, LavaLampBackground } from "../components/ui/HeroBackground";
 import { isConnected, supabase } from "../lib/supabase";
 import {
   friendlyAccountError,
@@ -63,6 +63,7 @@ export function RegistrationPage() {
   const [step, setStep] = useState<1 | 2>(1);
   const [loading, setLoading] = useState(false);
   const [checkingStudentId, setCheckingStudentId] = useState(false);
+  const [studentIdAvailabilityWarning, setStudentIdAvailabilityWarning] = useState("");
   const [submitError, setSubmitError] = useState("");
   const [duplicateEmail, setDuplicateEmail] = useState(false);
   const [showPw, setShowPw] = useState(false);
@@ -80,6 +81,7 @@ export function RegistrationPage() {
   const set = (k: keyof typeof form, v: string) => {
     setForm(p => ({ ...p, [k]: v }));
     setErrs(p => ({ ...p, [k]: "" }));
+    if (k === "studentId") setStudentIdAvailabilityWarning("");
     setSubmitError("");
     setDuplicateEmail(false);
   };
@@ -127,6 +129,7 @@ export function RegistrationPage() {
     }
     setCheckingStudentId(true);
     setSubmitError("");
+    setStudentIdAvailabilityWarning("");
     try {
       const available = await checkStudentIdAvailability(form.studentId, supabase);
       if (!available) {
@@ -135,7 +138,10 @@ export function RegistrationPage() {
       }
       setStep(2);
     } catch {
-      setSubmitError("We couldn't check this Student ID right now. Check your connection and try again.");
+      // Availability is a convenience check. The profile uniqueness index and
+      // signup trigger remain authoritative if the RPC is missing or offline.
+      setStudentIdAvailabilityWarning("We couldn't check availability right now. We'll verify it when you create the account.");
+      setStep(2);
     } finally {
       setCheckingStudentId(false);
     }
@@ -211,7 +217,8 @@ export function RegistrationPage() {
   };
 
   return (
-    <div className="min-h-screen flex">
+    <div className="relative isolate flex min-h-screen min-h-[100dvh] overflow-x-hidden">
+      <AuthVisualBackdrop />
       {/* ══════════ LEFT PANEL ══════════ */}
       <div className="hidden lg:flex lg:flex-1 relative overflow-hidden flex-col justify-between p-10 xl:p-14">
         <div className="absolute inset-0" style={{
@@ -249,16 +256,16 @@ export function RegistrationPage() {
       </div>
 
       {/* ══════════ RIGHT — form ══════════ */}
-      <div className="flex-1 lg:max-w-[460px] flex flex-col bg-background">
+      <div className="relative z-10 flex min-h-[100dvh] flex-1 flex-col overflow-y-auto bg-transparent lg:max-w-[460px] lg:bg-background">
         <div className="flex items-center justify-between px-5 sm:px-8 pt-6 pb-2">
-          <Link to="/admin" className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors">
+          <Link to="/admin" className="flex items-center gap-1.5 text-sm text-white/80 transition-colors hover:text-white lg:text-muted-foreground lg:hover:text-foreground">
             <ArrowLeft className="h-4 w-4" /> Back to Sign In
           </Link>
           <ThemeToggle theme={theme} onToggle={toggleTheme} />
         </div>
 
         <div className="flex-1 flex items-center justify-center px-5 sm:px-8 py-6">
-          <div className="w-full max-w-sm">
+          <div className="w-full max-w-sm rounded-3xl border border-white/70 bg-card/95 p-5 shadow-2xl backdrop-blur-sm sm:p-8 lg:rounded-none lg:border-0 lg:bg-transparent lg:p-0 lg:shadow-none lg:backdrop-blur-none">
             {/* PLV logo + heading */}
             <motion.div
               initial={{ opacity: 0, y: -10 }}
@@ -342,6 +349,7 @@ export function RegistrationPage() {
                         className={"w-full h-11 pl-9 pr-4 rounded-xl border bg-input-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 text-sm font-mono transition-all " + (errs.studentId ? "border-destructive focus:ring-destructive/30" : "border-border focus:ring-primary/30 focus:border-primary")} />
                     </div>
                   {errs.studentId && <p id="reg-studentid-error" role="alert" className="text-xs text-destructive mt-1 flex items-center gap-1"><span className="w-1 h-1 rounded-full bg-destructive" />{errs.studentId}</p>}
+                  {studentIdAvailabilityWarning && <p role="status" className="mt-1 text-xs leading-relaxed text-amber-700 dark:text-amber-300">{studentIdAvailabilityWarning}</p>}
                   </div>
 
                   {submitError && <p role="alert" className="text-sm text-destructive">{submitError}</p>}
@@ -386,6 +394,7 @@ export function RegistrationPage() {
                       <button type="button" onClick={() => setStep(1)}
                         className="text-xs text-primary hover:underline font-semibold shrink-0">Edit</button>
                     </motion.div>
+                    {studentIdAvailabilityWarning && <p role="status" className="rounded-lg border border-amber-300/60 bg-amber-50/70 px-3 py-2 text-xs leading-relaxed text-amber-800 dark:border-amber-800/50 dark:bg-amber-950/20 dark:text-amber-200">{studentIdAvailabilityWarning}</p>}
 
                     <div>
                       <label htmlFor="reg-password" className="block text-xs font-bold text-foreground mb-1.5 uppercase tracking-widest">Password</label>

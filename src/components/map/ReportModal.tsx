@@ -97,7 +97,8 @@ export function ReportModal({ building, campusId, floors = [], initialFloorId, i
         role="dialog"
         aria-modal="true"
         aria-label="Report submitted"
-        className="fixed inset-0 z-[60] flex items-center justify-center bg-background/80 backdrop-blur-sm animate-fade-in"
+        data-map-layer="modal"
+        className="map-layer-modal fixed inset-0 flex items-center justify-center bg-background/80 backdrop-blur-sm animate-fade-in"
         onClick={onClose}
       >
         <div
@@ -134,7 +135,8 @@ export function ReportModal({ building, campusId, floors = [], initialFloorId, i
       role="dialog"
       aria-modal="true"
       aria-label="Report issue"
-      className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-background/70 backdrop-blur-sm animate-fade-in"
+      data-map-layer="modal"
+      className="map-layer-modal fixed inset-0 flex items-end sm:items-center justify-center bg-background/70 backdrop-blur-sm animate-fade-in"
       onClick={onClose}
     >
       <div

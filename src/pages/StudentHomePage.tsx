@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect, useCallback } from "react";
-import { Link } from "react-router";
+import { Link, Navigate } from "react-router";
 import {
   GraduationCap, Building2, ArrowUpRight, Search, CalendarDays,
   Flag, Compass, Plus,
@@ -25,7 +25,7 @@ function getGreeting(): string {
 
 // ── Main Component ─────────────────────────────────────────────────────────
 export function StudentHomePage() {
-  const { username, isStudentOrg } = useStudentAuth();
+  const { username, isStudent, isStudentOrg, loading: authLoading } = useStudentAuth();
   const { success, error: showError } = useToast();
   const [loading, setLoading] = useState(true);
   const [selectedBuilding, setSelectedBuilding] = useState<Building | null>(null);
@@ -89,7 +89,8 @@ export function StudentHomePage() {
   }, [activeCampusId, savedBuildingIds, showError, success]);
 
   // ── Loading skeleton ──
-  if (loading) {
+  if (!authLoading && !isStudent) return <Navigate to="/" replace />;
+  if (authLoading || loading) {
     return (
       <div className="min-h-screen bg-background">
         <div className="max-w-2xl mx-auto px-5 pt-8 pb-6 space-y-6">

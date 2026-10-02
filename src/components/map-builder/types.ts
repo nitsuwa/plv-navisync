@@ -517,6 +517,12 @@ export interface CampusBuilding {
   code: string;
   category: string;
   description: string;
+  /** Public Storage object path for the student-facing cover image. */
+  coverImagePath?: string;
+  /** Optional authored hours shown on the student-facing place page. */
+  operatingHours?: string;
+  /** Small curated amenities list; map-derived facilities are added at display time. */
+  facilities?: string[];
   x: number;
   y: number;
   width: number;

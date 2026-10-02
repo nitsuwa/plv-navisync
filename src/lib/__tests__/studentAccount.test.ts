@@ -125,6 +125,8 @@ describe("student account helpers", () => {
     await expect(checkStudentIdAvailability("233314", client)).resolves.toBe(true);
     expect(client.rpc).toHaveBeenCalledWith("check_student_id_availability", { p_student_number: "23-3314" });
     await expect(checkStudentIdAvailability("23-331", client)).rejects.toThrow("student_id_format_invalid");
+    client.rpc = vi.fn().mockResolvedValue({ data: null, error: null }) as never;
+    await expect(checkStudentIdAvailability("23-3314", client)).rejects.toThrow("student_id_availability_invalid_response");
     expect(isObfuscatedDuplicateEmail({ identities: [] })).toBe(true);
     expect(isObfuscatedDuplicateEmail({ identities: [{ provider: "email" }] })).toBe(false);
     expect(isObfuscatedDuplicateEmail(null)).toBe(false);

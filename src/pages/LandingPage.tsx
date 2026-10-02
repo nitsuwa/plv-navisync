@@ -7,10 +7,9 @@ import {
   Sparkles, Layers, Bookmark, Clock, Route, Zap, Wrench,
 } from "lucide-react";
 import { useRef, useState, useEffect } from "react";
-import { AnimatePresence, motion, useReducedMotion, useScroll, useTransform, useSpring } from "motion/react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { PLVLogo } from "../components/ui/PLVLogo";
 import { AccessibleRouteDemo as A11yDemo } from "../components/landing/AccessibleRouteDemo";
-import { LavaLampBackground } from "../components/ui/HeroBackground";
 import { useScrollReveal } from "../hooks/useScrollReveal";
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -50,58 +49,14 @@ function Reveal({ children, className, delay = 0 }: {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// ── Mouse-following radial glow ──────────────────────────────────────────────
+// ── Lightweight hero atmosphere ──────────────────────────────────────────────
 // ═════════════════════════════════════════════════════════════════════════════
-
-function MouseGlow() {
-  const ref = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState({ x: 50, y: 50 });
-  const [reducedMotion, setReducedMotion] = useState(false);
-
-  useEffect(() => {
-    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
-    setReducedMotion(mq.matches);
-    const mqHandler = (e: MediaQueryListEvent) => setReducedMotion(e.matches);
-    mq.addEventListener("change", mqHandler);
-    return () => mq.removeEventListener("change", mqHandler);
-  }, []);
-
-  useEffect(() => {
-    if (reducedMotion) return;
-    const handleMouse = (e: MouseEvent) => {
-      const x = (e.clientX / window.innerWidth) * 100;
-      const y = (e.clientY / window.innerHeight) * 100;
-      setPos({ x, y });
-    };
-    window.addEventListener("mousemove", handleMouse, { passive: true });
-    return () => window.removeEventListener("mousemove", handleMouse);
-  }, [reducedMotion]);
-
-  return (
-    <div
-      ref={ref}
-      className="absolute pointer-events-none select-none"
-      style={{
-        left: `${pos.x}%`,
-        top: `${pos.y}%`,
-        width: 400,
-        height: 400,
-        transform: "translate(-50%, -50%)",
-        background: "radial-gradient(circle, rgba(59,110,240,0.15) 0%, transparent 60%)",
-        filter: "blur(60px)",
-        transition: "left 0.8s cubic-bezier(0.16,1,0.3,1), top 0.8s cubic-bezier(0.16,1,0.3,1)",
-        willChange: "left, top",
-        zIndex: 1,
-      }}
-    />
-  );
-}
 
 // ═════════════════════════════════════════════════════════════════════════════
 // ── Floating particles ───────────────────────────────────────────────────────
 // ═════════════════════════════════════════════════════════════════════════════
 
-function FloatingParticles({ count = 20 }: { count?: number }) {
+function FloatingParticles({ count = 8 }: { count?: number }) {
   const particles = Array.from({ length: count }, (_, i) => ({
     id: i,
     left: `${(i * 17 + 7) % 100}%`,
@@ -115,14 +70,14 @@ function FloatingParticles({ count = 20 }: { count?: number }) {
       {particles.map((p) => (
         <div
           key={p.id}
-          className="absolute rounded-full bg-white/20"
+          data-hero-particle={p.id}
+          className="landing-hero__particle absolute rounded-full bg-white/20"
           style={{
             left: p.left,
             bottom: "-5%",
             width: p.size,
             height: p.size,
             animation: `particle-float ${p.dur}s linear ${p.delay} infinite`,
-            filter: "blur(0.5px)",
           }}
         />
       ))}
@@ -147,20 +102,10 @@ function HeroRouteLines({ reducedMotion = false }: { reducedMotion?: boolean }) 
       delay: "2s", dur: "5s", total: "22s",
       color: "rgba(59,110,240,0.35)", dash: "4 10", width: 1.2,
     },
-    {
-      d: "M200 800 C 400 650, 600 700, 800 600 S 1000 500, 1200 650 S 1400 550, 1500 600",
-      delay: "3.5s", dur: "6s", total: "25s",
-      color: "rgba(56,189,248,0.3)", dash: "3 12", width: 1,
-    },
-    {
-      d: "M300 -50 C 350 100, 400 250, 350 400 S 300 550, 400 700 S 450 800, 400 950",
-      delay: "1.2s", dur: "7s", total: "20s",
-      color: "rgba(200,150,12,0.25)", dash: "5 12", width: 1,
-    },
   ];
 
   return (
-    <div className="absolute inset-0 pointer-events-none overflow-hidden opacity-20" aria-hidden="true">
+      <div className="landing-hero__routes absolute inset-0 pointer-events-none overflow-hidden opacity-20" aria-hidden="true">
       <svg className="w-full h-full" viewBox="0 0 1440 900" preserveAspectRatio="xMidYMid slice">
         {LINES.map((line, i) => (
           <g key={i}>
@@ -170,7 +115,7 @@ function HeroRouteLines({ reducedMotion = false }: { reducedMotion?: boolean }) 
               stroke={line.color}
               strokeWidth={line.width}
               strokeDasharray={line.dash}
-              className={reducedMotion ? undefined : "animate-route-draw-loop"}
+              className={reducedMotion ? undefined : `animate-route-draw-loop ${i === 1 ? "landing-hero__route-secondary" : "landing-hero__route-primary"}`}
               style={{
                 animationDelay: line.delay,
                 animationDuration: line.total,
@@ -181,7 +126,6 @@ function HeroRouteLines({ reducedMotion = false }: { reducedMotion?: boolean }) 
         {/* Route nodes (dots at intersections) */}
         <circle cx="600" cy="300" r="2.5" fill="rgba(200,150,12,0.5)" className={reducedMotion ? undefined : "animate-pulse-ring-soft"} style={{ animationDelay: "1s" }} />
         <circle cx="900" cy="500" r="2" fill="rgba(59,110,240,0.5)" className={reducedMotion ? undefined : "animate-pulse-ring-soft"} style={{ animationDelay: "2.5s" }} />
-        <circle cx="400" cy="700" r="2.5" fill="rgba(56,189,248,0.4)" className={reducedMotion ? undefined : "animate-pulse-ring-soft"} style={{ animationDelay: "4s" }} />
       </svg>
     </div>
   );
@@ -193,9 +137,12 @@ function HeroRouteLines({ reducedMotion = false }: { reducedMotion?: boolean }) 
 
 function WavyDivider({ fill = "#071440" }: { fill?: string }) {
   return (
-    <div className="relative w-full pointer-events-none select-none" style={{ height: 90, marginBottom: 0 }}>
-      <svg viewBox="0 0 1440 90" preserveAspectRatio="none" className="absolute inset-0 w-full h-full" aria-hidden="true">
+    <div className="pointer-events-none relative h-[54px] w-full select-none md:h-[90px]" style={{ marginBottom: 0 }}>
+      <svg viewBox="0 0 1440 90" preserveAspectRatio="none" className="absolute inset-0 hidden h-full w-full md:block" aria-hidden="true">
         <path d="M0,55 C80,25 160,72 260,44 C360,16 440,68 540,40 C640,12 730,62 840,36 C950,10 1040,60 1140,34 C1240,8 1340,52 1390,36 L1440,30 L1440,90 L0,90 Z" fill={fill} />
+      </svg>
+      <svg viewBox="0 0 360 56" preserveAspectRatio="none" className="absolute inset-0 h-full w-full md:hidden" aria-hidden="true">
+        <path d="M0 34 C58 19 112 43 176 34 C242 25 300 23 360 31 L360 56 L0 56 Z" fill={fill} />
       </svg>
     </div>
   );
@@ -1186,8 +1133,8 @@ function LandingMapPreview() {
             backgroundSize: "32px 32px",
           }}
         />
-        <div className="absolute -left-12 bottom-8 h-36 w-36 rounded-full bg-cyan-400/10 blur-3xl" />
-        <div className="absolute -right-8 top-10 h-44 w-44 rounded-full bg-accent/10 blur-3xl" />
+        <div className="landing-map-preview__glow landing-map-preview__glow--cyan absolute -left-12 bottom-8 h-36 w-36 rounded-full" />
+        <div className="landing-map-preview__glow landing-map-preview__glow--gold absolute -right-8 top-10 h-44 w-44 rounded-full" />
 
         <svg
           aria-hidden="true"
@@ -1230,7 +1177,7 @@ function LandingMapPreview() {
         <div
           data-testid="map-start-callout"
           data-callout-placement="above-start-marker"
-          className="absolute left-[7%] top-[45%] rounded-xl border border-blue-200/30 bg-blue-500/25 px-3 py-2 text-white shadow-lg backdrop-blur-sm"
+          className="absolute left-[7%] top-[45%] rounded-xl border border-blue-200/30 bg-[#10285f]/90 px-3 py-2 text-white shadow-lg"
         >
           <span className="block text-[10px] font-extrabold uppercase tracking-[.16em] text-blue-100">Building A</span>
           <span className="mt-1 block text-[10px] text-white/60">Your starting point</span>
@@ -1238,13 +1185,13 @@ function LandingMapPreview() {
         <div
           data-testid="map-end-callout"
           data-callout-placement="above-end-marker"
-          className="absolute right-[6%] top-[30%] rounded-xl border border-accent/50 bg-accent/20 px-3 py-2 text-white shadow-lg backdrop-blur-sm sm:top-[5%]"
+          className="absolute right-[6%] top-[30%] rounded-xl border border-accent/50 bg-[#302b28]/90 px-3 py-2 text-white shadow-lg sm:top-[5%]"
         >
           <span className="block text-[10px] font-extrabold uppercase tracking-[.16em] text-amber-100">Building B</span>
           <span className="mt-1 block text-[10px] text-white/80">Destination</span>
         </div>
 
-        <div className="absolute bottom-4 left-4 flex items-center gap-2 rounded-lg border border-white/10 bg-[#071440]/70 px-3 py-2 text-[10px] font-semibold text-white/70 backdrop-blur-sm">
+        <div className="absolute bottom-4 left-4 flex items-center gap-2 rounded-lg border border-white/10 bg-[#071440]/90 px-3 py-2 text-[10px] font-semibold text-white/70">
           <Navigation className="h-3.5 w-3.5 text-accent" />
           <span>Route ready to follow</span>
         </div>
@@ -1263,41 +1210,51 @@ function LandingMapPreview() {
 
 function HeroSection() {
   const reduceMotion = useReducedMotion();
-  const { scrollY } = useScroll();
-  const smoothY = useSpring(scrollY, { stiffness: 60, damping: 35, mass: 0.6 });
+  const heroRef = useRef<HTMLElement>(null);
 
-  const heroBgY      = useTransform(smoothY, [0, 900], [0, 24]);
-  const heroContentY = useTransform(smoothY, [0, 900], [0, -28]);
-  const heroLogoY    = useTransform(smoothY, [0, 900], [0, -12]);
-  const heroOpacity  = useTransform(smoothY, [0, 900], [1, 0.9]);
+  useEffect(() => {
+    const syncVisibility = () => {
+      if (heroRef.current) {
+        heroRef.current.dataset.documentHidden = String(document.visibilityState === "hidden");
+      }
+    };
+
+    const hero = heroRef.current;
+    syncVisibility();
+    document.addEventListener("visibilitychange", syncVisibility);
+
+    const observer = typeof IntersectionObserver === "undefined"
+      ? null
+      : new IntersectionObserver(([entry]) => {
+          if (hero) hero.dataset.heroVisible = String(entry.isIntersecting);
+        });
+    if (hero) observer?.observe(hero);
+
+    return () => {
+      document.removeEventListener("visibilitychange", syncVisibility);
+      observer?.disconnect();
+    };
+  }, []);
 
   return (
     <section
+      ref={heroRef}
       id="landing-hero"
       data-testid="landing-hero"
+      data-hero-background="stable-navy"
+      data-document-hidden="false"
+      data-hero-visible="true"
       data-scroll-behavior="subtle"
       data-mobile-nav-aware="true"
-      className="relative isolate flex min-h-0 items-center justify-center overflow-hidden pb-[calc(1rem+env(safe-area-inset-bottom,0px))] pt-4 sm:py-12 lg:min-h-[820px] lg:py-28 lg:pb-28"
+      className="landing-hero relative isolate flex min-h-0 items-center justify-center overflow-hidden bg-[#071440] pb-[calc(1rem+env(safe-area-inset-bottom,0px))] pt-4 sm:py-12 lg:min-h-[820px] lg:py-28 lg:pb-28"
       aria-labelledby="landing-hero-heading"
     >
-      {/* ── Animated gradient background — slow shift ── */}
-      <motion.div
-        className="absolute inset-0"
-        style={{ y: reduceMotion ? 0 : heroBgY }}
-      >
-        <div className={`absolute inset-0 ${reduceMotion ? "" : "animate-gradient-shift"}`} style={{
-          background: `
-            radial-gradient(ellipse 90% 70% at 50% 35%, #0d2470 0%, #071440 50%, #020a1c 100%),
-            linear-gradient(135deg, rgba(59,110,240,0.08) 0%, transparent 30%, rgba(200,150,12,0.05) 60%, transparent 100%)
-          `,
-          backgroundBlendMode: "overlay",
-          backgroundSize: "200% 200%",
-        }} />
-      </motion.div>
+      {/* Opaque navy base stays painted beneath every decorative and responsive layer. */}
+      <div className="landing-hero__base absolute inset-0" aria-hidden="true" />
 
-      {/* ── Grid overlay — pulsing subtly ── */}
+      {/* Static grid texture: preserve the atmosphere without repainting the full hero. */}
       <div
-        className={`absolute inset-0 pointer-events-none ${reduceMotion ? "" : "animate-grid-pulse"}`}
+        className="landing-hero__grid absolute inset-0 pointer-events-none"
         style={{
           backgroundImage: `
             linear-gradient(rgba(255,255,255,0.04) 1px, transparent 1px),
@@ -1307,20 +1264,21 @@ function HeroSection() {
         }}
       />
 
-      {/* ── Cursor-interactive lava lamp blobs ── */}
-      {!reduceMotion && <LavaLampBackground />}
+      <div className="landing-hero__ambient landing-hero__ambient--blue absolute pointer-events-none" aria-hidden="true" />
+      <div className="landing-hero__ambient landing-hero__ambient--gold absolute pointer-events-none" aria-hidden="true" />
 
       {/* ── Animated route lines ── */}
       <HeroRouteLines reducedMotion={Boolean(reduceMotion)} />
 
       {/* ── Floating particles ── */}
-      {!reduceMotion && <FloatingParticles count={16} />}
+      {!reduceMotion && <FloatingParticles count={8} />}
 
       {/* ── Floating decorative shapes ── */}
       {FLOATING_SHAPES.map(({ Icon, size, startX, startY, dur, delay, rotate, opacity }, i) => (
         <div
           key={i}
-          className="absolute pointer-events-none select-none"
+          data-hero-shape={i}
+          className="landing-hero__shape absolute pointer-events-none select-none"
           style={{
             left: startX, top: startY,
             color: SHAPE_COLORS[i % SHAPE_COLORS.length],
@@ -1332,7 +1290,6 @@ function HeroSection() {
               size={size}
               strokeWidth={1.5}
               style={{
-                filter: "blur(1px)",
                 transform: rotate ? undefined : "rotate(var(--r, 0deg))",
               }}
             />
@@ -1340,48 +1297,12 @@ function HeroSection() {
         </div>
       ))}
 
-      {/* ── Mouse-following radial glow ── */}
-      <MouseGlow />
-
-      {/* ── Aurora blobs ── */}
-      <div
-        className={`absolute pointer-events-none ${reduceMotion ? "" : "animate-aurora-1"}`}
-        style={{
-          top: "10%", left: "52%",
-          width: 620, height: 500,
-          background: "radial-gradient(ellipse, rgba(59,110,240,0.38) 0%, transparent 65%)",
-          filter: "blur(72px)",
-          transform: "translateX(-50%) translateY(-50%)",
-        }}
-      />
-      <div
-        className={`absolute pointer-events-none ${reduceMotion ? "" : "animate-aurora-2"}`}
-        style={{
-          bottom: "5%", left: "10%",
-          width: 460, height: 400,
-          background: "radial-gradient(ellipse, rgba(200,150,12,0.28) 0%, transparent 62%)",
-          filter: "blur(60px)",
-        }}
-      />
-      <div
-        className={`absolute pointer-events-none ${reduceMotion ? "" : "animate-aurora-3"}`}
-        style={{
-          top: "45%", right: "8%",
-          width: 380, height: 360,
-          background: "radial-gradient(ellipse, rgba(80,200,240,0.20) 0%, transparent 66%)",
-          filter: "blur(56px)",
-        }}
-      />
-
       {/* ── HERO CONTENT ── */}
-      <motion.div
-        className="relative z-10 mx-auto grid w-full max-w-7xl grid-cols-1 items-center gap-8 px-5 py-12 sm:gap-10 sm:px-10 sm:py-16 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] lg:gap-14 lg:px-12 lg:py-0"
-        style={{ y: reduceMotion ? 0 : heroContentY, opacity: reduceMotion ? 1 : heroOpacity }}
-      >
-        <div className="min-w-0 text-left">
+      <div className="relative z-10 mx-auto grid w-full max-w-7xl grid-cols-1 items-center gap-8 px-5 py-12 sm:gap-10 sm:px-10 sm:py-16 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] lg:gap-14 lg:px-12 lg:py-0">
+        <div className="min-w-0 text-center lg:text-left">
         {/* PLV badge */}
         <div
-          className="inline-flex items-center gap-2.5 px-4 py-2 rounded-full bg-white/8 border mb-8 animate-fade-in animate-border-glow"
+          className="mx-auto mb-6 inline-flex items-center justify-center gap-2.5 rounded-full border bg-white/8 px-3.5 py-2 text-center animate-fade-in animate-border-glow sm:mb-8 sm:px-4 lg:mx-0 lg:justify-start"
           style={{ borderColor: "rgba(200,150,12,0.45)" }}
         >
           <PLVLogo size={20} />
@@ -1391,34 +1312,32 @@ function HeroSection() {
         </div>
 
         {/* PLV Seal — neon gold ring glow */}
-        <motion.div
+        <div
           data-testid="hero-seal"
-          className="relative mt-2 mb-8 flex h-36 w-36 items-center justify-center select-none"
-          style={{ y: reduceMotion ? 0 : heroLogoY }}
+          className="relative mx-auto mt-2 mb-6 flex h-32 w-32 items-center justify-center select-none sm:mb-8 sm:h-36 sm:w-36 lg:mx-0"
         >
           <div
             data-testid="hero-seal-halo"
-            className="absolute inset-0 rounded-full animate-neon-gold"
-            style={{ background: "radial-gradient(circle, rgba(200,150,12,0.22) 0%, transparent 70%)", filter: "blur(18px)" }}
+            className="landing-hero__seal-halo absolute inset-0 rounded-full"
           />
-          <div data-testid="hero-seal-ring" className="absolute inset-2 rounded-full border border-accent/30 animate-border-glow" />
-          <PLVLogo size={78} className="relative z-10 shadow-2xl animate-hero-breathe" />
-        </motion.div>
+          <div data-testid="hero-seal-ring" className="landing-hero__seal-ring absolute inset-2 rounded-full border border-accent/30" />
+          <PLVLogo size={78} className="landing-hero__seal-logo relative z-10 shadow-2xl" />
+        </div>
 
         {/* Headline */}
         <h1
           id="landing-hero-heading"
-          className="max-w-xl font-extrabold leading-[1.04] tracking-tight text-white animate-slide-up delay-100"
+          className="mx-auto max-w-xl font-extrabold leading-[1.04] tracking-tight text-white animate-slide-up delay-100 lg:mx-0"
           style={{ fontSize: "clamp(2.8rem, 6vw, 5.4rem)" }}
         >
           Navigate PLV <span className="text-accent">Smarter</span>
         </h1>
 
         {/* NaviSync badge */}
-        <div className="mt-5 flex items-center justify-start gap-2 mb-6 animate-slide-up delay-150">
+        <div className="mt-5 mb-6 flex items-center justify-center gap-2 animate-slide-up delay-150 lg:justify-start">
           <span className="text-white/30 text-sm font-medium">powered by</span>
           <span
-            className="font-extrabold tracking-wider px-3 py-1 rounded-full border bg-accent/15 animate-neon-gold"
+            className="landing-hero__brand-pill font-extrabold tracking-wider px-3 py-1 rounded-full border bg-accent/15"
             style={{
               color: "#e0a820",
               fontSize: "clamp(1rem, 2.5vw, 1.3rem)",
@@ -1430,12 +1349,12 @@ function HeroSection() {
         </div>
 
         {/* Tagline */}
-        <p className="max-w-lg text-base leading-relaxed text-white/60 mb-7 animate-slide-up delay-200 sm:text-lg">
+        <p className="mx-auto mb-7 max-w-lg text-base leading-relaxed text-white/60 animate-slide-up delay-200 sm:text-lg lg:mx-0">
           Find any building, plan a walking route, and move through campus with more confidence.
         </p>
 
         {/* CTAs — enhanced hover effects */}
-        <div className="flex flex-wrap justify-start gap-3 animate-slide-up delay-300">
+        <div className="flex flex-wrap justify-center gap-3 animate-slide-up delay-300 lg:justify-start">
           <motion.div whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.96 }} transition={{ type: "spring", stiffness: 400, damping: 10 }}>
             <Link
               to="/map"
@@ -1459,7 +1378,7 @@ function HeroSection() {
           </motion.div>
         </div>
 
-        <div className="mt-10 grid max-w-xl grid-cols-3 gap-3 border-t border-white/10 pt-5 text-left">
+        <div className="mx-auto mt-8 grid max-w-xl grid-cols-3 gap-2 border-t border-white/10 pt-5 text-center lg:mx-0 lg:mt-10 lg:gap-3 lg:text-left">
           <div>
             <p className="text-sm font-extrabold text-white">Campus-wide</p>
             <p className="mt-1 text-[11px] text-white/45">places to find</p>
@@ -1485,7 +1404,7 @@ function HeroSection() {
             <span className="hidden font-mono uppercase tracking-[.15em] text-white/35 sm:inline">NVS / 01</span>
           </div>
         </div>
-      </motion.div>
+      </div>
 
       {/* Wave divider */}
       <div className="absolute bottom-0 left-0 right-0 pointer-events-none">
@@ -1579,7 +1498,7 @@ function FinalCTA() {
     <>
       <WavyDivider fill="#071440" />
 
-      <section id="landing-final-cta" className="scroll-mt-8 py-20 lg:py-24 relative overflow-hidden" style={{ marginTop: "-1px" }}>
+      <section id="landing-final-cta" data-mobile-nav-aware="true" className="relative scroll-mt-8 overflow-hidden px-0 py-12 sm:py-16 lg:py-24" style={{ marginTop: "-1px" }}>
         {/* Dark gradient */}
         <div className="absolute inset-0" style={{
           background: "linear-gradient(to bottom, #071440 0%, #071440 8%, transparent 35%), radial-gradient(ellipse 90% 70% at 50% 40%, #0d2470 0%, #071440 55%, #020a1c 100%)",
@@ -1628,16 +1547,16 @@ function FinalCTA() {
           }}
         />
 
-        <Reveal className="relative max-w-2xl mx-auto px-5 sm:px-7 text-center">
-          <PLVLogo size={60} className="mx-auto mb-7 shadow-2xl animate-hero-breathe" />
-          <h2 className="text-2xl sm:text-3xl font-extrabold text-white mb-4 leading-tight">
+        <Reveal className="relative mx-auto flex max-w-2xl flex-col items-center px-5 text-center sm:px-7">
+          <PLVLogo size={60} className="mx-auto mb-5 shadow-2xl animate-hero-breathe sm:mb-7" />
+          <h2 className="mb-3 text-2xl font-extrabold leading-tight text-white sm:mb-4 sm:text-3xl">
             Ready to explore PLV?
           </h2>
-          <p className="text-white/45 text-sm mb-8 max-w-sm mx-auto">
+          <p className="mx-auto mb-6 max-w-sm text-sm leading-relaxed text-white/55 sm:mb-8">
             Open the interactive campus map and navigate every building, route, and facility.
           </p>
 
-          <div className="flex justify-center">
+          <div className="flex w-full justify-center">
             <motion.div whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.96 }}>
               <Link
                 to="/map"

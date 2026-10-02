@@ -39,14 +39,43 @@ describe("RouteMapOverlay direction arrows", () => {
     expect(arrows[0]).not.toHaveAttribute("transform", expect.stringContaining("NaN"));
   });
 
-  it("keeps the route and directional arrows visible without route animation", () => {
+  it("keeps the short route reveal while leaving arrow motion off when disabled", () => {
     const { container } = render(
       <svg>
         <RouteMapOverlay points={[{ x: 0, y: 0 }, { x: 0, y: 10 }]} mode="standard" animated={false} />
       </svg>,
     );
     expect(screen.getByTestId("route-direction-arrow")).toBeInTheDocument();
-    expect(container.querySelector("polyline[stroke-dasharray='none']")).toBeInTheDocument();
-    expect(container.querySelector("[style*='animation']")).toBeNull();
+    expect(container.querySelector("polyline[stroke-dasharray='1']")).toBeInTheDocument();
+    expect(screen.getByTestId("route-direction-arrow").style.animation).toBe("");
+    expect(container.querySelector("[style*='420ms']")).toBeInTheDocument();
+    expect(container.querySelector("animate")).toBeNull();
+    expect(container.querySelector("[style*='dash-flow']")).toBeNull();
+  });
+
+  it("reveals a route once and keeps directional arrows brief", () => {
+    render(
+      <svg>
+        <RouteMapOverlay points={[{ x: 0, y: 0 }, { x: 10, y: 10 }]} mode="standard" animated />
+      </svg>,
+    );
+    expect(screen.getByTestId("route-direction-arrow").getAttribute("style")).toContain("320ms");
+  });
+
+  it("renders a standard route in blue and reserves red route strokes for SOS mode", () => {
+    const { container, rerender } = render(
+      <svg>
+        <RouteMapOverlay points={[{ x: 0, y: 0 }, { x: 0, y: 10 }]} mode="standard" animated={false} />
+      </svg>,
+    );
+    expect(container.querySelector('polyline[stroke="#1e40af"]')).toBeInTheDocument();
+    expect(container.querySelector('polyline[stroke="#dc2626"]')).not.toBeInTheDocument();
+
+    rerender(
+      <svg>
+        <RouteMapOverlay points={[{ x: 0, y: 0 }, { x: 0, y: 10 }]} mode="emergency" animated={false} />
+      </svg>,
+    );
+    expect(container.querySelector('polyline[stroke="#dc2626"]')).toBeInTheDocument();
   });
 });
