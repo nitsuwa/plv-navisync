@@ -1,9 +1,9 @@
 import {
   Navigation, Flag, Footprints, ArrowUp, MoveVertical, DoorOpen,
-  CircleCheck, Info, Maximize2, Accessibility, RotateCcw,
+  CircleCheck, Info, Maximize2, RotateCcw,
 } from "lucide-react";
 import type { PlannedRoute, RouteMode, RouteStepIcon } from "../../lib/routePlanner";
-import { formatDistance, formatMinutes } from "../../lib/routePlanner";
+import { formatDistance } from "../../lib/routePlanner";
 import { cn } from "../../lib/utils";
 
 interface RouteStepsPanelProps {
@@ -143,25 +143,6 @@ export function RouteStepsPanel({
         <Navigation className="h-3.5 w-3.5 text-white shrink-0" />
         <span data-testid="route-destination" className={cn("text-[11px] font-extrabold text-white truncate flex-1", compact && "text-[10px]")}>To {toName}</span>
         <span className="w-1.5 h-1.5 rounded-full bg-green-300 animate-pulse shrink-0" />
-      </div>
-
-      {/* Stats row: distance, time, mode */}
-      <div className={cn("flex gap-2 px-3 pt-2.5 pb-2 border-b border-border", compact && "gap-1 px-2 pt-2 pb-1.5")}>
-        <div className={cn("flex-1 px-2 py-1.5 rounded-lg bg-primary/8 text-center", compact && "px-1.5 py-1")}>
-          <p className="text-[10px] text-muted-foreground font-bold uppercase tracking-wider">Dist</p>
-          <p className={cn("text-sm font-extrabold text-foreground", compact && "text-xs")}>{formatDistance(route.dist)}</p>
-        </div>
-        <div className={cn("flex-1 px-2 py-1.5 rounded-lg bg-primary/8 text-center", compact && "px-1.5 py-1")}>
-          <p className="text-[10px] text-muted-foreground font-bold uppercase tracking-wider">Time</p>
-          <p className={cn("text-sm font-extrabold text-foreground", compact && "text-xs")}>{formatMinutes(route.mins)}</p>
-        </div>
-        <div className={cn("flex-1 px-2 py-1.5 rounded-lg bg-primary/8 text-center", compact && "px-1.5 py-1")}>
-          <p className="text-[10px] text-muted-foreground font-bold uppercase tracking-wider">Via</p>
-          <p className={cn("text-sm font-extrabold text-foreground", compact && "text-xs")}>
-            {mode === "accessible" ? <Accessibility className="h-4 w-4 inline-block align-middle" /> :
-             mode === "emergency" ? "SOS" : "Walk"}
-          </p>
-        </div>
       </div>
 
       <p data-testid="active-route-source" className={cn("px-3 pt-2 text-[9px] font-semibold text-muted-foreground", compact && "px-2 pt-1.5 text-[8px]")}>

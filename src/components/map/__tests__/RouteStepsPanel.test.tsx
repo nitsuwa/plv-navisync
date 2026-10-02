@@ -36,6 +36,9 @@ describe("RouteStepsPanel", () => {
     expect(screen.getAllByText(transition)).toHaveLength(1);
     expect(screen.getByText("Follow the indoor path to the Left Stair.")).toBeInTheDocument();
     expect(screen.queryByText(/waypoint/i)).not.toBeInTheDocument();
+    expect(screen.queryByText("Dist")).not.toBeInTheDocument();
+    expect(screen.queryByText("Time")).not.toBeInTheDocument();
+    expect(screen.queryByText("Via")).not.toBeInTheDocument();
   });
 
   it("turns legacy waypoint placeholders into directions students can follow", () => {
