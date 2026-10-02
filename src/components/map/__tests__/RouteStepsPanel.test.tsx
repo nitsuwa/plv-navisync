@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { RouteStepsPanel } from "../RouteStepsPanel";
 import type { PlannedRoute } from "../../../lib/routePlanner";
@@ -72,5 +72,39 @@ describe("RouteStepsPanel", () => {
     expect(screen.getByText("Follow the highlighted path for 18 m.")).toBeInTheDocument();
     expect(screen.getByText("Continue along the connected indoor path.")).toBeInTheDocument();
     expect(screen.queryByText(/waypoint/i)).not.toBeInTheDocument();
+  });
+
+  it("lets the compact mobile panel resize with the drag handle or keyboard", () => {
+    const route: PlannedRoute = {
+      points: [],
+      dist: 26,
+      mins: 1,
+      steps: [{ id: "start", icon: "start", instruction: "Start from Door" }],
+      isGraphBased: true,
+      mode: "standard",
+      fromCode: "Door",
+      toCode: "Room",
+      transitions: [],
+    };
+
+    render(
+      <RouteStepsPanel
+        route={route}
+        mode="standard"
+        toName="Room"
+        compact
+        onEnd={() => undefined}
+        onZoom={() => undefined}
+      />,
+    );
+
+    const handle = screen.getByRole("slider", { name: "Resize route panel" });
+    expect(handle).toHaveAttribute("aria-valuenow", "300");
+    fireEvent.keyDown(handle, { key: "ArrowUp" });
+    expect(handle).toHaveAttribute("aria-valuenow", "332");
+    fireEvent.pointerDown(handle, { pointerId: 1, clientY: 400 });
+    fireEvent.pointerMove(handle, { pointerId: 1, clientY: 250 });
+    fireEvent.pointerUp(handle, { pointerId: 1, clientY: 250 });
+    expect(handle).toHaveAttribute("aria-valuenow", "482");
   });
 });
