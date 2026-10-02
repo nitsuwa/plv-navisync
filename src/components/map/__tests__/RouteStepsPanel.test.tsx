@@ -108,4 +108,40 @@ describe("RouteStepsPanel", () => {
     fireEvent.pointerUp(handle, { pointerId: 1, clientY: 250 });
     expect(handle).toHaveAttribute("aria-valuenow", "482");
   });
+
+  it.each([
+    { label: "mobile", compact: true },
+    { label: "laptop", compact: false },
+  ])("lets the $label route panel move by dragging its header", ({ compact }) => {
+    const route: PlannedRoute = {
+      points: [],
+      dist: 26,
+      mins: 1,
+      steps: [{ id: "start", icon: "start", instruction: "Start from Door" }],
+      isGraphBased: true,
+      mode: "standard",
+      fromCode: "Door",
+      toCode: "Room",
+      transitions: [],
+    };
+
+    render(
+      <RouteStepsPanel
+        route={route}
+        mode="standard"
+        toName="Room"
+        compact={compact}
+        onEnd={() => undefined}
+        onZoom={() => undefined}
+      />,
+    );
+
+    const panel = screen.getByTestId("route-steps-panel");
+    const dragHandle = screen.getByTestId("route-panel-drag-handle");
+    fireEvent.pointerDown(dragHandle, { pointerId: 2, clientX: 100, clientY: 200, button: 0 });
+    fireEvent.pointerMove(dragHandle, { pointerId: 2, clientX: 145, clientY: 250 });
+    fireEvent.pointerUp(dragHandle, { pointerId: 2, clientX: 145, clientY: 250 });
+
+    expect(panel).toHaveStyle({ transform: "translate3d(45px, 50px, 0)" });
+  });
 });

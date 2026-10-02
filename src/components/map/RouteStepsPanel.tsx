@@ -120,7 +120,10 @@ export function RouteStepsPanel({
   route, mode, toName, onEnd, onZoom, walkProgress, onReplay, activeLeg, compact = false,
 }: RouteStepsPanelProps) {
   const [mobilePanelHeight, setMobilePanelHeight] = useState(MOBILE_PANEL_DEFAULT_HEIGHT);
+  const [panelOffset, setPanelOffset] = useState({ x: 0, y: 0 });
+  const panelRef = useRef<HTMLDivElement>(null);
   const resizeStartRef = useRef<{ y: number; height: number } | null>(null);
+  const dragStartRef = useRef<{ x: number; y: number; offset: { x: number; y: number } } | null>(null);
   const hasActiveLegSteps = Boolean(activeLeg?.steps.length);
   const steps = hasActiveLegSteps ? activeLeg!.steps : route.steps;
   const trackedProgress = activeLeg?.progress ?? walkProgress;
@@ -170,11 +173,40 @@ export function RouteStepsPanel({
       setMobilePanelHeight(MOBILE_PANEL_MAX_HEIGHT);
     }
   };
+  const handleDragPointerDown = (event: PointerEvent<HTMLDivElement>) => {
+    if (event.pointerType === "mouse" && event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    dragStartRef.current = { x: event.clientX, y: event.clientY, offset: panelOffset };
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+  };
+  const handleDragPointerMove = (event: PointerEvent<HTMLDivElement>) => {
+    const start = dragStartRef.current;
+    if (!start) return;
+    event.preventDefault();
+    event.stopPropagation();
+
+    let nextX = start.offset.x + event.clientX - start.x;
+    let nextY = start.offset.y + event.clientY - start.y;
+    const rect = panelRef.current?.getBoundingClientRect();
+    if (rect && rect.width > 0 && rect.height > 0 && typeof window !== "undefined" && window.innerWidth > 0 && window.innerHeight > 0) {
+      const baseLeft = rect.left - start.offset.x;
+      const baseTop = rect.top - start.offset.y;
+      nextX = Math.max(8 - baseLeft, Math.min(window.innerWidth - rect.width - 8 - baseLeft, nextX));
+      nextY = Math.max(8 - baseTop, Math.min(window.innerHeight - rect.height - 8 - baseTop, nextY));
+    }
+    setPanelOffset({ x: nextX, y: nextY });
+  };
+  const handleDragPointerEnd = (event: PointerEvent<HTMLDivElement>) => {
+    dragStartRef.current = null;
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+  };
 
   return (
     <div
+      ref={panelRef}
       className={cn(
-        "rounded-2xl border border-border/60 shadow-xl overflow-hidden animate-slide-up",
+        "rounded-2xl border border-border/60 shadow-xl overflow-hidden will-change-transform",
         compact && "flex min-h-0 flex-col rounded-xl",
       )}
       role="region"
@@ -184,6 +216,7 @@ export function RouteStepsPanel({
         background: "var(--card)",
         backdropFilter: "blur(16px)",
         WebkitBackdropFilter: "blur(16px)",
+        transform: `translate3d(${panelOffset.x}px, ${panelOffset.y}px, 0)`,
         ...(compact ? { height: `${mobilePanelHeight}px`, maxHeight: "calc(100dvh - 8rem)" } : {}),
       }}>
       {compact && (
@@ -207,7 +240,16 @@ export function RouteStepsPanel({
         </div>
       )}
       {/* Header — destination name + live indicator */}
-      <div className={cn("flex items-center gap-2 px-3 py-2", compact && "gap-1.5 px-2.5 py-1.5")} style={{ background: modeColor }}>
+      <div
+        data-testid="route-panel-drag-handle"
+        title="Drag to move route panel"
+        className={cn("flex cursor-grab touch-none select-none items-center gap-2 px-3 py-2 active:cursor-grabbing", compact && "gap-1.5 px-2.5 py-1.5")}
+        onPointerDown={handleDragPointerDown}
+        onPointerMove={handleDragPointerMove}
+        onPointerUp={handleDragPointerEnd}
+        onPointerCancel={handleDragPointerEnd}
+        style={{ background: modeColor }}
+      >
         <Navigation className="h-3.5 w-3.5 text-white shrink-0" />
         <span data-testid="route-destination" className={cn("text-[11px] font-extrabold text-white truncate flex-1", compact && "text-[10px]")}>To {toName}</span>
         <span className="w-1.5 h-1.5 rounded-full bg-green-300 animate-pulse shrink-0" />
