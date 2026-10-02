@@ -19,6 +19,7 @@ const STATUS_DOT = { Open: "bg-green-500", Busy: "bg-amber-500", Closed: "bg-red
 
 interface BuildingInfoPanelProps {
   selected: Building;
+  campusId?: string;
   onClose: () => void;
   onDirections: (b: Building) => void;
   onFloorPlan: (b: Building) => void;
@@ -39,7 +40,7 @@ interface BuildingInfoPanelProps {
 }
 
 export function BuildingInfoPanel({
-  selected, onClose, onDirections, onFloorPlan,
+  selected, campusId, onClose, onDirections, onFloorPlan,
   isFloorMode, floorBuildingId, saved, studentAuth, onToggleSave, onReport,
   onSignInPrompt, showQR, onToggleQR, hasFloorPlans, floorPlanCount,
   facilities, accessibility, route,
@@ -250,7 +251,7 @@ export function BuildingInfoPanel({
           {showQR && (
             <div className="mt-3 flex flex-col items-center gap-2 p-4 rounded-xl bg-muted border border-border animate-scale-in">
               <div className="text-foreground">
-                <LocationQR buildingId={selected.id} buildingName={selected.name} />
+                <LocationQR buildingId={selected.id} buildingName={selected.name} campusId={campusId} />
               </div>
             </div>
           )}

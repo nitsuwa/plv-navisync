@@ -30,6 +30,7 @@ import {
   type RouteSegment,
 } from "./combinedPathfinding";
 import { exteriorFloorPointToCampusWorld } from "./exteriorApproachNavigation";
+import { filterRoutineNavigationEdges, filterRoutineNavigationNodes } from "./routineNavigationGraph";
 import {
   reconcileRoomDoorEdges,
   ROOM_DOOR_EDGE_TYPE,
@@ -647,7 +648,7 @@ export function planAuthoredDestinationRoute(
   mode: RouteMode,
   graph?: CampusNavGraph | null,
 ): PlannedRoute | null {
-  const campusGraph = resolveCampusGraph(graph);
+  const campusGraph = resolveCampusGraph(graph, mode);
   if (!campusGraph || !from?.buildingId || !to?.buildingId) return null;
 
   const accessibleOnly = mode === "accessible";
@@ -698,6 +699,7 @@ export function planAuthoredDestinationRoute(
   planned.campusPoints = contexts.campusPoints;
   planned.indoorSegments = contexts.indoorSegments;
   planned.transitionDetails = contexts.transitionDetails;
+  planned.steps = authoredRouteGuidanceSteps(from, to, planned, campusGraph.nodes, graph ?? undefined);
   if (to.type === "room") {
     planned.destinationRoom = {
       buildingId: to.buildingId,
@@ -713,7 +715,7 @@ export function planAuthoredDestinationRoute(
  * Resolve the campus-published nav graph (navNodes/navEdges) into the generic
  * shape expected by `findNavigationRoute`, or `null` when the campus has none.
  */
-function resolveCampusGraph(graph?: CampusNavGraph | null): {
+function resolveCampusGraph(graph?: CampusNavGraph | null, mode: RouteMode = "standard"): {
   nodes: CampusNavNode[];
   edges: CampusNavEdge[];
 } | null {
@@ -722,9 +724,16 @@ function resolveCampusGraph(graph?: CampusNavGraph | null): {
   if (graph === undefined || graph === null) return null;
   const sourceNodes = Array.isArray(graph.navNodes) ? graph.navNodes : [];
   const authoredEdges = Array.isArray(graph.navEdges) ? graph.navEdges : [];
-  const { nodes, movedNodeIds } = syncPublishedIndoorNodes(graph, sourceNodes);
+  const { nodes: syncedNodes, movedNodeIds } = syncPublishedIndoorNodes(graph, sourceNodes);
+  const nodes = mode === "emergency"
+    ? syncedNodes
+    : filterRoutineNavigationNodes(graph, syncedNodes);
+  const routableNodeIds = new Set(nodes.map((node) => node.id));
+  const availableEdges = (mode === "emergency" ? authoredEdges : filterRoutineNavigationEdges(authoredEdges))
+    .filter((edge) => routableNodeIds.has(edge.startNodeId) && routableNodeIds.has(edge.endNodeId));
   const edges = repriceMovedIndoorEdges(
-    effectiveAuthoredRouteEdges(graph, nodes, authoredEdges),
+    effectiveAuthoredRouteEdges(graph, nodes, availableEdges)
+      .filter((edge) => routableNodeIds.has(edge.startNodeId) && routableNodeIds.has(edge.endNodeId)),
     nodes,
     movedNodeIds,
   );
@@ -984,7 +993,8 @@ function authoredRouteContexts(
   const campusPoints: Pt[] = [];
   const indoorSegments: RouteIndoorSegment[] = [];
   let afterOutdoor = false;
-  for (const context of contexts) {
+  for (let contextIndex = 0; contextIndex < contexts.length; contextIndex += 1) {
+    const context = contexts[contextIndex];
     if (context.kind === "campus") {
       afterOutdoor = true;
       context.waypoints.forEach((point) => appendPoint(campusPoints, point));
@@ -992,11 +1002,31 @@ function authoredRouteContexts(
     }
     const distanceM = Number((context.rawDistance * metersPerRawUnit).toFixed(1));
     const isTargetFloor = Boolean(toFloorId && context.floorId === toFloorId);
-    const steps: RouteStep[] = context.waypoints.slice(1).map((point, index) => ({
-      id: `indoor-context-${indoorSegments.length}-${index}`,
-      icon: "walk",
-      instruction: `Continue to floor waypoint ${index + 1}`,
-    }));
+    const nextContext = contexts[contextIndex + 1];
+    const nextFloorTransition = nextContext?.kind === "floor"
+      && nextContext.buildingId === context.buildingId
+      && context.floorId !== nextContext.floorId
+      ? transitions.find((transition) =>
+          transition.fromFloorId === context.floorId
+          && transition.toFloorId === nextContext.floorId
+          && nodeById.get(transition.nodeId)?.buildingId === context.buildingId,
+        )
+      : undefined;
+    const segmentInstruction = nextFloorTransition
+      ? `Follow the indoor path to ${routePlaceLabel(nextFloorTransition.label, nextFloorTransition.kind === "elevator" ? "elevator" : "stairs")}.`
+      : !afterOutdoor && from.type === "room" && from.buildingId !== to.buildingId
+        ? "Follow the indoor path to the building exit door."
+        : to.type === "room" && context.buildingId === to.buildingId
+          ? `Follow the indoor path to the door of ${to.roomName}.`
+          : "Follow the connected indoor path.";
+    const steps: RouteStep[] = context.waypoints.length > 0
+      ? [{
+          id: `indoor-context-${indoorSegments.length}`,
+          icon: "walk",
+          instruction: segmentInstruction,
+          distanceM,
+        }]
+      : [];
     indoorSegments.push({
       buildingId: context.buildingId ?? (to.type === "room" ? to.buildingId : from.buildingId),
       floorId: context.floorId,
@@ -1009,6 +1039,142 @@ function authoredRouteContexts(
     });
   }
   return { campusPoints, indoorSegments, transitionDetails: transitions };
+}
+
+function destinationBuildingCode(destination: Destination): string {
+  return destination.type === "room"
+    ? destination.buildingCode || destination.buildingLabel
+    : destination.code || destination.label;
+}
+
+function routePlaceLabel(label: string, fallback: string): string {
+  const place = label.trim() || fallback;
+  return /^(the|a|an)\s/i.test(place) ? place : `the ${place}`;
+}
+
+function destinationFloorId(
+  destination: Destination,
+  nodes: CampusNavNode[],
+): string | undefined {
+  return destination.type === "room" ? roomFloorId(nodes, destination) : undefined;
+}
+
+function authoredRouteGuidanceSteps(
+  from: Destination,
+  to: Destination,
+  route: PlannedRoute,
+  nodes: CampusNavNode[],
+  graph?: CampusNavGraph,
+): RouteStep[] {
+  const steps: RouteStep[] = [];
+  const nodeById = new Map(nodes.map((node) => [node.id, node]));
+  const floorNumberById = new Map<string, number>();
+  for (const building of graph?.buildings ?? []) {
+    for (const floor of building.floors ?? []) {
+      if (floor.id && typeof floor.number === "number") floorNumberById.set(floor.id, floor.number);
+    }
+  }
+  for (const destination of [from, to]) {
+    if (destination.type !== "room") continue;
+    const floorId = destinationFloorId(destination, nodes);
+    if (floorId) floorNumberById.set(floorId, destination.floorNumber);
+  }
+
+  let nextStepId = 0;
+  const append = (icon: RouteStep["icon"], instruction: string, distanceM?: number) => {
+    if (steps.at(-1)?.instruction === instruction) return;
+    steps.push({ id: `guidance-${nextStepId++}`, icon, instruction, ...(distanceM === undefined ? {} : { distanceM }) });
+  };
+  const fromName = destinationBuildingCode(from);
+  const toName = destinationBuildingCode(to);
+  append("start", from.buildingId === "__point_origin__"
+    ? "You are here"
+    : from.type === "room"
+      ? `Start at the door of ${from.roomName}.`
+      : `Start at the entrance of ${fromName} building.`);
+
+  const indoorSegments = route.indoorSegments ?? [];
+  const originSegments = indoorSegments.filter((segment) => !segment.afterOutdoor);
+  const destinationSegments = indoorSegments.filter((segment) => segment.afterOutdoor);
+  const directSameBuildingRoomRoute = from.type === "room"
+    && to.type === "room"
+    && from.buildingId === to.buildingId
+    && destinationSegments.length === 0;
+  const transitionBetween = (current: RouteIndoorSegment, next: RouteIndoorSegment) =>
+    route.transitionDetails?.find((transition) =>
+      transition.fromFloorId === current.floorId
+      && transition.toFloorId === next.floorId
+      && nodeById.get(transition.nodeId)?.buildingId === current.buildingId,
+    );
+  const appendTransition = (transition: RouteTransitionDetail) => {
+    const fromFloorNumber = transition.fromFloorId ? floorNumberById.get(transition.fromFloorId) : undefined;
+    const toFloorNumber = transition.toFloorId ? floorNumberById.get(transition.toFloorId) : undefined;
+    const targetFloor = toFloorNumber === undefined
+      ? "the connected floor"
+      : toFloorNumber === 1 ? "Ground Floor" : `Floor ${toFloorNumber}`;
+    const direction = fromFloorNumber !== undefined && toFloorNumber !== undefined
+      ? toFloorNumber > fromFloorNumber ? "up" : "down"
+      : toFloorNumber === 1 ? "down" : undefined;
+    const articleLabel = routePlaceLabel(
+      transition.label,
+      transition.kind === "elevator" ? "elevator" : "stairs",
+    );
+    if (transition.kind === "elevator") {
+      append("elevator", `Take ${articleLabel} to ${targetFloor}.`);
+    } else if (direction) {
+      append("stairs", `Take ${articleLabel} ${direction} to ${targetFloor}.`);
+    } else {
+      append("stairs", `Take ${articleLabel} to ${targetFloor}.`);
+    }
+  };
+  const appendIndoorGroup = (
+    segments: RouteIndoorSegment[],
+    finalInstruction: string,
+  ) => {
+    segments.forEach((segment, index) => {
+      const next = segments[index + 1];
+      const transition = next ? transitionBetween(segment, next) : undefined;
+      const instruction = transition
+        ? `Follow the indoor path to ${routePlaceLabel(transition.label, transition.kind === "elevator" ? "elevator" : "stairs")}.`
+        : finalInstruction;
+      append("walk", instruction, segment.distanceM);
+      if (transition) appendTransition(transition);
+    });
+  };
+
+  const leavesOriginBuilding = from.type === "room"
+    && (from.buildingId !== to.buildingId || to.type === "building");
+  const originFinalInstruction = directSameBuildingRoomRoute
+    ? `Follow the indoor path to the door of ${to.type === "room" ? to.roomName : to.label}.`
+    : "Follow the indoor path to the building exit door.";
+  appendIndoorGroup(originSegments, originFinalInstruction);
+  if (leavesOriginBuilding && originSegments.length > 0) {
+    append("enter", `Exit ${fromName} building.`);
+  }
+
+  const hasCampusLeg = from.buildingId !== to.buildingId
+    || (originSegments.length > 0 && destinationSegments.length > 0);
+  const totalIndoorDistance = indoorSegments.reduce((total, segment) => total + segment.distanceM, 0);
+  if (hasCampusLeg) {
+    append("walk", `Follow the campus path to the entrance of ${toName} building.`, Math.max(0, route.dist - totalIndoorDistance));
+  }
+
+  if (destinationSegments.length > 0) {
+    append("enter", `Enter ${toName} building.`);
+    appendIndoorGroup(
+      destinationSegments,
+      to.type === "room"
+        ? `Follow the indoor path to the door of ${to.roomName}.`
+        : `Follow the indoor path through ${toName} building.`,
+    );
+  }
+
+  if (to.type === "room") {
+    append("arrive", `Arrive at ${to.roomName}.`);
+  } else {
+    append("arrive", `Arrive at the entrance of ${toName} building.`);
+  }
+  return steps;
 }
 
 /**
@@ -1032,7 +1198,7 @@ export function planBuildingRoute(
   if (!from?.id || !to?.id || from.id === to.id) return null;
 
   // 0. Published-campus nav graph (real routes for any campus with one)
-  const campusGraph = resolveCampusGraph(graph);
+  const campusGraph = resolveCampusGraph(graph, mode);
   if (campusGraph) {
     const accessibleOnly = mode === "accessible";
     const fromNodes = resolveBuildingEntranceNodes(campusGraph.nodes, from.id, from.entranceNodeId, accessibleOnly, graph, "outbound", mode === "emergency");
@@ -1105,7 +1271,7 @@ export function planRouteFromPoint(
 ): PlannedRoute | null {
   if (!fromPt || !to?.id) return null;
 
-  const campusGraph = resolveCampusGraph(graph);
+  const campusGraph = resolveCampusGraph(graph, mode);
   if (!campusGraph && mode === "accessible") return null;
   if (!campusGraph && mode === "emergency") return null;
   const nodes: CampusNavNode[] = campusGraph ? campusGraph.nodes : STATIC_NODES;
@@ -1156,7 +1322,24 @@ export function planRouteFromPoint(
     return svgFallbackFromPoint(fromPt, to, mode, positions);
   }
 
-  return toPlannedRoute(path, mode, "You are here", to.code, fromPt, campusGraph?.nodes, campusGraph?.edges, graph);
+  const planned = toPlannedRoute(path, mode, "You are here", to.code, fromPt, campusGraph?.nodes, campusGraph?.edges, graph);
+  if (planned && campusGraph) {
+    const pointOrigin: BuildingDest = {
+      type: "building",
+      buildingId: "__point_origin__",
+      label: "You are here",
+      code: "You are here",
+    };
+    const buildingDestination: BuildingDest = {
+      type: "building",
+      buildingId: to.id,
+      label: to.name,
+      code: to.code,
+      entranceNodeId: to.entranceNodeId,
+    };
+    planned.steps = authoredRouteGuidanceSteps(pointOrigin, buildingDestination, planned, campusGraph.nodes, graph ?? undefined);
+  }
+  return planned;
 }
 
 /**
@@ -1183,7 +1366,7 @@ export function planPointToDestinationRoute(
     );
   }
   if (!fromPt) return null;
-  const campusGraph = resolveCampusGraph(graph);
+  const campusGraph = resolveCampusGraph(graph, mode);
   if (!campusGraph && mode === "accessible") return null;
   if (!campusGraph) return null;
 
@@ -1234,6 +1417,7 @@ export function planPointToDestinationRoute(
   planned.campusPoints = contexts.campusPoints;
   planned.indoorSegments = contexts.indoorSegments;
   planned.transitionDetails = contexts.transitionDetails;
+  planned.steps = authoredRouteGuidanceSteps(pointOrigin, to, planned, campusGraph.nodes, graph ?? undefined);
   planned.destinationRoom = {
     buildingId: to.buildingId,
     floorNumber: to.floorNumber,
@@ -1289,7 +1473,7 @@ export function planDestinationRoute(
 ): PlannedRoute | null {
   if (!from?.buildingId || !to?.buildingId) return null;
 
-  if (resolveCampusGraph(graph)) {
+  if (resolveCampusGraph(graph, mode)) {
     return planAuthoredDestinationRoute(from, to, mode, graph);
   }
   if (mode === "accessible") return null;

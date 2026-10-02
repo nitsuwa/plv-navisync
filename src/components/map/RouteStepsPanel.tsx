@@ -1,10 +1,14 @@
 import {
   Navigation, Flag, Footprints, ArrowUp, MoveVertical, DoorOpen,
-  CircleCheck, Info, Maximize2, Accessibility, RotateCcw,
+  CircleCheck, Info, Maximize2, RotateCcw,
 } from "lucide-react";
+import { useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import type { PlannedRoute, RouteMode, RouteStepIcon } from "../../lib/routePlanner";
-import { formatDistance, formatMinutes } from "../../lib/routePlanner";
 import { cn } from "../../lib/utils";
+
+const MOBILE_PANEL_MIN_HEIGHT = 190;
+const MOBILE_PANEL_DEFAULT_HEIGHT = 300;
+const MOBILE_PANEL_MAX_HEIGHT = 560;
 
 interface RouteStepsPanelProps {
   route: PlannedRoute;
@@ -94,14 +98,29 @@ function stepDot(isFirst: boolean, isLast: boolean) {
   return "bg-card border-primary/50";
 }
 
+/** Keep internal graph-node names out of student-facing directions when a
+ * legacy or emergency route still contains a raw waypoint step. */
+function presentInstruction(instruction: string): string {
+  const trimmed = instruction.trim();
+  const floorWaypoint = trimmed.match(/^Continue to floor waypoint(?:\s+\d+)?\.?$/i);
+  if (floorWaypoint) return "Continue along the connected indoor path.";
+  const walkToWaypoint = trimmed.match(/^Walk\s+([\d.]+)\s*m\s+to\s+(?:the\s+)?waypoint(?:\s+\d+)?\.?$/i);
+  if (walkToWaypoint) return `Follow the highlighted path for ${walkToWaypoint[1]} m.`;
+  if (/^Start from (?:the )?Door\.?$/i.test(trimmed)) return "Start at the room door.";
+  return trimmed;
+}
+
 /**
- * Turn-by-turn navigation panel — shows total distance/ETA, every step with
- * an icon and distance, and floor-transition badges. Positioned by the parent
+ * Turn-by-turn navigation panel — shows every step with an icon and distance.
+ * Floor changes are included inline in the directions,
+ * so users see each transition once. Positioned by the parent
  * (desktop bottom-left card, mobile sheet).
  */
 export function RouteStepsPanel({
   route, mode, toName, onEnd, onZoom, walkProgress, onReplay, activeLeg, compact = false,
 }: RouteStepsPanelProps) {
+  const [mobilePanelHeight, setMobilePanelHeight] = useState(MOBILE_PANEL_DEFAULT_HEIGHT);
+  const resizeStartRef = useRef<{ y: number; height: number } | null>(null);
   const hasActiveLegSteps = Boolean(activeLeg?.steps.length);
   const steps = hasActiveLegSteps ? activeLeg!.steps : route.steps;
   const trackedProgress = activeLeg?.progress ?? walkProgress;
@@ -113,42 +132,85 @@ export function RouteStepsPanel({
       ? activeStepIndex(steps, trackedProgress, trackedDistance)
       : steps.length > 0 ? 0 : null;
   const currentInstruction = activeLeg?.statusInstruction
-    ?? (activeIndex !== null ? steps[activeIndex]?.instruction : undefined);
+    ?? (activeIndex !== null && steps[activeIndex] ? presentInstruction(steps[activeIndex].instruction) : undefined);
+  const clampMobilePanelHeight = (height: number) => Math.min(
+    MOBILE_PANEL_MAX_HEIGHT,
+    Math.max(MOBILE_PANEL_MIN_HEIGHT, height),
+  );
+  const handleResizePointerDown = (event: PointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    resizeStartRef.current = { y: event.clientY, height: mobilePanelHeight };
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+  };
+  const handleResizePointerMove = (event: PointerEvent<HTMLDivElement>) => {
+    const start = resizeStartRef.current;
+    if (!start) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setMobilePanelHeight(clampMobilePanelHeight(start.height + start.y - event.clientY));
+  };
+  const handleResizePointerEnd = (event: PointerEvent<HTMLDivElement>) => {
+    resizeStartRef.current = null;
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+  };
+  const handleResizeKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    const step = event.shiftKey ? 80 : 32;
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setMobilePanelHeight(height => clampMobilePanelHeight(height + step));
+    } else if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setMobilePanelHeight(height => clampMobilePanelHeight(height - step));
+    } else if (event.key === "Home") {
+      event.preventDefault();
+      setMobilePanelHeight(MOBILE_PANEL_MIN_HEIGHT);
+    } else if (event.key === "End") {
+      event.preventDefault();
+      setMobilePanelHeight(MOBILE_PANEL_MAX_HEIGHT);
+    }
+  };
 
   return (
     <div
       className={cn(
         "rounded-2xl border border-border/60 shadow-xl overflow-hidden animate-slide-up",
-        compact && "rounded-xl",
+        compact && "flex min-h-0 flex-col rounded-xl",
       )}
       role="region"
       aria-label={`Active route to ${toName}`}
       data-testid="route-steps-panel"
-      style={{ background: "var(--card)", backdropFilter: "blur(16px)", WebkitBackdropFilter: "blur(16px)" }}>
+      style={{
+        background: "var(--card)",
+        backdropFilter: "blur(16px)",
+        WebkitBackdropFilter: "blur(16px)",
+        ...(compact ? { height: `${mobilePanelHeight}px`, maxHeight: "calc(100dvh - 8rem)" } : {}),
+      }}>
+      {compact && (
+        <div
+          role="slider"
+          tabIndex={0}
+          aria-label="Resize route panel"
+          aria-orientation="vertical"
+          aria-valuemin={MOBILE_PANEL_MIN_HEIGHT}
+          aria-valuemax={MOBILE_PANEL_MAX_HEIGHT}
+          aria-valuenow={mobilePanelHeight}
+          data-testid="route-panel-resize-handle"
+          className="flex h-5 shrink-0 touch-none cursor-row-resize items-center justify-center bg-card/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+          onPointerDown={handleResizePointerDown}
+          onPointerMove={handleResizePointerMove}
+          onPointerUp={handleResizePointerEnd}
+          onPointerCancel={handleResizePointerEnd}
+          onKeyDown={handleResizeKeyDown}
+        >
+          <span aria-hidden="true" className="h-1 w-10 rounded-full bg-muted-foreground/40" />
+        </div>
+      )}
       {/* Header — destination name + live indicator */}
       <div className={cn("flex items-center gap-2 px-3 py-2", compact && "gap-1.5 px-2.5 py-1.5")} style={{ background: modeColor }}>
         <Navigation className="h-3.5 w-3.5 text-white shrink-0" />
         <span data-testid="route-destination" className={cn("text-[11px] font-extrabold text-white truncate flex-1", compact && "text-[10px]")}>To {toName}</span>
         <span className="w-1.5 h-1.5 rounded-full bg-green-300 animate-pulse shrink-0" />
-      </div>
-
-      {/* Stats row: distance, time, mode */}
-      <div className={cn("flex gap-2 px-3 pt-2.5 pb-2 border-b border-border", compact && "gap-1 px-2 pt-2 pb-1.5")}>
-        <div className={cn("flex-1 px-2 py-1.5 rounded-lg bg-primary/8 text-center", compact && "px-1.5 py-1")}>
-          <p className="text-[10px] text-muted-foreground font-bold uppercase tracking-wider">Dist</p>
-          <p className={cn("text-sm font-extrabold text-foreground", compact && "text-xs")}>{formatDistance(route.dist)}</p>
-        </div>
-        <div className={cn("flex-1 px-2 py-1.5 rounded-lg bg-primary/8 text-center", compact && "px-1.5 py-1")}>
-          <p className="text-[10px] text-muted-foreground font-bold uppercase tracking-wider">Time</p>
-          <p className={cn("text-sm font-extrabold text-foreground", compact && "text-xs")}>{formatMinutes(route.mins)}</p>
-        </div>
-        <div className={cn("flex-1 px-2 py-1.5 rounded-lg bg-primary/8 text-center", compact && "px-1.5 py-1")}>
-          <p className="text-[10px] text-muted-foreground font-bold uppercase tracking-wider">Via</p>
-          <p className={cn("text-sm font-extrabold text-foreground", compact && "text-xs")}>
-            {mode === "accessible" ? <Accessibility className="h-4 w-4 inline-block align-middle" /> :
-             mode === "emergency" ? "SOS" : "Walk"}
-          </p>
-        </div>
       </div>
 
       <p data-testid="active-route-source" className={cn("px-3 pt-2 text-[9px] font-semibold text-muted-foreground", compact && "px-2 pt-1.5 text-[8px]")}>
@@ -171,20 +233,11 @@ export function RouteStepsPanel({
         </p>
       )}
 
-      {/* Floor-transition badges */}
-      {route.transitions.length > 0 && (
-        <div className={cn("px-3 pt-2 flex flex-col gap-1", compact && "px-2 pt-1.5")}>
-          {route.transitions.map((t, i) => (
-            <div key={`tr-${i}`} className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-purple-500/10 border border-purple-500/20 text-purple-700 dark:text-purple-400">
-              <MoveVertical className="h-3 w-3 shrink-0" />
-              <span className="text-[10px] font-bold">{t}</span>
-            </div>
-          ))}
-        </div>
-      )}
-
       {/* Step-by-step directions */}
-      <div className={cn("px-3 pt-2 pb-1 max-h-32 overflow-y-auto scrollbar-show-on-hover", compact && "px-2 pt-1.5 max-h-24")}>
+      <div className={cn(
+        "px-3 pt-2 pb-1 max-h-32 overflow-y-auto scrollbar-show-on-hover",
+        compact && "min-h-0 flex-1 px-2 pt-1.5 max-h-none",
+      )}>
         <div className="relative pl-4 border-l-2 border-primary/30 space-y-1.5">
           {steps.map((step, i) => {
             const isFirst = i === 0;
@@ -212,13 +265,8 @@ export function RouteStepsPanel({
                     "text-[10px] leading-snug pt-0.5",
                     isLast ? "font-bold text-foreground" : "text-muted-foreground"
                   )}>
-                    {step.instruction}
+                    {presentInstruction(step.instruction)}
                   </p>
-                  {step.distanceM !== undefined && (
-                    <span className="text-[10px] text-muted-foreground font-semibold">
-                      {formatDistance(step.distanceM)}
-                    </span>
-                  )}
                 </div>
               </div>
             );
