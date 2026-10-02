@@ -909,6 +909,8 @@ export interface EventOverlayLocation {
 
 export interface CampusEventOverlay {
   id: string;
+  /** Server revision used for conflict-safe administrator review/publication. */
+  updatedAt?: string;
   /** Campus whose published map snapshot anchors this event proposal. */
   campusId?: string;
   title: string;
@@ -930,6 +932,9 @@ export interface CampusEventOverlay {
   status?: "draft" | "pending" | "approved" | "disapproved";
   /** ISO timestamp of the latest explicit submission to GSO. */
   submittedAt?: string;
+  /** Student visibility begins at this approved publication instant. */
+  publicationAt?: string;
+  locationFeedback?: Record<string, string>;
   /** Admin feedback when disapproving */
   adminComment?: string;
   /** Event-specific furniture items (booths, tents, stages, etc.) */

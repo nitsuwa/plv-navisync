@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router";
+import { settingsService, DEFAULT_PUBLIC_PLATFORM_SETTINGS } from "../../services/settingsService";
 import type { ComponentProps } from "react";
 import { CampusMapPage } from "../CampusMapPage";
 import { eventOverlayService } from "../../services/eventOverlayService";
@@ -54,6 +55,7 @@ vi.mock("../../services/eventOverlayService", () => ({
   eventOverlayService: {
     getApprovedOverlaysForCampus: vi.fn().mockResolvedValue([]),
     getApprovedOverlaysForFloor: vi.fn().mockResolvedValue([]),
+    listPublishedEventPreviews: vi.fn().mockResolvedValue({ serverNow: "2026-10-08T02:00:00.000Z", events: [] }),
   },
 }));
 
@@ -69,9 +71,28 @@ describe("CampusMapPage event overlays", () => {
       </MemoryRouter>,
     );
 
-  it("loads approved campus overlays without throwing a missing service reference", async () => {
-    renderCampusMap();
-    await waitFor(() => expect(eventOverlayService.getApprovedOverlaysForCampus).toHaveBeenCalled());
+  it("toggles event preview without changing the navigation camera", async () => {
+    vi.spyOn(settingsService, "getPublicPlatformSettings").mockResolvedValue(DEFAULT_PUBLIC_PLATFORM_SETTINGS);
+    renderCampusMap({ previewCampus });
+    const toggle = await screen.findByRole("button", { name: "Event map" });
+    const svg = screen.getByTestId("student-map-surface").querySelector("svg");
+    const camera = svg?.querySelector("g[transform]")?.getAttribute("transform");
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(await screen.findByText(/No published events/i)).toBeInTheDocument();
+    expect(svg?.querySelector("g[transform]")?.getAttribute("transform")).toBe(camera);
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("region", { name: "Campus events" })).not.toBeInTheDocument();
+    fireEvent.click(toggle);
+    fireEvent.click(screen.getByRole("button", { name: "Close campus events" }));
+    expect(toggle).toHaveFocus();
+  });
+
+  it("loads student event previews from the allowlisted feed when the panel opens", async () => {
+    renderCampusMap({ previewCampus });
+    fireEvent.click(await screen.findByRole("button", { name: "Event map" }));
+    await waitFor(() => expect(eventOverlayService.listPublishedEventPreviews).toHaveBeenCalledWith("campus-test"));
   });
 
   it("exposes the responsive student map landmarks and controls", async () => {

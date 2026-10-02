@@ -230,6 +230,28 @@ afterEach(() => {
 });
 
 describe("EventFloorEditor", () => {
+  it("shows advisory alignment and spacing only while a single asset is dragged", () => {
+    const twoChairs = { ...overlayWithChair, eventFurniture: [...overlayWithChair.eventFurniture!, { ...overlayWithChair.eventFurniture![0], id: "chair-2", y: 100 }] };
+    render(<EventFloorEditor floorPlan={floorPlan} overlay={twoChairs} onSave={vi.fn()} onSubmit={vi.fn()} onBack={vi.fn()} />);
+    expect(screen.queryByTestId("event-placement-guides")).not.toBeInTheDocument();
+    fireEventCompat.mouseDown(screen.getByTestId("event-furniture-chair-1"), { clientX: 36, clientY: 36 });
+    expect(screen.getByTestId("event-placement-guides")).toHaveClass("pointer-events-none");
+    expect(screen.getByTestId("event-alignment-guide-x")).toBeInTheDocument();
+    expect(screen.getByText("52 map units")).toBeInTheDocument();
+    fireEventCompat.mouseUp(window);
+    expect(screen.queryByTestId("event-placement-guides")).not.toBeInTheDocument();
+  });
+  it("keeps physical asset sizes fixed while preserving saved legacy dimensions", () => {
+    render(<EventFloorEditor floorPlan={floorPlan} overlay={overlayWithChair} onSave={vi.fn()} onSubmit={vi.fn()} onBack={vi.fn()} />);
+    const canvas = screen.getByLabelText("Event layout canvas");
+    const item = screen.getByTestId("event-furniture-chair-1");
+    fireEvent.mouseDown(item, { button: 0, clientX: 36, clientY: 36 });
+    fireEvent.mouseUp(canvas);
+    expect(screen.queryAllByTestId(/^event-furniture-resize-handle/)).toHaveLength(0);
+    expect(item.style.width).toBe("24px");
+    expect(screen.getByTestId("event-furniture-rotate-handle")).toBeInTheDocument();
+  });
+
   it("marquee-selects event items from blank canvas and exposes shared bulk actions", () => {
     setInspectorViewport(false);
     const chairs = [20, 80, 200].map((x, index) => ({
@@ -274,7 +296,7 @@ describe("EventFloorEditor", () => {
     expect(screen.getByRole("button", { name: "Duplicate selected items" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Arrange selected items" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Rotate selected items" })).not.toBeInTheDocument();
-    expect(within(screen.getByTestId("event-item-inspector-rail")).getByText("Bulk selection")).toBeInTheDocument();
+    expect(screen.queryByTestId("event-item-inspector-rail")).not.toBeInTheDocument();
   });
 
   it("arms a preset preview before creating its furniture", () => {
@@ -1085,31 +1107,6 @@ describe("EventFloorEditor", () => {
     expect(item.style.left).not.toBe(initialLeft);
   });
 
-  it("resizes an existing item while Furniture mode is active", () => {
-    render(
-      <EventFloorEditor
-        floorPlan={floorPlan}
-        overlay={overlayWithChair}
-        onSave={vi.fn()}
-        onSubmit={vi.fn()}
-        onBack={vi.fn()}
-      />,
-    );
-
-    fireEvent.click(screen.getByRole("button", { name: /Furniture$/ }));
-    const canvas = screen.getByLabelText("Event layout canvas");
-    const item = screen.getByTestId("event-furniture-chair-1");
-    fireEvent.mouseDown(item, { button: 0, clientX: 36, clientY: 36 });
-    fireEvent.mouseUp(canvas);
-
-    const resizeHandle = screen.getByTestId("event-furniture-resize-handle");
-    const initialWidth = item.style.width;
-    fireEvent.mouseDown(resizeHandle, { button: 0, clientX: 48, clientY: 48 });
-    fireEvent.mouseMove(canvas, { clientX: 88, clientY: 88 });
-    fireEvent.mouseUp(canvas);
-
-    expect(item.style.width).not.toBe(initialWidth);
-  });
 
   it("owns a pointer drag once and ignores the compatibility mouse event", () => {
     render(
@@ -1841,63 +1838,7 @@ describe("EventFloorEditor", () => {
     }
   });
 
-  it("derives every resize frame from the original asset geometry", () => {
-    render(
-      <EventFloorEditor
-        floorPlan={floorPlan}
-        overlay={overlayWithChair}
-        onSave={vi.fn()}
-        onSubmit={vi.fn()}
-        onBack={vi.fn()}
-      />,
-    );
 
-    const canvas = screen.getByLabelText("Event layout canvas");
-    const item = screen.getByTestId("event-furniture-chair-1");
-    fireEvent.mouseDown(item, { button: 0, clientX: 36, clientY: 36 });
-    fireEvent.mouseUp(canvas);
-
-    const resizeHandle = screen.getByTestId("event-furniture-resize-handle");
-    fireEvent.mouseDown(resizeHandle, { button: 0, clientX: 48, clientY: 48 });
-    fireEvent.mouseMove(canvas, { clientX: 60, clientY: 60 });
-    expect(item.style.width).toBe("36px");
-    expect(item.style.height).toBe("36px");
-
-    fireEvent.mouseMove(canvas, { clientX: 72, clientY: 72 });
-    fireEvent.mouseUp(canvas);
-
-    expect(item.style.width).toBe("48px");
-    expect(item.style.height).toBe("48px");
-  });
-
-  it("keeps an active resize gesture alive when the pointer crosses the canvas boundary", () => {
-    render(
-      <EventFloorEditor
-        floorPlan={floorPlan}
-        overlay={overlayWithChair}
-        onSave={vi.fn()}
-        onSubmit={vi.fn()}
-        onBack={vi.fn()}
-      />,
-    );
-
-    const canvas = screen.getByLabelText("Event layout canvas");
-    const item = screen.getByTestId("event-furniture-chair-1");
-    fireEvent.mouseDown(item, { button: 0, clientX: 36, clientY: 36 });
-    fireEvent.mouseUp(canvas);
-
-    fireEvent.mouseDown(screen.getByTestId("event-furniture-resize-handle"), {
-      button: 0,
-      clientX: 48,
-      clientY: 48,
-    });
-    fireEvent.mouseLeave(canvas);
-    fireEvent.mouseMove(window, { clientX: 72, clientY: 72 });
-    fireEvent.mouseUp(window);
-
-    expect(item.style.width).toBe("48px");
-    expect(item.style.height).toBe("48px");
-  });
 
   it("exposes a visible rotate action for a selected furniture item", () => {
     render(
@@ -1948,44 +1889,7 @@ describe("EventFloorEditor", () => {
     expect(item.style.transform).toContain("rotate(90deg)");
   });
 
-  it("provides eight resize handles for direct manipulation", () => {
-    render(
-      <EventFloorEditor
-        floorPlan={floorPlan}
-        overlay={overlayWithChair}
-        onSave={vi.fn()}
-        onSubmit={vi.fn()}
-        onBack={vi.fn()}
-      />,
-    );
 
-    const canvas = screen.getByLabelText("Event layout canvas");
-    const item = screen.getByTestId("event-furniture-chair-1");
-    fireEvent.mouseDown(item, { button: 0, clientX: 36, clientY: 36 });
-    fireEvent.mouseUp(canvas);
-
-    expect(screen.getAllByTestId(/^event-furniture-resize-handle/)).toHaveLength(8);
-  });
-
-  it("keeps resize hit areas compact so mobile touch rules do not overlap tiny assets", () => {
-    render(
-      <EventFloorEditor
-        floorPlan={floorPlan}
-        overlay={overlayWithChair}
-        onSave={vi.fn()}
-        onSubmit={vi.fn()}
-        onBack={vi.fn()}
-      />,
-    );
-
-    const item = screen.getByTestId("event-furniture-chair-1");
-    fireEvent.mouseDown(item, { button: 0, clientX: 36, clientY: 36 });
-    fireEvent.mouseUp(screen.getByLabelText("Event layout canvas"));
-
-    for (const handle of screen.getAllByTestId(/^event-furniture-resize-handle/)) {
-      expect(handle).toHaveStyle({ minWidth: "0px", minHeight: "0px" });
-    }
-  });
 
   it("snaps a dragged item to a nearby sibling edge and shows an alignment guide", () => {
     const target = { ...overlayWithChair.eventFurniture![0], id: "chair-2", x: 100 };
@@ -2027,7 +1931,7 @@ describe("EventFloorEditor", () => {
     expect(snapToggle).toHaveAttribute("aria-pressed", "false");
   });
 
-  it("opens an item details inspector and updates its dimensions", () => {
+  it("opens item details for placement while retaining fixed dimensions", () => {
     render(
       <EventFloorEditor
         floorPlan={floorPlan}
@@ -2044,14 +1948,14 @@ describe("EventFloorEditor", () => {
     fireEvent.click(screen.getByRole("button", { name: "Open item details" }));
 
     const inspector = screen.getByRole("dialog", { name: "Item details" });
-    const width = within(inspector).getByRole("spinbutton", { name: "Width" });
-    fireEvent.change(width, { target: { value: "48" } });
-
-    expect(width).toHaveValue(48);
-    expect(screen.getByTestId("event-furniture-chair-1").style.width).toBe("48px");
+    expect(within(inspector).queryByRole("spinbutton", { name: "Width" })).not.toBeInTheDocument();
+    const x = within(inspector).getByRole("spinbutton", { name: "X" });
+    fireEvent.change(x, { target: { value: "48" } });
+    expect(screen.getByTestId("event-furniture-chair-1").style.left).toBe("48px");
+    expect(screen.getByTestId("event-furniture-chair-1").style.width).toBe("24px");
   });
 
-  it("reserves the desktop inspector rail outside the canvas and keeps canvas geometry independent of its content", () => {
+  it("opens and collapses the compact desktop inspector outside the canvas", () => {
     setInspectorViewport(false);
     render(
       <EventFloorEditor
@@ -2065,22 +1969,19 @@ describe("EventFloorEditor", () => {
 
     const workspace = screen.getByTestId("event-editor-workspace");
     const canvas = screen.getByLabelText("Event layout canvas");
-    const rail = screen.getByTestId("event-item-inspector-rail");
-    expect(rail).toHaveClass("w-[22rem]");
-    expect(canvas.parentElement).toBe(workspace);
-    expect(rail.parentElement).toBe(workspace);
-    expect(within(rail).getByText(/select a single furniture item or label/i)).toBeInTheDocument();
+    expect(screen.queryByTestId("event-item-inspector-rail")).not.toBeInTheDocument();
 
     fireEvent.mouseDown(screen.getByTestId("event-furniture-chair-1"), { button: 0, clientX: 36, clientY: 36 });
     fireEvent.mouseUp(canvas);
     fireEvent.click(screen.getByRole("button", { name: "Open item details" }));
+    const rail = screen.getByTestId("event-item-inspector-rail");
     const details = within(rail).getByRole("region", { name: "Item details" });
     expect(canvas).not.toContainElement(details);
     expect(canvas.parentElement).toBe(workspace);
-    expect(rail).toHaveClass("w-[22rem]");
+    expect(rail).toHaveClass("w-[17rem]");
 
     fireEvent.click(within(rail).getByRole("button", { name: "Close item details" }));
-    expect(within(rail).getByText(/select a single furniture item or label/i)).toBeInTheDocument();
+    expect(screen.queryByTestId("event-item-inspector-rail")).not.toBeInTheDocument();
   });
 
   it("opens item details as a mobile sheet, restores focus, and leaves canvas gestures available after close", async () => {
@@ -2173,9 +2074,9 @@ describe("EventFloorEditor", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Open item details" }));
     const inspector = screen.getByRole("dialog", { name: "Item details" });
-    const width = within(inspector).getByRole("spinbutton", { name: "Width" });
-    expect(width).toBeDisabled();
-    fireEvent.change(width, { target: { value: "48" } });
+    const x = within(inspector).getByRole("spinbutton", { name: "X" });
+    expect(x).toBeDisabled();
+    fireEvent.change(x, { target: { value: "48" } });
     expect(item.style.width).not.toBe("48px");
 
     fireEvent.mouseDown(item, { button: 0, clientX: 36, clientY: 36 });
@@ -2429,7 +2330,10 @@ describe("EventFloorEditor", () => {
     const seededChairs = [20, 80, 140].map((x, index) => ({
       ...overlayWithChair.eventFurniture![0],
       id: `chair-${index + 1}`,
-      x,
+      x: index === 1 ? 100 : x,
+      width: index === 0 ? 40 : index === 1 ? 30 : 24,
+      height: 20,
+      rotation: index === 0 ? 90 : 0,
     }));
     render(
       <EventFloorEditor
@@ -2454,6 +2358,20 @@ describe("EventFloorEditor", () => {
     fireEvent.click(arrange);
     expect(screen.getByRole("button", { name: "Align left" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Distribute horizontally" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Align left" }));
+    const visibleLeft = (id: string) => {
+      const node = screen.getByTestId(`event-furniture-${id}`);
+      const width = Number.parseFloat(node.style.width);
+      const height = Number.parseFloat(node.style.height);
+      const degrees = Number(node.style.transform.match(/rotate\((-?[\d.]+)deg\)/)?.[1] ?? 0);
+      const radians = degrees * Math.PI / 180;
+      const visualWidth = Math.abs(Math.cos(radians)) * width + Math.abs(Math.sin(radians)) * height;
+      return Number.parseFloat(node.style.left) + width / 2 - visualWidth / 2;
+    };
+
+    expect(visibleLeft("chair-1")).toBeCloseTo(visibleLeft("chair-2"));
+    expect(screen.getByTestId("event-furniture-chair-3")).toHaveStyle({ left: "140px" });
   });
 
   it("places a dragged recent asset at the canvas drop point", () => {

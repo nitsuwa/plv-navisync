@@ -57,6 +57,7 @@ export function EventLayoutIssues({ warnings, onFocusItems, disabled = false }: 
   return (
     <div
       data-testid="event-layout-warnings"
+      data-event-tour="layout-checks"
       data-event-editor-chrome
       data-event-layout-issues={panelId}
       className="relative z-50 h-9 shrink-0 border-b border-border/70 bg-card/95 px-3 sm:px-4"

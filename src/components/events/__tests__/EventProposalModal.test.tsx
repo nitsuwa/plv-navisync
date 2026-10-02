@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
-import { EventProposalModal } from "../EventProposalModal";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { EventDetailsModal, EventProposalModal } from "../EventProposalModal";
 
 vi.mock("../../../lib/supabase", () => ({
   getSupabase: () => ({
@@ -16,16 +16,74 @@ vi.mock("../../../lib/supabase", () => ({
 const buildings = [{ buildingId: "science", buildingName: "Science Building", floors: [{ number: 1, label: "Floor 1" }] }];
 
 describe("EventProposalModal", () => {
+  beforeEach(() => {
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", { configurable: true, value: vi.fn() });
+  });
+
+  it("keeps event scheduling out of the student organization draft editor", async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    render(<EventDetailsModal overlay={{ id: "draft", title: "Copy", description: "", organizer: "Org", locations: [{ id: "loc", locationRef: { type: "campus", label: "Campus Grounds" }, eventFurniture: [], eventLabels: [] }] } as never} buildings={buildings} onClose={vi.fn()} onSave={onSave} />);
+    expect(screen.queryByLabelText(/event starts|event ends/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/administrator will set the event schedule/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+    expect(onSave.mock.calls[0][0]).not.toHaveProperty("dateStart");
+    expect(onSave.mock.calls[0][0]).not.toHaveProperty("dateEnd");
+  });
+  it("uses the themed campus picker and loads buildings for the selected campus", async () => {
+    render(<EventProposalModal buildings={buildings} campuses={[{ id: "north", name: "North", buildings }, { id: "south", name: "South", buildings: [{ buildingId: "arts", buildingName: "Arts", floors: [{ number: 1, label: "Ground" }] }] }]} onClose={vi.fn()} onCreate={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText(/event title/i), { target: { value: "Campus fair" } });
+    fireEvent.click(screen.getByRole("button", { name: /continue/i }));
+
+    expect(document.querySelector("select")).toBeNull();
+    fireEvent.click(screen.getByRole("combobox", { name: "Published campus" }));
+    fireEvent.click(await screen.findByRole("option", { name: "South" }));
+
+    expect(screen.getByRole("checkbox", { name: "Arts — Ground" })).toBeInTheDocument();
+    expect(screen.queryByRole("checkbox", { name: "Science Building — Floor 1" })).not.toBeInTheDocument();
+  });
+  it("clears incompatible floors only after confirming a campus change", async () => {
+    render(<EventProposalModal buildings={buildings} campuses={[{ id: "north", name: "North", buildings }, { id: "south", name: "South", buildings: [{ buildingId: "arts", buildingName: "Arts", floors: [{ number: 1, label: "Ground" }] }] }]} onClose={vi.fn()} onCreate={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText(/event title/i), { target: { value: "Campus fair" } });
+    fireEvent.click(screen.getByRole("button", { name: /continue/i }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Science Building — Floor 1" }));
+    fireEvent.click(screen.getByRole("combobox", { name: "Published campus" }));
+    fireEvent.click(await screen.findByRole("option", { name: "South" }));
+    expect(screen.getByRole("alertdialog", { name: "Change campus?" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Keep campus" }));
+    expect(screen.getByRole("checkbox", { name: "Science Building — Floor 1" })).toBeChecked();
+    fireEvent.click(screen.getByRole("combobox", { name: "Published campus" }));
+    fireEvent.click(await screen.findByRole("option", { name: "South" }));
+    fireEvent.click(screen.getByRole("button", { name: "Change and clear" }));
+    expect(screen.getByRole("checkbox", { name: "Arts — Ground" })).not.toBeChecked();
+    expect(screen.queryByRole("checkbox", { name: "Science Building — Floor 1" })).not.toBeInTheDocument();
+    expect(screen.getByText("Selected (0)")).toBeInTheDocument();
+  });
+  it("requires a review before creating the proposal", () => {
+    const onCreate = vi.fn();
+    render(<EventProposalModal buildings={buildings} onClose={vi.fn()} onCreate={onCreate} />);
+    fireEvent.change(screen.getByLabelText(/event title/i), { target: { value: "Review Fair" } });
+    fireEvent.click(screen.getByRole("button", { name: /continue/i }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /campus grounds/i }));
+    fireEvent.click(screen.getByRole("button", { name: /create & design maps/i }));
+    expect(screen.getByRole("alertdialog", { name: /review event proposal/i })).toBeInTheDocument();
+    expect(onCreate).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: /back to locations/i }));
+    expect(screen.getByRole("checkbox", { name: /campus grounds/i })).toBeChecked();
+  });
   it("guides the org through details and multiple locations without date fields", async () => {
     const onCreate = vi.fn().mockResolvedValue(undefined);
     render(<EventProposalModal buildings={buildings} onClose={vi.fn()} onCreate={onCreate} />);
     fireEvent.change(screen.getByLabelText(/event title/i), { target: { value: "Student Fair" } });
+    expect(screen.getByText(/administrator will set the event schedule/i)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /continue/i }));
     expect(screen.getByText(/step 2 of 2/i)).toBeInTheDocument();
-    expect(screen.queryByLabelText(/start date|end date/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/event starts|event ends|start date|end date/i)).not.toBeInTheDocument();
+    expect(document.querySelector('input[type="date"], input[type="time"], input[type="datetime-local"]')).toBeNull();
     fireEvent.click(screen.getByRole("checkbox", { name: /campus grounds/i }));
     fireEvent.click(screen.getByRole("button", { name: /add building location/i }));
     fireEvent.click(screen.getByRole("button", { name: /create & design maps/i }));
+    fireEvent.click(screen.getByRole("button", { name: /confirm & design/i }));
     await waitFor(() => expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({
       title: "Student Fair",
       locations: expect.arrayContaining([
@@ -97,11 +155,13 @@ describe("EventProposalModal", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: /campus grounds/i }));
     const createButton = screen.getByRole("button", { name: /create & design maps/i });
     fireEvent.click(createButton);
-    fireEvent.click(createButton);
+    const confirmButton = screen.getByRole("button", { name: /confirm & design/i });
+    fireEvent.click(confirmButton);
+    fireEvent.click(confirmButton);
     await waitFor(() => expect(onCreate).toHaveBeenCalledTimes(1));
 
     expect(createButton).toBeDisabled();
-    fireEvent.keyDown(screen.getByRole("dialog", { name: /create event proposal/i }), { key: "Escape" });
+    fireEvent.keyDown(screen.getByRole("alertdialog", { name: /review event proposal/i }), { key: "Escape" });
     fireEvent.pointerDown(screen.getByTestId("proposal-modal-backdrop"), { pointerType: "mouse" });
     expect(onClose).not.toHaveBeenCalled();
 
@@ -118,6 +178,7 @@ describe("EventProposalModal", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: /campus grounds/i }));
     fireEvent.click(screen.getByRole("button", { name: /add building location/i }));
     fireEvent.click(screen.getByRole("button", { name: /create & design maps/i }));
+    fireEvent.click(screen.getByRole("button", { name: /confirm & design/i }));
     expect(await screen.findByText(/network unavailable/i)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /back/i }));

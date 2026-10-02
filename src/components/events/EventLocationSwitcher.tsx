@@ -32,7 +32,7 @@ export function EventLocationSwitcher({
           <span>Published map stays locked</span>
         </div>
       </div>
-      <div className="flex gap-2 overflow-x-auto p-3 no-scrollbar lg:flex-col lg:overflow-visible lg:p-4">
+      <div data-event-tour="locations" className="flex gap-2 overflow-x-auto p-3 no-scrollbar lg:flex-col lg:overflow-visible lg:p-4">
         {locations.map((location) => {
           const counts = countEventOverlayItems([location]);
           const active = activeLocationId === location.id;

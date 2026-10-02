@@ -24,6 +24,9 @@ vi.mock("../ScrollToTop", () => ({ ScrollToTop: () => null }));
 vi.mock("../MobileBottomNav", () => ({ MobileBottomNav: () => <nav data-testid="mobile-bottom-nav">Map</nav> }));
 vi.mock("../../ui/NavigationProgress", () => ({ NavigationProgress: () => null }));
 vi.mock("../../../app/components/ui/sonner", () => ({ Toaster: () => null }));
+vi.mock("../../../services/settingsService", () => ({ settingsService: {
+  getPublicPlatformSettings: vi.fn().mockResolvedValue({ defaultLandingPage: "home" }),
+} }));
 
 describe("PublicLayout student entry", () => {
   it("redirects an authenticated student from the public root to Home", async () => {
@@ -74,5 +77,7 @@ describe("PublicLayout student entry", () => {
 
     expect(screen.getByText("Event editor")).toBeInTheDocument();
     expect(screen.queryByTestId("site-footer")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("mobile-bottom-nav")).not.toBeInTheDocument();
+    expect(document.getElementById("main-content")).toHaveClass("min-h-0", "overflow-hidden");
   });
 });

@@ -513,16 +513,15 @@ describe("listPublishedCampusSnapshots (student snapshot boundary)", () => {
       data: [{ snapshot, published_at: "2026-09-14T00:00:00Z" }],
       error: null,
     });
-    const eq = vi.fn(() => ({ order }));
-    const select = vi.fn(() => ({ eq }));
+
     vi.mocked(getSupabase).mockReturnValue({
-      from: vi.fn(() => ({ select })),
+      rpc: order,
     } as never);
 
     const campuses = await listPublishedCampusSnapshots();
 
-    expect(select).toHaveBeenCalledWith("campus_id,snapshot,published_at");
-    expect(eq).toHaveBeenCalledWith("state", "published");
+    expect(order).toHaveBeenCalledWith("list_event_safe_published_campuses");
+    expect(campuses[0].eventOverlays).toEqual([]);
     expect(campuses[0]).toMatchObject({
       id: "c-published",
       canvasGroundMaterial: "grass",

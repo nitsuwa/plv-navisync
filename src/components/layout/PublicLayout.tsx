@@ -16,6 +16,19 @@ export function PublicLayout() {
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const { isStudent, loading: authLoading } = useStudentAuth();
+  const isEventEditor = /^\/student\/events\/[^/]+\/edit\/?$/.test(pathname);
+
+  useEffect(() => {
+    if (!isEventEditor) return;
+    const previousBodyOverflow = document.body.style.overflow;
+    const previousRootOverflow = document.documentElement.style.overflow;
+    document.body.style.overflow = "hidden";
+    document.documentElement.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previousBodyOverflow;
+      document.documentElement.style.overflow = previousRootOverflow;
+    };
+  }, [isEventEditor]);
 
   useEffect(() => {
     if (authLoading || !isStudent || pathname !== "/") return;
@@ -43,7 +56,7 @@ export function PublicLayout() {
   const isMapPage     = pathname === "/map";
 
   return (
-    <div className={cn("min-h-screen flex flex-col w-full max-w-full overflow-x-hidden", !isMapPage && "app-page-bg")}>
+    <div className={cn("flex flex-col w-full max-w-full", isEventEditor ? "h-[100dvh] overflow-hidden" : "min-h-screen overflow-x-hidden", !isMapPage && "app-page-bg")}>
       {/* Skip-to-content link for keyboard and screen reader users */}
       <a
         href="#main-content"
@@ -70,18 +83,18 @@ export function PublicLayout() {
       <NavigationProgress />
       <ScrollToTop />
       {/* Navbar hidden on mobile map for immersive experience */}
-      <div className={isMapPage ? "hidden md:block" : ""}>
+      {!isEventEditor && <div className={isMapPage ? "hidden md:block" : ""}>
         <Navbar />
-      </div>
+      </div>}
       {/* Emergency banner hidden on map view */}
-      {!isMapPage && <EmergencyBanner />}
+      {!isMapPage && !isEventEditor && <EmergencyBanner />}
 
       <main
         id="main-content"
         className={cn(
           "relative z-[1] w-full max-w-full",
-          isMapPage ? "overflow-hidden flex-1" : "overflow-x-hidden",
-          !isMapPage && "pb-[calc(76px+env(safe-area-inset-bottom,0px))] md:pb-0",
+          isMapPage || isEventEditor ? "min-h-0 overflow-hidden flex-1" : "overflow-x-hidden",
+          !isMapPage && !isEventEditor && "pb-[calc(76px+env(safe-area-inset-bottom,0px))] md:pb-0",
         )}
       >
         <motion.div
@@ -96,7 +109,7 @@ export function PublicLayout() {
       </main>
 
       {showFooter && <div className="hidden md:block"><Footer /></div>}
-      <MobileBottomNav />
+      {!isEventEditor && <MobileBottomNav />}
     </div>
   );
 }

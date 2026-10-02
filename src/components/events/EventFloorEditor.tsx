@@ -5,7 +5,7 @@
  * Features:
  * - Read-only base map (walls, doors, windows, permanent furniture)
  * - Limited tool palette: select, furniture (event-specific only), text, pan
- * - Event furniture can be placed, moved, resized, and deleted
+ * - Event furniture can be placed, moved, rotated, and deleted
  * - Event labels can be placed and edited
  * - Saves ONLY to the CampusEventOverlay document, not the base map
  */
@@ -71,12 +71,14 @@ import { applyLayoutAction, itemsIntersectingRect, nudgeItems, resolveLayoutMove
 import { constrainFurnitureToFloor, resizeFurnitureWithinFloor } from "../../lib/floorGeometry";
 import { transformControlMetrics } from "../../lib/campusSelection";
 import { EVENT_LAYOUT_PRESETS, buildEventPreset, fitEventPresetToCanvas, type EventLayoutPresetId } from "../../lib/eventLayoutPresets";
-import { validateEventLayout } from "../../lib/eventLayoutValidation";
+import { validateEventLayout, eventProtectedAccessRegions } from "../../lib/eventLayoutValidation";
 import { useEventViewportMotion } from "./useEventViewportMotion";
 import { EventLayoutIssues } from "./EventLayoutIssues";
+import { EventEditorTutorial } from "./EventEditorTutorial";
 import { EventItemInspector } from "./EventItemInspector";
 import * as Dialog from "@radix-ui/react-dialog";
 import { clientToEventWorld, type GestureFrame } from "../../lib/eventGestureCoordinates";
+import { eventPlacementGuides } from "../../lib/eventPlacementGuides";
 
 // ── Tool types ────────────────────────────────────────────────────────────
 
@@ -134,12 +136,12 @@ const EVENT_TOOLS: EventToolDef[] = [
 ];
 
 const EVENT_LAYOUT_ACTIONS: Array<{ action: LayoutAction; label: string; description: string }> = [
-  { action: "align-left", label: "Align left", description: "Line up the left edges" },
-  { action: "align-center", label: "Align center", description: "Line up the horizontal centers" },
-  { action: "align-top", label: "Align top", description: "Line up the top edges" },
-  { action: "align-middle", label: "Align middle", description: "Line up the vertical centers" },
-  { action: "distribute-horizontal", label: "Distribute horizontally", description: "Space items evenly left to right" },
-  { action: "distribute-vertical", label: "Distribute vertically", description: "Space items evenly top to bottom" },
+  { action: "align-left", label: "Align left", description: "Match visible left edges, including rotated items" },
+  { action: "align-center", label: "Align center", description: "Center items on one vertical line" },
+  { action: "align-top", label: "Align top", description: "Match visible top edges, including rotated items" },
+  { action: "align-middle", label: "Align middle", description: "Center items on one horizontal line" },
+  { action: "distribute-horizontal", label: "Distribute horizontally", description: "Space visible items evenly in a row" },
+  { action: "distribute-vertical", label: "Distribute vertically", description: "Space visible items evenly in a column" },
 ];
 
 type ResizeHandleDirection = "nw" | "n" | "ne" | "e" | "se" | "s" | "sw" | "w";
@@ -286,6 +288,8 @@ export interface EventFloorEditorProps {
   activeCampus?: Campus | null;
   /** Admin review mode: show the submitted map without edit controls. */
   readOnly?: boolean;
+  saveStatus?: string;
+  tutorialAccountId?: string;
 }
 
 export interface EventEditorDraftSnapshot {
@@ -306,10 +310,13 @@ export function EventFloorEditor({
   isSubmitting = false,
   activeCampus,
   readOnly = false,
+  saveStatus,
+  tutorialAccountId,
 }: EventFloorEditorProps) {
   // ── State ──────────────────────────────────────────────────────────────
   const [initialEventLayout] = useState(() => getInitialEventLayout(overlay, readOnly));
   const [activeTool, setActiveTool] = useState<EventTool>("select");
+  const tutorialPreviousToolRef = useRef<EventTool | null>(null);
   const [activeTemplate, setActiveTemplate] = useState(
     EVENT_FURNITURE_TEMPLATES[0]
   );
@@ -326,6 +333,7 @@ export function EventFloorEditor({
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [history, setHistory] = useState<EditorHistoryEntry[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
+  const [placementError, setPlacementError] = useState<string | null>(null);
   const [presetMenuOpen, setPresetMenuOpen] = useState(false);
   const [objectListOpen, setObjectListOpen] = useState(false);
   const [objectQuery, setObjectQuery] = useState("");
@@ -334,6 +342,7 @@ export function EventFloorEditor({
   const [presetPreview, setPresetPreview] = useState<{
     id: EventLayoutPresetId;
     count: number;
+    chairsPerRow?: number;
     spacing: number;
     rotation: number;
     point: { x: number; y: number };
@@ -576,11 +585,13 @@ export function EventFloorEditor({
     ];
     return items.filter((item) => (objectFilter === "all" || item.kind === objectFilter) && (!query || item.name.toLowerCase().includes(query)));
   }, [eventFurniture, eventLabels, objectFilter, objectQuery]);
+  const protectedRegions = useMemo(() => eventProtectedAccessRegions(floorPlan), [floorPlan]);
   const layoutWarnings = useMemo(() => validateEventLayout({
     furniture: validatedFurniture,
     canvasWidth: canvasW,
     canvasHeight: canvasH,
-  }), [canvasH, canvasW, validatedFurniture]);
+    blockedRegions: protectedRegions,
+  }), [canvasH, canvasW, validatedFurniture, protectedRegions]);
   const viewportBackground = floorPlan.id === "campus" && activeCampus
     ? campusGroundAppearance(activeCampus).color
     : floorPlan.backgroundColor || "var(--map-floor-corridor, #f3f4f6)";
@@ -639,6 +650,9 @@ export function EventFloorEditor({
   });
 
   const effectiveTool: EventTool = isPanning || pinchActive || (spaceHeld && !itemGestureActive) ? "pan" : activeTool;
+  const placementGuides = useMemo(() => dragging?.type === "furniture" && dragging.ids.length === 1 && selectedFurniture
+    ? eventPlacementGuides(selectedFurniture, eventFurniture, 3 / zoom)
+    : null, [dragging, selectedFurniture, eventFurniture, zoom]);
   const panStatus = isPanning || pinchActive
     ? "Panning"
     : effectiveTool === "pan"
@@ -768,6 +782,10 @@ export function EventFloorEditor({
   const placePreset = useCallback((preview: NonNullable<typeof presetPreview>, point: { x: number; y: number }) => {
     if (readOnly) return;
     const fitted = fitEventPresetToCanvas(buildEventPreset(preview.id, point, preview, () => genId("event-item")), canvasW, canvasH);
+    const proposedIds = new Set(fitted.map(item => item.id));
+    const placementIssues = validateEventLayout({ furniture: [...eventFurniture, ...fitted], canvasWidth: canvasW, canvasHeight: canvasH, blockedRegions: protectedRegions }).filter(issue => issue.itemIds.some(id => proposedIds.has(id)) && (issue.severity === "critical" || issue.code === "overlap"));
+    if (placementIssues.length) { setPlacementError(`${placementIssues[0].message} Move the preview to clear space, reduce the total chairs, or adjust chairs per row.`); return; }
+    setPlacementError(null);
     const usedNames = eventFurniture.map((item) => item.name);
     const placed = fitted.map((item) => {
       const name = getUniqueEventObjectName(item.name, usedNames);
@@ -1468,10 +1486,10 @@ export function EventFloorEditor({
 
   const applyFurnitureLayout = useCallback((action: LayoutAction) => {
     if (readOnly || selectedFurnitureIds.length < 2) return;
-    const nextFurniture = applyLayoutAction(eventFurniture, selectedFurnitureIds, action);
+    const nextFurniture = applyLayoutAction(eventFurniture, selectedFurnitureIds, action, { width: canvasW, height: canvasH });
     setEventFurniture(nextFurniture);
     pushHistory(nextFurniture, eventLabels);
-  }, [eventFurniture, eventLabels, pushHistory, readOnly, selectedFurnitureIds]);
+  }, [canvasH, canvasW, eventFurniture, eventLabels, pushHistory, readOnly, selectedFurnitureIds]);
 
   const selectTool = useCallback((tool: EventTool) => {
     temporarySelectRef.current = null;
@@ -1480,6 +1498,19 @@ export function EventFloorEditor({
     setPresetPreview(null);
     setSelectionArrangeOpen(false);
   }, []);
+
+  const handleTutorialStepChange = useCallback((step: number | null) => {
+    if (step === 1) {
+      if (tutorialPreviousToolRef.current === null) tutorialPreviousToolRef.current = activeTool;
+      selectTool("furniture");
+      return;
+    }
+    if ((step === 0 || step === null) && tutorialPreviousToolRef.current !== null) {
+      const previousTool = tutorialPreviousToolRef.current;
+      tutorialPreviousToolRef.current = null;
+      selectTool(previousTool);
+    }
+  }, [activeTool, selectTool]);
 
   useEffect(() => {
     if (!selectionAllFurniture || selectedFurnitureIds.length < 2) setSelectionArrangeOpen(false);
@@ -2125,6 +2156,7 @@ export function EventFloorEditor({
           </div>
         </div>
         {!readOnly && <div className="flex w-full items-center justify-end gap-1.5 sm:w-auto sm:gap-2">
+          {tutorialAccountId && <EventEditorTutorial key={tutorialAccountId} accountId={tutorialAccountId} onStepChange={handleTutorialStepChange} />}
           {/* Undo/Redo */}
           <button
             onClick={undo}
@@ -2150,8 +2182,10 @@ export function EventFloorEditor({
           >
             <Trash2 className="h-3.5 w-3.5" />
           </button>
+          {saveStatus && <span data-event-tour="save-status" role="status" className="text-[10px] text-muted-foreground">{saveStatus}</span>}
           {/* Save */}
           <button
+            data-event-tour="save"
             onClick={handleSave}
             disabled={busy}
             className="flex items-center gap-1.5 h-8 px-2.5 sm:px-3 rounded-xl border border-border text-[11px] sm:text-xs font-bold text-foreground hover:bg-muted transition-all disabled:opacity-50"
@@ -2161,6 +2195,7 @@ export function EventFloorEditor({
           </button>
           {/* Submit */}
           <button
+            data-event-tour="submit"
             onClick={handleSubmit}
             disabled={busy}
             className="flex items-center gap-1.5 h-8 px-3 sm:px-4 rounded-xl bg-primary text-primary-foreground text-[11px] sm:text-xs font-bold hover:bg-primary/90 transition-all disabled:opacity-50"
@@ -2182,6 +2217,7 @@ export function EventFloorEditor({
           return (
             <button
               key={tool.id}
+              data-event-tour={tool.id === "furniture" ? "furniture" : undefined}
               onClick={() => selectTool(tool.id)}
               aria-pressed={effectiveTool === tool.id}
               title={tool.id === "select" ? "Select (V to switch; hold V for temporary Select)" : tool.id === "text" ? "Label (T)" : `${tool.label}${tool.id === "pan" ? " (Space or middle mouse also pans)" : ""}`}
@@ -2198,6 +2234,7 @@ export function EventFloorEditor({
           );
         })}
         <button
+          data-event-tour="objects"
           type="button"
           aria-label={objectListOpen ? "Hide event objects" : "Show event objects"}
           aria-expanded={objectListOpen}
@@ -2257,6 +2294,7 @@ export function EventFloorEditor({
       <div data-testid="event-editor-workspace" className="flex min-h-0 min-w-0 flex-1">
       <div
         ref={canvasRef}
+        data-event-tour="canvas"
         tabIndex={0}
         aria-label="Event layout canvas"
         className="min-h-0 min-w-0 flex-1 overflow-hidden relative select-none cursor-crosshair outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/40"
@@ -2289,8 +2327,9 @@ export function EventFloorEditor({
         onDrop={handleCanvasDrop}
       >
         {!readOnly && activeTool === "furniture" && (
-          <div
+            <div
             data-testid="event-asset-dock"
+            data-event-tour="asset-picker"
             data-event-editor-chrome
             className="event-asset-dock absolute left-3 top-3 z-40 max-w-[calc(100%-1.5rem)]"
             onClick={(event) => event.stopPropagation()}
@@ -2311,6 +2350,7 @@ export function EventFloorEditor({
               <div className="flex max-w-full items-center gap-2 rounded-2xl border border-border/80 bg-card/95 p-2 shadow-xl backdrop-blur-sm">
                 <button
                   type="button"
+                  data-event-tour="arrange"
                   aria-expanded={presetMenuOpen}
                   aria-label="Arrange event layout"
                   onClick={() => setPresetMenuOpen((current) => !current)}
@@ -2342,7 +2382,8 @@ export function EventFloorEditor({
                             : { x: canvasW / 2, y: canvasH / 2 };
                           setPresetPreview({
                             id: preset.id,
-                            count: preset.id === "chair-row" ? 6 : 1,
+                            count: preset.id === "chair-row" ? 10 : 1,
+                            chairsPerRow: 5,
                             spacing: preset.id === "chair-row" ? 34 : 180,
                             rotation: 0,
                             point: point ?? { x: canvasW / 2, y: canvasH / 2 },
@@ -2359,6 +2400,7 @@ export function EventFloorEditor({
                 </div>
               )}
             </div>
+            {placementError && <p role="alert" className="absolute bottom-4 left-4 z-50 max-w-sm rounded-xl border border-destructive bg-card p-3 text-xs text-destructive">{placementError}</p>}
             {presetPreview && (
               <div
                 data-testid="event-preset-controls"
@@ -2375,13 +2417,14 @@ export function EventFloorEditor({
                     <p className="text-xs font-bold text-foreground">{EVENT_LAYOUT_PRESETS.find((preset) => preset.id === presetPreview.id)?.name} preview</p>
                     <p className="text-[10px] text-muted-foreground">Move over the map, then click to place. Esc cancels.</p>
                   </div>
-                  <button type="button" onClick={() => setPresetPreview(null)} aria-label="Cancel preset preview" className="rounded-lg px-2 py-1 text-xs font-bold text-muted-foreground hover:bg-muted">Cancel</button>
+                  <button type="button" onClick={() => { setPresetPreview(null); setPlacementError(null); }} aria-label="Cancel preset preview" className="rounded-lg px-2 py-1 text-xs font-bold text-muted-foreground hover:bg-muted">Cancel</button>
                 </div>
                 <div className="grid grid-cols-3 gap-2">
                   <label className="text-[10px] font-bold text-muted-foreground">
                     {presetPreview.id === "chair-row" ? "Chairs" : "Copies"}
-                    <input type="number" aria-label="Preset item count" min="1" max="30" value={presetPreview.count} onChange={(event) => setPresetPreview((current) => current ? { ...current, count: Math.max(1, Math.min(30, Number(event.target.value) || 1)) } : null)} className="mt-1 h-9 w-full rounded-lg border border-border bg-background px-2 text-xs text-foreground" />
+                    <input type="number" aria-label="Preset item count" min="1" max={presetPreview.id === "chair-row" ? 500 : 30} value={presetPreview.count} onChange={(event) => setPresetPreview((current) => current ? { ...current, count: Math.max(1, Math.min(current.id === "chair-row" ? 500 : 30, Number(event.target.value) || 1)) } : null)} className="mt-1 h-9 w-full rounded-lg border border-border bg-background px-2 text-xs text-foreground" />
                   </label>
+                  {presetPreview.id === "chair-row" && <label className="text-[10px] font-bold text-muted-foreground">Chairs per row<input type="number" aria-label="Chairs per row" min="1" max="30" value={presetPreview.chairsPerRow ?? 5} onChange={(event) => setPresetPreview(current => current ? { ...current, chairsPerRow: Math.max(1, Math.min(30, Number(event.target.value) || 1)) } : null)} className="mt-1 h-9 w-full rounded-lg border border-border bg-background px-2 text-xs text-foreground" /></label>}
                   <label className="text-[10px] font-bold text-muted-foreground">
                     Spacing
                     <input type="number" aria-label="Preset spacing" min="20" max="240" step="5" value={presetPreview.spacing} onChange={(event) => setPresetPreview((current) => current ? { ...current, spacing: Math.max(20, Math.min(240, Number(event.target.value) || 20)) } : null)} className="mt-1 h-9 w-full rounded-lg border border-border bg-background px-2 text-xs text-foreground" />
@@ -2701,6 +2744,14 @@ export function EventFloorEditor({
             />
           ))}
 
+          {placementGuides && <svg data-testid="event-placement-guides" aria-hidden="true" width={canvasW} height={canvasH} className="pointer-events-none absolute inset-0 z-40 overflow-visible" style={{ pointerEvents: "none" }}>
+            {placementGuides.alignments.map((guide) => <line key={`alignment-${guide.axis}`} data-testid={`event-alignment-guide-${guide.axis}`} x1={guide.axis === "x" ? guide.value : guide.from} y1={guide.axis === "x" ? guide.from : guide.value} x2={guide.axis === "x" ? guide.value : guide.to} y2={guide.axis === "x" ? guide.to : guide.value} stroke="var(--primary, #153176)" strokeWidth={1.5 / zoom} strokeDasharray={`${4 / zoom} ${3 / zoom}`} />)}
+            {placementGuides.gaps.map((guide) => <g key={`gap-${guide.axis}`}>
+              <line x1={guide.axis === "x" ? guide.from : guide.cross} y1={guide.axis === "x" ? guide.cross : guide.from} x2={guide.axis === "x" ? guide.to : guide.cross} y2={guide.axis === "x" ? guide.cross : guide.to} stroke="#0369a1" strokeWidth={1 / zoom} />
+              <text x={guide.axis === "x" ? (guide.from + guide.to) / 2 : guide.cross + 6 / zoom} y={guide.axis === "x" ? guide.cross - 6 / zoom : (guide.from + guide.to) / 2} textAnchor={guide.axis === "x" ? "middle" : "start"} fontSize={11 / zoom} fontWeight={600} fill="#0369a1" stroke="var(--card, white)" strokeWidth={3 / zoom} paintOrder="stroke">{Math.round(guide.distance * 10) / 10} map units</text>
+            </g>)}
+          </svg>}
+
           {marquee && (
             <div
               data-testid="event-selection-marquee"
@@ -2773,31 +2824,7 @@ export function EventFloorEditor({
                   >
                     <RotateCw className="h-4 w-4" aria-hidden="true" />
                   </button>
-                  {RESIZE_HANDLE_DIRECTIONS.map((handle) => (
-                    <button
-                      key={handle}
-                      type="button"
-                      data-testid={handle === "se" ? "event-furniture-resize-handle" : `event-furniture-resize-handle-${handle}`}
-                      aria-label={`Resize ${f.name} from ${handle}`}
-                      title={`Resize ${f.name}`}
-                      className={cn(
-                        "absolute z-30 flex items-center justify-center rounded-full bg-transparent p-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary",
-                        RESIZE_HANDLE_POSITION[handle],
-                        effectiveTool === "pan" && (isPanning || pinchActive ? "cursor-grabbing" : "cursor-grab"),
-                      )}
-                      style={getEventResizeHandleStyle(handle, resizeMetrics.hitSize)}
-                      onPointerDown={(e) => beginPointerGesture(e, () => {
-                        if (effectiveTool === "pan" || e.button === 1) handlePanStart(e);
-                        else handleResizeStart(e, f, handle);
-                      }, "handle")}
-                    >
-                      <span
-                        aria-hidden="true"
-                        className="pointer-events-none block rounded-full border-2 border-primary bg-card shadow-sm"
-                        style={{ width: resizeMetrics.handleSize, height: resizeMetrics.handleSize }}
-                      />
-                    </button>
-                  ))}
+
                 </>
               )}
               </div>
@@ -2989,8 +3016,8 @@ export function EventFloorEditor({
           </div>
         )}
       </div>
-      {!readOnly && !inspectorViewportCompact && (
-        <aside data-testid="event-item-inspector-rail" aria-label="Event item inspector rail" className="flex w-[22rem] shrink-0 flex-col overflow-y-auto border-l border-border bg-card p-4">
+      {!readOnly && !inspectorViewportCompact && inspectorOpen && hasInspectorSelection && (
+        <aside data-testid="event-item-inspector-rail" aria-label="Event item inspector rail" className="flex w-[17rem] shrink-0 flex-col overflow-y-auto border-l border-border bg-card p-4">
           {selectedIds.length > 1 ? (
             <div className="rounded-2xl border border-primary/20 bg-primary/5 p-4">
               <h3 className="text-sm font-extrabold text-foreground">Bulk selection</h3>

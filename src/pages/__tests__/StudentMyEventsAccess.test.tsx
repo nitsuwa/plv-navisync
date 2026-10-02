@@ -55,6 +55,18 @@ vi.mock("../../services/eventOverlayService", () => ({
 }));
 
 describe("StudentMyEventsPage access", () => {
+  it("offers copying an existing event layout into a new draft", async () => {
+    authState.isStudentOrg = true;
+    authState.profile = { id: "org-1" };
+    publishedCampusState.activeCampus = { id: "campus", name: "Campus", publishStatus: "published", buildings: [] };
+    publishedCampusState.campuses = [publishedCampusState.activeCampus];
+    publishedCampusState.loading = false;
+    publishedCampusState.error = null;
+    publishedCampusState.isCached = false;
+    vi.mocked(eventOverlayService.listEventOverlays).mockResolvedValueOnce([{ id: "event", campusId: "campus", title: "Fair", organizer: "Org", status: "draft", locations: [{ id: "loc", locationRef: { type: "campus", label: "Campus Grounds" }, eventFurniture: [], eventLabels: [] }] }] as never);
+    render(<MemoryRouter><StudentMyEventsPage /></MemoryRouter>);
+    expect(await screen.findByRole("button", { name: /duplicate layout/i })).toBeInTheDocument();
+  });
   it("redirects regular students to Home without showing a restricted-feature message", async () => {
     authState.isStudent = true;
     authState.isStudentOrg = false;
@@ -138,6 +150,7 @@ describe("StudentMyEventsPage access", () => {
     publishedCampusState.activeCampus = {
       id: "campus-published",
       name: "Published Campus",
+      publishStatus: "published",
       buildings: [
         { id: "visible", name: "Visible Building", visible: true, floors: [{ id: "visible-f1", buildingId: "visible", number: 1, label: "Ground Floor", rooms: [] }] },
         { id: "hidden", name: "Hidden Building", visible: false, floors: [{ id: "hidden-f1", buildingId: "hidden", number: 1, label: "Ground Floor", rooms: [] }] },
@@ -160,7 +173,7 @@ describe("StudentMyEventsPage access", () => {
 
     const createButton = await screen.findByRole("button", { name: "Create event" });
     expect(eventOverlayService.listEventOverlays).toHaveBeenCalledWith({
-      campusId: "campus-published",
+      allCampuses: true,
       createdByUserId: "org-1",
     });
     fireEvent.click(createButton);

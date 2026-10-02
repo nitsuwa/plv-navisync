@@ -24,6 +24,12 @@ const multiBuildingOptions = [
 ];
 
 describe("EventLocationPicker", () => {
+  it("offers floors directly without the building-add cycle", () => {
+    render(<EventLocationPicker buildings={buildings} locations={[]} onChange={vi.fn()} />);
+    expect(screen.getByRole("checkbox", { name: "Science Building — Floor 2" })).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Search buildings"), { target: { value: "missing" } });
+    expect(screen.queryByRole("checkbox", { name: "Science Building — Floor 2" })).not.toBeInTheDocument();
+  });
   it("adds campus grounds and a building floor, then removes only the selected request", () => {
     let selected: EventLocationRef[] = [];
     const onChange = vi.fn((next: EventLocationRef[]) => {

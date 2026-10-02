@@ -133,6 +133,21 @@ export const ADMIN_ACTIVITY_CATALOG: Record<string, ActivityCopy> = {
     activity: (c) => `${c.targetName ? quoted(c.targetName) : "An event overlay"} was approved${campusSuffix(c)}.`,
     notification: (c) => `${c.targetName ? quoted(c.targetName) : "An event overlay"} was approved.`,
   },
+  "event_overlay.published": {
+    title: "Event map published", category: "Events",
+    activity: (c) => `${c.targetName ? quoted(c.targetName) : "An event map"} was published to student maps${campusSuffix(c)}${actorSuffix(c)}.`,
+    notification: (c) => `${c.targetName ? quoted(c.targetName) : "An event map"} was published to student maps.`,
+  },
+  "event_overlay.publication_scheduled": {
+    title: "Event map publication scheduled", category: "Events",
+    activity: (c) => `${c.targetName ? quoted(c.targetName) : "An event map"} was scheduled for student publication${campusSuffix(c)}${actorSuffix(c)}.`,
+    notification: (c) => `${c.targetName ? quoted(c.targetName) : "An event map"} was scheduled for student publication.`,
+  },
+  "event_overlay.unpublished": {
+    title: "Event map unpublished", category: "Events",
+    activity: (c) => `${c.targetName ? quoted(c.targetName) : "An event map"} was removed from student maps${campusSuffix(c)}${actorSuffix(c)}.`,
+    notification: (c) => `${c.targetName ? quoted(c.targetName) : "An event map"} was removed from student maps.`,
+  },
   "event_overlay.disapproved": {
     title: "Event overlay not approved", category: "Events",
     activity: (c) => `${c.targetName ? quoted(c.targetName) : "An event overlay"} was not approved${campusSuffix(c)}.`,

@@ -236,16 +236,109 @@ describe("event layout geometry", () => {
     expect(resolveLayoutMoveFromSnapshot(snapshot, { x: 500, y: 10 }).delta.x).toBe(0);
   });
 
-  it("aligns selected items without changing dimensions or unselected items", () => {
+  it("aligns visual top edges while preserving dimensions, rotation, and unselected items", () => {
     const result = applyLayoutAction(items, ["a", "b"], "align-top");
     expect(result[0]).toMatchObject({ x: 10, y: 20, width: 20, height: 10, rotation: 15 });
-    expect(result[1]).toMatchObject({ x: 60, y: 20, width: 30, height: 20 });
+    expect(result[1].y).toBeCloseTo(25 - (Math.sin(15 * Math.PI / 180) * 20 + Math.cos(15 * Math.PI / 180) * 10) / 2);
+    expect(result[1]).toMatchObject({ x: 60, width: 30, height: 20 });
     expect(result[2]).toEqual(items[2]);
+  });
+
+  it("aligns rotated visual left edges and supports two selected items", () => {
+    const selected = [
+      { id: "rotated", x: 20, y: 10, width: 40, height: 20, rotation: 90 },
+      { id: "plain", x: 100, y: 40, width: 30, height: 20 },
+      { id: "untouched", x: 150, y: 50, width: 10, height: 10 },
+    ];
+
+    const result = applyLayoutAction(selected, ["rotated", "plain"], "align-left");
+
+    expect(result[0].x + result[0].width / 2 - 20 / 2).toBeCloseTo(30);
+    expect(result[1].x).toBe(30);
+    expect(result[2]).toEqual(selected[2]);
+  });
+
+  it("aligns selected item centers to the center of their visual selection bounds", () => {
+    const selected = [
+      { id: "rotated", x: 20, y: 10, width: 40, height: 20, rotation: 90 },
+      { id: "plain", x: 100, y: 40, width: 30, height: 20 },
+    ];
+
+    const result = applyLayoutAction(selected, ["rotated", "plain"], "align-center");
+
+    expect(result.map((item) => item.x + item.width / 2)).toEqual([80, 80]);
+  });
+
+  it("aligns rotated visual top edges", () => {
+    const selected = [
+      { id: "rotated", x: 20, y: 10, width: 20, height: 40, rotation: 90 },
+      { id: "plain", x: 100, y: 80, width: 30, height: 20 },
+    ];
+
+    const result = applyLayoutAction(selected, ["rotated", "plain"], "align-top");
+
+    expect(result[0].y + result[0].height / 2 - 20 / 2).toBe(20);
+    expect(result[1].y).toBe(20);
+  });
+
+  it("aligns selected item centers to the center of their visual vertical bounds", () => {
+    const selected = [
+      { id: "rotated", x: 20, y: 10, width: 20, height: 40, rotation: 90 },
+      { id: "plain", x: 100, y: 80, width: 30, height: 20 },
+    ];
+
+    const result = applyLayoutAction(selected, ["rotated", "plain"], "align-middle");
+
+    expect(result.map((item) => item.y + item.height / 2)).toEqual([60, 60]);
+  });
+
+  it("keeps aligned visual bounds inside the map when bounds are supplied", () => {
+    const selected = [
+      { id: "first", x: -20, y: -10, width: 20, height: 20 },
+      { id: "second", x: 60, y: 60, width: 20, height: 20 },
+    ];
+
+    const left = applyLayoutAction(selected, ["first", "second"], "align-left", { width: 100, height: 100 });
+    const top = applyLayoutAction(selected, ["first", "second"], "align-top", { width: 100, height: 100 });
+
+    expect(left.map((item) => item.x)).toEqual([0, 0]);
+    expect(top.map((item) => item.y)).toEqual([0, 0]);
+  });
+
+  it("clamps center alignments to the map when the selected group starts outside it", () => {
+    const selected = [
+      { id: "first", x: -130, y: 170, width: 20, height: 20 },
+      { id: "second", x: -90, y: 210, width: 20, height: 20 },
+    ];
+
+    const center = applyLayoutAction(selected, ["first", "second"], "align-center", { width: 100, height: 100 });
+    const middle = applyLayoutAction(selected, ["first", "second"], "align-middle", { width: 100, height: 100 });
+
+    expect(center.map((item) => item.x + item.width / 2)).toEqual([10, 10]);
+    expect(middle.map((item) => item.y + item.height / 2)).toEqual([90, 90]);
   });
 
   it("distributes three selected items with equal gaps", () => {
     const result = applyLayoutAction(items, ["a", "b", "c"], "distribute-horizontal");
-    expect(result.map((item) => item.x)).toEqual([10, 60, 120]);
+    const horizontalEdges = result.map((item) => {
+      const radians = (item.rotation ?? 0) * Math.PI / 180;
+      const width = Math.abs(Math.cos(radians)) * item.width + Math.abs(Math.sin(radians)) * item.height;
+      const centerX = item.x + item.width / 2;
+      return { left: centerX - width / 2, right: centerX + width / 2 };
+    });
+
+    expect(horizontalEdges[1].left - horizontalEdges[0].right).toBeCloseTo(horizontalEdges[2].left - horizontalEdges[1].right);
+  });
+
+  it("distributes two selected items vertically as an evenly spaced column", () => {
+    const selected = [
+      { id: "first", x: 20, y: 10, width: 20, height: 20 },
+      { id: "second", x: 50, y: 30, width: 20, height: 20 },
+    ];
+
+    const result = applyLayoutAction(selected, ["first", "second"], "distribute-vertical", { width: 100, height: 100 });
+
+    expect(result.map((item) => item.y)).toEqual([2, 38]);
   });
 
   it("returns null for an empty selection and bounds selected items", () => {

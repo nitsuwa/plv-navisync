@@ -60,13 +60,11 @@ export function EventItemInspector({
         </div>
       ) : furniture ? (
         <>
-          <p className="-mt-2 text-xs leading-5 text-muted-foreground">Adjust exact placement, size, and order without dragging.</p>
+          <p className="-mt-2 text-xs leading-5 text-muted-foreground">Fixed size: {furniture.width} × {furniture.height} map units. Move and rotate without resizing.</p>
           <div className="grid grid-cols-2 gap-3">
             {([
               ["X", furniture.x, (value: number) => onUpdateFurniture({ x: Math.max(0, Math.min(canvasWidth - furniture.width, value)) })],
               ["Y", furniture.y, (value: number) => onUpdateFurniture({ y: Math.max(0, Math.min(canvasHeight - furniture.height, value)) })],
-              ["Width", furniture.width, (value: number) => onUpdateFurniture({ width: Math.max(4, Math.min(canvasWidth, value)) })],
-              ["Height", furniture.height, (value: number) => onUpdateFurniture({ height: Math.max(4, Math.min(canvasHeight, value)) })],
               ["Rotation", Math.round(furniture.rotation || 0), (value: number) => onUpdateFurniture({ rotation: ((value % 360) + 360) % 360 })],
             ] as Array<[string, number, (value: number) => void]>).map(([field, value, update]) => (
               <label key={field} className="flex min-w-0 flex-col gap-1.5 text-xs font-bold text-muted-foreground">

@@ -10,6 +10,7 @@ import type { CampusEventOverlay, EventLocationRef } from "../map-builder/types"
 import type { EventBuildingOption } from "../../lib/eventLocationData";
 import { EventLocationPicker } from "./EventLocationPicker";
 import { useToast } from "../../hooks/useToast";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../app/components/ui/select";
 
 const inputClass =
   "w-full h-10 px-4 rounded-xl border border-border bg-input-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary/30";
@@ -171,7 +172,7 @@ function DetailsFields({
   return (
     <div className="space-y-4">
       <div className="rounded-xl border border-primary/20 bg-primary/5 px-4 py-3 text-xs text-foreground leading-relaxed">
-        Start with the event information. Dates are not required for this proposal; the administrator reviews the requested locations and maps together.
+        Start with the event information. The administrator will set the event schedule after reviewing the proposal.
       </div>
       <div>
         <label htmlFor="event-title" className="block text-xs font-bold text-foreground uppercase tracking-wide mb-1.5">Event title *</label>
@@ -201,14 +202,22 @@ function DetailsFields({
 
 export function EventProposalModal({
   buildings,
+  campuses = [],
+  initialCampusId,
   onClose,
   onCreate,
 }: {
   buildings: EventBuildingOption[];
+  campuses?: { id: string; name: string; buildings: EventBuildingOption[] }[];
+  initialCampusId?: string;
   onClose: () => void;
-  onCreate: (data: { title: string; description: string; organizer: string; locations: EventLocationRef[]; posterUrl?: string }) => Promise<void>;
+  onCreate: (data: { title: string; description: string; organizer: string; locations: EventLocationRef[]; posterUrl?: string; campusId?: string }) => Promise<void>;
 }) {
   const [step, setStep] = useState<1 | 2>(1);
+  const [campusId, setCampusId] = useState(campuses.some((campus) => campus.id === initialCampusId) ? initialCampusId! : campuses[0]?.id ?? "");
+  const [pendingCampusId, setPendingCampusId] = useState<string | null>(null);
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const selectedCampus = campuses.find((campus) => campus.id === campusId);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [organizer, setOrganizer] = useState("");
@@ -220,6 +229,11 @@ export function EventProposalModal({
   const submissionInFlightRef = useRef(false);
   const toast = useToast();
   const dirty = Boolean(title.trim() || description.trim() || organizer.trim() || posterFile || locations.length > 0);
+
+  const handleCampusChange = (nextCampusId: string) => {
+    if (locations.length) setPendingCampusId(nextCampusId);
+    else setCampusId(nextCampusId);
+  };
 
   const requestClose = () => {
     if (submissionInFlightRef.current) return;
@@ -249,10 +263,12 @@ export function EventProposalModal({
         organizer: organizer.trim() || "Student Organization",
         locations,
         posterUrl,
+        ...(campusId ? { campusId } : {}),
       });
       toast.success("Event created", "Choose a location and start designing its map.");
       onClose();
     } catch (err) {
+      setReviewOpen(false);
       const message = err instanceof Error ? err.message : "Something went wrong.";
       setError(message);
       toast.error("Create failed", message);
@@ -290,7 +306,7 @@ export function EventProposalModal({
                 Continue <ArrowRight className="inline h-4 w-4 ml-1" />
               </button>
             ) : (
-              <button type="button" onClick={submit} disabled={saving || locations.length === 0} aria-describedby="event-create-help" className="flex-1 h-11 rounded-xl bg-primary text-primary-foreground text-sm font-extrabold hover:bg-primary/90 transition-colors disabled:opacity-40 flex items-center justify-center gap-2">
+              <button type="button" onClick={() => setReviewOpen(true)} disabled={saving || locations.length === 0} aria-describedby="event-create-help" className="flex-1 h-11 rounded-xl bg-primary text-primary-foreground text-sm font-extrabold hover:bg-primary/90 transition-colors disabled:opacity-40 flex items-center justify-center gap-2">
                 {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} Create & design maps
               </button>
             )}
@@ -305,9 +321,29 @@ export function EventProposalModal({
         </>
       ) : (
         <>
-          <EventLocationPicker buildings={buildings} locations={locations} disabled={saving} onChange={(next) => { setLocations(next); setError(""); }} />
+          {campuses.length > 0 && <label className="mb-4 block text-xs font-bold">Published campus
+            <Select value={campusId} disabled={saving} onValueChange={handleCampusChange}>
+              <SelectTrigger aria-label="Published campus" className={cn(inputClass, "mt-2")}>
+                <SelectValue placeholder="Choose a campus" />
+              </SelectTrigger>
+              <SelectContent>
+                {campuses.map((campus) => <SelectItem key={campus.id} value={campus.id}>{campus.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </label>}
+          <EventLocationPicker buildings={selectedCampus?.buildings ?? buildings} locations={locations} disabled={saving} onChange={(next) => { setLocations(next); setError(""); }} />
         </>
       )}
+      <AlertDialog.Root open={reviewOpen} onOpenChange={(open) => { if (!saving) setReviewOpen(open); }}>
+        <AlertDialog.Portal><AlertDialog.Overlay className="fixed inset-0 z-[60] bg-background/70 backdrop-blur-sm" /><AlertDialog.Content className="fixed left-1/2 top-1/2 z-[61] max-h-[85dvh] w-[calc(100%-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-2xl border border-border bg-card p-6 shadow-2xl">
+          <AlertDialog.Title className="text-lg font-bold">Review event proposal</AlertDialog.Title>
+          <AlertDialog.Description className="mt-2 text-sm text-muted-foreground">Confirm the areas where you will design and plot event assets. This creates a draft for review later.</AlertDialog.Description>
+          <dl className="my-4 space-y-2 text-sm"><dt className="font-bold">{title}</dt><dd>{organizer || "Student Organization"}</dd><dd>{selectedCampus?.name || "Published campus"}</dd><dd>Event schedule set by the administrator after review</dd></dl>
+          <p className="text-sm font-bold">{locations.length} maps to design</p><ul className="my-3 space-y-2 text-sm">{locations.map((location, index) => <li key={index} className="rounded-lg bg-muted p-2">{location.label}</li>)}</ul>
+          <div className="flex gap-2"><AlertDialog.Cancel asChild><button disabled={saving} className="flex-1 rounded-xl border border-border p-3 text-sm font-bold">Back to locations</button></AlertDialog.Cancel><button onClick={() => void submit()} disabled={saving} className="flex-1 rounded-xl bg-primary p-3 text-sm font-bold text-primary-foreground">{saving ? "Creating…" : "Confirm & design"}</button></div>
+        </AlertDialog.Content></AlertDialog.Portal>
+      </AlertDialog.Root>
+      <AlertDialog.Root open={pendingCampusId !== null} onOpenChange={(open) => { if (!open) setPendingCampusId(null); }}><AlertDialog.Portal><AlertDialog.Overlay className="fixed inset-0 z-[60] bg-background/70" /><AlertDialog.Content className="fixed left-1/2 top-1/2 z-[61] w-[calc(100%-2rem)] max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-border bg-card p-6"><AlertDialog.Title className="font-bold">Change campus?</AlertDialog.Title><AlertDialog.Description className="my-3 text-sm text-muted-foreground">Selected locations belong to the current campus. Changing campus clears them; your event details stay.</AlertDialog.Description><div className="flex gap-3"><AlertDialog.Cancel asChild><button className="rounded-lg border p-2">Keep campus</button></AlertDialog.Cancel><AlertDialog.Action asChild><button className="rounded-lg bg-primary p-2 text-primary-foreground" onClick={() => { setCampusId(pendingCampusId!); setLocations([]); setPendingCampusId(null); }}>Change and clear</button></AlertDialog.Action></div></AlertDialog.Content></AlertDialog.Portal></AlertDialog.Root>
     </ModalShell>
   );
 }
@@ -342,6 +378,7 @@ export function EventDetailsModal({
   };
 
   const save = async () => {
+    if (saving) return;
     if (!title.trim()) { setError("Event title is required."); return; }
     if (!locations.length) { setError("Select at least one requested location."); return; }
     setSaving(true);

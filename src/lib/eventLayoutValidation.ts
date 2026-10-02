@@ -1,4 +1,4 @@
-import type { FloorFurniture } from "../components/map-builder/types";
+import type { FloorFurniture, FloorPlan } from "../components/map-builder/types";
 
 export interface LayoutWarning {
   code: "outside-boundary" | "overlap" | "blocked-access" | "narrow-aisle";
@@ -137,4 +137,12 @@ export function validateEventLayout(input: {
   }
 
   return warnings;
+}
+
+/** Conservative clearance footprints for authored entrances and permanent assets. */
+export function eventProtectedAccessRegions(floor: Pick<FloorPlan, "doors" | "furniture">): Array<Rect & { label: string }> {
+  return [
+    ...(floor.doors ?? []).filter(door => door.visible !== false).map(door => ({ x: door.x - door.width / 2, y: door.y - door.width / 2, width: door.width, height: door.width, label: `${door.isEmergencyExit ? "Emergency exit" : "Entrance"} ${door.label || door.id}` })),
+    ...(floor.furniture ?? []).filter(item => item.visible !== false).map(item => ({ ...polygonBounds(rotatedRectPoints(item)), label: `Permanent asset: ${item.name}` })),
+  ];
 }

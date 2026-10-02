@@ -73,6 +73,7 @@ export function getEventLayoutPreset(id: EventLayoutPresetId): EventLayoutPreset
 
 export interface EventPresetPlacementOptions {
   count: number;
+  chairsPerRow?: number;
   spacing: number;
   rotation: number;
 }
@@ -84,10 +85,11 @@ export function buildEventPreset(
   options: EventPresetPlacementOptions,
   nextId: () => string,
 ): FloorFurniture[] {
-  const count = Math.max(1, Math.min(30, Math.round(options.count) || 1));
+  const count = Math.max(1, Math.min(id === "chair-row" ? 500 : 30, Math.round(options.count) || 1));
   const spacing = Math.max(20, Math.min(240, Number(options.spacing) || 20));
+  const chairsPerRow = Math.max(1, Math.min(count, Math.round(options.chairsPerRow ?? count)));
   const base = id === "chair-row"
-    ? Array.from({ length: count }, (_, index) => place("chair", index * spacing, 0, nextId))
+    ? Array.from({ length: count }, (_, index) => place("chair", (index % chairsPerRow) * spacing, Math.floor(index / chairsPerRow) * Math.max(40, spacing), nextId))
     : Array.from({ length: count }, (_, index) => getEventLayoutPreset(id).create({ x: index * spacing, y: 0 }, nextId)).flat();
   if (base.length === 0) return base;
   const left = Math.min(...base.map((item) => item.x));

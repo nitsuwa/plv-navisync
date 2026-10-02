@@ -4,6 +4,8 @@ import { createPortal } from "react-dom";
 import { useEscToClose } from "../../hooks/useEscToClose";
 import type { CampusEventOverlay } from "../map-builder/types";
 
+import { formatEventDate } from "../../lib/eventPublication";
+
 interface EventInfoPanelProps {
   event: CampusEventOverlay;
   onClose: () => void;
@@ -62,6 +64,7 @@ export function EventInfoPanel({ event, onClose, onNavigate }: EventInfoPanelPro
           </div>
         )}
 
+        <p className="mb-3 text-xs text-muted-foreground">{formatEventDate(event.dateStart)} – {formatEventDate(event.dateEnd)} (Asia/Manila)</p>
         <div className="space-y-3 mb-6 bg-muted/30 p-4 rounded-2xl border border-border/50">
           <div className="flex items-start gap-3">
             <MapPin className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />

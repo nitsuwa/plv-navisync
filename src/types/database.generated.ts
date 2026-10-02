@@ -1465,6 +1465,37 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      list_published_event_previews: {
+        Args: { p_campus_id: string }
+        Returns: Json
+      }
+      review_event_layout: {
+        Args: {
+          p_admin_comment: string | null
+          p_date_end: string | null
+          p_date_start: string | null
+          p_decision: string
+          p_expected_updated_at: string
+          p_location_feedback: Json | null
+          p_overlay_id: string
+          p_publication_at: string | null
+          p_publication_mode: string | null
+        }
+        Returns: Json
+      }
+      manage_event_publication: {
+        Args: {
+          p_action: string
+          p_expected_updated_at: string
+          p_overlay_id: string
+          p_publication_at?: string | null
+        }
+        Returns: Json
+      }
+      list_event_safe_published_campuses: {
+        Args: Record<PropertyKey, never>
+        Returns: { campus_id: string; snapshot: Json; published_at: string | null }[]
+      }
       admin_update_profile: {
         Args: {
           p_department: string

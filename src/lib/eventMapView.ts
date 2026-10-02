@@ -1,0 +1,122 @@
+import type { Campus, CampusBuilding, CampusEventOverlay, EventOverlayLocation, FloorPlan } from "../components/map-builder/types";
+import { floorLookupId } from "./eventLocationData";
+import { getStudentEventPhase } from "./eventPublication";
+import type { EventMapFilter, PublicEventPreview } from "../types/eventPreview";
+
+export type VisibleEventCard = PublicEventPreview & { phase: "upcoming" | "ongoing" };
+
+export type ResolvedEventLocation =
+  | { kind: "campus"; canvasW: number; canvasH: number }
+  | { kind: "floor"; buildingId: string; floorNumber: number; floor: FloorPlan; roomId?: string };
+
+export interface EventVenue {
+  id: string;
+  type: "campus" | "building";
+  x: number;
+  y: number;
+  label: string;
+  eventIds: string[];
+  locations: Array<{ eventId: string; locationId: string }>;
+}
+
+export function visibleEventCards(
+  events: PublicEventPreview[],
+  nowMs: number,
+  filter: EventMapFilter,
+): VisibleEventCard[] {
+  return events.flatMap((event) => {
+    const phase = getStudentEventPhase(event, nowMs);
+    if ((phase !== "upcoming" && phase !== "ongoing") || (filter !== "all" && filter !== phase)) return [];
+    return [{ ...event, phase }];
+  }).sort((a, b) => {
+    if (a.phase !== b.phase) return a.phase === "ongoing" ? -1 : 1;
+    if (a.phase === "upcoming" && b.phase === "upcoming") {
+      const startOrder = Date.parse(a.dateStart) - Date.parse(b.dateStart);
+      if (startOrder) return startOrder;
+    }
+    return a.title.localeCompare(b.title) || a.id.localeCompare(b.id);
+  });
+}
+
+export function resolveEventLocation(
+  campus: Campus,
+  locationRef: PublicEventPreview["locations"][number]["locationRef"],
+): ResolvedEventLocation | null {
+  if (locationRef.type === "campus") return { kind: "campus", canvasW: campus.canvasW, canvasH: campus.canvasH };
+  if (!locationRef.buildingId || !locationRef.floorId) return null;
+  const building = campus.buildings.find((item) => item.id === locationRef.buildingId && item.visible !== false);
+  if (!building) return null;
+  const floor = building.floors.find((item) => floorLookupId(building.id, item.number) === locationRef.floorId);
+  if (!floor) return null;
+  if (locationRef.roomId && !floor.rooms.some((room) => room.id === locationRef.roomId)) return null;
+  return { kind: "floor", buildingId: building.id, floorNumber: floor.number, floor, roomId: locationRef.roomId };
+}
+
+function buildingAt(campus: Campus, building: CampusBuilding): { x: number; y: number } {
+  return { x: building.x + building.width / 2, y: building.y + building.height / 2 };
+}
+
+export function buildEventVenues(campus: Campus, events: PublicEventPreview[]): EventVenue[] {
+  const venues = new Map<string, EventVenue>();
+  for (const event of events) {
+    for (const location of event.locations) {
+      const resolved = resolveEventLocation(campus, location.locationRef);
+      if (!resolved) continue;
+      let id: string, type: EventVenue["type"], x: number, y: number, label: string;
+      if (resolved.kind === "campus") {
+        id = "campus"; type = "campus";
+        const authoredMarker = campus.markers.find((marker) => /event|grounds|plaza|quad/i.test(`${marker.type} ${marker.name}`));
+        const authoredEventMarker = event.markers.find((marker) => Number.isFinite(marker.x) && Number.isFinite(marker.y));
+        x = authoredEventMarker?.x ?? authoredMarker?.x ?? campus.canvasW / 2;
+        y = authoredEventMarker?.y ?? authoredMarker?.y ?? campus.canvasH / 2;
+        label = authoredEventMarker?.label || authoredMarker?.name || "Campus Grounds (approximate)";
+      } else {
+        const building = campus.buildings.find((item) => item.id === resolved.buildingId)!;
+        id = `building:${building.id}`; type = "building";
+        ({ x, y } = buildingAt(campus, building));
+        label = building.name;
+      }
+      const venue = venues.get(id) ?? { id, type, x, y, label, eventIds: [], locations: [] };
+      if (!venue.eventIds.includes(event.id)) venue.eventIds.push(event.id);
+      venue.locations.push({ eventId: event.id, locationId: location.id });
+      venues.set(id, venue);
+    }
+  }
+  return [...venues.values()];
+}
+
+export function selectedEventLocation(
+  events: PublicEventPreview[],
+  eventId: string | null,
+  locationId: string | null,
+): { event: PublicEventPreview; location: PublicEventPreview["locations"][number] } | null {
+  if (!eventId || !locationId) return null;
+  const event = events.find((item) => item.id === eventId);
+  const location = event?.locations.find((item) => item.id === locationId);
+  return event && location ? { event, location } : null;
+}
+
+export function toEventOverlayPreview(
+  event: PublicEventPreview,
+  location: EventOverlayLocation,
+): CampusEventOverlay {
+  return {
+    id: event.id,
+    campusId: event.campusId,
+    title: event.title,
+    description: event.description,
+    organizer: event.organizer,
+    markers: event.markers,
+    locationRef: location.locationRef,
+    locations: [location],
+    restrictedAreas: [],
+    status: "approved",
+    isActive: true,
+    dateStart: event.dateStart,
+    dateEnd: event.dateEnd,
+    publicationAt: event.publicationAt,
+    eventFurniture: location.eventFurniture,
+    eventLabels: location.eventLabels,
+    posterUrl: event.posterUrl,
+  };
+}

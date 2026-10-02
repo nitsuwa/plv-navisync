@@ -530,7 +530,11 @@ export function AdminLoginPage() {
   };
 
   return (
-    <div className="min-h-screen min-h-[100dvh] flex" style={{ fontFamily: "var(--font-body)" }}>
+    <div
+      data-testid="admin-login-layout"
+      className="relative flex min-h-screen min-h-[100dvh] w-full min-w-0 overflow-x-hidden"
+      style={{ fontFamily: "var(--font-body)" }}
+    >
 
       {/* ══════════ LEFT — full-bleed campus visual (desktop only) ══════════ */}
       <div className="hidden lg:flex lg:flex-1 relative overflow-hidden flex-col justify-between p-10 xl:p-14">
@@ -576,7 +580,10 @@ export function AdminLoginPage() {
       </div>
 
       {/* ══════════ RIGHT — shared login form for phone, tablet, and desktop ══════════ */}
-      <div className="flex min-h-[100dvh] flex-1 lg:max-w-[460px] flex-col bg-background">
+      <div
+        data-testid="admin-login-panel"
+        className="flex min-h-[100dvh] w-full min-w-0 flex-1 flex-col bg-background lg:max-w-[460px]"
+      >
         {/* Top bar */}
         <div className="flex items-center justify-between px-5 sm:px-8 pt-5 sm:pt-6 pb-2">
           <Link to="/" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors">
@@ -586,8 +593,8 @@ export function AdminLoginPage() {
           <ThemeToggle theme={theme} onToggle={toggleTheme}/>
         </div>
 
-        <div className="flex-1 flex items-center justify-center px-5 sm:px-10 py-8 sm:py-10">
-          <div className="w-full max-w-[340px]">
+        <div className="flex w-full min-w-0 flex-1 items-center justify-center px-5 py-8 sm:px-10 sm:py-10">
+          <div data-testid="admin-login-content" className="w-full min-w-0 max-w-[340px]">
 
             {/* PLV Logo — prominently at top */}
             <div className="flex flex-col items-center mb-9">
