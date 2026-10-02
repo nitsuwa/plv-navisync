@@ -11,7 +11,7 @@ describe("RouteStepsPanel", () => {
       dist: 45,
       mins: 1,
       steps: [
-        { id: "exit", icon: "walk", instruction: "Follow the indoor path to the Left Stair." },
+        { id: "exit", icon: "walk", instruction: "Follow the indoor path to the Left Stair.", distanceM: 12 },
         { id: "stairs", icon: "stairs", instruction: transition },
         { id: "leave", icon: "enter", instruction: "Exit CEIT building." },
       ],
@@ -39,6 +39,7 @@ describe("RouteStepsPanel", () => {
     expect(screen.queryByText("Dist")).not.toBeInTheDocument();
     expect(screen.queryByText("Time")).not.toBeInTheDocument();
     expect(screen.queryByText("Via")).not.toBeInTheDocument();
+    expect(screen.queryByText("12 m")).not.toBeInTheDocument();
   });
 
   it("turns legacy waypoint placeholders into directions students can follow", () => {

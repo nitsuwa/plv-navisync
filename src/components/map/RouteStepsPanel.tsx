@@ -4,7 +4,6 @@ import {
 } from "lucide-react";
 import { useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import type { PlannedRoute, RouteMode, RouteStepIcon } from "../../lib/routePlanner";
-import { formatDistance } from "../../lib/routePlanner";
 import { cn } from "../../lib/utils";
 
 const MOBILE_PANEL_MIN_HEIGHT = 190;
@@ -268,11 +267,6 @@ export function RouteStepsPanel({
                   )}>
                     {presentInstruction(step.instruction)}
                   </p>
-                  {step.distanceM !== undefined && (
-                    <span className="text-[10px] text-muted-foreground font-semibold">
-                      {formatDistance(step.distanceM)}
-                    </span>
-                  )}
                 </div>
               </div>
             );
