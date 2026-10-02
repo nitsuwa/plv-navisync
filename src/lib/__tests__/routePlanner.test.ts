@@ -257,7 +257,9 @@ describe("authored destination endpoint combinations", () => {
     const buildingToRoom = planAuthoredDestinationRoute(building("b1", "B1"), targetRoom, "standard", graph);
     expect(buildingToRoom?.destinationRoom?.roomId).toBe("r2");
     expect(buildingToRoom?.toCode).toBe("Room 201");
-    expect(buildingToRoom?.steps.at(-1)?.instruction).toBe("Arrive at Room 201");
+    expect(buildingToRoom?.steps.at(-1)?.instruction).toBe("Arrive at Room 201.");
+    expect(buildingToRoom?.steps.map((step) => step.instruction)).toContain("Take the Stairs to Floor 2.");
+    expect(buildingToRoom?.steps.some((step) => /waypoint/i.test(step.instruction))).toBe(false);
     expect(buildingToRoom?.points.length).toBeLessThan(2);
     expect(buildingToRoom?.indoorSegments?.some((segment) => segment.floorNumber === 2)).toBe(true);
     expect(buildingToRoom?.indoorSegments?.at(-1)?.waypoints.at(-1)).toEqual({ x: 55, y: 0 });
@@ -284,6 +286,7 @@ describe("authored destination endpoint combinations", () => {
       graphWithFloorMetadata,
     );
     expect(buildingToUpperRoom?.indoorSegments?.map((segment) => segment.floorNumber)).toEqual([1, 2]);
+    expect(buildingToUpperRoom?.steps.map((step) => step.instruction)).toContain("Take the Stairs up to Floor 2.");
 
     const sameBuilding = planDestinationRoute(room("b1", "r1", 1, "B1"), room("b1", "r2", 2, "B1"), "standard", graph);
     expect(sameBuilding?.points).toEqual([]);
@@ -296,6 +299,13 @@ describe("authored destination endpoint combinations", () => {
     expect(sameBuilding?.indoorSegments?.at(-1)?.waypoints.at(-1)).toEqual({ x: 55, y: 0 });
     expect(sameBuilding?.indoorSegments?.at(-1)?.waypoints).not.toContainEqual({ x: 70, y: 0 });
     expect(sameBuilding?.steps.some((step) => /Take the stairs/i.test(step.instruction))).toBe(true);
+    expect(sameBuilding?.steps.map((step) => step.instruction)).toEqual([
+      "Start at the door of r1.",
+      "Follow the indoor path to the Stairs.",
+      "Take the Stairs up to Floor 2.",
+      "Follow the indoor path to the door of r2.",
+      "Arrive at r2.",
+    ]);
     const roomToBuilding = planDestinationRoute(room("b1", "r2", 2, "B1"), building("b1", "B1"), "standard", graph);
     expect(roomToBuilding?.destinationRoom).toBeUndefined();
     expect(roomToBuilding?.points.length).toBeLessThan(2);
@@ -319,9 +329,61 @@ describe("authored destination endpoint combinations", () => {
     expect(crossBuilding?.indoorSegments?.[0].waypoints[0]).toEqual({ x: 20, y: 0 });
     expect(crossBuilding?.indoorSegments?.at(-1)?.waypoints.at(-1)).toEqual({ x: 220, y: 0 });
     expect(crossBuilding?.indoorSegments?.at(-1)?.waypoints).not.toContainEqual({ x: 230, y: 0 });
+    expect(crossBuilding?.steps.map((step) => step.instruction)).toEqual([
+      "Start at the door of r1.",
+      "Follow the indoor path to the building exit door.",
+      "Exit B1 building.",
+      "Follow the campus path to the entrance of B2 building.",
+      "Enter B2 building.",
+      "Follow the indoor path to the door of r3.",
+      "Arrive at r3.",
+    ]);
     const emergencyRoute = planDestinationRoute(room("b1", "r2", 2, "B1"), building("b2", "B2"), "emergency", graph);
     expect(emergencyRoute).not.toBeNull();
     expect(emergencyRoute!.steps.some((step) => step.icon === "stairs")).toBe(true);
+  });
+
+  it("keeps routine room routes off emergency-only stairs while preserving them for Emergency mode", () => {
+    const emergencyShortcutGraph: CampusNavGraph = {
+      ...graph,
+      navNodes: [
+        ...(graph.navNodes ?? []),
+        {
+          id: "emergency-path-junction",
+          name: "Emergency Path",
+          type: "walking",
+          x: 150,
+          y: 50,
+        },
+        {
+          id: "exterior-emergency-stair",
+          name: "Right Stair",
+          type: "stair",
+          x: 100,
+          y: 100,
+          exteriorEmergencyStairId: "right-stair",
+          emergencySafe: true,
+        },
+      ],
+      navEdges: [
+        ...(graph.navEdges ?? []),
+        { id: "emergency-shortcut-in", startNodeId: "b1-entry", endNodeId: "exterior-emergency-stair", distance: 1, bidirectional: true, accessible: true, emergencySafe: true },
+        { id: "emergency-shortcut-out", startNodeId: "exterior-emergency-stair", endNodeId: "b2-entry", distance: 1, bidirectional: true, accessible: true, emergencySafe: true },
+        { id: "emergency-layer-in", startNodeId: "b1-entry", endNodeId: "emergency-path-junction", distance: 5, bidirectional: true, accessible: true, emergencySafe: true, type: "emergency" },
+        { id: "emergency-layer-out", startNodeId: "emergency-path-junction", endNodeId: "b2-entry", distance: 5, bidirectional: true, accessible: true, emergencySafe: true, type: "emergency" },
+      ],
+    };
+    const from = room("b1", "r1", 1, "B1");
+    const to = room("b2", "r3", 1, "B2");
+
+    const standardRoute = planDestinationRoute(from, to, "standard", emergencyShortcutGraph);
+    const emergencyRoute = planDestinationRoute(from, to, "emergency", emergencyShortcutGraph);
+
+    expect(standardRoute).not.toBeNull();
+    expect(standardRoute?.points).not.toContainEqual({ x: 100, y: 100 });
+    expect(standardRoute?.points).not.toContainEqual({ x: 150, y: 50 });
+    expect(emergencyRoute?.points).toContainEqual({ x: 100, y: 100 });
+    expect(standardRoute!.dist).toBeGreaterThan(emergencyRoute!.dist);
   });
 
   it("keeps a same-building exterior-stair detour in source → campus → destination order", () => {
@@ -477,7 +539,9 @@ describe("authored destination endpoint combinations", () => {
     expect(route).not.toBeNull();
     expect(route!.points).toEqual([{ x: 0, y: 0 }]);
     expect(route!.toCode).toBe("Room 202");
-    expect(route!.steps.at(-1)?.instruction).toBe("Arrive at Room 202");
+    expect(route!.steps.at(-1)?.instruction).toBe("Arrive at Room 202.");
+    expect(route!.steps.some((step) => /waypoint/i.test(step.instruction))).toBe(false);
+    expect(route!.steps.map((step) => step.instruction)).toContain("Enter B1 building.");
     expect(route!.indoorSegments?.map((segment) => segment.floorId)).toEqual(["f1", "f2"]);
     expect(route!.dist).toBeGreaterThan(0);
     expect(route!.transitions).toContain("Take the stairs to Stairs");

@@ -44,7 +44,7 @@ These came from a full system audit — frozen-spec gaps and adjacent improvemen
 
 | # | Feature | What it does |
 |---|---|---|
-| 1 | **QR Location Sharing** | Real scannable QR code per building encoding `/map?buildingId=<id>` — scanning it on another phone opens the map at that building. Includes a "Copy link" button. Replaces the old fake animated pattern. |
+| 1 | **QR Location Identification** | Students can scan a campus location QR from the map; NaviSync resolves its `locationId` (and optional `campusId`), marks that published outdoor point as **You are here**, and uses it as the route origin. Building panels generate matching scannable marker QR codes with a copy-link fallback; legacy `buildingId` links still open the selected building. |
 | 2 | **Remember Last Viewed Building** | The map remembers the last building you selected (localStorage) and restores it + zoom on your next visit. |
 | 3 | **Usage Analytics** | Anonymous in-browser analytics (page views, searches, planned routes, reports). New **Usage Analytics** card on the admin dashboard with a weekly chart (previously-dead `WeeklyChart` is now live) + top searches / top routes. |
 | 4 | **In-app Notifications** | **Admin:** the notification bell now shows a real activity-log feed with an unread badge. **Student:** when an admin changes a report's status, the student sees a badge + toast ("Report updated — ... is now resolved"). |

@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import type {
   CampusBuilding,
   CampusDecorAsset,
@@ -13,7 +13,7 @@ import { DECOR_ASSET_MAP, groundTypeForDecorType, isDecorAreaType } from "./cons
 import { DecorAssetArt } from "./DecorAssetVisual";
 import { CampusGateVisual } from "./CampusGateVisual";
 import { effectiveStackKey, sortOutdoorGroundAssets } from "../../lib/campusStack";
-import { BUILDING_ENTRANCE_TYPE_COLORS, entranceDisplayName, entranceWorldPosition, normalizeEntranceType } from "../../lib/buildingEntrances";
+import { BUILDING_ENTRANCE_TYPE_COLORS, entranceDisplayName, entranceWorldPosition, normalizeEntranceDirection, normalizeEntranceType } from "../../lib/buildingEntrances";
 import { exteriorEmergencyStairWorldPosition } from "../../lib/exteriorEmergencyStairs";
 import { OutdoorPathNetworkArtwork } from "./OutdoorPathNetworkVisuals";
 import { isCampusGate } from "../../lib/campusGates";
@@ -21,7 +21,7 @@ import type { ReadonlyOutdoorCampus, ReadonlyOutdoorEntrance } from "../../lib/r
 import { surfaceCellRuns } from "../../lib/campusSurface";
 import { campusAreaGroundAppearance, campusGroundAppearance } from "../../lib/campusCanvas";
 import { decorRenderScale, decorWorldSize } from "../../lib/decorVisual";
-import { EntranceDirectionBadge } from "./EntranceDirectionBadge";
+import { EntranceDirectionBadge, entranceDirectionBadgePlacement } from "./EntranceDirectionBadge";
 import { CampusGroundPatternDefs } from "./CampusGroundPatternDefs";
 import { CampusGroundSurface } from "./CampusGroundSurface";
 import { Tooltip } from "../ui/Tooltip";
@@ -415,25 +415,127 @@ export function OutdoorGroundAreaVisual({ asset, gridSize = 20 }: { asset: Campu
   }
   return <OutdoorGroundAreaArtwork asset={asset} gridSize={gridSize} />;
 }
+
+function outdoorEntrancePosition(building: CampusBuilding, entrance: ReadonlyOutdoorEntrance) {
+  return entrance.legacyPosition
+    ? { ...entrance.legacyPosition, angle: 0 }
+    : entranceWorldPosition(building, entrance);
+}
+
+function canEnterOutdoorBuilding(entrance: ReadonlyOutdoorEntrance) {
+  return normalizeEntranceType(entrance.type) !== "emergency_exit"
+    && normalizeEntranceDirection(entrance) !== "exit_only";
+}
+
+function outdoorEntryLabelOrigin(badgePoint: { x: number; y: number; angle: number }) {
+  const radians = (badgePoint.angle * Math.PI) / 180;
+  const outwardX = Math.sin(radians);
+  const outwardY = -Math.cos(radians);
+
+  // Put the pill beyond the direction badge so door and badge symbols cannot
+  // sit on top of its text. Choose the dominant outward axis for rotated walls.
+  if (Math.abs(outwardX) > Math.abs(outwardY)) {
+    return {
+      x: badgePoint.x + (outwardX < 0 ? -96 : 10),
+      y: badgePoint.y - 9,
+    };
+  }
+
+  return {
+    x: badgePoint.x + 9,
+    y: badgePoint.y + (outwardY < 0 ? -28 : 10),
+  };
+}
+
+function outdoorEntryLabelBounds(building: CampusBuilding, entrance: ReadonlyOutdoorEntrance) {
+  const position = outdoorEntrancePosition(building, entrance);
+  const badgePoint = entranceDirectionBadgePlacement(
+    position.x,
+    position.y,
+    entrance.edge,
+    entrance.legacyPosition ? 0 : building.rotation ?? 0,
+  );
+  const origin = outdoorEntryLabelOrigin(badgePoint);
+  // A little breathing room keeps adjacent pills from appearing to touch.
+  return { left: origin.x - 4, right: origin.x + 86 + 4, top: origin.y - 4, bottom: origin.y + 18 + 4 };
+}
+
+function defaultOutdoorEntryLabelIds(campus: ReadonlyOutdoorCampus) {
+  const visibleIds = new Set<string>();
+  const placedLabels: ReturnType<typeof outdoorEntryLabelBounds>[] = [];
+
+  for (const building of campus.buildings) {
+    const candidates = campus.entrances
+      .filter((entrance) => entrance.buildingId === building.id && canEnterOutdoorBuilding(entrance))
+      .sort((a, b) => Number(Boolean(b.isPrimary)) - Number(Boolean(a.isPrimary)));
+    const entrance = candidates.find((candidate) => {
+      const bounds = outdoorEntryLabelBounds(building, candidate);
+      return !placedLabels.some((placed) =>
+        bounds.left < placed.right
+        && bounds.right > placed.left
+        && bounds.top < placed.bottom
+        && bounds.bottom > placed.top,
+      );
+    });
+    if (!entrance) continue;
+
+    visibleIds.add(entrance.id);
+    placedLabels.push(outdoorEntryLabelBounds(building, entrance));
+  }
+
+  return visibleIds;
+}
+
 export function OutdoorEntranceVisual({
   building,
   entrance,
   onClick,
+  showEntryLabelByDefault = true,
 }: {
   building: CampusBuilding;
   entrance: ReadonlyOutdoorEntrance;
   /** Optional read-only map callback for selecting the entrance's building. */
   onClick?: (buildingId: string) => void;
+  /** Keep default labels sparse; secondary doors reveal their label on focus or hover. */
+  showEntryLabelByDefault?: boolean;
 }) {
-  const position = entrance.legacyPosition
-    ? { ...entrance.legacyPosition, angle: 0 }
-    : entranceWorldPosition(building, entrance);
+  const [emphasized, setEmphasized] = useState(false);
+  const position = outdoorEntrancePosition(building, entrance);
   const label = entranceDisplayName(entrance, (building.entrances ?? []).findIndex((item) => item.id === entrance.id));
   const color = BUILDING_ENTRANCE_TYPE_COLORS[normalizeEntranceType(entrance.type)];
+  const canEnterBuilding = Boolean(
+    onClick
+      && canEnterOutdoorBuilding(entrance),
+  );
+  const badgePoint = entranceDirectionBadgePlacement(
+    position.x,
+    position.y,
+    entrance.edge,
+    entrance.legacyPosition ? 0 : building.rotation ?? 0,
+  );
+  const labelOrigin = outdoorEntryLabelOrigin(badgePoint);
+  const showEntryIndicator = canEnterBuilding && (showEntryLabelByDefault || emphasized);
   return (
-    <g data-testid="readonly-entrance" data-entrance-id={entrance.id} style={{ cursor: onClick ? "pointer" : undefined }} onClick={onClick ? (e) => { e.stopPropagation(); onClick(building.id); } : undefined}>
-      <title>{label}{entrance.accessible ? " · Accessible" : ""}</title>
+    <g data-testid="readonly-entrance" data-entrance-id={entrance.id}
+      role={canEnterBuilding ? "button" : undefined}
+      tabIndex={canEnterBuilding ? 0 : undefined}
+      aria-label={canEnterBuilding ? `Enter ${building.name}` : undefined}
+      style={{ cursor: canEnterBuilding ? "pointer" : undefined }}
+      onKeyDown={canEnterBuilding ? (event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        event.stopPropagation();
+        onClick?.(building.id);
+      } : undefined}
+      onFocus={canEnterBuilding ? () => setEmphasized(true) : undefined}
+      onBlur={canEnterBuilding ? () => setEmphasized(false) : undefined}
+      onMouseEnter={canEnterBuilding ? () => setEmphasized(true) : undefined}
+      onMouseLeave={canEnterBuilding ? () => setEmphasized(false) : undefined}
+      onClick={canEnterBuilding ? (event) => { event.stopPropagation(); onClick?.(building.id); } : undefined}>
+      <title>{label}{canEnterBuilding ? " · Enter Building" : ""}{entrance.accessible ? " · Accessible" : ""}</title>
       <g transform={`translate(${position.x},${position.y}) rotate(${position.angle ?? 0})`}>
+        {canEnterBuilding && <rect data-testid="readonly-enter-building-door-hit-target" x={-20} y={-18}
+          width={40} height={36} fill="transparent" pointerEvents="all" />}
         <OutdoorEntranceArtwork entrance={entrance} color={color} />
       </g>
       <EntranceDirectionBadge
@@ -444,6 +546,22 @@ export function OutdoorEntranceVisual({
         type={entrance.type}
         rotation={entrance.legacyPosition ? 0 : building.rotation ?? 0}
       />
+      {showEntryIndicator && (
+        <g data-testid="student-enter-building-indicator" pointerEvents="all">
+          {emphasized && <circle cx={badgePoint.x} cy={badgePoint.y} r={10.5} fill="#60a5fa" opacity={0.32} />}
+          <g transform={`translate(${labelOrigin.x},${labelOrigin.y})`}>
+            <rect data-testid="readonly-enter-building-indicator-hit-target" x={-3} y={-13} width={92} height={44}
+              rx={12} fill="transparent" pointerEvents="all" />
+            <rect data-testid="student-enter-building-pill" width={86} height={18} rx={9}
+              fill={emphasized ? "#dbeafe" : "#eff6ff"}
+              stroke={emphasized ? "#1d4ed8" : "#3b82f6"} strokeWidth={emphasized ? 1.4 : 1} />
+            <path d="M5.5 5.5 12 12m-5.5 0H12V6.5" fill="none" stroke="#1e40af" strokeWidth={1.3}
+              strokeLinecap="round" strokeLinejoin="round" />
+            <text x={16} y={11.8} fill="#1e3a8a" fontSize={7.2} fontWeight={700} fontFamily="inherit">Enter Building</text>
+          </g>
+          <title>Enter Building — open {building.name}</title>
+        </g>
+      )}
     </g>
   );
 }
@@ -572,6 +690,7 @@ export interface ReadonlyOutdoorCampusSceneProps {
 /** Read-only scene composition shared by Preview and the public campus map. */
 export function ReadonlyOutdoorCampusScene({ campus, zoom = 1, showBuildings = true, showLabels = true, selectedBuildingId, onSelectBuilding, onDoubleClickBuilding, onClickEntrance }: ReadonlyOutdoorCampusSceneProps) {
   const buildingById = new Map(campus.buildings.map((building) => [building.id, building]));
+  const defaultEntryLabelIds = defaultOutdoorEntryLabelIds(campus);
   const stack: { zOrder: number; order: number; node: ReactNode }[] = [];
   const groundAreaAssets = sortOutdoorGroundAssets([...campus.decorAssets]);
   if (campus.paths.length) stack.push({ zOrder: -1000, order: 0, node: <OutdoorPathNetworkArtwork key="campus-path-network" paths={campus.paths} /> });
@@ -623,7 +742,8 @@ export function ReadonlyOutdoorCampusScene({ campus, zoom = 1, showBuildings = t
       {stack.map((entry) => entry.node)}
       {showBuildings && campus.entrances.map((entrance) => {
         const building = buildingById.get(entrance.buildingId);
-        return building ? <OutdoorEntranceVisual key={`entrance-${entrance.id}`} building={building} entrance={entrance} onClick={onClickEntrance} /> : null;
+        return building ? <OutdoorEntranceVisual key={`entrance-${entrance.id}`} building={building} entrance={entrance}
+          onClick={onClickEntrance} showEntryLabelByDefault={defaultEntryLabelIds.has(entrance.id)} /> : null;
       })}
       {showBuildings && campus.exteriorEmergencyStairs.map((stair) => {
         const building = buildingById.get(stair.buildingId);

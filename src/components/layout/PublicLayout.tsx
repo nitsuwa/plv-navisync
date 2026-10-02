@@ -12,6 +12,8 @@ import { motion } from "motion/react";
 import { useStudentAuth } from "../../hooks/useStudentAuth";
 import { settingsService } from "../../services/settingsService";
 
+const STUDENT_ENTRY_REDIRECT_TIMEOUT_MS = 500;
+
 export function PublicLayout() {
   const { pathname } = useLocation();
   const navigate = useNavigate();
@@ -20,10 +22,24 @@ export function PublicLayout() {
   useEffect(() => {
     if (authLoading || !isStudent || pathname !== "/") return;
     let active = true;
-    void settingsService.getPublicPlatformSettings().then((settings) => {
-      if (active) navigate(settings.defaultLandingPage === "map" ? "/map" : "/home", { replace: true });
-    });
-    return () => { active = false; };
+    let settled = false;
+    const finishRedirect = (destination: "/home" | "/map") => {
+      if (!active || settled) return;
+      settled = true;
+      window.clearTimeout(fallbackTimer);
+      navigate(destination, { replace: true });
+    };
+    const fallbackTimer = window.setTimeout(
+      () => finishRedirect("/home"),
+      STUDENT_ENTRY_REDIRECT_TIMEOUT_MS,
+    );
+    void settingsService.getPublicPlatformSettings()
+      .then((settings) => finishRedirect(settings.defaultLandingPage === "map" ? "/map" : "/home"))
+      .catch(() => finishRedirect("/home"));
+    return () => {
+      active = false;
+      window.clearTimeout(fallbackTimer);
+    };
   }, [authLoading, isStudent, navigate, pathname]);
 
   useEffect(() => {

@@ -28,6 +28,7 @@ import { polylineCrossesBuilding } from "../../lib/editorPlacement";
 import { canonicalExteriorEmergencyStairsForBuilding, exteriorEmergencyStairRouteReadiness } from "../../lib/exteriorEmergencyStairs";
 import { campusWorldPointToExteriorFloor, exteriorApproachEntranceReadiness, exteriorApproachNodeId, exteriorFloorPointToCampusWorld, reconcileExteriorApproachNavigation } from "../../lib/exteriorApproachNavigation";
 import { campusGates, campusGateNodeIds, outdoorNetworkReachesCampusGate } from "../../lib/campusGates";
+import { filterRoutineNavigationEdges, filterRoutineNavigationNodes } from "../../lib/routineNavigationGraph";
 import { validateNavigationGraph } from "../../lib/validateNavigationGraph";
 import type { GraphPath, GraphPathEdgeTraversal, NavigationRouteSearchCache, PreparedNavigationGraph } from "../../lib/pathfinding";
 import type { Campus, CampusEntrance, FloorDoor, FloorPlan, FloorRoom, FloorWall, NavigationEdge, NavigationNode } from "./types";
@@ -1062,35 +1063,6 @@ export function buildTestRouteEdges(
  * normal route cannot opportunistically take a nearby fire exit simply
  * because it is geometrically shorter.
  */
-function isEmergencyOnlyNavigationNode(campus: Campus, node: NavigationNode | undefined, indexes?: TestRouteLookupIndexes): boolean {
-  if (!node) return false;
-  if (node.exteriorEmergencyStairId || node.emergencyStair || node.type === "emergency_exit") return true;
-  // Older hydrated Exterior Emergency Stair occurrences may retain only the
-  // Floor Stair reference. Resolve that owner here so routine searches cannot
-  // re-introduce the emergency-only transition through a legacy node shape.
-  if (node.stairId && node.buildingId && node.floorId) {
-    const floor = indexes?.floorByBuildingId.get(node.buildingId)?.get(node.floorId)
-      ?? (campus.buildings ?? []).find((candidate) => candidate.id === node.buildingId)?.floors.find((candidate) => candidate.id === node.floorId);
-    const stair = indexes?.objectsByBuildingFloorId.get(node.buildingId)?.get(node.floorId)?.stairs.get(node.stairId)
-      ?? floor?.stairs?.find((candidate) => candidate.id === node.stairId);
-    if (stair?.exteriorEmergencyStairId) return true;
-  }
-  if (node.doorId && node.buildingId && node.floorId) {
-    const floor = indexes?.floorByBuildingId.get(node.buildingId)?.get(node.floorId)
-      ?? (campus.buildings ?? []).find((candidate) => candidate.id === node.buildingId)?.floors.find((candidate) => candidate.id === node.floorId);
-    const door = indexes?.objectsByBuildingFloorId.get(node.buildingId)?.get(node.floorId)?.doors.get(node.doorId)
-      ?? floor?.doors.find((candidate) => candidate.id === node.doorId);
-    if ((door as (FloorDoor & { isEmergencyExit?: boolean }) | undefined)?.isEmergencyExit === true) return true;
-  }
-  if (node.entranceId && node.buildingId && !node.floorId) {
-    const building = indexes?.buildingById.get(node.buildingId) ?? (campus.buildings ?? []).find((candidate) => candidate.id === node.buildingId);
-    const entrance = indexes?.entranceByBuildingId.get(node.buildingId)?.get(node.entranceId)
-      ?? building?.entrances?.find((candidate) => candidate.id === node.entranceId);
-    if (entrance && normalizeEntranceType(entrance.type) === "emergency_exit") return true;
-  }
-  return false;
-}
-
 /** Return the graph view used by routine route modes.  Filtering nodes as well
  * as edges prevents pathfinding's virtual shared-stair transition expansion
  * from reintroducing an emergency-only stair after the authored edges have
@@ -1105,14 +1077,15 @@ export function routineRouteGraph(
 ): { nodes: NavigationNode[]; edges: NavigationEdge[] } {
   const graphCampus = exteriorApproachReconciled ? campus : reconcileExteriorApproachNavigation(campus);
   const graphNodes = graphCampus.navNodes ?? nodes;
-  const indexes = buildTestRouteLookupIndexes(graphCampus);
-  const routineNodes = graphNodes.filter((node) => !isEmergencyOnlyNavigationNode(graphCampus, node, indexes));
+  const routineNodes = filterRoutineNavigationNodes(graphCampus, graphNodes);
   const routineNodeIds = new Set(routineNodes.map((node) => node.id));
   return {
     nodes: routineNodes,
     edges: filterCompleteExteriorFallbackEdges(
       graphCampus,
-      filterRoutineEntranceDirectionEdges(graphCampus, routeEdges.filter((edge) => routineNodeIds.has(edge.startNodeId) && routineNodeIds.has(edge.endNodeId))),
+      filterRoutineEntranceDirectionEdges(graphCampus, filterRoutineNavigationEdges(
+        routeEdges.filter((edge) => routineNodeIds.has(edge.startNodeId) && routineNodeIds.has(edge.endNodeId)),
+      )),
       routeMode,
     ),
   };

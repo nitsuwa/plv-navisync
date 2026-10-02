@@ -1,5 +1,6 @@
 export { BuildingPicker } from "./BuildingPicker";
 export { LocationQR } from "./LocationQR";
+export { LocationQRScanner } from "./LocationQRScanner";
 export { ReportModal } from "./ReportModal";
 export { EventPopup } from "./EventPopup";
 export { SignInPrompt } from "./SignInPrompt";

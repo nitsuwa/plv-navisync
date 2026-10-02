@@ -11,23 +11,27 @@ import { useToast } from "../../hooks/useToast";
 export function LocationQR({
   buildingId,
   buildingName,
+  campusId,
 }: {
   buildingId: string;
   buildingName: string;
+  campusId?: string;
 }) {
   const toast = useToast();
 
   const url = useMemo(() => {
-    // Always point to the map route regardless of the current page.
+    // A location QR sets this published campus position as the student's route origin.
     const origin = typeof window !== "undefined" ? window.location.origin : "";
-    return `${origin}/map?buildingId=${encodeURIComponent(buildingId)}`;
-  }, [buildingId]);
+    const params = new URLSearchParams({ locationId: buildingId });
+    if (campusId) params.set("campusId", campusId);
+    return `${origin}/map?${params.toString()}`;
+  }, [buildingId, campusId]);
 
   const copyLink = async () => {
     try {
       if (!navigator.clipboard?.writeText) throw new Error("Clipboard unavailable");
       await navigator.clipboard.writeText(url);
-      toast.success("Link copied", { description: "Share this link to open the location." });
+      toast.success("Link copied", { description: "Opening it sets this place as the route starting point." });
     } catch {
       toast.error("Could not copy", { description: "Clipboard access denied." });
     }
@@ -53,7 +57,7 @@ export function LocationQR({
         <Link2 className="h-3 w-3" /> Copy link
       </button>
       <p className="text-[10px] text-muted-foreground text-center">
-        Scan to open {buildingName} on the campus map
+        Scan to set {buildingName} as your current location
       </p>
     </div>
   );

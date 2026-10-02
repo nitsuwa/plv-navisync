@@ -94,9 +94,22 @@ function stepDot(isFirst: boolean, isLast: boolean) {
   return "bg-card border-primary/50";
 }
 
+/** Keep internal graph-node names out of student-facing directions when a
+ * legacy or emergency route still contains a raw waypoint step. */
+function presentInstruction(instruction: string): string {
+  const trimmed = instruction.trim();
+  const floorWaypoint = trimmed.match(/^Continue to floor waypoint(?:\s+\d+)?\.?$/i);
+  if (floorWaypoint) return "Continue along the connected indoor path.";
+  const walkToWaypoint = trimmed.match(/^Walk\s+([\d.]+)\s*m\s+to\s+(?:the\s+)?waypoint(?:\s+\d+)?\.?$/i);
+  if (walkToWaypoint) return `Follow the highlighted path for ${walkToWaypoint[1]} m.`;
+  if (/^Start from (?:the )?Door\.?$/i.test(trimmed)) return "Start at the room door.";
+  return trimmed;
+}
+
 /**
  * Turn-by-turn navigation panel — shows total distance/ETA, every step with
- * an icon and distance, and floor-transition badges. Positioned by the parent
+ * an icon and distance. Floor changes are included inline in the directions,
+ * so users see each transition once. Positioned by the parent
  * (desktop bottom-left card, mobile sheet).
  */
 export function RouteStepsPanel({
@@ -113,7 +126,7 @@ export function RouteStepsPanel({
       ? activeStepIndex(steps, trackedProgress, trackedDistance)
       : steps.length > 0 ? 0 : null;
   const currentInstruction = activeLeg?.statusInstruction
-    ?? (activeIndex !== null ? steps[activeIndex]?.instruction : undefined);
+    ?? (activeIndex !== null && steps[activeIndex] ? presentInstruction(steps[activeIndex].instruction) : undefined);
 
   return (
     <div
@@ -171,18 +184,6 @@ export function RouteStepsPanel({
         </p>
       )}
 
-      {/* Floor-transition badges */}
-      {route.transitions.length > 0 && (
-        <div className={cn("px-3 pt-2 flex flex-col gap-1", compact && "px-2 pt-1.5")}>
-          {route.transitions.map((t, i) => (
-            <div key={`tr-${i}`} className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-purple-500/10 border border-purple-500/20 text-purple-700 dark:text-purple-400">
-              <MoveVertical className="h-3 w-3 shrink-0" />
-              <span className="text-[10px] font-bold">{t}</span>
-            </div>
-          ))}
-        </div>
-      )}
-
       {/* Step-by-step directions */}
       <div className={cn("px-3 pt-2 pb-1 max-h-32 overflow-y-auto scrollbar-show-on-hover", compact && "px-2 pt-1.5 max-h-24")}>
         <div className="relative pl-4 border-l-2 border-primary/30 space-y-1.5">
@@ -212,7 +213,7 @@ export function RouteStepsPanel({
                     "text-[10px] leading-snug pt-0.5",
                     isLast ? "font-bold text-foreground" : "text-muted-foreground"
                   )}>
-                    {step.instruction}
+                    {presentInstruction(step.instruction)}
                   </p>
                   {step.distanceM !== undefined && (
                     <span className="text-[10px] text-muted-foreground font-semibold">
