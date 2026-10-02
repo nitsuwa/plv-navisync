@@ -54,7 +54,7 @@ describe("student indoor navigation controls", () => {
     const card = screen.getByTestId("student-selected-place-card");
     expect(card).toHaveTextContent("Administration Office");
     expect(card).toHaveTextContent("Student Center Building · Floor 2");
-    expect(screen.getByRole("button", { name: "Directions" })).toHaveClass("bg-primary");
+    expect(screen.getByRole("button", { name: /directions/i })).toHaveClass("bg-primary");
     expect(screen.queryByRole("button", { name: /Report/ })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "More place actions" }));
     fireEvent.click(screen.getByRole("button", { name: "Report a room issue" }));

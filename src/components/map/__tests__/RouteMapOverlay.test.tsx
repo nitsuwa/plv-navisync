@@ -61,4 +61,21 @@ describe("RouteMapOverlay direction arrows", () => {
     );
     expect(screen.getByTestId("route-direction-arrow").getAttribute("style")).toContain("320ms");
   });
+
+  it("renders a standard route in blue and reserves red route strokes for SOS mode", () => {
+    const { container, rerender } = render(
+      <svg>
+        <RouteMapOverlay points={[{ x: 0, y: 0 }, { x: 0, y: 10 }]} mode="standard" animated={false} />
+      </svg>,
+    );
+    expect(container.querySelector('polyline[stroke="#1e40af"]')).toBeInTheDocument();
+    expect(container.querySelector('polyline[stroke="#dc2626"]')).not.toBeInTheDocument();
+
+    rerender(
+      <svg>
+        <RouteMapOverlay points={[{ x: 0, y: 0 }, { x: 0, y: 10 }]} mode="emergency" animated={false} />
+      </svg>,
+    );
+    expect(container.querySelector('polyline[stroke="#dc2626"]')).toBeInTheDocument();
+  });
 });

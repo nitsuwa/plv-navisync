@@ -27,6 +27,7 @@ export interface UnifiedRoutePlannerDialogProps {
   onClear: () => void;
   onFindRoute: () => void;
   youAreHere?: { x: number; y: number } | null;
+  youAreHereLabel?: string | null;
   useMyLocation: boolean;
   onUseMyLocationChange: (value: boolean) => void;
   fromRoom?: RoomDest | null;
@@ -59,25 +60,29 @@ function endpointText(
   room: RoomDest | null | undefined,
   useMyLocation: boolean,
   youAreHere: { x: number; y: number } | null | undefined,
+  youAreHereLabel?: string | null,
 ) {
-  if (purpose === "start" && useMyLocation && youAreHere) return { label: "You are here", context: "Current map location" };
+  if (purpose === "start" && useMyLocation && youAreHere) {
+    return { label: "You are here", context: youAreHereLabel ?? "Current map location" };
+  }
   if (room) return { label: room.roomName, context: `${room.buildingLabel} · ${room.floorLabel ?? `Floor ${room.floorNumber}`}` };
   if (building) return { label: building.name, context: `${building.code} · Building` };
   return { label: purpose === "start" ? "Choose starting point" : "Choose destination", context: "Search buildings, rooms, and offices" };
 }
 
 function EndpointCard({
-  purpose, building, room, useMyLocation, youAreHere, onChange,
+  purpose, building, room, useMyLocation, youAreHere, youAreHereLabel, onChange,
 }: {
   purpose: RoutePlannerEndpoint;
   building: Building | null;
   room: RoomDest | null | undefined;
   useMyLocation: boolean;
   youAreHere?: { x: number; y: number } | null;
+  youAreHereLabel?: string | null;
   onChange: () => void;
 }) {
   const isStart = purpose === "start";
-  const text = endpointText(purpose, building, room, useMyLocation, youAreHere);
+  const text = endpointText(purpose, building, room, useMyLocation, youAreHere, youAreHereLabel);
   const selected = Boolean((isStart && useMyLocation && youAreHere) || room || building);
   return (
     <div data-testid={`route-endpoint-card-${isStart ? "start" : "destination"}`} className={cn(
@@ -100,7 +105,7 @@ function EndpointCard({
 /** Shared compact route workflow for the live Student Map and Student Preview. */
 export function UnifiedRoutePlannerDialog({
   from, to, onFromChange, onToChange, mode, onModeChange, route, onClose, onClear, onFindRoute,
-  youAreHere, useMyLocation, onUseMyLocationChange, fromRoom = null, toRoom = null,
+  youAreHere, youAreHereLabel, useMyLocation, onUseMyLocationChange, fromRoom = null, toRoom = null,
   onSwapEndpoints, destinationResults = [], onSelectFromDestination, onSelectToDestination,
   activeEndpoint: controlledEndpoint, onActiveEndpointChange, selectedRoomForPlanner,
   onUseSelectedRoomAsStart, onUseSelectedRoomAsDestination,
@@ -129,7 +134,7 @@ export function UnifiedRoutePlannerDialog({
   const hasTo = isEmergency || Boolean(toRoom || to);
   const bothSet = hasFrom && hasTo;
   const canStart = Boolean(bothSet && route);
-  const fromDisplay = endpointText("start", from, fromRoom, useMyLocation, youAreHere);
+  const fromDisplay = endpointText("start", from, fromRoom, useMyLocation, youAreHere, youAreHereLabel);
   const toDisplay = isEmergency
     ? { label: route?.emergencyDestinationLabel ?? "Safe evacuation exit", context: "Selected automatically from emergency paths" }
     : endpointText("destination", to, toRoom, false, null);
@@ -259,7 +264,7 @@ export function UnifiedRoutePlannerDialog({
                   ))}
                 </div>
                 {mode === "accessible" && <p data-testid="accessible-route-note" className="rounded-lg bg-emerald-700/[0.06] px-2.5 py-2 text-[10px] leading-relaxed text-emerald-800 dark:text-emerald-200">Accessible route · Uses ramps and elevators where the authored path supports them.</p>}
-                <EndpointCard purpose="start" building={from} room={fromRoom} useMyLocation={useMyLocation} youAreHere={youAreHere} onChange={() => openSearch("start")} />
+                <EndpointCard purpose="start" building={from} room={fromRoom} useMyLocation={useMyLocation} youAreHere={youAreHere} youAreHereLabel={youAreHereLabel} onChange={() => openSearch("start")} />
                 {!isEmergency && (
                   <div className="flex items-center justify-center -my-1">
                     <button type="button" onClick={swapEndpoints} disabled={!hasFrom || !hasTo} aria-label="Swap start and destination" className="flex h-8 w-8 items-center justify-center rounded-full border border-border bg-card text-muted-foreground transition-colors hover:border-primary/30 hover:text-primary disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"><ArrowUpDown className="h-3.5 w-3.5" /></button>

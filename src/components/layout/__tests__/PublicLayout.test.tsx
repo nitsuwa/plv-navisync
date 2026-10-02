@@ -16,6 +16,11 @@ const authState = vi.hoisted(() => ({
 vi.mock("../../../hooks/useStudentAuth", () => ({
   useStudentAuth: () => authState,
 }));
+vi.mock("../../../services/settingsService", () => ({
+  settingsService: {
+    getPublicPlatformSettings: vi.fn().mockResolvedValue({ defaultLandingPage: "home" }),
+  },
+}));
 
 vi.mock("../Navbar", () => ({ Navbar: () => null }));
 vi.mock("../EmergencyBanner", () => ({ EmergencyBanner: () => null }));

@@ -227,6 +227,32 @@ describe("CampusMapPage event overlays", () => {
     });
   });
 
+  it("starts a fresh room-directions planner in the configured mode, not a previous SOS mode", async () => {
+    const campus: EditorCampus = { ...previewCampus, buildings: [{ ...previewCampus.buildings[0], floors: [{
+      id: "route-floor", buildingId: "building-test", number: 1, label: "Ground Floor",
+      rooms: [{ id: "copyshop-room", name: "Copyshop", type: "classroom", floorId: "route-floor", buildingId: "building-test", x: 10, y: 10, w: 60, h: 60 }],
+      paths: [], walls: [], doors: [], windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [],
+    }] }] };
+    renderCampusMap({ previewCampus: campus });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Open directions" }));
+    fireEvent.click(screen.getByRole("button", { name: "SOS routing" }));
+    expect(screen.getByRole("button", { name: "SOS routing" })).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(screen.getByRole("button", { name: "Close directions" }));
+    await waitFor(() => expect(screen.queryByTestId("route-planner-dialog")).not.toBeInTheDocument());
+
+    const search = screen.getByRole("searchbox", { name: "Search campus map" });
+    fireEvent.focus(search);
+    fireEvent.change(search, { target: { value: "Science Hall" } });
+    fireEvent.click(await screen.findByRole("option", { name: /Science Hall, Building/i }));
+    fireEvent.click(screen.getAllByRole("button", { name: /View Floor Plan/i })[0]);
+    fireEvent.click(await screen.findByTestId("readonly-room"));
+    fireEvent.click(screen.getByRole("button", { name: "Get directions to Copyshop" }));
+
+    expect(screen.getByRole("button", { name: "Standard routing" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "SOS routing" })).toHaveAttribute("aria-pressed", "false");
+  });
+
   it("opens a building selected by a scanned QR deep link after the campus loads", async () => {
     const originalUrl = window.location.href;
     window.history.replaceState({}, "", "/map?buildingId=building-test");
@@ -243,12 +269,15 @@ describe("CampusMapPage event overlays", () => {
     }
   });
 
-  it("keeps the non-routable drop-pin action out of the student map", async () => {
+  it("keeps manual drop-pin navigation available on the student map", async () => {
     renderCampusMap({ previewCampus });
 
     await screen.findByRole("searchbox", { name: "Search campus map" });
-    expect(screen.queryByRole("button", { name: /Drop pin|Move dropped pin|Cancel drop pin/i })).not.toBeInTheDocument();
-    expect(screen.queryByText("Tap map to drop pin")).not.toBeInTheDocument();
+    const dropPin = screen.getByRole("button", { name: "Drop pin" });
+    expect(dropPin).toBeInTheDocument();
+    fireEvent.click(dropPin);
+    expect(screen.getByRole("button", { name: "Cancel drop pin" })).toBeInTheDocument();
+    expect(screen.getByText("Tap map to drop pin")).toBeInTheDocument();
   });
 
   it("lets users report an interacted indoor room with its floor prefilled", async () => {
@@ -405,6 +434,7 @@ describe("CampusMapPage event overlays", () => {
         { id: "outdoor", startNodeId: "source-entry", endNodeId: "target-entry", distance: 300, bidirectional: true, accessible: true, type: "walkway", color: "#3b82f6", width: 3 },
       ],
     };
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
     renderCampusMap({ previewCampus: campus });
     fireEvent.click(await screen.findByRole("button", { name: "Open directions" }));
     fireEvent.click(screen.getByRole("button", { name: "Choose start" }));
@@ -424,6 +454,12 @@ describe("CampusMapPage event overlays", () => {
     expect(mobileRoutePanel.querySelector("button")).toHaveClass("h-8");
     expect(screen.queryByTestId("indoor-route-preview")).not.toBeInTheDocument();
     expect(screen.queryByText("Directions to room")).not.toBeInTheDocument();
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    const maxDepthWarnings = consoleError.mock.calls.filter((call) =>
+      call.some((value) => String(value).includes("Maximum update depth exceeded")),
+    );
+    consoleError.mockRestore();
+    expect(maxDepthWarnings).toHaveLength(0);
   });
 
   it("zooms the student map when a two-finger pinch spreads", async () => {

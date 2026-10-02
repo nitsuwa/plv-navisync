@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { LocationQR } from "../LocationQR";
 
 describe("LocationQR", () => {
-  it("renders a QR graphic and copies the building deep link", async () => {
+  it("renders a QR graphic and copies the location identifier link", async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     const previousClipboard = Object.getOwnPropertyDescriptor(navigator, "clipboard");
     Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
@@ -14,7 +14,7 @@ describe("LocationQR", () => {
       expect(code.querySelector("path")).not.toBeNull();
       fireEvent.click(screen.getByRole("button", { name: "Copy link" }));
       await waitFor(() => expect(writeText).toHaveBeenCalledWith(
-        `${window.location.origin}/map?buildingId=building%20with%20spaces`,
+        `${window.location.origin}/map?locationId=building+with+spaces`,
       ));
     } finally {
       if (previousClipboard) Object.defineProperty(navigator, "clipboard", previousClipboard);
