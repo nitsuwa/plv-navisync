@@ -1,15 +1,26 @@
+import type { BuildingTypeValue, WeeklyOperatingHours } from "./buildingInformation";
+
 export interface Building {
   id: string;
   name: string;
   code: string;
   description: string;
   category: "academic" | "admin" | "facility" | "sports" | "dormitory";
+  building_type?: BuildingTypeValue;
   floor_count: number;
   image_url?: string;
+  facilities?: string[];
+  accessibility?: {
+    wheelchairAccessible?: boolean;
+    hasElevator?: boolean;
+    hasRamp?: boolean;
+    accessibleEntrance?: boolean;
+  } | string[];
   latitude?: number;
   longitude?: number;
   departments?: string[];
   operating_hours?: string;
+  operating_hours_schedule?: WeeklyOperatingHours;
   contact?: string;
   created_at: string;
 }

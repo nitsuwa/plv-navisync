@@ -1,4 +1,5 @@
 import type { CampusLifecycleStatus } from "../../types/campusLifecycle";
+import type { BuildingTypeValue, WeeklyOperatingHours } from "../../types/buildingInformation";
 
 /** Campus status */
 export type CampusStatus = "active" | "hidden" | "archived";
@@ -517,6 +518,16 @@ export interface CampusBuilding {
   code: string;
   category: string;
   description: string;
+  /** Public Storage object path for the student-facing cover image. */
+  coverImagePath?: string;
+  /** Optional authored hours shown on the student-facing place page. */
+  operatingHours?: string;
+  /** Structured weekly hours, retained in the building UI metadata snapshot. */
+  operatingHoursSchedule?: WeeklyOperatingHours;
+  /** Student-facing type, independent from the legacy map category/style. */
+  buildingType?: BuildingTypeValue;
+  /** Small curated amenities list; map-derived facilities are added at display time. */
+  facilities?: string[];
   x: number;
   y: number;
   width: number;
@@ -703,6 +714,22 @@ export interface CampusMarker {
    * while their linked NavigationNode provides the routable identity. */
   purpose?: "general" | "emergency_exit";
   navNodeId?: string;
+  /** Optional student-facing place details for outdoor landmarks and gates. */
+  studentInfo?: CampusPlaceStudentInfo;
+}
+
+export type CampusGateType = "main_entrance" | "pedestrian" | "service" | "emergency" | "other";
+
+/** Additive, backward-compatible place metadata stored with its authored marker. */
+export interface CampusPlaceStudentInfo {
+  description?: string;
+  coverImagePath?: string;
+  gateType?: CampusGateType;
+  operatingHoursSchedule?: import("../../types/buildingInformation").WeeklyOperatingHours;
+  accessibleEntrance?: boolean;
+  pedestrianAccess?: boolean;
+  vehicleAccess?: boolean;
+  securityCheckpoint?: boolean;
 }
 
 export interface CampusPath {
@@ -911,6 +938,8 @@ export interface EventOverlayLocation {
 
 export interface CampusEventOverlay {
   id: string;
+  /** Server revision used for conflict-safe administrator review/publication. */
+  updatedAt?: string;
   /** Campus whose published map snapshot anchors this event proposal. */
   campusId?: string;
   title: string;
@@ -932,6 +961,9 @@ export interface CampusEventOverlay {
   status?: "draft" | "pending" | "approved" | "disapproved";
   /** ISO timestamp of the latest explicit submission to GSO. */
   submittedAt?: string;
+  /** Student visibility begins at this approved publication instant. */
+  publicationAt?: string;
+  locationFeedback?: Record<string, string>;
   /** Admin feedback when disapproving */
   adminComment?: string;
   /** Event-specific furniture items (booths, tents, stages, etc.) */

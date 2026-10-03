@@ -48,6 +48,8 @@ describe("StudentMapControls", () => {
     const searchbox = screen.getByRole("searchbox", { name: "Search campus map" });
     expect(searchbox).toBeInTheDocument();
     expect(searchbox).toHaveClass("text-xs", "sm:text-[13px]");
+    expect(screen.getByTestId("student-map-controls")).toHaveClass("map-layer-controls");
+    expect(screen.getByTestId("student-map-search-panel").querySelector("[data-map-search-header='true']")).toBeInTheDocument();
     expect(screen.getByTestId("student-map-search-panel")).toHaveClass("right-16");
     expect(screen.getByTestId("student-map-utility-controls")).toHaveClass("bottom-[calc(0.75rem+env(safe-area-inset-bottom,0px))]");
     expect(screen.getByRole("button", { name: "Open directions" })).toBeInTheDocument();
@@ -67,6 +69,27 @@ describe("StudentMapControls", () => {
     expect(screen.getByTestId("student-map-utility-controls").contains(screen.getByRole("button", { name: "Open directions" }))).toBe(true);
   });
 
+  it("uses the right utility stack for its only recenter action", () => {
+    const onResetView = vi.fn();
+    render(<StudentMapControls {...props({ onResetView })} />);
+
+    const recenter = screen.getByRole("button", { name: "Recenter map" });
+    expect(recenter).toHaveAttribute("data-testid", "student-map-recenter-button");
+    expect(recenter).toHaveAttribute("data-dock", "map-control-top-right");
+    expect(screen.queryByRole("button", { name: /Drop pin|Move dropped pin|Cancel drop pin/i })).not.toBeInTheDocument();
+    fireEvent.click(recenter);
+    expect(onResetView).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the utility stack anchored while yielding its controls to Profile", () => {
+    render(<StudentMapControls {...props({ profileOpen: true, onResetView: vi.fn() })} />);
+
+    const stack = screen.getByTestId("student-map-utility-controls");
+    expect(stack).toHaveClass("absolute", "right-3", "bottom-[calc(0.75rem+env(safe-area-inset-bottom,0px))]", "md:top-20");
+    expect(stack).toHaveAttribute("data-profile-open", "true");
+    expect(within(stack).getByTestId("student-map-recenter-button")).toBeInTheDocument();
+  });
+
   it("selects a search result without submitting a form", () => {
     const onSelectSearchResult = vi.fn();
     render(
@@ -76,6 +99,7 @@ describe("StudentMapControls", () => {
     );
 
     expect(screen.getByRole("button", { name: "All destinations" })).toBeInTheDocument();
+    expect(screen.getByRole("listbox", { name: "Campus destination results" })).toHaveAttribute("data-map-layer", "transient");
     expect(screen.getByText("Building")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("option", { name: /Science Hall/i }));
     expect(onSelectSearchResult).toHaveBeenCalledWith(result);

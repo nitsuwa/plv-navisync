@@ -19,11 +19,14 @@ import type {
   FloorFurniture,
   FloorLabel,
 } from "../components/map-builder/types";
+import type { EventPublicationCommand, PublicEventFeed, PublicEventPreview } from "../types/eventPreview";
 import {
   eventLocationKey,
   normalizeEventOverlayLocations,
 } from "../lib/eventOverlayModel";
 import { floorLookupId, publishedEventBuildingOptions } from "../lib/eventLocationData";
+
+import { getStudentEventPhase, isValidEventInstant, validateEventDates } from "../lib/eventPublication";
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -51,6 +54,8 @@ export interface EventOverlayFilters {
   search?: string;
   createdByUserId?: string;
   campusId?: string;
+  strict?: boolean;
+  allCampuses?: boolean;
 }
 
 // ── Mock fallback data ──────────────────────────────────────────────────────
@@ -90,10 +95,12 @@ const MOCK_OVERLAYS: CampusEventOverlay[] = [
 function overlayFromMetadata(
   metadata: Record<string, unknown>,
   id: string,
-  campusId?: string | null
+  campusId?: string | null,
+  updatedAt?: string | null,
 ): CampusEventOverlay {
   const overlay: CampusEventOverlay = {
     id,
+    updatedAt: updatedAt || undefined,
     campusId: campusId || undefined,
     title: (metadata.title as string) || "Untitled Event",
     description: (metadata.description as string) || "",
@@ -108,6 +115,8 @@ function overlayFromMetadata(
     isActive: (metadata.isActive as boolean) ?? true,
     status: (metadata.status as EventOverlayStatus) || "pending",
     submittedAt: typeof metadata.submittedAt === "string" ? metadata.submittedAt : undefined,
+    publicationAt: metadata.publicationAt as string | undefined,
+    locationFeedback: metadata.locationFeedback as Record<string, string> | undefined,
     adminComment: metadata.adminComment as string | undefined,
     eventFurniture: (metadata.eventFurniture as FloorFurniture[]) || [],
     eventLabels: (metadata.eventLabels as FloorLabel[]) || [],
@@ -117,6 +126,119 @@ function overlayFromMetadata(
   return {
     ...overlay,
     locations: normalizeEventOverlayLocations(overlay),
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function finiteNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function parsePublicLocations(value: unknown): EventOverlayLocation[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry, index) => {
+    if (!isRecord(entry) || !isRecord(entry.locationRef)) return [];
+    const ref = entry.locationRef;
+    if (!(["campus", "building", "room"] as unknown[]).includes(ref.type) || typeof ref.label !== "string") return [];
+    const locationRef: EventLocationRef = {
+      type: ref.type as EventLocationRef["type"],
+      label: ref.label,
+      ...(typeof ref.buildingId === "string" ? { buildingId: ref.buildingId } : {}),
+      ...(typeof ref.floorId === "string" ? { floorId: ref.floorId } : {}),
+      ...(typeof ref.roomId === "string" ? { roomId: ref.roomId } : {}),
+    };
+    const eventFurniture: FloorFurniture[] = Array.isArray(entry.eventFurniture) ? entry.eventFurniture.flatMap((item) => {
+      if (!isRecord(item) || typeof item.id !== "string" || typeof item.type !== "string" || typeof item.name !== "string" || typeof item.category !== "string") return [];
+      const x = finiteNumber(item.x), y = finiteNumber(item.y), width = finiteNumber(item.width), height = finiteNumber(item.height), rotation = finiteNumber(item.rotation);
+      if (x === null || y === null || width === null || height === null || rotation === null || typeof item.color !== "string") return [];
+      const assetConfig = isRecord(item.assetConfig) && typeof item.assetConfig.style === "string"
+        ? { style: item.assetConfig.style }
+        : undefined;
+      return [{
+        id: item.id, type: item.type, name: item.name, category: item.category, x, y, width, height, rotation, color: item.color,
+        ...(typeof item.assetKey === "string" ? { assetKey: item.assetKey } : {}),
+        ...(typeof item.assetVariant === "string" ? { assetVariant: item.assetVariant } : {}),
+        ...(assetConfig ? { assetConfig } : {}),
+        ...(typeof item.flipX === "boolean" ? { flipX: item.flipX } : {}),
+        ...(typeof item.flipY === "boolean" ? { flipY: item.flipY } : {}),
+        ...(typeof item.layer === "string" ? { layer: item.layer } : {}),
+        ...(finiteNumber(item.zOrder) !== null ? { zOrder: finiteNumber(item.zOrder)! } : {}),
+        ...(typeof item.visible === "boolean" ? { visible: item.visible } : {}),
+      }];
+    }) : [];
+    const eventLabels: FloorLabel[] = Array.isArray(entry.eventLabels) ? entry.eventLabels.flatMap((item) => {
+      if (!isRecord(item) || typeof item.id !== "string" || typeof item.text !== "string" || typeof item.color !== "string") return [];
+      const x = finiteNumber(item.x), y = finiteNumber(item.y), fontSize = finiteNumber(item.fontSize), rotation = finiteNumber(item.rotation);
+      if (x === null || y === null || fontSize === null || rotation === null) return [];
+      return [{
+        id: item.id, text: item.text, color: item.color, x, y, fontSize, rotation,
+        ...(item.align === "center" || item.align === "right" || item.align === "left" ? { align: item.align } : {}),
+        ...(finiteNumber(item.zOrder) !== null ? { zOrder: finiteNumber(item.zOrder)! } : {}),
+        ...(typeof item.visible === "boolean" ? { visible: item.visible } : {}),
+      }];
+    }) : [];
+    return [{
+      id: typeof entry.id === "string" && entry.id ? entry.id : `location-${index + 1}`,
+      locationRef,
+      eventFurniture,
+      eventLabels,
+    }];
+  });
+}
+
+function parsePublicPreview(value: unknown, requestedCampusId: string, serverNowMs: number): PublicEventPreview | null {
+  if (!isRecord(value) || typeof value.id !== "string" || !value.id || value.campusId !== requestedCampusId ||
+      typeof value.title !== "string" || typeof value.organizer !== "string" ||
+      value.status !== "approved" || value.isActive !== true ||
+      typeof value.dateStart !== "string" || typeof value.dateEnd !== "string" || typeof value.publicationAt !== "string") return null;
+  const locations = parsePublicLocations(value.locations);
+  if (locations.length === 0) return null;
+  const markers = Array.isArray(value.markers) ? value.markers.flatMap((marker) => {
+    if (!isRecord(marker) || typeof marker.label !== "string" || typeof marker.color !== "string") return [];
+    const x = finiteNumber(marker.x), y = finiteNumber(marker.y);
+    return x === null || y === null ? [] : [{ x, y, label: marker.label, color: marker.color }];
+  }) : [];
+  const preview: PublicEventPreview = {
+    id: value.id,
+    campusId: requestedCampusId,
+    title: value.title,
+    description: typeof value.description === "string" ? value.description : "",
+    organizer: value.organizer,
+    posterUrl: typeof value.posterUrl === "string" ? value.posterUrl : undefined,
+    markers,
+    status: "approved",
+    isActive: true,
+    dateStart: value.dateStart,
+    dateEnd: value.dateEnd,
+    publicationAt: value.publicationAt,
+    locations,
+  };
+  const phase = getStudentEventPhase(preview, serverNowMs);
+  return phase === "upcoming" || phase === "ongoing" ? preview : null;
+}
+
+function compatibilityPreview(event: PublicEventPreview, location: EventOverlayLocation): CampusEventOverlay {
+  return {
+    id: event.id,
+    campusId: event.campusId,
+    title: event.title,
+    description: event.description,
+    organizer: event.organizer,
+    markers: event.markers,
+    locationRef: location.locationRef,
+    locations: [location],
+    restrictedAreas: [],
+    status: "approved",
+    isActive: true,
+    dateStart: event.dateStart,
+    dateEnd: event.dateEnd,
+    publicationAt: event.publicationAt,
+    eventFurniture: location.eventFurniture,
+    eventLabels: location.eventLabels,
+    posterUrl: event.posterUrl,
   };
 }
 
@@ -140,8 +262,6 @@ function createLocationEntries(
 
 function stripLegacyDateAndLayoutFields(metadata: Record<string, unknown>) {
   const {
-    dateStart: _dateStart,
-    dateEnd: _dateEnd,
     locationRef: _locationRef,
     eventFurniture: _eventFurniture,
     eventLabels: _eventLabels,
@@ -164,17 +284,21 @@ function applyLocationCompatibilityFields(
   };
 }
 
-function overlayForLocation(
-  overlay: CampusEventOverlay,
-  location: EventOverlayLocation
-): CampusEventOverlay {
-  return {
-    ...overlay,
-    locationRef: location.locationRef,
-    eventFurniture: location.eventFurniture,
-    eventLabels: location.eventLabels,
-    locations: [location],
-  };
+async function validateSavedLocations(campusId: string | null | undefined, locations: EventOverlayLocation[]): Promise<void> {
+  if (!campusId) return;
+  if (!locations.length) throw new Error("At least one event location is required.");
+  const campus = (await campusService.listPublishedSnapshots()).find(snapshot => snapshot.id === campusId);
+  if (!campus) throw new Error("The event campus is no longer published. Refresh before saving.");
+  const buildings = publishedEventBuildingOptions(campus);
+  const keys = new Set<string>();
+  for (const location of locations) {
+    const key = eventLocationKey(location.locationRef);
+    if (keys.has(key)) throw new Error("Each requested event location must be unique.");
+    keys.add(key);
+    if (location.locationRef.type === "campus") continue;
+    const building = buildings.find(b => b.buildingId === location.locationRef.buildingId);
+    if (!building?.floors.some(f => floorLookupId(building.buildingId, f.number) === location.locationRef.floorId)) throw new Error(`Location “${location.locationRef.label}” is no longer published.`);
+  }
 }
 
 // ── CRUD Operations ─────────────────────────────────────────────────────────
@@ -293,13 +417,17 @@ export async function updateEventOverlayDetails(
 
   const { data: existing, error: fetchError } = await supabase
     .from("map_elements")
-    .select("id, metadata, name")
+    .select("id, campus_id, metadata, name, updated_at")
     .eq("id", overlayId)
     .single();
 
   if (fetchError || !existing) throw new Error("Event overlay not found.");
 
   const metadata = existing.metadata as Record<string, unknown>;
+  const existingStatus = (metadata.status || "draft") as EventOverlayStatus;
+  if (existingStatus !== "draft" && existingStatus !== "disapproved") {
+    throw new Error("This event is locked while it is awaiting or has received administrator approval.");
+  }
   const previousLocations = normalizeEventOverlayLocations({
     locations: metadata.locations as EventOverlayLocation[] | undefined,
     locationRef: metadata.locationRef as EventLocationRef | undefined,
@@ -328,6 +456,8 @@ export async function updateEventOverlayDetails(
     organizer: input.organizer,
     status: "draft",
     submittedAt: null,
+    adminComment: null,
+    locationFeedback: {},
   };
 
   if (input.posterUrl !== undefined) {
@@ -342,7 +472,7 @@ export async function updateEventOverlayDetails(
       updated_at: new Date().toISOString()
     })
     .eq("id", overlayId)
-    .eq("element_type", "event_overlay");
+    .or("element_type.eq.event_overlay,metadata->>kind.eq.event_overlay");
 
   if (error) throw error;
 
@@ -366,24 +496,33 @@ export async function updateEventOverlayLayout(
 
   const { data: existing, error: fetchError } = await supabase
     .from("map_elements")
-    .select("id, campus_id, name, metadata")
+    .select("id, campus_id, name, metadata, updated_at")
     .eq("id", overlayId)
     .single();
 
   if (fetchError || !existing) throw new Error("Event overlay not found.");
 
-  const metadata = existing.metadata as Record<string, unknown>;
+  const existingMetadata = existing.metadata as Record<string, unknown>;
+  const existingStatus = (existingMetadata.status || "draft") as EventOverlayStatus;
+  if (existingStatus !== "draft" && existingStatus !== "disapproved") {
+    throw new Error("This event is locked while it is awaiting or has received administrator approval.");
+  }
+
+  await validateSavedLocations(existing.campus_id, locations);
+  const metadata = existingMetadata;
   const updatedMetadata = {
     ...applyLocationCompatibilityFields(metadata, locations),
     status: "draft",
     submittedAt: null,
+    adminComment: null,
+    locationFeedback: {},
   };
 
   const { error } = await supabase
     .from("map_elements")
     .update({ metadata: updatedMetadata as never, updated_at: new Date().toISOString() })
     .eq("id", overlayId)
-    .eq("element_type", "event_overlay");
+    .or("element_type.eq.event_overlay,metadata->>kind.eq.event_overlay");
 
   if (error) throw error;
 
@@ -410,26 +549,31 @@ export async function submitEventOverlayLayout(
 
   const { data: existing, error: fetchError } = await supabase
     .from("map_elements")
-    .select("id, campus_id, name, metadata")
+    .select("id, campus_id, name, metadata, updated_at")
     .eq("id", overlayId)
-    .eq("element_type", "event_overlay")
     .single();
 
   if (fetchError || !existing) throw new Error("Event overlay not found.");
 
   const metadata = existing.metadata as Record<string, unknown>;
+  if (!(["draft", "disapproved"] as unknown[]).includes(metadata.status || "draft")) {
+    throw new Error("Only drafts or disapproved event maps can be submitted.");
+  }
+
+  await validateSavedLocations(existing.campus_id, locations);
   const updatedMetadata = {
     ...applyLocationCompatibilityFields(metadata, locations),
     status: "pending",
     submittedAt: new Date().toISOString(),
     adminComment: null,
+    locationFeedback: {},
   };
 
   const { error } = await supabase
     .from("map_elements")
     .update({ metadata: updatedMetadata as never, updated_at: new Date().toISOString() })
     .eq("id", overlayId)
-    .eq("element_type", "event_overlay");
+    .or("element_type.eq.event_overlay,metadata->>kind.eq.event_overlay");
 
   if (error) throw error;
 
@@ -450,25 +594,27 @@ export async function listEventOverlays(
   filters: EventOverlayFilters = {}
 ): Promise<CampusEventOverlay[]> {
   const supabase = getSupabase();
-  const campusId = filters.campusId ?? await resolveActiveCampusId();
-  if (!campusId) return [];
+  const campusId = filters.allCampuses ? filters.campusId : filters.campusId ?? await resolveActiveCampusId();
+  if (!campusId && !filters.allCampuses) return [];
 
   try {
     let query = supabase
       .from("map_elements")
-      .select("id, campus_id, metadata, name")
-      .eq("element_type", "event_overlay")
-      .eq("campus_id", campusId)
-      .order("created_at", { ascending: false });
+      .select("id, campus_id, metadata, name, updated_at")
+      .or("element_type.eq.event_overlay,metadata->>kind.eq.event_overlay");
+    if (campusId) query = query.eq("campus_id", campusId);
+    if (filters.createdByUserId) query = query.eq("metadata->>createdByUserId", filters.createdByUserId);
+    const result = query.order("created_at", { ascending: false });
 
-    const { data, error } = await query;
+    const { data, error } = await result;
     if (error) throw error;
 
     let overlays = (data ?? []).map((row) =>
       overlayFromMetadata(
         (row.metadata as Record<string, unknown>) || {},
         row.id,
-        row.campus_id
+        row.campus_id,
+        row.updated_at
       )
     );
 
@@ -492,7 +638,8 @@ export async function listEventOverlays(
     }
 
     return overlays;
-  } catch {
+  } catch (error) {
+    if (filters.strict) throw error;
     if (filters.campusId) return [];
     // Fallback to mock data when not connected
     let overlays = [...MOCK_OVERLAYS];
@@ -519,7 +666,7 @@ export async function getEventOverlay(
   try {
     const { data, error } = await supabase
       .from("map_elements")
-      .select("id, campus_id, metadata")
+      .select("id, campus_id, metadata, updated_at")
       .eq("id", overlayId)
       .eq("element_type", "event_overlay")
       .single();
@@ -528,7 +675,8 @@ export async function getEventOverlay(
     return overlayFromMetadata(
       (data.metadata as Record<string, unknown>) || {},
       data.id,
-      data.campus_id
+      data.campus_id,
+      data.updated_at
     );
   } catch {
     return MOCK_OVERLAYS.find((o) => o.id === overlayId) || null;
@@ -541,47 +689,88 @@ export async function getEventOverlay(
 export async function reviewEventOverlay(
   overlayId: string,
   decision: "approved" | "disapproved",
-  adminComment?: string
-): Promise<void> {
-  const supabase = getSupabase();
-
-  const { data: existing, error: fetchError } = await supabase
-    .from("map_elements")
-    .select("id, campus_id, name, metadata")
-    .eq("id", overlayId)
-    .single();
-
-  if (fetchError || !existing) throw new Error("Event overlay not found.");
-
-  const metadata = existing.metadata as Record<string, unknown>;
-  if ((metadata.status || "pending") !== "pending") {
-    throw new Error("Only submitted event layouts can be reviewed.");
+  adminComment?: string,
+  publication?: {
+    expectedUpdatedAt?: string;
+    dateStart?: string;
+    dateEnd?: string;
+    publicationMode?: "now" | "schedule";
+    publicationAt?: string;
+    locationFeedback?: Record<string, string>;
   }
-  const updatedMetadata = {
-    ...metadata,
-    status: decision,
-    adminComment: adminComment || undefined,
-  };
-
-  const { error } = await supabase
-    .from("map_elements")
-    .update({ metadata: updatedMetadata, updated_at: new Date().toISOString() })
-    .eq("id", overlayId)
-    .eq("element_type", "event_overlay");
-
-  if (error) throw error;
-
-  await logActivity({
-    action: `event_overlay.${decision}`,
-    campusId: existing.campus_id,
-    entityType: "event_overlay",
-    entityId: overlayId,
-    metadata: {
-      status: decision,
-      adminComment,
-      title: typeof metadata.title === "string" ? metadata.title : existing.name,
-    },
+): Promise<CampusEventOverlay> {
+  if (decision !== "approved" && decision !== "disapproved") throw new Error("Invalid review decision.");
+  const supabase = getSupabase();
+  if (!publication?.expectedUpdatedAt) throw new Error("Refresh this event before reviewing it.");
+  const dateStart = publication?.dateStart;
+  const dateEnd = publication?.dateEnd;
+  const publicationMode = publication.publicationMode ?? (publication.publicationAt ? "schedule" : "now");
+  if (decision === "approved") {
+    validateEventDates(dateStart, dateEnd);
+    if (!dateStart || !dateEnd) throw new Error("Set the event start and end before approving publication.");
+    if (Date.parse(dateEnd) <= Date.now()) throw new Error("The event end must be in the future.");
+    if (publicationMode === "schedule" && (!publication.publicationAt || !Number.isFinite(Date.parse(publication.publicationAt)) || Date.parse(publication.publicationAt) <= Date.now())) {
+      throw new Error("Choose a future publication time.");
+    }
+    if (publicationMode === "schedule" && publication.publicationAt && Date.parse(publication.publicationAt) >= Date.parse(dateEnd)) throw new Error("Publication must be before the event ends.");
+  }
+  if (decision === "disapproved" && !adminComment?.trim()) throw new Error("Add feedback before disapproving this event.");
+  const { data, error } = await supabase.rpc("review_event_layout", {
+    p_overlay_id: overlayId,
+    p_expected_updated_at: publication.expectedUpdatedAt,
+    p_decision: decision,
+    p_date_start: decision === "approved" ? dateStart! : null,
+    p_date_end: decision === "approved" ? dateEnd! : null,
+    p_publication_mode: decision === "approved" ? publicationMode : null,
+    p_publication_at: decision === "approved" && publicationMode === "schedule" ? publication.publicationAt ?? null : null,
+    p_admin_comment: adminComment ?? null,
+    p_location_feedback: publication?.locationFeedback ?? null,
   });
+  if (error) throw error;
+  return overlayFromAdminResult(data);
+}
+
+function overlayFromAdminResult(value: unknown): CampusEventOverlay {
+  if (!isRecord(value) || typeof value.id !== "string" || typeof value.campusId !== "string" ||
+      typeof value.updatedAt !== "string" || !isRecord(value.metadata)) {
+    throw new Error("The event change was not confirmed. Refresh the event list before continuing.");
+  }
+  return overlayFromMetadata(value.metadata, value.id, value.campusId, value.updatedAt);
+}
+
+export async function manageEventPublication(
+  overlayId: string,
+  expectedUpdatedAt: string,
+  command: EventPublicationCommand,
+): Promise<CampusEventOverlay> {
+  if (!expectedUpdatedAt) throw new Error("Refresh this event before changing publication.");
+  const { data, error } = await getSupabase().rpc("manage_event_publication", {
+    p_overlay_id: overlayId,
+    p_expected_updated_at: expectedUpdatedAt,
+    p_action: command.action,
+    p_publication_at: command.action === "schedule" ? command.publicationAt : null,
+  });
+  if (error) throw error;
+  return overlayFromAdminResult(data);
+}
+
+export async function listPublishedEventPreviews(campusId: string): Promise<PublicEventFeed> {
+  if (!campusId.trim()) throw new Error("A published campus must be selected.");
+  const { data, error } = await getSupabase().rpc("list_published_event_previews", { p_campus_id: campusId });
+  if (error) throw error;
+  if (!isRecord(data) || typeof data.serverNow !== "string" || !isValidEventInstant(data.serverNow) || !Array.isArray(data.events)) {
+    throw new Error("The event preview response is invalid. Retry to refresh the map.");
+  }
+  const serverNow = data.serverNow;
+  const serverNowMs = Date.parse(serverNow);
+  const seen = new Set<string>();
+  const events = data.events.flatMap((candidate) => {
+    const event = parsePublicPreview(candidate, campusId, serverNowMs);
+    if (!event || seen.has(event.id)) return [];
+    seen.add(event.id);
+    return [event];
+  });
+  return { serverNow, events };
 }
 
 /**
@@ -624,28 +813,27 @@ export async function deleteEventOverlay(overlayId: string): Promise<void> {
  * Filters by status=approved and matches the requested floor.
  */
 export async function getApprovedOverlaysForFloor(
-  _floorId: string
+  floorId: string,
+  campusId?: string
 ): Promise<CampusEventOverlay[]> {
-  const allOverlays = await listEventOverlays({ status: "approved" });
-  return allOverlays.flatMap((overlay) =>
-    normalizeEventOverlayLocations(overlay)
-      .filter((location) => location.locationRef.floorId === _floorId)
-      .map((location) => overlayForLocation(overlay, location))
-  );
+  if (!campusId) return [];
+  const feed = await listPublishedEventPreviews(campusId);
+  return feed.events.flatMap((event) => event.locations
+    .filter((location) => location.locationRef.floorId === floorId)
+    .map((location) => compatibilityPreview(event, location)));
 }
 
 /**
  * Get all active approved overlays for the campus grounds.
  */
-export async function getApprovedOverlaysForCampus(): Promise<
+export async function getApprovedOverlaysForCampus(campusId?: string): Promise<
   CampusEventOverlay[]
 > {
-  const allOverlays = await listEventOverlays({ status: "approved" });
-  return allOverlays.flatMap((overlay) =>
-    normalizeEventOverlayLocations(overlay)
-      .filter((location) => location.locationRef.type === "campus")
-      .map((location) => overlayForLocation(overlay, location))
-  );
+  if (!campusId) return [];
+  const feed = await listPublishedEventPreviews(campusId);
+  return feed.events.flatMap((event) => event.locations
+    .filter((location) => location.locationRef.type === "campus")
+    .map((location) => compatibilityPreview(event, location)));
 }
 
 /**
@@ -654,12 +842,10 @@ export async function getApprovedOverlaysForCampus(): Promise<
 export async function getActiveApprovedOverlays(): Promise<
   CampusEventOverlay[]
 > {
-  const allOverlays = await listEventOverlays({ status: "approved" });
-  return allOverlays.flatMap((overlay) =>
-    normalizeEventOverlayLocations(overlay).map((location) =>
-      overlayForLocation(overlay, location)
-    )
-  );
+  const campusId = await resolveActiveCampusId();
+  if (!campusId) return [];
+  const feed = await listPublishedEventPreviews(campusId);
+  return feed.events.flatMap((event) => event.locations.map((location) => compatibilityPreview(event, location)));
 }
 
 // ── Service export ──────────────────────────────────────────────────────────
@@ -672,6 +858,8 @@ export const eventOverlayService = {
   listEventOverlays,
   getEventOverlay,
   reviewEventOverlay,
+  manageEventPublication,
+  listPublishedEventPreviews,
   deleteEventOverlay,
   getApprovedOverlaysForFloor,
   getApprovedOverlaysForCampus,

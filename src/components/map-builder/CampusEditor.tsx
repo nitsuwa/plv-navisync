@@ -10551,6 +10551,8 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
           selected={selected}
           issueItems={selectedIssueItems}
           selBldg={selBldg}
+          navigationCampus={campus}
+          onReviewNavigationIssue={(buildingId, floorId, initialSelection) => requestOpenFloor(buildingId, floorId, initialSelection)}
           selEntrance={selEntrance}
           selEntranceParent={selEntranceParent}
           selMkr={selMkr}

@@ -164,28 +164,72 @@ export function RoomVisual({ room, hovered, highlighted, mapMode, onClick, onMou
   const rotation = room.rotation ?? 0;
   const cx = room.x + room.w / 2;
   const cy = room.y + room.h / 2;
-  const customPoints = Array.isArray(room.shapePoints) && room.shapePoints.length >= 3 ? roomOutlinePoints(room) : null;
 
   return (
     <g
       data-testid="readonly-room"
       data-room-id={room.id}
+      data-room-hovered={hovered ? "true" : "false"}
+      data-room-highlighted={highlighted ? "true" : "false"}
+      role={onClick ? "button" : undefined}
+      aria-label={onClick ? room.name : undefined}
+      aria-pressed={onClick ? highlighted : undefined}
+      tabIndex={onClick ? 0 : undefined}
       style={{ cursor: onClick ? "pointer" : undefined }}
-      transform={customPoints ? undefined : `rotate(${rotation}, ${cx}, ${cy})`}
+      transform={Array.isArray(room.shapePoints) && room.shapePoints.length >= 3 ? undefined : `rotate(${rotation}, ${cx}, ${cy})`}
       onClick={onClick ? (e) => { e.stopPropagation(); onClick(room.id); } : undefined}
+      onKeyDown={onClick ? (event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        event.stopPropagation();
+        onClick(room.id);
+      } : undefined}
       onMouseEnter={onMouseEnter ? () => onMouseEnter(room.id) : undefined}
       onMouseLeave={onMouseLeave}
     >
-      <FloorRoomArtwork room={room} fillOpacity={highlighted ? 0.3 : 0.58}
-        strokeColor={highlighted ? "#0e2a6e" : undefined} strokeWidth={highlighted ? 2.5 : hovered ? 2 : 1} />
-      {highlighted && (customPoints ? (
-        <path d={roomShapePath(customPoints)} fill="none" stroke="#0e2a6e" strokeWidth={2.5}
-          style={{ animation: "border-glow 2s ease-in-out infinite" }} />
+      <FloorRoomArtwork room={room} fillOpacity={hovered && !highlighted ? 0.62 : 0.58}
+        strokeColor={hovered && !highlighted ? "#60a5fa" : undefined} strokeWidth={hovered && !highlighted ? 1.5 : 1} />
+    </g>
+  );
+}
+
+/** Student-only selection treatment follows the room polygon and sits above
+ * neighboring fills while staying below furniture, walls, doors, and labels. */
+function RoomSelectionOverlay({ room }: { room: FloorRoom }) {
+  const points = Array.isArray(room.shapePoints) && room.shapePoints.length >= 3 ? roomOutlinePoints(room) : null;
+  const rotation = room.rotation ?? 0;
+  const transform = points ? undefined : `rotate(${rotation}, ${room.x + room.w / 2}, ${room.y + room.h / 2})`;
+
+  return (
+    <g
+      data-testid="readonly-room-selection"
+      data-semantic-layer="room-selection"
+      data-room-id={room.id}
+      className="student-room-selection"
+      pointerEvents="none"
+      transform={transform}
+      aria-hidden="true"
+    >
+      {points ? (
+        <path data-testid="readonly-room-selection-tint" d={roomShapePath(points)} fill="#60a5fa" fillOpacity={0.2} stroke="none" />
       ) : (
-        <rect x={room.x - 3} y={room.y - 3} width={room.w + 6} height={room.h + 6} rx={2}
-          fill="none" stroke="#0e2a6e" strokeWidth={2.5}
-          style={{ animation: "border-glow 2s ease-in-out infinite" }} />
-      ))}
+        <rect data-testid="readonly-room-selection-tint" x={room.x} y={room.y} width={room.w} height={room.h} rx={1} fill="#60a5fa" fillOpacity={0.2} stroke="none" />
+      )}
+      {points ? (
+        <path data-testid="readonly-room-selection-halo" className="student-room-selection-halo" d={roomShapePath(points)} fill="none" stroke="#3b82f6" strokeOpacity={0.28} strokeWidth={9} strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+      ) : (
+        <rect data-testid="readonly-room-selection-halo" className="student-room-selection-halo" x={room.x} y={room.y} width={room.w} height={room.h} rx={1} fill="none" stroke="#3b82f6" strokeOpacity={0.28} strokeWidth={9} vectorEffect="non-scaling-stroke" />
+      )}
+      {points ? (
+        <path data-testid="readonly-room-selection-outline" d={roomShapePath(points)} fill="none" stroke="#1d4ed8" strokeWidth={3} strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+      ) : (
+        <rect data-testid="readonly-room-selection-outline" x={room.x} y={room.y} width={room.w} height={room.h} rx={1} fill="none" stroke="#1d4ed8" strokeWidth={3} vectorEffect="non-scaling-stroke" />
+      )}
+      {points ? (
+        <path data-testid="readonly-room-selection-trace" className="student-room-selection-trace" d={roomShapePath(points)} pathLength={1} fill="none" stroke="#2563eb" strokeWidth={4} strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+      ) : (
+        <rect data-testid="readonly-room-selection-trace" className="student-room-selection-trace" x={room.x} y={room.y} width={room.w} height={room.h} rx={1} pathLength={1} fill="none" stroke="#2563eb" strokeWidth={4} strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+      )}
     </g>
   );
 }
@@ -362,7 +406,7 @@ function FurnitureVisual({ item }: { item: FloorFurniture }) {
 }
 
 function RoomLabelVisual({ room, hovered, highlighted }: Pick<RoomVisualProps, "room" | "hovered" | "highlighted">) {
-  return <FloorRoomLabelArtwork room={room} emphasized={hovered || highlighted} opacity={highlighted ? 1 : hovered ? 0.95 : 0.78} />;
+  return <FloorRoomLabelArtwork room={room} emphasized={hovered || highlighted} studentSelected={highlighted} opacity={highlighted ? 1 : hovered ? 0.95 : 0.78} />;
 }
 export interface ReadonlyFloorPlanSceneProps {
   floor: FloorPlan;
@@ -540,6 +584,12 @@ export function ReadonlyFloorPlanScene({
           />
         ))}
       </g>
+
+      {/* Selection is a separate student-only overlay above every room fill,
+          but below authored furniture and architecture. */}
+      {sortedRooms.filter((room) => room.id === highlightedRoomId).map((room) => (
+        <RoomSelectionOverlay key={`readonly-room-selection-${room.id}`} room={room} />
+      ))}
 
       {/* Furniture remains in its own local ordering band below architecture. */}
       <g data-semantic-layer="furniture">

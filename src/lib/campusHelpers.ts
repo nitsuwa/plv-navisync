@@ -24,6 +24,10 @@ export function buildSharedCampus(campus: Campus, publishedAt?: string): SharedC
     buildings: campus.buildings.map((b) => ({
       id: b.id, name: b.name, code: b.code,
       category: b.category, description: b.description,
+      coverImagePath: b.coverImagePath,
+      operating_hours: b.operatingHours,
+      facilities: b.facilities,
+      accessibility: b.accessibility,
       x: b.x, y: b.y, width: b.width, height: b.height,
       color: b.color, floors: b.floors, entrances: normalizeBuildingEntrances(b),
     })),

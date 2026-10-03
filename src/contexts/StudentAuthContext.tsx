@@ -17,6 +17,7 @@ import {
 } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase, isConnected, type Profile } from "../lib/supabase";
+import { isAdminRole } from "../lib/roles";
 
 export type AuthStatus = "initializing" | "authenticated" | "unauthenticated" | "error";
 export type PasswordRecoveryState = "idle" | "processing" | "ready" | "invalid" | "complete";
@@ -326,6 +327,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await restoreSession();
       return;
     }
+    // Explicit refreshes (for example after invitation acceptance) supersede
+    // any earlier profile fetch so a stale pre-activation result cannot win.
+    generationRef.current += 1;
+    pendingProfileRef.current = null;
     await loadProfile(current.user.id, generationRef.current);
   }, [loadProfile, restoreSession]);
 
@@ -344,7 +349,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const activeProfile = session?.user.id && profile?.id === session.user.id ? profile : null;
   const isStudent = !!activeProfile && (activeProfile.role === "student" || activeProfile.role === "student_org") && activeProfile.is_active;
   const isStudentOrg = !!activeProfile && activeProfile.role === "student_org" && activeProfile.is_active;
-  const isAdmin = !!activeProfile && activeProfile.role === "admin" && activeProfile.is_active;
+  const isAdmin = !!activeProfile && isAdminRole(activeProfile.role) && activeProfile.is_active;
   const username = activeProfile
     ? [activeProfile.first_name, activeProfile.last_name].filter(Boolean).join(" ") || activeProfile.email.split("@")[0] || "Student"
     : "";

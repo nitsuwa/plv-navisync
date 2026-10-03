@@ -17,6 +17,8 @@ import {
   MessageSquare,
   Eye,
   Loader2,
+  Settings2,
+  ExternalLink,
 } from "lucide-react";
 import { cn } from "../lib/utils";
 import { SearchBar } from "../components/ui/SearchBar";
@@ -29,7 +31,11 @@ import {
 } from "../services/eventOverlayService";
 import type { CampusEventOverlay } from "../components/map-builder/types";
 import { countEventOverlayItems, normalizeEventOverlayLocations } from "../lib/eventOverlayModel";
+import { findEventConflicts, formatEventDate, getStudentEventPhase } from "../lib/eventPublication";
 import { formatEventSubmissionTime } from "../lib/eventSubmissionTime";
+import { isValidThemedTime, manilaDateTimeToIso, ThemedDateTimeField } from "../components/ui/ThemedDateTimeField";
+import { AdminEventPublicationDialog } from "../components/events/AdminEventPublicationDialog";
+import type { EventPublicationCommand } from "../types/eventPreview";
 
 // ── Status configuration ──────────────────────────────────────────────────
 
@@ -69,32 +75,95 @@ const STATUS_CONFIG: Record<
   },
 };
 
+function publicationStateLabel(overlay: CampusEventOverlay): string {
+  if (!overlay.isActive) return "Unpublished";
+  const phase = getStudentEventPhase(overlay, Date.now());
+  if (phase === "scheduled") return "Scheduled";
+  if (phase === "upcoming") return "Upcoming";
+  if (phase === "ongoing") return "Ongoing";
+  if (phase === "ended") return "Ended";
+  return "Timing unavailable";
+}
+
 // ── Review Modal ─────────────────────────────────────────────────────────
 
 function ReviewModal({
   overlay,
   onClose,
   onReview,
+  allOverlays,
 }: {
   overlay: CampusEventOverlay;
+  allOverlays: CampusEventOverlay[];
   onClose: () => void;
   onReview: (
     id: string,
     decision: "approved" | "disapproved",
-    comment?: string
+    comment?: string,
+    publication?: { expectedUpdatedAt?: string; dateStart?: string; dateEnd?: string; publicationMode?: "now" | "schedule"; publicationAt?: string; locationFeedback?: Record<string, string> }
   ) => Promise<void>;
 }) {
+  const [conflictCheckFailed, setConflictCheckFailed] = useState(false);
+  const [approvedEvents, setApprovedEvents] = useState<CampusEventOverlay[]>(allOverlays);
+  useEffect(() => {
+    let cancelled = false;
+    eventOverlayService.listEventOverlays({ allCampuses: true, campusId: overlay.campusId, status: "approved", strict: true }).then(events => { if (!cancelled) setApprovedEvents(events); }).catch(() => { if (!cancelled) setConflictCheckFailed(true); });
+    return () => { cancelled = true; };
+  }, [overlay.campusId]);
   const [comment, setComment] = useState("");
+  const [publicationMode, setPublicationMode] = useState<"now" | "schedule">("now");
+  const [eventStartDate, setEventStartDate] = useState("");
+  const [eventStartTime, setEventStartTime] = useState("");
+  const [eventEndDate, setEventEndDate] = useState("");
+  const [eventEndTime, setEventEndTime] = useState("");
+  const [publicationDate, setPublicationDate] = useState("");
+  const [publicationTime, setPublicationTime] = useState("");
+  const [locationFeedback, setLocationFeedback] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const toast = useToast();
 
+  const dateStart = manilaDateTimeToIso(eventStartDate, eventStartTime);
+  const dateEnd = manilaDateTimeToIso(eventEndDate, eventEndTime);
+  const hasValidEventTimes = isValidThemedTime(eventStartTime) && isValidThemedTime(eventEndTime);
+  const eventScheduleError = !eventStartDate || !eventEndDate || !eventStartTime || !eventEndTime
+    ? "Set a start and end date with 24-hour times (for example, 09:00)."
+    : !hasValidEventTimes
+      ? "Use valid 24-hour times, for example 09:00."
+      : !dateStart || !dateEnd
+        ? "Choose valid calendar dates for the event start and end."
+        : Date.parse(dateEnd) <= Date.now()
+      ? "The event end must be in the future."
+      : dateStart && dateEnd && Date.parse(dateEnd) <= Date.parse(dateStart)
+      ? "The event end must be later than its start."
+      : "";
+  const eventScheduleValid = !eventScheduleError && Boolean(dateStart && dateEnd);
+  const scheduledPublicationAt = manilaDateTimeToIso(publicationDate, publicationTime);
+  const publicationTooLate = Boolean(scheduledPublicationAt && dateEnd && Date.parse(scheduledPublicationAt) >= Date.parse(dateEnd));
+  const publicationScheduleValid = publicationMode === "now" || Boolean(scheduledPublicationAt && Date.parse(scheduledPublicationAt) > Date.now() && !publicationTooLate);
+  const publicationScheduleError = !scheduledPublicationAt || (publicationMode === "schedule" && Date.parse(scheduledPublicationAt) <= Date.now())
+    ? "Choose a publication date and enter a valid time."
+    : publicationTooLate
+      ? "Publication must be scheduled before the event ends."
+      : "";
+  const scheduleForConflicts = eventScheduleValid ? { ...overlay, dateStart, dateEnd } : null;
+
   const handleReview = async (decision: "approved" | "disapproved") => {
+    if (decision === "approved" && !eventScheduleValid) return;
+    if (decision === "approved" && !publicationScheduleValid) return;
     setBusy(true);
     try {
       await onReview(
         overlay.id,
         decision,
-        decision === "disapproved" ? comment : undefined
+        comment || undefined,
+        {
+          dateStart: decision === "approved" ? dateStart : undefined,
+          dateEnd: decision === "approved" ? dateEnd : undefined,
+          expectedUpdatedAt: overlay.updatedAt,
+          publicationMode: decision === "approved" ? publicationMode : undefined,
+          publicationAt: decision === "approved" && publicationMode === "schedule" ? scheduledPublicationAt : undefined,
+          locationFeedback,
+        }
       );
       toast.success(
         decision === "approved" ? "Event layout approved" : "Event layout disapproved",
@@ -175,6 +244,34 @@ function ReviewModal({
             </div>
           </div>
 
+          <div className="space-y-3 rounded-xl border border-border p-3">
+            <div>
+              <p className="text-sm font-bold">Event schedule</p>
+              <p className="mt-1 text-xs text-muted-foreground">Set when the event takes place. Dates and times use Asia/Manila.</p>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <ThemedDateTimeField label="Event starts" date={eventStartDate} time={eventStartTime} disabled={busy} onDateChange={setEventStartDate} onTimeChange={setEventStartTime} />
+              <ThemedDateTimeField label="Event ends" date={eventEndDate} time={eventEndTime} disabled={busy} onDateChange={setEventEndDate} onTimeChange={setEventEndTime} />
+            </div>
+            {eventScheduleError && <p role="alert" className="text-xs text-destructive">{eventScheduleError}</p>}
+            {eventScheduleValid && <p className="text-xs text-muted-foreground">Event: {formatEventDate(dateStart)} – {formatEventDate(dateEnd)}. The preview expires when the event ends.</p>}
+            <div className="border-t border-border pt-3">
+              <p className="mb-2 text-sm font-bold">Student publication</p>
+              <div role="group" aria-label="Publication timing" className="grid gap-2 sm:grid-cols-2">
+                {([
+                  { value: "now", label: "Publish now" },
+                  { value: "schedule", label: "Schedule publication" },
+                ] as const).map((option) => <button key={option.value} type="button" aria-pressed={publicationMode === option.value} disabled={busy} onClick={() => setPublicationMode(option.value)} className={cn("rounded-xl border px-3 py-2 text-left text-xs font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30", publicationMode === option.value ? "border-primary bg-primary/10 text-primary" : "border-border bg-card text-muted-foreground hover:bg-muted")}>
+                  {option.label}{option.value === "now" ? " after approval" : ""}
+                </button>)}
+              </div>
+              {publicationMode === "schedule" && <div className="mt-3"><ThemedDateTimeField label="Publish on" date={publicationDate} time={publicationTime} disabled={busy} onDateChange={setPublicationDate} onTimeChange={setPublicationTime} /></div>}
+              {publicationMode === "schedule" && publicationScheduleError && <p role="alert" className="mt-2 text-xs text-destructive">{publicationScheduleError}</p>}
+            </div>
+            {conflictCheckFailed && <p role="alert" className="text-xs text-amber-600">Venue conflicts could not be checked. Verify the schedule before approving.</p>}
+            {(scheduleForConflicts ? findEventConflicts(scheduleForConflicts, approvedEvents) : []).map(conflict => <p key={conflict.id} role="alert" className="text-xs text-amber-600">Location/time conflict: {conflict.title}. Check venue availability before approving.</p>)}
+          </div>
+          <div className="space-y-2"><p className="text-xs font-bold">Feedback by location</p>{locations.map(location => <label key={location.id} className="block text-xs">{location.locationRef.label}<input value={locationFeedback[location.id] || ""} onChange={e=>setLocationFeedback({...locationFeedback,[location.id]:e.target.value})} placeholder="Specific feedback for this map" className="mt-1 block w-full rounded-lg border border-border bg-background p-2" /></label>)}</div>
           {/* Admin Comment */}
           <div>
             <label
@@ -219,7 +316,7 @@ function ReviewModal({
           </button>
           <button
             onClick={() => handleReview("disapproved")}
-            disabled={busy || (comment.trim().length === 0)}
+            disabled={busy || (comment.trim().length === 0) || !overlay.updatedAt}
             className="flex-1 h-10 rounded-xl bg-destructive text-white text-sm font-bold hover:bg-destructive/90 active:scale-[0.97] transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2"
           >
             {busy ? (
@@ -231,7 +328,7 @@ function ReviewModal({
           </button>
           <button
             onClick={() => handleReview("approved")}
-            disabled={busy}
+            disabled={busy || !eventScheduleValid || !publicationScheduleValid || !overlay.updatedAt}
             className="flex-1 h-10 rounded-xl bg-green-600 text-white text-sm font-bold hover:bg-green-700 active:scale-[0.97] transition-all disabled:opacity-40 flex items-center justify-center gap-2"
           >
             {busy ? (
@@ -260,6 +357,7 @@ export function AdminEventLayoutsPage() {
   const [reviewTarget, setReviewTarget] = useState<CampusEventOverlay | null>(
     null
   );
+  const [publicationTarget, setPublicationTarget] = useState<CampusEventOverlay | null>(null);
   const requestRef = useRef(0);
   const toast = useToast();
 
@@ -268,6 +366,7 @@ export function AdminEventLayoutsPage() {
     setLoading(true);
     try {
       const data = await eventOverlayService.listEventOverlays({
+        allCampuses: true,
         status: statusFilter,
         search,
       });
@@ -292,10 +391,17 @@ export function AdminEventLayoutsPage() {
   const handleReview = async (
     id: string,
     decision: "approved" | "disapproved",
-    comment?: string
+    comment?: string,
+    publication?: { expectedUpdatedAt?: string; dateStart?: string; dateEnd?: string; publicationMode?: "now" | "schedule"; publicationAt?: string; locationFeedback?: Record<string, string> }
   ) => {
-    await eventOverlayService.reviewEventOverlay(id, decision, comment);
-    loadOverlays();
+    await eventOverlayService.reviewEventOverlay(id, decision, comment, publication);
+    await loadOverlays();
+  };
+
+  const handlePublicationChange = async (overlay: CampusEventOverlay, command: EventPublicationCommand) => {
+    if (!overlay.updatedAt) throw new Error("This event has no server revision. Refresh the event list before changing publication.");
+    await eventOverlayService.manageEventPublication(overlay.id, overlay.updatedAt, command);
+    await loadOverlays();
   };
 
   if (loading) return <TablePageSkeleton rows={4} />;
@@ -465,6 +571,7 @@ export function AdminEventLayoutsPage() {
                     {locations.map((location) => location.locationRef.label).join(" · ") || "No location set"}
                   </p>
                   <p className="text-[11px] text-muted-foreground mt-1">Submitted to GSO: {formatEventSubmissionTime(overlay.submittedAt)}</p>
+                  {status === "approved" && <p className="mt-1 text-[11px] font-semibold text-muted-foreground">Student publication: {publicationStateLabel(overlay)}</p>}
                   {/* Layout stats */}
                   <div className="flex items-center gap-3 mt-2">
                     <span className="text-[10px] font-bold text-muted-foreground px-2 py-0.5 rounded-full bg-muted">
@@ -496,23 +603,9 @@ export function AdminEventLayoutsPage() {
 
               {/* Actions */}
               <div className="flex items-center gap-2 px-5 py-3 border-t border-border bg-muted/20">
-                <button
-                  onClick={() => setReviewTarget(overlay)}
-                  className="flex items-center gap-1.5 h-8 px-3 rounded-xl border border-border text-xs font-bold text-foreground hover:bg-muted active:scale-[0.97] transition-all"
-                >
-                  <Eye className="h-3.5 w-3.5" /> View & Review
-                </button>
-
-                {status === "pending" && (
-                  <>
-                    <button
-                      onClick={() => handleReview(overlay.id, "approved")}
-                      className="flex items-center gap-1.5 h-8 px-3 rounded-xl bg-green-500 text-white text-xs font-bold hover:bg-green-600 active:scale-[0.97] transition-all"
-                    >
-                      <CheckCircle2 className="h-3.5 w-3.5" /> Quick Approve
-                    </button>
-                  </>
-                )}
+                {status === "pending" && <button type="button" onClick={() => setReviewTarget(overlay)} className="inline-flex min-h-10 items-center gap-1.5 rounded-xl bg-primary px-3 text-xs font-bold text-primary-foreground hover:bg-primary/90"><Eye className="h-3.5 w-3.5" />Review submission</button>}
+                {status === "approved" && <button type="button" onClick={() => setPublicationTarget(overlay)} className="inline-flex min-h-10 items-center gap-1.5 rounded-xl bg-primary px-3 text-xs font-bold text-primary-foreground hover:bg-primary/90"><Settings2 className="h-3.5 w-3.5" />Manage publication</button>}
+                <a href={`/admin-dashboard/event-layouts/${overlay.id}/preview`} className="inline-flex min-h-10 items-center gap-1.5 rounded-xl border border-border px-3 text-xs font-bold text-foreground hover:bg-muted"><ExternalLink className="h-3.5 w-3.5" />Open map preview</a>
 
                 <div className="ml-auto text-[10px] text-muted-foreground">
                   {overlay.createdByUserId &&
@@ -551,9 +644,11 @@ export function AdminEventLayoutsPage() {
         <ReviewModal
           overlay={reviewTarget}
           onClose={() => setReviewTarget(null)}
+          allOverlays={overlays}
           onReview={handleReview}
         />
       )}
+      {publicationTarget && <AdminEventPublicationDialog overlay={publicationTarget} onClose={() => setPublicationTarget(null)} onSave={handlePublicationChange} />}
     </div>
   );
 }

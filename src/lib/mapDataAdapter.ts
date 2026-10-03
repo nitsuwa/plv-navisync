@@ -7,6 +7,8 @@
 
 import type { Campus, CampusBuilding, FloorPlan, FloorRoom } from "../components/map-builder/types";
 import { entranceDescription, entranceDisplayName } from "./buildingEntrances";
+import { buildingCoverPublicUrl } from "../services/buildingImageService";
+import { buildingTypeValue, formatWeeklyOperatingHours } from "./buildingInformation";
 
 type CampusWithOptionalBuildings = Campus & { buildings: CampusBuilding[] };
 
@@ -72,10 +74,12 @@ import type { Building } from "../types";
 
 type LegacyBuilding = Building;
 
-type PublicBuildingMetadata = CampusBuilding & {
+type PublicBuildingMetadata = Omit<CampusBuilding, "departments" | "facilities" | "accessibility"> & {
   departments?: unknown;
   facilities?: unknown;
   accessibility?: unknown;
+  image_url?: string;
+  operating_hours?: string;
 };
 
 function cleanStringList(value: unknown): string[] | null {
@@ -90,35 +94,51 @@ function cleanStringList(value: unknown): string[] | null {
 
 const ROOM_FACILITY_LABELS: Record<string, string> = {
   classroom: "Classrooms",
+  classrooms: "Classrooms",
   lab: "Laboratories",
   laboratory: "Laboratories",
+  laboratories: "Laboratories",
   office: "Offices",
-  restroom: "Restrooms",
+  offices: "Offices",
+  restroom: "Restroom",
+  restrooms: "Restroom",
+  accessible_restroom: "Restroom",
   canteen: "Canteen",
   clinic: "Clinic",
   kitchen: "Kitchen",
   library: "Library",
   lounge: "Student Lounge",
+  student_lounge: "Student Lounge",
+  "student lounge": "Student Lounge",
   lobby: "Lobby",
   stairs: "Stairs",
+  staircase: "Stairs",
   elevator: "Elevator",
+  lift: "Elevator",
+  study_area: "Study Area",
+  "study area": "Study Area",
+  service_counter: "Service Counter",
+  "service counter": "Service Counter",
+  wifi: "Wi-Fi",
+  "wi-fi": "Wi-Fi",
 };
 
 function facilitiesFromFloorPlans(building: CampusBuilding): string[] {
   const labels = new Set<string>();
   for (const floor of building.floors ?? []) {
     for (const room of floor.rooms ?? []) {
-      const label = ROOM_FACILITY_LABELS[room.type?.trim().toLowerCase() ?? ""];
+      const normalizedType = room.type?.trim().toLowerCase().replace(/[_-]+/g, " ").replace(/\s+/g, " ");
+      const label = normalizedType ? ROOM_FACILITY_LABELS[normalizedType] : undefined;
       if (label) labels.add(label);
     }
-    if (floor.elevators?.length) labels.add("Elevator");
-    if (floor.stairs?.length) labels.add("Stairs");
+    if (floor.elevators?.some((item) => item.visible !== false)) labels.add("Elevator");
+    if (floor.stairs?.some((item) => item.visible !== false)) labels.add("Stairs");
   }
   return [...labels];
 }
 
 export function buildingsFromCampus(campus: CampusWithOptionalBuildings): LegacyBuilding[] {
-  return visibleBuildings(campus).map(b => {
+  return visibleBuildings(campus).map((b) => {
     const metadata = b as PublicBuildingMetadata;
     return {
       id: b.id,
@@ -126,11 +146,19 @@ export function buildingsFromCampus(campus: CampusWithOptionalBuildings): Legacy
       code: b.code,
       description: b.description || "",
       category: b.category.toLowerCase() as Building["category"],
+      building_type: buildingTypeValue(b),
       floor_count: b.floors.length,
-      image_url: undefined,
-      operating_hours: undefined,
+      image_url: b.coverImagePath
+        ? buildingCoverPublicUrl(b.coverImagePath)
+        : metadata.image_url,
+      facilities: cleanStringList(metadata.facilities) ?? [],
+      accessibility: metadata.accessibility,
+      operating_hours: formatWeeklyOperatingHours(b.operatingHoursSchedule)
+        ?? b.operatingHours
+        ?? metadata.operating_hours,
+      operating_hours_schedule: b.operatingHoursSchedule,
       contact: undefined,
-      departments: cleanStringList(metadata.departments) ?? cleanStringList(metadata.facilities) ?? [],
+      departments: cleanStringList(metadata.departments) ?? [],
       created_at: new Date().toISOString(),
     };
   });
@@ -145,8 +173,18 @@ export const STATUS_DOT = { Open: "bg-green-500", Busy: "bg-amber-500", Closed: 
 export function facilitiesFromCampus(campus: CampusWithOptionalBuildings): Record<string, string[]> {
   const result: Record<string, string[]> = {};
   for (const b of visibleBuildings(campus)) {
-    const explicit = cleanStringList((b as PublicBuildingMetadata).facilities);
-    result[b.id] = explicit ?? facilitiesFromFloorPlans(b);
+    const facilities = new Map<string, string>();
+    const add = (value: string | undefined) => {
+      const normalized = value?.trim().toLocaleLowerCase().replace(/[_-]+/g, " ").replace(/\s+/g, " ");
+      if (!normalized) return;
+      const label = ROOM_FACILITY_LABELS[normalized] ?? value.trim();
+      const key = label.toLocaleLowerCase();
+      if (!facilities.has(key)) facilities.set(key, label);
+    };
+
+    cleanStringList((b as PublicBuildingMetadata).facilities)?.forEach(add);
+    facilitiesFromFloorPlans(b).forEach(add);
+    result[b.id] = [...facilities.values()];
   }
   return result;
 }
@@ -163,21 +201,41 @@ export function accessibilityFromCampus(campus: CampusWithOptionalBuildings): Re
   const result: Record<string, string[]> = {};
   for (const b of visibleBuildings(campus)) {
     const metadata = b as PublicBuildingMetadata;
-    const items = new Set<string>(cleanStringList(metadata.accessibility) ?? []);
+    const items = new Map<string, string>();
+    const add = (label: string | undefined) => {
+      const value = label?.trim();
+      if (!value) return;
+      const key = value.toLocaleLowerCase();
+      if (!items.has(key)) items.set(key, value);
+    };
     const acc = metadata.accessibility;
-    if (acc && typeof acc === "object" && !Array.isArray(acc)) {
+    if (Array.isArray(acc)) {
+      for (const value of acc) {
+        if (typeof value !== "string") continue;
+        const normalized = value.trim().toLocaleLowerCase().replace(/[_-]+/g, " ").replace(/\s+/g, " ");
+        const label = normalized === "ramp" || normalized === "has ramp" ? ACCESSIBILITY_TYPE_LABELS.ramp
+          : normalized === "elevator" || normalized === "has elevator" ? ACCESSIBILITY_TYPE_LABELS.elevator
+            : normalized === "accessible entrance" ? ACCESSIBILITY_TYPE_LABELS.accessible_entrance
+              : normalized === "wheelchair accessible" ? "Wheelchair Accessible"
+                : ACCESSIBILITY_TYPE_LABELS[normalized.replace(/ /g, "_")] ?? value.trim();
+        add(label);
+      }
+    } else if (acc && typeof acc === "object") {
       const summary = acc as Record<string, unknown>;
-      if (summary.wheelchairAccessible) items.add("Wheelchair Accessible");
-      if (summary.hasElevator) items.add("Elevator Available");
-      if (summary.hasRamp) items.add("Ramp Access");
-      if (summary.accessibleEntrance) items.add("Accessible Entrance");
+      if (summary.wheelchairAccessible) add("Wheelchair Accessible");
+      if (summary.hasElevator) add(ACCESSIBILITY_TYPE_LABELS.elevator);
+      if (summary.hasRamp) add(ACCESSIBILITY_TYPE_LABELS.ramp);
+      if (summary.accessibleEntrance) add(ACCESSIBILITY_TYPE_LABELS.accessible_entrance);
     }
     for (const feature of campus.accessibilityFeatures ?? []) {
       if (feature.buildingId !== b.id || feature.status !== "present") continue;
-      items.add(feature.label?.trim() || ACCESSIBILITY_TYPE_LABELS[feature.type] || "Accessibility Feature");
+      add(feature.label?.trim() || ACCESSIBILITY_TYPE_LABELS[feature.type] || "Accessibility Feature");
     }
-    if (b.entrances?.some((entrance) => entrance.accessible === true)) items.add("Accessible Entrance");
-    result[b.id] = [...items];
+    if (b.entrances?.some((entrance) => entrance.accessible === true)) add(ACCESSIBILITY_TYPE_LABELS.accessible_entrance);
+    if ((b.floors ?? []).some((floor) => [...(floor.ramps ?? []), ...(floor.entranceRamps ?? [])].some((ramp) => ramp.accessible !== false && ramp.visible !== false))) add(ACCESSIBILITY_TYPE_LABELS.ramp);
+    if ((b.floors ?? []).some((floor) => (floor.elevators ?? []).some((elevator) => elevator.visible !== false))) add(ACCESSIBILITY_TYPE_LABELS.elevator);
+    if ((b.floors ?? []).some((floor) => (floor.rooms ?? []).some((room) => room.type === "accessible_restroom" || (room.type === "restroom" && room.accessibility === true)))) add(ACCESSIBILITY_TYPE_LABELS.accessible_restroom);
+    result[b.id] = [...items.values()];
   }
   return result;
 }

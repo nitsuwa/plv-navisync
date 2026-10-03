@@ -58,3 +58,7 @@ LPT9
 
 # Local IDE/Agent Cache
 .freebuff/
+
+# Local dependency store and temporary visual-planning state
+.pnpm-store/
+.superpowers/

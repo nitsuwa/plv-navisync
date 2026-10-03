@@ -95,5 +95,7 @@ describe("PublicLayout student entry", () => {
 
     expect(screen.getByText("Event editor")).toBeInTheDocument();
     expect(screen.queryByTestId("site-footer")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("mobile-bottom-nav")).not.toBeInTheDocument();
+    expect(document.getElementById("main-content")).toHaveClass("min-h-0", "overflow-hidden");
   });
 });

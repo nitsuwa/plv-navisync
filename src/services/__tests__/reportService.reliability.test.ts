@@ -43,6 +43,25 @@ describe("report reliability and privacy", () => {
     await submitReport({ ...input, category: "hazard", priority: "urgent" });
     expect(queries.reports.insert).toHaveBeenCalledWith(expect.objectContaining({ floor_id: "f1", map_element_id: "room1", priority: "normal", category: "safety_concern" }));
   });
+  it("persists a campus-place report against the existing map element and keeps its entity context", async () => {
+    const { queries } = client();
+    const report = await submitReport({
+      campusId: "c1",
+      campusPlaceId: "gate-main",
+      campusPlaceName: "Campus Gate",
+      campusPlaceType: "gate",
+      category: "safety_concern",
+      title: "Safety concern at Campus Gate · Main Entrance",
+      description: "A safety concern was reported at the main gate.",
+    });
+
+    expect(queries.reports.insert).toHaveBeenCalledWith(expect.objectContaining({
+      campus_id: "c1", building_id: null, map_element_id: "gate-main",
+      title: "Safety concern at Campus Gate · Main Entrance",
+    }));
+    expect(report).toMatchObject({ campusPlaceId: "gate-main", campusPlaceName: "Campus Gate", campusPlaceType: "gate" });
+    expect(report.roomId).toBeUndefined();
+  });
   it("does not leak legacy caches or private notes to students", async () => {
     localStorage.setItem("plv_student_submitted_reports_v1", JSON.stringify([{ id: "other", reporterId: "student-b" }]));
     const { queries, mock } = client();

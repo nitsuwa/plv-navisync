@@ -66,6 +66,15 @@ describe("central authentication bootstrap", () => {
     expect(mocks.onAuthStateChange).toHaveBeenCalledTimes(1);
   });
 
+  it("recognizes Super Admin through the same centralized profile", async () => {
+    mocks.maybeSingle.mockResolvedValueOnce({ data: { ...profile, role: "super_admin" }, error: null });
+    const { result } = renderHook(() => useAdminAuth(), { wrapper });
+
+    await waitFor(() => expect(result.current.isAdmin).toBe(true));
+    expect(result.current.profile?.role).toBe("super_admin");
+    expect(result.current.refreshProfile).toBeTypeOf("function");
+  });
+
   it("does not treat an early null INITIAL_SESSION event as a completed restore", async () => {
     let resolveSession: ((value: { data: { session: typeof session }; error: null }) => void) | undefined;
     mocks.getSession.mockImplementationOnce(() => new Promise((resolve) => { resolveSession = resolve; }));

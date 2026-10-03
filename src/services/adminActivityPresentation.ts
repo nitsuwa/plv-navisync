@@ -4,6 +4,8 @@ export interface ActivityPresentationContext {
   actorName?: string | null;
   campusName?: string | null;
   targetName?: string | null;
+  fromRole?: string | null;
+  toRole?: string | null;
 }
 
 export interface FormattedAdminActivity {
@@ -133,6 +135,21 @@ export const ADMIN_ACTIVITY_CATALOG: Record<string, ActivityCopy> = {
     activity: (c) => `${c.targetName ? quoted(c.targetName) : "An event overlay"} was approved${campusSuffix(c)}.`,
     notification: (c) => `${c.targetName ? quoted(c.targetName) : "An event overlay"} was approved.`,
   },
+  "event_overlay.published": {
+    title: "Event map published", category: "Events",
+    activity: (c) => `${c.targetName ? quoted(c.targetName) : "An event map"} was published to student maps${campusSuffix(c)}${actorSuffix(c)}.`,
+    notification: (c) => `${c.targetName ? quoted(c.targetName) : "An event map"} was published to student maps.`,
+  },
+  "event_overlay.publication_scheduled": {
+    title: "Event map publication scheduled", category: "Events",
+    activity: (c) => `${c.targetName ? quoted(c.targetName) : "An event map"} was scheduled for student publication${campusSuffix(c)}${actorSuffix(c)}.`,
+    notification: (c) => `${c.targetName ? quoted(c.targetName) : "An event map"} was scheduled for student publication.`,
+  },
+  "event_overlay.unpublished": {
+    title: "Event map unpublished", category: "Events",
+    activity: (c) => `${c.targetName ? quoted(c.targetName) : "An event map"} was removed from student maps${campusSuffix(c)}${actorSuffix(c)}.`,
+    notification: (c) => `${c.targetName ? quoted(c.targetName) : "An event map"} was removed from student maps.`,
+  },
   "event_overlay.disapproved": {
     title: "Event overlay not approved", category: "Events",
     activity: (c) => `${c.targetName ? quoted(c.targetName) : "An event overlay"} was not approved${campusSuffix(c)}.`,
@@ -173,7 +190,44 @@ export const ADMIN_ACTIVITY_CATALOG: Record<string, ActivityCopy> = {
     activity: (c) => `${c.targetName || "A user account"} was updated${actorSuffix(c)}.`,
     notification: (c) => `${c.targetName || "A user account"} was updated.`,
   },
+  "admin.user_invited": {
+    title: "User invited", category: "Users",
+    activity: (c) => `${c.targetName || "A user"} was invited${c.toRole ? ` as ${roleName(c.toRole)}` : ""}${actorSuffix(c)}.`,
+    notification: (c) => `${c.targetName || "A user"} was invited${c.toRole ? ` as ${roleName(c.toRole)}` : ""}.`,
+  },
+  "admin.user_invitation_resent": {
+    title: "Invitation resent", category: "Users",
+    activity: (c) => `An invitation was resent to ${c.targetName || "a user"}${actorSuffix(c)}.`,
+    notification: (c) => `An invitation was resent to ${c.targetName || "a user"}.`,
+  },
+  "admin.user_invitation_accepted": {
+    title: "Invitation accepted", category: "Users",
+    activity: (c) => `${c.targetName || "A user"} completed account setup.`,
+    notification: (c) => `${c.targetName || "A user"} completed account setup.`,
+  },
+  "admin.user_role_changed": {
+    title: "User role changed", category: "Users",
+    activity: (c) => `${c.targetName || "A user"} changed access${c.fromRole && c.toRole ? ` from ${roleName(c.fromRole)} to ${roleName(c.toRole)}` : ""}${actorSuffix(c)}.`,
+    notification: (c) => `${c.targetName || "A user"} changed access${c.fromRole && c.toRole ? ` from ${roleName(c.fromRole)} to ${roleName(c.toRole)}` : ""}.`,
+  },
+  "admin.user_deactivated": {
+    title: "User deactivated", category: "Users",
+    activity: (c) => `${c.targetName || "A user account"} was deactivated${actorSuffix(c)}.`,
+    notification: (c) => `${c.targetName || "A user account"} was deactivated.`,
+  },
+  "admin.user_activated": {
+    title: "User activated", category: "Users",
+    activity: (c) => `${c.targetName || "A user account"} was activated${actorSuffix(c)}.`,
+    notification: (c) => `${c.targetName || "A user account"} was activated.`,
+  },
 };
+
+function roleName(role: string): string {
+  if (role === "student_org") return "Student Org";
+  if (role === "super_admin") return "Super Admin";
+  if (role === "admin") return "Administrator";
+  return "Student";
+}
 
 function metadataObject(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -241,9 +295,11 @@ export function formatAdminActivity(
   const metadata = metadataObject(safeActivity.metadata);
   const resolved: ActivityPresentationContext = {
     ...safeContext,
-    actorName: dash(safeContext.actorName) || undefined,
     campusName: dash(safeContext.campusName) || metadataText(metadata, "campus_name", "campusName") || undefined,
-    targetName: dash(safeContext.targetName) || metadataText(metadata, "title", "name", "report_title", "event_title", "announcement_title") || undefined,
+    targetName: dash(safeContext.targetName) || metadataText(metadata, "target_name", "targetName", "title", "name", "report_title", "event_title", "announcement_title") || undefined,
+    actorName: dash(safeContext.actorName) || metadataText(metadata, "actor_name", "actorName") || undefined,
+    fromRole: dash(safeContext.fromRole) || metadataText(metadata, "from_role", "fromRole") || undefined,
+    toRole: dash(safeContext.toRole) || metadataText(metadata, "to_role", "toRole", "role") || undefined,
   };
   const definition = ADMIN_ACTIVITY_CATALOG[action];
   const title = definition?.title ?? humanizeAction(action);

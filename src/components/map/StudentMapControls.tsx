@@ -1,9 +1,9 @@
 import {
   ChevronLeft,
+  Crosshair,
   MapPin,
   Navigation,
   QrCode,
-  RotateCcw,
 } from "lucide-react";
 import { useState } from "react";
 import type { SearchResult } from "../../hooks";
@@ -17,6 +17,7 @@ export interface StudentMapControlsProps {
   search: string;
   searchFocused: boolean;
   directionsMode: boolean;
+  profileOpen?: boolean;
   pinning?: boolean;
   youAreHere?: boolean;
   hasSelectedRoom?: boolean;
@@ -39,6 +40,7 @@ export function StudentMapControls({
   search,
   searchFocused,
   directionsMode,
+  profileOpen = false,
   pinning = false,
   youAreHere = false,
   hasSelectedRoom = false,
@@ -58,11 +60,7 @@ export function StudentMapControls({
   const searchPlaceholder = isFloorMode
     ? "Search rooms, offices, and labs"
     : "Search buildings, offices, and rooms";
-  const pinLabel = pinning
-    ? "Cancel drop pin"
-    : youAreHere
-      ? "Move dropped pin"
-      : "Drop pin";
+  const pinLabel = pinning ? "Cancel drop pin" : youAreHere ? "Move dropped pin" : "Drop pin";
   const utilityControlsVisible = !directionsMode && !searchFocused && (!isFloorMode || !hasSelectedRoom);
 
   const handleClearSearch = () => {
@@ -76,7 +74,7 @@ export function StudentMapControls({
   };
 
   return (
-    <div data-testid="student-map-controls" className="absolute inset-0 z-20 pointer-events-none">
+    <div data-testid="student-map-controls" className="map-layer-controls absolute inset-0 pointer-events-none">
       {!directionsMode && (
         <div
           data-testid="student-map-search-panel"
@@ -104,6 +102,7 @@ export function StudentMapControls({
             listId="student-map-search-results"
             groupByBuilding
             compact
+            mapHeaderSafeZone
             leading={isFloorMode && onBackToCampus ? (
               <button type="button" onClick={onBackToCampus} className="flex h-11 w-10 shrink-0 items-center justify-center gap-1 rounded-2xl px-1 text-left text-primary transition-colors hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 md:h-auto md:w-auto md:max-w-[118px] md:justify-start md:px-2" aria-label={`Back to campus map${floorLabel ? ` from ${floorLabel}` : ""}`} title={floorLabel ? `Back to campus map from ${floorLabel}` : "Back to campus map"}>
                 <ChevronLeft className="h-4 w-4 shrink-0" />
@@ -115,7 +114,14 @@ export function StudentMapControls({
       )}
 
       {utilityControlsVisible && (
-        <div data-testid="student-map-utility-controls" data-no-drag className="absolute bottom-[calc(0.75rem+env(safe-area-inset-bottom,0px))] right-3 flex flex-col items-end gap-1.5 pointer-events-auto">
+        <div
+          data-testid="student-map-utility-controls"
+          data-no-drag
+          data-profile-open={profileOpen ? "true" : "false"}
+          aria-hidden={profileOpen}
+          inert={profileOpen}
+          className="student-map-utility-stack pointer-events-auto absolute bottom-[calc(0.75rem+env(safe-area-inset-bottom,0px))] right-3 flex flex-col items-end gap-1.5 md:bottom-auto md:top-20"
+        >
           <button
             type="button"
             onClick={onOpenDirections}
@@ -144,10 +150,7 @@ export function StudentMapControls({
               aria-label={pinLabel}
               aria-pressed={pinning}
               title={pinLabel}
-              className={cn(
-                "flex h-11 w-11 items-center justify-center rounded-xl border border-white/50 bg-card/95 text-primary shadow-[0_6px_18px_rgba(15,23,42,0.14)] backdrop-blur-xl transition-[transform,background-color,box-shadow] duration-150 hover:bg-primary/10 hover:shadow-lg active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 dark:border-white/10 md:h-10 md:w-10",
-                pinning && "bg-primary/10",
-              )}
+              className="flex h-11 w-11 items-center justify-center rounded-xl border border-white/50 bg-card/95 text-primary shadow-[0_6px_18px_rgba(15,23,42,0.14)] backdrop-blur-xl transition-[transform,background-color,box-shadow] duration-150 hover:bg-primary/10 hover:shadow-lg active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 dark:border-white/10 md:h-10 md:w-10"
             >
               <MapPin className="h-[18px] w-[18px]" />
             </button>
@@ -155,12 +158,14 @@ export function StudentMapControls({
           {onResetView && (
             <button
               type="button"
+              data-testid="student-map-recenter-button"
+              data-dock="map-control-top-right"
               onClick={onResetView}
-              aria-label="Reset map view"
-              title="Reset map view"
-              className="flex h-11 w-11 items-center justify-center rounded-xl border border-white/50 bg-card/95 text-muted-foreground shadow-[0_6px_18px_rgba(15,23,42,0.14)] backdrop-blur-xl transition-[transform,background-color,box-shadow] duration-150 hover:bg-muted hover:text-primary hover:shadow-lg active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 dark:border-white/10 md:h-10 md:w-10"
+              aria-label="Recenter map"
+              title="Recenter map"
+              className="flex h-11 w-11 items-center justify-center rounded-xl border border-white/50 bg-card/95 text-primary shadow-[0_6px_18px_rgba(15,23,42,0.14)] backdrop-blur-xl transition-[transform,background-color,box-shadow] duration-150 hover:bg-primary/10 hover:shadow-lg active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 dark:border-white/10 md:h-10 md:w-10"
             >
-              <RotateCcw className="h-[18px] w-[18px]" />
+              <Crosshair className="h-[18px] w-[18px]" />
             </button>
           )}
         </div>

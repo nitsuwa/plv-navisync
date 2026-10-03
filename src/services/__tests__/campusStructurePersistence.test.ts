@@ -20,6 +20,7 @@ import { createIndoorNavNode } from "../../lib/indoorNavigationGraph";
 import { repairInvalidFloorMapElementIds } from "../../lib/physicalFloorIntegrity";
 import { duplicateFloorInBuilding } from "../../lib/floorManagement";
 import { prepareFloorTemplateReplacement } from "../../lib/floorTemplateReplacement";
+import { weeklyHoursPreset } from "../../lib/buildingInformation";
 
 vi.mock("../../lib/supabase", () => ({ getSupabase: vi.fn() }));
 
@@ -127,6 +128,26 @@ function makeEntranceCampus(): Campus {
 const transitionPayloadRows = (campus: Campus) =>
   serializeCampusStructure(campus).navigation_edges
     .filter((edge) => (edge.metadata as { ui?: { type?: string } }).ui?.type === ENTRANCE_TRANSITION_EDGE_TYPE);
+
+describe("student-facing building information persistence", () => {
+  it("stores the image and hours in existing building columns and preserves curated facilities in metadata", () => {
+    const campus = makeCampus([{ id: IDs.floorA, number: 1 }]);
+    Object.assign(campus.buildings[0], {
+      coverImagePath: "buildings/eng/cover.webp",
+      operatingHoursSchedule: weeklyHoursPreset("weekdays"),
+      buildingType: "academic",
+      operatingHours: "Mon–Fri, 8:00 AM–5:00 PM",
+      facilities: ["Study Area", "Wi-Fi"],
+    });
+
+    const row = serializeCampusStructure(campus).buildings[0];
+    expect(row.image_path).toBe("buildings/eng/cover.webp");
+    expect(row.operating_hours).toBe("Mon–Fri, 8:00 AM–5:00 PM");
+    expect(row.metadata).toMatchObject({ ui: { facilities: ["Study Area", "Wi-Fi"], buildingType: "academic", operatingHoursSchedule: { monday: { closed: false, open: "08:00", close: "17:00" }, sunday: { closed: true } } } });
+    expect((row.metadata as { ui: Record<string, unknown> }).ui).not.toHaveProperty("coverImagePath");
+    expect((row.metadata as { ui: Record<string, unknown> }).ui).not.toHaveProperty("operatingHours");
+  });
+});
 
 describe("B5 Phase 3.1.2 — floor unique-constraint persistence (write order)", () => {
   afterEach(() => vi.clearAllMocks());

@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import {
   buildingPositionsFromCampus,
   floorPlansFromCampus,
@@ -8,6 +8,11 @@ import {
   locationsFromCampus,
 } from "../mapDataAdapter";
 import type { SharedCampusData } from "../../contexts/CampusDataContext";
+import { weeklyHoursPreset } from "../buildingInformation";
+
+vi.mock("../../services/buildingImageService", () => ({
+  buildingCoverPublicUrl: (path: string) => `https://storage.example/${path}`,
+}));
 
 // ── Fixture: a campus authored in the Map Builder ───────────────────────────
 
@@ -25,6 +30,8 @@ function makeCampus(): SharedCampusData {
         code: "MAB",
         category: "Academic",
         description: "Main building",
+        coverImagePath: "buildings/b1/cover.webp",
+        operating_hours: "Mon–Fri 8 AM–5 PM",
         x: 10,
         y: 20,
         width: 100,
@@ -128,16 +135,29 @@ describe("buildingsFromCampus", () => {
     expect(b1.code).toBe("MAB");
     expect(b1.category).toBe("academic");
     expect(b1.floor_count).toBe(1);
-    expect(b1.departments).toEqual(["Library"]);
     expect(b1.description).toBe("Main building");
+    expect(b1.image_url).toBe("https://storage.example/buildings/b1/cover.webp");
+    expect(b1.operating_hours).toBe("Mon–Fri 8 AM–5 PM");
+    expect(b1.facilities).toContain("Library");
+  });
+
+  it("passes student-facing building type and structured weekly hours into Student Map data", () => {
+    const campus = makeCampus() as Parameters<typeof buildingsFromCampus>[0];
+    Object.assign(campus.buildings[0], { buildingType: "student_services", operatingHoursSchedule: weeklyHoursPreset("weekdays") });
+    const building = buildingsFromCampus(campus).find((row) => row.id === "b1")!;
+    expect(building.building_type).toBe("student_services");
+    expect(building.operating_hours_schedule?.monday).toEqual({ closed: false, open: "08:00", close: "17:00" });
+    expect(building.operating_hours).toMatch(/Mon.*Fri.*8:00 AM.*5:00 PM/);
   });
 });
 
 describe("facilitiesFromCampus / accessibilityFromCampus", () => {
   it("maps per-building facility and accessibility lists", () => {
     const campus = makeCampus();
-    expect(facilitiesFromCampus(campus)["b1"]).toEqual(["Library"]);
-    expect(accessibilityFromCampus(campus)["b1"]).toEqual(["ramp"]);
+    expect(facilitiesFromCampus(campus)["b1"]).toEqual([
+      "Library", "Classrooms", "Restroom", "Elevator", "Laboratories", "Stairs",
+    ]);
+    expect(accessibilityFromCampus(campus)["b1"]).toEqual(["Ramp Access", "Elevator Available"]);
     expect(facilitiesFromCampus(campus)["b2"]).toEqual([]);
   });
 });
@@ -148,7 +168,7 @@ describe("locationsFromCampus", () => {
   it("derives locations from outdoor markers with type mapping", () => {
     const locations = locationsFromCampus(makeCampus());
     const byId = new Map(locations.map((l) => [l.id, l]));
-    expect(byId.get("campus-m1")).toMatchObject({ name: "Main Gate", type: "entrance", building_id: undefined });
+    expect(byId.get("campus-m1")).toMatchObject({ name: "Main Gate", type: "entrance" });
     expect(byId.get("campus-m2")).toMatchObject({ type: "parking" });
     expect(byId.get("campus-m3")).toMatchObject({ type: "landmark" });
     // Unknown marker types fall back to landmark

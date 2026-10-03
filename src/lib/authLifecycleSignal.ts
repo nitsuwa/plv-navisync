@@ -1,5 +1,5 @@
 /** Same-origin, transient completion signals. Never include credentials or profile data. */
-export type AuthLifecycleSignal = "EMAIL_VERIFIED" | "PASSWORD_RESET_COMPLETE";
+export type AuthLifecycleSignal = "EMAIL_VERIFIED" | "PASSWORD_RESET_COMPLETE" | "USER_INVITATION_COMPLETE";
 
 const CHANNEL_NAME = "plv-navisync-auth-lifecycle";
 
@@ -26,7 +26,7 @@ export function subscribeAuthLifecycleSignal(
   }
   channel.onmessage = (event: MessageEvent<unknown>) => {
     const type = (event.data as { type?: unknown } | null)?.type;
-    if (type === "EMAIL_VERIFIED" || type === "PASSWORD_RESET_COMPLETE") onSignal(type);
+    if (type === "EMAIL_VERIFIED" || type === "PASSWORD_RESET_COMPLETE" || type === "USER_INVITATION_COMPLETE") onSignal(type);
   };
   return () => channel.close();
 }

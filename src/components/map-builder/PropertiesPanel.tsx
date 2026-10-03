@@ -6,7 +6,7 @@ import {
   Layers, Copy,
   ChevronUp, ChevronDown, ChevronsUp, ChevronsDown,
   DoorOpen, ArrowRightLeft, ArrowLeft, Navigation as NavigationIcon,
-  Search as SearchIcon,
+  Search as SearchIcon, ImagePlus, Upload,
 } from "lucide-react";
 import type { LayerOrderAction } from "../../lib/campusLayerOrder";
 import { polylineCrossesObstacle } from "../../lib/editorPlacement";
@@ -39,7 +39,7 @@ import {
   BUILDING_ENTRANCE_DIRECTION_LABELS,
 } from "../../lib/buildingEntrances";
 import type {
-  CampusBuilding, CampusMarker, CampusSelection, EditorLayer,
+  Campus, CampusBuilding, CampusMarker, CampusGateType, CampusPlaceStudentInfo, CampusSelection, EditorLayer, FloorSelection,
   CampusRoute, NavigationNode, NavigationEdge, CampusEventOverlay,
   EventLocationRef, FloorPlan, CampusDecorAsset,
   CampusGroundMaterial, CampusGroundTexture,
@@ -58,6 +58,11 @@ import {
 } from "../../lib/campusPathNetwork";
 import { isCampusGate } from "../../lib/campusGates";
 import { CAMPUS_GROUND_MATERIALS, campusAreaGroundAppearance } from "../../lib/campusCanvas";
+import { buildingCoverPublicUrl, uploadBuildingCoverImage, uploadCampusPlaceCoverImage } from "../../services/buildingImageService";
+import { BuildingWeeklyHoursEditor } from "./BuildingWeeklyHoursEditor";
+import { BUILDING_TYPE_OPTIONS } from "../../types/buildingInformation";
+import { buildingTypeValue, deriveBuildingAccessibilityFacts, facilityIsOnAuthoredMap } from "../../lib/buildingInformation";
+import { buildingNavigationHealth, reviewTargetForRoomIssue } from "./buildingNavigationHealth";
 
 type TabId = "basic" | "style" | "advanced";
 
@@ -80,6 +85,8 @@ interface PropertiesPanelProps {
   /** B7 Phase 2: live validation issues for the currently selected object. */
   issueItems?: ObjectIssueItem[];
   selBldg: CampusBuilding | undefined;
+  navigationCampus?: Campus;
+  onReviewNavigationIssue?: (buildingId: string, floorId: string, selection: FloorSelection) => void;
   selEntrance?: CampusEntrance | undefined;
   selEntranceParent?: CampusBuilding | undefined;
   selMkr: CampusMarker | undefined;
@@ -560,7 +567,7 @@ function TabBar({ active, onChange }: { active: TabId; onChange: (t: TabId) => v
 }
 
 export function PropertiesPanel({
-  open,
+  open, navigationCampus, onReviewNavigationIssue,
   selected, selBldg, selEntrance, selEntranceParent, selMkr, selPath, selRoute, allPaths = [],
   issueItems = [],
   selectedPathPoint, selectedPathPointIsJunction, selectedPathPointIsAttached = false, selectedPathPointCanBeRemoved,
@@ -591,6 +598,49 @@ export function PropertiesPanel({
   const [entranceDoorSearch, setEntranceDoorSearch] = useState("");
   const [expandedEntranceFloors, setExpandedEntranceFloors] = useState<Set<string>>(new Set());
   const [entranceSettingsOpen, setEntranceSettingsOpen] = useState(false);
+  const [buildingCoverUploading, setBuildingCoverUploading] = useState(false);
+  const [buildingCoverError, setBuildingCoverError] = useState<string | null>(null);
+  const [buildingCoverDragActive, setBuildingCoverDragActive] = useState(false);
+  const [placeCoverUploading, setPlaceCoverUploading] = useState(false);
+  const [placeCoverError, setPlaceCoverError] = useState<string | null>(null);
+  const placeCoverInputRef = useRef<HTMLInputElement>(null);
+  const [exteriorStairsOpen, setExteriorStairsOpen] = useState(false);
+  const [expandedStairId, setExpandedStairId] = useState<string | null>(null);
+  const buildingCoverInputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => { setBuildingCoverError(null); }, [selBldg?.id]);
+  useEffect(() => { setPlaceCoverError(null); }, [selMkr?.id]);
+  useEffect(() => { setExpandedStairId(null); setExteriorStairsOpen(false); }, [selBldg?.id]);
+  const navigationHealth = useMemo(() => navigationCampus && selBldg
+    ? buildingNavigationHealth(navigationCampus, selBldg)
+    : null, [navigationCampus, selBldg]);
+  const uploadCoverFile = useCallback(async (file: File) => {
+    if (!selBldg) return;
+    setBuildingCoverError(null);
+    setBuildingCoverUploading(true);
+    try {
+      const path = await uploadBuildingCoverImage(selBldg.id, file);
+      onUpdateBuilding(selBldg.id, { coverImagePath: path });
+    } catch (error) {
+      setBuildingCoverError(error instanceof Error && /JPEG|PNG|WebP|5 MB/.test(error.message)
+        ? error.message
+        : "The cover photo could not be uploaded. Try again.");
+    } finally {
+      setBuildingCoverUploading(false);
+    }
+  }, [onUpdateBuilding, selBldg]);
+  const uploadPlaceCoverFile = useCallback(async (file: File) => {
+    if (!selMkr) return;
+    setPlaceCoverError(null);
+    setPlaceCoverUploading(true);
+    try {
+      const path = await uploadCampusPlaceCoverImage(selMkr.id, file);
+      onUpdateMarker(selMkr.id, { studentInfo: { ...(selMkr.studentInfo ?? {}), coverImagePath: path } });
+    } catch (error) {
+      setPlaceCoverError(error instanceof Error && /JPEG|PNG|WebP|5 MB/.test(error.message)
+        ? error.message
+        : "The place photo could not be uploaded. Try again.");
+    } finally { setPlaceCoverUploading(false); }
+  }, [onUpdateMarker, selMkr]);
   const visible = open ?? (!!selected || multiSelected.length > 0);
   const selectedPathPointForPath = selPath && selectedPathPoint?.pathId === selPath.id ? selectedPathPoint : null;
   const selectedPathPointCoord = selectedPathPointForPath ? selPath?.points[selectedPathPointForPath.pointIndex] : undefined;
@@ -724,6 +774,10 @@ export function PropertiesPanel({
     selNavNode?.id && exteriorEmergencyStairOutdoorDischargeConnected(selNavNode.id, allNavNodes ?? [], allNavEdges ?? []),
   );
   const selectedCampusGate = isCampusGate(selMkr) ? selMkr : undefined;
+  const updatePlaceInfo = (changes: Partial<CampusPlaceStudentInfo>) => {
+    if (!selMkr) return;
+    onUpdateMarker(selMkr.id, { studentInfo: { ...(selMkr.studentInfo ?? {}), ...changes } });
+  };
   const selectedCampusGateNode = selectedCampusGate?.navNodeId
     ? allNavNodes?.find((node) => node.id === selectedCampusGate.navNodeId)
     : undefined;
@@ -1220,13 +1274,118 @@ export function PropertiesPanel({
                   <label htmlFor="bldg-code" className={labelCls}>Code</label>
                   <input id="bldg-code" maxLength={32} value={selBldg.code} onChange={(e) => onUpdateBuilding(selBldg.id, { code: e.target.value.toUpperCase() })} className={cn(inputCls, "font-mono tracking-wide")} placeholder="e.g. MAB" />
                 </div>
-                {/* Building Type is intentionally NOT editable in the sidebar:
-                    an outdoor building object is simply a Building here. The
-                    legacy `category` field is preserved in the data model for
-                    backward compatibility but provides no editor functionality. */}
                 <div>
-                  <label htmlFor="bldg-description" className={labelCls}>Description</label>
-                  <textarea id="bldg-description" value={selBldg.description ?? ""} rows={2} onChange={(e) => onUpdateBuilding(selBldg.id, { description: e.target.value })} placeholder="Optional description..." className="w-full px-3 py-2 rounded-xl border border-border bg-input-background text-foreground text-xs resize-none focus:outline-none focus:ring-2 focus:ring-primary/30 transition-all duration-200" />
+                  <div className="mb-2 mt-3 flex items-center gap-1.5 border-t border-border/70 pt-3">
+                    <Info className="h-3 w-3 text-primary" />
+                    <span className="text-[9px] font-extrabold uppercase tracking-widest text-muted-foreground">Building Information</span>
+                  </div>
+                  <label htmlFor="bldg-description" className={labelCls}>About this building</label>
+                  <p className="mb-1.5 text-[9px] leading-snug text-muted-foreground">Shown to students when they select this building on the campus map.</p>
+                  <textarea id="bldg-description" maxLength={360} value={selBldg.description ?? ""} rows={3} onChange={(e) => onUpdateBuilding(selBldg.id, { description: e.target.value })} placeholder="A short description for students (1–3 sentences)." className="w-full px-3 py-2 rounded-xl border border-border bg-input-background text-foreground text-xs resize-none focus:outline-none focus:ring-2 focus:ring-primary/30 transition-all duration-200" />
+                  <p className="mt-1 text-[9px] text-muted-foreground">{(selBldg.description ?? "").length}/360 characters</p>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className={labelCls}>Building type</label>
+                  <CompactDropdown
+                    ariaLabel="Building type"
+                    value={buildingTypeValue(selBldg)}
+                    options={BUILDING_TYPE_OPTIONS}
+                    onChange={(buildingType) => onUpdateBuilding(selBldg.id, { buildingType: buildingType as CampusBuilding["buildingType"] })}
+                    className="h-8 rounded-lg text-xs"
+                    testId="building-details-category"
+                    disabled={selBldg.locked}
+                  />
+                </div>
+
+                <div className="space-y-2 rounded-xl border border-border/70 bg-muted/20 p-2.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <div>
+                      <p className="text-[10px] font-bold text-foreground">Cover photo</p>
+                      <p className="text-[9px] text-muted-foreground">Landscape image · JPG, PNG or WebP · max 5 MB</p>
+                    </div>
+                  </div>
+                  <input
+                    ref={buildingCoverInputRef}
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    className="hidden"
+                    aria-label="Upload building cover photo"
+                    onChange={async (event) => {
+                      const file = event.currentTarget.files?.[0];
+                      event.currentTarget.value = "";
+                      if (file) await uploadCoverFile(file);
+                    }}
+                  />
+                  {selBldg.coverImagePath ? (
+                    <img src={buildingCoverPublicUrl(selBldg.coverImagePath)} alt={`${selBldg.name} cover photo preview`} className="aspect-[16/8] w-full rounded-lg object-cover ring-1 ring-border" />
+                  ) : (
+                    <button type="button" disabled={buildingCoverUploading || selBldg.locked}
+                      onClick={() => buildingCoverInputRef.current?.click()}
+                      onDragOver={(event) => { event.preventDefault(); setBuildingCoverDragActive(true); }}
+                      onDragLeave={() => setBuildingCoverDragActive(false)}
+                      onDrop={async (event) => { event.preventDefault(); setBuildingCoverDragActive(false); const file = event.dataTransfer.files?.[0]; if (file) await uploadCoverFile(file); }}
+                      className={cn("flex aspect-[16/8] w-full flex-col items-center justify-center gap-1.5 rounded-lg border border-dashed bg-card/70 text-center transition-colors", buildingCoverDragActive ? "border-primary bg-primary/5" : "border-border hover:border-primary/40", selBldg.locked && "opacity-50")}>
+                      <ImagePlus className="h-5 w-5 text-primary" />
+                      <span className="text-[10px] font-bold text-foreground">{buildingCoverUploading ? "Uploading photo…" : "Drop a photo here or browse"}</span>
+                      <span className="text-[8px] text-muted-foreground">Wide images work best</span>
+                    </button>
+                  )}
+                  <div className="flex gap-2">
+                    <button type="button" onClick={() => buildingCoverInputRef.current?.click()} disabled={buildingCoverUploading || selBldg.locked} className="inline-flex h-8 flex-1 items-center justify-center gap-1.5 rounded-lg border border-primary/20 bg-card px-2 text-[10px] font-bold text-primary transition-colors hover:bg-primary/5 disabled:opacity-50">
+                      {selBldg.coverImagePath ? <Upload className="h-3 w-3" /> : <ImagePlus className="h-3 w-3" />}
+                      {buildingCoverUploading ? "Uploading…" : selBldg.coverImagePath ? "Replace photo" : "Upload photo"}
+                    </button>
+                    {selBldg.coverImagePath && <button type="button" disabled={buildingCoverUploading || selBldg.locked} onClick={() => onUpdateBuilding(selBldg.id, { coverImagePath: undefined })} className="h-8 rounded-lg border border-border px-2 text-[10px] font-bold text-muted-foreground transition-colors hover:bg-muted disabled:opacity-50">Remove</button>}
+                  </div>
+                  {buildingCoverError && <p role="alert" className="text-[10px] font-medium text-destructive">{buildingCoverError}</p>}
+                </div>
+
+                <BuildingWeeklyHoursEditor
+                  value={selBldg.operatingHoursSchedule}
+                  legacyValue={selBldg.operatingHours}
+                  disabled={!!selBldg.locked}
+                  onChange={(operatingHoursSchedule, summary) => onUpdateBuilding(selBldg.id, { operatingHoursSchedule, operatingHours: summary })}
+                  onClear={() => onUpdateBuilding(selBldg.id, { operatingHoursSchedule: undefined, operatingHours: undefined })}
+                />
+
+                <div className="space-y-1.5">
+                  <span className={labelCls}>Facilities</span>
+                  <div className="grid grid-cols-2 gap-x-2 gap-y-1.5">
+                    {[
+                      ["Restroom", "Restroom"], ["Clinic", "Clinic"], ["Study Area", "Study Area"],
+                      ["Student Lounge", "Student Lounge"], ["Service Counter", "Service Counter"], ["Wi-Fi", "Wi-Fi"], ["Library", "Library"], ["Elevator", "Elevator"],
+                    ].map(([value, label]) => {
+                      const derived = facilityIsOnAuthoredMap(selBldg, value);
+                      const checked = derived || (selBldg.facilities ?? []).includes(value);
+                      return (
+                        <label key={value} className={cn("flex min-w-0 cursor-pointer items-center gap-1.5 rounded-lg border px-2 py-1.5 text-[9px] font-semibold transition-colors", checked ? "border-primary/25 bg-primary/5 text-foreground" : "border-border/70 bg-card/60 text-muted-foreground hover:border-primary/25", (selBldg.locked || derived) && "cursor-default")} title={derived ? "Detected from authored floor-map data" : undefined}>
+                          <input type="checkbox" checked={checked} disabled={selBldg.locked || derived} onChange={(event) => {
+                            const next = new Set(selBldg.facilities ?? []);
+                            if (event.target.checked) next.add(value); else next.delete(value);
+                            onUpdateBuilding(selBldg.id, { facilities: [...next] });
+                          }} className="sr-only" />
+                          <CheckCircle2 className={cn("h-3.5 w-3.5 shrink-0", checked ? "text-primary" : "text-muted-foreground/45")} />
+                          <span className="min-w-0 flex-1 truncate">{label}</span>
+                          {derived && <span className="shrink-0 text-[8px] font-medium text-muted-foreground">Detected</span>}
+                        </label>
+                      );
+                    })}
+                  </div>
+                  <p className="text-[9px] leading-relaxed text-muted-foreground">Only checked amenities and facilities present in the authored floor map appear to students.</p>
+                </div>
+                <div className="space-y-1.5" data-testid="building-accessibility-facts">
+                  <span className={labelCls}>Accessibility</span>
+                  {deriveBuildingAccessibilityFacts(selBldg).length > 0 ? (
+                    <div className="space-y-1">
+                      {deriveBuildingAccessibilityFacts(selBldg).map((fact) => (
+                        <div key={fact.label} className="flex items-center justify-between gap-2 rounded-lg border border-blue-200/70 bg-blue-50/50 px-2 py-1.5 dark:border-blue-900/50 dark:bg-blue-950/15">
+                          <span className="flex min-w-0 items-center gap-1.5 text-[9px] font-semibold text-foreground"><Accessibility className="h-3 w-3 shrink-0 text-blue-600" />{fact.label}</span>
+                          <span className="shrink-0 text-[8px] text-muted-foreground">{fact.source}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : <p className="text-[9px] text-muted-foreground">No authored accessibility features detected.</p>}
                 </div>
                 <div className="pt-1">
                   <div className="flex items-center justify-between mb-2">
@@ -1356,26 +1515,34 @@ export function PropertiesPanel({
                   const stairs = canonicalExteriorEmergencyStairsForBuilding(selBldg);
                   const focused = stairs.some((stair) => stair.id === focusedExteriorEmergencyStairId)
                     ? focusedExteriorEmergencyStairId
-                    : stairs.length === 1 ? stairs[0].id : null;
+                    : null;
                   return (
                     <div className="pt-2 border-t border-border" data-testid="exterior-emergency-stairs-properties">
-                      <div className="flex items-center justify-between mb-2">
-                        <div className="flex items-center gap-1.5"><AlertTriangle className="h-3 w-3 text-red-600" /><span className="text-[9px] font-extrabold uppercase tracking-widest text-muted-foreground">Exterior Emergency Stairs ({stairs.length})</span></div>
+                      <div className="mb-2 flex items-center justify-between gap-2">
+                        <button type="button" aria-expanded={exteriorStairsOpen} onClick={() => setExteriorStairsOpen((open) => !open)} className="flex min-w-0 items-center gap-1.5 rounded-md text-left hover:text-foreground">
+                          {exteriorStairsOpen ? <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" /> : <ChevronUp className="h-3 w-3 shrink-0 text-muted-foreground" />}
+                          <AlertTriangle className="h-3 w-3 shrink-0 text-red-600" /><span className="truncate text-[9px] font-extrabold uppercase tracking-widest text-muted-foreground">Exterior Emergency Stairs ({stairs.length})</span>
+                        </button>
                         <button type="button" onClick={() => onAddExteriorEmergencyStair(selBldg.id)} disabled={selBldg.locked} className="flex items-center gap-1 h-6 px-2 rounded-lg border border-red-300/60 text-[9px] font-bold text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-all disabled:opacity-40"><Plus className="h-3 w-3" /> Add</button>
                       </div>
-                      {stairs.length === 0 ? <p className="text-[9px] text-muted-foreground italic">No exterior emergency stair configured.</p> : (
+                      {exteriorStairsOpen && (stairs.length === 0 ? <p className="text-[9px] text-muted-foreground italic">No exterior emergency stair configured.</p> : (
                         <div className="space-y-2 max-h-[300px] overflow-y-auto scrollbar-show-on-hover">
                           {stairs.map((stair, index) => {
                             const readiness = exteriorEmergencyStairRouteReadiness(selBldg, stair, allNavNodes ?? [], allNavEdges ?? []);
                             const displayName = stair.label?.trim() || `Exterior Stair ${index + 1}`;
-                            const detailOpen = focused === stair.id;
+                            const detailOpen = focused === stair.id || expandedStairId === stair.id;
                             const servedCount = selBldg.floors.filter((floor) => stair.servedFloorIds.includes(floor.id)).length;
                             return <div key={stair.id} className="rounded-xl border border-red-200/60 dark:border-red-800/40 bg-red-50/35 dark:bg-red-950/10 p-2.5 space-y-2">
                               <div className="flex items-center gap-2">
-                                <button type="button" onClick={() => onFocusExteriorEmergencyStair?.(detailOpen && stairs.length > 1 ? null : stair.id)} className="min-w-0 flex-1 text-left rounded-lg px-1 py-0.5 hover:bg-red-100/60 dark:hover:bg-red-900/20">
+                                <div className="min-w-0 flex-1 px-1 py-0.5">
                                   <p className="text-[10px] font-extrabold uppercase tracking-wide text-foreground truncate">{displayName}</p>
-                                  <p className="text-[8px] text-muted-foreground">{BUILDING_ENTRANCE_EDGE_LABELS[stair.attachment.edge]} side · {servedCount} {servedCount === 1 ? "floor" : "floors"} served</p>
-                                </button>
+                                  <p className="text-[8px] text-muted-foreground">{BUILDING_ENTRANCE_EDGE_LABELS[stair.attachment.edge]} side · {servedCount} {servedCount === 1 ? "floor" : "floors"} · {stair.state === "open" ? "Open" : "Closed"}</p>
+                                </div>
+                                <button type="button" aria-expanded={detailOpen} onClick={() => {
+                                  const nextId = detailOpen ? null : stair.id;
+                                  setExpandedStairId(nextId);
+                                  onFocusExteriorEmergencyStair?.(nextId);
+                                }} className="inline-flex h-7 shrink-0 items-center gap-1 rounded-lg border border-border bg-card px-2 text-[9px] font-bold text-foreground hover:bg-muted">{detailOpen ? "Done" : "Edit"}{detailOpen ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}</button>
                                 <button type="button" title={`Delete ${displayName}`} aria-label={stairs.length > 1 ? `Delete ${displayName}` : "Delete Exterior Emergency Stair"} onClick={() => setDeleteConfirm({ type: "exteriorEmergencyStair", id: stair.id, stairId: stair.id, buildingId: selBldg.id, label: displayName })} className="w-7 h-7 rounded-lg text-destructive hover:bg-destructive/10 flex items-center justify-center shrink-0"><Trash2 className="h-3 w-3" /></button>
                               </div>
                               {detailOpen && <>
@@ -1399,45 +1566,36 @@ export function PropertiesPanel({
                             </div>;
                           })}
                         </div>
-                      )}
+                      ))}
                     </div>
                   );
                 })()}
                 {/* ── Room Navigation Status ── */}
-                <div className="pt-2 border-t border-border">
-                  <span className={labelCls}>Rooms & Navigation</span>
-                  {(() => {
-                    const allRooms = selBldg.floors.flatMap(f =>
-                      f.rooms.map(r => ({ ...r, floorLabel: f.label, floorId: f.id }))
-                    );
-                    const connectedRooms = allRooms.filter(r => r.navConnection || r.accessNodeId);
-                    if (allRooms.length === 0) {
-                      return <p className="text-[9px] text-muted-foreground italic">No rooms defined in this building yet.</p>;
-                    }
-                    return (
-                      <div className="space-y-1 max-h-[150px] overflow-y-auto scrollbar-show-on-hover">
-                        {allRooms.map((r) => {
-                          const isConnected = !!(r.navConnection || r.accessNodeId);
-                          return (
-                            <div key={r.id} className="flex items-center gap-2 px-2 py-1 rounded-lg border border-border/50 bg-muted/10">
-                              <div className={cn(
-                                "w-2 h-2 rounded-full shrink-0",
-                                isConnected ? "bg-green-500" : "bg-amber-400"
-                              )} />
-                              <span className="text-[10px] font-medium truncate flex-1 text-foreground">{r.name}</span>
-                              <span className="text-[8px] text-muted-foreground">{r.floorLabel}</span>
-                              <span className={cn(
-                                "text-[8px] font-bold",
-                                isConnected ? "text-green-500" : "text-amber-500"
-                              )}>
-                                {isConnected ? "Nav ✓" : "Not connected"}
-                              </span>
-                            </div>
-                          );
-                        })}
+                <div className="space-y-2 border-t border-border pt-2" data-testid="building-navigation-health">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className={labelCls}>Rooms & Navigation</span>
+                    {navigationHealth?.issues.length ? <button type="button" onClick={() => {
+                      const issue = navigationHealth.issues[0];
+                      onReviewNavigationIssue?.(selBldg.id, issue.floorId, reviewTargetForRoomIssue(issue));
+                    }} className="shrink-0 rounded-md px-1.5 py-1 text-[9px] font-bold text-primary hover:bg-primary/5">Review navigation issues</button> : null}
+                  </div>
+                  {!navigationHealth ? <p className="text-[9px] text-muted-foreground">Navigation status is unavailable.</p> : navigationHealth.total === 0 ? <p className="text-[9px] text-muted-foreground italic">No rooms defined in this building yet.</p> : (
+                    <>
+                      <p className="text-[10px] font-semibold text-foreground">{navigationHealth.total} {navigationHealth.total === 1 ? "room" : "rooms"}</p>
+                      <div className="flex flex-wrap gap-x-3 gap-y-1 text-[9px] font-semibold">
+                        <span className="inline-flex items-center gap-1 text-emerald-700 dark:text-emerald-400"><CheckCircle2 className="h-3 w-3" />{navigationHealth.connected} connected</span>
+                        {navigationHealth.issues.length > 0 && <span className="inline-flex items-center gap-1 text-amber-700 dark:text-amber-400"><AlertTriangle className="h-3 w-3" />{navigationHealth.issues.length} need attention</span>}
                       </div>
-                    );
-                  })()}
+                      {navigationHealth.issues.length === 0 ? <p className="rounded-lg border border-emerald-200/60 bg-emerald-50/50 px-2 py-1.5 text-[9px] font-medium text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/15 dark:text-emerald-300">All routable rooms are connected.</p> : (
+                        <div className="max-h-[180px] space-y-1 overflow-y-auto scrollbar-show-on-hover" aria-label="Navigation issues">
+                          {navigationHealth.issues.map((issue) => <div key={`${issue.floorId}:${issue.roomId}`} className="rounded-lg border border-amber-200/60 bg-amber-50/45 px-2 py-1.5 dark:border-amber-900/40 dark:bg-amber-950/10">
+                            <div className="flex items-start justify-between gap-2"><span className="min-w-0 truncate text-[10px] font-semibold text-foreground">{issue.roomName}</span><span className="shrink-0 text-[8px] text-muted-foreground">{issue.floorLabel}</span></div>
+                            <p className="mt-0.5 text-[9px] leading-snug text-muted-foreground">{issue.status === "no_usable_entrance" ? "No usable entrance" : "Needs attention"} · {issue.reason}</p>
+                          </div>)}
+                        </div>
+                      )}
+                    </>
+                  )}
                 </div>
               </>
             )}
@@ -1560,40 +1718,6 @@ export function PropertiesPanel({
                     </div>
                   </div>
                   <p className="text-[9px] text-muted-foreground mt-1.5 px-1">Navigation is configured through building entrances. Select an entrance to manage its connections.</p>
-                </div>
-                {/* Accessibility summary */}
-                <div className="pt-3 border-t border-border">
-                  <div className="flex items-center gap-1.5 mb-2">
-                    <Accessibility className="h-3 w-3 text-blue-500" />
-                    <span className="text-[9px] font-extrabold uppercase tracking-widest text-muted-foreground">Accessibility</span>
-                  </div>
-                  <div className="px-2.5 py-2 rounded-xl border border-border bg-muted/20 text-[10px] text-muted-foreground space-y-1.5">
-                    <div className="flex justify-between">
-                      <span>Accessible entrance</span>
-                      <span className={cn("font-bold", selBldg.accessibility?.accessibleEntrance ? "text-green-600" : "text-amber-600")}>
-                        {selBldg.accessibility?.accessibleEntrance ? 'Yes' : 'No'}
-                      </span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span>Elevator</span>
-                      <span className={cn("font-bold", selBldg.accessibility?.hasElevator ? "text-green-600" : "text-muted-foreground")}>
-                        {selBldg.accessibility?.hasElevator ? 'Available' : 'None'}
-                      </span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span>Wheelchair ramp</span>
-                      <span className={cn("font-bold", selBldg.accessibility?.hasRamp ? "text-green-600" : "text-muted-foreground")}>
-                        {selBldg.accessibility?.hasRamp ? 'Available' : 'None'}
-                      </span>
-                    </div>
-                    <div className="flex justify-between border-t border-border pt-1.5 mt-1">
-                      <span className="font-semibold">Overall</span>
-                      <span className={cn("font-bold",
-                        selBldg.accessibility?.wheelchairAccessible ? "text-green-600" : "text-amber-600")}>
-                        {selBldg.accessibility?.wheelchairAccessible ? 'Accessible' : 'Limited'}
-                      </span>
-                    </div>
-                  </div>
                 </div>
                 <div className="pt-3 border-t border-border">
                   <button onClick={() => setDeleteConfirm({ type: "building", id: selBldg.id, label: selBldg.name || selBldg.code })} className="w-full h-10 rounded-xl border border-destructive/30 text-xs font-bold text-destructive hover:bg-destructive/10 hover:border-destructive/50 transition-colors duration-200">
@@ -1914,7 +2038,7 @@ export function PropertiesPanel({
               <label htmlFor="mkr-name" className={labelCls}>Name</label>
               <input id="mkr-name" value={selMkr.name} onChange={(e) => onUpdateMarker(selMkr.id, { name: e.target.value })} className={inputCls} placeholder={selectedCampusGate ? "Campus Gate name" : "Marker name"} />
             </div>
-            {selectedCampusGate ? (
+            {selectedCampusGate ? (<>
               <div>
                 <label className={labelCls}>Purpose</label>
                 <div className="grid grid-cols-2 gap-1.5">
@@ -1935,7 +2059,53 @@ export function PropertiesPanel({
                   ))}
                 </div>
               </div>
-            ) : (
+            {selectedCampusGate && <section data-testid="campus-gate-student-information" className="space-y-3 rounded-xl border border-primary/15 bg-primary/[0.025] p-2.5">
+              <div><p className="text-[10px] font-extrabold uppercase tracking-widest text-primary">Student Information</p><p className="mt-0.5 text-[9px] text-muted-foreground">Optional details shown when students select this gate.</p></div>
+              <div>
+                <label htmlFor="gate-student-description" className={labelCls}>Student description</label>
+                <textarea id="gate-student-description" rows={3} maxLength={400} value={selectedCampusGate.studentInfo?.description ?? ""} onChange={(event) => updatePlaceInfo({ description: event.target.value || undefined })} className="w-full resize-y rounded-xl border border-border bg-input-background px-3 py-2 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30" placeholder="A short description shown to students in the campus map." />
+                <p className="mt-1 text-right text-[9px] text-muted-foreground">{selectedCampusGate.studentInfo?.description?.length ?? 0}/400</p>
+              </div>
+              <div>
+                <label className={labelCls}>Gate type</label>
+                <Combobox
+                  value={selectedCampusGate.studentInfo?.gateType ?? (selectedCampusGate.purpose === "emergency_exit" ? "emergency" : "main_entrance")}
+                  onChange={(value) => updatePlaceInfo({ gateType: value as CampusGateType })}
+                  options={[
+                    { value: "main_entrance", label: "Main entrance" },
+                    { value: "pedestrian", label: "Pedestrian" },
+                    { value: "service", label: "Service" },
+                    { value: "emergency", label: "Emergency" },
+                    { value: "other", label: "Other" },
+                  ]}
+                  placeholder="Select gate type"
+                  searchPlaceholder="Search gate types..."
+                />
+              </div>
+              <div className="space-y-2 rounded-xl border border-border/70 bg-card/70 p-2">
+                <p className="text-[10px] font-bold text-foreground">Cover photo <span className="font-normal text-muted-foreground">(optional)</span></p>
+                <input ref={placeCoverInputRef} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" aria-label="Upload gate cover photo" onChange={async (event) => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ""; if (file) await uploadPlaceCoverFile(file); }} />
+                {selectedCampusGate.studentInfo?.coverImagePath ? <img src={buildingCoverPublicUrl(selectedCampusGate.studentInfo.coverImagePath)} alt={`${selectedCampusGate.name} cover photo preview`} className="aspect-[16/8] w-full rounded-lg object-cover ring-1 ring-border" /> : <div className="flex aspect-[16/8] w-full items-center justify-center rounded-lg border border-dashed border-border bg-gradient-to-br from-[#0b1b35] via-[#173d68] to-[#287c95] text-white/80"><DoorOpen className="h-8 w-8" /></div>}
+                <div className="flex gap-2"><button type="button" disabled={placeCoverUploading} onClick={() => placeCoverInputRef.current?.click()} className="inline-flex h-8 flex-1 items-center justify-center gap-1.5 rounded-lg border border-primary/20 px-2 text-[10px] font-bold text-primary hover:bg-primary/5 disabled:opacity-50">{selectedCampusGate.studentInfo?.coverImagePath ? <Upload className="h-3 w-3" /> : <ImagePlus className="h-3 w-3" />}{placeCoverUploading ? "Uploading…" : selectedCampusGate.studentInfo?.coverImagePath ? "Replace photo" : "Upload photo"}</button>{selectedCampusGate.studentInfo?.coverImagePath && <button type="button" disabled={placeCoverUploading} onClick={() => updatePlaceInfo({ coverImagePath: undefined })} className="h-8 rounded-lg border border-border px-2 text-[10px] font-bold text-muted-foreground">Remove</button>}</div>
+                <p className="text-[8px] text-muted-foreground">JPG, PNG or WebP · max 5 MB</p>
+                {placeCoverError && <p role="alert" className="text-[10px] text-destructive">{placeCoverError}</p>}
+              </div>
+              <BuildingWeeklyHoursEditor
+                value={selectedCampusGate.studentInfo?.operatingHoursSchedule}
+                onChange={(operatingHoursSchedule) => updatePlaceInfo({ operatingHoursSchedule })}
+                onClear={() => updatePlaceInfo({ operatingHoursSchedule: undefined })}
+              />
+              <div className="space-y-1.5">
+                <span className={labelCls}>Access information</span>
+                {([
+                  ["accessibleEntrance", "Accessible entrance"],
+                  ["pedestrianAccess", "Pedestrian access"],
+                  ["vehicleAccess", "Vehicle access"],
+                  ["securityCheckpoint", "Security checkpoint"],
+                ] as const).map(([key, label]) => <label key={key} className="flex min-h-8 cursor-pointer items-center gap-2 rounded-lg border border-border/70 bg-card/70 px-2 text-[10px] font-semibold text-foreground"><input type="checkbox" checked={!!selectedCampusGate.studentInfo?.[key]} onChange={(event) => updatePlaceInfo({ [key]: event.target.checked } as Partial<CampusPlaceStudentInfo>)} className="accent-primary" />{label}</label>)}
+              </div>
+            </section>}
+            </>) : (
               <div>
                 <label className={labelCls}>Type</label>
                 <Combobox

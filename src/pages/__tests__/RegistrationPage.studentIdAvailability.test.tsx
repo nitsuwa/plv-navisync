@@ -11,7 +11,7 @@ vi.mock("../../lib/supabase", () => ({
 vi.mock("../../hooks/useTheme", () => ({ useTheme: () => ({ theme: "light", toggleTheme: vi.fn() }) }));
 vi.mock("../../components/ui/ThemeToggle", () => ({ ThemeToggle: () => null }));
 vi.mock("../../components/ui/PLVLogo", () => ({ PLVLogo: () => null }));
-vi.mock("../../components/ui/HeroBackground", () => ({ StarField: () => null, LavaLampBackground: () => null }));
+vi.mock("../../components/ui/HeroBackground", () => ({ AuthVisualBackdrop: () => null, StarField: () => null, LavaLampBackground: () => null }));
 
 import { RegistrationPage } from "../RegistrationPage";
 
