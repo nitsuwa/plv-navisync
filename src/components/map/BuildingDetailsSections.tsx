@@ -69,18 +69,20 @@ export function BuildingDetailsSections({
         </div>
       </section>
 
-      {facilities.length > 0 && (
-        <section data-testid="building-facilities" aria-label="Facilities" className="space-y-2">
-          <h3 className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-muted-foreground">Facilities</h3>
+      <section data-testid="building-facilities" aria-label="Facilities" className="space-y-2">
+        <h3 className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-muted-foreground">Facilities</h3>
+        {facilities.length > 0 ? (
           <div className="flex flex-wrap gap-1.5">
             {facilities.map((facility) => <span key={facility} className="rounded-lg border border-border/80 bg-card px-2.5 py-1.5 text-xs font-medium text-foreground/85">{facility}</span>)}
           </div>
-        </section>
-      )}
+        ) : (
+          <p className="text-sm leading-relaxed text-muted-foreground">No facilities are listed for this building.</p>
+        )}
+      </section>
 
-      {accessibility.length > 0 && (
-        <section data-testid="building-accessibility" aria-label="Accessibility" className="space-y-2">
-          <h3 className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-muted-foreground">Accessibility</h3>
+      <section data-testid="building-accessibility" aria-label="Accessibility" className="space-y-2">
+        <h3 className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-muted-foreground">Accessibility</h3>
+        {accessibility.length > 0 ? (
           <div className="space-y-1.5">
             {accessibility.map((item) => (
               <div key={item} className="flex items-center gap-2 rounded-xl border border-emerald-200/70 bg-emerald-50/70 px-3 py-2 text-xs text-foreground dark:border-emerald-900/40 dark:bg-emerald-950/20">
@@ -88,8 +90,10 @@ export function BuildingDetailsSections({
               </div>
             ))}
           </div>
-        </section>
-      )}
+        ) : (
+          <p className="text-sm leading-relaxed text-muted-foreground">No accessibility features are listed for this building.</p>
+        )}
+      </section>
 
       {operatingHours && (
         <section data-testid="building-hours" className="space-y-2">

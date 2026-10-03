@@ -1,6 +1,6 @@
 import { Accessibility, ArrowLeft, ArrowUpDown, Check, Compass, Navigation, Route as RouteIcon, ShieldAlert, X } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent, type ReactNode } from "react";
 import type { SearchResult } from "../../hooks/useCampusSearch";
 import { searchDestinationResults, type DestinationFilter } from "../../lib/destinationSearch";
 import type { CampusPlaceDest, RoomDest } from "../../lib/combinedPathfinding";
@@ -59,6 +59,10 @@ const MODES: Array<{ key: RouteMode; label: string; icon: ReactNode }> = [
   { key: "accessible", label: "Accessible", icon: <Accessibility className="h-3.5 w-3.5" /> },
   { key: "emergency", label: "SOS", icon: <ShieldAlert className="h-3.5 w-3.5" /> },
 ];
+
+const ROUTE_PLANNER_MIN_HEIGHT = 320;
+const ROUTE_PLANNER_DEFAULT_HEIGHT = 360;
+const ROUTE_PLANNER_MAX_HEIGHT = 760;
 
 function endpointText(
   purpose: RoutePlannerEndpoint,
@@ -140,7 +144,73 @@ export function UnifiedRoutePlannerDialog({
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<DestinationFilter>("all");
   const [editingRoute, setEditingRoute] = useState(false);
+  const [panelHeight, setPanelHeight] = useState<number | null>(null);
+  const resizeStartRef = useRef<{ y: number; height: number } | null>(null);
   const reducedMotion = useReducedMotion();
+
+  const panelHeightBounds = () => {
+    const viewportHeight = typeof window !== "undefined" && window.innerHeight > 0 ? window.innerHeight : 768;
+    const parentHeight = dialogRef.current?.parentElement?.getBoundingClientRect().height ?? 0;
+    const availableHeight = Math.min(
+      ROUTE_PLANNER_MAX_HEIGHT,
+      viewportHeight - 104,
+      parentHeight > 0 ? parentHeight : ROUTE_PLANNER_MAX_HEIGHT,
+    );
+    return {
+      min: ROUTE_PLANNER_MIN_HEIGHT,
+      max: Math.max(ROUTE_PLANNER_MIN_HEIGHT, availableHeight),
+    };
+  };
+
+  const clampPanelHeight = (height: number) => {
+    const bounds = panelHeightBounds();
+    return Math.min(bounds.max, Math.max(bounds.min, height));
+  };
+
+  const currentPanelHeight = () => {
+    const measured = dialogRef.current?.getBoundingClientRect().height ?? 0;
+    return measured > 0 ? measured : panelHeight ?? ROUTE_PLANNER_DEFAULT_HEIGHT;
+  };
+  const resizeBounds = panelHeightBounds();
+
+  const handleResizePointerDown = (event: PointerEvent<HTMLDivElement>) => {
+    if (event.pointerType === "mouse" && event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    resizeStartRef.current = { y: event.clientY, height: currentPanelHeight() };
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+  };
+
+  const handleResizePointerMove = (event: PointerEvent<HTMLDivElement>) => {
+    const start = resizeStartRef.current;
+    if (!start) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setPanelHeight(clampPanelHeight(start.height + start.y - event.clientY));
+  };
+
+  const handleResizePointerEnd = (event: PointerEvent<HTMLDivElement>) => {
+    resizeStartRef.current = null;
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+  };
+
+  const handleResizeKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    const step = event.shiftKey ? 96 : 48;
+    const current = currentPanelHeight();
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setPanelHeight(clampPanelHeight(current + step));
+    } else if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setPanelHeight(clampPanelHeight(current - step));
+    } else if (event.key === "Home") {
+      event.preventDefault();
+      setPanelHeight(panelHeightBounds().min);
+    } else if (event.key === "End") {
+      event.preventDefault();
+      setPanelHeight(panelHeightBounds().max);
+    }
+  };
 
   useEffect(() => {
     const previous = document.activeElement;
@@ -202,10 +272,11 @@ export function UnifiedRoutePlannerDialog({
       data-map-surface="route-planner"
       data-suspended-for-building={isSuspendedForBuilding ? "true" : "false"}
       data-search-open={activeEndpoint ? "true" : "false"}
-      className="route-planner-dialog pointer-events-auto fixed inset-x-2 bottom-[calc(4.75rem+env(safe-area-inset-bottom,0px))] z-50 flex max-h-[calc(100dvh-6.5rem-env(safe-area-inset-bottom,0px))] flex-col overflow-hidden rounded-[24px] border border-border/70 bg-card text-foreground shadow-[0_-16px_42px_rgba(15,23,42,0.18)] outline-none md:relative md:inset-auto md:h-fit md:max-h-[calc(100dvh-1.5rem)] md:w-full md:rounded-3xl md:shadow-2xl"
+      className="route-planner-dialog pointer-events-auto fixed inset-x-2 bottom-[calc(4.75rem+env(safe-area-inset-bottom,0px))] z-50 flex h-[360px] max-h-[calc(100dvh-6.5rem-env(safe-area-inset-bottom,0px))] flex-col overflow-hidden rounded-[24px] border border-border/70 bg-card text-foreground shadow-[0_-16px_42px_rgba(15,23,42,0.18)] outline-none md:relative md:inset-auto md:h-fit md:max-h-[calc(100dvh-1.5rem)] md:w-full md:rounded-3xl md:shadow-2xl"
       style={{
         paddingBottom: "max(0.35rem, env(safe-area-inset-bottom, 0px))",
-        ...(activeEndpoint ? { height: "min(72dvh, calc(100dvh - 7rem - env(safe-area-inset-bottom, 0px)))" } : {}),
+        ...(activeEndpoint ? { height: "min(58dvh, calc(100dvh - 7rem - env(safe-area-inset-bottom, 0px)))" } : {}),
+        ...(panelHeight !== null ? { height: `${panelHeight}px` } : {}),
       }}
       onWheelCapture={(event) => event.stopPropagation()}
       onTouchMoveCapture={(event) => event.stopPropagation()}
@@ -216,7 +287,24 @@ export function UnifiedRoutePlannerDialog({
       </p>
 
       <header className="shrink-0 border-b border-border/60 bg-card/95 px-3.5 pb-2.5 pt-2.5 backdrop-blur-xl md:px-4 md:pb-3 md:pt-3">
-        <div className="mx-auto mb-2 h-1 w-9 rounded-full bg-border md:hidden" aria-hidden="true" />
+        <div
+          role="slider"
+          tabIndex={0}
+          aria-label="Resize route planner"
+          aria-orientation="vertical"
+          aria-valuemin={ROUTE_PLANNER_MIN_HEIGHT}
+          aria-valuemax={resizeBounds.max}
+          aria-valuenow={panelHeight ?? ROUTE_PLANNER_DEFAULT_HEIGHT}
+          data-testid="route-planner-resize-handle"
+          className="mx-auto mb-2 flex h-3 w-12 touch-none cursor-row-resize items-center justify-center rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+          onPointerDown={handleResizePointerDown}
+          onPointerMove={handleResizePointerMove}
+          onPointerUp={handleResizePointerEnd}
+          onPointerCancel={handleResizePointerEnd}
+          onKeyDown={handleResizeKeyDown}
+        >
+          <span aria-hidden="true" className="h-1 w-9 rounded-full bg-border" />
+        </div>
         <div className="flex items-center gap-2.5">
           {activeEndpoint ? (
             <button type="button" onClick={closeSearch} aria-label="Back to route planner" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-primary transition-colors hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"><ArrowLeft className="h-4 w-4" /></button>
@@ -267,7 +355,7 @@ export function UnifiedRoutePlannerDialog({
           <motion.div
             key="route-planner-main"
             data-testid="route-planner-scroll-region"
-            className="min-h-0 flex-none space-y-2.5 overflow-y-auto overscroll-contain px-3.5 py-3 md:max-h-[calc(100dvh-14rem)] md:flex-none md:space-y-3 md:px-4 md:py-4"
+            className="min-h-0 flex-1 space-y-2.5 overflow-y-auto overscroll-contain px-3.5 py-3 md:max-h-[calc(100dvh-14rem)] md:flex-none md:space-y-3 md:px-4 md:py-4"
             initial={reducedMotion ? false : { opacity: 0, x: -10 }}
             animate={{ opacity: 1, x: 0 }}
             exit={reducedMotion ? { opacity: 0 } : { opacity: 0, x: 10 }}

@@ -561,6 +561,8 @@ export interface CampusBuilding {
     hasRamp: boolean;
     accessibleEntrance: boolean;
   };
+  /** Optional public-facing facility labels for the student building panel. */
+  facilities?: string[];
   /** Building-attached Exterior Emergency Stairs; occurrences are derived on served Floors. */
   exteriorEmergencyStairs?: ExteriorEmergencyStair[];
 }

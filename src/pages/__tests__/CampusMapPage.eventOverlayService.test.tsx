@@ -219,15 +219,17 @@ describe("CampusMapPage event overlays", () => {
     expect(sheet).toHaveAttribute("data-sheet-state", "default");
     expect(sheetActions.getByTestId("building-cover-fallback")).toBeInTheDocument();
     expect(screen.getByTestId("readonly-building")).toHaveAttribute("data-selected", "true");
+    expect(screen.queryByTestId("student-map-zoom-controls")).not.toBeInTheDocument();
     expect(screen.getByTestId("student-map-recenter-button")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Zoom in" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Zoom out" })).not.toBeInTheDocument();
     expect(sheetActions.getByRole("button", { name: /Directions/i })).toBeVisible();
     expect(sheetActions.getByRole("button", { name: "Enter Building" })).toBeVisible();
     expect(sheetActions.getByRole("button", { name: /Save/i })).toBeVisible();
+    expect(sheetActions.getByRole("button", { name: /Report/i })).toBeVisible();
     expect(sheetActions.getByRole("button", { name: /Share/i })).toBeVisible();
     expect(sheetActions.getByRole("button", { name: "Report map issue" })).toBeVisible();
-    expect(utilityControls).toHaveClass("right-3", "top-20");
+    expect(utilityControls).toHaveClass("right-3", "bottom-[calc(0.75rem+env(safe-area-inset-bottom,0px))]", "md:top-20");
     expect(screen.getByTestId("student-map-surface").style.getPropertyValue("--student-map-controls-safe-top")).toMatch(/px$/);
 
     fireEvent.click(sheetActions.getByRole("button", { name: "Expand building details" }));
@@ -385,7 +387,7 @@ describe("CampusMapPage event overlays", () => {
     fireEvent.click(await screen.findByRole("button", { name: /user menu/i }));
     expect(await screen.findByRole("menu", { name: "Student account menu" })).toBeInTheDocument();
     expect(stack).toHaveAttribute("data-profile-open", "true");
-    expect(stack).toHaveClass("right-3", "top-20");
+    expect(stack).toHaveClass("right-3", "bottom-[calc(0.75rem+env(safe-area-inset-bottom,0px))]", "md:top-20");
     expect(screen.getByRole("button", { name: "Open event map" })).toBe(eventMap);
     expect(eventMap).toHaveAttribute("data-dock", "event-map-bottom-left");
     expect(surface.querySelector("svg > g[transform]")?.getAttribute("transform")).toBe(cameraBefore);
@@ -506,6 +508,7 @@ describe("CampusMapPage event overlays", () => {
     fireEvent.change(search, { target: { value: "Copy Shop" } });
     fireEvent.click(await screen.findByRole("option", { name: /Copy Shop, Room/i }));
     expect(await screen.findByTestId("readonly-room")).toBeInTheDocument();
+    expect(screen.queryByTestId("student-map-zoom-percentage")).not.toBeInTheDocument();
     await waitFor(() => {
       const transform = screen.getByTestId("student-map-surface").querySelector("svg > g[transform]")?.getAttribute("transform") ?? "";
       expect(Number(transform.match(/scale\(([^)]+)\)/)?.[1])).toBeCloseTo(1, 1);
@@ -547,7 +550,7 @@ describe("CampusMapPage event overlays", () => {
     expect(screen.getByTestId("readonly-room")).toHaveAttribute("data-room-id", "room-third");
   });
 
-  it("keeps one top-stack Recenter control while wheel and keyboard zoom remain available", async () => {
+  it("keeps zoom controls hidden while wheel and keyboard zoom remain available", async () => {
     renderCampusMap({ previewCampus });
     const surface = await screen.findByTestId("student-map-surface");
     const readScale = () => Number(surface.querySelector("svg > g[transform]")?.getAttribute("transform")?.match(/scale\(([^)]+)\)/)?.[1]);
@@ -556,8 +559,10 @@ describe("CampusMapPage event overlays", () => {
     expect(recenter).toHaveAttribute("data-dock", "map-control-top-right");
     expect(screen.getByTestId("student-map-utility-controls").contains(recenter)).toBe(true);
     expect(screen.queryAllByTestId("student-map-recenter-button")).toHaveLength(1);
+    expect(screen.queryByTestId("student-map-zoom-controls")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Zoom in" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Zoom out" })).not.toBeInTheDocument();
+    expect(screen.queryByTestId("student-map-zoom-percentage")).not.toBeInTheDocument();
 
     const initialScale = readScale();
     fireEvent.wheel(surface, { deltaY: 100, clientX: 300, clientY: 220 });
@@ -579,6 +584,9 @@ describe("CampusMapPage event overlays", () => {
     expect(readTransform()).toBe(before);
     fireEvent.wheel(surface, { deltaY: -1000 });
     await waitFor(() => expect(readTransform()).not.toBe(before));
+    const zoomed = readTransform();
+    fireEvent.wheel(surface, { deltaY: 10000 });
+    await waitFor(() => expect(readTransform()).not.toBe(zoomed));
     expect(screen.getByRole("button", { name: "Recenter map" })).toBeInTheDocument();
   });
 

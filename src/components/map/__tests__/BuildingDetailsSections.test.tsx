@@ -19,13 +19,13 @@ describe("building details content", () => {
     expect(screen.getByText("6 floors")).toBeInTheDocument();
   });
 
-  it("uses a branded cover fallback and hides empty optional sections", () => {
+  it("uses a branded cover fallback and explains when building details are unavailable", () => {
     const { rerender } = render(<BuildingCover code="CABA" name="CABA" />);
     expect(screen.getByTestId("building-cover-fallback")).toBeInTheDocument();
     rerender(<BuildingDetailsSections building={{ ...building, description: " " }} facilities={[]} accessibility={[]} floorCount={0} />);
     expect(screen.queryByTestId("building-description")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("building-facilities")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("building-accessibility")).not.toBeInTheDocument();
+    expect(screen.getByTestId("building-facilities")).toHaveTextContent("No facilities are listed for this building.");
+    expect(screen.getByTestId("building-accessibility")).toHaveTextContent("No accessibility features are listed for this building.");
     expect(screen.queryByText(/No facilities data yet|No accessibility data yet|No description available/i)).not.toBeInTheDocument();
   });
 

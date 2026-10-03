@@ -45,10 +45,13 @@ describe("StudentMapControls", () => {
   it("keeps search and the single useful route action in the floating controls", () => {
     render(<StudentMapControls {...props()} />);
 
-    expect(screen.getByRole("searchbox", { name: "Search campus map" })).toBeInTheDocument();
+    const searchbox = screen.getByRole("searchbox", { name: "Search campus map" });
+    expect(searchbox).toBeInTheDocument();
+    expect(searchbox).toHaveClass("text-xs", "sm:text-[13px]");
     expect(screen.getByTestId("student-map-controls")).toHaveClass("map-layer-controls");
     expect(screen.getByTestId("student-map-search-panel").querySelector("[data-map-search-header='true']")).toBeInTheDocument();
     expect(screen.getByTestId("student-map-search-panel")).toHaveClass("right-16");
+    expect(screen.getByTestId("student-map-utility-controls")).toHaveClass("bottom-[calc(0.75rem+env(safe-area-inset-bottom,0px))]");
     expect(screen.getByRole("button", { name: "Open directions" })).toBeInTheDocument();
     expect(within(screen.getByTestId("student-map-utility-controls")).getAllByRole("button")).toHaveLength(1);
     expect(screen.queryByRole("button", { name: /Drop pin|Move dropped pin|Cancel drop pin/i })).not.toBeInTheDocument();
@@ -82,7 +85,7 @@ describe("StudentMapControls", () => {
     render(<StudentMapControls {...props({ profileOpen: true, onResetView: vi.fn() })} />);
 
     const stack = screen.getByTestId("student-map-utility-controls");
-    expect(stack).toHaveClass("absolute", "right-3", "top-20");
+    expect(stack).toHaveClass("absolute", "right-3", "bottom-[calc(0.75rem+env(safe-area-inset-bottom,0px))]", "md:top-20");
     expect(stack).toHaveAttribute("data-profile-open", "true");
     expect(within(stack).getByTestId("student-map-recenter-button")).toBeInTheDocument();
   });

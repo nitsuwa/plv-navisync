@@ -32,6 +32,8 @@ export interface StudentRoomFocusCameraOptions {
   currentPan: MapPoint;
   zoom: number;
   insets?: MapViewportInsets;
+  /** Letterbox space around the SVG viewBox, expressed in viewBox units. */
+  viewportOffset?: MapPoint;
   /** Translation applied by a child scene inside the SVG viewBox. */
   contentOffset?: MapPoint;
   /** Minimum visible fraction required before a room is considered in view. */
@@ -126,6 +128,7 @@ export function getStudentRoomFocusCamera({
   currentPan,
   zoom,
   insets,
+  viewportOffset = { x: 0, y: 0 },
   contentOffset = { x: 0, y: 0 },
   visibleThreshold = 0.9,
   comfortMargin = 14,
@@ -137,12 +140,18 @@ export function getStudentRoomFocusCamera({
   const right = Math.max(0, insets?.right ?? 0);
   const top = Math.max(0, insets?.top ?? 0);
   const bottom = Math.max(0, insets?.bottom ?? 0);
-  const safeLeft = Math.min(left, safeMapWidth / 2);
-  const safeRight = Math.min(right, safeMapWidth / 2);
-  const safeTop = Math.min(top, safeMapHeight / 2);
-  const safeBottom = Math.min(bottom, safeMapHeight / 2);
-  const safeRightEdge = safeMapWidth - safeRight;
-  const safeBottomEdge = safeMapHeight - safeBottom;
+  const letterboxX = Math.max(0, viewportOffset.x);
+  const letterboxY = Math.max(0, viewportOffset.y);
+  const visibleMapWidth = safeMapWidth + letterboxX * 2;
+  const visibleMapHeight = safeMapHeight + letterboxY * 2;
+  const requestedSafeLeft = -letterboxX + Math.min(left, visibleMapWidth);
+  const requestedSafeRight = safeMapWidth + letterboxX - Math.min(right, visibleMapWidth);
+  const requestedSafeTop = -letterboxY + Math.min(top, visibleMapHeight);
+  const requestedSafeBottom = safeMapHeight + letterboxY - Math.min(bottom, visibleMapHeight);
+  const safeLeft = Math.min(requestedSafeLeft, (requestedSafeLeft + requestedSafeRight) / 2);
+  const safeRightEdge = Math.max(requestedSafeRight, (requestedSafeLeft + requestedSafeRight) / 2);
+  const safeTop = Math.min(requestedSafeTop, (requestedSafeTop + requestedSafeBottom) / 2);
+  const safeBottomEdge = Math.max(requestedSafeBottom, (requestedSafeTop + requestedSafeBottom) / 2);
 
   const roomLeft = roomBounds.x + contentOffset.x;
   const roomTop = roomBounds.y + contentOffset.y;
