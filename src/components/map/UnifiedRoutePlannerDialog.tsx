@@ -61,7 +61,7 @@ const MODES: Array<{ key: RouteMode; label: string; icon: ReactNode }> = [
 ];
 
 const ROUTE_PLANNER_MIN_HEIGHT = 320;
-const ROUTE_PLANNER_DEFAULT_HEIGHT = 560;
+const ROUTE_PLANNER_DEFAULT_HEIGHT = 360;
 const ROUTE_PLANNER_MAX_HEIGHT = 760;
 
 function endpointText(
@@ -272,10 +272,10 @@ export function UnifiedRoutePlannerDialog({
       data-map-surface="route-planner"
       data-suspended-for-building={isSuspendedForBuilding ? "true" : "false"}
       data-search-open={activeEndpoint ? "true" : "false"}
-      className="route-planner-dialog pointer-events-auto fixed inset-x-2 bottom-[calc(4.75rem+env(safe-area-inset-bottom,0px))] z-50 flex max-h-[calc(100dvh-6.5rem-env(safe-area-inset-bottom,0px))] flex-col overflow-hidden rounded-[24px] border border-border/70 bg-card text-foreground shadow-[0_-16px_42px_rgba(15,23,42,0.18)] outline-none md:relative md:inset-auto md:h-fit md:max-h-[calc(100dvh-1.5rem)] md:w-full md:rounded-3xl md:shadow-2xl"
+      className="route-planner-dialog pointer-events-auto fixed inset-x-2 bottom-[calc(4.75rem+env(safe-area-inset-bottom,0px))] z-50 flex h-[360px] max-h-[calc(100dvh-6.5rem-env(safe-area-inset-bottom,0px))] flex-col overflow-hidden rounded-[24px] border border-border/70 bg-card text-foreground shadow-[0_-16px_42px_rgba(15,23,42,0.18)] outline-none md:relative md:inset-auto md:h-fit md:max-h-[calc(100dvh-1.5rem)] md:w-full md:rounded-3xl md:shadow-2xl"
       style={{
         paddingBottom: "max(0.35rem, env(safe-area-inset-bottom, 0px))",
-        ...(activeEndpoint ? { height: "min(72dvh, calc(100dvh - 7rem - env(safe-area-inset-bottom, 0px)))" } : {}),
+        ...(activeEndpoint ? { height: "min(58dvh, calc(100dvh - 7rem - env(safe-area-inset-bottom, 0px)))" } : {}),
         ...(panelHeight !== null ? { height: `${panelHeight}px` } : {}),
       }}
       onWheelCapture={(event) => event.stopPropagation()}
@@ -355,7 +355,7 @@ export function UnifiedRoutePlannerDialog({
           <motion.div
             key="route-planner-main"
             data-testid="route-planner-scroll-region"
-            className="min-h-0 flex-none space-y-2.5 overflow-y-auto overscroll-contain px-3.5 py-3 md:max-h-[calc(100dvh-14rem)] md:flex-none md:space-y-3 md:px-4 md:py-4"
+            className="min-h-0 flex-1 space-y-2.5 overflow-y-auto overscroll-contain px-3.5 py-3 md:max-h-[calc(100dvh-14rem)] md:flex-none md:space-y-3 md:px-4 md:py-4"
             initial={reducedMotion ? false : { opacity: 0, x: -10 }}
             animate={{ opacity: 1, x: 0 }}
             exit={reducedMotion ? { opacity: 0 } : { opacity: 0, x: 10 }}

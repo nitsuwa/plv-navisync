@@ -171,17 +171,17 @@ describe("RoutePlannerDialog student accessibility", () => {
 
     const handle = screen.getByRole("slider", { name: "Resize route planner" });
     const dialog = screen.getByRole("dialog", { name: "Route planner" });
-    expect(handle).toHaveAttribute("aria-valuenow", "560");
+    expect(handle).toHaveAttribute("aria-valuenow", "360");
 
     fireEvent.keyDown(handle, { key: "ArrowUp" });
-    expect(handle).toHaveAttribute("aria-valuenow", "608");
-    expect(dialog).toHaveStyle({ height: "608px" });
+    expect(handle).toHaveAttribute("aria-valuenow", "408");
+    expect(dialog).toHaveStyle({ height: "408px" });
 
     fireEvent.pointerDown(handle, { pointerId: 1, pointerType: "touch", clientY: 300 });
     fireEvent.pointerMove(handle, { pointerId: 1, pointerType: "touch", clientY: 220 });
     fireEvent.pointerUp(handle, { pointerId: 1, pointerType: "touch", clientY: 220 });
-    expect(handle).toHaveAttribute("aria-valuenow", "664");
-    expect(dialog).toHaveStyle({ height: "664px" });
+    expect(handle).toHaveAttribute("aria-valuenow", "488");
+    expect(dialog).toHaveStyle({ height: "488px" });
   });
 
   it("uses one active unified destination search instead of parallel building and room controls", async () => {
