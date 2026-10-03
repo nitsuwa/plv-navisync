@@ -4495,6 +4495,7 @@ const buildingFill = (id: string) =>
             search={search}
             searchFocused={searchFocused}
             directionsMode={directionsMode}
+            navigationActive={navigationTransitioning || navigationPhase !== "idle"}
             profileOpen={profileMenuOpen}
             searchResults={campusSearch.results}
             onSearchChange={setSearch}

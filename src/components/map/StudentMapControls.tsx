@@ -17,6 +17,7 @@ export interface StudentMapControlsProps {
   search: string;
   searchFocused: boolean;
   directionsMode: boolean;
+  navigationActive?: boolean;
   profileOpen?: boolean;
   pinning?: boolean;
   youAreHere?: boolean;
@@ -40,6 +41,7 @@ export function StudentMapControls({
   search,
   searchFocused,
   directionsMode,
+  navigationActive = false,
   profileOpen = false,
   pinning = false,
   youAreHere = false,
@@ -122,17 +124,19 @@ export function StudentMapControls({
           inert={profileOpen}
           className="student-map-utility-stack pointer-events-auto absolute bottom-[calc(0.75rem+env(safe-area-inset-bottom,0px))] right-3 flex flex-col items-end gap-1.5 md:bottom-auto md:top-20"
         >
-          <button
-            type="button"
-            onClick={onOpenDirections}
-            aria-label="Open directions"
-            aria-expanded={directionsMode}
-            title="Open directions"
-            className="flex h-11 w-11 items-center justify-center rounded-xl border border-white/50 bg-card/95 text-primary shadow-[0_6px_18px_rgba(15,23,42,0.14)] backdrop-blur-xl transition-[transform,background-color,box-shadow] duration-150 hover:bg-primary/10 hover:shadow-lg active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 dark:border-white/10 md:h-10 md:w-10"
-          >
-            <Navigation className="h-[18px] w-[18px]" />
-          </button>
-          {onScanLocation && (
+          {!navigationActive && (
+            <button
+              type="button"
+              onClick={onOpenDirections}
+              aria-label="Open directions"
+              aria-expanded={directionsMode}
+              title="Open directions"
+              className="flex h-11 w-11 items-center justify-center rounded-xl border border-white/50 bg-card/95 text-primary shadow-[0_6px_18px_rgba(15,23,42,0.14)] backdrop-blur-xl transition-[transform,background-color,box-shadow] duration-150 hover:bg-primary/10 hover:shadow-lg active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 dark:border-white/10 md:h-10 md:w-10"
+            >
+              <Navigation className="h-[18px] w-[18px]" />
+            </button>
+          )}
+          {onScanLocation && !navigationActive && (
             <button
               type="button"
               onClick={onScanLocation}
