@@ -9,6 +9,7 @@ import { cn } from "../../lib/utils";
 const MOBILE_PANEL_MIN_HEIGHT = 190;
 const MOBILE_PANEL_DEFAULT_HEIGHT = 300;
 const MOBILE_PANEL_MAX_HEIGHT = 560;
+const MOBILE_PANEL_TOP_CLEARANCE = 120;
 
 interface RouteStepsPanelProps {
   route: PlannedRoute;
@@ -33,7 +34,7 @@ interface RouteStepsPanelProps {
     progress: number;
     statusInstruction?: string;
   };
-  /** Condensed layout for the small floating mobile navigation card. */
+  /** Full-width, resizable mobile navigation sheet. */
   compact?: boolean;
 }
 
@@ -123,6 +124,7 @@ export function RouteStepsPanel({
   route, mode, toName, onEnd, onZoom, walkProgress, onReplay, activeLeg, compact = false,
 }: RouteStepsPanelProps) {
   const [mobilePanelHeight, setMobilePanelHeight] = useState(MOBILE_PANEL_DEFAULT_HEIGHT);
+  const [mobilePanelMaxHeight, setMobilePanelMaxHeight] = useState(MOBILE_PANEL_MAX_HEIGHT);
   const [panelOffset, setPanelOffset] = useState({ x: 0, y: 0 });
   const panelRef = useRef<HTMLDivElement>(null);
   const resizeStartRef = useRef<{ y: number; height: number } | null>(null);
@@ -145,10 +147,38 @@ export function RouteStepsPanel({
   const visibleSteps = steps
     .map((step, index) => ({ step, index, instruction: presentInstruction(step.instruction) }))
     .filter(({ instruction }) => Boolean(instruction));
-  const clampMobilePanelHeight = (height: number) => Math.min(
-    MOBILE_PANEL_MAX_HEIGHT,
+  const clampMobilePanelHeight = (height: number, maximum = mobilePanelMaxHeight) => Math.min(
+    maximum,
     Math.max(MOBILE_PANEL_MIN_HEIGHT, height),
   );
+  useEffect(() => {
+    if (!compact) return;
+    const mapSurface = panelRef.current?.closest("[data-testid='student-map-surface']") as HTMLElement | null;
+    const updateMaxHeight = () => {
+      const availableHeight = mapSurface
+        ? mapSurface.clientHeight - MOBILE_PANEL_TOP_CLEARANCE
+        : window.innerHeight - MOBILE_PANEL_TOP_CLEARANCE;
+      setMobilePanelMaxHeight(Math.max(
+        MOBILE_PANEL_MIN_HEIGHT,
+        Math.min(MOBILE_PANEL_MAX_HEIGHT, Math.floor(availableHeight)),
+      ));
+    };
+    updateMaxHeight();
+    const observer = mapSurface && typeof ResizeObserver !== "undefined"
+      ? new ResizeObserver(updateMaxHeight)
+      : null;
+    if (mapSurface) observer?.observe(mapSurface);
+    window.addEventListener("resize", updateMaxHeight);
+    window.visualViewport?.addEventListener("resize", updateMaxHeight);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", updateMaxHeight);
+      window.visualViewport?.removeEventListener("resize", updateMaxHeight);
+    };
+  }, [compact]);
+  useEffect(() => {
+    setMobilePanelHeight((height) => Math.min(mobilePanelMaxHeight, Math.max(MOBILE_PANEL_MIN_HEIGHT, height)));
+  }, [mobilePanelMaxHeight]);
   const handleResizePointerDown = (event: PointerEvent<HTMLDivElement>) => {
     event.preventDefault();
     event.stopPropagation();
@@ -179,7 +209,7 @@ export function RouteStepsPanel({
       setMobilePanelHeight(MOBILE_PANEL_MIN_HEIGHT);
     } else if (event.key === "End") {
       event.preventDefault();
-      setMobilePanelHeight(MOBILE_PANEL_MAX_HEIGHT);
+      setMobilePanelHeight(mobilePanelMaxHeight);
     }
   };
   const handleDragPointerDown = (event: PointerEvent<HTMLDivElement>) => {
@@ -216,7 +246,7 @@ export function RouteStepsPanel({
       ref={panelRef}
       className={cn(
         "rounded-2xl border border-border/60 shadow-xl overflow-hidden will-change-transform",
-        compact && "flex min-h-0 flex-col rounded-xl",
+        compact && "flex w-full min-h-0 flex-col rounded-t-2xl rounded-b-none",
       )}
       role="region"
       aria-label={`Active route to ${toName}`}
@@ -225,8 +255,14 @@ export function RouteStepsPanel({
         background: "var(--card)",
         backdropFilter: "blur(16px)",
         WebkitBackdropFilter: "blur(16px)",
-        transform: `translate3d(${panelOffset.x}px, ${panelOffset.y}px, 0)`,
-        ...(compact ? { height: `${mobilePanelHeight}px`, maxHeight: "calc(100dvh - 8rem)" } : {}),
+        transform: compact ? undefined : `translate3d(${panelOffset.x}px, ${panelOffset.y}px, 0)`,
+        ...(compact ? {
+          height: `${mobilePanelHeight}px`,
+          maxHeight: `${mobilePanelMaxHeight}px`,
+        } : {}),
+        boxSizing: "border-box",
+        width: compact ? "100%" : undefined,
+        touchAction: compact ? "auto" : undefined,
       }}>
       {compact && (
         <div
@@ -235,7 +271,7 @@ export function RouteStepsPanel({
           aria-label="Resize route panel"
           aria-orientation="vertical"
           aria-valuemin={MOBILE_PANEL_MIN_HEIGHT}
-          aria-valuemax={MOBILE_PANEL_MAX_HEIGHT}
+          aria-valuemax={mobilePanelMaxHeight}
           aria-valuenow={mobilePanelHeight}
           data-testid="route-panel-resize-handle"
           className="flex h-5 shrink-0 touch-none cursor-row-resize items-center justify-center bg-card/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
@@ -252,11 +288,11 @@ export function RouteStepsPanel({
       <div
         data-testid="route-panel-drag-handle"
         title="Drag to move route panel"
-        className={cn("flex cursor-grab touch-none select-none items-center gap-2 px-3 py-2 active:cursor-grabbing", compact && "gap-1.5 px-2.5 py-1.5")}
-        onPointerDown={handleDragPointerDown}
-        onPointerMove={handleDragPointerMove}
-        onPointerUp={handleDragPointerEnd}
-        onPointerCancel={handleDragPointerEnd}
+        className={cn("flex cursor-grab touch-none select-none items-center gap-2 px-3 py-2 active:cursor-grabbing", compact && "cursor-default touch-auto gap-1.5 px-2.5 py-1.5")}
+        onPointerDown={compact ? undefined : handleDragPointerDown}
+        onPointerMove={compact ? undefined : handleDragPointerMove}
+        onPointerUp={compact ? undefined : handleDragPointerEnd}
+        onPointerCancel={compact ? undefined : handleDragPointerEnd}
         style={{ background: modeColor }}
       >
         <Navigation className="h-3.5 w-3.5 text-white shrink-0" />

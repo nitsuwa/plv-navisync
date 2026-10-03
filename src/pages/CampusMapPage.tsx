@@ -4673,8 +4673,8 @@ const buildingFill = (id: string) =>
               />
             </div>
           </div>
-          {/* Mobile: compact navigation card at the lower-left, above the map dock. */}
-          <div data-no-drag className="absolute bottom-[calc(5.25rem_+_env(safe-area-inset-bottom,0px))] left-3 z-30 w-[min(18rem,calc(100vw_-_5rem))] max-h-[calc(100dvh_-_8rem)] md:hidden animate-slide-up">
+          {/* Mobile: full-width resizable navigation sheet, docked above Home / Map. */}
+          <div data-testid="mobile-active-route-dock" data-no-drag className="absolute inset-x-0 bottom-0 z-30 max-h-full md:hidden animate-slide-up">
             <RouteStepsPanel
               route={route}
               mode={mapMode}

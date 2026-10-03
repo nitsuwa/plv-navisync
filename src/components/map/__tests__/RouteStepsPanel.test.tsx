@@ -110,10 +110,7 @@ describe("RouteStepsPanel", () => {
     expect(handle).toHaveAttribute("aria-valuenow", "482");
   });
 
-  it.each([
-    { label: "mobile", compact: true },
-    { label: "laptop", compact: false },
-  ])("lets the $label route panel move by dragging its header", ({ compact }) => {
+  it("lets the laptop route panel move by dragging its header", () => {
     const route: PlannedRoute = {
       points: [],
       dist: 26,
@@ -131,7 +128,7 @@ describe("RouteStepsPanel", () => {
         route={route}
         mode="standard"
         toName="Room"
-        compact={compact}
+        compact={false}
         onEnd={() => undefined}
         onZoom={() => undefined}
       />,
