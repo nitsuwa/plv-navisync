@@ -3033,16 +3033,23 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
       : 1;
     if (!Number.isFinite(mapScale) || mapScale <= 0) return;
     const mapRect = hasMeasuredSvg ? {
-      left: svgRect.left + (svgRect.width - viewportCanvasW * mapScale) / 2,
-      top: svgRect.top + (svgRect.height - viewportCanvasH * mapScale) / 2,
-      right: svgRect.left + (svgRect.width + viewportCanvasW * mapScale) / 2,
-      bottom: svgRect.top + (svgRect.height + viewportCanvasH * mapScale) / 2,
+      left: svgRect.left,
+      top: svgRect.top,
+      right: svgRect.right,
+      bottom: svgRect.bottom,
     } : {
       left: surfaceRect.left,
       top: surfaceRect.top,
       right: surfaceRect.left + viewportCanvasW,
       bottom: surfaceRect.top + viewportCanvasH,
     };
+    // The floor SVG uses xMidYMid meet. On a portrait phone that leaves large
+    // letterbox bands above and below the viewBox; camera panning can still
+    // move a room into those bands, so include them in the focus viewport.
+    const viewportOffset = hasMeasuredSvg ? {
+      x: Math.max(0, (svgRect.width - viewportCanvasW * mapScale) / (2 * mapScale)),
+      y: Math.max(0, (svgRect.height - viewportCanvasH * mapScale) / (2 * mapScale)),
+    } : { x: 0, y: 0 };
     const safePx = { left: 12, right: 12, top: 12, bottom: 12 };
     const getRect = (selector: string) => surface.querySelector<HTMLElement>(selector)?.getBoundingClientRect() ?? null;
     const overlapsMapX = (rect: DOMRect) => rect.right > mapRect.left && rect.left < mapRect.right;
@@ -3068,7 +3075,9 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
       }
     }
     if (plannerRect && plannerRect.width > 0 && plannerRect.height > 0) {
-      if (mobileMap && plannerRect.top > (mapRect.top + mapRect.bottom) / 2) {
+      const plannerCoversMobileWidth = mobileMap
+        && plannerRect.width >= (mapRect.right - mapRect.left) * 0.72;
+      if (mobileMap && (plannerCoversMobileWidth || plannerRect.top > (mapRect.top + mapRect.bottom) / 2)) {
         safePx.bottom = Math.max(safePx.bottom, mapRect.bottom - plannerRect.top + 12);
       } else if (plannerRect.left <= mapRect.left + 24) {
         safePx.left = Math.max(safePx.left, plannerRect.right - mapRect.left + 12);
@@ -3099,6 +3108,7 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
         top: safePx.top / mapScale,
         bottom: safePx.bottom / mapScale,
       },
+      viewportOffset,
       contentOffset: { x: floorViewport.offsetX, y: floorViewport.offsetY },
     });
     lastRoomFocusKeyRef.current = focusKey;
