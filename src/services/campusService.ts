@@ -485,11 +485,15 @@ export async function listCampuses(): Promise<Campus[]> {
 
 /** Read the immutable snapshots that are currently visible to students. */
 export async function listPublishedCampusSnapshots(): Promise<Campus[]> {
-  const { data, error } = await getSupabase()
-    .from("campus_versions")
-    .select("campus_id,snapshot,published_at")
-    .eq("state", "published")
-    .order("published_at", { ascending: false });
+  const client = getSupabase();
+  let { data, error } = await client.rpc("list_event_safe_published_campuses");
+  // Transitional compatibility for databases that have not installed the event
+  // migration. Other failures stay visible; this is not a security fallback.
+  if (error?.code === "PGRST202") {
+    const legacy = await client.from("campus_versions").select("campus_id,snapshot,published_at").eq("state", "published").order("published_at", { ascending: false });
+    data = legacy.data;
+    error = legacy.error;
+  }
   assertOk(error, "list published campus versions");
   const result: Campus[] = [];
   for (const row of data ?? []) {
@@ -503,6 +507,7 @@ export async function listPublishedCampusSnapshots(): Promise<Campus[]> {
     );
     result.push({
       ...value,
+      eventOverlays: [],
       publishStatus: "published",
       lifecycleStatus: "published",
       visibleToStudents: true,
@@ -900,10 +905,11 @@ export async function publishCampusVersion(
   const userId = await requireCurrentUserId();
   const existingVersions = await listCampusVersions(campus.id);
   const nextVersion = existingVersions.reduce((max, version) => Math.max(max, version.version_number), 0) + 1;
+  const eventFreeCampus = { ...campus, eventOverlays: [] };
   const snapshot = {
     version: 1,
-    campus: JSON.parse(JSON.stringify(campus)) as Campus,
-    structure: serializeCampusStructure(campus),
+    campus: JSON.parse(JSON.stringify(eventFreeCampus)) as Campus,
+    structure: serializeCampusStructure(eventFreeCampus),
   } as unknown as Json;
   const warnings = Math.max(validation.warnings, readiness.warnings.length);
   const passed = validation.passed;

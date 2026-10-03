@@ -1,5 +1,5 @@
 import { createPortal } from "react-dom";
-import { motion, AnimatePresence } from "motion/react";
+import { motion, AnimatePresence, useReducedMotion } from "motion/react";
 import { AlertTriangle, Map, Loader2 } from "lucide-react";
 import { cn } from "../../lib/utils";
 
@@ -56,6 +56,7 @@ export function UnsavedChangesDialog({
   onSave,
   onDiscard,
 }: UnsavedChangesDialogProps) {
+  const reducedMotion = useReducedMotion();
   const content = (
     <AnimatePresence>
       {open && (
@@ -69,10 +70,10 @@ export function UnsavedChangesDialog({
           aria-label={isDirty ? title : infoTitle}
         >
           <motion.div
-            initial={{ opacity: 0, scale: 0.96, y: 10 }}
+            initial={reducedMotion ? false : { opacity: 0, scale: 0.96, y: 10 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.96, y: 10 }}
-            transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+            exit={reducedMotion ? { opacity: 0 } : { opacity: 0, scale: 0.96, y: 10 }}
+            transition={{ duration: reducedMotion ? 0 : 0.18, ease: [0.16, 1, 0.3, 1] }}
             className="w-full max-w-md bg-card border border-border rounded-2xl shadow-2xl overflow-hidden"
             onClick={(e) => e.stopPropagation()}
           >

@@ -1,11 +1,25 @@
 import { describe, expect, it } from "vitest";
-import { validateEventLayout } from "../eventLayoutValidation";
+import { eventProtectedAccessRegions, validateEventLayout } from "../eventLayoutValidation";
 
 const item = (id: string, x: number, y: number, width = 20, height = 20, rotation = 0) => ({
   id, type: "chair", name: "Chair", category: "event", x, y, width, height, rotation, color: "#000", layer: "events" as const,
 });
 
 describe("validateEventLayout", () => {
+  it("blocks campus building footprints but not indoor rooms", () => {
+    const floor = { id: "campus", doors: [], furniture: [], rooms: [{ id: "hall", name: "Student Hall", type: "building", x: 40, y: 40, w: 80, h: 20, rotation: 0, floorId: "campus", buildingId: "campus", color: "orange" }] };
+    const warnings = validateEventLayout({ furniture: [item("chair", 60, 45, 10, 10)], canvasWidth: 200, canvasHeight: 200, blockedRegions: eventProtectedAccessRegions(floor) });
+    expect(warnings).toEqual(expect.arrayContaining([expect.objectContaining({ code: "building-overlap", severity: "critical", itemIds: ["chair"], message: expect.stringContaining("Student Hall") })]));
+    expect(eventProtectedAccessRegions({ ...floor, id: "hall-ground" })).toEqual([]);
+  });
+
+  it("uses the rotated building footprint without blocking empty corners", () => {
+    const floor = { id: "campus", doors: [], furniture: [], rooms: [{ id: "hall", name: "Rotated Hall", type: "building", x: 40, y: 40, w: 80, h: 20, rotation: 45, floorId: "campus", buildingId: "campus", color: "orange" }] };
+    const blockedRegions = eventProtectedAccessRegions(floor);
+    const assess = (x: number, y: number) => validateEventLayout({ furniture: [item("chair", x, y, 4, 4)], canvasWidth: 200, canvasHeight: 200, blockedRegions });
+    expect(assess(100, 72).some(warning => warning.code === "building-overlap")).toBe(true);
+    expect(assess(45, 42)).toEqual([]);
+  });
   it("returns no warnings for a clean layout", () => {
     expect(validateEventLayout({ furniture: [item("a", 10, 10), item("b", 60, 10)], canvasWidth: 200, canvasHeight: 120 })).toEqual([]);
   });
@@ -23,10 +37,15 @@ describe("validateEventLayout", () => {
   });
 
   it("flags a narrow aisle without mutating the objects", () => {
-    const furniture = [item("a", 10, 10, 20, 40), item("b", 34, 10, 20, 40)];
+    const furniture = [item("a", 10, 10, 20, 40), item("b", 31, 10, 20, 40)].map(value => ({ ...value, type: "table" }));
     const warnings = validateEventLayout({ furniture, canvasWidth: 100, canvasHeight: 100 });
     expect(warnings.some((warning) => warning.code === "narrow-aisle")).toBe(true);
     expect(furniture[0].x).toBe(10);
+  });
+
+  it("allows normal close seating while retaining actual chair overlap warnings", () => {
+    expect(validateEventLayout({ furniture: [item("a", 10, 10), item("b", 34, 10)], canvasWidth: 100, canvasHeight: 100 })).toEqual([]);
+    expect(validateEventLayout({ furniture: [item("a", 10, 10), item("b", 29, 10)], canvasWidth: 100, canvasHeight: 100 })).toEqual(expect.arrayContaining([expect.objectContaining({ code: "overlap" })]));
   });
 
   it("uses rotated footprints for boundary and overlap checks", () => {

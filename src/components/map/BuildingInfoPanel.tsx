@@ -93,23 +93,15 @@ export function BuildingInfoPanel({
         />
       </div>
 
-        {/* QR code */}
-        <div className="pt-1">
-          <button
-            onClick={onToggleQR}
-            className="flex items-center gap-2 text-[10px] font-extrabold text-muted-foreground uppercase tracking-widest hover:text-primary active:scale-[0.98] transition-all w-full"
-          >
-            <QrCode className="h-3.5 w-3.5" /> QR Code
-            <ChevronRight className={cn("h-3.5 w-3.5 ml-auto transition-transform duration-200", showQR && "rotate-90")} />
-          </button>
-          {showQR && (
-            <div className="mt-3 flex flex-col items-center gap-2 p-4 rounded-xl bg-muted border border-border animate-scale-in">
-              <div className="text-foreground">
-                <LocationQR buildingId={selected.id} buildingName={selected.name} campusId={campusId} />
-              </div>
-            </div>
-          )}
-        </div>
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-4 scrollbar-show-on-hover">
+        <BuildingDetailsSections
+          building={selected}
+          facilities={facilities}
+          accessibility={accessibility}
+          floorCount={floorPlanCount}
+          showQR={showQR}
+          qrContent={<LocationQR campusId={campusId} buildingId={selected.id} buildingName={selected.name} />}
+        />
       </div>
     </motion.aside>
   );

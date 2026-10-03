@@ -19,6 +19,7 @@ export function EventLocationPicker({
   onChange,
   disabled = false,
 }: EventLocationPickerProps) {
+  const [search, setSearch] = React.useState("");
   const [buildingId, setBuildingId] = React.useState(buildings[0]?.buildingId ?? "");
   const selectedBuilding = buildings.find((building) => building.buildingId === buildingId);
   const [floorNumber, setFloorNumber] = React.useState<number | null>(selectedBuilding?.floors[0]?.number ?? null);
@@ -145,7 +146,16 @@ export function EventLocationPicker({
         </span>
       </label>
 
-      <div className="rounded-xl border border-border p-3 space-y-3">
+      <div className="space-y-3">
+        <label className="block text-xs font-bold">Search buildings<input aria-label="Search buildings" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Find a building…" className="mt-2 h-10 w-full rounded-xl border border-border bg-input-background px-3 text-sm" /></label>
+        {buildings.filter((building) => building.buildingName.toLowerCase().includes(search.toLowerCase())).map((building) => <fieldset key={building.buildingId} aria-label={`Available floors in ${building.buildingName}`} className="rounded-xl border border-border p-3"><legend className="px-1 text-sm font-bold">{building.buildingName}</legend><div className="grid gap-2 sm:grid-cols-2">{building.floors.map((floor) => {
+          const ref: EventLocationRef = { type: "building", buildingId: building.buildingId, floorId: floorLookupId(building.buildingId, floor.number), label: `${building.buildingName} — ${floor.label}` };
+          const checked = locations.some((location) => eventLocationKey(location) === eventLocationKey(ref));
+          return <label key={floor.number} className={cn("flex min-h-11 cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm", checked ? "border-primary bg-primary/5" : "border-border hover:bg-muted")}><input type="checkbox" aria-label={ref.label} checked={checked} disabled={disabled} onChange={() => checked ? removeLocation(ref) : onChange([...locations, ref])} className="accent-primary" />{floor.label}</label>;
+        })}</div></fieldset>)}
+        {buildings.length > 0 && !buildings.some((building) => building.buildingName.toLowerCase().includes(search.toLowerCase())) && <p className="text-xs text-muted-foreground">No matching buildings.</p>}
+      </div>
+      <details className="rounded-xl border border-border p-3 space-y-3"><summary className="cursor-pointer text-xs font-semibold text-muted-foreground">Choose one floor using dropdowns</summary>
         <div className="flex items-center gap-2 text-sm font-bold text-foreground">
           <Building2 className="h-4 w-4 text-primary" />
           Add a building floor
@@ -212,7 +222,7 @@ export function EventLocationPicker({
             )}
           </>
         )}
-      </div>
+      </details>
 
       <div className="space-y-2">
         <div className="flex items-center justify-between">

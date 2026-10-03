@@ -1,4 +1,5 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { useSyncExternalStore } from "react";
 import { createMemoryRouter, RouterProvider } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { StudentEventEditPage } from "../StudentEventEditPage";
@@ -37,6 +38,7 @@ const fixture = vi.hoisted(() => ({
 }));
 
 const publishedCampusState = vi.hoisted(() => ({
+  listeners: new Set<() => void>(),
   activeCampus: null as { id: string } | null,
   campuses: [] as Array<{ id: string }>,
   loading: false,
@@ -54,7 +56,13 @@ const authState = vi.hoisted(() => ({
 }));
 
 vi.mock("../../hooks/useStudentAuth", () => ({ useStudentAuth: () => authState }));
-vi.mock("../../hooks/usePublishedCampus", () => ({ usePublishedCampus: () => publishedCampusState }));
+vi.mock("../../hooks/usePublishedCampus", () => ({ usePublishedCampus: () => {
+  useSyncExternalStore((listener) => {
+    publishedCampusState.listeners.add(listener);
+    return () => publishedCampusState.listeners.delete(listener);
+  }, () => publishedCampusState.loading);
+  return publishedCampusState;
+} }));
 vi.mock("../../hooks/useToast", () => ({ useToast: () => fixture.toast }));
 vi.mock("../../services/eventOverlayService", () => ({ eventOverlayService: fixture.service }));
 vi.mock("../../lib/eventLocationData", async (importOriginal) => {
@@ -132,7 +140,7 @@ function renderPage() {
     { path: "/student/events/:id/edit", element: <StudentEventEditPage /> },
     { path: "/student/events", element: <div>My Events landing</div> },
   ], { initialEntries: ["/student/events/event-1/edit"] });
-  return render(<RouterProvider router={router} />);
+  return { ...render(<RouterProvider router={router} />), router };
 }
 
 function startPendingChairMove() {
@@ -159,6 +167,48 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 
 describe("StudentEventEditPage pending interaction boundaries", () => {
+  it("confirms Back even with a saved draft and lets the user keep editing", async () => {
+    renderPage();
+    await screen.findByTestId("event-furniture-a-chair");
+    fireEvent.click(screen.getByRole("button", { name: "Back to My Events" }));
+    const dialog = await screen.findByRole("dialog", { name: "Leave event editor?" });
+    expect(within(dialog).getByText(/Your draft is saved/)).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Continue Editing" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Leave event editor?" })).not.toBeInTheDocument());
+    expect(screen.queryByText("My Events landing")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Back to My Events" }));
+    fireEvent.click(within(await screen.findByRole("dialog", { name: "Leave event editor?" })).getByRole("button", { name: "Back to My Events" }));
+    expect(await screen.findByText("My Events landing")).toBeInTheDocument();
+    expect(fixture.service.updateEventOverlayLayout).not.toHaveBeenCalled();
+  });
+  it("preserves edits made while a manual save is in flight", async () => {
+    let resolveSave!: () => void;
+    fixture.service.updateEventOverlayLayout.mockImplementationOnce(() => new Promise<void>((resolve) => { resolveSave = resolve; }));
+    renderPage();
+    await screen.findByTestId("event-furniture-a-chair");
+    startPendingChairMove();
+    fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
+    await waitFor(() => expect(fixture.service.updateEventOverlayLayout).toHaveBeenCalledOnce());
+    const savedX = fixture.service.updateEventOverlayLayout.mock.calls[0][1][0].eventFurniture[0].x;
+    fireEvent.keyDown(window, { key: "ArrowRight" });
+    const editedLeft = screen.getByTestId("event-furniture-a-chair").style.left;
+    expect(Number.parseFloat(editedLeft)).toBeGreaterThan(savedX);
+    await act(async () => resolveSave());
+    expect(screen.getByTestId("event-furniture-a-chair").style.left).toBe(editedLeft);
+    expect(screen.getByText(/Unsaved changes/)).toBeInTheDocument();
+  });
+  it("keeps the event canvas mounted during a background campus refresh", async () => {
+    renderPage();
+    const item = await screen.findByTestId("event-furniture-a-chair");
+    act(() => {
+      publishedCampusState.loading = true;
+      publishedCampusState.listeners.forEach((listener) => listener());
+    });
+    expect(screen.queryByText("Loading event map...")).not.toBeInTheDocument();
+    expect(screen.getByTestId("event-furniture-a-chair")).toBeInTheDocument();
+    expect(screen.getByTestId("event-furniture-a-chair")).toBe(item);
+    publishedCampusState.loading = false;
+  });
   it("resolves a stored event against its own published campus instead of the hook default", async () => {
     const campusA = { id: "campus-a" };
     const campusB = { id: "campus-b" };
@@ -268,7 +318,7 @@ describe("StudentEventEditPage pending interaction boundaries", () => {
     fireEvent.click(screen.getByRole("button", { name: "Continue Editing" }));
     expect(screen.queryByText("My Events landing")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Back to My Events" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Don't Save" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Leave without saving" }));
     expect(await screen.findByText("My Events landing")).toBeInTheDocument();
     expect(fixture.service.updateEventOverlayLayout).not.toHaveBeenCalled();
     expect(readEventLayoutDraft("event-1", overlay.locations![0].locationRef)).toBeNull();
@@ -290,7 +340,7 @@ describe("StudentEventEditPage pending interaction boundaries", () => {
     startPendingChairMove();
     fireEvent.click(screen.getByRole("button", { name: "Back to My Events" }));
     const dialog = await screen.findByRole("dialog", { name: "Unsaved Changes" });
-    fireEvent.click(within(dialog).getByRole("button", { name: "Save Draft" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save draft & leave" }));
     await waitFor(() => expect(within(dialog).getByText(/save failed/i)).toBeInTheDocument());
     expect(screen.queryByText("My Events landing")).not.toBeInTheDocument();
   });
@@ -301,7 +351,7 @@ describe("StudentEventEditPage pending interaction boundaries", () => {
     startPendingChairMove();
     fireEvent.click(screen.getByRole("button", { name: "Back to My Events" }));
     const dialog = await screen.findByRole("dialog", { name: "Unsaved Changes" });
-    fireEvent.click(within(dialog).getByRole("button", { name: "Save Draft" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save draft & leave" }));
     await waitFor(() => expect(fixture.service.updateEventOverlayLayout).toHaveBeenCalledTimes(1));
     expect(await screen.findByText("My Events landing")).toBeInTheDocument();
   });

@@ -11,6 +11,13 @@ const warning: LayoutWarning = {
 };
 
 describe("EventLayoutIssues", () => {
+  it("does not present optional spacing hints as layout issues", () => {
+    render(<EventLayoutIssues warnings={[{ ...warning, code: "narrow-aisle", severity: "info" }]} onFocusItems={vi.fn()} />);
+    expect(screen.queryByText(/1 layout issue/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Review before submitting")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /open layout checks/i }));
+    expect(screen.getByText("Optional spacing tips")).toBeInTheDocument();
+  });
   it("keeps a fixed-height summary row and focuses every referenced item", () => {
     const onFocusItems = vi.fn();
     render(<EventLayoutIssues warnings={[warning]} onFocusItems={onFocusItems} />);

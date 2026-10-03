@@ -33,6 +33,29 @@ export type LayoutAction =
   | "distribute-horizontal"
   | "distribute-vertical";
 
+const DISTRIBUTION_GAP = 16;
+
+function rotatedLayoutExtent(item: LayoutItem) {
+  const radians = (item.rotation ?? 0) * Math.PI / 180;
+  return {
+    width: Math.abs(Math.cos(radians)) * item.width + Math.abs(Math.sin(radians)) * item.height,
+    height: Math.abs(Math.sin(radians)) * item.width + Math.abs(Math.cos(radians)) * item.height,
+  };
+}
+
+function rotatedLayoutBounds(item: LayoutItem) {
+  const extent = rotatedLayoutExtent(item);
+  const centerX = item.x + item.width / 2;
+  const centerY = item.y + item.height / 2;
+  return {
+    left: centerX - extent.width / 2,
+    right: centerX + extent.width / 2,
+    top: centerY - extent.height / 2,
+    bottom: centerY + extent.height / 2,
+    ...extent,
+  };
+}
+
 export function snapValue(value: number, grid: number): number {
   return grid > 0 ? Math.round(value / grid) * grid : value;
 }
@@ -286,6 +309,7 @@ export function applyLayoutAction<T extends LayoutItem>(
   items: readonly T[],
   ids: readonly string[],
   action: LayoutAction,
+  bounds?: { width: number; height: number },
 ): T[] {
   const selected = new Set(ids);
   const targets = items.filter((item) => selected.has(item.id));
@@ -293,45 +317,108 @@ export function applyLayoutAction<T extends LayoutItem>(
 
   const selectedIds = new Set(targets.map((item) => item.id));
   const next = items.map((item) => ({ ...item }));
-  const minX = Math.min(...targets.map((item) => item.x));
-  const minY = Math.min(...targets.map((item) => item.y));
-  const maxRight = Math.max(...targets.map((item) => item.x + item.width));
-  const maxBottom = Math.max(...targets.map((item) => item.y + item.height));
-  const centerX = (minX + maxRight) / 2;
-  const centerY = (minY + maxBottom) / 2;
+  const visualBounds = targets.map((item) => ({ item, bounds: rotatedLayoutBounds(item) }));
 
   const update = (id: string, changes: Partial<LayoutItem>) => {
     const index = next.findIndex((item) => item.id === id);
     if (index >= 0) next[index] = { ...next[index], ...changes };
   };
 
-  if (action === "align-left") targets.forEach((item) => update(item.id, { x: minX }));
-  if (action === "align-center") targets.forEach((item) => update(item.id, { x: centerX - item.width / 2 }));
-  if (action === "align-top") targets.forEach((item) => update(item.id, { y: minY }));
-  if (action === "align-middle") targets.forEach((item) => update(item.id, { y: centerY - item.height / 2 }));
+  if (action === "align-left") {
+    const largestExtent = Math.max(...visualBounds.map(({ bounds }) => bounds.width));
+    const requestedLeft = Math.min(...visualBounds.map(({ bounds }) => bounds.left));
+    const left = bounds
+      ? Math.max(0, Math.min(requestedLeft, bounds.width - largestExtent))
+      : requestedLeft;
+    visualBounds.forEach(({ item, bounds: itemBounds }) => update(item.id, {
+      x: item.x + left - itemBounds.left,
+    }));
+  }
+  if (action === "align-center") {
+    const largestExtent = Math.max(...visualBounds.map(({ bounds }) => bounds.width));
+    const minLeft = Math.min(...visualBounds.map(({ bounds }) => bounds.left));
+    const maxRight = Math.max(...visualBounds.map(({ bounds }) => bounds.right));
+    const requestedCenter = (minLeft + maxRight) / 2;
+    const centerX = bounds
+      ? largestExtent > bounds.width
+        ? bounds.width / 2
+        : Math.max(largestExtent / 2, Math.min(requestedCenter, bounds.width - largestExtent / 2))
+      : requestedCenter;
+    targets.forEach((item) => update(item.id, { x: centerX - item.width / 2 }));
+  }
+  if (action === "align-top") {
+    const largestExtent = Math.max(...visualBounds.map(({ bounds }) => bounds.height));
+    const requestedTop = Math.min(...visualBounds.map(({ bounds }) => bounds.top));
+    const top = bounds
+      ? Math.max(0, Math.min(requestedTop, bounds.height - largestExtent))
+      : requestedTop;
+    visualBounds.forEach(({ item, bounds: itemBounds }) => update(item.id, {
+      y: item.y + top - itemBounds.top,
+    }));
+  }
+  if (action === "align-middle") {
+    const largestExtent = Math.max(...visualBounds.map(({ bounds }) => bounds.height));
+    const minTop = Math.min(...visualBounds.map(({ bounds }) => bounds.top));
+    const maxBottom = Math.max(...visualBounds.map(({ bounds }) => bounds.bottom));
+    const requestedCenter = (minTop + maxBottom) / 2;
+    const centerY = bounds
+      ? largestExtent > bounds.height
+        ? bounds.height / 2
+        : Math.max(largestExtent / 2, Math.min(requestedCenter, bounds.height - largestExtent / 2))
+      : requestedCenter;
+    targets.forEach((item) => update(item.id, { y: centerY - item.height / 2 }));
+  }
 
-  if (action === "distribute-horizontal" && targets.length > 2) {
-    const ordered = [...targets].sort((a, b) => a.x - b.x || a.id.localeCompare(b.id));
-    const span = (ordered.at(-1)!.x + ordered.at(-1)!.width) - ordered[0].x;
-    const totalWidth = ordered.reduce((sum, item) => sum + item.width, 0);
-    const gap = (span - totalWidth) / (ordered.length - 1);
-    let cursor = ordered[0].x;
-    ordered.forEach((item) => {
-      update(item.id, { x: cursor });
-      cursor += item.width + gap;
+  const distribute = (axis: "x" | "y") => {
+    const horizontal = axis === "x";
+    const measured = targets.map((item) => {
+      const extent = rotatedLayoutExtent(item);
+      const centerX = item.x + item.width / 2;
+      const centerY = item.y + item.height / 2;
+      const size = horizontal ? extent.width : extent.height;
+      const crossSize = horizontal ? extent.height : extent.width;
+      const center = horizontal ? centerX : centerY;
+      return { item, size, crossSize, start: center - size / 2, end: center + size / 2, center };
+    }).sort((a, b) => a.start - b.start || (a.item.id < b.item.id ? -1 : a.item.id > b.item.id ? 1 : 0));
+
+    const currentStart = Math.min(...measured.map((entry) => entry.start));
+    const currentEnd = Math.max(...measured.map((entry) => entry.end));
+    const totalSize = measured.reduce((sum, entry) => sum + entry.size, 0);
+    const axisLimit = bounds ? (horizontal ? bounds.width : bounds.height) : undefined;
+    if (axisLimit !== undefined && totalSize > axisLimit) return;
+
+    // Grow tightly selected items to a clear, even row/column instead of
+    // calculating a negative gap that makes assets overlap.
+    const desiredSpan = Math.max(currentEnd - currentStart, totalSize + DISTRIBUTION_GAP * (measured.length - 1));
+    const span = axisLimit === undefined ? desiredSpan : Math.min(desiredSpan, axisLimit);
+    const gap = Math.max(0, (span - totalSize) / (measured.length - 1));
+    const currentCenter = (currentStart + currentEnd) / 2;
+    const requestedStart = currentCenter - span / 2;
+    const start = axisLimit === undefined
+      ? requestedStart
+      : Math.max(0, Math.min(requestedStart, axisLimit - span));
+
+    const crossLimit = bounds ? (horizontal ? bounds.height : bounds.width) : undefined;
+    const crossStart = Math.min(...measured.map((entry) => entry.center - entry.crossSize / 2));
+    const crossEnd = Math.max(...measured.map((entry) => entry.center + entry.crossSize / 2));
+    const largestCrossHalf = Math.max(...measured.map((entry) => entry.crossSize / 2));
+    const crossCenter = crossLimit === undefined
+      ? (crossStart + crossEnd) / 2
+      : crossLimit < largestCrossHalf * 2
+        ? crossLimit / 2
+        : Math.max(largestCrossHalf, Math.min((crossStart + crossEnd) / 2, crossLimit - largestCrossHalf));
+
+    let cursor = start;
+    measured.forEach(({ item, size }) => {
+      const itemCenterX = horizontal ? cursor + size / 2 : crossCenter;
+      const itemCenterY = horizontal ? crossCenter : cursor + size / 2;
+      update(item.id, { x: itemCenterX - item.width / 2, y: itemCenterY - item.height / 2 });
+      cursor += size + gap;
     });
-  }
-  if (action === "distribute-vertical" && targets.length > 2) {
-    const ordered = [...targets].sort((a, b) => a.y - b.y || a.id.localeCompare(b.id));
-    const span = (ordered.at(-1)!.y + ordered.at(-1)!.height) - ordered[0].y;
-    const totalHeight = ordered.reduce((sum, item) => sum + item.height, 0);
-    const gap = (span - totalHeight) / (ordered.length - 1);
-    let cursor = ordered[0].y;
-    ordered.forEach((item) => {
-      update(item.id, { y: cursor });
-      cursor += item.height + gap;
-    });
-  }
+  };
+
+  if (action === "distribute-horizontal") distribute("x");
+  if (action === "distribute-vertical") distribute("y");
 
   // Keep this explicit so adding future actions cannot accidentally mutate an
   // item outside the requested selection.

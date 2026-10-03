@@ -34,7 +34,7 @@ import { campusGroundAppearance } from "../lib/campusCanvas";
 import { routeEndpointFromSearchResult } from "../lib/routeEndpoints";
 import { outdoorWalkingDistance, walkingAnimationDuration } from "../lib/walkingAnimation";
 import { planStudentEmergencyRoute } from "../lib/studentEmergencyNavigation";
-import { doorEntranceLinkStatus } from "../lib/entranceTransitions";
+import { doorEntranceLinkStatus, entryFloorForBuilding } from "../lib/entranceTransitions";
 import { entranceWorldPosition, normalizeEntranceDirection } from "../lib/buildingEntrances";
 import { mapBackAction, publishMapSurface, type MapSurface } from "../lib/mapSurface";
 import { getStudentInitialFloorZoom } from "../lib/studentFloorCamera";
@@ -46,7 +46,6 @@ import {
   StudentMapControls,
 } from "../components/map";
 import { studentAccountService } from "../services/studentAccountService";
-import { eventOverlayService } from "../services/eventOverlayService";
 import { DEFAULT_PUBLIC_PLATFORM_SETTINGS, settingsService, type PublicPlatformSettings } from "../services/settingsService";
 import { usageAnalyticsService } from "../services/usageAnalyticsService";
 import type {
@@ -56,6 +55,12 @@ import type {
 } from "../components/map-builder/types";
 import { ReadonlyOutdoorCampusScene } from "../components/map-builder/ReadonlyOutdoorVisuals";
 import { ReadonlyFloorPlanScene, readonlyFloorPlanViewport } from "../components/map-builder/ReadonlyFloorPlanVisuals";
+import { EventPreviewLayer } from "../components/map/EventPreviewLayer";
+import { EventMapPanel } from "../components/map/EventMapPanel";
+import { EventVenueLayer } from "../components/map/EventVenueLayer";
+import { useEventMapPreviews } from "../hooks/useEventMapPreviews";
+import { resolveEventLocation, selectedEventLocation, toEventOverlayPreview } from "../lib/eventMapView";
+import type { EventMapFilter } from "../types/eventPreview";
 import { ComingSoonCampusScreen } from "../components/map/ComingSoonCampusScreen";
 
 type CampusLocationQrResolution =
@@ -1019,13 +1024,22 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
     [activeFloorPlan, activeFloorExteriorStairs],
   );
 
-  // ── Event Overlays (approved events for current floor) ───────────────
-  // The demo floor plans are keyed by building id + floor number, so the
-  // canonical floor id used by event overlays is `${buildingId}-f${number}`
-  // (this must match the locationRef.floorId saved by the event editor).
-  const [activeOverlays, setActiveOverlays] = useState<CampusEventOverlay[]>([]);
-  const [activeCampusOverlays, setActiveCampusOverlays] = useState<CampusEventOverlay[]>([]);
+  // ── Student event map preview ─────────────────────────────────────────
+  const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
+  const [selectedLocationId, setSelectedLocationId] = useState<string | null>(null);
+  const [eventFilter, setEventFilter] = useState<EventMapFilter>("all");
+  const [showEventMaps, setShowEventMaps] = useState(false);
   const [eventOverlaysEnabled, setEventOverlaysEnabled] = useState(false);
+  const eventMapTriggerRef = useRef<HTMLButtonElement>(null);
+  const eventMapWasOpenRef = useRef(false);
+
+  useEffect(() => {
+    if (showEventMaps) eventMapWasOpenRef.current = true;
+    else if (eventMapWasOpenRef.current) {
+      eventMapWasOpenRef.current = false;
+      eventMapTriggerRef.current?.focus();
+    }
+  }, [showEventMaps]);
 
   const floorLookupId =
     isFloorMode && floorView && currentFloor
@@ -1037,31 +1051,53 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
     setEventOverlaysEnabled(platformSettings.showApprovedEventOverlays);
   }, [platformSettingsReady, platformSettings.showApprovedEventOverlays]);
 
-  useEffect(() => {
-    if (!eventOverlaysEnabled) {
-      setActiveCampusOverlays([]);
-      return;
-    }
-    eventOverlayService
-      .getApprovedOverlaysForCampus()
-      .then(setActiveCampusOverlays)
-      .catch(() => setActiveCampusOverlays([]));
-  }, [eventOverlaysEnabled]);
+  const eventFeed = useEventMapPreviews({
+    campusId: activeCampus?.id,
+    enabled: eventOverlaysEnabled,
+    open: showEventMaps,
+    identityKey: studentAuth.profile?.id ?? "guest",
+  });
+  const selectedEventLocationData = selectedEventLocation(eventFeed.events, selectedEventId, selectedLocationId);
+  const selectedEventOverlay = selectedEventLocationData
+    ? toEventOverlayPreview(selectedEventLocationData.event, selectedEventLocationData.location)
+    : null;
 
   useEffect(() => {
-    if (!eventOverlaysEnabled) {
-      setActiveOverlays([]);
+    if (selectedEventId && !eventFeed.events.some((event) => event.id === selectedEventId)) {
+      setSelectedEventId(null);
+      setSelectedLocationId(null);
+    } else if (selectedEventId && selectedLocationId && !selectedEventLocation(eventFeed.events, selectedEventId, selectedLocationId)) {
+      setSelectedEventId(null);
+      setSelectedLocationId(null);
+    }
+  }, [eventFeed.events, selectedEventId, selectedLocationId]);
+
+  const selectEventLocation = useCallback((eventId: string, locationId: string) => {
+    setSelectedEventId(eventId);
+    setSelectedLocationId(locationId);
+  }, []);
+
+  const viewEventLocation = useCallback((eventId: string, locationId: string) => {
+    if (!activeCampus) return;
+    const event = eventFeed.events.find((item) => item.id === eventId);
+    const location = event?.locations.find((item) => item.id === locationId);
+    if (!event || !location) return;
+    const resolved = resolveEventLocation(activeCampus, location.locationRef);
+    if (!resolved) return;
+    setSelectedEventId(eventId);
+    setSelectedLocationId(locationId);
+    if (resolved.kind === "campus") {
+      setFloorView(null);
       return;
     }
-    if (!floorLookupId) {
-      setActiveOverlays([]);
-      return;
-    }
-    eventOverlayService
-      .getApprovedOverlaysForFloor(floorLookupId)
-      .then(setActiveOverlays)
-      .catch(() => setActiveOverlays([]));
-  }, [floorLookupId, eventOverlaysEnabled]);
+    const building = MOCK_BUILDINGS.find((item) => item.id === resolved.buildingId);
+    if (building) setFloorView({ building, floor: resolved.floorNumber });
+  }, [activeCampus, eventFeed.events, MOCK_BUILDINGS]);
+
+  const selectedLocationIsVisible = Boolean(selectedEventLocationData && (
+    (!isFloorMode && selectedEventLocationData.location.locationRef.type === "campus") ||
+    (isFloorMode && selectedEventLocationData.location.locationRef.floorId === floorLookupId)
+  ));
 
   // SVG center shifts with mode (floor plan uses authored canvas, campus uses campus canvas)
   const outdoorCanvasW = activeCampus?.canvasW || SVG_W;
@@ -3346,6 +3382,7 @@ const buildingFill = (id: string) =>
                   onRoomHoverEnd={() => setHoveredRoom(null)}
                   onDoorClick={() => closeFloorPlan()}
                 />
+                {showEventMaps && isFloorMode && selectedLocationIsVisible && selectedEventOverlay && <EventPreviewLayer events={[selectedEventOverlay]} onSelect={() => {}} />}
                 {/* Indoor navigation path (entrance → active room) */}
                 {indoorRoute && indoorRoute.waypoints.length >= 2 && (() => {
                   return (
@@ -3407,70 +3444,6 @@ const buildingFill = (id: string) =>
               ))}
             </>}
 
-            {/* ── Event Overlay (approved events for campus grounds) ── */}
-            {activeCampusOverlays.map((overlay) => (
-              <g
-                key={overlay.id}
-                className="cursor-pointer transition-opacity hover:opacity-80"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (!dragRef.current?.moved) setSelectedEvent(overlay);
-                }}
-              >
-                {/* Event furniture */}
-                {(overlay.eventFurniture ?? []).map((f) => (
-                  <g key={f.id} transform={`translate(${f.x},${f.y}) rotate(${f.rotation || 0},${f.width / 2},${f.height / 2})`}>
-                    <rect
-                      width={f.width}
-                      height={f.height}
-                      fill={f.color}
-                      fillOpacity={0.75}
-                      stroke="black"
-                      strokeWidth={1}
-                      rx={3}
-                    />
-                    <text
-                      x={f.width / 2}
-                      y={f.height / 2}
-                      textAnchor="middle"
-                      dominantBaseline="middle"
-                      fontSize={Math.min(f.width, f.height) * 0.3}
-                      fill="black"
-                      fontWeight="bold"
-                      className="pointer-events-none"
-                    >
-                      {f.name}
-                    </text>
-                  </g>
-                ))}
-
-                {/* Event labels */}
-                {(overlay.eventLabels ?? []).map((l) => (
-                  <text
-                    key={l.id}
-                    x={l.x}
-                    y={l.y}
-                    fontSize={l.size || 14}
-                    fill={l.color || "#000000"}
-                    fontWeight="bold"
-                    textAnchor="middle"
-                    className="pointer-events-none"
-                  >
-                    {l.text}
-                  </text>
-                ))}
-
-                {/* Event overlay indicator */}
-                {overlay.eventFurniture && overlay.eventFurniture.length > 0 && (
-                  <g transform={`translate(${overlay.eventFurniture[0].x}, ${overlay.eventFurniture[0].y - 20})`}>
-                    <rect x="-40" y="-12" width="80" height="18" fill="white" rx="9" opacity="0.9" filter="url(#drop-shadow)" />
-                    <text textAnchor="middle" fontSize="9" fontWeight="bold" fill="var(--primary)" y="0" className="pointer-events-none">
-                      🎪 {overlay.title}
-                    </text>
-                  </g>
-                )}
-              </g>
-            ))}
             {readonlyOutdoorCampus && (
               <ReadonlyOutdoorCampusScene
                 campus={readonlyOutdoorCampus}
@@ -3492,6 +3465,8 @@ const buildingFill = (id: string) =>
                 }}
               />
             )}
+            {showEventMaps && !isFloorMode && activeCampus && <EventVenueLayer campus={activeCampus} events={eventFeed.events} zoom={displayZoom} onSelect={selectEventLocation} />}
+            {showEventMaps && !isFloorMode && selectedLocationIsVisible && selectedEventOverlay && <EventPreviewLayer events={[selectedEventOverlay]} onSelect={() => {}} />}
             {/* Route */}
             {route && (
               <RouteMapOverlay points={route.points} mode={mapMode} fading={routeFading} walkProgress={walkProgress} animated={platformSettings.animatedRouteArrows} />
@@ -4466,6 +4441,29 @@ const buildingFill = (id: string) =>
           </div>
         </div>
       )}
+      {eventOverlaysEnabled && <button ref={eventMapTriggerRef} type="button" aria-expanded={showEventMaps} onClick={() => {
+        const nextOpen = !showEventMaps;
+        setShowEventMaps(nextOpen);
+        if (!nextOpen) { setSelectedEventId(null); setSelectedLocationId(null); }
+      }} className="absolute left-3 bottom-24 z-20 inline-flex min-h-11 items-center rounded-xl border border-border bg-card px-3 text-sm font-bold shadow-md md:bottom-5" data-no-drag>
+        <CalendarDays className="mr-2 h-4 w-4" />Event map
+      </button>}
+      {eventOverlaysEnabled && <EventMapPanel
+        open={showEventMaps}
+        loading={eventFeed.loading}
+        error={eventFeed.error}
+        events={eventFeed.events}
+        nowMs={eventFeed.nowMs}
+        filter={eventFilter}
+        selectedEventId={selectedEventId}
+        selectedLocationId={selectedLocationId}
+        onClose={() => { setShowEventMaps(false); setSelectedEventId(null); setSelectedLocationId(null); }}
+        onRetry={eventFeed.refresh}
+        onFilterChange={setEventFilter}
+        onSelectEvent={(eventId) => { setSelectedEventId(eventId); setSelectedLocationId(null); }}
+        onViewLocation={viewEventLocation}
+        onBackToEvents={() => { setSelectedEventId(null); setSelectedLocationId(null); }}
+      />}
     </div>
   );
 }

@@ -10,6 +10,7 @@ import {
 import { cn } from "../lib/utils";
 import { SearchBar } from "../components/ui/SearchBar";
 import { EmptyState } from "../components/ui/EmptyState";
+import { isValidThemedTime, manilaDateTimeParts, manilaDateTimeToIso, ThemedDateTimeField } from "../components/ui/ThemedDateTimeField";
 import {
   eventService,
   type ManagedEvent,
@@ -26,13 +27,17 @@ const STATUS_CONFIG: Record<ManagedEventStatus, { label: string; color: string; 
 };
 
 function toLocalInput(iso: string): string {
-  try {
-    const d = new Date(iso);
-    const pad = (n: number) => String(n).padStart(2, "0");
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-  } catch {
-    return "";
-  }
+  const { date, time } = manilaDateTimeParts(iso);
+  return date && time ? `${date}T${time}` : "";
+}
+
+function splitDateTime(value: string): { date: string; time: string } {
+  const [date = "", time = ""] = value.split("T");
+  return { date, time };
+}
+
+function combineDateTime(date: string, time: string): string {
+  return date || time ? `${date}T${time}` : "";
 }
 
 function formatDate(iso: string): string {
@@ -64,6 +69,8 @@ function EventModal({ event, onClose, onSave }: {
     status: event?.status ?? ("draft" as ManagedEventStatus),
   });
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+  const startParts = splitDateTime(form.startsAt);
+  const endParts = splitDateTime(form.endsAt);
 
   const update = (k: keyof typeof form, v: string) => {
     setForm(p => ({ ...p, [k]: v }));
@@ -74,9 +81,18 @@ function EventModal({ event, onClose, onSave }: {
     const errors: Record<string, string> = {};
     if (!form.title.trim()) errors.title = "Event title is required";
     if (!form.venue.trim()) errors.venue = "Venue is required";
-    if (!form.startsAt) errors.startsAt = "Start date is required";
-    if (form.startsAt && form.endsAt && form.endsAt < form.startsAt) errors.endsAt = "End must be after start";
+    const startIso = manilaDateTimeToIso(startParts.date, startParts.time);
+    const startInstant = startIso ? Date.parse(startIso) : Number.NaN;
+    if (!startParts.date || !isValidThemedTime(startParts.time) || !Number.isFinite(startInstant)) errors.startsAt = "Choose a start date and enter a valid 24-hour time";
+    const endEntered = Boolean(endParts.date || endParts.time);
+    const endIso = manilaDateTimeToIso(endParts.date, endParts.time);
+    const endInstant = endIso ? Date.parse(endIso) : Number.NaN;
+    if (endEntered && (!endParts.date || !isValidThemedTime(endParts.time) || !Number.isFinite(endInstant))) errors.endsAt = "Choose an end date and enter a valid 24-hour time";
+    else if (endEntered && Number.isFinite(startInstant) && endInstant <= startInstant) errors.endsAt = "End must be after start";
     if (Object.keys(errors).length > 0) { setFormErrors(errors); return; }
+    if (!startIso) { setFormErrors({ startsAt: "Choose a start date and enter a valid 24-hour time" }); return; }
+    const endsAt = endEntered ? endIso : startIso;
+    if (!endsAt) { setFormErrors({ endsAt: "Choose an end date and enter a valid 24-hour time" }); return; }
 
     setSaving(true);
     try {
@@ -86,8 +102,8 @@ function EventModal({ event, onClose, onSave }: {
         category: form.category,
         organizer: form.organizer.trim() || undefined,
         venue: form.venue.trim(),
-        startsAt: new Date(form.startsAt).toISOString(),
-        endsAt: new Date(form.endsAt || form.startsAt).toISOString(),
+        startsAt: startIso,
+        endsAt,
         status: form.status,
       });
       toast.success(isNew ? "Event created" : "Event updated", `"${form.title}" has been ${isNew ? "created" : "updated"}.`);
@@ -159,19 +175,9 @@ function EventModal({ event, onClose, onSave }: {
             {formErrors.venue && <p className="text-[10px] text-destructive mt-1 font-medium">{formErrors.venue}</p>}
           </div>
 
-          <div className="grid sm:grid-cols-2 gap-4">
-            <div>
-              <label htmlFor="event-start" className="block text-xs font-bold text-foreground uppercase tracking-wide mb-1.5">Start Date & Time *</label>
-              <input id="event-start" type="datetime-local" value={form.startsAt} onChange={e => update("startsAt", e.target.value)}
-                className={inputCls + (formErrors.startsAt ? " border-destructive focus:ring-destructive/30" : "")} />
-              {formErrors.startsAt && <p className="text-[10px] text-destructive mt-1 font-medium">{formErrors.startsAt}</p>}
-            </div>
-            <div>
-              <label htmlFor="event-end" className="block text-xs font-bold text-foreground uppercase tracking-wide mb-1.5">End Date & Time</label>
-              <input id="event-end" type="datetime-local" value={form.endsAt} onChange={e => update("endsAt", e.target.value)}
-                className={inputCls + (formErrors.endsAt ? " border-destructive focus:ring-destructive/30" : "")} />
-              {formErrors.endsAt && <p className="text-[10px] text-destructive mt-1 font-medium">{formErrors.endsAt}</p>}
-            </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <ThemedDateTimeField label="Start date and time *" date={startParts.date} time={startParts.time} disabled={saving} error={formErrors.startsAt} onDateChange={date => update("startsAt", combineDateTime(date, startParts.time))} onTimeChange={time => update("startsAt", combineDateTime(startParts.date, time))} />
+            <ThemedDateTimeField label="End date and time (optional)" date={endParts.date} time={endParts.time} disabled={saving} error={formErrors.endsAt} onDateChange={date => update("endsAt", combineDateTime(date, endParts.time))} onTimeChange={time => update("endsAt", combineDateTime(endParts.date, time))} />
           </div>
 
           <div>
@@ -459,7 +465,7 @@ export function AdminEventsPage() {
       </div>
 
       {/* Modal */}
-      {(modal === "new" || (modal && modal !== "new")) && (
+      {modal !== null && (
         <EventModal
           event={modal === "new" ? null : modal}
           onClose={() => setModal(null)}

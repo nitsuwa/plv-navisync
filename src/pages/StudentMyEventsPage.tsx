@@ -25,6 +25,7 @@ export function StudentMyEventsPage() {
   const navigate = useNavigate();
   const { isStudentOrg, profile, loading: authLoading } = useStudentAuth();
   const {
+    campuses,
     activeCampus,
     loading: campusLoading,
     error: campusError,
@@ -38,18 +39,19 @@ export function StudentMyEventsPage() {
   const [editTarget, setEditTarget] = useState<CampusEventOverlay | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<CampusEventOverlay | null>(null);
   const [busy, setBusy] = useState(false);
+  const publishedCampuses = useMemo(() => (campuses ?? []).filter((campus) => campus.lifecycleStatus === "published" || campus.publishStatus === "published"), [campuses]);
   const buildings = useMemo(
     () => activeCampus ? publishedEventBuildingOptions(activeCampus) : [],
     [activeCampus],
   );
   const canCreateProposal = Boolean(
-    activeCampus && !campusLoading && !campusError && !isCached && buildings.length > 0,
+    publishedCampuses.length > 0 && !campusLoading && !campusError && !isCached,
   );
   const overlayRequestSequence = useRef(0);
 
   const loadOverlays = useCallback(async () => {
     const requestSequence = ++overlayRequestSequence.current;
-    if (!profile?.id || !activeCampus?.id) {
+    if (!profile?.id) {
       if (requestSequence === overlayRequestSequence.current) {
         setOverlays([]);
         setLoading(false);
@@ -59,7 +61,7 @@ export function StudentMyEventsPage() {
     setLoading(true);
     try {
       const result = await eventOverlayService.listEventOverlays({
-        campusId: activeCampus.id,
+        allCampuses: true,
         createdByUserId: profile.id,
       });
       if (requestSequence === overlayRequestSequence.current) setOverlays(result);
@@ -75,14 +77,14 @@ export function StudentMyEventsPage() {
     return () => { overlayRequestSequence.current += 1; };
   }, [isStudentOrg, campusLoading, loadOverlays]);
 
-  const handleCreate = async (data: { title: string; description: string; organizer: string; locations: EventLocationRef[]; posterUrl?: string }) => {
+  const handleCreate = async (data: { title: string; description: string; organizer: string; locations: EventLocationRef[]; posterUrl?: string; campusId?: string }) => {
     if (!canCreateProposal || !activeCampus) {
       throw new Error("A fresh published campus map is required before creating an event proposal.");
     }
     const overlay = await eventOverlayService.createEventOverlay(
       data,
       profile?.id || "unknown",
-      activeCampus.id,
+      data.campusId ?? activeCampus.id,
     );
     await loadOverlays();
     navigate(`/student/events/${overlay.id}/edit`);
@@ -111,6 +113,18 @@ export function StudentMyEventsPage() {
     }
   };
 
+  const handleDuplicate = async (source: CampusEventOverlay) => {
+    if (busy || !profile?.id || !source.campusId) return;
+    setBusy(true);
+    try {
+      const copy = await eventOverlayService.createEventOverlay({ title: `${source.title} (copy)`, description: source.description, organizer: source.organizer, posterUrl: source.posterUrl, locations: normalizeEventOverlayLocations(source).map((location) => ({ locationRef: location.locationRef, eventFurniture: location.eventFurniture, eventLabels: location.eventLabels })) }, profile.id, source.campusId);
+      toast.success("Layout copied", "Review the locations before submitting this draft. The administrator will set its schedule.");
+      navigate(`/student/events/${copy.id}/edit`);
+    } catch (err) {
+      toast.error("Copy failed", err instanceof Error ? err.message : "Unable to copy this layout.");
+    } finally { setBusy(false); }
+  };
+
   if (authLoading) return <div className="min-h-[60vh] flex items-center justify-center"><Loader2 className="h-8 w-8 text-primary animate-spin" /></div>;
   if (!isStudentOrg) return <Navigate to="/home" replace />;
 
@@ -137,6 +151,7 @@ export function StudentMyEventsPage() {
               Request one or more campus locations, design each map on top of the published base map, and send the complete proposal for one GSO decision.
             </p>
           </div>
+          {overlays.length > 0 && canCreateProposal && <button type="button" onClick={() => setShowCreate(true)} className="shrink-0 rounded-xl bg-primary px-4 py-3 text-sm font-bold text-primary-foreground">Create event</button>}
         </div>
 
         {campusNotice && (
@@ -197,6 +212,7 @@ export function StudentMyEventsPage() {
                       </span>
                     </div>
                     {overlay.description && <p className="text-xs text-muted-foreground mt-2 line-clamp-2">{overlay.description}</p>}
+                    <p className="mt-2 text-xs font-semibold text-muted-foreground">{campuses?.find((campus) => campus.id === overlay.campusId)?.name ?? "Campus"}{status === "approved" && overlay.dateStart && ` · ${new Date(overlay.dateStart).toLocaleString("en-PH", { timeZone: "Asia/Manila", dateStyle: "medium", timeStyle: "short" })}`}</p>
                     <div className="flex items-start gap-2 mt-3 text-xs text-muted-foreground">
                       <MapPin className="h-3.5 w-3.5 text-primary mt-0.5 shrink-0" />
                       <span><strong className="text-foreground">{locations.length} location{locations.length === 1 ? "" : "s"}</strong> · {locations.map((location) => location.locationRef.label).join(" · ") || "No location set"}</span>
@@ -212,7 +228,9 @@ export function StudentMyEventsPage() {
                       <div><p className="text-[10px] font-bold text-red-600 uppercase">GSO feedback</p><p className="text-xs text-red-700 dark:text-red-300 mt-0.5">{overlay.adminComment}</p></div>
                     </div>
                   )}
+                  {Object.entries(overlay.locationFeedback ?? {}).map(([locationId, feedback]) => <div key={locationId} className="border-t border-border bg-amber-50/50 px-5 py-3 text-xs dark:bg-amber-900/10"><p className="font-bold">GSO feedback · {locations.find((location) => location.id === locationId)?.locationRef.label ?? "Location"}</p><p className="mt-1 text-muted-foreground">{feedback}</p></div>)}
                   <div className="flex flex-wrap items-center gap-2 px-5 py-3 border-t border-border bg-muted/20">
+                    <button type="button" disabled={busy || isCached || Boolean(campusError)} onClick={() => void handleDuplicate(overlay)} className="h-8 rounded-xl border border-border px-3 text-xs font-bold disabled:opacity-40">Duplicate layout</button>
                     <button type="button" onClick={() => setEditTarget(overlay)} className="flex items-center gap-1.5 h-8 px-3 rounded-xl border border-primary/30 text-xs font-bold text-primary hover:bg-primary/10"><Pencil className="h-3.5 w-3.5" /> Edit details</button>
                     <Link to={`/student/events/${overlay.id}/edit`} className="flex items-center gap-1.5 h-8 px-3 rounded-xl border border-border text-xs font-bold text-foreground hover:bg-muted"><Edit2 className="h-3.5 w-3.5" /> {status === "draft" ? "Continue draft" : status === "disapproved" ? "Revise maps" : "Edit maps"}</Link>
                     <button type="button" onClick={() => setDeleteTarget(overlay)} className="flex items-center gap-1.5 h-8 px-3 rounded-xl border border-destructive/30 text-xs font-bold text-destructive hover:bg-destructive/10"><Trash2 className="h-3.5 w-3.5" /> Delete</button>
@@ -224,8 +242,8 @@ export function StudentMyEventsPage() {
         )}
       </div>
 
-      {showCreate && <EventProposalModal buildings={buildings} onClose={() => setShowCreate(false)} onCreate={handleCreate} />}
-      {editTarget && <EventDetailsModal overlay={editTarget} buildings={buildings} onClose={() => setEditTarget(null)} onSave={handleEdit} />}
+      {showCreate && <EventProposalModal buildings={buildings} campuses={publishedCampuses.map((campus) => ({ id: campus.id, name: campus.name, buildings: publishedEventBuildingOptions(campus) }))} initialCampusId={activeCampus?.id} onClose={() => setShowCreate(false)} onCreate={handleCreate} />}
+      {editTarget && <EventDetailsModal overlay={editTarget} buildings={(() => { const campus = campuses?.find((item) => item.id === editTarget.campusId) ?? (activeCampus?.id === editTarget.campusId ? activeCampus : null); return campus ? publishedEventBuildingOptions(campus) : []; })()} onClose={() => setEditTarget(null)} onSave={handleEdit} />}
       {deleteTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/70 backdrop-blur-sm p-4">
           <div role="dialog" aria-modal="true" className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-sm p-6">

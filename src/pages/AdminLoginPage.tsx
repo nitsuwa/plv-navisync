@@ -522,7 +522,11 @@ export function AdminLoginPage() {
   };
 
   return (
-    <div className="relative isolate flex min-h-screen min-h-[100dvh] overflow-x-hidden" style={{ fontFamily: "var(--font-body)" }}>
+    <div
+      data-testid="admin-login-layout"
+      className="relative isolate flex min-h-screen min-h-[100dvh] w-full min-w-0 overflow-x-hidden"
+      style={{ fontFamily: "var(--font-body)" }}
+    >
       <AuthVisualBackdrop />
 
       {/* ══════════ LEFT — full-bleed campus visual (desktop only) ══════════ */}
@@ -569,7 +573,10 @@ export function AdminLoginPage() {
       </div>
 
       {/* ══════════ RIGHT — shared login form for phone, tablet, and desktop ══════════ */}
-      <div className="relative z-10 flex min-h-[100dvh] flex-1 flex-col overflow-y-auto bg-transparent lg:max-w-[460px] lg:bg-background">
+      <div
+        data-testid="admin-login-panel"
+        className="relative z-10 flex min-h-[100dvh] w-full min-w-0 flex-1 flex-col overflow-y-auto bg-transparent lg:max-w-[460px] lg:bg-background"
+      >
         {/* Top bar */}
         <div className="flex items-center justify-between px-5 sm:px-8 pt-5 sm:pt-6 pb-2">
           <Link to="/" className="inline-flex items-center gap-1 text-sm text-white/80 transition-colors hover:text-white lg:text-muted-foreground lg:hover:text-foreground">
@@ -579,8 +586,8 @@ export function AdminLoginPage() {
           <ThemeToggle theme={theme} onToggle={toggleTheme}/>
         </div>
 
-        <div className="flex-1 flex items-center justify-center px-5 sm:px-10 py-8 sm:py-10">
-          <div className="w-full max-w-[340px] rounded-3xl border border-white/70 bg-card/95 p-5 shadow-2xl backdrop-blur-sm sm:p-8 lg:rounded-none lg:border-0 lg:bg-transparent lg:p-0 lg:shadow-none lg:backdrop-blur-none">
+        <div className="flex w-full min-w-0 flex-1 items-center justify-center px-5 py-8 sm:px-10 sm:py-10">
+          <div data-testid="admin-login-content" className="w-full min-w-0 max-w-[340px] rounded-3xl border border-white/70 bg-card/95 p-5 shadow-2xl backdrop-blur-sm sm:p-8 lg:rounded-none lg:border-0 lg:bg-transparent lg:p-0 lg:shadow-none lg:backdrop-blur-none">
 
             {/* PLV Logo — prominently at top */}
             <div className="flex flex-col items-center mb-9">

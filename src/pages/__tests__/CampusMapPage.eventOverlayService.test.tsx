@@ -56,6 +56,7 @@ vi.mock("../../services/eventOverlayService", () => ({
   eventOverlayService: {
     getApprovedOverlaysForCampus: vi.fn().mockResolvedValue([]),
     getApprovedOverlaysForFloor: vi.fn().mockResolvedValue([]),
+    listPublishedEventPreviews: vi.fn().mockResolvedValue({ serverNow: "2026-10-08T02:00:00.000Z", events: [] }),
   },
 }));
 
@@ -94,9 +95,27 @@ describe("CampusMapPage event overlays", () => {
       </MemoryRouter>,
     );
 
-  it("loads approved campus overlays without throwing a missing service reference", async () => {
+  it("toggles event preview without changing the navigation camera", async () => {
     renderCampusMap({ previewCampus });
-    await waitFor(() => expect(eventOverlayService.getApprovedOverlaysForCampus).toHaveBeenCalled());
+    const toggle = await screen.findByRole("button", { name: "Event map" }, { timeout: 5000 });
+    const svg = screen.getByTestId("student-map-surface").querySelector("svg");
+    const camera = svg?.querySelector("g[transform]")?.getAttribute("transform");
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(await screen.findByText(/No published events/i)).toBeInTheDocument();
+    expect(svg?.querySelector("g[transform]")?.getAttribute("transform")).toBe(camera);
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("region", { name: "Campus events" })).not.toBeInTheDocument();
+    fireEvent.click(toggle);
+    fireEvent.click(screen.getByRole("button", { name: "Close campus events" }));
+    expect(toggle).toHaveFocus();
+  });
+
+  it("loads student event previews from the allowlisted feed when the panel opens", async () => {
+    renderCampusMap({ previewCampus });
+    fireEvent.click(await screen.findByRole("button", { name: "Event map" }));
+    await waitFor(() => expect(eventOverlayService.listPublishedEventPreviews).toHaveBeenCalledWith("campus-test"));
   });
 
   it("uses the platform overlay setting in Student Preview", async () => {
@@ -108,6 +127,8 @@ describe("CampusMapPage event overlays", () => {
     renderCampusMap({ previewCampus });
     await waitFor(() => expect(settingsMocks.getPublicPlatformSettings).toHaveBeenCalled());
     expect(eventOverlayService.getApprovedOverlaysForCampus).not.toHaveBeenCalled();
+    expect(eventOverlayService.listPublishedEventPreviews).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Event map" })).not.toBeInTheDocument();
   });
 
   it("uses the platform label setting in Student Preview", async () => {
@@ -250,7 +271,7 @@ describe("CampusMapPage event overlays", () => {
     fireEvent.focus(search);
     fireEvent.change(search, { target: { value: "Science Hall" } });
     fireEvent.click(await screen.findByRole("option", { name: /Science Hall, Building/i }));
-    fireEvent.click(screen.getAllByRole("button", { name: /View Floor Plan/i })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: /Enter Building/i })[0]);
     fireEvent.click(await screen.findByTestId("readonly-room"));
     fireEvent.click(screen.getByRole("button", { name: "Get directions to Copyshop" }));
 
@@ -374,7 +395,7 @@ describe("CampusMapPage event overlays", () => {
     fireEvent.click(screen.getByRole("option", { name: /Science Hall, Building/i }));
     fireEvent.click(screen.getAllByRole("button", { name: "Enter Building" })[0]);
     fireEvent.click(await screen.findByTestId("readonly-room"));
-    fireEvent.click(await screen.findByRole("button", { name: action === "Directions" ? "Directions" : "Start" }));
+    fireEvent.click(await screen.findByRole("button", { name: action === "Directions" ? "Get directions to Administration Office" : "Start" }));
 
     expect(await screen.findByTestId(chosenEndpoint)).toHaveTextContent(chosenLabel);
     expect(screen.getByTestId(emptyEndpoint)).toHaveTextContent(emptyLabel);

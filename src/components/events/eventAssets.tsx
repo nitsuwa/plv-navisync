@@ -14,7 +14,7 @@ export interface EventFurnitureTemplate {
 
 export const EVENT_FURNITURE_TEMPLATES: EventFurnitureTemplate[] = [
   { type: "booth", name: "Booth", category: "event", width: 60, height: 40, color: "#f59e0b" },
-  { type: "chair", name: "Chair", category: "event", width: 24, height: 24, color: "#0ea5e9" },
+  { type: "chair", name: "Chair", category: "event", width: 16, height: 16, color: "#0ea5e9" },
   { type: "stage", name: "Stage", category: "event", width: 120, height: 80, color: "#8b5cf6" },
   { type: "speaker", name: "Speaker", category: "event", width: 28, height: 42, color: "#334155" },
   { type: "projector", name: "Projector", category: "event", width: 36, height: 24, color: "#64748b" },

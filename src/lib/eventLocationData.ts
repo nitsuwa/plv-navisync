@@ -172,7 +172,7 @@ export function resolveFloorPlanForEvent(
     const campusW = activeCampus?.canvasW || 1200;
     const campusH = activeCampus?.canvasH || 900;
     const campusBuildings = activeCampus?.buildings ?? [];
-    const rooms: FloorRoom[] = campusBuildings.map((b) => ({
+    const rooms: FloorRoom[] = campusBuildings.filter((b) => b.visible !== false).map((b) => ({
       id: b.id,
       name: b.name,
       type: "building",
