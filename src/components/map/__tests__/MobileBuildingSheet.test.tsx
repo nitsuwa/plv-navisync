@@ -90,6 +90,20 @@ describe("mobile building details sheet", () => {
     expect(screen.getByTestId("mobile-building-sheet")).toHaveAttribute("data-sheet-state", "default");
   });
 
+  it("offers a route return action when this sheet temporarily foregrounds building details", () => {
+    const onBackToRoutePlanner = vi.fn();
+    render(<MobileBuildingSheet
+      selected={building} onClose={vi.fn()} onDirections={vi.fn()} onEnterBuilding={vi.fn()}
+      onSave={vi.fn()} onReport={vi.fn()} onSignInPrompt={vi.fn()} saved={new Set()} studentAuth={{ isStudent: true } as StudentAuthState}
+      hasFloorPlans floorPlanCount={6} facilities={[]} accessibility={[]} showQR={false} onToggleQR={vi.fn()}
+      onBackToRoutePlanner={onBackToRoutePlanner}
+    />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Back to route planner" }));
+    expect(onBackToRoutePlanner).toHaveBeenCalledOnce();
+    expect(screen.getByTestId("mobile-building-sheet")).toHaveAttribute("data-sheet-state", "default");
+  });
+
   it("settles a captured drag after the pointer moves outside the handle", () => {
     render(<MobileBuildingSheet
       selected={building} onClose={vi.fn()} onDirections={vi.fn()} onEnterBuilding={vi.fn()}

@@ -14,6 +14,7 @@ describe("desktop building details panel", () => {
   it("renders a complete selected-building place page with primary actions", () => {
     const onDirections = vi.fn();
     const onEnterBuilding = vi.fn();
+    const onBackToRoutePlanner = vi.fn();
     render(
       <BuildingInfoPanel
         selected={building} campusId="campus-1" onClose={vi.fn()}
@@ -22,6 +23,7 @@ describe("desktop building details panel", () => {
         onToggleSave={vi.fn()} onReport={vi.fn()} onSignInPrompt={vi.fn()}
         showQR={false} onToggleQR={vi.fn()} hasFloorPlans floorPlanCount={6}
         facilities={["Elevator"]} accessibility={["Accessible entrance"]}
+        onBackToRoutePlanner={onBackToRoutePlanner}
       />,
     );
 
@@ -33,7 +35,9 @@ describe("desktop building details panel", () => {
 
     fireEvent.click(screen.getByTestId("building-directions"));
     fireEvent.click(screen.getByTestId("building-enter"));
+    fireEvent.click(screen.getByRole("button", { name: "Back to route planner" }));
     expect(onDirections).toHaveBeenCalledWith(building);
     expect(onEnterBuilding).toHaveBeenCalledWith(building);
+    expect(onBackToRoutePlanner).toHaveBeenCalledOnce();
   });
 });

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { Building } from "../../../types";
 import { BuildingCover } from "../BuildingCover";
 import { BuildingDetailsSections } from "../BuildingDetailsSections";
+import { weeklyHoursPreset } from "../../../lib/buildingInformation";
 
 const building: Building = {
   id: "b1", name: "College of Accountancy and Business Administration", code: "CABA",
@@ -38,5 +39,11 @@ describe("building details content", () => {
     render(<BuildingDetailsSections building={building} facilities={["Restroom", "Elevator"]} accessibility={["Accessible entrance"]} floorCount={6} />);
     expect(screen.getByTestId("building-facilities")).toHaveTextContent("Restroom");
     expect(screen.getByTestId("building-accessibility")).toHaveTextContent("Accessible entrance");
+  });
+
+  it("uses a human-friendly authored building type and structured hours in student details", () => {
+    render(<BuildingDetailsSections building={{ ...building, building_type: "student_services", operating_hours_schedule: weeklyHoursPreset("weekdays") }} facilities={[]} accessibility={[]} floorCount={6} />);
+    expect(screen.getByLabelText("Quick information")).toHaveTextContent("Student Services");
+    expect(screen.getByTestId("building-hours")).toHaveTextContent(/Mon.*Fri.*8:00 AM.*5:00 PM/);
   });
 });

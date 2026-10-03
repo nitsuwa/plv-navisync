@@ -1040,19 +1040,23 @@
     transform: translate3d(var(--map-controls-shift-x), var(--map-controls-shift-y), 0);
     transition: transform 200ms cubic-bezier(.2,.8,.2,1), opacity 160ms ease, box-shadow 180ms ease;
   }
-  .student-map-zoom-controls[data-dock-open="true"] > [data-testid="student-map-zoom-stack"] {
-    display: flex;
-    flex-direction: row;
+  .student-map-zoom-controls[data-search-open="true"] {
+    opacity: 0;
+    pointer-events: none;
   }
-  .student-map-zoom-controls[data-dock-open="true"] > [data-testid="student-map-zoom-stack"] > div {
-    width: 1px;
-    height: 24px;
-    flex: none;
+  .student-map-zoom-controls[data-collision-hidden="true"] {
+    opacity: 0;
+    pointer-events: none;
   }
-  .student-map-zoom-controls[data-dock-open="true"] > [data-testid="student-map-zoom-percentage"] {
-    display: none;
+  /* Keep the planner mounted so route state survives inspection. On narrower
+     viewports the selected place takes the foreground and exposes a return
+     action; the planner is visible again when that place is dismissed. */
+  @media (max-width: 1279px) {
+    .route-planner-dialog[data-suspended-for-building="true"] {
+      visibility: hidden;
+      pointer-events: none;
+    }
   }
-  .student-map-zoom-controls[data-dock-open="true"] { align-items: flex-start; }
   .student-map-building[data-interactive="true"] { cursor: pointer; }
   .student-map-building__body { transition: filter 150ms ease, stroke-width 150ms ease; }
   .student-map-building[data-interactive="true"]:hover > .student-map-building__body {
@@ -1070,6 +1074,14 @@
     filter: drop-shadow(0 0 7px rgba(37, 99, 235, 0.22));
     animation: student-selection-halo-in 360ms cubic-bezier(0.22, 1, 0.36, 1) both;
   }
+  .student-room-selection-halo {
+    animation: student-room-selection-in 420ms ease-out both;
+  }
+  @keyframes student-room-selection-in {
+    0% { stroke-opacity: 0.02; }
+    42% { stroke-opacity: 0.4; }
+    100% { stroke-opacity: 0.24; }
+  }
 
   @media (max-width: 768px) and (orientation: landscape) {
     .landscape-minimized[data-sheet-state="default"] [data-testid="building-quick-facts-compact"] > div {
@@ -1079,15 +1091,11 @@
 
   @media (max-width: 767px) {
     .student-map-zoom-controls { right: 0.75rem; bottom: 6rem; }
-    .student-map-zoom-controls[data-dock-open="true"] { right: 0.75rem; bottom: 6rem; }
-    .student-map-zoom-controls[data-sheet-state="expanded"] { opacity: 1; }
-    .student-map-zoom-controls[data-profile-open="true"] > [data-testid="student-map-zoom-stack"] {
-      flex-direction: row;
-    }
   }
 
   @media (prefers-reduced-motion: reduce) {
     .student-map-zoom-controls { transition-duration: 0.01ms; }
+    .student-room-selection-halo { animation: none; }
   }
 
   @media (max-height: 700px) {

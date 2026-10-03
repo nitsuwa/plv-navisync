@@ -3,7 +3,7 @@ import { useNavigate } from "react-router";
 import { AnimatePresence, motion } from "motion/react";
 
 import {
-  Search, Building2, X, Plus, Minus,
+  Search, Building2, X,
   Accessibility, AlertTriangle, Navigation, Bookmark,
   Clock, ChevronRight, ChevronLeft, ChevronDown,
   Share2, CalendarDays, MapPin, Compass,
@@ -29,7 +29,7 @@ import type { RoomDest } from "../lib/combinedPathfinding";
 import { snapToNearest } from "../lib/geo";
 import { NODES as STATIC_NAV_NODES } from "../lib/pathfinding";
 import { projectReadonlyOutdoorCampus } from "../lib/readonlyOutdoorCampus";
-import { clampStudentMapZoom, getCameraSmoothingFactor, STUDENT_MAP_MIN_ZOOM, STUDENT_MAP_MAX_ZOOM, STUDENT_MAP_ZOOM_STEP, clampViewportPan, getBuildingFocusPan, getPanToKeepWorldPoint, getViewportPanBounds, normalizeStudentMapWheelDelta } from "../lib/mapViewport";
+import { clampStudentMapZoom, getCameraSmoothingFactor, STUDENT_MAP_MIN_ZOOM, STUDENT_MAP_ZOOM_STEP, clampViewportPan, getBuildingFocusPan, getPanToKeepWorldPoint, getViewportPanBounds, normalizeStudentMapWheelDelta } from "../lib/mapViewport";
 import { campusGroundAppearance } from "../lib/campusCanvas";
 import { routeEndpointFromSearchResult } from "../lib/routeEndpoints";
 import { outdoorWalkingDistance, walkingAnimationDuration } from "../lib/walkingAnimation";
@@ -524,9 +524,11 @@ export interface CampusMapPageProps {
   previewCampus?: EditorCampus | null;
   /** Remove the public-layout header offset when embedded full-screen. */
   fullScreen?: boolean;
+  /** Allow an admin preview shell to reserve space for its own toolbar. */
+  fullScreenHeight?: string;
 }
 
-export function CampusMapPage({ previewCampus = null, fullScreen = false }: CampusMapPageProps = {}) {
+export function CampusMapPage({ previewCampus = null, fullScreen = false, fullScreenHeight }: CampusMapPageProps = {}) {
   const navigate = useNavigate();
   const studentAuth = useStudentAuth();
   const { error: showError, warning: showWarning, success: showSuccess } = useToast();
@@ -743,7 +745,6 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
   const mapZoomControlsRef = useRef<HTMLDivElement>(null);
   const svgRef          = useRef<SVGSVGElement>(null);
   const cameraGroupRef  = useRef<SVGGElement>(null);
-  const zoomPercentRef  = useRef<HTMLDivElement>(null);
   const dragRef         = useRef<{ sx:number; sy:number; lx:number; ly:number; px:number; py:number; moved:boolean; vx:number; vy:number; lastTime:number }|null>(null);
   const inertiaRef      = useRef<number>(0);
   const panFrameRef     = useRef<number | null>(null);
@@ -793,34 +794,6 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
       setZoom(clampStudentMapZoom(nextZoom));
     }
   }, []);
-
-  // Button zoom should focus the visible map. The pointer usually rests over
-  // the zoom button itself, so using its coordinates as the anchor makes the
-  // map drift beneath the controls.
-  const zoomFromControls = useCallback((delta: number) => {
-    const element = mapContainerRef.current;
-    if (!element) return;
-    const rect = element.getBoundingClientRect();
-    const mobile = typeof window !== "undefined" && window.innerWidth < 768;
-    const detailsOpen = Boolean(selected && !directionsMode && !searchFocused && !floorView);
-    const rightInset = detailsOpen && !mobile
-      ? Math.min(390, Math.max(340, window.innerWidth * 0.32))
-      : 0;
-    const sheetHeight = detailsOpen && mobile
-      ? mobileBuildingSheetState === "peek"
-        ? Math.min(window.innerHeight * 0.35, 270, window.innerHeight - 84)
-        : mobileBuildingSheetState === "expanded"
-        ? Math.min(window.innerHeight * 0.7, 620, window.innerHeight - 84)
-          : Math.min(window.innerHeight * 0.56, 410, window.innerHeight - 84)
-      : 0;
-    const bottomInset = sheetHeight > 0 ? sheetHeight + 24 : 0;
-    const visibleHeight = Math.max(1, rect.height - bottomInset);
-    animateZoomAtRef.current(
-      rect.left + (rect.width - rightInset) / 2,
-      rect.top + visibleHeight / 2,
-      zoomStateRef.current + delta,
-    );
-  }, [mobileBuildingSheetState, selected, directionsMode, searchFocused, floorView]);
 
   const resetMapCamera = useCallback(() => {
     const origin = { x: 0, y: 0 };
@@ -874,22 +847,52 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
       const safeTop = headerBottom + 16;
       surface.style.setProperty("--student-map-search-safe-top", `${Math.max(0, searchHeaderRect?.bottom ?? surfaceRect.top + headerBottom)}px`);
       surface.style.setProperty("--student-map-controls-safe-top", `${Math.max(0, surfaceRect.top + safeTop)}px`);
+      surface.style.setProperty("--student-map-room-card-top", `${headerBottom + 10}px`);
 
       if (window.innerWidth >= 768) {
-        controls.style.setProperty("--map-controls-shift-x", "0px");
+        const detailsVisible = Boolean(selected && !isFloorMode);
+        const detailsWidth = Math.min(390, Math.max(340, window.innerWidth * 0.32));
+        controls.style.setProperty("--map-controls-shift-x", detailsVisible ? `${-(detailsWidth - 4)}px` : "0px");
         controls.style.setProperty("--map-controls-shift-y", "0px");
+        controls.dataset.collisionHidden = "false";
         return;
       }
 
-      const width = controls.offsetWidth || (profileMenuOpen ? 132 : 44);
-      const height = controls.offsetHeight || (profileMenuOpen ? 44 : 132);
+      const width = controls.offsetWidth || 44;
+      const height = controls.offsetHeight || 44;
       const surfaceWidth = surface.clientWidth || surfaceRect.width;
       const surfaceHeight = surface.clientHeight || surfaceRect.height;
       const normalLeft = surfaceWidth - 12 - width;
       const normalTop = surfaceHeight - 96 - height;
       const dockOpen = controls.dataset.dockOpen === "true";
-      controls.style.setProperty("--map-controls-shift-x", dockOpen ? `${12 - normalLeft}px` : "0px");
-      controls.style.setProperty("--map-controls-shift-y", dockOpen ? `${safeTop - normalTop}px` : "0px");
+      const roomCard = surface.querySelector<HTMLElement>("[data-testid='student-selected-place-card']");
+      const roomCardRect = roomCard?.getBoundingClientRect();
+      const roomCardBottom = roomCardRect ? roomCardRect.bottom - surfaceRect.top + 12 : safeTop;
+      const planner = surface.querySelector<HTMLElement>("[data-testid='route-planner-dialog']");
+      const plannerIsVisible = Boolean(planner && getComputedStyle(planner).visibility !== "hidden" && planner.getBoundingClientRect().height > 0);
+      const plannerTop = plannerIsVisible && planner ? planner.getBoundingClientRect().top - surfaceRect.top : surfaceHeight - 80;
+      const availableBottom = plannerIsVisible ? plannerTop - height - 12 : surfaceHeight - 96 - height;
+      // Keep panel-mode controls below the header. A selected room card keeps
+      // the normal lower-right dock, while any planner gap is used only when
+      // both surfaces are simultaneously present.
+      const safeLeft = profileMenuOpen && !roomCardRect ? 12 : normalLeft;
+      controls.style.setProperty("--map-controls-shift-x", dockOpen ? `${safeLeft - normalLeft}px` : "0px");
+      const desiredTop = plannerIsVisible
+        ? roomCardRect ? Math.max(safeTop, roomCardBottom) : safeTop
+        : roomCardRect ? normalTop : dockOpen ? safeTop : normalTop;
+      const top = Math.min(desiredTop, availableBottom);
+      const collision = top < roomCardBottom || top < safeTop || desiredTop > availableBottom;
+      controls.dataset.collisionHidden = String(collision);
+      controls.style.setProperty("--map-controls-shift-y", `${top - normalTop}px`);
+
+      const floorPicker = surface.querySelector<HTMLElement>("[data-testid='student-floor-picker']");
+      const floorTrigger = floorPicker?.querySelector<HTMLElement>("button[aria-haspopup='listbox']");
+      if (floorTrigger && window.innerWidth < 768) {
+        const menuBottom = floorTrigger.getBoundingClientRect().top - surfaceRect.top - 8;
+        const menuTop = Math.max(safeTop, roomCardRect ? roomCardBottom : safeTop);
+        const maxMenuHeight = Math.max(120, Math.min(352, menuBottom - menuTop));
+        surface.style.setProperty("--student-map-floor-menu-max-height", `${maxMenuHeight}px`);
+      }
     };
 
     updateOverlayLayout();
@@ -898,6 +901,12 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
     observer?.observe(controls);
     const searchHeader = surface.querySelector<HTMLElement>("[data-map-search-header='true']");
     if (searchHeader) observer?.observe(searchHeader);
+    const roomCard = surface.querySelector<HTMLElement>("[data-testid='student-selected-place-card']");
+    if (roomCard) observer?.observe(roomCard);
+    const floorPicker = surface.querySelector<HTMLElement>("[data-testid='student-floor-picker']");
+    if (floorPicker) observer?.observe(floorPicker);
+    const planner = surface.querySelector<HTMLElement>("[data-testid='route-planner-dialog']");
+    if (planner) observer?.observe(planner);
     window.addEventListener("resize", updateOverlayLayout);
     window.visualViewport?.addEventListener("resize", updateOverlayLayout);
     window.visualViewport?.addEventListener("scroll", updateOverlayLayout);
@@ -907,7 +916,7 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
       window.visualViewport?.removeEventListener("resize", updateOverlayLayout);
       window.visualViewport?.removeEventListener("scroll", updateOverlayLayout);
     };
-  }, [directionsMode, isFloorMode, mobileBuildingSheetState, profileMenuOpen, searchFocused, selected?.id]);
+  }, [directionsMode, isFloorMode, mobileBuildingSheetState, profileMenuOpen, searchFocused, selected?.id, selectedRoomContext?.floorNumber, selectedRoomContext?.roomId]);
   const mapSurface: MapSurface = directionsMode
     ? "route-planner"
     : (navigationPhase !== "idle" || navigationTransitioning)
@@ -1103,7 +1112,6 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
     if (group) {
       group.setAttribute("transform", `translate(${viewCX * (1 - nextZoom) + nextPan.x},${viewCY * (1 - nextZoom) + nextPan.y}) scale(${nextZoom})`);
     }
-    if (zoomPercentRef.current) zoomPercentRef.current.textContent = `${Math.round(nextZoom * 100)}%`;
   }, [viewCX, viewCY]);
 
   const commitCameraState = useCallback(() => {
@@ -2003,14 +2011,23 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
   }, [FLOOR_PLANS, activeCampus]);
 
   const changeStudentFloor = useCallback((floorNumber: number) => {
+    const selectedRoom = selectedRoomContext;
+    const buildingData = floorView && activeCampus?.buildings.find((building) => building.id === floorView.building.id);
+    const nextFloor = buildingData?.floors.find((floor) => floor.number === floorNumber);
+    const retainedRoom = selectedRoom
+      && selectedRoom.buildingId === floorView?.building.id
+      && nextFloor?.rooms.some((room) => room.id === selectedRoom.roomId)
+      ? { ...selectedRoom, floorNumber, floorLabel: nextFloor.label }
+      : null;
+
     setFloorView((view) => view ? { ...view, floor: floorNumber } : view);
     setZoom(getInitialFloorZoom());
     setPan({ x: 0, y: 0 });
-    setHighlightedRoom(null);
+    setHighlightedRoom(retainedRoom?.roomId ?? null);
     setHoveredRoom(null);
     setActiveRouteRoom(null);
-    setSelectedRoomContext(null);
-  }, []);
+    setSelectedRoomContext(retainedRoom);
+  }, [activeCampus, floorView, selectedRoomContext]);
 
   const closeFloorPlan = useCallback(() => {
     cancelAnimationFrame(navigationTransitionAnimRef.current ?? 0);
@@ -2514,14 +2531,6 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false }: Camp
     setMobileBuildingSheetState("default");
     setSelected(b);
     setSearchFocused(false); setSearch(""); setShowQR(false);
-    // Close route planner when selecting a building
-    if (b && directionsMode) {
-      setDirectionsMode(false);
-      setFromBuilding(null);
-      setToBuilding(null);
-      setRoomOrigin(null);
-      setRoomDestination(null);
-    }
     if (b) {
       if (!recentSearches.includes(b.name))
         setRecentSearches(prev => [b.name, ...prev].slice(0, 5));
@@ -2977,26 +2986,14 @@ const buildingFill = (id: string) =>
     useRoomAsDestination(target);
   }, [roomEndpointFromFloor, useRoomAsDestination]);
 
-  // A map-tapped room either fills the active planner endpoint, or becomes
-  // the compact selected-place context used by the planner when no field is active.
+  // A map-tapped room is inspection only. Route endpoints change through the
+  // explicit Directions / Start here actions or the planner search workflow.
   const selectIndoorRoom = useCallback((roomId: string) => {
-    if (route?.destinationRoom) return;
     const room = roomEndpointFromFloor(roomId);
     if (!room) return;
-    if (directionsMode && routePlannerEndpoint === "start") {
-      useRoomAsStart(room);
-      return;
-    }
-    if (directionsMode && routePlannerEndpoint === "destination") {
-      useRoomAsDestination(room);
-      return;
-    }
-    setActiveRouteRoom(roomId);
     setHighlightedRoom(roomId);
     setSelectedRoomContext(room);
-    setIndoorRoute(null);
-    setIndoorWalkProgress(0);
-  }, [directionsMode, route, routePlannerEndpoint, roomEndpointFromFloor, useRoomAsDestination, useRoomAsStart]);
+  }, [roomEndpointFromFloor]);
 
   // ── Walk arrival → enter the destination building's floor plan ────────
   // When the walking dot reaches the end of an outdoor route that targets a
@@ -3102,7 +3099,7 @@ const buildingFill = (id: string) =>
   // ── Map skeleton loading ──
   if (isCampusLoading && !activeCampus) {
     return (
-      <div role="status" aria-live="polite" data-testid="student-map-loading" className="relative flex w-full items-center justify-center overflow-hidden" style={{ height: fullScreen ? "100dvh" : "calc(100dvh - 56px)", background: "var(--map-bg)" }}>
+      <div role="status" aria-live="polite" data-testid="student-map-loading" className={cn("relative flex w-full items-center justify-center overflow-hidden", fullScreen && fullScreenHeight ? "h-full" : "")} style={{ height: fullScreen ? fullScreenHeight ?? "100dvh" : "calc(100dvh - 56px)", background: "var(--map-bg)" }}>
         <div className={cn("flex flex-col items-center gap-3 px-6 py-5 rounded-2xl bg-white/90 dark:bg-card/90 backdrop-blur-md shadow-lg border border-border/50", !reducedMotion && "animate-scale-in")}>
           <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
             <Compass className="h-5 w-5 text-primary" />
@@ -3122,7 +3119,7 @@ const buildingFill = (id: string) =>
 
   if (isCampusEmpty && !activeCampus) {
     return (
-      <div className="relative flex flex-col items-center justify-center w-full p-6" style={{ height: "calc(100dvh - 56px)", background: "var(--map-bg)" }}>
+      <div className={cn("relative flex w-full flex-col items-center justify-center p-6", fullScreen && fullScreenHeight ? "h-full" : "")} style={{ height: fullScreen ? fullScreenHeight ?? "100dvh" : "calc(100dvh - 56px)", background: "var(--map-bg)" }}>
         <div className="flex flex-col items-center text-center max-w-sm p-8 rounded-3xl bg-card border border-border shadow-xl">
           <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center mb-4 text-primary">
             <Building2 className="h-8 w-8" />
@@ -3145,7 +3142,7 @@ const buildingFill = (id: string) =>
 
   if (campusError && !activeCampus) {
     return (
-      <div className="relative flex flex-col items-center justify-center w-full p-6" style={{ height: "calc(100dvh - 56px)", background: "var(--map-bg)" }}>
+      <div className={cn("relative flex w-full flex-col items-center justify-center p-6", fullScreen && fullScreenHeight ? "h-full" : "")} style={{ height: fullScreen ? fullScreenHeight ?? "100dvh" : "calc(100dvh - 56px)", background: "var(--map-bg)" }}>
         <div className="flex flex-col items-center text-center max-w-sm p-8 rounded-3xl bg-card border border-destructive/20 shadow-xl">
           <div className="w-16 h-16 rounded-2xl bg-destructive/10 flex items-center justify-center mb-4 text-destructive">
             <AlertCircle className="h-8 w-8" />
@@ -3243,11 +3240,11 @@ const buildingFill = (id: string) =>
       className={cn(
         "student-map-surface relative overflow-hidden animate-fade-in",
         fullScreen
-          ? "h-[100dvh]"
+          ? fullScreenHeight ? "h-full" : "h-[100dvh]"
           : "h-[calc(100dvh-4rem-env(safe-area-inset-bottom,0px))] md:h-[calc(100dvh-76px)]",
       )}
       style={{
-        height: fullScreen ? "100dvh" : undefined,
+        height: fullScreen ? fullScreenHeight ?? "100dvh" : undefined,
         background: viewportBackground,
         animationDuration: reducedMotion ? "0ms" : "200ms",
         cursor: "grab",
@@ -3507,7 +3504,7 @@ const buildingFill = (id: string) =>
         <motion.div
           key="route-planner-container"
           data-no-drag
-          className="pointer-events-none absolute inset-0 z-30 md:inset-x-auto md:bottom-3 md:left-3 md:top-3 md:w-[380px]"
+          className="pointer-events-none absolute inset-0 z-30 md:inset-auto md:left-3 md:top-3 md:w-[clamp(340px,25vw,390px)]"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
@@ -3567,9 +3564,15 @@ const buildingFill = (id: string) =>
               destinationResults={campusSearch.destinations}
               activeEndpoint={routePlannerEndpoint}
               onActiveEndpointChange={setRoutePlannerEndpoint}
+              suspendedForBuilding={Boolean(selected)}
               selectedRoomForPlanner={selectedRoomContext}
               onUseSelectedRoomAsStart={useRoomAsStart}
               onUseSelectedRoomAsDestination={useRoomAsDestination}
+              onReportSelectedRoom={room => {
+                if (!floorView || !activeFloorPlan) return;
+                setReportRoomContext({ floorId: activeFloorPlan.id, roomId: room.roomId });
+                setReportModal(floorView.building);
+              }}
               onSelectFromDestination={(result) => {
                 const endpoint = routeEndpointFromSearchResult(result, MOCK_BUILDINGS, roomDestinationCatalog);
                 if (!endpoint) return;
@@ -3962,31 +3965,25 @@ const buildingFill = (id: string) =>
         data-testid="student-map-zoom-controls"
         data-map-layer="map-controls"
         data-no-drag
-        data-sheet-open={Boolean(selected && !directionsMode && !isFloorMode)}
-        data-dock-open={Boolean((selected && !directionsMode && !isFloorMode) || profileMenuOpen)}
+        data-sheet-open={Boolean(selected && !isFloorMode)}
+        data-dock-open={Boolean((selected && !isFloorMode) || directionsMode || profileMenuOpen || (isFloorMode && selectedRoomContext))}
         data-profile-open={profileMenuOpen}
-        data-sheet-state={selected && !directionsMode && !isFloorMode ? mobileBuildingSheetState : "closed"}
+        data-search-open={searchFocused}
+        data-dock-location={profileMenuOpen ? "profile-safe" : selectedRoomContext && isFloorMode ? "room-card-safe" : directionsMode ? "planner-safe" : selected ? "building-details" : "normal"}
+        data-sheet-state={selected && !isFloorMode ? mobileBuildingSheetState : "closed"}
         data-sheet-expanded={mobileBuildingSheetState === "expanded"}
-        className={cn("student-map-zoom-controls map-layer-controls absolute z-20 flex flex-col gap-1 right-3 bottom-24 will-change-transform md:bottom-5 md:right-[402px]", (selected && !directionsMode && !isFloorMode) && "md:bottom-5")}
+        className="student-map-zoom-controls map-layer-controls absolute z-20 right-3 bottom-24 will-change-transform md:bottom-5 md:right-4"
       >
-        <div data-testid="student-map-zoom-stack" className="overflow-hidden rounded-2xl border border-white/45 bg-card/95 shadow-[0_8px_24px_rgba(15,23,42,0.14)] backdrop-blur-xl dark:border-white/10">
-          <button type="button" aria-label="Zoom in" disabled={zoom >= STUDENT_MAP_MAX_ZOOM} onClick={() => zoomFromControls(STUDENT_MAP_ZOOM_STEP)} className="flex h-11 w-11 items-center justify-center text-foreground transition-[background-color,transform] duration-150 hover:bg-muted active:scale-95 disabled:cursor-not-allowed disabled:opacity-40 md:h-10 md:w-10">
-            <Plus className="h-4 w-4" />
-          </button>
-          <div className="h-px bg-border/60" />
-          <button type="button" aria-label="Zoom out" disabled={zoom <= STUDENT_MAP_MIN_ZOOM} onClick={() => zoomFromControls(-STUDENT_MAP_ZOOM_STEP)} className="flex h-11 w-11 items-center justify-center text-foreground transition-[background-color,transform] duration-150 hover:bg-muted active:scale-95 disabled:cursor-not-allowed disabled:opacity-40 md:h-10 md:w-10">
-            <Minus className="h-4 w-4" />
-          </button>
-          <div className="h-px bg-border/60" />
-          <button type="button" onClick={(e) => { e.stopPropagation(); resetMapCamera(); }} title={isFloorMode ? "Fit full floor" : "Reset map view"}
-            className="flex h-11 w-11 items-center justify-center text-muted-foreground transition-[background-color,color,transform] duration-150 hover:bg-primary/10 hover:text-primary active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/50 md:h-10 md:w-10" aria-label={isFloorMode ? "Fit full floor" : "Reset map view"}>
-            <LocateFixed className="h-4 w-4" />
-          </button>
-        </div>
-        {/* Zoom level indicator */}
-        <div data-testid="student-map-zoom-percentage" ref={zoomPercentRef} className="text-center text-[9px] font-semibold text-muted-foreground/60 select-none mt-0.5">
-          {Math.round(displayZoom * 100)}%
-        </div>
+        <button
+          type="button"
+          data-testid="student-map-recenter-button"
+          onClick={(event) => { event.stopPropagation(); resetMapCamera(); }}
+          title={isFloorMode ? "Fit full floor" : "Recenter map"}
+          aria-label={isFloorMode ? "Fit full floor" : "Recenter map"}
+          className="flex h-11 w-11 items-center justify-center rounded-2xl border border-white/45 bg-card/95 text-primary shadow-[0_8px_24px_rgba(15,23,42,0.14)] backdrop-blur-xl transition-[transform,background-color,box-shadow] duration-150 hover:bg-primary/8 hover:shadow-lg active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 motion-reduce:transition-none dark:border-white/10 md:h-10 md:w-10"
+        >
+          <LocateFixed className="h-[18px] w-[18px]" aria-hidden="true" />
+        </button>
       </div>
 
       {/* ══════════════ NAVIGATION PANEL (only when route active & planner closed) ══════════════ */}
@@ -4025,26 +4022,30 @@ const buildingFill = (id: string) =>
       )}
 
       {/* ══════════════ DESKTOP BUILDING INFO PANEL ══════════════ */}
-      {selected && !directionsMode && (
-        <BuildingInfoPanel
-          selected={selected}
-          campusId={activeCampus?.id}
-          onClose={() => selectBuilding(null)}
-          onDirections={startDirectionsTo}
-          onEnterBuilding={(b) => openFloorPlan(b)}
-          saved={saved}
-          studentAuth={studentAuth}
-          onToggleSave={toggleSave}
-          onReport={building => { setReportRoomContext(null); setReportModal(building); }}
-          onSignInPrompt={setSignInPrompt}
-          showQR={showQR}
-          onToggleQR={() => setShowQR(v => !v)}
-          hasFloorPlans={Boolean(FLOOR_PLANS[selected.id])}
-          floorPlanCount={FLOOR_PLANS[selected.id]?.floors?.length ?? 0}
-          facilities={BUILDING_FACILITIES[selected.id] ?? []}
-          accessibility={BUILDING_ACCESSIBILITY[selected.id] ?? []}
-        />
-      )}
+      <AnimatePresence initial={false}>
+        {selected && !isFloorMode && (
+          <BuildingInfoPanel
+            key={selected.id}
+            selected={selected}
+            campusId={activeCampus?.id}
+            onClose={() => selectBuilding(null)}
+            onDirections={startDirectionsTo}
+            onEnterBuilding={(building) => openFloorPlan(building)}
+            saved={saved}
+            studentAuth={studentAuth}
+            onToggleSave={toggleSave}
+            onReport={building => { setReportRoomContext(null); setReportModal(building); }}
+            onSignInPrompt={setSignInPrompt}
+            showQR={showQR}
+            onToggleQR={() => setShowQR(v => !v)}
+            hasFloorPlans={Boolean(FLOOR_PLANS[selected.id])}
+            floorPlanCount={FLOOR_PLANS[selected.id]?.floors?.length ?? 0}
+            facilities={BUILDING_FACILITIES[selected.id] ?? []}
+            accessibility={BUILDING_ACCESSIBILITY[selected.id] ?? []}
+            onBackToRoutePlanner={directionsMode ? () => selectBuilding(null) : undefined}
+          />
+        )}
+      </AnimatePresence>
 
       {/* ══════════════ ARRIVAL OVERLAY ══════════════ */}
       {showArrival && (
@@ -4323,7 +4324,7 @@ const buildingFill = (id: string) =>
 
       {/* ══════════════ MOBILE BUILDING SHEET ══════════════ */}
       <AnimatePresence initial={false}>
-        {selected && !isFloorMode && !directionsMode && (
+        {selected && !isFloorMode && (
           <MobileBuildingSheet
             key={selected.id}
             selected={selected}
@@ -4344,6 +4345,7 @@ const buildingFill = (id: string) =>
             onToggleQR={() => setShowQR(v => !v)}
             interactionPaused={searchFocused || profileMenuOpen || Boolean(reportModal) || Boolean(signInPrompt)}
             onStateChange={setMobileBuildingSheetState}
+            onBackToRoutePlanner={directionsMode ? () => selectBuilding(null) : undefined}
           />
         )}
       </AnimatePresence>

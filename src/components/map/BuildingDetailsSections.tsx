@@ -2,6 +2,8 @@ import { Accessibility, Clock } from "lucide-react";
 import type { ReactNode } from "react";
 import type { Building } from "../../types";
 import { BuildingCover } from "./BuildingCover";
+import { formatWeeklyOperatingHours } from "../../lib/buildingInformation";
+import { BUILDING_TYPE_OPTIONS } from "../../types/buildingInformation";
 
 interface BuildingDetailsSectionsProps {
   building: Building;
@@ -14,14 +16,19 @@ interface BuildingDetailsSectionsProps {
   variant?: "full" | "compact" | "peek";
 }
 
-const categoryLabel = (value: string) => value ? value.replace(/[_-]+/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase()) : "Campus building";
+const categoryLabel = (value: string) => {
+  const type = BUILDING_TYPE_OPTIONS.find((option) => option.value === value);
+  if (type) return type.label;
+  if (value === "admin" || value === "administration") return "Administrative";
+  return value ? value.replace(/[_-]+/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase()) : "Campus building";
+};
 
 export function BuildingDetailsSections({
   building, facilities, accessibility, floorCount, showCover = false, showQR, qrContent, variant = "full",
 }: BuildingDetailsSectionsProps) {
   const description = building.description?.trim();
-  const operatingHours = building.operating_hours?.trim();
-  const facts = [categoryLabel(building.category), floorCount > 0 ? `${floorCount} ${floorCount === 1 ? "floor" : "floors"}` : null].filter(Boolean);
+  const operatingHours = formatWeeklyOperatingHours(building.operating_hours_schedule) ?? building.operating_hours?.trim();
+  const facts = [categoryLabel(building.building_type ?? building.category), floorCount > 0 ? `${floorCount} ${floorCount === 1 ? "floor" : "floors"}` : null].filter(Boolean);
   const compact = variant !== "full";
   const compactFeatures = [...facilities.slice(0, 1), ...accessibility.slice(0, 2), ...facilities.slice(1, 2)]
     .filter((feature, index, all) => all.findIndex((item) => item.toLowerCase() === feature.toLowerCase()) === index)

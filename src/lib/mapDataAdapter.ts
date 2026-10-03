@@ -8,6 +8,7 @@
 import type { Campus, CampusBuilding, FloorPlan, FloorRoom } from "../components/map-builder/types";
 import { entranceDescription, entranceDisplayName } from "./buildingEntrances";
 import { buildingCoverPublicUrl } from "../services/buildingImageService";
+import { buildingTypeValue, formatWeeklyOperatingHours } from "./buildingInformation";
 
 type CampusWithOptionalBuildings = Campus & { buildings: CampusBuilding[] };
 
@@ -80,13 +81,15 @@ export function buildingsFromCampus(campus: CampusWithOptionalBuildings): Legacy
     code: b.code,
     description: b.description || "",
     category: b.category.toLowerCase() as Building["category"],
+    building_type: buildingTypeValue(b),
     floor_count: b.floors.length,
     image_url: b.coverImagePath
       ? buildingCoverPublicUrl(b.coverImagePath)
       : (b as CampusBuilding & { image_url?: string }).image_url,
     facilities: b.facilities ?? [],
     accessibility: b.accessibility,
-    operating_hours: b.operatingHours ?? (b as CampusBuilding & { operating_hours?: string }).operating_hours,
+    operating_hours: formatWeeklyOperatingHours(b.operatingHoursSchedule) ?? b.operatingHours ?? (b as CampusBuilding & { operating_hours?: string }).operating_hours,
+    operating_hours_schedule: b.operatingHoursSchedule,
     contact: undefined,
     departments: [],
     created_at: new Date().toISOString(),
@@ -155,8 +158,9 @@ export function accessibilityFromCampus(campus: CampusWithOptionalBuildings): Re
       }
     }
     if ((b.entrances ?? []).some((entrance) => entrance.accessible)) items.add("Accessible entrance");
-    if ((b.floors ?? []).some((floor) => (floor.ramps ?? []).some((ramp) => ramp.accessible !== false && ramp.visible !== false))) items.add("Ramp access");
+    if ((b.floors ?? []).some((floor) => [...(floor.ramps ?? []), ...(floor.entranceRamps ?? [])].some((ramp) => ramp.accessible !== false && ramp.visible !== false))) items.add("Ramp access");
     if ((b.floors ?? []).some((floor) => (floor.elevators ?? []).some((elevator) => elevator.visible !== false))) items.add("Elevator available");
+    if ((b.floors ?? []).some((floor) => (floor.rooms ?? []).some((room) => room.type === "accessible_restroom" || (room.type === "restroom" && room.accessibility === true)))) items.add("Accessible restroom");
     result[b.id] = [...items];
   }
   return result;

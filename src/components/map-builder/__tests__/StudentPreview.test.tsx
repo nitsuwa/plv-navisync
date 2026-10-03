@@ -4,7 +4,7 @@ import type { Campus } from "../types";
 import type { ValidationIssue } from "../ValidationErrorsDialog";
 
 vi.mock("../../../pages/CampusMapPage", () => ({
-  CampusMapPage: ({ previewCampus }: { previewCampus: Campus }) => <div data-testid="student-map">{previewCampus.name}</div>,
+  CampusMapPage: ({ previewCampus, fullScreenHeight }: { previewCampus: Campus; fullScreenHeight?: string }) => <div data-testid="student-map" data-fullscreen-height={fullScreenHeight}>{previewCampus.name}</div>,
 }));
 
 import { StudentPreview } from "../StudentPreview";
@@ -24,6 +24,9 @@ describe("StudentPreview", () => {
   it("renders the read-only student surface and publish controls", () => {
     render(<StudentPreview campus={campus} validationIssues={[]} onBack={vi.fn()} onPublish={vi.fn().mockResolvedValue(undefined)} />);
     expect(screen.getByTestId("student-map")).toHaveTextContent("Preview Campus");
+    expect(screen.getByTestId("student-map")).toHaveAttribute("data-fullscreen-height", "100%");
+    expect(screen.getByTestId("student-preview-toolbar").tagName).toBe("HEADER");
+    expect((screen.getByTestId("student-preview-toolbar").compareDocumentPosition(screen.getByTestId("student-preview-viewport")) & Node.DOCUMENT_POSITION_FOLLOWING)).toBeTruthy();
     expect(screen.getByText("Draft Preview")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Publish" })).toBeInTheDocument();
   });
