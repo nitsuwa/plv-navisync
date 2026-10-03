@@ -916,6 +916,7 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
   const timedCameraMotionRef = useRef<{ fromPan: Pt; fromZoom: number; startedAt: number; durationMs: number } | null>(null);
   const roomFocusAnimationRef = useRef(false);
   const lastRoomFocusKeyRef = useRef<string | null>(null);
+  const lastDestinationBuildingFocusKeyRef = useRef<string | null>(null);
   const targetCameraRef = useRef<{ pan: Pt; zoom: number }>({ pan: { x: 0, y: 0 }, zoom: 1 });
   const overviewCameraRef = useRef<{ pan: Pt; zoom: number }>({ pan: { x: 0, y: 0 }, zoom: 1 });
   const fittedCampusIdRef = useRef<string | null>(null);
@@ -2953,6 +2954,77 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
       searchFocusRef.current = null;
     }
   }, [animateCameraTo, clampMapPan, selected?.id, B_POS, isFloorMode, outdoorCanvasH, outdoorCanvasW, searchFocusNonce]);
+
+  // Keep mobile building destinations in the usable area above the route
+  // planner, just as indoor room destinations are focused above the sheet.
+  useLayoutEffect(() => {
+    const mobileMap = (mapContainerRef.current?.clientWidth ?? 0) < 768;
+    const shouldFocusDestination = mobileMap
+      && directionsMode
+      && navigationPhase === "idle"
+      && !navigationTransitioning
+      && !isFloorMode
+      && !roomDestination
+      && Boolean(toBuilding);
+    if (!shouldFocusDestination || !toBuilding) {
+      lastDestinationBuildingFocusKeyRef.current = null;
+      if (roomFocusAnimationRef.current) cancelCameraAnimation();
+      return;
+    }
+
+    const position = B_POS[toBuilding.id];
+    if (!position) return;
+    const focusKey = `${toBuilding.id}:route-planner`;
+    if (lastDestinationBuildingFocusKeyRef.current === focusKey) return;
+
+    const surface = mapContainerRef.current;
+    const svg = svgRef.current;
+    const surfaceRect = surface?.getBoundingClientRect();
+    const svgRect = svg?.getBoundingClientRect();
+    if (!surface || !surfaceRect || !svgRect || svgRect.width <= 0 || svgRect.height <= 0) return;
+
+    const mapScale = Math.min(svgRect.width / outdoorCanvasW, svgRect.height / outdoorCanvasH);
+    if (!Number.isFinite(mapScale) || mapScale <= 0) return;
+    const viewportOffset = {
+      x: Math.max(0, (svgRect.width - outdoorCanvasW * mapScale) / (2 * mapScale)),
+      y: Math.max(0, (svgRect.height - outdoorCanvasH * mapScale) / (2 * mapScale)),
+    };
+    const safePx = { left: 12, right: 12, top: 12, bottom: 12 };
+    const plannerRect = surface.querySelector<HTMLElement>("[data-testid='route-planner-dialog']")
+      ?.getBoundingClientRect()
+      ?? document.querySelector<HTMLElement>("[data-testid='route-planner-dialog']")?.getBoundingClientRect();
+    if (plannerRect && plannerRect.width > 0 && plannerRect.height > 0) {
+      const plannerCoversMobileWidth = plannerRect.width >= surfaceRect.width * 0.72;
+      if (plannerCoversMobileWidth || plannerRect.top > (surfaceRect.top + surfaceRect.bottom) / 2) {
+        safePx.bottom = Math.max(safePx.bottom, surfaceRect.bottom - plannerRect.top + 12);
+      } else if (plannerRect.left <= surfaceRect.left + 24) {
+        safePx.left = Math.max(safePx.left, plannerRect.right - surfaceRect.left + 12);
+      } else if (plannerRect.right >= surfaceRect.right - 24) {
+        safePx.right = Math.max(safePx.right, surfaceRect.right - plannerRect.left + 12);
+      }
+    }
+
+    const focus = getStudentRoomFocusCamera({
+      mapWidth: outdoorCanvasW,
+      mapHeight: outdoorCanvasH,
+      roomBounds: { x: position.x, y: position.y, width: position.w, height: position.h },
+      currentPan: panRef.current,
+      zoom: zoomRef.current,
+      insets: {
+        left: safePx.left / mapScale,
+        right: safePx.right / mapScale,
+        top: safePx.top / mapScale,
+        bottom: safePx.bottom / mapScale,
+      },
+      viewportOffset,
+    });
+    lastDestinationBuildingFocusKeyRef.current = focusKey;
+    if (focus.shouldMove) {
+      animateCameraTo(clampMapPan(focus.pan, focus.zoom), focus.zoom, "room-focus");
+    } else if (roomFocusAnimationRef.current) {
+      cancelCameraAnimation();
+    }
+  }, [animateCameraTo, B_POS, cancelCameraAnimation, clampMapPan, directionsMode, isFloorMode, navigationPhase, navigationTransitioning, outdoorCanvasH, outdoorCanvasW, roomDestination, toBuilding]);
 
   useEffect(() => {
     const target = searchFocusRef.current;
