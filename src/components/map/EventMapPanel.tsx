@@ -50,9 +50,11 @@ export function EventMapPanel(props: EventMapPanelProps) {
       aria-label="Campus events"
       aria-live="polite"
       data-no-drag
+      data-testid="event-map-panel"
+      data-map-layer="building-sheet"
       className={cn(
-        "absolute z-20 flex min-h-0 flex-col overflow-hidden border border-border bg-card/95 text-card-foreground shadow-xl backdrop-blur-xl",
-        "left-3 right-3 bottom-[calc(env(safe-area-inset-bottom)+5.5rem)] rounded-2xl md:left-4 md:right-auto md:top-4 md:bottom-4 md:w-[min(360px,calc(100%-2rem))] md:rounded-2xl",
+        "map-layer-building-sheet absolute flex min-h-0 flex-col overflow-hidden border border-border bg-card/95 text-card-foreground shadow-xl backdrop-blur-xl",
+        "left-3 right-3 bottom-[var(--student-map-utility-bottom,1rem)] rounded-2xl md:left-4 md:right-auto md:top-4 md:bottom-4 md:w-[min(360px,calc(100%-2rem))] md:rounded-2xl",
       )}
       style={{ height: `min(${sheetHeight}, calc(100% - 1rem))` }}
       onKeyDownCapture={onKeyDownCapture}

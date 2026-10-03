@@ -18,6 +18,9 @@ export interface IssueReport {
   floorLabel?: string;
   roomId?: string | null;
   roomName?: string;
+  campusPlaceId?: string | null;
+  campusPlaceName?: string;
+  campusPlaceType?: string;
   submissionWarning?: string;
   reporterId: string;
   category: "accessibility" | "maintenance" | "map_error" | "hazard" | string;
@@ -42,6 +45,9 @@ export interface CreateReportInput {
   campusId?: string;
   buildingId?: string | null;
   buildingName?: string;
+  campusPlaceId?: string | null;
+  campusPlaceName?: string;
+  campusPlaceType?: string;
   floorId?: string | null;
   floorLabel?: string;
   roomId?: string | null;
@@ -135,12 +141,12 @@ export async function submitReport(input: CreateReportInput): Promise<IssueRepor
   const client = getSupabase();
   const { data: userData, error: authError } = await client.auth.getUser();
   if (authError || !userData.user) throw new Error("Sign in to submit a report.");
-  if (!input.campusId || !input.buildingId) throw new Error("Choose a published building before reporting.");
+  if (!input.campusId || (!input.buildingId && !input.campusPlaceId)) throw new Error("Choose a published campus place before reporting.");
   if (!input.title.trim() || !input.description.trim()) throw new Error("Describe the issue before submitting.");
   if (input.imageFile) validateReportImage(input.imageFile);
   const payload: TablesInsert<"reports"> = {
-    id: crypto.randomUUID(), campus_id: input.campusId, building_id: input.buildingId,
-    floor_id: input.floorId || null, map_element_id: input.roomId || null,
+    id: crypto.randomUUID(), campus_id: input.campusId, building_id: input.buildingId || null,
+    floor_id: input.floorId || null, map_element_id: input.roomId || input.campusPlaceId || null,
     reporter_id: userData.user.id, category: normalizeReportCategory(input.category),
     priority: "normal", title: input.title.trim(), description: input.description.trim(), status: "pending",
   };
@@ -149,7 +155,11 @@ export async function submitReport(input: CreateReportInput): Promise<IssueRepor
   const report = toIssueReport(data as ReportRow);
   report.buildingName = input.buildingName;
   report.floorLabel = input.floorLabel;
+  report.roomId = input.roomId;
   report.roomName = input.roomName;
+  report.campusPlaceId = input.campusPlaceId;
+  report.campusPlaceName = input.campusPlaceName;
+  report.campusPlaceType = input.campusPlaceType;
   if (input.imageFile) {
     try {
       const uploaded = await uploadReportImage(input.imageFile, report.id, client);
@@ -226,12 +236,15 @@ async function hydrateStudentReports(
     floorIds.length ? read(from("floors").select("id,name").in("id", floorIds)) : Promise.resolve([]),
     read(from("report_images").select("report_id,storage_path,created_at").in("report_id", reportIds)),
     read(from("report_history").select("report_id,action,new_status,note,created_at").in("report_id", reportIds).order("created_at", { ascending: true })),
-    roomIds.length ? read(from("map_elements").select("id,name").in("id", roomIds)) : Promise.resolve([]),
+    roomIds.length ? read(from("map_elements").select("id,name,element_type").in("id", roomIds)) : Promise.resolve([]),
   ]);
 
   const buildingNames = new Map(buildingRows.map((row) => [row.id, row.name]));
   const floorNames = new Map(floorRows.map((row) => [row.id, row.name]));
   const roomNames = new Map(roomRows.map((row) => [row.id, row.name]));
+  const campusPlaces = new Map(roomRows
+    .filter((row) => row.element_type === "gate" || row.element_type === "marker")
+    .map((row) => [row.id, { name: row.name, type: row.element_type }]));
   const imageByReport = new Map<string, string>();
   await Promise.all(imageRows.filter(image => !isPlaceholderReportImage(image.storage_path)).map(async (image) => {
     try {
@@ -252,14 +265,21 @@ async function hydrateStudentReports(
     updatesByReport.set(history.report_id, updates);
   });
 
-  return reports.map((report) => ({
-    ...report,
-    buildingName: report.buildingName ?? (report.buildingId ? buildingNames.get(report.buildingId) : undefined),
-    floorLabel: report.floorLabel ?? (report.floorId ? floorNames.get(report.floorId) : undefined),
-    roomName: report.roomName ?? (report.roomId ? roomNames.get(report.roomId) : undefined),
-    imageUrl: report.imageUrl ?? imageByReport.get(report.id) ?? null,
-    updates: updatesByReport.get(report.id) ?? [{ text: "Report submitted", date: report.createdAt }],
-  }));
+  return reports.map((report) => {
+    const campusPlace = report.roomId ? campusPlaces.get(report.roomId) : undefined;
+    return {
+      ...report,
+      buildingName: report.buildingName ?? (report.buildingId ? buildingNames.get(report.buildingId) : undefined),
+      floorLabel: report.floorLabel ?? (report.floorId ? floorNames.get(report.floorId) : undefined),
+      roomId: campusPlace ? undefined : report.roomId,
+      roomName: campusPlace ? undefined : report.roomName ?? (report.roomId ? roomNames.get(report.roomId) : undefined),
+      campusPlaceId: report.campusPlaceId ?? (campusPlace ? report.roomId : undefined),
+      campusPlaceName: report.campusPlaceName ?? campusPlace?.name,
+      campusPlaceType: report.campusPlaceType ?? campusPlace?.type,
+      imageUrl: report.imageUrl ?? imageByReport.get(report.id) ?? null,
+      updates: updatesByReport.get(report.id) ?? [{ text: "Report submitted", date: report.createdAt }],
+    };
+  });
 }
 
 // Read only the signed-in student's persisted reports. Legacy shared-browser

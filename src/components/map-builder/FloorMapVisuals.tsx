@@ -475,7 +475,7 @@ export function FloorRoomArtwork({
 }
 
 /** Room name plaque from the shared authored geometry and wrapping rules. */
-export function FloorRoomLabelArtwork({ room, emphasized = false, opacity = 0.78 }: { room: FloorRoom; emphasized?: boolean; opacity?: number }) {
+export function FloorRoomLabelArtwork({ room, emphasized = false, studentSelected = false, opacity = 0.78 }: { room: FloorRoom; emphasized?: boolean; studentSelected?: boolean; opacity?: number }) {
   const palette = ROOM_MAP[room.type] ?? ROOM_MAP.classroom;
   const points = roomOutlinePoints(room);
   const custom = Array.isArray(room.shapePoints) && room.shapePoints.length >= 3;
@@ -494,13 +494,14 @@ export function FloorRoomLabelArtwork({ room, emphasized = false, opacity = 0.78
   });
   const labelY = center.y - layout.height / 2;
   return (
-    <g data-testid="room-label-overlay" data-room-id={room.id} className="pointer-events-none select-none"
+    <g data-testid="room-label-overlay" data-room-id={room.id} data-room-label-selected={studentSelected ? "true" : undefined} className="pointer-events-none select-none"
       style={{ opacity, transition: "opacity 150ms ease, fill-opacity 150ms ease" }}>
       <rect x={center.x - layout.width / 2} y={labelY} width={layout.width} height={layout.height} rx={3}
-        fill="#ffffff" fillOpacity={emphasized ? 0.96 : 0.88} stroke={palette.stroke}
-        strokeOpacity={emphasized ? 0.72 : 0.42} strokeWidth={0.8} />
+        fill={studentSelected ? "#eff6ff" : "#ffffff"} fillOpacity={emphasized ? 0.97 : 0.88}
+        stroke={studentSelected ? "#2563eb" : palette.stroke}
+        strokeOpacity={studentSelected ? 0.88 : emphasized ? 0.72 : 0.42} strokeWidth={studentSelected ? 1.2 : 0.8} />
       <text x={center.x} y={labelY + layout.height / 2} textAnchor="middle" dominantBaseline="middle"
-        fill={palette.text} fontSize={layout.fontSize} fontWeight="600" fontFamily="var(--font-sans)">
+        fill={studentSelected ? "#1e3a8a" : palette.text} fontSize={layout.fontSize} fontWeight={studentSelected ? "700" : "600"} fontFamily="var(--font-sans)">
         {layout.lines.map((line, index) => <tspan key={`${room.id}-label-line-${index}`} x={center.x}
           y={roomLabelLineCenterY(labelY + layout.height / 2, index, layout.lines.length, layout.lineHeight)}>{line}</tspan>)}
       </text>

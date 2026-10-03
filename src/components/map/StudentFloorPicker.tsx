@@ -69,7 +69,7 @@ export function StudentFloorPicker({ buildingName, floors, activeFloor, onSelect
       data-testid="student-floor-picker"
       data-dock="floor-control-bottom-left"
       data-no-drag
-      className="absolute bottom-[calc(4rem+1rem+env(safe-area-inset-bottom,0px))] left-3 z-30 md:bottom-6 md:left-1/2 md:-translate-x-1/2"
+      className="student-map-utility-control absolute bottom-4 left-3 z-30 md:bottom-6 md:left-1/2 md:-translate-x-1/2"
     >
       <button
         ref={triggerRef}

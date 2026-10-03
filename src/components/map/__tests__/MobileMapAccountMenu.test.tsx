@@ -63,6 +63,53 @@ describe("MobileMapAccountMenu", () => {
     expect(onOpenChange).toHaveBeenLastCalledWith(false);
   });
 
+  it("shows only working profile destinations and omits redundant Home", () => {
+    render(<MemoryRouter><MobileMapAccountMenu /></MemoryRouter>);
+    fireEvent.click(screen.getByRole("button", { name: /user menu/i }));
+
+    const menu = screen.getByRole("menu", { name: "Student account menu" });
+    expect(within(menu).queryByRole("menuitem", { name: "Home" })).not.toBeInTheDocument();
+    expect(within(menu).getByRole("menuitem", { name: "My Profile" })).toHaveAttribute("href", "/student");
+    expect(within(menu).getByRole("menuitem", { name: "Favorites" })).toHaveAttribute("href", "/student/favorites");
+    expect(within(menu).getByRole("menuitem", { name: "My Reports" })).toHaveAttribute("href", "/student/reports");
+    expect(within(menu).getByRole("menuitem", { name: "Settings" })).toHaveAttribute("href", "/student/settings");
+    expect(within(menu).getByRole("menuitem", { name: "Sign Out" })).toBeInTheDocument();
+  });
+
+  it("swallows the click paired with an outside pointer so the map beneath is not activated", () => {
+    const onMapClick = vi.fn();
+    render(
+      <MemoryRouter>
+        <button type="button" onClick={onMapClick}>Map building</button>
+        <MobileMapAccountMenu />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /user menu/i }));
+    const mapTarget = screen.getByRole("button", { name: "Map building" });
+    fireEvent.pointerDown(mapTarget, { pointerType: "touch" });
+    fireEvent.click(mapTarget);
+
+    expect(onMapClick).not.toHaveBeenCalled();
+    expect(screen.queryByRole("menu", { name: "Student account menu" })).not.toBeInTheDocument();
+  });
+
+  it("swallows click-only outside input so the map beneath is not activated", () => {
+    const onMapClick = vi.fn();
+    render(
+      <MemoryRouter>
+        <button type="button" onClick={onMapClick}>Map building</button>
+        <MobileMapAccountMenu />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /user menu/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Map building" }));
+
+    expect(onMapClick).not.toHaveBeenCalled();
+    expect(screen.queryByRole("menu", { name: "Student account menu" })).not.toBeInTheDocument();
+  });
+
   it("keeps the building sheet and its snap state underneath the active profile menu", () => {
     function OverlayHarness() {
       const [profileOpen, setProfileOpen] = useState(false);

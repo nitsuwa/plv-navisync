@@ -654,21 +654,35 @@ export function OutdoorMarkerArtwork({ marker, selected = false, zoom = 1, showN
   );
 }
 
-function OutdoorMarkerVisual({ marker, zoom, showLabel }: { marker: CampusMarker; zoom: number; showLabel: boolean }) {
+function OutdoorMarkerVisual({ marker, zoom, showLabel, selected = false, onSelect }: { marker: CampusMarker; zoom: number; showLabel: boolean; selected?: boolean; onSelect?: (markerId: string) => void }) {
   return (
-    <g data-testid="readonly-campus-marker" data-marker-id={marker.id}>
+    <g data-testid="readonly-campus-marker" data-marker-id={marker.id} data-no-drag={onSelect ? "true" : undefined}
+      role={onSelect ? "button" : undefined} tabIndex={onSelect ? 0 : undefined}
+      aria-label={onSelect ? `View ${marker.name || "campus place"} details` : undefined}
+      onPointerDown={onSelect ? (event) => event.stopPropagation() : undefined}
+      onClick={onSelect ? (event) => { event.stopPropagation(); onSelect(marker.id); } : undefined}
+      onKeyDown={onSelect ? (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); event.stopPropagation(); onSelect(marker.id); } } : undefined}
+      style={onSelect ? { cursor: "pointer" } : undefined}>
       <title>{marker.name}</title>
-      <OutdoorMarkerArtwork marker={marker} zoom={zoom} showName={showLabel} />
+      {selected && <circle className="campus-place-selection-ring" cx={marker.x} cy={marker.y} r={22} fill="rgba(37,99,235,0.12)" stroke="#2563eb" strokeWidth={2.5} vectorEffect="non-scaling-stroke" pointerEvents="none" />}
+      <OutdoorMarkerArtwork marker={marker} selected={selected} zoom={zoom} showName={showLabel} />
     </g>
   );
 }
 
-function OutdoorCampusGateVisual({ marker, showLabel }: { marker: CampusMarker; showLabel: boolean }) {
+function OutdoorCampusGateVisual({ marker, showLabel, selected = false, onSelect }: { marker: CampusMarker; showLabel: boolean; selected?: boolean; onSelect?: (markerId: string) => void }) {
   const emergency = marker.purpose === "emergency_exit";
   const color = emergency ? "#dc2626" : "#2563eb";
   return (
-    <g data-testid="readonly-campus-gate" data-marker-id={marker.id}>
+    <g data-testid="readonly-campus-gate" data-marker-id={marker.id} data-no-drag={onSelect ? "true" : undefined}
+      role={onSelect ? "button" : undefined} tabIndex={onSelect ? 0 : undefined}
+      aria-label={onSelect ? `View ${marker.name || "Campus Gate"} details` : undefined}
+      onPointerDown={onSelect ? (event) => event.stopPropagation() : undefined}
+      onClick={onSelect ? (event) => { event.stopPropagation(); onSelect(marker.id); } : undefined}
+      onKeyDown={onSelect ? (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); event.stopPropagation(); onSelect(marker.id); } } : undefined}
+      style={onSelect ? { cursor: "pointer" } : undefined}>
       <title>{marker.name || (emergency ? "Emergency Exit Gate" : "Campus Gate")}</title>
+      {selected && <circle className="campus-place-selection-ring" cx={marker.x} cy={marker.y} r={25} fill="rgba(37,99,235,0.14)" stroke="#2563eb" strokeWidth={2.5} vectorEffect="non-scaling-stroke" pointerEvents="none" />}
       <CampusGateVisual x={marker.x - 18} y={marker.y - 15} width={36} height={30} color={color} />
       {showLabel && marker.name && <text x={marker.x} y={marker.y + 18} textAnchor="middle" fill="var(--map-building-name, #475569)" fontSize={6.5} fontWeight="700" className="pointer-events-none select-none">{marker.name}</text>}
     </g>
@@ -682,13 +696,15 @@ export interface ReadonlyOutdoorCampusSceneProps {
   showBuildings?: boolean;
   showLabels?: boolean;
   selectedBuildingId?: string | null;
+  selectedCampusPlaceId?: string | null;
   onSelectBuilding?: (buildingId: string) => void;
+  onSelectCampusPlace?: (placeId: string) => void;
   onDoubleClickBuilding?: (buildingId: string) => void;
   onClickEntrance?: (buildingId: string) => void;
 }
 
 /** Read-only scene composition shared by Preview and the public campus map. */
-export function ReadonlyOutdoorCampusScene({ campus, zoom = 1, showBuildings = true, showLabels = true, selectedBuildingId, onSelectBuilding, onDoubleClickBuilding, onClickEntrance }: ReadonlyOutdoorCampusSceneProps) {
+export function ReadonlyOutdoorCampusScene({ campus, zoom = 1, showBuildings = true, showLabels = true, selectedBuildingId, selectedCampusPlaceId, onSelectBuilding, onSelectCampusPlace, onDoubleClickBuilding, onClickEntrance }: ReadonlyOutdoorCampusSceneProps) {
   const buildingById = new Map(campus.buildings.map((building) => [building.id, building]));
   const defaultEntryLabelIds = defaultOutdoorEntryLabelIds(campus);
   const stack: { zOrder: number; order: number; node: ReactNode }[] = [];
@@ -750,8 +766,8 @@ export function ReadonlyOutdoorCampusScene({ campus, zoom = 1, showBuildings = t
         return building ? <OutdoorEmergencyStairVisual key={`stair-${stair.id}`} building={building} stair={stair} /> : null;
       })}
       {campus.markers.map((marker) => isCampusGate(marker)
-        ? <OutdoorCampusGateVisual key={`marker-${marker.id}`} marker={marker} showLabel={showLabels} />
-        : <OutdoorMarkerVisual key={`marker-${marker.id}`} marker={marker} zoom={zoom} showLabel={showLabels} />)}
+        ? <OutdoorCampusGateVisual key={`marker-${marker.id}`} marker={marker} showLabel={showLabels} selected={selectedCampusPlaceId === marker.id} onSelect={onSelectCampusPlace} />
+        : <OutdoorMarkerVisual key={`marker-${marker.id}`} marker={marker} zoom={zoom} showLabel={showLabels} selected={selectedCampusPlaceId === marker.id} onSelect={onSelectCampusPlace} />)}
     </g>
   );
 }

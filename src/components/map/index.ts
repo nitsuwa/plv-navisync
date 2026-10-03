@@ -16,3 +16,4 @@ export { ActiveEventsList } from "./ActiveEventsList";
 export { StudentMapControls, type StudentMapControlsProps } from "./StudentMapControls";
 export { StudentFloorPicker, type StudentFloorOption } from "./StudentFloorPicker";
 export { StudentSelectedPlaceCard } from "./StudentSelectedPlaceCard";
+export { CampusPlaceDetails } from "./CampusPlaceDetails";

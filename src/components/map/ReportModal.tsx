@@ -5,6 +5,7 @@ import type { Building } from "../../types";
 import { cn } from "../../lib/utils";
 import { reportService, validateReportImage } from "../../services/reportService";
 import type { FloorPlan } from "../map-builder/types";
+import type { CampusMarker } from "../map-builder/types";
 import { useToast } from "../../hooks/useToast";
 import { useEscToClose } from "../../hooks/useEscToClose";
 
@@ -19,7 +20,8 @@ const ISSUE_TYPES = [
 ];
 
 interface ReportModalProps {
-  building: Building;
+  building?: Building;
+  campusPlace?: CampusMarker;
   campusId?: string;
   floors?: FloorPlan[];
   initialFloorId?: string;
@@ -27,7 +29,7 @@ interface ReportModalProps {
   onClose: () => void;
 }
 
-export function ReportModal({ building, campusId, floors = [], initialFloorId, initialRoomId, onClose }: ReportModalProps) {
+export function ReportModal({ building, campusPlace, campusId, floors = [], initialFloorId, initialRoomId, onClose }: ReportModalProps) {
   useEscToClose(onClose);
   const [issueType, setIssueType] = useState("");
   const [description, setDescription] = useState("");
@@ -40,7 +42,8 @@ export function ReportModal({ building, campusId, floors = [], initialFloorId, i
   const [warning, setWarning] = useState<string | null>(null);
   const selectedFloor = floors.find(floor => floor.id === floorId);
   const selectedRoom = selectedFloor?.rooms.find(room => room.id === roomId);
-  const locationLabel = [building.name, selectedFloor?.label, selectedRoom?.name].filter(Boolean).join(" · ");
+  const placeName = building?.name ?? campusPlace?.name ?? "Campus place";
+  const locationLabel = [campusPlace ? `${campusPlace.type === "gate" ? "Campus Gate" : "Campus place"} · ${placeName}` : placeName, selectedFloor?.label, selectedRoom?.name].filter(Boolean).join(" · ");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { showToast } = useToast();
 
@@ -64,9 +67,12 @@ export function ReportModal({ building, campusId, floors = [], initialFloorId, i
     setError(null);
     try {
       const report = await reportService.submitReport({
-        buildingId: building.id,
+        buildingId: building?.id,
         campusId,
-        buildingName: building.name,
+        buildingName: building?.name,
+        campusPlaceId: campusPlace?.id,
+        campusPlaceName: campusPlace?.name,
+        campusPlaceType: campusPlace?.type,
         floorId: selectedFloor?.id,
         floorLabel: selectedFloor?.label,
         roomId: selectedRoom?.id,
@@ -152,7 +158,7 @@ export function ReportModal({ building, campusId, floors = [], initialFloorId, i
               <h3 className="font-extrabold text-foreground text-sm">
                 Report Issue
               </h3>
-              <p className="text-[11px] text-muted-foreground">{building.name}</p>
+                <p className="text-[11px] text-muted-foreground">{placeName}</p>
             </div>
           </div>
           <button
@@ -181,7 +187,7 @@ export function ReportModal({ building, campusId, floors = [], initialFloorId, i
           </div>}
           <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-muted/60 border border-border">
             <MapPin className="h-3.5 w-3.5 text-primary shrink-0" />
-            <span className="text-xs text-foreground font-semibold flex-1">{building.name}</span>
+            <span className="text-xs text-foreground font-semibold flex-1">{placeName}</span>
             <span className="text-[10px] font-bold text-green-600 dark:text-green-400 bg-green-500/10 px-1.5 py-0.5 rounded-full">
               Auto-set
             </span>

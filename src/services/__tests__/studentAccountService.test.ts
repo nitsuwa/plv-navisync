@@ -6,6 +6,8 @@ import {
   getSavedBuildingIdsAsync,
   getSavedBuildings,
   getSavedBuildingStorageKey,
+  getSavedCampusPlaceIdsAsync,
+  toggleSaveCampusPlace,
   toggleSaveBuilding,
 } from "../studentAccountService";
 
@@ -47,6 +49,27 @@ describe("student account favorites", () => {
     const { client, insert } = favoritesClient([]);
     await expect(toggleSaveBuilding("b1", "campus-1", client)).resolves.toBe(true);
     expect(insert).toHaveBeenCalledWith({ user_id: "user-1", campus_id: "campus-1", building_id: "b1" });
+  });
+
+  it("stores Campus Gate in the existing generic map-element favorites column", async () => {
+    const insert = vi.fn().mockResolvedValue({ error: null });
+    const selectQuery = { eq: vi.fn().mockResolvedValue({ data: [], error: null }) };
+    const client = {
+      auth: { getUser: vi.fn().mockResolvedValue({ data: { user: { id: "user-1" } }, error: null }) },
+      from: vi.fn(() => ({ select: vi.fn(() => selectQuery), insert })),
+    } as unknown as SupabaseClient<Database>;
+
+    await expect(toggleSaveCampusPlace("gate-main", "campus-1", client)).resolves.toBe(true);
+    expect(insert).toHaveBeenCalledWith({ user_id: "user-1", campus_id: "campus-1", map_element_id: "gate-main" });
+  });
+
+  it("loads saved Campus Place IDs from generic map-element favorites", async () => {
+    const selectQuery = { eq: vi.fn().mockResolvedValue({ data: [{ map_element_id: "gate-main" }, { map_element_id: null }], error: null }) };
+    const client = {
+      auth: { getUser: vi.fn().mockResolvedValue({ data: { user: { id: "user-1" } }, error: null }) },
+      from: vi.fn(() => ({ select: vi.fn(() => selectQuery) })),
+    } as unknown as SupabaseClient<Database>;
+    await expect(getSavedCampusPlaceIdsAsync(client)).resolves.toEqual(["gate-main"]);
   });
 
   it("resolves saved building records from IDs without seeded demo data", async () => {

@@ -3,54 +3,105 @@ import { createPortal } from "react-dom";
 import { Link, useLocation, useNavigate } from "react-router";
 import { motion } from "motion/react";
 import { useReducedMotion } from "../../hooks/useReducedMotion";
-import { Bookmark, ChevronDown, Flag, Home, LogIn, LogOut, Settings, UserRound } from "lucide-react";
+import { Bookmark, ChevronDown, Flag, LogIn, LogOut, Settings, UserRound } from "lucide-react";
 import { useStudentAuth } from "../../hooks/useStudentAuth";
 import { cn } from "../../lib/utils";
 
 const menuItemClass = "flex min-h-11 w-full items-center gap-3 px-4 py-2.5 text-left text-sm font-semibold text-foreground transition-colors hover:bg-muted focus-visible:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/50";
 
 interface MobileMapAccountMenuProps {
+  open?: boolean;
   onOpenChange?: (open: boolean) => void;
 }
 
-export function MobileMapAccountMenu({ onOpenChange }: MobileMapAccountMenuProps) {
+export function MobileMapAccountMenu({ open: controlledOpen, onOpenChange }: MobileMapAccountMenuProps) {
   const { isStudent, loading, username, role, signOut } = useStudentAuth();
-  const [open, setOpen] = useState(false);
+  const [internalOpen, setInternalOpen] = useState(false);
+  const open = controlledOpen ?? internalOpen;
   const reducedMotion = useReducedMotion();
   const menuRef = useRef<HTMLDivElement>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const [menuPosition, setMenuPosition] = useState({ top: 0, right: 8 });
+  const [menuMaxHeight, setMenuMaxHeight] = useState(400);
+  const suppressOutsideClickRef = useRef(false);
+  const outsideClickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const navigate = useNavigate();
   const location = useLocation();
   const displayName = isStudent ? username : "Campus visitor";
   const initials = isStudent ? (username.trim().slice(0, 2).toUpperCase() || "ST") : "GU";
   const roleLabel = isStudent ? role.replaceAll("_", " ") : "Guest";
+  const openRef = useRef(open);
+  openRef.current = open;
 
   const changeOpen = (value: boolean) => {
-    setOpen(value);
+    if (controlledOpen === undefined) setInternalOpen(value);
     onOpenChange?.(value);
   };
 
   useEffect(() => {
+    if (!open) return;
     const closeOnOutsidePointer = (event: PointerEvent) => {
       const target = event.target as Node;
       if (menuRef.current?.contains(target) || wrapperRef.current?.contains(target)) return;
+      if (target instanceof Element && target.closest("[data-testid='student-map-search-panel']")) {
+        changeOpen(false);
+        return;
+      }
+      // The outside gesture dismisses the menu only; it must not activate a
+      // building, map control, or sheet underneath the popover.
+      suppressOutsideClickRef.current = true;
+      if (outsideClickTimerRef.current) clearTimeout(outsideClickTimerRef.current);
+      outsideClickTimerRef.current = setTimeout(() => { suppressOutsideClickRef.current = false; }, 700);
+      event.preventDefault();
+      event.stopPropagation();
       changeOpen(false);
     };
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape" && open) {
+        event.preventDefault();
+        event.stopPropagation();
         changeOpen(false);
         triggerRef.current?.focus();
       }
     };
-    document.addEventListener("pointerdown", closeOnOutsidePointer);
+    document.addEventListener("pointerdown", closeOnOutsidePointer, true);
     document.addEventListener("keydown", closeOnEscape);
     return () => {
-      document.removeEventListener("pointerdown", closeOnOutsidePointer);
+      document.removeEventListener("pointerdown", closeOnOutsidePointer, true);
       document.removeEventListener("keydown", closeOnEscape);
     };
   }, [open, onOpenChange]);
+
+  useEffect(() => {
+    const swallowDismissClick = (event: MouseEvent) => {
+      if (suppressOutsideClickRef.current) {
+        suppressOutsideClickRef.current = false;
+        if (outsideClickTimerRef.current) clearTimeout(outsideClickTimerRef.current);
+        outsideClickTimerRef.current = null;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        return;
+      }
+      // Click-only input paths still dismiss the foreground menu without
+      // activating map content underneath it.
+      if (!openRef.current) return;
+      const target = event.target as Node;
+      if (menuRef.current?.contains(target) || wrapperRef.current?.contains(target)) return;
+      if (target instanceof Element && target.closest("[data-testid='student-map-search-panel']")) {
+        changeOpen(false);
+        return;
+      }
+      changeOpen(false);
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    };
+    document.addEventListener("click", swallowDismissClick, true);
+    return () => {
+      document.removeEventListener("click", swallowDismissClick, true);
+      if (outsideClickTimerRef.current) clearTimeout(outsideClickTimerRef.current);
+    };
+  }, []);
 
   useEffect(() => changeOpen(false), [location.pathname]);
 
@@ -59,10 +110,13 @@ export function MobileMapAccountMenu({ onOpenChange }: MobileMapAccountMenuProps
     const updatePosition = () => {
       const rect = triggerRef.current?.getBoundingClientRect();
       if (!rect) return;
+      const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
+      const top = Math.min(rect.bottom + 8, Math.max(8, viewportHeight - 168));
       setMenuPosition({
-        top: rect.bottom + 8,
+        top,
         right: Math.max(8, window.innerWidth - rect.right),
       });
+      setMenuMaxHeight(Math.max(144, viewportHeight - top - 12 - (window.visualViewport?.offsetTop ?? 0)));
     };
     updatePosition();
     window.addEventListener("resize", updatePosition);
@@ -82,15 +136,15 @@ export function MobileMapAccountMenu({ onOpenChange }: MobileMapAccountMenuProps
   };
 
   return (
-      <div ref={wrapperRef} className="relative">
+      <div ref={wrapperRef} data-testid="student-map-profile-trigger" className="relative">
       <button
         ref={triggerRef}
         type="button"
         onClick={() => changeOpen(!open)}
-        aria-label={loading ? "Checking student account" : `${displayName} — user menu`}
+        aria-label={`${displayName} — user menu`}
+        aria-busy={loading}
         aria-expanded={open}
         aria-haspopup="menu"
-        disabled={loading}
         className={cn(
           "relative flex h-12 w-12 min-w-12 shrink-0 items-center justify-center rounded-2xl border border-border/70 bg-card/95 p-0 text-foreground shadow-[0_6px_18px_rgba(15,23,42,0.14)] backdrop-blur-xl transition-[transform,background-color,border-color] duration-150 hover:bg-muted active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 disabled:opacity-70",
           open && "border-primary/40",
@@ -106,16 +160,16 @@ export function MobileMapAccountMenu({ onOpenChange }: MobileMapAccountMenuProps
           <motion.div
             ref={menuRef}
             data-map-layer="transient"
-            data-open={open && !loading}
-            role={open && !loading ? "menu" : undefined}
-            aria-label={open && !loading ? "Student account menu" : undefined}
-            aria-hidden={!open || loading}
-            inert={!open || loading}
+            data-open={open}
+            role={open ? "menu" : undefined}
+            aria-label={open ? "Student account menu" : undefined}
+            aria-hidden={!open}
+            inert={!open}
             initial={false}
-            animate={open && !loading ? { opacity: 1, scale: 1, y: 0 } : { opacity: 0, scale: 0.96, y: -5 }}
+            animate={open ? { opacity: 1, scale: 1, y: 0 } : { opacity: 0, scale: 0.96, y: -5 }}
             transition={reducedMotion ? { duration: 0.01 } : { duration: 0.17, ease: "easeOut" }}
-            className="map-layer-transient fixed z-[var(--map-layer-transient)] max-h-[calc(100dvh-6rem-env(safe-area-inset-bottom,0px))] w-[min(13rem,calc(100vw-10rem))] origin-top-right overflow-y-auto rounded-2xl border border-border bg-card text-foreground shadow-2xl md:hidden"
-            style={{ top: menuPosition.top, right: menuPosition.right, pointerEvents: open && !loading ? "auto" : "none" }}
+            className="map-layer-transient fixed z-[var(--map-layer-transient)] w-[min(14.5rem,calc(100vw-1rem))] origin-top-right overflow-y-auto rounded-2xl border border-border bg-card text-foreground shadow-2xl md:hidden"
+            style={{ top: menuPosition.top, right: menuPosition.right, maxHeight: menuMaxHeight, pointerEvents: open ? "auto" : "none" }}
           >
             <div className="flex items-center gap-3 border-b border-border px-4 py-3.5">
               <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary text-sm font-extrabold text-primary-foreground" aria-hidden="true">
@@ -127,10 +181,9 @@ export function MobileMapAccountMenu({ onOpenChange }: MobileMapAccountMenuProps
               </span>
             </div>
 
-            <div className="py-1.5">
-              <Link role="menuitem" to={isStudent ? "/home" : "/"} onClick={() => changeOpen(false)} className={menuItemClass}>
-                <Home className="h-4 w-4 shrink-0 text-muted-foreground" /> Home
-              </Link>
+            {loading ? (
+              <div role="status" className="px-4 py-3 text-xs font-medium text-muted-foreground">Checking student account…</div>
+            ) : <div className="py-1.5">
               {isStudent ? (
                 <>
                   <Link role="menuitem" to="/student" onClick={() => changeOpen(false)} className={menuItemClass}>
@@ -148,9 +201,9 @@ export function MobileMapAccountMenu({ onOpenChange }: MobileMapAccountMenuProps
                   <LogIn className="h-4 w-4 shrink-0 text-muted-foreground" /> Student sign in
                 </Link>
               )}
-            </div>
+            </div>}
 
-            {isStudent && (
+            {isStudent && !loading && (
               <>
                 <div className="mx-3 h-px bg-border" />
                 <div className="py-1.5">

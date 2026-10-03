@@ -187,8 +187,8 @@ export function RoomVisual({ room, hovered, highlighted, mapMode, onClick, onMou
       onMouseEnter={onMouseEnter ? () => onMouseEnter(room.id) : undefined}
       onMouseLeave={onMouseLeave}
     >
-      <FloorRoomArtwork room={room} fillOpacity={hovered ? 0.66 : 0.58}
-        strokeColor={hovered ? "#3b82f6" : undefined} strokeWidth={hovered ? 1.8 : 1} />
+      <FloorRoomArtwork room={room} fillOpacity={hovered && !highlighted ? 0.62 : 0.58}
+        strokeColor={hovered && !highlighted ? "#60a5fa" : undefined} strokeWidth={hovered && !highlighted ? 1.5 : 1} />
     </g>
   );
 }
@@ -211,19 +211,24 @@ function RoomSelectionOverlay({ room }: { room: FloorRoom }) {
       aria-hidden="true"
     >
       {points ? (
-        <path data-testid="readonly-room-selection-tint" d={roomShapePath(points)} fill="#60a5fa" fillOpacity={0.16} stroke="none" />
+        <path data-testid="readonly-room-selection-tint" d={roomShapePath(points)} fill="#60a5fa" fillOpacity={0.2} stroke="none" />
       ) : (
-        <rect data-testid="readonly-room-selection-tint" x={room.x} y={room.y} width={room.w} height={room.h} rx={1} fill="#60a5fa" fillOpacity={0.16} stroke="none" />
+        <rect data-testid="readonly-room-selection-tint" x={room.x} y={room.y} width={room.w} height={room.h} rx={1} fill="#60a5fa" fillOpacity={0.2} stroke="none" />
       )}
       {points ? (
-        <path data-testid="readonly-room-selection-halo" className="student-room-selection-halo" d={roomShapePath(points)} fill="none" stroke="#3b82f6" strokeOpacity={0.24} strokeWidth={9} strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+        <path data-testid="readonly-room-selection-halo" className="student-room-selection-halo" d={roomShapePath(points)} fill="none" stroke="#3b82f6" strokeOpacity={0.28} strokeWidth={9} strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
       ) : (
-        <rect data-testid="readonly-room-selection-halo" className="student-room-selection-halo" x={room.x} y={room.y} width={room.w} height={room.h} rx={1} fill="none" stroke="#3b82f6" strokeOpacity={0.24} strokeWidth={9} vectorEffect="non-scaling-stroke" />
+        <rect data-testid="readonly-room-selection-halo" className="student-room-selection-halo" x={room.x} y={room.y} width={room.w} height={room.h} rx={1} fill="none" stroke="#3b82f6" strokeOpacity={0.28} strokeWidth={9} vectorEffect="non-scaling-stroke" />
       )}
       {points ? (
-        <path data-testid="readonly-room-selection-outline" d={roomShapePath(points)} fill="none" stroke="#1d4ed8" strokeWidth={2.75} strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+        <path data-testid="readonly-room-selection-outline" d={roomShapePath(points)} fill="none" stroke="#1d4ed8" strokeWidth={3} strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
       ) : (
-        <rect data-testid="readonly-room-selection-outline" x={room.x} y={room.y} width={room.w} height={room.h} rx={1} fill="none" stroke="#1d4ed8" strokeWidth={2.75} vectorEffect="non-scaling-stroke" />
+        <rect data-testid="readonly-room-selection-outline" x={room.x} y={room.y} width={room.w} height={room.h} rx={1} fill="none" stroke="#1d4ed8" strokeWidth={3} vectorEffect="non-scaling-stroke" />
+      )}
+      {points ? (
+        <path data-testid="readonly-room-selection-trace" className="student-room-selection-trace" d={roomShapePath(points)} pathLength={1} fill="none" stroke="#2563eb" strokeWidth={4} strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+      ) : (
+        <rect data-testid="readonly-room-selection-trace" className="student-room-selection-trace" x={room.x} y={room.y} width={room.w} height={room.h} rx={1} pathLength={1} fill="none" stroke="#2563eb" strokeWidth={4} strokeLinecap="round" vectorEffect="non-scaling-stroke" />
       )}
     </g>
   );
@@ -401,7 +406,7 @@ function FurnitureVisual({ item }: { item: FloorFurniture }) {
 }
 
 function RoomLabelVisual({ room, hovered, highlighted }: Pick<RoomVisualProps, "room" | "hovered" | "highlighted">) {
-  return <FloorRoomLabelArtwork room={room} emphasized={hovered || highlighted} opacity={highlighted ? 1 : hovered ? 0.95 : 0.78} />;
+  return <FloorRoomLabelArtwork room={room} emphasized={hovered || highlighted} studentSelected={highlighted} opacity={highlighted ? 1 : hovered ? 0.95 : 0.78} />;
 }
 export interface ReadonlyFloorPlanSceneProps {
   floor: FloorPlan;

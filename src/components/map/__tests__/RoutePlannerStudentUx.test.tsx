@@ -234,6 +234,25 @@ describe("RoutePlannerDialog student accessibility", () => {
     expect(onReportSelectedRoom).toHaveBeenCalledWith(expect.objectContaining({ roomId: "admin-office" }));
   });
 
+  it("keeps the planner mounted and marks selected-place expansion for layout motion", async () => {
+    const propsWithoutRoom = plannerProps();
+    const view = render(<RoutePlannerDialog {...propsWithoutRoom} />);
+    const planner = screen.getByTestId("route-planner-dialog");
+    expect(planner).toHaveAttribute("data-layout-animated", "true");
+
+    view.rerender(
+      <RoutePlannerDialog
+        {...plannerProps({ selectedRoomForPlanner: room("admin-office", "Administration Office") })}
+      />,
+    );
+    expect(screen.getByTestId("route-planner-dialog")).toBe(planner);
+    expect(screen.getByTestId("selected-room-planner-context")).toHaveTextContent("Administration Office");
+
+    view.rerender(<RoutePlannerDialog {...propsWithoutRoom} />);
+    await waitFor(() => expect(screen.queryByTestId("selected-room-planner-context")).not.toBeInTheDocument());
+    expect(screen.getByTestId("route-planner-dialog")).toBe(planner);
+  });
+
   it("uses the dropped pin as the start and lets the user change it", async () => {
     render(<RoutePlannerDialog {...plannerProps({ useMyLocation: true })} />);
 
