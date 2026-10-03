@@ -2990,16 +2990,33 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
     const contextMatchesFloor = Boolean(selectedRoomContext
       && selectedRoomContext.buildingId === floorView.building.id
       && selectedRoomContext.floorNumber === floorView.floor);
-    if (!searchMatchesFloor && !contextMatchesFloor) {
+    // While choosing a room destination, keep that room in the visible map
+    // area above the route planner. The planner remains the same size; its
+    // measured bounds are already included in the safe viewport below.
+    const destinationMatchesFloor = Boolean(directionsMode
+      && navigationPhase === "idle"
+      && !navigationTransitioning
+      && roomDestination
+      && roomDestination.buildingId === floorView.building.id
+      && roomDestination.floorNumber === floorView.floor);
+    if (!searchMatchesFloor && !contextMatchesFloor && !destinationMatchesFloor) {
       lastRoomFocusKeyRef.current = null;
       if (roomFocusAnimationRef.current) cancelCameraAnimation();
       return;
     }
-    const roomId = searchMatchesFloor ? searchTarget?.roomId : contextMatchesFloor ? selectedRoomContext?.roomId : undefined;
+    const roomId = searchMatchesFloor
+      ? searchTarget?.roomId
+      : destinationMatchesFloor
+        ? roomDestination?.roomId
+        : contextMatchesFloor
+          ? selectedRoomContext?.roomId
+          : undefined;
     if (!roomId) return;
     const room = activeFloorPlan.rooms.find((candidate) => candidate.id === roomId);
     if (!room) return;
-    const focusKey = `${floorView.building.id}:${floorView.floor}:${room.id}`;
+    // Opening the planner changes the room's safe viewport even if the same
+    // room was focused moments earlier from its selection card.
+    const focusKey = `${floorView.building.id}:${floorView.floor}:${room.id}:${directionsMode ? "planner" : "map"}`;
     if (lastRoomFocusKeyRef.current === focusKey) {
       if (searchMatchesFloor) searchFocusRef.current = null;
       return;
@@ -3093,7 +3110,7 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
       cancelCameraAnimation();
     }
     if (searchMatchesFloor) searchFocusRef.current = null;
-  }, [activeFloorPlan, animateCameraTo, cancelCameraAnimation, clampMapPan, floorView, floorViewport, isFloorMode, searchFocusNonce, selectedRoomContext?.buildingId, selectedRoomContext?.floorNumber, selectedRoomContext?.roomId, viewportCanvasH, viewportCanvasW]);
+  }, [activeFloorPlan, animateCameraTo, cancelCameraAnimation, clampMapPan, directionsMode, floorView, floorViewport, isFloorMode, navigationPhase, navigationTransitioning, roomDestination?.buildingId, roomDestination?.floorNumber, roomDestination?.roomId, searchFocusNonce, selectedRoomContext?.buildingId, selectedRoomContext?.floorNumber, selectedRoomContext?.roomId, viewportCanvasH, viewportCanvasW]);
 
   const selectBuilding = useCallback((b: Building|null) => {
     cancelCameraAnimation();
