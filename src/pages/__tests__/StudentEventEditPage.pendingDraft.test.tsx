@@ -167,6 +167,20 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 
 describe("StudentEventEditPage pending interaction boundaries", () => {
+  it("confirms Back even with a saved draft and lets the user keep editing", async () => {
+    renderPage();
+    await screen.findByTestId("event-furniture-a-chair");
+    fireEvent.click(screen.getByRole("button", { name: "Back to My Events" }));
+    const dialog = await screen.findByRole("dialog", { name: "Leave event editor?" });
+    expect(within(dialog).getByText(/Your draft is saved/)).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Continue Editing" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Leave event editor?" })).not.toBeInTheDocument());
+    expect(screen.queryByText("My Events landing")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Back to My Events" }));
+    fireEvent.click(within(await screen.findByRole("dialog", { name: "Leave event editor?" })).getByRole("button", { name: "Back to My Events" }));
+    expect(await screen.findByText("My Events landing")).toBeInTheDocument();
+    expect(fixture.service.updateEventOverlayLayout).not.toHaveBeenCalled();
+  });
   it("preserves edits made while a manual save is in flight", async () => {
     let resolveSave!: () => void;
     fixture.service.updateEventOverlayLayout.mockImplementationOnce(() => new Promise<void>((resolve) => { resolveSave = resolve; }));
@@ -304,7 +318,7 @@ describe("StudentEventEditPage pending interaction boundaries", () => {
     fireEvent.click(screen.getByRole("button", { name: "Continue Editing" }));
     expect(screen.queryByText("My Events landing")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Back to My Events" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Don't Save" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Leave without saving" }));
     expect(await screen.findByText("My Events landing")).toBeInTheDocument();
     expect(fixture.service.updateEventOverlayLayout).not.toHaveBeenCalled();
     expect(readEventLayoutDraft("event-1", overlay.locations![0].locationRef)).toBeNull();
@@ -326,7 +340,7 @@ describe("StudentEventEditPage pending interaction boundaries", () => {
     startPendingChairMove();
     fireEvent.click(screen.getByRole("button", { name: "Back to My Events" }));
     const dialog = await screen.findByRole("dialog", { name: "Unsaved Changes" });
-    fireEvent.click(within(dialog).getByRole("button", { name: "Save Draft" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save draft & leave" }));
     await waitFor(() => expect(within(dialog).getByText(/save failed/i)).toBeInTheDocument());
     expect(screen.queryByText("My Events landing")).not.toBeInTheDocument();
   });
@@ -337,7 +351,7 @@ describe("StudentEventEditPage pending interaction boundaries", () => {
     startPendingChairMove();
     fireEvent.click(screen.getByRole("button", { name: "Back to My Events" }));
     const dialog = await screen.findByRole("dialog", { name: "Unsaved Changes" });
-    fireEvent.click(within(dialog).getByRole("button", { name: "Save Draft" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save draft & leave" }));
     await waitFor(() => expect(fixture.service.updateEventOverlayLayout).toHaveBeenCalledTimes(1));
     expect(await screen.findByText("My Events landing")).toBeInTheDocument();
   });

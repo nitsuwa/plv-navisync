@@ -1,5 +1,6 @@
 /** Focused multi-location event map editor for active Student Org accounts. */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { motion, useReducedMotion } from "motion/react";
 import { AlertCircle, ArrowLeft, Loader2 } from "lucide-react";
 import { Link, Navigate, useBlocker, useNavigate, useParams } from "react-router";
 import { EventFloorEditor, type EventEditorDraftSnapshot } from "../components/events/EventFloorEditor";
@@ -41,6 +42,7 @@ function layoutsMatch(a: EventOverlayLocation[], b: EventOverlayLocation[]): boo
 }
 
 export function StudentEventEditPage() {
+  const reducedMotion = useReducedMotion();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const toast = useToast();
@@ -54,6 +56,7 @@ export function StudentEventEditPage() {
   const [saving, setSaving] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [pendingLocationId, setPendingLocationId] = useState<string | null>(null);
+  const [pendingBack, setPendingBack] = useState(false);
   const [dialogError, setDialogError] = useState<string | null>(null);
   const [submissionLocations, setSubmissionLocations] = useState<EventOverlayLocation[] | null>(null);
   const interactionCommitRef = useRef<(() => EventEditorDraftSnapshot) | null>(null);
@@ -217,7 +220,7 @@ export function StudentEventEditPage() {
   }, [captureLocations, clearRecoveryDrafts, overlay, saving, submitting]);
   const saveStatus = useEventAutosave(
     isDirty,
-    Boolean(overlay && (overlay.status === "draft" || overlay.status === "disapproved") && !saving && !submitting && !pendingLocationId && !submissionLocations && blocker.state !== "blocked"),
+    Boolean(overlay && (overlay.status === "draft" || overlay.status === "disapproved") && !saving && !submitting && !pendingLocationId && !pendingBack && !submissionLocations && blocker.state !== "blocked"),
     locations,
     autosave,
   );
@@ -256,6 +259,7 @@ export function StudentEventEditPage() {
   }), [submissionLocations, eventCampus]);
 
   const closePrompt = useCallback(() => {
+    setPendingBack(false);
     setPendingLocationId(null);
     setDialogError(null);
     if (blocker.state === "blocked") blocker.reset();
@@ -265,9 +269,13 @@ export function StudentEventEditPage() {
     const nextLocationId = pendingLocationId;
     setPendingLocationId(null);
     setDialogError(null);
-    if (nextLocationId) setActiveLocationId(nextLocationId);
+    if (pendingBack) {
+      setPendingBack(false);
+      allowNavigationRef.current = true;
+      navigate("/student/events");
+    } else if (nextLocationId) setActiveLocationId(nextLocationId);
     else if (blocker.state === "blocked") blocker.proceed();
-  }, [blocker, pendingLocationId]);
+  }, [blocker, pendingLocationId, pendingBack, navigate]);
 
   const discardAndContinue = useCallback(() => {
     clearRecoveryDrafts();
@@ -303,5 +311,5 @@ export function StudentEventEditPage() {
     eventLabels: activeLocation.eventLabels,
   };
 
-  return <div className="h-full min-h-0 flex flex-col overflow-hidden bg-background"><div className="flex-1 min-h-0 flex flex-col lg:flex-row"><EventLocationSwitcher locations={locations} activeLocationId={activeLocation.id} onChange={handleLocationChange} /><div className="flex-1 min-w-0 min-h-0"><EventFloorEditor key={activeLocation.id} floorPlan={floorPlan} overlay={focusedOverlay} activeCampus={eventCampus} onSave={handleSave} onSubmit={handleSubmit} onDraftChange={handleDraftChange} interactionCommitRef={interactionCommitRef} finalizeDraftRef={finalizeDraftRef} onBack={() => navigate("/student/events")} isSaving={saving} isSubmitting={submitting} saveStatus={saveStatus} tutorialAccountId={profile?.id} /></div></div><EventSubmissionReview open={Boolean(submissionLocations)} title={overlay.title} locations={submissionChecks} busy={submitting || saving} onClose={() => setSubmissionLocations(null)} onConfirm={() => void confirmSubmission()} onReviewLocation={(locationId) => { setSubmissionLocations(null); setActiveLocationId(locationId); }} /><UnsavedChangesDialog open={Boolean(pendingLocationId) || blocker.state === "blocked"} isDirty={isDirty || blocker.state === "blocked"} saving={saving} error={dialogError} description="Save your event map changes before leaving, or discard them." discardLabel="Don't Save" onCancel={closePrompt} onSave={() => void saveAndContinue()} onDiscard={discardAndContinue} /></div>;
+  return <motion.div initial={reducedMotion ? false : { opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.2 }} className="h-full min-h-0 flex flex-col overflow-hidden bg-background"><div className="flex-1 min-h-0 flex flex-col lg:flex-row"><EventLocationSwitcher presentation="responsive" locations={locations} activeLocationId={activeLocation.id} onChange={handleLocationChange} /><div className="flex-1 min-w-0 min-h-0"><EventFloorEditor key={activeLocation.id} floorPlan={floorPlan} overlay={focusedOverlay} activeCampus={eventCampus} onSave={handleSave} onSubmit={handleSubmit} onDraftChange={handleDraftChange} interactionCommitRef={interactionCommitRef} finalizeDraftRef={finalizeDraftRef} onBack={() => { captureLocations(); setDialogError(null); setPendingBack(true); }} isSaving={saving} isSubmitting={submitting} saveStatus={saveStatus} tutorialAccountId={profile?.id} /></div></div><EventSubmissionReview open={Boolean(submissionLocations)} title={overlay.title} locations={submissionChecks} busy={submitting || saving} onClose={() => setSubmissionLocations(null)} onConfirm={() => void confirmSubmission()} onReviewLocation={(locationId) => { setSubmissionLocations(null); setActiveLocationId(locationId); }} /><UnsavedChangesDialog open={pendingBack || Boolean(pendingLocationId) || blocker.state === "blocked"} isDirty={isDirty || blocker.state === "blocked"} saving={saving} error={dialogError} description="Save your event map changes before leaving, or discard them." infoTitle="Leave event editor?" infoDescription="Your draft is saved. You can return to My Events and continue designing later." leaveLabel="Back to My Events" saveLabel={pendingBack ? "Save draft & leave" : "Save Draft"} discardLabel={pendingBack ? "Leave without saving" : "Don't Save"} onCancel={closePrompt} onSave={() => void saveAndContinue()} onDiscard={discardAndContinue} /></motion.div>;
 }

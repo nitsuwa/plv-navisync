@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { EventDetailsModal, EventProposalModal } from "../EventProposalModal";
 
@@ -160,6 +160,7 @@ describe("EventProposalModal", () => {
     fireEvent.click(confirmButton);
     await waitFor(() => expect(onCreate).toHaveBeenCalledTimes(1));
 
+    expect(within(screen.getByRole("alertdialog", { name: /review event proposal/i })).getByRole("status")).toHaveTextContent("Preparing your event workspace");
     expect(createButton).toBeDisabled();
     fireEvent.keyDown(screen.getByRole("alertdialog", { name: /review event proposal/i }), { key: "Escape" });
     fireEvent.pointerDown(screen.getByTestId("proposal-modal-backdrop"), { pointerType: "mouse" });

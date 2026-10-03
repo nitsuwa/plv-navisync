@@ -1,4 +1,5 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
+import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { CanvasAssetPalette } from "../CanvasAssetPalette";
 
@@ -43,18 +44,37 @@ describe("CanvasAssetPalette", () => {
     const dock = screen.getByTestId("canvas-asset-floating-palette");
     expect(dock).toHaveAttribute("data-floating", "true");
     expect(screen.getByRole("button", { name: /add event item/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /more assets/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /browse assets/i })).toBeInTheDocument();
   });
 
   it("offers the active asset and recent choices without opening the full catalog", () => {
     const onSelect = vi.fn();
     render(<CanvasAssetPalette surface="event" activeKey="chair" onSelect={onSelect} floating />);
 
-    expect(screen.getByText("Recently used")).toBeInTheDocument();
+    expect(screen.getByText("Quick assets")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Chair.*selected/i })).toBeInTheDocument();
     expect(screen.queryByRole("searchbox", { name: "Search assets" })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /Table/i }));
     expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ key: "table" }));
+  });
+
+  it("keeps event quick assets in a fixed order when the active asset changes", () => {
+    function StatefulPalette() {
+      const [activeKey, setActiveKey] = useState<string | null>("chair");
+      return <CanvasAssetPalette surface="event" activeKey={activeKey} onSelect={asset => setActiveKey(asset.key)} floating />;
+    }
+
+    render(<StatefulPalette />);
+    const quickAssets = () => within(screen.getByRole("group", { name: "Quick assets" }));
+    const order = () => quickAssets().getAllByRole("button").map(button => button.getAttribute("aria-label"));
+    expect(order()).toEqual(["Chair — selected", "Table", "Booth", "Stage"]);
+
+    const table = quickAssets().getByRole("button", { name: "Table" });
+    table.focus();
+    fireEvent.click(table);
+
+    expect(order()).toEqual(["Chair", "Table — selected", "Booth", "Stage"]);
+    expect(quickAssets().getByRole("button", { name: "Table — selected" })).toHaveFocus();
   });
 });

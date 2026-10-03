@@ -1,13 +1,19 @@
 import type { FloorFurniture, FloorPlan } from "../components/map-builder/types";
 
 export interface LayoutWarning {
-  code: "outside-boundary" | "overlap" | "blocked-access" | "narrow-aisle";
+  code: "outside-boundary" | "overlap" | "blocked-access" | "building-overlap" | "narrow-aisle";
   severity: "info" | "warning" | "critical";
   itemIds: string[];
   message: string;
 }
 
 interface Rect { x: number; y: number; width: number; height: number }
+
+export interface EventProtectedRegion extends Rect {
+  label: string;
+  rotation?: number;
+  kind?: "building";
+}
 
 interface Point { x: number; y: number }
 
@@ -68,7 +74,7 @@ export function validateEventLayout(input: {
   furniture: readonly FloorFurniture[];
   canvasWidth: number;
   canvasHeight: number;
-  blockedRegions?: readonly (Rect & { label: string })[];
+  blockedRegions?: readonly EventProtectedRegion[];
 }): LayoutWarning[] {
   const warnings: LayoutWarning[] = [];
   const furniture = input.furniture;
@@ -85,18 +91,15 @@ export function validateEventLayout(input: {
       });
     }
     for (const region of input.blockedRegions ?? []) {
-      const blockedPoints = [
-        { x: region.x, y: region.y },
-        { x: region.x + region.width, y: region.y },
-        { x: region.x + region.width, y: region.y + region.height },
-        { x: region.x, y: region.y + region.height },
-      ];
+      const blockedPoints = rotatedRectPoints(region);
       if (polygonsOverlap(points, blockedPoints)) {
         warnings.push({
-          code: "blocked-access",
+          code: region.kind === "building" ? "building-overlap" : "blocked-access",
           severity: "critical",
           itemIds: [item.id],
-          message: `${item.name} overlaps the blocked access area: ${region.label}.`,
+          message: region.kind === "building"
+            ? `${item.name} overlaps building ${region.label}. Place it on open campus grounds, or use the requested building floor map for indoor items.`
+            : `${item.name} overlaps the blocked access area: ${region.label}.`,
         });
       }
     }
@@ -119,18 +122,22 @@ export function validateEventLayout(input: {
         continue;
       }
 
+      // Adjacent seats are intentional seating, not an inferred walking aisle.
+      // Real intersections are still reported above.
+      if (a.type === "chair" && b.type === "chair") continue;
+      const spacingHintThreshold = Math.min(4, Math.min(a.width, a.height, b.width, b.height) * 0.15);
       const aBounds = polygonBounds(aPoints);
       const bBounds = polygonBounds(bPoints);
       const horizontalGap = Math.max(aBounds.x - (bBounds.x + bBounds.width), bBounds.x - (aBounds.x + aBounds.width));
       const verticalGap = Math.max(aBounds.y - (bBounds.y + bBounds.height), bBounds.y - (aBounds.y + aBounds.height));
-      const sideBySide = horizontalGap >= 0 && horizontalGap < 12 && projectionsOverlap(aBounds.y, aBounds.y + aBounds.height, bBounds.y, bBounds.y + bBounds.height);
-      const stacked = verticalGap >= 0 && verticalGap < 12 && projectionsOverlap(aBounds.x, aBounds.x + aBounds.width, bBounds.x, bBounds.x + bBounds.width);
+      const sideBySide = horizontalGap >= 0 && horizontalGap < spacingHintThreshold && projectionsOverlap(aBounds.y, aBounds.y + aBounds.height, bBounds.y, bBounds.y + bBounds.height);
+      const stacked = verticalGap >= 0 && verticalGap < spacingHintThreshold && projectionsOverlap(aBounds.x, aBounds.x + aBounds.width, bBounds.x, bBounds.x + bBounds.width);
       if (sideBySide || stacked) {
         warnings.push({
           code: "narrow-aisle",
           severity: "info",
           itemIds,
-          message: `The aisle between ${a.name} and ${b.name} is narrower than the recommended 12 units.`,
+          message: `${a.name} and ${b.name} are very close. Consider clearance if people need to pass between them. This is an optional map-unit hint, not a physical-distance measurement.`,
         });
       }
     }
@@ -140,8 +147,11 @@ export function validateEventLayout(input: {
 }
 
 /** Conservative clearance footprints for authored entrances and permanent assets. */
-export function eventProtectedAccessRegions(floor: Pick<FloorPlan, "doors" | "furniture">): Array<Rect & { label: string }> {
+export function eventProtectedAccessRegions(floor: Pick<FloorPlan, "doors" | "furniture"> & Partial<Pick<FloorPlan, "id" | "rooms">>): EventProtectedRegion[] {
   return [
+    ...(floor.id === "campus" ? (floor.rooms ?? []).filter(room => room.type === "building" && room.visible !== false).map(room => ({
+      x: room.x, y: room.y, width: room.w, height: room.h, rotation: room.rotation ?? 0, label: room.name, kind: "building" as const,
+    })) : []),
     ...(floor.doors ?? []).filter(door => door.visible !== false).map(door => ({ x: door.x - door.width / 2, y: door.y - door.width / 2, width: door.width, height: door.width, label: `${door.isEmergencyExit ? "Emergency exit" : "Entrance"} ${door.label || door.id}` })),
     ...(floor.furniture ?? []).filter(item => item.visible !== false).map(item => ({ ...polygonBounds(rotatedRectPoints(item)), label: `Permanent asset: ${item.name}` })),
   ];

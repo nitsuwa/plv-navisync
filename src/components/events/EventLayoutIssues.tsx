@@ -7,6 +7,7 @@ interface EventLayoutIssuesProps {
   warnings: readonly LayoutWarning[];
   onFocusItems: (ids: string[]) => void;
   disabled?: boolean;
+  compact?: boolean;
 }
 
 const severityLabel: Record<LayoutWarning["severity"], string> = {
@@ -17,16 +18,17 @@ const severityLabel: Record<LayoutWarning["severity"], string> = {
 
 function warningDescription(warning: LayoutWarning) {
   if (warning.code === "narrow-aisle") {
-    return "Items are close together; review walking space. Uses a 12 map-unit spacing heuristic, not a physical-distance measurement.";
+    return warning.message;
   }
   return warning.message;
 }
 
-export function EventLayoutIssues({ warnings, onFocusItems, disabled = false }: EventLayoutIssuesProps) {
+export function EventLayoutIssues({ warnings, onFocusItems, disabled = false, compact = false }: EventLayoutIssuesProps) {
   const [open, setOpen] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const panelId = useId();
-  const count = warnings.length;
+  const count = warnings.filter(warning => warning.severity !== "info").length;
+  const orderedWarnings = [...warnings.filter(warning => warning.severity !== "info"), ...warnings.filter(warning => warning.severity === "info")];
 
   useEffect(() => {
     if (!open) return;
@@ -60,7 +62,7 @@ export function EventLayoutIssues({ warnings, onFocusItems, disabled = false }: 
       data-event-tour="layout-checks"
       data-event-editor-chrome
       data-event-layout-issues={panelId}
-      className="relative z-50 h-9 shrink-0 border-b border-border/70 bg-card/95 px-3 sm:px-4"
+      className={cn("relative z-50 shrink-0", compact ? "h-8 border-0 bg-transparent px-0" : "h-9 border-b border-border/70 bg-card/95 px-3 sm:px-4")}
       onClick={(event) => event.stopPropagation()}
       onPointerDown={(event) => event.stopPropagation()}
     >
@@ -103,18 +105,19 @@ export function EventLayoutIssues({ warnings, onFocusItems, disabled = false }: 
               <X className="h-3.5 w-3.5" aria-hidden="true" />
             </button>
           </div>
-          {count === 0 ? (
+          {count === 0 && warnings.length === 0 ? (
             <div className="flex items-start gap-2 rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-3 py-2.5 text-emerald-700">
               <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
               <p className="text-[11px] leading-4">No placement checks need attention on this map.</p>
             </div>
           ) : (
             <div className="space-y-1.5">
-              {warnings.map((warning, index) => (
+              {orderedWarnings.map((warning, index) => (
                 <div key={`${warning.code}-${warning.itemIds.join("-")}-${index}`} className="rounded-xl border border-border/70 bg-background/70 p-2.5">
+                  {warning.severity === "info" && index === count && <p className="mb-2 text-[11px] font-semibold text-muted-foreground">Optional spacing tips</p>}
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <p className="text-[10px] font-extrabold uppercase tracking-[0.08em] text-amber-700">{severityLabel[warning.severity]}</p>
+                      <p className={cn("text-[10px] font-extrabold uppercase tracking-[0.08em]", warning.severity === "info" ? "text-muted-foreground" : "text-amber-700")}>{severityLabel[warning.severity]}</p>
                       <p className="mt-0.5 text-[11px] font-semibold leading-4 text-foreground">{warningDescription(warning)}</p>
                     </div>
                     <button
