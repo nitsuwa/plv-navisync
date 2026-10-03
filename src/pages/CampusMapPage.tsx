@@ -1348,6 +1348,11 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
   const getMapPanBounds = useCallback((zoomValue = zoomRef.current) => {
     const rect = mapContainerRef.current?.getBoundingClientRect();
     const isMobileViewport = typeof window !== "undefined" && window.innerWidth < 768;
+    const focusingMobileBuildingDestination = isMobileViewport
+      && directionsMode
+      && !isFloorMode
+      && !roomDestination
+      && Boolean(toBuilding);
     return getViewportPanBounds({
       mapWidth: viewportCanvasW,
       mapHeight: viewportCanvasH,
@@ -1358,7 +1363,7 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
       insets: isMobileViewport
         ? (isFloorMode ? MOBILE_FLOOR_VIEWER_INSETS : MOBILE_OUTDOOR_VIEWER_INSETS)
         : undefined,
-      inspectionSlack: isFloorMode
+      inspectionSlack: isFloorMode || focusingMobileBuildingDestination
         ? getStudentFloorInspectionSlack(
             rect?.width || viewportCanvasW,
             rect?.height || viewportCanvasH,
@@ -1366,7 +1371,7 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
           )
         : undefined,
     });
-  }, [isFloorMode, viewportCanvasH, viewportCanvasW]);
+  }, [directionsMode, isFloorMode, roomDestination, toBuilding, viewportCanvasH, viewportCanvasW]);
   const clampMapPan = useCallback((candidate: Pt, zoomValue = zoomRef.current) =>
     clampViewportPan(candidate, getMapPanBounds(zoomValue)), [getMapPanBounds]);
 
@@ -1375,9 +1380,8 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
   /** One retargetable, time-based RAF loop for every animated camera move. */
   const animateCameraTo = useCallback((targetPan: Pt, targetZoom = zoomStateRef.current, source?: "room-focus") => {
     const toZoom = clampStudentMapZoom(targetZoom);
-    // Every camera source must settle inside the same pan bounds. Previously
-    // cursor zoom bypassed these bounds, then the React-state reconciliation
-    // effect clamped the committed pan and produced a small second movement.
+    // Every camera move settles inside the active map pan bounds. Destination
+    // bounds include inspection slack on mobile while a building route is open.
     const toPan = clampMapPan(targetPan, toZoom);
     roomFocusAnimationRef.current = source === "room-focus";
     timedCameraMotionRef.current = source === "room-focus"
@@ -3020,7 +3024,7 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
     });
     lastDestinationBuildingFocusKeyRef.current = focusKey;
     if (focus.shouldMove) {
-      animateCameraTo(clampMapPan(focus.pan, focus.zoom), focus.zoom, "room-focus");
+      animateCameraTo(focus.pan, focus.zoom, "room-focus");
     } else if (roomFocusAnimationRef.current) {
       cancelCameraAnimation();
     }
