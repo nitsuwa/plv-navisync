@@ -349,7 +349,7 @@ export function StudentReportsPage() {
                               </div>
                               <div className="flex items-center gap-1.5 mt-1 text-xs text-muted-foreground">
                                 <MapPin className="h-3 w-3 text-primary shrink-0" />
-                                {[r.buildingName || "Campus Location", r.floorLabel, r.roomName].filter(Boolean).join(" · ")}
+                                {[r.campusPlaceName || r.buildingName || "Campus Location", r.floorLabel, r.roomName].filter(Boolean).join(" · ")}
                               </div>
                               <p className="text-[10px] text-muted-foreground mt-0.5">{dateStr}</p>
                             </div>

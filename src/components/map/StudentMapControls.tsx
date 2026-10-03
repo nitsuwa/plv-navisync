@@ -1,9 +1,8 @@
 import {
   ChevronLeft,
-  MapPin,
+  Crosshair,
   Navigation,
   QrCode,
-  RotateCcw,
 } from "lucide-react";
 import { useState } from "react";
 import type { SearchResult } from "../../hooks";
@@ -17,9 +16,7 @@ export interface StudentMapControlsProps {
   search: string;
   searchFocused: boolean;
   directionsMode: boolean;
-  pinning?: boolean;
-  youAreHere?: boolean;
-  hasSelectedRoom?: boolean;
+  profileOpen?: boolean;
   searchResults: readonly SearchResult[];
   onSearchChange: (value: string) => void;
   onSearchFocus: () => void;
@@ -28,7 +25,6 @@ export interface StudentMapControlsProps {
   onSelectSearchResult: (result: SearchResult) => void;
   onOpenDirections: () => void;
   onScanLocation?: () => void;
-  onTogglePin?: () => void;
   onResetView?: () => void;
   onBackToCampus?: () => void;
 }
@@ -39,9 +35,7 @@ export function StudentMapControls({
   search,
   searchFocused,
   directionsMode,
-  pinning = false,
-  youAreHere = false,
-  hasSelectedRoom = false,
+  profileOpen = false,
   searchResults,
   onSearchChange,
   onSearchFocus,
@@ -50,7 +44,6 @@ export function StudentMapControls({
   onSelectSearchResult,
   onOpenDirections,
   onScanLocation,
-  onTogglePin,
   onResetView,
   onBackToCampus,
 }: StudentMapControlsProps) {
@@ -58,12 +51,7 @@ export function StudentMapControls({
   const searchPlaceholder = isFloorMode
     ? "Search rooms, offices, and labs"
     : "Search buildings, offices, and rooms";
-  const pinLabel = pinning
-    ? "Cancel drop pin"
-    : youAreHere
-      ? "Move dropped pin"
-      : "Drop pin";
-  const utilityControlsVisible = !directionsMode && !searchFocused && (!isFloorMode || !hasSelectedRoom);
+  const utilityControlsVisible = !directionsMode && !searchFocused;
 
   const handleClearSearch = () => {
     setDestinationFilter("all");
@@ -116,7 +104,14 @@ export function StudentMapControls({
       )}
 
       {utilityControlsVisible && (
-        <div data-testid="student-map-utility-controls" data-no-drag className="absolute right-3 top-20 flex flex-col items-end gap-1.5 pointer-events-auto">
+        <div
+          data-testid="student-map-utility-controls"
+          data-no-drag
+          data-profile-open={profileOpen ? "true" : "false"}
+          aria-hidden={profileOpen}
+          inert={profileOpen}
+          className="student-map-utility-stack pointer-events-auto absolute right-3 top-20 flex flex-col items-end gap-1.5"
+        >
           <button
             type="button"
             onClick={onOpenDirections}
@@ -138,30 +133,17 @@ export function StudentMapControls({
               <QrCode className="h-[18px] w-[18px]" />
             </button>
           )}
-          {!isFloorMode && onTogglePin && (
-            <button
-              type="button"
-              onClick={onTogglePin}
-              aria-label={pinLabel}
-              aria-pressed={pinning}
-              title={pinLabel}
-              className={cn(
-                "flex h-11 w-11 items-center justify-center rounded-xl border border-white/50 bg-card/95 text-primary shadow-[0_6px_18px_rgba(15,23,42,0.14)] backdrop-blur-xl transition-[transform,background-color,box-shadow] duration-150 hover:bg-primary/10 hover:shadow-lg active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 dark:border-white/10 md:h-10 md:w-10",
-                pinning && "bg-primary/10",
-              )}
-            >
-              <MapPin className="h-[18px] w-[18px]" />
-            </button>
-          )}
           {onResetView && (
             <button
               type="button"
+            data-testid="student-map-recenter-button"
+            data-dock="map-control-top-right"
               onClick={onResetView}
-              aria-label="Reset map view"
-              title="Reset map view"
-              className="flex h-11 w-11 items-center justify-center rounded-xl border border-white/50 bg-card/95 text-muted-foreground shadow-[0_6px_18px_rgba(15,23,42,0.14)] backdrop-blur-xl transition-[transform,background-color,box-shadow] duration-150 hover:bg-muted hover:text-primary hover:shadow-lg active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 dark:border-white/10 md:h-10 md:w-10"
+              aria-label="Recenter map"
+              title="Recenter map"
+              className="flex h-11 w-11 items-center justify-center rounded-xl border border-white/50 bg-card/95 text-primary shadow-[0_6px_18px_rgba(15,23,42,0.14)] backdrop-blur-xl transition-[transform,background-color,box-shadow] duration-150 hover:bg-primary/10 hover:shadow-lg active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 dark:border-white/10 md:h-10 md:w-10"
             >
-              <RotateCcw className="h-[18px] w-[18px]" />
+              <Crosshair className="h-[18px] w-[18px]" />
             </button>
           )}
         </div>

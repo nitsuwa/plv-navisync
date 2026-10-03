@@ -39,7 +39,7 @@ import {
   BUILDING_ENTRANCE_DIRECTION_LABELS,
 } from "../../lib/buildingEntrances";
 import type {
-  Campus, CampusBuilding, CampusMarker, CampusSelection, EditorLayer, FloorSelection,
+  Campus, CampusBuilding, CampusMarker, CampusGateType, CampusPlaceStudentInfo, CampusSelection, EditorLayer, FloorSelection,
   CampusRoute, NavigationNode, NavigationEdge, CampusEventOverlay,
   EventLocationRef, FloorPlan, CampusDecorAsset,
   CampusGroundMaterial, CampusGroundTexture,
@@ -58,7 +58,7 @@ import {
 } from "../../lib/campusPathNetwork";
 import { isCampusGate } from "../../lib/campusGates";
 import { CAMPUS_GROUND_MATERIALS, campusAreaGroundAppearance } from "../../lib/campusCanvas";
-import { buildingCoverPublicUrl, uploadBuildingCoverImage } from "../../services/buildingImageService";
+import { buildingCoverPublicUrl, uploadBuildingCoverImage, uploadCampusPlaceCoverImage } from "../../services/buildingImageService";
 import { BuildingWeeklyHoursEditor } from "./BuildingWeeklyHoursEditor";
 import { BUILDING_TYPE_OPTIONS } from "../../types/buildingInformation";
 import { buildingTypeValue, deriveBuildingAccessibilityFacts, facilityIsOnAuthoredMap } from "../../lib/buildingInformation";
@@ -601,10 +601,14 @@ export function PropertiesPanel({
   const [buildingCoverUploading, setBuildingCoverUploading] = useState(false);
   const [buildingCoverError, setBuildingCoverError] = useState<string | null>(null);
   const [buildingCoverDragActive, setBuildingCoverDragActive] = useState(false);
+  const [placeCoverUploading, setPlaceCoverUploading] = useState(false);
+  const [placeCoverError, setPlaceCoverError] = useState<string | null>(null);
+  const placeCoverInputRef = useRef<HTMLInputElement>(null);
   const [exteriorStairsOpen, setExteriorStairsOpen] = useState(false);
   const [expandedStairId, setExpandedStairId] = useState<string | null>(null);
   const buildingCoverInputRef = useRef<HTMLInputElement>(null);
   useEffect(() => { setBuildingCoverError(null); }, [selBldg?.id]);
+  useEffect(() => { setPlaceCoverError(null); }, [selMkr?.id]);
   useEffect(() => { setExpandedStairId(null); setExteriorStairsOpen(false); }, [selBldg?.id]);
   const navigationHealth = useMemo(() => navigationCampus && selBldg
     ? buildingNavigationHealth(navigationCampus, selBldg)
@@ -624,6 +628,19 @@ export function PropertiesPanel({
       setBuildingCoverUploading(false);
     }
   }, [onUpdateBuilding, selBldg]);
+  const uploadPlaceCoverFile = useCallback(async (file: File) => {
+    if (!selMkr) return;
+    setPlaceCoverError(null);
+    setPlaceCoverUploading(true);
+    try {
+      const path = await uploadCampusPlaceCoverImage(selMkr.id, file);
+      onUpdateMarker(selMkr.id, { studentInfo: { ...(selMkr.studentInfo ?? {}), coverImagePath: path } });
+    } catch (error) {
+      setPlaceCoverError(error instanceof Error && /JPEG|PNG|WebP|5 MB/.test(error.message)
+        ? error.message
+        : "The place photo could not be uploaded. Try again.");
+    } finally { setPlaceCoverUploading(false); }
+  }, [onUpdateMarker, selMkr]);
   const visible = open ?? (!!selected || multiSelected.length > 0);
   const selectedPathPointForPath = selPath && selectedPathPoint?.pathId === selPath.id ? selectedPathPoint : null;
   const selectedPathPointCoord = selectedPathPointForPath ? selPath?.points[selectedPathPointForPath.pointIndex] : undefined;
@@ -757,6 +774,10 @@ export function PropertiesPanel({
     selNavNode?.id && exteriorEmergencyStairOutdoorDischargeConnected(selNavNode.id, allNavNodes ?? [], allNavEdges ?? []),
   );
   const selectedCampusGate = isCampusGate(selMkr) ? selMkr : undefined;
+  const updatePlaceInfo = (changes: Partial<CampusPlaceStudentInfo>) => {
+    if (!selMkr) return;
+    onUpdateMarker(selMkr.id, { studentInfo: { ...(selMkr.studentInfo ?? {}), ...changes } });
+  };
   const selectedCampusGateNode = selectedCampusGate?.navNodeId
     ? allNavNodes?.find((node) => node.id === selectedCampusGate.navNodeId)
     : undefined;
@@ -2017,7 +2038,7 @@ export function PropertiesPanel({
               <label htmlFor="mkr-name" className={labelCls}>Name</label>
               <input id="mkr-name" value={selMkr.name} onChange={(e) => onUpdateMarker(selMkr.id, { name: e.target.value })} className={inputCls} placeholder={selectedCampusGate ? "Campus Gate name" : "Marker name"} />
             </div>
-            {selectedCampusGate ? (
+            {selectedCampusGate ? (<>
               <div>
                 <label className={labelCls}>Purpose</label>
                 <div className="grid grid-cols-2 gap-1.5">
@@ -2038,7 +2059,53 @@ export function PropertiesPanel({
                   ))}
                 </div>
               </div>
-            ) : (
+            {selectedCampusGate && <section data-testid="campus-gate-student-information" className="space-y-3 rounded-xl border border-primary/15 bg-primary/[0.025] p-2.5">
+              <div><p className="text-[10px] font-extrabold uppercase tracking-widest text-primary">Student Information</p><p className="mt-0.5 text-[9px] text-muted-foreground">Optional details shown when students select this gate.</p></div>
+              <div>
+                <label htmlFor="gate-student-description" className={labelCls}>Student description</label>
+                <textarea id="gate-student-description" rows={3} maxLength={400} value={selectedCampusGate.studentInfo?.description ?? ""} onChange={(event) => updatePlaceInfo({ description: event.target.value || undefined })} className="w-full resize-y rounded-xl border border-border bg-input-background px-3 py-2 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30" placeholder="A short description shown to students in the campus map." />
+                <p className="mt-1 text-right text-[9px] text-muted-foreground">{selectedCampusGate.studentInfo?.description?.length ?? 0}/400</p>
+              </div>
+              <div>
+                <label className={labelCls}>Gate type</label>
+                <Combobox
+                  value={selectedCampusGate.studentInfo?.gateType ?? (selectedCampusGate.purpose === "emergency_exit" ? "emergency" : "main_entrance")}
+                  onChange={(value) => updatePlaceInfo({ gateType: value as CampusGateType })}
+                  options={[
+                    { value: "main_entrance", label: "Main entrance" },
+                    { value: "pedestrian", label: "Pedestrian" },
+                    { value: "service", label: "Service" },
+                    { value: "emergency", label: "Emergency" },
+                    { value: "other", label: "Other" },
+                  ]}
+                  placeholder="Select gate type"
+                  searchPlaceholder="Search gate types..."
+                />
+              </div>
+              <div className="space-y-2 rounded-xl border border-border/70 bg-card/70 p-2">
+                <p className="text-[10px] font-bold text-foreground">Cover photo <span className="font-normal text-muted-foreground">(optional)</span></p>
+                <input ref={placeCoverInputRef} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" aria-label="Upload gate cover photo" onChange={async (event) => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ""; if (file) await uploadPlaceCoverFile(file); }} />
+                {selectedCampusGate.studentInfo?.coverImagePath ? <img src={buildingCoverPublicUrl(selectedCampusGate.studentInfo.coverImagePath)} alt={`${selectedCampusGate.name} cover photo preview`} className="aspect-[16/8] w-full rounded-lg object-cover ring-1 ring-border" /> : <div className="flex aspect-[16/8] w-full items-center justify-center rounded-lg border border-dashed border-border bg-gradient-to-br from-[#0b1b35] via-[#173d68] to-[#287c95] text-white/80"><DoorOpen className="h-8 w-8" /></div>}
+                <div className="flex gap-2"><button type="button" disabled={placeCoverUploading} onClick={() => placeCoverInputRef.current?.click()} className="inline-flex h-8 flex-1 items-center justify-center gap-1.5 rounded-lg border border-primary/20 px-2 text-[10px] font-bold text-primary hover:bg-primary/5 disabled:opacity-50">{selectedCampusGate.studentInfo?.coverImagePath ? <Upload className="h-3 w-3" /> : <ImagePlus className="h-3 w-3" />}{placeCoverUploading ? "Uploading…" : selectedCampusGate.studentInfo?.coverImagePath ? "Replace photo" : "Upload photo"}</button>{selectedCampusGate.studentInfo?.coverImagePath && <button type="button" disabled={placeCoverUploading} onClick={() => updatePlaceInfo({ coverImagePath: undefined })} className="h-8 rounded-lg border border-border px-2 text-[10px] font-bold text-muted-foreground">Remove</button>}</div>
+                <p className="text-[8px] text-muted-foreground">JPG, PNG or WebP · max 5 MB</p>
+                {placeCoverError && <p role="alert" className="text-[10px] text-destructive">{placeCoverError}</p>}
+              </div>
+              <BuildingWeeklyHoursEditor
+                value={selectedCampusGate.studentInfo?.operatingHoursSchedule}
+                onChange={(operatingHoursSchedule) => updatePlaceInfo({ operatingHoursSchedule })}
+                onClear={() => updatePlaceInfo({ operatingHoursSchedule: undefined })}
+              />
+              <div className="space-y-1.5">
+                <span className={labelCls}>Access information</span>
+                {([
+                  ["accessibleEntrance", "Accessible entrance"],
+                  ["pedestrianAccess", "Pedestrian access"],
+                  ["vehicleAccess", "Vehicle access"],
+                  ["securityCheckpoint", "Security checkpoint"],
+                ] as const).map(([key, label]) => <label key={key} className="flex min-h-8 cursor-pointer items-center gap-2 rounded-lg border border-border/70 bg-card/70 px-2 text-[10px] font-semibold text-foreground"><input type="checkbox" checked={!!selectedCampusGate.studentInfo?.[key]} onChange={(event) => updatePlaceInfo({ [key]: event.target.checked } as Partial<CampusPlaceStudentInfo>)} className="accent-primary" />{label}</label>)}
+              </div>
+            </section>}
+            </>) : (
               <div>
                 <label className={labelCls}>Type</label>
                 <Combobox

@@ -14,6 +14,7 @@ export interface SearchResult {
   floorId?: string;
   floorNumber?: number;
   floorLabel?: string;
+  campusPlaceId?: string;
   description?: string;
   accessible: boolean;
   keywords: string[];
@@ -226,10 +227,11 @@ export function useCampusSearch(
         id: m.id,
         name: mName,
         kind: "marker",
-        category: "facility",
-        description: "Campus Landmark",
-        accessible: true,
-        keywords: [mName.toLowerCase(), "landmark"],
+        category: m.type === "gate" ? "gate" : "landmark",
+        campusPlaceId: m.id,
+        description: m.studentInfo?.description || (m.type === "gate" ? "Campus Gate" : "Campus Landmark"),
+        accessible: Boolean(m.studentInfo?.accessibleEntrance),
+        keywords: [mName.toLowerCase(), "landmark", m.type.toLowerCase(), ...(m.studentInfo?.description ? [m.studentInfo.description.toLowerCase()] : [])],
       });
     });
 

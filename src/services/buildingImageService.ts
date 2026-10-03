@@ -10,10 +10,18 @@ export function validateBuildingCoverImage(file: Pick<File, "type" | "size">): v
 }
 
 export async function uploadBuildingCoverImage(buildingId: string, file: File): Promise<string> {
+  return uploadPlaceCoverImage("buildings", buildingId, file);
+}
+
+export async function uploadCampusPlaceCoverImage(placeId: string, file: File): Promise<string> {
+  return uploadPlaceCoverImage("campus-places", placeId, file);
+}
+
+async function uploadPlaceCoverImage(folder: "buildings" | "campus-places", entityId: string, file: File): Promise<string> {
   validateBuildingCoverImage(file);
   const extension = file.type === "image/jpeg" ? "jpg" : file.type.slice("image/".length);
-  const safeBuildingId = buildingId.replace(/[^a-zA-Z0-9_-]/g, "_");
-  const path = `buildings/${safeBuildingId}/${crypto.randomUUID()}.${extension}`;
+  const safeEntityId = entityId.replace(/[^a-zA-Z0-9_-]/g, "_");
+  const path = `${folder}/${safeEntityId}/${crypto.randomUUID()}.${extension}`;
   const { error } = await getSupabase().storage.from(BUILDING_IMAGE_BUCKET).upload(path, file, {
     contentType: file.type,
     upsert: false,

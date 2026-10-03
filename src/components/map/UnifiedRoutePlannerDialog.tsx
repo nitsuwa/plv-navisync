@@ -3,7 +3,7 @@ import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { SearchResult } from "../../hooks/useCampusSearch";
 import { searchDestinationResults, type DestinationFilter } from "../../lib/destinationSearch";
-import type { RoomDest } from "../../lib/combinedPathfinding";
+import type { CampusPlaceDest, RoomDest } from "../../lib/combinedPathfinding";
 import type { PlannedRoute, RouteMode } from "../../lib/routePlanner";
 import { formatDistance, formatMinutes } from "../../lib/routePlanner";
 import type { Building } from "../../types";
@@ -18,6 +18,8 @@ export type RoutePlannerEndpoint = "start" | "destination";
 export interface UnifiedRoutePlannerDialogProps {
   from: Building | null;
   to: Building | null;
+  fromCampusPlace?: CampusPlaceDest | null;
+  toCampusPlace?: CampusPlaceDest | null;
   onFromChange: (building: Building | null) => void;
   onToChange: (building: Building | null) => void;
   buildings: readonly Building[];
@@ -61,6 +63,7 @@ const MODES: Array<{ key: RouteMode; label: string; icon: ReactNode }> = [
 function endpointText(
   purpose: RoutePlannerEndpoint,
   building: Building | null,
+  campusPlace: CampusPlaceDest | null | undefined,
   room: RoomDest | null | undefined,
   useMyLocation: boolean,
   youAreHere: { x: number; y: number } | null | undefined,
@@ -70,15 +73,17 @@ function endpointText(
     return { label: "You are here", context: youAreHereLabel ?? "Current map location" };
   }
   if (room) return { label: room.roomName, context: `${room.buildingLabel} · ${room.floorLabel ?? `Floor ${room.floorNumber}`}` };
+  if (campusPlace) return { label: campusPlace.label, context: "Campus place" };
   if (building) return { label: building.name, context: `${building.code} · Building` };
   return { label: purpose === "start" ? "Choose starting point" : "Choose destination", context: "Search buildings, rooms, and offices" };
 }
 
 function EndpointCard({
-  purpose, building, room, useMyLocation, youAreHere, youAreHereLabel, onChange,
+  purpose, building, campusPlace, room, useMyLocation, youAreHere, youAreHereLabel, onChange,
 }: {
   purpose: RoutePlannerEndpoint;
   building: Building | null;
+  campusPlace?: CampusPlaceDest | null;
   room: RoomDest | null | undefined;
   useMyLocation: boolean;
   youAreHere?: { x: number; y: number } | null;
@@ -86,8 +91,8 @@ function EndpointCard({
   onChange: () => void;
 }) {
   const isStart = purpose === "start";
-  const text = endpointText(purpose, building, room, useMyLocation, youAreHere, youAreHereLabel);
-  const selected = Boolean((isStart && useMyLocation && youAreHere) || room || building);
+  const text = endpointText(purpose, building, campusPlace, room, useMyLocation, youAreHere, youAreHereLabel);
+  const selected = Boolean((isStart && useMyLocation && youAreHere) || room || building || campusPlace);
   return (
     <div data-testid={`route-endpoint-card-${isStart ? "start" : "destination"}`} className={cn(
       "flex min-h-[62px] items-center gap-2.5 rounded-2xl border px-3 py-2.5 transition-colors",
@@ -108,7 +113,7 @@ function EndpointCard({
 
 /** Shared compact route workflow for the live Student Map and Student Preview. */
 export function UnifiedRoutePlannerDialog({
-  from, to, onFromChange, onToChange, mode, onModeChange, route, onClose, onClear, onFindRoute,
+  from, to, fromCampusPlace = null, toCampusPlace = null, onFromChange, onToChange, mode, onModeChange, route, onClose, onClear, onFindRoute,
   youAreHere, youAreHereLabel, useMyLocation, onUseMyLocationChange, fromRoom = null, toRoom = null,
   onSwapEndpoints, destinationResults = [], onSelectFromDestination, onSelectToDestination,
   activeEndpoint: controlledEndpoint, onActiveEndpointChange, selectedRoomForPlanner,
@@ -143,15 +148,15 @@ export function UnifiedRoutePlannerDialog({
     return () => { if (previous instanceof HTMLElement && document.contains(previous)) previous.focus(); };
   }, []);
 
-  const hasFrom = Boolean(fromRoom || from || (useMyLocation && youAreHere));
+  const hasFrom = Boolean(fromRoom || fromCampusPlace || from || (useMyLocation && youAreHere));
   const isEmergency = mode === "emergency";
-  const hasTo = isEmergency || Boolean(toRoom || to);
+  const hasTo = isEmergency || Boolean(toRoom || toCampusPlace || to);
   const bothSet = hasFrom && hasTo;
   const canStart = Boolean(bothSet && route);
-  const fromDisplay = endpointText("start", from, fromRoom, useMyLocation, youAreHere, youAreHereLabel);
+  const fromDisplay = endpointText("start", from, fromCampusPlace, fromRoom, useMyLocation, youAreHere, youAreHereLabel);
   const toDisplay = isEmergency
     ? { label: route?.emergencyDestinationLabel ?? "Safe evacuation exit", context: "Selected automatically from emergency paths" }
-    : endpointText("destination", to, toRoom, false, null);
+    : endpointText("destination", to, toCampusPlace, toRoom, false, null);
   const selectedSearchRoom = selectedRoomForPlanner;
   const searchTitle = activeEndpoint === "start" ? "Choose starting point" : "Choose destination";
   const endpointResults = useMemo(
@@ -181,7 +186,11 @@ export function UnifiedRoutePlannerDialog({
   const canShowMainForm = activeEndpoint === null;
 
   return (
-    <div
+    <motion.div
+      layout
+      transition={reducedMotion
+        ? { layout: { duration: 0.01 } }
+        : { layout: { duration: 0.25, ease: [0.2, 0.8, 0.2, 1] } }}
       ref={dialogRef}
       role="dialog"
       aria-modal="false"
@@ -189,6 +198,7 @@ export function UnifiedRoutePlannerDialog({
       aria-describedby="route-planner-description"
       tabIndex={-1}
       data-testid="route-planner-dialog"
+      data-layout-animated="true"
       data-map-surface="route-planner"
       data-suspended-for-building={isSuspendedForBuilding ? "true" : "false"}
       data-search-open={activeEndpoint ? "true" : "false"}
@@ -283,7 +293,7 @@ export function UnifiedRoutePlannerDialog({
                   ))}
                 </div>
                 {mode === "accessible" && <p data-testid="accessible-route-note" className="rounded-lg bg-emerald-700/[0.06] px-2.5 py-2 text-[10px] leading-relaxed text-emerald-800 dark:text-emerald-200">Accessible route · Uses ramps and elevators where the authored path supports them.</p>}
-                <EndpointCard purpose="start" building={from} room={fromRoom} useMyLocation={useMyLocation} youAreHere={youAreHere} onChange={() => openSearch("start")} />
+                <EndpointCard purpose="start" building={from} campusPlace={fromCampusPlace} room={fromRoom} useMyLocation={useMyLocation} youAreHere={youAreHere} onChange={() => openSearch("start")} />
                 {!isEmergency && bothSet && (
                   <div data-testid="route-planner-swap-row" className="flex h-9 items-center justify-center">
                     <button type="button" onClick={swapEndpoints} aria-label="Swap start and destination" title="Swap start and destination" className="flex h-8 w-8 items-center justify-center rounded-full border border-border/80 bg-muted/50 text-muted-foreground transition-[transform,background-color,color,border-color] duration-150 hover:border-primary/30 hover:bg-primary/5 hover:text-primary active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 motion-reduce:transition-none"><ArrowUpDown className="h-3.5 w-3.5" /></button>
@@ -292,10 +302,19 @@ export function UnifiedRoutePlannerDialog({
                 {isEmergency ? (
                   <div data-testid="emergency-destination" className="rounded-xl border border-rose-500/20 bg-rose-500/[0.04] px-3 py-2.5"><p className="text-[10px] font-extrabold text-rose-700 dark:text-rose-300">Automatic evacuation destination</p><p className="mt-0.5 truncate text-[12px] font-bold">{toDisplay.label}</p><p className="mt-0.5 text-[10px] leading-relaxed text-muted-foreground">Uses valid emergency exits and excludes elevators.</p></div>
                 ) : (
-                  <EndpointCard purpose="destination" building={to} room={toRoom} useMyLocation={false} onChange={() => openSearch("destination")} />
+                  <EndpointCard purpose="destination" building={to} campusPlace={toCampusPlace} room={toRoom} useMyLocation={false} onChange={() => openSearch("destination")} />
                 )}
+                <AnimatePresence initial={false}>
                 {selectedSearchRoom && (
-                  <div data-testid="selected-room-planner-context" className="rounded-xl border border-primary/15 bg-primary/[0.035] p-2.5">
+                  <motion.div
+                    key="selected-room-planner-context"
+                    data-testid="selected-room-planner-context"
+                    initial={reducedMotion ? false : { opacity: 0, y: 6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={reducedMotion ? { opacity: 0 } : { opacity: 0, y: 4 }}
+                    transition={reducedMotion ? { duration: 0.01 } : { duration: 0.2, ease: "easeOut" }}
+                    className="rounded-xl border border-primary/15 bg-primary/[0.035] p-2.5"
+                  >
                     <p className="truncate text-[11px] font-bold">{selectedSearchRoom.roomName}</p>
                     <p className="truncate text-[10px] text-muted-foreground">{selectedSearchRoom.buildingLabel} · {selectedSearchRoom.floorLabel ?? `Floor ${selectedSearchRoom.floorNumber}`}</p>
                     <div className="mt-1.5 grid grid-cols-3 gap-1.5">
@@ -303,8 +322,9 @@ export function UnifiedRoutePlannerDialog({
                       <button type="button" onClick={() => onUseSelectedRoomAsDestination?.(selectedSearchRoom)} className="min-h-8 rounded-lg bg-card px-2.5 text-[10px] font-extrabold text-primary hover:bg-primary/10">Use as Destination</button>
                       {onReportSelectedRoom && <StudentReportAction ariaLabel="Report this room" onClick={() => onReportSelectedRoom(selectedSearchRoom)} className="min-h-8 gap-1 px-1.5 text-[9px]" />}
                     </div>
-                  </div>
+                  </motion.div>
                 )}
+                </AnimatePresence>
                 {bothSet && !route && <RouteErrorState fromCode={fromDisplay.label} toCode={toDisplay.label} mode={mode} onSwitchMode={onModeChange} />}
               </>
             )}
@@ -327,6 +347,6 @@ export function UnifiedRoutePlannerDialog({
           )}
         </footer>
       )}
-    </div>
+    </motion.div>
   );
 }

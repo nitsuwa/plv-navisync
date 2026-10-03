@@ -170,7 +170,7 @@ function ReportDetailModal({ report, onClose, onChanged }: {
           <div className="flex items-start gap-2.5 px-3 py-2.5 rounded-xl bg-muted/60 border border-border">
             <MapPin className="h-4 w-4 text-primary mt-0.5 shrink-0" />
             <div>
-              <p className="text-xs font-bold text-foreground">{report.buildingName ?? report.buildingId ?? "Campus"}</p>
+              <p className="text-xs font-bold text-foreground">{report.campusPlaceName ?? report.buildingName ?? report.buildingId ?? "Campus"}</p>
               {(report.floorLabel || report.roomName) && <p className="text-xs text-muted-foreground">{[report.floorLabel, report.roomName].filter(Boolean).join(" · ")}</p>}
               <p className="text-xs text-muted-foreground">{report.category} · {report.priority} priority</p>
             </div>

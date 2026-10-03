@@ -86,6 +86,7 @@ export interface CampusNavNode {
   y: number;
   name?: string;
   buildingId?: string;
+  gateId?: string;
   floorId?: string;
   entranceId?: string;
   roomId?: string;
@@ -423,7 +424,7 @@ export function hasNavigableRoute(route: PlannedRoute | null | undefined): route
 }
 
 function endpointLabel(destination: Destination): string {
-  return destination.type === "room" ? destination.roomName : destination.code;
+  return destination.type === "room" ? destination.roomName : destination.type === "campus_place" ? destination.label : destination.code;
 }
 
 /**
@@ -633,6 +634,11 @@ function authoredDestinationEndpoints(
     return resolveRoomDoorNodes(nodes, destination, edges)
       .filter((node) => !accessibleOnly || node.accessible !== false);
   }
+  if (destination.type === "campus_place") {
+    const node = nodes.find((candidate) => candidate.id === destination.nodeId
+      && (candidate.gateId === destination.campusPlaceId || !candidate.gateId));
+    return node && (!accessibleOnly || node.accessible !== false) ? [node] : [];
+  }
   return resolveBuildingEntranceNodes(nodes, destination.buildingId, destination.entranceNodeId, accessibleOnly, graph, role, emergencyOnly);
 }
 
@@ -649,7 +655,7 @@ export function planAuthoredDestinationRoute(
   graph?: CampusNavGraph | null,
 ): PlannedRoute | null {
   const campusGraph = resolveCampusGraph(graph, mode);
-  if (!campusGraph || !from?.buildingId || !to?.buildingId) return null;
+  if (!campusGraph || (from.type !== "campus_place" && !from.buildingId) || (to.type !== "campus_place" && !to.buildingId)) return null;
 
   const accessibleOnly = mode === "accessible";
   const fromNodes = authoredDestinationEndpoints(campusGraph.nodes, from, accessibleOnly, campusGraph.edges, graph, "outbound", mode === "emergency");
@@ -1028,7 +1034,9 @@ function authoredRouteContexts(
         }]
       : [];
     indoorSegments.push({
-      buildingId: context.buildingId ?? (to.type === "room" ? to.buildingId : from.buildingId),
+      buildingId: context.buildingId
+        ?? (to.type === "room" || to.type === "building" ? to.buildingId
+          : from.type === "room" || from.type === "building" ? from.buildingId : ""),
       floorId: context.floorId,
       floorNumber: context.floorNumber ?? (isTargetFloor && to.type === "room" ? to.floorNumber : undefined),
       afterOutdoor,
@@ -1044,7 +1052,7 @@ function authoredRouteContexts(
 function destinationBuildingCode(destination: Destination): string {
   return destination.type === "room"
     ? destination.buildingCode || destination.buildingLabel
-    : destination.code || destination.label;
+    : destination.type === "campus_place" ? destination.label : destination.code || destination.label;
 }
 
 function routePlaceLabel(label: string, fallback: string): string {
@@ -1091,7 +1099,9 @@ function authoredRouteGuidanceSteps(
     ? "You are here"
     : from.type === "room"
       ? `Start at the door of ${from.roomName}.`
-      : `Start at the entrance of ${fromName} building.`);
+      : from.type === "campus_place"
+        ? `Start at ${from.label}.`
+        : `Start at the entrance of ${fromName} building.`);
 
   const indoorSegments = route.indoorSegments ?? [];
   const originSegments = indoorSegments.filter((segment) => !segment.afterOutdoor);
@@ -1145,18 +1155,20 @@ function authoredRouteGuidanceSteps(
   const leavesOriginBuilding = from.type === "room"
     && (from.buildingId !== to.buildingId || to.type === "building");
   const originFinalInstruction = directSameBuildingRoomRoute
-    ? `Follow the indoor path to the door of ${to.type === "room" ? to.roomName : to.label}.`
+    ? `Follow the indoor path to the door of ${endpointLabel(to)}.`
     : "Follow the indoor path to the building exit door.";
   appendIndoorGroup(originSegments, originFinalInstruction);
   if (leavesOriginBuilding && originSegments.length > 0) {
     append("enter", `Exit ${fromName} building.`);
   }
 
-  const hasCampusLeg = from.buildingId !== to.buildingId
+  const hasCampusLeg = from.type === "campus_place" || to.type === "campus_place" || from.buildingId !== to.buildingId
     || (originSegments.length > 0 && destinationSegments.length > 0);
   const totalIndoorDistance = indoorSegments.reduce((total, segment) => total + segment.distanceM, 0);
   if (hasCampusLeg) {
-    append("walk", `Follow the campus path to the entrance of ${toName} building.`, Math.max(0, route.dist - totalIndoorDistance));
+    append("walk", to.type === "campus_place"
+      ? `Follow the campus path to ${to.label}.`
+      : `Follow the campus path to the entrance of ${toName} building.`, Math.max(0, route.dist - totalIndoorDistance));
   }
 
   if (destinationSegments.length > 0) {
@@ -1395,11 +1407,12 @@ export function planPointToDestinationRoute(
   }
   if (!path || path.waypoints.length < 2) return null;
 
+  const placeLabel = endpointLabel(to);
   const planned = toPlannedRoute(
     path,
     mode,
     "You are here",
-    to.roomName,
+    placeLabel,
     fromPt,
     campusGraph.nodes,
     campusGraph.edges,
@@ -1418,7 +1431,7 @@ export function planPointToDestinationRoute(
   planned.indoorSegments = contexts.indoorSegments;
   planned.transitionDetails = contexts.transitionDetails;
   planned.steps = authoredRouteGuidanceSteps(pointOrigin, to, planned, campusGraph.nodes, graph ?? undefined);
-  planned.destinationRoom = {
+  if (to.type === "room") planned.destinationRoom = {
     buildingId: to.buildingId,
     floorNumber: to.floorNumber,
     roomId: to.roomId,
@@ -1471,11 +1484,12 @@ export function planDestinationRoute(
   mode: RouteMode,
   graph?: CampusNavGraph | null,
 ): PlannedRoute | null {
-  if (!from?.buildingId || !to?.buildingId) return null;
+  if ((from.type !== "campus_place" && !from.buildingId) || (to.type !== "campus_place" && !to.buildingId)) return null;
 
   if (resolveCampusGraph(graph, mode)) {
     return planAuthoredDestinationRoute(from, to, mode, graph);
   }
+  if (from.type === "campus_place" || to.type === "campus_place") return null;
   if (mode === "accessible") return null;
   if (mode === "emergency") return null;
   const combined = findCompleteRoute(from, to, false);

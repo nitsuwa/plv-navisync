@@ -91,6 +91,49 @@ describe("planBuildingRoute (building → building)", () => {
     );
     expect(route).toBeNull();
   });
+
+  it("routes to an authored Campus Gate node without treating it as a building", () => {
+    const gateGraph: CampusNavGraph = {
+      navNodes: [
+        { id: "gate-node", name: "Campus Gate", type: "outdoor", gateId: "gate-1", x: 20, y: 20, accessible: true },
+        { id: "walk-node", name: "Walkway", type: "outdoor", x: 80, y: 20, accessible: true },
+        { id: "building-entry", name: "Building entrance", type: "entrance", buildingId: "lib", x: 120, y: 20, accessible: true },
+      ],
+      navEdges: [
+        { id: "gate-walk", startNodeId: "gate-node", endNodeId: "walk-node", distance: 60, bidirectional: true, accessible: true },
+        { id: "walk-building", startNodeId: "walk-node", endNodeId: "building-entry", distance: 40, bidirectional: true, accessible: true },
+      ],
+    };
+    const route = planDestinationRoute(
+      { type: "campus_place", campusPlaceId: "gate-1", nodeId: "gate-node", label: "Campus Gate", code: "Campus Gate" },
+      { type: "building", buildingId: "lib", label: "Library", code: "LIB" },
+      "standard",
+      gateGraph,
+    );
+
+    expect(route).not.toBeNull();
+    expect(route?.fromCode).toBe("Campus Gate");
+    expect(route?.points[0]).toEqual({ x: 20, y: 20 });
+    expect(route?.points.at(-1)).toEqual({ x: 120, y: 20 });
+  });
+
+  it("routes from a generic campus place through its exact authored node reference", () => {
+    const gateGraph: CampusNavGraph = {
+      navNodes: [
+        { id: "landmark-node", name: "Atrium", type: "outdoor", x: 20, y: 20, accessible: true },
+        { id: "entry", name: "Library entrance", type: "entrance", buildingId: "lib", x: 80, y: 20, accessible: true },
+      ],
+      navEdges: [{ id: "path", startNodeId: "landmark-node", endNodeId: "entry", distance: 60, bidirectional: true, accessible: true }],
+    };
+    const route = planDestinationRoute(
+      { type: "campus_place", campusPlaceId: "atrium-1", nodeId: "landmark-node", label: "Atrium", code: "Atrium" },
+      { type: "building", buildingId: "lib", label: "Library", code: "LIB" },
+      "standard",
+      gateGraph,
+    );
+    expect(route?.fromCode).toBe("Atrium");
+    expect(route?.points).toEqual([{ x: 20, y: 20 }, { x: 80, y: 20 }]);
+  });
 });
 
 describe("planBuildingRoute (published-campus nav graph — C4 Phase 2 bridge)", () => {
@@ -145,8 +188,8 @@ describe("planBuildingRoute (published-campus nav graph — C4 Phase 2 bridge)",
     const graph: CampusNavGraph = {
       navNodes: CAMPUS_GRAPH.navNodes,
       navEdges: [
-        { ...CAMPUS_GRAPH.navEdges[0], accessible: false },
-        { ...CAMPUS_GRAPH.navEdges[1], accessible: true },
+        { ...CAMPUS_GRAPH.navEdges![0], accessible: false },
+        { ...CAMPUS_GRAPH.navEdges![1], accessible: true },
       ],
     };
     const route = planBuildingRoute(

@@ -92,6 +92,27 @@ describe("ReadonlyOutdoorCampusScene", () => {
     expect(onClickEntrance).toHaveBeenCalledWith("b1");
   });
 
+  it("selects a Campus Gate from the map and renders its selected halo", () => {
+    const onSelectCampusPlace = vi.fn();
+    const withGate = {
+      ...campus,
+      markers: [{
+        id: "gate-main", name: "Campus Gate", type: "gate", purpose: "general",
+        navNodeId: "gate-node", x: 240, y: 180, color: "#2563eb",
+      }],
+    } as unknown as Campus;
+    render(<svg><ReadonlyOutdoorCampusScene
+      campus={projectReadonlyOutdoorCampus(withGate)}
+      selectedCampusPlaceId="gate-main"
+      onSelectCampusPlace={onSelectCampusPlace}
+    /></svg>);
+
+    const gate = screen.getByTestId("readonly-campus-gate");
+    expect(gate.querySelector(".campus-place-selection-ring")).toBeInTheDocument();
+    fireEvent.click(gate);
+    expect(onSelectCampusPlace).toHaveBeenCalledWith("gate-main");
+  });
+
   it("uses Admin building label/body styling and the shared entrance glyph", () => {
     const { container } = render(<svg><ReadonlyOutdoorCampusScene campus={projectReadonlyOutdoorCampus(campus)} /></svg>);
     const building = screen.getByTestId("readonly-building");
@@ -104,7 +125,7 @@ describe("ReadonlyOutdoorCampusScene", () => {
     expect(entranceArt.querySelector('circle[cx="-8"]')).toBeInTheDocument();
     expect(container.querySelector('pattern[id="campus-ground-asphalt-pattern"]')).toBeInTheDocument();
     const markerArtwork = screen.getAllByTestId("campus-marker-artwork").find((node) => node.getAttribute("data-marker-id") === "m2");
-    expect(markerArtwork.querySelector("text")?.textContent).toBe("★");
+    expect(markerArtwork?.querySelector("text")?.textContent).toBe("★");
   });
 
   it("hides student-facing building and marker labels when labels are disabled", () => {

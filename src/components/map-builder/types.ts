@@ -712,6 +712,22 @@ export interface CampusMarker {
    * while their linked NavigationNode provides the routable identity. */
   purpose?: "general" | "emergency_exit";
   navNodeId?: string;
+  /** Optional student-facing place details for outdoor landmarks and gates. */
+  studentInfo?: CampusPlaceStudentInfo;
+}
+
+export type CampusGateType = "main_entrance" | "pedestrian" | "service" | "emergency" | "other";
+
+/** Additive, backward-compatible place metadata stored with its authored marker. */
+export interface CampusPlaceStudentInfo {
+  description?: string;
+  coverImagePath?: string;
+  gateType?: CampusGateType;
+  operatingHoursSchedule?: import("../../types/buildingInformation").WeeklyOperatingHours;
+  accessibleEntrance?: boolean;
+  pedestrianAccess?: boolean;
+  vehicleAccess?: boolean;
+  securityCheckpoint?: boolean;
 }
 
 export interface CampusPath {
