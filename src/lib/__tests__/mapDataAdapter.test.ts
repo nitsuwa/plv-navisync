@@ -8,6 +8,7 @@ import {
   locationsFromCampus,
 } from "../mapDataAdapter";
 import type { SharedCampusData } from "../../contexts/CampusDataContext";
+import { weeklyHoursPreset } from "../buildingInformation";
 
 vi.mock("../../services/buildingImageService", () => ({
   buildingCoverPublicUrl: (path: string) => `https://storage.example/${path}`,
@@ -138,6 +139,15 @@ describe("buildingsFromCampus", () => {
     expect(b1.image_url).toBe("https://storage.example/buildings/b1/cover.webp");
     expect(b1.operating_hours).toBe("Mon–Fri 8 AM–5 PM");
     expect(b1.facilities).toContain("Library");
+  });
+
+  it("passes student-facing building type and structured weekly hours into Student Map data", () => {
+    const campus = makeCampus() as Parameters<typeof buildingsFromCampus>[0];
+    Object.assign(campus.buildings[0], { buildingType: "student_services", operatingHoursSchedule: weeklyHoursPreset("weekdays") });
+    const building = buildingsFromCampus(campus).find((row) => row.id === "b1")!;
+    expect(building.building_type).toBe("student_services");
+    expect(building.operating_hours_schedule?.monday).toEqual({ closed: false, open: "08:00", close: "17:00" });
+    expect(building.operating_hours).toMatch(/Mon.*Fri.*8:00 AM.*5:00 PM/);
   });
 });
 

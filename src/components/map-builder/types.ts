@@ -1,4 +1,5 @@
 import type { CampusLifecycleStatus } from "../../types/campusLifecycle";
+import type { BuildingTypeValue, WeeklyOperatingHours } from "../../types/buildingInformation";
 
 /** Campus status */
 export type CampusStatus = "active" | "hidden" | "archived";
@@ -521,6 +522,10 @@ export interface CampusBuilding {
   coverImagePath?: string;
   /** Optional authored hours shown on the student-facing place page. */
   operatingHours?: string;
+  /** Structured weekly hours, retained in the building UI metadata snapshot. */
+  operatingHoursSchedule?: WeeklyOperatingHours;
+  /** Student-facing type, independent from the legacy map category/style. */
+  buildingType?: BuildingTypeValue;
   /** Small curated amenities list; map-derived facilities are added at display time. */
   facilities?: string[];
   x: number;

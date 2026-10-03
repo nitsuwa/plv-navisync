@@ -168,10 +168,13 @@ describe("CampusMapPage event overlays", () => {
     const sheet = await screen.findByTestId("mobile-building-sheet");
     const sheetActions = within(sheet);
     const zoomControls = screen.getByTestId("student-map-zoom-controls");
+    const recenterButton = screen.getByTestId("student-map-recenter-button");
     expect(sheet).toHaveAttribute("data-sheet-state", "default");
     expect(sheetActions.getByTestId("building-cover-fallback")).toBeInTheDocument();
     expect(screen.getByTestId("readonly-building")).toHaveAttribute("data-selected", "true");
-    expect(screen.getByTestId("student-map-zoom-percentage")).toBeInTheDocument();
+    expect(screen.getByTestId("student-map-recenter-button")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Zoom in" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Zoom out" })).not.toBeInTheDocument();
     expect(sheetActions.getByRole("button", { name: /Directions/i })).toBeVisible();
     expect(sheetActions.getByRole("button", { name: "Enter Building" })).toBeVisible();
     expect(sheetActions.getByRole("button", { name: /Save/i })).toBeVisible();
@@ -184,9 +187,11 @@ describe("CampusMapPage event overlays", () => {
     fireEvent.click(sheetActions.getByRole("button", { name: "Expand building details" }));
     expect(sheet).toHaveAttribute("data-sheet-state", "expanded");
     expect(screen.getByTestId("student-map-zoom-controls")).toBe(zoomControls);
+    expect(screen.getByTestId("student-map-recenter-button")).toBe(recenterButton);
     fireEvent.click(sheetActions.getByRole("button", { name: "Close building details" }));
     await waitFor(() => expect(screen.queryByTestId("mobile-building-sheet")).not.toBeInTheDocument());
     expect(screen.getByTestId("student-map-zoom-controls")).toBe(zoomControls);
+    expect(screen.getByTestId("student-map-recenter-button")).toBe(recenterButton);
     expect(zoomControls).toHaveAttribute("data-sheet-open", "false");
   });
 
@@ -291,11 +296,68 @@ describe("CampusMapPage event overlays", () => {
     fireEvent.click(screen.getByRole("option", { name: /Science Hall, Building/ }));
     fireEvent.click(screen.getAllByRole("button", { name: "Enter Building" })[0]);
     fireEvent.click(await screen.findByTestId("readonly-room"));
-    fireEvent.click(await screen.findByRole("button", { name: "More place actions" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Report a room issue" }));
+    const roomCard = await screen.findByTestId("student-selected-place-card");
+    expect(roomCard).toHaveClass("left-3", "right-3");
+    expect(screen.getByTestId("student-map-surface").style.getPropertyValue("--student-map-room-card-top")).toMatch(/px$/);
+    fireEvent.click(within(roomCard).getByRole("button", { name: "Report this room" }));
     expect(screen.getByRole("dialog", { name: "Report issue" })).toBeInTheDocument();
     expect(screen.getByLabelText("Floor (optional)")).toHaveValue("report-floor");
     expect(screen.getByLabelText("Room (optional)")).toHaveValue("report-room");
+  });
+
+  it("keeps a selected room card only while that room exists on the newly selected floor", async () => {
+    const sharedRoom = { id: "same-room", name: "Study Lounge", type: "lounge", x: 20, y: 20, w: 70, h: 50 };
+    const campus: EditorCampus = { ...previewCampus, buildings: [{
+      ...previewCampus.buildings[0],
+      floors: [
+        { id: "ground", buildingId: "building-test", number: 1, label: "Ground Floor", rooms: [{ ...sharedRoom, floorId: "ground", buildingId: "building-test" }], paths: [], walls: [], doors: [], windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [] },
+        { id: "second", buildingId: "building-test", number: 2, label: "Floor 2", rooms: [{ ...sharedRoom, floorId: "second", buildingId: "building-test" }], paths: [], walls: [], doors: [], windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [] },
+        { id: "third", buildingId: "building-test", number: 3, label: "Floor 3", rooms: [], paths: [], walls: [], doors: [], windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [] },
+      ],
+    }] };
+    renderCampusMap({ previewCampus: campus });
+    fireEvent.focus(await screen.findByRole("searchbox", { name: "Search campus map" }));
+    fireEvent.click(screen.getByRole("option", { name: /Science Hall, Building/i }));
+    fireEvent.click(screen.getAllByRole("button", { name: "Enter Building" })[0]);
+    fireEvent.click(await screen.findByTestId("readonly-room"));
+
+    expect(await screen.findByTestId("student-selected-place-card")).toBeInTheDocument();
+    expect(screen.getByTestId("student-floor-picker")).toHaveAttribute("data-dock", "floor-control-bottom-left");
+    expect(screen.getByTestId("student-map-zoom-controls")).toHaveAttribute("data-dock-location", "room-card-safe");
+    expect(screen.getByTestId("student-map-recenter-button")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Choose floor. Current floor: Ground Floor" }));
+    fireEvent.click(within(screen.getByTestId("student-floor-picker-menu")).getByRole("option", { name: /Floor 2/ }));
+    expect(await screen.findByTestId("student-selected-place-card")).toHaveTextContent("Floor 2");
+
+    fireEvent.click(screen.getByRole("button", { name: "Choose floor. Current floor: Floor 2" }));
+    fireEvent.click(within(screen.getByTestId("student-floor-picker-menu")).getByRole("option", { name: /Floor 3/ }));
+    await waitFor(() => expect(screen.queryByTestId("student-selected-place-card")).not.toBeInTheDocument());
+  });
+
+  it("inspects a floor room without changing the open route planner endpoints or mode", async () => {
+    const campus: EditorCampus = { ...previewCampus, buildings: [{
+      ...previewCampus.buildings[0],
+      floors: [{
+        id: "inspect-floor", buildingId: "building-test", number: 1, label: "Ground Floor",
+        rooms: [{ id: "inspect-room", name: "Visitor Lounge", type: "lounge", floorId: "inspect-floor", buildingId: "building-test", x: 10, y: 10, w: 80, h: 50 }],
+        paths: [], walls: [], doors: [], windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [],
+      }],
+    }] };
+    renderCampusMap({ previewCampus: campus });
+    fireEvent.focus(await screen.findByRole("searchbox", { name: "Search campus map" }));
+    fireEvent.click(screen.getByRole("option", { name: /Science Hall, Building/i }));
+    fireEvent.click(screen.getAllByRole("button", { name: "Enter Building" })[0]);
+    fireEvent.click(await screen.findByRole("button", { name: "Open directions" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Accessible routing" }));
+
+    const planner = screen.getByTestId("route-planner-dialog");
+    fireEvent.click(screen.getByTestId("readonly-room"));
+
+    expect(within(planner).getByTestId("route-endpoint-card-start")).toHaveTextContent("Choose starting point");
+    expect(within(planner).getByTestId("route-endpoint-card-destination")).toHaveTextContent("Choose destination");
+    expect(within(planner).getByRole("button", { name: "Accessible routing" })).toHaveAttribute("aria-pressed", "true");
+    expect(within(planner).getByTestId("selected-room-planner-context")).toHaveTextContent("Visitor Lounge");
+    expect(within(planner).getByRole("button", { name: "Report this room" })).toBeInTheDocument();
   });
 
   it.each([
@@ -331,7 +393,10 @@ describe("CampusMapPage event overlays", () => {
     fireEvent.change(search, { target: { value: "Copy Shop" } });
     fireEvent.click(await screen.findByRole("option", { name: /Copy Shop, Room/i }));
     expect(await screen.findByTestId("readonly-room")).toBeInTheDocument();
-    await waitFor(() => expect(screen.getByText("180%")).toBeInTheDocument(), { timeout: 3000 });
+    await waitFor(() => {
+      const transform = screen.getByTestId("student-map-surface").querySelector("svg > g[transform]")?.getAttribute("transform") ?? "";
+      expect(Number(transform.match(/scale\(([^)]+)\)/)?.[1])).toBeCloseTo(1.8, 1);
+    }, { timeout: 3000 });
 
     fireEvent.focus(search);
     fireEvent.change(search, { target: { value: "Science Hall" } });
@@ -369,29 +434,34 @@ describe("CampusMapPage event overlays", () => {
     expect(screen.getByTestId("readonly-room")).toHaveAttribute("data-room-id", "room-third");
   });
 
-  it("uses visible zoom buttons and prevents zooming beyond the fit-map limit", async () => {
+  it("keeps one recenter control while wheel and keyboard zoom remain available", async () => {
     renderCampusMap({ previewCampus });
-    const zoomIn = await screen.findByRole("button", { name: "Zoom in" });
-    const zoomOut = screen.getByRole("button", { name: "Zoom out" });
-    expect(zoomOut).toBeDisabled();
-    fireEvent.click(zoomIn);
-    await waitFor(() => expect(zoomOut).not.toBeDisabled());
-    fireEvent.click(zoomOut);
-    await waitFor(() => expect(zoomOut).toBeDisabled());
-    for (let index = 0; index < 30; index += 1) fireEvent.click(zoomIn);
-    await waitFor(() => expect(zoomIn).toBeDisabled());
-    expect(screen.getByText("350%")).toBeInTheDocument();
+    const surface = await screen.findByTestId("student-map-surface");
+    const readScale = () => Number(surface.querySelector("svg > g[transform]")?.getAttribute("transform")?.match(/scale\(([^)]+)\)/)?.[1]);
+    const recenter = screen.getByRole("button", { name: "Recenter map" });
+    expect(recenter).toHaveAttribute("data-testid", "student-map-recenter-button");
+    expect(screen.queryByRole("button", { name: "Zoom in" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Zoom out" })).not.toBeInTheDocument();
+
+    fireEvent.wheel(surface, { deltaY: -100, clientX: 300, clientY: 220 });
+    await waitFor(() => expect(readScale()).toBeGreaterThan(1));
+    fireEvent.keyDown(window, { key: "+" });
+    await waitFor(() => expect(readScale()).toBeGreaterThan(Math.exp(0.11)));
+    fireEvent.click(recenter);
+    await waitFor(() => expect(readScale()).toBeCloseTo(1, 2), { timeout: 1200 });
   });
 
   it("does not zoom the map when scrolling its search controls", async () => {
     renderCampusMap({ previewCampus });
     const search = await screen.findByRole("searchbox", { name: "Search campus map" });
+    const surface = screen.getByTestId("student-map-surface");
+    const readTransform = () => surface.querySelector("svg > g[transform]")?.getAttribute("transform");
+    const before = readTransform();
     fireEvent.wheel(search, { deltaY: -1000 });
-    expect(screen.getByRole("button", { name: "Zoom out" })).toBeDisabled();
-    fireEvent.wheel(screen.getByTestId("student-map-surface"), { deltaY: -1000 });
-    await waitFor(() => expect(screen.getByRole("button", { name: "Zoom out" })).not.toBeDisabled());
-    fireEvent.wheel(screen.getByTestId("student-map-surface"), { deltaY: 10000 });
-    await waitFor(() => expect(screen.getByRole("button", { name: "Zoom out" })).toBeDisabled());
+    expect(readTransform()).toBe(before);
+    fireEvent.wheel(surface, { deltaY: -1000 });
+    await waitFor(() => expect(readTransform()).not.toBe(before));
+    expect(screen.getByRole("button", { name: "Recenter map" })).toBeInTheDocument();
   });
 
   it("renders intermediate wheel-zoom scales without rebuilding the map scene", async () => {
@@ -589,8 +659,8 @@ describe("CampusMapPage event overlays", () => {
     const svg = surface.querySelector("svg");
     const camera = svg?.querySelector(":scope > g[transform]");
     expect(camera).not.toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
-    await waitFor(() => expect(screen.getByRole("button", { name: "Zoom out" })).not.toBeDisabled());
+    fireEvent.wheel(surface, { deltaY: -100, clientX: 300, clientY: 220 });
+    await waitFor(() => expect(Number(camera?.getAttribute("transform")?.match(/scale\(([^)]+)\)/)?.[1])).toBeGreaterThan(1));
     const before = camera?.getAttribute("transform");
     const building = screen.getByTestId("readonly-building");
 
@@ -621,6 +691,26 @@ describe("CampusMapPage event overlays", () => {
 
     expect(screen.getByTestId("route-planner-dialog")).toBeInTheDocument();
     await waitFor(() => expect(screen.queryByTestId("mobile-building-sheet")).not.toBeInTheDocument());
+  });
+
+  it("lets students inspect a building during route planning without changing planner state", async () => {
+    renderCampusMap({ previewCampus });
+    fireEvent.click(await screen.findByRole("button", { name: "Open directions" }));
+    const planner = screen.getByTestId("route-planner-dialog");
+    fireEvent.click(screen.getByRole("button", { name: "Choose start" }));
+    const startSearch = await screen.findByRole("searchbox", { name: "Search start" });
+    fireEvent.change(startSearch, { target: { value: "Science" } });
+
+    fireEvent.click(screen.getByTestId("readonly-building"));
+    const details = await screen.findByTestId("mobile-building-sheet");
+    expect(planner).toHaveAttribute("data-suspended-for-building", "true");
+    expect(screen.getByTestId("route-planner-dialog")).toBe(planner);
+    expect(within(details).getByRole("button", { name: "Back to route planner" })).toBeInTheDocument();
+
+    fireEvent.click(within(details).getByRole("button", { name: "Back to route planner" }));
+    expect(screen.getByTestId("route-planner-dialog")).toBe(planner);
+    expect(screen.getByRole("searchbox", { name: "Search start" })).toHaveValue("Science");
+    expect(screen.queryByTestId("route-endpoint-card-start")).not.toBeInTheDocument();
   });
 
   it("shows building actions in a sheet positioned above the mobile navigation", async () => {

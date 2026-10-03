@@ -1,10 +1,11 @@
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
-import { Bookmark, Check, ChevronDown, ClipboardCopy, Flag, Layers3, MoreHorizontal, Navigation, QrCode, Share2 } from "lucide-react";
+import { Bookmark, Check, ChevronDown, ClipboardCopy, Layers3, MoreHorizontal, Navigation, QrCode, Share2 } from "lucide-react";
 import type { Building } from "../../types";
 import type { StudentAuthState } from "../../hooks/useStudentAuth";
 import { buildingMapDeepLink, copyBuildingLink, shareBuildingLink } from "../../lib/buildingShare";
 import { cn } from "../../lib/utils";
 import { useToast } from "../../hooks/useToast";
+import { StudentReportAction } from "./StudentReportAction";
 
 interface BuildingDetailsActionsProps {
   building: Building;
@@ -74,9 +75,12 @@ export function BuildingDetailsActions({
         <button type="button" onClick={() => void share()} className={cn(iconButton, "h-11 gap-1 px-1 text-[10px]")}>
           <Share2 className="h-3.5 w-3.5 shrink-0" /> <span>Share</span>
         </button>
-        <button type="button" data-testid="building-report" aria-label="Report map issue" onClick={() => studentAuth.isStudent ? onReport(building) : onSignInPrompt("report issues")} className={cn(iconButton, "h-11 gap-1 px-1 text-[10px]")}>
-          <Flag className="h-3.5 w-3.5 shrink-0" /> <span>Report</span>
-        </button>
+        <StudentReportAction
+          testId="building-report"
+          ariaLabel="Report map issue"
+          onClick={() => studentAuth.isStudent ? onReport(building) : onSignInPrompt("report issues")}
+          className="h-11 gap-1 px-1 text-[10px]"
+        />
 
         <DropdownMenu.Root modal={false}>
           <DropdownMenu.Trigger asChild>

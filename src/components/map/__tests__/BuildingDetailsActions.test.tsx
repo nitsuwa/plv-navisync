@@ -31,7 +31,9 @@ describe("building details actions", () => {
 
   it("keeps Report visible and reserves More for QR and link utilities", () => {
     const { props } = renderActions();
-    fireEvent.click(screen.getByRole("button", { name: "Report map issue" }));
+    const report = screen.getByRole("button", { name: "Report map issue" });
+    expect(report).toHaveClass("text-destructive", "border-destructive/30");
+    fireEvent.click(report);
     expect(props.onReport).toHaveBeenCalledWith(building);
 
     fireEvent.pointerDown(screen.getByRole("button", { name: "More building actions" }), { button: 0, ctrlKey: false });

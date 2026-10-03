@@ -11,6 +11,7 @@ import { useEscToClose } from "../../hooks/useEscToClose";
 import { cn } from "../../lib/utils";
 import { CampusDestinationSearch } from "./CampusDestinationSearch";
 import { RouteErrorState } from "./RouteErrorState";
+import { StudentReportAction } from "./StudentReportAction";
 
 export type RoutePlannerEndpoint = "start" | "destination";
 
@@ -46,6 +47,9 @@ export interface UnifiedRoutePlannerDialogProps {
   selectedRoomForPlanner?: RoomDest | null;
   onUseSelectedRoomAsStart?: (room: RoomDest) => void;
   onUseSelectedRoomAsDestination?: (room: RoomDest) => void;
+  onReportSelectedRoom?: (room: RoomDest) => void;
+  /** Keep the planner mounted while a selected building is foregrounded on small screens. */
+  suspendedForBuilding?: boolean;
 }
 
 const MODES: Array<{ key: RouteMode; label: string; icon: ReactNode }> = [
@@ -108,9 +112,19 @@ export function UnifiedRoutePlannerDialog({
   youAreHere, youAreHereLabel, useMyLocation, onUseMyLocationChange, fromRoom = null, toRoom = null,
   onSwapEndpoints, destinationResults = [], onSelectFromDestination, onSelectToDestination,
   activeEndpoint: controlledEndpoint, onActiveEndpointChange, selectedRoomForPlanner,
-  onUseSelectedRoomAsStart, onUseSelectedRoomAsDestination,
+  onUseSelectedRoomAsStart, onUseSelectedRoomAsDestination, onReportSelectedRoom,
+  suspendedForBuilding = false,
 }: UnifiedRoutePlannerDialogProps) {
-  useEscToClose(onClose);
+  const [compactPanelLayout, setCompactPanelLayout] = useState(() =>
+    typeof window !== "undefined" && window.innerWidth < 1280,
+  );
+  useEffect(() => {
+    const updateLayout = () => setCompactPanelLayout(window.innerWidth < 1280);
+    window.addEventListener("resize", updateLayout);
+    return () => window.removeEventListener("resize", updateLayout);
+  }, []);
+  const isSuspendedForBuilding = suspendedForBuilding && compactPanelLayout;
+  useEscToClose(onClose, !isSuspendedForBuilding);
   const dialogRef = useRef<HTMLDivElement>(null);
   const [uncontrolledEndpoint, setUncontrolledEndpoint] = useState<RoutePlannerEndpoint | null>(null);
   const activeEndpoint = controlledEndpoint === undefined ? uncontrolledEndpoint : controlledEndpoint;
@@ -176,8 +190,13 @@ export function UnifiedRoutePlannerDialog({
       tabIndex={-1}
       data-testid="route-planner-dialog"
       data-map-surface="route-planner"
-      className="pointer-events-auto fixed inset-x-2 bottom-[calc(4.75rem+env(safe-area-inset-bottom,0px))] z-50 flex max-h-[calc(100dvh-6.5rem-env(safe-area-inset-bottom,0px))] flex-col overflow-hidden rounded-[24px] border border-border/70 bg-card text-foreground shadow-[0_-16px_42px_rgba(15,23,42,0.18)] outline-none md:absolute md:inset-0 md:h-auto md:max-h-none md:w-full md:rounded-3xl md:shadow-2xl"
-      style={{ paddingBottom: "max(0.35rem, env(safe-area-inset-bottom, 0px))" }}
+      data-suspended-for-building={isSuspendedForBuilding ? "true" : "false"}
+      data-search-open={activeEndpoint ? "true" : "false"}
+      className="route-planner-dialog pointer-events-auto fixed inset-x-2 bottom-[calc(4.75rem+env(safe-area-inset-bottom,0px))] z-50 flex max-h-[calc(100dvh-6.5rem-env(safe-area-inset-bottom,0px))] flex-col overflow-hidden rounded-[24px] border border-border/70 bg-card text-foreground shadow-[0_-16px_42px_rgba(15,23,42,0.18)] outline-none md:relative md:inset-auto md:h-fit md:max-h-[calc(100dvh-1.5rem)] md:w-full md:rounded-3xl md:shadow-2xl"
+      style={{
+        paddingBottom: "max(0.35rem, env(safe-area-inset-bottom, 0px))",
+        ...(activeEndpoint ? { height: "min(72dvh, calc(100dvh - 7rem - env(safe-area-inset-bottom, 0px)))" } : {}),
+      }}
       onWheelCapture={(event) => event.stopPropagation()}
       onTouchMoveCapture={(event) => event.stopPropagation()}
     >
@@ -238,7 +257,7 @@ export function UnifiedRoutePlannerDialog({
           <motion.div
             key="route-planner-main"
             data-testid="route-planner-scroll-region"
-            className="min-h-0 flex-1 space-y-2.5 overflow-y-auto overscroll-contain px-3.5 py-3 md:space-y-3 md:px-4 md:py-4"
+            className="min-h-0 flex-none space-y-2.5 overflow-y-auto overscroll-contain px-3.5 py-3 md:max-h-[calc(100dvh-14rem)] md:flex-none md:space-y-3 md:px-4 md:py-4"
             initial={reducedMotion ? false : { opacity: 0, x: -10 }}
             animate={{ opacity: 1, x: 0 }}
             exit={reducedMotion ? { opacity: 0 } : { opacity: 0, x: 10 }}
@@ -264,10 +283,10 @@ export function UnifiedRoutePlannerDialog({
                   ))}
                 </div>
                 {mode === "accessible" && <p data-testid="accessible-route-note" className="rounded-lg bg-emerald-700/[0.06] px-2.5 py-2 text-[10px] leading-relaxed text-emerald-800 dark:text-emerald-200">Accessible route · Uses ramps and elevators where the authored path supports them.</p>}
-                <EndpointCard purpose="start" building={from} room={fromRoom} useMyLocation={useMyLocation} youAreHere={youAreHere} youAreHereLabel={youAreHereLabel} onChange={() => openSearch("start")} />
-                {!isEmergency && (
-                  <div className="flex items-center justify-center -my-1">
-                    <button type="button" onClick={swapEndpoints} disabled={!hasFrom || !hasTo} aria-label="Swap start and destination" className="flex h-8 w-8 items-center justify-center rounded-full border border-border bg-card text-muted-foreground transition-colors hover:border-primary/30 hover:text-primary disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"><ArrowUpDown className="h-3.5 w-3.5" /></button>
+                <EndpointCard purpose="start" building={from} room={fromRoom} useMyLocation={useMyLocation} youAreHere={youAreHere} onChange={() => openSearch("start")} />
+                {!isEmergency && bothSet && (
+                  <div data-testid="route-planner-swap-row" className="flex h-9 items-center justify-center">
+                    <button type="button" onClick={swapEndpoints} aria-label="Swap start and destination" title="Swap start and destination" className="flex h-8 w-8 items-center justify-center rounded-full border border-border/80 bg-muted/50 text-muted-foreground transition-[transform,background-color,color,border-color] duration-150 hover:border-primary/30 hover:bg-primary/5 hover:text-primary active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 motion-reduce:transition-none"><ArrowUpDown className="h-3.5 w-3.5" /></button>
                   </div>
                 )}
                 {isEmergency ? (
@@ -279,9 +298,10 @@ export function UnifiedRoutePlannerDialog({
                   <div data-testid="selected-room-planner-context" className="rounded-xl border border-primary/15 bg-primary/[0.035] p-2.5">
                     <p className="truncate text-[11px] font-bold">{selectedSearchRoom.roomName}</p>
                     <p className="truncate text-[10px] text-muted-foreground">{selectedSearchRoom.buildingLabel} · {selectedSearchRoom.floorLabel ?? `Floor ${selectedSearchRoom.floorNumber}`}</p>
-                    <div className="mt-1.5 flex gap-2">
+                    <div className="mt-1.5 grid grid-cols-3 gap-1.5">
                       <button type="button" onClick={() => onUseSelectedRoomAsStart?.(selectedSearchRoom)} className="min-h-8 rounded-lg bg-card px-2.5 text-[10px] font-extrabold text-primary hover:bg-primary/10">Use as Start</button>
                       <button type="button" onClick={() => onUseSelectedRoomAsDestination?.(selectedSearchRoom)} className="min-h-8 rounded-lg bg-card px-2.5 text-[10px] font-extrabold text-primary hover:bg-primary/10">Use as Destination</button>
+                      {onReportSelectedRoom && <StudentReportAction ariaLabel="Report this room" onClick={() => onReportSelectedRoom(selectedSearchRoom)} className="min-h-8 gap-1 px-1.5 text-[9px]" />}
                     </div>
                   </div>
                 )}

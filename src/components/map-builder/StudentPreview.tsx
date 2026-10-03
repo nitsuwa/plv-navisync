@@ -57,13 +57,11 @@ export function StudentPreview({ campus, validationIssues, onBack, onPublish, on
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       transition={{ duration: 0.2 }}
-      className="fixed inset-0 z-[300] overflow-hidden bg-background"
+      className="fixed inset-0 z-[300] flex flex-col overflow-hidden bg-background"
       aria-label="Student Preview"
     >
-      <CampusMapPage previewCampus={campus} fullScreen />
-
-      <div className="pointer-events-none fixed right-3 top-[8.5rem] z-[320] flex max-w-[calc(100vw-1.5rem)] justify-end md:top-3">
-        <div className="pointer-events-auto flex max-w-full items-center gap-1.5 rounded-xl border border-primary/25 bg-card/95 px-2 py-2 shadow-lg backdrop-blur-xl sm:gap-2 sm:px-2.5">
+      <header data-testid="student-preview-toolbar" className="relative z-10 flex w-full shrink-0 justify-end border-b border-border bg-background/95 px-2 py-1.5 shadow-sm sm:px-3">
+        <div className="flex w-full max-w-full flex-wrap items-center justify-between gap-1.5 sm:w-auto sm:flex-nowrap sm:gap-2 rounded-xl border border-primary/25 bg-card/95 px-2 py-1.5 shadow-sm sm:px-2.5">
           <div className="flex min-w-0 items-center gap-1.5 pr-0.5">
             <Globe2 className="h-3.5 w-3.5 shrink-0 text-primary" />
             <p className="truncate text-[10px] font-extrabold uppercase tracking-[0.14em] text-primary">{previewLabel}</p>
@@ -77,6 +75,10 @@ export function StudentPreview({ campus, validationIssues, onBack, onPublish, on
             </button>
           )}
         </div>
+      </header>
+
+      <div data-testid="student-preview-viewport" className="relative min-h-0 flex-1 overflow-hidden">
+        <CampusMapPage previewCampus={campus} fullScreen fullScreenHeight="100%" />
       </div>
 
       <AnimatePresence>
