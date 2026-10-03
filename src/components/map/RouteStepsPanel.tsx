@@ -2,7 +2,7 @@ import {
   Navigation, Flag, Footprints, ArrowUp, MoveVertical, DoorOpen,
   CircleCheck, Info, Maximize2, RotateCcw,
 } from "lucide-react";
-import { useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import type { PlannedRoute, RouteMode, RouteStepIcon } from "../../lib/routePlanner";
 import { cn } from "../../lib/utils";
 
