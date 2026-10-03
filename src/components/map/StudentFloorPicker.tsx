@@ -68,7 +68,7 @@ export function StudentFloorPicker({ buildingName, floors, activeFloor, onSelect
       ref={rootRef}
       data-testid="student-floor-picker"
       data-no-drag
-      className="absolute bottom-[calc(5rem+env(safe-area-inset-bottom,0px))] left-3 z-30 md:bottom-6 md:left-1/2 md:-translate-x-1/2"
+      className="absolute bottom-[calc(5rem+env(safe-area-inset-bottom,0px))] left-3 z-[45] isolate md:bottom-8 md:left-1/2 md:-translate-x-1/2"
     >
       <button
         ref={triggerRef}
@@ -101,7 +101,7 @@ export function StudentFloorPicker({ buildingName, floors, activeFloor, onSelect
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={reducedMotion ? { opacity: 0 } : { opacity: 0, y: 4, scale: 0.985 }}
             transition={reducedMotion ? { duration: 0.01 } : { duration: 0.16, ease: "easeOut" }}
-            className="absolute bottom-full left-0 mb-2 max-h-[min(22rem,calc(100dvh-12rem))] w-[min(19rem,calc(100vw-1.5rem))] overflow-y-auto rounded-2xl border border-border/70 bg-card/98 p-1.5 text-foreground shadow-2xl backdrop-blur-xl md:left-1/2 md:w-72 md:-translate-x-1/2"
+            className="absolute bottom-full left-0 z-10 mb-3 max-h-[min(22rem,calc(100dvh-12rem))] w-[min(19rem,calc(100vw-1.5rem))] overflow-y-auto rounded-2xl border border-border/70 bg-card/98 p-1.5 text-foreground shadow-2xl backdrop-blur-xl md:left-1/2 md:w-72 md:-translate-x-1/2"
           >
             <p className="px-3 pb-1.5 pt-2 text-[10px] font-extrabold uppercase tracking-[0.14em] text-muted-foreground">Choose floor</p>
             {floors.map((floor, index) => {

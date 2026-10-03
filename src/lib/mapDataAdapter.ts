@@ -72,20 +72,68 @@ import type { Building } from "../types";
 
 type LegacyBuilding = Building;
 
+type PublicBuildingMetadata = CampusBuilding & {
+  departments?: unknown;
+  facilities?: unknown;
+  accessibility?: unknown;
+};
+
+function cleanStringList(value: unknown): string[] | null {
+  if (!Array.isArray(value)) return null;
+  return [...new Set(
+    value
+      .filter((item): item is string => typeof item === "string")
+      .map((item) => item.trim())
+      .filter(Boolean),
+  )];
+}
+
+const ROOM_FACILITY_LABELS: Record<string, string> = {
+  classroom: "Classrooms",
+  lab: "Laboratories",
+  laboratory: "Laboratories",
+  office: "Offices",
+  restroom: "Restrooms",
+  canteen: "Canteen",
+  clinic: "Clinic",
+  kitchen: "Kitchen",
+  library: "Library",
+  lounge: "Student Lounge",
+  lobby: "Lobby",
+  stairs: "Stairs",
+  elevator: "Elevator",
+};
+
+function facilitiesFromFloorPlans(building: CampusBuilding): string[] {
+  const labels = new Set<string>();
+  for (const floor of building.floors ?? []) {
+    for (const room of floor.rooms ?? []) {
+      const label = ROOM_FACILITY_LABELS[room.type?.trim().toLowerCase() ?? ""];
+      if (label) labels.add(label);
+    }
+    if (floor.elevators?.length) labels.add("Elevator");
+    if (floor.stairs?.length) labels.add("Stairs");
+  }
+  return [...labels];
+}
+
 export function buildingsFromCampus(campus: CampusWithOptionalBuildings): LegacyBuilding[] {
-  return visibleBuildings(campus).map(b => ({
-    id: b.id,
-    name: b.name,
-    code: b.code,
-    description: b.description || "",
-    category: b.category.toLowerCase() as Building["category"],
-    floor_count: b.floors.length,
-    image_url: undefined,
-    operating_hours: undefined,
-    contact: undefined,
-    departments: [],
-    created_at: new Date().toISOString(),
-  }));
+  return visibleBuildings(campus).map(b => {
+    const metadata = b as PublicBuildingMetadata;
+    return {
+      id: b.id,
+      name: b.name,
+      code: b.code,
+      description: b.description || "",
+      category: b.category.toLowerCase() as Building["category"],
+      floor_count: b.floors.length,
+      image_url: undefined,
+      operating_hours: undefined,
+      contact: undefined,
+      departments: cleanStringList(metadata.departments) ?? cleanStringList(metadata.facilities) ?? [],
+      created_at: new Date().toISOString(),
+    };
+  });
 }
 
 // ── Building status (legacy) ───────────────────────────────────────────────
@@ -97,25 +145,39 @@ export const STATUS_DOT = { Open: "bg-green-500", Busy: "bg-amber-500", Closed: 
 export function facilitiesFromCampus(campus: CampusWithOptionalBuildings): Record<string, string[]> {
   const result: Record<string, string[]> = {};
   for (const b of visibleBuildings(campus)) {
-    result[b.id] = [];
+    const explicit = cleanStringList((b as PublicBuildingMetadata).facilities);
+    result[b.id] = explicit ?? facilitiesFromFloorPlans(b);
   }
   return result;
 }
 
+const ACCESSIBILITY_TYPE_LABELS: Record<string, string> = {
+  ramp: "Ramp Access",
+  elevator: "Elevator Available",
+  accessible_entrance: "Accessible Entrance",
+  accessible_restroom: "Accessible Restroom",
+  wide_corridor: "Wide Corridors",
+};
+
 export function accessibilityFromCampus(campus: CampusWithOptionalBuildings): Record<string, string[]> {
   const result: Record<string, string[]> = {};
   for (const b of visibleBuildings(campus)) {
-    const acc = b.accessibility;
-    if (acc && typeof acc === "object") {
-      const items: string[] = [];
-      if (acc.wheelchairAccessible) items.push("Wheelchair Accessible");
-      if (acc.hasElevator) items.push("Elevator Available");
-      if (acc.hasRamp) items.push("Ramp Access");
-      if (acc.accessibleEntrance) items.push("Accessible Entrance");
-      result[b.id] = items;
-    } else {
-      result[b.id] = [];
+    const metadata = b as PublicBuildingMetadata;
+    const items = new Set<string>(cleanStringList(metadata.accessibility) ?? []);
+    const acc = metadata.accessibility;
+    if (acc && typeof acc === "object" && !Array.isArray(acc)) {
+      const summary = acc as Record<string, unknown>;
+      if (summary.wheelchairAccessible) items.add("Wheelchair Accessible");
+      if (summary.hasElevator) items.add("Elevator Available");
+      if (summary.hasRamp) items.add("Ramp Access");
+      if (summary.accessibleEntrance) items.add("Accessible Entrance");
     }
+    for (const feature of campus.accessibilityFeatures ?? []) {
+      if (feature.buildingId !== b.id || feature.status !== "present") continue;
+      items.add(feature.label?.trim() || ACCESSIBILITY_TYPE_LABELS[feature.type] || "Accessibility Feature");
+    }
+    if (b.entrances?.some((entrance) => entrance.accessible === true)) items.add("Accessible Entrance");
+    result[b.id] = [...items];
   }
   return result;
 }
@@ -162,6 +224,7 @@ export function locationsFromCampus(campus: CampusWithOptionalBuildings): Campus
       name: m.name,
       type: mapMarkerTypeToLocationType(m.type),
       description: `Auto-generated from campus map marker`,
+      building_id: undefined,
     });
   }
 

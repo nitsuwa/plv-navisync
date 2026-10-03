@@ -169,7 +169,7 @@ describe("CampusMapPage event overlays", () => {
     const sheetActions = within(sheet);
     expect(sheet).toHaveStyle({ height: "58dvh" });
     expect(screen.getByTestId("readonly-building")).toHaveAttribute("data-selected", "true");
-    expect(screen.getByTestId("student-map-zoom-percentage")).toBeInTheDocument();
+    expect(screen.queryByTestId("student-map-zoom-controls")).not.toBeInTheDocument();
     expect(sheetActions.getByRole("button", { name: /Directions/i })).toBeVisible();
     const floorPlanActions = sheetActions.getAllByRole("button", { name: /Floor Plan/i });
     expect(floorPlanActions).toHaveLength(2);
@@ -177,7 +177,6 @@ describe("CampusMapPage event overlays", () => {
     expect(sheetActions.getByRole("button", { name: /Save/i })).toBeVisible();
     expect(sheetActions.getByRole("button", { name: /Report/i })).toBeVisible();
     expect(sheetActions.getByRole("button", { name: /View Floor Plan/i })).toBeVisible();
-    expect(screen.getByTestId("student-map-zoom-controls")).toHaveAttribute("data-sheet-open", "true");
   });
 
   it("exposes the responsive student map landmarks and controls", async () => {
@@ -278,7 +277,7 @@ describe("CampusMapPage event overlays", () => {
     fireEvent.change(search, { target: { value: "Copy Shop" } });
     fireEvent.click(await screen.findByRole("option", { name: /Copy Shop, Room/i }));
     expect(await screen.findByTestId("readonly-room")).toBeInTheDocument();
-    await waitFor(() => expect(screen.getByText("180%")).toBeInTheDocument(), { timeout: 3000 });
+    expect(screen.queryByTestId("student-map-zoom-percentage")).not.toBeInTheDocument();
 
     fireEvent.focus(search);
     fireEvent.change(search, { target: { value: "Science Hall" } });
@@ -315,29 +314,28 @@ describe("CampusMapPage event overlays", () => {
     expect(screen.getByTestId("readonly-room")).toHaveAttribute("data-room-id", "room-third");
   });
 
-  it("uses visible zoom buttons and prevents zooming beyond the fit-map limit", async () => {
+  it("hides the visible zoom controls and percentage indicator", async () => {
     renderCampusMap({ previewCampus });
-    const zoomIn = await screen.findByRole("button", { name: "Zoom in" });
-    const zoomOut = screen.getByRole("button", { name: "Zoom out" });
-    expect(zoomOut).toBeDisabled();
-    fireEvent.click(zoomIn);
-    await waitFor(() => expect(zoomOut).not.toBeDisabled());
-    fireEvent.click(zoomOut);
-    await waitFor(() => expect(zoomOut).toBeDisabled());
-    for (let index = 0; index < 30; index += 1) fireEvent.click(zoomIn);
-    await waitFor(() => expect(zoomIn).toBeDisabled());
-    expect(screen.getByText("350%")).toBeInTheDocument();
+    await screen.findByTestId("student-map-surface");
+    expect(screen.queryByTestId("student-map-zoom-controls")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Zoom in" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Zoom out" })).not.toBeInTheDocument();
+    expect(screen.queryByTestId("student-map-zoom-percentage")).not.toBeInTheDocument();
   });
 
   it("does not zoom the map when scrolling its search controls", async () => {
     renderCampusMap({ previewCampus });
     const search = await screen.findByRole("searchbox", { name: "Search campus map" });
+    const surface = screen.getByTestId("student-map-surface");
+    const camera = surface.querySelector("svg > g[transform]");
+    const before = camera?.getAttribute("transform");
     fireEvent.wheel(search, { deltaY: -1000 });
-    expect(screen.getByRole("button", { name: "Zoom out" })).toBeDisabled();
-    fireEvent.wheel(screen.getByTestId("student-map-surface"), { deltaY: -1000 });
-    await waitFor(() => expect(screen.getByRole("button", { name: "Zoom out" })).not.toBeDisabled());
-    fireEvent.wheel(screen.getByTestId("student-map-surface"), { deltaY: 10000 });
-    await waitFor(() => expect(screen.getByRole("button", { name: "Zoom out" })).toBeDisabled());
+    expect(camera).toHaveAttribute("transform", before);
+    fireEvent.wheel(surface, { deltaY: -1000 });
+    await waitFor(() => expect(camera).not.toHaveAttribute("transform", before));
+    const zoomed = camera?.getAttribute("transform");
+    fireEvent.wheel(surface, { deltaY: 10000 });
+    await waitFor(() => expect(camera).not.toHaveAttribute("transform", zoomed));
   });
 
   it("renders intermediate wheel-zoom scales without rebuilding the map scene", async () => {
@@ -535,8 +533,8 @@ describe("CampusMapPage event overlays", () => {
     const svg = surface.querySelector("svg");
     const camera = svg?.querySelector(":scope > g[transform]");
     expect(camera).not.toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
-    await waitFor(() => expect(screen.getByRole("button", { name: "Zoom out" })).not.toBeDisabled());
+    fireEvent.wheel(surface, { deltaY: -1000, clientX: 300, clientY: 220 });
+    await waitFor(() => expect(camera?.getAttribute("transform")).not.toBe("translate(0,0) scale(1)"));
     const before = camera?.getAttribute("transform");
     const building = screen.getByTestId("readonly-building");
 

@@ -146,7 +146,7 @@ export function CampusDestinationSearch({
               className={cn(
                 "min-w-0 min-h-11 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground",
                 compact && "min-h-10",
-                compact && "text-[13px]",
+                compact && "text-xs sm:text-[13px]",
               )}
             />
             {query && (

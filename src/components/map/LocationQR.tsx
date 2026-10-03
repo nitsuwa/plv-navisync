@@ -4,34 +4,48 @@ import { Link2 } from "lucide-react";
 import { useToast } from "../../hooks/useToast";
 
 /**
- * Real, scannable QR code that encodes a deep link to a campus location:
- *   /map?buildingId=<id>
- * Scanning it on another phone opens the interactive map at that building.
+ * Scannable QR deep link to a building or an individual room.
  */
 export function LocationQR({
   buildingId,
   buildingName,
   campusId,
+  roomId,
+  roomName,
+  floorId,
+  floorNumber,
 }: {
   buildingId: string;
   buildingName: string;
   campusId?: string;
+  roomId?: string;
+  roomName?: string;
+  floorId?: string;
+  floorNumber?: number;
 }) {
   const toast = useToast();
+  const locationName = roomName ?? buildingName;
 
   const url = useMemo(() => {
-    // A location QR sets this published campus position as the student's route origin.
+    // A room QR scopes the room ID to its building and floor, avoiding any
+    // ambiguity if room identifiers are reused in another building.
     const origin = typeof window !== "undefined" ? window.location.origin : "";
-    const params = new URLSearchParams({ locationId: buildingId });
+    const params = new URLSearchParams({ locationId: roomId ?? buildingId });
+    if (roomId) {
+      params.set("locationType", "room");
+      params.set("buildingId", buildingId);
+      if (floorId) params.set("floorId", floorId);
+      if (floorNumber !== undefined) params.set("floorNumber", String(floorNumber));
+    }
     if (campusId) params.set("campusId", campusId);
     return `${origin}/map?${params.toString()}`;
-  }, [buildingId, campusId]);
+  }, [buildingId, campusId, floorId, floorNumber, roomId]);
 
   const copyLink = async () => {
     try {
       if (!navigator.clipboard?.writeText) throw new Error("Clipboard unavailable");
       await navigator.clipboard.writeText(url);
-      toast.success("Link copied", { description: "Opening it sets this place as the route starting point." });
+      toast.success("Link copied", { description: `Opening it sets ${locationName} as your current location.` });
     } catch {
       toast.error("Could not copy", { description: "Clipboard access denied." });
     }
@@ -47,7 +61,7 @@ export function LocationQR({
           marginSize={1}
           fgColor="#0f172a"
           bgColor="#ffffff"
-          aria-label={`QR code for ${buildingName}`}
+          aria-label={`QR code for ${locationName}`}
         />
       </div>
       <button
@@ -57,7 +71,7 @@ export function LocationQR({
         <Link2 className="h-3 w-3" /> Copy link
       </button>
       <p className="text-[10px] text-muted-foreground text-center">
-        Scan to set {buildingName} as your current location
+        Scan to set {locationName} as your current location
       </p>
     </div>
   );

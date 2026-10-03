@@ -98,20 +98,23 @@ function stepDot(isFirst: boolean, isLast: boolean) {
   return "bg-card border-primary/50";
 }
 
-/** Keep internal graph-node names out of student-facing directions when a
- * legacy or emergency route still contains a raw waypoint step. */
-function presentInstruction(instruction: string): string {
+/** Keep internal graph-node names and synthetic distance labels out of
+ * student-facing directions. */
+function presentInstruction(instruction: string): string | null {
   const trimmed = instruction.trim();
   const floorWaypoint = trimmed.match(/^Continue to floor waypoint(?:\s+\d+)?\.?$/i);
   if (floorWaypoint) return "Continue along the connected indoor path.";
-  const walkToWaypoint = trimmed.match(/^Walk\s+([\d.]+)\s*m\s+to\s+(?:the\s+)?waypoint(?:\s+\d+)?\.?$/i);
-  if (walkToWaypoint) return `Follow the highlighted path for ${walkToWaypoint[1]} m.`;
+  if (/\b(?:walking point|waypoint)\b/i.test(trimmed)) return null;
   if (/^Start from (?:the )?Door\.?$/i.test(trimmed)) return "Start at the room door.";
-  return trimmed;
+  return trimmed
+    .replace(/\b\d+(?:\.\d+)?\s*m\b/gi, "")
+    .replace(/\s{2,}/g, " ")
+    .replace(/\s+([,.])/g, "$1")
+    .trim() || null;
 }
 
 /**
- * Turn-by-turn navigation panel — shows every step with an icon and distance.
+ * Turn-by-turn navigation panel — shows every student-facing step with an icon.
  * Floor changes are included inline in the directions,
  * so users see each transition once. Positioned by the parent
  * (desktop bottom-left card, mobile sheet).
@@ -135,7 +138,13 @@ export function RouteStepsPanel({
       ? activeStepIndex(steps, trackedProgress, trackedDistance)
       : steps.length > 0 ? 0 : null;
   const currentInstruction = activeLeg?.statusInstruction
-    ?? (activeIndex !== null && steps[activeIndex] ? presentInstruction(steps[activeIndex].instruction) : undefined);
+    ? presentInstruction(activeLeg.statusInstruction)
+    : activeIndex !== null && steps[activeIndex]
+      ? presentInstruction(steps[activeIndex].instruction)
+      : undefined;
+  const visibleSteps = steps
+    .map((step, index) => ({ step, index, instruction: presentInstruction(step.instruction) }))
+    .filter(({ instruction }) => Boolean(instruction));
   const clampMobilePanelHeight = (height: number) => Math.min(
     MOBILE_PANEL_MAX_HEIGHT,
     Math.max(MOBILE_PANEL_MIN_HEIGHT, height),
@@ -281,10 +290,10 @@ export function RouteStepsPanel({
         compact && "min-h-0 flex-1 px-2 pt-1.5 max-h-none",
       )}>
         <div className="relative pl-4 border-l-2 border-primary/30 space-y-1.5">
-          {steps.map((step, i) => {
+          {visibleSteps.map(({ step, index: originalIndex, instruction }, i) => {
             const isFirst = i === 0;
-            const isLast = i === steps.length - 1;
-            const isActive = activeIndex === i;
+            const isLast = i === visibleSteps.length - 1;
+            const isActive = activeIndex === originalIndex;
             return (
               <div
                 key={step.id}
@@ -307,7 +316,7 @@ export function RouteStepsPanel({
                     "text-[10px] leading-snug pt-0.5",
                     isLast ? "font-bold text-foreground" : "text-muted-foreground"
                   )}>
-                    {presentInstruction(step.instruction)}
+                    {instruction}
                   </p>
                 </div>
               </div>

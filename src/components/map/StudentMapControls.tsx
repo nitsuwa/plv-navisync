@@ -115,7 +115,7 @@ export function StudentMapControls({
       )}
 
       {utilityControlsVisible && (
-        <div data-testid="student-map-utility-controls" data-no-drag className="absolute right-3 top-20 flex flex-col items-end gap-1.5 pointer-events-auto">
+        <div data-testid="student-map-utility-controls" data-no-drag className="absolute bottom-[calc(0.75rem+env(safe-area-inset-bottom,0px))] right-3 flex flex-col items-end gap-1.5 pointer-events-auto">
           <button
             type="button"
             onClick={onOpenDirections}

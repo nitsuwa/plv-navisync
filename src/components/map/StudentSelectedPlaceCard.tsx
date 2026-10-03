@@ -1,8 +1,9 @@
 import { AnimatePresence, motion } from "motion/react";
 import { useState } from "react";
-import { Flag, MoreHorizontal, Navigation, Play, X } from "lucide-react";
+import { Flag, MoreHorizontal, Navigation, Play, QrCode, X } from "lucide-react";
 import type { RoomDest } from "../../lib/combinedPathfinding";
 import { useReducedMotion } from "../../hooks/useReducedMotion";
+import { LocationQR } from "./LocationQR";
 
 interface StudentSelectedPlaceCardProps {
   room: RoomDest;
@@ -10,13 +11,17 @@ interface StudentSelectedPlaceCardProps {
   onStartHere: () => void;
   onReport: () => void;
   onClose: () => void;
+  campusId?: string;
+  floorId?: string;
 }
 
-export function StudentSelectedPlaceCard({ room, onDirections, onStartHere, onReport, onClose }: StudentSelectedPlaceCardProps) {
+export function StudentSelectedPlaceCard({ room, onDirections, onStartHere, onReport, onClose, campusId, floorId }: StudentSelectedPlaceCardProps) {
   const [moreOpen, setMoreOpen] = useState(false);
+  const [qrOpen, setQrOpen] = useState(false);
   const reducedMotion = useReducedMotion();
 
   return (
+    <>
       <motion.section
         key={`${room.buildingId}:${room.floorNumber}:${room.roomId}`}
         data-testid="student-selected-place-card"
@@ -48,6 +53,7 @@ export function StudentSelectedPlaceCard({ room, onDirections, onStartHere, onRe
             <AnimatePresence>
               {moreOpen && (
                 <motion.div initial={reducedMotion ? false : { opacity: 0, y: 4, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0 }} transition={{ duration: reducedMotion ? 0.01 : 0.14 }} className="absolute right-0 top-full z-10 mt-1 w-40 overflow-hidden rounded-xl border border-border/70 bg-card p-1 shadow-xl">
+                  <button type="button" onClick={() => { setMoreOpen(false); setQrOpen(true); }} className="flex min-h-10 w-full items-center gap-2 rounded-lg px-2.5 text-left text-[11px] font-bold text-foreground transition-colors hover:bg-primary/5 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"><QrCode className="h-3.5 w-3.5" />Show room QR</button>
                   <button type="button" onClick={() => { setMoreOpen(false); onReport(); }} className="flex min-h-10 w-full items-center gap-2 rounded-lg px-2.5 text-left text-[11px] font-bold text-muted-foreground transition-colors hover:bg-destructive/5 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"><Flag className="h-3.5 w-3.5" />Report a room issue</button>
                 </motion.div>
               )}
@@ -55,5 +61,49 @@ export function StudentSelectedPlaceCard({ room, onDirections, onStartHere, onRe
           </div>
         </div>
       </motion.section>
+      <AnimatePresence>
+        {qrOpen && (
+          <motion.div
+            data-no-drag
+            className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-950/65 p-4 backdrop-blur-sm"
+            role="presentation"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onMouseDown={(event) => { if (event.target === event.currentTarget) setQrOpen(false); }}
+          >
+            <motion.section
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="room-location-qr-title"
+              className="w-full max-w-sm rounded-2xl border border-border bg-card p-4 text-foreground shadow-2xl"
+              initial={reducedMotion ? false : { opacity: 0, y: 8, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 4, scale: 0.98 }}
+              transition={{ duration: reducedMotion ? 0.01 : 0.16 }}
+            >
+              <div className="mb-3 flex items-start gap-3">
+                <div className="min-w-0 flex-1">
+                  <h2 id="room-location-qr-title" className="truncate text-sm font-extrabold">Room location QR</h2>
+                  <p className="mt-1 truncate text-[11px] text-muted-foreground">{room.roomName} · {room.buildingLabel} · {room.floorLabel ?? `Floor ${room.floorNumber}`}</p>
+                </div>
+                <button type="button" onClick={() => setQrOpen(false)} aria-label="Close room QR" className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"><X className="h-4 w-4" /></button>
+              </div>
+              <div className="rounded-xl bg-muted p-4">
+                <LocationQR
+                  buildingId={room.buildingId}
+                  buildingName={room.buildingLabel}
+                  campusId={campusId}
+                  roomId={room.roomId}
+                  roomName={room.roomName}
+                  floorId={floorId}
+                  floorNumber={room.floorNumber}
+                />
+              </div>
+            </motion.section>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </>
   );
 }

@@ -216,7 +216,7 @@ export function BuildingInfoPanel({
               ))}
             </div>
           ) : (
-            <p className="text-xs text-muted-foreground/90">No facilities data yet.</p>
+            <p className="text-xs text-muted-foreground/90">No facilities are listed for this building.</p>
           )}
         </div>
 
@@ -235,7 +235,7 @@ export function BuildingInfoPanel({
               ))}
             </div>
           ) : (
-            <p className="text-xs text-muted-foreground/90">No accessibility data yet.</p>
+            <p className="text-xs text-muted-foreground/90">No accessibility features are listed for this building.</p>
           )}
         </div>
 

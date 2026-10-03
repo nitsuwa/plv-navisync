@@ -45,8 +45,11 @@ describe("StudentMapControls", () => {
   it("keeps search and the single useful route action in the floating controls", () => {
     render(<StudentMapControls {...props()} />);
 
-    expect(screen.getByRole("searchbox", { name: "Search campus map" })).toBeInTheDocument();
+    const searchbox = screen.getByRole("searchbox", { name: "Search campus map" });
+    expect(searchbox).toBeInTheDocument();
+    expect(searchbox).toHaveClass("text-xs", "sm:text-[13px]");
     expect(screen.getByTestId("student-map-search-panel")).toHaveClass("right-16");
+    expect(screen.getByTestId("student-map-utility-controls")).toHaveClass("bottom-[calc(0.75rem+env(safe-area-inset-bottom,0px))]");
     expect(screen.getByRole("button", { name: "Open directions" })).toBeInTheDocument();
     expect(within(screen.getByTestId("student-map-utility-controls")).getAllByRole("button")).toHaveLength(1);
     expect(screen.queryByRole("button", { name: /Drop pin|Move dropped pin|Cancel drop pin/i })).not.toBeInTheDocument();
