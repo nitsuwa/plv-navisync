@@ -1,5 +1,5 @@
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 import type { FloorPlan } from "../types";
 import { ReadonlyFloorPlanScene, readonlyFloorPlanViewport } from "../ReadonlyFloorPlanVisuals";
 
@@ -138,6 +138,22 @@ const sharedVisualFloor = {
 } as unknown as FloorPlan;
 
 describe("ReadonlyFloorPlanScene", () => {
+  it("does not render the authored floor scene again for a camera-only parent update", () => {
+    let floorIdReads = 0;
+    const observedFloor = new Proxy(floor, {
+      get(target, property, receiver) {
+        if (property === "id") floorIdReads += 1;
+        return Reflect.get(target, property, receiver);
+      },
+    });
+    const view = render(<svg data-camera-zoom="1"><ReadonlyFloorPlanScene floor={observedFloor} /></svg>);
+    const initialReads = floorIdReads;
+    expect(initialReads).toBeGreaterThan(0);
+
+    view.rerender(<svg data-camera-zoom="1.2"><ReadonlyFloorPlanScene floor={observedFloor} /></svg>);
+    expect(floorIdReads).toBe(initialReads);
+  });
+
   it("preserves Admin-authored chair and table dimensions and rotation", () => {
     render(<svg><ReadonlyFloorPlanScene floor={floor} /></svg>);
 
@@ -182,7 +198,6 @@ describe("ReadonlyFloorPlanScene", () => {
     const room = screen.getByTestId("readonly-room");
     const roomShape = screen.getByTestId("room-custom-shape");
     const selection = screen.getByTestId("readonly-room-selection");
-    const tint = screen.getByTestId("readonly-room-selection-tint");
     const halo = screen.getByTestId("readonly-room-selection-halo");
     const outline = screen.getByTestId("readonly-room-selection-outline");
     const trace = screen.getByTestId("readonly-room-selection-trace");
@@ -191,9 +206,13 @@ describe("ReadonlyFloorPlanScene", () => {
     expect(room).toHaveAttribute("aria-pressed", "true");
     expect(selection).toHaveAttribute("data-room-id", "lab-room");
     expect(selection).toHaveAttribute("pointer-events", "none");
-    expect(tint.tagName.toLowerCase()).toBe("path");
-    expect(tint).toHaveAttribute("d", roomShape.getAttribute("d"));
+    expect(screen.queryByTestId("readonly-room-selection-tint")).not.toBeInTheDocument();
+    expect(halo).toHaveAttribute("d", roomShape.getAttribute("d"));
+    expect(halo).toHaveAttribute("stroke-opacity", "0.045");
+    expect(halo).toHaveAttribute("stroke-width", "4");
     expect(outline).toHaveAttribute("d", roomShape.getAttribute("d"));
+    expect(outline).toHaveAttribute("stroke-width", "2.5");
+    expect(outline).toHaveAttribute("stroke", "#059669");
     expect(halo).toHaveClass("student-room-selection-halo");
     expect(trace).toHaveClass("student-room-selection-trace");
     expect(trace).toHaveAttribute("d", roomShape.getAttribute("d"));
@@ -208,12 +227,62 @@ describe("ReadonlyFloorPlanScene", () => {
     expect(screen.getByTestId("readonly-wall")).toBeInTheDocument();
     expect(screen.getByTestId("room-label-overlay")).toHaveTextContent("Fluid Mechanics Laboratory");
     expect(screen.getByTestId("room-label-overlay")).toHaveAttribute("data-room-label-selected", "true");
+    expect(screen.getByTestId("room-label-overlay").querySelector("rect")).toHaveAttribute("fill", "#0f2748");
+    expect(screen.getByTestId("room-label-overlay").querySelector("rect")).toHaveAttribute("stroke", "#059669");
+    expect(screen.getByTestId("room-label-overlay").querySelector("rect")).toHaveAttribute("stroke-width", "1");
+    expect(screen.getByTestId("room-label-overlay").querySelector("text")).toHaveAttribute("fill", "#ffffff");
+    expect(screen.queryByTestId("room-label-selected-accent")).not.toBeInTheDocument();
 
     view.rerender(<svg><ReadonlyFloorPlanScene floor={sharedVisualFloor} hoveredRoomId="lab-room" showLabels onRoomClick={() => undefined} /></svg>);
     expect(screen.queryByTestId("readonly-room-selection")).not.toBeInTheDocument();
     expect(screen.getByTestId("readonly-room")).toHaveAttribute("data-room-hovered", "true");
     expect(screen.getByTestId("readonly-room")).toHaveAttribute("data-room-highlighted", "false");
     expect(screen.getByTestId("room-label-overlay")).not.toHaveAttribute("data-room-label-selected", "true");
+  });
+
+  it("keeps a non-navigable room visible but removes Student interaction and selection", () => {
+    const onRoomClick = vi.fn();
+    const onRoomHover = vi.fn();
+    const { container } = render(<svg><ReadonlyFloorPlanScene
+      floor={sharedVisualFloor}
+      highlightedRoomId="lab-room"
+      hoveredRoomId="lab-room"
+      interactiveRoomIds={new Set()}
+      onRoomClick={onRoomClick}
+      onRoomHover={onRoomHover}
+    /></svg>);
+
+    const room = container.querySelector<SVGGElement>("[data-room-id='lab-room'][data-testid='readonly-room']");
+    expect(room).toHaveAttribute("data-room-interactive", "false");
+    expect(room).toHaveAttribute("data-room-hovered", "false");
+    expect(room).toHaveAttribute("data-room-highlighted", "false");
+    expect(room).toHaveStyle({ cursor: "default" });
+    expect(room).not.toHaveAttribute("role", "button");
+    expect(room).not.toHaveAttribute("tabindex");
+    fireEvent.mouseEnter(room!);
+    fireEvent.click(room!);
+    expect(onRoomHover).not.toHaveBeenCalled();
+    expect(onRoomClick).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("readonly-room-selection")).not.toBeInTheDocument();
+    expect(screen.getByTestId("room-label-overlay")).toHaveTextContent("Fluid Mechanics Laboratory");
+    expect(screen.getByTestId("room-label-overlay")).not.toHaveAttribute("data-room-label-selected", "true");
+  });
+
+  it("skips static floor-scene renders when its authored data and interactions are unchanged", () => {
+    const component = ReadonlyFloorPlanScene as unknown as { type: (...args: unknown[]) => unknown };
+    const sceneRender = vi.spyOn(component, "type");
+    const props = { floor, showLabels: false };
+    const tree = () => (
+      <svg>
+        <ReadonlyFloorPlanScene {...props} />
+      </svg>
+    );
+    const view = render(tree());
+    expect(sceneRender).toHaveBeenCalledTimes(1);
+
+    view.rerender(tree());
+    expect(sceneRender).toHaveBeenCalledTimes(1);
+    sceneRender.mockRestore();
   });
 
   it("hides informational labels while retaining an active route destination label", () => {

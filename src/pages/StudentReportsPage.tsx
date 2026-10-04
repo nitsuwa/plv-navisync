@@ -140,7 +140,7 @@ export function StudentReportsPage() {
     return (
       <PageTransition>
         <div className="min-h-screen">
-          <div className="max-w-2xl mx-auto px-5 py-6 space-y-4">
+          <div className="max-w-3xl mx-auto px-4 sm:px-5 py-6 space-y-4">
             {/* Header skeleton */}
             <div className="flex items-center gap-4 mb-6">
               <Skeleton variant="avatar" className="h-12 w-12" />
@@ -231,7 +231,7 @@ export function StudentReportsPage() {
           }
         />
 
-        <div className="max-w-2xl mx-auto px-5 py-6 space-y-4">
+        <div className="max-w-3xl mx-auto px-4 sm:px-5 py-6 space-y-4">
           {/* Search + Filter */}
           {reports.length > 0 && (
             <Reveal>
@@ -341,15 +341,15 @@ export function StudentReportsPage() {
                             </div>
                             <div className="flex-1 min-w-0">
                               <div className="flex items-start justify-between gap-2">
-                                <p className="text-sm font-extrabold text-foreground">{r.title}</p>
+                                <p className="min-w-0 break-words text-sm font-extrabold text-foreground">{r.title}</p>
                                 <span className={cn("flex items-center gap-1 text-[10px] font-bold px-2.5 py-1 rounded-full border shrink-0 whitespace-nowrap", st.bg, st.color)}>
                                   <StatusIcon className="h-2.5 w-2.5" />
                                   {st.label}
                                 </span>
                               </div>
-                              <div className="flex items-center gap-1.5 mt-1 text-xs text-muted-foreground">
+                              <div className="flex min-w-0 flex-wrap items-start gap-x-1.5 gap-y-1 mt-1 text-xs text-muted-foreground">
                                 <MapPin className="h-3 w-3 text-primary shrink-0" />
-                                {[r.campusPlaceName || r.buildingName || "Campus Location", r.floorLabel, r.roomName].filter(Boolean).join(" · ")}
+                                <span className="min-w-0 break-words">{[r.campusPlaceName || r.buildingName || "Campus Location", r.floorLabel, r.roomName].filter(Boolean).join(" · ")}</span>
                               </div>
                               <p className="text-[10px] text-muted-foreground mt-0.5">{dateStr}</p>
                             </div>
@@ -358,7 +358,7 @@ export function StudentReportsPage() {
 
                         {/* Description */}
                         <div className="px-5 py-3 border-b border-border/50 bg-muted/20">
-                          <p className="text-xs text-muted-foreground leading-relaxed">{r.description}</p>
+                          <p className="break-words text-xs text-muted-foreground leading-relaxed">{r.description}</p>
                           {r.imageUrl && (
                             <div className="mt-2.5 overflow-hidden rounded-xl border border-border max-w-xs">
                               <img src={r.imageUrl} alt={`Photo attached to ${r.title}`} className="w-full h-32 object-cover" />

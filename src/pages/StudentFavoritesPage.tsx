@@ -117,12 +117,11 @@ export function StudentFavoritesPage() {
 
   const filtered = search.trim()
     ? savedBuildings.filter((b) =>
-        b.name.toLowerCase().includes(search.toLowerCase()) ||
-        b.code.toLowerCase().includes(search.toLowerCase())
+        `${b.name} ${b.code} ${b.category} ${activeCampus?.name ?? ""} building`.toLowerCase().includes(search.trim().toLowerCase())
       )
     : savedBuildings;
   const filteredCampusPlaces = search.trim()
-    ? savedCampusPlaces.filter((place) => `${place.name} ${place.type} ${place.studentInfo?.description ?? ""}`.toLowerCase().includes(search.toLowerCase()))
+    ? savedCampusPlaces.filter((place) => `${place.name} ${place.type} ${place.studentInfo?.description ?? ""} ${activeCampus?.name ?? ""}`.toLowerCase().includes(search.trim().toLowerCase()))
     : savedCampusPlaces;
 
   const remove = async (id: string) => {
@@ -133,7 +132,13 @@ export function StudentFavoritesPage() {
       setTimeout(() => {
         setSavedBuildings((prev) => prev.filter((x) => x.id !== id));
         setRemovingId(null);
-        toast.success(`${building?.name || "Location"} removed from favorites`);
+        toast.success(`${building?.name || "Location"} removed from Favorites`, {
+          action: { label: "Undo", onClick: () => {
+            void studentAccountService.toggleSaveBuilding(id, activeCampus?.id).then(() => {
+              if (building) setSavedBuildings((prev) => prev.some((item) => item.id === id) ? prev : [building, ...prev]);
+            }).catch(() => toast.error("Favorite could not be restored"));
+          } },
+        });
       }, 300);
     } catch {
       setRemovingId(null);
@@ -147,7 +152,13 @@ export function StudentFavoritesPage() {
       await studentAccountService.toggleSaveCampusPlace(place.id, activeCampus?.id ?? "");
       setSavedCampusPlaceIds((current) => current.filter((id) => id !== place.id));
       setRemovingId(null);
-      toast.success(`${place.name || "Campus place"} removed from favorites`);
+      toast.success(`${place.name || "Campus place"} removed from Favorites`, {
+        action: { label: "Undo", onClick: () => {
+          void studentAccountService.toggleSaveCampusPlace(place.id, activeCampus?.id ?? "").then(() => {
+            setSavedCampusPlaceIds((current) => current.includes(place.id) ? current : [place.id, ...current]);
+          }).catch(() => toast.error("Favorite could not be restored"));
+        } },
+      });
     } catch {
       setRemovingId(null);
       toast.error("Favorite could not be removed");
@@ -164,7 +175,7 @@ export function StudentFavoritesPage() {
           icon={Bookmark}
         />
 
-        <div className="max-w-2xl mx-auto px-5 py-6 space-y-4">
+        <div className="max-w-3xl mx-auto px-4 sm:px-5 py-6 space-y-4">
           {savedCount > 0 && (
             <Reveal>
               <div className="space-y-4">
@@ -243,15 +254,15 @@ export function StudentFavoritesPage() {
                       animate={{ opacity: removingId === place.id ? 0 : 1, y: removingId === place.id ? -10 : 0, scale: removingId === place.id ? 0.95 : 1 }}
                       exit={{ opacity: 0, x: 100 }}
                       transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
-                      className="group flex items-center gap-4 px-4 py-4 rounded-2xl border border-border/60 bg-card/50 hover:bg-card hover:border-primary/15 hover:shadow-sm transition-all duration-200"
+                      className="group flex flex-col items-stretch gap-3 px-4 py-4 rounded-2xl border border-border/60 bg-card/50 hover:bg-card hover:border-primary/15 hover:shadow-sm transition-all duration-200 sm:flex-row sm:items-center sm:gap-4"
                     >
-                      <div className="w-14 h-14 rounded-xl flex items-center justify-center shrink-0 bg-primary/10 group-hover:scale-105 transition-transform"><MapPin className="h-7 w-7 text-primary" /></div>
+                      <div className="hidden sm:flex w-14 h-14 rounded-xl items-center justify-center shrink-0 bg-primary/10 group-hover:scale-105 transition-transform"><MapPin className="h-7 w-7 text-primary" /></div>
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-bold text-foreground truncate">{place.name || "Campus place"}</p>
-                        <p className="text-xs text-muted-foreground mt-0.5 capitalize">{place.studentInfo?.gateType?.replaceAll("_", " ") || (place.type === "gate" ? "Gate" : "Landmark")}</p>
+                        <p className="break-words text-sm font-bold text-foreground">{place.name || "Campus place"}</p>
+                        <p className="mt-0.5 text-xs capitalize text-muted-foreground">{place.studentInfo?.gateType?.replaceAll("_", " ") || (place.type === "gate" ? "Gate" : "Landmark")} · {activeCampus?.name || "Campus"}</p>
                       </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        <Link to={`/map?campusId=${encodeURIComponent(activeCampus?.id ?? "")}&placeId=${encodeURIComponent(place.id)}`} className="flex items-center gap-1.5 h-9 px-3.5 rounded-xl border border-border text-xs font-bold hover:bg-primary hover:text-primary-foreground hover:border-primary transition-all"><Navigation className="h-3.5 w-3.5" /><span className="hidden sm:inline text-[10px]">Navigate</span></Link>
+                      <div className="flex w-full items-center justify-end gap-2 shrink-0 sm:w-auto">
+                        <Link to={`/map?campusId=${encodeURIComponent(activeCampus?.id ?? "")}&destinationPlaceId=${encodeURIComponent(place.id)}`} className="inline-flex h-10 min-w-28 items-center justify-center gap-1.5 rounded-xl border border-border px-3.5 text-xs font-bold transition-all hover:border-primary hover:bg-primary hover:text-primary-foreground"><Navigation className="h-3.5 w-3.5" />Navigate</Link>
                         <button onClick={() => void removeCampusPlace(place)} aria-label={`Remove ${place.name} from favorites`} className="flex items-center justify-center h-9 w-9 rounded-xl border border-border text-muted-foreground hover:bg-destructive/10 hover:text-destructive hover:border-destructive/30 transition-all" title="Remove from favorites"><Trash2 className="h-3.5 w-3.5" /></button>
                       </div>
                     </motion.div>
@@ -283,7 +294,7 @@ export function StudentFavoritesPage() {
                       role="button"
                       tabIndex={0}
                       aria-label={`Open details for ${b.name}`}
-                      className="group flex items-center gap-4 px-4 py-4 rounded-2xl border border-border/60 bg-card/50 hover:bg-card hover:border-primary/15 hover:shadow-sm transition-all duration-200 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                      className="group flex flex-col items-stretch gap-3 px-4 py-4 rounded-2xl border border-border/60 bg-card/50 hover:bg-card hover:border-primary/15 hover:shadow-sm transition-all duration-200 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 sm:flex-row sm:items-center sm:gap-4"
                     >
                       {b.image_url ? (
                         <img src={b.image_url} alt={`${b.name} thumbnail`} className="w-14 h-14 rounded-xl object-cover shrink-0 ring-1 ring-border" />
@@ -294,20 +305,21 @@ export function StudentFavoritesPage() {
                       )}
 
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-bold text-foreground truncate">{b.name}</p>
-                        <p className="text-xs text-muted-foreground mt-0.5 font-mono">{b.code}</p>
+                        <p className="break-words text-sm font-bold text-foreground">{b.name}</p>
+                        <p className="text-xs text-muted-foreground mt-0.5">{b.category.replaceAll("_", " ")} · {activeCampus?.name || "Campus"}</p>
+                        <p className="text-[11px] text-muted-foreground mt-0.5 font-mono">{b.code}</p>
                         {b.operating_hours && (
                           <p className="text-[11px] text-muted-foreground mt-1">{b.operating_hours}</p>
                         )}
                       </div>
 
-                      <div className="flex items-center gap-2 shrink-0">
+                      <div className="flex w-full items-center justify-end gap-2 shrink-0 sm:w-auto">
                         <Link
-                          to={`/map?buildingId=${b.id}`}
-                          className="flex items-center gap-1.5 h-9 px-3.5 rounded-xl border border-border text-xs font-bold hover:bg-primary hover:text-primary-foreground hover:border-primary transition-all"
+                          to={`/map?destinationBuildingId=${encodeURIComponent(b.id)}`}
+                          className="inline-flex h-10 min-w-28 items-center justify-center gap-1.5 rounded-xl border border-border px-3.5 text-xs font-bold transition-all hover:border-primary hover:bg-primary hover:text-primary-foreground"
                         >
                           <Navigation className="h-3.5 w-3.5" />
-                          <span className="hidden sm:inline text-[10px]">Navigate</span>
+                          <span>Navigate</span>
                         </Link>
                         <button
                           onClick={() => remove(b.id)}

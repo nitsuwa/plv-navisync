@@ -542,11 +542,70 @@ describe("FloorEditor render (regression: LandPlot runtime crash)", () => {
     const furniture = container.querySelector('[data-layer-key="furniture:chair-1"]');
     expect(furniture).toBeTruthy();
     fireEvent.mouseDown(furniture!, { clientX: 262, clientY: 480, bubbles: true });
+    fireEvent.mouseMove(svg!, { clientX: 280, clientY: 486, bubbles: true });
     fireEvent.mouseMove(svg!, { clientX: 290, clientY: 490, bubbles: true });
+    // Drag preview is transient: no campus/floor serialization happens until
+    // the final snapped position is committed on release.
+    expect(updates).toHaveLength(0);
     fireEvent.mouseUp(svg!, { bubbles: true });
+    expect(updates).toHaveLength(1);
     const moved = updates.at(-1)?.buildings[0].floors[0].furniture?.find((item) => item.id === "chair-1");
     expect(moved?.y).toBeGreaterThan(450);
     expect(moved?.x).toBeGreaterThan(250);
+  });
+
+  it("moves grouped furniture as one transient drag and preserves child geometry", () => {
+    const campus = makeCampus();
+    const floor = campus.buildings[0].floors[0];
+    floor.furniture = [
+      { id: "chair-a", groupId: "set-a", type: "chair", name: "Chair A", category: "seating", x: 100, y: 100, width: 24, height: 20, rotation: 30, color: "#c08457" },
+      { id: "chair-b", groupId: "set-a", type: "chair", name: "Chair B", category: "seating", x: 140, y: 100, width: 28, height: 22, rotation: 90, color: "#c08457", flipX: true },
+    ];
+    const updates: Campus[] = [];
+    const { container } = render(<FloorEditor campus={campus} buildingId="b1" floorId="f1" onBack={() => {}} onSwitchFloor={() => {}} onUpdate={(next) => updates.push(next)} />);
+    const svg = Array.from(container.querySelectorAll("svg")).find((candidate) => candidate.getAttribute("viewBox") === "0 0 600 450");
+    expect(svg).toBeTruthy();
+    mockFloorSvgViewport(svg!);
+    const furniture = container.querySelector('[data-layer-key="furniture:chair-a"]');
+    expect(furniture).toBeTruthy();
+    fireEvent.mouseDown(furniture!, { clientX: 112, clientY: 110, bubbles: true });
+    fireEvent.mouseMove(svg!, { clientX: 132, clientY: 125, bubbles: true });
+    expect(updates).toHaveLength(0);
+    fireEvent.mouseUp(svg!, { bubbles: true });
+
+    expect(updates).toHaveLength(1);
+    const moved = updates[0].buildings[0].floors[0].furniture ?? [];
+    const chairA = moved.find((item) => item.id === "chair-a");
+    const chairB = moved.find((item) => item.id === "chair-b");
+    expect(chairA?.x).toBeGreaterThan(100);
+    expect(chairA?.y).toBeGreaterThan(100);
+    expect(chairB?.x).toBe((chairA?.x ?? 0) + 40);
+    expect(chairB?.y).toBe(chairA?.y);
+    expect(chairA).toMatchObject({ width: 24, height: 20, rotation: 30 });
+    expect(chairB).toMatchObject({ width: 28, height: 22, rotation: 90, flipX: true });
+  });
+
+  it("shows temporary Space-pan feedback, restores it on release/blur, and leaves typing alone", () => {
+    const { container } = render(<FloorEditor campus={makeCampus()} buildingId="b1" floorId="f1" onBack={() => {}} onSwitchFloor={() => {}} onUpdate={() => {}} />);
+    const svg = container.querySelector('[data-testid="floor-canvas-boundary"]')?.closest("svg");
+    expect(svg).toBeTruthy();
+
+    const input = document.createElement("input");
+    document.body.appendChild(input);
+    input.focus();
+    fireEvent.keyDown(input, { code: "Space", key: " " });
+    expect(screen.queryByTestId("floor-space-pan-indicator")).toBeNull();
+    input.blur();
+    input.remove();
+
+    fireEvent.keyDown(window, { code: "Space", key: " " });
+    expect(screen.getByTestId("floor-space-pan-indicator")).toHaveTextContent("Pan mode");
+    expect(container.querySelector('[data-temporary-pan-active="true"]')).toBeTruthy();
+    expect((svg as SVGSVGElement).style.cursor).toBe("grab");
+
+    fireEvent.blur(window);
+    expect(screen.queryByTestId("floor-space-pan-indicator")).toBeNull();
+    expect(container.querySelector('[data-temporary-pan-active="true"]')).toBeNull();
   });
 
   it("allows furniture to cross the perimeter wall when the final footprint enters a Veranda", () => {

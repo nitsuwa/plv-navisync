@@ -50,6 +50,45 @@ const previewCampus: EditorCampus = {
   publishedAt: "2026-01-02",
 };
 
+function withNavigableRooms(campus: EditorCampus, rooms: { buildingId: string; floorId: string; roomId: string }[]): EditorCampus {
+  const buildingIds = [...new Set(rooms.map((room) => room.buildingId))];
+  const entranceNodes = buildingIds.flatMap((buildingId) => [
+    { id: `test-outdoor-${buildingId}`, name: "Campus Path", type: "outdoor" as const, x: 20, y: 20, accessible: true, color: "#2563eb" },
+    { id: `test-entrance-${buildingId}`, name: "Main Entrance", type: "entrance" as const, x: 40, y: 40, buildingId, accessible: true, color: "#2563eb" },
+  ]);
+  const entranceEdges = buildingIds.map((buildingId) => ({
+    id: `test-entrance-edge-${buildingId}`,
+    startNodeId: `test-outdoor-${buildingId}`,
+    endNodeId: `test-entrance-${buildingId}`,
+    bidirectional: true,
+    distance: 20,
+    accessible: true,
+    type: "path",
+    color: "#2563eb",
+    width: 4,
+  }));
+  return {
+    ...campus,
+    navNodes: [
+      ...(campus.navNodes ?? []),
+      ...entranceNodes,
+      ...rooms.map(({ buildingId, floorId, roomId }) => ({
+        id: `test-room-node-${buildingId}-${floorId}-${roomId}`,
+        name: roomId,
+        type: "room_access" as const,
+        x: 80,
+        y: 80,
+        buildingId,
+        floorId,
+        roomId,
+        accessible: true,
+        color: "#2563eb",
+      })),
+    ],
+    navEdges: [...(campus.navEdges ?? []), ...entranceEdges],
+  };
+}
+
 const settingsMocks = vi.hoisted(() => ({ getPublicPlatformSettings: vi.fn() }));
 
 vi.mock("../../services/eventOverlayService", () => ({
@@ -199,6 +238,7 @@ describe("CampusMapPage event overlays", () => {
       ...previewCampus,
       buildings: [{
         ...previewCampus.buildings[0],
+        entrances: [{ id: "science-main-entrance", buildingId: "building-test", edge: "bottom", offset: 0.5, type: "general", isPrimary: true }],
         floors: [{
           id: "science-floor",
           buildingId: "building-test",
@@ -219,6 +259,9 @@ describe("CampusMapPage event overlays", () => {
     expect(sheet).toHaveAttribute("data-sheet-state", "default");
     expect(sheetActions.getByTestId("building-cover-fallback")).toBeInTheDocument();
     expect(screen.getByTestId("readonly-building")).toHaveAttribute("data-selected", "true");
+    expect(screen.queryByTestId("student-enter-building-pill")).not.toBeInTheDocument();
+    expect(screen.getByTestId("readonly-entrance")).toBeInTheDocument();
+    expect(screen.getByTestId("readonly-enter-building-door-hit-target")).toBeInTheDocument();
     expect(screen.queryByTestId("student-map-zoom-controls")).not.toBeInTheDocument();
     expect(screen.getByTestId("student-map-recenter-button")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Zoom in" })).not.toBeInTheDocument();
@@ -280,11 +323,11 @@ describe("CampusMapPage event overlays", () => {
   });
 
   it("starts a fresh room-directions planner in the configured mode, not a previous SOS mode", async () => {
-    const campus: EditorCampus = { ...previewCampus, buildings: [{ ...previewCampus.buildings[0], floors: [{
+    const campus: EditorCampus = withNavigableRooms({ ...previewCampus, buildings: [{ ...previewCampus.buildings[0], floors: [{
       id: "route-floor", buildingId: "building-test", number: 1, label: "Ground Floor",
       rooms: [{ id: "copyshop-room", name: "Copyshop", type: "classroom", floorId: "route-floor", buildingId: "building-test", x: 10, y: 10, w: 60, h: 60 }],
       paths: [], walls: [], doors: [], windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [],
-    }] }] };
+    }] }] }, [{ buildingId: "building-test", floorId: "route-floor", roomId: "copyshop-room" }]);
     renderCampusMap({ previewCampus: campus });
 
     fireEvent.click(await screen.findByRole("button", { name: "Open directions" }));
@@ -401,11 +444,11 @@ describe("CampusMapPage event overlays", () => {
   });
 
   it("lets users report an interacted indoor room with its floor prefilled", async () => {
-    const campus: EditorCampus = { ...previewCampus, buildings: [{ ...previewCampus.buildings[0], floors: [{
+    const campus: EditorCampus = withNavigableRooms({ ...previewCampus, buildings: [{ ...previewCampus.buildings[0], floors: [{
       id: "report-floor", buildingId: "building-test", number: 1, label: "Ground Floor",
       rooms: [{ id: "report-room", name: "Copy Shop", type: "classroom", floorId: "report-floor", buildingId: "building-test", x: 10, y: 10, w: 60, h: 60 }],
       paths: [], walls: [], doors: [], windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [],
-    }] }] };
+    }] }] }, [{ buildingId: "building-test", floorId: "report-floor", roomId: "report-room" }]);
     renderCampusMap({ previewCampus: campus });
     fireEvent.focus(await screen.findByRole("searchbox", { name: "Search campus map" }));
     fireEvent.click(screen.getByRole("option", { name: /Science Hall, Building/ }));
@@ -420,16 +463,90 @@ describe("CampusMapPage event overlays", () => {
     expect(screen.getByLabelText("Room (optional)")).toHaveValue("report-room");
   });
 
+  it("keeps visual-only rooms inert, excludes them from Student search/routes, and follows published navigation membership", async () => {
+    const floor = {
+      id: "visual-floor", buildingId: "building-test", number: 1, label: "Ground Floor",
+      rooms: [
+        { id: "comfort-room", name: "Comfort Room", type: "restroom", floorId: "visual-floor", buildingId: "building-test", x: 10, y: 10, w: 60, h: 60 },
+        { id: "classroom", name: "Room 101", type: "classroom", floorId: "visual-floor", buildingId: "building-test", x: 90, y: 10, w: 60, h: 60 },
+      ],
+      paths: [], walls: [], doors: [], windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [],
+    };
+    const visualOnlyCampus: EditorCampus = { ...previewCampus, buildings: [{ ...previewCampus.buildings[0], floors: [floor] }] };
+    const campusWithRoom101 = withNavigableRooms(visualOnlyCampus, [{
+      buildingId: "building-test", floorId: "visual-floor", roomId: "classroom",
+    }]);
+    const view = renderCampusMap({ previewCampus: campusWithRoom101 });
+
+    const search = await screen.findByRole("searchbox", { name: "Search campus map" });
+    fireEvent.focus(search);
+    fireEvent.change(search, { target: { value: "Comfort Room" } });
+    await waitFor(() => expect(screen.queryByRole("option", { name: /Comfort Room, Facility/i })).not.toBeInTheDocument());
+    fireEvent.change(search, { target: { value: "Science Hall" } });
+    fireEvent.click(await screen.findByRole("option", { name: /Science Hall, Building/i }));
+    fireEvent.click(screen.getAllByTestId("building-enter")[0]);
+
+    await screen.findByTestId("readonly-floor-plan-scene");
+    const visualRoom = screen.getAllByTestId("readonly-room").find((room) => room.getAttribute("data-room-id") === "comfort-room");
+    expect(visualRoom).toBeDefined();
+    expect(visualRoom).toHaveAttribute("data-room-interactive", "false");
+    expect(visualRoom).not.toHaveAttribute("role", "button");
+    expect(document.querySelector("[data-testid='room-label-overlay'][data-room-id='comfort-room']")).toHaveTextContent(/Comfort\s*Room/);
+    const navigableRoom101 = screen.getAllByTestId("readonly-room").find((room) => room.getAttribute("data-room-id") === "classroom");
+    expect(navigableRoom101).toHaveAttribute("data-room-interactive", "true");
+    fireEvent.click(navigableRoom101!);
+    expect(await screen.findByTestId("student-selected-place-card")).toHaveTextContent("Room 101");
+    const camera = screen.getByTestId("student-map-surface").querySelector("svg > g[transform]");
+    const cameraBefore = camera?.getAttribute("transform");
+    fireEvent.click(visualRoom!);
+    expect(screen.getByTestId("student-selected-place-card")).toHaveTextContent("Room 101");
+    expect(camera?.getAttribute("transform")).toBe(cameraBefore);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Open directions" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Choose destination" }));
+    const destinationSearch = await screen.findByRole("searchbox", { name: "Search destination" });
+    fireEvent.change(destinationSearch, { target: { value: "Comfort Room" } });
+    await waitFor(() => expect(screen.queryByRole("option", { name: /Comfort Room/ })).not.toBeInTheDocument());
+
+    const navigableCampus = withNavigableRooms(visualOnlyCampus, [
+      { buildingId: "building-test", floorId: "visual-floor", roomId: "classroom" },
+      { buildingId: "building-test", floorId: "visual-floor", roomId: "comfort-room" },
+    ]);
+    view.rerender(<MemoryRouter><CampusMapPage previewCampus={navigableCampus} /></MemoryRouter>);
+    const nowNavigable = screen.getAllByTestId("readonly-room").find((room) => room.getAttribute("data-room-id") === "comfort-room");
+    expect(nowNavigable).toBeDefined();
+    expect(nowNavigable).toHaveAttribute("data-room-interactive", "true");
+    expect(nowNavigable).toHaveAttribute("role", "button");
+    expect(await screen.findByRole("option", { name: /Comfort Room/ })).toBeInTheDocument();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Back to route planner" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Close directions" }));
+    await waitFor(() => expect(screen.queryByTestId("route-planner-dialog")).not.toBeInTheDocument());
+    const currentNavigableRoom = screen.getAllByTestId("readonly-room").find((room) => room.getAttribute("data-room-id") === "comfort-room");
+    fireEvent.click(currentNavigableRoom!);
+    expect(await screen.findByTestId("student-selected-place-card")).toBeInTheDocument();
+
+    // Removing the authored node (the Admin's Remove from Navigation action)
+    // withdraws its Student selection and details state on the updated preview.
+    view.rerender(<MemoryRouter><CampusMapPage previewCampus={campusWithRoom101} /></MemoryRouter>);
+    await waitFor(() => expect(screen.queryByTestId("student-selected-place-card")).not.toBeInTheDocument());
+    const removedRoom = screen.getAllByTestId("readonly-room").find((room) => room.getAttribute("data-room-id") === "comfort-room");
+    expect(removedRoom).toHaveAttribute("data-room-interactive", "false");
+  });
+
   it("keeps a selected room card only while that room exists on the newly selected floor", async () => {
     const sharedRoom = { id: "same-room", name: "Study Lounge", type: "lounge", x: 20, y: 20, w: 70, h: 50 };
-    const campus: EditorCampus = { ...previewCampus, buildings: [{
+    const campus: EditorCampus = withNavigableRooms({ ...previewCampus, buildings: [{
       ...previewCampus.buildings[0],
       floors: [
         { id: "ground", buildingId: "building-test", number: 1, label: "Ground Floor", rooms: [{ ...sharedRoom, floorId: "ground", buildingId: "building-test" }], paths: [], walls: [], doors: [], windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [] },
         { id: "second", buildingId: "building-test", number: 2, label: "Floor 2", rooms: [{ ...sharedRoom, floorId: "second", buildingId: "building-test" }], paths: [], walls: [], doors: [], windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [] },
         { id: "third", buildingId: "building-test", number: 3, label: "Floor 3", rooms: [], paths: [], walls: [], doors: [], windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [] },
       ],
-    }] };
+    }] }, [
+      { buildingId: "building-test", floorId: "ground", roomId: "same-room" },
+      { buildingId: "building-test", floorId: "second", roomId: "same-room" },
+    ]);
     renderCampusMap({ previewCampus: campus });
     fireEvent.focus(await screen.findByRole("searchbox", { name: "Search campus map" }));
     fireEvent.click(screen.getByRole("option", { name: /Science Hall, Building/i }));
@@ -450,14 +567,14 @@ describe("CampusMapPage event overlays", () => {
   });
 
   it("inspects a floor room without changing the open route planner endpoints or mode", async () => {
-    const campus: EditorCampus = { ...previewCampus, buildings: [{
+    const campus: EditorCampus = withNavigableRooms({ ...previewCampus, buildings: [{
       ...previewCampus.buildings[0],
       floors: [{
         id: "inspect-floor", buildingId: "building-test", number: 1, label: "Ground Floor",
         rooms: [{ id: "inspect-room", name: "Visitor Lounge", type: "lounge", floorId: "inspect-floor", buildingId: "building-test", x: 10, y: 10, w: 80, h: 50 }],
         paths: [], walls: [], doors: [], windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [],
       }],
-    }] };
+    }] }, [{ buildingId: "building-test", floorId: "inspect-floor", roomId: "inspect-room" }]);
     renderCampusMap({ previewCampus: campus });
     fireEvent.focus(await screen.findByRole("searchbox", { name: "Search campus map" }));
     fireEvent.click(screen.getByRole("option", { name: /Science Hall, Building/i }));
@@ -479,11 +596,11 @@ describe("CampusMapPage event overlays", () => {
     ["Directions", "route-endpoint-card-destination", "Administration Office", "route-endpoint-card-start", "Choose starting point"],
     ["Start", "route-endpoint-card-start", "Administration Office", "route-endpoint-card-destination", "Choose destination"],
   ])("transfers a selected room into the planner from the %s action", async (action, chosenEndpoint, chosenLabel, emptyEndpoint, emptyLabel) => {
-    const campus: EditorCampus = { ...previewCampus, buildings: [{ ...previewCampus.buildings[0], floors: [{
+    const campus: EditorCampus = withNavigableRooms({ ...previewCampus, buildings: [{ ...previewCampus.buildings[0], floors: [{
       id: "context-floor", buildingId: "building-test", number: 2, label: "Floor 2",
       rooms: [{ id: "admin-office", name: "Administration Office", type: "office", floorId: "context-floor", buildingId: "building-test", x: 10, y: 10, w: 80, h: 50 }],
       paths: [], walls: [], doors: [], windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [],
-    }] }] };
+    }] }] }, [{ buildingId: "building-test", floorId: "context-floor", roomId: "admin-office" }]);
     renderCampusMap({ previewCampus: campus });
     fireEvent.focus(await screen.findByRole("searchbox", { name: "Search campus map" }));
     fireEvent.click(screen.getByRole("option", { name: /Science Hall, Building/i }));
@@ -497,11 +614,11 @@ describe("CampusMapPage event overlays", () => {
   });
 
   it("opens a searched room without forcing a zoom change, then returns to the campus for a building result", async () => {
-    const campus: EditorCampus = { ...previewCampus, buildings: [{ ...previewCampus.buildings[0], floors: [{
+    const campus: EditorCampus = withNavigableRooms({ ...previewCampus, buildings: [{ ...previewCampus.buildings[0], floors: [{
       id: "search-floor", buildingId: "building-test", number: 1, label: "Ground Floor",
       rooms: [{ id: "search-room", name: "Copy Shop", type: "classroom", floorId: "search-floor", buildingId: "building-test", x: 15, y: 20, w: 60, h: 40 }],
       paths: [], walls: [], doors: [], windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [],
-    }] }] };
+    }] }] }, [{ buildingId: "building-test", floorId: "search-floor", roomId: "search-room" }]);
     renderCampusMap({ previewCampus: campus });
     const search = await screen.findByRole("searchbox", { name: "Search campus map" });
     fireEvent.focus(search);
@@ -590,21 +707,46 @@ describe("CampusMapPage event overlays", () => {
     expect(screen.getByRole("button", { name: "Recenter map" })).toBeInTheDocument();
   });
 
-  it("renders intermediate wheel-zoom scales without rebuilding the map scene", async () => {
+  it("smoothly wheel-zooms without replacing the map scene", async () => {
     renderCampusMap({ previewCampus });
     const surface = await screen.findByTestId("student-map-surface");
     const camera = surface.querySelector("svg > g[transform]");
     const building = screen.getByTestId("readonly-building");
     const readScale = () => Number(camera?.getAttribute("transform")?.match(/scale\(([^)]+)\)/)?.[1]);
+    const initialScale = readScale();
 
     fireEvent.wheel(surface, { deltaY: -100, clientX: 300, clientY: 220 });
 
-    await waitFor(() => expect(readScale()).toBeGreaterThan(1));
-    const intermediateScale = readScale();
-    expect(intermediateScale).toBeLessThan(Math.exp(0.11));
+    // Wheel input only changes the target; the visible transform moves on the
+    // next camera frame rather than stepping to the final scale in the event.
+    expect(readScale()).toBe(initialScale);
+    await waitFor(() => expect(readScale()).toBeCloseTo(Math.exp(0.11), 2));
     expect(screen.getByTestId("readonly-building")).toBe(building);
+  });
 
-    await waitFor(() => expect(readScale()).toBeCloseTo(Math.exp(0.11), 2), { timeout: 1_200 });
+  it("uses the same continuous cursor-anchored wheel zoom in the indoor floor view", async () => {
+    const campus: EditorCampus = { ...previewCampus, buildings: [{
+      ...previewCampus.buildings[0],
+      floors: [{
+        id: "zoom-floor", buildingId: "building-test", number: 1, label: "Ground Floor",
+        rooms: [{ id: "zoom-room", name: "Room", type: "classroom", floorId: "zoom-floor", buildingId: "building-test", x: 20, y: 20, w: 80, h: 50 }],
+        paths: [], walls: [], doors: [], windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [],
+      }],
+    }] };
+    renderCampusMap({ previewCampus: campus });
+    fireEvent.focus(await screen.findByRole("searchbox", { name: "Search campus map" }));
+    fireEvent.click(screen.getByRole("option", { name: /Science Hall, Building/i }));
+    fireEvent.click(screen.getAllByTestId("building-enter")[0]);
+
+    const surface = await screen.findByTestId("student-map-surface");
+    await screen.findByTestId("readonly-floor-plan-scene");
+    const camera = surface.querySelector("svg > g[transform]");
+    const readScale = () => Number(camera?.getAttribute("transform")?.match(/scale\(([^)]+)\)/)?.[1]);
+    const initialScale = readScale();
+
+    fireEvent.wheel(surface, { deltaY: -100, clientX: 300, clientY: 220 });
+    expect(readScale()).toBe(initialScale);
+    await waitFor(() => expect(readScale()).toBeCloseTo(initialScale * Math.exp(0.11), 2));
   });
 
   it("shows only journey instructions for a room-to-building navigation", async () => {
@@ -619,6 +761,7 @@ describe("CampusMapPage event overlays", () => {
         { ...previewCampus.buildings[0], id: "ceit", name: "CEIT", code: "CEIT", x: 500, entranceNodeId: "target-entry" },
       ],
       navNodes: [
+        { id: "source-room-access", name: "CABA-103", type: "room_access", roomId: "source-room", x: 40, y: 50, buildingId: "building-test", floorId: "ground", accessible: true, color: "#3b82f6" },
         { id: "room-door-node", name: "Room Door", type: "hallway", x: 40, y: 70, buildingId: "building-test", floorId: "ground", doorId: "room-door", accessible: true, color: "#3b82f6" },
         { id: "hall", name: "Hall", type: "hallway", x: 40, y: 150, buildingId: "building-test", floorId: "ground", accessible: true, color: "#3b82f6" },
         { id: "source-entry", name: "Entrance", type: "entrance", x: 200, y: 220, buildingId: "building-test", accessible: true, color: "#3b82f6" },

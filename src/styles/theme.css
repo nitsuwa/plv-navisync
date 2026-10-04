@@ -1091,18 +1091,25 @@
     animation: student-selection-halo-in 360ms cubic-bezier(0.22, 1, 0.36, 1) both;
   }
   .student-room-selection-halo {
-    animation: student-room-selection-in 420ms ease-out both;
+    animation: student-room-selection-in 360ms ease-out both;
+  }
+  .student-room-selection-outline {
+    animation: student-room-selection-outline-in 180ms ease-out both;
   }
   .student-room-selection-trace {
     stroke-dasharray: 1;
     stroke-dashoffset: 1;
     opacity: 0;
-    animation: student-room-selection-trace-in 420ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+    animation: student-room-selection-trace-in 380ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  }
+  @keyframes student-room-selection-outline-in {
+    from { stroke-width: 1.5; stroke-opacity: 0.7; }
+    to { stroke-width: 2.5; stroke-opacity: 1; }
   }
   @keyframes student-room-selection-in {
-    0% { stroke-opacity: 0.02; }
-    42% { stroke-opacity: 0.4; }
-    100% { stroke-opacity: 0.24; }
+    0% { stroke-opacity: 0.01; }
+    42% { stroke-opacity: 0.07; }
+    100% { stroke-opacity: 0.045; }
   }
   @keyframes student-room-selection-trace-in {
     0% { stroke-dashoffset: 1; opacity: 0; }
@@ -1131,6 +1138,7 @@
     .student-map-zoom-controls,
     .student-map-utility-stack { transition-duration: 0.01ms; }
     .student-room-selection-halo,
+    .student-room-selection-outline,
     .student-room-selection-trace { animation: none; }
     .student-room-selection-trace { display: none; }
   }

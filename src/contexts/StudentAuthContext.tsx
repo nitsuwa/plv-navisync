@@ -73,6 +73,8 @@ export interface AuthState {
   /** Existing student-facing role fallback retained for compatibility. */
   role: "student" | "student_org" | "faculty";
   refreshProfile: () => Promise<void>;
+  /** Adopt a profile mutation immediately so every account surface stays in sync. */
+  applyProfileUpdate: (profile: Partial<Profile>) => void;
   retryBootstrap: () => Promise<void>;
   signOut: () => Promise<void>;
 }
@@ -113,6 +115,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     profileRef.current = next;
     setProfile(next);
   }, []);
+  const applyProfileUpdate = useCallback((patch: Partial<Profile>) => {
+    const current = profileRef.current;
+    if (!current || current.id !== sessionRef.current?.user.id) return;
+    updateProfile({ ...current, ...patch });
+  }, [updateProfile]);
   const updateStatus = useCallback((next: AuthStatus) => {
     statusRef.current = next;
     setStatus(next);
@@ -357,8 +364,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<AuthState>(() => ({
     session, profile: activeProfile, status, recoveryState, loading: status === "initializing" || status === "error", error,
-    isAdmin, isStudent, isStudentOrg, username, role, refreshProfile, retryBootstrap, signOut,
-  }), [session, activeProfile, status, recoveryState, error, isAdmin, isStudent, isStudentOrg, username, role, refreshProfile, retryBootstrap, signOut]);
+    isAdmin, isStudent, isStudentOrg, username, role, refreshProfile, applyProfileUpdate, retryBootstrap, signOut,
+  }), [session, activeProfile, status, recoveryState, error, isAdmin, isStudent, isStudentOrg, username, role, refreshProfile, applyProfileUpdate, retryBootstrap, signOut]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
@@ -381,6 +388,7 @@ const EMPTY_AUTH_STATE: AuthState = {
   username: "",
   role: "faculty",
   refreshProfile: async () => {},
+  applyProfileUpdate: () => {},
   retryBootstrap: async () => {},
   signOut: async () => {},
 };
@@ -390,8 +398,8 @@ export function useAuth(): AuthState {
 }
 
 /** Drop-in compatibility hook for existing student UI. */
-export type StudentAuthState = Pick<AuthState, "profile" | "loading" | "isStudent" | "isStudentOrg" | "username" | "role" | "refreshProfile" | "signOut">;
+export type StudentAuthState = Pick<AuthState, "profile" | "loading" | "isStudent" | "isStudentOrg" | "username" | "role" | "refreshProfile" | "applyProfileUpdate" | "signOut">;
 export function useStudentAuth(): StudentAuthState {
-  const { profile, loading, isStudent, isStudentOrg, username, role, refreshProfile, signOut } = useAuth();
-  return { profile, loading, isStudent, isStudentOrg, username, role, refreshProfile, signOut };
+  const { profile, loading, isStudent, isStudentOrg, username, role, refreshProfile, applyProfileUpdate, signOut } = useAuth();
+  return { profile, loading, isStudent, isStudentOrg, username, role, refreshProfile, applyProfileUpdate, signOut };
 }

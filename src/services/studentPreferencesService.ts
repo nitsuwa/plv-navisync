@@ -82,26 +82,18 @@ export async function saveStudentPreferences(
     campusEvents: Boolean(preferences.campusEvents),
   };
 
-  try {
-    const { client: activeClient, user } = await resolveUser(client);
-    if (activeClient && user) {
-      const { error } = await activeClient.auth.updateUser({
-        data: { student_preferences: normalized },
-      });
-      if (error) throw error;
-      return normalized;
-    }
-  } catch {
-    // Fall through to the account-scoped local fallback.
+  const { client: activeClient, user } = await resolveUser(client);
+  if (activeClient && user) {
+    const { error } = await activeClient.auth.updateUser({
+      data: { student_preferences: normalized },
+    });
+    if (error) throw error;
+    writeLocalPreferences(user.id, normalized);
+    return normalized;
   }
 
-  let scope = "guest";
-  try {
-    const { user } = await resolveUser(client);
-    scope = user?.id ?? "guest";
-  } catch {
-    // Keep the guest scope when the auth client is unavailable.
-  }
-  writeLocalPreferences(scope, normalized);
+  // The local store is used only for unauthenticated/demo mode. An actual
+  // signed-in write failure must reach the UI so its optimistic toggle rolls back.
+  writeLocalPreferences(user?.id ?? "guest", normalized);
   return normalized;
 }

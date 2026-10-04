@@ -92,6 +92,21 @@ describe("ReadonlyOutdoorCampusScene", () => {
     expect(onClickEntrance).toHaveBeenCalledWith("b1");
   });
 
+  it("can hide Student outdoor action pills while keeping entrance markers interactive", () => {
+    const onClickEntrance = vi.fn();
+    render(<svg><ReadonlyOutdoorCampusScene
+      campus={projectReadonlyOutdoorCampus(campus)}
+      onClickEntrance={onClickEntrance}
+      showEntryPills={false}
+    /></svg>);
+
+    expect(screen.queryByTestId("student-enter-building-pill")).not.toBeInTheDocument();
+    expect(screen.getByTestId("campus-entrance-artwork")).toBeInTheDocument();
+    expect(screen.getByTestId("readonly-enter-building-door-hit-target")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("readonly-entrance"));
+    expect(onClickEntrance).toHaveBeenCalledWith("b1");
+  });
+
   it("selects a Campus Gate from the map and renders its selected halo", () => {
     const onSelectCampusPlace = vi.fn();
     const withGate = {

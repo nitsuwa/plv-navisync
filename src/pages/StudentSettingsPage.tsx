@@ -1,10 +1,10 @@
 import { useState, useEffect } from "react";
 import {
-  Moon, Sun, Lock, Bell, ChevronDown, Shield, MapPin, HelpCircle,
-  Smartphone, Globe, CheckCircle2, ChevronRight, Sparkles,
+  Moon, Sun, Lock, Bell, ChevronDown, Shield, CheckCircle2,
+  Sparkles, Monitor, Eye, EyeOff,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
-import { Link, useNavigate } from "react-router";
+import { useNavigate } from "react-router";
 import { useStudentAuth } from "../hooks/useStudentAuth";
 import { useTheme } from "../hooks/useTheme";
 import { useToast } from "../hooks/useToast";
@@ -13,7 +13,9 @@ import { PageTransition } from "../components/ui/PageTransition";
 import { Skeleton } from "../components/ui/Skeleton";
 import { useScrollReveal } from "../hooks/useScrollReveal";
 import { cn } from "../lib/utils";
-import { updateStudentPassword } from "../lib/studentAccount";
+import { useReducedMotion } from "../hooks/useReducedMotion";
+import type { ThemePreference } from "../hooks/useTheme";
+import { MIN_ACCOUNT_PASSWORD_LENGTH, updateStudentPassword } from "../lib/studentAccount";
 import {
   DEFAULT_STUDENT_PREFERENCES,
   loadStudentPreferences,
@@ -55,25 +57,24 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
   );
 }
 
-type SettingsSection = "appearance" | "notifications" | "security" | "support";
+type SettingsSection = "appearance" | "notifications" | "security";
 
 export function StudentSettingsPage() {
   const navigate = useNavigate();
   const { loading: authLoading, isStudent, username, role, signOut } = useStudentAuth();
-  const { theme, toggleTheme } = useTheme();
+  const { theme, themePreference, setThemePreference } = useTheme();
+  const reducedMotion = useReducedMotion();
   const { success, error: showError } = useToast();
   const [loading, setLoading] = useState(true);
   const [activeSection, setActiveSection] = useState<SettingsSection>("appearance");
 
-  const [notifMap, setNotifMap] = useState(true);
-  const [notifReports, setNotifReports] = useState(true);
-  const [notifEvents, setNotifEvents] = useState(DEFAULT_STUDENT_PREFERENCES.campusEvents);
   const [preferences, setPreferences] = useState<StudentNotificationPreferences>(DEFAULT_STUDENT_PREFERENCES);
   const [preferencesLoading, setPreferencesLoading] = useState(true);
   const [preferencesError, setPreferencesError] = useState<string | null>(null);
   const [savingPreferences, setSavingPreferences] = useState(false);
   const [changingPw, setChangingPw] = useState(false);
   const [pwForm, setPwForm] = useState({ current: "", next: "", confirm: "" });
+  const [pwVisibility, setPwVisibility] = useState({ current: false, next: false, confirm: false });
   const [pwSaved, setPwSaved] = useState(false);
   const [pwError, setPwError] = useState<string | null>(null);
   const [pwSaving, setPwSaving] = useState(false);
@@ -90,9 +91,6 @@ export function StudentSettingsPage() {
       .then((loaded) => {
         if (!mounted) return;
         setPreferences(loaded);
-        setNotifMap(loaded.mapUpdates);
-        setNotifReports(loaded.reportStatus);
-        setNotifEvents(loaded.campusEvents);
       })
       .catch(() => {
         if (mounted) setPreferencesError("Notification preferences could not be loaded.");
@@ -144,9 +142,6 @@ export function StudentSettingsPage() {
     const previous = preferences;
     const next = { ...preferences, [key]: value };
     setPreferences(next);
-    setNotifMap(next.mapUpdates);
-    setNotifReports(next.reportStatus);
-    setNotifEvents(next.campusEvents);
     setSavingPreferences(true);
     setPreferencesError(null);
     try {
@@ -154,9 +149,6 @@ export function StudentSettingsPage() {
       success("Preferences saved");
     } catch {
       setPreferences(previous);
-      setNotifMap(previous.mapUpdates);
-      setNotifReports(previous.reportStatus);
-      setNotifEvents(previous.campusEvents);
       setPreferencesError("Could not save this preference. Please try again.");
       showError("Preference not saved");
     } finally {
@@ -166,8 +158,8 @@ export function StudentSettingsPage() {
 
   const handlePwSave = async () => {
     setPwError(null);
-    if (pwForm.next.length < 8) {
-      setPwError("Your new password must be at least 8 characters.");
+    if (pwForm.next.length < MIN_ACCOUNT_PASSWORD_LENGTH) {
+      setPwError(`Your new password must be at least ${MIN_ACCOUNT_PASSWORD_LENGTH} characters.`);
       return;
     }
     if (pwForm.next !== pwForm.confirm) {
@@ -196,7 +188,6 @@ export function StudentSettingsPage() {
     { key: "appearance", label: "Appearance", icon: theme === "dark" ? Moon : Sun },
     { key: "notifications", label: "Notifications", icon: Bell },
     { key: "security", label: "Security", icon: Lock },
-    { key: "support", label: "Support", icon: HelpCircle },
   ];
 
   function Toggle({ on, onToggle, label }: { on: boolean; onToggle: () => void; label: string }) {
@@ -207,8 +198,9 @@ export function StudentSettingsPage() {
         aria-label={label}
         aria-checked={on}
         onClick={onToggle}
+        disabled={preferencesLoading || savingPreferences}
         className={cn(
-          "relative inline-flex items-center h-[28px] w-[50px] shrink-0 cursor-pointer rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-2",
+          "relative inline-flex items-center h-[28px] w-[50px] shrink-0 cursor-pointer rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60",
           on ? "bg-primary" : "bg-gray-200 dark:bg-gray-700"
         )}
       >
@@ -232,7 +224,7 @@ export function StudentSettingsPage() {
           <Icon className="h-4 w-4 text-muted-foreground shrink-0" />
           <div className="min-w-0">
             <p className="text-sm font-semibold text-foreground">{label}</p>
-            {desc && <p className="text-xs text-muted-foreground mt-0.5 truncate">{desc}</p>}
+            {desc && <p className="break-words text-xs leading-relaxed text-muted-foreground mt-0.5">{desc}</p>}
           </div>
         </div>
         <div className="shrink-0">{action}</div>
@@ -268,7 +260,7 @@ export function StudentSettingsPage() {
                 )}
               >
                 <SecIcon className="h-4 w-4" />
-                <span className="text-[10px] font-semibold leading-tight">{label}</span>
+                <span className="text-[11px] font-semibold leading-tight">{label}</span>
                 {activeSection === key && (
                   <span className="absolute bottom-0 left-2 right-2 h-0.5 rounded-full bg-primary" />
                 )}
@@ -277,41 +269,37 @@ export function StudentSettingsPage() {
           </div>
         </StudentPageHeader>
 
-        <div className="max-w-2xl mx-auto px-5 py-6 space-y-6">
+        <div className="max-w-3xl mx-auto px-4 sm:px-5 py-6 space-y-6">
           <AnimatePresence>
             <motion.div
               key={activeSection}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
-              transition={{ duration: 0.2 }}
+              initial={reducedMotion ? { opacity: 0 } : { opacity: 0, x: 6 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={reducedMotion ? { opacity: 0 } : { opacity: 0, x: -4 }}
+              transition={{ duration: reducedMotion ? 0.01 : 0.18, ease: "easeOut" }}
             >
               {activeSection === "appearance" && (
                 <Reveal>
                   <div>
                     <SectionLabel>Appearance</SectionLabel>
-                    <div className="rounded-2xl border border-border/60 bg-card shadow-sm overflow-hidden">
-                      <div className="px-5 py-4">
-                        <div className="flex items-center justify-between gap-4">
-                          <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-muted border border-border/60">
-                              {theme === "dark"
-                                ? <Moon className="h-4 w-4 text-muted-foreground" />
-                                : <Sun className="h-4 w-4 text-muted-foreground" />}
-                            </div>
-                            <div>
-                              <p className="text-sm font-semibold text-foreground">
-                                {theme === "dark" ? "Dark Mode" : "Light Mode"}
-                              </p>
-                              <p className="text-xs text-muted-foreground">Switch appearance theme</p>
-                            </div>
-                          </div>
-                          <Toggle on={theme === "dark"} onToggle={toggleTheme} label="Dark mode" />
+                    <div className="rounded-2xl border border-border/60 bg-card p-4 shadow-sm sm:p-5">
+                      <div className="mb-4 flex items-center gap-3">
+                        <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-border/60 bg-muted">
+                          {themePreference === "system" ? <Monitor className="h-4 w-4 text-muted-foreground" /> : theme === "dark" ? <Moon className="h-4 w-4 text-muted-foreground" /> : <Sun className="h-4 w-4 text-muted-foreground" />}
                         </div>
+                        <div><p className="text-sm font-semibold text-foreground">Theme</p><p className="text-xs text-muted-foreground">Choose how NaviSync looks on this device.</p></div>
                       </div>
-                      <div className="px-5 py-3 border-t border-border/50 bg-muted/20 flex items-center gap-3">
-                        <Globe className="h-4 w-4 text-muted-foreground shrink-0" />
-                        <span className="text-xs text-muted-foreground">System default follows your device settings</span>
+                      <div className="grid grid-cols-3 gap-2" role="radiogroup" aria-label="Appearance theme">
+                        {([
+                          ["system", "System", Monitor, "Follow device"],
+                          ["light", "Light", Sun, "Always light"],
+                          ["dark", "Dark", Moon, "Always dark"],
+                        ] as [ThemePreference, string, React.ElementType, string][]).map(([value, label, Icon, hint]) => (
+                          <button key={value} type="button" role="radio" aria-checked={themePreference === value} onClick={() => setThemePreference(value)}
+                            className={cn("flex min-h-[78px] flex-col items-center justify-center gap-1 rounded-xl border px-2 py-2 text-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40", themePreference === value ? "border-primary bg-primary/8 text-primary" : "border-border/70 text-muted-foreground hover:bg-muted/40")}>
+                            <Icon className="h-4 w-4" /><span className="text-xs font-bold">{label}</span><span className="text-[10px] leading-tight">{hint}</span>
+                          </button>
+                        ))}
                       </div>
                     </div>
                   </div>
@@ -323,10 +311,9 @@ export function StudentSettingsPage() {
                   <div>
                     <SectionLabel>Notifications</SectionLabel>
                     <div className="rounded-2xl border border-border/60 bg-card shadow-sm overflow-hidden">
-                      <SettingRow icon={MapPin} label="Map updates" desc="When published maps are updated" action={<Toggle on={notifMap} onToggle={() => void handlePreferenceChange("mapUpdates", !notifMap)} label="Map updates" />} />
-                      <SettingRow icon={Bell} label="Report status" desc="Updates when your reports change status" action={<Toggle on={notifReports} onToggle={() => void handlePreferenceChange("reportStatus", !notifReports)} label="Report status" />} />
-                      <SettingRow icon={Smartphone} label="Campus events" desc="Alerts for event maps and activities" action={<Toggle on={notifEvents} onToggle={() => void handlePreferenceChange("campusEvents", !notifEvents)} label="Campus events" />} />
-                      {(preferencesLoading || savingPreferences) && <p className="px-5 py-2 text-xs text-muted-foreground">Saving preferences…</p>}
+                      <SettingRow icon={Bell} label="Report status" desc="In-app notice when one of your reports changes status" action={<Toggle on={preferences.reportStatus} onToggle={() => void handlePreferenceChange("reportStatus", !preferences.reportStatus)} label="Report status" />} />
+                      <p className="px-5 py-3 text-xs leading-relaxed text-muted-foreground">Report status is currently the only in-app notification category NaviSync delivers. Browser and OS push alerts are not enabled.</p>
+                      {(preferencesLoading || savingPreferences) && <p className="px-5 py-2 text-xs text-muted-foreground">{preferencesLoading ? "Loading preferences…" : "Saving preferences…"}</p>}
                       {preferencesError && <p role="alert" className="px-5 py-2 text-xs font-semibold text-destructive">{preferencesError}</p>}
                     </div>
                   </div>
@@ -363,22 +350,31 @@ export function StudentSettingsPage() {
                           >
                             <div className="px-5 py-4 border-b border-border/50 space-y-3 bg-muted/20">
                               {([
-                                { key: "current" as const, label: "Current Password", placeholder: "Enter current password", type: "password" },
-                                { key: "next" as const, label: "New Password", placeholder: "Min. 8 characters", type: "password" },
-                                { key: "confirm" as const, label: "Confirm New Password", placeholder: "Repeat new password", type: "password" },
+                                { key: "current" as const, label: "Current Password", placeholder: "Enter current password" },
+                                { key: "next" as const, label: "New Password", placeholder: `Min. ${MIN_ACCOUNT_PASSWORD_LENGTH} characters` },
+                                { key: "confirm" as const, label: "Confirm New Password", placeholder: "Repeat new password" },
                               ]).map(f => (
                                 <div key={f.key}>
                                   <label htmlFor={`student-${f.key}-password`} className="block text-xs font-bold uppercase tracking-wide mb-1.5 text-foreground">{f.label}</label>
-                                  <input
-                                    id={`student-${f.key}-password`}
-                                    type={f.type}
-                                    value={pwForm[f.key]}
-                                    onChange={e => setPwForm(p => ({ ...p, [f.key]: e.target.value }))}
-                                    placeholder={f.placeholder}
-                                    className="w-full px-3 py-2.5 rounded-xl border border-border/60 text-sm focus:outline-none focus:ring-2 focus:ring-primary/25 transition-all bg-input-background"
-                                  />
+                                  <div className="relative">
+                                    <input
+                                      id={`student-${f.key}-password`}
+                                      type={pwVisibility[f.key] ? "text" : "password"}
+                                      value={pwForm[f.key]}
+                                      onChange={e => { setPwForm(p => ({ ...p, [f.key]: e.target.value })); setPwError(null); }}
+                                      placeholder={f.placeholder}
+                                      autoComplete={f.key === "current" ? "current-password" : "new-password"}
+                                      className="w-full rounded-xl border border-border/60 bg-input-background px-3 py-2.5 pr-11 text-sm transition-all focus:outline-none focus:ring-2 focus:ring-primary/25"
+                                    />
+                                    <button type="button" onClick={() => setPwVisibility((v) => ({ ...v, [f.key]: !v[f.key] }))} aria-label={`${pwVisibility[f.key] ? "Hide" : "Show"} ${f.label.toLowerCase()}`} className="absolute inset-y-0 right-2 inline-flex w-8 items-center justify-center text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40">
+                                      {pwVisibility[f.key] ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                                    </button>
+                                  </div>
                                 </div>
                               ))}
+                              <p className="text-[11px] text-muted-foreground">Use at least {MIN_ACCOUNT_PASSWORD_LENGTH} characters. Your current password is verified before the update.</p>
+                              {pwForm.confirm && pwForm.next !== pwForm.confirm && <p className="text-xs font-semibold text-destructive">The new passwords do not match.</p>}
+                              {pwForm.next && pwForm.next.length < MIN_ACCOUNT_PASSWORD_LENGTH && <p className="text-xs text-muted-foreground">Your new password needs at least {MIN_ACCOUNT_PASSWORD_LENGTH} characters.</p>}
                               {pwSaved && (
                                 <motion.p
                                   initial={{ opacity: 0, y: -5 }}
@@ -418,30 +414,12 @@ export function StudentSettingsPage() {
                           </div>
                         ))}
                       </div>
+                      <p className="px-5 pb-4 text-xs text-muted-foreground">Account details are read-only. Contact your campus administrator if they need to change.</p>
                     </div>
                   </div>
                 </Reveal>
               )}
 
-              {activeSection === "support" && (
-                <Reveal>
-                  <div>
-                    <SectionLabel>Support</SectionLabel>
-                    <div className="rounded-2xl border border-border/60 bg-card shadow-sm overflow-hidden">
-                      <Link to="/help" className="flex items-center gap-3 px-5 py-4 border-b border-border/50 hover:bg-muted/20 transition-colors group">
-                        <HelpCircle className="h-4 w-4 text-muted-foreground shrink-0" />
-                        <span className="text-sm font-semibold text-foreground flex-1">Help Center</span>
-                        <ChevronRight className="h-4 w-4 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
-                      </Link>
-                      <Link to="/map" className="flex items-center gap-3 px-5 py-4 hover:bg-muted/20 transition-colors group">
-                        <MapPin className="h-4 w-4 text-muted-foreground shrink-0" />
-                        <span className="text-sm font-semibold text-foreground flex-1">Open Campus Map</span>
-                        <ChevronRight className="h-4 w-4 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
-                      </Link>
-                    </div>
-                  </div>
-                </Reveal>
-              )}
             </motion.div>
           </AnimatePresence>
 

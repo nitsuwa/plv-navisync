@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const authState = vi.hoisted(() => ({
   loading: false,
@@ -20,10 +20,12 @@ const authState = vi.hoisted(() => ({
   },
   signOut: vi.fn(),
   refreshProfile: vi.fn(),
+  applyProfileUpdate: vi.fn(),
 }));
 const accountService = vi.hoisted(() => ({
   getSavedBuildingIds: vi.fn().mockReturnValue(["b1"]),
   getSavedBuildingIdsAsync: vi.fn().mockResolvedValue(["b1"]),
+  getSavedCampusPlaceIdsAsync: vi.fn().mockResolvedValue(["place-1"]),
 }));
 const reportService = vi.hoisted(() => ({ getStudentReports: vi.fn().mockResolvedValue([]) }));
 const profileService = vi.hoisted(() => ({
@@ -43,18 +45,23 @@ vi.mock("../../hooks/useToast", () => ({
 import { StudentProfilePage } from "../StudentProfilePage";
 
 describe("StudentProfilePage persistence", () => {
+  beforeEach(() => {
+    Object.defineProperty(window, "scrollTo", { configurable: true, value: vi.fn() });
+  });
+
   it("saves the edited profile name through the profile service", async () => {
     render(<StudentProfilePage />, { wrapper: ({ children }) => <MemoryRouter>{children}</MemoryRouter> });
     await waitFor(() => expect(screen.getByRole("heading", { name: "Maria Santos" })).toBeInTheDocument());
 
     fireEvent.click(screen.getByRole("button", { name: "Edit display name" }));
-    fireEvent.change(screen.getByRole("textbox", { name: "Edit display name" }), { target: { value: "Ana Reyes" } });
+    fireEvent.change(await screen.findByRole("textbox", { name: "Edit display name" }), { target: { value: "Ana Reyes" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => expect(profileService.updateStudentProfile).toHaveBeenCalledWith({
       firstName: "Ana",
       lastName: "Reyes",
     }));
+    expect(authState.applyProfileUpdate).toHaveBeenCalled();
   });
 
   it("uploads a selected profile photo", async () => {
@@ -65,5 +72,6 @@ describe("StudentProfilePage persistence", () => {
     fireEvent.change(input, { target: { files: [new File(["avatar"], "avatar.png", { type: "image/png" })] } });
 
     await waitFor(() => expect(profileService.uploadStudentAvatar).toHaveBeenCalled());
+    await waitFor(() => expect(authState.applyProfileUpdate).toHaveBeenCalledWith({ avatar_path: "user-1/avatar.png" }));
   });
 });

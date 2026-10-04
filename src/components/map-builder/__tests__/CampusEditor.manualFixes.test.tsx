@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { render, fireEvent, cleanup } from "@testing-library/react";
+import { render, fireEvent, cleanup, screen } from "@testing-library/react";
 import { useState } from "react";
 import { CampusEditor } from "../CampusEditor";
 import type { Campus } from "../types";
@@ -311,6 +311,38 @@ describe("properties panel cleanup", () => {
     expect(Array.from(container.querySelectorAll("label")).some((l) => l.textContent?.trim() === "Building Type")).toBe(false);
     // Useful basic info remains.
     expect(Array.from(container.querySelectorAll("label")).some((l) => l.textContent?.trim() === "Name")).toBe(true);
+  });
+
+  it("uses a roomy single-scroll inspector and keeps description keystrokes local", () => {
+    const onCampusChange = vi.fn();
+    const campus = makeCampus({
+      buildings: makeCampus().buildings.map((building, index) => index === 0
+        ? { ...building, buildingType: "academic" }
+        : building),
+    });
+    const { container } = render(<Harness campus={campus} onCampusChange={onCampusChange} />);
+    stubSvgRect(container);
+    selectItem(buildingG(container, "#1e40af"), 100, 100);
+
+    const panel = container.querySelector('[data-testid="properties-panel"]') as HTMLDivElement;
+    const content = container.querySelector('[data-testid="properties-panel-content"]') as HTMLDivElement;
+    expect(panel.className).toContain("w-[min(400px,34vw)]");
+    expect(panel.className).toContain("max-[1023px]:w-[min(380px,calc(100vw-24px))]");
+    expect(content.className).toContain("min-h-0");
+    expect(content.className).toContain("overflow-y-auto");
+    expect(Array.from(content.querySelectorAll(".overflow-y-auto"), (element) => element.outerHTML.slice(0, 500))).toEqual([]);
+
+    const facility = screen.getByText("Student Lounge");
+    expect(facility.closest("label")?.textContent).toContain("Student Lounge");
+    expect(facility.closest("label")?.querySelector(".truncate")).toBeNull();
+
+    const description = screen.getByLabelText("About this building") as HTMLTextAreaElement;
+    fireEvent.change(description, { target: { value: "A student-facing description." } });
+    expect(onCampusChange).not.toHaveBeenCalled();
+    fireEvent.blur(description);
+    expect(onCampusChange).toHaveBeenCalledTimes(1);
+    expect(onCampusChange.mock.calls[0][0].buildings[0].description).toBe("A student-facing description.");
+    expect(onCampusChange.mock.calls[0][0].buildings[0].buildingType).toBe("academic");
   });
 
   it("keeps decorative asset type immutable and does not expose the area type picker", () => {

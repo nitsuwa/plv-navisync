@@ -1,11 +1,13 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { PropertiesPanel } from "../PropertiesPanel";
-import type { CampusBuilding, CampusEntrance } from "../types";
+import type { Campus, CampusBuilding, CampusEntrance, FloorPlan, NavigationEdge, NavigationNode } from "../types";
 import type { DoorOption, EntranceIndoorLinkStatus } from "../../../lib/entranceTransitions";
+import { ENTRANCE_TRANSITION_EDGE_TYPE } from "../../../lib/entranceTransitions";
 
 const entrance: CampusEntrance = {
   id: "ent-main",
+  buildingId: "b1",
   name: "Main Entrance",
   type: "general",
   edge: "bottom",
@@ -130,7 +132,7 @@ function renderEntrancePanel(overrides: Partial<React.ComponentProps<typeof Prop
     ...callbacks,
     ...overrides,
   };
-  return { ...render(<PropertiesPanel {...props} />), callbacks };
+  return { ...render(<PropertiesPanel {...props} />), callbacks, props };
 }
 
 describe("B5 Phase 4.1 - entrance linking PropertiesPanel UI", () => {
@@ -263,5 +265,154 @@ describe("B5 Phase 4.1 - entrance linking PropertiesPanel UI", () => {
 
     fireEvent.click(within(floor3Group as HTMLElement).getByRole("button", { name: /Select/i }));
     expect(callbacks.onConnectEntranceToDoor).toHaveBeenCalledWith("b1", "ent-main", "door-node-f3");
+  });
+});
+
+describe("Building Navigation summary and identity drafts", () => {
+  const makeNode = (id: string, type: NavigationNode["type"], refs: Partial<NavigationNode> = {}): NavigationNode => ({
+    id,
+    name: id,
+    type,
+    x: 10,
+    y: 20,
+    accessible: true,
+    color: "#2563eb",
+    ...refs,
+  });
+  const makeEdge = (id: string, startNodeId: string, endNodeId: string, type = "walkway"): NavigationEdge => ({
+    id,
+    startNodeId,
+    endNodeId,
+    distance: 10,
+    bidirectional: true,
+    accessible: true,
+    type,
+    color: "#2563eb",
+    width: 3,
+  });
+  const threeEntranceBuilding: CampusBuilding = {
+    ...building,
+    entrances: [
+      { ...entrance, id: "ent-a", name: "North Entrance", isPrimary: false },
+      { ...entrance, id: "ent-b", name: "South Entrance", isPrimary: false },
+      { ...entrance, id: "ent-c", name: "Service Entrance", isPrimary: false },
+    ],
+    floors: [{
+      id: "f1",
+      buildingId: "b1",
+      number: 1,
+      label: "Ground Floor",
+      rooms: [],
+      paths: [],
+      walls: [],
+      doors: [{ id: "door-a", x: 20, y: 20, width: 24, direction: "left", color: "#fff", label: "Lobby Door" }],
+      windows: [],
+      furniture: [],
+      stairs: [],
+      ramps: [],
+      elevators: [],
+      labels: [],
+    } as FloorPlan],
+  };
+  const linkedCampus = (outdoorConnectionCount = 2): Campus => ({
+    id: "campus-1",
+    buildings: [threeEntranceBuilding],
+    navNodes: [
+      makeNode("ent-a-node", "entrance", { buildingId: "b1", entranceId: "ent-a" }),
+      makeNode("ent-b-node", "entrance", { buildingId: "b1", entranceId: "ent-b" }),
+      makeNode("ent-c-node", "entrance", { buildingId: "b1", entranceId: "ent-c" }),
+      makeNode("walk-a", "outdoor"),
+      makeNode("walk-b", "outdoor"),
+      makeNode("door-a-node", "hallway", { buildingId: "b1", floorId: "f1", doorId: "door-a" }),
+    ],
+    navEdges: [
+      ...[
+        makeEdge("out-a", "ent-a-node", "walk-a"),
+        makeEdge("out-b", "ent-b-node", "walk-b"),
+      ].slice(0, outdoorConnectionCount),
+      makeEdge("indoor-a", "ent-a-node", "door-a-node", ENTRANCE_TRANSITION_EDGE_TYPE),
+    ],
+  } as unknown as Campus);
+  const openAdvancedBuilding = (campus: Campus) => {
+    const view = renderEntrancePanel({
+      selected: { type: "building", id: threeEntranceBuilding.id },
+      selBldg: threeEntranceBuilding,
+      selEntrance: undefined,
+      selEntranceParent: undefined,
+      navigationCampus: campus,
+      allBuildings: [threeEntranceBuilding],
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Advanced" }));
+    return view;
+  };
+
+  it("aggregates authored outdoor links independently from Primary Entrance and counts indoor links", () => {
+    openAdvancedBuilding(linkedCampus());
+
+    expect(screen.getByText("Not set")).toBeInTheDocument();
+    expect(screen.getByText("Connected · 2 entrances")).toBeInTheDocument();
+    expect(screen.getByText("1 linked entrance")).toBeInTheDocument();
+  });
+
+  it("shows a single valid entrance link as connected", () => {
+    openAdvancedBuilding(linkedCampus(1));
+
+    expect(screen.getByText("Connected · 1 entrance")).toBeInTheDocument();
+  });
+
+  it("updates the outdoor summary when the final authored entrance link is removed", () => {
+    const campus = linkedCampus();
+    const view = openAdvancedBuilding(campus);
+    expect(screen.getByText("Connected · 2 entrances")).toBeInTheDocument();
+
+    view.rerender(<PropertiesPanel {...view.props} navigationCampus={linkedCampus(0)} />);
+
+    expect(screen.getByText("Not connected")).toBeInTheDocument();
+    expect(screen.getByText("1 linked entrance")).toBeInTheDocument();
+  });
+
+  it("keeps Name and Code keystrokes local, then commits one edit on blur", () => {
+    const { callbacks } = renderEntrancePanel({
+      selected: { type: "building", id: building.id },
+      selBldg: building,
+      selEntrance: undefined,
+      selEntranceParent: undefined,
+    });
+    const name = screen.getByLabelText("Name") as HTMLTextAreaElement;
+    fireEvent.change(name, { target: { value: "College of Engineering" } });
+    expect(name).toHaveValue("College of Engineering");
+    expect(callbacks.onUpdateBuilding).not.toHaveBeenCalled();
+    fireEvent.blur(name);
+    expect(callbacks.onUpdateBuilding).toHaveBeenCalledTimes(1);
+    expect(callbacks.onUpdateBuilding).toHaveBeenLastCalledWith("b1", { name: "College of Engineering" });
+
+    const code = screen.getByLabelText("Code") as HTMLInputElement;
+    fireEvent.change(code, { target: { value: "ceit" } });
+    expect(code).toHaveValue("CEIT");
+    expect(callbacks.onUpdateBuilding).toHaveBeenCalledTimes(1);
+    fireEvent.blur(code);
+    expect(callbacks.onUpdateBuilding).toHaveBeenCalledTimes(2);
+    expect(callbacks.onUpdateBuilding).toHaveBeenLastCalledWith("b1", { code: "CEIT" });
+  });
+
+  it("flushes an uncommitted Name draft when the selected Building changes", () => {
+    const view = renderEntrancePanel({
+      selected: { type: "building", id: building.id },
+      selBldg: building,
+      selEntrance: undefined,
+      selEntranceParent: undefined,
+    });
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Pending Building Name" } });
+    const nextBuilding: CampusBuilding = { ...building, id: "b2", name: "Second Building", code: "SB" };
+
+    view.rerender(<PropertiesPanel
+      {...view.props}
+      selected={{ type: "building", id: nextBuilding.id }}
+      selBldg={nextBuilding}
+      allBuildings={[building, nextBuilding]}
+    />);
+
+    expect(view.callbacks.onUpdateBuilding).toHaveBeenCalledTimes(1);
+    expect(view.callbacks.onUpdateBuilding).toHaveBeenCalledWith("b1", { name: "Pending Building Name" });
   });
 });

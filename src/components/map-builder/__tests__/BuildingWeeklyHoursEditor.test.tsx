@@ -18,12 +18,26 @@ describe("BuildingWeeklyHoursEditor", () => {
   it("mirrors the edited weekday across Monday to Friday when enabled", () => {
     const onChange = vi.fn();
     render(<BuildingWeeklyHoursEditor value={weeklyHoursPreset("weekdays")} onChange={onChange} onClear={vi.fn()} />);
-    fireEvent.change(screen.getByLabelText("Monday opening time"), { target: { value: "09:30" } });
+    const input = screen.getByLabelText("Monday opening time");
+    fireEvent.change(input, { target: { value: "09:30" } });
+    expect(onChange).not.toHaveBeenCalled();
+    fireEvent.blur(input);
     const schedule = onChange.mock.calls[0][0];
     expect(schedule.monday.open).toBe("09:30");
     expect(schedule.tuesday.open).toBe("09:30");
     expect(schedule.friday.open).toBe("09:30");
     expect(schedule.saturday.closed).toBe(true);
+  });
+
+  it("commits native time input drafts on blur instead of pushing each edit to campus state", () => {
+    const onChange = vi.fn();
+    render(<BuildingWeeklyHoursEditor value={weeklyHoursPreset("weekdays")} onChange={onChange} onClear={vi.fn()} />);
+    const input = screen.getByLabelText("Monday closing time");
+    fireEvent.change(input, { target: { value: "16:30" } });
+    expect(onChange).not.toHaveBeenCalled();
+    fireEvent.blur(input);
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange.mock.calls[0][0].monday.close).toBe("16:30");
   });
 
   it("lets the admin turn off the same-weekday shortcut", () => {

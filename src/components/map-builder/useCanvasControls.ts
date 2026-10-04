@@ -1,23 +1,59 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { screenToWorld, screenPointToLocalCoordinates, screenPixelsToWorldDistance, panToKeepWorldPoint, type ScreenRect } from "../../lib/editorPlacement";
-import { clampViewportPan, getViewportFitZoom, getViewportPanBounds, type MapViewportInsets, type MapViewportPanBounds } from "../../lib/mapViewport";
+import { clampViewportPan, dampCameraZoomLogarithm, getViewportFitZoom, getViewportPanBounds, normalizeStudentMapWheelDelta, type MapViewportInsets, type MapViewportPanBounds } from "../../lib/mapViewport";
 
 // ── Animation constants ─────────────────────────────────────────────────────
 const ZOOM_MIN = 0.25;
 const ZOOM_MAX = 4;
 const ZOOM_DURATION_MS = 180;
 const WHEEL_ZOOM_DURATION_MS = 200;
-const WHEEL_SENSITIVITY = 0.001;
-const SCROLL_LINE_SENSITIVITY = 0.05;
 const ZOOM_BUTTON_STEP = 0.25;
 const EDITOR_WORKSPACE_PADDING = 180;
+
+interface WheelZoomAnchor {
+  clientX: number;
+  clientY: number;
+  worldX: number;
+  worldY: number;
+  svgRect: ScreenRect;
+  mapWidth: number;
+  mapHeight: number;
+  origin: { x: number; y: number };
+}
 
 // ── Spacebar pan state (module-level ref so all hooks instances share) ──────
 // Use a ref rather than state to avoid re-renders on every space press
 const spacePressedRef = { current: false };
 
+const spacePanSubscribers = new Set<(pressed: boolean) => void>();
+
+function updateSpacePressed(pressed: boolean) {
+  if (spacePressedRef.current === pressed) return;
+  spacePressedRef.current = pressed;
+  spacePanSubscribers.forEach((subscriber) => subscriber(pressed));
+}
+
+function isSpacePanBlockedTarget(target: EventTarget | null) {
+  const element = target instanceof Element ? target : document.activeElement;
+  if (!(element instanceof Element)) return false;
+  return element.matches("input, textarea, select, [role='textbox']")
+    || (element as HTMLElement).isContentEditable
+    || element.closest("[contenteditable='true']") !== null;
+}
+
 export function isSpacePressed() {
   return spacePressedRef.current;
+}
+
+/** Subscribe UI that needs to reflect the temporary pan state immediately. */
+export function useSpacePressedState() {
+  const [pressed, setPressed] = useState(spacePressedRef.current);
+  useEffect(() => {
+    spacePanSubscribers.add(setPressed);
+    setPressed(spacePressedRef.current);
+    return () => { spacePanSubscribers.delete(setPressed); };
+  }, []);
+  return pressed;
 }
 
 // ── Easing function (cubic ease-out) ───────────────────────────────────────
@@ -43,7 +79,7 @@ export interface CanvasViewportOptions {
    * that extends beyond the base canvas. */
   worldBounds?: { x: number; y: number; width: number; height: number };
   /** Update one SVG camera group directly during gestures, then publish React
-   * state when the gesture/animation settles. Kept opt-in for the Floor Editor. */
+   * state when the gesture/animation settles. Used by large map-editor scenes. */
   imperativeCamera?: boolean;
   /** Receives transient camera frames for small DOM-only viewport readouts. */
   onCameraFrame?: (zoom: number, pan: { x: number; y: number }) => void;
@@ -68,21 +104,25 @@ export function useCanvasControls(canvasW: number, canvasH: number, options: Can
   // ── Refs for smooth animation ───────────────────────────────────────────
   const currentZoom = useRef(1);
   const currentPan = useRef({ x: 0, y: 0 });
+  const endPanForSpaceRef = useRef<() => void>(() => {});
   const targetZoom = useRef(1);
+  const targetLogZoom = useRef(0);
   const targetPan = useRef({ x: 0, y: 0 });
+  const wheelZoomAnchorRef = useRef<WheelZoomAnchor | null>(null);
   const animStartTime = useRef(0);
   const animStartZoom = useRef(1);
   const animStartPan = useRef({ x: 0, y: 0 });
   const animDuration = useRef(ZOOM_DURATION_MS);
   const animFrame = useRef<number | null>(null);
   const animating = useRef(false);
+  const animationModeRef = useRef<"programmatic" | "wheel">("programmatic");
 
   // ── Shared state refs ───────────────────────────────────────────────────
   const panning = useRef<{ sx: number; sy: number; ox: number; oy: number } | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const cameraTransformRef = useRef<SVGGElement>(null);
-  const viewportRectsRef = useRef<{ container: ScreenRect } | null>(null);
+  const viewportRectsRef = useRef<{ container: ScreenRect; svg?: ScreenRect } | null>(null);
   const clampPanRef = useRef<(point: { x: number; y: number }, zoomValue: number) => { x: number; y: number }>((point) => point);
   const panFrameRef = useRef<number | null>(null);
   const latestPanPointerRef = useRef<{ x: number; y: number } | null>(null);
@@ -91,8 +131,10 @@ export function useCanvasControls(canvasW: number, canvasH: number, options: Can
   const measureViewport = useCallback(() => {
     const container = containerRef.current?.getBoundingClientRect();
     if (!container) return;
+    const svg = svgRef.current?.getBoundingClientRect();
     viewportRectsRef.current = {
       container: { left: container.left, top: container.top, width: container.width, height: container.height },
+      ...(svg ? { svg: { left: svg.left, top: svg.top, width: svg.width, height: svg.height } } : {}),
     };
   }, []);
 
@@ -156,6 +198,15 @@ export function useCanvasControls(canvasW: number, canvasH: number, options: Can
 
   // ── Start or continue the animation loop ────────────────────────────────
   const startAnimation = useCallback((duration?: number) => {
+    // Programmatic actions take over from the live wheel frame, never from a
+    // stale React state or a queued manual-wheel commit.
+    if (animFrame.current !== null && animationModeRef.current === "wheel") {
+      cancelAnimationFrame(animFrame.current);
+      animFrame.current = null;
+      animating.current = false;
+    }
+    animationModeRef.current = "programmatic";
+    wheelZoomAnchorRef.current = null;
     if (duration !== undefined) {
       animDuration.current = duration;
     }
@@ -218,6 +269,70 @@ export function useCanvasControls(canvasW: number, canvasH: number, options: Can
         return;
       }
 
+      animFrame.current = requestAnimationFrame(tick);
+    };
+
+    animFrame.current = requestAnimationFrame(tick);
+  }, [applyCameraTransform, imperativeCamera]);
+
+  /** One target-driven RAF for continuous wheel/trackpad zoom. */
+  const startWheelAnimation = useCallback(() => {
+    if (animFrame.current !== null && animationModeRef.current === "wheel") return;
+    if (animFrame.current !== null) cancelAnimationFrame(animFrame.current);
+    animFrame.current = null;
+    animationModeRef.current = "wheel";
+    animating.current = true;
+
+    let previousTime = performance.now();
+    const tick = (now: number) => {
+      const delta = Math.max(0, Math.min(64, now - previousTime));
+      previousTime = now;
+      const dampedZoom = dampCameraZoomLogarithm(currentZoom.current, targetZoom.current, delta, 34);
+      const nextZoom = Math.abs(Math.log(targetZoom.current) - Math.log(dampedZoom)) < 0.0005
+        ? targetZoom.current
+        : dampedZoom;
+      const anchor = wheelZoomAnchorRef.current;
+      const anchoredPan = anchor
+        ? panToKeepWorldPoint(
+            anchor.clientX,
+            anchor.clientY,
+            anchor.svgRect,
+            anchor.mapWidth,
+            anchor.mapHeight,
+            anchor.worldX,
+            anchor.worldY,
+            nextZoom,
+            anchor.origin,
+          )
+        : {
+            x: currentPan.current.x + (targetPan.current.x - currentPan.current.x) * (1 - Math.exp(-delta / 34)),
+            y: currentPan.current.y + (targetPan.current.y - currentPan.current.y) * (1 - Math.exp(-delta / 34)),
+          };
+      const nextPan = clampPanRef.current(anchoredPan, nextZoom);
+      currentZoom.current = nextZoom;
+      currentPan.current = nextPan;
+      applyCameraTransform(nextPan, nextZoom);
+      if (!imperativeCamera) {
+        setZoom(nextZoom);
+        setPan({ ...nextPan });
+      }
+
+      const settled = Math.abs(Math.log(targetZoom.current) - Math.log(nextZoom)) < 0.0005
+        && Math.abs(targetPan.current.x - nextPan.x) < 0.5
+        && Math.abs(targetPan.current.y - nextPan.y) < 0.5;
+      if (settled) {
+        currentZoom.current = targetZoom.current;
+        currentPan.current = { ...targetPan.current };
+        applyCameraTransform(currentPan.current, targetZoom.current);
+        setZoom(targetZoom.current);
+        setPan({ ...currentPan.current });
+        animFrame.current = null;
+        animating.current = false;
+        animationModeRef.current = "programmatic";
+        targetLogZoom.current = Math.log(targetZoom.current);
+        wheelZoomAnchorRef.current = null;
+        return;
+      }
       animFrame.current = requestAnimationFrame(tick);
     };
 
@@ -309,10 +424,45 @@ export function useCanvasControls(canvasW: number, canvasH: number, options: Can
       newZoom: number,
       clientX?: number,
       clientY?: number,
-      duration?: number
+      duration?: number,
+      manualWheel = false,
     ) => {
       const clampedZoom = clamp(newZoom, ZOOM_MIN, ZOOM_MAX);
       const oldZoom = currentZoom.current;
+
+      if (manualWheel) {
+        let nextPan = { ...currentPan.current };
+        const world = clientX !== undefined && clientY !== undefined ? screenToWorldPt(clientX, clientY) : null;
+        const svg = svgRef.current;
+        const rect = viewportRectsRef.current?.svg ?? getSvgRect();
+        if (world && svg && rect && clientX !== undefined && clientY !== undefined) {
+          const viewBox = svg.viewBox.baseVal;
+          const mapWidth = viewBox.width > 0 ? viewBox.width : canvasW;
+          const mapHeight = viewBox.height > 0 ? viewBox.height : canvasH;
+          const origin = viewBox.width > 0 && viewBox.height > 0 ? { x: viewBox.x, y: viewBox.y } : { x: 0, y: 0 };
+          const anchor: WheelZoomAnchor = {
+            clientX, clientY, worldX: world.x, worldY: world.y,
+            svgRect: { ...rect }, mapWidth, mapHeight, origin,
+          };
+          wheelZoomAnchorRef.current = anchor;
+          nextPan = panToKeepWorldPoint(clientX, clientY, anchor.svgRect, mapWidth, mapHeight, world.x, world.y, clampedZoom, origin);
+        } else {
+          wheelZoomAnchorRef.current = null;
+          const zoomRatio = clampedZoom / oldZoom;
+          const viewBox = svgRef.current?.viewBox.baseVal;
+          const centerX = viewBox && viewBox.width > 0 ? viewBox.x + viewBox.width / 2 : canvasW / 2;
+          const centerY = viewBox && viewBox.height > 0 ? viewBox.y + viewBox.height / 2 : canvasH / 2;
+          nextPan = {
+            x: currentPan.current.x * zoomRatio + centerX * (1 - zoomRatio),
+            y: currentPan.current.y * zoomRatio + centerY * (1 - zoomRatio),
+          };
+        }
+        targetZoom.current = clampedZoom;
+        targetLogZoom.current = Math.log(clampedZoom);
+        targetPan.current = clampPanRef.current(nextPan, clampedZoom);
+        startWheelAnimation();
+        return;
+      }
 
       let newPanX = targetPan.current.x;
       let newPanY = targetPan.current.y;
@@ -349,40 +499,59 @@ export function useCanvasControls(canvasW: number, canvasH: number, options: Can
 
       targetZoom.current = clampedZoom;
       targetPan.current = clampPanRef.current({ x: newPanX, y: newPanY }, clampedZoom);
+      targetLogZoom.current = Math.log(clampedZoom);
 
       startAnimation(duration);
     },
-    [canvasW, canvasH, getSvgRect, screenToWorldPt, startAnimation]
+    [canvasW, canvasH, getSvgRect, screenToWorldPt, startAnimation, startWheelAnimation]
   );
 
   // ── Global keyboard listener for spacebar pan ──────────────────────────
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
       if (e.code === "Space" && !e.repeat) {
-        // Don't intercept space when typing in text fields
-        const tag = document.activeElement?.tagName;
-        if (tag === "INPUT" || tag === "TEXTAREA" || document.activeElement?.getAttribute("contenteditable") === "true") return;
+        // Don't intercept Space while a form control or editable field owns it.
+        if (isSpacePanBlockedTarget(e.target)) return;
         e.preventDefault();
-        spacePressedRef.current = true;
+        updateSpacePressed(true);
       }
     };
     const up = (e: KeyboardEvent) => {
       if (e.code === "Space") {
-        spacePressedRef.current = false;
-        endPan();
+        updateSpacePressed(false);
+        endPanForSpaceRef.current();
       }
+    };
+    const blur = () => {
+      updateSpacePressed(false);
+      endPanForSpaceRef.current();
+    };
+    const visibilityChange = () => {
+      if (document.visibilityState === "hidden") blur();
     };
     window.addEventListener("keydown", down);
     window.addEventListener("keyup", up);
+    window.addEventListener("blur", blur);
+    document.addEventListener("visibilitychange", visibilityChange);
     return () => {
       window.removeEventListener("keydown", down);
       window.removeEventListener("keyup", up);
-      spacePressedRef.current = false;
+      window.removeEventListener("blur", blur);
+      document.removeEventListener("visibilitychange", visibilityChange);
+      updateSpacePressed(false);
     };
   }, []);
 
   // ── Panning ─────────────────────────────────────────────────────────────
   const startPan = useCallback((e: Pick<MouseEvent, "clientX" | "clientY">) => {
+    if (animFrame.current !== null) cancelAnimationFrame(animFrame.current);
+    animFrame.current = null;
+    animating.current = false;
+    animationModeRef.current = "programmatic";
+    targetZoom.current = currentZoom.current;
+    targetLogZoom.current = Math.log(currentZoom.current);
+    targetPan.current = { ...currentPan.current };
+    wheelZoomAnchorRef.current = null;
     if (imperativeCamera && !panning.current && svgRef.current) {
       panCursorBeforeRef.current = svgRef.current.style.cursor;
       svgRef.current.style.cursor = "grabbing";
@@ -447,6 +616,7 @@ export function useCanvasControls(canvasW: number, canvasH: number, options: Can
     }
     panning.current = null;
   }, [flushPendingPan, imperativeCamera]);
+  endPanForSpaceRef.current = endPan;
 
   const handleMiddleMouseDown = useCallback(
     (e: React.MouseEvent) => {
@@ -500,24 +670,27 @@ export function useCanvasControls(canvasW: number, canvasH: number, options: Can
     // but we keep it here too as a fallback for older browsers.
     e.preventDefault();
 
-    const absDelta = Math.abs(e.deltaY);
-    // Trackpad pinch gestures fire with very small deltas (±1-10px)
-    // while mouse wheel + Ctrl fires large deltas (±100-300px)
-    const sensitivity = (e.deltaMode === 1 || absDelta < 20)
-      ? SCROLL_LINE_SENSITIVITY  // 0.05 — for trackpad pinch / line-based scroll
-      : WHEEL_SENSITIVITY;       // 0.001 — for mouse wheel
+    const delta = normalizeStudentMapWheelDelta(e.deltaY, e.deltaMode, e.currentTarget.clientHeight);
 
-    const delta = e.deltaY * sensitivity;
-    const currentZ = targetZoom.current;
-    const newZoom = clamp(currentZ - delta, ZOOM_MIN, ZOOM_MAX);
+    // When wheel input interrupts a programmatic move, start from its visible
+    // frame rather than the old destination. Subsequent wheel events accumulate
+    // on the live wheel target while its single RAF remains active.
+    if (animFrame.current !== null && animationModeRef.current !== "wheel") {
+      cancelAnimationFrame(animFrame.current);
+      animFrame.current = null;
+      animating.current = false;
+      targetZoom.current = currentZoom.current;
+      targetLogZoom.current = Math.log(currentZoom.current);
+      targetPan.current = { ...currentPan.current };
+      wheelZoomAnchorRef.current = null;
+    }
 
-    if (newZoom === currentZ) return;
-
-    // Update zoom display immediately while canvas animates smoothly
-    if (!imperativeCamera) setZoom(newZoom);
-
-    smoothZoomTo(newZoom, e.clientX, e.clientY, WHEEL_ZOOM_DURATION_MS);
-  }, [imperativeCamera, smoothZoomTo]);
+    const isContinuingWheel = animFrame.current !== null && animationModeRef.current === "wheel";
+    const baseLogZoom = isContinuingWheel ? targetLogZoom.current : Math.log(currentZoom.current);
+    const newZoom = clamp(Math.exp(baseLogZoom - delta), ZOOM_MIN, ZOOM_MAX);
+    if (Math.abs(Math.log(newZoom) - baseLogZoom) < 1e-9) return;
+    smoothZoomTo(newZoom, e.clientX, e.clientY, WHEEL_ZOOM_DURATION_MS, true);
+  }, [smoothZoomTo]);
 
   // ── Zoom in/out buttons ─────────────────────────────────────────────────
   const zoomIn = useCallback(() => {
