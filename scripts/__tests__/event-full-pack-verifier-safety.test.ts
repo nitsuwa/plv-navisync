@@ -2,6 +2,11 @@ import { describe, expect, it } from "vitest";
 import { isExpectedPrivateRowDenial, makeStaleRevision, probeSnapshotUnchanged } from "../event-full-pack-verifier-safety.mjs";
 
 describe("event staging verifier safety", () => {
+  it("rejects nested resolution metadata and student acknowledgement identity", async () => {
+    const { assertAllowlistedPublicEventPreview } = await import('../event-full-pack-verifier-safety.mjs');
+    expect(() => assertAllowlistedPublicEventPreview({ locations: [{ feedbackResolutions: {} }] })).toThrow(/Private key/);
+    expect(() => assertAllowlistedPublicEventPreview({ locations: [{ addressedBy: 'owner' }] })).toThrow(/Private key/);
+  });
   it("accepts an empty exact-row query or a recognized permission error as a private-row denial", () => {
     expect(isExpectedPrivateRowDenial({ data: null, error: null })).toBe(true);
     expect(isExpectedPrivateRowDenial({ data: null, error: { code: "42501" } })).toBe(true);

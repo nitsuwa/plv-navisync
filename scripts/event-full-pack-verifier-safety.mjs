@@ -20,7 +20,7 @@ export function assertAllowlistedPublicEventPreview(value, path = "event") {
   }
   if (!value || typeof value !== "object") return;
   for (const [key, child] of Object.entries(value)) {
-    if (["createdByUserId", "adminComment", "locationFeedback", "created_by"].includes(key)) {
+    if (["createdByUserId", "adminComment", "locationFeedback", "feedbackResolutions", "addressedBy", "actorId", "actor_id", "before_metadata", "after_metadata", "created_by"].includes(key)) {
       throw new Error(`Private key ${path}.${key} appeared in the public event feed.`);
     }
     if (key === "assetConfig" && child != null) {

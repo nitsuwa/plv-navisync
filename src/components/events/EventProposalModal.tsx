@@ -4,7 +4,7 @@ import { useRef, useState } from "react";
 import { ArrowLeft, ArrowRight, Check, ImageIcon, Loader2, Plus, XCircle } from "lucide-react";
 import { motion } from "motion/react";
 import { cn } from "../../lib/utils";
-import { getSupabase } from "../../lib/supabase";
+import { removeUnusedEventPoster, uploadEventPoster, validateEventPoster } from "../../lib/eventPosterStorage";
 import { normalizeEventOverlayLocations } from "../../lib/eventOverlayModel";
 import type { CampusEventOverlay, EventLocationRef } from "../map-builder/types";
 import type { EventBuildingOption } from "../../lib/eventLocationData";
@@ -15,15 +15,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 const inputClass =
   "w-full h-10 px-4 rounded-xl border border-border bg-input-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary/30";
 
-async function uploadPoster(file: File | null): Promise<string | undefined> {
-  if (!file) return undefined;
-  const supabase = getSupabase();
-  const extension = file.name.split(".").pop() || "jpg";
-  const path = `posters/${Math.random().toString(36).slice(2)}-${Date.now()}.${extension}`;
-  const { error } = await supabase.storage.from("event_posters").upload(path, file);
-  if (error) throw new Error(`Failed to upload poster: ${error.message}`);
-  return supabase.storage.from("event_posters").getPublicUrl(path).data.publicUrl;
-}
 
 function ModalShell({
   title,
@@ -54,6 +45,7 @@ function ModalShell({
 }) {
   const titleRef = useRef<HTMLHeadingElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const returnFocusRef = useRef<HTMLElement | null>(typeof document !== 'undefined' && document.activeElement instanceof HTMLElement ? document.activeElement : null);
   const focusBeforeConfirmationRef = useRef<HTMLElement | null>(null);
   const requestClose = () => {
     if (dismissDisabled) return;
@@ -75,7 +67,7 @@ function ModalShell({
           }}
           onCloseAutoFocus={(event) => {
             event.preventDefault();
-            if (!discardConfirmationOpen) focusBeforeConfirmationRef.current?.focus();
+            if (!discardConfirmationOpen) returnFocusRef.current?.focus();
           }}
           onEscapeKeyDown={(event) => { if (dismissDisabled) event.preventDefault(); }}
           onPointerDownOutside={(event) => { if (dismissDisabled) event.preventDefault(); }}
@@ -183,7 +175,7 @@ function DetailsFields({
         <textarea id="event-description" value={description} disabled={disabled} onChange={(event) => onChange("description", event.target.value)} rows={4} placeholder="What is the event about?" className={cn(inputClass, "h-auto min-h-[96px] py-2.5 resize-y")} />
       </div>
       <div>
-        <label htmlFor="event-organizer" className="block text-xs font-bold text-foreground uppercase tracking-wide mb-1.5">Organization name</label>
+        <label htmlFor="event-organizer" className="block text-xs font-bold text-foreground uppercase tracking-wide mb-1.5">Organization name (optional)</label>
         <input id="event-organizer" value={organizer} disabled={disabled} onChange={(event) => onChange("organizer", event.target.value)} placeholder="Your student organization" className={inputClass} />
       </div>
       {showPoster && (
@@ -193,7 +185,9 @@ function DetailsFields({
             <ImageIcon className="h-5 w-5 text-muted-foreground" />
             <span className="text-xs text-muted-foreground truncate">{posterFile?.name || "Choose an image to help identify the event"}</span>
           </label>
-          <input id="event-poster" type="file" accept="image/*" disabled={disabled} className="sr-only" onChange={(event) => onPosterChange(event.target.files?.[0] || null)} />
+            <p className="mt-2 text-xs text-muted-foreground">JPEG, PNG or WebP · Up to 5 MB</p>
+            {posterFile && <button type="button" disabled={disabled} onClick={() => onPosterChange(null)} className="mt-2 min-h-10 rounded-lg px-2 text-xs font-semibold text-primary hover:bg-muted focus-visible:ring-2 focus-visible:ring-primary">Remove selected poster</button>}
+          <input id="event-poster" type="file" accept="image/jpeg,image/png,image/webp" disabled={disabled} className="sr-only" onChange={(event) => onPosterChange(event.target.files?.[0] || null)} />
         </div>
       )}
     </div>
@@ -211,7 +205,7 @@ export function EventProposalModal({
   campuses?: { id: string; name: string; buildings: EventBuildingOption[] }[];
   initialCampusId?: string;
   onClose: () => void;
-  onCreate: (data: { title: string; description: string; organizer: string; locations: EventLocationRef[]; posterUrl?: string; campusId?: string }) => Promise<void>;
+  onCreate: (data: { title: string; description: string; organizer: string; locations: EventLocationRef[]; posterUrl?: string; campusId?: string; requestId?: string }) => Promise<void>;
 }) {
   const [step, setStep] = useState<1 | 2>(1);
   const [campusId, setCampusId] = useState(campuses.some((campus) => campus.id === initialCampusId) ? initialCampusId! : campuses[0]?.id ?? "");
@@ -227,8 +221,23 @@ export function EventProposalModal({
   const [saving, setSaving] = useState(false);
   const [discardConfirmationOpen, setDiscardConfirmationOpen] = useState(false);
   const submissionInFlightRef = useRef(false);
+  const requestIdRef = useRef(crypto.randomUUID());
+  const uploadedPosterRef = useRef<{file:File;url:string;path:string} | null>(null);
   const toast = useToast();
   const dirty = Boolean(title.trim() || description.trim() || organizer.trim() || posterFile || locations.length > 0);
+
+  const releaseUnusedPoster = () => {
+    const unused = uploadedPosterRef.current;
+    uploadedPosterRef.current = null;
+    if (unused) void removeUnusedEventPoster(unused, requestIdRef.current).catch(() => toast.error('Unused poster cleanup failed', 'The uploaded image may need administrator cleanup.'));
+  };
+  const closeProposal = () => { releaseUnusedPoster(); onClose(); };
+  const changePoster = (file: File | null) => {
+    const invalid = file ? validateEventPoster(file) : null;
+    if (invalid) { setError(invalid); return; }
+    releaseUnusedPoster();
+    setPosterFile(file); setError('');
+  };
 
   const handleCampusChange = (nextCampusId: string) => {
     if (locations.length) setPendingCampusId(nextCampusId);
@@ -238,7 +247,7 @@ export function EventProposalModal({
   const requestClose = () => {
     if (submissionInFlightRef.current) return;
     if (dirty) setDiscardConfirmationOpen(true);
-    else onClose();
+    else closeProposal();
   };
 
   const submit = async () => {
@@ -256,8 +265,12 @@ export function EventProposalModal({
     setSaving(true);
     setError("");
     try {
-      const posterUrl = await uploadPoster(posterFile);
+      if (posterFile && uploadedPosterRef.current?.file !== posterFile) {
+        uploadedPosterRef.current = { file: posterFile, ...await uploadEventPoster(posterFile) };
+      }
+      const posterUrl = uploadedPosterRef.current?.url;
       await onCreate({
+        requestId: requestIdRef.current,
         title: title.trim(),
         description: description.trim(),
         organizer: organizer.trim() || "Student Organization",
@@ -265,6 +278,7 @@ export function EventProposalModal({
         posterUrl,
         ...(campusId ? { campusId } : {}),
       });
+      uploadedPosterRef.current = null;
       toast.success("Event created", "Choose a location and start designing its map.");
       onClose();
     } catch (err) {
@@ -289,7 +303,7 @@ export function EventProposalModal({
       footerClassName="flex-col gap-2"
       discardConfirmationOpen={discardConfirmationOpen}
       onDiscardConfirmationChange={setDiscardConfirmationOpen}
-      onDiscard={onClose}
+      onDiscard={closeProposal}
       footer={
         <>
           {step === 2 && (
@@ -316,7 +330,7 @@ export function EventProposalModal({
     >
       {step === 1 ? (
         <>
-          <DetailsFields title={title} description={description} organizer={organizer} posterFile={posterFile} onPosterChange={setPosterFile} disabled={saving} onChange={(field, value) => { if (field === "title") setTitle(value); if (field === "description") setDescription(value); if (field === "organizer") setOrganizer(value); setError(""); }} />
+          <DetailsFields title={title} description={description} organizer={organizer} posterFile={posterFile} onPosterChange={changePoster} disabled={saving} onChange={(field, value) => { if (field === "title") setTitle(value); if (field === "description") setDescription(value); if (field === "organizer") setOrganizer(value); setError(""); }} />
           {error && <p role="alert" className="text-xs text-destructive mt-3">{error}</p>}
         </>
       ) : (
@@ -361,6 +375,8 @@ export function EventDetailsModal({
   onSave: (data: { title: string; description: string; organizer: string; locations: EventLocationRef[]; posterUrl?: string }) => Promise<void>;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
+  const uploadedPosterRef = useRef<{file: File; url: string; path: string} | null>(null);
+  const mutationRef = useRef(false);
   const existingLocations = normalizeEventOverlayLocations(overlay);
   const [title, setTitle] = useState(overlay.title);
   const [description, setDescription] = useState(overlay.description);
@@ -368,49 +384,68 @@ export function EventDetailsModal({
   const [locations, setLocations] = useState<EventLocationRef[]>(existingLocations.map((location) => location.locationRef));
   const [posterFile, setPosterFile] = useState<File | null>(null);
   const [posterPreview, setPosterPreview] = useState(overlay.posterUrl || "");
+  const [posterRemoved, setPosterRemoved] = useState(false);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const toast = useToast();
 
+  const releaseUnusedPoster = () => {
+    const unused = uploadedPosterRef.current;
+    uploadedPosterRef.current = null;
+    if (unused) void removeUnusedEventPoster(unused, overlay.id).catch(() => toast.error('Unused poster cleanup failed', 'The uploaded image may need administrator cleanup.'));
+  };
+  const closeDetails = () => { if (!mutationRef.current) { releaseUnusedPoster(); onClose(); } };
+
   const handlePoster = (file: File | null) => {
     if (!file) return;
+    const invalid = validateEventPoster(file);
+    if (invalid) { setError(invalid); return; }
+    releaseUnusedPoster();
     setPosterFile(file);
     setPosterPreview(URL.createObjectURL(file));
+    setPosterRemoved(false);
   };
 
   const save = async () => {
-    if (saving) return;
+    if (mutationRef.current) return;
     if (!title.trim()) { setError("Event title is required."); return; }
     if (!locations.length) { setError("Select at least one requested location."); return; }
+    mutationRef.current = true;
     setSaving(true);
     try {
+      if (posterFile && uploadedPosterRef.current?.file !== posterFile) {
+        uploadedPosterRef.current = { file: posterFile, ...await uploadEventPoster(posterFile) };
+      }
       await onSave({
         title: title.trim(),
         description: description.trim(),
         organizer: organizer.trim() || "Student Organization",
         locations,
-        posterUrl: posterFile ? await uploadPoster(posterFile) : undefined,
+        posterUrl: posterRemoved ? '' : uploadedPosterRef.current?.url,
       });
+      uploadedPosterRef.current = null;
       onClose();
     } catch (err) {
       toast.error("Save failed", err instanceof Error ? err.message : "Something went wrong.");
     } finally {
+      mutationRef.current = false;
       setSaving(false);
     }
   };
 
   return (
-    <ModalShell title="Edit event proposal" subtitle="Keep the information clear, then update the requested locations if needed." onClose={onClose} footer={<><button type="button" onClick={onClose} className="flex-1 h-10 rounded-xl border border-border text-sm font-bold text-muted-foreground hover:bg-muted transition-colors">Cancel</button><button type="button" onClick={save} disabled={saving} className="flex-1 h-10 rounded-xl bg-primary text-primary-foreground text-sm font-extrabold hover:bg-primary/90 disabled:opacity-40 flex items-center justify-center gap-2">{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Save changes</button></>}>
+    <ModalShell title="Edit event proposal" subtitle="Keep the information clear, then update the requested locations if needed." onClose={closeDetails} footer={<><button type="button" onClick={closeDetails} disabled={saving} className="flex-1 h-10 rounded-xl border border-border text-sm font-bold text-muted-foreground hover:bg-muted transition-colors">Cancel</button><button type="button" onClick={save} disabled={saving} className="flex-1 h-10 rounded-xl bg-primary text-primary-foreground text-sm font-extrabold hover:bg-primary/90 disabled:opacity-40 flex items-center justify-center gap-2">{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Save changes</button></>}>
       <div className="space-y-5">
         <div>
-          <button type="button" onClick={() => fileRef.current?.click()} className="flex items-center gap-3 w-full rounded-xl border border-dashed border-border px-4 py-3 text-left hover:border-primary/50 hover:bg-muted/30 transition-colors">
+          <button type="button" disabled={saving} onClick={() => fileRef.current?.click()} className="flex items-center gap-3 w-full rounded-xl border border-dashed border-border px-4 py-3 text-left hover:border-primary/50 hover:bg-muted/30 transition-colors">
             {posterPreview ? <img src={posterPreview} alt="Event poster preview" className="w-12 h-12 rounded-lg object-cover" /> : <ImageIcon className="h-5 w-5 text-muted-foreground" />}
             <span className="text-xs text-muted-foreground">{posterPreview ? "Change poster" : "Add event poster (optional)"}</span>
           </button>
-          <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={(event) => handlePoster(event.target.files?.[0] || null)} />
+          <input ref={fileRef} disabled={saving} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={(event) => handlePoster(event.target.files?.[0] || null)} />
+          {posterPreview && <button type="button" disabled={saving} onClick={() => { releaseUnusedPoster(); setPosterFile(null); setPosterPreview(''); setPosterRemoved(true); if (fileRef.current) fileRef.current.value = ''; }} className="mt-2 min-h-10 rounded-lg px-2 text-xs font-semibold text-primary hover:bg-muted focus-visible:ring-2 focus-visible:ring-primary">Remove poster</button>}
         </div>
-        <DetailsFields title={title} description={description} organizer={organizer} posterFile={posterFile} onPosterChange={handlePoster} showPoster={false} onChange={(field, value) => { if (field === "title") setTitle(value); if (field === "description") setDescription(value); if (field === "organizer") setOrganizer(value); setError(""); }} />
-        <EventLocationPicker buildings={buildings} locations={locations} onChange={(next) => { setLocations(next); setError(""); }} />
+        <DetailsFields disabled={saving} title={title} description={description} organizer={organizer} posterFile={posterFile} onPosterChange={handlePoster} showPoster={false} onChange={(field, value) => { if (field === "title") setTitle(value); if (field === "description") setDescription(value); if (field === "organizer") setOrganizer(value); setError(""); }} />
+        <EventLocationPicker disabled={saving} buildings={buildings} locations={locations} onChange={(next) => { setLocations(next); setError(""); }} />
         {error && <p className="text-xs text-destructive">{error}</p>}
       </div>
     </ModalShell>

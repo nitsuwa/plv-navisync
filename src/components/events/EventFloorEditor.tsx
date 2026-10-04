@@ -331,6 +331,11 @@ function getPresetPlacementMessage(assessment: ReturnType<typeof assessEventPlac
 // ── Main Component ────────────────────────────────────────────────────────
 
 export interface EventFloorEditorProps {
+  compactPreview?: boolean;
+  draftFeedbackPoint?: { x: number; y: number } | null;
+  feedbackPins?: Array<{ id: string; x: number; y: number; comment: string; addressed?: boolean }>;
+  feedbackFocusRequest?: { pinId: string; requestKey: number } | null;
+  onFeedbackPoint?: (point: { x: number; y: number }) => void;
   /** The base floor plan data (read-only) */
   floorPlan: FloorPlan;
   /** The event overlay being edited */
@@ -385,6 +390,11 @@ export function EventFloorEditor({
   readOnly = false,
   saveStatus,
   tutorialAccountId,
+  feedbackPins = [],
+  feedbackFocusRequest,
+  onFeedbackPoint,
+  compactPreview = false,
+  draftFeedbackPoint,
 }: EventFloorEditorProps) {
   // ── State ──────────────────────────────────────────────────────────────
   const [initialEventLayout] = useState(() => getInitialEventLayout(overlay, readOnly));
@@ -437,7 +447,9 @@ export function EventFloorEditor({
   } | null>(null);
   const [saving, setSaving] = useState(false);
   const [submittingLocal, setSubmittingLocal] = useState(false);
-  const { spaceHeld } = useSpacePan(!readOnly);
+  const { spaceHeld } = useSpacePan(true);
+  const [previewPanMode, setPreviewPanMode] = useState(true);
+  useEffect(() => { if (readOnly) setPreviewPanMode(!onFeedbackPoint); }, [Boolean(onFeedbackPoint), readOnly]);
   const [resizing, setResizing] = useState<{
     id: string;
     handle: ResizeHandleDirection;
@@ -465,6 +477,18 @@ export function EventFloorEditor({
   const [validatedFurniture, setValidatedFurniture] = useState(eventFurniture);
 
   const canvasRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const containWheel = (event: WheelEvent) => {
+      // React wheel listeners can be passive; cancel native scrolling here,
+      // while leaving the React handler to perform map pan/zoom.
+      const target = event.target instanceof Element ? event.target : null;
+      if (!target?.closest("[data-event-editor-chrome]") || event.ctrlKey || event.metaKey) event.preventDefault();
+    };
+    canvas.addEventListener("wheel", containWheel, { passive: false });
+    return () => canvas.removeEventListener("wheel", containWheel);
+  }, []);
   const objectListTriggerRef = useRef<HTMLButtonElement>(null);
   const inspectorTriggerRef = useRef<HTMLElement | null>(null);
   const panRef = useRef<{ sx: number; sy: number; px: number; py: number } | null>(null);
@@ -683,10 +707,10 @@ export function EventFloorEditor({
   );
   const selectedFocusBounds = useMemo(() => {
     const rectangles: Array<{ x: number; y: number; width: number; height: number }> = [];
-    const visibleFurnitureIds = eventFurniture.filter((item) => selectedIds.includes(item.id) && item.visible !== false).map((item) => item.id);
+    const visibleFurnitureIds = eventFurniture.filter((item) => (readOnly || selectedIds.includes(item.id)) && item.visible !== false).map((item) => item.id);
     const furnitureBounds = selectionBounds(eventFurniture, visibleFurnitureIds);
     if (furnitureBounds) rectangles.push(furnitureBounds);
-    for (const label of eventLabels.filter((item) => selectedIds.includes(item.id))) {
+    for (const label of eventLabels.filter((item) => readOnly || selectedIds.includes(item.id))) {
       const width = Math.max(10, label.text.length * (label.fontSize || 14) * 0.6);
       const height = (label.fontSize || 14) * 1.2;
       const radians = ((label.rotation || 0) * Math.PI) / 180;
@@ -700,7 +724,7 @@ export function EventFloorEditor({
     const right = Math.max(...rectangles.map((rect) => rect.x + rect.width));
     const bottom = Math.max(...rectangles.map((rect) => rect.y + rect.height));
     return { x: left, y: top, width: right - left, height: bottom - top };
-  }, [eventFurniture, eventLabels, selectedIds]);
+  }, [eventFurniture, eventLabels, selectedIds, readOnly]);
   const moveHereTarget = useMemo(() => {
     if (selectedIds.length === 0 || selectedFurnitureIds.length !== selectedIds.length) return { ids: [], blocked: false };
     const selected = eventFurniture.filter((item) => selectedFurnitureIds.includes(item.id));
@@ -803,6 +827,15 @@ export function EventFloorEditor({
     clampPan: clampEventPan,
   });
 
+  useEffect(() => {
+    const pin = feedbackPins.find(item => item.id === feedbackFocusRequest?.pinId);
+    const rect = canvasRef.current?.getBoundingClientRect();
+    if (!pin || !rect || !feedbackFocusRequest) return;
+    const nextZoom = Math.max(viewportTargetRef.current.zoom, 1);
+    animateViewportTo({ zoom: nextZoom, pan: clampEventPan({ x: rect.width / 2 - pin.x * nextZoom, y: rect.height / 2 - pin.y * nextZoom }, nextZoom) }, 180);
+    // The request identifies a deliberate checklist action, not every map edit.
+  }, [feedbackFocusRequest?.requestKey, animateViewportTo, clampEventPan, viewportTargetRef]);
+
   const placementCandidate = useMemo(() => {
     if (!placementPoint || activeTool !== "furniture" || presetPreview) return null;
     return buildEventAssetCandidate({
@@ -818,7 +851,7 @@ export function EventFloorEditor({
     });
   }, [activeTemplate, activeTool, canvasH, canvasW, eventFurniture, floorPlan.gridSize, placementPoint, presetPreview, protectedRegions, snapEnabled, zoom]);
 
-  const effectiveTool: EventTool = isPanning || pinchActive || (spaceHeld && !itemGestureActive) ? "pan" : activeTool;
+  const effectiveTool: EventTool = isPanning || pinchActive || (spaceHeld && !itemGestureActive) || (readOnly && previewPanMode) ? "pan" : activeTool;
   const placementGuides = useMemo(() => dragging?.type === "furniture" && dragging.ids.length === 1 && selectedFurniture
     ? eventPlacementGuides(selectedFurniture, eventFurniture, 3 / zoom)
     : null, [dragging, selectedFurniture, eventFurniture, zoom]);
@@ -1061,7 +1094,15 @@ export function EventFloorEditor({
   // ── Canvas click handler ───────────────────────────────────────────────
   const handleCanvasClick = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
-      if (readOnly) return;
+      if (readOnly) {
+        if (effectiveTool === "pan" || panMovedRef.current || suppressCanvasClickRef.current) { suppressCanvasClickRef.current = false; panMovedRef.current = false; return; }
+        if (onFeedbackPoint && !(e.target as Element).closest("[data-event-editor-chrome]")) {
+          const rect = e.currentTarget.getBoundingClientRect();
+          const point = { x: (e.clientX - rect.left - pan.x) / zoom, y: (e.clientY - rect.top - pan.y) / zoom };
+          if (point.x >= 0 && point.y >= 0 && point.x <= canvasW && point.y <= canvasH) onFeedbackPoint(point);
+        }
+        return;
+      }
       const pressOrigin = pointerPressOriginRef.current;
       pointerPressOriginRef.current = "none";
       if (pressOrigin !== "none" && pressOrigin !== "blank") return;
@@ -1142,7 +1183,7 @@ export function EventFloorEditor({
         }
       }
     },
-    [activeTool, zoom, pan, commitFurnitureCandidate, placeLabel, placePreset, presetPreview, previewItems, presetAssessment, presetValidation, dragging, resizing, rotating, activeTemplate, readOnly, spaceHeld, eventFurniture, canvasW, canvasH, floorPlan.gridSize, snapEnabled, protectedRegions, moveHereArmedIds]
+    [activeTool, zoom, pan, commitFurnitureCandidate, placeLabel, placePreset, presetPreview, previewItems, presetAssessment, presetValidation, dragging, resizing, rotating, activeTemplate, readOnly, spaceHeld, eventFurniture, canvasW, canvasH, floorPlan.gridSize, snapEnabled, protectedRegions, moveHereArmedIds, onFeedbackPoint, effectiveTool]
   );
 
   const handleCanvasDragOver = useCallback((e: React.DragEvent<HTMLDivElement>) => {
@@ -1843,7 +1884,7 @@ export function EventFloorEditor({
   // ── Pan (middle mouse or pan tool) ─────────────────────────────────────
   const handlePanStart = useCallback(
     (e: React.PointerEvent, forceTouch = false) => {
-      if (activeTool === "pan" || spaceHeld || e.button === 1 || forceTouch) {
+      if (effectiveTool === "pan" || spaceHeld || e.button === 1 || forceTouch) {
         e.preventDefault();
         cancelViewportMotion();
         const currentPan = viewportCurrentRef.current.pan;
@@ -1855,7 +1896,7 @@ export function EventFloorEditor({
         setIsPanning(false);
       }
     },
-    [activeTool, cancelViewportMotion, spaceHeld, viewportCurrentRef]
+    [effectiveTool, cancelViewportMotion, spaceHeld, viewportCurrentRef]
   );
 
   const handlePanMove = useCallback(
@@ -2067,7 +2108,7 @@ export function EventFloorEditor({
       handlePanStart(e, e.pointerType === "touch");
       if (e.button === 1 || effectiveTool === "pan") return;
       if (moveHereArmedIds) return;
-      if (effectiveTool === "select" && !dragging && origin === "blank" && e.pointerType !== "touch") {
+      if (!readOnly && effectiveTool === "select" && !dragging && origin === "blank" && e.pointerType !== "touch") {
         beginTransformGesture(e.clientX, e.clientY);
         const start = getCanvasWorldPoint(e.clientX, e.clientY);
         if (!start) return;
@@ -2080,7 +2121,7 @@ export function EventFloorEditor({
         }
       }
     }, origin);
-  }, [beginPointerGesture, beginTransformGesture, dragging, effectiveTool, getCanvasWorldPoint, handlePanStart, selectedIds, moveHereArmedIds]);
+  }, [beginPointerGesture, beginTransformGesture, dragging, effectiveTool, getCanvasWorldPoint, handlePanStart, selectedIds, moveHereArmedIds, readOnly]);
 
   useLayoutEffect(() => {
     pointerMoveRef.current = (e: PointerEvent) => {
@@ -2300,6 +2341,12 @@ export function EventFloorEditor({
         return;
       }
       if (isCanvasTextEditingTarget(e.target)) return;
+      if (readOnly) {
+        if (!canvasRef.current?.contains(e.target as Node)) return;
+        if (e.key.toLowerCase() === "h") { e.preventDefault(); setPreviewPanMode(current => !current); }
+        if (e.key === "0") { e.preventDefault(); resetViewport(); }
+        return;
+      }
 
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "d") {
         if (!readOnly) {
@@ -2561,7 +2608,7 @@ export function EventFloorEditor({
     <Dialog.Root open={mobileInspectorOpen} onOpenChange={(open) => { if (!open) setInspectorOpen(false); }}>
     <div className="flex min-w-0 flex-col h-full bg-background">
       {/* Top Bar */}
-      <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 sm:px-4 sm:py-3 border-b border-border bg-card shrink-0">
+      <div className={cn("flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 sm:px-4 sm:py-3 border-b border-border bg-card shrink-0", compactPreview && "hidden")}>
         <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3">
           <button
             aria-label={readOnly ? "Back to event approvals" : "Back to My Events"}
@@ -2642,7 +2689,7 @@ export function EventFloorEditor({
             ) : (
               <Send className="h-3 w-3" />
             )}
-            Review & submit
+            {overlay.status === "pending" ? "Review & update GSO" : "Review & submit"}
           </button>
         </div>}
       </div>
@@ -2744,7 +2791,7 @@ export function EventFloorEditor({
         data-event-tour="canvas"
         tabIndex={0}
         aria-label="Event layout canvas"
-        className="min-h-0 min-w-0 flex-1 overflow-hidden relative select-none cursor-crosshair outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/40"
+        className="min-h-0 min-w-0 flex-1 overflow-hidden overscroll-contain relative select-none cursor-crosshair outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/40"
         style={{
           background: viewportBackground,
           touchAction: "none",
@@ -2791,6 +2838,9 @@ export function EventFloorEditor({
         onDragOver={handleCanvasDragOver}
         onDrop={handleCanvasDrop}
       >
+        {draftFeedbackPoint && <div aria-label="Unsaved feedback pin position" className="pointer-events-none absolute z-50 flex h-10 w-10 -translate-x-1/2 -translate-y-full items-center justify-center rounded-full border-2 border-dashed border-white bg-amber-600 text-lg font-bold text-white shadow-lg ring-4 ring-amber-400/40" style={{ left: draftFeedbackPoint.x * zoom + pan.x, top: draftFeedbackPoint.y * zoom + pan.y }}>+</div>}
+        {feedbackPins.map((pin, index) => <button key={pin.id} type="button" data-event-editor-chrome aria-label={`Feedback pin ${index + 1}: ${pin.comment}`} title={`${pin.addressed ? "Addressed" : "Open"}: ${pin.comment}`} onClick={event => { event.stopPropagation(); }} className="absolute z-40 flex h-8 w-8 -translate-x-1/2 -translate-y-full items-center justify-center rounded-full border-2 border-card bg-amber-600 text-xs font-bold text-white shadow-md" style={{ left: pin.x * zoom + pan.x, top: pin.y * zoom + pan.y, backgroundColor: pin.addressed ? "#047857" : undefined }}>{index + 1}</button>)}
+        {feedbackPins.length > 0 && <details data-event-editor-chrome className="absolute bottom-3 right-3 z-40 max-h-40 w-[min(18rem,calc(100%-1.5rem))] overflow-y-auto rounded-xl border border-border bg-card p-3 shadow-lg"><summary className="cursor-pointer text-xs font-bold">GSO map feedback · {feedbackPins.length} pins</summary>{feedbackPins.map((pin, index) => <button key={pin.id} type="button" onClick={event => { event.stopPropagation(); const rect = canvasRef.current?.getBoundingClientRect(); if (rect) animateViewportTo({ zoom: Math.max(zoom, 1), pan: { x: rect.width / 2 - pin.x * Math.max(zoom, 1), y: rect.height / 2 - pin.y * Math.max(zoom, 1) } }, 180); }} className="mb-1 block w-full rounded-lg p-2 text-left text-xs hover:bg-muted"><strong className="text-amber-700 dark:text-amber-400">Pin {index + 1}</strong> · {pin.addressed ? "Addressed · " : "Open · "}{pin.comment}</button>)}</details>}
         {!readOnly && activeTool === "furniture" && (
           <div
             data-testid="event-asset-dock"
@@ -3157,7 +3207,7 @@ export function EventFloorEditor({
 
         <div
           data-event-editor-chrome
-          className="absolute right-3 top-3 z-30 flex items-center gap-0.5 rounded-xl border border-border/70 bg-card/90 p-1 shadow-lg backdrop-blur-sm"
+          className="absolute right-3 top-3 z-30 flex max-w-[calc(100%-1.5rem)] flex-wrap items-center justify-end gap-0.5 rounded-xl border border-border/70 bg-card/90 p-1 shadow-lg backdrop-blur-sm"
         >
           {!readOnly && (
             <button
@@ -3218,16 +3268,18 @@ export function EventFloorEditor({
           >
             <Maximize2 className="h-4 w-4" />
           </button>
+          {readOnly && <button type="button" aria-label="Pan map" aria-pressed={previewPanMode} title="Pan: drag map · H toggles · hold Space temporarily" onClick={() => setPreviewPanMode(current => !current)} className="flex min-h-9 items-center gap-1 rounded-lg px-2 text-xs font-bold text-muted-foreground hover:bg-muted aria-pressed:bg-primary/10 aria-pressed:text-primary"><Hand className="h-4 w-4" /><span>Pan</span></button>}
+          {readOnly && <details className="relative text-xs text-muted-foreground"><summary className="cursor-pointer rounded-lg px-2 py-2">Shortcuts</summary><div className="absolute right-0 top-full z-50 mt-2 w-56 rounded-xl border border-border bg-card p-3 shadow-xl"><p>Drag: pan while Pan is on</p><p className="mt-1">Space + drag: temporary pan</p><p className="mt-1">H: toggle Pan · 0: fit map</p><p className="mt-1">Ctrl / ⌘ + scroll: zoom</p><p className="mt-1">Click the map first for shortcuts.</p></div></details>}
           <button
             type="button"
-            aria-label="Focus selection"
-            title={selectedFocusBounds ? "Focus selection" : "Select a visible item to focus it"}
+            aria-label={readOnly ? "Focus event items" : "Focus selection"}
+            title={readOnly ? "Fit the requested event items into view" : selectedFocusBounds ? "Focus selection" : "Select a visible item to focus it"}
             disabled={!selectedFocusBounds || itemGestureActive}
             onClick={focusSelection}
             className="flex h-9 items-center gap-1 rounded-lg px-2 text-[10px] font-extrabold text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
           >
             <MapPin className="h-3.5 w-3.5" aria-hidden="true" />
-            <span className="hidden sm:inline">Focus</span>
+            <span className="hidden sm:inline">{readOnly ? "Focus items" : "Focus"}</span>
           </button>
         </div>
 
@@ -3607,14 +3659,14 @@ export function EventFloorEditor({
               aria-live="polite"
               aria-atomic="true"
               data-testid="event-pan-status"
-              className="min-w-[7rem] max-w-[11rem] truncate rounded-full bg-primary/10 px-2 py-0.5 font-bold text-primary"
+              className="max-w-[11rem] truncate rounded-full bg-primary/10 px-2 py-0.5 font-bold text-primary empty:hidden"
             >
               {panStatus}
             </span>
-            {readOnly && <span className="rounded-full bg-muted px-2 py-0.5 font-bold text-foreground">Published map locked</span>}
-            {readOnly
+            {readOnly && <span className="whitespace-nowrap rounded-full bg-muted px-2 py-0.5 font-bold text-foreground">Read-only</span>}
+            <span className="hidden sm:inline">{readOnly
               ? "Published base map and submitted additions"
-              : "Hold V: Select · T: Label · Drag empty map: select · Del: delete · Space + drag: pan"}
+              : "Hold V: Select · T: Label · Drag empty map: select · Del: delete · Space + drag: pan"}</span>
           </span>
         </div>
       </div>

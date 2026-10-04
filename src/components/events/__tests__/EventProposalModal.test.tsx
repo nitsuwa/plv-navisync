@@ -1,12 +1,15 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { EventDetailsModal, EventProposalModal } from "../EventProposalModal";
+const posterStorage = vi.hoisted(() => ({ upload: vi.fn(), remove: vi.fn() }));
 
 vi.mock("../../../lib/supabase", () => ({
   getSupabase: () => ({
+    auth: { getUser: vi.fn().mockResolvedValue({data:{user:{id:'org-id'}},error:null}) },
     storage: {
       from: () => ({
-        upload: vi.fn().mockResolvedValue({ error: null }),
+        upload: posterStorage.upload,
+        remove: posterStorage.remove,
         getPublicUrl: () => ({ data: { publicUrl: "https://example.test/poster.png" } }),
       }),
     },
@@ -17,7 +20,27 @@ const buildings = [{ buildingId: "science", buildingName: "Science Building", fl
 
 describe("EventProposalModal", () => {
   beforeEach(() => {
+    posterStorage.upload.mockReset().mockResolvedValue({error:null});
+    posterStorage.remove.mockReset().mockResolvedValue({error:null});
     Object.defineProperty(HTMLElement.prototype, "scrollIntoView", { configurable: true, value: vi.fn() });
+  });
+
+  it("uploads a replacement poster when saving event details", async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    render(<EventDetailsModal overlay={{ id: "draft", title: "Copy", description: "", organizer: "Org", locations: [{ id: "loc", locationRef: { type: "campus", label: "Campus Grounds" }, eventFurniture: [], eventLabels: [] }] } as never} buildings={buildings} onClose={vi.fn()} onSave={onSave} />);
+    fireEvent.change(document.querySelector('input[type="file"]')!, {target:{files:[new File(['image'], 'poster.png', {type:'image/png'})]}});
+    fireEvent.click(screen.getByRole('button', {name:/save changes/i}));
+    await waitFor(() => expect(onSave).toHaveBeenCalledWith(expect.objectContaining({posterUrl:'https://example.test/poster.png'})));
+  });
+
+  it("removes the existing poster on save without deleting a possibly shared image", async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    render(<EventDetailsModal overlay={{ id: 'draft', title: 'Copy', description: '', organizer: 'Org', posterUrl: 'https://example.test/shared.png', locations: [{ id: 'loc', locationRef: { type: 'campus', label: 'Campus Grounds' }, eventFurniture: [], eventLabels: [] }] } as never} buildings={buildings} onClose={vi.fn()} onSave={onSave} />);
+    fireEvent.click(screen.getByRole('button', {name:'Remove poster'}));
+    expect(screen.queryByAltText('Event poster preview')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', {name:/save changes/i}));
+    await waitFor(() => expect(onSave).toHaveBeenCalledWith(expect.objectContaining({posterUrl:''})));
+    expect(posterStorage.remove).not.toHaveBeenCalled();
   });
 
   it("keeps event scheduling out of the student organization draft editor", async () => {
@@ -189,6 +212,11 @@ describe("EventProposalModal", () => {
     expect(screen.getByRole("checkbox", { name: /campus grounds/i })).toBeChecked();
     expect(screen.getByRole("button", { name: /remove science building — floor 1/i })).toBeInTheDocument();
     expect(onCreate).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole('button', { name: /create & design maps/i }));
+    fireEvent.click(screen.getByRole('button', { name: /confirm & design/i }));
+    await waitFor(() => expect(onCreate).toHaveBeenCalledTimes(2));
+    expect(posterStorage.upload).toHaveBeenCalledOnce();
+    expect(onCreate.mock.calls[0][0].requestId).toBe(onCreate.mock.calls[1][0].requestId);
   });
 
   it("keeps the mobile dialog footer present while ten selected floors are in the scrollable content", () => {

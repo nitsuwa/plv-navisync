@@ -33,9 +33,11 @@ vi.mock("../../hooks/usePublishedCampus", () => ({
 }));
 vi.mock("../../services/eventOverlayService", () => ({ eventOverlayService: { getEventOverlay: previewState.getEventOverlay } }));
 vi.mock("../../components/events/EventFloorEditor", () => ({
-  EventFloorEditor: ({ readOnly, floorPlan, activeCampus }: { readOnly?: boolean; floorPlan: { id: string }; activeCampus?: { id: string } }) => (
+  EventFloorEditor: ({ readOnly, floorPlan, activeCampus, onFeedbackPoint, draftFeedbackPoint }: { readOnly?: boolean; floorPlan: { id: string }; activeCampus?: { id: string }; onFeedbackPoint?: (point: { x: number; y: number }) => void; draftFeedbackPoint?: { x: number; y: number } | null }) => (
     <div data-testid="readonly-editor" data-floor-id={floorPlan.id} data-campus-id={activeCampus?.id ?? "legacy"}>
       {readOnly ? "read-only" : "editable"}
+      {onFeedbackPoint && <button onClick={() => onFeedbackPoint({ x: 100, y: 200 })}>Choose feedback point</button>}
+      {draftFeedbackPoint && <span>Draft position visible</span>}
     </div>
   ),
 }));
@@ -65,6 +67,35 @@ beforeEach(() => {
 });
 
 describe("AdminEventLayoutPreviewPage", () => {
+  it("asks before discarding a positioned comment on location switch", async () => {
+    render(<MemoryRouter><AdminEventLayoutPreviewPage previewOverlay={previewState.overlay as never} onClose={vi.fn()} onAddFeedbackPin={vi.fn()} /></MemoryRouter>);
+    fireEvent.click(await screen.findByRole('button', { name: 'Add pin' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Choose feedback point' }));
+    fireEvent.change(screen.getByLabelText('Pin comment'), { target: { value: 'Keep this comment' } });
+    fireEvent.click(screen.getByRole('button', { name: /view science building/i }));
+    expect(screen.getByText('Discard this unsaved pin?')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Keep pin draft' }));
+    expect(screen.getByLabelText('Pin comment')).toHaveValue('Keep this comment');
+    expect(screen.getByTestId('readonly-editor')).toHaveAttribute('data-floor-id', 'campus');
+  });
+  it("shows the per-location capacity instead of silently dropping pin 31", async () => {
+    const locationFeedback = { campus: '@event-feedback/v1:' + JSON.stringify({ text: '', pins: Array.from({length:30},(_,i)=>({id:`pin-${i}`,x:1,y:1,comment:'Issue'})) }) };
+    render(<MemoryRouter><AdminEventLayoutPreviewPage previewOverlay={{...previewState.overlay,locationFeedback} as never} onAddFeedbackPin={vi.fn()} /></MemoryRouter>);
+    expect(await screen.findByRole('button', { name: 'Add pin' })).toBeDisabled();
+    expect(screen.getByText(/30\/30 pins/i)).toBeInTheDocument();
+  });
+  it("requires explicit pin mode and previews the point before saving a comment", async () => {
+    const add = vi.fn();
+    render(<MemoryRouter><AdminEventLayoutPreviewPage previewOverlay={previewState.overlay as never} onClose={vi.fn()} onAddFeedbackPin={add} /></MemoryRouter>);
+    fireEvent.click(await screen.findByRole("button", { name: "Add pin" }));
+    fireEvent.click(screen.getByRole("button", { name: "Choose feedback point" }));
+    expect(screen.getByText("Draft position visible")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save pin" })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText("Pin comment"), { target: { value: "Move booth" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save pin" }));
+    expect(add).toHaveBeenCalledWith("campus", expect.objectContaining({ x: 100, y: 200, comment: "Move booth" }));
+    expect(screen.queryByText("Draft position visible")).not.toBeInTheDocument();
+  });
   it("shows all requested locations read-only and resolves the stored campus after switching floors", async () => {
     renderPage();
     await waitFor(() => expect(screen.getByText("Student Fair")).toBeInTheDocument());

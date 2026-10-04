@@ -22,6 +22,31 @@ beforeEach(() => {
 });
 
 describe("AdminEventLayoutsPage publication controls", () => {
+  it('preserves staged review comments when cancellation is declined', async () => {
+    render(<AdminEventLayoutsPage />);
+    fireEvent.click(await screen.findByRole('button', { name: /Review submission/i }));
+    fireEvent.change(screen.getByLabelText(/Admin Comment/), { target: { value: 'Keep this feedback' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.getByRole('alertdialog', { name: 'Discard review changes?' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Keep reviewing' }));
+    expect(screen.getByLabelText(/Admin Comment/)).toHaveValue('Keep this feedback');
+    expect(eventOverlayService.reviewEventOverlay).not.toHaveBeenCalled();
+  });
+  it("opens a responsive accessible review without immediate red validation alerts", async () => {
+    render(<AdminEventLayoutsPage />);
+    fireEvent.click(await screen.findByRole("button", { name: /Review submission/i }));
+    expect(screen.getByRole("dialog", { name: "Review Event Layout" })).toHaveClass("max-w-3xl");
+    expect(screen.getByRole("button", { name: "Preview requested maps" })).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByText(/Choose the start and end dates/)).toHaveClass("text-muted-foreground");
+  });
+  it("returns focus to the queue action when the review dialog closes", async () => {
+    render(<AdminEventLayoutsPage />);
+    const trigger = await screen.findByRole("button", { name: /Review submission/i });
+    fireEvent.click(trigger);
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(trigger).toHaveFocus());
+  });
   it("uses review only for pending proposals and removes Quick Approve", async () => {
     render(<AdminEventLayoutsPage />);
     expect(await screen.findByRole("button", { name: /Review submission/i })).toBeInTheDocument();

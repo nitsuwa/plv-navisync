@@ -175,14 +175,14 @@ immutable
 set search_path = ''
 as $$
   with source_locations as (
-    select value as location
+    select value as location, ordinality
       from jsonb_array_elements(case
         when jsonb_typeof(p_metadata->'locations') = 'array' then p_metadata->'locations'
         when jsonb_typeof(p_metadata->'locationRef') = 'object'
           then jsonb_build_array(jsonb_build_object('id', 'legacy-location', 'locationRef', p_metadata->'locationRef',
             'eventFurniture', coalesce(p_metadata->'eventFurniture', '[]'::jsonb),
             'eventLabels', coalesce(p_metadata->'eventLabels', '[]'::jsonb)))
-        else '[]'::jsonb end)
+        else '[]'::jsonb end) with ordinality as locations(value, ordinality)
   ), projected as (
     select jsonb_build_object(
       'id', coalesce(nullif(location->>'id', ''), 'location-' || ordinality::text),
@@ -195,7 +195,7 @@ as $$
       'eventFurniture', public.event_public_furniture(location->'eventFurniture'),
       'eventLabels', public.event_public_labels(location->'eventLabels')
     ) as value, ordinality
-    from source_locations with ordinality
+    from source_locations
   )
   select coalesce(jsonb_agg(value order by ordinality), '[]'::jsonb) from projected;
 $$;

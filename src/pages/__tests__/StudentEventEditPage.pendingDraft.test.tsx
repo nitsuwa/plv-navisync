@@ -11,6 +11,7 @@ const fixture = vi.hoisted(() => ({
     getEventOverlay: vi.fn(),
     updateEventOverlayLayout: vi.fn(),
     submitEventOverlayLayout: vi.fn(),
+    setEventFeedbackPinAddressed: vi.fn(),
   },
   toast: { success: vi.fn(), error: vi.fn() },
   floorResolver: vi.fn((_buildingId?: string, _floorNumber?: number, _campus?: unknown) => fixture.floorPlan),
@@ -167,6 +168,32 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 
 describe("StudentEventEditPage pending interaction boundaries", () => {
+  it('keeps edits and blocks a competing save while acknowledgement is in flight', async () => {
+    const feedback = '@event-feedback/v1:' + JSON.stringify({text:'',pins:[{id:'pin',x:24,y:24,comment:'Move this chair'}]});
+    const source = { ...overlay, locationFeedback: { 'location-a': feedback } };
+    fixture.service.getEventOverlay.mockResolvedValue(source);
+    let finish!: (value: CampusEventOverlay) => void;
+    fixture.service.setEventFeedbackPinAddressed.mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+    renderPage();
+    const item = await screen.findByTestId('event-furniture-a-chair');
+    fireEvent.click(screen.getByText(/Feedback checklist/));
+    fireEvent.click(screen.getByRole('button', { name: 'Mark as addressed' }));
+    expect(screen.getByRole('button', { name: 'Save Draft' })).toBeDisabled();
+    fireEvent.pointerDown(item, { button: 0, clientX: 24, clientY: 24 });
+    fireEvent.keyDown(window, { key: 'ArrowRight' });
+    const editedPosition = item.style.left;
+    await act(async () => finish({ ...source, feedbackResolutions: { 'location-a': { pin: {feedback,addressedBy:'owner',addressedAt:'2026-10-03T12:00:00Z',note:'Moved'} } } }));
+    expect(screen.getByTestId('event-furniture-a-chair').style.left).toBe(editedPosition);
+    expect(fixture.service.setEventFeedbackPinAddressed).toHaveBeenCalledOnce();
+    expect(fixture.service.updateEventOverlayLayout).not.toHaveBeenCalled();
+  });
+  it('opens approved maps for inspection without save or submit controls', async () => {
+    fixture.service.getEventOverlay.mockResolvedValue({ ...overlay, status: 'approved' });
+    renderPage();
+    await screen.findByTestId('event-furniture-a-chair');
+    expect(screen.queryByRole('button', { name: 'Save Draft' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Review & submit/ })).not.toBeInTheDocument();
+  });
   it("confirms Back even with a saved draft and lets the user keep editing", async () => {
     renderPage();
     await screen.findByTestId("event-furniture-a-chair");
@@ -254,6 +281,32 @@ describe("StudentEventEditPage pending interaction boundaries", () => {
 
     expect(await screen.findByText(/there is no published map for/i)).toBeInTheDocument();
     expect(screen.queryByTestId("event-furniture-b-table")).not.toBeInTheDocument();
+  });
+
+  it('treats the database JSON key order as the same saved layout', async () => {
+    fixture.service.updateEventOverlayLayout.mockImplementation(async (_id, locations) => ({...overlay, locations:JSON.parse(JSON.stringify(locations, (_key,value)=>value&&typeof value==='object'&&!Array.isArray(value)?Object.fromEntries(Object.entries(value).sort(([a],[b])=>a.localeCompare(b))):value))}));
+    renderPage();
+    await screen.findByTestId('event-furniture-a-chair');
+    startPendingChairMove();
+    fireEvent.click(screen.getByRole('button',{name:'Save Draft'}));
+    await waitFor(()=>expect(fixture.toast.success).toHaveBeenCalled());
+    fireEvent.click(screen.getByRole('button',{name:/administration building/i}));
+    await waitFor(()=>expect(screen.getByTestId('event-furniture-b-table')).toBeInTheDocument());
+    expect(screen.queryByRole('dialog',{name:'Unsaved Changes'})).not.toBeInTheDocument();
+  });
+
+  it('keeps location identity when a save finishes after switching the active map', async () => {
+    let finish!: (saved: CampusEventOverlay) => void;
+    fixture.service.updateEventOverlayLayout.mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve;}));
+    renderPage();
+    await screen.findByTestId('event-furniture-a-chair');
+    fireEvent.click(screen.getByRole('button',{name:'Save Draft'}));
+    fireEvent.click(screen.getByRole('button',{name:/administration building/i}));
+    await screen.findByTestId('event-furniture-b-table');
+    await act(async()=>finish(overlay));
+    fireEvent.click(screen.getByRole('button',{name:/main academic building/i}));
+    await waitFor(()=>expect(screen.getByTestId('event-furniture-a-chair')).toBeInTheDocument());
+    expect(screen.queryByRole('dialog',{name:'Unsaved Changes'})).not.toBeInTheDocument();
   });
 
   it("commits the outgoing pending preview before switching and saves all locations", async () => {

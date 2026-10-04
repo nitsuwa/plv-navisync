@@ -18,10 +18,13 @@ describe("ThemedDateTimeField", () => {
     fireEvent.click(screen.getByRole("button", { name: "October 2, 2026" }));
 
     expect(onDateChange).toHaveBeenCalledWith("2026-10-02");
-    expect(screen.getByLabelText("Event starts time")).toHaveAttribute("type", "text");
-    expect(screen.getByLabelText("Event starts time")).toHaveAttribute("inputmode", "numeric");
-    fireEvent.change(screen.getByLabelText("Event starts time"), { target: { value: "1745" } });
-    expect(onTimeChange).toHaveBeenCalledWith("17:45");
+    fireEvent.click(screen.getByRole("button", { name: "Event starts time: 9:00 AM" }));
+    fireEvent.click(screen.getByRole("button", { name: "PM" }));
+    expect(onTimeChange).toHaveBeenCalledWith("21:00");
     expect(document.querySelector('input[type="date"], input[type="time"], input[type="datetime-local"]')).toBeNull();
+  });
+  it.each([["00:00", "12:00 AM"], ["12:00", "12:00 PM"], ["17:45", "5:45 PM"]])("displays %s as %s", (time, display) => {
+    render(<ThemedDateTimeField label="Start" date="" time={time} onDateChange={vi.fn()} onTimeChange={vi.fn()} />);
+    expect(screen.getByRole("button", { name: `Start time: ${display}` })).toBeInTheDocument();
   });
 });

@@ -1501,6 +1501,22 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      save_pending_event_layout: {
+        Args: { p_overlay_id: string; p_expected_updated_at: string; p_locations: Json }
+        Returns: Json
+      }
+      withdraw_event_submission: {
+        Args: { p_overlay_id: string; p_expected_updated_at: string }
+        Returns: Json
+      }
+      list_event_revisions: {
+        Args: { p_overlay_id: string }
+        Returns: Json
+      }
+      set_event_feedback_pin_addressed: {
+        Args: { p_overlay_id: string; p_expected_updated_at: string; p_location_id: string; p_pin_id: string; p_addressed: boolean; p_note: string }
+        Returns: Json
+      }
       list_published_event_previews: {
         Args: { p_campus_id: string }
         Returns: Json

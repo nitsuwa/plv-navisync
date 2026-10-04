@@ -8,7 +8,10 @@
  * Data is persisted through the campus structure serialize/hydrate flow
  * (map_element kind "event_overlay") — no new DB tables required.
  */
+import type { Json } from "../types/database.generated";
 import { getSupabase } from "../lib/supabase";
+import { countOpenFeedbackPins } from "../lib/eventFeedbackPins";
+import { stableEventJson } from "../lib/stableEventJson";
 import { genId } from "../components/map-builder/constants";
 import { campusService, resolveActiveCampusId } from "./campusService";
 import { logActivity } from "./activityLogService";
@@ -42,6 +45,7 @@ export type EventOverlayLocationInput =
     };
 
 export interface EventOverlayInput {
+  requestId?: string;
   title: string;
   description?: string;
   organizer: string;
@@ -113,10 +117,13 @@ function overlayFromMetadata(
     restrictedAreas:
       (metadata.restrictedAreas as CampusEventOverlay["restrictedAreas"]) || [],
     isActive: (metadata.isActive as boolean) ?? true,
-    status: (metadata.status as EventOverlayStatus) || "pending",
+    status: (["draft", "pending", "approved", "disapproved"].includes(String(metadata.status)) ? metadata.status : "draft") as EventOverlayStatus,
+    lastEditedAt: typeof metadata.lastEditedAt === "string" ? metadata.lastEditedAt : undefined,
+    revision: typeof metadata.revision === "number" ? metadata.revision : undefined,
     submittedAt: typeof metadata.submittedAt === "string" ? metadata.submittedAt : undefined,
     publicationAt: metadata.publicationAt as string | undefined,
     locationFeedback: metadata.locationFeedback as Record<string, string> | undefined,
+    feedbackResolutions: metadata.feedbackResolutions as CampusEventOverlay["feedbackResolutions"],
     adminComment: metadata.adminComment as string | undefined,
     eventFurniture: (metadata.eventFurniture as FloorFurniture[]) || [],
     eventLabels: (metadata.eventLabels as FloorLabel[]) || [],
@@ -340,7 +347,8 @@ export async function createEventOverlay(
   }
 
   // Use the shared Map Builder UUID identity source for the event and its row.
-  const id = genId("event-overlay");
+  const id = input.requestId ?? genId("event-overlay");
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) throw new Error('Invalid creation attempt. Close and reopen the proposal.');
   const overlay: CampusEventOverlay = {
     id,
     title: input.title,
@@ -386,7 +394,19 @@ export async function createEventOverlay(
     .select("id")
     .single();
 
-  if (error) throw error;
+  if (error) {
+    // The insert may have committed before its response was lost. A stable
+    // request UUID prevents a second draft; recover only the exact owned attempt.
+    if (input.requestId) {
+      const recovered = await supabase.from('map_elements').select('id,campus_id,metadata,updated_at').eq('id', id).maybeSingle();
+      const saved = recovered.data?.metadata as Record<string, unknown> | undefined;
+      if (!recovered.error && recovered.data && saved?.createdByUserId === createdByUserId && recovered.data.campus_id === campusId && saved.status === 'draft') {
+        if (saved.title !== input.title || saved.organizer !== input.organizer || (saved.description ?? '') !== (input.description ?? '') || (saved.posterUrl ?? '') !== (input.posterUrl ?? '') || stableEventJson((saved.locations as EventOverlayLocation[] ?? []).map(({locationRef,eventFurniture,eventLabels}) => ({locationRef,eventFurniture,eventLabels}))) !== stableEventJson(locations.map(({locationRef,eventFurniture,eventLabels}) => ({locationRef,eventFurniture,eventLabels})))) throw new Error('This attempt already created a draft with your earlier details. Close this form and continue it from My Events.');
+        return overlayFromMetadata(saved, recovered.data.id, recovered.data.campus_id, recovered.data.updated_at);
+      }
+    }
+    throw error;
+  }
 
   const persistedId = inserted?.id;
   if (!persistedId) throw new Error("Event overlay was not persisted.");
@@ -411,7 +431,8 @@ export async function updateEventOverlayDetails(
     organizer: string;
     locations: EventLocationRef[];
     posterUrl?: string;
-  }
+  },
+  expectedUpdatedAt?: string
 ): Promise<void> {
   const supabase = getSupabase();
 
@@ -423,6 +444,9 @@ export async function updateEventOverlayDetails(
 
   if (fetchError || !existing) throw new Error("Event overlay not found.");
 
+  if (expectedUpdatedAt && existing.updated_at && Date.parse(expectedUpdatedAt) !== Date.parse(existing.updated_at)) {
+    throw new Error('This event changed in another session. Your form inputs are still here; reload the latest details before saving again.');
+  }
   const metadata = existing.metadata as Record<string, unknown>;
   const existingStatus = (metadata.status || "draft") as EventOverlayStatus;
   if (existingStatus !== "draft" && existingStatus !== "disapproved") {
@@ -456,16 +480,15 @@ export async function updateEventOverlayDetails(
     organizer: input.organizer,
     status: "draft",
     submittedAt: null,
-    adminComment: null,
-    locationFeedback: {},
+    adminComment: metadata.adminComment ?? null,
+    locationFeedback: metadata.locationFeedback ?? {},
   };
 
   if (input.posterUrl !== undefined) {
     updatedMetadata.posterUrl = input.posterUrl;
   }
 
-  const { error } = await supabase
-    .from("map_elements")
+  let detailsWrite = supabase.from("map_elements")
     .update({
       name: input.title,
       metadata: updatedMetadata as never,
@@ -473,8 +496,10 @@ export async function updateEventOverlayDetails(
     })
     .eq("id", overlayId)
     .or("element_type.eq.event_overlay,metadata->>kind.eq.event_overlay");
-
+  if (existing.updated_at) detailsWrite = detailsWrite.eq('updated_at', expectedUpdatedAt ?? existing.updated_at);
+  const {data: savedDetails, error} = await detailsWrite.select('id').maybeSingle();
   if (error) throw error;
+  if (!savedDetails) throw new Error('This event changed. Reload its latest details before saving again. Your form inputs are still here.');
 
   await logActivity({
     action: "event_overlay.update_details",
@@ -490,8 +515,9 @@ export async function updateEventOverlayDetails(
  */
 export async function updateEventOverlayLayout(
   overlayId: string,
-  locations: EventOverlayLocation[]
-): Promise<void> {
+  locations: EventOverlayLocation[],
+  expectedUpdatedAt?: string
+): Promise<CampusEventOverlay | undefined> {
   const supabase = getSupabase();
 
   const { data: existing, error: fetchError } = await supabase
@@ -502,8 +528,20 @@ export async function updateEventOverlayLayout(
 
   if (fetchError || !existing) throw new Error("Event overlay not found.");
 
+  if (expectedUpdatedAt && existing.updated_at && Date.parse(expectedUpdatedAt) !== Date.parse(existing.updated_at)) {
+    throw new Error('This event changed in another session. Your local edits are still here; reload to review the latest saved map before saving again.');
+  }
+
   const existingMetadata = existing.metadata as Record<string, unknown>;
   const existingStatus = (existingMetadata.status || "draft") as EventOverlayStatus;
+  if (existingStatus === "pending") {
+    await validateSavedLocations(existing.campus_id, locations);
+    const { data, error } = await supabase.rpc("save_pending_event_layout", {
+      p_overlay_id: overlayId, p_expected_updated_at: expectedUpdatedAt ?? existing.updated_at, p_locations: locations as unknown as Json,
+    });
+    if (error) throw eventCommandError(error);
+    return overlayFromAdminResult(data);
+  }
   if (existingStatus !== "draft" && existingStatus !== "disapproved") {
     throw new Error("This event is locked while it is awaiting or has received administrator approval.");
   }
@@ -514,17 +552,17 @@ export async function updateEventOverlayLayout(
     ...applyLocationCompatibilityFields(metadata, locations),
     status: "draft",
     submittedAt: null,
-    adminComment: null,
-    locationFeedback: {},
+    adminComment: metadata.adminComment ?? null,
+    locationFeedback: metadata.locationFeedback ?? {},
   };
 
-  const { error } = await supabase
-    .from("map_elements")
+  let write = supabase.from("map_elements")
     .update({ metadata: updatedMetadata as never, updated_at: new Date().toISOString() })
-    .eq("id", overlayId)
-    .or("element_type.eq.event_overlay,metadata->>kind.eq.event_overlay");
-
+    .eq("id", overlayId).or("element_type.eq.event_overlay,metadata->>kind.eq.event_overlay");
+  if (existing.updated_at) write = write.eq('updated_at', expectedUpdatedAt ?? existing.updated_at);
+  const { data: savedRow, error } = await write.select('id,campus_id,metadata,updated_at').maybeSingle();
   if (error) throw error;
+  if (!savedRow) throw new Error('This event changed. Retry the save to preserve your local edits.');
 
   await logActivity({
     action: "event_overlay.update_layout",
@@ -533,6 +571,7 @@ export async function updateEventOverlayLayout(
     entityId: overlayId,
     metadata: { title: typeof metadata.title === "string" ? metadata.title : existing.name },
   });
+  return overlayFromMetadata(savedRow.metadata as Record<string, unknown>, savedRow.id, savedRow.campus_id, savedRow.updated_at);
 }
 
 /**
@@ -543,7 +582,8 @@ export async function updateEventOverlayLayout(
  */
 export async function submitEventOverlayLayout(
   overlayId: string,
-  locations: EventOverlayLocation[]
+  locations: EventOverlayLocation[],
+  expectedUpdatedAt?: string
 ): Promise<void> {
   const supabase = getSupabase();
 
@@ -559,6 +599,12 @@ export async function submitEventOverlayLayout(
   if (!(["draft", "disapproved"] as unknown[]).includes(metadata.status || "draft")) {
     throw new Error("Only drafts or disapproved event maps can be submitted.");
   }
+  if (expectedUpdatedAt && existing.updated_at && Date.parse(expectedUpdatedAt) !== Date.parse(existing.updated_at)) {
+    throw new Error('This event changed in another session. Your local edits are still here; reload the latest map and feedback before submitting again.');
+  }
+  if (countOpenFeedbackPins(metadata.locationFeedback as Record<string, string>, metadata.feedbackResolutions as CampusEventOverlay["feedbackResolutions"]) > 0) {
+    throw new Error("Address every GSO feedback pin before resubmitting.");
+  }
 
   await validateSavedLocations(existing.campus_id, locations);
   const updatedMetadata = {
@@ -566,16 +612,16 @@ export async function submitEventOverlayLayout(
     status: "pending",
     submittedAt: new Date().toISOString(),
     adminComment: null,
-    locationFeedback: {},
+    locationFeedback: metadata.locationFeedback ?? {},
   };
 
-  const { error } = await supabase
-    .from("map_elements")
+  let write = supabase.from("map_elements")
     .update({ metadata: updatedMetadata as never, updated_at: new Date().toISOString() })
-    .eq("id", overlayId)
-    .or("element_type.eq.event_overlay,metadata->>kind.eq.event_overlay");
-
+    .eq("id", overlayId).or("element_type.eq.event_overlay,metadata->>kind.eq.event_overlay");
+  if (existing.updated_at) write = write.eq('updated_at', expectedUpdatedAt ?? existing.updated_at);
+  const { data: submittedRow, error } = await write.select('id').maybeSingle();
   if (error) throw error;
+  if (!submittedRow) throw new Error('This event changed. Review the latest feedback before submitting again.');
 
   await logActivity({
     action: "event_overlay.submit",
@@ -590,6 +636,17 @@ export async function submitEventOverlayLayout(
  * List event overlays with optional filters.
  * Returns all overlays for the active campus.
  */
+export async function setEventFeedbackPinAddressed(overlay: CampusEventOverlay, locationId: string, pinId: string, addressed: boolean, note: string): Promise<CampusEventOverlay> {
+  const latest = await getEventOverlay(overlay.id);
+  if (!latest || !latest.updatedAt || latest.locationFeedback?.[locationId] !== overlay.locationFeedback?.[locationId]) throw new Error("Feedback changed. Refresh before updating the checklist.");
+  const { data, error } = await getSupabase().rpc("set_event_feedback_pin_addressed", {
+    p_overlay_id: overlay.id, p_expected_updated_at: latest.updatedAt, p_location_id: locationId,
+    p_pin_id: pinId, p_addressed: addressed, p_note: note,
+  });
+  if (error) throw eventCommandError(error);
+  return overlayFromAdminResult(data);
+}
+
 export async function listEventOverlays(
   filters: EventOverlayFilters = {}
 ): Promise<CampusEventOverlay[]> {
@@ -726,7 +783,37 @@ export async function reviewEventOverlay(
     p_admin_comment: adminComment ?? null,
     p_location_feedback: publication?.locationFeedback ?? null,
   });
-  if (error) throw error;
+  if (error) throw eventCommandError(error);
+  return overlayFromAdminResult(data);
+}
+
+function eventCommandError(error: { code?: string; message?: string }): Error {
+  if (error.code === "PGRST202" || error.code === "42883" || /function.*(schema cache|does not exist)/i.test(error.message ?? "")) {
+    return new Error("The event database migration is not installed. Ask the administrator to apply the event publication and revision migrations, then refresh. Your map has not been changed.");
+  }
+  return new Error(error.message || "The event change could not be saved. Refresh and try again.");
+}
+
+export interface EventRevision {
+  id: string;
+  action: string;
+  createdAt: string;
+  actorId: string | null;
+  before: Partial<CampusEventOverlay>;
+  after: Partial<CampusEventOverlay>;
+}
+
+export async function listEventRevisions(overlayId: string): Promise<EventRevision[]> {
+  const { data, error } = await getSupabase().rpc("list_event_revisions", { p_overlay_id: overlayId });
+  if (error) throw eventCommandError(error);
+  return Array.isArray(data) ? data as unknown as EventRevision[] : [];
+}
+
+export async function withdrawEventSubmission(overlayId: string, expectedUpdatedAt: string): Promise<CampusEventOverlay> {
+  const { data, error } = await getSupabase().rpc("withdraw_event_submission", {
+    p_overlay_id: overlayId, p_expected_updated_at: expectedUpdatedAt,
+  });
+  if (error) throw eventCommandError(error);
   return overlayFromAdminResult(data);
 }
 
@@ -852,9 +939,12 @@ export async function getActiveApprovedOverlays(): Promise<
 
 export const eventOverlayService = {
   createEventOverlay,
+  listEventRevisions,
+  withdrawEventSubmission,
   updateEventOverlayDetails,
   updateEventOverlayLayout,
   submitEventOverlayLayout,
+  setEventFeedbackPinAddressed,
   listEventOverlays,
   getEventOverlay,
   reviewEventOverlay,

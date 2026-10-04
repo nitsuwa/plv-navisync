@@ -244,10 +244,40 @@ describe("EventFloorEditor", () => {
     expect(screen.getAllByRole("alert").some(alert => alert.textContent?.includes("overlaps building Student Hall"))).toBe(true);
   });
 
-  it("labels the existing submission entry point as Review & submit", () => {
+  it("renders a visible draft pin before saving and hides the duplicate preview header", () => {
+    render(<EventFloorEditor floorPlan={floorPlan} overlay={overlayWithChair} compactPreview readOnly draftFeedbackPoint={{ x: 50, y: 60 }} onSave={vi.fn()} onSubmit={vi.fn()} onBack={vi.fn()} />);
+    expect(screen.getByLabelText("Unsaved feedback pin position")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Back to My Events" })).not.toBeInTheDocument();
+  });
+  it("provides a working Pan toggle and shortcut guide in read-only mode", () => {
+    render(<EventFloorEditor floorPlan={floorPlan} overlay={overlayWithChair} readOnly onSave={vi.fn()} onSubmit={vi.fn()} onBack={vi.fn()} />);
+    const pan = screen.getByRole("button", { name: "Pan map" });
+    expect(pan).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(pan);
+    expect(pan).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByText("Shortcuts")).toBeInTheDocument();
+  });
+  it("can focus event furniture in a read-only preview without selection", () => {
+    render(<EventFloorEditor floorPlan={floorPlan} overlay={overlayWithChair} readOnly onSave={vi.fn()} onSubmit={vi.fn()} onBack={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "Focus event items" })).toBeEnabled();
+  });
+  it("prevents map wheel gestures from scrolling an enclosing preview", () => {
+    render(<EventFloorEditor floorPlan={floorPlan} overlay={overlay} readOnly onSave={vi.fn()} onSubmit={vi.fn()} onBack={vi.fn()} />);
+    const wheel = new WheelEvent("wheel", { deltaY: 80, bubbles: true, cancelable: true });
+    screen.getByLabelText("Event layout canvas").dispatchEvent(wheel);
+    expect(wheel.defaultPrevented).toBe(true);
+  });
+  it("shows map feedback without modifying furniture in read-only mode", () => {
+    const save = vi.fn();
+    render(<EventFloorEditor floorPlan={floorPlan} overlay={overlay} readOnly feedbackPins={[{ id: "pin", x: 50, y: 60, comment: "Move booth" }]} onSave={save} onSubmit={vi.fn()} onBack={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "Feedback pin 1: Move booth" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Feedback pin 1: Move booth" }));
+    expect(save).not.toHaveBeenCalled();
+  });
+  it("offers saving an updated submission while an event is pending", () => {
     render(<EventFloorEditor floorPlan={floorPlan} overlay={overlay} onSave={vi.fn()} onSubmit={vi.fn()} onBack={vi.fn()} />);
 
-    expect(screen.getByRole("button", { name: "Review & submit" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Review & update GSO" })).toBeEnabled();
   });
 
   it("shows advisory alignment and spacing only while a single asset is dragged", () => {
@@ -498,11 +528,11 @@ describe("EventFloorEditor", () => {
     );
 
     expect(screen.getByText("Read-only review")).toBeInTheDocument();
-    expect(screen.getByText("Published map locked")).toBeInTheDocument();
+    expect(screen.getByText("Read-only")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /save draft|submit to gso|delete/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Furniture" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Fit map" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Focus selection" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Focus event items" })).toBeDisabled();
     expect(screen.getByText("No event additions yet")).toBeInTheDocument();
   });
 

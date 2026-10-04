@@ -12,9 +12,10 @@ interface EventLocationSwitcherProps {
   onChange: (locationId: string) => void;
   /** The read-only approval preview keeps its expanded rail unless explicitly made responsive. */
   presentation?: "rail" | "responsive";
+  readOnly?: boolean;
 }
 
-export function EventLocationSwitcher({ locations, activeLocationId, onChange, presentation = "rail" }: EventLocationSwitcherProps) {
+export function EventLocationSwitcher({ locations, activeLocationId, onChange, presentation = "rail", readOnly = false }: EventLocationSwitcherProps) {
   const [desktop, setDesktop] = useState(() => typeof window !== "undefined" && (window.matchMedia?.("(min-width: 1024px)").matches ?? window.innerWidth >= 1024));
   const [collapsed, setCollapsed] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -39,7 +40,7 @@ export function EventLocationSwitcher({ locations, activeLocationId, onChange, p
       <button
         type="button"
         key={location.id}
-        aria-label={`Edit ${location.locationRef.label}`}
+        aria-label={`${readOnly ? "View" : "Edit"} ${location.locationRef.label}`}
         aria-current={active ? "page" : undefined}
         onClick={() => {
           onChange(location.id);
@@ -62,7 +63,7 @@ export function EventLocationSwitcher({ locations, activeLocationId, onChange, p
         </span>
         <span className="flex shrink-0 flex-col items-end gap-1 text-[9px] font-extrabold uppercase tracking-wide">
           {active ? <Check className="h-3.5 w-3.5 text-primary" aria-label="Active location" /> : <ChevronRight className="h-4 w-4 text-muted-foreground/60" aria-hidden="true" />}
-          <span className={active ? "text-primary" : "text-muted-foreground/70"}>{active ? "Editing" : "Switch map"}</span>
+          <span className={active ? "text-primary" : "text-muted-foreground/70"}>{active ? (readOnly ? "Viewing" : "Editing") : "Switch map"}</span>
         </span>
       </button>
     );
@@ -107,7 +108,7 @@ export function EventLocationSwitcher({ locations, activeLocationId, onChange, p
             {locations.map((location, index) => {
               const active = location.id === activeLocationId;
               const Icon = location.locationRef.type === "campus" ? MapPin : Building2;
-              return <Tooltip.Root key={location.id}><Tooltip.Trigger asChild><button type="button" aria-label={`Edit ${location.locationRef.label}`} aria-current={active ? "page" : undefined} onClick={() => onChange(location.id)} className={cn("relative flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary", active ? "border-primary/50 bg-primary/10 text-primary" : "border-transparent text-muted-foreground hover:bg-muted")}><Icon className="h-4 w-4" aria-hidden="true" /><span aria-hidden="true" className="absolute bottom-0.5 right-1 text-[8px] font-bold">{index + 1}</span></button></Tooltip.Trigger><Tooltip.Portal><Tooltip.Content side="right" sideOffset={8} className="z-[90] max-w-60 rounded-lg border border-border bg-card px-3 py-2 text-xs font-semibold text-foreground shadow-lg">{location.locationRef.label}{active && <span className="mt-1 block text-[10px] text-primary">Currently editing</span>}</Tooltip.Content></Tooltip.Portal></Tooltip.Root>;
+              return <Tooltip.Root key={location.id}><Tooltip.Trigger asChild><button type="button" aria-label={`${readOnly ? "View" : "Edit"} ${location.locationRef.label}`} aria-current={active ? "page" : undefined} onClick={() => onChange(location.id)} className={cn("relative flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary", active ? "border-primary/50 bg-primary/10 text-primary" : "border-transparent text-muted-foreground hover:bg-muted")}><Icon className="h-4 w-4" aria-hidden="true" /><span aria-hidden="true" className="absolute bottom-0.5 right-1 text-[8px] font-bold">{index + 1}</span></button></Tooltip.Trigger><Tooltip.Portal><Tooltip.Content side="right" sideOffset={8} className="z-[90] max-w-60 rounded-lg border border-border bg-card px-3 py-2 text-xs font-semibold text-foreground shadow-lg">{location.locationRef.label}{active && <span className="mt-1 block text-[10px] text-primary">Currently editing</span>}</Tooltip.Content></Tooltip.Portal></Tooltip.Root>;
             })}
           </div></Tooltip.Provider>
         </div>
@@ -117,7 +118,7 @@ export function EventLocationSwitcher({ locations, activeLocationId, onChange, p
             <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary"><MapPin className="h-4 w-4" aria-hidden="true" /></span>
             <div className="min-w-0 flex-1">
               <p className="text-[10px] font-extrabold uppercase tracking-[0.12em] text-foreground">Event locations</p>
-              <p className="mt-1 text-[11px] leading-4 text-muted-foreground">Choose a map to edit your event setup.</p>
+              <p className="mt-1 text-[11px] leading-4 text-muted-foreground">{readOnly ? "Choose a map to inspect the approved setup." : "Choose a map to edit your event setup."}</p>
             </div>
             {responsive && <button type="button" aria-label="Collapse locations" title="Collapse locations" aria-expanded="true" onClick={() => setCollapsed(true)} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"><ChevronsLeft className="h-4 w-4" aria-hidden="true" /></button>}
           </div>

@@ -51,10 +51,49 @@ vi.mock("../../services/eventOverlayService", () => ({
     createEventOverlay: vi.fn(),
     updateEventOverlayDetails: vi.fn(),
     deleteEventOverlay: vi.fn(),
+    withdrawEventSubmission: vi.fn(),
   },
 }));
 
 describe("StudentMyEventsPage access", () => {
+  it('shows a retryable error instead of an empty event list on fetch failure', async () => {
+    authState.isStudentOrg = true;
+    authState.profile = { id: 'org-1' };
+    publishedCampusState.loading = false;
+    vi.mocked(eventOverlayService.listEventOverlays).mockRejectedValueOnce(new Error('Network unavailable'));
+    render(<MemoryRouter><StudentMyEventsPage /></MemoryRouter>);
+    expect(await screen.findByText('Could not load your events')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Retry events' })).toBeInTheDocument();
+    expect(screen.queryByText('No events yet')).not.toBeInTheDocument();
+  });
+  it.each([
+    ["draft", "Continue designing your maps, then review and submit the proposal to GSO."],
+    ["pending", "GSO is reviewing your proposal. You can edit the submitted maps or withdraw to Draft."],
+    ["disapproved", "Read GSO feedback, revise the existing maps, then resubmit from the editor."],
+    ["approved", "GSO approved this proposal. The administrator controls its schedule and student publication."],
+  ])("explains the next step for a %s proposal", async (status, instruction) => {
+    authState.isStudentOrg = true;
+    authState.profile = { id: "org-1" };
+    publishedCampusState.loading = false;
+    vi.mocked(eventOverlayService.listEventOverlays).mockResolvedValueOnce([{ id: "event", title: "Fair", organizer: "Org", status, locations: [] }] as never);
+    render(<MemoryRouter><StudentMyEventsPage /></MemoryRouter>);
+    expect(await screen.findByText(instruction)).toBeInTheDocument();
+  });
+  it("confirms withdrawal and preserves the layout as a draft", async () => {
+    authState.isStudentOrg = true;
+    authState.profile = { id: "org-1" };
+    publishedCampusState.loading = false;
+    const event = { id: "pending", title: "Submitted Fair", organizer: "Org", status: "pending", updatedAt: "2026-10-03T00:00:00Z", locations: [{ id: "loc", locationRef: { type: "campus", label: "Campus Grounds" }, eventFurniture: [], eventLabels: [] }] };
+    vi.mocked(eventOverlayService.listEventOverlays).mockResolvedValueOnce([event] as never).mockResolvedValueOnce([{ ...event, status: "draft" }] as never);
+    vi.mocked(eventOverlayService.withdrawEventSubmission).mockResolvedValue({ ...event, status: "draft" } as never);
+    render(<MemoryRouter><StudentMyEventsPage /></MemoryRouter>);
+    fireEvent.click(await screen.findByRole("button", { name: "Withdraw submission" }));
+    expect(screen.getByRole("alertdialog", { name: "Withdraw submission?" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Withdraw to draft" }));
+    await waitFor(() => expect(eventOverlayService.withdrawEventSubmission).toHaveBeenCalledWith(event.id, event.updatedAt));
+    expect(await screen.findByRole("link", { name: "Continue draft" })).toBeInTheDocument();
+    expect(eventOverlayService.deleteEventOverlay).not.toHaveBeenCalled();
+  });
   it("offers copying an existing event layout into a new draft", async () => {
     authState.isStudentOrg = true;
     authState.profile = { id: "org-1" };
@@ -175,6 +214,7 @@ describe("StudentMyEventsPage access", () => {
     expect(eventOverlayService.listEventOverlays).toHaveBeenCalledWith({
       allCampuses: true,
       createdByUserId: "org-1",
+      strict: true,
     });
     fireEvent.click(createButton);
     fireEvent.change(await screen.findByLabelText("Event title *"), { target: { value: "Student Fair" } });

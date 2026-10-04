@@ -938,9 +938,13 @@ export interface CampusEventOverlay {
   status?: "draft" | "pending" | "approved" | "disapproved";
   /** ISO timestamp of the latest explicit submission to GSO. */
   submittedAt?: string;
+  /** Server-recorded layout/detail edit time and revision. */
+  lastEditedAt?: string;
+  revision?: number;
   /** Student visibility begins at this approved publication instant. */
   publicationAt?: string;
   locationFeedback?: Record<string, string>;
+  feedbackResolutions?: import("../../lib/eventFeedbackPins").EventFeedbackResolutions;
   /** Admin feedback when disapproving */
   adminComment?: string;
   /** Event-specific furniture items (booths, tents, stages, etc.) */

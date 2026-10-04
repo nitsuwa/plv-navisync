@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getSupabase } from "../../lib/supabase";
 import { campusService, resolveActiveCampusId } from "../campusService";
 import { eventOverlayService } from "../eventOverlayService";
+import { writeEventFeedback } from "../../lib/eventFeedbackPins";
 
 vi.mock("../../lib/supabase", () => ({ getSupabase: vi.fn() }));
 vi.mock("../campusService", () => ({
@@ -21,6 +22,7 @@ const floorLocation = {
 function makeClient(rows: unknown[] = []) {
   const filters: Array<{ column: string; value: unknown }> = [];
   const query = {
+    select: vi.fn(() => query),
     eq: vi.fn((column: string, value: unknown) => {
       filters.push({ column, value });
       return query;
@@ -28,6 +30,7 @@ function makeClient(rows: unknown[] = []) {
     or: vi.fn(() => query),
     order: vi.fn().mockResolvedValue({ data: rows, error: null }),
     single: vi.fn().mockResolvedValue({ data: rows[0] ?? null, error: null }),
+    maybeSingle: vi.fn().mockResolvedValue({ data: rows[0] ?? null, error: null }),
   };
   const mapElements = {
     insert: vi.fn((payload: unknown) => ({
@@ -62,6 +65,62 @@ function publishedCampus(id: string) {
 }
 
 describe("event overlay service", () => {
+  it('rejects stale details and submission callers before writing an old form or map', async () => {
+    const {client,mapElements}=makeClient([{id:'event-1',campus_id:'campus-1',updated_at:'2026-10-03T01:00:01Z',metadata:{status:'draft'}}]);
+    vi.mocked(getSupabase).mockReturnValue(client as never);
+    await expect(eventOverlayService.updateEventOverlayDetails('event-1', {title:'Old form',description:'',organizer:'Org',locations:[]}, '2026-10-03T01:00:00Z')).rejects.toThrow(/changed/i);
+    await expect(eventOverlayService.submitEventOverlayLayout('event-1', [], '2026-10-03T01:00:00Z')).rejects.toThrow(/changed/i);
+    expect(mapElements.update).not.toHaveBeenCalled();
+  });
+  it('rejects an old editor version even when a fresh fetch finds a newer pending event', async () => {
+    const {client,mapElements}=makeClient([{id:'event-1',campus_id:'campus-1',updated_at:'2026-10-03T01:00:01Z',metadata:{status:'pending'}}]);
+    vi.mocked(getSupabase).mockReturnValue(client as never);
+    await expect(eventOverlayService.updateEventOverlayLayout('event-1', [], '2026-10-03T01:00:00Z')).rejects.toThrow(/changed/i);
+    expect(client.rpc).not.toHaveBeenCalled();
+    expect(mapElements.update).not.toHaveBeenCalled();
+  });
+  it('rejects a details save after another operation advanced the row version', async () => {
+    const {client,mapElements,filters}=makeClient([{id:'event-1',campus_id:'campus-1',updated_at:'2026-10-03T00:00:00Z',metadata:{status:'draft'}}]);
+    mapElements.select().maybeSingle.mockResolvedValueOnce({data:null,error:null});
+    vi.mocked(getSupabase).mockReturnValue(client as never);
+    await expect(eventOverlayService.updateEventOverlayDetails('event-1',{title:'Fair',description:'',organizer:'Org',locations:[campusLocation]})).rejects.toThrow(/changed/i);
+    expect(filters).toContainEqual({column:'updated_at',value:'2026-10-03T00:00:00Z'});
+  });
+  it('recovers the same owned draft on retry after an insert response was lost', async () => {
+    const requestId = '10000000-0000-4000-8000-000000000011';
+    const metadata = {id:requestId,title:'Retry fair',description:'',organizer:'Council',status:'draft',createdByUserId:'org-1',locations:[{id:'grounds',locationRef:{label:'Campus Grounds',type:'campus'},eventFurniture:[],eventLabels:[]}]};
+    const {client,mapElements} = makeClient([{id:requestId,campus_id:'campus-1',metadata}]);
+    mapElements.insert.mockImplementation(() => ({select:()=>({single:vi.fn().mockResolvedValue({data:null,error:{code:'23505',message:'Already inserted'}})})}) as never);
+    vi.mocked(getSupabase).mockReturnValue(client as never);
+    const result=await eventOverlayService.createEventOverlay({requestId,title:'Retry fair',organizer:'Council',locations:[campusLocation]},'org-1','campus-1');
+    expect(result.id).toBe(requestId);
+    expect((mapElements.insert.mock.calls[0][0] as {id:string}).id).toBe(requestId);
+    expect(mapElements.update).not.toHaveBeenCalled();
+  });
+  it("rejects a draft save whose row changed since it was fetched", async () => {
+    const existing = { id: 'event-1', updated_at: '2026-10-03T00:00:00Z', metadata: { status: 'draft' } };
+    const { client, mapElements, filters } = makeClient([existing]);
+    const query = mapElements.select();
+    query.maybeSingle.mockResolvedValueOnce({ data: null, error: null });
+    vi.mocked(getSupabase).mockReturnValue(client as never);
+    await expect(eventOverlayService.updateEventOverlayLayout('event-1', [])).rejects.toThrow(/changed/i);
+    expect(filters).toContainEqual({ column: 'updated_at', value: existing.updated_at });
+  });
+  it("blocks resubmission until feedback pins are addressed", async () => {
+    const feedback = writeEventFeedback("", [{ id: "pin", x: 1, y: 2, comment: "Move booth" }]);
+    const { client, mapElements } = makeClient([{ id: "event-1", metadata: { status: "draft", locationFeedback: { campus: feedback } } }]);
+    vi.mocked(getSupabase).mockReturnValue(client as never);
+    await expect(eventOverlayService.submitEventOverlayLayout("event-1", [])).rejects.toThrow("Address every GSO feedback pin");
+    expect(mapElements.update).not.toHaveBeenCalled();
+  });
+  it("preserves original feedback and resolutions when resubmitting addressed pins", async () => {
+    const feedback = writeEventFeedback("", [{ id: "pin", x: 1, y: 2, comment: "Move booth" }]);
+    const resolutions = { campus: { pin: { feedback, addressedAt: "2026-10-03T00:00:00Z", addressedBy: "org", note: "Moved" } } };
+    const { client, mapElements } = makeClient([{ id: "event-1", metadata: { status: "draft", locationFeedback: { campus: feedback }, feedbackResolutions: resolutions } }]);
+    vi.mocked(getSupabase).mockReturnValue(client as never);
+    await eventOverlayService.submitEventOverlayLayout("event-1", []);
+    expect(mapElements.update.mock.calls[0][0]).toMatchObject({ metadata: { status: "pending", locationFeedback: { campus: feedback }, feedbackResolutions: resolutions } });
+  });
   beforeEach(() => {
     vi.mocked(resolveActiveCampusId).mockResolvedValue("campus-1");
     vi.mocked(campusService.listPublishedSnapshots).mockResolvedValue([publishedCampus("campus-1")]);
@@ -121,11 +180,26 @@ describe("event overlay service", () => {
     expect(updated.metadata.submittedAt).toBeNull();
   });
 
-  it("refuses to edit a pending layout while the administrator is reviewing it", async () => {
-    const existing = { id: "event-1", metadata: { title: "Student Fair", status: "pending", submittedAt: "2026-09-01T00:00:00.000Z", locations: [] } };
+  it("saves pending edits through the revision-checked command without withdrawing submission", async () => {
+    const existing = { id: "event-1", updated_at: "2026-10-03T00:00:00Z", metadata: { title: "Student Fair", status: "pending", submittedAt: "2026-09-01T00:00:00.000Z", locations: [] } };
     const { client, mapElements } = makeClient([existing]);
     vi.mocked(getSupabase).mockReturnValue(client as never);
-    await expect(eventOverlayService.updateEventOverlayLayout("event-1", [])).rejects.toThrow(/locked/i);
+    await eventOverlayService.updateEventOverlayLayout("event-1", []);
+    expect(client.rpc).toHaveBeenCalledWith("save_pending_event_layout", expect.objectContaining({ p_overlay_id: "event-1", p_expected_updated_at: existing.updated_at, p_locations: [] }));
+    expect(mapElements.update).not.toHaveBeenCalled();
+  });
+
+  it("does not invent pending submissions for records without a status", async () => {
+    const { client } = makeClient([{ id: "legacy", metadata: {}, campus_id: "campus-1" }]);
+    vi.mocked(getSupabase).mockReturnValue(client as never);
+    expect((await eventOverlayService.listEventOverlays({ allCampuses: true }))[0].status).toBe("draft");
+  });
+
+  it("withdraws through a revision checked command and does not delete the layout", async () => {
+    const { client, mapElements } = makeClient();
+    vi.mocked(getSupabase).mockReturnValue(client as never);
+    await eventOverlayService.withdrawEventSubmission("event-1", "2026-10-03T00:00:00Z");
+    expect(client.rpc).toHaveBeenCalledWith("withdraw_event_submission", { p_overlay_id: "event-1", p_expected_updated_at: "2026-10-03T00:00:00Z" });
     expect(mapElements.update).not.toHaveBeenCalled();
   });
 
