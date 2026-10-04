@@ -33,6 +33,14 @@ begin
   if public.event_free_campus_snapshot('{"campus":{"eventOverlays":null}}'::jsonb)#>'{campus,eventOverlays}' <> 'null'::jsonb then raise exception 'Projection did not tolerate null campus path'; end if;
   if public.event_free_campus_snapshot('{"structure":{"map_elements":null}}'::jsonb)#>'{structure,map_elements}' <> 'null'::jsonb then raise exception 'Projection did not tolerate null element path'; end if;
 
+  v_projected := public.event_public_locations('{"locations":[{"locationRef":{"type":"campus","label":"Grounds"}},{"locationRef":{"type":"building","buildingId":"building-b","label":"Hall"}}]}'::jsonb);
+  if jsonb_array_length(v_projected) <> 2
+     or v_projected#>>'{0,id}' <> 'location-1'
+     or v_projected#>>'{1,id}' <> 'location-2'
+     or v_projected#>>'{1,locationRef,buildingId}' <> 'building-b' then
+    raise exception 'Public location projection did not preserve ordered location identities';
+  end if;
+
   v_snapshot := jsonb_build_object('campus',jsonb_build_object('buildings',jsonb_build_array(
     jsonb_build_object('id','building-a','visible',true,'floors',jsonb_build_array(jsonb_build_object('number',2,'visible',true,'rooms',jsonb_build_array(jsonb_build_object('id','room-a')))))
   )));

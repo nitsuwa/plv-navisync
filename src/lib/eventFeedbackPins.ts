@@ -17,7 +17,7 @@ export function readEventFeedback(value?: string): { text: string; pins: EventFe
   try {
     const data = JSON.parse(value.slice(PREFIX.length));
     if (typeof data.text !== "string" || !Array.isArray(data.pins)) throw new Error("Invalid feedback");
-    return { text: data.text, pins: data.pins.filter((pin: EventFeedbackPin) => pin && typeof pin === 'object' && typeof pin.id === "string" && Number.isFinite(pin.x) && Number.isFinite(pin.y) && pin.x >= 0 && pin.y >= 0 && typeof pin.comment === "string" && pin.comment.trim()).slice(0, 30) };
+    return { text: data.text, pins: data.pins.filter((pin: EventFeedbackPin) => pin && typeof pin === 'object' && typeof pin.id === "string" && Number.isFinite(pin.x) && Number.isFinite(pin.y) && pin.x >= 0 && pin.y >= 0 && typeof pin.comment === "string" && pin.comment.trim()) };
   } catch { return { text: value, pins: [] }; }
 }
 export function writeEventFeedback(text: string, pins: EventFeedbackPin[]): string {

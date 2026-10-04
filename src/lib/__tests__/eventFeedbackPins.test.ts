@@ -25,6 +25,17 @@ describe("event feedback pins", () => {
     expect(readEventFeedback(stored)).toEqual({ text: "Check walking space", pins });
     expect(eventFeedbackText(stored)).toBe("Check walking space · Pin 1: Move booth");
   });
+  it("preserves every valid feedback pin so the owner can address all of them", () => {
+    const pins = Array.from({ length: 31 }, (_, index) => ({
+      id: `pin-${index + 1}`,
+      x: index,
+      y: index,
+      comment: `Feedback ${index + 1}`,
+    }));
+
+    expect(readEventFeedback(writeEventFeedback("", pins)).pins).toHaveLength(31);
+    expect(readEventFeedback(writeEventFeedback("", pins)).pins[30]?.id).toBe("pin-31");
+  });
   it("rejects invalid pin coordinates and preserves malformed legacy text", () => {
     expect(readEventFeedback(writeEventFeedback("", [{ id: "bad", x: -1, y: 0, comment: "Bad" }])).pins).toEqual([]);
     expect(readEventFeedback("@event-feedback/v1:broken").text).toBe("@event-feedback/v1:broken");

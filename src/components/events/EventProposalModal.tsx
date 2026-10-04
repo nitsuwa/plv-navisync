@@ -1,6 +1,6 @@
 import * as AlertDialog from "@radix-ui/react-alert-dialog";
 import * as Dialog from "@radix-ui/react-dialog";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ArrowLeft, ArrowRight, Check, ImageIcon, Loader2, Plus, XCircle } from "lucide-react";
 import { motion } from "motion/react";
 import { cn } from "../../lib/utils";
@@ -376,6 +376,7 @@ export function EventDetailsModal({
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const uploadedPosterRef = useRef<{file: File; url: string; path: string} | null>(null);
+  const posterPreviewObjectUrlRef = useRef<string | null>(null);
   const mutationRef = useRef(false);
   const existingLocations = normalizeEventOverlayLocations(overlay);
   const [title, setTitle] = useState(overlay.title);
@@ -389,6 +390,17 @@ export function EventDetailsModal({
   const [saving, setSaving] = useState(false);
   const toast = useToast();
 
+  const releasePosterPreview = () => {
+    const previewUrl = posterPreviewObjectUrlRef.current;
+    posterPreviewObjectUrlRef.current = null;
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+  };
+
+  useEffect(() => () => {
+    const previewUrl = posterPreviewObjectUrlRef.current;
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+  }, []);
+
   const releaseUnusedPoster = () => {
     const unused = uploadedPosterRef.current;
     uploadedPosterRef.current = null;
@@ -401,8 +413,11 @@ export function EventDetailsModal({
     const invalid = validateEventPoster(file);
     if (invalid) { setError(invalid); return; }
     releaseUnusedPoster();
+    releasePosterPreview();
     setPosterFile(file);
-    setPosterPreview(URL.createObjectURL(file));
+    const previewUrl = URL.createObjectURL(file);
+    posterPreviewObjectUrlRef.current = previewUrl;
+    setPosterPreview(previewUrl);
     setPosterRemoved(false);
   };
 
@@ -442,7 +457,7 @@ export function EventDetailsModal({
             <span className="text-xs text-muted-foreground">{posterPreview ? "Change poster" : "Add event poster (optional)"}</span>
           </button>
           <input ref={fileRef} disabled={saving} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={(event) => handlePoster(event.target.files?.[0] || null)} />
-          {posterPreview && <button type="button" disabled={saving} onClick={() => { releaseUnusedPoster(); setPosterFile(null); setPosterPreview(''); setPosterRemoved(true); if (fileRef.current) fileRef.current.value = ''; }} className="mt-2 min-h-10 rounded-lg px-2 text-xs font-semibold text-primary hover:bg-muted focus-visible:ring-2 focus-visible:ring-primary">Remove poster</button>}
+          {posterPreview && <button type="button" disabled={saving} onClick={() => { releaseUnusedPoster(); releasePosterPreview(); setPosterFile(null); setPosterPreview(''); setPosterRemoved(true); if (fileRef.current) fileRef.current.value = ''; }} className="mt-2 min-h-10 rounded-lg px-2 text-xs font-semibold text-primary hover:bg-muted focus-visible:ring-2 focus-visible:ring-primary">Remove poster</button>}
         </div>
         <DetailsFields disabled={saving} title={title} description={description} organizer={organizer} posterFile={posterFile} onPosterChange={handlePoster} showPoster={false} onChange={(field, value) => { if (field === "title") setTitle(value); if (field === "description") setDescription(value); if (field === "organizer") setOrganizer(value); setError(""); }} />
         <EventLocationPicker disabled={saving} buildings={buildings} locations={locations} onChange={(next) => { setLocations(next); setError(""); }} />

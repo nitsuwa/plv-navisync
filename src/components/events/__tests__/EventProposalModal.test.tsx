@@ -20,6 +20,7 @@ const buildings = [{ buildingId: "science", buildingName: "Science Building", fl
 
 describe("EventProposalModal", () => {
   beforeEach(() => {
+    vi.unstubAllGlobals();
     posterStorage.upload.mockReset().mockResolvedValue({error:null});
     posterStorage.remove.mockReset().mockResolvedValue({error:null});
     Object.defineProperty(HTMLElement.prototype, "scrollIntoView", { configurable: true, value: vi.fn() });
@@ -41,6 +42,23 @@ describe("EventProposalModal", () => {
     fireEvent.click(screen.getByRole('button', {name:/save changes/i}));
     await waitFor(() => expect(onSave).toHaveBeenCalledWith(expect.objectContaining({posterUrl:''})));
     expect(posterStorage.remove).not.toHaveBeenCalled();
+  });
+
+  it("releases replaced poster preview URLs and the final preview when the dialog closes", () => {
+    const createObjectURL = vi.fn()
+      .mockReturnValueOnce("blob:poster-one")
+      .mockReturnValueOnce("blob:poster-two");
+    const revokeObjectURL = vi.fn();
+    vi.stubGlobal("URL", { createObjectURL, revokeObjectURL });
+    const { unmount } = render(<EventDetailsModal overlay={{ id: "draft", title: "Copy", description: "", organizer: "Org", locations: [{ id: "loc", locationRef: { type: "campus", label: "Campus Grounds" }, eventFurniture: [], eventLabels: [] }] } as never} buildings={buildings} onClose={vi.fn()} onSave={vi.fn()} />);
+    const posterInput = document.querySelector('input[type="file"]')!;
+
+    fireEvent.change(posterInput, { target: { files: [new File(["one"], "one.png", { type: "image/png" })] } });
+    fireEvent.change(posterInput, { target: { files: [new File(["two"], "two.png", { type: "image/png" })] } });
+
+    expect(revokeObjectURL).toHaveBeenCalledWith("blob:poster-one");
+    unmount();
+    expect(revokeObjectURL).toHaveBeenCalledWith("blob:poster-two");
   });
 
   it("keeps event scheduling out of the student organization draft editor", async () => {
