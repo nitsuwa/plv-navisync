@@ -154,8 +154,10 @@ describe("buildingsFromCampus", () => {
 describe("facilitiesFromCampus / accessibilityFromCampus", () => {
   it("maps per-building facility and accessibility lists", () => {
     const campus = makeCampus();
-    expect(facilitiesFromCampus(campus)["b1"]).toEqual(["Library", "Restroom", "Elevator"]);
-    expect(accessibilityFromCampus(campus)["b1"]).toEqual(["Ramp access", "Elevator available"]);
+    expect(facilitiesFromCampus(campus)["b1"]).toEqual([
+      "Library", "Classrooms", "Restroom", "Elevator", "Laboratories", "Stairs",
+    ]);
+    expect(accessibilityFromCampus(campus)["b1"]).toEqual(["Ramp Access", "Elevator Available"]);
     expect(facilitiesFromCampus(campus)["b2"]).toEqual([]);
   });
 });

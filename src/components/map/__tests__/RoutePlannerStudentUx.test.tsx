@@ -166,6 +166,24 @@ describe("RoutePlannerDialog student accessibility", () => {
     expect(screen.getByRole("button", { name: "Choose starting point" })).toBeDisabled();
   });
 
+  it("resizes the planner with the handle on pointer and keyboard input", () => {
+    render(<RoutePlannerDialog {...plannerProps()} />);
+
+    const handle = screen.getByRole("slider", { name: "Resize route planner" });
+    const dialog = screen.getByRole("dialog", { name: "Route planner" });
+    expect(handle).toHaveAttribute("aria-valuenow", "360");
+
+    fireEvent.keyDown(handle, { key: "ArrowUp" });
+    expect(handle).toHaveAttribute("aria-valuenow", "408");
+    expect(dialog).toHaveStyle({ height: "408px" });
+
+    fireEvent.pointerDown(handle, { pointerId: 1, pointerType: "touch", clientY: 300 });
+    fireEvent.pointerMove(handle, { pointerId: 1, pointerType: "touch", clientY: 220 });
+    fireEvent.pointerUp(handle, { pointerId: 1, pointerType: "touch", clientY: 220 });
+    expect(handle).toHaveAttribute("aria-valuenow", "488");
+    expect(dialog).toHaveStyle({ height: "488px" });
+  });
+
   it("uses one active unified destination search instead of parallel building and room controls", async () => {
     const onSelectToDestination = vi.fn();
     render(

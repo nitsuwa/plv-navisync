@@ -96,7 +96,12 @@ describe("student indoor navigation controls", () => {
     );
     const picker = screen.getByTestId("student-floor-picker");
     expect(picker).toHaveAttribute("data-dock", "floor-control-bottom-left");
-    expect(picker).toHaveClass("left-3", "bottom-4", "student-map-utility-control");
+    expect(picker).toHaveClass(
+      "left-3",
+      "bottom-[calc(5rem+env(safe-area-inset-bottom,0px))]",
+      "md:bottom-8",
+      "student-map-utility-control",
+    );
     fireEvent.click(screen.getByRole("button", { name: "Choose floor. Current floor: Ground Floor" }));
     const menu = screen.getByTestId("student-floor-picker-menu");
     expect(menu).toHaveClass("bottom-full");
