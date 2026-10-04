@@ -40,6 +40,12 @@ export function planStudentEmergencyRoute(
       && (doorIds.has(node.doorId) || semanticDoorIds.has(node.id) || node.id === origin.accessNodeId)
       && edges.some((edge) => edge.type !== "room_door_transition" && !edge.closed && edge.emergencySafe !== false
         && (edge.startNodeId === node.id || edge.endNodeId === node.id))).map((node) => node.id);
+  } else if (origin.type === "campus_place") {
+    label = origin.label;
+    const node = nodes.find((candidate) => candidate.id === origin.nodeId
+      && (candidate.gateId === origin.campusPlaceId || !candidate.gateId));
+    if (node && edges.some((edge) => !edge.closed && edge.emergencySafe !== false
+      && (edge.startNodeId === node.id || (edge.bidirectional && edge.endNodeId === node.id)))) startIds = [node.id];
   } else {
     label = origin.label;
     const id = resolveNodeId(`building:${origin.buildingId}`, campus, edges, false, true);

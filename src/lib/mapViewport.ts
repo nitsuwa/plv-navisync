@@ -1,5 +1,6 @@
-// SVG viewers already fit the complete authored map at zoom 1.
-export const STUDENT_MAP_MIN_ZOOM = 1;
+// Zoom 1 is the authored viewBox fit; allow a modest zoom-out margin so
+// wheel/trackpad users can inspect the whole scene with surrounding context.
+export const STUDENT_MAP_MIN_ZOOM = 0.5;
 export const STUDENT_MAP_MAX_ZOOM = 3.5;
 export const STUDENT_MAP_ZOOM_STEP = 0.2;
 
@@ -51,6 +52,35 @@ export interface MapViewportPanBounds {
   maxY: number;
 }
 
+/**
+ * Preserve free movement through the allowed inspection area, then apply a
+ * small elastic overdrag beyond its edge. The returned pan remains bounded so
+ * a map cannot be thrown out of view during a long gesture.
+ */
+export function getSoftBoundedPan(
+  candidate: MapPoint,
+  bounds: MapViewportPanBounds,
+  worldUnitsPerScreenPixel = 1,
+  overscrollPixels = 28,
+): MapPoint {
+  const overscroll = Math.max(0.01, worldUnitsPerScreenPixel) * Math.max(0, overscrollPixels);
+  const resist = (value: number, min: number, max: number) => {
+    if (value < min) {
+      const distance = min - value;
+      return min - overscroll * (1 - Math.exp(-distance / overscroll));
+    }
+    if (value > max) {
+      const distance = value - max;
+      return max + overscroll * (1 - Math.exp(-distance / overscroll));
+    }
+    return value;
+  };
+  return {
+    x: resist(candidate.x, bounds.minX, bounds.maxX),
+    y: resist(candidate.y, bounds.minY, bounds.maxY),
+  };
+}
+
 export interface MapViewportInsets {
   top?: number;
   right?: number;
@@ -71,6 +101,8 @@ export interface MapViewportPanOptions extends MapViewportSize {
   baseScale?: number;
   /** World-space origin corresponding to the local top-left of mapWidth/mapHeight. */
   worldOrigin?: MapPoint;
+  /** Additional screen-space pan range for inspection without losing the map. */
+  inspectionSlack?: MapPoint;
 }
 
 export interface MapViewportZoomPanOptions {
@@ -144,6 +176,7 @@ export function getViewportPanBounds({
   zoomOrigin = "top-left",
   baseScale,
   worldOrigin,
+  inspectionSlack,
 }: MapViewportPanOptions): MapViewportPanBounds {
   const safeMapWidth = Math.max(1, mapWidth);
   const safeMapHeight = Math.max(1, mapHeight);
@@ -174,20 +207,22 @@ export function getViewportPanBounds({
     letterbox: number,
     leadingInset: number,
     trailingInset: number,
+    slackPixels: number,
   ): { min: number; max: number } => {
+    const slack = Math.max(0, slackPixels) / fitScale;
     const zoomOriginOffset = zoomOrigin === "center"
       ? (mapSize / 2) * (1 - safeZoom)
       : 0;
     const min = (viewportSize - trailingInset - letterbox) / fitScale - zoomOriginOffset - mapSize * safeZoom;
     const max = (leadingInset - letterbox) / fitScale - zoomOriginOffset;
-    if (min <= max) return { min, max };
+    if (min <= max) return { min: min - slack, max: max + slack };
     const safeCenter = (leadingInset + viewportSize - trailingInset) / 2;
     const centered = (safeCenter - letterbox) / fitScale - zoomOriginOffset - (mapSize * safeZoom) / 2;
-    return { min: centered, max: centered };
+    return { min: centered - slack, max: centered + slack };
   };
 
-  const x = axisBounds(safeMapWidth, safeViewportWidth, letterboxX, safeInsets.left, safeInsets.right);
-  const y = axisBounds(safeMapHeight, safeViewportHeight, letterboxY, safeInsets.top, safeInsets.bottom);
+  const x = axisBounds(safeMapWidth, safeViewportWidth, letterboxX, safeInsets.left, safeInsets.right, inspectionSlack?.x ?? 0);
+  const y = axisBounds(safeMapHeight, safeViewportHeight, letterboxY, safeInsets.top, safeInsets.bottom, inspectionSlack?.y ?? 0);
   const originShiftX = (worldOrigin?.x ?? 0) * (safeZoom - 1);
   const originShiftY = (worldOrigin?.y ?? 0) * (safeZoom - 1);
   return {

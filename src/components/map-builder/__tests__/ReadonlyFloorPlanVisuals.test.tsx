@@ -176,6 +176,46 @@ describe("ReadonlyFloorPlanScene", () => {
     expect(screen.getByTestId("readonly-floor-path").querySelector("polyline")).toHaveAttribute("stroke", "#c2410c");
   });
 
+  it("highlights a selected irregular room above neighboring fills while preserving map details", () => {
+    const view = render(<svg><ReadonlyFloorPlanScene floor={sharedVisualFloor} highlightedRoomId="lab-room" showLabels onRoomClick={() => undefined} /></svg>);
+
+    const room = screen.getByTestId("readonly-room");
+    const roomShape = screen.getByTestId("room-custom-shape");
+    const selection = screen.getByTestId("readonly-room-selection");
+    const tint = screen.getByTestId("readonly-room-selection-tint");
+    const halo = screen.getByTestId("readonly-room-selection-halo");
+    const outline = screen.getByTestId("readonly-room-selection-outline");
+    const trace = screen.getByTestId("readonly-room-selection-trace");
+    const semanticLayers = Array.from(document.querySelectorAll("[data-semantic-layer]"));
+
+    expect(room).toHaveAttribute("aria-pressed", "true");
+    expect(selection).toHaveAttribute("data-room-id", "lab-room");
+    expect(selection).toHaveAttribute("pointer-events", "none");
+    expect(tint.tagName.toLowerCase()).toBe("path");
+    expect(tint).toHaveAttribute("d", roomShape.getAttribute("d"));
+    expect(outline).toHaveAttribute("d", roomShape.getAttribute("d"));
+    expect(halo).toHaveClass("student-room-selection-halo");
+    expect(trace).toHaveClass("student-room-selection-trace");
+    expect(trace).toHaveAttribute("d", roomShape.getAttribute("d"));
+    expect(trace).toHaveAttribute("pathLength", "1");
+    expect(semanticLayers.map((layer) => layer.getAttribute("data-semantic-layer"))).toEqual(expect.arrayContaining(["room-fills", "room-selection", "furniture", "walls", "openings"]));
+    const layerOrder = semanticLayers.map((layer) => layer.getAttribute("data-semantic-layer"));
+    expect(layerOrder.indexOf("room-fills")).toBeLessThan(layerOrder.indexOf("room-selection"));
+    expect(layerOrder.indexOf("room-selection")).toBeLessThan(layerOrder.indexOf("furniture"));
+    expect(layerOrder.indexOf("room-selection")).toBeLessThan(layerOrder.indexOf("walls"));
+    expect(layerOrder.indexOf("room-selection")).toBeLessThan(layerOrder.indexOf("openings"));
+    expect(screen.getByTestId("readonly-door")).toBeInTheDocument();
+    expect(screen.getByTestId("readonly-wall")).toBeInTheDocument();
+    expect(screen.getByTestId("room-label-overlay")).toHaveTextContent("Fluid Mechanics Laboratory");
+    expect(screen.getByTestId("room-label-overlay")).toHaveAttribute("data-room-label-selected", "true");
+
+    view.rerender(<svg><ReadonlyFloorPlanScene floor={sharedVisualFloor} hoveredRoomId="lab-room" showLabels onRoomClick={() => undefined} /></svg>);
+    expect(screen.queryByTestId("readonly-room-selection")).not.toBeInTheDocument();
+    expect(screen.getByTestId("readonly-room")).toHaveAttribute("data-room-hovered", "true");
+    expect(screen.getByTestId("readonly-room")).toHaveAttribute("data-room-highlighted", "false");
+    expect(screen.getByTestId("room-label-overlay")).not.toHaveAttribute("data-room-label-selected", "true");
+  });
+
   it("hides informational labels while retaining an active route destination label", () => {
     const { rerender } = render(<svg><ReadonlyFloorPlanScene floor={sharedVisualFloor} showLabels={false} /></svg>);
     expect(screen.queryByTestId("room-label-overlay")).not.toBeInTheDocument();

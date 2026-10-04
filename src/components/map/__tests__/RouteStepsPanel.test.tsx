@@ -11,7 +11,7 @@ describe("RouteStepsPanel", () => {
       dist: 45,
       mins: 1,
       steps: [
-        { id: "exit", icon: "walk", instruction: "Follow the indoor path to the Left Stair.", distanceM: 12 },
+        { id: "exit", icon: "walk", instruction: "Walk 12m toward the Left Stair.", distanceM: 12 },
         { id: "stairs", icon: "stairs", instruction: transition },
         { id: "leave", icon: "enter", instruction: "Exit CEIT building." },
       ],
@@ -34,7 +34,7 @@ describe("RouteStepsPanel", () => {
     );
 
     expect(screen.getAllByText(transition)).toHaveLength(1);
-    expect(screen.getByText("Follow the indoor path to the Left Stair.")).toBeInTheDocument();
+    expect(screen.getByText("Walk toward the Left Stair.")).toBeInTheDocument();
     expect(screen.queryByText(/waypoint/i)).not.toBeInTheDocument();
     expect(screen.queryByText("Dist")).not.toBeInTheDocument();
     expect(screen.queryByText("Time")).not.toBeInTheDocument();
@@ -42,14 +42,14 @@ describe("RouteStepsPanel", () => {
     expect(screen.queryByText("12 m")).not.toBeInTheDocument();
   });
 
-  it("turns legacy waypoint placeholders into directions students can follow", () => {
+  it("hides generic walking-point placeholders while keeping meaningful directions", () => {
     const route: PlannedRoute = {
       points: [],
       dist: 26,
       mins: 1,
       steps: [
         { id: "start", icon: "start", instruction: "Start from Door" },
-        { id: "legacy-waypoint", icon: "walk", instruction: "Walk 18m to Waypoint" },
+        { id: "legacy-waypoint", icon: "walk", instruction: "Walk 18m to Walking Point" },
         { id: "floor-waypoint", icon: "walk", instruction: "Continue to floor waypoint 2" },
       ],
       isGraphBased: true,
@@ -70,7 +70,8 @@ describe("RouteStepsPanel", () => {
     );
 
     expect(screen.getByText("Start at the room door.")).toBeInTheDocument();
-    expect(screen.getByText("Follow the highlighted path for 18 m.")).toBeInTheDocument();
+    expect(screen.queryByText(/walking point/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/18\s*m/i)).not.toBeInTheDocument();
     expect(screen.getByText("Continue along the connected indoor path.")).toBeInTheDocument();
     expect(screen.queryByText(/waypoint/i)).not.toBeInTheDocument();
   });
@@ -107,5 +108,38 @@ describe("RouteStepsPanel", () => {
     fireEvent.pointerMove(handle, { pointerId: 1, clientY: 250 });
     fireEvent.pointerUp(handle, { pointerId: 1, clientY: 250 });
     expect(handle).toHaveAttribute("aria-valuenow", "482");
+  });
+
+  it("lets the laptop route panel move by dragging its header", () => {
+    const route: PlannedRoute = {
+      points: [],
+      dist: 26,
+      mins: 1,
+      steps: [{ id: "start", icon: "start", instruction: "Start from Door" }],
+      isGraphBased: true,
+      mode: "standard",
+      fromCode: "Door",
+      toCode: "Room",
+      transitions: [],
+    };
+
+    render(
+      <RouteStepsPanel
+        route={route}
+        mode="standard"
+        toName="Room"
+        compact={false}
+        onEnd={() => undefined}
+        onZoom={() => undefined}
+      />,
+    );
+
+    const panel = screen.getByTestId("route-steps-panel");
+    const dragHandle = screen.getByTestId("route-panel-drag-handle");
+    fireEvent.pointerDown(dragHandle, { pointerId: 2, clientX: 100, clientY: 200, button: 0 });
+    fireEvent.pointerMove(dragHandle, { pointerId: 2, clientX: 145, clientY: 250 });
+    fireEvent.pointerUp(dragHandle, { pointerId: 2, clientX: 145, clientY: 250 });
+
+    expect(panel).toHaveStyle({ transform: "translate3d(45px, 50px, 0)" });
   });
 });

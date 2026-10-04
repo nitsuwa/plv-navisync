@@ -1,5 +1,5 @@
 import { useRef, useCallback, useEffect, useState } from "react";
-import { X } from "lucide-react";
+import { ArrowLeft, X } from "lucide-react";
 import { motion, useMotionValue, useTransform, animate, useReducedMotion } from "motion/react";
 import type { Building } from "../../types";
 import type { StudentAuthState } from "../../hooks/useStudentAuth";
@@ -30,6 +30,7 @@ interface MobileBuildingSheetProps {
   onToggleQR: () => void;
   interactionPaused?: boolean;
   onStateChange?: (state: MobileBuildingSheetState) => void;
+  onBackToRoutePlanner?: () => void;
 }
 
 const HEIGHTS: Record<MobileBuildingSheetState, string> = {
@@ -71,6 +72,7 @@ export function MobileBuildingSheet({
   selected, campusId, onClose, onDirections, onEnterBuilding, onSave, onReport,
   onSignInPrompt, saved, studentAuth, hasFloorPlans, floorPlanCount, facilities,
   accessibility, showQR, onToggleQR, onStateChange,
+  onBackToRoutePlanner,
   interactionPaused = false,
 }: MobileBuildingSheetProps) {
   useEscToClose(onClose, !interactionPaused);
@@ -255,6 +257,20 @@ export function MobileBuildingSheet({
         >
           <span className="h-1 w-9 rounded-full bg-muted-foreground/25" />
         </button>
+
+        {onBackToRoutePlanner && (
+          <div className="shrink-0 px-3 pb-1">
+            <button
+              type="button"
+              onClick={onBackToRoutePlanner}
+              aria-label="Back to route planner"
+              className="inline-flex min-h-7 items-center gap-1 rounded-lg px-2 text-[10px] font-extrabold text-primary transition-colors hover:bg-primary/8 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+            >
+              <ArrowLeft className="h-3 w-3" aria-hidden="true" />
+              Back to route planner
+            </button>
+          </div>
+        )}
 
         {sheetState !== "peek" && (
           <div data-testid="building-sheet-image" data-building-sheet-image className={`mx-3 shrink-0 overflow-hidden rounded-2xl transition-[height] duration-200 motion-reduce:transition-none ${sheetState === "expanded" ? "h-[160px]" : "h-[96px]"}`}>

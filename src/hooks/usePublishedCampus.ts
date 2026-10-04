@@ -9,6 +9,16 @@ import { DEFAULT_PUBLIC_PLATFORM_SETTINGS, settingsService, type PublicPlatformS
 const SESSION_CACHE_KEY = "plv_published_campuses_cache_v1";
 const LAST_CAMPUS_KEY = "plv_student_last_campus_v1";
 const RESUME_REFRESH_INTERVAL_MS = 15_000;
+const CAMPUS_LOAD_ERROR = "We couldn't load the campus map right now. Please try again.";
+
+function isMissingPublishedSnapshotSchema(error: unknown): boolean {
+  if (!error || typeof error !== "object" || !("code" in error)) return false;
+  const code = String((error as { code?: unknown }).code ?? "");
+  // Older installations may not have the immutable snapshot relation/columns.
+  // Timeouts, permission errors, and network failures must not fall through to
+  // the legacy list, which can look like a valid empty published map.
+  return ["42P01", "42703"].includes(code);
+}
 
 function isPublished(campus: Campus): boolean {
   return campus.lifecycleStatus === "published" || campus.publishStatus === "published";
@@ -77,6 +87,7 @@ export function usePublishedCampus(previewCampus?: Campus | null): UsePublishedC
   // Show the offline warning only if that revalidation actually fails.
   const [isCached, setIsCached] = useState(false);
   const hasCampusDataRef = useRef(campuses.length > 0);
+  const lastGoodCampusesRef = useRef<Campus[]>(campuses);
   const fetchInFlightRef = useRef<Promise<void> | null>(null);
   const userIdRef = useRef(userId);
   const previousUserIdRef = useRef(userId);
@@ -100,9 +111,11 @@ export function usePublishedCampus(previewCampus?: Campus | null): UsePublishedC
           // Published snapshots carry the full campus object including buildings,
           // floors, rooms, walls, and navigation data from the serialized
           // structure payload — no additional hydration needed.
-        } catch {
-          // Compatibility fallback for environments that predate the version
-          // table; the live list still contains the legacy published marker.
+        } catch (snapshotError) {
+          if (!isMissingPublishedSnapshotSchema(snapshotError)) throw snapshotError;
+          // Compatibility fallback is limited to known missing-schema cases.
+          // In particular, a Postgres statement timeout (57014) must preserve
+          // the previous map rather than falling through to an empty legacy list.
         }
         if (published.length === 0) {
           const allCampuses = await campusService.list();
@@ -129,6 +142,7 @@ export function usePublishedCampus(previewCampus?: Campus | null): UsePublishedC
 
         setCampuses(published);
         hasCampusDataRef.current = published.length > 0;
+        lastGoodCampusesRef.current = published;
         setSelectedCampusId((currentId) => currentId && published.some((campus) => campus.id === currentId)
           ? currentId
           : chooseInitialCampus(published, studentSettings, userIdRef.current)?.id ?? null);
@@ -142,16 +156,19 @@ export function usePublishedCampus(previewCampus?: Campus | null): UsePublishedC
             // Ignore sessionStorage write errors
           }
         }
-      } catch (err: unknown) {
-        // Fallback: Try sessionStorage cache first
-        const cached = readCachedCampuses();
+      } catch {
+        // Preserve the last successfully rendered campus before consulting
+        // session storage. This keeps refresh failures from clearing the map,
+        // even when browser storage is unavailable.
+        const cached = lastGoodCampusesRef.current;
         if (cached.length > 0) {
           setCampuses(cached);
+          lastGoodCampusesRef.current = cached;
           hasCampusDataRef.current = true;
           setIsCached(true);
+          setError(null);
         } else {
-          const msg = err instanceof Error ? err.message : "Failed to load published campus map.";
-          setError(msg);
+          setError(CAMPUS_LOAD_ERROR);
         }
       } finally {
         setLoading(false);

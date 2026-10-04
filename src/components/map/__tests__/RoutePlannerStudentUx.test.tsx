@@ -161,9 +161,27 @@ describe("RoutePlannerDialog student accessibility", () => {
     const scrollRegion = screen.getByTestId("route-planner-scroll-region");
 
     expect(dialog).toHaveClass("overflow-hidden", "flex");
-    expect(scrollRegion).toHaveClass("min-h-0", "flex-1", "overflow-y-auto", "overscroll-contain");
+    expect(scrollRegion).toHaveClass("min-h-0", "flex-none", "overflow-y-auto", "overscroll-contain");
     expect(screen.getByRole("button", { name: "Close directions" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Choose starting point" })).toBeDisabled();
+  });
+
+  it("resizes the planner with the handle on pointer and keyboard input", () => {
+    render(<RoutePlannerDialog {...plannerProps()} />);
+
+    const handle = screen.getByRole("slider", { name: "Resize route planner" });
+    const dialog = screen.getByRole("dialog", { name: "Route planner" });
+    expect(handle).toHaveAttribute("aria-valuenow", "360");
+
+    fireEvent.keyDown(handle, { key: "ArrowUp" });
+    expect(handle).toHaveAttribute("aria-valuenow", "408");
+    expect(dialog).toHaveStyle({ height: "408px" });
+
+    fireEvent.pointerDown(handle, { pointerId: 1, pointerType: "touch", clientY: 300 });
+    fireEvent.pointerMove(handle, { pointerId: 1, pointerType: "touch", clientY: 220 });
+    fireEvent.pointerUp(handle, { pointerId: 1, pointerType: "touch", clientY: 220 });
+    expect(handle).toHaveAttribute("aria-valuenow", "488");
+    expect(dialog).toHaveStyle({ height: "488px" });
   });
 
   it("uses one active unified destination search instead of parallel building and room controls", async () => {
@@ -210,12 +228,14 @@ describe("RoutePlannerDialog student accessibility", () => {
   it("keeps a map-selected room in planner context with direct Start/Destination actions", () => {
     const onUseSelectedRoomAsStart = vi.fn();
     const onUseSelectedRoomAsDestination = vi.fn();
+    const onReportSelectedRoom = vi.fn();
     render(
       <RoutePlannerDialog
         {...plannerProps({
           selectedRoomForPlanner: room("admin-office", "Administration Office"),
           onUseSelectedRoomAsStart,
           onUseSelectedRoomAsDestination,
+          onReportSelectedRoom,
         })}
       />,
     );
@@ -224,8 +244,31 @@ describe("RoutePlannerDialog student accessibility", () => {
     expect(context).toHaveTextContent("Administration Office");
     fireEvent.click(screen.getByRole("button", { name: "Use as Start" }));
     fireEvent.click(screen.getByRole("button", { name: "Use as Destination" }));
+    const report = screen.getByRole("button", { name: "Report this room" });
+    expect(report).toHaveClass("text-destructive", "border-destructive/30");
+    fireEvent.click(report);
     expect(onUseSelectedRoomAsStart).toHaveBeenCalledWith(expect.objectContaining({ roomId: "admin-office" }));
     expect(onUseSelectedRoomAsDestination).toHaveBeenCalledWith(expect.objectContaining({ roomId: "admin-office" }));
+    expect(onReportSelectedRoom).toHaveBeenCalledWith(expect.objectContaining({ roomId: "admin-office" }));
+  });
+
+  it("keeps the planner mounted and marks selected-place expansion for layout motion", async () => {
+    const propsWithoutRoom = plannerProps();
+    const view = render(<RoutePlannerDialog {...propsWithoutRoom} />);
+    const planner = screen.getByTestId("route-planner-dialog");
+    expect(planner).toHaveAttribute("data-layout-animated", "true");
+
+    view.rerender(
+      <RoutePlannerDialog
+        {...plannerProps({ selectedRoomForPlanner: room("admin-office", "Administration Office") })}
+      />,
+    );
+    expect(screen.getByTestId("route-planner-dialog")).toBe(planner);
+    expect(screen.getByTestId("selected-room-planner-context")).toHaveTextContent("Administration Office");
+
+    view.rerender(<RoutePlannerDialog {...propsWithoutRoom} />);
+    await waitFor(() => expect(screen.queryByTestId("selected-room-planner-context")).not.toBeInTheDocument());
+    expect(screen.getByTestId("route-planner-dialog")).toBe(planner);
   });
 
   it("uses the dropped pin as the start and lets the user change it", async () => {
@@ -236,9 +279,16 @@ describe("RoutePlannerDialog student accessibility", () => {
     expect(await screen.findByRole("searchbox", { name: "Search start" })).toBeInTheDocument();
   });
 
-  it("keeps swap available only when both endpoints are complete", () => {
+  it("hides swap until both endpoints exist, then places it in its own row", () => {
     const onSwapEndpoints = vi.fn();
-    render(
+    const view = render(
+      <RoutePlannerDialog
+        {...plannerProps({ onSwapEndpoints })}
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: "Swap start and destination" })).not.toBeInTheDocument();
+    view.rerender(
       <RoutePlannerDialog
         {...plannerProps({
           from: building("science", "SCI", "Science Hall"),
@@ -250,8 +300,29 @@ describe("RoutePlannerDialog student accessibility", () => {
 
     const swap = screen.getByRole("button", { name: "Swap start and destination" });
     expect(swap).not.toBeDisabled();
+    expect(screen.getByTestId("route-planner-swap-row")).toContainElement(swap);
+    expect(screen.getByTestId("route-planner-swap-row")).toHaveClass("h-9", "items-center", "justify-center");
     fireEvent.click(swap);
     expect(onSwapEndpoints).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the desktop planner content-sized and preserves its search state when suspended", async () => {
+    const view = render(<RoutePlannerDialog {...plannerProps({ destinationResults: [
+      destinationResult({ id: "science", name: "Science Hall", kind: "building", buildingId: "science" }),
+    ] })} />);
+    const dialog = screen.getByTestId("route-planner-dialog");
+    expect(dialog).toHaveClass("md:h-fit", "md:max-h-[calc(100dvh-1.5rem)]", "md:relative");
+    expect(screen.getByTestId("route-planner-scroll-region")).toHaveClass("md:flex-none");
+
+    fireEvent.click(screen.getByRole("button", { name: "Choose start" }));
+    fireEvent.change(await screen.findByRole("searchbox", { name: "Search start" }), { target: { value: "Science" } });
+    view.rerender(<RoutePlannerDialog {...plannerProps({
+      destinationResults: [destinationResult({ id: "science", name: "Science Hall", kind: "building", buildingId: "science" })],
+      suspendedForBuilding: true,
+    })} />);
+
+    expect(screen.getByTestId("route-planner-dialog")).toHaveAttribute("data-suspended-for-building", "true");
+    expect(screen.getByRole("searchbox", { name: "Search start" })).toHaveValue("Science");
   });
 
   it("does not offer a dead start action when no authored route exists", () => {

@@ -14,6 +14,7 @@ import { BuildingDetailModal } from "../components/ui/BuildingDetailModal";
 import { useScrollReveal } from "../hooks/useScrollReveal";
 import { useToast } from "../hooks/useToast";
 import type { Building } from "../types";
+import type { CampusMarker } from "../components/map-builder/types";
 
 // ═════════════════════════════════════════════════════════════════════════════
 // ── Scroll-reveal wrapper ───────────────────────────────────────────────────
@@ -63,19 +64,27 @@ export function StudentFavoritesPage() {
   }, [activeCampus]);
   const buildingScope = campusBuildings.map((building) => building.id).join("|");
   const [savedBuildings, setSavedBuildings] = useState<Building[]>([]);
+  const [savedCampusPlaceIds, setSavedCampusPlaceIds] = useState<string[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [retryNonce, setRetryNonce] = useState(0);
   const [search, setSearch] = useState("");
   const [removingId, setRemovingId] = useState<string | null>(null);
   const [selectedBuilding, setSelectedBuilding] = useState<Building | null>(null);
+  const savedCampusPlaces: CampusMarker[] = useMemo(() => (activeCampus?.markers ?? [])
+    .filter((place) => savedCampusPlaceIds.includes(place.id)), [activeCampus?.markers, savedCampusPlaceIds]);
+  const savedCount = savedBuildings.length + savedCampusPlaces.length;
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: "instant" });
     let mounted = true;
-    studentAccountService.getSavedBuildings(campusBuildings)
-      .then((res) => {
+    Promise.all([
+      studentAccountService.getSavedBuildings(campusBuildings),
+      studentAccountService.getSavedCampusPlaceIdsAsync(),
+    ])
+      .then(([res, placeIds]) => {
         if (mounted) {
           setSavedBuildings(res);
+          setSavedCampusPlaceIds(placeIds);
           setLoadError(null);
         }
       })
@@ -91,7 +100,7 @@ export function StudentFavoritesPage() {
     return () => {
       mounted = false;
     };
-  }, [buildingScope, retryNonce]);
+  }, [buildingScope, activeCampus?.markers, retryNonce]);
 
   if (authLoading || loading) return (
     <PageTransition>
@@ -112,6 +121,9 @@ export function StudentFavoritesPage() {
         b.code.toLowerCase().includes(search.toLowerCase())
       )
     : savedBuildings;
+  const filteredCampusPlaces = search.trim()
+    ? savedCampusPlaces.filter((place) => `${place.name} ${place.type} ${place.studentInfo?.description ?? ""}`.toLowerCase().includes(search.toLowerCase()))
+    : savedCampusPlaces;
 
   const remove = async (id: string) => {
     const building = savedBuildings.find((b) => b.id === id);
@@ -129,18 +141,31 @@ export function StudentFavoritesPage() {
     }
   };
 
+  const removeCampusPlace = async (place: CampusMarker) => {
+    setRemovingId(place.id);
+    try {
+      await studentAccountService.toggleSaveCampusPlace(place.id, activeCampus?.id ?? "");
+      setSavedCampusPlaceIds((current) => current.filter((id) => id !== place.id));
+      setRemovingId(null);
+      toast.success(`${place.name || "Campus place"} removed from favorites`);
+    } catch {
+      setRemovingId(null);
+      toast.error("Favorite could not be removed");
+    }
+  };
+
   return (
     <PageTransition>
       <div className="min-h-screen">
         <StudentPageHeader
           backTo="/student"
           title="Favorite Locations"
-          subtitle={`${savedBuildings.length} saved ${savedBuildings.length === 1 ? "location" : "locations"}`}
+          subtitle={`${savedCount} saved ${savedCount === 1 ? "location" : "locations"}`}
           icon={Bookmark}
         />
 
         <div className="max-w-2xl mx-auto px-5 py-6 space-y-4">
-          {savedBuildings.length > 0 && (
+          {savedCount > 0 && (
             <Reveal>
               <div className="space-y-4">
                 {/* Section badge */}
@@ -159,7 +184,7 @@ export function StudentFavoritesPage() {
             </Reveal>
           )}
 
-          {loadError && savedBuildings.length === 0 ? (
+          {loadError && savedCount === 0 ? (
             <Reveal>
               <div role="alert" className="flex flex-col items-center justify-center py-16 text-center">
                 <div className="w-14 h-14 rounded-2xl bg-destructive/10 flex items-center justify-center mb-4">
@@ -180,11 +205,11 @@ export function StudentFavoritesPage() {
                 </button>
               </div>
             </Reveal>
-          ) : filtered.length === 0 && savedBuildings.length === 0 ? (
+          ) : filtered.length === 0 && filteredCampusPlaces.length === 0 && savedCount === 0 ? (
             <EmptyState
               icon={Bookmark}
               title="No favorite locations yet"
-              description="Save buildings from the map and they will appear here for quick access."
+              description="Save buildings and campus places from the map and they will appear here for quick access."
               action={
                 <Link
                   to="/map"
@@ -195,7 +220,7 @@ export function StudentFavoritesPage() {
                 </Link>
               }
             />
-          ) : filtered.length === 0 ? (
+          ) : filtered.length === 0 && filteredCampusPlaces.length === 0 ? (
             <Reveal>
               <div className="flex flex-col items-center justify-center py-16 text-center">
                 <div className="w-14 h-14 rounded-2xl bg-muted flex items-center justify-center mb-4">
@@ -210,6 +235,28 @@ export function StudentFavoritesPage() {
           ) : (
             <AnimatePresence>
               <div className="space-y-2.5">
+                {filteredCampusPlaces.map((place, i) => (
+                  <Reveal key={place.id} delay={i * 30}>
+                    <motion.div
+                      layout
+                      initial={{ opacity: 0, y: 16 }}
+                      animate={{ opacity: removingId === place.id ? 0 : 1, y: removingId === place.id ? -10 : 0, scale: removingId === place.id ? 0.95 : 1 }}
+                      exit={{ opacity: 0, x: 100 }}
+                      transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+                      className="group flex items-center gap-4 px-4 py-4 rounded-2xl border border-border/60 bg-card/50 hover:bg-card hover:border-primary/15 hover:shadow-sm transition-all duration-200"
+                    >
+                      <div className="w-14 h-14 rounded-xl flex items-center justify-center shrink-0 bg-primary/10 group-hover:scale-105 transition-transform"><MapPin className="h-7 w-7 text-primary" /></div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-bold text-foreground truncate">{place.name || "Campus place"}</p>
+                        <p className="text-xs text-muted-foreground mt-0.5 capitalize">{place.studentInfo?.gateType?.replaceAll("_", " ") || (place.type === "gate" ? "Gate" : "Landmark")}</p>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <Link to={`/map?campusId=${encodeURIComponent(activeCampus?.id ?? "")}&placeId=${encodeURIComponent(place.id)}`} className="flex items-center gap-1.5 h-9 px-3.5 rounded-xl border border-border text-xs font-bold hover:bg-primary hover:text-primary-foreground hover:border-primary transition-all"><Navigation className="h-3.5 w-3.5" /><span className="hidden sm:inline text-[10px]">Navigate</span></Link>
+                        <button onClick={() => void removeCampusPlace(place)} aria-label={`Remove ${place.name} from favorites`} className="flex items-center justify-center h-9 w-9 rounded-xl border border-border text-muted-foreground hover:bg-destructive/10 hover:text-destructive hover:border-destructive/30 transition-all" title="Remove from favorites"><Trash2 className="h-3.5 w-3.5" /></button>
+                      </div>
+                    </motion.div>
+                  </Reveal>
+                ))}
                 {filtered.map((b, i) => (
                   <Reveal key={b.id} delay={i * 30}>
                     <motion.div

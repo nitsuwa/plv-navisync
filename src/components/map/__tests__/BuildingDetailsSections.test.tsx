@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { Building } from "../../../types";
 import { BuildingCover } from "../BuildingCover";
 import { BuildingDetailsSections } from "../BuildingDetailsSections";
+import { weeklyHoursPreset } from "../../../lib/buildingInformation";
 
 const building: Building = {
   id: "b1", name: "College of Accountancy and Business Administration", code: "CABA",
@@ -18,13 +19,13 @@ describe("building details content", () => {
     expect(screen.getByText("6 floors")).toBeInTheDocument();
   });
 
-  it("uses a branded cover fallback and hides empty optional sections", () => {
+  it("uses a branded cover fallback and explains when building details are unavailable", () => {
     const { rerender } = render(<BuildingCover code="CABA" name="CABA" />);
     expect(screen.getByTestId("building-cover-fallback")).toBeInTheDocument();
     rerender(<BuildingDetailsSections building={{ ...building, description: " " }} facilities={[]} accessibility={[]} floorCount={0} />);
     expect(screen.queryByTestId("building-description")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("building-facilities")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("building-accessibility")).not.toBeInTheDocument();
+    expect(screen.getByTestId("building-facilities")).toHaveTextContent("No facilities are listed for this building.");
+    expect(screen.getByTestId("building-accessibility")).toHaveTextContent("No accessibility features are listed for this building.");
     expect(screen.queryByText(/No facilities data yet|No accessibility data yet|No description available/i)).not.toBeInTheDocument();
   });
 
@@ -38,5 +39,11 @@ describe("building details content", () => {
     render(<BuildingDetailsSections building={building} facilities={["Restroom", "Elevator"]} accessibility={["Accessible entrance"]} floorCount={6} />);
     expect(screen.getByTestId("building-facilities")).toHaveTextContent("Restroom");
     expect(screen.getByTestId("building-accessibility")).toHaveTextContent("Accessible entrance");
+  });
+
+  it("uses a human-friendly authored building type and structured hours in student details", () => {
+    render(<BuildingDetailsSections building={{ ...building, building_type: "student_services", operating_hours_schedule: weeklyHoursPreset("weekdays") }} facilities={[]} accessibility={[]} floorCount={6} />);
+    expect(screen.getByLabelText("Quick information")).toHaveTextContent("Student Services");
+    expect(screen.getByTestId("building-hours")).toHaveTextContent(/Mon.*Fri.*8:00 AM.*5:00 PM/);
   });
 });

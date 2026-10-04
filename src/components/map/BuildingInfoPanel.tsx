@@ -1,5 +1,5 @@
 import { motion } from "motion/react";
-import { X } from "lucide-react";
+import { ArrowLeft, X } from "lucide-react";
 import type { Building } from "../../types";
 import type { StudentAuthState } from "../../hooks/useStudentAuth";
 import { useEscToClose } from "../../hooks/useEscToClose";
@@ -27,13 +27,13 @@ interface BuildingInfoPanelProps {
   floorPlanCount: number;
   facilities: string[];
   accessibility: string[];
+  onBackToRoutePlanner?: () => void;
 }
 
 export function BuildingInfoPanel({
-  selected, campusId, onClose, onDirections, onEnterBuilding,
-  saved, studentAuth, onToggleSave, onReport,
-  onSignInPrompt, showQR, onToggleQR, hasFloorPlans, floorPlanCount,
-  facilities, accessibility,
+  selected, campusId, onClose, onDirections, onEnterBuilding, saved, studentAuth,
+  onToggleSave, onReport, onSignInPrompt, showQR, onToggleQR, hasFloorPlans,
+  floorPlanCount, facilities, accessibility, onBackToRoutePlanner,
 }: BuildingInfoPanelProps) {
   useEscToClose(onClose);
 
@@ -57,6 +57,17 @@ export function BuildingInfoPanel({
       </div>
 
       <header className="shrink-0 px-5 pb-3 pt-3">
+        {onBackToRoutePlanner && (
+          <button
+            type="button"
+            onClick={onBackToRoutePlanner}
+            aria-label="Back to route planner"
+            className="mb-2 inline-flex min-h-8 items-center gap-1.5 rounded-lg px-2 text-[11px] font-extrabold text-primary transition-colors hover:bg-primary/8 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 xl:hidden"
+          >
+            <ArrowLeft className="h-3.5 w-3.5" aria-hidden="true" />
+            Back to route planner
+          </button>
+        )}
         <div className="mb-1.5 flex min-w-0 items-center gap-2">
           <span className="shrink-0 rounded-md bg-primary/10 px-2 py-0.5 font-mono text-[10px] font-extrabold tracking-wide text-primary">{selected.code}</span>
           <span className="truncate text-[10px] font-bold uppercase tracking-[0.12em] text-muted-foreground">{selected.category?.replace(/[_-]+/g, " ") || "Campus building"}</span>

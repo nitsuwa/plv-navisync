@@ -20,6 +20,7 @@ import { createIndoorNavNode } from "../../lib/indoorNavigationGraph";
 import { repairInvalidFloorMapElementIds } from "../../lib/physicalFloorIntegrity";
 import { duplicateFloorInBuilding } from "../../lib/floorManagement";
 import { prepareFloorTemplateReplacement } from "../../lib/floorTemplateReplacement";
+import { weeklyHoursPreset } from "../../lib/buildingInformation";
 
 vi.mock("../../lib/supabase", () => ({ getSupabase: vi.fn() }));
 
@@ -133,6 +134,8 @@ describe("student-facing building information persistence", () => {
     const campus = makeCampus([{ id: IDs.floorA, number: 1 }]);
     Object.assign(campus.buildings[0], {
       coverImagePath: "buildings/eng/cover.webp",
+      operatingHoursSchedule: weeklyHoursPreset("weekdays"),
+      buildingType: "academic",
       operatingHours: "Mon–Fri, 8:00 AM–5:00 PM",
       facilities: ["Study Area", "Wi-Fi"],
     });
@@ -140,7 +143,7 @@ describe("student-facing building information persistence", () => {
     const row = serializeCampusStructure(campus).buildings[0];
     expect(row.image_path).toBe("buildings/eng/cover.webp");
     expect(row.operating_hours).toBe("Mon–Fri, 8:00 AM–5:00 PM");
-    expect(row.metadata).toMatchObject({ ui: { facilities: ["Study Area", "Wi-Fi"] } });
+    expect(row.metadata).toMatchObject({ ui: { facilities: ["Study Area", "Wi-Fi"], buildingType: "academic", operatingHoursSchedule: { monday: { closed: false, open: "08:00", close: "17:00" }, sunday: { closed: true } } } });
     expect((row.metadata as { ui: Record<string, unknown> }).ui).not.toHaveProperty("coverImagePath");
     expect((row.metadata as { ui: Record<string, unknown> }).ui).not.toHaveProperty("operatingHours");
   });

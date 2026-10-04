@@ -7,6 +7,7 @@ import {
   getCameraSmoothingFactor,
   getBuildingFocusPan,
   getPanToKeepWorldPoint,
+  getSoftBoundedPan,
   getViewportFitZoom,
   getViewportPanBounds,
   normalizeStudentMapWheelDelta,
@@ -109,6 +110,33 @@ describe("bounded map viewport", () => {
 
     expect(editor.minX).toBeLessThan(viewer.minX);
     expect(editor.maxX).toBeGreaterThan(viewer.maxX);
+  });
+
+  it("adds a finite proportional inspection range for indoor viewers", () => {
+    const normal = getViewportPanBounds({ ...campus, zoom: 2, zoomOrigin: "center" });
+    const inspection = getViewportPanBounds({
+      ...campus,
+      zoom: 2,
+      zoomOrigin: "center",
+      inspectionSlack: { x: 156, y: 240 },
+    });
+
+    expect(inspection.minX).toBeLessThan(normal.minX);
+    expect(inspection.maxX).toBeGreaterThan(normal.maxX);
+    expect(inspection.minY).toBeLessThan(normal.minY);
+    expect(inspection.maxY).toBeGreaterThan(normal.maxY);
+  });
+
+  it("resists over-panning softly and keeps extreme movement bounded", () => {
+    const bounds = { minX: -100, maxX: 100, minY: -50, maxY: 50 };
+    expect(getSoftBoundedPan({ x: 90, y: -20 }, bounds)).toEqual({ x: 90, y: -20 });
+    const slightOverdrag = getSoftBoundedPan({ x: 110, y: -60 }, bounds, 1, 28);
+    const extremeOverdrag = getSoftBoundedPan({ x: 10_000, y: -10_000 }, bounds, 1, 28);
+
+    expect(slightOverdrag.x).toBeGreaterThan(100);
+    expect(slightOverdrag.x).toBeLessThan(110);
+    expect(extremeOverdrag.x).toBeLessThanOrEqual(128);
+    expect(extremeOverdrag.y).toBeGreaterThanOrEqual(-78);
   });
 
   it("supports center-origin zoom transforms used by the student map", () => {

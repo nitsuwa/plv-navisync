@@ -2,13 +2,14 @@ import {
   Navigation, Flag, Footprints, ArrowUp, MoveVertical, DoorOpen,
   CircleCheck, Info, Maximize2, RotateCcw,
 } from "lucide-react";
-import { useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import type { PlannedRoute, RouteMode, RouteStepIcon } from "../../lib/routePlanner";
 import { cn } from "../../lib/utils";
 
 const MOBILE_PANEL_MIN_HEIGHT = 190;
 const MOBILE_PANEL_DEFAULT_HEIGHT = 300;
 const MOBILE_PANEL_MAX_HEIGHT = 560;
+const MOBILE_PANEL_TOP_CLEARANCE = 120;
 
 interface RouteStepsPanelProps {
   route: PlannedRoute;
@@ -33,7 +34,7 @@ interface RouteStepsPanelProps {
     progress: number;
     statusInstruction?: string;
   };
-  /** Condensed layout for the small floating mobile navigation card. */
+  /** Full-width, resizable mobile navigation sheet. */
   compact?: boolean;
 }
 
@@ -98,20 +99,23 @@ function stepDot(isFirst: boolean, isLast: boolean) {
   return "bg-card border-primary/50";
 }
 
-/** Keep internal graph-node names out of student-facing directions when a
- * legacy or emergency route still contains a raw waypoint step. */
-function presentInstruction(instruction: string): string {
+/** Keep internal graph-node names and synthetic distance labels out of
+ * student-facing directions. */
+function presentInstruction(instruction: string): string | null {
   const trimmed = instruction.trim();
   const floorWaypoint = trimmed.match(/^Continue to floor waypoint(?:\s+\d+)?\.?$/i);
   if (floorWaypoint) return "Continue along the connected indoor path.";
-  const walkToWaypoint = trimmed.match(/^Walk\s+([\d.]+)\s*m\s+to\s+(?:the\s+)?waypoint(?:\s+\d+)?\.?$/i);
-  if (walkToWaypoint) return `Follow the highlighted path for ${walkToWaypoint[1]} m.`;
+  if (/\b(?:walking point|waypoint)\b/i.test(trimmed)) return null;
   if (/^Start from (?:the )?Door\.?$/i.test(trimmed)) return "Start at the room door.";
-  return trimmed;
+  return trimmed
+    .replace(/\b\d+(?:\.\d+)?\s*m\b/gi, "")
+    .replace(/\s{2,}/g, " ")
+    .replace(/\s+([,.])/g, "$1")
+    .trim() || null;
 }
 
 /**
- * Turn-by-turn navigation panel — shows every step with an icon and distance.
+ * Turn-by-turn navigation panel — shows every student-facing step with an icon.
  * Floor changes are included inline in the directions,
  * so users see each transition once. Positioned by the parent
  * (desktop bottom-left card, mobile sheet).
@@ -120,7 +124,11 @@ export function RouteStepsPanel({
   route, mode, toName, onEnd, onZoom, walkProgress, onReplay, activeLeg, compact = false,
 }: RouteStepsPanelProps) {
   const [mobilePanelHeight, setMobilePanelHeight] = useState(MOBILE_PANEL_DEFAULT_HEIGHT);
+  const [mobilePanelMaxHeight, setMobilePanelMaxHeight] = useState(MOBILE_PANEL_MAX_HEIGHT);
+  const [panelOffset, setPanelOffset] = useState({ x: 0, y: 0 });
+  const panelRef = useRef<HTMLDivElement>(null);
   const resizeStartRef = useRef<{ y: number; height: number } | null>(null);
+  const dragStartRef = useRef<{ x: number; y: number; offset: { x: number; y: number } } | null>(null);
   const hasActiveLegSteps = Boolean(activeLeg?.steps.length);
   const steps = hasActiveLegSteps ? activeLeg!.steps : route.steps;
   const trackedProgress = activeLeg?.progress ?? walkProgress;
@@ -132,11 +140,45 @@ export function RouteStepsPanel({
       ? activeStepIndex(steps, trackedProgress, trackedDistance)
       : steps.length > 0 ? 0 : null;
   const currentInstruction = activeLeg?.statusInstruction
-    ?? (activeIndex !== null && steps[activeIndex] ? presentInstruction(steps[activeIndex].instruction) : undefined);
-  const clampMobilePanelHeight = (height: number) => Math.min(
-    MOBILE_PANEL_MAX_HEIGHT,
+    ? presentInstruction(activeLeg.statusInstruction)
+    : activeIndex !== null && steps[activeIndex]
+      ? presentInstruction(steps[activeIndex].instruction)
+      : undefined;
+  const visibleSteps = steps
+    .map((step, index) => ({ step, index, instruction: presentInstruction(step.instruction) }))
+    .filter(({ instruction }) => Boolean(instruction));
+  const clampMobilePanelHeight = (height: number, maximum = mobilePanelMaxHeight) => Math.min(
+    maximum,
     Math.max(MOBILE_PANEL_MIN_HEIGHT, height),
   );
+  useEffect(() => {
+    if (!compact) return;
+    const mapSurface = panelRef.current?.closest("[data-testid='student-map-surface']") as HTMLElement | null;
+    const updateMaxHeight = () => {
+      const availableHeight = mapSurface
+        ? mapSurface.clientHeight - MOBILE_PANEL_TOP_CLEARANCE
+        : window.innerHeight - MOBILE_PANEL_TOP_CLEARANCE;
+      setMobilePanelMaxHeight(Math.max(
+        MOBILE_PANEL_MIN_HEIGHT,
+        Math.min(MOBILE_PANEL_MAX_HEIGHT, Math.floor(availableHeight)),
+      ));
+    };
+    updateMaxHeight();
+    const observer = mapSurface && typeof ResizeObserver !== "undefined"
+      ? new ResizeObserver(updateMaxHeight)
+      : null;
+    if (mapSurface) observer?.observe(mapSurface);
+    window.addEventListener("resize", updateMaxHeight);
+    window.visualViewport?.addEventListener("resize", updateMaxHeight);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", updateMaxHeight);
+      window.visualViewport?.removeEventListener("resize", updateMaxHeight);
+    };
+  }, [compact]);
+  useEffect(() => {
+    setMobilePanelHeight((height) => Math.min(mobilePanelMaxHeight, Math.max(MOBILE_PANEL_MIN_HEIGHT, height)));
+  }, [mobilePanelMaxHeight]);
   const handleResizePointerDown = (event: PointerEvent<HTMLDivElement>) => {
     event.preventDefault();
     event.stopPropagation();
@@ -167,15 +209,44 @@ export function RouteStepsPanel({
       setMobilePanelHeight(MOBILE_PANEL_MIN_HEIGHT);
     } else if (event.key === "End") {
       event.preventDefault();
-      setMobilePanelHeight(MOBILE_PANEL_MAX_HEIGHT);
+      setMobilePanelHeight(mobilePanelMaxHeight);
     }
+  };
+  const handleDragPointerDown = (event: PointerEvent<HTMLDivElement>) => {
+    if (event.pointerType === "mouse" && event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    dragStartRef.current = { x: event.clientX, y: event.clientY, offset: panelOffset };
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+  };
+  const handleDragPointerMove = (event: PointerEvent<HTMLDivElement>) => {
+    const start = dragStartRef.current;
+    if (!start) return;
+    event.preventDefault();
+    event.stopPropagation();
+
+    let nextX = start.offset.x + event.clientX - start.x;
+    let nextY = start.offset.y + event.clientY - start.y;
+    const rect = panelRef.current?.getBoundingClientRect();
+    if (rect && rect.width > 0 && rect.height > 0 && typeof window !== "undefined" && window.innerWidth > 0 && window.innerHeight > 0) {
+      const baseLeft = rect.left - start.offset.x;
+      const baseTop = rect.top - start.offset.y;
+      nextX = Math.max(8 - baseLeft, Math.min(window.innerWidth - rect.width - 8 - baseLeft, nextX));
+      nextY = Math.max(8 - baseTop, Math.min(window.innerHeight - rect.height - 8 - baseTop, nextY));
+    }
+    setPanelOffset({ x: nextX, y: nextY });
+  };
+  const handleDragPointerEnd = (event: PointerEvent<HTMLDivElement>) => {
+    dragStartRef.current = null;
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
   };
 
   return (
     <div
+      ref={panelRef}
       className={cn(
-        "rounded-2xl border border-border/60 shadow-xl overflow-hidden animate-slide-up",
-        compact && "flex min-h-0 flex-col rounded-xl",
+        "rounded-2xl border border-border/60 shadow-xl overflow-hidden will-change-transform",
+        compact && "flex w-full min-h-0 flex-col rounded-t-2xl rounded-b-none",
       )}
       role="region"
       aria-label={`Active route to ${toName}`}
@@ -184,7 +255,14 @@ export function RouteStepsPanel({
         background: "var(--card)",
         backdropFilter: "blur(16px)",
         WebkitBackdropFilter: "blur(16px)",
-        ...(compact ? { height: `${mobilePanelHeight}px`, maxHeight: "calc(100dvh - 8rem)" } : {}),
+        transform: compact ? undefined : `translate3d(${panelOffset.x}px, ${panelOffset.y}px, 0)`,
+        ...(compact ? {
+          height: `${mobilePanelHeight}px`,
+          maxHeight: `${mobilePanelMaxHeight}px`,
+        } : {}),
+        boxSizing: "border-box",
+        width: compact ? "100%" : undefined,
+        touchAction: compact ? "auto" : undefined,
       }}>
       {compact && (
         <div
@@ -193,7 +271,7 @@ export function RouteStepsPanel({
           aria-label="Resize route panel"
           aria-orientation="vertical"
           aria-valuemin={MOBILE_PANEL_MIN_HEIGHT}
-          aria-valuemax={MOBILE_PANEL_MAX_HEIGHT}
+          aria-valuemax={mobilePanelMaxHeight}
           aria-valuenow={mobilePanelHeight}
           data-testid="route-panel-resize-handle"
           className="flex h-5 shrink-0 touch-none cursor-row-resize items-center justify-center bg-card/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
@@ -207,7 +285,16 @@ export function RouteStepsPanel({
         </div>
       )}
       {/* Header — destination name + live indicator */}
-      <div className={cn("flex items-center gap-2 px-3 py-2", compact && "gap-1.5 px-2.5 py-1.5")} style={{ background: modeColor }}>
+      <div
+        data-testid="route-panel-drag-handle"
+        title="Drag to move route panel"
+        className={cn("flex cursor-grab touch-none select-none items-center gap-2 px-3 py-2 active:cursor-grabbing", compact && "cursor-default touch-auto gap-1.5 px-2.5 py-1.5")}
+        onPointerDown={compact ? undefined : handleDragPointerDown}
+        onPointerMove={compact ? undefined : handleDragPointerMove}
+        onPointerUp={compact ? undefined : handleDragPointerEnd}
+        onPointerCancel={compact ? undefined : handleDragPointerEnd}
+        style={{ background: modeColor }}
+      >
         <Navigation className="h-3.5 w-3.5 text-white shrink-0" />
         <span data-testid="route-destination" className={cn("text-[11px] font-extrabold text-white truncate flex-1", compact && "text-[10px]")}>To {toName}</span>
         <span className="w-1.5 h-1.5 rounded-full bg-green-300 animate-pulse shrink-0" />
@@ -239,10 +326,10 @@ export function RouteStepsPanel({
         compact && "min-h-0 flex-1 px-2 pt-1.5 max-h-none",
       )}>
         <div className="relative pl-4 border-l-2 border-primary/30 space-y-1.5">
-          {steps.map((step, i) => {
+          {visibleSteps.map(({ step, index: originalIndex, instruction }, i) => {
             const isFirst = i === 0;
-            const isLast = i === steps.length - 1;
-            const isActive = activeIndex === i;
+            const isLast = i === visibleSteps.length - 1;
+            const isActive = activeIndex === originalIndex;
             return (
               <div
                 key={step.id}
@@ -265,7 +352,7 @@ export function RouteStepsPanel({
                     "text-[10px] leading-snug pt-0.5",
                     isLast ? "font-bold text-foreground" : "text-muted-foreground"
                   )}>
-                    {presentInstruction(step.instruction)}
+                    {instruction}
                   </p>
                 </div>
               </div>

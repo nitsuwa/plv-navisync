@@ -42,7 +42,19 @@ export interface RoomDest {
   accessDoorIds?: string[];
 }
 
-export type Destination = BuildingDest | RoomDest;
+/** Outdoor campus place tied to an authored navigation node (for example a gate). */
+export interface CampusPlaceDest {
+  type: "campus_place";
+  campusPlaceId: string;
+  label: string;
+  code: string;
+  nodeId: string;
+  accessible?: boolean;
+  /** A place has no building identity and cannot be used as a Building. */
+  buildingId?: undefined;
+}
+
+export type Destination = BuildingDest | RoomDest | CampusPlaceDest;
 
 // ── Combined result ────────────────────────────────────────────────────────
 
@@ -147,6 +159,7 @@ export function findCompleteRoute(
   to: Destination,
   accessibleOnly = false
 ): CombinedRoute | null {
+  if (from.type === "campus_place" || to.type === "campus_place") return null;
   const fromBuildingId = from.buildingId;
   const toBuildingId = to.buildingId;
   const segments: RouteSegment[] = [];

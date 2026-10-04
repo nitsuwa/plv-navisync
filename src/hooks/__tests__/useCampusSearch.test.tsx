@@ -47,9 +47,30 @@ describe("published campus search connectivity", () => {
       buildings: [{ ...campus.buildings[0], floors: [{ ...campus.buildings[0].floors[0], rooms: [
         { id: "semantic", name: "Admin Office", type: "office", floorId: "ground", buildingId: "connected" },
       ] }] }],
-      navNodes: [...campus.navNodes, { id: "room-node", buildingId: "connected", floorId: "ground", roomId: "semantic", x: 2, y: 1 }],
-      navEdges: [...campus.navEdges, { startNodeId: "room-node", endNodeId: "copy-door-node", type: "room_door_transition", bidirectional: true, distance: 1, accessible: true }],
+      navNodes: [...(campus.navNodes ?? []), { id: "room-node", buildingId: "connected", floorId: "ground", roomId: "semantic", x: 2, y: 1 }],
+      navEdges: [...(campus.navEdges ?? []), { startNodeId: "room-node", endNodeId: "copy-door-node", type: "room_door_transition", bidirectional: true, distance: 1, accessible: true }],
     } as Campus;
     expect(connectedCampusDestinations(linked).roomKeys.has("connected:ground:semantic")).toBe(true);
+  });
+
+  it("indexes campus gates as selectable campus places instead of buildings", () => {
+    const withGate = {
+      ...campus,
+      markers: [{
+        id: "campus-gate-1", name: "Campus Gate", type: "gate", x: 12, y: 18, color: "#2563eb",
+        purpose: "general", navNodeId: "campus-gate-node",
+        studentInfo: { description: "Main pedestrian entrance." },
+      }],
+    } as unknown as Campus;
+    const { result } = renderHook(() => useCampusSearch(withGate));
+    expect(result.current.destinations).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: "campus-gate-1",
+        campusPlaceId: "campus-gate-1",
+        kind: "marker",
+        category: "gate",
+        description: "Main pedestrian entrance.",
+      }),
+    ]));
   });
 });

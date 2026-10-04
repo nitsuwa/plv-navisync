@@ -1,4 +1,5 @@
 import type { CampusLifecycleStatus } from "../../types/campusLifecycle";
+import type { BuildingTypeValue, WeeklyOperatingHours } from "../../types/buildingInformation";
 
 /** Campus status */
 export type CampusStatus = "active" | "hidden" | "archived";
@@ -521,6 +522,10 @@ export interface CampusBuilding {
   coverImagePath?: string;
   /** Optional authored hours shown on the student-facing place page. */
   operatingHours?: string;
+  /** Structured weekly hours, retained in the building UI metadata snapshot. */
+  operatingHoursSchedule?: WeeklyOperatingHours;
+  /** Student-facing type, independent from the legacy map category/style. */
+  buildingType?: BuildingTypeValue;
   /** Small curated amenities list; map-derived facilities are added at display time. */
   facilities?: string[];
   x: number;
@@ -556,6 +561,8 @@ export interface CampusBuilding {
     hasRamp: boolean;
     accessibleEntrance: boolean;
   };
+  /** Optional public-facing facility labels for the student building panel. */
+  facilities?: string[];
   /** Building-attached Exterior Emergency Stairs; occurrences are derived on served Floors. */
   exteriorEmergencyStairs?: ExteriorEmergencyStair[];
 }
@@ -707,6 +714,22 @@ export interface CampusMarker {
    * while their linked NavigationNode provides the routable identity. */
   purpose?: "general" | "emergency_exit";
   navNodeId?: string;
+  /** Optional student-facing place details for outdoor landmarks and gates. */
+  studentInfo?: CampusPlaceStudentInfo;
+}
+
+export type CampusGateType = "main_entrance" | "pedestrian" | "service" | "emergency" | "other";
+
+/** Additive, backward-compatible place metadata stored with its authored marker. */
+export interface CampusPlaceStudentInfo {
+  description?: string;
+  coverImagePath?: string;
+  gateType?: CampusGateType;
+  operatingHoursSchedule?: import("../../types/buildingInformation").WeeklyOperatingHours;
+  accessibleEntrance?: boolean;
+  pedestrianAccess?: boolean;
+  vehicleAccess?: boolean;
+  securityCheckpoint?: boolean;
 }
 
 export interface CampusPath {

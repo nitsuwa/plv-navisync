@@ -4,6 +4,7 @@ import type { Building } from "../types";
 import { supabase } from "../lib/supabase";
 
 const SAVED_BUILDINGS_KEY = "plv_student_saved_buildings_v1";
+const SAVED_CAMPUS_PLACES_KEY = "plv_student_saved_campus_places_v1";
 const RECENT_DESTINATIONS_KEY = "plv_student_recent_destinations_v1";
 
 export interface RecentDestination {
@@ -18,6 +19,56 @@ type StudentClient = SupabaseClient<Database>;
 
 export function getSavedBuildingStorageKey(scope = "guest"): string {
   return `${SAVED_BUILDINGS_KEY}:${scope || "guest"}`;
+}
+
+function getLocalSavedCampusPlaceIds(scope = "guest"): string[] {
+  try {
+    const raw = localStorage.getItem(`${SAVED_CAMPUS_PLACES_KEY}:${scope || "guest"}`);
+    if (!raw) return [];
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === "string") : [];
+  } catch { return []; }
+}
+
+export async function getSavedCampusPlaceIdsAsync(client?: StudentClient): Promise<string[]> {
+  const { client: activeClient, user } = await resolveRemoteUser(client);
+  if (!activeClient || !user) return getLocalSavedCampusPlaceIds("guest");
+  const { data, error } = await activeClient
+    .from("favorites")
+    .select("map_element_id")
+    .eq("user_id", user.id);
+  if (error) throw error;
+  return (data ?? [])
+    .map((favorite) => favorite.map_element_id)
+    .filter((placeId): placeId is string => Boolean(placeId));
+}
+
+/** Campus places are authored map elements and use the existing generic favorite FK. */
+export async function toggleSaveCampusPlace(placeId: string, campusId: string, client?: StudentClient): Promise<boolean> {
+  const { client: activeClient, user } = await resolveRemoteUser(client);
+  if (!activeClient || !user) {
+    const current = getLocalSavedCampusPlaceIds("guest");
+    const exists = current.includes(placeId);
+    const next = exists ? current.filter((id) => id !== placeId) : [placeId, ...current];
+    try { localStorage.setItem(`${SAVED_CAMPUS_PLACES_KEY}:guest`, JSON.stringify(next)); } catch { /* local preference only */ }
+    return !exists;
+  }
+
+  const { data: favorites, error: lookupError } = await activeClient
+    .from("favorites")
+    .select("id, map_element_id")
+    .eq("user_id", user.id);
+  if (lookupError) throw lookupError;
+  const existing = (favorites ?? []).find((favorite) => favorite.map_element_id === placeId);
+  if (existing) {
+    const { error } = await activeClient.from("favorites").delete().eq("id", existing.id).eq("user_id", user.id);
+    if (error) throw error;
+    return false;
+  }
+
+  const { error } = await activeClient.from("favorites").insert({ user_id: user.id, campus_id: campusId, map_element_id: placeId });
+  if (error) throw error;
+  return true;
 }
 
 function getLocalSavedBuildingIds(scope = "guest"): string[] {
@@ -174,6 +225,8 @@ export const studentAccountService = {
   getSavedBuildingIds,
   getSavedBuildingIdsAsync,
   getSavedBuildingStorageKey,
+  getSavedCampusPlaceIdsAsync,
+  toggleSaveCampusPlace,
   toggleSaveBuilding,
   getRecentDestinations,
   addRecentDestination,
